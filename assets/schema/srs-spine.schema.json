@@ -894,6 +894,16 @@
               ],
               "additionalProperties": false
             }
+          },
+          "release": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -958,6 +968,16 @@
                   "could",
                   "wont"
                 ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "release": {
+            "anyOf": [
+              {
+                "type": "string"
               },
               {
                 "type": "null"
@@ -1290,6 +1310,89 @@
           "level",
           "blocks",
           "source"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "references": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "normative",
+              "informative"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "kind"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "verifications": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "requirement_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "test",
+              "analysis",
+              "inspection",
+              "demonstration",
+              "other"
+            ]
+          },
+          "artifact": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "requirement_id",
+          "method"
         ],
         "additionalProperties": false
       }
@@ -1870,6 +1973,8 @@
     "glossary",
     "addendum",
     "custom_sections",
+    "references",
+    "verifications",
     "diagrams",
     "assumptions",
     "decisions",

@@ -36,7 +36,7 @@ import type { Block, InlineRun, RenderedSection, RocRow, TableCell } from "./ren
 import { mediaId } from "./import-media.js"
 import { defaultSectionTitle, renderContentSlot, renderSection, type SectionRenderContext } from "./section-renderer.js"
 import { bindFixedTemplateSlots, isContentSlot, slotParents } from "../import/content-slots.js"
-import { isInstructionText, tableBodyHasRealText } from "../../shared/utils/instruction-text.js"
+import { isInstructionText, isRealText, splitInstruction, tableBodyHasRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
 
 /** Một mục layout (cùng hình `LayoutEntry` của `import/template-profile.model.ts`). */
 export interface TemplateLayoutEntry {
@@ -44,6 +44,10 @@ export interface TemplateLayoutEntry {
   heading_text: string
   level: number
   section_id: string
+  /** FLF-362: nhãn số Word tự đánh của heading gốc ("2.1.", "II.") — không nằm trong `heading_text`. */
+  number_label?: string
+  /** FLF-364 (câu 10): nguyên văn chữ hướng dẫn của mẫu dưới heading — in khi mục chưa có dữ liệu. */
+  template_guidance?: string[]
 }
 
 /** Restore headings omitted by old aggregate bindings, using the source as the authority. */
@@ -155,6 +159,20 @@ const splitTypedNumber = (text: string): { typed: boolean; title: string; label:
   return m && m[2].trim() ? { typed: true, title: m[2].trim(), label: m[1] } : { typed: false, title: text.trim(), label: "" }
 }
 
+/**
+ * Số của heading gốc (FLF-362): số gõ tay trong chữ, không có thì nhãn số Word tự đánh (`number_label`, chữ giữ nguyên).
+ * `typed` = heading có số trong file (gõ tay hoặc Word tự đánh).
+ */
+const fileNumber = (text: string, numberLabel?: string | null): { typed: boolean; title: string; label: string } => {
+  const typed = splitTypedNumber(text)
+  if (typed.typed) return typed
+  const label = numberLabel?.trim()
+  return label ? { typed: true, title: text.trim(), label } : typed
+}
+
+/** Nhãn số bỏ dấu kết ("2.1." ⇒ "2.1", "II." ⇒ "II", "A)" ⇒ "A") — để so với số đếm theo cấp. */
+const bareLabel = (label: string): string => label.trim().replace(/[.)\s]+$/, "")
+
 const ROMAN: Record<string, number> = { I: 1, V: 5, X: 10 }
 /** `IV` ⇒ 4; không phải số La Mã ⇒ `null`. */
 export const romanValue = (label: string): number | null => {
@@ -183,6 +201,8 @@ interface Placed {
   typed: boolean
   /** Số gõ tay nguyên văn (`2.1`, `II`) — rỗng nếu không gõ số. */
   label?: string
+  /** FLF-364 (câu 10): chữ hướng dẫn của mẫu dưới heading (mục FPT / phần nhỏ). */
+  guidance?: readonly string[]
 }
 
 // ─── mục riêng ⇒ block ─────────────────────────────────────────────
@@ -231,6 +251,25 @@ export const customBlocks = (blocks: readonly CustomBlock[], imagePng?: (imageRe
   }
   return out
 }
+
+/**
+ * FLF-364 (câu 10): chữ hướng dẫn của mẫu (`[…]` / `{…}`) chỉ in khi mục chưa có dữ liệu — mục riêng có nội dung thật (ảnh,
+ * bảng / đoạn có chữ thật, kể cả thêm qua CR) ⇒ bỏ đoạn hướng dẫn, bỏ đoạn ngoặc hướng dẫn trong câu, ô bảng chỉ có hướng dẫn
+ * để trống. Khối vẫn nằm trong Spine (ngữ cảnh khi soạn) — xoá hết dữ liệu thì hướng dẫn in lại.
+ */
+export const guidanceWhileEmpty = (blocks: readonly CustomBlock[]): CustomBlock[] => {
+  const filled = blocks.some((b) => b.kind === "image" || (b.kind === "table" ? tableHasRealText(b.rows) : isRealText(b.text)))
+  if (!filled) return [...blocks]
+  return blocks.flatMap((b): CustomBlock[] => {
+    if (b.kind === "table") return [{ ...b, rows: (b.rows ?? []).map((r) => r.map((c) => (isInstructionText(c) ? "" : splitInstruction(c).text))) }]
+    if (b.kind !== "paragraph" && b.kind !== "list_item") return [b]
+    const text = splitInstruction(b.text).text
+    return text ? [{ ...b, text }] : []
+  })
+}
+
+/** Khối hướng dẫn của mẫu cho mục FPT / phần nhỏ chưa có dữ liệu — nguyên văn như file upload. */
+const guidanceBlocks = (guidance: readonly string[] | undefined): Block[] => (guidance ?? []).filter((t) => t.trim()).map((t) => ({ type: "paragraph", runs: runs(t) }))
 
 // ─── xếp chỗ ───────────────────────────────────────────────────────
 
@@ -295,7 +334,7 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
   for (const entry of [...template.layout].sort((a, b) => a.order - b.order)) {
     const id = entry.section_id
     if (used.has(id) && !template.fixedTemplate) continue
-    const { typed, title, label } = splitTypedNumber(entry.heading_text)
+    const { typed, title, label } = fileNumber(entry.heading_text, entry.number_label)
     const level = clampLevel(entry.level)
     if (id.startsWith(GROUP_PREFIX)) {
       placed.push({ section_id: id, kind: "group", title: title || id.slice(GROUP_PREFIX.length), level, fromLayout: true, typed, label })
@@ -308,19 +347,29 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
         continue
       }
       const heading = template.fixedTemplate ? entry.heading_text.trim() : custom.heading.trim()
+      const own = heading ? fileNumber(heading, entry.number_label) : null
       placed.push({
         section_id: id,
         kind: heading ? "custom" : "continuation",
-        title: heading ? splitTypedNumber(heading).title : "",
+        title: own?.title ?? "",
         level: template.fixedTemplate ? level : clampLevel(custom.level),
         fromLayout: true,
-        typed: heading ? splitTypedNumber(heading).typed : false,
-        label: heading ? splitTypedNumber(heading).label : ""
+        typed: own?.typed ?? false,
+        label: own?.label ?? ""
       })
     } else if (isContentSlot(id)) {
-      placed.push({ section_id: id, kind: "slot", title: title || id, level, fromLayout: true, typed, label, sourceOrder: entry.order })
+      placed.push({ section_id: id, kind: "slot", title: title || id, level, fromLayout: true, typed, label, guidance: entry.template_guidance, sourceOrder: entry.order })
     } else if (defById.has(id)) {
-      placed.push({ section_id: id, kind: "fpt", title: title || defaultSectionTitle(spine, id, template.language), level, fromLayout: true, typed, label })
+      placed.push({
+        section_id: id,
+        kind: "fpt",
+        title: title || defaultSectionTitle(spine, id, template.language),
+        level,
+        fromLayout: true,
+        typed,
+        label,
+        guidance: entry.template_guidance
+      })
     } else {
       continue
     }
@@ -398,20 +447,21 @@ interface Numbered extends Placed {
  */
 const isPart = (placed: readonly Placed[], i: number): boolean => {
   const p = placed[i]
-  const value = p.fromLayout && p.typed && p.label ? romanValue(p.label) : null
+  const value = p.fromLayout && p.typed && p.label ? romanValue(bareLabel(p.label)) : null
   if (value === null) return false
   for (let j = i + 1; j < placed.length && placed[j].level > p.level; j++) {
     const child = placed[j]
-    if (!child.fromLayout || !child.typed || !child.label || romanValue(child.label) !== null) continue
+    if (!child.fromLayout || !child.typed || !child.label || romanValue(bareLabel(child.label)) !== null) continue
     return Number(child.label.split(".")[0]) !== value
   }
   return false
 }
 
-/** Đánh số theo cấp; phần nối không có số (gộp vào section trước); phần La Mã giữ nhãn gốc, không chiếm cấp số. */
-export const numberSections = (placed: readonly Placed[]): Numbered[] => {
-  const headings = placed.filter((p) => p.kind !== "continuation" && p.fromLayout)
-  const typedFile = headings.length > 0 && headings.filter((p) => p.typed).length * 2 >= headings.length
+/**
+ * Đếm số theo cấp (cấp nhảy quá 1 được kéo về cấp kế tiếp); phần nối không số (gộp vào section trước); phần La Mã giữ nhãn
+ * gốc, không chiếm cấp số; mục của file không có số ⇒ không số, không chiếm số đếm.
+ */
+const countNumbers = (placed: readonly Placed[]): Numbered[] => {
   const counters: number[] = []
   let depth = 0
   /** Cấp của phần đang mở (0 = không trong phần nào): mục bên trong đánh số như thể phần không tồn tại. */
@@ -423,15 +473,58 @@ export const numberSections = (placed: readonly Placed[]): Numbered[] => {
       partLevel = p.level
       counters.length = 0
       depth = 0
-      return { ...p, number: p.label ?? "", renderLevel: Math.min(MAX_LEVEL, p.level) }
+      return { ...p, number: bareLabel(p.label ?? ""), renderLevel: Math.min(MAX_LEVEL, p.level) }
     }
     const level = partLevel ? p.level - partLevel : p.level
-    if (typedFile && p.fromLayout && !p.typed) return { ...p, number: "", renderLevel: Math.min(MAX_LEVEL, p.level) }
+    if (p.fromLayout && !p.typed) return { ...p, number: "", renderLevel: Math.min(MAX_LEVEL, p.level) }
     depth = Math.min(level, depth + 1)
     counters.length = depth
     counters[depth - 1] = (counters[depth - 1] ?? 0) + 1
     return { ...p, number: counters.slice(0, depth).join("."), renderLevel: Math.min(MAX_LEVEL, depth + partLevel) }
   })
+}
+
+const DECIMAL_LABEL = /^\d+(\.\d+)*$/
+
+/** Số kế tiếp của mục chèn thêm khi file đánh số không đều: anh em đứng trước + 1, không có thì mục cha + ".1". */
+const nextAfter = (out: readonly Numbered[], level: number): string => {
+  for (let k = out.length - 1; k >= 0; k--) {
+    const q = out[k]
+    if (q.kind === "continuation" || q.level > level) continue
+    const bare = bareLabel(q.number)
+    if (!DECIMAL_LABEL.test(bare)) return ""
+    if (q.level === level) {
+      const parts = bare.split(".")
+      parts[parts.length - 1] = String(Number(parts[parts.length - 1]) + 1)
+      return parts.join(".")
+    }
+    return `${bare}.1`
+  }
+  return ""
+}
+
+/**
+ * Số hiệu theo **số của file upload** (FLF-362), không đánh lại:
+ * - file không có số nào (gõ tay hay Word tự đánh) ⇒ không mục nào có số;
+ * - file đánh số đều (số của file = số đếm theo cấp) ⇒ đếm theo cấp trên cả tài liệu: không chèn mục thì ra đúng số file,
+ *   có mục FlintFlow chèn thêm thì mục đó nhận số theo thứ tự, anh em đứng sau cùng nhánh dịch số theo;
+ * - file đánh số không đều (nhảy số, chữ cái, kiểu riêng) ⇒ giữ nguyên văn số của file; mục chèn thêm lấy số kế tiếp của
+ *   anh em đứng trước khi tính được (`nextAfter`).
+ * Số trả ra luôn bỏ dấu kết ("1." ⇒ "1", "A)" ⇒ "A"): bản in và FE tự thêm dấu / khoảng cách sau số.
+ */
+export const numberSections = (placed: readonly Placed[]): Numbered[] => {
+  const flat = (p: Placed, number: string): Numbered => ({ ...p, number, renderLevel: Math.min(MAX_LEVEL, p.level) })
+  if (!placed.some((p) => p.fromLayout && p.kind !== "continuation" && p.typed)) return placed.map((p) => flat(p, ""))
+  const sameAsFile = (n: Numbered): boolean => !!n.label && bareLabel(n.label) === bareLabel(n.number)
+  const regular = countNumbers(placed.filter((p) => p.fromLayout)).every((n) => !n.typed || sameAsFile(n))
+  if (regular) return countNumbers(placed)
+  const out: Numbered[] = []
+  for (const p of placed) {
+    if (p.kind === "continuation") out.push(flat(p, ""))
+    else if (p.fromLayout) out.push(flat(p, p.typed ? bareLabel(p.label ?? "") : ""))
+    else out.push(flat(p, nextAfter(out, p.level)))
+  }
+  return out
 }
 
 // ─── dựng section ──────────────────────────────────────────────────
@@ -530,7 +623,10 @@ export const buildLayoutSections = (
     }
     if (n.kind === "custom" || n.kind === "continuation") {
       const sourceBlocks = customById.get(n.section_id)?.blocks ?? []
-      const blocks = [...sliceBlocks(n), ...customBlocks(template.fixedTemplate ? sourceBlocks.filter((b) => !isInstructionText(b.text) && (b.kind !== "table" || tableBodyHasRealText(b.rows))) : sourceBlocks, (ref) => opts.diagramPng(mediaId(ref)))]
+      const kept = template.fixedTemplate
+        ? sourceBlocks.filter((b) => !isInstructionText(b.text) && (b.kind !== "table" || tableBodyHasRealText(b.rows)))
+        : guidanceWhileEmpty(sourceBlocks)
+      const blocks = [...sliceBlocks(n), ...customBlocks(kept, (ref) => opts.diagramPng(mediaId(ref)))]
       if (n.kind === "continuation") {
         // Chủ = section gần nhất phía trước có cấp nhỏ hơn (phần nối có cấp = cấp chủ + 1, xem import/step-plan.ts)
         let owner = levels.length - 1
@@ -557,15 +653,22 @@ export const buildLayoutSections = (
         const retained = original?.blocks.filter((b) => !isInstructionText(b.text) && (b.kind !== "table" || tableBodyHasRealText(b.rows)) && (!b.text.trim() || !renderedText.includes(b.text))) ?? []
         blocks.push(...customBlocks(retained, (ref) => opts.diagramPng(mediaId(ref))))
       }
-      push({ ...base, blocks }, n.level)
+      // FLF-364 (câu 10): phần nhỏ chưa có dữ liệu ⇒ in chữ hướng dẫn của mẫu (mẫu bắt buộc thì không)
+      push({ ...base, blocks: blocks.length || template.fixedTemplate ? blocks : guidanceBlocks(n.guidance) }, n.level)
       continue
     }
     const taken = claimed.get(n.section_id)
     const section = renderSection(taken ? filterSliceItems(contentSpine, taken, false) : contentSpine, n.section_id, contextFor(n.section_id, n.number))
     const original = originalOf(n.section_id)
     const rendered = original
-      ? { ...section, heading: n.title, level: n.renderLevel, blocks: customBlocks(original.blocks, (ref) => opts.diagramPng(mediaId(ref))) }
-      : { ...section, heading: n.title, level: n.renderLevel, blocks: shiftHeadings(section.blocks, n.renderLevel - section.level) }
+      ? { ...section, heading: n.title, level: n.renderLevel, blocks: customBlocks(guidanceWhileEmpty(original.blocks), (ref) => opts.diagramPng(mediaId(ref))) }
+      : {
+          ...section,
+          heading: n.title,
+          level: n.renderLevel,
+          // Mục chưa có dữ liệu ⇒ in chữ hướng dẫn của mẫu (câu 10); có dữ liệu thì không
+          blocks: section.blocks.length ? shiftHeadings(section.blocks, n.renderLevel - section.level) : guidanceBlocks(n.guidance)
+        }
     if (original) fromOriginal.add(rendered)
     // `partial`: mục rỗng vẫn giữ chỗ tới khi gộp xong phần nối — mục chỉ có hình gốc của người dùng (§4.13, PlantUML
     // không in) nhận khối từ phần nối ngay sau nó; bỏ sớm thì khối đó rơi vào mục đứng trước

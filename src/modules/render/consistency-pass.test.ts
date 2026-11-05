@@ -23,6 +23,8 @@ const emptySpine = (): Spine => ({
   glossary: [],
   addendum: [],
   custom_sections: [],
+  references: [],
+  verifications: [],
   diagrams: [],
   assumptions: [],
   decisions: [],

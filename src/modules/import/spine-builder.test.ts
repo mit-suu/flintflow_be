@@ -470,3 +470,32 @@ describe("chunkBlocks (trần input mỗi lượt I-4)", () => {
     expect(chunkBlocks([], 25)).toEqual([])
   })
 })
+
+describe("FLF-365 — trích tài liệu tham khảo / ma trận kiểm chứng (mẫu IEEE 29148)", () => {
+  it("references + verifications vào Spine; mã yêu cầu như trong file phân giải ra id Spine, không ra thì giữ mã", () => {
+    const spine = createEmptySpine({ name: "EduSchedule" })
+    const ops = buildImportOps(spine, [
+      { entity: "features", id: "F-01", value: { name: "Scheduling" } },
+      { entity: "functions", id: "FR-01", value: { name: "Create timetable", feature_id: "F-01" } },
+      { entity: "nfrs", id: "NFR-01", value: { statement: "p95 under 2 s", kind: "quantitative" } },
+      { entity: "references", id: "REF-01", value: { title: "ISO/IEC/IEEE 29148:2018", version: "2018", kind: "normative" } },
+      { entity: "references", id: "REF-02", value: { name: "Quy chế đào tạo", kind: "lạ" } },
+      { entity: "verifications", id: "VER-01", value: { requirement_id: "FR-01", method: "test", artifact: "TC-01", status: "not run" } },
+      { entity: "verifications", id: "VER-02", value: { requirement_id: "Create timetable", method: "demonstration" } },
+      { entity: "verifications", id: "VER-03", value: { requirement_id: "FR-99", method: "guess" } },
+      { entity: "verifications", id: "VER-04", value: { method: "test" } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.references).toEqual([
+      { id: "REF-01", title: "ISO/IEC/IEEE 29148:2018", version: "2018", kind: "normative" },
+      { id: "REF-02", title: "Quy chế đào tạo", kind: "informative" }
+    ])
+    expect(plan.spine.verifications.map((v) => [v.id, v.requirement_id, v.method])).toEqual([
+      ["VER-01", "FR-01", "test"],
+      ["VER-02", "FR-01", "demonstration"],
+      ["VER-03", "FR-99", "other"]
+    ])
+    // FR-99 không có ⇒ cờ vàng verification_orphan
+    expect(runDeterministicCheck(plan.spine).filter((f) => f.rule_id === "verification_orphan").map((f) => f.target_id)).toEqual(["VER-03"])
+  })
+})

@@ -67,6 +67,16 @@ export interface OoxmlBlock {
    * không ghi vào chữ của block. Heading gõ số tay / không đánh số ⇒ không có.
    */
   auto_number?: string | null
+  /**
+   * FLF-362: nhãn số Word tự đánh của heading, đúng như Word hiển thị ("2.1", "II.", "A.") — tính theo `numbering.xml`, không
+   * nằm trong `text`. Để hiển thị / in lại đúng số của file upload. Heading gõ số tay hoặc không đánh số ⇒ không có.
+   */
+  number_label?: string | null
+  /**
+   * FLF-364: mọi run có chữ của đoạn in nghiêng, tô nền, hoặc màu khác màu thân bài — kiểu chữ hướng dẫn hay gặp của mẫu
+   * (xanh / xám). Chỉ là tín hiệu phụ: chữ hướng dẫn vẫn phải nằm trong `[ ]` / `{ }`. Không có ở heading / bảng.
+   */
+  guidance_format?: boolean
 }
 
 interface StyleInfo {
@@ -78,6 +88,10 @@ interface StyleInfo {
   bold: boolean | null
   /** `w:rPr/w:sz` (nửa point). */
   size: number | null
+  /** FLF-364: `w:rPr/w:color` (hex hoa, `auto` ⇒ `null`), `w:i`, `w:highlight`. */
+  color: string | null
+  italic: boolean | null
+  highlight: boolean | null
   /** Style mặc định của đoạn (`w:default="1"`, thường là Normal). */
   isDefault: boolean
   /** `numPr` của style: `numId` + `ilvl` (thiếu ilvl ⇒ 0). */
@@ -91,13 +105,54 @@ const ilvlOf = (v: string | null): number | null => {
   return Number.isFinite(n) && n >= 0 && n <= 8 ? Math.floor(n) : null
 }
 
-/** `w:b` / `w:sz` của một `rPr`. */
-const runFormat = (rPr: Element | undefined): { bold: boolean | null; size: number | null } => {
-  if (!rPr) return { bold: null, size: null }
-  const b = wKid(rPr, "b")
-  const val = b ? wAttr(b, "val") : null
+interface RunFormat {
+  bold: boolean | null
+  size: number | null
+  color: string | null
+  italic: boolean | null
+  highlight: boolean | null
+}
+
+const onOff = (el: Element | null | undefined): boolean | null => {
+  if (!el) return null
+  const val = wAttr(el, "val")
+  return val !== "0" && val !== "false" && val !== "off"
+}
+
+/** `w:b` / `w:sz` / `w:color` / `w:i` / `w:highlight` của một `rPr`. */
+const runFormat = (rPr: Element | undefined): RunFormat => {
+  if (!rPr) return { bold: null, size: null, color: null, italic: null, highlight: null }
   const sz = wAttr(wKid(rPr, "sz"), "val")
-  return { bold: b ? val !== "0" && val !== "false" && val !== "off" : null, size: sz && Number(sz) > 0 ? Number(sz) : null }
+  const color = wAttr(wKid(rPr, "color"), "val")
+  const hl = wAttr(wKid(rPr, "highlight"), "val")
+  return {
+    bold: onOff(wKid(rPr, "b")),
+    size: sz && Number(sz) > 0 ? Number(sz) : null,
+    color: color && color.toLowerCase() !== "auto" ? color.toUpperCase() : null,
+    italic: onOff(wKid(rPr, "i")),
+    highlight: hl === null ? null : hl !== "none"
+  }
+}
+
+/** Màu chữ thật của một run: run ⇒ style đoạn (`null` = màu mặc định / đen). */
+const runColor = (r: Element, chain: StyleInfo[]): string | null => {
+  const color = runFormat(wKid(r, "rPr")).color ?? chain.find((s) => s.color !== null)?.color ?? null
+  return color === "000000" ? null : color
+}
+
+/**
+ * FLF-364: đoạn có kiểu chữ hướng dẫn — mọi run có chữ in nghiêng, tô nền hoặc khác màu thân bài (`bodyColor`, màu chiếm
+ * nhiều chữ nhất của thân bài).
+ */
+const guidanceFormat = (p: Element, chain: StyleInfo[], bodyColor: string | null): boolean => {
+  const runs = visibleRuns(p).filter((r) => runText(r).trim())
+  if (!runs.length) return false
+  const styleItalic = chain.find((s) => s.italic !== null)?.italic ?? false
+  return runs.every((r) => {
+    const f = runFormat(wKid(r, "rPr"))
+    const color = runColor(r, chain)
+    return (f.italic ?? styleItalic) || f.highlight === true || (color !== null && color !== bodyColor)
+  })
 }
 
 const readStyles = (styles: Document | null): Map<string, StyleInfo> => {
@@ -122,16 +177,31 @@ const readStyles = (styles: Document | null): Map<string, StyleInfo> => {
   return map
 }
 
-/** Một cấp của danh sách đánh số (`numbering.xml`): `numFmt` (`bullet`, `decimal`…) và `lvlText` (`%1.%2`). */
+/**
+ * Một cấp của danh sách đánh số (`numbering.xml`): `numFmt` (`bullet`, `decimal`…), `lvlText` (`%1.%2`) và — để tính nhãn số
+ * Word hiển thị (FLF-362) — `start`, `lvlRestart` (`null` = đánh lại khi cấp trên bất kỳ tăng, `0` = không bao giờ), `isLgl`.
+ */
 interface NumLevel {
   numFmt: string | null
   lvlText: string
+  start: number
+  restart: number | null
+  legal: boolean
 }
-/** `numId` ⇒ các cấp của abstractNum + danh sách có phải dàn mục (có cấp `%1.%2…`). */
-type NumberingInfo = Map<string, { levels: Map<number, NumLevel>; outline: boolean }>
+/**
+ * `numId` ⇒ các cấp của abstractNum + danh sách có phải dàn mục (có cấp `%1.%2…`). `abstractId` để các `num` cùng một
+ * abstractNum đếm tiếp nhau; `startOverrides` (`lvlOverride/startOverride`) đánh lại từ số đó khi `num` này dùng lần đầu.
+ */
+type NumberingInfo = Map<string, { levels: Map<number, NumLevel>; outline: boolean; abstractId: string; startOverrides: Map<number, number> }>
 
 /** Dàn mục: `lvlText` nối hai số trở lên bằng dấu chấm (`%1.%2`, `%1.%2.%3.`). */
 const OUTLINE_LVL_TEXT = /%\d\.%\d/
+
+const intAttr = (el: Element | undefined): number | null => {
+  const v = wAttr(el, "val")
+  const n = v === null ? NaN : Number(v)
+  return Number.isInteger(n) ? n : null
+}
 
 const readNumbering = (numbering: Document | null): NumberingInfo => {
   const out: NumberingInfo = new Map()
@@ -142,15 +212,101 @@ const readNumbering = (numbering: Document | null): NumberingInfo => {
     for (const l of wKids(a, "lvl")) {
       const ilvl = ilvlOf(wAttr(l, "ilvl"))
       if (ilvl === null) continue
-      levels.set(ilvl, { numFmt: wAttr(wKid(l, "numFmt"), "val"), lvlText: wAttr(wKid(l, "lvlText"), "val") ?? "" })
+      const lgl = wKid(l, "isLgl")
+      levels.set(ilvl, {
+        numFmt: wAttr(wKid(l, "numFmt"), "val"),
+        lvlText: wAttr(wKid(l, "lvlText"), "val") ?? "",
+        // ECMA-376 ghi mặc định 0, nhưng file thiếu `w:start` (sinh bởi công cụ khác Word) vẫn hiện bắt đầu từ 1 ⇒ 1
+        start: intAttr(wKid(l, "start")) ?? 1,
+        restart: intAttr(wKid(l, "lvlRestart")),
+        legal: !!lgl && !["0", "false", "off"].includes(wAttr(lgl, "val") ?? "")
+      })
     }
     const id = wAttr(a, "abstractNumId")
     if (id) abstracts.set(id, levels)
   }
   for (const n of wAll(numbering, "num")) {
     const id = wAttr(n, "numId")
-    const levels = abstracts.get(wAttr(wKid(n, "abstractNumId"), "val") ?? "")
-    if (id && levels) out.set(id, { levels, outline: [...levels.values()].some((l) => OUTLINE_LVL_TEXT.test(l.lvlText)) })
+    const abstractId = wAttr(wKid(n, "abstractNumId"), "val") ?? ""
+    const levels = abstracts.get(abstractId)
+    if (!id || !levels) continue
+    const startOverrides = new Map<number, number>()
+    for (const o of wKids(n, "lvlOverride")) {
+      const ilvl = ilvlOf(wAttr(o, "ilvl"))
+      const start = intAttr(wKid(o, "startOverride"))
+      if (ilvl !== null && start !== null) startOverrides.set(ilvl, start)
+    }
+    out.set(id, { levels, outline: [...levels.values()].some((l) => OUTLINE_LVL_TEXT.test(l.lvlText)), abstractId, startOverrides })
+  }
+  return out
+}
+
+const ROMAN_DIGITS: readonly [number, string][] = [
+  [1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]
+]
+const roman = (n: number): string => {
+  let out = ""
+  for (const [v, s] of ROMAN_DIGITS) while (n >= v) (out += s), (n -= v)
+  return out
+}
+/** `1` ⇒ `A`, `27` ⇒ `AA` (cách Word đánh chữ: lặp lại chữ cái). */
+const letters = (n: number): string => (n < 1 ? "" : String.fromCharCode(65 + ((n - 1) % 26)).repeat(Math.floor((n - 1) / 26) + 1))
+
+/** Một giá trị bộ đếm theo `numFmt`; định dạng lạ (`ordinal`, chữ Á Đông…) ⇒ số thường. */
+const formatCounter = (value: number, numFmt: string | null): string => {
+  switch (numFmt) {
+    case "upperRoman":
+      return roman(value)
+    case "lowerRoman":
+      return roman(value).toLowerCase()
+    case "upperLetter":
+      return letters(value)
+    case "lowerLetter":
+      return letters(value).toLowerCase()
+    case "decimalZero":
+      return value < 10 ? `0${value}` : String(value)
+    default:
+      return String(value)
+  }
+}
+
+/**
+ * Nhãn số Word tự đánh của từng đoạn có `numPr` (FLF-362): "2.1", "II.", "A." — như Word hiển thị, không nằm trong chữ của
+ * đoạn. Đếm **mọi** đoạn đánh số theo thứ tự tài liệu (kể cả gạch đầu dòng, ô bảng) vì chúng chung bộ đếm; bộ đếm theo
+ * abstractNum (các `num` cùng abstractNum đếm tiếp nhau), `startOverride` đánh lại khi `num` đó dùng lần đầu, cấp dưới đánh
+ * lại khi cấp trên tăng (trừ `lvlRestart` = 0). Gạch đầu dòng / `none` / không tính được ⇒ không có nhãn.
+ */
+const numberLabels = (body: Element, styles: Map<string, StyleInfo>, numbering: NumberingInfo): Map<Element, string> => {
+  const out = new Map<Element, string>()
+  if (!numbering.size) return out
+  const counters = new Map<string, (number | undefined)[]>()
+  const started = new Set<string>()
+  for (const p of wAll(body, "p")) {
+    const pPr = wKid(p, "pPr")
+    const num = numberingOf(pPr, styleChain(styles, pPr ? wAttr(wKid(pPr, "pStyle"), "val") : null))
+    const info = num?.numId ? numbering.get(num.numId) : undefined
+    const lvl = info?.levels.get(num!.ilvl)
+    if (!num || !info || !lvl || lvl.numFmt === "none") continue
+    const c = counters.get(info.abstractId) ?? []
+    counters.set(info.abstractId, c)
+    if (!started.has(num.numId!)) {
+      started.add(num.numId!)
+      for (const [k, start] of info.startOverrides) c[k] = start - 1
+    }
+    c[num.ilvl] = (c[num.ilvl] ?? lvl.start - 1) + 1
+    for (let k = num.ilvl + 1; k < 9; k++) {
+      const restart = info.levels.get(k)?.restart ?? null
+      if (restart === null || (restart !== 0 && num.ilvl + 1 <= restart)) c[k] = undefined
+    }
+    if (lvl.numFmt === "bullet") continue
+    const label = lvl.lvlText
+      .replace(/%([1-9])/g, (_, d: string) => {
+        const k = Number(d) - 1
+        const def = info.levels.get(k)
+        return formatCounter(c[k] ?? def?.start ?? 0, lvl.legal ? "decimal" : (def?.numFmt ?? null))
+      })
+      .trim()
+    if (label) out.set(p, label)
   }
   return out
 }
@@ -391,6 +547,8 @@ interface PreScan {
   handToc: Set<Element>
   defaultSize: number
   bodySize: number
+  /** FLF-364: màu chữ thân bài (`null` = mặc định / đen). */
+  bodyColor: string | null
   sizeLevels: Map<number, number>
   numbering: NumberingInfo
 }
@@ -427,6 +585,7 @@ const preScan = (body: Element, styles: Map<string, StyleInfo>, stylesDoc: Docum
   const entries: TocEntry[] = []
   const handToc = new Set<Element>()
   const weights = new Map<number, number>()
+  const colors = new Map<string, number>()
   const candidates: { size: number; titleStyle: boolean; idx: number }[] = []
   const runs: { lines: { p: Element; text: string }[]; afterTitle: boolean; end: number }[] = []
   const laterKeys: { idx: number; key: string }[] = []
@@ -465,6 +624,10 @@ const preScan = (body: Element, styles: Map<string, StyleInfo>, stylesDoc: Docum
     }
     const fmt = paragraphFormat(p, chain, defaultSize)
     weights.set(fmt.size, (weights.get(fmt.size) ?? 0) + text.length)
+    for (const r of visibleRuns(p)) {
+      const color = runColor(r, chain) ?? ""
+      colors.set(color, (colors.get(color) ?? 0) + runText(r).trim().length)
+    }
     if (headingLike(text)) candidates.push({ size: fmt.size, titleStyle: isTitleStyle(chain), idx })
   })
   flush(paras.length)
@@ -478,13 +641,14 @@ const preScan = (body: Element, styles: Map<string, StyleInfo>, stylesDoc: Docum
     bodyStart = bodyStart === null ? r.end - r.lines.length : Math.min(bodyStart, r.end - r.lines.length)
   }
   const bodySize = [...weights].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] ?? defaultSize
+  const bodyColor = [...colors].sort((a, b) => b[1] - a[1])[0]?.[0] || null
   const counts = new Map<number, number>()
   for (const c of candidates) {
     if (c.idx < (bodyStart ?? 0)) continue
     if (c.size >= bodySize + LARGE_DELTA || (c.titleStyle && c.size >= bodySize)) counts.set(c.size, (counts.get(c.size) ?? 0) + 1)
   }
   const large = [...counts].filter(([, n]) => n >= 2).map(([size]) => size).sort((a, b) => b - a)
-  return { toc: new TocIndex(entries), handToc, defaultSize, bodySize, sizeLevels: new Map(large.map((size, i) => [size, Math.min(9, i + 1)])), numbering }
+  return { toc: new TocIndex(entries), handToc, defaultSize, bodySize, bodyColor, sizeLevels: new Map(large.map((size, i) => [size, Math.min(9, i + 1)])), numbering }
 }
 
 export const parseBlocks = (
@@ -497,6 +661,7 @@ export const parseBlocks = (
   const body = wAll(doc, "body")[0]
   if (!body) return []
   const pre = preScan(body, styles, stylesDoc, readNumbering(numberingDoc))
+  const labels = numberLabels(body, styles, pre.numbering)
   const tocTracker = new TocFieldTracker()
   /** Đã qua mục lục — chỉ sau đó đoạn không số mới được nhận là heading nhờ trùng mục lục. */
   let pastToc = false
@@ -686,9 +851,14 @@ export const parseBlocks = (
     }
     const headingExtra =
       kind === "heading" && level !== null
-        ? { heading_signals: signals, auto_number: noteHeading(level, text, numbering !== null) }
+        ? {
+            heading_signals: signals,
+            auto_number: noteHeading(level, text, numbering !== null),
+            ...(labels.has(p) && !typedNumber(text) ? { number_label: labels.get(p)! } : {})
+          }
         : {}
-    push({ ...base, kind, level, heading_detector: detector, bookmark, editable: !embedded && !hasField(p), ...headingExtra })
+    const formatExtra = kind !== "heading" && guidanceFormat(p, chain, pre.bodyColor) ? { guidance_format: true } : {}
+    push({ ...base, kind, level, heading_detector: detector, bookmark, editable: !embedded && !hasField(p), ...headingExtra, ...formatExtra })
     if (kind === "heading" && level !== null) headingStack.push({ level, text: text.trim() })
   }
 

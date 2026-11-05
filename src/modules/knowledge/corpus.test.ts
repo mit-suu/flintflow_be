@@ -9,8 +9,8 @@ describe("loadCorpus — skill (assets/skills)", () => {
   const bySource = new Map(docs.map((d) => [d.source, d]))
 
   it("đọc mọi SKILL.md trừ skill đánh dấu `knowledge_index: false` (knowledge-answer)", () => {
-    // 44 = 45 skill (thêm renderer/sequence) trừ knowledge-answer
-    expect(docs).toHaveLength(44)
+    // 47 = 48 skill (thêm renderer/sequence; FLF-365: 3 skill mục IEEE 29148) trừ knowledge-answer
+    expect(docs).toHaveLength(47)
     expect(bySource.has("knowledge-answer")).toBe(false)
     expect(docs.every((d) => d.source_kind === "internal_skill" && d.status === "verified" && d.corpus === "skills")).toBe(true)
     expect(docs.every((d) => d.doc_id === d.source)).toBe(true)

@@ -239,7 +239,10 @@ export const IMPORT_EXTRACT_ENTITIES = [
   "common_requirements",
   "messages",
   "other_requirements",
-  "glossary"
+  "glossary",
+  // FLF-365: mẫu IEEE 29148
+  "references",
+  "verifications"
 ] as const
 
 const blockIdRef = z.string().regex(/^B\d{4,}$/)

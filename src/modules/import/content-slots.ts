@@ -44,7 +44,12 @@ export const CONTENT_SLOTS: readonly ContentSlotDef[] = Object.freeze([
     label_vi: "Sơ đồ phân tích (use case, luồng màn hình, ERD)",
     parents: ["fixed:2.2.1", "fixed:3.1.1", "fixed:3.1.5"],
     targets: []
-  }
+  },
+  // FLF-365: mục chỉ có ở mẫu IEEE 29148 — Spine có chỗ riêng (`references[]`, `release` của yêu cầu, `verifications[]`)
+  { id: "slot:references", label_en: "References", label_vi: "Tài liệu tham khảo", parents: [], targets: ["references"] },
+  // Bảng phân bổ trong file là yêu cầu đã có ở chương chức năng ⇒ không trích lại (sẽ nhân đôi); skill điền `release`
+  { id: "slot:apportioning", label_en: "Apportioning of requirements", label_vi: "Phân bổ yêu cầu", parents: [], targets: [] },
+  { id: "slot:verification", label_en: "Verification", label_vi: "Kiểm chứng", parents: [], targets: ["verifications"] }
 ])
 
 const SLOT_BY_ID = new Map<string, ContentSlotDef>(CONTENT_SLOTS.map((s) => [s.id, s]))
@@ -108,6 +113,12 @@ export const slotHasData = (spine: Spine, slotId: string): boolean => {
       return spine.common_requirements.some((c) => ["localization", "date_format"].includes(c.category))
     case "slot:analysis_models":
       return spine.diagrams.some((d) => d.kind === "usecase" || d.kind === "screen_flow" || d.kind === "erd")
+    case "slot:references":
+      return (spine.references ?? []).length > 0
+    case "slot:apportioning":
+      return [...spine.functions, ...spine.nfrs].some((r) => !!r.release)
+    case "slot:verification":
+      return (spine.verifications ?? []).length > 0
     default:
       return false
   }
