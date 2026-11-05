@@ -25,13 +25,26 @@
  * - **Heading lặp một section FPT** (mẫu IEEE: Reliability + Availability ⇒ 4.2.2): phần tử trích từ heading lặp
  *   (`sectionSlices`) in dưới chính heading đó, trước khối nguyên văn của nó; lần đầu của section in phần còn lại.
  * - **Sơ đồ gốc** (§4.13): loại sơ đồ còn ảnh gốc của người dùng trong phần nối ⇒ không in hình PlantUML cùng loại.
+ * - **Đoạn nguyên văn** (FLF-366, `sectionSegments`): mục FPT `fixed:*` có dữ liệu đoạn đi qua các đoạn theo thứ tự file —
+ *   dãy nguyên văn (phần nối riêng) in tại chỗ, không gộp lên đầu mục; đoạn đã trích còn khớp dấu ⇒ in khối gốc, lệch ⇒
+ *   chỉ phần tử của đoạn dựng lại từ Spine tại chỗ; ảnh sơ đồ gốc CR đã bỏ ⇒ sơ đồ FlintFlow cùng loại ngay sau dãy đó;
+ *   phần tử mới / đã đổi mà không thuộc đoạn nào ⇒ cuối mục. PlantUML khác không in (bản 0.1 đủ đúng số hình của file).
+ *   Project chưa có dữ liệu đoạn (import trước FLF-366) ⇒ in như cũ.
  */
 
 import { createHash } from "node:crypto"
 import { listSections, type SectionDef } from "../spine/section-registry.js"
 import type { SectionStateView } from "../spine/section-status.js"
-import { keptOriginalKinds } from "../spine/original-diagram.js"
-import type { CustomBlock, CustomSection, Spine } from "../spine/spine.types.js"
+import { keptOriginalKinds, ORIGINAL_DIAGRAM_SECTION } from "../spine/original-diagram.js"
+import {
+  homedItems,
+  isVerbatim,
+  SECTION_ITEM_ARRAYS,
+  sectionItemKeys,
+  segmentItemHashes,
+  type SectionSegments
+} from "../spine/segment-hash.js"
+import type { CustomBlock, CustomSection, OriginalDiagramKind, Spine } from "../spine/spine.types.js"
 import type { Block, InlineRun, RenderedSection, RocRow, TableCell } from "./rendered-document.types.js"
 import { mediaId } from "./import-media.js"
 import { defaultSectionTitle, renderContentSlot, renderSection, type SectionRenderContext } from "./section-renderer.js"
@@ -71,6 +84,8 @@ export interface TemplateLayout {
    * vẫn chèn dưới mục chức năng của mẫu (là nội dung của mục đó).
    */
   fixedTemplate?: boolean
+  /** FLF-366: đoạn nguyên văn của từng mục FPT `fixed:*` (`TemplateProfile.section_segments`). Không có ⇒ in như cũ. */
+  sectionSegments?: readonly SectionSegments[]
 }
 
 export interface SectionSliceView {
@@ -87,6 +102,28 @@ export const filterSliceItems = (spine: Spine, items: ReadonlySet<string>, keep:
     const list = (spine as unknown as Record<string, unknown>)[entity]
     if (!Array.isArray(list)) continue
     out[entity] = list.filter((x: { id?: string }) => items.has(`${entity}:${x.id}`) === keep)
+  }
+  return out as unknown as Spine
+}
+
+/**
+ * Spine chỉ còn phần tử `keep` (`business_rules:BR-01`, `project:vision`) trong các mảng mục `sectionId` in ra — mảng chỉ
+ * dùng để tra tên giữ nguyên — và không còn sơ đồ (FLF-366: dựng lại một đoạn / phần tử cuối mục).
+ */
+export const segmentSpine = (spine: Spine, sectionId: string, keep: ReadonlySet<string>, diagrams: Spine["diagrams"] = []): Spine => {
+  const out: Record<string, unknown> = { ...spine, diagrams }
+  for (const array of SECTION_ITEM_ARRAYS[sectionId] ?? []) {
+    if (array === "project") {
+      out.project = {
+        ...spine.project,
+        vision: keep.has("project:vision") ? spine.project.vision : null,
+        goals: keep.has("project:goals") ? spine.project.goals : [],
+        release_scope: keep.has("project:release_scope") ? spine.project.release_scope : { ...spine.project.release_scope, in: [], out: [] }
+      }
+      continue
+    }
+    const list = (spine as unknown as Record<string, unknown>)[array]
+    if (Array.isArray(list)) out[array] = list.filter((x: { id?: string }) => keep.has(`${array}:${x.id}`))
   }
   return out as unknown as Spine
 }
@@ -422,7 +459,11 @@ export const buildLayoutSections = (
   const customById = new Map<string, CustomSection>(spine.custom_sections.map((c) => [`${CUSTOM_PREFIX}${c.id}`, c]))
   // §4.13: sơ đồ người dùng đã có hình gốc (in ở phần nối) ⇒ không in thêm PlantUML cùng loại — một sơ đồ một hình
   const kept = keptOriginalKinds(spine)
-  const contentSpine: Spine = kept.size ? { ...spine, diagrams: spine.diagrams.filter((d) => !(kept as ReadonlySet<string>).has(d.kind)) } : spine
+  // FLF-366: loại sơ đồ có ảnh gốc trong một đoạn ⇒ sơ đồ FlintFlow của nó chỉ in tại chỗ ảnh đó (khi CR đã bỏ ảnh)
+  const records = template.sectionSegments ?? []
+  const recordedKinds = new Set<string>(records.flatMap((r) => r.parts.flatMap((p) => (p.kind === "original" ? p.diagrams.map((d) => d.kind) : []))))
+  const hiddenKinds = new Set<string>([...kept, ...recordedKinds])
+  const contentSpine: Spine = hiddenKinds.size ? { ...spine, diagrams: spine.diagrams.filter((d) => !hiddenKinds.has(d.kind)) } : spine
   const nonScreen = nonScreenTableIds(spine, template)
   // FLF-252: mục chức năng chưa bị sửa từ lúc nhập ⇒ in nguyên văn file (nhãn, gạch đầu dòng, ảnh đúng thứ tự)
   const originals = new Map((template.functionOriginals ?? []).filter((o) => o.blocks.length).map((o) => [o.section_id, o]))
@@ -452,6 +493,45 @@ export const buildLayoutSections = (
       ...(state?.awaiting_reaccept !== undefined ? { awaiting_reaccept: state.awaiting_reaccept } : {})
     }
   }
+  // FLF-366: đoạn nguyên văn của mục FPT
+  const segmentsOf = new Map(records.map((r) => [r.section_id, r]))
+  const homed = homedItems(records)
+  /** Phần nối in tại chỗ trong đoạn của mục — không gộp lên đầu mục nữa. */
+  const consumed = new Set(records.flatMap((r) => r.parts.flatMap((p) => (p.kind === "original" ? [`${CUSTOM_PREFIX}${p.custom_id}`] : []))))
+  const redrawn = new Set<OriginalDiagramKind>()
+  const originalPng = (ref: string) => opts.diagramPng(mediaId(ref))
+  const segmentBlocks = (record: SectionSegments, n: Numbered): Block[] => {
+    const sectionId = record.section_id
+    const shifted = (section: RenderedSection): Block[] => shiftHeadings(section.blocks, n.renderLevel - section.level)
+    const rebuild = (items: readonly string[]): Block[] =>
+      shifted(renderSection(segmentSpine(contentSpine, sectionId, new Set(items)), sectionId, contextFor(sectionId, n.number)))
+    const out: Block[] = []
+    for (const part of record.parts) {
+      if (part.kind === "spine") {
+        out.push(...(isVerbatim(spine, part) ? customBlocks(part.blocks, originalPng) : rebuild(part.items)))
+        continue
+      }
+      const blocks = customById.get(`${CUSTOM_PREFIX}${part.custom_id}`)?.blocks ?? []
+      out.push(...customBlocks(blocks, originalPng))
+      // Ảnh sơ đồ gốc CR đã bỏ (đề xuất vẽ lại, §4.13) ⇒ sơ đồ FlintFlow cùng loại đúng chỗ ảnh; loại còn ảnh gốc ở chỗ khác thì thôi
+      const present = new Set(blocks.flatMap((b) => (b.image_ref ? [b.image_ref] : [])))
+      for (const kind of new Set(part.diagrams.filter((d) => !present.has(d.image_ref)).map((d) => d.kind))) {
+        if (kept.has(kind) || redrawn.has(kind)) continue
+        redrawn.add(kind)
+        const target = ORIGINAL_DIAGRAM_SECTION[kind]
+        const diagrams = spine.diagrams.filter((d) => d.kind === kind)
+        out.push(...shifted(renderSection(segmentSpine(spine, target, new Set(), diagrams), target, contextFor(target, n.number))))
+      }
+    }
+    // Phần tử mới / đã đổi từ lúc import mà không đoạn nào in (CR thêm) ⇒ cuối mục
+    const known = new Map(record.known.map((k) => [k.key, k.hash]))
+    const taken = claimed.get(sectionId)
+    const candidates = sectionItemKeys(spine, sectionId).filter((k) => !homed.has(k) && !taken?.has(k))
+    const trailing = segmentItemHashes(spine, candidates).filter((h) => known.get(h.key) !== h.hash).map((h) => h.key)
+    if (trailing.length) out.push(...rebuild(trailing))
+    return out
+  }
+
   /** Khối Spine của heading lặp — phần tử đã xoá hết ⇒ không có gì. */
   const sliceBlocks = (n: Numbered): Block[] => {
     const sl = sliceOf.get(n.section_id)
@@ -474,6 +554,7 @@ export const buildLayoutSections = (
       push({ ...base, blocks: [] }, n.level)
       continue
     }
+    if (n.kind === "continuation" && consumed.has(n.section_id)) continue
     if (n.kind === "custom" || n.kind === "continuation") {
       const blocks = [...sliceBlocks(n), ...customBlocks(customById.get(n.section_id)?.blocks ?? [], (ref) => opts.diagramPng(mediaId(ref)))]
       if (n.kind === "continuation") {
@@ -497,6 +578,13 @@ export const buildLayoutSections = (
     }
     const taken = claimed.get(n.section_id)
     const section = renderSection(taken ? filterSliceItems(contentSpine, taken, false) : contentSpine, n.section_id, contextFor(n.section_id, n.number))
+    const record = segmentsOf.get(n.section_id)
+    if (record) {
+      const rendered = { ...section, heading: n.title, level: n.renderLevel, blocks: segmentBlocks(record, n) }
+      if (opts.partial && rendered.blocks.length === 0) emptyUntilMerged.add(rendered)
+      push(rendered, n.level)
+      continue
+    }
     const original = originalOf(n.section_id)
     const rendered = original
       ? { ...section, heading: n.title, level: n.renderLevel, blocks: customBlocks(original.blocks, (ref) => opts.diagramPng(mediaId(ref))) }
