@@ -21,7 +21,7 @@ import type { LocalizedEntry, OpTransaction, SourceEntry } from "../../shared/ai
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { documentLanguageInput, type TurnDocumentLanguage } from "../translation/turn-language.js"
 import type { StepContext } from "./context-projection.js"
-import { briefExtractionErrors, dropRedundantScalarAdds, requiredArrayErrors, sanitizeModelOps, useCaseNamingErrors, useCaseWiringErrors, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
+import { actorGeneralizationErrors, briefExtractionErrors, dropRedundantScalarAdds, requiredArrayErrors, sanitizeModelOps, useCaseNamingErrors, useCaseWiringErrors, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
 
 export const NEEDS_USER_INPUT = "NEEDS_USER_INPUT"
 /** Phases §4.1: gửi lại model kèm lỗi tối đa 2 lần, rồi hỏi user. */
@@ -144,10 +144,17 @@ const defaultExecutor: DraftExecutor = (actionType, input, projectId, userId, op
 /** Ngân sách trả lời của skill nội dung của step (`maxTokens` trong frontmatter) — lượt draft dùng mức lớn hơn của hai skill. */
 const contentMaxTokens = (ctx: StepContext): number | undefined => (ctx.skill ? getSkill(ctx.skill).providerConfig.maxTokens : undefined)
 
-const contentGuidance = (ctx: StepContext): string => {
+const PARAGRAPH = "\n\n"
+
+/** Thân skill nội dung + các reference skill khai ở `prompt_references` (FLF-370: luật chi tiết nằm ở reference phải tới được model). */
+export const contentGuidance = (ctx: Pick<StepContext, "skill">): string => {
   if (!ctx.skill) return ""
-  const skill = getSkill(ctx.skill)
-  return skill.stub ? `Content skill ${ctx.skill} is not written yet; follow the generic rules.` : skill.template
+  const base = getSkill(ctx.skill)
+  if (base.stub) return `Content skill ${ctx.skill} is not written yet; follow the generic rules.`
+  if (base.promptReferences.length === 0) return base.template
+  const { references } = getSkill(ctx.skill, { references: base.promptReferences })
+  const blocks = base.promptReferences.map((name) => [`## Reference: ${name}`, references[name]].join(PARAGRAPH))
+  return [base.template, ...blocks].join(PARAGRAPH)
 }
 
 const loadSpine = async (projectId: string, expectedVersion: number): Promise<Spine> => {
@@ -225,6 +232,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       if (errors.length === 0) errors = briefExtractionErrors(spine, ops as Op[], stepId, callKind)
       // FLF-243: tên use case sai luật cờ vàng ⇒ gửi lại model kèm lỗi; lượt cuối thì nhận lô (cờ vàng là lưới cuối)
       if (errors.length === 0 && attempt <= maxRetries) errors = useCaseNamingErrors(spine, ops as Op[])
+      // FLF-370: use case tài khoản gắn thẳng ≥ 2 actor người ⇒ gửi lại model thêm actor tổng quát; lượt cuối nhận lô (cờ vàng là lưới cuối)
+      if (errors.length === 0 && attempt <= maxRetries && callKind === "draft") errors = actorGeneralizationErrors(spine, ops as Op[], stepId)
       // FLF-248: danh sách bắt buộc của step vẫn trống sau lô ⇒ gửi lại model; lượt cuối nhận lô (cờ array_empty là lưới cuối)
       if (errors.length === 0 && attempt <= maxRetries && callKind !== "glossary_scan") errors = requiredArrayErrors(spine, ops as Op[], stepId)
       // Chức năng màn hình sinh ra từ use case ⇒ S-4.1 gắn ngay; còn use case người dùng chưa gắn ⇒ gửi lại model

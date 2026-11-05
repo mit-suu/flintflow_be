@@ -64,6 +64,7 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("actor_name_shape", "yellow", true),
   rule("actor_generalization_invalid", "yellow", true),
   rule("actor_generalization_children_unlisted", "yellow", true),
+  rule("actor_generalization_missing", "yellow", true),
   rule("system_name_missing", "yellow", true),
   rule("screen_placeholder", "yellow", true),
   rule("derived_from_changed_assumption", "yellow", true),
@@ -206,6 +207,8 @@ export interface StepGate {
  */
 const GATE_STEP = {
   orphan_actor: "S-3.2",
+  /** Use case truy cập tài khoản chỉ có từ S-3.2; trước đó chưa thể có nhóm dùng chung. */
+  actor_generalization_missing: "S-3.2",
   usecase_no_function: "S-4.4",
   screen_no_function: "S-4.1",
   orphan_screen: "S-4.2",
@@ -1209,6 +1212,70 @@ const actorGeneralizationChildrenUnlisted = (spine: Spine): FlagCandidate[] => {
   })
 }
 
+/** Nhóm actor người cùng gắn TRỰC TIẾP một/nhiều use case truy cập tài khoản (FLF-370). */
+export interface SharedAccessGroup {
+  /** Actor người trong `actor_ids`, theo thứ tự gặp đầu tiên. */
+  actorIds: string[]
+  useCaseIds: string[]
+  /** Actor gần nhất mà mọi actor của nhóm là chính nó hoặc kế thừa từ nó; null ⇒ chưa có actor tổng quát chung. */
+  commonParent: string | null
+}
+
+/**
+ * FLF-370: use case truy cập tài khoản (Log In, Reset Password…) gắn ≥ 2 actor người ⇒ các actor đó cùng đăng nhập vào
+ * một sản phẩm, nên phải có actor tổng quát (`User`) làm cha và use case chung chỉ gắn cho actor tổng quát (con thừa kế).
+ * Actor system/time (identity provider) không tính. Gộp theo tập actor để một cặp vai chỉ ra một mục.
+ * Một nguồn sự thật cho cờ `actor_generalization_missing` và chặn lúc sinh ở S-3.2/S-3.3 (`op-validator`).
+ */
+export const sharedAccessGroups = (spine: Pick<Spine, "actors" | "use_cases">): SharedAccessGroup[] => {
+  const humans = new Set(spine.actors.filter((a) => a.kind === "human").map((a) => a.id))
+  const parents = actorParents(spine.actors)
+  const groups = new Map<string, SharedAccessGroup>()
+  for (const u of spine.use_cases) {
+    if (!isAccountAccessUseCase(u.name)) continue
+    const actorIds = [...new Set(u.actor_ids.filter((id) => humans.has(id)))]
+    if (actorIds.length < 2) continue
+    const key = [...actorIds].sort().join("|")
+    const group = groups.get(key)
+    if (group) {
+      group.useCaseIds.push(u.id)
+      continue
+    }
+    const chains = actorIds.map((id) => [id, ...ancestorsOf(id, parents)])
+    const commonParent = chains[0].find((id) => chains.every((chain) => chain.includes(id))) ?? null
+    groups.set(key, { actorIds, useCaseIds: [u.id], commonParent })
+  }
+  return [...groups.values()]
+}
+
+/** Lời nhắn cho một nhóm (cờ vàng và lỗi gửi lại model dùng chung) — chỉ tên, không id nội bộ. */
+export const sharedAccessMessage = (spine: Pick<Spine, "actors" | "use_cases">, group: SharedAccessGroup): string => {
+  const actorName = new Map(spine.actors.map((a) => [a.id, a.name]))
+  const useCaseName = new Map(spine.use_cases.map((u) => [u.id, u.name]))
+  const useCases = group.useCaseIds.map((id) => `"${useCaseName.get(id) ?? id}"`).join(", ")
+  const actors = group.actorIds.map((id) => actorName.get(id) ?? id).join(", ")
+  if (group.commonParent !== null) {
+    const parent = actorName.get(group.commonParent) ?? group.commonParent
+    return `Use case ${useCases} đang gắn cho ${actors} trong khi các tác nhân này đã kế thừa "${parent}" — chỉ gắn các use case này cho "${parent}", bỏ khỏi tác nhân con`
+  }
+  return (
+    `Use case ${useCases} đang gắn riêng cho ${actors} — các tác nhân này cùng đăng nhập vào sản phẩm nên cần một tác nhân ` +
+    `tổng quát (vd. "User") làm cha, và use case dùng chung chỉ gắn cho tác nhân tổng quát đó`
+  )
+}
+
+const actorGeneralizationMissing = (spine: Spine, gate: StepGate): FlagCandidate[] => {
+  if (!gate.done(GATE_STEP.actor_generalization_missing)) return []
+  return sharedAccessGroups(spine).map((group) => ({
+    level: "yellow" as const,
+    rule_id: "actor_generalization_missing",
+    section_id: "fixed:2.1",
+    target_id: group.useCaseIds[0],
+    message: sharedAccessMessage(spine, group),
+    remediation_step: "S-3.1"
+  }))
+}
+
 const namingShape = (spine: Spine): FlagCandidate[] => {
   const actorNames = spine.actors.map((a) => a.name)
   const useCaseNames = spine.use_cases.map((u) => u.name)
@@ -1433,6 +1500,7 @@ export const runDeterministicCheck = (
     ...namingShape(spine),
     ...actorGeneralizationInvalid(spine),
     ...actorGeneralizationChildrenUnlisted(spine),
+    ...actorGeneralizationMissing(spine, gate),
     ...systemNameMissing(spine),
     ...nonEnglishContent(spine, gate),
     ...(options.ruleProfile?.sectionSegments?.length ? originalTextMentionsChanged(spine, options.ruleProfile.sectionSegments) : []),
