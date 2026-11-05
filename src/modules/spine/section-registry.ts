@@ -150,6 +150,10 @@ export const FIELD_SECTION_MAP: readonly FieldSectionRow[] = Object.freeze([
   row("messages", "messages[]", ["fixed:5.3"]),
   row("other_requirements", "other_requirements[]", ["fixed:5.4"]),
   row("glossary", "glossary[]", ["fixed:5.5"]),
+  // FLF-365: mục chỉ có ở mẫu IEEE 29148 (Mode 1, phần nhỏ không mục FPT cha)
+  row("references", "references[]", ["slot:references"]),
+  row("verifications", "verifications[]", ["slot:verification"], [], [], "đọc id yêu cầu"),
+  row("release_apportioning", "functions[].release, nfrs[].release", ["slot:apportioning"]),
   row("changes", "changes[]", ["fixed:I"]),
   row("diagram_context", "diagrams[kind=context]", ["fixed:1"]),
   row("diagram_usecase", "diagrams[kind=usecase]", ["fixed:2.2.1"]),
@@ -219,6 +223,8 @@ const matchRows = (t: Target): FieldSectionRow[] => {
       // `section_stale_at_baseline` chặn chính cái baseline ngay sau đó (đo được: 62 cờ đỏ trên fixture
       // 19 màn). Xem docs/spec-gaps.md, dòng T19.
       if (t.sub === "priority") return []
+      // FLF-365: bản phát hành chỉ in ở bảng phân bổ — như priority, không làm mục chức năng `stale`
+      if (t.sub === "release") return rowsOf(["release_apportioning"])
       if (t.sub === "validations") return rowsOf(["functions_validations"])
       if (t.sub === "abnormal") return rowsOf(["functions_abnormal"])
       return rowsOf([base])
@@ -227,6 +233,7 @@ const matchRows = (t: Target): FieldSectionRow[] => {
       return rowsOf(["entities"])
     case "nfrs": {
       if (t.sub === "priority") return [] // như functions[].priority — cột MoSCoW, không đổi nội dung
+      if (t.sub === "release") return rowsOf(["release_apportioning"])
       const key = typeof el?.category === "string" ? NFR_ROW[el.category] : undefined
       return key ? rowsOf([key]) : rowsOf(Object.values(NFR_ROW))
     }
@@ -238,6 +245,10 @@ const matchRows = (t: Target): FieldSectionRow[] => {
       return rowsOf(["other_requirements"])
     case "glossary":
       return rowsOf(["glossary"])
+    case "references":
+      return rowsOf(["references"])
+    case "verifications":
+      return rowsOf(["verifications"])
     case "diagrams": {
       const kind = typeof el?.kind === "string" ? el.kind : null
       return kind && ROW[`diagram_${kind}`] ? rowsOf([`diagram_${kind}`]) : []

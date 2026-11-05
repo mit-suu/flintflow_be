@@ -51,6 +51,12 @@ const HEADINGS = new Map([
 ])
 
 describe("buildLayout", () => {
+  it("FLF-362: heading có số Word tự đánh ⇒ layout giữ `number_label`, `heading_text` giữ nguyên chữ", () => {
+    const blocks: LayoutBlock[] = [{ ...h("B0001", "Product Overview", 1), number_label: "1." }, p("B0002", "Text", "fixed:1")]
+    const { layout } = buildLayout(blocks, new Map([["B0001", "fixed:1"]]))
+    expect(layout[0]).toMatchObject({ heading_text: "Product Overview", number_label: "1.", section_id: "fixed:1" })
+  })
+
   it("heading mở section FPT giữ section; heading con cùng section thành đoạn chữ của dãy nguyên văn (FLF-366); unmapped ⇒ mục riêng giữ nguyên văn; section FPT lặp ở chỗ khác ⇒ mục riêng", () => {
     const { layout, customSections, segments } = buildLayout(BLOCKS, HEADINGS)
     expect(layout.map((l) => [l.heading_text, l.level, l.section_id])).toEqual([
@@ -372,5 +378,22 @@ describe("seedStepOps + step engine với step skipped", () => {
     expect(skipped).toBe(plan.filter((x) => x.state === "hidden").length)
     const withoutSkip = progressByStep({ ...s, steps: s.steps.filter((x) => x.status !== "skipped") })
     expect(progressByStep(s).total).toBe(withoutSkip.total - skipped)
+  })
+})
+
+describe("FLF-364 (câu 10) — chữ hướng dẫn dưới mục FPT giữ ở layout entry", () => {
+  it("đoạn hướng dẫn dưới mục FPT ⇒ template_guidance nguyên văn, không thành phần nối; dưới heading lạ ⇒ khối của mục riêng", () => {
+    const blocks: LayoutBlock[] = [
+      h("B0001", "2.1 Actors", 2),
+      p("B0002", "[Liệt kê các tác nhân]", "fixed:2.1"),
+      p("B0003", "Học viên là người học.", "fixed:2.1"),
+      h("B0004", "Ghi chú nhóm", 1),
+      p("B0005", "{Ghi lịch họp}", null)
+    ]
+    const { layout, customSections } = buildLayout(blocks, new Map([["B0001", "fixed:2.1"]]), new Set(["B0002"]))
+    expect(layout.find((l) => l.section_id === "fixed:2.1")?.template_guidance).toEqual(["[Liệt kê các tác nhân]"])
+    // không có phần nối chỉ chứa hướng dẫn
+    expect(customSections.filter((c) => !c.heading)).toEqual([])
+    expect(customSections.find((c) => c.heading === "Ghi chú nhóm")?.blocks.map((b) => b.text)).toEqual(["{Ghi lịch họp}"])
   })
 })

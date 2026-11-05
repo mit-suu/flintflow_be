@@ -150,6 +150,33 @@ describe("FLF-343 needsReviewFindings — chỗ độ tin thấp vào baseline k
   })
 })
 
+describe("FLF-363 titleContentFindings — tiêu đề và nội dung khác nhau", () => {
+  it("heading đổi mục theo nội dung ⇒ cờ nêu cả hai mục theo tên mẫu, không mã nội bộ; không thêm cờ Cần xem cho heading đó", async () => {
+    const { needsReviewFindings, titleContentFindings } = await import("./finalize.service.js")
+    const heading_map = [
+      {
+        block_id: "B0002",
+        heading_text: "Product Perspective",
+        section_id: "fixed:2.1",
+        confidence: 0.75,
+        detected_by: "style" as const,
+        confirmed: true,
+        auto_confirmed: true,
+        content_mismatch: { by_title: "fixed:1", by_content: "fixed:2.1" }
+      }
+    ]
+    const layout = [{ order: 0, heading_text: "Product Perspective", level: 2, section_id: "fixed:2.1" }]
+    const spine = createEmptySpine() as unknown as Parameters<typeof titleContentFindings>[0]
+    const out = titleContentFindings(spine, heading_map, layout)
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ section_id: "fixed:2.1", target_id: "B0002", block_ids: ["B0002"] })
+    expect(out[0].message).toContain('Tiêu đề "Product Perspective" giống mục "Product Overview"')
+    expect(out[0].message).toContain('nội dung là của mục "Actors"')
+    expect(out[0].message).not.toMatch(/fixed:|group:|@B/)
+    expect(needsReviewFindings(spine, [], { heading_map, table_map: [] }, layout, new Map(), () => null)).toEqual([])
+  })
+})
+
 describe("FLF-343 needsReviewFindings — trùng đường dẫn, phần tử bị bỏ", () => {
   it("cùng field ở hai section ⇒ một cờ; phần tử buildImportOps không đưa vào Spine ⇒ không cờ", async () => {
     const { needsReviewFindings } = await import("./finalize.service.js")
