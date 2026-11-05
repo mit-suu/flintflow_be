@@ -208,17 +208,21 @@ function projectMappedTable(block: Extract<Block, { type: "table" }>, source: El
   const headers = wKids(wKids(source, "tr")[0], "tc").map((cell) => wAll(cell, "t").map((t) => t.textContent ?? "").join(""))
   if (!mappings.length || headers.every((h) => block.header.some((c) => columnKey(c.map((r) => r.text).join("")) === columnKey(h)))) return block
   const entities = new Set(mappings.flatMap((m) => m.field_path ? [m.field_path.split("[].")[0]] : []))
-  if (entities.size !== 1) unavailable("Source table field mapping is ambiguous")
+  const fieldOf = (definition: (typeof TABLE_ENTITIES)[number], text: string) =>
+    definition.columns.find((col) => col.headers.some((h) => columnKey(h) === columnKey(text)))?.field
+  // FLF-372: bảng của bản ghi import trước khi từ điển có thực thể này (table_map không mang field) ⇒ ghép theo tên cột của
+  // từ điển: thực thể mà mọi cột FlintFlow in ra và ít nhất một cột của mẫu đều có tên trong từ điển
+  const byDictionary = entities.size === 0
+    ? TABLE_ENTITIES.find((def) => block.header.every((cell) => fieldOf(def, cell.map((r) => r.text).join(""))) && headers.some((h) => fieldOf(def, h)))
+    : undefined
+  if (entities.size !== 1 && !byDictionary) unavailable("Source table field mapping is ambiguous")
   const [entity] = entities
-  const definition = TABLE_ENTITIES.find((entry) => entry.entity === entity)
+  const definition = byDictionary ?? TABLE_ENTITIES.find((entry) => entry.entity === entity)
   if (!definition) unavailable("Source table entity has no renderer")
-  const generated = block.header.map((cell) => {
-    const key = columnKey(cell.map((r) => r.text).join(""))
-    return definition!.columns.find((col) => col.headers.some((h) => columnKey(h) === key))?.field
-  })
-  const indexes = headers.map((_header, column) => {
+  const generated = block.header.map((cell) => fieldOf(definition!, cell.map((r) => r.text).join("")))
+  const indexes = headers.map((header, column) => {
     const mapping = mappings.find((m) => m.column_index === column)
-    const field = mapping?.field_path?.split("[].")[1]
+    const field = byDictionary ? fieldOf(byDictionary, header) : mapping?.field_path?.split("[].")[1]
     if (mapping?.role === "row_no") return -2
     const index = field ? generated.indexOf(field) : -1
     if (index < 0) unavailable(`Source table column ${column + 1} has no explicit generated field`)
@@ -244,7 +248,8 @@ function table(xml: Document, block: Extract<Block, { type: "table" }>, source?:
   const columns = Math.max(0, ...content.map((r) => r.length))
   const sourceColumns = rows[0] ? wKids(rows[0], "tc").length : columns
   if (source && sourceColumns) {
-    const sourceHeaders = wKids(rows[0], "tc").map((cell) => wAll(cell, "t").map((t) => t.textContent ?? "").join(" ").trim())
+    // Word tách một chữ thành nhiều run (dấu tiếng Việt, sửa chính tả) ⇒ ghép không chèn dấu cách ("Thu"+"ật ng"+"ữ")
+    const sourceHeaders = wKids(rows[0], "tc").map((cell) => wAll(cell, "t").map((t) => t.textContent ?? "").join("").trim())
     const generatedHeaders = block.header.map((cell) => cell.map((run) => run.text).join("").trim())
     // Exact header binding only. Ambiguous/missing columns must never be dumped
     // into the last cell or matched by generic words like "name" or "id".
@@ -252,12 +257,15 @@ function table(xml: Document, block: Extract<Block, { type: "table" }>, source?:
       const matches = sourceHeaders.map((text, i) => columnKey(text) === columnKey(header) ? i : -1).filter((i) => i >= 0)
       return matches.length === 1 ? headerPositions[matches[0]] : -1
     })
-    if (mapping.some((i) => i < 0) || new Set(mapping).size !== mapping.length) unavailable("Generated table columns do not match the source table")
+    // FLF-372: cột FlintFlow mà mẫu không có (Thuật ngữ thêm "Tiếng Việt") ⇒ mẫu bắt buộc không in cột đó (dữ liệu vẫn ở
+    // Spine) thay vì hỏng cả lượt tạo bản; không khớp cột nào / hai cột cùng một cột gốc mới là lỗi
+    const bound = mapping.filter((i) => i >= 0)
+    if (!bound.length || new Set(bound).size !== bound.length) unavailable("Generated table columns do not match the source table")
     content = [sourceHeaders.map((text) => [{ text }]), ...block.rows.map((cells) => {
       const projected: InlineRun[][] = Array.from({ length: gridWidth }, () => [])
       cells.forEach((runs, index) => {
         const target = mapping[index] ?? -1
-        if (target < 0) unavailable("Table cell has no source column")
+        if (target < 0) return // cột mẫu không có — không in (xem trên)
         const dest = projected[target]
         if (dest.length) dest.push({ text: "\n" })
         dest.push(...runs)

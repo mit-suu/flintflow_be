@@ -12,10 +12,10 @@ const heading = (text: string, level = 1) => `<w:p><w:pPr><w:pStyle w:val="Headi
 const body = `<w:p><w:pPr><w:spacing w:after="321"/><w:ind w:left="432"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Cambria"/><w:sz w:val="23"/></w:rPr><w:t>Replace this guidance.</w:t></w:r></w:p>`
 const cell = (text: string) => `<w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/><w:shd w:fill="AABBCC"/></w:tcPr>${body.replace("Replace this guidance.", text)}</w:tc>`
 const sourceTable = `<w:tbl><w:tblPr><w:tblW w:w="6000" w:type="dxa"/><w:tblBorders><w:top w:val="double"/></w:tblBorders></w:tblPr><w:tblGrid><w:gridCol w:w="3000"/><w:gridCol w:w="3000"/></w:tblGrid><w:tr><w:trPr><w:tblHeader/></w:trPr>${cell("A")}${cell("B")}</w:tr><w:tr><w:trPr><w:trHeight w:val="444"/></w:trPr>${cell("sample")}${cell("sample")}</w:tr></w:tbl>`
-async function template() {
+async function template(table = sourceTable) {
   const zip = new JSZip()
   zip.file("[Content_Types].xml", `<Types xmlns="${NS.ct}"><Default Extension="xml" ContentType="application/xml"/></Types>`)
-  zip.file("word/document.xml", `<w:document xmlns:w="${NS.w}" xmlns:r="${NS.r}"><w:body><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>[Project</w:t></w:r><w:r><w:rPr><w:i/></w:rPr><w:t> name] — [Version] — [Date]</w:t></w:r></w:p>${heading("Requirements")}${body}${sourceTable}<w:p><w:r><w:br w:type="page"/></w:r></w:p>${heading("Repeated", 2)}${body}${heading("Repeated", 2)}${body}${heading("Unmapped")}${body}<w:sectPr><w:headerReference w:type="default" r:id="rId1"/><w:pgMar w:top="1134" w:left="1134"/></w:sectPr></w:body></w:document>`)
+  zip.file("word/document.xml", `<w:document xmlns:w="${NS.w}" xmlns:r="${NS.r}"><w:body><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>[Project</w:t></w:r><w:r><w:rPr><w:i/></w:rPr><w:t> name] — [Version] — [Date]</w:t></w:r></w:p>${heading("Requirements")}${body}${table}<w:p><w:r><w:br w:type="page"/></w:r></w:p>${heading("Repeated", 2)}${body}${heading("Repeated", 2)}${body}${heading("Unmapped")}${body}<w:sectPr><w:headerReference w:type="default" r:id="rId1"/><w:pgMar w:top="1134" w:left="1134"/></w:sectPr></w:body></w:document>`)
   zip.file("word/styles.xml", styles)
   zip.file("word/numbering.xml", `<w:numbering xmlns:w="${NS.w}" />`)
   zip.file("word/header1.xml", `<w:hdr xmlns:w="${NS.w}"><w:p><w:r><w:t>Company header</w:t></w:r></w:p></w:hdr>`)
@@ -153,6 +153,37 @@ describe("writeTemplateDocx", () => {
     const input = await template(), parsed = await parseDocument(input), doc = document()
     doc.sections = [{ id: "fixed:1", number: "1", heading: "Requirements", level: 1, blocks: [{ type: "table", header: [runs("ID"), runs("Name"), runs("Role"), runs("Permissions")], rows: [[runs("A01"), runs("Manager"), runs("Manage club"), runs("Approve members")]] }] }]
     await expect(writeTemplateDocx(doc, input, [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:1" }])).rejects.toMatchObject({ code: "TEMPLATE_LAYOUT_UNAVAILABLE" })
+  })
+
+  it("FLF-372: tiêu đề cột tiếng Việt tách nhiều run vẫn khớp; cột FlintFlow mẫu không có thì bỏ, không hỏng cả lượt", async () => {
+    // Word tách "Thuật ngữ" thành nhiều run quanh dấu tiếng Việt
+    const split = (...parts: string[]) => `<w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/></w:tcPr><w:p>${parts.map((t) => `<w:r><w:t xml:space="preserve">${t}</w:t></w:r>`).join("")}</w:p></w:tc>`
+    const glossary = `<w:tbl><w:tblPr/><w:tblGrid><w:gridCol w:w="3000"/><w:gridCol w:w="3000"/></w:tblGrid><w:tr>${split("Thu", "ật ng", "ữ")}${split("Đ", "ị", "nh nghĩa")}</w:tr><w:tr>${cell("[term]")}${cell("[definition]")}</w:tr></w:tbl>`
+    const input = await template(glossary), parsed = await parseDocument(input), doc = document()
+    doc.sections = [{ id: "fixed:5.5", number: "1", heading: "Requirements", level: 1, blocks: [{ type: "table", header: [runs("Thuật ngữ"), runs("Tiếng Việt"), runs("Định nghĩa")], rows: [[runs("SRS"), runs("Đặc tả yêu cầu"), runs("Software Requirements Specification")]] }] }]
+    const output = await writeTemplateDocx(doc, input, [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:5.5" }])
+    const xml = await (await DocxPackage.load(output)).requireXml("word/document.xml")
+    const rows = wKids(wAll(xml, "tbl")[0], "tr").map((tr) => wKids(tr, "tc").map((tc) => wAll(tc, "t").map((t) => t.textContent).join("")))
+    expect(rows).toEqual([
+      ["Thuật ngữ", "Định nghĩa"],
+      ["SRS", "Software Requirements Specification"]
+    ])
+  })
+
+  it("FLF-372: bảng ghép cột lúc upload chưa có field (bản ghi cũ) ⇒ ghép theo tên cột của từ điển (ma trận kiểm chứng)", async () => {
+    const head = (...names: string[]) => `<w:tr>${names.map((n) => cell(n)).join("")}</w:tr>`
+    const verification = `<w:tbl><w:tblPr/><w:tblGrid>${"<w:gridCol w:w=\"2000\"/>".repeat(5)}</w:tblGrid>${head("Mã yêu cầu", "Phương pháp", "Ca kiểm thử / Tạo tác", "Trạng thái", "Bằng chứng")}${head("[FR-xx]", "[Test]", "[TC-xx]", "[Not run]", "[Link]")}</w:tbl>`
+    const input = await template(verification), parsed = await parseDocument(input), doc = document()
+    const tableBlock = parsed.blocks.find((b) => b.kind === "table")!
+    doc.sections = [{ id: "slot:verification", number: "1", heading: "Requirements", level: 1, blocks: [{ type: "table", header: [runs("Yêu cầu"), runs("Phương pháp"), runs("Tài liệu kiểm"), runs("Trạng thái"), runs("Bằng chứng")], rows: [[runs("FR-01"), runs("Kiểm thử"), runs("TC-FR-01"), runs("not run"), runs("")]] }] }]
+    const legacyMap = [0, 1, 2, 3, 4].map((column_index) => ({ block_id: tableBlock.block_id, column_index, header: "", field_path: null, confidence: 0.9, confirmed: true }))
+    const output = await writeTemplateDocx(doc, input, [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "slot:verification" }], legacyMap)
+    const xml = await (await DocxPackage.load(output)).requireXml("word/document.xml")
+    const rows = wKids(wAll(xml, "tbl")[0], "tr").map((tr) => wKids(tr, "tc").map((tc) => wAll(tc, "t").map((t) => t.textContent).join("")))
+    expect(rows).toEqual([
+      ["Mã yêu cầu", "Phương pháp", "Ca kiểm thử / Tạo tác", "Trạng thái", "Bằng chứng"],
+      ["FR-01", "Kiểm thử", "TC-FR-01", "not run", ""]
+    ])
   })
 
   it("updates an existing revision history table with source columns and keeps leading layout breaks", async () => {
