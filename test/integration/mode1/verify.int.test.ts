@@ -276,7 +276,9 @@ describe("FLF-367 C-5 thấy mâu thuẫn ⇒ hỏi người yêu cầu", () => 
     )
     detail(await c.post(`${cr}/verify`))
     const [prompt] = promptsOf("# CR Consistency")
-    expect(prompt).toContain('Passages kept verbatim:\ncustom_sections[id=CS90] "Service levels" (custom:CS90):')
+    // tài liệu vừa ngân sách ⇒ mọi đoạn văn giữ nguyên đều có, đoạn CS90 không nhất thiết đứng đầu
+    expect(prompt).toContain("Passages kept verbatim:\n")
+    expect(prompt).toContain('custom_sections[id=CS90] "Service levels" (custom:CS90):')
     expect(prompt).toContain("measured monthly against 2 seconds")
   })
 })

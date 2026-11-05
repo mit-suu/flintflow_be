@@ -36,6 +36,12 @@ export const namedEntities = (spine: Spine): NamedEntity[] => [
  * nguyên (`custom_sections`) liên quan. Chỉ phần liên quan, không gửi toàn bộ để giữ độ dài prompt và credit.
  */
 export const RELATED_RULES_CHARS = 3000
+/**
+ * Tổng BR / NFR (đủ câu) không quá ngưỡng này ⇒ gửi **tất cả**, không lọc theo từ chung: CR viết tiếng Việt cho tài liệu
+ * tiếng Anh ("khoá sau 3 lần" ↔ "locked after five failed login attempts") không có từ nào trùng, lọc theo từ thì model chỉ
+ * thấy 40 ký tự đầu ở chỉ mục và không nhận ra mâu thuẫn. FAP (38 BR + 20 NFR) ≈ 7.5k ký tự.
+ */
+export const ALL_RULES_CHARS = 10000
 export const RELATED_PASSAGES_CHARS = 4000
 /** Một đoạn văn / một phần tử dài quá thì cắt ở đây (vẫn đủ dài để thấy con số nằm sau 40 ký tự đầu). */
 const RELATED_ITEM_CHARS = 600
@@ -107,6 +113,12 @@ export const plainValues = (value: unknown): string => {
   return ""
 }
 
+/**
+ * Mọi ứng viên nếu tổng chữ không quá `whole` (không phụ thuộc ngôn ngữ của CR); quá thì chọn theo điểm như `pickRelated`.
+ */
+const allOrRelated = (query: ReadonlySet<string>, candidates: readonly Candidate[], whole: number, budget: number, sections: ReadonlySet<string>): Candidate[] =>
+  candidates.reduce((n, c) => n + c.text.length, 0) <= whole ? [...candidates].sort((a, b) => a.order - b.order) : pickRelated(query, candidates, budget, sections)
+
 /** Ứng viên liên quan theo điểm (section đích trước), trong `budget` ký tự; trả về theo thứ tự tài liệu. */
 const pickRelated = (query: ReadonlySet<string>, candidates: readonly Candidate[], budget: number, sections: ReadonlySet<string>): Candidate[] => {
   const scored = candidates
@@ -135,7 +147,7 @@ export const relatedRules = (spine: Spine, text: string, opts: RelatedOptions = 
       })
       .filter((c) => !exclude.has(c.path))
   )
-  return pickRelated(gramsOf(text), candidates, RELATED_RULES_CHARS, new Set(opts.sections ?? [])).map((c) => `${c.path} (${c.section_id}): ${c.text}`)
+  return allOrRelated(gramsOf(text), candidates, ALL_RULES_CHARS, RELATED_RULES_CHARS, new Set(opts.sections ?? [])).map((c) => `${c.path} (${c.section_id}): ${c.text}`)
 }
 
 /** Ngân sách phần tử liên quan ở section khác cho C-5 (FLF-367). */
@@ -170,7 +182,8 @@ export const relatedPassages = (spine: Spine, text: string, opts: RelatedOptions
     .flatMap((c) =>
       c.blocks.map(blockText).flatMap((t) => (t ? [{ path: `custom_sections[id=${c.id}]`, section_id: `custom:${c.id}`, text: truncate(t, RELATED_ITEM_CHARS), order: order++ }] : []))
     )
-  const picked = pickRelated(gramsOf(text), candidates, RELATED_PASSAGES_CHARS, new Set(opts.sections ?? []))
+  // Văn xuôi giữ nguyên vừa ngân sách ⇒ gửi hết (CR khác ngôn ngữ tài liệu vẫn thấy "5 lần"); quá thì chọn theo từ chung
+  const picked = allOrRelated(gramsOf(text), candidates, RELATED_PASSAGES_CHARS, RELATED_PASSAGES_CHARS, new Set(opts.sections ?? []))
   const out: string[] = []
   let current: string | null = null
   for (const p of picked) {
