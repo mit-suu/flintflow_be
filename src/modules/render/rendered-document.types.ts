@@ -52,7 +52,11 @@ export interface TableBlock {
 
 export interface ImageBlock {
   type: "image"
-  /** PNG: Buffer khi gọi trong process, chuỗi base64 (có thể kèm tiền tố `data:image/png;base64,`) khi qua HTTP. */
+  /**
+   * PNG: Buffer khi gọi trong process, chuỗi base64 (có thể kèm tiền tố `data:image/png;base64,`) khi qua HTTP.
+   * FLF-369: `GET /document` trả chuỗi tham chiếu `image-ref:<diagram|media>:<id>[:<locale>]@<hash>` cho ảnh thật (bytes
+   * qua `GET /document/image?ref=`, `render/image-ref.ts`); export Word/PDF luôn nhận PNG.
+   */
   png: Buffer | string
   caption?: string
 }
