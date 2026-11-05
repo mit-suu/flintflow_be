@@ -198,7 +198,7 @@ describe("buildLayout", () => {
 })
 
 describe("sectionSegments — đoạn nguyên văn theo mục (FLF-366)", () => {
-  it("phần tử thuộc đoạn chứa nhiều khối nguồn nhất (chỉ phần tử mục đó in ra); đoạn không trích được gì ⇒ rỗng; dấu + known + tên nhắc tới", () => {
+  it("phần tử thuộc đoạn chứa nhiều khối nguồn nhất (theo mảng mục đó in, không theo loại); đoạn không trích được gì ⇒ rỗng; dấu + known + tên nhắc tới", () => {
     const blocks: LayoutBlock[] = [
       h("B01", "5.1 Business Rules", 1, "fixed:5.1"),
       p("B02", "Rules for Student.", "fixed:5.1"),
@@ -223,7 +223,7 @@ describe("sectionSegments — đoạn nguyên văn theo mục (FLF-366)", () => 
         // nguồn chia hai bảng: bảng chứa nhiều khối nguồn hơn thắng
         { entity: "business_rules", id: "BR-01", source_block_ids: ["B03", "B03", "B04"] },
         { entity: "business_rules", id: "BR-02", source_block_ids: ["B04"] },
-        // BR cấp cao không in ở 5.1 ⇒ không thuộc đoạn nào của 5.1
+        // BR bị xếp cấp cao nhưng trích từ bảng 5.1 ⇒ vẫn thuộc đoạn bảng đó (CR sửa thì bảng dựng lại)
         { entity: "business_rules", id: "BR-09", source_block_ids: ["B04"] }
       ],
       spine,
@@ -233,7 +233,7 @@ describe("sectionSegments — đoạn nguyên văn theo mục (FLF-366)", () => 
     const [run, t1, t2, tail] = records[0].parts
     expect(run).toMatchObject({ kind: "original", custom_id: "CS01", mentions: [{ path: "actors[id=A01]", name: "Student" }] })
     expect(t1).toMatchObject({ kind: "spine", items: ["business_rules:BR-01"] })
-    expect(t2).toMatchObject({ kind: "spine", items: ["business_rules:BR-02"] })
+    expect(t2).toMatchObject({ kind: "spine", items: ["business_rules:BR-02", "business_rules:BR-09"] })
     expect(tail).toMatchObject({ kind: "spine", items: [], blocks: [{ text: "Approved by the board." }] })
     expect(records[0].known.map((k) => k.key)).toEqual(["business_rules:BR-01", "business_rules:BR-02"])
   })

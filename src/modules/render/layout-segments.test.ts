@@ -60,8 +60,9 @@ const baseSpine = (): Spine => {
 }
 
 /** Import: Spine sau lô thực thể + layout + đoạn (như finalize). */
-const imported = () => {
+const imported = (mutate: (s: Spine) => void = () => undefined) => {
   const spine = baseSpine()
+  mutate(spine)
   const blocks = BLOCKS.map((b) => (b.block_id === "B05" ? { ...b, diagram: { kind: "context" as const, source_hash: originalDiagramHash(spine, "context") } } : b))
   const { layout, customSections, segments } = buildLayout(blocks, HEADINGS, UNMAPPED)
   const entities = [
@@ -135,6 +136,18 @@ describe("FLF-366 — bản 0.1 theo đoạn của file", () => {
       "Absent over 30% fails"
     ])
     for (const id of ["fixed:1", "fixed:2.2.2"]) expect(section(after, id)).toEqual(section(before, id))
+  })
+
+  it("BR trong bảng 5.1 bị AI xếp nhầm cấp cao: vẫn thuộc đoạn bảng đó — CR sửa ⇒ bảng 5.1 dựng lại có chữ mới, không giữ chữ cũ", () => {
+    const { spine, template } = imported((s) => {
+      s.business_rules = s.business_rules.map((r) => (r.id === "BR-02" ? { ...r, tier: "high" as const } : r))
+    })
+    expect(texts(section(render(spine, template), "fixed:5.1"))[1]).toBe("ID,Rule / BR-01,One check-in per slot / BR-02,Late after 15 minutes")
+    const after = render({ ...spine, business_rules: spine.business_rules.map((r) => (r.id === "BR-02" ? { ...r, statement: "Late after 10 minutes" } : r)) }, template)
+    const s51 = texts(section(after, "fixed:5.1")).join(" | ")
+    expect(s51).toContain("Late after 10 minutes")
+    expect(s51).toContain("One check-in per slot")
+    expect(s51).not.toContain("Late after 15 minutes")
   })
 
   it("CR đổi tên actor: đoạn in tên actor (bảng use case, qua tham chiếu) dựng lại; đoạn khác giữ nguyên", () => {

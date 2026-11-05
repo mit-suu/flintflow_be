@@ -37,6 +37,7 @@ import { listSections, type SectionDef } from "../spine/section-registry.js"
 import type { SectionStateView } from "../spine/section-status.js"
 import { keptOriginalKinds, ORIGINAL_DIAGRAM_SECTION } from "../spine/original-diagram.js"
 import {
+  asPrintedIn,
   homedItems,
   isVerbatim,
   SECTION_ITEM_ARRAYS,
@@ -161,7 +162,7 @@ export const segmentSpine = (spine: Spine, sectionId: string, keep: ReadonlySet<
       continue
     }
     const list = (spine as unknown as Record<string, unknown>)[array]
-    if (Array.isArray(list)) out[array] = list.filter((x: { id?: string }) => keep.has(`${array}:${x.id}`))
+    if (Array.isArray(list)) out[array] = list.filter((x: { id?: string }) => keep.has(`${array}:${x.id}`)).map((x: Record<string, unknown>) => asPrintedIn(sectionId, array, x))
   }
   return out as unknown as Spine
 }
