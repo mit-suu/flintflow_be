@@ -15,7 +15,20 @@ import { sectionHasData } from "../spine/deterministic-check.js"
 import { FEATURE_OWNER_STEPS, FIXED_OWNER_STEPS } from "../spine/section-registry.js"
 import type { Op } from "../spine/op.types.js"
 import type { CustomBlock, CustomSection, OriginalDiagram, Spine, StepState } from "../spine/spine.types.js"
-import type { DocBlockKind } from "./import.constants.js"
+import type { DocBlockKind, MentionEntity } from "./import.constants.js"
+import {
+  isSegmentedSection,
+  printableIn,
+  PROJECT_SEGMENT_FIELDS,
+  sectionItemKeys,
+  segmentHash,
+  segmentItemHashes,
+  segmentItemKey,
+  type SectionSegments,
+  type SegmentMention,
+  type SegmentPart
+} from "../spine/segment-hash.js"
+import { scanCodeMentions, scanNameMentions, type NamedEntity } from "./mentions.js"
 import { UNMAPPED_SECTION } from "./import.constants.js"
 import { targetsOf } from "./extract-targets.js"
 import { isInstructionText, isRealText, tableBodyHasRealText } from "../../shared/utils/instruction-text.js"
@@ -68,10 +81,27 @@ export interface LayoutSlice {
   block_ids: string[]
 }
 
+/**
+ * Đoạn của một mục FPT `fixed:*` theo thứ tự file (FLF-366): `original` = dãy khối không trích được, giữ ở phần nối
+ * `custom_id` (một dãy một phần nối); `spine` = một khối đã trích (khối gốc giữ để in nguyên văn).
+ */
+export type LayoutSegmentPart =
+  | { kind: "original"; custom_id: string }
+  | { kind: "spine"; block_ids: string[]; blocks: CustomBlock[] }
+  /** Heading con của mục (cấp theo file) — giữ đúng kiểu heading khi in, không vào Spine. */
+  | { kind: "heading"; text: string; level: number }
+
+export interface LayoutSegment {
+  section_id: string
+  parts: LayoutSegmentPart[]
+}
+
 export interface LayoutResult {
   layout: LayoutEntry[]
   customSections: CustomSection[]
   slices: LayoutSlice[]
+  /** FLF-366: đoạn của từng mục FPT `fixed:*` có trong file (kể cả mục chỉ có heading). */
+  segments: LayoutSegment[]
 }
 
 const toCustomBlock = (b: LayoutBlock): CustomBlock | null => {
@@ -98,12 +128,21 @@ const toCustomBlock = (b: LayoutBlock): CustomBlock | null => {
  * `unmappedBlockIds` (I-4 báo không trích được) và mọi khối dưới heading nhóm (`group:*`, không trích) ⇒ **phần nối**
  * của section: mục riêng tiêu đề rỗng, cấp = cấp section + 1, đứng sau section trong layout — assemble gộp khối của nó
  * vào đầu section đó (FLF-184), để render từ Spine không mất văn xuôi của file gốc.
+ * FLF-366: mục FPT `fixed:*` được **chia đoạn** theo thứ tự file — mỗi dãy khối không trích được (kể cả heading con của
+ * mục, thành đoạn chữ) là một phần nối riêng, mỗi khối đã trích là một đoạn `spine`; bản in đi qua các đoạn theo thứ tự
+ * gốc thay vì gộp phần nối lên đầu mục.
  */
 export const buildLayout = (
   blocks: LayoutBlock[],
   headingSections: ReadonlyMap<string, string>,
-  unmappedBlockIds: ReadonlySet<string> = new Set()
+  unmappedBlockIds: ReadonlySet<string> = new Set(),
+  /**
+   * FLF-366: chia đoạn mục FPT. Tắt cho mẫu bắt buộc (`template_intent = fixed`, chế độ 3): file upload là mẫu để điền
+   * (bản xuất điền vào chính file đó — FLF-371), không phải SRS cần in nguyên văn.
+   */
+  options: { segment?: boolean } = {}
 ): LayoutResult => {
+  const segmentOn = options.segment ?? true
   const layout: LayoutEntry[] = []
   const customSections: CustomSection[] = []
   const slices: LayoutSlice[] = []
@@ -122,6 +161,9 @@ export const buildLayout = (
   /** Section FPT / nhóm đang mở — khối không trích được thành phần nối của nó. */
   let owner: LayoutEntry | null = null
   const continuations = new Map<LayoutEntry, CustomSection>()
+  /** FLF-366: đoạn của mục FPT `fixed:*` đang mở. */
+  const segments: LayoutSegment[] = []
+  const segmentOf = new Map<LayoutEntry, LayoutSegment>()
 
   const newCustom = (heading: string, level: number): CustomSection => {
     const section: CustomSection = { id: customId(customSections.length + 1), heading, level, blocks: [], source: "import" }
@@ -137,6 +179,15 @@ export const buildLayout = (
     }
     return section
   }
+  /** Phần nối của dãy nguyên văn đang mở trong mục chia đoạn — khối đã trích chen giữa ⇒ dãy sau là phần nối mới. */
+  const runOf = (entry: LayoutEntry, segment: LayoutSegment): CustomSection => {
+    const last = segment.parts[segment.parts.length - 1]
+    if (last?.kind === "original") return customSections.find((c) => c.id === last.custom_id)!
+    const section = newCustom("", clampLevel(entry.level + 1))
+    layout.push({ order: layout.length, heading_text: "", level: section.level, section_id: customSectionKey(section.id) })
+    segment.parts.push({ kind: "original", custom_id: section.id })
+    return section
+  }
 
   for (const b of blocks) {
     if (b.kind === "heading" && b.level !== null) {
@@ -150,6 +201,13 @@ export const buildLayout = (
         current = null
         slice = null
         owner = enclosing.entry
+        // Mục chia đoạn: heading con ("External Systems") là chữ của file ⇒ đoạn `heading` đúng chỗ, giữ cấp của file;
+        // số Word tự đánh (FLF-362) ghép lại vào chữ như file hiển thị
+        const segment = segmentOf.get(owner)
+        if (segment && heading) {
+          const label = b.number_label?.trim()
+          segment.parts.push({ kind: "heading", text: label && !heading.startsWith(label) ? `${label} ${heading}` : heading, level: clampLevel(b.level) })
+        }
         continue
       }
       let section: string
@@ -175,6 +233,11 @@ export const buildLayout = (
       layout.push(entry)
       stack.push({ level: b.level, section, entry })
       owner = current ? null : entry
+      if (owner && segmentOn && isSegmentedSection(section)) {
+        const segment: LayoutSegment = { section_id: section, parts: [] }
+        segments.push(segment)
+        segmentOf.set(entry, segment)
+      }
       continue
     }
     slice?.block_ids.push(b.block_id)
@@ -186,11 +249,15 @@ export const buildLayout = (
       owner.template_guidance = [...(owner.template_guidance ?? []), block.text]
       continue
     }
+    const segment = owner && !current ? segmentOf.get(owner) : undefined
     if (current) {
       if (!currentRepeats || unmappedBlockIds.has(b.block_id)) current.blocks.push(block)
+    } else if (owner && segment) {
+      if (unmappedBlockIds.has(b.block_id)) runOf(owner, segment).blocks.push(block)
+      else segment.parts.push({ kind: "spine", block_ids: [b.block_id], blocks: [block] })
     } else if (owner && (owner.section_id.startsWith("group:") || unmappedBlockIds.has(b.block_id))) continuationOf(owner).blocks.push(block)
   }
-  return { layout, customSections, slices }
+  return { layout, customSections, slices, segments }
 }
 
 /** Phần tử Spine đã trích (finalize): khoá `entity` + `id` + khối nguồn. */
@@ -231,6 +298,92 @@ export const sectionSlices = (slices: readonly LayoutSlice[], entities: readonly
     }
   }
   return out.filter((s) => s.items.length)
+}
+
+/** Mảng Spine của phần tử nhắc tới trong văn xuôi (`mentions.ts`). */
+const MENTION_ARRAY: Readonly<Record<MentionEntity, string>> = {
+  use_case: "use_cases",
+  function: "functions",
+  nfr: "nfrs",
+  business_rule: "business_rules",
+  screen: "screens",
+  actor: "actors",
+  entity: "entities",
+  feature: "features"
+}
+
+const blockText = (blocks: readonly CustomBlock[]): string =>
+  blocks.map((b) => (b.kind === "table" ? (b.rows ?? []).map((r) => r.join(" ")).join("\n") : b.text)).join("\n")
+
+/** Tên / mã phần tử Spine mà văn xuôi nhắc tới, kèm tên lúc import (cờ vàng khi phần tử đổi tên / bị xoá — FLF-366). */
+export const textMentions = (text: string, spine: Spine, names: readonly NamedEntity[]): SegmentMention[] => {
+  const out = new Map<string, SegmentMention>()
+  const exists = (array: string, id: string) => ((spine as unknown as Record<string, unknown>)[array] as { id?: string }[] | undefined)?.some((x) => x.id === id) ?? false
+  for (const m of scanCodeMentions(text)) {
+    const array = MENTION_ARRAY[m.entity]
+    if (exists(array, m.id)) out.set(`${array}[id=${m.id}]`, { path: `${array}[id=${m.id}]`, array, id: m.id, name: null })
+  }
+  for (const m of scanNameMentions(text, [...names])) {
+    const array = MENTION_ARRAY[m.entity]
+    const name = names.find((n) => n.entity === m.entity && n.id === m.id)?.name ?? null
+    out.set(`${array}[id=${m.id}]`, { path: `${array}[id=${m.id}]`, array, id: m.id, name })
+  }
+  return [...out.values()]
+}
+
+/** Nguồn của từng field `project` in ở mục 1 (`project.vision`…) — phần tử `project:<field>` của đoạn. */
+export const projectFieldEntities = (fields: readonly { path: string; source_block_ids: readonly string[] }[]): SlicedEntity[] => {
+  const sources = new Map<string, Set<string>>()
+  for (const f of fields) {
+    const m = /^project\.([a-z_]+)/.exec(f.path)
+    if (!m || !(PROJECT_SEGMENT_FIELDS as readonly string[]).includes(m[1])) continue
+    const set = sources.get(m[1]) ?? new Set<string>()
+    f.source_block_ids.forEach((b) => set.add(b))
+    sources.set(m[1], set)
+  }
+  return [...sources].map(([field, set]) => ({ entity: "project", id: field, source_block_ids: set }))
+}
+
+/**
+ * Đoạn của từng mục FPT (FLF-366) cho `TemplateProfile.section_segments`: phần tử Spine thuộc đoạn `spine` chứa nhiều khối
+ * nguồn của nó nhất (chỉ phần tử mục đó in ra), dấu của đoạn, sơ đồ gốc + tên / mã nhắc tới trong khối nguyên văn, và dấu
+ * mọi phần tử mục in ra lúc import (`known`). `spine` = Spine sau lô thực thể import (trước khi có CR nào).
+ */
+export const sectionSegments = (
+  segments: readonly LayoutSegment[],
+  customSections: readonly CustomSection[],
+  entities: readonly SlicedEntity[],
+  spine: Spine,
+  names: readonly NamedEntity[] = []
+): SectionSegments[] => {
+  const customById = new Map(customSections.map((c) => [c.id, c]))
+  return segments.map((seg): SectionSegments => {
+    const partOf = new Map<string, number>()
+    seg.parts.forEach((p, i) => (p.kind === "spine" ? p.block_ids.forEach((b) => partOf.set(b, i)) : undefined))
+    const items = seg.parts.map(() => [] as string[])
+    for (const e of entities) {
+      if (!e.id) continue
+      const key = segmentItemKey(e.entity, e.id)
+      if (!printableIn(spine, seg.section_id, key)) continue
+      const counts = new Map<number, number>()
+      for (const b of new Set(e.source_block_ids)) {
+        const at = partOf.get(b)
+        if (at !== undefined) counts.set(at, (counts.get(at) ?? 0) + 1)
+      }
+      const best = [...counts].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]
+      if (best && !items[best[0]].includes(key)) items[best[0]].push(key)
+    }
+    const parts = seg.parts.map((p, i): SegmentPart => {
+      if (p.kind === "heading") return p
+      if (p.kind === "original") {
+        const blocks = customById.get(p.custom_id)?.blocks ?? []
+        const diagrams = blocks.flatMap((b) => (b.kind === "image" && b.image_ref && b.diagram ? [{ image_ref: b.image_ref, kind: b.diagram.kind }] : []))
+        return { kind: "original", custom_id: p.custom_id, diagrams, mentions: textMentions(blockText(blocks), spine, names) }
+      }
+      return { kind: "spine", items: items[i], source_hash: segmentHash(spine, items[i]), blocks: p.blocks, mentions: textMentions(blockText(p.blocks), spine, names) }
+    })
+    return { section_id: seg.section_id, parts, known: segmentItemHashes(spine, sectionItemKeys(spine, seg.section_id)) }
+  })
 }
 
 /**
