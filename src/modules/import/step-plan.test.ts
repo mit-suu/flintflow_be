@@ -136,6 +136,12 @@ describe("buildLayout", () => {
     expect(sectionSlices([{ custom_id: "CS02", section_id: "fixed:1", block_ids: ["B0009"] }], [{ entity: "project", id: null, source_block_ids: ["B0009"] }])).toEqual([])
   })
 
+  it("FLF-366: mẫu bắt buộc (segment: false) ⇒ không chia đoạn — heading con cùng section bỏ, không có phần nối thêm", () => {
+    const { layout, segments } = buildLayout(BLOCKS, HEADINGS, new Set(), { segment: false })
+    expect(segments).toEqual([])
+    expect(layout.map((l) => l.section_id)).toEqual(["fixed:1", "custom:CS01", "fixed:2.1", "fixed:5.1", "custom:CS02", "custom:CS03"])
+  })
+
   it("không có heading ⇒ layout rỗng; block trước heading đầu tiên không vào mục riêng", () => {
     expect(buildLayout([p("B0001", "Cover page", null)], new Map())).toEqual({ layout: [], customSections: [], slices: [], segments: [] })
   })

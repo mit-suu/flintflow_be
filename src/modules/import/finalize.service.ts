@@ -182,7 +182,12 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     const kind = imageRead.get(b.block_id)
     if (kind) b.diagram = { kind, source_hash: originalDiagramHash(imported, kind) }
   }
-  const { layout, customSections, slices, segments } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds)
+  // FLF-366: mẫu bắt buộc (chế độ 3) là mẫu để điền, không chia đoạn nguyên văn
+  const project = await Project.findById(projectId).lean()
+  const intentRaw = (project as { template_intent?: string | null } | null)?.template_intent ?? null
+  const { layout, customSections, slices, segments } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds, {
+    segment: intentRaw !== "fixed"
+  })
   const seeded = await loadSpine(projectId)
   // Kế hoạch đọc Spine đã nạp dữ liệu: mục trích không ra gì thì vẫn là "thiếu", đừng đánh dấu step đã xong
   const plan = buildStepPlan(layout, sectionsWithContent(layoutBlocks), stripRecord(seeded))
@@ -229,8 +234,6 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   )
   // FLF-336 I-5: so cấu trúc đích TRƯỚC khi chụp v0 — còn mục thiếu và người dùng chưa bấm "Hoàn thiện" ⇒ dừng ở
   // `incomplete` (không có v0 dở dang, §1). Ý định theo `Project.template_intent` (FLF-335); dự án cũ ⇒ tự do.
-  const project = await Project.findById(projectId).lean()
-  const intentRaw = (project as { template_intent?: string | null } | null)?.template_intent ?? null
   const intent: TemplateIntent = intentRaw === "fixed" ? "fixed" : "free"
   const withContent = new Set([...sectionsWithContent(layoutBlocks), ...customSectionsWithContent(customSections)])
   const structure = compareTargetStructure(layout, withContent, stripRecord(seeded), intent)
