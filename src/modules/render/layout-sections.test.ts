@@ -555,3 +555,41 @@ describe("phần nhỏ slot:* của mẫu khách (FLF-278 trên FLF-335/336)", (
     expect(sub?.level).toBeGreaterThan(scope.level)
   })
 })
+
+describe("FLF-364 (câu 10) — chữ hướng dẫn của mẫu in khi mục trống, có dữ liệu thì bỏ", () => {
+  const guideLayout: TemplateLayout = {
+    language: "vi",
+    fixedTemplate: true,
+    layout: [
+      { ...entry(0, "1 Mục đích", 1, "slot:vision"), template_guidance: ["[Mô tả mục đích của tài liệu]"] },
+      { ...entry(1, "2 Tác nhân", 1, "fixed:2.1"), template_guidance: ["[Liệt kê các tác nhân và vai trò]"] },
+      entry(2, "3 Ghi chú nhóm", 1, "custom:CS01")
+    ]
+  }
+  const empty = (custom: Spine["custom_sections"][number]["blocks"]): Spine => ({
+    ...createEmptySpine({ name: "Lumen", domain: "E-learning" }),
+    custom_sections: [{ id: "CS01", heading: "3 Ghi chú nhóm", level: 1, blocks: custom, source: "import" }]
+  })
+  const textOf = (sections: { id: string; blocks: unknown[] }[], id: string) => JSON.stringify(sections.find((s) => s.id === id)?.blocks ?? [])
+  const para = (text: string) => ({ kind: "paragraph" as const, text, rows: null, image_ref: null })
+
+  it("mục FPT / phần nhỏ / mục riêng chưa có dữ liệu ⇒ in nguyên văn hướng dẫn (giữ ngoặc)", () => {
+    const { sections } = buildLayoutSections(empty([para("[Ghi lịch họp, người tham gia]")]), guideLayout, [], { diagramPng: () => undefined })
+    expect(textOf(sections, "slot:vision")).toContain("[Mô tả mục đích của tài liệu]")
+    expect(textOf(sections, "fixed:2.1")).toContain("[Liệt kê các tác nhân và vai trò]")
+    expect(textOf(sections, "custom:CS01")).toContain("[Ghi lịch họp, người tham gia]")
+  })
+
+  it("có dữ liệu (kể cả thêm qua CR) ⇒ không in hướng dẫn; đoạn ngoặc hướng dẫn trong câu cũng bỏ", () => {
+    const s = empty([para("[Ghi lịch họp, người tham gia]"), para("Họp thứ Hai hằng tuần {ghi rõ giờ họp nếu có}.")])
+    s.project.vision = "Lumen là nền tảng học trực tuyến."
+    s.actors = [{ id: "A01", name: "Học viên", kind: "human", description: "Người học" } as never]
+    const { sections } = buildLayoutSections(s, guideLayout, [], { diagramPng: () => undefined })
+    expect(textOf(sections, "slot:vision")).not.toContain("[Mô tả mục đích")
+    expect(textOf(sections, "fixed:2.1")).not.toContain("[Liệt kê")
+    const custom = textOf(sections, "custom:CS01")
+    expect(custom).toContain("Họp thứ Hai hằng tuần.")
+    expect(custom).not.toContain("[Ghi lịch họp")
+    expect(custom).not.toContain("ghi rõ giờ họp")
+  })
+})

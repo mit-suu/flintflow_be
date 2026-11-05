@@ -625,4 +625,9 @@ baseline 1.0 ⇒ FLF-318 đưa dự án về mode 1, lần import mẫu `draftin
 - I-3: heading không khớp tên phần nào mà hướng dẫn nhắc đúng một phần ⇒ nhận phần đó (độ tin 0.7, `template_section` = phần).
 - C-4 (`cr-propose`): `target_sections` kèm "Template guidance" của mục (ghép hướng dẫn heading cha) + "Expected content (ISO
   29148)"; vị trí trong mục giữ nguyên văn có heading không khớp ⇒ `owner_skill` theo phần mà hướng dẫn nhắc. Mode 2 không đổi.
-- Hướng dẫn không vào bản xuất, không làm mục "có nội dung" (như trước).
+- Bản xem / xuất Mode 1 (câu 10, chốt 2026-11-05): mục **chưa có dữ liệu** in nguyên văn chữ hướng dẫn của mẫu (giữ ngoặc) —
+  mục FPT / phần nhỏ lấy từ `layout[].template_guidance` (mới, nội bộ: đoạn hướng dẫn trọn ngoặc dưới heading, lưu lúc
+  finalize, không thành phần nối), mục riêng lấy từ khối của chính nó. Mục **có dữ liệu** (kể cả thêm qua CR) ⇒ không in
+  hướng dẫn, đoạn ngoặc hướng dẫn trong câu bỏ, ô bảng chỉ có hướng dẫn để trống. Hướng dẫn vẫn giữ trong dữ liệu (ngữ cảnh
+  khi soạn) — xoá hết dữ liệu thì in lại. Hướng dẫn không làm mục "có nội dung" (như trước). Dự án import trước thay đổi này:
+  mục FPT không có `template_guidance` ⇒ không in hướng dẫn; mục riêng theo luật mới. Mode 2 không đổi.
