@@ -28,12 +28,19 @@ const COLUMN_PATTERNS: [Column, RegExp][] = [
   ["change_type", /(a\*|a,\s*m|\bm,\s*d|\btype\b|\bloại\b)/i],
   ["in_charge", /(in charge|người|author|thực hiện|phụ trách|changed by|editor)/i],
   ["item", /(change item|\bitem\b|hạng mục|mục thay đổi|section)/i],
-  ["description", /(description|mô tả|nội dung|change|summary|ghi chú)/i]
+  // FLF-372: "Lý do thay đổi" (mẫu jam01 tiếng Việt) — "Loại thay đổi" đã nhận ở `change_type` phía trên
+  ["description", /(description|mô tả|nội dung|change|summary|ghi chú|lý do|thay đổi)/i]
 ]
 
 const columnOf = (header: string): Column | null => {
   for (const [column, pattern] of COLUMN_PATTERNS) if (pattern.test(header)) return column
   return null
+}
+
+/** Cột của bảng lịch sử theo tiêu đề (EN / VI) — bản xuất theo mẫu bắt buộc điền dòng lịch sử vào đúng cột (FLF-372). */
+export const recordColumnOfHeader = (header: string): keyof RocRow | null => {
+  const column = columnOf(header)
+  return column && column !== "item" ? column : null
 }
 
 /** Vai trò dữ liệu ⇒ cột khi tiêu đề không nói được (cột "#" chứa ngày, cột không tên chứa A/M/D…). */

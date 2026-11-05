@@ -201,4 +201,17 @@ describe("writeTemplateDocx", () => {
     expect(table.text).toContain("Updated requirements")
     expect(table.text).not.toContain("Change type:")
   })
+
+  it("FLF-372: bảng Lịch sử sửa đổi tiêu đề tiếng Việt (mẫu jam01) điền đúng cột", async () => {
+    const head = (...names: string[]) => `<w:tr>${names.map((n) => cell(n)).join("")}</w:tr>`
+    const history = `<w:tbl><w:tblPr/><w:tblGrid>${"<w:gridCol w:w=\"2000\"/>".repeat(4)}</w:tblGrid>${head("Người thực hiện", "Ngày", "Lý do thay đổi", "Phiên bản")}${head("[Tên]", "[dd/mm/yyyy]", "[Lý do]", "[x.y]")}</w:tbl>`
+    const input = await template(history), parsed = await parseDocument(input), doc = document()
+    doc.recordOfChanges = [{ date: "05/11/2026", version: "0.1", in_charge: "Tuấn Anh", description: "Bản đầu", change_type: "A" }]
+    const output = await writeTemplateDocx(doc, input, [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:I" }])
+    const table = (await parseDocument(output)).blocks.find((b) => b.kind === "table")!
+    expect(table.rows).toEqual([
+      ["Người thực hiện", "Ngày", "Lý do thay đổi", "Phiên bản"],
+      ["Tuấn Anh", "05/11/2026", "Bản đầu", "0.1"]
+    ])
+  })
 })

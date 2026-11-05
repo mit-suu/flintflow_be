@@ -6,6 +6,7 @@ import { exportLineage, writeDocx } from "./docx-writer.js"
 import type { Block, InlineRun, RenderedDocument, RenderedSection } from "./rendered-document.types.js"
 import { isInstructionText } from "../../shared/utils/instruction-text.js"
 import { TABLE_ENTITIES } from "../import/table-header-dictionary.js"
+import { recordColumnOfHeader } from "../import/legacy-record.js"
 import type { TableMapEntry } from "../import/template-profile.model.js"
 
 const unavailable = (reason: string): never => {
@@ -60,10 +61,12 @@ export async function writeTemplateDocx(
       version: "version", date: "date", author: "in_charge", "in charge": "in_charge",
       description: "description", "change description": "description", "change type": "change_type", "a*, m, d": "change_type"
     }
-    if (headers.some((h) => !values[columnKey(h)])) unavailable("Revision history column has no mapping")
+    // FLF-372: tiêu đề tiếng Việt / biến thể ("Người thực hiện", "Lý do thay đổi") ⇒ cùng bảng nhận cột của bộ đọc lịch sử
+    const fieldOf = (h: string) => values[columnKey(h)] ?? recordColumnOfHeader(h)
+    if (headers.some((h) => !fieldOf(h))) unavailable("Revision history column has no mapping")
     const section: RenderedSection = {
       id: history.section_id, number: "", heading: history.heading.text, level: history.heading.level ?? 1,
-      blocks: [{ type: "table", header: headers.map((text) => [{ text }]), rows: records.map((row) => headers.map((h) => [{ text: row[values[columnKey(h)]] }])) }]
+      blocks: [{ type: "table", header: headers.map((text) => [{ text }]), rows: records.map((row) => headers.map((h) => [{ text: row[fieldOf(h)!] }])) }]
     }
     const index = history.sections.findIndex((s) => s.id === history.section_id)
     if (index >= 0) history.sections[index] = section
