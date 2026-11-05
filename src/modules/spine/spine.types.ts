@@ -255,6 +255,8 @@ export interface Function {
   priority: Priority | null
   /** Message actor ↔ system theo thứ tự thời gian (sơ đồ tuần tự). Thiếu ⇒ `[]`. */
   interactions?: FunctionInteraction[]
+  /** FLF-365: bản phát hành của yêu cầu (phân bổ yêu cầu, "1.0"; "deferred" = hoãn). Thiếu = chưa phân bổ. */
+  release?: string | null
 }
 export type SpineFunction = Function
 
@@ -269,6 +271,8 @@ export interface Nfr {
   metric?: string
   threshold?: string
   priority: Priority | null
+  /** FLF-365: như `Function.release`. */
+  release?: string | null
 }
 
 export type BusinessRuleTier = "high" | "detail"
@@ -308,6 +312,34 @@ export interface GlossaryTerm {
   term: string
   term_native?: string
   definition: string
+}
+
+/** FLF-365: tài liệu tham khảo (IEEE 29148 §References) — chỉ Mode 1 render (`slot:references`). */
+export interface Reference {
+  /** `REF-01`… */
+  id: string
+  title: string
+  owner?: string
+  version?: string
+  date?: string
+  /** Mã / URL / nơi lưu. */
+  location?: string
+  kind: "normative" | "informative"
+}
+
+export type VerificationMethod = "test" | "analysis" | "inspection" | "demonstration" | "other"
+
+/** FLF-365: cách kiểm chứng một yêu cầu (IEEE 29148 §Verification) — chỉ Mode 1 render (`slot:verification`). */
+export interface Verification {
+  /** `VER-01`… */
+  id: string
+  /** Id phần tử yêu cầu: function / NFR / business rule / use case. */
+  requirement_id: string
+  method: VerificationMethod
+  /** Ca kiểm thử / tài liệu kiểm (`TC-F-01`). */
+  artifact?: string
+  status?: string
+  evidence?: string
 }
 
 /** Khối nội dung nguyên văn của một mục riêng (FLF-182). Chỉ field hợp với `kind` mang giá trị, còn lại `null`. */
@@ -520,6 +552,9 @@ export interface Spine {
   glossary: GlossaryTerm[]
   addendum: Addendum[]
   custom_sections: CustomSection[]
+  /** FLF-365 — Spine cũ không có ⇒ `[]`. */
+  references: Reference[]
+  verifications: Verification[]
 
   diagrams: Diagram[]
   assumptions: Assumption[]

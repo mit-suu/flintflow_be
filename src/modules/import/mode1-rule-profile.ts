@@ -54,4 +54,9 @@ export const IMPORT_UNRESOLVED_RULE = "import_unresolved_ref"
  * cột bảng I-3 độ tin < 0.8. Cờ vàng "Cần xem" mang đường dẫn phần tử (`target_id`), hiện ở trang tạo CR; sai thì sửa bằng CR.
  */
 export const IMPORT_NEEDS_REVIEW_RULE = "import_needs_review"
+/**
+ * FLF-363 (D2): tên heading giống một mục mà nội dung dưới nó là của mục khác — heading đã xếp theo nội dung (độ tin ≤ 0.75).
+ * Cờ vàng "Tiêu đề và nội dung khác nhau" nêu cả hai mục; sai thì sửa bằng CR. Thay cờ "Cần xem" của heading đó.
+ */
+export const IMPORT_TITLE_CONTENT_RULE = "import_title_content_mismatch"
 export const CR_CONSISTENCY_RULE = "cr_consistency"

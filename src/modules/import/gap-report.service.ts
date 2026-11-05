@@ -19,6 +19,7 @@ import { latestImport, toReviewFields, transitionImport } from "./import.service
 import { Mode1Error } from "./mode1.errors.js"
 import { sectionTitle } from "./section-catalog.js"
 import { contentSlot } from "./content-slots.js"
+import { displayHeading } from "./heading-label.js"
 import { FEATURE_SECTIONS, continuationOwnerSection } from "./step-plan.js"
 import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
 import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
@@ -150,7 +151,7 @@ const layoutRows = (layout: readonly LayoutEntry[], spine: Spine, bySection: Fla
       return {
         order: l.order,
         section_id: l.section_id,
-        heading: l.heading_text,
+        heading: displayHeading(l.heading_text, l.number_label),
         level: l.level,
         kind,
         red: flags.filter((f) => f.level === "red").length,

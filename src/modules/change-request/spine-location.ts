@@ -40,7 +40,10 @@ export const LOCATION_ARRAYS = [
   "glossary",
   /** Mode 1 v3: cờ đỏ `unconfirmed_assumption` chỉ đóng được bằng CR (không còn S-9.2) ⇒ giả định phải làm được vị trí. */
   "assumptions",
-  "custom_sections"
+  "custom_sections",
+  // FLF-365: mục IEEE 29148 (Mode 1)
+  "references",
+  "verifications"
 ] as const
 
 const ELEMENT = /^(\w+)\[id=([^\]]+)\]/
