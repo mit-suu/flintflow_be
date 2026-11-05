@@ -35,6 +35,8 @@ export interface LoadedSkill {
   references: Record<string, string>
   /** Mọi reference có sẵn — để caller chọn nạp. */
   referenceNames: string[]
+  /** Reference skill khai phải nạp kèm thân khi dùng làm skill nội dung của step (frontmatter `prompt_references`). */
+  promptReferences: string[]
   asset_version: string
   outputSchema: OutputSchemaName[]
   language: SkillLanguage
@@ -78,6 +80,7 @@ export const getSkill = (skillId: string, options: GetSkillOptions = {}): Loaded
     },
     references,
     referenceNames: skill.referenceNames,
+    promptReferences: skill.promptReferences,
     asset_version: skill.assetVersion,
     outputSchema: skill.outputSchema,
     language: skill.language,
