@@ -21,3 +21,13 @@ export const isRealText = (text: string | null | undefined): boolean => !!text &
 /** Bảng có ít nhất một ô chữ thật (bảng mẫu toàn `[Name]` / trống ⇒ không tính là nội dung). */
 export const tableHasRealText = (rows: readonly (readonly string[])[] | null | undefined): boolean =>
   (rows ?? []).some((row) => row.some((cell) => isRealText(cell)))
+
+/**
+ * Bảng có **nội dung** (không chỉ khung mẫu): hàng tiêu đề không tính — bảng mẫu thường là tiêu đề + hàng chỗ trống
+ * (`ID | Requirement | Priority` + `[FR-xxx] | …`). Bảng một hàng coi là nhãn | giá trị: chỉ xét các ô sau cột đầu
+ * (`Role | [Name]` trống, `Role | Admin` có nội dung).
+ */
+export const tableBodyHasRealText = (rows: readonly (readonly string[])[] | null | undefined): boolean => {
+  if (!rows || rows.length === 0) return false
+  return rows.length === 1 ? rows[0].slice(1).some((cell) => isRealText(cell)) : tableHasRealText(rows.slice(1))
+}

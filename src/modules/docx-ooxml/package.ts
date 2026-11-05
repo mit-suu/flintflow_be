@@ -26,6 +26,7 @@ type ZipEntryWithSize = JSZip.JSZipObject & { _data?: { uncompressedSize?: numbe
 
 export class DocxPackage {
   private readonly parts = new Map<string, Document>()
+  private readonly originalXml = new Map<string, string>()
 
   private constructor(private readonly zip: JSZip) {}
 
@@ -55,6 +56,7 @@ export class DocxPackage {
     if (!file) return null
     const doc = parseXml(await file.async("string"), name)
     this.parts.set(name, doc)
+    this.originalXml.set(name, serializeXml(doc))
     return doc
   }
 
@@ -62,6 +64,17 @@ export class DocxPackage {
   async binary(name: string): Promise<Buffer | null> {
     const file = this.zip.file(name)
     return file ? file.async("nodebuffer") : null
+  }
+
+  /** Add a binary part without replacing any existing package part. */
+  async addBinaryPart(name: string, data: Buffer, contentType: string): Promise<void> {
+    if (this.has(name)) throw new Error(`Package part already exists: ${name}`)
+    this.zip.file(name, data)
+    const ct = await this.requireXml("[Content_Types].xml")
+    const override = ct.createElementNS(NS.ct, "Override")
+    override.setAttribute("PartName", `/${name}`)
+    override.setAttribute("ContentType", contentType)
+    ct.documentElement.appendChild(override)
   }
 
   async requireXml(name: string): Promise<Document> {
@@ -135,7 +148,13 @@ export class DocxPackage {
   }
 
   async toBuffer(): Promise<Buffer> {
-    for (const [name, doc] of this.parts) this.zip.file(name, serializeXml(doc))
+    for (const [name, doc] of this.parts) {
+      const xml = serializeXml(doc)
+      if (this.originalXml.get(name) !== xml) {
+        this.zip.file(name, xml)
+        this.originalXml.set(name, xml)
+      }
+    }
     return this.zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" })
   }
 }
