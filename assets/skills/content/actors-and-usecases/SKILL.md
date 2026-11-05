@@ -1,7 +1,7 @@
 ---
 skill_id: actors-and-usecases
 kind: content
-version: 0.11.0
+version: 0.12.0
 description: "S-3.1–S-3.5 actors, roles, actor–goal list, missing use case sweep, relationships, descriptions"
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -21,6 +21,7 @@ writes:
 output_schema: opTransaction
 language: en
 stub: false
+prompt_references: [actor-rules]
 ---
 # Actors And Usecases
 
@@ -44,7 +45,9 @@ Naming: **A1** a singular role/party noun phrase, never a person's name or a tea
 ("Dashboard User" ⇒ "Project Owner"). **A4** a `system` actor is the outside role, not the vendor or version ("Stripe API v3" ⇒
 "Payment Gateway"). **A5** a `time` actor is named after what it triggers ("Cron" ⇒ "Nightly Billing Scheduler"). **A6** two names
 sharing every capability are one actor with two `roles[]` rows. **A8** `description` is one sentence tied to this product, saying
-who they are, what they do here and why they care — not a dictionary gloss. **Generalization.** Read the Brief first: add a general human actor `User` (no role of its own) only when ≥ 2 human actors each sign in to the SAME product as a kind of user **and** at least one goal is done the same way by every one of them (Log In, Reset Password, Update Own Profile, View Dashboard). Then set `parent_id` on each of them (`{"op":"set","path":"actors[id=A02].parent_id","value":"A05"}`; diagram: `Customer --|> User`). Human ↔ human only: never a `system`/`time` actor, an external system, or a party that is not a signed-in user (a Guest with no account, a customer who only receives emails). The general actor's `description` must name every specialized actor (else yellow flag `actor_generalization_children_unlisted`; §2.1 and the actor hierarchy diagram show only the general name). One human actor, or nothing every role shares ⇒ no `User`, `parent_id` unset.
+who they are, what they do here and why they care — not a dictionary gloss.
+
+**General actor (generalization) — decide it in THIS batch, right after access.** Count the human actors that sign in to this product (`self-registers`, `invited` or `identity provider`). **≥ 2 ⇒ they all share Log In ⇒ you MUST** add a general human actor `User` (no role of its own), `set` each of their `parent_id` to it (`{"op":"set","path":"actors[id=A02].parent_id","value":"A05"}`; diagram `Customer --|> User`), and write its `description` naming every specialized actor ("Any signed-in Student or Lecturer.") — else yellow flag `actor_generalization_children_unlisted`. Code checks it: an account use case listing ≥ 2 human actors raises `actor_generalization_missing` and the batch is sent back. Never a child: a `system`/`time` actor, an identity provider, or a party that does not sign in (a Guest with no account, a customer who only receives emails). Exactly one signing-in human actor ⇒ no `User`, `parent_id` unset. Full rules and the university example: Reference `actor-rules` below.
 
 **Context exchanges (S-3.1/S-3.2/S-3.3 only).** Every actor (including existing S-2.3 actors) needs its data exchanges: `flows_in` (actor → OUR system) and `flows_out` (OUR system → actor), English data noun phrases in Title Case naming the data packet that crosses the boundary (never a verb or use-case name), from Brief/addendum/use-case outcomes, one exchange per item and one arrow per item. Human: "Registration Details" in, "Account Confirmation" out; system: "Payment Result" in, "Payment Request" out; time: "Scheduled Trigger" in only.
 Every actor needs at least one item, and all actors together must have at least one `flows_in` and one `flows_out` item. A one-way actor is valid: leave its other list empty, never invent a reply; lists need not be equal or paired by index. Maintain lists as use cases are added, preserve confirmed labels, list the main business-level data exchanges (level 0, not per-screen detail), every item is drawn as its own arrow; uncertain details need an `assumptions[]` entry. Do not combine exchanges or use use-case verbs as data labels.
@@ -56,15 +59,12 @@ function_ids: [], description: "<actor, trigger, outcome — one full sentence, 
 extends: []}`.
 
 `actor_ids` = every actor that **participates** in the use case (UML association), primary actor first.
-With a general `User`: a goal **every** specialized role does the same way ⇒ `User` only (they inherit it); a goal only **some** roles do (View Timetable: Lecturer, Student, not Office) ⇒ exactly those roles, never `User`.
+With a general `User`: a goal **every** specialized role does the same way ⇒ `User` only (they inherit it), never the children again; a goal only **some** roles do (View Timetable: Lecturer, Student, not Office) ⇒ exactly those roles, never `User`.
 Participation is not initiation: an actor the flow calls out to belongs here too. Do not invent a use case for a
 `system` or `time` actor just to give it something to do — it participates in the use case it is actually part of.
 A **notification actor** (email, SMS, push) sits on the use case whose flow *changes a state and emits the event*
 ("Assign Order to Driver" sends the SMS), never on one that only reads a state ("Track Order"); a `time` actor
-sits on the use case it starts. **Account use cases follow S-3.1 access**, for exactly the actors concerned:
-`self-registers` ⇒ Register Account; `self-registers`/`invited` ⇒ Log In + Reset Password; `invited` ⇒ "Create
-<Actor> Account" for the managing actor; `identity provider` ⇒ Log In with the provider as participant, no
-Register/Reset; `no sign-in` ⇒ none.
+sits on the use case it starts. **Account use cases follow S-3.1 access**: `self-registers` ⇒ Register Account; `self-registers`/`invited` ⇒ Log In + Reset Password; `invited` ⇒ "Create <Actor> Account" for the managing actor; `identity provider` ⇒ Log In with the provider as participant, no Register/Reset; `no sign-in` ⇒ none. **One** use case per goal, never one per actor: when ≥ 2 human actors get the same account use case, its `actor_ids` is `User` only (plus a provider/notification actor). No `User` yet (S-3.1 missed it) ⇒ add it **in this batch** with each child's `parent_id` — S-3.2 may write `actors[]`. An account use case only one actor has (Register Account when only Customer self-registers) stays on that actor.
 
 One use case = one goal reachable in one sitting, independent of UI screens; "Click Accept Button" is too fine.
 Naming — code re-checks every name and flags each miss, so get it right here. **U1** Title Case, no trailing period. **U2** one goal: no "and", "/" or comma — two goals are two use cases. **U3** a concrete verb, never Manage, Handle, Process, Maintain, Administer, Support, Control, Operate, Use, Do, Perform, Work, Deal or Take: "Manage Students" is split by real goal ("Enroll Student", "Update Student Profile", "Deactivate Student"). **U4** the actor is never the subject ("Teacher Enters Grades" ⇒ "Enter Grades", no "… by Teacher"); an actor type that is also the data being handled is fine ("Create Student Record").
@@ -80,8 +80,7 @@ actor has view/list + suspend for every entity type end users create. **(2) Supp
 wrong, help me" path unless support is explicitly out of scope. **(3) Notifications** — receiving one is not a use case; the
 notification actor sits on the emitting use case (S-3.2). Add one only when the recipient must then decide something, named after
 the decision ("Respond to Failed Delivery"); never a passive "Receive …" / "View Notifications". **(4) Account access** — every
-human actor has exactly the account use cases its access implies (S-3.2). **(5) Audit log** — an admin actor can review
-destructive/high-trust actions, when any exist. **(6) Error handling** — a human actor can recover from a failed action or
+human actor has exactly the account use cases its access implies (S-3.2); inherited through `User` counts, and ≥ 2 actors sharing one ⇒ `User` (S-3.1). **(5) Audit log** — an admin actor can review destructive/high-trust actions, when any exist. **(6) Error handling** — a human actor can recover from a failed action or
 validation rejection when the recovery involves a real decision. **(7) Work on a clock** — sweep `business_rules[]` and
 `project.goals[]` for anything that fires on time, not on a click (reminder N hours before an event, releasing an expired hold,
 marking a no-show after a grace period, a recurring charge): each gets a `time` actor **and** its own use case ("Send Appointment
@@ -140,6 +139,7 @@ extending use case opens with its condition ("When …"); every other one starts
 
 ## Self-check
 
+- [ ] ≥ 2 human actors sign in ⇒ `User` exists, each of them has `parent_id` = `User`, its `description` names them all, and Log In / Reset Password list `User` only (no account use case lists two human actors).
 - [ ] Every actor has `kind` correct, a product-specific `description`, and a name following A1/A3–A6/A8; `parent_id` only human → general human actor; `User` only on goals every specialized role shares, subsets list their roles.
 - [ ] S-3.1/S-3.2/S-3.3 actors each have ≥1 `flows_in`/`flows_out` data noun phrase, one exchange per item; all actors together have both directions; one-way actors fine, no invented replies.
 - [ ] Every use case name passes U1–U9 (no Manage/Maintain/Handle…, no "and", ≤ 5 words, actor never the subject), `function_ids: []`.

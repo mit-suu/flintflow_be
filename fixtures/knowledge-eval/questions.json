@@ -127,7 +127,7 @@
       "language": "vi",
       "question": "Tên use case phải tuân theo những quy tắc đặt tên nào?",
       "answer_points": ["Title Case, một mục tiêu, không có \"and\", \"/\" hay dấu phẩy", "Động từ cụ thể, không dùng Manage, Handle, Process…", "Tối đa 5 từ, không thuật ngữ giao diện / kỹ thuật", "Actor không bao giờ làm chủ ngữ"],
-      "gold_chunk_ids": ["actors-and-usecases#s-3-2-actor-goal-list"]
+      "gold_chunk_ids": ["actors-and-usecases#s-3-2-actor-goal-list/part-3"]
     },
     {
       "id": "q17",
