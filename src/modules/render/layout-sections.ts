@@ -36,6 +36,7 @@ import type { Block, InlineRun, RenderedSection, RocRow, TableCell } from "./ren
 import { mediaId } from "./import-media.js"
 import { defaultSectionTitle, renderContentSlot, renderSection, type SectionRenderContext } from "./section-renderer.js"
 import { isContentSlot, slotParents } from "../import/content-slots.js"
+import { isInstructionText, isRealText, splitInstruction, tableHasRealText } from "../../shared/utils/instruction-text.js"
 
 /** Một mục layout (cùng hình `LayoutEntry` của `import/template-profile.model.ts`). */
 export interface TemplateLayoutEntry {
@@ -45,6 +46,8 @@ export interface TemplateLayoutEntry {
   section_id: string
   /** FLF-362: nhãn số Word tự đánh của heading gốc ("2.1.", "II.") — không nằm trong `heading_text`. */
   number_label?: string
+  /** FLF-364 (câu 10): nguyên văn chữ hướng dẫn của mẫu dưới heading — in khi mục chưa có dữ liệu. */
+  template_guidance?: readonly string[]
 }
 
 export interface TemplateLayout {
@@ -164,6 +167,8 @@ interface Placed {
   typed: boolean
   /** Số gõ tay nguyên văn (`2.1`, `II`) — rỗng nếu không gõ số. */
   label?: string
+  /** FLF-364 (câu 10): chữ hướng dẫn của mẫu dưới heading (mục FPT / phần nhỏ). */
+  guidance?: readonly string[]
 }
 
 // ─── mục riêng ⇒ block ─────────────────────────────────────────────
@@ -212,6 +217,25 @@ export const customBlocks = (blocks: readonly CustomBlock[], imagePng?: (imageRe
   }
   return out
 }
+
+/**
+ * FLF-364 (câu 10): chữ hướng dẫn của mẫu (`[…]` / `{…}`) chỉ in khi mục chưa có dữ liệu — mục riêng có nội dung thật (ảnh,
+ * bảng / đoạn có chữ thật, kể cả thêm qua CR) ⇒ bỏ đoạn hướng dẫn, bỏ đoạn ngoặc hướng dẫn trong câu, ô bảng chỉ có hướng dẫn
+ * để trống. Khối vẫn nằm trong Spine (ngữ cảnh khi soạn) — xoá hết dữ liệu thì hướng dẫn in lại.
+ */
+export const guidanceWhileEmpty = (blocks: readonly CustomBlock[]): CustomBlock[] => {
+  const filled = blocks.some((b) => b.kind === "image" || (b.kind === "table" ? tableHasRealText(b.rows) : isRealText(b.text)))
+  if (!filled) return [...blocks]
+  return blocks.flatMap((b): CustomBlock[] => {
+    if (b.kind === "table") return [{ ...b, rows: (b.rows ?? []).map((r) => r.map((c) => (isInstructionText(c) ? "" : splitInstruction(c).text))) }]
+    if (b.kind !== "paragraph" && b.kind !== "list_item") return [b]
+    const text = splitInstruction(b.text).text
+    return text ? [{ ...b, text }] : []
+  })
+}
+
+/** Khối hướng dẫn của mẫu cho mục FPT / phần nhỏ chưa có dữ liệu — nguyên văn như file upload. */
+const guidanceBlocks = (guidance: readonly string[] | undefined): Block[] => (guidance ?? []).filter((t) => t.trim()).map((t) => ({ type: "paragraph", runs: runs(t) }))
 
 // ─── xếp chỗ ───────────────────────────────────────────────────────
 
@@ -294,9 +318,18 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
         label: own?.label ?? ""
       })
     } else if (isContentSlot(id)) {
-      placed.push({ section_id: id, kind: "slot", title: title || id, level, fromLayout: true, typed, label })
+      placed.push({ section_id: id, kind: "slot", title: title || id, level, fromLayout: true, typed, label, guidance: entry.template_guidance })
     } else if (defById.has(id)) {
-      placed.push({ section_id: id, kind: "fpt", title: title || defaultSectionTitle(spine, id, template.language), level, fromLayout: true, typed, label })
+      placed.push({
+        section_id: id,
+        kind: "fpt",
+        title: title || defaultSectionTitle(spine, id, template.language),
+        level,
+        fromLayout: true,
+        typed,
+        label,
+        guidance: entry.template_guidance
+      })
     } else {
       continue
     }
@@ -536,7 +569,7 @@ export const buildLayoutSections = (
       continue
     }
     if (n.kind === "custom" || n.kind === "continuation") {
-      const blocks = [...sliceBlocks(n), ...customBlocks(customById.get(n.section_id)?.blocks ?? [], (ref) => opts.diagramPng(mediaId(ref)))]
+      const blocks = [...sliceBlocks(n), ...customBlocks(guidanceWhileEmpty(customById.get(n.section_id)?.blocks ?? []), (ref) => opts.diagramPng(mediaId(ref)))]
       if (n.kind === "continuation") {
         // Chủ = section gần nhất phía trước có cấp nhỏ hơn (phần nối có cấp = cấp chủ + 1, xem import/step-plan.ts)
         let owner = levels.length - 1
@@ -553,15 +586,22 @@ export const buildLayoutSections = (
     }
     if (n.kind === "slot") {
       // Khối của phần nhỏ đánh cấp heading con từ 1 ⇒ dời theo cấp heading của mẫu
-      push({ ...base, blocks: shiftHeadings(renderContentSlot(contentSpine, n.section_id, contextFor(n.section_id, n.number)), n.renderLevel - 1) }, n.level)
+      const slotBlocks = shiftHeadings(renderContentSlot(contentSpine, n.section_id, contextFor(n.section_id, n.number)), n.renderLevel - 1)
+      push({ ...base, blocks: slotBlocks.length ? slotBlocks : guidanceBlocks(n.guidance) }, n.level)
       continue
     }
     const taken = claimed.get(n.section_id)
     const section = renderSection(taken ? filterSliceItems(contentSpine, taken, false) : contentSpine, n.section_id, contextFor(n.section_id, n.number))
     const original = originalOf(n.section_id)
     const rendered = original
-      ? { ...section, heading: n.title, level: n.renderLevel, blocks: customBlocks(original.blocks, (ref) => opts.diagramPng(mediaId(ref))) }
-      : { ...section, heading: n.title, level: n.renderLevel, blocks: shiftHeadings(section.blocks, n.renderLevel - section.level) }
+      ? { ...section, heading: n.title, level: n.renderLevel, blocks: customBlocks(guidanceWhileEmpty(original.blocks), (ref) => opts.diagramPng(mediaId(ref))) }
+      : {
+          ...section,
+          heading: n.title,
+          level: n.renderLevel,
+          // Mục chưa có dữ liệu ⇒ in chữ hướng dẫn của mẫu (câu 10); có dữ liệu thì không
+          blocks: section.blocks.length ? shiftHeadings(section.blocks, n.renderLevel - section.level) : guidanceBlocks(n.guidance)
+        }
     if (original) fromOriginal.add(rendered)
     // `partial`: mục rỗng vẫn giữ chỗ tới khi gộp xong phần nối — mục chỉ có hình gốc của người dùng (§4.13, PlantUML
     // không in) nhận khối từ phần nối ngay sau nó; bỏ sớm thì khối đó rơi vào mục đứng trước

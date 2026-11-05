@@ -18,7 +18,7 @@ import type { CustomBlock, CustomSection, OriginalDiagram, Spine, StepState } fr
 import type { DocBlockKind } from "./import.constants.js"
 import { UNMAPPED_SECTION } from "./import.constants.js"
 import { targetsOf } from "./extract-targets.js"
-import { isRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
+import { isInstructionText, isRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
 import { withSlotParents } from "./content-slots.js"
 import type { LayoutEntry, StepPlanItem } from "./template-profile.model.js"
 
@@ -180,6 +180,12 @@ export const buildLayout = (
     slice?.block_ids.push(b.block_id)
     const block = toCustomBlock(b)
     if (!block) continue
+    // FLF-364 (câu 10): chữ hướng dẫn trọn đoạn dưới mục FPT / phần nhỏ ⇒ giữ nguyên văn ở layout entry (in khi mục trống),
+    // không thành phần nối (in cả khi mục đã có dữ liệu)
+    if (!current && owner && !owner.section_id.startsWith("group:") && (block.kind === "paragraph" || block.kind === "list_item") && isInstructionText(block.text)) {
+      owner.template_guidance = [...(owner.template_guidance ?? []), block.text]
+      continue
+    }
     if (current) {
       if (!currentRepeats || unmappedBlockIds.has(b.block_id)) current.blocks.push(block)
     } else if (owner && (owner.section_id.startsWith("group:") || unmappedBlockIds.has(b.block_id))) continuationOf(owner).blocks.push(block)
