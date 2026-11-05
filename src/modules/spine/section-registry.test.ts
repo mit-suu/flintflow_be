@@ -27,9 +27,9 @@ describe("section registry", () => {
     expect([...DERIVED_SECTION_IDS].sort()).toEqual(["fixed:5.5", "fixed:I"])
   })
 
-  it("bảng field → section có đúng 34 dòng như srs-spine.md §4, key không trùng", () => {
-    expect(FIELD_SECTION_MAP).toHaveLength(38)
-    expect(new Set(FIELD_SECTION_MAP.map((r) => r.key)).size).toBe(38)
+  it("bảng field → section như srs-spine.md §4 (+3 dòng FLF-365: tham khảo, kiểm chứng, phân bổ), key không trùng", () => {
+    expect(FIELD_SECTION_MAP).toHaveLength(41)
+    expect(new Set(FIELD_SECTION_MAP.map((r) => r.key)).size).toBe(41)
   })
 
   it("listSections trên fixture: 20 cố định + 6 feature + 89 function, feature/function nằm giữa 3.1.5 và 4.1", () => {

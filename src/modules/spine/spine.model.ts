@@ -237,7 +237,9 @@ const functionSchema = new Schema(
     validations: { type: [validationSchema], default: [] },
     business_rule_ids: { type: [String], default: [] },
     priority,
-    interactions: { type: [functionInteractionSchema], default: undefined }
+    interactions: { type: [functionInteractionSchema], default: undefined },
+    // FLF-365: bản phát hành (phân bổ yêu cầu) — thiếu = chưa phân bổ
+    release: { type: String, default: undefined }
   },
   opts
 )
@@ -254,7 +256,8 @@ const nfrSchema = new Schema(
     kind: { type: String, enum: ["quantitative", "descriptive"], required: true },
     metric: { type: String },
     threshold: { type: String },
-    priority
+    priority,
+    release: { type: String, default: undefined }
   },
   opts
 )
@@ -308,6 +311,32 @@ const glossaryTermSchema = new Schema(
     term: { type: String, default: "" },
     term_native: { type: String },
     definition: { type: String, default: "" }
+  },
+  opts
+)
+
+// FLF-365: mẫu IEEE 29148 — tài liệu tham khảo, ma trận kiểm chứng (chỉ Mode 1 render)
+const referenceSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    title: { type: String, default: "" },
+    owner: { type: String },
+    version: { type: String },
+    date: { type: String },
+    location: { type: String },
+    kind: { type: String, enum: ["normative", "informative"], default: "informative" }
+  },
+  opts
+)
+
+const verificationSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    requirement_id: { type: String, required: true },
+    method: { type: String, enum: ["test", "analysis", "inspection", "demonstration", "other"], default: "test" },
+    artifact: { type: String },
+    status: { type: String },
+    evidence: { type: String }
   },
   opts
 )
@@ -487,6 +516,8 @@ const spineSchema = new Schema(
     messages: { type: [messageSchema], default: [] },
     other_requirements: { type: [otherRequirementSchema], default: [] },
     glossary: { type: [glossaryTermSchema], default: [] },
+    references: { type: [referenceSchema], default: [] },
+    verifications: { type: [verificationSchema], default: [] },
     addendum: { type: [addendumSchema], default: [] },
     custom_sections: { type: [customSectionSchema], default: [] },
 
