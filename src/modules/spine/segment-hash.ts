@@ -88,13 +88,27 @@ export const sectionItemKeys = (spine: Spine, sectionId: string): string[] =>
       : listOf(spine, array).flatMap((el) => (el.id && printsIn(sectionId, array, el) ? [segmentItemKey(array, el.id)] : []))
   )
 
-/** Phần tử Spine có thể trích vào mục đó (khoá `array:id`) — dùng khi chia phần tử cho đoạn lúc import. */
+/**
+ * Phần tử Spine có thể thuộc đoạn của mục đó (khoá `array:id`) — dùng khi chia phần tử cho đoạn lúc import. Chỉ xét mảng,
+ * **không xét loại** (BR cấp cao / chi tiết, nhóm NFR): khối của mục nào trích ra phần tử thì phần tử thuộc đoạn đó, kể cả khi
+ * AI xếp loại sai (FAP: BR-01 trong bảng 5.1 bị xếp `tier = high`) — nếu không, CR sửa phần tử đó mà đoạn vẫn in chữ cũ.
+ */
 export const printableIn = (spine: Spine, sectionId: string, key: string): boolean => {
   const { array, id } = splitKey(key)
   if (!(SECTION_ITEM_ARRAYS[sectionId] ?? []).includes(array)) return false
   if (array === "project") return (PROJECT_SEGMENT_FIELDS as readonly string[]).includes(id)
-  const el = listOf(spine, array).find((x) => x.id === id)
-  return !!el && printsIn(sectionId, array, el)
+  return listOf(spine, array).some((x) => x.id === id)
+}
+
+/**
+ * Phần tử của đoạn khi dựng lại đoạn đó: đổi loại cho hợp mục để renderer in ra đúng chỗ (BR ở 5.1 ⇒ chi tiết, ở mục 1 ⇒
+ * cấp cao; NFR ⇒ nhóm của mục). Chỉ cho bản in, không ghi Spine.
+ */
+export const asPrintedIn = (sectionId: string, array: string, el: Record<string, unknown>): Record<string, unknown> => {
+  if (array === "business_rules" && sectionId === "fixed:1") return { ...el, tier: "high" }
+  if (array === "business_rules" && sectionId === "fixed:5.1") return { ...el, tier: "detail" }
+  if (array === "nfrs" && NFR_CATEGORY[sectionId]) return { ...el, category: NFR_CATEGORY[sectionId] }
+  return el
 }
 
 /** Field không in ra / đổi mà nội dung không đổi (thứ tự) — không vào dấu. */
