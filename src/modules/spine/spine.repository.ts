@@ -351,6 +351,20 @@ export interface ChangeRange {
 }
 
 /** Change theo `seq` tăng dần; `fromSeq`/`toSeq` bao gồm hai đầu. */
+/**
+ * Đầu Spine nhẹ cho `GET /projects/:id/version` (FLF-369): `spine_version` (projection, không tải cả Spine) + `seq` của
+ * change gần nhất KHÔNG thuộc `flags[…]` — tính lại cờ / waive / giữ nguyên tăng `spine_version` nhưng không đổi nội dung
+ * tài liệu nên không làm tab khác tải lại. Hai truy vấn theo index, không `listChanges`.
+ */
+export const versionHead = async (projectId: string): Promise<{ spine_version: number; content_seq: number } | null> => {
+  const head = await SpineModel.findOne({ projectId }, { spine_version: 1, _id: 0 }, { lean: true })
+  if (!head) return null
+  const latest = (await ChangeModel.findOne({ projectId, path: { $not: /^flags(\[|\.|$)/ } }, { seq: 1, _id: 0 }, { sort: { seq: -1 }, lean: true })) as {
+    seq?: number
+  } | null
+  return { spine_version: head.spine_version, content_seq: latest?.seq ?? 0 }
+}
+
 export const listChanges = async (projectId: string, range: ChangeRange = {}): Promise<Change[]> => {
   const seq: { $gte?: number; $lte?: number } = {}
   if (range.fromSeq !== undefined) seq.$gte = range.fromSeq

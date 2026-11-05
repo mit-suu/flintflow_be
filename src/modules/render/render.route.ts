@@ -81,6 +81,12 @@ router.post("/:projectId/assemble", authMiddleware, renderController.assembleCon
  */
 router.get("/:projectId/document", authMiddleware, renderController.getDocumentController)
 
+// FLF-369: ảnh của GET /document theo tham chiếu (pipeline-contract #38)
+router.get("/:projectId/document/image", authMiddleware, renderController.getDocumentImageController)
+
+// FLF-369: revision tài liệu để tab đang mở tự bám bản mới (pipeline-contract #39)
+router.get("/:projectId/version", authMiddleware, renderController.getVersionController)
+
 /**
  * @swagger
  * /api/v1/projects/{projectId}/export/word:
