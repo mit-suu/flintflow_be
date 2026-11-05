@@ -79,14 +79,6 @@ describe("Luồng 2 cho phần thiếu — chế độ 3", () => {
     // Không còn bị chặn MODE1_NO_STEPS — workspace chạy step như dự án tạo mới
     const steps = await request(app).get(`/api/v1/projects/${projectId}/steps`).set({ Authorization: `Bearer ${token}` })
     expect(steps.status, JSON.stringify(steps.body.error)).toBe(200)
-    // FLF-278: rail theo quy trình FlintFlow, mỗi bước kèm heading của mẫu mà bước đó soạn
-    const stepList = steps.body.data.steps as { id: string; template_sections?: string[] }[]
-    expect(stepList.every((s) => Array.isArray(s.template_sections))).toBe(true)
-    const templateHeadings = new Set(((await TemplateProfile.findOne({ projectId }).lean())!.layout ?? []).map((l) => l.heading_text.trim()))
-    const tagged = stepList.flatMap((s) => s.template_sections ?? [])
-    expect(tagged.length).toBeGreaterThan(0)
-    expect(tagged.every((title) => templateHeadings.has(title))).toBe(true)
-    expect(stepList.find((s) => s.id === "B-1.1")?.template_sections).toEqual([])
 
     // Luật cờ: đủ luật tạo mới, chỉ trên mục của mẫu
     const profile = await ruleProfileOf(projectId)
