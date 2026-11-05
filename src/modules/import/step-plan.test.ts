@@ -10,6 +10,8 @@ import {
   continuationOwnerSection,
   customSectionOps,
   functionOriginals,
+  projectFieldEntities,
+  sectionSegments,
   sectionsOwnedBy,
   sectionsWithContent,
   customSectionsWithContent,
@@ -49,19 +51,34 @@ const HEADINGS = new Map([
 ])
 
 describe("buildLayout", () => {
-  it("heading mở section FPT giữ section; heading con cùng section bỏ; unmapped ⇒ mục riêng giữ nguyên văn; section FPT lặp ở chỗ khác ⇒ mục riêng", () => {
-    const { layout, customSections } = buildLayout(BLOCKS, HEADINGS)
+  it("heading mở section FPT giữ section; heading con cùng section thành đoạn chữ của dãy nguyên văn (FLF-366); unmapped ⇒ mục riêng giữ nguyên văn; section FPT lặp ở chỗ khác ⇒ mục riêng", () => {
+    const { layout, customSections, segments } = buildLayout(BLOCKS, HEADINGS)
     expect(layout.map((l) => [l.heading_text, l.level, l.section_id])).toEqual([
       ["1 Introduction", 1, "fixed:1"],
-      ["1.4 References", 2, "custom:CS01"],
+      ["", 2, "custom:CS01"],
+      ["1.4 References", 2, "custom:CS02"],
       ["2 Actors", 1, "fixed:2.1"],
       ["5.1 Business Rules", 2, "fixed:5.1"],
-      ["Appendix A — Meeting notes", 1, "custom:CS02"],
-      ["1.2 Scope", 2, "custom:CS03"]
+      ["Appendix A — Meeting notes", 1, "custom:CS03"],
+      ["1.2 Scope", 2, "custom:CS04"]
     ])
-    expect(layout.map((l) => l.order)).toEqual([0, 1, 2, 3, 4, 5])
-    expect(customSections[0]).toEqual({
-      id: "CS01",
+    expect(layout.map((l) => l.order)).toEqual([0, 1, 2, 3, 4, 5, 6])
+    // FLF-366: mục 1 theo thứ tự file — đoạn trích, heading con "1.1 Purpose" (nguyên văn), đoạn trích
+    expect(customSections[0].blocks.map((b) => b.text)).toEqual(["1.1 Purpose"])
+    expect(segments).toEqual([
+      {
+        section_id: "fixed:1",
+        parts: [
+          { kind: "spine", block_ids: ["B0002"], blocks: [{ kind: "paragraph", text: "Lumen is a learning platform.", rows: null, image_ref: null }] },
+          { kind: "original", custom_id: "CS01" },
+          { kind: "spine", block_ids: ["B0004"], blocks: [{ kind: "paragraph", text: "Purpose text.", rows: null, image_ref: null }] }
+        ]
+      },
+      { section_id: "fixed:2.1", parts: [] },
+      { section_id: "fixed:5.1", parts: [] }
+    ])
+    expect(customSections[1]).toEqual({
+      id: "CS02",
       heading: "1.4 References",
       level: 2,
       source: "import",
@@ -71,8 +88,8 @@ describe("buildLayout", () => {
       ]
     })
     // khối rỗng bỏ, ô bảng không lặp, ảnh giữ chỗ
-    expect(customSections[1].blocks.map((b) => b.kind)).toEqual(["list_item", "image"])
-    expect(customSectionOps(customSections).map((o) => o.path)).toEqual(["custom_sections[]", "custom_sections[]", "custom_sections[]"])
+    expect(customSections[2].blocks.map((b) => b.kind)).toEqual(["list_item", "image"])
+    expect(customSectionOps(customSections).map((o) => o.path)).toEqual(["custom_sections[]", "custom_sections[]", "custom_sections[]", "custom_sections[]"])
   })
 
   it("FLF-252: heading lặp một section FPT có trích (IEEE Reliability + Availability) ⇒ mục riêng chỉ giữ khối không trích được, không in hai lần", () => {
@@ -120,7 +137,7 @@ describe("buildLayout", () => {
   })
 
   it("không có heading ⇒ layout rỗng; block trước heading đầu tiên không vào mục riêng", () => {
-    expect(buildLayout([p("B0001", "Cover page", null)], new Map())).toEqual({ layout: [], customSections: [], slices: [] })
+    expect(buildLayout([p("B0001", "Cover page", null)], new Map())).toEqual({ layout: [], customSections: [], slices: [], segments: [] })
   })
 
   it("FLF-184: văn xuôi I-4 không trích được ⇒ phần nối (tiêu đề rỗng, cấp + 1) ngay sau section; khối dưới heading con cùng section gom vào cùng phần nối", () => {
@@ -130,7 +147,8 @@ describe("buildLayout", () => {
       ["", 2, "custom:CS01"],
       ["1.4 References", 2, "custom:CS02"]
     ])
-    expect(customSections[0]).toMatchObject({ heading: "", level: 2, blocks: [{ text: "Lumen is a learning platform." }, { text: "Purpose text." }] })
+    // heading con "1.1 Purpose" nằm giữa hai khối không trích được ⇒ cùng dãy, đúng thứ tự file (FLF-366)
+    expect(customSections[0]).toMatchObject({ heading: "", level: 2, blocks: [{ text: "Lumen is a learning platform." }, { text: "1.1 Purpose" }, { text: "Purpose text." }] })
     // nợ T5: tra ngược được mục chủ của phần nối — đúng mục mà assemble gộp nội dung vào
     expect(continuationOwnerSection(layout, "custom:CS01")).toBe("fixed:1")
     expect(continuationOwnerSection(layout, "custom:CS02")).toBe("fixed:1") // mục riêng thường: mục bao nó
@@ -162,7 +180,63 @@ describe("buildLayout", () => {
       ["2.1.9 Notes", 3, "custom:CS02"],
       ["", 3, "custom:CS03"]
     ])
-    expect(customSections.map((c) => c.blocks.map((b) => b.text))).toEqual([["This chapter lists who uses Lumen."], ["Draft note"], ["Guests are read-only."]])
+    expect(customSections.map((c) => c.blocks.map((b) => b.text))).toEqual([["This chapter lists who uses Lumen."], ["Draft note"], ["2.1.10 More actors", "Guests are read-only."]])
+  })
+})
+
+describe("sectionSegments — đoạn nguyên văn theo mục (FLF-366)", () => {
+  it("phần tử thuộc đoạn chứa nhiều khối nguồn nhất (chỉ phần tử mục đó in ra); đoạn không trích được gì ⇒ rỗng; dấu + known + tên nhắc tới", () => {
+    const blocks: LayoutBlock[] = [
+      h("B01", "5.1 Business Rules", 1, "fixed:5.1"),
+      p("B02", "Rules for Student.", "fixed:5.1"),
+      { block_id: "B03", kind: "table", level: null, text: "", section_id: "fixed:5.1", rows: [["ID", "Rule"], ["BR-01", "One check-in"]] },
+      { block_id: "B04", kind: "table", level: null, text: "", section_id: "fixed:5.1", rows: [["ID", "Rule"], ["BR-02", "Late"]] },
+      p("B05", "Approved by the board.", "fixed:5.1")
+    ]
+    const { customSections, segments } = buildLayout(blocks, new Map([["B01", "fixed:5.1"]]), new Set(["B02"]))
+    const spine: Spine = {
+      ...createEmptySpine({ name: "FAP" }),
+      actors: [{ id: "A01", name: "Student", kind: "human", description: "" }],
+      business_rules: [
+        { id: "BR-01", tier: "detail", statement: "One check-in", source_validation_ids: [] },
+        { id: "BR-02", tier: "detail", statement: "Late", source_validation_ids: [] },
+        { id: "BR-09", tier: "high", statement: "Cấp cao — in ở mục 1", source_validation_ids: [] }
+      ]
+    }
+    const records = sectionSegments(
+      segments,
+      customSections,
+      [
+        // nguồn chia hai bảng: bảng chứa nhiều khối nguồn hơn thắng
+        { entity: "business_rules", id: "BR-01", source_block_ids: ["B03", "B03", "B04"] },
+        { entity: "business_rules", id: "BR-02", source_block_ids: ["B04"] },
+        // BR cấp cao không in ở 5.1 ⇒ không thuộc đoạn nào của 5.1
+        { entity: "business_rules", id: "BR-09", source_block_ids: ["B04"] }
+      ],
+      spine,
+      [{ entity: "actor", id: "A01", name: "Student" }]
+    )
+    expect(records).toHaveLength(1)
+    const [run, t1, t2, tail] = records[0].parts
+    expect(run).toMatchObject({ kind: "original", custom_id: "CS01", mentions: [{ path: "actors[id=A01]", name: "Student" }] })
+    expect(t1).toMatchObject({ kind: "spine", items: ["business_rules:BR-01"] })
+    expect(t2).toMatchObject({ kind: "spine", items: ["business_rules:BR-02"] })
+    expect(tail).toMatchObject({ kind: "spine", items: [], blocks: [{ text: "Approved by the board." }] })
+    expect(records[0].known.map((k) => k.key)).toEqual(["business_rules:BR-01", "business_rules:BR-02"])
+  })
+
+  it("projectFieldEntities: nguồn theo từng field project mục 1 in ra", () => {
+    expect(
+      projectFieldEntities([
+        { path: "project.vision", source_block_ids: ["B1"] },
+        { path: "project.goals", source_block_ids: ["B2"] },
+        { path: "project.goals", source_block_ids: ["B3"] },
+        { path: "project.system_name", source_block_ids: ["B0"] }
+      ]).map((e) => [e.id, [...e.source_block_ids]])
+    ).toEqual([
+      ["vision", ["B1"]],
+      ["goals", ["B2", "B3"]]
+    ])
   })
 })
 
