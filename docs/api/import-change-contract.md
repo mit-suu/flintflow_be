@@ -454,6 +454,7 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-11-05 | FLF-278 (kết quả đọc theo loại dự án; bảng mẫu trống) | Hành vi, không đổi shape: #8b chỉ cho dự án mới theo mẫu bắt buộc (dự án có sẵn ⇒ `409 IMPORT_INVALID_STATE`); #8 `complete: true` ở `incomplete` bị chặn với dự án mới theo mẫu bắt buộc (`409`, `meta.allowed = ["drafting"]`). Bảng mẫu chỉ có tiêu đề + hàng chỗ trống tính là trống ở I-5 / cờ `template_section_empty`, không sinh item ở I-4. Xem §FLF-278 "Luồng 2 cho phần thiếu" |
 | 2026-10-29 | contract-change FLF-278 (mẫu bắt buộc: Luồng 2 cho phần thiếu, phần nhỏ `slot:*`, thư viện tổ chức) | Additive — xem §FLF-278 cuối file. Trạng thái import mới `drafting` (`incomplete → drafting → delivered`); endpoint mới #8b `POST /import/continue`, #8c `POST /import/from-org`, #8d `POST /import/save-to-org`, #8e `GET /library-matches`, #8f `POST /library`, `/orgs/:orgId/templates`, `/orgs/:orgId/content-library`, admin `GET /admin/template-gaps`; `heading_map[].guidance?`; `section_id` nhận thêm `slot:*`; cờ vàng `template_section_absent` / `template_section_empty` |
 | 2026-10-27 | contract-change FLF-336 (I-5 so cấu trúc đích, lát 1) | Additive. Trạng thái import mới `incomplete` (`baselining → incomplete → baselining`), không có v0 ở trạng thái này; `TemplateProfile.target_structure` (`present / missing / out_of_scope`, `resolved_mode` 1 / 3 / 4) trả ở #4 và #9; #8 nhận `complete: true` để đi tiếp từ `incomplete`; #9 mở từ `incomplete`. Chưa làm: vòng rà soát phần có sẵn, Luồng 2 chỉ cho phần thiếu, xem trước bố cục, ghi vào file khách |
 | 2026-10-27 | contract-change FLF-338 (rút yêu cầu từ tài liệu thô, lát 1 sau baseline) | Additive. Endpoint mới #31a–#31c (`/documents/:documentId/extract`, `/extract/approve`); `CR_SOURCE_KINDS` / `NEW_CR_SOURCE_KINDS` thêm `reference_document`; `call_kind` mới `extract_requirements` (3 credit); mã lỗi `EXTRACTION_*`. Collection mới `requirementextractions`. Chưa làm: trần token theo file / dự án, nhánh trước baseline, đi tiếp từ C-3 với vị trí có sẵn (CR tạo ở `draft`, đi C-2 như thường) |
@@ -519,7 +520,15 @@ mẫu bắt buộc = "chỉ mẫu đó, không thêm phần, không đổi thứ
 ### Luồng 2 cho phần thiếu (lát 3)
 | # | Method + path | Body | Kết quả / lỗi |
 |---|---|---|---|
-| 8b | `POST /projects/:id/import/continue` | `{ import_id, base_version }` | `{ project_mode: "fpt", import_state: "drafting", current_step, spine_version }`. Chỉ từ `incomplete` với `target_structure.resolved_mode = 3` (chế độ 4 cần 2.9a — chưa hỗ trợ) ⇒ ngược lại `409 IMPORT_INVALID_STATE` |
+| 8b | `POST /projects/:id/import/continue` | `{ import_id, base_version }` | `{ project_mode: "fpt", import_state: "drafting", current_step, spine_version }`. Chỉ từ `incomplete` với `target_structure.resolved_mode = 3` (chế độ 4 cần 2.9a — chưa hỗ trợ) **và dự án mới** (`Project.start_kind = new`, `template_intent = fixed`) ⇒ ngược lại `409 IMPORT_INVALID_STATE` (`meta.start_kind`). Dự án có sẵn theo mẫu cố định: "Hoàn thiện" (#8 `complete: true`) rồi bổ sung mục thiếu qua CR (Luồng 3) |
+
+Ràng buộc theo loại dự án (2026-11-05): ở `incomplete`, dự án **mới** theo mẫu bắt buộc chỉ đi #8b — #8 với `complete: true` trả
+`409 IMPORT_INVALID_STATE` (`meta.allowed = ["drafting"]`), vì khoá mẫu còn trống thành bản gốc là vô nghĩa; FE chỉ hiện nút "Viết với
+FlintFlow". Dự án **có sẵn** giữ "Dừng, tải gap report" (#9) / "Hoàn thiện" (#8). Không đổi shape.
+
+I-5 / I-4 với bảng mẫu (2026-11-05, không đổi shape): bảng chỉ có hàng tiêu đề + hàng chỗ trống (`[FR-xxx]`, `[dd/mm/yyyy]`) là
+**trống** (`missing`, cờ `template_section_empty`); bảng một hàng xét như nhãn | giá trị. Hàng chỗ trống không thành item tất định
+ở I-4 (`deterministicTableItems`).
 
 Hành vi: mở lại bước Brief B-1…S-1 (2.4–2.7; B-0 = 2.1–2.3 giữ bỏ qua), bước sở hữu mục thiếu giữ `pending`, `Project.mode = fpt` (luồng
 tạo mới: chạy step, ký baseline), `import_state = drafting`, `documentLanguage` = ngôn ngữ file mẫu. Bản in theo layout mẫu. Ký
@@ -545,6 +554,28 @@ baseline 1.0 ⇒ FLF-318 đưa dự án về mode 1, lần import mẫu `draftin
 
 Áp nội dung thư viện: trước baseline FE gửi lô `set custom_sections[id=…]` qua `POST /changes/preview` + `POST /changes {ops, preview_id}`
 (không gọi model); sau baseline FE điền sẵn lệnh vào chat ⇒ change request như mọi lệnh sửa.
+
+### Bản xuất theo đúng file mẫu (2026-11-05, mở rộng D1)
+Dự án `template_intent = fixed`: `GET /projects/:id/export/word|pdf` và file version điền nội dung vào **chính file mẫu đã
+upload** (`render/template-docx-writer.ts`). Bìa, lề, styles, numbering, header/footer và heading của mẫu giữ nguyên;
+FlintFlow không thêm bìa, mục lục, header/footer hay phụ lục cờ. Shape response không đổi (file `.docx` / `.pdf`).
+
+Watermark DRAFT (2026-11-05): bản làm việc (`source=draft`) và tải version chưa phát hành (#14) **có** watermark chữ mờ "DRAFT"
+như mẫu FPT — chỉ thêm shape vào header (mẫu không có header ⇒ một header chỉ chứa watermark, không chữ nào khác). Bản
+`source=baseline`, file version lưu và bản release không có watermark.
+
+Mapping lúc tách file (`matchProfile(…, { fixedTemplate: true })`) và lúc xuất dùng chung `bindFixedTemplateHeadings`:
+- phần nhỏ theo tiêu đề;
+- heading cha mà con cùng mục ⇒ heading bao.
+
+Lỗi mới — cùng mã, hai nghĩa:
+
+| HTTP | `code` | Khi nào |
+|---|---|---|
+| 409 | `TEMPLATE_LAYOUT_UNAVAILABLE` | Thiếu file mẫu / mapping / snapshot nguồn của version (không chứng minh được nguồn duy nhất) |
+| 422 | `TEMPLATE_LAYOUT_UNAVAILABLE` | Có nguồn nhưng không điền an toàn được (`meta.reason`: chữ cùng đoạn với section break, field / object, cột bảng mơ hồ, ô gộp dọc…) |
+
+Cả hai đều không tự chuyển sang mẫu chuẩn FlintFlow.
 
 ## FLF-334 (2026-10-29) — tên file tải về + stamp mang nhãn version
 

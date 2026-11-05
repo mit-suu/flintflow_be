@@ -54,7 +54,7 @@ import {
   type ChangeRecordRow,
   type SectionRenderContext
 } from "./section-renderer.js"
-import { missingImageFindings, runConsistencyPass, type ConsistencyFinding } from "./consistency-pass.js"
+import { missingImageFindings, omittedTemplateSectionFindings, runConsistencyPass, type ConsistencyFinding } from "./consistency-pass.js"
 import { DIAGRAM_PLACEHOLDER_PNG, pendingImageCaption } from "./diagram-placeholder.js"
 import { GROUP_HEADINGS, assembleTextFor, isVietnamese, type DocumentLanguage } from "./labels.js"
 import { loadRenderContext } from "../diagram/render-context.js"
@@ -405,7 +405,7 @@ interface ChangeRecordDoc {
  * với projection nhẹ này thay vì `spine.repository.listChanges` (tải cả `before`/`value`, không cần
  * cho Record of Changes, có thể lớn với change phức tạp).
  */
-const listChangesForRecord = async (projectId: string): Promise<ChangeRecordRow[]> => {
+export const listChangesForRecord = async (projectId: string): Promise<ChangeRecordRow[]> => {
   const docs = (await ChangeModel.find({ projectId }, RECORD_CHANGE_PROJECTION, { sort: { seq: 1 }, lean: true })) as ChangeRecordDoc[]
   return docs.map((d) => ({
     txn: d.txn,
@@ -742,11 +742,12 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
   let sections: RenderedSection[]
   let numbers: Map<string, string>
   let titles: Map<string, string> | undefined
+  let omittedSectionIds: string[] | undefined
   // Section chữ gốc cho S-8.4 — `null` ⇒ bỏ qua pass (xem dưới)
   let checked: RenderedSection[] | null
   if (input.template) {
     // Mode 1 v2: thứ tự + tiêu đề + số hiệu theo file người dùng (layout-sections.ts)
-    ;({ sections, numbers, titles } = buildLayoutSections(spine, input.template, states, {
+    ;({ sections, numbers, titles, omittedSectionIds } = buildLayoutSections(spine, input.template, states, {
       partial: input.partial ?? false,
       diagramPng: imageRef
     }))
@@ -770,7 +771,7 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
   }
 
   if (checked) {
-    const findings = await runConsistencyPass(spine, checked)
+    const findings = [...await runConsistencyPass(spine, checked), ...omittedTemplateSectionFindings(spine, omittedSectionIds ?? [])]
     deps.onConsistencyFindings?.(findings)
   }
 
@@ -853,11 +854,15 @@ export async function assemble(
   if (cached && parsedCache?.success) {
     // Trúng cache vẫn báo ảnh thiếu — client gọi lại cùng version không bị mất lý do; ảnh đã có lại thì hết báo
     const stillMissing = await recheckMissingImages(projectId, cached._id, cached.missing_diagram_ids ?? [], merged.loadDiagramPng)
+    const template = await (merged.loadTemplate ?? loadTemplateLayout)(projectId)
+    const omitted = template?.fixedTemplate
+      ? buildLayoutSections(record, template, [], { diagramPng: imageRef }).omittedSectionIds ?? []
+      : []
     return {
       spine_version: record.spine_version,
       sections: countRealSections(parsedCache.data.sections),
       generated_at: parsedCache.data.generatedAt,
-      findings: missingImageFindings(stillMissing)
+      findings: [...missingImageFindings(stillMissing), ...omittedTemplateSectionFindings(record, omitted)]
     }
   }
   if (cached) console.warn(`[render] cache tài liệu v${record.spine_version} của project ${projectId} không hợp khuôn — dựng lại`)
@@ -915,6 +920,9 @@ export async function assemble(
 // ─── GET /projects/:id/document, GET /projects/:id/export/word ──
 
 export interface DocumentQuery {
+  /** Fixed-template exports must not reuse documents assembled with legacy collapsed headings. */
+  freshTemplate?: boolean
+  recordChanges?: ChangeRecordRow[]
   source: RenderSource
   baseline_id?: string
   /**
@@ -1142,13 +1150,14 @@ const getTranslatedBaselineDocument = async (
   baselineId: string | undefined,
   languages: ProjectLanguages,
   deps: AssembleDeps,
-  beforeRender?: (spine: Spine) => Promise<void>
+  beforeRender?: (spine: Spine) => Promise<void>,
+  savedRecords?: ChangeRecordRow[]
 ): Promise<DocumentWithMeta> => {
   const baseline = await findBaseline(projectId, baselineId)
   const spine = baselineSpine(baseline.snapshot)
   if (beforeRender) await beforeRender(spine)
   // §I + status rỗng như bản baseline gốc (`getBaselineDocument`)
-  const recordChanges = await listChangesForRecord(projectId)
+  const recordChanges = savedRecords ?? await listChangesForRecord(projectId)
   const resolveInCharge = await buildInChargeResolver(recordChanges)
   const template = await (deps.loadTemplate ?? loadTemplateLayout)(projectId)
 
@@ -1197,9 +1206,9 @@ export async function getDocumentWithMeta(
 ): Promise<DocumentWithMeta> {
   const merged: AssembleDeps = { ...defaultDeps(), ...deps }
   const { languages } = query
-  if (languages && languages.locale !== languages.source) {
+  if (languages && (languages.locale !== languages.source || query.freshTemplate)) {
     return query.source === "baseline"
-      ? getTranslatedBaselineDocument(projectId, projectName, query.baseline_id, languages, merged, query.beforeRender)
+      ? getTranslatedBaselineDocument(projectId, projectName, query.baseline_id, languages, merged, query.beforeRender, query.recordChanges)
       : getTranslatedDraftDocument(projectId, projectName, languages, merged, query.beforeRender)
   }
   if (query.source === "baseline") return { doc: await getBaselineDocument(projectId, projectName, query.baseline_id, merged) }
@@ -1231,6 +1240,8 @@ export async function renderSpineDocument(
   projectName: string,
   spine: Spine,
   opts: {
+    /** Immutable version history; an explicit empty array means no generated history rows. */
+    recordChanges?: ChangeRecordRow[]
     version: string
     source: RenderSource
     /** Change chưa ghi DB nhưng thuộc snapshot (C-7 render trước khi ghi Spine — FLF-186) — nối vào §I. */
@@ -1244,7 +1255,7 @@ export async function renderSpineDocument(
   deps: Partial<AssembleDeps> = {}
 ): Promise<RenderedDocument> {
   const merged: AssembleDeps = { ...defaultDeps(), ...deps }
-  const recordChanges = [...(await listChangesForRecord(projectId)), ...(opts.pendingRecord ?? [])]
+  const recordChanges = [...(opts.recordChanges ?? await listChangesForRecord(projectId)), ...(opts.pendingRecord ?? [])]
   const resolveInCharge = await buildInChargeResolver(recordChanges)
   return buildDocument(
     {

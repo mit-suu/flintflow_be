@@ -47,6 +47,7 @@ import { knownKeysText, scopeKnownKeys } from "./known-keys.js"
 import { withMeteredAi, type MeteredResult } from "./metered-ai.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { capitalize, pathLabel, sectionLabel } from "../spine/human-labels.js"
+import { isRealText } from "../../shared/utils/instruction-text.js"
 import { PROVISIONAL_SECTION } from "./section-catalog.js"
 import { TABLE_ENTITIES, hasRequiredFields } from "./table-header-dictionary.js"
 import { indentedCells, tableRows, tableText } from "./table-rows.js"
@@ -234,6 +235,8 @@ export const deterministicTableItems = (
   const labelCol =
     entity === "nfrs" && statementCol !== undefined ? shape.columns.find((c) => c.index < statementCol && c.role === "name" && !fields.has(c.index))?.index : undefined
   return shape.body.flatMap((r) => {
+    // Hàng chỗ trống của mẫu (`[FR-xxx] | [The system shall ...]`) không phải dữ liệu — không thành phần tử Spine
+    if (!grid[r].some((cell) => isRealText(cell))) return []
     const value: Record<string, unknown> = {}
     for (const [col, field] of fields) {
       let cell: string | undefined = grid[r][col]?.trim()
