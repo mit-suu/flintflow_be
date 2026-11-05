@@ -78,10 +78,10 @@ describe("mode 1 — version + tải về", () => {
     expect((await c.get("/versions/9.9/blocks")).body.error.code).toBe("DOC_VERSION_NOT_FOUND")
 
     const diff = compareResponseSchema.parse((await c.get("/versions/compare?from=0.1&to=0.2")).body.data)
-    // bảng Performance: khớp theo text (file render không có neo) ⇒ modified 2 s → 1 s
-    expect(diff.blocks).toContainEqual(
-      expect.objectContaining({ block_id: null, change: "modified", before: expect.stringContaining("| 2 s |"), after: expect.stringContaining("| 1 s |") })
-    )
+    // FLF-366: 0.1 in nguyên văn đoạn Performance của file; CR sửa NFR ⇒ đoạn đó dựng lại từ Spine (bảng của renderer) —
+    // khác dạng khối nên diff là bỏ đoạn cũ (2 seconds) + thêm bảng mới (1 s), không ghép thành "modified"
+    expect(diff.blocks).toContainEqual(expect.objectContaining({ block_id: null, change: "removed", before: expect.stringContaining("within 2 seconds") }))
+    expect(diff.blocks).toContainEqual(expect.objectContaining({ block_id: null, change: "added", after: expect.stringContaining("| 1 s |") }))
     expect((await c.get("/versions/compare?from=0.2&to=0.2")).status).toBe(400)
 
     const draft = await binary(c.get("/versions/0.2/download"))
