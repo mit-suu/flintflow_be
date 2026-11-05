@@ -29,6 +29,7 @@ import { snapshotBaseline } from "../pipeline/s9/baseline.service.js"
 import { Baseline } from "../spine/baseline.model.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import { isOriginalDiagramKind, originalDiagramHash } from "../spine/original-diagram.js"
+import { rehashSegments, segmentKeyOfPath } from "../spine/segment-hash.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Op } from "../spine/op.types.js"
 import type { Baseline as BaselineEntry, OriginalDiagramKind, Spine } from "../spine/spine.types.js"
@@ -50,7 +51,7 @@ import { IMPORT_IMAGE_RULE, IMPORT_NEEDS_REVIEW_RULE, IMPORT_UNRESOLVED_RULE } f
 import { parseDocument } from "./parse.service.js"
 import { buildImportOps, droppedPermissionFindings, type DroppedPermission } from "./spine-builder.js"
 import { tableRows } from "./table-rows.js"
-import { buildLayout, buildStepPlan, customSectionOps, customSectionsWithContent, functionOriginals, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
+import { buildLayout, buildStepPlan, customSectionOps, customSectionsWithContent, functionOriginals, projectFieldEntities, sectionSegments, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
 import { functionSourceHash } from "../render/layout-sections.js"
 import { TemplateProfile, type HeadingMapEntry, type LayoutEntry, type TableMapEntry } from "./template-profile.model.js"
 import { compareTargetStructure, type TargetStructure, type TemplateIntent } from "./target-structure.js"
@@ -179,7 +180,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     const kind = imageRead.get(b.block_id)
     if (kind) b.diagram = { kind, source_hash: originalDiagramHash(imported, kind) }
   }
-  const { layout, customSections, slices } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds)
+  const { layout, customSections, slices, segments } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds)
   const seeded = await loadSpine(projectId)
   // Kế hoạch đọc Spine đã nạp dữ liệu: mục trích không ra gì thì vẫn là "thiếu", đừng đánh dấu step đã xong
   const plan = buildStepPlan(layout, sectionsWithContent(layoutBlocks), stripRecord(seeded))
@@ -206,6 +207,9 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   profile.step_plan = plan
   // Mẫu IEEE: phần tử trích từ heading lặp (Availability dưới 4.2.2) in dưới đúng heading đó của file
   profile.section_slices = sectionSlices(slices, entities)
+  // FLF-366: đoạn nguyên văn theo mục FPT — dấu tính trên Spine sau lô thực thể (lô kế hoạch step không đổi phần tử)
+  profile.section_segments = sectionSegments(segments, customSections, [...entities, ...projectFieldEntities(accepted)], stripRecord(seeded), names)
+  profile.markModified("section_segments")
   // T15: giữ lịch sử sửa đổi của khách (bảng dưới heading Record of Changes) — render in lên đầu bảng §I.
   // FLF-252: dòng người dùng đã xem/sửa ở wizard thắng; không gửi ⇒ đọc lại từ file
   profile.legacy_record_of_changes =
@@ -287,6 +291,23 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   await assembleWorkingDraft(projectId, projectName, after.spine_version)
   scheduleEmbeddingSync(projectId)
   return { doc, baseline, spine_version: after.spine_version ?? spineVersion, flags: countOpenFlags(after.flags), target_structure: structure }
+}
+
+/**
+ * FLF-366: tính lại dấu đoạn nguyên văn sau một lô ghi `by: import` vào Spine đã có bản 0.1 (vd FLF-360 đọc lại ảnh): đoạn
+ * chứa phần tử vừa ghi nhận dấu mới để không bị coi là CR đã sửa (in nguyên văn như cũ), phần tử import mới thêm không bị
+ * in thêm ở cuối mục. `paths` = đường dẫn op của lô (`business_rules[id=BR-01].statement`); không truyền ⇒ tính lại hết.
+ * Project chưa có dữ liệu đoạn ⇒ không làm gì.
+ */
+export const refreshSegmentHashes = async (projectId: string, paths?: readonly string[]): Promise<void> => {
+  const profile = await TemplateProfile.findOne({ projectId })
+  if (!profile?.section_segments?.length) return
+  const spine = stripRecord(await loadSpine(projectId))
+  const touched = paths ? new Set(paths.flatMap((p) => segmentKeyOfPath(p) ?? [])) : undefined
+  if (touched && !touched.size) return
+  profile.section_segments = rehashSegments(profile.section_segments, spine, touched)
+  profile.markModified("section_segments")
+  await profile.save()
 }
 
 /** Id chức năng đọc từ bảng Non-Screen Functions (mục 3.1.4) của file, theo thứ tự bảng (FLF-252). */

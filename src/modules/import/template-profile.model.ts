@@ -8,6 +8,7 @@
 import mongoose, { Schema, Document } from "mongoose"
 import type { RocRow } from "../render/rendered-document.types.js"
 import type { CustomBlock } from "../spine/spine.types.js"
+import type { SectionSegments } from "../spine/segment-hash.js"
 import { HEADING_DETECTORS, type HeadingDetector } from "./import.constants.js"
 import type { TargetStructure } from "./target-structure.js"
 
@@ -96,6 +97,11 @@ export interface ITemplateProfile extends Document {
    * (`nfrs:NFR-03`) — bản in đặt phần tử dưới đúng heading của file thay vì dồn hết lên lần đầu của section.
    */
   section_slices: { custom_id: string; section_id: string; items: string[] }[]
+  /**
+   * FLF-366: đoạn của từng mục FPT `fixed:*` theo thứ tự file (`spine/segment-hash.ts`) — đoạn còn khớp dấu in nguyên văn
+   * file, lệch thì chỉ phần tử của đoạn dựng lại từ Spine. Project import trước FLF-366 không có ⇒ bản in như cũ.
+   */
+  section_segments: SectionSegments[]
   /** FLF-336 I-5: kết quả so cấu trúc đích lần finalize gần nhất (present / missing / out_of_scope + chế độ thật); null khi chưa so. */
   target_structure: TargetStructure | null
   createdAt: Date
@@ -165,6 +171,8 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
       default: []
     },
     target_structure: { type: Schema.Types.Mixed, default: null },
+    // FLF-366: đoạn nguyên văn theo mục (`SectionSegments` — khối gốc, phần tử, dấu) — chỉ để in lại
+    section_segments: { type: Schema.Types.Mixed, default: [] },
     section_slices: {
       type: [
         new Schema(
