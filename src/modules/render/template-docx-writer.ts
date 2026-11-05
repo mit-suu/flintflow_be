@@ -9,8 +9,10 @@ import { TABLE_ENTITIES } from "../import/table-header-dictionary.js"
 import { recordColumnOfHeader } from "../import/legacy-record.js"
 import type { TableMapEntry } from "../import/template-profile.model.js"
 
+const TEMPLATE_LAYOUT_UNAVAILABLE = "TEMPLATE_LAYOUT_UNAVAILABLE"
+
 const unavailable = (reason: string): never => {
-  throw new ApiError(422, "Không thể điền nội dung vào bố cục mẫu gốc.", "TEMPLATE_LAYOUT_UNAVAILABLE", { reason })
+  throw new ApiError(422, "Không thể điền nội dung vào bố cục mẫu gốc.", TEMPLATE_LAYOUT_UNAVAILABLE, { reason })
 }
 
 /** Populate the imported package in place: its styles, sections and ancillary parts remain authoritative. */
@@ -125,7 +127,15 @@ export async function writeTemplateDocx(
             if (sourceTable) {
               const sourceBlock = blocks.find((b) => b.kind === "table" && b.element === sourceTable)
               const columns = tableMap.filter((entry) => entry.block_id === sourceBlock?.block_id)
-              output.push(table(xml, projectMappedTable(block, sourceTable, columns), sourceTable, pattern, bodyStyleId))
+              // FLF-372: bảng không ghép được cột với bảng mẫu ⇒ in bảng riêng theo cột FlintFlow tại chỗ của mục (không đoán
+              // cột, không dồn ô cuối) thay vì hỏng cả lượt tạo bản; lỗi khác vẫn ném
+              try {
+                output.push(table(xml, projectMappedTable(block, sourceTable, columns), sourceTable, pattern, bodyStyleId))
+              } catch (err) {
+                if ((err as { code?: string }).code !== TEMPLATE_LAYOUT_UNAVAILABLE) throw err
+                console.warn(`[template-docx] Bảng của ${section.id} không ghép được với bảng mẫu (${String((err as { meta?: { reason?: string } }).meta?.reason ?? "")}) ⇒ in bảng FlintFlow`)
+                output.push(table(xml, block, undefined, pattern, bodyStyleId))
+              }
             }
             else output.push(...tableAsParagraphs(xml, block, pattern))
             break
@@ -227,11 +237,15 @@ function projectMappedTable(block: Extract<Block, { type: "table" }>, source: El
     const mapping = mappings.find((m) => m.column_index === column)
     const field = byDictionary ? fieldOf(byDictionary, header) : mapping?.field_path?.split("[].")[1]
     if (mapping?.role === "row_no") return -2
-    const index = field ? generated.indexOf(field) : -1
-    if (index < 0) unavailable(`Source table column ${column + 1} has no explicit generated field`)
-    return index
+    // FLF-372: cột của mẫu mà FlintFlow không có dữ liệu ("Thuộc tính chính", "Yêu cầu liên quan") ⇒ để trống, giữ bố cục mẫu
+    return field ? generated.indexOf(field) : -1
   })
-  return { type: "table", header: headers.map((text) => [{ text }]), rows: block.rows.map((row, i) => indexes.map((index) => index === -2 ? [{ text: String(i + 1) }] : row[index] ?? [])) }
+  if (!indexes.some((index) => index >= 0)) unavailable("Source table has no column with a generated field")
+  return {
+    type: "table",
+    header: headers.map((text) => [{ text }]),
+    rows: block.rows.map((row, i) => indexes.map((index) => (index === -2 ? [{ text: String(i + 1) }] : index >= 0 ? (row[index] ?? []) : [])))
+  }
 }
 
 function table(xml: Document, block: Extract<Block, { type: "table" }>, source?: Element, pattern?: Element, bodyStyleId?: string): Element {

@@ -61,7 +61,7 @@ describe("writeTemplateDocx", () => {
     expect(wAll(dataCells[1], "t").map((t) => t.textContent).join("")).toBe("three")
   })
 
-  it("preserves vertical merge groups and rejects hidden values or repeated continuations", async () => {
+  it("preserves vertical merge groups; hidden values / repeated continuations fall back to a FlintFlow table (FLF-372)", async () => {
     const zip = await JSZip.loadAsync(await template())
     const merged = sourceTable.replace(`${cell("sample")}${cell("sample")}</w:tr>`, `${cell("[A]").replace("<w:tcPr>", '<w:tcPr><w:vMerge w:val="restart"/>')}${cell("[B]")}</w:tr><w:tr>${cell("").replace("<w:tcPr>", '<w:tcPr><w:vMerge/>')}${cell("[B]")}</w:tr>`)
     zip.file("word/document.xml", (await zip.file("word/document.xml")!.async("string")).replace(sourceTable, merged))
@@ -72,10 +72,14 @@ describe("writeTemplateDocx", () => {
     const output = await parseDocument(await writeTemplateDocx(doc, input, map))
     const merges = wAll(output.blocks.find((b) => b.kind === "table")!.element, "vMerge")
     expect(merges.map((m) => wAttr(m, "val"))).toEqual(["restart", null])
+    // FLF-372: không lặp được nhóm gộp dọc ⇒ không hỏng cả lượt — in bảng FlintFlow (không gộp), giá trị không mất
     block.rows[1][0] = runs("must not disappear")
-    await expect(writeTemplateDocx(doc, input, map)).rejects.toMatchObject({ code: "TEMPLATE_LAYOUT_UNAVAILABLE" })
+    const fallback = (await parseDocument(await writeTemplateDocx(doc, input, map))).blocks.find((b) => b.kind === "table")!
+    expect(wAll(fallback.element, "vMerge")).toHaveLength(0)
+    expect(fallback.text).toContain("must not disappear")
     block.rows.pop()
-    await expect(writeTemplateDocx(doc, input, map)).rejects.toMatchObject({ code: "TEMPLATE_LAYOUT_UNAVAILABLE" })
+    const single = (await parseDocument(await writeTemplateDocx(doc, input, map))).blocks.find((b) => b.kind === "table")!
+    expect(wAll(single.element, "vMerge")).toHaveLength(0)
   })
 
   it.each([
@@ -149,10 +153,15 @@ describe("writeTemplateDocx", () => {
     await expect(writeTemplateDocx(doc, input, [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:1" }])).rejects.toMatchObject({ code: "TEMPLATE_LAYOUT_UNAVAILABLE" })
   })
 
-  it("rejects mismatched table schemas instead of guessing columns or appending overflow", async () => {
+  it("mismatched table schemas never guess columns or append overflow — the FlintFlow table is written as is (FLF-372)", async () => {
     const input = await template(), parsed = await parseDocument(input), doc = document()
     doc.sections = [{ id: "fixed:1", number: "1", heading: "Requirements", level: 1, blocks: [{ type: "table", header: [runs("ID"), runs("Name"), runs("Role"), runs("Permissions")], rows: [[runs("A01"), runs("Manager"), runs("Manage club"), runs("Approve members")]] }] }]
-    await expect(writeTemplateDocx(doc, input, [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:1" }])).rejects.toMatchObject({ code: "TEMPLATE_LAYOUT_UNAVAILABLE" })
+    const output = await writeTemplateDocx(doc, input, [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:1" }])
+    const table = (await parseDocument(output)).blocks.find((b) => b.kind === "table")!
+    expect(table.rows).toEqual([
+      ["ID", "Name", "Role", "Permissions"],
+      ["A01", "Manager", "Manage club", "Approve members"]
+    ])
   })
 
   it("FLF-372: tiêu đề cột tiếng Việt tách nhiều run vẫn khớp; cột FlintFlow mẫu không có thì bỏ, không hỏng cả lượt", async () => {
