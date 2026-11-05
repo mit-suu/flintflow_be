@@ -22,7 +22,7 @@ import type { ErdNotation, RenderContext } from "../../shared/diagram/erd-notati
 import { ORIGINAL_DIAGRAM_LABELS, ORIGINAL_DIAGRAM_SECTION, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds } from "./original-diagram.js"
 import { NFR_CATEGORY_LABELS, capitalize, diagramLabel, pathLabel, quotedSectionLabel } from "./human-labels.js"
 import { PROJECT_TEXT_FIELDS, SRS_TEXT_FIELDS, VALIDATION_TEXT_FIELDS, pickTextFields } from "./srs-text-fields.js"
-import { isRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
+import { isRealText, tableBodyHasRealText } from "../../shared/utils/instruction-text.js"
 
 export interface RuleDef {
   rule_id: string
@@ -769,7 +769,8 @@ const fixedTemplateGaps = (spine: Spine, layout: ReadonlySet<string>, wrappers: 
         layout.has(`custom:${c.id}`) &&
         !wrappers.has(`custom:${c.id}`) &&
         c.heading.trim() &&
-        !c.blocks.some((b) => b.image_ref || isRealText(b.text) || tableHasRealText(b.rows))
+        // Bảng: bỏ hàng tiêu đề cột — bảng mẫu chỉ có tiêu đề + hàng chỗ trống vẫn là mục trống
+        !c.blocks.some((b) => b.image_ref || (b.kind === "table" ? tableBodyHasRealText(b.rows) : isRealText(b.text)))
     )
     .map(
       (c): FlagCandidate => ({

@@ -1,3 +1,5 @@
+import { listChangesForRecord } from "../render/assemble.service.js"
+import { captureTemplateSourceBinding } from "../doc-version/template-source-binding.js"
 /**
  * C-7 ghi thay đổi đã duyệt (nút 3.14) — ghi ngay khi duyệt xong (D4). FLF-171, plan §6 2E; mode 1 v2 (FLF-186).
  * Spine là nguồn sự thật (D1): kiểm giá trị tại path chưa đổi → chạy khô op (`by = cr_id`) → **render** version minor
@@ -57,7 +59,11 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
   const version = (await latestDocVersion(projectId))!
   const next = nextMinor(version.version)
   const projectName = (await Project.findById(projectId, { name: 1 }).lean())?.name ?? "SRS"
+  const templateSource = await captureTemplateSourceBinding(projectId)
+  const recordSnapshot = templateSource ? await listChangesForRecord(projectId) : null
   const buffer = await renderVersionFile(projectId, projectName, plan?.spine ?? current, {
+    templateSource,
+    ...(recordSnapshot ? { recordChanges: recordSnapshot } : {}),
     version: next,
     stampSource: "cr_revision",
     pendingRecord: (plan?.changes ?? []).map((c) => ({ txn: c.txn, at: c.at, by: c.by, reason: c.reason ?? null, op: c.op, step_id: c.step_id ?? null }))
@@ -84,6 +90,9 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
       based_on: version.version,
       cr_ids: [cr.cr_id],
       baseline_ref: null,
+      template_source: templateSource,
+      record_snapshot: recordSnapshot ? [...recordSnapshot, ...(plan?.changes ?? []).map((c) => ({ txn: c.txn, at: c.at, by: c.by, reason: c.reason ?? null, op: c.op, path: c.path, step_id: c.step_id ?? null }))] : null,
+      spine_snapshot: templateSource ? (plan?.spine ?? current) : null,
       created_by: userId
     })
     versionCreated = true
@@ -139,10 +148,12 @@ const redrawDiagrams = async (
   if (![fresh, drawn].some((r) => r && (r.rendered.length || r.removed.length))) return
   try {
     const latest = stripRecord((await spineRepository.get(projectId))!)
-    const buffer = await renderVersionFile(projectId, projectName, latest, { version, stampSource: "cr_revision" })
+    const stored = await DocVersion.findOne({ projectId, version }).lean()
+    const templateSource = stored?.template_source ?? null
+    const buffer = await renderVersionFile(projectId, projectName, latest, { version, stampSource: "cr_revision", templateSource, ...(stored?.record_snapshot ? { recordChanges: stored.record_snapshot } : {}) })
     const redone = await docFileStore().save(buffer, { projectId, kind: "version", name: version })
     const redoneTracked = await tracked(buffer)
-    await DocVersion.updateOne({ projectId, version }, { $set: { file_ref: redone, tracked_file_ref: redoneTracked } })
+    await DocVersion.updateOne({ projectId, version }, { $set: { file_ref: redone, tracked_file_ref: redoneTracked, ...(templateSource ? { spine_snapshot: latest } : {}) } })
     await docFileStore().remove(refs.file)
     if (refs.tracked) await docFileStore().remove(refs.tracked)
   } catch (err) {
