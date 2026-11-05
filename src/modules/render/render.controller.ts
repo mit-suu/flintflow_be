@@ -2,7 +2,9 @@
  * render.controller.ts
  * ─────────────────────────────────────────────────────────────────
  * POST /projects/:projectId/assemble               S-8.2 ghép RenderedDocument, cache
- * GET  /projects/:projectId/document?source=&baseline_id=   trả RenderedDocument
+ * GET  /projects/:projectId/document?source=&baseline_id=   trả RenderedDocument (ảnh dạng tham chiếu `image-ref:`)
+ * GET  /projects/:projectId/document/image?ref=             bytes một ảnh của tài liệu theo tham chiếu (FLF-369)
+ * GET  /projects/:projectId/version                         spine_version + revision tài liệu (FLF-369)
  *
  * `GET /projects/:projectId/export/word` nằm ở `export.controller.ts` (T05 tạo file, T15 thêm route
  * thật — dùng chung `getDocument` ở đây qua `assemble.service.ts`).
@@ -24,6 +26,10 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { validationError } from "../../shared/utils/validation-message.js"
 import { isViewer } from "../../shared/auth/viewer-read-scope.middleware.js"
 import { viewerDocument } from "./viewer-projection.js"
+import * as spineRepository from "../spine/spine.repository.js"
+import { DIAGRAM_FILE_CSP } from "../diagram/diagram.controller.js"
+import { parseImageRef, readImageRef, refDiagramPngLoader, refLocalizedPngLoader } from "./image-ref.js"
+import { documentVersion } from "./document-revision.js"
 
 const parse = <T extends z.ZodType>(schema: T, input: unknown): z.infer<T> => {
   const parsed = schema.safeParse(input)
@@ -80,10 +86,19 @@ export const assembleController = catchAsync(async (req: Request, res: Response)
 export const getDocumentController = catchAsync(async (req: Request, res: Response) => {
   const { projectId, projectName, documentLanguage, sourceLanguage } = await authorize(req)
   const query = parse(documentQuerySchema, req.query)
+  // FLF-369: revision đọc TRƯỚC khi dựng ⇒ thay đổi chen giữa làm revision cũ hơn tài liệu thực tế, client tải lại thêm
+  // một lần (an toàn), không bao giờ ngược lại
+  const version = query.source === "draft" ? await documentVersion(projectId, { locale: documentLanguage, source: sourceLanguage }) : null
 
   try {
     // FLF-265: ngôn ngữ lấy từ project — xem trước không nhận `?lang=` (chỉ tải file #18/#34, FLF-334 B)
-    const result = await getDocumentWithMeta(projectId, projectName, { ...query, languages: { locale: documentLanguage, source: sourceLanguage } })
+    // FLF-369: ảnh dạng tham chiếu — FE tải riêng qua /document/image; export Word/PDF và comment vẫn nhúng PNG
+    const result = await getDocumentWithMeta(
+      projectId,
+      projectName,
+      { ...query, languages: { locale: documentLanguage, source: sourceLanguage } },
+      { loadDiagramPng: refDiagramPngLoader(), loadLocalizedDiagramPng: refLocalizedPngLoader() }
+    )
     // review C2: source=draft trước đây trả im lặng bản cache mới nhất dù Spine đã đổi tiếp — đính
     // kèm độ mới để caller (FE) tự quyết định có báo "tài liệu đang xem đã cũ" hay không.
     // FLF-265: bản dịch dựng mới mỗi lần, không ghi cache ⇒ độ mới lấy từ chính bản vừa dựng.
@@ -92,6 +107,7 @@ export const getDocumentController = catchAsync(async (req: Request, res: Respon
       ...(draftMeta
         ? { assembled_at_version: draftMeta.assembled_at_version, spine_version: draftMeta.spine_version, stale: draftMeta.stale }
         : {}),
+      ...(version ? { document_revision: version.document_revision } : {}),
       // Chỉ khi ngôn ngữ tài liệu ≠ ngôn ngữ gốc (contract #16) — draft lẫn baseline
       ...(result.translation ? { translation: documentTranslationMetaSchema.parse(result.translation) } : {})
     }
@@ -109,4 +125,57 @@ export const getDocumentController = catchAsync(async (req: Request, res: Respon
     }
     throw err
   }
+})
+
+// ─── GET /document/image ─────────────────────────────────────────
+
+const imageQuerySchema = z.object({ ref: z.string().min(1).max(600) })
+
+const IMAGE_NOT_FOUND = "IMAGE_NOT_FOUND"
+const notFound = (): ApiError => new ApiError(404, "Không tìm thấy ảnh này trong tài liệu.", IMAGE_NOT_FOUND)
+
+/**
+ * Một ảnh của tài liệu theo chuỗi `image-ref:` mà GET /document trả. Kiểm thành viên (`authorize`), rồi kiểm tham chiếu
+ * thuộc đúng dự án: sơ đồ phải có trong `spine.diagrams`; bản dịch chỉ nhận đúng ngôn ngữ tài liệu (khác ngôn ngữ gốc);
+ * media chỉ nhận part đang được mục riêng tham chiếu (`custom_sections[].blocks[].image_ref`), không part tuỳ ý trong
+ * file. Chỉ đọc — thiếu file ⇒ 404, không vẽ. Hash lệch file đang lưu ⇒ 409 `IMAGE_CHANGED` (FE tải lại tài liệu).
+ * URL mang hash nội dung ⇒ cache trình duyệt dài hạn.
+ */
+export const getDocumentImageController = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, documentLanguage, sourceLanguage } = await authorize(req)
+  const { ref: token } = parse(imageQuerySchema, req.query)
+  const ref = parseImageRef(token)
+  if (!ref) throw notFound()
+  const spine = await spineRepository.get(projectId)
+  if (!spine) throw notFound()
+  if (ref.kind === "diagram") {
+    if (!spine.diagrams.some((d) => d.id === ref.id)) throw notFound()
+    if (ref.locale !== undefined && (ref.locale !== documentLanguage || ref.locale === sourceLanguage)) throw notFound()
+  } else {
+    const parts = new Set(spine.custom_sections.flatMap((c) => c.blocks.flatMap((b) => (b.kind === "image" && b.image_ref ? [b.image_ref] : []))))
+    if (!parts.has(ref.id)) throw notFound()
+  }
+  const image = await readImageRef(projectId, ref)
+  if (!image.ok) {
+    if (image.reason === "changed") throw new ApiError(409, "Ảnh này vừa được vẽ lại — tải lại tài liệu để xem bản mới.", "IMAGE_CHANGED")
+    throw notFound()
+  }
+  res.setHeader("Content-Type", image.contentType)
+  res.setHeader("Cache-Control", "private, max-age=31536000, immutable")
+  res.setHeader("Content-Security-Policy", DIAGRAM_FILE_CSP)
+  res.setHeader("X-Content-Type-Options", "nosniff")
+  return res.status(200).send(image.data)
+})
+
+// ─── GET /version ────────────────────────────────────────────────
+
+/**
+ * Nhẹ, để tab đang mở hỏi định kỳ: chỉ đầu Spine + một change + một bản dịch (không dựng tài liệu, không `listChanges`).
+ * Mọi vai trò trong org (Viewer có trong allowlist).
+ */
+export const getVersionController = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, documentLanguage, sourceLanguage } = await authorize(req)
+  const version = await documentVersion(projectId, { locale: documentLanguage, source: sourceLanguage })
+  if (!version) throw new ApiError(404, "Dự án chưa có dữ liệu tài liệu.", "SPINE_NOT_FOUND")
+  return sendSuccess(res, 200, version)
 })

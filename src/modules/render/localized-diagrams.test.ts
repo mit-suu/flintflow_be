@@ -8,6 +8,8 @@ import { titleCase } from "../diagram/renderers/context.renderer.js"
 import { svgTitleOf } from "../diagram/renderers/common.js"
 import { translationUnits, type TranslationUnit, type UnitValue } from "../translation/translation-units.js"
 import { localizeSpine, localizedDiagramSources, renderView } from "./localized-spine.js"
+import { _clearRenderCache, matchingPart } from "./localized-diagrams.js"
+import type { RenderedPart } from "../diagram/renderers/common.js"
 
 const fixture = (): Spine =>
   spineSchema.parse(JSON.parse(readFileSync(new URL("../../../fixtures/spine-fixture-19-screens.json", import.meta.url), "utf8")))
@@ -151,5 +153,52 @@ describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong 
     expect(byKind(spine, "context")[0].source).toContain(`>${titleCase(human.flows_in![0])}<`)
     expect(byKind(view, "context")[0].source).toContain(`>${human.flows_in![0]}<`)
     expect(localizedDiagramSources(spine, localized).has(byKind(spine, "context")[0].id)).toBe(true)
+  })
+})
+
+describe("matchingPart — ghép phần bản dịch với phần gốc theo tập id use case", () => {
+  const part = (source: string, members?: string[], section = "fixed:2.2.1"): RenderedPart => ({
+    kind: "usecase", section, owner_kind: null, owner_id: null, format: "svg", source, ...(members ? { members } : {})
+  })
+  const hierarchy = (source: string) => part(source, undefined, "fixed:2.1")
+
+  it("chữ dịch dài làm bản dịch tách khác (cùng số phần, khác bộ use case) ⇒ phần lệch không ghép, dùng ảnh gốc", () => {
+    const before = [part("a", ["UC01", "UC02"]), part("b", ["UC03"]), hierarchy("h")]
+    const after = [part("a'", ["UC01"]), part("b'", ["UC02", "UC03"]), hierarchy("h'")]
+    expect(matchingPart(before, after, 0)).toBeUndefined()
+    expect(matchingPart(before, after, 1)).toBeUndefined()
+    expect(matchingPart(before, after, 2)?.source).toBe("h'")
+  })
+
+  it("tách khác số phần: phần cùng tập id vẫn ghép đúng dù khác chỉ số; hình không có members ghép theo thứ tự riêng", () => {
+    const before = [part("a", ["UC01", "UC02"]), part("b", ["UC03", "UC04"]), hierarchy("h")]
+    const after = [part("a1", ["UC01"]), part("a2", ["UC02"]), part("b'", ["UC03", "UC04"]), hierarchy("h'")]
+    expect(matchingPart(before, after, 0)).toBeUndefined()
+    expect(matchingPart(before, after, 1)?.source).toBe("b'")
+    expect(matchingPart(before, after, 2)?.source).toBe("h'")
+  })
+})
+
+describe("cache renderer trong tiến trình (FLF-369)", () => {
+  it("cùng đầu vào ⇒ cùng nguồn (lượt sau lấy từ cache); chữ dịch khác ⇒ vẽ lại, không trả nhầm kết quả cũ", () => {
+    _clearRenderCache()
+    const { spine } = rendered()
+    const units = translationUnits(spine)
+    const first = renderView(localizeSpine(spine, units, translate(units), "vi")).diagrams.map((d) => d.source)
+    const again = renderView(localizeSpine(spine, units, translate(units), "vi")).diagrams.map((d) => d.source)
+    expect(again).toEqual(first)
+    const other = new Map([...translate(units)].map(([k, v]) => [k, typeof v === "string" ? v.replace(/^vi: /, "vi2: ") : v]))
+    const changed = renderView(localizeSpine(spine, units, other, "vi"))
+    expect(changed.diagrams.filter((d) => d.kind === "usecase").map((d) => d.source).join("")).toContain(">vi2: ")
+  })
+
+  it("cùng Spine khác RenderContext (ký pháp ERD) ⇒ khoá khác, không lẫn kết quả", () => {
+    _clearRenderCache()
+    const { spine } = rendered()
+    const units = translationUnits(spine)
+    const chen = renderView(localizeSpine(spine, units, translate(units), "vi", { erdNotation: "chen" }))
+    const crow = renderView(localizeSpine(spine, units, translate(units), "vi", { erdNotation: "crowsfoot" }))
+    // fixture vẽ ERD theo chen ⇒ bản crowsfoot không khớp nguồn đang lưu ⇒ giữ nguồn gốc; bản chen được dịch
+    expect(chen.diagrams.find((d) => d.kind === "erd")!.source).not.toBe(crow.diagrams.find((d) => d.kind === "erd")!.source)
   })
 })

@@ -1,0 +1,818 @@
+{
+  "_comment": "Use case Log In / Reset Password chung nhiều actor người. spine: rút từ dự án local (Outpatient Flow Suite) — chỉ field renderer use case đọc; trước FLF-350 phần Authentication lỗi line_over_text. diagram: hình dựng tay cùng hình dạng (7 actor người, 2 use case chung) mà bộ xếp chỉ đổi khoảng cách vẫn để đường association cắt chữ actor.",
+  "spine": {
+    "project": {
+      "name": "Dự án chưa đặt tên",
+      "system_name": "Outpatient Flow Suite"
+    },
+    "actors": [
+      {
+        "id": "A01",
+        "name": "BHYT Appraisal Portal",
+        "kind": "system"
+      },
+      {
+        "id": "A02",
+        "name": "Payment Gateway",
+        "kind": "system"
+      },
+      {
+        "id": "A03",
+        "name": "Patient",
+        "kind": "human"
+      },
+      {
+        "id": "A04",
+        "name": "Reception Staff",
+        "kind": "human"
+      },
+      {
+        "id": "A05",
+        "name": "Doctor",
+        "kind": "human"
+      },
+      {
+        "id": "A06",
+        "name": "Cashier",
+        "kind": "human"
+      },
+      {
+        "id": "A07",
+        "name": "Pharmacist",
+        "kind": "human"
+      },
+      {
+        "id": "A08",
+        "name": "BHYT Verification Officer",
+        "kind": "human"
+      },
+      {
+        "id": "A09",
+        "name": "System Administrator",
+        "kind": "human"
+      },
+      {
+        "id": "A10",
+        "name": "Appointment Reminder Scheduler",
+        "kind": "time"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "UC01",
+        "name": "Book Outpatient Appointment Online",
+        "actor_ids": [
+          "A03"
+        ],
+        "function_ids": [
+          "FN003"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC02",
+        "name": "Book Appointment By Phone",
+        "actor_ids": [
+          "A04"
+        ],
+        "function_ids": [
+          "FN003"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC03",
+        "name": "Change Appointment",
+        "actor_ids": [
+          "A03"
+        ],
+        "function_ids": [
+          "FN004"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC04",
+        "name": "Cancel Appointment",
+        "actor_ids": [
+          "A03"
+        ],
+        "function_ids": [
+          "FN004"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC05",
+        "name": "Send Appointment Reminder",
+        "actor_ids": [
+          "A10"
+        ],
+        "function_ids": [
+          "FN017"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC06",
+        "name": "Check In Booked Appointment",
+        "actor_ids": [
+          "A04"
+        ],
+        "function_ids": [
+          "FN006"
+        ],
+        "description": "",
+        "includes": [
+          "UC09"
+        ],
+        "extends": []
+      },
+      {
+        "id": "UC07",
+        "name": "Register Walk-in Patient",
+        "actor_ids": [
+          "A04"
+        ],
+        "function_ids": [
+          "FN007"
+        ],
+        "description": "",
+        "includes": [
+          "UC09"
+        ],
+        "extends": []
+      },
+      {
+        "id": "UC08",
+        "name": "Verify BHYT Card",
+        "actor_ids": [
+          "A04",
+          "A01"
+        ],
+        "function_ids": [
+          "FN008"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": [
+          "UC06",
+          "UC07"
+        ]
+      },
+      {
+        "id": "UC09",
+        "name": "Issue Queue Number",
+        "actor_ids": [
+          "A04"
+        ],
+        "function_ids": [
+          "FN006"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC10",
+        "name": "View Visit Queue",
+        "actor_ids": [
+          "A05"
+        ],
+        "function_ids": [
+          "FN009"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC11",
+        "name": "Record Diagnosis",
+        "actor_ids": [
+          "A05"
+        ],
+        "function_ids": [
+          "FN010"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC12",
+        "name": "Order Lab Tests",
+        "actor_ids": [
+          "A05"
+        ],
+        "function_ids": [
+          "FN011"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC13",
+        "name": "View Lab Results",
+        "actor_ids": [
+          "A05"
+        ],
+        "function_ids": [
+          "FN011"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC14",
+        "name": "Prescribe Medicines",
+        "actor_ids": [
+          "A05"
+        ],
+        "function_ids": [
+          "FN010"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC15",
+        "name": "Complete Visit",
+        "actor_ids": [
+          "A05"
+        ],
+        "function_ids": [
+          "FN010"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC16",
+        "name": "Calculate Visit Charges",
+        "actor_ids": [
+          "A06"
+        ],
+        "function_ids": [
+          "FN012"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC17",
+        "name": "Collect Counter Payment",
+        "actor_ids": [
+          "A06"
+        ],
+        "function_ids": [
+          "FN012"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC18",
+        "name": "Pay Outpatient Fees Online",
+        "actor_ids": [
+          "A03",
+          "A02"
+        ],
+        "function_ids": [
+          "FN003",
+          "FN012",
+          "FN018"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC19",
+        "name": "Refund Payment",
+        "actor_ids": [
+          "A06"
+        ],
+        "function_ids": [
+          "FN012"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC20",
+        "name": "Dispense Prescribed Medicines",
+        "actor_ids": [
+          "A07"
+        ],
+        "function_ids": [
+          "FN013"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC21",
+        "name": "Build BHYT XML Record",
+        "actor_ids": [
+          "A08"
+        ],
+        "function_ids": [
+          "FN014"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC22",
+        "name": "Submit BHYT Claim Record",
+        "actor_ids": [
+          "A08",
+          "A01"
+        ],
+        "function_ids": [
+          "FN014",
+          "FN019"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC23",
+        "name": "Resolve Rejected Claim",
+        "actor_ids": [
+          "A08",
+          "A01"
+        ],
+        "function_ids": [
+          "FN014"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC24",
+        "name": "View Visit History",
+        "actor_ids": [
+          "A03"
+        ],
+        "function_ids": [
+          "FN005"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC25",
+        "name": "Create Staff Account",
+        "actor_ids": [
+          "A09"
+        ],
+        "function_ids": [
+          "FN015"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC26",
+        "name": "Assign Staff Roles",
+        "actor_ids": [
+          "A09"
+        ],
+        "function_ids": [
+          "FN015"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC27",
+        "name": "Update Doctor Schedule",
+        "actor_ids": [
+          "A09"
+        ],
+        "function_ids": [
+          "FN015"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC28",
+        "name": "Update Service Prices",
+        "actor_ids": [
+          "A09"
+        ],
+        "function_ids": [
+          "FN015"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC29",
+        "name": "Register Patient Account",
+        "actor_ids": [
+          "A03"
+        ],
+        "function_ids": [
+          "FN002"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC30",
+        "name": "Log In",
+        "actor_ids": [
+          "A03",
+          "A04",
+          "A05",
+          "A06",
+          "A07",
+          "A08",
+          "A09"
+        ],
+        "function_ids": [
+          "FN001",
+          "FN021"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC31",
+        "name": "Reset Password",
+        "actor_ids": [
+          "A03",
+          "A04",
+          "A05",
+          "A06",
+          "A07",
+          "A08",
+          "A09"
+        ],
+        "function_ids": [
+          "FN001"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC32",
+        "name": "Deactivate Staff Account",
+        "actor_ids": [
+          "A09"
+        ],
+        "function_ids": [
+          "FN015"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC33",
+        "name": "Review Audit Log",
+        "actor_ids": [
+          "A09"
+        ],
+        "function_ids": [
+          "FN016"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      },
+      {
+        "id": "UC34",
+        "name": "Archive Expired Medical Records",
+        "actor_ids": [],
+        "function_ids": [
+          "FN020"
+        ],
+        "description": "",
+        "includes": [],
+        "extends": []
+      }
+    ],
+    "functions": [
+      {
+        "id": "FN001",
+        "feature_id": "F1"
+      },
+      {
+        "id": "FN002",
+        "feature_id": "F1"
+      },
+      {
+        "id": "FN003",
+        "feature_id": "F2"
+      },
+      {
+        "id": "FN004",
+        "feature_id": "F2"
+      },
+      {
+        "id": "FN005",
+        "feature_id": "F2"
+      },
+      {
+        "id": "FN006",
+        "feature_id": "F3"
+      },
+      {
+        "id": "FN007",
+        "feature_id": "F3"
+      },
+      {
+        "id": "FN008",
+        "feature_id": "F3"
+      },
+      {
+        "id": "FN009",
+        "feature_id": "F4"
+      },
+      {
+        "id": "FN010",
+        "feature_id": "F4"
+      },
+      {
+        "id": "FN011",
+        "feature_id": "F4"
+      },
+      {
+        "id": "FN012",
+        "feature_id": "F5"
+      },
+      {
+        "id": "FN013",
+        "feature_id": "F6"
+      },
+      {
+        "id": "FN014",
+        "feature_id": "F7"
+      },
+      {
+        "id": "FN015",
+        "feature_id": "F8"
+      },
+      {
+        "id": "FN016",
+        "feature_id": "F8"
+      },
+      {
+        "id": "FN017",
+        "feature_id": "F2"
+      },
+      {
+        "id": "FN018",
+        "feature_id": "F5"
+      },
+      {
+        "id": "FN019",
+        "feature_id": "F7"
+      },
+      {
+        "id": "FN020",
+        "feature_id": "F8"
+      },
+      {
+        "id": "FN021",
+        "feature_id": "F1"
+      }
+    ],
+    "features": [
+      {
+        "id": "F1",
+        "name": "Authentication",
+        "order": 0
+      },
+      {
+        "id": "F2",
+        "name": "Appointment Booking",
+        "order": 1
+      },
+      {
+        "id": "F3",
+        "name": "Reception",
+        "order": 2
+      },
+      {
+        "id": "F4",
+        "name": "Examination",
+        "order": 3
+      },
+      {
+        "id": "F5",
+        "name": "Cashier",
+        "order": 4
+      },
+      {
+        "id": "F6",
+        "name": "Dispensing",
+        "order": 5
+      },
+      {
+        "id": "F7",
+        "name": "BHYT Claims",
+        "order": 6
+      },
+      {
+        "id": "F8",
+        "name": "Administration",
+        "order": 7
+      }
+    ]
+  },
+  "diagram": {
+    "system": "Outpatient Flow Suite",
+    "rows": [
+      {
+        "id": "UC29",
+        "name": "Register Patient Account"
+      },
+      {
+        "id": "UC30",
+        "name": "Log In"
+      },
+      {
+        "id": "UC31",
+        "name": "Reset Password"
+      },
+      {
+        "id": "UC32",
+        "name": "Update Profile"
+      },
+      {
+        "id": "UC33",
+        "name": "View Visit History"
+      }
+    ],
+    "actors": [
+      {
+        "id": "A03",
+        "name": "Patient",
+        "kind": "human",
+        "abstract": false
+      },
+      {
+        "id": "A04",
+        "name": "Reception Staff",
+        "kind": "human",
+        "abstract": false
+      },
+      {
+        "id": "A05",
+        "name": "Doctor",
+        "kind": "human",
+        "abstract": false
+      },
+      {
+        "id": "A06",
+        "name": "Cashier",
+        "kind": "human",
+        "abstract": false
+      },
+      {
+        "id": "A07",
+        "name": "Pharmacist",
+        "kind": "human",
+        "abstract": false
+      },
+      {
+        "id": "A08",
+        "name": "BHYT Verification Officer",
+        "kind": "human",
+        "abstract": false
+      },
+      {
+        "id": "A09",
+        "name": "System Administrator",
+        "kind": "human",
+        "abstract": false
+      }
+    ],
+    "associations": [
+      {
+        "actorId": "A03",
+        "useCaseId": "UC29"
+      },
+      {
+        "actorId": "A08",
+        "useCaseId": "UC29"
+      },
+      {
+        "actorId": "A09",
+        "useCaseId": "UC29"
+      },
+      {
+        "actorId": "A03",
+        "useCaseId": "UC30"
+      },
+      {
+        "actorId": "A04",
+        "useCaseId": "UC30"
+      },
+      {
+        "actorId": "A05",
+        "useCaseId": "UC30"
+      },
+      {
+        "actorId": "A06",
+        "useCaseId": "UC30"
+      },
+      {
+        "actorId": "A07",
+        "useCaseId": "UC30"
+      },
+      {
+        "actorId": "A09",
+        "useCaseId": "UC30"
+      },
+      {
+        "actorId": "A03",
+        "useCaseId": "UC31"
+      },
+      {
+        "actorId": "A04",
+        "useCaseId": "UC31"
+      },
+      {
+        "actorId": "A05",
+        "useCaseId": "UC31"
+      },
+      {
+        "actorId": "A06",
+        "useCaseId": "UC31"
+      },
+      {
+        "actorId": "A07",
+        "useCaseId": "UC31"
+      },
+      {
+        "actorId": "A08",
+        "useCaseId": "UC31"
+      },
+      {
+        "actorId": "A09",
+        "useCaseId": "UC31"
+      },
+      {
+        "actorId": "A03",
+        "useCaseId": "UC32"
+      },
+      {
+        "actorId": "A08",
+        "useCaseId": "UC32"
+      },
+      {
+        "actorId": "A09",
+        "useCaseId": "UC32"
+      },
+      {
+        "actorId": "A03",
+        "useCaseId": "UC33"
+      },
+      {
+        "actorId": "A07",
+        "useCaseId": "UC33"
+      },
+      {
+        "actorId": "A08",
+        "useCaseId": "UC33"
+      }
+    ],
+    "relations": []
+  }
+}
