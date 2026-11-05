@@ -802,13 +802,15 @@ describe("chế độ 3 — mẫu bắt buộc (FLF-278 trên FLF-335/336)", () 
       custom_sections: [
         { id: "CS01", heading: "Document Conventions", level: 2, blocks: [block("[Describe the conventions used in this SRS.]")], source: "import" },
         { id: "CS02", heading: "References", level: 2, blocks: [block("IEEE 830-1998")], source: "import" },
-        { id: "CS03", heading: "Chat note", level: 1, blocks: [], source: "manual" }
+        { id: "CS03", heading: "Chat note", level: 1, blocks: [], source: "manual" },
+        // bảng mẫu: tiêu đề + hàng chỗ trống ⇒ vẫn trống
+        { id: "CS04", heading: "Business Rules", level: 2, blocks: [{ kind: "table" as const, text: "", rows: [["ID", "Rule"], ["[BR-xx]", "[Describe the rule.]"]], image_ref: null }], source: "import" }
       ]
     }
-    const layout = new Set(["fixed:1", "custom:CS01", "custom:CS02"])
+    const layout = new Set(["fixed:1", "custom:CS01", "custom:CS02", "custom:CS04"])
     const flags = runDeterministicCheck(spine, [], { ruleProfile: { exclude: new Set(), downgrade: new Set(), templateLayout: layout } })
     const empty = flags.filter((f) => f.rule_id === "template_section_empty")
-    expect(empty.map((f) => f.section_id)).toEqual(["custom:CS01"])
+    expect(empty.map((f) => f.section_id)).toEqual(["custom:CS01", "custom:CS04"])
     const absent = flags.filter((f) => f.rule_id === "template_section_absent")
     expect(absent.length).toBeGreaterThan(0)
     expect(absent.every((f) => f.level === "yellow" && f.section_id !== "fixed:1")).toBe(true)
@@ -818,6 +820,6 @@ describe("chế độ 3 — mẫu bắt buộc (FLF-278 trên FLF-335/336)", () 
     const wrapped = runDeterministicCheck(spine, [], {
       ruleProfile: { exclude: new Set(), downgrade: new Set(), templateLayout: layout, templateWrappers: new Set(["custom:CS01"]) }
     })
-    expect(wrapped.some((f) => f.rule_id === "template_section_empty")).toBe(false)
+    expect(wrapped.filter((f) => f.rule_id === "template_section_empty").map((f) => f.section_id)).toEqual(["custom:CS04"])
   })
 })
