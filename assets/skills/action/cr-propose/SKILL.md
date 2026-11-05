@@ -1,7 +1,7 @@
 ---
 skill_id: cr-propose
 kind: action
-version: 2.5.0
+version: 2.6.0
 description: Mode 1 C-4 — for every affected Spine element conclude edit | comment | not_related and propose the Spine ops
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -81,7 +81,11 @@ and keep every other field exactly as it is — each changed field is a revision
    needs is not there, still write a reasonable value, and add one short line per invented fact to that location's
    `assumptions`, in the document's language (`"Giả định thời gian phản hồi tối đa 2 giây"`). Never invent a fact
    silently; `assumptions` is `[]` when everything came from the inputs.
-9. `reason`, `comment_text` and `assumptions`: User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`, `feature:@B0012`), element paths (`actors[id=A02].name`), block ids (`B0012`) or location ids (`L001`). Name a section by its heading and an element by its name or document code (`UC-01` is fine).
+9. **Contradiction answered** (an answer to a question quoting the CR against existing content): "change it to follow
+   the CR" ⇒ also edit the old element / passage that said otherwise so the document no longer says both (a passage
+   kept verbatim: set that `custom_sections` element's `blocks`, changing only the conflicting sentence); when no op
+   can express it, conclude `comment` naming the passage to fix. "keep it as it is" ⇒ do not change that content.
+10. `reason`, `comment_text` and `assumptions`: User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`, `feature:@B0012`), element paths (`actors[id=A02].name`), block ids (`B0012`) or location ids (`L001`). Name a section by its heading and an element by its name or document code (`UC-01` is fine).
 
 ## Output
 
