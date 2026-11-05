@@ -175,7 +175,7 @@ export const TABLE_ENTITIES: readonly TableEntityDef[] = [
     columns: [
       { field: "id", headers: ["id", "ref id", "mã", "mã tài liệu"] },
       { field: "title", headers: ["title", "document", "document title", "tên tài liệu", "tài liệu", "tiêu đề"] },
-      { field: "owner", headers: ["owner", "publisher", "issuer", "đơn vị", "đơn vị ban hành", "nơi ban hành"] },
+      { field: "owner", headers: ["owner", "publisher", "issuer", "đơn vị", "đơn vị ban hành", "nơi ban hành", "chủ quản", "cơ quan ban hành"] },
       { field: "version", headers: ["version", "phiên bản"] },
       { field: "date", headers: ["date", "issue date", "ngày", "ngày ban hành"] },
       { field: "location", headers: ["location", "link", "url", "source", "nơi lưu", "đường dẫn", "nguồn"] },
