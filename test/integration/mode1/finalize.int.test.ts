@@ -304,6 +304,33 @@ describe("finalize — DocVersion 0.1 + baseline imported", () => {
     expect(JSON.stringify((await sectionOf()).blocks)).toContain("Learner clicks Sign in")
   })
 
+  it("FLF-366: mục FPT in theo đoạn của file — chưa sửa ⇒ nguyên văn (bảng BR đúng tiêu đề cột của file); CR sửa BR ⇒ chỉ đoạn đó in từ Spine", async () => {
+    const { projectId } = await importFinalized({ srs: { extraRules: [["BR-02", "Accounts lock after 5 failed logins."]] } })
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    const rules = profile.section_segments.find((r) => r.section_id === "fixed:5.1")!
+    expect(rules.parts.some((p) => p.kind === "spine" && p.items.includes("business_rules:BR-01"))).toBe(true)
+    const draft = async () => new Map((await getDocument(projectId, "Lumen", { source: "draft" })).sections.map((s) => [s.id, s]))
+    const before = await draft()
+    const header = (b: unknown) => ((b as { header?: { text: string }[][] }).header ?? []).map((c) => c.map((r) => r.text).join(""))
+    expect(before.get("fixed:5.1")!.blocks.map((b) => b.type)).toEqual(["table"])
+    expect(header(before.get("fixed:5.1")!.blocks[0])).toEqual(["BR ID", "Business Rule"])
+    expect(before.get("fixed:1")!.blocks[0]).toEqual({ type: "paragraph", runs: [{ text: SRS_FIXTURE_TEXT.purpose }] })
+
+    const spine = (await spineRepository.get(projectId))!
+    const applied = await applyTransaction(projectId, {
+      base_version: spine.spine_version,
+      ops: [{ op: "set", path: "business_rules[id=BR-01].statement", value: "Passwords must have at least 10 characters." }],
+      by: "CR-001",
+      reason: "test",
+      step_id: null
+    })
+    await assemble(projectId, "Lumen", applied.spine_version)
+    const after = await draft()
+    expect(JSON.stringify(after.get("fixed:5.1")!.blocks)).toContain("at least 10 characters")
+    expect(header(after.get("fixed:5.1")!.blocks[0])).not.toEqual(["BR ID", "Business Rule"])
+    for (const id of ["fixed:1", "fixed:2.1", "fixed:2.2.2", "fixed:4.2.3"]) expect(after.get(id)?.blocks).toEqual(before.get(id)?.blocks)
+  })
+
   it("FLF-184: văn xuôi I-4 báo không trích được ⇒ giữ nguyên văn ở đầu section chủ khi render từ Spine", async () => {
     mockOverrides.next = (prompt: string) => {
       const out = fakeMode1(prompt)

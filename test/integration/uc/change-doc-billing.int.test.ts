@@ -153,9 +153,10 @@ describe("UC-48 — so sánh hai phiên bản SRS", () => {
     expect(res.status, JSON.stringify(res.body.error)).toBe(200)
     const diff = compareResponseSchema.parse(res.body.data)
     expect(diff).toMatchObject({ from: "0.1", to: "0.2" })
-    expect(diff.summary.modified).toBeGreaterThan(0)
-    const changed = diff.blocks.find((b) => b.change === "modified" && b.before?.includes("2 seconds"))
-    expect(changed?.after).toContain("1 second")
+    // FLF-366: 0.1 in nguyên văn đoạn NFR của file; sau CR đoạn đó dựng lại từ Spine (khác dạng khối) ⇒ bỏ đoạn cũ + thêm đoạn mới
+    expect(diff.summary.removed).toBeGreaterThan(0)
+    expect(diff.blocks.some((b) => b.change === "removed" && b.before?.includes("2 seconds"))).toBe(true)
+    expect(diff.blocks.some((b) => b.change !== "removed" && b.after?.includes("1 second"))).toBe(true)
   })
 
   it("phiên bản không tồn tại ⇒ 404 DOC_VERSION_NOT_FOUND; from trùng to ⇒ 400", async () => {
