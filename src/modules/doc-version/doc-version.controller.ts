@@ -13,7 +13,8 @@ import { getPackage, requestChanges, settleAfterRelease, submitPackage, type Pac
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { release } from "./release.service.js"
 import { compareVersions, downloadVersion, listVersions, toVersionDto, versionBlocks } from "./versions.service.js"
-import { IMPORTED_DOC_VERSIONS, isReleaseVersion } from "./versioning.js"
+import { requireDocVersion } from "./doc-version.service.js"
+import { isStableDocVersion } from "./versioning.js"
 import { isViewer } from "../../shared/auth/viewer-read-scope.middleware.js"
 
 export const list = mode1Handler(async (req, res) => {
@@ -32,7 +33,7 @@ export const download = mode1Handler(async (req, res) => {
   const { v } = parseInput(versionParamsSchema, req.params)
   const { variant, format, lang } = parseInput(downloadQuerySchema, req.query)
   // UC-50: Viewer chỉ tải bản đã phát hành (kể cả v0) — không bản nháp 0.x, không bản đánh dấu theo CR
-  if (isViewer(req) && (variant === "tracked" || !(IMPORTED_DOC_VERSIONS.includes(v) || isReleaseVersion(v)))) {
+  if (isViewer(req) && (variant === "tracked" || !isStableDocVersion(await requireDocVersion(auth.projectId, v)))) {
     throw new ApiError(403, "Viewer chỉ tải được phiên bản đã phát hành.", "ORG_ROLE_FORBIDDEN")
   }
   if (format === "pdf" && variant === "original") throw new ApiError(400, "File gốc người dùng upload chỉ tải được dạng .docx.", "VALIDATION_ERROR")
