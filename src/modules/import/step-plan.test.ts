@@ -202,8 +202,11 @@ describe("sectionsWithContent", () => {
   it("FLF-278: chữ hướng dẫn của mẫu (`[…]`, ô chỗ trống) không tính là nội dung", () => {
     const blocks: LayoutBlock[] = [
       { block_id: "B1", kind: "paragraph", level: null, text: "[Describe the product scope.]", section_id: "fixed:1" },
-      { block_id: "B2", kind: "table", level: null, text: "", section_id: "fixed:2.1", rows: [["Role", "[Name]"]] },
-      { block_id: "B3", kind: "table", level: null, text: "", section_id: "fixed:4.1", rows: [["[x.y]", "[dd/mm/yyyy]"]] }
+      { block_id: "B2", kind: "table", level: null, text: "", section_id: "fixed:2.1", rows: [["Role", "Admin"]] },
+      { block_id: "B3", kind: "table", level: null, text: "", section_id: "fixed:4.1", rows: [["[x.y]", "[dd/mm/yyyy]"]] },
+      // bảng một hàng nhãn | chỗ trống; bảng tiêu đề + hàng chỗ trống (3.2 Functional Requirements của mẫu FU-IT-SRS-01)
+      { block_id: "B4", kind: "table", level: null, text: "", section_id: "fixed:2.2", rows: [["Role", "[Name]"]] },
+      { block_id: "B5", kind: "table", level: null, text: "", section_id: "fixed:4.2", rows: [["ID", "Requirement", "Priority"], ["[FR-xxx]", "[Describe the requirement.]", "[High/Medium/Low]"]] }
     ]
     expect(sectionsWithContent(blocks)).toEqual(new Set(["fixed:2.1"]))
   })

@@ -18,7 +18,7 @@ import type { CustomBlock, CustomSection, OriginalDiagram, Spine, StepState } fr
 import type { DocBlockKind } from "./import.constants.js"
 import { UNMAPPED_SECTION } from "./import.constants.js"
 import { targetsOf } from "./extract-targets.js"
-import { isRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
+import { isRealText, tableBodyHasRealText } from "../../shared/utils/instruction-text.js"
 import { withSlotParents } from "./content-slots.js"
 import type { LayoutEntry, StepPlanItem } from "./template-profile.model.js"
 
@@ -240,11 +240,12 @@ export const functionOriginals = (blocks: readonly LayoutBlock[], headingSection
 }
 
 /**
- * Khối có nội dung thật: ảnh; bảng có ô chữ thật; đoạn chữ không phải chữ hướng dẫn của mẫu (`[Describe …]`, "Mục này mô
- * tả…" — business-flow 1.3). Mẫu trống chỉ còn chữ hướng dẫn ⇒ không có nội dung (FLF-278 trên FLF-336).
+ * Khối có nội dung thật: ảnh; bảng có ô chữ thật **ngoài hàng tiêu đề cột** (bảng mẫu chỉ có "ID | Requirement" + hàng
+ * `[FR-xxx]` là bảng trống); đoạn chữ không phải chữ hướng dẫn của mẫu (`[Describe …]`, "Mục này mô tả…" — business-flow 1.3).
+ * Mẫu trống chỉ còn chữ hướng dẫn ⇒ không có nội dung (FLF-278 trên FLF-336).
  */
 const hasRealContent = (b: { kind: string; text: string; rows?: string[][] | null; image_ref?: string | null }): boolean =>
-  b.kind === "image" ? true : b.kind === "table" ? (b.rows ? tableHasRealText(b.rows) : isRealText(b.text)) : isRealText(b.text)
+  b.kind === "image" ? true : b.kind === "table" ? (b.rows ? tableBodyHasRealText(b.rows) : isRealText(b.text)) : isRealText(b.text)
 
 /** Section có nội dung thật (khối không phải heading) — mục "chỉ có heading" hoặc chỉ có chữ hướng dẫn coi như thiếu. */
 export const sectionsWithContent = (blocks: LayoutBlock[]): Set<string> => {

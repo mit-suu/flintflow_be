@@ -1,3 +1,7 @@
+import { Project } from "../project/project.model.js"
+import { spineSchema } from "../spine/spine.schema.js"
+import { DocVersion } from "./doc-version.model.js"
+import { FIXED_TEMPLATE_RENDERER_REVISION, templateLayoutUnavailable } from "./template-source-binding.js"
 /**
  * Đọc version tài liệu mode 1 qua API (UC-54 xem theo block, UC-55 so sánh, UC-57 tải về). FLF-171, plan §6 2F.
  * Mode 1 v2 (FLF-186): version là bản render từ Spine — block (#13) và so sánh (#15) đọc từ file của version, khớp theo
@@ -11,6 +15,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import type { UserLocale } from "../../shared/i18n/locale.js"
 import { CONVERT_STAMP_SOURCE } from "../import/convert-from-fpt.service.js"
 import type { DocumentLanguageProject } from "../project/document-language.js"
+import type { TemplateIntent } from "../project/project.model.js"
 import { loadBaselineSpine } from "../render/assemble.service.js"
 import { assertTranslationComplete, documentLanguageUnavailable, projectLanguages } from "../translation/translation.service.js"
 import { renderVersionFile } from "./render-version.js"
@@ -90,7 +95,8 @@ const stampDownload = async (pkg: DocxPackage, projectId: string, v: IDocVersion
  * FLF-334 B: `lang` = ngôn ngữ của file (không truyền / trùng ngôn ngữ tài liệu ⇒ như trước). Có `lang` thì BẮT BUỘC có
  * `project` (đọc ngôn ngữ tài liệu) — kiểu chặn lúc biên dịch, không để `lang` bị bỏ qua lặng lẽ.
  */
-export type DownloadLanguageOptions = { project?: DocumentLanguageProject; lang?: undefined } | { project: DocumentLanguageProject; lang: UserLocale }
+type DownloadProject = DocumentLanguageProject & { template_intent?: TemplateIntent | null }
+export type DownloadLanguageOptions = { project?: DownloadProject; lang?: undefined } | { project: DownloadProject; lang: UserLocale }
 
 export const downloadVersion = async (
   projectId: string,
@@ -100,6 +106,10 @@ export const downloadVersion = async (
   options: DownloadLanguageOptions = {}
 ): Promise<DownloadFile> => {
   const v = await requireDocVersion(projectId, version)
+  const intent = options.project?.template_intent === undefined
+    ? (await Project.findById(projectId, { template_intent: 1 }).lean())?.template_intent
+    : options.project.template_intent
+  const fixed = intent === "fixed"
   const languages = options.lang && options.project ? await projectLanguages(projectId, options.project) : null
   const otherLanguage = !!languages && options.lang !== languages.locale
   if (otherLanguage && variant !== "auto") {
@@ -112,13 +122,15 @@ export const downloadVersion = async (
     // Chỉ version có snapshot baseline của dự án chuyển từ mode 2 — import thật (đường layout) / bản nháp CR chưa hỗ trợ
     if (!options.project || !otherLanguageAvailable(v, options.project)) throw documentLanguageUnavailable()
     const locale = options.lang!
+    if (fixed && !v.template_source) throw templateLayoutUnavailable()
     const spine = await loadBaselineSpine(projectId, v.baseline_ref!)
     if (locale !== languages!.source) await assertTranslationComplete(projectId, locale, spine)
     // Dựng mỗi lần, không ghi GridFS: file lưu của version giữ ngôn ngữ tài liệu
     const rendered = await renderVersionFile(projectId, projectName, spine, {
       version: v.version,
       stampSource: v.kind === "release" ? "release" : CONVERT_STAMP_SOURCE,
-      languages: { locale, source: languages!.source }
+      languages: { locale, source: languages!.source },
+      ...(fixed ? { templateSource: v.template_source ?? null, recordChanges: v.record_snapshot ?? [] } : {})
     })
     const pkg = await DocxPackage.load(rendered)
     await stampDownload(pkg, projectId, v, lineage)
@@ -130,6 +142,13 @@ export const downloadVersion = async (
     if (!v.original_ref) throw new Mode1Error("DOC_VERSION_NOT_FOUND", "Phiên bản này không có file gốc để tải về.")
     return { filename: name({ original: true }), data: await docFileStore().load(v.original_ref) }
   }
+  if (fixed && variant === "auto") {
+    const pkg = await DocxPackage.load(await fixedVersionFile(projectId, projectName, v))
+    await stampDownload(pkg, projectId, v, lineage)
+    // File lưu / cache dựng ở `source = baseline` (không watermark) ⇒ bản chưa phát hành gắn DRAFT lúc tải như mẫu FPT
+    if (!lineage.release) await addDraftWatermark(pkg)
+    return { filename: name(), data: await pkg.toBuffer() }
+  }
   const release = lineage.release
   // BPMN 3.14 (mode 1 v3): bản có đánh dấu của CR là file riêng; version không có (0.0, dựng lỗi) ⇒ bản render như cũ
   const clean = release && variant === "auto" && !!v.clean_file_ref
@@ -137,8 +156,38 @@ export const downloadVersion = async (
   const ref = clean ? v.clean_file_ref! : tracked ? v.tracked_file_ref! : v.file_ref
   const pkg = await DocxPackage.load(await docFileStore().load(ref))
   await stampDownload(pkg, projectId, v, lineage)
+  // Mẫu bắt buộc cũng gắn watermark: chỉ thêm shape DRAFT vào header, nội dung / bố cục của mẫu giữ nguyên
   if (!release) await addDraftWatermark(pkg)
   return { filename: name({ tracked }), data: await pkg.toBuffer() }
+}
+
+/** Cache regenerated output separately; the original version file and snapshot stay intact. */
+const fixedVersionFile = async (projectId: string, projectName: string, v: IDocVersion): Promise<Buffer> => {
+  if (!v.template_source) throw templateLayoutUnavailable()
+  if (v.fixed_render_cache?.revision === FIXED_TEMPLATE_RENDERER_REVISION) {
+    try { return await docFileStore().load(v.fixed_render_cache.file_ref) } catch { /* Rebuild a missing cache only. */ }
+  }
+  let snapshot: unknown
+  try {
+    snapshot = v.spine_snapshot ?? (v.baseline_ref ? await loadBaselineSpine(projectId, v.baseline_ref) : null)
+  } catch { throw templateLayoutUnavailable() }
+  const parsed = spineSchema.safeParse(snapshot)
+  if (!parsed.success) throw templateLayoutUnavailable()
+  const rendered = await renderVersionFile(projectId, projectName, parsed.data, {
+    version: v.version, stampSource: v.kind, templateSource: v.template_source, recordChanges: v.record_snapshot ?? []
+  })
+  const ref = await docFileStore().save(rendered, {
+    projectId, kind: "version", name: `${v.version}_${FIXED_TEMPLATE_RENDERER_REVISION}`
+  })
+  try {
+    await DocVersion.updateOne({ _id: v._id }, { $set: {
+      fixed_render_cache: { revision: FIXED_TEMPLATE_RENDERER_REVISION, file_ref: ref }
+    } })
+  } catch (err) {
+    await docFileStore().remove(ref)
+    throw err
+  }
+  return rendered
 }
 
 export const compareVersions = async (projectId: string, from: string, to: string): Promise<CompareResponse> => {

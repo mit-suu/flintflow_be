@@ -2,9 +2,13 @@
  * Mode 1 v2 — render theo layout file người dùng (FLF-184, plan v2 §6). Hàm thuần: không DB.
  */
 import { describe, expect, it } from "vitest"
+import { readFile } from "node:fs/promises"
+import { parseDocument } from "../import/parse.service.js"
+import { assignBlockSections, matchProfile } from "../import/profile-match.service.js"
+import { buildLayout } from "../import/step-plan.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
-import { buildLayoutSections, customBlocks, functionSourceHash, numberSections, placeSections, romanValue, type TemplateLayout, type TemplateLayoutEntry } from "./layout-sections.js"
+import { buildLayoutSections, customBlocks, functionSourceHash, numberSections, placeSections, repairFixedTemplateLayout, romanValue, type TemplateLayout, type TemplateLayoutEntry } from "./layout-sections.js"
 
 const entry = (order: number, heading_text: string, level: number, section_id: string): TemplateLayoutEntry => ({ order, heading_text, level, section_id })
 
@@ -84,11 +88,11 @@ describe("placeSections — thứ tự theo file, chèn đầu mục FPT thiếu
     expect(placed.find((p) => p.section_id === "custom:CS01")?.kind).toBe("continuation")
   })
 
-  it("mẫu bắt buộc (chế độ 3): không chèn mục FPT ngoài mẫu; feature/function mới vẫn chèn dưới mục chức năng", () => {
+  it("mẫu bắt buộc (chế độ 3): không chèn heading ngoài mẫu", () => {
     const s = spine()
     s.functions.push({ ...s.functions[0], id: "FN02", order: 1, name: "Quên mật khẩu" })
     const ids = placeSections(s, { ...LAYOUT, fixedTemplate: true }).map((p) => p.section_id)
-    const fileOrder = ["fixed:1", "custom:CS01", "fixed:2.1", "feature:F-4", "function:FN01", "function:FN02", "group:4", "fixed:4.2.3", "custom:CS02"]
+    const fileOrder = ["fixed:1", "custom:CS01", "fixed:2.1", "feature:F-4", "function:FN01", "group:4", "fixed:4.2.3", "custom:CS02"]
     expect(ids).toEqual(fileOrder)
   })
 
@@ -479,6 +483,91 @@ describe("customBlocks", () => {
 })
 
 describe("phần nhỏ slot:* của mẫu khách (FLF-278 trên FLF-335/336)", () => {
+  it("fixed source Scope owns goals, Business Rules owns all tiers, and Messages retains its source columns", () => {
+    const s = spine()
+    s.project.goals = ["Increase club participation"]
+    s.project.release_scope.in = ["Club registration"]
+    s.business_rules = [
+      { id: "BR-H", tier: "high", statement: "Only enrolled students may join", source_validation_ids: [] },
+      { id: "BR-D", tier: "detail", statement: "An application needs approval", source_validation_ids: [] }
+    ]
+    s.messages = [{ id: "M1", code: "APPROVED", text: "Your application was approved", function_ids: [] }]
+    const layout = [entry(0, "1 Introduction", 1, "fixed:1"), entry(1, "1.2 Scope", 2, "custom:OLD-SCOPE"),
+      entry(2, "5.1 Business Rules", 2, "custom:OLD-RULES"), entry(3, "5.2 Messages", 2, "fixed:5.2")]
+    const { sections } = buildLayoutSections(s, { language: "en", fixedTemplate: true, layout }, [], { diagramPng: () => undefined })
+    expect(JSON.stringify(sections[0].blocks)).not.toContain("Increase club participation")
+    expect(JSON.stringify(sections[0].blocks)).not.toContain("Only enrolled students")
+    expect(JSON.stringify(sections[1].blocks)).toContain("Increase club participation")
+    expect(sections[2].blocks).toEqual([{ type: "table", header: [[{ text: "ID" }], [{ text: "Rule" }]], rows: [
+      [[{ text: "BR-H" }], [{ text: "Only enrolled students may join" }]],
+      [[{ text: "BR-D" }], [{ text: "An application needs approval" }]]
+    ] }])
+    expect(sections[3].blocks).toEqual([{ type: "table", header: [[{ text: "Code" }], [{ text: "Type" }], [{ text: "Content" }]], rows: [
+      [[{ text: "APPROVED" }], [{ text: "" }], [{ text: "Your application was approved" }]]
+    ] }])
+    const withSeparateGoals = buildLayoutSections(s, { language: "en", fixedTemplate: true, layout: [...layout, entry(4, "Goals", 2, "slot:goals")] }, [], { diagramPng: () => undefined })
+    expect(JSON.stringify(withSeparateGoals.sections.find((x) => x.id === "slot:scope")!.blocks)).not.toContain("Increase club participation")
+    s.messages = []
+    const empty = buildLayoutSections(s, { language: "en", fixedTemplate: true, layout }, [], { diagramPng: () => undefined })
+    expect(empty.sections.find((x) => x.id === "slot:messages")!.blocks).toEqual([])
+  })
+
+  it("real FU template projects populated data into source Purpose, Scope and FR table", async () => {
+    const { blocks } = await parseDocument(await readFile(new URL("../../../fixtures/fixed-template-fu-it-srs-01.docx", import.meta.url)))
+    const profile = matchProfile(blocks)
+    const sectionMap = assignBlockSections(blocks, profile.heading_map)
+    const built = buildLayout(blocks.map((b) => ({ ...b, section_id: sectionMap.get(b.block_id) ?? null })), new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
+    const s = spine()
+    s.project.release_scope = { in: ["Manage clubs"], out: ["Process payments"] }
+    s.custom_sections = built.customSections
+    const repaired = repairFixedTemplateLayout(built.layout, profile.heading_map.map((h) => ({ ...h, level: blocks.find((b) => b.block_id === h.block_id)!.level! })))
+    expect(repaired.filter((e) => e.heading_text.trim()).map((e) => e.heading_text)).toEqual(profile.heading_map.map((h) => h.heading_text))
+    const { sections } = buildLayoutSections(s, { layout: repaired, language: "en", fixedTemplate: true }, [], { diagramPng: () => undefined })
+    const purpose = sections.find((x) => /\bPurpose\b/.test(x.heading))!
+    const scope = sections.find((x) => /\bScope\b/.test(x.heading))!
+    expect(JSON.stringify(purpose.blocks)).toContain(s.project.vision)
+    expect(JSON.stringify(scope.blocks)).toContain("Manage clubs")
+    expect(JSON.stringify(scope.blocks)).toContain("Process payments")
+    const intro = sections.find((x) => /Introduction/.test(x.heading))!
+    expect(JSON.stringify(intro.blocks)).not.toContain(s.project.vision)
+    expect(JSON.stringify(intro.blocks)).not.toContain("Manage clubs")
+    const functional = sections.find((x) => /Functional Requirements/.test(x.heading))!
+    expect(functional.blocks[0]).toMatchObject({ type: "table", header: [[{ text: "ID" }], [{ text: "Requirement" }], [{ text: "Priority" }]] })
+    expect(JSON.stringify(functional.blocks)).toContain(s.functions[0].name)
+    expect(sections.flatMap((x) => x.blocks).some((b) => b.type === "heading")).toBe(false)
+    expect(sections.some((x) => x.id === "function:FN01")).toBe(false)
+    expect(JSON.stringify(purpose.blocks)).not.toContain("[Describe")
+  })
+
+  it("retains dependency prose when a cached custom assumptions heading is rebound", () => {
+    const s = spine()
+    s.assumptions = [{ id: "A01", statement: "Staff have accounts", status: "confirmed" } as Spine["assumptions"][number]]
+    s.custom_sections = [{ id: "DEP", heading: "2.5 Assumptions and Dependencies", level: 2, source: "import", blocks: [
+      { kind: "paragraph", text: "Depends on university identity service", rows: null, image_ref: null },
+      { kind: "paragraph", text: "[Describe assumptions and dependencies]", rows: null, image_ref: null }
+    ] }]
+    const repaired = repairFixedTemplateLayout([entry(0, "2.5 Assumptions and Dependencies", 2, "custom:DEP")], [
+      { block_id: "B1", heading_text: "2.5 Assumptions and Dependencies", level: 2, section_id: "fixed:5.4" }
+    ])
+    const { sections } = buildLayoutSections(s, { language: "en", fixedTemplate: true, layout: repaired }, [], { diagramPng: () => undefined })
+    expect(JSON.stringify(sections[0].blocks)).toContain("Staff have accounts")
+    expect(JSON.stringify(sections[0].blocks)).toContain("Depends on university identity service")
+    expect(JSON.stringify(sections[0].blocks)).not.toContain("[Describe")
+  })
+
+  it("source repair preserves repeated headings and attaches continuations to the original owner", () => {
+    const repaired = repairFixedTemplateLayout([
+      entry(0, "1 Introduction", 1, "fixed:1"), entry(1, "", 2, "custom:BODY"), entry(2, "2 Introduction", 1, "fixed:1")
+    ], [
+      { block_id: "B1", heading_text: "1 Introduction", level: 1, section_id: "fixed:1" },
+      { block_id: "B2", heading_text: "1.1 Purpose", level: 2, section_id: "fixed:1" },
+      { block_id: "B3", heading_text: "2 Introduction", level: 1, section_id: "fixed:1" }
+    ])
+    expect(repaired.map((x) => [x.heading_text, x.section_id, x.level])).toEqual([
+      ["1 Introduction", "fixed:1", 1], ["", "custom:BODY", 2], ["1.1 Purpose", "slot:vision", 2], ["2 Introduction", "group:source:B3", 1]
+    ])
+  })
+
   const slotLayout: TemplateLayout = {
     language: "en",
     fixedTemplate: true,
@@ -502,8 +591,32 @@ describe("phần nhỏ slot:* của mẫu khách (FLF-278 trên FLF-335/336)", (
     const text = JSON.stringify(scope.blocks)
     expect(text).toContain("Online courses")
     expect(text).toContain("Payments")
-    // heading con "In Scope" dời xuống dưới cấp heading mẫu
-    const sub = scope.blocks.find((b) => b.type === "heading") as { level: number } | undefined
-    expect(sub?.level).toBeGreaterThan(scope.level)
+    expect(scope.blocks.some((b) => b.type === "heading")).toBe(false)
+    // Mẫu bắt buộc: nhãn là dòng thường, không phải đoạn đậm giống heading
+    expect(scope.blocks).toContainEqual({ type: "paragraph", runs: [{ text: "In Scope:" }] })
+  })
+
+  it("repairs cached child bindings, preserves repeated and empty source headings, and reports absent data", () => {
+    const s = withScope()
+    s.project.goals = ["Increase access"]
+    s.custom_sections.push({ id: "NEW", heading: "New appendix", level: 1, source: "import", blocks: [] })
+    const template: TemplateLayout = { language: "en", fixedTemplate: true, layout: [
+      entry(0, "1 Introduction", 1, "fixed:1"),
+      entry(1, "1.1 Purpose", 2, "custom:OLD"),
+      entry(2, "1.2 Scope", 2, "fixed:1"),
+      entry(3, "2 Actors", 1, "fixed:2.1"),
+      entry(4, "3 Additional Actors", 1, "fixed:2.1"),
+      entry(5, "4 Notes", 1, "custom:MISSING")
+    ] }
+    const { sections, omittedSectionIds } = buildLayoutSections(s, template, [], { partial: true, diagramPng: () => undefined })
+    expect(sections.map((x) => x.heading)).toEqual(["Introduction", "Purpose", "Scope", "Actors", "Additional Actors", "Notes"])
+    expect(JSON.stringify(sections[0].blocks)).not.toContain(s.project.vision)
+    expect(JSON.stringify(sections[0].blocks)).not.toContain("Online courses")
+    expect(JSON.stringify(sections[1].blocks)).toContain(s.project.vision)
+    expect(JSON.stringify(sections[2].blocks)).toContain("Online courses")
+    expect(sections.flatMap((x) => x.blocks).some((b) => b.type === "heading")).toBe(false)
+    expect(sections[4].blocks).toEqual([])
+    expect(omittedSectionIds).toContain("function:FN01")
+    expect(omittedSectionIds).toContain("custom:NEW")
   })
 })

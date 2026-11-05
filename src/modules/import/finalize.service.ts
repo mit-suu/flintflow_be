@@ -1,3 +1,5 @@
+import { listChangesForRecord } from "../render/assemble.service.js"
+import { captureTemplateSourceBinding } from "../doc-version/template-source-binding.js"
 /**
  * Finalize import (nút 1.10) rồi check (1.11–1.12). FLF-171, plan §6 2C.
  *   1. Mọi field trích được ⇒ thực thể ⇒ op; áp trong **một** transaction `by: "import"`. FLF-343: field độ tin thấp (< 0.7 /
@@ -246,8 +248,10 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // Baseline imported + DocVersion 0.1 — chụp Spine sau lô kế hoạch step; file 0.1 = bản render của đúng snapshot đó
   const planned = await loadSpine(projectId)
   const projectName = project?.name ?? doc.original_name
+  const templateSource = await captureTemplateSourceBinding(projectId)
+  const recordSnapshot = templateSource ? await listChangesForRecord(projectId) : null
   const renderedRef = await docFileStore().save(
-    await renderVersionFile(projectId, projectName, stripRecord(planned), { version: IMPORTED_DOC_VERSION, stampSource: "import" }),
+    await renderVersionFile(projectId, projectName, stripRecord(planned), { version: IMPORTED_DOC_VERSION, stampSource: "import", templateSource, ...(recordSnapshot ? { recordChanges: recordSnapshot } : {}) }),
     { projectId, kind: "version", name: IMPORTED_DOC_VERSION }
   )
   let baseline: BaselineEntry
@@ -275,6 +279,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     based_on: null,
     cr_ids: [],
     baseline_ref: baseline.id,
+    template_source: templateSource,
+    record_snapshot: recordSnapshot,
     created_by: userId
   })
   // Index embedding cho C-3 (hybrid retrieval) từ baseline v0 — chạy nền, không chặn/không làm hỏng finalize. Gọi ngay
