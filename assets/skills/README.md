@@ -13,7 +13,8 @@ assets/skills/
 ├─ LICENSE-BMAD.md
 └─ <kind>/<skill_id>/
    ├─ SKILL.md            luôn nạp, ≤ ~150 dòng
-   ├─ references/*.md     nạp có điều kiện: getSkill(id, { references: [...] })
+   ├─ references/*.md     nạp có điều kiện: getSkill(id, { references: [...] }); skill nội dung của step chỉ
+   │                      đưa vào prompt những file khai ở `prompt_references` — còn lại model KHÔNG thấy
    └─ assets/*-template.md nạp lúc render (không tính vào asset_version)
 ```
 
@@ -37,6 +38,8 @@ writes:                         # BẮT BUỘC — field Spine skill được ph
 output_schema: opTransaction    # BẮT BUỘC — một tên hoặc mảng tên (bảng dưới)
 language: en                    # BẮT BUỘC — en: nội dung render vào SRS · user: theo ngôn ngữ user
 stub: true                      # tuỳ chọn — skill chờ task sau điền nội dung
+prompt_references:              # tuỳ chọn — reference luôn nạp kèm thân khi là skill nội dung của step (FLF-370)
+  - actor-rules                 #   tên file trong references/ (không đuôi .md); thiếu file ⇒ lỗi lúc nạp
 ---
 ```
 
