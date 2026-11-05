@@ -26,7 +26,7 @@ import type { Spine } from "../spine/spine.types.js"
 import { SYSTEM_LIFELINE } from "../spine/spine.schema.js"
 import { restatesAssumption } from "./text-overlap.js"
 import { normalizeFormFactorAt } from "../spine/form-factor.js"
-import { USE_CASE_NAME_FIX, emptyProtectedArraysOf, orphanEntities, useCaseNameIssues } from "../spine/deterministic-check.js"
+import { USE_CASE_NAME_FIX, emptyProtectedArraysOf, orphanEntities, sharedAccessGroups, sharedAccessMessage, useCaseNameIssues, type SharedAccessGroup } from "../spine/deterministic-check.js"
 import { stampAddendum } from "../spine/addendum-stamp.js"
 import { RECOMMENDED_SUFFIX } from "./decisions.service.js"
 import {
@@ -1006,6 +1006,41 @@ export const useCaseNamingErrors = (spine: Spine, ops: readonly Op[]): Validatio
       path: `use_cases[id=${issue.id}].name`,
       message: `${issue.message}. ${USE_CASE_NAME_FIX}`
     }))
+  } catch {
+    return []
+  }
+}
+
+/** Cách sửa gửi kèm lỗi `actor_generalization_missing` — model cần biết làm cả ba việc trong CÙNG lô. */
+export const ACTOR_GENERALIZATION_FIX =
+  "Sửa trong cùng lô: (1) chưa có tác nhân tổng quát thì `add actors[]` một actor `kind: \"human\"` tên \"User\" (id tiếp theo), " +
+  "`description` nêu tên mọi tác nhân con; (2) `set actors[id=<con>].parent_id` = id của \"User\" cho từng tác nhân con; " +
+  "(3) `set use_cases[id=<use case>].actor_ids` = [id của \"User\"] (giữ actor system như identity provider nếu có). " +
+  "Use case tài khoản chỉ MỘT tác nhân làm (vd. Register Account chỉ Customer tự đăng ký) thì giữ trên tác nhân đó"
+
+/** Bước được chặn: nơi use case tài khoản được gắn actor (S-3.2) hoặc bổ sung (S-3.3) — cả hai đều được ghi `actors`. */
+const GENERALIZATION_STEPS = new Set(["S-3.2", "S-3.3"])
+
+const groupKey = (g: SharedAccessGroup): string => `${[...g.actorIds].sort().join("|")}#${[...g.useCaseIds].sort().join("|")}#${g.commonParent ?? ""}`
+
+/**
+ * FLF-370: lô S-3.2/S-3.3 để use case truy cập tài khoản gắn thẳng ≥ 2 actor người (thiếu actor tổng quát `User`).
+ * Chỉ xét nhóm MỚI hoặc VỪA ĐỔI so với trước lô — nhóm có sẵn không chặn lô đang làm việc khác. Lỗi **mềm** như
+ * `useCaseNamingErrors`: hết lượt thì nhận lô, cờ vàng `actor_generalization_missing` là lưới cuối.
+ */
+export const actorGeneralizationErrors = (spine: Spine, ops: readonly Op[], stepId: string): ValidationError[] => {
+  if (!GENERALIZATION_STEPS.has(stepId.split("@")[0])) return []
+  if (!ops.some((op) => op.path.startsWith("use_cases") || op.path.startsWith("actors"))) return []
+  try {
+    const after = planTransaction(spine, { base_version: spine.spine_version, ops: [...ops], by: "op-validator", step_id: null }, { startSeq: 1 }).spine
+    const before = new Set(sharedAccessGroups(spine).map(groupKey))
+    return sharedAccessGroups(after)
+      .filter((g) => !before.has(groupKey(g)))
+      .map((g) => ({
+        rule: "actor_generalization_missing",
+        path: `use_cases[id=${g.useCaseIds[0]}].actor_ids`,
+        message: `${sharedAccessMessage(after, g)}. ${ACTOR_GENERALIZATION_FIX}`
+      }))
   } catch {
     return []
   }

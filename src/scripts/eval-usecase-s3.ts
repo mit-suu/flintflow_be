@@ -190,6 +190,8 @@ const METRIC_COLUMNS: Array<[string, (m: S3Metrics) => number]> = [
   ["floating", (m) => m.flags.floating],
   ["name_semantic", (m) => m.flags.name_semantic],
   ["name_style", (m) => m.flags.name_style],
+  ["gen_missing", (m) => m.flags.generalization_missing],
+  ["User", (m) => m.generalization.general_actors],
   ["persona thiếu", (m) => m.personasMissing.length]
 ]
 

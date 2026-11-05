@@ -16,7 +16,7 @@ import { planTransaction } from "../spine/op-engine.js"
 import { AiActionError, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
 import { projectStep, type StepContext } from "./context-projection.js"
-import { DraftRejectedError, draftOps, type DraftExecutor } from "./draft-to-ops.js"
+import { DraftRejectedError, contentGuidance, draftOps, type DraftExecutor } from "./draft-to-ops.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -261,6 +261,30 @@ describe("draftOps retry", () => {
     expect(result.attempts[0].errors).toEqual([])
   })
 
+  it("FLF-370: lô S-3.2 gắn use case tài khoản cho ≥ 2 actor người ⇒ gửi lại model; lượt sau thêm User + parent_id thì qua", async () => {
+    const shared = [{ op: "set", path: "use_cases[id=UC03].actor_ids", value: ["A01", "A02", "A08"] }]
+    const fixed = [
+      { op: "add", path: "actors[]", value: { id: "A10", name: "User", kind: "human", description: "Any signed-in Founder, Business Analyst or Administrator.", flows_in: ["Login Credentials"], flows_out: ["Session Token"] } },
+      ...["A01", "A02", "A03"].map((id) => ({ op: "set", path: `actors[id=${id}].parent_id`, value: "A10" })),
+      { op: "set", path: "use_cases[id=UC02].actor_ids", value: ["A10"] },
+      { op: "set", path: "use_cases[id=UC03].actor_ids", value: ["A10", "A08"] }
+    ]
+    const executor = vi.fn<DraftExecutor>().mockResolvedValueOnce(reply(shared)).mockResolvedValueOnce(reply(fixed))
+
+    const result = await draftOps("p", "S-3.2", ctxFor(spine, "S-3.2"), { userId: "u", spine, executor })
+    expect(result.attempts.map((a) => a.errors.map((e) => e.rule))).toEqual([["actor_generalization_missing"], []])
+    expect(result.txn?.ops).toHaveLength(fixed.length)
+    const secondVars = executor.mock.calls[1][1].promptVariables as Record<string, unknown>
+    expect(secondVars.validation_errors).toMatchObject([{ rule: "actor_generalization_missing", path: "use_cases[id=UC03].actor_ids" }])
+  })
+
+  it("FLF-370: hết lượt mà vẫn dùng chung ⇒ lượt cuối vẫn nhận lô (lỗi mềm, cờ vàng là lưới cuối)", async () => {
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([{ op: "set", path: "use_cases[id=UC03].actor_ids", value: ["A01", "A02", "A08"] }]))
+    const result = await draftOps("p", "S-3.2", ctxFor(spine, "S-3.2"), { userId: "u", spine, executor })
+    expect(executor).toHaveBeenCalledTimes(3)
+    expect(result.txn?.ops).toHaveLength(1)
+  })
+
   it("FLF-248: lô để trống danh sách bắt buộc của step (S-7.2 · common_requirements) ⇒ gửi lại model kèm lỗi", async () => {
     const bare = structuredClone(FIXTURE)
     bare.common_requirements = []
@@ -379,5 +403,20 @@ describe("draftOps — S-1.1 dựng lại tầm nhìn/mục tiêu từ addendum 
     const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([], { notes: "nothing" }))
     const result = await draftOps("p", "S-1.1", ctxFor(spine, "S-1.1"), { userId: "u", spine, executor })
     expect(result.txn).toBeNull()
+  })
+})
+
+describe("contentGuidance — FLF-370 reference khai ở prompt_references vào prompt", () => {
+  it("S-3.x (actors-and-usecases) kèm nguyên actor-rules sau thân skill", () => {
+    const guidance = contentGuidance({ skill: "actors-and-usecases" })
+    expect(guidance).toContain("## S-3.1 — Actors")
+    expect(guidance).toContain("## Reference: actor-rules")
+    expect(guidance).toContain("university")
+    expect(guidance.indexOf("## Reference: actor-rules")).toBeGreaterThan(guidance.indexOf("## Self-check"))
+  })
+
+  it("skill không khai prompt_references ⇒ chỉ thân skill", () => {
+    expect(contentGuidance({ skill: "screens-and-flow" })).not.toContain("## Reference:")
+    expect(contentGuidance({ skill: null })).toBe("")
   })
 })

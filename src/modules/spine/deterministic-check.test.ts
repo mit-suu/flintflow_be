@@ -29,23 +29,26 @@ const withSystemNameStep = (s: Spine, status: StepStatus): void => {
 }
 
 describe("RULES", () => {
-  it("13 luật đỏ + 24 luật vàng (FLF-278: template_section_absent / _empty; FLF-365: verification_orphan); mọi luật đỏ không waive được (FLF-329)", () => {
+  it("13 luật đỏ + 25 luật vàng (FLF-278: template_section_absent / _empty; FLF-365: verification_orphan; FLF-370: actor_generalization_missing); mọi luật đỏ không waive được (FLF-329)", () => {
     expect(RULES.filter((r) => r.level === "red")).toHaveLength(13)
     // FLF-177: thêm screen_placeholder (BUG-03), function_without_uc (BUG-12),
     // derived_from_changed_assumption (BUG-14); mode 1 §4.13: original_diagram_stale;
-    // FLF-225: orphan_entity, unresolved_many_to_many (ERD); actor_generalization_invalid, actor_generalization_children_unlisted; screen_actor_ambiguous đã bỏ cùng làn của luồng màn
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(24)
+    // FLF-225: orphan_entity, unresolved_many_to_many (ERD); actor_generalization_invalid, actor_generalization_children_unlisted; screen_actor_ambiguous đã bỏ cùng làn của luồng màn;
+    // FLF-370: actor_generalization_missing; FLF-365: verification_orphan
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(25)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(RULES.filter((r) => r.level === "red").map((r) => r.rule_id).sort())
     expect(RULES.filter((r) => r.level === "yellow").every((r) => r.waivable)).toBe(true)
   })
 })
 
 describe("runDeterministicCheck", () => {
-  it("fixture đầy đủ: 0 cờ đỏ (kể cả atBaseline); cờ vàng chỉ là screen_no_function, screen_placeholder, function_without_uc", () => {
+  it("fixture đầy đủ: 0 cờ đỏ (kể cả atBaseline); cờ vàng chỉ là screen_no_function, screen_placeholder, function_without_uc, actor_generalization_missing", () => {
     expect(red(runDeterministicCheck(FIXTURE))).toEqual([])
     expect(red(runDeterministicCheck(FIXTURE, [], { atBaseline: true }))).toEqual([])
     const yellowRules = new Set(runDeterministicCheck(FIXTURE).filter((f) => f.level === "yellow").map((f) => f.rule_id))
-    for (const r of yellowRules) expect(["screen_no_function", "screen_placeholder", "function_without_uc"]).toContain(r)
+    for (const r of yellowRules) expect(["screen_no_function", "screen_placeholder", "function_without_uc", "actor_generalization_missing"]).toContain(r)
+    // FLF-370: fixture có trước luật — Log In gắn thẳng cho 4 actor người, không có actor tổng quát ⇒ đúng một cờ, ở Log In
+    expect(byRule(runDeterministicCheck(FIXTURE), "actor_generalization_missing").map((f) => f.target_id)).toEqual(["UC02"])
   })
 
   it("BUG-03: màn placeholder chưa qua cổng S-5.1 của nó ⇒ cờ vàng mở lại được; qua cổng rồi thì thôi", () => {
@@ -493,6 +496,77 @@ describe("runDeterministicCheck", () => {
     const wrong = runDeterministicCheck(variant((s) => (s.actors.find((a) => a.id === "A01")!.parent_id = "A05")))
     expect(byRule(wrong, "actor_generalization_invalid")).toMatchObject([{ target_id: "A01", level: "yellow", section_id: "fixed:2.1", remediation_step: "S-3.1" }])
     expect(byRule(runDeterministicCheck(variant((s) => (s.actors[0].parent_id = "A99"))), "dead_reference")).toHaveLength(1)
+  })
+
+  describe("FLF-370 actor_generalization_missing", () => {
+    const uc = (id: string, name: string, actor_ids: string[]) => ({ id, name, actor_ids, function_ids: [], description: `${name}.`, includes: [], extends: [] })
+    const portal = (fn?: (s: Spine) => void): Spine =>
+      variant((s) => {
+        s.actors = [
+          { id: "A01", name: "Student", kind: "human", description: "Studies at the university." },
+          { id: "A02", name: "Lecturer", kind: "human", description: "Teaches courses." },
+          { id: "A03", name: "Identity Provider", kind: "system", description: "University single sign-on." }
+        ]
+        s.roles = []
+        s.use_cases = [uc("UC01", "Log In", ["A01", "A02"]), uc("UC02", "Reset Password", ["A02", "A01"]), uc("UC03", "View Timetable", ["A01", "A02"])]
+        fn?.(s)
+      })
+    const missing = (s: Spine, options?: Parameters<typeof runDeterministicCheck>[2]) => byRule(runDeterministicCheck(s, [], options), "actor_generalization_missing")
+    const withUser = (s: Spine) => {
+      s.actors.push({ id: "A10", name: "User", kind: "human", description: "Any signed-in Student or Lecturer." })
+      s.actors[0].parent_id = "A10"
+      s.actors[1].parent_id = "A10"
+    }
+
+    it("use case tài khoản gắn ≥ 2 actor người, chưa có cha ⇒ một cờ cho cả nhóm, nêu tên use case và tác nhân", () => {
+      const flags = missing(portal())
+      expect(flags).toMatchObject([{ level: "yellow", section_id: "fixed:2.1", target_id: "UC01", remediation_step: "S-3.1" }])
+      expect(flags[0].message).toContain('"Log In", "Reset Password"')
+      expect(flags[0].message).toContain("Student, Lecturer")
+      expect(flags[0].message).toContain("tác nhân tổng quát")
+      expect(flags[0].message).not.toMatch(/(A0\d|UC0\d)/)
+    })
+
+    it("đã có User làm cha và use case tài khoản chỉ gắn User ⇒ không cờ; use case không phải tài khoản dùng chung ⇒ không cờ", () => {
+      expect(missing(portal((s) => {
+        withUser(s)
+        s.use_cases[0].actor_ids = ["A10"]
+        s.use_cases[1].actor_ids = ["A10"]
+      }))).toEqual([])
+    })
+
+    it("Log In gắn 1 người + identity provider (system) ⇒ không cờ", () => {
+      expect(missing(portal((s) => {
+        s.use_cases = [uc("UC01", "Log In", ["A01", "A03"]), uc("UC02", "Log In with Single Sign-On", ["A02", "A03"])]
+      }))).toEqual([])
+    })
+
+    it("con đã kế thừa User mà use case tài khoản vẫn gắn cho con (hoặc cả cha lẫn con) ⇒ cờ bảo chỉ gắn cho cha", () => {
+      const onChildren = missing(portal(withUser))
+      expect(onChildren).toHaveLength(1)
+      expect(onChildren[0].message).toContain('đã kế thừa "User"')
+      const parentAndChild = missing(portal((s) => {
+        withUser(s)
+        s.use_cases = [uc("UC01", "Log In", ["A10", "A01"])]
+      }))
+      expect(parentAndChild[0].message).toContain('đã kế thừa "User"')
+    })
+
+    it("hai tập actor khác nhau ⇒ hai cờ", () => {
+      const flags = missing(portal((s) => {
+        s.actors.push({ id: "A04", name: "Office Staff", kind: "human", description: "Runs the academic office." })
+        s.use_cases.push(uc("UC04", "Register Account", ["A01", "A04"]))
+      }))
+      expect(flags.map((f) => f.target_id)).toEqual(["UC01", "UC04"])
+    })
+
+    it("trước khi S-3.2 chốt ⇒ chưa bắn; mode 1 vẫn bắn", () => {
+      const early = portal((s) => {
+        s.steps = s.steps.map((st) => (st.id === "S-3.2" ? { ...st, status: "pending" as StepStatus } : st))
+      })
+      expect(missing(early)).toEqual([])
+      expect(missing(early, { ruleProfile: MODE1_RULE_PROFILE })).toHaveLength(1)
+    })
   })
 
   it("U1 xét CHỮ CÁI đầu tiên, U3 bỏ dấu câu quanh từ đầu", () => {
