@@ -84,7 +84,11 @@ export const SCHEMA_EXCERPT: Readonly<Record<string, string>> = {
   common_requirements: "common_requirements[]: { category, statement }",
   messages: "messages[]: { code, text, function_ids: <function ids / names that show it> }",
   other_requirements: 'other_requirements[]: { kind: "risk" | "assumption" | "open_question" | "technical_risk", statement }',
-  glossary: "glossary[]: { term, term_native: <term in the other language if given>, definition }"
+  glossary: "glossary[]: { term, term_native: <term in the other language if given>, definition }",
+  references:
+    'references[]: { title, owner?, version?, date?, location?: <document code / URL as written>, kind: "normative" (must comply) | "informative" } — only documents the text actually lists',
+  verifications:
+    'verifications[]: { requirement_id: <requirement id as written (FR-01, NFR-02, UC-03…)>, method: "test" | "analysis" | "inspection" | "demonstration" | "other", artifact?, status?, evidence? } — one item per requirement row'
 }
 
 export const schemaExcerptFor = (targets: readonly string[]): string => targets.map((t) => `- ${SCHEMA_EXCERPT[t] ?? t}`).join("\n")

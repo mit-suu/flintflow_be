@@ -547,6 +547,79 @@ describe("readBlocks — tín hiệu heading FLF-343", () => {
     ])
   })
 
+  it("FLF-362: heading đánh số tự động mang number_label đúng như Word hiện (lvlText `%1.` / `%1.%2.`), đếm chung với đoạn danh sách cùng numId; heading gõ số tay ⇒ không có", async () => {
+    const num = (ilvl: number, id = 7) => `<w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="${id}"/></w:numPr>`
+    const blocks = await readBlocks(
+      await loadWithNumbering(
+        bold("Overview", num(0)) + p(body) + bold("Purpose", num(1)) + p("A plain numbered item", num(1)) + bold("Scope", num(1)) +
+          bold("Requirements", num(0)) + bold("Actors", num(1)) + p("A bullet", num(0, 8)) + bold("3.1 Typed Number")
+      )
+    )
+    expect(blocks.filter((b) => b.kind === "heading").map((b) => [b.text, b.number_label ?? null])).toEqual([
+      ["Overview", "1."],
+      ["Purpose", "1.1."],
+      // "A plain numbered item" (1.2) chiếm một số của cùng danh sách
+      ["Scope", "1.3."],
+      ["Requirements", "2."],
+      ["Actors", "2.1."],
+      ["3.1 Typed Number", null]
+    ])
+  })
+
+  it("FLF-362: number_label theo numFmt (La Mã, chữ cái), start, startOverride, lvlRestart = 0, isLgl; heading qua style mang numPr", async () => {
+    const numbering =
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+      `<w:abstractNum w:abstractNumId="1">` +
+      `<w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="upperRoman"/><w:lvlText w:val="%1."/></w:lvl>` +
+      `<w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="upperLetter"/><w:lvlText w:val="%2)"/></w:lvl>` +
+      `<w:lvl w:ilvl="2"><w:start w:val="1"/><w:isLgl/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2.%3"/></w:lvl>` +
+      `</w:abstractNum>` +
+      `<w:abstractNum w:abstractNumId="2"><w:lvl w:ilvl="0"><w:start w:val="5"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1"/></w:lvl>` +
+      `<w:lvl w:ilvl="1"><w:start w:val="1"/><w:lvlRestart w:val="0"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2"/></w:lvl></w:abstractNum>` +
+      `<w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num>` +
+      `<w:num w:numId="2"><w:abstractNumId w:val="2"/></w:num>` +
+      `<w:num w:numId="3"><w:abstractNumId w:val="2"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>` +
+      `</w:numbering>`
+    const styles =
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+      `<w:style w:type="paragraph" w:styleId="H1"><w:name w:val="heading 1"/><w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr></w:style>` +
+      `<w:style w:type="paragraph" w:styleId="H2"><w:name w:val="heading 2"/><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="1"/></w:numPr></w:pPr></w:style>` +
+      `<w:style w:type="paragraph" w:styleId="H3"><w:name w:val="heading 3"/><w:pPr><w:numPr><w:ilvl w:val="2"/><w:numId w:val="1"/></w:numPr></w:pPr></w:style>` +
+      `</w:styles>`
+    const st = (id: string, text: string, numPr = "") => `<w:p><w:pPr><w:pStyle w:val="${id}"/>${numPr}</w:pPr><w:r><w:t xml:space="preserve">${text}</w:t></w:r></w:p>`
+    const n = (id: number, ilvl: number) => `<w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="${id}"/></w:numPr>`
+    const blocks = await readBlocks(
+      await DocxPackage.load(
+        await makeDocx({
+          body:
+            st("H1", "Introduction") + st("H2", "Purpose") + st("H2", "Scope") + st("H3", "Definitions") + st("H1", "Requirements") + st("H2", "Functions") +
+            bold("Chapter Five", n(2, 0)) + bold("Five One", n(2, 1)) + bold("Chapter Six", n(2, 0)) + bold("Six Continues", n(2, 1)) +
+            bold("Restarted List", n(3, 0)),
+          styles,
+          extraParts: { "word/numbering.xml": numbering }
+        })
+      )
+    )
+    expect(blocks.filter((b) => b.kind === "heading").map((b) => [b.text, b.number_label ?? null])).toEqual([
+      ["Introduction", "I."],
+      ["Purpose", "A)"],
+      ["Scope", "B)"],
+      // isLgl: mọi cấp in số thường
+      ["Definitions", "1.2.1"],
+      ["Requirements", "II."],
+      // cấp dưới đánh lại khi cấp trên tăng
+      ["Functions", "A)"],
+      // start = 5
+      ["Chapter Five", "5"],
+      ["Five One", "5.1"],
+      ["Chapter Six", "6"],
+      // lvlRestart = 0: không đánh lại khi cấp trên tăng
+      ["Six Continues", "6.2"],
+      // num khác cùng abstractNum, startOverride = 1 ⇒ đánh lại từ 1
+      ["Restarted List", "1"]
+    ])
+  })
+
   it("chữ to hơn thân bài rõ rệt (cỡ dùng ≥ 2 lần) ⇒ heading `format`, cấp theo thứ hạng cỡ chữ; chữ to một chút / câu văn ⇒ không", async () => {
     const blocks = await readBlocks(
       await load(
@@ -662,5 +735,35 @@ describe("readBlocks — tín hiệu heading FLF-343", () => {
     const off = `<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="7"/></w:numPr></w:pPr><w:r><w:rPr><w:b w:val="off"/></w:rPr><w:t>Not bold</w:t></w:r></w:p>`
     const blocks = await readBlocks(await loadWithNumbering(p(body) + off))
     expect(blocks[1].kind).toBe("list_item")
+  })
+})
+
+describe("FLF-364 — kiểu chữ hướng dẫn (tín hiệu phụ)", () => {
+  const run = (text: string, rPr = "") => `<w:r>${rPr ? `<w:rPr>${rPr}</w:rPr>` : ""}<w:t xml:space="preserve">${text}</w:t></w:r>`
+  const para = (...runs: string[]) => `<w:p>${runs.join("")}</w:p>`
+
+  it("đoạn toàn chữ xanh / xám, nghiêng hoặc tô nền ⇒ guidance_format; chữ màu thân bài hoặc lẫn màu ⇒ không", async () => {
+    const blocks = await readBlocks(
+      await load(
+        [
+          para(run("Hệ thống quản lý học sinh cho trường THPT, phục vụ giáo viên chủ nhiệm và phụ huynh.")),
+          para(run("Giáo viên nhập điểm, phụ huynh xem kết quả học tập theo từng kỳ.")),
+          para(run("[Mô tả mục đích tài liệu]", '<w:color w:val="0070C0"/>')),
+          para(run("[Liệt kê tài liệu tham khảo]", '<w:color w:val="808080"/><w:i/>')),
+          para(run("{Ghi chú cho người soạn}", '<w:highlight w:val="yellow"/>')),
+          para(run("Chữ đen "), run("[chỗ điền]", '<w:color w:val="0070C0"/>')),
+          para(run("Đoạn màu tự động", '<w:color w:val="auto"/>'))
+        ].join("")
+      )
+    )
+    expect(blocks.map((b) => [b.text, b.guidance_format ?? false])).toEqual([
+      ["Hệ thống quản lý học sinh cho trường THPT, phục vụ giáo viên chủ nhiệm và phụ huynh.", false],
+      ["Giáo viên nhập điểm, phụ huynh xem kết quả học tập theo từng kỳ.", false],
+      ["[Mô tả mục đích tài liệu]", true],
+      ["[Liệt kê tài liệu tham khảo]", true],
+      ["{Ghi chú cho người soạn}", true],
+      ["Chữ đen [chỗ điền]", false],
+      ["Đoạn màu tự động", false]
+    ])
   })
 })
