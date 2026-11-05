@@ -4,7 +4,9 @@
  *   `409 CR_VALUE_CHANGED`); `edit` có op và đổi thật; op chỉ chạm phần tử CR đang khoá (thêm phần tử mới thì được);
  *   `comment` có nội dung; toàn bộ op của CR qua `planTransaction` chạy khô + bất biến; Spine giả lập không thêm cờ đỏ
  *   (hồ sơ luật mode 1).
- * - AI `CR_CONSISTENCY` (không chặn): nhận xét vàng trên phạm vi thay đổi (phần tử cùng section), gắn theo `section_id`.
+ * - AI `CR_CONSISTENCY`: nhận xét vàng trên phạm vi thay đổi (phần tử cùng section; FLF-367 thêm phần tử liên quan ở
+ *   section khác + đoạn văn giữ nguyên), gắn theo `section_id`. FLF-367: `contradiction` chưa hỏi ⇒ quay lại hỏi người
+ *   yêu cầu (`clarifying → awaiting_answers`), không đi tới `ready_to_submit`.
  *   FLF-307: chỉ chạy khi cả CR qua kiểm code và có vị trí đổi đề xuất từ lần trước; nhận xét cũ giữ lại và đưa AI xem
  *   để không nêu lại.
  * Trượt ⇒ AI làm lại vị trí đó (`redo_count` ≤ 2) ⇒ vẫn trượt / vị trí sửa tay trượt ⇒ `manual_fix` (3.9).
@@ -29,7 +31,9 @@ import { assertCrStatus, submitCr, transitionCr } from "./change-request.service
 import { recordAutoPass } from "../pipeline/auto-pass.service.js"
 import { MAX_REDO_PER_LOCATION } from "./change-request.state.js"
 import { ChangeLocation, type IChangeLocation, type VerifyViolation } from "./change-location.model.js"
-import { answersText, crHeader, glossaryText, truncate } from "./cr-context.js"
+import { newContradictions } from "./clarify.service.js"
+import { answersText, crHeader, glossaryText, plainValues, relatedElements, relatedPassages, truncate } from "./cr-context.js"
+import { regroup } from "./group.service.js"
 import { refreshDiagramLocations } from "./diagram-location.js"
 import { locksOf } from "./lock.service.js"
 import { fixDuplicateIds } from "./propose.service.js"
@@ -126,14 +130,57 @@ export const checkSpineOps = (spine: Spine, cr: Pick<IChangeRequest, "cr_id">, l
   return out
 }
 
-/** Phạm vi đưa AI xem: phần tử khác cùng section với vị trí sửa (tối đa `limit` phần tử). */
-const scopeText = (spine: Spine, changed: IChangeLocation[], limit = 20): string => {
+/** Phần phạm vi cùng section (giữ chỗ cho phần tử section khác + đoạn văn giữ nguyên, FLF-367). */
+const NEIGHBOURS_CHARS = 5000
+
+/**
+ * Phạm vi đưa AI xem: phần tử khác cùng section với vị trí sửa (tối đa `limit` phần tử); FLF-367 thêm phần tử liên quan ở
+ * section khác và đoạn văn giữ nguyên liên quan (theo cụm từ của CR + giá trị sau khi sửa).
+ */
+export const scopeText = (spine: Spine, changed: readonly Pick<IChangeLocation, "path" | "section_id" | "proposal">[], query: string, limit = 20): string => {
   const sections = new Set(changed.map((l) => l.section_id))
   const edited = new Set(changed.map((l) => l.path))
   const neighbours = listElements(spine)
     .filter((e) => !edited.has(e.path) && sections.has(sectionOfElement(spine, e.path)))
     .slice(0, limit)
-  return neighbours.map((e) => `[${e.path}] (${sectionOfElement(spine, e.path)}) ${truncate(valueText(e.value), 600)}`).join("\n") || "(none)"
+  const shown = new Set([...edited, ...neighbours.map((e) => e.path)])
+  // Giá trị sau khi sửa là JSON ⇒ chỉ lấy giá trị chữ (tên khoá như "business_rule_ids" kéo mọi phần tử vào)
+  const text = `${query}\n${changed.map((l) => plainValues(l.proposal?.new_text ?? l.proposal?.comment_text ?? "")).join("\n")}`
+  const others = relatedElements(spine, text, { exclude: [...shown] })
+  const passages = relatedPassages(spine, text, { exclude: [...shown] })
+  const lines = [
+    truncate(neighbours.map((e) => `[${e.path}] (${sectionOfElement(spine, e.path)}) ${truncate(valueText(e.value), 600)}`).join("\n"), NEIGHBOURS_CHARS),
+    ...others.map((e) => `[${e.path}] (${e.section_id}) ${e.text}`),
+    ...(passages.length ? ["Passages kept verbatim:", ...passages] : [])
+  ].filter(Boolean)
+  return lines.join("\n") || "(none)"
+}
+
+/**
+ * FLF-367: mâu thuẫn C-5 thấy ⇒ hỏi người yêu cầu (`verifying → clarifying → awaiting_answers`) thay vì ghi chú vàng.
+ * Câu hỏi = nhận xét (trích cả hai phía) + lựa chọn; câu đã hỏi ở vòng trước thì thôi. Vị trí không sửa tay bỏ kết luận
+ * để C-4 đề xuất lại theo câu trả lời (khoá giữ nguyên như luồng gộp lệnh `amend`; C-3 tìm lại vị trí như thường).
+ */
+const askContradictions = async (cr: IChangeRequest, locations: IChangeLocation[], questions: { question: string; suggestions: string[] }[]): Promise<void> => {
+  for (const l of locations) {
+    if (l.manual) continue
+    l.conclusion = null
+    l.reason = null
+    l.proposal = null
+    l.verify = null
+    l.redo_count = 0
+  }
+  await Promise.all(locations.map((l) => l.save()))
+  await regroup(cr)
+  await transitionCr(cr, "clarifying")
+  cr.clarifications.push({
+    round: cr.clarifications.length + 1,
+    questions: questions.map((q) => q.question),
+    answers: [],
+    suggestions: questions.map((q) => q.suggestions)
+  })
+  cr.markModified("clarifications")
+  await transitionCr(cr, "awaiting_answers")
 }
 
 type AiFlag = { rule: string; message: string }
@@ -188,12 +235,21 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
           )
           .join("\n")
       ),
-      scope: truncate(scopeText(spine, changed)),
+      scope: scopeText(spine, changed, `${cr.title}\n${crHeader(cr).description}\n${answersText(cr)}`),
       glossary: glossaryText(spine)
     })
     if (!result.ok) {
       cr.paused = { reason: result.reason, at: new Date() }
       await cr.save()
+      return
+    }
+    // FLF-367: mâu thuẫn ⇒ hỏi người yêu cầu (câu đã hỏi thì thôi, thành ghi chú vàng như cũ); nhận xét khác vẫn vàng
+    const contradictions = newContradictions(
+      cr,
+      result.data.findings.filter((f) => f.rule === "contradiction").map((f) => ({ question: humanizeText(f.message), suggestions: [] }))
+    )
+    if (contradictions.length) {
+      await askContradictions(cr, locations, contradictions)
       return
     }
     for (const f of result.data.findings) {
