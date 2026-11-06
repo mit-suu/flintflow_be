@@ -603,6 +603,22 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     expect(draft.diagram_images.map((i) => i.kind)).toEqual(["unavailable"])
   })
 
+  it("FLF-361: ảnh sơ đồ ở 2.2.1 chưa đọc được (AI quá tải) ⇒ vẫn đánh dấu sơ đồ gốc use case: đoạn 2.2.1 ghi loại sơ đồ, không in PlantUML use case; cờ vàng ảnh vẫn còn", async () => {
+    const { projectId, userId, importId } = await importAtExtracting({ srs: { images: [{ name: "image1.png", data: PNG, caption: "Use Cases — Learner USECASE-IMG" }] } })
+    mockOverrides.next = (prompt) => (prompt.includes("# Read Diagram Image") ? new AiActionError(503, "high demand", "GEMINI_OVERLOADED") : fakeMode1(prompt))
+    await runExtraction(projectId, userId, importId)
+    mockOverrides.next = fakeMode1
+    const before = (await spineRepository.get(projectId))!
+    await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
+    const spine = (await spineRepository.get(projectId))!
+    const images = spine.custom_sections.flatMap((c) => c.blocks).filter((b) => b.kind === "image")
+    expect(images).toEqual([expect.objectContaining({ image_ref: "word/media/image1.png", diagram: expect.objectContaining({ kind: "usecase" }) })])
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    const seg = profile.section_segments.find((r) => r.section_id === "fixed:2.2.1")!
+    expect(seg.parts.flatMap((p) => (p.kind === "original" ? p.diagrams.map((d) => d.kind) : []))).toEqual(["usecase"])
+    expect(spine.flags.filter((f) => f.rule_id === "import_image_unread")).toHaveLength(1)
+  })
+
   it("FLF-252: ảnh không đọc được + quyền không khớp màn trong cùng lần nhập ⇒ hai cờ vàng khác id, tạo được bản 0.1 (trước đây trùng id ⇒ cả lô bị từ chối)", async () => {
     const { projectId, userId, importId } = await importAtExtracting({ srs: { images: [{ name: "image1.png", data: PNG, caption: "USECASE-IMG" }] } })
     mockOverrides.next = (prompt) => (prompt.includes("# Read Diagram Image") ? new AiActionError(503, "high demand", "GEMINI_OVERLOADED") : fakeMode1(prompt))
