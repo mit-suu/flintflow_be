@@ -165,6 +165,11 @@ const localizeBlocks = (blocks: Block[], language: string | undefined, fpt = fal
 export interface SectionRenderContext {
   /** Preserve the fixed source outline; child slots own their data instead of the aggregate parent. */
   fixedTemplate?: boolean
+  /**
+   * Dựng lại một đoạn mà trong file gốc là **bảng** (FLF-366 + dự án có sẵn): danh sách in thành bảng để bản in ghép lại
+   * đúng bảng gốc thay vì chèn gạch đầu dòng cạnh bảng cũ.
+   */
+  preferTable?: boolean
   representedSlots?: ReadonlySet<string>
   /** Số hiệu hiển thị của chính section này, đã tính lúc assemble (§6.3). */
   number: string
@@ -680,9 +685,10 @@ const nfrTable = (spine: Spine, category: NfrCategory, ctx: SectionRenderContext
 
 // ─── §5 Requirement Appendix ────────────────────────────────────────
 
-const businessRulesDetail = (spine: Spine): Block[] => {
+const businessRulesDetail = (spine: Spine, ctx?: SectionRenderContext): Block[] => {
   const items = spine.business_rules.filter((r) => r.tier === "detail")
-  return items.length === 0 ? [] : [bulletList(items.map((r) => r.statement))]
+  if (items.length === 0) return []
+  return ctx?.preferTable ? [tableBlock(["ID", "Rule"], items.map((r) => [r.id, r.statement]))] : [bulletList(items.map((r) => r.statement))]
 }
 
 const commonRequirements = (spine: Spine, ctx: SectionRenderContext): Block[] =>
@@ -737,7 +743,7 @@ const blocksFor = (spine: Spine, sectionId: string, ctx: SectionRenderContext): 
     case "fixed:4.2.4":
       return nfrTable(spine, "other", ctx)
     case "fixed:5.1":
-      return ctx.fixedTemplate && ctx.representedSlots?.has("slot:business_rules") ? [] : businessRulesDetail(spine)
+      return ctx.fixedTemplate && ctx.representedSlots?.has("slot:business_rules") ? [] : businessRulesDetail(spine, ctx)
     case "fixed:5.2":
       return commonRequirements(ctx.fixedTemplate ? { ...spine, common_requirements: spine.common_requirements.filter((c) =>
         !(ctx.representedSlots?.has("slot:security") && ["security", "session", "audit"].includes(c.category)) &&

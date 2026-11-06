@@ -183,11 +183,13 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     const kind = imageRead.get(b.block_id)
     if (kind) b.diagram = { kind, source_hash: originalDiagramHash(imported, kind) }
   }
-  // FLF-366: mẫu bắt buộc (chế độ 3) là mẫu để điền, không chia đoạn nguyên văn
+  // FLF-366: chỉ mẫu bắt buộc của **dự án mới** là mẫu để điền ⇒ không chia đoạn nguyên văn. Dự án có sẵn theo mẫu của
+  // công ty là SRS đã viết ⇒ vẫn giữ đoạn gốc như cấu trúc FlintFlow
   const project = await Project.findById(projectId).lean()
-  const intentRaw = (project as { template_intent?: string | null } | null)?.template_intent ?? null
+  const facts = project as { template_intent?: string | null; start_kind?: string | null } | null
+  const intentRaw = facts?.template_intent ?? null
   const { layout, customSections, slices, segments } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds, {
-    segment: intentRaw !== "fixed"
+    segment: !(facts?.template_intent === "fixed" && facts.start_kind === "new")
   })
   const seeded = await loadSpine(projectId)
   // Kế hoạch đọc Spine đã nạp dữ liệu: mục trích không ra gì thì vẫn là "thiếu", đừng đánh dấu step đã xong
@@ -237,7 +239,12 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // FLF-336 I-5: so cấu trúc đích TRƯỚC khi chụp v0 — còn mục thiếu và người dùng chưa bấm "Hoàn thiện" ⇒ dừng ở
   // `incomplete` (không có v0 dở dang, §1). Ý định theo `Project.template_intent` (FLF-335); dự án cũ ⇒ tự do.
   const intent: TemplateIntent = intentRaw === "fixed" ? "fixed" : "free"
-  const withContent = new Set([...sectionsWithContent(layoutBlocks), ...customSectionsWithContent(customSections)])
+  // Heading lặp (vd "Business Rules" của từng chức năng) mà nội dung đã trích vào Spine qua slice vẫn là mục có nội dung
+  const withContent = new Set([
+    ...sectionsWithContent(layoutBlocks),
+    ...customSectionsWithContent(customSections),
+    ...profile.section_slices.filter((sl) => sl.items.length).map((sl) => `custom:${sl.custom_id}`)
+  ])
   const structure = compareTargetStructure(layout, withContent, stripRecord(seeded), intent)
   profile.target_structure = structure
   profile.markModified("target_structure")

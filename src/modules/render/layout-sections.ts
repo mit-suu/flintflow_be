@@ -645,8 +645,8 @@ export const buildLayoutSections = (
   const segmentBlocks = (record: SectionSegments, n: Numbered): Block[] => {
     const sectionId = record.section_id
     const shifted = (section: RenderedSection): Block[] => shiftHeadings(section.blocks, n.renderLevel - section.level)
-    const rebuild = (items: readonly string[]): Block[] =>
-      shifted(renderSection(segmentSpine(contentSpine, sectionId, new Set(items)), sectionId, contextFor(sectionId, n.number)))
+    const rebuild = (items: readonly string[], asTable = false): Block[] =>
+      shifted(renderSection(segmentSpine(contentSpine, sectionId, new Set(items)), sectionId, { ...contextFor(sectionId, n.number), ...(asTable ? { preferTable: true } : {}) }))
     const out: Block[] = []
     for (const part of record.parts) {
       if (part.kind === "heading") {
@@ -655,7 +655,8 @@ export const buildLayoutSections = (
         continue
       }
       if (part.kind === "spine") {
-        out.push(...(isVerbatim(spine, part) ? customBlocks(part.blocks, originalPng) : rebuild(part.items)))
+        // Đoạn gốc là bảng ⇒ dựng lại thành bảng (ghép vào bảng gốc), không thành danh sách cạnh bảng cũ
+        out.push(...(isVerbatim(spine, part) ? customBlocks(part.blocks, originalPng) : rebuild(part.items, part.blocks.some((b) => b.kind === "table"))))
         continue
       }
       const blocks = customById.get(`${CUSTOM_PREFIX}${part.custom_id}`)?.blocks ?? []
