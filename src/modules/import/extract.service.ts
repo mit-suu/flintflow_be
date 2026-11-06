@@ -31,7 +31,7 @@ import {
   flattenItem,
   idKey,
   mergeFieldValue,
-  normalizeKey,
+  keepKey,
   parseFieldPath,
   refTarget,
   resolveProvisional,
@@ -137,7 +137,7 @@ export const settleSection = (
     out.verbatim.add(t.block_id)
     out.items.push({
       entity: "use_cases",
-      id: uc.key ? normalizeKey(uc.key) : null,
+      id: uc.key ? keepKey(uc.key) : null,
       value: uc.value,
       confidence: SPEC_CONFIDENCE,
       field_confidence: {},
@@ -252,7 +252,7 @@ export const deterministicTableItems = (
     if (entity === "screens" && value.feature_id === undefined && group) value.feature_id = group
     // Bảng yêu cầu "ID | Requirement" không có cột tên ⇒ tên chức năng là phần đầu câu yêu cầu (mô tả giữ đủ câu)
     if (entity === "functions" && value.name === undefined && typeof value.description === "string") value.name = shortName(value.description)
-    const key = typeof value.id === "string" ? normalizeKey(value.id) : null
+    const key = typeof value.id === "string" && value.id.trim() ? keepKey(value.id) : null
     delete value.id
     return [{ entity, id: key, value, confidence, field_confidence: {}, source_block_ids: [table.block_id], origin: "deterministic" as const }]
   })
