@@ -957,7 +957,11 @@ export function buildRecordOfChanges(
   }
   const out: RocRow[] = []
   for (const row of rows) {
-    const raw = row.changes.map((c) => c.reason).filter((r): r is string => !!r && !INTERNAL_REASON.test(r) && !MACHINE_REASON.test(r))
+    // FLF-361: lô vẽ sơ đồ lúc import (`by: import`, lý do "render") là việc của máy, không in vào mô tả dòng v0.1
+    const raw = row.changes
+      .filter((c) => !(c.by === "import" && c.reason === "render"))
+      .map((c) => c.reason)
+      .filter((r): r is string => !!r && !INTERNAL_REASON.test(r) && !MACHINE_REASON.test(r))
     const reasons = [...new Set(raw.map((r) => toDocumentLanguage(r, language)))]
     let version: string
     if (row.baseline) {

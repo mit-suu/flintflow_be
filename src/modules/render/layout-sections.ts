@@ -48,7 +48,7 @@ import {
 import type { CustomBlock, CustomSection, OriginalDiagramKind, Spine } from "../spine/spine.types.js"
 import type { Block, InlineRun, RenderedSection, RocRow, TableCell } from "./rendered-document.types.js"
 import { mediaId } from "./import-media.js"
-import { changedFunctionFields, patchFunctionOriginal, type FunctionOriginalBlock } from "./function-original.js"
+import { functionFieldValues, patchFunctionOriginal, type FunctionFieldValues, type FunctionOriginalBlock } from "./function-original.js"
 import { defaultSectionTitle, renderContentSlot, renderSection, type SectionRenderContext } from "./section-renderer.js"
 import { bindFixedTemplateSlots, isContentSlot, slotParents } from "../import/content-slots.js"
 import { isInstructionText, isRealText, splitInstruction, tableBodyHasRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
@@ -172,8 +172,8 @@ export interface FunctionOriginal {
   section_id: string
   source_hash: string
   blocks: readonly FunctionOriginalBlock[]
-  /** FLF-361: dấu từng trường lúc import — CR chỉ dựng lại khối của trường đã đổi. Dữ liệu cũ không có ⇒ dựng lại cả mục. */
-  field_hashes?: Readonly<Record<string, string>>
+  /** FLF-361: chữ từng trường lúc import — CR chỉ sửa khối chứa phần tử đã đổi. Dữ liệu cũ không có ⇒ dựng lại cả mục. */
+  field_values?: Readonly<FunctionFieldValues>
 }
 
 /**
@@ -617,7 +617,7 @@ export const buildLayoutSections = (
     const fn = o ? spine.functions.find((f) => `function:${f.id}` === sectionId) : undefined
     if (!o || !fn) return null
     if (functionSourceHash(fn) === o.source_hash) return [...o.blocks]
-    return o.field_hashes ? patchFunctionOriginal(o.blocks, spine, fn, changedFunctionFields(fn, o.field_hashes), o.field_hashes) : null
+    return o.field_values ? patchFunctionOriginal(o.blocks, o.field_values, functionFieldValues(spine, fn)) : null
   }
   /** Heading con của mục chức năng: cấp tương đối heading mục ⇒ dời theo cấp in của mục. */
   const functionBlocks = (blocks: readonly FunctionOriginalBlock[], renderLevel: number): Block[] => {
@@ -632,7 +632,7 @@ export const buildLayoutSections = (
         flush()
         out.push({ type: "heading", level: Math.min(MAX_LEVEL, renderLevel + b.level), text: b.text })
       } else {
-        const { fields: _fields, ...block } = b
+        const { tags: _tags, ...block } = b
         run.push(block)
       }
     }

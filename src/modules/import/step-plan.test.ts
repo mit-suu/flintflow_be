@@ -279,7 +279,7 @@ describe("functionOriginals — nguyên văn mục chức năng (FLF-252)", () =
     expect(originals.get("function:FR-3.2.3")).toEqual([{ kind: "paragraph", text: "Function Trigger", rows: null, image_ref: null }])
     // mục không phải chức năng không gom
     expect(functionOriginals([p("B0002", "Lumen", "fixed:1")], new Map()).size).toBe(0)
-    // FLF-361: 4 heading con map vào chính mục chức năng (FAP) vẫn giữ; khối ghi trường chức năng đọc từ nó
+    // FLF-361: 4 heading con map vào chính mục chức năng (FAP) vẫn giữ, cấp tương đối heading mở
     const fap = functionOriginals(
       [
         h("B0700", "3.2.1 Log In", 3, fn),
@@ -289,12 +289,11 @@ describe("functionOriginals — nguyên văn mục chức năng (FLF-252)", () =
         h("B0704", "Screen layout", 4, fn),
         h("B0705", "Function details", 5, fn)
       ],
-      new Map(["B0700", "B0701", "B0703", "B0704", "B0705"].map((b) => [b, fn])),
-      (b) => (b === "B0702" ? ["trigger", "trigger"] : [])
+      new Map(["B0700", "B0701", "B0703", "B0704", "B0705"].map((b) => [b, fn]))
     ).get(fn)!
     expect(fap).toEqual([
       { kind: "heading", text: "Function trigger", level: 1 },
-      { kind: "list_item", text: "Timing frequency: on open", rows: null, image_ref: null, fields: ["trigger"] },
+      { kind: "list_item", text: "Timing frequency: on open", rows: null, image_ref: null },
       { kind: "heading", text: "Function description", level: 1 },
       { kind: "heading", text: "Screen layout", level: 1 },
       { kind: "heading", text: "Function details", level: 2 }

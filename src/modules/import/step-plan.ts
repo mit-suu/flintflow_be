@@ -398,13 +398,9 @@ export const sectionSegments = (
  * AI giữ đoạn nào).
  * FLF-361: chỉ bỏ heading **mở** mục (heading đầu tiên của mục — đã là tiêu đề mục); heading con ("Function trigger",
  * "Screen layout"…) giữ kiểu heading, cấp tương đối heading mở (trước đây mọi heading map vào mục đều bị bỏ ⇒ bản 0.1 mất
- * 4 tiêu đề con ở mọi mục chức năng). `fieldsOf` = trường chức năng I-4 đọc từ khối ⇒ CR chỉ dựng lại khối của trường đã đổi.
+ * 4 tiêu đề con ở mọi mục chức năng).
  */
-export const functionOriginals = (
-  blocks: readonly LayoutBlock[],
-  headingSections: ReadonlyMap<string, string>,
-  fieldsOf: (blockId: string) => readonly string[] = () => []
-): Map<string, FunctionOriginalBlock[]> => {
+export const functionOriginals = (blocks: readonly LayoutBlock[], headingSections: ReadonlyMap<string, string>): Map<string, FunctionOriginalBlock[]> => {
   const out = new Map<string, FunctionOriginalBlock[]>()
   const openerLevel = new Map<string, number>()
   for (const b of blocks) {
@@ -421,8 +417,7 @@ export const functionOriginals = (
       block = text ? { kind: "heading", text, level: Math.max(1, b.level !== null && base !== undefined ? b.level - base : 1) } : null
     } else block = toCustomBlock(b)
     if (!block) continue
-    const fields = [...new Set(fieldsOf(b.block_id))]
-    out.set(section, [...(out.get(section) ?? []), fields.length ? { ...block, fields } : block])
+    out.set(section, [...(out.get(section) ?? []), block])
   }
   return out
 }

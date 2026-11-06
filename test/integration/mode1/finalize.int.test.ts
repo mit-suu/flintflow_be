@@ -280,12 +280,13 @@ describe("finalize — DocVersion 0.1 + baseline imported", () => {
     const { projectId } = await importFinalized()
     const profile = (await TemplateProfile.findOne({ projectId }).lean())!
     const login = profile.function_originals.find((o) => o.section_id === "function:FR-3.2.2")!
-    // FLF-361: mỗi khối ghi thêm trường chức năng I-4 đọc từ nó (CR chỉ dựng lại khối của trường đổi)
+    // FLF-361: chữ từng trường lúc import; khối chỉ gắn phần tử khi chữ khớp — model giả trả "Wrong password", khác chữ file
+    // ("Show an error when the password is wrong.") ⇒ không gắn ⇒ CR sửa chức năng thì dựng lại cả mục (không giữ chữ cũ)
     expect(login.blocks).toEqual([
-      expect.objectContaining({ kind: "paragraph", text: SRS_FIXTURE_TEXT.loginNormal, rows: null, image_ref: null, fields: expect.arrayContaining(["trigger", "normal"]) }),
-      expect.objectContaining({ kind: "list_item", text: "Show an error when the password is wrong.", rows: null, image_ref: null })
+      { kind: "paragraph", text: SRS_FIXTURE_TEXT.loginNormal, rows: null, image_ref: null },
+      { kind: "list_item", text: "Show an error when the password is wrong.", rows: null, image_ref: null }
     ])
-    expect(login.field_hashes).toEqual(expect.objectContaining({ trigger: expect.any(String), normal: expect.any(String) }))
+    expect(login.field_values).toEqual(expect.objectContaining({ trigger: ["Learner submits the form"], abnormal: ["Wrong password"] }))
     const sectionOf = async () => (await getDocument(projectId, "Lumen", { source: "draft" })).sections.find((s) => s.id === "function:FR-3.2.2")!
     expect((await sectionOf()).blocks).toEqual([
       { type: "paragraph", runs: [{ text: SRS_FIXTURE_TEXT.loginNormal }] },
