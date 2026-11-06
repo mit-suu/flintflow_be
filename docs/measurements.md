@@ -641,3 +641,34 @@ So nội dung: chữ giống hệt (bỏ `generatedAt`), 62/62 ảnh tham chiế
 
 Ghi chú cho tự bám bản mới (phase 4 FE): một lượt tải lại tài liệu dịch nóng ~1.3 s ⇒ giữ khoảng tối thiểu 10 s giữa hai
 lần tự áp như plan; `/version` chỉ 2–3 truy vấn nhỏ.
+
+## GET /document — mở tài liệu: hash ảnh media, bản dựng nhớ trong tiến trình, `changes` đọc tăng dần (FLF-381, 2026-11-06)
+
+Mongo Atlas (dev), đo in-process như `getDocumentController` (project + ngôn ngữ + `documentVersion` + `getDocumentWithMeta`
+với loader tham chiếu + `getDraftMeta` khi thiếu), 5 lượt liền mỗi cấu hình trong một tiến trình mới — lượt 1 lạnh
+(tiến trình vừa khởi động), 2–5 nóng (trung vị). Mạng local ~9,8 MB/s; Atlas trả ~100 KB/s nên số đo tỉ lệ với số byte kéo về.
+
+| Cấu hình (dự án dev) | Trước: lạnh / nóng | Sau: lạnh / nóng |
+| --- | --- | --- |
+| Import draft — FAP PLAN 2, 53 mục, 28 ảnh media | 11 228 / 2 674 ms | 4 240 / 346 ms |
+| Import baseline — cùng dự án | 10 038 / 4 348 ms | 1 876 / 354 ms |
+| fpt `en` draft — FAP, 27 sơ đồ | 5 094 / 2 333 ms | 4 551 / 345 ms |
+| fpt `vi` draft (Spine `en`) — Quản lý học sinh, 24 sơ đồ | 16 409 / 10 226 ms | 14 273 / 335 ms |
+| Import `vi` draft (Spine `en`) — fap, 38 sơ đồ, 1 718 change | 21 239 / 17 645 ms | 21 380 / 442 ms |
+
+Chặng đã bỏ (profile lệnh Mongo, lượt nóng trước khi sửa):
+- Hash ảnh media: tải + giải nén cả .docx gốc (~6,2 s, gói chỉ nhớ 60 s) + 28 truy vấn `importeddocuments` ⇒ hash theo
+  `(file_ref, part)`, một truy vấn `file_ref` mỗi lượt; nhúng được hay không theo đuôi part.
+- Thân `rendered_documents` (~100 KB, ~1,5 s) ⇒ chỉ hỏi `_id` + `updatedAt`, thân nhớ trong tiến trình.
+- Baseline: snapshot (179 KB, ~2 s) tải trước khi tra cache ⇒ chỉ lấy `_id`.
+- Bản dịch: dựng lại mỗi lượt, đọc cả `changes` hai lần (1,57 MB ≈ 15,6 s với dự án 1 718 change) ⇒ nhớ theo danh tính
+  Spine + ngôn ngữ + revision lớp bản dịch; chỉ nhớ khi mọi PNG theo ngôn ngữ đã vẽ xong trong trần chờ.
+
+Lượt nóng bản dịch còn 3 truy vấn nhỏ (219 ms): head Spine, revision bản dịch, metadata PNG.
+
+Lượt lạnh còn lại là lần đầu một tiến trình gặp dự án: tải Spine (~2,3 s) + cả lịch sử `changes` (dự án 1 718 change:
+12,5 s đủ field + 4,6 s projection §I). Từ lượt sau `changes` đọc tăng dần: **~0,18 s + 0,17 s** (chỉ change mới + một
+truy vấn mốc) — nên lượt mở đầu sau mỗi lần sửa không còn trả giá đọc cả lịch sử.
+
+So nội dung: body (bỏ `generatedAt`) của cả 5 cấu hình giống hệt trước khi sửa, trừ giá trị hash trong
+`image-ref:media:…@<hash>` (đổi cách tính, định dạng giữ nguyên); đủ 28/28, 38/38… chuỗi tham chiếu.

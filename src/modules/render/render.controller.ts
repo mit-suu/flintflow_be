@@ -99,7 +99,8 @@ export const getDocumentController = catchAsync(async (req: Request, res: Respon
     const result = await getDocumentWithMeta(
       projectId,
       projectName,
-      { ...query, languages: { locale: documentLanguage, source: sourceLanguage } },
+      // Chỉ xem trước mới dùng lại bản dịch đã dựng (ảnh tham chiếu) — export / comment luôn dựng mới
+      { ...query, languages: { locale: documentLanguage, source: sourceLanguage }, reuseTranslated: true },
       { loadDiagramPng: refDiagramPngLoader(), loadLocalizedDiagramPng: refLocalizedPngLoader() }
     )
     // review C2: source=draft trước đây trả im lặng bản cache mới nhất dù Spine đã đổi tiếp — đính

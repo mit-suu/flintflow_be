@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { createMemoryDiagramStore } from "../diagram/diagram-file.store.js"
 import { localizedDiagramHash } from "../diagram/localized-diagram.service.js"
-import { formatImageRef, parseImageRef, readImageRef, refDiagramPngLoader, refLocalizedPngLoader } from "./image-ref.js"
+import { formatImageRef, mediaHash, parseImageRef, readImageRef, refDiagramPngLoader, refLocalizedPngLoader } from "./image-ref.js"
 
 const PROJECT = "650000000000000000000001"
 const png = (text: string) => ({ data: Buffer.from(text), contentType: "image/png" })
@@ -46,11 +46,18 @@ describe("loader chế độ tham chiếu", () => {
     expect(spy).toHaveBeenCalledTimes(1)
   })
 
-  it("media: hash theo bytes; không nhúng được ⇒ null", async () => {
-    const loadMedia = vi.fn(async (_p: string, part: string) => (part === "word/media/a.png" ? { mime: "image/png" as const, data: Buffer.from("img").toString("base64") } : null))
-    const load = refDiagramPngLoader(createMemoryDiagramStore(), loadMedia)
-    expect(parseImageRef((await load(PROJECT, "media:word/media/a.png"))!)).toMatchObject({ kind: "media", id: "word/media/a.png" })
+  it("media: hash theo (file_ref, part), không mở file gốc; một lượt dựng hỏi file_ref một lần; không nhúng được ⇒ null", async () => {
+    const fileRefOf = vi.fn(async () => "F1")
+    const load = refDiagramPngLoader(createMemoryDiagramStore(), fileRefOf)
+    expect(await load(PROJECT, "media:word/media/a.png")).toBe(formatImageRef({ kind: "media", id: "word/media/a.png", hash: mediaHash("F1", "word/media/a.png") }))
+    expect(parseImageRef((await load(PROJECT, "media:word/media/c.jpeg"))!)).toMatchObject({ kind: "media", id: "word/media/c.jpeg" })
     expect(await load(PROJECT, "media:word/media/b.emf")).toBeNull()
+    expect(fileRefOf).toHaveBeenCalledTimes(1)
+    // Cùng ảnh, lượt dựng khác ⇒ cùng tham chiếu (FE giữ Blob); upload lại (file_ref mới) ⇒ tham chiếu mới
+    expect(await refDiagramPngLoader(createMemoryDiagramStore(), async () => "F1")(PROJECT, "media:word/media/a.png")).toBe(await load(PROJECT, "media:word/media/a.png"))
+    expect(await refDiagramPngLoader(createMemoryDiagramStore(), async () => "F2")(PROJECT, "media:word/media/a.png")).not.toBe(await load(PROJECT, "media:word/media/a.png"))
+    // Dự án không có file gốc ⇒ null (placeholder)
+    expect(await refDiagramPngLoader(createMemoryDiagramStore(), async () => null)(PROJECT, "media:word/media/a.png")).toBeNull()
   })
 
   it("bản dịch: file đã có ⇒ tham chiếu, không vẽ; chưa có ⇒ vẽ rồi trả tham chiếu; vẽ hỏng ⇒ null (dùng ảnh gốc)", async () => {
@@ -85,13 +92,20 @@ describe("readImageRef — chỉ đọc", () => {
     expect(await readImageRef(PROJECT, { kind: "diagram", id: "D01", locale: "vi", hash }, store)).toMatchObject({ ok: true, data: Buffer.from("vi") })
   })
 
-  it("media: bytes đổi ⇒ changed; content type theo magic bytes", async () => {
+  it("media: upload lại (file_ref đổi) ⇒ changed, không tải bytes; thiếu file / part ⇒ not_found; content type theo magic bytes", async () => {
     const pngBytes = Buffer.from("89504e470d0a1a0a0000", "hex")
-    let current = pngBytes
-    const loadMedia = async () => ({ mime: "image/png" as const, data: current.toString("base64") })
-    const ref = parseImageRef((await refDiagramPngLoader(createMemoryDiagramStore(), loadMedia)(PROJECT, "media:word/media/a.png"))!)!
-    expect(await readImageRef(PROJECT, ref, createMemoryDiagramStore(), loadMedia)).toMatchObject({ ok: true, contentType: "image/png" })
-    current = Buffer.concat([pngBytes, Buffer.from("x")])
-    expect(await readImageRef(PROJECT, ref, createMemoryDiagramStore(), loadMedia)).toEqual({ ok: false, reason: "changed" })
+    let fileRef: string | null = "F1"
+    const fileRefOf = async () => fileRef
+    const loadMedia = vi.fn(async (_p: string, part: string) => (part === "word/media/a.png" ? { mime: "image/png" as const, data: pngBytes.toString("base64") } : null))
+    const store = createMemoryDiagramStore()
+    const ref = parseImageRef((await refDiagramPngLoader(store, fileRefOf)(PROJECT, "media:word/media/a.png"))!)!
+    expect(await readImageRef(PROJECT, ref, store, loadMedia, fileRefOf)).toMatchObject({ ok: true, data: pngBytes, contentType: "image/png" })
+    expect(await readImageRef(PROJECT, { ...ref, id: "word/media/z.png", hash: mediaHash("F1", "word/media/z.png") }, store, loadMedia, fileRefOf)).toEqual({ ok: false, reason: "not_found" })
+    loadMedia.mockClear()
+    fileRef = "F2"
+    expect(await readImageRef(PROJECT, ref, store, loadMedia, fileRefOf)).toEqual({ ok: false, reason: "changed" })
+    expect(loadMedia).not.toHaveBeenCalled()
+    fileRef = null
+    expect(await readImageRef(PROJECT, ref, store, loadMedia, fileRefOf)).toEqual({ ok: false, reason: "not_found" })
   })
 })

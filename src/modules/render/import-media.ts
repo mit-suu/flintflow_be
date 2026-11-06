@@ -28,21 +28,54 @@ export const imageMime = (data: Buffer): LlmImage["mime"] | null =>
 /** PNG / JPEG theo magic bytes — writer chỉ nhúng hai loại này. */
 export const embeddableImage = (data: Buffer): boolean => imageMime(data) !== null
 
-const CACHE_MS = 60_000
-/** Gói đã mở theo `file_ref` (không theo project: upload lại thì file mới, không dùng nhầm gói cũ). */
+/**
+ * `file_ref` của file gốc lần import mới nhất (`null` ⇒ dự án không có file gốc). Mọi lần lưu .docx đi qua
+ * `docFileStore().save` — luôn là file GridFS mới, id mới — nên một `file_ref` không bao giờ đổi nội dung: `(file_ref, part)`
+ * định danh đúng một ảnh, đủ làm khoá (hash tham chiếu, gói đã mở) mà không cần đọc bytes.
+ */
+export const currentImportFileRef = async (projectId: string): Promise<string | null> => {
+  const doc = (await ImportedDocument.findOne({ projectId, file_ref: { $ne: null } }, { file_ref: 1 }, { sort: { createdAt: -1 } }).lean()) as { file_ref?: string | null } | null
+  return doc?.file_ref ?? null
+}
+
+/**
+ * Part có nhúng được không, đoán theo đuôi — KHÔNG mở file (tải + giải nén .docx gốc từ GridFS mất vài giây). Word đặt
+ * đuôi part theo content type (`image3.png`, `image5.emf`), khớp với `imageMime` theo magic bytes. Lệch hiếm gặp (đuôi
+ * `.png` mà bytes không phải PNG) chỉ làm route ảnh trả 404 — route vẫn kiểm bytes thật.
+ */
+export const embeddableMediaPart = (part: string): boolean => /\.(png|jpe?g)$/i.test(part)
+
+/**
+ * Gói đã mở theo `file_ref` (bất biến ⇒ giữ lâu không sai). Giới hạn số gói vì mỗi gói là cả file .docx trong bộ nhớ;
+ * gói rảnh quá `PACKAGE_IDLE_MS` thì bỏ. Trước đây trần cứng 60 s ⇒ mở lại tài liệu sau một phút lại tải cả file.
+ */
+const PACKAGE_IDLE_MS = 10 * 60_000
+const PACKAGE_MAX = 3
 const cache = new Map<string, { at: number; pkg: Promise<DocxPackage | null> }>()
 
-const originalPackage = async (projectId: string): Promise<DocxPackage | null> => {
-  const doc = (await ImportedDocument.findOne({ projectId, file_ref: { $ne: null } }, { file_ref: 1 }, { sort: { createdAt: -1 } }).lean()) as { file_ref?: string | null } | null
-  if (!doc?.file_ref) return null
+const packageOf = (fileRef: string): Promise<DocxPackage | null> => {
   const now = Date.now()
-  for (const [key, entry] of cache) if (now - entry.at > CACHE_MS) cache.delete(key)
-  const hit = cache.get(doc.file_ref)
-  if (hit) return hit.pkg
-  const fileRef = doc.file_ref
+  for (const [key, entry] of cache) if (now - entry.at > PACKAGE_IDLE_MS) cache.delete(key)
+  const hit = cache.get(fileRef)
+  if (hit) {
+    // LRU: dùng lại thì đưa về cuối, làm mới mốc rảnh
+    cache.delete(fileRef)
+    cache.set(fileRef, { at: now, pkg: hit.pkg })
+    return hit.pkg
+  }
   const pkg = (async () => DocxPackage.load(await docFileStore().load(fileRef)))().catch(() => null)
   cache.set(fileRef, { at: now, pkg })
+  if (cache.size > PACKAGE_MAX) cache.delete(cache.keys().next().value as string)
+  // Tải lỗi thì đừng giữ — lượt sau thử lại
+  void pkg.then((loaded) => {
+    if (!loaded && cache.get(fileRef)?.pkg === pkg) cache.delete(fileRef)
+  })
   return pkg
+}
+
+const originalPackage = async (projectId: string): Promise<DocxPackage | null> => {
+  const fileRef = await currentImportFileRef(projectId)
+  return fileRef ? packageOf(fileRef) : null
 }
 
 /** Test dùng để cô lập giữa các ca. */
