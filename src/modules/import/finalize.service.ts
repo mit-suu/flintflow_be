@@ -56,6 +56,7 @@ import { buildImportOps, droppedPermissionFindings, type DroppedPermission } fro
 import { tableRows } from "./table-rows.js"
 import { buildLayout, buildStepPlan, customSectionOps, customSectionsWithContent, functionOriginals, projectFieldEntities, sectionSegments, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
 import { functionSourceHash } from "../render/layout-sections.js"
+import { functionFieldHashes } from "../render/function-original.js"
 import { TemplateProfile, type HeadingMapEntry, type LayoutEntry, type TableMapEntry } from "./template-profile.model.js"
 import { compareTargetStructure, type TargetStructure, type TemplateIntent } from "./target-structure.js"
 import { titleOfSection } from "./gap-report.service.js"
@@ -232,12 +233,22 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // FLF-252 — in theo file gốc: nguyên văn từng mục chức năng + dấu nội dung chức năng lúc nhập (chức năng không đổi ở lô
   // kế hoạch step nên dấu tính trên Spine sau lô thực thể)
   const fnById = new Map(seeded.functions.map((f) => [`function:${f.id}`, f]))
-  profile.function_originals = [...functionOriginals(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))].flatMap(
-    ([section_id, blocks]) => {
-      const fn = fnById.get(section_id)
-      return fn && blocks.length ? [{ section_id, source_hash: functionSourceHash(fn), blocks }] : []
-    }
-  )
+  // FLF-361: trường chức năng đọc từ từng khối (field I-4 `functions[id=…].normal` ⇒ khối nguồn) — CR chỉ dựng lại khối của trường đổi
+  const functionFields = new Map<string, Set<string>>()
+  for (const f of accepted) {
+    const path = parseFieldPath(f.path)
+    if (path?.entity !== "functions" || !path.id) continue
+    for (const b of f.source_block_ids) functionFields.set(`function:${path.id}|${b}`, (functionFields.get(`function:${path.id}|${b}`) ?? new Set()).add(path.field))
+  }
+  const blockSection = new Map(layoutBlocks.map((b) => [b.block_id, b.section_id ?? ""]))
+  profile.function_originals = [
+    ...functionOriginals(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), (blockId) => [
+      ...(functionFields.get(`${blockSection.get(blockId)}|${blockId}`) ?? [])
+    ])
+  ].flatMap(([section_id, blocks]) => {
+    const fn = fnById.get(section_id)
+    return fn && blocks.length ? [{ section_id, source_hash: functionSourceHash(fn), field_hashes: functionFieldHashes(fn), blocks }] : []
+  })
   // FLF-336 I-5: so cấu trúc đích TRƯỚC khi chụp v0 — còn mục thiếu và người dùng chưa bấm "Hoàn thiện" ⇒ dừng ở
   // `incomplete` (không có v0 dở dang, §1). Ý định theo `Project.template_intent` (FLF-335); dự án cũ ⇒ tự do.
   const intent: TemplateIntent = intentRaw === "fixed" ? "fixed" : "free"
