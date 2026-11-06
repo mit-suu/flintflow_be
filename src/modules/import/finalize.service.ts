@@ -39,7 +39,7 @@ import { countOpenFlags, findingOpsInOrder, runImportCheck, stripRecord, type Fi
 import { legacyRecordRows } from "./legacy-record.js"
 import { DocBlock } from "./doc-block.model.js"
 import { captionOf } from "./extract.service.js"
-import { collectEntities, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
+import { collectEntities, imageOnlyGenericActors, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
 import { ExtractionDraft, type IExtractionDraft } from "./extraction-draft.model.js"
 import { FieldAnchor } from "./field-anchor.model.js"
 import { needsConfirm } from "./import.constants.js"
@@ -100,7 +100,9 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const drafts = await ExtractionDraft.find({ import_id: doc._id }).lean()
   // FLF-343: không bỏ field độ tin thấp chưa xác nhận (trước đây bị bỏ im lặng) — vào baseline, cờ "Cần xem" bên dưới
   const accepted = drafts.flatMap((d) => d.fields.map((f) => ({ ...f, section_id: realSectionId(d.section_id, provisional) })))
-  const entities = [...collectEntities(accepted).values()]
+  // FLF-361: actor chung chung chỉ có trên ảnh sơ đồ ("User") không thêm khi file đã có danh sách actor
+  const genericActors = imageOnlyGenericActors(accepted)
+  const entities = [...collectEntities(accepted)].filter(([key]) => !genericActors.has(key)).map(([, e]) => e)
   const droppedPermissions: DroppedPermission[] = []
   const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value, sections: e.sections })), droppedPermissions)
 

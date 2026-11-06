@@ -286,3 +286,30 @@ export const collectEntities = (
   const at = (key: string): number => rank.get(key)!.main ?? rank.get(key)!.any
   return new Map([...out].sort(([a], [b]) => at(a) - at(b)))
 }
+
+/** Tên actor chung chung — sơ đồ hay vẽ làm actor cha (tổng quát hoá) của các actor thật. */
+const GENERIC_ACTOR = /^(the\s+)?(users?|end[\s-]?users?|actors?|system users?|người dùng|người sử dụng|tác nhân)$/i
+
+/**
+ * FLF-361: actor chỉ đọc từ ảnh sơ đồ (`vision`), tên chung chung ("User" — actor cha vẽ trên sơ đồ ngữ cảnh / use case),
+ * khi file đã liệt kê actor bằng chữ / bảng ⇒ không thêm vào Spine (FAP: `A08 | User | human` không có trong bảng 2.1).
+ * Người dùng đã sửa field ở wizard ⇒ giữ. Trả khoá phần tử (`actors|A08`) cần bỏ; tham chiếu tới nó bị bỏ khi dựng op.
+ */
+export const imageOnlyGenericActors = (fields: readonly Pick<ExtractedField, "path" | "value" | "origin" | "edited_value">[]): Set<string> => {
+  const byActor = new Map<string, Pick<ExtractedField, "path" | "value" | "origin" | "edited_value">[]>()
+  for (const f of fields) {
+    const p = parseFieldPath(f.path)
+    if (p?.entity !== "actors") continue
+    const key = `actors|${p.id ?? ""}`
+    byActor.set(key, [...(byActor.get(key) ?? []), f])
+  }
+  const listed = [...byActor.values()].some((fs) => fs.some((f) => f.origin !== "vision"))
+  if (!listed) return new Set()
+  const out = new Set<string>()
+  for (const [key, fs] of byActor) {
+    if (fs.some((f) => f.origin !== "vision" || f.edited_value !== undefined)) continue
+    const name = fs.find((f) => parseFieldPath(f.path)?.field === "name")?.value
+    if (typeof name === "string" && GENERIC_ACTOR.test(name.trim())) out.add(key)
+  }
+  return out
+}
