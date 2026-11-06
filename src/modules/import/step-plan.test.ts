@@ -15,6 +15,7 @@ import {
   sectionsOwnedBy,
   sectionsWithContent,
   customSectionsWithContent,
+  repeatSectionsWithContent,
   seedStepOps,
   type LayoutBlock
 } from "./step-plan.js"
@@ -278,6 +279,22 @@ describe("functionOriginals — nguyên văn mục chức năng (FLF-252)", () =
     expect(originals.get("function:FR-3.2.3")).toEqual([{ kind: "paragraph", text: "Function Trigger", rows: null, image_ref: null }])
     // mục không phải chức năng không gom
     expect(functionOriginals([p("B0002", "Lumen", "fixed:1")], new Map()).size).toBe(0)
+  })
+})
+
+describe("repeatSectionsWithContent (FLF-379)", () => {
+  it("heading lặp lại mục FPT đã có heading trước: có khối thật dưới chính heading đó ⇒ mục riêng có nội dung; chỉ hướng dẫn ⇒ không", () => {
+    const blocks: LayoutBlock[] = [
+      h("H1", "3.3.1 Độ tin cậy", 4, "fixed:4.2.2"),
+      p("P1", "REQ-REL-001 – Phục hồi sau sự cố", "fixed:4.2.2"),
+      h("H2", "3.3.4 Tính sẵn sàng", 4, "fixed:4.2.2"),
+      p("P2", "REQ-AVAIL-001 – Sẵn sàng trong giờ học", "fixed:4.2.2"),
+      h("H3", "3.3.5 Khả năng quan sát", 4, "fixed:4.2.2"),
+      p("P3", "[Describe observability requirements]", "fixed:4.2.2")
+    ]
+    const { slices } = buildLayout(blocks, new Map(blocks.filter((b) => b.kind === "heading").map((b) => [b.block_id, "fixed:4.2.2"])))
+    expect(slices).toHaveLength(2)
+    expect(repeatSectionsWithContent(slices, blocks)).toEqual(new Set([`custom:${slices[0].custom_id}`]))
   })
 })
 

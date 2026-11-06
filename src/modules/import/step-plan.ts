@@ -425,6 +425,18 @@ export const sectionsWithContent = (blocks: LayoutBlock[]): Set<string> => {
 }
 
 /**
+ * FLF-379: heading lặp lại một mục FPT đã có heading trước (mẫu: "Reliability" rồi "3.3.4 Tính sẵn sàng" cùng mục) thành mục
+ * riêng; nội dung đã trích vào Spine nên mục riêng không giữ khối ⇒ trước đây I-5 coi là trống ("Sẽ soạn"). Xét khối thật
+ * nằm dưới chính heading đó (`LayoutSlice.block_ids`).
+ */
+export const repeatSectionsWithContent = (slices: readonly LayoutSlice[], blocks: readonly LayoutBlock[]): Set<string> => {
+  const real = new Set(
+    blocks.filter((b) => b.kind !== "heading" && b.kind !== "table_cell" && b.kind !== "table_row" && hasRealContent(b)).map((b) => b.block_id)
+  )
+  return new Set(slices.filter((s) => s.block_ids.some((id) => real.has(id))).map((s) => customSectionKey(s.custom_id)))
+}
+
+/**
  * Mục riêng (`custom:<id>`, heading mẫu không map vào mục FlintFlow) có nội dung thật. Khối dưới heading không map mang
  * `section_id = null` nên `sectionsWithContent` không thấy — trước đây mục riêng có chữ vẫn bị I-5 coi là `missing`.
  */
