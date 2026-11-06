@@ -68,6 +68,7 @@ export const toImportDto = (doc: IImportedDocument): ImportedDocumentDto => ({
   confirmed_latest_at: toIso(doc.confirmed_latest_at),
   paused: doc.paused ? { reason: doc.paused.reason, at: toIso(doc.paused.at)! } : null,
   extract_cursor: doc.extract_cursor ?? null,
+  reread: doc.reread ? { kind: doc.reread.kind, done: doc.reread.done, total: doc.reread.total, section_id: doc.reread.section_id } : null,
   intent: doc.intent ?? null,
   created_at: toIso(doc.createdAt)!,
   updated_at: toIso(doc.updatedAt)!
