@@ -457,7 +457,16 @@ const matches = (section: string, pool: Iterable<string>): boolean => {
  * được đánh `accepted` ngay từ import, người dùng thấy "đã chốt" mà cờ đỏ vẫn treo (gặp thật 2026-09-20).
  * Mục ngoài bảng luật (mục riêng, feature…) vẫn theo file như cũ.
  */
-export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string>, spine?: Spine): StepPlanItem[] =>
+export interface StepPlanOptions {
+  /**
+   * FLF-378 (luồng C — dự án mới theo mẫu bắt buộc): id bước (không mang `@màn`) sở hữu các mục của mẫu. Có ⇒ file là mẫu,
+   * không phải dữ liệu: bước sở hữu mục mẫu luôn `enabled` (chờ soạn), không bao giờ `applied` vì chữ ví dụ của mẫu; bước
+   * không sở hữu mục nào của mẫu ⇒ `hidden`.
+   */
+  draftOwners?: ReadonlySet<string>
+}
+
+export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string>, spine?: Spine, opts: StepPlanOptions = {}): StepPlanItem[] =>
   loadStepRegistry()
     .filter((s) => s.kind !== "loop")
     .map((s): StepPlanItem => {
@@ -468,6 +477,11 @@ export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string
       if (!owned.length) return { step_id: s.id, state: "applied", section_ids: [], reason: "Bước ghép / kiểm tra tài liệu — luôn chạy" }
       if (owned.every((sec) => DERIVED_SECTIONS.has(sec))) {
         return { step_id: s.id, state: "applied", section_ids: owned, reason: "Mục tự sinh từ lịch sử thay đổi" }
+      }
+      if (opts.draftOwners) {
+        return opts.draftOwners.has(s.id)
+          ? { step_id: s.id, state: "enabled", section_ids: owned, reason: "Mục của mẫu bắt buộc — FlintFlow soạn" }
+          : { step_id: s.id, state: "hidden", section_ids: owned, reason: "Mẫu không có mục này" }
       }
       const hasContent = owned.some((sec) => {
         const inSpine = spine ? sectionHasData(spine, sec) : null
@@ -496,6 +510,8 @@ export interface SeedOptions {
   firstSeq: number | null
   lastSeq: number | null
   at: string
+  /** FLF-378: như `StepPlanOptions.draftOwners` — vòng S-5 chờ soạn (bước mẫu sở hữu mục mẫu) hoặc bỏ qua, không `accepted`. */
+  draftOwners?: ReadonlySet<string>
 }
 
 /**
@@ -512,7 +528,11 @@ export const seedStepOps = (spine: Spine, plan: StepPlanItem[], opts: SeedOption
   const loopTemplates = loadStepRegistry().filter((s) => s.kind === "loop")
   for (const key of loopKeys(spine)) {
     if (!withFunctions.has(key)) continue
-    for (const t of loopTemplates) steps.push(accepted(`${t.id}@${key}`))
+    for (const t of loopTemplates) {
+      const id = `${t.id}@${key}`
+      if (!opts.draftOwners) steps.push(accepted(id))
+      else steps.push({ id, status: opts.draftOwners.has(t.id) ? "pending" : "skipped", first_seq: null, last_seq: null, accepted_at: null })
+    }
   }
 
   const probe = { ...spine, steps }

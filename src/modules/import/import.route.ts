@@ -298,10 +298,10 @@ router.post("/:id/import/finalize", authMiddleware, importController.finalize)
  * @swagger
  * /api/v1/projects/{id}/import/continue:
  *   post:
- *     summary: Chế độ 3 (mẫu bắt buộc còn thiếu mục) — viết phần còn thiếu với FlintFlow (Luồng 2) thay vì Hoàn thiện
+ *     summary: Chế độ 3 (dự án mới theo mẫu bắt buộc) — soạn các mục của mẫu với FlintFlow (Luồng 2) thay vì Hoàn thiện
  *     description: |
- *       Chỉ từ `incomplete` khi `target_structure.resolved_mode = 3`. Mở lại bước Brief (B-1…S-1), giữ bước sở hữu mục thiếu
- *       `pending`, chuyển dự án sang luồng tạo mới (`mode = fpt`, `import_state = drafting`). Bản in vẫn theo mẫu; ký
+ *       Chỉ từ `incomplete` khi `target_structure.resolved_mode = 3`. Mở lại bước Brief (B-1…S-1), đặt bước sở hữu **mọi mục
+ *       của mẫu** về `pending` (FLF-378 — chữ trong mẫu là ví dụ, không phải nội dung đã chốt), chuyển dự án sang luồng tạo mới (`mode = fpt`, `import_state = drafting`). Bản in vẫn theo mẫu; ký
  *       baseline 1.0 ⇒ dự án về mode 1 (FLF-318).
  *     tags: [Import (mode 1)]
  *     security:
