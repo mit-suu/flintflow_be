@@ -674,11 +674,12 @@ export const buildLayoutSections = (
   const segmentBlocks = (record: SectionSegments, n: Numbered): Block[] => {
     const sectionId = record.section_id
     const shifted = (section: RenderedSection): Block[] => shiftHeadings(section.blocks, n.renderLevel - section.level)
-    // FLF-361: bảng dựng lại giữ cột của bảng trong file (3.1.4: Name · Trigger · Description)
+    // FLF-361: bảng dựng lại giữ cột của bảng trong file (3.1.4: Name · Trigger · Description); FLF-380: đoạn gốc là bảng ⇒
+    // dựng lại thành bảng (ghép vào bảng gốc), không thành danh sách cạnh bảng cũ
     const fileHeader = (blocks: readonly CustomBlock[]): readonly string[] | undefined => blocks.find((b) => b.kind === "table" && b.rows?.length)?.rows?.[0]
-    const rebuild = (items: readonly string[], blocks: readonly CustomBlock[] = []): Block[] => {
+    const rebuild = (items: readonly string[], blocks: readonly CustomBlock[] = [], asTable = blocks.some((b) => b.kind === "table")): Block[] => {
       const header = sectionId === "fixed:3.1.4" ? fileHeader(blocks) : undefined
-      const ctx = { ...contextFor(sectionId, n.number), ...(header ? { nonScreenHeader: header } : {}) }
+      const ctx = { ...contextFor(sectionId, n.number), ...(header ? { nonScreenHeader: header } : {}), ...(asTable ? { preferTable: true } : {}) }
       return shifted(renderSection(segmentSpine(contentSpine, sectionId, new Set(items)), sectionId, ctx))
     }
     const out: Block[] = []
@@ -710,7 +711,8 @@ export const buildLayoutSections = (
     const taken = claimed.get(sectionId)
     const candidates = sectionItemKeys(spine, sectionId).filter((k) => !homed.has(k) && !taken?.has(k))
     const trailing = segmentItemHashes(spine, candidates).filter((h) => known.get(h.key) !== h.hash).map((h) => h.key)
-    if (trailing.length) out.push(...rebuild(trailing, record.parts.flatMap((p) => (p.kind === "spine" ? p.blocks : []))))
+    // phần tử mới cuối mục: cột theo bảng của file (FLF-361), không ép thành bảng (FLF-380)
+    if (trailing.length) out.push(...rebuild(trailing, record.parts.flatMap((p) => (p.kind === "spine" ? p.blocks : [])), false))
     return out
   }
 

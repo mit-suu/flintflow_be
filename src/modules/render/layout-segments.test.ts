@@ -126,14 +126,14 @@ describe("FLF-366 — bản 0.1 theo đoạn của file", () => {
     expect(sections.some((s) => s.id.startsWith("custom:"))).toBe(false)
   })
 
-  it("CR sửa 1 BR: chỉ bảng chứa BR đó dựng lại từ Spine đúng chỗ; phần còn lại giống bản trước", () => {
+  it("CR sửa 1 BR: chỉ bảng chứa BR đó dựng lại từ Spine đúng chỗ, vẫn là bảng như file; phần còn lại giống bản trước", () => {
     const { spine, template } = imported()
     const before = render(spine, template)
     const after = render({ ...spine, business_rules: spine.business_rules.map((r) => (r.id === "BR-03" ? { ...r, statement: "Absent over 30% fails" } : r)) }, template)
     expect(texts(section(after, "fixed:5.1"))).toEqual([
       "Rules below apply to Student and Lecturer.",
       "ID,Rule / BR-01,One check-in per slot / BR-02,Late after 15 minutes",
-      "Absent over 30% fails"
+      "ID,Rule / BR-03,Absent over 30% fails"
     ])
     for (const id of ["fixed:1", "fixed:2.2.2"]) expect(section(after, id)).toEqual(section(before, id))
   })
@@ -166,7 +166,7 @@ describe("FLF-366 — bản 0.1 theo đoạn của file", () => {
     expect(s51.slice(0, 3)).toEqual(texts(section(render(spine, template), "fixed:5.1")))
     expect(s51[3]).toBe("Excuse needs proof")
     const removed = render({ ...spine, business_rules: spine.business_rules.filter((r) => r.id !== "BR-02") }, template)
-    expect(texts(section(removed, "fixed:5.1"))).toEqual(["Rules below apply to Student and Lecturer.", "One check-in per slot", "ID,Rule / BR-03,Absent over 20% fails"])
+    expect(texts(section(removed, "fixed:5.1"))).toEqual(["Rules below apply to Student and Lecturer.", "ID,Rule / BR-01,One check-in per slot", "ID,Rule / BR-03,Absent over 20% fails"])
   })
 
   it("§4.13: CR bỏ ảnh sơ đồ gốc (vẽ lại) ⇒ sơ đồ FlintFlow cùng loại in ngay chỗ ảnh, không in lần nữa ở chỗ khác", () => {
