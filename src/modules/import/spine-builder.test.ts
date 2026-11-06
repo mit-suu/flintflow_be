@@ -13,6 +13,7 @@ import {
   findKnownKey,
   flattenItem,
   idKey,
+  imageOnlyGenericActors,
   nameKey,
   normalizeKey,
   parseFieldPath,
@@ -124,6 +125,25 @@ describe("extracted-entities", () => {
     expect(aiItemId(known, "entities", null, "SubscriptionPlan", true)).toBe("E13")
     // nhiều phần tử cùng khoá ⇒ không đoán
     expect(findKnownCompact([...known, entity("E20", "SubscriptionPlans")], "entities", "subscription plan")).toBeNull()
+  })
+})
+
+describe("FLF-361 imageOnlyGenericActors — không sinh actor thừa từ ảnh", () => {
+  const f = (path: string, value: unknown, origin: "ai" | "vision" | "deterministic", edited?: unknown) => ({ path, value, origin, ...(edited !== undefined ? { edited_value: edited } : {}) })
+  it("actor cha \"User\" chỉ có trên sơ đồ, file có bảng actor ⇒ bỏ; actor cụ thể từ ảnh (Guest) vẫn giữ", () => {
+    const fields = [
+      f("actors[id=A01].name", "Lecturer", "deterministic"),
+      f("actors[id=A02].name", "Student", "deterministic"),
+      f("actors[id=A08].name", "User", "vision"),
+      f("actors[id=A08].kind", "human", "vision"),
+      f("actors[id=A09].name", "Guest", "vision")
+    ]
+    expect([...imageOnlyGenericActors(fields)]).toEqual(["actors|A08"])
+  })
+  it("file không liệt kê actor bằng chữ ⇒ giữ actor của ảnh; người dùng đã sửa ở wizard ⇒ giữ; actor User ghi trong bảng ⇒ giữ", () => {
+    expect(imageOnlyGenericActors([f("actors[id=A08].name", "User", "vision")]).size).toBe(0)
+    expect(imageOnlyGenericActors([f("actors[id=A01].name", "Lecturer", "ai"), f("actors[id=A08].name", "User", "vision", "User")]).size).toBe(0)
+    expect(imageOnlyGenericActors([f("actors[id=A01].name", "User", "deterministic"), f("actors[id=A01].kind", "human", "vision")]).size).toBe(0)
   })
 })
 
