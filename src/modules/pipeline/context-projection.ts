@@ -411,6 +411,10 @@ export const buildStepContext = async (projectId: string, stepId: string, option
     projected.projection = { ...projected.projection, custom_sections: template.customSections }
     projected.writable = [...projected.writable, ...template.customSections.map((c) => `custom_sections[id=${c.id}]`)]
   }
+  if (template.slotWrites.length) {
+    projected.projection = { ...projected.projection, ...template.slotProjection }
+    projected.writable = [...new Set([...projected.writable, ...template.slotWrites])]
+  }
   const transcriptTail = await loadTranscriptTail(options.sessionId, stepId)
   const base = JSON.stringify(projected.projection) + JSON.stringify(projected.addendum) + transcriptTail
   const docs = await buildDocumentContext(projectId, ActionType.DRAFT, stepId, estimateTokens(base), options.modelName, options.maxOutputTokens)

@@ -48,10 +48,24 @@ export const slotOwnerSteps = (slotId: string, spine?: Spine): string[] => {
  */
 export const CUSTOM_SECTION_OWNER_STEP = "S-8.1"
 
+/**
+ * FLF-378 (C2.4): phần nhỏ chỉ có ở mẫu IEEE 29148 (FLF-365) mà không bước pipeline nào ghi — soạn bằng skill của ngân hàng
+ * phần ở bước có dữ liệu cần thiết: References / Verification ⇒ S-8.1 (ghi `references[]` / `verifications[]`), Apportioning
+ * ⇒ S-9.4 (xếp ưu tiên — được ghi `functions` / `nfrs`, nơi có `release` của yêu cầu).
+ */
+export const SLOT_FALLBACK_OWNER: Readonly<Record<string, { step: string; writes: readonly string[] }>> = {
+  "slot:references": { step: CUSTOM_SECTION_OWNER_STEP, writes: ["references"] },
+  "slot:verification": { step: CUSTOM_SECTION_OWNER_STEP, writes: ["verifications"] },
+  "slot:apportioning": { step: "S-9.4", writes: [] }
+}
+
 /** Bước soạn một mục của mẫu (`fixed:*`, `feature:*`, `function:*`, `slot:*` hoặc mục riêng `custom:*`). */
 export const templateSectionOwnerSteps = (sectionId: string, spine?: Spine): string[] => {
   if (sectionId.startsWith("custom:")) return [CUSTOM_SECTION_OWNER_STEP]
-  return isContentSlot(sectionId) ? slotOwnerSteps(sectionId, spine) : stepsOf(sectionId, spine)
+  if (!isContentSlot(sectionId)) return stepsOf(sectionId, spine)
+  const owners = slotOwnerSteps(sectionId, spine)
+  const fallback = SLOT_FALLBACK_OWNER[sectionId]
+  return owners.length || !fallback ? owners : [fallback.step]
 }
 
 const isTemplateSection = (id: string): boolean => id !== "unmapped" && !id.startsWith("group:")
