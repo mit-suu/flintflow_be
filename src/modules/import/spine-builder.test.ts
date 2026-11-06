@@ -22,7 +22,8 @@ import {
 } from "./extracted-entities.js"
 import { findingOps } from "./check.service.js"
 import { MODE1_RULE_PROFILE } from "./mode1-rule-profile.js"
-import { buildImportOps, droppedPermissionFindings, relationPhrase, type DroppedPermission } from "./spine-builder.js"
+import { buildImportOps, droppedPermissionFindings, relationPhrase, ruleTierOfSections, type DroppedPermission } from "./spine-builder.js"
+import { buildLayoutSections } from "../render/layout-sections.js"
 
 describe("extracted-entities", () => {
   it("chuẩn hoá khoá, cấp id không trùng", () => {
@@ -150,6 +151,37 @@ describe("buildImportOps", () => {
     expect(plan.spine.functions[0].validations.map((v) => v.kind)).toEqual(["format", "business"])
     expect(plan.spine.nfrs[0]).toMatchObject({ category: "performance", kind: "quantitative" })
     expect(plan.spine.permissions).toEqual([])
+  })
+
+  it("FLF-361: cấp business rule theo mục của file — rule ở 5.1 model đoán `high` vẫn là `detail` và in ở 5.1, không in ở mục 1", () => {
+    expect(ruleTierOfSections(["fixed:5.1"])).toBe("detail")
+    expect(ruleTierOfSections(["slot:high_rules"])).toBe("high")
+    expect(ruleTierOfSections(["fixed:1", "fixed:5.1"])).toBe("detail")
+    expect(ruleTierOfSections(["function:FR-01"])).toBeNull()
+    const spine = createEmptySpine({ name: "FAP" })
+    const ops = buildImportOps(spine, [
+      { entity: "business_rules", id: "BR-01", value: { statement: "Lock account after 5 failed logins", tier: "high" }, sections: ["fixed:5.1"] },
+      { entity: "business_rules", id: "BR-02", value: { statement: "Password at least 8 characters" }, sections: ["fixed:5.1"] },
+      { entity: "business_rules", id: "BR-H1", value: { statement: "Only students of FPT use FAP", tier: "detail" }, sections: ["slot:high_rules"] },
+      { entity: "business_rules", id: "BR-X", value: { statement: "Something", tier: "high" } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.business_rules.map((r) => [r.id, r.tier])).toEqual([
+      ["BR-01", "detail"],
+      ["BR-02", "detail"],
+      ["BR-H1", "high"],
+      ["BR-X", "high"]
+    ])
+    // Bản render từ Spine (đoạn đã bị CR sửa / project chưa có đoạn): BR của 5.1 in ở 5.1
+    const layout = [
+      { section_id: "fixed:1", heading_text: "1 Overview", level: 1 },
+      { section_id: "fixed:5.1", heading_text: "5.1 Business Rules", level: 2 }
+    ]
+    const sections = buildLayoutSections(plan.spine, { layout, language: "en" } as never, [], { diagramPng: () => undefined }).sections
+    const text = (id: string) => JSON.stringify(sections.find((s) => s.id === id)?.blocks ?? [])
+    expect(text("fixed:5.1")).toContain("Lock account after 5 failed logins")
+    expect(text("fixed:1")).not.toContain("Lock account after 5 failed logins")
+    expect(text("fixed:1")).toContain("Only students of FPT use FAP")
   })
 
   it("feature General không trùng id với feature trích được trong cùng lô (FLF-179)", () => {
