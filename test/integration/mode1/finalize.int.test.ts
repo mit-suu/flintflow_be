@@ -280,10 +280,12 @@ describe("finalize — DocVersion 0.1 + baseline imported", () => {
     const { projectId } = await importFinalized()
     const profile = (await TemplateProfile.findOne({ projectId }).lean())!
     const login = profile.function_originals.find((o) => o.section_id === "function:FR-3.2.2")!
+    // FLF-361: mỗi khối ghi thêm trường chức năng I-4 đọc từ nó (CR chỉ dựng lại khối của trường đổi)
     expect(login.blocks).toEqual([
-      { kind: "paragraph", text: SRS_FIXTURE_TEXT.loginNormal, rows: null, image_ref: null },
-      { kind: "list_item", text: "Show an error when the password is wrong.", rows: null, image_ref: null }
+      expect.objectContaining({ kind: "paragraph", text: SRS_FIXTURE_TEXT.loginNormal, rows: null, image_ref: null, fields: expect.arrayContaining(["trigger", "normal"]) }),
+      expect.objectContaining({ kind: "list_item", text: "Show an error when the password is wrong.", rows: null, image_ref: null })
     ])
+    expect(login.field_hashes).toEqual(expect.objectContaining({ trigger: expect.any(String), normal: expect.any(String) }))
     const sectionOf = async () => (await getDocument(projectId, "Lumen", { source: "draft" })).sections.find((s) => s.id === "function:FR-3.2.2")!
     expect((await sectionOf()).blocks).toEqual([
       { type: "paragraph", runs: [{ text: SRS_FIXTURE_TEXT.loginNormal }] },

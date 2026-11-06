@@ -134,9 +134,8 @@ describe("FLF-318 — chuyển dự án tạo SRS sang mode 1 khi Lead ký basel
     // Record of Changes khớp số version tài liệu
     const xml = await documentXml((await binary(c.get("/versions/2.0/download"))).body as Buffer)
     const printed = [...xml.matchAll(/>(v\d+\.\d+(?:\.\d+)?)</g)].map((m) => m[1])
-    // Business-flow §5.1: dòng CR mang số bản phát hành chứa nó (v2.0), không số phụ nội bộ 1.1 (FLF-330)
-    expect(printed).toEqual(expect.arrayContaining(["v1.0", "v2.0"]))
-    expect(printed).not.toContain("v1.1")
+    // FLF-361: dòng CR mang số bản tài liệu của CR (v1.1 — đúng bản 1.1 ở trên), release v2.0; không số phụ kiểu mode 2
+    expect(printed).toEqual(expect.arrayContaining(["v1.0", "v1.1", "v2.0"]))
     expect(printed).not.toContain("v1.0.1")
   })
 
