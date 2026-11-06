@@ -94,7 +94,8 @@ export const continueInFlow2 = async (projectId: string, userId: string, body: F
       (profile?.target_structure?.sections ?? []).filter((s) => !isNonDraftHeading(s.section_id, s.title)).flatMap((s) => s.owner_steps ?? [])
     ),
     by: userId,
-    reason: "Luồng 2: soạn các mục của mẫu bắt buộc",
+    // Lý do in vào Record of Changes của tài liệu (bản đầu của dự án) — câu cho người đọc tài liệu, không phải tên luồng nội bộ
+    reason: "Start drafting from the required template",
     step_id: null
   })
   // Bước cuối: đổi luồng. Ngôn ngữ tài liệu = ngôn ngữ của file mẫu (dự án tải file lên không có `documentLanguage`)
