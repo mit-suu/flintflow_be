@@ -190,8 +190,16 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     segment: intentRaw !== "fixed"
   })
   const seeded = await loadSpine(projectId)
+  // FLF-336 I-5: so cấu trúc đích (trước kế hoạch step) — ý định theo `Project.template_intent` (FLF-335); dự án cũ ⇒ tự do.
+  // FLF-378 (luồng C): dự án mới theo mẫu bắt buộc ⇒ file là mẫu, mọi mục mẫu "Sẽ soạn", luôn chế độ 3
+  const intent: TemplateIntent = intentRaw === "fixed" ? "fixed" : "free"
+  const draftAll = intent === "fixed" && project?.start_kind === "new"
+  const withContent = new Set([...sectionsWithContent(layoutBlocks), ...customSectionsWithContent(customSections)])
+  const structure = compareTargetStructure(layout, withContent, stripRecord(seeded), intent, undefined, { draftAll })
+  // Bước sở hữu mục của mẫu (id bước mẫu, bỏ `@màn`) — dự án mới theo mẫu bắt buộc: chờ soạn hết, không bước nào `accepted` sẵn
+  const draftOwners = draftAll ? new Set(structure.sections.flatMap((s) => s.owner_steps.map((id) => id.split("@")[0]))) : undefined
   // Kế hoạch đọc Spine đã nạp dữ liệu: mục trích không ra gì thì vẫn là "thiếu", đừng đánh dấu step đã xong
-  const plan = buildStepPlan(layout, sectionsWithContent(layoutBlocks), stripRecord(seeded))
+  const plan = buildStepPlan(layout, sectionsWithContent(layoutBlocks), stripRecord(seeded), draftOwners ? { draftOwners } : {})
   // FLF-252: quyền của ma trận không khớp màn / vai trò nào ⇒ cờ vàng (trước đây bỏ im lặng), neo vào bảng phân quyền
   const matrixBlocks = [...new Set(entities.filter((e) => e.entity === "permissions").flatMap((e) => [...e.source_block_ids]))].slice(0, 1)
   const planOps = [
@@ -209,7 +217,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
       },
       { findings: titleContentFindings(stripRecord(seeded), profile.heading_map, layout), rule: IMPORT_TITLE_CONTENT_RULE }
     ]),
-    ...seedStepOps(stripRecord(seeded), plan, { firstSeq: seqRange.first, lastSeq: seqRange.last, at: new Date().toISOString() })
+    ...seedStepOps(stripRecord(seeded), plan, { firstSeq: seqRange.first, lastSeq: seqRange.last, at: new Date().toISOString(), ...(draftOwners ? { draftOwners } : {}) })
   ]
   await applyTransaction(projectId, { base_version: seeded.spine_version, ops: planOps, by: "import", reason: "Import: kế hoạch step theo template", step_id: null })
   profile.layout = layout
@@ -234,17 +242,15 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
       return fn && blocks.length ? [{ section_id, source_hash: functionSourceHash(fn), blocks }] : []
     }
   )
-  // FLF-336 I-5: so cấu trúc đích TRƯỚC khi chụp v0 — còn mục thiếu và người dùng chưa bấm "Hoàn thiện" ⇒ dừng ở
-  // `incomplete` (không có v0 dở dang, §1). Ý định theo `Project.template_intent` (FLF-335); dự án cũ ⇒ tự do.
-  const intent: TemplateIntent = intentRaw === "fixed" ? "fixed" : "free"
-  const withContent = new Set([...sectionsWithContent(layoutBlocks), ...customSectionsWithContent(customSections)])
-  const structure = compareTargetStructure(layout, withContent, stripRecord(seeded), intent)
+  // FLF-336 I-5: cấu trúc đích lưu TRƯỚC khi chụp v0 — còn mục thiếu và người dùng chưa bấm "Hoàn thiện" ⇒ dừng ở
+  // `incomplete` (không có v0 dở dang, §1).
   profile.target_structure = structure
   profile.markModified("target_structure")
   await profile.save()
   // Chỉ dự án có ý định (tạo qua picker FLF-335) mới dừng; dự án cũ không có `template_intent` giữ luồng cũ ⇒ v0 như hôm nay
   const structureGate = intentRaw === "fixed" || intentRaw === "free"
-  if (structureGate && structure.missing.length > 0 && !doc.complete_requested) {
+  // FLF-378: dự án mới theo mẫu bắt buộc luôn dừng — không bao giờ có baseline / DocVersion 0.1 chụp từ mẫu
+  if (draftAll || (structureGate && structure.missing.length > 0 && !doc.complete_requested)) {
     await transitionImport(doc, "incomplete")
     const stopped = await loadSpine(projectId)
     return { doc, baseline: null, spine_version: stopped.spine_version, flags: null, target_structure: structure }

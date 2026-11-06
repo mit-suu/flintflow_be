@@ -236,4 +236,43 @@ describe("Luồng 2 cho phần thiếu — chế độ 3", () => {
       .toBe(readZipText(source, "word/styles.xml"))
   })
 
+  it("FLF-378 luồng C: mẫu mục nào cũng có chữ ví dụ ⇒ vẫn chế độ 3, mọi mục 'Sẽ soạn', không 0.1, không bước nào chốt sẵn; continue ⇒ bước sở hữu mục mẫu chờ soạn", async () => {
+    const source = await makeDocx({
+      styles: `<w:style w:type="paragraph" w:styleId="u1"><w:name w:val="heading 1"/></w:style><w:style w:type="paragraph" w:styleId="u2"><w:name w:val="heading 2"/></w:style>`,
+      body:
+        styled("u1", "1 Product Overview") +
+        styled("u2", "1.1 Purpose") + p("Ví dụ: Hệ thống quản lý thư viện giúp thủ thư theo dõi sách mượn.") +
+        styled("u2", "1.2 Scope") + p("The Library System covers borrowing and returning books for members.") +
+        styled("u2", "1.3 Document Conventions") + p("Requirements are written in bold, e.g. FR-001.")
+    })
+    const { projectId, importId, userId } = await importAtExtracting({ buffer: source })
+    await runExtraction(projectId, userId, importId)
+    await Project.updateOne({ _id: projectId }, { $set: { template_intent: "fixed", start_kind: "new" } })
+    await startFinalize(projectId, userId, { import_id: importId, base_version: await version(projectId) })
+    await waitForFinalize(importId)
+    expect((await ImportedDocument.findById(importId))!.status).toBe("incomplete")
+    const structure = (await TemplateProfile.findOne({ projectId }).lean())!.target_structure!
+    expect(structure.resolved_mode).toBe(3)
+    expect(structure.sections.length).toBeGreaterThan(0)
+    expect(structure.sections.every((s) => s.status === "missing")).toBe(true)
+    expect(await DocVersion.countDocuments({ projectId })).toBe(0)
+    const seeded = (await spineRepository.get(projectId))!
+    expect(seeded.steps.filter((s) => s.status === "accepted" && s.id !== "S-8.3").map((s) => s.id)).toEqual([])
+
+    const user = (await User.findById(userId).lean())!
+    const project = (await Project.findById(projectId).lean())!
+    const token = await authAs({ _id: user._id, email: user.email, orgId: String(project.organizationId) })
+    const res = await request(app)
+      .post(`/api/v1/projects/${projectId}/import/continue`)
+      .set({ Authorization: `Bearer ${token}` })
+      .send({ import_id: importId, base_version: await version(projectId) })
+    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+    const spine = (await spineRepository.get(projectId))!
+    const owners = new Set(structure.sections.flatMap((s) => s.owner_steps.map((id) => id.split("@")[0])))
+    expect(owners.size).toBeGreaterThan(0)
+    const ownerSteps = spine.steps.filter((s) => owners.has(s.id.split("@")[0]))
+    expect(ownerSteps.length).toBeGreaterThan(0)
+    expect(ownerSteps.every((s) => s.status === "pending")).toBe(true)
+  })
 })
+
