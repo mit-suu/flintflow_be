@@ -183,7 +183,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   )
   // FLF-361: ảnh gửi đọc mà chưa đọc được (EMF / AI quá tải) ⇒ suy loại theo caption / mục để vẫn ẩn PlantUML cùng loại
   // (lưới an toàn khi FLF-360 đọc lại vẫn không được). Cờ vàng `import_image_unread` giữ nguyên — dữ liệu ảnh chưa vào Spine
-  const imageUnread = new Set(drafts.flatMap((d) => (d.diagram_images ?? []).filter((i) => i.kind === "unsupported" || i.kind === "unavailable").map((i) => i.block_id)))
+  const imageUnread = new Set(drafts.flatMap((d) => (d.diagram_images ?? []).filter((i) => i.kind === "unsupported" || i.kind === "unavailable" || i.kind === "failed").map((i) => i.block_id)))
   const imported = stripRecord(spineNow)
   for (const b of layoutBlocks) {
     if (b.kind !== "image" || !b.image_ref || !b.section_id) continue
@@ -318,6 +318,10 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const after = await loadSpine(projectId)
   await assembleWorkingDraft(projectId, projectName, after.spine_version)
   scheduleEmbeddingSync(projectId)
+  // FLF-360: còn ảnh AI chưa đọc được vì quá tải ⇒ hẹn job đọc lại nền (không tạo version mới khi đọc được). Import động:
+  // reread-jobs dùng lại `refreshSegmentHashes` của file này
+  const { scheduleRereadAfterFinalize } = await import("./reread-jobs.js")
+  await scheduleRereadAfterFinalize(projectId, userId, String(doc._id), await ExtractionDraft.find({ import_id: doc._id }, { section_id: 1, status: 1, diagram_images: 1 }).lean())
   return { doc, baseline, spine_version: after.spine_version ?? spineVersion, flags: countOpenFlags(after.flags), target_structure: structure }
 }
 
@@ -352,7 +356,8 @@ export const nonScreenTableIds = (drafts: Pick<IExtractionDraft, "section_id" | 
 
 const UNREAD_REASON: Readonly<Record<string, string>> = {
   unsupported: "định dạng ảnh không hỗ trợ",
-  unavailable: "AI đọc ảnh đang quá tải, chưa đọc được"
+  unavailable: "AI đọc ảnh đang quá tải, chưa đọc được",
+  failed: "AI không đọc được ảnh này"
 }
 
 /** Ảnh ở mục diagram mà I-4 không đọc được (`other` / EMF / AI lỗi…) ⇒ cờ vàng: ảnh gốc được giữ, dữ liệu trong ảnh chưa vào Spine. */

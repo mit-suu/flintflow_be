@@ -6,6 +6,24 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
+// FLF-360: ảnh quá tải giờ được đọc lại thêm vài lượt — giữ đúng logic thử lại trong một lượt gọi (cùng số lần, cùng điều
+// kiện) nhưng không chờ thật 2 s / 6 s, không thì các ca "Gemini quá tải" vượt 30 s
+vi.mock("../../../src/shared/ai/retry.service.js", async (orig) => {
+  const real = await orig<typeof import("../../../src/shared/ai/retry.service.js")>()
+  return {
+    ...real,
+    delay: async () => undefined,
+    executeWithInRequestRetry: async <T>(fn: (attempt: number) => Promise<T>, maxRetries = 2): Promise<T> => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await fn(attempt)
+        } catch (err) {
+          if (attempt >= maxRetries || !real.isTransientError(err)) throw err
+        }
+      }
+    }
+  }
+})
 
 import mongoose from "mongoose"
 import { mockImages, mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
