@@ -150,6 +150,27 @@ describe("FLF-343 needsReviewFindings — chỗ độ tin thấp vào baseline k
   })
 })
 
+describe("FLF-361 needsReviewFindings — không hỏi lại chỗ không vào Spine / không còn là đoán", () => {
+  it("UC → actor chỉ có trên ảnh đã bỏ (\"User\") ⇒ không cờ; tham chiếu vào được ⇒ có cờ; cấp BR ở 5.1 ⇒ không cờ; mã khác dạng vẫn khớp", async () => {
+    const { needsReviewFindings } = await import("./finalize.service.js")
+    const drafts = [
+      { section_id: "fixed:2.2.1", fields: [field("use_cases[id=UC10].actor_ids", ["A08"], 0.7, false, { origin: "vision" }), field("use_cases[id=UC-11].actor_ids", ["A01", "A08"], 0.7, false, { origin: "vision" })] },
+      { section_id: "fixed:5.1", fields: [field("business_rules[id=BR-01].tier", "high", 0.69)] }
+    ]
+    const spine = {
+      ...createEmptySpine(),
+      actors: [{ id: "A01" }],
+      use_cases: [
+        { id: "UC10", actor_ids: [] },
+        { id: "UC11", actor_ids: ["A01"] }
+      ],
+      business_rules: [{ id: "BR-01", tier: "detail" }]
+    } as unknown as Parameters<typeof needsReviewFindings>[0]
+    const out = needsReviewFindings(spine, drafts, { heading_map: [], table_map: [] }, [], new Map(), () => null)
+    expect(out.map((f) => f.target_id)).toEqual(["use_cases[id=UC-11].actor_ids"])
+  })
+})
+
 describe("FLF-363 titleContentFindings — tiêu đề và nội dung khác nhau", () => {
   it("heading đổi mục theo nội dung ⇒ cờ nêu cả hai mục theo tên mẫu, không mã nội bộ; không thêm cờ Cần xem cho heading đó", async () => {
     const { needsReviewFindings, titleContentFindings } = await import("./finalize.service.js")

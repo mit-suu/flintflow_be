@@ -39,7 +39,7 @@ import { countOpenFlags, findingOpsInOrder, runImportCheck, stripRecord, type Fi
 import { legacyRecordRows } from "./legacy-record.js"
 import { DocBlock } from "./doc-block.model.js"
 import { captionOf } from "./extract.service.js"
-import { canonicalFieldIds, collectEntities, imageOnlyGenericActors, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
+import { canonicalFieldIds, collectEntities, idKey, imageOnlyGenericActors, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
 import { ExtractionDraft, type IExtractionDraft } from "./extraction-draft.model.js"
 import { FieldAnchor } from "./field-anchor.model.js"
 import { needsConfirm } from "./import.constants.js"
@@ -52,11 +52,11 @@ import { scanMentions, type NamedEntity } from "./mentions.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { IMPORT_IMAGE_RULE, IMPORT_NEEDS_REVIEW_RULE, IMPORT_TITLE_CONTENT_RULE, IMPORT_UNRESOLVED_RULE } from "./mode1-rule-profile.js"
 import { parseDocument } from "./parse.service.js"
-import { buildImportOps, droppedPermissionFindings, type DroppedPermission } from "./spine-builder.js"
+import { buildImportOps, droppedPermissionFindings, ruleTierOfSections, type DroppedPermission } from "./spine-builder.js"
 import { tableRows } from "./table-rows.js"
 import { buildLayout, buildStepPlan, customSectionOps, customSectionsWithContent, functionOriginals, projectFieldEntities, sectionSegments, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
 import { functionSourceHash } from "../render/layout-sections.js"
-import { functionFieldHashes } from "../render/function-original.js"
+import { functionFieldValues, tagFunctionBlocks } from "../render/function-original.js"
 import { TemplateProfile, type HeadingMapEntry, type LayoutEntry, type TableMapEntry } from "./template-profile.model.js"
 import { compareTargetStructure, type TargetStructure, type TemplateIntent } from "./target-structure.js"
 import { titleOfSection } from "./gap-report.service.js"
@@ -236,21 +236,13 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // FLF-252 — in theo file gốc: nguyên văn từng mục chức năng + dấu nội dung chức năng lúc nhập (chức năng không đổi ở lô
   // kế hoạch step nên dấu tính trên Spine sau lô thực thể)
   const fnById = new Map(seeded.functions.map((f) => [`function:${f.id}`, f]))
-  // FLF-361: trường chức năng đọc từ từng khối (field I-4 `functions[id=…].normal` ⇒ khối nguồn) — CR chỉ dựng lại khối của trường đổi
-  const functionFields = new Map<string, Set<string>>()
-  for (const f of accepted) {
-    const path = parseFieldPath(f.path)
-    if (path?.entity !== "functions" || !path.id) continue
-    for (const b of f.source_block_ids) functionFields.set(`function:${path.id}|${b}`, (functionFields.get(`function:${path.id}|${b}`) ?? new Set()).add(path.field))
-  }
-  const blockSection = new Map(layoutBlocks.map((b) => [b.block_id, b.section_id ?? ""]))
-  profile.function_originals = [
-    ...functionOriginals(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), (blockId) => [
-      ...(functionFields.get(`${blockSection.get(blockId)}|${blockId}`) ?? [])
-    ])
-  ].flatMap(([section_id, blocks]) => {
+  // FLF-361: khối nào chứa chữ của phần tử nào (đối chiếu theo chữ, không theo khối nguồn AI ghi) + chữ từng trường lúc
+  // import ⇒ CR chỉ sửa khối chứa phần tử đã đổi
+  profile.function_originals = [...functionOriginals(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))].flatMap(([section_id, blocks]) => {
     const fn = fnById.get(section_id)
-    return fn && blocks.length ? [{ section_id, source_hash: functionSourceHash(fn), field_hashes: functionFieldHashes(fn), blocks }] : []
+    if (!fn || !blocks.length) return []
+    const field_values = functionFieldValues(seeded, fn)
+    return [{ section_id, source_hash: functionSourceHash(fn), field_values, blocks: tagFunctionBlocks(blocks, field_values) }]
   })
   // FLF-336 I-5: so cấu trúc đích TRƯỚC khi chụp v0 — còn mục thiếu và người dùng chưa bấm "Hoàn thiện" ⇒ dừng ở
   // `incomplete` (không có v0 dở dang, §1). Ý định theo `Project.template_intent` (FLF-335); dự án cũ ⇒ tự do.
@@ -400,9 +392,25 @@ export const needsReviewFindings = (
     const p = parseFieldPath(path)
     if (!p || p.entity === "project") return true
     const arr = (spine as unknown as Record<string, unknown>)[p.entity]
-    return Array.isArray(arr) && arr.some((x) => (x as { id?: unknown }).id === p.id)
+    // FLF-361: path của bản trích có thể ghi mã khác dạng id Spine (UC-01 / UC01) ⇒ so theo idKey
+    return Array.isArray(arr) && arr.some((x) => typeof (x as { id?: unknown }).id === "string" && idKey((x as { id: string }).id) === idKey(p.id ?? ""))
   }
-  const fields = toReviewFields(drafts, (f) => !f.confirmed && needsConfirm(f) && inSpine(f.path)).map((f) => ({
+  // FLF-361: field tham chiếu mà không giá trị nào vào Spine (UC → actor "User" chỉ có trên ảnh, đã bỏ) ⇒ không có gì để xem;
+  // cấp business rule đã quyết theo mục của file (5.1 / mục 1) ⇒ không còn là chỗ model đoán
+  const landed = (f: { path: string; value: unknown; section_id: string }): boolean => {
+    const p = parseFieldPath(f.path)
+    if (!p || p.entity === "project") return true
+    if (p.entity === "business_rules" && p.field === "tier" && ruleTierOfSections([realSectionId(f.section_id, provisional)]) !== null) return false
+    if (!Array.isArray(f.value) || !f.value.length || !f.value.every((v) => typeof v === "string")) return true
+    const el = ((spine as unknown as Record<string, unknown>)[p.entity] as Record<string, unknown>[] | undefined)?.find((x) => typeof x.id === "string" && idKey(x.id) === idKey(p.id ?? ""))
+    const now = el?.[p.field]
+    if (!Array.isArray(now)) return true
+    const keys = new Set(now.filter((x): x is string => typeof x === "string").map(idKey))
+    return (f.value as string[]).some((v) => keys.has(idKey(v)))
+  }
+  const fields = toReviewFields(drafts, (f) => !f.confirmed && needsConfirm(f) && inSpine(f.path))
+    .filter((f) => landed(f))
+    .map((f) => ({
     rule: "needs_review",
     section_id: realSectionId(f.section_id, provisional),
     message: `Cần xem: ${pathLabel(f.path, f.entity_name)} — ${f.origin === "vision" ? "đọc từ ảnh sơ đồ" : `độ tin ${percent(f.confidence)}`}; đã đưa vào bản 0.1, sai thì sửa bằng change request`,

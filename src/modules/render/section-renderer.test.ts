@@ -644,6 +644,7 @@ describe("buildRecordOfChanges", () => {
     const rows = buildRecordOfChanges([
       change({ txn: "t1", step_id: null, by: "import", reason: "Import SRS FAP_SRS_v1.0_fixed.docx" }),
       change({ txn: "t2", step_id: null, by: "import", reason: "Import: kế hoạch step theo template" }),
+      change({ txn: "t2b", step_id: null, by: "import", reason: "render" }),
       change({ txn: "t3", op: "add", path: "baselines[]", step_id: null, by: "import", reason: "Baseline 0.1" }),
       change({ txn: "t4", step_id: null, by: "import", reason: "AI check: term_drift" }),
       change({ txn: "t5", step_id: null, by: "CR-001", reason: "CR-001: Khoá tài khoản sau 3 lần đăng nhập sai liên tiếp." })

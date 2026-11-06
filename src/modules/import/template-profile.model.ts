@@ -9,7 +9,7 @@ import mongoose, { Schema, Document } from "mongoose"
 import type { RocRow } from "../render/rendered-document.types.js"
 import type { CustomBlock } from "../spine/spine.types.js"
 import type { SectionSegments } from "../spine/segment-hash.js"
-import type { FunctionOriginalBlock } from "../render/function-original.js"
+import type { FunctionFieldValues, FunctionOriginalBlock } from "../render/function-original.js"
 import { HEADING_DETECTORS, type HeadingDetector } from "./import.constants.js"
 import type { TargetStructure } from "./target-structure.js"
 
@@ -117,7 +117,7 @@ export interface ITemplateProfile extends Document {
    * FLF-252 — in theo file gốc: nguyên văn từng mục chức năng của file + dấu nội dung chức năng lúc nhập. Bản in dùng
    * nguyên văn khi chức năng chưa bị change request sửa (dấu còn khớp).
    */
-  function_originals: { section_id: string; source_hash: string; blocks: FunctionOriginalBlock[]; field_hashes?: Record<string, string> }[]
+  function_originals: { section_id: string; source_hash: string; blocks: FunctionOriginalBlock[]; field_values?: FunctionFieldValues }[]
   /**
    * Heading lặp lại một section FPT (mẫu IEEE: Reliability + Availability ⇒ 4.2.2) + phần tử Spine trích từ nó
    * (`nfrs:NFR-03`) — bản in đặt phần tử dưới đúng heading của file thay vì dồn hết lên lần đầu của section.
@@ -195,10 +195,10 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
           {
             section_id: { type: String, required: true },
             source_hash: { type: String, required: true },
-            // khối nguyên văn (CustomBlock của Spine: paragraph / list_item / table / image; FLF-361: heading con + `fields`)
+            // khối nguyên văn (CustomBlock của Spine: paragraph / list_item / table / image; FLF-361: heading con + `tags`)
             blocks: { type: [Schema.Types.Mixed], default: [] },
-            // FLF-361: dấu từng trường chức năng lúc import — CR chỉ dựng lại khối của trường đã đổi
-            field_hashes: { type: Schema.Types.Mixed, default: undefined }
+            // FLF-361: chữ từng trường chức năng lúc import — CR chỉ sửa khối chứa phần tử đã đổi
+            field_values: { type: Schema.Types.Mixed, default: undefined }
           },
           opts
         )
