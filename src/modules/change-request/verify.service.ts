@@ -36,6 +36,8 @@ import { answersText, crHeader, glossaryText, plainValues, relatedElements, rela
 import { regroup } from "./group.service.js"
 import { refreshDiagramLocations } from "./diagram-location.js"
 import { locksOf } from "./lock.service.js"
+import { GAP_SECTION_EMPTY_RULE, gapSectionFlags } from "./gap-fill.js"
+import { gapSectionTitles } from "./gap-fill.service.js"
 import { fixDuplicateIds } from "./propose.service.js"
 import { elementValue, isArrayPath, listElements, opElement, sectionOfElement, unchangedSince, valueText } from "./spine-location.js"
 
@@ -128,6 +130,25 @@ export const checkSpineOps = (spine: Spine, cr: Pick<IChangeRequest, "cr_id">, l
     }
   }
   return out
+}
+
+/** Spine sau khi chạy khô mọi op `edit` của CR; op sai / phá bất biến ⇒ `null` (vi phạm đã báo ở `checkSpineOps`). */
+export const spineAfterEdits = (spine: Spine, cr: Pick<IChangeRequest, "cr_id">, locations: readonly CheckLocation[]): Spine | null => {
+  const ops: Op[] = []
+  for (const l of locations) {
+    if (l.conclusion !== "edit") continue
+    for (const raw of l.proposal?.spine_ops ?? []) {
+      const parsed = userOpSchema.safeParse(raw)
+      if (!parsed.success) return null
+      ops.push(parsed.data)
+    }
+  }
+  if (!ops.length) return spine
+  try {
+    return planTransaction(spine, { base_version: spine.spine_version, ops, by: cr.cr_id }, { startSeq: 1 }).spine
+  } catch {
+    return null
+  }
 }
 
 /** Phần phạm vi cùng section (giữ chỗ cho phần tử section khác + đoạn văn giữ nguyên, FLF-367). */
@@ -260,6 +281,16 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
         const mine = aiFlags.get(l.location_id) ?? []
         if (!mine.some((x) => x.message === flag.message)) aiFlags.set(l.location_id, [...mine, flag])
       }
+    }
+  }
+
+  // FLF-382: CR bổ sung — mục nào vẫn trống sau đề xuất thì báo (vàng), không chặn ghi
+  if (cr.kind === "gap_fill" && cr.gap_sections?.length) {
+    for (const [id, flags] of aiFlags) aiFlags.set(id, flags.filter((f) => f.rule !== GAP_SECTION_EMPTY_RULE))
+    const after = spineAfterEdits(spine, cr, locations)
+    if (after) {
+      const titles = await gapSectionTitles(String(cr.projectId), [cr])
+      for (const [id, flags] of gapSectionFlags(after, cr.gap_sections, titles, locations)) aiFlags.set(id, [...(aiFlags.get(id) ?? []), ...flags])
     }
   }
 

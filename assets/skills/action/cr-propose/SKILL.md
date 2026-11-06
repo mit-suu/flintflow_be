@@ -1,7 +1,7 @@
 ---
 skill_id: cr-propose
 kind: action
-version: 2.6.0
+version: 2.7.0
 description: Mode 1 C-4 — for every affected Spine element conclude edit | comment | not_related and propose the Spine ops
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -12,6 +12,7 @@ reads:
   - "<source material the user attached + facts the clarify step reported missing>"
   - "<locked locations: element path, section, found_by, current value as JSON>"
   - "<content skill of the owner step (writing rules for that field)>"
+  - "<gap-fill CR only: each empty section — heading, template guidance, ISO 29148 expected content, template table columns>"
   - glossary[]
 writes:
   - "<the locked elements, through spine_ops applied at C-7 after approval>"
@@ -37,6 +38,11 @@ and keep every other field exactly as it is — each changed field is a revision
 {{target_sections}}
 - Writing rules of the section that owns these elements:
 {{owner_skill}}
+{{#if gap_sections}}
+- **Gap-fill CR** — empty sections of the customer's template to write now (one location each; write the content the
+  template asks for, from the data already in the document, the answers and the material):
+{{gap_sections}}
+{{/if}}
 - Locations (`[L001] element path (section; why it was found)` then the element's current value as JSON):
 {{locations}}
 - Glossary: {{glossary}}
@@ -86,6 +92,9 @@ and keep every other field exactly as it is — each changed field is a revision
    kept verbatim: set that `custom_sections` element's `blocks`, changing only the conflicting sentence); when no op
    can express it, conclude `comment` naming the passage to fix. "keep it as it is" ⇒ do not change that content.
 10. `reason`, `comment_text` and `assumptions`: User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`, `feature:@B0012`), element paths (`actors[id=A02].name`), block ids (`B0012`) or location ids (`L001`). Name a section by its heading and an element by its name or document code (`UC-01` is fine).
+11. **Template text is guidance, not content**: never copy a template's guidance or example sentence (`[…]`, `{…}`,
+   "e.g. …") into the document — write the project's own content. A template table keeps exactly its columns, in order
+   (fill `rows` under that header; a column with no data stays empty).
 
 ## Output
 

@@ -36,6 +36,7 @@ import { addedElements, elementValue, isArrayPath, isSectionTarget, opElement, s
 import { isDiagramLocation, refreshDiagramLocations } from "./diagram-location.js"
 import { reassignDuplicateIds } from "./new-ids.js"
 import { proposeUseCaseBatch } from "./add-use-case.service.js"
+import { gapContextFor } from "./gap-fill.service.js"
 
 /**
  * Số vị trí gửi trong một lượt C-4. Trước là 12: prompt kèm giá trị JSON của từng phần tử (tới 2500 ký tự) và câu
@@ -255,6 +256,8 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
   // FLF-364: hướng dẫn của mẫu upload theo mục (Mode 1) — ngữ cảnh soạn đúng ý người làm mẫu
   const guidance = templateGuidanceBySection(await TemplateProfile.findOne({ projectId: cr.projectId }).select("heading_map layout").lean())
   let locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
+  // FLF-382: CR bổ sung — ngữ cảnh từng mục trống (hướng dẫn mẫu, nội dung nên có, cột bảng mẫu); CR thường ⇒ ""
+  const gapSections = await gapContextFor(cr, spine)
 
   // FLF-318: CR thêm / xoá use case ⇒ soạn trọn lô một lượt như chat trước baseline (luật 3e / 3g), vị trí còn
   // lại đề xuất theo lô như dưới. Hết credit ⇒ dừng như C-4.
@@ -292,7 +295,8 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
           materials: materialsText(cr),
           missing_info: missingInfoText(cr),
           locations: batch.map((l) => locationPromptText(spine, l, cr.seed?.ops ?? [])).join("\n"),
-          glossary: glossaryText(spine)
+          glossary: glossaryText(spine),
+          gap_sections: gapSections
         })
         if (!result.ok) {
           if (result.reason !== "credits" && batch.length > 1) {
@@ -377,7 +381,8 @@ Analyst's instruction for ${loc.location_id} (${loc.owner_step ? `fix in owner s
     materials: materialsText(cr),
     missing_info: missingInfoText(cr),
     locations: locationPromptText(spine, loc, cr.seed?.ops ?? []),
-    glossary: glossaryText(spine)
+    glossary: glossaryText(spine),
+    gap_sections: await gapContextFor(cr, spine)
   })
   if (!result.ok) {
     // `manual_fix` không phải bước pause được (Flow 4/5 của CR chỉ ở clarifying/proposing/verifying) ⇒ báo lỗi, giữ nguyên

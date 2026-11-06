@@ -72,6 +72,11 @@ export interface IImportedDocument extends Document {
   finalize_checkpoint: FinalizeCheckpoint | null
   /** FLF-336: người dùng bấm "Hoàn thiện" ở màn Kết quả đọc file ⇒ lần finalize kế không dừng ở `incomplete` nữa. */
   complete_requested: boolean
+  /**
+   * FLF-382 (luồng B): "Hoàn thiện" khi còn mục thiếu ⇒ mục thiếu lúc chốt 0.1 (section id theo I-5). Bước kiểm tra xong thì
+   * mở CR "Bổ sung mục còn thiếu" cho các mục này (một lần mỗi import). `null` = không cần.
+   */
+  gap_fill_requested: { section_ids: string[]; at: Date } | null
   created_by: mongoose.Types.ObjectId
   createdAt: Date
   updatedAt: Date
@@ -140,6 +145,10 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
     },
     extract_cursor: { type: String, default: null },
     complete_requested: { type: Boolean, default: false },
+    gap_fill_requested: {
+      type: new Schema({ section_ids: { type: [String], default: [] }, at: { type: Date, required: true } }, opts),
+      default: null
+    },
     intent: { type: String, enum: [...TEMPLATE_INTENTS, null], default: null },
     org_template_id: { type: Schema.Types.ObjectId, ref: "OrgTemplate", default: null },
     finalize_checkpoint: {
