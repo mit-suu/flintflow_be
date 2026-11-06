@@ -17,6 +17,19 @@ describe("templateWrapperIds (FLF-278 — heading bao của mẫu bắt buộc)"
     expect([...templateWrapperIds(layout)]).toEqual(["custom:CS02"])
   })
 
+  it("heading tính năng có chức năng con (3.2 Course Registration › 3.2.1 …) ⇒ heading bao; tính năng không có heading con thì không", () => {
+    const layout = [
+      e(0, "feature:F01", "3.2 Course Registration", 2),
+      e(1, "function:FN01", "3.2.1 Register for course sections", 3),
+      e(2, "function:FN02", "3.2.2 Drop a course section", 3),
+      e(3, "feature:F02", "3.3 Attendance", 2),
+      e(4, "function:FN03", "3.3.1 Take attendance", 3),
+      e(5, "feature:F03", "3.6 Notifications", 2),
+      e(6, "fixed:4.1", "4.1 External Interfaces", 2)
+    ]
+    expect([...templateWrapperIds(layout)]).toEqual(["feature:F01", "feature:F02"])
+  })
+
   it("bỏ qua phần nối (tiêu đề rỗng) khi tìm heading kế tiếp; xét theo `order`, không theo thứ tự mảng", () => {
     const layout = [
       e(3, "custom:CS05", "Known Risks", 2),
