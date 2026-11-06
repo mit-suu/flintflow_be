@@ -40,9 +40,10 @@ export const ruleProfileOf = async (projectId: string): Promise<RuleProfile | un
   const mode1 = project?.mode === "import"
   const fixed = project?.template_intent === "fixed"
   if (!mode1 && !fixed) return undefined
-  const profile = (await TemplateProfile.findOne({ projectId }, { layout: 1, section_segments: 1 }).lean()) as {
+  const profile = (await TemplateProfile.findOne({ projectId }, { layout: 1, section_segments: 1, section_slices: 1 }).lean()) as {
     layout?: LayoutEntry[]
     section_segments?: SectionSegments[]
+    section_slices?: { custom_id: string; items: string[] }[]
   } | null
   // FLF-366: đoạn nguyên văn của file import ⇒ cờ vàng khi văn xuôi gốc nhắc tới phần tử đã đổi tên / bị xoá
   const segments = mode1 ? (profile?.section_segments ?? []) : []
@@ -54,8 +55,10 @@ export const ruleProfileOf = async (projectId: string): Promise<RuleProfile | un
   // Mục FPT có mặt qua các phần nhỏ (`slot:*`) của nó cũng là mục của mẫu
   const templateLayout = withSlotParents(layout.map((l) => l.section_id))
   const templateWrappers = templateWrapperIds(layout)
+  // Heading lặp có nội dung đã trích vào Spine (slice) ⇒ không phải mục trống
+  const templateFilled = new Set((profile?.section_slices ?? []).filter((sl) => sl.items.length).map((sl) => `custom:${sl.custom_id}`))
   // Luồng 2 của chế độ 3 (`mode = fpt`, flow2.service): đủ luật tạo mới, chỉ trên các mục của mẫu
-  return mode1 ? mode1Profile({ templateLayout, templateWrappers }) : { exclude: new Set(), downgrade: new Set(), templateLayout, templateWrappers }
+  return mode1 ? mode1Profile({ templateLayout, templateWrappers, templateFilled }) : { exclude: new Set(), downgrade: new Set(), templateLayout, templateWrappers, templateFilled }
 }
 
 flagsService.setRuleProfileResolver(ruleProfileOf)

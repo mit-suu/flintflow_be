@@ -11,6 +11,7 @@ import { renderSpineDocument } from "../render/assemble.service.js"
 import type { ChangeRecordRow } from "../render/section-renderer.js"
 import { loadFixedTemplateContext, writeProjectDocx } from "../render/project-docx-writer.js"
 import { writerOptionsFor } from "../render/labels.js"
+import { sourceFidelityFor } from "../render/source-fidelity.js"
 import type { Spine } from "../spine/spine.types.js"
 import { projectLanguages, type ProjectLanguages } from "../translation/translation.service.js"
 
@@ -49,14 +50,17 @@ export const renderVersionFile = async (projectId: string, projectName: string, 
     ...(opts.recordChanges !== undefined ? { recordChanges: opts.recordChanges } : {}),
     ...(languages ? { languages } : {})
   }
-  const doc = context
-    ? await renderSpineDocument(projectId, projectName, spine, renderOptions, { loadTemplate: async () => context.layout })
-    : await renderSpineDocument(projectId, projectName, spine, renderOptions)
+  const render = (snapshot: Spine) => context
+    ? renderSpineDocument(projectId, projectName, snapshot, renderOptions, { loadTemplate: async () => context.layout })
+    : renderSpineDocument(projectId, projectName, snapshot, renderOptions)
+  const doc = await render(spine)
+  // Dự án "Upload SRS có sẵn": mục chưa đổi so với lúc import in nguyên văn từ file upload (bản 0.1 = chính file upload)
+  const fidelity = await sourceFidelityFor(projectId, doc, render, { otherLanguage: !!opts.languages })
   // Version file của dự án import thật ⇒ phụ lục cờ tiếng Việt (thông điệp cờ đã là tiếng Việt), bỏ qua ngôn ngữ tài
   // liệu ⇒ chữ cố định của file giữ như trước FLF-265. Dự án chuyển từ mode 2 (FLF-318) theo ngôn ngữ tài liệu.
   const options = languages ? writerOptionsFor("import", languages.locale, "fpt") : writerOptionsFor("import")
   // FLF-344: mục lục ghi sẵn — file mở mà không cập nhật field (Protected View, trình xem) vẫn có mục lục bấm được
-  const pkg = await DocxPackage.load(await writeProjectDocx(doc, { ...options, tocEntries: true }, undefined, context?.binding ?? opts.templateSource))
+  const pkg = await DocxPackage.load(await writeProjectDocx(doc, { ...options, tocEntries: true }, undefined, context?.binding ?? opts.templateSource, fidelity))
   await writeStamp(pkg, { project_id: projectId, version: opts.version, source: opts.stampSource })
   return pkg.toBuffer()
 }

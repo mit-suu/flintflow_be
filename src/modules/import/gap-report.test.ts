@@ -119,6 +119,25 @@ describe("renderGapReportDocx — xuất .docx mở được", () => {
     expect(last).toContain("Tên: Learner")
     expect(last).not.toContain("{")
   })
+
+  it("mẫu cố định (mẫu công ty / mẫu bắt buộc): mục là 'Mục của mẫu', không 'Mẫu FPT' / 'ngoài FPT'; liệt kê mục còn trống", async () => {
+    const r = gapReportSchema.parse({
+      ...REPORT,
+      target_structure: {
+        target: "template", intent: "fixed", resolved_mode: 3, compared_at: "2026-11-06T00:00:00.000Z", missing: ["custom:CS05"],
+        sections: [
+          { section_id: "fixed:1", title: "1.1 Purpose", status: "present", owner_steps: [] },
+          { section_id: "custom:CS05", title: "3.5.2 Availability", status: "missing", owner_steps: [] }
+        ]
+      }
+    })
+    const all = (await texts(await renderGapReportDocx(r, "Lumen"))).map((b) => b.text).join(NL)
+    expect(all).toContain("Mục của mẫu")
+    expect(all).not.toContain("Mẫu FPT")
+    expect(all).not.toContain("ngoài FPT")
+    expect(all).toContain("Mục còn trống")
+    expect(all).toContain("3.5.2 Availability")
+  })
 })
 
 describe("readableValue / formatReportTime", () => {
