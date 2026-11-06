@@ -9,6 +9,7 @@
  */
 
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
+import { isOverloadError, isTransientError } from "../../shared/ai/retry.service.js"
 import { AiActionError, type ActionType } from "../../shared/ai/ai-action.types.js"
 import type { LlmImage } from "../../shared/ai/providers/provider.types.js"
 import { finalizeCall, releaseCall, reserveCall } from "../pipeline/meter.service.js"
@@ -16,6 +17,36 @@ import { notifyTopUpNeeded } from "./credit-flow.service.js"
 import { clientErrorMessage } from "../../shared/utils/client-error.js"
 
 export type MeteredPauseReason = "credits" | "resume_later"
+
+/**
+ * FLF-360: loại lỗi AI của một lượt gọi (sau khi `executeAiAction` đã tự thử lại + model dự phòng):
+ * - `transient` — quá tải / "high demand", 503, 429 không phải hết tiền, timeout, lỗi mạng ⇒ đọc lại sau một lúc;
+ * - `credits` — hết credit ⇒ dừng `paused: credits`;
+ * - `config` — môi trường không đọc được (thiếu khoá vision, provider không nhận ảnh) hoặc lỗi không tự khỏi (400, 403…)
+ *   ⇒ không đọc lại. Ảnh EMF / WMF / file ảnh mất không gọi AI nên không qua hàm này (caller ghi `unsupported`).
+ */
+export type AiFailureKind = "transient" | "credits" | "config"
+
+/** Mã lỗi cho biết môi trường không đọc được ảnh (không phải lỗi tạm thời). */
+export const VISION_UNAVAILABLE: ReadonlySet<string> = new Set(["GEMINI_KEY_MISSING", "AI_PROVIDER_NO_VISION"])
+
+/** Lỗi mạng tầng socket / DNS — `isTransientError` chỉ nhận timeout. */
+const NETWORK_CODES: ReadonlySet<string> = new Set(["ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EPIPE", "ENETUNREACH", "UND_ERR_SOCKET"])
+
+export const classifyAiFailure = (err: unknown): AiFailureKind => {
+  if (isInsufficientCredit(err)) return "credits"
+  const code = (err as { code?: unknown } | null)?.code
+  if (typeof code === "string" && VISION_UNAVAILABLE.has(code)) return "config"
+  // Quá tải / chạm hạn mức (503, 429, GEMINI_OVERLOADED / TIMEOUT) — `isOverloadError` đã loại 429 vì hết tiền khỏi nhóm này
+  if (isOverloadError(err)) return "transient"
+  // Timeout / mạng. Không dùng cả `isTransientError`: nó coi sai schema và mọi lỗi 500 là tạm thời (đáng thử lại trong một
+  // lượt gọi), còn đọc lại cả lô sau vài chục giây chỉ đáng khi nhà cung cấp quá tải / mạng chập chờn
+  if (typeof code === "string" && NETWORK_CODES.has(code)) return "transient"
+  if (isTransientError(err) && !(err instanceof AiActionError)) return "transient"
+  const message = err instanceof Error ? err.message.toLowerCase() : ""
+  if (message.includes("timeout") || message.includes("fetch failed") || message.includes("socket hang up") || message.includes("network")) return "transient"
+  return "config"
+}
 
 export type MeteredResult<T> =
   | { ok: true; data: T; usageId: string; tokens_in: number; tokens_out: number; cost: number }
@@ -28,6 +59,8 @@ export type MeteredResult<T> =
       userMessage: string
       usageId: string
       code?: string
+      /** FLF-360: loại lỗi — `transient` thì caller đọc lại, `config` thì không. */
+      kind: AiFailureKind
     }
 
 export interface MeteredContext {
@@ -66,6 +99,6 @@ export const withMeteredAi = async <T>(
     // BPMN 4.2 (mode 1 v3): hết credit ⇒ báo chủ project nạp; nạp xong bước tự chạy tiếp (credit-flow.service)
     if (credits) void notifyTopUpNeeded(ctx.projectId, ctx.stepId)
     const code = err instanceof AiActionError ? err.code : undefined
-    return { ok: false, reason: credits ? "credits" : "resume_later", message, userMessage: clientErrorMessage(err), usageId, ...(code ? { code } : {}) }
+    return { ok: false, reason: credits ? "credits" : "resume_later", message, userMessage: clientErrorMessage(err), usageId, kind: classifyAiFailure(err), ...(code ? { code } : {}) }
   }
 }
