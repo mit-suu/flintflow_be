@@ -16,6 +16,7 @@ import {
   sectionsWithContent,
   customSectionsWithContent,
   seedStepOps,
+  textMentions,
   type LayoutBlock
 } from "./step-plan.js"
 
@@ -416,5 +417,13 @@ describe("FLF-364 (câu 10) — chữ hướng dẫn dưới mục FPT giữ ở
     // không có phần nối chỉ chứa hướng dẫn
     expect(customSections.filter((c) => !c.heading)).toEqual([])
     expect(customSections.find((c) => c.heading === "Ghi chú nhóm")?.blocks.map((b) => b.text)).toEqual(["{Ghi lịch họp}"])
+  })
+})
+
+describe("FLF-361 textMentions — mã trong chữ khớp id Spine giữ dạng tài liệu", () => {
+  it("chữ ghi UC-01, Spine giữ UC01 ⇒ mention ghi id thật UC01; mã không có trong Spine ⇒ bỏ", () => {
+    const empty = createEmptySpine({ name: "FAP" })
+    const spine = { ...empty, use_cases: [{ id: "UC01", name: "Take attendance", actor_ids: [], description: "", includes: [], extends: [], function_ids: [] }] } as Spine
+    expect(textMentions("See UC-01 and UC-09.", spine, [])).toEqual([{ path: "use_cases[id=UC01]", array: "use_cases", id: "UC01", name: null }])
   })
 })

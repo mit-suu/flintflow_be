@@ -7,7 +7,7 @@
 
 import type { Op } from "../spine/op.types.js"
 import type { EntityAttribute, EntityState, EntityTransition, FlowEdge, Spine } from "../spine/spine.types.js"
-import { IdAllocator, compactKey, idKey, nameKey, normalizeKey } from "./extracted-entities.js"
+import { IdAllocator, compactKey, idKey, nameKey } from "./extracted-entities.js"
 
 export interface BuiltEntity {
   entity: string
@@ -221,7 +221,7 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
   const alloc = new IdAllocator({ features: ids("features"), functions: ids("functions"), permissions: ids("permissions") })
 
   // Chỉ mục tên ⇒ id để phân giải tham chiếu ghi bằng tên (vd cột "Actor" của bảng UC). So tên đã chuẩn hoá (FLF-251):
-  // cột Feature ghi "3.2 Account Management" vẫn ra feature "Account Management"; mã gõ "UC01" ra "UC-01".
+  // cột Feature ghi "3.2 Account Management" vẫn ra feature "Account Management"; mã gõ "UC-01" ra "UC01" (so `idKey`).
   // Không khớp ⇒ so khoá lỏng (FLF-252) nếu chỉ một phần tử khớp: "Landing Page (Dark)" ~ "Landing Page", "Sign In" ~ "Sign In Screen"
   const resolver = (entity: string, pool: { id: string; name?: string }[]) => {
     const ids = new Set(pool.map((p) => p.id))
@@ -235,7 +235,6 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
       const s = str(ref)
       if (!s) return null
       if (ids.has(s)) return s
-      if (ids.has(normalizeKey(s))) return normalizeKey(s)
       return byIdKey.get(idKey(s)) ?? byName.get(nameKey(s)) ?? byLoose.get(looseKey(s)) ?? byCompact.get(compactKey(s)) ?? null
     }
   }
