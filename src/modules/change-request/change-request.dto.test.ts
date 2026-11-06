@@ -112,6 +112,9 @@ describe("change-request DTO — response", () => {
         materials: [{ material_id: "M01", kind: "file", name: "bien-ban.docx", text: "Phản hồi ≤ 2 s", truncated: false, round: 1, added_at: AT }],
         missing_info: [],
         amendments: [{ text: "Thêm cả app mobile", at: AT }],
+        // FLF-382: loại CR + mục CR bổ sung soạn (CR thường ⇒ `edit`, `[]`)
+        kind: "edit",
+        gap_sections: [],
         created_at: AT,
         updated_at: AT
       },
