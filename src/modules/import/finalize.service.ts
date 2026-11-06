@@ -101,7 +101,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const accepted = drafts.flatMap((d) => d.fields.map((f) => ({ ...f, section_id: realSectionId(d.section_id, provisional) })))
   const entities = [...collectEntities(accepted).values()]
   const droppedPermissions: DroppedPermission[] = []
-  const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value })), droppedPermissions)
+  const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value, sections: e.sections })), droppedPermissions)
 
   // 2. File gốc của bản 0.1 (ghi file trước; lô Spine hỏng thì xoá file, không để mồ côi)
   const parsed = await parseDocument(await loadImportFile(doc))
