@@ -44,6 +44,50 @@ const toObjectId = (ref: string): mongoose.Types.ObjectId => {
   return new mongoose.Types.ObjectId(ref)
 }
 
+/**
+ * FLF-377: cache trong bộ nhớ cho file đã đọc — file GridFS không bao giờ sửa tại chỗ (mỗi lần lưu ra id mới), nên ref là khoá
+ * an toàn. Xuất Word theo mẫu bắt buộc đọc lại file mẫu mỗi lượt; với Atlas ở xa mỗi lần tải 1,5 MB mất ~16 s. Giới hạn tổng
+ * dung lượng, bỏ file dùng lâu nhất; file quá lớn không cache. Xoá file ⇒ bỏ khỏi cache.
+ */
+const CACHE_MAX_BYTES = 64 * 1024 * 1024
+const CACHE_MAX_FILE_BYTES = 16 * 1024 * 1024
+const loadCache = new Map<string, Buffer>()
+let loadCacheBytes = 0
+
+const cacheGet = (ref: string): Buffer | undefined => {
+  const hit = loadCache.get(ref)
+  if (!hit) return undefined
+  // Dùng gần nhất ⇒ xuống cuối Map (thứ tự chèn = thứ tự LRU)
+  loadCache.delete(ref)
+  loadCache.set(ref, hit)
+  return hit
+}
+
+const cacheSet = (ref: string, data: Buffer): void => {
+  if (data.length > CACHE_MAX_FILE_BYTES) return
+  cacheDrop(ref)
+  loadCache.set(ref, data)
+  loadCacheBytes += data.length
+  for (const [oldest, buf] of loadCache) {
+    if (loadCacheBytes <= CACHE_MAX_BYTES) break
+    loadCache.delete(oldest)
+    loadCacheBytes -= buf.length
+  }
+}
+
+const cacheDrop = (ref: string): void => {
+  const old = loadCache.get(ref)
+  if (!old) return
+  loadCache.delete(ref)
+  loadCacheBytes -= old.length
+}
+
+/** Xoá cache file đã đọc (test). */
+export const clearDocFileCache = (): void => {
+  loadCache.clear()
+  loadCacheBytes = 0
+}
+
 const deleteQuietly = async (b: ReturnType<typeof bucket>, id: mongoose.Types.ObjectId): Promise<void> => {
   try {
     await b.delete(id)
@@ -67,6 +111,9 @@ export const gridFsDocFileStore: DocFileStore = {
   },
 
   async load(ref) {
+    const cached = cacheGet(ref)
+    // Trả bản sao: bên gọi có thể sửa buffer (JSZip, ghi stamp) — cache không được đổi theo
+    if (cached) return Buffer.from(cached)
     const b = bucket()
     const id = toObjectId(ref)
     const [file] = await b.find({ _id: id }).limit(1).toArray()
@@ -78,17 +125,23 @@ export const gridFsDocFileStore: DocFileStore = {
         .once("end", () => resolve())
         .once("error", reject)
     })
-    return Buffer.concat(chunks)
+    const data = Buffer.concat(chunks)
+    cacheSet(ref, data)
+    return Buffer.from(data)
   },
 
   async remove(ref) {
+    cacheDrop(ref)
     if (!mongoose.isValidObjectId(ref)) return
     await deleteQuietly(bucket(), new mongoose.Types.ObjectId(ref))
   },
 
   async removeProject(projectId) {
     const b = bucket()
-    for (const file of await b.find({ "metadata.projectId": projectId }).toArray()) await deleteQuietly(b, file._id)
+    for (const file of await b.find({ "metadata.projectId": projectId }).toArray()) {
+      cacheDrop(String(file._id))
+      await deleteQuietly(b, file._id)
+    }
   }
 }
 
