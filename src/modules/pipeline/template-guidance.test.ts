@@ -39,8 +39,8 @@ describe("FLF-378 template-guidance — prompt bước soạn nhận mẫu bắt
 
   it("mục riêng của mẫu ⇒ S-8.1 soạn: thấy mục + luật ghi custom_sections", () => {
     const s81 = buildTemplateStepContext(entries, "S-8.1", spine())
-    expect(s81.customSections).toEqual([{ id: "CS02", heading: "Dự toán", blocks: [] }])
-    expect(s81.guidance).toContain("custom_sections[id=<id>].blocks")
+    expect(s81.customSections).toEqual([{ id: "CS02", heading: "Dự toán", level: 1, blocks: [] }])
+    expect(s81.guidance).toContain("\"path\":\"custom_sections[id=<id>]\"")
   })
 
   it("không có ngữ cảnh mẫu (dự án khác) ⇒ rỗng", () => {
