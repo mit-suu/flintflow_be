@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { buildPlaceholderPng } from "./diagram-placeholder.js"
-import { MEDIA_PREFIX, embeddableImage, isMediaId, mediaId } from "./import-media.js"
+import { MEDIA_PREFIX, embeddableImage, embeddableMediaPart, isMediaId, mediaId } from "./import-media.js"
 
 describe("import-media (mode 1 v3 phase 5, T3)", () => {
   it("mediaId / isMediaId: tiền tố media: tách khỏi id diagram", () => {
@@ -14,5 +14,10 @@ describe("import-media (mode 1 v3 phase 5, T3)", () => {
     expect(embeddableImage(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0]))).toBe(true)
     expect(embeddableImage(Buffer.from([0x01, 0, 0, 0, 0x6c, 0, 0, 0, 0, 0]))).toBe(false)
     expect(embeddableImage(Buffer.alloc(0))).toBe(false)
+  })
+
+  it("embeddableMediaPart: theo đuôi part Word đặt (png / jpg / jpeg) — không mở file", () => {
+    for (const part of ["word/media/image1.png", "word/media/image2.JPG", "word/media/image3.jpeg"]) expect(embeddableMediaPart(part)).toBe(true)
+    for (const part of ["word/media/image4.emf", "word/media/image5.wmf", "word/media/image6.gif", "word/media/png"]) expect(embeddableMediaPart(part)).toBe(false)
   })
 })
