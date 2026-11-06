@@ -65,3 +65,25 @@ export const keptOriginalKinds = (spine: Pick<Spine, "custom_sections">): Set<Or
 
 /** Hình gốc không còn khớp dữ liệu hiện tại (dữ liệu đổi mà hình vẫn là ảnh của người dùng). */
 export const isOriginalStale = (spine: Spine, diagram: OriginalDiagram): boolean => originalDiagramHash(spine, diagram.kind) !== diagram.source_hash
+
+/** Caption chỉ loại sơ đồ (FLF-361) — thứ tự quan trọng: "Use Cases — Screen flow" vẫn là use case. */
+const KIND_CAPTION: readonly (readonly [OriginalDiagramKind, RegExp])[] = [
+  ["usecase", /use[\s-]?cases?/i],
+  ["screen_flow", /screens?[\s-]?flow|navigation|luồng màn/i],
+  ["erd", /\berd\b|entity[\s-]?relationship|class diagram|data model|quan hệ thực thể/i],
+  ["context", /context|ngữ cảnh/i]
+]
+
+/** Caption nói là hình khác (ảnh màn hình, sequence…) ⇒ không suy loại theo mục. */
+const OTHER_CAPTION = /(layout|screenshot|screen shot|mock-?up|wireframe|prototype|giao diện|sequence|activity|state machine|deployment|component|workflow)/i
+
+/**
+ * FLF-361: loại sơ đồ của ảnh gốc **chưa đọc được** (EMF / AI quá tải) — theo caption, không có thì theo mục FPT thường
+ * in sơ đồ đó (`ORIGINAL_DIAGRAM_SECTION`). Không suy được ⇒ null. Dùng để vẫn ẩn PlantUML cùng loại (tránh hai hình).
+ */
+export const inferDiagramKind = (sectionId: string | null, caption: string): OriginalDiagramKind | null => {
+  const byCaption = KIND_CAPTION.find(([, re]) => re.test(caption))
+  if (byCaption) return byCaption[0]
+  if (OTHER_CAPTION.test(caption) || !sectionId) return null
+  return ORIGINAL_DIAGRAM_KINDS.find((k) => ORIGINAL_DIAGRAM_SECTION[k] === sectionId) ?? null
+}

@@ -30,7 +30,7 @@ import { assemble } from "../render/assemble.service.js"
 import { snapshotBaseline } from "../pipeline/s9/baseline.service.js"
 import { Baseline } from "../spine/baseline.model.js"
 import { applyTransaction } from "../spine/op-engine.js"
-import { isOriginalDiagramKind, originalDiagramHash } from "../spine/original-diagram.js"
+import { inferDiagramKind, isOriginalDiagramKind, originalDiagramHash } from "../spine/original-diagram.js"
 import { rehashSegments, segmentKeyOfPath } from "../spine/segment-hash.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Op } from "../spine/op.types.js"
@@ -38,6 +38,7 @@ import type { Baseline as BaselineEntry, OriginalDiagramKind, Spine } from "../s
 import { countOpenFlags, findingOpsInOrder, runImportCheck, stripRecord, type Finding } from "./check.service.js"
 import { legacyRecordRows } from "./legacy-record.js"
 import { DocBlock } from "./doc-block.model.js"
+import { captionOf } from "./extract.service.js"
 import { collectEntities, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
 import { ExtractionDraft, type IExtractionDraft } from "./extraction-draft.model.js"
 import { FieldAnchor } from "./field-anchor.model.js"
@@ -176,11 +177,14 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const imageRead = new Map(
     drafts.flatMap((d) => (d.diagram_images ?? []).filter((i) => isOriginalDiagramKind(i.kind)).map((i) => [i.block_id, i.kind as OriginalDiagramKind] as const))
   )
+  // FLF-361: ảnh gửi đọc mà chưa đọc được (EMF / AI quá tải) ⇒ suy loại theo caption / mục để vẫn ẩn PlantUML cùng loại
+  // (lưới an toàn khi FLF-360 đọc lại vẫn không được). Cờ vàng `import_image_unread` giữ nguyên — dữ liệu ảnh chưa vào Spine
+  const imageUnread = new Set(drafts.flatMap((d) => (d.diagram_images ?? []).filter((i) => i.kind === "unsupported" || i.kind === "unavailable").map((i) => i.block_id)))
   const imported = stripRecord(spineNow)
   for (const b of layoutBlocks) {
     if (b.kind !== "image" || !b.image_ref || !b.section_id) continue
     unmappedIds.add(b.block_id)
-    const kind = imageRead.get(b.block_id)
+    const kind = imageRead.get(b.block_id) ?? (imageUnread.has(b.block_id) ? inferDiagramKind(b.section_id, captionOf(b, layoutBlocks.filter((x) => x.section_id === b.section_id))) : null)
     if (kind) b.diagram = { kind, source_hash: originalDiagramHash(imported, kind) }
   }
   // FLF-366: mẫu bắt buộc (chế độ 3) là mẫu để điền, không chia đoạn nguyên văn
