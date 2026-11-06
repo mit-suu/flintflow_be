@@ -73,6 +73,31 @@ router.get("/:projectId/change-requests", authMiddleware, crController.listCrs)
 
 /**
  * @swagger
+ * /api/v1/projects/{projectId}/change-requests/gap-fill:
+ *   post:
+ *     summary: FLF-382 (luồng B — có sẵn · mẫu cố định) — mở CR "Bổ sung mục còn thiếu" (kind gap_fill)
+ *     description: |
+ *       CR bổ sung đang mở (chưa written / cancelled / rejected) ⇒ trả nó (200). Không có ⇒ chạy lại I-5 trên Spine hiện tại,
+ *       tạo CR cho các mục còn trống (lời yêu cầu theo tiêu đề của file, ngôn ngữ tài liệu) rồi chạy C-2 làm rõ ⇒ 201.
+ *       Không còn mục trống (hoặc dự án không phải luồng B) ⇒ 409 NO_MISSING_SECTIONS.
+ *     tags: [Change requests (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/Mode1ProjectId'
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema: { type: object, additionalProperties: false }
+ *     responses:
+ *       200: { $ref: '#/components/responses/CrDetail' }
+ *       201: { $ref: '#/components/responses/CrDetail' }
+ *       409: { description: "NO_MISSING_SECTIONS, CR_REQUIRES_BASELINE, PACKAGE_PENDING" }
+ */
+router.post("/:projectId/change-requests/gap-fill", authMiddleware, crController.gapFill)
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/documents/{documentId}/extract:
  *   post:
  *     summary: FLF-338 §3.6.1 — AI rút danh sách yêu cầu từ tài liệu tham khảo (một lượt EXTRACT_REQUIREMENTS, báo credit trước ở FE)

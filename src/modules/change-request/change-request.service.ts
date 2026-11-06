@@ -12,7 +12,7 @@ import { hasBaseline } from "../import/import.state.js"
 import { latestImport, transitionImport } from "../import/import.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { toIso } from "../import/mode1.http.js"
-import { clipMaterialText, formatCrId, formatMaterialId } from "./change-request.constants.js"
+import { clipMaterialText, formatCrId, formatMaterialId, type CrKind } from "./change-request.constants.js"
 import type { ChangeRequestDetail, CreateChangeRequest } from "./change-request.dto.js"
 import { ChangeRequest, CrCounter, type CrSeed, type IChangeRequest } from "./change-request.model.js"
 import { CR_STATUS_LABELS, assertTransition, isTerminal, type CrStatus } from "./change-request.state.js"
@@ -28,6 +28,7 @@ import { lockPaths, unlockPaths } from "./lock.service.js"
 import { addedElements, currentText, isArrayPath, opElement, valueText } from "./spine-location.js"
 import { peekPreview } from "../spine/change.service.js"
 import { markPreviewAsCr } from "../spine/change-transcript.js"
+import { gapSectionTitles, refreshAfterWrite } from "./gap-fill.service.js"
 
 // ─── đọc ─────────────────────────────────────────────────────────
 
@@ -50,7 +51,8 @@ export const transitionCr = async (cr: IChangeRequest, to: CrStatus): Promise<vo
   await cr.save()
 }
 
-const toCrDto = (cr: IChangeRequest): ChangeRequestDetail["change_request"] => ({
+/** `titles`: tiêu đề theo file khách của mục trong `gap_sections` (FLF-382, `gapSectionTitles`). */
+const toCrDto = (cr: IChangeRequest, titles: ReadonlyMap<string, string> = new Map()): ChangeRequestDetail["change_request"] => ({
   cr_id: cr.cr_id,
   project_id: String(cr.projectId),
   title: cr.title,
@@ -83,6 +85,8 @@ const toCrDto = (cr: IChangeRequest): ChangeRequestDetail["change_request"] => (
   })),
   missing_info: [...(cr.missing_info ?? [])],
   amendments: (cr.amendments ?? []).map((a) => ({ text: a.text, at: toIso(a.at)! })),
+  kind: cr.kind ?? "edit",
+  gap_sections: (cr.gap_sections ?? []).map((section_id) => ({ section_id, title: titles.get(section_id) ?? "" })),
   created_at: toIso(cr.createdAt)!,
   updated_at: toIso(cr.updatedAt)!
 })
@@ -112,15 +116,16 @@ export const shownTexts = (path: string, p: Pick<LocationProposal, "old_text" | 
 }
 
 export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail> => {
-  const [locations, groups, record, layout] = await Promise.all([
+  const [locations, groups, record, layout, titles] = await Promise.all([
     ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 }).lean(),
     ChangeGroup.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ group_id: 1 }).lean(),
     spineRepository.get(String(cr.projectId)),
-    loadLayout(String(cr.projectId))
+    loadLayout(String(cr.projectId)),
+    gapSectionTitles(String(cr.projectId), [cr])
   ])
   const spine = record ? stripRecord(record) : null
   return {
-    change_request: toCrDto(cr),
+    change_request: toCrDto(cr, titles),
     locations: locations.map((l) => {
       return {
         location_id: l.location_id,
@@ -167,7 +172,8 @@ export const listCrs = async (projectId: string, status?: CrStatus): Promise<Cha
   const filter: Record<string, unknown> = { projectId }
   if (status) filter.status = status
   const crs = await ChangeRequest.find(filter).sort({ createdAt: -1, _id: -1 })
-  return crs.map(toCrDto)
+  const titles = await gapSectionTitles(projectId, crs)
+  return crs.map((cr) => toCrDto(cr, titles))
 }
 
 // ─── C-1 tạo ─────────────────────────────────────────────────────
@@ -180,7 +186,14 @@ export const seedFromPreview = (projectId: string, userId: string, previewId: st
   return { instruction: preview.instruction, ops: preview.ops.map((op) => ({ ...op }) as Record<string, unknown>), targets }
 }
 
-export const createCr = async (projectId: string, userId: string, body: CreateChangeRequest): Promise<IChangeRequest> => {
+/** FLF-382: field của CR "Bổ sung mục còn thiếu" — chỉ code tạo (`gap-fill.service.ts`), không nhận từ body HTTP. */
+export interface CrKindFields {
+  kind: CrKind
+  gap_sections: string[]
+  origin_import_id: mongoose.Types.ObjectId | null
+}
+
+export const createCr = async (projectId: string, userId: string, body: CreateChangeRequest, kindFields?: CrKindFields): Promise<IChangeRequest> => {
   // FLF-330 C-7: gói đang chờ Lead ⇒ bản nháp khoá, không mở CR mới
   assertPackageNotPending((await spineRepository.get(projectId))?.baseline_submission)
   const imported = await latestImport(projectId)
@@ -200,7 +213,8 @@ export const createCr = async (projectId: string, userId: string, body: CreateCh
     materials: (body.materials ?? []).map((m, i) => ({ ...clipMaterialText(m.text), material_id: formatMaterialId(i + 1), kind: "text", name: m.name, round: 0, added_at: new Date() })),
     status: "draft",
     base_doc_version: version.version,
-    created_by: userId
+    created_by: userId,
+    ...(kindFields ?? {})
   })
   if (imported.status === "gap_review" || imported.status === "delivered") await transitionImport(imported, "change_requested")
   // FLF-318: tin bản xem trước trong chat ⇒ "đã tạo CR-…" (lỗi chỉ ghi log — CR đã tạo)
@@ -241,6 +255,8 @@ export const submitCr = async (cr: IChangeRequest, userId: string): Promise<void
   cr.submitted_at = new Date()
   const approved = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id, conclusion: { $in: ["edit", "comment"] } })
   const written = await writeApproved(cr, userId, approved, record.spine_version)
+  // FLF-382: luồng B — mục vừa soạn ⇒ `present` ở gap report / bản đồ mục
+  await refreshAfterWrite(String(cr.projectId))
   const decidedBy = new mongoose.Types.ObjectId(userId)
   await ChangeGroup.updateMany({ projectId: cr.projectId, cr_id: cr.cr_id }, { $set: { decision: "approved", reason: "BA xác nhận, ghi vào bản nháp", decided_by: decidedBy, decided_at: new Date() } })
   cr.result_doc_version = written

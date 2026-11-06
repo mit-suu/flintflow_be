@@ -39,6 +39,7 @@ import { patchLocation } from "./location.service.js"
 import { addMaterial, removeMaterial } from "./material.service.js"
 import { draftInOwnerStep, runPropose } from "./propose.service.js"
 import { runVerify } from "./verify.service.js"
+import { requestGapFill } from "./gap-fill.service.js"
 import { assertConvertible, markConverted } from "../comment/comment.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -130,6 +131,17 @@ export const createCr = mode1Handler(async (req, res) => {
   // Bản xem trước hết hạn / không phải của mình ⇒ CR vẫn tạo (3.1 không phụ thuộc bản xem trước), báo để FE nói rõ
   if (body.preview_id && !cr.seed) return sendSuccess(res, 201, await crService.toDetail(cr), { seed_dropped: true })
   return detail(res, cr, 201)
+})
+
+/**
+ * FLF-382 (luồng B): `POST …/change-requests/gap-fill` — CR "Bổ sung mục còn thiếu" đang mở ⇒ 200 + chi tiết của nó; không có
+ * ⇒ I-5 chạy lại, tạo CR cho mục còn thiếu + chạy C-2 ⇒ 201; không còn mục thiếu ⇒ 409 `NO_MISSING_SECTIONS`.
+ */
+export const gapFill = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  parseInput(emptyRequestSchema, req.body ?? {})
+  const { cr, created } = await requestGapFill(auth.projectId, auth.userId)
+  return detail(res, cr, created ? 201 : 200)
 })
 
 // ─── tài liệu bổ sung (mode 1 v3 phase 7) ─────────────────────────

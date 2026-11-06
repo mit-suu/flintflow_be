@@ -56,3 +56,10 @@ export const clipMaterialText = (raw: string): { text: string; truncated: boolea
 
 export const LOCATION_ID_PATTERN = /^L\d{3,}$/
 export const GROUP_ID_PATTERN = /^G\d{2,}$/
+
+/**
+ * FLF-382 (luồng B): loại CR. `edit` = CR thường; `gap_fill` = CR "Bổ sung mục còn thiếu" tự mở sau "Hoàn thiện" (hoặc
+ * `POST …/change-requests/gap-fill`) để soạn các mục của mẫu cố định còn trống. CR cũ không có field ⇒ `edit`.
+ */
+export const CR_KINDS = ["edit", "gap_fill"] as const
+export type CrKind = (typeof CR_KINDS)[number]
