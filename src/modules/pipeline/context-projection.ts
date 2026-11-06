@@ -24,6 +24,7 @@ import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
 import { ChatSession } from "../project/chat-session.model.js"
 import { DOCUMENTS_READ, getStep, orderedSteps } from "./step-registry.js"
+import { buildTemplateStepContext, loadTemplateContext } from "./template-guidance.js"
 import { buildConversationSummary, formatRecentTurns, type TranscriptMessage } from "./conversation-summary.js"
 
 export { STEP_NOT_FOUND } from "./step-registry.js"
@@ -330,6 +331,11 @@ export const elicitProjection = (spine: Spine, stepId: string): Record<string, u
 
 export interface StepContext extends StepProjection {
   documents: string
+  /**
+   * FLF-378 (luồng C): hướng dẫn / ví dụ / ngữ cảnh của mẫu bắt buộc cho các mục bước này soạn — nối vào `content_guidance`.
+   * Không có (dự án khác) ⇒ vắng.
+   */
+  templateGuidance?: string
   documentTokens: number
   transcriptTail: string
   /** Ước lượng token input (ký tự / 4) — ghi vào usage cho T22 đo. */
@@ -399,12 +405,19 @@ export const buildStepContext = async (projectId: string, stepId: string, option
 
   const { projectId: _projectId, ...spine } = record
   const projected = projectStep(spine, stepId)
+  // FLF-378: mẫu bắt buộc của dự án mới — hướng dẫn / ví dụ / ngữ cảnh theo mục; mục riêng của mẫu ⇒ thấy + ghi được
+  const template = buildTemplateStepContext(await loadTemplateContext(projectId), stepId, spine)
+  if (template.customSections.length) {
+    projected.projection = { ...projected.projection, custom_sections: template.customSections }
+    projected.writable = [...projected.writable, ...template.customSections.map((c) => `custom_sections[id=${c.id}]`)]
+  }
   const transcriptTail = await loadTranscriptTail(options.sessionId, stepId)
   const base = JSON.stringify(projected.projection) + JSON.stringify(projected.addendum) + transcriptTail
   const docs = await buildDocumentContext(projectId, ActionType.DRAFT, stepId, estimateTokens(base), options.modelName, options.maxOutputTokens)
 
   return {
     ...projected,
+    ...(template.guidance ? { templateGuidance: template.guidance } : {}),
     documents: docs.contextText,
     documentTokens: docs.tokenCount,
     transcriptTail,

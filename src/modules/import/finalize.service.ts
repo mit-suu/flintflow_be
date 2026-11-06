@@ -56,6 +56,7 @@ import { tableRows } from "./table-rows.js"
 import { buildLayout, buildStepPlan, customSectionOps, customSectionsWithContent, functionOriginals, projectFieldEntities, sectionSegments, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
 import { functionSourceHash } from "../render/layout-sections.js"
 import { TemplateProfile, type HeadingMapEntry, type LayoutEntry, type TableMapEntry } from "./template-profile.model.js"
+import { buildTemplateContext } from "./template-context.js"
 import { compareTargetStructure, type TargetStructure, type TemplateIntent } from "./target-structure.js"
 import { titleOfSection } from "./gap-report.service.js"
 import { scheduleEmbeddingSync } from "../change-request/embedding/embedding-sync.service.js"
@@ -186,14 +187,16 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // FLF-366: mẫu bắt buộc (chế độ 3) là mẫu để điền, không chia đoạn nguyên văn
   const project = await Project.findById(projectId).lean()
   const intentRaw = (project as { template_intent?: string | null } | null)?.template_intent ?? null
-  const { layout, customSections, slices, segments } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds, {
-    segment: intentRaw !== "fixed"
+  // FLF-378 (luồng C): dự án mới theo mẫu bắt buộc ⇒ file là mẫu, không phải dữ liệu: mục riêng không giữ nguyên văn, chữ
+  // của mẫu thành `template_context` (hướng dẫn / ví dụ / ngữ cảnh theo mục); mọi mục mẫu "Sẽ soạn", luôn chế độ 3
+  const intent: TemplateIntent = intentRaw === "fixed" ? "fixed" : "free"
+  const draftAll = intent === "fixed" && project?.start_kind === "new"
+  const { layout, customSections, slices, segments, contextBlocks } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds, {
+    segment: intentRaw !== "fixed",
+    templateOnly: draftAll
   })
   const seeded = await loadSpine(projectId)
   // FLF-336 I-5: so cấu trúc đích (trước kế hoạch step) — ý định theo `Project.template_intent` (FLF-335); dự án cũ ⇒ tự do.
-  // FLF-378 (luồng C): dự án mới theo mẫu bắt buộc ⇒ file là mẫu, mọi mục mẫu "Sẽ soạn", luôn chế độ 3
-  const intent: TemplateIntent = intentRaw === "fixed" ? "fixed" : "free"
-  const draftAll = intent === "fixed" && project?.start_kind === "new"
   const withContent = new Set([...sectionsWithContent(layoutBlocks), ...customSectionsWithContent(customSections)])
   const structure = compareTargetStructure(layout, withContent, stripRecord(seeded), intent, undefined, { draftAll })
   // Bước sở hữu mục của mẫu (id bước mẫu, bỏ `@màn`) — dự án mới theo mẫu bắt buộc: chờ soạn hết, không bước nào `accepted` sẵn
@@ -246,6 +249,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // `incomplete` (không có v0 dở dang, §1).
   profile.target_structure = structure
   profile.markModified("target_structure")
+  profile.template_context = draftAll ? buildTemplateContext(layout, contextBlocks) : null
+  profile.markModified("template_context")
   await profile.save()
   // Chỉ dự án có ý định (tạo qua picker FLF-335) mới dừng; dự án cũ không có `template_intent` giữ luồng cũ ⇒ v0 như hôm nay
   const structureGate = intentRaw === "fixed" || intentRaw === "free"

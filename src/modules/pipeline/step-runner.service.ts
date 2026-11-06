@@ -1926,9 +1926,9 @@ export const runStep = async (
  * từng không được hỏi — `system_name` vẫn null sau 5 vòng). Dùng đúng skill content của step; luật hỏi tên ở B-2.3 nằm trong đó.
  */
 export const elicitGuidance = (ctx: StepContext): string => {
-  if (!ctx.skill) return ""
-  const skill = getSkill(ctx.skill)
-  return skill.stub ? "" : skill.template
+  const skill = ctx.skill ? getSkill(ctx.skill) : null
+  // FLF-378: vòng hỏi thấy mẫu bắt buộc — hỏi phần mẫu cần mà dự án chưa có, không hỏi lại điều ngữ cảnh mẫu đã ghi
+  return [skill && !skill.stub ? skill.template : "", ctx.templateGuidance ?? ""].filter(Boolean).join("\n\n")
 }
 
 /**

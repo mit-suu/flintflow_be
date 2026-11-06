@@ -258,6 +258,20 @@ describe("Luồng 2 cho phần thiếu — chế độ 3", () => {
     expect(await DocVersion.countDocuments({ projectId })).toBe(0)
     const seeded = (await spineRepository.get(projectId))!
     expect(seeded.steps.filter((s) => s.status === "accepted" && s.id !== "S-8.3").map((s) => s.id)).toEqual([])
+    // C2.1: chữ ví dụ của mẫu không thành dữ liệu Spine; nằm ở ngữ cảnh mẫu theo mục
+    expect(JSON.stringify(stripRecord(seeded))).not.toMatch(/thư viện|Library System/)
+    const context = (await TemplateProfile.findOne({ projectId }).lean())!.template_context!
+    const overview = context.find((c) => c.section_id === "fixed:1")!
+    expect(overview.guidance).toEqual(["Sub-section: 1.1 Purpose", "Sub-section: 1.2 Scope"])
+    expect(overview.passages).toEqual([
+      { text: "Ví dụ: Hệ thống quản lý thư viện giúp thủ thư theo dõi sách mượn.", kind: "example" },
+      { text: "The Library System covers borrowing and returning books for members.", kind: "unclassified" }
+    ])
+    // Mục riêng của mẫu: nguyên văn không giữ lại (không lọt vào bản in), chữ nằm ở ngữ cảnh
+    expect(context.find((c) => c.heading.includes("Document Conventions"))!.passages).toEqual([{ text: "Requirements are written in bold, e.g. FR-001.", kind: "example" }])
+    expect(seeded.custom_sections.every((c) => c.blocks.length === 0)).toBe(true)
+    // Không gọi AI trích (không trừ credit cho mẫu)
+    expect((await ImportedDocument.findById(importId))!.status).toBe("incomplete")
 
     const user = (await User.findById(userId).lean())!
     const project = (await Project.findById(projectId).lean())!

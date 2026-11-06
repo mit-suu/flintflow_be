@@ -46,7 +46,9 @@ export const writeProjectDocx = async (doc: RenderedDocument, options: WriteDocx
   if (intent !== "fixed") return writeDocx(doc, options)
 
   const context = await loadFixedTemplateContext(doc.projectId, sourceBinding)
-  const filled = await writeTemplateDocx(doc, context.template, context.headingMap, context.binding.table_map)
+  // FLF-378 (luồng C): dự án mới theo mẫu bắt buộc — file upload là mẫu, chữ của mẫu không vào bản in
+  const project = await Project.findById(doc.projectId, { start_kind: 1 }).lean()
+  const filled = await writeTemplateDocx(doc, context.template, context.headingMap, context.binding.table_map, { stripTemplateText: project?.start_kind === "new" })
   // Bản làm việc vẫn mang watermark DRAFT như mẫu FPT (cùng điều kiện `writeDocx`): chỉ thêm shape chữ mờ vào header — header
   // có sẵn của mẫu giữ nguyên nội dung, mẫu không có header thì thêm một header chỉ chứa watermark. Bản baseline không đổi.
   if (doc.source !== "draft" && doc.watermark !== "DRAFT") return filled
