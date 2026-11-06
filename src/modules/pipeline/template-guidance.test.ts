@@ -44,6 +44,18 @@ describe("FLF-378 template-guidance — prompt bước soạn nhận mẫu bắt
   })
 
   it("không có ngữ cảnh mẫu (dự án khác) ⇒ rỗng", () => {
-    expect(buildTemplateStepContext(null, "S-3.1", spine())).toEqual({ guidance: "", customSections: [] })
+    expect(buildTemplateStepContext(null, "S-3.1", spine())).toEqual({ guidance: "", customSections: [], slotWrites: [], slotProjection: {} })
+  })
+
+  it("phần nhỏ IEEE không có bước pipeline: References ⇒ S-8.1 ghi references[] + skill references-list; Apportioning ⇒ S-9.4", () => {
+    const withSlots = [...entries, ctx("slot:references", "1.4 References"), ctx("slot:apportioning", "5.4 Apportioning of Requirements")]
+    const s81 = buildTemplateStepContext(withSlots, "S-8.1", spine())
+    expect(s81.slotWrites).toEqual(["references"])
+    expect(s81.slotProjection).toEqual({ references: [] })
+    expect(s81.guidance).toContain("### Template section: 1.4 References")
+    expect(s81.guidance).toContain("## Skill for template section (references-list)")
+    const s94 = buildTemplateStepContext(withSlots, "S-9.4", spine())
+    expect(s94.guidance).toContain("5.4 Apportioning of Requirements")
+    expect(s94.slotWrites).toEqual([])
   })
 })

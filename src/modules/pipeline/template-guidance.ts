@@ -13,8 +13,9 @@ import mongoose from "mongoose"
 import type { CustomSection, Spine } from "../spine/spine.types.js"
 import { TemplateProfile } from "../import/template-profile.model.js"
 import { templatePromptBlock, type ProjectFacts, type TemplateContextEntry } from "../import/template-context.js"
-import { templateSectionOwnerSteps } from "../import/template-step-headings.js"
-import { expectedContentOf } from "../import/part-bank.js"
+import { SLOT_FALLBACK_OWNER, templateSectionOwnerSteps } from "../import/template-step-headings.js"
+import { expectedContentOf, skillOfSection } from "../import/part-bank.js"
+import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 
 /** Pha đọc cả mẫu (Brief mở lại ở Luồng 2). */
 const WHOLE_TEMPLATE_PHASES = ["B-1", "B-2", "S-1"]
@@ -38,6 +39,9 @@ export interface TemplateStepContext {
   guidance: string
   /** Mục riêng của mẫu bước này soạn (C2.4) — thêm vào projection + đường ghi. */
   customSections: Pick<CustomSection, "id" | "heading" | "blocks">[]
+  /** Phần nhỏ không có bước pipeline (References / Verification) bước này soạn — đường ghi thêm + dữ liệu hiện có. */
+  slotWrites: string[]
+  slotProjection: Record<string, unknown>
 }
 
 const CUSTOM_WRITE_RULE = [
@@ -62,14 +66,27 @@ export const buildTemplateStepContext = (
   stepId: string,
   spine: Spine
 ): TemplateStepContext => {
-  if (!entries?.length) return { guidance: "", customSections: [] }
+  if (!entries?.length) return { guidance: "", customSections: [], slotWrites: [], slotProjection: {} }
   const own = templateEntriesForStep(entries, stepId, spine)
-  const customIds = isWholeTemplateStep(stepId) ? new Set<string>() : new Set(own.filter((e) => e.section_id.startsWith("custom:")).map((e) => e.section_id.slice("custom:".length)))
+  const whole = isWholeTemplateStep(stepId)
+  const customIds = whole ? new Set<string>() : new Set(own.filter((e) => e.section_id.startsWith("custom:")).map((e) => e.section_id.slice("custom:".length)))
   const customSections = spine.custom_sections.filter((c) => customIds.has(c.id)).map(({ id, heading, blocks }) => ({ id, heading, blocks }))
   const block = templatePromptBlock(own, projectFactsOf(spine), expectedContentOf)
-  const brief = isWholeTemplateStep(stepId) && block ? BRIEF_RULE : ""
-  const guidance = [block, brief, customSections.length ? CUSTOM_WRITE_RULE : ""].filter(Boolean).join("\n\n")
-  return { guidance, customSections }
+  const brief = whole && block ? BRIEF_RULE : ""
+  // C2.4: phần nhỏ mẫu IEEE không có bước pipeline ⇒ skill của ngân hàng phần + được ghi đúng chỗ của nó trong Spine
+  const slots = whole ? [] : own.filter((e) => SLOT_FALLBACK_OWNER[e.section_id]?.step === stepId.split("@")[0])
+  const slotWrites = [...new Set(slots.flatMap((e) => SLOT_FALLBACK_OWNER[e.section_id].writes))]
+  const slotProjection = Object.fromEntries(slotWrites.map((w) => [w, (spine as unknown as Record<string, unknown>)[w] ?? []]))
+  const skills = [...new Set(slots.map((e) => skillOfSection(e.section_id)).filter((s): s is string => !!s))].map((name) => {
+    try {
+      const skill = getSkill(name)
+      return skill.stub ? "" : `## Skill for template section (${name})\n\n${skill.template}`
+    } catch {
+      return ""
+    }
+  })
+  const guidance = [block, brief, ...skills, customSections.length ? CUSTOM_WRITE_RULE : ""].filter(Boolean).join("\n\n")
+  return { guidance, customSections, slotWrites, slotProjection }
 }
 
 /** Nạp `template_context` của dự án (null ⇒ không phải dự án mới theo mẫu bắt buộc). */
