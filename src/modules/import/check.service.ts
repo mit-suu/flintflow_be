@@ -31,7 +31,7 @@ import { transitionImport } from "./import.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
 import { withMeteredAi, type MeteredResult } from "./metered-ai.js"
 import { IMPORT_SEMANTIC_RULE } from "./mode1-rule-profile.js"
-import { isContentSlot, slotParents } from "./content-slots.js"
+import { contentSlot, isContentSlot, slotParents } from "./content-slots.js"
 import { mode1RuleProfileFor } from "./mode1-guard.js"
 
 /** Tiền tố step của 1.11. Usage đúng `I-1.11` (không hậu tố) là lượt đơn của bản cũ — đã xong thì coi như xong cả 1.11. */
@@ -184,6 +184,17 @@ const flagIdGenerator = (flags: Flag[]): (() => string) => {
   return () => `FL${String(++n).padStart(3, "0")}`
 }
 
+/**
+ * Phần nhỏ không có mục FPT cha (tổng quan chức năng, yêu cầu chức năng, nền tảng…) ⇒ mục FPT giữ đúng loại dữ liệu của
+ * nó (chức năng ⇒ chức năng đầu tiên / 3.1.4, dự án ⇒ 1), không dồn về Record of Changes (`fixed:I`).
+ */
+const slotHome = (slotId: string, sections: ReadonlySet<string>): string | undefined => {
+  const targets = contentSlot(slotId)?.targets ?? []
+  if (targets.includes("functions")) return [...sections].find((id) => id.startsWith("function:")) ?? (sections.has("fixed:3.1.4") ? "fixed:3.1.4" : undefined)
+  if (targets.includes("project")) return sections.has("fixed:1") ? "fixed:1" : undefined
+  return undefined
+}
+
 /** Một phát hiện thành cờ vàng; `target_id` (FLF-343) = đường dẫn phần tử / block được nói tới — thiếu ⇒ block đầu. */
 export type Finding = FindingsOutput["findings"][number] & { target_id?: string | null }
 
@@ -197,7 +208,7 @@ export const findingOps = (spine: Spine, findings: readonly Finding[], rule: str
   const open = new Set(spine.flags.filter((f) => f.resolved_at === null && f.rule_id === rule).map((f) => `${f.section_id}|${f.message}`))
   const ops: Op[] = []
   for (const f of findings) {
-    const parent = isContentSlot(f.section_id) ? slotParents(f.section_id).find((p) => sections.has(p)) : undefined
+    const parent = isContentSlot(f.section_id) ? (slotParents(f.section_id).find((p) => sections.has(p)) ?? slotHome(f.section_id, sections)) : undefined
     const section = sections.has(f.section_id) ? f.section_id : (parent ?? "fixed:I")
     // Không in mã luật thô (`[ambiguity]`) cho người đọc — luật AI biết tên thì thành nhãn tiếng Việt đứng đầu
     const label = aiFindingLabel(f.rule)
