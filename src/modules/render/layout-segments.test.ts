@@ -201,3 +201,53 @@ describe("FLF-366 — bản 0.1 theo đoạn của file", () => {
     expect(s1).toContain("# External Systems")
   })
 })
+
+describe("FLF-361 — bảng 3.1.4 và mục tính năng khi dựng lại từ Spine", () => {
+  const BLOCKS_314: LayoutBlock[] = [
+    h("C01", "3.1.4 Non-Screen Functions", 3, "fixed:3.1.4"),
+    table(
+      "C02",
+      [
+        ["Name", "Trigger", "Description"],
+        ["Auto Lock Attendance", "Every day at 2:00 AM", "Locks attendance older than one week"],
+        ["Sync Timetable", "Every hour", "Pulls the timetable from FAP"]
+      ],
+      "fixed:3.1.4"
+    ),
+    h("C03", "3.2 Attendance", 2, "feature:F-01")
+  ]
+  const fn = (id: string, name: string, trigger: string, description: string) =>
+    ({ id, name, feature_id: "F-01", screen_id: null, trigger, description, normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null, order: 0 }) as Spine["functions"][number]
+  const setup = () => {
+    const spine: Spine = {
+      ...createEmptySpine({ name: "FAP" }),
+      features: [{ id: "F-01", name: "Attendance", order: 0 }] as never,
+      screens: [{ id: "S01", feature_id: "F-01", name: "Attendance Screen", description: "", flow_to: [], is_popup: false }] as never,
+      functions: [fn("FN-01", "Auto Lock Attendance", "Every day at 2:00 AM", "Locks attendance older than one week"), fn("FN-02", "Sync Timetable", "Every hour", "Pulls the timetable from FAP")]
+    }
+    const { layout, customSections, segments } = buildLayout(BLOCKS_314, new Map([["C01", "fixed:3.1.4"], ["C03", "feature:F-01"]]), new Set())
+    const entities = [
+      { entity: "functions", id: "FN-01", source_block_ids: ["C02"] },
+      { entity: "functions", id: "FN-02", source_block_ids: ["C02"] }
+    ]
+    const records = sectionSegments(segments, customSections, entities, spine, [])
+    const template: TemplateLayout = { layout, language: "en", sectionSegments: records, nonScreenTable: ["FN-01", "FN-02"] }
+    return { spine: { ...spine, custom_sections: customSections }, template }
+  }
+
+  it("CR sửa một chức năng của bảng ⇒ bảng dựng lại giữ cột của file (Name · Trigger · Description), có câu trigger", () => {
+    const { spine, template } = setup()
+    expect(texts(section(render(spine, template), "fixed:3.1.4"))).toEqual([
+      "Name,Trigger,Description / Auto Lock Attendance,Every day at 2:00 AM,Locks attendance older than one week / Sync Timetable,Every hour,Pulls the timetable from FAP"
+    ])
+    const edited: Spine = { ...spine, functions: spine.functions.map((f) => (f.id === "FN-02" ? { ...f, trigger: "Every 30 minutes" } : f)) }
+    expect(texts(section(render(edited, template), "fixed:3.1.4"))).toEqual([
+      "Name,Trigger,Description / Auto Lock Attendance,Every day at 2:00 AM,Locks attendance older than one week / Sync Timetable,Every 30 minutes,Pulls the timetable from FAP"
+    ])
+  })
+
+  it("mục tính năng không thêm dòng \"Screens: …\" mà file không có", () => {
+    const { spine, template } = setup()
+    expect(JSON.stringify(section(render(spine, template), "feature:F-01").blocks)).not.toContain("Screens:")
+  })
+})

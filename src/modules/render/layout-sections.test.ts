@@ -274,9 +274,11 @@ describe("buildLayoutSections", () => {
     const { sections } = build()
     const fn = sections.find((s) => s.id === "function:FN01")!
     expect(fn).toMatchObject({ heading: "Đăng ký", level: 2 })
-    expect(fn.blocks[0]).toEqual({ type: "paragraph", runs: [{ text: "Kích hoạt: ", bold: true }, { text: "Học viên bấm Đăng ký." }] })
-    // heading "Normal Flow" level 4 ở mẫu FPT (function level 3) ⇒ level 3 khi function ở cấp 2
-    expect(fn.blocks).toContainEqual({ type: "heading", level: 3, text: "Luồng chính" })
+    // FLF-361: mục chức năng dựng từ Spine theo khung FPT (4 tiêu đề con), heading con dời cấp theo mục (function cấp 2 ⇒ 3)
+    expect(fn.blocks.filter((b) => b.type === "heading")).toEqual(
+      ["Kích hoạt chức năng", "Mô tả chức năng", "Bố cục màn hình", "Chi tiết chức năng"].map((text) => ({ type: "heading", level: 3, text }))
+    )
+    expect(fn.blocks[1]).toMatchObject({ type: "bullet_list", items: [expect.anything(), [{ text: "Thời điểm / tần suất: ", bold: true }, { text: "Học viên bấm Đăng ký." }]] })
     const perf = sections.find((s) => s.id === "fixed:4.2.3")!
     expect(perf.heading).toBe("Hiệu năng")
     expect(perf.blocks[0]).toMatchObject({ type: "table", header: [[{ text: "Yêu cầu" }], [{ text: "Chỉ số" }], [{ text: "Ngưỡng" }], [{ text: "Ưu tiên" }]] })
@@ -311,7 +313,9 @@ describe("buildLayoutSections", () => {
   it("ngôn ngữ en ⇒ nhãn tiếng Anh như mode 2", () => {
     const { sections } = buildLayoutSections(spine(), { ...LAYOUT, language: "en" }, [], { diagramPng: () => undefined })
     expect(sections.find((s) => s.id === "fixed:5.1")?.heading).toBe("Business Rules")
-    expect(sections.find((s) => s.id === "function:FN01")?.blocks[0]).toMatchObject({ runs: [{ text: "Trigger: " }, { text: "Học viên bấm Đăng ký." }] })
+    const fn = sections.find((s) => s.id === "function:FN01")!
+    expect(fn.blocks[0]).toEqual({ type: "heading", level: 3, text: "Function trigger" })
+    expect(JSON.stringify(fn.blocks)).toContain('"text":"Timing frequency: "')
   })
 })
 

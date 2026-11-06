@@ -22,6 +22,7 @@ import { ACTOR_HIERARCHY_SECTION } from "../diagram/renderers/usecase.renderer.j
 import { DEFAULT_RELATION_VERB, relationVerb } from "../diagram/renderers/erd.renderer.js"
 import { describeInterface } from "./interface-description.js"
 import { diagramErrorMarker } from "./diagram-placeholder.js"
+import { matchTableHeader } from "../import/table-header-dictionary.js"
 import { loadStepRegistry } from "../pipeline/step-registry.js"
 import {
   MACHINE_DESCRIPTIONS,
@@ -190,6 +191,8 @@ export interface SectionRenderContext {
    * năng không màn thêm sau), theo cột của mẫu FPT. Không đặt ⇒ mọi chức năng không màn, cột cũ.
    */
   nonScreenFunctionIds?: ReadonlySet<string>
+  /** FLF-361 — tiêu đề cột của bảng 3.1.4 trong file (đoạn đang dựng lại): bảng dựng lại giữ đúng cột của file. */
+  nonScreenHeader?: readonly string[]
   /**
    * FLF-265 D11 — Spine GỐC khi `spine` truyền vào `renderSection` là bản xem đã dịch (`localized-spine.ts`). Logic dựa
    * chữ Anh hoặc so chuỗi giữa các field (lọc "Data processing", dò tên entity, tên actor trong tiêu đề sơ đồ luồng màn,
@@ -391,14 +394,38 @@ const screenAuthorization = (spine: Spine, ctx: SectionRenderContext): Block[] =
   return [matrix]
 }
 
+/** Cột của bảng 3.1.4 khi không biết cột của file (project nhập trước FLF-366): như mẫu FPT, như trước. */
+const FPT_NON_SCREEN_HEADER = ["#", "Feature", "System Function", "Description"]
+
 const nonScreenFunctions = (spine: Spine, ctx: SectionRenderContext): Block[] => {
   const listed = ctx.nonScreenFunctionIds
   if (listed) {
-    // FLF-252: tài liệu nhập — đúng các dòng bảng 3.1.4 của file, cột như mẫu FPT (# · Feature · System Function · Description)
+    // FLF-252: tài liệu nhập — đúng các dòng bảng 3.1.4 của file. FLF-361: cột theo tiêu đề cột của bảng trong file
+    // (FAP: Name · Trigger · Description — trước đây luôn in cột mẫu FPT nên mất cột Trigger khi bảng dựng lại)
     const fns = spine.functions.filter((f) => listed.has(f.id))
     if (fns.length === 0) return []
     const featureName = (id: string) => spine.features.find((f) => f.id === id)?.name ?? id
-    return [tableBlock(["#", "Feature", "System Function", "Description"], fns.map((f, i) => [String(i + 1), featureName(f.feature_id), f.name, f.description]))]
+    const header = ctx.nonScreenHeader?.length ? [...ctx.nonScreenHeader] : FPT_NON_SCREEN_HEADER
+    const fields = matchTableHeader(header, "fixed:3.1.4").columns.map((c) => c.field_path?.replace(/^functions\[\]\./, "") ?? null)
+    const cell = (f: Spine["functions"][number], i: number, field: string | null, title: string): string => {
+      switch (field) {
+        case "id":
+          return f.id
+        case "name":
+          return f.name
+        case "feature_id":
+          return featureName(f.feature_id)
+        case "trigger":
+          return f.trigger
+        case "description":
+          return f.description
+        case "priority":
+          return f.priority ?? ""
+        default:
+          return /^(#|no\.?|stt|tt)$/i.test(title.trim()) ? String(i + 1) : ""
+      }
+    }
+    return [tableBlock(header, fns.map((f, i) => header.map((title, c) => cell(f, i, fields[c] ?? null, title))))]
   }
   const fns = spine.functions.filter((f) => f.screen_id === null)
   if (fns.length === 0) return []
@@ -838,13 +865,16 @@ const CR_ACTOR = /^CR-\d{3,}$/
 const isCrTxn = (group: readonly ChangeRecordRow[]): boolean => group.some((c) => CR_ACTOR.test(c.by))
 const withV = (version: string): string => (version.startsWith("v") ? version : `v${version}`)
 /**
- * Bản phát hành kế tiếp sau mốc `version` (`v1.0` ⇒ `v2.0`, `v0.1` ⇒ `v1.0`) — khớp `nextMajor` của version tài liệu
- * mode 1. Business-flow §2/§5.1: chỉ có số chính; số phụ `1.1`, `1.2` của `DocVersion` là sổ nội bộ (FLF-330).
+ * FLF-361: bản tài liệu thứ `k` sau mốc `version` — khớp `nextMinor` của version tài liệu mode 1 (mỗi CR ghi xong ra một
+ * bản `DocVersion`): sau `v0.1` CR đầu là `v0.2`, CR kế `v0.3`; sau `v1.0` là `v1.1`. Trước đây CR mang số bản phát hành
+ * kế tiếp (`v1.0`) trong khi tài liệu là bản 0.2.
  */
-const nextRelease = (version: string): string => {
-  const m = /^v(\d+)\.\d+/.exec(version)
-  return m ? `v${Number(m[1]) + 1}.0` : version
+const nthDraftAfter = (version: string, k: number): string => {
+  const m = /^v(\d+)\.(\d+)/.exec(version)
+  return m ? `v${m[1]}.${Number(m[2]) + k}` : version
 }
+/** Lô ký baseline lúc import (mode 1: `by: import`, "Baseline 0.1") — cùng bản với dòng import, không thêm dòng riêng. */
+const isImportBaseline = (group: readonly ChangeRecordRow[]): boolean => group.every((c) => c.by === "import")
 
 const describeRow = (reasons: readonly string[], language?: string): string => {
   const shown = reasons.slice(0, MAX_REASONS_PER_ROW).join("; ")
@@ -865,8 +895,9 @@ const MACHINE_REASON = /^Cascade:/
  *
  * `version` đánh theo dòng, không theo `spine_version`: trước baseline `v0.1, v0.2…`; dòng ký lấy đúng mã
  * baseline (`v1.0`; version tài liệu mode 1 `0.1` / `2.0` in thành `v0.1` / `v2.0`); sau đó `v1.0.1, v1.0.2…` cho tới
- * baseline kế tiếp. Lô của change request (mode 1, FLF-318) là một dòng riêng mang **số bản phát hành sẽ chứa nó**
- * (business-flow §5.1: "3 CR này ra 3–4 hàng, cùng mang Version 1.0"): sau `v1.0` mọi CR là `v2.0`, sau `v0.1` là `v1.0`.
+ * baseline kế tiếp. Lô của change request (mode 1, FLF-318) là một dòng riêng; FLF-361: mang **số bản tài liệu của CR**
+ * (`DocVersion` minor kế tiếp: sau `v0.1` là `v0.2`, `v0.3`…; sau `v1.0` là `v1.1`). Baseline lúc import cùng bản với dòng
+ * import ⇒ không in dòng riêng.
  *
  * `resolveInCharge` (T7): `by` lưu trong `changes[]` là userId thô (hoặc `"system"`) — caller truyền
  * hàm tra `User.name`/email theo lô để hiển thị tên thay vì id; mặc định giữ nguyên `by` (test thuần
@@ -909,6 +940,7 @@ export function buildRecordOfChanges(
 
   let base = "v0"
   let minor = 0
+  let crs = 0
   let baselines = 0
   const seenPhases = new Set<string>()
   const describe = (row: (typeof rows)[number], reasons: readonly string[]): string => {
@@ -923,7 +955,8 @@ export function buildRecordOfChanges(
     // Ngoài quy trình (yêu cầu sửa sau baseline): lời của user
     return reasons.length > 0 ? describeRow(reasons, language) : text.documentUpdated
   }
-  return rows.map((row) => {
+  const out: RocRow[] = []
+  for (const row of rows) {
     const raw = row.changes.map((c) => c.reason).filter((r): r is string => !!r && !INTERNAL_REASON.test(r) && !MACHINE_REASON.test(r))
     const reasons = [...new Set(raw.map((r) => toDocumentLanguage(r, language)))]
     let version: string
@@ -934,21 +967,26 @@ export function buildRecordOfChanges(
       baselines += 1
       base = version.replace(/-conditional$/, "")
       minor = 0
+      crs = 0
+      // FLF-361: baseline của bản import trùng bản với dòng import (`v0.1`) ⇒ không in thêm dòng "Baseline 0.1 signed"
+      if (isImportBaseline(row.changes) && out[out.length - 1]?.version === version) continue
     } else if (row.cr) {
-      // Mode 1 (FLF-318): CR mang số bản phát hành kế tiếp, không mang số phụ nội bộ của `DocVersion`; mốc không đổi
-      version = nextRelease(base)
+      // Mode 1: mỗi CR một bản tài liệu (`DocVersion` minor kế tiếp), mốc không đổi
+      crs += 1
+      version = nthDraftAfter(base, crs)
     } else {
       minor += 1
       version = `${base}.${minor}`
     }
-    return {
+    out.push({
       date: row.date,
       version,
       change_type: changeTypeOf(new Set(row.changes.map((c) => c.op))),
       in_charge: [...new Set(row.changes.map((c) => resolveInCharge(c.by)))].join(", "),
       description: describe(row, reasons)
-    }
-  })
+    })
+  }
+  return out
 }
 
 // ─── FLF-278 bước 09: phần nhỏ (slot) cho mẫu khách ───────────────

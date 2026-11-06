@@ -254,7 +254,7 @@ describe("sectionSegments — đoạn nguyên văn theo mục (FLF-366)", () => 
 })
 
 describe("functionOriginals — nguyên văn mục chức năng (FLF-252)", () => {
-  it("mọi khối dưới heading chức năng đúng thứ tự: nhãn, gạch đầu dòng, ảnh, bảng; heading con thành đoạn; bỏ heading của chính mục và ô bảng", () => {
+  it("mọi khối dưới heading chức năng đúng thứ tự: nhãn, gạch đầu dòng, ảnh, bảng; FLF-361: heading con giữ kiểu heading (cấp tương đối); bỏ heading mở mục và ô bảng", () => {
     const fn = "function:FR-3.2.2"
     const blocks: LayoutBlock[] = [
       h("B0560", "3.2.2 View Profile", 3, fn),
@@ -271,13 +271,33 @@ describe("functionOriginals — nguyên văn mục chức năng (FLF-252)", () =
     expect(originals.get(fn)).toEqual([
       { kind: "paragraph", text: "Function Trigger", rows: null, image_ref: null },
       { kind: "list_item", text: "Navigation Path: User Menu → Profile", rows: null, image_ref: null },
-      { kind: "paragraph", text: "Screen Layout", rows: null, image_ref: null },
+      { kind: "heading", text: "Screen Layout", level: 1 },
       { kind: "image", text: "", rows: null, image_ref: "word/media/image7.png" },
       { kind: "table", text: "", rows: [["Field", "Rule"], ["Email", "Required"]], image_ref: null }
     ])
     expect(originals.get("function:FR-3.2.3")).toEqual([{ kind: "paragraph", text: "Function Trigger", rows: null, image_ref: null }])
     // mục không phải chức năng không gom
     expect(functionOriginals([p("B0002", "Lumen", "fixed:1")], new Map()).size).toBe(0)
+    // FLF-361: 4 heading con map vào chính mục chức năng (FAP) vẫn giữ; khối ghi trường chức năng đọc từ nó
+    const fap = functionOriginals(
+      [
+        h("B0700", "3.2.1 Log In", 3, fn),
+        h("B0701", "Function trigger", 4, fn),
+        { block_id: "B0702", kind: "list_item", level: null, text: "Timing frequency: on open", section_id: fn },
+        h("B0703", "Function description", 4, fn),
+        h("B0704", "Screen layout", 4, fn),
+        h("B0705", "Function details", 5, fn)
+      ],
+      new Map(["B0700", "B0701", "B0703", "B0704", "B0705"].map((b) => [b, fn])),
+      (b) => (b === "B0702" ? ["trigger", "trigger"] : [])
+    ).get(fn)!
+    expect(fap).toEqual([
+      { kind: "heading", text: "Function trigger", level: 1 },
+      { kind: "list_item", text: "Timing frequency: on open", rows: null, image_ref: null, fields: ["trigger"] },
+      { kind: "heading", text: "Function description", level: 1 },
+      { kind: "heading", text: "Screen layout", level: 1 },
+      { kind: "heading", text: "Function details", level: 2 }
+    ])
   })
 })
 

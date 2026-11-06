@@ -34,6 +34,7 @@ import { targetsOf } from "./extract-targets.js"
 import { isInstructionText, isRealText, tableBodyHasRealText } from "../../shared/utils/instruction-text.js"
 import { withSlotParents } from "./content-slots.js"
 import type { LayoutEntry, StepPlanItem } from "./template-profile.model.js"
+import type { FunctionOriginalBlock } from "../render/function-original.js"
 
 export const CUSTOM_SECTION_PREFIX = "custom:"
 export const customSectionKey = (id: string): string => `${CUSTOM_SECTION_PREFIX}${id}`
@@ -388,20 +389,36 @@ export const sectionSegments = (
 
 /**
  * Nguyên văn từng mục chức năng của file (FLF-252 — in theo file gốc): mọi khối dưới heading chức năng, đúng thứ tự —
- * nhãn ("Function Trigger", "Normal Case"…), gạch đầu dòng, bảng, ảnh màn hình; heading con trong mục thành đoạn chữ.
- * Bản in dùng nguyên văn này khi chức năng chưa bị change request sửa, thay cho khung dựng lại từ Spine (khung đó mất
- * dòng Interface / Data, còn nhãn trôi nổi tuỳ AI giữ đoạn nào).
+ * nhãn ("Function Trigger", "Normal Case"…), gạch đầu dòng, bảng, ảnh màn hình. Bản in dùng nguyên văn này khi chức năng
+ * chưa bị change request sửa, thay cho khung dựng lại từ Spine (khung đó mất dòng Interface / Data, còn nhãn trôi nổi tuỳ
+ * AI giữ đoạn nào).
+ * FLF-361: chỉ bỏ heading **mở** mục (heading đầu tiên của mục — đã là tiêu đề mục); heading con ("Function trigger",
+ * "Screen layout"…) giữ kiểu heading, cấp tương đối heading mở (trước đây mọi heading map vào mục đều bị bỏ ⇒ bản 0.1 mất
+ * 4 tiêu đề con ở mọi mục chức năng). `fieldsOf` = trường chức năng I-4 đọc từ khối ⇒ CR chỉ dựng lại khối của trường đã đổi.
  */
-export const functionOriginals = (blocks: readonly LayoutBlock[], headingSections: ReadonlyMap<string, string>): Map<string, CustomBlock[]> => {
-  const out = new Map<string, CustomBlock[]>()
+export const functionOriginals = (
+  blocks: readonly LayoutBlock[],
+  headingSections: ReadonlyMap<string, string>,
+  fieldsOf: (blockId: string) => readonly string[] = () => []
+): Map<string, FunctionOriginalBlock[]> => {
+  const out = new Map<string, FunctionOriginalBlock[]>()
+  const openerLevel = new Map<string, number>()
   for (const b of blocks) {
     const section = b.section_id
     if (!section?.startsWith("function:")) continue
-    // heading của chính mục chức năng ⇒ đã là tiêu đề mục, không lặp
-    if (b.kind === "heading" && headingSections.get(b.block_id) === section) continue
-    const block = b.kind === "heading" ? (b.text.trim() ? { kind: "paragraph" as const, text: b.text.trim(), rows: null, image_ref: null } : null) : toCustomBlock(b)
+    if (b.kind === "heading" && headingSections.get(b.block_id) === section && !openerLevel.has(section)) {
+      openerLevel.set(section, b.level ?? 0)
+      continue
+    }
+    let block: FunctionOriginalBlock | null
+    if (b.kind === "heading") {
+      const text = b.text.trim()
+      const base = openerLevel.get(section)
+      block = text ? { kind: "heading", text, level: Math.max(1, b.level !== null && base !== undefined ? b.level - base : 1) } : null
+    } else block = toCustomBlock(b)
     if (!block) continue
-    out.set(section, [...(out.get(section) ?? []), block])
+    const fields = [...new Set(fieldsOf(b.block_id))]
+    out.set(section, [...(out.get(section) ?? []), fields.length ? { ...block, fields } : block])
   }
   return out
 }
