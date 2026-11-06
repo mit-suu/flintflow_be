@@ -56,7 +56,7 @@ export const renderVersionFile = async (projectId: string, projectName: string, 
   // liệu ⇒ chữ cố định của file giữ như trước FLF-265. Dự án chuyển từ mode 2 (FLF-318) theo ngôn ngữ tài liệu.
   const options = languages ? writerOptionsFor("import", languages.locale, "fpt") : writerOptionsFor("import")
   // FLF-344: mục lục ghi sẵn — file mở mà không cập nhật field (Protected View, trình xem) vẫn có mục lục bấm được
-  const pkg = await DocxPackage.load(await writeProjectDocx(doc, { ...options, tocEntries: true }, undefined, context?.binding ?? opts.templateSource))
+  const pkg = await DocxPackage.load(await writeProjectDocx(doc, { ...options, tocEntries: true }, undefined, context ?? opts.templateSource))
   await writeStamp(pkg, { project_id: projectId, version: opts.version, source: opts.stampSource })
   return pkg.toBuffer()
 }

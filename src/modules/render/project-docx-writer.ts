@@ -38,14 +38,25 @@ export const templateHeadingMap = (
   return mapped
 }
 
-/** Cùng một đường xuất cho Word, PDF và file version: mẫu bắt buộc luôn lấy DOCX upload làm nền. */
-export const writeProjectDocx = async (doc: RenderedDocument, options: WriteDocxOptions = {}, templateIntent?: TemplateIntent | null, sourceBinding?: TemplateSourceBinding | null): Promise<Buffer> => {
+const isTemplateContext = (source: unknown): source is FixedTemplateContext =>
+  !!source && typeof source === "object" && Buffer.isBuffer((source as { template?: unknown }).template)
+
+/**
+ * Cùng một đường xuất cho Word, PDF và file version: mẫu bắt buộc luôn lấy DOCX upload làm nền. FLF-377: bên gọi đã nạp
+ * `loadFixedTemplateContext` (dựng tài liệu cần layout của mẫu) thì truyền nguyên context — không tải lại file mẫu.
+ */
+export const writeProjectDocx = async (
+  doc: RenderedDocument,
+  options: WriteDocxOptions = {},
+  templateIntent?: TemplateIntent | null,
+  source?: TemplateSourceBinding | FixedTemplateContext | null
+): Promise<Buffer> => {
   const intent = templateIntent === undefined
     ? (await Project.findById(doc.projectId, { template_intent: 1 }).lean())?.template_intent
     : templateIntent
   if (intent !== "fixed") return writeDocx(doc, options)
 
-  const context = await loadFixedTemplateContext(doc.projectId, sourceBinding)
+  const context = isTemplateContext(source) ? source : await loadFixedTemplateContext(doc.projectId, source)
   const filled = await writeTemplateDocx(doc, context.template, context.headingMap, context.binding.table_map)
   // Bản làm việc vẫn mang watermark DRAFT như mẫu FPT (cùng điều kiện `writeDocx`): chỉ thêm shape chữ mờ vào header — header
   // có sẵn của mẫu giữ nguyên nội dung, mẫu không có header thì thêm một header chỉ chứa watermark. Bản baseline không đổi.

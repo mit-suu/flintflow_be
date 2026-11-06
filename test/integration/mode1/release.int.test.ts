@@ -38,7 +38,7 @@ import {
 import { releaseResponseSchema, versionsResponseSchema } from "../../../src/modules/doc-version/doc-version.dto.js"
 import { release } from "../../../src/modules/doc-version/release.service.js"
 import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.js"
-import { DocFileNotFoundError, docFileStore, gridFsDocFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
+import { DocFileNotFoundError, clearDocFileCache, docFileStore, gridFsDocFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
 import { DocxPackage, readBlocks, readStamp } from "../../../src/modules/docx-ooxml/index.js"
 import { lockedPaths } from "../../helpers/mode1-cr-p4.js"
 import { applyTransaction } from "../../../src/modules/spine/op-engine.js"
@@ -235,6 +235,23 @@ describe("doc-file.store — GridFS", () => {
 
     await expect(gridFsDocFileStore.load(new mongoose.Types.ObjectId().toHexString())).rejects.toBeInstanceOf(DocFileNotFoundError)
     await expect(gridFsDocFileStore.load("khong-phai-id")).rejects.toBeInstanceOf(DocFileNotFoundError)
+  })
+
+  it("FLF-377: đọc lần hai lấy từ cache (không tải lại GridFS), trả bản sao; xoá file ⇒ bỏ cache", async () => {
+    clearDocFileCache()
+    const data = Buffer.from("mẫu bắt buộc")
+    const ref = await gridFsDocFileStore.save(data, { projectId: "P3", kind: "upload", name: "Mau.docx" })
+    const first = await gridFsDocFileStore.load(ref)
+    // Xoá thẳng trong GridFS (không qua store) ⇒ lần đọc sau chỉ có thể đến từ cache
+    await mongoose.connection.db!.collection("source-docs.chunks").deleteMany({ files_id: new mongoose.Types.ObjectId(ref) })
+    const second = await gridFsDocFileStore.load(ref)
+    expect(Buffer.compare(second, data)).toBe(0)
+    // Bên gọi sửa buffer không làm hỏng cache
+    first.fill(0)
+    second.fill(0)
+    expect(Buffer.compare(await gridFsDocFileStore.load(ref), data)).toBe(0)
+    await gridFsDocFileStore.remove(ref)
+    await expect(gridFsDocFileStore.load(ref)).rejects.toBeInstanceOf(DocFileNotFoundError)
   })
 
   it("file lớn nhiều chunk đọc lại đủ", async () => {
