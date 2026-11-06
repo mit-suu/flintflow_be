@@ -235,4 +235,27 @@ describe("writeTemplateDocx", () => {
       ["Tuấn Anh", "05/11/2026", "Bản đầu", "0.1"]
     ])
   })
+
+  it("FLF-378: mẫu của dự án mới (stripTemplateText) — mục chưa soạn bỏ hướng dẫn / ví dụ, bảng mẫu giữ tiêu đề bỏ dòng mẫu", async () => {
+    const input = await template(), parsed = await parseDocument(input)
+    const requirements = parsed.blocks.find((b) => b.kind === "heading")!
+    const doc = document()
+    const plain = await parseDocument(await writeTemplateDocx(doc, input, [{ block_id: requirements.block_id, section_id: "fixed:1" }]))
+    // Mặc định (dự án có sẵn): mục trống giữ nguyên chữ của file
+    expect(plain.blocks.some((b) => b.text === "Replace this guidance.")).toBe(true)
+    const stripped = await parseDocument(await writeTemplateDocx(doc, input, [{ block_id: requirements.block_id, section_id: "fixed:1" }], [], { stripTemplateText: true }))
+    const start = stripped.blocks.findIndex((b) => b.text === "Requirements")
+    const end = stripped.blocks.findIndex((b) => b.text === "Repeated")
+    const between = stripped.blocks.slice(start + 1, end)
+    expect(between.some((b) => b.text === "Replace this guidance.")).toBe(false)
+    expect(between.find((b) => b.kind === "table")!.rows).toEqual([["A", "B"]])
+  })
+
+  it("FLF-378: mục đã soạn — bảng mẫu không được điền vẫn bỏ dòng mẫu khi stripTemplateText", async () => {
+    const input = await template(), parsed = await parseDocument(input), doc = document()
+    doc.sections = [{ id: "fixed:1", heading: "Requirements", number: "1", level: 1, blocks: [{ type: "paragraph", runs: runs("Drafted requirement") }] }]
+    const output = await parseDocument(await writeTemplateDocx(doc, input, [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:1" }], [], { stripTemplateText: true }))
+    expect(output.blocks.some((b) => b.text === "Drafted requirement")).toBe(true)
+    expect(output.blocks.find((b) => b.kind === "table")!.rows).toEqual([["A", "B"]])
+  })
 })

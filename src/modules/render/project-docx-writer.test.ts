@@ -39,7 +39,7 @@ describe("writeProjectDocx", () => {
   it("dự án chế độ 3 đã sang mode fpt vẫn dùng đúng file tạo mapping, không dùng upload mới nhất", async () => {
     expect(await writeProjectDocx(doc)).toEqual(Buffer.from("filled"))
     expect(mocks.load).toHaveBeenCalledWith("source")
-    expect(mocks.template).toHaveBeenCalledWith(doc, templateBytes, expect.arrayContaining([{ block_id: headingMap.find((h) => h.heading_text === "1.1 Purpose")!.block_id, section_id: "slot:vision" }]), undefined)
+    expect(mocks.template).toHaveBeenCalledWith(doc, templateBytes, expect.arrayContaining([{ block_id: headingMap.find((h) => h.heading_text === "1.1 Purpose")!.block_id, section_id: "slot:vision" }]), undefined, { stripTemplateText: false })
     expect(mocks.imported).not.toHaveBeenCalled()
     expect(mocks.generic).not.toHaveBeenCalled()
   })

@@ -20,7 +20,14 @@ export async function writeTemplateDocx(
   doc: RenderedDocument,
   template: Buffer,
   headingMap: readonly { block_id: string; section_id: string }[],
-  tableMap: readonly TableMapEntry[] = []
+  tableMap: readonly TableMapEntry[] = [],
+  options: {
+    /**
+     * FLF-378 (luồng C, C2.5): file là **mẫu** của dự án mới — hướng dẫn, ví dụ, ngữ cảnh của mẫu không lọt vào bản in: mục
+     * chưa có nội dung bỏ đoạn thân của mẫu; bảng mẫu không được điền giữ hàng tiêu đề + style, bỏ dòng mẫu.
+     */
+    stripTemplateText?: boolean
+  } = {}
 ): Promise<Buffer> {
   const pkg = await DocxPackage.load(template)
   const xml = await pkg.requireXml(MAIN_PART)
@@ -94,7 +101,10 @@ export async function writeTemplateDocx(
     return lvl ? wAttr(wKid(lvl, "numFmt"), "val") : null
   }
   for (const slot of slots) {
-    if (!slot.sections.some((s) => s.blocks.length || s.id !== slot.section_id)) continue
+    if (!slot.sections.some((s) => s.blocks.length || s.id !== slot.section_id)) {
+      if (options.stripTemplateText && slot.section_id !== "fixed:I") stripTemplateBody(slot.nodes)
+      continue
+    }
     if (slot.nodes.some((n) => isW(n, "p") && isLayoutParagraph(n) && wAll(n, "t").some((t) => t.textContent?.trim()))) unavailable(`Body text shares a layout break below ${slot.block_id}`)
     // FLF-372: đoạn chỉ chứa ảnh (sơ đồ ngữ cảnh, use case… của file gốc) thay được khi bản in của mục mang lại đủ số ảnh —
     // bản in Mode 1 giữ ảnh gốc thành khối ảnh; field / sdt / công thức / bookmark lạ vẫn không xoá
@@ -158,8 +168,10 @@ export async function writeTemplateDocx(
     const replacedTables = new Set(tables.slice(0, tableIndex))
     for (const node of slot.nodes) {
       // Breaks and paragraph section properties are layout, even inside a body slot.
-      // An unfilled source table remains part of the template, including its sample rows.
+      // An unfilled source table remains part of the template, including its sample rows (FLF-378: trừ mẫu của dự án mới —
+      // bỏ dòng mẫu, giữ hàng tiêu đề).
       if (replacedTables.has(node) || (isW(node, "p") && !isLayoutParagraph(node))) parent.removeChild(node)
+      else if (options.stripTemplateText && isW(node, "tbl")) stripSampleRows(node)
     }
   }
   replacePlaceholders(xml, { "[Project name]": doc.projectName, "[Version]": doc.version, "[Date]": doc.generatedAt.slice(0, 10) })
@@ -170,6 +182,23 @@ export async function writeTemplateDocx(
   const lineage = exportLineage(doc)
   await writeStamp(pkg, { project_id: doc.projectId, version: doc.version, source: doc.source, base_version: lineage.base, kind: lineage.release ? "release" : "draft" })
   return pkg.toBuffer()
+}
+
+/** FLF-378: bảng mẫu giữ hàng tiêu đề (+ style), bỏ dòng mẫu / ví dụ bên dưới. */
+const stripSampleRows = (tbl: Element): void => {
+  for (const row of wKids(tbl, "tr").slice(1)) tbl.removeChild(row)
+}
+
+/**
+ * FLF-378: mục của mẫu chưa có nội dung soạn — bỏ đoạn thân (hướng dẫn, ví dụ, ngữ cảnh) và dòng mẫu của bảng. Ngắt trang /
+ * section, field (mục lục), ảnh, đối tượng lạ giữ nguyên.
+ */
+const stripTemplateBody = (nodes: readonly Element[]): void => {
+  for (const node of nodes) {
+    const parent = node.parentNode
+    if (isW(node, "tbl")) stripSampleRows(node)
+    else if (isW(node, "p") && !isLayoutParagraph(node) && !hasOpaqueContent(node)) parent?.removeChild(node)
+  }
 }
 
 const isLayoutParagraph = (p: Element): boolean => wAll(p, "sectPr").length > 0 || wAll(p, "br").some((b) => wAttr(b, "type") === "page")

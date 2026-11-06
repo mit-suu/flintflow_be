@@ -102,6 +102,8 @@ export interface LayoutResult {
   slices: LayoutSlice[]
   /** FLF-366: đoạn của từng mục FPT `fixed:*` có trong file (kể cả mục chỉ có heading). */
   segments: LayoutSegment[]
+  /** FLF-378 (`templateOnly`): mọi khối dưới heading của mẫu, theo mục (`section_id` của layout) — nguồn của `template_context`. */
+  contextBlocks: { section_id: string; block: CustomBlock }[]
 }
 
 const toCustomBlock = (b: LayoutBlock): CustomBlock | null => {
@@ -140,9 +142,18 @@ export const buildLayout = (
    * FLF-366: chia đoạn mục FPT. Tắt cho mẫu bắt buộc (`template_intent = fixed`, chế độ 3): file upload là mẫu để điền
    * (bản xuất điền vào chính file đó — FLF-371), không phải SRS cần in nguyên văn.
    */
-  options: { segment?: boolean } = {}
+  options: {
+    segment?: boolean
+    /**
+     * FLF-378 (luồng C — dự án mới theo mẫu bắt buộc): file là **mẫu**, không phải dữ liệu. Mục riêng không giữ nguyên văn
+     * (chữ ví dụ / hướng dẫn không lọt vào bản in); mọi khối được gom vào `contextBlocks` theo mục.
+     */
+    templateOnly?: boolean
+  } = {}
 ): LayoutResult => {
   const segmentOn = options.segment ?? true
+  const templateOnly = options.templateOnly === true
+  const contextBlocks: LayoutResult["contextBlocks"] = []
   const layout: LayoutEntry[] = []
   const customSections: CustomSection[] = []
   const slices: LayoutSlice[] = []
@@ -201,6 +212,11 @@ export const buildLayout = (
         current = null
         slice = null
         owner = enclosing.entry
+        // FLF-378: mục con của mẫu (1.1 Purpose dưới 1 Product Overview) ⇒ ngữ cảnh mẫu ghi tên mục con để bước soạn thấy cấu trúc
+        if (templateOnly && heading) {
+          const label = b.number_label?.trim()
+          contextBlocks.push({ section_id: mapped, block: { kind: "paragraph", text: `[Sub-section: ${label && !heading.startsWith(label) ? `${label} ${heading}` : heading}]`, rows: null, image_ref: null } })
+        }
         // Mục chia đoạn: heading con ("External Systems") là chữ của file ⇒ đoạn `heading` đúng chỗ, giữ cấp của file;
         // số Word tự đánh (FLF-362) ghép lại vào chữ như file hiển thị
         const segment = segmentOf.get(owner)
@@ -243,6 +259,15 @@ export const buildLayout = (
     slice?.block_ids.push(b.block_id)
     const block = toCustomBlock(b)
     if (!block) continue
+    if (templateOnly) {
+      const sectionId = current ? customSectionKey(current.id) : owner?.section_id
+      if (sectionId) contextBlocks.push({ section_id: sectionId, block })
+      // Hướng dẫn trọn đoạn dưới mục FPT vẫn ghi ở layout entry (FLF-364); còn lại không thành nguyên văn của mục
+      if (!current && owner && !owner.section_id.startsWith("group:") && (block.kind === "paragraph" || block.kind === "list_item") && isInstructionText(block.text)) {
+        owner.template_guidance = [...(owner.template_guidance ?? []), block.text]
+      }
+      continue
+    }
     // FLF-364 (câu 10): chữ hướng dẫn trọn đoạn dưới mục FPT / phần nhỏ ⇒ giữ nguyên văn ở layout entry (in khi mục trống),
     // không thành phần nối (in cả khi mục đã có dữ liệu)
     if (!current && owner && !owner.section_id.startsWith("group:") && (block.kind === "paragraph" || block.kind === "list_item") && isInstructionText(block.text)) {
@@ -257,7 +282,7 @@ export const buildLayout = (
       else segment.parts.push({ kind: "spine", block_ids: [b.block_id], blocks: [block] })
     } else if (owner && (owner.section_id.startsWith("group:") || unmappedBlockIds.has(b.block_id))) continuationOf(owner).blocks.push(block)
   }
-  return { layout, customSections, slices, segments }
+  return { layout, customSections, slices, segments, contextBlocks }
 }
 
 /** Phần tử Spine đã trích (finalize): khoá `entity` + `id` + khối nguồn. */

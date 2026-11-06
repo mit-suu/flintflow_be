@@ -5,6 +5,7 @@
  * theo mẫu số mục khi file không dùng style heading (spike P0 §4.2) — cách nhận ghi ở `detected_by`.
  */
 
+import type { TemplateContextEntry } from "./template-context.js"
 import mongoose, { Schema, Document } from "mongoose"
 import type { RocRow } from "../render/rendered-document.types.js"
 import type { CustomBlock } from "../spine/spine.types.js"
@@ -129,6 +130,8 @@ export interface ITemplateProfile extends Document {
   section_segments: SectionSegments[]
   /** FLF-336 I-5: kết quả so cấu trúc đích lần finalize gần nhất (present / missing / out_of_scope + chế độ thật); null khi chưa so. */
   target_structure: TargetStructure | null
+  /** FLF-378 (luồng C): hướng dẫn / ví dụ / ngữ cảnh của mẫu theo mục — chỉ dự án mới theo mẫu bắt buộc. */
+  template_context?: TemplateContextEntry[] | null
   createdAt: Date
   updatedAt: Date
 }
@@ -203,6 +206,7 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
       default: []
     },
     target_structure: { type: Schema.Types.Mixed, default: null },
+    template_context: { type: Schema.Types.Mixed, default: null },
     // FLF-366: đoạn nguyên văn theo mục (`SectionSegments` — khối gốc, phần tử, dấu) — chỉ để in lại
     section_segments: { type: Schema.Types.Mixed, default: [] },
     section_slices: {

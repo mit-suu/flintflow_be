@@ -17,6 +17,7 @@ import { stepsOf } from "../spine/section-registry.js"
 import { loadStepRegistry } from "../pipeline/step-registry.js"
 import { bindFixedTemplateHeadings, contentSlot, isContentSlot } from "./content-slots.js"
 import type { LayoutEntry } from "./template-profile.model.js"
+import { templateWrapperIds } from "./template-wrappers.js"
 
 /** Giai đoạn phân tích / Brief không soạn mục nào của tài liệu. */
 const isDocumentPhase = (phase: string): boolean => phase.startsWith("S-") && phase !== "S-1"
@@ -40,11 +41,20 @@ export const slotOwnerSteps = (slotId: string, spine?: Spine): string[] => {
   return precise.length ? precise : parentSteps
 }
 
-/** Bước soạn một mục của mẫu (`fixed:*`, `feature:*`, `function:*` hoặc `slot:*`); mục riêng / heading bao ⇒ không có. */
-export const templateSectionOwnerSteps = (sectionId: string, spine?: Spine): string[] =>
-  isContentSlot(sectionId) ? slotOwnerSteps(sectionId, spine) : stepsOf(sectionId, spine)
+/**
+ * FLF-378 (C2.4): **mục riêng của mẫu** (`custom:*` — References / Verification khách tự đặt, "Dự toán"…) không có mục FlintFlow
+ * tương ứng ⇒ soạn tự do theo hướng dẫn của mẫu ở bước cuối của phần soạn (S-8.1, khi mọi dữ liệu đã có), ghi vào
+ * `custom_sections[id=…].blocks`.
+ */
+export const CUSTOM_SECTION_OWNER_STEP = "S-8.1"
 
-const isTemplateSection = (id: string): boolean => id !== "unmapped" && !id.startsWith("group:") && !id.startsWith("custom:")
+/** Bước soạn một mục của mẫu (`fixed:*`, `feature:*`, `function:*`, `slot:*` hoặc mục riêng `custom:*`). */
+export const templateSectionOwnerSteps = (sectionId: string, spine?: Spine): string[] => {
+  if (sectionId.startsWith("custom:")) return [CUSTOM_SECTION_OWNER_STEP]
+  return isContentSlot(sectionId) ? slotOwnerSteps(sectionId, spine) : stepsOf(sectionId, spine)
+}
+
+const isTemplateSection = (id: string): boolean => id !== "unmapped" && !id.startsWith("group:")
 
 /**
  * Heading của mẫu theo bước. Khoá là id bước như `stepsOf` trả: bước thường (`S-2.1`), bước vòng S-5 theo màn
@@ -55,8 +65,10 @@ export const templateSectionsByStep = (layout: readonly LayoutEntry[], spine?: S
   const bound = bindFixedTemplateHeadings(headings)
   const byStep = new Map<string, string[]>()
   const seen = new Set<string>()
+  const wrappers = templateWrapperIds(headings)
   for (const entry of bound) {
-    if (!isTemplateSection(entry.section_id)) continue
+    // Heading bao của mẫu (chỉ chứa mục con) không phải mục cần soạn
+    if (!isTemplateSection(entry.section_id) || wrappers.has(entry.section_id)) continue
     const title = entry.heading_text.trim()
     for (const step of templateSectionOwnerSteps(entry.section_id, spine)) {
       const key = `${step}\u0000${title}`
