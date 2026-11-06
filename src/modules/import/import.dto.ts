@@ -337,6 +337,13 @@ export const getImportResponseSchema = z.object({
   blocks_count: z.number().int().min(0),
   /** FLF-336: có sau lần finalize đầu (kể cả khi dừng ở `incomplete`); null khi chưa so. */
   target_structure: targetStructureSchema.nullable().optional(),
+  /** FLF-382 (luồng B): mã CR "Bổ sung mục còn thiếu" của import này (`CR-003`) — đang mở trước, rồi mới nhất; không có ⇒ null. */
+  gap_fill_cr_id: z.string().nullable().optional(),
+  /**
+   * FLF-382: ước tính credit soạn mục trống (C-2 + C-4 + C-5 của CR bổ sung × số lô theo phần) — chỉ luồng B ở `incomplete`
+   * còn `target_structure.missing`; khác ⇒ null.
+   */
+  gap_fill_credit_estimate: z.number().min(0).nullable().optional(),
   /**
    * FLF-343: ước tính cả lượt một mạch (I-4 còn phải chạy + kiểm tra AI 1.11) — chỉ có khi import ở `mapping_review` hoặc `extracting` mà job chưa chạy / đang dừng; trạng
    * thái khác hoặc đang chạy ⇒ `null` / không có. Tính bằng chính kế hoạch lượt của lượt chạy (lô chữ sau phần đọc tất định +
@@ -398,7 +405,9 @@ export const gapReportSchema = z.object({
       level: z.number().int().min(1),
       kind: z.enum(["fpt", "group", "custom"]),
       red: z.number().int().min(0),
-      yellow: z.number().int().min(0)
+      yellow: z.number().int().min(0),
+      /** FLF-382: mục đang được soạn trong CR "Bổ sung mục còn thiếu" còn mở (`CR-007`); không ⇒ null. */
+      drafting_cr_id: z.string().nullable().optional()
     })
   ),
   /** Cờ đỏ/vàng gộp theo section (chỉ section có cờ) — theo thứ tự layout của file upload, section ngoài layout sau cùng. */

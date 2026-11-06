@@ -33,6 +33,7 @@ import * as reuploadService from "./reupload.service.js"
 import * as stepPlanService from "./step-plan.service.js"
 import { authorizeMode1, mode1Handler, parseInput } from "./mode1.http.js"
 import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
+import { gapFillImportFields } from "../change-request/gap-fill.service.js"
 
 /**
  * Multer giữ file trong bộ nhớ. Giới hạn cứng gấp đôi giới hạn nghiệp vụ: file hơi quá cỡ vẫn tới preflight để
@@ -83,6 +84,8 @@ export const getImport = mode1Handler(async (req, res) => {
     await finalizeJobs.markOrphanedFinalize(current)
   }
   const view = await importService.getImportView(auth.projectId)
+  // FLF-382 (luồng B): CR "Bổ sung mục còn thiếu" của import + ước tính credit soạn mục trống ở màn Kết quả đọc file
+  Object.assign(view, await gapFillImportFields(auth.projectId, current, view.target_structure))
   // Ước tính credit một lần trước khi chạy (màn Bắt đầu / chạy tiếp, FLF-343) — job đang chạy thì FE đang xem tiến độ, không tính
   if (current && !(await extractJobs.isExtractionRunning(String(current._id)))) {
     const role = req.orgContext?.role

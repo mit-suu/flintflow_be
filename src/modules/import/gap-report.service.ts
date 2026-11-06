@@ -23,6 +23,7 @@ import { displayHeading } from "./heading-label.js"
 import { FEATURE_SECTIONS, continuationOwnerSection } from "./step-plan.js"
 import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
 import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
+import { ChangeRequest } from "../change-request/change-request.model.js"
 
 // FLF-336: dừng ở "Kết quả đọc file" cũng tải được gap report (kèm bản đồ mục ⇒ cấu trúc đích)
 const REPORT_STATUSES: readonly ImportStatus[] = ["incomplete", "gap_review", "delivered", "change_requested"]
@@ -87,7 +88,13 @@ export const buildGapReport = async (projectId: string): Promise<GapReport> => {
   const open = spine.flags.filter((f) => f.resolved_at === null)
   const bySection = new Map<string, typeof open>()
   for (const f of open) bySection.set(f.section_id, [...(bySection.get(f.section_id) ?? []), f])
-  const layout = layoutRows(profile?.layout ?? [], spine, bySection)
+  // FLF-382 (§4.5): mục đang nằm trong CR "Bổ sung mục còn thiếu" còn mở ⇒ "đang soạn ở CR-xxx"
+  const drafting = new Map<string, string>()
+  const openGapFill = await ChangeRequest.find({ projectId, kind: "gap_fill", status: { $nin: ["written", "cancelled", "rejected"] } }, { cr_id: 1, gap_sections: 1 })
+    .sort({ createdAt: 1 })
+    .lean()
+  for (const cr of openGapFill) for (const id of cr.gap_sections ?? []) if (!drafting.has(id)) drafting.set(id, cr.cr_id)
+  const layout = layoutRows(profile?.layout ?? [], spine, bySection, drafting)
   const orderOf = new Map(layout.map((l) => [l.section_id, l.order]))
   const sections = [...bySection]
     .map(([section_id, flags]) => ({
@@ -142,7 +149,7 @@ const unrendered = (spine: Spine): GapReport["unrendered_diagrams"] =>
 type FlagsBySection = Map<string, Spine["flags"]>
 
 /** Mục theo thứ tự file upload + số cờ mở; bỏ phần nối (mục riêng tiêu đề rỗng — văn xuôi của section trước). */
-const layoutRows = (layout: readonly LayoutEntry[], spine: Spine, bySection: FlagsBySection): GapReport["layout"] =>
+const layoutRows = (layout: readonly LayoutEntry[], spine: Spine, bySection: FlagsBySection, drafting: ReadonlyMap<string, string> = new Map()): GapReport["layout"] =>
   layout
     .filter((l) => l.heading_text.trim())
     .map((l) => {
@@ -155,7 +162,8 @@ const layoutRows = (layout: readonly LayoutEntry[], spine: Spine, bySection: Fla
         level: l.level,
         kind,
         red: flags.filter((f) => f.level === "red").length,
-        yellow: flags.filter((f) => f.level === "yellow").length
+        yellow: flags.filter((f) => f.level === "yellow").length,
+        drafting_cr_id: drafting.get(l.section_id) ?? null
       } as const
     })
 
@@ -236,7 +244,7 @@ export const renderGapReportDocx = async (report: GapReport, projectName: string
       ? table(
           ["Mục", "Loại", "Cờ đỏ", "Cờ vàng"],
           report.layout.map((l) => [
-            `${"  ".repeat(Math.max(0, l.level - 1))}${l.heading}`,
+            `${"  ".repeat(Math.max(0, l.level - 1))}${l.heading}${l.drafting_cr_id ? ` — đang soạn ở ${l.drafting_cr_id}` : ""}`,
             l.kind === "custom" ? "Mục riêng (ngoài FPT)" : l.kind === "group" ? "Nhóm" : "Mẫu FPT",
             String(l.red),
             String(l.yellow)

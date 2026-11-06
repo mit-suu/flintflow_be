@@ -20,6 +20,7 @@ import { loadLayout, titleOfSection } from "../import/gap-report.service.js"
 import { ownerStepOf } from "../spine/section-registry.js"
 import { crQueryText } from "./embedding/element-text.js"
 import { vectorCandidates } from "./embedding/vector-search.js"
+import { gapFillLocations } from "./gap-fill.js"
 
 export { elementPathOf, MAX_LOCATIONS } from "./spine-location.js"
 
@@ -35,7 +36,10 @@ export const runImpact = async (cr: IChangeRequest): Promise<void> => {
   const seedTargets = new Set(cr.seed?.targets ?? [])
   // FLF-318: lô thêm / xoá / sửa use case đã duyệt trong chat ⇒ vị trí là đúng phần tử lô chạm tới, như trước baseline
   const approved = approvedBatch(spine, cr)
-  const found: FoundLocation[] = approved
+  // FLF-382: CR bổ sung ⇒ mỗi mục trống một vị trí "thêm nội dung vào mục" (không tìm theo đích / từ khoá)
+  const found: FoundLocation[] = cr.kind === "gap_fill" && cr.gap_sections?.length
+    ? gapFillLocations(spine, cr.gap_sections)
+    : approved
     ? approvedBatchLocations(spine, approved)
     : findSpineLocations(spine, cr.targets.entity_paths, cr.targets.keywords, await vectorCandidates(String(cr.projectId), crQueryText(cr))).map((f) =>
         seedTargets.has(f.path) && !f.found_by.includes("preview") ? { ...f, found_by: [...f.found_by, "preview" as const] } : f

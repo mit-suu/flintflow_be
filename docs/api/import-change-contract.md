@@ -662,3 +662,24 @@ Cả hai đều không tự chuyển sang mẫu chuẩn FlintFlow.
   hướng dẫn, đoạn ngoặc hướng dẫn trong câu bỏ, ô bảng chỉ có hướng dẫn để trống. Hướng dẫn vẫn giữ trong dữ liệu (ngữ cảnh
   khi soạn) — xoá hết dữ liệu thì in lại. Hướng dẫn không làm mục "có nội dung" (như trước). Dự án import trước thay đổi này:
   mục FPT không có `template_guidance` ⇒ không in hướng dẫn; mục riêng theo luật mới. Mode 2 không đổi.
+
+## FLF-382 (2026-11-06) — Luồng B: một nút "Hoàn thiện" (chỉ thêm field + một endpoint)
+
+Chỉ dự án `start_kind = existing` + `template_intent = fixed`. Luồng A / C không đổi.
+
+- `POST /import/finalize` `complete: true` giữ hợp đồng. Còn mục thiếu ⇒ `ImportedDocument.gap_fill_requested` (nội bộ); job kiểm
+  tra 1.11–1.12 tạo CR "Bổ sung mục còn thiếu" **trước** `checking ⇒ gap_review` (một lần mỗi import), rồi chạy C-2 trong job.
+  Import dừng ở `gap_review`. Mục không có chỗ ghi bằng CR (heading tính năng chỉ chứa chức năng con, `slot:analysis_models`…)
+  không vào CR, vẫn ở gap report.
+- `GET /import` thêm `gap_fill_cr_id: string | null` (mã người đọc `CR-007`; CR bổ sung của import — đang mở trước, rồi mới nhất)
+  và `gap_fill_credit_estimate: number | null` (luồng B, `incomplete`, còn `target_structure.missing`: (giá `cr_clarify` +
+  `cr_propose` + `cr_consistency`) × số lô theo phần; khác ⇒ null).
+- DTO change request (chi tiết + danh sách) thêm `kind: "edit" | "gap_fill"` (CR cũ ⇒ `edit`) và
+  `gap_sections: { section_id, title }[]` (tiêu đề theo file khách; `[]` với `edit`).
+- Endpoint mới `POST /projects/:id/change-requests/gap-fill` (body `{}`): CR bổ sung đang mở ⇒ 200 + `CrDetail`; không có ⇒ I-5
+  chạy lại, tạo CR cho mục còn trống + C-2 ⇒ 201 + `CrDetail`; không còn mục nào ⇒ 409 `NO_MISSING_SECTIONS` (mã mới).
+- C-3 của CR bổ sung: mỗi mục một vị trí — mục FPT ⇒ mảng nuôi mục (`fixed:1` ⇒ `project`), `slot:*` ⇒ đích của phần,
+  `custom:*` ⇒ `custom_sections[id=…]`; hai mục cùng đường ghi ⇒ một vị trí (`entity_paths` nêu cả hai).
+- C-5: mục vẫn trống sau đề xuất ⇒ nhận xét vàng `gap_section_empty` (không chặn). Sau C-6 (luồng B) I-5 chạy lại, lưu
+  `TemplateProfile.target_structure`.
+- Gap report: `layout[].drafting_cr_id: string | null` — mục đang soạn trong CR bổ sung còn mở; bản .docx ghi "đang soạn ở CR-xxx".

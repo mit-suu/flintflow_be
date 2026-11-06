@@ -350,7 +350,14 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string): Pr
 
   // BPMN 1.12: S-9.1 + S-9.2 bằng luật code trên baseline v0 ⇒ bật luật S-9 (`atBaseline`: giả định chưa xác nhận)
   await flagsService.recompute(projectId, { by: "import", ruleProfile: await mode1RuleProfileFor(projectId), atBaseline: true })
+  // FLF-382 (luồng B): "Hoàn thiện" còn mục thiếu ⇒ CR "Bổ sung mục còn thiếu" tạo TRƯỚC khi import xong (FE thấy
+  // `gap_fill_cr_id` ngay lần poll đầu thấy `gap_review`), rồi C-2 chạy trong chính job này. Nạp muộn: tránh vòng import.
+  const gapFill = doc.gap_fill_requested?.section_ids.length ? await import("../change-request/gap-fill.service.js") : null
+  const gapCr = gapFill ? await gapFill.prepareAutoGapFill(doc, userId) : null
+  // Import dừng ở `gap_review` (FE điều hướng tới CR bổ sung đúng lần poll thấy trạng thái này); CR thường tạo sau mới
+  // chuyển `change_requested` như cũ
   await transitionImport(doc, "gap_review")
+  if (gapFill && gapCr) await gapFill.startGapFillClarify(gapCr, userId)
   return true
 }
 

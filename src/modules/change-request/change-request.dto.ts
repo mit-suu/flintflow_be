@@ -13,6 +13,7 @@ import {
   LOCATION_CONCLUSIONS,
   LOCATION_FOUND_BY,
   LOCATION_ID_PATTERN,
+  CR_KINDS,
   CR_MATERIAL_KINDS,
   CR_MATERIAL_MAX_CHARS,
   MATERIAL_ID_PATTERN,
@@ -85,6 +86,10 @@ export const changeRequestDtoSchema = z.object({
   missing_info: z.array(z.string()),
   /** Phase 8: lệnh sửa gộp thêm (chat) theo thứ tự. */
   amendments: z.array(z.object({ text: z.string(), at: isoDateTime })),
+  /** FLF-382: `gap_fill` = CR "Bổ sung mục còn thiếu" (luồng B); CR cũ ⇒ `edit`. */
+  kind: z.enum(CR_KINDS),
+  /** FLF-382: mục CR bổ sung soạn, tiêu đề theo file của khách; `[]` với `edit`. */
+  gap_sections: z.array(z.object({ section_id: z.string().min(1), title: z.string() })),
   created_at: isoDateTime,
   updated_at: isoDateTime
 })

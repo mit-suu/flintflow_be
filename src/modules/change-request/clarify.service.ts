@@ -24,6 +24,7 @@ import { assertCrStatus, transitionCr } from "./change-request.service.js"
 import { AMENDABLE_CR_STATUSES, MAX_CLARIFY_ROUNDS, canAskMore } from "./change-request.state.js"
 import { answersText, crHeader, crProjection, materialsText, truncate } from "./cr-context.js"
 import { mentionedSections, type HeadingRef } from "./section-mention.js"
+import { gapContextFor } from "./gap-fill.service.js"
 
 /**
  * Tiêu đề mục của bản tài liệu mới nhất, theo thứ tự (kèm mã section đã khớp). Dự án chuyển từ mode 2 (FLF-318) không
@@ -95,8 +96,11 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
     return
   }
   const headings = await docHeadings(cr, spine)
+  // FLF-382: CR bổ sung — đích là đúng các mục còn trống; ngữ cảnh từng mục (hướng dẫn mẫu, nội dung nên có, skill)
+  const gapFill = cr.kind === "gap_fill" && (cr.gap_sections ?? []).length > 0
+  const gapSections = gapFill ? await gapContextFor(cr, spine) : ""
   // Mục người yêu cầu gọi tên ("phần 3.1.3 Screen Authorization") luôn là đích — code nhận, không trông vào model.
-  const named = mentionedSections(requesterText(cr), headings)
+  const named = gapFill ? [...cr.gap_sections] : mentionedSections(requesterText(cr), headings)
   const result = await withMeteredAi<CrClarifyOutput>({ projectId: String(cr.projectId), userId, stepId: `C-2:${cr.cr_id}` }, ActionType.CR_CLARIFY, {
     ...crHeader(cr),
     round: Math.min(asked + 1, MAX_CLARIFY_ROUNDS),
@@ -106,7 +110,8 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
     projection: crProjection(spine, `${cr.title}\n${crHeader(cr).description}\n${answersText(cr)}\n${(cr.materials ?? []).map((m) => m.text).join("\n")}`, {
       sections: named
     }),
-    outline: outlineText(headings)
+    outline: outlineText(headings),
+    gap_sections: gapSections
   })
   if (!result.ok) {
     cr.paused = { reason: result.reason, at: new Date() }
@@ -137,7 +142,10 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
   // Đã chỉ đích danh mục thì bỏ từ khoá của model: từ khoá kiểu "SCR-01", "Hộ gia đình" kéo cả tài liệu vào CR.
   const keywords = named.length ? [] : out.targets.keywords.length || out.targets.entity_paths.length ? out.targets.keywords : fallbackKeywords(cr)
   // Phần tử bản xem trước đã chạm (mode 1 v3) luôn là đích — 3.4 vẫn tìm thêm vị trí liên quan như thường
-  cr.targets = { entity_paths: [...new Set([...named, ...out.targets.entity_paths, ...(cr.seed?.targets ?? [])])], keywords }
+  // CR bổ sung: C-3 dựng vị trí từ `gap_sections` (`gapFillLocations`) — đích của model không thêm vị trí nào
+  cr.targets = gapFill
+    ? { entity_paths: [...cr.gap_sections], keywords: [] }
+    : { entity_paths: [...new Set([...named, ...out.targets.entity_paths, ...(cr.seed?.targets ?? [])])], keywords }
   cr.markModified("targets")
   await transitionCr(cr, "impact_review")
 }

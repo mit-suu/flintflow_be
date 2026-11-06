@@ -6,7 +6,7 @@
 
 import mongoose, { Schema, Document } from "mongoose"
 import { CR_PAUSE_REASONS, CR_STATUSES, type CrPauseReason, type CrStatus } from "./change-request.state.js"
-import { CR_ID_PATTERN, CR_MATERIAL_KINDS, CR_SOURCE_KINDS, MATERIAL_ID_PATTERN, type CrMaterialKind, type CrSourceKind } from "./change-request.constants.js"
+import { CR_ID_PATTERN, CR_KINDS, CR_MATERIAL_KINDS, CR_SOURCE_KINDS, MATERIAL_ID_PATTERN, type CrKind, type CrMaterialKind, type CrSourceKind } from "./change-request.constants.js"
 
 export interface CrSource {
   kind: CrSourceKind
@@ -79,6 +79,12 @@ export interface IChangeRequest extends Document {
   decided_by: mongoose.Types.ObjectId | null
   /** Lý do khi `rejected` (đóng) hoặc `cancelled` (huỷ). */
   closed_reason: string | null
+  /** FLF-382: `gap_fill` = CR "Bổ sung mục còn thiếu" (luồng B); CR cũ không có ⇒ `edit`. */
+  kind: CrKind
+  /** FLF-382: mục còn trống CR bổ sung phải soạn (section id theo I-5: `fixed:*`, `slot:*`, `custom:*`); rỗng với `edit`. */
+  gap_sections: string[]
+  /** FLF-382: lần import sinh ra CR bổ sung (idempotent theo import); `null` với `edit`. */
+  origin_import_id: mongoose.Types.ObjectId | null
   createdAt: Date
   updatedAt: Date
 }
@@ -154,13 +160,17 @@ const changeRequestSchema = new Schema<IChangeRequest>(
     created_by: { type: Schema.Types.ObjectId, ref: "User", required: true },
     submitted_at: { type: Date, default: null },
     decided_by: { type: Schema.Types.ObjectId, ref: "User", default: null },
-    closed_reason: { type: String, default: null }
+    closed_reason: { type: String, default: null },
+    kind: { type: String, enum: CR_KINDS, default: "edit" },
+    gap_sections: { type: [String], default: [] },
+    origin_import_id: { type: Schema.Types.ObjectId, ref: "ImportedDocument", default: null }
   },
   { timestamps: true }
 )
 
 changeRequestSchema.index({ projectId: 1, cr_id: 1 }, { unique: true })
 changeRequestSchema.index({ projectId: 1, status: 1 })
+changeRequestSchema.index({ projectId: 1, kind: 1, origin_import_id: 1 })
 
 export const ChangeRequest = mongoose.model<IChangeRequest>("ChangeRequest", changeRequestSchema)
 

@@ -58,6 +58,7 @@ import { functionSourceHash } from "../render/layout-sections.js"
 import { TemplateProfile, type HeadingMapEntry, type LayoutEntry, type TableMapEntry } from "./template-profile.model.js"
 import { buildTemplateContext } from "./template-context.js"
 import { compareTargetStructure, type TargetStructure, type TemplateIntent } from "./target-structure.js"
+import { gapFillRequestOf } from "./target-structure.service.js"
 import { titleOfSection } from "./gap-report.service.js"
 import { scheduleEmbeddingSync } from "../change-request/embedding/embedding-sync.service.js"
 
@@ -260,6 +261,11 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     const stopped = await loadSpine(projectId)
     return { doc, baseline: null, spine_version: stopped.spine_version, flags: null, target_structure: structure }
   }
+
+  // FLF-382 (luồng B): "Hoàn thiện" khi còn mục thiếu ⇒ bước kiểm tra xong mở CR "Bổ sung mục còn thiếu" cho các mục này
+  doc.gap_fill_requested = gapFillRequestOf(project, doc.complete_requested, structure)
+  doc.markModified("gap_fill_requested")
+  await doc.save()
 
   // 4. Diagram từ Spine (use case, ERD, luồng màn, ngữ cảnh) ⇒ bản render có hình như mode 2 cho loại người dùng chưa có
   // hình; loại đã có sơ đồ gốc thì hình PlantUML vẫn vẽ sẵn (in ra ngay khi CR bỏ ảnh gốc) nhưng không in (§4.13)

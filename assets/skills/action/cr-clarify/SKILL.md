@@ -1,7 +1,7 @@
 ---
 skill_id: cr-clarify
 kind: action
-version: 1.7.0
+version: 1.8.0
 description: Mode 1 C-2 — decide whether a change request is clear, has the facts it needs and does not contradict the document; ask questions or return targets for impact search
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -13,6 +13,7 @@ reads:
   - "<source material the user attached: pasted text, text extracted from files and images>"
   - "<Spine projection around entities named in the request + related rules / NFRs + related verbatim passages>"
   - "<document outline: headings + section ids>"
+  - "<gap-fill CR only: each empty section — heading, template guidance, ISO 29148 expected content, writing skill>"
 writes: []
 output_schema: crClarify
 language: user
@@ -43,6 +44,10 @@ You never write edits.
 {{projection}}
 - Document outline (headings with section ids):
 {{outline}}
+{{#if gap_sections}}
+- **Gap-fill CR** — the sections of the customer's template that are still empty and must now be written:
+{{gap_sections}}
+{{/if}}
 
 ## Rules
 
@@ -107,6 +112,14 @@ You never write edits.
    again one already answered above. When the answer is "follow the CR", put the old element (or its
    `custom_sections[id=…]`) in `targets.entity_paths` too. A CR that only adds or edits without conflicting is not a
    contradiction.
+
+{{#if gap_sections}}
+13. **Gap-fill CR** (the empty sections listed above): targets are fixed — return `targets` empty. Decide per section
+   which facts its expected content needs and whether the document already states them (other sections, the index,
+   the answers); ask **only** for facts nobody can infer, grouped by section and naming it by its heading, with
+   `suggestions` + free answer as usual. Never ask about wording or the template's guidance / example text. Nothing
+   missing ⇒ `ambiguous: false`, no questions.
+{{/if}}
 
 ## Output
 

@@ -15,6 +15,7 @@ import { ChangeGroup } from "./change-group.model.js"
 import { ChangeLocation } from "./change-location.model.js"
 import { unlockPaths } from "./lock.service.js"
 import { writeApproved } from "./write.service.js"
+import { refreshAfterWrite } from "./gap-fill.service.js"
 
 export const decideGroup = async (cr: IChangeRequest, userId: string, groupId: string, body: GroupDecisionRequest): Promise<void> => {
   assertCrStatus(cr, ["in_review"], "written")
@@ -32,6 +33,7 @@ export const decideGroup = async (cr: IChangeRequest, userId: string, groupId: s
   if (!remaining.length && approvedIds.length) {
     const approved = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id, location_id: { $in: approvedIds } })
     written = await writeApproved(cr, userId, approved, body.base_version)
+    await refreshAfterWrite(String(cr.projectId))
   }
 
   group.decision = body.decision
