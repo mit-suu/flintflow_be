@@ -38,7 +38,7 @@ export interface TemplateStepContext {
   /** Khối prompt nối vào `content_guidance`; "" khi không phải dự án mẫu bắt buộc mới / bước không sở hữu mục mẫu nào. */
   guidance: string
   /** Mục riêng của mẫu bước này soạn (C2.4) — thêm vào projection + đường ghi. */
-  customSections: Pick<CustomSection, "id" | "heading" | "blocks">[]
+  customSections: Pick<CustomSection, "id" | "heading" | "level" | "blocks">[]
   /** Phần nhỏ không có bước pipeline (References / Verification) bước này soạn — đường ghi thêm + dữ liệu hiện có. */
   slotWrites: string[]
   slotProjection: Record<string, unknown>
@@ -46,8 +46,9 @@ export interface TemplateStepContext {
 
 const CUSTOM_WRITE_RULE = [
   "### Template-specific sections (custom_sections)",
-  "Some template sections have no FlintFlow data model. Draft each one for THIS project by setting its blocks:",
-  '`{"op":"set","path":"custom_sections[id=<id>].blocks","value":[{"kind":"paragraph","text":"…","rows":null,"image_ref":null}]}`.',
+  "Some template sections have no FlintFlow data model. Draft each one for THIS project by replacing the WHOLE element",
+  "(the op engine rejects setting `.blocks` alone) — keep its id, heading and level exactly as shown in the projection:",
+  '`{"op":"set","path":"custom_sections[id=<id>]","value":{"id":"<id>","heading":"<heading>","level":<level>,"source":"import","blocks":[{"kind":"paragraph","text":"…","rows":null,"image_ref":null}]}}`.',
   'Use `"kind":"list_item"` for bullets and `{"kind":"table","text":"","rows":[[header…],[row…]],"image_ref":null}` for a table that',
   "keeps the template's columns. Never copy the template's example text."
 ].join("\n")
@@ -70,7 +71,7 @@ export const buildTemplateStepContext = (
   const own = templateEntriesForStep(entries, stepId, spine)
   const whole = isWholeTemplateStep(stepId)
   const customIds = whole ? new Set<string>() : new Set(own.filter((e) => e.section_id.startsWith("custom:")).map((e) => e.section_id.slice("custom:".length)))
-  const customSections = spine.custom_sections.filter((c) => customIds.has(c.id)).map(({ id, heading, blocks }) => ({ id, heading, blocks }))
+  const customSections = spine.custom_sections.filter((c) => customIds.has(c.id)).map(({ id, heading, level, blocks }) => ({ id, heading, level, blocks }))
   const block = templatePromptBlock(own, projectFactsOf(spine), expectedContentOf)
   const brief = whole && block ? BRIEF_RULE : ""
   // C2.4: phần nhỏ mẫu IEEE không có bước pipeline ⇒ skill của ngân hàng phần + được ghi đúng chỗ của nó trong Spine
