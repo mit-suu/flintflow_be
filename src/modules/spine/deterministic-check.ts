@@ -468,6 +468,16 @@ const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$
 const mentionsToken = (text: string, token: string): boolean =>
   token.trim().length > 0 && new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegex(token.trim())}(?![\\p{L}\\p{N}])`, "iu").test(text)
 
+/** Khoá so mã (như `idKey` của import): `UC-01` = `UC01` = `uc 1` — id Spine giữ dạng tài liệu (FLF-361). */
+const codeKey = (id: string): string => id.trim().toUpperCase().replace(/[-_\s]+/g, "").replace(/(^|\D)0+(?=\d)/g, "$1")
+
+/** Chữ có nhắc mã `id` không, chấp nhận mọi cách viết (`UC-01`, `UC01`, `UC 1`). */
+const mentionsCode = (text: string, id: string): boolean => {
+  const m = /^([A-Za-z]+)[-_\s]?0*(\d.*)$/.exec(id.trim())
+  if (!m) return mentionsToken(text, id)
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegex(m[1])}[-_ ]?0*${escapeRegex(m[2])}(?![\\p{L}\\p{N}])`, "iu").test(text)
+}
+
 const partText = (blocks: readonly { kind: string; text: string; rows: string[][] | null }[]): string =>
   blocks.map((b) => (b.kind === "table" ? (b.rows ?? []).map((r) => r.join(" ")).join("\n") : b.text)).join("\n")
 
@@ -486,11 +496,11 @@ export const originalTextMentionsChanged = (spine: Spine, records: readonly Sect
       const text = partText(blocks)
       for (const m of part.mentions) {
         const list = (spine as unknown as Record<string, unknown>)[m.array]
-        const el = Array.isArray(list) ? (list as { id?: string; name?: string }[]).find((x) => x.id === m.id) : undefined
+        const el = Array.isArray(list) ? (list as { id?: string; name?: string }[]).find((x) => typeof x.id === "string" && codeKey(x.id) === codeKey(m.id)) : undefined
         const renamed = !!el && m.name !== null && typeof el.name === "string" && el.name !== m.name
         if (el && !renamed) continue
         const token = m.name ?? m.id
-        if (!mentionsToken(text, token)) continue
+        if (!(m.name !== null ? mentionsToken(text, token) : mentionsCode(text, m.id))) continue
         out.push({
           level: "yellow",
           rule_id: "original_text_mentions_changed",

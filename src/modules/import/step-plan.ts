@@ -28,6 +28,7 @@ import {
   type SegmentMention,
   type SegmentPart
 } from "../spine/segment-hash.js"
+import { idKey } from "./extracted-entities.js"
 import { scanCodeMentions, scanNameMentions, type NamedEntity } from "./mentions.js"
 import { UNMAPPED_SECTION } from "./import.constants.js"
 import { targetsOf } from "./extract-targets.js"
@@ -319,10 +320,13 @@ const blockText = (blocks: readonly CustomBlock[]): string =>
 /** Tên / mã phần tử Spine mà văn xuôi nhắc tới, kèm tên lúc import (cờ vàng khi phần tử đổi tên / bị xoá — FLF-366). */
 export const textMentions = (text: string, spine: Spine, names: readonly NamedEntity[]): SegmentMention[] => {
   const out = new Map<string, SegmentMention>()
-  const exists = (array: string, id: string) => ((spine as unknown as Record<string, unknown>)[array] as { id?: string }[] | undefined)?.some((x) => x.id === id) ?? false
+  // FLF-361: mã trong chữ (`UC-01`) so lỏng với id Spine giữ dạng tài liệu (`UC01`) — ghi id thật của Spine
+  const idOf = (array: string, id: string): string | null =>
+    ((spine as unknown as Record<string, unknown>)[array] as { id?: string }[] | undefined)?.find((x) => typeof x.id === "string" && idKey(x.id) === idKey(id))?.id ?? null
   for (const m of scanCodeMentions(text)) {
     const array = MENTION_ARRAY[m.entity]
-    if (exists(array, m.id)) out.set(`${array}[id=${m.id}]`, { path: `${array}[id=${m.id}]`, array, id: m.id, name: null })
+    const id = idOf(array, m.id)
+    if (id) out.set(`${array}[id=${id}]`, { path: `${array}[id=${id}]`, array, id, name: null })
   }
   for (const m of scanNameMentions(text, [...names])) {
     const array = MENTION_ARRAY[m.entity]
