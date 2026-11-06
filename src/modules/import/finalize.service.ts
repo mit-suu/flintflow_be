@@ -53,7 +53,7 @@ import { IMPORT_IMAGE_RULE, IMPORT_NEEDS_REVIEW_RULE, IMPORT_TITLE_CONTENT_RULE,
 import { parseDocument } from "./parse.service.js"
 import { buildImportOps, droppedPermissionFindings, type DroppedPermission } from "./spine-builder.js"
 import { tableRows } from "./table-rows.js"
-import { buildLayout, buildStepPlan, customSectionOps, customSectionsWithContent, functionOriginals, projectFieldEntities, sectionSegments, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
+import { buildLayout, buildStepPlan, customSectionOps, customSectionsWithContent, functionOriginals, projectFieldEntities, repeatSectionsWithContent, sectionSegments, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
 import { functionSourceHash } from "../render/layout-sections.js"
 import { TemplateProfile, type HeadingMapEntry, type LayoutEntry, type TableMapEntry } from "./template-profile.model.js"
 import { compareTargetStructure, type TargetStructure, type TemplateIntent } from "./target-structure.js"
@@ -237,7 +237,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // FLF-336 I-5: so cấu trúc đích TRƯỚC khi chụp v0 — còn mục thiếu và người dùng chưa bấm "Hoàn thiện" ⇒ dừng ở
   // `incomplete` (không có v0 dở dang, §1). Ý định theo `Project.template_intent` (FLF-335); dự án cũ ⇒ tự do.
   const intent: TemplateIntent = intentRaw === "fixed" ? "fixed" : "free"
-  const withContent = new Set([...sectionsWithContent(layoutBlocks), ...customSectionsWithContent(customSections)])
+  const withContent = new Set([...sectionsWithContent(layoutBlocks), ...customSectionsWithContent(customSections), ...repeatSectionsWithContent(slices, layoutBlocks)])
   const structure = compareTargetStructure(layout, withContent, stripRecord(seeded), intent)
   profile.target_structure = structure
   profile.markModified("target_structure")
