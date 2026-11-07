@@ -312,6 +312,15 @@ function tableAsParagraphs(xml: Document, block: Extract<Block, { type: "table" 
 /** Reuse the import's explicit field paths; no fuzzy header matching or overflow cells. */
 function projectMappedTable(block: Extract<Block, { type: "table" }>, source: Element, mappings: readonly TableMapEntry[]): Extract<Block, { type: "table" }> {
   const headers = wKids(wKids(source, "tr")[0], "tc").map((cell) => wAll(cell, "t").map((t) => t.textContent ?? "").join(""))
+  return projectTableColumns(block, headers, mappings)
+}
+
+/**
+ * Bảng FlintFlow ⇒ đúng cột của bảng mẫu (`headers` = hàng tiêu đề của bảng trong file upload): cột mẫu không có dữ liệu để
+ * trống, cột FlintFlow mẫu không có thì bỏ. FLF-379: bản xem trước của dự án mẫu cố định dùng chung hàm này để hiện đúng cột
+ * như bản xuất. Không ghép được ⇒ ném `TEMPLATE_LAYOUT_UNAVAILABLE`.
+ */
+export function projectTableColumns(block: Extract<Block, { type: "table" }>, headers: readonly string[], mappings: readonly TableMapEntry[]): Extract<Block, { type: "table" }> {
   if (!mappings.length || headers.every((h) => block.header.some((c) => columnKey(c.map((r) => r.text).join("")) === columnKey(h)))) return block
   const entities = new Set(mappings.flatMap((m) => m.field_path ? [m.field_path.split("[].")[0]] : []))
   const fieldOf = (definition: (typeof TABLE_ENTITIES)[number], text: string) =>
@@ -406,6 +415,35 @@ function table(xml: Document, block: Extract<Block, { type: "table" }>, source?:
     tbl.appendChild(row)
   })
   return tbl
+}
+
+/**
+ * FLF-379: bước đặt cột của `table()` (ghép đúng tên cột, cột FlintFlow mẫu không có thì bỏ) ở dạng thuần cho bản xem trước —
+ * một ô mỗi cột mẫu (không tính gộp ô). Không khớp cột nào / hai cột cùng một cột mẫu ⇒ ném như `table()`.
+ */
+export function fitTableToHeaders(block: Extract<Block, { type: "table" }>, headers: readonly string[]): Extract<Block, { type: "table" }> {
+  const sourceHeaders = headers.map((h) => h.trim())
+  const mapping = block.header.map((cell) => {
+    const header = cell.map((run) => run.text).join("").trim()
+    const matches = sourceHeaders.map((text, i) => (columnKey(text) === columnKey(header) ? i : -1)).filter((i) => i >= 0)
+    return matches.length === 1 ? matches[0] : -1
+  })
+  const bound = mapping.filter((i) => i >= 0)
+  if (!bound.length || new Set(bound).size !== bound.length) unavailable("Generated table columns do not match the source table")
+  return {
+    ...block,
+    header: sourceHeaders.map((text) => [{ text }]),
+    rows: block.rows.map((cells) => {
+      const projected: InlineRun[][] = sourceHeaders.map(() => [])
+      cells.forEach((runs, index) => {
+        const target = mapping[index] ?? -1
+        if (target < 0) return
+        if (projected[target].length) projected[target].push({ text: "\n" })
+        projected[target].push(...runs)
+      })
+      return projected
+    })
+  }
 }
 
 function columnKey(header: string): string {
