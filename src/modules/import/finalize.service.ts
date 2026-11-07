@@ -57,6 +57,7 @@ import { tableRows } from "./table-rows.js"
 import { buildLayout, buildStepPlan, customSectionOps, customSectionsWithContent, functionOriginals, projectFieldEntities, repeatSectionsWithContent, sectionSegments, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
 import { functionSourceHash } from "../render/layout-sections.js"
 import { functionFieldValues, tagFunctionBlocks } from "../render/function-original.js"
+import { isTemplateFile, structureChanges } from "./structure-preview.js"
 import { TemplateProfile, type HeadingMapEntry, type LayoutEntry, type TableMapEntry } from "./template-profile.model.js"
 import { buildTemplateContext } from "./template-context.js"
 import { compareTargetStructure, type TargetStructure, type TemplateIntent } from "./target-structure.js"
@@ -192,16 +193,18 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     const kind = imageRead.get(b.block_id) ?? (imageUnread.has(b.block_id) ? inferDiagramKind(b.section_id, captionOf(b, layoutBlocks.filter((x) => x.section_id === b.section_id))) : null)
     if (kind) b.diagram = { kind, source_hash: originalDiagramHash(imported, kind) }
   }
-  // FLF-366: chỉ mẫu bắt buộc của **dự án mới** là mẫu để điền ⇒ không chia đoạn nguyên văn. Dự án có sẵn theo mẫu của
-  // công ty là SRS đã viết ⇒ vẫn giữ đoạn gốc như cấu trúc FlintFlow
   const project = await Project.findById(projectId).lean()
   const intentRaw = (project as { template_intent?: string | null } | null)?.template_intent ?? null
-  // FLF-378 (luồng C): dự án mới theo mẫu bắt buộc ⇒ file là mẫu, không phải dữ liệu: mục riêng không giữ nguyên văn, chữ
-  // của mẫu thành `template_context` (hướng dẫn / ví dụ / ngữ cảnh theo mục); mọi mục mẫu "Sẽ soạn", luôn chế độ 3
+  // FLF-378 (luồng C): file là khung mẫu để điền (giữ khung + màn đọc khung thấy phần lớn mục trống) ⇒ không phải dữ liệu: mục
+  // riêng không giữ nguyên văn, chữ của mẫu thành `template_context` (hướng dẫn / ví dụ / ngữ cảnh theo mục); mọi mục mẫu
+  // "Sẽ soạn", luôn chế độ 3
   const intent: TemplateIntent = intentRaw === "fixed" ? "fixed" : "free"
-  const draftAll = intent === "fixed" && project?.start_kind === "new"
+  const draftAll = isTemplateFile(project, profile)
+  // FLF-366: file giữ khung còn mục trống là mẫu để điền (bản xuất điền vào chính file đó) ⇒ không chia đoạn nguyên văn. SRS
+  // đã viết đủ khung (kể cả theo mẫu của công ty) vẫn giữ đoạn gốc như cấu trúc FlintFlow
+  const previewMissing = (profile.structure_preview?.summary.missing ?? 0) > 0
   const { layout, customSections, slices, segments, contextBlocks } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds, {
-    segment: !draftAll,
+    segment: !draftAll && !(intent === "fixed" && previewMissing),
     templateOnly: draftAll
   })
   const seeded = await loadSpine(projectId)
@@ -267,6 +270,9 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // `incomplete` (không có v0 dở dang, §1).
   profile.target_structure = structure
   profile.markModified("target_structure")
+  // Màn đọc khung: mục mà kết quả cuối khác bản sơ bộ ⇒ workspace báo, không dừng hỏi lại (hồ sơ trước màn đọc khung ⇒ null)
+  doc.structure_changes = profile.structure_preview ? structureChanges(profile.structure_preview, structure, (id) => realSectionId(id, provisional)) : null
+  doc.markModified("structure_changes")
   profile.template_context = draftAll ? buildTemplateContext(layout, contextBlocks) : null
   profile.markModified("template_context")
   await profile.save()

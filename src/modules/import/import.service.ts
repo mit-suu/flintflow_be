@@ -32,6 +32,8 @@ import { normalizeTemplateFamily } from "./part-bank.js"
 import { slotOverlaps } from "./content-slots.js"
 import { applyOrgMapping, orgTemplateHeadings } from "./org-mapping.js"
 import { TemplateProfile, type ITemplateProfile } from "./template-profile.model.js"
+import { previewStructure } from "./structure-preview.js"
+import * as spineRepository from "../spine/spine.repository.js"
 
 export interface UploadedFile {
   buffer: Buffer
@@ -70,6 +72,7 @@ export const toImportDto = (doc: IImportedDocument): ImportedDocumentDto => ({
   extract_cursor: doc.extract_cursor ?? null,
   reread: doc.reread ? { kind: doc.reread.kind, done: doc.reread.done, total: doc.reread.total, section_id: doc.reread.section_id } : null,
   intent: doc.intent ?? null,
+  structure_changes: doc.structure_changes ?? null,
   created_at: toIso(doc.createdAt)!,
   updated_at: toIso(doc.updatedAt)!
 })
@@ -311,6 +314,28 @@ const clearPreviousImportData = async (projectId: mongoose.Types.ObjectId): Prom
   ])
 }
 
+/** Cấu trúc đích sơ bộ của file vừa tách (ý định theo `import.intent`, Spine hiện tại — chưa trích gì). */
+const previewOf = async (
+  doc: IImportedDocument,
+  blocks: ParsedBlock[],
+  sections: ReadonlyMap<string, string | null>,
+  headingMap: readonly { block_id: string; section_id: string }[]
+) => {
+  const spine = await spineRepository.getOrCreate(String(doc.projectId))
+  const { projectId: _p, ...plain } = spine
+  const layoutBlocks = blocks.map((b) => ({
+    block_id: b.block_id,
+    kind: b.kind,
+    level: b.level ?? null,
+    text: b.text,
+    section_id: sections.get(b.block_id) ?? null,
+    rows: b.kind === "table" ? (b.rows ?? null) : null,
+    image_ref: b.image_ref ?? null,
+    ...(b.number_label ? { number_label: b.number_label } : {})
+  }))
+  return previewStructure(layoutBlocks, new Map(headingMap.map((h) => [h.block_id, h.section_id])), plain, doc.intent ?? "free")
+}
+
 export const runParse = async (doc: IImportedDocument): Promise<void> => {
   const sourceFile = await loadImportFile(doc)
   const { blocks } = await parseDocument(sourceFile)
@@ -326,7 +351,9 @@ export const runParse = async (doc: IImportedDocument): Promise<void> => {
   const legacy_record_of_changes = legacyRecordRows(blocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
   await clearPreviousImportData(doc.projectId)
   await DocBlock.insertMany(blocks.map((b) => toBlockDoc(doc.projectId, b, sections.get(b.block_id) ?? null)))
-  await TemplateProfile.create({ projectId: doc.projectId, source: "imported", doc_version: IMPORTED_DOC_VERSION, ...profile, source_file_ref: doc.file_ref, source_sha256: createHash("sha256").update(sourceFile).digest("hex"), legacy_record_of_changes })
+  // Màn đọc khung (business-flow §3.1.2): cấu trúc đích sơ bộ bằng Code, trước khi người dùng bấm Bắt đầu — không gọi AI
+  const structure_preview = await previewOf(doc, blocks, sections, profile.heading_map)
+  await TemplateProfile.create({ projectId: doc.projectId, source: "imported", doc_version: IMPORTED_DOC_VERSION, ...profile, source_file_ref: doc.file_ref, source_sha256: createHash("sha256").update(sourceFile).digest("hex"), legacy_record_of_changes, structure_preview })
   await transitionImport(doc, "extracting")
 }
 
@@ -464,5 +491,5 @@ export const getImportView = async (projectId: string): Promise<GetImportRespons
     extractionSummary(doc._id as mongoose.Types.ObjectId),
     DocBlock.countDocuments({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } })
   ])
-  return { import: toImportDto(doc), profile: profile ? toProfileDto(profile) : null, extraction, blocks_count: blocksCount, target_structure: profile?.target_structure ?? null }
+  return { import: toImportDto(doc), profile: profile ? toProfileDto(profile) : null, extraction, blocks_count: blocksCount, target_structure: profile?.target_structure ?? null, structure_preview: profile?.structure_preview ?? null }
 }
