@@ -76,22 +76,17 @@ describe("preflight — 3 nhánh stamp", () => {
     expect(await sourceFiles(projectId)).toBe(1)
   })
 
-  it("FLF-335: ý định lúc upload — thiếu ⇒ free (Project không có ý định); fixed ghi vào import.intent và Project.template_intent; dự án mới có mẫu bắt buộc luôn fixed", async () => {
+  it("ý định lúc upload lấy từ Project (hộp Tạo dự án); intent client gửi kèm bị bỏ qua; dự án không có ý định ⇒ free", async () => {
     const { projectId, userId } = await project()
     const free = await uploadImport(projectId, userId, fileOf(await makeSrsDocx(), "srs.docx"))
     expect(free.intent).toBe("free")
     expect((await Project.findById(projectId).lean())?.template_intent).toBeNull()
 
     const { projectId: other, userId: u2 } = await project()
-    const fixed = await uploadImport(other, u2, fileOf(await makeSrsDocx(), "srs.docx"), { intent: "fixed" })
+    await Project.updateOne({ _id: other }, { template_intent: "fixed" })
+    const fixed = await uploadImport(other, u2, fileOf(await makeSrsDocx(), "srs.docx"))
     expect(fixed.intent).toBe("fixed")
     expect((await Project.findById(other).lean())?.template_intent).toBe("fixed")
-
-    // Dự án mới có mẫu bắt buộc: ý định chốt lúc tạo, client gửi free cũng không đổi
-    await Project.updateOne({ _id: other }, { start_kind: "new", template_intent: "fixed" })
-    await ImportedDocument.deleteMany({ projectId: other })
-    const locked = await uploadImport(other, u2, fileOf(await makeSrsDocx(), "srs.docx"), { intent: "free" })
-    expect(locked.intent).toBe("fixed")
   })
 
   it("stamp đúng project (chưa có baseline) ⇒ coi như đã xác nhận, parse ngay", async () => {

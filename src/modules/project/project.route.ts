@@ -71,6 +71,12 @@ const upload = multer({
  *               folderId:
  *                 type: string
  *                 description: Tạo thẳng trong thư mục của user (404 FOLDER_NOT_FOUND nếu không thuộc user)
+ *               has_srs_file:
+ *                 type: boolean
+ *                 description: "Hộp Tạo dự án hai ô: có tải file SRS không. Có trường này thì source / has_required_template / mode bị bỏ qua (false ⇒ fpt; true ⇒ import, start_kind=existing)"
+ *               complete_to_standard:
+ *                 type: boolean
+ *                 description: "Chỉ khi has_srs_file=true: tick \"Bổ sung các mục còn thiếu theo mẫu chuẩn FlintFlow\" ⇒ template_intent=free; không gửi / false ⇒ fixed (giữ khung file)"
  *               source:
  *                 type: string
  *                 enum: [new, existing]

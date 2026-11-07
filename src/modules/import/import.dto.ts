@@ -61,7 +61,7 @@ export const importPausedSchema = z.object({ reason: z.enum(IMPORT_PAUSE_REASONS
 
 /** FLF-335: ý định lúc upload (bước 1.2). */
 export const templateIntentSchema = z.enum(TEMPLATE_INTENTS)
-/** Field text đi cùng multipart #2 `POST /:id/import` — thiếu ⇒ `free`; dự án mới có mẫu bắt buộc luôn `fixed`. */
+/** Field text đi cùng multipart #2 `POST /:id/import` — client cũ còn gửi `intent`; parse được nhưng bỏ qua (ý định lấy từ Project). */
 export const uploadImportBodySchema = z.object({ intent: templateIntentSchema.optional() })
 export type UploadImportBody = z.infer<typeof uploadImportBodySchema>
 

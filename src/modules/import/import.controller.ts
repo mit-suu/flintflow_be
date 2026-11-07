@@ -62,9 +62,9 @@ export const requireFile = (req: Request): importService.UploadedFile => {
 
 export const uploadImport = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
-  // FLF-335: field text `intent` đi cùng multipart (bước 1.2)
-  const body = parseInput(uploadImportBodySchema, req.body)
-  const doc = await importService.uploadImport(auth.projectId, auth.userId, requireFile(req), body)
+  // Client cũ gửi kèm `intent`: vẫn kiểm định dạng nhưng bỏ qua — ý định lấy từ Project (hộp Tạo dự án)
+  parseInput(uploadImportBodySchema, req.body)
+  const doc = await importService.uploadImport(auth.projectId, auth.userId, requireFile(req))
   return sendSuccess(res, 201, { import: importService.toImportDto(doc) })
 })
 
