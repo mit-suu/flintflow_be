@@ -69,7 +69,7 @@ describe("compareTargetStructure (FLF-336 I-5 — so cấu trúc đích)", () =>
     ])
   })
 
-  it("FLF-379: mẫu cố định — heading chỉ có mục con (tính năng ⇒ chức năng) có nội dung ⇒ present; mục con trống hết ⇒ missing", () => {
+  it("mẫu cố định — heading tính năng chỉ chứa chức năng con là heading bao: không xếp mục; chức năng con xếp theo nội dung", () => {
     const layout = [
       entry(0, "feature:F-3.2", "3.2 Course Registration", 2),
       entry(1, "function:FR-3.2.1", "3.2.1 Register for course sections", 3),
@@ -79,9 +79,7 @@ describe("compareTargetStructure (FLF-336 I-5 — so cấu trúc đích)", () =>
     ]
     const result = compareTargetStructure(layout, new Set(["function:FR-3.2.1"]), spineWith(), "fixed")
     expect(result.sections.map((s) => [s.section_id, s.status])).toEqual([
-      ["feature:F-3.2", "present"],
       ["function:FR-3.2.1", "present"],
-      ["feature:F-3.3", "missing"],
       ["function:FR-3.3.1", "missing"],
       ["fixed:4.2.3", "missing"]
     ])
