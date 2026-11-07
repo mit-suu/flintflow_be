@@ -149,7 +149,7 @@ describe("buildLayout", () => {
   })
 
   it("không có heading ⇒ layout rỗng; block trước heading đầu tiên không vào mục riêng", () => {
-    expect(buildLayout([p("B0001", "Cover page", null)], new Map())).toEqual({ layout: [], customSections: [], slices: [], segments: [] })
+    expect(buildLayout([p("B0001", "Cover page", null)], new Map())).toEqual({ layout: [], customSections: [], slices: [], segments: [], contextBlocks: [] })
   })
 
   it("FLF-184: văn xuôi I-4 không trích được ⇒ phần nối (tiêu đề rỗng, cấp + 1) ngay sau section; khối dưới heading con cùng section gom vào cùng phần nối", () => {
@@ -433,6 +433,38 @@ describe("FLF-364 (câu 10) — chữ hướng dẫn dưới mục FPT giữ ở
     // không có phần nối chỉ chứa hướng dẫn
     expect(customSections.filter((c) => !c.heading)).toEqual([])
     expect(customSections.find((c) => c.heading === "Ghi chú nhóm")?.blocks.map((b) => b.text)).toEqual(["{Ghi lịch họp}"])
+  })
+})
+
+describe("FLF-378 luồng C — dự án mới theo mẫu bắt buộc: không bước nào accepted sẵn", () => {
+  const { layout } = buildLayout(BLOCKS, HEADINGS)
+  // S-2.1 sở hữu fixed:1 (file có chữ thật), S-7.1 sở hữu mục có heading mà trống; S-5.2 = vòng S-5 sở hữu mục mẫu
+  const draftOwners = new Set(["S-2.1", "S-7.1", "S-5.2"])
+  const plan = buildStepPlan(layout, sectionsWithContent(BLOCKS), undefined, { draftOwners })
+  const of = (id: string) => plan.find((s) => s.step_id === id)!
+
+  it("bước sở hữu mục mẫu ⇒ enabled kể cả khi mục có chữ (chữ mẫu là ví dụ); bước mẫu không có ⇒ hidden; Record of Changes / bước ghép giữ nguyên", () => {
+    expect(of("S-2.1")).toMatchObject({ state: "enabled", reason: "Mục của mẫu bắt buộc — FlintFlow soạn" })
+    expect(of("S-7.1").state).toBe("enabled")
+    expect(of("S-6.4")).toMatchObject({ state: "hidden", reason: "Mẫu không có mục này" })
+    expect(of("S-8.3").state).toBe("applied")
+    expect(of("S-8.4")).toMatchObject({ state: "applied", section_ids: [] })
+    expect(of("B-1.1").state).toBe("hidden")
+  })
+
+  it("seed: không step nào accepted ngoài Record of Changes; vòng S-5 sở hữu mục mẫu ⇒ pending, còn lại skipped", () => {
+    const s = createEmptySpine({ name: "Kho" })
+    s.features = [{ id: "F-01", name: "Auth", order: 0 }] as Spine["features"]
+    s.screens = [
+      { id: "SCR-01", feature_id: "F-01", name: "Login", description: "", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: null, detail_status: "signed_off" }
+    ] as Spine["screens"]
+    s.functions = [{ id: "FR-01", screen_id: "SCR-01", feature_id: "F-01", order: 0, name: "Log in" }] as unknown as Spine["functions"]
+    const ops = seedStepOps(s, plan, { firstSeq: 1, lastSeq: 9, at: "2026-11-06T00:00:00.000Z", draftOwners })
+    const steps = ops.filter((o) => o.path === "steps[]").map((o) => o.value as StepState)
+    expect(steps.filter((x) => x.status === "accepted").map((x) => x.id)).toEqual(["S-8.3"])
+    expect(steps.find((x) => x.id === "S-2.1")?.status).toBe("pending")
+    expect(steps.find((x) => x.id === "S-5.2@SCR-01")?.status).toBe("pending")
+    expect(steps.find((x) => x.id === "S-5.1@SCR-01")?.status).toBe("skipped")
   })
 })
 

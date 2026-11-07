@@ -58,6 +58,7 @@ import { buildLayout, buildStepPlan, customSectionOps, customSectionsWithContent
 import { functionSourceHash } from "../render/layout-sections.js"
 import { functionFieldValues, tagFunctionBlocks } from "../render/function-original.js"
 import { TemplateProfile, type HeadingMapEntry, type LayoutEntry, type TableMapEntry } from "./template-profile.model.js"
+import { buildTemplateContext } from "./template-context.js"
 import { compareTargetStructure, type TargetStructure, type TemplateIntent } from "./target-structure.js"
 import { titleOfSection } from "./gap-report.service.js"
 import { scheduleEmbeddingSync } from "../change-request/embedding/embedding-sync.service.js"
@@ -194,14 +195,31 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // FLF-366: chỉ mẫu bắt buộc của **dự án mới** là mẫu để điền ⇒ không chia đoạn nguyên văn. Dự án có sẵn theo mẫu của
   // công ty là SRS đã viết ⇒ vẫn giữ đoạn gốc như cấu trúc FlintFlow
   const project = await Project.findById(projectId).lean()
-  const facts = project as { template_intent?: string | null; start_kind?: string | null } | null
-  const intentRaw = facts?.template_intent ?? null
-  const { layout, customSections, slices, segments } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds, {
-    segment: !(facts?.template_intent === "fixed" && facts.start_kind === "new")
+  const intentRaw = (project as { template_intent?: string | null } | null)?.template_intent ?? null
+  // FLF-378 (luồng C): dự án mới theo mẫu bắt buộc ⇒ file là mẫu, không phải dữ liệu: mục riêng không giữ nguyên văn, chữ
+  // của mẫu thành `template_context` (hướng dẫn / ví dụ / ngữ cảnh theo mục); mọi mục mẫu "Sẽ soạn", luôn chế độ 3
+  const intent: TemplateIntent = intentRaw === "fixed" ? "fixed" : "free"
+  const draftAll = intent === "fixed" && project?.start_kind === "new"
+  const { layout, customSections, slices, segments, contextBlocks } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds, {
+    segment: !draftAll,
+    templateOnly: draftAll
   })
   const seeded = await loadSpine(projectId)
+  // Mẫu IEEE: phần tử trích từ heading lặp (Availability dưới 4.2.2) in dưới đúng heading đó của file
+  const sliceItems = sectionSlices(slices, entities)
+  // FLF-336 I-5: so cấu trúc đích (trước kế hoạch step) — ý định theo `Project.template_intent` (FLF-335); dự án cũ ⇒ tự do.
+  // Heading lặp (vd "Business Rules" của từng chức năng) mà nội dung đã trích vào Spine qua slice vẫn là mục có nội dung
+  const withContent = new Set([
+    ...sectionsWithContent(layoutBlocks),
+    ...customSectionsWithContent(customSections),
+    ...repeatSectionsWithContent(slices, layoutBlocks),
+    ...sliceItems.filter((sl) => sl.items.length).map((sl) => `custom:${sl.custom_id}`)
+  ])
+  const structure = compareTargetStructure(layout, withContent, stripRecord(seeded), intent, undefined, { draftAll })
+  // Bước sở hữu mục của mẫu (id bước mẫu, bỏ `@màn`) — dự án mới theo mẫu bắt buộc: chờ soạn hết, không bước nào `accepted` sẵn
+  const draftOwners = draftAll ? new Set(structure.sections.flatMap((s) => s.owner_steps.map((id) => id.split("@")[0]))) : undefined
   // Kế hoạch đọc Spine đã nạp dữ liệu: mục trích không ra gì thì vẫn là "thiếu", đừng đánh dấu step đã xong
-  const plan = buildStepPlan(layout, sectionsWithContent(layoutBlocks), stripRecord(seeded))
+  const plan = buildStepPlan(layout, sectionsWithContent(layoutBlocks), stripRecord(seeded), draftOwners ? { draftOwners } : {})
   // FLF-252: quyền của ma trận không khớp màn / vai trò nào ⇒ cờ vàng (trước đây bỏ im lặng), neo vào bảng phân quyền
   const matrixBlocks = [...new Set(entities.filter((e) => e.entity === "permissions").flatMap((e) => [...e.source_block_ids]))].slice(0, 1)
   const planOps = [
@@ -219,13 +237,12 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
       },
       { findings: titleContentFindings(stripRecord(seeded), profile.heading_map, layout), rule: IMPORT_TITLE_CONTENT_RULE }
     ]),
-    ...seedStepOps(stripRecord(seeded), plan, { firstSeq: seqRange.first, lastSeq: seqRange.last, at: new Date().toISOString() })
+    ...seedStepOps(stripRecord(seeded), plan, { firstSeq: seqRange.first, lastSeq: seqRange.last, at: new Date().toISOString(), ...(draftOwners ? { draftOwners } : {}) })
   ]
   await applyTransaction(projectId, { base_version: seeded.spine_version, ops: planOps, by: "import", reason: "Import: kế hoạch step theo template", step_id: null })
   profile.layout = layout
   profile.step_plan = plan
-  // Mẫu IEEE: phần tử trích từ heading lặp (Availability dưới 4.2.2) in dưới đúng heading đó của file
-  profile.section_slices = sectionSlices(slices, entities)
+  profile.section_slices = sliceItems
   // FLF-366: đoạn nguyên văn theo mục FPT — dấu tính trên Spine sau lô thực thể (lô kế hoạch step không đổi phần tử)
   profile.section_segments = sectionSegments(segments, customSections, [...entities, ...projectFieldEntities(accepted)], stripRecord(seeded), names)
   profile.markModified("section_segments")
@@ -246,23 +263,17 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     const field_values = functionFieldValues(seeded, fn)
     return [{ section_id, source_hash: functionSourceHash(fn), field_values, blocks: tagFunctionBlocks(blocks, field_values) }]
   })
-  // FLF-336 I-5: so cấu trúc đích TRƯỚC khi chụp v0 — còn mục thiếu và người dùng chưa bấm "Hoàn thiện" ⇒ dừng ở
-  // `incomplete` (không có v0 dở dang, §1). Ý định theo `Project.template_intent` (FLF-335); dự án cũ ⇒ tự do.
-  const intent: TemplateIntent = intentRaw === "fixed" ? "fixed" : "free"
-  // Heading lặp (vd "Business Rules" của từng chức năng) mà nội dung đã trích vào Spine qua slice vẫn là mục có nội dung
-  const withContent = new Set([
-    ...sectionsWithContent(layoutBlocks),
-    ...customSectionsWithContent(customSections),
-    ...repeatSectionsWithContent(slices, layoutBlocks),
-    ...profile.section_slices.filter((sl) => sl.items.length).map((sl) => `custom:${sl.custom_id}`)
-  ])
-  const structure = compareTargetStructure(layout, withContent, stripRecord(seeded), intent)
+  // FLF-336 I-5: cấu trúc đích lưu TRƯỚC khi chụp v0 — còn mục thiếu và người dùng chưa bấm "Hoàn thiện" ⇒ dừng ở
+  // `incomplete` (không có v0 dở dang, §1).
   profile.target_structure = structure
   profile.markModified("target_structure")
+  profile.template_context = draftAll ? buildTemplateContext(layout, contextBlocks) : null
+  profile.markModified("template_context")
   await profile.save()
   // Chỉ dự án có ý định (tạo qua picker FLF-335) mới dừng; dự án cũ không có `template_intent` giữ luồng cũ ⇒ v0 như hôm nay
   const structureGate = intentRaw === "fixed" || intentRaw === "free"
-  if (structureGate && structure.missing.length > 0 && !doc.complete_requested) {
+  // FLF-378: dự án mới theo mẫu bắt buộc luôn dừng — không bao giờ có baseline / DocVersion 0.1 chụp từ mẫu
+  if (draftAll || (structureGate && structure.missing.length > 0 && !doc.complete_requested)) {
     await transitionImport(doc, "incomplete")
     const stopped = await loadSpine(projectId)
     return { doc, baseline: null, spine_version: stopped.spine_version, flags: null, target_structure: structure }

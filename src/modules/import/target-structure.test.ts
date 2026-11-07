@@ -69,6 +69,28 @@ describe("compareTargetStructure (FLF-336 I-5 — so cấu trúc đích)", () =>
     ])
   })
 
+  it("FLF-378 luồng C: dự án mới theo mẫu bắt buộc ⇒ mọi mục mẫu missing kể cả mục có chữ (ví dụ của mẫu), luôn chế độ 3; bỏ Record of Changes / mục lục", () => {
+    const layout = [
+      entry(0, "fixed:I", "Record of Changes", 1),
+      entry(1, "custom:TOC", "Table of Contents", 1),
+      entry(2, "fixed:1", "1. Giới thiệu", 1),
+      entry(3, "custom:CS02", "2 Ghi chú nhóm", 1)
+    ]
+    const result = compareTargetStructure(layout, new Set(["fixed:1", "custom:CS02"]), spineWith({ actors: [{ id: "A01" } as never] }), "fixed", undefined, { draftAll: true })
+    expect(result).toMatchObject({ target: "template", resolved_mode: 3, missing: ["fixed:1", "custom:CS02"] })
+    expect(result.sections.every((s) => s.status === "missing")).toBe(true)
+    expect(result.sections.find((s) => s.section_id === "fixed:1")?.owner_steps.length).toBeGreaterThan(0)
+  })
+
+  it("FLF-378: mẫu không có mục cần soạn nào vẫn là chế độ 3 (không bao giờ chụp 0.1 từ mẫu); dự án có sẵn giữ luật cũ", () => {
+    const only = [entry(0, "fixed:I", "Record of Changes", 1)]
+    expect(compareTargetStructure(only, new Set(), spineWith(), "fixed", undefined, { draftAll: true }).resolved_mode).toBe(3)
+    const layout = [entry(0, "fixed:1", "1. Giới thiệu", 1)]
+    expect(compareTargetStructure(layout, new Set(["fixed:1"]), spineWith(), "fixed").resolved_mode).toBe(1)
+    // draftAll chỉ có tác dụng với ý định fixed
+    expect(compareTargetStructure(layout, new Set(["fixed:1"]), spineWith(), "free", undefined, { draftAll: true }).target).toBe("fpt")
+  })
+
   it("mẫu cố định — heading tính năng chỉ chứa chức năng con là heading bao: không xếp mục; chức năng con xếp theo nội dung", () => {
     const layout = [
       entry(0, "feature:F-3.2", "3.2 Course Registration", 2),

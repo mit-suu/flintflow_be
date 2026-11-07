@@ -6,8 +6,8 @@
  * tạo mới sẵn có, vào thẳng 2.4 (bỏ 2.1–2.3):
  *  - Bước Brief (B-1 … S-1) mở lại để AI phân tích phần đã có + hỏi phần thiếu (2.4–2.7); B-0 (nhập ý tưởng, chọn ngôn ngữ,
  *    hồ sơ) giữ bỏ qua — đã có từ file.
- *  - Bước sở hữu mục thiếu đã `pending` từ kế hoạch step lúc import; mục đã có giữ `accepted`, mục mẫu không có giữ `skipped`
- *    (2.8 "AI drafts each missing step").
+ *  - FLF-378 (luồng C): file là **mẫu**, không phải dữ liệu ⇒ **bước sở hữu của mọi mục mẫu** `pending` (kể cả bước lúc import
+ *    bị đánh `accepted` vì chữ ví dụ của mẫu — hồ sơ trước FLF-378); mục FPT mẫu không có giữ `skipped` (2.8).
  *  - `Project.mode = fpt` (luồng tạo mới) ⇒ chạy step, ký baseline như dự án tạo mới; bản in vẫn theo layout của mẫu
  *    (`loadTemplateLayout` + `fixedTemplate`, 2.10). Ký baseline 1.0 ⇒ FLF-318 (`convert-from-fpt`) đưa dự án về mode 1,
  *    sửa sau đó qua change request (Luồng 3).
@@ -23,20 +23,34 @@ import { loadStepRegistry, orderedSteps } from "../pipeline/step-registry.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { assertImportStatus, requireImport, transitionImport } from "./import.service.js"
 import { TemplateProfile } from "./template-profile.model.js"
+import { isNonDraftHeading } from "./target-structure.js"
 
 /** Pha Brief mở lại khi sang Luồng 2 (business-flow 2.4–2.7). B-0 = 2.1–2.3, bỏ qua với chế độ 3/4. */
 const FLOW2_BRIEF_PHASES: ReadonlySet<string> = new Set(["B-1", "B-2", "S-1"])
 
 /**
- * Op mở lại bước Brief + đặt bước kế tiếp (hàm thuần). Bước đã `accepted` / bước sở hữu mục thiếu đã `pending` giữ nguyên.
+ * Op mở lại bước Brief + bước sở hữu mục của mẫu, rồi đặt bước kế tiếp (hàm thuần).
+ * `templateOwners`: id bước sở hữu các mục của mẫu (`TargetStructure.sections[].owner_steps`); id không mang `@màn` áp cho mọi
+ * vòng S-5. Bước sở hữu đang `accepted` / `skipped` ⇒ `pending` (bỏ mốc chốt); bước khác giữ nguyên.
  */
-export const flow2StepOps = (spine: Pick<Spine, "steps" | "screens" | "functions">): Op[] => {
+export const flow2StepOps = (spine: Pick<Spine, "steps" | "screens" | "functions">, templateOwners: readonly string[] = []): Op[] => {
   const brief = new Set(loadStepRegistry().filter((s) => FLOW2_BRIEF_PHASES.has(s.phase)).map((s) => s.id))
+  const owners = new Set(templateOwners)
+  const ownsTemplateSection = (id: string) => owners.has(id) || owners.has(id.split("@")[0])
   const reopened = new Set(spine.steps.filter((s) => brief.has(s.id) && s.status === "skipped").map((s) => s.id))
-  const statusOf = (id: string) => (reopened.has(id) ? "pending" : (spine.steps.find((s) => s.id === id)?.status ?? "pending"))
+  const redraft = spine.steps.filter((s) => !reopened.has(s.id) && s.status !== "pending" && ownsTemplateSection(s.id)).map((s) => s.id)
+  const pending = new Set([...reopened, ...redraft])
+  const statusOf = (id: string) => (pending.has(id) ? "pending" : (spine.steps.find((s) => s.id === id)?.status ?? "pending"))
   const next = orderedSteps(spine).find((st) => statusOf(st.id) !== "accepted" && statusOf(st.id) !== "skipped")
   return [
     ...[...reopened].map((id): Op => ({ op: "set", path: `steps[id=${id}].status`, value: "pending" })),
+    // Vòng mới như gate mở lại bước đã chốt: bỏ mốc first_seq / last_seq / accepted_at
+    ...redraft.flatMap((id): Op[] => [
+      { op: "set", path: `steps[id=${id}].status`, value: "pending" },
+      { op: "set", path: `steps[id=${id}].first_seq`, value: null },
+      { op: "set", path: `steps[id=${id}].last_seq`, value: null },
+      { op: "set", path: `steps[id=${id}].accepted_at`, value: null }
+    ]),
     { op: "set", path: "progress.current_phase", value: next?.phase ?? null },
     { op: "set", path: "progress.current_step", value: next?.id ?? null }
   ]
@@ -73,9 +87,15 @@ export const continueInFlow2 = async (projectId: string, userId: string, body: F
   if (!spine) throw new Mode1Error("IMPORT_INVALID_STATE", "Dự án chưa có dữ liệu tài liệu", { status: doc.status })
   const applied = await applyTransaction(projectId, {
     base_version: body.base_version,
-    ops: flow2StepOps(spine),
+    // FLF-378: mọi mục của mẫu (không chỉ mục `missing` của hồ sơ cũ) — dự án mới soạn đủ mẫu
+    // (bỏ Record of Changes / bìa / mục lục mà hồ sơ trước FLF-378 còn ghi)
+    ops: flow2StepOps(
+      spine,
+      (profile?.target_structure?.sections ?? []).filter((s) => !isNonDraftHeading(s.section_id, s.title)).flatMap((s) => s.owner_steps ?? [])
+    ),
     by: userId,
-    reason: "Luồng 2: viết phần còn thiếu của mẫu bắt buộc",
+    // Lý do in vào Record of Changes của tài liệu (bản đầu của dự án) — câu cho người đọc tài liệu, không phải tên luồng nội bộ
+    reason: "Start drafting from the required template",
     step_id: null
   })
   // Bước cuối: đổi luồng. Ngôn ngữ tài liệu = ngôn ngữ của file mẫu (dự án tải file lên không có `documentLanguage`)
