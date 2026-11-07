@@ -1,7 +1,9 @@
 /**
- * FLF-278 trên FLF-335/336 — chế độ 3 (mẫu bắt buộc còn thiếu mục) đi tiếp Luồng 2 thay vì "Hoàn thiện", Mongo thật:
- * `incomplete` ⇒ `POST /import/continue` ⇒ dự án sang pipeline tạo mới (`mode = fpt`, `import_state = drafting`), Brief mở lại
- * từ B-1.1, bước mục thiếu chờ chạy, chạy step được; bản in vẫn theo mẫu (không thêm mục ngoài mẫu). Ý định tự do ⇒ từ chối.
+ * Chế độ 3 (file giữ khung còn thiếu mục) đi thẳng Luồng 2, Mongo thật: file thiếu cấu trúc đích không có bản gốc 0.1 — finalize
+ * tự đưa dự án sang pipeline tạo mới (`mode = fpt`, `import_state = drafting`), Brief mở lại từ B-1.1, bước mục thiếu chờ chạy,
+ * bước mục khách đã viết giữ chốt; bản in vẫn theo file (không thêm mục ngoài mẫu, mục khách viết in nguyên văn). "Hoàn thiện"
+ * từ `incomplete` bị chặn. Bổ sung theo mẫu chuẩn (chế độ 4) ⇒ dừng `incomplete`. Bản ghi cũ còn `incomplete` ⇒
+ * `POST /import/continue`.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
@@ -40,14 +42,15 @@ beforeEach(() => {
 })
 
 const version = async (projectId: string) => (await spineRepository.get(projectId))!.spine_version
-const toIncomplete = async (intent: "fixed" | "free", startKind: "new" | "existing" = intent === "fixed" ? "new" : "existing") => {
+const toFinalized = async (intent: "fixed" | "free", startKind: "new" | "existing" = intent === "fixed" ? "new" : "existing") => {
   const ctx = await importAtBaselining({ srs: { extraBody: styled("u2", "5.10 Document Conventions") + p("[Describe the conventions.]") } })
   await mongoose.connection.db!
     .collection("projects")
     .updateOne({ _id: new mongoose.Types.ObjectId(ctx.projectId) }, { $set: { template_intent: intent, start_kind: startKind } })
   await startFinalize(ctx.projectId, ctx.userId, { import_id: ctx.importId, base_version: await version(ctx.projectId) })
   await waitForFinalize(ctx.importId)
-  expect((await ImportedDocument.findById(ctx.importId))!.status).toBe("incomplete")
+  // Giữ khung còn thiếu ⇒ tự sang Luồng 2; bổ sung theo mẫu chuẩn ⇒ dừng ở kết quả đọc
+  expect((await ImportedDocument.findById(ctx.importId))!.status).toBe(intent === "fixed" ? "drafting" : "incomplete")
   const user = (await User.findById(ctx.userId).lean())!
   const project = (await Project.findById(ctx.projectId).lean())!
   const token = await authAs({ _id: user._id, email: user.email, orgId: String(project.organizationId) })
@@ -55,14 +58,9 @@ const toIncomplete = async (intent: "fixed" | "free", startKind: "new" | "existi
 }
 
 describe("Luồng 2 cho phần thiếu — chế độ 3", () => {
-  it("incomplete ⇒ continue ⇒ mode fpt + drafting, Brief từ B-1.1, chạy step được, bản in theo mẫu", async () => {
-    const { projectId, importId, token, userId } = await toIncomplete("fixed")
-    const res = await request(app)
-      .post(`/api/v1/projects/${projectId}/import/continue`)
-      .set({ Authorization: `Bearer ${token}` })
-      .send({ import_id: importId, base_version: await version(projectId) })
-    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
-    expect(res.body.data).toMatchObject({ project_mode: "fpt", import_state: "drafting", current_step: "B-1.1" })
+  it("giữ khung còn thiếu ⇒ finalize tự sang Luồng 2: mode fpt + drafting, Brief từ B-1.1, không 0.1, chạy step được, bản in theo mẫu", async () => {
+    const { projectId, importId, token, userId } = await toFinalized("fixed")
+    expect(await DocVersion.countDocuments({ projectId })).toBe(0)
 
     const project = (await Project.findById(projectId).lean())!
     expect(project).toMatchObject({ mode: "fpt", import_state: "drafting", template_intent: "fixed" })
@@ -144,8 +142,8 @@ describe("Luồng 2 cho phần thiếu — chế độ 3", () => {
     expect(readZipText(downloaded.data, "word/styles.xml")).toBe(readZipText(original, "word/styles.xml"))
   })
 
-  it("dự án mới theo mẫu bắt buộc ⇒ Hoàn thiện bị chặn (409), không khoá mẫu còn trống thành bản gốc", async () => {
-    const { projectId, importId, token } = await toIncomplete("fixed")
+  it("Hoàn thiện (complete: true) từ incomplete bị chặn — không bao giờ khoá file thiếu cấu trúc đích thành bản gốc", async () => {
+    const { projectId, importId, token } = await toFinalized("free")
     const res = await request(app)
       .post(`/api/v1/projects/${projectId}/import/finalize`)
       .set({ Authorization: `Bearer ${token}` })
@@ -154,28 +152,84 @@ describe("Luồng 2 cho phần thiếu — chế độ 3", () => {
     expect(res.body.error.code).toBe("IMPORT_INVALID_STATE")
     expect((await ImportedDocument.findById(importId))!.status).toBe("incomplete")
     expect((await Project.findById(projectId).lean())!.mode).toBe("import")
+    expect(await DocVersion.countDocuments({ projectId })).toBe(0)
   })
 
-  it("dự án có sẵn theo mẫu cố định ⇒ continue 409 (bổ sung mục thiếu qua change request), Hoàn thiện vẫn được", async () => {
-    const { projectId, importId, token } = await toIncomplete("fixed", "existing")
+  it("SRS có sẵn viết dở (giữ khung): bước của mục khách đã viết giữ chốt, chỉ bước mục thiếu chờ soạn; bản in giữ nguyên văn mục đã viết, mục vừa soạn in nội dung mới", async () => {
+    const { projectId, token } = await toFinalized("fixed", "existing")
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    const structure = profile.target_structure!
+    expect(structure.resolved_mode).toBe(3)
+    expect(profile.structure_preview?.summary.kind).toBe("written")
+    expect(profile.flow2_entry_at).toBeTruthy()
+    expect(await DocVersion.countDocuments({ projectId })).toBe(0)
+    const spine = (await spineRepository.get(projectId))!
+    const statusOf = (id: string) => spine.steps.filter((st) => st.id === id || st.id.startsWith(`${id}@`)).map((st) => st.status)
+    const present = structure.sections.filter((sec) => sec.status === "present")
+    const missing = structure.sections.filter((sec) => sec.status === "missing")
+    expect(present.length).toBeGreaterThan(0)
+    expect(missing.length).toBeGreaterThan(0)
+    // Mục khách đã viết: không bước sở hữu nào chờ chạy (đã chốt, kể cả bước lúc import chưa trích được dữ liệu; hoặc bỏ qua)
+    for (const sec of present) for (const owner of sec.owner_steps) expect(statusOf(owner).includes("pending"), `${sec.section_id} ⇐ ${owner}`).toBe(false)
+    expect(statusOf("S-3.6")).toEqual(["accepted"])
+    // Bước chỉ sở hữu mục thiếu: chờ soạn hoặc giữ nguyên bỏ qua — không bao giờ đã chốt sẵn
+    const keep = new Set(present.flatMap((sec) => sec.owner_steps))
+    for (const sec of missing) for (const owner of sec.owner_steps.filter((o) => !keep.has(o))) expect(statusOf(owner).includes("accepted")).toBe(false)
+
+    const exportDraft = async (): Promise<string[]> => {
+      const res = await request(app)
+        .get(`/api/v1/projects/${projectId}/export/word?source=draft`)
+        .set({ Authorization: `Bearer ${token}` })
+        .buffer(true)
+        .parse((r, cb) => {
+          const chunks: Buffer[] = []
+          r.on("data", (c: Buffer) => chunks.push(c))
+          r.on("end", () => cb(null, Buffer.concat(chunks)))
+        })
+      expect(res.status).toBe(200)
+      const xml = await (await DocxPackage.load(res.body as Buffer)).requireXml("word/document.xml")
+      return wAll(xml, "p").map((para) => wAll(para, "t").map((t) => t.textContent ?? "").join("")).filter((t) => t.trim())
+    }
+    const sourceXml = await (await DocxPackage.load(await docFileStore().load(profile.source_file_ref!))).requireXml("word/document.xml")
+    const original = wAll(sourceXml, "p").map((para) => wAll(para, "t").map((t) => t.textContent ?? "").join("")).filter((t) => t.trim())
+    const before = await exportDraft()
+    // Chưa soạn gì: chữ khách viết in nguyên văn (không dựng lại từ Spine)
+    for (const line of original.filter((t) => !t.startsWith("[") && t.length > 30)) expect(before, line).toContain(line)
+
+    // Soạn mục còn thiếu (mục riêng của file) ⇒ bản in có nội dung mới, mục khách viết vẫn nguyên văn
+    const gap = missing.find((sec) => sec.section_id.startsWith("custom:"))!
+    const section = (await spineRepository.get(projectId))!.custom_sections.find((c) => `custom:${c.id}` === gap.section_id)!
+    await applyTransaction(projectId, {
+      base_version: await version(projectId),
+      by: "test",
+      reason: "Draft the missing section",
+      step_id: null,
+      ops: [
+        { op: "remove", path: `custom_sections[id=${section.id}]` },
+        { op: "add", path: "custom_sections[]", value: { ...section, blocks: [{ kind: "paragraph", text: "Requirements use the shall keyword and carry an FR code.", rows: null, image_ref: null }] } }
+      ]
+    })
+    const after = await exportDraft()
+    expect(after.join("\n")).toContain("Requirements use the shall keyword and carry an FR code.")
+    for (const line of original.filter((t) => !t.startsWith("[") && t.length > 30)) expect(after, line).toContain(line)
+  })
+
+  it("bản ghi cũ chế độ 3 còn dừng ở incomplete ⇒ POST /import/continue sang Luồng 2", async () => {
+    const { projectId, importId, token } = await toFinalized("free")
+    // Dữ liệu do bản trước tạo: giữ khung, I-5 cũ ra chế độ 3 nhưng chưa tự chuyển
+    await Project.updateOne({ _id: projectId }, { $set: { template_intent: "fixed" } })
+    await TemplateProfile.updateOne({ projectId }, { $set: { "target_structure.resolved_mode": 3, "target_structure.intent": "fixed", structure_preview: null } })
     const res = await request(app)
       .post(`/api/v1/projects/${projectId}/import/continue`)
       .set({ Authorization: `Bearer ${token}` })
       .send({ import_id: importId, base_version: await version(projectId) })
-    expect(res.status).toBe(409)
-    expect(res.body.error).toMatchObject({ code: "IMPORT_INVALID_STATE" })
-    expect((await Project.findById(projectId).lean())!.mode).toBe("import")
-    const done = await request(app)
-      .post(`/api/v1/projects/${projectId}/import/finalize`)
-      .set({ Authorization: `Bearer ${token}` })
-      .send({ import_id: importId, base_version: await version(projectId), complete: true })
-    expect(done.status, JSON.stringify(done.body.error)).toBe(200)
-    await waitForFinalize(importId)
-    expect((await ImportedDocument.findById(importId))!.status).toBe("gap_review")
+    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+    expect(res.body.data).toMatchObject({ project_mode: "fpt", import_state: "drafting", current_step: "B-1.1" })
+    expect((await ImportedDocument.findById(importId))!.status).toBe("drafting")
   })
 
   it("ý định tự do (chế độ 4) ⇒ 409 IMPORT_INVALID_STATE, dự án giữ nguyên", async () => {
-    const { projectId, importId, token } = await toIncomplete("free")
+    const { projectId, importId, token } = await toFinalized("free")
     const res = await request(app)
       .post(`/api/v1/projects/${projectId}/import/continue`)
       .set({ Authorization: `Bearer ${token}` })
@@ -252,7 +306,7 @@ describe("Luồng 2 cho phần thiếu — chế độ 3", () => {
     await TemplateProfile.updateOne({ projectId }, { $set: { structure_preview: null } })
     await startFinalize(projectId, userId, { import_id: importId, base_version: await version(projectId) })
     await waitForFinalize(importId)
-    expect((await ImportedDocument.findById(importId))!.status).toBe("incomplete")
+    expect((await ImportedDocument.findById(importId))!.status).toBe("drafting")
     const structure = (await TemplateProfile.findOne({ projectId }).lean())!.target_structure!
     expect(structure.resolved_mode).toBe(3)
     expect(structure.sections.length).toBeGreaterThan(0)
@@ -272,17 +326,8 @@ describe("Luồng 2 cho phần thiếu — chế độ 3", () => {
     // Mục riêng của mẫu: nguyên văn không giữ lại (không lọt vào bản in), chữ nằm ở ngữ cảnh
     expect(context.find((c) => c.heading.includes("Document Conventions"))!.passages).toEqual([{ text: "Requirements are written in bold, e.g. FR-001.", kind: "example" }])
     expect(seeded.custom_sections.every((c) => c.blocks.length === 0)).toBe(true)
-    // Không gọi AI trích (không trừ credit cho mẫu)
-    expect((await ImportedDocument.findById(importId))!.status).toBe("incomplete")
-
-    const user = (await User.findById(userId).lean())!
-    const project = (await Project.findById(projectId).lean())!
-    const token = await authAs({ _id: user._id, email: user.email, orgId: String(project.organizationId) })
-    const res = await request(app)
-      .post(`/api/v1/projects/${projectId}/import/continue`)
-      .set({ Authorization: `Bearer ${token}` })
-      .send({ import_id: importId, base_version: await version(projectId) })
-    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+    // Khung mẫu: không lưu Spine mốc (chữ của mẫu không in lại)
+    expect((await TemplateProfile.findOne({ projectId }).lean())!.flow2_entry_at ?? null).toBeNull()
     const spine = (await spineRepository.get(projectId))!
     const owners = new Set(structure.sections.flatMap((s) => s.owner_steps.map((id) => id.split("@")[0])))
     expect(owners.size).toBeGreaterThan(0)
