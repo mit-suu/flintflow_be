@@ -163,6 +163,11 @@ describe("Luồng 2 cho phần thiếu — chế độ 3", () => {
     expect(profile.structure_preview?.summary.kind).toBe("written")
     expect(profile.flow2_entry_at).toBeTruthy()
     expect(await DocVersion.countDocuments({ projectId })).toBe(0)
+    // Workspace (mode fpt) vẫn đọc được lần import để báo mục lệch bản sơ bộ
+    const view = await request(app).get(`/api/v1/projects/${projectId}/import`).set({ Authorization: `Bearer ${token}` })
+    expect(view.status, JSON.stringify(view.body.error)).toBe(200)
+    expect(view.body.data.import).toMatchObject({ status: "drafting" })
+    expect(Array.isArray(view.body.data.import.structure_changes)).toBe(true)
     const spine = (await spineRepository.get(projectId))!
     const statusOf = (id: string) => spine.steps.filter((st) => st.id === id || st.id.startsWith(`${id}@`)).map((st) => st.status)
     const present = structure.sections.filter((sec) => sec.status === "present")

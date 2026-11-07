@@ -284,7 +284,11 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     await transitionImport(doc, "incomplete")
     // D4: file thiếu cấu trúc đích không có bản gốc 0.1. Giữ khung (chế độ 3) ⇒ sang Luồng 2 soạn phần thiếu ngay, không chờ
     // bấm; bổ sung theo mẫu chuẩn (chế độ 4) chưa soạn được ⇒ dừng ở `incomplete` (gap report + DRAFT)
-    if (structure.resolved_mode === 3 && intent === "fixed") await enterFlow2(doc, userId)
+    // Chuyển lỗi (vd xung đột phiên bản Spine) ⇒ giữ `incomplete` chế độ 3: workspace có nút "Soạn phần còn thiếu"
+    // (`POST /import/continue`), không chạy lại finalize
+    if (structure.resolved_mode === 3 && intent === "fixed") {
+      await enterFlow2(doc, userId).catch((err: unknown) => console.error(`[import] Chuyển Luồng 2 cho import ${String(doc._id)} lỗi:`, err))
+    }
     const stopped = await loadSpine(projectId)
     return { doc, baseline: null, spine_version: stopped.spine_version, flags: null, target_structure: structure }
   }
