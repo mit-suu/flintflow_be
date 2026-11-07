@@ -5,6 +5,7 @@ import { createEmptySpine } from "../spine/spine.repository.js"
 import {
   IdAllocator,
   aiItemId,
+  canonicalFieldIds,
   collectEntities,
   compactKey,
   fieldPath,
@@ -13,7 +14,9 @@ import {
   findKnownKey,
   flattenItem,
   idKey,
+  imageOnlyGenericActors,
   nameKey,
+  keepKey,
   normalizeKey,
   parseFieldPath,
   realSectionId,
@@ -22,11 +25,13 @@ import {
 } from "./extracted-entities.js"
 import { findingOps } from "./check.service.js"
 import { MODE1_RULE_PROFILE } from "./mode1-rule-profile.js"
-import { buildImportOps, droppedPermissionFindings, relationPhrase, type DroppedPermission } from "./spine-builder.js"
+import { buildImportOps, droppedPermissionFindings, relationPhrase, ruleTierOfSections, type DroppedPermission } from "./spine-builder.js"
+import { buildLayoutSections } from "../render/layout-sections.js"
 
 describe("extracted-entities", () => {
   it("chuẩn hoá khoá, cấp id không trùng", () => {
     expect(normalizeKey("uc01")).toBe("UC-01")
+    expect(keepKey("  UC01 ")).toBe("UC01")
     expect(normalizeKey("NFR_P01")).toBe("NFR_P01")
     expect(normalizeKey(" BR 12 ")).toBe("BR-12")
     const alloc = new IdAllocator({ actors: ["A01"] })
@@ -87,7 +92,12 @@ describe("extracted-entities", () => {
     expect(idKey("FR-3.2.1")).not.toBe(idKey("FR-32.1"))
     const alloc = new IdAllocator({ actors: ["A-01"] })
     expect(alloc.has("actors", "A01")).toBe(true)
-    expect(alloc.next("actors")).toBe("A02")
+    // FLF-361: id mới theo khuôn của tài liệu ("A-01" ⇒ "A-02"; "A01" ⇒ "A02")
+    expect(alloc.next("actors")).toBe("A-02")
+    expect(new IdAllocator({ actors: ["A01", "A07"] }).next("actors")).toBe("A08")
+    expect(new IdAllocator({ use_cases: ["UC01", "UC02"] }).next("use_cases")).toBe("UC03")
+    // id theo số mục không phải khuôn đánh số
+    expect(new IdAllocator({ functions: ["FR-3.2.1"] }).next("functions")).toBe("FR-01")
   })
 
   it("FLF-252 aiItemId: khoá model chép từ known_keys khớp mã đã biết dù khác dạng; khoá là tên ⇒ như không có khoá", () => {
@@ -103,7 +113,8 @@ describe("extracted-entities", () => {
     expect(aiItemId(known, "actors", "Admin", "Admin", true)).toBe("A02")
     // ảnh: khoá lạ model tự đặt thua tên trùng; chữ: mã tài liệu thắng
     expect(aiItemId(known, "actors", "ACT-9", "Developer", true)).toBe("A01")
-    expect(aiItemId(known, "use_cases", "UC05", "Log in")).toBe("UC-05")
+    // FLF-361: mã tài liệu giữ đúng dạng ("UC05" không thành "UC-05")
+    expect(aiItemId(known, "use_cases", "UC05", "Log in")).toBe("UC05")
     expect(aiItemId(known, "use_cases", null, "log in")).toBe("UC-02")
     expect(aiItemId(known, "actors", null, "Guest", true)).toBeNull()
     expect(aiItemId(known, "actors", "A01", "Developer")).toBe(findKnownKey(known, "actors", "A-01"))
@@ -123,6 +134,43 @@ describe("extracted-entities", () => {
     expect(aiItemId(known, "entities", null, "SubscriptionPlan", true)).toBe("E13")
     // nhiều phần tử cùng khoá ⇒ không đoán
     expect(findKnownCompact([...known, entity("E20", "SubscriptionPlans")], "entities", "subscription plan")).toBeNull()
+  })
+})
+
+describe("FLF-361 giữ định dạng mã của tài liệu", () => {
+  it("file có A01, UC01 ⇒ Spine giữ A01, UC01; tham chiếu UC-01 / A-01 trong chữ vẫn khớp; một phần tử ghi hai dạng ⇒ một cách viết", () => {
+    const fields = canonicalFieldIds([
+      { path: "actors[id=A01].name", value: "Lecturer" },
+      { path: "use_cases[id=UC01].name", value: "Take attendance" },
+      { path: "use_cases[id=UC-01].description", value: "Lecturer takes attendance." },
+      { path: "use_cases[id=UC-01].actor_ids", value: ["A-01"] }
+    ])
+    expect(fields.map((f) => f.path)).toEqual(["actors[id=A01].name", "use_cases[id=UC01].name", "use_cases[id=UC01].description", "use_cases[id=UC01].actor_ids"])
+    const entities = [...collectEntities(fields.map((f) => ({ ...f, confidence: 1, source_block_ids: [], origin: "deterministic" as const, confirmed: true })))].map(([, e]) => e)
+    const spine = createEmptySpine({ name: "FAP" })
+    const ops = buildImportOps(spine, entities)
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.actors.map((a) => a.id)).toEqual(["A01"])
+    expect(plan.spine.use_cases.map((u) => [u.id, u.actor_ids])).toEqual([["UC01", ["A01"]]])
+  })
+})
+
+describe("FLF-361 imageOnlyGenericActors — không sinh actor thừa từ ảnh", () => {
+  const f = (path: string, value: unknown, origin: "ai" | "vision" | "deterministic", edited?: unknown) => ({ path, value, origin, ...(edited !== undefined ? { edited_value: edited } : {}) })
+  it("actor cha \"User\" chỉ có trên sơ đồ, file có bảng actor ⇒ bỏ; actor cụ thể từ ảnh (Guest) vẫn giữ", () => {
+    const fields = [
+      f("actors[id=A01].name", "Lecturer", "deterministic"),
+      f("actors[id=A02].name", "Student", "deterministic"),
+      f("actors[id=A08].name", "User", "vision"),
+      f("actors[id=A08].kind", "human", "vision"),
+      f("actors[id=A09].name", "Guest", "vision")
+    ]
+    expect([...imageOnlyGenericActors(fields)]).toEqual(["actors|A08"])
+  })
+  it("file không liệt kê actor bằng chữ ⇒ giữ actor của ảnh; người dùng đã sửa ở wizard ⇒ giữ; actor User ghi trong bảng ⇒ giữ", () => {
+    expect(imageOnlyGenericActors([f("actors[id=A08].name", "User", "vision")]).size).toBe(0)
+    expect(imageOnlyGenericActors([f("actors[id=A01].name", "Lecturer", "ai"), f("actors[id=A08].name", "User", "vision", "User")]).size).toBe(0)
+    expect(imageOnlyGenericActors([f("actors[id=A01].name", "User", "deterministic"), f("actors[id=A01].kind", "human", "vision")]).size).toBe(0)
   })
 })
 
@@ -150,6 +198,37 @@ describe("buildImportOps", () => {
     expect(plan.spine.functions[0].validations.map((v) => v.kind)).toEqual(["format", "business"])
     expect(plan.spine.nfrs[0]).toMatchObject({ category: "performance", kind: "quantitative" })
     expect(plan.spine.permissions).toEqual([])
+  })
+
+  it("FLF-361: cấp business rule theo mục của file — rule ở 5.1 model đoán `high` vẫn là `detail` và in ở 5.1, không in ở mục 1", () => {
+    expect(ruleTierOfSections(["fixed:5.1"])).toBe("detail")
+    expect(ruleTierOfSections(["slot:high_rules"])).toBe("high")
+    expect(ruleTierOfSections(["fixed:1", "fixed:5.1"])).toBe("detail")
+    expect(ruleTierOfSections(["function:FR-01"])).toBeNull()
+    const spine = createEmptySpine({ name: "FAP" })
+    const ops = buildImportOps(spine, [
+      { entity: "business_rules", id: "BR-01", value: { statement: "Lock account after 5 failed logins", tier: "high" }, sections: ["fixed:5.1"] },
+      { entity: "business_rules", id: "BR-02", value: { statement: "Password at least 8 characters" }, sections: ["fixed:5.1"] },
+      { entity: "business_rules", id: "BR-H1", value: { statement: "Only students of FPT use FAP", tier: "detail" }, sections: ["slot:high_rules"] },
+      { entity: "business_rules", id: "BR-X", value: { statement: "Something", tier: "high" } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.business_rules.map((r) => [r.id, r.tier])).toEqual([
+      ["BR-01", "detail"],
+      ["BR-02", "detail"],
+      ["BR-H1", "high"],
+      ["BR-X", "high"]
+    ])
+    // Bản render từ Spine (đoạn đã bị CR sửa / project chưa có đoạn): BR của 5.1 in ở 5.1
+    const layout = [
+      { section_id: "fixed:1", heading_text: "1 Overview", level: 1 },
+      { section_id: "fixed:5.1", heading_text: "5.1 Business Rules", level: 2 }
+    ]
+    const sections = buildLayoutSections(plan.spine, { layout, language: "en" } as never, [], { diagramPng: () => undefined }).sections
+    const text = (id: string) => JSON.stringify(sections.find((s) => s.id === id)?.blocks ?? [])
+    expect(text("fixed:5.1")).toContain("Lock account after 5 failed logins")
+    expect(text("fixed:1")).not.toContain("Lock account after 5 failed logins")
+    expect(text("fixed:1")).toContain("Only students of FPT use FAP")
   })
 
   it("feature General không trùng id với feature trích được trong cùng lô (FLF-179)", () => {

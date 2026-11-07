@@ -156,12 +156,12 @@ describe("deterministicTableItems — bảng khớp đủ cột (G7)", () => {
   const blocks = ucTable()
   const grid = tableGrid(blocks[0], blocks)
 
-  it("đủ cột bắt buộc ⇒ mỗi hàng dữ liệu một item tất định, id chuẩn hoá, cột danh sách tách phần tử", () => {
+  it("đủ cột bắt buộc ⇒ mỗi hàng dữ liệu một item tất định, id giữ đúng như bảng (FLF-361: UC01 không thành UC-01), cột danh sách tách phần tử", () => {
     const items = deterministicTableItems(blocks[0], grid, profileOf([col(0, "use_cases[].id"), col(1, "use_cases[].name"), col(2, "use_cases[].actor_ids", 0.9)]))
     expect(items).toEqual([
       {
         entity: "use_cases",
-        id: "UC-01",
+        id: "UC01",
         value: { name: "Register account", actor_ids: ["Learner", "Admin"] },
         confidence: 0.9,
         field_confidence: {},
@@ -200,7 +200,7 @@ describe("deterministicTableItems — bảng khớp đủ cột (G7)", () => {
   it("FLF-278: hàng chỗ trống của bảng mẫu (`[FR-xxx]`, `[Describe…]`) không thành item", () => {
     const withPlaceholder = [...grid, ["[UC-xx]", "[Use case name]", "[Actor]"]]
     const items = deterministicTableItems(blocks[0], withPlaceholder, profileOf([col(0, "use_cases[].id"), col(1, "use_cases[].name"), col(2, "use_cases[].actor_ids")]))!
-    expect(items.map((i) => i.id)).toEqual(["UC-01", "UC-02"])
+    expect(items.map((i) => i.id)).toEqual(["UC01", "UC-02"])
     expect(deterministicTableItems(blocks[0], [grid[0], ["[UC-xx]", "[Use case name]", "[Actor]"]], profileOf([col(0, "use_cases[].id"), col(1, "use_cases[].name")]))).toEqual([])
   })
 
@@ -370,7 +370,7 @@ describe("itemsFromAi — output model ⇒ item", () => {
   })
   const item = (over: Record<string, unknown>) => ({ entity: "use_cases", key: null, value: {}, confidence: 0.9, field_confidence: {}, source_block_ids: ["B0005"], ...over }) as never
 
-  it("khoá tài liệu được chuẩn hoá; không khoá ⇒ dùng lại id theo tên đã biết, còn không thì cấp id mới", () => {
+  it("khoá tài liệu giữ như model chép (FLF-361); không khoá ⇒ dùng lại id theo tên đã biết, còn không thì cấp id mới sau số lớn nhất", () => {
     const known: EntityItem[] = [{ entity: "use_cases", id: "UC-07", value: { name: "Log in" }, confidence: 1, field_confidence: {}, source_block_ids: [], origin: "deterministic" }]
     const out = itemsFromAi(
       {
@@ -380,7 +380,7 @@ describe("itemsFromAi — output model ⇒ item", () => {
       },
       ctx(known)
     )
-    expect(out.map((i) => i.id)).toEqual(["UC-09", "UC-07", "UC-02"])
+    expect(out.map((i) => i.id)).toEqual(["uc_09", "UC-07", "UC-08"])
     expect(out[0].value).toEqual({ name: "Pay" })
     expect(out.every((i) => i.origin === "ai")).toBe(true)
   })

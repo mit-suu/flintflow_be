@@ -77,6 +77,8 @@ export const importedDocumentDtoSchema = z.object({
   confirmed_latest_at: isoDateTime.nullable(),
   paused: importPausedSchema.nullable(),
   extract_cursor: z.string().nullable(),
+  /** FLF-360: đang đọc lại vì AI quá tải — ảnh (`done`/`total` ảnh) hoặc một lô chữ (`done`/`total` lượt); `null` = không. */
+  reread: z.object({ kind: z.enum(["images", "text"]), done: z.number().int(), total: z.number().int(), section_id: z.string() }).nullable().optional(),
   /** FLF-335: `fixed` / `free`; bản ghi cũ `null`. */
   intent: templateIntentSchema.nullable().optional(),
   created_at: isoDateTime,

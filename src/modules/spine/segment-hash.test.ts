@@ -114,6 +114,18 @@ describe("original_text_mentions_changed", () => {
     expect(originalTextMentionsChanged(removed, records).map((f) => f.target_id)).toEqual(["use_cases[id=UC-01]"])
   })
 
+  it("FLF-361: Spine giữ mã dạng tài liệu (UC01) mà chữ ghi UC-01 ⇒ vẫn khớp (không báo nhầm \"đã bị xoá\"); xoá thật ⇒ cờ", () => {
+    const base = spine()
+    const s: Spine = { ...base, use_cases: base.use_cases.map((u) => ({ ...u, id: "UC01" })) }
+    const recorded: SectionSegments[] = [
+      { ...records[0], parts: [{ kind: "original", custom_id: "CS01", diagrams: [], mentions: [{ path: "use_cases[id=UC01]", array: "use_cases", id: "UC01", name: null }] }] }
+    ]
+    expect(originalTextMentionsChanged(s, recorded)).toEqual([])
+    // bản ghi cũ mang "UC-01" vẫn tìm thấy phần tử "UC01"
+    expect(originalTextMentionsChanged(s, records)).toEqual([])
+    expect(originalTextMentionsChanged({ ...s, use_cases: [] }, recorded).map((f) => f.target_id)).toEqual(["use_cases[id=UC01]"])
+  })
+
   it("đoạn văn đã sửa qua CR, không còn nhắc tên cũ ⇒ không cờ", () => {
     const renamed = { ...spine(), actors: spine().actors.map((a) => (a.id === "A01" ? { ...a, name: "Learner" } : a)) }
     const edited = { ...renamed, custom_sections: [{ ...renamed.custom_sections[0], blocks: [{ kind: "paragraph" as const, text: "Each Learner checks in; see UC-01.", rows: null, image_ref: null }] }] }

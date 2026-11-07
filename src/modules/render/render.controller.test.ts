@@ -19,6 +19,8 @@ vi.mock("../import/template-profile.model.js", async (importOriginal) => {
 })
 // FLF-265 §3.6: đường đọc tài liệu không bao giờ gọi model
 vi.mock("../../shared/ai/ai-action.service.js", () => ({ executeAiAction: vi.fn() }))
+// Dự án "Upload SRS có sẵn" đọc Project / TemplateProfile / DocVersion — ngoài phạm vi test này
+vi.mock("./source-fidelity.js", () => ({ sourceFidelityFor: vi.fn(async () => undefined) }))
 // FLF-369: revision tài liệu đọc Mongo — giả
 vi.mock("./document-revision.js", () => ({ documentVersion: vi.fn(async () => ({ spine_version: 3, document_revision: "7:-:en" })) }))
 vi.mock("./docx-writer.js", () => ({ writeDocx: vi.fn(), buildDocxFileName: vi.fn(() => "demo-v0.1-draft.docx") }))

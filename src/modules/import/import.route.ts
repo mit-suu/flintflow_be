@@ -60,6 +60,10 @@ const router = Router()
  *             reason: { type: string, enum: [credits, resume_later] }
  *             at: { type: string, format: date-time }
  *         extract_cursor: { type: string, nullable: true }
+ *         reread:
+ *           type: object
+ *           nullable: true
+ *           description: "FLF-360: đang đọc lại vì AI quá tải — kind images (done/total ảnh) | text (done/total lượt)"
  *         created_at: { type: string, format: date-time }
  *         updated_at: { type: string, format: date-time }
  *
