@@ -321,8 +321,8 @@ const previewOf = async (
   sections: ReadonlyMap<string, string | null>,
   headingMap: readonly { block_id: string; section_id: string }[]
 ) => {
-  const spine = await spineRepository.getOrCreate(String(doc.projectId))
-  const { projectId: _p, ...plain } = spine
+  // Spine rỗng: lúc này chưa trích gì — dữ liệu của lần upload trước (chưa có bản gốc) không được làm mục "có nội dung"
+  const plain = spineRepository.createEmptySpine({})
   const layoutBlocks = blocks.map((b) => ({
     block_id: b.block_id,
     kind: b.kind,

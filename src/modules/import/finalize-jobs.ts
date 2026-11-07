@@ -99,7 +99,7 @@ export const startFinalize = async (projectId: string, userId: string, body: Fin
     throw new Mode1Error(
       "IMPORT_INVALID_STATE",
       "File còn thiếu mục của cấu trúc đích nên chưa tạo được bản gốc — soạn phần còn thiếu với FlintFlow, hoặc tải báo cáo thiếu sót và bản DRAFT.",
-      { status: doc.status, to: "baselining", allowed: ["drafting"] }
+      { status: doc.status, to: "drafting", allowed: ["drafting"] }
     )
   }
   // request song song vừa bật job trong lúc kiểm ⇒ `startJob` không chạy lần hai

@@ -52,7 +52,8 @@ export const pendingCrIds = async (projectId: string): Promise<{ crIds: string[]
 
 /** "1.0 · 3 thay đổi chưa duyệt" — nhãn bản nháp theo business-flow §2 (chỉ số chính, không số phụ). */
 export const draftLabel = (base: string | null, pendingCount: number): string => {
-  const root = base ?? "v0"
+  // Chưa phát hành bản nào: nhãn cho người đọc là bản gốc 0.1 (business-flow §2) — `base_version` vẫn giữ mã `v0` cho client
+  const root = !base || base === "v0" ? "Bản gốc 0.1" : base
   return pendingCount > 0 ? `${root} · ${pendingCount} thay đổi chưa duyệt` : root
 }
 

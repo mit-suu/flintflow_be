@@ -59,12 +59,12 @@ beforeEach(() => {
 })
 
 describe("C-6 — BA xác nhận là ghi ngay vào bản nháp (CR = commit)", () => {
-  it("3 CR xác nhận ⇒ bản nháp 'v0 · 3 thay đổi chưa duyệt', không có bước Lead duyệt từng CR, gói liệt kê đúng thứ tự", async () => {
+  it("3 CR xác nhận ⇒ bản nháp 'Bản gốc 0.1 · 3 thay đổi chưa duyệt', không có bước Lead duyệt từng CR, gói liệt kê đúng thứ tự", async () => {
     const { seeded, projectId, c } = await importedProject()
     const analyst = await joinOrg(seeded.orgId, "analyst")
     const a = apiAs(seeded, analyst.token, projectId)
 
-    expect(await pkg(a)).toMatchObject({ status: "drafting", base_version: "v0", draft_label: "v0", change_requests: [] })
+    expect(await pkg(a)).toMatchObject({ status: "drafting", base_version: "v0", draft_label: "Bản gốc 0.1", change_requests: [] })
 
     const first = await writeCr(a, "Nhanh hơn", "1 second instead of 2 seconds")
     expect(first).toEqual({ crId: "CR-001", version: "0.2" })
@@ -75,7 +75,7 @@ describe("C-6 — BA xác nhận là ghi ngay vào bản nháp (CR = commit)", (
 
     const p = await pkg(a)
     expect(p.status).toBe("drafting")
-    expect(p.draft_label).toBe("v0 · 3 thay đổi chưa duyệt")
+    expect(p.draft_label).toBe("Bản gốc 0.1 · 3 thay đổi chưa duyệt")
     expect(p.change_requests.map((x) => x.cr_id)).toEqual(["CR-001", "CR-002", "CR-003"])
     expect(p.change_requests[0]).toMatchObject({ requester: "PM", source: { kind: "verbal" }, result_doc_version: "0.2" })
     expect(p.next_version).toBe("1.0")

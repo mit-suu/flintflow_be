@@ -124,13 +124,6 @@ export const enterFlow2 = async (doc: IImportedDocument, by: string, baseVersion
   if (!spine) throw new Mode1Error("IMPORT_INVALID_STATE", "Dự án chưa có dữ liệu tài liệu", { status: doc.status })
   const templateFile = isTemplateFile(project, profile)
   const { draft, keep } = flow2Owners(profile.target_structure.sections, templateFile)
-  if (!templateFile) {
-    const { projectId: _p, ...snapshot } = spine
-    profile.flow2_entry_spine = snapshot
-    profile.flow2_entry_at = new Date()
-    profile.markModified("flow2_entry_spine")
-    await profile.save()
-  }
   const applied = await applyTransaction(projectId, {
     base_version: baseVersion ?? spine.spine_version,
     ops: flow2StepOps(spine, draft, keep),
@@ -139,6 +132,15 @@ export const enterFlow2 = async (doc: IImportedDocument, by: string, baseVersion
     reason: templateFile ? "Start drafting from the required template" : "Start completing the missing sections",
     step_id: null
   })
+  // Mốc lưu sau khi mở bước thành công (lô trên chỉ đổi trạng thái bước, nội dung giữ nguyên Spine lúc vào) — lô lỗi thì không để
+  // lại mốc dở
+  if (!templateFile) {
+    const { projectId: _p, ...snapshot } = spine
+    profile.flow2_entry_spine = snapshot
+    profile.flow2_entry_at = new Date()
+    profile.markModified("flow2_entry_spine")
+    await profile.save()
+  }
   // Bước cuối: đổi luồng. Ngôn ngữ tài liệu = ngôn ngữ của file (dự án tải file lên không có `documentLanguage`)
   await transitionImport(doc, "drafting")
   await Project.updateOne(

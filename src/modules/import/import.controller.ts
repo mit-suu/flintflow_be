@@ -76,7 +76,7 @@ export const confirmLatest = mode1Handler(async (req, res) => {
 })
 
 export const getImport = mode1Handler(async (req, res) => {
-  const auth = await authorizeMode1(req)
+  const auth = await authorizeMode1(req, { allowDrafting: true })
   const current = await importService.latestImport(auth.projectId)
   if (current) {
     await extractJobs.markOrphanedExtraction(current)
