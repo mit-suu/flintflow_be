@@ -96,7 +96,7 @@ describe("mẫu FU-IT-SRS-01 (dự án mới, mẫu bắt buộc) — bảng m�
     const projectId = await createMode1Project(seeded)
     await Project.updateOne({ _id: projectId }, { $set: { template_intent: "fixed", start_kind: "new" } })
     const buffer = await readFile(new URL("../../../fixtures/fixed-template-fu-it-srs-01.docx", import.meta.url))
-    const doc = await uploadImport(projectId, seeded.userId, fileOf(buffer, "Mau_SRS_FU-IT-SRS-01.docx"), { intent: "fixed" })
+    const doc = await uploadImport(projectId, seeded.userId, fileOf(buffer, "Mau_SRS_FU-IT-SRS-01.docx"))
     await acceptLatest(doc, true)
     const importId = String(doc._id)
     await runExtraction(projectId, seeded.userId, importId)

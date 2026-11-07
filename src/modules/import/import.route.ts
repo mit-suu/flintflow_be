@@ -88,7 +88,7 @@ const router = Router()
  *             required: [file]
  *             properties:
  *               file: { type: string, format: binary }
- *               intent: { type: string, enum: [fixed, free], description: "FLF-335 bước 1.2: file theo một mẫu cố định hay cấu trúc tự do; thiếu ⇒ free; dự án mới có mẫu bắt buộc luôn fixed" }
+ *               intent: { type: string, enum: [fixed, free], deprecated: true, description: "Client cũ — bỏ qua. Ý định lấy từ Project.template_intent (chốt ở hộp Tạo dự án); dự án không có ý định ⇒ free" }
  *     responses:
  *       201:
  *         description: "`{ import: ImportedDocument }` — `import.intent` là ý định đã ghi"

@@ -162,23 +162,20 @@ export const assertImportStatus = (doc: IImportedDocument, allowed: readonly Imp
 // ─── 1.1–1.3 upload + preflight ──────────────────────────────────
 
 /**
- * FLF-335: ý định với file (bước 1.2). Dự án mới có mẫu bắt buộc ⇒ luôn `fixed` (đã chốt lúc tạo); còn lại theo client, thiếu ⇒
- * `free` (dự án cũ / client cũ). Chỉ ghi lên Project khi client chọn ý định (hoặc mẫu đã khoá) — `GET /projects/:id` và luồng so
- * cấu trúc đích (FLF-336) đọc được; client cũ không gửi `intent` thì Project không có ý định ⇒ giữ luồng cũ (v0 ngay).
+ * Ý định với file (bước 1.2) **luôn lấy từ Project** — chốt ở hộp Tạo dự án (ô "Bổ sung các mục còn thiếu theo mẫu chuẩn
+ * FlintFlow"), không hỏi lại lúc upload; `intent` client gửi kèm (client cũ) bị bỏ qua. Dự án không có ý định (tạo trước
+ * FLF-335) ⇒ `free`, Project giữ trống ⇒ luồng cũ (bản gốc ngay, không dừng ở cấu trúc đích).
  */
-const resolveUploadIntent = async (projectId: string, requested: TemplateIntent | undefined): Promise<TemplateIntent> => {
-  const project = await Project.findById(projectId, { start_kind: 1, template_intent: 1 }).lean()
-  const locked = project?.start_kind === "new" && project?.template_intent === "fixed"
-  const intent: TemplateIntent = locked ? "fixed" : (requested ?? "free")
-  if (project && (locked || requested) && project.template_intent !== intent) await Project.updateOne({ _id: projectId }, { template_intent: intent })
-  return intent
+const resolveUploadIntent = async (projectId: string): Promise<TemplateIntent> => {
+  const project = await Project.findById(projectId, { template_intent: 1 }).lean()
+  return project?.template_intent ?? "free"
 }
 
 export const uploadImport = async (
   projectId: string,
   userId: string,
   file: UploadedFile,
-  body: { intent?: TemplateIntent; /** FLF-278: import từ mẫu đã lưu của tổ chức (`org-library.service#importFromOrg`). */ org_template_id?: string } = {}
+  body: { /** FLF-278: import từ mẫu đã lưu của tổ chức (`org-library.service#importFromOrg`). */ org_template_id?: string } = {}
 ): Promise<IImportedDocument> => {
   const current = await latestImport(projectId)
   if (current && hasBaseline(current.status)) {
@@ -199,7 +196,7 @@ export const uploadImport = async (
     original_name: file.originalname,
     size: file.size,
     stamp: result.stamp,
-    intent: await resolveUploadIntent(projectId, body.intent),
+    intent: await resolveUploadIntent(projectId),
     ...(body.org_template_id ? { org_template_id: body.org_template_id } : {}),
     created_by: userId
   }

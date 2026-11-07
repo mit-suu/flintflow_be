@@ -186,6 +186,19 @@ describe("createProject", () => {
   })
 })
 
+describe("resolveProjectStart — hộp Tạo dự án hai ô", () => {
+  it("không SRS ⇒ fpt; có SRS ⇒ import + fixed; có SRS + tick Bổ sung ⇒ import + free; has_srs_file thắng source / mode", () => {
+    expect(projectService.resolveProjectStart("fpt", { has_srs_file: false })).toEqual({ mode: "fpt", start_kind: "new", has_required_template: false, template_intent: null })
+    expect(projectService.resolveProjectStart("fpt", { has_srs_file: true })).toEqual({ mode: "import", start_kind: "existing", has_required_template: null, template_intent: "fixed" })
+    expect(projectService.resolveProjectStart("fpt", { has_srs_file: true, complete_to_standard: false }).template_intent).toBe("fixed")
+    expect(projectService.resolveProjectStart("fpt", { has_srs_file: true, complete_to_standard: true })).toEqual({ mode: "import", start_kind: "existing", has_required_template: null, template_intent: "free" })
+    // Tick khi không có file: vô nghĩa ⇒ vẫn chế độ 2
+    expect(projectService.resolveProjectStart("fpt", { has_srs_file: false, complete_to_standard: true }).mode).toBe("fpt")
+    expect(projectService.resolveProjectStart("import", { has_srs_file: false, source: "existing" }).mode).toBe("fpt")
+    expect(projectService.resolveProjectStart("fpt", { has_srs_file: true, source: "new", has_required_template: false }).mode).toBe("import")
+  })
+})
+
 describe("createProject — ngôn ngữ tài liệu (FLF-265)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
