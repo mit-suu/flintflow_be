@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { RULES, applyRuleProfile, runDeterministicCheck, type FlagCandidate } from "../spine/deterministic-check.js"
 import { spineSchema } from "../spine/spine.schema.js"
+import { listSections } from "../spine/section-registry.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Flag, Spine } from "../spine/spine.types.js"
 import {
@@ -149,16 +150,19 @@ describe("findingOps — AI semantic check chỉ ra vàng", () => {
     expect(ops.map((o) => (o as { value: Flag }).value.section_id)).toEqual(["fixed:I"])
   })
 
-  it("phần nhỏ slot:* của mẫu bắt buộc (FLF-278) không phải mục Spine ⇒ cờ trỏ về mục FPT cha; không có cha ⇒ fixed:I", () => {
+  it("phần nhỏ slot:* của mẫu (FLF-278) không phải mục Spine ⇒ cờ trỏ về mục FPT cha; không có cha ⇒ mục giữ loại dữ liệu đó, không có ⇒ fixed:I", () => {
     const ops = findingOps(
       spine(),
       [
         { rule: "r", section_id: "slot:vision", message: "xem tầm nhìn", block_ids: ["B0003"] },
-        { rule: "r", section_id: "slot:features", message: "xem chức năng", block_ids: ["B0004"] }
+        { rule: "r", section_id: "slot:features", message: "xem chức năng", block_ids: ["B0004"] },
+        { rule: "r", section_id: "slot:platforms", message: "xem nền tảng", block_ids: ["B0005"] },
+        { rule: "r", section_id: "slot:references", message: "xem tham khảo", block_ids: ["B0006"] }
       ],
       IMPORT_SEMANTIC_RULE
     )
-    expect(ops.map((o) => (o as { value: Flag }).value.section_id)).toEqual(["fixed:1", "fixed:I"])
+    const firstFunction = listSections(spine()).find((sec) => sec.id.startsWith("function:"))!.id
+    expect(ops.map((o) => (o as { value: Flag }).value.section_id)).toEqual(["fixed:1", firstFunction, "fixed:1", "fixed:I"])
   })
 
   it("không finding ⇒ không op", () => {

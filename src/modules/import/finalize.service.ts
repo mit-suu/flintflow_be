@@ -30,7 +30,7 @@ import { assemble } from "../render/assemble.service.js"
 import { snapshotBaseline } from "../pipeline/s9/baseline.service.js"
 import { Baseline } from "../spine/baseline.model.js"
 import { applyTransaction } from "../spine/op-engine.js"
-import { isOriginalDiagramKind, originalDiagramHash } from "../spine/original-diagram.js"
+import { inferDiagramKind, isOriginalDiagramKind, originalDiagramHash } from "../spine/original-diagram.js"
 import { rehashSegments, segmentKeyOfPath } from "../spine/segment-hash.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Op } from "../spine/op.types.js"
@@ -38,7 +38,8 @@ import type { Baseline as BaselineEntry, OriginalDiagramKind, Spine } from "../s
 import { countOpenFlags, findingOpsInOrder, runImportCheck, stripRecord, type Finding } from "./check.service.js"
 import { legacyRecordRows } from "./legacy-record.js"
 import { DocBlock } from "./doc-block.model.js"
-import { collectEntities, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
+import { captionOf } from "./extract.service.js"
+import { canonicalFieldIds, collectEntities, idKey, imageOnlyGenericActors, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
 import { ExtractionDraft, type IExtractionDraft } from "./extraction-draft.model.js"
 import { FieldAnchor } from "./field-anchor.model.js"
 import { needsConfirm } from "./import.constants.js"
@@ -51,10 +52,11 @@ import { scanMentions, type NamedEntity } from "./mentions.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { IMPORT_IMAGE_RULE, IMPORT_NEEDS_REVIEW_RULE, IMPORT_TITLE_CONTENT_RULE, IMPORT_UNRESOLVED_RULE } from "./mode1-rule-profile.js"
 import { parseDocument } from "./parse.service.js"
-import { buildImportOps, droppedPermissionFindings, type DroppedPermission } from "./spine-builder.js"
+import { buildImportOps, droppedPermissionFindings, ruleTierOfSections, type DroppedPermission } from "./spine-builder.js"
 import { tableRows } from "./table-rows.js"
 import { buildLayout, buildStepPlan, customSectionOps, customSectionsWithContent, functionOriginals, projectFieldEntities, sectionSegments, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
 import { functionSourceHash } from "../render/layout-sections.js"
+import { functionFieldValues, tagFunctionBlocks } from "../render/function-original.js"
 import { TemplateProfile, type HeadingMapEntry, type LayoutEntry, type TableMapEntry } from "./template-profile.model.js"
 import { buildTemplateContext } from "./template-context.js"
 import { compareTargetStructure, type TargetStructure, type TemplateIntent } from "./target-structure.js"
@@ -98,10 +100,13 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // 1. Thực thể ⇒ op
   const drafts = await ExtractionDraft.find({ import_id: doc._id }).lean()
   // FLF-343: không bỏ field độ tin thấp chưa xác nhận (trước đây bị bỏ im lặng) — vào baseline, cờ "Cần xem" bên dưới
-  const accepted = drafts.flatMap((d) => d.fields.map((f) => ({ ...f, section_id: realSectionId(d.section_id, provisional) })))
-  const entities = [...collectEntities(accepted).values()]
+  // FLF-361: mã giữ đúng dạng tài liệu; một phần tử ghi mã khác dạng ở nhiều nguồn (UC01 / UC-01) ⇒ một cách viết
+  const accepted = canonicalFieldIds(drafts.flatMap((d) => d.fields.map((f) => ({ ...f, section_id: realSectionId(d.section_id, provisional) }))))
+  // FLF-361: actor chung chung chỉ có trên ảnh sơ đồ ("User") không thêm khi file đã có danh sách actor
+  const genericActors = imageOnlyGenericActors(accepted)
+  const entities = [...collectEntities(accepted)].filter(([key]) => !genericActors.has(key)).map(([, e]) => e)
   const droppedPermissions: DroppedPermission[] = []
-  const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value })), droppedPermissions)
+  const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value, sections: e.sections })), droppedPermissions)
 
   // 2. File gốc của bản 0.1 (ghi file trước; lô Spine hỏng thì xoá file, không để mồ côi)
   const parsed = await parseDocument(await loadImportFile(doc))
@@ -177,14 +182,18 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const imageRead = new Map(
     drafts.flatMap((d) => (d.diagram_images ?? []).filter((i) => isOriginalDiagramKind(i.kind)).map((i) => [i.block_id, i.kind as OriginalDiagramKind] as const))
   )
+  // FLF-361: ảnh gửi đọc mà chưa đọc được (EMF / AI quá tải) ⇒ suy loại theo caption / mục để vẫn ẩn PlantUML cùng loại
+  // (lưới an toàn khi FLF-360 đọc lại vẫn không được). Cờ vàng `import_image_unread` giữ nguyên — dữ liệu ảnh chưa vào Spine
+  const imageUnread = new Set(drafts.flatMap((d) => (d.diagram_images ?? []).filter((i) => i.kind === "unsupported" || i.kind === "unavailable" || i.kind === "failed").map((i) => i.block_id)))
   const imported = stripRecord(spineNow)
   for (const b of layoutBlocks) {
     if (b.kind !== "image" || !b.image_ref || !b.section_id) continue
     unmappedIds.add(b.block_id)
-    const kind = imageRead.get(b.block_id)
+    const kind = imageRead.get(b.block_id) ?? (imageUnread.has(b.block_id) ? inferDiagramKind(b.section_id, captionOf(b, layoutBlocks.filter((x) => x.section_id === b.section_id))) : null)
     if (kind) b.diagram = { kind, source_hash: originalDiagramHash(imported, kind) }
   }
-  // FLF-366: mẫu bắt buộc (chế độ 3) là mẫu để điền, không chia đoạn nguyên văn
+  // FLF-366: chỉ mẫu bắt buộc của **dự án mới** là mẫu để điền ⇒ không chia đoạn nguyên văn. Dự án có sẵn theo mẫu của
+  // công ty là SRS đã viết ⇒ vẫn giữ đoạn gốc như cấu trúc FlintFlow
   const project = await Project.findById(projectId).lean()
   const intentRaw = (project as { template_intent?: string | null } | null)?.template_intent ?? null
   // FLF-378 (luồng C): dự án mới theo mẫu bắt buộc ⇒ file là mẫu, không phải dữ liệu: mục riêng không giữ nguyên văn, chữ
@@ -192,12 +201,19 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const intent: TemplateIntent = intentRaw === "fixed" ? "fixed" : "free"
   const draftAll = intent === "fixed" && project?.start_kind === "new"
   const { layout, customSections, slices, segments, contextBlocks } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds, {
-    segment: intentRaw !== "fixed",
+    segment: !draftAll,
     templateOnly: draftAll
   })
   const seeded = await loadSpine(projectId)
+  // Mẫu IEEE: phần tử trích từ heading lặp (Availability dưới 4.2.2) in dưới đúng heading đó của file
+  const sliceItems = sectionSlices(slices, entities)
   // FLF-336 I-5: so cấu trúc đích (trước kế hoạch step) — ý định theo `Project.template_intent` (FLF-335); dự án cũ ⇒ tự do.
-  const withContent = new Set([...sectionsWithContent(layoutBlocks), ...customSectionsWithContent(customSections)])
+  // Heading lặp (vd "Business Rules" của từng chức năng) mà nội dung đã trích vào Spine qua slice vẫn là mục có nội dung
+  const withContent = new Set([
+    ...sectionsWithContent(layoutBlocks),
+    ...customSectionsWithContent(customSections),
+    ...sliceItems.filter((sl) => sl.items.length).map((sl) => `custom:${sl.custom_id}`)
+  ])
   const structure = compareTargetStructure(layout, withContent, stripRecord(seeded), intent, undefined, { draftAll })
   // Bước sở hữu mục của mẫu (id bước mẫu, bỏ `@màn`) — dự án mới theo mẫu bắt buộc: chờ soạn hết, không bước nào `accepted` sẵn
   const draftOwners = draftAll ? new Set(structure.sections.flatMap((s) => s.owner_steps.map((id) => id.split("@")[0]))) : undefined
@@ -225,8 +241,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   await applyTransaction(projectId, { base_version: seeded.spine_version, ops: planOps, by: "import", reason: "Import: kế hoạch step theo template", step_id: null })
   profile.layout = layout
   profile.step_plan = plan
-  // Mẫu IEEE: phần tử trích từ heading lặp (Availability dưới 4.2.2) in dưới đúng heading đó của file
-  profile.section_slices = sectionSlices(slices, entities)
+  profile.section_slices = sliceItems
   // FLF-366: đoạn nguyên văn theo mục FPT — dấu tính trên Spine sau lô thực thể (lô kế hoạch step không đổi phần tử)
   profile.section_segments = sectionSegments(segments, customSections, [...entities, ...projectFieldEntities(accepted)], stripRecord(seeded), names)
   profile.markModified("section_segments")
@@ -239,12 +254,14 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // FLF-252 — in theo file gốc: nguyên văn từng mục chức năng + dấu nội dung chức năng lúc nhập (chức năng không đổi ở lô
   // kế hoạch step nên dấu tính trên Spine sau lô thực thể)
   const fnById = new Map(seeded.functions.map((f) => [`function:${f.id}`, f]))
-  profile.function_originals = [...functionOriginals(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))].flatMap(
-    ([section_id, blocks]) => {
-      const fn = fnById.get(section_id)
-      return fn && blocks.length ? [{ section_id, source_hash: functionSourceHash(fn), blocks }] : []
-    }
-  )
+  // FLF-361: khối nào chứa chữ của phần tử nào (đối chiếu theo chữ, không theo khối nguồn AI ghi) + chữ từng trường lúc
+  // import ⇒ CR chỉ sửa khối chứa phần tử đã đổi
+  profile.function_originals = [...functionOriginals(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))].flatMap(([section_id, blocks]) => {
+    const fn = fnById.get(section_id)
+    if (!fn || !blocks.length) return []
+    const field_values = functionFieldValues(seeded, fn)
+    return [{ section_id, source_hash: functionSourceHash(fn), field_values, blocks: tagFunctionBlocks(blocks, field_values) }]
+  })
   // FLF-336 I-5: cấu trúc đích lưu TRƯỚC khi chụp v0 — còn mục thiếu và người dùng chưa bấm "Hoàn thiện" ⇒ dừng ở
   // `incomplete` (không có v0 dở dang, §1).
   profile.target_structure = structure
@@ -312,6 +329,10 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const after = await loadSpine(projectId)
   await assembleWorkingDraft(projectId, projectName, after.spine_version)
   scheduleEmbeddingSync(projectId)
+  // FLF-360: còn ảnh AI chưa đọc được vì quá tải ⇒ hẹn job đọc lại nền (không tạo version mới khi đọc được). Import động:
+  // reread-jobs dùng lại `refreshSegmentHashes` của file này
+  const { scheduleRereadAfterFinalize } = await import("./reread-jobs.js")
+  await scheduleRereadAfterFinalize(projectId, userId, String(doc._id), await ExtractionDraft.find({ import_id: doc._id }, { section_id: 1, status: 1, diagram_images: 1 }).lean())
   return { doc, baseline, spine_version: after.spine_version ?? spineVersion, flags: countOpenFlags(after.flags), target_structure: structure }
 }
 
@@ -346,7 +367,8 @@ export const nonScreenTableIds = (drafts: Pick<IExtractionDraft, "section_id" | 
 
 const UNREAD_REASON: Readonly<Record<string, string>> = {
   unsupported: "định dạng ảnh không hỗ trợ",
-  unavailable: "AI đọc ảnh đang quá tải, chưa đọc được"
+  unavailable: "AI đọc ảnh đang quá tải, chưa đọc được",
+  failed: "AI không đọc được ảnh này"
 }
 
 /** Ảnh ở mục diagram mà I-4 không đọc được (`other` / EMF / AI lỗi…) ⇒ cờ vàng: ảnh gốc được giữ, dữ liệu trong ảnh chưa vào Spine. */
@@ -393,9 +415,25 @@ export const needsReviewFindings = (
     const p = parseFieldPath(path)
     if (!p || p.entity === "project") return true
     const arr = (spine as unknown as Record<string, unknown>)[p.entity]
-    return Array.isArray(arr) && arr.some((x) => (x as { id?: unknown }).id === p.id)
+    // FLF-361: path của bản trích có thể ghi mã khác dạng id Spine (UC-01 / UC01) ⇒ so theo idKey
+    return Array.isArray(arr) && arr.some((x) => typeof (x as { id?: unknown }).id === "string" && idKey((x as { id: string }).id) === idKey(p.id ?? ""))
   }
-  const fields = toReviewFields(drafts, (f) => !f.confirmed && needsConfirm(f) && inSpine(f.path)).map((f) => ({
+  // FLF-361: field tham chiếu mà không giá trị nào vào Spine (UC → actor "User" chỉ có trên ảnh, đã bỏ) ⇒ không có gì để xem;
+  // cấp business rule đã quyết theo mục của file (5.1 / mục 1) ⇒ không còn là chỗ model đoán
+  const landed = (f: { path: string; value: unknown; section_id: string }): boolean => {
+    const p = parseFieldPath(f.path)
+    if (!p || p.entity === "project") return true
+    if (p.entity === "business_rules" && p.field === "tier" && ruleTierOfSections([realSectionId(f.section_id, provisional)]) !== null) return false
+    if (!Array.isArray(f.value) || !f.value.length || !f.value.every((v) => typeof v === "string")) return true
+    const el = ((spine as unknown as Record<string, unknown>)[p.entity] as Record<string, unknown>[] | undefined)?.find((x) => typeof x.id === "string" && idKey(x.id) === idKey(p.id ?? ""))
+    const now = el?.[p.field]
+    if (!Array.isArray(now)) return true
+    const keys = new Set(now.filter((x): x is string => typeof x === "string").map(idKey))
+    return (f.value as string[]).some((v) => keys.has(idKey(v)))
+  }
+  const fields = toReviewFields(drafts, (f) => !f.confirmed && needsConfirm(f) && inSpine(f.path))
+    .filter((f) => landed(f))
+    .map((f) => ({
     rule: "needs_review",
     section_id: realSectionId(f.section_id, provisional),
     message: `Cần xem: ${pathLabel(f.path, f.entity_name)} — ${f.origin === "vision" ? "đọc từ ảnh sơ đồ" : `độ tin ${percent(f.confidence)}`}; đã đưa vào bản 0.1, sai thì sửa bằng change request`,

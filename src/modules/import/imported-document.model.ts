@@ -65,6 +65,11 @@ export interface IImportedDocument extends Document {
   /** Section đang/sắp trích ở I-4; resume chạy tiếp từ đây, không trích lại section `done`. */
   extract_cursor: string | null
   /**
+   * FLF-360: đang đọc lại vì AI quá tải (I-4) — `images`: ảnh sơ đồ chưa đọc được (`done`/`total` ảnh), `text`: một lô chữ
+   * (`done`/`total` lượt). `null` = không đọc lại. Chỉ để FE hiện "Đang đọc lại ảnh N/M" (`GET /import`), không phải Spine.
+   */
+  reread?: { kind: "images" | "text"; done: number; total: number; section_id: string } | null
+  /**
    * Mốc ngay trước lần finalize đang/đã chạy nền (`finalize-jobs.ts`): nội dung Spine, `seq` change kế tiếp và
    * section của từng heading (finalize đổi section tạm `feature:@B…` sang id thật). Lần chạy dở (lỗi / máy chủ khởi
    * động lại giữa `baselining`) được hoàn về mốc này trước khi chạy lại. `null` = chưa finalize lần nào.
@@ -139,6 +144,13 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
       default: null
     },
     extract_cursor: { type: String, default: null },
+    reread: {
+      type: new Schema(
+        { kind: { type: String, enum: ["images", "text"], required: true }, done: { type: Number, required: true }, total: { type: Number, required: true }, section_id: { type: String, required: true } },
+        opts
+      ),
+      default: null
+    },
     complete_requested: { type: Boolean, default: false },
     intent: { type: String, enum: [...TEMPLATE_INTENTS, null], default: null },
     org_template_id: { type: Schema.Types.ObjectId, ref: "OrgTemplate", default: null },

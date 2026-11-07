@@ -6,6 +6,24 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
+// FLF-360: ảnh quá tải giờ được đọc lại thêm vài lượt — giữ đúng logic thử lại trong một lượt gọi (cùng số lần, cùng điều
+// kiện) nhưng không chờ thật 2 s / 6 s, không thì các ca "Gemini quá tải" vượt 30 s
+vi.mock("../../../src/shared/ai/retry.service.js", async (orig) => {
+  const real = await orig<typeof import("../../../src/shared/ai/retry.service.js")>()
+  return {
+    ...real,
+    delay: async () => undefined,
+    executeWithInRequestRetry: async <T>(fn: (attempt: number) => Promise<T>, maxRetries = 2): Promise<T> => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await fn(attempt)
+        } catch (err) {
+          if (attempt >= maxRetries || !real.isTransientError(err)) throw err
+        }
+      }
+    }
+  }
+})
 
 import mongoose from "mongoose"
 import { mockImages, mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
@@ -280,10 +298,13 @@ describe("finalize — DocVersion 0.1 + baseline imported", () => {
     const { projectId } = await importFinalized()
     const profile = (await TemplateProfile.findOne({ projectId }).lean())!
     const login = profile.function_originals.find((o) => o.section_id === "function:FR-3.2.2")!
+    // FLF-361: chữ từng trường lúc import; khối chỉ gắn phần tử khi chữ khớp — model giả trả "Wrong password", khác chữ file
+    // ("Show an error when the password is wrong.") ⇒ không gắn ⇒ CR sửa chức năng thì dựng lại cả mục (không giữ chữ cũ)
     expect(login.blocks).toEqual([
       { kind: "paragraph", text: SRS_FIXTURE_TEXT.loginNormal, rows: null, image_ref: null },
       { kind: "list_item", text: "Show an error when the password is wrong.", rows: null, image_ref: null }
     ])
+    expect(login.field_values).toEqual(expect.objectContaining({ trigger: ["Learner submits the form"], abnormal: ["Wrong password"] }))
     const sectionOf = async () => (await getDocument(projectId, "Lumen", { source: "draft" })).sections.find((s) => s.id === "function:FR-3.2.2")!
     expect((await sectionOf()).blocks).toEqual([
       { type: "paragraph", runs: [{ text: SRS_FIXTURE_TEXT.loginNormal }] },
@@ -601,6 +622,22 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     expect(run.doc.status).toBe("baselining")
     const draft = (await ExtractionDraft.findOne({ import_id: importId, section_id: "fixed:2.2.1" }).lean())!
     expect(draft.diagram_images.map((i) => i.kind)).toEqual(["unavailable"])
+  })
+
+  it("FLF-361: ảnh sơ đồ ở 2.2.1 chưa đọc được (AI quá tải) ⇒ vẫn đánh dấu sơ đồ gốc use case: đoạn 2.2.1 ghi loại sơ đồ, không in PlantUML use case; cờ vàng ảnh vẫn còn", async () => {
+    const { projectId, userId, importId } = await importAtExtracting({ srs: { images: [{ name: "image1.png", data: PNG, caption: "Use Cases — Learner USECASE-IMG" }] } })
+    mockOverrides.next = (prompt) => (prompt.includes("# Read Diagram Image") ? new AiActionError(503, "high demand", "GEMINI_OVERLOADED") : fakeMode1(prompt))
+    await runExtraction(projectId, userId, importId)
+    mockOverrides.next = fakeMode1
+    const before = (await spineRepository.get(projectId))!
+    await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
+    const spine = (await spineRepository.get(projectId))!
+    const images = spine.custom_sections.flatMap((c) => c.blocks).filter((b) => b.kind === "image")
+    expect(images).toEqual([expect.objectContaining({ image_ref: "word/media/image1.png", diagram: expect.objectContaining({ kind: "usecase" }) })])
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    const seg = profile.section_segments.find((r) => r.section_id === "fixed:2.2.1")!
+    expect(seg.parts.flatMap((p) => (p.kind === "original" ? p.diagrams.map((d) => d.kind) : []))).toEqual(["usecase"])
+    expect(spine.flags.filter((f) => f.rule_id === "import_image_unread")).toHaveLength(1)
   })
 
   it("FLF-252: ảnh không đọc được + quyền không khớp màn trong cùng lần nhập ⇒ hai cờ vàng khác id, tạo được bản 0.1 (trước đây trùng id ⇒ cả lô bị từ chối)", async () => {

@@ -46,4 +46,28 @@ describe("content-slots (FLF-278 trên FLF-335/336)", () => {
     // Thiếu cấp heading ⇒ chỉ gán phần nhỏ
     expect(bindFixedTemplateHeadings([{ heading_text: "1. Introduction", section_id: "fixed:1" }, { heading_text: "1.1 Purpose", section_id: "fixed:1" }]).map((e) => e.section_id)).toEqual(["fixed:1", "slot:vision"])
   })
+
+  it("SRS mẫu công ty đã điền: tên chức năng / tính năng không bị gán phần nhỏ theo từ khoá; heading con của chức năng thuộc chức năng đó", () => {
+    const out = bindFixedTemplateHeadings([
+      { heading_text: "3. Functional Requirements", section_id: "group:3", level: 1 },
+      { heading_text: "3.1 Risk Assessment", section_id: "feature:@B0040", level: 2 },
+      { heading_text: "3.1.1 Manage Security Questions", section_id: "function:@B0041", level: 3 },
+      { heading_text: "Business Rules", section_id: "unmapped", level: 4 },
+      { heading_text: "Messages", section_id: "unmapped", level: 4 },
+      { heading_text: "4. Security", section_id: "unmapped", level: 1 },
+      { heading_text: "5.1 Business Rules", section_id: "unmapped", level: 2 }
+    ])
+    expect(out.map((e) => e.section_id)).toEqual(["group:3", "feature:@B0040", "function:@B0041", "unmapped", "unmapped", "slot:security", "slot:business_rules"])
+  })
+
+  it("'Functional Requirements' chứa heading của từng chức năng ⇒ heading bao (mỗi chức năng in một lần, không thêm bảng tổng hợp)", () => {
+    const out = bindFixedTemplateHeadings([
+      { heading_text: "3.2 Functional Requirements", section_id: "unmapped", level: 2 },
+      { heading_text: "3.2.1 Join a club", section_id: "function:@B0050", level: 3 },
+      { heading_text: "3.3 Performance", section_id: "fixed:4.2.3", level: 2 }
+    ])
+    expect(out.map((e) => e.section_id)).toEqual(["unmapped", "function:@B0050", "fixed:4.2.3"])
+    // Mẫu trống (chỉ có bảng FR, không heading chức năng) ⇒ vẫn là phần nhỏ
+    expect(bindFixedTemplateHeadings([{ heading_text: "3.2 Functional Requirements", section_id: "unmapped", level: 2 }])[0].section_id).toBe("slot:functional_requirements")
+  })
 })

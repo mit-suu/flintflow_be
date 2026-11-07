@@ -49,10 +49,11 @@ export interface IExtractionDraft extends Document {
   /**
    * Ảnh diagram của section đã qua I-4 phần ảnh (mode 1 v3 phase 5): `kind` = loại model đọc được, `unsupported` =
    * không gửi được (EMF/WMF, file gốc không còn), `other` = không phải diagram đọc được, `unavailable` = AI đọc ảnh lỗi
-   * sau mọi lượt thử (Gemini quá tải cả model dự phòng). Finalize: mọi ảnh giữ nguyên (§4.13); 4 loại diagram đọc được
-   * ⇒ đánh dấu sơ đồ gốc, còn lại ⇒ cờ vàng `import_image_unread`.
+   * sau mọi lượt thử (Gemini quá tải cả model dự phòng — FLF-360: lỗi tạm thời, được đọc lại), `failed` = AI lỗi không tự
+   * khỏi (không đọc lại). Finalize: mọi ảnh giữ nguyên (§4.13); 4 loại diagram đọc được ⇒ đánh dấu sơ đồ gốc, còn lại ⇒
+   * cờ vàng `import_image_unread`.
    */
-  diagram_images: { block_id: string; kind: DiagramImageKind | "unsupported" | "unavailable" }[]
+  diagram_images: { block_id: string; kind: DiagramImageKind | "unsupported" | "unavailable" | "failed" }[]
   /** Usage của lượt gọi AI (null nếu section chỉ trích deterministic). */
   usage_id: string | null
   partial: ExtractionProgress | null
