@@ -96,7 +96,7 @@ Mã chung vẫn dùng như pipeline: `400 VALIDATION_ERROR`, `401 UNAUTHORIZED`,
 | 6 | `POST /projects/:id/import/extract` | 1.8 | `extractRequestSchema` `{ import_id, confirm_latest? }` — FLF-343: nút Bắt đầu; `confirm_latest: true` bắt buộc khi file chưa xác nhận bản mới nhất | `extractResponseSchema` — **trả ngay** (`status = extracting`, `paused = null`), chạy nền một mạch I-4 ⇒ finalize ⇒ 1.11–1.12; FE poll #4 tới `gap_review` / `incomplete` hoặc có `paused` | `IMPORT_INVALID_STATE`, `IMPORT_NEEDS_LATEST_CONFIRM` (bỏ tick "bản mới nhất" — import không chạy) |
 | 7 | `PATCH /projects/:id/import/fields` | UC-22, 1.9 | `fieldsPatchRequestSchema` — **FLF-343: chỉ bản ghi cũ** ở `fields_review` | `importStateResponseSchema` | `IMPORT_INVALID_STATE` |
 | 8 | `POST /projects/:id/import/finalize` | 1.10–1.12 | `finalizeRequestSchema` (+ `complete?: boolean` — FLF-336). **FLF-343:** chế độ 1 không gọi #8 — job finalize nối tiếp I-4 tự lấy `base_version` = Spine hiện tại trên server (không có 409), Record of Changes đọc từ file; #8 chỉ còn cho `incomplete` ⇒ "Hoàn thiện" (`complete: true`) và bản ghi cũ ở `baselining`, khi đó `base_version` của client vẫn được kiểm | `finalizeResponseSchema` — **trả ngay** (`status = baselining`, `baseline: null`, `flags: null`), finalize + 1.11–1.12 chạy nền; FE poll #4 tới `gap_review` hoặc có `paused` (§4.16). **FLF-336 I-5**: trước khi chụp v0, Code so bố cục file với cấu trúc đích (`Project.template_intent` `free` ⇒ mẫu chuẩn FlintFlow tối thiểu, `fixed` ⇒ chính heading của mẫu); còn mục thiếu ⇒ dừng ở `incomplete` (**không có v0**), #4 trả `target_structure` (`resolved_mode` 3 / 4). Từ `incomplete` gọi lại #8 với `complete: true` ⇒ chạy lại từ mốc và tạo v0 như cũ (lát 1 — vòng rà soát + Luồng 2 cho phần thiếu là lát sau); thiếu `complete` ⇒ `IMPORT_INVALID_STATE` | `IMPORT_INVALID_STATE`; `SPINE_VERSION_CONFLICT` chỉ khi gọi tay (#8) với `base_version` cũ |
-| 9 | `GET /projects/:id/gap-report?format=json\|docx` | UC-23, 1.13 | `gapReportQuerySchema` | `gapReportSchema` (FLF-336: thêm `target_structure`); `docx` trả file, không bọc envelope. Có từ `incomplete` ("Dừng, tải gap report") | `IMPORT_INVALID_STATE` (chưa tới `incomplete` / `gap_review`) |
+| 9 | `GET /projects/:id/gap-report?format=json\|docx` | UC-23, 1.13 | `gapReportQuerySchema` | `gapReportSchema` (FLF-336: thêm `target_structure`); `docx` trả file, không bọc envelope. Có từ `incomplete` (FE tải ở workspace) | `IMPORT_INVALID_STATE` (chưa tới `incomplete` / `gap_review`) |
 | 10 | `POST /projects/:id/import/resume` | UC-61, UC-75 | `importResumeRequestSchema` | `extractResponseSchema` — **trả ngay**, chạy nền: `extracting` như #6 (rồi nối tiếp tới `gap_review`); `baselining` (đã từng finalize, job lỗi / mất) ⇒ chạy lại finalize; `baselining` chưa có mốc / bản ghi cũ `fields_review` ⇒ finalize một mạch (FLF-343); `checking` ⇒ 1.11–1.12 (§4.16) | `IMPORT_INVALID_STATE`, `IMPORT_NEEDS_LATEST_CONFIRM` |
 | 11 | `POST /projects/:id/reupload` | UC-24, 1.4 | multipart như #2 | `reuploadDiffDtoSchema` — **không** tạo version | `IMPORT_FILE_REJECTED`, `IMPORT_STAMP_FOREIGN_PROJECT`, `IMPORT_INVALID_STATE` (chưa có baseline) |
 | 12 | `GET /projects/:id/versions` | UC-54 | — | `DocVersion[]`, mới nhất trước | — |
@@ -321,7 +321,7 @@ Plan: `claude_plan/mode1-v3/phase-2-be-flow3.md`.
 Plan: `claude_plan/mode1-v3/phase-5-vision.md`.
 
 - **Ảnh gốc (T3)**: block ảnh của file upload giữ `image_ref` (part `word/media/*`). Ảnh dưới mục FPT không được thay bằng diagram ⇒ phần nối nguyên văn của mục (`custom_sections[].blocks[].image_ref`); bản render (0.0, bản làm việc, version CR) nhúng lại **đúng ảnh gốc** (PNG/JPEG). EMF/WMF / file gốc không còn ⇒ chỗ giữ ảnh + chú thích `original image could not be embedded (<part>)`.
-- **I-4 phần ảnh (1.8)**: `call_kind` mới **`import_extract_diagram`** (2 credit/ảnh, Gemini) — chỉ cho ảnh ở mục diagram (`fixed:1`, `2.1`, `2.2.1`, `2.2.2`, `3.1.1`, `3.1.5`), sau bảng tất định, trước lô chữ; `step_id` usage vẫn `I-4:<section>`. Hết credit ⇒ `paused` như lô chữ. Lỗi AI khác sau mọi lượt thử (2026-09-24: Gemini quá tải cả model dự phòng) ⇒ **không dừng** I-4: ảnh ghi `kind: unavailable`, giữ ảnh gốc + cờ vàng `import_image_unread` ("AI đọc ảnh đang quá tải").
+- **I-4 phần ảnh (1.8)**: `call_kind` mới **`import_extract_diagram`** (2 credit/ảnh, Gemini) — chỉ cho ảnh ở mục diagram (`fixed:1`, `2.1`, `2.2.1`, `2.2.2`, `3.1.1`, `3.1.5`), sau bảng tất định, trước lô chữ; `step_id` usage vẫn `I-4:<section>`. Hết credit ⇒ `paused` như lô chữ. Lỗi AI khác sau mọi lượt thử (2026-09-24: Gemini quá tải cả model dự phòng) ⇒ **không dừng** I-4: ảnh ghi `kind: unavailable`, giữ ảnh gốc + cờ vàng `import_image_unread` ("AI đọc ảnh đang quá tải"). FLF-360: lỗi tạm thời ⇒ `unavailable`, đọc lại sau khi chạy hết các mục (tối đa `IMPORT_AI_RETRY_BACKOFF_MS` lượt, giãn dần; #4 `reread`); vẫn chưa được ⇒ job nền đọc lại sau bản 0.1. Lỗi không tự khỏi ⇒ `kind: failed` (không đọc lại). Lô chữ lỗi tạm thời đọc lại cùng số lượt rồi mới `paused: resume_later`.
   Môi trường không có vision (`GEMINI_KEY_MISSING`, `AI_PROVIDER_NO_VISION`) ⇒ không dừng: ảnh coi như định dạng không hỗ trợ (giữ ảnh + cờ vàng).
 - **Field từ ảnh**: `ReviewField.origin` thêm **`vision`**. Độ tin ≤ 0.7 và **luôn** vào `review_fields` (1.9) kể cả bằng ngưỡng — chưa xác nhận thì finalize bỏ. Danh sách tham chiếu (`actor_ids`, `includes`, `extends`, `relations`, `flow_to`) từ nhiều nguồn gộp hợp. `screens.flow_to` được trích.
 - **Finalize (1.10)** — **đổi ở §4.13** (giữ ảnh gốc): ảnh đọc được (use case / ERD / luồng màn / ngữ cảnh) ⇒ bỏ ảnh gốc, diagram PlantUML vẽ từ Spine thay; ảnh ở mục diagram không đọc được (`other` / định dạng không hỗ trợ) ⇒ giữ ảnh gốc + **cờ vàng `rule_id: import_image_unread`** (model-owned, recompute không đóng).
@@ -454,6 +454,8 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-11-06 | FLF-360 (AI quá tải lúc import: tự đọc lại) | Additive: #4 trả thêm `reread: { kind: "images" \| "text", done, total, section_id } \| null` (đang đọc lại — FE hiện "Đang đọc lại ảnh N/M"). Hành vi §4.10: lô chữ lỗi tạm thời (quá tải, 503, 429 không phải hết tiền, timeout, mạng) đọc lại tối đa 3 lượt giãn dần rồi mới `paused: resume_later`; ảnh `unavailable` đọc lại sau khi chạy hết các mục; lỗi AI không tự khỏi ghi `diagram_images.kind = failed` (không đọc lại). Ảnh vẫn chưa đọc được sau bản 0.1 ⇒ job nền `import/reread-images` đọc lại theo lịch, ghi lô `by: import` (không version mới), đóng cờ `import_image_unread`. `credit_estimate` tính cả ảnh chờ đọc lại |
+| 2026-11-06 | FLF-278 (dự án "Upload SRS có sẵn": tải về giống file upload) | Hành vi, không đổi shape: export / version của dự án có sẵn (mẫu công ty hoặc cấu trúc FlintFlow đủ mục) dùng file upload làm nền, mục chưa đổi in nguyên văn, bảng lịch sử không thêm dòng import; SRS có field không còn 422. Xem §FLF-278 "Dự án Upload SRS có sẵn" |
 | 2026-11-05 | FLF-278 (kết quả đọc theo loại dự án; bảng mẫu trống) | Hành vi, không đổi shape: #8b chỉ cho dự án mới theo mẫu bắt buộc (dự án có sẵn ⇒ `409 IMPORT_INVALID_STATE`); #8 `complete: true` ở `incomplete` bị chặn với dự án mới theo mẫu bắt buộc (`409`, `meta.allowed = ["drafting"]`). Bảng mẫu chỉ có tiêu đề + hàng chỗ trống tính là trống ở I-5 / cờ `template_section_empty`, không sinh item ở I-4. Xem §FLF-278 "Luồng 2 cho phần thiếu" |
 | 2026-11-04 | contract-change FLF-364 (chữ hướng dẫn `[ ]` / `{ }`) | Luật hướng dẫn chỉ `[ ]` / `{ }`; `guidance` nguyên văn ≤ 4 000 + `guidance_by?` + `guidance_blocks?`; `table_map[].guidance?`; prompt C-4 kèm hướng dẫn mẫu — xem §FLF-364 cuối file |
 | 2026-11-04 | contract-change FLF-363 (ngân hàng phần chung FPT + IEEE 29148) | `template_family` enum mới `fpt` · `ieee29148` · `mixed` (nhãn báo cáo; giá trị cũ đọc ra `ieee29148`, script `migrate:template-family`); `template_section?` = id phần của ngân hàng; heading thêm `content_mismatch?` — xem §FLF-363 cuối file |
@@ -526,7 +528,10 @@ mẫu bắt buộc = "chỉ mẫu đó, không thêm phần, không đổi thứ
 
 Ràng buộc theo loại dự án (2026-11-05): ở `incomplete`, dự án **mới** theo mẫu bắt buộc chỉ đi #8b — #8 với `complete: true` trả
 `409 IMPORT_INVALID_STATE` (`meta.allowed = ["drafting"]`), vì khoá mẫu còn trống thành bản gốc là vô nghĩa; FE chỉ hiện nút "Viết với
-FlintFlow". Dự án **có sẵn** giữ "Dừng, tải gap report" (#9) / "Hoàn thiện" (#8). Không đổi shape.
+FlintFlow". Dự án **có sẵn** (người dùng upload để sửa tiếp SRS, 2026-11-06): một nút "Tiếp tục sửa với FlintFlow" = #8
+`complete: true` (bản gốc 0.1 từ chính file rồi vào workspace); gap report (#9) tải ở workspace, không còn nút ở màn này. Heading
+tính năng (`feature:*`) chỉ chứa chức năng con là heading bao (`template-wrappers.ts`), không thành mục "còn trống" ở I-5. Không đổi
+shape.
 
 I-5 / I-4 với bảng mẫu (2026-11-05, không đổi shape): bảng chỉ có hàng tiêu đề + hàng chỗ trống (`[FR-xxx]`, `[dd/mm/yyyy]`) là
 **trống** (`missing`, cờ `template_section_empty`); bảng một hàng xét như nhãn | giá trị. Hàng chỗ trống không thành item tất định
@@ -556,6 +561,26 @@ baseline 1.0 ⇒ FLF-318 đưa dự án về mode 1, lần import mẫu `draftin
 
 Áp nội dung thư viện: trước baseline FE gửi lô `set custom_sections[id=…]` qua `POST /changes/preview` + `POST /changes {ops, preview_id}`
 (không gọi model); sau baseline FE điền sẵn lệnh vào chat ⇒ change request như mọi lệnh sửa.
+
+### Dự án "Upload SRS có sẵn": tải về giống file upload (2026-11-06, không đổi shape)
+
+Dự án có sẵn (`start_kind ≠ new`, không chuyển từ mode 2) theo **mẫu cố định của công ty** hoặc **cấu trúc FlintFlow đủ mục**
+(chế độ 1): `/export/word|pdf`, file version (#14) dùng **chính file upload** làm nền.
+
+- **Mục chưa đổi** so với bản gốc 0.1 in nguyên văn: đoạn, bảng, ảnh, field, chú thích, bìa. Chưa có CR ⇒ bản tải về có chữ y
+  hệt file upload, chỉ thêm stamp + watermark DRAFT.
+- **Mục bị CR sửa** mới dựng lại từ Spine; bảng gốc dựng lại vẫn là bảng.
+- **Bảng lịch sử** của file giữ nguyên. Không thêm dòng "Import SRS …" / "Baseline 0.1 signed"; mỗi CR thêm một dòng cuối bảng.
+- **SRS có field** (chú thích hình SEQ, bookmark `_Ref`) không còn làm finalize lỗi `422 TEMPLATE_LAYOUT_UNAVAILABLE`.
+- **Dự án có sẵn + mẫu cố định** vẫn chia đoạn nguyên văn (FLF-366). Chỉ mẫu bắt buộc của dự án mới không chia.
+- **Mẫu công ty đã điền:**
+  - tên chức năng / tính năng không bị gán phần nhỏ theo từ khoá;
+  - "Functional Requirements" chứa heading từng chức năng là heading bao;
+  - heading lặp có nội dung trích vào Spine không bị coi là trống (I-5, `template_section_empty`);
+  - cờ sơ đồ của mục mẫu không có không chặn release;
+  - CR nhắm được mục `slot:*`;
+  - gap report gọi "Mục của mẫu", không đòi sơ đồ mẫu không có, `.docx` liệt kê mục còn trống.
+- **Chế độ 4** (thiếu mục FlintFlow) vẫn in theo mẫu FPT.
 
 ### Bản xuất theo đúng file mẫu (2026-11-05, mở rộng D1)
 Dự án `template_intent = fixed`: `GET /projects/:id/export/word|pdf` và file version điền nội dung vào **chính file mẫu đã

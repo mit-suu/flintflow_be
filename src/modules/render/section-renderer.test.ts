@@ -615,7 +615,7 @@ describe("buildRecordOfChanges", () => {
     ])
   })
 
-  it("FLF-318 (business-flow §5.1): mỗi CR một dòng mang số bản phát hành sẽ chứa nó — sau v1.0 là v2.0, không số phụ; release in đúng v2.0", () => {
+  it("FLF-318: mỗi CR một dòng; FLF-361: mang số bản tài liệu của CR (sau v1.0 là v1.1, v1.2), release in đúng v2.0", () => {
     const rows = buildRecordOfChanges([
       change({ txn: "t1", op: "add", path: "baselines[]", step_id: "S-9.5", reason: "Ký baseline v1.0" }),
       change({ txn: "t2", step_id: null, by: "CR-001", reason: "CR-001: Thêm use case gửi cảnh báo" }),
@@ -625,19 +625,34 @@ describe("buildRecordOfChanges", () => {
     ])
     expect(rows.map((r) => [r.version, r.description])).toEqual([
       ["v1.0", "Baseline v1.0 signed"],
-      ["v2.0", "CR-001: Thêm use case gửi cảnh báo"],
-      ["v2.0", "CR-002: Sửa tên màn"],
+      ["v1.1", "CR-001: Thêm use case gửi cảnh báo"],
+      ["v1.2", "CR-002: Sửa tên màn"],
       ["v2.0", "Baseline 2.0 signed"],
-      ["v3.0", "CR-003: Bổ sung NFR"]
+      ["v2.1", "CR-003: Bổ sung NFR"]
     ])
   })
 
-  it("FLF-318: baseline import 0.1 in v0.1 (trước đây rơi về v1.0); CR sau đó mang bản phát hành đầu tiên v1.0", () => {
+  it("FLF-318: baseline import 0.1 in v0.1 (trước đây rơi về v1.0); FLF-361: CR sau đó là bản 0.2", () => {
     const rows = buildRecordOfChanges([
       change({ txn: "t1", op: "add", path: "baselines[]", step_id: null, by: "import", reason: "Baseline 0.1" }),
       change({ txn: "t2", step_id: null, by: "CR-001", reason: "CR-001: Sửa mô tả" })
     ])
-    expect(rows.map((r) => r.version)).toEqual(["v0.1", "v1.0"])
+    expect(rows.map((r) => r.version)).toEqual(["v0.1", "v0.2"])
+  })
+
+  it("FLF-361: sau CR đầu tiên chỉ thêm một dòng cho CR (v0.2) — baseline import cùng bản với dòng import v0.1, không in dòng riêng", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", step_id: null, by: "import", reason: "Import SRS FAP_SRS_v1.0_fixed.docx" }),
+      change({ txn: "t2", step_id: null, by: "import", reason: "Import: kế hoạch step theo template" }),
+      change({ txn: "t2b", step_id: null, by: "import", reason: "render" }),
+      change({ txn: "t3", op: "add", path: "baselines[]", step_id: null, by: "import", reason: "Baseline 0.1" }),
+      change({ txn: "t4", step_id: null, by: "import", reason: "AI check: term_drift" }),
+      change({ txn: "t5", step_id: null, by: "CR-001", reason: "CR-001: Khoá tài khoản sau 3 lần đăng nhập sai liên tiếp." })
+    ])
+    expect(rows.map((r) => [r.version, r.description])).toEqual([
+      ["v0.1", "Import SRS FAP_SRS_v1.0_fixed.docx"],
+      ["v0.2", "CR-001: Khoá tài khoản sau 3 lần đăng nhập sai liên tiếp."]
+    ])
   })
 
   it("FLF-204 (BUG-15): sổ sách của runner không vào §I", () => {

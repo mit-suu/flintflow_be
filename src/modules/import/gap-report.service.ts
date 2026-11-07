@@ -18,7 +18,7 @@ import type { ImportStatus } from "./import.state.js"
 import { latestImport, toReviewFields, transitionImport } from "./import.service.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { sectionTitle } from "./section-catalog.js"
-import { contentSlot } from "./content-slots.js"
+import { contentSlot, withSlotParents } from "./content-slots.js"
 import { displayHeading } from "./heading-label.js"
 import { FEATURE_SECTIONS, continuationOwnerSection } from "./step-plan.js"
 import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
@@ -96,7 +96,8 @@ export const buildGapReport = async (projectId: string): Promise<GapReport> => {
       flags: [...flags].sort((a, b) => (a.level === b.level ? 0 : a.level === "red" ? -1 : 1))
     }))
     .sort((a, b) => (orderOf.get(a.section_id) ?? Infinity) - (orderOf.get(b.section_id) ?? Infinity))
-  const unrenderedDiagrams = unrendered(spine)
+  const fixedTemplate = profile?.target_structure?.target === "template"
+  const unrenderedDiagrams = unrendered(spine, fixedTemplate ? withSlotParents((profile?.layout ?? []).map((l) => l.section_id)) : undefined)
   const low = toReviewFields(drafts, needsConfirm)
 
   return {
@@ -119,10 +120,10 @@ export const buildGapReport = async (projectId: string): Promise<GapReport> => {
 
 /** Hình dựng được từ Spine mode 1 — chỉ liệt kê loại có dữ liệu (không có entity thì không đòi ERD). */
 const DIAGRAM_TARGETS = [
-  { kind: "context", title: "Sơ đồ ngữ cảnh", has: (s: Spine) => s.actors.length > 0 },
-  { kind: "usecase", title: "Sơ đồ use case", has: (s: Spine) => s.use_cases.length > 0 },
-  { kind: "screen_flow", title: "Luồng màn hình", has: (s: Spine) => s.screens.length > 0 },
-  { kind: "erd", title: "Sơ đồ thực thể (ERD)", has: (s: Spine) => s.entities.length > 0 }
+  { kind: "context", title: "Sơ đồ ngữ cảnh", section: "fixed:1", has: (s: Spine) => s.actors.length > 0 },
+  { kind: "usecase", title: "Sơ đồ use case", section: "fixed:2.2.1", has: (s: Spine) => s.use_cases.length > 0 },
+  { kind: "screen_flow", title: "Luồng màn hình", section: "fixed:3.1.1", has: (s: Spine) => s.screens.length > 0 },
+  { kind: "erd", title: "Sơ đồ thực thể (ERD)", section: "fixed:3.1.5", has: (s: Spine) => s.entities.length > 0 }
 ] as const
 
 /**
@@ -130,8 +131,9 @@ const DIAGRAM_TARGETS = [
  * hình nào cho loại đó — đúng trường hợp lúc import PlantUML không sẵn sàng (finalize bỏ qua bước vẽ, không cờ).
  * Không chặn baseline: người dùng bấm vẽ lại ở workspace khi có PlantUML.
  */
-const unrendered = (spine: Spine): GapReport["unrendered_diagrams"] =>
-  DIAGRAM_TARGETS.filter((t) => t.has(spine)).flatMap((t): GapReport["unrendered_diagrams"] => {
+const unrendered = (spine: Spine, templateSections?: ReadonlySet<string>): GapReport["unrendered_diagrams"] =>
+  // Mẫu cố định: chỉ đòi hình mẫu có chỗ in (mẫu công ty không có Use Case Diagram / ERD ⇒ không đòi vẽ)
+  DIAGRAM_TARGETS.filter((t) => t.has(spine) && (!templateSections || templateSections.has(t.section))).flatMap((t): GapReport["unrendered_diagrams"] => {
     const drawn = spine.diagrams.filter((d) => d.kind === t.kind)
     if (!drawn.length) return [{ diagram_id: "", kind: t.kind, section_id: "", title: t.title, reason: "not_rendered" }]
     return drawn
@@ -218,6 +220,15 @@ export const renderGapReportDocx = async (report: GapReport, projectName: string
     ...report.layout.map((l) => [l.section_id, l.heading] as const)
   ])
   const sectionName = (id: string): string => titles.get(id) ?? capitalize(sectionLabel(id))
+  const template = report.target_structure?.target === "template"
+  // I-5: mục của cấu trúc đích còn trống (mẫu cố định: heading của mẫu chưa có nội dung) — bổ sung qua change request
+  const missing = (report.target_structure?.sections ?? []).filter((s) => s.status === "missing")
+  const emptySections: (Paragraph | Table)[] = report.target_structure
+    ? [
+        new Paragraph({ text: "Mục còn trống", heading: HeadingLevel.HEADING_1 }),
+        missing.length ? table(["Mục"], missing.map((s) => [s.title])) : new Paragraph("Không có mục nào còn trống.")
+      ]
+    : []
   const children: (Paragraph | Table)[] = [
     new Paragraph({ text: `Báo cáo thiếu sót — ${projectName}`, heading: HeadingLevel.TITLE }),
     new Paragraph({ children: [new TextRun({ text: `Phiên bản tài liệu ${report.doc_version} · tạo lúc ${formatReportTime(report.generated_at)}`, italics: true })] }),
@@ -237,12 +248,14 @@ export const renderGapReportDocx = async (report: GapReport, projectName: string
           ["Mục", "Loại", "Cờ đỏ", "Cờ vàng"],
           report.layout.map((l) => [
             `${"  ".repeat(Math.max(0, l.level - 1))}${l.heading}`,
-            l.kind === "custom" ? "Mục riêng (ngoài FPT)" : l.kind === "group" ? "Nhóm" : "Mẫu FPT",
+            // Mẫu cố định (mẫu bắt buộc / mẫu công ty): mọi heading là mục của mẫu, không phải "Mẫu FPT" / "ngoài FPT"
+            l.kind === "group" ? "Nhóm" : template ? "Mục của mẫu" : l.kind === "custom" ? "Mục riêng (ngoài FPT)" : "Mẫu FPT",
             String(l.red),
             String(l.yellow)
           ])
         )
       : new Paragraph("Không có bố cục tài liệu (bản nhập trước khi có tính năng này)."),
+    ...emptySections,
     new Paragraph({ text: "Cờ theo mục", heading: HeadingLevel.HEADING_1 })
   ]
   if (!report.sections.length) children.push(new Paragraph("Không có cờ nào đang mở."))
