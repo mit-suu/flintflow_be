@@ -90,4 +90,27 @@ describe("compareTargetStructure (FLF-336 I-5 — so cấu trúc đích)", () =>
     // draftAll chỉ có tác dụng với ý định fixed
     expect(compareTargetStructure(layout, new Set(["fixed:1"]), spineWith(), "free", undefined, { draftAll: true }).target).toBe("fpt")
   })
+
+  it("mẫu cố định — heading tính năng chỉ chứa chức năng con là heading bao: không xếp mục; chức năng con xếp theo nội dung", () => {
+    const layout = [
+      entry(0, "feature:F-3.2", "3.2 Course Registration", 2),
+      entry(1, "function:FR-3.2.1", "3.2.1 Register for course sections", 3),
+      entry(2, "feature:F-3.3", "3.3 Attendance", 2),
+      entry(3, "function:FR-3.3.1", "3.3.1 Take attendance", 3),
+      entry(4, "fixed:4.2.3", "4 Performance", 2)
+    ]
+    const result = compareTargetStructure(layout, new Set(["function:FR-3.2.1"]), spineWith(), "fixed")
+    expect(result.sections.map((s) => [s.section_id, s.status])).toEqual([
+      ["function:FR-3.2.1", "present"],
+      ["function:FR-3.3.1", "missing"],
+      ["fixed:4.2.3", "missing"]
+    ])
+  })
+
+  it("FLF-379: mẫu cố định — Record of Changes / Revision History tự sinh, không thành mục \"Sẽ soạn\"", () => {
+    const layout = [entry(0, "fixed:I", "Revision History", 1), entry(1, "fixed:1", "Introduction", 1)]
+    const result = compareTargetStructure(layout, new Set(["fixed:1"]), spineWith(), "fixed")
+    expect(result.sections.map((s) => s.section_id)).toEqual(["fixed:1"])
+    expect(result.resolved_mode).toBe(1)
+  })
 })

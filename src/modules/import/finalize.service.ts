@@ -54,7 +54,7 @@ import { IMPORT_IMAGE_RULE, IMPORT_NEEDS_REVIEW_RULE, IMPORT_TITLE_CONTENT_RULE,
 import { parseDocument } from "./parse.service.js"
 import { buildImportOps, droppedPermissionFindings, ruleTierOfSections, type DroppedPermission } from "./spine-builder.js"
 import { tableRows } from "./table-rows.js"
-import { buildLayout, buildStepPlan, customSectionOps, customSectionsWithContent, functionOriginals, projectFieldEntities, sectionSegments, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
+import { buildLayout, buildStepPlan, customSectionOps, customSectionsWithContent, functionOriginals, projectFieldEntities, repeatSectionsWithContent, sectionSegments, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
 import { functionSourceHash } from "../render/layout-sections.js"
 import { functionFieldValues, tagFunctionBlocks } from "../render/function-original.js"
 import { TemplateProfile, type HeadingMapEntry, type LayoutEntry, type TableMapEntry } from "./template-profile.model.js"
@@ -212,6 +212,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const withContent = new Set([
     ...sectionsWithContent(layoutBlocks),
     ...customSectionsWithContent(customSections),
+    ...repeatSectionsWithContent(slices, layoutBlocks),
     ...sliceItems.filter((sl) => sl.items.length).map((sl) => `custom:${sl.custom_id}`)
   ])
   const structure = compareTargetStructure(layout, withContent, stripRecord(seeded), intent, undefined, { draftAll })
