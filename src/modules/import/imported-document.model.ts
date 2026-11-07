@@ -10,6 +10,7 @@ import { IMPORT_PAUSE_REASONS, IMPORT_STATUSES, type ImportPauseReason, type Imp
 import { PREFLIGHT_ISSUE_CODES, STAMP_KINDS, type PreflightIssueCode, type StampKind } from "./import.constants.js"
 import type { FinalizeRequest } from "./import.dto.js"
 import type { Spine } from "../spine/spine.types.js"
+import type { StructureChange } from "./structure-preview.js"
 import { TEMPLATE_INTENTS, type TemplateIntent } from "../project/project.model.js"
 
 export interface PreflightIssue {
@@ -77,6 +78,8 @@ export interface IImportedDocument extends Document {
   finalize_checkpoint: FinalizeCheckpoint | null
   /** FLF-336: người dùng bấm "Hoàn thiện" ở màn Kết quả đọc file ⇒ lần finalize kế không dừng ở `incomplete` nữa. */
   complete_requested: boolean
+  /** Màn đọc khung: mục mà I-5 cuối khác bản sơ bộ lúc upload (rỗng ⇒ khớp; null ⇒ chưa finalize / import trước màn đọc khung). */
+  structure_changes: StructureChange[] | null
   created_by: mongoose.Types.ObjectId
   createdAt: Date
   updatedAt: Date
@@ -152,6 +155,7 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
       default: null
     },
     complete_requested: { type: Boolean, default: false },
+    structure_changes: { type: Schema.Types.Mixed, default: null },
     intent: { type: String, enum: [...TEMPLATE_INTENTS, null], default: null },
     org_template_id: { type: Schema.Types.ObjectId, ref: "OrgTemplate", default: null },
     finalize_checkpoint: {

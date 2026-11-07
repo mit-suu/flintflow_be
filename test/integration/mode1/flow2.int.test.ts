@@ -247,7 +247,9 @@ describe("Luồng 2 cho phần thiếu — chế độ 3", () => {
     })
     const { projectId, importId, userId } = await importAtExtracting({ buffer: source })
     await runExtraction(projectId, userId, importId)
+    // Hồ sơ trước màn đọc khung (không có bản sơ bộ): dự án mới có mẫu bắt buộc vẫn là khung mẫu như cũ
     await Project.updateOne({ _id: projectId }, { $set: { template_intent: "fixed", start_kind: "new" } })
+    await TemplateProfile.updateOne({ projectId }, { $set: { structure_preview: null } })
     await startFinalize(projectId, userId, { import_id: importId, base_version: await version(projectId) })
     await waitForFinalize(importId)
     expect((await ImportedDocument.findById(importId))!.status).toBe("incomplete")

@@ -19,6 +19,7 @@ import type { DiagramImageKind, ImportExtractDiagramOutput, ImportExtractOutput 
 import { loadImportImage } from "../render/import-media.js"
 import { IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { DocBlock, type IDocBlock } from "./doc-block.model.js"
+import { isTemplateFile } from "./structure-preview.js"
 import { DIAGRAM_SECTIONS, DIAGRAM_TARGETS, NFR_CATEGORY_BY_SECTION, isExtractableSection, schemaExcerptFor, targetsOf } from "./extract-targets.js"
 import {
   IdAllocator,
@@ -695,13 +696,17 @@ interface ExtractionInputs {
 }
 
 /**
- * FLF-378 (luồng C, C2.1): dự án **mới** theo mẫu bắt buộc — file là mẫu (hướng dẫn / ví dụ), không phải dữ liệu ⇒ không
- * trích nội dung vào Spine (không gọi AI, không đọc bảng tất định). Chỉ giữ cấu trúc từ heading (tính năng / chức năng tạm
- * của mapping) để mục của mẫu khớp được phần tử Spine; chữ của mẫu thành `template_context` lúc finalize.
+ * FLF-378 (luồng C, C2.1): file là **khung mẫu để điền** (giữ khung + màn đọc khung thấy phần lớn mục trống — `isTemplateFile`)
+ * — chữ trong file là hướng dẫn / ví dụ, không phải dữ liệu ⇒ không trích nội dung vào Spine (không gọi AI, không đọc bảng tất
+ * định). Chỉ giữ cấu trúc từ heading (tính năng / chức năng tạm của mapping) để mục của mẫu khớp được phần tử Spine; chữ của
+ * mẫu thành `template_context` lúc finalize.
  */
 export const isTemplateOnlyProject = async (projectId: string): Promise<boolean> => {
-  const project = await Project.findById(projectId, { start_kind: 1, template_intent: 1 }).lean()
-  return project?.start_kind === "new" && project.template_intent === "fixed"
+  const [project, profile] = await Promise.all([
+    Project.findById(projectId, { start_kind: 1, template_intent: 1 }).lean(),
+    TemplateProfile.findOne({ projectId }, { structure_preview: 1 }).lean()
+  ])
+  return isTemplateFile(project, profile)
 }
 
 export const loadExtractionInputs = async (projectId: string): Promise<ExtractionInputs | null> => {
