@@ -24,7 +24,7 @@ vi.mock("../pipeline/meter.service.js", () => ({
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { AiActionError, ActionType } from "../../shared/ai/ai-action.types.js"
 import { finalizeCall, releaseCall, reserveCall } from "../pipeline/meter.service.js"
-import { isInsufficientCredit, withMeteredAi } from "./metered-ai.js"
+import { classifyAiFailure, isInsufficientCredit, withMeteredAi } from "./metered-ai.js"
 
 const exec = vi.mocked(executeAiAction)
 const PROJECT = "64b000000000000000000001"
@@ -87,7 +87,7 @@ describe("withMeteredAi — lỗi", () => {
   it("hết credit (INSUFFICIENT_CREDIT) ⇒ release usage, reason credits, không ném lỗi", async () => {
     exec.mockRejectedValueOnce(new AiActionError(402, "Không đủ credit", "INSUFFICIENT_CREDIT"))
     const res = await withMeteredAi({ projectId: PROJECT, userId: USER, stepId: "C-4:CR-002" }, ActionType.CR_PROPOSE, {})
-    expect(res).toEqual({ ok: false, reason: "credits", message: "Không đủ credit", userMessage: "Không đủ credit", usageId: "usage-1", code: "INSUFFICIENT_CREDIT" })
+    expect(res).toEqual({ ok: false, reason: "credits", message: "Không đủ credit", userMessage: "Không đủ credit", usageId: "usage-1", code: "INSUFFICIENT_CREDIT", kind: "credits" })
     expect(calls).toEqual(["reserve:C-4:CR-002", "release:usage-1"])
     expect(finalizeCall).not.toHaveBeenCalled()
   })
@@ -108,7 +108,9 @@ describe("withMeteredAi — lỗi", () => {
       message: "Provider down",
       userMessage: "Dịch vụ AI đang gặp sự cố. Vui lòng thử lại sau ít phút.",
       usageId: "usage-1",
-      code: "AI_EXECUTION_FAILED"
+      code: "AI_EXECUTION_FAILED",
+      // FLF-360: lỗi 500 chung (không phải quá tải) ⇒ I-4 không đọc lại cả lô
+      kind: "config"
     })
     expect(exec).toHaveBeenCalledTimes(1)
     expect(calls).toEqual(["reserve:I-4:fixed:1", "release:usage-1"])
@@ -142,5 +144,43 @@ describe("isInsufficientCredit", () => {
     expect(isInsufficientCredit(new AiActionError(429, "x", "RATE_LIMIT_EXCEEDED"))).toBe(false)
     expect(isInsufficientCredit(Object.assign(new Error("x"), { code: "INSUFFICIENT_CREDIT", statusCode: 402 }))).toBe(false)
     expect(isInsufficientCredit(null)).toBe(false)
+  })
+})
+
+describe("FLF-360 classifyAiFailure — lỗi tạm thời / hết credit / cấu hình", () => {
+  it("tạm thời: quá tải \"high demand\", 503, 429 không phải hết tiền, timeout, lỗi mạng", () => {
+    expect(classifyAiFailure(new AiActionError(503, "high demand", "GEMINI_OVERLOADED"))).toBe("transient")
+    expect(classifyAiFailure(new AiActionError(503, "Service Unavailable", "PROVIDER_ERROR"))).toBe("transient")
+    expect(classifyAiFailure(new AiActionError(429, "Too many requests", "RATE_LIMIT_EXCEEDED"))).toBe("transient")
+    expect(classifyAiFailure(new AiActionError(504, "deadline", "GEMINI_TIMEOUT"))).toBe("transient")
+    expect(classifyAiFailure(Object.assign(new Error("socket"), { code: "ECONNRESET" }))).toBe("transient")
+    expect(classifyAiFailure(new Error("Request timeout after 60000ms"))).toBe("transient")
+    expect(classifyAiFailure(new TypeError("fetch failed"))).toBe("transient")
+  })
+
+  it("hết credit: INSUFFICIENT_CREDIT / 402; 429 vì hết hạn mức chi của nhà cung cấp không phải tạm thời", () => {
+    expect(classifyAiFailure(new AiActionError(402, "Insufficient credits", "INSUFFICIENT_CREDIT"))).toBe("credits")
+    expect(classifyAiFailure(new AiActionError(402, "x", "OTHER"))).toBe("credits")
+    expect(classifyAiFailure(new AiActionError(500, "You exceeded your current quota", "PROVIDER_ERROR"))).toBe("config")
+  })
+
+  it("sai schema / lỗi 500 chung (đã thử lại trong lượt gọi) không phải quá tải ⇒ không đọc lại cả lô", () => {
+    expect(classifyAiFailure(new AiActionError(500, "bad json", "PARSE_FAILED"))).toBe("config")
+    expect(classifyAiFailure(new AiActionError(500, "schema", "SCHEMA_MISMATCH"))).toBe("config")
+    expect(classifyAiFailure(new AiActionError(500, "Provider down", "AI_EXECUTION_FAILED"))).toBe("config")
+  })
+
+  it("cấu hình / không tự khỏi: thiếu khoá vision, provider không nhận ảnh, 400 / 403", () => {
+    expect(classifyAiFailure(new AiActionError(500, "Gemini API key is missing.", "GEMINI_KEY_MISSING"))).toBe("config")
+    expect(classifyAiFailure(new AiActionError(400, "no vision", "AI_PROVIDER_NO_VISION"))).toBe("config")
+    expect(classifyAiFailure(new AiActionError(400, "bad request", "PROVIDER_ERROR"))).toBe("config")
+    expect(classifyAiFailure(new AiActionError(403, "forbidden", "FORBIDDEN"))).toBe("config")
+    expect(classifyAiFailure("boom")).toBe("config")
+  })
+
+  it("withMeteredAi trả loại lỗi cùng kết quả", async () => {
+    exec.mockRejectedValueOnce(new AiActionError(503, "high demand", "GEMINI_OVERLOADED"))
+    const r = await withMeteredAi({ projectId: PROJECT, userId: USER, stepId: "I-4:fixed:2.2.1" }, ActionType.IMPORT_EXTRACT_DIAGRAM, {})
+    expect(r).toMatchObject({ ok: false, reason: "resume_later", kind: "transient" })
   })
 })

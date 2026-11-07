@@ -146,6 +146,11 @@ export interface RuleProfile {
   /** Heading bao của mẫu (`custom:*` chỉ chứa mục con, `import/template-wrappers.ts`) — trống không phải gap, không cờ. */
   templateWrappers?: ReadonlySet<string>
   /**
+   * Mục riêng của mẫu có phần tử Spine qua slice (heading lặp — nội dung đã trích vào Spine, khối của mục chỉ còn phần
+   * không trích) — không phải mục trống.
+   */
+  templateFilled?: ReadonlySet<string>
+  /**
    * FLF-366: đoạn nguyên văn của file import (`TemplateProfile.section_segments`). Có ⇒ bật `original_text_mentions_changed`
    * (đoạn in nguyên văn nhắc tới tên / mã phần tử đã đổi tên hay bị xoá so với lúc import). Không đặt ⇒ luật không chạy.
    */
@@ -468,6 +473,16 @@ const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$
 const mentionsToken = (text: string, token: string): boolean =>
   token.trim().length > 0 && new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegex(token.trim())}(?![\\p{L}\\p{N}])`, "iu").test(text)
 
+/** Khoá so mã (như `idKey` của import): `UC-01` = `UC01` = `uc 1` — id Spine giữ dạng tài liệu (FLF-361). */
+const codeKey = (id: string): string => id.trim().toUpperCase().replace(/[-_\s]+/g, "").replace(/(^|\D)0+(?=\d)/g, "$1")
+
+/** Chữ có nhắc mã `id` không, chấp nhận mọi cách viết (`UC-01`, `UC01`, `UC 1`). */
+const mentionsCode = (text: string, id: string): boolean => {
+  const m = /^([A-Za-z]+)[-_\s]?0*(\d.*)$/.exec(id.trim())
+  if (!m) return mentionsToken(text, id)
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegex(m[1])}[-_ ]?0*${escapeRegex(m[2])}(?![\\p{L}\\p{N}])`, "iu").test(text)
+}
+
 const partText = (blocks: readonly { kind: string; text: string; rows: string[][] | null }[]): string =>
   blocks.map((b) => (b.kind === "table" ? (b.rows ?? []).map((r) => r.join(" ")).join("\n") : b.text)).join("\n")
 
@@ -486,11 +501,11 @@ export const originalTextMentionsChanged = (spine: Spine, records: readonly Sect
       const text = partText(blocks)
       for (const m of part.mentions) {
         const list = (spine as unknown as Record<string, unknown>)[m.array]
-        const el = Array.isArray(list) ? (list as { id?: string; name?: string }[]).find((x) => x.id === m.id) : undefined
+        const el = Array.isArray(list) ? (list as { id?: string; name?: string }[]).find((x) => typeof x.id === "string" && codeKey(x.id) === codeKey(m.id)) : undefined
         const renamed = !!el && m.name !== null && typeof el.name === "string" && el.name !== m.name
         if (el && !renamed) continue
         const token = m.name ?? m.id
-        if (!mentionsToken(text, token)) continue
+        if (!(m.name !== null ? mentionsToken(text, token) : mentionsCode(text, m.id))) continue
         out.push({
           level: "yellow",
           rule_id: "original_text_mentions_changed",
@@ -803,10 +818,17 @@ export const orphanScreens = (spine: Spine): { screen: Spine["screens"][number];
  */
 /** Luật "mục bắt buộc còn trống / cũ" — với mẫu bắt buộc chỉ áp lên mục của mẫu (mục FPT ngoài mẫu không in, không đòi). */
 const SECTION_SCOPED_RULES: ReadonlySet<string> = new Set(["section_empty", "array_empty", "section_stale_at_baseline", "section_awaiting_reaccept"])
+/**
+ * Cờ sơ đồ (vẽ lỗi / cũ) của mục mẫu không có chỗ in (mẫu công ty không có Use Case Diagram, ERD…): sơ đồ không vào tài liệu
+ * ⇒ không đòi vẽ lại, không chặn release — change request cũng không sửa được mục mẫu không có.
+ */
+const DIAGRAM_RULES: ReadonlySet<string> = new Set(["render_error", "diagram_stale"])
 const outsideTemplate = (c: FlagCandidate, layout: ReadonlySet<string> | undefined): boolean =>
-  !!layout && SECTION_SCOPED_RULES.has(c.rule_id) && c.section_id.startsWith("fixed:") && !layout.has(c.section_id)
+  !!layout && !layout.has(c.section_id) &&
+  ((SECTION_SCOPED_RULES.has(c.rule_id) && c.section_id.startsWith("fixed:")) ||
+    (DIAGRAM_RULES.has(c.rule_id) && /^(fixed|function|feature):/.test(c.section_id)))
 
-const fixedTemplateGaps = (spine: Spine, layout: ReadonlySet<string>, wrappers: ReadonlySet<string> = new Set()): FlagCandidate[] => [
+const fixedTemplateGaps = (spine: Spine, layout: ReadonlySet<string>, wrappers: ReadonlySet<string> = new Set(), filled: ReadonlySet<string> = new Set()): FlagCandidate[] => [
   ...REQUIRED_FIXED_SECTION_IDS.filter((id) => !layout.has(id) && !DERIVED_SECTION_IDS.has(id) && sectionHasData(spine, id) === true).map(
     (id): FlagCandidate => ({
       level: "yellow",
@@ -822,6 +844,7 @@ const fixedTemplateGaps = (spine: Spine, layout: ReadonlySet<string>, wrappers: 
       (c) =>
         layout.has(`custom:${c.id}`) &&
         !wrappers.has(`custom:${c.id}`) &&
+        !filled.has(`custom:${c.id}`) &&
         c.heading.trim() &&
         // Bảng: bỏ hàng tiêu đề cột — bảng mẫu chỉ có tiêu đề + hàng chỗ trống vẫn là mục trống
         !c.blocks.some((b) => b.image_ref || (b.kind === "table" ? tableBodyHasRealText(b.rows) : isRealText(b.text)))
@@ -1504,7 +1527,7 @@ export const runDeterministicCheck = (
     ...systemNameMissing(spine),
     ...nonEnglishContent(spine, gate),
     ...(options.ruleProfile?.sectionSegments?.length ? originalTextMentionsChanged(spine, options.ruleProfile.sectionSegments) : []),
-    ...(options.ruleProfile?.templateLayout ? fixedTemplateGaps(spine, options.ruleProfile.templateLayout, options.ruleProfile.templateWrappers) : [])
+    ...(options.ruleProfile?.templateLayout ? fixedTemplateGaps(spine, options.ruleProfile.templateLayout, options.ruleProfile.templateWrappers, options.ruleProfile.templateFilled) : [])
   ].filter((c) => !outsideTemplate(c, options.ruleProfile?.templateLayout)), options.ruleProfile)
 
   const index = buildIdIndex(spine)

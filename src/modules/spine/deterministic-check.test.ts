@@ -895,6 +895,20 @@ describe("chế độ 3 — mẫu bắt buộc (FLF-278 trên FLF-335/336)", () 
       ruleProfile: { exclude: new Set(), downgrade: new Set(), templateLayout: layout, templateWrappers: new Set(["custom:CS01"]) }
     })
     expect(wrapped.filter((f) => f.rule_id === "template_section_empty").map((f) => f.section_id)).toEqual(["custom:CS04"])
+    // Heading lặp có nội dung đã trích vào Spine qua slice ⇒ không phải mục trống
+    const filled = runDeterministicCheck(spine, [], {
+      ruleProfile: { exclude: new Set(), downgrade: new Set(), templateLayout: layout, templateFilled: new Set(["custom:CS04"]) }
+    })
+    expect(filled.filter((f) => f.rule_id === "template_section_empty").map((f) => f.section_id)).toEqual(["custom:CS01"])
+  })
+
+  it("mẫu cố định không có chỗ in sơ đồ (Use Case Diagram) ⇒ sơ đồ vẽ lỗi / cũ không thành cờ chặn release", () => {
+    const d = FIXTURE.diagrams.find((x) => x.kind === "usecase")!
+    const errored = variant((s) => Object.assign(s.diagrams.find((x) => x.id === d.id)!, { render_status: "error", error: "syntax" }))
+    const profile = (layout: string[]) => ({ ruleProfile: { exclude: new Set<string>(), downgrade: new Set<string>(), templateLayout: new Set(layout) } })
+    expect(byRule(runDeterministicCheck(errored, [], profile(["fixed:1"])), "render_error")).toEqual([])
+    // Mẫu có mục chứa sơ đồ ⇒ vẫn báo như cũ
+    expect(byRule(runDeterministicCheck(errored, [], profile(["fixed:1", "fixed:2.2.1"])), "render_error")).toHaveLength(1)
   })
 })
 

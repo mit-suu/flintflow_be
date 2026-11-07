@@ -183,6 +183,24 @@ const envSchema = z.object({
     .string()
     .default("false")
     .transform((v) => v === "true" || v === "1"),
+  /**
+   * FLF-360: chờ trước mỗi lượt đọc lại (ms, cách nhau dấu phẩy) khi AI quá tải trong lúc import — số phần tử = số lượt đọc
+   * lại tối đa của một lô chữ / của các ảnh chưa đọc được. Test đặt `0,0,0`.
+   */
+  IMPORT_AI_RETRY_BACKOFF_MS: z
+    .string()
+    .default("15000,45000,90000")
+    .transform((v) => v.split(",").map((x) => x.trim()).filter(Boolean).map(Number))
+    .refine((v) => v.every((n) => Number.isFinite(n) && n >= 0), { message: "danh sách số ms ≥ 0, cách nhau dấu phẩy" }),
+  /**
+   * FLF-360: job nền đọc lại ảnh sơ đồ sau khi đã có bản 0.1 — chờ trước từng lượt (ms, cách nhau dấu phẩy); hết danh sách
+   * thì dừng, giữ cờ vàng. Rỗng ⇒ tắt job (test).
+   */
+  IMPORT_REREAD_JOB_DELAYS_MS: z
+    .string()
+    .default("120000,600000,1800000,3600000,10800000")
+    .transform((v) => v.split(",").map((x) => x.trim()).filter(Boolean).map(Number))
+    .refine((v) => v.every((n) => Number.isFinite(n) && n >= 0), { message: "danh sách số ms ≥ 0, cách nhau dấu phẩy" }),
   /** Số job import (I-4 / finalize, mỗi job vài phút gọi AI) một worker chạy song song. */
   JOB_IMPORT_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(2),
 

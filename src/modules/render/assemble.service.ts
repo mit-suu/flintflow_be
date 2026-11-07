@@ -445,6 +445,10 @@ const buildInChargeResolver = async (changes: ChangeRecordRow[]): Promise<(by: s
  * FLF-265: tài liệu tiếng Việt in `"system"` thành "Hệ thống" — resolver do caller dựng (tra `User`) giữ nguyên cho
  * mọi người ghi khác. Không có ngôn ngữ ⇒ đúng resolver cũ.
  */
+/** Lô import (`by = import`: nạp dữ liệu file + ký bản gốc 0.1) không thành dòng lịch sử khi file đã có bảng lịch sử riêng. */
+export const withoutImportRows = (rows: readonly ChangeRecordRow[], legacyRows: number): ChangeRecordRow[] =>
+  legacyRows > 0 ? rows.filter((r) => r.by !== "import") : [...rows]
+
 const inChargeFor = (resolve: ((by: string) => string) | undefined, language?: string): ((by: string) => string) | undefined =>
   isVietnamese(language) ? (by) => (by === SYSTEM_ACTOR ? assembleTextFor(language).systemInCharge : resolve ? resolve(by) : by) : resolve
 
@@ -783,8 +787,10 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
     source,
     generatedAt: deps.now().toISOString(),
     sections,
-    // T15 (mode 1 v3): lịch sử sửa đổi của khách (file gốc) đứng trước, lịch sử FlintFlow nối tiếp
-    recordOfChanges: [...(input.template?.legacyRecord ?? []), ...buildRecordOfChanges(input.recordChanges, inChargeFor(deps.resolveInCharge, language), language)],
+    // T15 (mode 1 v3): lịch sử sửa đổi của khách (file gốc) đứng trước, lịch sử FlintFlow nối tiếp. File đã có bảng lịch sử
+    // của riêng nó ⇒ không thêm dòng chỉ vì import / ký bản gốc 0.1 (lô `by = import`): bản 0.1 giữ đúng bảng của file, mỗi
+    // change request mới thành một dòng
+    recordOfChanges: [...(input.template?.legacyRecord ?? []), ...buildRecordOfChanges(withoutImportRows(input.recordChanges, input.template?.legacyRecord?.length ?? 0), inChargeFor(deps.resolveInCharge, language), language)],
     flagsAppendix: buildFlagsAppendix(spine, input.statusChanges, numbers, source, states, titles, language, translated?.localized)
   }
   if (source === "draft") refDoc.watermark = "DRAFT"
