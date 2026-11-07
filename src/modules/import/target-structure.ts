@@ -77,6 +77,16 @@ const hasContent = (spine: Spine, sectionId: string, withContent: ReadonlySet<st
   return withContent.has(sectionId)
 }
 
+/** Có mục con (heading cấp sâu hơn đứng ngay sau, tới heading cùng cấp / cấp trên kế tiếp) có nội dung. */
+const childHasContent = (ordered: readonly LayoutEntry[], index: number, spine: Spine, withContent: ReadonlySet<string>): boolean => {
+  const level = ordered[index].level
+  for (let j = index + 1; j < ordered.length && ordered[j].level > level; j++) {
+    const child = ordered[j].section_id
+    if (!child.startsWith("group:") && hasContent(spine, child, withContent)) return true
+  }
+  return false
+}
+
 /** Tiêu đề của mục theo file upload, kèm số Word tự đánh (FLF-362); mục không có trong file ⇒ tên mẫu. */
 const titleOf = (sectionId: string, layout: readonly LayoutEntry[]): string => {
   const entry = layout.find((l) => l.section_id === sectionId)
@@ -98,14 +108,21 @@ export const compareTargetStructure = (
     // gom khối dưới heading nhóm / khối không trích, thuộc mục đứng trước chứ không phải heading của mẫu)
     const seen = new Set<string>()
     const wrappers = templateWrapperIds(layout)
-    for (const entry of layout) {
+    const ordered = [...layout].sort((a, b) => a.order - b.order)
+    for (const [i, entry] of ordered.entries()) {
       if (entry.section_id.startsWith("group:") || seen.has(entry.section_id)) continue
       if (entry.section_id.startsWith("custom:") && !entry.heading_text.trim()) continue
       seen.add(entry.section_id)
+      // FLF-379: Record of Changes / Revision History tự sinh từ lịch sử thay đổi — không phải mục cần soạn
+      if (DERIVED_SECTIONS.has(entry.section_id)) continue
       if (draftAll && isNonDraftHeading(entry.section_id, entry.heading_text)) continue
-      const present = draftAll ? false : hasContent(spine, entry.section_id, withContent)
+      // FLF-378: dự án mới theo mẫu bắt buộc — chữ trong mẫu không tính là nội dung
+      const own = draftAll ? false : hasContent(spine, entry.section_id, withContent)
       // Heading bao chỉ chứa mục con (vd "2 Overall Description") không phải mục cần soạn
-      if (wrappers.has(entry.section_id) && !present) continue
+      if (wrappers.has(entry.section_id) && !own) continue
+      // FLF-379: heading chỉ có mục con (tính năng "3.2 Course Registration" ⇒ chức năng 3.2.1…) — mục con có nội dung thì
+      // mục cha đã có nội dung, không "Sẽ soạn"
+      const present = !draftAll && (own || childHasContent(ordered, i, spine, withContent))
       const owners = templateSectionOwnerSteps(entry.section_id, spine)
       sections.push({ section_id: entry.section_id, title: titleOf(entry.section_id, layout), status: present ? "present" : "missing", owner_steps: owners })
     }
