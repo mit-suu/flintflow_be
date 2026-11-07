@@ -173,7 +173,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
   const executor = options.executor ?? defaultExecutor
   const spine = options.spine ?? (await loadSpine(projectId, ctx.spine_version))
 
-  const guidance = contentGuidance(ctx)
+  // FLF-378: mẫu bắt buộc của dự án mới (hướng dẫn / ví dụ không chép / ngữ cảnh của các mục bước này soạn)
+  const guidance = [contentGuidance(ctx), ctx.templateGuidance].filter(Boolean).join(PARAGRAPH)
   // BUG-02: model chỉ được sửa/xoá phần tử nó thấy trong projection (của lô hiện tại, nếu S-5 chia lô)
   const visibleIds = visibleIdsOf(ctx.projection)
   const gateIds = callKind === "revision" ? (options.gateAssumptionIds ?? new Set<string>()) : undefined

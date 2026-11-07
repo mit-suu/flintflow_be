@@ -25,6 +25,11 @@ const unavailable = (reason: string): never => {
 export interface SourceWriteOptions {
   keepSource?: ReadonlySet<string>
   legacyRecordCount?: number
+  /**
+   * FLF-378 (luồng C, C2.5): file là **mẫu** của dự án mới — hướng dẫn, ví dụ, ngữ cảnh của mẫu không lọt vào bản in: mục
+   * chưa có nội dung bỏ đoạn thân của mẫu; bảng mẫu không được điền giữ hàng tiêu đề + style, bỏ dòng mẫu.
+   */
+  stripTemplateText?: boolean
 }
 
 /** Populate the imported package in place: its styles, sections and ancillary parts remain authoritative. */
@@ -118,7 +123,10 @@ export async function writeTemplateDocx(
   }
   for (const slot of slots) {
     if (handledSlots.has(slot)) continue
-    if (!slot.sections.some((s) => s.blocks.length || s.id !== slot.section_id)) continue
+    if (!slot.sections.some((s) => s.blocks.length || s.id !== slot.section_id)) {
+      if (sourceOptions.stripTemplateText && slot.section_id !== "fixed:I") stripTemplateBody(slot.nodes)
+      continue
+    }
     // Mục nguyên vẹn so với lúc import ⇒ không đụng node nào của file gốc
     if (keep && slot.sections.every((s) => keep.has(s.id))) continue
     if (slot.nodes.some((n) => isW(n, "p") && isLayoutParagraph(n) && wAll(n, "t").some((t) => t.textContent?.trim()))) {
@@ -192,9 +200,11 @@ export async function writeTemplateDocx(
     const replacedTables = new Set(tables.slice(0, tableIndex))
     for (const node of slot.nodes) {
       // Breaks and paragraph section properties are layout, even inside a body slot.
-      // An unfilled source table remains part of the template, including its sample rows.
+      // An unfilled source table remains part of the template, including its sample rows (FLF-378: trừ mẫu của dự án mới —
+      // bỏ dòng mẫu, giữ hàng tiêu đề).
       if (preserved.has(node)) continue
       if (replacedTables.has(node) || (isW(node, "p") && !isLayoutParagraph(node))) parent.removeChild(node)
+      else if (sourceOptions.stripTemplateText && isW(node, "tbl")) stripSampleRows(node)
     }
   }
   // Mẫu để điền: thay chữ giữ chỗ của bìa. Dự án có sẵn: bìa là của file đã viết ⇒ giữ nguyên
@@ -206,6 +216,23 @@ export async function writeTemplateDocx(
   const lineage = exportLineage(doc)
   await writeStamp(pkg, { project_id: doc.projectId, version: doc.version, source: doc.source, base_version: lineage.base, kind: lineage.release ? "release" : "draft" })
   return pkg.toBuffer()
+}
+
+/** FLF-378: bảng mẫu giữ hàng tiêu đề (+ style), bỏ dòng mẫu / ví dụ bên dưới. */
+const stripSampleRows = (tbl: Element): void => {
+  for (const row of wKids(tbl, "tr").slice(1)) tbl.removeChild(row)
+}
+
+/**
+ * FLF-378: mục của mẫu chưa có nội dung soạn — bỏ đoạn thân (hướng dẫn, ví dụ, ngữ cảnh) và dòng mẫu của bảng. Ngắt trang /
+ * section, field (mục lục), ảnh, đối tượng lạ giữ nguyên.
+ */
+const stripTemplateBody = (nodes: readonly Element[]): void => {
+  for (const node of nodes) {
+    const parent = node.parentNode
+    if (isW(node, "tbl")) stripSampleRows(node)
+    else if (isW(node, "p") && !isLayoutParagraph(node) && !hasOpaqueContent(node)) parent?.removeChild(node)
+  }
 }
 
 type RecordRow = RenderedDocument["recordOfChanges"][number]

@@ -78,7 +78,12 @@ export const writeProjectDocx = async (
   }
 
   const context = await loadFixedTemplateContext(doc.projectId, sourceBinding)
-  const filled = await writeTemplateDocx(doc, context.template, context.headingMap, context.binding.table_map, fidelity ? sourceWriteOptions(fidelity, context.binding) : {})
+  // FLF-378 (luồng C): dự án mới theo mẫu bắt buộc — file upload là mẫu, chữ của mẫu không vào bản in
+  const project = await Project.findById(doc.projectId, { start_kind: 1 }).lean()
+  const filled = await writeTemplateDocx(doc, context.template, context.headingMap, context.binding.table_map, {
+    ...(fidelity ? sourceWriteOptions(fidelity, context.binding) : {}),
+    stripTemplateText: project?.start_kind === "new"
+  })
   return withDraftWatermark(doc, filled)
 }
 

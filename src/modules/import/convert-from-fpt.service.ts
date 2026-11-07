@@ -11,6 +11,8 @@
  *   `snapshotBaseline` và không ghi Spine (một lô chạm `baselines[` sẽ thành thêm một dòng trong §I).
  * - Ký baseline và chuyển đổi KHÔNG chung transaction. Lỗi giữa chừng ⇒ dự án vẫn `fpt` đã ký, bản ghi + file đã tạo bị
  *   gỡ; gọi lại (mở dự án, script migrate) chạy lại từ đầu, không tạo trùng. `mode` đổi ở bước CUỐI.
+ * - FLF-378: dự án mới theo mẫu bắt buộc (Luồng 2 xong) ⇒ TemplateProfile của lúc import giữ nguyên (layout, heading map,
+ *   `template_context`); DocVersion 1.0 mang `template_source` + `record_snapshot` để mọi bản in sau 1.0 theo đúng mẫu.
  */
 
 import { createHash } from "node:crypto"
@@ -18,6 +20,8 @@ import { scheduleEmbeddingSync } from "../change-request/embedding/embedding-syn
 import { docFileStore } from "../doc-version/doc-file.store.js"
 import { DocVersion } from "../doc-version/doc-version.model.js"
 import { renderVersionFile } from "../doc-version/render-version.js"
+import { captureTemplateSourceBinding } from "../doc-version/template-source-binding.js"
+import { listChangesForRecord } from "../render/assemble.service.js"
 import { versionFileName } from "../doc-version/versioning.js"
 import { notify } from "../notification/notification.service.js"
 import { Project } from "../project/project.model.js"
@@ -94,7 +98,17 @@ const convert = async (projectId: string, userId: string, opts: ConvertOptions):
   await removeLeftovers(projectId)
   // Dự án chưa đổi mode ⇒ ngôn ngữ như mode 2: tài liệu theo dự án, chữ gốc `en`
   const languages = await projectLanguages(projectId, project)
-  const buffer = await renderVersionFile(projectId, project.name, spine, { version: CONVERTED_DOC_VERSION, stampSource: CONVERT_STAMP_SOURCE, languages })
+  // FLF-378 (luồng C, C3.1): dự án theo mẫu bắt buộc — bản 1.0 ghim binding / layout của mẫu (file mẫu, heading map, bảng)
+  // như bản 0.1 của finalize: tải lại 1.0, xuất baseline, CR sau 1.0 đều in đúng mẫu. Dự án FPT ⇒ null (giữ như cũ).
+  const templateSource = await captureTemplateSourceBinding(projectId)
+  const recordSnapshot = templateSource ? await listChangesForRecord(projectId) : null
+  const buffer = await renderVersionFile(projectId, project.name, spine, {
+    version: CONVERTED_DOC_VERSION,
+    stampSource: CONVERT_STAMP_SOURCE,
+    languages,
+    ...(templateSource ? { templateSource } : {}),
+    ...(recordSnapshot ? { recordChanges: recordSnapshot } : {})
+  })
   const fileRef = await docFileStore().save(buffer, { projectId, kind: "version", name: CONVERTED_DOC_VERSION })
 
   try {
@@ -130,6 +144,7 @@ const convert = async (projectId: string, userId: string, opts: ConvertOptions):
       original_ref: null,
       based_on: null,
       baseline_ref: entry.id,
+      ...(templateSource ? { template_source: templateSource, record_snapshot: recordSnapshot } : {}),
       created_by: userId
     })
     await Baseline.updateOne({ _id: entry.snapshot_ref }, { $set: { doc_version: CONVERTED_DOC_VERSION } })

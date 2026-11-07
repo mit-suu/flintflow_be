@@ -104,6 +104,8 @@ export interface LayoutResult {
   slices: LayoutSlice[]
   /** FLF-366: đoạn của từng mục FPT `fixed:*` có trong file (kể cả mục chỉ có heading). */
   segments: LayoutSegment[]
+  /** FLF-378 (`templateOnly`): mọi khối dưới heading của mẫu, theo mục (`section_id` của layout) — nguồn của `template_context`. */
+  contextBlocks: { section_id: string; block: CustomBlock }[]
 }
 
 const toCustomBlock = (b: LayoutBlock): CustomBlock | null => {
@@ -142,9 +144,18 @@ export const buildLayout = (
    * FLF-366: chia đoạn mục FPT. Tắt cho mẫu bắt buộc (`template_intent = fixed`, chế độ 3): file upload là mẫu để điền
    * (bản xuất điền vào chính file đó — FLF-371), không phải SRS cần in nguyên văn.
    */
-  options: { segment?: boolean } = {}
+  options: {
+    segment?: boolean
+    /**
+     * FLF-378 (luồng C — dự án mới theo mẫu bắt buộc): file là **mẫu**, không phải dữ liệu. Mục riêng không giữ nguyên văn
+     * (chữ ví dụ / hướng dẫn không lọt vào bản in); mọi khối được gom vào `contextBlocks` theo mục.
+     */
+    templateOnly?: boolean
+  } = {}
 ): LayoutResult => {
   const segmentOn = options.segment ?? true
+  const templateOnly = options.templateOnly === true
+  const contextBlocks: LayoutResult["contextBlocks"] = []
   const layout: LayoutEntry[] = []
   const customSections: CustomSection[] = []
   const slices: LayoutSlice[] = []
@@ -203,6 +214,11 @@ export const buildLayout = (
         current = null
         slice = null
         owner = enclosing.entry
+        // FLF-378: mục con của mẫu (1.1 Purpose dưới 1 Product Overview) ⇒ ngữ cảnh mẫu ghi tên mục con để bước soạn thấy cấu trúc
+        if (templateOnly && heading) {
+          const label = b.number_label?.trim()
+          contextBlocks.push({ section_id: mapped, block: { kind: "paragraph", text: `[Sub-section: ${label && !heading.startsWith(label) ? `${label} ${heading}` : heading}]`, rows: null, image_ref: null } })
+        }
         // Mục chia đoạn: heading con ("External Systems") là chữ của file ⇒ đoạn `heading` đúng chỗ, giữ cấp của file;
         // số Word tự đánh (FLF-362) ghép lại vào chữ như file hiển thị
         const segment = segmentOf.get(owner)
@@ -245,6 +261,15 @@ export const buildLayout = (
     slice?.block_ids.push(b.block_id)
     const block = toCustomBlock(b)
     if (!block) continue
+    if (templateOnly) {
+      const sectionId = current ? customSectionKey(current.id) : owner?.section_id
+      if (sectionId) contextBlocks.push({ section_id: sectionId, block })
+      // Hướng dẫn trọn đoạn dưới mục FPT vẫn ghi ở layout entry (FLF-364); còn lại không thành nguyên văn của mục
+      if (!current && owner && !owner.section_id.startsWith("group:") && (block.kind === "paragraph" || block.kind === "list_item") && isInstructionText(block.text)) {
+        owner.template_guidance = [...(owner.template_guidance ?? []), block.text]
+      }
+      continue
+    }
     // FLF-364 (câu 10): chữ hướng dẫn trọn đoạn dưới mục FPT / phần nhỏ ⇒ giữ nguyên văn ở layout entry (in khi mục trống),
     // không thành phần nối (in cả khi mục đã có dữ liệu)
     if (!current && owner && !owner.section_id.startsWith("group:") && (block.kind === "paragraph" || block.kind === "list_item") && isInstructionText(block.text)) {
@@ -259,7 +284,7 @@ export const buildLayout = (
       else segment.parts.push({ kind: "spine", block_ids: [b.block_id], blocks: [block] })
     } else if (owner && (owner.section_id.startsWith("group:") || unmappedBlockIds.has(b.block_id))) continuationOf(owner).blocks.push(block)
   }
-  return { layout, customSections, slices, segments }
+  return { layout, customSections, slices, segments, contextBlocks }
 }
 
 /** Phần tử Spine đã trích (finalize): khoá `entity` + `id` + khối nguồn. */
@@ -485,7 +510,16 @@ const matches = (section: string, pool: Iterable<string>): boolean => {
  * được đánh `accepted` ngay từ import, người dùng thấy "đã chốt" mà cờ đỏ vẫn treo (gặp thật 2026-09-20).
  * Mục ngoài bảng luật (mục riêng, feature…) vẫn theo file như cũ.
  */
-export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string>, spine?: Spine): StepPlanItem[] =>
+export interface StepPlanOptions {
+  /**
+   * FLF-378 (luồng C — dự án mới theo mẫu bắt buộc): id bước (không mang `@màn`) sở hữu các mục của mẫu. Có ⇒ file là mẫu,
+   * không phải dữ liệu: bước sở hữu mục mẫu luôn `enabled` (chờ soạn), không bao giờ `applied` vì chữ ví dụ của mẫu; bước
+   * không sở hữu mục nào của mẫu ⇒ `hidden`.
+   */
+  draftOwners?: ReadonlySet<string>
+}
+
+export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string>, spine?: Spine, opts: StepPlanOptions = {}): StepPlanItem[] =>
   loadStepRegistry()
     .filter((s) => s.kind !== "loop")
     .map((s): StepPlanItem => {
@@ -496,6 +530,11 @@ export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string
       if (!owned.length) return { step_id: s.id, state: "applied", section_ids: [], reason: "Bước ghép / kiểm tra tài liệu — luôn chạy" }
       if (owned.every((sec) => DERIVED_SECTIONS.has(sec))) {
         return { step_id: s.id, state: "applied", section_ids: owned, reason: "Mục tự sinh từ lịch sử thay đổi" }
+      }
+      if (opts.draftOwners) {
+        return opts.draftOwners.has(s.id)
+          ? { step_id: s.id, state: "enabled", section_ids: owned, reason: "Mục của mẫu bắt buộc — FlintFlow soạn" }
+          : { step_id: s.id, state: "hidden", section_ids: owned, reason: "Mẫu không có mục này" }
       }
       const hasContent = owned.some((sec) => {
         const inSpine = spine ? sectionHasData(spine, sec) : null
@@ -524,6 +563,8 @@ export interface SeedOptions {
   firstSeq: number | null
   lastSeq: number | null
   at: string
+  /** FLF-378: như `StepPlanOptions.draftOwners` — vòng S-5 chờ soạn (bước mẫu sở hữu mục mẫu) hoặc bỏ qua, không `accepted`. */
+  draftOwners?: ReadonlySet<string>
 }
 
 /**
@@ -540,7 +581,11 @@ export const seedStepOps = (spine: Spine, plan: StepPlanItem[], opts: SeedOption
   const loopTemplates = loadStepRegistry().filter((s) => s.kind === "loop")
   for (const key of loopKeys(spine)) {
     if (!withFunctions.has(key)) continue
-    for (const t of loopTemplates) steps.push(accepted(`${t.id}@${key}`))
+    for (const t of loopTemplates) {
+      const id = `${t.id}@${key}`
+      if (!opts.draftOwners) steps.push(accepted(id))
+      else steps.push({ id, status: opts.draftOwners.has(t.id) ? "pending" : "skipped", first_seq: null, last_seq: null, accepted_at: null })
+    }
   }
 
   const probe = { ...spine, steps }

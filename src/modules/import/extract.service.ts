@@ -41,6 +41,7 @@ import {
 import { ExtractionDraft, type ExtractedField, type IExtractionDraft } from "./extraction-draft.model.js"
 import { FIELD_CONFIDENCE_THRESHOLD, VISION_CONFIDENCE_CAP, needsConfirm, type FieldOrigin, type MentionEntity } from "./import.constants.js"
 import type { FieldsPatchRequest, GetImportResponse } from "./import.dto.js"
+import { Project } from "../project/project.model.js"
 import { assertImportStatus, extractionSummary, requireImport, transitionImport } from "./import.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
 import { knownKeysText, scopeKnownKeys } from "./known-keys.js"
@@ -693,6 +694,16 @@ interface ExtractionInputs {
   plan: string[]
 }
 
+/**
+ * FLF-378 (luồng C, C2.1): dự án **mới** theo mẫu bắt buộc — file là mẫu (hướng dẫn / ví dụ), không phải dữ liệu ⇒ không
+ * trích nội dung vào Spine (không gọi AI, không đọc bảng tất định). Chỉ giữ cấu trúc từ heading (tính năng / chức năng tạm
+ * của mapping) để mục của mẫu khớp được phần tử Spine; chữ của mẫu thành `template_context` lúc finalize.
+ */
+export const isTemplateOnlyProject = async (projectId: string): Promise<boolean> => {
+  const project = await Project.findById(projectId, { start_kind: 1, template_intent: 1 }).lean()
+  return project?.start_kind === "new" && project.template_intent === "fixed"
+}
+
 export const loadExtractionInputs = async (projectId: string): Promise<ExtractionInputs | null> => {
   const profile = await TemplateProfile.findOne({ projectId })
   if (!profile) return null
@@ -818,6 +829,24 @@ export const runExtraction = async (projectId: string, userId: string, importId:
   }
   const drafts = await ExtractionDraft.find({ import_id: doc._id })
   const draftOf = new Map(drafts.map((d) => [d.section_id, d]))
+
+  if (await isTemplateOnlyProject(projectId)) {
+    for (const section_id of plan) {
+      const draft = draftOf.get(section_id)!
+      draft.fields = mergeItems(provisionalItems(section_id, provisional)).flatMap(flattenItem) as ExtractedField[]
+      draft.status = "done"
+      draft.error = null
+      draft.unmapped_block_ids = []
+      draft.diagram_images = []
+      draft.partial = null
+      draft.markModified("fields")
+      await draft.save()
+    }
+    doc.extract_cursor = null
+    await doc.save()
+    await transitionImport(doc, "baselining")
+    return { doc, sections: (await extractionSummary(doc._id as mongoose.Types.ObjectId)).sections }
+  }
 
   const known: EntityItem[] = drafts.filter((d) => d.status === "done").flatMap(itemsOfDraft)
   for (const p of provisional.values()) known.push(...provisionalItems(p.section, provisional))
@@ -1111,6 +1140,8 @@ export interface ExtractionEstimate {
 export const estimateExtraction = async (projectId: string, doc: Pick<IImportedDocument, "_id">): Promise<ExtractionEstimate | null> => {
   const inputs = await loadExtractionInputs(projectId)
   if (!inputs) return null
+  // FLF-378: dự án mới theo mẫu bắt buộc không trích (không gọi AI)
+  if (await isTemplateOnlyProject(projectId)) return { text_batches: 0, diagram_images: 0, ai_calls: 0, credits: 0 }
   const drafts = await ExtractionDraft.find({ import_id: doc._id }, { section_id: 1, status: 1, partial: 1, diagram_images: 1 }).lean<
     Pick<IExtractionDraft, "section_id" | "status" | "partial" | "diagram_images">[]
   >()
