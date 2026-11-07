@@ -18,6 +18,7 @@ import { getProjectById } from "../project/project.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { assembleRequestSchema, assembleResponseSchema, documentQuerySchema, documentTranslationMetaSchema } from "../pipeline/pipeline.dto.js"
 import { assemble, getDocumentWithMeta, getDraftMeta, NoWorkingDraftError } from "./assemble.service.js"
+import { applyTemplatePreviewTables } from "./template-preview-tables.js"
 import { projectLanguages } from "../translation/translation.service.js"
 import type { UserLocale } from "../../shared/i18n/locale.js"
 import type { TemplateIntent } from "../project/project.model.js"
@@ -87,7 +88,7 @@ export const assembleController = catchAsync(async (req: Request, res: Response)
 // ─── GET /document ───────────────────────────────────────────────
 
 export const getDocumentController = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, projectName, documentLanguage, sourceLanguage } = await authorize(req)
+  const { projectId, projectName, documentLanguage, sourceLanguage, templateIntent } = await authorize(req)
   const query = parse(documentQuerySchema, req.query)
   // FLF-369: revision đọc TRƯỚC khi dựng ⇒ thay đổi chen giữa làm revision cũ hơn tài liệu thực tế, client tải lại thêm
   // một lần (an toàn), không bao giờ ngược lại
@@ -115,7 +116,9 @@ export const getDocumentController = catchAsync(async (req: Request, res: Respon
       ...(result.translation ? { translation: documentTranslationMetaSchema.parse(result.translation) } : {})
     }
     // UC-47: Viewer nhận bản không cờ / trạng thái nội bộ
-    const doc = isViewer(req) && result.doc ? viewerDocument(result.doc) : result.doc
+    // FLF-379: mẫu cố định ⇒ bảng xem trước đúng cột của file như bản xuất Word
+    const shown = templateIntent === "fixed" && result.doc ? await applyTemplatePreviewTables(projectId, result.doc) : result.doc
+    const doc = isViewer(req) && shown ? viewerDocument(shown) : shown
     return sendSuccess(res, 200, doc, Object.keys(meta).length ? meta : undefined)
   } catch (err) {
     if (err instanceof NoWorkingDraftError) {
