@@ -17,6 +17,7 @@ import { ImportedDocument, type IImportedDocument } from "./imported-document.mo
 import { acceptLatest, assertImportStatus, autoConfirmPendingMapping, requireImport } from "./import.service.js"
 import { runExtraction } from "./extract.service.js"
 import { startAutoFinalize } from "./finalize-jobs.js"
+import { Mode1Error } from "./mode1.errors.js"
 
 interface ExtractJobData {
   projectId: string
@@ -87,6 +88,24 @@ export const startExtraction = async (projectId: string, userId: string, importI
   )
   if (started) doc.paused = null
   return doc
+}
+
+/**
+ * Người dùng bấm Dừng lúc đang đọc nội dung: đặt `paused: user` (chỉ khi `extracting` và chưa dừng). Job đang chạy thấy cờ
+ * trước lượt AI kế tiếp và dừng (`runExtraction` → `userStopRequested`) — lượt đang gọi dở vẫn chạy xong (đã giữ credit),
+ * không gọi thêm lượt nào. Đã dừng (bất kỳ lý do) ⇒ trả nguyên trạng. Chưa bấm Bắt đầu ⇒ không có gì để dừng.
+ * Tiếp tục bằng `/import/resume` như mọi lý do dừng khác (đi tiếp từ `extract_cursor` + `partial`).
+ */
+export const requestStop = async (projectId: string, importId: string): Promise<IImportedDocument> => {
+  const doc = await requireImport(projectId, importId)
+  assertImportStatus(doc, ["extracting"], "extracting")
+  if (doc.paused) return doc
+  if (!doc.extract_cursor && !(await isExtractionRunning(importId))) {
+    throw new Mode1Error("IMPORT_INVALID_STATE", "Lượt đọc file chưa bắt đầu nên không có gì để dừng", { status: doc.status, to: doc.status, allowed: ["extracting"] })
+  }
+  const paused = { reason: "user" as const, at: new Date() }
+  await ImportedDocument.updateOne({ _id: importId, status: "extracting", paused: null }, { $set: { paused } })
+  return (await ImportedDocument.findById(importId)) ?? doc
 }
 
 /**

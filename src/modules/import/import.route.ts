@@ -57,7 +57,7 @@ const router = Router()
  *           type: object
  *           nullable: true
  *           properties:
- *             reason: { type: string, enum: [credits, resume_later] }
+ *             reason: { type: string, enum: [credits, resume_later, user] }
  *             at: { type: string, format: date-time }
  *         extract_cursor: { type: string, nullable: true }
  *         reread:
@@ -352,6 +352,30 @@ router.post("/:id/library", authMiddleware, orgLibrary.saveSectionToLibrary)
  *       409: { description: IMPORT_INVALID_STATE }
  */
 router.post("/:id/import/resume", authMiddleware, importController.resume)
+
+/**
+ * @swagger
+ * /api/v1/projects/{id}/import/pause:
+ *   post:
+ *     summary: Dừng lượt đọc nội dung đang chạy (FLF-388)
+ *     description: |
+ *       Chỉ ở `extracting` đã bấm Bắt đầu: đặt `paused: { reason: user }`. Job nền dừng trước lượt AI kế tiếp (lượt đang gọi
+ *       dở chạy xong), không gọi thêm ⇒ không trừ thêm credit. Đã dừng ⇒ trả nguyên trạng. Tiếp tục qua `/import/resume`.
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [import_id], properties: { import_id: { type: string } } }
+ *     responses:
+ *       200: { description: "`{ import, sections }` — `import.paused.reason = user`" }
+ *       409: { description: IMPORT_INVALID_STATE (không ở `extracting` / chưa bắt đầu) }
+ */
+router.post("/:id/import/pause", authMiddleware, importController.pause)
 
 /**
  * @swagger
