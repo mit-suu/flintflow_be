@@ -16,6 +16,7 @@ import { z } from "zod"
 import type { ClientSession } from "mongoose"
 import { Spine as SpineModel } from "./spine.model.js"
 import { Change as ChangeModel } from "./change.model.js"
+import { clearChangeLogs, createChangeLog } from "./change-log.js"
 import { changeSchema, spineRecordSchema } from "./spine.schema.js"
 import type { Change, Spine, SpineProject, SpineRecord } from "./spine.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -130,9 +131,20 @@ const remember = (projectId: string, key: string, record: SpineRecord): void => 
 }
 
 /** Xoá cache đọc — cho test ghi thẳng vào collection. */
-export const clearReadCache = (): void => readCache.clear()
+export const clearReadCache = (): void => {
+  readCache.clear()
+  // Lịch sử `changes` đọc tăng dần (FLF-381) cũng là bản nhớ của dữ liệu test ghi thẳng
+  clearChangeLogs()
+}
 
-export const get = async (projectId: string): Promise<SpineRecord | null> => {
+export const get = async (projectId: string): Promise<SpineRecord | null> => (await getWithIdentity(projectId))?.record ?? null
+
+/**
+ * Như `get`, kèm danh tính của đúng bản trả về: `<_id>:<spine_version>` — một danh tính chỉ ứng với một nội dung đã commit
+ * (cùng lý do read cache ở trên), kể cả khi Spine bị xoá rồi tạo lại (`_id` mới). Dùng làm khoá cache cho thứ dựng từ
+ * Spine (vd bản xem đã dịch, FLF-381).
+ */
+export const getWithIdentity = async (projectId: string): Promise<{ record: SpineRecord; identity: string } | null> => {
   const key = String(projectId)
   const head = await SpineModel.findOne({ projectId }, { _id: 1, spine_version: 1 }, { lean: true })
   if (!head) {
@@ -144,14 +156,15 @@ export const get = async (projectId: string): Promise<SpineRecord | null> => {
     // LRU: dùng lại thì đưa về cuối
     readCache.delete(key)
     readCache.set(key, hit)
-    return structuredClone(hit.record)
+    return { record: structuredClone(hit.record), identity: hit.key }
   }
   const doc = await SpineModel.findOne({ projectId }, null, { lean: true })
   if (!doc) return null
   const record = parseRecord(doc)
   // Khoá theo chính bản vừa đọc — version có thể đã tăng giữa hai lượt đọc
-  remember(key, cacheKey(doc), record)
-  return record
+  const identity = cacheKey(doc)
+  remember(key, identity, record)
+  return { record, identity }
 }
 
 const baselineRefsSchema = z.array(z.object({ id: z.string().min(1), snapshot_ref: z.string().min(1) }))
@@ -358,21 +371,25 @@ export interface ChangeRange {
  * change gần nhất KHÔNG thuộc `flags[…]` — tính lại cờ / waive / giữ nguyên tăng `spine_version` nhưng không đổi nội dung
  * tài liệu nên không làm tab khác tải lại. Hai truy vấn theo index, không `listChanges`.
  */
-export const versionHead = async (projectId: string): Promise<{ spine_version: number; content_seq: number } | null> => {
-  const head = await SpineModel.findOne({ projectId }, { spine_version: 1, _id: 0 }, { lean: true })
+export const versionHead = async (projectId: string): Promise<{ spine_version: number; content_seq: number; identity: string } | null> => {
+  const head = await SpineModel.findOne({ projectId }, { _id: 1, spine_version: 1 }, { lean: true })
   if (!head) return null
   const latest = (await ChangeModel.findOne({ projectId, path: { $not: /^flags(\[|\.|$)/ } }, { seq: 1, _id: 0 }, { sort: { seq: -1 }, lean: true })) as {
     seq?: number
   } | null
-  return { spine_version: head.spine_version, content_seq: latest?.seq ?? 0 }
+  // `identity` (FLF-383): cùng dạng `getWithIdentity` — khoá bản đã dựng mà khỏi hỏi lại đầu Spine
+  return { spine_version: head.spine_version, content_seq: latest?.seq ?? 0, identity: cacheKey(head) }
 }
+
+/** Cả lịch sử, đọc tăng dần (FLF-381, `change-log.ts`) — lượt đọc lại chỉ tải change mới. */
+const fullChangeLog = createChangeLog<Change>(null, (doc) => parseChange(doc))
 
 export const listChanges = async (projectId: string, range: ChangeRange = {}): Promise<Change[]> => {
   const seq: { $gte?: number; $lte?: number } = {}
   if (range.fromSeq !== undefined) seq.$gte = range.fromSeq
   if (range.toSeq !== undefined) seq.$lte = range.toSeq
+  if (Object.keys(seq).length === 0) return fullChangeLog.list(projectId)
 
-  const filter = Object.keys(seq).length > 0 ? { projectId, seq } : { projectId }
-  const docs = await ChangeModel.find(filter, null, { sort: { seq: 1 }, lean: true })
+  const docs = await ChangeModel.find({ projectId, seq }, null, { sort: { seq: 1 }, lean: true })
   return docs.map(parseChange)
 }

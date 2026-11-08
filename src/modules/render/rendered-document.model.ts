@@ -3,10 +3,13 @@
  * KHÔNG phải Spine: ghi tự do ở đây không phạm điều cấm "ghi Spine ngoài op-engine"
  * (coding-rules §3.3) — đây là một document cache riêng, độc lập với collection `spines`.
  *
- * Một document trong collection này là MỘT trong hai dạng, phân biệt bởi field nào có mặt:
+ * Một document trong collection này là MỘT trong ba dạng, phân biệt bởi field nào có mặt:
  * - draft    : `spine_version` + `assembled_at_version` có mặt, `baseline_id` vắng mặt.
  * - baseline : `baseline_id` có mặt (T15 review T5 — trước đây bản baseline không cache, dựng lại
  *   mỗi lần xem dù snapshot bất biến), `spine_version`/`assembled_at_version` vắng mặt.
+ * - bản dịch : `locale` có mặt (FLF-383 — bản xem theo ngôn ngữ tài liệu ≠ ngôn ngữ gốc, sống qua restart). Một hàng mỗi
+ *   `(projectId, view, locale)`; dùng khi `content_key` + `translation_revision` khớp hiện tại, không thì dựng lại ghi đè.
+ *   KHÔNG có `spine_version` / `baseline_id` top-level ⇒ không đụng hai index cũ và các truy vấn draft / baseline.
  *
  * `doc.sections[].blocks[].png` (khi là ảnh) không lưu base64 thật — section sinh sẵn tham chiếu
  * `diagram-ref:<diagramId>`, PNG tải lại lúc đọc (T15 review T6, xem `assemble.service.ts`
@@ -32,7 +35,22 @@ const renderedDocumentCacheSchema = new Schema(
      * Id sơ đồ `render_status = "ok"` mà PNG không tải được lúc assemble — để lần `POST /assemble` trúng cache
      * vẫn trả lại finding `diagram_png_missing`. Lúc đọc, tham chiếu vẫn được thử tải lại: PNG có sau ⇒ ảnh thật.
      */
-    missing_diagram_ids: { type: [String], default: [] }
+    missing_diagram_ids: { type: [String], default: [] },
+    // ─── chỉ ở bản dịch (FLF-383) ───
+    /** Ngôn ngữ tài liệu của bản dịch (`vi` | `en`). */
+    locale: { type: String },
+    /** `draft` hoặc `baseline:<Baseline._id>`. */
+    view: { type: String },
+    /** Draft: danh tính Spine `<_id>:<spine_version>`; baseline: `spine_version` (§I theo lịch sử hiện có). */
+    content_key: { type: String },
+    /** `translationRevision(projectId, locale)` lúc dựng; chưa có bản dịch nào ⇒ `-`. */
+    translation_revision: { type: String },
+    /** `DocumentTranslationMeta` của bản dựng. */
+    translation: { type: Schema.Types.Mixed },
+    /** `[diagramId, tham chiếu]` — PNG theo ngôn ngữ đã có lúc dựng. */
+    localized_refs: { type: Schema.Types.Mixed },
+    /** Ngôn ngữ chú thích placeholder; `null` ⇒ mặc định (mode 1 có layout). */
+    image_language: { type: String }
   },
   { timestamps: true, strict: true, minimize: false }
 )
@@ -44,6 +62,11 @@ renderedDocumentCacheSchema.index(
 renderedDocumentCacheSchema.index(
   { projectId: 1, baseline_id: 1 },
   { unique: true, partialFilterExpression: { baseline_id: { $exists: true } } }
+)
+
+renderedDocumentCacheSchema.index(
+  { projectId: 1, view: 1, locale: 1 },
+  { unique: true, partialFilterExpression: { locale: { $exists: true } } }
 )
 
 export const RenderedDocumentCache = mongoose.model("RenderedDocumentCache", renderedDocumentCacheSchema)
