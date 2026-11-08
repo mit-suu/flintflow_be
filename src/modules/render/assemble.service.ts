@@ -30,7 +30,7 @@
  */
 
 import mongoose from "mongoose"
-import type { z } from "zod"
+import { z } from "zod"
 import * as spineRepository from "../spine/spine.repository.js"
 import { listSections } from "../spine/section-registry.js"
 import { computeSectionStates, readiness, type SectionStateView } from "../spine/section-status.js"
@@ -40,7 +40,7 @@ import { systemName } from "../spine/system-name.js"
 import { Baseline } from "../spine/baseline.model.js"
 // T15 review T5: đọc Change model trực tiếp (chỉ đọc) — projection nhẹ cho §I, không qua
 // spine.repository.listChanges (tải cả before/value, không cần cho Record of Changes).
-import { Change as ChangeModel } from "../spine/change.model.js"
+import { createChangeLog } from "../spine/change-log.js"
 // T15 review T7: tra tên người ghi thay cho userId thô trong §I (chỉ đọc).
 import { User } from "../user/user.model.js"
 import { loadDiagramFile } from "../diagram/diagram.service.js"
@@ -61,9 +61,11 @@ import { loadRenderContext } from "../diagram/render-context.js"
 import { localizeSpine, localizedDiagramSources, renderView, type LocalizedSpine } from "./localized-spine.js"
 import { translationUnits, type TranslationUnit } from "../translation/translation-units.js"
 import { resolveTranslations, type ProjectLanguages, type ResolvedTranslations } from "../translation/translation.service.js"
+import { translationRevision } from "../translation/translation.repository.js"
 import type { UserLocale } from "../../shared/i18n/locale.js"
-import type { documentTranslationMetaSchema } from "../pipeline/pipeline.dto.js"
+import { documentTranslationMetaSchema } from "../pipeline/pipeline.dto.js"
 import { RenderedDocumentCache } from "./rendered-document.model.js"
+import { cacheMemoKey, createMemo } from "./rendered-document-memo.js"
 import { buildLayoutSections, type TemplateLayout } from "./layout-sections.js"
 // Mode 1 v2 (FLF-184): layout của file người dùng upload — chỉ đọc
 import { TemplateProfile } from "../import/template-profile.model.js"
@@ -195,7 +197,17 @@ const unassignedFunctionsSection = (number: string, language?: string): Rendered
 
 // ─── ảnh diagram ─────────────────────────────────────────────────
 
-export type DiagramPngLoader = (projectId: string, diagramId: string) => Promise<string | null>
+/**
+ * `warm` (tuỳ chọn): nạp sẵn thứ loader cần cho cả lượt (metadata PNG, `file_ref`) — caller chạy song song với lượt đọc
+ * cache để khỏi nối tiếp round-trip (FLF-383). Loader không có `warm` ⇒ bỏ qua.
+ */
+export type DiagramPngLoader = ((projectId: string, diagramId: string) => Promise<string | null>) & {
+  warm?: (projectId: string) => Promise<void>
+}
+
+/** Nạp sẵn của loader, lỗi nuốt — loader tự hỏi lại lúc phân giải từng ảnh. */
+const warmLoader = (load: DiagramPngLoader, projectId: string): Promise<void> =>
+  load.warm ? load.warm(projectId).catch(() => undefined) : Promise.resolve()
 
 const defaultDiagramPngLoader: DiagramPngLoader = async (projectId, diagramId) => {
   // Phase 5 (T3): ảnh gốc của mục riêng — lấy từ file upload, không phải file diagram
@@ -268,9 +280,9 @@ const loadLocalizedPngs = async (
   sources: ReadonlyMap<string, DiagramSource>,
   load: LocalizedDiagramPngLoader,
   budgetMs: number
-): Promise<Map<string, string>> => {
+): Promise<{ loaded: Map<string, string>; complete: boolean }> => {
   const loaded = new Map<string, string>()
-  if (sources.size === 0) return loaded
+  if (sources.size === 0) return { loaded, complete: true }
   const entries = [...sources]
   let next = 0
   const worker = async (): Promise<void> => {
@@ -280,15 +292,19 @@ const loadLocalizedPngs = async (
       if (png) loaded.set(id, png)
     }
   }
-  const work = Promise.all(Array.from({ length: Math.min(IMAGE_LOAD_BATCH_SIZE, entries.length) }, worker))
+  let complete = false
+  const work = Promise.all(Array.from({ length: Math.min(IMAGE_LOAD_BATCH_SIZE, entries.length) }, worker)).then(() => {
+    complete = true
+  })
   let timer: ReturnType<typeof setTimeout> | undefined
   const budget = new Promise<void>((resolve) => {
     timer = setTimeout(resolve, budgetMs)
   })
   await Promise.race([work, budget])
   clearTimeout(timer)
-  // Bản chụp lúc hết chờ — lượt vẽ còn chạy tiếp không đổi tài liệu đã trả
-  return new Map(loaded)
+  // Bản chụp lúc hết chờ — lượt vẽ còn chạy tiếp không đổi tài liệu đã trả. `complete = false` ⇒ còn sơ đồ đang vẽ:
+  // bản dựng này không được nhớ (sẽ kẹt ảnh gốc), lượt sau lấy PNG theo ngôn ngữ đã vẽ xong
+  return { loaded: new Map(loaded), complete }
 }
 
 // ─── ảnh dạng tham chiếu trong section/cache; phân giải lúc trả về (review T6, FLF-166) ──────
@@ -338,7 +354,8 @@ const warnMissingImages = (images: ImageLoadResult, target: string): void => {
  * gốc (§3.5) nên đường đọc cache không truyền (chú thích như trước); bản theo ngôn ngữ khác không qua cache, chú thích
  * theo ngôn ngữ ở `materializeImages`.
  */
-const rehydrateImages = async (doc: RenderedDocument, projectId: string, load: DiagramPngLoader, language?: string): Promise<RenderedDocument> => {
+/** Id sơ đồ / media mà tài liệu dạng tham chiếu đang trỏ tới. */
+const docImageIds = (doc: RenderedDocument): string[] => {
   const refs = new Set<string>()
   for (const section of doc.sections) {
     for (const block of section.blocks) {
@@ -346,9 +363,14 @@ const rehydrateImages = async (doc: RenderedDocument, projectId: string, load: D
       if (id !== null) refs.add(id)
     }
   }
-  if (refs.size === 0) return doc
+  return [...refs]
+}
 
-  const images = await loadDiagramPngs(projectId, [...refs], load)
+const rehydrateImages = async (doc: RenderedDocument, projectId: string, load: DiagramPngLoader, language?: string): Promise<RenderedDocument> => {
+  const refs = docImageIds(doc)
+  if (refs.length === 0) return doc
+
+  const images = await loadDiagramPngs(projectId, refs, load)
   warnMissingImages(images, `project ${projectId} (đọc cache)`)
   return materializeImages(doc, resolveLoaded(images), language)
 }
@@ -403,20 +425,20 @@ interface ChangeRecordDoc {
 /**
  * T15 review T5: §I chỉ cần `{txn, at, by, reason, op, step_id}` — đọc thẳng `Change` model (chỉ đọc)
  * với projection nhẹ này thay vì `spine.repository.listChanges` (tải cả `before`/`value`, không cần
- * cho Record of Changes, có thể lớn với change phức tạp).
+ * cho Record of Changes, có thể lớn với change phức tạp). FLF-381: đọc tăng dần (`spine/change-log.ts`) — lượt sau chỉ
+ * tải change mới.
  */
-export const listChangesForRecord = async (projectId: string): Promise<ChangeRecordRow[]> => {
-  const docs = (await ChangeModel.find({ projectId }, RECORD_CHANGE_PROJECTION, { sort: { seq: 1 }, lean: true })) as ChangeRecordDoc[]
-  return docs.map((d) => ({
-    txn: d.txn,
-    at: d.at instanceof Date ? d.at.toISOString() : d.at,
-    by: d.by,
-    reason: d.reason,
-    op: d.op,
-    path: d.path,
-    step_id: d.step_id
-  }))
-}
+const recordChangeLog = createChangeLog<ChangeRecordRow>(RECORD_CHANGE_PROJECTION, (d: ChangeRecordDoc) => ({
+  txn: d.txn,
+  at: d.at instanceof Date ? d.at.toISOString() : d.at,
+  by: d.by,
+  reason: d.reason,
+  op: d.op,
+  path: d.path,
+  step_id: d.step_id
+}))
+
+export const listChangesForRecord = (projectId: string): Promise<ChangeRecordRow[]> => recordChangeLog.list(projectId)
 
 const SYSTEM_ACTOR = "system"
 const IMPORT_ACTOR = "import"
@@ -595,6 +617,11 @@ export interface AssembleDeps {
   loadLocalizedDiagramPng?: LocalizedDiagramPngLoader
   /** N1 — trần chờ vẽ PNG theo ngôn ngữ của một lượt dựng; mặc định `LOCALIZED_IMAGE_BUDGET_MS`. */
   localizedImageBudgetMs?: number
+  /**
+   * FLF-381 — revision lớp bản dịch của (dự án, ngôn ngữ) cho khoá bản xem đã dịch nhớ trong tiến trình; mặc định
+   * `translation.repository#translationRevision` (`updatedAt` lớn nhất — mọi lần ghi bản dịch đều đổi nó).
+   */
+  translationRevision?: (projectId: string, locale: DocumentLanguage) => Promise<string | null>
 }
 
 export type TemplateLoader = (projectId: string) => Promise<TemplateLayout | null>
@@ -683,6 +710,8 @@ interface BuiltDocument {
   images: ImageLoadResult
   /** FLF-265: chỉ có khi nội dung dựng từ bản xem đã dịch. */
   translation?: DocumentTranslationMeta
+  /** Bản đã dịch: PNG theo ngôn ngữ đã lấy được + mọi lượt vẽ đã xong trong trần chờ (điều kiện được nhớ — FLF-381). */
+  localized?: { loaded: Map<string, string>; complete: boolean }
 }
 
 /**
@@ -715,8 +744,8 @@ const loadDocumentImages = async (
   spine: Spine,
   deps: AssembleDeps,
   translated: { localized: LocalizedSpine; translation: DocumentTranslationMeta } | undefined
-): Promise<ImageLoadResult> => {
-  if (!translated || !deps.loadLocalizedDiagramPng) return preloadDiagramPngs(projectId, spine, deps.loadDiagramPng)
+): Promise<{ images: ImageLoadResult; localized?: { loaded: Map<string, string>; complete: boolean } }> => {
+  if (!translated || !deps.loadLocalizedDiagramPng) return { images: await preloadDiagramPngs(projectId, spine, deps.loadDiagramPng) }
   const localized = await loadLocalizedPngs(
     projectId,
     translated.translation.locale,
@@ -724,7 +753,18 @@ const loadDocumentImages = async (
     deps.loadLocalizedDiagramPng,
     deps.localizedImageBudgetMs ?? LOCALIZED_IMAGE_BUDGET_MS
   )
-  const images = await loadDiagramPngs(projectId, documentImageIds(spine).filter((id) => !localized.has(id)), deps.loadDiagramPng)
+  const images = await withLocalizedImages(projectId, documentImageIds(spine), localized.loaded, deps.loadDiagramPng)
+  return { images, localized }
+}
+
+/** Ảnh gốc cho mọi id chưa có PNG theo ngôn ngữ, rồi gộp PNG theo ngôn ngữ vào — dùng lúc dựng và lúc đọc bản đã nhớ. */
+const withLocalizedImages = async (
+  projectId: string,
+  ids: readonly string[],
+  localized: ReadonlyMap<string, string>,
+  load: DiagramPngLoader
+): Promise<ImageLoadResult> => {
+  const images = await loadDiagramPngs(projectId, ids.filter((id) => !localized.has(id)), load)
   for (const [id, png] of localized) images.loaded.set(id, png)
   return images
 }
@@ -741,7 +781,7 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
     language !== undefined && input.sourceLanguage !== undefined && language !== input.sourceLanguage
       ? await translateSpine(projectId, spine, language, input.sourceLanguage, deps)
       : undefined
-  const images = await loadDocumentImages(projectId, spine, deps, translated)
+  const { images, localized } = await loadDocumentImages(projectId, spine, deps, translated)
   deps.onImagesLoaded?.(images)
   let sections: RenderedSection[]
   let numbers: Map<string, string>
@@ -796,7 +836,7 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
   if (source === "draft") refDoc.watermark = "DRAFT"
   // Không có layout file người dùng ⇒ mẫu FPT (FLF-214: style heading con của §3.x.y)
   if (!input.template) refDoc.format = "fpt"
-  return { refDoc, images, ...(translated ? { translation: translated.translation } : {}) }
+  return { refDoc, images, ...(translated ? { translation: translated.translation } : {}), ...(localized ? { localized } : {}) }
 }
 
 /** Dựng `RenderedDocument` sẵn ảnh (PNG thật hoặc placeholder) — cho writer/test gọi trực tiếp, không qua cache. */
@@ -913,6 +953,7 @@ export async function assemble(
       missing_diagram_ids: images.missing
     }
   )
+  await rememberWrittenCache({ projectId, spine_version: record.spine_version }, refDoc)
   await pruneOldDraftCache(projectId)
 
   return {
@@ -943,6 +984,26 @@ export interface DocumentQuery {
    * `TRANSLATION_INCOMPLETE`) mà không đọc Spine lần hai giữa lúc kiểm và lúc dựng.
    */
   beforeRender?: (spine: Spine) => Promise<void>
+  /**
+   * Bản xem đã dịch: được dùng lại bản đã dựng (ảnh dạng tham chiếu `image-ref:`). CHỈ `GET /document` bật — export /
+   * comment cần ảnh nhúng + dựng mới (`freshTemplate` luôn dựng mới), nên không bao giờ đọc / ghi bản dùng lại.
+   */
+  reuseTranslated?: boolean
+  /**
+   * FLF-383 — đầu Spine (+ revision lớp bản dịch khi ngôn ngữ tài liệu ≠ gốc) controller vừa đọc (`documentVersion`) cho
+   * bản draft: tra cache / bản dịch đã lưu theo đó, khỏi hỏi lại và khỏi tải cả Spine khi trúng. `null` ⇒ dự án chưa có
+   * Spine. Không truyền ⇒ tự đọc.
+   */
+  draftHead?: DraftHead | null
+}
+
+/** Đầu Spine của bản draft mà caller đã đọc (FLF-383). */
+export interface DraftHead {
+  spine_version: number
+  /** `<_id>:<spine_version>` — cùng dạng `spineRepository.getWithIdentity`. */
+  identity: string
+  /** `translationRevision(projectId, locale)`; chỉ có nghĩa khi đã đọc cho ngôn ngữ tài liệu ≠ gốc. */
+  translation_revision: string | null
 }
 
 /**
@@ -950,19 +1011,73 @@ export interface DocumentQuery {
  * `null` trả về ⇒ chưa có bản nào dùng được — kể cả khi cache tồn tại nhưng nội dung không còn hợp khuôn
  * (dữ liệu cũ, ghi tay): lượt đọc kế dựng lại đè lên, không bắt người dùng xử lý một lỗi của cache.
  */
-const loadDraftCache = async (projectId: string, spineVersion: number | null, load: DiagramPngLoader): Promise<RenderedDocument | null> => {
-  const cached = await RenderedDocumentCache.findOne(
-    spineVersion === null ? { projectId, spine_version: { $exists: true } } : { projectId, spine_version: spineVersion },
-    null,
-    { lean: true, sort: { spine_version: -1 } }
-  )
-  if (!cached) return null
-  const parsed = renderedDocumentSchema.safeParse(cached.doc)
-  if (!parsed.success) {
+const loadDraftCache = async (
+  projectId: string,
+  spineVersion: number | null,
+  load: DiagramPngLoader
+): Promise<{ doc: RenderedDocument; assembledAtVersion: number | undefined } | null> => {
+  // Metadata ảnh nạp cùng lúc với lượt đọc cache (FLF-383) — `rehydrateImages` dùng bản đã nạp
+  const [cached] = await Promise.all([
+    readCachedDocument(
+      spineVersion === null ? { projectId, spine_version: { $exists: true } } : { projectId, spine_version: spineVersion },
+      { spine_version: -1 }
+    ),
+    warmLoader(load, projectId)
+  ])
+  if (cached === null) return null
+  if (cached === "invalid") {
     console.warn(`[render] cache tài liệu của project ${projectId} không hợp khuôn — dựng lại`)
     return null
   }
-  return rehydrateImages(parsed.data, projectId, load)
+  return { doc: await rehydrateImages(cached.doc, projectId, load), assembledAtVersion: cached.assembledAtVersion }
+}
+
+/** Thân document cache đã đọc, theo `cacheMemoKey` (FLF-381, `rendered-document-memo.ts`). */
+const documentMemo = createMemo<RenderedDocument>()
+
+/** Bản xem đã dịch đã dựng (FLF-381) — dạng tham chiếu + PNG theo ngôn ngữ đã có lúc dựng. */
+interface TranslatedEntry {
+  doc: RenderedDocument
+  translation: DocumentTranslationMeta
+  localized: [string, string][]
+  /** Ngôn ngữ chú thích placeholder lúc phân giải ảnh (mode 1 có layout ⇒ không đặt, như `withImages`). */
+  imageLanguage?: DocumentLanguage
+}
+const translatedMemo = createMemo<TranslatedEntry>()
+
+/**
+ * Đọc một document cache (FLF-381): hỏi `_id` + `updatedAt` trước (vài chục byte), thân (~100 KB, ~1,5 s qua Atlas) chỉ
+ * tải khi bản đó chưa nhớ trong tiến trình (`rendered-document-memo.ts`). `null` ⇒ không có; `"invalid"` ⇒ có mà không
+ * hợp khuôn (caller dựng lại đè lên). Bản trả về ở dạng tham chiếu ảnh, chưa phân giải.
+ */
+const readCachedDocument = async (
+  filter: Record<string, unknown>,
+  sort?: Record<string, 1 | -1>
+): Promise<{ doc: RenderedDocument; assembledAtVersion: number | undefined } | "invalid" | null> => {
+  const head = (await RenderedDocumentCache.findOne(filter, { _id: 1, updatedAt: 1, assembled_at_version: 1 }, { lean: true, ...(sort ? { sort } : {}) })) as {
+    _id: unknown
+    updatedAt?: unknown
+    assembled_at_version?: number
+  } | null
+  if (!head) return null
+  const key = cacheMemoKey(head)
+  const assembledAtVersion = typeof head.assembled_at_version === "number" ? head.assembled_at_version : undefined
+  const memoized = documentMemo.get(key)
+  if (memoized) return { doc: memoized, assembledAtVersion }
+  const full = (await RenderedDocumentCache.findOne({ _id: head._id }, { doc: 1 }, { lean: true })) as { doc?: unknown } | null
+  if (!full) return null
+  const parsed = renderedDocumentSchema.safeParse(full.doc)
+  if (!parsed.success) return "invalid"
+  documentMemo.set(key, parsed.data)
+  return { doc: parsed.data, assembledAtVersion }
+}
+
+/** Vừa ghi document cache: nhớ luôn bản vừa dựng (khỏi tải lại ~100 KB ngay sau khi chính mình ghi). */
+const rememberWrittenCache = async (filter: Record<string, unknown>, refDoc: RenderedDocument): Promise<void> => {
+  const parsed = renderedDocumentSchema.safeParse(refDoc)
+  if (!parsed.success) return
+  const head = (await RenderedDocumentCache.findOne(filter, { _id: 1, updatedAt: 1 }, { lean: true })) as { _id: unknown; updatedAt?: unknown } | null
+  if (head) documentMemo.set(cacheMemoKey(head), parsed.data)
 }
 
 /**
@@ -989,13 +1104,34 @@ const isSpineVersionConflict = (err: unknown): boolean => err instanceof ApiErro
  * tác tất định, idempotent theo version, không gọi model và đo được ~20ms cho một SRS 19 màn, nên nó là chi tiết
  * nội bộ chứ không phải một quyết định của người dùng.
  */
-const getDraftDocument = async (projectId: string, projectName: string, deps: AssembleDeps): Promise<RenderedDocument> => {
-  const record = await spineRepository.get(projectId)
+const getDraftDocument = async (
+  projectId: string,
+  projectName: string,
+  deps: AssembleDeps,
+  knownSpineVersion?: number | null
+): Promise<{ doc: RenderedDocument; draftMeta?: DraftMeta }> => {
+  // FLF-383: chỉ cần `spine_version` để tra cache — cả Spine (~250 KB, vài giây qua Atlas) chỉ tải khi phải dựng
+  // (`assemble` tự đọc). Version đọc trước body cache: Spine đi tiếp giữa chừng ⇒ `stale` theo version đã đọc (FLF-369).
+  const spineVersion = knownSpineVersion !== undefined ? knownSpineVersion : ((await spineRepository.versionHead(projectId))?.spine_version ?? null)
   // Dự án chưa có Spine (vừa tạo, chưa chạy bước nào): không có gì để dựng — caller trả trạng thái "chưa có"
-  if (!record) throw new NoWorkingDraftError()
+  if (spineVersion === null) throw new NoWorkingDraftError()
+  const record = { spine_version: spineVersion }
+  // Độ mới của chính bản trả về — cùng nghĩa `getDraftMeta` mà khỏi hỏi lại cache + Spine
+  const withMeta = (built: { doc: RenderedDocument; assembledAtVersion: number | undefined }) => ({
+    doc: built.doc,
+    ...(built.assembledAtVersion !== undefined
+      ? {
+          draftMeta: {
+            assembled_at_version: built.assembledAtVersion,
+            spine_version: record.spine_version,
+            stale: built.assembledAtVersion !== record.spine_version
+          }
+        }
+      : {})
+  })
 
   const current = await loadDraftCache(projectId, record.spine_version, deps.loadDiagramPng)
-  if (current) return current
+  if (current) return withMeta(current)
 
   // `SPINE_VERSION_CONFLICT`: Spine đi tiếp ngay giữa lúc đọc version và dựng (một step khác đang chạy). Bản vừa
   // dựng ở version cũ vẫn đọc được và lượt đọc kế sẽ bắt kịp — không chặn lượt xem hiện tại vì một cuộc đua.
@@ -1005,7 +1141,7 @@ const getDraftDocument = async (projectId: string, projectName: string, deps: As
 
   const built = await loadDraftCache(projectId, null, deps.loadDiagramPng)
   if (!built) throw new NoWorkingDraftError()
-  return built
+  return withMeta(built)
 }
 
 /** Mã baseline hiển thị `BLnnn` — `Spine.baselines[].id` do `baseline.service.nextBaselineId` sinh. */
@@ -1031,6 +1167,15 @@ const resolveBaselineObjectId = async (projectId: string, baselineId: string | u
 }
 
 /** Baseline theo `baseline_id` (`_id` hoặc `BLnnn`); không truyền ⇒ bản mới nhất; không có ⇒ 404. */
+/** `_id` của baseline cần đọc (không tải snapshot); `undefined` ⇒ baseline mới nhất. Không có ⇒ 404. */
+const baselineObjectId = async (projectId: string, baselineId: string | undefined): Promise<string> => {
+  const objectId = await resolveBaselineObjectId(projectId, baselineId)
+  if (objectId) return objectId
+  const latest = (await Baseline.findOne({ projectId }, { _id: 1 }, { lean: true, sort: { at: -1 } })) as { _id: unknown } | null
+  if (!latest) throw baselineNotFound()
+  return String(latest._id)
+}
+
 const findBaseline = async (projectId: string, baselineId: string | undefined) => {
   const objectId = await resolveBaselineObjectId(projectId, baselineId)
   const filter = objectId ? { projectId, _id: objectId } : { projectId }
@@ -1052,17 +1197,17 @@ const getBaselineDocument = async (
   baselineId: string | undefined,
   deps: AssembleDeps
 ): Promise<RenderedDocument> => {
-  const baseline = await findBaseline(projectId, baselineId)
-  const baselineIdStr = String(baseline._id)
+  // FLF-381: chỉ lấy `_id` để tra cache — snapshot (~200 KB, ~2 s qua Atlas) chỉ tải khi phải dựng
+  const baselineIdStr = await baselineObjectId(projectId, baselineId)
 
   // T15 review T5: baseline bất biến — cache theo baseline._id, không dựng lại mỗi lần xem.
   const cacheFilter = { projectId, baseline_id: baselineIdStr }
-  const cached = await RenderedDocumentCache.findOne(cacheFilter, null, { lean: true })
-  const parsedCache = cached ? renderedDocumentSchema.safeParse(cached.doc) : null
-  if (parsedCache?.success) return rehydrateImages(parsedCache.data, projectId, deps.loadDiagramPng)
+  const cached = await readCachedDocument(cacheFilter)
+  if (cached !== null && cached !== "invalid") return rehydrateImages(cached.doc, projectId, deps.loadDiagramPng)
   // Cache hỏng: snapshot của baseline là bất biến nên dựng lại từ nó luôn đúng — không trả lỗi cho người dùng
-  if (cached) console.warn(`[render] cache baseline ${baselineIdStr} của project ${projectId} không hợp khuôn — dựng lại`)
+  if (cached === "invalid") console.warn(`[render] cache baseline ${baselineIdStr} của project ${projectId} không hợp khuôn — dựng lại`)
 
+  const baseline = await findBaseline(projectId, baselineIdStr)
   const spine = baselineSpine(baseline.snapshot)
 
   // §I hiển thị lịch sử đầy đủ hiện có (chưa có mốc "seq tại lúc ký" trong Baseline — T19 chưa chốt);
@@ -1091,15 +1236,19 @@ const getBaselineDocument = async (
   // (chú thích placeholder theo mặc định, trùng lúc `rehydrateImages` đọc lại). Bản theo ngôn ngữ khác dựng mỗi lần từ
   // snapshot + lớp bản dịch theo hash (Q4) ở `getTranslatedBaselineDocument`, không qua cache.
   await upsertCache(cacheFilter, { generated_at: new Date(refDoc.generatedAt), doc: refDoc, missing_diagram_ids: images.missing })
+  await rememberWrittenCache(cacheFilter, refDoc)
 
   return materializeImages(refDoc, resolveLoaded(images))
 }
 
-// ─── FLF-265 §3.5: ngôn ngữ tài liệu ≠ ngôn ngữ gốc — dựng mỗi lần, không qua cache ──
+// ─── FLF-265 §3.5 + FLF-383: ngôn ngữ tài liệu ≠ ngôn ngữ gốc ──
 //
-// Bản dịch mới (lượt AI trả kèm — D16, dịch theo lô) không tăng `spine_version`, nên cache khoá theo version / baseline sẽ
-// trả chữ cũ ⇒ đường này KHÔNG đọc / ghi `RenderedDocumentCache` (khoá, index giữ nguyên). Giá mỗi lượt đọc: một lần dựng
-// (~20 ms cho SRS 19 màn) + một truy vấn lớp bản dịch; cache bản dịch để sau nếu đo thấy chậm (`no-ky-thuat.md` N4).
+// Bản dịch mới (lượt AI trả kèm — D16, dịch theo lô) không tăng `spine_version` ⇒ không dùng hàng draft / baseline (khoá
+// theo version / baseline). Bản xem đã dịch có hàng riêng trong `RenderedDocumentCache` (`locale` có mặt, một hàng mỗi
+// `(project, view, locale)` — xem `rendered-document.model.ts`), khoá bằng danh tính nội dung + revision lớp bản dịch, nên
+// bản dịch mới / Spine đổi vẫn hiện ở lượt đọc kế và bản dựng sống qua restart (FLF-383). `translatedMemo` (FLF-381) là
+// lớp RAM phía trên. Đường export (`beforeRender` / `recordChanges`) và caller nghe findings S-8.4 luôn dựng mới, không
+// đọc / ghi.
 
 /** Tài liệu sẵn ảnh, chú thích placeholder theo `language` (mode 1 có layout ⇒ mặc định, như `buildDocument`). */
 const withImages = (built: BuiltDocument, language: DocumentLanguage | undefined): DocumentWithMeta => ({
@@ -1107,16 +1256,142 @@ const withImages = (built: BuiltDocument, language: DocumentLanguage | undefined
   ...(built.translation ? { translation: built.translation } : {})
 })
 
-/** Bản nháp ở `spine_version` hiện tại, dựng thẳng từ Spine + lớp bản dịch — không qua cache, không qua `assembleShared`. */
+/** Khoá một bản xem đã dịch: hàng `(view, locale)` dùng được khi `contentKey` + `revision` khớp. */
+interface TranslatedKey {
+  /** `draft` | `baseline:<Baseline._id>` */
+  view: string
+  /** Draft: danh tính Spine; baseline: `spine_version` (§I theo lịch sử hiện có, mọi change đều tăng nó). */
+  contentKey: string
+  locale: DocumentLanguage
+  /** `translationRevision` lúc đọc; chưa có bản dịch nào ⇒ `-`. */
+  revision: string
+}
+
+const revisionOf = async (projectId: string, locale: DocumentLanguage, deps: AssembleDeps): Promise<string> =>
+  (await (deps.translationRevision ?? translationRevision)(projectId, locale)) ?? "-"
+
+const translatedMemoKey = (projectId: string, key: TranslatedKey): string =>
+  `${projectId}:${key.view}:${key.contentKey}:${key.locale}:${key.revision}`
+
+/** Hàng bản dịch đã lưu — sai khuôn (dữ liệu cũ, ghi tay) ⇒ coi như chưa có, dựng lại ghi đè. */
+const storedTranslatedSchema = z.object({
+  doc: renderedDocumentSchema,
+  translation: documentTranslationMetaSchema,
+  localized_refs: z.array(z.tuple([z.string(), z.string()])),
+  image_language: z.enum(["vi", "en"]).nullish()
+})
+
+/** Một truy vấn theo đủ khoá: hàng khác khoá (bản cũ) ⇒ `null`. */
+const loadStoredTranslated = async (projectId: string, key: TranslatedKey): Promise<TranslatedEntry | null> => {
+  const row = await RenderedDocumentCache.findOne(
+    { projectId, view: key.view, locale: key.locale, content_key: key.contentKey, translation_revision: key.revision },
+    { doc: 1, translation: 1, localized_refs: 1, image_language: 1 },
+    { lean: true }
+  )
+  if (!row) return null
+  const parsed = storedTranslatedSchema.safeParse(row)
+  if (!parsed.success) {
+    console.warn(`[render] bản dịch ${key.locale} (${key.view}) đã lưu của project ${projectId} không hợp khuôn — dựng lại`)
+    return null
+  }
+  const { doc, translation, localized_refs, image_language } = parsed.data
+  return { doc, translation, localized: localized_refs, ...(image_language ? { imageLanguage: image_language } : {}) }
+}
+
+/** Phân giải ảnh như lúc dựng: PNG theo ngôn ngữ đã có, còn lại ảnh gốc tải lại. */
+const materializeTranslated = async (entry: TranslatedEntry, projectId: string, deps: AssembleDeps): Promise<DocumentWithMeta> => {
+  const images = await withLocalizedImages(projectId, docImageIds(entry.doc), new Map(entry.localized), deps.loadDiagramPng)
+  return { doc: materializeImages(entry.doc, resolveLoaded(images), entry.imageLanguage), translation: entry.translation }
+}
+
+/**
+ * RAM ⇒ hàng đã lưu (nạp lại vào RAM). Chưa có ⇒ `null`. Metadata ảnh chỉ nạp sẵn (song song) khi phải hỏi DB — trúng RAM
+ * mà mọi sơ đồ đã có PNG theo ngôn ngữ thì loader ảnh gốc không cần hỏi gì.
+ */
+const readTranslated = async (projectId: string, key: TranslatedKey, deps: AssembleDeps): Promise<DocumentWithMeta | null> => {
+  const memoKey = translatedMemoKey(projectId, key)
+  const memoized = translatedMemo.get(memoKey)
+  if (memoized) return materializeTranslated(memoized, projectId, deps)
+  const [stored] = await Promise.all([loadStoredTranslated(projectId, key), warmLoader(deps.loadDiagramPng, projectId)])
+  if (!stored) return null
+  translatedMemo.set(memoKey, stored)
+  return materializeTranslated(stored, projectId, deps)
+}
+
+/** Lượt ghi bản dịch đang chạy — response không chờ; test chờ qua `_internal.flushTranslatedWrites`. */
+const pendingTranslatedWrites = new Set<Promise<void>>()
+
+/**
+ * Nhớ (RAM) + lưu (DB, không chờ) bản vừa dựng. Chỉ khi mọi PNG theo ngôn ngữ đã vẽ xong trong trần chờ — không thì sẽ
+ * kẹt ảnh gốc cho tới khi khoá đổi. Lưu lỗi chỉ log: lượt sau dựng lại.
+ */
+const rememberTranslatedBuild = (projectId: string, key: TranslatedKey, built: BuiltDocument, imageLanguage: DocumentLanguage | undefined): void => {
+  if (!built.translation || built.localized?.complete === false) return
+  const entry: TranslatedEntry = {
+    doc: built.refDoc,
+    translation: built.translation,
+    localized: [...(built.localized?.loaded ?? [])],
+    ...(imageLanguage ? { imageLanguage } : {})
+  }
+  translatedMemo.set(translatedMemoKey(projectId, key), entry)
+  const write: Promise<void> = upsertCache(
+    { projectId, view: key.view, locale: key.locale },
+    {
+      content_key: key.contentKey,
+      translation_revision: key.revision,
+      generated_at: new Date(built.refDoc.generatedAt),
+      doc: entry.doc,
+      translation: entry.translation,
+      localized_refs: entry.localized,
+      image_language: imageLanguage ?? null,
+      missing_diagram_ids: built.images.missing
+    }
+  )
+    .then(
+      () => undefined,
+      (err: unknown) => console.warn(`[render] không lưu được bản dịch ${key.locale} (${key.view}) của project ${projectId}: ${err instanceof Error ? err.message : String(err)}`)
+    )
+    .finally(() => pendingTranslatedWrites.delete(write))
+  pendingTranslatedWrites.add(write)
+}
+
+const flushTranslatedWrites = async (): Promise<void> => {
+  await Promise.all([...pendingTranslatedWrites])
+}
+
+const translatedDraftMeta = (version: number): DraftMeta => ({ assembled_at_version: version, spine_version: version, stale: false })
+
+/** Bản nháp ở `spine_version` hiện tại, dựng từ Spine + lớp bản dịch — không qua hàng draft / `assembleShared`. */
 const getTranslatedDraftDocument = async (
   projectId: string,
   projectName: string,
   languages: ProjectLanguages,
   deps: AssembleDeps,
-  beforeRender?: (spine: Spine) => Promise<void>
+  beforeRender: ((spine: Spine) => Promise<void>) | undefined,
+  reuse: boolean,
+  knownHead: DraftHead | null | undefined
 ): Promise<DocumentWithMeta> => {
-  const record = await spineRepository.get(projectId)
-  if (!record) throw new NoWorkingDraftError()
+  // Chỉ GET /document (`reuse`) dùng lại; caller nghe findings S-8.4 cần một lượt dựng thật; export luôn dựng mới
+  const reusable = reuse && !beforeRender && !deps.onConsistencyFindings
+  let revision: string | null = null
+  if (reusable) {
+    // FLF-383: khoá chỉ cần danh tính Spine (projection) + revision — controller đã đọc thì dùng luôn, cả Spine chỉ tải
+    // khi phải dựng
+    if (knownHead === null) throw new NoWorkingDraftError()
+    const [head, rev] = knownHead
+      ? [knownHead, knownHead.translation_revision ?? "-"]
+      : await Promise.all([spineRepository.versionHead(projectId), revisionOf(projectId, languages.locale, deps)])
+    if (!head) throw new NoWorkingDraftError()
+    revision = rev
+    const hit = await readTranslated(projectId, { view: "draft", contentKey: head.identity, locale: languages.locale, revision }, deps)
+    if (hit) return { ...hit, draftMeta: translatedDraftMeta(head.spine_version) }
+  }
+
+  const loaded = await spineRepository.getWithIdentity(projectId)
+  if (!loaded) throw new NoWorkingDraftError()
+  const { record, identity } = loaded
+  // Độ mới của chính bản trả về — `getDraftMeta` đọc hàng draft, mà đường này không ghi hàng đó
+  const draftMeta = translatedDraftMeta(record.spine_version)
 
   const { projectId: _projectId, ...spine } = record
   if (beforeRender) await beforeRender(spine)
@@ -1141,25 +1416,36 @@ const getTranslatedDraftDocument = async (
     { ...deps, resolveInCharge }
   )
   warnMissingImages(built.images, `project ${projectId}`)
-  // Độ mới của chính bản vừa dựng — `getDraftMeta` đọc cache, mà đường này không ghi cache
-  const version = record.spine_version
-  return {
-    ...withImages(built, template ? undefined : languages.locale),
-    draftMeta: { assembled_at_version: version, spine_version: version, stale: false }
-  }
+  const imageLanguage = template ? undefined : languages.locale
+  // Khoá theo chính bản Spine vừa dựng (version có thể đã tăng sau lượt tra head)
+  if (revision !== null) rememberTranslatedBuild(projectId, { view: "draft", contentKey: identity, locale: languages.locale, revision }, built, imageLanguage)
+  return { ...withImages(built, imageLanguage), draftMeta }
 }
 
-/** Baseline đã ký dựng lại từ `Baseline.snapshot` + lớp bản dịch theo hash chữ gốc (Q4) — không qua cache. */
+/** Baseline đã ký dựng lại từ `Baseline.snapshot` + lớp bản dịch theo hash chữ gốc (Q4) — không qua hàng baseline gốc. */
 const getTranslatedBaselineDocument = async (
   projectId: string,
   projectName: string,
   baselineId: string | undefined,
   languages: ProjectLanguages,
   deps: AssembleDeps,
-  beforeRender?: (spine: Spine) => Promise<void>,
-  savedRecords?: ChangeRecordRow[]
+  beforeRender: ((spine: Spine) => Promise<void>) | undefined,
+  savedRecords: ChangeRecordRow[] | undefined,
+  reuse: boolean
 ): Promise<DocumentWithMeta> => {
-  const baseline = await findBaseline(projectId, baselineId)
+  const reusable = reuse && !beforeRender && !savedRecords && !deps.onConsistencyFindings
+  // Snapshot bất biến theo `_id`; §I lấy lịch sử hiện có ⇒ khoá thêm `spine_version` (mọi change đều tăng nó)
+  const [baselineIdStr, head, revision] = await Promise.all([
+    baselineObjectId(projectId, baselineId),
+    reusable ? spineRepository.versionHead(projectId) : Promise.resolve(null),
+    reusable ? revisionOf(projectId, languages.locale, deps) : Promise.resolve(null)
+  ])
+  const key: TranslatedKey | null =
+    head && revision !== null ? { view: `baseline:${baselineIdStr}`, contentKey: String(head.spine_version), locale: languages.locale, revision } : null
+  const hit = key ? await readTranslated(projectId, key, deps) : null
+  if (hit) return hit
+
+  const baseline = await findBaseline(projectId, baselineIdStr)
   const spine = baselineSpine(baseline.snapshot)
   if (beforeRender) await beforeRender(spine)
   // §I + status rỗng như bản baseline gốc (`getBaselineDocument`)
@@ -1183,7 +1469,9 @@ const getTranslatedBaselineDocument = async (
     { ...deps, resolveInCharge }
   )
   warnMissingImages(built.images, `baseline ${String(baseline._id)}`)
-  return withImages(built, template ? undefined : languages.locale)
+  const imageLanguage = template ? undefined : languages.locale
+  if (key) rememberTranslatedBuild(projectId, key, built, imageLanguage)
+  return withImages(built, imageLanguage)
 }
 
 /** Kết quả của `getDocumentWithMeta` — tài liệu + phần caller đính vào `meta` / header. */
@@ -1192,8 +1480,8 @@ export interface DocumentWithMeta {
   /** Chỉ khi nội dung dựng từ bản xem đã dịch: `meta.translation` (`missing` = đơn vị đang in chữ gốc). */
   translation?: DocumentTranslationMeta
   /**
-   * Chỉ cho bản draft dựng từ bản xem đã dịch: độ mới của chính bản vừa dựng (`stale: false`) — `getDraftMeta` đọc cache
-   * mà đường này không ghi. Không có ⇒ caller gọi `getDraftMeta` như trước.
+   * Chỉ cho bản draft: độ mới của chính bản trả về (bản dịch: `stale: false`; bản gốc: theo document cache vừa đọc —
+   * FLF-381, khỏi hỏi lại cache + Spine). Không có ⇒ caller gọi `getDraftMeta` như trước.
    */
   draftMeta?: DraftMeta
 }
@@ -1213,12 +1501,13 @@ export async function getDocumentWithMeta(
   const merged: AssembleDeps = { ...defaultDeps(), ...deps }
   const { languages } = query
   if (languages && (languages.locale !== languages.source || query.freshTemplate)) {
+    const reuse = query.reuseTranslated === true && !query.freshTemplate
     return query.source === "baseline"
-      ? getTranslatedBaselineDocument(projectId, projectName, query.baseline_id, languages, merged, query.beforeRender, query.recordChanges)
-      : getTranslatedDraftDocument(projectId, projectName, languages, merged, query.beforeRender)
+      ? getTranslatedBaselineDocument(projectId, projectName, query.baseline_id, languages, merged, query.beforeRender, query.recordChanges, reuse)
+      : getTranslatedDraftDocument(projectId, projectName, languages, merged, query.beforeRender, reuse, query.draftHead)
   }
   if (query.source === "baseline") return { doc: await getBaselineDocument(projectId, projectName, query.baseline_id, merged) }
-  return { doc: await getDraftDocument(projectId, projectName, merged) }
+  return getDraftDocument(projectId, projectName, merged, query.draftHead === undefined ? undefined : (query.draftHead?.spine_version ?? null))
 }
 
 /** FLF-334 B — snapshot Spine của một baseline (`_id` hoặc `BLnnn`; không truyền ⇒ mới nhất). */
@@ -1305,4 +1594,4 @@ export async function getDraftMeta(projectId: string): Promise<DraftMeta | null>
 }
 
 // exported for tests that need to build a document without the cache/HTTP layer (dev `partial`)
-export const _internal = { buildDocument, buildNumberMap, buildSections, rehydrateImages }
+export const _internal = { buildDocument, buildNumberMap, buildSections, rehydrateImages, flushTranslatedWrites }

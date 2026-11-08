@@ -18,6 +18,10 @@ import { formatImageRef, parseImageRef } from "../../src/modules/render/image-re
 import { readZipText } from "../../src/modules/render/zip.test-helper.js"
 import { saveTranslations } from "../../src/modules/translation/translation.repository.js"
 import { SpineTranslation } from "../../src/modules/translation/spine-translation.model.js"
+import { RenderedDocumentCache } from "../../src/modules/render/rendered-document.model.js"
+import { _internal } from "../../src/modules/render/assemble.service.js"
+import { clearDocumentMemo } from "../../src/modules/render/rendered-document-memo.js"
+import * as spineRepository from "../../src/modules/spine/spine.repository.js"
 
 const PNG_1X1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64")
 
@@ -168,5 +172,41 @@ describe("GET /version", () => {
     await saveTranslations(seeded.projectId, "vi", "en", [{ sourceHash: "h1", text: "Chào bạn" }], "author")
     const v3 = (await lead.get("/version")).body.data
     expect(v3.document_revision).not.toBe(v2.document_revision)
+  })
+})
+
+describe("FLF-383 — bản xem đã dịch lưu trong rendered_documents", () => {
+  it("GET /document (vi) lưu đúng một hàng bản dịch; tiến trình mới (RAM rỗng) trả y hệt; export Word cùng ngôn ngữ dựng mới, nhúng PNG", async () => {
+    expect((await lead.patch("/document-language", { documentLanguage: "vi" })).status).toBe(200)
+    const first = await lead.get("/document?source=draft")
+    expect(first.status, JSON.stringify(first.body.error)).toBe(200)
+    expect(first.body.meta.translation).toMatchObject({ locale: "vi", source_locale: "en" })
+    await _internal.flushTranslatedWrites()
+
+    await RenderedDocumentCache.init()
+    const index = (await RenderedDocumentCache.collection.indexes()).find((i) => i.name === "projectId_1_view_1_locale_1")
+    expect(index).toMatchObject({ unique: true, partialFilterExpression: { locale: { $exists: true } } })
+    const rows = await RenderedDocumentCache.find({ projectId: seeded.projectId, locale: { $exists: true } }).lean()
+    expect(rows.map((r) => [r.view, r.locale])).toEqual([["draft", "vi"]])
+    // Khoá ghi (danh tính từ `getWithIdentity`) cùng dạng khoá đọc (`versionHead.identity` qua `documentVersion`)
+    const head = await spineRepository.versionHead(seeded.projectId)
+    expect(rows[0].content_key).toBe(head!.identity)
+    // Hàng gốc (draft theo spine_version) không lẫn hàng bản dịch
+    expect(await RenderedDocumentCache.countDocuments({ projectId: seeded.projectId, locale: { $exists: true }, spine_version: { $exists: true } })).toBe(0)
+
+    clearDocumentMemo()
+    spineRepository.clearReadCache()
+    const again = await lead.get("/document?source=draft")
+    expect(again.status).toBe(200)
+    expect(again.body.data).toEqual(first.body.data)
+    expect(again.body.meta).toEqual(first.body.meta)
+
+    // Export ở ngôn ngữ mặc định (không `?lang=`) vẫn tải được, nhúng PNG, không ghi thêm hàng bản dịch (không dùng lại bản
+    // của GET — chặn ở unit test `assemble.test.ts` "chỉ caller bật reuseTranslated")
+    const word = await lead.download("/export/word?source=draft")
+    expect(word.status, String(word.body)).toBe(200)
+    expect(readZipText(word.body as Buffer, "word/_rels/document.xml.rels")).toContain("media/")
+    await _internal.flushTranslatedWrites()
+    expect(await RenderedDocumentCache.countDocuments({ projectId: seeded.projectId, locale: { $exists: true } })).toBe(1)
   })
 })

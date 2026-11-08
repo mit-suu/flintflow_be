@@ -8,7 +8,8 @@
  * - `kind = diagram`: `id` = id sơ đồ; có `locale` ⇒ PNG bản dịch (N1) của nguồn đã dịch hiện tại.
  * - `kind = media`  : `id` = part ảnh trong file gốc (mode 1), đã `encodeURIComponent`.
  * - `hash`: đổi khi ảnh đổi. Sơ đồ gốc: theo phiên bản file đã lưu (GridFS `_id` + độ dài — ghi lại là đổi, kể cả vẽ ép);
- *   bản dịch: hash nguồn đã dịch (đúng hash trong tên file `<id>.<locale>.<hash>.png`); media: sha256 bytes.
+ *   bản dịch: hash nguồn đã dịch (đúng hash trong tên file `<id>.<locale>.<hash>.png`); media: theo `(file_ref, part)` —
+ *   file gốc bất biến theo `file_ref`, nên không phải tải + giải nén cả .docx chỉ để lấy hash (FLF-381).
  *
  * Lấy hash KHÔNG tải bytes (sơ đồ gốc + bản dịch đã có file): chặng nặng nhất của GET /document trước đây là tải và nhúng
  * mọi PNG. FE tải từng ảnh qua `GET /projects/:id/document/image?ref=…` (kiểm thành viên, kiểm id / locale / part, chỉ
@@ -18,7 +19,7 @@
 import { createHash } from "node:crypto"
 import { gridFsDiagramStore, type DiagramFileStat, type DiagramFileStore } from "../diagram/diagram-file.store.js"
 import { localizedDiagramHash, localizedDiagramPng, type DiagramSource } from "../diagram/localized-diagram.service.js"
-import { imageMime, isMediaId, loadImportImage, MEDIA_PREFIX } from "./import-media.js"
+import { currentImportFileRef, embeddableMediaPart, isMediaId, MEDIA_PREFIX, readImportImage } from "./import-media.js"
 import type { DiagramPngLoader, LocalizedDiagramPngLoader } from "./assemble.service.js"
 
 export const IMAGE_REF_TOKEN_PREFIX = "image-ref:"
@@ -57,7 +58,21 @@ export const isImageRefToken = (value: unknown): value is string => typeof value
 /** Hash tham chiếu của sơ đồ gốc theo phiên bản file đã lưu. */
 export const diagramFileHash = (version: string): string => shortHash(`diagram:${version}`)
 
-export const mediaHash = (data: Buffer): string => shortHash(data)
+/** Hash tham chiếu của ảnh gốc mode 1 theo `(file_ref, part)` — file gốc bất biến theo `file_ref` (xem `import-media.ts`). */
+export const mediaHash = (fileRef: string, part: string): string => shortHash(`media:${fileRef}:${part}`)
+
+/** `file_ref` của project, đọc một lần cho cả lượt dựng (28 ảnh = một truy vấn, không phải 28). */
+const projectFileRefs = (fileRefOf: (projectId: string) => Promise<string | null>) => {
+  const cache = new Map<string, Promise<string | null>>()
+  return (projectId: string) => {
+    let found = cache.get(projectId)
+    if (!found) {
+      found = fileRefOf(projectId).catch(() => null)
+      cache.set(projectId, found)
+    }
+    return found
+  }
+}
 
 /**
  * Loader ảnh gốc cho chế độ tham chiếu: thay cho `defaultDiagramPngLoader` — trả chuỗi `image-ref:` thay vì base64.
@@ -80,18 +95,26 @@ const projectStats = (store: DiagramFileStore) => {
 }
 
 /** Mỗi request tạo loader mới (cache metadata theo lượt dựng, không giữ qua request). */
-export const refDiagramPngLoader = (store: DiagramFileStore = gridFsDiagramStore, loadMedia = loadImportImage): DiagramPngLoader => {
+export const refDiagramPngLoader = (store: DiagramFileStore = gridFsDiagramStore, fileRefOf = currentImportFileRef): DiagramPngLoader => {
   const stats = projectStats(store)
-  return async (projectId, diagramId) => {
+  const fileRefs = projectFileRefs(fileRefOf)
+  const load: DiagramPngLoader = async (projectId, diagramId) => {
     if (isMediaId(diagramId)) {
+      // Không mở file gốc: hash theo `(file_ref, part)`, nhúng được theo đuôi part — bytes chỉ đọc ở route ảnh
       const part = diagramId.slice(MEDIA_PREFIX.length)
-      const image = await loadMedia(projectId, part).catch(() => null)
-      return image ? formatImageRef({ kind: "media", id: part, hash: mediaHash(Buffer.from(image.data, "base64")) }) : null
+      if (!embeddableMediaPart(part)) return null
+      const fileRef = await fileRefs(projectId)
+      return fileRef ? formatImageRef({ kind: "media", id: part, hash: mediaHash(fileRef, part) }) : null
     }
     const all = await stats(projectId)
     const stat = all ? (all.get(`${diagramId}.png`) ?? null) : await store.stat(projectId, diagramId, "png").catch(() => null)
     return stat ? formatImageRef({ kind: "diagram", id: diagramId, hash: diagramFileHash(stat.version) }) : null
   }
+  // FLF-383: nạp sẵn metadata PNG + `file_ref` (đã memo theo loader) song song với lượt đọc cache tài liệu
+  load.warm = async (projectId) => {
+    await Promise.all([stats(projectId), fileRefs(projectId)])
+  }
+  return load
 }
 
 /**
@@ -116,7 +139,7 @@ export const refLocalizedPngLoader = (
 /** Kết quả đọc một ảnh theo tham chiếu cho route. */
 export type ImageRead =
   | { ok: true; data: Buffer; contentType: string }
-  | { ok: false; reason: "not_found" | "changed" }
+  | { ok: false; reason: "not_found" | "changed" | "unsupported" | "unavailable" }
 
 /**
  * Bytes của ảnh `ref` — CHỈ ĐỌC (không vẽ khi thiếu). Kiểm quyền / tập id hợp lệ là việc của controller. Hash lệch file
@@ -126,14 +149,24 @@ export const readImageRef = async (
   projectId: string,
   ref: ImageRef,
   store: DiagramFileStore = gridFsDiagramStore,
-  loadMedia = loadImportImage
+  readMedia = readImportImage,
+  fileRefOf = currentImportFileRef
 ): Promise<ImageRead> => {
   if (ref.kind === "media") {
-    const image = await loadMedia(projectId, ref.id).catch(() => null)
-    if (!image) return { ok: false, reason: "not_found" }
-    const data = Buffer.from(image.data, "base64")
-    if (mediaHash(data) !== ref.hash) return { ok: false, reason: "changed" }
-    return { ok: true, data, contentType: imageMime(data) ?? "application/octet-stream" }
+    // Lỗi DB khi tra `file_ref` là lỗi tạm thời, không phải "không có ảnh"
+    let fileRef: string | null
+    try {
+      fileRef = await fileRefOf(projectId)
+    } catch {
+      return { ok: false, reason: "unavailable" }
+    }
+    if (!fileRef) return { ok: false, reason: "not_found" }
+    // Upload lại ⇒ `file_ref` mới ⇒ hash lệch ⇒ `changed` trước khi tải bytes của file mới
+    if (mediaHash(fileRef, ref.id) !== ref.hash) return { ok: false, reason: "changed" }
+    const read = await readMedia(fileRef, ref.id).catch(() => ({ ok: false as const, reason: "unavailable" as const }))
+    if (!read.ok) return { ok: false, reason: read.reason === "missing" ? "not_found" : read.reason }
+    const data = Buffer.from(read.image.data, "base64")
+    return { ok: true, data, contentType: read.image.mime }
   }
   if (ref.locale) {
     const file = await store.loadLocalized(projectId, ref.id, ref.locale, ref.hash).catch(() => null)

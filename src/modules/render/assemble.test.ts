@@ -26,13 +26,16 @@ const cacheDb = vi.hoisted(() => {
     }
     return rows[0] ?? null
   })
+  // `timestamps: true` của model thật: mỗi lần ghi đổi `updatedAt` (khoá bản nhớ trong tiến trình — FLF-381)
+  let tick = 0
+  const stamp = () => new Date(Date.UTC(2026, 0, 1) + ++tick)
   const findOneAndUpdate = vi.fn(async (filter: D, update: { $set: D }) => {
     const existing = docs.find((d) => matches(d, filter))
     if (existing) {
-      Object.assign(existing, update.$set)
+      Object.assign(existing, update.$set, { updatedAt: stamp() })
       return existing
     }
-    const created = { _id: `cache-${nextId++}`, ...filter, ...update.$set }
+    const created = { _id: `cache-${nextId++}`, ...filter, ...update.$set, updatedAt: stamp() }
     docs.push(created)
     return created
   })
@@ -55,7 +58,7 @@ const cacheDb = vi.hoisted(() => {
   })
   const updateOne = vi.fn(async (filter: D, update: { $set: D }) => {
     const existing = docs.find((d) => matches(d, filter))
-    if (existing) Object.assign(existing, update.$set)
+    if (existing) Object.assign(existing, update.$set, { updatedAt: stamp() })
     return { matchedCount: existing ? 1 : 0 }
   })
   const reset = () => {
@@ -78,19 +81,26 @@ const baselineDb = vi.hoisted(() => {
 const changeDb = vi.hoisted(() => {
   type D = Record<string, unknown>
   let rows: D[] = []
+  // Lịch sử đọc tăng dần (FLF-381) hỏi `seq > n` và mốc `findOne({ seq })`; mỗi lần đặt lại hàng là một lịch sử mới
+  let generation = 0
+  const matches = (r: D, filter: D) =>
+    Object.entries(filter).every(([k, v]) => (v && typeof v === "object" && "$gt" in v ? Number(r[k]) > Number((v as { $gt: number }).$gt) : r[k] === v))
   const find = vi.fn(async (filter: D, _proj: unknown, options: { sort?: Record<string, number> } = {}) => {
-    let out = rows.filter((r) => Object.entries(filter).every(([k, v]) => r[k] === v))
+    let out = rows.filter((r) => matches(r, filter))
     if (options.sort?.seq === 1) out = [...out].sort((a, b) => Number(a.seq) - Number(b.seq))
     return out
   })
+  const findOne = vi.fn(async (filter: D) => rows.find((r) => matches(r, filter)) ?? null)
   const setRows = (r: D[]) => {
-    rows = r
+    generation++
+    rows = r.map((row, i) => ({ _id: `chg-${generation}-${i}`, seq: i + 1, ...row }))
   }
   const reset = () => {
     rows = []
     find.mockClear()
+    findOne.mockClear()
   }
-  return { find, setRows, reset }
+  return { find, findOne, setRows, reset }
 })
 
 const userDb = vi.hoisted(() => {
@@ -120,27 +130,42 @@ vi.mock("./rendered-document.model.js", () => ({
   }
 }))
 vi.mock("../spine/baseline.model.js", () => ({ Baseline: { findOne: baselineDb.findOne } }))
-vi.mock("../spine/change.model.js", () => ({ Change: { find: changeDb.find } }))
+vi.mock("../spine/change.model.js", () => ({ Change: { find: changeDb.find, findOne: changeDb.findOne } }))
 vi.mock("../user/user.model.js", () => ({ User: { find: userDb.find } }))
 // Project mode 2: chưa có layout file upload ⇒ thứ tự mẫu FPT (FLF-184)
 vi.mock("../import/template-profile.model.js", () => ({ TemplateProfile: { findOne: async () => null } }))
-vi.mock("../spine/spine.repository.js", () => ({
-  get: vi.fn(),
+vi.mock("../spine/spine.repository.js", () => {
+  const get = vi.fn()
+  return {
+  get,
+  // Như repository thật: cùng bản ghi `get` trả, danh tính theo version (mỗi ca test xoá bộ nhớ ở beforeEach)
+  getWithIdentity: vi.fn(async (projectId: string) => {
+    const record = await get(projectId)
+    return record ? { record, identity: `spine:${record.spine_version}` } : null
+  }),
+  versionHead: vi.fn(async (projectId: string) => {
+    const record = await get(projectId)
+    return record ? { spine_version: record.spine_version, content_seq: 0, identity: `spine:${record.spine_version}` } : null
+  }),
   listBaselineRefs: vi.fn(),
   listChanges: vi.fn(),
   SPINE_VERSION_CONFLICT: "SPINE_VERSION_CONFLICT",
   SPINE_NOT_FOUND: "SPINE_NOT_FOUND"
-}))
+  }
+})
 // FLF-265: S-8.4 thật, chỉ bọc để xem section nó nhận (không bao giờ là chữ dịch)
 vi.mock("./consistency-pass.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./consistency-pass.js")>()
   return { ...actual, runConsistencyPass: vi.fn(actual.runConsistencyPass) }
 })
 // FLF-265: lớp bản dịch không có Mongo — test tiêm `resolveTranslations`, riêng một test đi resolver mặc định qua kho giả này
-vi.mock("../translation/translation.repository.js", () => ({ findByHashes: vi.fn() }))
+// `translationRevision`: lớp bản dịch "chưa đổi" — ca nào ghi bản dịch mới thì tiêm `translationRevision` riêng (FLF-381)
+vi.mock("../translation/translation.repository.js", () => ({ findByHashes: vi.fn(), translationRevision: vi.fn(async () => null) }))
 
 import * as spineRepository from "../spine/spine.repository.js"
 import { _internal, assemble, getDocument, getDocumentWithMeta, getDraftMeta, NoWorkingDraftError, type TranslationResolver } from "./assemble.service.js"
+import { clearDocumentMemo } from "./rendered-document-memo.js"
+import { clearChangeLogs } from "../spine/change-log.js"
 import { runConsistencyPass } from "./consistency-pass.js"
 import { DIAGRAM_PLACEHOLDER_PNG } from "./diagram-placeholder.js"
 import { buildDocxFileName } from "./docx-writer.js"
@@ -193,6 +218,8 @@ const baseSpine = (): Spine => ({
 const spineRecord = (overrides: Partial<SpineRecord> = {}): SpineRecord => ({ ...baseSpine(), projectId: PROJECT, ...overrides })
 
 beforeEach(() => {
+  clearDocumentMemo()
+  clearChangeLogs()
   cacheDb.reset()
   baselineDb.reset()
   changeDb.reset()
@@ -479,6 +506,80 @@ describe("getDocument() — source=draft", () => {
     expect(cacheDb.docs.filter((d) => d.spine_version === 7)).toHaveLength(1)
   })
 
+  it("FLF-381: lượt đọc lại cùng bản cache không tải lại thân document (chỉ hỏi _id + updatedAt); ghi lại cache ⇒ tải bản mới", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 5 }))
+    const first = await getDocument(PROJECT, "Demo", { source: "draft" })
+    // Thân document chỉ được tải bằng `findOne({ _id })` — đếm các lượt đó
+    const bodyReads = () => cacheDb.findOne.mock.calls.filter(([filter]) => "_id" in (filter as object)).length
+
+    cacheDb.findOne.mockClear()
+    const second = await getDocument(PROJECT, "Demo", { source: "draft" })
+    expect(second).toEqual(first)
+    expect(bodyReads()).toBe(0)
+
+    // Caller sửa bản nhận về không làm bẩn lượt sau
+    second.sections[0].heading = "đã sửa"
+    expect((await getDocument(PROJECT, "Demo", { source: "draft" })).sections[0].heading).toBe(first.sections[0].heading)
+
+    // Document cache bị ghi lại (updatedAt đổi) ⇒ khoá đổi ⇒ tải thân mới
+    const row = cacheDb.docs.find((d) => d.spine_version === 5)!
+    const changed = structuredClone(row.doc) as typeof first
+    changed.sections[0].heading = "ghi lại"
+    await cacheDb.updateOne({ _id: row._id }, { $set: { doc: changed } })
+    cacheDb.findOne.mockClear()
+    expect((await getDocument(PROJECT, "Demo", { source: "draft" })).sections[0].heading).toBe("ghi lại")
+    expect(bodyReads()).toBe(1)
+  })
+
+  it("FLF-381: draftMeta đi kèm bản trả về (khỏi hỏi lại cache + Spine), cùng nghĩa getDraftMeta", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 3 }))
+    const result = await getDocumentWithMeta(PROJECT, "Demo", { source: "draft" })
+    expect(result.draftMeta).toEqual({ assembled_at_version: 3, spine_version: 3, stale: false })
+    expect(result.draftMeta).toEqual(await getDraftMeta(PROJECT))
+  })
+
+  it("FLF-383: cache trúng ⇒ không tải cả Spine (draftHead caller truyền, hoặc tự đọc versionHead)", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 5 }))
+    const first = await getDocumentWithMeta(PROJECT, "Demo", { source: "draft" })
+
+    vi.mocked(spineRepository.get).mockClear()
+    vi.mocked(spineRepository.versionHead).mockClear()
+    const passed = await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", draftHead: { spine_version: 5, identity: "spine:5", translation_revision: null } })
+    expect(passed).toEqual(first)
+    expect(spineRepository.get).not.toHaveBeenCalled()
+    expect(spineRepository.versionHead).not.toHaveBeenCalled()
+
+    vi.mocked(spineRepository.versionHead).mockResolvedValueOnce({ spine_version: 5, content_seq: 0, identity: "spine:5" })
+    const own = await getDocumentWithMeta(PROJECT, "Demo", { source: "draft" })
+    expect(own).toEqual(first)
+    expect(spineRepository.versionHead).toHaveBeenCalledTimes(1)
+    expect(spineRepository.get).not.toHaveBeenCalled()
+  })
+
+  it("FLF-383: draftHead = null (chưa có Spine) ⇒ NoWorkingDraftError, không đọc gì thêm", async () => {
+    await expect(getDocumentWithMeta(PROJECT, "Demo", { source: "draft", draftHead: null })).rejects.toBeInstanceOf(NoWorkingDraftError)
+    expect(spineRepository.get).not.toHaveBeenCalled()
+  })
+
+  it("FLF-383: trượt cache ⇒ vẫn dựng ở draftHead caller truyền", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 6 }))
+    const result = await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", draftHead: { spine_version: 6, identity: "spine:6", translation_revision: null } })
+    expect(result.draftMeta).toEqual({ assembled_at_version: 6, spine_version: 6, stale: false })
+    expect(cacheDb.docs.filter((d) => d.spine_version === 6)).toHaveLength(1)
+  })
+
+  it("FLF-383: loader có warm ⇒ gọi warm(projectId) cùng lượt đọc cache; warm lỗi không làm hỏng lượt đọc", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 2 }))
+    await assemble(PROJECT, "Demo", 2)
+    const warm = vi.fn(async () => {
+      throw new Error("stat lỗi")
+    })
+    const loader = Object.assign(async () => null, { warm })
+    const doc = await getDocument(PROJECT, "Demo", { source: "draft", draftHead: { spine_version: 2, identity: "spine:2", translation_revision: null } }, { loadDiagramPng: loader })
+    expect(warm).toHaveBeenCalledWith(PROJECT)
+    expect(doc.version).toBe("v0")
+  })
+
   it("review T2 (FLF-264): bản ghi cache hỏng ⇒ dựng lại đè lên, không ném 422 ra cho người dùng", async () => {
     vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 1 }))
     cacheDb.docs.push({ projectId: PROJECT, spine_version: 1, assembled_at_version: 1, generated_at: new Date(), doc: { not: "a rendered document" } })
@@ -553,7 +654,8 @@ describe("getDocument() — source=baseline", () => {
 
     const second = images(await getDocument(PROJECT, "Demo", { source: "baseline", baseline_id: BASELINE_ID }, { loadDiagramPng: async () => "BASE64PNG" }))
     expect(second).toEqual([{ type: "image", png: "BASE64PNG", caption: "Figure — System Context Diagram" }])
-    expect(baselineDb.findOne).toHaveBeenCalledTimes(2) // lần hai vẫn tra Baseline để lấy _id, nhưng không dựng lại (cache 1 bản)
+    // Lần hai trúng cache theo `_id` đã biết ⇒ không tải snapshot Baseline (FLF-381), không dựng lại (cache 1 bản)
+    expect(baselineDb.findOne).toHaveBeenCalledTimes(1)
     expect(cacheDb.docs.filter((d) => d.baseline_id === BASELINE_ID)).toHaveLength(1)
   })
 
@@ -705,7 +807,10 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
     const plain = await getDocument(PROJECT, "Demo", { source: "draft" })
 
     for (const languages of [{ locale: "en", source: "en" }, { locale: "vi", source: "vi" }] as const) {
-      expect(await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages }, { resolveTranslations })).toEqual({ doc: plain })
+      expect(await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages }, { resolveTranslations })).toEqual({
+        doc: plain,
+        draftMeta: { assembled_at_version: 31, spine_version: 31, stale: false }
+      })
     }
     expect(resolveTranslations).not.toHaveBeenCalled()
     expect(cacheDb.docs.map((d) => [d.projectId, d.spine_version])).toEqual([[PROJECT, 31]])
@@ -816,7 +921,24 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
     expect(terms.some((m) => m.includes('"XYZ"'))).toBe(false)
   })
 
-  it("không đọc / ghi cache (draft + baseline); bản dịch mới hiện ngay ở lượt đọc kế dù spine_version không đổi", async () => {
+  it("chỉ caller bật reuseTranslated (GET /document) mới dùng lại bản đã dựng — export (không bật / freshTemplate) dựng mới, ảnh theo loader của chính nó", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 52, diagrams: [contextDiagram] }))
+    const resolveTranslations = overlay()
+    // GET: ảnh dạng tham chiếu, bản dựng được nhớ
+    const ref = "image-ref:diagram:D01@0123456789abcdef"
+    await getDocument(PROJECT, "Demo", { source: "draft", languages: LANG_VI, reuseTranslated: true }, { resolveTranslations, loadDiagramPng: async () => ref, loadLocalizedDiagramPng: async () => ref })
+    resolveTranslations.mockClear()
+    // Export cùng ngôn ngữ mặc định (không `beforeRender`): dựng mới, PNG nhúng — không lấy tham chiếu (cả PNG theo ngôn
+    // ngữ) của bản GET đã nhớ; trước đây docx-writer giải mã chuỗi tham chiếu như base64 ⇒ 422
+    const exported = await getDocument(PROJECT, "Demo", { source: "draft", languages: LANG_VI }, { resolveTranslations, loadDiagramPng: async () => "BASE64PNG", loadLocalizedDiagramPng: async () => "BASE64VI" })
+    expect(resolveTranslations).toHaveBeenCalled()
+    expect(imagesOf(exported).every((b) => !String(b.png).startsWith("image-ref:"))).toBe(true)
+    resolveTranslations.mockClear()
+    await getDocument(PROJECT, "Demo", { source: "draft", languages: LANG_VI, reuseTranslated: true, freshTemplate: true }, { resolveTranslations })
+    expect(resolveTranslations).toHaveBeenCalled()
+  })
+
+  it("không đụng hàng draft / baseline gốc (bản dịch có hàng riêng, FLF-383); bản dịch mới hiện ngay ở lượt đọc kế dù spine_version không đổi", async () => {
     vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 51 }))
     // Bản gốc đã cache đúng version hiện tại — đường bản dịch không được trả bản này
     await assemble(PROJECT, "Demo", 51)
@@ -824,13 +946,21 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
     for (const fn of cacheCalls()) fn.mockClear()
 
     let vision = "Tầm nhìn (bản máy)"
+    // Revision lớp bản dịch = `updatedAt` lớn nhất: lần ghi bản dịch nào cũng đổi nó (translation.repository)
+    let revision = "2026-11-01T00:00:00.000Z"
+    const translationRevision = async () => revision
     const resolveTranslations = overlay((unit) => (unit.key === "project.vision" ? vision : toVi(unit.value)))
-    const first = await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI }, { resolveTranslations })
-    // Lượt AI ghi Spine trả kèm bản dịch khác (D16) — spine_version không đổi
+    const first = await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI, reuseTranslated: true }, { resolveTranslations, translationRevision })
+    // FLF-381: chưa có bản dịch mới ⇒ lượt đọc lại dùng bản đã nhớ, không tra lại lớp bản dịch
+    resolveTranslations.mockClear()
+    expect(await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI, reuseTranslated: true }, { resolveTranslations, translationRevision })).toEqual(first)
+    expect(resolveTranslations).not.toHaveBeenCalled()
+    // Lượt AI ghi Spine trả kèm bản dịch khác (D16) — spine_version không đổi, revision đổi
     vision = "Tầm nhìn (bản tác giả)"
-    const second = await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI }, { resolveTranslations })
+    revision = "2026-11-01T00:00:01.000Z"
+    const second = await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI, reuseTranslated: true }, { resolveTranslations, translationRevision })
     baselineDb.findOne.mockResolvedValue(baselineRow(baseSpine()))
-    const baseline = await getDocumentWithMeta(PROJECT, "Demo", { source: "baseline", baseline_id: BASELINE_ID, languages: LANG_VI }, { resolveTranslations })
+    const baseline = await getDocumentWithMeta(PROJECT, "Demo", { source: "baseline", baseline_id: BASELINE_ID, languages: LANG_VI, reuseTranslated: true }, { resolveTranslations, translationRevision })
 
     expect(firstText(first.doc, "fixed:1")).toBe("Tầm nhìn (bản máy)")
     expect(firstText(second.doc, "fixed:1")).toBe("Tầm nhìn (bản tác giả)")
@@ -838,8 +968,123 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
     expect(baseline.doc).toMatchObject({ source: "baseline", version: "v1.0" })
     expect(baseline.translation).toEqual({ locale: "vi", source_locale: "en", missing: 0 })
     expect(baseline.draftMeta).toBeUndefined()
-    for (const fn of cacheCalls()) expect(fn).not.toHaveBeenCalled()
-    expect(cacheDb.docs).toEqual(cached)
+    await _internal.flushTranslatedWrites()
+    // Hàng gốc giữ nguyên; bản dịch một hàng mỗi (view, locale), ghi đè theo revision mới nhất
+    expect(cacheDb.docs.filter((d) => !("locale" in d))).toEqual(cached)
+    expect(cacheDb.docs.filter((d) => "locale" in d).map((d) => [d.view, d.locale, d.translation_revision])).toEqual([
+      ["draft", "vi", revision],
+      [`baseline:${BASELINE_ID}`, "vi", revision]
+    ])
+  })
+
+  describe("FLF-383 — bản dịch lưu trong rendered_documents, sống qua restart", () => {
+    const translatedRows = () => cacheDb.docs.filter((d) => "locale" in d)
+    /** Giả lập tiến trình mới: mọi bộ nhớ RAM rỗng, DB giữ nguyên. */
+    const restart = () => {
+      clearDocumentMemo()
+      clearChangeLogs()
+    }
+
+    it("draft: lượt sau restart đọc hàng đã lưu — không tải Spine, không đọc changes, body như bản dựng", async () => {
+      vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 61 }))
+      const resolveTranslations = overlay()
+      const first = await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI, reuseTranslated: true }, { resolveTranslations })
+      await _internal.flushTranslatedWrites()
+      expect(translatedRows()).toHaveLength(1)
+      expect(translatedRows()[0]).toMatchObject({ view: "draft", locale: "vi", content_key: "spine:61", translation_revision: "-" })
+
+      restart()
+      vi.mocked(spineRepository.getWithIdentity).mockClear()
+      vi.mocked(spineRepository.listChanges).mockClear()
+      resolveTranslations.mockClear()
+      const again = await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI, reuseTranslated: true }, { resolveTranslations })
+      expect(again).toEqual(first)
+      expect(spineRepository.getWithIdentity).not.toHaveBeenCalled()
+      expect(spineRepository.listChanges).not.toHaveBeenCalled()
+      expect(resolveTranslations).not.toHaveBeenCalled()
+    })
+
+    it("Spine đổi / bản dịch mới / ngôn ngữ khác ⇒ dựng lại; vẫn một hàng mỗi (view, locale)", async () => {
+      const resolveTranslations = overlay()
+      let revision: string | null = null
+      const deps = { resolveTranslations, translationRevision: async () => revision }
+      vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 62 }))
+      await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI, reuseTranslated: true }, deps)
+      await _internal.flushTranslatedWrites()
+
+      const rebuildsAfter = async (change: () => void, languages: { locale: "vi" | "en"; source: "vi" | "en" } = LANG_VI) => {
+        change()
+        restart()
+        resolveTranslations.mockClear()
+        await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages, reuseTranslated: true }, deps)
+        await _internal.flushTranslatedWrites()
+        return resolveTranslations.mock.calls.length > 0
+      }
+      expect(await rebuildsAfter(() => vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 63 })))).toBe(true)
+      expect(await rebuildsAfter(() => (revision = "2026-11-06T00:00:00.000Z"))).toBe(true)
+      expect(await rebuildsAfter(() => undefined)).toBe(false)
+      expect(translatedRows().map((d) => [d.view, d.locale, d.content_key, d.translation_revision])).toEqual([["draft", "vi", "spine:63", revision]])
+
+      expect(await rebuildsAfter(() => undefined, { locale: "en", source: "vi" })).toBe(true)
+      expect(translatedRows().map((d) => [d.view, d.locale])).toEqual([["draft", "vi"], ["draft", "en"]])
+    })
+
+    it("baseline: lưu theo baseline + spine_version; baseline khác ⇒ hàng riêng; Spine đi tiếp (§I) ⇒ dựng lại", async () => {
+      const OTHER = "650000000000000000000098"
+      const resolveTranslations = overlay()
+      vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 70 }))
+      baselineDb.findOne.mockResolvedValue(baselineRow(baseSpine()))
+      const first = await getDocumentWithMeta(PROJECT, "Demo", { source: "baseline", baseline_id: BASELINE_ID, languages: LANG_VI, reuseTranslated: true }, { resolveTranslations })
+      await _internal.flushTranslatedWrites()
+
+      restart()
+      baselineDb.findOne.mockClear()
+      resolveTranslations.mockClear()
+      expect(await getDocumentWithMeta(PROJECT, "Demo", { source: "baseline", baseline_id: BASELINE_ID, languages: LANG_VI, reuseTranslated: true }, { resolveTranslations })).toEqual(first)
+      expect(baselineDb.findOne).not.toHaveBeenCalled()
+      expect(resolveTranslations).not.toHaveBeenCalled()
+
+      await getDocumentWithMeta(PROJECT, "Demo", { source: "baseline", baseline_id: OTHER, languages: LANG_VI, reuseTranslated: true }, { resolveTranslations })
+      vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 71 }))
+      restart()
+      resolveTranslations.mockClear()
+      await getDocumentWithMeta(PROJECT, "Demo", { source: "baseline", baseline_id: BASELINE_ID, languages: LANG_VI, reuseTranslated: true }, { resolveTranslations })
+      expect(resolveTranslations).toHaveBeenCalled()
+      await _internal.flushTranslatedWrites()
+      expect(translatedRows().map((d) => [d.view, d.content_key])).toEqual([
+        [`baseline:${BASELINE_ID}`, "71"],
+        [`baseline:${OTHER}`, "70"]
+      ])
+    })
+
+    it("hàng gốc + getDraftMeta không thấy hàng bản dịch; đường export không đọc / ghi hàng bản dịch; hàng hỏng ⇒ dựng lại", async () => {
+      vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 64 }))
+      const resolveTranslations = overlay()
+      await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI, reuseTranslated: true }, { resolveTranslations })
+      await _internal.flushTranslatedWrites()
+      expect(await getDraftMeta(PROJECT)).toBeNull()
+      await assemble(PROJECT, "Demo", 64)
+      expect(await getDraftMeta(PROJECT)).toEqual({ assembled_at_version: 64, spine_version: 64, stale: false })
+      expect(translatedRows()).toHaveLength(1)
+
+      // Export (`beforeRender`) luôn dựng mới, không ghi
+      const before = structuredClone(translatedRows())
+      restart()
+      resolveTranslations.mockClear()
+      await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI, beforeRender: async () => undefined }, { resolveTranslations })
+      await _internal.flushTranslatedWrites()
+      expect(resolveTranslations).toHaveBeenCalled()
+      expect(translatedRows()).toEqual(before)
+
+      // Hàng hỏng khuôn ⇒ dựng lại, ghi đè
+      translatedRows()[0].doc = { not: "a document" }
+      resolveTranslations.mockClear()
+      const rebuilt = await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI, reuseTranslated: true }, { resolveTranslations })
+      expect(resolveTranslations).toHaveBeenCalled()
+      await _internal.flushTranslatedWrites()
+      expect(translatedRows()).toHaveLength(1)
+      expect(translatedRows()[0].doc).toMatchObject({ source: rebuilt.doc.source })
+    })
   })
 
   it("ảnh chưa có PNG ⇒ placeholder, chú thích tiếng Việt (draft + baseline)", async () => {
@@ -939,12 +1184,48 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
       const english = await build(spine, { loadLocalizedDiagramPng: vi.fn() }, false)
       for (const b of imagesOf(english)) expect(b.png).toMatch(/^EN:/)
     })
+
+    it("FLF-381: còn sơ đồ vẽ chưa xong lúc hết trần ⇒ không nhớ bản dựng (lượt sau lấy ảnh theo ngôn ngữ); vẽ đủ ⇒ nhớ, ảnh vẫn phân giải lại", async () => {
+      const spine = renderedFixture()
+      vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ ...spine, spine_version: 81 }))
+      const slow = spine.diagrams[0].id
+      let slowReady = false
+      const loadLocalizedDiagramPng = vi.fn(async (_p: string, id: string) => (id === slow && !slowReady ? new Promise<string>(() => {}) : `VI:${id}`))
+      let base = "EN"
+      const loadDiagramPng = vi.fn(async (_p: string, id: string) => `${base}:${id}`)
+      const resolveTranslations = overlay()
+      const deps = { resolveTranslations, loadLocalizedDiagramPng, loadDiagramPng, localizedImageBudgetMs: 30 }
+      const pngOf = (doc: RenderedDocument, id: string) => imagesOf(doc).find((b) => String(b.png).endsWith(`:${id}`))?.png
+
+      const translatedRows = () => cacheDb.docs.filter((d) => "locale" in d)
+      const first = await getDocument(PROJECT, "Demo", { source: "draft", languages: LANG_VI, reuseTranslated: true }, deps)
+      expect(pngOf(first, slow)).toBe(`EN:${slow}`)
+      // FLF-383: chưa đủ PNG theo ngôn ngữ ⇒ không lưu hàng bản dịch
+      await _internal.flushTranslatedWrites()
+      expect(translatedRows()).toHaveLength(0)
+
+      // Lượt vẽ đã xong (file đã lưu) ⇒ lượt sau dựng lại, có ảnh theo ngôn ngữ
+      slowReady = true
+      const second = await getDocument(PROJECT, "Demo", { source: "draft", languages: LANG_VI, reuseTranslated: true }, deps)
+      expect(pngOf(second, slow)).toBe(`VI:${slow}`)
+      expect(resolveTranslations).toHaveBeenCalledTimes(2)
+      await _internal.flushTranslatedWrites()
+      expect(translatedRows()).toHaveLength(1)
+
+      // Đủ ảnh ⇒ đã nhớ: không tra lại lớp bản dịch, không vẽ lại; ảnh gốc (nếu có) vẫn tải lại mỗi lượt
+      loadLocalizedDiagramPng.mockClear()
+      base = "EN2"
+      const third = await getDocument(PROJECT, "Demo", { source: "draft", languages: LANG_VI, reuseTranslated: true }, deps)
+      expect(third).toEqual(second)
+      expect(resolveTranslations).toHaveBeenCalledTimes(2)
+      expect(loadLocalizedDiagramPng).not.toHaveBeenCalled()
+    })
   })
 
   it("chưa có Spine ⇒ NoWorkingDraftError; baseline không có ⇒ 404 — như đường gốc, không tra lớp bản dịch", async () => {
     const resolveTranslations = overlay()
     vi.mocked(spineRepository.get).mockResolvedValue(null)
-    await expect(getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI }, { resolveTranslations })).rejects.toBeInstanceOf(NoWorkingDraftError)
+    await expect(getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI, reuseTranslated: true }, { resolveTranslations })).rejects.toBeInstanceOf(NoWorkingDraftError)
     baselineDb.findOne.mockResolvedValue(null)
     await expect(getDocumentWithMeta(PROJECT, "Demo", { source: "baseline", languages: LANG_VI }, { resolveTranslations })).rejects.toMatchObject({
       statusCode: 404,
