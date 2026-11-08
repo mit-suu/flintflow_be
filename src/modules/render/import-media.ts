@@ -73,20 +73,33 @@ const packageOf = (fileRef: string): Promise<DocxPackage | null> => {
   return pkg
 }
 
-const originalPackage = async (projectId: string): Promise<DocxPackage | null> => {
-  const fileRef = await currentImportFileRef(projectId)
-  return fileRef ? packageOf(fileRef) : null
-}
-
 /** Test dùng để cô lập giữa các ca. */
 export const clearImportMediaCache = (): void => cache.clear()
 
+/**
+ * Đọc ảnh `part` trong file gốc `fileRef`, giữ lý do khi không đọc được — route ảnh cần phân biệt để client hiện đúng:
+ * `unavailable` = không tải / giải nén được file gốc (lỗi storage, có thể tạm thời), `missing` = file không có part này,
+ * `unsupported` = có bytes nhưng không phải PNG/JPEG (writer không nhúng được).
+ */
+export type ImportImageRead =
+  | { ok: true; image: LlmImage }
+  | { ok: false; reason: "unavailable" | "missing" | "unsupported" }
+
+export const readImportImage = async (fileRef: string, part: string): Promise<ImportImageRead> => {
+  const pkg = await packageOf(fileRef)
+  if (!pkg) return { ok: false, reason: "unavailable" }
+  const data = await pkg.binary(part).catch(() => null)
+  if (!data) return { ok: false, reason: "missing" }
+  const mime = imageMime(data)
+  return mime ? { ok: true, image: { mime, data: data.toString("base64") } } : { ok: false, reason: "unsupported" }
+}
+
 /** Ảnh gốc `part` của project kèm loại (PNG/JPEG) — dùng cho render và I-4 phần ảnh (Gemini). Không có / EMF… ⇒ `null`. */
 export const loadImportImage = async (projectId: string, part: string): Promise<LlmImage | null> => {
-  const pkg = await originalPackage(projectId)
-  const data = pkg ? await pkg.binary(part) : null
-  const mime = data ? imageMime(data) : null
-  return data && mime ? { mime, data: data.toString("base64") } : null
+  const fileRef = await currentImportFileRef(projectId)
+  if (!fileRef) return null
+  const read = await readImportImage(fileRef, part)
+  return read.ok ? read.image : null
 }
 
 /** Ảnh gốc `part` của project ⇒ base64 (PNG/JPEG), không nhúng được / không có ⇒ `null`. */

@@ -15,18 +15,31 @@ export interface VersionInfo {
   document_revision: string
 }
 
+/** `VersionInfo` + phần nội bộ `GET /document` dùng để tra bản đã dựng (FLF-383) — không trả ra `GET /version`. */
+export interface DocumentHead extends VersionInfo {
+  /** Danh tính Spine `<_id>:<spine_version>`. */
+  identity: string
+  /** Revision lớp bản dịch của ngôn ngữ tài liệu; `null` khi chưa có bản dịch hoặc ngôn ngữ tài liệu = gốc (không đọc). */
+  translation_revision: string | null
+}
+
 export interface DocumentLanguages {
   locale: UserLocale
   source: UserLocale
 }
 
 /** `null` khi dự án chưa có Spine. Bản dịch chỉ đọc khi ngôn ngữ tài liệu khác ngôn ngữ gốc. */
-export const documentVersion = async (projectId: string, languages: DocumentLanguages): Promise<VersionInfo | null> => {
+export const documentVersion = async (projectId: string, languages: DocumentLanguages): Promise<DocumentHead | null> => {
   const translated = languages.locale !== languages.source
   const [head, translation] = await Promise.all([
     spineRepository.versionHead(projectId),
     translated ? translationRevision(projectId, languages.locale) : Promise.resolve(null)
   ])
   if (!head) return null
-  return { spine_version: head.spine_version, document_revision: `${head.content_seq}:${translation ?? "-"}:${languages.locale}` }
+  return {
+    spine_version: head.spine_version,
+    document_revision: `${head.content_seq}:${translation ?? "-"}:${languages.locale}`,
+    identity: head.identity,
+    translation_revision: translation
+  }
 }
