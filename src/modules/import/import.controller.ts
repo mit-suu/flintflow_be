@@ -169,6 +169,15 @@ export const resume = mode1Handler(async (req, res) => {
   })
 })
 
+/** Người dùng bấm Dừng lúc đang đọc nội dung (I-4): đặt `paused: user`, job dừng trước lượt AI kế tiếp. Tiếp tục qua `resume`. */
+export const pause = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(importResumeRequestSchema, req.body)
+  const current = await extractJobs.requestStop(auth.projectId, body.import_id)
+  const summary = await importService.extractionSummary(String(current._id))
+  return sendSuccess(res, 200, { import: importService.toImportDto(current), sections: summary.sections })
+})
+
 export const gapReport = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const query = parseInput(gapReportQuerySchema, req.query)
