@@ -32,6 +32,8 @@ import { normalizeTemplateFamily } from "./part-bank.js"
 import { slotOverlaps } from "./content-slots.js"
 import { applyOrgMapping, orgTemplateHeadings } from "./org-mapping.js"
 import { TemplateProfile, type ITemplateProfile } from "./template-profile.model.js"
+import { previewStructure } from "./structure-preview.js"
+import * as spineRepository from "../spine/spine.repository.js"
 
 export interface UploadedFile {
   buffer: Buffer
@@ -70,6 +72,7 @@ export const toImportDto = (doc: IImportedDocument): ImportedDocumentDto => ({
   extract_cursor: doc.extract_cursor ?? null,
   reread: doc.reread ? { kind: doc.reread.kind, done: doc.reread.done, total: doc.reread.total, section_id: doc.reread.section_id } : null,
   intent: doc.intent ?? null,
+  structure_changes: doc.structure_changes ?? null,
   created_at: toIso(doc.createdAt)!,
   updated_at: toIso(doc.updatedAt)!
 })
@@ -162,23 +165,20 @@ export const assertImportStatus = (doc: IImportedDocument, allowed: readonly Imp
 // ─── 1.1–1.3 upload + preflight ──────────────────────────────────
 
 /**
- * FLF-335: ý định với file (bước 1.2). Dự án mới có mẫu bắt buộc ⇒ luôn `fixed` (đã chốt lúc tạo); còn lại theo client, thiếu ⇒
- * `free` (dự án cũ / client cũ). Chỉ ghi lên Project khi client chọn ý định (hoặc mẫu đã khoá) — `GET /projects/:id` và luồng so
- * cấu trúc đích (FLF-336) đọc được; client cũ không gửi `intent` thì Project không có ý định ⇒ giữ luồng cũ (v0 ngay).
+ * Ý định với file (bước 1.2) **luôn lấy từ Project** — chốt ở hộp Tạo dự án (ô "Bổ sung các mục còn thiếu theo mẫu chuẩn
+ * FlintFlow"), không hỏi lại lúc upload; `intent` client gửi kèm (client cũ) bị bỏ qua. Dự án không có ý định (tạo trước
+ * FLF-335) ⇒ `free`, Project giữ trống ⇒ luồng cũ (bản gốc ngay, không dừng ở cấu trúc đích).
  */
-const resolveUploadIntent = async (projectId: string, requested: TemplateIntent | undefined): Promise<TemplateIntent> => {
-  const project = await Project.findById(projectId, { start_kind: 1, template_intent: 1 }).lean()
-  const locked = project?.start_kind === "new" && project?.template_intent === "fixed"
-  const intent: TemplateIntent = locked ? "fixed" : (requested ?? "free")
-  if (project && (locked || requested) && project.template_intent !== intent) await Project.updateOne({ _id: projectId }, { template_intent: intent })
-  return intent
+const resolveUploadIntent = async (projectId: string): Promise<TemplateIntent> => {
+  const project = await Project.findById(projectId, { template_intent: 1 }).lean()
+  return project?.template_intent ?? "free"
 }
 
 export const uploadImport = async (
   projectId: string,
   userId: string,
   file: UploadedFile,
-  body: { intent?: TemplateIntent; /** FLF-278: import từ mẫu đã lưu của tổ chức (`org-library.service#importFromOrg`). */ org_template_id?: string } = {}
+  body: { /** FLF-278: import từ mẫu đã lưu của tổ chức (`org-library.service#importFromOrg`). */ org_template_id?: string } = {}
 ): Promise<IImportedDocument> => {
   const current = await latestImport(projectId)
   if (current && hasBaseline(current.status)) {
@@ -199,7 +199,7 @@ export const uploadImport = async (
     original_name: file.originalname,
     size: file.size,
     stamp: result.stamp,
-    intent: await resolveUploadIntent(projectId, body.intent),
+    intent: await resolveUploadIntent(projectId),
     ...(body.org_template_id ? { org_template_id: body.org_template_id } : {}),
     created_by: userId
   }
@@ -314,6 +314,28 @@ const clearPreviousImportData = async (projectId: mongoose.Types.ObjectId): Prom
   ])
 }
 
+/** Cấu trúc đích sơ bộ của file vừa tách (ý định theo `import.intent`, Spine hiện tại — chưa trích gì). */
+const previewOf = async (
+  doc: IImportedDocument,
+  blocks: ParsedBlock[],
+  sections: ReadonlyMap<string, string | null>,
+  headingMap: readonly { block_id: string; section_id: string }[]
+) => {
+  // Spine rỗng: lúc này chưa trích gì — dữ liệu của lần upload trước (chưa có bản gốc) không được làm mục "có nội dung"
+  const plain = spineRepository.createEmptySpine({})
+  const layoutBlocks = blocks.map((b) => ({
+    block_id: b.block_id,
+    kind: b.kind,
+    level: b.level ?? null,
+    text: b.text,
+    section_id: sections.get(b.block_id) ?? null,
+    rows: b.kind === "table" ? (b.rows ?? null) : null,
+    image_ref: b.image_ref ?? null,
+    ...(b.number_label ? { number_label: b.number_label } : {})
+  }))
+  return previewStructure(layoutBlocks, new Map(headingMap.map((h) => [h.block_id, h.section_id])), plain, doc.intent ?? "free")
+}
+
 export const runParse = async (doc: IImportedDocument): Promise<void> => {
   const sourceFile = await loadImportFile(doc)
   const { blocks } = await parseDocument(sourceFile)
@@ -329,7 +351,9 @@ export const runParse = async (doc: IImportedDocument): Promise<void> => {
   const legacy_record_of_changes = legacyRecordRows(blocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
   await clearPreviousImportData(doc.projectId)
   await DocBlock.insertMany(blocks.map((b) => toBlockDoc(doc.projectId, b, sections.get(b.block_id) ?? null)))
-  await TemplateProfile.create({ projectId: doc.projectId, source: "imported", doc_version: IMPORTED_DOC_VERSION, ...profile, source_file_ref: doc.file_ref, source_sha256: createHash("sha256").update(sourceFile).digest("hex"), legacy_record_of_changes })
+  // Màn đọc khung (business-flow §3.1.2): cấu trúc đích sơ bộ bằng Code, trước khi người dùng bấm Bắt đầu — không gọi AI
+  const structure_preview = await previewOf(doc, blocks, sections, profile.heading_map)
+  await TemplateProfile.create({ projectId: doc.projectId, source: "imported", doc_version: IMPORTED_DOC_VERSION, ...profile, source_file_ref: doc.file_ref, source_sha256: createHash("sha256").update(sourceFile).digest("hex"), legacy_record_of_changes, structure_preview })
   await transitionImport(doc, "extracting")
 }
 
@@ -467,5 +491,5 @@ export const getImportView = async (projectId: string): Promise<GetImportRespons
     extractionSummary(doc._id as mongoose.Types.ObjectId),
     DocBlock.countDocuments({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } })
   ])
-  return { import: toImportDto(doc), profile: profile ? toProfileDto(profile) : null, extraction, blocks_count: blocksCount, target_structure: profile?.target_structure ?? null }
+  return { import: toImportDto(doc), profile: profile ? toProfileDto(profile) : null, extraction, blocks_count: blocksCount, target_structure: profile?.target_structure ?? null, structure_preview: profile?.structure_preview ?? null }
 }

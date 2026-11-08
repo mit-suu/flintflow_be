@@ -8,11 +8,12 @@
 import type { TemplateContextEntry } from "./template-context.js"
 import mongoose, { Schema, Document } from "mongoose"
 import type { RocRow } from "../render/rendered-document.types.js"
-import type { CustomBlock } from "../spine/spine.types.js"
+import type { CustomBlock, Spine } from "../spine/spine.types.js"
 import type { SectionSegments } from "../spine/segment-hash.js"
 import type { FunctionFieldValues, FunctionOriginalBlock } from "../render/function-original.js"
 import { HEADING_DETECTORS, type HeadingDetector } from "./import.constants.js"
 import type { TargetStructure } from "./target-structure.js"
+import type { StructurePreview } from "./structure-preview.js"
 
 export interface HeadingMapEntry {
   block_id: string
@@ -133,6 +134,17 @@ export interface ITemplateProfile extends Document {
   target_structure: TargetStructure | null
   /** FLF-378 (luồng C): hướng dẫn / ví dụ / ngữ cảnh của mẫu theo mục — chỉ dự án mới theo mẫu bắt buộc. */
   template_context?: TemplateContextEntry[] | null
+  /**
+   * Màn đọc khung: cấu trúc đích sơ bộ tính lúc upload (tất định, trước Bắt đầu) + loại file (`written` / `template`). Dự án
+   * import trước màn đọc khung không có ⇒ null.
+   */
+  structure_preview?: StructurePreview | null
+  /**
+   * Chế độ 3 từ SRS đã viết: Spine lúc vào Luồng 2 — mốc so "nguyên vẹn" của bản in (mục chưa đổi so với mốc in nguyên văn
+   * file gốc). Không có bản gốc 0.1 nên không dùng Spine lúc import. Khung mẫu / dự án khác ⇒ null.
+   */
+  flow2_entry_spine?: Spine | null
+  flow2_entry_at?: Date | null
   createdAt: Date
   updatedAt: Date
 }
@@ -210,6 +222,9 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
     },
     target_structure: { type: Schema.Types.Mixed, default: null },
     template_context: { type: Schema.Types.Mixed, default: null },
+    structure_preview: { type: Schema.Types.Mixed, default: null },
+    flow2_entry_spine: { type: Schema.Types.Mixed, default: null },
+    flow2_entry_at: { type: Date, default: null },
     // FLF-366: đoạn nguyên văn theo mục (`SectionSegments` — khối gốc, phần tử, dấu) — chỉ để in lại
     section_segments: { type: Schema.Types.Mixed, default: [] },
     section_slices: {

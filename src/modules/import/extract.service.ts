@@ -19,6 +19,7 @@ import type { DiagramImageKind, ImportExtractDiagramOutput, ImportExtractOutput 
 import { loadImportImage } from "../render/import-media.js"
 import { IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { DocBlock, type IDocBlock } from "./doc-block.model.js"
+import { isTemplateFile } from "./structure-preview.js"
 import { DIAGRAM_SECTIONS, DIAGRAM_TARGETS, NFR_CATEGORY_BY_SECTION, isExtractableSection, schemaExcerptFor, targetsOf } from "./extract-targets.js"
 import {
   IdAllocator,
@@ -43,7 +44,7 @@ import { FIELD_CONFIDENCE_THRESHOLD, VISION_CONFIDENCE_CAP, needsConfirm, type F
 import type { FieldsPatchRequest, GetImportResponse } from "./import.dto.js"
 import { Project } from "../project/project.model.js"
 import { assertImportStatus, extractionSummary, requireImport, transitionImport } from "./import.service.js"
-import type { IImportedDocument } from "./imported-document.model.js"
+import { ImportedDocument, type IImportedDocument } from "./imported-document.model.js"
 import { knownKeysText, scopeKnownKeys } from "./known-keys.js"
 import { VISION_UNAVAILABLE, withMeteredAi, type MeteredResult } from "./metered-ai.js"
 import { delay } from "../../shared/ai/retry.service.js"
@@ -695,13 +696,17 @@ interface ExtractionInputs {
 }
 
 /**
- * FLF-378 (luồng C, C2.1): dự án **mới** theo mẫu bắt buộc — file là mẫu (hướng dẫn / ví dụ), không phải dữ liệu ⇒ không
- * trích nội dung vào Spine (không gọi AI, không đọc bảng tất định). Chỉ giữ cấu trúc từ heading (tính năng / chức năng tạm
- * của mapping) để mục của mẫu khớp được phần tử Spine; chữ của mẫu thành `template_context` lúc finalize.
+ * FLF-378 (luồng C, C2.1): file là **khung mẫu để điền** (giữ khung + màn đọc khung thấy phần lớn mục trống — `isTemplateFile`)
+ * — chữ trong file là hướng dẫn / ví dụ, không phải dữ liệu ⇒ không trích nội dung vào Spine (không gọi AI, không đọc bảng tất
+ * định). Chỉ giữ cấu trúc từ heading (tính năng / chức năng tạm của mapping) để mục của mẫu khớp được phần tử Spine; chữ của
+ * mẫu thành `template_context` lúc finalize.
  */
 export const isTemplateOnlyProject = async (projectId: string): Promise<boolean> => {
-  const project = await Project.findById(projectId, { start_kind: 1, template_intent: 1 }).lean()
-  return project?.start_kind === "new" && project.template_intent === "fixed"
+  const [project, profile] = await Promise.all([
+    Project.findById(projectId, { start_kind: 1, template_intent: 1 }).lean(),
+    TemplateProfile.findOne({ projectId }, { structure_preview: 1 }).lean()
+  ])
+  return isTemplateFile(project, profile)
 }
 
 export const loadExtractionInputs = async (projectId: string): Promise<ExtractionInputs | null> => {
@@ -811,6 +816,17 @@ export const importRetryBackoff = (): readonly number[] => env.IMPORT_AI_RETRY_B
  * Tiến độ lưu sau từng lượt AI (`ExtractionDraft.partial`): section nhiều lô dừng ở lô k ⇒ chạy tiếp từ lô k, không gọi
  * (và không trừ credit) lại các lô trước.
  */
+/**
+ * Người dùng đã bấm Dừng (`paused: user`, đặt bởi request khác qua `requestStop`) — đọc lại từ DB vì `doc` trong bộ nhớ của
+ * job không thấy. Có ⇒ chép `paused` vào `doc` để kết quả trả về đúng trạng thái dừng.
+ */
+export const userStopRequested = async (doc: IImportedDocument): Promise<boolean> => {
+  const fresh = await ImportedDocument.findById(doc._id, { paused: 1 }).lean()
+  if (fresh?.paused?.reason !== "user") return false
+  doc.paused = fresh.paused
+  return true
+}
+
 export const runExtraction = async (projectId: string, userId: string, importId: string): Promise<ExtractionRun> => {
   const doc = await requireImport(projectId, importId)
   assertImportStatus(doc, ["extracting"], "extracting")
@@ -876,7 +892,11 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     if (stepsDoneOf(d, p) > 0) for (const it of d.partial!.items) if (it.id) alloc.reserve(it.entity, it.id)
   }
 
+  const stoppedByUser = async (): Promise<ExtractionRun> => ({ doc, sections: (await extractionSummary(doc._id as mongoose.Types.ObjectId)).sections })
+
   for (const planned of pending) {
+    // Người dùng bấm Dừng ⇒ không sang mục mới (mục đã xong giữ nguyên, chạy tiếp từ mục này)
+    if (await userStopRequested(doc)) return stoppedByUser()
     const { section_id, steps } = planned
     const draft = draftOf.get(section_id)!
     doc.extract_cursor = section_id
@@ -968,6 +988,8 @@ export const runExtraction = async (projectId: string, userId: string, importId:
 
     for (const [i, step] of steps.entries()) {
       if (i < skip) continue
+      // Dừng giữa mục nhiều lượt: các lượt trước đã lưu ở `partial` (dưới đây) ⇒ chạy tiếp bắt đầu đúng lượt này
+      if (i > skip && (await userStopRequested(doc))) return stoppedByUser()
       let failed = step.kind === "image" ? await readImage(step.block) : await readBatch(step.batch)
       // FLF-360: lô chữ lỗi tạm thời (AI quá tải…) ⇒ đọc lại lô đó với giãn cách tăng dần, không dừng ngay; hết lượt mới
       // `resume_later` (lượt đã xong giữ ở `partial`, chạy tiếp bắt đầu đúng lô này). Không bỏ qua lô chữ rồi đi tiếp.
@@ -1012,6 +1034,7 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     await draft.save()
   }
 
+  if (await userStopRequested(doc)) return stoppedByUser()
   // FLF-360: ảnh AI chưa đọc được vì quá tải ⇒ đọc lại sau khi chạy hết các mục (đợt quá tải thường đã qua)
   const stopped = await rereadUnavailableImages({ projectId, userId, doc, blocks, profile, provisional, alloc, drafts: await ExtractionDraft.find({ import_id: doc._id }) })
   if (stopped) return stopped

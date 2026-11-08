@@ -5,6 +5,7 @@ import * as chatSessionController from "./chat-session.controller.js"
 import * as projectDocumentController from "./project-document.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
 import { requireRole } from "../../shared/auth/require-role.middleware.js"
+import { receiveDocx } from "../import/import.controller.js"
 import { CreateProjectSchema, MoveProjectSchema, UpdateDocumentLanguageSchema, UpdateErdNotationSchema, validateRequest } from "./project.validation.js"
 
 const router = Router()
@@ -71,6 +72,12 @@ const upload = multer({
  *               folderId:
  *                 type: string
  *                 description: Tạo thẳng trong thư mục của user (404 FOLDER_NOT_FOUND nếu không thuộc user)
+ *               has_srs_file:
+ *                 type: boolean
+ *                 description: "Hộp Tạo dự án hai ô: có tải file SRS không. Có trường này thì source / has_required_template / mode bị bỏ qua (false ⇒ fpt; true ⇒ import, start_kind=existing)"
+ *               complete_to_standard:
+ *                 type: boolean
+ *                 description: "Chỉ khi has_srs_file=true: tick \"Bổ sung các mục còn thiếu theo mẫu chuẩn FlintFlow\" ⇒ template_intent=free; không gửi / false ⇒ fixed (giữ khung file)"
  *               source:
  *                 type: string
  *                 enum: [new, existing]
@@ -101,6 +108,34 @@ const upload = multer({
  */
 router.get("/", authMiddleware, projectController.getProjects)
 router.post("/", authMiddleware, validateRequest(CreateProjectSchema), projectController.createProject)
+
+/**
+ * @swagger
+ * /api/v1/projects/precheck-docx:
+ *   post:
+ *     summary: "Kiểm file có trông như SRS không (business-flow §3.6) — hộp Tạo dự án, ô Tài liệu tham khảo"
+ *     description: >
+ *       Code nhận diện như preflight I-1 (dấu version FlintFlow + loại tài liệu), không gọi AI, không lưu file. Chỉ .docx;
+ *       định dạng khác ⇒ `looks_like_srs: false`. Giới hạn kích thước như upload SRS.
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required: [file]
+ *             properties:
+ *               file: { type: string, format: binary }
+ *     responses:
+ *       200:
+ *         description: "`{ looks_like_srs: boolean, stamp: { project_id } | null }`"
+ *       400: { description: FILE_REQUIRED }
+ *       413: { description: FILE_TOO_LARGE }
+ */
+router.post("/precheck-docx", authMiddleware, requireRole("lead", "analyst"), receiveDocx, projectDocumentController.precheckDocument)
 
 /**
  * @swagger
@@ -145,7 +180,7 @@ router.post("/", authMiddleware, validateRequest(CreateProjectSchema), projectCo
  *                 format: binary
  *     responses:
  *       201:
- *         description: Upload thành công
+ *         description: "Upload thành công — tài liệu kèm `precheck { looks_like_srs, stamp, heading_overlap? }` (business-flow §3.6; `null` nếu kiểm lỗi)"
  *       400:
  *         description: File không hợp lệ
  *       401:

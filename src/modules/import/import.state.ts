@@ -60,7 +60,8 @@ export const IMPORT_STATUS_LABELS: Readonly<Record<ImportStatus, string>> = {
   change_requested: "Đang sửa qua change request"
 }
 
-export const IMPORT_PAUSE_REASONS = ["credits", "resume_later"] as const
+/** `user`: người dùng bấm Dừng lúc đang đọc nội dung (I-4) — vòng đọc dừng sau lượt AI đang chạy, không gọi thêm. */
+export const IMPORT_PAUSE_REASONS = ["credits", "resume_later", "user"] as const
 export type ImportPauseReason = (typeof IMPORT_PAUSE_REASONS)[number]
 
 export const IMPORT_TRANSITIONS: Readonly<Record<ImportStatus, readonly ImportStatus[]>> = {

@@ -7,6 +7,7 @@ import * as projectDocumentService from "./project-document.service.js"
 import { listSources } from "./requirement-source.service.js"
 import { getProjectById } from "./project.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
+import { precheckDocx } from "../import/docx-precheck.js"
 
 /** FLF-292: nguồn tài liệu của từng phần tử Spine (phần tử đã xoá khỏi Spine không trả về). */
 export const getSources = catchAsync(async (req: Request, res: Response) => {
@@ -33,7 +34,18 @@ export const uploadDocument = catchAsync(async (req: Request, res: Response) => 
   const file = (req as Request & { file?: Express.Multer.File }).file
 
   const document = await projectDocumentService.uploadProjectDocument(requireOrgId(req), userId, projectId, file as Express.Multer.File)
-  return sendSuccess(res, 201, document)
+  // Business-flow §3.6: file trông như SRS đính kèm ở chat / ô tham khảo ⇒ FE gợi ý (cập nhật phiên bản mới / dùng làm tham khảo)
+  const precheck = file ? await precheckDocx(file.buffer, document.originalName ?? file.originalname, { projectId }).catch(() => null) : null
+  return sendSuccess(res, 201, { ...document.toJSON(), precheck })
+})
+
+/** `POST /projects/precheck-docx` — hộp Tạo dự án: file ở ô tham khảo có trông như SRS không (không cần dự án, không lưu file). */
+export const precheckDocument = catchAsync(async (req: Request, res: Response) => {
+  const file = (req as Request & { file?: Express.Multer.File }).file
+  if (!file) throw new ApiError(400, "Vui lòng chọn file để kiểm tra.", "FILE_REQUIRED")
+  // multer đọc tên file theo latin1 — đổi lại UTF-8 để giữ tên tiếng Việt
+  const originalName = Buffer.from(file.originalname, "latin1").toString("utf8")
+  return sendSuccess(res, 200, await precheckDocx(file.buffer, originalName))
 })
 
 export const getDocuments = catchAsync(async (req: Request, res: Response) => {
