@@ -61,7 +61,7 @@ export const importPausedSchema = z.object({ reason: z.enum(IMPORT_PAUSE_REASONS
 
 /** FLF-335: ý định lúc upload (bước 1.2). */
 export const templateIntentSchema = z.enum(TEMPLATE_INTENTS)
-/** Field text đi cùng multipart #2 `POST /:id/import` — thiếu ⇒ `free`; dự án mới có mẫu bắt buộc luôn `fixed`. */
+/** Field text đi cùng multipart #2 `POST /:id/import` — client cũ còn gửi `intent`; parse được nhưng bỏ qua (ý định lấy từ Project). */
 export const uploadImportBodySchema = z.object({ intent: templateIntentSchema.optional() })
 export type UploadImportBody = z.infer<typeof uploadImportBodySchema>
 
@@ -81,6 +81,11 @@ export const importedDocumentDtoSchema = z.object({
   reread: z.object({ kind: z.enum(["images", "text"]), done: z.number().int(), total: z.number().int(), section_id: z.string() }).nullable().optional(),
   /** FLF-335: `fixed` / `free`; bản ghi cũ `null`. */
   intent: templateIntentSchema.nullable().optional(),
+  /**
+   * Màn đọc khung: mục mà kết quả đọc cuối (I-5) khác bản sơ bộ lúc upload — workspace báo một lần. Rỗng ⇒ khớp; `null` ⇒ chưa
+   * finalize / import trước màn đọc khung.
+   */
+  structure_changes: z.array(z.object({ section_id: z.string(), title: z.string(), from: z.enum(["present", "missing", "out_of_scope", "absent"]), to: z.enum(["present", "missing", "out_of_scope", "absent"]) })).nullable().optional(),
   created_at: isoDateTime,
   updated_at: isoDateTime
 })
@@ -316,6 +321,25 @@ export const targetStructureSchema = z.object({
 })
 export type TargetStructureDto = z.infer<typeof targetStructureSchema>
 
+/**
+ * Màn đọc khung (business-flow §3.1.2) — cấu trúc đích sơ bộ tính bằng Code lúc upload, trước Bắt đầu
+ * (`TemplateProfile.structure_preview`). `sections` theo thứ tự heading trong file; `kind = template` khi phần lớn mục chưa có
+ * nội dung (khung mẫu).
+ */
+export const structurePreviewSchema = z.object({
+  summary: z.object({
+    present: z.number().int().min(0),
+    missing: z.number().int().min(0),
+    out_of_scope: z.number().int().min(0),
+    kind: z.enum(["written", "template"])
+  }),
+  sections: z.array(z.object({ section_id: z.string().min(1), title: z.string(), status: z.enum(["present", "missing", "out_of_scope"]), order: z.number().int().min(0) })),
+  resolved_mode: z.union([z.literal(1), z.literal(3), z.literal(4)]),
+  intent: z.enum(["fixed", "free"]),
+  computed_at: isoDateTime
+})
+export type StructurePreviewDto = z.infer<typeof structurePreviewSchema>
+
 /** `POST /projects/:id/import/resume` (UC-61, UC-75). */
 export const importResumeRequestSchema = z.strictObject({ import_id: id })
 
@@ -339,6 +363,8 @@ export const getImportResponseSchema = z.object({
   blocks_count: z.number().int().min(0),
   /** FLF-336: có sau lần finalize đầu (kể cả khi dừng ở `incomplete`); null khi chưa so. */
   target_structure: targetStructureSchema.nullable().optional(),
+  /** Màn đọc khung: cấu trúc đích sơ bộ lúc upload (trước Bắt đầu); null khi chưa upload / import trước màn đọc khung. */
+  structure_preview: structurePreviewSchema.nullable().optional(),
   /**
    * FLF-343: ước tính cả lượt một mạch (I-4 còn phải chạy + kiểm tra AI 1.11) — chỉ có khi import ở `mapping_review` hoặc `extracting` mà job chưa chạy / đang dừng; trạng
    * thái khác hoặc đang chạy ⇒ `null` / không có. Tính bằng chính kế hoạch lượt của lượt chạy (lô chữ sau phần đọc tất định +
@@ -379,6 +405,8 @@ export const finalizeResponseSchema = z.object({
 })
 
 export const gapReportSchema = z.object({
+  /** Màn đọc khung: báo cáo sơ bộ trước Bắt đầu (chưa đọc nội dung, chưa có cờ) — kết quả cuối có thể khác. */
+  preliminary: z.boolean().optional(),
   /** FLF-336: bản đồ mục ⇒ cấu trúc đích (có từ trạng thái `incomplete`). */
   target_structure: targetStructureSchema.nullable().optional(),
   project_id: id,

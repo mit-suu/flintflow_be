@@ -15,6 +15,7 @@ import { repairFixedTemplateLayout, type TemplateLayout } from "./layout-section
 import { templateLayoutFromBinding, type TemplateSourceBinding } from "../doc-version/template-source-binding.js"
 import { DocxPackage, addDraftWatermark } from "../docx-ooxml/index.js"
 import type { SourceFidelity } from "./source-fidelity.js"
+import { isTemplateFile } from "../import/structure-preview.js"
 
 const unavailable = () => new ApiError(
   409,
@@ -78,11 +79,14 @@ export const writeProjectDocx = async (
   }
 
   const context = await loadFixedTemplateContext(doc.projectId, sourceBinding)
-  // FLF-378 (luồng C): dự án mới theo mẫu bắt buộc — file upload là mẫu, chữ của mẫu không vào bản in
-  const project = await Project.findById(doc.projectId, { start_kind: 1 }).lean()
+  // FLF-378 (luồng C): file upload là khung mẫu (`isTemplateFile`) — chữ hướng dẫn / ví dụ của mẫu không vào bản in
+  const [project, profile] = await Promise.all([
+    Project.findById(doc.projectId, { start_kind: 1, template_intent: 1 }).lean(),
+    TemplateProfile.findOne({ projectId: doc.projectId }, { structure_preview: 1 }).lean()
+  ])
   const filled = await writeTemplateDocx(doc, context.template, context.headingMap, context.binding.table_map, {
     ...(fidelity ? sourceWriteOptions(fidelity, context.binding) : {}),
-    stripTemplateText: project?.start_kind === "new"
+    stripTemplateText: isTemplateFile(project, profile)
   })
   return withDraftWatermark(doc, filled)
 }

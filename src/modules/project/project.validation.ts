@@ -20,6 +20,13 @@ export const CreateProjectSchema = z.object({
   source: projectStartKindSchema.optional(),
   /** Chỉ với `source: "new"`: khách có bắt buộc theo một mẫu không (có ⇒ `import`, tải mẫu lên; không ⇒ `fpt`). */
   has_required_template: z.boolean().optional(),
+  /**
+   * Hộp Tạo dự án (business-flow §1): có tải file SRS lên không. Có trường này thì `source` / `has_required_template` / `mode`
+   * bị bỏ qua — Code suy ra chế độ từ hai lựa chọn còn lại của người dùng.
+   */
+  has_srs_file: z.boolean().optional(),
+  /** Chỉ khi `has_srs_file`: "Bổ sung các mục còn thiếu theo mẫu chuẩn FlintFlow" (mặc định không ⇒ giữ khung của file). */
+  complete_to_standard: z.boolean().optional(),
   domain: z.string().trim().max(100).optional(),
   /** Tạo thẳng trong thư mục của user. */
   folderId: z.string().min(1).optional(),

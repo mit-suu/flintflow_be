@@ -1,7 +1,7 @@
 /**
  * FLF-336 I-5 (lát 1) trên Mongo thật: dự án có ý định (`Project.template_intent`, FLF-335) mà file thiếu mục của cấu trúc
- * đích ⇒ finalize dừng ở `incomplete` (không có v0), `GET /import` / gap report mang `target_structure`; "Hoàn thiện"
- * (`complete: true`) ⇒ chạy lại từ mốc và tạo v0 như cũ. Dự án không có ý định ⇒ luồng cũ, chỉ lưu `target_structure`.
+ * đích ⇒ finalize dừng ở `incomplete` (không có v0), `GET /import` / gap report mang `target_structure`; không còn "Hoàn thiện"
+ * (D4 — file thiếu không bao giờ thành bản gốc). Dự án không có ý định ⇒ luồng cũ, chỉ lưu `target_structure`.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
@@ -29,7 +29,7 @@ const finalize = async (projectId: string, userId: string, importId: string, bod
 }
 
 describe("FLF-336 I-5 — so cấu trúc đích trước v0", () => {
-  it("ý định tự do + file thiếu mục ⇒ dừng incomplete (chế độ 4, không v0); gap report + GET /import có bản đồ mục; finalize thiếu complete ⇒ 409; Hoàn thiện ⇒ v0 + gap_review", async () => {
+  it("ý định tự do + file thiếu mục ⇒ dừng incomplete (chế độ 4, không v0); gap report + GET /import có bản đồ mục; finalize lại (kể cả complete) ⇒ 409, không bao giờ có 0.1", async () => {
     const { projectId, userId, importId } = await importAtBaselining()
     // Dự án tạo qua picker FLF-335 (field chưa có trong model ở nhánh này ⇒ ghi thẳng collection)
     await mongoose.connection.db!.collection("projects").updateOne({ _id: new mongoose.Types.ObjectId(projectId) }, { $set: { template_intent: "free", start_kind: "existing" } })
@@ -49,12 +49,10 @@ describe("FLF-336 I-5 — so cấu trúc đích trước v0", () => {
     expect(report.target_structure?.resolved_mode).toBe(4)
 
     await expect(startFinalize(projectId, userId, { import_id: importId, base_version: await version(projectId) })).rejects.toMatchObject({ code: "IMPORT_INVALID_STATE" })
-
-    const done = await finalize(projectId, userId, importId, { complete: true })
-    expect(done.status).toBe("gap_review")
-    expect(done.complete_requested).toBe(true)
-    const versions = await DocVersion.find({ projectId }).lean()
-    expect(versions.map((v) => v.version)).toEqual(["0.1"])
+    // D4: không còn "Hoàn thiện" — file thiếu cấu trúc đích không bao giờ thành bản gốc 0.1
+    await expect(startFinalize(projectId, userId, { import_id: importId, base_version: await version(projectId), complete: true })).rejects.toMatchObject({ code: "IMPORT_INVALID_STATE" })
+    expect((await ImportedDocument.findById(importId))!.status).toBe("incomplete")
+    expect(await DocVersion.countDocuments({ projectId })).toBe(0)
     expect((await getImportView(projectId)).target_structure?.resolved_mode).toBe(4)
   })
 

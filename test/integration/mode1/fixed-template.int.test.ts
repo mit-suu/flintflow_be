@@ -21,6 +21,8 @@ import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { acceptLatest, getImportView, uploadImport } from "../../../src/modules/import/import.service.js"
 import { Project } from "../../../src/modules/project/project.model.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
+import * as flagsService from "../../../src/modules/spine/flags.service.js"
+import { ruleProfileOf } from "../../../src/modules/import/mode1-guard.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
 import { getDocument } from "../../../src/modules/render/assemble.service.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
@@ -38,7 +40,7 @@ const finalize = async (projectId: string, userId: string, importId: string, bod
 }
 
 describe("chế độ 3 — mẫu bắt buộc", () => {
-  // Dự án có sẵn theo mẫu cố định: "Hoàn thiện" khoá bản gốc (FLF-336). Dự án mới: chỉ Luồng 2 (`flow2.int.test.ts`).
+  // File giữ khung còn thiếu mục: không có bản gốc 0.1 — tự sang Luồng 2 (`flow2.int.test.ts`); luật cờ của mẫu áp ở Luồng 2.
   it("I-5 tính đúng mục riêng có chữ / chỉ chữ hướng dẫn; bản in không thêm mục ngoài mẫu; cờ vàng mục thiếu / trống", async () => {
     const { projectId, userId, importId } = await importAtBaselining({
       srs: { extraBody: styled("u2", "5.10 Document Conventions") + p("[Describe the typographical conventions used in this SRS.]") }
@@ -48,7 +50,7 @@ describe("chế độ 3 — mẫu bắt buộc", () => {
       .updateOne({ _id: new mongoose.Types.ObjectId(projectId) }, { $set: { template_intent: "fixed", start_kind: "existing", has_required_template: true } })
 
     const stopped = await finalize(projectId, userId, importId)
-    expect(stopped.status).toBe("incomplete")
+    expect(stopped.status).toBe("drafting")
     const structure = (await getImportView(projectId)).target_structure!
     expect(structure).toMatchObject({ target: "template", intent: "fixed", resolved_mode: 3 })
     const byTitle = (title: string) => structure.sections.find((s) => s.title.includes(title))
@@ -57,8 +59,8 @@ describe("chế độ 3 — mẫu bắt buộc", () => {
     // Lỗi (b) cũ: chữ hướng dẫn `[…]` bị tính là nội dung
     expect(byTitle("Document Conventions")?.status).toBe("missing")
 
-    const done = await finalize(projectId, userId, importId, { complete: true })
-    expect(done.status).toBe("gap_review")
+    // Luồng 2: cờ tính theo hồ sơ luật của mẫu (như sau mỗi bước soạn)
+    await flagsService.recompute(projectId, { by: "test", ruleProfile: await ruleProfileOf(projectId) })
 
     const profile = (await TemplateProfile.findOne({ projectId }).lean())!
     const layoutIds = new Set((profile.layout ?? []).map((l) => l.section_id))
@@ -96,12 +98,13 @@ describe("mẫu FU-IT-SRS-01 (dự án mới, mẫu bắt buộc) — bảng m�
     const projectId = await createMode1Project(seeded)
     await Project.updateOne({ _id: projectId }, { $set: { template_intent: "fixed", start_kind: "new" } })
     const buffer = await readFile(new URL("../../../fixtures/fixed-template-fu-it-srs-01.docx", import.meta.url))
-    const doc = await uploadImport(projectId, seeded.userId, fileOf(buffer, "Mau_SRS_FU-IT-SRS-01.docx"), { intent: "fixed" })
+    const doc = await uploadImport(projectId, seeded.userId, fileOf(buffer, "Mau_SRS_FU-IT-SRS-01.docx"))
     await acceptLatest(doc, true)
     const importId = String(doc._id)
     await runExtraction(projectId, seeded.userId, importId)
     const stopped = await finalize(projectId, seeded.userId, importId)
-    expect(stopped.status).toBe("incomplete")
+    // Khung mẫu thiếu mục ⇒ sang Luồng 2 soạn đủ, không bản gốc 0.1
+    expect(stopped.status).toBe("drafting")
 
     const structure = (await getImportView(projectId)).target_structure!
     const statusOf = (title: string) => structure.sections.find((s) => s.title.includes(title))?.status

@@ -22,7 +22,7 @@ export interface Mode1Auth {
   project: IProject
 }
 
-export const authorizeMode1 = async (req: Request): Promise<Mode1Auth> => {
+export const authorizeMode1 = async (req: Request, opts: { allowDrafting?: boolean } = {}): Promise<Mode1Auth> => {
   const userId = req.user?.userId
   if (!userId) throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   // Route import dùng `/:id/…`; change request và version vẫn `/:projectId/…`
@@ -30,7 +30,8 @@ export const authorizeMode1 = async (req: Request): Promise<Mode1Auth> => {
   if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   const project = await getProjectById(projectId, requireOrgId(req))
   const mode = project.mode ?? "fpt"
-  if (mode !== "import") {
+  // Chế độ 3 sang Luồng 2 (`mode = fpt`, import `drafting`): vẫn đọc được lần import để workspace báo mục lệch bản sơ bộ
+  if (mode !== "import" && !(opts.allowDrafting && project.import_state === "drafting")) {
     throw new Mode1Error("PROJECT_MODE_MISMATCH", "Chức năng này chỉ dùng cho dự án tải SRS có sẵn lên.", { mode, expected: "import" })
   }
   return { projectId, userId, project }

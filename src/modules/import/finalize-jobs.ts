@@ -23,7 +23,6 @@ import { assertImportStatus, requireImport, transitionImport } from "./import.se
 import { canPause } from "./import.state.js"
 import { ImportedDocument, type IImportedDocument } from "./imported-document.model.js"
 import { Mode1Error } from "./mode1.errors.js"
-import { Project } from "../project/project.model.js"
 
 interface FinalizeJobData {
   /** `finalize` = 1.10–1.12 từ mốc; `check` = 1.11–1.12 phần còn thiếu (import ở `checking`). */
@@ -94,18 +93,14 @@ export const startFinalize = async (projectId: string, userId: string, body: Fin
   const current = await requireImport(projectId, body.import_id)
   if (await isFinalizeRunning(body.import_id)) return current
   const { doc } = await assertCanFinalize(projectId, body)
-  // FLF-336: màn "Kết quả đọc file" — chỉ đi tiếp khi bấm "Hoàn thiện"; lần finalize kế bỏ qua điểm dừng
+  // D4 (quyết định 26/09): file thiếu cấu trúc đích không có bản gốc 0.1 — không còn "Hoàn thiện" (`complete: true`) từ
+  // `incomplete`. Giữ khung ⇒ soạn phần thiếu ở Luồng 2 (`POST /import/continue`); bổ sung theo mẫu chuẩn ⇒ tải gap report + DRAFT
   if (doc.status === "incomplete") {
-    if (!body.complete) {
-      throw new Mode1Error("IMPORT_INVALID_STATE", "File còn thiếu mục của cấu trúc đích — bấm \"Hoàn thiện\" để đi tiếp, hoặc dừng và tải gap report.", { status: doc.status, to: "baselining", allowed: ["baselining"] })
-    }
-    // Dự án mới theo mẫu bắt buộc: file là khung mẫu để FlintFlow viết, không khoá mẫu còn trống thành bản gốc (FLF-278)
-    const project = await Project.findById(projectId, { start_kind: 1, template_intent: 1 }).lean()
-    if (project?.start_kind === "new" && project.template_intent === "fixed") {
-      throw new Mode1Error("IMPORT_INVALID_STATE", "Dự án mới theo mẫu bắt buộc: viết phần còn thiếu với FlintFlow, không khoá mẫu còn trống thành bản gốc.", { status: doc.status, to: "drafting", allowed: ["drafting"] })
-    }
-    doc.complete_requested = true
-    await transitionImport(doc, "baselining")
+    throw new Mode1Error(
+      "IMPORT_INVALID_STATE",
+      "File còn thiếu mục của cấu trúc đích nên chưa tạo được bản gốc — soạn phần còn thiếu với FlintFlow, hoặc tải báo cáo thiếu sót và bản DRAFT.",
+      { status: doc.status, to: "drafting", allowed: ["drafting"] }
+    )
   }
   // request song song vừa bật job trong lúc kiểm ⇒ `startJob` không chạy lần hai
   return launch(doc, { mode: "finalize", projectId, userId, importId: body.import_id }, prepareFinalize(doc, body.record_of_changes ?? null))

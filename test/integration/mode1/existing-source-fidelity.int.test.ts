@@ -47,11 +47,11 @@ const headerText = async (buffer: Buffer): Promise<string> => {
 
 const importExisting = async (source: URL, intent: "free" | "fixed") => {
   const seeded = await seedFixture("minimal", { balance: 5000 })
-  const created = await request(app).post("/api/v1/projects").set("Authorization", `Bearer ${seeded.token}`).send({ name: "FU Student Portal", source: "existing" })
+  const created = await request(app).post("/api/v1/projects").set("Authorization", `Bearer ${seeded.token}`).send({ name: "FU Student Portal", has_srs_file: true, complete_to_standard: intent === "free" })
   expect(created.status, JSON.stringify(created.body.error)).toBe(201)
   const projectId = String(created.body.data._id)
   const original = await readFile(source)
-  const doc = await uploadImport(projectId, seeded.userId, fileOf(original, "SRS.docx"), { intent })
+  const doc = await uploadImport(projectId, seeded.userId, fileOf(original, "SRS.docx"))
   await acceptLatest(doc, true)
   await runExtraction(projectId, seeded.userId, String(doc._id))
   const version = async () => (await spineRepository.get(projectId))!.spine_version
@@ -101,9 +101,9 @@ describe("Upload SRS có sẵn — tải về giống file upload", () => {
 
   it("SRS đủ mục + chọn 'Theo một mẫu cố định': heading tính năng chỉ chứa chức năng con không bị coi là còn trống ⇒ không dừng ở kết quả đọc", async () => {
     const seeded = await seedFixture("minimal", { balance: 5000 })
-    const created = await request(app).post("/api/v1/projects").set("Authorization", `Bearer ${seeded.token}`).send({ name: "FU Student Portal", source: "existing" })
+    const created = await request(app).post("/api/v1/projects").set("Authorization", `Bearer ${seeded.token}`).send({ name: "FU Student Portal", has_srs_file: true })
     const projectId = String(created.body.data._id)
-    const doc = await uploadImport(projectId, seeded.userId, fileOf(await readFile(FPT_SRS), "SRS.docx"), { intent: "fixed" })
+    const doc = await uploadImport(projectId, seeded.userId, fileOf(await readFile(FPT_SRS), "SRS.docx"))
     await acceptLatest(doc, true)
     await runExtraction(projectId, seeded.userId, String(doc._id))
     await startFinalize(projectId, seeded.userId, { import_id: String(doc._id), base_version: (await spineRepository.get(projectId))!.spine_version })

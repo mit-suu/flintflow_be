@@ -205,11 +205,12 @@ describe("mode 1 — finalize, check, gap report", () => {
     expect(getImportResponseSchema.parse((await c.get("/import")).body.data).import?.status).toBe("delivered")
   })
 
-  it("gap report trước khi check ⇒ IMPORT_INVALID_STATE; upload lại sau baseline ⇒ phải dùng /reupload", async () => {
+  it("gap report trước khi check ⇒ chỉ có bản sơ bộ của màn đọc khung (chưa có cờ); upload lại sau baseline ⇒ phải dùng /reupload", async () => {
     const { c } = await startImport()
-    expect((await c.get("/gap-report")).body.error.code).toBe("IMPORT_INVALID_STATE")
-    const early = await c.upload(await makeSrsDocx(), "x.docx", "/reupload")
-    expect(early.status).toBe(409)
+    const early = (await c.get("/gap-report")).body.data
+    expect(early).toMatchObject({ preliminary: true, totals: { red: 0, yellow: 0 }, sections: [] })
+    const reupload = await c.upload(await makeSrsDocx(), "x.docx", "/reupload")
+    expect(reupload.status).toBe(409)
   })
 
   it("AI check hết credit ⇒ paused ở checking (baseline 0.1 đã có); resume ⇒ gap_review", async () => {

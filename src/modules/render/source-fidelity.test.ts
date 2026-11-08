@@ -25,6 +25,21 @@ describe("sourceBasedFrom — dự án 'Upload SRS có sẵn' dùng file upload 
     expect(sourceBasedFrom({ start_kind: "existing", template_intent: "fixed", mode: "fpt" }, profile)).toBe(false)
     expect(sourceBasedFrom(null, profile)).toBe(false)
   })
+
+  it("màn đọc khung: khung mẫu không bao giờ in lại; SRS viết dở giữ khung đã sang Luồng 2 (mode fpt, kể cả sau 1.0) vẫn lấy file làm nền", () => {
+    const preview = (kind: "written" | "template") => ({
+      summary: { present: 0, missing: 0, out_of_scope: 0, kind },
+      sections: [],
+      resolved_mode: 3 as const,
+      intent: "fixed" as const,
+      computed_at: "2026-11-08T00:00:00.000Z"
+    })
+    const entered = { source_file_ref: "file", target_structure: { resolved_mode: 3 }, structure_preview: preview("written"), flow2_entry_at: "2026-11-08T00:00:00.000Z" }
+    expect(sourceBasedFrom({ start_kind: "existing", template_intent: "fixed", mode: "fpt" }, entered)).toBe(true)
+    expect(sourceBasedFrom({ start_kind: "existing", template_intent: "fixed", mode: "import", converted_from: "fpt" }, entered)).toBe(true)
+    expect(sourceBasedFrom({ start_kind: "existing", template_intent: "fixed", mode: "import" }, { ...entered, structure_preview: preview("template"), flow2_entry_at: null })).toBe(false)
+    expect(sourceBasedFrom({ start_kind: "existing", template_intent: "free", mode: "fpt" }, entered)).toBe(false)
+  })
 })
 
 describe("pristineSectionIds — mục in giống hệt lúc import", () => {
