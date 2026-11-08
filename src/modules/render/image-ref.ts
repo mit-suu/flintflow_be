@@ -19,7 +19,7 @@
 import { createHash } from "node:crypto"
 import { gridFsDiagramStore, type DiagramFileStat, type DiagramFileStore } from "../diagram/diagram-file.store.js"
 import { localizedDiagramHash, localizedDiagramPng, type DiagramSource } from "../diagram/localized-diagram.service.js"
-import { currentImportFileRef, embeddableMediaPart, imageMime, isMediaId, loadImportImage, MEDIA_PREFIX } from "./import-media.js"
+import { currentImportFileRef, embeddableMediaPart, isMediaId, MEDIA_PREFIX, readImportImage } from "./import-media.js"
 import type { DiagramPngLoader, LocalizedDiagramPngLoader } from "./assemble.service.js"
 
 export const IMAGE_REF_TOKEN_PREFIX = "image-ref:"
@@ -98,7 +98,7 @@ const projectStats = (store: DiagramFileStore) => {
 export const refDiagramPngLoader = (store: DiagramFileStore = gridFsDiagramStore, fileRefOf = currentImportFileRef): DiagramPngLoader => {
   const stats = projectStats(store)
   const fileRefs = projectFileRefs(fileRefOf)
-  return async (projectId, diagramId) => {
+  const load: DiagramPngLoader = async (projectId, diagramId) => {
     if (isMediaId(diagramId)) {
       // Không mở file gốc: hash theo `(file_ref, part)`, nhúng được theo đuôi part — bytes chỉ đọc ở route ảnh
       const part = diagramId.slice(MEDIA_PREFIX.length)
@@ -110,6 +110,11 @@ export const refDiagramPngLoader = (store: DiagramFileStore = gridFsDiagramStore
     const stat = all ? (all.get(`${diagramId}.png`) ?? null) : await store.stat(projectId, diagramId, "png").catch(() => null)
     return stat ? formatImageRef({ kind: "diagram", id: diagramId, hash: diagramFileHash(stat.version) }) : null
   }
+  // FLF-383: nạp sẵn metadata PNG + `file_ref` (đã memo theo loader) song song với lượt đọc cache tài liệu
+  load.warm = async (projectId) => {
+    await Promise.all([stats(projectId), fileRefs(projectId)])
+  }
+  return load
 }
 
 /**
@@ -134,7 +139,7 @@ export const refLocalizedPngLoader = (
 /** Kết quả đọc một ảnh theo tham chiếu cho route. */
 export type ImageRead =
   | { ok: true; data: Buffer; contentType: string }
-  | { ok: false; reason: "not_found" | "changed" }
+  | { ok: false; reason: "not_found" | "changed" | "unsupported" | "unavailable" }
 
 /**
  * Bytes của ảnh `ref` — CHỈ ĐỌC (không vẽ khi thiếu). Kiểm quyền / tập id hợp lệ là việc của controller. Hash lệch file
@@ -144,18 +149,24 @@ export const readImageRef = async (
   projectId: string,
   ref: ImageRef,
   store: DiagramFileStore = gridFsDiagramStore,
-  loadMedia = loadImportImage,
+  readMedia = readImportImage,
   fileRefOf = currentImportFileRef
 ): Promise<ImageRead> => {
   if (ref.kind === "media") {
-    // Upload lại ⇒ `file_ref` mới ⇒ hash lệch ⇒ `changed` trước khi tải bytes của file mới
-    const fileRef = await fileRefOf(projectId).catch(() => null)
+    // Lỗi DB khi tra `file_ref` là lỗi tạm thời, không phải "không có ảnh"
+    let fileRef: string | null
+    try {
+      fileRef = await fileRefOf(projectId)
+    } catch {
+      return { ok: false, reason: "unavailable" }
+    }
     if (!fileRef) return { ok: false, reason: "not_found" }
+    // Upload lại ⇒ `file_ref` mới ⇒ hash lệch ⇒ `changed` trước khi tải bytes của file mới
     if (mediaHash(fileRef, ref.id) !== ref.hash) return { ok: false, reason: "changed" }
-    const image = await loadMedia(projectId, ref.id).catch(() => null)
-    if (!image) return { ok: false, reason: "not_found" }
-    const data = Buffer.from(image.data, "base64")
-    return { ok: true, data, contentType: imageMime(data) ?? "application/octet-stream" }
+    const read = await readMedia(fileRef, ref.id).catch(() => ({ ok: false as const, reason: "unavailable" as const }))
+    if (!read.ok) return { ok: false, reason: read.reason === "missing" ? "not_found" : read.reason }
+    const data = Buffer.from(read.image.data, "base64")
+    return { ok: true, data, contentType: read.image.mime }
   }
   if (ref.locale) {
     const file = await store.loadLocalized(projectId, ref.id, ref.locale, ref.hash).catch(() => null)

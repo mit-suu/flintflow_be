@@ -371,13 +371,14 @@ export interface ChangeRange {
  * change gần nhất KHÔNG thuộc `flags[…]` — tính lại cờ / waive / giữ nguyên tăng `spine_version` nhưng không đổi nội dung
  * tài liệu nên không làm tab khác tải lại. Hai truy vấn theo index, không `listChanges`.
  */
-export const versionHead = async (projectId: string): Promise<{ spine_version: number; content_seq: number } | null> => {
-  const head = await SpineModel.findOne({ projectId }, { spine_version: 1, _id: 0 }, { lean: true })
+export const versionHead = async (projectId: string): Promise<{ spine_version: number; content_seq: number; identity: string } | null> => {
+  const head = await SpineModel.findOne({ projectId }, { _id: 1, spine_version: 1 }, { lean: true })
   if (!head) return null
   const latest = (await ChangeModel.findOne({ projectId, path: { $not: /^flags(\[|\.|$)/ } }, { seq: 1, _id: 0 }, { sort: { seq: -1 }, lean: true })) as {
     seq?: number
   } | null
-  return { spine_version: head.spine_version, content_seq: latest?.seq ?? 0 }
+  // `identity` (FLF-383): cùng dạng `getWithIdentity` — khoá bản đã dựng mà khỏi hỏi lại đầu Spine
+  return { spine_version: head.spine_version, content_seq: latest?.seq ?? 0, identity: cacheKey(head) }
 }
 
 /** Cả lịch sử, đọc tăng dần (FLF-381, `change-log.ts`) — lượt đọc lại chỉ tải change mới. */
