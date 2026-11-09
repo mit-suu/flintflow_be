@@ -11,6 +11,7 @@ import {
   elementPathOf,
   elementValue,
   emptySectionTargets,
+  expandSlotTargets,
   fillPathsOfSection,
   findSpineLocations,
   isArrayPath,
@@ -74,6 +75,12 @@ describe("C-3 findSpineLocations", () => {
     expect(elementValue(s, "business_rules[]")).toEqual([]) // giá trị = cả mảng ⇒ C-5 so được mảng có bị đổi không
     expect(isArrayPath("business_rules[]")).toBe(true)
     expect(isArrayPath("business_rules[id=BR-01]")).toBe(false)
+  })
+
+  it("FLF-278: đích là phần nhỏ của mẫu (`slot:*`) ⇒ đổi sang mục FPT cha / mảng dữ liệu — CR nhắm mục mẫu trống có vị trí thêm mới", () => {
+    expect(expandSlotTargets(["slot:business_rules", "slot:functional_requirements", "slot:vision", "actors[id=A01]"])).toEqual(["fixed:5.1", "functions[]", "fixed:1", "actors[id=A01]"])
+    const found = findSpineLocations(spine(), ["slot:business_rules"], [])
+    expect(found.map((f) => [f.path, f.section_id])).toEqual([["business_rules[]", "fixed:5.1"]])
   })
 
   it("C-2 trả đích thêm mới `entities[]` ⇒ ô thêm mới ở mục ERD; mảng nuôi nhiều mục ⇒ ưu tiên mục CR nhắm; ô thêm mới không bị cắt", () => {

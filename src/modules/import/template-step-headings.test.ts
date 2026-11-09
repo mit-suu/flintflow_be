@@ -47,11 +47,13 @@ describe("templateSectionsByStep — mẫu FU-IT-SRS-01", () => {
     expect(byStep.get("S-4.1")).toContain("3.2 Functional Requirements")
   })
 
-  it("heading bao và mục riêng của mẫu (soạn bằng 'Nhờ AI soạn') không gắn vào bước nào", () => {
-    const all = [...templateSectionsByStep(layout).values()].flat()
-    for (const title of ["1. Introduction", "3. Specific Requirements", "3.1 External Interface Requirements", "1.4 References", "5.3 Sign-off"]) {
+  it("heading bao không gắn vào bước nào; FLF-378: mục riêng của mẫu do S-8.1 soạn", () => {
+    const byStep = templateSectionsByStep(layout)
+    const all = [...byStep.values()].flat()
+    for (const title of ["1. Introduction", "3. Specific Requirements", "3.1 External Interface Requirements"]) {
       expect(all).not.toContain(title)
     }
+    expect(byStep.get("S-8.1")).toContain("5.3 Sign-off")
   })
 
   it("bước vòng S-5 theo màn nhận cả mục chung của bước mẫu; bước không soạn mục nào ⇒ rỗng", () => {

@@ -18,6 +18,7 @@ import { getProjectById } from "../project/project.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { assembleRequestSchema, assembleResponseSchema, documentQuerySchema, documentTranslationMetaSchema } from "../pipeline/pipeline.dto.js"
 import { assemble, getDocumentWithMeta, getDraftMeta, NoWorkingDraftError } from "./assemble.service.js"
+import { applyTemplatePreviewTables } from "./template-preview-tables.js"
 import { projectLanguages } from "../translation/translation.service.js"
 import type { UserLocale } from "../../shared/i18n/locale.js"
 import type { TemplateIntent } from "../project/project.model.js"
@@ -87,7 +88,7 @@ export const assembleController = catchAsync(async (req: Request, res: Response)
 // ─── GET /document ───────────────────────────────────────────────
 
 export const getDocumentController = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, projectName, documentLanguage, sourceLanguage } = await authorize(req)
+  const { projectId, projectName, documentLanguage, sourceLanguage, templateIntent } = await authorize(req)
   const query = parse(documentQuerySchema, req.query)
   // FLF-369: revision đọc TRƯỚC khi dựng ⇒ thay đổi chen giữa làm revision cũ hơn tài liệu thực tế, client tải lại thêm
   // một lần (an toàn), không bao giờ ngược lại
@@ -99,7 +100,16 @@ export const getDocumentController = catchAsync(async (req: Request, res: Respon
     const result = await getDocumentWithMeta(
       projectId,
       projectName,
-      { ...query, languages: { locale: documentLanguage, source: sourceLanguage } },
+      // Chỉ xem trước mới dùng lại bản dịch đã dựng (ảnh tham chiếu) — export / comment luôn dựng mới.
+      // FLF-383: đầu Spine + revision bản dịch vừa đọc ⇒ draft tra bản đã dựng theo đó, không hỏi lại / tải cả Spine
+      {
+        ...query,
+        languages: { locale: documentLanguage, source: sourceLanguage },
+        reuseTranslated: true,
+        ...(query.source === "draft"
+          ? { draftHead: version ? { spine_version: version.spine_version, identity: version.identity, translation_revision: version.translation_revision } : null }
+          : {})
+      },
       { loadDiagramPng: refDiagramPngLoader(), loadLocalizedDiagramPng: refLocalizedPngLoader() }
     )
     // review C2: source=draft trước đây trả im lặng bản cache mới nhất dù Spine đã đổi tiếp — đính
@@ -115,7 +125,9 @@ export const getDocumentController = catchAsync(async (req: Request, res: Respon
       ...(result.translation ? { translation: documentTranslationMetaSchema.parse(result.translation) } : {})
     }
     // UC-47: Viewer nhận bản không cờ / trạng thái nội bộ
-    const doc = isViewer(req) && result.doc ? viewerDocument(result.doc) : result.doc
+    // FLF-379: mẫu cố định ⇒ bảng xem trước đúng cột của file như bản xuất Word
+    const shown = templateIntent === "fixed" && result.doc ? await applyTemplatePreviewTables(projectId, result.doc) : result.doc
+    const doc = isViewer(req) && shown ? viewerDocument(shown) : shown
     return sendSuccess(res, 200, doc, Object.keys(meta).length ? meta : undefined)
   } catch (err) {
     if (err instanceof NoWorkingDraftError) {
@@ -142,6 +154,7 @@ const notFound = (): ApiError => new ApiError(404, "Không tìm thấy ảnh nà
  * thuộc đúng dự án: sơ đồ phải có trong `spine.diagrams`; bản dịch chỉ nhận đúng ngôn ngữ tài liệu (khác ngôn ngữ gốc);
  * media chỉ nhận part đang được mục riêng tham chiếu (`custom_sections[].blocks[].image_ref`), không part tuỳ ý trong
  * file. Chỉ đọc — thiếu file ⇒ 404, không vẽ. Hash lệch file đang lưu ⇒ 409 `IMAGE_CHANGED` (FE tải lại tài liệu).
+ * Media: bytes không phải PNG/JPEG ⇒ 415 `MEDIA_NOT_EMBEDDABLE`; không tải được file gốc ⇒ 503 `IMAGE_UNAVAILABLE`.
  * URL mang hash nội dung ⇒ cache trình duyệt dài hạn.
  */
 export const getDocumentImageController = catchAsync(async (req: Request, res: Response) => {
@@ -161,6 +174,10 @@ export const getDocumentImageController = catchAsync(async (req: Request, res: R
   const image = await readImageRef(projectId, ref)
   if (!image.ok) {
     if (image.reason === "changed") throw new ApiError(409, "Ảnh này vừa được vẽ lại — tải lại tài liệu để xem bản mới.", "IMAGE_CHANGED")
+    // Ảnh gốc có bytes nhưng không phải PNG/JPEG — lỗi vĩnh viễn, client hiện chỗ giữ ảnh thay vì báo lỗi
+    if (image.reason === "unsupported") throw new ApiError(415, "Không nhúng được ảnh gốc (định dạng không hỗ trợ).", "MEDIA_NOT_EMBEDDABLE")
+    // Không tải được file gốc từ storage — có thể tạm thời, client cho thử lại
+    if (image.reason === "unavailable") throw new ApiError(503, "Tạm thời không tải được ảnh — thử lại sau.", "IMAGE_UNAVAILABLE")
     throw notFound()
   }
   res.setHeader("Content-Type", image.contentType)
@@ -180,5 +197,6 @@ export const getVersionController = catchAsync(async (req: Request, res: Respons
   const { projectId, documentLanguage, sourceLanguage } = await authorize(req)
   const version = await documentVersion(projectId, { locale: documentLanguage, source: sourceLanguage })
   if (!version) throw new ApiError(404, "Dự án chưa có dữ liệu tài liệu.", "SPINE_NOT_FOUND")
-  return sendSuccess(res, 200, version)
+  // Đúng hợp đồng #39 — phần nội bộ (danh tính Spine, revision bản dịch) không trả ra
+  return sendSuccess(res, 200, { spine_version: version.spine_version, document_revision: version.document_revision })
 })

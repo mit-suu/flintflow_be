@@ -14,6 +14,8 @@ import { bindFixedTemplateHeadings } from "../import/content-slots.js"
 import { repairFixedTemplateLayout, type TemplateLayout } from "./layout-sections.js"
 import { templateLayoutFromBinding, type TemplateSourceBinding } from "../doc-version/template-source-binding.js"
 import { DocxPackage, addDraftWatermark } from "../docx-ooxml/index.js"
+import type { SourceFidelity } from "./source-fidelity.js"
+import { isTemplateFile } from "../import/structure-preview.js"
 
 const unavailable = () => new ApiError(
   409,
@@ -41,30 +43,62 @@ export const templateHeadingMap = (
 const isTemplateContext = (source: unknown): source is FixedTemplateContext =>
   !!source && typeof source === "object" && Buffer.isBuffer((source as { template?: unknown }).template)
 
-/**
- * Cùng một đường xuất cho Word, PDF và file version: mẫu bắt buộc luôn lấy DOCX upload làm nền. FLF-377: bên gọi đã nạp
- * `loadFixedTemplateContext` (dựng tài liệu cần layout của mẫu) thì truyền nguyên context — không tải lại file mẫu.
- */
-export const writeProjectDocx = async (
-  doc: RenderedDocument,
-  options: WriteDocxOptions = {},
-  templateIntent?: TemplateIntent | null,
-  source?: TemplateSourceBinding | FixedTemplateContext | null
-): Promise<Buffer> => {
-  const intent = templateIntent === undefined
-    ? (await Project.findById(doc.projectId, { template_intent: 1 }).lean())?.template_intent
-    : templateIntent
-  if (intent !== "fixed") return writeDocx(doc, options)
-
-  const context = isTemplateContext(source) ? source : await loadFixedTemplateContext(doc.projectId, source)
-  const filled = await writeTemplateDocx(doc, context.template, context.headingMap, context.binding.table_map)
-  // Bản làm việc vẫn mang watermark DRAFT như mẫu FPT (cùng điều kiện `writeDocx`): chỉ thêm shape chữ mờ vào header — header
-  // có sẵn của mẫu giữ nguyên nội dung, mẫu không có header thì thêm một header chỉ chứa watermark. Bản baseline không đổi.
+/** Bản làm việc mang watermark DRAFT (cùng điều kiện `writeDocx`): chỉ thêm shape chữ mờ vào header, file nền giữ nguyên. */
+const withDraftWatermark = async (doc: RenderedDocument, filled: Buffer): Promise<Buffer> => {
   if (doc.source !== "draft" && doc.watermark !== "DRAFT") return filled
   const pkg = await DocxPackage.load(filled)
   await addDraftWatermark(pkg)
   return pkg.toBuffer()
 }
+
+/**
+ * Cùng một đường xuất cho Word, PDF và file version: mẫu bắt buộc luôn lấy DOCX upload làm nền.
+ * `fidelity` (dự án "Upload SRS có sẵn", `source-fidelity.ts`): file upload là nền, mục nguyên vẹn in nguyên văn.
+ * - theo mẫu cố định ⇒ writer mẫu + `keepSource`;
+ * - cấu trúc FlintFlow (chế độ 1) ⇒ writer mẫu với mapping của profile (không gán lại kiểu mẫu bắt buộc); file nền
+ *   không điền an toàn được ⇒ writer FPT như trước.
+ */
+export const writeProjectDocx = async (
+  doc: RenderedDocument,
+  options: WriteDocxOptions = {},
+  templateIntent?: TemplateIntent | null,
+  /** FLF-377: bên gọi đã nạp `loadFixedTemplateContext` (dựng tài liệu cần layout của mẫu) thì truyền nguyên context — không tải lại file mẫu. */
+  source?: TemplateSourceBinding | FixedTemplateContext | null,
+  fidelity?: SourceFidelity
+): Promise<Buffer> => {
+  const intent = templateIntent === undefined
+    ? (await Project.findById(doc.projectId, { template_intent: 1 }).lean())?.template_intent
+    : templateIntent
+  if (intent !== "fixed") {
+    if (!fidelity) return writeDocx(doc, options)
+    try {
+      const context = await loadFixedTemplateContext(doc.projectId, undefined, { rebind: false })
+      const filled = await writeTemplateDocx(doc, context.template, context.headingMap, context.binding.table_map, sourceWriteOptions(fidelity, context.binding))
+      return await withDraftWatermark(doc, filled)
+    } catch (err) {
+      if ((err as { code?: string }).code !== "TEMPLATE_LAYOUT_UNAVAILABLE") throw err
+      console.warn(`[project-docx] Dự án ${doc.projectId}: không dùng được file upload làm nền (${String((err as { meta?: { reason?: string } }).meta?.reason ?? (err as Error).message)}) ⇒ bản in FPT`)
+      return writeDocx(doc, options)
+    }
+  }
+
+  const context = isTemplateContext(source) ? source : await loadFixedTemplateContext(doc.projectId, source)
+  // FLF-378 (luồng C): file upload là khung mẫu (`isTemplateFile`) — chữ hướng dẫn / ví dụ của mẫu không vào bản in
+  const [project, profile] = await Promise.all([
+    Project.findById(doc.projectId, { start_kind: 1, template_intent: 1 }).lean(),
+    TemplateProfile.findOne({ projectId: doc.projectId }, { structure_preview: 1 }).lean()
+  ])
+  const filled = await writeTemplateDocx(doc, context.template, context.headingMap, context.binding.table_map, {
+    ...(fidelity ? sourceWriteOptions(fidelity, context.binding) : {}),
+    stripTemplateText: isTemplateFile(project, profile)
+  })
+  return withDraftWatermark(doc, filled)
+}
+
+const sourceWriteOptions = (fidelity: SourceFidelity, binding: Pick<TemplateSourceBinding, "legacy_record_of_changes">) => ({
+  keepSource: fidelity.keepSource,
+  legacyRecordCount: binding.legacy_record_of_changes?.length ?? 0
+})
 
 export interface FixedTemplateContext {
   template: Buffer
@@ -74,7 +108,11 @@ export interface FixedTemplateContext {
 }
 
 /** Repair legacy heading/layout omissions from the retained source before assembly, never from cached rendered text. */
-export const loadFixedTemplateContext = async (projectId: string, sourceBinding?: TemplateSourceBinding | null): Promise<FixedTemplateContext> => {
+export const loadFixedTemplateContext = async (
+  projectId: string,
+  sourceBinding?: TemplateSourceBinding | null,
+  opts: { rebind?: boolean } = {}
+): Promise<FixedTemplateContext> => {
   if (sourceBinding === null) throw unavailable()
   const profile = sourceBinding ?? await TemplateProfile.findOne({ projectId }).lean()
   if (!profile?.layout?.length || !profile.heading_map?.length) throw unavailable()
@@ -122,8 +160,10 @@ export const loadFixedTemplateContext = async (projectId: string, sourceBinding?
     if (!mapped) throw unavailable()
     return { ...mapped, heading_text: heading.text, level: heading.level ?? 1 }
   })
-  const bound = bindFixedTemplateHeadings(entries)
-  const repaired = repairFixedTemplateLayout(profile.layout, bound)
+  // Dự án có sẵn theo cấu trúc FlintFlow (`rebind: false`): giữ đúng mapping lúc import, không gán lại kiểu mẫu bắt buộc
+  const rebind = opts.rebind ?? true
+  const bound = rebind ? bindFixedTemplateHeadings(entries) : entries
+  const repaired = rebind ? repairFixedTemplateLayout(profile.layout, bound) : profile.layout
   const binding = { ...profile, source_file_ref: ref, source_sha256: sha, layout: repaired } as TemplateSourceBinding
   return {
     template, binding, layout: templateLayoutFromBinding(binding),

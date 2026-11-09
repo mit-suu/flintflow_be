@@ -28,12 +28,14 @@ import {
   type SegmentMention,
   type SegmentPart
 } from "../spine/segment-hash.js"
+import { idKey } from "./extracted-entities.js"
 import { scanCodeMentions, scanNameMentions, type NamedEntity } from "./mentions.js"
 import { UNMAPPED_SECTION } from "./import.constants.js"
 import { targetsOf } from "./extract-targets.js"
 import { isInstructionText, isRealText, tableBodyHasRealText } from "../../shared/utils/instruction-text.js"
 import { withSlotParents } from "./content-slots.js"
 import type { LayoutEntry, StepPlanItem } from "./template-profile.model.js"
+import type { FunctionOriginalBlock } from "../render/function-original.js"
 
 export const CUSTOM_SECTION_PREFIX = "custom:"
 export const customSectionKey = (id: string): string => `${CUSTOM_SECTION_PREFIX}${id}`
@@ -102,6 +104,8 @@ export interface LayoutResult {
   slices: LayoutSlice[]
   /** FLF-366: đoạn của từng mục FPT `fixed:*` có trong file (kể cả mục chỉ có heading). */
   segments: LayoutSegment[]
+  /** FLF-378 (`templateOnly`): mọi khối dưới heading của mẫu, theo mục (`section_id` của layout) — nguồn của `template_context`. */
+  contextBlocks: { section_id: string; block: CustomBlock }[]
 }
 
 const toCustomBlock = (b: LayoutBlock): CustomBlock | null => {
@@ -140,9 +144,18 @@ export const buildLayout = (
    * FLF-366: chia đoạn mục FPT. Tắt cho mẫu bắt buộc (`template_intent = fixed`, chế độ 3): file upload là mẫu để điền
    * (bản xuất điền vào chính file đó — FLF-371), không phải SRS cần in nguyên văn.
    */
-  options: { segment?: boolean } = {}
+  options: {
+    segment?: boolean
+    /**
+     * FLF-378 (luồng C — dự án mới theo mẫu bắt buộc): file là **mẫu**, không phải dữ liệu. Mục riêng không giữ nguyên văn
+     * (chữ ví dụ / hướng dẫn không lọt vào bản in); mọi khối được gom vào `contextBlocks` theo mục.
+     */
+    templateOnly?: boolean
+  } = {}
 ): LayoutResult => {
   const segmentOn = options.segment ?? true
+  const templateOnly = options.templateOnly === true
+  const contextBlocks: LayoutResult["contextBlocks"] = []
   const layout: LayoutEntry[] = []
   const customSections: CustomSection[] = []
   const slices: LayoutSlice[] = []
@@ -201,6 +214,11 @@ export const buildLayout = (
         current = null
         slice = null
         owner = enclosing.entry
+        // FLF-378: mục con của mẫu (1.1 Purpose dưới 1 Product Overview) ⇒ ngữ cảnh mẫu ghi tên mục con để bước soạn thấy cấu trúc
+        if (templateOnly && heading) {
+          const label = b.number_label?.trim()
+          contextBlocks.push({ section_id: mapped, block: { kind: "paragraph", text: `[Sub-section: ${label && !heading.startsWith(label) ? `${label} ${heading}` : heading}]`, rows: null, image_ref: null } })
+        }
         // Mục chia đoạn: heading con ("External Systems") là chữ của file ⇒ đoạn `heading` đúng chỗ, giữ cấp của file;
         // số Word tự đánh (FLF-362) ghép lại vào chữ như file hiển thị
         const segment = segmentOf.get(owner)
@@ -243,6 +261,15 @@ export const buildLayout = (
     slice?.block_ids.push(b.block_id)
     const block = toCustomBlock(b)
     if (!block) continue
+    if (templateOnly) {
+      const sectionId = current ? customSectionKey(current.id) : owner?.section_id
+      if (sectionId) contextBlocks.push({ section_id: sectionId, block })
+      // Hướng dẫn trọn đoạn dưới mục FPT vẫn ghi ở layout entry (FLF-364); còn lại không thành nguyên văn của mục
+      if (!current && owner && !owner.section_id.startsWith("group:") && (block.kind === "paragraph" || block.kind === "list_item") && isInstructionText(block.text)) {
+        owner.template_guidance = [...(owner.template_guidance ?? []), block.text]
+      }
+      continue
+    }
     // FLF-364 (câu 10): chữ hướng dẫn trọn đoạn dưới mục FPT / phần nhỏ ⇒ giữ nguyên văn ở layout entry (in khi mục trống),
     // không thành phần nối (in cả khi mục đã có dữ liệu)
     if (!current && owner && !owner.section_id.startsWith("group:") && (block.kind === "paragraph" || block.kind === "list_item") && isInstructionText(block.text)) {
@@ -257,7 +284,7 @@ export const buildLayout = (
       else segment.parts.push({ kind: "spine", block_ids: [b.block_id], blocks: [block] })
     } else if (owner && (owner.section_id.startsWith("group:") || unmappedBlockIds.has(b.block_id))) continuationOf(owner).blocks.push(block)
   }
-  return { layout, customSections, slices, segments }
+  return { layout, customSections, slices, segments, contextBlocks }
 }
 
 /** Phần tử Spine đã trích (finalize): khoá `entity` + `id` + khối nguồn. */
@@ -318,10 +345,13 @@ const blockText = (blocks: readonly CustomBlock[]): string =>
 /** Tên / mã phần tử Spine mà văn xuôi nhắc tới, kèm tên lúc import (cờ vàng khi phần tử đổi tên / bị xoá — FLF-366). */
 export const textMentions = (text: string, spine: Spine, names: readonly NamedEntity[]): SegmentMention[] => {
   const out = new Map<string, SegmentMention>()
-  const exists = (array: string, id: string) => ((spine as unknown as Record<string, unknown>)[array] as { id?: string }[] | undefined)?.some((x) => x.id === id) ?? false
+  // FLF-361: mã trong chữ (`UC-01`) so lỏng với id Spine giữ dạng tài liệu (`UC01`) — ghi id thật của Spine
+  const idOf = (array: string, id: string): string | null =>
+    ((spine as unknown as Record<string, unknown>)[array] as { id?: string }[] | undefined)?.find((x) => typeof x.id === "string" && idKey(x.id) === idKey(id))?.id ?? null
   for (const m of scanCodeMentions(text)) {
     const array = MENTION_ARRAY[m.entity]
-    if (exists(array, m.id)) out.set(`${array}[id=${m.id}]`, { path: `${array}[id=${m.id}]`, array, id: m.id, name: null })
+    const id = idOf(array, m.id)
+    if (id) out.set(`${array}[id=${id}]`, { path: `${array}[id=${id}]`, array, id, name: null })
   }
   for (const m of scanNameMentions(text, [...names])) {
     const array = MENTION_ARRAY[m.entity]
@@ -388,18 +418,29 @@ export const sectionSegments = (
 
 /**
  * Nguyên văn từng mục chức năng của file (FLF-252 — in theo file gốc): mọi khối dưới heading chức năng, đúng thứ tự —
- * nhãn ("Function Trigger", "Normal Case"…), gạch đầu dòng, bảng, ảnh màn hình; heading con trong mục thành đoạn chữ.
- * Bản in dùng nguyên văn này khi chức năng chưa bị change request sửa, thay cho khung dựng lại từ Spine (khung đó mất
- * dòng Interface / Data, còn nhãn trôi nổi tuỳ AI giữ đoạn nào).
+ * nhãn ("Function Trigger", "Normal Case"…), gạch đầu dòng, bảng, ảnh màn hình. Bản in dùng nguyên văn này khi chức năng
+ * chưa bị change request sửa, thay cho khung dựng lại từ Spine (khung đó mất dòng Interface / Data, còn nhãn trôi nổi tuỳ
+ * AI giữ đoạn nào).
+ * FLF-361: chỉ bỏ heading **mở** mục (heading đầu tiên của mục — đã là tiêu đề mục); heading con ("Function trigger",
+ * "Screen layout"…) giữ kiểu heading, cấp tương đối heading mở (trước đây mọi heading map vào mục đều bị bỏ ⇒ bản 0.1 mất
+ * 4 tiêu đề con ở mọi mục chức năng).
  */
-export const functionOriginals = (blocks: readonly LayoutBlock[], headingSections: ReadonlyMap<string, string>): Map<string, CustomBlock[]> => {
-  const out = new Map<string, CustomBlock[]>()
+export const functionOriginals = (blocks: readonly LayoutBlock[], headingSections: ReadonlyMap<string, string>): Map<string, FunctionOriginalBlock[]> => {
+  const out = new Map<string, FunctionOriginalBlock[]>()
+  const openerLevel = new Map<string, number>()
   for (const b of blocks) {
     const section = b.section_id
     if (!section?.startsWith("function:")) continue
-    // heading của chính mục chức năng ⇒ đã là tiêu đề mục, không lặp
-    if (b.kind === "heading" && headingSections.get(b.block_id) === section) continue
-    const block = b.kind === "heading" ? (b.text.trim() ? { kind: "paragraph" as const, text: b.text.trim(), rows: null, image_ref: null } : null) : toCustomBlock(b)
+    if (b.kind === "heading" && headingSections.get(b.block_id) === section && !openerLevel.has(section)) {
+      openerLevel.set(section, b.level ?? 0)
+      continue
+    }
+    let block: FunctionOriginalBlock | null
+    if (b.kind === "heading") {
+      const text = b.text.trim()
+      const base = openerLevel.get(section)
+      block = text ? { kind: "heading", text, level: Math.max(1, b.level !== null && base !== undefined ? b.level - base : 1) } : null
+    } else block = toCustomBlock(b)
     if (!block) continue
     out.set(section, [...(out.get(section) ?? []), block])
   }
@@ -422,6 +463,18 @@ export const sectionsWithContent = (blocks: LayoutBlock[]): Set<string> => {
     if (hasRealContent(b)) out.add(b.section_id)
   }
   return out
+}
+
+/**
+ * FLF-379: heading lặp lại một mục FPT đã có heading trước (mẫu: "Reliability" rồi "3.3.4 Tính sẵn sàng" cùng mục) thành mục
+ * riêng; nội dung đã trích vào Spine nên mục riêng không giữ khối ⇒ trước đây I-5 coi là trống ("Sẽ soạn"). Xét khối thật
+ * nằm dưới chính heading đó (`LayoutSlice.block_ids`).
+ */
+export const repeatSectionsWithContent = (slices: readonly LayoutSlice[], blocks: readonly LayoutBlock[]): Set<string> => {
+  const real = new Set(
+    blocks.filter((b) => b.kind !== "heading" && b.kind !== "table_cell" && b.kind !== "table_row" && hasRealContent(b)).map((b) => b.block_id)
+  )
+  return new Set(slices.filter((s) => s.block_ids.some((id) => real.has(id))).map((s) => customSectionKey(s.custom_id)))
 }
 
 /**
@@ -457,7 +510,16 @@ const matches = (section: string, pool: Iterable<string>): boolean => {
  * được đánh `accepted` ngay từ import, người dùng thấy "đã chốt" mà cờ đỏ vẫn treo (gặp thật 2026-09-20).
  * Mục ngoài bảng luật (mục riêng, feature…) vẫn theo file như cũ.
  */
-export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string>, spine?: Spine): StepPlanItem[] =>
+export interface StepPlanOptions {
+  /**
+   * FLF-378 (luồng C — dự án mới theo mẫu bắt buộc): id bước (không mang `@màn`) sở hữu các mục của mẫu. Có ⇒ file là mẫu,
+   * không phải dữ liệu: bước sở hữu mục mẫu luôn `enabled` (chờ soạn), không bao giờ `applied` vì chữ ví dụ của mẫu; bước
+   * không sở hữu mục nào của mẫu ⇒ `hidden`.
+   */
+  draftOwners?: ReadonlySet<string>
+}
+
+export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string>, spine?: Spine, opts: StepPlanOptions = {}): StepPlanItem[] =>
   loadStepRegistry()
     .filter((s) => s.kind !== "loop")
     .map((s): StepPlanItem => {
@@ -468,6 +530,11 @@ export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string
       if (!owned.length) return { step_id: s.id, state: "applied", section_ids: [], reason: "Bước ghép / kiểm tra tài liệu — luôn chạy" }
       if (owned.every((sec) => DERIVED_SECTIONS.has(sec))) {
         return { step_id: s.id, state: "applied", section_ids: owned, reason: "Mục tự sinh từ lịch sử thay đổi" }
+      }
+      if (opts.draftOwners) {
+        return opts.draftOwners.has(s.id)
+          ? { step_id: s.id, state: "enabled", section_ids: owned, reason: "Mục của mẫu bắt buộc — FlintFlow soạn" }
+          : { step_id: s.id, state: "hidden", section_ids: owned, reason: "Mẫu không có mục này" }
       }
       const hasContent = owned.some((sec) => {
         const inSpine = spine ? sectionHasData(spine, sec) : null
@@ -496,6 +563,8 @@ export interface SeedOptions {
   firstSeq: number | null
   lastSeq: number | null
   at: string
+  /** FLF-378: như `StepPlanOptions.draftOwners` — vòng S-5 chờ soạn (bước mẫu sở hữu mục mẫu) hoặc bỏ qua, không `accepted`. */
+  draftOwners?: ReadonlySet<string>
 }
 
 /**
@@ -512,7 +581,11 @@ export const seedStepOps = (spine: Spine, plan: StepPlanItem[], opts: SeedOption
   const loopTemplates = loadStepRegistry().filter((s) => s.kind === "loop")
   for (const key of loopKeys(spine)) {
     if (!withFunctions.has(key)) continue
-    for (const t of loopTemplates) steps.push(accepted(`${t.id}@${key}`))
+    for (const t of loopTemplates) {
+      const id = `${t.id}@${key}`
+      if (!opts.draftOwners) steps.push(accepted(id))
+      else steps.push({ id, status: opts.draftOwners.has(t.id) ? "pending" : "skipped", first_seq: null, last_seq: null, accepted_at: null })
+    }
   }
 
   const probe = { ...spine, steps }

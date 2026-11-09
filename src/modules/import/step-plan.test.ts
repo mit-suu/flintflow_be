@@ -15,7 +15,9 @@ import {
   sectionsOwnedBy,
   sectionsWithContent,
   customSectionsWithContent,
+  repeatSectionsWithContent,
   seedStepOps,
+  textMentions,
   type LayoutBlock
 } from "./step-plan.js"
 
@@ -147,7 +149,7 @@ describe("buildLayout", () => {
   })
 
   it("không có heading ⇒ layout rỗng; block trước heading đầu tiên không vào mục riêng", () => {
-    expect(buildLayout([p("B0001", "Cover page", null)], new Map())).toEqual({ layout: [], customSections: [], slices: [], segments: [] })
+    expect(buildLayout([p("B0001", "Cover page", null)], new Map())).toEqual({ layout: [], customSections: [], slices: [], segments: [], contextBlocks: [] })
   })
 
   it("FLF-184: văn xuôi I-4 không trích được ⇒ phần nối (tiêu đề rỗng, cấp + 1) ngay sau section; khối dưới heading con cùng section gom vào cùng phần nối", () => {
@@ -254,7 +256,7 @@ describe("sectionSegments — đoạn nguyên văn theo mục (FLF-366)", () => 
 })
 
 describe("functionOriginals — nguyên văn mục chức năng (FLF-252)", () => {
-  it("mọi khối dưới heading chức năng đúng thứ tự: nhãn, gạch đầu dòng, ảnh, bảng; heading con thành đoạn; bỏ heading của chính mục và ô bảng", () => {
+  it("mọi khối dưới heading chức năng đúng thứ tự: nhãn, gạch đầu dòng, ảnh, bảng; FLF-361: heading con giữ kiểu heading (cấp tương đối); bỏ heading mở mục và ô bảng", () => {
     const fn = "function:FR-3.2.2"
     const blocks: LayoutBlock[] = [
       h("B0560", "3.2.2 View Profile", 3, fn),
@@ -271,13 +273,48 @@ describe("functionOriginals — nguyên văn mục chức năng (FLF-252)", () =
     expect(originals.get(fn)).toEqual([
       { kind: "paragraph", text: "Function Trigger", rows: null, image_ref: null },
       { kind: "list_item", text: "Navigation Path: User Menu → Profile", rows: null, image_ref: null },
-      { kind: "paragraph", text: "Screen Layout", rows: null, image_ref: null },
+      { kind: "heading", text: "Screen Layout", level: 1 },
       { kind: "image", text: "", rows: null, image_ref: "word/media/image7.png" },
       { kind: "table", text: "", rows: [["Field", "Rule"], ["Email", "Required"]], image_ref: null }
     ])
     expect(originals.get("function:FR-3.2.3")).toEqual([{ kind: "paragraph", text: "Function Trigger", rows: null, image_ref: null }])
     // mục không phải chức năng không gom
     expect(functionOriginals([p("B0002", "Lumen", "fixed:1")], new Map()).size).toBe(0)
+    // FLF-361: 4 heading con map vào chính mục chức năng (FAP) vẫn giữ, cấp tương đối heading mở
+    const fap = functionOriginals(
+      [
+        h("B0700", "3.2.1 Log In", 3, fn),
+        h("B0701", "Function trigger", 4, fn),
+        { block_id: "B0702", kind: "list_item", level: null, text: "Timing frequency: on open", section_id: fn },
+        h("B0703", "Function description", 4, fn),
+        h("B0704", "Screen layout", 4, fn),
+        h("B0705", "Function details", 5, fn)
+      ],
+      new Map(["B0700", "B0701", "B0703", "B0704", "B0705"].map((b) => [b, fn]))
+    ).get(fn)!
+    expect(fap).toEqual([
+      { kind: "heading", text: "Function trigger", level: 1 },
+      { kind: "list_item", text: "Timing frequency: on open", rows: null, image_ref: null },
+      { kind: "heading", text: "Function description", level: 1 },
+      { kind: "heading", text: "Screen layout", level: 1 },
+      { kind: "heading", text: "Function details", level: 2 }
+    ])
+  })
+})
+
+describe("repeatSectionsWithContent (FLF-379)", () => {
+  it("heading lặp lại mục FPT đã có heading trước: có khối thật dưới chính heading đó ⇒ mục riêng có nội dung; chỉ hướng dẫn ⇒ không", () => {
+    const blocks: LayoutBlock[] = [
+      h("H1", "3.3.1 Độ tin cậy", 4, "fixed:4.2.2"),
+      p("P1", "REQ-REL-001 – Phục hồi sau sự cố", "fixed:4.2.2"),
+      h("H2", "3.3.4 Tính sẵn sàng", 4, "fixed:4.2.2"),
+      p("P2", "REQ-AVAIL-001 – Sẵn sàng trong giờ học", "fixed:4.2.2"),
+      h("H3", "3.3.5 Khả năng quan sát", 4, "fixed:4.2.2"),
+      p("P3", "[Describe observability requirements]", "fixed:4.2.2")
+    ]
+    const { slices } = buildLayout(blocks, new Map(blocks.filter((b) => b.kind === "heading").map((b) => [b.block_id, "fixed:4.2.2"])))
+    expect(slices).toHaveLength(2)
+    expect(repeatSectionsWithContent(slices, blocks)).toEqual(new Set([`custom:${slices[0].custom_id}`]))
   })
 })
 
@@ -396,5 +433,45 @@ describe("FLF-364 (câu 10) — chữ hướng dẫn dưới mục FPT giữ ở
     // không có phần nối chỉ chứa hướng dẫn
     expect(customSections.filter((c) => !c.heading)).toEqual([])
     expect(customSections.find((c) => c.heading === "Ghi chú nhóm")?.blocks.map((b) => b.text)).toEqual(["{Ghi lịch họp}"])
+  })
+})
+
+describe("FLF-378 luồng C — dự án mới theo mẫu bắt buộc: không bước nào accepted sẵn", () => {
+  const { layout } = buildLayout(BLOCKS, HEADINGS)
+  // S-2.1 sở hữu fixed:1 (file có chữ thật), S-7.1 sở hữu mục có heading mà trống; S-5.2 = vòng S-5 sở hữu mục mẫu
+  const draftOwners = new Set(["S-2.1", "S-7.1", "S-5.2"])
+  const plan = buildStepPlan(layout, sectionsWithContent(BLOCKS), undefined, { draftOwners })
+  const of = (id: string) => plan.find((s) => s.step_id === id)!
+
+  it("bước sở hữu mục mẫu ⇒ enabled kể cả khi mục có chữ (chữ mẫu là ví dụ); bước mẫu không có ⇒ hidden; Record of Changes / bước ghép giữ nguyên", () => {
+    expect(of("S-2.1")).toMatchObject({ state: "enabled", reason: "Mục của mẫu bắt buộc — FlintFlow soạn" })
+    expect(of("S-7.1").state).toBe("enabled")
+    expect(of("S-6.4")).toMatchObject({ state: "hidden", reason: "Mẫu không có mục này" })
+    expect(of("S-8.3").state).toBe("applied")
+    expect(of("S-8.4")).toMatchObject({ state: "applied", section_ids: [] })
+    expect(of("B-1.1").state).toBe("hidden")
+  })
+
+  it("seed: không step nào accepted ngoài Record of Changes; vòng S-5 sở hữu mục mẫu ⇒ pending, còn lại skipped", () => {
+    const s = createEmptySpine({ name: "Kho" })
+    s.features = [{ id: "F-01", name: "Auth", order: 0 }] as Spine["features"]
+    s.screens = [
+      { id: "SCR-01", feature_id: "F-01", name: "Login", description: "", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: null, detail_status: "signed_off" }
+    ] as Spine["screens"]
+    s.functions = [{ id: "FR-01", screen_id: "SCR-01", feature_id: "F-01", order: 0, name: "Log in" }] as unknown as Spine["functions"]
+    const ops = seedStepOps(s, plan, { firstSeq: 1, lastSeq: 9, at: "2026-11-06T00:00:00.000Z", draftOwners })
+    const steps = ops.filter((o) => o.path === "steps[]").map((o) => o.value as StepState)
+    expect(steps.filter((x) => x.status === "accepted").map((x) => x.id)).toEqual(["S-8.3"])
+    expect(steps.find((x) => x.id === "S-2.1")?.status).toBe("pending")
+    expect(steps.find((x) => x.id === "S-5.2@SCR-01")?.status).toBe("pending")
+    expect(steps.find((x) => x.id === "S-5.1@SCR-01")?.status).toBe("skipped")
+  })
+})
+
+describe("FLF-361 textMentions — mã trong chữ khớp id Spine giữ dạng tài liệu", () => {
+  it("chữ ghi UC-01, Spine giữ UC01 ⇒ mention ghi id thật UC01; mã không có trong Spine ⇒ bỏ", () => {
+    const empty = createEmptySpine({ name: "FAP" })
+    const spine = { ...empty, use_cases: [{ id: "UC01", name: "Take attendance", actor_ids: [], description: "", includes: [], extends: [], function_ids: [] }] } as Spine
+    expect(textMentions("See UC-01 and UC-09.", spine, [])).toEqual([{ path: "use_cases[id=UC01]", array: "use_cases", id: "UC01", name: null }])
   })
 })

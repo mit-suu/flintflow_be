@@ -15,13 +15,33 @@ const unavailable = (reason: string): never => {
   throw new ApiError(422, "Không thể điền nội dung vào bố cục mẫu gốc.", TEMPLATE_LAYOUT_UNAVAILABLE, { reason })
 }
 
+/**
+ * Dự án "Upload SRS có sẵn" (`render/source-fidelity.ts`): file upload là bản gốc đã viết, không phải mẫu để điền.
+ * - `keepSource`: mục nguyên vẹn so với lúc import ⇒ slot giữ nguyên node gốc (đoạn, bảng, ảnh, field, chú thích).
+ * - `legacyRecordCount`: số dòng lịch sử đọc từ file ⇒ bảng lịch sử gốc giữ nguyên, chỉ thêm dòng mới vào cuối.
+ * - Mục phải dựng lại mà có field / bookmark / công thức ⇒ giữ các đoạn đó tại chỗ; slot không ghi an toàn được ⇒ giữ
+ *   nguyên slot (cảnh báo) thay vì hỏng cả file.
+ */
+export interface SourceWriteOptions {
+  keepSource?: ReadonlySet<string>
+  legacyRecordCount?: number
+  /**
+   * FLF-378 (luồng C, C2.5): file là **mẫu** của dự án mới — hướng dẫn, ví dụ, ngữ cảnh của mẫu không lọt vào bản in: mục
+   * chưa có nội dung bỏ đoạn thân của mẫu; bảng mẫu không được điền giữ hàng tiêu đề + style, bỏ dòng mẫu.
+   */
+  stripTemplateText?: boolean
+}
+
 /** Populate the imported package in place: its styles, sections and ancillary parts remain authoritative. */
 export async function writeTemplateDocx(
   doc: RenderedDocument,
   template: Buffer,
   headingMap: readonly { block_id: string; section_id: string }[],
-  tableMap: readonly TableMapEntry[] = []
+  tableMap: readonly TableMapEntry[] = [],
+  sourceOptions: SourceWriteOptions = {}
 ): Promise<Buffer> {
+  const keep = sourceOptions.keepSource
+  const sourceMode = !!keep
   const pkg = await DocxPackage.load(template)
   const xml = await pkg.requireXml(MAIN_PART)
   const originalBookmarkIds = new Set(wAll(xml, "bookmarkStart").map((b) => wAttr(b, "id")))
@@ -46,6 +66,8 @@ export async function writeTemplateDocx(
     while (ancestors.length && ancestors[ancestors.length - 1].level >= section.level) ancestors.pop()
     const own = slots.find((s) => s.section_id === section.id)
     const slot = own ?? ancestors[ancestors.length - 1]?.slot
+    // Mục nguyên vẹn không có chỗ trong file nền (FlintFlow tự thêm khi dựng) ⇒ không in: file gốc vốn không có
+    if (!slot && keep?.has(section.id)) continue
     if (!slot) {
       if (section.blocks.length || !section.id.startsWith("group:")) unavailable(`No template parent for ${section.id}`)
       continue
@@ -55,16 +77,19 @@ export async function writeTemplateDocx(
   }
   const history = slots.find((s) => s.section_id === "fixed:I")
   const records = doc.recordOfChanges.filter((row) => !isInstructionText(row.version) && !isInstructionText(row.description))
-  if (history && records.length) {
+  const handledSlots = new Set<typeof slots[number]>()
+  if (sourceMode && history) {
+    // Bảng lịch sử của file là nguồn: giữ nguyên (kể cả chú thích dưới bảng), chỉ thêm dòng của CR / phát hành vào cuối
+    const added = records.slice(sourceOptions.legacyRecordCount ?? 0)
+    const sourceHistory = history.nodes.find((n) => isW(n, "tbl"))
+    if (sourceHistory && added.length) appendRecordRows(sourceHistory, added)
+    if (sourceHistory || !added.length) handledSlots.add(history)
+  }
+  if (history && records.length && !handledSlots.has(history)) {
     const sourceHistory = history.nodes.find((n) => isW(n, "tbl"))
     if (!sourceHistory) unavailable("Revision history has no source table")
     const headers = wKids(wKids(sourceHistory!, "tr")[0], "tc").map((cell) => wAll(cell, "t").map((t) => t.textContent ?? "").join(""))
-    const values: Record<string, keyof typeof records[number]> = {
-      version: "version", date: "date", author: "in_charge", "in charge": "in_charge",
-      description: "description", "change description": "description", "change type": "change_type", "a*, m, d": "change_type"
-    }
-    // FLF-372: tiêu đề tiếng Việt / biến thể ("Người thực hiện", "Lý do thay đổi") ⇒ cùng bảng nhận cột của bộ đọc lịch sử
-    const fieldOf = (h: string) => values[columnKey(h)] ?? recordColumnOfHeader(h)
+    const fieldOf = recordFieldOf
     if (headers.some((h) => !fieldOf(h))) unavailable("Revision history column has no mapping")
     const section: RenderedSection = {
       id: history.section_id, number: "", heading: history.heading.text, level: history.heading.level ?? 1,
@@ -93,18 +118,35 @@ export async function writeTemplateDocx(
     const lvl = abstract && wKids(abstract, "lvl").find((n) => wAttr(n, "ilvl") === level)
     return lvl ? wAttr(wKid(lvl, "numFmt"), "val") : null
   }
+  const skipSlot = (slot: typeof slots[number], reason: string): void => {
+    console.warn(`[template-docx] Giữ nguyên mục "${slot.heading.text}" của file nền: ${reason}`)
+  }
   for (const slot of slots) {
-    if (!slot.sections.some((s) => s.blocks.length || s.id !== slot.section_id)) continue
-    if (slot.nodes.some((n) => isW(n, "p") && isLayoutParagraph(n) && wAll(n, "t").some((t) => t.textContent?.trim()))) unavailable(`Body text shares a layout break below ${slot.block_id}`)
+    if (handledSlots.has(slot)) continue
+    if (!slot.sections.some((s) => s.blocks.length || s.id !== slot.section_id)) {
+      if (sourceOptions.stripTemplateText && slot.section_id !== "fixed:I") stripTemplateBody(slot.nodes)
+      continue
+    }
+    // Mục nguyên vẹn so với lúc import ⇒ không đụng node nào của file gốc
+    if (keep && slot.sections.every((s) => keep.has(s.id))) continue
+    if (slot.nodes.some((n) => isW(n, "p") && isLayoutParagraph(n) && wAll(n, "t").some((t) => t.textContent?.trim()))) {
+      if (sourceMode) { skipSlot(slot, "chữ chung đoạn với ngắt trang / section"); continue }
+      unavailable(`Body text shares a layout break below ${slot.block_id}`)
+    }
     // FLF-372: đoạn chỉ chứa ảnh (sơ đồ ngữ cảnh, use case… của file gốc) thay được khi bản in của mục mang lại đủ số ảnh —
     // bản in Mode 1 giữ ảnh gốc thành khối ảnh; field / sdt / công thức / bookmark lạ vẫn không xoá
     const opaque = slot.nodes.filter((n) => isW(n, "p") && hasOpaqueContent(n))
     const pictures = opaque.filter(isPictureOnly)
     const printedImages = slot.sections.reduce((n, s) => n + s.blocks.filter((b) => b.type === "image").length, 0)
-    if (opaque.length > pictures.length || pictures.length > printedImages) unavailable(`Source objects or fields cannot be safely replaced below ${slot.block_id}`)
+    // Dự án có sẵn: đoạn có field / bookmark / công thức (chú thích hình "Figure {SEQ}", tham chiếu chéo…) giữ nguyên tại chỗ
+    const preserved = new Set<Element>(sourceMode ? (pictures.length > printedImages ? opaque : opaque.filter((n) => !isPictureOnly(n))) : [])
+    if (!sourceMode && (opaque.length > pictures.length || pictures.length > printedImages)) unavailable(`Source objects or fields cannot be safely replaced below ${slot.block_id}`)
     const replaceable = slot.nodes.map((node, index) => isW(node, "tbl") || (isW(node, "p") && !isLayoutParagraph(node)) ? index : -1).filter((index) => index >= 0)
-    if (slot.nodes.some((node, index) => isW(node, "p") && isLayoutParagraph(node) && index > replaceable[0] && index < replaceable[replaceable.length - 1])) unavailable(`Source content spans an internal layout boundary below ${slot.block_id}`)
-    const paragraphs = slot.nodes.filter((n) => isW(n, "p") && !isLayoutParagraph(n))
+    if (slot.nodes.some((node, index) => isW(node, "p") && isLayoutParagraph(node) && index > replaceable[0] && index < replaceable[replaceable.length - 1])) {
+      if (sourceMode) { skipSlot(slot, "nội dung vắt qua ngắt section"); continue }
+      unavailable(`Source content spans an internal layout boundary below ${slot.block_id}`)
+    }
+    const paragraphs = slot.nodes.filter((n) => isW(n, "p") && !isLayoutParagraph(n) && !preserved.has(n))
     const tables = slot.nodes.filter((n) => isW(n, "tbl"))
     const pattern = bodyPatternFor(paragraphs.find((p) => !wKid(wKid(p, "pPr") ?? p, "numPr")) ?? bodyPattern, bodyStyleId)
     let tableIndex = 0
@@ -152,17 +194,21 @@ export async function writeTemplateDocx(
     }
     const parent = slot.heading.element.parentNode!
     // A leading page/section break belongs before the slot's generated content.
-    const ref = slot.nodes.find((node) => isW(node, "tbl") || (isW(node, "p") && !isLayoutParagraph(node)))
+    const ref = slot.nodes.find((node) => isW(node, "tbl") || (isW(node, "p") && !isLayoutParagraph(node) && !preserved.has(node)))
       ?? (slot.nodes.length ? slot.nodes[slot.nodes.length - 1].nextSibling : slot.heading.element.nextSibling)
     for (const node of output) parent.insertBefore(node, ref)
     const replacedTables = new Set(tables.slice(0, tableIndex))
     for (const node of slot.nodes) {
       // Breaks and paragraph section properties are layout, even inside a body slot.
-      // An unfilled source table remains part of the template, including its sample rows.
+      // An unfilled source table remains part of the template, including its sample rows (FLF-378: trừ mẫu của dự án mới —
+      // bỏ dòng mẫu, giữ hàng tiêu đề).
+      if (preserved.has(node)) continue
       if (replacedTables.has(node) || (isW(node, "p") && !isLayoutParagraph(node))) parent.removeChild(node)
+      else if (sourceOptions.stripTemplateText && isW(node, "tbl")) stripSampleRows(node)
     }
   }
-  replacePlaceholders(xml, { "[Project name]": doc.projectName, "[Version]": doc.version, "[Date]": doc.generatedAt.slice(0, 10) })
+  // Mẫu để điền: thay chữ giữ chỗ của bìa. Dự án có sẵn: bìa là của file đã viết ⇒ giữ nguyên
+  if (!sourceMode) replacePlaceholders(xml, { "[Project name]": doc.projectName, "[Version]": doc.version, "[Date]": doc.generatedAt.slice(0, 10) })
   // Import-only anchors are useful while resolving slots, but untouched source
   // paragraphs must not acquire extra bookmarks in the exported package.
   const addedIds = new Set(wAll(xml, "bookmarkStart").filter((b) => !originalBookmarkIds.has(wAttr(b, "id"))).map((b) => wAttr(b, "id")))
@@ -170,6 +216,68 @@ export async function writeTemplateDocx(
   const lineage = exportLineage(doc)
   await writeStamp(pkg, { project_id: doc.projectId, version: doc.version, source: doc.source, base_version: lineage.base, kind: lineage.release ? "release" : "draft" })
   return pkg.toBuffer()
+}
+
+/** FLF-378: bảng mẫu giữ hàng tiêu đề (+ style), bỏ dòng mẫu / ví dụ bên dưới. */
+const stripSampleRows = (tbl: Element): void => {
+  for (const row of wKids(tbl, "tr").slice(1)) tbl.removeChild(row)
+}
+
+/**
+ * FLF-378: mục của mẫu chưa có nội dung soạn — bỏ đoạn thân (hướng dẫn, ví dụ, ngữ cảnh) và dòng mẫu của bảng. Ngắt trang /
+ * section, field (mục lục), ảnh, đối tượng lạ giữ nguyên.
+ */
+const stripTemplateBody = (nodes: readonly Element[]): void => {
+  for (const node of nodes) {
+    const parent = node.parentNode
+    if (isW(node, "tbl")) stripSampleRows(node)
+    else if (isW(node, "p") && !isLayoutParagraph(node) && !hasOpaqueContent(node)) parent?.removeChild(node)
+  }
+}
+
+type RecordRow = RenderedDocument["recordOfChanges"][number]
+
+const RECORD_FIELDS: Record<string, keyof RecordRow> = {
+  version: "version", date: "date", author: "in_charge", "in charge": "in_charge",
+  description: "description", "change description": "description", "change type": "change_type", "a*, m, d": "change_type"
+}
+
+// FLF-372: tiêu đề tiếng Việt / biến thể ("Người thực hiện", "Lý do thay đổi") ⇒ cùng bảng nhận cột của bộ đọc lịch sử
+const recordFieldOf = (header: string): keyof RecordRow | null => RECORD_FIELDS[columnKey(header)] ?? recordColumnOfHeader(header) ?? null
+
+/**
+ * Thêm dòng lịch sử vào cuối bảng gốc: nhân bản dòng dữ liệu cuối (giữ định dạng ô), ghi chữ theo cột của bảng, cột lạ
+ * ("No.", "Approved by"…) để trống.
+ */
+function appendRecordRows(sourceTable: Element, rows: readonly RecordRow[]): void {
+  const trs = wKids(sourceTable, "tr")
+  if (trs.length < 2) return
+  const headers = wKids(trs[0], "tc").map((cell) => wAll(cell, "t").map((t) => t.textContent ?? "").join(""))
+  const model = trs[trs.length - 1]
+  for (const row of rows) {
+    const tr = model.cloneNode(true) as Element
+    wKids(tr, "tc").forEach((cell, i) => {
+      const field = recordFieldOf(headers[i] ?? "")
+      setCellText(cell, field ? String(row[field] ?? "") : "")
+    })
+    sourceTable.appendChild(tr)
+  }
+}
+
+/** Ghi chữ vào ô: giữ đoạn + run đầu (định dạng của ô gốc), bỏ phần còn lại. */
+function setCellText(cell: Element, text: string): void {
+  const paragraphs = wKids(cell, "p")
+  paragraphs.slice(1).forEach((p) => cell.removeChild(p))
+  const p = paragraphs[0]
+  if (!p) return
+  const runs = wKids(p, "r")
+  runs.slice(1).forEach((r) => p.removeChild(r))
+  const run = runs[0] ?? p.appendChild(wEl(p.ownerDocument, "r"))
+  const ts = wAll(run, "t")
+  ts.slice(1).forEach((t) => t.parentNode?.removeChild(t))
+  const t = ts[0] ?? run.appendChild(wEl(p.ownerDocument, "t"))
+  t.textContent = text
+  t.setAttributeNS("http://www.w3.org/XML/1998/namespace", "xml:space", "preserve")
 }
 
 const isLayoutParagraph = (p: Element): boolean => wAll(p, "sectPr").length > 0 || wAll(p, "br").some((b) => wAttr(b, "type") === "page")
@@ -231,6 +339,15 @@ function tableAsParagraphs(xml: Document, block: Extract<Block, { type: "table" 
 /** Reuse the import's explicit field paths; no fuzzy header matching or overflow cells. */
 function projectMappedTable(block: Extract<Block, { type: "table" }>, source: Element, mappings: readonly TableMapEntry[]): Extract<Block, { type: "table" }> {
   const headers = wKids(wKids(source, "tr")[0], "tc").map((cell) => wAll(cell, "t").map((t) => t.textContent ?? "").join(""))
+  return projectTableColumns(block, headers, mappings)
+}
+
+/**
+ * Bảng FlintFlow ⇒ đúng cột của bảng mẫu (`headers` = hàng tiêu đề của bảng trong file upload): cột mẫu không có dữ liệu để
+ * trống, cột FlintFlow mẫu không có thì bỏ. FLF-379: bản xem trước của dự án mẫu cố định dùng chung hàm này để hiện đúng cột
+ * như bản xuất. Không ghép được ⇒ ném `TEMPLATE_LAYOUT_UNAVAILABLE`.
+ */
+export function projectTableColumns(block: Extract<Block, { type: "table" }>, headers: readonly string[], mappings: readonly TableMapEntry[]): Extract<Block, { type: "table" }> {
   if (!mappings.length || headers.every((h) => block.header.some((c) => columnKey(c.map((r) => r.text).join("")) === columnKey(h)))) return block
   const entities = new Set(mappings.flatMap((m) => m.field_path ? [m.field_path.split("[].")[0]] : []))
   const fieldOf = (definition: (typeof TABLE_ENTITIES)[number], text: string) =>
@@ -325,6 +442,35 @@ function table(xml: Document, block: Extract<Block, { type: "table" }>, source?:
     tbl.appendChild(row)
   })
   return tbl
+}
+
+/**
+ * FLF-379: bước đặt cột của `table()` (ghép đúng tên cột, cột FlintFlow mẫu không có thì bỏ) ở dạng thuần cho bản xem trước —
+ * một ô mỗi cột mẫu (không tính gộp ô). Không khớp cột nào / hai cột cùng một cột mẫu ⇒ ném như `table()`.
+ */
+export function fitTableToHeaders(block: Extract<Block, { type: "table" }>, headers: readonly string[]): Extract<Block, { type: "table" }> {
+  const sourceHeaders = headers.map((h) => h.trim())
+  const mapping = block.header.map((cell) => {
+    const header = cell.map((run) => run.text).join("").trim()
+    const matches = sourceHeaders.map((text, i) => (columnKey(text) === columnKey(header) ? i : -1)).filter((i) => i >= 0)
+    return matches.length === 1 ? matches[0] : -1
+  })
+  const bound = mapping.filter((i) => i >= 0)
+  if (!bound.length || new Set(bound).size !== bound.length) unavailable("Generated table columns do not match the source table")
+  return {
+    ...block,
+    header: sourceHeaders.map((text) => [{ text }]),
+    rows: block.rows.map((cells) => {
+      const projected: InlineRun[][] = sourceHeaders.map(() => [])
+      cells.forEach((runs, index) => {
+        const target = mapping[index] ?? -1
+        if (target < 0) return
+        if (projected[target].length) projected[target].push({ text: "\n" })
+        projected[target].push(...runs)
+      })
+      return projected
+    })
+  }
 }
 
 function columnKey(header: string): string {

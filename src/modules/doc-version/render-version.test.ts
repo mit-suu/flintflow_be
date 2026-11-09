@@ -16,6 +16,8 @@ vi.mock("../render/docx-writer.js", async (importOriginal) => {
   return { ...actual, writeDocx: vi.fn(actual.writeDocx) }
 })
 vi.mock("../../shared/ai/ai-action.service.js", () => ({ executeAiAction: vi.fn() }))
+// Dự án "Upload SRS có sẵn" đọc Project / TemplateProfile / DocVersion — ngoài phạm vi test này
+vi.mock("../render/source-fidelity.js", () => ({ sourceFidelityFor: vi.fn(async () => undefined) }))
 const { findProject } = vi.hoisted(() => ({ findProject: vi.fn() }))
 vi.mock("../project/project.model.js", () => ({ TEMPLATE_INTENTS: ["fixed", "free"], Project: { findById: () => ({ lean: findProject }) } }))
 vi.mock("../translation/translation.service.js", () => ({

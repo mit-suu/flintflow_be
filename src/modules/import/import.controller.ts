@@ -62,9 +62,9 @@ export const requireFile = (req: Request): importService.UploadedFile => {
 
 export const uploadImport = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
-  // FLF-335: field text `intent` đi cùng multipart (bước 1.2)
-  const body = parseInput(uploadImportBodySchema, req.body)
-  const doc = await importService.uploadImport(auth.projectId, auth.userId, requireFile(req), body)
+  // Client cũ gửi kèm `intent`: vẫn kiểm định dạng nhưng bỏ qua — ý định lấy từ Project (hộp Tạo dự án)
+  parseInput(uploadImportBodySchema, req.body)
+  const doc = await importService.uploadImport(auth.projectId, auth.userId, requireFile(req))
   return sendSuccess(res, 201, { import: importService.toImportDto(doc) })
 })
 
@@ -76,7 +76,7 @@ export const confirmLatest = mode1Handler(async (req, res) => {
 })
 
 export const getImport = mode1Handler(async (req, res) => {
-  const auth = await authorizeMode1(req)
+  const auth = await authorizeMode1(req, { allowDrafting: true })
   const current = await importService.latestImport(auth.projectId)
   if (current) {
     await extractJobs.markOrphanedExtraction(current)
@@ -167,6 +167,15 @@ export const resume = mode1Handler(async (req, res) => {
     to: doc.status,
     allowed: ["extracting", "fields_review", "baselining", "checking"]
   })
+})
+
+/** Người dùng bấm Dừng lúc đang đọc nội dung (I-4): đặt `paused: user`, job dừng trước lượt AI kế tiếp. Tiếp tục qua `resume`. */
+export const pause = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(importResumeRequestSchema, req.body)
+  const current = await extractJobs.requestStop(auth.projectId, body.import_id)
+  const summary = await importService.extractionSummary(String(current._id))
+  return sendSuccess(res, 200, { import: importService.toImportDto(current), sections: summary.sections })
 })
 
 export const gapReport = mode1Handler(async (req, res) => {

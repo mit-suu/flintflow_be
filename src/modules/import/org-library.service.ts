@@ -85,6 +85,7 @@ export const importFromOrg = async (
   projectId: string,
   orgId: string,
   userId: string,
+  /** `intent` (client cũ) bỏ qua — ý định lấy từ Project. */
   body: { org_template_id: string; intent?: TemplateIntent }
 ): Promise<IImportedDocument> => {
   const template = mongoose.isValidObjectId(body.org_template_id) ? await OrgTemplate.findOne({ _id: body.org_template_id, orgId }) : null
@@ -94,7 +95,7 @@ export const importFromOrg = async (
     projectId,
     userId,
     { buffer, originalname: template.source_file.name, size: buffer.length },
-    { ...(body.intent ? { intent: body.intent } : {}), org_template_id: String(template._id) }
+    { org_template_id: String(template._id) }
   )
   await OrgTemplate.updateOne({ _id: template._id }, { $inc: { uses: 1 } })
   return doc
