@@ -40,6 +40,11 @@ describe("Project.mode (FLF-171)", () => {
     expect(CreateProjectSchema.safeParse({ name: "Lumen", source: "new", has_required_template: "yes" }).success).toBe(false)
   })
 
+  it("hộp Tạo dự án: nhận has_srs_file + complete_to_standard (boolean)", () => {
+    expect(CreateProjectSchema.parse({ name: "Lumen", has_srs_file: true, complete_to_standard: true })).toMatchObject({ has_srs_file: true, complete_to_standard: true })
+    expect(CreateProjectSchema.safeParse({ name: "Lumen", has_srs_file: "yes" }).success).toBe(false)
+  })
+
   it("model: project cũ không có mode đọc ra fpt, import_state null; import_state phải thuộc máy trạng thái import", () => {
     const legacy = new Project({ userId: "66f000000000000000000001", name: "Old" })
     expect(legacy.validateSync()).toBeUndefined()

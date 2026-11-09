@@ -130,8 +130,12 @@ describe("gap report — gộp nhóm", () => {
     expect(all.filter((f) => f.confidence < 0.7)).toHaveLength(report.low_confidence_fields.length)
   })
 
-  it("trước bước check ⇒ IMPORT_INVALID_STATE", async () => {
+  it("trước Bắt đầu ⇒ báo cáo sơ bộ từ màn đọc khung (chưa có cờ); hồ sơ trước màn đọc khung ⇒ IMPORT_INVALID_STATE", async () => {
     const { projectId } = await importAtExtracting()
+    const report = await buildGapReport(projectId)
+    expect(report).toMatchObject({ preliminary: true, totals: { red: 0, yellow: 0 }, sections: [] })
+    expect(report.target_structure!.sections.length).toBeGreaterThan(0)
+    await TemplateProfile.updateOne({ projectId }, { $set: { structure_preview: null } })
     await expect(buildGapReport(projectId)).rejects.toMatchObject({ code: "IMPORT_INVALID_STATE" })
   })
 })

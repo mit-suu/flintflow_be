@@ -55,6 +55,10 @@ export const assertProjectQuota = async (orgId: string): Promise<void> => {
 export interface ProjectStart {
   source?: ProjectStartKind
   has_required_template?: boolean
+  /** Hộp Tạo dự án hai ô (business-flow §1): có file SRS không. Có trường này thì thắng `source` / `mode`. */
+  has_srs_file?: boolean
+  /** "Bổ sung các mục còn thiếu theo mẫu chuẩn FlintFlow" — chỉ có nghĩa khi có file SRS. */
+  complete_to_standard?: boolean
 }
 
 export interface ResolvedProjectStart {
@@ -65,13 +69,25 @@ export interface ResolvedProjectStart {
 }
 
 /**
- * FLF-335 (business-flow §1 "Chọn chế độ"): người dùng không chọn chế độ — Code suy ra từ hai lựa chọn:
+ * Business-flow §1 "Chọn chế độ" — hộp Tạo dự án hai ô (`has_srs_file`): người dùng chỉ khai có file SRS không và có tick
+ * "Bổ sung các mục còn thiếu theo mẫu chuẩn FlintFlow" không:
+ * - không SRS ⇒ `fpt` (chế độ 2);
+ * - có SRS, không tick ⇒ `import` + `fixed` (cấu trúc đích = chính khung file; chế độ 1 / 3 quyết định sau khi đọc khung);
+ * - có SRS, tick ⇒ `import` + `free` (cấu trúc đích = mẫu chuẩn FlintFlow; chế độ 1 / 4).
+ * Mọi file tải lên là `existing` — file là khung trống hay SRS đã viết do màn đọc khung nhận ra từ nội dung.
+ *
+ * Client trước hộp hai ô (FLF-335) gửi `source` — Code suy ra từ hai lựa chọn:
  * - mới · không mẫu ⇒ `fpt` (chế độ 2, mẫu chuẩn FlintFlow);
  * - mới · có mẫu bắt buộc ⇒ `import` + `template_intent = fixed` (tải mẫu lên; chế độ 1 / 3 quyết định sau khi so cấu trúc đích);
  * - có sẵn ⇒ `import`, ý định (`fixed` / `free`) hỏi lúc upload (#2 `intent`); chế độ 1 / 3 / 4 quyết định sau.
  * Client cũ gửi `mode`: `customer_template` (từng trả 501) quy về mới · có mẫu bắt buộc; `import` ⇒ có sẵn; `fpt` ⇒ mới · không mẫu.
  */
 export const resolveProjectStart = (mode: ProjectMode = "fpt", start: ProjectStart = {}): ResolvedProjectStart => {
+  if (start.has_srs_file === false) return { mode: "fpt", start_kind: "new", has_required_template: false, template_intent: null }
+  if (start.has_srs_file === true) {
+    const intent: TemplateIntent = start.complete_to_standard === true ? "free" : "fixed"
+    return { mode: "import", start_kind: "existing", has_required_template: null, template_intent: intent }
+  }
   if (start.source === "new") {
     const required = start.has_required_template === true
     return { mode: required ? "import" : "fpt", start_kind: "new", has_required_template: required, template_intent: required ? "fixed" : null }

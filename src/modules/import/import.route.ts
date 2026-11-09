@@ -57,9 +57,13 @@ const router = Router()
  *           type: object
  *           nullable: true
  *           properties:
- *             reason: { type: string, enum: [credits, resume_later] }
+ *             reason: { type: string, enum: [credits, resume_later, user] }
  *             at: { type: string, format: date-time }
  *         extract_cursor: { type: string, nullable: true }
+ *         reread:
+ *           type: object
+ *           nullable: true
+ *           description: "FLF-360: đang đọc lại vì AI quá tải — kind images (done/total ảnh) | text (done/total lượt)"
  *         created_at: { type: string, format: date-time }
  *         updated_at: { type: string, format: date-time }
  *
@@ -84,7 +88,7 @@ const router = Router()
  *             required: [file]
  *             properties:
  *               file: { type: string, format: binary }
- *               intent: { type: string, enum: [fixed, free], description: "FLF-335 bước 1.2: file theo một mẫu cố định hay cấu trúc tự do; thiếu ⇒ free; dự án mới có mẫu bắt buộc luôn fixed" }
+ *               intent: { type: string, enum: [fixed, free], deprecated: true, description: "Client cũ — bỏ qua. Ý định lấy từ Project.template_intent (chốt ở hộp Tạo dự án); dự án không có ý định ⇒ free" }
  *     responses:
  *       201:
  *         description: "`{ import: ImportedDocument }` — `import.intent` là ý định đã ghi"
@@ -298,10 +302,10 @@ router.post("/:id/import/finalize", authMiddleware, importController.finalize)
  * @swagger
  * /api/v1/projects/{id}/import/continue:
  *   post:
- *     summary: Chế độ 3 (mẫu bắt buộc còn thiếu mục) — viết phần còn thiếu với FlintFlow (Luồng 2) thay vì Hoàn thiện
+ *     summary: Chế độ 3 (dự án mới theo mẫu bắt buộc) — soạn các mục của mẫu với FlintFlow (Luồng 2) thay vì Hoàn thiện
  *     description: |
- *       Chỉ từ `incomplete` khi `target_structure.resolved_mode = 3`. Mở lại bước Brief (B-1…S-1), giữ bước sở hữu mục thiếu
- *       `pending`, chuyển dự án sang luồng tạo mới (`mode = fpt`, `import_state = drafting`). Bản in vẫn theo mẫu; ký
+ *       Chỉ từ `incomplete` khi `target_structure.resolved_mode = 3`. Mở lại bước Brief (B-1…S-1), đặt bước sở hữu **mọi mục
+ *       của mẫu** về `pending` (FLF-378 — chữ trong mẫu là ví dụ, không phải nội dung đã chốt), chuyển dự án sang luồng tạo mới (`mode = fpt`, `import_state = drafting`). Bản in vẫn theo mẫu; ký
  *       baseline 1.0 ⇒ dự án về mode 1 (FLF-318).
  *     tags: [Import (mode 1)]
  *     security:
@@ -348,6 +352,30 @@ router.post("/:id/library", authMiddleware, orgLibrary.saveSectionToLibrary)
  *       409: { description: IMPORT_INVALID_STATE }
  */
 router.post("/:id/import/resume", authMiddleware, importController.resume)
+
+/**
+ * @swagger
+ * /api/v1/projects/{id}/import/pause:
+ *   post:
+ *     summary: Dừng lượt đọc nội dung đang chạy (FLF-388)
+ *     description: |
+ *       Chỉ ở `extracting` đã bấm Bắt đầu: đặt `paused: { reason: user }`. Job nền dừng trước lượt AI kế tiếp (lượt đang gọi
+ *       dở chạy xong), không gọi thêm ⇒ không trừ thêm credit. Đã dừng ⇒ trả nguyên trạng. Tiếp tục qua `/import/resume`.
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [import_id], properties: { import_id: { type: string } } }
+ *     responses:
+ *       200: { description: "`{ import, sections }` — `import.paused.reason = user`" }
+ *       409: { description: IMPORT_INVALID_STATE (không ở `extracting` / chưa bắt đầu) }
+ */
+router.post("/:id/import/pause", authMiddleware, importController.pause)
 
 /**
  * @swagger

@@ -18,9 +18,10 @@ import type { ImportStatus } from "./import.state.js"
 import { latestImport, toReviewFields, transitionImport } from "./import.service.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { sectionTitle } from "./section-catalog.js"
-import { contentSlot } from "./content-slots.js"
+import { contentSlot, withSlotParents } from "./content-slots.js"
 import { displayHeading } from "./heading-label.js"
 import { FEATURE_SECTIONS, continuationOwnerSection } from "./step-plan.js"
+import type { StructurePreview } from "./structure-preview.js"
 import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
 import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
 
@@ -67,8 +68,50 @@ export const loadLayout = async (projectId: string): Promise<LayoutEntry[] | und
   return profile?.layout?.length ? (profile.layout as LayoutEntry[]) : undefined
 }
 
+/** Trạng thái chờ Bắt đầu / đang đọc: chỉ có báo cáo sơ bộ từ màn đọc khung. */
+const PRELIMINARY_STATUSES: readonly ImportStatus[] = ["mapping_review", "extracting"]
+
+/**
+ * Hàm thuần: báo cáo thiếu sót **sơ bộ** từ màn đọc khung (business-flow §3.1.2) — trước Bắt đầu, chưa trích gì nên chưa có cờ,
+ * chỉ có bản đồ mục theo thứ tự file và mục còn thiếu. Kết quả cuối có thể khác (`structure_changes`).
+ */
+export const preliminaryGapReport = (projectId: string, preview: StructurePreview): GapReport => {
+  const missing = preview.sections.filter((s) => s.status === "missing").map((s) => s.section_id)
+  return {
+    preliminary: true,
+    target_structure: {
+      target: preview.intent === "fixed" ? "template" : "fpt",
+      intent: preview.intent,
+      resolved_mode: preview.resolved_mode,
+      sections: preview.sections.map((s) => ({ section_id: s.section_id, title: s.title, status: s.status, owner_steps: [] })),
+      missing,
+      compared_at: preview.computed_at
+    },
+    project_id: projectId,
+    doc_version: IMPORTED_DOC_VERSION,
+    generated_at: new Date().toISOString(),
+    totals: { red: 0, yellow: 0, low_confidence_fields: 0, unrendered_diagrams: 0 },
+    layout: preview.sections.map((s, i) => ({
+      order: i,
+      section_id: s.section_id,
+      heading: s.title,
+      level: 1,
+      kind: s.section_id.startsWith("custom:") ? ("custom" as const) : ("fpt" as const),
+      red: 0,
+      yellow: 0
+    })),
+    sections: [],
+    unrendered_diagrams: [],
+    low_confidence_fields: []
+  }
+}
+
 export const buildGapReport = async (projectId: string): Promise<GapReport> => {
   const doc = await latestImport(projectId)
+  if (doc && PRELIMINARY_STATUSES.includes(doc.status)) {
+    const preview = (await TemplateProfile.findOne({ projectId }, { structure_preview: 1 }).lean())?.structure_preview
+    if (preview) return preliminaryGapReport(projectId, preview)
+  }
   if (!doc || !REPORT_STATUSES.includes(doc.status)) {
     throw new Mode1Error("IMPORT_INVALID_STATE", "Báo cáo phần còn thiếu chỉ có sau khi nhập tài liệu xong bước kiểm tra.", {
       status: doc?.status ?? "uploaded",
@@ -96,7 +139,8 @@ export const buildGapReport = async (projectId: string): Promise<GapReport> => {
       flags: [...flags].sort((a, b) => (a.level === b.level ? 0 : a.level === "red" ? -1 : 1))
     }))
     .sort((a, b) => (orderOf.get(a.section_id) ?? Infinity) - (orderOf.get(b.section_id) ?? Infinity))
-  const unrenderedDiagrams = unrendered(spine)
+  const fixedTemplate = profile?.target_structure?.target === "template"
+  const unrenderedDiagrams = unrendered(spine, fixedTemplate ? withSlotParents((profile?.layout ?? []).map((l) => l.section_id)) : undefined)
   const low = toReviewFields(drafts, needsConfirm)
 
   return {
@@ -119,10 +163,10 @@ export const buildGapReport = async (projectId: string): Promise<GapReport> => {
 
 /** Hình dựng được từ Spine mode 1 — chỉ liệt kê loại có dữ liệu (không có entity thì không đòi ERD). */
 const DIAGRAM_TARGETS = [
-  { kind: "context", title: "Sơ đồ ngữ cảnh", has: (s: Spine) => s.actors.length > 0 },
-  { kind: "usecase", title: "Sơ đồ use case", has: (s: Spine) => s.use_cases.length > 0 },
-  { kind: "screen_flow", title: "Luồng màn hình", has: (s: Spine) => s.screens.length > 0 },
-  { kind: "erd", title: "Sơ đồ thực thể (ERD)", has: (s: Spine) => s.entities.length > 0 }
+  { kind: "context", title: "Sơ đồ ngữ cảnh", section: "fixed:1", has: (s: Spine) => s.actors.length > 0 },
+  { kind: "usecase", title: "Sơ đồ use case", section: "fixed:2.2.1", has: (s: Spine) => s.use_cases.length > 0 },
+  { kind: "screen_flow", title: "Luồng màn hình", section: "fixed:3.1.1", has: (s: Spine) => s.screens.length > 0 },
+  { kind: "erd", title: "Sơ đồ thực thể (ERD)", section: "fixed:3.1.5", has: (s: Spine) => s.entities.length > 0 }
 ] as const
 
 /**
@@ -130,8 +174,9 @@ const DIAGRAM_TARGETS = [
  * hình nào cho loại đó — đúng trường hợp lúc import PlantUML không sẵn sàng (finalize bỏ qua bước vẽ, không cờ).
  * Không chặn baseline: người dùng bấm vẽ lại ở workspace khi có PlantUML.
  */
-const unrendered = (spine: Spine): GapReport["unrendered_diagrams"] =>
-  DIAGRAM_TARGETS.filter((t) => t.has(spine)).flatMap((t): GapReport["unrendered_diagrams"] => {
+const unrendered = (spine: Spine, templateSections?: ReadonlySet<string>): GapReport["unrendered_diagrams"] =>
+  // Mẫu cố định: chỉ đòi hình mẫu có chỗ in (mẫu công ty không có Use Case Diagram / ERD ⇒ không đòi vẽ)
+  DIAGRAM_TARGETS.filter((t) => t.has(spine) && (!templateSections || templateSections.has(t.section))).flatMap((t): GapReport["unrendered_diagrams"] => {
     const drawn = spine.diagrams.filter((d) => d.kind === t.kind)
     if (!drawn.length) return [{ diagram_id: "", kind: t.kind, section_id: "", title: t.title, reason: "not_rendered" }]
     return drawn
@@ -218,9 +263,21 @@ export const renderGapReportDocx = async (report: GapReport, projectName: string
     ...report.layout.map((l) => [l.section_id, l.heading] as const)
   ])
   const sectionName = (id: string): string => titles.get(id) ?? capitalize(sectionLabel(id))
+  const template = report.target_structure?.target === "template"
+  // I-5: mục của cấu trúc đích còn trống (mẫu cố định: heading của mẫu chưa có nội dung) — bổ sung qua change request
+  const missing = (report.target_structure?.sections ?? []).filter((s) => s.status === "missing")
+  const emptySections: (Paragraph | Table)[] = report.target_structure
+    ? [
+        new Paragraph({ text: "Mục còn trống", heading: HeadingLevel.HEADING_1 }),
+        missing.length ? table(["Mục"], missing.map((s) => [s.title])) : new Paragraph("Không có mục nào còn trống.")
+      ]
+    : []
   const children: (Paragraph | Table)[] = [
     new Paragraph({ text: `Báo cáo thiếu sót — ${projectName}`, heading: HeadingLevel.TITLE }),
     new Paragraph({ children: [new TextRun({ text: `Phiên bản tài liệu ${report.doc_version} · tạo lúc ${formatReportTime(report.generated_at)}`, italics: true })] }),
+    ...(report.preliminary
+      ? [new Paragraph({ children: [new TextRun({ text: "Báo cáo sơ bộ: FlintFlow mới đọc khung tài liệu, chưa đọc nội dung. Kết quả sau khi đọc chi tiết có thể khác.", italics: true })] })]
+      : []),
     new Paragraph({ text: "Tổng quan", heading: HeadingLevel.HEADING_1 }),
     table(
       ["Hạng mục", "Số lượng"],
@@ -237,12 +294,14 @@ export const renderGapReportDocx = async (report: GapReport, projectName: string
           ["Mục", "Loại", "Cờ đỏ", "Cờ vàng"],
           report.layout.map((l) => [
             `${"  ".repeat(Math.max(0, l.level - 1))}${l.heading}`,
-            l.kind === "custom" ? "Mục riêng (ngoài FPT)" : l.kind === "group" ? "Nhóm" : "Mẫu FPT",
+            // Mẫu cố định (mẫu bắt buộc / mẫu công ty): mọi heading là mục của mẫu, không phải "Mẫu FPT" / "ngoài FPT"
+            l.kind === "group" ? "Nhóm" : template ? "Mục của mẫu" : l.kind === "custom" ? "Mục riêng (ngoài FPT)" : "Mẫu FPT",
             String(l.red),
             String(l.yellow)
           ])
         )
       : new Paragraph("Không có bố cục tài liệu (bản nhập trước khi có tính năng này)."),
+    ...emptySections,
     new Paragraph({ text: "Cờ theo mục", heading: HeadingLevel.HEADING_1 })
   ]
   if (!report.sections.length) children.push(new Paragraph("Không có cờ nào đang mở."))

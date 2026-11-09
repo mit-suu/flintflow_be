@@ -6,7 +6,8 @@ import { loadFixedTemplateContext, writeProjectDocx } from "./project-docx-write
 import { resolveFixedBaselineVersion } from "../doc-version/template-source-binding.js"
 import { authorize } from "./render.controller.js"
 import { exportWordQuerySchema } from "../pipeline/pipeline.dto.js"
-import { getDocumentWithMeta, getDraftMeta, NoWorkingDraftError, type DocumentWithMeta, type DraftMeta } from "./assemble.service.js"
+import { getDocumentWithMeta, getDraftMeta, NoWorkingDraftError, renderSpineDocument, type DocumentWithMeta, type DraftMeta } from "./assemble.service.js"
+import { sourceFidelityFor } from "./source-fidelity.js"
 import { assertTranslationComplete, documentLanguageUnavailable } from "../translation/translation.service.js"
 import { writerOptionsFor } from "./labels.js"
 import { sendError } from "../../shared/types/api-response.js"
@@ -103,7 +104,14 @@ const buildExportDocx = async (req: Request, res: Response): Promise<ExportedDoc
   if (!parsed.success) throw renderedDocumentInvalid(parsed.error)
 
   // FLF-344: dự án mode 1 (import thật lẫn chuyển từ mode 2) — mục lục ghi sẵn như file version; mode 2 giữ field TOC rỗng
-  const buffer = await writeProjectDocx(parsed.data, { ...writerOptionsFor(mode, locale, convertedFrom), ...(mode === "import" ? { tocEntries: true } : {}) }, templateIntent, template ?? undefined)
+  // Dự án "Upload SRS có sẵn": mục chưa đổi so với lúc import in nguyên văn từ file upload — kể cả SRS viết dở giữ khung đang
+  // soạn phần thiếu ở Luồng 2 (`mode = fpt`); `sourceFidelityFor` tự trả `undefined` với dự án không có file nền
+  const fidelity = mode === "import" || templateIntent === "fixed"
+    ? await sourceFidelityFor(projectId, parsed.data, (spine) => renderSpineDocument(projectId, projectName, spine, {
+        version: parsed.data.version, source: parsed.data.source, languages: { locale, source: sourceLanguage }
+      }, template ? { loadTemplate: async () => template.layout } : undefined), { otherLanguage })
+    : undefined
+  const buffer = await writeProjectDocx(parsed.data, { ...writerOptionsFor(mode, locale, convertedFrom), ...(mode === "import" ? { tocEntries: true } : {}) }, templateIntent, template ?? undefined, fidelity)
   // review C2: source=draft — đính kèm độ mới của bản đang xuất (baseline bất biến, không cần).
   // FLF-265: bản dịch không ghi cache ⇒ độ mới của chính bản vừa dựng.
   const draftMeta = query.source === "draft" ? (result.draftMeta ?? (await getDraftMeta(projectId)) ?? null) : null

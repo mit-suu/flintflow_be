@@ -161,20 +161,38 @@ export const suggestSlot = (title: string): string | null => {
   return SUGGESTION_RULES.find(([re]) => re.test(text))?.[1] ?? null
 }
 
-/** Repair semantic bindings at fixed-template export without changing source headings or order. */
-export const bindFixedTemplateSlots = <T extends { heading_text: string; section_id: string }>(entries: readonly T[]): T[] =>
-  entries.map((entry) => {
-    if (entry.section_id.startsWith("group:source:")) return { ...entry }
+/** Heading của một chức năng / tính năng (kể cả mã tạm `function:@B…`) — tên riêng, không phải tên mục của mẫu. */
+const isEntityHeading = (id: string): boolean => id.startsWith("function:") || id.startsWith("feature:")
+
+/**
+ * Repair semantic bindings at fixed-template export without changing source headings or order.
+ * - Gợi ý theo **từ khoá** (`suggestSlot`) chỉ cho heading chưa khớp / mục FPT: tên chức năng "Manage Security Questions",
+ *   tính năng "Risk Assessment", nhóm "3 Functional Requirements" không thành phần nhỏ bảo mật / rủi ro.
+ * - Tiêu đề **đúng tên** mục mẫu ("Business Rules", "Messages", "Functional Requirements") gán phần nhỏ, trừ heading con
+ *   nằm trong một chức năng / tính năng (có `level`): "Business Rules" của từng chức năng thuộc chức năng đó.
+ */
+export const bindFixedTemplateSlots = <T extends { heading_text: string; section_id: string; level?: number | null }>(entries: readonly T[]): T[] => {
+  let entityLevel: number | null = null
+  return entries.map((entry) => {
+    const level = entry.level ?? null
+    if (entityLevel !== null && level !== null && level <= entityLevel) entityLevel = null
+    const nested = entityLevel !== null && level !== null && level > entityLevel
+    if (isEntityHeading(entry.section_id) && level !== null && !nested) entityLevel = level
+    // Heading nhóm (`group:*`, vd "3 Functional Requirements" của cấu trúc FlintFlow) giữ nguyên: chỉ chứa mục con
+    if (entry.section_id.startsWith("group:") || nested) return { ...entry }
     const title = normalizeTitle(entry.heading_text)
-    const slot = /^(business rules|quy tắc nghiệp vụ)$/u.test(title)
+    const exact = /^(business rules|quy tắc nghiệp vụ)$/u.test(title)
       ? "slot:business_rules"
       : /^(messages|thông báo)$/u.test(title)
       ? "slot:messages"
       : /^(functional requirements|yêu cầu chức năng)$/u.test(title)
       ? "slot:functional_requirements"
-      : suggestSlot(entry.heading_text)
+      : null
+    const keywordAllowed = !isEntityHeading(entry.section_id)
+    const slot = exact ?? (keywordAllowed ? suggestSlot(entry.heading_text) : null)
     return slot ? { ...entry, section_id: slot } : { ...entry }
   })
+}
 
 /**
  * Mẫu bắt buộc: `bindFixedTemplateSlots` + quy tắc **cha và con cùng mục** — heading cha mà một heading con (sâu hơn, trước heading
@@ -187,6 +205,17 @@ export const bindFixedTemplateHeadings = <T extends { heading_text: string; sect
   const bound = bindFixedTemplateSlots(entries)
   return bound.map((entry, i) => {
     const level = entry.level ?? null
+    // "Functional Requirements" chứa heading của từng chức năng / tính năng ⇒ heading bao (không in thêm bảng tổng hợp,
+    // mỗi chức năng đã in dưới heading riêng)
+    if (level !== null && entry.section_id === "slot:functional_requirements") {
+      for (let k = i + 1; k < bound.length; k++) {
+        const child = bound[k]
+        if (!child.heading_text.trim()) continue
+        if (child.level === null || child.level === undefined || child.level <= level) break
+        if (isEntityHeading(child.section_id)) return { ...entry, section_id: "unmapped" }
+      }
+      return entry
+    }
     if (level === null || !entry.section_id.startsWith("fixed:") || !entry.heading_text.trim()) return entry
     for (let k = i + 1; k < bound.length; k++) {
       const child = bound[k]

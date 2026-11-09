@@ -16,6 +16,7 @@ import { impactOf } from "../spine/impact.service.js"
 import { ownerStepOf, sectionsOfPath } from "../spine/section-registry.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { LocationFoundBy } from "./change-request.constants.js"
+import { contentSlot } from "../import/content-slots.js"
 
 /** Trần số vị trí một CR — CR chạm quá nhiều chỗ nên tách nhỏ. */
 export const MAX_LOCATIONS = 80
@@ -103,6 +104,22 @@ export const SECTION_FIELD_ARRAYS: Readonly<Record<string, string>> = {
   "fixed:2.2.1": "use_cases",
   "fixed:3.1.1": "screens"
 }
+
+/**
+ * Đích là **phần nhỏ của mẫu** (`slot:business_rules`, FLF-278 — mẫu cố định đặt tên mục khác mẫu FPT): không phải mục Spine
+ * ⇒ đổi sang mục FPT cha (`fixed:5.1`) hoặc, phần nhỏ không có cha, sang mảng dữ liệu của nó (`functions[]`, `project`).
+ * Trước đây đích `slot:*` bị bỏ im lặng ⇒ CR nhắm mục mẫu trống ra 0 vị trí.
+ */
+export const expandSlotTargets = (targets: readonly string[]): string[] => [
+  ...new Set(
+    targets.flatMap((t) => {
+      const slot = t.startsWith("slot:") ? contentSlot(t) : undefined
+      if (!slot) return [t]
+      if (slot.parents.length) return [...slot.parents]
+      return slot.targets.map((target) => (target === PROJECT_PATH ? PROJECT_PATH : `${target}[]`))
+    })
+  )
+]
 
 /** Path thêm mới cho một section đang trống (`fixed:5.1` ⇒ `business_rules[]`); section không đổ được ⇒ []. */
 export const fillPathsOfSection = (sectionId: string): string[] => (SECTION_FILL_ARRAYS[sectionId] ?? []).map((arr) => `${arr}[]`)
@@ -243,6 +260,7 @@ export const findSpineLocations = (
   keywords: readonly string[],
   vector: readonly VectorCandidate[] = []
 ): FoundLocation[] => {
+  targets = expandSlotTargets(targets)
   const elements = listElements(spine)
   const exists = new Set(elements.map((e) => e.path))
   const hits = new Map<string, { found_by: Set<LocationFoundBy>; entity_paths: Set<string> }>()
@@ -422,7 +440,7 @@ const emptySections = (spine: Spine, targets: readonly string[]): string[] => {
  * `project`, `fixed:3.1.1` là field của màn có sẵn). Đây mới là ca phải chạy step soạn nội dung thay vì mở CR.
  */
 export const emptySectionTargets = (spine: Spine, targets: readonly string[]): string[] =>
-  emptySections(spine, targets).filter((s) => fillPathsOfSection(s).length === 0)
+  emptySections(spine, expandSlotTargets(targets)).filter((s) => fillPathsOfSection(s).length === 0)
 
 /** Phần tử mà op chạm tới (để đòi khoá): `actors[id=A01].name` ⇒ `actors[id=A01]`; `actors[]` (thêm mới) ⇒ null. */
 export const opElement = (opPath: string): string | null => elementPathOf(opPath)

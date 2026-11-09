@@ -7,12 +7,29 @@
 
 import type { Op } from "../spine/op.types.js"
 import type { EntityAttribute, EntityState, EntityTransition, FlowEdge, Spine } from "../spine/spine.types.js"
-import { IdAllocator, compactKey, idKey, nameKey, normalizeKey } from "./extracted-entities.js"
+import { IdAllocator, compactKey, idKey, nameKey } from "./extracted-entities.js"
 
 export interface BuiltEntity {
   entity: string
   id: string | null
   value: Record<string, unknown>
+  /** Mục của file mà phần tử được trích từ đó (FLF-361: cấp của business rule theo mục, không theo model đoán). */
+  sections?: Iterable<string>
+}
+
+/**
+ * FLF-361: cấp business rule theo mục chứa nó trong file — rule ở 5.1 Business Rules là `detail`, ở mục 1 (High-Level
+ * Business Rules) là `high`. Model trích không thấy bố cục tài liệu nên hay đoán `high` cho rule "quan trọng" (FAP: khoá
+ * tài khoản, mật khẩu ≥ 8 ký tự…) ⇒ rule bị in dưới mục 1 và biến mất khỏi 5.1 khi các mục đó dựng lại từ Spine.
+ * Mục khác (mục chức năng…) ⇒ null, giữ cấp model ghi.
+ */
+const DETAIL_RULE_SECTIONS: ReadonlySet<string> = new Set(["fixed:5.1", "slot:business_rules"])
+const HIGH_RULE_SECTIONS: ReadonlySet<string> = new Set(["fixed:1", "slot:high_rules"])
+export const ruleTierOfSections = (sections: Iterable<string> | undefined): "high" | "detail" | null => {
+  const list = [...(sections ?? [])]
+  if (list.some((s) => DETAIL_RULE_SECTIONS.has(s))) return "detail"
+  if (list.some((s) => HIGH_RULE_SECTIONS.has(s))) return "high"
+  return null
 }
 
 /** Quyền bị bỏ khi dựng op vì màn / vai trò không khớp phần tử nào (FLF-252 — "Sell Statistics" có trong ma trận, không có màn). */
@@ -204,7 +221,7 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
   const alloc = new IdAllocator({ features: ids("features"), functions: ids("functions"), permissions: ids("permissions") })
 
   // Chỉ mục tên ⇒ id để phân giải tham chiếu ghi bằng tên (vd cột "Actor" của bảng UC). So tên đã chuẩn hoá (FLF-251):
-  // cột Feature ghi "3.2 Account Management" vẫn ra feature "Account Management"; mã gõ "UC01" ra "UC-01".
+  // cột Feature ghi "3.2 Account Management" vẫn ra feature "Account Management"; mã gõ "UC-01" ra "UC01" (so `idKey`).
   // Không khớp ⇒ so khoá lỏng (FLF-252) nếu chỉ một phần tử khớp: "Landing Page (Dark)" ~ "Landing Page", "Sign In" ~ "Sign In Screen"
   const resolver = (entity: string, pool: { id: string; name?: string }[]) => {
     const ids = new Set(pool.map((p) => p.id))
@@ -218,7 +235,6 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
       const s = str(ref)
       if (!s) return null
       if (ids.has(s)) return s
-      if (ids.has(normalizeKey(s))) return normalizeKey(s)
       return byIdKey.get(idKey(s)) ?? byName.get(nameKey(s)) ?? byLoose.get(looseKey(s)) ?? byCompact.get(compactKey(s)) ?? null
     }
   }
@@ -329,7 +345,7 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
     })
   }
   for (const b of of("business_rules").filter(skip(spine.business_rules))) {
-    add("business_rules", { id: b.id, tier: oneOf(b.value.tier, ["high", "detail"], "detail"), statement: str(b.value.statement ?? b.value.rule ?? b.value.description), source_validation_ids: [] })
+    add("business_rules", { id: b.id, tier: ruleTierOfSections(b.sections) ?? oneOf(b.value.tier, ["high", "detail"], "detail"), statement: str(b.value.statement ?? b.value.rule ?? b.value.description), source_validation_ids: [] })
   }
   for (const s of of("screens").filter(skip(spine.screens))) {
     add("screens", {
