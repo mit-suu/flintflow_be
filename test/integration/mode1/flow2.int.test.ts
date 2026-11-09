@@ -28,6 +28,7 @@ import { RenderedDocumentCache } from "../../../src/modules/render/rendered-docu
 import { applyTransaction } from "../../../src/modules/spine/op-engine.js"
 import { getDocument, listChangesForRecord } from "../../../src/modules/render/assemble.service.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
+import { buildTemplateStepContext } from "../../../src/modules/pipeline/template-guidance.js"
 import { docFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
 import { DocxPackage } from "../../../src/modules/docx-ooxml/index.js"
 import { readZipText } from "../../../src/modules/render/zip.test-helper.js"
@@ -174,8 +175,22 @@ describe("Luồng 2 cho phần thiếu — chế độ 3", () => {
     const missing = structure.sections.filter((sec) => sec.status === "missing")
     expect(present.length).toBeGreaterThan(0)
     expect(missing.length).toBeGreaterThan(0)
-    // Mục khách đã viết: không bước sở hữu nào chờ chạy (đã chốt, kể cả bước lúc import chưa trích được dữ liệu; hoặc bỏ qua)
-    for (const sec of present) for (const owner of sec.owner_steps) expect(statusOf(owner).includes("pending"), `${sec.section_id} ⇐ ${owner}`).toBe(false)
+    // Mục khách đã viết: không bước sở hữu nào chờ chạy (đã chốt, kể cả bước lúc import chưa trích được dữ liệu; hoặc bỏ qua) —
+    // trừ bước soạn mục riêng (FLF-382: S-8.1 còn mục riêng trống thì vẫn soạn, chỉ ghi được mục còn trống)
+    const customGap = missing.some((sec) => sec.section_id.startsWith("custom:"))
+    for (const sec of present) for (const owner of sec.owner_steps.filter((o) => !(customGap && o === "S-8.1"))) expect(statusOf(owner).includes("pending"), `${sec.section_id} ⇐ ${owner}`).toBe(false)
+    if (customGap) {
+      expect(statusOf("S-8.1")).toEqual(["pending"])
+      // Ngữ cảnh mẫu chỉ có mục còn thiếu; prompt S-8.1 chỉ cho ghi đúng mục riêng còn trống
+      const missingIds = new Set(missing.map((sec) => sec.section_id))
+      expect(profile.template_context?.length).toBeGreaterThan(0)
+      expect(profile.template_context!.every((c) => missingIds.has(c.section_id))).toBe(true)
+      const ctx = buildTemplateStepContext(profile.template_context, "S-8.1", spine)
+      const writtenCustom = new Set(present.filter((sec) => sec.section_id.startsWith("custom:")).map((sec) => sec.section_id.slice("custom:".length)))
+      expect(ctx.customSections.length).toBeGreaterThan(0)
+      expect(ctx.customSections.every((c) => missingIds.has(`custom:${c.id}`) && !writtenCustom.has(c.id))).toBe(true)
+      expect(ctx.guidance).toContain("already written by the customer")
+    }
     expect(statusOf("S-3.6")).toEqual(["accepted"])
     // Bước chỉ sở hữu mục thiếu: chờ soạn hoặc giữ nguyên bỏ qua — không bao giờ đã chốt sẵn
     const keep = new Set(present.flatMap((sec) => sec.owner_steps))

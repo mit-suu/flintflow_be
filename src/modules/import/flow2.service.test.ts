@@ -78,7 +78,17 @@ describe("flow2Owners — bước cần soạn / bước giữ chốt", () => {
     { section_id: "custom:CS03", title: "Budget", status: "out_of_scope" as const, owner_steps: [] }
   ]
   it("SRS đã viết ⇒ soạn mục thiếu, giữ chốt mục đã viết; bỏ Record of Changes / ngoài phạm vi", () => {
-    expect(flow2Owners(sections, false)).toEqual({ draft: ["S-3.1", "S-8.1"], keep: ["S-2.1", "S-8.1"] })
+    // FLF-382: S-8.1 sở hữu cả mục riêng đã viết lẫn mục riêng còn trống ⇒ vẫn soạn (chỉ ghi được mục còn trống)
+    expect(flow2Owners(sections, false)).toEqual({ draft: ["S-3.1", "S-8.1"], keep: ["S-2.1"] })
+  })
+  it("FLF-382: bước sở hữu mục FPT đã viết lẫn mục FPT còn thiếu vẫn giữ chốt (D4 — không soạn lại phần khách viết)", () => {
+    const fpt = [
+      { section_id: "fixed:1", title: "1 Overview", status: "present" as const, owner_steps: ["S-2.1", "S-2.2"] },
+      { section_id: "slot:scope", title: "1.2 Scope", status: "missing" as const, owner_steps: ["S-2.2"] },
+      { section_id: "slot:references", title: "1.4 References", status: "missing" as const, owner_steps: ["S-8.1"] },
+      { section_id: "fixed:5.5", title: "Glossary", status: "present" as const, owner_steps: ["S-8.1"] }
+    ]
+    expect(flow2Owners(fpt, false)).toEqual({ draft: ["S-2.2", "S-8.1"], keep: ["S-2.1", "S-2.2"] })
   })
   it("khung mẫu ⇒ soạn mọi mục của mẫu, không giữ bước nào", () => {
     expect(flow2Owners(sections, true)).toEqual({ draft: ["S-2.1", "S-3.1", "S-8.1"], keep: [] })
