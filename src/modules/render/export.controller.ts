@@ -111,7 +111,7 @@ const buildExportDocx = async (req: Request, res: Response): Promise<ExportedDoc
         version: parsed.data.version, source: parsed.data.source, languages: { locale, source: sourceLanguage }
       }, template ? { loadTemplate: async () => template.layout } : undefined), { otherLanguage })
     : undefined
-  const buffer = await writeProjectDocx(parsed.data, { ...writerOptionsFor(mode, locale, convertedFrom), ...(mode === "import" ? { tocEntries: true } : {}) }, templateIntent, template?.binding, fidelity)
+  const buffer = await writeProjectDocx(parsed.data, { ...writerOptionsFor(mode, locale, convertedFrom), ...(mode === "import" ? { tocEntries: true } : {}) }, templateIntent, template ?? undefined, fidelity)
   // review C2: source=draft — đính kèm độ mới của bản đang xuất (baseline bất biến, không cần).
   // FLF-265: bản dịch không ghi cache ⇒ độ mới của chính bản vừa dựng.
   const draftMeta = query.source === "draft" ? (result.draftMeta ?? (await getDraftMeta(projectId)) ?? null) : null

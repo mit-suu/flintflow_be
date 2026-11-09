@@ -40,6 +40,9 @@ export const templateHeadingMap = (
   return mapped
 }
 
+const isTemplateContext = (source: unknown): source is FixedTemplateContext =>
+  !!source && typeof source === "object" && Buffer.isBuffer((source as { template?: unknown }).template)
+
 /** Bản làm việc mang watermark DRAFT (cùng điều kiện `writeDocx`): chỉ thêm shape chữ mờ vào header, file nền giữ nguyên. */
 const withDraftWatermark = async (doc: RenderedDocument, filled: Buffer): Promise<Buffer> => {
   if (doc.source !== "draft" && doc.watermark !== "DRAFT") return filled
@@ -59,7 +62,8 @@ export const writeProjectDocx = async (
   doc: RenderedDocument,
   options: WriteDocxOptions = {},
   templateIntent?: TemplateIntent | null,
-  sourceBinding?: TemplateSourceBinding | null,
+  /** FLF-377: bên gọi đã nạp `loadFixedTemplateContext` (dựng tài liệu cần layout của mẫu) thì truyền nguyên context — không tải lại file mẫu. */
+  source?: TemplateSourceBinding | FixedTemplateContext | null,
   fidelity?: SourceFidelity
 ): Promise<Buffer> => {
   const intent = templateIntent === undefined
@@ -78,7 +82,7 @@ export const writeProjectDocx = async (
     }
   }
 
-  const context = await loadFixedTemplateContext(doc.projectId, sourceBinding)
+  const context = isTemplateContext(source) ? source : await loadFixedTemplateContext(doc.projectId, source)
   // FLF-378 (luồng C): file upload là khung mẫu (`isTemplateFile`) — chữ hướng dẫn / ví dụ của mẫu không vào bản in
   const [project, profile] = await Promise.all([
     Project.findById(doc.projectId, { start_kind: 1, template_intent: 1 }).lean(),

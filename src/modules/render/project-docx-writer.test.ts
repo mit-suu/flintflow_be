@@ -15,7 +15,7 @@ vi.mock("../doc-version/doc-file.store.js", () => ({ docFileStore: () => ({ load
 vi.mock("./docx-writer.js", () => ({ writeDocx: mocks.generic }))
 vi.mock("./template-docx-writer.js", () => ({ writeTemplateDocx: mocks.template }))
 
-import { templateHeadingMap, writeProjectDocx } from "./project-docx-writer.js"
+import { loadFixedTemplateContext, templateHeadingMap, writeProjectDocx } from "./project-docx-writer.js"
 
 const doc = { projectId: "project", sections: [] } as unknown as RenderedDocument
 const templateBytes = readFileSync(new URL("../../../fixtures/fixed-template-fu-it-srs-01.docx", import.meta.url))
@@ -36,6 +36,15 @@ beforeEach(async () => {
 })
 
 describe("writeProjectDocx", () => {
+  it("FLF-377: bên gọi đã nạp context mẫu ⇒ không tải lại file mẫu, ghi đúng file của context", async () => {
+    const context = await loadFixedTemplateContext("project")
+    expect(mocks.load).toHaveBeenCalledTimes(1)
+    mocks.load.mockClear()
+    expect(await writeProjectDocx({ ...doc, source: "baseline" } as RenderedDocument, {}, "fixed", context)).toEqual(Buffer.from("filled"))
+    expect(mocks.load).not.toHaveBeenCalled()
+    expect(mocks.template.mock.calls[0][1]).toBe(context.template)
+  })
+
   it("dự án chế độ 3 đã sang mode fpt vẫn dùng đúng file tạo mapping, không dùng upload mới nhất", async () => {
     expect(await writeProjectDocx(doc)).toEqual(Buffer.from("filled"))
     expect(mocks.load).toHaveBeenCalledWith("source")
