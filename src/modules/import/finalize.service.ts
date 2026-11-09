@@ -274,7 +274,17 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // Màn đọc khung: mục mà kết quả cuối khác bản sơ bộ ⇒ workspace báo, không dừng hỏi lại (hồ sơ trước màn đọc khung ⇒ null)
   doc.structure_changes = profile.structure_preview ? structureChanges(profile.structure_preview, structure, (id) => realSectionId(id, provisional)) : null
   doc.markModified("structure_changes")
-  profile.template_context = draftAll ? buildTemplateContext(layout, contextBlocks) : null
+  // FLF-382 (luồng B theo D4): SRS viết dở giữ khung sang Luồng 2 ⇒ ngữ cảnh mẫu (hướng dẫn `[ ]`/`{ }` của mục) chỉ cho các mục
+  // còn thiếu, để bước soạn biết mục cần viết gì; mục khách đã viết không vào (không bị soạn lại)
+  const missingIds = new Set(structure.missing)
+  profile.template_context = draftAll
+    ? buildTemplateContext(layout, contextBlocks)
+    : intent === "fixed" && missingIds.size > 0
+      ? buildTemplateContext(
+          layout.filter((l) => missingIds.has(l.section_id)),
+          customSections.filter((c) => missingIds.has(`custom:${c.id}`)).flatMap((c) => c.blocks.map((block) => ({ section_id: `custom:${c.id}`, block })))
+        )
+      : null
   profile.markModified("template_context")
   await profile.save()
   // Chỉ dự án có ý định (tạo qua picker FLF-335) mới dừng; dự án cũ không có `template_intent` giữ luồng cũ ⇒ v0 như hôm nay

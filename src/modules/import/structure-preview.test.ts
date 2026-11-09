@@ -58,6 +58,24 @@ describe("previewStructure — màn đọc khung lúc upload", () => {
     expect(preview.computed_at).toBe(AT)
   })
 
+  it("FLF-382: mẫu mà mục nào cũng có câu ví dụ / chỗ điền vẫn là khung mẫu (câu ví dụ không tính là nội dung khách viết)", () => {
+    const ids = ["fixed:1", "fixed:2.1", "fixed:2.2", "fixed:2.3", "fixed:3.1.1"]
+    const examples = [
+      "e.g. The Library Management System lets librarians track borrowed books.",
+      "Ví dụ: Thủ thư, Bạn đọc, Quản trị viên.",
+      "Example: Register books, Borrow a book, Return a book.",
+      "Hệ thống XYZ hỗ trợ tra cứu sách theo tên.",
+      "Người phê duyệt: Nguyễn Văn A."
+    ]
+    const blocks = ids.flatMap((id, i) => [heading(`h${i}`, `${i + 1} Section ${i}`, id), para(`p${i}`, examples[i], id)])
+    const preview = previewStructure(blocks, new Map(ids.map((id, i) => [`h${i}`, id])), spine, "fixed", AT)
+    expect(preview.summary.kind).toBe("template")
+    expect(preview.summary.missing).toBe(ids.length)
+    // Có một mục khách viết thật trong 5 ⇒ 20% ⇒ SRS đã viết (ngưỡng không đổi)
+    blocks.push(para("real", "Students register for a dormitory room each semester; staff assign rooms by building.", "fixed:2.1"))
+    expect(previewStructure(blocks, new Map(ids.map((id, i) => [`h${i}`, id])), spine, "fixed", AT).summary.kind).toBe("written")
+  })
+
   it("giữ khung, khung mẫu (gần như trống) ⇒ mọi mục của mẫu thiếu, kể cả mục có ví dụ — luôn chế độ 3", () => {
     const ids = ["fixed:1", "fixed:2.1", "fixed:2.2", "fixed:2.3", "fixed:3.1.1", "fixed:5.1"]
     const blocks = ids.flatMap((id, i) => [heading(`h${i}`, `${i + 1} Section ${i}`, id)])

@@ -71,6 +71,7 @@ describe("FLF-378 template-context — chữ trong mẫu là hướng dẫn / v�
     expect(text).toContain("- Quản lý kho Minh Phát phục vụ ba chi nhánh")
     expect(text).toContain("Template table columns (keep these columns and their order):\n- ID | Mô tả")
     expect(text).toContain("Should contain (ISO/IEC/IEEE 29148): purpose, scope")
+    expect(text).toContain("already written by the customer: do not rewrite or remove their content")
     expect(templatePromptBlock([], {})).toBe("")
   })
 })
