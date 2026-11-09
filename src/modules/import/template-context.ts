@@ -174,6 +174,7 @@ export const templatePromptBlock = (
   return [
     "## Customer template (required layout)",
     "The customer requires this template. Draft every section below for THIS project. Follow the guidance; never copy example text into the document.",
+    "Sections of the template that are not listed here were already written by the customer: do not rewrite or remove their content.",
     ...parts
   ].join("\n\n")
 }

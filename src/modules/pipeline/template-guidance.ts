@@ -1,7 +1,8 @@
 /**
  * FLF-378 (luồng C, C2.2–C2.4): đưa **mẫu bắt buộc** của khách vào prompt của bước soạn.
  *
- * Chỉ dự án mới theo mẫu bắt buộc có `TemplateProfile.template_context` (finalize ghi). Mỗi bước nhận:
+ * `TemplateProfile.template_context` (finalize ghi): khung mẫu ⇒ mọi mục của mẫu; SRS viết dở giữ khung (luồng B, FLF-382) ⇒ chỉ mục
+ * còn thiếu. Mỗi bước nhận:
  * - Brief (B-1, B-2, S-1): toàn bộ mẫu — tóm tắt mẫu yêu cầu gì, hỏi phần thiếu; đoạn chưa rõ được xếp thành ngữ cảnh / ví dụ
  *   bằng cách so với thông tin dự án (`classifyPassages`).
  * - Bước soạn S-x: các mục mẫu bước đó sở hữu (`templateSectionOwnerSteps`) — `Template guidance`, `Template example` (không
@@ -90,7 +91,7 @@ export const buildTemplateStepContext = (
   return { guidance, customSections, slotWrites, slotProjection }
 }
 
-/** Nạp `template_context` của dự án (null ⇒ không phải dự án mới theo mẫu bắt buộc). */
+/** Nạp `template_context` của dự án (null ⇒ không phải dự án theo mẫu cần soạn). */
 export const loadTemplateContext = async (projectId: string): Promise<TemplateContextEntry[] | null> => {
   // Chưa nối Mongo (unit test của pipeline giả Spine, không có DB) ⇒ không chờ buffer của mongoose
   if (mongoose.connection.readyState !== 1) return null
