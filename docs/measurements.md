@@ -716,3 +716,30 @@ Chặng đã bỏ:
 
 So nội dung: body (bỏ `generatedAt`) của cả 5 cấu hình deep-equal với mốc FLF-381, kể cả lượt đọc từ bản dịch đã lưu
 (khác duy nhất là thứ tự key `watermark` / `format`, do đi qua `renderedDocumentSchema` như hàng draft gốc).
+
+## I-4 đọc song song nhiều section (FLF-392) — provider thật (2026-11-11)
+
+- Cách đo: `test/e2e-ai/mode1-import-measure.e2e.test.ts` (luồng HTTP thật upload → Bắt đầu → I-4 → finalize, Mongo
+  in-memory, `JOB_DRIVER=inline`), cùng file FlintFlow SRS (Report3, 3 775 block, 93 lô chữ + 18 ảnh), chạy liền nhau trên
+  cùng máy. "Trước" = `develop` `a1a3a14` (tuần tự); "sau" = nhánh FLF-392, `IMPORT_EXTRACT_CONCURRENCY=4` (mặc định).
+- Thời gian I-4 = từ lượt I-4 đầu tiên được ghi tới lượt cuối được trừ credit (`timings_s.i4_span` của harness; `one_pass`
+  gộp cả finalize).
+- Điều kiện: lô chữ gọi `anthropic`; ảnh gọi `gemini` nhưng key **hết quota trong ngày** (log các lượt chạy cùng đêm báo
+  "exceeded your current quota") ⇒ 18 ảnh không đọc được ở **cả hai** lượt: 93 lượt I-4 trừ credit = đúng 93 lô chữ (ảnh
+  lỗi giữ ảnh gốc, không trừ credit). Số dưới đây là phần chữ; ảnh (nối đuôi trong section, ví dụ 2.2.1 có 13 ảnh) chưa
+  đo lại được.
+
+| Bản | I-4 | Lượt I-4 | tokens_in | tokens_out | Credit I-4 | Một mạch tới `gap_review` |
+|---|---:|---:|---:|---:|---:|---:|
+| trước (tuần tự) | 685,7 s | 93 | 202 637 | 153 244 | 186 | 821,6 s |
+| FLF-392, N = 4 | **172,6 s** | 93 | 200 078 | 152 228 | 186 | 294,8 s |
+
+- I-4 giảm **75%** (≈ 4×, đúng bằng N) — lô chữ gần như chỉ chờ mạng nên tăng gần tuyến tính theo N.
+- Số lượt và credit không đổi; ước tính trước khi chạy (`credit_estimate`) như nhau. Spine ra cùng cỡ (12 actor, 82 UC,
+  16 feature, 99 function, 27 màn, 43 entity, 35 BR); NFR 50 → 47 là dao động của model (prompt khác bản tuần tự ở chỗ
+  `known_keys` theo bản chụp lúc bắt đầu, xem `IMPORT_EXTRACT_CONCURRENCY` trong `.env.example`).
+- Kết quả trùng khít bản tuần tự được kiểm bằng AI giả tất định: golden `test/integration/mode1/__snapshots__/extract-parallel.golden.json`
+  chạy trên `develop` `a1a3a14` cho ra đúng file đó (khớp từng byte), và nhánh này cho cùng file ở N = 1, N = 4 và mọi
+  điểm dừng / chạy tiếp.
+- Lượt đo "trước" đầu tiên dừng ở finalize: một lô 1.11 (`I-1.11:4`) bị Anthropic cắt ở `max_tokens=7168` ⇒
+  `paused: resume_later`. Lỗi có sẵn trên `develop`, ngoài I-4; lượt chạy lại không gặp.
