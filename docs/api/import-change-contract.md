@@ -458,6 +458,7 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-11-10 | FLF-395 (version mẫu tổ chức, lát 1) | Additive + siết quyền: `OrgTemplate` thành họ mẫu, mỗi bản một `OrgTemplateVersion`; endpoint mới `POST /orgs/:orgId/templates`, `POST …/:templateId/versions`, `GET …/versions/:version`, `POST …/versions/:version/publish`, `DELETE …/versions/:version`; #8c nhận `version?`; #8d nhận `template_id?` và **chỉ Lead** (Analyst ⇒ `403 ORG_ROLE_FORBIDDEN`); xoá mẫu / bản chỉ Lead; `OrgTemplateSummary` thêm `latest_version`, `project_count`, `versions[]`; `GET /projects/:id` thêm `template_update`; `Project.template_ref`; `ImportedDocument.org_template_version`; thông báo `template_version_published`; .docx bị chặn theo byte giải nén thật + số mục. Xem §FLF-395 cuối file |
 | 2026-11-06 | FLF-360 (AI quá tải lúc import: tự đọc lại) | Additive: #4 trả thêm `reread: { kind: "images" \| "text", done, total, section_id } \| null` (đang đọc lại — FE hiện "Đang đọc lại ảnh N/M"). Hành vi §4.10: lô chữ lỗi tạm thời (quá tải, 503, 429 không phải hết tiền, timeout, mạng) đọc lại tối đa 3 lượt giãn dần rồi mới `paused: resume_later`; ảnh `unavailable` đọc lại sau khi chạy hết các mục; lỗi AI không tự khỏi ghi `diagram_images.kind = failed` (không đọc lại). Ảnh vẫn chưa đọc được sau bản 0.1 ⇒ job nền `import/reread-images` đọc lại theo lịch, ghi lô `by: import` (không version mới), đóng cờ `import_image_unread`. `credit_estimate` tính cả ảnh chờ đọc lại |
 | 2026-11-06 | FLF-278 (dự án "Upload SRS có sẵn": tải về giống file upload) | Hành vi, không đổi shape: export / version của dự án có sẵn (mẫu công ty hoặc cấu trúc FlintFlow đủ mục) dùng file upload làm nền, mục chưa đổi in nguyên văn, bảng lịch sử không thêm dòng import; SRS có field không còn 422. Xem §FLF-278 "Dự án Upload SRS có sẵn" |
 | 2026-11-05 | FLF-278 (kết quả đọc theo loại dự án; bảng mẫu trống) | Hành vi, không đổi shape: #8b chỉ cho dự án mới theo mẫu bắt buộc (dự án có sẵn ⇒ `409 IMPORT_INVALID_STATE`); #8 `complete: true` ở `incomplete` bị chặn với dự án mới theo mẫu bắt buộc (`409`, `meta.allowed = ["drafting"]`). Bảng mẫu chỉ có tiêu đề + hàng chỗ trống tính là trống ở I-5 / cờ `template_section_empty`, không sinh item ở I-4. Xem §FLF-278 "Luồng 2 cho phần thiếu" |
@@ -555,9 +556,9 @@ baseline 1.0 ⇒ FLF-318 đưa dự án về mode 1, lần import mẫu `draftin
 ### Mẫu và thư viện cấp tổ chức (lát 5)
 | Method + path | Quyền | Body | Kết quả |
 |---|---|---|---|
-| `POST /projects/:id/import/save-to-org` | lead, analyst | `{ name }` | 201 `OrgTemplateSummary` (lưu bản sao file mẫu + mapping đã xác nhận); `409 IMPORT_INVALID_STATE` khi chưa qua 1.5 |
-| `POST /projects/:id/import/from-org` | lead, analyst | `{ org_template_id, intent? }` | 201 `{ import }` — import từ file đã lưu, không hỏi "bản mới nhất", mapping áp sẵn; `404 ORG_TEMPLATE_NOT_FOUND` (kể cả tổ chức khác) |
-| `GET /orgs/:orgId/templates` · `DELETE …/:templateId` | thành viên · lead, analyst | — | `OrgTemplateSummary[]` · `{ deleted }` |
+| `POST /projects/:id/import/save-to-org` | lead (FLF-395) | `{ name, template_id? }` | 201 `OrgTemplateSummary` (lưu bản sao file mẫu + mapping đã xác nhận; `template_id` ⇒ bản mới của mẫu đó, xem §FLF-395); `409 IMPORT_INVALID_STATE` khi chưa qua 1.5 |
+| `POST /projects/:id/import/from-org` | lead, analyst | `{ org_template_id, version?, intent? }` | 201 `{ import }` — import từ file đã lưu, không hỏi "bản mới nhất", mapping áp sẵn; `404 ORG_TEMPLATE_NOT_FOUND` (kể cả tổ chức khác) |
+| `GET /orgs/:orgId/templates` · `DELETE …/:templateId` | thành viên · lead (FLF-395) | — | `OrgTemplateSummary[]` · `{ deleted, project_count }` |
 | `GET /orgs/:orgId/content-library` · `POST` · `PATCH …/:entryId` · `DELETE …/:entryId` | thành viên · lead, analyst | `{ title, blocks[] }` | `ContentEntry`; trùng tiêu đề chuẩn hoá ⇒ ghi đè (POST) / `409 ORG_CONTENT_DUPLICATE` (PATCH) |
 | `GET /projects/:id/library-matches` | thành viên | — | `[{ custom_section_id, heading, empty, entry }]` |
 | `POST /projects/:id/library` | lead, analyst | `{ custom_section_id }` | 201 `ContentEntry`; `422 CUSTOM_SECTION_EMPTY` |
@@ -691,3 +692,39 @@ Cả hai đều không tự chuyển sang mẫu chuẩn FlintFlow.
   hướng dẫn, đoạn ngoặc hướng dẫn trong câu bỏ, ô bảng chỉ có hướng dẫn để trống. Hướng dẫn vẫn giữ trong dữ liệu (ngữ cảnh
   khi soạn) — xoá hết dữ liệu thì in lại. Hướng dẫn không làm mục "có nội dung" (như trước). Dự án import trước thay đổi này:
   mục FPT không có `template_guidance` ⇒ không in hướng dẫn; mục riêng theo luật mới. Mode 2 không đổi.
+
+## FLF-395 (2026-11-10) — version của mẫu tổ chức (lát 1: version, gắn mẫu vào project, thông báo)
+
+`OrgTemplate` là **họ mẫu** (`orgId`, `name`, `latest_version`, `uses`). Mỗi bản là `OrgTemplateVersion` (`org_template_versions`):
+`{ template_id, orgId, version, status: draft | published, visibility: org | project, project_id, source_file, file_ref,
+template_family, language, headings[{ heading_text, section_id, auto_confirmed?, guidance? }], table_map[{ block_id, column_index,
+header, field_path }], published_at }`, unique `(template_id, version)`. Bản cũ giữ tới khi người dùng xoá; xoá không ảnh hưởng dự
+án (file nền của dự án là bản sao riêng). Bản `org` chỉ ra đời qua `publishVersion` — **chỉ Lead**.
+
+| Method + path | Quyền | Body | Kết quả |
+|---|---|---|---|
+| `POST /orgs/:orgId/templates` | lead | multipart `file` + `name` | 201 `TemplateVersionDetail` — họ mới + bản 1 **nháp**, mapping tự nhận (`matchProfile` mẫu bắt buộc + tự nhận độ tin thấp, `auto_confirmed`); file lỗi ⇒ `422 IMPORT_FILE_REJECTED` `meta.issues` |
+| `POST /orgs/:orgId/templates/:templateId/versions` | lead | multipart `file` | 201 `TemplateVersionDetail` — bản nháp kế tiếp |
+| `GET /orgs/:orgId/templates/:templateId/versions/:version` | thành viên (nháp: lead) | — | `TemplateVersionDetail` |
+| `POST /orgs/:orgId/templates/:templateId/versions/:version/publish` | lead | `{ headings?: [{ index, section_id }] }` | 200 `TemplateVersionDetail` — Lead rà mapping (sửa theo vị trí heading) rồi đăng; đã đăng ⇒ `409 ORG_TEMPLATE_VERSION_PUBLISHED`; `section_id` lạ ⇒ `400` |
+| `DELETE /orgs/:orgId/templates/:templateId/versions/:version` | lead | — | `{ deleted, project_count, template_deleted }` — hết bản ⇒ xoá họ |
+
+`TemplateVersionDetail` = `{ template_id, name, version, status, source_file_name, heading_count, custom_count, language,
+template_family, project_count, created_at, headings[{ index, heading_text, section_id, auto_confirmed?, guidance? }] }`.
+`OrgTemplateSummary` giữ field cũ (theo bản đã đăng mới nhất) + `latest_version` (0 = chưa đăng bản nào), `project_count`,
+`versions[]` (mới nhất trước; bản nháp chỉ trả cho Lead). Mẫu / bản của org khác ⇒ `404 ORG_TEMPLATE_NOT_FOUND` /
+`ORG_TEMPLATE_VERSION_NOT_FOUND`. Hai người tạo bản cùng lúc ⇒ thử lại số kế tiếp; quá 5 lần ⇒ `409 ORG_TEMPLATE_VERSION_CONFLICT`.
+
+- **Gắn mẫu vào project**: `Project.template_ref = { template_id, version } | null` — ghi khi import từ mẫu org (#8c, mặc định
+  bản đã đăng mới nhất, `version` chọn bản cụ thể) và khi lưu vào thư viện (#8d). `ImportedDocument.org_template_version` nhớ
+  bản lúc import; mapping áp ở tách file đọc theo đúng bản đó (đăng bản mới giữa chừng không đổi).
+- **Thông báo** `template_version_published`: đăng bản mới mà org còn dự án theo bản cũ hơn ⇒ báo mọi Lead + Analyst của org
+  (trừ người đăng, không Viewer); `link` = dự án (1 dự án) hoặc `/home`; `meta = { template_id, version, project_ids }`.
+- `GET /projects/:id` thêm `template_update: { template_id, name, current_version, latest_version } | null` — chỉ Lead /
+  Analyst, chỉ khi bản org mới hơn bản dự án đang theo.
+- **Dữ liệu cũ**: họ mẫu trước FLF-395 (file + mapping trên họ) đọc như bản 1; lần đầu dùng / `npm run migrate:org-template-versions`
+  (backup DB trước) tạo bản 1 thật (đọc lại file để có `table_map`, `language`), gắn `org_template_version = 1` cho import cũ và
+  `template_ref` cho project theo lần import gần nhất.
+- **.docx**: `DocxPackage` đếm byte giải nén thật khi đọc từng part (kích thước khai báo trong zip có thể bị ghi nhỏ) và chặn gói
+  quá 5 000 mục ⇒ `FILE_TOO_LARGE` như trước.
+

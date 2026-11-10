@@ -178,7 +178,12 @@ export const uploadImport = async (
   projectId: string,
   userId: string,
   file: UploadedFile,
-  body: { /** FLF-278: import từ mẫu đã lưu của tổ chức (`org-library.service#importFromOrg`). */ org_template_id?: string } = {}
+  body: {
+    /** FLF-278: import từ mẫu đã lưu của tổ chức (`org-library.service#importFromOrg`). */
+    org_template_id?: string
+    /** FLF-395: bản của mẫu — mapping đọc theo đúng bản này. */
+    org_template_version?: number
+  } = {}
 ): Promise<IImportedDocument> => {
   const current = await latestImport(projectId)
   if (current && hasBaseline(current.status)) {
@@ -200,7 +205,7 @@ export const uploadImport = async (
     size: file.size,
     stamp: result.stamp,
     intent: await resolveUploadIntent(projectId),
-    ...(body.org_template_id ? { org_template_id: body.org_template_id } : {}),
+    ...(body.org_template_id ? { org_template_id: body.org_template_id, org_template_version: body.org_template_version ?? null } : {}),
     created_by: userId
   }
 
@@ -217,6 +222,8 @@ export const uploadImport = async (
   if (result.stamp || body.org_template_id) doc.confirmed_latest_at = new Date()
   // FLF-343: tách file + khớp mẫu ngay (tất định, không gọi AI) ⇒ màn báo credit có số; câu hỏi "bản mới nhất" (file không
   // stamp) trả lời cùng nút Bắt đầu (`POST /import/extract` `confirm_latest`)
+  // FLF-395: tải file riêng (không từ mẫu tổ chức) thay lần import trước ⇒ dự án không còn theo mẫu tổ chức nào
+  if (!body.org_template_id) await Project.updateOne({ _id: projectId, template_ref: { $ne: null } }, { $set: { template_ref: null } })
   await transitionImport(doc, "parsing")
   await parseOrReject(doc)
   return doc
@@ -342,7 +349,7 @@ export const runParse = async (doc: IImportedDocument): Promise<void> => {
   // Mẫu bắt buộc: profile lưu dùng đúng mapping của bản xuất (phần nhỏ, cha/con cùng mục) ⇒ I-5, kế hoạch step, cờ "Cần xem" khớp
   const matched = matchProfile(blocks, { fixedTemplate: doc.intent === "fixed" })
   // FLF-278: mẫu đã lưu của tổ chức ⇒ mapping BA đã xác nhận ở dự án trước áp sẵn (bỏ bước 1.5 nếu khớp đủ)
-  const saved = doc.org_template_id ? await orgTemplateHeadings(doc.org_template_id) : null
+  const saved = doc.org_template_id ? await orgTemplateHeadings(doc.org_template_id, doc.org_template_version ?? null) : null
   const profile = saved ? { ...matched, heading_map: applyOrgMapping(matched.heading_map, saved) } : matched
   // FLF-343: không dừng ở bước xác nhận mapping — mục độ tin thấp tự nhận (giữ độ tin), finalize gắn cờ "Cần xem"
   autoConfirmMapping(profile)
