@@ -23,7 +23,8 @@ const SOURCE_LABELS: Record<CrSourceKind, string> = {
   viewer_comment: "Viewer comment",
   verbal: "verbal request",
   chat: "chat",
-  reference_document: "reference document"
+  reference_document: "reference document",
+  template_migration: "template migration"
 }
 
 export const assertCrInfo = (info: ChangeRequestInfo | undefined): ChangeRequestInfo => {

@@ -83,6 +83,8 @@ const db = vi.hoisted(() => {
   return { Spine, Change, Baseline, spines, changes, baselines, reset }
 })
 
+// Rào đổi mẫu đọc Mongo; bản test thuần không có DB
+vi.mock("../../template-migration/migration-guard.js", () => ({ assertNoMigrationRunning: async () => undefined }))
 vi.mock("../../spine/spine.model.js", () => ({ Spine: db.Spine }))
 vi.mock("../../spine/change.model.js", () => ({ Change: db.Change }))
 vi.mock("../../spine/baseline.model.js", () => ({ Baseline: db.Baseline }))

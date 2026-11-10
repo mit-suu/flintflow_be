@@ -57,9 +57,10 @@ describe("FLF-395 — version của mẫu tổ chức", () => {
     expect(denied.body.error.code).toBe("ORG_ROLE_FORBIDDEN")
     expect(await OrgTemplate.countDocuments({ orgId: lead.orgId })).toBe(0)
 
+    await User.updateOne({ _id: lead.userId }, { $set: { name: "Lead Hien Thi" } })
     const draft = await uploadTemplate(lead.token, base, file, "Mẫu ngân hàng")
     expect(draft.status, JSON.stringify(draft.body.error)).toBe(201)
-    expect(draft.body.data).toMatchObject({ name: "Mẫu ngân hàng", version: 1, status: "draft" })
+    expect(draft.body.data).toMatchObject({ name: "Mẫu ngân hàng", version: 1, status: "draft", published_by: { id: lead.userId, name: "Lead Hien Thi" } })
     const templateId = draft.body.data.template_id as string
     const conventions = (draft.body.data.headings as { index: number; heading_text: string }[]).find((h) => h.heading_text.includes("Document Conventions"))!
 
@@ -80,7 +81,9 @@ describe("FLF-395 — version của mẫu tổ chức", () => {
     expect((await request(app).post(`${base}/${templateId}/versions/1/publish`).set(H(lead.token)).send({})).status).toBe(409)
 
     const listed = (await request(app).get(base).set(H(analyst.token))).body.data
-    expect(listed).toMatchObject([{ id: templateId, latest_version: 1, versions: [{ version: 1, status: "published", project_count: 0 }] }])
+    expect(listed).toMatchObject([{ id: templateId, latest_version: 1, skeleton_source_project_id: null, versions: [{ version: 1, status: "published", project_count: 0 }] }])
+    // Người đăng: id + tên hiển thị của thành viên org
+    expect(listed[0].versions[0].published_by).toEqual({ id: lead.userId, name: "Lead Hien Thi" })
     const stored = (await OrgTemplateVersion.findOne({ template_id: templateId, version: 1 }))!
     expect(stored.table_map.length).toBeGreaterThan(0)
     expect(stored.language).toBe("en")

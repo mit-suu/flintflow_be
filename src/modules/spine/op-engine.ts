@@ -685,6 +685,8 @@ export interface RevertRangeOptions {
   /** Nếu có: kiểm khoá lạc quan như transaction thường. */
   base_version?: number
   step_id?: string | null
+  /** Id lô của lần revert (mặc định UUID) — đường ghi riêng của đổi mẫu đặt tiền tố để nhận ra Change của nó. */
+  txn?: string
 }
 
 /**
@@ -720,7 +722,7 @@ export const revertChanges = async (projectId: string, changes: Change[], option
 
 const saveRevert = async (projectId: string, record: SpineRecord, changes: Change[], options: RevertRangeOptions): Promise<ApplyResult> => {
   const startSeq = await repository.nextSeq(projectId)
-  const plan = planRevert(stripRecord(record), changes, { by: options.by, startSeq, step_id: options.step_id ?? null })
+  const plan = planRevert(stripRecord(record), changes, { by: options.by, startSeq, step_id: options.step_id ?? null, ...(options.txn ? { txn: options.txn } : {}) })
   const saved = await repository.applyAndSave(projectId, {
     spine: { ...plan.spine, projectId },
     baseVersion: record.spine_version,

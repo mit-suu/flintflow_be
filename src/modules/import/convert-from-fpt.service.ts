@@ -15,6 +15,7 @@
  *   `template_context`); DocVersion 1.0 mang `template_source` + `record_snapshot` để mọi bản in sau 1.0 theo đúng mẫu.
  */
 
+import { assertNoMigrationRunning } from "../template-migration/migration-guard.js"
 import { createHash } from "node:crypto"
 import { scheduleEmbeddingSync } from "../change-request/embedding/embedding-sync.service.js"
 import { docFileStore } from "../doc-version/doc-file.store.js"
@@ -74,6 +75,7 @@ const running = new Set<string>()
  * ở lượt khác ⇒ `null`, không làm gì. Lỗi ⇒ gỡ phần đã tạo rồi ném lại (dự án vẫn `fpt` đã ký).
  */
 export const convertFromFpt = async (projectId: string, userId: string, opts: ConvertOptions = {}): Promise<ConvertResult | null> => {
+  await assertNoMigrationRunning(projectId)
   if (running.has(projectId)) return null
   running.add(projectId)
   try {

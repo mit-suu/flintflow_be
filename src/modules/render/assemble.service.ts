@@ -83,6 +83,7 @@ import type {
 import { renderedDocumentSchema } from "./rendered-document.schema.js"
 import { draftVersionLabel } from "./draft-version.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { withoutTemplateMigration } from "../doc-version/template-migration-change.js"
 
 export const NO_WORKING_DRAFT = "NO_WORKING_DRAFT"
 
@@ -438,7 +439,8 @@ const recordChangeLog = createChangeLog<ChangeRecordRow>(RECORD_CHANGE_PROJECTIO
   step_id: d.step_id
 }))
 
-export const listChangesForRecord = (projectId: string): Promise<ChangeRecordRow[]> => recordChangeLog.list(projectId)
+/** Record of Changes không ghi dòng nào do đổi mẫu sinh ra (dòng `Baseline <số>` của lần phát hành vẫn có). */
+export const listChangesForRecord = async (projectId: string): Promise<ChangeRecordRow[]> => withoutTemplateMigration(await recordChangeLog.list(projectId))
 
 const SYSTEM_ACTOR = "system"
 const IMPORT_ACTOR = "import"
@@ -830,7 +832,7 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
     // T15 (mode 1 v3): lịch sử sửa đổi của khách (file gốc) đứng trước, lịch sử FlintFlow nối tiếp. File đã có bảng lịch sử
     // của riêng nó ⇒ không thêm dòng chỉ vì import / ký bản gốc 0.1 (lô `by = import`): bản 0.1 giữ đúng bảng của file, mỗi
     // change request mới thành một dòng
-    recordOfChanges: [...(input.template?.legacyRecord ?? []), ...buildRecordOfChanges(withoutImportRows(input.recordChanges, input.template?.legacyRecord?.length ?? 0), inChargeFor(deps.resolveInCharge, language), language)],
+    recordOfChanges: [...(input.template?.legacyRecord ?? []), ...buildRecordOfChanges(withoutTemplateMigration(withoutImportRows(input.recordChanges, input.template?.legacyRecord?.length ?? 0)), inChargeFor(deps.resolveInCharge, language), language)],
     flagsAppendix: buildFlagsAppendix(spine, input.statusChanges, numbers, source, states, titles, language, translated?.localized)
   }
   if (source === "draft") refDoc.watermark = "DRAFT"

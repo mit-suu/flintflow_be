@@ -103,7 +103,7 @@ describe("FLF-395 — tự lưu khung mẫu sau baseline", () => {
     expect(headings.find((h) => h.heading_text.includes("Team Notes"))).toMatchObject({ kind: "custom" })
     expect(await Notification.countDocuments({ type: "skeleton_headings_pending", organizationId: lead.orgId })).toBe(2)
     const listed = (await request(app).get(`/api/v1/orgs/${lead.orgId}/templates`).set(H(analyst.token))).body.data[0]
-    expect(listed).toMatchObject({ skeleton: true, pending_count: pending.body.data.pending_count })
+    expect(listed).toMatchObject({ skeleton: true, pending_count: pending.body.data.pending_count, skeleton_source_project_id: projectId })
 
     const suggested = await request(app).post(`/api/v1/projects/${projectId}/template-skeleton/suggest`).set(H(lead.token))
     expect(suggested.status, JSON.stringify(suggested.body.error)).toBe(200)
