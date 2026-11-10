@@ -9,6 +9,8 @@ import { NS, OoxmlError, parseXml, serializeXml } from "./xml.js"
 
 /** Chặn zip bomb: tổng dung lượng giải nén tối đa. */
 export const MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
+/** Chặn gói có quá nhiều mục (docx thật vài trăm mục). */
+export const MAX_ZIP_ENTRIES = 5000
 
 export interface Relationship {
   id: string
@@ -24,21 +26,86 @@ export const relsPathOf = (partName: string): string => {
 
 type ZipEntryWithSize = JSZip.JSZipObject & { _data?: { uncompressedSize?: number } }
 
+/** `internalStream` có ở JSZip runtime nhưng thiếu trong typings. */
+interface ZipStream {
+  on(event: "data", cb: (chunk: Uint8Array) => void): ZipStream
+  on(event: "error", cb: (err: Error) => void): ZipStream
+  on(event: "end", cb: () => void): ZipStream
+  pause(): ZipStream
+  resume(): ZipStream
+}
+type StreamableEntry = JSZip.JSZipObject & { internalStream(type: "uint8array"): ZipStream }
+
 export class DocxPackage {
   private readonly parts = new Map<string, Document>()
   private readonly originalXml = new Map<string, string>()
+  /** Byte đã thực sự giải nén (mỗi part tính một lần) — kích thước khai báo trong zip có thể bị khai man. */
+  private inflated = 0
+  private readonly counted = new Set<string>()
+  /** Hai lượt đọc cùng một part cùng lúc dùng chung một luồng — không giải nén / đếm byte hai lần. */
+  private readonly inflight = new Map<string, Promise<Buffer>>()
 
-  private constructor(private readonly zip: JSZip) {}
+  private constructor(
+    private readonly zip: JSZip,
+    private readonly limit: number
+  ) {}
 
-  static async load(data: Buffer | Uint8Array, opts: { maxUncompressedBytes?: number } = {}): Promise<DocxPackage> {
+  static async load(data: Buffer | Uint8Array, opts: { maxUncompressedBytes?: number; maxEntries?: number } = {}): Promise<DocxPackage> {
     const zip = await JSZip.loadAsync(data)
     const limit = opts.maxUncompressedBytes ?? MAX_UNCOMPRESSED_BYTES
+    const maxEntries = opts.maxEntries ?? MAX_ZIP_ENTRIES
+    const entries = Object.keys(zip.files).length
+    if (entries > maxEntries) throw new OoxmlError("PACKAGE_TOO_LARGE", `Gói có ${entries} mục vượt giới hạn ${maxEntries}`)
+    // Kiểm sớm theo kích thước khai báo (rẻ); giới hạn thật áp lúc giải nén từng part (`inflate`)
     let total = 0
     zip.forEach((_path, entry) => {
       total += (entry as ZipEntryWithSize)._data?.uncompressedSize ?? 0
     })
     if (total > limit) throw new OoxmlError("PACKAGE_TOO_LARGE", `Gói giải nén ${total} byte vượt giới hạn ${limit}`)
-    return new DocxPackage(zip)
+    return new DocxPackage(zip, limit)
+  }
+
+  /** Giải nén một part theo luồng, đếm byte thật và dừng ngay khi tổng của gói vượt giới hạn. */
+  private inflate(name: string, file: JSZip.JSZipObject): Promise<Buffer> {
+    const pending = this.inflight.get(name)
+    if (pending) return pending
+    const first = !this.counted.has(name)
+    const run = new Promise<Buffer>((resolve, reject) => {
+      const chunks: Uint8Array[] = []
+      let failed = false
+      // Đếm ngay từng chunk (part đọc song song cũng tính chung trần); luồng lỗi ⇒ trả lại để lượt đọc lại không bị tính hai lần
+      let read = 0
+      const stream = (file as StreamableEntry).internalStream("uint8array")
+      stream
+        .on("data", (chunk: Uint8Array) => {
+          if (failed) return
+          if (first) {
+            read += chunk.length
+            this.inflated += chunk.length
+          }
+          if (this.inflated > this.limit) {
+            failed = true
+            stream.pause()
+            reject(new OoxmlError("PACKAGE_TOO_LARGE", `Gói giải nén vượt giới hạn ${this.limit} byte`))
+            return
+          }
+          chunks.push(chunk)
+        })
+        .on("error", (err: Error) => {
+          if (failed) return
+          failed = true
+          this.inflated -= read
+          reject(err)
+        })
+        .on("end", () => {
+          if (failed) return
+          this.counted.add(name)
+          resolve(Buffer.concat(chunks))
+        })
+        .resume()
+    }).finally(() => this.inflight.delete(name))
+    this.inflight.set(name, run)
+    return run
   }
 
   has(name: string): boolean {
@@ -54,7 +121,7 @@ export class DocxPackage {
     if (cached) return cached
     const file = this.zip.file(name)
     if (!file) return null
-    const doc = parseXml(await file.async("string"), name)
+    const doc = parseXml((await this.inflate(name, file)).toString("utf8").replace(/^﻿/, ""), name)
     this.parts.set(name, doc)
     this.originalXml.set(name, serializeXml(doc))
     return doc
@@ -63,7 +130,7 @@ export class DocxPackage {
   /** Nội dung nhị phân của một part (ảnh `word/media/*`…) — không có ⇒ `null`. Mode 1 v3 phase 5 (T3). */
   async binary(name: string): Promise<Buffer | null> {
     const file = this.zip.file(name)
-    return file ? file.async("nodebuffer") : null
+    return file ? this.inflate(name, file) : null
   }
 
   /** Add a binary part without replacing any existing package part. */
