@@ -3,6 +3,9 @@
  * và câu cờ gọi mục bằng heading của mẫu hiện tại.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
+
+vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
+
 import request from "supertest"
 import app from "../../../src/app.js"
 import { seedFixture, type SeededFixture } from "../../setup.js"
@@ -34,11 +37,7 @@ const baselined = async (seeded: SeededFixture): Promise<string> => {
   const projectId = await createMode1Project(seeded, "Lumen carry")
   const doc = await uploadImport(projectId, seeded.userId, fileOf(await makeSrsDocx()))
   await acceptLatest(doc, true)
-  // Lượt AI lỗi tạm ⇒ trích dừng `resume_later` (production có job chạy tiếp); chạy tiếp như job, tối đa 3 lượt
-  let run = await runExtraction(projectId, seeded.userId, String(doc._id))
-  for (let i = 0; i < 2 && run.doc.status === "extracting" && run.doc.paused?.reason === "resume_later"; i++) {
-    run = await runExtraction(projectId, seeded.userId, String(doc._id))
-  }
+  const run = await runExtraction(projectId, seeded.userId, String(doc._id))
   expect(run.doc.status, JSON.stringify({ paused: run.doc.paused, sections: run.sections })).toBe("baselining")
   const before = (await spineRepository.get(projectId))!
   await finalizeImport(projectId, seeded.userId, { import_id: String(doc._id), base_version: before.spine_version })
