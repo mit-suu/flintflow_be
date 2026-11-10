@@ -76,8 +76,11 @@ export const withMeteredAi = async <T>(
   ctx: MeteredContext,
   actionType: ActionType,
   promptVariables: Record<string, unknown>,
-  /** Ảnh kèm prompt (phase 5, `IMPORT_EXTRACT_DIAGRAM`). */
-  opts: { images?: LlmImage[] } = {}
+  /**
+   * `images`: ảnh kèm prompt (phase 5, `IMPORT_EXTRACT_DIAGRAM`). `notifyTopUp: false`: hết credit không tự báo nạp — caller
+   * chạy nhiều lượt song song báo một lần (FLF-392, I-4).
+   */
+  opts: { images?: LlmImage[]; notifyTopUp?: boolean } = {}
 ): Promise<MeteredResult<T>> => {
   const usageId = await reserveCall(ctx.projectId, ctx.userId, ctx.stepId, actionType)
   try {
@@ -97,7 +100,7 @@ export const withMeteredAi = async <T>(
     console.error(`[metered-ai] ${ctx.stepId} (${actionType}) lỗi:`, message)
     const credits = isInsufficientCredit(err)
     // BPMN 4.2 (mode 1 v3): hết credit ⇒ báo chủ project nạp; nạp xong bước tự chạy tiếp (credit-flow.service)
-    if (credits) void notifyTopUpNeeded(ctx.projectId, ctx.stepId)
+    if (credits && opts.notifyTopUp !== false) void notifyTopUpNeeded(ctx.projectId, ctx.stepId)
     const code = err instanceof AiActionError ? err.code : undefined
     return { ok: false, reason: credits ? "credits" : "resume_later", message, userMessage: clientErrorMessage(err), usageId, kind: classifyAiFailure(err), ...(code ? { code } : {}) }
   }

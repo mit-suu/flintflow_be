@@ -6,7 +6,7 @@
  */
 
 import mongoose, { Schema, Document } from "mongoose"
-import type { DiagramImageKind } from "../../shared/ai/response-parser.js"
+import type { DiagramImageKind, ImportExtractDiagramOutput, ImportExtractOutput } from "../../shared/ai/response-parser.js"
 import type { EntityItem } from "./extracted-entities.js"
 import { EXTRACTION_STATUSES, FIELD_ORIGINS, type ExtractionStatus, type FieldOrigin } from "./import.constants.js"
 
@@ -23,18 +23,30 @@ export interface ExtractedField {
 }
 
 /**
+ * Output một lượt AI của I-4 (FLF-392) — `data` là output đã qua parse schema (không phải text thô của provider). Cấp mã /
+ * ghép tên / lọc chạy lúc ghép section (replay theo thứ tự tài liệu), không chạy lúc đọc.
+ * Ảnh: `read` (có `data`, `usage_id`), `unsupported` / `unavailable` / `failed` (không có dữ liệu).
+ */
+export type RawAiStep =
+  | { kind: "image"; block_id: string; status: "read" | "unsupported" | "unavailable" | "failed"; data?: ImportExtractDiagramOutput; usage_id?: string }
+  | { kind: "text"; data: ImportExtractOutput; usage_id: string }
+
+/**
  * Tiến độ AI của section đang dở (lượt = một ảnh diagram hoặc một lô chữ, theo `sectionAiSteps`). Lưu sau mỗi lượt đã trừ
- * credit; section xong ⇒ `null`. Chạy tiếp chỉ dùng lại khi `plan_hash` khớp kế hoạch lượt hiện tại.
+ * credit (kể cả lượt cuối: đọc xong mà chưa ghép); section ghép xong ⇒ `null`. Chạy tiếp chỉ dùng lại khi `plan_hash` khớp.
+ * FLF-392: `raw_steps` = output của các lượt cuối, `steps_done - raw_steps.length` lượt đầu (bản ghi trước FLF-392) đã xử
+ * lý sẵn vào `items` / `unmapped_block_ids` / `diagram_images` / `usage_id` (đã cấp id).
  */
 export interface ExtractionProgress {
   plan_hash: string
   /** Số lượt đầu đã xong — chạy tiếp bắt đầu ở lượt thứ `steps_done` (đếm từ 0). */
   steps_done: number
-  /** Phần tử các lượt đó trả về (đã cấp id) — chưa gộp, chưa làm phẳng. */
-  items: EntityItem[]
-  unmapped_block_ids: string[]
-  diagram_images: IExtractionDraft["diagram_images"]
-  usage_id: string | null
+  raw_steps?: RawAiStep[]
+  /** Phần tử của các lượt đã xử lý sẵn (bản ghi trước FLF-392) — chưa gộp, chưa làm phẳng. */
+  items?: EntityItem[]
+  unmapped_block_ids?: string[]
+  diagram_images?: IExtractionDraft["diagram_images"]
+  usage_id?: string | null
 }
 
 export interface IExtractionDraft extends Document {
