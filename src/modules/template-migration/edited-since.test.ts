@@ -68,3 +68,17 @@ describe("editedSections", () => {
     expect(editedSections([edit], s, APPLIED, () => null)).toEqual({ sections: [], unattributed: 1 })
   })
 })
+
+describe("sectionKeyResolver — mục FPT chia thành phần nhỏ của mẫu", () => {
+  it("Change quy tắc nghiệp vụ (chủ là mục 5.1) tính cho heading `slot:business_rules`, không rơi vào unattributed", () => {
+    const owners = sectionKeyResolver([{ key: "slot:business_rules", heading_text: "5.1 Business Rules", level: 2, section_id: "slot:business_rules" }], [])
+    expect(owners("fixed:5.1")).toBe("slot:business_rules")
+    expect(owners("fixed:5.2")).toBeNull()
+
+    const s = createEmptySpine({ name: "Lumen" })
+    const add = change("business_rules[]", "2026-11-11T08:00:00.000Z", { id: "BR-02", statement: "Giữ log 12 tháng", tier: "detail", source_validation_ids: [] })
+    const result = editedSections([add], s, APPLIED, owners)
+    expect(result.unattributed).toBe(0)
+    expect(result.sections).toMatchObject([{ key: "slot:business_rules", changes: 1 }])
+  })
+})

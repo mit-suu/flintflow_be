@@ -161,6 +161,8 @@ export interface RuleProfile {
    * này không bắn `template_section_empty`.
    */
   templateMissing?: ReadonlySet<string>
+  /** `section_id` ⇒ heading của mục trong mẫu hiện tại (`TemplateProfile.layout`) — tên mục trong câu cờ lấy từ đây. */
+  templateHeadings?: ReadonlyMap<string, string>
   /** Mục giữ thành mục riêng (`keep_custom`) ở lần đổi mẫu gần nhất: dữ liệu vẫn in (mục riêng) ⇒ không bắn `template_section_absent`. */
   templateKept?: ReadonlySet<string>
   /** Dự án đã đổi mẫu ⇒ bật `section_reference_after_migration`. */
@@ -904,20 +906,35 @@ const fixedTemplateGaps = (
  * Mục của mẫu đích mà lần đổi mẫu để trống (D7): đỏ tới khi có chữ thật. Mục riêng đo như `template_section_empty`; mục khung đo
  * bằng `SECTION_HAS_DATA` (mục ngoài bảng không soi được ⇒ không cờ — không có cách nào xoá cờ).
  */
-const migrationMissing = (spine: Spine, missing: ReadonlySet<string>, filled: ReadonlySet<string> = new Set()): FlagCandidate[] =>
+/**
+ * Mục của mẫu đích mà lần đổi mẫu để trống đã có chữ thật chưa. Mục riêng đã bị xoá (không còn trong Spine) tính là không cần viết.
+ * Mục khung ngoài bảng `SECTION_HAS_DATA`: phần nhỏ của mẫu (`slot:*`) đo bằng dữ liệu của slot; còn lại không đo được ⇒ coi là đã viết.
+ */
+export const migrationSectionWritten = (spine: Spine, id: string, filled: ReadonlySet<string> = new Set()): boolean => {
+  const isCustom = id.startsWith("custom:")
+  const custom = isCustom ? spine.custom_sections.find((c) => `custom:${c.id}` === id) : undefined
+  if (isCustom && !custom) return true
+  const measured = sectionHasData(spine, id) ?? (isContentSlot(id) ? slotHasData(spine, id) : null)
+  return custom ? customSectionHasContent(custom, filled) : measured !== null ? measured : id in UNMEASURED_FILL_ARRAYS ? filled.has(id) : true
+}
+
+/** Tên mục trong câu cờ: heading của mẫu hiện tại nếu biết (đúng chữ người dùng thấy trong tài liệu), không thì nhãn theo mã mục. */
+const migrationSectionName = (id: string, spine: Spine, headings: ReadonlyMap<string, string> | undefined): string => {
+  const heading = headings?.get(id)?.trim()
+  if (heading) return `Mục "${heading}"`
+  const label = quotedSectionLabel(id, spine)
+  return id.startsWith("fixed:") ? `Mục ${label}` : capitalize(label)
+}
+
+const migrationMissing = (spine: Spine, missing: ReadonlySet<string>, filled: ReadonlySet<string> = new Set(), headings?: ReadonlyMap<string, string>): FlagCandidate[] =>
   [...missing].flatMap((id): FlagCandidate[] => {
-    const isCustom = id.startsWith("custom:")
-    const custom = isCustom ? spine.custom_sections.find((c) => `custom:${c.id}` === id) : undefined
-    // Mục khung ngoài bảng `SECTION_HAS_DATA`: phần nhỏ của mẫu (`slot:*`) đo bằng dữ liệu của slot; còn lại không đo được ⇒ coi là đã viết
-    const measured = sectionHasData(spine, id) ?? (isContentSlot(id) ? slotHasData(spine, id) : null)
-    const written = custom ? customSectionHasContent(custom, filled) : measured !== null ? measured : id in UNMEASURED_FILL_ARRAYS ? filled.has(id) : true
-    if (written || (isCustom && !custom)) return []
+    if (migrationSectionWritten(spine, id, filled)) return []
     return [{
       level: "red",
       rule_id: "template_section_migration_missing",
       section_id: id,
       target_id: null,
-      message: `Mục ${quotedSectionLabel(id, spine)} có trong mẫu mới nhưng tài liệu cũ không có — chưa chốt bản được tới khi viết nội dung`,
+      message: `${migrationSectionName(id, spine, headings)} có trong mẫu mới nhưng tài liệu cũ không có — chưa chốt bản được tới khi viết nội dung`,
       remediation_step: ownerStepOf(id, spine)
     }]
   })
@@ -1610,7 +1627,7 @@ export const runDeterministicCheck = (
     ...(options.ruleProfile?.templateLayout
       ? fixedTemplateGaps(spine, options.ruleProfile.templateLayout, options.ruleProfile.templateWrappers, options.ruleProfile.templateFilled, options.ruleProfile.templateMissing, options.ruleProfile.templateKept)
       : []),
-    ...(options.ruleProfile?.templateMissing?.size ? migrationMissing(spine, options.ruleProfile.templateMissing, options.ruleProfile.templateFilled) : []),
+    ...(options.ruleProfile?.templateMissing?.size ? migrationMissing(spine, options.ruleProfile.templateMissing, options.ruleProfile.templateFilled, options.ruleProfile.templateHeadings) : []),
     ...(options.ruleProfile?.checkSectionReferences ? sectionReferencesAfterMigration(spine, options.ruleProfile.referenceBaseline) : [])
   ].filter((c) => !outsideTemplate(c, options.ruleProfile?.templateLayout)), options.ruleProfile)
 

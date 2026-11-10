@@ -180,7 +180,37 @@ describe("tableShapesBySection", () => {
       new Map([["B1#0", "actors[].name"]])
     )
     expect([...shapes.keys()]).toEqual(["fixed:2.1"])
-    expect(shapes.get("fixed:2.1")).toEqual([{ columns: ["actors[].name", "h:description"] }])
+    expect(shapes.get("fixed:2.1")).toEqual([{ columns: ["actors[].name", "h:description"], headers: ["Actor", "Description"] }])
     expect(sameColumns(shape("a", "b"), shape("b", "a"))).toBe(true)
+  })
+})
+
+describe("so cột bảng giữa hai phía", () => {
+  const headers = ["Use Case ID", "Use Case Name", "Actor"]
+  const oldShape: TableShape = { columns: ["use_cases[].id", "use_cases[].name", "actors[].name"], headers }
+  const newShape: TableShape = { columns: ["h:use case id", "h:use case name", "use_cases[].actor_ids"], headers }
+
+  it("cùng chữ tiêu đề nhưng chỉ một phía có field ⇒ cùng bộ cột, không báo bảng đổi cột", () => {
+    expect(sameColumns(oldShape, newShape)).toBe(true)
+    const oldDoc = [old("fixed:2.2.2", "2.2.2 Use Case Descriptions", 3)]
+    const newDoc = [neu(0, "2.2.2 Use Case Descriptions", "fixed:2.2.2")]
+    const { groups } = run(oldDoc, newDoc, { oldTables: tables({ "fixed:2.2.2": [oldShape] }), newTables: tables({ "fixed:2.2.2": [newShape] }) })
+    expect(groups.conflict).toEqual([])
+    expect(groups.matched.map((m) => m.old_key)).toEqual(["fixed:2.2.2"])
+  })
+
+  it("bảng thật sự đổi cột vẫn là conflict, và mô tả cột là chữ tiêu đề chứ không phải khoá nội bộ", () => {
+    const changed: TableShape = { columns: ["h:use case id", "h:priority"], headers: ["Use Case ID", "Priority"] }
+    const oldDoc = [old("fixed:2.2.2", "2.2.2 Use Case Descriptions", 3)]
+    const newDoc = [neu(0, "2.2.2 Use Case Descriptions", "fixed:2.2.2")]
+    const { groups } = run(oldDoc, newDoc, { oldTables: tables({ "fixed:2.2.2": [oldShape] }), newTables: tables({ "fixed:2.2.2": [changed] }) })
+    expect(groups.conflict).toMatchObject([{ kind: "table_columns", old_columns: [headers], new_columns: [["Use Case ID", "Priority"]] }])
+  })
+
+  it("bảng lưu từ trước không có headers: mô tả bỏ tiền tố `h:`", () => {
+    const oldDoc = [old("fixed:5.1", "5.1 Business Rules", 2)]
+    const newDoc = [neu(0, "5.1 Business Rules", "fixed:5.1")]
+    const { groups } = run(oldDoc, newDoc, { oldTables: tables({ "fixed:5.1": [shape("h:br id", "h:business rule")] }), newTables: tables({ "fixed:5.1": [shape("h:br id")] }) })
+    expect(groups.conflict[0].old_columns).toEqual([["br id", "business rule"]])
   })
 })

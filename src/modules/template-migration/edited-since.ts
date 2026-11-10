@@ -5,6 +5,7 @@
  * (`txn` bắt đầu bằng `TEMPLATE_MIGRATION_TXN_PREFIX`) không tính là "sửa". Change không thuộc section nào (cờ, tiến độ, baseline…)
  * bị bỏ qua; change thuộc phần tử (`function:*`…) tính cho mục khung cha qua `resolveKey`.
  */
+import { overlapsOf } from "../import/content-slots.js"
 import { sectionsOfPath } from "../spine/section-registry.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Change, Spine } from "../spine/spine.types.js"
@@ -34,7 +35,9 @@ export type KeyResolver = (sectionId: string) => string | null
 export const sectionKeyResolver = (old: readonly OldHeading[], followers: readonly Follower[]): KeyResolver => {
   const keys = new Set(old.map((o) => o.key))
   const parentOf = new Map(followers.map((f) => [f.old_key, f.parent_old_key]))
-  return (sectionId) => (keys.has(sectionId) ? sectionId : (parentOf.get(sectionId) ?? null))
+  // Mẫu bắt buộc chia mục FPT thành các phần nhỏ (`fixed:5.1` ↔ `slot:business_rules`): Change ghi theo mục FPT, heading mang id phần nhỏ
+  const byOverlap = (sectionId: string): string | null => overlapsOf(sectionId).find((id) => keys.has(id)) ?? null
+  return (sectionId) => (keys.has(sectionId) ? sectionId : (parentOf.get(sectionId) ?? byOverlap(sectionId)))
 }
 
 const charsOf = (value: unknown): number => (typeof value === "string" ? value.length : value === undefined || value === null ? 0 : JSON.stringify(value).length)
