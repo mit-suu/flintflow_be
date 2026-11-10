@@ -8,7 +8,7 @@ vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await imp
 
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { createMode1Project, fakeMode1, mode1Api } from "../../helpers/mode1.js"
-import { importAtExtracting } from "../../helpers/mode1-import-p4.js"
+import { importAtExtracting, useExtractConcurrency } from "../../helpers/mode1-import-p4.js"
 import { seedFixture } from "../../setup.js"
 import { AI_BLOCK_CHARS, estimateExtraction, runExtraction } from "../../../src/modules/import/extract.service.js"
 import { ExtractionDraft } from "../../../src/modules/import/extraction-draft.model.js"
@@ -19,6 +19,9 @@ import { buildPlaceholderPng } from "../../../src/modules/render/diagram-placeho
 import { CreditWallet } from "../../../src/modules/credits/credit-wallet.model.js"
 import { Membership } from "../../../src/modules/organization/membership.model.js"
 import { Usage } from "../../../src/modules/spine/usage.model.js"
+
+// Khẳng định thứ tự lượt gọi / số dư ví của bản tuần tự (FLF-392: song song ở extract-parallel.int.test.ts)
+useExtractConcurrency(1)
 
 /** Lượt gọi provider (kể cả retry): section + đoạn đánh dấu lô (`P01`…) có trong prompt. */
 let calls: { section: string; marks: string[]; image: boolean }[] = []
@@ -75,7 +78,7 @@ describe("I-4 — chạy tiếp theo từng lô", () => {
     expect(await deducted(ctx.projectId, "I-4:fixed:1")).toBe(1)
     const paused = (await ExtractionDraft.findOne({ import_id: ctx.importId, section_id: "fixed:1" }).lean())!
     expect(paused).toMatchObject({ status: "failed", partial: { steps_done: 1 } })
-    expect(paused.partial!.items.length).toBeGreaterThan(0)
+    expect(paused.partial!.raw_steps).toHaveLength(1)
     expect(await wallet(ctx.userId)).toMatchObject({ balance: 998, reserved: 0 })
 
     // ước tính lúc dừng = phần còn lại (2 lô của mục 1 + 5 mục chữ khác)
