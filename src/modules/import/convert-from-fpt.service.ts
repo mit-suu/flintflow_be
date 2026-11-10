@@ -33,6 +33,7 @@ import { projectLanguages } from "../translation/translation.service.js"
 import { ImportedDocument } from "./imported-document.model.js"
 import { buildStepPlan } from "./step-plan.js"
 import { TemplateProfile } from "./template-profile.model.js"
+import { autoSaveSkeleton } from "./template-skeleton.service.js"
 
 /** Version gốc của dự án chuyển đổi — bản Lead đã ký. */
 export const CONVERTED_DOC_VERSION = "1.0"
@@ -165,6 +166,8 @@ const convert = async (projectId: string, userId: string, opts: ConvertOptions):
   await ImportedDocument.updateMany({ projectId, status: "drafting" }, { $set: { status: "delivered" } })
 
   const result = { doc_version: CONVERTED_DOC_VERSION, baseline_id: entry.id }
+  // FLF-395 (D12): dự án chế độ 3 (file mẫu của khách) ký 1.0 ⇒ tự lưu khung; mode 2 không file nền ⇒ bỏ qua bên trong
+  await autoSaveSkeleton(projectId, userId, fileRef)
   if (opts.quiet) return result
   scheduleEmbeddingSync(projectId)
   void notify(userId, {

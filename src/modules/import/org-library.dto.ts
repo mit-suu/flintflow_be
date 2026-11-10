@@ -15,6 +15,13 @@ export const publishVersionSchema = z.strictObject({
   headings: z.array(z.strictObject({ index: z.number().int().min(0), section_id: z.string().min(1).max(120) })).max(1000).default([])
 })
 export const versionParamSchema = z.coerce.number().int().min(1)
+/** FLF-395 (D13): duyệt mục BA tự đặt của mẫu khung. */
+export const skeletonDecisionsSchema = z.strictObject({
+  decisions: z
+    .array(z.strictObject({ key: z.string().regex(/^B\d{4,}$/), decision: z.enum(["keep", "generic", "drop"]), generic_text: z.string().trim().min(1).max(300).optional() }))
+    .min(1)
+    .max(200)
+})
 const contentBlockSchema = z.strictObject({ kind: z.enum(["paragraph", "list_item"]), text: z.string().trim().min(1).max(4000) })
 export const contentEntrySchema = z.strictObject({ title: z.string().trim().min(1).max(200), blocks: z.array(contentBlockSchema).min(1).max(50) })
 export const patchContentEntrySchema = contentEntrySchema

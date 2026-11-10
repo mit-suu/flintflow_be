@@ -53,6 +53,8 @@ export interface IOrgTemplate extends Document {
   latest_version: number
   /** Số bản đã cấp (chỉ tăng) — bản mới lấy số kế tiếp, xoá bản không làm số bị dùng lại. 0 = chưa cấp bản nào. */
   version_seq: number
+  /** FLF-395 (D12): mẫu khung tự lưu từ dự án này (dự án mẫu tự do sau baseline); `null` = mẫu Lead đăng. */
+  skeleton_of: mongoose.Types.ObjectId | null
   created_by: mongoose.Types.ObjectId
   uses: number
   /** Bản ghi cũ (trước FLF-395). */
@@ -70,6 +72,7 @@ const orgTemplateSchema = new Schema<IOrgTemplate>(
     name: { type: String, required: true, trim: true, maxlength: 120 },
     latest_version: { type: Number, default: 0, min: 0 },
     version_seq: { type: Number, default: 0, min: 0 },
+    skeleton_of: { type: Schema.Types.ObjectId, ref: "Project", default: null },
     created_by: { type: Schema.Types.ObjectId, ref: "User", required: true },
     uses: { type: Number, default: 0, min: 0 },
     source_file: { type: sourceFileSchema, default: undefined },
@@ -81,6 +84,29 @@ const orgTemplateSchema = new Schema<IOrgTemplate>(
 )
 
 export const OrgTemplate = mongoose.model<IOrgTemplate>("OrgTemplate", orgTemplateSchema)
+
+export const PENDING_DECISIONS = ["pending", "keep", "generic", "drop"] as const
+export type PendingHeadingDecision = (typeof PENDING_DECISIONS)[number]
+
+/**
+ * FLF-395 (D13): heading chờ duyệt trước khi vào khung mẫu (khoá = `block_id` heading trong file nguồn của bản khung): mục BA
+ * tự đặt (`custom`) hoặc heading mẫu chuẩn có chữ khác tên chuẩn (`wording`).
+ */
+export interface SkeletonPendingHeading {
+  key: string
+  heading_text: string
+  level: number
+  kind: "custom" | "wording"
+  /** Tên chuẩn ghi vào khung khi mục `wording` chưa duyệt. */
+  standard_title: string | null
+  /** Gợi ý dạng chung không AI (thay tên dự án) hoặc từ nút "Gợi ý tên chung". */
+  suggestion: string | null
+  /** Lý do AI cho rằng không dùng lại được (gợi ý bỏ). */
+  suggestion_reason: string | null
+  decision: PendingHeadingDecision
+  /** Chữ heading khi chọn "giữ dạng chung". */
+  generic_text: string | null
+}
 
 export const TEMPLATE_VERSION_STATUSES = ["draft", "published"] as const
 export type TemplateVersionStatus = (typeof TEMPLATE_VERSION_STATUSES)[number]
@@ -107,6 +133,11 @@ export interface IOrgTemplateVersion extends Document {
   table_map: OrgTemplateColumn[]
   created_by: mongoose.Types.ObjectId
   published_at: Date | null
+  /** FLF-395 (D12): dấu khung (cấp + heading chuẩn hoá + tiêu đề cột) của bản tự lưu — trùng thì không lưu bản mới. */
+  skeleton_hash: string | null
+  /** File tài liệu (bản phát hành) dựng ra khung này — dựng lại khi duyệt heading. */
+  skeleton_source_ref: string | null
+  pending_headings: SkeletonPendingHeading[]
   createdAt: Date
   updatedAt: Date
 }
@@ -134,12 +165,34 @@ const orgTemplateVersionSchema = new Schema<IOrgTemplateVersion>(
       default: []
     },
     created_by: { type: Schema.Types.ObjectId, ref: "User", required: true },
-    published_at: { type: Date, default: null }
+    published_at: { type: Date, default: null },
+    skeleton_hash: { type: String, default: null },
+    skeleton_source_ref: { type: String, default: null },
+    pending_headings: {
+      type: [
+        new Schema(
+          {
+            key: { type: String, required: true },
+            heading_text: { type: String, required: true },
+            level: { type: Number, required: true },
+            kind: { type: String, enum: ["custom", "wording"], default: "custom" },
+            standard_title: { type: String, default: null },
+            suggestion: { type: String, default: null },
+            suggestion_reason: { type: String, default: null },
+            decision: { type: String, enum: PENDING_DECISIONS, default: "pending" },
+            generic_text: { type: String, default: null }
+          },
+          opts
+        )
+      ],
+      default: []
+    }
   },
   { timestamps: true, collection: "org_template_versions" }
 )
 orgTemplateVersionSchema.index({ template_id: 1, version: 1 }, { unique: true })
 orgTemplateVersionSchema.index({ orgId: 1, template_id: 1, status: 1 })
+orgTemplateVersionSchema.index({ orgId: 1, skeleton_hash: 1 }, { sparse: true })
 
 export const OrgTemplateVersion = mongoose.model<IOrgTemplateVersion>("OrgTemplateVersion", orgTemplateVersionSchema)
 

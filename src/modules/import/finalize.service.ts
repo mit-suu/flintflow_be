@@ -64,6 +64,7 @@ import { buildTemplateContext } from "./template-context.js"
 import { compareTargetStructure, type TargetStructure, type TemplateIntent } from "./target-structure.js"
 import { titleOfSection } from "./gap-report.service.js"
 import { scheduleEmbeddingSync } from "../change-request/embedding/embedding-sync.service.js"
+import { autoSaveSkeleton } from "./template-skeleton.service.js"
 
 export interface FinalizeResult {
   doc: IImportedDocument
@@ -358,6 +359,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // reread-jobs dùng lại `refreshSegmentHashes` của file này
   const { scheduleRereadAfterFinalize } = await import("./reread-jobs.js")
   await scheduleRereadAfterFinalize(projectId, userId, String(doc._id), await ExtractionDraft.find({ import_id: doc._id }, { section_id: 1, status: 1, diagram_images: 1 }).lean())
+  // FLF-395 (D12): dự án mẫu tự do có baseline ⇒ tự lưu khung (theo bản 0.1) thành mẫu tổ chức — cuối finalize, lỗi không chặn
+  await autoSaveSkeleton(projectId, userId, renderedRef)
   return { doc, baseline, spine_version: after.spine_version ?? spineVersion, flags: countOpenFlags(after.flags), target_structure: structure }
 }
 
@@ -591,5 +594,8 @@ export const rollbackPartialFinalize = async (doc: IImportedDocument): Promise<v
 /** UC-61/UC-75 cho bước check: chạy lại phần còn thiếu của 1.11–1.12. */
 export const resumeCheck = async (doc: IImportedDocument, userId: string): Promise<void> => {
   await runImportCheck(doc, userId)
+  // FLF-395: finalize dừng sau bản 0.1 (vd hết credit ở bước kiểm) ⇒ lần chạy tiếp mới tới chỗ tự lưu khung
+  const v01 = await DocVersion.findOne({ projectId: doc.projectId, version: IMPORTED_DOC_VERSION }).select("file_ref").lean()
+  if (v01?.file_ref) await autoSaveSkeleton(String(doc.projectId), userId, v01.file_ref)
 }
 
