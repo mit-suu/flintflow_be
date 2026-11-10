@@ -19,6 +19,16 @@ export interface HeadingRef {
   section_id: string | null
 }
 
+/**
+ * Heading của tài liệu hiện tại. Mẫu hiện hành (`TemplateProfile.layout`) đứng trước: sau đổi mẫu, heading của bản gốc đã lưu không còn
+ * là heading người dùng thấy (mục mới như "8 Data Retention" chỉ có ở layout), nên mục được gọi tên trong CR phải nhận ra qua layout.
+ */
+export const mergeHeadings = (layout: readonly { heading_text: string; section_id: string }[] | undefined, blocks: readonly HeadingRef[]): HeadingRef[] => {
+  const own = (layout ?? []).filter((l) => l.heading_text.trim()).map((l): HeadingRef => ({ text: l.heading_text.trim(), section_id: l.section_id }))
+  const known = new Set(own.map((h) => h.text))
+  return [...own, ...blocks.filter((b) => !known.has(b.text.trim()))]
+}
+
 const norm = (s: string): string => s.normalize("NFC").toLowerCase().replace(/[“”"'`*#]/g, " ").replace(/\s+/g, " ").trim()
 const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 const NUMBER = "\\d+(?:\\.\\d+){1,3}"

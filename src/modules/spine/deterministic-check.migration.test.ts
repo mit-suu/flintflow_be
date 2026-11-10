@@ -69,3 +69,23 @@ describe("section_reference_after_migration", () => {
     expect(byRule(runDeterministicCheck(spine, [], profile({})), "section_reference_after_migration")).toEqual([])
   })
 })
+
+describe("template_section_migration_missing — tên mục trong câu cờ", () => {
+  const messageOf = (id: string, headings?: Map<string, string>) => {
+    const spine = { ...spineWith([section("CS04", null)]), project: { ...base.project, form_factor: [] }, other_requirements: [], assumptions: [] }
+    const flags = runDeterministicCheck(spine, [], profile({ templateMissing: new Set([id]), ...(headings ? { templateHeadings: headings } : {}) }))
+    return byRule(flags, "template_section_migration_missing").find((f) => f.section_id === id)?.message ?? ""
+  }
+
+  it("dùng heading của mẫu hiện tại, không chèn chữ dự phòng và không lặp chữ Mục", () => {
+    expect(messageOf("custom:CS04", new Map([["custom:CS04", "7 Document Conventions"]]))).toMatch(/^Mục "7 Document Conventions" có trong mẫu mới/)
+    expect(messageOf("slot:platforms", new Map([["slot:platforms", "6 Operating Environment"]]))).toMatch(/^Mục "6 Operating Environment" có trong mẫu mới/)
+    // Mục khung mang số mục FPT nhưng tài liệu gọi bằng heading khác
+    expect(messageOf("fixed:5.4", new Map([["fixed:5.4", "8 Data Retention"]]))).toMatch(/^Mục "8 Data Retention" /)
+  })
+
+  it("không biết heading thì không ra 'Mục mục riêng' hay 'một mục của tài liệu'", () => {
+    expect(messageOf("custom:CS04")).toMatch(/^Mục riêng "Heading CS04" có trong mẫu mới/)
+    expect(messageOf("slot:platforms")).not.toMatch(/^Mục mục|một mục của tài liệu/)
+  })
+})

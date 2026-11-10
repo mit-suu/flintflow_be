@@ -19,7 +19,7 @@ import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
 import { withSlotParents } from "./content-slots.js"
 import { templateWrapperIds } from "./template-wrappers.js"
 import { TemplateMigration } from "../template-migration/template-migration.model.js"
-import { UNMEASURED_FILL_ARRAYS, sectionReferencesOf, type RuleProfile } from "../spine/deterministic-check.js"
+import { UNMEASURED_FILL_ARRAYS, migrationSectionWritten, sectionReferencesOf, type RuleProfile } from "../spine/deterministic-check.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { SectionSegments } from "../spine/segment-hash.js"
 
@@ -66,7 +66,7 @@ export const ruleProfileOf = async (projectId: string): Promise<RuleProfile | un
   const afterMigration = !!profile?.migrated_base_at
   const anchor = afterMigration ? await anchorOf(profile) : null
   const migrationExtras: Partial<RuleProfile> = {
-    ...(missing.size ? { templateMissing: missing } : {}),
+    ...(missing.size ? { templateMissing: missing, templateHeadings: new Map(layout.filter((l) => l.heading_text.trim()).map((l) => [l.section_id, l.heading_text.trim()] as const)) } : {}),
     ...(afterMigration
       ? {
           templateKept: await keptCustomSections(projectId),
@@ -104,6 +104,28 @@ export const unmeasuredFilled = (missing: ReadonlySet<string>, spine: Pick<Spine
     if (!arrays || !spine) return false
     return arrays.some((a) => (spine as unknown as Record<string, unknown[]>)[a as string]?.length > (anchor ? ((anchor as unknown as Record<string, unknown[] | undefined>)[a as string]?.length ?? 0) : 0))
   })
+
+export interface CarryProfile {
+  migration_missing_sections?: string[]
+  migrated_base_at?: Date | null
+  migrated_base_migration_id?: unknown
+  migrated_base_spine?: AnchorPart | null
+  section_slices?: { custom_id: string; items: string[] }[]
+}
+
+/**
+ * Mục của mẫu trước còn đang chờ viết (cờ đỏ chặn phát hành) mà lần đổi mẫu mới vẫn coi là mục của mẫu đích (`eligible`) và Spine
+ * chưa có chữ cho nó ⇒ mang sang danh sách mục thiếu mới. Không mang sang thì mục được ghép "khớp" với heading rỗng của lần đổi
+ * trước sẽ mất cờ dù tài liệu vẫn trống. `spine` = Spine sau lần đổi mẫu này.
+ */
+export const carriedMissingSections = async (profile: CarryProfile | null, spine: Spine, eligible: ReadonlySet<string>, already: readonly string[]): Promise<string[]> => {
+  const candidates = new Set((profile?.migration_missing_sections ?? []).filter((id) => eligible.has(id) && !already.includes(id)))
+  if (!candidates.size) return []
+  const anchor = profile?.migrated_base_at ? await anchorOf(profile) : null
+  const filled = new Set((profile?.section_slices ?? []).filter((sl) => sl.items.length).map((sl) => `custom:${sl.custom_id}`))
+  for (const id of unmeasuredFilled(candidates, spine, anchor)) filled.add(id)
+  return [...candidates].filter((id) => !migrationSectionWritten(spine, id, filled))
+}
 
 /** `section_id` cũ mà BA chọn giữ thành mục riêng (`keep_custom`) hoặc bỏ khỏi bản in (`drop_from_print`) ở **mọi** lần đổi mẫu còn hiệu lực (đã áp dụng, chưa hoàn tác). */
 export const keptCustomSections = async (projectId: string): Promise<ReadonlySet<string>> => {

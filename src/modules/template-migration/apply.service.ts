@@ -20,7 +20,7 @@ import { docFileStore } from "../doc-version/doc-file.store.js"
 import { latestDocVersion } from "../doc-version/doc-version.service.js"
 import { ChangeLocation } from "../change-request/change-location.model.js"
 import { stripRecord } from "../import/check.service.js"
-import { mode1RuleProfileFor } from "../import/mode1-guard.js"
+import { carriedMissingSections, mode1RuleProfileFor, type CarryProfile } from "../import/mode1-guard.js"
 import { findVersion, createProjectVersion, discardProjectVersion, toColumns, type TemplateActor } from "../import/org-template-versions.service.js"
 import { refreshSegmentHashes } from "../import/finalize.service.js"
 import { TemplateProfile, type ITemplateProfile, type TableMapEntry } from "../import/template-profile.model.js"
@@ -398,6 +398,9 @@ const buildFile = async (ctx: MigrationContext, doc: ITemplateMigration, work: S
       needsContent: new Set(doc.groups.missing.filter((m) => m.needs_content).map((m) => m.new_key)),
       knownColumns: known
     })
+    // Mục của lần đổi trước còn chờ viết và vẫn là mục của mẫu đích: giữ cờ chặn phát hành dù lần này nó được ghép "khớp" với heading rỗng
+    const carried = await carriedMissingSections(profile as CarryProfile | null, work.planned, new Set(work.layout.entries.filter((e) => e.new_key !== null).map((e) => e.section_id)), composed.missing_sections)
+    composed.missing_sections.push(...carried)
     const warnings = [...result.warnings, ...composed.warnings, ...result.sections.filter((s) => s.flag === "yellow").map((s) => `Mục ${s.section_id}: ${s.reason ?? "cần kiểm tra"}`)]
     const plan = await savePlan(doc, work, spine.spine_version)
     await markStep(doc, "file", {

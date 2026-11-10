@@ -32,6 +32,8 @@ export const isFreeTextSection = (sectionId: string): boolean => sectionId.start
 /** Bảng của một mục: định danh từng cột (đường dẫn field nếu mapping biết, không thì chữ tiêu đề đã gập). */
 export interface TableShape {
   columns: string[]
+  /** Chữ tiêu đề từng cột như người đọc thấy (cùng thứ tự `columns`) — để so cột theo tên khi chỉ một phía có field và để hiện cho BA. */
+  headers?: string[]
 }
 
 export type TableShapes = ReadonlyMap<string, readonly TableShape[]>
@@ -121,10 +123,31 @@ export interface ClassifyInput {
 const SAME_TABLE_CHOICES = ["map_by_header", "keep_old_table", "ai_resolve"]
 const NO_TABLE_CHOICES = ["keep_old_table", "delete", "ai_resolve"]
 
-const columnKey = (t: TableShape): string => [...t.columns].sort().join("\u0001")
+/** Khoá theo chữ tiêu đề của cột `i` (không có `headers` thì suy từ định danh dạng `h:`); `null` = không biết. */
+const headerKeyOf = (t: TableShape, i: number): string | null => {
+  const header = t.headers?.[i]
+  if (header !== undefined) return `h:${foldText(header)}`
+  return t.columns[i].startsWith("h:") ? t.columns[i] : null
+}
 
-/** Hai bảng cùng bộ cột (đổi thứ tự cột không tính là đổi). */
-export const sameColumns = (a: TableShape, b: TableShape): boolean => columnKey(a) === columnKey(b)
+/**
+ * Hai bảng cùng bộ cột (đổi thứ tự cột không tính là đổi). Hai cột là một khi cùng định danh, hoặc cùng chữ tiêu đề: mapping
+ * của hai phía có thể chỉ một phía biết field (`use_cases[].id` so với `h:use case id`) mà cột vẫn là cùng một cột.
+ */
+export const sameColumns = (a: TableShape, b: TableShape): boolean => {
+  if (a.columns.length !== b.columns.length) return false
+  const free = new Set(b.columns.map((_, j) => j))
+  for (let i = 0; i < a.columns.length; i++) {
+    const hi = headerKeyOf(a, i)
+    const hit = [...free].find((j) => a.columns[i] === b.columns[j] || (hi !== null && hi === headerKeyOf(b, j)))
+    if (hit === undefined) return false
+    free.delete(hit)
+  }
+  return true
+}
+
+/** Cột của bảng cho người đọc: chữ tiêu đề; bảng lưu từ trước (không có `headers`) thì bỏ tiền tố `h:` của định danh. */
+const humanColumns = (t: TableShape): string[] => t.headers ?? t.columns.map((c) => (c.startsWith("h:") ? c.slice(2) : c))
 
 /** Định danh cột: field của mapping nếu có; bảng Record of Changes theo cột lịch sử chuẩn; còn lại chữ tiêu đề. */
 export const columnIdentity = (header: string, fieldPath: string | null | undefined, sectionId: string): string => {
@@ -148,7 +171,7 @@ export const tableShapesBySection = (tables: readonly TableSource[], fieldPaths:
   for (const t of tables) {
     const header = t.rows?.[0]
     if (!t.section_id || !header?.length) continue
-    const shape: TableShape = { columns: header.map((h, c) => columnIdentity(h, fieldPaths.get(`${t.block_id}#${c}`), t.section_id!)) }
+    const shape: TableShape = { columns: header.map((h, c) => columnIdentity(h, fieldPaths.get(`${t.block_id}#${c}`), t.section_id!)), headers: header.map((h) => h.trim()) }
     out.set(t.section_id, [...(out.get(t.section_id) ?? []), shape])
   }
   return out
@@ -202,7 +225,7 @@ export const classify = (input: ClassifyInput): MigrationGroups => {
 
     if (!nw) {
       if (o.section_id === RECORD_OF_CHANGES) {
-        conflict.push({ id: `c:record_of_changes:${o.key}`, kind: "record_of_changes", old_key: o.key, new_key: null, candidate_keys: [], old_columns: (oldTables.get(o.section_id) ?? []).map((t) => t.columns), new_columns: [], choices: ["keep_custom", DROP_FROM_PRINT, "ai_resolve"], ai_choices: ["ai_resolve"], decision_required: true })
+        conflict.push({ id: `c:record_of_changes:${o.key}`, kind: "record_of_changes", old_key: o.key, new_key: null, candidate_keys: [], old_columns: (oldTables.get(o.section_id) ?? []).map(humanColumns), new_columns: [], choices: ["keep_custom", DROP_FROM_PRINT, "ai_resolve"], ai_choices: ["ai_resolve"], decision_required: true })
         continue
       }
       const followers = followersOf(o.key)
@@ -222,7 +245,7 @@ export const classify = (input: ClassifyInput): MigrationGroups => {
       if (oldT.some((ot) => !newT.some((nt) => sameColumns(ot, nt)))) {
         const kind: ConflictKind = o.section_id === RECORD_OF_CHANGES ? "record_of_changes" : "table_columns"
         const choices = newT.length ? SAME_TABLE_CHOICES : NO_TABLE_CHOICES
-        conflicts.push({ id: `c:${kind}:${o.key}`, kind, old_key: o.key, new_key: nw.key, candidate_keys: [], old_columns: oldT.map((t) => t.columns), new_columns: newT.map((t) => t.columns), choices, ai_choices: ["ai_resolve"], decision_required: true })
+        conflicts.push({ id: `c:${kind}:${o.key}`, kind, old_key: o.key, new_key: nw.key, candidate_keys: [], old_columns: oldT.map(humanColumns), new_columns: newT.map(humanColumns), choices, ai_choices: ["ai_resolve"], decision_required: true })
       }
     }
     const split = splitByOld.get(o.key)
