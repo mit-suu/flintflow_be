@@ -203,6 +203,16 @@ const envSchema = z.object({
     .refine((v) => v.every((n) => Number.isFinite(n) && n >= 0), { message: "danh sách số ms ≥ 0, cách nhau dấu phẩy" }),
   /** Số job import (I-4 / finalize, mỗi job vài phút gọi AI) một worker chạy song song. */
   JOB_IMPORT_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(2),
+  /**
+   * FLF-391: job finalize / kiểm tra quá bao lâu (ms) không tiến thêm (bước finalize, lượt AI kiểm tra, diagram vẽ xong) ⇒
+   * coi là treo: lỗi tạm thời (retry, rồi `paused`). Tính theo lúc đứng im, không theo tổng — SRS lớn vẽ hàng trăm diagram
+   * chạy vài chục phút vẫn xong.
+   */
+  FINALIZE_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(15 * 60 * 1000),
+  /** FLF-391: chu kỳ job finalize ghi nhịp tim lên import (ms). */
+  FINALIZE_HEARTBEAT_MS: z.coerce.number().int().positive().default(30_000),
+  /** FLF-391: job đang chạy mà nhịp tim cũ hơn mức này (ms) ⇒ coi là mất: `GET /import` gắn `paused`, resume chạy lại được. */
+  FINALIZE_STALE_MS: z.coerce.number().int().positive().default(5 * 60 * 1000),
 
   // Reservation credit quá TTL sẽ bị cron dọn (expireStaleReservations).
   CREDIT_RESERVE_TTL_MS: z.coerce.number().int().positive().default(10 * 60 * 1000),

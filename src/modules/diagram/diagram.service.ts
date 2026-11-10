@@ -197,6 +197,8 @@ export interface RenderOptions {
   /** Compile lại cả hình có `source_hash` không đổi. */
   force?: boolean
   deps?: Partial<DiagramServiceDeps>
+  /** Gọi sau mỗi hình vẽ xong — lượt chạy dài (finalize import) báo còn tiến triển, không bị coi là treo (FLF-391). */
+  onProgress?: () => void
 }
 
 export interface RenderResult {
@@ -295,6 +297,7 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
   const errored: string[] = []
 
   for (const target of targets) {
+    options.onProgress?.()
     const existing = spine.diagrams.filter((d) => sameTarget(d, target)).sort((a, b) => (a.id < b.id ? -1 : 1))
     const parts = renderKind(spine, target.kind, target.owner_id, context)
     const ids = assignPartIds(target.kind, existing, parts, nextId)
