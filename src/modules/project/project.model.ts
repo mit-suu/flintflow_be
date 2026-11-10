@@ -36,6 +36,11 @@ export interface IProject extends Document {
   has_required_template: boolean | null
   /** FLF-335: `fixed` ngay lúc tạo với dự án mới có mẫu bắt buộc; dự án có sẵn ghi lúc upload (#2 `intent`); cũ `null`. */
   template_intent: TemplateIntent | null
+  /**
+   * FLF-395: mẫu tổ chức + bản (version) dự án đang theo. `null` = chưa gắn mẫu (mẫu tự do / FPT). Ghi khi import từ mẫu
+   * org, lưu vào thư viện, đổi mẫu xong, tự lưu khung. Bản org mới hơn ⇒ `template_update` ở chi tiết project.
+   */
+  template_ref: { template_id: mongoose.Types.ObjectId; version: number } | null
   /** Mode 1: bản sao rút gọn `ImportedDocument.status` để hiện danh sách (UC-14, UC-19); mode khác luôn `null`. */
   import_state: ImportStatus | null
   /**
@@ -112,6 +117,16 @@ const projectSchema = new Schema<IProject>(
       enum: [...TEMPLATE_INTENTS, null],
       default: null
     },
+    template_ref: {
+      type: new Schema(
+        {
+          template_id: { type: Schema.Types.ObjectId, ref: "OrgTemplate", required: true },
+          version: { type: Number, required: true, min: 1 }
+        },
+        { _id: false }
+      ),
+      default: null
+    },
     import_state: {
       type: String,
       enum: [...IMPORT_STATUSES, null],
@@ -153,5 +168,6 @@ const projectSchema = new Schema<IProject>(
 projectSchema.index({ userId: 1, status: 1 })
 // Cùng truy vấn danh sách nhưng theo org (task-26 Pha 4 sẽ thay index theo userId ở trên)
 projectSchema.index({ organizationId: 1, status: 1 })
+projectSchema.index({ "template_ref.template_id": 1 }, { sparse: true })
 
 export const Project = mongoose.model<IProject>("Project", projectSchema)

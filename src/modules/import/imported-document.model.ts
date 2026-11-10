@@ -63,6 +63,8 @@ export interface IImportedDocument extends Document {
   intent: TemplateIntent | null
   /** FLF-278: lần import tạo từ mẫu đã lưu của tổ chức (`OrgTemplate`) — mapping heading áp sẵn, không phải xác nhận lại. */
   org_template_id?: mongoose.Types.ObjectId | null
+  /** FLF-395: bản của mẫu tổ chức lúc import — đọc mapping theo đúng bản này, đăng bản mới giữa chừng không đổi. */
+  org_template_version?: number | null
   /** Section đang/sắp trích ở I-4; resume chạy tiếp từ đây, không trích lại section `done`. */
   extract_cursor: string | null
   /**
@@ -158,6 +160,7 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
     structure_changes: { type: Schema.Types.Mixed, default: null },
     intent: { type: String, enum: [...TEMPLATE_INTENTS, null], default: null },
     org_template_id: { type: Schema.Types.ObjectId, ref: "OrgTemplate", default: null },
+    org_template_version: { type: Number, default: null, min: 1 },
     finalize_checkpoint: {
       type: new Schema(
         {

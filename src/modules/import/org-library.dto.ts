@@ -4,8 +4,17 @@ import { TEMPLATE_INTENTS } from "../project/project.model.js"
 
 const objectId = z.string().regex(/^[a-f0-9]{24}$/i, "Mã không hợp lệ.")
 
-export const saveToOrgSchema = z.strictObject({ name: z.string().trim().min(1).max(120) })
-export const importFromOrgSchema = z.strictObject({ org_template_id: objectId, intent: z.enum(TEMPLATE_INTENTS).optional() })
+/** FLF-395: `template_id` ⇒ lưu thành bản mới của mẫu có sẵn (tên bỏ qua). */
+export const saveToOrgSchema = z.strictObject({ name: z.string().trim().min(1).max(120), template_id: objectId.optional() })
+/** FLF-395 (D16): `version` trống ⇒ bản đã đăng mới nhất. */
+export const importFromOrgSchema = z.strictObject({ org_template_id: objectId, version: z.number().int().min(1).optional(), intent: z.enum(TEMPLATE_INTENTS).optional() })
+/** FLF-395: field chữ đi kèm file mẫu (multipart). Tên chỉ cần khi tạo mẫu mới. */
+export const uploadTemplateSchema = z.strictObject({ name: z.string().trim().min(1).max(120).optional() })
+/** FLF-395: Lead sửa mapping tự nhận theo vị trí heading rồi đăng. */
+export const publishVersionSchema = z.strictObject({
+  headings: z.array(z.strictObject({ index: z.number().int().min(0), section_id: z.string().min(1).max(120) })).max(1000).default([])
+})
+export const versionParamSchema = z.coerce.number().int().min(1)
 const contentBlockSchema = z.strictObject({ kind: z.enum(["paragraph", "list_item"]), text: z.string().trim().min(1).max(4000) })
 export const contentEntrySchema = z.strictObject({ title: z.string().trim().min(1).max(200), blocks: z.array(contentBlockSchema).min(1).max(50) })
 export const patchContentEntrySchema = contentEntrySchema
