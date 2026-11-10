@@ -147,7 +147,8 @@ export const DEFAULT_DIAGRAM_ENGINE = "plantuml@1"
  * (vd `"svg@1"`) — mọi hình đã vẽ của kind đó thành `diagram_stale` và được vẽ lại bằng renderer mới.
  */
 export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.freeze({
-  context: DEFAULT_DIAGRAM_ENGINE,
+  // svg@2 (FLF-396): đầu mũi tên data flow đổi từ phi tiêu khía lõm sang tam giác tô đặc ⇒ hình context cũ stale, vẽ lại
+  context: "svg@2",
   // svg@2 (FLF-369): bộ xếp thử nhiều phương án (thứ tự hàng, actor hai bên) ⇒ hình svg@1 cũ thành stale, vẽ lại một lượt
   usecase: "svg@2",
   screen_flow: "svg@3",
