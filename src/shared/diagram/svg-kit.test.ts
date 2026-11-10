@@ -57,6 +57,14 @@ describe("arrowHeadShape", () => {
     expect(arrowHeadShape("open", [0, 0], [-10, 0]).closed).toBe(false)
   })
 
+  it("classic (data flow context diagram) là tam giác tô đặc đáy thẳng, không khía lõm", () => {
+    const { points, filled, closed } = arrowHeadShape("classic", [100, 0], [0, 0])
+    expect(points).toHaveLength(3)
+    expect({ filled, closed }).toEqual({ filled: true, closed: true })
+    // hai góc đáy cùng lùi một khoảng ⇒ đáy thẳng, vuông góc với thân
+    expect(points[1][0]).toBeCloseTo(points[2][0])
+  })
+
   it("stereotype là ASCII thô", () => {
     expect(stereotype("include")).toBe("<<include>>")
   })
