@@ -458,6 +458,7 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-11-10 | FLF-395 (tự lưu khung mẫu, lát 2) | Additive: tự lưu khung mẫu tổ chức sau baseline cho dự án mẫu tự do; endpoint mới `GET /projects/:id/template-skeleton`, `POST …/template-skeleton/decisions`, `POST …/template-skeleton/suggest`; `call_kind` mới `skeleton_generic_names` (1 credit); thông báo `skeleton_headings_pending`; `OrgTemplateSummary.skeleton` + `pending_count`. Xem §FLF-395 "Tự lưu khung mẫu" |
 | 2026-11-10 | FLF-395 (version mẫu tổ chức, lát 1) | Additive + siết quyền: `OrgTemplate` thành họ mẫu, mỗi bản một `OrgTemplateVersion`; endpoint mới `POST /orgs/:orgId/templates`, `POST …/:templateId/versions`, `GET …/versions/:version`, `POST …/versions/:version/publish`, `DELETE …/versions/:version`; #8c nhận `version?`; #8d nhận `template_id?` và **chỉ Lead** (Analyst ⇒ `403 ORG_ROLE_FORBIDDEN`); xoá mẫu / bản chỉ Lead; `OrgTemplateSummary` thêm `latest_version`, `project_count`, `versions[]`; `GET /projects/:id` thêm `template_update`; `Project.template_ref`; `ImportedDocument.org_template_version`; thông báo `template_version_published`; .docx bị chặn theo byte giải nén thật + số mục. Xem §FLF-395 cuối file |
 | 2026-11-06 | FLF-360 (AI quá tải lúc import: tự đọc lại) | Additive: #4 trả thêm `reread: { kind: "images" \| "text", done, total, section_id } \| null` (đang đọc lại — FE hiện "Đang đọc lại ảnh N/M"). Hành vi §4.10: lô chữ lỗi tạm thời (quá tải, 503, 429 không phải hết tiền, timeout, mạng) đọc lại tối đa 3 lượt giãn dần rồi mới `paused: resume_later`; ảnh `unavailable` đọc lại sau khi chạy hết các mục; lỗi AI không tự khỏi ghi `diagram_images.kind = failed` (không đọc lại). Ảnh vẫn chưa đọc được sau bản 0.1 ⇒ job nền `import/reread-images` đọc lại theo lịch, ghi lô `by: import` (không version mới), đóng cờ `import_image_unread`. `credit_estimate` tính cả ảnh chờ đọc lại |
 | 2026-11-06 | FLF-278 (dự án "Upload SRS có sẵn": tải về giống file upload) | Hành vi, không đổi shape: export / version của dự án có sẵn (mẫu công ty hoặc cấu trúc FlintFlow đủ mục) dùng file upload làm nền, mục chưa đổi in nguyên văn, bảng lịch sử không thêm dòng import; SRS có field không còn 422. Xem §FLF-278 "Dự án Upload SRS có sẵn" |
@@ -728,3 +729,37 @@ template_family, project_count, created_at, headings[{ index, heading_text, sect
 - **.docx**: `DocxPackage` đếm byte giải nén thật khi đọc từng part (kích thước khai báo trong zip có thể bị ghi nhỏ) và chặn gói
   quá 5 000 mục ⇒ `FILE_TOO_LARGE` như trước.
 
+
+### Tự lưu khung mẫu sau baseline (FLF-395 lát 2, D12–D13)
+
+Dự án mẫu tự do (không phải `template_intent = fixed`) thuộc org, có file nền (`TemplateProfile.source_file_ref`), không theo mẫu do Lead đăng ⇒ ở mọi nơi tạo baseline (cuối
+finalize 0.1, chuyển từ mode 2 — chỉ dự án chế độ 3 có file mẫu, phát hành) FlintFlow dựng **khung** từ **file của chính bản vừa
+tạo** (khớp mẫu tất định, không AI), lưu thành mẫu tổ chức (`OrgTemplate.skeleton_of` = dự án, tên VI `<tên dự án> — khung` / EN
+`<tên dự án> — template` theo ngôn ngữ tài liệu) và gắn `template_ref`. Lỗi không chặn baseline / phát hành; lưu dở thì dọn họ / bản nháp.
+
+- **Khung** (allow-list): heading thuộc mẫu chuẩn (`fixed:*`, `group:*`, `slot:*`, hoặc khớp phần của ngân hàng) theo thứ tự + cấp;
+  hàng tiêu đề của bảng Code nhận ra cột (theo mapping cột) và bảng Record of Changes (không bao giờ có dòng dữ liệu); chữ hướng dẫn
+  chỉ khi mẫu đánh dấu bằng ngoặc **và** kiểu chữ hướng dẫn (`guidance_by = brackets+format`); styles / numbering / settings (bỏ mẫu
+  gắn kèm, biến tài liệu, rsid, mã định danh tài liệu…) / theme / bảng font, khổ giấy + lề. Bỏ: trang bìa, header / footer, docProps,
+  comment, customXml, ảnh, footnote, alt text của bảng, bảng khoá–giá trị, heading phần tử (`feature:*`, `function:*`) cùng nhánh.
+  Tên dự án trong chữ giữ lại ⇒ `{Tên khách hàng}` / `{Customer name}`.
+- **Heading chờ duyệt** (`pending_headings[{ key, heading_text, level, kind, standard_title, suggestion, suggestion_reason, decision:
+  pending | keep | generic | drop, generic_text }]`):
+  - `kind = custom` — mục BA tự đặt (`unmapped` / `custom:*`, kể cả lồng trong mục riêng khác): chưa duyệt thì không vào khung; được
+    giữ thì **chỉ heading** (không kéo bảng / chữ bên dưới).
+  - `kind = wording` — heading mẫu chuẩn nhưng chữ khác tên chuẩn ("1 Introduction to ACME"): chưa duyệt thì ghi tên chuẩn gần nhất
+    (`standard_title`, giữ số mục); giữ / dạng chung ⇒ chữ đã duyệt; bỏ ⇒ bỏ cả mục.
+  - Gợi ý không AI: tên dự án ⇒ chỗ trống. Có mục chờ ⇒ thông báo `skeleton_headings_pending` cho Lead + Analyst. Quyết định của bản
+    trước mang sang bản sau theo heading chuẩn hoá.
+- **Dấu khung** `skeleton_hash` = heading (cấp + chữ chuẩn hoá) + tiêu đề cột + heading còn chờ. Khung rỗng (không heading nào) ⇒
+  không lưu. Trùng một bản đã đăng trong org ⇒ không lưu, gắn dự án vào bản đó. Dự án đang theo khung (của mình hay dùng chung) mà
+  khung đổi ⇒ bản mới trong họ khung **của chính dự án** (chưa có thì tạo). Bản mới của khung tự lưu chỉ thuộc dự án nguồn: dự án khác
+  dùng chung khung không nhận `template_version_published`, không có `template_update`.
+
+| Method + path | Quyền | Body | Kết quả |
+|---|---|---|---|
+| `GET /projects/:id/template-skeleton` | thành viên | — | `{ template_id, name, version, pending_count, headings[], suggest_credit_cost } \| null` (null = dự án không có khung tự lưu của chính nó) |
+| `POST /projects/:id/template-skeleton/decisions` | lead, analyst | `{ decisions: [{ key, decision: keep \| generic \| drop, generic_text? }] }` | dựng lại khung từ đúng file nguồn của bản (`skeleton_source_ref`), cập nhật bản đang dùng (không đổi số); mục lồng mới lộ ra được thêm vào danh sách chờ; `generic` thiếu chữ và không có gợi ý ⇒ `400`; hai người duyệt cùng lúc ⇒ `409 SKELETON_CONFLICT`; không có khung ⇒ `404 SKELETON_NOT_FOUND` |
+| `POST /projects/:id/template-skeleton/suggest` | lead, analyst | — | nút "Gợi ý tên chung": **một** lượt AI cho mọi mục còn chờ (`call_kind` mới `skeleton_generic_names`, giá theo bảng giá — mặc định 1 credit, giữ credit trước), chỉ ghi gợi ý cho mục vẫn còn chờ lúc ghi; hết credit ⇒ `402 INSUFFICIENT_CREDIT`; AI lỗi ⇒ `502 SKELETON_SUGGEST_FAILED` |
+
+`OrgTemplateSummary` thêm `skeleton` (mẫu khung tự lưu) + `pending_count`; `TemplateVersionSummary` thêm `pending_count`.

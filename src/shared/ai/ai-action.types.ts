@@ -52,7 +52,11 @@ export enum ActionType {
   /** Trả lời câu hỏi trong chat chỉ từ chunk tri thức truy hồi được (K1..Kn), mỗi ý kèm trích dẫn. */
   KNOWLEDGE_ANSWER = "knowledge_answer",
   /** FLF-338 (§3.6.1): rút danh sách yêu cầu từ tài liệu thô, mỗi mục trỏ về đoạn nguồn + nhãn gợi ý. */
-  EXTRACT_REQUIREMENTS = "extract_requirements"
+  EXTRACT_REQUIREMENTS = "extract_requirements",
+
+  // ─── Mẫu tổ chức (FLF-395) ───
+  /** D13: gợi ý dạng chung (bỏ tên khách / hệ thống) cho mục BA tự đặt trước khi vào khung mẫu của org — một lượt cho cả danh sách. */
+  SKELETON_GENERIC_NAMES = "skeleton_generic_names"
 }
 
 /**
@@ -81,7 +85,8 @@ export const SKILL_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, string>>>
   [ActionType.CR_CONSISTENCY]: "cr-consistency",
   [ActionType.CR_MATERIAL_IMAGE]: "cr-material-image",
   [ActionType.KNOWLEDGE_ANSWER]: "knowledge-answer",
-  [ActionType.EXTRACT_REQUIREMENTS]: "extract-requirements"
+  [ActionType.EXTRACT_REQUIREMENTS]: "extract-requirements",
+  [ActionType.SKELETON_GENERIC_NAMES]: "skeleton-generic-names"
 }
 
 export interface AiActionInput {

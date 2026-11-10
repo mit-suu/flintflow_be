@@ -10,6 +10,7 @@ import { toImportDto } from "./import.service.js"
 import * as service from "./org-library.service.js"
 import { receiveDocx, requireFile } from "./import.controller.js"
 import * as versions from "./org-template-versions.service.js"
+import * as skeleton from "./template-skeleton.service.js"
 import type { TemplateActor } from "./org-template-versions.service.js"
 import {
   contentEntrySchema,
@@ -17,6 +18,7 @@ import {
   patchContentEntrySchema,
   publishVersionSchema,
   saveSectionSchema,
+  skeletonDecisionsSchema,
   saveToOrgSchema,
   uploadTemplateSchema,
   versionParamSchema
@@ -59,6 +61,21 @@ export const saveSectionToLibrary = mode1Handler(async (req, res) => {
   const p = await projectOf(req)
   const body = parseInput(saveSectionSchema, req.body)
   return sendSuccess(res, 201, await service.saveSectionToLibrary(p.projectId, p.orgId, p.userId, body.custom_section_id))
+})
+
+/** FLF-395 (D13): mục BA tự đặt của mẫu khung tự lưu — `null` khi dự án không có khung tự lưu. */
+export const getSkeletonPending = catchAsync(async (req: Request, res: Response) => {
+  const p = await projectOf(req)
+  return sendSuccess(res, 200, await skeleton.getPendingHeadings(p.projectId, p.orgId))
+})
+export const decideSkeletonPending = mode1Handler(async (req, res) => {
+  const p = await projectOf(req)
+  const body = parseInput(skeletonDecisionsSchema, req.body)
+  return sendSuccess(res, 200, await skeleton.decidePendingHeadings(p.projectId, p.orgId, req.orgContext!.role, body.decisions))
+})
+export const suggestSkeletonNames = mode1Handler(async (req, res) => {
+  const p = await projectOf(req)
+  return sendSuccess(res, 200, await skeleton.suggestGenericNames(p.projectId, p.orgId, p.userId, req.orgContext!.role))
 })
 
 export const listOrgTemplates = catchAsync(async (req: Request, res: Response) => sendSuccess(res, 200, await service.listOrgTemplates(orgOf(req), req.orgContext!.role)))

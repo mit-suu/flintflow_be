@@ -24,6 +24,7 @@ import { DocVersion, type IDocVersion } from "./doc-version.model.js"
 import { listDocVersions } from "./doc-version.service.js"
 import { renderVersionFile } from "./render-version.js"
 import { nextMajor } from "./versioning.js"
+import { autoSaveSkeleton } from "../import/template-skeleton.service.js"
 
 export interface ReleaseResult {
   version: IDocVersion
@@ -98,5 +99,7 @@ export const release = async (projectId: string, userId: string, baseVersion: nu
     record_snapshot: recordSnapshot ? [...recordSnapshot, releaseRow] : null,
     created_by: userId
   })
+  // FLF-395 (D12): khung đổi ở lần phát hành này ⇒ bản mới của mẫu khung tự lưu (lỗi không chặn phát hành)
+  await autoSaveSkeleton(projectId, userId, fileRef)
   return { version, baseline, cr_ids: crIds, spine_version: spineVersion }
 }
