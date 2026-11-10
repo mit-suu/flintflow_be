@@ -17,7 +17,8 @@ vi.mock("../render/docx-writer.js", async (importOriginal) => {
 })
 vi.mock("../../shared/ai/ai-action.service.js", () => ({ executeAiAction: vi.fn() }))
 // Dự án "Upload SRS có sẵn" đọc Project / TemplateProfile / DocVersion — ngoài phạm vi test này
-vi.mock("../render/source-fidelity.js", () => ({ sourceFidelityFor: vi.fn(async () => undefined) }))
+vi.mock("../render/source-fidelity.js", () => ({ sourceFidelityFor: vi.fn(async () => undefined), currentFidelityAnchor: vi.fn() }))
+vi.mock("../import/template-profile.model.js", () => ({ TemplateProfile: { findOne: () => ({ lean: async () => null }) } }))
 const { findProject } = vi.hoisted(() => ({ findProject: vi.fn() }))
 vi.mock("../project/project.model.js", () => ({ TEMPLATE_INTENTS: ["fixed", "free"], Project: { findById: () => ({ lean: findProject }) } }))
 vi.mock("../translation/translation.service.js", () => ({
@@ -28,6 +29,7 @@ import { loadFixedTemplateContext } from "../render/project-docx-writer.js"
 import type { TemplateSourceBinding } from "./template-source-binding.js"
 import { renderVersionFile } from "./render-version.js"
 import { renderSpineDocument } from "../render/assemble.service.js"
+import { sourceFidelityFor } from "../render/source-fidelity.js"
 import { writeDocx } from "../render/docx-writer.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { readZipText } from "../render/zip.test-helper.js"
@@ -90,4 +92,17 @@ it("assembles a bound version with the repaired original source layout and pinne
   const call = calls[calls.length - 1]!
   expect(call[3]).toMatchObject({ recordChanges: [] })
   expect(await call[4]!.loadTemplate!(PROJECT)).toBe(repaired)
+})
+
+describe("renderVersionFile — theo binding của version", () => {
+  it("mốc nguyên vẹn + ngôn ngữ nhãn lấy từ binding, không đọc ngôn ngữ hiện tại của dự án", async () => {
+    findProject.mockResolvedValue({ mode: "import", converted_from: "fpt", documentLanguage: "en" })
+    const anchor = { source_based: true, by_id: false, spine: null }
+    const binding = { source_file_ref: "raw", layout: [], fidelity_anchor: anchor, languages: { locale: "vi", source: "en" } } as unknown as TemplateSourceBinding
+    vi.mocked(loadFixedTemplateContext).mockResolvedValue({ template: Buffer.from("raw"), binding, layout: { fixedTemplate: true } as never, headingMap: [] })
+    const createdAt = new Date("2026-11-01")
+    await renderVersionFile(PROJECT, "Demo", {} as Spine, { version: "1.0", stampSource: "release", templateSource: binding, versionCreatedAt: createdAt })
+    expect(vi.mocked(renderSpineDocument).mock.calls[vi.mocked(renderSpineDocument).mock.calls.length - 1]![3]).toMatchObject({ languages: { locale: "vi", source: "en" } })
+    expect(vi.mocked(sourceFidelityFor)).toHaveBeenLastCalledWith(PROJECT, sample, expect.any(Function), { otherLanguage: false, anchor, versionCreatedAt: createdAt })
+  })
 })

@@ -1,4 +1,3 @@
-import { Project } from "../project/project.model.js"
 import { spineSchema } from "../spine/spine.schema.js"
 import { DocVersion } from "./doc-version.model.js"
 import { FIXED_TEMPLATE_RENDERER_REVISION, templateLayoutUnavailable } from "./template-source-binding.js"
@@ -106,10 +105,9 @@ export const downloadVersion = async (
   options: DownloadLanguageOptions = {}
 ): Promise<DownloadFile> => {
   const v = await requireDocVersion(projectId, version)
-  const intent = options.project?.template_intent === undefined
-    ? (await Project.findById(projectId, { template_intent: 1 }).lean())?.template_intent
-    : options.project.template_intent
-  const fixed = intent === "fixed"
+  // Đường in chọn theo từng version (binding mẫu đã ghi cùng version), không theo `template_intent` hiện tại của dự án:
+  // dự án đổi mẫu về sau không làm version cũ đổi đường in hay báo thiếu nguồn mẫu.
+  const fixed = !!v.template_source
   const languages = options.lang && options.project ? await projectLanguages(projectId, options.project) : null
   const otherLanguage = !!languages && options.lang !== languages.locale
   if (otherLanguage && variant !== "auto") {
@@ -122,7 +120,6 @@ export const downloadVersion = async (
     // Chỉ version có snapshot baseline của dự án chuyển từ mode 2 — import thật (đường layout) / bản nháp CR chưa hỗ trợ
     if (!options.project || !otherLanguageAvailable(v, options.project)) throw documentLanguageUnavailable()
     const locale = options.lang!
-    if (fixed && !v.template_source) throw templateLayoutUnavailable()
     const spine = await loadBaselineSpine(projectId, v.baseline_ref!)
     if (locale !== languages!.source) await assertTranslationComplete(projectId, locale, spine)
     // Dựng mỗi lần, không ghi GridFS: file lưu của version giữ ngôn ngữ tài liệu
@@ -130,7 +127,9 @@ export const downloadVersion = async (
       version: v.version,
       stampSource: v.kind === "release" ? "release" : CONVERT_STAMP_SOURCE,
       languages: { locale, source: languages!.source },
-      ...(fixed ? { templateSource: v.template_source ?? null, recordChanges: v.record_snapshot ?? [] } : {})
+      templateSource: v.template_source ?? null,
+      versionCreatedAt: v.createdAt,
+      ...(fixed ? { recordChanges: v.record_snapshot ?? [] } : {})
     })
     const pkg = await DocxPackage.load(rendered)
     await stampDownload(pkg, projectId, v, lineage)
@@ -174,7 +173,7 @@ const fixedVersionFile = async (projectId: string, projectName: string, v: IDocV
   const parsed = spineSchema.safeParse(snapshot)
   if (!parsed.success) throw templateLayoutUnavailable()
   const rendered = await renderVersionFile(projectId, projectName, parsed.data, {
-    version: v.version, stampSource: v.kind, templateSource: v.template_source, recordChanges: v.record_snapshot ?? []
+    version: v.version, stampSource: v.kind, templateSource: v.template_source, recordChanges: v.record_snapshot ?? [], versionCreatedAt: v.createdAt
   })
   const ref = await docFileStore().save(rendered, {
     projectId, kind: "version", name: `${v.version}_${FIXED_TEMPLATE_RENDERER_REVISION}`

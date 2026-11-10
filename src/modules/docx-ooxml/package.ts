@@ -16,6 +16,14 @@ export interface Relationship {
   id: string
   type: string
   target: string
+  /** `TargetMode` của rels — chỉ có khi gói khai báo (`External` = liên kết ra ngoài, `target` là URL chứ không phải part). */
+  targetMode?: "External" | "Internal"
+}
+
+export interface AddRelationshipOptions {
+  idPrefix?: string
+  /** `External` ⇒ ghi `TargetMode="External"` (URL ngoài gói). */
+  targetMode?: "External"
 }
 
 /** `word/document.xml` ⇒ `word/_rels/document.xml.rels`; `""` (gốc gói) ⇒ `_rels/.rels`. */
@@ -144,6 +152,13 @@ export class DocxPackage {
     ct.documentElement.appendChild(override)
   }
 
+  /** Xoá hẳn một part khỏi gói (không đụng `[Content_Types].xml` / rels — người gọi dọn phần khai báo). */
+  removePart(name: string): void {
+    this.zip.remove(name)
+    this.parts.delete(name)
+    this.originalXml.delete(name)
+  }
+
   async requireXml(name: string): Promise<Document> {
     const doc = await this.xml(name)
     if (!doc) throw new OoxmlError("PART_MISSING", `Thiếu part ${name}`)
@@ -167,15 +182,20 @@ export class DocxPackage {
   async relationships(ownerPart: string): Promise<Relationship[]> {
     const rels = await this.xml(relsPathOf(ownerPart))
     if (!rels) return []
-    return Array.from(rels.getElementsByTagNameNS(NS.rels, "Relationship")).map((r) => ({
-      id: r.getAttribute("Id") ?? "",
-      type: r.getAttribute("Type") ?? "",
-      target: r.getAttribute("Target") ?? ""
-    }))
+    return Array.from(rels.getElementsByTagNameNS(NS.rels, "Relationship")).map((r) => {
+      const mode = r.getAttribute("TargetMode")
+      return {
+        id: r.getAttribute("Id") ?? "",
+        type: r.getAttribute("Type") ?? "",
+        target: r.getAttribute("Target") ?? "",
+        ...(mode === "External" || mode === "Internal" ? { targetMode: mode } : {})
+      }
+    })
   }
 
-  /** Thêm quan hệ từ `ownerPart` tới `target` (đường dẫn tương đối như Word ghi). Trả `Id` mới. */
-  async addRelationship(ownerPart: string, type: string, target: string, idPrefix = "rIdFF"): Promise<string> {
+  /** Thêm quan hệ từ `ownerPart` tới `target` (đường dẫn tương đối như Word ghi, hoặc URL khi `targetMode: "External"`). Trả `Id` mới. */
+  async addRelationship(ownerPart: string, type: string, target: string, opts: AddRelationshipOptions = {}): Promise<string> {
+    const idPrefix = opts.idPrefix ?? "rIdFF"
     const path = relsPathOf(ownerPart)
     let rels = await this.xml(path)
     if (!rels) {
@@ -189,6 +209,7 @@ export class DocxPackage {
     rel.setAttribute("Id", `${idPrefix}${k}`)
     rel.setAttribute("Type", type)
     rel.setAttribute("Target", target)
+    if (opts.targetMode) rel.setAttribute("TargetMode", opts.targetMode)
     rels.documentElement.appendChild(rel)
     return `${idPrefix}${k}`
   }

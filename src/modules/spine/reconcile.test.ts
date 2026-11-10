@@ -62,6 +62,8 @@ const db = vi.hoisted(() => {
   return { Spine, Change, spines, changes, reset }
 })
 
+// Rào đổi mẫu đọc Mongo; bản test thuần không có DB
+vi.mock("../template-migration/migration-guard.js", () => ({ assertNoMigrationRunning: async () => undefined }))
 vi.mock("./spine.model.js", () => ({ Spine: db.Spine }))
 vi.mock("./change.model.js", () => ({ Change: db.Change }))
 // FLF-265: kho bản dịch trong bộ nhớ (project `unit` không nối Mongo)

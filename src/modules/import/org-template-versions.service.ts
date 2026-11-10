@@ -11,6 +11,8 @@ import { docFileStore } from "../doc-version/doc-file.store.js"
 import { Membership, type OrgRole } from "../organization/membership.model.js"
 import { notify } from "../notification/notification.service.js"
 import { Project } from "../project/project.model.js"
+import { TemplateMigration } from "../template-migration/template-migration.model.js"
+import { User } from "../user/user.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { OrgTemplate, OrgTemplateVersion, type IOrgTemplate, type IOrgTemplateVersion, type OrgTemplateColumn, type OrgTemplateHeading } from "./org-library.model.js"
@@ -42,6 +44,7 @@ export interface AnalyzedTemplate {
 }
 
 const NOT_FOUND = () => new ApiError(404, "Không tìm thấy mẫu của tổ chức.", "ORG_TEMPLATE_NOT_FOUND")
+const MIGRATION_IN_USE = () => new ApiError(409, "Có dự án đang đổi sang mẫu này (chưa áp dụng hoặc huỷ), chưa xoá được.", "ORG_TEMPLATE_IN_USE_BY_MIGRATION")
 const VERSION_NOT_FOUND = () => new ApiError(404, "Không tìm thấy bản này của mẫu.", "ORG_TEMPLATE_VERSION_NOT_FOUND")
 
 /** Chỉ Lead (hoặc hệ thống) đăng được bản mẫu dùng chung cho org. */
@@ -143,13 +146,21 @@ export const materializeLegacyVersion = async (t: IOrgTemplate): Promise<IOrgTem
   return created
 }
 
+/** Họ mẫu của thư viện tổ chức (không gồm họ ẩn của dự án — xem `findFamilyAny`). */
 export const findFamily = async (orgId: string, templateId: string): Promise<IOrgTemplate> => {
+  const t = mongoose.isValidObjectId(templateId) ? await OrgTemplate.findOne({ _id: templateId, orgId, project_id: null }) : null
+  if (!t) throw NOT_FOUND()
+  return t
+}
+
+/** Mọi họ mẫu của org kể cả họ ẩn của dự án — chỉ cho luồng đổi mẫu, nơi người gọi tự kiểm họ ẩn có thuộc dự án mình không. */
+export const findFamilyAny = async (orgId: string, templateId: string): Promise<IOrgTemplate> => {
   const t = mongoose.isValidObjectId(templateId) ? await OrgTemplate.findOne({ _id: templateId, orgId }) : null
   if (!t) throw NOT_FOUND()
   return t
 }
 
-const findVersion = async (orgId: string, templateId: string, version: number): Promise<IOrgTemplateVersion> => {
+export const findVersion = async (orgId: string, templateId: string, version: number): Promise<IOrgTemplateVersion> => {
   const v = Number.isInteger(version) && version > 0 && mongoose.isValidObjectId(templateId) ? await OrgTemplateVersion.findOne({ template_id: templateId, orgId, version }) : null
   if (!v) throw VERSION_NOT_FOUND()
   return v
@@ -187,6 +198,54 @@ export const createDraftVersion = async (
   }
 }
 
+/**
+ * Bản riêng của một dự án (Analyst tải file khi đổi mẫu): không hiện ở thư viện, không thông báo, không tính vào `latest_version`.
+ * Họ mẫu ẩn dùng lại cho các lần tải sau của cùng dự án.
+ */
+export const createProjectVersion = async (
+  orgId: string,
+  projectId: string,
+  projectName: string,
+  actor: TemplateActor,
+  file: TemplateFile,
+  analyzed: AnalyzedTemplate
+): Promise<{ family: IOrgTemplate; version: IOrgTemplateVersion }> => {
+  const existing = await OrgTemplate.findOne({ orgId, project_id: projectId })
+  const family =
+    existing ??
+    (await OrgTemplate.create({ orgId, name: `${projectName.trim().slice(0, 100)} — mẫu tải lên`, created_by: actor.userId, latest_version: 0, project_id: projectId }))
+  const fileRef = await docFileStore().save(file.buffer, { projectId: `org-${orgId}`, kind: "upload", name: file.originalname })
+  try {
+    const version = await createNextVersion({
+      template_id: family._id as mongoose.Types.ObjectId,
+      orgId: new mongoose.Types.ObjectId(orgId),
+      status: "published",
+      visibility: "project",
+      project_id: new mongoose.Types.ObjectId(projectId),
+      source_file: { name: file.originalname, size: file.size, sha256: createHash("sha256").update(file.buffer).digest("hex") },
+      file_ref: fileRef,
+      template_family: analyzed.template_family,
+      language: analyzed.language,
+      headings: analyzed.headings,
+      table_map: analyzed.table_map,
+      created_by: new mongoose.Types.ObjectId(actor.userId),
+      published_at: new Date()
+    })
+    return { family, version }
+  } catch (err) {
+    await docFileStore().remove(fileRef).catch(() => undefined)
+    if (!existing) await OrgTemplate.deleteOne({ _id: family._id })
+    throw err
+  }
+}
+
+/** Huỷ bản riêng của dự án vừa tạo mà lần đổi mẫu không lập được (không để bản mồ côi). */
+export const discardProjectVersion = async (version: IOrgTemplateVersion): Promise<void> => {
+  await OrgTemplateVersion.deleteOne({ _id: version._id })
+  await docFileStore().remove(version.file_ref).catch(() => undefined)
+  if (!(await OrgTemplateVersion.exists({ template_id: version.template_id }))) await OrgTemplate.deleteOne({ _id: version.template_id })
+}
+
 /** Tải file mẫu lên thư viện: họ mới (`templateId` trống, cần `name`) hoặc bản mới của họ có sẵn. Ra bản nháp chờ Lead rà mapping. */
 export const uploadTemplateDraft = async (
   orgId: string,
@@ -201,7 +260,7 @@ export const uploadTemplateDraft = async (
   const target = family ?? (await OrgTemplate.create({ orgId, name: input.name!.trim(), created_by: actor.userId, latest_version: 0 }))
   try {
     const draft = await createDraftVersion(orgId, actor, target, input.file, analyzed)
-    return detailOf(target, draft)
+    return detailOf(target, draft, 0, await publisherNames(orgId, [draft.created_by]))
   } catch (err) {
     if (!family) await OrgTemplate.deleteOne({ _id: target._id })
     throw err
@@ -245,7 +304,7 @@ export const publishVersion = async (
   const updated = await OrgTemplate.findOneAndUpdate({ _id: family._id }, { $max: { latest_version: published.version } }, { returnDocument: "after" })
   // Đăng một bản nháp cũ hơn bản mới nhất ⇒ không có gì mới để báo
   if (updated && updated.latest_version === published.version) await notifyNewVersion(orgId, updated, published.version, actor.userId, opts.skipProjectIds ?? [])
-  return detailOf(updated ?? family, published)
+  return detailOf(updated ?? family, published, 0, await publisherNames(orgId, [published.created_by]))
 }
 
 /** D3: báo Lead + Analyst (không Viewer, không người vừa đăng) khi org còn dự án theo bản cũ hơn. Lỗi không chặn việc đăng. */
@@ -290,6 +349,8 @@ export interface TemplateVersionSummary {
   project_count: number
   /** FLF-395 (D13): mục BA tự đặt của mẫu khung còn chờ duyệt. */
   pending_count: number
+  /** Người tạo / đăng bản này (tên hiển thị nếu còn là thành viên của org, không thì chỉ id); `null` khi bản ghi cũ không còn người tạo. */
+  published_by: { id: string; name: string | null } | null
   created_at: string
 }
 
@@ -301,9 +362,21 @@ export interface TemplateVersionDetail extends TemplateVersionSummary {
 
 const familyLabel = (f: string | null | undefined) => (f ? normalizeTemplateFamily(f) : null)
 
+/** Tên hiển thị của người tạo bản, chỉ cho người vẫn là thành viên của chính org (không lộ tên người ngoài org). */
+const publisherNames = async (orgId: string, userIds: readonly unknown[]): Promise<Map<string, string>> => {
+  const ids = [...new Set(userIds.filter(Boolean).map(String))]
+  if (!ids.length) return new Map()
+  const members = await Membership.find({ organizationId: orgId, userId: { $in: ids } }).select("userId").lean()
+  const memberIds = members.map((m) => String(m.userId))
+  if (!memberIds.length) return new Map()
+  const users = await User.find({ _id: { $in: memberIds } }).select("name").lean()
+  return new Map(users.map((u) => [String(u._id), u.name?.trim() ?? ""]).filter(([, name]) => !!name) as [string, string][])
+}
+
 const versionSummary = (
-  v: Pick<IOrgTemplateVersion, "version" | "status" | "source_file" | "headings" | "language" | "template_family" | "createdAt"> & { pending_headings?: { decision: string }[] },
-  projectCount: number
+  v: Pick<IOrgTemplateVersion, "version" | "status" | "source_file" | "headings" | "language" | "template_family" | "createdAt"> & { pending_headings?: { decision: string }[]; created_by?: unknown },
+  projectCount: number,
+  names: ReadonlyMap<string, string> = new Map()
 ): TemplateVersionSummary => ({
   version: v.version,
   status: v.status,
@@ -314,11 +387,12 @@ const versionSummary = (
   template_family: familyLabel(v.template_family),
   project_count: projectCount,
   pending_count: (v.pending_headings ?? []).filter((p) => p.decision === "pending").length,
+  published_by: v.created_by ? { id: String(v.created_by), name: names.get(String(v.created_by)) ?? null } : null,
   created_at: v.createdAt.toISOString()
 })
 
-const detailOf = (family: IOrgTemplate, v: IOrgTemplateVersion, projectCount = 0): TemplateVersionDetail => ({
-  ...versionSummary(v, projectCount),
+const detailOf = (family: IOrgTemplate, v: IOrgTemplateVersion, projectCount = 0, names: ReadonlyMap<string, string> = new Map()): TemplateVersionDetail => ({
+  ...versionSummary(v, projectCount, names),
   template_id: String(family._id),
   name: family.name,
   headings: v.headings.map((h, index) => ({ index, heading_text: h.heading_text, section_id: h.section_id, ...(h.auto_confirmed ? { auto_confirmed: true } : {}), ...(h.guidance ? { guidance: h.guidance } : {}) }))
@@ -332,6 +406,7 @@ const legacyView = (t: IOrgTemplate) => ({
   headings: t.headings!,
   language: "en",
   template_family: t.template_family ?? null,
+  created_by: t.created_by,
   createdAt: t.createdAt
 })
 
@@ -351,18 +426,20 @@ export interface OrgTemplateSummary {
   pending_count: number
   /** Mẫu khung tự lưu từ một dự án (D12). */
   skeleton: boolean
+  /** Dự án nguồn của mẫu khung tự lưu (mở màn duyệt heading chờ từ thư viện); mẫu thường ⇒ `null`. */
+  skeleton_source_project_id: string | null
   /** Mới nhất trước. Bản nháp chỉ trả cho Lead. */
   versions: TemplateVersionSummary[]
 }
 
 /** Thư viện mẫu của org: mỗi họ kèm các bản + số dự án theo từng bản — 3 truy vấn cho cả trang, không N+1. */
 export const listOrgTemplates = async (orgId: string, role: OrgRole): Promise<OrgTemplateSummary[]> => {
-  const families = await OrgTemplate.find({ orgId }).sort({ uses: -1, updatedAt: -1 }).limit(100)
+  const families = await OrgTemplate.find({ orgId, project_id: null }).sort({ uses: -1, updatedAt: -1 }).limit(100)
   if (!families.length) return []
   const ids = families.map((f) => f._id)
   const [versions, counts] = await Promise.all([
     OrgTemplateVersion.find({ orgId, template_id: { $in: ids }, visibility: "org", ...(role === "lead" ? {} : { status: "published" }) })
-      .select("template_id version status source_file headings language template_family pending_headings createdAt")
+      .select("template_id version status source_file headings language template_family pending_headings created_by createdAt")
       .sort({ version: -1 })
       .lean(),
     Project.aggregate<{ _id: { t: mongoose.Types.ObjectId; v: number }; n: number }>([
@@ -370,11 +447,12 @@ export const listOrgTemplates = async (orgId: string, role: OrgRole): Promise<Or
       { $group: { _id: { t: "$template_ref.template_id", v: "$template_ref.version" }, n: { $sum: 1 } } }
     ])
   ])
+  const names = await publisherNames(orgId, [...versions.map((v) => v.created_by), ...families.filter(isLegacy).map((f) => f.created_by)])
   const countOf = (t: unknown, v: number) => counts.find((c) => String(c._id.t) === String(t) && c._id.v === v)?.n ?? 0
   return families.flatMap((f) => {
     const own = versions.filter((v) => String(v.template_id) === String(f._id))
     const rows = own.length ? own : isLegacy(f) ? [legacyView(f)] : []
-    const summaries = rows.map((v) => versionSummary(v as IOrgTemplateVersion, countOf(f._id, v.version)))
+    const summaries = rows.map((v) => versionSummary(v as IOrgTemplateVersion, countOf(f._id, v.version), names))
     const latest = rows.find((v) => v.status === "published")
     // Họ chỉ có bản nháp: chỉ Lead thấy (để đăng tiếp hoặc xoá)
     if (!latest && role !== "lead") return []
@@ -394,6 +472,7 @@ export const listOrgTemplates = async (orgId: string, role: OrgRole): Promise<Or
         project_count: summaries.reduce((n, s) => n + s.project_count, 0),
         pending_count: summaries[0]?.pending_count ?? 0,
         skeleton: !!f.skeleton_of,
+        skeleton_source_project_id: f.skeleton_of ? String(f.skeleton_of) : null,
         versions: summaries
       }
     ]
@@ -406,7 +485,7 @@ export const getVersionDetail = async (orgId: string, role: OrgRole, templateId:
   const v = await findVersion(orgId, templateId, version)
   if (v.visibility !== "org" || (v.status === "draft" && role !== "lead")) throw VERSION_NOT_FOUND()
   const projectCount = await Project.countDocuments({ organizationId: orgId, "template_ref.template_id": family._id, "template_ref.version": version })
-  return detailOf(family, v, projectCount)
+  return detailOf(family, v, projectCount, await publisherNames(orgId, [v.created_by]))
 }
 
 /**
@@ -433,6 +512,8 @@ export const deleteVersion = async (orgId: string, templateId: string, version: 
   const family = await findFamily(orgId, templateId)
   await materializeLegacyVersion(family)
   const v = await findVersion(orgId, templateId, version)
+  // Một lần đổi mẫu chưa kết thúc đang trỏ tới bản này (bước áp dụng cần đọc file của nó)
+  if (await TemplateMigration.exists({ "to.template_id": family._id, "to.version": version, open: true })) throw MIGRATION_IN_USE()
   const projectCount = await Project.countDocuments({ organizationId: orgId, "template_ref.template_id": family._id, "template_ref.version": version })
   await OrgTemplateVersion.deleteOne({ _id: v._id })
   await docFileStore().remove(v.file_ref).catch(() => undefined)
@@ -449,6 +530,7 @@ export const deleteVersion = async (orgId: string, templateId: string, version: 
 /** Xoá cả họ mẫu cùng mọi bản + file. */
 export const deleteFamily = async (orgId: string, templateId: string): Promise<{ deleted: true; project_count: number }> => {
   const family = await findFamily(orgId, templateId)
+  if (await TemplateMigration.exists({ "to.template_id": family._id, open: true })) throw MIGRATION_IN_USE()
   const versions = await OrgTemplateVersion.find({ template_id: family._id, orgId }).select("file_ref").lean()
   const projectCount = await Project.countDocuments({ organizationId: orgId, "template_ref.template_id": family._id })
   await OrgTemplateVersion.deleteMany({ template_id: family._id, orgId })

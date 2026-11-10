@@ -56,7 +56,9 @@ export enum ActionType {
 
   // ─── Mẫu tổ chức (FLF-395) ───
   /** D13: gợi ý dạng chung (bỏ tên khách / hệ thống) cho mục BA tự đặt trước khi vào khung mẫu của org — một lượt cho cả danh sách. */
-  SKELETON_GENERIC_NAMES = "skeleton_generic_names"
+  SKELETON_GENERIC_NAMES = "skeleton_generic_names",
+  /** D8: lựa chọn của BA khi đổi mẫu cần AI — chuyển mục riêng chữ tự do vào mục có cấu trúc (sinh op) hoặc giải quyết conflict (chọn cách ghép). Một lượt mỗi mục. */
+  TEMPLATE_MIGRATION_RESOLVE = "template_migration_resolve"
 }
 
 /**
@@ -86,7 +88,8 @@ export const SKILL_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, string>>>
   [ActionType.CR_MATERIAL_IMAGE]: "cr-material-image",
   [ActionType.KNOWLEDGE_ANSWER]: "knowledge-answer",
   [ActionType.EXTRACT_REQUIREMENTS]: "extract-requirements",
-  [ActionType.SKELETON_GENERIC_NAMES]: "skeleton-generic-names"
+  [ActionType.SKELETON_GENERIC_NAMES]: "skeleton-generic-names",
+  [ActionType.TEMPLATE_MIGRATION_RESOLVE]: "template-migration-resolve"
 }
 
 export interface AiActionInput {

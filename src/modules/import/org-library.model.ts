@@ -55,6 +55,8 @@ export interface IOrgTemplate extends Document {
   version_seq: number
   /** FLF-395 (D12): mẫu khung tự lưu từ dự án này (dự án mẫu tự do sau baseline); `null` = mẫu Lead đăng. */
   skeleton_of: mongoose.Types.ObjectId | null
+  /** Họ ẩn của riêng một dự án (file Analyst tải lên khi đổi mẫu): không hiện ở thư viện, route thư viện không nhắm tới được; `null` = họ của thư viện. */
+  project_id: mongoose.Types.ObjectId | null
   created_by: mongoose.Types.ObjectId
   uses: number
   /** Bản ghi cũ (trước FLF-395). */
@@ -73,6 +75,7 @@ const orgTemplateSchema = new Schema<IOrgTemplate>(
     latest_version: { type: Number, default: 0, min: 0 },
     version_seq: { type: Number, default: 0, min: 0 },
     skeleton_of: { type: Schema.Types.ObjectId, ref: "Project", default: null },
+    project_id: { type: Schema.Types.ObjectId, ref: "Project", default: null },
     created_by: { type: Schema.Types.ObjectId, ref: "User", required: true },
     uses: { type: Number, default: 0, min: 0 },
     source_file: { type: sourceFileSchema, default: undefined },

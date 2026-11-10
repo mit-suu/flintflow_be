@@ -145,6 +145,19 @@ export interface ITemplateProfile extends Document {
    */
   flow2_entry_spine?: Spine | null
   flow2_entry_at?: Date | null
+  /**
+   * Sau khi đổi mẫu: `source_file_ref` là file nền mới do FlintFlow dựng (kể cả dự án chưa từng có file nền). Mốc áp dụng + Spine
+   * lúc áp dụng — mốc so "nguyên vẹn" của bản in thay cho Spine lúc import. Chưa đổi mẫu ⇒ null.
+   */
+  migrated_base_at?: Date | null
+  migrated_base_spine?: Spine | null
+  /** Lần đổi mẫu mà `TemplateMigration.anchor_spine` là mốc nguyên vẹn hiện tại (không chép Spine vào profile — trần 16MB). `migrated_base_spine` chỉ còn cho dữ liệu cũ. */
+  migrated_base_migration_id?: mongoose.Types.ObjectId | null
+  /**
+   * Sau khi đổi mẫu: `section_id` của các mục mẫu đích có nội dung mà dự án chưa có gì để đặt (mục thiếu — trống + hướng dẫn của mẫu).
+   * Cờ đỏ chặn phát hành suy từ danh sách này cho tới khi BA viết xong; chỉ `template-migration` ghi.
+   */
+  migration_missing_sections?: string[]
   createdAt: Date
   updatedAt: Date
 }
@@ -225,6 +238,10 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
     structure_preview: { type: Schema.Types.Mixed, default: null },
     flow2_entry_spine: { type: Schema.Types.Mixed, default: null },
     flow2_entry_at: { type: Date, default: null },
+    migrated_base_at: { type: Date, default: null },
+    migrated_base_spine: { type: Schema.Types.Mixed, default: null },
+    migrated_base_migration_id: { type: Schema.Types.ObjectId, ref: "TemplateMigration", default: null },
+    migration_missing_sections: { type: [String], default: [] },
     // FLF-366: đoạn nguyên văn theo mục (`SectionSegments` — khối gốc, phần tử, dấu) — chỉ để in lại
     section_segments: { type: Schema.Types.Mixed, default: [] },
     section_slices: {

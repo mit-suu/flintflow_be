@@ -44,6 +44,18 @@ describe("DocxPackage", () => {
     expect(await out.file("word/_rels/document.xml.rels")!.async("string")).toContain(`Target="extra.xml"`)
   })
 
+  it("giữ TargetMode khi đọc và ghi quan hệ ngoài gói", async () => {
+    const pkg = await DocxPackage.load(await makeDocx({ body: p("a") }))
+    const id = await pkg.addRelationship("word/document.xml", "urn:link", "https://example.com/a", { targetMode: "External" })
+    await pkg.addRelationship("word/document.xml", "urn:t", "x.xml")
+    const reloaded = await DocxPackage.load(await pkg.toBuffer())
+    const rels = await reloaded.relationships("word/document.xml")
+    expect(rels.find((r) => r.id === id)).toMatchObject({ target: "https://example.com/a", targetMode: "External" })
+    expect(rels.find((r) => r.target === "x.xml")).not.toHaveProperty("targetMode")
+    const xml = await (await JSZip.loadAsync(await pkg.toBuffer())).file("word/_rels/document.xml.rels")!.async("string")
+    expect(xml).toContain('TargetMode="External"')
+  })
+
   it("addXmlPart trên part đã có trả part cũ", async () => {
     const pkg = await DocxPackage.load(await makeDocx({ body: p("a") }))
     const doc = await pkg.requireXml("word/document.xml")

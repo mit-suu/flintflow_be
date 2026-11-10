@@ -1,3 +1,4 @@
+import { assertNoMigrationRunning } from "../template-migration/migration-guard.js"
 import { listChangesForRecord } from "../render/assemble.service.js"
 import { captureTemplateSourceBinding } from "./template-source-binding.js"
 /**
@@ -34,6 +35,7 @@ export interface ReleaseResult {
 }
 
 export const release = async (projectId: string, userId: string, baseVersion: number): Promise<ReleaseResult> => {
+  await assertNoMigrationRunning(projectId)
   const before = await spineRepository.get(projectId)
   if (!before) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   if (before.spine_version !== baseVersion) {
