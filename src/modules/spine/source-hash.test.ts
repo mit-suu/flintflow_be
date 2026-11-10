@@ -152,6 +152,7 @@ describe("renderedDiagramHash — hash của hình đã vẽ theo engine (FLF-33
 describe("renderedDiagramHash — usecase", () => {
   it("bộ xếp thử nhiều phương án (svg@2) làm hình use case svg@1 cũ thành stale", () => {
     const usecase = { kind: "usecase" as const, owner_id: null }
+    expect(DIAGRAM_ENGINES.context).toBe("svg@2")
     expect(DIAGRAM_ENGINES.usecase).toBe("svg@2")
     expect(renderedDiagramHash(FIXTURE, usecase)).not.toBe(renderedDiagramHash(FIXTURE, usecase, { ...DIAGRAM_ENGINES, usecase: "svg@1" }))
   })
