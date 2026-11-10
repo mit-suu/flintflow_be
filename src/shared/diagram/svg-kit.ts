@@ -59,7 +59,7 @@ const frame = (tip: Point, from: Point) => {
 /**
  * Hình đầu mũi tên tại `tip`, đường đi tới từ `from`.
  * - `open`: V mở (dependency, navigation) — polyline, không tô.
- * - `classic`: phi tiêu tô đặc khía lõm (data flow DFD của VP).
+ * - `classic`: tam giác tô đặc, đáy thẳng (data flow DFD — context diagram).
  * - `triangle`: tam giác rỗng (generalization, realization).
  * - `triangle_filled`: tam giác nhỏ tô đặc (điều hướng màn hình — hình mẫu Screens Flow của template SRS FPT).
  * - `diamond` / `diamond_filled`: thoi (aggregation / composition).
@@ -71,7 +71,7 @@ export const arrowHeadShape = (style: ArrowHead, tip: Point, from: Point): { poi
       // dài 12, mở ±0.42 rad — như `arrowhead` của docs/diagram_guideline/svg-kit.mjs
       return { points: [at(12 * Math.cos(0.42), 12 * Math.sin(0.42)), tip, at(12 * Math.cos(0.42), -12 * Math.sin(0.42))], closed: false, filled: false }
     case "classic":
-      return { points: [tip, at(13, 5.5), at(13 * 0.55, 0), at(13, -5.5)], closed: true, filled: true }
+      return { points: [tip, at(12, 5), at(12, -5)], closed: true, filled: true }
     case "triangle":
       return { points: [tip, at(14, 7), at(14, -7)], closed: true, filled: false }
     case "triangle_filled":

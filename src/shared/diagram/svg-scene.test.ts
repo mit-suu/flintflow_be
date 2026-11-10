@@ -85,7 +85,7 @@ describe("Scene.toSvg — tất định", () => {
       <text x="85.06" y="52" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" font-weight="bold" fill="#000">Analyst</text>
       <circle cx="400" cy="47" r="40" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
       <line x1="160.12" y1="47" x2="360" y2="47" stroke="#000" stroke-width="1.2"/>
-      <polygon points="360,47 347,52.5 352.85,47 347,41.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+      <polygon points="360,47 348,52 348,42" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
       <rect x="242.33" y="38.5" width="35.46" height="17" fill="#fff"/>
       <text x="260.06" y="47" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Data</text>
       </svg>
