@@ -108,7 +108,7 @@ export const translateForMigration = async (input: TranslateStepInput): Promise<
     )
     creditsUsed += result.cost ?? 0
     const accepted = acceptBatchItems(batch, result.data.items)
-    if (!accepted.length) throw new ApiError(502, "Dịch lô nội dung không trả về bản dịch hợp lệ nào. Chưa ghi gì vào tài liệu — thử áp dụng lại.", TRANSLATION_INCOMPLETE)
+    if (!accepted.length) throw new ApiError(502, "Dịch lô nội dung không trả về bản dịch hợp lệ nào. Chưa ghi gì vào tài liệu - thử áp dụng lại.", TRANSLATION_INCOMPLETE)
     for (const a of accepted) done.set(a.sourceHash, { key: a.key, source_hash: a.sourceHash, text: a.text })
     untranslated += batch.length - accepted.length
     glossary.push(...namesOf(accepted))

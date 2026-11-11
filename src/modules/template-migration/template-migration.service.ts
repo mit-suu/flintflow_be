@@ -347,7 +347,7 @@ const prepare = async (projectId: string, spine: Spine, profile: ITemplateProfil
   if (previous?.applied_at) {
     const result = await editedSince(projectId, previous.applied_at, sectionKeyResolver(from.headings, pairing.followers))
     edited = result.sections
-    if (result.unattributed) warnings.push(`${result.unattributed} thay đổi sau lần đổi mẫu trước không gắn được vào mục nào của tài liệu — kiểm tra lại khi áp dụng.`)
+    if (result.unattributed) warnings.push(`${result.unattributed} thay đổi sau lần đổi mẫu trước không gắn được vào mục nào của tài liệu - kiểm tra lại khi áp dụng.`)
   }
   const analysis: MigrationAnalysis = { old_tables: toRecord(oldTables), new_tables: toRecord(newSide.tables), edited }
   const groups = classify({ old: from.headings, neu, pairing, oldTables, newTables: newSide.tables, edited })
@@ -388,7 +388,7 @@ export const startMigration = async (ctx: MigrationContext, input: StartInput): 
     const prepared = await prepare(ctx.projectId, spine, profile, from, to, buffer, version)
     const head = await spineRepository.versionHead(ctx.projectId)
     const translateTo = toUserLocale(to.language)
-    if (!translateTo) prepared.warnings.push("Không xác định được ngôn ngữ của mẫu mới nên chưa tính việc dịch — kiểm tra lại ngôn ngữ trước khi áp dụng.")
+    if (!translateTo) prepared.warnings.push("Không xác định được ngôn ngữ của mẫu mới nên chưa tính việc dịch - kiểm tra lại ngôn ngữ trước khi áp dụng.")
     const doc = await TemplateMigration.create({
       projectId: ctx.projectId,
       orgId: ctx.orgId,

@@ -147,7 +147,7 @@ const resolveMove = async (input: ResolveInput, executor: ResolveExecutor, extra
   if (known && known.original_choice === choice && known.source_hash === hash) return known
   const base = { id: extra.id, original_choice: choice, source_hash: hash }
   const keep = (why: string): ResolvedItem => {
-    warnings.push(`Mục "${extra.heading_text}": ${why} — giữ thành mục riêng.`)
+    warnings.push(`Mục "${extra.heading_text}": ${why} - giữ thành mục riêng.`)
     return { ...base, choice: "keep_custom", ops: [], removed_custom_ids: [], notes: why }
   }
   // Mục khung đã có dữ liệu có cấu trúc: chuyển chỗ in, không cần AI
@@ -191,6 +191,6 @@ const resolveConflict = async (input: ResolveInput, executor: ResolveExecutor, c
     input.userId
   )
   const chosen = res.data.choice && concrete.includes(res.data.choice) ? res.data.choice : null
-  if (!chosen) warnings.push(`Mục ${conflict.old_key}: AI không chọn được cách ghép hợp lệ — dùng cách giữ nguyên chữ / bảng cũ.`)
+  if (!chosen) warnings.push(`Mục ${conflict.old_key}: AI không chọn được cách ghép hợp lệ - dùng cách giữ nguyên chữ / bảng cũ.`)
   return { id: conflict.id, original_choice: "ai_resolve", source_hash: hash, choice: chosen ?? safeConflictChoice(conflict), ops: [], removed_custom_ids: [], notes: res.data.notes }
 }

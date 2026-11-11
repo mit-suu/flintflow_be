@@ -217,7 +217,7 @@ export const createProjectVersion = async (
   const existing = await OrgTemplate.findOne({ orgId, project_id: projectId })
   const family =
     existing ??
-    (await OrgTemplate.create({ orgId, name: `${projectName.trim().slice(0, 100)} — mẫu tải lên`, created_by: actor.userId, latest_version: 0, project_id: projectId }))
+    (await OrgTemplate.create({ orgId, name: `${projectName.trim().slice(0, 100)} - mẫu tải lên`, created_by: actor.userId, latest_version: 0, project_id: projectId }))
   const fileRef = await docFileStore().save(file.buffer, { projectId: `org-${orgId}`, kind: "upload", name: file.originalname })
   try {
     const version = await createNextVersion({

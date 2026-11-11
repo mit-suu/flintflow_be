@@ -2,7 +2,7 @@
 skill_id: template-migration-resolve
 kind: action
 version: 1.0.0
-description: FLF-395 (D8) — when a project switches SRS template, either turn the free text of one custom section into structured Spine items, or pick how one conflicting section should be placed in the new template
+description: FLF-395 (D8) - when a project switches SRS template, either turn the free text of one custom section into structured Spine items, or pick how one conflicting section should be placed in the new template
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 2048
@@ -41,7 +41,7 @@ Nothing you return is applied blindly: items are validated, dry-run against the 
 ## Rules for `move_structured`
 
 1. Return `ops` only: `{ "op": "add", "path": "<array>[]", "value": { ... } }` where `<array>` is one of the arrays in "Allowed array
-   shapes" and `value` follows that shape exactly. No `id` fields — ids are assigned by the system.
+   shapes" and `value` follows that shape exactly. No `id` fields - ids are assigned by the system.
 2. One item per distinct requirement / rule / statement the text actually states. Never invent facts, numbers or names.
 3. Text that does not fit the allowed shapes (diagrams, long prose with no discrete statements) ⇒ `ops: []` and say why in `notes`.
 4. `choice` stays `null`.
