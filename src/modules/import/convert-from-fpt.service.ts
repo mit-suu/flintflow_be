@@ -156,7 +156,7 @@ const convert = async (projectId: string, userId: string, opts: ConvertOptions):
       { _id: projectId, mode: { $in: ["fpt", null] } },
       { $set: { mode: "import", import_state: "delivered", converted_from: "fpt", converted_at: at, documentLanguage: languages.locale } }
     )
-    if (switched.modifiedCount !== 1) throw new Error(`[FLF-318] ${projectId}: dự án không còn ở mode fpt — huỷ chuyển đổi`)
+    if (switched.modifiedCount !== 1) throw new Error(`[FLF-318] ${projectId}: dự án không còn ở mode fpt - huỷ chuyển đổi`)
   } catch (err) {
     await removeLeftovers(projectId)
     await docFileStore().remove(fileRef).catch(() => undefined)
@@ -174,7 +174,7 @@ const convert = async (projectId: string, userId: string, opts: ConvertOptions):
   scheduleEmbeddingSync(projectId)
   void notify(userId, {
     type: "project_converted",
-    title: "Baseline đã chốt — dự án chuyển sang chế độ quản lý thay đổi",
+    title: "Baseline đã chốt - dự án chuyển sang chế độ quản lý thay đổi",
     body: `Tài liệu được khoá ở phiên bản ${CONVERTED_DOC_VERSION}. Từ giờ mọi chỉnh sửa đi qua Change Request; cờ không còn bỏ qua (waive) được.`,
     link: `/projects/${projectId}`,
     meta: { projectId, ...result }
@@ -190,7 +190,7 @@ export const convertAfterSignOff = async (projectId: string, userId: string): Pr
   try {
     return await convertFromFpt(projectId, userId)
   } catch (err) {
-    console.error(`[FLF-318] ${projectId}: ký baseline xong nhưng chuyển sang mode 1 lỗi — sẽ chạy lại khi mở dự án`, err)
+    console.error(`[FLF-318] ${projectId}: ký baseline xong nhưng chuyển sang mode 1 lỗi - sẽ chạy lại khi mở dự án`, err)
     return null
   }
 }

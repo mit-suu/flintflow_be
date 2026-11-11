@@ -84,7 +84,7 @@ beforeEach(() => {
 
 // ─── UC-44 ──────────────────────────────────────────────────────────
 
-describe("UC-44 — gửi gói thay đổi cho Lead duyệt", () => {
+describe("UC-44 - gửi gói thay đổi cho Lead duyệt", () => {
   it("gói gồm đúng mọi CR Analyst đã ghi từ baseline trước, theo thứ tự ghi", async () => {
     const { seeded, projectId, c } = await importedProject()
     const analyst = await joinOrg(seeded.orgId, "analyst")
@@ -130,7 +130,7 @@ describe("UC-44 — gửi gói thay đổi cho Lead duyệt", () => {
   // BUG(UC-44): đặc tả — Analyst gửi gói cho Lead, chỉ Lead phát hành (UC-45, "A Lead's own work is released without
   // UC-44") vs code — POST /release không kiểm vai trò (doc-version.route.ts:87, release.service.ts:33), Analyst
   // phát hành thẳng 1.0 được (201); cũng không có endpoint gửi gói / khoá bản nháp khi gói chờ duyệt.
-  it.skip("Analyst không phát hành thẳng được — phải gửi gói cho Lead (403)", async () => {
+  it.skip("Analyst không phát hành thẳng được - phải gửi gói cho Lead (403)", async () => {
     const { seeded, projectId } = await importedProject()
     const analyst = await joinOrg(seeded.orgId, "analyst")
     const a = apiAs(seeded, analyst.token, projectId)
@@ -144,7 +144,7 @@ describe("UC-44 — gửi gói thay đổi cho Lead duyệt", () => {
 
 // ─── UC-48 ──────────────────────────────────────────────────────────
 
-describe("UC-48 — so sánh hai phiên bản SRS", () => {
+describe("UC-48 - so sánh hai phiên bản SRS", () => {
   it("Lead so sánh 0.1 → 0.2: khác biệt theo block, block sửa có before/after", async () => {
     const { c } = await importedProject()
     await writeCr(c, "Nhanh hơn", "1 second instead of 2 seconds")
@@ -241,7 +241,7 @@ const onFreePlan = async (seeded: SeededFixture) => {
   })
 }
 
-describe("UC-54 — nâng gói đăng ký", () => {
+describe("UC-54 - nâng gói đăng ký", () => {
   it("Lead thanh toán gói Pro thành công ⇒ cộng ngay credit kỳ của Pro, kỳ mới bắt đầu hôm nay", async () => {
     const seeded = await seedFixture("minimal", { balance: 50 })
     await onFreePlan(seeded)
@@ -328,7 +328,7 @@ interface LedgerRow {
   [key: string]: unknown
 }
 
-describe("UC-56 — xem lịch sử tiêu credit", () => {
+describe("UC-56 - xem lịch sử tiêu credit", () => {
   it("Lead xem từng lượt gọi AI: project, thành viên, bước, credit và trạng thái", async () => {
     const seeded = await seedFixture("minimal", { balance: 500 })
     const analyst = await joinOrg(seeded.orgId, "analyst")

@@ -2,7 +2,7 @@
 skill_id: screen-layout
 kind: renderer
 version: 2.1.0
-description: "S-5.3 Screen Layout — the model draws a low-fi PlantUML Salt wireframe of one core screen from its functions"
+description: "S-5.3 Screen Layout - the model draws a low-fi PlantUML Salt wireframe of one core screen from its functions"
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 4096
@@ -39,7 +39,7 @@ screens this one opens).
 
 ## What to draw
 
-Low-fi: what the user sees and can do on the screen, top to bottom — not colours, not pixels.
+Low-fi: what the user sees and can do on the screen, top to bottom - not colours, not pixels.
 
 1. **Every function the user triggers here has its control**, labelled as in `trigger`: "clicks the Log in
    button" → `[ Log in ]`, "clicks the Sign up link" → `<u>Sign up</u>`, "checks the terms checkbox" →
@@ -47,7 +47,7 @@ Low-fi: what the user sees and can do on the screen, top to bottom — not colou
    background jobs, "the system…") get no control.
 2. **Every field a validation mentions has an input**: "Email must be a valid address" → an `Email` label and
    an input; a password gets a masked input; min/max price → two inputs on one row.
-3. `navigates_to[]` screens are reached through a button or link already drawn — do not add a second one.
+3. `navigates_to[]` screens are reached through a button or link already drawn - do not add a second one.
 4. Lists / results / history → a `{#` table with the real column names and one or two sample rows.
 5. Real labels in English, taken from the input; sample values that look real (`john@example.com`,
    `2,500,000,000`). No lorem ipsum, no Vietnamese diacritics, no ids (`FN001`, `S03`).
@@ -81,8 +81,8 @@ Low-fi: what the user sees and can do on the screen, top to bottom — not colou
 | Widget | Salt |
 | --- | --- |
 | Heading / plain text | `<b>Log in to your account` / `Don't have an account?` |
-| Text input (label on the line above) | `Email` then `"john@example.com          "` — pad with spaces for width |
-| Password | `"........                  "` — dots, **never `**`** (that is bold) |
+| Text input (label on the line above) | `Email` then `"john@example.com          "` - pad with spaces for width |
+| Password | `"........                  "` - dots, **never `**`** (that is bold) |
 | Button / main button | `[ Cancel ]` / `[        Log in        ]` (wider) |
 | Link | `<u>Forgot password?</u>` |
 | Checkbox | `[ ] Remember me` · `[X] Checked` |
@@ -94,10 +94,10 @@ Low-fi: what the user sees and can do on the screen, top to bottom — not colou
 | Separator | `..` alone on its line |
 | Image / map placeholder | `{+` then `Map area` then `}` |
 
-**One widget per line.** Two widgets side by side only inside a row `{ a | b }` — a bare `"...." [ Show ]` on
+**One widget per line.** Two widgets side by side only inside a row `{ a | b }` - a bare `"...." [ Show ]` on
 one line prints as plain text. Password with a show toggle: `{ "........          " | [ Show ] }`.
 Inside text never use `" [ ] { } | ^ # < >` except as the syntax above. `[text]` is a **button**, not an
-input — an input is always in double quotes.
+input - an input is always in double quotes.
 
 ## Example
 
@@ -142,6 +142,6 @@ Only a fenced json block, the Salt in `puml` with `\n` line breaks:
 - [ ] Starts with `@startsalt`, ends with `@endsalt`, one diagram, braces balanced.
 - [ ] Every user-triggered function has its button/link/control; every validated field has an input.
 - [ ] Inputs in double quotes, buttons in brackets, password as dots, no `**`.
-- [ ] Every line holds one widget, or one `{ … | … }` row — never two bare widgets.
+- [ ] Every line holds one widget, or one `{ … | … }` row - never two bare widgets.
 - [ ] Pop-up drawn as `{^"Name"`, tabs as `{/ … }`, header only on non-pop-up screens.
 - [ ] English only, no ids, no diacritics.

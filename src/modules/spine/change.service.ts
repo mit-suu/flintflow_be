@@ -203,7 +203,7 @@ const takePreview = (projectId: string, previewId: string): StoredPreview => {
   prunePreviews(Date.now())
   const stored = previewStore.get(previewId)
   if (!stored || stored.projectId !== projectId) {
-    throw new ApiError(422, "Bản xem trước đã hết hạn — hãy xem lại thay đổi rồi xác nhận", PREVIEW_EXPIRED)
+    throw new ApiError(422, "Bản xem trước đã hết hạn - hãy xem lại thay đổi rồi xác nhận", PREVIEW_EXPIRED)
   }
   previewStore.delete(previewId)
   return stored
@@ -589,7 +589,7 @@ export interface ResolvedOps {
 /** Model gửi field không có trong Spine (`screens[].authorized_role_ids`) — nhắc nó chỉ dùng field thấy trong projection. */
 const SCHEMA_FIX =
   "Lô bị từ chối: chỉ ghi vào field có trong projection. Phân quyền màn hình là các dòng permissions[] {screen_id, role_id, action} " +
-  "— thêm dòng để cấp quyền, remove permissions[id=…] để thu quyền; không có field nào kiểu authorized_role_ids trên screens[]"
+  "- thêm dòng để cấp quyền, remove permissions[id=…] để thu quyền; không có field nào kiểu authorized_role_ids trên screens[]"
 
 /**
  * Lỗi của lô model vừa trả, để gọi lại model một lần kèm lỗi:
@@ -668,10 +668,10 @@ const editIssuesOf = (spine: Spine, ops: Op[]): EditIssue[] => {
 const UNCLEAR_INSTRUCTION: Readonly<Record<ReplyLanguage, string>> = {
   vi:
     "Mình chưa xác định được cần đổi gì trong tài liệu. Bạn nói rõ mục và nội dung muốn đổi giúp mình " +
-    "(ví dụ: \"thêm quyền view màn Login cho Teacher\"). Sơ đồ được vẽ lại tự động từ dữ liệu — muốn vẽ lại ngay thì bấm \"Vẽ lại sơ đồ\" dưới hình.",
+    "(ví dụ: \"thêm quyền view màn Login cho Teacher\"). Sơ đồ được vẽ lại tự động từ dữ liệu - muốn vẽ lại ngay thì bấm \"Vẽ lại sơ đồ\" dưới hình.",
   en:
     "I couldn't tell what to change in the document. Please tell me which section and what content you want to change " +
-    "(for example: \"add view permission on the Login screen for Teacher\"). Diagrams are redrawn automatically from the data — " +
+    "(for example: \"add view permission on the Login screen for Teacher\"). Diagrams are redrawn automatically from the data - " +
     "to redraw one right away, press \"Vẽ lại sơ đồ\" (Redraw diagram) below it."
 }
 
@@ -686,8 +686,8 @@ const AI_OUTPUT_ERRORS = new Set(["SCHEMA_MISMATCH", "PARSE_FAILED"])
 const WITHDRAWAL = /^\s*(thôi|thoi|bỏ qua|bo qua|không cần|khong can|huỷ|hủy|huy|dừng|dung lai|cancel|never ?mind|skip it|forget it|no need)(?!\p{L})/iu
 export const isWithdrawal = (text: string): boolean => WITHDRAWAL.test(text)
 const WITHDRAWN = {
-  vi: "Đã bỏ yêu cầu này — tài liệu không đổi gì. Khi cần, bạn cứ nhắn yêu cầu mới.",
-  en: "Dropped this request — nothing in the document changed. Send a new request whenever you need."
+  vi: "Đã bỏ yêu cầu này - tài liệu không đổi gì. Khi cần, bạn cứ nhắn yêu cầu mới.",
+  en: "Dropped this request - nothing in the document changed. Send a new request whenever you need."
 }
 
 /** FLF-299: sau số câu hỏi làm rõ này cho cùng một yêu cầu, model phải soạn bản xem trước thay vì hỏi tiếp. */
@@ -1024,7 +1024,7 @@ const reacceptReviewedSections = async (
       reason: "gate: đã duyệt qua bản xem trước lô thêm use case"
     })
   } catch (err) {
-    console.warn(`[change] ${projectId}: đánh dấu đã duyệt các section của lô thêm use case lỗi — section còn stale`, err)
+    console.warn(`[change] ${projectId}: đánh dấu đã duyệt các section của lô thêm use case lỗi - section còn stale`, err)
   }
 }
 
@@ -1071,7 +1071,7 @@ export const apply = async (
   const branch = stored?.branch ?? branchOf(spine, impact)
 
   if (branch === "post_baseline" && (reason === undefined || reason.trim() === "")) {
-    throw new ApiError(400, "Dự án đã có baseline — mọi thay đổi cần ghi lý do (vào Record of Changes)", "VALIDATION_ERROR")
+    throw new ApiError(400, "Dự án đã có baseline - mọi thay đổi cần ghi lý do (vào Record of Changes)", "VALIDATION_ERROR")
   }
 
   // FLF-294: mã cấp sau mọi bước kiểm của lượt áp (lỗi trước đó không phí số); mã + người yêu cầu + nguồn vào reason

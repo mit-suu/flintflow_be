@@ -35,7 +35,7 @@ const del = (confirmName = "Org Một Mình", token = lead.token) =>
   request(app).delete("/api/v1/orgs/" + orgId).set(bearer(token)).send({ confirmName })
 
 describe("xoá tổ chức", () => {
-  it("Lead duy nhất xoá được — dự án, thư mục, ví, gói, thành viên đều biến mất", async () => {
+  it("Lead duy nhất xoá được - dự án, thư mục, ví, gói, thành viên đều biến mất", async () => {
     await request(app).post("/api/v1/projects").set(bearer(lead.token)).send({ name: "Dự án 1" })
     await request(app).post("/api/v1/projects").set(bearer(lead.token)).send({ name: "Dự án 2" })
     await Folder.create({ organizationId: orgId, userId: lead.id, name: "Thư mục" })
@@ -101,7 +101,7 @@ describe("xoá tổ chức", () => {
     expect(res.body.error.code).toBe("ORG_BUSY")
   })
 
-  it("đang có thanh toán chờ thì từ chối — webhook về sau sẽ không có ví để cộng", async () => {
+  it("đang có thanh toán chờ thì từ chối - webhook về sau sẽ không có ví để cộng", async () => {
     await PaymentIntent.create({
       userId: lead.id,
       organizationId: orgId,

@@ -38,7 +38,7 @@ const withOriginal = (): Spine => {
     level: 3,
     blocks: [
       { kind: "paragraph", text: "Hình dưới vẽ bằng draw.io.", rows: null, image_ref: null },
-      { kind: "image", text: "Figure 2 — Use case", rows: null, image_ref: "word/media/image2.png", diagram: { kind: "usecase", source_hash: originalDiagramHash(s, "usecase") } }
+      { kind: "image", text: "Figure 2 - Use case", rows: null, image_ref: "word/media/image2.png", diagram: { kind: "usecase", source_hash: originalDiagramHash(s, "usecase") } }
     ],
     source: "import"
   })

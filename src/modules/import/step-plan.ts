@@ -524,16 +524,16 @@ export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string
     .filter((s) => s.kind !== "loop")
     .map((s): StepPlanItem => {
       if (isHiddenPhase(s.phase)) {
-        return { step_id: s.id, state: "hidden", section_ids: [], reason: "Không sinh đầu mục — bật nếu muốn AI phân tích lại ý tưởng" }
+        return { step_id: s.id, state: "hidden", section_ids: [], reason: "Không sinh đầu mục - bật nếu muốn AI phân tích lại ý tưởng" }
       }
       const owned = sectionsOwnedBy(s.id)
-      if (!owned.length) return { step_id: s.id, state: "applied", section_ids: [], reason: "Bước ghép / kiểm tra tài liệu — luôn chạy" }
+      if (!owned.length) return { step_id: s.id, state: "applied", section_ids: [], reason: "Bước ghép / kiểm tra tài liệu - luôn chạy" }
       if (owned.every((sec) => DERIVED_SECTIONS.has(sec))) {
         return { step_id: s.id, state: "applied", section_ids: owned, reason: "Mục tự sinh từ lịch sử thay đổi" }
       }
       if (opts.draftOwners) {
         return opts.draftOwners.has(s.id)
-          ? { step_id: s.id, state: "enabled", section_ids: owned, reason: "Mục của mẫu bắt buộc — FlintFlow soạn" }
+          ? { step_id: s.id, state: "enabled", section_ids: owned, reason: "Mục của mẫu bắt buộc - FlintFlow soạn" }
           : { step_id: s.id, state: "hidden", section_ids: owned, reason: "Mẫu không có mục này" }
       }
       const hasContent = owned.some((sec) => {
@@ -545,10 +545,10 @@ export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string
       const inLayout = owned.some((sec) => matches(sec, withSlotParents(layout.map((l) => l.section_id))))
       const inFile = owned.some((sec) => matches(sec, content))
       if (inFile || inLayout) {
-        const reason = inFile ? "Đầu mục có trong file nhưng chưa trích được dữ liệu nào — chạy step nếu muốn AI soạn" : "Đầu mục có trong file nhưng trống — chạy step nếu muốn AI soạn"
+        const reason = inFile ? "Đầu mục có trong file nhưng chưa trích được dữ liệu nào - chạy step nếu muốn AI soạn" : "Đầu mục có trong file nhưng trống - chạy step nếu muốn AI soạn"
         return { step_id: s.id, state: "enabled", section_ids: owned, reason }
       }
-      return { step_id: s.id, state: "hidden", section_ids: owned, reason: "File không có đầu mục này — bật nếu muốn AI soạn thêm" }
+      return { step_id: s.id, state: "hidden", section_ids: owned, reason: "File không có đầu mục này - bật nếu muốn AI soạn thêm" }
     })
 
 /** Trạng thái step khởi đầu theo kế hoạch: ẩn ⇒ skipped; `applied` có section (đã có nội dung) ⇒ accepted; còn lại ⇒ pending. */

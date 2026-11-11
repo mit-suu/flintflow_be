@@ -125,15 +125,15 @@ export const submitPackage = async (actor: PackageActor, baseVersion: number): P
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", spineRepository.SPINE_VERSION_CONFLICT)
   }
   if (record.baseline_submission?.status === "pending") {
-    throw new ApiError(409, "Gói thay đổi đang chờ Lead duyệt — không gửi lại được.", "PACKAGE_ALREADY_SUBMITTED")
+    throw new ApiError(409, "Gói thay đổi đang chờ Lead duyệt - không gửi lại được.", "PACKAGE_ALREADY_SUBMITTED")
   }
   const { crIds } = await pendingCrIds(actor.projectId)
-  if (crIds.length === 0) throw new Mode1Error("PACKAGE_EMPTY", "Chưa có thay đổi nào được ghi vào bản nháp kể từ lần phát hành trước — không có gì để gửi duyệt.")
+  if (crIds.length === 0) throw new Mode1Error("PACKAGE_EMPTY", "Chưa có thay đổi nào được ghi vào bản nháp kể từ lần phát hành trước - không có gì để gửi duyệt.")
 
   // BR-04: cờ đỏ = 0 — quét lại đúng như lúc release để Lead chắc chắn duyệt được
   const checked = await flagsService.recompute(actor.projectId, { by: actor.userId, ruleProfile: await mode1RuleProfileFor(actor.projectId), atBaseline: true })
   const red: Flag[] = checked.flags.filter((f) => f.level === "red" && f.resolved_at === null)
-  if (red.length) throw new Mode1Error("RELEASE_RED_FLAGS_OPEN", `Còn ${red.length} cờ đỏ — xử lý qua change request rồi gửi duyệt`, { flags: red })
+  if (red.length) throw new Mode1Error("RELEASE_RED_FLAGS_OPEN", `Còn ${red.length} cờ đỏ - xử lý qua change request rồi gửi duyệt`, { flags: red })
 
   const submission: BaselineSubmission = {
     status: "pending",

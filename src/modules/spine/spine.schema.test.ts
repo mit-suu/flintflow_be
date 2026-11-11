@@ -155,7 +155,7 @@ describe.each([
   ["thiếu cả hai chiều", undefined, undefined],
   ["chỉ chiều vào", ["payment result"], undefined],
   ["cả hai chiều", ["payment result"], ["payment request"]]
-])("actorSchema — flows: %s", (_label, flowsIn, flowsOut) => {
+])("actorSchema - flows: %s", (_label, flowsIn, flowsOut) => {
   it("parse được, giữ nguyên giá trị", () => {
     const actor = {
       id: "A01",
@@ -198,7 +198,7 @@ describe("spineSchema", () => {
     expect(spineSchema.safeParse(s).success).toBe(false)
   })
 
-  it("từ chối status lưu trong sections[] (A7 — status là hàm tính)", () => {
+  it("từ chối status lưu trong sections[] (A7 - status là hàm tính)", () => {
     const s = sampleSpine()
     Object.assign(s.sections[0], { status: "accepted" })
     expect(spineSchema.safeParse(s).success).toBe(false)
@@ -314,7 +314,7 @@ describe("assumptions[].statement_vi (FLF-221)", () => {
   })
 })
 
-describe("baselineSchema — type / doc_version (FLF-171, contract-change mode 1)", () => {
+describe("baselineSchema - type / doc_version (FLF-171, contract-change mode 1)", () => {
   const legacy = { id: "B1", version: "v1.0", at: AT, snapshot_ref: "650000000000000000000009", checked_at_version: 4, waived_count: 0 }
 
   it("baseline cũ (trước FLF-171) không có type/doc_version ⇒ đọc ra generated / null", () => {
@@ -351,10 +351,10 @@ describe("baselineSchema — type / doc_version (FLF-171, contract-change mode 1
   })
 })
 
-describe("mode 1 v2 — steps skipped + custom_sections (FLF-182, contract-change)", () => {
+describe("mode 1 v2 - steps skipped + custom_sections (FLF-182, contract-change)", () => {
   const custom = {
     id: "CS01",
-    heading: "Phụ lục A — Biên bản họp",
+    heading: "Phụ lục A - Biên bản họp",
     level: 1,
     source: "import" as const,
     blocks: [
@@ -469,7 +469,7 @@ describe("JSON Schema", () => {
   })
 })
 
-describe("FLF-365 — Spine thêm references / verifications / release (chỉ thêm)", () => {
+describe("FLF-365 - Spine thêm references / verifications / release (chỉ thêm)", () => {
   it("Spine cũ không có field mới ⇒ parse được, mảng mới = []; giá trị mới hợp lệ được nhận", () => {
     const old = createEmptySpine({ name: "Lumen", domain: "E-learning" }) as Partial<Spine>
     delete old.references

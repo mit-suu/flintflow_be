@@ -75,7 +75,7 @@ export const validateGoals = async (projectId: string, userId: string, options: 
       promptVariables: {
         call_kind: "review",
         step_id: GOAL_VALIDATION_STEP,
-        lenses: "business goal coverage — every goal must be traceable to at least one use case or function",
+        lenses: "business goal coverage - every goal must be traceable to at least one use case or function",
         section_ids: [GOALS_SECTION],
         projection: {
           "project:name,vision,goals": { name: spine.project.name, vision: spine.project.vision, goals: spine.project.goals },

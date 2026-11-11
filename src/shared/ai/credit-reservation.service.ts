@@ -507,7 +507,7 @@ export const expireStaleReservations = async (
     // Nhả về ĐÚNG ví đã giữ: reservation ghi sẵn organizationId lúc reserve. Dùng userId ở đây sẽ nhả
     // trượt ví org và để credit treo vĩnh viễn. Reservation ví cá nhân cũ (trước FLF-310) không còn ví để nhả.
     if (!reservation.organizationId) {
-      console.error(`[CreditReservation] Reservation ${reservation._id} giữ trên ví cá nhân đã bỏ (FLF-310) — chỉ đánh dấu expired`)
+      console.error(`[CreditReservation] Reservation ${reservation._id} giữ trên ví cá nhân đã bỏ (FLF-310) - chỉ đánh dấu expired`)
       result.expiredCount += 1
       continue
     }

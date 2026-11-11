@@ -1,4 +1,4 @@
-# Caps, counters and edge cases — source: Phases §3, §4.1, §4.2, §5.1
+# Caps, counters and edge cases - source: Phases §3, §4.1, §4.2, §5.1
 
 ## Counters
 
@@ -8,7 +8,7 @@
 | `regenerates` | step; **function** at S-5.4 | Regenerate action | step `accepted` |
 | `elicit_turns_this_phase` | phase | Elicit turn (bookkeeping only) | phase change |
 
-Counters are derived from `usage[]` rows with `step_id` and `call_kind` since the step's last `accepted_at` — not stored separately — so they survive resume.
+Counters are derived from `usage[]` rows with `step_id` and `call_kind` since the step's last `accepted_at` - not stored separately - so they survive resume.
 
 ## Cap table
 

@@ -47,7 +47,7 @@ const CANCEL: [CrStatus, CrStatus][] = CR_STATUSES.filter((s) => !TERMINAL.inclu
 const key = (from: CrStatus, to: CrStatus) => `${from}→${to}`
 const allowed = new Set([...FORWARD, ...CANCEL].map(([f, t]) => key(f, t)))
 
-describe("change-request.state — cạnh chuyển trạng thái", () => {
+describe("change-request.state - cạnh chuyển trạng thái", () => {
   it.each(FORWARD)("%s → %s hợp lệ", (from, to) => {
     expect(canTransition(from, to)).toBe(true)
   })
@@ -56,7 +56,7 @@ describe("change-request.state — cạnh chuyển trạng thái", () => {
     expect(canTransition(from, to)).toBe(true)
   })
 
-  it("mọi cặp (from, to) ngoài bảng đều bị từ chối — 100% cạnh có test", () => {
+  it("mọi cặp (from, to) ngoài bảng đều bị từ chối - 100% cạnh có test", () => {
     for (const from of CR_STATUSES) {
       for (const to of CR_STATUSES) expect(canTransition(from, to), key(from, to)).toBe(allowed.has(key(from, to)))
     }
@@ -82,7 +82,7 @@ describe("change-request.state — cạnh chuyển trạng thái", () => {
   })
 })
 
-describe("change-request.state — pause, khoá, giới hạn", () => {
+describe("change-request.state - pause, khoá, giới hạn", () => {
   it("chỉ bước gọi AI được pause: clarifying, proposing, verifying", () => {
     expect(CR_STATUSES.filter(canPause)).toEqual(["clarifying", "proposing", "verifying"])
   })

@@ -57,7 +57,7 @@ beforeEach(() => {
   race.times = 0
 })
 
-describe("FLF-360 job đọc lại ảnh — xung đột khoá lạc quan", () => {
+describe("FLF-360 job đọc lại ảnh - xung đột khoá lạc quan", () => {
   it("CR ghi trước một lần ⇒ đọc lại Spine, ghi được; dữ liệu của CR giữ nguyên", async () => {
     const { projectId, userId, importId } = await finalizedWithUnreadImage()
     race.times = 1

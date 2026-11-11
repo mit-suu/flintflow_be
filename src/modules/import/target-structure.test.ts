@@ -9,7 +9,7 @@ const entry = (order: number, section_id: string, heading_text: string, level = 
 
 const spineWith = (over: Partial<Spine> = {}): Spine => ({ ...createEmptySpine({ name: "Thư viện" }), ...over })
 
-describe("compareTargetStructure (FLF-336 I-5 — so cấu trúc đích)", () => {
+describe("compareTargetStructure (FLF-336 I-5 - so cấu trúc đích)", () => {
   it("ý định tự do, file thiếu mục ⇒ chế độ 4: mục FPT bắt buộc có chữ / dữ liệu là present, còn lại missing; mục riêng là out_of_scope", () => {
     const layout = [entry(0, "fixed:1", "1. Tổng quan"), entry(1, "fixed:3.1.1", "3.1.1 Luồng màn"), entry(2, "custom:CS01", "Phụ lục Dự toán")]
     const spine = spineWith({ screens: [{ id: "S01", feature_id: "F01", name: "Trang chủ", description: "", flow_to: [], is_popup: false } as never] })
@@ -91,7 +91,7 @@ describe("compareTargetStructure (FLF-336 I-5 — so cấu trúc đích)", () =>
     expect(compareTargetStructure(layout, new Set(["fixed:1"]), spineWith(), "free", undefined, { draftAll: true }).target).toBe("fpt")
   })
 
-  it("mẫu cố định — heading tính năng chỉ chứa chức năng con là heading bao: không xếp mục; chức năng con xếp theo nội dung", () => {
+  it("mẫu cố định - heading tính năng chỉ chứa chức năng con là heading bao: không xếp mục; chức năng con xếp theo nội dung", () => {
     const layout = [
       entry(0, "feature:F-3.2", "3.2 Course Registration", 2),
       entry(1, "function:FR-3.2.1", "3.2.1 Register for course sections", 3),
@@ -107,7 +107,7 @@ describe("compareTargetStructure (FLF-336 I-5 — so cấu trúc đích)", () =>
     ])
   })
 
-  it("FLF-379: mẫu cố định — Record of Changes / Revision History tự sinh, không thành mục \"Sẽ soạn\"", () => {
+  it("FLF-379: mẫu cố định - Record of Changes / Revision History tự sinh, không thành mục \"Sẽ soạn\"", () => {
     const layout = [entry(0, "fixed:I", "Revision History", 1), entry(1, "fixed:1", "Introduction", 1)]
     const result = compareTargetStructure(layout, new Set(["fixed:1"]), spineWith(), "fixed")
     expect(result.sections.map((s) => s.section_id)).toEqual(["fixed:1"])

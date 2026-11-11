@@ -908,7 +908,7 @@ export const buildLayoutSections = (
           continue
         }
       }
-      push({ ...base, heading: base.heading || "—", blocks }, n.level)
+      push({ ...base, heading: base.heading || "-", blocks }, n.level)
       continue
     }
     if (n.kind === "slot") {

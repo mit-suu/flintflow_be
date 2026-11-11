@@ -47,7 +47,7 @@ describe("emptyFedSections (L11b)", () => {
     expect(emptyFedSections(spine, "S-7.2")).toEqual([])
   })
 
-  it("dùng chung tiêu chí với luật section_empty — không có đường cho hai bên lệch nhau", () => {
+  it("dùng chung tiêu chí với luật section_empty - không có đường cho hai bên lệch nhau", () => {
     const spine = emptySpine()
     for (const [sectionId, hasData] of Object.entries(SECTION_HAS_DATA)) {
       const flagged = !hasData(spine)

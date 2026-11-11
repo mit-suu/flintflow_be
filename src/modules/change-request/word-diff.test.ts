@@ -22,6 +22,6 @@ describe("directHit (BF §3.2: yêu cầu gốc đụng thẳng phần vừa s�
     expect(directHit("Ngưỡng phản hồi 2 giây cho 100 người", "Ngưỡng phản hồi 3 giây cho 100 người", "Ngưỡng phản hồi 1 giây cho 100 người")).toEqual({ original: "2", theirs: "3", yours: "1" })
   })
   it("con số lặp ở hai chỗ (phát biểu + chỉ số) ⇒ hỏi gọn theo chỗ đụng đầu tiên, không gộp cả câu", () => {
-    expect(directHit("lưu trong vòng 1 giây (p95) — p95 ≤ 1 s", "lưu trong vòng 3 giây (p95) — p95 ≤ 3 s", "lưu trong vòng 2 giây (p95) — p95 ≤ 2 s")).toEqual({ original: "1", theirs: "3", yours: "2" })
+    expect(directHit("lưu trong vòng 1 giây (p95) - p95 ≤ 1 s", "lưu trong vòng 3 giây (p95) - p95 ≤ 3 s", "lưu trong vòng 2 giây (p95) - p95 ≤ 2 s")).toEqual({ original: "1", theirs: "3", yours: "2" })
   })
 })

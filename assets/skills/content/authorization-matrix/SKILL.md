@@ -22,17 +22,17 @@ stub: false
 ---
 # Authorization Matrix
 
-Covers **S-4.3 Screen Authorization** — feeds `fixed:3.1.3`, rendered as a screen × role table. This is
+Covers **S-4.3 Screen Authorization** - feeds `fixed:3.1.3`, rendered as a screen × role table. This is
 the only place `permissions[]` is written. `references/*.md` are **not loaded at runtime**; the rules are
 inlined below.
 
 ## Roles
 
 `roles[]` already carries one row per (human actor, distinct permission set) from S-3.1. Add a row only
-when the screen inventory reveals a permission set nobody had yet — typically an unauthenticated
+when the screen inventory reveals a permission set nobody had yet - typically an unauthenticated
 `Guest`, or a `Support` role that can read but not write. Shape: `{id, name, actor_id}`. `actor_id` must
 point at an existing `actors[]` row with `kind: "human"`, or be `null` for a role that is not tied to one
-actor type (`Guest`). System and time actors never get a role — they do not operate the UI.
+actor type (`Guest`). System and time actors never get a role - they do not operate the UI.
 
 Do not create a role per screen, and do not split a role because two people *usually* do different work:
 two names with the same reachable screens and the same actions are one role.
@@ -40,12 +40,12 @@ two names with the same reachable screens and the same actions are one role.
 ## Permissions
 
 One `permissions[]` row per **(screen, role, action)** triple that is allowed. Absent row = denied; never
-write a row meaning "no access". Shape: `{id, screen_id, role_id, action}` — note the selector for this
+write a row meaning "no access". Shape: `{id, screen_id, role_id, action}` - note the selector for this
 collection is the triple (`permissions[screen_id=S3,role_id=R1,action=create]`), so the same triple must
 not appear twice.
 
 `action` is one of: `view` (can open the screen and read what is on it), `create`, `update`, `delete`,
-`export`, `approve`. Use exactly these words — the rendered table groups by them, and S-5.4 reuses them
+`export`, `approve`. Use exactly these words - the rendered table groups by them, and S-5.4 reuses them
 when writing per-function validations.
 
 Rules that keep the matrix honest:
@@ -54,14 +54,14 @@ Rules that keep the matrix honest:
    have `view` on it. Emit both rows.
 2. **Every screen needs at least one role with `view`**, including popups and admin screens. A screen no
    role can open is either dead or a missed role.
-3. **Every role needs at least one screen.** A role that can reach nothing is an orphan — either it was
+3. **Every role needs at least one screen.** A role that can reach nothing is an orphan - either it was
    invented here or a screen is missing.
 4. **Owner-scoped access is still access.** "The author can only edit their own project" is a `update`
    permission plus a business rule, not a missing row. Note the scoping in an `assumptions[]` entry so
    S-7.1 can turn it into a `business_rules[]` row.
 5. **Admin screens.** If an admin actor exists, it gets `view` on every admin screen plus the actions the
    console actually performs (`update` for suspend/reactivate, `approve` where a human decision applies).
-   An admin does not automatically get write access to end-user content screens — only if the product
+   An admin does not automatically get write access to end-user content screens - only if the product
    really allows it.
 6. **Unauthenticated screens.** Login, sign-up, forgot password and public landing screens get `view` for
    the `Guest` role (create it if missing). Authenticated screens must NOT have a Guest row.
@@ -69,9 +69,9 @@ Rules that keep the matrix honest:
 ## Rules
 
 1. Ids continue the existing sequence (`draft-to-ops` rule 5); check the projection first.
-2. Every `screen_id`/`role_id` must exist after this batch — a dangling key is `dead_reference`.
+2. Every `screen_id`/`role_id` must exist after this batch - a dangling key is `dead_reference`.
 3. English values; `action` from the fixed vocabulary above, lowercase.
-4. Do not edit `screens[]` or `actors[]` here — if a screen or actor is missing, say so in `notes`
+4. Do not edit `screens[]` or `actors[]` here - if a screen or actor is missing, say so in `notes`
    and add an `assumptions[]` entry naming the gap; S-4.1/S-3.1 own those collections.
 5. Still unanswered: pick the least-privilege default that still lets the flow work and record it as an
    assumption (`draft-to-ops` rule 10).

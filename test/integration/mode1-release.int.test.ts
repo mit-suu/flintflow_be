@@ -61,7 +61,7 @@ const projectWithRevision = async () => {
 
 const releaseNow = async (c: Api) => c.post("/release", { base_version: await c.spineVersion() })
 
-describe("mode 1 — version + tải về", () => {
+describe("mode 1 - version + tải về", () => {
   it("danh sách version, block đọc từ file render, so sánh 0.1 → 0.2, tải bản draft có watermark DRAFT", async () => {
     const { c, projectId } = await projectWithRevision()
     const versions = versionsResponseSchema.parse((await c.get("/versions")).body.data)
@@ -97,7 +97,7 @@ describe("mode 1 — version + tải về", () => {
   })
 })
 
-describe("mode 1 — release (Flow 6)", () => {
+describe("mode 1 - release (Flow 6)", () => {
   it("còn cờ đỏ ⇒ 422 RELEASE_RED_FLAGS_OPEN; hết đỏ ⇒ 1.0 sạch, baseline release, gom CR", async () => {
     const { c, projectId } = await projectWithRevision()
     // Sơ đồ render lỗi ⇒ cờ đỏ render_error (mode 1 không waive)
@@ -153,7 +153,7 @@ describe("mode 1 — release (Flow 6)", () => {
   })
 })
 
-describe("mode 1 — chặn sửa ngoài change request (G9, BR-03)", () => {
+describe("mode 1 - chặn sửa ngoài change request (G9, BR-03)", () => {
   it("/changes, /undo, /reconcile và chat ra lệnh sửa ⇒ 409 CHANGE_REQUIRES_CR kèm prefill; preview chỉ đọc vẫn chạy", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)

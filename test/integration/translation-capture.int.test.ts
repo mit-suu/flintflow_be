@@ -60,7 +60,7 @@ beforeEach(async () => {
   seeded = await seedFixture("full")
 })
 
-describe("lượt sửa qua chat — dự án en", () => {
+describe("lượt sửa qua chat - dự án en", () => {
   it("prompt không có khối Document language; localized model tự trả cũng không được lưu", async () => {
     mockOverrides.next = (prompt) => {
       prompts.push(prompt)
@@ -75,7 +75,7 @@ describe("lượt sửa qua chat — dự án en", () => {
   })
 })
 
-describe("lượt sửa qua chat — dự án vi (FLF-265 D16)", () => {
+describe("lượt sửa qua chat - dự án vi (FLF-265 D16)", () => {
   beforeEach(async () => {
     await Project.updateOne({ _id: seeded.projectId }, { documentLanguage: "vi" })
   })

@@ -1,4 +1,4 @@
-# Product Brief — khung đọc lại
+# Product Brief - khung đọc lại
 
 > Mẫu để **đọc lại brief cho user xác nhận** ở cuối B-1 và ở B-2.3. Không phải section của SRS: brief
 > không render thành chương nào, nó nuôi `project{}` và `addendum[]`.
@@ -11,7 +11,7 @@ addendum topic `vision` (content của user)
 
 ## 2. Mục tiêu
 
-addendum topic `goals` — 3 đến 6 entry, mỗi entry một kết quả
+addendum topic `goals` - 3 đến 6 entry, mỗi entry một kết quả
 
 ## 3. Vấn đề và cơ hội
 
@@ -39,9 +39,9 @@ other_requirements[] theo kind
 
 ## 9. Giả định chưa xác nhận
 
-assumptions[status=unconfirmed] — đây là danh sách B-2.1 đưa ra cho user duyệt
+assumptions[status=unconfirmed] - đây là danh sách B-2.1 đưa ra cho user duyệt
 
 ---
 
-Mọi mục ở trên đọc thẳng từ Spine. Một mục trống nghĩa là bước tương ứng chưa ghi op — đó là dấu hiệu
+Mọi mục ở trên đọc thẳng từ Spine. Một mục trống nghĩa là bước tương ứng chưa ghi op - đó là dấu hiệu
 cần quay lại, không phải chuyện để điền sau.

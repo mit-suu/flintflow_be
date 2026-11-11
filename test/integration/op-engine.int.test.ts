@@ -26,7 +26,7 @@ describe("10 ca op T02 qua POST /changes", () => {
     const opCase = loadOpCase(file)
     const title = opCase.must_reject ? `từ chối ${opCase.must_reject}` : "áp được và ghi change"
 
-    it(`${file} — ${opCase.name}: ${title}`, async () => {
+    it(`${file} - ${opCase.name}: ${title}`, async () => {
       const seeded = await seedFixture("full", { mutate: (spine) => applyOverrides(spine, opCase.spine_before_overrides) })
       // Ca 03/06 kèm op vào `sections`/`progress` (path hệ thống quản lý: op engine tự cascade / tự nối
       // hàng đợi). User gửi qua /changes chỉ được phần user ghi được — phần còn lại engine phải tự sinh.

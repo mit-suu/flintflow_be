@@ -1,4 +1,4 @@
-# Op grammar — source: srs-spine.md §1, §3; Phases §2.1
+# Op grammar - source: srs-spine.md §1, §3; Phases §2.1
 
 ```json
 { "txn": "t42", "op": "set", "path": "actors[id=A03].name", "value": "Administrator", "reason": "typo" }
@@ -9,7 +9,7 @@
 | `op` | `path` points to | `value` | Effect |
 | --- | --- | --- | --- |
 | `set` | a field (scalar, object or whole array field) | required | Replace the value. Creates the field if absent |
-| `add` | an array, suffix `[]` | required — the new element (object with `id` when the array is keyed) or a scalar for scalar arrays | Append |
+| `add` | an array, suffix `[]` | required - the new element (object with `id` when the array is keyed) or a scalar for scalar arrays | Append |
 | `remove` | an element selector `arr[id=X]`, or a scalar in a scalar array `arr[=X]` | omitted | Delete; the engine adds cascade ops to the same batch |
 | `renumber` | an array with an `order` field, optionally filtered | optional `{ "field": "order" }` | Rewrite `order` to 0..n-1 keeping current relative order |
 
@@ -60,7 +60,7 @@ Add a screen to feature F2 during S-4.1:
 { "op": "add", "path": "screens[]", "value": { "id": "S7", "feature_id": "F2", "name": "Invoice List", "description": "Lists invoices with filters.", "flow_to": [], "is_popup": false, "tabs": [], "primary_function_id": null, "queue_order": 6, "detail_status": "pending" }, "reason": "screen inventory" }
 ```
 
-Remove feature F1 (order 1 of 0..3) — cascade and renumber in one batch:
+Remove feature F1 (order 1 of 0..3) - cascade and renumber in one batch:
 
 ```json
 [
@@ -69,7 +69,7 @@ Remove feature F1 (order 1 of 0..3) — cascade and renumber in one batch:
 ]
 ```
 
-Swap two features: two `set … .order` ops plus nothing else — the intermediate duplicate order is fine because invariants run at the end of the batch.
+Swap two features: two `set … .order` ops plus nothing else - the intermediate duplicate order is fine because invariants run at the end of the batch.
 
 Quantitative NFR:
 

@@ -124,12 +124,12 @@ export const previewPayload = (
             ? [
                 opts.requiresCr
                   ? byLanguage(language, {
-                      vi: `Đã dựng bản xem trước ${preview.changes.length} thay đổi — xem rồi bấm “Tạo change request” để gửi thay đổi này.`,
-                      en: `Built a preview of ${preview.changes.length} change${preview.changes.length === 1 ? "" : "s"} — review it, then press "Tạo change request" (Create change request) to send it.`
+                      vi: `Đã dựng bản xem trước ${preview.changes.length} thay đổi - xem rồi bấm “Tạo change request” để gửi thay đổi này.`,
+                      en: `Built a preview of ${preview.changes.length} change${preview.changes.length === 1 ? "" : "s"} - review it, then press "Tạo change request" (Create change request) to send it.`
                     })
                   : byLanguage(language, {
-                      vi: `Đã dựng bản xem trước ${preview.changes.length} thay đổi — xem rồi bấm Áp dụng để ghi.`,
-                      en: `Built a preview of ${preview.changes.length} change${preview.changes.length === 1 ? "" : "s"} — review it, then press "Áp dụng" (Apply) to save.`
+                      vi: `Đã dựng bản xem trước ${preview.changes.length} thay đổi - xem rồi bấm Áp dụng để ghi.`,
+                      en: `Built a preview of ${preview.changes.length} change${preview.changes.length === 1 ? "" : "s"} - review it, then press "Áp dụng" (Apply) to save.`
                     }),
                 // FLF-298: phần còn thiếu (vd use case mới chưa có màn hình) phải hiện ngay trong chat, không chỉ trong thẻ
                 preview.notes
@@ -173,8 +173,8 @@ export const markPreviewAsCr = async (projectId: string, previewId: string, crId
       message.content = JSON.stringify({
         kind: "change_cr",
         reply: english
-          ? `Created ${crId} from this preview (${count} change${count === 1 ? "" : "s"}) — follow and confirm it in the change request.`
-          : `Đã tạo ${crId} từ bản xem trước này (${count} thay đổi) — theo dõi và xác nhận trong change request.`,
+          ? `Created ${crId} from this preview (${count} change${count === 1 ? "" : "s"}) - follow and confirm it in the change request.`
+          : `Đã tạo ${crId} từ bản xem trước này (${count} thay đổi) - theo dõi và xác nhận trong change request.`,
         cr_id: crId,
         preview_id: previewId,
         change_count: count

@@ -37,7 +37,7 @@ export const callGemini = async (
     } catch (error) {
       lastError = error
       if (!isGeminiOverloaded(error) || options.signal?.aborted) throw error
-      if (i < models.length - 1) console.warn(`[Gemini] ${model} quá tải (${(error as AiActionError).statusCode}) — chuyển sang ${models[i + 1]}`)
+      if (i < models.length - 1) console.warn(`[Gemini] ${model} quá tải (${(error as AiActionError).statusCode}) - chuyển sang ${models[i + 1]}`)
     }
   }
   const err = lastError as AiActionError

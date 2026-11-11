@@ -219,7 +219,7 @@ describe("changesMakingStale / staleSections", () => {
 
 // ─── lượt 1: preview gộp ─────────────────────────────────────────
 
-describe("reconcile lượt 1 — preview diff gộp", () => {
+describe("reconcile lượt 1 - preview diff gộp", () => {
   it("gọi skill của step sở hữu từng section stale, gộp ops thành một preview", async () => {
     await seed()
     await renameActor()
@@ -314,7 +314,7 @@ describe("reconcile lượt 1 — preview diff gộp", () => {
 
 // ─── lượt 2: áp ──────────────────────────────────────────────────
 
-describe("reconcile lượt 2 — áp, vẽ lại hình, awaiting_reaccept", () => {
+describe("reconcile lượt 2 - áp, vẽ lại hình, awaiting_reaccept", () => {
   const runFirstPass = async () => {
     await seed()
     await renameActor()
@@ -354,7 +354,7 @@ describe("reconcile lượt 2 — áp, vẽ lại hình, awaiting_reaccept", () 
     expect(awaitingReaccept(spine, "fixed:3.1.5")).toBe(false)
   })
 
-  it("sau baseline: duyệt bản xem trước hoà giải là đủ — section hết stale, KHÔNG mở lại step (không chờ chấp nhận lại)", async () => {
+  it("sau baseline: duyệt bản xem trước hoà giải là đủ - section hết stale, KHÔNG mở lại step (không chờ chấp nhận lại)", async () => {
     const baseline = { id: "BL001", version: "v1.0", type: "generated" as const, doc_version: null, at: "2026-09-10T00:00:00.000Z", snapshot_ref: "650000000000000000000099", checked_at_version: 1, waived_count: 0 }
     await seed({ ...FIXTURE, baselines: [baseline] })
     await renameActor()
@@ -433,7 +433,7 @@ describe("reconcile lượt 2 — áp, vẽ lại hình, awaiting_reaccept", () 
     expect(computeStatus(spineAfter, await repo.listChanges(PROJECT), "fixed:2.2.2")).not.toBe("stale")
   })
 
-  it("dep mặc định đủ cả recomputeFlags — controller không truyền deps, nhánh xác nhận không đổi gọi thẳng hàm này", () => {
+  it("dep mặc định đủ cả recomputeFlags - controller không truyền deps, nhánh xác nhận không đổi gọi thẳng hàm này", () => {
     const defaults = defaultReconcileDeps()
     for (const key of ["changeExecutor", "recomputeFlags", "reconcileExecutor", "rerender"] as const) {
       expect(defaults[key], key).toBeTypeOf("function")

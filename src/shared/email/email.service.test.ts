@@ -16,7 +16,7 @@ import { sendPasswordResetOtpEmail, sendVerificationOtpEmail } from "./email.ser
 
 const lastMail = () => sendMail.mock.calls[sendMail.mock.calls.length - 1][0]
 
-describe("email OTP — dấu hiệu 'thư người gửi' để vào Hộp thư chính", () => {
+describe("email OTP - dấu hiệu 'thư người gửi' để vào Hộp thư chính", () => {
   beforeEach(() => {
     sendMail.mockReset().mockResolvedValue({})
   })

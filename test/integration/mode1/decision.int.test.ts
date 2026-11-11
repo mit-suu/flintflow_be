@@ -89,7 +89,7 @@ describe("C-6 BA xác nhận ⇒ ghi ngay (FLF-330)", () => {
   })
 })
 
-describe("Luồng cũ (CR tạo trước FLF-330 còn in_review) — duyệt từng group, sửa lại, đóng vẫn chạy", () => {
+describe("Luồng cũ (CR tạo trước FLF-330 còn in_review) - duyệt từng group, sửa lại, đóng vẫn chạy", () => {
   it("từ chối G02 ⇒ mở khoá phần tử của G02, G01 vẫn khoá; duyệt G01 ⇒ written", async () => {
     const { c, projectId, seeded } = await importedProject()
     const { crId, cr, submitted } = await legacyInReview(c, projectId)

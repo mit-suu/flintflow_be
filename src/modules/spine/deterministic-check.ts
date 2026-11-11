@@ -500,7 +500,7 @@ const originalDiagramStale = (spine: Spine): FlagCandidate[] =>
       rule_id: "original_diagram_stale",
       section_id: originalSectionOf(k.diagram),
       target_id: k.custom_id,
-      message: `${ORIGINAL_DIAGRAM_LABELS[k.diagram.kind]} (hình gốc của tài liệu) không còn khớp dữ liệu — tạo change request để vẽ lại bằng FlintFlow`,
+      message: `${ORIGINAL_DIAGRAM_LABELS[k.diagram.kind]} (hình gốc của tài liệu) không còn khớp dữ liệu - tạo change request để vẽ lại bằng FlintFlow`,
       remediation_step: RENDER_STEP[k.diagram.kind]
     }))
 
@@ -547,7 +547,7 @@ export const originalTextMentionsChanged = (spine: Spine, records: readonly Sect
           rule_id: "original_text_mentions_changed",
           section_id: r.section_id,
           target_id: m.path,
-          message: `Đoạn văn giữ nguyên từ file gốc ở ${quotedSectionLabel(r.section_id, spine)} nhắc tới "${token}" — ${el ? `phần tử này đã đổi tên thành "${el.name}"` : "phần tử này đã bị xoá"}; xem lại đoạn văn, cần thì sửa bằng change request`,
+          message: `Đoạn văn giữ nguyên từ file gốc ở ${quotedSectionLabel(r.section_id, spine)} nhắc tới "${token}" - ${el ? `phần tử này đã đổi tên thành "${el.name}"` : "phần tử này đã bị xoá"}; xem lại đoạn văn, cần thì sửa bằng change request`,
           remediation_step: ownerStepOf(r.section_id, spine)
         })
       }
@@ -686,7 +686,7 @@ const sectionsAtBaseline = (spine: Spine, changes: Pick<Change, "seq" | "path" |
         rule_id: "section_awaiting_reaccept",
         section_id: s.id,
         target_id: null,
-        message: `Bước soạn ${quotedSectionLabel(s.id, spine)} đã mở lại — chạy lại bước đó rồi duyệt để gỡ`,
+        message: `Bước soạn ${quotedSectionLabel(s.id, spine)} đã mở lại - chạy lại bước đó rồi duyệt để gỡ`,
         remediation_step: awaitingOwnerOf(s.id, spine)
       }))
   ]
@@ -718,7 +718,7 @@ const screenPlaceholder = (spine: Spine, atBaseline: boolean): FlagCandidate[] =
           rule_id: "screen_placeholder",
           section_id: s.primary_function_id ? `function:${s.primary_function_id}` : "fixed:3.1.2",
           target_id: s.id,
-          message: `Màn hình "${s.name}" bị để trống mà chưa ai chốt — mở lại để mô tả, hoặc chốt "để sau" kèm lý do`,
+          message: `Màn hình "${s.name}" bị để trống mà chưa ai chốt - mở lại để mô tả, hoặc chốt "để sau" kèm lý do`,
           remediation_step: `S-5.1@${s.id}`
         }))
 }
@@ -738,7 +738,7 @@ const functionWithoutUseCase = (spine: Spine, gate: StepGate): FlagCandidate[] =
       rule_id: "function_without_uc",
       section_id: `function:${f.id}`,
       target_id: f.id,
-      message: `Chức năng nền "${f.name}" không thuộc use case nào — thiếu use case (vd cơ chế chạy theo lịch) hay thiếu liên kết?`,
+      message: `Chức năng nền "${f.name}" không thuộc use case nào - thiếu use case (vd cơ chế chạy theo lịch) hay thiếu liên kết?`,
       remediation_step: "S-3.2"
     }))
 }
@@ -882,7 +882,7 @@ const fixedTemplateGaps = (
       rule_id: "template_section_absent",
       section_id: id,
       target_id: null,
-      message: `Mẫu bắt buộc không có mục ${quotedSectionLabel(id, spine)} — dữ liệu của mục này không in vào tài liệu`,
+      message: `Mẫu bắt buộc không có mục ${quotedSectionLabel(id, spine)} - dữ liệu của mục này không in vào tài liệu`,
       remediation_step: ownerStepOf(id, spine)
     })
   ),
@@ -1031,7 +1031,7 @@ const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
         const partners = [...new Set(a.relations)].filter((b) => b > a.id && byEntity.get(b)?.relations.includes(a.id)).sort()
         if (partners.length === 0) return []
         const names = partners.map((b) => `"${byEntity.get(b)!.name}"`).join(", ")
-        return [yellow("unresolved_many_to_many", "fixed:3.1.5", a.id, `"${a.name}" và ${names} trỏ lẫn nhau — quan hệ nhiều–nhiều cần entity trung gian`, "S-4.5")]
+        return [yellow("unresolved_many_to_many", "fixed:3.1.5", a.id, `"${a.name}" và ${names} trỏ lẫn nhau - quan hệ nhiều–nhiều cần entity trung gian`, "S-4.5")]
       })
     })
   ]
@@ -1383,10 +1383,10 @@ export const sharedAccessMessage = (spine: Pick<Spine, "actors" | "use_cases">, 
   const actors = group.actorIds.map((id) => actorName.get(id) ?? id).join(", ")
   if (group.commonParent !== null) {
     const parent = actorName.get(group.commonParent) ?? group.commonParent
-    return `Use case ${useCases} đang gắn cho ${actors} trong khi các tác nhân này đã kế thừa "${parent}" — chỉ gắn các use case này cho "${parent}", bỏ khỏi tác nhân con`
+    return `Use case ${useCases} đang gắn cho ${actors} trong khi các tác nhân này đã kế thừa "${parent}" - chỉ gắn các use case này cho "${parent}", bỏ khỏi tác nhân con`
   }
   return (
-    `Use case ${useCases} đang gắn riêng cho ${actors} — các tác nhân này cùng đăng nhập vào sản phẩm nên cần một tác nhân ` +
+    `Use case ${useCases} đang gắn riêng cho ${actors} - các tác nhân này cùng đăng nhập vào sản phẩm nên cần một tác nhân ` +
     `tổng quát (vd. "User") làm cha, và use case dùng chung chỉ gắn cho tác nhân tổng quát đó`
   )
 }
@@ -1481,7 +1481,7 @@ const systemNameMissing = (spine: Spine): FlagCandidate[] =>
           rule_id: "system_name_missing",
           section_id: "fixed:1",
           target_id: null,
-          message: `Chưa chốt tên hệ thống (tiếng Anh) — sơ đồ và bìa tài liệu đang dùng tên dự án "${spine.project.name}"`,
+          message: `Chưa chốt tên hệ thống (tiếng Anh) - sơ đồ và bìa tài liệu đang dùng tên dự án "${spine.project.name}"`,
           remediation_step: "B-2.3"
         }
       ]

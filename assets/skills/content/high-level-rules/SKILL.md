@@ -19,11 +19,11 @@ stub: false
 ---
 # High Level Rules
 
-Covers **S-2.4 High-Level Business Rules** — feeds SRS section `fixed:1`. This is the *tier=high* half of
+Covers **S-2.4 High-Level Business Rules** - feeds SRS section `fixed:1`. This is the *tier=high* half of
 `business_rules[]`; the *tier=detail* half is a different skill (`appendix-content`, S-7.1), derived later
 from `functions[].validations[]`. Never touch `tier=detail` rows here.
 
-Projection carries `project.vision`, `project.release_scope`, current `business_rules[]` — the surrounding
+Projection carries `project.vision`, `project.release_scope`, current `business_rules[]` - the surrounding
 `draft-to-ops` prompt already substitutes the actual step id, projection and addendum around this content;
 do not restate `{{...}}` placeholders here, they are not interpolated inside skill content (only in the
 outer action prompt).
@@ -37,9 +37,9 @@ flag opened by that step is unresolved". One sentence, testable, no implementati
 
 ## Procedure
 
-1. Read `project.vision` and `release_scope.in` — one rule per cross-cutting constraint they imply.
-2. Read addendum entries targeting `fixed:1` or `fixed:5.1` — a policy addendum becomes a rule here.
-3. 3–8 rules is typical; more than that usually means some are `tier=detail` in disguise — leave those
+1. Read `project.vision` and `release_scope.in` - one rule per cross-cutting constraint they imply.
+2. Read addendum entries targeting `fixed:1` or `fixed:5.1` - a policy addendum becomes a rule here.
+3. 3–8 rules is typical; more than that usually means some are `tier=detail` in disguise - leave those
    for S-7.1.
 4. `source_validation_ids` stays `[]` here (only `tier=detail` rules derived from validations set it).
 
@@ -47,7 +47,7 @@ flag opened by that step is unresolved". One sentence, testable, no implementati
 
 1. English, no diacritics (`draft-to-ops` rule 6).
 2. New ids continue the `business_rules[]` sequence regardless of tier (`draft-to-ops` rule 5).
-3. Only `add`/`set` on `business_rules[tier=high]` elements — never touch a `tier=detail` row even to fix
+3. Only `add`/`set` on `business_rules[tier=high]` elements - never touch a `tier=detail` row even to fix
    wording; that belongs to S-7.1.
 
 ## Example
