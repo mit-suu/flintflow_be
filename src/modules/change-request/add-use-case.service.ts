@@ -275,6 +275,7 @@ const attachBatch = async (
     loc.conclusion = "edit"
     loc.reason = REASON_OF[intent]
     loc.proposal = {
+      proposed_at: new Date(),
       ...snapshotOf(spine, b.path),
       new_text: bundleNewText(spine, batch.after, b.path),
       comment_text: null,

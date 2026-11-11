@@ -35,6 +35,8 @@ import { addedElements, elementValue, isArrayPath, isSectionTarget, opElement, s
 import { isDiagramLocation, refreshDiagramLocations } from "./diagram-location.js"
 import { reassignDuplicateIds } from "./new-ids.js"
 import { proposeUseCaseBatch } from "./add-use-case.service.js"
+import { elementText } from "./location-display.js"
+import { directHit } from "./word-diff.js"
 
 /**
  * Số vị trí gửi trong một lượt C-4. Trước là 12: prompt kèm giá trị JSON của từng phần tử (tới 2500 ký tự) và câu
@@ -308,6 +310,7 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
           loc.conclusion = out.conclusion
           loc.reason = out.reason
           loc.proposal = {
+            proposed_at: new Date(),
             ...snapshotOf(spine, loc.path),
             new_text: out.conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
             comment_text: out.conclusion === "comment" ? (out.comment_text ?? null) : null,
@@ -315,6 +318,8 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
             assumptions: out.conclusion === "not_related" ? [] : out.assumptions
           }
           loc.verify = null
+          // Đề xuất mới chụp nội dung hiện tại ⇒ xung đột cũ (nếu có, từ lần xác nhận trước) không còn ý nghĩa
+          loc.conflict = null
           await loc.save()
         }
         batch = batch.filter((l) => !matched.has(l))
@@ -354,6 +359,29 @@ export const draftInOwnerStep = async (cr: IChangeRequest, userId: string, locat
     if (cr.status === "ready_to_submit") await transitionCr(cr, "verifying")
     return
   }
+  // BF §3.2 "AI soạn lại trên nội dung hiện tại": yêu cầu gốc đụng thẳng phần người khác vừa sửa ⇒ hỏi lại trong chat,
+  // không gọi AI (không tốn credit), không tự chọn. Người dùng trả lời (chọn gợi ý / gõ) ⇒ gọi lại đường này với câu trả lời.
+  if (loc.conflict && !loc.conflict.question && loc.conflict.proposal_text) {
+    const text = (json: string) => elementText(JSON.parse(json))
+    const hit = directHit(text(loc.conflict.at_proposal_text), text(loc.conflict.current_text), text(loc.conflict.proposal_text))
+    if (hit) {
+      const who = loc.conflict.changed_by
+      loc.conflict.question = {
+        text: `${who} vừa đổi “${hit.original}” thành “${hit.theirs}”, còn yêu cầu của bạn muốn đổi thành “${hit.yours}”. Giữ bản nào?`,
+        suggestions: [`Dùng “${hit.yours}” theo yêu cầu của tôi`, `Giữ “${hit.theirs}” của ${who} và soạn phần còn lại`]
+      }
+      loc.markModified("conflict")
+      await loc.save()
+      return
+    }
+  }
+  // Câu trả lời cho câu hỏi "Giữ bản nào?" là một vòng làm rõ thật sự: C-4 / C-5 / C-2 về sau đều thấy (không hỏi lại
+  // "ngưỡng gốc là 1 hay 3?" ở bước kiểm nhất quán)
+  if (loc.conflict?.question) {
+    cr.clarifications.push({ round: cr.clarifications.length + 1, questions: [loc.conflict.question.text], answers: [instruction], suggestions: [loc.conflict.question.suggestions] })
+    cr.markModified("clarifications")
+    await cr.save()
+  }
   const result = await withMeteredAi<CrProposeOutput>({ projectId: String(cr.projectId), userId, stepId: `C-4:${cr.cr_id}` }, ActionType.CR_PROPOSE, {
     ...crHeader(cr),
     answers: `${answersText(cr)}
@@ -382,6 +410,7 @@ Analyst's instruction for ${loc.location_id} (${loc.owner_step ? `fix in owner s
   loc.conclusion = out.conclusion
   loc.reason = out.reason
   loc.proposal = {
+    proposed_at: new Date(),
     ...snapshotOf(spine, loc.path),
     new_text: out.conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
     comment_text: out.conclusion === "comment" ? (out.comment_text ?? null) : null,
