@@ -17,7 +17,7 @@ const doc = (over: Partial<ExistingDocument> & { id: string; name: string }): Ex
   ...over
 })
 
-describe("FLF-398 — tên gốc (bỏ dấu phiên bản cuối tên)", () => {
+describe("FLF-398 - tên gốc (bỏ dấu phiên bản cuối tên)", () => {
   it.each([
     ["SRS_KhachHang_v1.docx", "srs khachhang"],
     ["SRS_KhachHang_v2.docx", "srs khachhang"],
@@ -50,7 +50,7 @@ describe("FLF-398 — tên gốc (bỏ dấu phiên bản cuối tên)", () => {
   })
 })
 
-describe("FLF-398 — độ giống nội dung", () => {
+describe("FLF-398 - độ giống nội dung", () => {
   const V1 = "Mục tiêu\n\nKhách hàng đặt hàng online.\n\nThanh toán trong 3 giây.\n\nAdmin duyệt đơn."
   it("giống hệt ⇒ 1; sửa một đoạn ⇒ vẫn trên ngưỡng; khác hẳn ⇒ 0", () => {
     expect(contentSimilarity(V1, V1)).toBe(1)
@@ -61,7 +61,7 @@ describe("FLF-398 — độ giống nội dung", () => {
   })
 })
 
-describe("FLF-398 — trùng hệt", () => {
+describe("FLF-398 - trùng hệt", () => {
   it("cùng hash với bản đang dùng ⇒ trùng; khác hash ⇒ không", () => {
     const hash = contentHashOf(Buffer.from("abc"))
     const existing = [doc({ id: "d1", name: "a.txt", contentHash: hash })]
@@ -88,7 +88,7 @@ describe("FLF-398 — trùng hệt", () => {
   })
 })
 
-describe("FLF-398 — ứng viên bản mới", () => {
+describe("FLF-398 - ứng viên bản mới", () => {
   const TEXT = "Mục tiêu\n\nKhách hàng đặt hàng online.\n\nThanh toán trong 3 giây.\n\nAdmin duyệt đơn."
   it("cùng tên gốc ⇒ ứng viên dù nội dung khác hẳn; tên khác + nội dung giống ≥ ngưỡng ⇒ ứng viên; còn lại thì không", () => {
     const existing = [

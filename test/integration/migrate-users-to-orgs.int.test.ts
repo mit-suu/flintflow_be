@@ -118,7 +118,7 @@ describe("migrate-users-to-orgs (integration)", () => {
     expect(platform?.organizationId ?? null).toBeNull()
   })
 
-  it("ví của org là duy nhất — partial unique index chặn ví thứ hai cùng org", async () => {
+  it("ví của org là duy nhất - partial unique index chặn ví thứ hai cùng org", async () => {
     await migrateUsersToOrgs({ dryRun: false })
     const org = await Organization.findOne({}).lean()
 

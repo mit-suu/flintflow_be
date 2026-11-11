@@ -68,7 +68,7 @@ export const installGracefulShutdown = (): void => {
   const stop = async (signal: string) => {
     if (stopping) return
     stopping = true
-    console.log(`[worker] Nhận ${signal} — dừng nhận job, chờ job đang chạy…`)
+    console.log(`[worker] Nhận ${signal} - dừng nhận job, chờ job đang chạy…`)
     await stopWorkers().catch((err: unknown) => console.error("[worker] Đóng worker lỗi:", err))
     await closeQueues()
     await closeRedis()

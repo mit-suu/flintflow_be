@@ -17,7 +17,7 @@ import { makeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
 import { getImportResponseSchema } from "../../../src/modules/import/import.dto.js"
 import { Project } from "../../../src/modules/project/project.model.js"
 
-describe("FLF-343 — tách file lỗi", () => {
+describe("FLF-343 - tách file lỗi", () => {
   it("upload ⇒ 422 IMPORT_FILE_REJECTED kèm PARSE_FAILED; GET /import thấy preflight_rejected; upload lại được", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)

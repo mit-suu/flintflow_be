@@ -153,7 +153,7 @@ describe("run-state qua HTTP (BUG-05, BUG-07)", () => {
     expect(res.text).toBe("")
   })
 
-  it("FLF-264: đọc tài liệu lần đầu đã có nội dung — BE tự dựng, không trả not_assembled", async () => {
+  it("FLF-264: đọc tài liệu lần đầu đã có nội dung - BE tự dựng, không trả not_assembled", async () => {
     const seeded = await seedFixture("minimal")
     const doc = await api(seeded).get("/document?source=draft")
     expect(doc.status).toBe(200)

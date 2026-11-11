@@ -52,7 +52,7 @@ const viewerOf = async (orgId: string) => {
   return authAs({ _id: user._id, email: user.email, orgId })
 }
 
-describe("FLF-278 — mẫu và thư viện nội dung của tổ chức (luồng import)", () => {
+describe("FLF-278 - mẫu và thư viện nội dung của tổ chức (luồng import)", () => {
   it("A. lưu mẫu + mapping ⇒ dự án khác dùng lại, mapping áp sẵn, bỏ qua xác nhận; tổ chức khác không dùng được", async () => {
     const owner = await seedFixture("minimal", { balance: 1000 })
     const first = await mappedProject(owner)

@@ -72,7 +72,7 @@ describe("vectorCandidates", () => {
     expect(await vectorCandidates(PID, "x", { limit: 2, minScore: 0.5 })).toEqual([{ ref: "actors[id=A01]", score: 0.6 }])
   })
 
-  it("lỗi tạm thời (thăm dò hoặc embed) ⇒ [] nhưng không nhớ — lần sau thử lại", async () => {
+  it("lỗi tạm thời (thăm dò hoặc embed) ⇒ [] nhưng không nhớ - lần sau thử lại", async () => {
     aggregate.mockRejectedValueOnce(new Error("connection reset"))
     expect(await vectorCandidates(PID, "x")).toEqual([])
     aggregate.mockResolvedValue([])

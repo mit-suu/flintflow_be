@@ -2,7 +2,7 @@
 skill_id: gate-check
 kind: action
 version: 1.0.0
-description: Commit gate — Accept / Request revision / Regenerate / Accept as-is; caps 8 calls and 3 regenerates per step; phase menu [A]/[P]/[C]
+description: Commit gate - Accept / Request revision / Regenerate / Accept as-is; caps 8 calls and 3 regenerates per step; phase menu [A]/[P]/[C]
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 1024
@@ -22,7 +22,7 @@ language: user
 
 # Gate Check
 
-Contract for `gate.service.ts` (T13) and the FE GateCard (T12). **No model call** — the user decides; code enforces caps. Actions that do call a model (`revision`, `regenerate`) route to `draft-to-ops`.
+Contract for `gate.service.ts` (T13) and the FE GateCard (T12). **No model call** - the user decides; code enforces caps. Actions that do call a model (`revision`, `regenerate`) route to `draft-to-ops`.
 
 ## When the gate opens
 
@@ -60,8 +60,8 @@ After the last step of a phase is accepted:
 
 | Key | Meaning | Round one |
 | --- | --- | --- |
-| `[A]` | Advanced elicitation — deeper critique of the phase (BMAD `bmad-advanced-elicitation`) | cut |
-| `[P]` | Party mode — multi-persona review (most expensive; warn credit first) | cut |
+| `[A]` | Advanced elicitation - deeper critique of the phase (BMAD `bmad-advanced-elicitation`) | cut |
+| `[P]` | Party mode - multi-persona review (most expensive; warn credit first) | cut |
 | `[C]` | Continue to next phase | ✔ |
 
 ## Refuse

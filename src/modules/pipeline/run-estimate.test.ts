@@ -15,7 +15,7 @@ const spineAt = (upTo: string, extra: Partial<Spine> = {}): Spine => {
   return spine
 }
 
-describe("planRunEstimate (FLF-332 — ước tính credit trước lượt chạy hàng loạt)", () => {
+describe("planRunEstimate (FLF-332 - ước tính credit trước lượt chạy hàng loạt)", () => {
   it("scope unit: chỉ đơn vị giai đoạn của bước tới lượt; mỗi bước gọi model một lượt Draft, giai đoạn chưa phỏng vấn thêm một lượt Elicit", () => {
     const est = planRunEstimate(spineAt("S-2.1"), { scope: "unit" }, COSTS)
     expect(est.from_step).toBe("S-2.1")

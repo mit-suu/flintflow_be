@@ -36,7 +36,7 @@ const AI_ORDER = ["fixed:1", "fixed:2.2.1", "fixed:3.1.2"]
 const wallet = async (userId: string) => CreditWallet.findOne({ userId }).lean()
 const draftsOf = async (importId: string) => ExtractionDraft.find({ import_id: importId }).lean()
 
-describe("I-4 — bảng khớp đủ cột", () => {
+describe("I-4 - bảng khớp đủ cột", () => {
   it("bảng actor/UC/BR trích tất định, không gọi AI, không usage, không trừ credit", async () => {
     const ctx = await importAtExtracting()
     const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
@@ -64,7 +64,7 @@ describe("I-4 — bảng khớp đủ cột", () => {
   })
 })
 
-describe("I-4 — output sai schema", () => {
+describe("I-4 - output sai schema", () => {
   it("sai schema 2 lần rồi đúng ⇒ retry trong cùng lượt (3 lần gọi), trừ credit một lần", async () => {
     let bad = 0
     mockOverrides.next = record((prompt) => {
@@ -100,7 +100,7 @@ describe("I-4 — output sai schema", () => {
   }, 20_000)
 })
 
-describe("I-4 — độ tin", () => {
+describe("I-4 - độ tin", () => {
   it("FLF-343: field độ tin < 0.7 ⇒ vẫn sang baselining (không dừng ở fields_review), chỉ field đó đếm là cần xem", async () => {
     const ctx = await importAtExtracting()
     const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
@@ -139,7 +139,7 @@ describe("I-4 — độ tin", () => {
   })
 })
 
-describe("I-4 — hết credit, resume", () => {
+describe("I-4 - hết credit, resume", () => {
   it("hết credit ⇒ paused credits, giữ cursor ở section đang dở; nạp rồi resume không trích lại section done", async () => {
     // 5 credit: đủ 2 lượt (fixed:1, fixed:2.2.1), lượt thứ 3 (fixed:3.1.2) thiếu
     const ctx = await importAtExtracting({ balance: 5 })
@@ -183,7 +183,7 @@ describe("I-4 — hết credit, resume", () => {
   })
 })
 
-describe("I-4 — lỗi AI", () => {
+describe("I-4 - lỗi AI", () => {
   it("provider lỗi giữa chừng ⇒ release hold: ví hoàn phần giữ, usage refunded; resume trích lại section failed", async () => {
     mockOverrides.next = record((prompt) => (prompt.includes("# Import Extract") && sectionOf(prompt) === AI_ORDER[2] ? new Error("provider down") : fakeMode1(prompt)))
     const ctx = await importAtExtracting()

@@ -241,7 +241,7 @@ beforeEach(() => {
 })
 
 describe("T20: project rỗng đi trọn B-0.1 → B-2.3 → S-1.4 (mock provider)", () => {
-  it("ghi project{}, addendum[], assumptions[], other_requirements[] bằng op — không còn nằm trong tin nhắn", async () => {
+  it("ghi project{}, addendum[], assumptions[], other_requirements[] bằng op - không còn nằm trong tin nhắn", async () => {
     seedEmpty()
     for (const stepId of BRIEF_STEPS) await runAndAccept(stepId)
 
@@ -913,7 +913,7 @@ describe("fast path Brief: một lượt hỏi gộp, bước B-1.x viết trư�
     expect((last?.phase_gate as typeof phaseGate).message_vi).toContain("Còn 6 điều tôi tạm hiểu nữa")
   })
 
-  it("Mọi bước: bước dừng là cổng thật — không auto, run-state `gate`", async () => {
+  it("Mọi bước: bước dừng là cổng thật - không auto, run-state `gate`", async () => {
     seedB1({ reviewMode: "strict" })
     const { events, emit } = collect()
     await runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: trackedElicit().executor, draftExecutor: drafts(), message: "Đặt lịch khám" })

@@ -22,7 +22,7 @@ const toDto = (items: StepPlanItem[]): { steps: StepPlanEntry[] } => ({
 const requirePlan = async (projectId: string) => {
   const profile = await TemplateProfile.findOne({ projectId })
   if (!profile || !profile.step_plan?.length) {
-    throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa có kế hoạch các bước — hãy hoàn tất nhập tài liệu trước.", { status: null, to: "checking", allowed: [] })
+    throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa có kế hoạch các bước - hãy hoàn tất nhập tài liệu trước.", { status: null, to: "checking", allowed: [] })
   }
   return profile
 }

@@ -146,7 +146,7 @@ export interface AcquireOptions {
 
 const lockedMessage = (doc: RunStateDoc): string => {
   const since = new Date(doc.started_at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })
-  return `Bước ${doc.step_id} đang chạy ở lượt trước (bắt đầu ${since}) — huỷ lượt đó rồi chạy lại`
+  return `Bước ${doc.step_id} đang chạy ở lượt trước (bắt đầu ${since}) - huỷ lượt đó rồi chạy lại`
 }
 
 /**

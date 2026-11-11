@@ -7,7 +7,7 @@ const doc = (sections: RenderedDocument["sections"]): RenderedDocument => ({
 })
 const para = (text: string) => ({ type: "paragraph" as const, runs: [{ text }] })
 
-describe("sourceBasedFrom — dự án 'Upload SRS có sẵn' dùng file upload làm nền", () => {
+describe("sourceBasedFrom - dự án 'Upload SRS có sẵn' dùng file upload làm nền", () => {
   const profile = { source_file_ref: "file", target_structure: { resolved_mode: 1 } }
   it("có sẵn: mẫu cố định của công ty, hoặc cấu trúc FlintFlow đủ mục (chế độ 1)", () => {
     expect(sourceBasedFrom({ start_kind: "existing", template_intent: "fixed", mode: "import" }, { source_file_ref: "file", target_structure: { resolved_mode: 3 } })).toBe(true)
@@ -42,7 +42,7 @@ describe("sourceBasedFrom — dự án 'Upload SRS có sẵn' dùng file upload 
   })
 })
 
-describe("pristineSectionIds — mục in giống hệt lúc import", () => {
+describe("pristineSectionIds - mục in giống hệt lúc import", () => {
   it("so heading + khối của từng mục; mục sửa / mục mới không nguyên vẹn; trạng thái duyệt không tính", () => {
     const imported = doc([
       { id: "fixed:1", number: "1", heading: "Product Overview", level: 1, blocks: [para("Portal for students.")] },

@@ -2,14 +2,14 @@
 skill_id: cr-material-image
 kind: action
 version: 1.0.1
-description: Mode 1 phase 7 — read one image a user attached to a change request as source material and return its text + a short description
+description: Mode 1 phase 7 - read one image a user attached to a change request as source material and return its text + a short description
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 4096
 temperature: 0
 reads:
   - "<one attached image (PNG/JPEG): a photo of meeting notes, a screenshot of an email, a table, a sketch>"
-  - "<change request title — only to know what matters>"
+  - "<change request title - only to know what matters>"
 writes: []
 output_schema: crMaterialImage
 language: user
@@ -33,10 +33,10 @@ your output **instead of the image**, so everything useful in it must be in your
 2. A table ⇒ one line per row, cells separated by ` | `, header row first.
 3. After the transcription add a short section starting with `Description:` (in the change request's language):
    what the image is (e.g. "photo of handwritten meeting notes", "screen mock-up with 3 fields") and any structure
-   that text alone loses — arrows between boxes, which field belongs to which screen, strike-throughs, highlights.
+   that text alone loses - arrows between boxes, which field belongs to which screen, strike-throughs, highlights.
 4. Text you cannot read ⇒ write `[unreadable]` in its place. Never guess words or numbers.
 5. An image with no text and nothing relevant (logo, photo of a person) ⇒ only the `Description:` line.
 
 ## Output
 
-JSON only: `{ "text": "Họp 23/09 — chốt NFR\n- Thời gian phản hồi ≤ 2 s cho 95 % request\n...\n\nDescription: ảnh chụp biên bản viết tay, 6 gạch đầu dòng." }`
+JSON only: `{ "text": "Họp 23/09 - chốt NFR\n- Thời gian phản hồi ≤ 2 s cho 95 % request\n...\n\nDescription: ảnh chụp biên bản viết tay, 6 gạch đầu dòng." }`

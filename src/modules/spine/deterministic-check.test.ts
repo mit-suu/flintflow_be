@@ -180,7 +180,7 @@ describe("runDeterministicCheck", () => {
     )
   })
 
-  it("orphan_entity: ERD phải liên thông — entity đứng riêng và cụm tách rời đều bị bắt; chờ S-4.5", () => {
+  it("orphan_entity: ERD phải liên thông - entity đứng riêng và cụm tách rời đều bị bắt; chờ S-4.5", () => {
     const split = variant((s) => {
       s.entities.push({ id: "E90", name: "Island", description: "", relations: ["E90"] })
       s.entities.push({ id: "E91", name: "Child Only", description: "", relations: [] })
@@ -374,7 +374,7 @@ describe("runDeterministicCheck", () => {
   })
 
 
-  it("FLF-265: non_english_content chỉ đọc Spine — dự án mode 2 có ngôn ngữ tài liệu vi vẫn bị bắt chữ Việt; mode 1 vẫn tắt", () => {
+  it("FLF-265: non_english_content chỉ đọc Spine - dự án mode 2 có ngôn ngữ tài liệu vi vẫn bị bắt chữ Việt; mode 1 vẫn tắt", () => {
     // Ngôn ngữ tài liệu nằm ở Project, bản dịch ở SpineTranslation — luật không nhận cả hai, Spine mode 2 vẫn phải tiếng Anh
     const vietnameseInSpine = variant((s) => {
       s.actors[1].name = "Quản trị viên"
@@ -706,12 +706,12 @@ describe("system_name_missing (FLF-177)", () => {
 
   it("system_name tiếng Việt ⇒ non_english_content", () => {
     const flags = byRule(runDeterministicCheck(withSystemName("Giao hàng nhanh")), "non_english_content")
-    expect(flags.some((f) => f.message.includes("Thông tin dự án — Tên hệ thống"))).toBe(true)
+    expect(flags.some((f) => f.message.includes("Thông tin dự án - Tên hệ thống"))).toBe(true)
     expect(flags.some((f) => f.message.includes("project.system_name"))).toBe(false)
   })
 })
 
-describe("non_english_content — tên dự án chờ bước chốt tên hệ thống", () => {
+describe("non_english_content - tên dự án chờ bước chốt tên hệ thống", () => {
   /** Chưa chốt tên hệ thống nên tên dự án sẽ lọt vào tài liệu; `systemNameStep` quyết bước đó đã chạy chưa. */
   const vietnameseProjectName = (systemNameStep: StepStatus | null): Spine =>
     variant((s) => {
@@ -721,7 +721,7 @@ describe("non_english_content — tên dự án chờ bước chốt tên hệ t
     })
 
   const flagsOnProjectName = (spine: Spine, atBaseline = false) =>
-    byRule(runDeterministicCheck(spine, [], { atBaseline }), "non_english_content").filter((f) => f.message.includes("Thông tin dự án — Tên"))
+    byRule(runDeterministicCheck(spine, [], { atBaseline }), "non_english_content").filter((f) => f.message.includes("Thông tin dự án - Tên"))
 
   it("chưa chốt bước đặt tên hệ thống ⇒ không bắt tên dự án", () => {
     expect(flagsOnProjectName(vietnameseProjectName(null))).toHaveLength(0)
@@ -743,7 +743,7 @@ describe("thông điệp cờ cho người đọc (mode 1: không in mã kỹ th
     for (const f of flags) for (const re of RAW) expect(f.message, `${f.rule_id}: ${f.message}`).not.toMatch(re)
   }
 
-  it("Spine rỗng (section_empty, array_empty, nfr_missing_number) — tên mục/nhóm bằng chữ", () => {
+  it("Spine rỗng (section_empty, array_empty, nfr_missing_number) - tên mục/nhóm bằng chữ", () => {
     const flags = runDeterministicCheck(createEmptySpine(), [], { atBaseline: true })
     check(flags)
     expect(flags.find((f) => f.rule_id === "section_empty" && f.section_id === "fixed:5.3")?.message).toBe('Mục bắt buộc "5.3 Application Messages List" chưa có dữ liệu')
@@ -836,7 +836,7 @@ describe("FLF-213: luật \"chưa có X\" chờ bước sở hữu chốt", () =
     expect(normal.length).toBeLessThan(flags.filter((f) => GATED_RULES.includes(f.rule_id)).length)
   })
 
-  it("mode 1 (skipOwnerStepGate) giữ nguyên cờ dù step chưa accepted — Spine import suy step từ file", () => {
+  it("mode 1 (skipOwnerStepGate) giữ nguyên cờ dù step chưa accepted - Spine import suy step từ file", () => {
     const spine = atS36()
     const profile = { exclude: new Set<string>(), downgrade: new Set<string>(), skipOwnerStepGate: true }
     const gated = byRule(runDeterministicCheck(spine), "section_empty").map((f) => f.section_id)
@@ -846,7 +846,7 @@ describe("FLF-213: luật \"chưa có X\" chờ bước sở hữu chốt", () =
   })
 })
 
-describe("non_english_content — tầm nhìn/mục tiêu chỉ về S-1.1", () => {
+describe("non_english_content - tầm nhìn/mục tiêu chỉ về S-1.1", () => {
   it("vision tiếng Việt ⇒ cờ vàng ở fixed:1 với remediation_step S-1.1", () => {
     const flags = runDeterministicCheck(variant((s) => (s.project.vision = "Giúp bệnh nhân đặt lịch khám trực tuyến")))
     expect(byRule(flags, "non_english_content").filter((f) => f.section_id === "fixed:1")).toMatchObject([{ level: "yellow", remediation_step: "S-1.1" }])
@@ -866,7 +866,7 @@ describe("non_english_content — tầm nhìn/mục tiêu chỉ về S-1.1", () 
   })
 })
 
-describe("chế độ 3 — mẫu bắt buộc (FLF-278 trên FLF-335/336)", () => {
+describe("chế độ 3 - mẫu bắt buộc (FLF-278 trên FLF-335/336)", () => {
   it("mục FlintFlow có dữ liệu mà mẫu không có ⇒ template_section_absent; mục riêng của mẫu chỉ có chữ hướng dẫn ⇒ template_section_empty", async () => {
     const { readFileSync } = await import("node:fs")
     const base = JSON.parse(readFileSync(new URL("../../../fixtures/spine-fixture-19-screens.json", import.meta.url), "utf8"))
@@ -912,7 +912,7 @@ describe("chế độ 3 — mẫu bắt buộc (FLF-278 trên FLF-335/336)", () 
   })
 })
 
-describe("FLF-365 — verification_orphan", () => {
+describe("FLF-365 - verification_orphan", () => {
   it("dòng kiểm chứng trỏ yêu cầu không có ⇒ cờ vàng ở slot:verification, target = dòng; trỏ đúng ⇒ không cờ", () => {
     const spine = {
       ...createEmptySpine(),

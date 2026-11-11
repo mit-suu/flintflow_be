@@ -244,7 +244,7 @@ describe("renderer thuần, tất định", () => {
 
   it("nhãn theo ngôn ngữ tài liệu: tiêu đề tiếng Việt, ký pháp UML giữ nguyên", () => {
     const vi = RENDERERS.usecase(FIXTURE, null, DIAGRAM_LABELS.vi)
-    expect(svgTitleOf(vi[0].source)).toMatch(/^Sơ đồ use case — /)
+    expect(svgTitleOf(vi[0].source)).toMatch(/^Sơ đồ use case - /)
     expect(vi.map((p) => p.source).join("\n")).toContain("&lt;&lt;include&gt;&gt;")
   })
 
@@ -277,7 +277,7 @@ describe("dữ liệu thật: Log In / Reset Password chung nhiều actor (Outpa
     expect(parts.flatMap((p) => p.issues ?? [])).toEqual([])
     const members = parts.flatMap((p) => p.members ?? [])
     expect([...new Set(members)].sort()).toEqual(spine.use_cases.map((u) => u.id).sort())
-    expect(titles(spine)).toContain("Use Cases — Authentication")
+    expect(titles(spine)).toContain("Use Cases - Authentication")
   })
 
   it("tất định: hai lượt render ⇒ cùng nguồn", () => {

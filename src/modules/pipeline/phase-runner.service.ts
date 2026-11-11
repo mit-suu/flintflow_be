@@ -393,7 +393,7 @@ const askPhaseInterview = async (
           // FLF-221: user mở giai đoạn bằng một tin chat — lượt hỏi gộp phải thấy điều user vừa nói. FLF-232: kèm đuôi hội
           // thoại của các bước trước, để sang giai đoạn mới AI nối mạch thay vì chào lại.
           ...conversation,
-          user_message: userMessage ?? "(tự động — hỏi gộp đầu giai đoạn)"
+          user_message: userMessage ?? "(tự động - hỏi gộp đầu giai đoạn)"
         },
         replyLanguage
       },
@@ -787,5 +787,5 @@ export const runPhase = async (
     })
   }
 
-  return { phase: unit, stopped_at: null, reason_vi: `Đã chạy ${MAX_PHASE_STEPS} bước liên tiếp — dừng lại để bạn xem`, steps: outcomes }
+  return { phase: unit, stopped_at: null, reason_vi: `Đã chạy ${MAX_PHASE_STEPS} bước liên tiếp - dừng lại để bạn xem`, steps: outcomes }
 }

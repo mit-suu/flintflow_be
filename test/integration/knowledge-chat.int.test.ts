@@ -62,7 +62,7 @@ afterAll(() => {
   env.KNOWLEDGE_MIN_SCORE = saved.minScore
 })
 
-describe("FLF-267 chat — cờ knowledge", () => {
+describe("FLF-267 chat - cờ knowledge", () => {
   it("KNOWLEDGE_ENABLED tắt ⇒ 409 KNOWLEDGE_DISABLED, không ghi tin nào vào phiên", async () => {
     env.KNOWLEDGE_ENABLED = false
     const f = await seedFixture("minimal")
@@ -82,7 +82,7 @@ describe("FLF-267 chat — cờ knowledge", () => {
   })
 })
 
-describe("FLF-267 chat — trả lời có căn cứ", () => {
+describe("FLF-267 chat - trả lời có căn cứ", () => {
   it("route JSON: tin AI = { reply, questions: [], grounded: true, citations[] } chỉ gồm nhãn thật; KHÔNG trừ credit (FLF-333), vẫn ghi aiactionlogs", async () => {
     const f = await seedFixture("minimal")
     const before = await balance(f)

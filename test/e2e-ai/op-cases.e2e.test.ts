@@ -21,7 +21,7 @@ const OUT_DIR = path.resolve(__dirname, "results")
 
 const verdicts: OpCaseVerdict[] = []
 
-describe.skipIf(!enabled)("10 ca op T02 — provider thật (E2E_AI=1)", () => {
+describe.skipIf(!enabled)("10 ca op T02 - provider thật (E2E_AI=1)", () => {
   for (const file of OP_CASE_FILES) {
     it(`${file}`, async () => {
       const verdict = await runOpCase(file)
@@ -42,16 +42,16 @@ describe.skipIf(!enabled)("10 ca op T02 — provider thật (E2E_AI=1)", () => {
     fs.mkdirSync(OUT_DIR, { recursive: true })
     const stamp = new Date().toISOString().replace(/[:.]/g, "-")
     const header = [
-      `# 10 ca op T02 — provider thật (${new Date().toISOString()})`,
+      `# 10 ca op T02 - provider thật (${new Date().toISOString()})`,
       "",
       "Sinh bởi `npm run test:e2e-ai`. Luật chấm: `test/helpers/op-case-eval.ts`.",
-      "Token/credit của ca bị `DraftRejectedError` không có trong bảng (lỗi không trả usage) — xem `AiActionLog`.",
+      "Token/credit của ca bị `DraftRejectedError` không có trong bảng (lỗi không trả usage) - xem `AiActionLog`.",
       ""
     ].join("\n")
     fs.writeFileSync(path.join(OUT_DIR, `op-cases-${stamp}.md`), `${header}\n${formatVerdicts(verdicts)}\n`)
   })
 })
 
-describe.skipIf(enabled)("10 ca op T02 — provider thật", () => {
+describe.skipIf(enabled)("10 ca op T02 - provider thật", () => {
   it.skip("bỏ qua: đặt E2E_AI=1 để gọi provider thật (tốn credit)", () => {})
 })

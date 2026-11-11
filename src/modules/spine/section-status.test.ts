@@ -26,7 +26,7 @@ const change = (seq: number, p: string, step_id: string | null = null): Change =
   step_id
 })
 
-describe("FLF-204 (BUG-26) — feature chỉ accepted khi function con cũng xong", () => {
+describe("FLF-204 (BUG-26) - feature chỉ accepted khi function con cũng xong", () => {
   it("một function con còn draft ⇒ feature xuống draft", () => {
     const spine = structuredClone(FIXTURE)
     // Mở lại vòng của màn S01 (đang signed_off) ⇒ function của nó chưa chốt lại
@@ -126,7 +126,7 @@ describe("readiness / progressByStep", () => {
     expect(r.accepted_pct).toBeLessThan(100) // function của màn placeholder còn draft
   })
 
-  it("fixture: 68 step done / 50 + 5×6 = 80 — màn để lại (placeholder) không vào mẫu số", () => {
+  it("fixture: 68 step done / 50 + 5×6 = 80 - màn để lại (placeholder) không vào mẫu số", () => {
     // 19 màn: 5 signed_off + 14 placeholder. Đếm cả 14 màn để lại thì mẫu số là 150 và thanh tiến độ không bao giờ
     // chạm 100% được, trong khi `nextStep` vốn đã bỏ qua vòng của màn placeholder.
     expect(progressByStep(FIXTURE)).toEqual({ done: 68, total: 80, current_phase: "S-9", current_step: "S-9.5", show_percent: true })

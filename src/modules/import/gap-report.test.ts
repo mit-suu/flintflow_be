@@ -53,13 +53,13 @@ const NL = String.fromCharCode(10)
 
 const texts = async (buf: Buffer) => (await readBlocks(await DocxPackage.load(buf))).map((b) => ({ kind: b.kind, text: b.text }))
 
-describe("renderGapReportDocx — xuất .docx mở được", () => {
+describe("renderGapReportDocx - xuất .docx mở được", () => {
   it("đọc lại bằng docx-ooxml: tiêu đề, bảng tổng quan, cờ theo mục (đỏ trước), bố cục, dữ liệu độ tin thấp; không còn mục FPT thiếu (FLF-312)", async () => {
     const buf = await renderGapReportDocx(REPORT, "Lumen")
     expect(buf.subarray(0, 4).toString("hex")).toBe("504b0304")
     const blocks = await texts(buf)
     const all = blocks.map((b) => b.text)
-    expect(all[0]).toBe("Báo cáo thiếu sót — Lumen")
+    expect(all[0]).toBe("Báo cáo thiếu sót - Lumen")
     expect(all[1]).toBe("Phiên bản tài liệu 0.1 · tạo lúc 19/09/2026 07:00")
     for (const h of ["Tổng quan", "Cờ theo mục", "Dữ liệu trích có độ tin thấp"]) expect(all).toContain(h)
     for (const h of ["Thiếu mục theo mẫu FPT", "Mục mẫu FPT không có tiêu đề trong file", "Tiêu đề không khớp mẫu"]) expect(all).not.toContain(h)
@@ -76,7 +76,7 @@ describe("renderGapReportDocx — xuất .docx mở được", () => {
     ])
     expect(tables[0]).not.toContain("mẫu FPT")
     expect(tables.some((t) => t.includes("Phụ lục A Biên bản họp | Mục riêng (ngoài FPT) | 0 | 0"))).toBe(true)
-    expect(tables.some((t) => t.includes("Chức năng FR-3.2.1 — Điều kiện kích hoạt | Learner submits | 50%"))).toBe(true)
+    expect(tables.some((t) => t.includes("Chức năng FR-3.2.1 - Điều kiện kích hoạt | Learner submits | 50%"))).toBe(true)
   })
 
   it("không in mã máy: khoá section, block id, path Spine, mã luật, mã step, JSON", async () => {
@@ -184,7 +184,7 @@ describe("titleOfSection", () => {
   })
 })
 
-describe("toReviewFields — tên phần tử cho nhãn field cần xác nhận", () => {
+describe("toReviewFields - tên phần tử cho nhãn field cần xác nhận", () => {
   const ef = (path: string, value: unknown, over: Partial<ExtractedField> = {}): ExtractedField => ({
     path,
     value,

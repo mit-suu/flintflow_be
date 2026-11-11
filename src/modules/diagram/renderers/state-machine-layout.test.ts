@@ -56,7 +56,7 @@ const crossings = (s: Scene): number => {
   return n
 }
 
-describe("state-machine-layout — ký pháp UML", () => {
+describe("state-machine-layout - ký pháp UML", () => {
   it("initial là chấm đặc, final là bullseye (vòng + lõi đặc), state là chữ nhật bo góc", () => {
     const s = scene(CHANGE_REQUEST)
     expect(el(s, "I")).toMatchObject({ type: "ellipse", fill: "#000", rx: 9, ry: 9 })
@@ -102,7 +102,7 @@ describe("state-machine-layout — ký pháp UML", () => {
   })
 })
 
-describe("state-machine-layout — transition giữa cùng một cặp state", () => {
+describe("state-machine-layout - transition giữa cùng một cặp state", () => {
   const PAIR: StateMachineInput = {
     states: [st("A", "Open", { initial: true }), st("B", "Closed")],
     transitions: [tr("A", "B", "close"), tr("B", "A", "reopen [within 30 days]"), tr("A", "B", "auto close / archive")]
@@ -139,7 +139,7 @@ describe("state-machine-layout — transition giữa cùng một cặp state", (
   })
 })
 
-describe("state-machine-layout — internal transition (self-transition)", () => {
+describe("state-machine-layout - internal transition (self-transition)", () => {
   it("không vẽ đường; chữ nằm trong ngăn dưới của state, có đường chia ngăn, state cao hơn state thường", () => {
     const s = scene(CHANGE_REQUEST)
     expect(s.find("T:D>D")).toBeUndefined()
@@ -167,7 +167,7 @@ describe("state-machine-layout — internal transition (self-transition)", () =>
   })
 })
 
-describe("state-machine-layout — ca biên", () => {
+describe("state-machine-layout - ca biên", () => {
   it("không có state ⇒ null", () => {
     expect(layoutStateMachine({ states: [], transitions: [] })).toBeNull()
   })
@@ -223,7 +223,7 @@ describe("state-machine-layout — ca biên", () => {
   })
 })
 
-describe("state-machine-layout — không có hai đường cắt nhau (tiêu chí riêng ngoài checkScene)", () => {
+describe("state-machine-layout - không có hai đường cắt nhau (tiêu chí riêng ngoài checkScene)", () => {
   const cases: Record<string, StateMachineInput> = {
     "vòng đời tuyến tính": {
       states: [st("A", "Draft", { initial: true }), st("B", "Submitted"), st("C", "Approved"), st("D", "Published", { final: true })],

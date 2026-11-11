@@ -44,7 +44,7 @@ beforeEach(async () => {
 const adjust = (amount: number, reason = "Bù cho sự cố hệ thống") =>
   request(app).patch("/api/v1/admin/orgs/" + orgId + "/credits").set(bearer(admin)).send({ amount, reason })
 
-describe("UC-68 — điều chỉnh credit tổ chức", () => {
+describe("UC-68 - điều chỉnh credit tổ chức", () => {
   it("cộng credit vào ví org và ghi lý do vào ledger", async () => {
     const before = await CreditWallet.findOne({ organizationId: orgId }).lean()
 
@@ -134,7 +134,7 @@ describe("UC-68 — điều chỉnh credit tổ chức", () => {
   })
 })
 
-describe("UC-65 — xem user thuộc org nào", () => {
+describe("UC-65 - xem user thuộc org nào", () => {
   it("chi tiết user liệt kê org, vai trò và ví của từng org", async () => {
     const res = await request(app).get("/api/v1/admin/users/" + lead.id).set(bearer(admin))
 

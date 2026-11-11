@@ -63,7 +63,7 @@ const crToReady = async (c: ReturnType<typeof mode1Api>) => {
   return { crId, cr, impact, proposed, verified }
 }
 
-describe("mode 1 — change request", () => {
+describe("mode 1 - change request", () => {
   it("chưa có baseline ⇒ CR_REQUIRES_BASELINE; thiếu nguồn ⇒ CR_SOURCE_REQUIRED", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)

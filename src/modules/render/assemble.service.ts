@@ -331,7 +331,7 @@ const materializeImages = (doc: RenderedDocument, resolve: (diagramId: string) =
     const png = resolve(id)
     if (png) return { ...b, png }
     // Ảnh gốc không nhúng được (EMF/WMF, file gốc không còn) ⇒ chỗ giữ ảnh + chú thích nói đúng lý do
-    if (isMediaId(id)) return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: `${b.caption ? `${b.caption} — ` : ""}${assembleTextFor(language).mediaNotEmbedded}` }
+    if (isMediaId(id)) return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: `${b.caption ? `${b.caption} - ` : ""}${assembleTextFor(language).mediaNotEmbedded}` }
     return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: pendingImageCaption(b.caption, id, language) }
   }
   return { ...doc, sections: doc.sections.map((s) => ({ ...s, blocks: s.blocks.map(materialize) })) }
@@ -344,7 +344,7 @@ const resolveLoaded =
 
 const warnMissingImages = (images: ImageLoadResult, target: string): void => {
   if (images.missing.length > 0) {
-    console.warn(`[assemble] ${images.missing.length} diagram PNG chưa tải được cho ${target} (${images.missing.join(", ")}) — tài liệu dùng placeholder tới khi có ảnh`)
+    console.warn(`[assemble] ${images.missing.length} diagram PNG chưa tải được cho ${target} (${images.missing.join(", ")}) - tài liệu dùng placeholder tới khi có ảnh`)
   }
 }
 
@@ -913,7 +913,7 @@ export async function assemble(
       findings: [...missingImageFindings(stillMissing), ...omittedTemplateSectionFindings(record, omitted)]
     }
   }
-  if (cached) console.warn(`[render] cache tài liệu v${record.spine_version} của project ${projectId} không hợp khuôn — dựng lại`)
+  if (cached) console.warn(`[render] cache tài liệu v${record.spine_version} của project ${projectId} không hợp khuôn - dựng lại`)
 
   const { projectId: _projectId, ...spine } = record
   const changes = await spineRepository.listChanges(projectId)
@@ -1028,7 +1028,7 @@ const loadDraftCache = async (
   ])
   if (cached === null) return null
   if (cached === "invalid") {
-    console.warn(`[render] cache tài liệu của project ${projectId} không hợp khuôn — dựng lại`)
+    console.warn(`[render] cache tài liệu của project ${projectId} không hợp khuôn - dựng lại`)
     return null
   }
   return { doc: await rehydrateImages(cached.doc, projectId, load), assembledAtVersion: cached.assembledAtVersion }
@@ -1207,7 +1207,7 @@ const getBaselineDocument = async (
   const cached = await readCachedDocument(cacheFilter)
   if (cached !== null && cached !== "invalid") return rehydrateImages(cached.doc, projectId, deps.loadDiagramPng)
   // Cache hỏng: snapshot của baseline là bất biến nên dựng lại từ nó luôn đúng — không trả lỗi cho người dùng
-  if (cached === "invalid") console.warn(`[render] cache baseline ${baselineIdStr} của project ${projectId} không hợp khuôn — dựng lại`)
+  if (cached === "invalid") console.warn(`[render] cache baseline ${baselineIdStr} của project ${projectId} không hợp khuôn - dựng lại`)
 
   const baseline = await findBaseline(projectId, baselineIdStr)
   const spine = baselineSpine(baseline.snapshot)
@@ -1293,7 +1293,7 @@ const loadStoredTranslated = async (projectId: string, key: TranslatedKey): Prom
   if (!row) return null
   const parsed = storedTranslatedSchema.safeParse(row)
   if (!parsed.success) {
-    console.warn(`[render] bản dịch ${key.locale} (${key.view}) đã lưu của project ${projectId} không hợp khuôn — dựng lại`)
+    console.warn(`[render] bản dịch ${key.locale} (${key.view}) đã lưu của project ${projectId} không hợp khuôn - dựng lại`)
     return null
   }
   const { doc, translation, localized_refs, image_language } = parsed.data
