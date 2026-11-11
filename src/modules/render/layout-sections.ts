@@ -359,7 +359,11 @@ export const sectionsNotInserted = (spine: Spine, template: TemplateLayout): Set
     if (!inLayout.has(id) && !spine.functions.some((f) => f.feature_id === feature.id && inserted(f))) out.add(id)
   }
   if (template.fixedTemplate) {
-    for (const def of listSections(spine)) if (!inLayout.has(def.id)) out.add(def.id)
+    // TechMart 11/11 (user chốt): mẫu cố định vẫn chèn feature / chức năng MỚI (CR thêm use case có chức năng riêng) dưới
+    // đúng feature — chương chức năng là phần lặp của mẫu; mục khác ngoài khung mẫu vẫn không chèn
+    // Chỉ khi khung mẫu vốn có mục feature / chức năng riêng; mẫu in chức năng thành bảng (FU, `slot:*`) thì chèn sẽ in trùng
+    const repeats = [...inLayout].some(isRepeatingSection)
+    for (const def of listSections(spine)) if (!inLayout.has(def.id) && !(repeats && isRepeatingSection(def.id))) out.add(def.id)
   }
   // Mục FPT đã in qua các phần nhỏ của nó (`slot:*`) ⇒ không chèn lại cả mục (dữ liệu in hai lần)
   for (const id of inLayout) for (const parent of slotParents(id)) if (!inLayout.has(parent)) out.add(parent)
@@ -387,6 +391,7 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
   const customById = new Map(spine.custom_sections.map((c) => [c.id, c]))
   const placed: Placed[] = []
   const used = new Set<string>()
+  const insertMissing = (candidates: readonly SectionDef[]) => insertMissingSections(placed, used, defs, candidates, spine, template)
 
   for (const entry of [...template.layout].sort((a, b) => a.order - b.order)) {
     const id = entry.section_id
@@ -433,7 +438,10 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
     used.add(id)
   }
 
-  if (template.fixedTemplate) return placed
+  if (template.fixedTemplate) {
+    insertMissing(defs.filter((d) => isRepeatingSection(d.id)))
+    return placed
+  }
 
   // Mục riêng thêm tay (chat) chưa có trong layout ⇒ cuối tài liệu
   for (const c of spine.custom_sections) {
@@ -446,13 +454,28 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
 
   insertDistribution(placed, used, spine, template)
 
-  // Section FPT thiếu trong layout ⇒ chèn cạnh mục anh em cùng nhóm mẫu FPT (sau anh em đứng trước, không có thì trước
-  // anh em đứng sau); nhóm chưa có mục nào ⇒ sau section FPT gần nhất đứng trước theo thứ tự mẫu
+  insertMissing(defs)
+  return placed
+}
+
+/** Mục lặp của mẫu (feature, chức năng) — CR thêm được dù mẫu cố định. */
+const isRepeatingSection = (id: string): boolean => /^(feature|function):/.test(id)
+
+/**
+ * Section FPT thiếu trong layout ⇒ chèn cạnh mục anh em cùng nhóm mẫu FPT (sau anh em đứng trước, không có thì trước
+ * anh em đứng sau); nhóm chưa có mục nào ⇒ sau section FPT gần nhất đứng trước theo thứ tự mẫu. `candidates` ⊆ `defs`.
+ */
+const insertMissingSections = (placed: Placed[], used: Set<string>, defs: SectionDef[], candidates: readonly SectionDef[], spine: Spine, template: TemplateLayout): void => {
+  const wanted = new Set(candidates.map((d) => d.id))
   defs.forEach((def, i) => {
-    if (used.has(def.id)) return
+    if (used.has(def.id) || !wanted.has(def.id)) return
     const sibling = (d: SectionDef) => def.parent !== undefined && d.parent === def.parent && used.has(d.id)
     const before = defs.slice(0, i).reverse()
-    const anchor = before.find(sibling) ?? null
+    // TechMart 11/11: chức năng mới (chưa có trong file) đứng SAU mọi chức năng của file trong cùng feature — không chen
+    // giữa làm đổi số mục của file ("Write Product Review" 3.3.3 ⇒ 3.3.4)
+    const placedAt = (d: SectionDef) => placed.findIndex((p) => p.section_id === d.id)
+    const lastPlacedSibling = def.id.startsWith("function:") ? (defs.filter(sibling).sort((a, b) => placedAt(b) - placedAt(a))[0] ?? null) : null
+    const anchor = lastPlacedSibling ?? before.find(sibling) ?? null
     const next = anchor ? null : (defs.slice(i + 1).find(sibling) ?? null)
     const group = anchor || next || !def.parent ? null : `${GROUP_PREFIX}${def.parent}`
     const groupAt = group ? placed.findIndex((p) => p.section_id === group) : -1
@@ -467,7 +490,6 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
     }
     used.add(def.id)
   })
-  return placed
 }
 
 const DESIGN_HEADING = /design and implementation|thiết kế và triển khai/i
@@ -499,6 +521,20 @@ const insertDistribution = (placed: Placed[], used: Set<string>, spine: Spine, t
   used.add("slot:distribution")
 }
 
+/**
+ * TechMart 11/11: mục chức năng của file ghi mã use case sau tên ("Search Products (UC-03)") ⇒ chức năng mới thêm cùng kiểu
+ * ("Compare Products (UC-21)") khi chức năng đó hiện thực một use case.
+ */
+const USE_CASE_SUFFIX = /\((UC|US)[-_ ]?\d+[a-z]?\)\s*$/i
+const withUseCaseCode = (title: string, def: SectionDef, placed: readonly Placed[], spine: Spine): string => {
+  if (!def.id.startsWith("function:") || USE_CASE_SUFFIX.test(title)) return title
+  const fileUsesCodes = placed.some((p) => p.section_id.startsWith("function:") && p.fromLayout && USE_CASE_SUFFIX.test(p.title))
+  if (!fileUsesCodes) return title
+  const fnId = def.id.slice("function:".length)
+  const uc = spine.use_cases.find((u) => u.function_ids.includes(fnId))
+  return uc ? `${title} (${uc.id})` : title
+}
+
 const insertionPoint = (
   placed: Placed[],
   def: SectionDef,
@@ -506,7 +542,7 @@ const insertionPoint = (
   template: TemplateLayout,
   spine: Spine
 ): [number, number, Placed] => {
-  const title = defaultSectionTitle(spine, def.id, template.language)
+  const title = withUseCaseCode(defaultSectionTitle(spine, def.id, template.language), def, placed, spine)
   const make = (level: number): Placed => ({ section_id: def.id, kind: "fpt", title, level: clampLevel(level), fromLayout: false, typed: false })
   if (anchor.before) {
     const at = placed.findIndex((p) => p.section_id === anchor.before!.id)
