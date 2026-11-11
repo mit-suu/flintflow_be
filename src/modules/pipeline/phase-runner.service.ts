@@ -70,10 +70,10 @@ export const isPhaseTerminal = (spine: Spine, step: ExpandedStep): boolean => {
  * FLF-292: tài liệu upload cho lượt hỏi gộp đầu giai đoạn — nạp khi có bước nào trong đơn vị đọc `documents` (cùng ngân
  * sách token với lượt Draft của bước đó). Không bước nào đọc ⇒ `""`.
  */
-export const unitDocuments = async (projectId: string, spine: Spine, unit: string): Promise<string> => {
+export const unitDocuments = async (projectId: string, spine: Spine, unit: string, since?: Date): Promise<string> => {
   const step = orderedSteps(spine).find((s) => phaseUnitOf(s) === unit && stepNeedsSourceDocuments(s.id))
   if (!step) return ""
-  return (await buildDocumentContext(projectId, ActionType.DRAFT, step.id)).contextText
+  return (await buildDocumentContext(projectId, ActionType.DRAFT, step.id, 0, undefined, undefined, since ? { since } : {})).contextText
 }
 
 /**
@@ -139,7 +139,9 @@ const interviewChatTurn = async (
   /** FLF-260: ngôn ngữ trả lời của lượt — nơi gọi đã đoán lại trên `message`. */
   language: ReplyLanguage,
   /** Lời AI lúc đặt các câu đang chờ — ghi vào lịch sử cùng câu hỏi nếu lịch sử chưa có lượt hỏi nào của giai đoạn. */
-  askedReply = ""
+  askedReply = "",
+  /** FLF-398: lúc đặt các câu đang chờ (`PendingAnswerState.asked_at`) — tài liệu tải lên sau lúc này vào lượt chat. */
+  askedAt?: string
 ): Promise<{ reply: string; remaining: PendingAnswerState["asked"] }> => {
   const cardAnswers = payload.answers.filter((a) => indexOfQuestion(asked, a.question_id) >= 0)
   // Lượt hỏi đầu giai đoạn chỉ vào lịch sử khi có câu trả lời trên thẻ — trả lời bằng chat thì câu hỏi biến mất khỏi
@@ -177,6 +179,9 @@ const interviewChatTurn = async (
     userId,
     unit,
     stepName: `Phỏng vấn đầu giai đoạn ${unit}`,
+    // FLF-398: tệp đính kèm cùng câu trả lời (tải sau lúc hỏi) — thiếu thì AI báo "tệp chưa mở được"; trạng thái cũ chưa có
+    // `asked_at` ⇒ mọi tài liệu của giai đoạn
+    documents: await unitDocuments(projectId, spine, unit, askedAt && !Number.isNaN(new Date(askedAt).getTime()) ? new Date(askedAt) : undefined),
     asked,
     message,
     // Lời AI lúc đặt các câu đang chờ + tin user: thiếu lời AI thì model không biết user đang trả lời câu nào
@@ -230,7 +235,7 @@ export const resumePhaseInterview = async (
       const d: StepRunnerDeps = { ...defaultStepRunnerDeps(), ...deps }
       // FLF-260: tin chat là chữ user gõ ⇒ đoán ngôn ngữ trả lời; mơ hồ ⇒ ngôn ngữ phiên (lượt chạy tiếp không có ngôn ngữ đang dùng)
       const language = await replyLanguageAfterMessage({ projectId, sessionId: pending.session_id, userId, message }, d.replyLanguage)
-      const { reply, remaining } = await interviewChatTurn(projectId, unit, pending.session_id, userId, d, pending.asked, payload, message, language, pending.reply ?? "")
+      const { reply, remaining } = await interviewChatTurn(projectId, unit, pending.session_id, userId, d, pending.asked, payload, message, language, pending.reply ?? "", pending.asked_at)
       if (remaining.length > 0) {
         const { questions } = shapeQuestions(remaining)
         const elicit: StepEvent = { type: "elicit", step_id: unit, delta: reply }
@@ -431,8 +436,11 @@ const askPhaseInterview = async (
   }
 
   /** Phát `answer_needed` + lưu lượt chờ; lượt nghe đăng ký TRƯỚC để `/answer` tới ngay sau đó về đúng luồng này. */
+  /** FLF-398: lúc đặt các câu đang chờ — lượt chat trả lời nạp tài liệu tải lên sau lúc này. */
+  let askedAt: string | undefined
   const announceWaiting = async (shown: typeof questions, pendingAnswer: PendingAnswerState): Promise<{ answer: Promise<AnswerPayload> }> => {
     const listener = listenForAnswer(projectId, unit, sessionId, deps.signal)
+    askedAt = new Date().toISOString()
     const answerNeeded: StepEvent = { type: "answer_needed", step_id: unit, questions: shown }
     try {
       emit(answerNeeded)
@@ -441,7 +449,7 @@ const askPhaseInterview = async (
         stage: "ask",
         detail_vi: `Chờ bạn trả lời ${shown.length} câu`,
         questions: shown,
-        pending_answer: pendingAnswer,
+        pending_answer: { ...pendingAnswer, asked_at: askedAt },
         release: true,
         appendEvent: { ...answerNeeded, at: new Date().toISOString() }
       })
@@ -485,7 +493,7 @@ const askPhaseInterview = async (
     }
     // FLF-260: tin chat là chữ user gõ ⇒ đoán lại ngôn ngữ trả lời (rõ ⇒ đổi và ghi lên phiên; mơ hồ ⇒ giữ)
     language = await replyLanguageAfterMessage({ projectId, sessionId, userId, message }, language)
-    const turn = await interviewChatTurn(projectId, unit, sessionId, userId, deps, pending, payload, message, language, reply)
+    const turn = await interviewChatTurn(projectId, unit, sessionId, userId, deps, pending, payload, message, language, reply, askedAt)
     if (turn.reply) emit({ type: "elicit", step_id: unit, delta: turn.reply })
     if (turn.remaining.length === 0) return "answered"
     pending = turn.remaining

@@ -98,6 +98,7 @@ export interface DocumentContextResult {
  * @param chatHistoryTokens - Token ước lượng của chat history hiện có (cho CHAT action)
  * @param modelName      - Tên model AI đang dùng (để tính context window)
  * @param maxOutputTokens - maxTokens output dự kiến (từ frontmatter của prompt/skill)
+ * @param filter         - `since`: chỉ tài liệu tải lên từ lúc này (lượt chat trả lời câu hỏi đang chờ — tài liệu mới đính kèm)
  */
 export const buildDocumentContext = async (
   projectId: string,
@@ -105,7 +106,8 @@ export const buildDocumentContext = async (
   stepId?: string,
   chatHistoryTokens: number = 0,
   modelName?: string,
-  maxOutputTokens: number = DEFAULT_MAX_OUTPUT_TOKENS
+  maxOutputTokens: number = DEFAULT_MAX_OUTPUT_TOKENS,
+  filter: { since?: Date } = {}
 ): Promise<DocumentContextResult> => {
   const empty: DocumentContextResult = {
     contextText: "",
@@ -130,7 +132,8 @@ export const buildDocumentContext = async (
   const documents = await ProjectDocument.find({
     projectId,
     parseStatus: "success",
-    supersededBy: null
+    supersededBy: null,
+    ...(filter.since ? { createdAt: { $gte: filter.since } } : {})
   })
     .select("_id originalName extractedText summary summaryStatus tokenCount docCode")
     .sort({ docCode: 1, createdAt: 1 })
