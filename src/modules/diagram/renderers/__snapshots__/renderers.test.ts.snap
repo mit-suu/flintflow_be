@@ -1,5 +1,54 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > activity@UC02 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="728" height="653" viewBox="-20 -20 728 653">
+<title>Activity Diagram — Log In</title>
+<rect x="-20" y="-20" width="728" height="653" fill="#fff"/>
+<rect x="0" y="0" width="236" height="613" fill="none" stroke="#000" stroke-width="1.2"/>
+<rect x="0" y="0" width="236" height="30" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="118" y="15" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Founder</text>
+<rect x="236" y="0" width="452" height="613" fill="none" stroke="#000" stroke-width="1.2"/>
+<rect x="236" y="0" width="452" height="30" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="462" y="15" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">System</text>
+<circle cx="118" cy="58" r="10" fill="#000" stroke="#000" stroke-width="1.2"/>
+<rect x="30" y="112" width="176" height="52" rx="10" ry="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="118" y="130" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Submit email and</text>
+<text x="118" y="146" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">password</text>
+<rect x="266" y="208" width="176" height="40" rx="10" ry="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="354" y="228" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Check credentials</text>
+<polygon points="280.24,326 354,288 427.76,326 354,364" fill="#fff" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="354" y="318" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Credentials</text>
+<text x="354" y="334" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">valid?</text>
+<rect x="266" y="469" width="176" height="52" rx="10" ry="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="354" y="487" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Show authentication</text>
+<text x="354" y="503" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">error</text>
+<rect x="482" y="475" width="176" height="40" rx="10" ry="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="570" y="495" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Open project dashboard</text>
+<circle cx="570" cy="580" r="15" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<circle cx="570" cy="580" r="9" fill="#000" stroke="#000" stroke-width="1.2"/>
+<line x1="118" y1="68" x2="118" y2="112" stroke="#000" stroke-width="1.2"/>
+<polyline points="113.11,101.04 118,112 122.89,101.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<polyline points="118,164 118,186 354,186 354,208" fill="none" stroke="#000" stroke-width="1.2"/>
+<polyline points="349.11,197.04 354,208 358.89,197.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="354" y1="248" x2="354" y2="288" stroke="#000" stroke-width="1.2"/>
+<polyline points="349.11,277.04 354,288 358.89,277.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="354" y1="364" x2="354" y2="469" stroke="#000" stroke-width="1.2"/>
+<polyline points="349.11,458.04 354,469 358.89,458.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<polyline points="376,352.67 376,386 570,386 570,475" fill="none" stroke="#000" stroke-width="1.2"/>
+<polyline points="565.11,464.04 570,475 574.89,464.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<polyline points="354,521 354,543 462,543 462,90 124,90 124,112" fill="none" stroke="#000" stroke-width="1.2"/>
+<polyline points="119.11,101.04 124,112 128.89,101.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="570" y1="515" x2="570" y2="565" stroke="#000" stroke-width="1.2"/>
+<polyline points="565.11,554.04 570,565 574.89,554.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<rect x="281.3" y="409" width="145.41" height="19" fill="#fff"/>
+<text x="354" y="418.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">[credentials do not match]</text>
+<rect x="515.64" y="409" width="108.71" height="19" fill="#fff"/>
+<text x="570" y="418.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">[credentials match]</text>
+</svg>
+"
+`;
+
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > class@F1 part 1 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="150" height="154" viewBox="74 74 150 154">
@@ -381,70 +430,109 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 "
 `;
 
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > deployment 1`] = `
+"@startuml
+skinparam defaultFontName Arial
+skinparam defaultFontSize 13
+skinparam defaultFontColor #000000
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam ArrowColor #000000
+skinparam ArrowThickness 1.2
+skinparam BackgroundColor #FFFFFF
+skinparam NodeBackgroundColor #7ACFF5
+skinparam NodeBorderColor #000000
+skinparam ComponentBackgroundColor #FFFFFF
+skinparam ComponentBorderColor #000000
+skinparam ComponentStyle uml2
+skinparam ArtifactBackgroundColor #FFFFFF
+skinparam ArtifactBorderColor #000000
+skinparam dpi 192
+skinparam nodesep 60
+skinparam ranksep 60
+left to right direction
+node "User Device" <<device>> as DN01 {
+  component "Web Browser" as DN01_C1
+}
+node "Application Server" <<device>> as DN02 {
+  node "Node.js Runtime" <<executionEnvironment>> as DN03 {
+    component "API Service" as DN03_C1
+    artifact "api-bundle.js" as DN03_A1
+  }
+}
+node "MongoDB Atlas" as DN04
+node "LLM Provider" as DN05
+DN01 -- DN03 : HTTPS
+DN03 -- DN04 : MongoDB wire protocol
+DN03 -- DN05 : HTTPS
+@enduml
+"
+`;
+
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > erd 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1624" height="1182" viewBox="74 74 1624 1182">
+<svg xmlns="http://www.w3.org/2000/svg" width="1624" height="1234" viewBox="74 74 1624 1234">
 <title>Entity Relationship Diagram</title>
-<rect x="74" y="74" width="1624" height="1182" fill="#fff"/>
-<rect x="210" y="342" width="110" height="50" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<rect x="74" y="74" width="1624" height="1234" fill="#fff"/>
+<rect x="210" y="342" width="110" height="76" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="265" y="361" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">User</text>
-<ellipse cx="122" cy="429" rx="28" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="122" y="429" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">email</text>
-<line x1="106.66" y1="437" x2="137.34" y2="437" stroke="#000" stroke-width="1.2"/>
-<line x1="232" y1="392" x2="122" y2="416" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="208" cy="429" rx="48" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="208" y="429" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">display name</text>
-<line x1="254" y1="392" x2="208" y2="416" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="295" cy="429" rx="29" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="295" y="429" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">avatar</text>
-<line x1="276" y1="392" x2="295" y2="416" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="385" cy="429" rx="51" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="385" y="429" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">account status</text>
-<line x1="298" y1="392" x2="385" y2="416" stroke="#000" stroke-width="1.2"/>
-<rect x="210" y="602" width="110" height="50" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="265" y="621" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Project</text>
-<ellipse cx="162" cy="689" rx="50" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="162" y="689" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">project name</text>
-<line x1="124.66" y1="697" x2="199.34" y2="697" stroke="#000" stroke-width="1.2"/>
-<line x1="232" y1="652" x2="162" y2="676" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="254" cy="689" rx="32" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="254" y="689" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">domain</text>
-<line x1="254" y1="652" x2="254" y2="676" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="324" cy="689" rx="28" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="324" y="689" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">mode</text>
-<line x1="276" y1="652" x2="324" y2="676" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="390" cy="689" rx="28" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="390" y="689" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">folder</text>
-<line x1="298" y1="652" x2="390" y2="676" stroke="#000" stroke-width="1.2"/>
-<rect x="594" y="862" width="110" height="76" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="649" y="881" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Spine</text>
-<ellipse cx="551" cy="975" rx="51" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="551" y="975" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">spine version</text>
-<line x1="512.32" y1="983" x2="589.68" y2="983" stroke="#000" stroke-width="1.2"/>
-<line x1="621.5" y1="938" x2="551" y2="962" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="654" cy="975" rx="42" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="654" y="975" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">completion</text>
-<line x1="649" y1="938" x2="654" y2="962" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="752" cy="975" rx="46" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="752" y="975" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">last saved at</text>
-<line x1="676.5" y1="938" x2="752" y2="962" stroke="#000" stroke-width="1.2"/>
-<rect x="208.5" y="881" width="113" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="265" y="900" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">ChatSession</text>
-<ellipse cx="208" cy="956" rx="51" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="208" y="956" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">session code</text>
-<line x1="169.98" y1="964" x2="246.02" y2="964" stroke="#000" stroke-width="1.2"/>
-<line x1="246.17" y1="919" x2="208" y2="943" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="321" cy="956" rx="52" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="321" y="956" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">reply language</text>
-<line x1="283.83" y1="919" x2="321" y2="943" stroke="#000" stroke-width="1.2"/>
-<rect x="591" y="608" width="116" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="649" y="627" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">CreditLedger</text>
-<ellipse cx="597" cy="683" rx="34" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="597" y="683" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">balance</text>
-<line x1="629.67" y1="646" x2="597" y2="670" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="688" cy="683" rx="47" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="688" y="683" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">last top-up at</text>
-<line x1="668.33" y1="646" x2="688" y2="670" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="122" cy="455" rx="28" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="122" y="455" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">email</text>
+<line x1="106.66" y1="463" x2="137.34" y2="463" stroke="#000" stroke-width="1.2"/>
+<line x1="232" y1="418" x2="122" y2="442" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="208" cy="455" rx="48" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="208" y="455" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">display name</text>
+<line x1="254" y1="418" x2="208" y2="442" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="295" cy="455" rx="29" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="295" y="455" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">avatar</text>
+<line x1="276" y1="418" x2="295" y2="442" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="385" cy="455" rx="51" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="385" y="455" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">account status</text>
+<line x1="298" y1="418" x2="385" y2="442" stroke="#000" stroke-width="1.2"/>
+<rect x="210" y="628" width="110" height="50" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="265" y="647" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Project</text>
+<ellipse cx="162" cy="715" rx="50" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="162" y="715" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">project name</text>
+<line x1="124.66" y1="723" x2="199.34" y2="723" stroke="#000" stroke-width="1.2"/>
+<line x1="232" y1="678" x2="162" y2="702" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="254" cy="715" rx="32" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="254" y="715" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">domain</text>
+<line x1="254" y1="678" x2="254" y2="702" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="324" cy="715" rx="28" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="324" y="715" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">mode</text>
+<line x1="276" y1="678" x2="324" y2="702" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="390" cy="715" rx="28" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="390" y="715" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">folder</text>
+<line x1="298" y1="678" x2="390" y2="702" stroke="#000" stroke-width="1.2"/>
+<rect x="594" y="888" width="110" height="102" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="649" y="907" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Spine</text>
+<ellipse cx="551" cy="1027" rx="51" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="551" y="1027" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">spine version</text>
+<line x1="512.32" y1="1035" x2="589.68" y2="1035" stroke="#000" stroke-width="1.2"/>
+<line x1="621.5" y1="990" x2="551" y2="1014" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="654" cy="1027" rx="42" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="654" y="1027" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">completion</text>
+<line x1="649" y1="990" x2="654" y2="1014" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="752" cy="1027" rx="46" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="752" y="1027" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">last saved at</text>
+<line x1="676.5" y1="990" x2="752" y2="1014" stroke="#000" stroke-width="1.2"/>
+<rect x="208.5" y="920" width="113" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="265" y="939" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">ChatSession</text>
+<ellipse cx="208" cy="995" rx="51" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="208" y="995" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">session code</text>
+<line x1="169.98" y1="1003" x2="246.02" y2="1003" stroke="#000" stroke-width="1.2"/>
+<line x1="246.17" y1="958" x2="208" y2="982" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="321" cy="995" rx="52" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="321" y="995" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">reply language</text>
+<line x1="283.83" y1="958" x2="321" y2="982" stroke="#000" stroke-width="1.2"/>
+<rect x="591" y="628" width="116" height="50" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="649" y="647" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">CreditLedger</text>
+<ellipse cx="597" cy="715" rx="34" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="597" y="715" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">balance</text>
+<line x1="629.67" y1="678" x2="597" y2="702" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="688" cy="715" rx="47" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="688" y="715" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">last top-up at</text>
+<line x1="668.33" y1="678" x2="688" y2="702" stroke="#000" stroke-width="1.2"/>
 <rect x="208" y="94" width="114" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="265" y="113" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Subscription</text>
 <ellipse cx="213" cy="169" rx="25" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
@@ -454,143 +542,143 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 <ellipse cx="295" cy="169" rx="47" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="295" y="169" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">renewal date</text>
 <line x1="284" y1="132" x2="295" y2="156" stroke="#000" stroke-width="1.2"/>
-<rect x="907" y="608" width="110" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="962" y="627" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Notification</text>
-<ellipse cx="884" cy="683" rx="22" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="884" y="683" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">title</text>
-<line x1="934.5" y1="646" x2="884" y2="670" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="953" cy="683" rx="37" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="953" y="683" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">message</text>
-<line x1="962" y1="646" x2="953" y2="670" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="1031" cy="683" rx="31" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="1031" y="683" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">read at</text>
-<line x1="989.5" y1="646" x2="1031" y2="670" stroke="#000" stroke-width="1.2"/>
-<rect x="594" y="1148" width="110" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="649" y="1167" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Baseline</text>
-<ellipse cx="607" cy="1223" rx="52" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="607" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">baseline label</text>
-<line x1="567.65" y1="1231" x2="646.35" y2="1231" stroke="#000" stroke-width="1.2"/>
-<line x1="630.67" y1="1186" x2="607" y2="1210" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="706" cy="1223" rx="37" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="706" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">signed at</text>
-<line x1="667.33" y1="1186" x2="706" y2="1210" stroke="#000" stroke-width="1.2"/>
-<rect x="898" y="1148" width="128" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="962" y="1167" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">ChangeRecord</text>
-<ellipse cx="926" cy="1223" rx="40" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="926" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">sequence</text>
-<line x1="898.32" y1="1231" x2="953.68" y2="1231" stroke="#000" stroke-width="1.2"/>
-<line x1="940.67" y1="1186" x2="926" y2="1210" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="1007" cy="1223" rx="31" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="1007" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">reason</text>
-<line x1="983.33" y1="1186" x2="1007" y2="1210" stroke="#000" stroke-width="1.2"/>
-<rect x="902.5" y="881" width="119" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="962" y="900" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">UsageRecord</text>
-<ellipse cx="912" cy="956" rx="46" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="912" y="956" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">usage code</text>
-<line x1="878.99" y1="964" x2="945.01" y2="964" stroke="#000" stroke-width="1.2"/>
-<line x1="942.17" y1="919" x2="912" y2="943" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="1013" cy="956" rx="45" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="1013" y="956" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">credits used</text>
-<line x1="981.83" y1="919" x2="1013" y2="943" stroke="#000" stroke-width="1.2"/>
-<rect x="1181" y="1148" width="110" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="1236" y="1167" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Flag</text>
-<ellipse cx="1150" cy="1223" rx="24" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="1150" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">rule</text>
-<line x1="1139" y1="1231" x2="1161" y2="1231" stroke="#000" stroke-width="1.2"/>
-<line x1="1208.5" y1="1186" x2="1150" y2="1210" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="1209" cy="1223" rx="25" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="1209" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">level</text>
-<line x1="1236" y1="1186" x2="1209" y2="1210" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="1295" cy="1223" rx="51" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="1295" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">waived reason</text>
-<line x1="1263.5" y1="1186" x2="1295" y2="1210" stroke="#000" stroke-width="1.2"/>
-<rect x="1489" y="1148" width="110" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="1544" y="1167" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Diagram</text>
-<ellipse cx="1462" cy="1223" rx="52" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="1462" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">diagram code</text>
-<line x1="1422.99" y1="1231" x2="1501.01" y2="1231" stroke="#000" stroke-width="1.2"/>
-<line x1="1516.5" y1="1186" x2="1462" y2="1210" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="1548" cy="1223" rx="24" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="1548" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">kind</text>
-<line x1="1544" y1="1186" x2="1548" y2="1210" stroke="#000" stroke-width="1.2"/>
-<ellipse cx="1630" cy="1223" rx="48" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<text x="1630" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">render status</text>
-<line x1="1571.5" y1="1186" x2="1630" y2="1210" stroke="#000" stroke-width="1.2"/>
-<polygon points="231,524 265,502 299,524 265,546" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
-<text x="265" y="524" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
-<polygon points="615,524 649,502 683,524 649,546" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
-<text x="649" y="524" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
-<polygon points="928,524 962,502 996,524 962,546" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
-<text x="962" y="524" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
-<polygon points="615,784 649,762 683,784 649,806" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
-<text x="649" y="784" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
-<polygon points="231,784 265,762 299,784 265,806" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
-<text x="265" y="784" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
-<polygon points="615,1070 649,1048 683,1070 649,1092" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
-<text x="649" y="1070" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
-<polygon points="928,1070 962,1048 996,1070 962,1092" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
-<text x="962" y="1070" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
-<polygon points="1202,1070 1236,1048 1270,1070 1236,1092" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
-<text x="1236" y="1070" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
-<polygon points="1510,1070 1544,1048 1578,1070 1544,1092" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
-<text x="1544" y="1070" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
-<polygon points="928,784 962,762 996,784 962,806" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
-<text x="962" y="784" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<rect x="907" y="634" width="110" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="962" y="653" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Notification</text>
+<ellipse cx="884" cy="709" rx="22" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="884" y="709" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">title</text>
+<line x1="934.5" y1="672" x2="884" y2="696" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="953" cy="709" rx="37" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="953" y="709" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">message</text>
+<line x1="962" y1="672" x2="953" y2="696" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1031" cy="709" rx="31" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1031" y="709" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">read at</text>
+<line x1="989.5" y1="672" x2="1031" y2="696" stroke="#000" stroke-width="1.2"/>
+<rect x="594" y="1200" width="110" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="649" y="1219" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Baseline</text>
+<ellipse cx="607" cy="1275" rx="52" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="607" y="1275" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">baseline label</text>
+<line x1="567.65" y1="1283" x2="646.35" y2="1283" stroke="#000" stroke-width="1.2"/>
+<line x1="630.67" y1="1238" x2="607" y2="1262" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="706" cy="1275" rx="37" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="706" y="1275" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">signed at</text>
+<line x1="667.33" y1="1238" x2="706" y2="1262" stroke="#000" stroke-width="1.2"/>
+<rect x="898" y="1200" width="128" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="962" y="1219" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">ChangeRecord</text>
+<ellipse cx="926" cy="1275" rx="40" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="926" y="1275" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">sequence</text>
+<line x1="898.32" y1="1283" x2="953.68" y2="1283" stroke="#000" stroke-width="1.2"/>
+<line x1="940.67" y1="1238" x2="926" y2="1262" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1007" cy="1275" rx="31" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1007" y="1275" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">reason</text>
+<line x1="983.33" y1="1238" x2="1007" y2="1262" stroke="#000" stroke-width="1.2"/>
+<rect x="902.5" y="920" width="119" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="962" y="939" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">UsageRecord</text>
+<ellipse cx="912" cy="995" rx="46" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="912" y="995" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">usage code</text>
+<line x1="878.99" y1="1003" x2="945.01" y2="1003" stroke="#000" stroke-width="1.2"/>
+<line x1="942.17" y1="958" x2="912" y2="982" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1013" cy="995" rx="45" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1013" y="995" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">credits used</text>
+<line x1="981.83" y1="958" x2="1013" y2="982" stroke="#000" stroke-width="1.2"/>
+<rect x="1181" y="1200" width="110" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1236" y="1219" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Flag</text>
+<ellipse cx="1150" cy="1275" rx="24" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1150" y="1275" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">rule</text>
+<line x1="1139" y1="1283" x2="1161" y2="1283" stroke="#000" stroke-width="1.2"/>
+<line x1="1208.5" y1="1238" x2="1150" y2="1262" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1209" cy="1275" rx="25" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1209" y="1275" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">level</text>
+<line x1="1236" y1="1238" x2="1209" y2="1262" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1295" cy="1275" rx="51" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1295" y="1275" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">waived reason</text>
+<line x1="1263.5" y1="1238" x2="1295" y2="1262" stroke="#000" stroke-width="1.2"/>
+<rect x="1489" y="1200" width="110" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1544" y="1219" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Diagram</text>
+<ellipse cx="1462" cy="1275" rx="52" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1462" y="1275" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">diagram code</text>
+<line x1="1422.99" y1="1283" x2="1501.01" y2="1283" stroke="#000" stroke-width="1.2"/>
+<line x1="1516.5" y1="1238" x2="1462" y2="1262" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1548" cy="1275" rx="24" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1548" y="1275" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">kind</text>
+<line x1="1544" y1="1238" x2="1548" y2="1262" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1630" cy="1275" rx="48" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1630" y="1275" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">render status</text>
+<line x1="1571.5" y1="1238" x2="1630" y2="1262" stroke="#000" stroke-width="1.2"/>
+<polygon points="231,550 265,528 299,550 265,572" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="265" y="550" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="615,550 649,528 683,550 649,572" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="649" y="550" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="928,550 962,528 996,550 962,572" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="962" y="550" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="615,810 649,788 683,810 649,832" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="649" y="810" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="231,810 265,788 299,810 265,832" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="265" y="810" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="615,1122 649,1100 683,1122 649,1144" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="649" y="1122" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="928,1122 962,1100 996,1122 962,1144" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="962" y="1122" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="1202,1122 1236,1100 1270,1122 1236,1144" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="1236" y="1122" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="1510,1122 1544,1100 1578,1122 1544,1144" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="1544" y="1122" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="928,810 962,788 996,810 962,832" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="962" y="810" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
 <polygon points="231,264 265,242 299,264 265,286" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
 <text x="265" y="264" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
-<polyline points="320,380 452,380 452,524 299,524" fill="none" stroke="#000" stroke-width="1.2"/>
-<line x1="262.8" y1="544.58" x2="262.8" y2="602" stroke="#000" stroke-width="1.2"/>
-<line x1="267.2" y1="544.58" x2="267.2" y2="602" stroke="#000" stroke-width="1.2"/>
-<polyline points="320,354 649,354 649,502" fill="none" stroke="#000" stroke-width="1.2"/>
-<line x1="646.8" y1="544.58" x2="646.8" y2="608" stroke="#000" stroke-width="1.2"/>
-<line x1="651.2" y1="544.58" x2="651.2" y2="608" stroke="#000" stroke-width="1.2"/>
-<polyline points="304,342 304,314 962,314 962,502" fill="none" stroke="#000" stroke-width="1.2"/>
-<line x1="959.8" y1="544.58" x2="959.8" y2="608" stroke="#000" stroke-width="1.2"/>
-<line x1="964.2" y1="544.58" x2="964.2" y2="608" stroke="#000" stroke-width="1.2"/>
-<polyline points="320,614 468,614 468,784 615,784" fill="none" stroke="#000" stroke-width="1.2"/>
-<line x1="646.8" y1="804.58" x2="646.8" y2="862" stroke="#000" stroke-width="1.2"/>
-<line x1="651.2" y1="804.58" x2="651.2" y2="862" stroke="#000" stroke-width="1.2"/>
-<polyline points="320,640 452,640 452,784 299,784" fill="none" stroke="#000" stroke-width="1.2"/>
-<line x1="262.8" y1="804.58" x2="262.8" y2="881" stroke="#000" stroke-width="1.2"/>
-<line x1="267.2" y1="804.58" x2="267.2" y2="881" stroke="#000" stroke-width="1.2"/>
-<polyline points="594,926 484,926 484,1070 615,1070" fill="none" stroke="#000" stroke-width="1.2"/>
-<line x1="646.8" y1="1090.58" x2="646.8" y2="1148" stroke="#000" stroke-width="1.2"/>
-<line x1="651.2" y1="1090.58" x2="651.2" y2="1148" stroke="#000" stroke-width="1.2"/>
-<polyline points="704,926 814,926 814,1070 928,1070" fill="none" stroke="#000" stroke-width="1.2"/>
-<line x1="959.8" y1="1090.58" x2="959.8" y2="1148" stroke="#000" stroke-width="1.2"/>
-<line x1="964.2" y1="1090.58" x2="964.2" y2="1148" stroke="#000" stroke-width="1.2"/>
-<polyline points="704,874 1236,874 1236,1048" fill="none" stroke="#000" stroke-width="1.2"/>
-<line x1="1233.8" y1="1090.58" x2="1233.8" y2="1148" stroke="#000" stroke-width="1.2"/>
-<line x1="1238.2" y1="1090.58" x2="1238.2" y2="1148" stroke="#000" stroke-width="1.2"/>
-<polyline points="688,862 688,834 1544,834 1544,1048" fill="none" stroke="#000" stroke-width="1.2"/>
-<line x1="1541.8" y1="1090.58" x2="1541.8" y2="1148" stroke="#000" stroke-width="1.2"/>
-<line x1="1546.2" y1="1090.58" x2="1546.2" y2="1148" stroke="#000" stroke-width="1.2"/>
-<polyline points="707,627 814,627 814,784 928,784" fill="none" stroke="#000" stroke-width="1.2"/>
-<line x1="959.8" y1="804.58" x2="959.8" y2="881" stroke="#000" stroke-width="1.2"/>
-<line x1="964.2" y1="804.58" x2="964.2" y2="881" stroke="#000" stroke-width="1.2"/>
+<polyline points="320,406 452,406 452,550 299,550" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="262.8" y1="570.58" x2="262.8" y2="628" stroke="#000" stroke-width="1.2"/>
+<line x1="267.2" y1="570.58" x2="267.2" y2="628" stroke="#000" stroke-width="1.2"/>
+<polyline points="320,380 649,380 649,528" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="646.8" y1="570.58" x2="646.8" y2="628" stroke="#000" stroke-width="1.2"/>
+<line x1="651.2" y1="570.58" x2="651.2" y2="628" stroke="#000" stroke-width="1.2"/>
+<polyline points="320,354 962,354 962,528" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="959.8" y1="570.58" x2="959.8" y2="634" stroke="#000" stroke-width="1.2"/>
+<line x1="964.2" y1="570.58" x2="964.2" y2="634" stroke="#000" stroke-width="1.2"/>
+<polyline points="320,640 468,640 468,810 615,810" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="646.8" y1="830.58" x2="646.8" y2="888" stroke="#000" stroke-width="1.2"/>
+<line x1="651.2" y1="830.58" x2="651.2" y2="888" stroke="#000" stroke-width="1.2"/>
+<polyline points="320,666 452,666 452,810 299,810" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="262.8" y1="830.58" x2="262.8" y2="920" stroke="#000" stroke-width="1.2"/>
+<line x1="267.2" y1="830.58" x2="267.2" y2="920" stroke="#000" stroke-width="1.2"/>
+<polyline points="594,978 484,978 484,1122 615,1122" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="646.8" y1="1142.58" x2="646.8" y2="1200" stroke="#000" stroke-width="1.2"/>
+<line x1="651.2" y1="1142.58" x2="651.2" y2="1200" stroke="#000" stroke-width="1.2"/>
+<polyline points="704,978 814,978 814,1122 928,1122" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="959.8" y1="1142.58" x2="959.8" y2="1200" stroke="#000" stroke-width="1.2"/>
+<line x1="964.2" y1="1142.58" x2="964.2" y2="1200" stroke="#000" stroke-width="1.2"/>
+<polyline points="704,913 1236,913 1236,1100" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="1233.8" y1="1142.58" x2="1233.8" y2="1200" stroke="#000" stroke-width="1.2"/>
+<line x1="1238.2" y1="1142.58" x2="1238.2" y2="1200" stroke="#000" stroke-width="1.2"/>
+<polyline points="688,888 688,860 1544,860 1544,1100" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="1541.8" y1="1142.58" x2="1541.8" y2="1200" stroke="#000" stroke-width="1.2"/>
+<line x1="1546.2" y1="1142.58" x2="1546.2" y2="1200" stroke="#000" stroke-width="1.2"/>
+<polyline points="707,666 814,666 814,810 928,810" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="959.8" y1="830.58" x2="959.8" y2="920" stroke="#000" stroke-width="1.2"/>
+<line x1="964.2" y1="830.58" x2="964.2" y2="920" stroke="#000" stroke-width="1.2"/>
 <polyline points="322,113 452,113 452,264 299,264" fill="none" stroke="#000" stroke-width="1.2"/>
 <line x1="262.8" y1="284.58" x2="262.8" y2="342" stroke="#000" stroke-width="1.2"/>
 <line x1="267.2" y1="284.58" x2="267.2" y2="342" stroke="#000" stroke-width="1.2"/>
-<text x="275.33" y="586" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="275.33" y="612" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="333.34" y="394" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="659.33" y="612" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
 <text x="333.34" y="368" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
-<text x="659.33" y="592" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="972.33" y="618" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
 <text x="333.34" y="342" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
-<text x="972.33" y="592" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
-<text x="313.34" y="326" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
-<text x="659.33" y="846" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
-<text x="333.34" y="626" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
-<text x="275.33" y="865" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
-<text x="349.34" y="628" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
-<text x="659.33" y="1132" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
-<text x="580.66" y="914" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
-<text x="972.33" y="1132" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
-<text x="717.34" y="914" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
-<text x="1246.33" y="1132" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
-<text x="717.34" y="886" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
-<text x="1554.33" y="1132" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
-<text x="697.34" y="846" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
-<text x="972.33" y="857" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
-<text x="720.34" y="615" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="659.33" y="872" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="333.34" y="652" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="275.33" y="904" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="349.34" y="654" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="659.33" y="1184" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="580.66" y="966" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="972.33" y="1184" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="717.34" y="966" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="1246.33" y="1184" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="717.34" y="925" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="1554.33" y="1184" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="697.34" y="872" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="972.33" y="896" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="720.34" y="654" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
 <text x="275.33" y="326" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
 <text x="335.34" y="101" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
 </svg>

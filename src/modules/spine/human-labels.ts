@@ -58,6 +58,11 @@ export const FIELD_LABELS: Readonly<Record<string, string>> = {
   states: "Trạng thái",
   transitions: "Chuyển trạng thái",
   interactions: "Tương tác actor - hệ thống",
+  activity_nodes: "Bước của luồng xử lý",
+  activity_flows: "Luồng giữa các bước",
+  artifacts: "Artifact triển khai",
+  components: "Component chạy trên nút",
+  protocol: "Giao thức",
   guard: "Điều kiện rẽ nhánh",
   is_popup: "Là popup",
   tabs: "Tab",
@@ -272,7 +277,8 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   op_outside_section: "Sửa ngoài phạm vi của vị trí",
   comment_empty: "Comment còn trống",
   op_invalid: "Nội dung sửa sai định dạng",
-  new_red_flag: "Làm phát sinh lỗi đỏ mới"
+  new_red_flag: "Làm phát sinh lỗi đỏ mới",
+  wrong_language: "Viết khác ngôn ngữ tài liệu"
 }
 
 /** Mã lạ ⇒ chuỗi rỗng: câu thông điệp đã đủ nghĩa (như FE). */
@@ -302,6 +308,8 @@ export const DIAGRAM_KIND_LABELS: Readonly<Record<DiagramKind, string>> = {
   class: "sơ đồ lớp",
   state_machine: "sơ đồ trạng thái",
   sequence: "sơ đồ tuần tự",
+  activity: "sơ đồ hoạt động",
+  deployment: "sơ đồ triển khai",
   screen_layout: "bố cục màn hình"
 }
 

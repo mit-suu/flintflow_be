@@ -159,12 +159,15 @@ describe("FLF-366 — bản 0.1 theo đoạn của file", () => {
     expect(section(after, "fixed:1")).toEqual(section(before, "fixed:1"))
   })
 
-  it("phần tử CR thêm (không thuộc đoạn nào) in ở cuối mục; xoá phần tử ⇒ chỉ bảng của nó dựng lại", () => {
+  it("phần tử CR thêm (không thuộc đoạn nào) thành dòng cuối bảng cùng loại của file; xoá phần tử ⇒ chỉ bảng của nó dựng lại", () => {
     const { spine, template } = imported()
     const added = render({ ...spine, business_rules: [...spine.business_rules, { id: "BR-04", tier: "detail", statement: "Excuse needs proof", source_validation_ids: [] }] }, template)
-    const s51 = texts(section(added, "fixed:5.1"))
-    expect(s51.slice(0, 3)).toEqual(texts(section(render(spine, template), "fixed:5.1")))
-    expect(s51[3]).toBe("Excuse needs proof")
+    // FLF-375: mục có bảng BR của file ⇒ BR mới là dòng mới của bảng BR cuối cùng, không thành đoạn / bảng rời
+    expect(texts(section(added, "fixed:5.1"))).toEqual([
+      "Rules below apply to Student and Lecturer.",
+      "ID,Rule / BR-01,One check-in per slot / BR-02,Late after 15 minutes",
+      "ID,Rule / BR-03,Absent over 20% fails / BR-04,Excuse needs proof"
+    ])
     const removed = render({ ...spine, business_rules: spine.business_rules.filter((r) => r.id !== "BR-02") }, template)
     expect(texts(section(removed, "fixed:5.1"))).toEqual(["Rules below apply to Student and Lecturer.", "ID,Rule / BR-01,One check-in per slot", "ID,Rule / BR-03,Absent over 20% fails"])
   })

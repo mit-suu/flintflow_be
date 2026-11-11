@@ -62,6 +62,13 @@ beforeEach(() => {
 const DATA_ROOTS = /^(project|actors|roles|use_cases|features|screens|permissions|entities|functions|nfrs|business_rules|common_requirements|messages|other_requirements|glossary)\b/
 
 describe("finalize — Spine", () => {
+  it("bug #12b (QLHS 11/11): file ghi \"ký hiệu chân chim\" ⇒ dự án vẽ ERD theo crow's foot; file không ghi ⇒ giữ mặc định", async () => {
+    const stated = await importFinalized({ srs: { overviewParagraphs: ["H7 · ERD (ký hiệu chân chim): vạch ngang = phía 1, chân chim = phía nhiều."] } })
+    expect((await Project.findById(stated.projectId).lean())?.erdNotation).toBe("crowsfoot")
+    const silent = await importFinalized()
+    expect((await Project.findById(silent.projectId).lean())?.erdNotation).toBe("chen")
+  })
+
   it("mọi field đã xác nhận ghi trong MỘT transaction by import, lý do có tên file", async () => {
     const { projectId, result, baseVersionBefore } = await importFinalized()
     const changes = await spineRepository.listChanges(projectId)
@@ -348,7 +355,8 @@ describe("finalize — DocVersion 0.1 + baseline imported", () => {
     await assemble(projectId, "Lumen", applied.spine_version)
     const after = await draft()
     expect(JSON.stringify(after.get("fixed:5.1")!.blocks)).toContain("at least 10 characters")
-    expect(header(after.get("fixed:5.1")!.blocks[0])).not.toEqual(["BR ID", "Business Rule"])
+    // FLF-375: bảng dựng lại từ Spine vẫn mang đúng tiêu đề cột của bảng trong file (không đổi sang cột FlintFlow)
+    expect(header(after.get("fixed:5.1")!.blocks[0])).toEqual(["BR ID", "Business Rule"])
     for (const id of ["fixed:1", "fixed:2.1", "fixed:2.2.2", "fixed:4.2.3"]) expect(after.get(id)?.blocks).toEqual(before.get(id)?.blocks)
   })
 

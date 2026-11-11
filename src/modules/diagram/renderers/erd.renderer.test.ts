@@ -165,6 +165,54 @@ describe("erd.renderer — ba ký pháp trên một bộ xếp + đi đường",
     }
   })
 
+  it("FLF-375: tài liệu upload (một hình ERD gốc) mà ký pháp dự án không vừa một hình ⇒ thử ký pháp gọn hơn để giữ một hình", () => {
+    // Đồ thị kiểu TechMart: một thực thể trung tâm bậc cao (Order) + chuỗi ⇒ Chen (mỗi quan hệ một hình thoi) phải cắt,
+    // crowsfoot / idef1x vừa một hình
+    const ids = Array.from({ length: 15 }, (_, i) => `E${String(i + 1).padStart(2, "0")}`)
+    const links = (i: number): number[] => (i === 7 ? [0, 6, 8, 9, 10] : i === 4 ? [3, 8, 12, 13] : i === 8 ? [7, 11, 4] : [(i + 1) % 15])
+    // Thuộc tính như tài liệu thật: Chen vẽ dải ô-van dưới thân ⇒ cạnh dưới không có cổng, thực thể bậc cao hết chỗ
+    const attributes = [{ kind: "key", name: "id" }, { kind: "attribute", name: "name" }, { kind: "attribute", name: "created_at" }]
+    const dense = ids.map((id, i) => ({ ...entity(id, `Entity ${i + 1}`, Object.fromEntries(links(i).map((j, k) => [ids[j], { verb: ["has", "owns", "uses"][k % 3], card: k % 2 ? "N" : "1" }]))), attributes }) as Entity)
+    const chenParts = partitionErd(spineOf(dense), "chen")
+    expect(chenParts.length, "dự án FlintFlow tự soạn: Chen cắt như thường").toBeGreaterThan(1)
+
+    const uploaded: Spine = { ...spineOf(dense), custom_sections: [{ id: "CS01", heading: "", level: 2, source: "import", blocks: [] } as never] }
+    const parts = partitionErd(uploaded, "chen")
+    expect(parts).toHaveLength(1)
+    expect(parts[0].diagram.notation).not.toBe("chen")
+    expect(parts[0].diagram.entities.map((e) => e.id).sort()).toEqual(ids)
+    expect(renderErd(uploaded, null, undefined, { erdNotation: "chen" }).map((p) => p.issues)).toEqual([[]])
+  })
+
+  it("QLHS 11/11 bug #12: tài liệu upload chân chim 12 thực thể / 16 quan hệ, thuộc tính dài ⇒ một hình, đúng ký pháp của file", () => {
+    // Đồ thị như H7 của QLHS (sau khi bỏ chiều ngược n–1); hộp cao chắn đường một làn (Năm học → Phân công giảng dạy)
+    const attrs = (names: string[]) => [...names, "ghi chú", "ngày tạo", "người tạo"].map((name, i) => ({ name, kind: i === 0 ? "key" : name.startsWith("mã ") ? "reference" : "plain", required: i === 0 }))
+    const e = (id: string, name: string, relations: string[], names: string[]): Entity => ({ id, name, description: "", relations, attributes: attrs(names) as Entity["attributes"] })
+    const qlhs = [
+      e("E01", "Năm học", ["E02", "E04", "E08"], ["mã", "năm bắt đầu", "năm kết thúc"]),
+      e("E02", "Học kỳ", ["E09", "E11"], ["mã", "tên", "ngày bắt đầu", "ngày kết thúc", "mã năm học"]),
+      e("E03", "Khối", ["E04"], ["mã", "tên khối"]),
+      e("E04", "Lớp", ["E05", "E08"], ["mã", "tên lớp", "sĩ số", "mã GVCN", "mã khối"]),
+      e("E05", "Xếp lớp", [], ["mã học sinh", "mã lớp", "ngày vào"]),
+      e("E06", "Học sinh", ["E09", "E10", "E11", "E05"], ["mã", "họ tên", "ngày sinh", "giới tính", "trạng thái", "mã TK phụ huynh"]),
+      e("E07", "Môn học", ["E09", "E08"], ["mã", "tên môn", "hệ số"]),
+      e("E08", "Phân công giảng dạy", [], ["mã giáo viên", "mã lớp", "mã môn", "mã năm học"]),
+      e("E09", "Điểm", [], ["mã học sinh", "mã môn", "mã học kỳ", "loại điểm", "giá trị"]),
+      e("E10", "Điểm danh", [], ["mã học sinh", "ngày", "buổi", "trạng thái"]),
+      e("E11", "Hạnh kiểm", [], ["mã học sinh", "mã học kỳ", "xếp loại"]),
+      e("E12", "Tài khoản", ["E06", "E08"], ["mã", "tên đăng nhập", "vai trò", "trạng thái"])
+    ]
+    expect(partitionErd(spineOf(qlhs), "crowsfoot").length, "mode 2: cắt như cũ").toBeGreaterThan(1)
+    const uploaded: Spine = { ...spineOf(qlhs), custom_sections: [{ id: "CS01", heading: "", level: 2, source: "import", blocks: [] } as never] }
+    const parts = partitionErd(uploaded, "crowsfoot")
+    expect(parts).toHaveLength(1)
+    expect(parts[0].diagram.notation).toBe("crowsfoot")
+    expect(parts[0].diagram.entities).toHaveLength(12)
+    expect(parts[0].diagram.relations).toHaveLength(16)
+    expect(parts[0].diagram.entities[0].attributes?.[0]).toEqual({ name: "mã", pk: true, fk: false })
+    expect(renderErd(uploaded, null, undefined, { erdNotation: "crowsfoot" }).map((p) => p.issues)).toEqual([[]])
+  })
+
   it("thành phần liên thông nhỏ gộp chung một hình khi tổng ≤ giới hạn", () => {
     const pairs = Array.from({ length: 6 }, (_, i) => [entity(`A${i}`, `Parent ${i}`, { [`B${i}`]: {} }), entity(`B${i}`, `Child ${i}`)]).flat()
     expect(partitionErd(spineOf(pairs), "crowsfoot")).toHaveLength(1)

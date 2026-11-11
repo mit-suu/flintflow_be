@@ -224,3 +224,18 @@ describe("parseResponse — sources cạnh ops (FLF-292)", () => {
     expect(parseResponse<OpTransaction>(JSON.stringify({ ops: [op], sources: "D1-P07" }), ActionType.REVISION).sources).toBeUndefined()
   })
 })
+
+describe("IMPORT_EXTRACT_DIAGRAM — sơ đồ triển khai (FLF-390, QLHS 11/11 bug #11)", () => {
+  it("item deployment_nodes đọc từ ảnh qua được schema (trước đây trượt ⇒ ảnh H6 'failed', Spine không có nút triển khai)", () => {
+    const out = {
+      section_id: "slot:distribution",
+      diagram_kind: "deployment",
+      items: [
+        { entity: "deployment_nodes", key: null, value: { name: "Máy chủ ứng dụng", kind: "device", parent: null, artifacts: [], components: ["QLHS API"], links: [{ to: "CSDL", protocol: "TCP" }] }, confidence: 0.9, source_block_ids: ["B0537"] }
+      ],
+      unmapped_block_ids: []
+    }
+    const parsed = parseResponse<{ items: { entity: string }[] }>(JSON.stringify(out), ActionType.IMPORT_EXTRACT_DIAGRAM)
+    expect(parsed.items.map((i) => i.entity)).toEqual(["deployment_nodes"])
+  })
+})

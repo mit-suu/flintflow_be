@@ -431,6 +431,73 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          "activity_nodes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "initial",
+                    "final",
+                    "action",
+                    "decision",
+                    "merge",
+                    "fork",
+                    "join"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "lane": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "kind"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "activity_flows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "to": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "guard": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "from",
+                "to"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
@@ -1267,7 +1334,21 @@
                             "context",
                             "usecase",
                             "screen_flow",
-                            "erd"
+                            "erd",
+                            "sequence",
+                            "activity",
+                            "deployment"
+                          ]
+                        },
+                        "owner_id": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
                           ]
                         },
                         "source_hash": {
@@ -1397,6 +1478,91 @@
         "additionalProperties": false
       }
     },
+    "deployment_nodes": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "device",
+              "execution_environment",
+              "node"
+            ]
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "parent_id",
+          "artifacts",
+          "components"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "deployment_links": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "minLength": 1
+          },
+          "to": {
+            "type": "string",
+            "minLength": 1
+          },
+          "protocol": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "additionalProperties": false
+      }
+    },
     "diagrams": {
       "type": "array",
       "items": {
@@ -1416,6 +1582,8 @@
               "class",
               "state_machine",
               "sequence",
+              "activity",
+              "deployment",
               "screen_layout"
             ]
           },
@@ -1975,6 +2143,8 @@
     "custom_sections",
     "references",
     "verifications",
+    "deployment_nodes",
+    "deployment_links",
     "diagrams",
     "assumptions",
     "decisions",

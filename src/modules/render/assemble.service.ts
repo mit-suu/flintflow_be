@@ -642,12 +642,13 @@ export type DocumentTranslationMeta = z.infer<typeof documentTranslationMetaSche
 export const loadTemplateLayout: TemplateLoader = async (projectId) => {
   const profile = (await TemplateProfile.findOne(
     { projectId },
-    { layout: 1, language: 1, legacy_record_of_changes: 1, non_screen_table: 1, function_originals: 1, section_slices: 1, section_segments: 1 },
+    { layout: 1, language: 1, template_family: 1, legacy_record_of_changes: 1, non_screen_table: 1, function_originals: 1, section_slices: 1, section_segments: 1 },
     { lean: true }
   )) as
     | {
         layout?: TemplateLayout["layout"]
         language?: string
+        template_family?: string
         legacy_record_of_changes?: TemplateLayout["legacyRecord"]
         non_screen_table?: string[]
         function_originals?: TemplateLayout["functionOriginals"]
@@ -662,6 +663,7 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
     ...(project?.template_intent === "fixed" ? { fixedTemplate: true } : {}),
     layout: profile.layout,
     language: profile.language ?? "en",
+    ...(profile.template_family ? { family: profile.template_family } : {}),
     legacyRecord: profile.legacy_record_of_changes ?? [],
     // FLF-252: import trước khi có các field này ⇒ không truyền, bản in giữ cách cũ
     ...(profile.non_screen_table?.length ? { nonScreenTable: profile.non_screen_table } : {}),

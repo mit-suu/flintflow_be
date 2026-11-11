@@ -99,8 +99,12 @@ const lastKey = (path: string): string => {
   return segments[segments.length - 1].key
 }
 
-/** Mảng object có id (actors, functions, validations…) chỉ được sửa bằng add/remove từng phần tử. */
-const isEntityArray = (value: unknown): boolean => Array.isArray(value) && value.some(isRecord)
+/**
+ * Mảng object có id (actors, functions, validations…) chỉ được sửa bằng add/remove từng phần tử. Mảng object không có
+ * `id` (khối văn bản `custom_sections[].blocks`, …) là giá trị thường — `set` cả mảng (FLF-375: trước đây bị chặn nhầm ⇒
+ * CR không sửa được đoạn văn nguyên văn của file và kết luận vẽ lại sơ đồ bị sai theo).
+ */
+const isEntityArray = (value: unknown): boolean => Array.isArray(value) && value.some((el) => isRecord(el) && typeof el.id === "string")
 
 /** Dạng cũ còn trong op / change log: form_factor chuỗi, diagram có `puml`, `flow_to` là mảng id màn ⇒ dạng hiện hành. */
 const normalizeLegacyAt = (path: string, value: unknown): unknown => normalizeFlowAt(path, normalizeDiagramAt(path, normalizeFormFactorAt(path, value)))
@@ -115,12 +119,14 @@ const keepKnownEdges = (given: unknown[], normalized: unknown[], target: ReturnT
 }
 
 /** Mảng phần tử không có `id`, chọn phần tử bằng khoá riêng: cạnh `flow_to` theo `to`, `attributes` theo `name`. */
-const KEYED_ARRAYS: ReadonlySet<string> = new Set(["flow_to", "attributes", "transitions", "interactions"])
+const KEYED_ARRAYS: ReadonlySet<string> = new Set(["flow_to", "attributes", "transitions", "interactions", "activity_flows", "deployment_links"])
 
 const elementKeyOf = (el: unknown): string | null => {
   if (!isRecord(el)) return null
   if (typeof el.from === "string" && typeof el.to === "string" && typeof el.message === "string") return `from=${el.from},to=${el.to},message=${el.message},kind=${String(el.kind)},flow=${String(el.flow)}`
   if (typeof el.from === "string" && typeof el.to === "string" && typeof el.event === "string") return `from=${el.from},to=${el.to},event=${el.event}`
+  // Control flow của sơ đồ activity `functions[].activity_flows[]`: khoá là from + to
+  if (typeof el.from === "string" && typeof el.to === "string") return `from=${el.from},to=${el.to}`
   return typeof el.to === "string" ? `to=${el.to}` : typeof el.name === "string" ? `name=${el.name}` : null
 }
 
@@ -193,7 +199,7 @@ const withAllocatedId = (state: WorkState, path: string, value: unknown): unknow
   if (!isRecord(value)) return value
   const segments = parsePath(path)
   const collection = segments[segments.length - 1].key
-  const nested = segments.length === 2 && (collection === "validations" || collection === "states")
+  const nested = segments.length === 2 && (collection === "validations" || collection === "states" || collection === "activity_nodes")
   if (!allocatesIds(collection) || (segments.length !== 1 && !nested)) return value
 
   const current = value.id
@@ -216,6 +222,11 @@ const withAllocatedId = (state: WorkState, path: string, value: unknown): unknow
  */
 const expandEntityArraySet = (state: WorkState, op: Op, current: unknown): boolean => {
   const segments = parsePath(op.path)
+  // FLF-390: mảng tuỳ chọn còn vắng (use case chưa có `activity_nodes`) ⇒ tạo mảng rỗng rồi tách như mảng đã có
+  if (segments.length === 2 && current === undefined && Array.isArray(op.value) && OPTIONAL_ARRAYS[segments[0].key]?.has(segments[1].key) && !segments[1].selector) {
+    applySet(state, { op: "set", path: op.path, value: [] })
+    current = []
+  }
   if (segments.length < 2 || !Array.isArray(current) || !Array.isArray(op.value)) return false
   if (!current.every((el) => isRecord(el) && typeof el.id === "string")) return false
   if (!op.value.every(isRecord)) return false
@@ -237,10 +248,11 @@ const expandEntityArraySet = (state: WorkState, op: Op, current: unknown): boole
   return true
 }
 
-/** Mảng tuỳ chọn của phần tử (entity, function): Spine cũ / phần tử chưa điền thì vắng, `add` vào đó tạo mảng rỗng trước (ghi thành một change). */
+/** Mảng tuỳ chọn của phần tử (entity, function, use case): Spine cũ / phần tử chưa điền thì vắng, `add` vào đó tạo mảng rỗng trước (ghi thành một change). */
 const OPTIONAL_ARRAYS: Readonly<Record<string, ReadonlySet<string>>> = {
   entities: new Set(["attributes", "feature_ids", "states", "transitions"]),
-  functions: new Set(["interactions"])
+  functions: new Set(["interactions"]),
+  use_cases: new Set(["activity_nodes", "activity_flows"])
 }
 
 const ensureOptionalArray = (state: WorkState, path: string): void => {

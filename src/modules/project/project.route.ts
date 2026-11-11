@@ -153,7 +153,9 @@ router.post("/precheck-docx", authMiddleware, requireRole("lead", "analyst"), re
  *           type: string
  *     responses:
  *       200:
- *         description: Danh sách tài liệu
+ *         description: >
+ *           Danh sách tài liệu đang dùng (FLF-398: bản đã bị thay không trả); mỗi bản kèm `replaces: [{ id, name, doc_code }]`
+ *           — các bản cũ nó đã thay
  *       401:
  *         description: Chưa xác thực
  *   post:
@@ -178,11 +180,25 @@ router.post("/precheck-docx", authMiddleware, requireRole("lead", "analyst"), re
  *               file:
  *                 type: string
  *                 format: binary
+ *               replace_document_id:
+ *                 type: string
+ *                 description: "FLF-398 — \"Thay bản cũ\": id tài liệu đang dùng mà file này thay (bản cũ thành `supersededBy`)"
+ *               keep_both:
+ *                 type: string
+ *                 enum: ["true"]
+ *                 description: "FLF-398 — \"Giữ cả hai\": không hỏi bản mới nữa (trùng hệt vẫn chặn)"
  *     responses:
  *       201:
  *         description: "Upload thành công — tài liệu kèm `precheck { looks_like_srs, stamp, heading_overlap? }` (business-flow §3.6; `null` nếu kiểm lỗi)"
  *       400:
  *         description: File không hợp lệ
+ *       404:
+ *         description: "`DOCUMENT_NOT_FOUND` — `replace_document_id` không thuộc dự án"
+ *       409:
+ *         description: >
+ *           FLF-398 — `DUPLICATE_DOCUMENT` (trùng hệt nội dung, `meta { document, superseded_by? }`, không lưu, không tóm tắt);
+ *           `POSSIBLE_NEW_VERSION` (cùng tên gốc / nội dung giống ≥ 70%, `meta { candidates: [{ id, name, doc_code, reason, similarity }] }`
+ *           — gửi lại kèm `replace_document_id` hoặc `keep_both`); `DOCUMENT_ALREADY_SUPERSEDED`
  *       401:
  *         description: Chưa xác thực
  */

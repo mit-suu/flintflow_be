@@ -7,10 +7,13 @@ import { describe, expect, it } from "vitest"
 import { parseDocument } from "./parse.service.js"
 import { matchProfile } from "./profile-match.service.js"
 import { makeSrsDocx } from "./testing/srs-fixture.js"
+import { matchTable } from "./table-header-dictionary.js"
 import {
   AI_BATCH_CHARS,
   AI_BLOCK_CHARS,
+  attributesFromCell,
   captionOf,
+  tablesToKeepVerbatim,
   chunkBlocks,
   codeSignals,
   combineAiConfidence,
@@ -330,6 +333,62 @@ describe("deterministicTableItems — bảng khớp đủ cột (G7)", () => {
     expect(out.items.map((i) => i.value)).toEqual([{ statement: "GitHub: Provides PR events.", category: "interface" }])
   })
 
+  it("bug #10 (QLHS 11/11) settleSection: bảng từ điển dữ liệu đọc tất định tên + quan hệ, cột thuộc tính không vào Spine ⇒ bảng giữ nguyên văn", () => {
+    const t = {
+      ...block("B0875", "table", "", "body/tbl[9]", "fixed:3.1.5"),
+      rows: [["Thực thể", "Thuộc tính chính", "Quan hệ", "Yêu cầu liên quan"], ["Học sinh", "mã HS, họ tên, ngày sinh", "Lớp", "REQ-DATA-001"]]
+    }
+    const profile = {
+      table_map: [
+        { block_id: "B0875", column_index: 0, header: "Thực thể", field_path: "entities[].name", confidence: 0.95, confirmed: true },
+        { block_id: "B0875", column_index: 2, header: "Quan hệ", field_path: "entities[].relations", confidence: 0.9, confirmed: true }
+      ]
+    } as unknown as ITemplateProfile
+    const out = settleSection("fixed:3.1.5", [t], profile, new Map())
+    expect(out.items.map((i) => i.value.name)).toEqual(["Học sinh"])
+    expect(out.handled.has("B0875")).toBe(true)
+    expect(out.verbatim.has("B0875")).toBe(true)
+  })
+
+  it("bug #12c (QLHS 11/11): cột \"Thuộc tính chính\" ⇒ entities[].attributes; thuộc tính vào Spine, bảng vẫn giữ nguyên văn", () => {
+    const rows = [
+      ["Thực thể", "Thuộc tính chính", "Quan hệ", "Yêu cầu liên quan"],
+      ["Năm học", "mã, năm bắt đầu, năm kết thúc", "1–n Học kỳ, 1–n Lớp", "REQ-FUNC-043"],
+      ["Học sinh", "mã, họ tên, ngày sinh, giới tính, trạng thái, mã TK phụ huynh", "1–n Điểm, Điểm danh, Hạnh kiểm", "REQ-FUNC-010"]
+    ]
+    const m = matchTable(rows, "fixed:3.1.5")
+    expect(m.entity).toBe("entities")
+    expect(m.columns.map((c) => c.field_path)).toEqual(["entities[].name", "entities[].attributes", "entities[].relations", null])
+    const t = { ...block("B0875", "table", "", "body/tbl[9]", "fixed:3.1.5"), rows }
+    const profile = {
+      table_map: m.columns.map((c) => ({ block_id: "B0875", column_index: c.column_index, header: c.header, field_path: c.field_path, confidence: c.confidence, confirmed: true }))
+    } as unknown as ITemplateProfile
+    const out = settleSection("fixed:3.1.5", [t], profile, new Map())
+    expect(out.items.map((i) => i.value.name)).toEqual(["Năm học", "Học sinh"])
+    expect(out.items[0].value.attributes).toEqual([
+      { name: "mã", kind: "key", required: true },
+      { name: "năm bắt đầu", kind: "plain", required: false },
+      { name: "năm kết thúc", kind: "plain", required: false }
+    ])
+    expect(out.items[1].value.attributes).toContainEqual({ name: "mã TK phụ huynh", kind: "reference", required: false })
+    expect(out.items[1].value.relations).toEqual(["1–n Điểm", "Điểm danh", "Hạnh kiểm"])
+    // Bản in theo file upload: bảng từ điển dữ liệu vẫn in nguyên văn dù Spine đã nhận thuộc tính
+    expect(out.handled.has("B0875")).toBe(true)
+    expect(out.verbatim.has("B0875")).toBe(true)
+  })
+
+  it("bug #12c: attributesFromCell — mã của chính thực thể là khoá, mã thực thể khác là tham chiếu, còn lại thường", () => {
+    expect(attributesFromCell("mã HS, họ tên, mã lớp, trạng thái (đang học, nghỉ học)", "Học sinh")).toEqual([
+      { name: "mã HS", kind: "key", required: true },
+      { name: "họ tên", kind: "plain", required: false },
+      { name: "mã lớp", kind: "reference", required: false },
+      { name: "trạng thái (đang học, nghỉ học)", kind: "plain", required: false }
+    ])
+    expect(attributesFromCell("Mã lớp; tên lớp; sĩ số", "Lớp").map((a) => a.kind)).toEqual(["key", "plain", "plain"])
+    expect(attributesFromCell("id, order id, total, customer id", "Order").map((a) => a.kind)).toEqual(["key", "key", "plain", "reference"])
+    expect(attributesFromCell("mã, mã, ", "Khối")).toEqual([{ name: "mã", kind: "key", required: true }])
+  })
+
   it("độ tin cột thấp ⇒ field của bảng rơi vào danh sách cần xác nhận (< 0.7)", () => {
     const items = deterministicTableItems(blocks[0], grid, profileOf([col(0, "use_cases[].id", 0.6), col(1, "use_cases[].name", 0.95)]))!
     const fields = items.flatMap(flattenItem)
@@ -469,11 +528,31 @@ describe("ảnh diagram (mode 1 v3 phase 5)", () => {
     expect(captionOf(blk("B9", "image"), [blk("B9", "image"), blk("B10", "paragraph", "y")])).toBe("(none)")
   })
 
-  it("FLF-252 readsImage: chọn ảnh theo caption — ảnh màn hình / sequence không đọc; sơ đồ đọc được ở mục khác FPT vẫn đọc", () => {
+  it("bug #10 (QLHS 11/11): bảng từ điển dữ liệu có cột thuộc tính mà không item nào trích attributes từ nó ⇒ giữ nguyên văn", () => {
+    const table = { block_id: "B0875", kind: "table", rows: [["Thực thể", "Thuộc tính chính", "Quan hệ", "Yêu cầu liên quan"], ["Học sinh", "mã, họ tên", "Lớp", "REQ-DATA-001"]] } as never
+    const item = (value: Record<string, unknown>): EntityItem => ({ entity: "entities", id: "E01", value, confidence: 0.9, field_confidence: {}, source_block_ids: ["B0875"], origin: "ai" })
+    expect(tablesToKeepVerbatim([table], [item({ name: "Học sinh", relations: ["E02"] })])).toEqual(["B0875"])
+    expect(tablesToKeepVerbatim([table], [item({ name: "Học sinh", attributes: [{ name: "mã" }] })])).toEqual([])
+    const plain = { block_id: "B0900", kind: "table", rows: [["Tác nhân", "Mô tả"]] } as never
+    expect(tablesToKeepVerbatim([plain], [])).toEqual([])
+  })
+
+  it("captionOf: đoạn thường ngay dưới ảnh bắt đầu bằng 'H3 ·' / 'Hình 3' / 'Figure 3' cũng là chú thích (QLHS 11/11 — file không dùng kiểu Caption)", () => {
+    const blocks = [blk("B1", "list_item", "Kiểm chứng: Test"), blk("B2", "image"), blk("B3", "paragraph", "H3 · sơ đồ hoạt động UC-05 Điểm danh"), blk("B4", "paragraph", "REQ-FUNC-052 – Sửa điểm danh")]
+    expect(captionOf(blk("B2", "image"), blocks)).toBe("H3 · sơ đồ hoạt động UC-05 Điểm danh")
+    expect(readsImage("feature:@B0255", captionOf(blk("B2", "image"), blocks))).toBe(true)
+    // Đoạn văn dài / không bắt đầu bằng số hình thì không phải chú thích
+    expect(captionOf(blk("B2", "image"), [blk("B1", "paragraph", "Hệ thống phải lưu…"), blk("B2", "image"), blk("B3", "paragraph", "Mỗi yêu cầu dùng mã REQ")])).toBe("(none)")
+  })
+
+  it("FLF-252 readsImage: chọn ảnh theo caption — ảnh màn hình không đọc; sơ đồ đọc được ở mục khác FPT vẫn đọc (FLF-390: cả sequence / activity)", () => {
     expect(readsImage("fixed:2.2.1", "(none)")).toBe(true)
     expect(readsImage("fixed:2.2.1", "Figure 03. Use Case Diagram - Account")).toBe(true)
     expect(readsImage("fixed:3.1.1", "Figure 17 - Register account screen layout")).toBe(false)
-    expect(readsImage("fixed:2.2.2", "Figure 5 - Sequence diagram for Login")).toBe(false)
+    expect(readsImage("fixed:2.2.2", "Figure 5 - Sequence diagram for Login")).toBe(true)
+    expect(readsImage("function:@B0042", "Hình 4: Sơ đồ hoạt động đăng nhập")).toBe(true)
+    expect(readsImage("function:@B0042", "Figure 6 - Activity diagram: Place order")).toBe(true)
+    expect(readsImage("fixed:3.1.5", "Figure 8 - State machine of Order")).toBe(false)
     expect(readsImage("fixed:4.1", "Figure 9 - Entity Relationship Diagram")).toBe(true)
     expect(readsImage("function:@B0042", "Hình 3: Giao diện đăng nhập")).toBe(false)
     expect(readsImage("function:@B0042", "(none)")).toBe(false)

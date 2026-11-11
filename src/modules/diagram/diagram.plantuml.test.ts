@@ -17,9 +17,11 @@ const reachable = await isPlantUmlReachable()
 if (!reachable) console.warn("\n[diagram] PlantUML không reachable — test render thật bị SKIP (docker compose up -d plantuml).\n")
 
 describe.skipIf(!reachable)("renderer × PlantUML server thật (DoD T10)", () => {
-  for (const target of allTargets(FIXTURE)) {
+  // Chỉ kind vẽ bằng PlantUML (`puml`: sequence, wireframe salt). Kind `svg` (FLF-339) dựng SVG trong code — gửi SVG cho
+  // PlantUML compile luôn lỗi; bố cục của chúng do `checkScene` kiểm ở test renderer
+  for (const target of allTargets(FIXTURE).filter((t) => renderKind(FIXTURE, t.kind, t.owner_id).some((p) => p.format === "puml"))) {
     it(`${target.kind}${target.owner_id ? `@${target.owner_id}` : ""} compile ok`, async () => {
-      for (const part of renderKind(FIXTURE, target.kind, target.owner_id)) {
+      for (const part of renderKind(FIXTURE, target.kind, target.owner_id).filter((p) => p.format === "puml")) {
         const result = await checkPlantUml(part.source)
         expect(result.ok, result.ok ? "" : `${result.error}\n${part.source}`).toBe(true)
       }

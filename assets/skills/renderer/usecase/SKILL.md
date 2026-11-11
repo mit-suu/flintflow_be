@@ -51,6 +51,7 @@ stub: false
 ## Actors as modelled
 
 - A use case is linked to **every** actor in `actor_ids`; several human actors may share one use case on a diagram. A general actor stays general (`User`) — never expanded to leaf actors, never merged.
+- An actor whose ancestor (`parent_id` chain) is also in `actor_ids` gets **no** edge to that use case: it inherits the association through the parent (`Guest, Customer` with `Customer --|> Guest` ⇒ only Guest is linked).
 - A **human** actor is not connected to a use case that is the target of an `<<include>>` or the source of an `<<extend>>` drawn in the same diagram: it reaches it through the base. A human actor left with no edge keeps the edge to its smallest use case id. `system`/`time` actors keep every edge.
 - Only actors with an edge in that diagram are drawn.
 
