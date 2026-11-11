@@ -44,7 +44,7 @@ beforeEach(async () => {
   vi.mocked(uploadFileToCloudinary).mockClear()
 })
 
-describe("FLF-398 — trùng hệt", () => {
+describe("FLF-398 - trùng hệt", () => {
   it("tải lại đúng file (kể cả đổi tên) ⇒ 409 DUPLICATE_DOCUMENT, không lưu, không Cloudinary, không tóm tắt lần hai", async () => {
     const first = await upload(V1, "yeu-cau.txt")
     expect(first.status).toBe(201)
@@ -93,7 +93,7 @@ describe("FLF-398 — trùng hệt", () => {
   })
 })
 
-describe("FLF-398 — bản mới của tài liệu đã có", () => {
+describe("FLF-398 - bản mới của tài liệu đã có", () => {
   it("v1 rồi v2 (cùng tên gốc) ⇒ 409 POSSIBLE_NEW_VERSION kèm ứng viên; chưa lưu gì", async () => {
     const v1 = await upload(V1, "SRS_KhachHang_v1.txt")
     const res = await upload(V2, "SRS_KhachHang_v2.txt")

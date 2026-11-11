@@ -39,7 +39,7 @@ const SHOP = spineOf([
   entity("E04", "Invoice", ["F1", "F2"])
 ])
 
-describe("class.renderer — mỗi feature một hình, mức domain", () => {
+describe("class.renderer - mỗi feature một hình, mức domain", () => {
   it("một hình mỗi feature có entity, theo thứ tự feature; chủ = feature, section = feature:<id>", () => {
     const parts = renderClass(SHOP)
     expect(parts.map((p) => [p.kind, p.format, p.owner_kind, p.owner_id, p.section])).toEqual([
@@ -50,7 +50,7 @@ describe("class.renderer — mỗi feature một hình, mức domain", () => {
       expect(p.issues, p.owner_id!).toEqual([])
       expect(p.source).toContain("#7ACFF5")
     }
-    expect(parts[0].source).toContain("<title>Class Diagram — Ordering</title>")
+    expect(parts[0].source).toContain("<title>Class Diagram - Ordering</title>")
   })
 
   it("entity của nhiều feature xuất hiện ở từng hình; quan hệ sang feature khác không vẽ; không thêm class", () => {
@@ -111,7 +111,7 @@ describe("class.renderer — mỗi feature một hình, mức domain", () => {
     const parts = renderClass(spineOf(many))
     expect(parts.length).toBeGreaterThan(1)
     expect(parts.every((p) => p.owner_id === "F1" && p.section === "feature:F1" && (p.issues ?? []).length === 0)).toBe(true)
-    expect(parts[0].source).toContain(`<title>Class Diagram — Ordering (1/${parts.length})</title>`)
+    expect(parts[0].source).toContain(`<title>Class Diagram - Ordering (1/${parts.length})</title>`)
     const sizes = partitionClass(spineOf(many)).map((p) => p.diagram.nodes.length)
     expect(Math.max(...sizes)).toBeLessThanOrEqual(MAX_CLASSES_PER_DIAGRAM)
     expect(sizes.reduce((a, b) => a + b, 0)).toBe(30)
@@ -135,6 +135,6 @@ describe("class.renderer — mỗi feature một hình, mức domain", () => {
   it("hình tiếng Việt: tiêu đề theo ngôn ngữ", () => {
     const spine = spineOf([entity("E01", "A", ["F1"], { E02: {} }), entity("E02", "B", ["F1"])])
     const [part] = renderClass(spine, null, DIAGRAM_LABELS.vi)
-    expect(part.source).toContain("<title>Sơ đồ lớp — Ordering</title>")
+    expect(part.source).toContain("<title>Sơ đồ lớp - Ordering</title>")
   })
 })

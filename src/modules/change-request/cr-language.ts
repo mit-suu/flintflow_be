@@ -35,7 +35,7 @@ const LANGUAGE_NAME: Readonly<Record<UserLocale, string>> = { vi: "Vietnamese (t
 
 /** Dòng ngữ cảnh C-4: ngôn ngữ mọi chữ mới / sửa trong `spine_ops` phải theo. */
 export const documentLanguageText = (language: UserLocale): string =>
-  `${LANGUAGE_NAME[language]}. Every new or changed text value in spine_ops (steps, descriptions, statements, names, labels such as flows_in / flows_out, table cells) and every reason, comment_text and assumption is written in ${LANGUAGE_NAME[language]}, with the wording and terms the existing elements and the glossary already use — even when the change request, the answers or the material are in another language. Names quoted from the document or the change request (screen names, statuses, codes, product names) keep their original form.`
+  `${LANGUAGE_NAME[language]}. Every new or changed text value in spine_ops (steps, descriptions, statements, names, labels such as flows_in / flows_out, table cells) and every reason, comment_text and assumption is written in ${LANGUAGE_NAME[language]}, with the wording and terms the existing elements and the glossary already use - even when the change request, the answers or the material are in another language. Names quoted from the document or the change request (screen names, statuses, codes, product names) keep their original form.`
 
 // ─── C-5: chữ mới khác ngôn ngữ tài liệu ─────────────────────────
 
@@ -83,5 +83,5 @@ export const wrongLanguageMessage = (element: string, language: UserLocale, text
   const sample = texts[0].length > QUOTE_CHARS ? `${texts[0].slice(0, QUOTE_CHARS)}…` : texts[0]
   const [wrote, doc] = language === "vi" ? ["tiếng Anh", "tiếng Việt"] : ["tiếng Việt", "tiếng Anh"]
   const more = texts.length > 1 ? ` (và ${texts.length - 1} đoạn khác)` : ""
-  return `Nội dung mới ở ${element} viết bằng ${wrote} trong khi tài liệu viết bằng ${doc}: “${sample}”${more} — viết lại bằng ${doc}, dùng đúng thuật ngữ của tài liệu`
+  return `Nội dung mới ở ${element} viết bằng ${wrote} trong khi tài liệu viết bằng ${doc}: “${sample}”${more} - viết lại bằng ${doc}, dùng đúng thuật ngữ của tài liệu`
 }

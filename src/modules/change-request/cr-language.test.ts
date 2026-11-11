@@ -15,7 +15,7 @@ import { checkLocation } from "./verify.service.js"
 const EN_STEP = "After GVCN saves attendance, if any student is marked Vắng không phép, the system sends an email to the parent immediately"
 const VI_STEP = "Sau khi GVCN lưu điểm danh, nếu có học sinh Vắng không phép, hệ thống gửi email cho phụ huynh ngay"
 
-describe("isForeignText — tài liệu tiếng Việt", () => {
+describe("isForeignText - tài liệu tiếng Việt", () => {
   it("câu tiếng Anh (kể cả chen tên trạng thái tiếng Việt) ⇒ khác ngôn ngữ", () => {
     expect(isForeignText(EN_STEP, "vi")).toBe(true)
     expect(isForeignText("Send absence notification email to parent of student", "vi")).toBe(true)
@@ -75,7 +75,7 @@ describe("thông điệp + prompt", () => {
   })
 })
 
-describe("C-5 checkLocation — wrong_language", () => {
+describe("C-5 checkLocation - wrong_language", () => {
   const PATH = "functions[id=FR-05]"
   const cr = { cr_id: "CR-001" } as IChangeRequest
   const spine = (): Spine => {

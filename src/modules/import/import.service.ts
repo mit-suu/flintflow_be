@@ -182,7 +182,7 @@ export const uploadImport = async (
 ): Promise<IImportedDocument> => {
   const current = await latestImport(projectId)
   if (current && hasBaseline(current.status)) {
-    throw new Mode1Error("IMPORT_INVALID_STATE", "Dự án đã có bản gốc — hãy tải bản mới bằng chức năng tải lại để xem khác biệt", {
+    throw new Mode1Error("IMPORT_INVALID_STATE", "Dự án đã có bản gốc - hãy tải bản mới bằng chức năng tải lại để xem khác biệt", {
       status: current.status,
       to: "uploaded",
       allowed: []
@@ -396,7 +396,7 @@ export const patchMapping = async (projectId: string, body: MappingPatchRequest)
   // FLF-278: một phần nhỏ và mục FPT chứa nó cùng có heading ⇒ phần dữ liệu đó in hai lần
   const overlaps = slotOverlaps(profile.heading_map.map((h) => h.section_id))
   if (overlaps.length) {
-    throw new Mode1Error("IMPORT_INVALID_STATE", "Một heading nhận cả mục, heading khác nhận một phần của chính mục đó — nội dung sẽ in hai lần. Chỉ giữ một bên.", {
+    throw new Mode1Error("IMPORT_INVALID_STATE", "Một heading nhận cả mục, heading khác nhận một phần của chính mục đó - nội dung sẽ in hai lần. Chỉ giữ một bên.", {
       status: doc.status, to: "extracting", allowed: [], overlaps: overlaps.map(([section, slot]) => ({ section_id: section, slot_id: slot }))
     })
   }

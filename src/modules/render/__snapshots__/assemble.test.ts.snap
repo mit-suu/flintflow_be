@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn định (generatedAt cố định, ảnh thay bằng độ dài — không lưu base64 lớn) 1`] = `
+exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn định (generatedAt cố định, ảnh thay bằng độ dài - không lưu base64 lớn) 1`] = `
 {
   "flagsAppendix": {
     "redOpen": [],
@@ -173,34 +173,34 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
           "items": [
             [
               {
-                "text": "Payment Gateway (system) — External payment provider (sandbox) that processes credit purchases and sends webhooks.",
+                "text": "Payment Gateway (system) - External payment provider (sandbox) that processes credit purchases and sends webhooks.",
               },
             ],
             [
               {
-                "text": "LLM Provider (system) — External large language model API that generates draft content as structured ops.",
+                "text": "LLM Provider (system) - External large language model API that generates draft content as structured ops.",
               },
             ],
             [
               {
-                "text": "PlantUML Server (system) — Self-hosted diagram renderer that compiles .puml sources into images.",
+                "text": "PlantUML Server (system) - Self-hosted diagram renderer that compiles .puml sources into images.",
               },
             ],
             [
               {
-                "text": "Email Service (system) — SMTP provider used for account verification and password reset mail.",
+                "text": "Email Service (system) - SMTP provider used for account verification and password reset mail.",
               },
             ],
             [
               {
-                "text": "Scheduler (time) — Cron trigger that fires quota resets, expiry checks and housekeeping jobs.",
+                "text": "Scheduler (time) - Cron trigger that fires quota resets, expiry checks and housekeeping jobs.",
               },
             ],
           ],
           "type": "bullet_list",
         },
         {
-          "caption": "Figure — System Context Diagram",
+          "caption": "Figure - System Context Diagram",
           "png": 96,
           "type": "image",
         },
@@ -1749,17 +1749,17 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
@@ -1781,12 +1781,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
@@ -1813,12 +1813,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
             ],
@@ -1840,12 +1840,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
             ],
@@ -1862,17 +1862,17 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
             ],
@@ -1894,12 +1894,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
             ],
@@ -1921,12 +1921,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
             ],
@@ -1948,12 +1948,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
             ],
@@ -1975,12 +1975,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
             ],
@@ -1997,17 +1997,17 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
             ],
@@ -2024,17 +2024,17 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
             ],
@@ -2056,12 +2056,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
             ],
@@ -2073,12 +2073,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
@@ -2088,7 +2088,7 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
             ],
@@ -2100,12 +2100,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
@@ -2115,7 +2115,7 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
             ],
@@ -2127,12 +2127,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
@@ -2142,7 +2142,7 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
             ],
@@ -2154,12 +2154,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
@@ -2169,7 +2169,7 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
             ],
@@ -2181,12 +2181,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
@@ -2196,7 +2196,7 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
             ],
@@ -2208,12 +2208,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
               [
@@ -2223,7 +2223,7 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "—",
+                  "text": "-",
                 },
               ],
             ],
@@ -7518,7 +7518,7 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
           "type": "heading",
         },
         {
-          "caption": "Screen Layout — Project Workspace",
+          "caption": "Screen Layout - Project Workspace",
           "png": 96,
           "type": "image",
         },

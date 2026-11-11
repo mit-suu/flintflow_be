@@ -61,8 +61,8 @@ export const droppedPermissionFindings = (
     const list = [...others].filter(Boolean).join(", ")
     const message =
       missing === "screen"
-        ? `Bảng phân quyền có "${name}"${list ? ` (quyền của ${list})` : ""} nhưng phần mô tả màn hình không có màn này — quyền chưa vào dữ liệu; thêm màn hoặc sửa tên cho khớp qua change request`
-        : `Bảng phân quyền có vai trò "${name}" không khớp vai trò / tác nhân nào — quyền${list ? ` trên ${list}` : ""} chưa vào dữ liệu; sửa tên cho khớp qua change request`
+        ? `Bảng phân quyền có "${name}"${list ? ` (quyền của ${list})` : ""} nhưng phần mô tả màn hình không có màn này - quyền chưa vào dữ liệu; thêm màn hoặc sửa tên cho khớp qua change request`
+        : `Bảng phân quyền có vai trò "${name}" không khớp vai trò / tác nhân nào - quyền${list ? ` trên ${list}` : ""} chưa vào dữ liệu; sửa tên cho khớp qua change request`
     return { rule: "unresolved_permission", section_id: "fixed:3.1.3", message, block_ids: blockIds }
   })
 }

@@ -11,7 +11,7 @@ const spine = {
   ]
 }
 
-describe("FLF-363 (D4) — skill cho vị trí CR trong mục giữ nguyên văn", () => {
+describe("FLF-363 (D4) - skill cho vị trí CR trong mục giữ nguyên văn", () => {
   it("heading mục riêng khớp phần của ngân hàng ⇒ skill của phần; không khớp / chưa có skill ⇒ không skill", () => {
     expect(ownerKeyOf(spine, { owner_step: null, section_id: "custom:c1" })).toBe("skill:product-overview")
     expect(ownerKeyOf(spine, { owner_step: null, section_id: "custom:c2" })).toBe("skill:actors-and-usecases")
@@ -24,7 +24,7 @@ describe("FLF-363 (D4) — skill cho vị trí CR trong mục giữ nguyên văn
 
   it("khoá skill ⇒ nạp đúng skill; không khoá ⇒ câu mục tự do", () => {
     expect(ownerSkillText("skill:product-overview")).not.toMatch(/^\(none/)
-    expect(ownerSkillText("")).toMatch(/^\(none — free-form/)
+    expect(ownerSkillText("")).toMatch(/^\(none - free-form/)
   })
 
   it("skillOfPart theo plan §2.4", () => {
@@ -42,7 +42,7 @@ describe("FLF-363 (D4) — skill cho vị trí CR trong mục giữ nguyên văn
   })
 })
 
-describe("FLF-364 (L6) — skill theo chữ hướng dẫn khi heading mục riêng không khớp", () => {
+describe("FLF-364 (L6) - skill theo chữ hướng dẫn khi heading mục riêng không khớp", () => {
   it("hướng dẫn nhắc đúng một phần có skill ⇒ skill đó; nhắc nhiều phần ⇒ không skill", () => {
     const block = (text: string) => ({ kind: "paragraph" as const, text })
     const s = {

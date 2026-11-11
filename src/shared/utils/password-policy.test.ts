@@ -6,7 +6,7 @@ import {
   PASSWORD_MAX_LENGTH
 } from "./password-policy.js"
 
-describe("password-policy — luật cứng", () => {
+describe("password-policy - luật cứng", () => {
   it("mật khẩu đạt chuẩn ⇒ không lỗi", () => {
     expect(checkPassword("Mua2Roi!")).toBeNull() // 8 ký tự, đủ 4 nhóm
     expect(checkPassword("bien-xanh-2026")).toBeNull() // 14 ký tự, 3 nhóm
@@ -35,7 +35,7 @@ describe("password-policy — luật cứng", () => {
     expect(checkPassword("matkhau2026")).toBe("not_complex")
   })
 
-  it("mật khẩu kiểu 'đúng khuôn mẫu' vẫn được nhận — không còn danh sách chặn", () => {
+  it("mật khẩu kiểu 'đúng khuôn mẫu' vẫn được nhận - không còn danh sách chặn", () => {
     // Danh sách mật khẩu phổ biến đã bị gỡ: 35/35 mục trong đó đều đã bị `too_short`/`not_complex`
     // chặn sẵn, nên nó chỉ còn tác dụng bắt nhầm (`Password1!` bị rút gọn thành `password`).
     expect(checkPassword("Password1!")).toBeNull()
@@ -49,7 +49,7 @@ describe("password-policy — luật cứng", () => {
   })
 })
 
-describe("password-policy — ngưỡng 'Khá' trở lên mới được dùng", () => {
+describe("password-policy - ngưỡng 'Khá' trở lên mới được dùng", () => {
   it("qua hết luật cứng nhưng mới mức 1 ⇒ not_strong_enough", () => {
     // 8 ký tự, đúng 3 nhóm ⇒ chưa dài, chưa đủ 4 nhóm
     expect(passwordLevel("muaroi2!")).toBe(1)
@@ -73,7 +73,7 @@ describe("password-policy — ngưỡng 'Khá' trở lên mới được dùng",
   })
 })
 
-describe("password-policy — KHÔNG còn đối chiếu với tên / email", () => {
+describe("password-policy - KHÔNG còn đối chiếu với tên / email", () => {
   it("mật khẩu trùng tên hay phần email vẫn được chấp nhận", () => {
     expect(checkPassword("Minhhoang2026")).toBeNull()
     expect(checkPassword("Quangvinh!9")).toBeNull()

@@ -1,4 +1,4 @@
-# Invariants and cascade — source: srs-spine.md §3, §4.1, §6
+# Invariants and cascade - source: srs-spine.md §3, §4.1, §6
 
 Violation ⇒ the **whole transaction is rejected**. Checked at the end of the batch, for Draft and for change flows alike.
 

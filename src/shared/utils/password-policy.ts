@@ -37,9 +37,9 @@ export const PASSWORD_ISSUE_MESSAGES: Record<PasswordIssue, string> = {
   too_short: `Mật khẩu phải có ít nhất ${PASSWORD_MIN_LENGTH} ký tự.`,
   too_long: `Mật khẩu tối đa ${PASSWORD_MAX_LENGTH} ký tự.`,
   not_ascii:
-    "Mật khẩu chỉ dùng chữ không dấu, chữ số và ký tự đặc biệt trên bàn phím — không dùng tiếng Việt có dấu hay khoảng trắng.",
+    "Mật khẩu chỉ dùng chữ không dấu, chữ số và ký tự đặc biệt trên bàn phím - không dùng tiếng Việt có dấu hay khoảng trắng.",
   not_complex: "Mật khẩu phải có ít nhất 3 trong 4 nhóm: chữ thường, chữ HOA, chữ số, ký tự đặc biệt.",
-  not_strong_enough: `Mật khẩu chưa đủ mạnh — cần từ ${PASSWORD_LONG_LENGTH} ký tự, hoặc có đủ cả 4 nhóm ký tự.`
+  not_strong_enough: `Mật khẩu chưa đủ mạnh - cần từ ${PASSWORD_LONG_LENGTH} ký tự, hoặc có đủ cả 4 nhóm ký tự.`
 }
 
 /** ASCII in được, KHÔNG gồm khoảng trắng (0x21–0x7E). Chặn cả chữ có dấu lẫn emoji. */

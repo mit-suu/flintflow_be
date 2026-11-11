@@ -25,7 +25,7 @@ describe("formatChatHistory", () => {
   })
 })
 
-describe("clarificationRounds — FLF-299", () => {
+describe("clarificationRounds - FLF-299", () => {
   const ask = (q: string) => msg("ai", JSON.stringify({ kind: "change_clarification", reply: q }))
 
   it("đếm câu hỏi làm rõ liên tiếp ở cuối phiên, bỏ qua tin user", () => {
@@ -101,10 +101,10 @@ describe("previewPayload", () => {
     const one: ChangePreviewResult = { ...base, changes: [change], preview_id: "pv", branch: "dependent" }
     const two: ChangePreviewResult = { ...one, changes: [change, change] }
 
-    expect(previewPayload(one, "en").reply).toBe('Built a preview of 1 change — review it, then press "Áp dụng" (Apply) to save.')
-    expect(previewPayload(two, "en").reply).toBe('Built a preview of 2 changes — review it, then press "Áp dụng" (Apply) to save.')
+    expect(previewPayload(one, "en").reply).toBe('Built a preview of 1 change - review it, then press "Áp dụng" (Apply) to save.')
+    expect(previewPayload(two, "en").reply).toBe('Built a preview of 2 changes - review it, then press "Áp dụng" (Apply) to save.')
     expect(previewPayload(base, "en").reply).toBe("Nothing in the document needs to change for this request.")
-    expect(previewPayload(two).reply).toBe("Đã dựng bản xem trước 2 thay đổi — xem rồi bấm Áp dụng để ghi.")
+    expect(previewPayload(two).reply).toBe("Đã dựng bản xem trước 2 thay đổi - xem rồi bấm Áp dụng để ghi.")
     expect(previewPayload(two, "vi").reply).toBe(previewPayload(two).reply)
     expect(previewPayload(base).reply).toBe("Không tìm thấy chỗ nào cần đổi theo lệnh này.")
     // Chỉ câu đổi theo ngôn ngữ — các field FE đọc (kind, preview_id, branch, change_count) giữ nguyên
@@ -154,9 +154,9 @@ describe("recordChangeTurn", () => {
   })
 })
 
-describe("previewPayload — không có thay đổi mà có ghi chú", () => {
+describe("previewPayload - không có thay đổi mà có ghi chú", () => {
   it("rút lại yêu cầu ⇒ câu trả lời là ghi chú, không ghép câu 'Không tìm thấy chỗ nào cần đổi'", () => {
-    const payload = previewPayload({ ok: true, txn: "t", base_version: 1, ops: [], changes: [], violations: [], referrers: [], notes: "Đã bỏ yêu cầu này — tài liệu không đổi gì." })
-    expect(payload).toMatchObject({ kind: "change_preview", reply: "Đã bỏ yêu cầu này — tài liệu không đổi gì.", change_count: 0 })
+    const payload = previewPayload({ ok: true, txn: "t", base_version: 1, ops: [], changes: [], violations: [], referrers: [], notes: "Đã bỏ yêu cầu này - tài liệu không đổi gì." })
+    expect(payload).toMatchObject({ kind: "change_preview", reply: "Đã bỏ yêu cầu này - tài liệu không đổi gì.", change_count: 0 })
   })
 })

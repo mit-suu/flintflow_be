@@ -200,7 +200,7 @@ const groupUseCases = (spine: Spine, kinds: ActorKinds, labels: DiagramLabels): 
     const parentGroups: UseCaseGroup[] = parentIds.flatMap((p) => {
       const ucs = byId(spine.use_cases).filter((u) => !taken.has(u.id) && u.actor_ids.includes(p.id))
       ucs.forEach((u) => taken.add(u.id))
-      return ucs.length ? [{ key: `${PARENT_GROUP_PREFIX}${p.id}`, name: `${system} — ${clean(p.name)}`, useCases: ucs }] : []
+      return ucs.length ? [{ key: `${PARENT_GROUP_PREFIX}${p.id}`, name: `${system} - ${clean(p.name)}`, useCases: ucs }] : []
     })
     const rest = byId(spine.use_cases).filter((u) => !taken.has(u.id))
     return [...(rest.length ? [{ key: UPLOAD_OVERVIEW_KEY, name: system, useCases: rest }] : []), ...parentGroups]

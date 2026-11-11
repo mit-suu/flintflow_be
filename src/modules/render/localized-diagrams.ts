@@ -114,7 +114,7 @@ export const localizeDiagrams = (
     if (!part || part.format !== source.format) return source.source
     // Chữ dịch dài hơn làm vỡ bố cục SVG ⇒ tài liệu dùng ảnh gốc, không in hình đè chữ
     if (part.issues?.length) {
-      console.warn(`[diagram] Bản ${language} của ${source.id} vi phạm bố cục — dùng ảnh gốc: ${part.issues.map((i) => `${i.rule} ${i.message}`).join("; ")}`)
+      console.warn(`[diagram] Bản ${language} của ${source.id} vi phạm bố cục - dùng ảnh gốc: ${part.issues.map((i) => `${i.rule} ${i.message}`).join("; ")}`)
       return source.source
     }
     return part.source

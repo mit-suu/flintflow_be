@@ -96,7 +96,7 @@ describe("C-7 ghi Spine + render version mới", () => {
         locations: promptLocations(p).map((l) => ({
           location_id: l.location_id,
           conclusion: "edit",
-          reason: "Mục còn trống — bổ sung yêu cầu khác",
+          reason: "Mục còn trống - bổ sung yêu cầu khác",
           spine_ops: [{ op: "add", path: "other_requirements[]", value: { id: "OR-01", kind: "assumption", statement: "The system runs on Chrome 120 or newer." } }]
         }))
       })
@@ -266,7 +266,7 @@ describe("C-7 lỗi giữa chừng", () => {
     expect(await lockedPaths(projectId, crId)).toEqual([])
   })
 
-  it("Spine đổi ở phiên khác sau khi đã tạo version ⇒ bỏ version + file vừa tạo, kiểm lại trên bản mới rồi ghi (BF §3.2 'ai xác nhận trước thì ghi trước') — một lần bấm", async () => {
+  it("Spine đổi ở phiên khác sau khi đã tạo version ⇒ bỏ version + file vừa tạo, kiểm lại trên bản mới rồi ghi (BF §3.2 'ai xác nhận trước thì ghi trước') - một lần bấm", async () => {
     const { c, projectId } = await importedProject()
     const { crId, cr } = await crToReady(c)
     const create = DocVersion.create.bind(DocVersion)
@@ -284,7 +284,7 @@ describe("C-7 lỗi giữa chừng", () => {
   })
 })
 
-describe("C-6 BA bỏ riêng một vị trí trước khi xác nhận (FLF-330 — thay cho Lead từ chối từng group)", () => {
+describe("C-6 BA bỏ riêng một vị trí trước khi xác nhận (FLF-330 - thay cho Lead từ chối từng group)", () => {
   it("vị trí edit đặt not_related, chỉ còn comment ⇒ vẫn lên 0.2, không op Spine của CR", async () => {
     const { c, projectId } = await importedProject()
     const { crId, cr, verified } = await crToReady(c)

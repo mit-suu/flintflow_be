@@ -82,7 +82,7 @@ export const redrawDecision = (
   if (!stale.size) {
     return {
       conclusion: "not_related",
-      reason: "Change request này không đổi dữ liệu mà hình gốc thể hiện — giữ nguyên hình của tài liệu",
+      reason: "Change request này không đổi dữ liệu mà hình gốc thể hiện - giữ nguyên hình của tài liệu",
       proposal: { old_text, new_text: null, comment_text: null, spine_ops: [], assumptions: [] }
     }
   }

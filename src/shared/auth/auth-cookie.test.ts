@@ -13,7 +13,7 @@ describe("authCookieOptions (FLF-137)", () => {
     expect(authCookieOptions({ nodeEnv: "production", sameSite: "lax", domain: "" }).secure).toBe(true)
   })
 
-  it("SameSite=None luôn kèm Secure, kể cả ngoài production — trình duyệt từ chối None thiếu Secure", () => {
+  it("SameSite=None luôn kèm Secure, kể cả ngoài production - trình duyệt từ chối None thiếu Secure", () => {
     const opts = authCookieOptions({ nodeEnv: "development", sameSite: "none", domain: "" })
 
     expect(opts.sameSite).toBe("none")

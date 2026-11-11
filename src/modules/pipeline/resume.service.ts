@@ -78,7 +78,7 @@ export const resumeProject = async (projectId: string, userId: string): Promise<
     // F2/F4: step đang thật sự chạy dở ở một request khác (khoá `step_runs` còn hiệu lực) — không phải
     // "đóng tab bỏ dở", KHÔNG được revert nội dung đang được ghi.
     if (await isStepRunning(projectId, inProgress.id)) {
-      throw new ApiError(409, `Step ${inProgress.id} đang chạy ở một request khác — không thể resume lúc này`, STEP_NOT_RUNNABLE)
+      throw new ApiError(409, `Step ${inProgress.id} đang chạy ở một request khác - không thể resume lúc này`, STEP_NOT_RUNNABLE)
     }
     if (inProgress.first_seq !== null && inProgress.last_seq !== null) {
       const content = await stepContentToRevert(projectId, inProgress.id, inProgress.first_seq, inProgress.last_seq)

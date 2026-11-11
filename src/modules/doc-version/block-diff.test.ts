@@ -33,7 +33,7 @@ describe("diffBlockLists", () => {
     expect(diffBlockLists(before, after).blocks).toEqual([{ block_id: "B0001", change: "modified", before: "Alpha", after: "Alpha changed" }])
   })
 
-  it("FLF-186 — không neo (file render): block lẻ giữa cùng hai block đã khớp, giống từ ≥ 50% ⇒ modified; khác hẳn ⇒ xoá + thêm", () => {
+  it("FLF-186 - không neo (file render): block lẻ giữa cùng hai block đã khớp, giống từ ≥ 50% ⇒ modified; khác hẳn ⇒ xoá + thêm", () => {
     const n = (text: string) => b(null, text)
     const before = [n("Intro"), n("The system shall respond within 2 seconds."), n("Glossary")]
     const edited = diffBlockLists(before, [n("Intro"), n("The system shall respond within 1 second."), n("Glossary")])

@@ -35,7 +35,7 @@ export class DocFileNotFoundError extends Error {
 
 const bucket = (): InstanceType<typeof mongoose.mongo.GridFSBucket> => {
   const db = mongoose.connection.db
-  if (!db) throw new Error("MongoDB chưa kết nối — không lưu được file tài liệu")
+  if (!db) throw new Error("MongoDB chưa kết nối - không lưu được file tài liệu")
   return new mongoose.mongo.GridFSBucket(db, { bucketName: DOC_FILE_BUCKET })
 }
 

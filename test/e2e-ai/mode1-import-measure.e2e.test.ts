@@ -34,7 +34,7 @@ interface StepRow {
   credits: number
 }
 
-describe.skipIf(!enabled || !SRS)("Đo import mode 1 — provider thật (E2E_AI=1, MEASURE_SRS)", () => {
+describe.skipIf(!enabled || !SRS)("Đo import mode 1 - provider thật (E2E_AI=1, MEASURE_SRS)", () => {
   it("upload → I-4 → finalize/1.11", { timeout: 90 * 60_000 }, async () => {
     const { Usage } = await import("../../src/modules/spine/usage.model.js")
     const { DocBlock } = await import("../../src/modules/import/doc-block.model.js")
@@ -121,7 +121,7 @@ describe.skipIf(!enabled || !SRS)("Đo import mode 1 — provider thật (E2E_AI
     const stem = `mode1-measure-${LABEL}-${path.basename(SRS, ".docx").replace(/[^\w.-]+/g, "_")}-${new Date().toISOString().replace(/[:.]/g, "-")}`
     fs.writeFileSync(path.join(OUT_DIR, `${stem}.json`), JSON.stringify(result, null, 2))
     const md = [
-      `# Đo import mode 1 — ${result.label} — ${result.srs}`,
+      `# Đo import mode 1 - ${result.label} - ${result.srs}`,
       "",
       `- File ${result.file_bytes} byte, ${result.blocks_total} block; chữ cho 1.11: ${result.check_chars} ký tự`,
       `- 1.11: ${result.check_mode}, độ phủ ${(result.check_coverage * 100).toFixed(1)}%`,

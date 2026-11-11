@@ -17,7 +17,7 @@ const fnOf = (spine: Spine, id: string): SpineFunction => spine.functions.find((
 const KEY = "functions[id=FN010].interactions[from=A01,to=system,message=Submit email address,kind=request,flow=normal]"
 const reply: FunctionInteraction = { from: "system", to: "A01", message: "Show quota notice", kind: "response", flow: "abnormal", guard: "quota is used up" }
 
-describe("functions[].interactions — schema", () => {
+describe("functions[].interactions - schema", () => {
   it("fixture có interactions cho vài function; Spine cũ thiếu field vẫn hợp lệ", () => {
     expect(fnOf(FIXTURE, "FN001").interactions).toHaveLength(4)
     const old = structuredClone(FIXTURE) as unknown as { functions: Record<string, unknown>[] }
@@ -46,7 +46,7 @@ describe("functions[].interactions — schema", () => {
   })
 })
 
-describe("op engine — interactions", () => {
+describe("op engine - interactions", () => {
   it("selectorFor: message chọn theo from + to + message + kind + flow (không rơi vào khoá `to` của flow_to)", () => {
     const i = fnOf(FIXTURE, "FN010").interactions![0]
     expect(selectorFor(i)).toEqual({ kind: "match", pairs: [["from", "A01"], ["to", "system"], ["message", "Submit email address"], ["kind", "request"], ["flow", "normal"]] })

@@ -180,7 +180,7 @@ const sidesOf = (scene: Scene, d: UseCaseDiagram): Record<string, "left" | "righ
 }
 const rowOrderOf = (scene: Scene): string[] => [...ellipses(scene)].sort((a, b) => a.cy - b.cy).map((e) => e.id.slice(3))
 
-describe("layoutUseCaseDiagram — thử nhiều phương án", () => {
+describe("layoutUseCaseDiagram - thử nhiều phương án", () => {
   it("Log In / Reset Password chung 7 actor người: chỉ đổi khoảng cách thì vẫn cắt chữ; thử thêm phương án ⇒ sạch, đủ use case", () => {
     const [first] = layoutOptions(SHARED_LOGIN)
     expect(first).toEqual({ gap: ACTOR_BOUNDARY_GAPS[0], sides: undefined, rowOrder: undefined })

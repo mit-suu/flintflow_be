@@ -22,7 +22,7 @@ const mutate = (fn: (s: Spine) => void): Spine => {
 const plan = (ops: unknown[], spine: Spine = FIXTURE) => planTransaction(spine, txn(ops), { startSeq: 1 }).spine
 const KEY = "entities[id=E01].transitions[from=E01-ST1,to=E01-ST2,event=verify email]"
 
-describe("entities[].states / transitions — schema", () => {
+describe("entities[].states / transitions - schema", () => {
   it("fixture có vòng đời cho User và Baseline; Spine cũ thiếu hai field vẫn hợp lệ", () => {
     expect(entityOf(FIXTURE, "E01").states?.map((s) => s.name)).toEqual(["Pending", "Active", "Suspended", "Deactivated"])
     expect(entityOf(FIXTURE, "E08").transitions?.[0]).toMatchObject({ event: "sign", business_rule_ids: ["BR03"] })
@@ -49,7 +49,7 @@ describe("entities[].states / transitions — schema", () => {
   })
 })
 
-describe("op engine — states / transitions", () => {
+describe("op engine - states / transitions", () => {
   it("selectorFor: transition chọn theo from + to + event (không rơi vào khoá `to` của flow_to)", () => {
     const t = entityOf(FIXTURE, "E01").transitions![0]
     expect(selectorFor(t)).toEqual({ kind: "match", pairs: [["from", "E01-ST1"], ["to", "E01-ST2"], ["event", "verify email"]] })
@@ -123,7 +123,7 @@ describe("tham chiếu và cascade", () => {
   })
 })
 
-describe("source hash — state_machine", () => {
+describe("source hash - state_machine", () => {
   const sm = (owner: string) => ({ kind: "state_machine" as const, owner_id: owner })
 
   it("hash theo từng entity: đổi state / nhãn transition làm cũ hình entity đó, entity khác thì không", () => {

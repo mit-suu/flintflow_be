@@ -14,7 +14,7 @@ describe("organization models (task-26 Pha 0)", () => {
     expect([...ORG_ROLES]).toEqual(["lead", "analyst", "viewer"])
   })
 
-  it("UC-08 chỉ mời được Analyst / Viewer — Lead phải nâng qua UC-73", () => {
+  it("UC-08 chỉ mời được Analyst / Viewer - Lead phải nâng qua UC-73", () => {
     expect([...INVITABLE_ROLES]).toEqual(["analyst", "viewer"])
     expect(INVITABLE_ROLES).not.toContain("lead")
   })
@@ -35,7 +35,7 @@ describe("organization models (task-26 Pha 0)", () => {
     expect(Invitation.schema.path("codeHash").options.unique).toBe(true)
   })
 
-  it("trạng thái mã mời là giá trị suy diễn — không có field status trong schema", () => {
+  it("trạng thái mã mời là giá trị suy diễn - không có field status trong schema", () => {
     expect(Object.keys(Invitation.schema.paths)).not.toContain("status")
     for (const field of ["expiresAt", "acceptedAt", "revokedAt"]) {
       expect(Invitation.schema.path(field)).toBeDefined()

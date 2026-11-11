@@ -146,7 +146,7 @@ const executorFor = (ops: OpTransaction["ops"], seen: { prompt?: Record<string, 
 
 beforeEach(() => db.reset())
 
-describe("scopeWarnings — Won't-have không tự đổi release_scope", () => {
+describe("scopeWarnings - Won't-have không tự đổi release_scope", () => {
   it("Won't-have mà release_scope.out không nhắc tới ⇒ cảnh báo", () => {
     const spine = structuredClone(FIXTURE)
     spine.project.release_scope = { in: [], out: [] }
@@ -201,7 +201,7 @@ describe("skill prioritization", () => {
   })
 })
 
-describe("prioritize — ghi priority bằng op", () => {
+describe("prioritize - ghi priority bằng op", () => {
   it("nội dung skill đi vào prompt; ops được áp; đếm đúng số đã xếp hạng", async () => {
     const spine = await seed((s) => {
       for (const f of s.functions) f.priority = null
@@ -240,7 +240,7 @@ describe("prioritize — ghi priority bằng op", () => {
     expect(inputs[1]).not.toHaveProperty("replyLanguage")
   })
 
-  it("op đụng release_scope bị op-validator chặn — S-9.4 không được đổi phạm vi", async () => {
+  it("op đụng release_scope bị op-validator chặn - S-9.4 không được đổi phạm vi", async () => {
     await seed()
     const ops = [{ op: "set" as const, path: "project.release_scope", value: { in: [], out: ["mọi thứ"] } }]
 

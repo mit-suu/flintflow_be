@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import { locationPromptText, matchProposals } from "./propose.service.js"
 
-describe("matchProposals — ghép output C-4 với vị trí của lô", () => {
+describe("matchProposals - ghép output C-4 với vị trí của lô", () => {
   const batch = [
     { location_id: "L005", path: "actors[id=A01]" },
     { location_id: "L006", path: "use_cases[id=UC-01]" }
@@ -32,7 +32,7 @@ describe("matchProposals — ghép output C-4 với vị trí của lô", () => 
   })
 })
 
-describe("locationPromptText — vị trí trong prompt C-4", () => {
+describe("locationPromptText - vị trí trong prompt C-4", () => {
   it("mã vị trí + path + section + lý do tìm thấy + giá trị hiện tại (JSON); lần làm lại kèm lỗi trước", () => {
     const s = createEmptySpine({ name: "Lumen" })
     s.actors.push({ id: "A01", name: "Learner", kind: "human", description: "" } as never)

@@ -221,18 +221,18 @@ export const deleteOrganization = async (
   if (!onlyMe) {
     throw new ApiError(
       409,
-      "Chỉ xoá được tổ chức khi bạn là thành viên duy nhất — hãy xoá các thành viên khác trước",
+      "Chỉ xoá được tổ chức khi bạn là thành viên duy nhất - hãy xoá các thành viên khác trước",
       "ORG_HAS_OTHER_MEMBERS"
     )
   }
 
   const wallet = await CreditWallet.findOne({ organizationId: orgId }).select("reserved").lean()
   if (wallet && wallet.reserved > 0) {
-    throw new ApiError(409, "Tổ chức đang có lượt gọi AI chạy dở — thử lại sau ít phút", "ORG_BUSY")
+    throw new ApiError(409, "Tổ chức đang có lượt gọi AI chạy dở - thử lại sau ít phút", "ORG_BUSY")
   }
   if (await PaymentIntent.exists({ organizationId: orgId, status: "pending" })) {
     // Webhook về sau sẽ cộng credit vào ví của một org đã biến mất.
-    throw new ApiError(409, "Tổ chức đang có thanh toán chờ xử lý — thử lại khi thanh toán kết thúc", "ORG_PAYMENT_PENDING")
+    throw new ApiError(409, "Tổ chức đang có thanh toán chờ xử lý - thử lại khi thanh toán kết thúc", "ORG_PAYMENT_PENDING")
   }
 
   const projects = await Project.find({ organizationId: orgId }).select("_id").lean()

@@ -28,7 +28,7 @@ describe("invariants", () => {
     expect(REQUIRED_FIXED_SECTIONS).not.toContain("fixed:I")
   })
 
-  it("1 — xoá section bắt buộc; xoá section tuỳ chọn 4.2.4 thì được", () => {
+  it("1 - xoá section bắt buộc; xoá section tuỳ chọn 4.2.4 thì được", () => {
     expect(rulesOf(variant((s) => (s.sections = s.sections.filter((x) => x.id !== "fixed:5.2"))))).toContain(
       "invariant_1_required_section"
     )
@@ -38,13 +38,13 @@ describe("invariants", () => {
     expect(rulesOf(variant((s) => (s.sections = s.sections.filter((x) => x.id !== "fixed:4.2.4"))))).toEqual([])
   })
 
-  it("2 — xoá phần tử human cuối cùng; Spine rỗng không vi phạm", () => {
+  it("2 - xoá phần tử human cuối cùng; Spine rỗng không vi phạm", () => {
     expect(rulesOf(variant((s) => (s.actors = s.actors.filter((a) => a.kind !== "human"))))).toContain("invariant_2_last_element")
     const empty = createEmptySpine()
     expect(checkInvariants(empty, empty)).toEqual([])
   })
 
-  it("3 — chỉ báo khoá chết MỚI", () => {
+  it("3 - chỉ báo khoá chết MỚI", () => {
     const broken = variant((s) => (s.screens[0].flow_to = [...s.screens[0].flow_to, { to: "S99" }]))
     expect(rulesOf(broken)).toEqual(["invariant_3_dead_reference"])
     // lỗi đã có từ trước: sửa chỗ khác vẫn được
@@ -53,21 +53,21 @@ describe("invariants", () => {
     expect(checkInvariants(stillBroken, broken)).toEqual([])
   })
 
-  it("4 — function trỏ màn không tồn tại", () => {
+  it("4 - function trỏ màn không tồn tại", () => {
     expect(rulesOf(variant((s) => (s.functions[0].screen_id = "S99")))).toContain("invariant_4_screen_missing")
   })
 
-  it("5 — feature order hở / function order trùng; function order hở thì được", () => {
+  it("5 - feature order hở / function order trùng; function order hở thì được", () => {
     expect(rulesOf(variant((s) => (s.features[5].order = 9)))).toContain("invariant_5_feature_order")
     expect(rulesOf(variant((s) => (s.functions[1].order = s.functions[0].order)))).toContain("invariant_5_function_order")
     expect(rulesOf(variant((s) => (s.functions[3].order = 40)))).toEqual([])
   })
 
-  it("6 — function lệch feature của màn", () => {
+  it("6 - function lệch feature của màn", () => {
     expect(rulesOf(variant((s) => (s.functions[0].feature_id = "F2")))).toContain("invariant_6_feature_mismatch")
   })
 
-  it("8 — xoá màn cursor; thêm màn trong S-5 phải pending và vào queue", () => {
+  it("8 - xoá màn cursor; thêm màn trong S-5 phải pending và vào queue", () => {
     expect(rulesOf(variant((s) => (s.screens = s.screens.filter((x) => x.id !== "S10"))))).toContain("invariant_8_cursor_screen")
 
     const inS5 = variant((s) => (s.progress.current_phase = "S-5"))

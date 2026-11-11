@@ -41,7 +41,7 @@ import { fixDuplicateIds } from "./propose.service.js"
 import { elementValue, isArrayPath, listElements, opElement, sectionOfElement, unchangedSince, valueText } from "./spine-location.js"
 
 export const valueChanged = (loc: Pick<IChangeLocation, "location_id" | "path">): Mode1Error =>
-  new Mode1Error("CR_VALUE_CHANGED", `${pathLabel(loc.path)} đã bị sửa ở chỗ khác kể từ lúc đề xuất — tải lại rồi đề xuất lại`, { location_id: loc.location_id, path: loc.path })
+  new Mode1Error("CR_VALUE_CHANGED", `${pathLabel(loc.path)} đã bị sửa ở chỗ khác kể từ lúc đề xuất - tải lại rồi đề xuất lại`, { location_id: loc.location_id, path: loc.path })
 
 type CheckLocation = Pick<IChangeLocation, "location_id" | "path" | "conclusion" | "proposal">
 
@@ -102,19 +102,19 @@ export const checkLocation = (
   if (!p) return [...out, { rule: "no_proposal", message: "Thiếu đề xuất" }]
   // FLF-375 (§3.2): trước khi xác nhận, đề xuất chưa có giá trị kiểm tra — chữ cũ đã đổi (người khác vừa ghi) ⇒ AI soạn
   // lại trên nội dung hiện tại như một lỗi kiểm thường; lúc xác nhận mới so 3 cột (`concurrent-edit.ts`)
-  if (!unchangedSince(spine, loc.path, p)) return [...out, { rule: "value_changed", message: `${pathLabel(loc.path)} vừa được sửa ở chỗ khác — soạn lại trên nội dung hiện tại`, path: loc.path }]
+  if (!unchangedSince(spine, loc.path, p)) return [...out, { rule: "value_changed", message: `${pathLabel(loc.path)} vừa được sửa ở chỗ khác - soạn lại trên nội dung hiện tại`, path: loc.path }]
   if (loc.conclusion === "edit") {
     if (!p.spine_ops.length) out.push({ rule: "edit_without_ops", message: "Kết luận là sửa nhưng chưa có nội dung sửa" })
     else if (p.new_text !== null && p.new_text === p.old_text) out.push({ rule: "edit_no_change", message: "Đề xuất không thay đổi gì ở phần tử này" })
     for (const el of opElements(loc)) {
-      if (el !== loc.path && locks.get(el) !== cr.cr_id) out.push({ rule: "op_path_not_locked", message: `Đề xuất sửa cả ${pathLabel(el)} — phần này không thuộc các vị trí của change request`, path: el })
+      if (el !== loc.path && locks.get(el) !== cr.cr_id) out.push({ rule: "op_path_not_locked", message: `Đề xuất sửa cả ${pathLabel(el)} - phần này không thuộc các vị trí của change request`, path: el })
     }
     // Vị trí "mục trống" (`arr[]`): chỉ được thêm phần tử vào đúng mảng đó, không lấn sang mảng khác
     if (isArrayPath(loc.path)) {
       const array = loc.path.slice(0, -2)
       for (const raw of p.spine_ops) {
         const path = opPath(raw)
-        if (!path.startsWith(array)) out.push({ rule: "op_outside_section", message: `Đề xuất sửa ${pathLabel(path)} — vị trí này chỉ được thêm mới vào ${pathLabel(loc.path)}`, path })
+        if (!path.startsWith(array)) out.push({ rule: "op_outside_section", message: `Đề xuất sửa ${pathLabel(path)} - vị trí này chỉ được thêm mới vào ${pathLabel(loc.path)}`, path })
       }
     } else {
       // Phần tử mới chỉ thêm từ ô "thêm mới" của đúng mục (2026-09-24: AI chèn bảng phân quyền thành mục riêng mới từ vị
@@ -122,7 +122,7 @@ export const checkLocation = (
       for (const raw of p.spine_ops) {
         const path = opPath(raw)
         if (isArrayPath(path)) {
-          out.push({ rule: "add_outside_slot", message: `Đề xuất thêm ${pathLabel(path)} từ ${pathLabel(loc.path)} — phần tử mới phải thêm ở ô “thêm mới” của đúng mục`, path })
+          out.push({ rule: "add_outside_slot", message: `Đề xuất thêm ${pathLabel(path)} từ ${pathLabel(loc.path)} - phần tử mới phải thêm ở ô “thêm mới” của đúng mục`, path })
         }
       }
     }
@@ -159,7 +159,7 @@ export const checkSpineOps = (spine: Spine, cr: Pick<IChangeRequest, "cr_id">, l
     const newRed = runDeterministicCheck(plan.spine, [], { ruleProfile: MODE1_RULE_PROFILE }).filter(
       (c) => c.level === "red" && c.rule_id !== "diagram_stale" && !before.has(flagKey(c))
     )
-    for (const c of newRed) for (const locId of new Set(owner)) push(locId, { rule: "new_red_flag", message: `Đề xuất làm phát sinh lỗi đỏ mới: ${ruleLabel(c.rule_id) ? `${ruleLabel(c.rule_id)} — ` : ""}${c.message}` })
+    for (const c of newRed) for (const locId of new Set(owner)) push(locId, { rule: "new_red_flag", message: `Đề xuất làm phát sinh lỗi đỏ mới: ${ruleLabel(c.rule_id) ? `${ruleLabel(c.rule_id)} - ` : ""}${c.message}` })
   } catch (err) {
     if (!(err instanceof TransactionRejectedError)) throw err
     for (const v of err.violations) {

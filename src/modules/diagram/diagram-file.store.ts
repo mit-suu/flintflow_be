@@ -67,7 +67,7 @@ const localizedNamePattern = (projectId: string, diagramId: string, locale?: str
 
 const bucket = (): InstanceType<typeof mongoose.mongo.GridFSBucket> => {
   const db = mongoose.connection.db
-  if (!db) throw new Error("MongoDB chưa kết nối — không lưu được file diagram")
+  if (!db) throw new Error("MongoDB chưa kết nối - không lưu được file diagram")
   return new mongoose.mongo.GridFSBucket(db, { bucketName: DIAGRAM_BUCKET })
 }
 

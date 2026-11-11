@@ -22,7 +22,7 @@ describe("GET /health", () => {
     expect(res.body.data.assets.steps).toBeGreaterThan(0)
   })
 
-  it("không cần đăng nhập — health check của orchestrator không mang token", async () => {
+  it("không cần đăng nhập - health check của orchestrator không mang token", async () => {
     const res = await request(app).get("/health")
     expect(res.status).not.toBe(401)
   })

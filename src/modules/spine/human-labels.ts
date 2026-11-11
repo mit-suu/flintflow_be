@@ -131,7 +131,7 @@ const parsePathLabel = (path: string, entityName?: string): string | null => {
     field = null
   }
   if (entityName && parts[0].selector) out[0] += ` (${entityName})`
-  return field ? `${out.join(" › ")} — ${fieldLabel(field)}` : out.join(" › ")
+  return field ? `${out.join(" › ")} - ${fieldLabel(field)}` : out.join(" › ")
 }
 
 /**

@@ -63,7 +63,7 @@ const exists = async (ref: string | null | undefined): Promise<boolean> => {
   }
 }
 
-describe("C-7 mode 1 v3 — vẽ lại hình, bản có đánh dấu lỗi", () => {
+describe("C-7 mode 1 v3 - vẽ lại hình, bản có đánh dấu lỗi", () => {
   it("có hình vẽ lại ⇒ in lại file version (bản sạch + bản có đánh dấu mới), file cũ bị dọn", async () => {
     const { c, projectId } = await importedProject()
     const { cr, verified: submitted } = await crToReady(c)
