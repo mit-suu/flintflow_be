@@ -539,7 +539,7 @@ export const cleanupArtifacts = async (doc: ITemplateMigration): Promise<string[
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       console.error(`[TemplateMigration] dọn ${what} thất bại:`, message)
-      failures.push(`Dọn ${what} thất bại (${message}) — cần dọn tay`)
+      failures.push(`Dọn ${what} thất bại (${message}) - cần dọn tay`)
     }
   }
   if (doc.new_base_file_ref) await attempt("file nền mới", () => docFileStore().remove(doc.new_base_file_ref!))

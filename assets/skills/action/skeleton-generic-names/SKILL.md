@@ -2,7 +2,7 @@
 skill_id: skeleton-generic-names
 kind: action
 version: 1.0.0
-description: FLF-395 (D13) — suggest a generic, reusable form of the custom section headings a BA added to a project before they enter the organisation's template skeleton
+description: FLF-395 (D13) - suggest a generic, reusable form of the custom section headings a BA added to a project before they enter the organisation's template skeleton
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 1024
@@ -37,7 +37,7 @@ picks it, edits it, or drops the heading. You never decide.
    `{Tên đối tác}`. Keep the rest of the wording, the numbering prefix and the language of the heading.
 3. A heading that is already generic (no specific names) is returned unchanged.
 4. A heading that only makes sense for this one project (an internal codename, a one-off meeting) gets `generic: null`
-   and a short `reason` in the document language — the reviewer will likely drop it.
+   and a short `reason` in the document language - the reviewer will likely drop it.
 5. Never translate, never add new topics, never merge headings.
 6. Output JSON only, following the schema below. No prose outside the JSON.
 
