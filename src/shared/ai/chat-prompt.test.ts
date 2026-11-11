@@ -13,7 +13,7 @@ const VARIABLES = {
   chat_history: "User: Hello\nAI: Hi, what are you building?",
   input_text: "Can you explain what this document is still missing?",
   documentContext: "## Tài liệu tham khảo\n(không có)",
-  spine_index: "- Use cases: 2 — UC01 Log In; UC02 Log Out"
+  spine_index: "- Use cases: 2 - UC01 Log In; UC02 Log Out"
 }
 
 /** Như `buildPrompt`: thế biến vào template rồi nối khối ngôn ngữ trả lời vào cuối. */
@@ -24,7 +24,7 @@ const buildChatPrompt = async (language: ReplyLanguage): Promise<{ body: string;
 }
 
 describe("chat.md theo ngôn ngữ trả lời (FLF-260)", () => {
-  it("thế đủ biến — không còn {{…}} trong prompt", async () => {
+  it("thế đủ biến - không còn {{…}} trong prompt", async () => {
     const { prompt } = await buildChatPrompt("en")
     expect(prompt).not.toContain("{{")
     expect(prompt).toContain(VARIABLES.input_text)

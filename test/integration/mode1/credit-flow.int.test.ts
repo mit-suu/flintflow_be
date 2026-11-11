@@ -25,7 +25,7 @@ const topUpNotices = async (userId: string) => {
   return []
 }
 
-describe("Flow 4 — mode 1", () => {
+describe("Flow 4 - mode 1", () => {
   it("4.2: hết credit ở C-4 ⇒ CR paused credits + chủ project nhận thông báo nạp (link trang nạp, bước đang dừng)", async () => {
     const { c, seeded, projectId } = await importedProject()
     const { cr } = await crToImpact(c)
@@ -34,7 +34,7 @@ describe("Flow 4 — mode 1", () => {
     const d = detail(await c.post(`${cr}/propose`))
     expect(d.change_request.paused?.reason).toBe("credits")
     const [notice] = await topUpNotices(seeded.userId)
-    expect(notice).toMatchObject({ title: "Hết credit — bước AI đang dừng", link: "/home/billing", meta: { project_id: projectId } })
+    expect(notice).toMatchObject({ title: "Hết credit - bước AI đang dừng", link: "/home/billing", meta: { project_id: projectId } })
     expect(String((notice.meta as { step_id: string }).step_id)).toMatch(/^C-4:CR-/)
   })
 

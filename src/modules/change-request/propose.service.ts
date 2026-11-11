@@ -73,7 +73,7 @@ export const ownerKeyOf = (spine: Pick<Spine, "custom_sections">, loc: Pick<ICha
 }
 
 export const ownerSkillText = (ownerKey: string | null): string => {
-  if (!ownerKey) return "(none — free-form section kept verbatim from the uploaded file)"
+  if (!ownerKey) return "(none - free-form section kept verbatim from the uploaded file)"
   const skillId = ownerKey.startsWith(SKILL_KEY) ? ownerKey.slice(SKILL_KEY.length) : STEP_SKILLS[parseStepId(ownerKey).base]
   if (!skillId) return "(none)"
   try {
@@ -146,8 +146,8 @@ export const locationPromptText = (spine: Spine, l: PromptLocation, seedOps: rea
   const how = !isArrayPath(l.path)
     ? ""
     : isEmpty
-      ? "\n  EMPTY SECTION — the only valid edit is adding new elements to this array (`add` ops)."
-      : `\n  ADD NEW — the only valid edit is adding new elements to this array (\`add\` ops) that the change needs and that do not exist yet (value above = existing elements, to avoid duplicates). Existing elements are separate locations. Nothing new needed ⇒ not_related.${existingIdsText(spine, l.path)}`
+      ? "\n  EMPTY SECTION - the only valid edit is adding new elements to this array (`add` ops)."
+      : `\n  ADD NEW - the only valid edit is adding new elements to this array (\`add\` ops) that the change needs and that do not exist yet (value above = existing elements, to avoid duplicates). Existing elements are separate locations. Nothing new needed ⇒ not_related.${existingIdsText(spine, l.path)}`
   // Mode 1 v3: op người yêu cầu đã xem trước cho đúng vị trí này — gợi ý, AI vẫn tự kết luận
   const mine = seedOpsFor(seedOps, l.path)
   const suggested = mine.length ? `\n  Requester's previewed ops for this location (suggestion): ${JSON.stringify(mine)}` : ""
@@ -180,7 +180,7 @@ export const templateGuidanceBySection = (profile: {
     const parent = [...stack].reverse().find((s) => s.guidance)?.guidance ?? null
     stack.push({ level: l.level, guidance: own })
     if (!own) continue
-    const text = parent && parent !== own ? `${parent} — ${own}` : own
+    const text = parent && parent !== own ? `${parent} - ${own}` : own
     const prev = out.get(l.section_id)
     out.set(l.section_id, (prev ? `${prev} · ${text}` : text).slice(0, GUIDANCE_PROMPT_CHARS))
   }
@@ -299,7 +299,7 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
             // Lô quá nặng cho một lượt gọi (prompt dài ⇒ model suy nghĩ hết ngân sách) ⇒ chia đôi, thử lại từng nửa
             // thay vì dừng cả CR. Hết credit thì vẫn dừng để người dùng nạp rồi resume.
             const half = Math.ceil(batch.length / 2)
-            console.warn(`[C-4] ${cr.cr_id}: lô ${batch.length} vị trí lỗi (${result.message}) — chia đôi và thử lại`)
+            console.warn(`[C-4] ${cr.cr_id}: lô ${batch.length} vị trí lỗi (${result.message}) - chia đôi và thử lại`)
             queue.unshift(batch.slice(0, half), batch.slice(half))
             batch = []
             break
@@ -328,7 +328,7 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
         }
         batch = batch.filter((l) => !matched.has(l))
       }
-      if (batch.length) console.warn(`[C-4] ${cr.cr_id}: model bỏ sót ${batch.map((l) => l.location_id).join(", ")} sau ${PROPOSE_ATTEMPTS} lượt — chờ sửa tay`)
+      if (batch.length) console.warn(`[C-4] ${cr.cr_id}: model bỏ sót ${batch.map((l) => l.location_id).join(", ")} sau ${PROPOSE_ATTEMPTS} lượt - chờ sửa tay`)
     }
   }
   await fixDuplicateIds(spine, locations)
@@ -410,7 +410,7 @@ Analyst's instruction for ${loc.location_id} (${loc.owner_step ? `fix in owner s
     throw new ApiError(502, result.userMessage, "AI_PROVIDER_ERROR", result.code ? { cause_code: result.code } : undefined)
   }
   const out = matchProposals([loc], result.data.locations).get(loc)
-  if (!out) throw new ApiError(502, "AI chưa đưa ra đề xuất cho chỗ này — thử lại, hoặc gõ hướng sửa cụ thể hơn", "AI_PROVIDER_ERROR")
+  if (!out) throw new ApiError(502, "AI chưa đưa ra đề xuất cho chỗ này - thử lại, hoặc gõ hướng sửa cụ thể hơn", "AI_PROVIDER_ERROR")
   const ops = out.conclusion === "not_related" ? [] : out.spine_ops
   loc.conclusion = out.conclusion
   loc.reason = out.reason

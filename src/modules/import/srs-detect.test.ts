@@ -36,8 +36,8 @@ const cv = () =>
       p("NGUYEN VAN A"),
       p("Senior Backend Developer"),
       h1("Work Experience"),
-      p("2021–2024: FPT Software — built billing services in Node.js."),
-      p("2019–2021: VNG — payment gateway integration."),
+      p("2021–2024: FPT Software - built billing services in Node.js."),
+      p("2019–2021: VNG - payment gateway integration."),
       h1("Education"),
       p("FPT University, Software Engineering, GPA 3.4"),
       h1("Skills"),
@@ -64,7 +64,7 @@ const invoice = () =>
 const testPlan = () =>
   makeDocx({
     body: [
-      p("Test Plan — Lumen release 1.2"),
+      p("Test Plan - Lumen release 1.2"),
       h1("1. Test cases"),
       table([
         ["Test case", "Steps", "Expected result", "Actual result", "Pass/Fail"],
@@ -98,7 +98,7 @@ const freeTextSrs = () =>
     ].join("")
   })
 
-describe("classifyDocument (FLF-331, I-1 nhận diện SRS — 0 credit)", () => {
+describe("classifyDocument (FLF-331, I-1 nhận diện SRS - 0 credit)", () => {
   it("SRS theo mẫu FPT và mẫu IEEE 830 ⇒ srs, độ tin cao", async () => {
     const fpt = await classify(await makeSrsDocx())
     expect(fpt.kind).toBe("srs")

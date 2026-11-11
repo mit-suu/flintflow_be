@@ -15,7 +15,7 @@ import { sessionOptions } from "../../shared/db/transaction.js"
  */
 
 export const LAST_LEAD_MESSAGE =
-  "Tổ chức phải còn ít nhất một Lead — hãy chỉ định người khác làm Lead trước"
+  "Tổ chức phải còn ít nhất một Lead - hãy chỉ định người khác làm Lead trước"
 
 /** Điểm ghi chung để serialize các thao tác đổi thành viên của cùng một org. */
 export const touchMembership = async (

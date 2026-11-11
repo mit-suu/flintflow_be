@@ -11,7 +11,7 @@ import app from "../../src/app.js"
 
 const ORIGIN = "http://localhost:3000"
 
-describe("CORS — Access-Control-Expose-Headers", () => {
+describe("CORS - Access-Control-Expose-Headers", () => {
   it("response có Origin ⇒ expose Content-Disposition để FE đọc được tên file tải về", async () => {
     const res = await request(app).get("/health").set("Origin", ORIGIN)
 

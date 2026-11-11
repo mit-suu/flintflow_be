@@ -199,7 +199,7 @@ describe("C-5 redo ≤ 2 rồi manual_fix", () => {
     expect((await c.post(`${cr}/propose`)).body.error.code).toBe("CR_INVALID_TRANSITION")
   })
 
-  it("FLF-375 (nguyên tắc 6): không sửa tay — PATCH kèm nội dung ⇒ 400; giữ nguyên + lý do ⇒ chỗ đó không ghi, AI không đè", async () => {
+  it("FLF-375 (nguyên tắc 6): không sửa tay - PATCH kèm nội dung ⇒ 400; giữ nguyên + lý do ⇒ chỗ đó không ghi, AI không đè", async () => {
     const { c, cr } = await toProposed()
     const nfr = detail(await c.get(cr)).locations.find((l) => l.path === NFR)!
     const same = JSON.parse(nfr.current_text)
@@ -209,7 +209,7 @@ describe("C-5 redo ≤ 2 rồi manual_fix", () => {
     expect(kept.locations.find((l) => l.location_id === nfr.location_id)).toMatchObject({ conclusion: "not_related", reason: "Khách giữ ngưỡng cũ", manual: true })
   })
 
-  it("BPMN 3.9 (mode 1 v3): manual_fix ⇒ sửa trong step sở hữu — skill step + hướng của BA, chỉ ghi đề xuất; kiểm lại (3.7) ⇒ đạt", async () => {
+  it("BPMN 3.9 (mode 1 v3): manual_fix ⇒ sửa trong step sở hữu - skill step + hướng của BA, chỉ ghi đề xuất; kiểm lại (3.7) ⇒ đạt", async () => {
     routeCr((p) => clarifyPerf(p) ?? fakeCrProposeNoChange(p))
     const { c, cr, projectId } = await toProposed()
     const nfr = detail(await c.get(cr)).locations.find((l) => l.path === NFR)!

@@ -116,7 +116,7 @@ export const fulfillTopupRequests = async (orgId: string, credits: number, by: {
           notify(String(r.userId), {
             type: "credit_topped_up",
             title: `Tổ chức đã được nạp ${credits} credit`,
-            body: `${by.kind === "admin" ? "Quản trị viên" : "Lead"} đã nạp ${credits} credit, ví còn ${available} credit khả dụng. Mở lại dự án và bấm tiếp tục — bước đang dừng không tự chạy.`,
+            body: `${by.kind === "admin" ? "Quản trị viên" : "Lead"} đã nạp ${credits} credit, ví còn ${available} credit khả dụng. Mở lại dự án và bấm tiếp tục - bước đang dừng không tự chạy.`,
             link: r.projectId ? `/projects/${String(r.projectId)}` : "/home/billing",
             organizationId: orgId,
             meta: { organizationId: orgId, credits, available, projectId: r.projectId ? String(r.projectId) : null, step: r.step ?? null }

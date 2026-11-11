@@ -1,4 +1,4 @@
-# Prompt phẳng — chỉ cho action ngoài pipeline
+# Prompt phẳng - chỉ cho action ngoài pipeline
 
 > Pipeline B-0 → S-9 dùng **skill** ở `assets/skills/` (xem `assets/skills/README.md`). Thư mục này chỉ còn prompt cho action **ngoài pipeline** (`chat`, `summarize_document`, `translate`).
 
@@ -8,8 +8,8 @@
 
 ```
 ---
-actionType: <tên action>       # BẮT BUỘC — khớp ActionType enum
-provider: anthropic                  # BẮT BUỘC — anthropic | glm | gemini
+actionType: <tên action>       # BẮT BUỘC - khớp ActionType enum
+provider: anthropic                  # BẮT BUỘC - anthropic | glm | gemini
 aiModel: claude-haiku-5-5 # BẮT BUỘC
 maxTokens: 1024                # BẮT BUỘC
 temperature: 0.3               # BẮT BUỘC
@@ -21,7 +21,7 @@ Nội dung prompt... {{variable_name}} được thay lúc chạy.
 ```
 
 **Ngôn ngữ trả lời (FLF-260):** không cần biến template. Lời gọi hội thoại (vd `chat`) truyền `AiActionInput.replyLanguage`
-(`vi` | `en`) và `buildPrompt` nối khối `## Reply language` vào cuối prompt — prompt chỉ dặn model theo khối đó, không ghi
+(`vi` | `en`) và `buildPrompt` nối khối `## Reply language` vào cuối prompt - prompt chỉ dặn model theo khối đó, không ghi
 cứng "bằng tiếng Việt".
 
 ## Các file hiện có
@@ -30,11 +30,11 @@ cứng "bằng tiếng Việt".
 |------|-----------|-----------|
 | `chat.md` | `chat` | Dùng |
 | `summarize_document.md` | `summarize_document` | Dùng |
-| `translate.md` | `translate` | Dùng — dịch giả định user sửa sang EN (FLF-221) |
+| `translate.md` | `translate` | Dùng - dịch giả định user sửa sang EN (FLF-221) |
 
-`_archive/` — không nạp: prompt của action đã ngừng từ trước refactor, giữ để tra cứu.
+`_archive/` - không nạp: prompt của action đã ngừng từ trước refactor, giữ để tra cứu.
 
-Prompt section-based cũ (`generate_section`, `priority_ranking`, `scope_out_of_scope`, `chat_discovery`) đã **xoá ở T21** — thay bằng skill `draft-to-ops` + skill nội dung của từng step (S-2.2 cho scope, S-9.4 cho MoSCoW, B-* cho Discovery).
+Prompt section-based cũ (`generate_section`, `priority_ranking`, `scope_out_of_scope`, `chat_discovery`) đã **xoá ở T21** - thay bằng skill `draft-to-ops` + skill nội dung của từng step (S-2.2 cho scope, S-9.4 cho MoSCoW, B-* cho Discovery).
 
 ## Thêm action ngoài pipeline
 
@@ -42,4 +42,4 @@ Prompt section-based cũ (`generate_section`, `priority_ranking`, `scope_out_of_
 2. Thêm Zod schema vào `SCHEMAS` (`src/shared/ai/response-parser.ts`) và giá vào `credit-reservation.service.ts`.
 3. Tạo file `.md` ở đây. `npm test -- prompt-assets` bắt thiếu/trùng/mồ côi.
 
-Action thuộc pipeline thì **không** tạo prompt phẳng — khai skill và thêm vào `SKILL_BY_ACTION_TYPE`.
+Action thuộc pipeline thì **không** tạo prompt phẳng - khai skill và thêm vào `SKILL_BY_ACTION_TYPE`.

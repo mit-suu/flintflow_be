@@ -60,7 +60,7 @@ describe("renderers trên fixture 19 màn", () => {
     }
   })
 
-  it("context: SVG — một hình tròn, mỗi actor một hộp, mỗi luồng một đoạn thẳng có đầu mũi tên và một nhãn", () => {
+  it("context: SVG - một hình tròn, mỗi actor một hộp, mỗi luồng một đoạn thẳng có đầu mũi tên và một nhãn", () => {
     const part = only(FIXTURE, "context")
     const svg = part.source
     expect(part.section).toBe("fixed:1")
@@ -80,7 +80,7 @@ describe("renderers trên fixture 19 màn", () => {
     expect(svg.match(/<rect [^>]*fill="#fff" transform=/g)).toHaveLength(flows)
   })
 
-  it("context: nhãn là tên gói dữ liệu Title Case của flows_in / flows_out — actor một chiều không bịa chiều còn lại", () => {
+  it("context: nhãn là tên gói dữ liệu Title Case của flows_in / flows_out - actor một chiều không bịa chiều còn lại", () => {
     const svg = only(FIXTURE, "context").source
     const actors = contextActors(FIXTURE.actors)
     for (const a of FIXTURE.actors) {
@@ -113,7 +113,7 @@ describe("renderers trên fixture 19 màn", () => {
   it.each([
     { name: "6 nhãn một chiều", count: 6 },
     { name: "12 nhãn một chiều", count: 12 }
-  ])("context: không giới hạn, không gộp — mỗi phần tử là một mũi tên ($name)", ({ count }) => {
+  ])("context: không giới hạn, không gộp - mỗi phần tử là một mũi tên ($name)", ({ count }) => {
     const labels = Array.from({ length: count }, (_, i) => `Flow ${i}`)
     const spine = mutate((s) => {
       const a = s.actors.find((x) => x.id === "A01")!

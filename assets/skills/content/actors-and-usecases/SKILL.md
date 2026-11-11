@@ -25,76 +25,76 @@ prompt_references: [actor-rules, activity-flow]
 ---
 # Actors And Usecases
 
-Covers **S-3.1 Actors, S-3.2 Actor–Goal List, S-3.3 Missing Use Case Sweep, S-3.4 Use Case Relationships, S-3.5 Use Case Descriptions** — feeds `fixed:2.1` (Actors) and `fixed:2.2.2` (Use Case Descriptions).
+Covers **S-3.1 Actors, S-3.2 Actor–Goal List, S-3.3 Missing Use Case Sweep, S-3.4 Use Case Relationships, S-3.5 Use Case Descriptions** - feeds `fixed:2.1` (Actors) and `fixed:2.2.2` (Use Case Descriptions).
 `fixed:2.2.1` (the diagram) is `S-3.6`, render-only, no skill. You produce **data**, never a drawing: code
-renders the diagram from `actors[]`, `use_cases[]`, `actor_ids`, `includes`, `extends` — no PlantUML/arrows. Activity diagram data of a use case: only when the user asks — reference `activity-flow`.
+renders the diagram from `actors[]`, `use_cases[]`, `actor_ids`, `includes`, `extends` - no PlantUML/arrows. Activity diagram data of a use case: only when the user asks - reference `activity-flow`.
 
-## S-3.1 — Actors
+## S-3.1 - Actors
 
 Add every human, system and time actor implied by the Brief/addendum and any `actors[kind=system]` already added at S-2.3 (do not
 duplicate). Kinds: `human` (operates via UI, gets a role unless sharing one), `system` (external integration, no role), `time`
 (scheduler/cron/trigger, no UI, no role). An actor is a type of party, not a job-title synonym. **Derive, do not wait to be
 told**: an external capability the product calls out to ⇒ a `system` actor; anything that expires, resets or runs on a schedule ⇒
 a `time` actor. One `roles[]` row per (human actor, distinct permission set); `actor_id` must be a `human` actor's id, never
-`null` at creation; add the actor before its role in the same batch. **Access**: for every human actor decide how it gets in —
+`null` at creation; add the actor before its role in the same batch. **Access**: for every human actor decide how it gets in -
 `self-registers`, `invited` (account created by another actor), `identity provider` (sign-in delegated; the provider is a `system`
-actor) or `no sign-in` — and say it in its `description`. Brief/addendum silent ⇒ pick the likeliest and write **one**
-`assumptions[]` entry (`path: "actors[]"`) for all unresolved actors — one combined question for the gate.
+actor) or `no sign-in` - and say it in its `description`. Brief/addendum silent ⇒ pick the likeliest and write **one**
+`assumptions[]` entry (`path: "actors[]"`) for all unresolved actors - one combined question for the gate.
 
 Naming: **A1** a singular role/party noun phrase, never a person's name or a team. **A3** never named after a screen or a feature
 ("Dashboard User" ⇒ "Project Owner"). **A4** a `system` actor is the outside role, not the vendor or version ("Stripe API v3" ⇒
 "Payment Gateway"). **A5** a `time` actor is named after what it triggers ("Cron" ⇒ "Nightly Billing Scheduler"). **A6** two names
 sharing every capability are one actor with two `roles[]` rows. **A8** `description` is one sentence tied to this product, saying
-who they are, what they do here and why they care — not a dictionary gloss.
+who they are, what they do here and why they care - not a dictionary gloss.
 
-**General actor (generalization) — decide it in THIS batch, right after access.** Count the human actors that sign in to this product (`self-registers`, `invited` or `identity provider`). **≥ 2 ⇒ they all share Log In ⇒ you MUST** add a general human actor `User` (no role of its own), `set` each of their `parent_id` to it (`{"op":"set","path":"actors[id=A02].parent_id","value":"A05"}`; diagram `Customer --|> User`), and write its `description` naming every specialized actor ("Any signed-in Student or Lecturer.") — else yellow flag `actor_generalization_children_unlisted`. Code checks it: an account use case listing ≥ 2 human actors raises `actor_generalization_missing` and the batch is sent back. Never a child: a `system`/`time` actor, an identity provider, or a party that does not sign in (a Guest with no account, a customer who only receives emails). Exactly one signing-in human actor ⇒ no `User`, `parent_id` unset. Full rules and the university example: Reference `actor-rules` below.
+**General actor (generalization) - decide it in THIS batch, right after access.** Count the human actors that sign in to this product (`self-registers`, `invited` or `identity provider`). **≥ 2 ⇒ they all share Log In ⇒ you MUST** add a general human actor `User` (no role of its own), `set` each of their `parent_id` to it (`{"op":"set","path":"actors[id=A02].parent_id","value":"A05"}`; diagram `Customer --|> User`), and write its `description` naming every specialized actor ("Any signed-in Student or Lecturer.") - else yellow flag `actor_generalization_children_unlisted`. Code checks it: an account use case listing ≥ 2 human actors raises `actor_generalization_missing` and the batch is sent back. Never a child: a `system`/`time` actor, an identity provider, or a party that does not sign in (a Guest with no account, a customer who only receives emails). Exactly one signing-in human actor ⇒ no `User`, `parent_id` unset. Full rules and the university example: Reference `actor-rules` below.
 
 **Context exchanges (S-3.1/S-3.2/S-3.3 only).** Every actor (including existing S-2.3 actors) needs its data exchanges: `flows_in` (actor → OUR system) and `flows_out` (OUR system → actor), English data noun phrases in Title Case naming the data packet that crosses the boundary (never a verb or use-case name), from Brief/addendum/use-case outcomes, one exchange per item and one arrow per item. Human: "Registration Details" in, "Account Confirmation" out; system: "Payment Result" in, "Payment Request" out; time: "Scheduled Trigger" in only.
 Every actor needs at least one item, and all actors together must have at least one `flows_in` and one `flows_out` item. A one-way actor is valid: leave its other list empty, never invent a reply; lists need not be equal or paired by index. Maintain lists as use cases are added, preserve confirmed labels, list the main business-level data exchanges (level 0, not per-screen detail), every item is drawn as its own arrow; uncertain details need an `assumptions[]` entry. Do not combine exchanges or use use-case verbs as data labels.
 
-## S-3.2 — Actor–Goal List
+## S-3.2 - Actor–Goal List
 
 For each actor, list what it needs to accomplish; each goal becomes one `use_cases[]` candidate: `{id, name, actor_ids,
-function_ids: [], description: "<actor, trigger, outcome — one full sentence, written now, not deferred to S-3.5>", includes: [],
+function_ids: [], description: "<actor, trigger, outcome - one full sentence, written now, not deferred to S-3.5>", includes: [],
 extends: []}`.
 
 `actor_ids` = every actor that **participates** in the use case (UML association), primary actor first.
 With a general `User`: a goal **every** specialized role does the same way ⇒ `User` only (they inherit it), never the children again; a goal only **some** roles do (View Timetable: Lecturer, Student, not Office) ⇒ exactly those roles, never `User`.
 Participation is not initiation: an actor the flow calls out to belongs here too. Do not invent a use case for a
-`system` or `time` actor just to give it something to do — it participates in the use case it is actually part of.
+`system` or `time` actor just to give it something to do - it participates in the use case it is actually part of.
 A **notification actor** (email, SMS, push) sits on the use case whose flow *changes a state and emits the event*
 ("Assign Order to Driver" sends the SMS), never on one that only reads a state ("Track Order"); a `time` actor
-sits on the use case it starts. **Account use cases follow S-3.1 access**: `self-registers` ⇒ Register Account; `self-registers`/`invited` ⇒ Log In + Reset Password; `invited` ⇒ "Create <Actor> Account" for the managing actor; `identity provider` ⇒ Log In with the provider as participant, no Register/Reset; `no sign-in` ⇒ none. **One** use case per goal, never one per actor: when ≥ 2 human actors get the same account use case, its `actor_ids` is `User` only (plus a provider/notification actor). No `User` yet (S-3.1 missed it) ⇒ add it **in this batch** with each child's `parent_id` — S-3.2 may write `actors[]`. An account use case only one actor has (Register Account when only Customer self-registers) stays on that actor.
+sits on the use case it starts. **Account use cases follow S-3.1 access**: `self-registers` ⇒ Register Account; `self-registers`/`invited` ⇒ Log In + Reset Password; `invited` ⇒ "Create <Actor> Account" for the managing actor; `identity provider` ⇒ Log In with the provider as participant, no Register/Reset; `no sign-in` ⇒ none. **One** use case per goal, never one per actor: when ≥ 2 human actors get the same account use case, its `actor_ids` is `User` only (plus a provider/notification actor). No `User` yet (S-3.1 missed it) ⇒ add it **in this batch** with each child's `parent_id` - S-3.2 may write `actors[]`. An account use case only one actor has (Register Account when only Customer self-registers) stays on that actor.
 
 One use case = one goal reachable in one sitting, independent of UI screens; "Click Accept Button" is too fine.
-Naming — code re-checks every name and flags each miss, so get it right here. **U1** Title Case, no trailing period. **U2** one goal: no "and", "/" or comma — two goals are two use cases. **U3** a concrete verb, never Manage, Handle, Process, Maintain, Administer, Support, Control, Operate, Use, Do, Perform, Work, Deal or Take: "Manage Students" is split by real goal ("Enroll Student", "Update Student Profile", "Deactivate Student"). **U4** the actor is never the subject ("Teacher Enters Grades" ⇒ "Enter Grades", no "… by Teacher"); an actor type that is also the data being handled is fine ("Create Student Record").
+Naming - code re-checks every name and flags each miss, so get it right here. **U1** Title Case, no trailing period. **U2** one goal: no "and", "/" or comma - two goals are two use cases. **U3** a concrete verb, never Manage, Handle, Process, Maintain, Administer, Support, Control, Operate, Use, Do, Perform, Work, Deal or Take: "Manage Students" is split by real goal ("Enroll Student", "Update Student Profile", "Deactivate Student"). **U4** the actor is never the subject ("Teacher Enters Grades" ⇒ "Enter Grades", no "… by Teacher"); an actor type that is also the data being handled is fine ("Create Student Record").
 **U5** no UI or tech term (Button, Screen, Page, Form, Popup, Tab, Modal, API, Database). **U6** at most 5 words. **U7** the object uses the business term from the Brief/Glossary, the same term throughout. **U8** no two use cases share a name. **U9** the name shows the value the actor gets ("Update Record" ⇒ "Approve Purchase Order").
 Cover every goal in `project.goals[]` and every `release_scope.in` bullet; every human actor needs at least one use case, and a S-3.2 batch with no new `use_cases[]` is almost always wrong.
 
-## S-3.3 — Missing Use Case Sweep
+## S-3.3 - Missing Use Case Sweep
 
 Check each theme against the current list. For a theme with no match, decide which it is: a **branch of an existing use case**
 (name it in `notes` for S-3.4 to wire as `extends`), or a **goal of its own** (add a use case, with an `assumptions[]`
-entry). Name the theme in `notes` with a reason if it does not apply — never silently skip. **(1) Administration** — an admin
-actor has view/list + suspend for every entity type end users create. **(2) Support** — a human actor can reach a "something is
-wrong, help me" path unless support is explicitly out of scope. **(3) Notifications** — receiving one is not a use case; the
+entry). Name the theme in `notes` with a reason if it does not apply - never silently skip. **(1) Administration** - an admin
+actor has view/list + suspend for every entity type end users create. **(2) Support** - a human actor can reach a "something is
+wrong, help me" path unless support is explicitly out of scope. **(3) Notifications** - receiving one is not a use case; the
 notification actor sits on the emitting use case (S-3.2). Add one only when the recipient must then decide something, named after
-the decision ("Respond to Failed Delivery"); never a passive "Receive …" / "View Notifications". **(4) Account access** — every
-human actor has exactly the account use cases its access implies (S-3.2); inherited through `User` counts, and ≥ 2 actors sharing one ⇒ `User` (S-3.1). **(5) Audit log** — an admin actor can review destructive/high-trust actions, when any exist. **(6) Error handling** — a human actor can recover from a failed action or
-validation rejection when the recovery involves a real decision. **(7) Work on a clock** — sweep `business_rules[]` and
+the decision ("Respond to Failed Delivery"); never a passive "Receive …" / "View Notifications". **(4) Account access** - every
+human actor has exactly the account use cases its access implies (S-3.2); inherited through `User` counts, and ≥ 2 actors sharing one ⇒ `User` (S-3.1). **(5) Audit log** - an admin actor can review destructive/high-trust actions, when any exist. **(6) Error handling** - a human actor can recover from a failed action or
+validation rejection when the recovery involves a real decision. **(7) Work on a clock** - sweep `business_rules[]` and
 `project.goals[]` for anything that fires on time, not on a click (reminder N hours before an event, releasing an expired hold,
 marking a no-show after a grace period, a recurring charge): each gets a `time` actor **and** its own use case ("Send Appointment
-Reminder", "Mark No-show"). Missing one is the costliest gap — S-4.4 still creates the background function, and it lands in the
+Reminder", "Mark No-show"). Missing one is the costliest gap - S-4.4 still creates the background function, and it lands in the
 document with no use case and nothing saying why it exists.
 
-## S-3.4 — Use Case Relationships
+## S-3.4 - Use Case Relationships
 
-Set `includes[]`/`extends[]` on use cases already added at S-3.2/S-3.3 — never create a new use case here. Most use cases stay
+Set `includes[]`/`extends[]` on use cases already added at S-3.2/S-3.3 - never create a new use case here. Most use cases stay
 standalone: wire one only when its definition holds, a wrong one is worse than none.
 
 **What they mean (UML 2.5.1 §18).** `includes` (set on the **base**): the included behaviour **runs every time** the base runs, as
-part of it — without it the base is incomplete. `extends` (set on the **extending** use case): optional behaviour **inserted at a
-point inside the base's flow** when a condition holds — the base is complete without it. Neither means time order, screen
+part of it - without it the base is incomplete. `extends` (set on the **extending** use case): optional behaviour **inserted at a
+point inside the base's flow** when a condition holds - the base is complete without it. Neither means time order, screen
 navigation, a precondition, or "these two are related". One base is enough for an include; being shared is not a reason to
 include.
 
@@ -117,19 +117,19 @@ Op: `{ "op": "set", "path": "use_cases[id=UC02].includes", "value": ["UC06"], "r
 shown at the gate: say why (a) or (b) holds, do not restate the relationship. Every referenced id exists after
 this batch; no self-reference, no cycles, never both an include and an extend between the same pair.
 
-## S-3.5 — Use Case Descriptions
+## S-3.5 - Use Case Descriptions
 
 Finalize `description` for every use case not yet fully worded (one sentence: actor, trigger, outcome). Only an
 extending use case opens with its condition ("When …"); every other one starts with the actor. Table shape:
-`assets/usecase-table-template.md` — ids resolved to names at render time, never stored.
+`assets/usecase-table-template.md` - ids resolved to names at render time, never stored.
 
 ## Rules
 
-1. `function_ids` stays `[]` for every use case — functions do not exist until S-4; wiring happens then.
+1. `function_ids` stays `[]` for every use case - functions do not exist until S-4; wiring happens then.
 2. New actor/use-case ids continue the existing sequence (`draft-to-ops` rule 5); check the projection.
 3. English, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).
 4. `includes`/`extends` only reference use case ids already present after this batch (own adds count).
-5. A detail still missing after the answers: fill it with the likeliest default + an `assumptions[]` entry (`status: "unconfirmed"`), rule 10 — S-3.1 access gets the one combined assumption.
+5. A detail still missing after the answers: fill it with the likeliest default + an `assumptions[]` entry (`status: "unconfirmed"`), rule 10 - S-3.1 access gets the one combined assumption.
 
 ## Example (S-3.1, one human actor + role)
 

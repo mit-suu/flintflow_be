@@ -310,7 +310,7 @@ describe("FLF-243: skill đặt tên use case nêu đủ luật mà cờ vàng u
     expect(text).toMatch(/at most 5 words/)
   })
 
-  it.each(["content/actors-and-usecases", "action/apply-change-op"])("%s: U4 nói đúng luật code — chỉ cấm actor làm chủ ngữ", (dir) => {
+  it.each(["content/actors-and-usecases", "action/apply-change-op"])("%s: U4 nói đúng luật code - chỉ cấm actor làm chủ ngữ", (dir) => {
     const text = skill(dir)
     expect(text).toContain("never the subject")
     expect(text).toContain("Create Student Record")
@@ -327,13 +327,13 @@ describe("FLF-260: skill chat viết theo ngôn ngữ trả lời nối ở cu�
     expect(text).toContain("Vietnamese when it is absent")
   })
 
-  it("thẻ tuân thủ có cặp nhãn tiếng Anh cố định — server dò chữ 'law' trong câu trả lời đã chốt để ghi project.stakes", () => {
+  it("thẻ tuân thủ có cặp nhãn tiếng Anh cố định - server dò chữ 'law' trong câu trả lời đã chốt để ghi project.stakes", () => {
     expect(skill("action/elicit-loop")).toContain('(English reply: "Internal rules only" / "Internal rules and the law")')
     // draft-to-ops phải nhận ra vế nội bộ bằng tiếng Anh: vế này không tự quyết internal hay production
     expect(skill("action/draft-to-ops")).toContain('English reply: "Internal rules only"')
   })
 
-  it("trích đoạn chốt câu hỏi mở không bị dịch theo ngôn ngữ trả lời — server chỉ nhận chuỗi con của tin user", () => {
+  it("trích đoạn chốt câu hỏi mở không bị dịch theo ngôn ngữ trả lời - server chỉ nhận chuỗi con của tin user", () => {
     expect(skill("action/elicit-loop")).toContain("never paraphrased, translated or shortened")
   })
 })

@@ -56,7 +56,7 @@ const expectBlocked = (res: request.Response, label: string) => {
 const SPINE_ROUTES = ["/changes", "/reconcile", "/undo"] as const
 const VERBAL = { kind: "verbal", ref: null } as const
 
-describe("chặn sửa ngoài CR — /changes, /reconcile, /undo (mode 1)", () => {
+describe("chặn sửa ngoài CR - /changes, /reconcile, /undo (mode 1)", () => {
   it("project mode 1 vừa import (v0): mọi route ghi Spine ⇒ 409 kèm prefill (gợi ý nguồn yêu cầu miệng); Spine không đổi, không gọi AI", async () => {
     const { seeded, projectId } = await importedProject()
     const c = client(seeded, projectId)
@@ -120,7 +120,7 @@ describe("chặn sửa ngoài CR — /changes, /reconcile, /undo (mode 1)", () =
   })
 })
 
-describe("chặn sửa ngoài CR — chat (mode 1)", () => {
+describe("chặn sửa ngoài CR - chat (mode 1)", () => {
   it("chat JSON ra lệnh sửa (v0) ⇒ 409 kèm prefill nguồn yêu cầu miệng ref chat, không tạo CR, không gọi AI; tin nhắn không được lưu", async () => {
     const { seeded, projectId } = await importedProject()
     const c = client(seeded, projectId)

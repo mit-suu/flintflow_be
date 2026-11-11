@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { ActionType } from "../ai/ai-action.types.js"
 import { LOCALIZED_ACTION_TYPES, MAX_DIRECTIVE_TERMS, documentLanguageDirective, shouldLocalize, termsInText, withoutDocumentLanguage } from "./document-language.js"
 
-describe("shouldLocalize — chỉ ActionType ra op, ngôn ngữ tài liệu khác ngôn ngữ gốc (FLF-265 D16)", () => {
+describe("shouldLocalize - chỉ ActionType ra op, ngôn ngữ tài liệu khác ngôn ngữ gốc (FLF-265 D16)", () => {
   it("đúng 7 ActionType ra op nhận khối", () => {
     expect([...LOCALIZED_ACTION_TYPES].sort()).toEqual(
       [
@@ -85,7 +85,7 @@ describe("documentLanguageDirective", () => {
   })
 })
 
-describe("withoutDocumentLanguage — client không tự bật khối (POST /ai-actions)", () => {
+describe("withoutDocumentLanguage - client không tự bật khối (POST /ai-actions)", () => {
   it("bỏ documentLanguage / sourceLanguage / documentGlossary, giữ phần còn lại; không phải object ⇒ giữ nguyên", () => {
     const input = { promptVariables: { x: 1 }, replyLanguage: "vi", documentLanguage: "vi", sourceLanguage: "en", documentGlossary: [] }
     expect(withoutDocumentLanguage(input)).toEqual({ promptVariables: { x: 1 }, replyLanguage: "vi" })

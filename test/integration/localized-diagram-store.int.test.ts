@@ -10,7 +10,7 @@ const PROJECT = "650000000000000000000abc"
 const file = (text: string) => ({ data: Buffer.from(text), contentType: "image/png" })
 const hash = (c: string) => c.repeat(16)
 
-describe("gridFsDiagramStore — PNG theo ngôn ngữ", () => {
+describe("gridFsDiagramStore - PNG theo ngôn ngữ", () => {
   it("lưu / đọc theo (sơ đồ, ngôn ngữ, hash); giữ bản mới nhất, không dọn sơ đồ hay ngôn ngữ khác", async () => {
     await gridFsDiagramStore.saveLocalized(PROJECT, "D02-2", "vi", hash("a"), file("other diagram"))
     await gridFsDiagramStore.saveLocalized(PROJECT, "D02", "en", hash("b"), file("other locale"))

@@ -67,7 +67,7 @@ const dataOf = async (projectId: string) => {
   return { actors: s.actors, use_cases: s.use_cases, functions: s.functions, steps: s.steps, baselines: s.baselines, diagrams: s.diagrams }
 }
 
-describe("finalize chạy nền — trả ngay, kiểm điều kiện ngay", () => {
+describe("finalize chạy nền - trả ngay, kiểm điều kiện ngay", () => {
   it("trả ngay baselining (baseline/flags null); lỗi base_version / trạng thái vẫn 4xx ngay; xong job ⇒ gap_review", async () => {
     const { c, id } = await atBaselining()
     const conflict = await c.post("/import/finalize", { import_id: id, base_version: 999 })
@@ -102,7 +102,7 @@ describe("finalize chạy nền — trả ngay, kiểm điều kiện ngay", () 
   })
 })
 
-describe("finalize chạy nền — lỗi giữa chừng, job mất", () => {
+describe("finalize chạy nền - lỗi giữa chừng, job mất", () => {
   it("lỗi sau khi Spine đã đổi ⇒ hoàn về mốc + paused resume_later; resume chạy lại sạch, giữ Record of Changes đã sửa", async () => {
     const { c, id, projectId } = await atBaselining()
     const before = await dataOf(projectId)

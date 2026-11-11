@@ -51,9 +51,9 @@ describe("ma trận phân quyền", () => {
 
   it("màn mới ⇒ dòng mới dùng ký hiệu của file; ô sẵn có không bị xoá", () => {
     const added = table(["Screen", "Guest", "Customer", "Sales Staff", "Store Admin"], [
-      ["Login", "—", "—", "—", "—"],
-      ["Dashboard", "—", "—", "—", "—"],
-      ["Refer a Friend", "—", "access", "—", "—"]
+      ["Login", "-", "-", "-", "-"],
+      ["Dashboard", "-", "-", "-", "-"],
+      ["Refer a Friend", "-", "access", "-", "-"]
     ])
     const out: Block[] = [file()]
     expect(appendToFileTables(out, [added], "fixed:3.1.3")).toEqual([])
@@ -66,7 +66,7 @@ describe("ma trận phân quyền", () => {
   })
 
   it("quyền mới trên màn đã có ⇒ bật thêm ô, giữ ô cũ", () => {
-    const added = table(["Screen", "Guest", "Customer", "Store Admin"], [["Dashboard", "—", "view", "—"]])
+    const added = table(["Screen", "Guest", "Customer", "Store Admin"], [["Dashboard", "-", "view", "-"]])
     const out: Block[] = [file()]
     appendToFileTables(out, [added], "fixed:3.1.3")
     expect(texts(out[0])[2]).toEqual(["Dashboard", "", "X", "X"])

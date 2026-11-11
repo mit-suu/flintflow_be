@@ -16,16 +16,16 @@ import {
 
 describe("pathLabel", () => {
   it("path theo khoá ⇒ tên thực thể + mã + tên field (khớp FE)", () => {
-    expect(pathLabel("use_cases[id=UC-01].description")).toBe("Use case UC-01 — Mô tả")
+    expect(pathLabel("use_cases[id=UC-01].description")).toBe("Use case UC-01 - Mô tả")
     expect(pathLabel("actors[]")).toBe("Tác nhân (thêm mới)")
-    expect(pathLabel("project.system_name")).toBe("Thông tin dự án — Tên hệ thống")
+    expect(pathLabel("project.system_name")).toBe("Thông tin dự án - Tên hệ thống")
     expect(pathLabel("use_cases[id=UC-01].actor_ids[=A09]")).toBe("Use case UC-01 › Tác nhân A09")
     expect(pathLabel("functions[id=FR-1].normal[0]")).toBe("Chức năng FR-1 › Luồng chính #1")
   })
 
   it("có tên phần tử ⇒ ghép sau mã (khớp FE); path không có khoá thì bỏ qua tên", () => {
-    expect(pathLabel("actors[id=A01].kind", "Learner")).toBe("Tác nhân A01 (Learner) — Loại")
-    expect(pathLabel("project.code", "X")).toBe("Thông tin dự án — Mã")
+    expect(pathLabel("actors[id=A01].kind", "Learner")).toBe("Tác nhân A01 (Learner) - Loại")
+    expect(pathLabel("project.code", "X")).toBe("Thông tin dự án - Mã")
   })
 
   it("path không đọc được ⇒ nhãn chung, không trả nguyên path", () => {
@@ -34,7 +34,7 @@ describe("pathLabel", () => {
   })
 
   it("humanizeText đổi path nằm giữa câu", () => {
-    expect(humanizeText("use_cases[id=UC-01] không còn, xem actors[id=A1].name")).toBe("Use case UC-01 không còn, xem Tác nhân A1 — Tên")
+    expect(humanizeText("use_cases[id=UC-01] không còn, xem actors[id=A1].name")).toBe("Use case UC-01 không còn, xem Tác nhân A1 - Tên")
   })
 })
 
@@ -89,11 +89,11 @@ describe("nameElementIds", () => {
   it("mã màn trong câu hỏi làm rõ ⇒ tên; mã trong ngoặc ngay sau chính tên của nó ⇒ bỏ", () => {
     expect(
       nameElementIds(
-        "Màn hình 'Login' (S01) hiện có luồng đi ra tới S02, S03, S11 nhưng không có màn hình nào đi tới nó — bạn muốn xử lý thế nào?",
+        "Màn hình 'Login' (S01) hiện có luồng đi ra tới S02, S03, S11 nhưng không có màn hình nào đi tới nó - bạn muốn xử lý thế nào?",
         spine
       )
     ).toBe(
-      "Màn hình 'Login' hiện có luồng đi ra tới 'Reset Password', 'Schedule Composer', 'Class Schedule' nhưng không có màn hình nào đi tới nó — bạn muốn xử lý thế nào?"
+      "Màn hình 'Login' hiện có luồng đi ra tới 'Reset Password', 'Schedule Composer', 'Class Schedule' nhưng không có màn hình nào đi tới nó - bạn muốn xử lý thế nào?"
     )
   })
 

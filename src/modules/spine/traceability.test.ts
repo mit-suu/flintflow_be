@@ -14,7 +14,7 @@ const FIXTURE = load("spine-fixture-19-screens.json")
 
 const kinds = (graph: { nodes: { kind: string }[] }): string[] => [...new Set(graph.nodes.map((n) => n.kind))].sort()
 
-describe("trace — bản đồ quanh một thực thể", () => {
+describe("trace - bản đồ quanh một thực thể", () => {
   it("actor: ra use case đã trỏ tới nó, rồi function của use case đó", () => {
     const graph = trace(FIXTURE, { entity: "actor", id: "A01" })
 

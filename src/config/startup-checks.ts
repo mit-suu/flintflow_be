@@ -26,7 +26,7 @@ export const validateStartupAssets = (): void => {
   const steps = loadStepRegistry()
 
   console.log(
-    `[startup] assets: ${assetsRoot} — nạp ${index.size} prompt asset ` +
+    `[startup] assets: ${assetsRoot} - nạp ${index.size} prompt asset ` +
       `(${[...index.keys()].sort().join(", ")}), ${skills.size} skill, ${steps.length} step`
   )
 }
@@ -43,14 +43,14 @@ export const validateStartupAssets = (): void => {
  */
 export const warnStartupConfig = async (): Promise<void> => {
   if (!env.ANTHROPIC_API_KEY.trim()) {
-    console.warn("[startup] ⚠ ANTHROPIC_API_KEY trống — mọi skill `provider: anthropic` sẽ trả ANTHROPIC_KEY_MISSING")
+    console.warn("[startup] ⚠ ANTHROPIC_API_KEY trống - mọi skill `provider: anthropic` sẽ trả ANTHROPIC_KEY_MISSING")
   }
   if (!env.MODAL_BASE_URL.trim()) {
-    console.warn("[startup] ⚠ MODAL_BASE_URL trống — mọi skill `provider: glm` sẽ trả AI_PROVIDER_NOT_CONFIGURED")
+    console.warn("[startup] ⚠ MODAL_BASE_URL trống - mọi skill `provider: glm` sẽ trả AI_PROVIDER_NOT_CONFIGURED")
   }
   if (env.AI_PROVIDER_OVERRIDE) {
     console.warn(
-      `[startup] ⚠ AI_PROVIDER_OVERRIDE=${env.AI_PROVIDER_OVERRIDE} — provider của skill bị bỏ qua. ` +
+      `[startup] ⚠ AI_PROVIDER_OVERRIDE=${env.AI_PROVIDER_OVERRIDE} - provider của skill bị bỏ qua. ` +
         "Chỉ dùng cho CI / smoke test."
     )
   }
@@ -60,16 +60,16 @@ export const warnStartupConfig = async (): Promise<void> => {
     // khác chiếm là chỉ sai đường, dựng thêm cũng không chiếm lại được cổng.
     console.warn(
       plantuml.reason === "not_plantuml"
-        ? `[startup] ⚠ ${env.PLANTUML_BASE_URL} có server trả lời nhưng không phải ảnh (${plantuml.detail}) — ` +
+        ? `[startup] ⚠ ${env.PLANTUML_BASE_URL} có server trả lời nhưng không phải ảnh (${plantuml.detail}) - ` +
             'một tiến trình khác đang chiếm cổng này. Diagram sẽ có render_status "error". ' +
             "Đổi PLANTUML_BASE_URL sang cổng khác, hoặc tắt tiến trình đang chiếm."
-        : `[startup] ⚠ PlantUML không phản hồi ở ${env.PLANTUML_BASE_URL} (${plantuml.detail}) — ` +
+        : `[startup] ⚠ PlantUML không phản hồi ở ${env.PLANTUML_BASE_URL} (${plantuml.detail}) - ` +
             'diagram sẽ có render_status "error". Dựng bằng: docker compose up -d plantuml'
     )
   }
   if (!(await isGotenbergReachable())) {
     console.warn(
-      `[startup] ⚠ Gotenberg không phản hồi ở ${env.GOTENBERG_URL} — xuất PDF sẽ trả 503 PDF_EXPORT_UNAVAILABLE ` +
+      `[startup] ⚠ Gotenberg không phản hồi ở ${env.GOTENBERG_URL} - xuất PDF sẽ trả 503 PDF_EXPORT_UNAVAILABLE ` +
         "(xuất Word vẫn chạy). Dựng bằng: docker compose up -d gotenberg"
     )
   }

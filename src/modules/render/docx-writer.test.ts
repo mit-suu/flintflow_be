@@ -23,7 +23,7 @@ const baseline = (): RenderedDocument => {
   return { ...rest, source: "baseline", version: "v1.0" }
 }
 
-describe("writeDocx — fixture Working Draft", () => {
+describe("writeDocx - fixture Working Draft", () => {
   let docx: Buffer
   let documentXml: string
 
@@ -79,7 +79,7 @@ describe("writeDocx — fixture Working Draft", () => {
     expect(readZipText(docx, "word/settings.xml")).toContain("w:updateFields")
   })
 
-  it("FLF-316: Heading 1–3 mang outlineLvl — LibreOffice (bản PDF) dựng mục lục theo cấp outline, không theo tên style", () => {
+  it("FLF-316: Heading 1–3 mang outlineLvl - LibreOffice (bản PDF) dựng mục lục theo cấp outline, không theo tên style", () => {
     const stylesXml = readZipText(docx, "word/styles.xml")
     for (const level of [1, 2, 3]) {
       const style = new RegExp(`<w:style[^>]*w:styleId="Heading${level}".*?</w:style>`, "s").exec(stylesXml)?.[0]
@@ -149,7 +149,7 @@ describe("writeDocx — fixture Working Draft", () => {
   })
 })
 
-describe("writeDocx — biến thể", () => {
+describe("writeDocx - biến thể", () => {
   it("baseline: không watermark, không cờ đỏ, vẫn in danh sách waive", async () => {
     const docx = await writeDocx(baseline())
     const documentXml = readZipText(docx, "word/document.xml")
@@ -183,10 +183,10 @@ describe("writeDocx — biến thể", () => {
 
   it("sơ đồ vẽ lỗi (marker diagram-error:<id>) ⇒ nhúng ảnh placeholder kèm chú thích, không ném lỗi", async () => {
     const doc = structuredClone(sample)
-    doc.sections = [{ id: "fixed:1", number: "1", heading: "Failed", level: 1, blocks: [{ type: "image", png: "diagram-error:D07", caption: "Class Diagram — diagram could not be drawn yet" }] }]
+    doc.sections = [{ id: "fixed:1", number: "1", heading: "Failed", level: 1, blocks: [{ type: "image", png: "diagram-error:D07", caption: "Class Diagram - diagram could not be drawn yet" }] }]
     const docx = await writeDocx(doc)
     expect([...readZipEntries(docx).keys()].some((name) => name.startsWith("word/media/"))).toBe(true)
-    expect(readZipText(docx, "word/document.xml")).toContain("Class Diagram — diagram could not be drawn yet")
+    expect(readZipText(docx, "word/document.xml")).toContain("Class Diagram - diagram could not be drawn yet")
   })
 
   it("ảnh không phải PNG ném RENDER_IMAGE_INVALID", async () => {
@@ -225,7 +225,7 @@ describe("writeDocx — biến thể", () => {
   })
 })
 
-describe("buildDocxFileName — quy tắc chung FLF-334", () => {
+describe("buildDocxFileName - quy tắc chung FLF-334", () => {
   it("bản nháp: gốc baseline (+ N changes bỏ đi) ⇒ _v<gốc>_DRAFT; chưa baseline (v0) ⇒ <tên>_DRAFT", () => {
     expect(buildDocxFileName({ projectName: "Lumen", version: "v1.0 + 3 changes", source: "draft" })).toBe("Lumen_v1.0_DRAFT.docx")
     expect(buildDocxFileName({ projectName: "Lumen", version: "v1.0", source: "draft" })).toBe("Lumen_v1.0_DRAFT.docx")
@@ -249,7 +249,7 @@ describe("buildDocxFileName — quy tắc chung FLF-334", () => {
     expect(exportLineage({ version: "v1.1", source: "baseline" })).toEqual({ release: true, base: "1.1" })
   })
 
-  it("FLF-356: dự án import 0.1 — draft ⇒ _v0.1_DRAFT, baseline (không watermark) ⇒ _v0.1; stamp kind vẫn draft", async () => {
+  it("FLF-356: dự án import 0.1 - draft ⇒ _v0.1_DRAFT, baseline (không watermark) ⇒ _v0.1; stamp kind vẫn draft", async () => {
     expect(exportLineage({ version: "0.1", source: "baseline" })).toEqual({ release: false, base: "0.1" })
     expect(buildDocxFileName({ projectName: "FAP", version: "0.1", source: "baseline" })).toBe("FAP_v0.1.docx")
     expect(buildDocxFileName({ projectName: "FAP", version: "0.1", source: "draft" })).toBe("FAP_v0.1_DRAFT.docx")
@@ -275,7 +275,7 @@ describe("style heading con theo mẫu FPT (FLF-214)", () => {
   })
 })
 
-describe("writeDocx — phụ lục cờ theo ngôn ngữ (mode 1: tiếng Việt, không in mã luật)", () => {
+describe("writeDocx - phụ lục cờ theo ngôn ngữ (mode 1: tiếng Việt, không in mã luật)", () => {
   const withFlags = (): RenderedDocument => {
     const doc = structuredClone(sample)
     doc.flagsAppendix = {
@@ -302,7 +302,7 @@ describe("writeDocx — phụ lục cờ theo ngôn ngữ (mode 1: tiếng Việ
   })
 })
 
-describe("writeDocx — chữ cố định theo ngôn ngữ (FLF-265)", () => {
+describe("writeDocx - chữ cố định theo ngôn ngữ (FLF-265)", () => {
   const coreXml = (docx: Buffer) => readZipText(docx, "docProps/core.xml")
   const footerXml = (docx: Buffer) =>
     [...readZipEntries(docx).entries()]
@@ -340,7 +340,7 @@ describe("writeDocx — chữ cố định theo ngôn ngữ (FLF-265)", () => {
     expect(headerXml(docx)).toContain(`${sample.projectName} - SRS ${sample.version}`)
   })
 
-  it("language vi không đổi phụ lục cờ — phụ lục vẫn theo flagLanguage", async () => {
+  it("language vi không đổi phụ lục cờ - phụ lục vẫn theo flagLanguage", async () => {
     const { value } = await mammoth.extractRawText({ buffer: await writeDocx(sample, { language: "vi" }) })
     expect(value).toContain("Working Draft Status")
   })
@@ -362,7 +362,7 @@ describe("writeDocx — chữ cố định theo ngôn ngữ (FLF-265)", () => {
   })
 })
 
-describe("writeDocx — mục lục ghi sẵn cho file version mode 1 (FLF-344)", () => {
+describe("writeDocx - mục lục ghi sẵn cho file version mode 1 (FLF-344)", () => {
   /** Tài liệu theo layout file khách: phần La Mã cấp 1, chương cấp 2, mục cấp 3, mục con cấp 4 + heading trong khối. */
   const layoutDoc = (): RenderedDocument => ({
     projectId: "p1",

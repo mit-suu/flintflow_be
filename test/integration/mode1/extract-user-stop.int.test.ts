@@ -40,7 +40,7 @@ beforeEach(() => {
 
 const deducted = (projectId: string) => Usage.countDocuments({ projectId, step_id: "I-4:fixed:1", state: "deducted" })
 
-describe("I-4 — người dùng dừng / tiếp tục", () => {
+describe("I-4 - người dùng dừng / tiếp tục", () => {
   it("bấm Dừng trong lô 1 ⇒ không gọi lô 2; tiếp tục chạy từ lô 2, không gọi lại lô 1", async () => {
     const ctx = await importAtExtracting(LONG)
     // Người dùng bấm Dừng trong lúc lô 1 đang gọi AI (request khác ghi thẳng cờ, như `requestStop`)

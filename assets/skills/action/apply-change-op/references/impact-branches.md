@@ -1,4 +1,4 @@
-# Impact query and change branches — source: srs-spine.md §4, §5, §9; Phases §2.2
+# Impact query and change branches - source: srs-spine.md §4, §5, §9; Phases §2.2
 
 ## Impact query
 
@@ -8,7 +8,7 @@ Run on `reference_fields[]` (srs-spine §4.1) **plus** the three columns Owns / 
 2. For each touched field, collect sections in any of the three columns.
 3. Collect `diagrams[]` whose `source_fields` include the touched field (srs-spine §7.1).
 
-**Known limit:** semantic dependency is not caught — changing `project.vision` affects §1 prose but no key links them. Warn heuristically only.
+**Known limit:** semantic dependency is not caught - changing `project.vision` affects §1 prose but no key links them. Warn heuristically only.
 
 ## Branches
 
@@ -16,8 +16,8 @@ Run on `reference_fields[]` (srs-spine §4.1) **plus** the three columns Owns / 
 | --- | --- | --- |
 | No field references the changed field | Apply batch, write `changes[]` | 6.2 |
 | Dependents exist | Report scope → preview diff (UC 6.1) → confirm → apply → write `flags[]` on contradiction | 6.2 · 6.11 if ambiguous |
-| **Baseline already exists** | «include» Impact Analysis. If red flags remain after apply, **no new baseline** — document becomes "v1.0 + unbaselined changes" | 6.8 |
-| Breaks an invariant | **Reject whole batch**, return referrers | — |
+| **Baseline already exists** | «include» Impact Analysis. If red flags remain after apply, **no new baseline** - document becomes "v1.0 + unbaselined changes" | 6.8 |
+| Breaks an invariant | **Reject whole batch**, return referrers | - |
 
 UC 6.8 has `Precondition: baseline exists`. Before the first baseline every change follows UC 6.2, including late Brief edits.
 

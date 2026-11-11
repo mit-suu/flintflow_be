@@ -69,7 +69,7 @@ describe("FLF-337 mức duyệt qua HTTP", () => {
   })
 })
 
-describe("FLF-337 sau baseline — Chỉ ở mốc chốt: CR qua kiểm tự ghi vào bản nháp", () => {
+describe("FLF-337 sau baseline - Chỉ ở mốc chốt: CR qua kiểm tự ghi vào bản nháp", () => {
   // C-5: kiểm AI không có nhận xét ⇒ đủ điều kiện tự ghi (có nhận xét thì để BA xem)
   beforeEach(() => resetCrMock((p) => (p.includes("# CR Consistency") ? JSON.stringify({ findings: [] }) : fakeCrClarify(PERF_TARGETS)(p) ?? fakeCrPropose(p))))
 

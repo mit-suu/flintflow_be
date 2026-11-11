@@ -11,7 +11,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../fixtures/spine-fixture-19-screens.json"), "utf8")))
 const fn = FIXTURE.functions.find((f) => f.normal.length >= 3)!
 
-describe("expandIndexSelectors — op chỉ số trên mảng chuỗi (e2e FAP 21/10: 'Viết lại' chết vì normal[2])", () => {
+describe("expandIndexSelectors - op chỉ số trên mảng chuỗi (e2e FAP 21/10: 'Viết lại' chết vì normal[2])", () => {
   it("set một dòng theo chỉ số ⇒ set cả mảng, chỉ đổi đúng vị trí, giữ reason", () => {
     const ops: Op[] = [{ op: "set", path: `functions[id=${fn.id}].normal[2]`, value: "New third step.", reason: "hoà giải" }]
     const expected = [...fn.normal]

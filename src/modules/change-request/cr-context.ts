@@ -234,7 +234,7 @@ export const seedText = (cr: Pick<IChangeRequest, "seed">): string => {
 ` : ""
   return truncate(`
 
-The requester previewed this change before logging the CR (a suggestion — check it, do not copy blindly):
+The requester previewed this change before logging the CR (a suggestion - check it, do not copy blindly):
 ${instruction}Ops: ${JSON.stringify(cr.seed.ops)}`, 3000)
 }
 
@@ -248,7 +248,7 @@ export const crHeader = (cr: IChangeRequest) => ({
   cr_id: cr.cr_id,
   title: cr.title,
   description: `${cr.description}${amendmentsText(cr)}${seedText(cr)}`,
-  source: `${cr.source.kind}${cr.source.ref ? ` — ${cr.source.ref}` : ""}`
+  source: `${cr.source.kind}${cr.source.ref ? ` - ${cr.source.ref}` : ""}`
 })
 
 /**
@@ -259,7 +259,7 @@ export const answersText = (cr: Pick<IChangeRequest, "clarifications">): string 
   const rounds = cr.clarifications ?? []
   const lines = rounds
     // Mode 1 v3 phase 7: câu trả lời trống = người dùng chưa biết ⇒ model coi dữ kiện đó là thiếu
-    .flatMap((c) => c.questions.map((q, i) => `Q${c.round}.${i + 1}: ${q}\nA: ${c.answers[i]?.trim() || "(no answer — unknown)"}`))
+    .flatMap((c) => c.questions.map((q, i) => `Q${c.round}.${i + 1}: ${q}\nA: ${c.answers[i]?.trim() || "(no answer - unknown)"}`))
     .join("\n")
   if (!lines) return "(none)"
   if (rounds.length < 2) return lines

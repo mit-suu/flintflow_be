@@ -3,7 +3,7 @@
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > activity@UC02 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="728" height="653" viewBox="-20 -20 728 653">
-<title>Activity Diagram — Log In</title>
+<title>Activity Diagram - Log In</title>
 <rect x="-20" y="-20" width="728" height="653" fill="#fff"/>
 <rect x="0" y="0" width="236" height="613" fill="none" stroke="#000" stroke-width="1.2"/>
 <rect x="0" y="0" width="236" height="30" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
@@ -52,7 +52,7 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > class@F1 part 1 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="150" height="154" viewBox="74 74 150 154">
-<title>Class Diagram — Authentication &amp; Onboarding</title>
+<title>Class Diagram - Authentication &amp; Onboarding</title>
 <rect x="74" y="74" width="150" height="154" fill="#fff"/>
 <rect x="94" y="94" width="110" height="114" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="149" y="111" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">User</text>
@@ -68,7 +68,7 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > class@F2 part 2 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="155" height="369" viewBox="74 74 155 369">
-<title>Class Diagram — Project Dashboard</title>
+<title>Class Diagram - Project Dashboard</title>
 <rect x="74" y="74" width="155" height="369" fill="#fff"/>
 <rect x="96.5" y="94" width="110" height="114" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="151.5" y="111" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">User</text>
@@ -97,7 +97,7 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > class@F3 part 3 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="619" height="567" viewBox="74 74 619 567">
-<title>Class Diagram — SRS Workspace</title>
+<title>Class Diagram - SRS Workspace</title>
 <rect x="74" y="74" width="619" height="567" fill="#fff"/>
 <rect x="100.5" y="94" width="115" height="131" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="158" y="111" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Project</text>
@@ -171,7 +171,7 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > class@F4 part 4 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="619" height="567" viewBox="74 74 619 567">
-<title>Class Diagram — Verification &amp; Export</title>
+<title>Class Diagram - Verification &amp; Export</title>
 <rect x="74" y="74" width="619" height="567" fill="#fff"/>
 <rect x="96" y="94" width="115" height="131" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="153.5" y="111" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Project</text>
@@ -234,7 +234,7 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > class@F5 part 5 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="374" height="714" viewBox="74 74 374 714">
-<title>Class Diagram — Billing &amp; Notifications</title>
+<title>Class Diagram - Billing &amp; Notifications</title>
 <rect x="74" y="74" width="374" height="714" fill="#fff"/>
 <rect x="101" y="275" width="110" height="114" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="156" y="292" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">User</text>
@@ -295,7 +295,7 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > class@F6 part 6 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="164" height="516" viewBox="74 74 164 516">
-<title>Class Diagram — Administration</title>
+<title>Class Diagram - Administration</title>
 <rect x="74" y="74" width="164" height="516" fill="#fff"/>
 <rect x="101" y="275" width="110" height="114" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="156" y="292" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">User</text>
@@ -1135,7 +1135,7 @@ deactivate SSD_SYSTEM
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > state_machine@E01 part 1 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="937" height="962" viewBox="-453 -467 937 962">
-<title>State Machine Diagram — User</title>
+<title>State Machine Diagram - User</title>
 <rect x="-453" y="-467" width="937" height="962" fill="#fff"/>
 <line x1="7.79" y1="-433.3" x2="337.58" y2="-242.9" stroke="#000" stroke-width="1.2"/>
 <polyline points="325.64,-244.14 337.58,-242.9 330.54,-252.62" fill="none" stroke="#000" stroke-width="1.2"/>
@@ -1182,7 +1182,7 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > state_machine@E08 part 2 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="222" height="534" viewBox="-111 -20 222 534">
-<title>State Machine Diagram — Baseline</title>
+<title>State Machine Diagram - Baseline</title>
 <rect x="-111" y="-20" width="222" height="534" fill="#fff"/>
 <line x1="0" y1="18" x2="0" y2="88" stroke="#000" stroke-width="1.2"/>
 <polyline points="-4.89,77.04 0,88 4.89,77.04" fill="none" stroke="#000" stroke-width="1.2"/>
@@ -1215,7 +1215,7 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 1 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="868" height="580" viewBox="-446 -82 868 580">
-<title>Use Cases — Authentication &amp; Onboarding</title>
+<title>Use Cases - Authentication &amp; Onboarding</title>
 <rect x="-446" y="-82" width="868" height="580" fill="#fff"/>
 <rect x="-184" y="0" width="368" height="478" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
@@ -1274,7 +1274,7 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 2 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="528" height="518" viewBox="-354 -20 528 518">
-<title>Use Cases — Project Dashboard</title>
+<title>Use Cases - Project Dashboard</title>
 <rect x="-354" y="-20" width="528" height="518" fill="#fff"/>
 <rect x="-154" y="0" width="308" height="478" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
@@ -1303,7 +1303,7 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 3 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="840" height="536" viewBox="-389 -20 840 536">
-<title>Use Cases — SRS Workspace</title>
+<title>Use Cases - SRS Workspace</title>
 <rect x="-389" y="-20" width="840" height="536" fill="#fff"/>
 <rect x="-189" y="0" width="378" height="478" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
@@ -1353,7 +1353,7 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 4 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="668" height="726" viewBox="-455 -20 668 726">
-<title>Use Cases — Verification &amp; Export</title>
+<title>Use Cases - Verification &amp; Export</title>
 <rect x="-455" y="-20" width="668" height="726" fill="#fff"/>
 <rect x="-193" y="0" width="386" height="686" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
@@ -1400,7 +1400,7 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 5 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="923" height="536" viewBox="-426 -20 923 536">
-<title>Use Cases — Billing &amp; Notifications</title>
+<title>Use Cases - Billing &amp; Notifications</title>
 <rect x="-426" y="-20" width="923" height="536" fill="#fff"/>
 <rect x="-226" y="0" width="452" height="478" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
@@ -1444,7 +1444,7 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 6 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="663" height="310" viewBox="-439 -20 663 310">
-<title>Use Cases — Administration</title>
+<title>Use Cases - Administration</title>
 <rect x="-439" y="-20" width="663" height="310" fill="#fff"/>
 <rect x="-204" y="0" width="408" height="270" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>

@@ -459,7 +459,7 @@ describe("step-runner: CALL_LIMIT", () => {
   })
 })
 
-describe("step-runner: 2 tab — SPINE_VERSION_CONFLICT hoàn usage, không tiêu trần", () => {
+describe("step-runner: 2 tab - SPINE_VERSION_CONFLICT hoàn usage, không tiêu trần", () => {
   it("applyTransaction 409 khi ghi ops Draft ⇒ usage của lượt đó refunded, không tính calls_used", async () => {
     seedSpine()
     seedSession(true)
@@ -498,7 +498,7 @@ describe("step-runner: POST /answer", () => {
     expect(submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [{ question_id: "Q1", answer: "x" }] })).toBe(false)
   })
 
-  it("F18: waitForAnswer/submitAnswer — elicit trả questions ⇒ answer_needed, submitAnswer từ ngoài đưa luồng tới gate_ready", async () => {
+  it("F18: waitForAnswer/submitAnswer - elicit trả questions ⇒ answer_needed, submitAnswer từ ngoài đưa luồng tới gate_ready", async () => {
     seedSpine()
     seedSession(true)
     const deps: Partial<StepRunnerDeps> = {
@@ -633,7 +633,7 @@ describe("step-runner: mở lại bước đã accepted kèm tin chat (B7 reopen
   })
 })
 
-describe("step-runner: F1 — usage Elicit ghi TRƯỚC change nội dung đầu tiên vẫn được tính vào calls_used", () => {
+describe("step-runner: F1 - usage Elicit ghi TRƯỚC change nội dung đầu tiên vẫn được tính vào calls_used", () => {
   it("gate_ready.calls_used đếm cả elicit lẫn draft (bug cũ: mốc vòng = change first_seq, loại mất elicit)", async () => {
     seedSpine()
     seedSession(true)
@@ -741,7 +741,7 @@ describe("step-runner: trạng thái lượt chạy (FLF-177 BUG-05, BUG-07, BUG
   })
 })
 
-describe("step-runner: sổ quyết định (FLF-208 R4 — BUG-21)", () => {
+describe("step-runner: sổ quyết định (FLF-208 R4 - BUG-21)", () => {
   const askUptime = (topic = "uptime") =>
     elicitReply("Hỏi", [{ question: "Mức uptime mong muốn?", options: [], multiple: false, topic_key: topic } as never])
 
@@ -798,7 +798,7 @@ describe("step-runner: sổ quyết định (FLF-208 R4 — BUG-21)", () => {
   })
 })
 
-describe("step-runner: F8 — client đóng kết nối (AbortSignal)", () => {
+describe("step-runner: F8 - client đóng kết nối (AbortSignal)", () => {
   it("signal đã abort TRƯỚC khi gọi model ⇒ dừng ngay, không gọi elicit/draft", async () => {
     seedSpine()
     seedSession(true)
@@ -1528,7 +1528,7 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
 
     expect(await decisionsOf()).toEqual([])
     const draftText = JSON.stringify((s.draftExecutor.mock.calls[0]![1] as { promptVariables: Record<string, unknown> }).promptVariables)
-    expect(draftText).toContain("Chưa trả lời — tự giả định và ghi assumptions[]: Actor chính là ai?")
+    expect(draftText).toContain("Chưa trả lời - tự giả định và ghi assumptions[]: Actor chính là ai?")
     expect(draftText).toContain("User nhắn: có, tiếp đón phải kiểm tra thẻ bhyt")
   })
 
@@ -1554,8 +1554,8 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
 
     expect((await decisionsOf()).map((d) => [d.topic_key, d.answer])).toEqual([["uptime", "99%"]])
     const draftText = JSON.stringify((s.draftExecutor.mock.calls[0]![1] as { promptVariables: Record<string, unknown> }).promptVariables)
-    expect(draftText).toContain("Chưa trả lời — tự giả định và ghi assumptions[]: Actor chính là ai?")
-    expect(draftText).not.toContain("Chưa trả lời — tự giả định và ghi assumptions[]: Mức uptime mong muốn?")
+    expect(draftText).toContain("Chưa trả lời - tự giả định và ghi assumptions[]: Actor chính là ai?")
+    expect(draftText).not.toContain("Chưa trả lời - tự giả định và ghi assumptions[]: Mức uptime mong muốn?")
   })
 
   it("askTranscript giữ inline của câu mở (không liệt kê lại sau reload), bỏ inline của câu có lựa chọn", () => {
@@ -1900,7 +1900,7 @@ describe("settleWithoutModel: chốt tất định khi hết ngân sách chat", 
   })
 })
 
-describe("step-runner: fast path Brief — bước B-1.x không tự hỏi sau lượt hỏi gộp", () => {
+describe("step-runner: fast path Brief - bước B-1.x không tự hỏi sau lượt hỏi gộp", () => {
   /** Project đứng trước B-1.2: B-0 và B-1.1 đã accepted, sổ quyết định có sẵn `uptime = 99%`. */
   const seedBrief = () => {
     seedSpine()
@@ -1912,7 +1912,7 @@ describe("step-runner: fast path Brief — bước B-1.x không tự hỏi sau l
     spine.decisions = [{ id: "DC01", topic_key: "uptime", question: "Uptime?", answer: "99%", step_id: "B-1", at: "2026-09-30T00:00:00.000Z", superseded_by: null }]
   }
   const normalQuestion = { question: "Bạn lưu hồ sơ bao lâu?", options: [], topic_key: "data_retention" } as never
-  const conflictQuestion = { question: "Bạn vừa nói 99.9% — đổi uptime nhé?", options: [], topic_key: "uptime", conflict: "user nói 99.9%, sổ ghi 99%" } as never
+  const conflictQuestion = { question: "Bạn vừa nói 99.9% - đổi uptime nhé?", options: [], topic_key: "uptime", conflict: "user nói 99.9%, sổ ghi 99%" } as never
 
   it("không có tin user ⇒ không gọi Elicit (0 usage, 0 tin AI), đi thẳng Draft với sổ quyết định", async () => {
     seedBrief()
@@ -1942,7 +1942,7 @@ describe("step-runner: fast path Brief — bước B-1.x không tự hỏi sau l
     const run = runStep(PROJECT, "B-1.2", SESSION, USER, emit, { elicitExecutor, draftExecutor, message: "Uptime phải 99.9%" })
     for (let i = 0; i < 50 && !events.some((e) => e.type === "answer_needed"); i++) await new Promise((r) => setTimeout(r, 0))
     const asked = events.find((e) => e.type === "answer_needed") as Extract<StepEvent, { type: "answer_needed" }>
-    expect(asked.questions.map((x) => x.text)).toEqual(["Bạn vừa nói 99.9% — đổi uptime nhé?"])
+    expect(asked.questions.map((x) => x.text)).toEqual(["Bạn vừa nói 99.9% - đổi uptime nhé?"])
     expect(submitAnswer(PROJECT, "B-1.2", SESSION, { answers: [{ question_id: asked.questions[0].id, answer: "99.9%" }] })).toBe(true)
     await run
 
@@ -1985,13 +1985,13 @@ describe("step-runner: fast path Brief — bước B-1.x không tự hỏi sau l
 
   it("còn câu mâu thuẫn được hỏi ⇒ lời AI giữ, chỉ cắt câu hỏi thường đã bị bỏ", async () => {
     seedBrief()
-    const elicitExecutor = vi.fn(async () => elicitReply("Mình đã ghi lại. Bạn lưu hồ sơ bao lâu? Bạn vừa nói 99.9% — đổi uptime nhé?", [{ ...(normalQuestion as object), inline: true } as never, conflictQuestion]))
+    const elicitExecutor = vi.fn(async () => elicitReply("Mình đã ghi lại. Bạn lưu hồ sơ bao lâu? Bạn vừa nói 99.9% - đổi uptime nhé?", [{ ...(normalQuestion as object), inline: true } as never, conflictQuestion]))
     const { events, emit } = collectEvents()
     const run = runStep(PROJECT, "B-1.2", SESSION, USER, emit, { elicitExecutor, draftExecutor: async () => draftReply([]), message: "Uptime phải 99.9%" })
     for (let i = 0; i < 50 && !events.some((e) => e.type === "answer_needed"); i++) await new Promise((r) => setTimeout(r, 0))
     const asked = events.find((e) => e.type === "answer_needed") as Extract<StepEvent, { type: "answer_needed" }>
     const said = events.find((e) => e.type === "elicit") as { delta: string }
-    expect(said.delta).toBe("Mình đã ghi lại. Bạn vừa nói 99.9% — đổi uptime nhé?")
+    expect(said.delta).toBe("Mình đã ghi lại. Bạn vừa nói 99.9% - đổi uptime nhé?")
     submitAnswer(PROJECT, "B-1.2", SESSION, { answers: [{ question_id: asked.questions[0].id, answer: "99.9%" }] })
     await run
   })
@@ -2218,7 +2218,7 @@ describe("FLF-260: ngôn ngữ trả lời của một bước", () => {
       message: "I don't have an idea yet"
     })
 
-    expect(prompts).toEqual([{ language: "en", userMessage: "[no_idea] I don't have a concrete idea yet — suggest where I could start." }])
+    expect(prompts).toEqual([{ language: "en", userMessage: "[no_idea] I don't have a concrete idea yet - suggest where I could start." }])
     // Tin FE gửi kèm chip vẫn vào lịch sử như lời user, câu thay thế thì không
     const userMsgs = (db.sessions[0].messages as { role: string; content: string }[]).filter((m) => m.role === "user").map((m) => m.content)
     expect(userMsgs).toEqual(["I don't have an idea yet"])
@@ -2240,8 +2240,8 @@ describe("FLF-260: ngôn ngữ trả lời của một bước", () => {
       expect(elicitExecutor).not.toHaveBeenCalled()
       return (events.find((e) => e.type === "gate_ready") as Extract<StepEvent, { type: "gate_ready" }>).no_change_reason
     }
-    expect(await reasonOf({ replyLanguage: "en" })).toBe("The platform is already clear from what you told me — no need to ask again. To change it, just tell me what to fix.")
-    expect(await reasonOf({})).toBe("Nền tảng đã rõ từ những gì bạn kể — không cần hỏi lại. Muốn đổi thì nhắn điều cần sửa.")
+    expect(await reasonOf({ replyLanguage: "en" })).toBe("The platform is already clear from what you told me - no need to ask again. To change it, just tell me what to fix.")
+    expect(await reasonOf({})).toBe("Nền tảng đã rõ từ những gì bạn kể - không cần hỏi lại. Muốn đổi thì nhắn điều cần sửa.")
   })
 
   it("isSubstantiveAnswer: uỷ quyền, chưa biết và đồng ý suông bằng tiếng Anh không phải câu trả lời", () => {
@@ -2264,7 +2264,7 @@ describe("FLF-260: ngôn ngữ trả lời của một bước", () => {
   })
 })
 
-describe("FLF-260: runPhase — ngôn ngữ đi qua phỏng vấn đầu giai đoạn, các bước và câu đếm của cổng cuối", () => {
+describe("FLF-260: runPhase - ngôn ngữ đi qua phỏng vấn đầu giai đoạn, các bước và câu đếm của cổng cuối", () => {
   const B1_STEPS = ["B-1.1", "B-1.2", "B-1.3", "B-1.4", "B-1.5", "B-1.6"]
   const SUMMARY_EN = "This is a booking system for a small clinic."
 
