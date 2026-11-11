@@ -64,9 +64,9 @@ beforeEach(() => {
 })
 
 describe("FLF-360 — đọc lại ảnh sơ đồ trong lượt import", () => {
-  it("quá tải lần đầu, đọc lại được ⇒ dữ liệu ảnh vào draft như lần đọc đầu, loại ảnh thật; import không dừng", async () => {
+  it.each([503, 529])("quá tải HTTP %i lần đầu, đọc lại được ⇒ dữ liệu ảnh vào draft như lần đọc đầu, loại ảnh thật; import không dừng", async (status) => {
     const { projectId, userId, importId } = await importAtExtracting(USECASE_IMAGE)
-    const count = scripted({ diagram: (n) => (n === 1 ? overloaded() : null) })
+    const count = scripted({ diagram: (n) => (n === 1 ? new AiActionError(status, "Overloaded", status === 529 ? "ANTHROPIC_ERROR" : "GEMINI_OVERLOADED") : null) })
     const run = await runExtraction(projectId, userId, importId)
     expect(run.doc.paused).toBeNull()
     expect(run.doc.status).toBe("baselining")
@@ -117,9 +117,9 @@ describe("FLF-360 — đọc lại ảnh sơ đồ trong lượt import", () => 
     expect((await draftOf(importId)).diagram_images.map((i) => i.kind)).toEqual(["usecase"])
   })
 
-  it("không đọc lại ảnh môi trường không có vision / lỗi AI không tự khỏi (400)", async () => {
+  it.each(["ANTHROPIC_KEY_MISSING", "GEMINI_KEY_MISSING"])("không đọc lại ảnh khi thiếu khoá %s / lỗi AI không tự khỏi (400)", async (keyCode) => {
     const a = await importAtExtracting(USECASE_IMAGE)
-    const noVision = scripted({ diagram: () => new AiActionError(500, "Gemini API key is missing.", "GEMINI_KEY_MISSING") })
+    const noVision = scripted({ diagram: () => new AiActionError(500, "Vision API key is missing.", keyCode) })
     await runExtraction(a.projectId, a.userId, a.importId)
     expect(noVision.diagram).toBe(1)
     expect((await draftOf(a.importId)).diagram_images.map((i) => i.kind)).toEqual(["unsupported"])
