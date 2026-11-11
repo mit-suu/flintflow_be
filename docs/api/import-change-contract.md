@@ -727,6 +727,8 @@ template_family, project_count, created_at, headings[{ index, heading_text, sect
   (trừ người đăng, không Viewer); `link` = dự án (1 dự án) hoặc `/home`; `meta = { template_id, version, project_ids }`.
 - `GET /projects/:id` thêm `template_update: { template_id, name, current_version, latest_version } | null` — chỉ Lead /
   Analyst, chỉ khi bản org mới hơn bản dự án đang theo.
+- `GET /projects/:id` thêm `template_current: { template_id, name, version, kind: "org" | "skeleton" | "project" } | null` (sửa sau test
+  tay 11/11) — mẫu dự án đang theo cho thẻ "Mẫu tài liệu", mọi thành viên; `null` khi dự án theo file mẫu của chính nó.
 - **Dữ liệu cũ**: họ mẫu trước FLF-395 (file + mapping trên họ) đọc như bản 1; lần đầu dùng / `npm run migrate:org-template-versions`
   (backup DB trước) tạo bản 1 thật (đọc lại file để có `table_map`, `language`), gắn `org_template_version = 1` cho import cũ và
   `template_ref` cho project theo lần import gần nhất.
@@ -817,6 +819,11 @@ ready → applying → applied | cancelled | failed`.
   đổi ngược) · `structure_only_dropped` (heading nhóm không có gì đi theo) · `restored_from_snapshot`. Bảng so theo bộ cột (đổi thứ tự cột
   không tính là đổi; cột Record of Changes theo cột lịch sử chuẩn). Mục có cặp nằm đúng một trong `matched` / `conflict`; mục đã sửa còn nằm thêm
   ở `edited_since`. Mục thừa + conflict **bắt buộc** có quyết định trước `ready` (`409 TEMPLATE_MIGRATION_UNDECIDED`, `meta.undecided`).
+  Sửa sau test tay 11/11 (additive): heading nhóm của mẫu đích (heading ngay sau sâu hơn) ⇒ `missing[].needs_content = false`, không là đích
+  `move_to`, không vào `migration_missing_sections` / cờ đỏ (profile cũ đã ghi cũng được lọc khi tính cờ); mục thiếu là đích của một
+  `move_to` đã quyết ⇒ DTO trả `needs_content = false` + `moved_in: [id mục thừa]` (bước áp dụng tính theo quyết định đã giải). Bộ đọc
+  heading của file mẫu bỏ đoạn style `Title`/`Subtitle`, tiêu đề ngay trên field mục lục, chữ to trên trang bìa và dòng gạch đầu dòng có số
+  gõ tay — bản mẫu đã đăng từ file có các dòng này cần đăng lại (số heading đọc lại sẽ khác mapping đã lưu ⇒ `422 TEMPLATE_MIGRATION_BUILD_FAILED`).
 - **Đổi ngược (D15)**: đích = mẫu trước (`from`) của lần đổi `applied` gần nhất (cùng bản mẫu hoặc cùng sha256 file) ⇒ `direction = reverse`,
   `edited_since` = mục có Change ghi sau `applied_at` (theo `section_id`; Change của phần tử tính cho mục cha; Change có `txn` bắt đầu
   bằng `template-migration:` không tính), `choices = [keep, discard]`, mặc định `keep`. Mục chưa sửa tự lấy lại từ snapshot, chỉ báo

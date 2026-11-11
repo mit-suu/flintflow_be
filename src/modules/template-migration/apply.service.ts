@@ -41,6 +41,7 @@ import { toUserLocale } from "../../shared/i18n/locale.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { addCustomOps, affectedSectionIds, customIdAllocator, deleteOps, migrationTxn, ownerKeysOf, selectReverseChanges, withSnapshotContinuations } from "./apply-plan.js"
 import { BuildBaseFileError, buildBaseFile, planLayout, type PlannedLayout } from "./build-base-file.js"
+import { missingAfterMoves } from "./classify.js"
 import { composeProfile } from "./compose-profile.js"
 import { editedSections, sectionKeyResolver } from "./edited-since.js"
 import {
@@ -395,7 +396,8 @@ const buildFile = async (ctx: MigrationContext, doc: ITemplateMigration, work: S
     const composed = await composeProfile({
       buffer: result.buffer,
       plan: work.layout.entries,
-      needsContent: new Set(doc.groups.missing.filter((m) => m.needs_content).map((m) => m.new_key)),
+      // Quyết định đã giải: mục nhận nội dung "chuyển vào" không phải viết; AI không chuyển được (về `keep_custom`) ⇒ vẫn là mục thiếu
+      needsContent: new Set(missingAfterMoves(doc.groups, work.decisions).missing.filter((m) => m.needs_content).map((m) => m.new_key)),
       knownColumns: known
     })
     // Mục của lần đổi trước còn chờ viết và vẫn là mục của mẫu đích: giữ cờ chặn phát hành dù lần này nó được ghép "khớp" với heading rỗng

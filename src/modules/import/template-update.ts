@@ -23,3 +23,20 @@ export const templateUpdateOf = async (project: Pick<IProject, "template_ref" | 
   if (!family || family.skeleton_of || family.latest_version <= ref.version) return null
   return { template_id: String(family._id), name: family.name, current_version: ref.version, latest_version: family.latest_version }
 }
+
+/** Mẫu dự án đang theo — để thẻ "Mẫu tài liệu" ghi tên + bản. `kind`: mẫu thư viện, khung tự lưu, hay bản riêng của dự án (file tải lên lúc đổi mẫu). */
+export interface TemplateCurrent {
+  template_id: string
+  name: string
+  version: number
+  kind: "org" | "skeleton" | "project"
+}
+
+/** `null` khi dự án theo file mẫu của chính nó (chưa gắn mẫu tổ chức) hoặc họ mẫu không còn. Mọi thành viên đọc được (chỉ là nhãn). */
+export const templateCurrentOf = async (project: Pick<IProject, "template_ref" | "organizationId">): Promise<TemplateCurrent | null> => {
+  const ref = project.template_ref
+  if (!ref || !project.organizationId) return null
+  const family = await OrgTemplate.findOne({ _id: ref.template_id, orgId: project.organizationId }).select("name skeleton_of project_id").lean()
+  if (!family) return null
+  return { template_id: String(family._id), name: family.name, version: ref.version, kind: family.project_id ? "project" : family.skeleton_of ? "skeleton" : "org" }
+}

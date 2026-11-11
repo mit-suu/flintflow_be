@@ -43,6 +43,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import {
   classify,
   decidableItems,
+  missingAfterMoves,
   settleDecisions,
   tableShapesBySection,
   type MigrationGroups,
@@ -521,7 +522,8 @@ export const toDto = async (doc: ITemplateMigration, spineHint?: Spine | null): 
       headings: doc.to.headings
     },
     pairing: doc.pairing,
-    groups: doc.groups,
+    // Mục nhận nội dung "chuyển vào" không còn là mục phải viết (nhóm lưu trên migration là kết quả lúc ghép, chưa theo quyết định)
+    groups: missingAfterMoves(doc.groups, doc.decisions),
     decisions: doc.decisions.map((d) => ({ id: d.id, choice: d.choice })),
     undecided: settleDecisions(doc.groups, doc.decisions).undecided,
     language: { source: doc.from.language, target: toUserLocale(doc.to.language) ?? "en", needs_translation: doc.needs_translation, switches_document_language: doc.language_switch_only },

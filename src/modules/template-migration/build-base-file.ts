@@ -16,10 +16,10 @@ import { NS, insertAfter, isW, removeNode, wAll, wEl, wKid, wKids, wText } from 
 import { parseDocument } from "../import/parse.service.js"
 import type { RenderedDocument } from "../render/rendered-document.types.js"
 import { writeTemplateDocx } from "../render/template-docx-writer.js"
-import { columnIdentity, DROP_FROM_PRINT, RECORD_OF_CHANGES, type MigrationGroups } from "./classify.js"
+import { columnIdentity, DROP_FROM_PRINT, RECORD_OF_CHANGES, isFreeTextSection, type MigrationGroups } from "./classify.js"
 import { UNMAPPED_SECTION } from "../import/import.constants.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { createTransplanter, enforceRelsAllowList, pruneUnreferencedParts, validateDocxStructure, type DroppedItem } from "./ooxml-transplant.js"
+import { createTransplanter, enforceRelsAllowList, pruneUnreferencedParts, requestFieldUpdate, validateDocxStructure, type DroppedItem } from "./ooxml-transplant.js"
 import type { NewHeading, OldHeading, PairingResult } from "./pair-sections.js"
 
 // ─── kiểu công khai ──────────────────────────────────────────────
@@ -223,6 +223,8 @@ const planOf = (input: PlanInput): { byNew: Map<string, Placement[]>; customs: C
   const removed: { oldKey: string; reason: string }[] = []
   const add = (newKey: string, p: Placement): void => void byNew.set(newKey, [...(byNew.get(newKey) ?? []), p])
   const dropped = new Set(input.groups.structure_only_dropped)
+  const oldSection = new Map(input.oldHeadings.map((h) => [h.key, h.section_id]))
+  const frameworkMoves: { newKey: string; placement: Placement }[] = []
 
   for (const pair of input.pairing.pairs) {
     const notes: string[] = []
@@ -244,12 +246,22 @@ const planOf = (input: PlanInput): { byNew: Map<string, Placement[]>; customs: C
     }
     const extra = decision.get(`e:${pair.old_key}`) ?? decision.get(`c:record_of_changes:${pair.old_key}`)
     if (extra === "delete" || extra === DROP_FROM_PRINT) removed.push({ oldKey: pair.old_key, reason: extra === DROP_FROM_PRINT ? "BA chọn bỏ khỏi bản in (dữ liệu giữ trong Spine)" : "BA chọn xoá" })
-    else if (extra?.startsWith("move_to:") && validNew.has(extra.slice(8))) add(extra.slice(8), { oldKey: pair.old_key, tableAction: "none", notes, moved: true })
+    else if (extra?.startsWith("move_to:") && validNew.has(extra.slice(8))) {
+      if (isFreeTextSection(oldSection.get(pair.old_key) ?? "")) add(extra.slice(8), { oldKey: pair.old_key, tableAction: "none", notes, moved: true })
+      else frameworkMoves.push({ newKey: extra.slice(8), placement: { oldKey: pair.old_key, tableAction: "none", notes, moved: true } })
+    }
     else {
       if (extra === undefined) notes.push("Chưa có quyết định cho mục này: giữ thành mục riêng để không mất nội dung")
       if (extra === "ai_resolve") notes.push("ai_resolve chưa chạy ở bước dựng file: giữ thành mục riêng")
       customs.push({ oldKey: pair.old_key, notes })
     }
+  }
+  // Mục khung (dữ liệu có cấu trúc) "chuyển vào" một heading của mẫu **chưa có cặp** (mục thiếu) = ghép với heading đó: nội dung
+  // nằm dưới heading đích, không kèm heading cũ — trước đây thành mục anh em, heading đích còn trống + cờ vàng (test tay 11/11).
+  // Heading đã có cặp (vd. đổi ngược về bản chụp) giữ cách cũ: chép kèm heading gốc làm ranh giới, nối sau phần thân hiện có.
+  for (const { newKey, placement } of frameworkMoves) {
+    const paired = (byNew.get(newKey) ?? []).some((p) => !p.moved)
+    add(newKey, { ...placement, moved: paired })
   }
   return { byNew, customs, removed }
 }
@@ -293,6 +305,8 @@ export const planLayout = (input: PlanInput, nextCustomId: () => string): Planne
   const newCustoms: PlannedLayout["newCustoms"] = []
   /** Nơi nhận phần tử / phần nối của từng mục cũ: chúng nằm vật lý sau mục cũ đứng ngay trước chúng, đúng như vùng chép khối. */
   const containerOf = new Map<string, PlannedLayoutEntry[]>()
+  /** Độ lệch cấp của từng mục cũ đã đặt (cấp nơi đặt − cấp cũ) — phần tử / mục riêng đi theo nó dịch cùng độ lệch, như `buildOnce`. */
+  const shiftOf = new Map<string, number>()
 
   targetHeadings.forEach((heading, i) => {
     const all = byNew.get(heading.key) ?? []
@@ -312,13 +326,20 @@ export const planLayout = (input: PlanInput, nextCustomId: () => string): Planne
       // Heading mẫu đích có `section_id` thì giữ; mục riêng của mẫu ghép với mục cũ thì mang id của mục cũ (dữ liệu nằm ở đó)
       const id = heading.section_id === UNMAPPED_SECTION ? (first?.section_id ?? heading.section_id) : heading.section_id
       slots[i].head.push({ heading_text: heading.heading_text, level, section_id: id, kind: "target", new_key: heading.key, old_key: pairPl[0].oldKey, missing: false, guidance: null })
-      for (const pl of pairPl) containerOf.set(pl.oldKey, slots[i].head)
+      for (const pl of pairPl) {
+        containerOf.set(pl.oldKey, slots[i].head)
+        const o = oldByKey.get(pl.oldKey)
+        if (o) shiftOf.set(pl.oldKey, level - o.level)
+      }
     }
     for (const m of movedPl) {
       const old = oldByKey.get(m.oldKey)
       if (!old) continue
-      slots[i].moved.push(entryOf(old, "moved", heading.key))
+      // Mục chuyển vào là một khối có heading riêng cùng cấp heading đích (như `buildOnce`)
+      const shift = level - old.level
+      slots[i].moved.push(entryOf(old, "moved", heading.key, shift))
       containerOf.set(old.key, slots[i].moved)
+      shiftOf.set(old.key, shift)
     }
   })
 
@@ -327,34 +348,50 @@ export const planLayout = (input: PlanInput, nextCustomId: () => string): Planne
   for (const [newKey, ps] of byNew) for (const p of ps) if (!p.moved) placed.set(p.oldKey, indexOfKey.get(newKey)!)
   const customKeys = new Set(customs.map((c) => c.oldKey))
   let last: number | null = null
+  let lastShift = 0
   for (const old of input.oldHeadings) {
     const at = placed.get(old.key)
     if (at !== undefined) {
       last = at
+      lastShift = shiftOf.get(old.key) ?? 0
       continue
     }
     if (!customKeys.has(old.key)) continue
     const dest = last === null ? tail : slots[last].custom
-    dest.push(entryOf(old, "custom", null))
+    const shift = last === null ? 0 : lastShift
+    dest.push(entryOf(old, "custom", null, shift))
     containerOf.set(old.key, dest)
+    shiftOf.set(old.key, shift)
   }
 
   // Phần tử / phần nối đi theo mục đứng ngay trước chúng trong tài liệu cũ. Bản chụp đã chứa heading phần tử của chính nó.
   if (!snapshot) {
     const followerKeys = new Set(pairing.followers.map((f) => f.old_key))
     let current: PlannedLayoutEntry[] | null = null
+    let currentShift = 0
     for (const old of input.oldHeadings) {
       if (!followerKeys.has(old.key)) {
         current = containerOf.get(old.key) ?? null
+        currentShift = shiftOf.get(old.key) ?? 0
         continue
       }
-      current?.push({ ...entryOf(old, "follower", null) })
+      current?.push({ ...entryOf(old, "follower", null, currentShift) })
     }
   }
   return { entries: [...slots.flatMap((s) => [...s.head, ...s.moved, ...s.custom]), ...tail], newCustoms }
 }
 
-const entryOf = (old: OldHeading, kind: PlannedLayoutEntry["kind"], newKey: string | null): PlannedLayoutEntry => ({ heading_text: old.heading_text, level: old.level, section_id: old.section_id, kind, new_key: newKey, old_key: old.key, missing: false, guidance: null })
+/** Mục cũ trong layout mới; `shift` = độ lệch cấp của nơi đặt (cấp heading đích − cấp heading cũ của mục chủ), kẹp 1–9. */
+const entryOf = (old: OldHeading, kind: PlannedLayoutEntry["kind"], newKey: string | null, shift = 0): PlannedLayoutEntry => ({
+  heading_text: old.heading_text,
+  level: Math.min(9, Math.max(1, old.level + shift)),
+  section_id: old.section_id,
+  kind,
+  new_key: newKey,
+  old_key: old.key,
+  missing: false,
+  guidance: null
+})
 
 /**
  * Heading ví dụ của mẫu (feature / function / UC…) bỏ đi khi dự án đã có phần tử của chính nó — phần tử được chép nguyên khối từ
@@ -532,6 +569,19 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
   // Một môi trường chép cho cả lượt dựng: numId / ảnh / rels dùng chung giữa các mục, bộ đếm id liên tục
   const transplanter = view ? await createTransplanter(view.pkg, tgt) : null
   const oldByKey = new Map(input.oldHeadings.map((h) => [h.key, h]))
+  /** Id mục của heading mẫu đích như `planLayout`: heading riêng của mẫu (`unmapped`) đã có cặp mang id của mục cũ ghép vào nó. */
+  const pairedSectionId = (h: NewHeading): string => {
+    if (h.section_id !== UNMAPPED_SECTION) return h.section_id
+    const pl = (byNew.get(h.key) ?? []).find((p) => !p.moved)
+    return pl ? (oldByKey.get(pl.oldKey)?.section_id ?? h.section_id) : h.section_id
+  }
+  /** Cấp heading thứ `i` của mẫu đích (đọc từ file). */
+  const tgtLevel = (i: number): number => tgtHeadingBlocks[i]?.level ?? targetHeadings[i]?.level ?? 1
+  /** Độ lệch cấp khi chép khối của mục cũ `oldKey` vào heading đích thứ `i` — heading con trong khối giữ đúng quan hệ cha / con. */
+  const shiftOf = (oldKey: string, i: number): number => {
+    const o = oldByKey.get(oldKey)
+    return o ? tgtLevel(i) - o.level : 0
+  }
 
   const editedKeep = new Set<string>()
   if (input.direction === "reverse") {
@@ -560,9 +610,9 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
   }
 
   /** Chép một đoạn khối của mục `oldKey`; lỗi ⇒ trả lý do. */
-  const transplant = async (oldKey: string, elements: Element[], after: Element): Promise<{ inserted: Element[]; dropped: DroppedItem[]; warnings: string[] } | { error: string }> => {
+  const transplant = async (oldKey: string, elements: Element[], after: Element, headingShift = 0): Promise<{ inserted: Element[]; dropped: DroppedItem[]; warnings: string[] } | { error: string }> => {
     if (!elements.length) return { inserted: [], dropped: [], warnings: [] }
-    const res = await transplanter!.run({ key: oldKey, elements, after })
+    const res = await transplanter!.run({ key: oldKey, elements, after, headingShift })
     if (!res.ok) return { error: `${res.error?.code ?? "unexpected"}: ${res.error?.message ?? ""}` }
     refs.set(oldKey, new Set([...(refs.get(oldKey) ?? []), ...referencesOf(res.inserted)]))
     return { inserted: res.inserted, dropped: res.dropped, warnings: res.warnings }
@@ -578,7 +628,7 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
    * heading gốc; không chép được / cần Spine ⇒ heading mẫu cùng cấp + dựng từ Spine. Heading gốc luôn đi kèm nên khối này tự có
    * ranh giới mục — writer không ghi đè nó khi điền mục đứng trước. Trả `true` khi chép được khối.
    */
-  const placeSection = async (old: OldHeading, after: Element, notes: string[], kind: "custom" | "moved", newKey: string | null): Promise<{ last: Element; transplanted: boolean }> => {
+  const placeSection = async (old: OldHeading, after: Element, notes: string[], kind: "custom" | "moved", newKey: string | null, headingShift = 0): Promise<{ last: Element; transplanted: boolean }> => {
     const base = { key: old.key, old_key: old.key, new_key: newKey, section_id: old.section_id }
     const sourceHeading = view?.headingEl.get(old.key)
     const wanted = spineReason(old.key)
@@ -586,7 +636,7 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
     if (!wanted && view) {
       const region = sourceHeading ? view.region(old.key) : null
       if (sourceHeading && region) {
-        const res = await transplant(old.key, [sourceHeading, ...region], after)
+        const res = await transplant(old.key, [sourceHeading, ...region], after, headingShift)
         if (!("error" in res)) {
           report({ ...base, mode: kind, dropped: res.dropped, warnings: [...notes, ...res.warnings] })
           return { last: res.inserted[res.inserted.length - 1] ?? after, transplanted: true }
@@ -594,7 +644,8 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
         why = { reason: `Chép khối lỗi (${res.error})`, flag: "yellow" }
       } else why = { reason: "Không tìm thấy khối của mục trong file nền", flag: "yellow" }
     } else if (!wanted) why = { reason: input.forceSpine ? "Dựng lại toàn file từ Spine" : input.source ? "File nền không đọc được theo layout" : "Dự án không có khối gốc" }
-    const model = tgtHeadingBlocks.find((b) => b.level === old.level)?.element ?? headingEls[0]
+    const placedLevel = Math.min(9, Math.max(1, old.level + headingShift))
+    const model = tgtHeadingBlocks.find((b) => b.level === placedLevel)?.element ?? tgtHeadingBlocks.find((b) => b.level === old.level)?.element ?? headingEls[0]
     const synthetic = headingLike(model, old.heading_text)
     insertAfter(synthetic, after)
     const r = report({ ...base, mode: "spine", ...(why?.flag ? { flag: why.flag } : {}), reason: why?.reason, warnings: notes })
@@ -633,7 +684,7 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
       const notes = pairPl.flatMap((p) => p.notes)
       const asSpine = (reason: string, flag?: "yellow"): void => {
         const r = report({ ...base, key: heading.key, old_key: oldKey, mode: "spine", ...(flag ? { flag } : {}), reason, warnings: notes })
-        spineSlots.push({ el, sectionId: heading.section_id, report: r })
+        spineSlots.push({ el, sectionId: pairedSectionId(heading), report: r })
       }
 
       if (!view) {
@@ -662,9 +713,9 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
       let cursor: Element = el
       let failure: string | null = null
 
-      const flush = async (owner: string, pending: Element[]): Promise<void> => {
+      const flush = async (owner: string, pending: Element[], headingShift = 0): Promise<void> => {
         if (failure || !pending.length) return
-        const res = await transplant(owner, pending, cursor)
+        const res = await transplant(owner, pending, cursor, headingShift)
         if ("error" in res) {
           failure = res.error
           return
@@ -690,7 +741,7 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
               .map((t) => ({ t, score: columnOverlap(node, t, heading.section_id) }))
               .sort((a, b) => b.score - a.score)[0]
             if (best && best.score > 0) {
-              await flush(p.oldKey, pending)
+              await flush(p.oldKey, pending, shiftOf(p.oldKey, i))
               pending = []
               if (failure) break
               fillTable(best.t, node, heading.section_id)
@@ -706,7 +757,7 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
           }
           pending.push(node)
         }
-        await flush(p.oldKey, pending)
+        await flush(p.oldKey, pending, shiftOf(p.oldKey, i))
         if (failure) break
       }
 
@@ -726,7 +777,8 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
     for (const m of movedPl) {
       const old = oldByKey.get(m.oldKey)
       if (!old) continue
-      const placed = await placeSection(old, tailOf(el), m.notes, "moved", heading.key)
+      // Mục chuyển vào là một khối có heading riêng cùng cấp heading đích, nối sau phần thân của nó
+      const placed = await placeSection(old, tailOf(el), m.notes, "moved", heading.key, shiftOf(old.key, i))
       movedTransplanted ||= placed.transplanted
     }
     if (movedTransplanted && guidanceBefore.length) for (const n of guidanceBefore) removeNode(n)
@@ -734,7 +786,13 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
 
   // Mục riêng (giữ theo quyết định): đặt sau mục có cặp đứng trước nó trong tài liệu cũ
   const placedHeadingOf = new Map<string, Element>()
-  for (const [newKey, ps] of byNew) for (const p of ps) if (!p.moved) placedHeadingOf.set(p.oldKey, headingEls[indexOfKey.get(newKey)!])
+  const placedIndexOf = new Map<string, number>()
+  for (const [newKey, ps] of byNew)
+    for (const p of ps)
+      if (!p.moved) {
+        placedHeadingOf.set(p.oldKey, headingEls[indexOfKey.get(newKey)!])
+        placedIndexOf.set(p.oldKey, indexOfKey.get(newKey)!)
+      }
   const customByKey = new Map(customs.map((c) => [c.oldKey, c]))
   const targetDoc = await tgt.requireXml("word/document.xml")
   const bodyEl = wKid(targetDoc.documentElement, "body")!
@@ -743,16 +801,29 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
     return kids[kids.length - 1] ?? headingEls[headingEls.length - 1]
   }
   let lastTail: Element | null = null
+  // Mục riêng giữ cùng quan hệ cấp với mục có cặp đứng trước nó (như `planLayout`)
+  let lastShift = 0
+  // Mục riêng chưa có mục có cặp nào đứng trước (vd. "1 Introduction" đầu file cũ): `planLayout` xếp vào cuối tài liệu (`tail`) ⇒ đặt
+  // sau cùng, sau mọi mục riêng khác — đặt ngay lúc gặp thì mục riêng nối sau mục có cặp cuối cùng sẽ chèn sau nó, lệch thứ tự layout
+  // ⇒ heading_map gán nhầm id, xuất Word báo TEMPLATE_LAYOUT_UNAVAILABLE (test tay lượt 3, 11/11)
+  const tailCustoms: OldHeading[] = []
   for (const old of input.oldHeadings) {
     const placed = placedHeadingOf.get(old.key)
     if (placed) {
       lastTail = tailOf(placed)
+      lastShift = shiftOf(old.key, placedIndexOf.get(old.key)!)
       continue
     }
     const custom = customByKey.get(old.key)
     if (!custom) continue
-    lastTail = (await placeSection(old, lastTail ?? lastBodyNode(), custom.notes, "custom", null)).last
+    if (!lastTail) {
+      tailCustoms.push(old)
+      continue
+    }
+    lastTail = (await placeSection(old, lastTail, custom.notes, "custom", null, lastShift)).last
   }
+  let tailAfter: Element | null = null
+  for (const old of tailCustoms) tailAfter = (await placeSection(old, tailAfter ?? lastBodyNode(), customByKey.get(old.key)!.notes, "custom", null, 0)).last
   for (const r of removed) {
     const o = oldByKey.get(r.oldKey)
     report({ key: r.oldKey, old_key: r.oldKey, new_key: null, section_id: o?.section_id ?? "", mode: "removed", reason: r.reason })
@@ -797,7 +868,7 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
         return block.block_id
       }
       const headingMap = [
-        ...headingEls.map((el, i) => ({ block_id: idOf(el), section_id: targetHeadings[i].section_id })),
+        ...headingEls.map((el, i) => ({ block_id: idOf(el), section_id: pairedSectionId(targetHeadings[i]) })),
         ...customSlots.map((c) => ({ block_id: idOf(c.el), section_id: c.sectionId }))
       ]
       const spineIds = new Set(spineSlots.map((s) => s.sectionId))
@@ -818,6 +889,8 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
   const finalPkg = await DocxPackage.load(buffer)
   mergeDropped(dropped, await enforceRelsAllowList(finalPkg))
   await pruneUnreferencedParts(finalPkg)
+  // Mục lục chép theo file mẫu là mục lục của mẫu ⇒ yêu cầu Word dựng lại khi mở
+  await requestFieldUpdate(finalPkg)
   const out = await finalPkg.toBuffer()
   const problems = (await validateDocxStructure(await DocxPackage.load(out))).filter((p) => !baseline.has(p))
   return { buffer: out, sections: reports, dropped, problems, warnings, fellBackToSpine: false, refs }

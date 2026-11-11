@@ -54,6 +54,8 @@ export interface MissingItem {
   /** Mục có nội dung (không phải heading nhóm) ⇒ thêm trống + hướng dẫn, cờ đỏ chặn phát hành tới khi BA viết xong. */
   needs_content: boolean
   guidance: string | null
+  /** Mục thừa đã chọn "chuyển vào" mục này (`id` của mục thừa) — mục nhận nội dung, không còn là mục phải viết. Chỉ có khi ≥ 1. */
+  moved_in?: string[]
 }
 
 export interface ExtraItem {
@@ -194,15 +196,25 @@ export const classify = (input: ClassifyInput): MigrationGroups => {
   const ignored = new Set(pairing.ignored_new)
 
   const followersOf = (key: string): string[] => pairing.followers.filter((f) => f.parent_old_key === key).map((f) => f.old_key)
+  /**
+   * Heading nhóm của mẫu đích ("II. Software Requirement Specification", "Introduction"): heading ngay sau nó sâu hơn ⇒ nội dung nằm
+   * ở các mục con, bản thân nó không cần viết (không cờ đỏ, không là đích "chuyển vào"). Thiếu `level` ⇒ không suy được, giữ như cũ.
+   */
+  const isWrapper = (i: number): boolean => {
+    const own = input.neu[i]?.level
+    const next = input.neu[i + 1]?.level
+    return own !== undefined && next !== undefined && next > own
+  }
 
   const missing: MissingItem[] = input.neu
-    .filter((n) => !claimed.has(n.key) && !ignored.has(n.key))
-    .map((n) => ({
+    .map((n, i) => ({ n, wrapper: isWrapper(i) }))
+    .filter(({ n }) => !claimed.has(n.key) && !ignored.has(n.key))
+    .map(({ n, wrapper }) => ({
       id: `x:${n.key}`,
       new_key: n.key,
       heading_text: n.heading_text,
       section_id: n.section_id,
-      needs_content: n.section_id === UNMAPPED_SECTION || isContentSection(n.section_id),
+      needs_content: !wrapper && (n.section_id === UNMAPPED_SECTION || isContentSection(n.section_id)),
       guidance: n.guidance ?? null
     }))
 
@@ -234,7 +246,10 @@ export const classify = (input: ClassifyInput): MigrationGroups => {
         structure_only_dropped.push(o.key)
         continue
       }
-      extra.push({ id: `e:${o.key}`, old_key: o.key, heading_text: o.heading_text, section_id: o.section_id, follower_keys: followers, choices: ["keep_custom", isFreeTextSection(o.section_id) ? "delete" : DROP_FROM_PRINT, ...moveChoices], ai_choices: aiMoves, decision_required: true })
+      // Chỉ mục chữ tự do chuyển vào mục có cấu trúc mới gọi AI (resolve-step); mục khung chuyển chỗ in không gọi AI ⇒ không nhãn "dùng
+      // AI", không tính credit (test tay 11/11: ước tính 3 credit, thực tế 0)
+      const free = isFreeTextSection(o.section_id)
+      extra.push({ id: `e:${o.key}`, old_key: o.key, heading_text: o.heading_text, section_id: o.section_id, follower_keys: followers, choices: ["keep_custom", free ? "delete" : DROP_FROM_PRINT, ...moveChoices], ai_choices: free ? aiMoves : [], decision_required: true })
       continue
     }
 
@@ -261,6 +276,28 @@ export const classify = (input: ClassifyInput): MigrationGroups => {
   }
 
   return { matched, missing, extra, conflict, edited_since, structure_only_dropped, restored_from_snapshot: input.edited ? restored : null }
+}
+
+/**
+ * Nhóm mục thiếu sau quyết định của BA: mục là đích của `move_to:<new_key>` (đã quyết) nhận nội dung chuyển vào ⇒ không còn "Cần viết"
+ * (`needs_content = false`, ghi `moved_in`). `groups` lưu trên migration là kết quả phân nhóm lúc ghép, không đổi theo quyết định ⇒ DTO
+ * và bước áp dụng đọc qua hàm này. Truyền quyết định **đã giải** (AI không chuyển được ⇒ `keep_custom`) để mục đó vẫn là mục thiếu.
+ */
+export const missingAfterMoves = (groups: MigrationGroups, decisions: readonly { id: string; choice: string }[]): MigrationGroups => {
+  const movedIn = new Map<string, string[]>()
+  for (const d of decisions) {
+    if (!d.choice.startsWith("move_to:")) continue
+    const key = d.choice.slice("move_to:".length)
+    movedIn.set(key, [...(movedIn.get(key) ?? []), d.id])
+  }
+  if (!movedIn.size) return groups
+  return {
+    ...groups,
+    missing: groups.missing.map((m) => {
+      const from = movedIn.get(m.new_key)
+      return from ? { ...m, needs_content: false, moved_in: from } : m
+    })
+  }
 }
 
 export interface DecidableItem {
