@@ -82,7 +82,7 @@ export const SCHEMA_EXCERPT: Readonly<Record<string, string>> = {
     'functions[]: { name, trigger, description, screen_id: <screen id / name or null>, normal: string[] (main flow steps), abnormal: string[] (alternative/exception flows), validations: [{ kind: "business" | "format" | "required", statement }], business_rule_ids: <business rule ids>, priority: "must" | "should" | "could" | "wont" | null, interactions?: [{ from: <actor id / name or "system">, to: <actor id / name or "system">, message, kind: "request" | "response", flow: "normal" | "abnormal", guard? }] (only from a sequence diagram) }',
   nfrs: 'nfrs[]: { statement, kind: "quantitative" | "descriptive", metric?, threshold?, priority }',
   deployment_nodes:
-    'deployment_nodes[]: { name, kind: "device" | "execution_environment" | "node", parent: <name / key of the node that contains it, or null>, artifacts: string[], components: string[], links: [{ to: <node name / key>, protocol? }] } (only from a deployment diagram)',
+    'deployment_nodes[]: { name, kind: "device" | "execution_environment" | "node", parent: <name / key of the node that contains it, or null>, description?: <the small text under the node name, one string as written — NOT components>, artifacts: string[], components: string[] (only shapes drawn as UML artifact / component or a list labelled so), links: [{ to: <node name / key>, protocol? }] } (only from a deployment diagram)',
   business_rules: 'business_rules[]: { statement, tier: "high" | "detail" }',
   common_requirements: "common_requirements[]: { category, statement }",
   messages: "messages[]: { code, text, function_ids: <function ids / names that show it> }",

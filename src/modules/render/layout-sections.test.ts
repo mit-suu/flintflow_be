@@ -88,11 +88,11 @@ describe("placeSections — thứ tự theo file, chèn đầu mục FPT thiếu
     expect(placed.find((p) => p.section_id === "custom:CS01")?.kind).toBe("continuation")
   })
 
-  it("mẫu bắt buộc (chế độ 3): không chèn heading ngoài mẫu", () => {
+  it("mẫu bắt buộc (chế độ 3): không chèn heading ngoài mẫu — trừ chức năng mới dưới feature của nó (TechMart 11/11, user chốt)", () => {
     const s = spine()
     s.functions.push({ ...s.functions[0], id: "FN02", order: 1, name: "Quên mật khẩu" })
     const ids = placeSections(s, { ...LAYOUT, fixedTemplate: true }).map((p) => p.section_id)
-    const fileOrder = ["fixed:1", "custom:CS01", "fixed:2.1", "feature:F-4", "function:FN01", "group:4", "fixed:4.2.3", "custom:CS02"]
+    const fileOrder = ["fixed:1", "custom:CS01", "fixed:2.1", "feature:F-4", "function:FN01", "function:FN02", "group:4", "fixed:4.2.3", "custom:CS02"]
     expect(ids).toEqual(fileOrder)
   })
 
@@ -785,5 +785,19 @@ describe("FLF-390 — sơ đồ triển khai ở mục Phân tán (mẫu IEEE), 
     expect(pngsOf("slot:distribution")).toEqual(["PNG:D01"])
     expect(pngsOf("fixed:4.1")).toEqual([])
     expect(pngsOf("feature:F-4")).toEqual(["PNG:D02"])
+  })
+})
+
+
+describe("TechMart 11/11 — chức năng mới trong mẫu cố định", () => {
+  it("đứng sau mọi chức năng của file trong feature (không đổi số mục của file) và ghi mã use case như file", () => {
+    const s = spine()
+    s.functions.push({ ...s.functions[0], id: "FN09", order: 0, name: "So sánh" })
+    s.use_cases.push({ id: "UC-21", name: "So sánh", actor_ids: [], function_ids: ["FN09"], description: "", includes: [], extends: [] } as never)
+    const layout = { ...LAYOUT, fixedTemplate: true, layout: LAYOUT.layout.map((e) => (e.section_id === "function:FN01" ? { ...e, heading_text: "4.1 Đăng nhập (UC-01)" } : e)) }
+    const placed = placeSections(s, layout)
+    const ids = placed.map((p) => p.section_id)
+    expect(ids.indexOf("function:FN09")).toBe(ids.indexOf("function:FN01") + 1)
+    expect(placed.find((p) => p.section_id === "function:FN09")?.title).toBe("So sánh (UC-21)")
   })
 })

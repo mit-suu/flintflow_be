@@ -73,7 +73,11 @@ describe("renderActivity — mỗi use case có luồng xử lý một hình (ph
     expect(svgTitleOf(parts[0].source)).toBe(`Activity Diagram — ${UC_NAME}`)
     expect(parts[0].issues).toEqual([])
     expect(parts[0].source).toContain("[invalid]")
-    expect(parts[0].source).toContain("Credentials valid?")
+    // Câu hỏi nằm trong hình thoi (UML) — có thể xuống dòng
+    expect(parts[0].source).toMatch(/Credentials[\s\S]*valid\?/)
+    expect(parts[0].source).toMatch(/<polygon points="[^"]+"/)
+    const diamond = /<polygon points="([^"]+)"[^>]*>\s*(?:<title>)?/.exec(parts[0].source)!
+    expect(diamond[1].trim().split(/\s+/)).toHaveLength(4)
   })
 
   it("không function nào có nút ⇒ không có hình; renderKind ghi source_hash", () => {

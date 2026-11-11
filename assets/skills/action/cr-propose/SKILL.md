@@ -1,7 +1,7 @@
 ---
 skill_id: cr-propose
 kind: action
-version: 2.6.0
+version: 2.7.0
 description: Mode 1 C-4 — for every affected Spine element conclude edit | comment | not_related and propose the Spine ops
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -28,6 +28,7 @@ and keep every other field exactly as it is — each changed field is a revision
 ## Context
 
 - CR {{cr_id}}: {{title}}
+- Document language: {{document_language}}
 - Description: {{description}}
 - Clarification answers (an empty answer means "I don't know"; when rounds disagree, the later round wins): {{answers}}
 - Source material attached by the user (the requester's own documents — the primary source of facts):
@@ -85,7 +86,13 @@ and keep every other field exactly as it is — each changed field is a revision
    the CR" ⇒ also edit the old element / passage that said otherwise so the document no longer says both (a passage
    kept verbatim: set that `custom_sections` element's `blocks`, changing only the conflicting sentence); when no op
    can express it, conclude `comment` naming the passage to fix. "keep it as it is" ⇒ do not change that content.
-10. `reason`, `comment_text` and `assumptions`: User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`, `feature:@B0012`), element paths (`actors[id=A02].name`), block ids (`B0012`) or location ids (`L001`). Name a section by its heading and an element by its name or document code (`UC-01` is fine).
+10. **Language.** All new or changed text — values in `spine_ops`, `reason`, `comment_text`, `assumptions` — is in the
+    *Document language* above, matching the language and terms the element's current value and the glossary already
+    use (a Vietnamese document gets a Vietnamese step "Sau khi GVCN lưu điểm danh, …", never an English one "After the
+    teacher saves…"; a new label in `flows_in` / `flows_out` follows the existing labels). Never translate content
+    into the language of the change request or the material. Names quoted from the document or the CR keep their
+    original form. A proposal with text in another language fails the checks and is redone.
+11. `reason`, `comment_text` and `assumptions`: User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`, `feature:@B0012`), element paths (`actors[id=A02].name`), block ids (`B0012`) or location ids (`L001`). Name a section by its heading and an element by its name or document code (`UC-01` is fine).
 
 ## Output
 

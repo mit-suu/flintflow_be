@@ -52,7 +52,8 @@ export const CONTENT_SLOTS: readonly ContentSlotDef[] = Object.freeze([
   { id: "slot:verification", label_en: "Verification", label_vi: "Kiểm chứng", parents: [], targets: ["verifications"] },
   // FLF-390: mục "Phân tán" của "Thiết kế và triển khai" (mẫu IEEE / jam01 3.5) — chỗ in sơ đồ triển khai. Dữ liệu chỉ từ
   // ảnh sơ đồ (đọc ảnh) hoặc người dùng yêu cầu, không trích từ chữ
-  { id: "slot:distribution", label_en: "Distribution", label_vi: "Phân tán", parents: [], targets: [] }
+  // FLF-390 / QLHS 11/11: mục "Phân tán" chứa sơ đồ triển khai ⇒ trích `deployment_nodes` (ảnh + chữ); trước đây targets rỗng nên ảnh không được đọc
+  { id: "slot:distribution", label_en: "Distribution", label_vi: "Phân tán", parents: [], targets: ["deployment_nodes"] }
 ])
 
 const SLOT_BY_ID = new Map<string, ContentSlotDef>(CONTENT_SLOTS.map((s) => [s.id, s]))
@@ -137,7 +138,7 @@ export const slotHasData = (spine: Spine, slotId: string): boolean => {
  */
 const SUGGESTION_RULES: readonly [RegExp, string | null][] = [
   [/\bsafety\b|maintainab|portab|supportab|\blegal\b|licens|document conventions?|\breferences?\b|data retention|archiv/, null],
-  [/\bdistribution\b|phân tán|deployment (view|diagram|topology)|sơ đồ triển khai/, "slot:distribution"],
+  [/\bdistribution\b|phân tán|deployment (view|diagram|topology)|sơ đồ triển khai|^(sơ đồ )?(triển khai|deployment)$/, "slot:distribution"],
   [/\bpurpose\b|mục đích|\bvision\b|tầm nhìn/, "slot:vision"],
   [/\bgoals?\b|\bobjectives?\b|mục tiêu/, "slot:goals"],
   [/\bscope\b|phạm vi/, "slot:scope"],

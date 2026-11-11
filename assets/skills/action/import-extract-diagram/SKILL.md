@@ -1,7 +1,7 @@
 ---
 skill_id: import-extract-diagram
 kind: action
-version: 1.2.1
+version: 1.2.2
 description: Mode 1 I-4 (images) — classify one diagram image of an imported SRS section and extract the Spine entities it shows
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -76,7 +76,13 @@ labels exactly as drawn, you never invent elements, arrows or names that you can
      `{ "system_name": <label> }` (key `null`).
    - `deployment`: every 3D box ⇒ `deployment_nodes` (`kind`: `device` for `<<device>>` / hardware, `execution_environment`
      for `<<executionEnvironment>>` / OS / runtime / container / database server, else `node`); `parent` = the name of
-     the box it is drawn inside (or null); `components` / `artifacts` = names of the component / artifact shapes inside it;
+     the box it is drawn inside (or null); `components` / `artifacts` = names of the component / artifact shapes inside it.
+     The smaller / grey text under a box's bold name is that node's `description` (who uses it, its role, properties):
+     one string exactly as written, never split on commas, never turned into components. Box "Trình duyệt" with
+     "GV, phụ huynh" under it ⇒ `{ "name": "Trình duyệt", "description": "GV, phụ huynh", "components": [] }`; likewise
+     "Reverse proxy" / "TLS, ép HTTPS", "Web Server" / "public, port 443". `components` / `artifacts` only for named
+     software units drawn as UML component (box with the two-tab icon or `<<component>>`) / artifact (document icon or
+     `<<artifact>>`) shapes, or a list labelled as components / artifacts — otherwise `[]`.
      `links` = one `{ to: <other box name>, protocol: <label on the line> }` per line leaving this box (each line once).
    - `sequence` describes **one function** (the section's function, or the function / use case named in the caption or
      title): return **one** `functions` item whose `key` is that function's key from *Known keys* (never a new function; no
@@ -99,7 +105,7 @@ labels exactly as drawn, you never invent elements, arrows or names that you can
    name in `key`.
 3. References (`actor_ids`, `includes`, `extends`, `relations`, `flow_to`, interaction ends, lanes) use keys from *Known keys* or, for elements
    without a key, their **name as drawn** — code resolves names.
-4. `value` holds only what the image shows (usually just `name` and the references). No descriptions you made up.
+4. `value` holds only what the image shows (usually just `name` and the references). No descriptions you made up (a description written in the image, like a node subtitle, is fine).
 5. `source_block_ids`: always `["{{block_id}}"]`.
 6. `confidence` in [0, 1]: at most 0.7 — reading an image is never as sure as reading text; 0.5 or less when a
    label is small, cut off or ambiguous. The user confirms every item before it enters the Spine.

@@ -90,8 +90,11 @@ export const redrawDecision = (
   // FLF-375 (B12): chú thích ngay sau ảnh ("H2 · sơ đồ use case tổng quát: 5 tác nhân, 10 use case") mô tả HÌNH CŨ — thay
   // hình mà giữ chú thích thì tài liệu tự mâu thuẫn (AI kiểm hỏi lại mãi). Bỏ chú thích cùng ảnh; hình vẽ lại có tiêu đề riêng.
   const captions = new Set(custom.blocks.filter((b, i) => i > 0 && stale.has(custom.blocks[i - 1]) && isFigureCaption(b)))
-  const dropped = new Set([...stale, ...captions])
-  const blocks = custom.blocks.filter((b) => !dropped.has(b))
+  // Bug #16 (QLHS 11/11): giữ CHỖ của ảnh gốc (khối ảnh không file, còn `diagram`) ⇒ hình vẽ lại in đúng chỗ đó; trước đây xoá
+  // hẳn ảnh nên hình mới chạy về mục mặc định của loại sơ đồ (activity ⇒ 2.3) hoặc không in (ngữ cảnh ở mục không có đoạn ghi)
+  const blocks = custom.blocks
+    .filter((b) => !captions.has(b))
+    .map((b): CustomBlock => (stale.has(b) ? { kind: "image", text: "", rows: null, image_ref: null, diagram: b.diagram } : b))
   return {
     conclusion: "edit",
     reason: `${labels} (hình gốc của tài liệu) không còn khớp dữ liệu sau change request này ⇒ thay bằng sơ đồ FlintFlow vẽ lại từ dữ liệu mới. Không đồng ý ⇒ giữ hình gốc, tài liệu có cờ vàng "Hình gốc lệch dữ liệu".`,

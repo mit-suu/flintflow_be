@@ -40,7 +40,7 @@ import {
   sentencesFor,
   slotTextFor
 } from "./labels.js"
-import type { Change, DiagramKind, Nfr, NfrCategory, Spine } from "../spine/spine.types.js"
+import type { Change, DiagramKind, Nfr, NfrCategory, OriginalDiagramKind, Spine } from "../spine/spine.types.js"
 
 /**
  * T15 review T5: `fixed:I` không cần `before`/`value` (chỉ mô tả A/M/D + ngày/người/lý do) — caller
@@ -732,6 +732,18 @@ const useCaseActivities = (spine: Spine, sectionId: string, ctx: SectionRenderCo
  */
 export const functionDiagramBlocks = (spine: Spine, ownerId: string, kind: "sequence" | "activity", ctx: SectionRenderContext): Block[] =>
   kind === "sequence" ? sequenceBlocks(spine, ownerId, ctx) : activityBlocks(spine, ownerId, ctx)
+
+/**
+ * QLHS 11/11 (bug #16): hình FlintFlow vẽ lại thay một ảnh sơ đồ gốc — in đúng chỗ ảnh cũ (CR giữ chỗ đặt hình thay vì
+ * xoá ảnh), không chạy về mục mặc định của loại sơ đồ.
+ */
+export const generatedDiagramBlocks = (spine: Spine, kind: OriginalDiagramKind, ownerId: string | null | undefined, ctx: SectionRenderContext): Block[] => {
+  if (kind === "sequence" || kind === "activity") return ownerId ? functionDiagramBlocks(spine, ownerId, kind, ctx) : []
+  if (kind === "deployment") return deploymentBlocks(spine, ctx)
+  const labels = diagramLabelsFor(ctx.language)
+  const caption = kind === "context" ? "Figure — System Context Diagram" : kind === "usecase" ? "Use Case Diagram" : kind === "screen_flow" ? labels.screensFlowTitle() : labels.erdTitle
+  return diagramImages(spine, kind, undefined, ctx, caption, svgCaption, (d) => kind !== "usecase" || d.section !== ACTOR_HIERARCHY_SECTION)
+}
 
 /**
  * FLF-390: sơ đồ triển khai của hệ thống (nếu đã vẽ), kèm đoạn mô tả — mẫu IEEE in dưới "Phân tán" (`slot:distribution`),

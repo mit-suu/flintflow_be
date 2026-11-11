@@ -25,7 +25,7 @@ import {
 } from "./extracted-entities.js"
 import { findingOps } from "./check.service.js"
 import { MODE1_RULE_PROFILE } from "./mode1-rule-profile.js"
-import { buildImportOps, droppedPermissionFindings, relationPhrase, ruleTierOfSections, type BuiltEntity, type DroppedPermission } from "./spine-builder.js"
+import { buildImportOps, droppedPermissionFindings, relationPhrase, ruleTierOfSections, splitSubtitleComponents, type BuiltEntity, type DroppedPermission } from "./spine-builder.js"
 import { buildLayoutSections } from "../render/layout-sections.js"
 
 describe("extracted-entities", () => {
@@ -587,6 +587,43 @@ describe("buildImportOps", () => {
     ])
   })
 
+  it("QLHS 11/11 bug #14: dòng chữ phụ dưới tên nút là mô tả, không phải component", () => {
+    const spine = createEmptySpine({ name: "QLHS" })
+    const ops = buildImportOps(spine, [
+      { entity: "deployment_nodes", id: "DN01", value: { name: "Trình duyệt", components: ["GV", "phụ huynh"] } },
+      { entity: "deployment_nodes", id: "DN02", value: { name: "Reverse proxy", components: ["TLS", "ép HTTPS"] } },
+      { entity: "deployment_nodes", id: "DN03", value: { name: "Kho sao lưu", components: ["30 bản, tách biệt"] } },
+      { entity: "deployment_nodes", id: "DN04", value: { name: "Máy chủ SMTP", description: ["của nhà trường"] } },
+      { entity: "deployment_nodes", id: "DN05", value: { name: "CSDL quan hệ", description: "dữ liệu chính", components: ["dữ liệu chính"] } },
+      { entity: "deployment_nodes", id: "DN06", value: { name: "Máy chủ ứng dụng", components: ["API Service", "Docker"] } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.deployment_nodes.map((n) => [n.id, n.description, n.components])).toEqual([
+      ["DN01", "GV, phụ huynh", []],
+      ["DN02", "TLS, ép HTTPS", []],
+      ["DN03", "30 bản, tách biệt", []],
+      ["DN04", "của nhà trường", []],
+      ["DN05", "dữ liệu chính", []],
+      ["DN06", undefined, ["API Service", "Docker"]]
+    ])
+  })
+
+  it("splitSubtitleComponents: bảo thủ — tên phần mềm / tên đơn lẻ mơ hồ giữ là component", () => {
+    const keep = (c: string[]) => expect(splitSubtitleComponents(c, "")).toEqual({ components: c, description: "" })
+    keep(["Docker"])
+    keep(["Web Browser"])
+    keep(["nginx"])
+    keep(["GV"])
+    keep(["api.js", "chạy nền"])
+    keep(["Notification Service", "gửi thư"])
+    keep(["ApiGateway", "ép HTTPS"])
+    keep(["phần mềm quản lý học sinh của nhà trường cấp hai"])
+    expect(splitSubtitleComponents(["public", "port 443"], "")).toEqual({ components: [], description: "public, port 443" })
+    expect(splitSubtitleComponents(["dữ liệu chính"], "")).toEqual({ components: [], description: "dữ liệu chính" })
+    expect(splitSubtitleComponents(["Docker"], "API REST, Docker")).toEqual({ components: [], description: "API REST, Docker" })
+    expect(splitSubtitleComponents(["Redis"], "API REST")).toEqual({ components: ["Redis"], description: "API REST" })
+  })
+
   it("FLF-252: tham chiếu ghi mã khác dạng id ('E-02', 'a1') vẫn ra đúng phần tử", () => {
     const spine = createEmptySpine({ name: "Edu" })
     const ops = buildImportOps(spine, [
@@ -716,5 +753,40 @@ describe("FLF-390 actor kế thừa, luồng ngữ cảnh, actor User cho use ca
     expect(spine.actors.some((a) => a.name === "User")).toBe(false)
     expect(spine.use_cases.find((u) => u.name === "Log In")?.actor_ids).toEqual(["A02", "A03", "A04", "A05"])
     expect(spine.use_cases.find((u) => u.name === "Search Products")?.actor_ids).toEqual(["A01", "A02"])
+  })
+})
+
+describe("relationRefs — chiều quan hệ trong ô 'Quan hệ' (QLHS 11/11)", () => {
+  it("1–n ⇒ phía nhiều của thực thể này; n–1 ⇒ cha; mục không ghi bội số theo mục đứng trước", async () => {
+    const { relationRefs } = await import("./spine-builder.js")
+    expect(relationRefs(["1–n Điểm", "Điểm danh", "Hạnh kiểm"]).map((r) => [r.ref, r.side])).toEqual([["Điểm", "child"], ["Điểm danh", "child"], ["Hạnh kiểm", "child"]])
+    expect(relationRefs(["n–1 Học sinh", "Môn học", "Học kỳ"]).map((r) => r.side)).toEqual(["parent", "parent", "parent"])
+    expect(relationRefs(["1-1 Hồ sơ"])[0]).toEqual({ ref: "Hồ sơ", side: "one" })
+    expect(relationRefs(["Học kỳ"])[0]).toEqual({ ref: "Học kỳ", side: "child" })
+  })
+})
+
+describe("dropReciprocalRelations — mỗi cặp quan hệ một chiều (QLHS 11/11 bug #12)", () => {
+  it("khoá ngoại quyết định chiều; không có thì thực thể đứng trước là cha; 1–1 giữ nguyên", async () => {
+    const { dropReciprocalRelations } = await import("./spine-builder.js")
+    const ent = (id: string, name: string, relations: string[], attributes: unknown[] = [], cardinality: Record<string, "1" | "N"> = {}) => ({ id, value: { name, attributes }, relations, cardinality })
+    const list = [
+      ent("E01", "Năm học", ["E02"]),
+      ent("E02", "Học kỳ", ["E01", "E09"]),
+      ent("E06", "Học sinh", ["E12"], [{ name: "mã" }, { name: "mã TK phụ huynh" }]),
+      ent("E09", "Điểm", []),
+      ent("E12", "Tài khoản", ["E06"]),
+      ent("E20", "Hồ sơ", ["E21"], [], { E21: "1" }),
+      ent("E21", "Ảnh", ["E20"])
+    ]
+    dropReciprocalRelations(list)
+    const rel = Object.fromEntries(list.map((e) => [e.id, e.relations]))
+    expect(rel.E01).toEqual(["E02"])
+    expect(rel.E02).toEqual(["E09"])
+    // Học sinh có "mã TK phụ huynh" ⇒ Tài khoản là cha dù Học sinh đứng trước
+    expect(rel.E12).toEqual(["E06"])
+    expect(rel.E06).toEqual([])
+    expect(rel.E20).toEqual(["E21"])
+    expect(rel.E21).toEqual(["E20"])
   })
 })
