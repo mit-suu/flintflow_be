@@ -88,11 +88,11 @@ describe("QLHS 11/11 bug #13: User có mũi tên kế thừa trên chính sơ đ
   /** Mọi đầu tam giác rỗng (polygon nền trắng) trong SVG. */
   const triangles = (svg: string) => svg.match(/<polygon [^>]*fill="#fff"/g) ?? []
   const lines = (svg: string) => [...svg.matchAll(/<line x1="([^"]+)" y1="([^"]+)" x2="([^"]+)" y2="([^"]+)"/g)].map((m) => m.slice(1, 5).map(Number))
-  /** Số đường nối vào gốc thân mang tam giác chung (= số actor con của User). */
+  /** Số nhánh ngang chạm thanh gom dọc của thân mang tam giác chung (= số actor con của User). */
   const generalizationCount = (svg: string): number => {
     const tip = triangles(svg)[0]!.match(/points="([^ ]+)/)![1].split(",").map(Number)
     const trunk = lines(svg).find(([, , x2, y2]) => x2 === tip[0] && y2 === tip[1])!
-    return lines(svg).filter(([, , x2, y2]) => x2 === trunk[0] && y2 === trunk[1]).length
+    return lines(svg).filter(([x1, y1, x2, y2]) => x2 === trunk[0] && y1 === y2 && x1 < x2).length
   }
   const overview = (s: Spine) => renderUseCase(s, null).find((p) => (p as { section?: string }).section === "fixed:2.2.1")!
 

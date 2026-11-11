@@ -316,31 +316,45 @@ describe("generalization trên sơ đồ use case (QLHS 11/11 bug #13)", () => {
     generalizations: kids.map((child) => ({ child, parent: "__user" }))
   })
 
-  it("nhiều con ⇒ mỗi con một đường liền tới gốc thân chung, MỘT tam giác rỗng chạm User; con ở cột ngoài, không lỗi bố cục", () => {
+  it("mỗi con một nhánh ngang từ hông hình que tới thanh gom dọc, MỘT tam giác rỗng chạm User; con ở cột ngoài, không lỗi bố cục", () => {
     const kids = ["A01", "A02", "A03", "A04", "A05"]
     const scene = layoutUseCaseDiagram(diagram(kids))
     expect(checkScene(scene, { allowBends: false })).toEqual([])
-    const edges = paths(scene, "gen:A")
-    expect(edges.map((e) => e.id).sort()).toEqual(kids.map((k) => `gen:${k}>__user`))
     const trunk = paths(scene, "gen:*>__user")
     expect(trunk).toHaveLength(1)
     const head = arrowOf(scene, trunk[0].id)
     expect(head.closed).toBe(true)
     expect(head.fill).toBe("#fff")
-    for (const e of edges) {
+    expect(scene.elements.filter((e) => e.id.startsWith("gen:") && e.id.endsWith("#end"))).toHaveLength(1)
+    const [busX, trunkY] = trunk[0].points[0]
+    const bus = paths(scene, "gen:bus>__user")[0]
+    expect(bus.points.every(([x]) => x === busX)).toBe(true)
+    const stubs = paths(scene, "gen:A")
+    expect(stubs.map((e) => e.id).sort()).toEqual(kids.map((k) => `gen:${k}>__user`))
+    const [busTop, busBottom] = [Math.min(bus.points[0][1], bus.points[1][1]), Math.max(bus.points[0][1], bus.points[1][1])]
+    expect(trunkY).toBeGreaterThanOrEqual(busTop)
+    expect(trunkY).toBeLessThanOrEqual(busBottom)
+    for (const e of stubs) {
+      const kid = e.id.slice(4, 7)
+      const body = scene.find(`actor:${kid}#body`) as Path
       expect(e.dashed).toBe(false)
-      expect(e.points[1]).toEqual(trunk[0].points[0])
+      expect(e.points[0]).toEqual(body.points[1]) // bắt đầu ĐÚNG ở hông hình que
+      expect(e.points[1]).toEqual([busX, e.points[0][1]]) // nhánh ngang chạm thanh gom
+      expect(e.points[1][1]).toBeGreaterThanOrEqual(busTop)
+      expect(e.points[1][1]).toBeLessThanOrEqual(busBottom)
     }
     const headX = (id: string) => (scene.find(`actor:${id}#head`) as Ellipse).cx
     // User ở cột sát khung, các vai trò ở cột ngoài (bên trái User), mọi actor người bên trái khung
-    for (const k of kids) expect(headX(k)).toBeLessThan(headX("__user"))
+    for (const k of kids) expect(headX(k)).toBeLessThan(busX)
+    expect(busX).toBeLessThan(headX("__user"))
     expect(headX("__user")).toBeLessThan(0)
   })
 
-  it("một con ⇒ tam giác ngay trên đường của nó; không có generalization ⇒ không đường gen", () => {
+  it("một con ⇒ vẫn một tam giác chạm User; không có generalization ⇒ không đường gen", () => {
     const one = layoutUseCaseDiagram(diagram(["A01"]))
     expect(checkScene(one, { allowBends: false })).toEqual([])
-    expect(arrowOf(one, "gen:A01>__user").closed).toBe(true)
+    expect(paths(one, "gen:A01>__user")).toHaveLength(1)
+    expect(arrowOf(one, "gen:*>__user").closed).toBe(true)
     const none = layoutUseCaseDiagram({ ...diagram(["A01"]), generalizations: undefined })
     expect(paths(none, "gen:")).toHaveLength(0)
   })
