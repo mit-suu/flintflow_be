@@ -32,6 +32,19 @@ describe("renderDeployment — một sơ đồ triển khai cho cả hệ thốn
     expect(src).not.toContain("!include")
   })
 
+  it("QLHS 11/11 bug #14: mô tả nút = dòng thứ hai in nghiêng dưới tên, không thành component", () => {
+    const src = deploymentSource({
+      deployment_nodes: [
+        { id: "DN01", name: "Trình duyệt", kind: "device", parent_id: null, artifacts: [], components: [], description: "GV, phụ huynh" },
+        { id: "DN02", name: "Proxy", kind: "node", parent_id: null, artifacts: [], components: [], description: 'a <b> "c"' }
+      ],
+      deployment_links: []
+    })
+    expect(src).toContain('node "Trình duyệt\\n<i>GV, phụ huynh</i>" <<device>> as DN01')
+    expect(src).toContain("node \"Proxy\\n<i>a b 'c'</i>\" as DN02")
+    expect(src).not.toContain("component")
+  })
+
   it("cha không có / vòng cha ⇒ vẽ là nút gốc; đường trùng cặp / tự nối / nút không có bị bỏ", () => {
     const src = deploymentSource({
       deployment_nodes: [

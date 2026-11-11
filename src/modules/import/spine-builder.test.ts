@@ -25,7 +25,7 @@ import {
 } from "./extracted-entities.js"
 import { findingOps } from "./check.service.js"
 import { MODE1_RULE_PROFILE } from "./mode1-rule-profile.js"
-import { buildImportOps, droppedPermissionFindings, relationPhrase, ruleTierOfSections, type BuiltEntity, type DroppedPermission } from "./spine-builder.js"
+import { buildImportOps, droppedPermissionFindings, relationPhrase, ruleTierOfSections, splitSubtitleComponents, type BuiltEntity, type DroppedPermission } from "./spine-builder.js"
 import { buildLayoutSections } from "../render/layout-sections.js"
 
 describe("extracted-entities", () => {
@@ -585,6 +585,43 @@ describe("buildImportOps", () => {
       { from: "DN02", to: "DN03", protocol: "TCP" },
       { from: "DN01", to: "DN02" }
     ])
+  })
+
+  it("QLHS 11/11 bug #14: dòng chữ phụ dưới tên nút là mô tả, không phải component", () => {
+    const spine = createEmptySpine({ name: "QLHS" })
+    const ops = buildImportOps(spine, [
+      { entity: "deployment_nodes", id: "DN01", value: { name: "Trình duyệt", components: ["GV", "phụ huynh"] } },
+      { entity: "deployment_nodes", id: "DN02", value: { name: "Reverse proxy", components: ["TLS", "ép HTTPS"] } },
+      { entity: "deployment_nodes", id: "DN03", value: { name: "Kho sao lưu", components: ["30 bản, tách biệt"] } },
+      { entity: "deployment_nodes", id: "DN04", value: { name: "Máy chủ SMTP", description: ["của nhà trường"] } },
+      { entity: "deployment_nodes", id: "DN05", value: { name: "CSDL quan hệ", description: "dữ liệu chính", components: ["dữ liệu chính"] } },
+      { entity: "deployment_nodes", id: "DN06", value: { name: "Máy chủ ứng dụng", components: ["API Service", "Docker"] } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.deployment_nodes.map((n) => [n.id, n.description, n.components])).toEqual([
+      ["DN01", "GV, phụ huynh", []],
+      ["DN02", "TLS, ép HTTPS", []],
+      ["DN03", "30 bản, tách biệt", []],
+      ["DN04", "của nhà trường", []],
+      ["DN05", "dữ liệu chính", []],
+      ["DN06", undefined, ["API Service", "Docker"]]
+    ])
+  })
+
+  it("splitSubtitleComponents: bảo thủ — tên phần mềm / tên đơn lẻ mơ hồ giữ là component", () => {
+    const keep = (c: string[]) => expect(splitSubtitleComponents(c, "")).toEqual({ components: c, description: "" })
+    keep(["Docker"])
+    keep(["Web Browser"])
+    keep(["nginx"])
+    keep(["GV"])
+    keep(["api.js", "chạy nền"])
+    keep(["Notification Service", "gửi thư"])
+    keep(["ApiGateway", "ép HTTPS"])
+    keep(["phần mềm quản lý học sinh của nhà trường cấp hai"])
+    expect(splitSubtitleComponents(["public", "port 443"], "")).toEqual({ components: [], description: "public, port 443" })
+    expect(splitSubtitleComponents(["dữ liệu chính"], "")).toEqual({ components: [], description: "dữ liệu chính" })
+    expect(splitSubtitleComponents(["Docker"], "API REST, Docker")).toEqual({ components: [], description: "API REST, Docker" })
+    expect(splitSubtitleComponents(["Redis"], "API REST")).toEqual({ components: ["Redis"], description: "API REST" })
   })
 
   it("FLF-252: tham chiếu ghi mã khác dạng id ('E-02', 'a1') vẫn ra đúng phần tử", () => {
