@@ -24,7 +24,7 @@ vi.mock("../pipeline/meter.service.js", () => ({
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { AiActionError, ActionType } from "../../shared/ai/ai-action.types.js"
 import { finalizeCall, releaseCall, reserveCall } from "../pipeline/meter.service.js"
-import { classifyAiFailure, isInsufficientCredit, withMeteredAi } from "./metered-ai.js"
+import { classifyAiFailure, isInsufficientCredit, VISION_UNAVAILABLE, withMeteredAi } from "./metered-ai.js"
 
 const exec = vi.mocked(executeAiAction)
 const PROJECT = "64b000000000000000000001"
@@ -151,6 +151,7 @@ describe("FLF-360 classifyAiFailure — lỗi tạm thời / hết credit / cấ
   it("tạm thời: quá tải \"high demand\", 503, 429 không phải hết tiền, timeout, lỗi mạng", () => {
     expect(classifyAiFailure(new AiActionError(503, "high demand", "GEMINI_OVERLOADED"))).toBe("transient")
     expect(classifyAiFailure(new AiActionError(503, "Service Unavailable", "PROVIDER_ERROR"))).toBe("transient")
+    expect(classifyAiFailure(new AiActionError(529, "Overloaded", "ANTHROPIC_ERROR"))).toBe("transient")
     expect(classifyAiFailure(new AiActionError(429, "Too many requests", "RATE_LIMIT_EXCEEDED"))).toBe("transient")
     expect(classifyAiFailure(new AiActionError(504, "deadline", "GEMINI_TIMEOUT"))).toBe("transient")
     expect(classifyAiFailure(Object.assign(new Error("socket"), { code: "ECONNRESET" }))).toBe("transient")
@@ -171,6 +172,8 @@ describe("FLF-360 classifyAiFailure — lỗi tạm thời / hết credit / cấ
   })
 
   it("cấu hình / không tự khỏi: thiếu khoá vision, provider không nhận ảnh, 400 / 403", () => {
+    expect(VISION_UNAVAILABLE.has("ANTHROPIC_KEY_MISSING")).toBe(true)
+    expect(classifyAiFailure(new AiActionError(500, "Anthropic API key is missing.", "ANTHROPIC_KEY_MISSING"))).toBe("config")
     expect(classifyAiFailure(new AiActionError(500, "Gemini API key is missing.", "GEMINI_KEY_MISSING"))).toBe("config")
     expect(classifyAiFailure(new AiActionError(400, "no vision", "AI_PROVIDER_NO_VISION"))).toBe("config")
     expect(classifyAiFailure(new AiActionError(400, "bad request", "PROVIDER_ERROR"))).toBe("config")
