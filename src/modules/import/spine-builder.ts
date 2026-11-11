@@ -81,6 +81,31 @@ const strList = (v: unknown): string[] => {
   return s ? s.split(/\n+/).map((x) => x.replace(/^\s*(?:\d+[.)]|[-•*])\s*/, "").trim()).filter(Boolean) : []
 }
 
+// QLHS 11/11 bug #14: dòng chữ nhỏ dưới tên nút ("GV, phụ huynh") là mô tả, không phải component
+const SOFTWARE_WORD = /\b(service|server|api|app|application|module|component|bundle|database|db|gateway|worker|client|frontend|backend|engine|runtime|daemon|plugin|library|sdk)\b/i
+/** Tên giống phần mềm: file / đường dẫn (`api.js`, `bin/app`), PascalCase liền (`ApiGateway`), `<<…>>`, hoặc từ khoá phần mềm. */
+const looksSoftware = (s: string): boolean =>
+  /\.\w{1,5}$|[/\\]|<<|>>/.test(s) || /^[A-Z][a-z0-9]+[A-Z]\w*$/.test(s) || SOFTWARE_WORD.test(s)
+/** Mảnh văn xuôi: chữ thường đầu + nhiều từ (`phụ huynh`), có dấu phẩy (`30 bản, tách biệt`), số + từ (`30 bản`). */
+const looksProse = (s: string): boolean => /^\p{Ll}\S*\s/u.test(s) || s.includes(",") || /^\d+\s+\p{L}/u.test(s)
+
+/**
+ * Lưới an toàn cho `components` của nút triển khai đọc từ ảnh. Chỉ chuyển khi nút chưa có mô tả, MỌI mảnh đều ngắn
+ * (≤ 40 ký tự, ≤ 5 từ), không mảnh nào giống phần mềm, và ít nhất một mảnh là văn xuôi ⇒ nối ", " thành mô tả.
+ * Tên đơn lẻ mơ hồ ("Docker", "Web Browser", "API Service", "nginx") không phải văn xuôi ⇒ giữ là component.
+ * Nút đã có mô tả: bỏ những component chỉ lặp lại chữ trong mô tả.
+ */
+export const splitSubtitleComponents = (components: string[], description: string): { components: string[]; description: string } => {
+  if (components.length === 0) return { components, description }
+  if (description) {
+    const d = description.toLowerCase()
+    return { components: components.filter((c) => !d.includes(c.toLowerCase())), description }
+  }
+  const short = components.every((c) => c.length <= 40 && c.split(/\s+/).length <= 5)
+  if (short && !components.some(looksSoftware) && components.some(looksProse)) return { components: [], description: components.join(", ") }
+  return { components, description }
+}
+
 /**
  * `flow_to` đọc từ tài liệu: mỗi phần tử là tên / mã màn đích, hoặc `{ to, trigger?, guard? }` khi sơ đồ ghi nhãn trên
  * mũi tên (hành động) và trên nhánh rẽ (`[điều kiện]`). Màn đích không phân giải được, hoặc chính màn đó ⇒ bỏ; hai cạnh
@@ -687,14 +712,20 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
       }
     }
     for (const n of [...nodeItems].sort((a, b) => depth(a.id!) - depth(b.id!))) {
-      const description = str(n.value.description)
+      // Mô tả nút (dòng chữ phụ dưới tên): mảng thì nối ", ", không tách
+      const rawDescription = n.value.description ?? n.value.subtitle
+      const fixed = splitSubtitleComponents(
+        strList(n.value.components),
+        Array.isArray(rawDescription) ? rawDescription.map(str).filter(Boolean).join(", ") : str(rawDescription)
+      )
+      const description = fixed.description
       add("deployment_nodes", {
         id: n.id,
         name: str(n.value.name) || n.id,
         kind: oneOf(n.value.kind, ["device", "execution_environment", "node"], "node"),
         parent_id: parentOf.get(n.id!) ?? null,
         artifacts: strList(n.value.artifacts),
-        components: strList(n.value.components),
+        components: fixed.components,
         ...(description ? { description } : {})
       })
     }
