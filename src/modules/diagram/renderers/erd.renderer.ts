@@ -17,6 +17,7 @@ import type { RenderedPart, Renderer } from "./common.js"
 import { byId, compareIds, svgPart } from "./common.js"
 import { layoutErd, type ErdAttribute, type ErdDiagram, type ErdRelationInput } from "./erd-layout.js"
 import { DIAGRAM_LABELS, type DiagramLabels } from "./labels.js"
+import { isUploadedDocument } from "./drawn-user.js"
 
 export const MAX_ENTITIES_PER_DIAGRAM = 25
 export const ERD_SECTION = "fixed:3.1.5"
@@ -125,8 +126,25 @@ export interface ErdPart {
   diagram: ErdDiagram
 }
 
+/**
+ * FLF-375: tài liệu upload có MỘT hình ERD gốc ⇒ vẽ lại cũng phải là một hình (cắt 5 mảnh làm mất quan hệ vắt qua chỗ cắt).
+ * Ký pháp của dự án không vừa một hình (Chen: mỗi quan hệ một hình thoi, thực thể bậc cao bị vây kín) ⇒ thử ký pháp gọn hơn
+ * theo thứ tự này; vẫn không vừa ⇒ cắt như thường.
+ */
+const COMPACT_FALLBACK: readonly ErdNotation[] = ["crowsfoot", "idef1x"]
+
 /** Mọi hình ERD của Spine theo thứ tự trong tài liệu. */
 export const partitionErd = (spine: Spine, notation: ErdNotation = DEFAULT_ERD_NOTATION, labels: DiagramLabels = DIAGRAM_LABELS.en): ErdPart[] => {
+  const own = partitionErdWith(spine, notation, labels)
+  if (own.length <= 1 || !isUploadedDocument(spine)) return own
+  for (const alt of COMPACT_FALLBACK.filter((n) => n !== notation)) {
+    const parts = partitionErdWith(spine, alt, labels)
+    if (parts.length === 1) return parts
+  }
+  return own
+}
+
+const partitionErdWith = (spine: Spine, notation: ErdNotation, labels: DiagramLabels): ErdPart[] => {
   const entities = byId(spine.entities)
   const relations = relationsOf(entities, labels)
   const diagramOf = (ids: readonly string[]): ErdDiagram => {

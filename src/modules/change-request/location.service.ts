@@ -38,6 +38,7 @@ export const patchLocation = async (cr: IChangeRequest, locationId: string, body
   loc.conclusion = conclusion
   if (body.reason !== undefined) loc.reason = body.reason
   loc.proposal = {
+    proposed_at: loc.proposal?.proposed_at ?? null,
     ...snapshotOf(spine, loc.path),
     new_text: conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
     comment_text: conclusion === "comment" ? (loc.proposal?.comment_text ?? null) : null,

@@ -29,6 +29,8 @@ export interface LocationProposal {
   spine_ops: unknown[]
   /** Mode 1 v3 phase 7: dữ kiện AI phải tự giả định (CR / câu trả lời / tài liệu không nói) — người duyệt cần xác nhận. */
   assumptions?: string[]
+  /** FLF-375 (BF §3.2 màn 3 cột): thời điểm AI soạn đề xuất này. */
+  proposed_at?: Date | null
 }
 
 export interface VerifyViolation {
@@ -57,6 +59,10 @@ export interface LocationConflict {
   /** Người đã sửa (tên, hoặc "Tên (CR-003)"). */
   changed_by: string
   changed_at: Date | null
+  /** FLF-375 (BF §3.2): thời điểm AI soạn đề xuất ① — FE in "Lúc AI soạn (9:00)". */
+  proposed_at: Date | null
+  /** BF §3.2: yêu cầu gốc đụng thẳng phần vừa sửa ⇒ AI hỏi lại trong chat (câu hỏi + gợi ý), không tự chọn. */
+  question?: { text: string; suggestions: string[] } | null
 }
 
 export interface IChangeLocation extends Document {
@@ -107,7 +113,8 @@ const changeLocationSchema = new Schema<IChangeLocation>(
           new_text: { type: String, default: null },
           comment_text: { type: String, default: null },
           spine_ops: { type: [Schema.Types.Mixed], default: [] },
-          assumptions: { type: [String], default: [] }
+          assumptions: { type: [String], default: [] },
+          proposed_at: { type: Date, default: null }
         },
         opts
       ),
@@ -135,7 +142,9 @@ const changeLocationSchema = new Schema<IChangeLocation>(
           current_text: { type: String, default: "" },
           proposal_text: { type: String, default: null },
           changed_by: { type: String, default: "" },
-          changed_at: { type: Date, default: null }
+          changed_at: { type: Date, default: null },
+          proposed_at: { type: Date, default: null },
+          question: { type: new Schema({ text: { type: String, default: "" }, suggestions: { type: [String], default: [] } }, opts), default: null }
         },
         opts
       ),

@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
 
-import { crToImpact, crToReady, detail, importedProject, lockedPaths, newCr, resetCrMock, type Mode1Client } from "../../helpers/mode1-cr-p4.js"
+import { crToImpact, crToReady, detail, importedProject, lockedPaths, newCr, promptsOf, resetCrMock, type Mode1Client } from "../../helpers/mode1-cr-p4.js"
 import { ChangeLocation } from "../../../src/modules/change-request/change-location.model.js"
 import { unlockPaths } from "../../../src/modules/change-request/lock.service.js"
 import { SpineLock } from "../../../src/modules/change-request/spine-lock.model.js"
@@ -111,5 +111,28 @@ describe("đề xuất chưa xác nhận không chặn ai", () => {
     const early = await crToReady(c)
     expect((await confirm(c, early.cr)).change_request.status).toBe("written")
     expect(late).not.toBe(early.crId)
+  })
+})
+
+describe("AI soạn lại trên nội dung hiện tại (BF §3.2)", () => {
+  it("yêu cầu gốc đụng thẳng phần người khác vừa sửa ⇒ AI hỏi lại trong chat (không gọi model); trả lời ⇒ soạn lại, hết xung đột", async () => {
+    const { c, projectId } = await importedProject()
+    const { cr } = await crToReady(c)
+    await otherWrites(projectId, [{ op: "set", path: `${NFR}.threshold`, value: "3 s" }])
+    const nfr = nfrOf(await confirm(c, cr))
+    expect(nfr.conflict?.proposed_at).toEqual(expect.any(String))
+    expect(nfr.conflict?.question).toBeNull()
+
+    const before = promptsOf("# CR Propose").length
+    const asked = nfrOf(detail(await c.post(`${cr}/locations/${nfr.location_id}/owner-step-draft`, { instruction: "Áp yêu cầu gốc lên nội dung hiện tại" })))
+    expect(asked.conflict?.question?.text).toContain("CR-099 vừa đổi")
+    expect(asked.conflict?.question?.suggestions).toHaveLength(2)
+    expect(promptsOf("# CR Propose").length).toBe(before)
+
+    const answer = asked.conflict!.question!.suggestions[0]
+    const redone = nfrOf(detail(await c.post(`${cr}/locations/${nfr.location_id}/owner-step-draft`, { instruction: answer })))
+    expect(redone.conflict).toBeNull()
+    expect(promptsOf("# CR Propose").length).toBe(before + 1)
+    expect(promptsOf("# CR Propose").at(-1)).toContain(answer)
   })
 })
