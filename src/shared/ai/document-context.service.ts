@@ -126,9 +126,11 @@ export const buildDocumentContext = async (
 
   // FLF-292: tài liệu cũ chưa có số ⇒ gán bù trước khi đọc, để mã đoạn trong prompt ổn định qua các lượt
   await assignDocCodes(projectId)
+  // FLF-398: bản đã bị thay (người dùng chọn "Thay bản cũ") không vào ngữ cảnh model — chỉ bản đang dùng
   const documents = await ProjectDocument.find({
     projectId,
-    parseStatus: "success"
+    parseStatus: "success",
+    supersededBy: null
   })
     .select("_id originalName extractedText summary summaryStatus tokenCount docCode")
     .sort({ docCode: 1, createdAt: 1 })
