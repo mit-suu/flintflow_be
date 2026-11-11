@@ -86,10 +86,12 @@ describe("skill trên đĩa (assets/skills)", () => {
     // +1 renderer: renderer/state-machine (state machine diagram, mỗi entity có vòng đời một hình).
     // +1 renderer: renderer/sequence (System Sequence Diagram, mỗi function cần sơ đồ một hình).
     // +3 content FLF-365: references-list, requirement-apportioning, verification-matrix (mục IEEE 29148, Mode 1).
-    expect(listSkillAssets()).toHaveLength(48)
+    // +1 renderer FLF-390: renderer/activity (activity diagram, luồng xử lý mỗi function một hình).
+    // +1 renderer FLF-390: renderer/deployment (deployment diagram của hệ thống, §4.1).
+    expect(listSkillAssets()).toHaveLength(50)
     expect(byKind("action")).toBe(20)
     expect(byKind("content")).toBe(18)
-    expect(byKind("renderer")).toBe(8)
+    expect(byKind("renderer")).toBe(10)
     expect(byKind("output")).toBe(2)
   })
 
@@ -132,8 +134,10 @@ describe("skill trên đĩa (assets/skills)", () => {
     "content/requirement-apportioning",
     "content/verification-matrix",
     "output/srs-completeness-score",
+    "renderer/activity",
     "renderer/class",
     "renderer/context",
+    "renderer/deployment",
     "renderer/erd",
     "renderer/screen-flow",
     "renderer/screen-layout",

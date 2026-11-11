@@ -189,19 +189,19 @@ describe("release — gom CR", () => {
     expect(await documentXml(await docFileStore().load(v20!.clean_file_ref!))).not.toMatch(/<w:ins\b|<w:del\b/)
   })
 
-  it("CR đang dở không chặn release: khoá phần tử (theo path) giữ nguyên qua release, CR không bị gom", async () => {
+  it("CR đang dở không chặn release (đề xuất chưa xác nhận không nằm trong bản nháp), CR không bị gom", async () => {
     const { c, projectId } = await projectWithRevision()
     routeReplaceCr("1 second", "500 ms")
     const pending = await createCr(c, "Đang dở", "500 ms")
     crDetail(await c.post(`/change-requests/${pending}/clarify`))
     const impact = crDetail(await c.post(`/change-requests/${pending}/impact`))
     expect(impact.locations.length).toBeGreaterThan(0)
-    const held = await lockedPaths(projectId, pending)
-    expect(held.length).toBeGreaterThan(0)
+    // FLF-375 (§3.2): không khoá chỗ đang sửa
+    expect(await lockedPaths(projectId, pending)).toEqual([])
 
     const rel = await released(c)
     expect(rel.cr_ids).toEqual(["CR-001"])
-    expect(await lockedPaths(projectId, pending)).toEqual(held)
+    expect(await lockedPaths(projectId, pending)).toEqual([])
     const detail = crDetail(await c.get(`/change-requests/${pending}`))
     expect(detail.change_request.status).toBe("impact_review")
   })

@@ -122,6 +122,9 @@ export interface UseCase {
   description: string
   includes: string[]
   extends: string[]
+  /** FLF-390: luồng xử lý của use case (sơ đồ activity) — nút và control flow. Thiếu ⇒ `[]`, không có hình. */
+  activity_nodes?: ActivityNode[]
+  activity_flows?: ActivityFlow[]
 }
 
 export type ScreenDetailStatus = "pending" | "in_progress" | "signed_off" | "placeholder"
@@ -240,6 +243,31 @@ export interface FunctionInteraction {
   guard?: string
 }
 
+/**
+ * Loại nút của sơ đồ activity (UML 2.5): `initial` (chấm đặc), `final` (activity final), `action` (hộp bo góc),
+ * `decision` / `merge` (hình thoi), `fork` / `join` (thanh đặc).
+ */
+export type ActivityNodeKind = "initial" | "final" | "action" | "decision" | "merge" | "fork" | "join"
+
+/** Một nút trong luồng xử lý (activity) của use case. `id` duy nhất trên toàn Spine (`<use case id>-AN<n>`). */
+export interface ActivityNode {
+  id: string
+  kind: ActivityNodeKind
+  /** Chữ trong nút: việc làm của `action` (cụm động từ), câu hỏi của `decision`. Nút khác bỏ trống. */
+  name?: string
+  /** Làn (swimlane): id actor hoặc `system`. Thiếu / null ⇒ không có làn. */
+  lane?: string | null
+}
+
+/** Control flow giữa hai nút của cùng use case. Khoá phần tử = `from` + `to` (path `activity_flows[from=…,to=…]`). */
+export interface ActivityFlow {
+  /** Id `activity_nodes[]` của cùng use case. */
+  from: string
+  to: string
+  /** Điều kiện của nhánh (ra từ `decision`), không có ngoặc vuông. */
+  guard?: string
+}
+
 export interface Function {
   id: string
   screen_id: string | null
@@ -329,6 +357,32 @@ export interface Reference {
 
 export type VerificationMethod = "test" | "analysis" | "inspection" | "demonstration" | "other"
 
+/**
+ * FLF-390: nút của sơ đồ triển khai (UML 2.5 Deployment, §4.1 External Interfaces): phần cứng / máy chủ (`device`),
+ * môi trường thực thi (`execution_environment`: hệ điều hành, runtime, container, DBMS) hoặc nút chung (`node`).
+ * `parent_id` = nút chứa nó (môi trường thực thi nằm trong thiết bị). Artifact (file / gói triển khai) và component
+ * (module phần mềm) chạy trên nút là chữ, không phải phần tử riêng.
+ */
+export interface DeploymentNode {
+  id: string
+  name: string
+  kind: "device" | "execution_environment" | "node"
+  parent_id: string | null
+  /** Artifact triển khai lên nút (`api.jar`, `web-bundle`). */
+  artifacts: string[]
+  /** Component phần mềm chạy trên nút (`Web Application`). */
+  components: string[]
+  description?: string
+}
+
+/** Đường truyền thông giữa hai nút (communication path). Khoá phần tử = `from` + `to`. */
+export interface DeploymentLink {
+  from: string
+  to: string
+  /** Giao thức / kênh ghi trên đường (`HTTPS`, `JDBC`). */
+  protocol?: string
+}
+
 /** FLF-365: cách kiểm chứng một yêu cầu (IEEE 29148 §Verification) — chỉ Mode 1 render (`slot:verification`). */
 export interface Verification {
   /** `VER-01`… */
@@ -359,10 +413,12 @@ export interface CustomBlock {
 }
 
 /** Loại sơ đồ gốc đọc được từ ảnh (I-4) — một hình mỗi loại trong tài liệu. */
-export type OriginalDiagramKind = "context" | "usecase" | "screen_flow" | "erd"
+export type OriginalDiagramKind = "context" | "usecase" | "screen_flow" | "erd" | "sequence" | "activity" | "deployment"
 
 export interface OriginalDiagram {
   kind: OriginalDiagramKind
+  /** FLF-390: chủ của sơ đồ gắn một phần tử — id function (`sequence`), id use case (`activity`); loại khác không có. */
+  owner_id?: string | null
   source_hash: string
 }
 
@@ -390,7 +446,7 @@ export interface Addendum {
 
 // ─── state nội bộ ────────────────────────────────────────────────
 
-export type DiagramKind = "context" | "usecase" | "screen_flow" | "erd" | "class" | "state_machine" | "sequence" | "screen_layout"
+export type DiagramKind = "context" | "usecase" | "screen_flow" | "erd" | "class" | "state_machine" | "sequence" | "activity" | "deployment" | "screen_layout"
 export type RenderStatus = "ok" | "error"
 /** Engine vẽ (FLF-339): `puml` = text PlantUML qua server; `svg` = SVG tự dựng (`shared/diagram/svg-*`). */
 export type DiagramFormat = "puml" | "svg"
@@ -555,6 +611,9 @@ export interface Spine {
   /** FLF-365 — Spine cũ không có ⇒ `[]`. */
   references: Reference[]
   verifications: Verification[]
+  /** FLF-390 sơ đồ triển khai — Spine cũ không có ⇒ `[]`. */
+  deployment_nodes: DeploymentNode[]
+  deployment_links: DeploymentLink[]
 
   diagrams: Diagram[]
   assumptions: Assumption[]

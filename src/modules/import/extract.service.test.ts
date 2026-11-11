@@ -469,11 +469,14 @@ describe("ảnh diagram (mode 1 v3 phase 5)", () => {
     expect(captionOf(blk("B9", "image"), [blk("B9", "image"), blk("B10", "paragraph", "y")])).toBe("(none)")
   })
 
-  it("FLF-252 readsImage: chọn ảnh theo caption — ảnh màn hình / sequence không đọc; sơ đồ đọc được ở mục khác FPT vẫn đọc", () => {
+  it("FLF-252 readsImage: chọn ảnh theo caption — ảnh màn hình không đọc; sơ đồ đọc được ở mục khác FPT vẫn đọc (FLF-390: cả sequence / activity)", () => {
     expect(readsImage("fixed:2.2.1", "(none)")).toBe(true)
     expect(readsImage("fixed:2.2.1", "Figure 03. Use Case Diagram - Account")).toBe(true)
     expect(readsImage("fixed:3.1.1", "Figure 17 - Register account screen layout")).toBe(false)
-    expect(readsImage("fixed:2.2.2", "Figure 5 - Sequence diagram for Login")).toBe(false)
+    expect(readsImage("fixed:2.2.2", "Figure 5 - Sequence diagram for Login")).toBe(true)
+    expect(readsImage("function:@B0042", "Hình 4: Sơ đồ hoạt động đăng nhập")).toBe(true)
+    expect(readsImage("function:@B0042", "Figure 6 - Activity diagram: Place order")).toBe(true)
+    expect(readsImage("fixed:3.1.5", "Figure 8 - State machine of Order")).toBe(false)
     expect(readsImage("fixed:4.1", "Figure 9 - Entity Relationship Diagram")).toBe(true)
     expect(readsImage("function:@B0042", "Hình 3: Giao diện đăng nhập")).toBe(false)
     expect(readsImage("function:@B0042", "(none)")).toBe(false)

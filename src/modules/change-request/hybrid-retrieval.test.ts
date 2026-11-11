@@ -29,7 +29,7 @@ describe("findSpineLocations + ứng viên vector", () => {
     expect(before.every((f) => !("vector_score" in f))).toBe(true)
   })
 
-  it("có vector ⇒ thay từ khoá; đồ thị giữ nguyên; phần tử không còn bị bỏ; điểm ghi ở vị trí", () => {
+  it("FLF-375: có vector ⇒ trộn với từ khoá BM25 (không bỏ từ khoá); đồ thị giữ nguyên; phần tử không còn bị bỏ; điểm ghi ở vị trí", () => {
     const found = findSpineLocations(spine(), ["actors[id=A01]"], ["respond"], [
       { ref: "nfrs[id=NFR-01]", score: 0.88 },
       { ref: "use_cases[id=UC-01]", score: 0.82 },
@@ -38,10 +38,11 @@ describe("findSpineLocations + ứng viên vector", () => {
     expect(found.map((f) => [f.path, f.found_by, f.vector_score])).toEqual([
       ["actors[id=A01]", ["spine_link"], undefined],
       ["use_cases[id=UC-01]", ["spine_link", "vector"], 0.82],
-      ["nfrs[id=NFR-01]", ["vector"], 0.88]
+      ["nfrs[id=NFR-01]", ["vector"], 0.88],
+      ["nfrs[id=NFR-02]", ["keyword"], undefined]
     ])
-    // từ khoá "respond" không còn là nguồn khi đã có vector
-    expect(at(found, "nfrs[id=NFR-02]")).toBeUndefined()
+    // vị trí theo từ khoá / nghĩa mang điểm trộn RRF để xếp khi phải cắt
+    expect(found.filter((f) => f.found_by.every((b) => b === "vector" || b === "keyword")).every((f) => (f.recall_score ?? 0) > 0)).toBe(true)
   })
 })
 

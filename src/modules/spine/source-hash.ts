@@ -29,12 +29,14 @@ export const sourceProjection = (spine: Spine, diagram: Pick<Diagram, "kind" | "
     case "context":
       return {
         project: { name: systemName(spine.project) },
-        actors: byId(spine.actors).map(({ id, name, kind, flows_in, flows_out }) => ({
+        // FLF-390: `parent_id` chỉ khi có — actor tổng quát không luồng riêng không vẽ; hash cũ của Spine không kế thừa giữ nguyên
+        actors: byId(spine.actors).map(({ id, name, kind, flows_in, flows_out, parent_id }) => ({
           id,
           name,
           kind,
           flows_in: flows_in ?? [],
-          flows_out: flows_out ?? []
+          flows_out: flows_out ?? [],
+          ...(parent_id ? { parent_id } : {})
         })),
         use_cases: byId(spine.use_cases).map(({ id, name, actor_ids }) => ({ id, name, actor_ids }))
       }
@@ -110,6 +112,25 @@ export const sourceProjection = (spine: Spine, diagram: Pick<Diagram, "kind" | "
         actors: byId(spine.actors.filter((a) => ends.has(a.id))).map(({ id, name, kind }) => ({ id, name, kind }))
       }
     }
+    case "activity": {
+      // FLF-390: một hình = một use case (`owner_id`): tên use case, nút (loại, chữ, làn), control flow + guard, tên actor ở làn
+      const uc = spine.use_cases.find((u) => u.id === diagram.owner_id)
+      const nodes = uc?.activity_nodes ?? []
+      const lanes = new Set(nodes.flatMap((n) => (typeof n.lane === "string" ? [n.lane] : [])))
+      return {
+        use_case: uc?.name ?? null,
+        nodes: nodes.map(({ id, kind, name, lane }) => ({ id, kind, name: name ?? "", lane: lane ?? "" })),
+        flows: (uc?.activity_flows ?? []).map(({ from, to, guard }) => ({ from, to, guard: guard ?? "" })),
+        actors: byId(spine.actors.filter((a) => lanes.has(a.id))).map(({ id, name }) => ({ id, name }))
+      }
+    }
+    case "deployment": {
+      // FLF-390: một hình cho cả hệ thống: nút (tên, loại, nút cha, artifact, component) và đường truyền thông + giao thức
+      return {
+        nodes: byId(spine.deployment_nodes ?? []).map(({ id, name, kind, parent_id, artifacts, components }) => ({ id, name, kind, parent_id, artifacts, components })),
+        links: (spine.deployment_links ?? []).map(({ from, to, protocol }) => ({ from, to, protocol: protocol ?? "" }))
+      }
+    }
     case "screen_layout": {
       const screen = spine.screens.find((s) => s.id === diagram.owner_id)
       return {
@@ -155,6 +176,8 @@ export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.fre
   class: "svg@1",
   state_machine: "svg@1",
   sequence: DEFAULT_DIAGRAM_ENGINE,
+  activity: "svg@1",
+  deployment: DEFAULT_DIAGRAM_ENGINE,
   screen_layout: DEFAULT_DIAGRAM_ENGINE
 })
 

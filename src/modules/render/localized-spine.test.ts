@@ -73,6 +73,8 @@ const spine = (): Spine => ({
   custom_sections: [],
   references: [],
   verifications: [],
+  deployment_nodes: [],
+  deployment_links: [],
   diagrams: [{ id: "D01", kind: "erd", section: "fixed:3.1.5", owner_kind: null, owner_id: null, format: "puml", source: '@startchen\nentity "Order"\n@endchen', render_status: "ok", source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" }],
   assumptions: [],
   decisions: [],

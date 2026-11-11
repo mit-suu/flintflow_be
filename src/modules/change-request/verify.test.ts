@@ -39,8 +39,8 @@ describe("C-5 checkLocation — code (đỏ)", () => {
     expect(checkLocation(cr, loc({ path: "actors[id=A99]" }), spine(), mine).map((v) => v.rule)).toEqual(["element_missing"])
   })
 
-  it("mất khoá ⇒ path_not_locked; thiếu đề xuất ⇒ no_proposal", () => {
-    expect(checkLocation(cr, loc(), spine(), new Map([[PATH, "CR-002"]])).map((v) => v.rule)).toEqual(["path_not_locked"])
+  it("FLF-375: không còn khoá — CR khác cùng chạm phần tử không làm trượt; thiếu đề xuất ⇒ no_proposal", () => {
+    expect(checkLocation(cr, loc(), spine(), new Map([[PATH, "CR-002"]])).map((v) => v.rule)).not.toContain("path_not_locked")
     expect(checkLocation(cr, loc({ proposal: null }), spine(), mine).map((v) => v.rule)).toEqual(["no_proposal"])
   })
 
@@ -62,10 +62,10 @@ describe("C-5 checkLocation — code (đỏ)", () => {
     expect(checkLocation(cr, comment("Xem lại"), spine(), mine)).toEqual([])
   })
 
-  it("giá trị tại path đã đổi kể từ lúc đề xuất ⇒ ném CR_VALUE_CHANGED kèm vị trí", () => {
+  it("giá trị tại path đã đổi kể từ lúc đề xuất (trước khi xác nhận) ⇒ vi phạm value_changed để AI soạn lại (FLF-375)", () => {
     const changed = spine()
     ;(changed.actors[0] as { description: string }).description = "Edited elsewhere"
-    expect(() => checkLocation(cr, loc(), changed, mine)).toThrow(expect.objectContaining({ code: "CR_VALUE_CHANGED", meta: { location_id: "L001", path: PATH } }))
+    expect(checkLocation(cr, loc(), changed, mine)).toEqual([expect.objectContaining({ rule: "value_changed", path: PATH })])
   })
 })
 

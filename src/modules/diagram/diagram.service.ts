@@ -151,7 +151,7 @@ const nextIdFactory = (diagrams: Diagram[]): (() => string) => {
 }
 
 /** Kind có nhiều chủ trong một target: `class` (feature), `state_machine` (entity), `sequence` (function). */
-const MULTI_OWNER_KINDS: ReadonlySet<DiagramKind> = new Set<DiagramKind>(["class", "state_machine", "sequence"])
+const MULTI_OWNER_KINDS: ReadonlySet<DiagramKind> = new Set<DiagramKind>(["class", "state_machine", "sequence", "activity"])
 
 /** Hình của kind nhiều chủ đều thuộc target của kind đó. */
 const sameTarget = (d: Diagram, t: RenderTarget): boolean => d.kind === t.kind && (MULTI_OWNER_KINDS.has(t.kind) || (d.owner_id ?? null) === (t.owner_id ?? null))

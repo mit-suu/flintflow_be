@@ -4,7 +4,7 @@
  * draft ─► clarifying ⇄ awaiting_answers                 (C-2 làm rõ; tối đa 3 vòng rồi bắt buộc đi tiếp)
  * clarifying ─► impact_review                            (C-3 tìm vị trí + 3.5 khoá block)
  * impact_review ─► proposing ─► verifying                (C-4 đề xuất, C-5 kiểm)
- * verifying ─► ready_to_submit | proposing | manual_fix  (đạt · AI làm lại, redo ≤ 2 · vẫn trượt ⇒ sửa tay 3.9)
+ * verifying ─► ready_to_submit | proposing | manual_fix  (đạt · AI làm lại, redo ≤ 2 · vẫn trượt ⇒ hỏi người dùng 3.9)
  * manual_fix ─► verifying ;  ready_to_submit ─► verifying (user sửa đề xuất sau khi đã đạt)
  * ready_to_submit ─► written                             (FLF-330, C-6: BA xác nhận ⇒ ghi ngay vào bản nháp chung — CR = commit)
  * ready_to_submit ─► in_review                           (CŨ, chỉ còn cho CR tạo trước FLF-330; Lead duyệt cả GÓI ở C-7, không duyệt từng CR)
@@ -41,7 +41,7 @@ export const CR_STATUS_LABELS: Readonly<Record<CrStatus, string>> = {
   impact_review: "Xem phạm vi ảnh hưởng",
   proposing: "AI đang đề xuất sửa",
   verifying: "Đang kiểm tra đề xuất",
-  manual_fix: "Cần sửa tay",
+  manual_fix: "Cần bạn quyết",
   ready_to_submit: "Sẵn sàng xác nhận",
   in_review: "Đang chờ duyệt (luồng cũ)",
   written: "Đã ghi vào bản nháp",
@@ -62,7 +62,8 @@ export const CR_TRANSITIONS: Readonly<Record<CrStatus, readonly CrStatus[]>> = {
   proposing: ["verifying", "clarifying", "cancelled"],
   verifying: ["ready_to_submit", "proposing", "manual_fix", "clarifying", "cancelled"],
   manual_fix: ["verifying", "clarifying", "cancelled"],
-  ready_to_submit: ["written", "in_review", "verifying", "clarifying", "cancelled"],
+  // FLF-375: xác nhận mà chỗ đã bị người khác sửa đúng phần đề xuất định đổi ⇒ không ghi, về "Cần bạn quyết" (so 3 cột)
+  ready_to_submit: ["written", "in_review", "verifying", "manual_fix", "clarifying", "cancelled"],
   in_review: ["written", "proposing", "rejected", "cancelled"],
   written: [],
   rejected: [],
@@ -88,7 +89,7 @@ export const AMENDABLE_CR_STATUSES: readonly CrStatus[] = ["draft", "impact_revi
 /** Số vòng làm rõ tối đa (C-2) — tính từ lần gộp lệnh gần nhất; quá thì bắt buộc đi tiếp sang impact_review. */
 export const MAX_CLARIFY_ROUNDS = 3
 
-/** Số lần AI làm lại một vị trí trượt verify (C-5) trước khi chuyển sửa tay. */
+/** Số lần AI làm lại một vị trí trượt verify (C-5) trước khi hỏi người dùng. */
 export const MAX_REDO_PER_LOCATION = 2
 
 export const canTransition = (from: CrStatus, to: CrStatus): boolean => CR_TRANSITIONS[from].includes(to)
@@ -112,6 +113,6 @@ export const holdsLocks = (status: CrStatus): boolean => CR_STATUSES_HOLDING_LOC
 /** Sau `round` vòng hỏi–đáp, AI còn được hỏi tiếp không (nếu không ⇒ clarifying đi thẳng impact_review). */
 export const canAskMore = (round: number): boolean => round < MAX_CLARIFY_ROUNDS
 
-/** Vị trí trượt verify lần thứ `redoCount + 1`: AI làm lại hay chuyển sửa tay. */
+/** Vị trí trượt verify lần thứ `redoCount + 1`: AI làm lại hay hỏi người dùng. */
 export const nextAfterVerifyFail = (redoCount: number): Extract<CrStatus, "proposing" | "manual_fix"> =>
   redoCount < MAX_REDO_PER_LOCATION ? "proposing" : "manual_fix"

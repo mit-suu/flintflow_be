@@ -407,7 +407,7 @@ export const sectionSegments = (
       if (p.kind === "heading") return p
       if (p.kind === "original") {
         const blocks = customById.get(p.custom_id)?.blocks ?? []
-        const diagrams = blocks.flatMap((b) => (b.kind === "image" && b.image_ref && b.diagram ? [{ image_ref: b.image_ref, kind: b.diagram.kind }] : []))
+        const diagrams = blocks.flatMap((b) => (b.kind === "image" && b.image_ref && b.diagram ? [{ image_ref: b.image_ref, kind: b.diagram.kind, ...(b.diagram.owner_id ? { owner_id: b.diagram.owner_id } : {}) }] : []))
         return { kind: "original", custom_id: p.custom_id, diagrams, mentions: textMentions(blockText(blocks), spine, names) }
       }
       return { kind: "spine", items: items[i], source_hash: segmentHash(spine, items[i]), blocks: p.blocks, mentions: textMentions(blockText(p.blocks), spine, names) }

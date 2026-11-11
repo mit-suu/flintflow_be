@@ -16,11 +16,13 @@ import { renderErd } from "./erd.renderer.js"
 import { renderClass } from "./class.renderer.js"
 import { renderStateMachine } from "./state-machine.renderer.js"
 import { renderSequence } from "./sequence.renderer.js"
+import { renderActivity } from "./activity.renderer.js"
+import { renderDeployment } from "./deployment.renderer.js"
 import { renderScreenLayout } from "./screen-layout.renderer.js"
 
 export type { DiagramKind, RenderedPart } from "./common.js"
 
-export const DIAGRAM_KINDS: readonly DiagramKind[] = Object.freeze(["context", "usecase", "screen_flow", "erd", "class", "state_machine", "sequence", "screen_layout"])
+export const DIAGRAM_KINDS: readonly DiagramKind[] = Object.freeze(["context", "usecase", "screen_flow", "erd", "class", "state_machine", "sequence", "activity", "deployment", "screen_layout"])
 
 export const RENDERERS: Readonly<Record<DiagramKind, Renderer>> = Object.freeze({
   context: renderContext,
@@ -30,6 +32,8 @@ export const RENDERERS: Readonly<Record<DiagramKind, Renderer>> = Object.freeze(
   class: renderClass,
   state_machine: renderStateMachine,
   sequence: renderSequence,
+  activity: renderActivity,
+  deployment: renderDeployment,
   screen_layout: renderScreenLayout
 })
 
@@ -65,5 +69,8 @@ export const allTargets = (spine: Spine): RenderTarget[] => [
   { kind: "class", owner_id: null },
   { kind: "state_machine", owner_id: null },
   { kind: "sequence", owner_id: null },
-  ...layoutOwners(spine).map((id) => ({ kind: "screen_layout" as const, owner_id: id }))
+  ...layoutOwners(spine).map((id) => ({ kind: "screen_layout" as const, owner_id: id })),
+  // FLF-390: sau cùng ⇒ thêm kind không đổi id cấp cho hình của các kind trước trên dự án mới
+  { kind: "activity", owner_id: null },
+  { kind: "deployment", owner_id: null }
 ]

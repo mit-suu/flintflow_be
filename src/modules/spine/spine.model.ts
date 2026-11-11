@@ -99,6 +99,25 @@ const roleSchema = new Schema(
   opts
 )
 
+const activityNodeSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    kind: { type: String, enum: ["initial", "final", "action", "decision", "merge", "fork", "join"], required: true },
+    name: { type: String },
+    lane: { type: String }
+  },
+  opts
+)
+
+const activityFlowSchema = new Schema(
+  {
+    from: { type: String, required: true },
+    to: { type: String, required: true },
+    guard: { type: String }
+  },
+  opts
+)
+
 const useCaseSchema = new Schema(
   {
     id: { type: String, required: true },
@@ -107,7 +126,9 @@ const useCaseSchema = new Schema(
     function_ids: { type: [String], default: [] },
     description: { type: String, default: "" },
     includes: { type: [String], default: [] },
-    extends: { type: [String], default: [] }
+    extends: { type: [String], default: [] },
+    activity_nodes: { type: [activityNodeSchema], default: undefined },
+    activity_flows: { type: [activityFlowSchema], default: undefined }
   },
   opts
 )
@@ -329,6 +350,28 @@ const referenceSchema = new Schema(
   opts
 )
 
+const deploymentNodeSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    name: { type: String, required: true },
+    kind: { type: String, enum: ["device", "execution_environment", "node"], required: true },
+    parent_id: nullableString,
+    artifacts: { type: [String], default: [] },
+    components: { type: [String], default: [] },
+    description: { type: String }
+  },
+  opts
+)
+
+const deploymentLinkSchema = new Schema(
+  {
+    from: { type: String, required: true },
+    to: { type: String, required: true },
+    protocol: { type: String }
+  },
+  opts
+)
+
 const verificationSchema = new Schema(
   {
     id: { type: String, required: true },
@@ -361,7 +404,7 @@ const customBlockSchema = new Schema(
     image_ref: { type: String, default: null },
     // Sơ đồ gốc của người dùng (mode 1 v3 §4.13); ảnh thường không có field này
     diagram: {
-      type: new Schema({ kind: { type: String, enum: ["context", "usecase", "screen_flow", "erd"], required: true }, source_hash: { type: String, required: true } }, opts),
+      type: new Schema({ kind: { type: String, enum: ["context", "usecase", "screen_flow", "erd", "sequence", "activity", "deployment"], required: true }, owner_id: { type: String, default: undefined }, source_hash: { type: String, required: true } }, opts),
       default: undefined
     }
   },
@@ -384,7 +427,7 @@ const diagramSchema = new Schema(
     id: { type: String, required: true },
     kind: {
       type: String,
-      enum: ["context", "usecase", "screen_flow", "erd", "class", "state_machine", "sequence", "screen_layout"],
+      enum: ["context", "usecase", "screen_flow", "erd", "class", "state_machine", "sequence", "activity", "deployment", "screen_layout"],
       required: true
     },
     format: { type: String, enum: ["puml", "svg"], default: "puml" },
@@ -518,6 +561,8 @@ const spineSchema = new Schema(
     glossary: { type: [glossaryTermSchema], default: [] },
     references: { type: [referenceSchema], default: [] },
     verifications: { type: [verificationSchema], default: [] },
+    deployment_nodes: { type: [deploymentNodeSchema], default: [] },
+    deployment_links: { type: [deploymentLinkSchema], default: [] },
     addendum: { type: [addendumSchema], default: [] },
     custom_sections: { type: [customSectionSchema], default: [] },
 

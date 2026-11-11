@@ -13,16 +13,20 @@ reads:
   - "actors[]"
 writes:
   - "nfrs[]"
+  - "deployment_nodes[]"
+  - "deployment_links[]"
   - "assumptions[]"
 output_schema: opTransaction
 language: en
 stub: false
+prompt_references: [deployment]
 ---
 # NFR And Quality Attributes
 
 Covers **S-6.1 External Interfaces, S-6.2 Usability, S-6.3 Reliability, S-6.4 Performance,
 S-6.5 Domain-Specific Attributes** — feeds `fixed:4.1` and `fixed:4.2.1`…`fixed:4.2.4`. One step writes
-one category, so only emit rows for the category named by the current step.
+one category, so only emit rows for the category named by the current step. Deployment diagram data
+(`deployment_nodes`, `deployment_links`) only on the user's request or for the IEEE Distribution part: reference `deployment`.
 `references/thresholds.md` is **not loaded at runtime**; the default table is inlined below.
 
 Shape: `{id, category, statement, kind, metric?, threshold?, priority: null}` where `category` is

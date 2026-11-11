@@ -49,7 +49,10 @@ export const CONTENT_SLOTS: readonly ContentSlotDef[] = Object.freeze([
   { id: "slot:references", label_en: "References", label_vi: "Tài liệu tham khảo", parents: [], targets: ["references"] },
   // Bảng phân bổ trong file là yêu cầu đã có ở chương chức năng ⇒ không trích lại (sẽ nhân đôi); skill điền `release`
   { id: "slot:apportioning", label_en: "Apportioning of requirements", label_vi: "Phân bổ yêu cầu", parents: [], targets: [] },
-  { id: "slot:verification", label_en: "Verification", label_vi: "Kiểm chứng", parents: [], targets: ["verifications"] }
+  { id: "slot:verification", label_en: "Verification", label_vi: "Kiểm chứng", parents: [], targets: ["verifications"] },
+  // FLF-390: mục "Phân tán" của "Thiết kế và triển khai" (mẫu IEEE / jam01 3.5) — chỗ in sơ đồ triển khai. Dữ liệu chỉ từ
+  // ảnh sơ đồ (đọc ảnh) hoặc người dùng yêu cầu, không trích từ chữ
+  { id: "slot:distribution", label_en: "Distribution", label_vi: "Phân tán", parents: [], targets: [] }
 ])
 
 const SLOT_BY_ID = new Map<string, ContentSlotDef>(CONTENT_SLOTS.map((s) => [s.id, s]))
@@ -119,6 +122,8 @@ export const slotHasData = (spine: Spine, slotId: string): boolean => {
       return [...spine.functions, ...spine.nfrs].some((r) => !!r.release)
     case "slot:verification":
       return (spine.verifications ?? []).length > 0
+    case "slot:distribution":
+      return (spine.deployment_nodes ?? []).length > 0
     default:
       return false
   }
@@ -132,6 +137,7 @@ export const slotHasData = (spine: Spine, slotId: string): boolean => {
  */
 const SUGGESTION_RULES: readonly [RegExp, string | null][] = [
   [/\bsafety\b|maintainab|portab|supportab|\blegal\b|licens|document conventions?|\breferences?\b|data retention|archiv/, null],
+  [/\bdistribution\b|phân tán|deployment (view|diagram|topology)|sơ đồ triển khai/, "slot:distribution"],
   [/\bpurpose\b|mục đích|\bvision\b|tầm nhìn/, "slot:vision"],
   [/\bgoals?\b|\bobjectives?\b|mục tiêu/, "slot:goals"],
   [/\bscope\b|phạm vi/, "slot:scope"],

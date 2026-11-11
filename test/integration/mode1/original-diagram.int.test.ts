@@ -77,7 +77,10 @@ const renameToReview = async (c: ReturnType<typeof mode1Api>, opts: { keepOrigin
   expect(promptsOf("# CR Propose").flatMap(promptLocations).map((l) => l.path)).not.toContain(diagram!.path)
   const redraw = proposed.locations.find((l) => l.location_id === diagram!.location_id)!
   expect(redraw.conclusion).toBe("edit")
-  expect(redraw.proposal?.spine_ops).toEqual([expect.objectContaining({ op: "remove", path: `${diagram!.path}.blocks[image_ref=word/media/image1.png]` })])
+  // FLF-375 (B12): set cả mảng khối — bỏ ảnh gốc (và chú thích ngay sau nó nếu có), giữ văn xuôi khác
+  expect(redraw.proposal?.spine_ops).toEqual([expect.objectContaining({ op: "set", path: `${diagram!.path}.blocks` })])
+  const kept = (redraw.proposal!.spine_ops[0] as { value: { image_ref: string | null }[] }).value
+  expect(kept.some((b) => b.image_ref === "word/media/image1.png")).toBe(false)
 
   // C-5: đổi tên use case + bỏ ảnh gốc không bị coi là phát sinh lỗi đỏ (hình vẽ lại ở 3.14)
   expect(detail(await c.post(`${cr}/verify`)).change_request.status).toBe("ready_to_submit")

@@ -40,7 +40,8 @@ export const ID_PREFIX: Readonly<Record<string, { prefix: string; pad: number }>
   common_requirements: { prefix: "COM-", pad: 2 },
   messages: { prefix: "MSG-", pad: 2 },
   other_requirements: { prefix: "OR-", pad: 2 },
-  glossary: { prefix: "G", pad: 2 }
+  glossary: { prefix: "G", pad: 2 },
+  deployment_nodes: { prefix: "DN", pad: 2 }
 }
 
 /**

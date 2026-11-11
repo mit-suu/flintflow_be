@@ -56,7 +56,7 @@ describe("assets/step-registry.json", () => {
     expect(new Set(steps.map((s) => s.phase))).toEqual(new Set(PHASES))
   })
 
-  it("step tất định đúng Phases §4.2 (không Meter); renders khớp 7 kind", () => {
+  it("step tất định đúng Phases §4.2 (không Meter); renders khớp 10 kind", () => {
     const steps = loadStepRegistry()
     expect(steps.filter((s) => s.deterministic).map((s) => s.id)).toEqual(["S-8.2", "S-8.3", "S-9.1", "S-9.5"])
     expect(Object.fromEntries(steps.filter((s) => s.renders.length > 0).map((s) => [s.id, s.renders]))).toEqual({
@@ -65,7 +65,9 @@ describe("assets/step-registry.json", () => {
       "S-4.2": ["screen_flow"],
       "S-4.5": ["erd", "class", "state_machine"],
       "S-5.3": ["screen_layout"],
-      "S-5.4": ["sequence"]
+      "S-3.5": ["activity"],
+      "S-5.4": ["sequence"],
+      "S-6.1": ["deployment"]
     })
   })
 
