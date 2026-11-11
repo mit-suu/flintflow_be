@@ -63,7 +63,12 @@ console.log(result.logId) // Log ID lưu trên DB
 
 Các action section-based cũ (`generate_section`, `priority_ranking`, `scope_out_of_scope`, `chat_discovery`, `diagram_*`) đã gỡ ở T21. `AiActionLog` cũ vẫn có thể mang các tên này — trang chi phí AI của admin chỉ nhóm theo chuỗi.
 
-Context tài liệu upload (`document-context.service.ts`): step pipeline nạp `extractedText`/`summary` khi `reads` của step có token `documents`; action ngoài pipeline theo bảng `ACTION_NEEDS_SOURCE_DOCUMENTS`.
+Context tài liệu upload (`document-context.service.ts`): step pipeline nạp tài liệu khi `reads` của step có token `documents`; action ngoài pipeline theo bảng `ACTION_NEEDS_SOURCE_DOCUMENTS` (chỉ còn `chat`).
+
+FLF-393 — ngân sách là trần token cố định theo loại lượt gọi (`DOC_CONTEXT_CHAT_TOKENS`, `DOC_CONTEXT_DRAFT_TOKENS`), không phải context window của model:
+- Tổng tài liệu ≤ trần ⇒ gửi nguyên văn (`mode = "full"`), như trước.
+- Vượt trần ⇒ `mode = "retrieved"`: chỉ chunk liên quan. Chunk cắt theo cây section lúc upload (`document-retrieval/chunker.ts`; heading thật của .docx qua `docx-outline.ts`, file khác dò heading trên chữ), lưu ở `project_document_chunks`, dựng bù khi thiếu. Step ghim chunk có tiêu đề khớp section nó nuôi (`modules/pipeline/step-document-query.ts`), phần còn lại lấp bằng BM25 (`document-retrieval/bm25.ts`, tokenizer tiếng Việt `vi-tokenizer.ts`: NFC, có dấu + bỏ dấu, bigram, giữ mã `UC-12`). Câu hỏi toàn cục / không khớp gì ⇒ kèm `summary`.
+- Mã đoạn `D<n>-P<m>` giữ nguyên ở mọi chế độ. Đo chất lượng: `npm run eval:doc-retrieval`.
 
 ---
 
