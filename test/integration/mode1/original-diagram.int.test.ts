@@ -59,7 +59,10 @@ const mediaOf = async (projectId: string, version: string): Promise<Buffer[]> =>
 }
 
 const keptImages = async (projectId: string) =>
-  (await spineRepository.get(projectId))!.custom_sections.flatMap((c) => c.blocks).filter((b) => b.kind === "image" && b.diagram)
+  (await spineRepository.get(projectId))!.custom_sections.flatMap((c) => c.blocks).filter((b) => b.kind === "image" && b.image_ref && b.diagram)
+/** Bug #16: chỗ đặt hình vẽ lại (ảnh gốc đã bỏ, giữ vị trí) */
+const redrawSlots = async (projectId: string) =>
+  (await spineRepository.get(projectId))!.custom_sections.flatMap((c) => c.blocks).filter((b) => b.kind === "image" && !b.image_ref && b.diagram)
 
 /** CR đổi tên UC-02 tới khi BA xác nhận (FLF-330: xác nhận = ghi); `keepOriginal` ⇒ BA bỏ riêng vị trí sơ đồ gốc trước. */
 const renameToReview = async (c: ReturnType<typeof mode1Api>, opts: { keepOriginal?: boolean } = {}) => {
@@ -108,6 +111,7 @@ describe("§4.13 sơ đồ gốc của người dùng", () => {
     const spine = (await spineRepository.get(projectId))!
     expect(spine.use_cases.find((u) => u.id === "UC-02")?.name).toBe(NEW_NAME)
     expect(await keptImages(projectId)).toEqual([])
+    expect((await redrawSlots(projectId)).map((b) => b.diagram?.kind)).toEqual(["usecase"])
     expect(spine.flags.filter((f) => f.rule_id === "original_diagram_stale" && !f.resolved_at)).toEqual([])
     expect((await mediaOf(projectId, "0.2")).some((m) => m.equals(PNG))).toBe(false)
   })

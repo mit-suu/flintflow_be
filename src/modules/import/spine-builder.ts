@@ -266,6 +266,23 @@ const RELATION_VERB = /^[a-z]+( [a-z]+)*$/
  * Cụm quan hệ "động từ + Thực thể" (bảng ERD FlintFlow xuất ra: "teaches Schedule Slot") ⇒ thực thể có tên dài nhất
  * nằm ở cuối cụm + động từ đứng trước (giữ làm nhãn quan hệ khi là tiếng Anh thường). Không thực thể nào ⇒ `null`.
  */
+/** Bội số đầu mục quan hệ: "1–n", "n-1", "1:N", "1..*", "*–1", "1–1". */
+const MULTIPLICITY = /^\s*(1|n|\*|0\.\.1|1\.\.\*|0\.\.\*)\s*[–—\-:]\s*(1|n|\*|0\.\.1|1\.\.\*|0\.\.\*)\s+/i
+const isMany = (m: string): boolean => /n|\*/i.test(m)
+
+/**
+ * Mục của ô "Quan hệ" kèm phía: `child` (thực thể này là phía 1, mục là phía nhiều — mặc định), `one` (1–1), `parent`
+ * (n–1: mục là cha của thực thể này). Mục không ghi bội số dùng bội số của mục đứng trước ("1–n Điểm, Điểm danh").
+ */
+export const relationRefs = (refs: readonly string[]): { ref: string; side: "child" | "one" | "parent" }[] => {
+  let side: "child" | "one" | "parent" = "child"
+  return refs.map((raw) => {
+    const m = MULTIPLICITY.exec(raw)
+    if (m) side = isMany(m[1]) && !isMany(m[2]) ? "parent" : !isMany(m[1]) && !isMany(m[2]) ? "one" : "child"
+    return { ref: m ? raw.slice(m[0].length).trim() : raw.trim(), side }
+  })
+}
+
 export const relationPhrase = (ref: string, pool: { id: string; name?: string }[]): { id: string; verb: string } | null => {
   const key = nameKey(ref)
   const hits = pool
@@ -427,29 +444,56 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
     })
   }
   for (const r of of("roles").filter(skip(spine.roles))) add("roles", { id: r.id, name: str(r.value.name) || r.id, actor_id: resolveActor(r.value.actor_id ?? r.value.actor) })
+  // QLHS 11/11: cột "Quan hệ" ghi chiều ("1–n Học kỳ", "n–1 Học sinh"). `relations` của Spine chỉ chứa phía nhiều của
+  // thực thể này ⇒ "n–1 X" là quan hệ của X (X → thực thể này), không phải của thực thể này; bỏ chiều thì mỗi cặp bị vẽ
+  // hai lần ngược nhau trên ERD.
+  const builtEntities: { id: string; value: Record<string, unknown>; relations: string[]; cardinality: Record<string, "1" | "N"> }[] = []
+  const parentLinks: { parent: string; child: string }[] = []
   for (const e of of("entities").filter(skip(spine.entities))) {
     const relations: string[] = []
+    const cardinality: Record<string, "1" | "N"> = {}
     const verbs: Record<string, string> = {}
-    for (const ref of strList(e.value.relations)) {
+    for (const { ref, side } of relationRefs(strList(e.value.relations))) {
       const direct = resolveEntity(ref)
       const hit = direct ? { id: direct, verb: "" } : relationPhrase(ref, entityPool)
-      if (!hit || hit.id === e.id || relations.includes(hit.id)) continue
+      if (!hit || hit.id === e.id) continue
+      if (side === "parent") {
+        parentLinks.push({ parent: hit.id, child: e.id! })
+        continue
+      }
+      if (relations.includes(hit.id)) continue
       relations.push(hit.id)
+      if (side === "one") cardinality[hit.id] = "1"
       if (hit.verb) verbs[hit.id] = hit.verb
     }
     const attributes = attributesOf(e.value.attributes)
     const featureIds = [...new Set(strList(e.value.feature_ids ?? e.value.features).flatMap((ref) => resolveFeature(ref) ?? []))]
     const lifecycle = lifecycleOf(e.id ?? "", e.value.states, e.value.transitions)
-    add("entities", {
-      id: e.id,
-      name: str(e.value.name) || e.id,
-      description: str(e.value.description),
+    builtEntities.push({
+      id: e.id!,
       relations,
-      ...(Object.keys(verbs).length ? { relation_verbs: verbs } : {}),
-      ...(attributes.length ? { attributes } : {}),
-      ...(featureIds.length ? { feature_ids: featureIds } : {}),
-      ...(lifecycle.states.length ? lifecycle : {})
+      cardinality,
+      value: {
+        id: e.id,
+        name: str(e.value.name) || e.id,
+        description: str(e.value.description),
+        ...(Object.keys(verbs).length ? { relation_verbs: verbs } : {}),
+        ...(attributes.length ? { attributes } : {}),
+        ...(featureIds.length ? { feature_ids: featureIds } : {}),
+        ...(lifecycle.states.length ? lifecycle : {})
+      }
     })
+  }
+  for (const { parent, child } of parentLinks) {
+    const p = builtEntities.find((b) => b.id === parent)
+    // Cha đã có trong Spine (không dựng lại ở lô này) thì thôi — không sửa phần tử cũ từ import
+    if (p && !p.relations.includes(child)) p.relations.push(child)
+    // Chiều ngược (con cũng ghi cha là "1–n") bị bỏ: chỉ giữ cha → con
+    const c = builtEntities.find((b) => b.id === child)
+    if (c) c.relations = c.relations.filter((id) => id !== parent)
+  }
+  for (const b of builtEntities) {
+    add("entities", { ...b.value, relations: b.relations, ...(Object.keys(b.cardinality).length ? { relation_cardinality: b.cardinality } : {}) })
   }
   for (const b of of("business_rules").filter(skip(spine.business_rules))) {
     add("business_rules", { id: b.id, tier: ruleTierOfSections(b.sections) ?? oneOf(b.value.tier, ["high", "detail"], "detail"), statement: str(b.value.statement ?? b.value.rule ?? b.value.description), source_validation_ids: [] })

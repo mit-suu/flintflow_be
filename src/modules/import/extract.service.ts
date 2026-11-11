@@ -132,6 +132,8 @@ export const settleSection = (
       for (const it of items) if (it.entity === "nfrs" && it.value.category === undefined && NFR_CATEGORY_BY_SECTION[sectionId]) it.value.category = NFR_CATEGORY_BY_SECTION[sectionId]
       out.handled.add(t.block_id)
       out.items.push(...items)
+      // QLHS 11/11 (bug #10): bảng từ điển dữ liệu có cột thuộc tính mà Spine không nhận từ bảng ⇒ giữ nguyên văn tại chỗ
+      for (const id of tablesToKeepVerbatim([{ ...t, rows }], items)) out.verbatim.add(id)
       continue
     }
     if (!targets.includes("use_cases")) continue
@@ -290,6 +292,18 @@ export const chunkBlocks = <T extends { text: string }>(blocks: T[], budget = AI
 /** Khối gửi AI; `text` của bảng đã là `tableText` (dựng trước khi chia lô để trần ký tự tính đúng phần gửi đi). */
 const blockLines = (blocks: BlockLite[]): string => blocks.map((b) => `[${b.block_id}] ${b.kind === "table" ? `(table)\n${b.text}` : b.text}`).join("\n")
 
+/**
+ * QLHS 11/11 (bug #10): bảng "từ điển dữ liệu" có cột thuộc tính mà model chỉ lấy tên / quan hệ / mô tả (không field
+ * `attributes` nào trích từ bảng đó) ⇒ nếu coi bảng là "đã trích" thì cột thuộc tính biến mất khỏi tài liệu. Bảng như vậy
+ * giữ nguyên văn tại chỗ (unmapped) — Spine vẫn nhận phần model đọc được.
+ */
+const ATTRIBUTE_COLUMN = /thuộc tính|attribute/i
+export const tablesToKeepVerbatim = (batch: readonly Pick<BlockLite, "block_id" | "kind" | "rows">[], items: readonly EntityItem[]): string[] =>
+  batch
+    .filter((b) => b.kind === "table" && ATTRIBUTE_COLUMN.test((b.rows?.[0] ?? []).join(" | ")))
+    .filter((b) => !items.some((it) => it.source_block_ids.includes(b.block_id) && Array.isArray(it.value.attributes) && (it.value.attributes as unknown[]).length > 0))
+    .map((b) => b.block_id)
+
 /** Trọng số của điểm AI trong độ tin cuối (FLF-343); phần còn lại là trung bình tín hiệu của code. */
 export const AI_CONFIDENCE_WEIGHT = 0.6
 
@@ -418,10 +432,18 @@ export const keepMentionedRules = (items: EntityItem[], mentioned: ReadonlySet<s
     return { ...it, value }
   })
 
-/** Chú thích của ảnh: block caption ngay sau (hoặc ngay trước) ảnh trong section. */
+/** Đoạn văn thường nhưng là dòng chú thích hình: "H3 · sơ đồ hoạt động…", "Hình 2 …", "Figure 2 …", "Fig. 3 …". */
+const FIGURE_LINE = /^(h\d+\b|hình\s*\d+|figure\s*\d+|fig\.?\s*\d+)/i
+const isFigureLine = (b: Pick<BlockLite, "kind" | "text"> | undefined): boolean =>
+  !!b && b.kind === "paragraph" && b.text.trim().length <= 200 && FIGURE_LINE.test(b.text.trim())
+
+/**
+ * Chú thích của ảnh: block caption ngay sau (hoặc ngay trước) ảnh trong section. File không dùng kiểu "Caption" của Word
+ * (QLHS: "H3 · sơ đồ hoạt động UC-05" là đoạn thường ngay dưới ảnh) ⇒ nhận cả đoạn ngắn bắt đầu bằng "H3 / Hình 3 / Figure 3".
+ */
 export const captionOf = (img: Pick<BlockLite, "block_id">, sectionBlocks: Pick<BlockLite, "block_id" | "kind" | "text">[]): string => {
   const i = sectionBlocks.findIndex((b) => b.block_id === img.block_id)
-  const near = [sectionBlocks[i + 1], sectionBlocks[i - 1]].find((b) => b?.kind === "caption" && b.text.trim())
+  const near = [sectionBlocks[i + 1], sectionBlocks[i - 1]].find((b) => (b?.kind === "caption" && b.text.trim()) || isFigureLine(b))
   return near?.text.trim() ?? "(none)"
 }
 
@@ -1003,6 +1025,7 @@ export const runExtraction = async (projectId: string, userId: string, importId:
           mentionedRules
         )
       )
+      unmapped.push(...tablesToKeepVerbatim(batch, items).filter((id) => !unmapped.includes(id)))
       return null
     }
 

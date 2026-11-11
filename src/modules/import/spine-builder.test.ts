@@ -718,3 +718,13 @@ describe("FLF-390 actor kế thừa, luồng ngữ cảnh, actor User cho use ca
     expect(spine.use_cases.find((u) => u.name === "Search Products")?.actor_ids).toEqual(["A01", "A02"])
   })
 })
+
+describe("relationRefs — chiều quan hệ trong ô 'Quan hệ' (QLHS 11/11)", () => {
+  it("1–n ⇒ phía nhiều của thực thể này; n–1 ⇒ cha; mục không ghi bội số theo mục đứng trước", async () => {
+    const { relationRefs } = await import("./spine-builder.js")
+    expect(relationRefs(["1–n Điểm", "Điểm danh", "Hạnh kiểm"]).map((r) => [r.ref, r.side])).toEqual([["Điểm", "child"], ["Điểm danh", "child"], ["Hạnh kiểm", "child"]])
+    expect(relationRefs(["n–1 Học sinh", "Môn học", "Học kỳ"]).map((r) => r.side)).toEqual(["parent", "parent", "parent"])
+    expect(relationRefs(["1-1 Hồ sơ"])[0]).toEqual({ ref: "Hồ sơ", side: "one" })
+    expect(relationRefs(["Học kỳ"])[0]).toEqual({ ref: "Học kỳ", side: "child" })
+  })
+})
