@@ -129,6 +129,16 @@ const envSchema = z.object({
   /** `atlas` = `$vectorSearch` (Mongo không hỗ trợ ⇒ tự lùi về `memory`); `memory` = cosine vét cạn trong process. */
   KNOWLEDGE_VECTOR_BACKEND: z.enum(["atlas", "memory"]).default("atlas"),
 
+  // ─── Tài liệu upload trong prompt (FLF-393, `shared/ai/document-context.service.ts`) ───────────
+  // Trần token CỨNG của phần tài liệu mỗi lượt gọi (ước lượng ký tự / 3). Tổng tài liệu ≤ trần ⇒ gửi nguyên văn như trước;
+  // vượt ⇒ chỉ gửi các đoạn liên quan (cây section + BM25). Không còn lấy context window của model làm ngân sách.
+  /** Lượt chat tự do. */
+  DOC_CONTEXT_CHAT_TOKENS: z.coerce.number().int().min(1000).default(12000),
+  /** Lượt hỏi / soạn của step pipeline (Elicit, Draft, Revision, Regenerate, phỏng vấn đầu giai đoạn). */
+  DOC_CONTEXT_DRAFT_TOKENS: z.coerce.number().int().min(1000).default(16000),
+  /** Số đoạn BM25 tối đa mỗi lượt (không tính đoạn ghim theo section của step). */
+  DOC_CONTEXT_TOP_K: z.coerce.number().int().min(1).max(50).default(10),
+
   // S-9.2 Quality Lens bằng LLM — mặc định TẮT (Phases §9.1, hoãn vì ngân sách).
   REVIEW_LLM_ENABLED: z
     .string()

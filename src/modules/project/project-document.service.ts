@@ -7,6 +7,24 @@ import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { parseFileContent } from "../../shared/utils/file-text.js"
 import { assignDocCodes } from "./document-code.service.js"
+import { splitParagraphs } from "../../shared/ai/document-paragraphs.js"
+import { alignOutline, extractDocxHeadings, isDocx } from "../../shared/ai/document-retrieval/docx-outline.js"
+import { deleteDocumentChunks, saveDocumentChunks } from "../../shared/ai/document-retrieval/chunk-index.service.js"
+import type { OutlineEntry } from "../../shared/ai/document-retrieval/chunker.js"
+
+/**
+ * FLF-393: heading thật của file .docx, khớp về chỉ số đoạn — chữ phẳng mất style heading nên chỉ lấy được lúc còn buffer.
+ * File khác hoặc đọc lỗi ⇒ `[]` (chunker dò heading trên chữ).
+ */
+const outlineOf = async (file: Express.Multer.File, extension: string, text: string): Promise<OutlineEntry[]> => {
+  if (!isDocx(file.mimetype, extension)) return []
+  try {
+    return alignOutline(splitParagraphs(text), await extractDocxHeadings(file.buffer))
+  } catch (err) {
+    console.warn(`[DocumentChunks] Không đọc được heading của "${file.originalname}": ${err instanceof Error ? err.message : String(err)}`)
+    return []
+  }
+}
 
 export const uploadProjectDocument = async (
   orgId: string,
@@ -67,8 +85,12 @@ export const uploadProjectDocument = async (
     document.tokenCount = tokenCount
     document.parseStatus = "success"
     document.parseError = null
+    const outline = await outlineOf(file, extension, text)
+    if (outline.length) document.outline = outline
 
     await document.save()
+    // FLF-393: cắt sẵn thành chunk theo cây section — lượt chat / Draft chỉ nạp đoạn liên quan khi tài liệu vượt trần
+    await saveDocumentChunks(project._id, document._id, text, outline)
 
     console.log(
       `[DocumentParser] Parsed "${originalName}" successfully: ${text.length} chars, ~${tokenCount} tokens`
@@ -142,5 +164,6 @@ export const deleteProjectDocument = async (
   }
 
   await ProjectDocument.deleteOne({ _id: documentId, projectId })
+  await deleteDocumentChunks(documentId)
   await destroyDocumentAsset(document.cloudinaryPublicId)
 }
