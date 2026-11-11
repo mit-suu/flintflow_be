@@ -7,7 +7,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { AiActionError } from "../../shared/ai/ai-action.types.js"
 import { clientErrorMessage } from "../../shared/utils/client-error.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
-import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
+import { chatDocumentQuery } from "../../shared/ai/document-retrieval/query.js"
 import * as changeService from "../spine/change.service.js"
 import { changeErrorReply, clarificationRounds, formatChatContext, previewPayload } from "../spine/change-transcript.js"
 import { submitAnswer } from "../pipeline/step-runner.service.js"
@@ -308,16 +308,12 @@ export const sendMessageAndGetResponse = async (
   // 4. Build step name and document context
   const stepName = step
 
-  const historyTokens = Math.ceil(historyText.length / 4)
-  const chatTemplate = await getPromptTemplate(actionType)
-  const docContext = await buildDocumentContext(
+  // FLF-393: tài liệu vượt trần ⇒ chỉ các đoạn khớp tin nhắn này (tin quá ngắn mượn thêm vài lượt trước)
+  const docContext = await buildDocumentContext({
     projectId,
-    ActionType.CHAT,       // Document context logic same for both chat types
-    undefined,
-    historyTokens,
-    chatTemplate.providerConfig.model,
-    chatTemplate.providerConfig.maxTokens
-  )
+    actionType: ActionType.CHAT,
+    query: chatDocumentQuery(content, session.messages.slice(0, -1))
+  })
 
   // 5. Build prompt variables
   const promptVariables: Record<string, any> = {
@@ -478,16 +474,12 @@ export const sendMessageStream = async (
 
   // 4. Build step name and doc context
   const stepName = step
-  const historyTokens = Math.ceil(historyText.length / 4)
-  const chatTemplate = await getPromptTemplate(actionType)
-  const docContext = await buildDocumentContext(
+  // FLF-393: tài liệu vượt trần ⇒ chỉ các đoạn khớp tin nhắn này (tin quá ngắn mượn thêm vài lượt trước)
+  const docContext = await buildDocumentContext({
     projectId,
-    ActionType.CHAT,
-    undefined,
-    historyTokens,
-    chatTemplate.providerConfig.model,
-    chatTemplate.providerConfig.maxTokens
-  )
+    actionType: ActionType.CHAT,
+    query: chatDocumentQuery(content, session.messages.slice(0, -1))
+  })
 
   // 5. Build prompt variables
   const promptVariables: Record<string, any> = {

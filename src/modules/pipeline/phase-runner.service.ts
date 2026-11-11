@@ -17,7 +17,8 @@
 
 import { runStep, defaultStepRunnerDeps, recordUserMessage, B0_FIELD_STEPS, type Emit, type GateResolution, type StepRunnerDeps } from "./step-runner.service.js"
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
-import { addendumForUnit, assumptionsForPrompt, loadConversationVariables, projectStep } from "./context-projection.js"
+import { addendumForUnit, assumptionsForPrompt, loadConversationVariables, projectStep, sectionsFedBy } from "./context-projection.js"
+import { mergeStepDocumentQueries, stepDocumentQuery } from "./step-document-query.js"
 import { SYSTEM_NAME_FIELD, askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
 import { FAST_PATH_PHASES, interviewBudget, interviewGuidance, interviewProjection, noQuestionAck, reconcileReply, trimTailQuestion, withoutQuestions } from "./fast-path.js"
 import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, currentBatch, followUpQuestions, followUpReply, indexOfQuestion, shapeQuestions } from "./question-shape.js"
@@ -71,9 +72,11 @@ export const isPhaseTerminal = (spine: Spine, step: ExpandedStep): boolean => {
  * sách token với lượt Draft của bước đó). Không bước nào đọc ⇒ `""`.
  */
 export const unitDocuments = async (projectId: string, spine: Spine, unit: string): Promise<string> => {
-  const step = orderedSteps(spine).find((s) => phaseUnitOf(s) === unit && stepNeedsSourceDocuments(s.id))
-  if (!step) return ""
-  return (await buildDocumentContext(projectId, ActionType.DRAFT, step.id)).contextText
+  const steps = orderedSteps(spine).filter((s) => phaseUnitOf(s) === unit && stepNeedsSourceDocuments(s.id))
+  if (!steps.length) return ""
+  // FLF-393: lượt hỏi gộp hỏi thay cho mọi bước đọc tài liệu của đơn vị ⇒ tìm đoạn theo section của cả các bước đó
+  const retrieval = mergeStepDocumentQueries(steps.map((s) => stepDocumentQuery(spine, s.id, sectionsFedBy(spine, s.id))))
+  return (await buildDocumentContext({ projectId, actionType: ActionType.DRAFT, stepId: steps[0]!.id, ...retrieval })).contextText
 }
 
 /**
