@@ -151,7 +151,7 @@ describe("answerKnowledgeQuestion", () => {
   })
 })
 
-describe("FLF-333 — hạn mức câu hỏi tri thức mỗi ngày (không tốn credit)", () => {
+describe("FLF-333 - hạn mức câu hỏi tri thức mỗi ngày (không tốn credit)", () => {
   it("đã hỏi đủ hạn mức ⇒ 429 KNOWLEDGE_DAILY_LIMIT, không truy hồi, không gọi model", async () => {
     const { env } = await import("../../config/env.js")
     countDocuments.mockResolvedValueOnce(env.KNOWLEDGE_DAILY_LIMIT)

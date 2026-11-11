@@ -573,11 +573,11 @@ export const useCaseScreenNote = (issues: readonly UseCaseScreenIssue[], languag
       case "not_in_actor_flow":
         return language === "en"
           ? `Screen "${issue.screen}" opens only from ${issue.from.join(", ")}, which the actor of ${issue.use_case} cannot open.`
-          : `Màn "${issue.screen}" chỉ mở từ ${issue.from.join(", ")} — màn mà actor của ${issue.use_case} không xem được, nên chưa có trong luồng của actor đó.`
+          : `Màn "${issue.screen}" chỉ mở từ ${issue.from.join(", ")} - màn mà actor của ${issue.use_case} không xem được, nên chưa có trong luồng của actor đó.`
       case "no_use_case":
         return language === "en"
-          ? "The preview adds screens and functions but no use case — ask again or add the use case."
-          : "Bản xem trước chỉ có màn và chức năng, chưa có use case nào — hãy nhắn lại để thêm use case."
+          ? "The preview adds screens and functions but no use case - ask again or add the use case."
+          : "Bản xem trước chỉ có màn và chức năng, chưa có use case nào - hãy nhắn lại để thêm use case."
       case "not_chained":
         return language === "en"
           ? `The screens of "${issue.name}" (${issue.screens.join(", ")}) are not linked in order in the screens flow.`
@@ -801,12 +801,12 @@ const PROPOSED_HEADER = { vi: "AI đề xuất thêm để khớp dự án (gi�
 
 const describeItem = (u: BatchUseCase, i: number, language: "vi" | "en"): string => {
   const head = `${i + 1}. "${u.name}" (${u.actors.join(", ")})`
-  if (!u.ui) return `${head} — ${language === "en" ? "runs in the background, no screen" : "chạy nền, không cần màn"}`
+  if (!u.ui) return `${head} - ${language === "en" ? "runs in the background, no screen" : "chạy nền, không cần màn"}`
   const parts = [
     ...(u.newScreens.length ? [`${language === "en" ? "new screens" : "màn mới"}: ${u.newScreens.map((n) => `"${n}"`).join(" → ")}`] : []),
     ...(u.existingScreens.length ? [`${language === "en" ? "existing" : "màn có sẵn"}: ${u.existingScreens.map((n) => `"${n}"`).join(", ")}`] : [])
   ]
-  return parts.length ? `${head} — ${parts.join("; ")}` : head
+  return parts.length ? `${head} - ${parts.join("; ")}` : head
 }
 
 /**

@@ -54,7 +54,7 @@ export const scopeWarnings = (spine: Spine): ScopeWarning[] => {
       kind: "wont_not_in_scope_out",
       id: fn.id,
       name: fn.name,
-      message: `Function ${fn.id} "${fn.name}" được xếp Won't-have nhưng không có dòng nào trong release_scope.out nhắc tới — phạm vi không tự đổi theo MoSCoW, cần bạn quyết.`
+      message: `Function ${fn.id} "${fn.name}" được xếp Won't-have nhưng không có dòng nào trong release_scope.out nhắc tới - phạm vi không tự đổi theo MoSCoW, cần bạn quyết.`
     })
   }
   for (const nfr of spine.nfrs) {

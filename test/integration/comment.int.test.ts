@@ -49,7 +49,7 @@ const firstSection = async (c: ReturnType<typeof api>, query = "") => {
   return section!
 }
 
-describe("UC-49 — comment trên bản nháp (mode 2)", () => {
+describe("UC-49 - comment trên bản nháp (mode 2)", () => {
   let seeded: SeededFixture
   let lead: ReturnType<typeof api>
   let analyst: { userId: string; c: ReturnType<typeof api> }
@@ -233,7 +233,7 @@ describe("UC-49 — comment trên bản nháp (mode 2)", () => {
   })
 })
 
-describe("UC-49 — Viewer comment trên baseline, Analyst chuyển thành change request (mode 1)", () => {
+describe("UC-49 - Viewer comment trên baseline, Analyst chuyển thành change request (mode 1)", () => {
   it("Viewer ghim trên 0.0 ⇒ Analyst tạo CR từ comment ⇒ comment converted + báo tác giả; chuyển lần hai ⇒ 409", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)

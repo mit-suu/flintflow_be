@@ -5,7 +5,7 @@ import { Scene } from "./svg-scene.js"
 
 const rules = (scene: Scene, allowBends = false) => checkScene(scene, { allowBends }).map((i) => i.rule)
 
-describe("luật 1 — một đoạn thẳng, gấp khúc vuông góc khi kind cho phép", () => {
+describe("luật 1 - một đoạn thẳng, gấp khúc vuông góc khi kind cho phép", () => {
   const bent = (points: Point[]) => {
     const scene = new Scene()
     scene.polyline("L", points, { name: "places" })
@@ -30,7 +30,7 @@ describe("luật 1 — một đoạn thẳng, gấp khúc vuông góc khi kind c
   })
 })
 
-describe("luật 2 — chữ không đè chữ / hình", () => {
+describe("luật 2 - chữ không đè chữ / hình", () => {
   it("hai chữ chồng ⇒ text_overlap; cách nhau ⇒ sạch", () => {
     const scene = new Scene()
     scene.text("A", 0, 0, "Customer", { anchor: "start" })
@@ -70,7 +70,7 @@ describe("luật 2 — chữ không đè chữ / hình", () => {
   })
 })
 
-describe("luật 2b — chữ thuộc hình nằm trọn trong hình", () => {
+describe("luật 2b - chữ thuộc hình nằm trọn trong hình", () => {
   it("tên đậm tràn hộp ⇒ text_overflow", () => {
     const scene = new Scene()
     scene.rect("E", 0, 0, 60, 40, { name: "Administrator" })
@@ -89,7 +89,7 @@ describe("luật 2b — chữ thuộc hình nằm trọn trong hình", () => {
   })
 })
 
-describe("luật 3 — đường không cắt qua chữ", () => {
+describe("luật 3 - đường không cắt qua chữ", () => {
   it("đường cắt chữ ⇒ line_over_text; nhãn của chính nó ⇒ sạch", () => {
     const scene = new Scene()
     scene.line("L", [0, 0], [200, 0], { name: "submits" })
@@ -108,7 +108,7 @@ describe("luật 3 — đường không cắt qua chữ", () => {
   })
 })
 
-describe("luật 4 — hai đoạn không chồng nhau", () => {
+describe("luật 4 - hai đoạn không chồng nhau", () => {
   it("hai đường trùng phương, sát nhau ⇒ line_overlap", () => {
     const scene = new Scene()
     scene.line("A", [0, 0], [100, 0])
@@ -144,7 +144,7 @@ describe("luật 4 — hai đoạn không chồng nhau", () => {
   })
 })
 
-describe("luật 5 — đường không xuyên hình", () => {
+describe("luật 5 - đường không xuyên hình", () => {
   it("đường chạm viền hai đầu ⇒ sạch; xuyên hộp thứ ba ⇒ line_through_shape", () => {
     const scene = new Scene()
     scene.rect("A", 0, 0, 50, 50)
@@ -173,7 +173,7 @@ type Entity = { name: string; flows: Flow[] }
 
 /** Dữ liệu `docs/diagram_guideline/context/example-flintflow.data.mjs`. */
 const EXAMPLE: { title: string; process: string; left: Entity[]; right: Entity[] } = {
-  title: "Context Diagram — FlintFlow",
+  title: "Context Diagram - FlintFlow",
   process: "FlintFlow System",
   left: [
     { name: "Guest", flows: [{ label: "Registration Details", dir: "in" }, { label: "Login Credentials", dir: "in" }, { label: "OTP / Reset Code", dir: "in" }] },
@@ -271,7 +271,7 @@ const buildContext = (data: typeof EXAMPLE): Scene => {
   return scene
 }
 
-describe("fixture thật — mẫu context của guideline", () => {
+describe("fixture thật - mẫu context của guideline", () => {
   it("dựng qua Scene ⇒ 0 issue", () => {
     expect(checkScene(buildContext(EXAMPLE), { allowBends: false })).toEqual([])
   })

@@ -14,7 +14,7 @@ const map = (block_id: string, headers: string[], fields: (string | null)[]): Ta
 const headers = (d: RenderedDocument, i = 0) => (d.sections[i].blocks[0] as { header: { text: string }[][] }).header.map((c) => c.map((r) => r.text).join(""))
 const rows = (d: RenderedDocument, i = 0) => (d.sections[i].blocks[0] as { rows: { text: string }[][][] }).rows.map((r) => r.map((c) => c.map((x) => x.text).join("")))
 
-describe("projectPreviewTables (FLF-379 — xem trước mẫu cố định đúng cột như bản xuất)", () => {
+describe("projectPreviewTables (FLF-379 - xem trước mẫu cố định đúng cột như bản xuất)", () => {
   const blocks: SourceBlock[] = [
     { block_id: "H1", kind: "heading" },
     { block_id: "T1", kind: "table", rows: [["Mã", "Tên tài liệu", "Đơn vị", "Loại"], ["[REF-xx]", "[Tên]", "[Đơn vị]", "[Loại]"]] },

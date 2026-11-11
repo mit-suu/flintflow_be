@@ -23,7 +23,7 @@ const HOSTILE = [
   "O'Brien & Sons"
 ]
 
-describe("Scene.toSvg — escape tập trung", () => {
+describe("Scene.toSvg - escape tập trung", () => {
   it.each(HOSTILE)("chữ user %j ⇒ SVG parse được, chỉ có phần tử whitelist", (hostile) => {
     const scene = new Scene()
     scene.rect("E1", 0, 0, 200, 60, { name: hostile })
@@ -59,7 +59,7 @@ describe("Scene.toSvg — escape tập trung", () => {
   })
 })
 
-describe("Scene.toSvg — tất định", () => {
+describe("Scene.toSvg - tất định", () => {
   const build = () => {
     const scene = new Scene()
     scene.rect("A", 10.123456, 20, 150, 54, { name: "Analyst" })

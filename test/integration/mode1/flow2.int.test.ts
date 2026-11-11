@@ -58,7 +58,7 @@ const toFinalized = async (intent: "fixed" | "free", startKind: "new" | "existin
   return { ...ctx, token }
 }
 
-describe("Luồng 2 cho phần thiếu — chế độ 3", () => {
+describe("Luồng 2 cho phần thiếu - chế độ 3", () => {
   it("giữ khung còn thiếu ⇒ finalize tự sang Luồng 2: mode fpt + drafting, Brief từ B-1.1, không 0.1, chạy step được, bản in theo mẫu", async () => {
     const { projectId, importId, token, userId } = await toFinalized("fixed")
     expect(await DocVersion.countDocuments({ projectId })).toBe(0)
@@ -143,7 +143,7 @@ describe("Luồng 2 cho phần thiếu — chế độ 3", () => {
     expect(readZipText(downloaded.data, "word/styles.xml")).toBe(readZipText(original, "word/styles.xml"))
   })
 
-  it("Hoàn thiện (complete: true) từ incomplete bị chặn — không bao giờ khoá file thiếu cấu trúc đích thành bản gốc", async () => {
+  it("Hoàn thiện (complete: true) từ incomplete bị chặn - không bao giờ khoá file thiếu cấu trúc đích thành bản gốc", async () => {
     const { projectId, importId, token } = await toFinalized("free")
     const res = await request(app)
       .post(`/api/v1/projects/${projectId}/import/finalize`)

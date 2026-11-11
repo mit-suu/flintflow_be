@@ -43,7 +43,7 @@ const createAndUpload = async (body: Record<string, unknown>, file: URL) => {
   return { seeded, projectId, importId: String(uploaded.body.data.import.id), intent: uploaded.body.data.import.intent as string }
 }
 
-describe("màn đọc khung — cấu trúc đích sơ bộ lúc upload", () => {
+describe("màn đọc khung - cấu trúc đích sơ bộ lúc upload", () => {
   it("SRS đã viết, giữ khung ⇒ written, phần lớn mục có nội dung; không gọi AI, không trừ credit; gap report sơ bộ tải được", async () => {
     const { seeded, projectId, intent } = await createAndUpload({ has_srs_file: true }, WRITTEN_SRS)
     expect(intent).toBe("fixed")

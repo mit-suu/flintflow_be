@@ -376,7 +376,7 @@ const drawEntity = (scene: Scene, e: EntityBox, placed: PlacedNode, notation: Er
         const half = textWidth(v.name, ATTR_SIZE, true) / 2
         scene.decoration(`${ovalId}#key`, ovalId, [[cx - half, cy + 8], [cx + half, cy + 8]])
       }
-      scene.line(`${ovalId}#link`, [x + (w * (i + 1)) / (e.ovals.length + 1), y + h], [cx, cy - v.ry], { name: `${name} — ${v.name}` })
+      scene.line(`${ovalId}#link`, [x + (w * (i + 1)) / (e.ovals.length + 1), y + h], [cx, cy - v.ry], { name: `${name} - ${v.name}` })
       left += 2 * v.rx + 10
     })
   }

@@ -40,7 +40,7 @@ const MINUTES = () =>
 const precheck = (seeded: SeededFixture, buffer: Buffer, name: string) =>
   request(app).post("/api/v1/projects/precheck-docx").set(H(seeded)).attach("file", buffer, name)
 
-describe("precheck-docx — hộp Tạo dự án", () => {
+describe("precheck-docx - hộp Tạo dự án", () => {
   it("SRS ⇒ looks_like_srs; biên bản họp .docx ⇒ false; file không phải .docx ⇒ false; không lưu file", async () => {
     const seeded = await seedFixture("minimal")
     const srs = await precheck(seeded, await readFile(SRS), "SRS cu.docx")

@@ -1,4 +1,4 @@
-# Review lenses — source: Phases §6.4 (S-8.4, S-9.2, S-9.3), srs-spine.md §8.2; pattern from BMAD `bmad-review/references/lens-*.md`
+# Review lenses - source: Phases §6.4 (S-8.4, S-9.2, S-9.3), srs-spine.md §8.2; pattern from BMAD `bmad-review/references/lens-*.md`
 
 All lenses output **yellow** flags. Round one ships the schema; LLM yellow flags are cut from the round-one scope (Phases §9.1) except where a step explicitly enables a lens.
 
@@ -47,6 +47,6 @@ Keyed names change in one place, but prose does not follow (Phases §2.3 limit).
 - Each `project.goals[]` entry must be served by at least one function or NFR.
 - Flag `fixed:1` with the uncovered goal quoted.
 
-## Three-Lens Review (B-2.3) — not this skill
+## Three-Lens Review (B-2.3) - not this skill
 
 Skeptic / Opportunity / Contextual are FlintFlow's own Brief lenses and live in `content/product-brief`.

@@ -1,6 +1,6 @@
 # Abnormal flow patterns
 
-> Human-facing reference. **Not loaded at runtime** — the six-pattern sweep is inlined in `../SKILL.md`.
+> Human-facing reference. **Not loaded at runtime** - the six-pattern sweep is inlined in `../SKILL.md`.
 
 Each entry of `functions[].abnormal[]` is ONE sentence answering three things: what goes wrong, what the
 system does, what the user is left with. `S-7.3 Application Messages` later derives `messages[]` (with
@@ -21,8 +21,8 @@ the product is willing to reveal existence:
 **4. Conflict.** Concurrent edit, optimistic-lock rejection, or an idempotency collision:
 > "The document changed in another tab: the system rejects the write and asks the author to reload before retrying."
 
-**5. Dependency failure.** An external system errors or times out. Always say what happens to the work —
-retried, queued, or lost — and to any money or quota already committed:
+**5. Dependency failure.** An external system errors or times out. Always say what happens to the work -
+retried, queued, or lost - and to any money or quota already committed:
 > "The model provider times out: the system releases the reserved credits, keeps the previous content and offers a retry."
 
 **6. Limit reached.** Quota, balance, rate limit, size cap:
@@ -39,6 +39,6 @@ from the open project" is a reviewable statement; an absent row is not.
   does when it fires.
 - **UI toasts as flows.** "A toast appears" is not an abnormal flow unless the state or the user's next
   option changes.
-- **Implementation detail.** No HTTP status codes, no exception class names, no table names — §3 is read
+- **Implementation detail.** No HTTP status codes, no exception class names, no table names - §3 is read
   by business reviewers.
 - **The catch-all.** "Any other error shows an error message" adds nothing; name the dependency instead.

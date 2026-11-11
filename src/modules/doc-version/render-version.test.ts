@@ -46,7 +46,7 @@ beforeEach(() => {
   findProject.mockResolvedValue({ mode: "import", converted_from: null })
 })
 
-describe("renderVersionFile — mode 1 không đổi", () => {
+describe("renderVersionFile - mode 1 không đổi", () => {
   it("writer nhận { flagLanguage: vi } như trước FLF-265 + mục lục ghi sẵn (FLF-344)", async () => {
     await renderVersionFile(PROJECT, "Demo", {} as Spine, { version: "1.0", stampSource: "release" })
     expect(renderSpineDocument).toHaveBeenCalledWith(PROJECT, "Demo", {}, { version: "1.0", source: "baseline", pendingRecord: undefined })
@@ -65,7 +65,7 @@ describe("renderVersionFile — mode 1 không đổi", () => {
   })
 })
 
-describe("renderVersionFile — dự án chuyển từ mode 2 (FLF-318)", () => {
+describe("renderVersionFile - dự án chuyển từ mode 2 (FLF-318)", () => {
   it("mẫu FPT theo ngôn ngữ tài liệu, nội dung qua lớp bản dịch (en ⇒ vi)", async () => {
     findProject.mockResolvedValue({ mode: "import", converted_from: "fpt", documentLanguage: "vi" })
     await renderVersionFile(PROJECT, "Demo", {} as Spine, { version: "1.0", stampSource: "convert" })

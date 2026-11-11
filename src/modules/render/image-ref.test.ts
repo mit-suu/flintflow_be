@@ -89,7 +89,7 @@ describe("loader chế độ tham chiếu", () => {
   })
 })
 
-describe("readImageRef — chỉ đọc", () => {
+describe("readImageRef - chỉ đọc", () => {
   it("sơ đồ gốc: đúng hash ⇒ bytes; vẽ lại sau đó ⇒ changed; thiếu ⇒ not_found", async () => {
     const store = createMemoryDiagramStore()
     await store.save(PROJECT, "D01", "png", png("old"))

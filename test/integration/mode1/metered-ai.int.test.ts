@@ -38,7 +38,7 @@ const scriptClarify = (plan: (n: number) => string | Error | undefined) => {
   return counter
 }
 
-describe("withMeteredAi — usage theo từng loại gọi (luồng thật)", () => {
+describe("withMeteredAi - usage theo từng loại gọi (luồng thật)", () => {
   it("import + CR: usage I-4:<section>, I-1.11:<lô>/cross, C-2/C-4/C-5:<cr> đều deducted; ví bị trừ đúng tổng cost; không còn hold", async () => {
     const { c, projectId, seeded } = await importedProject()
     const crId = await createCr(c, "Faster", "1 second instead of 2 seconds")
@@ -66,7 +66,7 @@ describe("withMeteredAi — usage theo từng loại gọi (luồng thật)", ()
   })
 })
 
-describe("withMeteredAi — retry + lỗi (C-2)", () => {
+describe("withMeteredAi - retry + lỗi (C-2)", () => {
   it("timeout rồi sai schema rồi đúng ⇒ 3 lượt gọi (retry 2 lần), một usage deducted, ví trừ một lần, CR đi tiếp", async () => {
     const { c, projectId, seeded } = await importedProject()
     const before = await wallet(seeded.userId)
@@ -128,7 +128,7 @@ describe("withMeteredAi — retry + lỗi (C-2)", () => {
   })
 })
 
-describe("withMeteredAi — gọi trực tiếp", () => {
+describe("withMeteredAi - gọi trực tiếp", () => {
   it("trả data đã parse + usageId trỏ tới dòng usage deducted với tokens/cost thật", async () => {
     const { projectId, seeded } = await importedProject()
     mockOverrides.next = (p) => fakeCrClarify({ entity_paths: [], keywords: ["x"] })(p)

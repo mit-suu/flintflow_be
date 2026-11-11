@@ -30,7 +30,7 @@ export const assertCrInfo = (info: ChangeRequestInfo | undefined): ChangeRequest
   if (!info) {
     throw new ApiError(
       400,
-      "Dự án đã có baseline — mọi thay đổi phải là một change request: ghi người yêu cầu và nguồn (email, biên bản, gap report, …).",
+      "Dự án đã có baseline - mọi thay đổi phải là một change request: ghi người yêu cầu và nguồn (email, biên bản, gap report, …).",
       CR_FIELDS_REQUIRED
     )
   }
@@ -41,7 +41,7 @@ export const assertCrInfo = (info: ChangeRequestInfo | undefined): ChangeRequest
 export const crReason = (crId: string, info: ChangeRequestInfo, reason: string): string => {
   const ref = info.source.ref?.trim()
   const source = ref ? `${SOURCE_LABELS[info.source.kind]}: ${ref}` : SOURCE_LABELS[info.source.kind]
-  return `${crId} · ${info.requester.trim()} · ${source} — ${reason.trim()}`
+  return `${crId} · ${info.requester.trim()} · ${source} - ${reason.trim()}`
 }
 
 export const nextCrId = async (projectId: string): Promise<string> => {

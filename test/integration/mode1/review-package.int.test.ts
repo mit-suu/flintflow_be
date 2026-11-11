@@ -58,7 +58,7 @@ beforeEach(() => {
   routeReplaceCr("2 seconds", "1 second")
 })
 
-describe("C-6 — BA xác nhận là ghi ngay vào bản nháp (CR = commit)", () => {
+describe("C-6 - BA xác nhận là ghi ngay vào bản nháp (CR = commit)", () => {
   it("3 CR xác nhận ⇒ bản nháp 'Bản gốc 0.1 · 3 thay đổi chưa duyệt', không có bước Lead duyệt từng CR, gói liệt kê đúng thứ tự", async () => {
     const { seeded, projectId, c } = await importedProject()
     const analyst = await joinOrg(seeded.orgId, "analyst")
@@ -84,7 +84,7 @@ describe("C-6 — BA xác nhận là ghi ngay vào bản nháp (CR = commit)", (
   })
 })
 
-describe("C-7 — gói duyệt kiểu pull request", () => {
+describe("C-7 - gói duyệt kiểu pull request", () => {
   it("Analyst gửi ⇒ pending, bản nháp khoá (không tạo / xác nhận CR), Lead nhận thông báo; gửi lại ⇒ 409", async () => {
     const { seeded, projectId, c } = await importedProject()
     const analyst = await joinOrg(seeded.orgId, "analyst")

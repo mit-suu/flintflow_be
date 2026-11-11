@@ -135,7 +135,7 @@ describe("localizedDiagramPng (FLF-265 N1)", () => {
   })
 })
 
-describe("localizedDiagramPng — format svg (FLF-339)", () => {
+describe("localizedDiagramPng - format svg (FLF-339)", () => {
   it("svg ⇒ PNG bằng resvg, không compile-check, không gọi PlantUML; lưu theo hash nguồn", async () => {
     const { deps, store } = setup()
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>'
@@ -152,7 +152,7 @@ describe("localizedDiagramPng — format svg (FLF-339)", () => {
   })
 })
 
-describe("memory store — PNG theo ngôn ngữ", () => {
+describe("memory store - PNG theo ngôn ngữ", () => {
   const file = (text: string) => ({ data: Buffer.from(text), contentType: "image/png" })
 
   it(`giữ ${LOCALIZED_VERSIONS_KEPT} bản mới nhất mỗi (sơ đồ, ngôn ngữ); sơ đồ / ngôn ngữ khác không bị dọn`, async () => {

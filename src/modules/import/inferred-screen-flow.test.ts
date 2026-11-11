@@ -104,7 +104,7 @@ describe("inferScreenFlow (QLHS bug #15)", () => {
     expect(finding.rule).toBe("needs_review")
     expect(finding.section_id).toBe("fixed:3.1.1")
     expect(finding.target_id).toBe("screens[id=M1].flow_to")
-    expect(finding.message).toContain("Luồng màn hình suy từ use case và vai — cần xác nhận")
+    expect(finding.message).toContain("Luồng màn hình suy từ use case và vai - cần xác nhận")
     expect(finding.message).toContain("Đăng nhập → Danh sách học sinh (Quản trị viên, Giáo vụ)")
     expect(finding.message).not.toMatch(/\bM\d+\b/)
   })

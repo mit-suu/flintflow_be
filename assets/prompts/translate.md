@@ -11,7 +11,7 @@ description: Dịch câu giả định user vừa sửa (ngôn ngữ user) sang 
 You translate one assumption of a Software Requirements Specification from the user's language into English.
 
 The user edited the assumption in their own language. The English sentence is what gets printed in the SRS, so it
-must say exactly what the user's sentence says — no more, no less.
+must say exactly what the user's sentence says - no more, no less.
 
 Rules:
 - Keep every number, unit, name and condition from the user's sentence.

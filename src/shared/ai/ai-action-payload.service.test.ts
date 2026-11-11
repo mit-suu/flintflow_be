@@ -43,7 +43,7 @@ describe("clipPayload", () => {
     expect(clipPayload("a".repeat(10), 10)).toBe("a".repeat(10))
   })
 
-  it("quá trần thì cắt GIỮA — đầu là luật của skill, cuối là projection và câu trả lời của user", () => {
+  it("quá trần thì cắt GIỮA - đầu là luật của skill, cuối là projection và câu trả lời của user", () => {
     const text = `${"H".repeat(50)}${"M".repeat(100)}${"T".repeat(50)}`
     const clipped = clipPayload(text, 100)
 
@@ -56,7 +56,7 @@ describe("clipPayload", () => {
 })
 
 describe("capturePayload", () => {
-  it("ghi bản đã cắt nhưng độ dài THẬT giữ nguyên — đọc log phải biết mình đang xem bản cắt", async () => {
+  it("ghi bản đã cắt nhưng độ dài THẬT giữ nguyên - đọc log phải biết mình đang xem bản cắt", async () => {
     const prompt = "p".repeat(500)
     const response = "r".repeat(300)
     await capturePayload(input({ prompt, response }))
@@ -85,7 +85,7 @@ describe("capturePayload", () => {
     expect(doc.responseChars).toBe(0)
   })
 
-  it("ghi payload thất bại KHÔNG được ném — lượt gọi model đã thành công thì không đổ vì log phụ", async () => {
+  it("ghi payload thất bại KHÔNG được ném - lượt gọi model đã thành công thì không đổ vì log phụ", async () => {
     created.fail = true
     await expect(capturePayload(input())).resolves.toBeUndefined()
   })

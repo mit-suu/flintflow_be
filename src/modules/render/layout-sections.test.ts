@@ -66,7 +66,7 @@ const LAYOUT: TemplateLayout = {
   ]
 }
 
-describe("placeSections — thứ tự theo file, chèn đầu mục FPT thiếu", () => {
+describe("placeSections - thứ tự theo file, chèn đầu mục FPT thiếu", () => {
   it("mục layout giữ thứ tự + tiêu đề gốc (bỏ số gõ tay); mục đã xoá khỏi Spine bị bỏ; mục FPT thiếu chèn sau section FPT gần nhất đứng trước", () => {
     const placed = placeSections(spine(), LAYOUT)
     const ids = placed.map((p) => p.section_id)
@@ -88,7 +88,7 @@ describe("placeSections — thứ tự theo file, chèn đầu mục FPT thiếu
     expect(placed.find((p) => p.section_id === "custom:CS01")?.kind).toBe("continuation")
   })
 
-  it("mẫu bắt buộc (chế độ 3): không chèn heading ngoài mẫu — trừ chức năng mới dưới feature của nó (TechMart 11/11, user chốt)", () => {
+  it("mẫu bắt buộc (chế độ 3): không chèn heading ngoài mẫu - trừ chức năng mới dưới feature của nó (TechMart 11/11, user chốt)", () => {
     const s = spine()
     s.functions.push({ ...s.functions[0], id: "FN02", order: 1, name: "Quên mật khẩu" })
     const ids = placeSections(s, { ...LAYOUT, fixedTemplate: true }).map((p) => p.section_id)
@@ -208,7 +208,7 @@ describe("numberSections", () => {
   })
 })
 
-describe("numberSections — phần đánh số La Mã (nợ T14)", () => {
+describe("numberSections - phần đánh số La Mã (nợ T14)", () => {
   const placed = (rows: [string, string, number, string][]) =>
     rows.map(([section_id, title, level, label]) => ({ section_id, kind: "fpt" as const, title, level, fromLayout: true, typed: label !== "", label }))
 
@@ -304,7 +304,7 @@ describe("buildLayoutSections", () => {
     expect(titles.get("custom:CS02")).toBe("Phụ lục A Biên bản họp")
   })
 
-  it("section rỗng vẫn có mặt (FE hiện 'chưa có nội dung — chạy step'); partial bỏ section FPT rỗng", () => {
+  it("section rỗng vẫn có mặt (FE hiện 'chưa có nội dung - chạy step'); partial bỏ section FPT rỗng", () => {
     expect(build().sections.find((s) => s.id === "fixed:5.1")).toMatchObject({ heading: "Quy tắc nghiệp vụ", blocks: [] })
     const partial = buildLayoutSections(spine(), LAYOUT, [], { partial: true, diagramPng: () => undefined })
     expect(partial.sections.map((s) => s.id)).not.toContain("fixed:5.1")
@@ -319,7 +319,7 @@ describe("buildLayoutSections", () => {
   })
 })
 
-describe("FLF-252 — bảng Non-Screen Functions + chức năng chỉ có ở bảng (SRS WDP301)", () => {
+describe("FLF-252 - bảng Non-Screen Functions + chức năng chỉ có ở bảng (SRS WDP301)", () => {
   const fn = (id: string, name: string, feature_id: string, screen_id: string | null, order: number, detailed: boolean): Spine["functions"][number] => ({
     id,
     screen_id,
@@ -414,7 +414,7 @@ describe("FLF-252 — bảng Non-Screen Functions + chức năng chỉ có ở b
   })
 })
 
-describe("FLF-252 — mục chức năng in theo file gốc", () => {
+describe("FLF-252 - mục chức năng in theo file gốc", () => {
   const original = (s: Spine) => ({
     section_id: "function:FN01",
     source_hash: functionSourceHash(s.functions[0]),
@@ -467,7 +467,7 @@ describe("FLF-252 — mục chức năng in theo file gốc", () => {
   })
 })
 
-describe("mẫu IEEE — nhiều heading cùng một section FPT (Reliability + Availability ⇒ 4.2.2)", () => {
+describe("mẫu IEEE - nhiều heading cùng một section FPT (Reliability + Availability ⇒ 4.2.2)", () => {
   const nfr = (id: string, statement: string): Spine["nfrs"][number] => ({ id, category: "reliability", kind: "descriptive", statement, priority: null })
   const ieee = (): Spine => ({
     ...createEmptySpine({ name: "Lumen" }),
@@ -673,7 +673,7 @@ describe("phần nhỏ slot:* của mẫu khách (FLF-278 trên FLF-335/336)", (
   })
 })
 
-describe("FLF-364 (câu 10) — chữ hướng dẫn của mẫu in khi mục trống, có dữ liệu thì bỏ", () => {
+describe("FLF-364 (câu 10) - chữ hướng dẫn của mẫu in khi mục trống, có dữ liệu thì bỏ", () => {
   // Mẫu thường (không bắt buộc); mẫu bắt buộc (FLF-371) xuất vào chính file mẫu nên luôn bỏ hướng dẫn
   const guideLayout: TemplateLayout = {
     language: "vi",
@@ -718,7 +718,7 @@ describe("FLF-364 (câu 10) — chữ hướng dẫn của mẫu in khi mục tr
   })
 })
 
-describe("FLF-390 — sơ đồ triển khai ở mục Phân tán (mẫu IEEE), activity của use case ở phần chức năng", () => {
+describe("FLF-390 - sơ đồ triển khai ở mục Phân tán (mẫu IEEE), activity của use case ở phần chức năng", () => {
   const withDeployment = (): Spine => ({
     ...spine(),
     use_cases: [
@@ -778,7 +778,7 @@ describe("FLF-390 — sơ đồ triển khai ở mục Phân tán (mẫu IEEE), 
     const s = withDeployment()
     s.diagrams = [
       { id: "D01", kind: "deployment", format: "puml", source: "@startuml\n@enduml\n", section: "fixed:4.1", owner_kind: null, owner_id: null, render_status: "ok", source_hash: "h", rendered_at: "2026-11-10T00:00:00.000Z" },
-      { id: "D02", kind: "activity", format: "svg", source: "<svg><title>Activity Diagram — Đăng ký</title></svg>", section: "feature:F-4", owner_kind: "use_case", owner_id: "UC01", render_status: "ok", source_hash: "h", rendered_at: "2026-11-10T00:00:00.000Z" }
+      { id: "D02", kind: "activity", format: "svg", source: "<svg><title>Activity Diagram - Đăng ký</title></svg>", section: "feature:F-4", owner_kind: "use_case", owner_id: "UC01", render_status: "ok", source_hash: "h", rendered_at: "2026-11-10T00:00:00.000Z" }
     ]
     const { sections } = buildLayoutSections(s, DESIGN, [], { diagramPng: (id: string) => `PNG:${id}` })
     const pngsOf = (id: string) => sections.filter((x) => x.id === id).flatMap((x) => x.blocks.flatMap((b) => (b.type === "image" ? [String(b.png)] : [])))
@@ -789,7 +789,7 @@ describe("FLF-390 — sơ đồ triển khai ở mục Phân tán (mẫu IEEE), 
 })
 
 
-describe("TechMart 11/11 — chức năng mới trong mẫu cố định", () => {
+describe("TechMart 11/11 - chức năng mới trong mẫu cố định", () => {
   it("đứng sau mọi chức năng của file trong feature (không đổi số mục của file) và ghi mã use case như file", () => {
     const s = spine()
     s.functions.push({ ...s.functions[0], id: "FN09", order: 0, name: "So sánh" })

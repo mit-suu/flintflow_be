@@ -1,4 +1,4 @@
-# Credit price per call — T03 defaults (`DEFAULT_ACTION_COSTS`, overridable by active `PricingConfig`)
+# Credit price per call - T03 defaults (`DEFAULT_ACTION_COSTS`, overridable by active `PricingConfig`)
 
 | `call_kind` (ActionType) | Credits | Typical use |
 | --- | ---: | --- |
@@ -18,7 +18,7 @@
 
 Legacy (removed at T21): `generate_section` 5 · `priority_ranking` 5 · `scope_out_of_scope` 5 · `chat_discovery` 2 · `diagram_classify` 1 · `diagram_generate` 4.
 
-## Worked example — S-3.2
+## Worked example - S-3.2
 
 | Call | Kind | Credits | State |
 | --- | --- | ---: | --- |
@@ -27,4 +27,4 @@ Legacy (removed at T21): `generate_section` 5 · `priority_ranking` 5 · `scope_
 | 3 | draft (attempt 1) | 4 | deducted |
 | 4 | review | 2 | deducted |
 
-Parse/validation failure releases the reservation (Phases §4.2: refund on failure), so row 2 is `refunded` — but it still counts toward the cap of 8. Charged to the user: 7 credits; calls counted: 4.
+Parse/validation failure releases the reservation (Phases §4.2: refund on failure), so row 2 is `refunded` - but it still counts toward the cap of 8. Charged to the user: 7 credits; calls counted: 4.

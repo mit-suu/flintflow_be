@@ -62,7 +62,7 @@ const fakeStream = (chunks: string[]) =>
     usage: Promise.resolve({ inputTokens: 10, outputTokens: 20 })
   }) as any
 
-describe("executeAiAction — thứ tự parse → deduct", () => {
+describe("executeAiAction - thứ tự parse → deduct", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.spyOn(console, "error").mockImplementation(() => {})
@@ -125,7 +125,7 @@ describe("executeAiAction — thứ tự parse → deduct", () => {
   })
 })
 
-describe("executeAiAction — ngôn ngữ trả lời (FLF-260)", () => {
+describe("executeAiAction - ngôn ngữ trả lời (FLF-260)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.spyOn(console, "error").mockImplementation(() => {})
@@ -156,7 +156,7 @@ describe("executeAiAction — ngôn ngữ trả lời (FLF-260)", () => {
   })
 })
 
-describe("executeAiAction — ngôn ngữ tài liệu (FLF-265 D16)", () => {
+describe("executeAiAction - ngôn ngữ tài liệu (FLF-265 D16)", () => {
   const vi_ = { documentLanguage: "vi", sourceLanguage: "en" }
 
   beforeEach(() => {
@@ -316,7 +316,7 @@ describe("executeAiAction — ngôn ngữ tài liệu (FLF-265 D16)", () => {
   })
 })
 
-describe("executeAiActionStream — thứ tự parse → deduct", () => {
+describe("executeAiActionStream - thứ tự parse → deduct", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.spyOn(console, "error").mockImplementation(() => {})
@@ -369,7 +369,7 @@ describe("executeAiActionStream — thứ tự parse → deduct", () => {
   })
 })
 
-describe("executeAiActionStream — AI_PROVIDER_OVERRIDE (FLF-244)", () => {
+describe("executeAiActionStream - AI_PROVIDER_OVERRIDE (FLF-244)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.spyOn(console, "error").mockImplementation(() => {})

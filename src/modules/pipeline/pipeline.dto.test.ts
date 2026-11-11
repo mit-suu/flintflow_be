@@ -26,7 +26,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const CONTRACT = fs.readFileSync(path.resolve(__dirname, "../../../docs/api/pipeline-contract.md"), "utf8")
 
 describe("pipeline.dto", () => {
-  it("UC-49: comment — text 1–2000 ký tự sau trim, block_index mặc định null, status mặc định open, mã CM-nnn", () => {
+  it("UC-49: comment - text 1–2000 ký tự sau trim, block_index mặc định null, status mặc định open, mã CM-nnn", () => {
     const body = { version: { source: "draft" }, anchor: { section_id: "fixed:1" }, text: "  Góp ý  " }
     const parsed = createCommentSchema.parse(body)
     expect(parsed.text).toBe("Góp ý")
@@ -45,7 +45,7 @@ describe("pipeline.dto", () => {
     expect(CONTRACT).toContain("/comments/:commentId/resolve")
   })
 
-  it("FLF-265: dịch tài liệu — run chỉ nhận max_batches 1–10, status đủ số đếm + ước tính credit", () => {
+  it("FLF-265: dịch tài liệu - run chỉ nhận max_batches 1–10, status đủ số đếm + ước tính credit", () => {
     expect(translationRunRequestSchema.safeParse({}).success).toBe(true)
     expect(translationRunRequestSchema.safeParse({ max_batches: 5 }).success).toBe(true)
     expect(translationRunRequestSchema.safeParse({ max_batches: 0 }).success).toBe(false)

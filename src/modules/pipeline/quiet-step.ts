@@ -39,7 +39,7 @@ export const HARD_GATE_STEPS: ReadonlySet<string> = new Set([...ALWAYS_GATE, "B-
 
 /** Lý do dừng riêng của từng bước `ALWAYS_GATE` — cổng B-0.1 là nơi user chốt ý tưởng (FLF-221). */
 const ALWAYS_GATE_REASON: Readonly<Record<string, string>> = Object.freeze({
-  "B-0.1": "Chốt ý tưởng — duyệt để AI đi tiếp, hoặc nhắn điều cần sửa",
+  "B-0.1": "Chốt ý tưởng - duyệt để AI đi tiếp, hoặc nhắn điều cần sửa",
   "S-1.1": "Soát bản tiếng Anh của tầm nhìn và mục tiêu trước khi đưa vào tài liệu"
 })
 
@@ -107,7 +107,7 @@ export const isQuietStep = (input: QuietInput): QuietVerdict => {
   // Mọi bước: dừng ở mọi bước — trừ bước chỉ chạm phần đã chọn "không hỏi lại" (FLF-337, xét ở dưới)
   const touchedOnlySkipped = (input.touchedSections ?? []).length > 0 && (input.touchedSections ?? []).every((id) => (input.spine.project?.skip_confirm_sections ?? []).includes(id))
   if (input.reviewMode === "strict" && !touchedOnlySkipped) return { quiet: false, reason_vi: "Chế độ duyệt chặt: dừng ở mọi bước" }
-  if (input.settledEarlier) return { quiet: true, reason_vi: "Đã chốt ở bước trước — không cần hỏi lại" }
+  if (input.settledEarlier) return { quiet: true, reason_vi: "Đã chốt ở bước trước - không cần hỏi lại" }
   // Chưa có tên hệ thống thì B-2.3 phải hỏi tên (FLF-232) — không bao giờ tự Accept qua nó, dù chế độ duyệt nào
   if (input.templateId === SYSTEM_NAME_STEP && (input.spine.project?.system_name ?? null) === null) {
     return { quiet: false, reason_vi: "Cần chốt tên hệ thống trước khi mở phần tiếp theo" }
@@ -128,7 +128,7 @@ export const isQuietStep = (input: QuietInput): QuietVerdict => {
   }
   if (input.reviewMode === "milestones") {
     // Chỉ ở mốc chốt: Approve Brief là cổng cứng dù hệ thống đã có tên; mọi bước khác (kể cả cuối giai đoạn) tự qua
-    if (input.templateId === SYSTEM_NAME_STEP) return { quiet: false, reason_vi: "Duyệt Brief — mốc chốt" }
+    if (input.templateId === SYSTEM_NAME_STEP) return { quiet: false, reason_vi: "Duyệt Brief - mốc chốt" }
     return { quiet: true, reason_vi: "Chỉ ở mốc chốt: bước này tự qua" }
   }
   if (input.phaseTerminal) return { quiet: false, reason_vi: "Cổng chốt cuối giai đoạn" }

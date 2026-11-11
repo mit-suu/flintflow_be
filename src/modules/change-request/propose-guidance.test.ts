@@ -17,11 +17,11 @@ const profile = {
   ]
 }
 
-describe("FLF-364 (L5) — hướng dẫn của mẫu vào prompt C-4", () => {
+describe("FLF-364 (L5) - hướng dẫn của mẫu vào prompt C-4", () => {
   it("hướng dẫn theo mục, ghép hướng dẫn heading cha; mục không có hướng dẫn / không có profile ⇒ không có", () => {
     const g = templateGuidanceBySection(profile)
     expect(g.get("fixed:1")).toBe("Mô tả sản phẩm ở mức tổng quan")
-    expect(g.get("slot:context")).toBe("Mô tả sản phẩm ở mức tổng quan — Nêu hệ thống liên quan và sơ đồ ngữ cảnh")
+    expect(g.get("slot:context")).toBe("Mô tả sản phẩm ở mức tổng quan - Nêu hệ thống liên quan và sơ đồ ngữ cảnh")
     expect(g.has("custom:c1")).toBe(false)
     expect(templateGuidanceBySection(null).size).toBe(0)
   })

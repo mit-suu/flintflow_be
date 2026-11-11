@@ -25,7 +25,7 @@ const field = (path: string, value: unknown, confidence = 0.9, confirmed = false
 /** Cùng điều kiện lọc với `finalizeImport`: đã xác nhận hoặc không cần xác nhận (độ tin ≥ 0.7, không đọc từ ảnh). */
 const acceptedOf = (fields: ExtractedField[]) => fields.filter((f) => f.confirmed || !needsConfirm(f))
 
-describe("finalize — field ⇒ thực thể ⇒ op", () => {
+describe("finalize - field ⇒ thực thể ⇒ op", () => {
   it("field độ tin thấp chưa xác nhận bị bỏ; đã xác nhận (kể cả độ tin thấp) được ghi; edited_value thắng", () => {
     const fields = [
       field("actors[id=A01].name", "Learner"),
@@ -58,7 +58,7 @@ describe("finalize — field ⇒ thực thể ⇒ op", () => {
     expect([...collectEntities(fields).values()][0].value).toEqual({ actor_ids: ["A01", "Guest"], name: "Log in" })
   })
 
-  it("FLF-252: thứ tự phần tử theo nơi bảng / chữ định nghĩa — quan hệ từ sơ đồ ở mục trước không kéo use case lên đầu bảng", () => {
+  it("FLF-252: thứ tự phần tử theo nơi bảng / chữ định nghĩa - quan hệ từ sơ đồ ở mục trước không kéo use case lên đầu bảng", () => {
     const fields = [
       // 2.2.1: sơ đồ chỉ thêm quan hệ cho UC-03, UC-02
       field("use_cases[id=UC-03].actor_ids", ["Admin"], 0.65, true, { origin: "vision" }),
@@ -111,7 +111,7 @@ describe("finalize — field ⇒ thực thể ⇒ op", () => {
   })
 })
 
-describe("FLF-343 needsReviewFindings — chỗ độ tin thấp vào baseline kèm cờ Cần xem", () => {
+describe("FLF-343 needsReviewFindings - chỗ độ tin thấp vào baseline kèm cờ Cần xem", () => {
   it("field chưa xác nhận cần xem (độ tin < 0.7 / ảnh) + heading / cột tự nhận ⇒ mỗi chỗ một phát hiện, target = đường dẫn / block", async () => {
     const { needsReviewFindings } = await import("./finalize.service.js")
     const drafts = [
@@ -150,7 +150,7 @@ describe("FLF-343 needsReviewFindings — chỗ độ tin thấp vào baseline k
   })
 })
 
-describe("FLF-361 needsReviewFindings — không hỏi lại chỗ không vào Spine / không còn là đoán", () => {
+describe("FLF-361 needsReviewFindings - không hỏi lại chỗ không vào Spine / không còn là đoán", () => {
   it("UC → actor chỉ có trên ảnh đã bỏ (\"User\") ⇒ không cờ; tham chiếu vào được ⇒ có cờ; cấp BR ở 5.1 ⇒ không cờ; mã khác dạng vẫn khớp", async () => {
     const { needsReviewFindings } = await import("./finalize.service.js")
     const drafts = [
@@ -171,7 +171,7 @@ describe("FLF-361 needsReviewFindings — không hỏi lại chỗ không vào S
   })
 })
 
-describe("FLF-363 titleContentFindings — tiêu đề và nội dung khác nhau", () => {
+describe("FLF-363 titleContentFindings - tiêu đề và nội dung khác nhau", () => {
   it("heading đổi mục theo nội dung ⇒ cờ nêu cả hai mục theo tên mẫu, không mã nội bộ; không thêm cờ Cần xem cho heading đó", async () => {
     const { needsReviewFindings, titleContentFindings } = await import("./finalize.service.js")
     const heading_map = [
@@ -198,7 +198,7 @@ describe("FLF-363 titleContentFindings — tiêu đề và nội dung khác nhau
   })
 })
 
-describe("FLF-343 needsReviewFindings — trùng đường dẫn, phần tử bị bỏ", () => {
+describe("FLF-343 needsReviewFindings - trùng đường dẫn, phần tử bị bỏ", () => {
   it("cùng field ở hai section ⇒ một cờ; phần tử buildImportOps không đưa vào Spine ⇒ không cờ", async () => {
     const { needsReviewFindings } = await import("./finalize.service.js")
     const drafts = [
