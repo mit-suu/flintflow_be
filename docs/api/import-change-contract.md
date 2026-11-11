@@ -717,6 +717,15 @@ Cả hai đều không tự chuyển sang mẫu chuẩn FlintFlow.
     dung hiện tại") mà yêu cầu gốc **đụng thẳng** phần người kia vừa sửa ⇒ BE **không gọi model**, đặt câu hỏi + 2 gợi ý
     (BF §3.2 "AI hỏi lại trong chat, không tự chọn"); client gọi lại `owner-step-draft` với `instruction` = câu trả lời ⇒ AI soạn,
     `conflict` về `null`. `LocationProposal.proposed_at` ghi ở mọi chỗ AI soạn đề xuất.
+- (11/11 chiều, BF §3.2) `ChangeRequest.created_by_name` (tuỳ chọn) — tên BA giữ đề xuất. `POST …/submit` của người **không
+  phải** người tạo CR ⇒ **403 `CR_NOT_REQUESTER`** ("Đề xuất này đang treo ở <ai> — chỉ người đó xác nhận được"). Lúc ghi mà
+  luật Spine gãy trên nội dung hiện tại (`TransactionRejectedError`) ⇒ không còn 422 thô: CR chạy lại kiểm (C-5), chỗ gãy mang
+  cờ đỏ (`verify.violations`), trạng thái theo luật kiểm (`proposing` / `manual_fix`); người khác ghi đúng lúc (lệch
+  `spine_version`) ⇒ BE tự kiểm lại trên bản mới một lần rồi ghi ("ai xác nhận trước thì ghi trước").
+- Endpoint mới `GET …/change-requests/pending-sections` ⇒ `PendingSection[] { section_id, title, items[{ cr_id, who }] }`:
+  mục đang có đề xuất (`edit` / `comment`) của CR chưa đóng, `who` = tên BA tạo CR (fallback `requester`). FE in dưới tiêu đề
+  mục trong tài liệu: "<ai> (CR-003) có bản sửa chưa xác nhận ở mục này" (BF §3.2). `others_pending[].requester` trong chi
+  tiết CR nay cũng là tên BA tạo CR.
   - `others_pending [{ cr_id, requester }]` — CR khác chưa đóng có đề xuất ở cùng phần tử.
   - `keyword_score?`, `recall_score?` (`FoundLocation` nội bộ) — C-3 xếp hạng từ khoá bằng BM25, trộn với vector bằng RRF;
     `found_by: keyword` nay giữ cả khi có vector.

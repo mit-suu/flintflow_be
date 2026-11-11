@@ -9,11 +9,16 @@ vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await imp
 
 import { crToImpact, crToReady, detail, importedProject, lockedPaths, newCr, promptsOf, resetCrMock, type Mode1Client } from "../../helpers/mode1-cr-p4.js"
 import { ChangeLocation } from "../../../src/modules/change-request/change-location.model.js"
+import { ChangeRequest } from "../../../src/modules/change-request/change-request.model.js"
 import { unlockPaths } from "../../../src/modules/change-request/lock.service.js"
 import { SpineLock } from "../../../src/modules/change-request/spine-lock.model.js"
 import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.js"
 import { applyTransaction } from "../../../src/modules/spine/op-engine.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
+import { User } from "../../../src/modules/user/user.model.js"
+import { Membership } from "../../../src/modules/organization/membership.model.js"
+import { authAs } from "../../setup.js"
+import { mode1Api } from "../../helpers/mode1.js"
 
 beforeEach(() => resetCrMock())
 
@@ -134,5 +139,38 @@ describe("AI soạn lại trên nội dung hiện tại (BF §3.2)", () => {
     expect(redone.conflict).toBeNull()
     expect(promptsOf("# CR Propose").length).toBe(before + 1)
     expect(promptsOf("# CR Propose").at(-1)).toContain(answer)
+    // Câu trả lời thành một vòng làm rõ — bước kiểm nhất quán / làm rõ sau không hỏi lại
+    const doc = (await ChangeRequest.findOne({ projectId, cr_id: cr.split("/").pop() }).lean())!
+    expect(doc.clarifications.at(-1)).toMatchObject({ questions: [asked.conflict!.question!.text], answers: [answer] })
+  })
+})
+
+describe("đề xuất chưa xác nhận treo ở người yêu cầu (BF §3.2)", () => {
+  const joinOrg = async (orgId: string) => {
+    const email = `analyst-${Date.now()}@flintflow.test`
+    const user = await User.create({ email, name: "Huy", password: "test-password-123", emailVerified: true })
+    await Membership.create({ organizationId: orgId, userId: user._id, role: "analyst" })
+    return authAs({ _id: user._id, email, orgId })
+  }
+
+  it("người khác không xác nhận được CR của người này (403, nói rõ treo ở ai); tài liệu cho mọi người thấy mục nào đang có bản sửa chưa xác nhận", async () => {
+    const { seeded, c, projectId } = await importedProject()
+    const { cr } = await crToReady(c)
+    const other = mode1Api({ ...seeded, token: await joinOrg(seeded.orgId) }, projectId)
+
+    const res = await other.post(`${cr}/submit`)
+    expect(res.status).toBe(403)
+    expect(res.body.error.code).toBe("CR_NOT_REQUESTER")
+    expect(res.body.error.message).toContain("treo ở")
+
+    const pending = await other.get("/change-requests/pending-sections")
+    expect(pending.status, JSON.stringify(pending.body.error)).toBe(200)
+    const sections = pending.body.data as { section_id: string; title: string; items: { cr_id: string; who: string }[] }[]
+    expect(sections.length).toBeGreaterThan(0)
+    expect(sections.flatMap((s) => s.items)).toContainEqual({ cr_id: "CR-001", who: "Fixture User" })
+    expect(sections.every((s) => s.title && !/^[a-z_]+:/.test(s.title))).toBe(true)
+
+    // Người yêu cầu vẫn xác nhận được như thường
+    expect((await confirm(c, cr)).change_request.status).toBe("written")
   })
 })

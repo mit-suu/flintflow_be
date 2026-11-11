@@ -266,12 +266,9 @@ describe("C-7 lỗi giữa chừng", () => {
     expect(await lockedPaths(projectId, crId)).toEqual([])
   })
 
-  it("Spine đổi ở phiên khác sau khi đã tạo version ⇒ 409, xoá version + file vừa tạo, CR giữ nguyên; tải lại rồi ghi được", async () => {
+  it("Spine đổi ở phiên khác sau khi đã tạo version ⇒ bỏ version + file vừa tạo, kiểm lại trên bản mới rồi ghi (BF §3.2 'ai xác nhận trước thì ghi trước') — một lần bấm", async () => {
     const { c, projectId } = await importedProject()
     const { crId, cr } = await crToReady(c)
-    const held = await lockedPaths(projectId, crId)
-    const files = await gridFsFiles(projectId)
-    const base = await c.spineVersion()
     const create = DocVersion.create.bind(DocVersion)
     // "phiên khác" ghi Spine ngay sau khi version 0.2 được tạo, trước bước op Spine của CR
     vi.spyOn(DocVersion, "create").mockImplementationOnce((async (doc: unknown) => {
@@ -279,15 +276,11 @@ describe("C-7 lỗi giữa chừng", () => {
       await Spine.updateOne({ projectId }, { $inc: { spine_version: 1 } })
       return created
     }) as never)
-    const res = await confirm(c, cr)
-    expect(res.status).toBe(409)
-    expect(res.body.error.code).toBe(spineRepository.SPINE_VERSION_CONFLICT)
-    await expectNothingWritten(c, projectId, crId, cr, files, held)
-    expect((await spineRepository.listChanges(projectId)).filter((ch) => ch.by === crId)).toEqual([])
-
-    const retry = detail(await confirm(c, cr))
-    expect(retry.change_request).toMatchObject({ status: "written", result_doc_version: "0.2" })
+    // FLF-375: không trả 409 bắt người dùng tải lại — BE kiểm lại từng chỗ trên nội dung mới rồi ghi
+    const written = detail(await confirm(c, cr))
+    expect(written.change_request).toMatchObject({ status: "written", result_doc_version: "0.2" })
     expect(await DocVersion.countDocuments({ projectId, version: "0.2" })).toBe(1)
+    expect((await spineRepository.listChanges(projectId)).filter((ch) => ch.by === crId).length).toBeGreaterThan(0)
   })
 })
 

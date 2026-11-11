@@ -80,12 +80,15 @@ const applied = (tokens: string[], spans: DiffSpan[], lo: number, hi: number): s
 export const directHit = (atProposal: string, current: string, proposal: string): DirectHit | null => {
   const theirs = wordDiff(atProposal, current)
   const mine = wordDiff(atProposal, proposal)
-  const hitTheirs = theirs.filter((p) => mine.some((q) => touches(p, q)))
-  const hitMine = mine.filter((q) => theirs.some((p) => touches(p, q)))
-  if (!hitTheirs.length || !hitMine.length) return null
-  const tokens = tokenize(atProposal)
-  const all = [...hitTheirs, ...hitMine]
-  const lo = Math.min(...all.map((s) => s.start))
-  const hi = Math.max(...all.map((s) => s.end))
-  return { original: tokens.slice(lo, hi).join(" "), theirs: applied(tokens, hitTheirs, lo, hi), yours: applied(tokens, hitMine, lo, hi) }
+  // Chỉ lấy cặp đụng nhau **đầu tiên** để câu hỏi ngắn ("1" → "3" / "2"); cùng một con số lặp ở nhiều chỗ thì câu trả lời
+  // áp cho cả (AI soạn lại theo câu trả lời trên toàn phần tử).
+  for (const p of theirs) {
+    const q = mine.find((m) => touches(p, m))
+    if (!q) continue
+    const tokens = tokenize(atProposal)
+    const lo = Math.min(p.start, q.start)
+    const hi = Math.max(p.end, q.end)
+    return { original: tokens.slice(lo, hi).join(" "), theirs: applied(tokens, [p], lo, hi), yours: applied(tokens, [q], lo, hi) }
+  }
+  return null
 }
