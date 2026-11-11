@@ -40,7 +40,18 @@ export const callAnthropic = async (
         model,
         max_tokens: anthropicMaxTokens(providerConfig),
         output_config: { effort: ANTHROPIC_EFFORT },
-        messages: [{ role: "user", content: prompt }]
+        messages: [{
+          role: "user",
+          content: options.images?.length
+            ? [
+                ...options.images.map((image) => ({
+                  type: "image",
+                  source: { type: "base64", media_type: image.mime, data: image.data }
+                })),
+                { type: "text", text: prompt }
+              ]
+            : prompt
+        }]
       },
       {
         headers: {

@@ -28,7 +28,7 @@ export type MeteredPauseReason = "credits" | "resume_later"
 export type AiFailureKind = "transient" | "credits" | "config"
 
 /** Mã lỗi cho biết môi trường không đọc được ảnh (không phải lỗi tạm thời). */
-export const VISION_UNAVAILABLE: ReadonlySet<string> = new Set(["GEMINI_KEY_MISSING", "AI_PROVIDER_NO_VISION"])
+export const VISION_UNAVAILABLE: ReadonlySet<string> = new Set(["ANTHROPIC_KEY_MISSING", "GEMINI_KEY_MISSING", "AI_PROVIDER_NO_VISION"])
 
 /** Lỗi mạng tầng socket / DNS — `isTransientError` chỉ nhận timeout. */
 const NETWORK_CODES: ReadonlySet<string> = new Set(["ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EPIPE", "ENETUNREACH", "UND_ERR_SOCKET"])
@@ -38,7 +38,8 @@ export const classifyAiFailure = (err: unknown): AiFailureKind => {
   const code = (err as { code?: unknown } | null)?.code
   if (typeof code === "string" && VISION_UNAVAILABLE.has(code)) return "config"
   // Quá tải / chạm hạn mức (503, 429, GEMINI_OVERLOADED / TIMEOUT) — `isOverloadError` đã loại 429 vì hết tiền khỏi nhóm này
-  if (isOverloadError(err)) return "transient"
+  // Anthropic dùng HTTP 529 cho quá tải; ảnh cần được đọc lại như lỗi 503 của các provider khác.
+  if (isOverloadError(err) || (err instanceof AiActionError && err.statusCode === 529)) return "transient"
   // Timeout / mạng. Không dùng cả `isTransientError`: nó coi sai schema và mọi lỗi 500 là tạm thời (đáng thử lại trong một
   // lượt gọi), còn đọc lại cả lô sau vài chục giây chỉ đáng khi nhà cung cấp quá tải / mạng chập chờn
   if (typeof code === "string" && NETWORK_CODES.has(code)) return "transient"
