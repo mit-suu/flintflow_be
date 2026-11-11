@@ -279,31 +279,30 @@ const buildScene = (d: UseCaseDiagram, option: LayoutOption): Scene => {
     scene.line(`${link.actorId}~${link.useCaseId}`, hand(actor), to, { name: `${actor.name} — ${row.name}` })
   }
 
-  // Generalization: từ cột con sang cột cha (bên phải), tam giác rỗng chạm ngay trái tay actor cha. Cha nằm thấp hơn ⇒
-  // đường đi từ ngang đáy tên actor con (không cắt chữ của chính nó); cha cao hơn / ngang ⇒ từ ngang tay.
-  // Cha có ≥ 2 con ⇒ kiểu "shared target" của UML: một tam giác trên đoạn thân ngắn, các con nối vào gốc thân.
+  // Generalization kiểu "shared target" của UML, gồm các đoạn thẳng (kind này không cho đường gấp khúc): mỗi actor con
+  // một nhánh ngang từ hông hình que sang thanh dọc nằm giữa khe hai cột (tên actor không bao giờ lấn vào khe), thanh dọc
+  // gom mọi nhánh về ngang tay actor cha, rồi đoạn thân ngang mang MỘT tam giác rỗng chạm ngay trái tay actor cha.
   const childrenOf = new Map<string, string[]>()
   for (const g of generalizations) childrenOf.set(g.parent, [...(childrenOf.get(g.parent) ?? []), g.child])
   for (const [parentId, kids] of childrenOf) {
     const parent = d.actors.find((a) => a.id === parentId)!
+    const [pl, cl] = [level(parentId), level(parentId) + 1]
     const tip: [number, number] = [columnX(parent) - FIGURE.arm / 2 - GENERALIZATION_PAD, tops.get(parentId)! + FIGURE.armY]
-    const shared = kids.length > 1
-    const join: [number, number] = shared ? [tip[0] - GENERALIZATION_TRUNK, tip[1]] : tip
-    if (shared) {
-      const trunk = `gen:*>${parentId}`
-      scene.line(trunk, join, tip, { name: `→ ${parent.name}` })
-      scene.arrow(trunk, "triangle")
-    }
+    const childEdge = levelX[cl] + Math.max(FIGURE.arm, colWidth(levels[cl] ?? [])) / 2
+    const parentEdge = levelX[pl] - Math.max(FIGURE.arm, colWidth(levels[pl] ?? [])) / 2
+    const busX = Math.min((childEdge + parentEdge) / 2, tip[0] - GENERALIZATION_TRUNK)
+    const ys = [tip[1]]
     for (const childId of kids) {
       const child = d.actors.find((a) => a.id === childId)!
-      const [cx0, cTop] = [columnX(child), tops.get(childId)!]
-      // Gốc đường ở mép phải CỘT của actor con (không chỉ của tên nó) ⇒ đường dốc không quệt chữ actor kề trong cột
-      const edge = cx0 + Math.max(FIGURE.arm, colWidth(levels[level(childId)] ?? [])) / 2 + GENERALIZATION_PAD
-      const from: [number, number] = [edge, join[1] > cTop + FIGURE.legY ? cTop + metrics.get(childId)!.height : cTop + FIGURE.armY]
-      const id = `gen:${childId}>${parentId}`
-      scene.line(id, from, join, { name: `${child.name} → ${parent.name}` })
-      if (!shared) scene.arrow(id, "triangle")
+      const hip: [number, number] = [columnX(child), tops.get(childId)! + FIGURE.bodyBottom]
+      ys.push(hip[1])
+      scene.line(`gen:${childId}>${parentId}`, hip, [busX, hip[1]], { name: `${child.name} → ${parent.name}` })
     }
+    const [top, bottom] = [Math.min(...ys), Math.max(...ys)]
+    if (bottom - top > 0.5) scene.line(`gen:bus>${parentId}`, [busX, top], [busX, bottom], { name: `→ ${parent.name} (thanh gom)` })
+    const trunk = `gen:*>${parentId}`
+    scene.line(trunk, [busX, tip[1]], tip, { name: `→ ${parent.name}` })
+    scene.arrow(trunk, "triangle")
   }
 
   for (const rel of d.relations) {
