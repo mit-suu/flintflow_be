@@ -765,3 +765,28 @@ describe("relationRefs — chiều quan hệ trong ô 'Quan hệ' (QLHS 11/11)",
     expect(relationRefs(["Học kỳ"])[0]).toEqual({ ref: "Học kỳ", side: "child" })
   })
 })
+
+describe("dropReciprocalRelations — mỗi cặp quan hệ một chiều (QLHS 11/11 bug #12)", () => {
+  it("khoá ngoại quyết định chiều; không có thì thực thể đứng trước là cha; 1–1 giữ nguyên", async () => {
+    const { dropReciprocalRelations } = await import("./spine-builder.js")
+    const ent = (id: string, name: string, relations: string[], attributes: unknown[] = [], cardinality: Record<string, "1" | "N"> = {}) => ({ id, value: { name, attributes }, relations, cardinality })
+    const list = [
+      ent("E01", "Năm học", ["E02"]),
+      ent("E02", "Học kỳ", ["E01", "E09"]),
+      ent("E06", "Học sinh", ["E12"], [{ name: "mã" }, { name: "mã TK phụ huynh" }]),
+      ent("E09", "Điểm", []),
+      ent("E12", "Tài khoản", ["E06"]),
+      ent("E20", "Hồ sơ", ["E21"], [], { E21: "1" }),
+      ent("E21", "Ảnh", ["E20"])
+    ]
+    dropReciprocalRelations(list)
+    const rel = Object.fromEntries(list.map((e) => [e.id, e.relations]))
+    expect(rel.E01).toEqual(["E02"])
+    expect(rel.E02).toEqual(["E09"])
+    // Học sinh có "mã TK phụ huynh" ⇒ Tài khoản là cha dù Học sinh đứng trước
+    expect(rel.E12).toEqual(["E06"])
+    expect(rel.E06).toEqual([])
+    expect(rel.E20).toEqual(["E21"])
+    expect(rel.E21).toEqual(["E20"])
+  })
+})
