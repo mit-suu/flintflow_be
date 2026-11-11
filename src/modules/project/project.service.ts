@@ -1,5 +1,5 @@
 import { erdNotationOf, type ErdNotation } from "../../shared/diagram/erd-notation.js"
-import { Project, IProject, type ProjectMode, type ProjectStartKind, type TemplateIntent } from "./project.model.js"
+import { Project, IProject, WITH_DELETED, type ProjectMode, type ProjectStartKind, type TemplateIntent } from "./project.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ChatSession } from "./chat-session.model.js"
 import { ProjectDocument } from "./project-document.model.js"
@@ -227,17 +227,28 @@ const purgeProjectData = async (projectId: string): Promise<void> => {
     .catch((err: unknown) => console.warn(`[Project] Không xoá được file .docx mode 1 của project ${projectId}:`, err))
 }
 
+/**
+ * `hard` = nút "Xoá vĩnh viễn" của FE. FLF-401: BE chỉ xoá mềm — đặt `deletedAt` / `deletedBy`, KHÔNG dọn dữ liệu (chat,
+ * tài liệu, Spine, file còn nguyên để khôi phục bằng tay); dự án biến khỏi mọi truy vấn nhờ middleware của `Project`.
+ * Response giữ hình dạng cũ `{ _id, status: "deleted" }`. Không `hard` = Lưu trữ (`status: "archived"`) như cũ.
+ */
 export const deleteProject = async (
   projectId: string,
   orgId: string,
-  hard: boolean = false
+  hard: boolean = false,
+  deletedBy: string | null = null
 ): Promise<IProject | { _id: string; status: "deleted" }> => {
   if (hard) {
-    const project = await Project.findOneAndDelete({ _id: projectId, organizationId: orgId })
+    const project = mongoose.isValidObjectId(projectId)
+      ? await Project.findOneAndUpdate(
+          { _id: projectId, organizationId: orgId },
+          { $set: { deletedAt: new Date(), deletedBy: deletedBy && mongoose.isValidObjectId(deletedBy) ? deletedBy : null } },
+          { new: true }
+        )
+      : null
     if (!project) {
       throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
     }
-    await purgeProjectData(projectId)
     return { _id: projectId, status: "deleted" }
   }
 
@@ -250,6 +261,17 @@ export const deleteProject = async (
     throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   }
   return project
+}
+
+/**
+ * FLF-401: xoá cứng + dọn toàn bộ dữ liệu — chỉ dùng khi xoá cả tổ chức (dự án đã xoá mềm cũng dọn). Không có trên API.
+ * Trả `false` khi không có dự án.
+ */
+export const purgeProject = async (projectId: string, orgId: string): Promise<boolean> => {
+  const project = await Project.findOneAndDelete({ _id: projectId, organizationId: orgId }).setOptions(WITH_DELETED)
+  if (!project) return false
+  await purgeProjectData(projectId)
+  return true
 }
 
 export const updateProjectName = async (

@@ -10,7 +10,7 @@ import { scheduleResumeAfterTopUp } from "../import/credit-flow.service.js"
 import { fulfillTopupRequests } from "./topup-request.service.js"
 import { PaymentIntent, IPaymentIntent } from "./payment-intent.model.js"
 import { User } from "../user/user.model.js"
-import { Project } from "../project/project.model.js"
+import { Project, WITH_DELETED } from "../project/project.model.js"
 import { planConfig, findPackage, getPlan, planFromPackageId, planPackageId, PlanId } from "./plan.config.js"
 import {
   buildCallbackUrl,
@@ -145,7 +145,8 @@ const namesById = async (model: "user" | "project", ids: string[]): Promise<Map<
   const docs: any[] =
     model === "user"
       ? await User.find({ _id: { $in: ids } }, { name: 1, email: 1 })
-      : await Project.find({ _id: { $in: ids } }, { name: 1 })
+      : // FLF-401: giao dịch cũ của dự án đã xoá mềm vẫn hiện tên dự án
+        await Project.find({ _id: { $in: ids } }, { name: 1 }, WITH_DELETED)
   return new Map(docs.map((d) => [String(d._id), (d.name?.trim() || d.email || "") as string]))
 }
 
