@@ -2,11 +2,13 @@
  * §3.1.5 ERD — source_fields: `entities[].name/.relations/.relation_verbs/.relation_cardinality/.relation_optional`
  * (srs-spine §7.1) + ký pháp của dự án (`Project.erdNotation`, ngoài Spine — truyền qua `RenderContext`).
  * Dựng bằng SVG, ba ký pháp Chen / Crow's foot / IDEF1X trên một bộ xếp lưới + đi đường vuông góc dùng chung
- * (`erd-layout.ts`). Thuộc tính chưa có trong Spine nên chưa vẽ.
+ * (`erd-layout.ts`). Thuộc tính vẽ theo `entities[].attributes`.
  *
  * Cả hệ thống một hình; quá `MAX_ENTITIES_PER_DIAGRAM` entity thì tách theo thành phần liên thông (xếp các thành phần nhỏ
  * vào chung một hình), thành phần quá lớn cắt theo thứ tự duyệt rộng; quan hệ băng qua chỗ cắt không vẽ. Hình không qua
  * `checkScene` tách đôi tiếp. Phần đầu giữ id gốc của hình (`diagram.service.ts#assignIds`).
+ * QLHS 11/11 bug #12: tài liệu upload (ký pháp Crow's foot / IDEF1X) cho phép đường vòng khi đường thường bị hộp cao chắn
+ * ⇒ giữ một hình như hình gốc thay vì cắt; dự án FlintFlow tự soạn (mode 2) không đổi.
  */
 
 import { checkScene } from "../../../shared/diagram/svg-geometry.js"
@@ -135,16 +137,20 @@ const COMPACT_FALLBACK: readonly ErdNotation[] = ["crowsfoot", "idef1x"]
 
 /** Mọi hình ERD của Spine theo thứ tự trong tài liệu. */
 export const partitionErd = (spine: Spine, notation: ErdNotation = DEFAULT_ERD_NOTATION, labels: DiagramLabels = DIAGRAM_LABELS.en): ErdPart[] => {
-  const own = partitionErdWith(spine, notation, labels)
-  if (own.length <= 1 || !isUploadedDocument(spine)) return own
+  const uploaded = isUploadedDocument(spine)
+  // QLHS 11/11 bug #12: tài liệu upload được đi đường vòng (hộp nhiều thuộc tính chắn đường một làn) thay vì cắt hình.
+  // Chen không đi vòng (hình thoi + đường vòng rối) — FLF-375 đã chọn đổi sang ký pháp gọn cho trường hợp đó
+  const detours = (n: ErdNotation): boolean => uploaded && n !== "chen"
+  const own = partitionErdWith(spine, notation, labels, detours(notation))
+  if (own.length <= 1 || !uploaded) return own
   for (const alt of COMPACT_FALLBACK.filter((n) => n !== notation)) {
-    const parts = partitionErdWith(spine, alt, labels)
+    const parts = partitionErdWith(spine, alt, labels, detours(alt))
     if (parts.length === 1) return parts
   }
   return own
 }
 
-const partitionErdWith = (spine: Spine, notation: ErdNotation, labels: DiagramLabels): ErdPart[] => {
+const partitionErdWith = (spine: Spine, notation: ErdNotation, labels: DiagramLabels, detours = false): ErdPart[] => {
   const entities = byId(spine.entities)
   const relations = relationsOf(entities, labels)
   const diagramOf = (ids: readonly string[]): ErdDiagram => {
@@ -157,7 +163,7 @@ const partitionErdWith = (spine: Spine, notation: ErdNotation, labels: DiagramLa
     }
   }
   const fits = (ids: readonly string[]): { scene: Scene | null; ok: boolean } => {
-    const scene = layoutErd(diagramOf(ids))
+    const scene = layoutErd(diagramOf(ids), { detours })
     return { scene, ok: scene !== null && checkScene(scene, { allowBends: true }).length === 0 }
   }
   /** Tách đôi theo thứ tự duyệt tới khi hình qua `checkScene`; một entity lẻ thì dừng. */
@@ -172,7 +178,7 @@ const partitionErdWith = (spine: Spine, notation: ErdNotation, labels: DiagramLa
   const grouped = groupEntities(traversalOrder(entities.map((e) => e.id), relations), relations, MAX_ENTITIES_PER_DIAGRAM).flatMap(refine)
   return grouped.map((ids, i) => ({
     title: grouped.length > 1 ? `${labels.erdTitle} (${i + 1}/${grouped.length})` : labels.erdTitle,
-    scene: layoutErd(diagramOf(ids)),
+    scene: layoutErd(diagramOf(ids), { detours }),
     diagram: diagramOf(ids)
   }))
 }

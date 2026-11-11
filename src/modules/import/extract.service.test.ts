@@ -7,9 +7,11 @@ import { describe, expect, it } from "vitest"
 import { parseDocument } from "./parse.service.js"
 import { matchProfile } from "./profile-match.service.js"
 import { makeSrsDocx } from "./testing/srs-fixture.js"
+import { matchTable } from "./table-header-dictionary.js"
 import {
   AI_BATCH_CHARS,
   AI_BLOCK_CHARS,
+  attributesFromCell,
   captionOf,
   tablesToKeepVerbatim,
   chunkBlocks,
@@ -346,6 +348,45 @@ describe("deterministicTableItems — bảng khớp đủ cột (G7)", () => {
     expect(out.items.map((i) => i.value.name)).toEqual(["Học sinh"])
     expect(out.handled.has("B0875")).toBe(true)
     expect(out.verbatim.has("B0875")).toBe(true)
+  })
+
+  it("bug #12c (QLHS 11/11): cột \"Thuộc tính chính\" ⇒ entities[].attributes; thuộc tính vào Spine, bảng vẫn giữ nguyên văn", () => {
+    const rows = [
+      ["Thực thể", "Thuộc tính chính", "Quan hệ", "Yêu cầu liên quan"],
+      ["Năm học", "mã, năm bắt đầu, năm kết thúc", "1–n Học kỳ, 1–n Lớp", "REQ-FUNC-043"],
+      ["Học sinh", "mã, họ tên, ngày sinh, giới tính, trạng thái, mã TK phụ huynh", "1–n Điểm, Điểm danh, Hạnh kiểm", "REQ-FUNC-010"]
+    ]
+    const m = matchTable(rows, "fixed:3.1.5")
+    expect(m.entity).toBe("entities")
+    expect(m.columns.map((c) => c.field_path)).toEqual(["entities[].name", "entities[].attributes", "entities[].relations", null])
+    const t = { ...block("B0875", "table", "", "body/tbl[9]", "fixed:3.1.5"), rows }
+    const profile = {
+      table_map: m.columns.map((c) => ({ block_id: "B0875", column_index: c.column_index, header: c.header, field_path: c.field_path, confidence: c.confidence, confirmed: true }))
+    } as unknown as ITemplateProfile
+    const out = settleSection("fixed:3.1.5", [t], profile, new Map())
+    expect(out.items.map((i) => i.value.name)).toEqual(["Năm học", "Học sinh"])
+    expect(out.items[0].value.attributes).toEqual([
+      { name: "mã", kind: "key", required: true },
+      { name: "năm bắt đầu", kind: "plain", required: false },
+      { name: "năm kết thúc", kind: "plain", required: false }
+    ])
+    expect(out.items[1].value.attributes).toContainEqual({ name: "mã TK phụ huynh", kind: "reference", required: false })
+    expect(out.items[1].value.relations).toEqual(["1–n Điểm", "Điểm danh", "Hạnh kiểm"])
+    // Bản in theo file upload: bảng từ điển dữ liệu vẫn in nguyên văn dù Spine đã nhận thuộc tính
+    expect(out.handled.has("B0875")).toBe(true)
+    expect(out.verbatim.has("B0875")).toBe(true)
+  })
+
+  it("bug #12c: attributesFromCell — mã của chính thực thể là khoá, mã thực thể khác là tham chiếu, còn lại thường", () => {
+    expect(attributesFromCell("mã HS, họ tên, mã lớp, trạng thái (đang học, nghỉ học)", "Học sinh")).toEqual([
+      { name: "mã HS", kind: "key", required: true },
+      { name: "họ tên", kind: "plain", required: false },
+      { name: "mã lớp", kind: "reference", required: false },
+      { name: "trạng thái (đang học, nghỉ học)", kind: "plain", required: false }
+    ])
+    expect(attributesFromCell("Mã lớp; tên lớp; sĩ số", "Lớp").map((a) => a.kind)).toEqual(["key", "plain", "plain"])
+    expect(attributesFromCell("id, order id, total, customer id", "Order").map((a) => a.kind)).toEqual(["key", "key", "plain", "reference"])
+    expect(attributesFromCell("mã, mã, ", "Khối")).toEqual([{ name: "mã", kind: "key", required: true }])
   })
 
   it("độ tin cột thấp ⇒ field của bảng rơi vào danh sách cần xác nhận (< 0.7)", () => {
