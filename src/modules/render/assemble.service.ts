@@ -637,6 +637,16 @@ export type TranslationResolver = (
 export type DocumentTranslationMeta = z.infer<typeof documentTranslationMetaSchema>
 
 /** Layout người dùng của project mode 1 (sau finalize import). Project mode 2 / import cũ chưa có layout ⇒ `null`. */
+/**
+ * FLF-373: dự án upload SRS có sẵn — chữ của mục là của tác giả file. Dự án import trước khi có `start_kind` (FLF-388) là luồng
+ * nhập SRS có sẵn (`project.service` cũ: `source = existing` ⇒ `mode = import`), trừ mẫu bắt buộc (`template_intent = fixed`).
+ */
+export const isExistingSrs = (project: { mode?: string | null; start_kind?: string | null; template_intent?: string | null } | null): boolean => {
+  if (!project) return false
+  if (project.start_kind) return project.start_kind === "existing"
+  return project.mode === "import" && project.template_intent !== "fixed"
+}
+
 export const loadTemplateLayout: TemplateLoader = async (projectId) => {
   const profile = (await TemplateProfile.findOne(
     { projectId },
@@ -656,9 +666,14 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
     | null
   if (!profile?.layout?.length) return null
   // Chế độ 3 (mẫu bắt buộc, FLF-335): in đúng các mục của mẫu, không chèn mục FlintFlow ngoài mẫu (business-flow 2.10)
-  const project = (await Project.findById(projectId, { template_intent: 1 }, { lean: true })) as { template_intent?: string | null } | null
+  const project = (await Project.findById(projectId, { mode: 1, start_kind: 1, template_intent: 1 }, { lean: true })) as {
+    mode?: string | null
+    start_kind?: string | null
+    template_intent?: string | null
+  } | null
   return {
     ...(project?.template_intent === "fixed" ? { fixedTemplate: true } : {}),
+    ...(isExistingSrs(project) ? { existingSrs: true } : {}),
     layout: profile.layout,
     language: profile.language ?? "en",
     ...(profile.template_family ? { family: profile.template_family } : {}),

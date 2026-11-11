@@ -130,6 +130,11 @@ export interface TemplateLayout {
   fixedTemplate?: boolean
   /** FLF-366: đoạn nguyên văn của từng mục FPT `fixed:*` (`TemplateProfile.section_segments`). Không có ⇒ in như cũ. */
   sectionSegments?: readonly SectionSegments[]
+  /**
+   * FLF-373: dự án upload SRS có sẵn (`Project.start_kind = existing`) — chữ của mục là của tác giả file, không phải hướng dẫn
+   * của mẫu ⇒ mục có dữ liệu chỉ bỏ đoạn trọn trong ngoặc, không cắt đoạn ngoặc trong câu (`guidanceWhileEmpty` `keepInline`).
+   */
+  existingSrs?: boolean
 }
 
 export interface SectionSliceView {
@@ -301,14 +306,18 @@ export const customBlocks = (blocks: readonly CustomBlock[], imagePng?: (imageRe
  * FLF-364 (câu 10): chữ hướng dẫn của mẫu (`[…]` / `{…}`) chỉ in khi mục chưa có dữ liệu — mục riêng có nội dung thật (ảnh,
  * bảng / đoạn có chữ thật, kể cả thêm qua CR) ⇒ bỏ đoạn hướng dẫn, bỏ đoạn ngoặc hướng dẫn trong câu, ô bảng chỉ có hướng dẫn
  * để trống. Khối vẫn nằm trong Spine (ngữ cảnh khi soạn) — xoá hết dữ liệu thì hướng dẫn in lại.
+ *
+ * FLF-373 `keepInline`: chữ là của chính file SRS có sẵn (`existingSrs`) ⇒ chỉ bỏ đoạn / ô **trọn** trong ngoặc, giữ nguyên câu có
+ * ngoặc — `{ … }` trong câu là ký hiệu wireframe salt của tác giả (`"{ Search" text, … | [ Search ] }"`), không phải hướng dẫn.
  */
-export const guidanceWhileEmpty = (blocks: readonly CustomBlock[]): CustomBlock[] => {
+export const guidanceWhileEmpty = (blocks: readonly CustomBlock[], keepInline = false): CustomBlock[] => {
   const filled = blocks.some((b) => b.kind === "image" || (b.kind === "table" ? tableHasRealText(b.rows) : isRealText(b.text)))
   if (!filled) return [...blocks]
+  const strip = (text: string): string => (keepInline ? (isInstructionText(text) ? "" : text) : splitInstruction(text).text)
   return blocks.flatMap((b): CustomBlock[] => {
-    if (b.kind === "table") return [{ ...b, rows: (b.rows ?? []).map((r) => r.map((c) => (isInstructionText(c) ? "" : splitInstruction(c).text))) }]
+    if (b.kind === "table") return [{ ...b, rows: (b.rows ?? []).map((r) => r.map((c) => (isInstructionText(c) ? "" : strip(c)))) }]
     if (b.kind !== "paragraph" && b.kind !== "list_item") return [b]
-    const text = splitInstruction(b.text).text
+    const text = strip(b.text)
     return text ? [{ ...b, text }] : []
   })
 }
@@ -665,7 +674,7 @@ export const buildLayoutSections = (
     const out: Block[] = []
     let run: CustomBlock[] = []
     const flush = () => {
-      if (run.length) out.push(...customBlocks(guidanceWhileEmpty(run), (ref) => opts.diagramPng(mediaId(ref))))
+      if (run.length) out.push(...customBlocks(guidanceWhileEmpty(run, template.existingSrs), (ref) => opts.diagramPng(mediaId(ref))))
       run = []
     }
     for (const b of blocks) {
@@ -768,7 +777,7 @@ export const buildLayoutSections = (
       }
       const blocks = customById.get(`${CUSTOM_PREFIX}${part.custom_id}`)?.blocks ?? []
       // FLF-364: dãy có nội dung thật ⇒ bỏ chữ hướng dẫn của mẫu, như mọi phần nối
-      out.push(...customBlocks(guidanceWhileEmpty(blocks), originalPng))
+      out.push(...customBlocks(guidanceWhileEmpty(blocks, template.existingSrs), originalPng))
       // Ảnh sơ đồ gốc CR đã bỏ (đề xuất vẽ lại, §4.13) ⇒ sơ đồ FlintFlow cùng loại đúng chỗ ảnh; loại còn ảnh gốc ở chỗ khác thì thôi
       const present = new Set(blocks.flatMap((b) => (b.image_ref ? [b.image_ref] : [])))
       for (const d of part.diagrams.filter((x) => !present.has(x.image_ref))) {
@@ -837,7 +846,7 @@ export const buildLayoutSections = (
       const sourceBlocks = customById.get(n.section_id)?.blocks ?? []
       const kept = template.fixedTemplate
         ? sourceBlocks.filter((b) => !isInstructionText(b.text) && (b.kind !== "table" || tableBodyHasRealText(b.rows)))
-        : guidanceWhileEmpty(sourceBlocks)
+        : guidanceWhileEmpty(sourceBlocks, template.existingSrs)
       const blocks = [...sliceBlocks(n), ...customBlocks(kept, (ref) => opts.diagramPng(mediaId(ref)))]
       if (n.kind === "continuation") {
         // Chủ = section gần nhất phía trước có cấp nhỏ hơn (phần nối có cấp = cấp chủ + 1, xem import/step-plan.ts)
