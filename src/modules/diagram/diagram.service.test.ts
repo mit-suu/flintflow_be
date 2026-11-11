@@ -400,6 +400,17 @@ describe("screen_layout do model vẽ (FLF-214)", () => {
     expect(drawLayout).toHaveBeenCalledTimes(1)
   })
 
+  it("FLF-387: `by` là mã CR, có `userId` ⇒ model gọi bằng userId, change vẫn ghi mã CR", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    const drawLayout = vi.fn(async () => SALT)
+    const drawn = await renderDiagram(PROJECT, "screen_layout", "S01", { by: "CR-002", userId: USER, deps: { ...deps, drawLayout } })
+    expect(drawLayout).toHaveBeenCalledWith(expect.objectContaining({ userId: USER, screenId: "S01" }))
+    expect(drawn.diagrams[0]).toMatchObject({ owner_id: "S01", source: SALT })
+    const changes = await db.Change.find({})
+    expect(changes[changes.length - 1]).toMatchObject({ by: "CR-002" })
+  })
+
   it("salt của model không compile, model trả null hoặc ném ⇒ bảng function, vẫn ok", async () => {
     await seed()
     const table = renderKind(FIXTURE, "screen_layout", "S01")[0].source
