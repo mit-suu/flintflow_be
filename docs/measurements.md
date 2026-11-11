@@ -716,3 +716,22 @@ Chặng đã bỏ:
 
 So nội dung: body (bỏ `generatedAt`) của cả 5 cấu hình deep-equal với mốc FLF-381, kể cả lượt đọc từ bản dịch đã lưu
 (khác duy nhất là thứ tự key `watermark` / `format`, do đi qua `renderedDocumentSchema` như hàng draft gốc).
+
+## Tài liệu upload trong prompt — trích đoạn thay toàn văn (FLF-393)
+
+Nguồn: `npm run eval:doc-retrieval` (không DB, không gọi model), file `fixtures/existing-srs-fu-student-portal.docx`
+(347 đoạn, 36 heading đọc từ style Word ⇒ 17 chunk, trung bình 325 token), bộ câu hỏi
+`fixtures/doc-retrieval/questions-fu-student-portal.json` (16 câu: mã UC/FN/MSG, tên màn hình, luật, NFR, thuật ngữ, giao
+diện), top-k 10. Token ước lượng ký tự / 3 (thước của ngân sách tài liệu). Đo 2026-11-11.
+
+| Trần tài liệu | Recall | Token tài liệu / câu hỏi (TB · lớn nhất) | So với toàn văn ~5.251 |
+| ---: | ---: | --- | ---: |
+| 12.000 (mặc định chat) | 16/16 | 2.885 · 4.269 | −45% |
+| 2.000 | 16/16 | 1.630 · 1.981 | −69% |
+| 1.200 | 16/16 | 994 · 1.194 | −81% |
+
+File mẫu chỉ ~5k token nên **khi chạy thật nó vẫn được gửi nguyên văn** (dưới trần 12k); ba dòng trên mô phỏng đường trích
+đoạn để đo chất lượng tìm. Với tài liệu vượt trần, token tài liệu mỗi lượt không bao giờ vượt `DOC_CONTEXT_CHAT_TOKENS`
+(chat) / `DOC_CONTEXT_DRAFT_TOKENS` (step) — trước FLF-393 là cả tài liệu tới 1M token với model Claude 5.5. Unit test
+`document-context.service.test.ts` dựng SRS giả ~40k token (150 use case): lượt chat ≤ 12k, đúng đoạn UC-37 kể cả hỏi
+không dấu. Chưa đo bằng provider thật (`promptTokens` thật của tiếng Việt cao hơn ước lượng ký tự / 4).
