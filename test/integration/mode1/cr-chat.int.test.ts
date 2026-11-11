@@ -47,14 +47,14 @@ describe("phase 8 — gộp thêm lệnh sửa vào CR chưa nộp", () => {
     const amended = detail(await c.post(`${cr}/amend`, { instruction: "Also apply the new threshold to the login use case" }))
     expect(amended.change_request.status).toBe("impact_review")
     // khoá cũ còn nguyên khi quay lại làm rõ
-    expect(await lockedPaths(projectId, crId)).toEqual(expect.arrayContaining(before.map((l) => l.path)))
+    expect(await lockedPaths(projectId, crId)).toEqual([]) // FLF-375: không khoá
 
     const impact = detail(await c.post(`${cr}/impact`))
     for (const old of before) expect(impact.locations.find((l) => l.location_id === old.id)).toMatchObject({ path: old.path, conclusion: old.conclusion, proposal: old.proposal })
     const fresh = impact.locations.filter((l) => !before.some((b) => b.id === l.location_id))
     expect(fresh.map((l) => l.path)).toContain(UC)
     expect(fresh.every((l) => l.conclusion === null)).toBe(true)
-    expect(await lockedPaths(projectId, crId)).toContain(UC)
+    expect(await lockedPaths(projectId, crId)).toEqual([]) // FLF-375: không khoá
 
     const proposeCalls = promptsOf("# CR Propose").length
     detail(await c.post(`${cr}/propose`))

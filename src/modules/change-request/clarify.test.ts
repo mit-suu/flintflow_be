@@ -9,7 +9,8 @@ import type { Spine } from "../spine/spine.types.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import { MAX_CLARIFY_ROUNDS, canAskMore } from "./change-request.state.js"
 import { CR_MATERIAL_MAX_CHARS, clipMaterialText } from "./change-request.constants.js"
-import { MATERIALS_PROMPT_CHARS, answersText, crHeader, crProjection, glossaryText, materialsText, missingInfoText, namedEntities, truncate } from "./cr-context.js"
+import { MATERIALS_PROMPT_CHARS, answersText, crHeader, crProjection, glossaryText, materialsText,
+  relevantMaterialsText, missingInfoText, namedEntities, truncate } from "./cr-context.js"
 
 const spine = (): Spine => {
   const s = createEmptySpine({ name: "Lumen" })
@@ -59,6 +60,22 @@ describe("C-2 ngữ cảnh gửi model", () => {
       })
     )
     expect(text).toBe("[M01] Email PM (attached when the CR was logged)\nResponse ≤ 2 s\n\n[M02] notes.png (attached with the answers of round 2; cut at upload)\nPeak 500 users")
+  })
+
+  it("FLF-375: tài liệu dài — Tree-sitter + BM25 lấy đúng đoạn liên quan, kể cả đoạn ở CUỐI tài liệu; in theo thứ tự tài liệu", async () => {
+    const at = new Date()
+    const filler = Array.from({ length: 60 }, (_, i) => `## Mục ${i}\n\nNội dung họp về lịch thi và phòng học số ${i}, không liên quan.`).join("\n\n")
+    const tail = "## Kết luận\n\nThầy Hùng: trường bỏ chức năng nhập xuất Excel, không cần file mẫu nữa."
+    const text = await relevantMaterialsText(
+      cr({ materials: [{ material_id: "M01", kind: "file", name: "bien-ban.md", text: `${filler}\n\n${tail}`, truncated: false, round: 0, added_at: at }] }),
+      "bỏ chức năng nhập xuất excel"
+    )
+    expect(text).toContain("trường bỏ chức năng nhập xuất Excel")
+    expect(text).toContain("## Kết luận")
+    expect(text.length).toBeLessThan(MATERIALS_PROMPT_CHARS + 400)
+    // tài liệu ngắn ⇒ y như materialsText
+    const short = cr({ materials: [{ material_id: "M02", kind: "text", name: "Email", text: "Response ≤ 2 s", truncated: false, round: 0, added_at: at }] })
+    expect(await relevantMaterialsText(short, "response")).toBe(materialsText(short))
   })
 
   it("phase 7: tổng chữ tài liệu ≤ ngân sách prompt — tài liệu ngắn giữ nguyên, tài liệu dài chia phần còn lại", () => {

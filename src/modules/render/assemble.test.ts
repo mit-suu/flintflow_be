@@ -202,6 +202,8 @@ const baseSpine = (): Spine => ({
   custom_sections: [],
   references: [],
   verifications: [],
+  deployment_nodes: [],
+  deployment_links: [],
   diagrams: [],
   assumptions: [],
   decisions: [],
@@ -1115,6 +1117,10 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
     /** Fixture 19 màn với `diagrams[]` vẽ bằng renderer hiện tại (như sau một lượt vẽ thật). */
     const renderedFixture = (): Spine => {
       const spine = fixture19()
+      // FLF-390: sơ đồ triển khai không có chữ dịch (tên nút / giao thức giữ nguyên) ⇒ luôn dùng ảnh gốc — các test ở đây
+      // xét sơ đồ có chữ đã dịch
+      spine.deployment_nodes = []
+      spine.deployment_links = []
       spine.diagrams = allTargets(spine).flatMap((target) =>
         renderKind(spine, target.kind, target.owner_id).map((part, i) => ({
           id: `D-${target.kind}-${target.owner_id ?? "x"}-${i + 1}`,

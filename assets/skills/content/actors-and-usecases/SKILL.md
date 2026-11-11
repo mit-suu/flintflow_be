@@ -21,13 +21,13 @@ writes:
 output_schema: opTransaction
 language: en
 stub: false
-prompt_references: [actor-rules]
+prompt_references: [actor-rules, activity-flow]
 ---
 # Actors And Usecases
 
 Covers **S-3.1 Actors, S-3.2 Actor–Goal List, S-3.3 Missing Use Case Sweep, S-3.4 Use Case Relationships, S-3.5 Use Case Descriptions** — feeds `fixed:2.1` (Actors) and `fixed:2.2.2` (Use Case Descriptions).
 `fixed:2.2.1` (the diagram) is `S-3.6`, render-only, no skill. You produce **data**, never a drawing: code
-renders the diagram from `actors[]`, `use_cases[]`, `actor_ids`, `includes`, `extends` — no PlantUML/arrows.
+renders the diagram from `actors[]`, `use_cases[]`, `actor_ids`, `includes`, `extends` — no PlantUML/arrows. Activity diagram data of a use case: only when the user asks — reference `activity-flow`.
 
 ## S-3.1 — Actors
 

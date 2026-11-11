@@ -74,6 +74,25 @@ Engine `puml` (PlantUML server): UML 2.5 Sequence from `sequence.renderer.ts`, V
 - `abnormal` ⇒ `alt <guard>` / `else <guard>`, the normal flow after it is the last `else`; `normal` with `guard` ⇒ `opt <guard>`; no `loop` (no data yet).
 - Messages carry data in plain words (`Submit email and password`), not method calls; the Spine writes them (S-5.4 `function-detail`). Samples: `docs/diagram_guideline/sequence/`; full rules: `renderer/sequence/SKILL.md`.
 
+## `activity` — §3.x (Functions: feature of the use case)
+
+Source fields: `use_cases[<owner>].name/.activity_nodes[].id/.kind/.name/.lane/.activity_flows[].from/.to/.guard` · `actors[].name` of the lanes. Processing flow of one use case, UML 2.5 Activity Diagram with swimlanes. Not in the FPT template unless the user asks; an IEEE template has it under each use case in Functions.
+Engine `svg` (no PlantUML source): built in code, fill `#7ACFF5` (`activity.renderer.ts`, `activity-layout.ts`, swimlane layout from FLF-340).
+
+- One diagram per use case that has `activity_nodes[]` (`owner_kind = use_case`, `owner_id` = use case id, `section = feature:<id>` of the use case's feature, else `fixed:2.2.2`); title `Activity Diagram — <use case>`. Not split.
+- Initial = solid dot; activity final = bullseye; action = rounded rectangle with a verb phrase; decision = diamond (a flat hexagon holding the question when `name` is set); merge = diamond; fork / join = thick black bar; control flow = solid line, open arrowhead, `[guard]` on the line.
+- Lanes = `lane` of the nodes (actor id ⇒ exact actor name, `system` ⇒ System); a node without a lane sits in the lane of its predecessor. No lane anywhere ⇒ no lane frames.
+- Orthogonal lines; a loop back to an earlier node goes up a gutter. Full rules: `renderer/activity/SKILL.md`.
+
+## `deployment` — IEEE "Distribution" (`slot:distribution`) / FPT §4.1 on request
+
+Source fields: `deployment_nodes[].id/.name/.kind/.parent_id/.artifacts/.components` · `deployment_links[].from/.to/.protocol`. Physical placement of the software on hardware nodes (IEEE 830 §3.1 hardware / software / communication interfaces).
+Engine `puml` (PlantUML server): UML 2.5 Deployment from `deployment.renderer.ts`, Visual Paradigm theme inlined, node fill `#7ACFF5`, `left to right direction`.
+
+- One diagram for the system (`owner_kind = null`, `section = fixed:4.1`), title `Deployment Diagram`; no nodes ⇒ no diagram. Printed under "Distribution" of "Design and Implementation" in an IEEE template (inserted when the file has no such heading); in the FPT template only when the user asked, under §4.1.
+- Node = 3D box: `<<device>>` hardware, `<<executionEnvironment>>` runtime / OS / container / DBMS nested in its device, plain `node` otherwise; components and artifacts drawn inside their node; communication path = solid line without arrowhead labelled with the protocol.
+- Full rules and the Visual Paradigm principles: `renderer/deployment/SKILL.md`.
+
 ## `screen_layout` — §3.x.y (core screens only, Phases §7.2)
 
 Source fields: `screens[<owner>].name` · `functions[screen_id=<owner>].name/.description`. Attached to `screens[].primary_function_id`.

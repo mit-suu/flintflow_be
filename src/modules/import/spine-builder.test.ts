@@ -25,7 +25,7 @@ import {
 } from "./extracted-entities.js"
 import { findingOps } from "./check.service.js"
 import { MODE1_RULE_PROFILE } from "./mode1-rule-profile.js"
-import { buildImportOps, droppedPermissionFindings, relationPhrase, ruleTierOfSections, type DroppedPermission } from "./spine-builder.js"
+import { buildImportOps, droppedPermissionFindings, relationPhrase, ruleTierOfSections, type BuiltEntity, type DroppedPermission } from "./spine-builder.js"
 import { buildLayoutSections } from "../render/layout-sections.js"
 
 describe("extracted-entities", () => {
@@ -489,6 +489,104 @@ describe("buildImportOps", () => {
     expect(plan.spine.entities[1].transitions ?? []).toEqual([])
   })
 
+  it("FLF-390: function đọc từ sơ đồ tuần tự — actor theo tên, `system`, bỏ message hỏng (hai đầu actor, lỗi thiếu guard)", () => {
+    const spine = createEmptySpine({ name: "Shop" })
+    const ops = buildImportOps(spine, [
+      { entity: "actors", id: "A01", value: { name: "Customer", kind: "human" } },
+      { entity: "features", id: "F1", value: { name: "Account" } },
+      {
+        entity: "functions",
+        id: "FN001",
+        value: {
+          name: "Log in",
+          feature_id: "F1",
+          interactions: [
+            { from: "Customer", to: "System", message: "Submit email, password", kind: "request", flow: "normal" },
+            { from: "system", to: "Customer", message: "Show error", kind: "response", flow: "abnormal", guard: "wrong password" },
+            { from: "system", to: "Customer", message: "Show lock notice", kind: "response", flow: "abnormal" },
+            { from: "Customer", to: "Customer", message: "Think", kind: "request", flow: "normal" },
+            { from: "system", to: "Customer", message: "Open home", kind: "response", flow: "normal" }
+          ]
+        }
+      }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.functions[0].interactions).toEqual([
+      { from: "A01", to: "system", message: "Submit email password", kind: "request", flow: "normal" },
+      { from: "system", to: "A01", message: "Show error", kind: "response", flow: "abnormal", guard: "wrong password" },
+      { from: "system", to: "A01", message: "Open home", kind: "response", flow: "normal" }
+    ])
+  })
+
+  it("FLF-390: use case đọc từ sơ đồ activity — id nút <use case>-AN<n>, làn theo tên actor / system, flow theo id tạm, bỏ flow hỏng", () => {
+    const spine = createEmptySpine({ name: "Shop" })
+    const ops = buildImportOps(spine, [
+      { entity: "actors", id: "A01", value: { name: "Customer", kind: "human" } },
+      { entity: "features", id: "F1", value: { name: "Account" } },
+      {
+        entity: "use_cases",
+        id: "UC01",
+        value: {
+          name: "Log in",
+          actor_ids: ["Customer"],
+          activity_nodes: [
+            { id: "N1", kind: "initial" },
+            { id: "N2", kind: "action", name: "Enter credentials", lane: "Customer" },
+            { id: "N3", kind: "decision", name: "Valid?", lane: "System" },
+            { id: "N4", kind: "action", name: "Open home", lane: "Ghost lane" },
+            { id: "N5", kind: "Final" },
+            { id: "N6", kind: "cloud", name: "unknown shape" }
+          ],
+          activity_flows: [
+            { from: "N1", to: "N2" },
+            { from: "N2", to: "N3" },
+            { from: "N3", to: "N2", guard: "[invalid]" },
+            { from: "N3", to: "N4", guard: "valid" },
+            { from: "N4", to: "N5" },
+            { from: "N4", to: "N4" },
+            { from: "N4", to: "N9" }
+          ]
+        }
+      }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    const fn = plan.spine.use_cases[0]
+    expect(fn.activity_nodes).toEqual([
+      { id: "UC01-AN1", kind: "initial" },
+      { id: "UC01-AN2", kind: "action", name: "Enter credentials", lane: "A01" },
+      { id: "UC01-AN3", kind: "decision", name: "Valid?", lane: "system" },
+      { id: "UC01-AN4", kind: "action", name: "Open home" },
+      { id: "UC01-AN5", kind: "final" }
+    ])
+    expect(fn.activity_flows).toEqual([
+      { from: "UC01-AN1", to: "UC01-AN2" },
+      { from: "UC01-AN2", to: "UC01-AN3" },
+      { from: "UC01-AN3", to: "UC01-AN2", guard: "invalid" },
+      { from: "UC01-AN3", to: "UC01-AN4", guard: "valid" },
+      { from: "UC01-AN4", to: "UC01-AN5" }
+    ])
+  })
+
+  it("FLF-390: sơ đồ triển khai đọc từ ảnh — cha theo tên (cha trước con), đường truyền thông trên nút, bỏ đường trùng / tự nối", () => {
+    const spine = createEmptySpine({ name: "Shop" })
+    const ops = buildImportOps(spine, [
+      { entity: "deployment_nodes", id: "DN02", value: { name: "Node.js", kind: "execution_environment", parent: "App Server", components: ["API Service"], artifacts: ["api.js"], links: [{ to: "Database", protocol: "TCP" }] } },
+      { entity: "deployment_nodes", id: "DN01", value: { name: "App Server", kind: "device", parent: null, links: [{ to: "Node.js" }, { to: "App Server" }] } },
+      { entity: "deployment_nodes", id: "DN03", value: { name: "Database", kind: "weird", links: [{ to: "Node.js", protocol: "again" }] } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.deployment_nodes.map((n) => [n.id, n.kind, n.parent_id])).toEqual([
+      ["DN01", "device", null],
+      ["DN03", "node", null],
+      ["DN02", "execution_environment", "DN01"]
+    ])
+    expect(plan.spine.deployment_nodes.find((n) => n.id === "DN02")).toMatchObject({ components: ["API Service"], artifacts: ["api.js"] })
+    expect(plan.spine.deployment_links).toEqual([
+      { from: "DN02", to: "DN03", protocol: "TCP" },
+      { from: "DN01", to: "DN02" }
+    ])
+  })
+
   it("FLF-252: tham chiếu ghi mã khác dạng id ('E-02', 'a1') vẫn ra đúng phần tử", () => {
     const spine = createEmptySpine({ name: "Edu" })
     const ops = buildImportOps(spine, [
@@ -576,5 +674,47 @@ describe("FLF-365 — trích tài liệu tham khảo / ma trận kiểm chứng 
     ])
     // FR-99 không có ⇒ cờ vàng verification_orphan
     expect(runDeterministicCheck(plan.spine).filter((f) => f.rule_id === "verification_orphan").map((f) => f.target_id)).toEqual(["VER-03"])
+  })
+})
+
+describe("FLF-390 actor kế thừa, luồng ngữ cảnh, actor User cho use case đăng nhập dùng chung", () => {
+  const actor = (id: string, name: string, extra: Record<string, unknown> = {}) => ({ entity: "actors", id, value: { name, kind: "human", description: "", ...extra } })
+  const techMart = () => [
+    actor("A01", "Guest", { description: "A visitor who is not logged in.", flows_in: ["search keywords"], flows_out: ["product listings"] }),
+    actor("A02", "Customer", { description: "A registered buyer. Inherits everything a Guest can do, and can manage the cart.", flows_in: ["orders, payments, returns"], flows_out: ["order status, invoices"] }),
+    actor("A03", "Sales Staff"),
+    actor("A04", "Warehouse Staff"),
+    actor("A05", "Store Admin"),
+    { entity: "actors", id: "A06", value: { name: "VNPay / MoMo", kind: "system", description: "", flows_in: ["payment result"], flows_out: ["payment / refund request"] } },
+    { entity: "use_cases", id: "UC-02", value: { name: "Log In", actor_ids: ["Customer", "Sales Staff", "Warehouse Staff", "Store Admin"] } },
+    { entity: "use_cases", id: "UC-03", value: { name: "Search Products", actor_ids: ["Guest", "Customer"] } }
+  ]
+  const apply = (entities: BuiltEntity[]) => {
+    const spine = createEmptySpine({ name: "fpt" })
+    const ops = buildImportOps(spine, entities)
+    return planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 }).spine
+  }
+
+  it("mô tả \"Inherits everything a Guest can do\" ⇒ Customer.parent_id = Guest; flows_in/flows_out giữ đúng nhãn", () => {
+    const spine = apply(techMart())
+    const byName = new Map(spine.actors.map((a) => [a.name, a]))
+    expect(byName.get("Customer")?.parent_id).toBe("A01")
+    expect(byName.get("Customer")?.flows_in).toEqual(["orders, payments, returns"])
+    expect(byName.get("Customer")?.flows_out).toEqual(["order status, invoices"])
+    expect(byName.get("VNPay / MoMo")?.flows_out).toEqual(["payment / refund request"])
+    expect(byName.get("Guest")?.parent_id ?? null).toBeNull()
+  })
+
+  it("parent_id ghi từ sơ đồ (tên) được phân giải; cha là actor system ⇒ bỏ", () => {
+    const spine = apply([actor("A01", "Guest"), actor("A02", "Customer", { parent_id: "Guest" }), { entity: "actors", id: "A03", value: { name: "Bank", kind: "system" } }, actor("A04", "Clerk", { parent_id: "Bank" })])
+    expect(spine.actors.find((a) => a.name === "Customer")?.parent_id).toBe("A01")
+    expect(spine.actors.find((a) => a.name === "Clerk")?.parent_id ?? null).toBeNull()
+  })
+
+  it("FLF-375: Log In gắn ≥ 2 actor người chưa có cha ⇒ import GIỮ NGUYÊN trạng file (không thêm User); luật User áp lúc vẽ", () => {
+    const spine = apply(techMart())
+    expect(spine.actors.some((a) => a.name === "User")).toBe(false)
+    expect(spine.use_cases.find((u) => u.name === "Log In")?.actor_ids).toEqual(["A02", "A03", "A04", "A05"])
+    expect(spine.use_cases.find((u) => u.name === "Search Products")?.actor_ids).toEqual(["A01", "A02"])
   })
 })

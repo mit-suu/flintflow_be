@@ -11,6 +11,7 @@
  * nhãn vì đó là hành động, không phải dữ liệu.
  */
 
+import { actorParents } from "../../spine/actor-generalization.js"
 import type { Actor, ActorKind } from "../../spine/spine.types.js"
 import { systemName } from "../../spine/system-name.js"
 import { FILL } from "../../../shared/diagram/svg-kit.js"
@@ -19,6 +20,7 @@ import type { Renderer } from "./common.js"
 import { alias, byId, label, svgPart } from "./common.js"
 import { buildContextLayout, LABEL_SIZE, NAME_LINE_HEIGHT, NAME_SIZE, type ContextActor } from "./context-layout.js"
 import { DIAGRAM_LABELS, type DiagramLabels } from "./labels.js"
+import { isUploadedDocument } from "./drawn-user.js"
 
 /** Nhãn dự phòng khi Spine thiếu luồng: chiều vào / chiều ra theo `kind` (bản tiếng Anh — `labels.ts`). */
 export const DEFAULT_IN: Readonly<Record<ActorKind, string>> = DIAGRAM_LABELS.en.defaultIn
@@ -38,20 +40,39 @@ export const titleCase = (text: string): string =>
     })
     .join(" ")
 
-const clean = (values: readonly string[] | undefined, format: (text: string) => string): string[] =>
-  (values ?? []).map((v) => format(label(v))).filter((v) => v.length > 0)
+/** FLF-375: nhãn chép từ cột "Vào / ra" của file mang tiền tố chiều ("Ra: Email thông báo") — chiều đã do mũi tên thể hiện. */
+const DIRECTION_PREFIX = /^\s*(vào\s*\/\s*ra|vào|ra|in\s*\/\s*out|in|out|input|output)\s*[:：-]\s*/i
 
-/** Actor của sơ đồ, theo id: mỗi actor ít nhất một mũi tên có nhãn, toàn sơ đồ có cả chiều vào lẫn chiều ra. */
-export const contextActors = (actors: readonly Actor[], labels: DiagramLabels = DIAGRAM_LABELS.en): ContextActor[] => {
+const clean = (values: readonly string[] | undefined, format: (text: string) => string): string[] =>
+  (values ?? []).map((v) => format(label(v).replace(DIRECTION_PREFIX, ""))).filter((v) => v.length > 0)
+
+/**
+ * Actor của sơ đồ, theo id: mỗi actor ít nhất một mũi tên có nhãn, toàn sơ đồ có cả chiều vào lẫn chiều ra.
+ * `bothWays` (FLF-375, tài liệu upload — user chốt): MỖI actor có đủ hai chiều (gửi yêu cầu / dữ liệu vào ⇄ nhận phản hồi /
+ * kết quả); chiều nào file không ghi thì dùng nhãn dự phòng của `kind`.
+ */
+export const contextActors = (actors: readonly Actor[], labels: DiagramLabels = DIAGRAM_LABELS.en, bothWays = false): ContextActor[] => {
   const { defaultIn, defaultOut } = labels
   // Chỉ nhãn tiếng Anh mới Title Case; tiếng Việt giữ nguyên
   const format = labels === DIAGRAM_LABELS.en ? titleCase : (text: string) => text
-  const result = byId([...actors]).map((a) => {
+  // FLF-390: actor tổng quát (có actor con kế thừa) mà không có luồng riêng không phải bên ngoài trao đổi dữ liệu — các
+  // actor con mang luồng của nó (User của Log In, Guest khi Customer kế thừa) ⇒ không vẽ, khỏi mũi tên dự phòng vô nghĩa
+  const general = new Set(actorParents(actors).values())
+  const silent = (a: Actor): boolean => !(a.flows_in ?? []).some((f) => label(f)) && !(a.flows_out ?? []).some((f) => label(f))
+  const drawn = actors.filter((a) => !(general.has(a.id) && silent(a)))
+  const result = byId(drawn.length > 0 ? drawn : [...actors]).map((a) => {
     const flows = { id: a.id, name: label(a.name), kind: a.kind, inbound: clean(a.flows_in, format), outbound: clean(a.flows_out, format) }
     // Chưa có luồng nào: chiều chính theo kind — human/time gửi vào hệ thống, system nhận yêu cầu từ hệ thống
     if (flows.inbound.length > 0 || flows.outbound.length > 0) return flows
     return a.kind === "system" ? { ...flows, outbound: [defaultOut.system] } : { ...flows, inbound: [defaultIn[a.kind]] }
   })
+  if (bothWays) {
+    return result.map((a) => ({
+      ...a,
+      inbound: a.inbound.length ? a.inbound : [defaultIn[a.kind]],
+      outbound: a.outbound.length ? a.outbound : [defaultOut[a.kind]]
+    }))
+  }
   // Cả sơ đồ chỉ một chiều: thêm chiều thiếu cho actor đầu tiên theo thứ tự kind ưu tiên
   const first = (order: ActorKind[]): number => {
     for (const kind of order) {
@@ -81,7 +102,8 @@ const centredLines = (scene: Scene, id: string, owner: string, cx: number, cy: n
 
 export const renderContext: Renderer = (spine, _ownerId, labels = DIAGRAM_LABELS.en) => {
   const name = label(systemName(spine.project)) || labels.system
-  const layout = buildContextLayout(contextActors(spine.actors, labels), name)
+  // FLF-375: tài liệu upload ⇒ mỗi actor đủ hai chiều (yêu cầu ⇄ phản hồi), như sơ đồ ngữ cảnh khách hay vẽ
+  const layout = buildContextLayout(contextActors(spine.actors, labels, isUploadedDocument(spine)), name)
   const scene = new Scene()
 
   // Luồng trước (hộp và vòng tròn vẽ đè đầu mút), nhãn do Scene đặt ở lớp trên cùng

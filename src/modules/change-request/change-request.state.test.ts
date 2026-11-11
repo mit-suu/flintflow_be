@@ -30,6 +30,8 @@ const FORWARD: [CrStatus, CrStatus][] = [
   ["ready_to_submit", "written"],
   ["ready_to_submit", "in_review"],
   ["ready_to_submit", "verifying"],
+  // FLF-375 §3.2: xác nhận mà người khác đã sửa đúng phần đề xuất định đổi ⇒ không ghi, "Cần bạn quyết" (so 3 cột)
+  ["ready_to_submit", "manual_fix"],
   // phase 8: gộp thêm lệnh sửa ⇒ làm rõ lại
   ["impact_review", "clarifying"],
   ["proposing", "clarifying"],

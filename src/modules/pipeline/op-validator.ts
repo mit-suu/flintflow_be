@@ -877,6 +877,147 @@ const interactionOwners = (ops: readonly Op[]): string[] => [
   )
 ]
 
+/** FLF-390: lô op đụng tới sơ đồ triển khai. */
+const touchesDeployment = (ops: readonly Op[]): boolean => ops.some((op) => op.path.startsWith("deployment_nodes") || op.path.startsWith("deployment_links"))
+
+/**
+ * Sơ đồ triển khai: tên nút không trùng; nút cha có thật, không vòng cha, môi trường thực thi không chứa thiết bị; đường
+ * truyền thông nối hai nút có thật, khác nhau, mỗi cặp nút một đường.
+ */
+export const deploymentErrors = (after: Spine): ValidationError[] => {
+  const errors: ValidationError[] = []
+  const nodes = after.deployment_nodes ?? []
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const names = new Set<string>()
+  for (const n of nodes) {
+    const at = `deployment_nodes[id=${n.id}]`
+    const key = n.name.trim().toLowerCase()
+    if (names.has(key)) errors.push({ rule: "deployment_node_name_duplicate", path: at, message: `Hai nút triển khai trùng tên "${n.name}" — gộp thành một` })
+    names.add(key)
+    if (n.parent_id === null) continue
+    const parent = byId.get(n.parent_id)
+    if (!parent) {
+      errors.push({ rule: "deployment_parent_unknown", path: at, message: `Nút "${n.name}" nằm trong ${n.parent_id} nhưng nút đó không có` })
+      continue
+    }
+    if (n.kind === "device" && parent.kind === "execution_environment") {
+      errors.push({ rule: "deployment_parent_invalid", path: at, message: `Thiết bị "${n.name}" không nằm trong môi trường thực thi "${parent.name}" — môi trường thực thi chạy trên thiết bị, không ngược lại` })
+    }
+    const seen = new Set([n.id])
+    for (let p: string | null = n.parent_id; p !== null; p = byId.get(p)?.parent_id ?? null) {
+      if (seen.has(p)) {
+        errors.push({ rule: "deployment_parent_cycle", path: at, message: `Nút "${n.name}" nằm trong chính nó qua chuỗi nút cha — bỏ một parent_id` })
+        break
+      }
+      seen.add(p)
+    }
+  }
+  const pairs = new Set<string>()
+  for (const l of after.deployment_links ?? []) {
+    const at = `deployment_links[from=${l.from},to=${l.to}]`
+    if (!byId.has(l.from) || !byId.has(l.to)) {
+      errors.push({ rule: "deployment_link_unknown", path: at, message: `Đường truyền thông ${l.from} — ${l.to} nối tới nút không có` })
+      continue
+    }
+    if (l.from === l.to) errors.push({ rule: "deployment_link_self", path: at, message: `Đường truyền thông của "${byId.get(l.from)!.name}" nối với chính nó` })
+    const key = [l.from, l.to].sort().join("|")
+    if (pairs.has(key)) errors.push({ rule: "deployment_link_duplicate", path: at, message: `Hai đường truyền thông giữa cùng hai nút ${l.from} — ${l.to} — gộp thành một (ghi các giao thức chung một nhãn)` })
+    pairs.add(key)
+  }
+  return errors
+}
+
+/** FLF-390: id use case mà lô op đụng tới `activity_nodes` / `activity_flows` (hoặc ghi / thêm cả use case). */
+const activityOwners = (ops: readonly Op[]): string[] => [
+  ...new Set(
+    ops.flatMap((op) => {
+      if (op.path === "use_cases[]" && op.value && typeof op.value === "object" && typeof (op.value as { id?: unknown }).id === "string") return [(op.value as { id: string }).id]
+      const m = /^use_cases\[id=([^\],]+)\](\..*)?$/.exec(op.path)
+      return m && (m[2] === undefined || m[2].startsWith(".activity_")) ? [m[1]] : []
+    })
+  )
+]
+
+/**
+ * Luồng xử lý (sơ đồ activity) của use case: đúng một initial; id nút không trùng trên toàn Spine; action có chữ; flow
+ * nối hai nút CÓ THẬT của cùng use case, không tự trỏ; initial không có flow vào, final không có flow ra; decision có
+ * ≥ 2 nhánh ra và mọi nhánh có guard; fork có ≥ 2 nhánh ra, join ≥ 2 nhánh vào; làn là actor có thật hoặc `system`;
+ * mọi nút tới được từ initial. Use case không có nút thì không bị soi. Chỉ soi use case có trong `ids`.
+ */
+export const activityErrors = (after: Spine, ids: readonly string[]): ValidationError[] => {
+  const errors: ValidationError[] = []
+  const owner = new Map<string, string>()
+  for (const u of after.use_cases) for (const n of u.activity_nodes ?? []) if (!owner.has(n.id)) owner.set(n.id, u.id)
+  const actors = new Set(after.actors.map((a) => a.id))
+  for (const fn of after.use_cases.filter((u) => ids.includes(u.id))) {
+    const nodes = fn.activity_nodes ?? []
+    const flows = fn.activity_flows ?? []
+    const path = (field: string) => `use_cases[id=${fn.id}].${field}`
+    if (nodes.length === 0) {
+      if (flows.length > 0) errors.push({ rule: "activity_node_unknown", path: path("activity_flows"), message: `"${fn.name}" có activity_flows nhưng chưa có activity_nodes` })
+      continue
+    }
+    const seen = new Set<string>()
+    for (const n of nodes) {
+      if (seen.has(n.id) || owner.get(n.id) !== fn.id) {
+        errors.push({ rule: "activity_node_id_duplicate", path: path("activity_nodes"), message: `Id nút "${n.id}" của "${fn.name}" bị trùng — id nút activity duy nhất trên toàn Spine` })
+      }
+      seen.add(n.id)
+      if (n.kind === "action" && (n.name ?? "").trim() === "") {
+        errors.push({ rule: "activity_action_unnamed", path: path(`activity_nodes[id=${n.id}]`), message: `"${fn.name}": action ${n.id} chưa có chữ (cụm động từ mô tả việc làm)` })
+      }
+      if (typeof n.lane === "string" && n.lane !== SYSTEM_LIFELINE && !actors.has(n.lane)) {
+        errors.push({ rule: "activity_lane_unknown", path: path(`activity_nodes[id=${n.id}]`), message: `"${fn.name}": làn "${n.lane}" của ${n.id} không phải actor có thật hay "system"` })
+      }
+    }
+    const initial = nodes.filter((n) => n.kind === "initial")
+    if (initial.length !== 1) {
+      errors.push({ rule: "activity_initial_invalid", path: path("activity_nodes"), message: `"${fn.name}" phải có đúng một nút initial (đang có ${initial.length})` })
+    }
+    const kind = new Map(nodes.map((n) => [n.id, n.kind]))
+    const outs = (id: string) => flows.filter((f) => f.from === id)
+    const ins = (id: string) => flows.filter((f) => f.to === id)
+    for (const f of flows) {
+      const at = path(`activity_flows[from=${f.from},to=${f.to}]`)
+      if (!kind.has(f.from) || !kind.has(f.to)) {
+        errors.push({ rule: "activity_node_unknown", path: at, message: `Flow ${f.from} → ${f.to} của "${fn.name}" trỏ tới nút không nằm trong activity_nodes của use case` })
+      } else if (f.from === f.to) {
+        errors.push({ rule: "activity_flow_self", path: at, message: `Flow ${f.from} → ${f.to} của "${fn.name}" tự trỏ — vòng lặp phải đi qua một decision` })
+      } else if (kind.get(f.to) === "initial") {
+        errors.push({ rule: "activity_flow_into_initial", path: at, message: `Flow ${f.from} → ${f.to} của "${fn.name}" đi vào nút initial` })
+      } else if (kind.get(f.from) === "final") {
+        errors.push({ rule: "activity_flow_from_final", path: at, message: `Flow ${f.from} → ${f.to} của "${fn.name}" đi ra từ nút final` })
+      }
+    }
+    for (const n of nodes) {
+      const at = path(`activity_nodes[id=${n.id}]`)
+      if (n.kind === "decision") {
+        const branches = outs(n.id)
+        if (branches.length < 2) errors.push({ rule: "activity_decision_branches", path: at, message: `"${fn.name}": decision ${n.id} cần ít nhất 2 nhánh ra (đang có ${branches.length})` })
+        if (branches.some((b) => (b.guard ?? "").trim() === "")) errors.push({ rule: "activity_guard_missing", path: at, message: `"${fn.name}": mọi nhánh ra của decision ${n.id} cần guard (điều kiện, không có ngoặc vuông)` })
+      }
+      if (n.kind === "fork" && outs(n.id).length < 2) errors.push({ rule: "activity_fork_branches", path: at, message: `"${fn.name}": fork ${n.id} cần ít nhất 2 nhánh ra` })
+      if (n.kind === "join" && ins(n.id).length < 2) errors.push({ rule: "activity_join_branches", path: at, message: `"${fn.name}": join ${n.id} cần ít nhất 2 nhánh vào` })
+    }
+    if (initial.length === 1) {
+      const reached = new Set([initial[0].id])
+      for (let grew = true; grew; ) {
+        grew = false
+        for (const f of flows)
+          if (reached.has(f.from) && kind.has(f.to) && !reached.has(f.to)) {
+            reached.add(f.to)
+            grew = true
+          }
+      }
+      const lost = nodes.filter((n) => !reached.has(n.id))
+      if (lost.length > 0) {
+        errors.push({ rule: "activity_node_unreachable", path: path("activity_nodes"), message: `"${fn.name}": nút ${lost.map((n) => n.id).join(", ")} không tới được từ initial — thêm flow hoặc bỏ nút` })
+      }
+    }
+  }
+  return errors
+}
+
 /**
  * Message của sơ đồ tuần tự hệ thống (hộp đen): mỗi message có đúng một đầu là `system`; message đầu tiên là request
  * (stimulus) từ actor; nhánh lỗi có guard; actor người là actor của use case gắn function (không mở rộng ra actor con);
@@ -1149,7 +1290,7 @@ export const validateOps = (spine: Spine, ops: unknown, options: ValidateOptions
 
   try {
     const plan = planTransaction(spine, { base_version: spine.spine_version, ops: parsed, by: "op-validator", step_id: options.stepId ?? null }, { startSeq: 1 })
-    return [...(touchesErd(spine, parsed) ? erdShapeErrors(plan.spine) : []), ...interactionErrors(plan.spine, interactionOwners(parsed))]
+    return [...(touchesErd(spine, parsed) ? erdShapeErrors(plan.spine) : []), ...interactionErrors(plan.spine, interactionOwners(parsed)), ...activityErrors(plan.spine, activityOwners(parsed)), ...(touchesDeployment(parsed) ? deploymentErrors(plan.spine) : [])]
   } catch (err) {
     if (err instanceof TransactionRejectedError) {
       return err.violations.map((v) => ({

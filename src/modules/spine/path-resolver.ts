@@ -131,6 +131,10 @@ export const selectorFor = (element: unknown): Selector | null => {
   if (isRecord(element) && typeof element.from === "string" && typeof element.to === "string" && typeof element.event === "string") {
     return { kind: "match", pairs: [["from", element.from], ["to", element.to], ["event", element.event]] }
   }
+  // Control flow sơ đồ activity `functions[].activity_flows[]` không có id — khoá là from + to (trước nhánh `to` của flow_to)
+  if (isRecord(element) && typeof element.from === "string" && typeof element.to === "string") {
+    return { kind: "match", pairs: [["from", element.from], ["to", element.to]] }
+  }
   // Cạnh luồng màn `screens[].flow_to[]` không có id — khoá là màn đích
   if (isRecord(element) && typeof element.to === "string") return { kind: "match", pairs: [["to", element.to]] }
   // Thuộc tính entity `entities[].attributes[]` không có id — khoá là tên
