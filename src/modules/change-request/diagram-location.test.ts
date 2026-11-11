@@ -18,7 +18,7 @@ import type { IChangeLocation } from "./change-location.model.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import { redrawDecision } from "./diagram-location.js"
 import { previewAfter } from "./propose.service.js"
-import { elementValue, findSpineLocations, originalDiagramLocations, valueText } from "./spine-location.js"
+import { elementValue, findSpineLocations, originalDiagramLocations, valueText, withOriginalDiagrams } from "./spine-location.js"
 import { checkSpineOps } from "./verify.service.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -109,6 +109,13 @@ describe("§4.13 C-3 vị trí sơ đồ gốc", () => {
     expect(originalDiagramLocations(s, [], [{ path: "actors[]" }]).map((f) => f.path)).toEqual([CUSTOM])
   })
 
+  it("FLF-375: lô thêm use case đã duyệt trong chat ⇒ vẫn kèm vị trí sơ đồ use case gốc", () => {
+    const batch = [{ path: "use_cases[]", section_id: "fixed:2.2.2", found_by: ["preview" as const], entity_paths: ["fixed:2.2.2"], owner_step: null }]
+    const out = withOriginalDiagrams(withOriginal(), [], batch)
+    expect(out.map((f) => f.path)).toEqual(["use_cases[]", CUSTOM])
+    expect(out[1].found_by).toEqual(["diagram"])
+  })
+
   it("CR nhắm mục Use Case Diagram (vd từ cờ vàng) ⇒ có vị trí sơ đồ gốc", () => {
     expect(findSpineLocations(withOriginal(), ["fixed:2.2.1"], []).some((f) => f.path === CUSTOM && f.found_by.includes("diagram"))).toBe(true)
   })
@@ -123,6 +130,23 @@ describe("§4.13 C-4 đề xuất vẽ lại (code, không AI)", () => {
     expect(d.proposal.old_text).toBe(valueText(elementValue(s, CUSTOM)))
     expect(d.proposal.new_text).toBe(previewAfter(s, CUSTOM, d.proposal.spine_ops))
     expect(JSON.parse(d.proposal.new_text!).blocks).toEqual([expect.objectContaining({ kind: "paragraph" })])
+  })
+
+  it("FLF-375 (B12): vẽ lại ⇒ bỏ cả chú thích ngay sau ảnh (mô tả hình cũ), giữ văn xuôi khác", () => {
+    const s = withOriginal()
+    const c = s.custom_sections.find((x) => x.id === "CS01")!
+    c.blocks.push({ kind: "paragraph", text: "H2 · sơ đồ use case tổng quát: 3 tác nhân, 5 use case", rows: null, image_ref: null })
+    const d = redrawDecision(s, CUSTOM, [loc("use_cases[id=UC01]", RENAME_UC)])!
+    expect(d.conclusion).toBe("edit")
+    expect(JSON.parse(d.proposal.new_text!).blocks.map((b: { text: string }) => b.text)).toEqual(["Hình dưới vẽ bằng draw.io."])
+    expect(d.proposal.new_text).toBe(previewAfter(s, CUSTOM, d.proposal.spine_ops))
+  })
+
+  it("FLF-375: một vị trí khác có op hỏng ⇒ vẫn áp op của vị trí còn lại, sơ đồ vẫn kết luận vẽ lại", () => {
+    const s = withOriginal()
+    const broken = loc("actors[id=NOPE]", [{ op: "set", path: "actors[id=NOPE].name", value: "x" }])
+    const d = redrawDecision(s, CUSTOM, [broken, loc("use_cases[id=UC01]", RENAME_UC)])!
+    expect(d.conclusion).toBe("edit")
   })
 
   it("đổi mô tả (không vẽ lên hình) ⇒ not_related, giữ hình", () => {

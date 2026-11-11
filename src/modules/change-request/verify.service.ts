@@ -35,7 +35,6 @@ import { newContradictions } from "./clarify.service.js"
 import { answersText, crHeader, glossaryText, plainValues, relatedElements, relatedPassages, truncate } from "./cr-context.js"
 import { regroup } from "./group.service.js"
 import { refreshDiagramLocations } from "./diagram-location.js"
-import { locksOf } from "./lock.service.js"
 import { fixDuplicateIds } from "./propose.service.js"
 import { elementValue, isArrayPath, listElements, opElement, sectionOfElement, unchangedSince, valueText } from "./spine-location.js"
 
@@ -54,16 +53,35 @@ export const opElements = (loc: Pick<IChangeLocation, "proposal">): string[] =>
   (loc.proposal?.spine_ops ?? []).map((o) => opElement(opPath(o))).filter((p): p is string => !!p)
 
 /** Kiểm tất định từng vị trí (không gồm chạy khô op — xem `checkSpineOps`). `locks`: path ⇒ CR giữ khoá. */
+/**
+ * FLF-375: phần tử "thuộc" CR (thay bảng khoá đã bỏ) — mọi vị trí của CR + phần tử CR tự thêm bằng op `add` (lô use case
+ * tạo use case / chức năng / màn mới rồi sửa tiếp chúng). Op chạm phần tử ngoài tập này ⇒ `op_path_not_locked`.
+ */
+export const ownedElements = (crId: string, locations: readonly Pick<IChangeLocation, "path" | "proposal">[]): Map<string, string> => {
+  const owned = new Map<string, string>()
+  for (const l of locations) {
+    owned.set(l.path, crId)
+    for (const raw of l.proposal?.spine_ops ?? []) {
+      const o = raw as { op?: unknown; path?: unknown; value?: unknown }
+      const array = typeof o.path === "string" ? /^(\w+)\[\]$/.exec(o.path)?.[1] : undefined
+      const id = o.value && typeof o.value === "object" ? (o.value as { id?: unknown }).id : undefined
+      if (o.op === "add" && array && typeof id === "string") owned.set(`${array}[id=${id}]`, crId)
+    }
+  }
+  return owned
+}
+
 export const checkLocation = (cr: Pick<IChangeRequest, "cr_id">, loc: CheckLocation, spine: Spine, locks: ReadonlyMap<string, string>): VerifyViolation[] => {
   if (!loc.conclusion) return [{ rule: "unconcluded", message: "Vị trí chưa có kết luận" }]
   if (loc.conclusion === "not_related") return []
   const current = elementValue(spine, loc.path)
   if (current === undefined) return [{ rule: "element_missing", message: `${pathLabel(loc.path)} không còn trong tài liệu`, path: loc.path }]
   const out: VerifyViolation[] = []
-  if (locks.get(loc.path) !== cr.cr_id) out.push({ rule: "path_not_locked", message: `${pathLabel(loc.path)} chưa được giữ cho ${cr.cr_id} (có thể một change request khác đang sửa)`, path: loc.path })
   const p = loc.proposal
   if (!p) return [...out, { rule: "no_proposal", message: "Thiếu đề xuất" }]
-  if (!unchangedSince(spine, loc.path, p)) throw valueChanged(loc)
+  // FLF-375 (§3.2): trước khi xác nhận, đề xuất chưa có giá trị kiểm tra — chữ cũ đã đổi (người khác vừa ghi) ⇒ AI soạn
+  // lại trên nội dung hiện tại như một lỗi kiểm thường; lúc xác nhận mới so 3 cột (`concurrent-edit.ts`)
+  if (!unchangedSince(spine, loc.path, p)) return [...out, { rule: "value_changed", message: `${pathLabel(loc.path)} vừa được sửa ở chỗ khác — soạn lại trên nội dung hiện tại`, path: loc.path }]
   if (loc.conclusion === "edit") {
     if (!p.spine_ops.length) out.push({ rule: "edit_without_ops", message: "Kết luận là sửa nhưng chưa có nội dung sửa" })
     else if (p.new_text !== null && p.new_text === p.old_text) out.push({ rule: "edit_no_change", message: "Đề xuất không thay đổi gì ở phần tử này" })
@@ -207,7 +225,7 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
   await fixDuplicateIds(spine, locations)
   // Đề xuất của vị trí khác có thể đã đổi (sửa tay, "Sửa lại") ⇒ kết luận vẽ lại sơ đồ gốc tính lại trước khi kiểm (§4.13)
   await refreshDiagramLocations(spine, locations)
-  const locks = await locksOf(cr.projectId, [...locations.map((l) => l.path), ...locations.flatMap(opElements)])
+  const locks = ownedElements(cr.cr_id, locations)
 
   const violations = new Map(locations.map((l) => [l.location_id, checkLocation(cr, l, spine, locks)]))
   for (const [locId, vs] of checkSpineOps(spine, cr, locations)) violations.set(locId, [...(violations.get(locId) ?? []), ...vs])

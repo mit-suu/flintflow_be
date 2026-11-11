@@ -10,7 +10,8 @@
  * đứng sau các feature. Nhóm quá `MAX_USE_CASES_PER_DIAGRAM` use case tách đều thành nhiều hình trong cùng nhóm. Phần
  * đầu tiên giữ id gốc của hình (`diagram.service.ts#assignIds`) nên baseline đã ký giữ được ảnh.
  *
- * Actor đúng như mô hình: một use case nối mọi actor trong `actor_ids`, actor tổng quát hiện nguyên trên hình (không bung
+ * Actor đúng như mô hình: một use case nối mọi actor trong `actor_ids` (trừ actor con khi cha cũng có — con thừa kế),
+ * actor tổng quát hiện nguyên trên hình (không bung
  * xuống actor lá), actor có con thì in nghiêng. Cạnh actor–use case là association (đường liền, không mũi tên). Actor
  * người KHÔNG nối vào use case mở rộng / được include khi quan hệ đó được vẽ trong cùng hình — actor đến với nó qua use
  * case gốc; actor `system`/`time` luôn giữ cạnh. Actor người mất hết cạnh thì giữ cạnh tới use case có id nhỏ nhất.
@@ -26,12 +27,13 @@
 
 import { checkScene } from "../../../shared/diagram/svg-geometry.js"
 import type { Scene } from "../../../shared/diagram/svg-scene.js"
-import { actorParents } from "../../spine/actor-generalization.js"
+import { actorParents, ancestorsOf } from "../../spine/actor-generalization.js"
 import type { ActorKind, Spine, UseCase } from "../../spine/spine.types.js"
 import { systemName } from "../../spine/system-name.js"
 import type { RenderedPart, Renderer } from "./common.js"
 import { byId, compareIds, svgPart } from "./common.js"
 import { DIAGRAM_LABELS, type DiagramLabels } from "./labels.js"
+import { isUploadedDocument, withDrawnUser } from "./drawn-user.js"
 import { layoutActorHierarchy, layoutUseCaseDiagram, type Association, type DiagramActor, type Relation, type UseCaseDiagram } from "./usecase-layout.js"
 
 export const MAX_USE_CASES_PER_DIAGRAM = 20
@@ -178,6 +180,11 @@ const clusterKey = (cluster: readonly UseCase[], kinds: ActorKinds): string => {
 }
 
 const groupUseCases = (spine: Spine, kinds: ActorKinds, labels: DiagramLabels): UseCaseGroup[] => {
+  // FLF-375: tài liệu upload vẽ một sơ đồ use case TỔNG QUÁT (thay đúng hình gốc của file, vd H2 "10 use case") — không
+  // tách theo tính năng thành nhiều hình nhỏ một use case; quá trần một hình thì vẫn tách như thường ở bước sau
+  if (isUploadedDocument(spine) && spine.use_cases.length > 0 && spine.use_cases.length <= MAX_USE_CASES_PER_DIAGRAM) {
+    return [{ key: "~all", name: clean(systemName(spine.project)) || labels.system, useCases: byId(spine.use_cases) }]
+  }
   const byFeature = new Map<string, UseCase[]>()
   const unassigned: UseCase[] = []
   for (const uc of byId(spine.use_cases)) {
@@ -217,14 +224,20 @@ export interface UseCasePart {
 /** Actor chính của use case — dùng xếp các use case cùng actor gần nhau, ít đường association chéo nhau. */
 const primaryActor = (uc: UseCase, kinds: ActorKinds): string => uc.actor_ids.find((id) => isHuman(kinds, id)) ?? uc.actor_ids[0] ?? "~"
 
-/** Cạnh actor–use case của một hình, theo luật bỏ cạnh actor người ở use case phụ thuộc. */
-const associationsOf = (useCases: readonly UseCase[], relations: readonly Relation[], kinds: ActorKinds): Association[] => {
+/**
+ * Cạnh actor–use case của một hình, theo luật bỏ cạnh actor người ở use case phụ thuộc. FLF-390: actor con đã kế thừa
+ * use case qua actor cha (cha cũng có trong `actor_ids`) ⇒ không vẽ cạnh riêng cho con (UML: con thừa kế association
+ * của cha) — bảng nhập ghi "Guest, Customer" mà Customer kế thừa Guest thì hình chỉ nối Guest.
+ */
+const associationsOf = (useCases: readonly UseCase[], relations: readonly Relation[], kinds: ActorKinds, parents: ReadonlyMap<string, string> = new Map()): Association[] => {
   const dependent = new Set([...relations.filter((r) => r.kind === "include").map((r) => r.to), ...relations.filter((r) => r.kind === "extend").map((r) => r.from)])
   const kept: Association[] = []
   const dropped = new Map<string, string[]>()
   for (const uc of useCases) {
-    for (const actorId of [...new Set(uc.actor_ids)].sort(compareIds)) {
+    const linked = new Set(uc.actor_ids)
+    for (const actorId of [...linked].sort(compareIds)) {
       if (!kinds.has(actorId)) continue
+      if (ancestorsOf(actorId, parents).some((p) => linked.has(p))) continue
       if (isHuman(kinds, actorId) && dependent.has(uc.id)) dropped.set(actorId, [...(dropped.get(actorId) ?? []), uc.id])
       else kept.push({ actorId, useCaseId: uc.id })
     }
@@ -240,7 +253,7 @@ const associationsOf = (useCases: readonly UseCase[], relations: readonly Relati
 /** Hình có đạt bố cục không (`checkScene` sạch)? Không đạt ⇒ `partsOfGroup` tách đôi (luật 9: không đạt thì tách hình). */
 type Fits = (part: UseCasePart) => boolean
 
-const partsOfGroup = (group: UseCaseGroup, kinds: ActorKinds, fits: Fits): UseCasePart[] => {
+const partsOfGroup = (group: UseCaseGroup, kinds: ActorKinds, fits: Fits, parents: ReadonlyMap<string, string> = new Map()): UseCasePart[] => {
   const known = new Map(group.useCases.map((u) => [u.id, u]))
   const chains = relationChains(group.useCases).flatMap((c) => splitChain(c, MAX_USE_CASES_PER_DIAGRAM))
   // Mỗi lớp là một hình: các chuỗi trong lớp không chung use case (use case xuất hiện một lần trên một hình)
@@ -289,7 +302,7 @@ const partsOfGroup = (group: UseCaseGroup, kinds: ActorKinds, fits: Fits): UseCa
   const make = (blocks: RelationChain[], name: string): UseCasePart => {
     const useCases = blocks.flatMap((b) => b.nodes).map((id) => known.get(id)!)
     const relations = blocks.flatMap((b) => b.relations)
-    return { groupKey: group.key, name, useCases, relations, associations: associationsOf(useCases, relations, kinds) }
+    return { groupKey: group.key, name, useCases, relations, associations: associationsOf(useCases, relations, kinds, parents) }
   }
   /** Tách đôi tới khi vừa; một chuỗi dài bị cắt giữa (quan hệ ở chỗ cắt không vẽ), một use case đơn thì dừng. */
   const refine = (blocks: RelationChain[]): RelationChain[][] => {
@@ -309,14 +322,17 @@ const partsOfGroup = (group: UseCaseGroup, kinds: ActorKinds, fits: Fits): UseCa
 /** Mọi hình use case của Spine theo thứ tự xuất hiện trong tài liệu (feature theo `order`, rồi nhóm chưa có feature). */
 export const partitionUseCases = (spine: Spine, labels: DiagramLabels = DIAGRAM_LABELS.en, fits: Fits = () => true): UseCasePart[] => {
   const kinds: ActorKinds = new Map(spine.actors.map((a) => [a.id, a.kind]))
-  return groupUseCases(spine, kinds, labels).flatMap((g) => partsOfGroup(g, kinds, fits))
+  const parents = actorParents(spine.actors)
+  return groupUseCases(spine, kinds, labels).flatMap((g) => partsOfGroup(g, kinds, fits, parents))
 }
 
 // ─── renderer ──────────────────────────────────────────────────────
 
 const meta = (section: string): Pick<RenderedPart, "kind" | "section" | "owner_kind" | "owner_id"> => ({ kind: "usecase", section, owner_kind: null, owner_id: null })
 
-export const renderUseCase: Renderer = (spine, _ownerId, labels = DIAGRAM_LABELS.en) => {
+export const renderUseCase: Renderer = (source, _ownerId, labels = DIAGRAM_LABELS.en) => {
+  // FLF-375: luật actor `User` cho use case đăng nhập dùng chung áp lúc vẽ, không đổi dữ liệu của file (drawn-user.ts)
+  const spine = withDrawnUser(source)
   const actors = new Map(spine.actors.map((a) => [a.id, a]))
   const parents = actorParents(spine.actors)
   const abstract = new Set(parents.values())

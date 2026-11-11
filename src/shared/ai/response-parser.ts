@@ -270,8 +270,8 @@ export const importExtractSchema = z.object({
   unmapped_block_ids: z.array(blockIdRef).default([])
 })
 
-/** Loại diagram mà I-4 đọc được từ ảnh (mode 1 v3 phase 5); `other` ⇒ không đọc, giữ ảnh gốc. */
-export const DIAGRAM_IMAGE_KINDS = ["usecase", "erd", "screen_flow", "context", "other"] as const
+/** Loại diagram mà I-4 đọc được từ ảnh (mode 1 v3 phase 5; FLF-390 thêm sequence, activity); `other` ⇒ không đọc, giữ ảnh gốc. */
+export const DIAGRAM_IMAGE_KINDS = ["usecase", "erd", "screen_flow", "context", "sequence", "activity", "deployment", "other"] as const
 export type DiagramImageKind = (typeof DIAGRAM_IMAGE_KINDS)[number]
 
 /** I-4 phần ảnh: cùng hình item với `importExtract` + loại diagram. `other` thì `items` rỗng. */

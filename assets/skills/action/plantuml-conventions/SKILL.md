@@ -37,12 +37,14 @@ This skill is the shared contract for every renderer (`renderer/*`) and the prom
 | `fixed:3.1.5` | Logical database requirements | `erd` | `null` (split by cluster) | Chen \| Crow's foot \| IDEF1X (per project) | svg | FLF-324 | srs-spine §7.1 |
 | `feature:<id>` | Logical data model (domain) | `class` | feature (one part per feature, at the head of §3.x) | UML 2.5 Class (analysis level, 2 compartments) | svg | FLF-325 | srs-spine §7.1 |
 | `function:<id>` | Functional requirements — stimulus/response | `sequence` | function | UML 2.5 System Sequence Diagram (black box) | puml | FLF-326 | srs-spine §7.1 |
+| `feature:<id>` | Functional requirements — processing flow of a use case (only on request / IEEE Functions) | `activity` | use_case | UML 2.5 Activity (swimlanes) | svg | FLF-390 | srs-spine §7.1 |
+| `fixed:4.1` | External interfaces — deployment (IEEE: "Distribution" of "Design and Implementation"; only on request in FPT) | `deployment` | `null` (one diagram) | UML 2.5 Deployment | puml | FLF-390 | srs-spine §7.1 |
 | `fixed:3.1.5` | Modes and states | `state_machine` | entity (one per entity that has states, next to the entity description) | UML 2.5 State Machine | svg | FLF-327 | srs-spine §7.1 |
 | `function:<primary_function_id>` | User interfaces — layout | `screen_layout` | screen | Salt wireframe | puml | — | srs-spine §7.1 |
 
-`sequence` reads `functions[].interactions` (FLF-326, `contract-change`). **No data, no diagram**: a function with no `interactions[]`, or one that fails the criteria in `references/kinds.md`, has no diagram — no placeholder, no guessed content (`state_machine` is drawn only for entities whose `states[]` is filled).
+`sequence` reads `functions[].interactions` (FLF-326, `contract-change`); `activity` reads `use_cases[].activity_nodes` / `.activity_flows`, `deployment` reads `deployment_nodes` / `deployment_links` (FLF-390). **No data, no diagram**: a function with no `interactions[]`, or one that fails the criteria in `references/kinds.md`, has no diagram — no placeholder, no guessed content (`state_machine` is drawn only for entities whose `states[]` is filled, `activity` only for use cases whose `activity_nodes[]` is filled — neither `activity` nor `deployment` is in the FPT template unless the user asks).
 
-New kinds, the `svg` path and rules 5, 11 and 12 below are the target: each kind adopts them with the ticket in its row. `sequence` is the system level (black box) and the only kind besides the salt wireframe on the `puml` path. `SRS section` is the section id the diagram is embedded in (`section-registry.ts`; `feature:<id>` = §3.x, `function:<id>` = §3.x.y). Per-kind syntax and skeletons: `references/kinds.md`.
+New kinds, the `svg` path and rules 5, 11 and 12 below are the target: each kind adopts them with the ticket in its row. `sequence` (system level, black box) and `deployment` are the kinds besides the salt wireframe on the `puml` path. `SRS section` is the section id the diagram is embedded in (`section-registry.ts`; `feature:<id>` = §3.x, `function:<id>` = §3.x.y). Per-kind syntax and skeletons: `references/kinds.md`.
 
 ## Common rules
 
@@ -56,12 +58,14 @@ New kinds, the `svg` path and rules 5, 11 and 12 below are the target: each kind
    - `class`: one per feature. `screen_flow`: one for the whole system, split by whole features over 40 screens.
    - `erd`: whole system; split by connected entity cluster when > ~25 entities.
    - `sequence`: one per function (not every function needs one).
+   - `activity`: one per use case that has activity nodes; not split.
+   - `deployment`: one for the whole system.
    - `state_machine`: one per entity that has states.
    - Other kinds: more than ~25 nodes ⇒ split further within the same owner. Each part is its own `diagrams[]` entry with the same `kind`.
 6. **Actors and lifelines follow the actor–use case model**: use the actor the use case is linked to, keep generalization, never expand to leaf actors, never merge extra actors, use the exact actor name. General actors are defined in §2.1 and its actor hierarchy diagram; other diagrams only use the name and the description below the figure says "see §2.1". Actor unknown ⇒ do not guess.
 7. **Naming**: actor, entity and class = singular noun; use case, function and activity action = verb phrase; data-flow label = noun; state = adjective or participle (Pending, Approved).
 8. **Lines and arrowheads follow the notation's semantics, never aesthetics**: solid = association / call / control flow; dashed = dependency / include / extend / reply. Open V, hollow triangle and filled triangle exactly as the standard defines. An arrow without a label where the notation requires one is an error. Create a relation only when the standard's semantics prove it.
-9. **Layout**: prefer one straight segment. Orthogonal bends only when a straight line would cross a shape or text, and only for `erd`, `class`, `screen_flow`. `state_machine` never bends: every transition is one straight segment, parallel segments for several transitions between the same two states, a self-transition is written inside the state (internal transition). No curves, no line over text or shapes, no two overlapping lines, minimal crossings. Cannot meet this ⇒ split the diagram.
+9. **Layout**: prefer one straight segment. Orthogonal bends only when a straight line would cross a shape or text, and only for `erd`, `class`, `screen_flow`, `activity`. `state_machine` never bends: every transition is one straight segment, parallel segments for several transitions between the same two states, a self-transition is written inside the state (internal transition). No curves, no line over text or shapes, no two overlapping lines, minimal crossings. Cannot meet this ⇒ split the diagram.
 10. **Stereotypes in ASCII**: `<<include>>`, never `«include»`.
 11. **Visual Paradigm colours**: fill `#7ACFF5`, black border and text, Arial, no shadow; no per-element colours.
 12. **Caption + description**: every diagram has a caption `Figure n: <name>` and one description paragraph outside the figure. No notes that restate descriptions.
@@ -70,7 +74,7 @@ New kinds, the `svg` path and rules 5, 11 and 12 below are the target: each kind
     - **English labels only.** No Vietnamese diacritics anywhere in the file.
     - No `!include`, no `!import`, no URLs, no sprites or images, no `skinparam` loaded from remote. The server has no internet access.
     - Quote any label containing spaces, punctuation or keywords.
-    - `sequence`: the Visual Paradigm theme is written into the source as literal `skinparam` lines (no `!include`).
+    - `sequence`, `deployment`: the Visual Paradigm theme is written into the source as literal `skinparam` lines (no `!include`).
 
 ## Self-check before output
 

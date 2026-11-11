@@ -152,7 +152,7 @@ describe("danh sách field trùng phạm vi non_english_content", () => {
     })
     const units = translationUnits(spine).filter(isDiagramOnly)
     expect(new Set(units.map((u) => `${u.ref.group}.${u.ref.field}`))).toEqual(
-      new Set(["actors.flows_in", "actors.flows_out", "entities.relation_verbs", "entities.attributes", "entities.states", "entities.transitions", "functions.interactions", "screens.flow_to", "diagrams.labels"])
+      new Set(["actors.flows_in", "actors.flows_out", "entities.relation_verbs", "entities.attributes", "entities.states", "entities.transitions", "functions.interactions", "use_cases.activity_nodes", "use_cases.activity_flows", "screens.flow_to", "diagrams.labels"])
     )
     const before = new Set(nonEnglish(spine))
     const withVietnamese = variant((s) => {

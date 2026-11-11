@@ -64,7 +64,13 @@ export const CASCADE_POLICY: Readonly<Record<string, CascadePolicy>> = Object.fr
   "entities[].transitions[].to": "remove_owner",
   "entities[].transitions[].business_rule_ids[]": "pull",
   "functions[].interactions[].from": "remove_owner",
-  "functions[].interactions[].to": "remove_owner"
+  "functions[].interactions[].to": "remove_owner",
+  "use_cases[].activity_nodes[].lane": "null",
+  "use_cases[].activity_flows[].from": "remove_owner",
+  "use_cases[].activity_flows[].to": "remove_owner",
+  "deployment_nodes[].parent_id": "null",
+  "deployment_links[].from": "remove_owner",
+  "deployment_links[].to": "remove_owner"
 })
 
 // ─── removed ids ─────────────────────────────────────────────────

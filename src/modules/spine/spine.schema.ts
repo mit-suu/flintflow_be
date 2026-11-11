@@ -97,6 +97,23 @@ export const roleSchema = z.strictObject({
   actor_id: id.nullable()
 })
 
+export const ACTIVITY_NODE_KINDS = ["initial", "final", "action", "decision", "merge", "fork", "join"] as const
+
+/** FLF-390: nút của sơ đồ activity (luồng xử lý use case). `lane` = id actor hoặc `system`. */
+export const activityNodeSchema = z.strictObject({
+  id,
+  kind: z.enum(ACTIVITY_NODE_KINDS),
+  name: z.string().optional(),
+  lane: id.nullable().optional()
+})
+
+/** Control flow `from` → `to` (id nút của cùng use case), khoá phần tử = from + to. */
+export const activityFlowSchema = z.strictObject({
+  from: id,
+  to: id,
+  guard: z.string().optional()
+})
+
 export const useCaseSchema = z.strictObject({
   id,
   name: z.string(),
@@ -104,7 +121,10 @@ export const useCaseSchema = z.strictObject({
   function_ids: z.array(id),
   description: z.string(),
   includes: z.array(id),
-  extends: z.array(id)
+  extends: z.array(id),
+  // FLF-390: luồng xử lý (sơ đồ activity). Thiếu ⇒ `[]` (Spine cũ không migrate)
+  activity_nodes: z.array(activityNodeSchema).optional(),
+  activity_flows: z.array(activityFlowSchema).optional()
 })
 
 /** Cạnh luồng màn: `to` bắt buộc; `trigger` / `guard` bỏ trống = không có (dữ liệu cũ chỉ là chuỗi id màn đích). */
@@ -278,6 +298,24 @@ export const referenceSchema = z.strictObject({
   kind: z.enum(["normative", "informative"])
 })
 
+/** FLF-390: nút sơ đồ triển khai (§4.1). */
+export const deploymentNodeSchema = z.strictObject({
+  id,
+  name: z.string().trim().min(1),
+  kind: z.enum(["device", "execution_environment", "node"]),
+  parent_id: id.nullable(),
+  artifacts: z.array(z.string()),
+  components: z.array(z.string()),
+  description: z.string().optional()
+})
+
+/** Đường truyền thông `from` → `to` (id nút), khoá phần tử = from + to. */
+export const deploymentLinkSchema = z.strictObject({
+  from: id,
+  to: id,
+  protocol: z.string().optional()
+})
+
 export const verificationSchema = z.strictObject({
   id,
   requirement_id: id,
@@ -303,7 +341,7 @@ export const customBlockSchema = z.strictObject({
   image_ref: z.string().min(1).nullable(),
   /** Sơ đồ gốc của người dùng (mode 1 v3 §4.13) — Spine cũ không có. */
   diagram: z
-    .strictObject({ kind: z.enum(["context", "usecase", "screen_flow", "erd"]), source_hash: z.string().min(1) })
+    .strictObject({ kind: z.enum(["context", "usecase", "screen_flow", "erd", "sequence", "activity", "deployment"]), owner_id: id.nullable().optional(), source_hash: z.string().min(1) })
     .nullable()
     .optional()
 })
@@ -320,7 +358,7 @@ export const customSectionSchema = z.strictObject({
 
 export const diagramSchema = z.strictObject({
   id,
-  kind: z.enum(["context", "usecase", "screen_flow", "erd", "class", "state_machine", "sequence", "screen_layout"]),
+  kind: z.enum(["context", "usecase", "screen_flow", "erd", "class", "state_machine", "sequence", "activity", "deployment", "screen_layout"]),
   /** FLF-339: engine vẽ. Dữ liệu cũ (chỉ có `puml`) được chuyển lúc đọc ở mức mảng — xem `legacy-diagram.ts`. */
   format: z.enum(["puml", "svg"]),
   source: z.string(),
@@ -457,6 +495,9 @@ export const spineSchema = z.strictObject({
   /** FLF-365 — Spine trước mẫu IEEE 29148 không có ⇒ `[]`. */
   references: z.array(referenceSchema).default([]),
   verifications: z.array(verificationSchema).default([]),
+  /** FLF-390 — Spine trước sơ đồ triển khai không có ⇒ `[]`. */
+  deployment_nodes: z.array(deploymentNodeSchema).default([]),
+  deployment_links: z.array(deploymentLinkSchema).default([]),
 
   // preprocess ở mức phần tử mảng, không bọc `diagramSchema`: op engine đọc `.shape` của nó (element-defaults)
   diagrams: z.array(z.preprocess(legacyDiagram, diagramSchema)),

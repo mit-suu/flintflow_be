@@ -40,6 +40,8 @@ export const ID_FORMATS: Readonly<Record<string, IdFormat>> = Object.freeze({
   // FLF-365: mẫu IEEE 29148
   references: { prefix: "REF-", width: 2 },
   verifications: { prefix: "VER-", width: 2 },
+  // FLF-390: sơ đồ triển khai
+  deployment_nodes: { prefix: "DN", width: 2 },
   addendum: { prefix: "AD", width: 2 },
   custom_sections: { prefix: "CS", width: 2 },
   diagrams: { prefix: "D", width: 2 },
@@ -92,10 +94,10 @@ export const formatFor = (existing: readonly string[], fallback: IdFormat): IdFo
 }
 
 /** Collection này có được server cấp id không. */
-export const allocatesIds = (collection: string): boolean => collection === "validations" || collection === "states" || collection in ID_FORMATS
+export const allocatesIds = (collection: string): boolean => collection === "validations" || collection === "states" || collection === "activity_nodes" || collection in ID_FORMATS
 
 /**
- * Id mới cho một phần tử thêm vào `collection`. `parentId` chỉ dùng cho `validations` (id function cha) và `states` (id entity).
+ * Id mới cho một phần tử thêm vào `collection`. `parentId` chỉ dùng cho `validations` (id function cha), `activity_nodes` (id use case) và `states` (id entity).
  * `null` ⇒ collection không do allocator quản lý (vd `steps`, `sections` — khoá có nghĩa, không đánh số).
  */
 export const allocateId = (spine: Spine, collection: string, parentId: string | null = null): string | null => {
@@ -108,6 +110,11 @@ export const allocateId = (spine: Spine, collection: string, parentId: string | 
     // Trạng thái lồng trong entity: `<entity id>-ST<n>`, duy nhất trên toàn Spine (transition tham chiếu bằng id)
     if (!parentId) return null
     return nextIdIn(spine.entities.flatMap((e) => (e.states ?? []).map((s) => s.id)), { prefix: `${parentId}-ST`, width: 1 })
+  }
+  if (collection === "activity_nodes") {
+    // FLF-390: nút activity lồng trong use case: `<use case id>-AN<n>`, duy nhất trên toàn Spine (flow tham chiếu bằng id)
+    if (!parentId) return null
+    return nextIdIn(spine.use_cases.flatMap((u) => (u.activity_nodes ?? []).map((n) => n.id)), { prefix: `${parentId}-AN`, width: 1 })
   }
   const format = ID_FORMATS[collection]
   if (!format) return null

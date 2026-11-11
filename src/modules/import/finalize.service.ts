@@ -30,7 +30,7 @@ import { assemble } from "../render/assemble.service.js"
 import { snapshotBaseline } from "../pipeline/s9/baseline.service.js"
 import { Baseline } from "../spine/baseline.model.js"
 import { applyTransaction } from "../spine/op-engine.js"
-import { inferDiagramKind, isOriginalDiagramKind, originalDiagramHash } from "../spine/original-diagram.js"
+import { OWNER_DIAGRAM_KINDS, inferDiagramKind, isOriginalDiagramKind, originalDiagramValue, ownerOfSection } from "../spine/original-diagram.js"
 import { rehashSegments, segmentKeyOfPath } from "../spine/segment-hash.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Op } from "../spine/op.types.js"
@@ -182,7 +182,9 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // của người dùng** — dữ liệu đọc được chỉ vào Spine; khối ảnh mang `diagram` (loại + hash dữ liệu lúc import) để bản
   // render ẩn PlantUML cùng loại, và CR chạm dữ liệu đó sau này đề xuất vẽ lại bằng PlantUML.
   const imageRead = new Map(
-    drafts.flatMap((d) => (d.diagram_images ?? []).filter((i) => isOriginalDiagramKind(i.kind)).map((i) => [i.block_id, i.kind as OriginalDiagramKind] as const))
+    drafts.flatMap((d) =>
+      (d.diagram_images ?? []).filter((i) => isOriginalDiagramKind(i.kind)).map((i) => [i.block_id, { kind: i.kind as OriginalDiagramKind, owner: i.owner_id ?? null }] as const)
+    )
   )
   // FLF-361: ảnh gửi đọc mà chưa đọc được (EMF / AI quá tải) ⇒ suy loại theo caption / mục để vẫn ẩn PlantUML cùng loại
   // (lưới an toàn khi FLF-360 đọc lại vẫn không được). Cờ vàng `import_image_unread` giữ nguyên — dữ liệu ảnh chưa vào Spine
@@ -191,8 +193,12 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   for (const b of layoutBlocks) {
     if (b.kind !== "image" || !b.image_ref || !b.section_id) continue
     unmappedIds.add(b.block_id)
-    const kind = imageRead.get(b.block_id) ?? (imageUnread.has(b.block_id) ? inferDiagramKind(b.section_id, captionOf(b, layoutBlocks.filter((x) => x.section_id === b.section_id))) : null)
-    if (kind) b.diagram = { kind, source_hash: originalDiagramHash(imported, kind) }
+    const readAs = imageRead.get(b.block_id)
+    const inferred = !readAs && imageUnread.has(b.block_id) ? inferDiagramKind(b.section_id, captionOf(b, layoutBlocks.filter((x) => x.section_id === b.section_id))) : null
+    const kind = readAs?.kind ?? inferred
+    // FLF-390: sơ đồ gắn function (sequence / activity) cần chủ — đọc được ⇒ function nhận dữ liệu, chưa đọc ⇒ function của mục
+    const owner = kind && OWNER_DIAGRAM_KINDS.has(kind) ? (readAs?.owner ?? ownerOfSection(b.section_id)) : null
+    if (kind && (!OWNER_DIAGRAM_KINDS.has(kind) || owner)) b.diagram = originalDiagramValue(imported, kind, owner)
   }
   const project = await Project.findById(projectId).lean()
   const intentRaw = (project as { template_intent?: string | null } | null)?.template_intent ?? null

@@ -12,6 +12,7 @@ import { Mode1Error } from "../import/mode1.errors.js"
 import {
   addMaterialRequestSchema,
   amendRequestSchema,
+  crMessageRequestSchema,
   answersRequestSchema,
   closeRequestSchema,
   createChangeRequestSchema,
@@ -33,6 +34,7 @@ import * as crService from "./change-request.service.js"
 import * as extractionService from "./extraction.service.js"
 import type { IRequirementExtraction } from "./requirement-extraction.model.js"
 import { amendCr, answerClarification, runClarify } from "./clarify.service.js"
+import { handleCrMessage } from "./cr-message.service.js"
 import { runImpact } from "./cr-impact.service.js"
 import { decideGroup } from "./decision.service.js"
 import { patchLocation } from "./location.service.js"
@@ -173,6 +175,14 @@ export const amend = mode1Handler(async (req, res) => {
   const body = parseInput(amendRequestSchema, req.body)
   await amendCr(cr, auth.userId, body.instruction)
   return detail(res, cr)
+})
+
+/** FLF-375: tin nhắn trong lúc CR mở — lệnh sửa gộp vào CR, câu hỏi được trả lời (không thành yêu cầu bổ sung). */
+export const message = mode1Handler(async (req, res) => {
+  const { auth, cr } = await loadCr(req)
+  const body = parseInput(crMessageRequestSchema, req.body)
+  const outcome = await handleCrMessage(cr, auth.userId, body.text, body.language)
+  return sendSuccess(res, 200, { ...(await crService.toDetail(cr)), message: outcome })
 })
 
 export const listCrs = mode1Handler(async (req, res) => {
