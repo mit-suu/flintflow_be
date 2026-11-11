@@ -29,7 +29,7 @@ import { Project } from "../project/project.model.js"
 import { assemble } from "../render/assemble.service.js"
 import { snapshotBaseline } from "../pipeline/s9/baseline.service.js"
 import { Baseline } from "../spine/baseline.model.js"
-import { applyTransaction } from "../spine/op-engine.js"
+import { applyTransaction, planTransaction } from "../spine/op-engine.js"
 import { OWNER_DIAGRAM_KINDS, inferDiagramKind, isOriginalDiagramKind, originalDiagramValue, ownerOfSection } from "../spine/original-diagram.js"
 import { rehashSegments, segmentKeyOfPath } from "../spine/segment-hash.js"
 import * as spineRepository from "../spine/spine.repository.js"
@@ -43,6 +43,7 @@ import { canonicalFieldIds, collectEntities, idKey, imageOnlyGenericActors, pars
 import { ExtractionDraft, type IExtractionDraft } from "./extraction-draft.model.js"
 import { FieldAnchor } from "./field-anchor.model.js"
 import { needsConfirm } from "./import.constants.js"
+import { hasOwnScreenFlow, inferScreenFlow, inferredFlowFindings, inferredFlowOps, type InferredFlowEdge } from "./inferred-screen-flow.js"
 import type { FinalizeRequest } from "./import.dto.js"
 import { assertImportStatus, loadImportFile, recomputeBlockSections, requireImport, toReviewFields, transitionImport } from "./import.service.js"
 import { pathLabel } from "../spine/human-labels.js"
@@ -109,6 +110,10 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const entities = [...collectEntities(accepted)].filter(([key]) => !genericActors.has(key)).map(([, e]) => e)
   const droppedPermissions: DroppedPermission[] = []
   const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value, sections: e.sections })), droppedPermissions)
+  // QLHS 11/11 bug #15: file không có sơ đồ / mục luồng màn, chỉ ghi vài chuyển màn ⇒ suy Đăng nhập → màn của từng vai (cùng
+  // lô thực thể để dấu đoạn / hash tính trên dữ liệu đã có cạnh); cờ "Cần xem" liệt kê cạnh suy ra ở lô kế hoạch step
+  const inferredFlow = hasOwnScreenFlow(drafts, profile.heading_map, provisional) ? [] : inferFlowAfter(stripRecord(before), ops)
+  ops.push(...inferredFlowOps(inferredFlow))
 
   // 2. File gốc của bản 0.1 (ghi file trước; lô Spine hỏng thì xoá file, không để mồ côi)
   const parsed = await parseDocument(await loadImportFile(doc))
@@ -245,7 +250,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
         }),
         rule: IMPORT_NEEDS_REVIEW_RULE
       },
-      { findings: titleContentFindings(stripRecord(seeded), profile.heading_map, layout), rule: IMPORT_TITLE_CONTENT_RULE }
+      { findings: titleContentFindings(stripRecord(seeded), profile.heading_map, layout), rule: IMPORT_TITLE_CONTENT_RULE },
+      { findings: inferredFlowFindings(seeded, inferredFlow), rule: IMPORT_NEEDS_REVIEW_RULE }
     ]),
     ...seedStepOps(stripRecord(seeded), plan, { firstSeq: seqRange.first, lastSeq: seqRange.last, at: new Date().toISOString(), ...(draftOwners ? { draftOwners } : {}) })
   ]
@@ -423,6 +429,17 @@ const unreadImageFindings = (
     }))
   })
   return findings
+}
+
+/** Cạnh luồng màn suy ra trên Spine SAU lô thực thể (áp thử, không ghi). Lô hỏng ⇒ không suy (applyTransaction báo lỗi). */
+const inferFlowAfter = (spine: Spine, ops: Op[]): InferredFlowEdge[] => {
+  if (!ops.length) return []
+  try {
+    const planned = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import", step_id: null }, { startSeq: 1 })
+    return inferScreenFlow(planned.spine)
+  } catch {
+    return []
+  }
 }
 
 const percent = (n: number): string => `${Math.round(n * 100)}%`
