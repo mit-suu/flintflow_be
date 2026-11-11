@@ -53,6 +53,7 @@ import { documentLanguageForTurn, type TurnDocumentLanguage } from "../translati
 import { captureForTurn } from "../translation/capture.service.js"
 import { captureSources } from "../project/requirement-source.service.js"
 import { ActionType, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
+import { buildDocumentContext, stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 import type { ElicitOutput, OpTransaction, ReviewOutput } from "../../shared/ai/response-parser.js"
@@ -546,6 +547,21 @@ export interface ChatTurnInput {
   closing?: boolean
   /** FLF-260: ngôn ngữ trả lời của lượt — có thì đi vào lời gọi model (`buildPrompt` nối khối "Reply language"). */
   replyLanguage?: ReplyLanguage
+  /**
+   * Tài liệu tải lên SAU lượt hỏi (đính kèm cùng câu trả lời) — `newDocumentsSince`. Rỗng / thiếu ⇒ `(none)`: tài liệu cũ đã
+   * được đọc ở lượt hỏi.
+   */
+  documents?: string
+}
+
+/**
+ * Tài liệu đính kèm sau lúc hỏi cho lượt chat trả lời (bước `stepId` đọc `documents`). `askedAt` thiếu (trạng thái chờ cũ) ⇒
+ * mọi tài liệu của bước. Bước không đọc tài liệu ⇒ `""`.
+ */
+export const newDocumentsSince = async (projectId: string, stepId: string, askedAt: string | undefined): Promise<string> => {
+  if (!stepNeedsSourceDocuments(stepId)) return ""
+  const since = askedAt ? new Date(askedAt) : undefined
+  return (await buildDocumentContext(projectId, ActionType.DRAFT, stepId, 0, undefined, undefined, since && !Number.isNaN(since.getTime()) ? { since } : {})).contextText
 }
 
 /**
@@ -691,8 +707,9 @@ export const runChatTurn = async (input: ChatTurnInput): Promise<{ reply: string
           // FLF-358: giả định còn mở của bước — trước đây thiếu, prompt còn nguyên "{{assumptions}}"
           assumptions: assumptionsForPrompt(input.spine, input.unit),
           content_guidance: "",
-          // FLF-292: lượt chat khi còn câu chờ chỉ ghép câu trả lời — tài liệu đã được đọc ở lượt hỏi trước
-          documents: "(none)",
+          // FLF-292: lượt chat khi còn câu chờ chỉ ghép câu trả lời — tài liệu đã được đọc ở lượt hỏi trước. FLF-398: tài liệu
+          // đính kèm SAU lượt hỏi (cùng câu trả lời) thì chưa — nơi gọi nạp đúng phần đó
+          documents: input.documents?.trim() ? input.documents : "(none)",
           decisions: ledgerForPrompt(input.spine),
           ...conversation,
           user_message: input.message
@@ -1521,12 +1538,15 @@ export const runStep = async (
       }
     }
 
+    /** FLF-398: lúc đặt các câu đang chờ — lượt chat trả lời nạp tài liệu tải lên sau lúc này. */
+    let askedAt: string | undefined
     /**
      * Hỏi lại những câu còn chờ: phát `answer_needed`, lưu lượt chờ (FLF-222) rồi nhả khoá. Trả lượt nghe đã đăng ký TRƯỚC
      * khi công bố — câu trả lời tới ngay sau `answer_needed` / `waiting_answer` vẫn về đúng luồng này.
      */
     const announceWaiting = async (asked: PendingAnswerState["asked"]): Promise<{ answer: Promise<AnswerPayload> }> => {
       const listener = listenForAnswer(projectId, stepId, sessionId, d.signal)
+      askedAt = new Date().toISOString()
       const { questions } = shapeQuestions(asked)
       const answerNeeded: StepEvent = { type: "answer_needed", step_id: stepId, questions }
       try {
@@ -1536,7 +1556,7 @@ export const runStep = async (
           stage: "ask",
           detail_vi: `Chờ bạn trả lời ${questions.length} câu`,
           questions,
-          pending_answer: { kind: "step", unit: stepId, session_id: sessionId, asked, base_answers_text: answersText },
+          pending_answer: { kind: "step", unit: stepId, session_id: sessionId, asked, base_answers_text: answersText, asked_at: askedAt },
           release: true,
           appendEvent: { ...answerNeeded, at: new Date().toISOString() }
         })
@@ -1619,6 +1639,8 @@ export const runStep = async (
 
         assertNotAborted(d.signal, stepId)
         tracker.stage("ask", { detail_vi: "Đọc tin nhắn của bạn" })
+        // FLF-398: tệp đính kèm cùng câu trả lời — AI đọc được ngay lượt này
+        const freshDocuments = await newDocumentsSince(projectId, stepId, askedAt)
         const turn = await tracker.beat("ask", () =>
           runChatTurn({
             projectId,
@@ -1632,7 +1654,8 @@ export const runStep = async (
             projection: elicitProjection(spine, stepId),
             spine,
             elicitExecutor: d.elicitExecutor,
-            replyLanguage
+            replyLanguage,
+            documents: freshDocuments
           })
         )
         const settled = turn.settled.filter((a) => !answeredByCard.has(indexOfQuestion(pending, a.question_id)))
