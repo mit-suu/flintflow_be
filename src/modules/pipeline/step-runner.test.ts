@@ -170,6 +170,7 @@ import { documentLanguageForTurn } from "../translation/turn-language.js"
 import { buildStepContext } from "./context-projection.js"
 import { getPromptTemplate, interpolatePrompt } from "../../shared/ai/prompt-registry.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
+import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURES = path.resolve(__dirname, "../../../fixtures")
@@ -1354,6 +1355,50 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
     await run
   })
 
+  it("FLF-398: tệp đính kèm cùng câu trả lời (tải sau lượt hỏi) ⇒ lượt chat nhận nội dung tài liệu mới, không phải (none)", async () => {
+    const spine = structuredClone(MINIMAL)
+    spine.steps = []
+    spine.addendum = []
+    spine.project.vision = null
+    spine.progress.current_phase = "B-0"
+    spine.progress.current_step = "B-0.1"
+    db.spines[0] = { _id: crypto.randomUUID(), projectId: PROJECT, ...spine }
+    seedSession(true)
+    // Chỉ lượt chat (có `since`) mới thấy tài liệu mới; lượt hỏi đầu không có tài liệu
+    vi.mocked(buildDocumentContext).mockClear()
+    vi.mocked(buildDocumentContext).mockImplementation(async (_p, _a, _s, _c, _m, _o, filter) =>
+      filter?.since
+        ? { contextText: "[D3-P01] Quy trình khám ngoại trú: bệnh nhân lấy số từ 5 giờ sáng.", tokenCount: 20, documentsUsed: 1, usedSummary: false }
+        : { contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false }
+    )
+    const ASK = [{ question: "Hiện quy trình đang làm thế nào?", options: [], multiple: false, topic_key: "current_process" }] as never as ElicitOutput["questions"]
+    const elicitExecutor = vi.fn(async (input: { promptVariables?: Record<string, unknown> }) =>
+      input.promptVariables?.chat_turn ? chatReply("Đã đọc tài liệu", []) : elicitReply("Mình hỏi thêm chút", ASK)
+    )
+    const { events, emit } = collectEvents()
+    const before = Date.now()
+    const run = runStep(PROJECT, "B-0.1", SESSION, USER, emit, {
+      elicitExecutor: elicitExecutor as never,
+      draftExecutor: vi.fn<StepRunnerDeps["draftExecutor"]>(async () => draftReply([])),
+      renderDeps: renderStub(),
+      message: "Bệnh viện tỉnh cần phần mềm quản lý khám ngoại trú"
+    })
+    await waitCount(events, "answer_needed", 1)
+    submitAnswer(PROJECT, "B-0.1", SESSION, { answers: [], message: "[Đính kèm tài liệu]" })
+    await waitCount(events, "answer_needed", 2)
+
+    const chat = elicitExecutor.mock.calls.map(([input]) => (input as { promptVariables: Record<string, unknown> }).promptVariables).find((v) => v.chat_turn)
+    expect(chat?.documents).toContain("bệnh nhân lấy số từ 5 giờ sáng")
+    const sinceCall = vi.mocked(buildDocumentContext).mock.calls.find((c) => c[6]?.since)
+    expect(sinceCall?.[2]).toBe("B-0.1")
+    expect(sinceCall![6]!.since!.getTime()).toBeGreaterThanOrEqual(before)
+
+    const again = events.filter((e) => e.type === "answer_needed")[1] as Extract<StepEvent, { type: "answer_needed" }>
+    submitAnswer(PROJECT, "B-0.1", SESSION, { answers: again.questions.map((q) => ({ question_id: q.id, answer: "ok" })) })
+    await run
+    vi.mocked(buildDocumentContext).mockImplementation(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false }))
+  })
+
   it("AI viết lại câu còn chờ theo tin nhắn ⇒ hỏi bản mới, không hỏi lại nguyên văn", async () => {
     seedSpine()
     seedSession(true)
@@ -2300,6 +2345,35 @@ describe("FLF-260: runPhase — ngôn ngữ đi qua phỏng vấn đầu giai đ
     // Fast path đóng phỏng vấn: lời AI chỉ có câu hỏi ⇒ bỏ câu hỏi, còn lại lời nhận tin tiếng Anh
     const said = events.filter((e) => e.type === "elicit" && e.step_id === "B-1").map((e) => (e as { delta: string }).delta)
     expect(said).toEqual(["Mình hỏi nhanh một câu.", NO_QUESTION_ACK_EN])
+  })
+
+  it("FLF-398: đính kèm tệp khi trả lời lượt hỏi gộp B-1 ⇒ lượt chat nhận tài liệu tải sau lúc hỏi", async () => {
+    seedB1()
+    vi.mocked(buildDocumentContext).mockClear()
+    vi.mocked(buildDocumentContext).mockImplementation(async (_p, _a, _s, _c, _m, _o, filter) =>
+      filter?.since
+        ? { contextText: "[D3-P01] Bệnh nhân đặt lịch qua Zalo của phòng khám.", tokenCount: 15, documentsUsed: 1, usedSummary: false }
+        : { contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false }
+    )
+    const question = [{ question: "Bệnh nhân đặt lịch thế nào?", options: [], topic_key: "current_booking" }] as never as ElicitOutput["questions"]
+    const t = tracked({ reply: "Mình hỏi nhanh một câu.", questions: question }, "Đã đọc tài liệu.")
+    const seen: Record<string, unknown>[] = []
+    const elicitExecutor = async (input: AiActionInput) => {
+      seen.push(input.promptVariables as Record<string, unknown>)
+      return (t.elicitExecutor as unknown as (i: AiActionInput) => Promise<AiActionResult<ElicitOutput>>)(input)
+    }
+    const { events, emit } = collectEvents()
+    const before = Date.now()
+    const run = runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: elicitExecutor as never, draftExecutor: t.draftExecutor })
+    await waitForCount(events, "answer_needed", 1)
+    expect(submitAnswer(PROJECT, "B-1", SESSION, { answers: [], message: "[Đính kèm tài liệu]" })).toBe(true)
+    await run
+
+    const chat = seen.find((v) => v.chat_turn)
+    expect(chat?.documents).toContain("Bệnh nhân đặt lịch qua Zalo")
+    const since = vi.mocked(buildDocumentContext).mock.calls.map((c) => c[6]?.since).find(Boolean)
+    expect(since!.getTime()).toBeGreaterThanOrEqual(before)
+    vi.mocked(buildDocumentContext).mockImplementation(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false }))
   })
 
   it("/answer chạy tiếp lượt hỏi gộp đã tách kèm tin tiếng Anh ⇒ lượt chat nhận en", async () => {
