@@ -42,6 +42,19 @@ describe("deleteOps / addCustomOps", () => {
     expect(deleteOps({ ...doc, decisions: [{ id: "e:custom:CS01", choice: "keep_custom" }] }, old, spine())).toEqual([])
   })
 
+  it("xoá heading nhóm có phần tử đi theo: không xoá phần nối của phần tử (mục rỗng \"—\" sau đổi ngược — test tay 11/11)", () => {
+    const tree: OldHeading[] = [
+      { key: "custom:CS10", heading_text: "II. Software Requirement Specification", level: 1, section_id: "custom:CS10" },
+      { key: "custom:CS11", heading_text: "", level: 1, section_id: "custom:CS11" },
+      { key: "feature:F1", heading_text: "3.2 Authentication", level: 2, section_id: "feature:F1" },
+      { key: "function:FN1", heading_text: "3.2.1 Log in", level: 3, section_id: "function:FN1" },
+      { key: "custom:CS12", heading_text: "", level: 3, section_id: "custom:CS12" }
+    ]
+    const state = { custom_sections: ["CS10", "CS11", "CS12"].map((id) => ({ id, heading: "", level: 1, blocks: [], source: "manual" as const })) } as unknown as Spine
+    const doc = { groups: groups([extraItem("custom:CS10", ["custom:CS11", "feature:F1", "function:FN1", "custom:CS12"])]), decisions: [{ id: "e:custom:CS10", choice: "delete" }] }
+    expect(deleteOps(doc, tree, state).map((o) => o.path)).toEqual(["custom_sections[id=CS10]", "custom_sections[id=CS11]"])
+  })
+
   it("cấp id CS kế tiếp và dựng op thêm mục riêng trống", () => {
     const next = customIdAllocator(spine())
     expect([next(), next()]).toEqual(["CS04", "CS05"])

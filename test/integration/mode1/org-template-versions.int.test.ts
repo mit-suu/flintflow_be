@@ -185,6 +185,8 @@ describe("FLF-395 — version của mẫu tổ chức", () => {
     const v1 = (await OrgTemplateVersion.findOne({ template_id: legacy._id, version: 1 }).lean())!
     expect(v1.headings).toEqual([{ heading_text: "1 Introduction", section_id: "group:1" }])
     expect(v1.table_map.length).toBeGreaterThan(0)
+    // Bản 1 giữ ngày tạo của họ cũ, không phải lúc tách
+    expect(v1.createdAt.toISOString()).toBe(legacy.createdAt.toISOString())
     const family = (await OrgTemplate.findById(legacy._id).lean())!
     expect(family.latest_version).toBe(1)
     // Field cũ giữ để bản deploy cũ còn đọc được; version_seq đánh dấu đã tách

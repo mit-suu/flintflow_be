@@ -382,6 +382,8 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
     } else if (id.startsWith(CUSTOM_PREFIX)) {
       const custom = customById.get(id.slice(CUSTOM_PREFIX.length))
       if (!custom && !template.fixedTemplate) continue
+      // Phần nối (heading rỗng) mà mục riêng đã không còn: không có gì để in — không dựng mục trống tên "—"
+      if (!custom && !entry.heading_text.trim()) continue
       if (!custom) {
         placed.push({ section_id: id, kind: "custom", title, level, fromLayout: true, typed, label })
         used.add(id)

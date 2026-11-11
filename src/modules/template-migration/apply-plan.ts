@@ -46,11 +46,21 @@ export const choiceOf = (doc: DecisionView, id: string): string | null => doc.de
  */
 export const deleteOps = (doc: DecisionView, oldHeadings: readonly OldHeading[], spine: Pick<Spine, "custom_sections">): Op[] => {
   const byKey = new Map(oldHeadings.map((h) => [h.key, h]))
+  const indexOf = new Map(oldHeadings.map((h, i) => [h.key, i]))
   const existing = new Set(spine.custom_sections.map((c) => c.id))
   const ids = new Set<string>()
   for (const e of doc.groups.extra) {
     if (choiceOf(doc, e.id) !== "delete") continue
-    for (const key of [e.old_key, ...e.follower_keys]) {
+    // Chỉ phần nối liền ngay sau chính mục này (heading rỗng tới heading có chữ kế tiếp). Phần nối của phần tử đi theo (chức năng
+    // 3.2.1 dưới heading nhóm bị xoá) là thân của phần tử đó, không thuộc mục bị xoá — xoá nó để lại mục rỗng "—" (test tay 11/11).
+    const followers = new Set(e.follower_keys)
+    const keys = [e.old_key]
+    for (let i = (indexOf.get(e.old_key) ?? oldHeadings.length) + 1; i < oldHeadings.length; i++) {
+      const h = oldHeadings[i]
+      if (h.heading_text.trim() || !followers.has(h.key)) break
+      keys.push(h.key)
+    }
+    for (const key of keys) {
       const section = byKey.get(key)?.section_id
       if (section?.startsWith("custom:")) ids.add(section.slice("custom:".length))
     }

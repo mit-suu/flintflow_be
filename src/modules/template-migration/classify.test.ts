@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { classify, columnIdentity, decidableItems, sameColumns, settleDecisions, tableShapesBySection, type TableShape, type TableShapes } from "./classify.js"
+import { classify, columnIdentity, decidableItems, missingAfterMoves, sameColumns, settleDecisions, tableShapesBySection, type TableShape, type TableShapes } from "./classify.js"
 import { pairSections, type NewHeading, type OldHeading } from "./pair-sections.js"
 import type { EditedSection } from "./edited-since.js"
 
@@ -118,6 +118,42 @@ describe("classify — heading nhóm", () => {
   it("heading nhóm có phần nối / phần tử đi theo ⇒ thành mục thừa kèm phần đi theo", () => {
     const { groups } = run([old("group:3", "3 Functional Requirements", 1), old("feature:F01", "3.2 Auth", 2)], [neu(0, "1 Introduction", "fixed:1")])
     expect(groups.extra).toMatchObject([{ old_key: "group:3", follower_keys: ["feature:F01"] }])
+  })
+})
+
+describe("classify — heading nhóm của mẫu đích và mục nhận nội dung chuyển vào (test tay 11/11)", () => {
+  const oldDoc = [old("fixed:1", "1. Product Overview", 1), old("fixed:4.2.4", "4.2.4 Domain-Specific Attributes", 2), old("custom:c9", "5.9 Team Notes", 2)]
+  const newDoc = [
+    neu(0, "II. Software Requirement Specification", "unmapped", { level: 1 }),
+    neu(1, "1. Product Overview", "fixed:1", { level: 2 }),
+    neu(2, "4.2.4 …", "unmapped", { level: 4 }),
+    neu(3, "Appendix", "unmapped", { level: 2 })
+  ]
+
+  it("heading nhóm (heading sau sâu hơn) không cần viết và không là đích chuyển vào; heading lá vẫn cần viết", () => {
+    const { groups } = run(oldDoc, newDoc)
+    expect(groups.missing.map((m) => [m.heading_text, m.needs_content])).toEqual([
+      ["II. Software Requirement Specification", false],
+      ["4.2.4 …", true],
+      ["Appendix", true]
+    ])
+    expect(groups.extra.find((e) => e.old_key === "custom:c9")?.choices).not.toContain("move_to:n0")
+    // Mục khung chuyển chỗ in không gọi AI ⇒ không có lựa chọn AI (không nhãn "dùng AI", không tính credit)
+    expect(groups.extra.find((e) => e.old_key === "fixed:4.2.4")?.ai_choices).toEqual([])
+  })
+
+  it("không biết cấp heading ⇒ giữ như cũ (cần viết)", () => {
+    const { groups } = run(oldDoc, newDoc.map(({ level: _level, ...n }) => n))
+    expect(groups.missing.find((m) => m.new_key === "n0")?.needs_content).toBe(true)
+  })
+
+  it("missingAfterMoves: mục là đích move_to nhận nội dung ⇒ không cần viết, ghi mục chuyển vào; quyết định khác không đổi", () => {
+    const { groups } = run(oldDoc, newDoc)
+    const after = missingAfterMoves(groups, [{ id: "e:custom:c9", choice: "move_to:n2" }, { id: "e:x", choice: "keep_custom" }])
+    expect(after.missing.find((m) => m.new_key === "n2")).toMatchObject({ needs_content: false, moved_in: ["e:custom:c9"] })
+    expect(after.missing.find((m) => m.new_key === "n3")).toMatchObject({ needs_content: true })
+    expect(after.missing.find((m) => m.new_key === "n3")?.moved_in).toBeUndefined()
+    expect(missingAfterMoves(groups, [])).toBe(groups)
   })
 })
 

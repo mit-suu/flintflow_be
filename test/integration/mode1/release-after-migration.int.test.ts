@@ -86,3 +86,27 @@ describe("mục để trống sau đổi mẫu chặn phát hành", () => {
     expect(cleared.flags.some((f) => f.rule_id === "template_section_migration_missing" && f.resolved_at === null)).toBe(false)
   })
 })
+
+describe("heading nhóm của mẫu đích không chặn phát hành (test tay 11/11)", () => {
+  it("profile ghi heading nhóm vào migration_missing_sections (bản cũ) ⇒ lọc khỏi cờ đỏ, mục lá vẫn chặn", async () => {
+    const { projectId } = await importedProject()
+    await addCustomSection(projectId, null)
+    const WRAPPER = "custom:CSWRAP"
+    await Project.updateOne({ _id: projectId }, { $set: { template_intent: "fixed" } })
+    await TemplateProfile.updateOne({ projectId }, { $set: {
+      migrated_base_at: new Date(),
+      migration_missing_sections: [WRAPPER, MISSING],
+      layout: [
+        { order: 0, heading_text: "II. Software Requirement Specification", level: 1, section_id: WRAPPER },
+        { order: 1, heading_text: "Phạm vi", level: 2, section_id: MISSING }
+      ]
+    } })
+
+    const profile = (await ruleProfileOf(projectId))!
+    expect([...(profile.templateMissing ?? [])]).toEqual([MISSING])
+    const recomputed = await flagsService.recompute(projectId, { by: "test", ruleProfile: await mode1RuleProfileFor(projectId), atBaseline: true })
+    const red = recomputed.flags.filter((f) => f.resolved_at === null && f.rule_id === "template_section_migration_missing").map((f) => f.section_id)
+    expect(red).toEqual([MISSING])
+  })
+})
+

@@ -4,7 +4,7 @@ import { DocxPackage, MAIN_PART } from "../docx-ooxml/index.js"
 import { makeDocx, p } from "../docx-ooxml/testing/make-docx.js"
 import { NS, wAll, wKids } from "../docx-ooxml/xml.js"
 import { makePng } from "../render/zip.test-helper.js"
-import { createTransplanter, enforceRelsAllowList, pruneUnreferencedParts, transplantSections, validateDocxStructure, type TransplantRequest } from "./ooxml-transplant.js"
+import { createTransplanter, enforceRelsAllowList, pruneUnreferencedParts, requestFieldUpdate, transplantSections, validateDocxStructure, type TransplantRequest } from "./ooxml-transplant.js"
 
 const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 const CT = "application/vnd.openxmlformats-officedocument.wordprocessingml"
@@ -562,3 +562,61 @@ describe("createTransplanter", () => {
     expect(await validateDocxStructure(await DocxPackage.load(buf))).toEqual([])
   })
 })
+
+describe("requestFieldUpdate — mục lục chép theo file mẫu", () => {
+  const fld = (type: string) => `<w:r><w:fldChar w:fldCharType="${type}"/></w:r>`
+  const instr = (text: string) => `<w:r><w:instrText xml:space="preserve">${text}</w:instrText></w:r>`
+  // TOC phức nhiều đoạn, mỗi dòng có PAGEREF lồng; thêm một field PAGE không phải mục lục và một fldSimple TOC
+  const body =
+    `<w:p>${fld("begin")}${instr(' TOC \o "1-3" \h ')}${fld("separate")}<w:r><w:t>Status Report</w:t></w:r>${fld("begin")}${instr(" PAGEREF _Toc1 \h ")}${fld("separate")}<w:r><w:t>3</w:t></w:r>${fld("end")}</w:p>` +
+    `<w:p><w:r><w:t>&lt;&lt;Feature Name 1&gt;&gt;</w:t></w:r>${fld("begin")}${instr(" PAGEREF _Toc2 \h ")}${fld("separate")}<w:r><w:t>Error! Bookmark not defined.</w:t></w:r>${fld("end")}</w:p>` +
+    `<w:p>${fld("end")}</w:p>` +
+    `<w:p>${fld("begin")}${instr(" PAGE ")}${fld("separate")}<w:r><w:t>1</w:t></w:r>${fld("end")}</w:p>` +
+    `<w:p><w:fldSimple w:instr=" TOC \o &quot;1-2&quot; "><w:r><w:t>cũ</w:t></w:r></w:fldSimple></w:p>`
+  const settingsPart = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings xmlns:w="${NS.w}"><w:zoom w:percent="100"/><w:defaultTabStop w:val="720"/><w:footnotePr><w:footnote w:id="-1"/></w:footnotePr><w:compat/></w:settings>`
+
+  it("đánh dấu field TOC dirty (không đụng PAGEREF / PAGE) và bật updateFields đúng vị trí schema", async () => {
+    const pkg = await DocxPackage.load(
+      await makeDocx({ body, extraParts: { "word/settings.xml": settingsPart }, extraDocRels: rel("rId9", "settings", "settings.xml"), extraContentTypes: `<Override PartName="/word/settings.xml" ContentType="${CT}.settings+xml"/>` })
+    )
+    expect(await requestFieldUpdate(pkg)).toEqual({ tocFields: 2 })
+    const out = await DocxPackage.load(await pkg.toBuffer())
+    const doc = (await out.xml(MAIN_PART))!
+    const begins = wAll(doc, "fldChar").filter((f) => f.getAttributeNS(NS.w, "fldCharType") === "begin")
+    expect(begins.map((b) => b.getAttributeNS(NS.w, "dirty"))).toEqual(["true", "", "", ""])
+    expect(wAll(doc, "fldSimple")[0].getAttributeNS(NS.w, "dirty")).toBe("true")
+    const settings = (await out.xml("word/settings.xml"))!
+    expect(wKids(settings.documentElement).map((k) => k.localName)).toEqual(["zoom", "defaultTabStop", "updateFields", "footnotePr", "compat"])
+    // Gọi lại không nhân đôi updateFields
+    await requestFieldUpdate(out)
+    expect(wKids((await out.xml("word/settings.xml"))!.documentElement).filter((k) => k.localName === "updateFields")).toHaveLength(1)
+  })
+
+  it("không có settings.xml ⇒ vẫn đánh dấu field, không lỗi", async () => {
+    const pkg = await DocxPackage.load(await makeDocx({ body }))
+    expect(await requestFieldUpdate(pkg)).toEqual({ tocFields: 2 })
+    expect(await pkg.xml("word/settings.xml")).toBeNull()
+  })
+})
+
+describe("transplantSections — headingShift (mẫu đích lồng sâu hơn file cũ, test tay 11/11)", () => {
+  it("heading trong khối dịch cấp theo headingShift, kẹp 1–9; đoạn thường không đổi", async () => {
+    const body = `<w:p><w:pPr><w:pStyle w:val="u1"/></w:pPr><w:r><w:t>3.2 Authentication</w:t></w:r></w:p>` + p("Screens: SCR-01") + `<w:p><w:pPr><w:pStyle w:val="u2"/></w:pPr><w:r><w:t>3.2.1 Log in</w:t></w:r></w:p>`
+    const { source, target, heading, elements } = await setup(body)
+    const [res] = await transplantSections(source, target, [{ key: "s", elements, after: heading, headingShift: 1 }])
+    expect(res.ok).toBe(true)
+    const styles = res.inserted.map((n) => n.getElementsByTagNameNS(NS.w, "pStyle")[0]?.getAttributeNS(NS.w, "val") ?? null)
+    // h1 → Heading2, đoạn thường → style thân của đích (không phải heading), h2 → h3 (đích không có Heading3 ⇒ không phải Heading1/2)
+    expect(styles[0]).toBe("Heading2")
+    expect(styles[1]).not.toMatch(/^Heading/)
+    expect(styles[2]).not.toBe("Heading1")
+    expect(styles[2]).not.toBe("Heading2")
+  })
+
+  it("không truyền headingShift ⇒ giữ cấp như trước", async () => {
+    const { source, target, heading, elements } = await setup(`<w:p><w:pPr><w:pStyle w:val="u1"/></w:pPr><w:r><w:t>H</w:t></w:r></w:p>`)
+    const [res] = await transplantSections(source, target, [{ key: "s", elements, after: heading }])
+    expect(res.inserted[0].getElementsByTagNameNS(NS.w, "pStyle")[0]?.getAttributeNS(NS.w, "val")).toBe("Heading1")
+  })
+})
+

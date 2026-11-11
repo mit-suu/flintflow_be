@@ -43,6 +43,17 @@ export interface TransplantRequest {
   elements: readonly Element[]
   /** Nút con của `w:body` trong gói đích — khối được chèn ngay sau nút này, đúng thứ tự `elements`. */
   after: Element
+  /**
+   * Cộng vào cấp heading của các đoạn heading được chép (mục con / phần tử trong khối, heading gốc của mục giữ lại) — để khớp cấp của
+   * mẫu đích khi mẫu đích lồng sâu / nông hơn file cũ (FPTU: "3." là Heading 2, file cũ Heading 1). Mặc định 0; kết quả kẹp 1–9.
+   */
+  headingShift?: number
+}
+
+/** Dịch vai trò heading `h<n>` thêm `shift` cấp (kẹp 1–9); vai trò khác giữ nguyên. */
+const shiftHeadingRole = (role: ParaRole, shift: number): ParaRole => {
+  const m = /^h(\d)$/.exec(role)
+  return m && shift ? (`h${Math.min(9, Math.max(1, Number(m[1]) + shift))}` as ParaRole) : role
 }
 
 export interface TransplantResult {
@@ -469,7 +480,10 @@ class SectionBuilder {
   private readonly seen = new Set<Element>()
   private readonly renames = new Map<string, string>()
 
-  constructor(private readonly env: Env) {}
+  constructor(
+    private readonly env: Env,
+    private readonly headingShift = 0
+  ) {}
 
   private get doc(): Document {
     return this.env.targetDoc
@@ -629,7 +643,7 @@ class SectionBuilder {
     const pPr = wKid(p, "pPr")
     const chain = styleChain(this.env.srcStyles, pPr ? wAttr(wKid(pPr, "pStyle"), "val") : null)
     const num = this.effectiveNum(pPr, chain)
-    const role = sourceRole(pPr, chain, num !== null)
+    const role = shiftHeadingRole(sourceRole(pPr, chain, num !== null), this.headingShift)
     const group = role === "normal" || role === "footnoteText" ? PPR_KEEP_BODY : role === "list" ? PPR_KEEP_LIST : role === "caption" ? PPR_KEEP_CAPTION : new Set<string>()
 
     const fresh = wEl(this.doc, "pPr")
@@ -918,6 +932,49 @@ const declareFootnoteSeparators = async (pkg: DocxPackage): Promise<void> => {
   doc.documentElement.insertBefore(pr, before ?? null)
 }
 
+/** Con của `w:settings` đứng sau `w:updateFields` theo thứ tự schema. */
+const AFTER_UPDATE_FIELDS = ["hdrShapeDefaults", "footnotePr", ...AFTER_FOOTNOTE_PR]
+
+/**
+ * File nền dựng từ file mẫu mang theo mục lục (và field khác) đã tính sẵn của **file mẫu** — mục lục in ra là mục lục cũ của mẫu
+ * ("<<Feature Name 1>>", "Error! Bookmark not defined."). Đánh dấu field TOC `w:dirty` và bật `w:updateFields` để Word dựng lại khi
+ * mở (cùng cách bản xuất thường của `docx-writer`). Không có settings.xml ⇒ chỉ đánh dấu field.
+ */
+export const requestFieldUpdate = async (pkg: DocxPackage): Promise<{ tocFields: number }> => {
+  let tocFields = 0
+  const doc = await pkg.xml(MAIN_PART)
+  if (doc) {
+    for (const simple of wAll(doc, "fldSimple")) {
+      if (!/^\s*TOC\b/.test(wAttr(simple, "instr") ?? "")) continue
+      simple.setAttributeNS(NS.w, "w:dirty", "true")
+      tocFields++
+    }
+    // Field phức: begin … instrText … separate … end, lồng nhau được (PAGEREF / HYPERLINK trong từng dòng mục lục)
+    const stack: { begin: Element; instr: string }[] = []
+    for (const run of wAll(doc, "r")) {
+      for (const el of wKids(run)) {
+        if (el.localName === "fldChar") {
+          const type = wAttr(el, "fldCharType")
+          if (type === "begin") stack.push({ begin: el, instr: "" })
+          else if (type === "end") {
+            const field = stack.pop()
+            if (field && /^\s*TOC\b/.test(field.instr)) {
+              field.begin.setAttributeNS(NS.w, "w:dirty", "true")
+              tocFields++
+            }
+          }
+        } else if (el.localName === "instrText" && stack.length) stack[stack.length - 1].instr += el.textContent ?? ""
+      }
+    }
+  }
+  const settings = await pkg.xml("word/settings.xml")
+  if (settings && !wKid(settings.documentElement, "updateFields")) {
+    const before = wKids(settings.documentElement).find((k) => AFTER_UPDATE_FIELDS.includes(k.localName))
+    settings.documentElement.insertBefore(wEl(settings, "updateFields", { val: "true" }), before ?? null)
+  }
+  return { tocFields }
+}
+
 /** Khai báo namespace của gốc nguồn mà gốc đích chưa có (nội dung chép sang có thể dùng w14 / wp14…); prefix `mc:Ignorable` đi kèm. */
 const mergeNamespaces = (srcRoot: Element, tgtRoot: Element): void => {
   const ignorable = new Set((tgtRoot.getAttribute("mc:Ignorable") ?? "").split(/\s+/).filter(Boolean))
@@ -998,7 +1055,7 @@ export const createTransplanter = async (source: DocxPackage, target: DocxPackag
       if (!req.after.parentNode || req.elements.some((e) => e.ownerDocument !== env.srcDoc)) {
         return fail("invalid_input", "`after` không nằm trong đích hoặc `elements` không thuộc document.xml nguồn")
       }
-      const builder = new SectionBuilder(env)
+      const builder = new SectionBuilder(env, req.headingShift ?? 0)
       try {
         const nodes = await builder.build(req.elements)
         await commit(env, builder, nodes, req.after)

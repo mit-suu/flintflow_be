@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import mongoose from "mongoose"
 
-const store = vi.hoisted(() => ({ family: null as null | { _id: unknown; orgId: unknown; name: string; latest_version: number }, lastFilter: null as unknown }))
+const store = vi.hoisted(() => ({
+  family: null as null | { _id: unknown; orgId: unknown; name: string; latest_version: number; skeleton_of?: unknown; project_id?: unknown },
+  lastFilter: null as unknown
+}))
 vi.mock("./org-library.model.js", () => ({
   OrgTemplate: {
     findOne: (filter: { _id: unknown; orgId: unknown }) => {
@@ -13,7 +16,7 @@ vi.mock("./org-library.model.js", () => ({
   }
 }))
 
-import { templateUpdateOf } from "./template-update.js"
+import { templateCurrentOf, templateUpdateOf } from "./template-update.js"
 
 const orgId = new mongoose.Types.ObjectId()
 const templateId = new mongoose.Types.ObjectId()
@@ -46,5 +49,22 @@ describe("templateUpdateOf", () => {
     expect(await templateUpdateOf(project(1, new mongoose.Types.ObjectId()), "lead")).toBeNull()
     store.family = null
     expect(await templateUpdateOf(project(1), "lead")).toBeNull()
+  })
+})
+
+describe("templateCurrentOf", () => {
+  it("trả tên + bản dự án đang theo, phân loại mẫu thư viện / khung tự lưu / bản riêng của dự án", async () => {
+    expect(await templateCurrentOf(project(1))).toEqual({ template_id: String(templateId), name: "Mẫu ngân hàng", version: 1, kind: "org" })
+    store.family = { ...store.family!, skeleton_of: new mongoose.Types.ObjectId() }
+    expect((await templateCurrentOf(project(2)))?.kind).toBe("skeleton")
+    store.family = { ...store.family!, skeleton_of: null, project_id: new mongoose.Types.ObjectId() }
+    expect((await templateCurrentOf(project(2)))?.kind).toBe("project")
+  })
+
+  it("chưa gắn mẫu / họ mẫu thuộc org khác hoặc đã xoá ⇒ null", async () => {
+    expect(await templateCurrentOf(project(null))).toBeNull()
+    expect(await templateCurrentOf(project(1, new mongoose.Types.ObjectId()))).toBeNull()
+    store.family = null
+    expect(await templateCurrentOf(project(1))).toBeNull()
   })
 })

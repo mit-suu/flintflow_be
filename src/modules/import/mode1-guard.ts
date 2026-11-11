@@ -62,7 +62,8 @@ export const ruleProfileOf = async (projectId: string): Promise<RuleProfile | un
   const templateLayout = withSlotParents(layout.map((l) => l.section_id))
   const templateWrappers = templateWrapperIds(layout)
   // Sau đổi mẫu: mục của mẫu đích để trống chờ BA viết (cờ đỏ chặn phát hành) + mục giữ thành mục riêng (không báo "mẫu không có mục này")
-  const missing = new Set(profile?.migration_missing_sections ?? [])
+  // Heading nhóm (chỉ chứa mục con) không bao giờ là mục phải viết — lọc cả profile đã ghi trước khi sửa phân nhóm (test tay 11/11)
+  const missing = new Set((profile?.migration_missing_sections ?? []).filter((id) => !templateWrappers.has(id)))
   const afterMigration = !!profile?.migrated_base_at
   const anchor = afterMigration ? await anchorOf(profile) : null
   const migrationExtras: Partial<RuleProfile> = {

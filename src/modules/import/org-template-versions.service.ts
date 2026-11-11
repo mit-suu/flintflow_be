@@ -121,7 +121,8 @@ export const materializeLegacyVersion = async (t: IOrgTemplate): Promise<IOrgTem
   const analyzed = await analyzeLegacyFile(t)
   let created: IOrgTemplateVersion
   try {
-    created = await OrgTemplateVersion.create({
+    // Bản 1 là mẫu đã có từ trước ⇒ giữ ngày tạo của họ cũ (thư viện hiện ngày theo `createdAt`), không lấy lúc tách
+    const [doc] = await OrgTemplateVersion.create([{
       template_id: t._id,
       orgId: t.orgId,
       version: 1,
@@ -135,8 +136,11 @@ export const materializeLegacyVersion = async (t: IOrgTemplate): Promise<IOrgTem
       headings: t.headings,
       table_map: analyzed.table_map,
       created_by: t.created_by,
-      published_at: t.createdAt
-    })
+      published_at: t.createdAt,
+      createdAt: t.createdAt,
+      updatedAt: t.createdAt
+    }], { timestamps: false })
+    created = doc
   } catch (err) {
     // Hai lượt cùng migrate một họ ⇒ lượt sau đọc bản đã tạo
     if (!isDuplicateKey(err)) throw err

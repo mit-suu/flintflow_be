@@ -14,7 +14,7 @@ import {
   emptyGroups,
   forwardPlan
 } from "./base-file-fixtures.test-helper.js"
-import { buildBaseFile, type BuildBaseFileInput, type BuildBaseFileResult } from "./build-base-file.js"
+import { buildBaseFile, planLayout, type BuildBaseFileInput, type BuildBaseFileResult } from "./build-base-file.js"
 import { validateDocxStructure } from "./ooxml-transplant.js"
 
 const text = async (buf: Buffer, name: string) => (await (await JSZip.loadAsync(buf)).file(name)!.async("string")) as string
@@ -410,3 +410,102 @@ describe("buildBaseFile — lỗi cấu trúc, dọn part, giới hạn gói", (
     await expect(buildBaseFile(await forwardInput({ target }))).rejects.toMatchObject({ statusCode: 422, code: "TEMPLATE_MIGRATION_FILE_TOO_LARGE" })
   })
 })
+
+describe("planLayout — mục khung chuyển vào heading mẫu chưa có cặp (test tay 11/11)", () => {
+  const pair = (old_key: string, new_key: string | null) => ({ old_key, new_key, by: new_key ? ("section_id" as const) : null, score: 1, needs_review: false })
+  const base = {
+    targetHeadings: [
+      { key: "n0", heading_text: "4.2.3 Performance", section_id: "fixed:4.2.3", level: 4 },
+      { key: "n1", heading_text: "4.2.4 …", section_id: "unmapped", level: 4 }
+    ],
+    oldHeadings: [
+      { key: "fixed:4.2.3", heading_text: "4.2.3 Performance", level: 3, section_id: "fixed:4.2.3" },
+      { key: "fixed:4.2.4", heading_text: "4.2.4 Domain-Specific Attributes", level: 3, section_id: "fixed:4.2.4" },
+      { key: "custom:c1", heading_text: "Team notes", level: 3, section_id: "custom:c1" }
+    ],
+    pairing: { pairs: [pair("fixed:4.2.3", "n0"), pair("fixed:4.2.4", null), pair("custom:c1", null)], followers: [], ignored_new: [], split: [] },
+    groups: emptyGroups()
+  }
+
+  it("mục khung ⇒ nằm dưới heading đích, mang id mục cũ; không tạo mục riêng trống, không có heading anh em", () => {
+    let n = 0
+    const layout = planLayout({ ...base, decisions: [{ id: "e:fixed:4.2.4", choice: "move_to:n1" }, { id: "e:custom:c1", choice: "keep_custom" }] }, () => `CS${++n}`)
+    expect(layout.newCustoms).toEqual([])
+    expect(layout.entries.map((e) => [e.heading_text, e.section_id, e.kind, e.missing])).toEqual([
+      ["4.2.3 Performance", "fixed:4.2.3", "target", false],
+      ["4.2.4 …", "fixed:4.2.4", "target", false],
+      ["Team notes", "custom:c1", "custom", false]
+    ])
+  })
+
+  it("mục chữ tự do chuyển vào vẫn giữ heading gốc làm ranh giới (cách cũ)", () => {
+    let n = 0
+    const layout = planLayout({ ...base, decisions: [{ id: "e:fixed:4.2.4", choice: "keep_custom" }, { id: "e:custom:c1", choice: "move_to:n1" }] }, () => `CS${++n}`)
+    expect(layout.entries.find((e) => e.kind === "moved")).toMatchObject({ heading_text: "Team notes", section_id: "custom:c1", new_key: "n1" })
+  })
+})
+
+describe("planLayout — cấp phần tử / mục riêng theo cấp mẫu đích (test tay 11/11)", () => {
+  it("mẫu đích sâu hơn một cấp ⇒ tính năng, chức năng, mục riêng giữ lại cùng dịch một cấp", () => {
+    const pair = (old_key: string, new_key: string | null) => ({ old_key, new_key, by: new_key ? ("section_id" as const) : null, score: 1, needs_review: false })
+    const layout = planLayout(
+      {
+        targetHeadings: [
+          { key: "n0", heading_text: "3.1.5 Entity Relationship Diagram", section_id: "fixed:3.1.5", level: 4 },
+          { key: "n1", heading_text: "5.4 Other Requirements", section_id: "fixed:5.4", level: 3 }
+        ],
+        oldHeadings: [
+          { key: "fixed:3.1.5", heading_text: "3.1.5 Entity Relationship Diagram", level: 3, section_id: "fixed:3.1.5" },
+          { key: "feature:F1", heading_text: "3.2 Authentication", level: 2, section_id: "feature:F1" },
+          { key: "function:FN1", heading_text: "3.2.1 Log in", level: 3, section_id: "function:FN1" },
+          { key: "fixed:5.4", heading_text: "5.4 Other Requirements", level: 2, section_id: "fixed:5.4" },
+          { key: "custom:CS1", heading_text: "5.5 Glossary", level: 2, section_id: "custom:CS1" }
+        ],
+        pairing: {
+          pairs: [pair("fixed:3.1.5", "n0"), pair("fixed:5.4", "n1"), pair("custom:CS1", null)],
+          followers: [
+            { old_key: "feature:F1", parent_old_key: "fixed:3.1.5", kind: "element" },
+            { old_key: "function:FN1", parent_old_key: "fixed:3.1.5", kind: "element" }
+          ],
+          ignored_new: [],
+          split: []
+        },
+        groups: emptyGroups(),
+        decisions: [{ id: "e:custom:CS1", choice: "keep_custom" }]
+      } as Parameters<typeof planLayout>[0],
+      () => "CSX"
+    )
+    expect(layout.entries.map((e) => [e.heading_text, e.level])).toEqual([
+      ["3.1.5 Entity Relationship Diagram", 4],
+      ["3.2 Authentication", 3],
+      ["3.2.1 Log in", 4],
+      ["5.4 Other Requirements", 3],
+      ["5.5 Glossary", 3]
+    ])
+  })
+})
+
+describe("buildBaseFile — mục riêng đứng trước mọi mục có cặp (test tay lượt 3, 11/11)", () => {
+  it("thứ tự heading của file dựng ra khớp planLayout: mục riêng đầu file cũ ở cuối, mục riêng sau mục có cặp cuối cùng đứng trước nó", async () => {
+    const pair = (old_key: string, new_key: string | null) => ({ old_key, new_key, by: new_key ? ("section_id" as const) : null, score: 1, needs_review: false })
+    const extra = (key: string, text: string) => ({ id: `e:${key}`, old_key: key, heading_text: text, section_id: key, follower_keys: [], choices: ["keep_custom", "drop_from_print"], ai_choices: [], decision_required: true as const })
+    const base = forwardPlan()
+    const input = await forwardInput({
+      pairing: { ...base.pairing, pairs: [pair("fixed:1.1", null), pair("fixed:2.1", "n1"), pair("custom:x", null), pair("fixed:I", "n4"), pair("fixed:4.1", null)] },
+      groups: { ...base.groups, matched: [base.groups.matched[1]], extra: [extra("fixed:1.1", "1 Introduction"), extra("custom:x", "3 Extra Notes"), extra("fixed:4.1", "4 Edited")] },
+      decisions: [
+        { id: "e:fixed:1.1", choice: "keep_custom" },
+        { id: "e:custom:x", choice: "keep_custom" },
+        { id: "e:fixed:4.1", choice: "keep_custom" },
+        { id: "c:record_of_changes:fixed:I", choice: "map_by_header" }
+      ]
+    })
+    let n = 0
+    const layout = planLayout(input, () => `CS${++n}`)
+    const result = await buildBaseFile(input)
+    const fileHeadings = (await regions(result.buffer)).map((r) => r.heading)
+    expect(layout.entries.map((e) => e.heading_text)).toEqual(["1. Introduction", "2. Overview", "3 Extra Notes", "3. Edited", "4. Brand New", "Record of Changes", "4 Edited", "1 Introduction"])
+    expect(fileHeadings).toEqual(layout.entries.map((e) => e.heading_text))
+  })
+})
+

@@ -767,3 +767,37 @@ describe("FLF-364 — kiểu chữ hướng dẫn (tín hiệu phụ)", () => {
     ])
   })
 })
+
+describe("readBlocks — trang bìa / tiêu đề mục lục / mục lục dạng danh sách không phải heading (test tay FLF-395)", () => {
+  const body = "This paragraph is ordinary body text written in a full sentence for the reader."
+  const sized = (text: string, sz: number) => `<w:p><w:r><w:rPr><w:sz w:val="${sz}"/></w:rPr><w:t xml:space="preserve">${text}</w:t></w:r></w:p>`
+  const headings = (blocks: Awaited<ReturnType<typeof readBlocks>>) => blocks.filter((b) => b.kind === "heading").map((b) => b.text)
+
+  it("đoạn style Title / Subtitle (kể cả style mang outlineLvl như file Google Docs) không là heading", async () => {
+    const styles =
+      `<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>` +
+      `<w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:pPr><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:sz w:val="52"/></w:rPr></w:style>` +
+      `<w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Subtitle"/><w:rPr><w:b/></w:rPr></w:style>` +
+      `<w:style w:type="paragraph" w:styleId="u1"><w:name w:val="heading 1"/></w:style>`
+    const blocks = await readBlocks(
+      await DocxPackage.load(await makeDocx({ styles, body: styled("Title", "Software Requirements Specification") + styled("Title", "for") + styled("Subtitle", "<Project>") + styled("u1", "1 Introduction") + p(body) }))
+    )
+    expect(headings(blocks)).toEqual(["1 Introduction"])
+    expect(blocks.find((b) => b.text === "for")?.kind).toBe("paragraph")
+  })
+
+  it("tiêu đề ngay trên field mục lục bị bỏ (vẫn tính cỡ chữ heading); dòng chữ to trên trang bìa không là heading", async () => {
+    const toc = `<w:p><w:fldSimple w:instr=" TOC \o &quot;1-3&quot; "><w:r><w:t>Introduction 3</w:t></w:r></w:fldSimple></w:p>`
+    const blocks = await readBlocks(
+      await load(sized("Version 1.0 approved", 28) + sized("Prepared by the team", 28) + sized("Table of Contents", 36) + toc + sized("Revision History", 36) + p(body) + styled("u1", "Introduction") + p(body))
+    )
+    expect(headings(blocks)).toEqual(["Revision History", "Introduction"])
+  })
+
+  it("mục lục dạng gạch đầu dòng có số gõ tay không nhân đôi heading; heading thật phía sau giữ nguyên", async () => {
+    const bullet = `<w:numPr><w:ilvl w:val="0"/><w:numId w:val="8"/></w:numPr>`
+    const blocks = await readBlocks(await loadWithNumbering(p("1. Introduction", bullet) + p("1.1 Document Purpose", bullet) + styled("u1", "1. Introduction") + p(body) + styled("u2", "1.1 Document Purpose") + p(body)))
+    expect(headings(blocks)).toEqual(["1. Introduction", "1.1 Document Purpose"])
+    expect(blocks.filter((b) => b.kind === "list_item").map((b) => b.text)).toEqual(["1. Introduction", "1.1 Document Purpose"])
+  })
+})
