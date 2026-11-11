@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest"
 import { createEmptySpine } from "../../spine/spine.repository.js"
 import type { Spine } from "../../spine/spine.types.js"
-import { DRAWN_USER_ID, withDrawnUser } from "./drawn-user.js"
+import { DRAWN_USER_ID, drawnGeneralizations, withDrawnUser } from "./drawn-user.js"
 import { renderUseCase } from "./usecase.renderer.js"
 
 const uc = (id: string, name: string, actor_ids: string[]) => ({ id, name, actor_ids, function_ids: [], description: "", includes: [], extends: [] })
@@ -47,13 +47,24 @@ describe("withDrawnUser", () => {
     expect(drawn.use_cases.every((u) => u.actor_ids.filter((id) => humanIds.has(id)).length <= 1)).toBe(true)
   })
 
-  it("actor đã có cha trong file (Customer kế thừa Guest) ⇒ gốc của nó (Guest) kế thừa User, Customer giữ cha", () => {
+  it("TechMart 11/11: actor kế thừa actor khác cùng use case không tính là actor thứ hai ⇒ use case giữ cha (Guest), không thành User", () => {
     const s = qlhs()
+    s.use_cases = s.use_cases.filter((u) => u.actor_ids.length < 2)
     s.actors.push(human("A06", "Khách") as never, human("A07", "Khách hàng", "A06") as never)
     s.use_cases.push(uc("UC-09", "Tìm sản phẩm", ["A06", "A07"]) as never)
+    expect(withDrawnUser(s)).toBe(s)
+  })
+
+  it("TechMart 11/11: actor có cha trong file cùng đăng nhập với vai khác ⇒ chính nó kế thừa User (thêm cạnh chỉ trên hình), cha (Guest) không thành con User", () => {
+    const s = qlhs()
+    s.actors.push(human("A06", "Khách") as never, human("A07", "Khách hàng", "A06") as never)
+    s.use_cases.push(uc("UC-09", "Tìm sản phẩm", ["A06", "A07"]) as never, uc("UC-10", "Đăng nhập cửa hàng", ["A07", "A04"]) as never)
     const drawn = withDrawnUser(s)
     expect(drawn.actors.find((a) => a.id === "A07")?.parent_id).toBe("A06")
-    expect(drawn.actors.find((a) => a.id === "A06")?.parent_id).toBe(DRAWN_USER_ID)
+    expect(drawn.actors.find((a) => a.id === "A06")?.parent_id ?? null).toBeNull()
+    expect(drawnGeneralizations(drawn)).toContainEqual(["A07", DRAWN_USER_ID])
+    expect(drawn.use_cases.find((u) => u.id === "UC-09")?.actor_ids).toEqual(["A06", "A07"])
+    expect(drawn.use_cases.find((u) => u.id === "UC-10")?.actor_ids).toEqual([DRAWN_USER_ID])
   })
 
   it("không use case nào có ≥ 2 actor người ⇒ không đổi gì", () => {

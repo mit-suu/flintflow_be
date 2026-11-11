@@ -33,10 +33,12 @@ import { systemName } from "../../spine/system-name.js"
 import type { RenderedPart, Renderer } from "./common.js"
 import { byId, compareIds, svgPart } from "./common.js"
 import { DIAGRAM_LABELS, type DiagramLabels } from "./labels.js"
-import { isUploadedDocument, withDrawnUser } from "./drawn-user.js"
+import { drawnGeneralizations, isUploadedDocument, withDrawnUser } from "./drawn-user.js"
 import { layoutActorHierarchy, layoutUseCaseDiagram, type Association, type DiagramActor, type Relation, type UseCaseDiagram } from "./usecase-layout.js"
 
 export const MAX_USE_CASES_PER_DIAGRAM = 20
+/** Nhóm "hình tổng quát" của tài liệu upload — thay đúng một hình gốc. */
+const UPLOAD_OVERVIEW_KEY = "~all"
 
 /** Trần cứng của một cụm quan hệ khi gom nhóm use case chưa có feature; cụm dài hơn bị cắt theo lô. */
 export const MAX_CLUSTER_SPAN = MAX_USE_CASES_PER_DIAGRAM * 2
@@ -182,8 +184,10 @@ const clusterKey = (cluster: readonly UseCase[], kinds: ActorKinds): string => {
 const groupUseCases = (spine: Spine, kinds: ActorKinds, labels: DiagramLabels): UseCaseGroup[] => {
   // FLF-375: tài liệu upload vẽ một sơ đồ use case TỔNG QUÁT (thay đúng hình gốc của file, vd H2 "10 use case") — không
   // tách theo tính năng thành nhiều hình nhỏ một use case; quá trần một hình thì vẫn tách như thường ở bước sau
-  if (isUploadedDocument(spine) && spine.use_cases.length > 0 && spine.use_cases.length <= MAX_USE_CASES_PER_DIAGRAM) {
-    return [{ key: "~all", name: clean(systemName(spine.project)) || labels.system, useCases: byId(spine.use_cases) }]
+  // TechMart 11/11: không còn trần 20 cho tài liệu upload — file có một hình thì vẽ lại một hình (use case thứ 21 mất khỏi
+  // hình, phần còn lại tách thành 8 hình con)
+  if (isUploadedDocument(spine) && spine.use_cases.length > 0) {
+    return [{ key: UPLOAD_OVERVIEW_KEY, name: clean(systemName(spine.project)) || labels.system, useCases: byId(spine.use_cases) }]
   }
   const byFeature = new Map<string, UseCase[]>()
   const unassigned: UseCase[] = []
@@ -283,8 +287,9 @@ const partsOfGroup = (group: UseCaseGroup, kinds: ActorKinds, fits: Fits, parent
   for (const layer of layers) {
     const blocks = ordered(layer)
     const total = blocks.reduce((n, c) => n + c.nodes.length, 0)
-    // Quá trần ⇒ chia đều, không cắt giữa chuỗi quan hệ
-    const target = Math.ceil(total / Math.ceil(total / MAX_USE_CASES_PER_DIAGRAM))
+    // Quá trần ⇒ chia đều, không cắt giữa chuỗi quan hệ. Hình tổng quát của tài liệu upload (một hình gốc) không theo
+    // trần — chỉ tách khi bố cục thật sự không vừa (`refine`) (TechMart 11/11: 21 use case bị cắt làm hai)
+    const target = group.key === UPLOAD_OVERVIEW_KEY ? Math.max(1, total) : Math.ceil(total / Math.ceil(total / MAX_USE_CASES_PER_DIAGRAM))
     let current: RelationChain[] = []
     let size = 0
     for (const block of blocks) {
@@ -335,7 +340,9 @@ export const renderUseCase: Renderer = (source, _ownerId, labels = DIAGRAM_LABEL
   const spine = withDrawnUser(source)
   const actors = new Map(spine.actors.map((a) => [a.id, a]))
   const parents = actorParents(spine.actors)
-  const abstract = new Set(parents.values())
+  // TechMart 11/11: cạnh kế thừa thêm chỉ trên hình (actor đã có cha trong file, nay thêm → User)
+  const pairs: [string, string][] = [...parents, ...drawnGeneralizations(spine)]
+  const abstract = new Set(pairs.map(([, parent]) => parent))
   const system = clean(systemName(spine.project)) || labels.system
   const actorOf = (id: string): DiagramActor => {
     const a = actors.get(id)!
@@ -350,7 +357,7 @@ export const renderUseCase: Renderer = (source, _ownerId, labels = DIAGRAM_LABEL
     if (inlineGeneralization) {
       for (let grew = true; grew; ) {
         grew = false
-        for (const [child, parent] of parents) {
+        for (const [child, parent] of pairs) {
           if (ids.has(child) === ids.has(parent)) continue
           ids.add(child)
           ids.add(parent)
@@ -359,7 +366,7 @@ export const renderUseCase: Renderer = (source, _ownerId, labels = DIAGRAM_LABEL
       }
     }
     const generalizations = inlineGeneralization
-      ? [...parents].filter(([child, parent]) => ids.has(child) && ids.has(parent)).sort(([a], [b]) => compareIds(a, b)).map(([child, parent]) => ({ child, parent }))
+      ? pairs.filter(([child, parent]) => ids.has(child) && ids.has(parent)).sort(([a], [b]) => compareIds(a, b)).map(([child, parent]) => ({ child, parent }))
       : []
     return {
       system,

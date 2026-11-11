@@ -74,6 +74,9 @@ const MAX_ACTOR_LINES = 2
 /** Nhãn `<<include>>` / `<<extend>>` lệch phải đường dọc. */
 const RELATION_LABEL_OFFSET = 14
 const ACTOR_GAP_Y = 26
+/** Actor nhiều cha: thanh gom của cha thứ k lệch sang trái k bước; nhánh tới cha thứ k thấp hơn hông k bước. */
+const GENERALIZATION_BUS_STEP = 14
+const GENERALIZATION_STUB_STEP = 10
 /** Khoảng ngang giữa cột actor cha và cột actor con (cạnh generalization nằm trong khoảng này). */
 const GENERALIZATION_COLUMN_GAP = 110
 /** Đầu / cuối cạnh generalization cách hình que để không chạm tay / chữ. */
@@ -284,17 +287,27 @@ const buildScene = (d: UseCaseDiagram, option: LayoutOption): Scene => {
   // gom mọi nhánh về ngang tay actor cha, rồi đoạn thân ngang mang MỘT tam giác rỗng chạm ngay trái tay actor cha.
   const childrenOf = new Map<string, string[]>()
   for (const g of generalizations) childrenOf.set(g.parent, [...(childrenOf.get(g.parent) ?? []), g.child])
+  // TechMart 11/11: actor có HAI cha trên hình (Customer → Guest theo file, Customer → User chỉ trên hình) ⇒ mỗi cha một
+  // thanh gom lệch nhau trong khe, nhánh của từng cha ở độ cao riêng dưới hông — không đoạn nào chồng lên nhau
+  const parentsOfChild = new Map<string, string[]>()
+  for (const g of generalizations) parentsOfChild.set(g.child, [...(parentsOfChild.get(g.child) ?? []), g.parent])
+  const busSlot = new Map<string, number>()
+  for (const parentId of childrenOf.keys()) {
+    const sameLevel = [...childrenOf.keys()].filter((id) => level(id) === level(parentId))
+    busSlot.set(parentId, sameLevel.indexOf(parentId))
+  }
   for (const [parentId, kids] of childrenOf) {
     const parent = d.actors.find((a) => a.id === parentId)!
     const [pl, cl] = [level(parentId), level(parentId) + 1]
     const tip: [number, number] = [columnX(parent) - FIGURE.arm / 2 - GENERALIZATION_PAD, tops.get(parentId)! + FIGURE.armY]
     const childEdge = levelX[cl] + Math.max(FIGURE.arm, colWidth(levels[cl] ?? [])) / 2
     const parentEdge = levelX[pl] - Math.max(FIGURE.arm, colWidth(levels[pl] ?? [])) / 2
-    const busX = Math.min((childEdge + parentEdge) / 2, tip[0] - GENERALIZATION_TRUNK)
+    const busX = Math.min((childEdge + parentEdge) / 2, tip[0] - GENERALIZATION_TRUNK) - (busSlot.get(parentId) ?? 0) * GENERALIZATION_BUS_STEP
     const ys = [tip[1]]
     for (const childId of kids) {
       const child = d.actors.find((a) => a.id === childId)!
-      const hip: [number, number] = [columnX(child), tops.get(childId)! + FIGURE.bodyBottom]
+      const lane = Math.max(0, (parentsOfChild.get(childId) ?? []).indexOf(parentId))
+      const hip: [number, number] = [columnX(child), tops.get(childId)! + FIGURE.bodyBottom + lane * GENERALIZATION_STUB_STEP]
       ys.push(hip[1])
       scene.line(`gen:${childId}>${parentId}`, hip, [busX, hip[1]], { name: `${child.name} → ${parent.name}` })
     }
