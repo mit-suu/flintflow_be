@@ -84,6 +84,48 @@ describe("withDrawnUser", () => {
   })
 })
 
+describe("QLHS 11/11 bug #13: User có mũi tên kế thừa trên chính sơ đồ use case", () => {
+  /** Mọi đầu tam giác rỗng (polygon nền trắng) trong SVG. */
+  const triangles = (svg: string) => svg.match(/<polygon [^>]*fill="#fff"/g) ?? []
+  const lines = (svg: string) => [...svg.matchAll(/<line x1="([^"]+)" y1="([^"]+)" x2="([^"]+)" y2="([^"]+)"/g)].map((m) => m.slice(1, 5).map(Number))
+  /** Số đường nối vào gốc thân mang tam giác chung (= số actor con của User). */
+  const generalizationCount = (svg: string): number => {
+    const tip = triangles(svg)[0]!.match(/points="([^ ]+)/)![1].split(",").map(Number)
+    const trunk = lines(svg).find(([, , x2, y2]) => x2 === tip[0] && y2 === tip[1])!
+    return lines(svg).filter(([, , x2, y2]) => x2 === trunk[0] && y2 === trunk[1]).length
+  }
+  const overview = (s: Spine) => renderUseCase(s, null).find((p) => (p as { section?: string }).section === "fixed:2.2.1")!
+
+  it("các vai trò được thay bằng User đều có cạnh generalization tới User, kể cả vai trò không còn use case riêng", () => {
+    const part = overview(qlhs())
+    expect(part.issues).toEqual([])
+    const svg = String(part.source)
+    // A01, A02 không còn use case riêng (UC-01, UC-02 đều nối User) nhưng vẫn hiện để người đọc biết User là ai
+    for (const name of ["Quản trị viên", "Giáo vụ", "GV chủ nhiệm", "Học sinh / Phụ huynh", "User"]) expect(svg).toContain(`>${name}<`)
+    expect(triangles(svg)).toHaveLength(1) // một tam giác chung chạm User
+    expect(generalizationCount(svg)).toBe(4) // 4 vai trò người; actor hệ thống (Máy chủ email) không kế thừa
+  })
+
+  it("không use case nào có ≥ 2 actor người ⇒ không User, không cạnh kế thừa", () => {
+    const s = qlhs()
+    s.use_cases = [uc("UC-07", "Gửi thông báo", ["A03", "A05"]) as never, uc("UC-08", "Tra cứu kết quả", ["A04"]) as never]
+    const svg = String(overview(s).source)
+    expect(svg).not.toContain(">User<")
+    expect(triangles(svg)).toHaveLength(0)
+  })
+
+  it("dự án FlintFlow tự soạn ⇒ sơ đồ use case không vẽ generalization (vẫn ở hình phân cấp §2.1)", () => {
+    const s = qlhs()
+    s.custom_sections = []
+    s.actors.push(human("A06", "Khách") as never, human("A07", "Khách hàng", "A06") as never)
+    s.use_cases.push(uc("UC-09", "Mua hàng", ["A07"]) as never, uc("UC-10", "Xem hàng", ["A06"]) as never)
+    const parts = renderUseCase(s, null)
+    const useCaseSvg = parts.filter((p) => (p as { section?: string }).section === "fixed:2.2.1").map((p) => String(p.source)).join("")
+    expect(triangles(useCaseSvg)).toHaveLength(0)
+    expect(parts.some((p) => (p as { section?: string }).section === "fixed:2.1")).toBe(true)
+  })
+})
+
 describe("FLF-375: sơ đồ use case tổng quát cho tài liệu upload", () => {
   it("≤ 20 use case ⇒ một hình duy nhất (không tách theo tính năng)", () => {
     const s = qlhs()

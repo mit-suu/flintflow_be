@@ -306,6 +306,46 @@ describe("layoutActorHierarchy", () => {
   })
 })
 
+describe("generalization trên sơ đồ use case (QLHS 11/11 bug #13)", () => {
+  const diagram = (kids: string[]): UseCaseDiagram => ({
+    system: "QLHS",
+    rows: [{ id: "UC-01", name: "Đăng nhập" }, ...kids.map((k, i) => ({ id: `UC-1${i}`, name: `Việc riêng ${k}` }))],
+    actors: [{ ...human("__user", "User"), abstract: true }, ...kids.map((k) => human(k, `Vai trò ${k}`))],
+    associations: [{ actorId: "__user", useCaseId: "UC-01" }, ...kids.map((k, i) => ({ actorId: k, useCaseId: `UC-1${i}` }))],
+    relations: [],
+    generalizations: kids.map((child) => ({ child, parent: "__user" }))
+  })
+
+  it("nhiều con ⇒ mỗi con một đường liền tới gốc thân chung, MỘT tam giác rỗng chạm User; con ở cột ngoài, không lỗi bố cục", () => {
+    const kids = ["A01", "A02", "A03", "A04", "A05"]
+    const scene = layoutUseCaseDiagram(diagram(kids))
+    expect(checkScene(scene, { allowBends: false })).toEqual([])
+    const edges = paths(scene, "gen:A")
+    expect(edges.map((e) => e.id).sort()).toEqual(kids.map((k) => `gen:${k}>__user`))
+    const trunk = paths(scene, "gen:*>__user")
+    expect(trunk).toHaveLength(1)
+    const head = arrowOf(scene, trunk[0].id)
+    expect(head.closed).toBe(true)
+    expect(head.fill).toBe("#fff")
+    for (const e of edges) {
+      expect(e.dashed).toBe(false)
+      expect(e.points[1]).toEqual(trunk[0].points[0])
+    }
+    const headX = (id: string) => (scene.find(`actor:${id}#head`) as Ellipse).cx
+    // User ở cột sát khung, các vai trò ở cột ngoài (bên trái User), mọi actor người bên trái khung
+    for (const k of kids) expect(headX(k)).toBeLessThan(headX("__user"))
+    expect(headX("__user")).toBeLessThan(0)
+  })
+
+  it("một con ⇒ tam giác ngay trên đường của nó; không có generalization ⇒ không đường gen", () => {
+    const one = layoutUseCaseDiagram(diagram(["A01"]))
+    expect(checkScene(one, { allowBends: false })).toEqual([])
+    expect(arrowOf(one, "gen:A01>__user").closed).toBe(true)
+    const none = layoutUseCaseDiagram({ ...diagram(["A01"]), generalizations: undefined })
+    expect(paths(none, "gen:")).toHaveLength(0)
+  })
+})
+
 describe("wrapLines", () => {
   it("vừa một dòng hoặc một từ ⇒ giữ nguyên; dài ⇒ chia cân, tối đa maxLines", () => {
     expect(wrapLines("Log In", 16, 230, 3)).toEqual(["Log In"])

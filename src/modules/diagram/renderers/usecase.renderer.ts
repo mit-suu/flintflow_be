@@ -342,13 +342,34 @@ export const renderUseCase: Renderer = (source, _ownerId, labels = DIAGRAM_LABEL
     return { id: a.id, name: clean(a.name), kind: a.kind, abstract: abstract.has(a.id) }
   }
 
-  const diagramOf = (part: UseCasePart): UseCaseDiagram => ({
-    system,
-    rows: part.useCases.map((u) => ({ id: u.id, name: clean(u.name) })),
-    actors: [...new Set(part.associations.map((a) => a.actorId))].sort(compareIds).map(actorOf),
-    associations: part.associations,
-    relations: part.relations
-  })
+  // QLHS 11/11 bug #13: tài liệu upload không có hình phân cấp actor riêng (ảnh vẽ lại thay đúng chỗ ảnh gốc) ⇒ cạnh
+  // kế thừa (vd mọi vai trò → `User`) vẽ ngay trên sơ đồ use case, kèm cả actor con / cha chưa có cạnh nào trên hình
+  const inlineGeneralization = isUploadedDocument(spine)
+  const diagramOf = (part: UseCasePart): UseCaseDiagram => {
+    const ids = new Set(part.associations.map((a) => a.actorId))
+    if (inlineGeneralization) {
+      for (let grew = true; grew; ) {
+        grew = false
+        for (const [child, parent] of parents) {
+          if (ids.has(child) === ids.has(parent)) continue
+          ids.add(child)
+          ids.add(parent)
+          grew = true
+        }
+      }
+    }
+    const generalizations = inlineGeneralization
+      ? [...parents].filter(([child, parent]) => ids.has(child) && ids.has(parent)).sort(([a], [b]) => compareIds(a, b)).map(([child, parent]) => ({ child, parent }))
+      : []
+    return {
+      system,
+      rows: part.useCases.map((u) => ({ id: u.id, name: clean(u.name) })),
+      actors: [...ids].sort(compareIds).map(actorOf),
+      associations: part.associations,
+      relations: part.relations,
+      ...(generalizations.length > 0 ? { generalizations } : {})
+    }
+  }
   // Bộ xếp thử tới 16 phương án mỗi lần gọi, và `refine` hỏi `fits` ở mọi tầng tách ⇒ nhớ scene theo hình trong lượt này,
   // lượt vẽ ra dùng lại đúng scene đã chấm thay vì bố cục lại.
   const scenes = new Map<string, Scene>()
