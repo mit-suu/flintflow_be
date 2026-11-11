@@ -7,6 +7,7 @@
  * Ký pháp (Visual Paradigm "Beginner's guide to deployment diagrams" + UML 2.5):
  * - Nút = khối hộp 3D (`node`); thiết bị phần cứng `<<device>>`, môi trường thực thi `<<executionEnvironment>>`.
  * - Nút con lồng trong nút cha (`parent_id`): môi trường thực thi nằm trong thiết bị.
+ * - Mô tả nút (`description`) = dòng thứ hai in nghiêng dưới tên nút.
  * - Component chạy trên nút = `component` trong nút; artifact triển khai lên nút = `artifact` (biểu tượng tài liệu) trong nút.
  * - Đường truyền thông (communication path) = nét liền không mũi tên giữa hai nút, nhãn là giao thức.
  * Alias là id Spine (`DN01`), sắp theo id ⇒ cùng Spine ra cùng nguồn.
@@ -81,7 +82,10 @@ export const deploymentSource = (spine: Pick<Spine, "deployment_nodes" | "deploy
     const inner = children.get(n.id) ?? []
     const components = n.components.map(clean).filter((c) => c !== "")
     const artifacts = n.artifacts.map(clean).filter((a) => a !== "")
-    const head = `${pad}node "${clean(n.name) || n.id}"${STEREOTYPE[n.kind]} as ${alias(n.id)}`
+    // QLHS 11/11 bug #14: mô tả nút (dòng chữ phụ dưới tên) = dòng thứ hai in nghiêng, không vẽ thành component
+    const description = clean(n.description).replace(/[<>\\]/g, "")
+    const title = `${clean(n.name) || n.id}${description ? `\\n<i>${description}</i>` : ""}`
+    const head = `${pad}node "${title}"${STEREOTYPE[n.kind]} as ${alias(n.id)}`
     if (inner.length === 0 && components.length === 0 && artifacts.length === 0) {
       lines.push(head)
       return

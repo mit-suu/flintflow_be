@@ -57,6 +57,11 @@ export interface RouteOptions {
   clear: number
   /** Khoảng cách tối thiểu giữa hai đoạn song song chồng phạm vi. */
   sepMin: number
+  /**
+   * QLHS 11/11 bug #12: cạnh không đi được bằng I / L / Z / U (hộp cao chắn mọi đường một làn) ⇒ thử đường vòng qua hai /
+   * ba làn (3–4 góc). Chỉ là đường dự phòng — cạnh đã có đường thường thì không đổi. Mặc định tắt (hình mode 2 giữ nguyên).
+   */
+  detours?: boolean
 }
 
 export const DEFAULT_ROUTE_OPTIONS: RouteOptions = { gapX: 90, gapY: 90, pad: 48, ringOffset: 40, portPitch: 26, portMargin: 12, laneStep: 14, clear: 4, sepMin: 12 }
@@ -307,6 +312,51 @@ const routeAll = (nodes: readonly GridNode[], edges: readonly GridEdge[], cells:
     return out
   }
 
+  /**
+   * Đường vòng (bug #12): ra khỏi hộp tới một làn bên ngoài cạnh xuất phát, đi theo một làn vuông góc, rồi vào hộp kia từ
+   * làn bên ngoài cạnh đích. Cạnh ngang ↔ ngang: pa → (v1, ca) → (v1, h) → (v2, h) → (v2, cb) → pb; ngang ↔ dọc bỏ một làn.
+   */
+  const detours = (A: PlacedNode, B: PlacedNode, legA: number, legB: number): Candidate[] => {
+    const out: Candidate[] = []
+    const box = (n: PlacedNode) => ({ l: n.body.x, r: n.body.x + n.body.w, t: n.body.y, b: n.body.y + n.body.h })
+    const isH = (side: Side): boolean => side === "L" || side === "R"
+    /** Làn song song với cạnh `side`, nằm ngoài hộp ít nhất `leg` (gần nhất trước). */
+    const outside = (n: PlacedNode, side: Side, leg: number): number[] => {
+      const k = box(n)
+      const lanes = isH(side) ? geo.vLanes : geo.hLanes
+      const limit = side === "R" ? k.r + leg : side === "L" ? k.l - leg : side === "B" ? k.b + leg : k.t - leg
+      const dir = side === "R" || side === "B" ? 1 : -1
+      return lanes.filter((v) => (dir === 1 ? v >= limit : v <= limit)).sort((p, q) => Math.abs(p - limit) - Math.abs(q - limit)).slice(0, 4)
+    }
+    const cA = centerOf(A.body)
+    const cB = centerOf(B.body)
+    for (const sa of A.sides)
+      for (const sb of B.sides) {
+        const hA = isH(sa)
+        const hB = isH(sb)
+        const listA = near(A, sa, hA ? cB[1] : cB[0], 2)
+        const listB = near(B, sb, hB ? cA[1] : cA[0], 2)
+        const exitA = outside(A, sa, legA)
+        const exitB = outside(B, sb, legB)
+        // làn vuông góc ở giữa: mọi làn (đường vòng chỉ dùng khi đường thường không có)
+        const middle = hA === hB ? (hA ? geo.hLanes : geo.vLanes) : [null]
+        for (const ca of listA)
+          for (const cb of listB) {
+            const pa = point(A, sa, ca)
+            const pb = point(B, sb, cb)
+            for (const ea of exitA)
+              for (const eb of exitB)
+                for (const m of middle) {
+                  if (hA && hB) out.push({ pts: [pa, [ea, ca], [ea, m!], [eb, m!], [eb, cb], pb], sa, sb, ca, cb })
+                  else if (!hA && !hB) out.push({ pts: [pa, [ca, ea], [m!, ea], [m!, eb], [cb, eb], pb], sa, sb, ca, cb })
+                  else if (hA) out.push({ pts: [pa, [ea, ca], [ea, eb], [cb, eb], pb], sa, sb, ca, cb })
+                  else out.push({ pts: [pa, [ca, ea], [eb, ea], [eb, cb], pb], sa, sb, ca, cb })
+                }
+          }
+      }
+    return out
+  }
+
   const evaluate = (cand: Candidate, A: PlacedNode, B: PlacedNode, edge: GridEdge): number | null => {
     const segs = segmentsOf(cand.pts)
     if (segs.length === 0 || segs.some((s) => segLen(s) < EPS)) return null
@@ -350,6 +400,15 @@ const routeAll = (nodes: readonly GridNode[], edges: readonly GridEdge[], cells:
       if (cost !== null && cost < bestCost - EPS) {
         best = cand
         bestCost = cost
+      }
+    }
+    if (!best && o.detours && A.id !== B.id) {
+      for (const cand of detours(A, B, edge.endLeg[0], edge.endLeg[1])) {
+        const cost = evaluate(cand, A, B, edge)
+        if (cost !== null && cost < bestCost - EPS) {
+          best = cand
+          bestCost = cost
+        }
       }
     }
     if (!best) return null

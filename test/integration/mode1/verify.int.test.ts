@@ -132,6 +132,55 @@ describe("C-5 AI consistency: nhận xét khác mâu thuẫn chỉ vàng", () =>
   })
 })
 
+describe("QLHS 11/11 bug #17: chữ mới phải cùng ngôn ngữ tài liệu", () => {
+  const VI_STATEMENT = "Hệ thống phải phản hồi trong vòng 1 giây cho 95% yêu cầu."
+  /** C-4 chuẩn nhưng viết lại câu NFR bằng tiếng Việt (lượt làm lại sau khi C-5 báo sai ngôn ngữ). */
+  const proposeVietnamese = (p: string) => {
+    if (!p.includes("# CR Propose")) return undefined
+    const out = JSON.parse(fakeCrPropose(p)!)
+    for (const l of out.locations)
+      if (l.conclusion === "edit") l.spine_ops = l.spine_ops.map((o: { path: string }) => (o.path.endsWith(".statement") ? { ...o, value: VI_STATEMENT } : o))
+    return JSON.stringify(out)
+  }
+
+  it("tài liệu tiếng Việt: C-4 nêu ngôn ngữ; câu mới tiếng Anh ⇒ wrong_language (câu tiếng Việt cho người dùng), AI làm lại bằng tiếng Việt ⇒ đạt", async () => {
+    const { TemplateProfile } = await import("../../../src/modules/import/template-profile.model.js")
+    const ctx = await importedProject()
+    await TemplateProfile.updateOne({ projectId: ctx.projectId }, { $set: { language: "vi" } })
+    await Spine.updateOne(
+      { projectId: ctx.projectId, "nfrs.id": "NFR-01" },
+      { $set: { "nfrs.$.statement": "Hệ thống phải phản hồi trong vòng 2 seconds cho 95% yêu cầu.", "nfrs.$.metric": "thời gian phản hồi" }, $inc: { spine_version: 1 } }
+    )
+    const { cr } = await crToImpact(ctx.c)
+    detail(await ctx.c.post(`${cr}/propose`))
+    expect(promptsOf("# CR Propose")[0]).toContain("- Document language: Vietnamese (tiếng Việt).")
+
+    // fakeCrPropose viết câu NFR mới bằng tiếng Anh
+    const failed = detail(await ctx.c.post(`${cr}/verify`))
+    expect(failed.change_request.status).toBe("proposing")
+    const nfr = failed.locations.find((l) => l.path === NFR)!
+    expect(nfr.verify!.violations.map((v) => v.rule)).toEqual(["wrong_language"])
+    expect(nfr.verify!.violations[0].message).toMatch(/^Nội dung mới ở .+ viết bằng tiếng Anh trong khi tài liệu viết bằng tiếng Việt: “The system shall respond/)
+    expect(nfr.verify!.violations[0].message).not.toContain("nfrs[")
+    expect(nfr.redo_count).toBe(1)
+
+    // Lượt làm lại: C-4 thấy lỗi kiểm, viết bằng tiếng Việt ⇒ đạt
+    routeCr((p) => clarifyPerf(p) ?? proposeVietnamese(p))
+    detail(await ctx.c.post(`${cr}/propose`))
+    expect(promptsOf("# CR Propose").at(-1)).toContain("Previous proposal failed checks: Nội dung mới ở")
+    const ok = detail(await ctx.c.post(`${cr}/verify`))
+    expect(ok.change_request.status).toBe("ready_to_submit")
+    expect(ok.locations.find((l) => l.path === NFR)!.verify).toMatchObject({ code_ok: true, violations: [] })
+  })
+
+  it("tài liệu tiếng Anh: câu mới tiếng Anh ⇒ không vi phạm ngôn ngữ", async () => {
+    const { c, cr } = await toProposed()
+    expect(promptsOf("# CR Propose")[0]).toContain("- Document language: English.")
+    const d = detail(await c.post(`${cr}/verify`))
+    expect(d.locations.flatMap((l) => l.verify!.violations.map((v) => v.rule))).not.toContain("wrong_language")
+  })
+})
+
 describe("C-5 redo ≤ 2 rồi manual_fix", () => {
   it("AI đề xuất trượt 3 lần ⇒ proposing, proposing, manual_fix; redo_count dừng ở 2", async () => {
     routeCr((p) => clarifyPerf(p) ?? fakeCrProposeNoChange(p))

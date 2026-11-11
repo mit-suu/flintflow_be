@@ -54,6 +54,7 @@ import { capitalize, pathLabel, sectionLabel } from "../spine/human-labels.js"
 import { isRealText } from "../../shared/utils/instruction-text.js"
 import { PROVISIONAL_SECTION } from "./section-catalog.js"
 import { TABLE_ENTITIES, hasRequiredFields } from "./table-header-dictionary.js"
+import { foldText } from "./text-similarity.js"
 import { indentedCells, tableRows, tableText } from "./table-rows.js"
 import { groupOf, markActions, tableShape, type TableShape } from "./table-shape.js"
 import { FUNCTION_LABELS, USE_CASE_LABELS, functionSpecValue, readSpecLines, useCaseSpecValue } from "./spec-fields.js"
@@ -96,6 +97,55 @@ export const splitList = (s: string, refs = false): string[] =>
 
 const LIST_FIELDS = new Set(["actor_ids", "goals", "includes", "extends", "relations", "function_ids"])
 
+/** Tách theo dấu phẩy / chấm phẩy / xuống dòng, không cắt trong ngoặc ("trạng thái (đang học, nghỉ)" là một mục). */
+const splitOutsideParens = (s: string): string[] => {
+  const out: string[] = []
+  let depth = 0
+  let cur = ""
+  for (const ch of s) {
+    if (ch === "(" || ch === "[") depth++
+    else if ((ch === ")" || ch === "]") && depth > 0) depth--
+    if (depth === 0 && /[,;\n]/.test(ch)) {
+      out.push(cur)
+      cur = ""
+    } else cur += ch
+  }
+  out.push(cur)
+  return out.map((x) => x.trim().replace(/[.]+$/, "").trim()).filter(Boolean)
+}
+
+/** "Học sinh" ⇒ "hs" (viết tắt theo chữ đầu, như "mã HS"). */
+const initialsOf = (folded: string): string => folded.split(" ").filter(Boolean).map((w) => w[0]).join("")
+
+/** Thuộc tính đọc từ ô bảng — đúng dạng `EntityAttribute` của Spine. */
+export interface CellAttribute {
+  name: string
+  kind: "key" | "reference" | "plain"
+  required: boolean
+}
+
+/**
+ * QLHS 11/11 bug #12c: ô "Thuộc tính chính" của bảng từ điển dữ liệu ⇒ thuộc tính dạng Spine (`{ name, kind, required }`).
+ * Luật (tất định, đơn giản):
+ *   - mã của chính thực thể ⇒ `key` (bắt buộc): "mã" / "id" / "code" đứng một mình, "mã <tên thực thể>" hoặc "mã <viết tắt>"
+ *     ("mã HS" của Học sinh), "<tên thực thể> id";
+ *   - mã khác ("mã TK phụ huynh", "mã lớp", "lop_id", "… id") ⇒ `reference` (khoá ngoại, không bắt buộc);
+ *   - còn lại ⇒ `plain`, không bắt buộc (bảng không ghi bắt buộc thì không đoán).
+ */
+export const attributesFromCell = (cell: string, entityName: string): CellAttribute[] => {
+  const entity = foldText(entityName)
+  const own = new Set(["ma", "id", "code", "key", ...(entity ? [`ma ${entity}`, `ma ${initialsOf(entity)}`, `${entity} id`, `id ${entity}`, `${entity} code`] : [])])
+  const seen = new Set<string>()
+  return splitOutsideParens(cell).flatMap((name): CellAttribute[] => {
+    const folded = foldText(name)
+    if (!folded || seen.has(folded)) return []
+    seen.add(folded)
+    if (own.has(folded)) return [{ name, kind: "key", required: true }]
+    const reference = /^(ma|id) \S/.test(folded) || /\S (id|code)$/.test(folded) || /^fk /.test(folded)
+    return [{ name, kind: reference ? "reference" : "plain", required: false }]
+  })
+}
+
 /** Field nhận giá trị hàng trên khi ô trống (ô gộp dọc — "Feature" gộp cho nhiều màn hình liền nhau). */
 const FILL_DOWN_FIELDS = new Set(["feature_id"])
 
@@ -132,6 +182,9 @@ export const settleSection = (
       for (const it of items) if (it.entity === "nfrs" && it.value.category === undefined && NFR_CATEGORY_BY_SECTION[sectionId]) it.value.category = NFR_CATEGORY_BY_SECTION[sectionId]
       out.handled.add(t.block_id)
       out.items.push(...items)
+      // QLHS 11/11 (bug #10, #12c): bảng từ điển dữ liệu (có cột thuộc tính) luôn giữ nguyên văn tại chỗ — bản in theo file
+      // upload; Spine vẫn nhận tên / quan hệ / thuộc tính đọc được từ bảng
+      if (hasAttributeColumn(rows)) out.verbatim.add(t.block_id)
       continue
     }
     if (!targets.includes("use_cases")) continue
@@ -249,6 +302,8 @@ export const deterministicTableItems = (
       if (FILL_DOWN_FIELDS.has(field)) above.set(field, cell)
       value[field] = LIST_FIELDS.has(field) ? splitList(cell, field !== "goals") : cell
     }
+    // Bug #12c: thuộc tính cần tên thực thể (cột tên có thể đứng sau cột thuộc tính) ⇒ tách sau khi đọc hết hàng
+    if (typeof value.attributes === "string") value.attributes = attributesFromCell(value.attributes, typeof value.name === "string" ? value.name : "")
     const label = labelCol === undefined ? "" : (grid[r][labelCol] ?? "").trim()
     if (label && typeof value.statement === "string" && !value.statement.toLowerCase().startsWith(label.toLowerCase())) value.statement = `${label}: ${value.statement}`
     if (!Object.keys(value).length) return []
@@ -289,6 +344,20 @@ export const chunkBlocks = <T extends { text: string }>(blocks: T[], budget = AI
 
 /** Khối gửi AI; `text` của bảng đã là `tableText` (dựng trước khi chia lô để trần ký tự tính đúng phần gửi đi). */
 const blockLines = (blocks: BlockLite[]): string => blocks.map((b) => `[${b.block_id}] ${b.kind === "table" ? `(table)\n${b.text}` : b.text}`).join("\n")
+
+/**
+ * QLHS 11/11 (bug #10): bảng "từ điển dữ liệu" có cột thuộc tính mà model chỉ lấy tên / quan hệ / mô tả (không field
+ * `attributes` nào trích từ bảng đó) ⇒ nếu coi bảng là "đã trích" thì cột thuộc tính biến mất khỏi tài liệu. Bảng như vậy
+ * giữ nguyên văn tại chỗ (unmapped) — Spine vẫn nhận phần model đọc được.
+ */
+const ATTRIBUTE_COLUMN = /thuộc tính|attribute/i
+/** Hàng tiêu đề của bảng có cột thuộc tính (bảng từ điển dữ liệu). */
+export const hasAttributeColumn = (rows: readonly (readonly string[])[] | null | undefined): boolean => ATTRIBUTE_COLUMN.test((rows?.[0] ?? []).join(" | "))
+export const tablesToKeepVerbatim = (batch: readonly Pick<BlockLite, "block_id" | "kind" | "rows">[], items: readonly EntityItem[]): string[] =>
+  batch
+    .filter((b) => b.kind === "table" && ATTRIBUTE_COLUMN.test((b.rows?.[0] ?? []).join(" | ")))
+    .filter((b) => !items.some((it) => it.source_block_ids.includes(b.block_id) && Array.isArray(it.value.attributes) && (it.value.attributes as unknown[]).length > 0))
+    .map((b) => b.block_id)
 
 /** Trọng số của điểm AI trong độ tin cuối (FLF-343); phần còn lại là trung bình tín hiệu của code. */
 export const AI_CONFIDENCE_WEIGHT = 0.6
@@ -418,10 +487,18 @@ export const keepMentionedRules = (items: EntityItem[], mentioned: ReadonlySet<s
     return { ...it, value }
   })
 
-/** Chú thích của ảnh: block caption ngay sau (hoặc ngay trước) ảnh trong section. */
+/** Đoạn văn thường nhưng là dòng chú thích hình: "H3 · sơ đồ hoạt động…", "Hình 2 …", "Figure 2 …", "Fig. 3 …". */
+const FIGURE_LINE = /^(h\d+\b|hình\s*\d+|figure\s*\d+|fig\.?\s*\d+)/i
+const isFigureLine = (b: Pick<BlockLite, "kind" | "text"> | undefined): boolean =>
+  !!b && b.kind === "paragraph" && b.text.trim().length <= 200 && FIGURE_LINE.test(b.text.trim())
+
+/**
+ * Chú thích của ảnh: block caption ngay sau (hoặc ngay trước) ảnh trong section. File không dùng kiểu "Caption" của Word
+ * (QLHS: "H3 · sơ đồ hoạt động UC-05" là đoạn thường ngay dưới ảnh) ⇒ nhận cả đoạn ngắn bắt đầu bằng "H3 / Hình 3 / Figure 3".
+ */
 export const captionOf = (img: Pick<BlockLite, "block_id">, sectionBlocks: Pick<BlockLite, "block_id" | "kind" | "text">[]): string => {
   const i = sectionBlocks.findIndex((b) => b.block_id === img.block_id)
-  const near = [sectionBlocks[i + 1], sectionBlocks[i - 1]].find((b) => b?.kind === "caption" && b.text.trim())
+  const near = [sectionBlocks[i + 1], sectionBlocks[i - 1]].find((b) => (b?.kind === "caption" && b.text.trim()) || isFigureLine(b))
   return near?.text.trim() ?? "(none)"
 }
 
@@ -1003,6 +1080,7 @@ export const runExtraction = async (projectId: string, userId: string, importId:
           mentionedRules
         )
       )
+      unmapped.push(...tablesToKeepVerbatim(batch, items).filter((id) => !unmapped.includes(id)))
       return null
     }
 

@@ -146,7 +146,9 @@ const redrawDiagrams = async (
   // Màn mới vẽ trước bằng model (`layoutRenderDeps`); lượt vẽ lại toàn bộ sau đó thấy hash khớp nên giữ nguyên hình đó.
   // FLF-387: model gọi bằng user ghi CR — mã CR không phải user id (giữ credit hỏng ⇒ màn mới rơi về bảng function)
   const fresh = newScreenIds.length ? await renderChangedIfAvailable(projectId, newScreenIds, { by: crId, userId, step_id: null, deps: layoutRenderDeps() }) : null
-  const drawn = await renderAllIfAvailable(projectId, { by: crId, step_id: null })
+  // TechMart 11/11: màn có sẵn mà CR đổi dữ liệu (hình lệch) cũng vẽ lại bằng model như màn mới — dep mặc định không gọi
+  // model nên wireframe bị thay bằng bảng chức năng dự phòng
+  const drawn = await renderAllIfAvailable(projectId, { by: crId, userId, step_id: null, deps: layoutRenderDeps() })
   if (![fresh, drawn].some((r) => r && (r.rendered.length || r.removed.length))) return
   try {
     const latest = stripRecord((await spineRepository.get(projectId))!)

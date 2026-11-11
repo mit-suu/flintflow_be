@@ -37,6 +37,7 @@ import { reassignDuplicateIds } from "./new-ids.js"
 import { proposeUseCaseBatch } from "./add-use-case.service.js"
 import { elementText } from "./location-display.js"
 import { directHit } from "./word-diff.js"
+import { crDocumentLanguage, documentLanguageText } from "./cr-language.js"
 
 /**
  * Số vị trí gửi trong một lượt C-4. Trước là 12: prompt kèm giá trị JSON của từng phần tử (tới 2500 ký tự) và câu
@@ -252,6 +253,8 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
   const spine = stripRecord(record)
   // FLF-364: hướng dẫn của mẫu upload theo mục (Mode 1) — ngữ cảnh soạn đúng ý người làm mẫu
   const guidance = templateGuidanceBySection(await TemplateProfile.findOne({ projectId: cr.projectId }).select("heading_map layout").lean())
+  // QLHS 11/11 bug #17: nói rõ ngôn ngữ tài liệu — thiếu dòng này model viết bước mới bằng tiếng Anh vào tài liệu tiếng Việt
+  const documentLanguage = documentLanguageText(await crDocumentLanguage(String(cr.projectId), spine))
   let locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
 
   // FLF-318: CR thêm / xoá use case ⇒ soạn trọn lô một lượt như chat trước baseline (luật 3e / 3g), vị trí còn
@@ -288,7 +291,8 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
           materials: await relevantMaterialsText(cr, crQuery(cr, ...batch.map((l) => locationPromptText(spine, l, cr.seed?.ops ?? [])))),
           missing_info: missingInfoText(cr),
           locations: batch.map((l) => locationPromptText(spine, l, cr.seed?.ops ?? [])).join("\n"),
-          glossary: glossaryText(spine)
+          glossary: glossaryText(spine),
+          document_language: documentLanguage
         })
         if (!result.ok) {
           if (result.reason !== "credits" && batch.length > 1) {
@@ -397,7 +401,8 @@ Analyst's instruction for ${loc.location_id} (${loc.owner_step ? `fix in owner s
     materials: await relevantMaterialsText(cr, crQuery(cr, instruction, locationPromptText(spine, loc, cr.seed?.ops ?? []))),
     missing_info: missingInfoText(cr),
     locations: locationPromptText(spine, loc, cr.seed?.ops ?? []),
-    glossary: glossaryText(spine)
+    glossary: glossaryText(spine),
+    document_language: documentLanguageText(await crDocumentLanguage(String(cr.projectId), spine))
   })
   if (!result.ok) {
     // `manual_fix` không phải bước pause được (Flow 4/5 của CR chỉ ở clarifying/proposing/verifying) ⇒ báo lỗi, giữ nguyên
