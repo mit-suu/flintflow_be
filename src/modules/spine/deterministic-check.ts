@@ -20,7 +20,7 @@ import { hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
 import { actorParents, ancestorsOf, generalizationProblems, type GeneralizationProblem } from "./actor-generalization.js"
 import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "./source-hash.js"
 import type { ErdNotation, RenderContext } from "../../shared/diagram/erd-notation.js"
-import { ORIGINAL_DIAGRAM_LABELS, ORIGINAL_DIAGRAM_SECTION, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds } from "./original-diagram.js"
+import { ORIGINAL_DIAGRAM_LABELS, diagramKey, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds, originalSectionOf } from "./original-diagram.js"
 import { isVerbatim, type SectionSegments } from "./segment-hash.js"
 import { NFR_CATEGORY_LABELS, capitalize, diagramLabel, pathLabel, quotedSectionLabel } from "./human-labels.js"
 import { PROJECT_TEXT_FIELDS, SRS_TEXT_FIELDS, VALIDATION_TEXT_FIELDS, pickTextFields } from "./srs-text-fields.js"
@@ -194,7 +194,7 @@ export const applyRuleProfile = (candidates: FlagCandidate[], profile: RuleProfi
         .map((c) => (profile.downgrade.has(c.rule_id) && c.level === "red" ? { ...c, level: "yellow" as const } : c))
     : candidates
 
-const RENDER_STEP: Readonly<Record<string, string>> = { context: "S-2.5", usecase: "S-3.6", screen_flow: "S-4.2", erd: "S-4.5", class: "S-4.5", state_machine: "S-4.5", sequence: "S-5.4" }
+const RENDER_STEP: Readonly<Record<string, string>> = { context: "S-2.5", usecase: "S-3.6", screen_flow: "S-4.2", erd: "S-4.5", class: "S-4.5", state_machine: "S-4.5", sequence: "S-5.4", activity: "S-3.5", deployment: "S-6.1" }
 
 export const renderStepOf = (d: Pick<Diagram, "kind" | "owner_id">): string =>
   RENDER_STEP[d.kind] ?? (d.owner_id ? `S-5.3@${d.owner_id}` : "S-5.3")
@@ -362,6 +362,9 @@ const deadReferenceWhere = (spine: Spine, hit: ReferenceHit): Where => {
   switch (hit.field.path) {
     case "use_cases[].actor_ids[]":
     case "use_cases[].function_ids[]":
+    case "use_cases[].activity_nodes[].lane":
+    case "use_cases[].activity_flows[].from":
+    case "use_cases[].activity_flows[].to":
       return { section: "fixed:2.2.2", step: "S-3.2" }
     case "use_cases[].includes[]":
     case "use_cases[].extends[]":
@@ -392,6 +395,10 @@ const deadReferenceWhere = (spine: Spine, hit: ReferenceHit): Where => {
       return { section: `function:${owner}`, step: owner ? functionStep(spine, owner) : "S-5.4" }
     case "entities[].transitions[].business_rule_ids[]":
       return { section: "fixed:3.1.5", step: "S-4.5" }
+    case "deployment_nodes[].parent_id":
+    case "deployment_links[].from":
+    case "deployment_links[].to":
+      return { section: "fixed:4.1", step: "S-6.1" }
     case "business_rules[].source_validation_ids[]":
       return { section: "fixed:5.1", step: "S-7.1" }
     case "messages[].function_ids[]":
@@ -437,7 +444,7 @@ const deadReference = (spine: Spine): FlagCandidate[] =>
  */
 const printedDiagrams = (spine: Spine): Spine["diagrams"] => {
   const kept: ReadonlySet<string> = keptOriginalKinds(spine)
-  return kept.size ? spine.diagrams.filter((d) => !kept.has(d.kind)) : spine.diagrams
+  return kept.size ? spine.diagrams.filter((d) => !kept.has(diagramKey(d))) : spine.diagrams
 }
 
 const renderError = (spine: Spine): FlagCandidate[] =>
@@ -491,7 +498,7 @@ const originalDiagramStale = (spine: Spine): FlagCandidate[] =>
     .map((k) => ({
       level: "yellow",
       rule_id: "original_diagram_stale",
-      section_id: ORIGINAL_DIAGRAM_SECTION[k.diagram.kind],
+      section_id: originalSectionOf(k.diagram),
       target_id: k.custom_id,
       message: `${ORIGINAL_DIAGRAM_LABELS[k.diagram.kind]} (hình gốc của tài liệu) không còn khớp dữ liệu — tạo change request để vẽ lại bằng FlintFlow`,
       remediation_step: RENDER_STEP[k.diagram.kind]

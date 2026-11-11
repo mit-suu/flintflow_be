@@ -99,7 +99,8 @@ describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong 
     expect(table.source).toMatch(/\| vi: /)
     // Mọi hình dựng từ Spine đều có nguồn mới; cùng id, cùng thứ tự với bản gốc
     expect(view.diagrams.map((d) => d.id)).toEqual(spine.diagrams.map((d) => d.id))
-    expect([...localizedDiagramSources(spine, localizeSpine(spine, units, translate(units), "vi")).keys()]).toEqual(spine.diagrams.map((d) => d.id))
+    // FLF-390: sơ đồ triển khai không có chữ dịch ⇒ không có nguồn theo ngôn ngữ (dùng ảnh gốc)
+    expect([...localizedDiagramSources(spine, localizeSpine(spine, units, translate(units), "vi")).keys()]).toEqual(spine.diagrams.filter((d) => d.kind !== "deployment").map((d) => d.id))
   })
 
   it("wireframe: nhãn đã dịch thay đúng chỗ, dòng tên màn theo tên màn đã dịch; nhãn chưa dịch giữ chữ gốc", () => {

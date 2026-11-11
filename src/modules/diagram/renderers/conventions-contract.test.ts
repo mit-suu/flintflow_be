@@ -38,10 +38,10 @@ const ROWS = kindRows(SKILL)
 const rowOf = (kind: string): KindRow | undefined => ROWS.find((r) => r.kind === kind)
 
 describe("plantuml-conventions — bảng Kinds khớp renderer", () => {
-  it("đủ 8 kind, không trùng; owner_kind và path thuộc tập đã chốt", () => {
-    expect(ROWS.map((r) => r.kind)).toEqual(["context", "usecase", "screen_flow", "erd", "class", "sequence", "state_machine", "screen_layout"])
+  it("đủ 10 kind, không trùng; owner_kind và path thuộc tập đã chốt", () => {
+    expect(ROWS.map((r) => r.kind)).toEqual(["context", "usecase", "screen_flow", "erd", "class", "sequence", "activity", "deployment", "state_machine", "screen_layout"])
     for (const r of ROWS) {
-      expect(r.owner_kind, r.kind).toMatch(/^(null|feature|function|entity|screen)\b/)
+      expect(r.owner_kind, r.kind).toMatch(/^(null|feature|function|entity|screen|use_case)\b/)
       expect(["puml", "svg"], r.kind).toContain(r.path)
     }
   })

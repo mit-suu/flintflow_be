@@ -88,11 +88,11 @@ describe("placeSections — thứ tự theo file, chèn đầu mục FPT thiếu
     expect(placed.find((p) => p.section_id === "custom:CS01")?.kind).toBe("continuation")
   })
 
-  it("mẫu bắt buộc (chế độ 3): không chèn heading ngoài mẫu", () => {
+  it("mẫu bắt buộc (chế độ 3): không chèn heading ngoài mẫu — trừ chức năng mới dưới feature của nó (TechMart 11/11, user chốt)", () => {
     const s = spine()
     s.functions.push({ ...s.functions[0], id: "FN02", order: 1, name: "Quên mật khẩu" })
     const ids = placeSections(s, { ...LAYOUT, fixedTemplate: true }).map((p) => p.section_id)
-    const fileOrder = ["fixed:1", "custom:CS01", "fixed:2.1", "feature:F-4", "function:FN01", "group:4", "fixed:4.2.3", "custom:CS02"]
+    const fileOrder = ["fixed:1", "custom:CS01", "fixed:2.1", "feature:F-4", "function:FN01", "function:FN02", "group:4", "fixed:4.2.3", "custom:CS02"]
     expect(ids).toEqual(fileOrder)
   })
 
@@ -723,5 +723,89 @@ describe("FLF-364 (câu 10) — chữ hướng dẫn của mẫu in khi mục tr
     expect(custom).toContain("Họp thứ Hai hằng tuần.")
     expect(custom).not.toContain("[Ghi lịch họp")
     expect(custom).not.toContain("ghi rõ giờ họp")
+  })
+})
+
+describe("FLF-390 — sơ đồ triển khai ở mục Phân tán (mẫu IEEE), activity của use case ở phần chức năng", () => {
+  const withDeployment = (): Spine => ({
+    ...spine(),
+    use_cases: [
+      {
+        id: "UC01",
+        name: "Đăng ký",
+        actor_ids: ["A01"],
+        function_ids: ["FN01"],
+        description: "",
+        includes: [],
+        extends: [],
+        activity_nodes: [
+          { id: "UC01-AN1", kind: "initial" },
+          { id: "UC01-AN2", kind: "action", name: "Nhập email", lane: "A01" },
+          { id: "UC01-AN3", kind: "final" }
+        ],
+        activity_flows: [
+          { from: "UC01-AN1", to: "UC01-AN2" },
+          { from: "UC01-AN2", to: "UC01-AN3" }
+        ]
+      }
+    ],
+    deployment_nodes: [{ id: "DN01", name: "Máy chủ web", kind: "device", parent_id: null, artifacts: [], components: ["Web App"] }],
+    deployment_links: []
+  })
+  const DESIGN: TemplateLayout = { ...LAYOUT, family: "ieee29148", layout: [...LAYOUT.layout.slice(0, 8), entry(8, "6 Thiết kế và triển khai", 1, "fixed:5.4"), entry(9, "Phụ lục A Biên bản họp", 1, "custom:CS02")] }
+
+  it("mẫu IEEE có 'Thiết kế và triển khai' mà chưa có 'Phân tán' ⇒ chèn mục Phân tán cuối nhóm đó, cấp con", () => {
+    const placed = placeSections(withDeployment(), DESIGN)
+    const at = placed.findIndex((p) => p.section_id === "slot:distribution")
+    const design = placed.findIndex((p) => p.title === "Thiết kế và triển khai")
+    expect(at).toBe(design + 1)
+    expect(placed[at]).toMatchObject({ kind: "slot", title: "Phân tán", level: placed[design].level + 1, fromLayout: false })
+  })
+
+  it("mẫu IEEE chưa có cả nhóm ⇒ chèn nhóm 'Thiết kế và triển khai' + 'Phân tán' trước Phụ lục", () => {
+    const placed = placeSections(withDeployment(), { ...LAYOUT, family: "ieee29148" })
+    const ids = placed.map((p) => p.section_id)
+    const group = ids.indexOf("group:design_implementation")
+    expect(group).toBeGreaterThan(-1)
+    expect(ids[group + 1]).toBe("slot:distribution")
+    expect(ids.indexOf("custom:CS02")).toBe(group + 2)
+  })
+
+  it("mẫu IEEE đã có heading Phân tán ⇒ không chèn thêm; không có dữ liệu triển khai ⇒ không chèn", () => {
+    const own: TemplateLayout = { ...DESIGN, layout: [...DESIGN.layout.slice(0, 9), entry(9, "6.1 Phân tán", 2, "slot:distribution"), entry(10, "Phụ lục A Biên bản họp", 1, "custom:CS02")] }
+    expect(placeSections(withDeployment(), own).filter((p) => p.section_id === "slot:distribution")).toHaveLength(1)
+    expect(placeSections({ ...withDeployment(), deployment_nodes: [] }, DESIGN).some((p) => p.section_id === "slot:distribution")).toBe(false)
+  })
+
+  it("mẫu FPT không chèn mục Phân tán (sơ đồ triển khai ở §4.1 khi người dùng yêu cầu)", () => {
+    expect(placeSections(withDeployment(), { ...LAYOUT, family: "fpt" }).some((p) => p.section_id === "slot:distribution")).toBe(false)
+    expect(placeSections(withDeployment(), LAYOUT).some((p) => p.section_id === "slot:distribution")).toBe(false)
+  })
+
+  it("bản in: sơ đồ triển khai dưới Phân tán, không lặp ở §4.1; activity của use case trong mục tính năng chứa nó", () => {
+    const s = withDeployment()
+    s.diagrams = [
+      { id: "D01", kind: "deployment", format: "puml", source: "@startuml\n@enduml\n", section: "fixed:4.1", owner_kind: null, owner_id: null, render_status: "ok", source_hash: "h", rendered_at: "2026-11-10T00:00:00.000Z" },
+      { id: "D02", kind: "activity", format: "svg", source: "<svg><title>Activity Diagram — Đăng ký</title></svg>", section: "feature:F-4", owner_kind: "use_case", owner_id: "UC01", render_status: "ok", source_hash: "h", rendered_at: "2026-11-10T00:00:00.000Z" }
+    ]
+    const { sections } = buildLayoutSections(s, DESIGN, [], { diagramPng: (id: string) => `PNG:${id}` })
+    const pngsOf = (id: string) => sections.filter((x) => x.id === id).flatMap((x) => x.blocks.flatMap((b) => (b.type === "image" ? [String(b.png)] : [])))
+    expect(pngsOf("slot:distribution")).toEqual(["PNG:D01"])
+    expect(pngsOf("fixed:4.1")).toEqual([])
+    expect(pngsOf("feature:F-4")).toEqual(["PNG:D02"])
+  })
+})
+
+
+describe("TechMart 11/11 — chức năng mới trong mẫu cố định", () => {
+  it("đứng sau mọi chức năng của file trong feature (không đổi số mục của file) và ghi mã use case như file", () => {
+    const s = spine()
+    s.functions.push({ ...s.functions[0], id: "FN09", order: 0, name: "So sánh" })
+    s.use_cases.push({ id: "UC-21", name: "So sánh", actor_ids: [], function_ids: ["FN09"], description: "", includes: [], extends: [] } as never)
+    const layout = { ...LAYOUT, fixedTemplate: true, layout: LAYOUT.layout.map((e) => (e.section_id === "function:FN01" ? { ...e, heading_text: "4.1 Đăng nhập (UC-01)" } : e)) }
+    const placed = placeSections(s, layout)
+    const ids = placed.map((p) => p.section_id)
+    expect(ids.indexOf("function:FN09")).toBe(ids.indexOf("function:FN01") + 1)
+    expect(placed.find((p) => p.section_id === "function:FN09")?.title).toBe("So sánh (UC-21)")
   })
 })

@@ -7,7 +7,9 @@ import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import { formatLocationId } from "./cr-impact.service.js"
 import {
+  KEYWORD_MAX_HITS,
   MAX_LOCATIONS,
+  rankByKeywords,
   elementPathOf,
   elementValue,
   emptySectionTargets,
@@ -137,10 +139,20 @@ describe("C-3 findSpineLocations", () => {
     expect(findSpineLocations(spine(), [], ["2 seconds"]).map((f) => f.path)).toEqual(["nfrs[id=NFR-01]"])
   })
 
-  it(`tối đa ${MAX_LOCATIONS} vị trí`, () => {
+  it(`FLF-375: từ khoá xếp hạng BM25 — tối đa ${KEYWORD_MAX_HITS} phần tử khớp nhất (không còn trả mọi phần tử chứa chữ)`, () => {
     const s = spine()
     for (let i = 0; i < MAX_LOCATIONS + 10; i++) s.glossary.push({ id: `G${i}`, term: `login ${i}`, definition: "login term" } as never)
-    expect(findSpineLocations(s, [], ["login"])).toHaveLength(MAX_LOCATIONS)
+    const found = findSpineLocations(s, [], ["login"])
+    expect(found).toHaveLength(KEYWORD_MAX_HITS)
+    expect(found.every((f) => f.found_by.includes("keyword") && (f.keyword_score ?? 0) > 0)).toBe(true)
+  })
+
+  it("FLF-375: phần tử nói nhiều về yêu cầu xếp trên phần tử chỉ nhắc qua một lần", () => {
+    const s = spine()
+    s.glossary.push({ id: "G1", term: "Excel import", definition: "Import and export student lists and grade sheets with Excel files." } as never)
+    s.glossary.push({ id: "G2", term: "Report", definition: "A PDF report; an Excel copy is optional." } as never)
+    const [first] = rankByKeywords([{ path: "glossary[id=G2]", value: s.glossary[s.glossary.length - 1] }, { path: "glossary[id=G1]", value: s.glossary[s.glossary.length - 2] }], ["import export Excel"])
+    expect(first.path).toBe("glossary[id=G1]")
   })
 })
 

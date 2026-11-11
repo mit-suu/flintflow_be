@@ -13,7 +13,7 @@ import { latestImport, transitionImport } from "../import/import.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { toIso } from "../import/mode1.http.js"
 import { clipMaterialText, formatCrId, formatMaterialId } from "./change-request.constants.js"
-import type { ChangeRequestDetail, CreateChangeRequest } from "./change-request.dto.js"
+import type { ChangeRequestDetail, CreateChangeRequest, PendingSection } from "./change-request.dto.js"
 import { ChangeRequest, CrCounter, type CrSeed, type IChangeRequest } from "./change-request.model.js"
 import { CR_STATUS_LABELS, assertTransition, isTerminal, type CrStatus } from "./change-request.state.js"
 import { ChangeGroup } from "./change-group.model.js"
@@ -24,7 +24,10 @@ import { assertPackageNotPending } from "../doc-version/review-package.service.j
 import * as spineRepository from "../spine/spine.repository.js"
 import { notify } from "../notification/notification.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { lockPaths, unlockPaths } from "./lock.service.js"
+import { unlockPaths } from "./lock.service.js"
+import { checkBeforeWrite, othersPending, pendingSections, userName } from "./concurrent-edit.js"
+import { elementText, locationDisplay } from "./location-display.js"
+import { previewAfter } from "./propose.service.js"
 import { addedElements, currentText, isArrayPath, opElement, valueText } from "./spine-location.js"
 import { peekPreview } from "../spine/change.service.js"
 import { markPreviewAsCr } from "../spine/change-transcript.js"
@@ -119,8 +122,10 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
     loadLayout(String(cr.projectId))
   ])
   const spine = record ? stripRecord(record) : null
+  const pending = await othersPending(cr.projectId, cr.cr_id, locations.map((l) => l.path))
+  const asText = (json: string | null | undefined) => (json ? elementText(parseJson(json)) : "")
   return {
-    change_request: toCrDto(cr),
+    change_request: { ...toCrDto(cr), created_by_name: (await userName(String(cr.created_by))) ?? null },
     locations: locations.map((l) => {
       return {
         location_id: l.location_id,
@@ -147,7 +152,28 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
               at: toIso(l.verify.at)!
             }
           : null,
-        group_id: l.group_id ?? null
+        group_id: l.group_id ?? null,
+        // Đề xuất cũ lưu `new_text = null` (chạy khô từng hỏng) ⇒ tính lại chữ "sau" từ op để người dùng thấy sẽ đổi gì
+        display: locationDisplay(
+          spine,
+          l.path,
+          l.conclusion ?? null,
+          l.proposal && l.proposal.new_text === null && l.conclusion === "edit" && spine && l.proposal.spine_ops?.length
+            ? { ...l.proposal, new_text: previewAfter(spine, l.path, l.proposal.spine_ops) }
+            : (l.proposal ?? null)
+        ),
+        conflict: l.conflict
+          ? {
+              at_proposal: asText(l.conflict.at_proposal_text),
+              current: asText(l.conflict.current_text),
+              proposal: l.conflict.proposal_text ? asText(l.conflict.proposal_text) : null,
+              changed_by: l.conflict.changed_by,
+              changed_at: toIso(l.conflict.changed_at),
+              proposed_at: toIso(l.conflict.proposed_at),
+              question: l.conflict.question ?? null
+            }
+          : null,
+        others_pending: pending.get(l.path) ?? []
       }
     }),
     groups: groups.map((g) => ({
@@ -168,6 +194,15 @@ export const listCrs = async (projectId: string, status?: CrStatus): Promise<Cha
   if (status) filter.status = status
   const crs = await ChangeRequest.find(filter).sort({ createdAt: -1, _id: -1 })
   return crs.map(toCrDto)
+}
+
+/** BF §3.2: mục nào của tài liệu đang có bản sửa chưa xác nhận (CR chưa đóng), ai giữ — cho tài liệu đang mở. */
+export const listPendingSections = async (projectId: string): Promise<PendingSection[]> => {
+  const rows = await pendingSections(projectId)
+  if (!rows.length) return []
+  const [record, layout] = await Promise.all([spineRepository.get(projectId), loadLayout(projectId)])
+  const spine = record ? stripRecord(record) : null
+  return rows.map((r) => ({ ...r, title: spine ? titleOfSection(spine, r.section_id, layout) : r.section_id }))
 }
 
 // ─── C-1 tạo ─────────────────────────────────────────────────────
@@ -219,6 +254,12 @@ export const createCr = async (projectId: string, userId: string, body: CreateCh
  */
 export const submitCr = async (cr: IChangeRequest, userId: string): Promise<void> => {
   assertCrStatus(cr, ["ready_to_submit"], "written")
+  // BF §3.2: đề xuất chưa xác nhận **treo ở người yêu cầu** — không đưa cho người khác xác nhận (họ không có bối cảnh,
+  // và người xác nhận là người đứng tên thay đổi)
+  if (String(cr.created_by) !== String(userId)) {
+    const who = (await userName(String(cr.created_by))) ?? cr.requester
+    throw new ApiError(403, `Đề xuất này đang treo ở ${who} — chỉ người đó xác nhận được (người xác nhận đứng tên thay đổi).`, "CR_NOT_REQUESTER")
+  }
   const unconcluded = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id, conclusion: null }).distinct("location_id")
   if (unconcluded.length) {
     throw new Mode1Error("CR_LOCATION_UNCONCLUDED", `Còn ${unconcluded.length} vị trí chưa có kết luận`, { location_ids: unconcluded })
@@ -236,6 +277,20 @@ export const submitCr = async (cr: IChangeRequest, userId: string): Promise<void
   const record = await spineRepository.get(String(cr.projectId))
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   assertPackageNotPending(record.baseline_submission)
+
+  // FLF-375 — "Hai người sửa cùng lúc": kiểm lại từng chỗ trên nội dung hiện tại trước khi ghi
+  const check = await checkBeforeWrite(cr, await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }), stripRecord(record))
+  if (check.conflicts) {
+    // Chữ cũ không còn ở chỗ người khác vừa sửa ⇒ không ghi gì; người dùng xem so sánh 3 cột rồi quyết
+    await transitionCr(cr, "manual_fix")
+    return
+  }
+  if (check.same && !(await ChangeLocation.countDocuments({ projectId: cr.projectId, cr_id: cr.cr_id, conclusion: { $in: ["edit", "comment"] } }))) {
+    // Mọi chỗ đã được người khác sửa giống hệt đề xuất ⇒ đóng, không ghi
+    cr.closed_reason = "Mọi chỗ của change request đã được người khác sửa giống đề xuất — không còn gì để ghi"
+    await transitionCr(cr, "cancelled")
+    return
+  }
 
   await regroup(cr)
   cr.submitted_at = new Date()
@@ -261,8 +316,6 @@ export const reviseCr = async (cr: IChangeRequest): Promise<void> => {
   if (groups.some((g) => g.decision !== "rejected")) {
     throw new Mode1Error("CR_INVALID_TRANSITION", "Chỉ sửa lại được khi mọi nhóm thay đổi đã bị từ chối", { status: cr.status, to: "proposing", allowed: [] })
   }
-  const paths: string[] = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).distinct("path")
-  await lockPaths(cr.projectId, cr.cr_id, paths)
   await ChangeGroup.deleteMany({ projectId: cr.projectId, cr_id: cr.cr_id })
   await ChangeLocation.updateMany(
     { projectId: cr.projectId, cr_id: cr.cr_id },

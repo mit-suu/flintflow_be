@@ -3,6 +3,8 @@
  */
 
 import { scanMentions, type NamedEntity } from "../import/mentions.js"
+import { Bm25 } from "../../shared/search/bm25.js"
+import { chunkText } from "../../shared/search/md-chunks.js"
 import { foldText } from "../import/text-similarity.js"
 import type { CustomBlock, Spine } from "../spine/spine.types.js"
 import type { IChangeRequest } from "./change-request.model.js"
@@ -287,6 +289,58 @@ export const materialsText = (cr: Pick<IChangeRequest, "materials">): string => 
   })
   return parts.join("\n\n")
 }
+
+/**
+ * FLF-375 — tài liệu bổ sung của CR cho prompt, chọn theo **liên quan** thay vì cắt cụt phần đầu: tổng ≤
+ * `MATERIALS_PROMPT_CHARS` ⇒ đưa đủ như `materialsText`. Vượt ⇒ cắt từng tài liệu theo cấu trúc bằng Tree-sitter
+ * (`shared/search/md-chunks.ts` — đoạn, mục danh sách, dòng bảng kèm đường tiêu đề), BM25 chấm từng đơn vị theo `query`
+ * (yêu cầu CR + chỗ đang sửa), lấy đơn vị điểm cao nhất tới hết ngân sách rồi **in lại theo thứ tự trong tài liệu**, "…"
+ * ở chỗ bỏ. Trước đây yêu cầu nằm cuối biên bản / email dài không tới được AI.
+ */
+export const relevantMaterialsText = async (cr: Pick<IChangeRequest, "materials">, query: string): Promise<string> => {
+  const materials = cr.materials ?? []
+  if (!materials.length) return "(none)"
+  if (materials.reduce((n, m) => n + m.text.length, 0) <= MATERIALS_PROMPT_CHARS) return materialsText(cr)
+  const units = (await Promise.all(materials.map(async (m, mi) => (await chunkText(m.text)).map((c, ci) => ({ mi, ci, chunk: c }))))).flat()
+  const ranked = new Bm25(units, (u) => `${u.chunk.headings.join(" ")} ${u.chunk.text}`).search(query)
+  const picked = new Set<string>()
+  let budget = MATERIALS_PROMPT_CHARS
+  // Không đơn vị nào khớp (truy vấn rỗng / khác chữ hẳn) ⇒ lấy theo thứ tự tài liệu như cũ
+  const order = ranked.length ? ranked.map((h) => h.item) : units
+  for (const u of order) {
+    const cost = u.chunk.text.length + 20
+    if (cost > budget) continue
+    budget -= cost
+    picked.add(`${u.mi}:${u.ci}`)
+  }
+  return materials
+    .map((m, mi) => {
+      const chosen = units.filter((u) => u.mi === mi)
+      const lines: string[] = []
+      let gap = false
+      let heading = ""
+      for (const u of chosen) {
+        if (!picked.has(`${mi}:${u.ci}`)) {
+          gap = true
+          continue
+        }
+        if (gap && lines.length) lines.push("…")
+        gap = false
+        const path = u.chunk.headings.join(" › ")
+        if (path && path !== heading) lines.push(`## ${path}`)
+        heading = path
+        lines.push(u.chunk.text)
+      }
+      const when = m.round === 0 ? "attached when the CR was logged" : `attached with the answers of round ${m.round}`
+      const note = lines.length ? "only the passages relevant to this change request" : "no passage relevant to this change request"
+      return `[${m.material_id}] ${m.name} (${when}; ${note})\n${lines.join("\n")}`
+    })
+    .join("\n\n")
+}
+
+/** Truy vấn BM25 của CR: tiêu đề, mô tả, lệnh gộp thêm, câu trả lời làm rõ + chữ thêm (chỗ đang sửa, hướng của BA). */
+export const crQuery = (cr: Pick<IChangeRequest, "title" | "description" | "amendments" | "clarifications">, ...extra: string[]): string =>
+  [cr.title, cr.description, ...(cr.amendments ?? []).map((a) => a.text), ...(cr.clarifications ?? []).flatMap((c) => c.answers ?? []), ...extra].filter(Boolean).join("\n")
 
 export const missingInfoText = (cr: Pick<IChangeRequest, "missing_info">): string =>
   cr.missing_info?.length ? cr.missing_info.map((f) => `- ${f}`).join("\n") : "(none)"

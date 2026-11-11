@@ -7,7 +7,6 @@ import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import { shownTexts } from "./change-request.service.js"
-import { valueOps } from "./location.service.js"
 import { previewAfter } from "./propose.service.js"
 import { addedElements, currentText, elementValue, snapshotOf, unchangedSince, valueText } from "./spine-location.js"
 import { checkLocation } from "./verify.service.js"
@@ -76,17 +75,8 @@ describe("new_text của vị trí arr[] = chỉ phần tử thêm mới", () =>
     expect(proposed.proposal.new_text).toContain("UC-126")
     expect(checkLocation(cr, proposed, s, locks)).toEqual([])
     s.use_cases.push(uc("UC-200") as never)
-    expect(() => checkLocation(cr, proposed, s, locks)).toThrow(/đã bị sửa ở chỗ khác/)
-  })
-})
-
-describe("Tự sửa vị trí arr[] (valueOps)", () => {
-  it("danh sách phần tử mới ⇒ mỗi phần tử một op add; phần tử ⇒ set", () => {
-    expect(valueOps(SLOT, [{ name: "A" }, { name: "B" }])).toEqual([
-      { op: "add", path: SLOT, value: { name: "A" } },
-      { op: "add", path: SLOT, value: { name: "B" } }
-    ])
-    expect(valueOps("actors[id=A01]", { name: "X" })).toEqual([{ op: "set", path: "actors[id=A01]", value: { name: "X" } }])
+    // FLF-375: trước khi xác nhận, chữ cũ đổi ⇒ vi phạm thường để AI soạn lại (không ném lỗi chung)
+    expect(checkLocation(cr, proposed, s, locks).map((v) => v.rule)).toEqual(["value_changed"])
   })
 })
 

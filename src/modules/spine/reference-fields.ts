@@ -33,6 +33,8 @@ export type TargetCollection =
   | "entities"
   | "validations"
   | "states"
+  | "activity_nodes"
+  | "deployment_nodes"
   | "custom_sections"
   | "section_key"
   | "path"
@@ -76,7 +78,13 @@ export const REFERENCE_FIELDS: readonly ReferenceField[] = Object.freeze([
   { path: "entities[].transitions[].to", targetCollection: "states", cardinality: "one" },
   { path: "entities[].transitions[].business_rule_ids[]", targetCollection: "business_rules", cardinality: "many" },
   { path: "functions[].interactions[].from", targetCollection: "actors", cardinality: "one" },
-  { path: "functions[].interactions[].to", targetCollection: "actors", cardinality: "one" }
+  { path: "functions[].interactions[].to", targetCollection: "actors", cardinality: "one" },
+  { path: "use_cases[].activity_nodes[].lane", targetCollection: "actors", cardinality: "one" },
+  { path: "use_cases[].activity_flows[].from", targetCollection: "activity_nodes", cardinality: "one" },
+  { path: "use_cases[].activity_flows[].to", targetCollection: "activity_nodes", cardinality: "one" },
+  { path: "deployment_nodes[].parent_id", targetCollection: "deployment_nodes", cardinality: "one" },
+  { path: "deployment_links[].from", targetCollection: "deployment_nodes", cardinality: "one" },
+  { path: "deployment_links[].to", targetCollection: "deployment_nodes", cardinality: "one" }
 ] as const satisfies readonly ReferenceField[])
 
 /** Section cố định của template FPT — từ section registry (T09). */
@@ -113,6 +121,8 @@ export const buildIdIndex = (spine: Spine): IdIndex => ({
   entities: ids(spine.entities),
   validations: new Set(spine.functions.flatMap((f) => f.validations.map((v) => v.id))),
   states: new Set(spine.entities.flatMap((e) => (e.states ?? []).map((s) => s.id))),
+  activity_nodes: new Set(spine.use_cases.flatMap((u) => (u.activity_nodes ?? []).map((n) => n.id))),
+  deployment_nodes: ids(spine.deployment_nodes ?? []),
   custom_sections: ids(spine.custom_sections)
 })
 
@@ -172,7 +182,13 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
     transitionTo,
     transitionRules,
     interactionFrom,
-    interactionTo
+    interactionTo,
+    activityLane,
+    activityFrom,
+    activityTo,
+    deploymentParent,
+    deploymentFrom,
+    deploymentTo
   ] = REFERENCE_FIELDS
 
   // BUG-04: phần tử thiếu mảng tham chiếu (model bỏ trống `includes`…) không được làm sập cả lô
@@ -189,6 +205,15 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
 
   for (const uc of spine.use_cases) {
     const owner = `use_cases[id=${uc.id}]`
+    // FLF-390: làn của nút activity là actor (trừ `system`); control flow không có id — khoá from + to, đầu chết ⇒ gỡ flow
+    for (const n of uc.activity_nodes ?? []) {
+      if (typeof n.lane === "string" && n.lane !== SYSTEM_LIFELINE) yield one(activityLane, `${owner}.activity_nodes[id=${n.id}]`, "lane", n.lane)
+    }
+    for (const fl of uc.activity_flows ?? []) {
+      const at = `${owner}.activity_flows[from=${fl.from},to=${fl.to}]`
+      yield { field: activityFrom, ownerPath: at, refPath: `${at}.from`, targetId: fl.from, target: "activity_nodes" }
+      yield { field: activityTo, ownerPath: at, refPath: `${at}.to`, targetId: fl.to, target: "activity_nodes" }
+    }
     yield* many(ucActors, owner, "actor_ids", uc.actor_ids)
     yield* many(ucFunctions, owner, "function_ids", uc.function_ids)
     yield* many(ucIncludes, owner, "includes", uc.includes)
@@ -225,6 +250,16 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
       if (i.from !== SYSTEM_LIFELINE) yield { field: interactionFrom, ownerPath: at, refPath: `${at}.from`, targetId: i.from, target: "actors" }
       if (i.to !== SYSTEM_LIFELINE) yield { field: interactionTo, ownerPath: at, refPath: `${at}.to`, targetId: i.to, target: "actors" }
     }
+
+  }
+  // FLF-390: nút triển khai lồng nhau; đường truyền thông không có id — khoá from + to, đầu chết ⇒ gỡ đường
+  for (const n of spine.deployment_nodes ?? []) {
+    if (n.parent_id !== null) yield one(deploymentParent, `deployment_nodes[id=${n.id}]`, "parent_id", n.parent_id)
+  }
+  for (const l of spine.deployment_links ?? []) {
+    const at = `deployment_links[from=${l.from},to=${l.to}]`
+    yield { field: deploymentFrom, ownerPath: at, refPath: `${at}.from`, targetId: l.from, target: "deployment_nodes" }
+    yield { field: deploymentTo, ownerPath: at, refPath: `${at}.to`, targetId: l.to, target: "deployment_nodes" }
   }
   for (const e of spine.entities) {
     yield* many(entityRelations, `entities[id=${e.id}]`, "relations", e.relations)

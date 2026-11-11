@@ -73,6 +73,19 @@ router.get("/:projectId/change-requests", authMiddleware, crController.listCrs)
 
 /**
  * @swagger
+ * /api/v1/projects/{projectId}/change-requests/pending-sections:
+ *   get:
+ *     tags: [Change request]
+ *     summary: BF §3.2 — mục đang có bản sửa chưa xác nhận (CR chưa đóng), ai giữ
+ *     parameters:
+ *       - $ref: '#/components/parameters/Mode1ProjectId'
+ *     responses:
+ *       200: { description: "`PendingSection[]` — { section_id, title, items[{ cr_id, who }] }" }
+ */
+router.get("/:projectId/change-requests/pending-sections", authMiddleware, crController.listPendingSections)
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/documents/{documentId}/extract:
  *   post:
  *     summary: FLF-338 §3.6.1 — AI rút danh sách yêu cầu từ tài liệu tham khảo (một lượt EXTRACT_REQUIREMENTS, báo credit trước ở FE)
@@ -188,7 +201,7 @@ router.get("/:projectId/change-requests/:crId", authMiddleware, crController.get
  *       - $ref: '#/components/parameters/CrId'
  *     responses:
  *       200: { $ref: '#/components/responses/CrDetail' }
- *       409: { description: "PATH_LOCKED (`meta.locked[{ path, cr_id }]`), CR_INVALID_TRANSITION" }
+ *       409: { description: "CR_INVALID_TRANSITION" }
  * /api/v1/projects/{projectId}/change-requests/{crId}/propose:
  *   post:
  *     summary: AI đề xuất edit / comment / not_related cho từng vị trí (C-4, nút 3.6), gom change group
@@ -237,7 +250,7 @@ router.get("/:projectId/change-requests/:crId", authMiddleware, crController.get
  *       - $ref: '#/components/parameters/CrId'
  *     responses:
  *       200: { $ref: '#/components/responses/CrDetail' }
- *       409: { description: PATH_LOCKED, CR_INVALID_TRANSITION }
+ *       409: { description: CR_INVALID_TRANSITION }
  * /api/v1/projects/{projectId}/change-requests/{crId}/resume:
  *   post:
  *     summary: Tiếp tục bước AI đang dừng — clarifying / proposing / verifying (UC-75)
@@ -319,6 +332,28 @@ router.get("/:projectId/change-requests/:crId", authMiddleware, crController.get
  */
 router.post("/:projectId/change-requests/:crId/amend", authMiddleware, crController.amend)
 
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/change-requests/{crId}/messages:
+ *   post:
+ *     summary: "Tin nhắn trong lúc CR mở (FLF-375): lệnh sửa ⇒ gộp vào CR như /amend; câu hỏi ⇒ AI trả lời từ SRS + trạng thái CR"
+ *     tags: [Change requests (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/Mode1ProjectId'
+ *       - $ref: '#/components/parameters/CrId'
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [text], properties: { text: { type: string }, language: { type: string, enum: [vi, en] } } }
+ *     responses:
+ *       200: { description: "CrDetail + message { kind: amended } | { kind: answer, reply }" }
+ *       409: { description: CR_INVALID_TRANSITION (lệnh sửa khi CR không gộp được) }
+ */
+router.post("/:projectId/change-requests/:crId/messages", authMiddleware, crController.message)
+
 router.post("/:projectId/change-requests/:crId/materials", authMiddleware, crController.receiveMaterial, crController.addCrMaterial)
 router.delete("/:projectId/change-requests/:crId/materials/:mid", authMiddleware, crController.deleteCrMaterial)
 
@@ -335,7 +370,7 @@ router.post("/:projectId/change-requests/:crId/resume", authMiddleware, crContro
  * @swagger
  * /api/v1/projects/{projectId}/change-requests/{crId}/locations/{locId}:
  *   patch:
- *     summary: Sửa tay / kết luận tay một vị trí (UC-81, nút 3.9) ⇒ manual = true
+ *     summary: "Quyết định một chỗ (UC-81): chấp nhận đề xuất AI, hoặc giữ nguyên / bỏ + lý do. FLF-375: không nhận nội dung tự gõ"
  *     tags: [Change requests (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -351,14 +386,12 @@ router.post("/:projectId/change-requests/:crId/resume", authMiddleware, crContro
  *             type: object
  *             properties:
  *               conclusion: { type: string, enum: [edit, comment, not_related] }
- *               reason: { type: string }
- *               new_value: { description: "Giá trị mới của cả phần tử (JSON) ⇒ op set tại path của vị trí" }
- *               spine_ops: { type: array, items: { type: object } }
- *               comment_text: { type: string }
+ *               reason: { type: string, description: "Bắt buộc khi not_related (giữ nguyên / bỏ)" }
  *     responses:
  *       200: { $ref: '#/components/responses/CrDetail' }
+ *       400: { description: "VALIDATION_ERROR — gửi new_value / spine_ops / comment_text (đã bỏ sửa tay, FLF-375)" }
  *       404: { description: CR_LOCATION_NOT_FOUND }
- *       409: { description: CR_INVALID_TRANSITION, PATH_LOCKED }
+ *       409: { description: "CR_INVALID_TRANSITION, CR_NO_PROPOSAL (chấp nhận khi AI chưa soạn)" }
  */
 router.patch("/:projectId/change-requests/:crId/locations/:locId", authMiddleware, crController.updateLocation)
 
@@ -387,7 +420,7 @@ router.patch("/:projectId/change-requests/:crId/locations/:locId", authMiddlewar
  *       200: { $ref: '#/components/responses/CrDetail' }
  *       402: { description: INSUFFICIENT_CREDIT }
  *       404: { description: CR_LOCATION_NOT_FOUND }
- *       409: { description: "CR_INVALID_TRANSITION (CR không ở proposing / verifying / manual_fix / ready_to_submit), PATH_LOCKED" }
+ *       409: { description: "CR_INVALID_TRANSITION (CR không ở proposing / verifying / manual_fix / ready_to_submit)" }
  *       502: { description: AI_PROVIDER_ERROR }
  */
 router.post("/:projectId/change-requests/:crId/locations/:locId/owner-step-draft", authMiddleware, crController.ownerStepDraft)

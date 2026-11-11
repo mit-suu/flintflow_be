@@ -23,7 +23,7 @@ import { approvedBatch } from "./add-use-case.service.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus, transitionCr } from "./change-request.service.js"
 import { AMENDABLE_CR_STATUSES, MAX_CLARIFY_ROUNDS, canAskMore } from "./change-request.state.js"
-import { answersText, crHeader, crProjection, materialsText, truncate } from "./cr-context.js"
+import { answersText, crHeader, crProjection, crQuery, relevantMaterialsText, truncate } from "./cr-context.js"
 import { mentionedSections, mergeHeadings, type HeadingRef } from "./section-mention.js"
 
 /**
@@ -110,7 +110,7 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
     ...crHeader(cr),
     round: Math.min(asked + 1, MAX_CLARIFY_ROUNDS),
     clarifications: answersText(cr),
-    materials: materialsText(cr),
+    materials: await relevantMaterialsText(cr, crQuery(cr)),
     // FLF-367: kèm BR / NFR và đoạn văn giữ nguyên liên quan (theo cụm từ của CR hoặc mục được gọi tên) để thấy mâu thuẫn
     projection: crProjection(spine, `${cr.title}\n${crHeader(cr).description}\n${answersText(cr)}\n${(cr.materials ?? []).map((m) => m.text).join("\n")}`, {
       sections: named

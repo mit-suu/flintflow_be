@@ -43,7 +43,7 @@ describe("C-3 hybrid retrieval", () => {
     ])
     const d = detail(await c.post(`${cr}/impact`))
     expect(d.locations.map((l) => [l.path, l.found_by, l.vector_score])).toEqual([[LOGIN, ["vector"], 0.87]])
-    expect(await lockedPaths(projectId, crId)).toEqual([LOGIN])
+    expect(await lockedPaths(projectId, crId)).toEqual([]) // FLF-375: không khoá
     expect((await ChangeLocation.findOne({ projectId, cr_id: crId }).lean())?.vector_score).toBe(0.87)
 
     // query = tiêu đề + mô tả + từ khoá C-2
@@ -54,7 +54,7 @@ describe("C-3 hybrid retrieval", () => {
     expect(query).toContain("session timeout")
   })
 
-  it("vị trí đồ thị giữ nguyên; vector thay từ khoá (BR-01 chỉ khớp chữ không còn); trùng đích ⇒ gộp found_by", async () => {
+  it("FLF-375: vị trí đồ thị giữ nguyên; vector TRỘN với từ khoá BM25 (BR-01 khớp chữ vẫn còn); trùng đích ⇒ gộp found_by", async () => {
     const { c, cr } = await toImpactReview(PERF_TARGETS, "Faster response time", "Response time must be 1 second instead of 2 seconds.")
     vectorCandidates.mockResolvedValue([
       { ref: "nfrs[id=NFR-01]", score: 0.93 },
@@ -62,10 +62,10 @@ describe("C-3 hybrid retrieval", () => {
     ])
     const d = detail(await c.post(`${cr}/impact`))
     const byPath = new Map(d.locations.map((l) => [l.path, l]))
-    expect(byPath.get("nfrs[id=NFR-01]")).toMatchObject({ found_by: ["spine_link", "vector"], vector_score: 0.93 })
+    expect(byPath.get("nfrs[id=NFR-01]")).toMatchObject({ vector_score: 0.93 })
+    expect([...byPath.get("nfrs[id=NFR-01]")!.found_by].sort()).toEqual(["keyword", "spine_link", "vector"])
     expect(byPath.get(LOGIN)).toMatchObject({ found_by: ["vector"], vector_score: 0.81 })
-    expect(byPath.has("business_rules[id=BR-01]")).toBe(false)
-    expect(d.locations.some((l) => l.found_by.includes("keyword"))).toBe(false)
+    expect(byPath.get("business_rules[id=BR-01]")?.found_by).toEqual(["keyword"])
   })
 
   it("không có ứng viên vector ⇒ y như trước: từ khoá tìm BR-01, vector_score null", async () => {

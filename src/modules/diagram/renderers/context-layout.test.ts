@@ -166,3 +166,24 @@ describe("context layout geometry", () => {
     expect(layout.edges).toEqual([])
   })
 })
+
+describe("FLF-375: sơ đồ ngữ cảnh của tài liệu upload", () => {
+  const upload = () => {
+    const s = createEmptySpine({ name: "QLHS" })
+    s.custom_sections.push({ id: "CS01", heading: "", level: 2, source: "import", blocks: [] } as never)
+    s.actors.push(
+      { id: "A01", name: "Giáo vụ", kind: "human", description: "", parent_id: null } as never,
+      { id: "A02", name: "Máy chủ email (SMTP)", kind: "system", description: "", parent_id: null, flows_out: ["Ra: email thông báo"] } as never
+    )
+    return s
+  }
+
+  it("mỗi actor có đủ hai chiều (yêu cầu ⇄ phản hồi); bỏ tiền tố chiều 'Ra:' khỏi nhãn", () => {
+    const svg = String((renderContext(upload(), null)[0] as { source?: string }).source ?? "")
+    expect(svg).toContain("User Input")
+    expect(svg).toContain("Processing Result")
+    expect(svg).toContain("Service Response")
+    expect(svg).toMatch(/>Email Thông Báo</i)
+    expect(svg).not.toMatch(/Ra: /)
+  })
+})

@@ -13,7 +13,6 @@
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { Mode1Error } from "../import/mode1.errors.js"
-import { locksOf, pathLocked } from "./lock.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 import type { CrProposeOutput } from "../../shared/ai/response-parser.js"
 import { stripRecord } from "../import/check.service.js"
@@ -31,11 +30,14 @@ import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus, transitionCr } from "./change-request.service.js"
 import { regroup } from "./group.service.js"
 import { ChangeLocation, type IChangeLocation } from "./change-location.model.js"
-import { answersText, crHeader, glossaryText, materialsText, missingInfoText, truncate } from "./cr-context.js"
+import { answersText, crHeader, crQuery, glossaryText, missingInfoText, relevantMaterialsText, truncate } from "./cr-context.js"
 import { addedElements, elementValue, isArrayPath, isSectionTarget, opElement, snapshotOf, valueText } from "./spine-location.js"
 import { isDiagramLocation, refreshDiagramLocations } from "./diagram-location.js"
 import { reassignDuplicateIds } from "./new-ids.js"
 import { proposeUseCaseBatch } from "./add-use-case.service.js"
+import { elementText } from "./location-display.js"
+import { directHit } from "./word-diff.js"
+import { crDocumentLanguage, documentLanguageText } from "./cr-language.js"
 
 /**
  * Số vị trí gửi trong một lượt C-4. Trước là 12: prompt kèm giá trị JSON của từng phần tử (tới 2500 ký tự) và câu
@@ -241,9 +243,6 @@ export const matchProposals = <L extends { location_id: string; path: string }>(
   return matched
 }
 
-/** Lý do của vị trí nằm ngoài lô thêm / xoá / sửa use case (FLF-318) — giữ nguyên, không qua model. */
-export const OUTSIDE_USE_CASE_BATCH = "Không thuộc lô thay đổi use case — giữ nguyên"
-
 export const runPropose = async (cr: IChangeRequest, userId: string): Promise<void> => {
   assertCrStatus(cr, ["impact_review", "proposing"], "proposing")
   await transitionCr(cr, "proposing")
@@ -254,6 +253,8 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
   const spine = stripRecord(record)
   // FLF-364: hướng dẫn của mẫu upload theo mục (Mode 1) — ngữ cảnh soạn đúng ý người làm mẫu
   const guidance = templateGuidanceBySection(await TemplateProfile.findOne({ projectId: cr.projectId }).select("heading_map layout").lean())
+  // QLHS 11/11 bug #17: nói rõ ngôn ngữ tài liệu — thiếu dòng này model viết bước mới bằng tiếng Anh vào tài liệu tiếng Việt
+  const documentLanguage = documentLanguageText(await crDocumentLanguage(String(cr.projectId), spine))
   let locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
 
   // FLF-318: CR thêm / xoá use case ⇒ soạn trọn lô một lượt như chat trước baseline (luật 3e / 3g), vị trí còn
@@ -261,12 +262,9 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
   const bundled = await proposeUseCaseBatch(cr, userId, spine, locations)
   if (bundled === "paused") return
   if (bundled === "done") {
-    // Như chat trước baseline: thay đổi là đúng lô use case — vị trí khác (tìm theo từ khoá / tham chiếu) giữ nguyên,
-    // không gọi model đề xuất thêm (model hay sửa văn xuôi, thêm quy tắc ngoài yêu cầu)
-    await ChangeLocation.updateMany(
-      { projectId: cr.projectId, cr_id: cr.cr_id, conclusion: null, manual: { $ne: true }, found_by: { $ne: "diagram" } },
-      { $set: { conclusion: "not_related", reason: OUTSIDE_USE_CASE_BATCH, proposal: null, verify: null } }
-    )
+    // FLF-375 (BF C-4 "mỗi chỗ phải có kết luận + lý do"): vị trí ngoài lô use case KHÔNG còn tự gán "giữ nguyên" —
+    // văn xuôi / hình / kiểm chứng còn nhắc phần tử lô vừa xoá hay đổi (vd "UC-05, UC-06, UC-09 có sơ đồ hoạt động") phải
+    // được AI xem và đề xuất như mọi CR; người dùng duyệt từng chỗ. Đọc lại vị trí: lô vừa thêm / kết luận vài vị trí.
     locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
   }
 
@@ -289,10 +287,12 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
           answers: answersText(cr),
           owner_skill: ownerSkillText(owner || null),
           target_sections: targetSectionsText(spine, cr, locations, guidance),
-          materials: materialsText(cr),
+          // FLF-375: chỉ đoạn tài liệu đính kèm liên quan tới CR + các chỗ của lô (Tree-sitter + BM25)
+          materials: await relevantMaterialsText(cr, crQuery(cr, ...batch.map((l) => locationPromptText(spine, l, cr.seed?.ops ?? [])))),
           missing_info: missingInfoText(cr),
           locations: batch.map((l) => locationPromptText(spine, l, cr.seed?.ops ?? [])).join("\n"),
-          glossary: glossaryText(spine)
+          glossary: glossaryText(spine),
+          document_language: documentLanguage
         })
         if (!result.ok) {
           if (result.reason !== "credits" && batch.length > 1) {
@@ -314,6 +314,7 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
           loc.conclusion = out.conclusion
           loc.reason = out.reason
           loc.proposal = {
+            proposed_at: new Date(),
             ...snapshotOf(spine, loc.path),
             new_text: out.conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
             comment_text: out.conclusion === "comment" ? (out.comment_text ?? null) : null,
@@ -321,6 +322,8 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
             assumptions: out.conclusion === "not_related" ? [] : out.assumptions
           }
           loc.verify = null
+          // Đề xuất mới chụp nội dung hiện tại ⇒ xung đột cũ (nếu có, từ lần xác nhận trước) không còn ý nghĩa
+          loc.conflict = null
           await loc.save()
         }
         batch = batch.filter((l) => !matched.has(l))
@@ -347,8 +350,6 @@ export const draftInOwnerStep = async (cr: IChangeRequest, userId: string, locat
   const loc = await ChangeLocation.findOne({ projectId: cr.projectId, cr_id: cr.cr_id, location_id: locationId })
   if (!loc) throw new Mode1Error("CR_LOCATION_NOT_FOUND", "Không tìm thấy vị trí cần sửa này")
   // Phase 8: mục riêng (không có step sở hữu) vẫn soạn lại được — AI viết theo hướng của BA, không kèm skill nội dung
-  const holder = (await locksOf(cr.projectId, [loc.path])).get(loc.path)
-  if (holder !== cr.cr_id) throw pathLocked(holder ? [{ path: loc.path, cr_id: holder }] : [])
 
   const record = await spineRepository.get(String(cr.projectId))
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
@@ -362,6 +363,29 @@ export const draftInOwnerStep = async (cr: IChangeRequest, userId: string, locat
     if (cr.status === "ready_to_submit") await transitionCr(cr, "verifying")
     return
   }
+  // BF §3.2 "AI soạn lại trên nội dung hiện tại": yêu cầu gốc đụng thẳng phần người khác vừa sửa ⇒ hỏi lại trong chat,
+  // không gọi AI (không tốn credit), không tự chọn. Người dùng trả lời (chọn gợi ý / gõ) ⇒ gọi lại đường này với câu trả lời.
+  if (loc.conflict && !loc.conflict.question && loc.conflict.proposal_text) {
+    const text = (json: string) => elementText(JSON.parse(json))
+    const hit = directHit(text(loc.conflict.at_proposal_text), text(loc.conflict.current_text), text(loc.conflict.proposal_text))
+    if (hit) {
+      const who = loc.conflict.changed_by
+      loc.conflict.question = {
+        text: `${who} vừa đổi “${hit.original}” thành “${hit.theirs}”, còn yêu cầu của bạn muốn đổi thành “${hit.yours}”. Giữ bản nào?`,
+        suggestions: [`Dùng “${hit.yours}” theo yêu cầu của tôi`, `Giữ “${hit.theirs}” của ${who} và soạn phần còn lại`]
+      }
+      loc.markModified("conflict")
+      await loc.save()
+      return
+    }
+  }
+  // Câu trả lời cho câu hỏi "Giữ bản nào?" là một vòng làm rõ thật sự: C-4 / C-5 / C-2 về sau đều thấy (không hỏi lại
+  // "ngưỡng gốc là 1 hay 3?" ở bước kiểm nhất quán)
+  if (loc.conflict?.question) {
+    cr.clarifications.push({ round: cr.clarifications.length + 1, questions: [loc.conflict.question.text], answers: [instruction], suggestions: [loc.conflict.question.suggestions] })
+    cr.markModified("clarifications")
+    await cr.save()
+  }
   const result = await withMeteredAi<CrProposeOutput>({ projectId: String(cr.projectId), userId, stepId: `C-4:${cr.cr_id}` }, ActionType.CR_PROPOSE, {
     ...crHeader(cr),
     answers: `${answersText(cr)}
@@ -374,10 +398,11 @@ Analyst's instruction for ${loc.location_id} (${loc.owner_step ? `fix in owner s
       await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).select("path section_id").lean(),
       templateGuidanceBySection(await TemplateProfile.findOne({ projectId: cr.projectId }).select("heading_map layout").lean())
     ),
-    materials: materialsText(cr),
+    materials: await relevantMaterialsText(cr, crQuery(cr, instruction, locationPromptText(spine, loc, cr.seed?.ops ?? []))),
     missing_info: missingInfoText(cr),
     locations: locationPromptText(spine, loc, cr.seed?.ops ?? []),
-    glossary: glossaryText(spine)
+    glossary: glossaryText(spine),
+    document_language: documentLanguageText(await crDocumentLanguage(String(cr.projectId), spine))
   })
   if (!result.ok) {
     // `manual_fix` không phải bước pause được (Flow 4/5 của CR chỉ ở clarifying/proposing/verifying) ⇒ báo lỗi, giữ nguyên
@@ -385,11 +410,12 @@ Analyst's instruction for ${loc.location_id} (${loc.owner_step ? `fix in owner s
     throw new ApiError(502, result.userMessage, "AI_PROVIDER_ERROR", result.code ? { cause_code: result.code } : undefined)
   }
   const out = matchProposals([loc], result.data.locations).get(loc)
-  if (!out) throw new ApiError(502, "AI chưa đưa ra đề xuất cho vị trí này — thử lại hoặc sửa trực tiếp", "AI_PROVIDER_ERROR")
+  if (!out) throw new ApiError(502, "AI chưa đưa ra đề xuất cho chỗ này — thử lại, hoặc gõ hướng sửa cụ thể hơn", "AI_PROVIDER_ERROR")
   const ops = out.conclusion === "not_related" ? [] : out.spine_ops
   loc.conclusion = out.conclusion
   loc.reason = out.reason
   loc.proposal = {
+    proposed_at: new Date(),
     ...snapshotOf(spine, loc.path),
     new_text: out.conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
     comment_text: out.conclusion === "comment" ? (out.comment_text ?? null) : null,
@@ -398,6 +424,8 @@ Analyst's instruction for ${loc.location_id} (${loc.owner_step ? `fix in owner s
   }
   loc.manual = true
   loc.verify = null
+  // FLF-375: "AI soạn lại trên nội dung hiện tại" sau màn so sánh 3 cột ⇒ đề xuất mới chụp nội dung hiện tại, hết xung đột
+  loc.conflict = null
   await loc.save()
   // Đã đạt kiểm mà soạn lại một vị trí ⇒ phải kiểm lại (như sửa tay)
   if (cr.status === "ready_to_submit") await transitionCr(cr, "verifying")
