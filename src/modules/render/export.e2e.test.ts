@@ -23,7 +23,7 @@ const syntheticChanges: Change[] = [
   { projectId: "p", seq: 3, txn: "txn-2", op: "set", path: "project.vision", before: "old", value: "new", reason: "Refine product vision after review", at: "2026-09-05T10:00:00.000Z", by: "650000000000000000000010", step_id: "S-2.1" }
 ]
 
-describe("export end-to-end — fixture 19 màn", () => {
+describe("export end-to-end - fixture 19 màn", () => {
   it("assemble → writeDocx: 5 chương, §I có dòng từ changes[], ảnh 5 diagram nhúng, watermark DRAFT", async () => {
     const spine = load19Screens()
     const doc = await _internal.buildDocument(

@@ -1,7 +1,7 @@
 # Batching the S-5 loop
 
 > Human-facing reference. **Not loaded at runtime** (`draft-to-ops.ts#contentGuidance` calls `getSkill`
-> without a `references` option) — the operative rules are inlined in `../SKILL.md`.
+> without a `references` option) - the operative rules are inlined in `../SKILL.md`.
 
 ## Why batches exist
 
@@ -19,7 +19,7 @@ second call anyway.
   not `S-5.2`/`S-5.4`, or when the loop owns ≤ 6 functions.
 - Otherwise it chunks the loop's functions by `order`, then `id`, into groups of ≤ 6.
 - `batchContext(ctx, ids)` narrows every `functions*` key of the projection to that group. Nothing else
-  changes — no new prompt variable, so `draft-to-ops.ts` (T11's file) stays untouched.
+  changes - no new prompt variable, so `draft-to-ops.ts` (T11's file) stays untouched.
 
 So the model never sees the functions it must not write, which is a stronger guarantee than telling it
 not to.
@@ -29,10 +29,10 @@ not to.
 - **Call budget.** Each batch is one `draft` call against the 8-calls-per-step ceiling
   (`CALLS_LIMIT`), and the step also spends one `elicit` call. A screen with more than ~42 functions
   therefore cannot finish in one round: it stops at `CALL_LIMIT` and the user accepts what exists at the
-  gate. That is deliberate — no loop-specific exemption from the ceiling.
+  gate. That is deliberate - no loop-specific exemption from the ceiling.
 - **Step count is unchanged.** Batching happens *inside* `S-5.4@<screen>`; it does not add steps, so the
   `50 + 5 × N` total in the progress bar stays exact.
-- **Regenerate.** A gate `regenerate` reverts the step's whole seq range and redrafts — every batch runs
+- **Regenerate.** A gate `regenerate` reverts the step's whole seq range and redrafts - every batch runs
   again, not just the last one.
 
 ## Ordering

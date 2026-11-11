@@ -48,7 +48,7 @@ export const isInBriefPhase = (spine: Pick<Spine, "progress" | "steps">): boolea
   spine.progress.current_phase === null ? spine.steps.every((step) => step.status !== "accepted") : isBriefPhase(spine.progress.current_phase)
 
 export const BRIEF_PROJECT_WRITE_MESSAGE =
-  "Ở Brief, tầm nhìn/mục tiêu ghi vào addendum topic vision/goals (content ngôn ngữ user + content_en tiếng Anh) — không ghi project.vision/project.goals; S-1.1 sẽ dựng hai field này."
+  "Ở Brief, tầm nhìn/mục tiêu ghi vào addendum topic vision/goals (content ngôn ngữ user + content_en tiếng Anh) - không ghi project.vision/project.goals; S-1.1 sẽ dựng hai field này."
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v)
 

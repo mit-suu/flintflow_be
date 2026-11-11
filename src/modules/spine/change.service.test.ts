@@ -160,7 +160,7 @@ beforeEach(() => {
 
 // ─── nhánh ───────────────────────────────────────────────────────
 
-describe("branchOf — ba nhánh", () => {
+describe("branchOf - ba nhánh", () => {
   const empty = { fields: [], sections: [], diagrams: [], referrers: [] }
 
   it("không phụ thuộc gì ⇒ silent", () => {
@@ -185,7 +185,7 @@ describe("branchOf — ba nhánh", () => {
 
 // ─── preview ─────────────────────────────────────────────────────
 
-describe("preview — diff + impact, không ghi", () => {
+describe("preview - diff + impact, không ghi", () => {
   it("lô ops thuần: diff đầy đủ, branch dependent, preview_id để xác nhận", async () => {
     await seed()
     const result = await preview(PROJECT, USER, { base_version: 1, ops: [{ op: "set", path: "actors[id=A01].name", value: "Product Owner" }] }, {}, deps)
@@ -437,7 +437,7 @@ describe("preview — diff + impact, không ghi", () => {
       await seed()
       const asked = await preview(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Send Absence Warning cho Analyst, màn hình riêng" }, {}, deps)
       expect(asked.ok).toBe(false)
-      expect(asked.clarification).toContain('AI đề xuất thêm để khớp dự án (giữ hay bỏ):\n2. "Review Absence Warnings" (Founder) — màn mới: "Warning Review"')
+      expect(asked.clarification).toContain('AI đề xuất thêm để khớp dự án (giữ hay bỏ):\n2. "Review Absence Warnings" (Founder) - màn mới: "Warning Review"')
       expect(asked.clarification_choices).toContain("Bỏ các use case AI đề xuất")
 
       const history = `User: Thêm use case Send Absence Warning cho Analyst, màn hình riêng\nAI: ${asked.clarification}`
@@ -554,7 +554,7 @@ describe("preview — diff + impact, không ghi", () => {
 
 // ─── nhánh instruction ───────────────────────────────────────────
 
-describe("instruction — câu lệnh tự nhiên qua skill apply-change-op", () => {
+describe("instruction - câu lệnh tự nhiên qua skill apply-change-op", () => {
   it("model trả ops ⇒ preview như lô thường", async () => {
     await seed()
     deps.changeExecutor = vi.fn(async () =>
@@ -570,12 +570,12 @@ describe("instruction — câu lệnh tự nhiên qua skill apply-change-op", ()
 
   it("lệnh mơ hồ ⇒ preview trả clarification (200), apply ném 409 NEEDS_CLARIFICATION", async () => {
     await seed()
-    deps.changeExecutor = vi.fn(async () => aiResult({ clarification_needed: "Bạn muốn đổi actor nào — A01 hay A03?" }))
+    deps.changeExecutor = vi.fn(async () => aiResult({ clarification_needed: "Bạn muốn đổi actor nào - A01 hay A03?" }))
 
     const result = await preview(PROJECT, USER, { base_version: 1, instruction: "đổi tên admin" }, {}, deps)
     expect(result.ok).toBe(false)
     // Mã actor model còn chép được đổi sang tên trước khi tới user
-    expect(result.clarification).toBe("Bạn muốn đổi actor nào — 'Founder' hay 'Administrator'?")
+    expect(result.clarification).toBe("Bạn muốn đổi actor nào - 'Founder' hay 'Administrator'?")
     expect(result.changes).toHaveLength(0)
 
     await expect(apply(PROJECT, USER, { base_version: 1, instruction: "đổi tên admin" }, {}, deps)).rejects.toBeInstanceOf(NeedsClarificationError)
@@ -620,7 +620,7 @@ describe("instruction — câu lệnh tự nhiên qua skill apply-change-op", ()
       {
         base_version: 1,
         instruction: "cái thứ nhất",
-        chat_history: "User: đổi tên A01 thành Product Owner\nAI: Bạn muốn đổi actor nào — A01 hay A03?"
+        chat_history: "User: đổi tên A01 thành Product Owner\nAI: Bạn muốn đổi actor nào - A01 hay A03?"
       },
       {},
       deps
@@ -738,7 +738,7 @@ describe("instruction — câu lệnh tự nhiên qua skill apply-change-op", ()
   })
 })
 
-describe("buildChangeProjection — brief_core ở pha Brief", () => {
+describe("buildChangeProjection - brief_core ở pha Brief", () => {
   const entry = (id: string, topic: string) => ({ id, topic, content: "Nội dung", content_en: "Content", target_section: "fixed:1", captured_at: "2026-09-30T00:00:00.000Z" })
   const at = (phase: string): Spine => ({
     ...structuredClone(FIXTURE),
@@ -847,7 +847,7 @@ describe("sửa phân quyền màn hình (§3.1.3) và output sai khuôn", () =>
   })
 })
 
-describe("buildChangeProjection — chỉ thực thể được nhắc", () => {
+describe("buildChangeProjection - chỉ thực thể được nhắc", () => {
   it("nhắc id ⇒ chỉ phần tử đó, không nạp cả Spine", () => {
     const projection = buildChangeProjection(FIXTURE, "Đổi tên actor A01 thành Product Owner")
     expect(projection.actors).toHaveLength(1)
@@ -880,7 +880,7 @@ describe("buildChangeProjection — chỉ thực thể được nhắc", () => {
 
 // ─── apply ───────────────────────────────────────────────────────
 
-describe("apply — ghi Spine, section phụ thuộc thành stale", () => {
+describe("apply - ghi Spine, section phụ thuộc thành stale", () => {
   it("đổi tên actor: ghi changes[], recompute cờ, fixed:2.2.2 thành stale", async () => {
     await seed()
     const applied = await apply(PROJECT, USER, { base_version: 1, ops: [{ op: "set", path: "actors[id=A01].name", value: "Product Owner" }] }, {}, deps)
@@ -921,7 +921,7 @@ describe("apply — ghi Spine, section phụ thuộc thành stale", () => {
   })
 })
 
-describe("apply sau baseline — change request (FLF-294): người yêu cầu + nguồn + reason bắt buộc, impact luôn có", () => {
+describe("apply sau baseline - change request (FLF-294): người yêu cầu + nguồn + reason bắt buộc, impact luôn có", () => {
   const cr = { requester: "Ms. Lan", source: { kind: "meeting_minutes" as const, ref: "Biên bản 15/10" } }
   beforeEach(() => {
     crCounter.seq = 0
@@ -974,7 +974,7 @@ describe("apply sau baseline — change request (FLF-294): người yêu cầu +
     expect(applied.cr_id).toBe("CR-001")
     expect(applied.branch).toBe("post_baseline")
     expect(applied.impact.sections.map((s) => s.id)).toContain("fixed:1")
-    expect(applied.changes[0].reason).toBe("CR-001 · Ms. Lan · meeting minutes: Biên bản 15/10 — Khách hàng đổi mục tiêu")
+    expect(applied.changes[0].reason).toBe("CR-001 · Ms. Lan · meeting minutes: Biên bản 15/10 - Khách hàng đổi mục tiêu")
   })
 
   it("trước baseline ⇒ không đòi CR, cr_id null", async () => {
@@ -992,7 +992,7 @@ describe("apply sau baseline — change request (FLF-294): người yêu cầu +
   })
 })
 
-describe("isChangeInstruction — nhận lệnh sửa trong chat thường", () => {
+describe("isChangeInstruction - nhận lệnh sửa trong chat thường", () => {
   it.each([
     "Đổi tên actor A01 thành Product Owner",
     "Xoá màn hình S07",
@@ -1019,7 +1019,7 @@ describe("isChangeInstruction — nhận lệnh sửa trong chat thường", () 
     expect(isChangeInstruction("Theo tôi thì phần này có lẽ nên đổi tên lại cho gọn")).toBe(false)
   })
 
-  it("FLF-260: từ hỏi tiếng Anh khớp nguyên từ — \"how\" trong \"showing\" không chặn lệnh; câu hỏi thật vẫn chặn", () => {
+  it("FLF-260: từ hỏi tiếng Anh khớp nguyên từ - \"how\" trong \"showing\" không chặn lệnh; câu hỏi thật vẫn chặn", () => {
     expect(isChangeInstruction("Add a field showing the order status")).toBe(true)
     expect(isChangeInstruction("Update the dashboard so it shows overdue tasks")).toBe(true)
     expect(isChangeInstruction("How does this work?")).toBe(false)
@@ -1210,7 +1210,7 @@ describe("FLF-318: sửa use case kéo theo phần của nó (luật 3h)", () =>
   })
 })
 
-describe("FLF-278 — mục riêng của mẫu khách qua chat (soạn nháp từ hướng dẫn + dữ liệu dự án)", () => {
+describe("FLF-278 - mục riêng của mẫu khách qua chat (soạn nháp từ hướng dẫn + dữ liệu dự án)", () => {
   const block = (text: string) => ({ kind: "paragraph" as const, text, rows: null, image_ref: null })
   const conventions = { id: "CS07", heading: "Document Conventions", level: 2, blocks: [block("[Describe the typographical conventions used in this SRS.]")], source: "import" as const }
   const hardware = { id: "CS08", heading: "Hardware Interfaces", level: 2, blocks: [], source: "import" as const }

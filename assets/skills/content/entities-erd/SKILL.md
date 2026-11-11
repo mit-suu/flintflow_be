@@ -26,8 +26,8 @@ stub: false
 ---
 # Entities And ERD
 
-Covers **S-4.5 Entity Relationship Diagram** — feeds `fixed:3.1.5`. The `erd` diagram is rendered by code
-straight from `entities[]` in the notation the project chose (Chen, Crow's foot or IDEF1X — not your choice, never
+Covers **S-4.5 Entity Relationship Diagram** - feeds `fixed:3.1.5`. The `erd` diagram is rendered by code
+straight from `entities[]` in the notation the project chose (Chen, Crow's foot or IDEF1X - not your choice, never
 mentioned in ops): entity name in a box, each relation labelled with its verb, ends drawn from cardinality and
 `relation_optional`; attributes of kind `key` / `reference` show as PK / FK. Code also renders one **class diagram per
 feature** (domain level) from `entities[].feature_ids` and `attributes`, and one **state machine diagram per entity that has a
@@ -40,11 +40,11 @@ Work through the passes **in order**; skipping one produced the wrong ERDs liste
 
 - `name`: singular, Title Case, English, unique. Never ends in List, Screen, Page, Form, Popup, Modal,
   Dialog, Service, Manager, Controller, DTO or Table.
-- `description`: one grammatical sentence — what **one** instance is and whose it is. No attribute list in it
+- `description`: one grammatical sentence - what **one** instance is and whose it is. No attribute list in it
   (they go in `attributes`, Pass 7; field rules live in S-5.4 and S-7.1).
 - `root`: `true` only for master data that exists on its own (Pass 2). Omit it on every other entity.
 - `relations`: ids of this entity's **children** (the "many" side). Every id exists after this batch.
-- `relation_verbs`: one verb per id in `relations` — the label of the relation on the diagram; it must read true parent → child.
+- `relation_verbs`: one verb per id in `relations` - the label of the relation on the diagram; it must read true parent → child.
 - `relation_cardinality`: `{"<child id>": "1"}` only for a proven one-to-one (Pass 3a); omitted = `N`.
 - `relation_optional`: child ids that can exist **without** this parent (Pass 3, step 2).
 - `attributes` and `feature_ids`: Pass 7 · `states` and `transitions`: Pass 8.
@@ -52,7 +52,7 @@ Work through the passes **in order**; skipping one produced the wrong ERDs liste
 **Linked** below always means one of three things, nothing else: B is a **direct parent** of A; B is an
 **ancestor** of A through the parent chain; or A and B share an **associative child**.
 
-## Pass 1 — Inventory (every function, one by one)
+## Pass 1 - Inventory (every function, one by one)
 
 For **each function** in the projection, name the stored things it creates, reads or changes, then
 classify each noun:
@@ -60,8 +60,8 @@ classify each noun:
 | The noun is… | Model it as |
 | --- | --- |
 | a thing the product keeps and a user can name | an entity |
-| a property of another thing (status, score value, deadline, capacity) | nothing here — it is a field |
-| computed on demand (statistics, dashboard, report on screen) | nothing — say so in `notes` |
+| a property of another thing (status, score value, deadline, capacity) | nothing here - it is a field |
+| computed on demand (statistics, dashboard, report on screen) | nothing - say so in `notes` |
 | listed under `release_scope.out` | nothing |
 
 | Function says | Model |
@@ -71,22 +71,22 @@ classify each noun:
 | Assign X to Y · Allocate X to Y | an assignment entity (`Seat Assignment`), child of both X and Y |
 | Register for X · Enrol in X · Book X | a registration entity, child of **User** and of X |
 | Request / Appeal / Report / Swap on X | a request entity, **child of X** (it is raised against X) |
-| Approve / Publish / Lock / Confirm X | a status of X — no new entity |
+| Approve / Publish / Lock / Confirm X | a status of X - no new entity |
 | Import X from a file | the import batch as an entity; X as its own entity, optional child of the batch |
 | Notify · Send email | Notification, child of User |
 | Log · Audit | Audit Log, child of User |
-| View / Search / Filter / Export X | X only — the act itself stores nothing |
+| View / Search / Filter / Export X | X only - the act itself stores nothing |
 
 Also sweep machinery that is always stored but rarely on a screen: credits, payment, notification, audit
 log, uploaded file, AI usage. Fewer than 8 entities for 20+ functions means the inventory was skipped.
 Merge while you go: entities that differ only by status or kind (`Retake Registration` vs
 `Exam Registration`) are one entity with a kind field.
 
-## Pass 2 — Roots and dependents
+## Pass 2 - Roots and dependents
 
-- **Root** (`root: true`) — master data that exists on its own: User, Course, Semester, Building, Exam
+- **Root** (`root: true`) - master data that exists on its own: User, Course, Semester, Building, Exam
   Room, Product. A root may have no parent; it may still have one (Building contains Exam Room).
-- **Dependent** — only makes sense *of*, *for*, *in* or *against* something else: Exam Paper (for a
+- **Dependent** - only makes sense *of*, *for*, *in* or *against* something else: Exam Paper (for a
   course), Seat Assignment (in a room, for a registration), Regrade Appeal (against a score).
 
 **Every dependent has at least one direct parent.** Take the candidates from what its description says
@@ -94,7 +94,7 @@ it is *of / for / in / against / from*, and keep at least one of them as a direc
 with Pass 3). A dependent linked only through its own child (Exam Paper reached only via Paper Question)
 is floating. An entity with no parent and no `root: true` is rejected.
 
-## Pass 3 — Decide each relation
+## Pass 3 - Decide each relation
 
 Every edge is drawn one (parent) to many (child). For each pair you connect, in this order:
 
@@ -112,12 +112,12 @@ Every edge is drawn one (parent) to many (child). For each pair you connect, in 
    **optional**: keep it only when a function really records it, list the child in `relation_optional`,
    and say "optionally" in the child's description. A child needs at least one **mandatory** parent.
 3. **Read back.** "One <parent> <verb> many <children>" must be true in this domain. "One Exam Schedule
-   hosts many Exam Rooms" is false — the direction is wrong; flip it before choosing the verb.
+   hosts many Exam Rooms" is false - the direction is wrong; flip it before choosing the verb.
 4. **Verb.** Lowercase English, 1–3 words, active voice, read parent → child: `contains`, `owns`,
    `places`, `issues`, `records`, `hosts`, `receives`. Take it from the function that creates the child
    ("Register for Exam" → `User makes Exam Registration`). Never passive or child → parent (`belongs to`,
    `is part of`, `owned by`, `assigned to`, `linked to`, `derived from`, `contained in`, `applies to`), a
-   noun or a cardinality. A rejected verb means **rephrase from the parent's side** — never flip a
+   noun or a cardinality. A rejected verb means **rephrase from the parent's side** - never flip a
    direction you decided in steps 1–3 to fit a verb. Use `has` only when nothing more precise is true.
 5. **No shortcut.** When A → B → C exists, do not also relate A → C; the owner of C is reached
    through B (`User → Regrade Appeal` is redundant beside `User → Exam Registration → … → Score Record →
@@ -125,7 +125,7 @@ Every edge is drawn one (parent) to many (child). For each pair you connect, in 
    that role (`User invigilates`, `User reviews`).
 6. **Self-relation** only for a real tree (Comment → Comment); no duplicate id in one `relations` array.
 
-## Pass 3a — Cardinality from evidence
+## Pass 3a - Cardinality from evidence
 
 The child side of every relation is `N` unless evidence proves `"1"`. For each relation, answer "can one
 parent ever have a **second** child?":
@@ -147,32 +147,32 @@ parent ever have a **second** child?":
 7. **Write it down.** Every `"1"` has an `assumptions[]` entry whose path is
    `entities[id=<parent>].relation_cardinality`, whose statement names the child entity, and whose
    `rationale` cites the evidence ids (`FN009`, `BR55`, `AS29`). A confirmed assumption already covering
-   it is enough — repoint its path instead of adding a new one.
+   it is enough - repoint its path instead of adding a new one.
 
-## Pass 4 — People
+## Pass 4 - People
 
 For every human actor, ask of each of its functions "which record does this person create, own or get
-assigned to?" — each answer is a relation from `User` (roles are data on User, not entities):
+assigned to?" - each answer is a relation from `User` (roles are data on User, not entities):
 
 - the author or owner: `User authors Question`, `User makes Exam Registration`;
-- the person assigned: through the assignment entity — `User takes Invigilator Assignment`;
+- the person assigned: through the assignment entity - `User takes Invigilator Assignment`;
 - the person who raises a request, unless User is already its ancestor as the same person.
 
 A record a function says a named role creates ("a lecturer assembles the paper") must be **linked** to
 User; a different role acting on it (reviewer, invigilator) needs its own direct relation.
 
-## Pass 5 — Descriptions agree with relations
+## Pass 5 - Descriptions agree with relations
 
 - Every entity a description names is **linked** to it (definition above): add the relation (Pass 3), or reword
   the description. A named thing that is not an entity yet ("per semester") is added (Pass 1) or dropped.
 
-## Pass 6 — Normal form (3NF at entity level)
+## Pass 6 - Normal form (3NF at entity level)
 
 **1NF**: an entity never holds a list of another thing (a child, or an associative entity when shared). **2NF**: an associative
-entity only describes the pairing (order of a question *in that paper*). **3NF**: one entity, one thing — a description covering a
+entity only describes the pairing (order of a question *in that paper*). **3NF**: one entity, one thing - a description covering a
 second thing ("Exam Schedule with its room capacity") is two entities. User-maintained value sets are entities; code constants stay enums.
 
-## Pass 7 — Attributes and features
+## Pass 7 - Attributes and features
 
 The per-feature class diagram is drawn only from this data; code adds no class and no attribute of its own.
 
@@ -184,7 +184,7 @@ The per-feature class diagram is drawn only from this data; code adds no class a
    points at another entity of this ERD (also a relation in Pass 3), `plain` = the rest. `required: false` when it may stay empty.
 3. No evidence for an attribute ⇒ leave it out (`attributes: []` is allowed).
 
-## Pass 8 — Lifecycle (only entities with real states)
+## Pass 8 - Lifecycle (only entities with real states)
 
 The state machine diagram is drawn only from this data; code adds no state. Most entities have none: leave `states` and `transitions` empty.
 
@@ -202,7 +202,7 @@ The state machine diagram is drawn only from this data; code adds no state. Most
 
 ## Enforced on your batch
 
-Checked on the whole ERD **after** your batch (existing entities too — fix them in the same batch). A
+Checked on the whole ERD **after** your batch (existing entities too - fix them in the same batch). A
 failure **rejects** the batch and sends it back to you with the reason:
 
 | Rule | Rejected when |

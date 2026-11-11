@@ -27,7 +27,7 @@ const el = (s: Scene, id: string): SceneElement => {
 }
 const noLabels = { name: "", fromMultiplicity: "", toMultiplicity: "" }
 
-describe("class-layout — hộp class và đầu mút UML", () => {
+describe("class-layout - hộp class và đầu mút UML", () => {
   it("attributeText: tên, {id}, {ref}, [0..1]", () => {
     expect(attributeText({ name: "email", kind: "key", required: true })).toBe("email {id}")
     expect(attributeText({ name: "owner", kind: "reference", required: false })).toBe("owner {ref} [0..1]")

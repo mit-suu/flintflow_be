@@ -115,7 +115,7 @@ describe("CR xoá use case (luật 3g, như chat trước baseline)", () => {
   })
 })
 
-describe("seedBatch — CR tạo từ bản xem trước trong chat (FLF-318)", () => {
+describe("seedBatch - CR tạo từ bản xem trước trong chat (FLF-318)", () => {
   it("op của bản xem trước (đã chuẩn hoá, còn id tạm) ⇒ lô có id thật; không có / sai ⇒ null", () => {
     const seeded = seedBatch(FIXTURE, { seed: { instruction: "x", ops: normalizeUseCaseBatch(FIXTURE, batch()) as unknown as Record<string, unknown>[], targets: [] } })
     expect(seeded).not.toBeNull()
@@ -125,7 +125,7 @@ describe("seedBatch — CR tạo từ bản xem trước trong chat (FLF-318)", 
   })
 })
 
-describe("approvedBatch — CR có lô use case đã duyệt trong chat chạy như trước baseline (FLF-318)", () => {
+describe("approvedBatch - CR có lô use case đã duyệt trong chat chạy như trước baseline (FLF-318)", () => {
   const seed = { instruction: "x", ops: normalizeUseCaseBatch(FIXTURE, batch()) as unknown as Record<string, unknown>[], targets: ["use_cases[]", "screens[]", "permissions[]"] }
   const cr = { title: "Thêm use case Send Absence Warning", description: "Thêm use case Send Absence Warning cho Lecturer", amendments: [], clarifications: [], seed }
 
@@ -136,7 +136,7 @@ describe("approvedBatch — CR có lô use case đã duyệt trong chat chạy n
     expect(approvedBatch(FIXTURE, { ...cr, seed: null })).toBeNull()
   })
 
-  it("vị trí là đúng phần lô chạm tới — không kéo cả mảng use case / màn / quyền có sẵn", () => {
+  it("vị trí là đúng phần lô chạm tới - không kéo cả mảng use case / màn / quyền có sẵn", () => {
     const locs = approvedBatchLocations(FIXTURE, approvedBatch(FIXTURE, cr)!)
     expect(locs.map((l) => l.path).sort()).toEqual(["permissions[]", "screens[]", "functions[]", "screens[id=S07]", "use_cases[]"].sort())
     expect(locs.every((l) => l.found_by.includes("preview"))).toBe(true)

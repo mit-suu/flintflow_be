@@ -46,13 +46,13 @@ describe("buildHealthReport", () => {
     expect(report.version).toBeTruthy()
   })
 
-  it("PlantUML chết ⇒ degraded, KHÔNG phải error — diagram hỏng nhưng app còn phục vụ được", async () => {
+  it("PlantUML chết ⇒ degraded, KHÔNG phải error - diagram hỏng nhưng app còn phục vụ được", async () => {
     mockReachable.mockResolvedValue(false)
     const report = await buildHealthReport()
     expect(report).toMatchObject({ status: "degraded", mongo: "ok", plantuml: "error" })
   })
 
-  it("Gotenberg chết ⇒ degraded — chỉ xuất PDF hỏng, xuất Word và phần còn lại vẫn chạy (FLF-316)", async () => {
+  it("Gotenberg chết ⇒ degraded - chỉ xuất PDF hỏng, xuất Word và phần còn lại vẫn chạy (FLF-316)", async () => {
     mockGotenberg.mockResolvedValue(false)
     const report = await buildHealthReport()
     expect(report).toMatchObject({ status: "degraded", mongo: "ok", plantuml: "ok", gotenberg: "error" })
@@ -71,7 +71,7 @@ describe("buildHealthReport", () => {
     expect(report).toMatchObject({ status: "error", mongo: "error" })
   })
 
-  it("kết quả probe PlantUML / Gotenberg được cache — health check gọi 10s/lần không đấm liên tục sang đó", async () => {
+  it("kết quả probe PlantUML / Gotenberg được cache - health check gọi 10s/lần không đấm liên tục sang đó", async () => {
     await buildHealthReport()
     await buildHealthReport()
     await buildHealthReport()

@@ -182,7 +182,7 @@ export const renderPlantUml = async (
   if (!isImageResponse(res)) {
     throw new Error(
       `${baseUrl()}/${format} trả HTTP ${res.status} kèm content-type ` +
-        `"${res.headers.get("content-type") ?? "(trống)"}" thay vì image/* — ` +
+        `"${res.headers.get("content-type") ?? "(trống)"}" thay vì image/* - ` +
         "server đang nghe ở cổng này không phải PlantUML"
     )
   }

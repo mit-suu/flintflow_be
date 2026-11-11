@@ -4,7 +4,7 @@ import { loginSchema, registerSchema, resetPasswordSchema } from "./auth.validat
 const firstMessage = (result: { success: boolean; error?: { issues: { message: string }[] } }) =>
   result.success ? "" : (result.error?.issues[0]?.message ?? "")
 
-describe("auth.validation — chuẩn mật khẩu mới", () => {
+describe("auth.validation - chuẩn mật khẩu mới", () => {
   it("đăng ký: mật khẩu yếu bị từ chối", () => {
     expect(firstMessage(registerSchema.safeParse({ email: "ai@fpt.vn", password: "matkhau2026" }))).toContain(
       "3 trong 4 nhóm"

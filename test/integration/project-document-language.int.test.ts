@@ -28,7 +28,7 @@ beforeEach(async () => {
 const patchLanguage = (projectId: string, token: string, body: unknown) =>
   request(app).patch(`/api/v1/projects/${projectId}/document-language`).set(bearer(token)).send(body as object)
 
-describe("POST /projects — documentLanguage", () => {
+describe("POST /projects - documentLanguage", () => {
   it("body gửi vi ⇒ lưu vi, GET /projects/:id trả lại field", async () => {
     const created = await request(app).post("/api/v1/projects").set(bearer(seeded.token)).send({ name: "Lumen", documentLanguage: "vi" })
     expect(created.status).toBe(201)

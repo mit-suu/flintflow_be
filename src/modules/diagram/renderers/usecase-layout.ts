@@ -279,7 +279,7 @@ const buildScene = (d: UseCaseDiagram, option: LayoutOption): Scene => {
     const row = rows[index.get(link.useCaseId) ?? -1]
     if (!actor || !row) throw new Error(`usecase-layout: association ${link.actorId} → ${link.useCaseId} trỏ tới phần tử không có trong hình`)
     const to: [number, number] = [sideOf(actor) === "left" ? cx - rx : cx + rx, row.cy]
-    scene.line(`${link.actorId}~${link.useCaseId}`, hand(actor), to, { name: `${actor.name} — ${row.name}` })
+    scene.line(`${link.actorId}~${link.useCaseId}`, hand(actor), to, { name: `${actor.name} - ${row.name}` })
   }
 
   // Generalization kiểu "shared target" của UML, gồm các đoạn thẳng (kind này không cho đường gấp khúc): mỗi actor con

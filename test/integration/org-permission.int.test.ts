@@ -62,12 +62,12 @@ describe("chuỗi kiểm quyền org (BPMN Flow 10)", () => {
     expect(res.body.data).toMatchObject({ orgId, role: "lead" })
   })
 
-  it("10.1 — không có token trả 401", async () => {
+  it("10.1 - không có token trả 401", async () => {
     const res = await request(app).get("/protected")
     expect(res.status).toBe(401)
   })
 
-  it("10.4 — tài khoản bị khoá mất quyền NGAY request kế tiếp (UC-66)", async () => {
+  it("10.4 - tài khoản bị khoá mất quyền NGAY request kế tiếp (UC-66)", async () => {
     expect((await get("/protected")).status).toBe(200)
 
     await User.updateOne({ _id: userId }, { isActive: false })
@@ -77,7 +77,7 @@ describe("chuỗi kiểm quyền org (BPMN Flow 10)", () => {
     expect(res.body.error.code).toBe("ACCOUNT_SUSPENDED")
   })
 
-  it("10.6 — bị xoá khỏi org thì request kế tiếp trả 403 (UC-74, Flow 9.9)", async () => {
+  it("10.6 - bị xoá khỏi org thì request kế tiếp trả 403 (UC-74, Flow 9.9)", async () => {
     expect((await get("/protected")).status).toBe(200)
 
     await Membership.deleteOne({ organizationId: orgId, userId })
@@ -87,13 +87,13 @@ describe("chuỗi kiểm quyền org (BPMN Flow 10)", () => {
     expect(res.body.error.code).toBe("ORG_FORBIDDEN")
   })
 
-  it("10.6 — token không mang orgId trả 409 để FE đẩy về onboarding (Flow 8)", async () => {
+  it("10.6 - token không mang orgId trả 409 để FE đẩy về onboarding (Flow 8)", async () => {
     const res = await get("/protected", tokenFor(userId))
     expect(res.status).toBe(409)
     expect(res.body.error.code).toBe("NO_ACTIVE_ORG")
   })
 
-  it("10.6 — org mình không thuộc về trả 403, không phải 409", async () => {
+  it("10.6 - org mình không thuộc về trả 403, không phải 409", async () => {
     const other = await Organization.create({
       name: "Org B",
       ownerUserId: new mongoose.Types.ObjectId()
@@ -103,7 +103,7 @@ describe("chuỗi kiểm quyền org (BPMN Flow 10)", () => {
     expect(res.body.error.code).toBe("ORG_FORBIDDEN")
   })
 
-  it("10.7 — hạ vai trò Lead xuống Viewer thì mất quyền Lead ngay request kế tiếp (UC-73)", async () => {
+  it("10.7 - hạ vai trò Lead xuống Viewer thì mất quyền Lead ngay request kế tiếp (UC-73)", async () => {
     expect((await get("/lead-only")).status).toBe(200)
 
     await Membership.updateOne({ organizationId: orgId, userId }, { role: "viewer" })
@@ -113,7 +113,7 @@ describe("chuỗi kiểm quyền org (BPMN Flow 10)", () => {
     expect(res.body.error.code).toBe("ORG_ROLE_FORBIDDEN")
   })
 
-  it("10.7 — Viewer không chạy được việc của Author, Analyst thì được", async () => {
+  it("10.7 - Viewer không chạy được việc của Author, Analyst thì được", async () => {
     await Membership.updateOne({ organizationId: orgId, userId }, { role: "viewer" })
     expect((await get("/authors")).status).toBe(403)
 

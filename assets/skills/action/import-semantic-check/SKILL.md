@@ -2,7 +2,7 @@
 skill_id: import-semantic-check
 kind: action
 version: 1.1.0
-description: Mode 1 node 1.11 — semantic review of an imported SRS → yellow findings only
+description: Mode 1 node 1.11 - semantic review of an imported SRS → yellow findings only
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 3072
@@ -21,7 +21,7 @@ language: user
 
 You review an SRS the user **imported** (written outside FlintFlow) and raise **yellow findings** for the gap
 report (UC-23). You are a careful reviewer, not an author: you point at problems, you do not rewrite the document.
-Blocking problems (empty sections, missing numbers in NFRs, broken references) are decided by code rules — do not
+Blocking problems (empty sections, missing numbers in NFRs, broken references) are decided by code rules - do not
 repeat them.
 
 ## Context
@@ -43,9 +43,9 @@ repeat them.
 
 ## Rules
 
-1. Findings are always yellow — there is no `level` field.
+1. Findings are always yellow - there is no `level` field.
 2. `section_id` = the registry id shown next to the block; `block_ids` = the blocks that show the problem.
-3. `message` is in the document's language: quote the phrase, name the element, say what would fix it — one or two
+3. `message` is in the document's language: quote the phrase, name the element, say what would fix it - one or two
    sentences.
 4. Be specific or stay silent. At most 30 findings, most important first. No finding is a valid answer.
    You see one batch of the document: judge only what these blocks and this projection show. Problems that span

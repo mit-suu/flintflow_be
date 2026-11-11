@@ -32,7 +32,7 @@ const withInteractions = (fnId: string, interactions: FunctionInteraction[]): Sp
 const body = (source: string): string[] => source.split("\n").filter((l) => !l.startsWith("skinparam") && l !== "hide footbox" && l !== "")
 const sourceOf = (spine: Spine, fnId: string, labels = DIAGRAM_LABELS.en): string => sequenceSource(spine, spine.functions.find((f) => f.id === fnId)!, labels)
 
-describe("renderSequence — chọn function cần sơ đồ", () => {
+describe("renderSequence - chọn function cần sơ đồ", () => {
   it("fixture: mỗi function có interactions đủ tiêu chí một hình, theo id; chủ = function, section = function:<id>, puml", () => {
     const parts = renderSequence(FIXTURE)
     expect(parts.map((p) => [p.kind, p.format, p.owner_kind, p.owner_id, p.section])).toEqual(
@@ -59,7 +59,7 @@ describe("renderSequence — chọn function cần sơ đồ", () => {
   })
 })
 
-describe("sequenceSource — ký pháp", () => {
+describe("sequenceSource - ký pháp", () => {
   it("lifeline: actor người (stick figure) rồi :System rồi actor ngoài; actor ngoài gửi stimulus đứng bên trái :System", () => {
     expect(body(sourceOf(FIXTURE, "FN028")).slice(0, 5)).toEqual([
       "@startuml",
@@ -184,6 +184,6 @@ describe("sequenceSource — ký pháp", () => {
     const vi = sourceOf(FIXTURE, "FN001", DIAGRAM_LABELS.vi)
     expect(vi).toContain('participant ":Hệ thống" as SSD_SYSTEM')
     expect(vi).toContain("else ngược lại")
-    expect(DIAGRAM_LABELS.vi.sequenceTitle("Đăng nhập")).toBe("Sơ đồ tuần tự hệ thống — Đăng nhập")
+    expect(DIAGRAM_LABELS.vi.sequenceTitle("Đăng nhập")).toBe("Sơ đồ tuần tự hệ thống - Đăng nhập")
   })
 })

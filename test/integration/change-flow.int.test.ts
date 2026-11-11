@@ -160,7 +160,7 @@ const freshSteps = (spine: Record<string, unknown>) => {
   }
 }
 
-describe("FLF-311 — thêm use case kéo theo chức năng, màn, luồng, phân quyền", () => {
+describe("FLF-311 - thêm use case kéo theo chức năng, màn, luồng, phân quyền", () => {
   /** Lô model soạn cho "Thêm use case Send Absence Warning cho Business Analyst" (fixture đã qua S-5). */
   const fullBatch = [
     { op: "add", path: "use_cases[]", value: { name: "Send Absence Warning", actor_ids: ["A02"], function_ids: ["$newFn"], description: "The analyst warns students over the absence limit." } },
@@ -219,7 +219,7 @@ describe("FLF-311 — thêm use case kéo theo chức năng, màn, luồng, phâ
     expect(spine.messages.find((m) => m.code === "E-WARN-001")?.function_ids).toEqual([fn.id])
   })
 
-  it("sau baseline (FLF-318): lệnh thêm use case không áp thẳng — từ chối kèm nội dung điền sẵn cho CR (CR soạn lại đủ phần)", async () => {
+  it("sau baseline (FLF-318): lệnh thêm use case không áp thẳng - từ chối kèm nội dung điền sẵn cho CR (CR soạn lại đủ phần)", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
     expect((await api.post("/baseline", { base_version: seeded.spineVersion })).status).toBe(201)

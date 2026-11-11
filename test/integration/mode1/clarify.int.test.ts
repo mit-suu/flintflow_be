@@ -36,7 +36,7 @@ describe("C-2 mơ hồ ⇒ câu hỏi; trả lời ⇒ gọi lại", () => {
     const [prompt] = promptsOf("# CR Clarify")
     expect(prompt).toContain("Round 1 of at most 3")
     expect(prompt).toContain("AMBIGUOUS-CR: change UC-02 somehow.")
-    expect(prompt).toContain("stakeholder_email — Email PM 2026-09-17")
+    expect(prompt).toContain("stakeholder_email - Email PM 2026-09-17")
     // projection nạp chi tiết phần tử CR nhắc tới; outline gồm heading của version mới nhất
     expect(prompt).toContain("use_cases[id=UC-02] =")
     expect(prompt).toContain("4.2.3 Performance (fixed:4.2.3)")
@@ -234,7 +234,7 @@ describe("FLF-367 C-2: CR mâu thuẫn với tài liệu ⇒ hỏi người dùn
   })
 
   it("đã hết 3 vòng làm rõ mà còn mâu thuẫn ⇒ vẫn hỏi (chỉ câu mâu thuẫn); mâu thuẫn đã hỏi không hỏi lại", async () => {
-    const CONFLICT = "CR đặt 1 giây nhưng mục Performance ghi 2 giây — áp dụng giá trị nào?"
+    const CONFLICT = "CR đặt 1 giây nhưng mục Performance ghi 2 giây - áp dụng giá trị nào?"
     routeCr((p) => {
       if (!p.includes("# CR Clarify")) return undefined
       const round = /Round (\d+) of at most 3/.exec(p)?.[1]

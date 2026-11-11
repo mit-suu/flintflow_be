@@ -205,7 +205,7 @@ export const inferredFlowFindings = (spine: Pick<Spine, "screens">, edges: reado
     {
       rule: "needs_review",
       section_id: SCREEN_FLOW_SECTION_ID,
-      message: `Cần xem: Luồng màn hình suy từ use case và vai — cần xác nhận: ${list}; file không ghi các chuyển màn này, sai thì sửa bằng change request`,
+      message: `Cần xem: Luồng màn hình suy từ use case và vai - cần xác nhận: ${list}; file không ghi các chuyển màn này, sai thì sửa bằng change request`,
       block_ids: [],
       target_id: `screens[id=${edges[0].from}].flow_to`
     }

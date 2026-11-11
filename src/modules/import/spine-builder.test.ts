@@ -69,7 +69,7 @@ describe("extracted-entities", () => {
     expect(realSectionId("fixed:2.1", map)).toBe("fixed:2.1")
   })
 
-  it("FLF-251: ghép phần tử theo tên đã chuẩn hoá — bỏ số mục, dấu, hoa/thường, ký tự lạ", () => {
+  it("FLF-251: ghép phần tử theo tên đã chuẩn hoá - bỏ số mục, dấu, hoa/thường, ký tự lạ", () => {
     expect(nameKey("3.6.2 Send Reminder")).toBe("send reminder")
     expect(nameKey("Log-In")).toBe(nameKey("log in"))
     expect(nameKey("Đăng nhập")).toBe("dang nhap")
@@ -83,7 +83,7 @@ describe("extracted-entities", () => {
     expect(findKnownId(known, "functions", "")).toBeNull()
   })
 
-  it("FLF-252: mã so lỏng — 'A01' = 'A-01' = 'a1'; cấp id không trùng mã đã có khác dạng", () => {
+  it("FLF-252: mã so lỏng - 'A01' = 'A-01' = 'a1'; cấp id không trùng mã đã có khác dạng", () => {
     expect(idKey("A-01")).toBe(idKey("A01"))
     expect(idKey("a1")).toBe(idKey("A01"))
     expect(idKey("UC01")).toBe(idKey("UC-01"))
@@ -120,7 +120,7 @@ describe("extracted-entities", () => {
     expect(aiItemId(known, "actors", "A01", "Developer")).toBe(findKnownKey(known, "actors", "A-01"))
   })
 
-  it("FLF-252: tên khác quy ước đặt tên — lớp ERD 'SubscriptionPlan' / 'PrAnalysis' = bảng 'subscription_plans' / 'pr_analyses'", () => {
+  it("FLF-252: tên khác quy ước đặt tên - lớp ERD 'SubscriptionPlan' / 'PrAnalysis' = bảng 'subscription_plans' / 'pr_analyses'", () => {
     expect(compactKey("SubscriptionPlan")).toBe(compactKey("subscription_plans"))
     expect(compactKey("PrAnalysis")).toBe(compactKey("pr_analyses"))
     expect(compactKey("Category")).toBe(compactKey("categories"))
@@ -155,7 +155,7 @@ describe("FLF-361 giữ định dạng mã của tài liệu", () => {
   })
 })
 
-describe("FLF-361 imageOnlyGenericActors — không sinh actor thừa từ ảnh", () => {
+describe("FLF-361 imageOnlyGenericActors - không sinh actor thừa từ ảnh", () => {
   const f = (path: string, value: unknown, origin: "ai" | "vision" | "deterministic", edited?: unknown) => ({ path, value, origin, ...(edited !== undefined ? { edited_value: edited } : {}) })
   it("actor cha \"User\" chỉ có trên sơ đồ, file có bảng actor ⇒ bỏ; actor cụ thể từ ảnh (Guest) vẫn giữ", () => {
     const fields = [
@@ -200,7 +200,7 @@ describe("buildImportOps", () => {
     expect(plan.spine.permissions).toEqual([])
   })
 
-  it("FLF-361: cấp business rule theo mục của file — rule ở 5.1 model đoán `high` vẫn là `detail` và in ở 5.1, không in ở mục 1", () => {
+  it("FLF-361: cấp business rule theo mục của file - rule ở 5.1 model đoán `high` vẫn là `detail` và in ở 5.1, không in ở mục 1", () => {
     expect(ruleTierOfSections(["fixed:5.1"])).toBe("detail")
     expect(ruleTierOfSections(["slot:high_rules"])).toBe("high")
     expect(ruleTierOfSections(["fixed:1", "fixed:5.1"])).toBe("detail")
@@ -300,9 +300,9 @@ describe("buildImportOps", () => {
       [
         "fixed:3.1.3",
         ["B0333"],
-        'Bảng phân quyền có "Sell Statistics" (quyền của Admin, Developer) nhưng phần mô tả màn hình không có màn này — quyền chưa vào dữ liệu; thêm màn hoặc sửa tên cho khớp qua change request'
+        'Bảng phân quyền có "Sell Statistics" (quyền của Admin, Developer) nhưng phần mô tả màn hình không có màn này - quyền chưa vào dữ liệu; thêm màn hoặc sửa tên cho khớp qua change request'
       ],
-      ["fixed:3.1.3", ["B0333"], 'Bảng phân quyền có vai trò "Auditor" không khớp vai trò / tác nhân nào — quyền trên Transaction List chưa vào dữ liệu; sửa tên cho khớp qua change request']
+      ["fixed:3.1.3", ["B0333"], 'Bảng phân quyền có vai trò "Auditor" không khớp vai trò / tác nhân nào - quyền trên Transaction List chưa vào dữ liệu; sửa tên cho khớp qua change request']
     ])
   })
 
@@ -358,7 +358,7 @@ describe("buildImportOps", () => {
     expect(plan.spine.project.release_scope).toEqual({ in: ["Course catalog", "Enrolment"], out: ["Mobile app"] })
   })
 
-  it("FLF-252: khớp lỏng khi chỉ một phần tử khớp — tên màn có phần trong ngoặc / thiếu chữ Screen; mơ hồ ⇒ bỏ", () => {
+  it("FLF-252: khớp lỏng khi chỉ một phần tử khớp - tên màn có phần trong ngoặc / thiếu chữ Screen; mơ hồ ⇒ bỏ", () => {
     const spine = createEmptySpine({ name: "Flint" })
     const ops = buildImportOps(spine, [
       { entity: "screens", id: "SCR-01", value: { name: "Landing Page" } },
@@ -452,7 +452,7 @@ describe("buildImportOps", () => {
     expect(plan.spine.entities[1].feature_ids).toEqual([])
   })
 
-  it("entity: vòng đời (states / transitions) — id <entity>-ST<n>, một initial, chuyển nối theo tên, bỏ chuyển hỏng", () => {
+  it("entity: vòng đời (states / transitions) - id <entity>-ST<n>, một initial, chuyển nối theo tên, bỏ chuyển hỏng", () => {
     const spine = createEmptySpine({ name: "Shop" })
     const ops = buildImportOps(spine, [
       {
@@ -489,7 +489,7 @@ describe("buildImportOps", () => {
     expect(plan.spine.entities[1].transitions ?? []).toEqual([])
   })
 
-  it("FLF-390: function đọc từ sơ đồ tuần tự — actor theo tên, `system`, bỏ message hỏng (hai đầu actor, lỗi thiếu guard)", () => {
+  it("FLF-390: function đọc từ sơ đồ tuần tự - actor theo tên, `system`, bỏ message hỏng (hai đầu actor, lỗi thiếu guard)", () => {
     const spine = createEmptySpine({ name: "Shop" })
     const ops = buildImportOps(spine, [
       { entity: "actors", id: "A01", value: { name: "Customer", kind: "human" } },
@@ -518,7 +518,7 @@ describe("buildImportOps", () => {
     ])
   })
 
-  it("FLF-390: use case đọc từ sơ đồ activity — id nút <use case>-AN<n>, làn theo tên actor / system, flow theo id tạm, bỏ flow hỏng", () => {
+  it("FLF-390: use case đọc từ sơ đồ activity - id nút <use case>-AN<n>, làn theo tên actor / system, flow theo id tạm, bỏ flow hỏng", () => {
     const spine = createEmptySpine({ name: "Shop" })
     const ops = buildImportOps(spine, [
       { entity: "actors", id: "A01", value: { name: "Customer", kind: "human" } },
@@ -567,7 +567,7 @@ describe("buildImportOps", () => {
     ])
   })
 
-  it("FLF-390: sơ đồ triển khai đọc từ ảnh — cha theo tên (cha trước con), đường truyền thông trên nút, bỏ đường trùng / tự nối", () => {
+  it("FLF-390: sơ đồ triển khai đọc từ ảnh - cha theo tên (cha trước con), đường truyền thông trên nút, bỏ đường trùng / tự nối", () => {
     const spine = createEmptySpine({ name: "Shop" })
     const ops = buildImportOps(spine, [
       { entity: "deployment_nodes", id: "DN02", value: { name: "Node.js", kind: "execution_environment", parent: "App Server", components: ["API Service"], artifacts: ["api.js"], links: [{ to: "Database", protocol: "TCP" }] } },
@@ -608,7 +608,7 @@ describe("buildImportOps", () => {
     ])
   })
 
-  it("splitSubtitleComponents: bảo thủ — tên phần mềm / tên đơn lẻ mơ hồ giữ là component", () => {
+  it("splitSubtitleComponents: bảo thủ - tên phần mềm / tên đơn lẻ mơ hồ giữ là component", () => {
     const keep = (c: string[]) => expect(splitSubtitleComponents(c, "")).toEqual({ components: c, description: "" })
     keep(["Docker"])
     keep(["Web Browser"])
@@ -685,7 +685,7 @@ describe("chunkBlocks (trần input mỗi lượt I-4)", () => {
   })
 })
 
-describe("FLF-365 — trích tài liệu tham khảo / ma trận kiểm chứng (mẫu IEEE 29148)", () => {
+describe("FLF-365 - trích tài liệu tham khảo / ma trận kiểm chứng (mẫu IEEE 29148)", () => {
   it("references + verifications vào Spine; mã yêu cầu như trong file phân giải ra id Spine, không ra thì giữ mã", () => {
     const spine = createEmptySpine({ name: "EduSchedule" })
     const ops = buildImportOps(spine, [
@@ -756,7 +756,7 @@ describe("FLF-390 actor kế thừa, luồng ngữ cảnh, actor User cho use ca
   })
 })
 
-describe("relationRefs — chiều quan hệ trong ô 'Quan hệ' (QLHS 11/11)", () => {
+describe("relationRefs - chiều quan hệ trong ô 'Quan hệ' (QLHS 11/11)", () => {
   it("1–n ⇒ phía nhiều của thực thể này; n–1 ⇒ cha; mục không ghi bội số theo mục đứng trước", async () => {
     const { relationRefs } = await import("./spine-builder.js")
     expect(relationRefs(["1–n Điểm", "Điểm danh", "Hạnh kiểm"]).map((r) => [r.ref, r.side])).toEqual([["Điểm", "child"], ["Điểm danh", "child"], ["Hạnh kiểm", "child"]])
@@ -766,7 +766,7 @@ describe("relationRefs — chiều quan hệ trong ô 'Quan hệ' (QLHS 11/11)",
   })
 })
 
-describe("dropReciprocalRelations — mỗi cặp quan hệ một chiều (QLHS 11/11 bug #12)", () => {
+describe("dropReciprocalRelations - mỗi cặp quan hệ một chiều (QLHS 11/11 bug #12)", () => {
   it("khoá ngoại quyết định chiều; không có thì thực thể đứng trước là cha; 1–1 giữ nguyên", async () => {
     const { dropReciprocalRelations } = await import("./spine-builder.js")
     const ent = (id: string, name: string, relations: string[], attributes: unknown[] = [], cardinality: Record<string, "1" | "N"> = {}) => ({ id, value: { name, attributes }, relations, cardinality })

@@ -65,7 +65,7 @@ const sceneOf = (spine: Spine) => partitionScreenFlow(spine).map(({ diagram }) =
 const ids = (scene: ReturnType<typeof layoutScreenFlow>, prefix: string): string[] =>
   scene.elements.filter((e) => e.id.startsWith(prefix) && !e.id.includes("#")).map((e) => e.id)
 
-describe("screen_flow — một hình cho cả hệ thống, ký pháp template FPT", () => {
+describe("screen_flow - một hình cho cả hệ thống, ký pháp template FPT", () => {
   it("fixture: đúng một hình svg cho mọi màn, tiêu đề Screens flow, issues rỗng", () => {
     const parts = renderKind(FIXTURE, "screen_flow")
     expect(parts).toHaveLength(1)

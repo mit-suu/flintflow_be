@@ -102,7 +102,7 @@ describe("normalizeUseCaseBatch", () => {
   })
 })
 
-describe("normalizeUseCaseBatch — mã thông báo (S-7.3) cho luồng bất thường mới", () => {
+describe("normalizeUseCaseBatch - mã thông báo (S-7.3) cho luồng bất thường mới", () => {
   const withFn = (message: Record<string, unknown>): Op[] => [
     ...batch(),
     { op: "add", path: "messages[]", value: { text: "Select at least one student, then send again.", function_ids: ["$newFn"], ...message } }
@@ -127,7 +127,7 @@ describe("normalizeUseCaseBatch — mã thông báo (S-7.3) cho luồng bất th
   })
 })
 
-describe("declareTempIds — model dùng id tạm mà quên khai báo (e2e FLF-311, GLM thật)", () => {
+describe("declareTempIds - model dùng id tạm mà quên khai báo (e2e FLF-311, GLM thật)", () => {
   /** Đúng dạng lô GLM trả: `$newFn1/2`, `$newScreen` được tham chiếu nhưng phần tử thêm vào không mang `id`. */
   const glmBatch = (): Op[] => [
     { op: "add", path: "use_cases[]", value: { name: "Share Read-Only Link", actor_ids: ["A02"], function_ids: ["$newFn1", "$newFn2"] } },
@@ -165,7 +165,7 @@ describe("declareTempIds — model dùng id tạm mà quên khai báo (e2e FLF-3
   })
 })
 
-describe("declareTempIds — cạnh luồng thêm từng phần tử (flow_to[]) bằng id tạm chưa khai báo (gặp khi chạy AI thật)", () => {
+describe("declareTempIds - cạnh luồng thêm từng phần tử (flow_to[]) bằng id tạm chưa khai báo (gặp khi chạy AI thật)", () => {
   it("id tạm trong value của add …flow_to[] và trong selector …flow_to[=$x] được gán cho màn mới chưa có id", () => {
     const ops = declareTempIds([
       { op: "add", path: "screens[]", value: { name: "Confirm", feature_id: "F4", flow_to: [], tabs: [] } },
@@ -180,7 +180,7 @@ describe("declareTempIds — cạnh luồng thêm từng phần tử (flow_to[])
   })
 })
 
-describe("normalizeUseCaseBatch — màn mới trỏ tới màn mới đứng sau (gặp khi chạy AI thật)", () => {
+describe("normalizeUseCaseBatch - màn mới trỏ tới màn mới đứng sau (gặp khi chạy AI thật)", () => {
   it("cạnh giữa hai màn mới thành op set flow_to cuối lô; lô áp thử được", () => {
     const ops = normalizeUseCaseBatch(FIXTURE, [
       { op: "add", path: "screens[]", value: { id: "$newScreen", name: "Select Session", description: "…", feature_id: "F4", flow_to: ["$newPopup", "S02"], tabs: [] } },
@@ -194,7 +194,7 @@ describe("normalizeUseCaseBatch — màn mới trỏ tới màn mới đứng sa
     expect(() => planTransaction(FIXTURE, { base_version: FIXTURE.spine_version, ops, by: "test", step_id: null }, { startSeq: 1 })).not.toThrow()
     // Popup không nằm trong function_ids của use case vẫn được kể là bước sau ⇒ câu hỏi chi tiết, liệt kê đủ bước
     const ask = screenKindQuestion(FIXTURE, ops)!
-    expect(ask.text).toContain('1. "Submit Absence Request" (Business Analyst) — màn mới: "Select Session" → "Confirm Request"')
+    expect(ask.text).toContain('1. "Submit Absence Request" (Business Analyst) - màn mới: "Select Session" → "Confirm Request"')
     expect(ask.text).toContain(`mở từ "${FIXTURE.screens[0].name}"`)
   })
 })
@@ -208,7 +208,7 @@ describe("addedScreenIds / addsUseCaseOrScreen", () => {
   })
 })
 
-describe("newUseCaseScreenIssues — phần giao diện còn thiếu của use case mới, theo lựa chọn của user", () => {
+describe("newUseCaseScreenIssues - phần giao diện còn thiếu của use case mới, theo lựa chọn của user", () => {
   /** Lệnh sinh hai use case: Business Analyst (R2) gửi yêu cầu, Founder (R1) duyệt — màn mở từ S01. */
   const withUseCases = (pairs: { uc: string; actor: string; role: string; screen: string; edge?: boolean; view?: boolean }[]): Spine => {
     const after = structuredClone(FIXTURE)
@@ -296,7 +296,7 @@ describe("newUseCaseScreenIssues — phần giao diện còn thiếu của use c
   })
 })
 
-describe("skill apply-change-op — khối luật 3e theo chế độ (FLF-311)", () => {
+describe("skill apply-change-op - khối luật 3e theo chế độ (FLF-311)", () => {
   const render = async (vars: Record<string, unknown>): Promise<string> => {
     const { getSkill, interpolatePrompt } = await import("../../shared/ai/prompt-registry.service.js")
     return interpolatePrompt(getSkill("apply-change-op").template, vars)
@@ -312,7 +312,7 @@ describe("skill apply-change-op — khối luật 3e theo chế độ (FLF-311)"
     expect(prompt).toContain("`proposed_use_cases`, never silently")
     expect(prompt).toContain("one screen per step, chained in order by `flow_to`")
     // FLF-318: yêu cầu gửi đi phải có người xử lý (giảng viên chấm lại, phòng đào tạo duyệt) — không để luồng cụt; không rõ ai ⇒ hỏi
-    expect(prompt).toContain("A request needs someone to settle it — never leave the flow dead-ended")
+    expect(prompt).toContain("A request needs someone to settle it - never leave the flow dead-ended")
     expect(prompt).toContain("the batch MUST also hold the rest of that flow")
     expect(prompt).toContain("`clarification_needed` asking who decides")
     expect(prompt).toContain("`normal[]` steps, `abnormal[]` cases, `validations[]`")
@@ -337,7 +337,7 @@ describe("skill apply-change-op — khối luật 3e theo chế độ (FLF-311)"
   })
 })
 
-describe("useCaseOverlaps — use case mới chồng mục tiêu với use case có sẵn (FLF-311)", () => {
+describe("useCaseOverlaps - use case mới chồng mục tiêu với use case có sẵn (FLF-311)", () => {
   const uc = (id: string, name: string, actor_ids: string[]) => ({ id, name, actor_ids, function_ids: [], description: "", includes: [], extends: [] })
   const before = { use_cases: [uc("UC20", "Deactivate Student Record", ["A03"]), uc("UC08", "Create Student Record", ["A03"]), uc("UC24", "Archive Project", ["A01"])] }
 
@@ -372,7 +372,7 @@ describe("useCaseOverlaps — use case mới chồng mục tiêu với use case 
   })
 })
 
-describe("màn hình riêng hay popup — người dùng chọn (FLF-311)", () => {
+describe("màn hình riêng hay popup - người dùng chọn (FLF-311)", () => {
   it("screenKindChoice: đọc lời user (câu lệnh + tin User:), bỏ lời AI; nhắc sau cùng thắng", () => {
     expect(screenKindChoice("Thêm use case X dạng popup")).toBe("popup")
     expect(screenKindChoice("thêm UC X, làm màn hình riêng")).toBe("screen")
@@ -411,7 +411,7 @@ describe("màn hình riêng hay popup — người dùng chọn (FLF-311)", () =
   })
 })
 
-describe("kế hoạch giao diện theo từng use case / từng màn — nhiều use case, use case đề xuất, nhiều bước (FLF-311)", () => {
+describe("kế hoạch giao diện theo từng use case / từng màn - nhiều use case, use case đề xuất, nhiều bước (FLF-311)", () => {
   /** Lô: use case yêu cầu nhiều bước (3 màn) + use case đề xuất cho Founder + use case nền của Scheduler. */
   const multiOps = (): Op[] => [
     { op: "add", path: "screens[]", value: { id: "$s1", name: "Select Course", feature_id: "F4", flow_to: ["$s2"], tabs: [] } },
@@ -436,21 +436,21 @@ describe("kế hoạch giao diện theo từng use case / từng màn — nhiề
     const ask = screenKindQuestion(FIXTURE, multiOps(), "vi", PROPOSED)!
     const lines = ask.text.split("\n")
     expect(lines[0]).toBe("Yêu cầu này thêm các use case sau:")
-    expect(lines[1]).toBe('1. "Request Grade Review" (Business Analyst) — màn mới: "Select Course" → "Enter Reason" → "Confirm Request"')
+    expect(lines[1]).toBe('1. "Request Grade Review" (Business Analyst) - màn mới: "Select Course" → "Enter Reason" → "Confirm Request"')
     expect(lines[2]).toBe("AI đề xuất thêm để khớp dự án (giữ hay bỏ):")
-    expect(lines[3]).toBe('2. "Decide Grade Review" (Founder) — màn mới: "Review Queue"')
-    expect(lines[4]).toBe('3. "Send Review Reminder" (Scheduler) — chạy nền, không cần màn')
+    expect(lines[3]).toBe('2. "Decide Grade Review" (Founder) - màn mới: "Review Queue"')
+    expect(lines[4]).toBe('3. "Send Review Reminder" (Scheduler) - chạy nền, không cần màn')
     expect(ask.choices).toEqual(["Giữ tất cả, mỗi use case màn riêng", "Bỏ các use case AI đề xuất", "Dùng chung một màn hình"])
   })
 
   it("screenKindQuestion: một use case nhiều màn (không đề xuất) cũng hỏi chi tiết", () => {
     const ops = multiOps().filter((o) => !(o.path === "use_cases[]" && (o.value as { name: string }).name !== "Request Grade Review"))
     const ask = screenKindQuestion(FIXTURE, ops)!
-    expect(ask.text).toContain('1. "Request Grade Review" (Business Analyst) — màn mới: "Select Course" → "Enter Reason" → "Confirm Request"')
+    expect(ask.text).toContain('1. "Request Grade Review" (Business Analyst) - màn mới: "Select Course" → "Enter Reason" → "Confirm Request"')
     expect(ask.choices[0]).toBe("Mỗi use case một màn hình riêng")
   })
 
-  it("askedList: đọc lại câu hỏi gần nhất — tên, nhóm đề xuất, màn dự kiến", () => {
+  it("askedList: đọc lại câu hỏi gần nhất - tên, nhóm đề xuất, màn dự kiến", () => {
     const ask = screenKindQuestion(FIXTURE, multiOps(), "vi", PROPOSED)!
     const history = `User: thêm use case phúc khảo\nAI: ${ask.text}`
     expect(askedList(history)).toEqual([
@@ -469,7 +469,7 @@ describe("kế hoạch giao diện theo từng use case / từng màn — nhiề
   ]
   const pick = (plan: ReturnType<typeof parseUiAnswer>) => plan.map(({ index, kind, group, screen, drop, merge, popupScreens }) => ({ index, kind, group, screen, drop, merge, popupScreens }))
 
-  it("parseUiAnswer: trả lời theo số và theo màn — màn riêng + bước popup, dùng chung, bỏ, gộp thành 1 màn", () => {
+  it("parseUiAnswer: trả lời theo số và theo màn - màn riêng + bước popup, dùng chung, bỏ, gộp thành 1 màn", () => {
     const plan = parseUiAnswer('1 màn riêng, bước "Confirm Request" là popup; 2 và 3 dùng chung một màn; bỏ 4', ASKED)
     expect(pick(plan)).toEqual([
       { index: 1, kind: "own", group: undefined, screen: undefined, drop: undefined, merge: undefined, popupScreens: ["Confirm Request"] },
@@ -485,7 +485,7 @@ describe("kế hoạch giao diện theo từng use case / từng màn — nhiề
     ])
   })
 
-  it("parseUiAnswer: nút chọn nhanh — giữ tất cả / bỏ use case đề xuất / dùng chung", () => {
+  it("parseUiAnswer: nút chọn nhanh - giữ tất cả / bỏ use case đề xuất / dùng chung", () => {
     expect(parseUiAnswer("Giữ tất cả, mỗi use case màn riêng", ASKED).map((e) => [e.index, e.kind ?? null, e.drop ?? false])).toEqual([
       [1, "own", false],
       [2, "own", false],
@@ -500,7 +500,7 @@ describe("kế hoạch giao diện theo từng use case / từng màn — nhiề
     expect(new Set(parseUiAnswer("Dùng chung một màn hình", ASKED).map((e) => `${e.kind}:${e.group}`))).toEqual(new Set(["shared:1"]))
   })
 
-  it("parseUiAnswer: '1 màn riêng, bỏ các use case AI đề xuất' ⇒ giữ 1 (chữ 'bỏ' của cụm đề xuất không thuộc số 1) — lỗi gặp khi chạy AI thật", () => {
+  it("parseUiAnswer: '1 màn riêng, bỏ các use case AI đề xuất' ⇒ giữ 1 (chữ 'bỏ' của cụm đề xuất không thuộc số 1) - lỗi gặp khi chạy AI thật", () => {
     expect(parseUiAnswer("1 màn riêng, bỏ các use case AI đề xuất", ASKED).map((e) => [e.index, e.kind ?? null, e.drop ?? false])).toEqual([
       [1, "own", false],
       [2, null, true],
@@ -528,7 +528,7 @@ describe("kế hoạch giao diện theo từng use case / từng màn — nhiề
     expect(uiPlanFor("Màn hình riêng", "AI: Màn hình riêng hay popup?")).toEqual([])
   })
 
-  it("uiPlanForModel: câu cho model — bỏ, dùng chung (nêu tên cùng nhóm), gộp màn, màn popup", () => {
+  it("uiPlanForModel: câu cho model - bỏ, dùng chung (nêu tên cùng nhóm), gộp màn, màn popup", () => {
     const plan = parseUiAnswer('1 màn riêng, bước "Confirm Request" là popup; 2 và 3 dùng chung; bỏ 4', ASKED)
     expect(uiPlanForModel(plan)).toEqual([
       { use_case: "Request Grade Review", ui: 'its own new screen(s), used by no other new use case; screen(s) "Confirm Request" are popups' },
@@ -600,7 +600,7 @@ describe("kế hoạch giao diện theo từng use case / từng màn — nhiề
     expect(useCaseScreenNote(issues)).toContain("chưa nối nhau theo thứ tự")
   })
 
-  it("confirmedProposals: use case người dùng xin (tên có trong lời user) không bị coi là đề xuất; model đánh dấu tất cả ⇒ cái đầu vẫn là yêu cầu — lỗi gặp khi chạy AI thật", () => {
+  it("confirmedProposals: use case người dùng xin (tên có trong lời user) không bị coi là đề xuất; model đánh dấu tất cả ⇒ cái đầu vẫn là yêu cầu - lỗi gặp khi chạy AI thật", () => {
     const ops = multiOps()
     expect(confirmedProposals(FIXTURE, ops, ["Request Grade Review", "Decide Grade Review"], 'Thêm use case "Request Grade Review": Student…')).toEqual(["Decide Grade Review"])
     expect(confirmedProposals(FIXTURE, ops, ["Request Grade Review", "Decide Grade Review", "Send Review Reminder"], "Thêm use case phúc khảo cho sinh viên")).toEqual([
@@ -614,7 +614,7 @@ describe("kế hoạch giao diện theo từng use case / từng màn — nhiề
     ])
   })
 
-  it("applyUiPlan: bỏ use case ⇒ bỏ cả màn bước sau / popup đi tiếp từ màn đã bỏ dù model quên đưa chức năng của nó vào function_ids — lỗi gặp khi chạy AI thật", () => {
+  it("applyUiPlan: bỏ use case ⇒ bỏ cả màn bước sau / popup đi tiếp từ màn đã bỏ dù model quên đưa chức năng của nó vào function_ids - lỗi gặp khi chạy AI thật", () => {
     const ops: Op[] = [
       { op: "add", path: "screens[]", value: { id: "$a", name: "Absence Request", feature_id: "F4", flow_to: ["$b"], tabs: [] } },
       { op: "add", path: "screens[]", value: { id: "$b", name: "Confirm Absence Request", feature_id: "F4", flow_to: [], tabs: [], is_popup: true } },
@@ -630,7 +630,7 @@ describe("kế hoạch giao diện theo từng use case / từng màn — nhiề
   })
 })
 
-describe("FLF-318 — xoá use case (luật 3g)", () => {
+describe("FLF-318 - xoá use case (luật 3g)", () => {
   it("useCaseIntent: động từ đứng trước thắng; không nhắc use case ⇒ null", () => {
     expect(useCaseIntent("xoá UC phúc khảo điểm")).toBe("remove")
     expect(useCaseIntent("Xóa use case Request Grade Review")).toBe("remove")
@@ -674,7 +674,7 @@ describe("FLF-318 — xoá use case (luật 3g)", () => {
   })
 })
 
-describe("skill apply-change-op — luật 3g xoá use case (FLF-318)", () => {
+describe("skill apply-change-op - luật 3g xoá use case (FLF-318)", () => {
   const render = async (vars: Record<string, unknown>): Promise<string> => {
     const { getSkill, interpolatePrompt } = await import("../../shared/ai/prompt-registry.service.js")
     return interpolatePrompt(getSkill("apply-change-op").template, vars)
@@ -688,7 +688,7 @@ describe("skill apply-change-op — luật 3g xoá use case (FLF-318)", () => {
   })
 })
 
-describe("FLF-318 — sửa use case (luật 3h)", () => {
+describe("FLF-318 - sửa use case (luật 3h)", () => {
   it("useCaseIntent: lệnh sửa / đổi / cập nhật / rename ⇒ edit; động từ đứng trước thắng", () => {
     expect(useCaseIntent("sửa UC phúc khảo điểm: thêm bước phòng đào tạo duyệt")).toBe("edit")
     expect(useCaseIntent("đổi actor của use case Register Account sang Administrator")).toBe("edit")

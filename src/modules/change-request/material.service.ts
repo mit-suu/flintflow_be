@@ -51,7 +51,7 @@ const readImage = async (cr: IChangeRequest, userId: string, file: UploadedFile,
   )
   if (!result.ok) {
     if (result.reason === "credits") throw new ApiError(402, result.userMessage, "INSUFFICIENT_CREDIT")
-    throw new ApiError(502, "AI chưa đọc được ảnh này — thử lại, hoặc dán nội dung ảnh dưới dạng chữ", "AI_PROVIDER_ERROR")
+    throw new ApiError(502, "AI chưa đọc được ảnh này - thử lại, hoặc dán nội dung ảnh dưới dạng chữ", "AI_PROVIDER_ERROR")
   }
   return result.data.text
 }
@@ -66,14 +66,14 @@ const readFile = async (cr: IChangeRequest, userId: string, file: UploadedFile):
   try {
     return { kind: "file", text: (await parseFileContent(file.buffer, file.mimetype, ext)).text }
   } catch {
-    throw new Mode1Error("CR_MATERIAL_EMPTY", `Không đọc được nội dung "${file.originalname}" — file hỏng hoặc không có chữ`, { name: file.originalname })
+    throw new Mode1Error("CR_MATERIAL_EMPTY", `Không đọc được nội dung "${file.originalname}" - file hỏng hoặc không có chữ`, { name: file.originalname })
   }
 }
 
 export const addMaterial = async (cr: IChangeRequest, userId: string, input: MaterialInput): Promise<string> => {
   assertCrStatus(cr, MATERIAL_EDITABLE_STATUSES, cr.status)
   if ((cr.materials ?? []).length >= CR_MAX_MATERIALS) {
-    throw new Mode1Error("CR_MATERIAL_LIMIT", `Mỗi change request đính kèm tối đa ${CR_MAX_MATERIALS} tài liệu — xoá bớt tài liệu cũ trước`, { max: CR_MAX_MATERIALS })
+    throw new Mode1Error("CR_MATERIAL_LIMIT", `Mỗi change request đính kèm tối đa ${CR_MAX_MATERIALS} tài liệu - xoá bớt tài liệu cũ trước`, { max: CR_MAX_MATERIALS })
   }
   const read = "file" in input ? await readFile(cr, userId, input.file) : { kind: "text" as const, text: input.text }
   const clipped = clipMaterialText(read.text)

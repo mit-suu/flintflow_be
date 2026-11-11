@@ -69,7 +69,7 @@ describe("segmentItemHash / segmentHash", () => {
   })
 })
 
-describe("rehashSegments — sơ đồ đọc lại sau 0.1 (FLF-360)", () => {
+describe("rehashSegments - sơ đồ đọc lại sau 0.1 (FLF-360)", () => {
   it("ảnh vừa được gắn `diagram` ⇒ ghi loại sơ đồ vào đoạn; ảnh đã ghi không lặp", () => {
     const base = spine()
     const image = { kind: "image" as const, text: "", rows: null, image_ref: "word/media/image1.png" }

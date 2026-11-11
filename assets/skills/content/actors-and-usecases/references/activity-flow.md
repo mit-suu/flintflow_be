@@ -1,18 +1,18 @@
-# Activity flow of a use case (FLF-390) — only on request
+# Activity flow of a use case (FLF-390) - only on request
 
 The Activity Diagram of a use case is **not** part of the FlintFlow (FPT) template: write `activity_nodes` /
 `activity_flows` **only when the user asks for it** (chat or change request: "add an activity diagram for Log in"), or when
 the request is about the "Functions" part of an IEEE template that needs it. A normal S-3.x step writes none.
 
-**`use_cases[id=…].activity_nodes[]` + `.activity_flows[]`** — the processing flow of the use case; one `set` of each whole
-array per use case. Build them from the use case description and the `normal[]` / `abnormal[]` steps of its functions —
+**`use_cases[id=…].activity_nodes[]` + `.activity_flows[]`** - the processing flow of the use case; one `set` of each whole
+array per use case. Build them from the use case description and the `normal[]` / `abnormal[]` steps of its functions -
 no extra behaviour.
 
 - Node `{id, kind, name?, lane?}`: `id` = `<use case id>-AN<n>` in order (`UC02-AN1`…); `kind` one of `initial`, `action`,
   `decision`, `merge`, `fork`, `join`, `final`. Exactly one `initial`; at least one `final`.
 - `action.name`: a short verb phrase of one step ("Validate credentials", "Show error message"); `decision.name`: the
   question ("Credentials valid?"); other kinds have no name.
-- `lane`: who does the step — an actor id of the use case (`actor_ids`, general actor as modelled) or `system`. Give
+- `lane`: who does the step - an actor id of the use case (`actor_ids`, general actor as modelled) or `system`. Give
   every `action` a lane when two or more parties take part; the other kinds may leave it out (they inherit it).
 - Flow `{from, to, guard?}`: node ids of the same use case. Every flow out of a `decision` has a `guard` (the condition,
   no brackets: "credentials do not match"); a decision has ≥ 2 outgoing flows. A retry is a flow back to the earlier

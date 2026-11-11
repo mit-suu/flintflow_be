@@ -5,7 +5,7 @@ vi.mock("axios", () => ({ default: { post } }))
 vi.mock("../../../config/env.js", () => ({ env: { ANTHROPIC_API_KEY: "test-key", AI_PROVIDER_OVERRIDE: "" } }))
 
 import { callAnthropic, ANTHROPIC_THINKING_HEADROOM_TOKENS, DEFAULT_ANTHROPIC_MODEL } from "./anthropic.provider.js"
-import { callLLM } from "./llm.router.js"
+import { callLLM, PUNCTUATION_RULE } from "./llm.router.js"
 import { env } from "../../../config/env.js"
 
 const reply = (data: Record<string, unknown>) => ({ data: { usage: { input_tokens: 10, output_tokens: 20 }, ...data } })
@@ -42,15 +42,15 @@ describe("callAnthropic", () => {
     expect(post.mock.calls[0][1].messages).toEqual([{ role: "user", content: [
       { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw0K" } },
       { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "/9j/" } },
-      { type: "text", text: "Read images" }
+      { type: "text", text: `Read images\n\n${PUNCTUATION_RULE}` }
     ] }])
     expect(post.mock.calls[0][2].signal).toBe(signal)
   })
 
-  it("danh sách ảnh rỗng vẫn gửi prompt chữ như trước", async () => {
+  it("danh sách ảnh rỗng vẫn gửi prompt chữ như trước, kèm luật không dùng em dash", async () => {
     post.mockResolvedValue(reply({ stop_reason: "end_turn", content: [{ type: "text", text: "{}" }] }))
     await callLLM("Only text", { provider: "anthropic", model: DEFAULT_ANTHROPIC_MODEL }, { images: [] })
-    expect(post.mock.calls[0][1].messages).toEqual([{ role: "user", content: "Only text" }])
+    expect(post.mock.calls[0][1].messages).toEqual([{ role: "user", content: `Only text\n\n${PUNCTUATION_RULE}` }])
   })
 
   it("thiếu key khi đọc ảnh ⇒ ANTHROPIC_KEY_MISSING và không gọi mạng", async () => {

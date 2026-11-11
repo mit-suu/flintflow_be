@@ -177,20 +177,20 @@ const DIRECTIVE: Readonly<Record<ReplyLanguage, string>> = {
   en: [
     "## Reply language",
     "",
-    "Reply language: **English**. Write everything the user reads in this turn in English — the reply, questions,",
+    "Reply language: **English**. Write everything the user reads in this turn in English - the reply, questions,",
     "option labels and descriptions, card headers, gate notes, clarification questions, reasons, and the user-facing",
-    "assumption texts (`statement_vi`, `rationale_vi`) — even when earlier turns, the document context or the examples",
+    "assumption texts (`statement_vi`, `rationale_vi`) - even when earlier turns, the document context or the examples",
     "above are in Vietnamese. Mark a recommended option with ` (Recommended)`. Leave unchanged: ids, keys, paths,",
     "`topic_key` values, every value the rules above keep in English or in the document's language, and the names of",
-    "buttons, panels and tabs the rules above quote from the interface — the interface is in Vietnamese, so quote them",
+    "buttons, panels and tabs the rules above quote from the interface - the interface is in Vietnamese, so quote them",
     "exactly as written (an English gloss in parentheses is fine)."
   ].join("\n"),
   vi: [
     "## Reply language",
     "",
-    "Reply language: **Vietnamese (tiếng Việt)**. Write everything the user reads in this turn in Vietnamese — the",
+    "Reply language: **Vietnamese (tiếng Việt)**. Write everything the user reads in this turn in Vietnamese - the",
     "reply, questions, option labels and descriptions, card headers, gate notes, clarification questions, reasons, and",
-    "the user-facing assumption texts (`statement_vi`, `rationale_vi`) — even when the latest message, earlier turns or",
+    "the user-facing assumption texts (`statement_vi`, `rationale_vi`) - even when the latest message, earlier turns or",
     "the document context are in English. Mark a recommended option with ` (Khuyến nghị)`. Leave unchanged: ids, keys,",
     "paths, `topic_key` values, and every value the rules above keep in English or in the document's language."
   ].join("\n")

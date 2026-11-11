@@ -32,17 +32,17 @@ This skill is the shared contract for every renderer (`renderer/*`) and the prom
 | SRS section | SRS content (ISO/IEC/IEEE 29148) | `kind` | `owner_kind` | Notation | Path | Ticket | `source_fields` |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `fixed:1` | Product perspective / system interfaces | `context` | `null` (one diagram) | DFD level 0 (Yourdon/DeMarco) | svg | FLF-322 | srs-spine §7.1 |
-| `fixed:2.2.1` | Functional requirements — user view | `usecase` | `null` (one part per feature; actor hierarchy part in `fixed:2.1`) | UML 2.5.1 Use Case | svg | FLF-323 | srs-spine §7.1 |
-| `fixed:3.1.1` | User interfaces — navigation | `screen_flow` | `null` (one part for the system) | FPT SRS template §3.1.1 (screen box, pop-up oval, tab frame) | svg | FLF-349 | srs-spine §7.1 |
+| `fixed:2.2.1` | Functional requirements - user view | `usecase` | `null` (one part per feature; actor hierarchy part in `fixed:2.1`) | UML 2.5.1 Use Case | svg | FLF-323 | srs-spine §7.1 |
+| `fixed:3.1.1` | User interfaces - navigation | `screen_flow` | `null` (one part for the system) | FPT SRS template §3.1.1 (screen box, pop-up oval, tab frame) | svg | FLF-349 | srs-spine §7.1 |
 | `fixed:3.1.5` | Logical database requirements | `erd` | `null` (split by cluster) | Chen \| Crow's foot \| IDEF1X (per project) | svg | FLF-324 | srs-spine §7.1 |
 | `feature:<id>` | Logical data model (domain) | `class` | feature (one part per feature, at the head of §3.x) | UML 2.5 Class (analysis level, 2 compartments) | svg | FLF-325 | srs-spine §7.1 |
-| `function:<id>` | Functional requirements — stimulus/response | `sequence` | function | UML 2.5 System Sequence Diagram (black box) | puml | FLF-326 | srs-spine §7.1 |
-| `feature:<id>` | Functional requirements — processing flow of a use case (only on request / IEEE Functions) | `activity` | use_case | UML 2.5 Activity (swimlanes) | svg | FLF-390 | srs-spine §7.1 |
-| `fixed:4.1` | External interfaces — deployment (IEEE: "Distribution" of "Design and Implementation"; only on request in FPT) | `deployment` | `null` (one diagram) | UML 2.5 Deployment | puml | FLF-390 | srs-spine §7.1 |
+| `function:<id>` | Functional requirements - stimulus/response | `sequence` | function | UML 2.5 System Sequence Diagram (black box) | puml | FLF-326 | srs-spine §7.1 |
+| `feature:<id>` | Functional requirements - processing flow of a use case (only on request / IEEE Functions) | `activity` | use_case | UML 2.5 Activity (swimlanes) | svg | FLF-390 | srs-spine §7.1 |
+| `fixed:4.1` | External interfaces - deployment (IEEE: "Distribution" of "Design and Implementation"; only on request in FPT) | `deployment` | `null` (one diagram) | UML 2.5 Deployment | puml | FLF-390 | srs-spine §7.1 |
 | `fixed:3.1.5` | Modes and states | `state_machine` | entity (one per entity that has states, next to the entity description) | UML 2.5 State Machine | svg | FLF-327 | srs-spine §7.1 |
-| `function:<primary_function_id>` | User interfaces — layout | `screen_layout` | screen | Salt wireframe | puml | — | srs-spine §7.1 |
+| `function:<primary_function_id>` | User interfaces - layout | `screen_layout` | screen | Salt wireframe | puml | - | srs-spine §7.1 |
 
-`sequence` reads `functions[].interactions` (FLF-326, `contract-change`); `activity` reads `use_cases[].activity_nodes` / `.activity_flows`, `deployment` reads `deployment_nodes` / `deployment_links` (FLF-390). **No data, no diagram**: a function with no `interactions[]`, or one that fails the criteria in `references/kinds.md`, has no diagram — no placeholder, no guessed content (`state_machine` is drawn only for entities whose `states[]` is filled, `activity` only for use cases whose `activity_nodes[]` is filled — neither `activity` nor `deployment` is in the FPT template unless the user asks).
+`sequence` reads `functions[].interactions` (FLF-326, `contract-change`); `activity` reads `use_cases[].activity_nodes` / `.activity_flows`, `deployment` reads `deployment_nodes` / `deployment_links` (FLF-390). **No data, no diagram**: a function with no `interactions[]`, or one that fails the criteria in `references/kinds.md`, has no diagram - no placeholder, no guessed content (`state_machine` is drawn only for entities whose `states[]` is filled, `activity` only for use cases whose `activity_nodes[]` is filled - neither `activity` nor `deployment` is in the FPT template unless the user asks).
 
 New kinds, the `svg` path and rules 5, 11 and 12 below are the target: each kind adopts them with the ticket in its row. `sequence` (system level, black box) and `deployment` are the kinds besides the salt wireframe on the `puml` path. `SRS section` is the section id the diagram is embedded in (`section-registry.ts`; `feature:<id>` = §3.x, `function:<id>` = §3.x.y). Per-kind syntax and skeletons: `references/kinds.md`.
 

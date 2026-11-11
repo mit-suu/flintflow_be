@@ -21,7 +21,7 @@ beforeEach(() => {
   mocks.loadBaselineSpine.mockResolvedValue(snapshot)
 })
 
-describe("targetSpineLoader — FLF-334 B đích snapshot của #26 / #27", () => {
+describe("targetSpineLoader - FLF-334 B đích snapshot của #26 / #27", () => {
   it("không đích ⇒ Spine hiện tại", async () => {
     await expect(targetSpineLoader(PROJECT, {})()).resolves.toBe(current)
     expect(mocks.loadBaselineSpine).not.toHaveBeenCalled()

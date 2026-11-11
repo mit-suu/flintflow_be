@@ -65,12 +65,12 @@ describe("activityInput", () => {
   })
 })
 
-describe("renderActivity — mỗi use case có luồng xử lý một hình (phần chức năng)", () => {
+describe("renderActivity - mỗi use case có luồng xử lý một hình (phần chức năng)", () => {
   it("chỉ use case có activity_nodes; chủ = use case, section = tính năng chứa use case; tiêu đề; bố cục hợp lệ", () => {
     const parts = renderActivity(withActivity(UC, LOGIN_NODES, LOGIN_FLOWS))
     expect(parts).toHaveLength(1)
     expect(parts[0]).toMatchObject({ kind: "activity", format: "svg", owner_kind: "use_case", owner_id: UC, section: `feature:${FEATURE}` })
-    expect(svgTitleOf(parts[0].source)).toBe(`Activity Diagram — ${UC_NAME}`)
+    expect(svgTitleOf(parts[0].source)).toBe(`Activity Diagram - ${UC_NAME}`)
     expect(parts[0].issues).toEqual([])
     expect(parts[0].source).toContain("[invalid]")
     // Câu hỏi nằm trong hình thoi (UML) — có thể xuống dòng
@@ -123,7 +123,7 @@ describe("renderActivity — mỗi use case có luồng xử lý một hình (ph
   })
 })
 
-describe("layoutActivity — đồ thị ngẫu nhiên luôn qua checkScene", () => {
+describe("layoutActivity - đồ thị ngẫu nhiên luôn qua checkScene", () => {
   const KINDS: ActivityNodeKind[] = ["action", "action", "action", "decision", "merge", "fork", "join", "final"]
   /** PRNG tất định (mulberry32). */
   const rng = (seed: number) => () => {

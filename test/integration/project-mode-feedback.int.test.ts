@@ -23,7 +23,7 @@ describe("project mode qua HTTP", () => {
     expect(list.body.data).toHaveLength(1) // chỉ dự án của fixture
   })
 
-  it("FLF-335: source quyết định mode — có sẵn ⇒ import; mới có mẫu bắt buộc ⇒ import + template_intent fixed (không còn 501); mới không mẫu ⇒ fpt", async () => {
+  it("FLF-335: source quyết định mode - có sẵn ⇒ import; mới có mẫu bắt buộc ⇒ import + template_intent fixed (không còn 501); mới không mẫu ⇒ fpt", async () => {
     let seededRef: SeededFixture | undefined
     // Gói Free tối đa 3 dự án / org (fixture đã có 1) ⇒ mỗi org thử 2 trường hợp
     const cases = [
