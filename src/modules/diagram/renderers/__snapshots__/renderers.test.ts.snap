@@ -382,41 +382,41 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 <svg xmlns="http://www.w3.org/2000/svg" width="1099" height="728" viewBox="-542 -374 1099 728">
 <rect x="-542" y="-374" width="1099" height="728" fill="#fff"/>
 <line x1="-171.59" y1="-259.59" x2="-91.4" y2="-104.73" stroke="#000" stroke-width="1.2"/>
-<polygon points="-91.4,-104.73 -102.26,-113.74 -94.68,-111.08 -92.49,-118.8" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<polygon points="-91.4,-104.73 -101.35,-113.08 -92.47,-117.68" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <line x1="-146.82" y1="-259.59" x2="-73.49" y2="-117.99" stroke="#000" stroke-width="1.2"/>
-<polygon points="-73.49,-117.99 -84.35,-127 -76.77,-124.34 -74.58,-132.06" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<polygon points="-73.49,-117.99 -83.44,-126.34 -74.56,-130.94" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <line x1="-53.95" y1="-128.1" x2="-122.04" y2="-259.59" stroke="#000" stroke-width="1.2"/>
-<polygon points="-122.04,-259.59 -111.18,-250.57 -118.75,-253.24 -120.95,-245.52" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<polygon points="-122.04,-259.59 -112.08,-251.23 -120.96,-246.63" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <line x1="-32.79" y1="-135.08" x2="-97.27" y2="-259.59" stroke="#000" stroke-width="1.2"/>
-<polygon points="-97.27,-259.59 -86.4,-250.57 -93.98,-253.24 -96.17,-245.52" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<polygon points="-97.27,-259.59 -87.31,-251.23 -96.19,-246.63" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <line x1="-371.28" y1="-69.96" x2="-137.71" y2="-18.86" stroke="#000" stroke-width="1.2"/>
-<polygon points="-137.71,-18.86 -151.59,-16.27 -144.7,-20.39 -149.24,-27.02" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<polygon points="-137.71,-18.86 -150.51,-16.54 -148.37,-26.31" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <line x1="-133.01" y1="-40.36" x2="-365.23" y2="-91.15" stroke="#000" stroke-width="1.2"/>
-<polygon points="-365.23,-91.15 -351.36,-93.75 -358.25,-89.63 -353.71,-83" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<polygon points="-365.23,-91.15 -352.44,-93.47 -354.58,-83.71" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <line x1="-340.95" y1="130.38" x2="-127.24" y2="55.96" stroke="#000" stroke-width="1.2"/>
-<polygon points="-127.24,55.96 -137.71,65.43 -133.99,58.31 -141.33,55.04" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<polygon points="-127.24,55.96 -136.93,64.62 -140.22,55.18" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <line x1="-134.47" y1="35.18" x2="-371.86" y2="117.85" stroke="#000" stroke-width="1.2"/>
-<polygon points="-371.86,117.85 -361.4,108.38 -365.11,115.49 -357.78,118.76" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<polygon points="-371.86,117.85 -362.18,109.18 -358.89,118.62" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <line x1="-132.4" y1="279.59" x2="-53.95" y2="128.1" stroke="#000" stroke-width="1.2"/>
-<polygon points="-53.95,128.1 -55.04,142.18 -57.24,134.45 -64.81,137.12" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<polygon points="-53.95,128.1 -55.03,141.06 -63.91,136.46" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <line x1="-73.49" y1="117.99" x2="-157.17" y2="279.59" stroke="#000" stroke-width="1.2"/>
-<polygon points="-157.17,279.59 -156.08,265.52 -153.88,273.24 -146.31,270.57" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<polygon points="-157.17,279.59 -156.09,266.63 -147.21,271.23" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <line x1="132.4" y1="-279.59" x2="53.95" y2="-128.1" stroke="#000" stroke-width="1.2"/>
-<polygon points="53.95,-128.1 55.04,-142.18 57.24,-134.45 64.81,-137.12" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<polygon points="53.95,-128.1 55.03,-141.06 63.91,-136.46" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <line x1="73.49" y1="-117.99" x2="157.17" y2="-279.59" stroke="#000" stroke-width="1.2"/>
-<polygon points="157.17,-279.59 156.08,-265.52 153.88,-273.24 146.31,-270.57" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<polygon points="157.17,-279.59 156.09,-266.63 147.21,-271.23" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <line x1="320.38" y1="-150.51" x2="122.82" y2="-65.09" stroke="#000" stroke-width="1.2"/>
-<polygon points="122.82,-65.09 132.57,-75.3 129.38,-67.93 136.93,-65.2" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<polygon points="122.82,-65.09 131.85,-74.44 135.82,-65.26" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <line x1="131.55" y1="-44.9" x2="360.65" y2="-143.96" stroke="#000" stroke-width="1.2"/>
-<polygon points="360.65,-143.96 350.9,-133.75 354.09,-141.12 346.53,-143.84" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<polygon points="360.65,-143.96 351.62,-134.6 347.65,-143.78" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <line x1="385.44" y1="21.27" x2="139" y2="0.61" stroke="#000" stroke-width="1.2"/>
-<polygon points="139,0.61 152.41,-3.78 146.12,1.21 151.49,7.18" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<polygon points="139,0.61 151.37,-3.37 150.54,6.6" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <line x1="137.16" y1="22.54" x2="385.44" y2="43.35" stroke="#000" stroke-width="1.2"/>
-<polygon points="385.44,43.35 372.02,47.74 378.31,42.75 372.94,36.78" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<polygon points="385.44,43.35 373.06,47.33 373.9,37.36" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <line x1="118.99" y1="71.85" x2="307.39" y2="185.62" stroke="#000" stroke-width="1.2"/>
-<polygon points="307.39,185.62 293.42,183.61 301.27,181.92 299.1,174.19" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<polygon points="307.39,185.62 294.53,183.69 299.7,175.13" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <line x1="144.79" y1="279.59" x2="63.92" y2="123.43" stroke="#000" stroke-width="1.2"/>
-<polygon points="63.92,123.43 74.78,132.45 67.21,129.78 65.01,137.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<polygon points="63.92,123.43 73.88,131.79 65,136.39" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <rect x="-233.77" y="-353.59" width="150" height="94" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="-158.77" y="-306.59" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Founder</text>
 <rect x="-521.23" y="-123.96" width="156" height="54" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
