@@ -5,6 +5,8 @@ import type { Spine } from "../../spine/spine.types.js"
 import { DRAWN_USER_ID, drawnGeneralizations, withDrawnUser } from "./drawn-user.js"
 import { renderUseCase } from "./usecase.renderer.js"
 
+const triangles = (svg: string) => svg.match(/<polygon [^>]*fill="#fff"/g) ?? []
+
 const uc = (id: string, name: string, actor_ids: string[]) => ({ id, name, actor_ids, function_ids: [], description: "", includes: [], extends: [] })
 const human = (id: string, name: string, parent_id: string | null = null) => ({ id, name, kind: "human", description: "", parent_id })
 
@@ -97,7 +99,6 @@ describe("withDrawnUser", () => {
 
 describe("QLHS 11/11 bug #13: User có mũi tên kế thừa trên chính sơ đồ use case", () => {
   /** Mọi đầu tam giác rỗng (polygon nền trắng) trong SVG. */
-  const triangles = (svg: string) => svg.match(/<polygon [^>]*fill="#fff"/g) ?? []
   const lines = (svg: string) => [...svg.matchAll(/<line x1="([^"]+)" y1="([^"]+)" x2="([^"]+)" y2="([^"]+)"/g)].map((m) => m.slice(1, 5).map(Number))
   /** Số nhánh ngang chạm thanh gom dọc của thân mang tam giác chung (= số actor con của User). */
   const generalizationCount = (svg: string): number => {
@@ -108,7 +109,9 @@ describe("QLHS 11/11 bug #13: User có mũi tên kế thừa trên chính sơ đ
   const overview = (s: Spine) => renderUseCase(s, null).find((p) => (p as { section?: string }).section === "fixed:2.2.1")!
 
   it("các vai trò được thay bằng User đều có cạnh generalization tới User, kể cả vai trò không còn use case riêng", () => {
-    const part = overview(qlhs())
+    // TechMart 11/11 (user chốt): mỗi actor cha một hình — cạnh kế thừa nằm trên hình của User
+    const parts = renderUseCase(qlhs(), null).filter((p) => (p as { section?: string }).section === "fixed:2.2.1")
+    const part = parts.find((p) => String(p.source).includes(">User<"))!
     expect(part.issues).toEqual([])
     const svg = String(part.source)
     // A01, A02 không còn use case riêng (UC-01, UC-02 đều nối User) nhưng vẫn hiện để người đọc biết User là ai
@@ -138,13 +141,32 @@ describe("QLHS 11/11 bug #13: User có mũi tên kế thừa trên chính sơ đ
 })
 
 describe("FLF-375: sơ đồ use case tổng quát cho tài liệu upload", () => {
-  it("≤ 20 use case ⇒ một hình duy nhất (không tách theo tính năng)", () => {
+  it("không tách theo tính năng: một hình chính + một hình cho mỗi actor cha (User)", () => {
     const s = qlhs()
     s.features.push({ id: "F1", name: "Hồ sơ", order: 1 } as never, { id: "F2", name: "Thông báo", order: 2 } as never)
     s.functions.push({ id: "FR-01", feature_id: "F1" } as never, { id: "FR-02", feature_id: "F2" } as never)
     s.use_cases[1].function_ids = ["FR-01"]
     s.use_cases[2].function_ids = ["FR-02"]
     const parts = renderUseCase(s, null).filter((p) => (p as { section?: string }).section === "fixed:2.2.1")
-    expect(parts).toHaveLength(1)
+    expect(parts).toHaveLength(2)
+    // hình chính không có cạnh kế thừa; hình của User có
+    expect(triangles(String(parts[0].source))).toHaveLength(0)
+    expect(triangles(String(parts[1].source))).toHaveLength(1)
+  })
+
+  it("TechMart 11/11: actor cha có trong file (Guest) cũng có hình riêng, con (Customer) kế thừa trên hình đó; Customer kế thừa cả User trên hình User", () => {
+    const s = qlhs()
+    s.actors.push(human("A06", "Guest") as never, human("A07", "Customer", "A06") as never)
+    s.use_cases.push(uc("UC-11", "Search Products", ["A06", "A07"]) as never, uc("UC-12", "Place Order", ["A07"]) as never, uc("UC-13", "Log In shop", ["A07", "A03"]) as never)
+    const parts = renderUseCase(s, null).filter((p) => (p as { section?: string }).section === "fixed:2.2.1")
+    const guest = parts.find((p) => /Search Products/.test(String(p.source)))!
+    const user = parts.find((p) => /Log In shop/.test(String(p.source)))!
+    const main = parts.find((p) => /Place Order/.test(String(p.source)))!
+    expect(String(guest.source)).toContain(">Customer<")
+    expect(triangles(String(guest.source))).toHaveLength(1)
+    expect(String(user.source)).toContain(">Customer<")
+    expect(triangles(String(main.source))).toHaveLength(0)
+    expect(new Set([guest, user, main]).size).toBe(3)
+    for (const p of parts) expect(p.issues).toEqual([])
   })
 })
