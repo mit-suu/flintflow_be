@@ -122,7 +122,7 @@ beforeEach(() => {
   vi.restoreAllMocks()
 })
 
-describe("cache đọc theo (_id, spine_version) — FLF-308", () => {
+describe("cache đọc theo (_id, spine_version) - FLF-308", () => {
   const fullReads = (spy: { mock: { calls: unknown[][] } }) => spy.mock.calls.filter((c) => !c[1]).length
 
   it("Spine không đổi ⇒ chỉ hỏi version, không tải lại; bản trả về là bản sao (sửa không lan sang lần sau)", async () => {
@@ -197,7 +197,7 @@ describe("getOrCreate / get", () => {
   })
 })
 
-describe("saveWithVersion — khoá lạc quan", () => {
+describe("saveWithVersion - khoá lạc quan", () => {
   it("ghi khi base khớp và tăng spine_version đúng 1", async () => {
     const spine = await repo.getOrCreate(PROJECT)
     spine.actors.push({ id: "A01", name: "Student", kind: "human", description: "" })
@@ -257,7 +257,7 @@ describe("saveWithVersion — khoá lạc quan", () => {
   })
 })
 
-describe("restoreSnapshot — rollback việc nhiều lô dở", () => {
+describe("restoreSnapshot - rollback việc nhiều lô dở", () => {
   it("Spine về đúng nội dung mốc, version vẫn tăng, change từ mốc bị bỏ (change trước mốc giữ)", async () => {
     const spine = await repo.getOrCreate(PROJECT)
     const { projectId: _projectId, ...snapshot } = spine

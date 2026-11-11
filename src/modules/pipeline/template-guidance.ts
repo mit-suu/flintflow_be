@@ -48,7 +48,7 @@ export interface TemplateStepContext {
 const CUSTOM_WRITE_RULE = [
   "### Template-specific sections (custom_sections)",
   "Some template sections have no FlintFlow data model. Draft each one for THIS project by replacing the WHOLE element",
-  "(the op engine rejects setting `.blocks` alone) — keep its id, heading and level exactly as shown in the projection:",
+  "(the op engine rejects setting `.blocks` alone) - keep its id, heading and level exactly as shown in the projection:",
   '`{"op":"set","path":"custom_sections[id=<id>]","value":{"id":"<id>","heading":"<heading>","level":<level>,"source":"import","blocks":[{"kind":"paragraph","text":"…","rows":null,"image_ref":null}]}}`.',
   'Use `"kind":"list_item"` for bullets and `{"kind":"table","text":"","rows":[[header…],[row…]],"image_ref":null}` for a table that',
   "keeps the template's columns. Never copy the template's example text."

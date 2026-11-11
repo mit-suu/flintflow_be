@@ -207,4 +207,4 @@ export const assertTranslationComplete = async (projectId: string, locale: UserL
 
 /** 409 `DOCUMENT_LANGUAGE_UNAVAILABLE` — bản này chưa tải được theo ngôn ngữ khác (mode 1 import thật, bản nháp CR). */
 export const documentLanguageUnavailable = (): ApiError =>
-  new ApiError(409, "Bản này chưa tải được theo ngôn ngữ khác — chỉ tải được theo ngôn ngữ tài liệu của dự án.", DOCUMENT_LANGUAGE_UNAVAILABLE)
+  new ApiError(409, "Bản này chưa tải được theo ngôn ngữ khác - chỉ tải được theo ngôn ngữ tài liệu của dự án.", DOCUMENT_LANGUAGE_UNAVAILABLE)

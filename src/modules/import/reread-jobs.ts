@@ -173,7 +173,7 @@ const writeImage = async (projectId: string, read: Extract<DiagramRead, { status
       return ops.map(touchedPath)
     } catch (err) {
       if (!isConflict(err) || attempt === 1) {
-        console.warn(`[reread] project ${projectId}: không ghi được ảnh ${image.block_id} (${err instanceof Error ? err.message : String(err)}) — giữ cờ, lượt sau thử lại`)
+        console.warn(`[reread] project ${projectId}: không ghi được ảnh ${image.block_id} (${err instanceof Error ? err.message : String(err)}) - giữ cờ, lượt sau thử lại`)
         return null
       }
     }
@@ -214,7 +214,7 @@ export const runImageReread = async ({ projectId, userId, importId }: Omit<Rerea
     const spineKnown = spineItems(stripRecord(record))
     const r = await readDiagramImage(img, { ...ctx, known: [...ctx.known, ...spineKnown.filter((k) => !ctx.known.some((x) => x.entity === k.entity && x.id === k.id))] })
     if (r.status === "credits") {
-      console.warn(`[reread] project ${projectId}: hết credit — dừng đọc lại ảnh, giữ cờ vàng`)
+      console.warn(`[reread] project ${projectId}: hết credit - dừng đọc lại ảnh, giữ cờ vàng`)
       outcome = "stopped"
       break
     }
@@ -263,10 +263,10 @@ const rereadJob = defineJob<RereadJobData>({
   process: async (data) => {
     const outcome = await runImageReread(data)
     if (outcome === "retry") await scheduleImageReread(data.projectId, data.userId, data.importId, data.round + 1)
-    if (outcome === "retry" && data.round + 1 >= rereadDelays().length) console.warn(`[reread] import ${data.importId}: hết lịch đọc lại — giữ ảnh gốc + cờ vàng`)
+    if (outcome === "retry" && data.round + 1 >= rereadDelays().length) console.warn(`[reread] import ${data.importId}: hết lịch đọc lại - giữ ảnh gốc + cờ vàng`)
   },
   onFinalFailure: async ({ importId }, err) => {
-    console.error(`[reread] job đọc lại ảnh của import ${importId} lỗi — giữ cờ vàng:`, err)
+    console.error(`[reread] job đọc lại ảnh của import ${importId} lỗi - giữ cờ vàng:`, err)
   }
 })
 

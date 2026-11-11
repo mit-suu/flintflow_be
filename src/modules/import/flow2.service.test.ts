@@ -5,7 +5,7 @@ import { flow2Owners, flow2StepOps } from "./flow2.service.js"
 
 const state = (id: string, status: StepState["status"]): StepState => ({ id, status, first_seq: null, last_seq: null, accepted_at: null })
 
-describe("flow2StepOps — chế độ 3 sang Luồng 2 tại 2.4", () => {
+describe("flow2StepOps - chế độ 3 sang Luồng 2 tại 2.4", () => {
   it("mở lại Brief B-1…S-1 (đang bỏ qua), giữ B-0 bỏ qua, giữ bước đã chốt / bước mục thiếu; bước kế tiếp là B-1.1", () => {
     const registry = loadStepRegistry().filter((s) => s.kind !== "loop")
     const steps = registry.map((s) =>
@@ -68,7 +68,7 @@ describe("flow2StepOps — chế độ 3 sang Luồng 2 tại 2.4", () => {
   })
 })
 
-describe("flow2Owners — bước cần soạn / bước giữ chốt", () => {
+describe("flow2Owners - bước cần soạn / bước giữ chốt", () => {
   const sections = [
     { section_id: "fixed:1", title: "1 Overview", status: "present" as const, owner_steps: ["S-2.1"] },
     { section_id: "fixed:2.1", title: "2.1 Actors", status: "missing" as const, owner_steps: ["S-3.1"] },
@@ -81,7 +81,7 @@ describe("flow2Owners — bước cần soạn / bước giữ chốt", () => {
     // FLF-382: S-8.1 sở hữu cả mục riêng đã viết lẫn mục riêng còn trống ⇒ vẫn soạn (chỉ ghi được mục còn trống)
     expect(flow2Owners(sections, false)).toEqual({ draft: ["S-3.1", "S-8.1"], keep: ["S-2.1"] })
   })
-  it("FLF-382: bước sở hữu mục FPT đã viết lẫn mục FPT còn thiếu vẫn giữ chốt (D4 — không soạn lại phần khách viết)", () => {
+  it("FLF-382: bước sở hữu mục FPT đã viết lẫn mục FPT còn thiếu vẫn giữ chốt (D4 - không soạn lại phần khách viết)", () => {
     const fpt = [
       { section_id: "fixed:1", title: "1 Overview", status: "present" as const, owner_steps: ["S-2.1", "S-2.2"] },
       { section_id: "slot:scope", title: "1.2 Scope", status: "missing" as const, owner_steps: ["S-2.2"] },

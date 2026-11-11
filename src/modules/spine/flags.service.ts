@@ -273,8 +273,8 @@ export const waive = async (projectId: string, flagId: string, reason: string, u
     throw new ApiError(
       400,
       flag.level === "red"
-        ? "Cờ đỏ không bỏ qua được — hãy sửa dữ liệu, hoặc chọn Giữ nguyên kèm lý do (cờ vẫn chặn chốt bản)."
-        : "Cờ này không bỏ qua được — cần sửa dữ liệu.",
+        ? "Cờ đỏ không bỏ qua được - hãy sửa dữ liệu, hoặc chọn Giữ nguyên kèm lý do (cờ vẫn chặn chốt bản)."
+        : "Cờ này không bỏ qua được - cần sửa dữ liệu.",
       FLAG_NOT_WAIVABLE,
       { rule_id: flag.rule_id, level: flag.level }
     )

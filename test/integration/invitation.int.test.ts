@@ -51,7 +51,7 @@ const invite = async (role = "analyst", email = "invitee@flintflow.test") => {
   return res.body.data as { id: string; code: string; role: string; state: string }
 }
 
-describe("UC-08 — Lead tạo và thu hồi mã mời (Flow 9.1–9.2)", () => {
+describe("UC-08 - Lead tạo và thu hồi mã mời (Flow 9.1–9.2)", () => {
   it("tạo mã: trả mã thô đúng một lần, DB chỉ giữ hash", async () => {
     const created = await invite("analyst")
 
@@ -68,7 +68,7 @@ describe("UC-08 — Lead tạo và thu hồi mã mời (Flow 9.1–9.2)", () => 
     expect(JSON.stringify(list.body.data)).not.toContain(created.code)
   })
 
-  it("không mời được với vai trò Lead — phải nâng qua UC-73", async () => {
+  it("không mời được với vai trò Lead - phải nâng qua UC-73", async () => {
     const res = await request(app)
       .post(ORGS + "/" + orgId + "/invitations")
       .set(bearer(lead))
@@ -102,7 +102,7 @@ describe("UC-08 — Lead tạo và thu hồi mã mời (Flow 9.1–9.2)", () => 
   })
 })
 
-describe("UC-09 — nhập mã mời (Flow 8.3–8.5)", () => {
+describe("UC-09 - nhập mã mời (Flow 8.3–8.5)", () => {
   it("xem trước rồi tham gia với đúng vai trò trong mã, token mới mang orgId", async () => {
     const created = await invite("viewer")
 
@@ -167,7 +167,7 @@ describe("mã mời hỏng thì từ chối (Flow 8.4 nhánh No)", () => {
     expect(await Membership.countDocuments({ organizationId: orgId, userId: second.id })).toBe(0)
   })
 
-  it("hai người nhập cùng một mã đồng thời — chỉ một người vào được", async () => {
+  it("hai người nhập cùng một mã đồng thời - chỉ một người vào được", async () => {
     const created = await invite()
     const other = await makeUser("other@flintflow.test")
 

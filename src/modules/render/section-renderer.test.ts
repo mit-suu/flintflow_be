@@ -165,8 +165,8 @@ const ctx = (overrides: Partial<SectionRenderContext> = {}): SectionRenderContex
   ...overrides
 })
 
-describe("renderSection — fixed sections", () => {
-  it("fixed:1 — vision, goals, release scope, high business rules, external systems, context diagram", () => {
+describe("renderSection - fixed sections", () => {
+  it("fixed:1 - vision, goals, release scope, high business rules, external systems, context diagram", () => {
     const section = renderSection(spine(), "fixed:1", ctx({ number: "1" }))
     expect(section).toMatchSnapshot()
     expect(section.heading).toBe("Product Overview")
@@ -180,32 +180,32 @@ describe("renderSection — fixed sections", () => {
     expect(text).toContain("Payment Gateway")
   })
 
-  it("fixed:2.1 — actors table (mọi actor, mọi kind)", () => {
+  it("fixed:2.1 - actors table (mọi actor, mọi kind)", () => {
     const section = renderSection(spine(), "fixed:2.1", ctx({ number: "2.1" }))
     const table = section.blocks[0]
     expect(table).toMatchObject({ type: "table", header: [[{ text: "ID" }], [{ text: "Name" }], [{ text: "Kind" }], [{ text: "Description" }]] })
     expect(table.type === "table" && table.rows).toHaveLength(2)
   })
 
-  it("fixed:2.2.1 — use case diagram image only", () => {
+  it("fixed:2.2.1 - use case diagram image only", () => {
     const section = renderSection(spine(), "fixed:2.2.1", ctx({ number: "2.2.1" }))
     expect(section.blocks).toEqual([{ type: "image", png: "png-d02", caption: "Use Case Diagram" }])
   })
 
-  it("fixed:2.2.1 / fixed:2.1 — hình use case theo feature lấy chú thích từ <title> của SVG; hình phân cấp actor nằm ở §2.1 sau bảng actor", () => {
+  it("fixed:2.2.1 / fixed:2.1 - hình use case theo feature lấy chú thích từ <title> của SVG; hình phân cấp actor nằm ở §2.1 sau bảng actor", () => {
     const s = spine()
     const base = s.diagrams.find((d) => d.id === "D02")!
     const svg = (title: string) => `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><title>${title}</title></svg>\n`
     s.diagrams = [
       ...s.diagrams.filter((d) => d.id !== "D02"),
-      { ...base, id: "D02", format: "svg", source: svg("Use Cases — Account &amp; Access") },
-      { ...base, id: "D02-2", format: "svg", source: svg("Use Cases — Billing (2/2)") },
+      { ...base, id: "D02", format: "svg", source: svg("Use Cases - Account &amp; Access") },
+      { ...base, id: "D02-2", format: "svg", source: svg("Use Cases - Billing (2/2)") },
       { ...base, id: "D02-3", format: "svg", section: "fixed:2.1", source: svg("Actor Hierarchy") }
     ]
     const withPng = ctx({ diagramPng: (id) => `png-${id}` })
     expect(renderSection(s, "fixed:2.2.1", withPng).blocks).toEqual([
-      { type: "image", png: "png-D02", caption: "Use Cases — Account & Access" },
-      { type: "image", png: "png-D02-2", caption: "Use Cases — Billing (2/2)" }
+      { type: "image", png: "png-D02", caption: "Use Cases - Account & Access" },
+      { type: "image", png: "png-D02-2", caption: "Use Cases - Billing (2/2)" }
     ])
     const actors = renderSection(s, "fixed:2.1", withPng).blocks
     expect(actors[0].type).toBe("table")
@@ -214,7 +214,7 @@ describe("renderSection — fixed sections", () => {
     expect(renderSection(spine(), "fixed:2.1", ctx()).blocks).toHaveLength(1)
   })
 
-  it("fixed:3.1.1 — mỗi hình luồng màn có chú thích lấy từ <title> của SVG và một đoạn chú giải ký pháp", () => {
+  it("fixed:3.1.1 - mỗi hình luồng màn có chú thích lấy từ <title> của SVG và một đoạn chú giải ký pháp", () => {
     const s = spine()
     const base = s.diagrams.find((d) => d.id === "D03")!
     const svg = (title: string) => `<?xml version="1.0" encoding="UTF-8"?>
@@ -239,7 +239,7 @@ describe("renderSection — fixed sections", () => {
     expect(renderSection(spine(), "fixed:3.1.1", ctx()).blocks[0]).toEqual({ type: "image", png: "png-d03", caption: "Screens Flow Diagram" })
   })
 
-  it("fixed:2.2.2 — bảng 6 cột, in tên actor và tên use case", () => {
+  it("fixed:2.2.2 - bảng 6 cột, in tên actor và tên use case", () => {
     const section = renderSection(spine(), "fixed:2.2.2", ctx({ number: "2.2.2" }))
     const table = section.blocks[0]
     expect(table).toMatchObject({ type: "table" })
@@ -250,14 +250,14 @@ describe("renderSection — fixed sections", () => {
     expect(table.type === "table" && table.rows[1][5]).toEqual([{ text: "" }])
   })
 
-  it("fixed:3.1.2 — bảng Feature | Screen dùng số hiệu feature tính lúc assemble (numberOf)", () => {
+  it("fixed:3.1.2 - bảng Feature | Screen dùng số hiệu feature tính lúc assemble (numberOf)", () => {
     const section = renderSection(spine(), "fixed:3.1.2", ctx({ number: "3.1.2" }))
     const table = section.blocks[0]
     expect(table.type === "table" && table.rows[0][0]).toEqual([{ text: "3.2 Authentication" }])
     expect(table.type === "table" && table.rows[1][0]).toEqual([{ text: "3.3 Dashboard" }])
   })
 
-  it("fixed:3.1.3 — ma trận màn × vai trò (T15 review T9: cột = role, hàng = screen, ô = action gộp)", () => {
+  it("fixed:3.1.3 - ma trận màn × vai trò (T15 review T9: cột = role, hàng = screen, ô = action gộp)", () => {
     const section = renderSection(spine(), "fixed:3.1.3", ctx({ number: "3.1.3" }))
     expect(section.blocks).toEqual([
       {
@@ -265,13 +265,13 @@ describe("renderSection — fixed sections", () => {
         header: [[{ text: "Screen" }], [{ text: "Registered User" }]],
         rows: [
           [[{ text: "Login" }], [{ text: "view" }]],
-          [[{ text: "Dashboard" }], [{ text: "—" }]]
+          [[{ text: "Dashboard" }], [{ text: "-" }]]
         ]
       }
     ])
   })
 
-  it("fixed:3.1.3 — có vai trò mà chưa phân quyền ⇒ bảng vai trò (kèm tác nhân), không để mục trống; chưa có gì ⇒ không khối", () => {
+  it("fixed:3.1.3 - có vai trò mà chưa phân quyền ⇒ bảng vai trò (kèm tác nhân), không để mục trống; chưa có gì ⇒ không khối", () => {
     const base = spine()
     const rolesOnly = { ...base, permissions: [] }
     const section = renderSection(rolesOnly, "fixed:3.1.3", ctx({ number: "3.1.3" }))
@@ -281,22 +281,22 @@ describe("renderSection — fixed sections", () => {
     expect(renderSection({ ...base, permissions: [], roles: [] }, "fixed:3.1.3", ctx({ number: "3.1.3" })).blocks).toEqual([])
   })
 
-  it("fixed:3.1.4 — chỉ function non-screen", () => {
+  it("fixed:3.1.4 - chỉ function non-screen", () => {
     const section = renderSection(spine(), "fixed:3.1.4", ctx({ number: "3.1.4" }))
     const table = section.blocks[0]
     expect(table.type === "table" && table.rows).toHaveLength(1)
     expect(table.type === "table" && table.rows[0][0]).toEqual([{ text: "Nightly Aggregate" }])
   })
 
-  it("fixed:3.1.5 — erd image + bảng entity", () => {
+  it("fixed:3.1.5 - erd image + bảng entity", () => {
     const section = renderSection(spine(), "fixed:3.1.5", ctx({ number: "3.1.5" }))
     expect(section.blocks[0]).toEqual({ type: "image", png: "png-d04", caption: "Entity Relationship Diagram" })
     expect(section.blocks[1]).toMatchObject({ type: "table" })
   })
 
-  it("fixed:3.1.5 — state machine của entity có vòng đời đứng sau bảng entity: hình + chú thích từ <title> + đoạn mô tả (EN / VI)", () => {
+  it("fixed:3.1.5 - state machine của entity có vòng đời đứng sau bảng entity: hình + chú thích từ <title> + đoạn mô tả (EN / VI)", () => {
     const base = spine()
-    const svg = (entity: string) => `<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><title>State Machine Diagram — ${entity}</title></svg>`
+    const svg = (entity: string) => `<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><title>State Machine Diagram - ${entity}</title></svg>`
     const first = base.entities[0]
     first.states = [
       { id: "ST1", name: "Pending", initial: true },
@@ -320,17 +320,17 @@ describe("renderSection — fixed sections", () => {
     const blocks = renderSection(withMachine, "fixed:3.1.5", ctx({ number: "3.1.5", diagramPng: png })).blocks
     expect(blocks[0]).toMatchObject({ type: "image", caption: "Entity Relationship Diagram" })
     expect(blocks[1]).toMatchObject({ type: "table" })
-    expect(blocks[2]).toEqual({ type: "image", png: "png-D20", caption: `State Machine Diagram — ${first.name}` })
+    expect(blocks[2]).toEqual({ type: "image", png: "png-D20", caption: `State Machine Diagram - ${first.name}` })
     expect(blocks[3]).toMatchObject({ type: "paragraph" })
     expect(JSON.stringify(blocks[3])).toContain(`starts in \\"Pending\\" and ends in \\"Closed\\"; it has 3 states and 3 transitions`)
     // hình lỗi giữ chỗ bằng marker `diagram-error:<id>`, chú thích nói chưa vẽ được
-    expect(blocks[4]).toEqual({ type: "image", png: "diagram-error:D21", caption: "State Machine Diagram — Broken — diagram could not be drawn yet" })
+    expect(blocks[4]).toEqual({ type: "image", png: "diagram-error:D21", caption: "State Machine Diagram - Broken - diagram could not be drawn yet" })
     expect(blocks).toHaveLength(6)
     const vi = renderSection(withMachine, "fixed:3.1.5", ctx({ number: "3.1.5", language: "vi", diagramPng: png })).blocks
     expect(JSON.stringify(vi[3])).toContain("bắt đầu ở trạng thái")
   })
 
-  it("function:<id> — sơ đồ tuần tự của function đứng cuối mục: hình + chú thích theo ngôn ngữ + đoạn mô tả; hình lỗi giữ chỗ", () => {
+  it("function:<id> - sơ đồ tuần tự của function đứng cuối mục: hình + chú thích theo ngôn ngữ + đoạn mô tả; hình lỗi giữ chỗ", () => {
     const base = spine()
     base.actors.push({ id: "A77", name: "Reviewer", kind: "human" } as Spine["actors"][number])
     const fn = base.functions.find((f) => f.id === "FN01")!
@@ -346,21 +346,21 @@ describe("renderSection — fixed sections", () => {
     for (const layout of [undefined, "fpt" as const]) {
       const blocks = renderSection(withDiagram, "function:FN01", ctx({ number: "3.2.1", functionLayout: layout, diagramPng: png })).blocks
       const at = blocks.findIndex((b) => b.type === "image" && b.png === "png-D30")
-      expect(blocks[at]).toEqual({ type: "image", png: "png-D30", caption: `System Sequence Diagram — ${fn.name}` })
+      expect(blocks[at]).toEqual({ type: "image", png: "png-D30", caption: `System Sequence Diagram - ${fn.name}` })
       expect(JSON.stringify(blocks[at + 1])).toContain("The diagram shows 3 messages between Reviewer and the system")
       expect(JSON.stringify(blocks[at + 1])).toContain("1 messages of the error branches")
       expect(at + 2).toBe(blocks.length)
     }
     const vi = renderSection(withDiagram, "function:FN01", ctx({ number: "3.2.1", language: "vi", diagramPng: png })).blocks
-    expect(vi.some((b) => b.type === "image" && b.caption === `Sơ đồ tuần tự hệ thống — ${fn.name}`)).toBe(true)
+    expect(vi.some((b) => b.type === "image" && b.caption === `Sơ đồ tuần tự hệ thống - ${fn.name}`)).toBe(true)
     expect(JSON.stringify(vi[vi.length - 1])).toContain("Sơ đồ mô tả 3 message giữa Reviewer và hệ thống")
     const failed = renderSection(withDiagram, "function:FN02", ctx({ number: "3.3.1", diagramPng: png })).blocks.filter((b) => b.type === "image")
-    expect(failed).toEqual([{ type: "image", png: "diagram-error:D31", caption: expect.stringMatching(/ — diagram could not be drawn yet$/) }])
+    expect(failed).toEqual([{ type: "image", png: "diagram-error:D31", caption: expect.stringMatching(/ - diagram could not be drawn yet$/) }])
   })
 
-  it("feature:<id> — class diagram của feature đứng đầu mục (cả mẫu FPT), chú thích lấy từ <title>", () => {
+  it("feature:<id> - class diagram của feature đứng đầu mục (cả mẫu FPT), chú thích lấy từ <title>", () => {
     const base = spine()
-    const svg = '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><title>Class Diagram — Authentication</title></svg>'
+    const svg = '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><title>Class Diagram - Authentication</title></svg>'
     const withClass: Spine = {
       ...base,
       diagrams: [
@@ -371,22 +371,22 @@ describe("renderSection — fixed sections", () => {
     }
     const png = (id: string) => `png-${id}`
     const fpt = renderSection(withClass, "feature:F1", ctx({ number: "3.2", functionLayout: "fpt", diagramPng: png }))
-    expect(fpt.blocks).toEqual([{ type: "image", png: "png-D06", caption: "Class Diagram — Authentication" }])
+    expect(fpt.blocks).toEqual([{ type: "image", png: "png-D06", caption: "Class Diagram - Authentication" }])
     const mode1 = renderSection(withClass, "feature:F1", ctx({ number: "3.2", diagramPng: png }))
     expect(mode1.blocks[0]).toMatchObject({ type: "image", png: "png-D06" })
     expect(mode1.blocks.length).toBeGreaterThan(1)
     // hình lỗi giữ chỗ (không tải PNG cũ theo id); feature khác không lấy hình của feature này
     expect(renderSection(withClass, "feature:F2", ctx({ number: "3.3", functionLayout: "fpt", diagramPng: png })).blocks).toEqual([
-      { type: "image", png: "diagram-error:D07", caption: "Class Diagram — Authentication — diagram could not be drawn yet" }
+      { type: "image", png: "diagram-error:D07", caption: "Class Diagram - Authentication - diagram could not be drawn yet" }
     ])
     expect(renderSection(withClass, "feature:F2", ctx({ number: "3.3", functionLayout: "fpt", language: "vi", diagramPng: png })).blocks).toEqual([
-      { type: "image", png: "diagram-error:D07", caption: "Sơ đồ lớp — Authentication — sơ đồ chưa vẽ được" }
+      { type: "image", png: "diagram-error:D07", caption: "Sơ đồ lớp - Authentication - sơ đồ chưa vẽ được" }
     ])
     const vi = renderSection(withClass, "feature:F1", ctx({ number: "3.2", functionLayout: "fpt", language: "vi", diagramPng: png }))
-    expect(vi.blocks[0]).toMatchObject({ caption: "Sơ đồ lớp — Authentication" })
+    expect(vi.blocks[0]).toMatchObject({ caption: "Sơ đồ lớp - Authentication" })
   })
 
-  it("fixed:4.2.2 — bảng nfr có metric/threshold", () => {
+  it("fixed:4.2.2 - bảng nfr có metric/threshold", () => {
     const section = renderSection(spine(), "fixed:4.2.2", ctx({ number: "4.2.2" }))
     expect(section.blocks).toEqual([
       {
@@ -397,12 +397,12 @@ describe("renderSection — fixed sections", () => {
     ])
   })
 
-  it("fixed:5.1 — chỉ business_rules tier=detail", () => {
+  it("fixed:5.1 - chỉ business_rules tier=detail", () => {
     const section = renderSection(spine(), "fixed:5.1", ctx({ number: "5.1" }))
     expect(section.blocks).toEqual([{ type: "bullet_list", items: [[{ text: "Password must be hashed." }]] }])
   })
 
-  it("fixed:5.5 — glossary luôn render (derived)", () => {
+  it("fixed:5.5 - glossary luôn render (derived)", () => {
     const section = renderSection(spine(), "fixed:5.5", ctx({ number: "5.5", status: "derived" }))
     expect(section.status).toBe("derived")
     expect(section.blocks[0]).toMatchObject({ type: "table" })
@@ -414,15 +414,15 @@ describe("renderSection — fixed sections", () => {
   })
 })
 
-describe("renderSection — feature/function", () => {
-  it("feature:<id> — liệt kê screens của feature, heading = tên feature", () => {
+describe("renderSection - feature/function", () => {
+  it("feature:<id> - liệt kê screens của feature, heading = tên feature", () => {
     const section = renderSection(spine(), "feature:F1", ctx({ number: "3.2" }))
     expect(section.heading).toBe("Authentication")
     expect(section.level).toBe(2)
     expect(section.blocks).toEqual([{ type: "paragraph", runs: [{ text: "Screens: Login" }] }])
   })
 
-  it("function:<id> — trigger/description/normal/abnormal/validations/business rules + ảnh screen_layout khi là primary_function_id", () => {
+  it("function:<id> - trigger/description/normal/abnormal/validations/business rules + ảnh screen_layout khi là primary_function_id", () => {
     const section = renderSection(spine(), "function:FN01", ctx({ number: "3.2.1" }))
     expect(section.heading).toBe("Submit Credentials")
     expect(section.level).toBe(3)
@@ -441,7 +441,7 @@ describe("renderSection — feature/function", () => {
     expect(JSON.stringify(blocks)).not.toContain("Function trigger")
   })
 
-  it("function:<id> — mẫu FPT: 4 nhóm heading 4, mục con là danh sách gạch đầu dòng, mục trống ghi N/A", () => {
+  it("function:<id> - mẫu FPT: 4 nhóm heading 4, mục con là danh sách gạch đầu dòng, mục trống ghi N/A", () => {
     const item = (label: string, text?: string) => (text === undefined ? [{ text: `${label}: `, bold: true }] : [{ text: `${label}: `, bold: true }, { text }])
     const bullets = (...items: ReturnType<typeof item>[]) => ({ type: "bullet_list", items })
     const h = (text: string) => ({ type: "heading", level: 4, text })
@@ -458,7 +458,7 @@ describe("renderSection — feature/function", () => {
         item("Data processing", "System verifies.")
       ),
       h("Screen layout"),
-      { type: "image", png: "png-d05", caption: "Screen Layout — Login" },
+      { type: "image", png: "png-d05", caption: "Screen Layout - Login" },
       h("Function details"),
       bullets(
         item("Data", "User"),
@@ -478,12 +478,12 @@ describe("renderSection — feature/function", () => {
     expect(nonScreen[nonScreen.findIndex((b) => b.type === "heading" && b.text === "Screen layout") + 1]).toEqual({ type: "paragraph", runs: [{ text: "N/A" }] })
   })
 
-  it("feature:<id> — mẫu FPT chỉ có tiêu đề, không nội dung; mode 1 giữ dòng liệt kê màn", () => {
+  it("feature:<id> - mẫu FPT chỉ có tiêu đề, không nội dung; mode 1 giữ dòng liệt kê màn", () => {
     expect(renderSection(spine(), "feature:F1", ctx({ number: "3.2", functionLayout: "fpt" })).blocks).toEqual([])
     expect(renderSection(spine(), "feature:F1", ctx({ number: "3.2" })).blocks).not.toEqual([])
   })
 
-  it("function:<id> — mẫu FPT: Navigation path theo Screens Flow, Actors chỉ actor người, Interface đọc từ wireframe", () => {
+  it("function:<id> - mẫu FPT: Navigation path theo Screens Flow, Actors chỉ actor người, Interface đọc từ wireframe", () => {
     const s = spine()
     s.actors.push({ id: "A02", name: "Buyer", kind: "human", description: "" })
     s.roles.push({ id: "R2", name: "Buyer role", actor_id: "A02" }, { id: "R3", name: "Gateway role", actor_id: "A05" })
@@ -526,7 +526,7 @@ describe("renderSection — feature/function", () => {
     expect(value("Business rules")).toBe("Password must be hashed.")
   })
 
-  it("function:<id> không phải primary_function_id của màn — không nhúng ảnh screen_layout", () => {
+  it("function:<id> không phải primary_function_id của màn - không nhúng ảnh screen_layout", () => {
     const withSecondFn: Spine = { ...spine(), functions: [...spine().functions, { id: "FN03", screen_id: "S01", feature_id: "F1", order: 1, name: "Toggle", trigger: "t", description: "d", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null }] }
     const section = renderSection(withSecondFn, "function:FN03", ctx({ number: "3.2.2" }))
     expect(section.blocks.some((b) => b.type === "image")).toBe(false)
@@ -642,7 +642,7 @@ describe("buildRecordOfChanges", () => {
     expect(rows.map((r) => r.version)).toEqual(["v0.1", "v0.2"])
   })
 
-  it("FLF-361: sau CR đầu tiên chỉ thêm một dòng cho CR (v0.2) — baseline import cùng bản với dòng import v0.1, không in dòng riêng", () => {
+  it("FLF-361: sau CR đầu tiên chỉ thêm một dòng cho CR (v0.2) - baseline import cùng bản với dòng import v0.1, không in dòng riêng", () => {
     const rows = buildRecordOfChanges([
       change({ txn: "t1", step_id: null, by: "import", reason: "Import SRS FAP_SRS_v1.0_fixed.docx" }),
       change({ txn: "t2", step_id: null, by: "import", reason: "Import: kế hoạch step theo template" }),
@@ -709,7 +709,7 @@ describe("buildRecordOfChanges", () => {
 
 // ─── FLF-265: nhãn tiếng Việt của mẫu FPT (mode 2) ─────────────────
 
-describe("renderSection — mẫu FPT tiếng Việt (FLF-265)", () => {
+describe("renderSection - mẫu FPT tiếng Việt (FLF-265)", () => {
   const vi = (overrides: Partial<SectionRenderContext> = {}) => ctx({ functionLayout: "fpt", language: "vi", ...overrides })
   const bulletItems = (blocks: ReturnType<typeof renderSection>["blocks"]) => blocks.flatMap((b) => (b.type === "bullet_list" ? b.items : []))
   const tableOf = (blocks: ReturnType<typeof renderSection>["blocks"]) => {
@@ -746,7 +746,7 @@ describe("renderSection — mẫu FPT tiếng Việt (FLF-265)", () => {
     expect(value("Giao diện")).toBe("Màn hình Login: Entry screen.")
     // "System verifies." vẫn được chọn vào Xử lý dữ liệu (lọc trên chữ Anh của Spine)
     expect(value("Xử lý dữ liệu")).toBe("System verifies.")
-    expect(blocks).toContainEqual({ type: "image", png: "png-d05", caption: "Bố cục màn hình — Login" })
+    expect(blocks).toContainEqual({ type: "image", png: "png-d05", caption: "Bố cục màn hình - Login" })
 
     const nonScreen = renderSection(spine(), "function:FN02", vi({ number: "3.3.1" })).blocks
     const nsValue = (label: string) => bulletItems(nonScreen).find((i) => i[0].text === `${label}: `)?.[1]?.text
@@ -765,7 +765,7 @@ describe("renderSection — mẫu FPT tiếng Việt (FLF-265)", () => {
   it("nhãn enum trong ô bảng: actor kind, quyền, ưu tiên, nhóm yêu cầu chung, loại yêu cầu khác; giá trị lạ giữ nguyên", () => {
     const rows = (id: string, s: Spine = spine()) => (tableOf(renderSection(s, id, vi()).blocks)?.rows ?? []).map(texts)
     expect(rows("fixed:2.1").map((r) => r[2])).toEqual(["người dùng", "hệ thống"])
-    expect(rows("fixed:3.1.3")).toEqual([["Login", "xem"], ["Dashboard", "—"]])
+    expect(rows("fixed:3.1.3")).toEqual([["Login", "xem"], ["Dashboard", "-"]])
     expect(rows("fixed:4.2.2")[0][3]).toBe("Phải có")
     expect(rows("fixed:5.2")).toEqual([["Phân trang", "Lists paginate at 20."]])
     expect(rows("fixed:5.4")).toEqual([["Rủi ro", "Provider pricing may change."]])
@@ -784,7 +784,7 @@ describe("renderSection — mẫu FPT tiếng Việt (FLF-265)", () => {
       "Mở rộng"
     ])
     expect(texts(tableOf(renderSection({ ...spine(), permissions: [] }, "fixed:3.1.3", vi()).blocks)?.header ?? [])).toEqual(["Vai trò", "Tác nhân"])
-    expect(JSON.stringify(renderSection(spine(), "fixed:1", vi({ number: "1" })).blocks)).toContain("Payment Gateway (hệ thống) — Processes payments.")
+    expect(JSON.stringify(renderSection(spine(), "fixed:1", vi({ number: "1" })).blocks)).toContain("Payment Gateway (hệ thống) - Processes payments.")
 
     const s = spine()
     s.entities[0].relation_optional = ["E02"]
@@ -814,7 +814,7 @@ describe("renderSection — mẫu FPT tiếng Việt (FLF-265)", () => {
   })
 })
 
-describe("buildRecordOfChanges — tiếng Việt (FLF-265)", () => {
+describe("buildRecordOfChanges - tiếng Việt (FLF-265)", () => {
   const change = (over: Partial<Parameters<typeof buildRecordOfChanges>[0][number]>) => ({
     txn: "t1",
     op: "set",
@@ -864,7 +864,7 @@ describe("buildRecordOfChanges — tiếng Việt (FLF-265)", () => {
 
 // ─── FLF-265 D11: bản xem đã dịch — logic dựa chữ Anh quyết trên Spine gốc (`ctx.canonical`) ─────
 
-describe("renderSection — bản xem đã dịch + ctx.canonical (FLF-265 D11)", () => {
+describe("renderSection - bản xem đã dịch + ctx.canonical (FLF-265 D11)", () => {
   const fixture = (): Spine =>
     spineSchema.parse(JSON.parse(readFileSync(new URL("../../../fixtures/spine-fixture-19-screens.json", import.meta.url), "utf8")))
 
@@ -942,7 +942,7 @@ describe("renderSection — bản xem đã dịch + ctx.canonical (FLF-265 D11)"
     expect(blind["Giao diện"]).toContain('chữ "Login"')
   })
 
-  it("fixture 19 màn: mọi function — Xử lý dữ liệu / Dữ liệu / Tác nhân cùng dòng như bản tiếng Anh", () => {
+  it("fixture 19 màn: mọi function - Xử lý dữ liệu / Dữ liệu / Tác nhân cùng dòng như bản tiếng Anh", () => {
     const f = fixture()
     const view = translatedView(f)
     const asVi = (value: string | string[] | undefined, split = false): string | string[] | undefined => {
@@ -975,7 +975,7 @@ describe("renderSection — bản xem đã dịch + ctx.canonical (FLF-265 D11)"
   })
 })
 
-describe("FLF-365 — phần nhỏ tham khảo / phân bổ / kiểm chứng (Mode 1)", () => {
+describe("FLF-365 - phần nhỏ tham khảo / phân bổ / kiểm chứng (Mode 1)", () => {
   const tableOf = (blocks: Block[]) => blocks.find((b): b is Extract<Block, { type: "table" }> => b.type === "table")!
   const cells = (row: Extract<Block, { type: "table" }>["header"]) => row.map((c) => c.map((r) => r.text).join(""))
 

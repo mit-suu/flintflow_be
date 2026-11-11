@@ -53,7 +53,7 @@ beforeEach(async () => {
   ])
 })
 
-describe("UC-90 — danh sách tổ chức", () => {
+describe("UC-90 - danh sách tổ chức", () => {
   it("mỗi org kèm gói, ví, số thành viên và số dự án chưa xoá", async () => {
     const res = await listOrgs("?q=Alpha")
 

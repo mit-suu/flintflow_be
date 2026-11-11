@@ -22,7 +22,7 @@ stub: false
 > The renderer is deterministic code: `src/modules/diagram/renderers/state-machine.renderer.ts` (data, label text) and `state-machine-layout.ts` (shapes, layout, label placement). There is no `puml` source, so `render_fix` never applies. This skill documents the output.
 
 - Step: S-4.5 · Section: `fixed:3.1.5` (after the entity table, with a description paragraph) · `owner_kind = entity`, `owner_id` = entity id · Output: `svg`
-- IEEE 830 Annex A.1 (organised by mode), optional. Only entities with a real lifecycle (order, change request, invitation, baseline…) have `states[]`; an entity with no states has no diagram — nothing is invented, no placeholder.
+- IEEE 830 Annex A.1 (organised by mode), optional. Only entities with a real lifecycle (order, change request, invitation, baseline…) have `states[]`; an entity with no states has no diagram - nothing is invented, no placeholder.
 - Every state is a `states[]` element, every transition a `transitions[]` element. A diagram is never split.
 
 ## Data → diagram
@@ -39,4 +39,4 @@ stub: false
 - No bends: `allowBends = false`. Every line is a straight segment; `checkScene` issues must be empty (no line over a shape or text, no overlapping lines, no text over text).
 - States by BFS layer from the initial state, in a row-per-layer or column-per-layer arrangement; several arrangements (gaps, order inside a layer, a circle) are tried, then states are swapped to cut crossings. The best arrangement is the one with no `checkScene` issue, the fewest crossing lines, then the lowest cost (length, aspect ratio). No arrangement valid ⇒ `render_status = error`.
 - A state grows when several lines leave one side, so parallel lines meet the straight part of its edge.
-- Title (`<title>` of the SVG, figure caption): `State Machine Diagram — <entity>`. Samples: `docs/diagram_guideline/state-machine/`, `docs/diagram_image_test/state-machine/`.
+- Title (`<title>` of the SVG, figure caption): `State Machine Diagram - <entity>`. Samples: `docs/diagram_guideline/state-machine/`, `docs/diagram_image_test/state-machine/`.

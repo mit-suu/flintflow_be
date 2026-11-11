@@ -114,14 +114,14 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
     // Mode 1 luôn ở sau baseline v0 ⇒ tính cả luật S-9: CR xác nhận giả định thì cờ `unconfirmed_assumption` đóng ngay
     await flagsService.recompute(projectId, { by: cr.cr_id, ruleProfile: await mode1RuleProfileFor(projectId), atBaseline: true })
   } catch (err) {
-    console.warn(`[C-7] ${cr.cr_id}: đã ghi ${next} nhưng recompute cờ lỗi — cờ sẽ được tính lại ở lần recompute sau`, err)
+    console.warn(`[C-7] ${cr.cr_id}: đã ghi ${next} nhưng recompute cờ lỗi - cờ sẽ được tính lại ở lần recompute sau`, err)
   }
   await unlockPaths(projectId, cr.cr_id)
   try {
     const latest = await spineRepository.get(projectId)
     await assemble(projectId, projectName, latest?.spine_version ?? spineVersion)
   } catch (err) {
-    console.warn(`[C-7] ${cr.cr_id}: đã ghi ${next} nhưng ghép lại bản làm việc lỗi — workspace ghép lại khi mở`, err)
+    console.warn(`[C-7] ${cr.cr_id}: đã ghi ${next} nhưng ghép lại bản làm việc lỗi - workspace ghép lại khi mở`, err)
   }
   // Spine vừa đổi ⇒ embed lại phần tử đổi chữ cho C-3 của CR sau — chạy nền, không chặn/không làm hỏng C-7
   if (ops.length) scheduleEmbeddingSync(projectId)
@@ -161,7 +161,7 @@ const redrawDiagrams = async (
     await docFileStore().remove(refs.file)
     if (refs.tracked) await docFileStore().remove(refs.tracked)
   } catch (err) {
-    console.warn(`[C-7] ${crId}: đã vẽ lại hình nhưng in lại ${version} lỗi — file version giữ hình cũ`, err)
+    console.warn(`[C-7] ${crId}: đã vẽ lại hình nhưng in lại ${version} lỗi - file version giữ hình cũ`, err)
   }
 }
 
@@ -179,7 +179,7 @@ const saveTracked = async (
     const out = await buildTrackedDocx(await docFileStore().load(prevRef), file, { author: crId, date }, comments)
     return await docFileStore().save(out.data, { projectId, kind: "version", name: `${version}_tracked` })
   } catch (err) {
-    console.warn(`[C-7] ${crId}: dựng bản có đánh dấu của ${version} lỗi — chỉ còn bản sạch`, err)
+    console.warn(`[C-7] ${crId}: dựng bản có đánh dấu của ${version} lỗi - chỉ còn bản sạch`, err)
     return null
   }
 }

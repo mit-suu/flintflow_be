@@ -11,7 +11,7 @@ import { renderKind } from "./index.js"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../../fixtures/spine-fixture-19-screens.json"), "utf8")))
 
-describe("renderDeployment — một sơ đồ triển khai cho cả hệ thống (FLF-390)", () => {
+describe("renderDeployment - một sơ đồ triển khai cho cả hệ thống (FLF-390)", () => {
   it("một hình puml ở §4.1, không chủ; không có nút ⇒ không có hình", () => {
     const parts = renderDeployment(FIXTURE)
     expect(parts).toHaveLength(1)

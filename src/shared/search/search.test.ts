@@ -13,9 +13,9 @@ describe("tokenize", () => {
 
 describe("Bm25", () => {
   const docs = [
-    { id: "UC-09", text: "UC-09 Nhập/xuất dữ liệu Excel — giáo vụ nhập danh sách học sinh từ tệp Excel và xuất bảng điểm ra Excel." },
+    { id: "UC-09", text: "UC-09 Nhập/xuất dữ liệu Excel - giáo vụ nhập danh sách học sinh từ tệp Excel và xuất bảng điểm ra Excel." },
     { id: "NFR", text: "Hệ thống nên nhập xong tệp XLSX 2.000 dòng trong 30 giây; báo cáo có thể xuất PDF hoặc Excel." },
-    { id: "UC-05", text: "UC-05 Điểm danh — giáo viên điểm danh học sinh theo tiết học." }
+    { id: "UC-05", text: "UC-05 Điểm danh - giáo viên điểm danh học sinh theo tiết học." }
   ]
   const index = new Bm25(docs, (d) => d.text)
 

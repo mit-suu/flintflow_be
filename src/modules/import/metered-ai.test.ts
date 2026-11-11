@@ -49,7 +49,7 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe("withMeteredAi — từng loại gọi", () => {
+describe("withMeteredAi - từng loại gọi", () => {
   it.each([
     ["I-4:fixed:4.2.3", ActionType.IMPORT_EXTRACT_FIELDS],
     ["I-1.11", ActionType.IMPORT_SEMANTIC_CHECK],
@@ -83,7 +83,7 @@ describe("withMeteredAi — từng loại gọi", () => {
   })
 })
 
-describe("withMeteredAi — lỗi", () => {
+describe("withMeteredAi - lỗi", () => {
   it("hết credit (INSUFFICIENT_CREDIT) ⇒ release usage, reason credits, không ném lỗi", async () => {
     exec.mockRejectedValueOnce(new AiActionError(402, "Không đủ credit", "INSUFFICIENT_CREDIT"))
     const res = await withMeteredAi({ projectId: PROJECT, userId: USER, stepId: "C-4:CR-002" }, ActionType.CR_PROPOSE, {})
@@ -147,7 +147,7 @@ describe("isInsufficientCredit", () => {
   })
 })
 
-describe("FLF-360 classifyAiFailure — lỗi tạm thời / hết credit / cấu hình", () => {
+describe("FLF-360 classifyAiFailure - lỗi tạm thời / hết credit / cấu hình", () => {
   it("tạm thời: quá tải \"high demand\", 503, 429 không phải hết tiền, timeout, lỗi mạng", () => {
     expect(classifyAiFailure(new AiActionError(503, "high demand", "GEMINI_OVERLOADED"))).toBe("transient")
     expect(classifyAiFailure(new AiActionError(503, "Service Unavailable", "PROVIDER_ERROR"))).toBe("transient")

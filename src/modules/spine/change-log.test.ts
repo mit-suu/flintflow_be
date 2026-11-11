@@ -52,7 +52,7 @@ beforeEach(() => {
   clearChangeLogs()
 })
 
-describe("createChangeLog — lịch sử changes đọc tăng dần (FLF-381)", () => {
+describe("createChangeLog - lịch sử changes đọc tăng dần (FLF-381)", () => {
   it("lượt đầu đọc toàn bộ; lượt sau chỉ tải change mới, kết quả như đọc toàn bộ", async () => {
     db.append(P, "a", "b")
     expect(await log.list(P)).toEqual(["a", "b"])

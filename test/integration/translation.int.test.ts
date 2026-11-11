@@ -317,7 +317,7 @@ describe("translation.repository trên Mongo thật", () => {
   })
 })
 
-describe("FLF-334 B — dịch nốt rồi tải theo ngôn ngữ còn lại", () => {
+describe("FLF-334 B - dịch nốt rồi tải theo ngôn ngữ còn lại", () => {
   it("dự án en: export lang=vi 409 ⇒ run { locale: vi } tới khi hết ⇒ export lang=vi 200; ngôn ngữ dự án không đổi", async () => {
     const base = `/api/v1/projects/${seeded.projectId}`
     const blocked = await request(app).get(`${base}/export/word?source=draft&lang=vi`).set(bearer(seeded.token))
@@ -351,7 +351,7 @@ describe("FLF-334 B — dịch nốt rồi tải theo ngôn ngữ còn lại", (
   })
 })
 
-describe("FLF-334 B — Dịch nốt baseline cũ của dự án mode 2 qua đích baseline_id", () => {
+describe("FLF-334 B - Dịch nốt baseline cũ của dự án mode 2 qua đích baseline_id", () => {
   it("chữ đổi sau BL001 ⇒ export baseline lang=vi 409; run { locale: vi, baseline_id } tới khi hết ⇒ 200", async () => {
     const base = `/api/v1/projects/${seeded.projectId}`
     for (const d of readFixtureJson<{ diagrams: Array<{ id: string; render_status: string }> }>("spine-fixture-19-screens.json").diagrams) {

@@ -592,7 +592,7 @@ export const deleteChatSession = async (chatSessionId: string): Promise<void> =>
     throw new ApiError(404, "Không tìm thấy phiên trò chuyện.", "CHAT_SESSION_NOT_FOUND")
   }
   if (target.is_pipeline) {
-    throw new ApiError(409, "Không xoá được phiên chính của dự án — phiên này giữ tiến trình soạn tài liệu", PIPELINE_SESSION_LOCKED)
+    throw new ApiError(409, "Không xoá được phiên chính của dự án - phiên này giữ tiến trình soạn tài liệu", PIPELINE_SESSION_LOCKED)
   }
 
   const result = await ChatSession.deleteOne({ _id: chatSessionId, is_pipeline: false })

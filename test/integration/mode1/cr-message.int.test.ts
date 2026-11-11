@@ -11,7 +11,7 @@ import { fakeCrClarify, fakeCrPropose } from "../../helpers/mode1.js"
 import { ChangeRequest } from "../../../src/modules/change-request/change-request.model.js"
 
 const QUESTION = "không vẽ lại hình à?"
-const REPLY = "Có — sơ đồ use case sẽ được vẽ lại."
+const REPLY = "Có - sơ đồ use case sẽ được vẽ lại."
 
 beforeEach(() =>
   resetCrMock((p) => fakeCrClarify(PERF_TARGETS)(p) ?? fakeCrPropose(p) ?? (p.includes(QUESTION) ? JSON.stringify({ reply: REPLY, questions: [] }) : undefined))

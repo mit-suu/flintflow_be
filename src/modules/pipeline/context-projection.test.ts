@@ -123,7 +123,7 @@ describe("projectStep", () => {
     expect(overview.emptyFields.every((f) => f.startsWith("project"))).toBe(true)
   })
 
-  it("FLF-220: project.working_mode đã nghỉ — không vào projection, không tính là field trống", () => {
+  it("FLF-220: project.working_mode đã nghỉ - không vào projection, không tính là field trống", () => {
     const spine = structuredClone(FIXTURE)
     spine.project = {
       ...spine.project,
@@ -241,7 +241,7 @@ describe("buildStepContext", () => {
   })
 })
 
-describe("addendumForUnit — lượt hỏi gộp / chat thấy điều user đã kể", () => {
+describe("addendumForUnit - lượt hỏi gộp / chat thấy điều user đã kể", () => {
   it("Brief và S-1 (step hoặc đơn vị giai đoạn) ⇒ toàn bộ addendum, dạng gửi model", () => {
     expect(FIXTURE.addendum.length).toBeGreaterThan(0)
     for (const unit of ["B-1", "B-1.3", "S-1"]) {
@@ -257,7 +257,7 @@ describe("addendumForUnit — lượt hỏi gộp / chat thấy điều user đ�
   })
 })
 
-describe("openAssumptionsFor — biến {{assumptions}} của elicit-loop (FLF-358)", () => {
+describe("openAssumptionsFor - biến {{assumptions}} của elicit-loop (FLF-358)", () => {
   /** FIXTURE: AS01 nfrs[id=N05].threshold (S-6.3), AS02 actors[id=A05].name (S-2.3), AS03 screens[id=S07].tabs (S-4.2). */
   const withStatus = (status: Record<string, "unconfirmed" | "confirmed" | "rejected">): Spine => {
     const spine = structuredClone(FIXTURE)

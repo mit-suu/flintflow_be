@@ -10,7 +10,7 @@ import { User } from "../../src/modules/user/user.model.js"
 import { Baseline } from "../../src/modules/spine/baseline.model.js"
 import { authAs } from "../setup.js"
 
-describe("GET /admin/metrics — baselinesTotal", () => {
+describe("GET /admin/metrics - baselinesTotal", () => {
   it("đếm mọi baseline của mọi loại", async () => {
     const adminUser = await User.create({ email: "admin@flintflow.test", password: "test-password-123", role: "admin", emailVerified: true })
     const admin = await authAs({ _id: adminUser._id, email: adminUser.email, role: "admin" })

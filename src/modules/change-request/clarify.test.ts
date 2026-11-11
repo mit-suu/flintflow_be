@@ -30,7 +30,7 @@ describe("C-2 giới hạn vòng hỏi", () => {
 })
 
 describe("C-2 ngữ cảnh gửi model", () => {
-  it("câu hỏi – trả lời trước theo vòng; câu chưa / không trả lời (trống) ghi (no answer — unknown); chưa có ⇒ (none)", () => {
+  it("câu hỏi – trả lời trước theo vòng; câu chưa / không trả lời (trống) ghi (no answer - unknown); chưa có ⇒ (none)", () => {
     expect(answersText(cr())).toBe("(none)")
     const text = answersText(
       cr({
@@ -40,7 +40,7 @@ describe("C-2 ngữ cảnh gửi model", () => {
         ]
       })
     )
-    expect(text).toBe("Later rounds refine earlier ones: where two answers disagree, the answer from the later round wins and the earlier one no longer applies (round 2 is final).\nQ1.1: Which screen?\nA: Login screen\nQ1.2: Which actor?\nA: Learner\nQ2.1: How fast?\nA: (no answer — unknown)\nQ2.2: Which devices?\nA: all")
+    expect(text).toBe("Later rounds refine earlier ones: where two answers disagree, the answer from the later round wins and the earlier one no longer applies (round 2 is final).\nQ1.1: Which screen?\nA: Login screen\nQ1.2: Which actor?\nA: Learner\nQ2.1: How fast?\nA: (no answer - unknown)\nQ2.2: Which devices?\nA: all")
   })
 
   it("FLF-307: một vòng ⇒ không kèm câu dặn vòng sau thắng", () => {
@@ -62,7 +62,7 @@ describe("C-2 ngữ cảnh gửi model", () => {
     expect(text).toBe("[M01] Email PM (attached when the CR was logged)\nResponse ≤ 2 s\n\n[M02] notes.png (attached with the answers of round 2; cut at upload)\nPeak 500 users")
   })
 
-  it("FLF-375: tài liệu dài — Tree-sitter + BM25 lấy đúng đoạn liên quan, kể cả đoạn ở CUỐI tài liệu; in theo thứ tự tài liệu", async () => {
+  it("FLF-375: tài liệu dài - Tree-sitter + BM25 lấy đúng đoạn liên quan, kể cả đoạn ở CUỐI tài liệu; in theo thứ tự tài liệu", async () => {
     const at = new Date()
     const filler = Array.from({ length: 60 }, (_, i) => `## Mục ${i}\n\nNội dung họp về lịch thi và phòng học số ${i}, không liên quan.`).join("\n\n")
     const tail = "## Kết luận\n\nThầy Hùng: trường bỏ chức năng nhập xuất Excel, không cần file mẫu nữa."
@@ -78,7 +78,7 @@ describe("C-2 ngữ cảnh gửi model", () => {
     expect(await relevantMaterialsText(short, "response")).toBe(materialsText(short))
   })
 
-  it("phase 7: tổng chữ tài liệu ≤ ngân sách prompt — tài liệu ngắn giữ nguyên, tài liệu dài chia phần còn lại", () => {
+  it("phase 7: tổng chữ tài liệu ≤ ngân sách prompt - tài liệu ngắn giữ nguyên, tài liệu dài chia phần còn lại", () => {
     const at = new Date()
     const long = "a".repeat(CR_MATERIAL_MAX_CHARS)
     const text = materialsText(
@@ -101,7 +101,7 @@ describe("C-2 ngữ cảnh gửi model", () => {
     expect(missingInfoText(cr({ missing_info: ["Ngưỡng thời gian phản hồi", "Số người dùng đồng thời"] }))).toBe("- Ngưỡng thời gian phản hồi\n- Số người dùng đồng thời")
   })
 
-  it("phase 7: chuẩn hoá chữ tài liệu — xuống dòng Windows, dòng trống thừa, cắt ở giới hạn", () => {
+  it("phase 7: chuẩn hoá chữ tài liệu - xuống dòng Windows, dòng trống thừa, cắt ở giới hạn", () => {
     expect(clipMaterialText("  a\r\nb\n\n\n\nc  ")).toEqual({ text: "a\nb\n\nc", truncated: false })
     const clipped = clipMaterialText("x".repeat(CR_MATERIAL_MAX_CHARS + 5))
     expect(clipped.truncated).toBe(true)
@@ -110,7 +110,7 @@ describe("C-2 ngữ cảnh gửi model", () => {
 
   it("header CR: nguồn kèm ref nếu có", () => {
     expect(crHeader(cr()).source).toBe("verbal")
-    expect(crHeader(cr({ source: { kind: "stakeholder_email", ref: "Email PM", note: null } })).source).toBe("stakeholder_email — Email PM")
+    expect(crHeader(cr({ source: { kind: "stakeholder_email", ref: "Email PM", note: null } })).source).toBe("stakeholder_email - Email PM")
   })
 
   it("projection: chỉ mục id + tên theo mảng, chi tiết phần tử được CR nhắc tới (mã hoặc tên)", () => {

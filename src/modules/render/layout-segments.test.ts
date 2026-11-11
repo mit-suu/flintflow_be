@@ -104,7 +104,7 @@ const textOf = (b: Block): string => {
 }
 const texts = (s: RenderedSection): string[] => s.blocks.map(textOf)
 
-describe("FLF-366 — bản 0.1 theo đoạn của file", () => {
+describe("FLF-366 - bản 0.1 theo đoạn của file", () => {
   it("mỗi mục in đúng chữ, ảnh, thứ tự file: không gộp phần nối lên đầu, không in thêm External Systems / sơ đồ PlantUML", () => {
     const { spine, template } = imported()
     const sections = render(spine, template)
@@ -138,7 +138,7 @@ describe("FLF-366 — bản 0.1 theo đoạn của file", () => {
     for (const id of ["fixed:1", "fixed:2.2.2"]) expect(section(after, id)).toEqual(section(before, id))
   })
 
-  it("BR trong bảng 5.1 bị AI xếp nhầm cấp cao: vẫn thuộc đoạn bảng đó — CR sửa ⇒ bảng 5.1 dựng lại có chữ mới, không giữ chữ cũ", () => {
+  it("BR trong bảng 5.1 bị AI xếp nhầm cấp cao: vẫn thuộc đoạn bảng đó - CR sửa ⇒ bảng 5.1 dựng lại có chữ mới, không giữ chữ cũ", () => {
     const { spine, template } = imported((s) => {
       s.business_rules = s.business_rules.map((r) => (r.id === "BR-02" ? { ...r, tier: "high" as const } : r))
     })
@@ -205,7 +205,7 @@ describe("FLF-366 — bản 0.1 theo đoạn của file", () => {
   })
 })
 
-describe("FLF-361 — bảng 3.1.4 và mục tính năng khi dựng lại từ Spine", () => {
+describe("FLF-361 - bảng 3.1.4 và mục tính năng khi dựng lại từ Spine", () => {
   const BLOCKS_314: LayoutBlock[] = [
     h("C01", "3.1.4 Non-Screen Functions", 3, "fixed:3.1.4"),
     table(

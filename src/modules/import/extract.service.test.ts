@@ -102,7 +102,7 @@ describe("extractionPlan", () => {
   })
 })
 
-describe("sectionAiSteps — kế hoạch lượt AI (chung cho lượt chạy và ước tính credit)", () => {
+describe("sectionAiSteps - kế hoạch lượt AI (chung cho lượt chạy và ước tính credit)", () => {
   const none = { items: [], handled: new Set<string>(), consumed: new Set<string>(), verbatim: new Set<string>() }
   const img = (block_id: string, caption: string): Lite[] => [
     { ...block(block_id, "image", "", `body/p[${block_id}]`, "fixed:2.2.1"), image_ref: `word/media/${block_id}.png` },
@@ -137,7 +137,7 @@ describe("sectionAiSteps — kế hoạch lượt AI (chung cho lượt chạy v
   })
 })
 
-describe("shortName — tên chức năng từ câu yêu cầu (FLF-252)", () => {
+describe("shortName - tên chức năng từ câu yêu cầu (FLF-252)", () => {
   it("bỏ 'The system shall', lấy câu đầu, cắt ở ranh giới từ", () => {
     expect(shortName("The system shall allow users to register with email. A confirmation is sent.")).toBe("Allow users to register with email")
     expect(shortName("Users must be able to export reports")).toBe("Users must be able to export reports")
@@ -147,7 +147,7 @@ describe("shortName — tên chức năng từ câu yêu cầu (FLF-252)", () =>
   })
 })
 
-describe("splitList — ô danh sách", () => {
+describe("splitList - ô danh sách", () => {
   it("FLF-251: cột tham chiếu tách cả tác nhân phụ trong ngoặc; danh sách thường giữ ngoặc", () => {
     expect(splitList("Guest (Email Service, Identity Provider); Admin", true)).toEqual(["Guest", "Email Service", "Identity Provider", "Admin"])
     expect(splitList("Learner, Admin\nGuest")).toEqual(["Learner", "Admin", "Guest"])
@@ -155,7 +155,7 @@ describe("splitList — ô danh sách", () => {
   })
 })
 
-describe("deterministicTableItems — bảng khớp đủ cột (G7)", () => {
+describe("deterministicTableItems - bảng khớp đủ cột (G7)", () => {
   const blocks = ucTable()
   const grid = tableGrid(blocks[0], blocks)
 
@@ -377,7 +377,7 @@ describe("deterministicTableItems — bảng khớp đủ cột (G7)", () => {
     expect(out.verbatim.has("B0875")).toBe(true)
   })
 
-  it("bug #12c: attributesFromCell — mã của chính thực thể là khoá, mã thực thể khác là tham chiếu, còn lại thường", () => {
+  it("bug #12c: attributesFromCell - mã của chính thực thể là khoá, mã thực thể khác là tham chiếu, còn lại thường", () => {
     expect(attributesFromCell("mã HS, họ tên, mã lớp, trạng thái (đang học, nghỉ học)", "Học sinh")).toEqual([
       { name: "mã HS", kind: "key", required: true },
       { name: "họ tên", kind: "plain", required: false },
@@ -397,7 +397,7 @@ describe("deterministicTableItems — bảng khớp đủ cột (G7)", () => {
   })
 })
 
-describe("chunkBlocks — lô gửi AI", () => {
+describe("chunkBlocks - lô gửi AI", () => {
   const b = (id: string, len: number) => ({ block_id: id, text: "x".repeat(len) })
 
   it("gom block tới ngân sách, sang lô mới khi vượt", () => {
@@ -419,7 +419,7 @@ describe("chunkBlocks — lô gửi AI", () => {
   })
 })
 
-describe("itemsFromAi — output model ⇒ item", () => {
+describe("itemsFromAi - output model ⇒ item", () => {
   const ctx = (known: EntityItem[] = [], sectionId = "fixed:2.2.2") => ({
     sectionId,
     alloc: new IdAllocator({ use_cases: ["UC-01"] }),
@@ -537,7 +537,7 @@ describe("ảnh diagram (mode 1 v3 phase 5)", () => {
     expect(tablesToKeepVerbatim([plain], [])).toEqual([])
   })
 
-  it("captionOf: đoạn thường ngay dưới ảnh bắt đầu bằng 'H3 ·' / 'Hình 3' / 'Figure 3' cũng là chú thích (QLHS 11/11 — file không dùng kiểu Caption)", () => {
+  it("captionOf: đoạn thường ngay dưới ảnh bắt đầu bằng 'H3 ·' / 'Hình 3' / 'Figure 3' cũng là chú thích (QLHS 11/11 - file không dùng kiểu Caption)", () => {
     const blocks = [blk("B1", "list_item", "Kiểm chứng: Test"), blk("B2", "image"), blk("B3", "paragraph", "H3 · sơ đồ hoạt động UC-05 Điểm danh"), blk("B4", "paragraph", "REQ-FUNC-052 – Sửa điểm danh")]
     expect(captionOf(blk("B2", "image"), blocks)).toBe("H3 · sơ đồ hoạt động UC-05 Điểm danh")
     expect(readsImage("feature:@B0255", captionOf(blk("B2", "image"), blocks))).toBe(true)
@@ -545,7 +545,7 @@ describe("ảnh diagram (mode 1 v3 phase 5)", () => {
     expect(captionOf(blk("B2", "image"), [blk("B1", "paragraph", "Hệ thống phải lưu…"), blk("B2", "image"), blk("B3", "paragraph", "Mỗi yêu cầu dùng mã REQ")])).toBe("(none)")
   })
 
-  it("FLF-252 readsImage: chọn ảnh theo caption — ảnh màn hình không đọc; sơ đồ đọc được ở mục khác FPT vẫn đọc (FLF-390: cả sequence / activity)", () => {
+  it("FLF-252 readsImage: chọn ảnh theo caption - ảnh màn hình không đọc; sơ đồ đọc được ở mục khác FPT vẫn đọc (FLF-390: cả sequence / activity)", () => {
     expect(readsImage("fixed:2.2.1", "(none)")).toBe(true)
     expect(readsImage("fixed:2.2.1", "Figure 03. Use Case Diagram - Account")).toBe(true)
     expect(readsImage("fixed:3.1.1", "Figure 17 - Register account screen layout")).toBe(false)
@@ -697,7 +697,7 @@ describe("ảnh diagram (mode 1 v3 phase 5)", () => {
   })
 })
 
-describe("FLF-343 — độ tin I-4 = điểm AI kết hợp tín hiệu code", () => {
+describe("FLF-343 - độ tin I-4 = điểm AI kết hợp tín hiệu code", () => {
   it("combineAiConfidence: AI × 0.6 + trung bình tín hiệu × 0.4; không có tín hiệu ⇒ giữ điểm AI", () => {
     expect(combineAiConfidence(0.9, [1, 1, 1])).toBe(0.94)
     expect(combineAiConfidence(0.9, [0, 0])).toBe(0.54)

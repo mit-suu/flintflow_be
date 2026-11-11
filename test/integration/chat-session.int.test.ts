@@ -28,8 +28,8 @@ const joinOrg = async (orgId: string, email: string, role: OrgRole) => {
 const bearer = (token: string) => ({ Authorization: "Bearer " + token })
 const chats = (projectId: string) => `/api/v1/projects/${projectId}/chats`
 
-describe("FLF-244 chat session — vai trò", () => {
-  it("Viewer không đọc, không tạo, không nhắn, không xoá phiên chat (chat là dữ liệu làm việc — UC-47)", async () => {
+describe("FLF-244 chat session - vai trò", () => {
+  it("Viewer không đọc, không tạo, không nhắn, không xoá phiên chat (chat là dữ liệu làm việc - UC-47)", async () => {
     const owner = await seedFixture("minimal")
     const viewer = await joinOrg(owner.orgId, "viewer@flintflow.test", "viewer")
 
@@ -63,7 +63,7 @@ describe("FLF-244 chat session — vai trò", () => {
   })
 })
 
-describe("FLF-244 chat session — phiên chính và phiên phụ", () => {
+describe("FLF-244 chat session - phiên chính và phiên phụ", () => {
   it("phiên chính không xoá được (409 PIPELINE_SESSION_LOCKED); phiên phụ xoá được", async () => {
     const owner = await seedFixture("minimal")
     const extra = await request(app).post(chats(owner.projectId)).set(bearer(owner.token))
@@ -122,7 +122,7 @@ describe("FLF-244 chat session — phiên chính và phiên phụ", () => {
   })
 })
 
-describe("FLF-244 chat session — id sai định dạng", () => {
+describe("FLF-244 chat session - id sai định dạng", () => {
   it("projectId không phải ObjectId ⇒ 404 PROJECT_NOT_FOUND (không phải 500)", async () => {
     const owner = await seedFixture("minimal")
     const res = await request(app).get(chats("abc")).set(bearer(owner.token))
@@ -138,7 +138,7 @@ describe("FLF-244 chat session — id sai định dạng", () => {
   })
 })
 
-describe("FLF-260 chat session — ngôn ngữ trả lời", () => {
+describe("FLF-260 chat session - ngôn ngữ trả lời", () => {
   /** Prompt đã gửi model, theo thứ tự gọi. */
   const prompts: string[] = []
 

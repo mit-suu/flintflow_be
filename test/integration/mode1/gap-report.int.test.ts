@@ -60,7 +60,7 @@ const seedFlags = async (projectId: string) => {
   })
 }
 
-describe("gap report — gộp nhóm", () => {
+describe("gap report - gộp nhóm", () => {
   it("cờ mở gộp theo section (đỏ trước), cờ đã đóng bị bỏ, totals khớp từng nhóm", async () => {
     const { projectId } = await importFinalized()
     await seedFlags(projectId)
@@ -140,7 +140,7 @@ describe("gap report — gộp nhóm", () => {
   })
 })
 
-describe("gap report — .docx", () => {
+describe("gap report - .docx", () => {
   it("xuất .docx mở được bằng docx-ooxml, nội dung khớp báo cáo JSON", async () => {
     const { projectId } = await importFinalized()
     await seedFlags(projectId)
@@ -148,7 +148,7 @@ describe("gap report — .docx", () => {
     const buf = await renderGapReportDocx(report, "Lumen import")
     const blocks = await readBlocks(await DocxPackage.load(buf))
     const texts = blocks.map((b) => b.text)
-    expect(texts[0]).toBe("Báo cáo thiếu sót — Lumen import")
+    expect(texts[0]).toBe("Báo cáo thiếu sót - Lumen import")
     // tiêu đề mục không kèm khoá máy
     for (const s of report.sections) expect(texts).toContain(s.title)
     const summary = blocks.find((b) => b.kind === "table")!.rows!

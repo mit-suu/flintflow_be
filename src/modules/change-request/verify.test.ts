@@ -31,7 +31,7 @@ const proposal = (over: Partial<NonNullable<IChangeLocation["proposal"]>> = {}) 
 const loc = (over: Partial<IChangeLocation> = {}): IChangeLocation => ({ location_id: "L001", path: PATH, conclusion: "edit", proposal: proposal(), ...over }) as IChangeLocation
 const mine = new Map([[PATH, "CR-001"]])
 
-describe("C-5 checkLocation — code (đỏ)", () => {
+describe("C-5 checkLocation - code (đỏ)", () => {
   it("đạt; chưa kết luận; not_related bỏ qua; phần tử đã xoá ⇒ element_missing", () => {
     expect(checkLocation(cr, loc(), spine(), mine)).toEqual([])
     expect(checkLocation(cr, loc({ conclusion: null }), spine(), mine).map((v) => v.rule)).toEqual(["unconcluded"])
@@ -39,12 +39,12 @@ describe("C-5 checkLocation — code (đỏ)", () => {
     expect(checkLocation(cr, loc({ path: "actors[id=A99]" }), spine(), mine).map((v) => v.rule)).toEqual(["element_missing"])
   })
 
-  it("FLF-375: không còn khoá — CR khác cùng chạm phần tử không làm trượt; thiếu đề xuất ⇒ no_proposal", () => {
+  it("FLF-375: không còn khoá - CR khác cùng chạm phần tử không làm trượt; thiếu đề xuất ⇒ no_proposal", () => {
     expect(checkLocation(cr, loc(), spine(), new Map([[PATH, "CR-002"]])).map((v) => v.rule)).not.toContain("path_not_locked")
     expect(checkLocation(cr, loc({ proposal: null }), spine(), mine).map((v) => v.rule)).toEqual(["no_proposal"])
   })
 
-  it("edit không op ⇒ edit_without_ops; op không đổi gì ⇒ edit_no_change; op chạm phần tử không khoá ⇒ op_path_not_locked; thêm phần tử mới từ vị trí phần tử ⇒ add_outside_slot (chỉ thêm từ ô thêm mới — 2026-09-24)", () => {
+  it("edit không op ⇒ edit_without_ops; op không đổi gì ⇒ edit_no_change; op chạm phần tử không khoá ⇒ op_path_not_locked; thêm phần tử mới từ vị trí phần tử ⇒ add_outside_slot (chỉ thêm từ ô thêm mới - 2026-09-24)", () => {
     expect(checkLocation(cr, loc({ proposal: proposal({ spine_ops: [], new_text: OLD }) }), spine(), mine).map((v) => v.rule)).toEqual(["edit_without_ops"])
     const same = [{ op: "set", path: `${PATH}.name`, value: "Learner" }]
     expect(checkLocation(cr, loc({ proposal: proposal({ spine_ops: same, new_text: previewAfter(spine(), PATH, same) }) }), spine(), mine).map((v) => v.rule)).toEqual([
@@ -69,7 +69,7 @@ describe("C-5 checkLocation — code (đỏ)", () => {
   })
 })
 
-describe("C-5 checkSpineOps — op Spine chạy khô", () => {
+describe("C-5 checkSpineOps - op Spine chạy khô", () => {
   it("op hợp lệ ⇒ không vi phạm; chỉ op của vị trí edit được chạy khô", () => {
     expect(checkSpineOps(spine(), cr, [loc()]).size).toBe(0)
     expect(checkSpineOps(spine(), cr, [loc({ conclusion: "comment", proposal: proposal({ spine_ops: [{ op: "set", path: "actors[id=A99].name", value: "X" }] }) })]).size).toBe(0)

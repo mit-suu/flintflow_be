@@ -116,7 +116,7 @@ describe("assertNotMode1", () => {
   })
 })
 
-describe("điều kiện chặn chat — isChangeInstruction", () => {
+describe("điều kiện chặn chat - isChangeInstruction", () => {
   it("lệnh sửa bị nhận diện; câu hỏi và câu không có động từ sửa ở đầu thì không", () => {
     expect(isChangeInstruction("Rename actor Learner to Student")).toBe(true)
     expect(isChangeInstruction("Delete use case UC-01")).toBe(true)

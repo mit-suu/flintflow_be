@@ -29,9 +29,9 @@ stub: false
 
 ## Data → diagram
 
-- One box per entity (`name`, bold, wrapped to ≤ 2 lines). Entity name is a singular noun. `entities[].attributes` are drawn: Crow's foot an attribute compartment with `PK` (kind `key`) / `FK` (kind `reference`), IDEF1X key attributes above the line and `(FK)`, Chen ovals under the box for key (underlined) and plain attributes; `reference` attributes get no oval — the relationship diamond already shows the foreign key. No attributes ⇒ box with the name only.
+- One box per entity (`name`, bold, wrapped to ≤ 2 lines). Entity name is a singular noun. `entities[].attributes` are drawn: Crow's foot an attribute compartment with `PK` (kind `key`) / `FK` (kind `reference`), IDEF1X key attributes above the line and `(FK)`, Chen ovals under the box for key (underlined) and plain attributes; `reference` attributes get no oval - the relationship diamond already shows the foreign key. No attributes ⇒ box with the name only.
 - One relation per `relations[]` id that points to an existing entity, parent → child, id `<parent>><child>`:
-  - label = `relation_verbs[<child>]`, `has` when missing (never empty, never a flipped / passive verb — see `content/entities-erd`);
+  - label = `relation_verbs[<child>]`, `has` when missing (never empty, never a flipped / passive verb - see `content/entities-erd`);
   - parent end = `1`, or `0..1` when the child is in the parent's `relation_optional` (the child may exist without this parent);
   - child end = `relation_cardinality[<child>]`: `N` many (default), `1` one. The minimum on the child side is not in the Spine, so it is drawn as 0.
 - Self relations and several relations between two entities are drawn (each its own line / diamond).
@@ -40,7 +40,7 @@ stub: false
 
 | | Entity | Relation | Parent end | Child end |
 | --- | --- | --- | --- | --- |
-| Chen | rectangle | diamond with the verb; entity — diamond — entity | label `1`; single line | label `N` / `1`; **double line** when the child must have a parent (not optional), single when optional |
+| Chen | rectangle | diamond with the verb; entity - diamond - entity | label `1`; single line | label `N` / `1`; **double line** when the child must have a parent (not optional), single when optional |
 | Crow's foot | rectangle, bold name | one line, verb on the line | `\|\|` one, `\|o` zero or one | crow's foot + ring `o{` zero or many, bar + ring `\|o` zero or one |
 | IDEF1X | rectangle (independent) / rounded (dependent) | dashed line = non-identifying (solid = identifying, not in the Spine yet), verb on the line | hollow diamond when optional | solid dot; `Z` beside it for one-to-one |
 

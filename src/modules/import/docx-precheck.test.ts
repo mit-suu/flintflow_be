@@ -14,7 +14,7 @@ describe("looksLikeSrs", () => {
 })
 
 describe("headingOverlap", () => {
-  it("tỉ lệ heading của file có trong SRS của dự án — bỏ số mục, không phân biệt hoa thường, đếm mỗi heading một lần", () => {
+  it("tỉ lệ heading của file có trong SRS của dự án - bỏ số mục, không phân biệt hoa thường, đếm mỗi heading một lần", () => {
     const project = ["1 Product Overview", "2.1 Actors", "2.2 Use Cases", "3.1 Screen Flow"]
     expect(headingOverlap(["1. product overview", "2.1 Actors", "9 Budget", "9 Budget"], project)).toBe(0.67)
     expect(headingOverlap(["Meeting notes"], project)).toBe(0)

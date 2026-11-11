@@ -263,7 +263,7 @@ const diagramImages = (
   parts.forEach((d, i) => {
     const caption = captionOf(d) ?? (parts.length > 1 ? `${captionBase} (${i + 1}/${parts.length})` : captionBase)
     if (d.render_status === "error") {
-      out.push(image(diagramErrorMarker(d.id), `${caption} — ${notDrawn}`))
+      out.push(image(diagramErrorMarker(d.id), `${caption} - ${notDrawn}`))
       return
     }
     const png = ctx.diagramPng(d.id)
@@ -297,7 +297,7 @@ const productOverview = (spine: Spine, ctx: SectionRenderContext): Block[] => {
     const say = sentencesFor(lang)
     blocks.push(heading("External Systems", 2), bulletList(nonHuman.map((a) => say.externalSystem(a.name, enumLabel(lang, "actor_kind", a.kind), a.description))))
   }
-  if (!represented?.has("slot:context")) blocks.push(...diagramImages(spine, "context", undefined, ctx, "Figure — System Context Diagram"))
+  if (!represented?.has("slot:context")) blocks.push(...diagramImages(spine, "context", undefined, ctx, "Figure - System Context Diagram"))
   return blocks
 }
 
@@ -386,14 +386,14 @@ const screenAuthorization = (spine: Spine, ctx: SectionRenderContext): Block[] =
   // mục trống như chưa làm gì — ma trận toàn "—" thì đọc thành "không ai được vào màn nào", sai nghĩa
   if (spine.permissions.length === 0) {
     if (spine.roles.length === 0) return []
-    const actorName = (id: string | null) => spine.actors.find((a) => a.id === id)?.name ?? "—"
+    const actorName = (id: string | null) => spine.actors.find((a) => a.id === id)?.name ?? "-"
     return [tableBlock(["Role", "Actor"], spine.roles.map((r) => [r.name, actorName(r.actor_id)]))]
   }
   const actionsOf = (screenId: string, roleId: string): string =>
     spine.permissions
       .filter((p) => p.screen_id === screenId && p.role_id === roleId)
       .map((p) => enumLabel(fptLanguage(ctx), "permission_action", p.action))
-      .join(", ") || "—"
+      .join(", ") || "-"
   const matrix = tableBlock(
     [fptLabelFor(fptLanguage(ctx), "Screen"), ...spine.roles.map((r) => r.name)],
     spine.screens.map((s) => [s.name, ...spine.roles.map((r) => actionsOf(s.id, r.id))])
@@ -668,7 +668,7 @@ const legacyFunctionDetail = (spine: Spine, functionId: string, ctx: SectionRend
 
   const owningScreen = fn.screen_id ? spine.screens.find((s) => s.id === fn.screen_id) : undefined
   if (owningScreen && owningScreen.primary_function_id === fn.id) {
-    blocks.push(...diagramImages(spine, "screen_layout", owningScreen.id, ctx, `Screen Layout — ${owningScreen.name}`))
+    blocks.push(...diagramImages(spine, "screen_layout", owningScreen.id, ctx, `Screen Layout - ${owningScreen.name}`))
   }
   return blocks
 }
@@ -741,7 +741,7 @@ export const generatedDiagramBlocks = (spine: Spine, kind: OriginalDiagramKind, 
   if (kind === "sequence" || kind === "activity") return ownerId ? functionDiagramBlocks(spine, ownerId, kind, ctx) : []
   if (kind === "deployment") return deploymentBlocks(spine, ctx)
   const labels = diagramLabelsFor(ctx.language)
-  const caption = kind === "context" ? "Figure — System Context Diagram" : kind === "usecase" ? "Use Case Diagram" : kind === "screen_flow" ? labels.screensFlowTitle() : labels.erdTitle
+  const caption = kind === "context" ? "Figure - System Context Diagram" : kind === "usecase" ? "Use Case Diagram" : kind === "screen_flow" ? labels.screensFlowTitle() : labels.erdTitle
   return diagramImages(spine, kind, undefined, ctx, caption, svgCaption, (d) => kind !== "usecase" || d.section !== ACTOR_HIERARCHY_SECTION)
 }
 
@@ -1129,7 +1129,7 @@ const slotBlocks = (spine: Spine, slotId: string, ctx: SectionRenderContext): Bl
       return rules.length ? [bulletList(rules.map((r) => r.statement))] : []
     }
     case "slot:context":
-      return [...externalSystems(spine, ctx), ...diagramImages(spine, "context", undefined, ctx, "Figure — System Context Diagram")]
+      return [...externalSystems(spine, ctx), ...diagramImages(spine, "context", undefined, ctx, "Figure - System Context Diagram")]
     case "slot:features": {
       if (spine.features.length === 0) return []
       const say = sentencesFor(fptLanguage(ctx))

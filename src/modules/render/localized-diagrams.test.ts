@@ -70,7 +70,7 @@ const translate = (units: TranslationUnit[], pick: (u: TranslationUnit) => boole
   new Map(units.filter(pick).map((u) => [u.key, toVi(u.value)]))
 const byKind = (spine: Spine, kind: Diagram["kind"]) => spine.diagrams.filter((d) => d.kind === kind)
 
-describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong bản xem (FLF-265 N1)", () => {
+describe("localizeSpine + language - nguồn sơ đồ theo ngôn ngữ trong bản xem (FLF-265 N1)", () => {
   it("hình dựng từ Spine vẽ lại bằng chữ đã dịch + nhãn máy tiếng Việt; Spine gốc không đổi", () => {
     const { spine } = rendered()
     const before = structuredClone(spine)
@@ -148,7 +148,7 @@ describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong 
     const view = renderView(localized)
     for (const d of byKind(view, "screen_flow")) expect(svgTitleOf(d.source)).toBe(DIAGRAM_LABELS.vi.screensFlowTitle())
     // Use case tách theo feature: tiêu đề phần (ghi ở <title> của SVG) là chữ máy ⇒ đổi
-    for (const d of byKind(view, "usecase")) expect(svgTitleOf(d.source)).toMatch(/^Sơ đồ use case — /)
+    for (const d of byKind(view, "usecase")) expect(svgTitleOf(d.source)).toMatch(/^Sơ đồ use case - /)
     // Sơ đồ ngữ cảnh: bản gốc Title Case nhãn tiếng Anh, bản tiếng Việt giữ nguyên chữ như viết ⇒ vẽ lại, nhãn chưa dịch không bị Title Case
     const human = spine.actors.find((x) => x.kind === "human")!
     expect(byKind(spine, "context")[0].source).toContain(`>${titleCase(human.flows_in![0])}<`)
@@ -157,7 +157,7 @@ describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong 
   })
 })
 
-describe("matchingPart — ghép phần bản dịch với phần gốc theo tập id use case", () => {
+describe("matchingPart - ghép phần bản dịch với phần gốc theo tập id use case", () => {
   const part = (source: string, members?: string[], section = "fixed:2.2.1"): RenderedPart => ({
     kind: "usecase", section, owner_kind: null, owner_id: null, format: "svg", source, ...(members ? { members } : {})
   })

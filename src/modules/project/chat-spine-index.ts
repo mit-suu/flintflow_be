@@ -38,7 +38,7 @@ const namedLine = (label: string, items: ReadonlyArray<{ id: string; name: strin
   if (items.length === 0) return `- ${label}: 0`
   const shown = items.slice(0, SPINE_INDEX_MAX_ITEMS).map((item) => `${item.id} ${item.name}`.trim())
   const rest = items.length - shown.length
-  return `- ${label}: ${items.length} — ${shown.join("; ")}${rest > 0 ? `; +${rest}` : ""}`
+  return `- ${label}: ${items.length} - ${shown.join("; ")}${rest > 0 ? `; +${rest}` : ""}`
 }
 
 /** Rỗng khi chưa có Spine — prompt khi đó nói tài liệu chưa có dữ liệu. */

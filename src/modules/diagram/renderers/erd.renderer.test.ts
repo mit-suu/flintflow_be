@@ -41,7 +41,7 @@ const SHOP = spineOf([
   entity("E04", "Invoice")
 ])
 
-describe("erd.renderer — ba ký pháp trên một bộ xếp + đi đường", () => {
+describe("erd.renderer - ba ký pháp trên một bộ xếp + đi đường", () => {
   it.each(ERD_NOTATIONS)("%s: SVG, không issue, tô #7ACFF5, tất định", (notation) => {
     const [part] = renderErd(SHOP, null, undefined, { erdNotation: notation })
     expect(part).toMatchObject({ kind: "erd", section: "fixed:3.1.5", format: "svg", owner_id: null })
@@ -102,7 +102,7 @@ describe("erd.renderer — ba ký pháp trên một bộ xếp + đi đường",
     expect(texts).toEqual(expect.arrayContaining(["manages", "leads", "is staffed by"]))
   })
 
-  it.each(ERD_NOTATIONS)("%s: thuộc tính (khi Spine có) — hộp có ngăn / ô-van, không issue", (notation) => {
+  it.each(ERD_NOTATIONS)("%s: thuộc tính (khi Spine có) - hộp có ngăn / ô-van, không issue", (notation) => {
     const attributes = [{ name: "id", pk: true }, { name: "customer_id", fk: true }, { name: "created_at" }]
     const s = scene(diagram(notation, [{ id: "A", name: "Customer", attributes }, { id: "B", name: "Order", attributes }], [rel("A>B", "A", "B")]))
     expect(checkScene(s, { allowBends: true })).toEqual([])
@@ -227,7 +227,7 @@ const random = (seed: number) => () => {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296
 }
 
-describe("erd.renderer — đồ thị ngẫu nhiên (có seed): checkScene luôn rỗng, không mất entity", () => {
+describe("erd.renderer - đồ thị ngẫu nhiên (có seed): checkScene luôn rỗng, không mất entity", () => {
   it.each(ERD_NOTATIONS)("%s", (notation) => {
     for (let seed = 1; seed <= 25; seed++) {
       const rnd = random(seed * 7919)

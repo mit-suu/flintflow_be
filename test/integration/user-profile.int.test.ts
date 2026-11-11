@@ -39,7 +39,7 @@ describe("GET /users/me", () => {
   })
 })
 
-describe("PATCH /users/me — ngôn ngữ giao diện (FLF-259)", () => {
+describe("PATCH /users/me - ngôn ngữ giao diện (FLF-259)", () => {
   it("chưa chọn ⇒ locale null ở login và /users/me; lưu en ⇒ /users/me và lần đăng nhập sau trả en", async () => {
     await seedLocalUser()
     const firstLogin = await request(app).post("/api/v1/auth/login").send({ email: EMAIL, password: PASSWORD })

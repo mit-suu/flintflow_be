@@ -301,8 +301,8 @@ export const slugify = (s: string): string =>
 export const contextualHeader = (doc: Pick<KnowledgeDoc, "source" | "source_kind" | "topic" | "description">, section: string): string => {
   const head =
     doc.source_kind === "internal_skill"
-      ? `Skill: ${doc.source} (${doc.topic})${doc.description ? ` — ${doc.description}` : ""}`
-      : `Source: ${doc.source} (${doc.source_kind})${doc.topic ? ` — ${doc.topic}` : ""}${doc.description ? ` — ${doc.description}` : ""}`
+      ? `Skill: ${doc.source} (${doc.topic})${doc.description ? ` - ${doc.description}` : ""}`
+      : `Source: ${doc.source} (${doc.source_kind})${doc.topic ? ` - ${doc.topic}` : ""}${doc.description ? ` - ${doc.description}` : ""}`
   return `${head}\nSection: ${section}\n---\n`
 }
 
@@ -402,7 +402,7 @@ export const chunkDocument = (doc: KnowledgeDoc): ChunkResult => {
       }
       const tokens = estimateTokens(text)
       if (tokens > CHUNK_MAX_TOKENS) {
-        warnings.push({ chunk_id: chunkId, tokens, message: `block đơn lớn hơn trần ${CHUNK_MAX_TOKENS} token — giữ nguyên, không cắt` })
+        warnings.push({ chunk_id: chunkId, tokens, message: `block đơn lớn hơn trần ${CHUNK_MAX_TOKENS} token - giữ nguyên, không cắt` })
       }
       chunks.push({
         chunk_id: chunkId,

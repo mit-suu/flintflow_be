@@ -144,7 +144,7 @@ describe("nextBaselineVersion", () => {
   })
 })
 
-describe("signOff — điều kiện ký là cờ đỏ = 0, không phải phần trăm", () => {
+describe("signOff - điều kiện ký là cờ đỏ = 0, không phải phần trăm", () => {
   it("fixture sạch cờ đỏ ⇒ v1.0, snapshot lưu, step S-9.5 accepted, có notify", async () => {
     await seed()
     const result = await signOff(PROJECT, USER, { base_version: await version() })
@@ -244,7 +244,7 @@ describe("signOff — điều kiện ký là cờ đỏ = 0, không phải phầ
     expect(retried.baseline.version).toBe("v1.0")
   })
 
-  it("không gọi model và không ghi usage[] — hết credit vẫn ký được", async () => {
+  it("không gọi model và không ghi usage[] - hết credit vẫn ký được", async () => {
     await seed()
     // `signOff` không import ai-action/meter; kiểm bằng cách không mock chúng mà vẫn chạy trọn.
     const result = await signOff(PROJECT, USER, { base_version: await version() })

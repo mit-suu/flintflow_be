@@ -67,7 +67,7 @@ describe("computeSourceHash", () => {
   })
 })
 
-describe("computeSourceHash — tên hệ thống (FLF-177)", () => {
+describe("computeSourceHash - tên hệ thống (FLF-177)", () => {
   const usecase = { kind: "usecase" as const, owner_id: null }
   const context = { kind: "context" as const, owner_id: null }
 
@@ -97,7 +97,7 @@ describe("computeSourceHash — tên hệ thống (FLF-177)", () => {
   })
 })
 
-describe("renderedDiagramHash — hash của hình đã vẽ theo engine (FLF-339)", () => {
+describe("renderedDiagramHash - hash của hình đã vẽ theo engine (FLF-339)", () => {
   const targets = [
     { kind: "context" as const, owner_id: null },
     { kind: "usecase" as const, owner_id: null },
@@ -123,7 +123,7 @@ describe("renderedDiagramHash — hash của hình đã vẽ theo engine (FLF-33
     expect(renderedDiagramHash(renamed, context, svgContext)).not.toBe(renderedDiagramHash(FIXTURE, context, svgContext))
   })
 
-  it("ERD: ký pháp của dự án (ngoài Spine) nằm trong hash hình — đổi ký pháp ⇒ hình cũ, thiếu ký pháp = chen", () => {
+  it("ERD: ký pháp của dự án (ngoài Spine) nằm trong hash hình - đổi ký pháp ⇒ hình cũ, thiếu ký pháp = chen", () => {
     const erd = targets[3]
     const chen = renderedDiagramHash(FIXTURE, erd, undefined, { erdNotation: "chen" })
     expect(renderedDiagramHash(FIXTURE, erd)).toBe(chen)
@@ -149,7 +149,7 @@ describe("renderedDiagramHash — hash của hình đã vẽ theo engine (FLF-33
   })
 })
 
-describe("renderedDiagramHash — usecase", () => {
+describe("renderedDiagramHash - usecase", () => {
   it("bộ xếp thử nhiều phương án (svg@2) làm hình use case svg@1 cũ thành stale", () => {
     const usecase = { kind: "usecase" as const, owner_id: null }
     expect(DIAGRAM_ENGINES.context).toBe("svg@2")
@@ -158,7 +158,7 @@ describe("renderedDiagramHash — usecase", () => {
   })
 })
 
-describe("renderedDiagramHash — screen_flow theo template FPT", () => {
+describe("renderedDiagramHash - screen_flow theo template FPT", () => {
   const flow = { kind: "screen_flow" as const, owner_id: null }
 
   it("bố cục mới (svg@3: chỉ vẽ cây, tách theo actor) làm hình svg@2 cũ thành stale", () => {

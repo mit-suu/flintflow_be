@@ -103,7 +103,7 @@ const change = (over: Partial<SpineChange> & Pick<SpineChange, "seq" | "txn" | "
   ...over
 })
 
-describe("findUndoTarget — chọn lô nào để hoàn tác", () => {
+describe("findUndoTarget - chọn lô nào để hoàn tác", () => {
   it("lô người dùng gần nhất", () => {
     const target = findUndoTarget([
       change({ seq: 1, txn: "T1", path: "actors[id=A01].name" }),
@@ -155,7 +155,7 @@ describe("findUndoTarget — chọn lô nào để hoàn tác", () => {
   })
 })
 
-describe("undoLast — khôi phục Spine", () => {
+describe("undoLast - khôi phục Spine", () => {
   beforeEach(() => db.reset())
 
   it("khôi phục Spine deep-equal trạng thái trước lô", async () => {
