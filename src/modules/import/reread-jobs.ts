@@ -20,7 +20,7 @@ import { env } from "../../config/env.js"
 import { defineJob, enqueueJob, usesQueue } from "../../shared/queue/job-runner.js"
 import { applyTransaction, planTransaction } from "../spine/op-engine.js"
 import type { Op } from "../spine/op.types.js"
-import { isOriginalDiagramKind, originalDiagramHash } from "../spine/original-diagram.js"
+import { OWNER_DIAGRAM_KINDS, isOriginalDiagramKind, originalDiagramValue } from "../spine/original-diagram.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import { assemble } from "../render/assemble.service.js"
@@ -43,9 +43,12 @@ interface RereadJobData {
 }
 
 /** Mảng Spine mà sơ đồ đọc được ghi vào (`DIAGRAM_TARGETS`). */
-const DIAGRAM_ARRAYS = ["actors", "use_cases", "screens", "entities"] as const
+const DIAGRAM_ARRAYS = ["actors", "use_cases", "screens", "entities", "functions", "deployment_nodes"] as const
 type DiagramArray = (typeof DIAGRAM_ARRAYS)[number]
 const isDiagramArray = (entity: string): entity is DiagramArray => (DIAGRAM_ARRAYS as readonly string[]).includes(entity)
+
+/** FLF-390: luồng đọc từ sơ đồ tuần tự (function) / activity (use case). */
+const FUNCTION_FLOW_FIELDS = new Set(["interactions", "activity_nodes", "activity_flows"])
 
 /** Field tham chiếu dạng mảng mã (ảnh nối thêm actor / include / quan hệ…) — nối thêm, không thay. */
 const REF_FIELDS = new Set(["actor_ids", "includes", "extends", "relations", "function_ids", "feature_ids"])
@@ -70,7 +73,8 @@ const rawOf = (el: Element): Record<string, unknown> => {
  * ước đặt tên).
  */
 export const rereadOps = (spine: Spine, items: readonly EntityItem[]): Op[] => {
-  const fresh = items.filter((it) => it.id && isDiagramArray(it.entity) && !findElement(spine, it.entity, it.id))
+  // FLF-390: ảnh sequence / activity không tạo function mới — chỉ thêm luồng cho function đã có
+  const fresh = items.filter((it) => it.id && isDiagramArray(it.entity) && it.entity !== "functions" && !findElement(spine, it.entity, it.id))
   const ops: Op[] = fresh.length ? buildImportOps(spine, fresh.map((it) => ({ entity: it.entity, id: it.id, value: it.value }))) : []
   // Quan hệ của phần tử đã có phân giải trên Spine ĐÃ có phần tử mới (use case cũ nối thêm actor "Guest" vừa đọc được)
   const base = ops.length ? planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 }).spine : spine
@@ -91,13 +95,20 @@ export const rereadOps = (spine: Spine, items: readonly EntityItem[]): Op[] => {
     )?.value as Element | undefined
     if (!rebuilt) continue
     const at = `${it.entity}[id=${current.id}]`
-    for (const field of Object.keys(it.value)) {
+    // nút activity trước flow (flow tham chiếu id nút)
+    for (const field of Object.keys(it.value).sort((a, b) => Number(a === "activity_flows") - Number(b === "activity_flows"))) {
       const before = current[field]
       const after = rebuilt[field]
       if (after === undefined || JSON.stringify(before) === JSON.stringify(after)) continue
       if (field === "flow_to" && Array.isArray(after)) {
         const had = new Set(((before as { to: string }[]) ?? []).map((e) => e.to))
         for (const edge of after as { to: string }[]) if (!had.has(edge.to)) ops.push({ op: "add", path: `${at}.flow_to[]`, value: edge, reason: "Đọc lại ảnh sơ đồ" })
+        continue
+      }
+      // FLF-390: luồng của function / use case (mảng object) — chỉ ghi khi phần tử chưa có, cả mảng một op
+      const empty = before === undefined || before === null || (Array.isArray(before) && before.length === 0)
+      if (FUNCTION_FLOW_FIELDS.has(field) && Array.isArray(after) && after.length && empty) {
+        ops.push({ op: "set", path: `${at}.${field}`, value: after, reason: "Đọc lại ảnh sơ đồ" })
         continue
       }
       if (Array.isArray(after) && after.some((x) => typeof x === "object" && x !== null)) continue
@@ -121,11 +132,12 @@ export const imageRereadOps = (
   const planned = data.length ? planTransaction(spine, { base_version: spine.spine_version, ops: data, by: "import" }, { startSeq: 1 }).spine : spine
   const ops: Op[] = [...data]
   const owner = spine.custom_sections.find((c) => c.blocks.some((b) => b.kind === "image" && b.image_ref === image.image_ref))
-  if (owner && isOriginalDiagramKind(read.kind)) {
+  const fnOwner = read.owner_id ?? null
+  if (owner && isOriginalDiagramKind(read.kind) && (!OWNER_DIAGRAM_KINDS.has(read.kind) || fnOwner)) {
     ops.push({
       op: "set",
       path: `custom_sections[id=${owner.id}].blocks[image_ref=${image.image_ref}].diagram`,
-      value: { kind: read.kind, source_hash: originalDiagramHash(planned, read.kind) },
+      value: originalDiagramValue(planned, read.kind, fnOwner),
       reason: "Đọc lại ảnh sơ đồ: giữ hình gốc, ẩn sơ đồ FlintFlow cùng loại"
     })
   }

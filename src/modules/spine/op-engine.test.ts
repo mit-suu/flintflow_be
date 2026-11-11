@@ -307,6 +307,16 @@ describe("các loại op", () => {
     expect(rules).toEqual(["duplicate_id", "op_not_allowed", "index_selector_forbidden", "schema_invalid", "op_not_allowed", "op_value_missing"])
   })
 
+  it("FLF-375: set cả mảng khối văn bản (không có id) của mục riêng được, ghi before", () => {
+    const base = structuredClone(FIXTURE)
+    base.custom_sections.push({ id: "CS90", heading: "", level: 4, source: "import", blocks: [{ kind: "paragraph", text: "UC-05, UC-06, UC-09 có thêm sơ đồ hoạt động.", rows: null, image_ref: null }] } as never)
+    const value = [{ kind: "paragraph", text: "UC-05, UC-06 có thêm sơ đồ hoạt động.", rows: null, image_ref: null }]
+    const plan = planTransaction(base, txn([{ op: "set", path: "custom_sections[id=CS90].blocks", value } as Op]), { startSeq: 1 })
+    expect(plan.spine.custom_sections.find((c) => c.id === "CS90")?.blocks).toEqual(value)
+    expect(plan.changes[0]).toMatchObject({ op: "set", path: "custom_sections[id=CS90].blocks" })
+    expect((plan.changes[0].before as { text: string }[])[0].text).toContain("UC-09")
+  })
+
   it("không xoá được section bắt buộc và màn đang là screen_cursor", () => {
     const e1 = rejection(() => planTransaction(FIXTURE, txn([{ op: "remove", path: "sections[id=fixed:3.1.1]" }]), { startSeq: 1 }))
     expect(e1.violations.map((v) => v.rule)).toContain("invariant_1_required_section")

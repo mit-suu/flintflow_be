@@ -1,7 +1,7 @@
 /**
  * Một vị trí bị CR ảnh hưởng (C-3 tìm, C-4 đề xuất, C-5 kiểm). Mode 1 v2 (FLF-186): vị trí = **phần tử Spine**
  * (`path`) + section hiển thị nó, thay block của file docx. Mọi vị trí phải có `conclusion` trước khi nộp.
- * `redo_count` ≤ 2 (MAX_REDO_PER_LOCATION) rồi chuyển sửa tay.
+ * `redo_count` ≤ 2 (MAX_REDO_PER_LOCATION) rồi hỏi người dùng ("Cần bạn quyết" — gõ hướng sửa hoặc bỏ chỗ đó).
  */
 
 import mongoose, { Schema, Document } from "mongoose"
@@ -46,6 +46,19 @@ export interface LocationVerify {
   at: Date
 }
 
+/**
+ * FLF-375 (business-flow §3.2 "Hai người sửa cùng lúc"): lúc xác nhận, người khác đã sửa đúng phần đề xuất định đổi ⇒
+ * không ghi; giữ ba bản để người dùng so sánh 3 cột (lúc AI soạn · hiện tại · đề xuất của bạn).
+ */
+export interface LocationConflict {
+  at_proposal_text: string
+  current_text: string
+  proposal_text: string | null
+  /** Người đã sửa (tên, hoặc "Tên (CR-003)"). */
+  changed_by: string
+  changed_at: Date | null
+}
+
 export interface IChangeLocation extends Document {
   projectId: mongoose.Types.ObjectId
   cr_id: string
@@ -63,11 +76,12 @@ export interface IChangeLocation extends Document {
   conclusion: LocationConclusion | null
   reason: string | null
   proposal: LocationProposal | null
-  /** User sửa tay (PATCH locations) — AI không đè lên. */
+  /** Người dùng đã tự quyết chỗ này (giữ nguyên / bỏ, hoặc gõ hướng sửa cho AI soạn lại) — AI không đè lên. */
   manual: boolean
   redo_count: number
   verify: LocationVerify | null
   group_id: string | null
+  conflict: LocationConflict | null
 }
 
 const opts = { _id: false }
@@ -113,7 +127,20 @@ const changeLocationSchema = new Schema<IChangeLocation>(
       ),
       default: null
     },
-    group_id: { type: String, default: null }
+    group_id: { type: String, default: null },
+    conflict: {
+      type: new Schema(
+        {
+          at_proposal_text: { type: String, default: "" },
+          current_text: { type: String, default: "" },
+          proposal_text: { type: String, default: null },
+          changed_by: { type: String, default: "" },
+          changed_at: { type: Date, default: null }
+        },
+        opts
+      ),
+      default: null
+    }
   },
   { timestamps: true, minimize: false }
 )

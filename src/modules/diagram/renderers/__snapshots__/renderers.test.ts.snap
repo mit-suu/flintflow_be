@@ -1,5 +1,53 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > activity@UC02 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="728" height="617" viewBox="-20 -20 728 617">
+<title>Activity Diagram — Log In</title>
+<rect x="-20" y="-20" width="728" height="617" fill="#fff"/>
+<rect x="0" y="0" width="236" height="577" fill="none" stroke="#000" stroke-width="1.2"/>
+<rect x="0" y="0" width="236" height="30" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="118" y="15" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Founder</text>
+<rect x="236" y="0" width="452" height="577" fill="none" stroke="#000" stroke-width="1.2"/>
+<rect x="236" y="0" width="452" height="30" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="462" y="15" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">System</text>
+<circle cx="118" cy="58" r="10" fill="#000" stroke="#000" stroke-width="1.2"/>
+<rect x="30" y="112" width="176" height="52" rx="10" ry="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="118" y="130" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Submit email and</text>
+<text x="118" y="146" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">password</text>
+<rect x="266" y="208" width="176" height="40" rx="10" ry="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="354" y="228" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Check credentials</text>
+<polygon points="276.33,308 296.33,288 411.67,288 431.67,308 411.67,328 296.33,328" fill="#fff" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="354" y="308" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Credentials valid?</text>
+<rect x="266" y="433" width="176" height="52" rx="10" ry="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="354" y="451" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Show authentication</text>
+<text x="354" y="467" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">error</text>
+<rect x="482" y="439" width="176" height="40" rx="10" ry="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="570" y="459" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Open project dashboard</text>
+<circle cx="570" cy="544" r="15" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<circle cx="570" cy="544" r="9" fill="#000" stroke="#000" stroke-width="1.2"/>
+<line x1="118" y1="68" x2="118" y2="112" stroke="#000" stroke-width="1.2"/>
+<polyline points="113.11,101.04 118,112 122.89,101.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<polyline points="118,164 118,186 354,186 354,208" fill="none" stroke="#000" stroke-width="1.2"/>
+<polyline points="349.11,197.04 354,208 358.89,197.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="354" y1="248" x2="354" y2="288" stroke="#000" stroke-width="1.2"/>
+<polyline points="349.11,277.04 354,288 358.89,277.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="354" y1="328" x2="354" y2="433" stroke="#000" stroke-width="1.2"/>
+<polyline points="349.11,422.04 354,433 358.89,422.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<polyline points="376,328 376,350 570,350 570,439" fill="none" stroke="#000" stroke-width="1.2"/>
+<polyline points="565.11,428.04 570,439 574.89,428.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<polyline points="354,485 354,507 462,507 462,90 124,90 124,112" fill="none" stroke="#000" stroke-width="1.2"/>
+<polyline points="119.11,101.04 124,112 128.89,101.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="570" y1="479" x2="570" y2="529" stroke="#000" stroke-width="1.2"/>
+<polyline points="565.11,518.04 570,529 574.89,518.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<rect x="281.3" y="373" width="145.41" height="19" fill="#fff"/>
+<text x="354" y="382.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">[credentials do not match]</text>
+<rect x="515.64" y="373" width="108.71" height="19" fill="#fff"/>
+<text x="570" y="382.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">[credentials match]</text>
+</svg>
+"
+`;
+
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > class@F1 part 1 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="150" height="154" viewBox="74 74 150 154">
@@ -378,6 +426,45 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 <rect x="45.07" y="193.01" width="118.56" height="17" fill="#fff" transform="rotate(62.62 104.35 201.51)"/>
 <text x="104.35" y="201.51" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(62.62 104.35 201.51)">Housekeeping Tick</text>
 </svg>
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > deployment 1`] = `
+"@startuml
+skinparam defaultFontName Arial
+skinparam defaultFontSize 13
+skinparam defaultFontColor #000000
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam ArrowColor #000000
+skinparam ArrowThickness 1.2
+skinparam BackgroundColor #FFFFFF
+skinparam NodeBackgroundColor #7ACFF5
+skinparam NodeBorderColor #000000
+skinparam ComponentBackgroundColor #FFFFFF
+skinparam ComponentBorderColor #000000
+skinparam ComponentStyle uml2
+skinparam ArtifactBackgroundColor #FFFFFF
+skinparam ArtifactBorderColor #000000
+skinparam dpi 192
+skinparam nodesep 60
+skinparam ranksep 60
+left to right direction
+node "User Device" <<device>> as DN01 {
+  component "Web Browser" as DN01_C1
+}
+node "Application Server" <<device>> as DN02 {
+  node "Node.js Runtime" <<executionEnvironment>> as DN03 {
+    component "API Service" as DN03_C1
+    artifact "api-bundle.js" as DN03_A1
+  }
+}
+node "MongoDB Atlas" as DN04
+node "LLM Provider" as DN05
+DN01 -- DN03 : HTTPS
+DN03 -- DN04 : MongoDB wire protocol
+DN03 -- DN05 : HTTPS
+@enduml
 "
 `;
 

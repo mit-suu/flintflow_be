@@ -425,10 +425,10 @@ export const captionOf = (img: Pick<BlockLite, "block_id">, sectionBlocks: Pick<
   return near?.text.trim() ?? "(none)"
 }
 
-/** Caption chỉ hình là sơ đồ đọc được (use case, ngữ cảnh, ERD / class, luồng màn). */
-const DIAGRAM_CAPTION = /(use[\s-]?case|context|erd|entity[\s-]?relationship|class diagram|data model|screens?[\s-]?flow|navigation|sơ đồ|biểu đồ|diagram)/i
-/** Caption chỉ hình không phải 4 loại sơ đồ đọc được (ảnh màn hình, wireframe, sequence / activity…) — đọc chỉ tốn credit. */
-const NOT_DIAGRAM_CAPTION = /(layout|screenshot|screen shot|mock-?up|wireframe|prototype|giao diện|sequence|activity|state machine|deployment|component|workflow)/i
+/** Caption chỉ hình là sơ đồ đọc được (use case, ngữ cảnh, ERD / class, luồng màn; FLF-390: sequence, activity). */
+const DIAGRAM_CAPTION = /(use[\s-]?case|context|erd|entity[\s-]?relationship|class diagram|data model|screens?[\s-]?flow|navigation|sequence|tuần tự|activity|hoạt động|luồng xử lý|workflow|deployment|triển khai|sơ đồ|biểu đồ|diagram)/i
+/** Caption chỉ hình không phải loại sơ đồ đọc được (ảnh màn hình, wireframe, state machine…) — đọc chỉ tốn credit. */
+const NOT_DIAGRAM_CAPTION = /(layout|screenshot|screen shot|mock-?up|wireframe|prototype|giao diện|state machine|component diagram)/i
 
 /**
  * Ảnh có gửi AI đọc không (FLF-252): caption nói là ảnh màn hình / sơ đồ khác loại ⇒ không; ảnh ở mục thường có sơ đồ
@@ -742,6 +742,8 @@ export interface DiagramReadContext {
   alloc: IdAllocator
   ownProvisional: EntityItem[]
   targets: readonly string[]
+  /** FLF-390: function tạm của mục function — chủ của ảnh sequence / activity trong mục đó. */
+  sectionFunction?: ProvisionalEntity | null
 }
 
 /**
@@ -750,12 +752,16 @@ export interface DiagramReadContext {
  * không đọc lại), `credits` (hết credit — dừng).
  */
 export type DiagramRead =
-  | { status: "read"; kind: DiagramImageKind | "other"; items: EntityItem[]; usageId: string }
+  | { status: "read"; kind: DiagramImageKind | "other"; items: EntityItem[]; usageId: string; owner_id?: string | null }
   | { status: "unsupported" | "unavailable" | "failed" }
   | { status: "credits"; failure: MeteredFailure }
 
+/** FLF-390: sơ đồ của một phần tử — dữ liệu đọc được nằm trên chủ đó: sơ đồ tuần tự ↔ function, activity ↔ use case. */
+const OWNER_ENTITY: Readonly<Record<string, "functions" | "use_cases">> = { sequence: "functions", activity: "use_cases" }
+
 export const readDiagramImage = async (img: BlockLite, ctx: DiagramReadContext): Promise<DiagramRead> => {
   const { projectId, userId, section_id, heading, sectionBlocks, known, items, alloc, ownProvisional, targets } = ctx
+  const sectionFunction = ctx.sectionFunction?.entity === "functions" ? ctx.sectionFunction : null
   const image = await loadImportImage(projectId, img.image_ref!)
   if (!image) return { status: "unsupported" }
   const caption = captionOf(img, sectionBlocks)
@@ -776,7 +782,8 @@ export const readDiagramImage = async (img: BlockLite, ctx: DiagramReadContext):
           section: [...items],
           text: [heading?.heading_text ?? "", caption, ...sectionBlocks.filter((b) => b.kind !== "image").map((b) => b.text)].join("\n"),
           mentions: sectionBlocks.flatMap((b) => b.mentions ?? []),
-          always: [...ALWAYS_KNOWN, ...targets]
+          // FLF-390: ảnh activity gắn vào use case đã có ⇒ model cần thấy mã use case kể cả ở mục chức năng
+          always: [...ALWAYS_KNOWN, ...targets, "use_cases"]
         })
       )
     },
@@ -792,20 +799,33 @@ export const readDiagramImage = async (img: BlockLite, ctx: DiagramReadContext):
     console.warn(`[I-4] ${section_id}: đọc ảnh ${img.block_id} lỗi (${result.message}) — giữ ảnh gốc, đi tiếp`)
     return { status: result.kind === "transient" ? "unavailable" : "failed" }
   }
+  const all = [...known, ...items]
+  const knownIds = (entity: string) => new Set(all.filter((k) => k.entity === entity && k.id).map((k) => k.id as string))
+  const knownFunctions = knownIds("functions")
+  if (sectionFunction) knownFunctions.add(sectionFunction.id)
+  const knownUseCases = knownIds("use_cases")
+  const ownerEntity = OWNER_ENTITY[result.data.diagram_kind]
   const read =
     result.data.diagram_kind === "other"
       ? []
       : dropMutualRelations(
           orientRelations(
             visionItems(
-              itemsFromAi(result.data, { sectionId: section_id, alloc, known: [...known, ...items], sectionFunction: null, validBlocks: new Set([img.block_id]), fromImage: true, sectionConfidence: heading?.confidence ?? null })
+              itemsFromAi(result.data, { sectionId: section_id, alloc, known: all, sectionFunction, validBlocks: new Set([img.block_id]), fromImage: true, sectionConfidence: heading?.confidence ?? null })
             ),
-            [...known, ...items]
+            all
           ),
-          [...known, ...items]
+          all
         )
+          // FLF-390: hình không tạo chức năng mới; sơ đồ activity không tạo use case mới — chỉ thêm luồng cho phần tử đã có
+          .filter((it) => it.entity !== "functions" || (it.id !== null && knownFunctions.has(it.id)))
+          .filter((it) => result.data.diagram_kind !== "activity" || it.entity !== "use_cases" || (it.id !== null && knownUseCases.has(it.id)))
+  // Sơ đồ gắn phần tử: chủ = phần tử nhận dữ liệu của hình; sơ đồ tuần tự trong mục function ⇒ function của mục (không có
+  // chủ ⇒ không biết chủ, coi như hình khác)
+  const owner = ownerEntity ? (read.find((it) => it.entity === ownerEntity)?.id ?? (ownerEntity === "functions" ? sectionFunction?.id : null) ?? null) : null
+  const kind = !read.length || (ownerEntity && !owner) ? "other" : result.data.diagram_kind
   // Phần tử ảnh trùng phần tử đã có (chữ, bảng, ảnh trước) ⇒ chỉ giữ phần mới để bước 1.9 chỉ hỏi phần ảnh thêm vào (FLF-252)
-  return { status: "read", kind: read.length ? result.data.diagram_kind : "other", items: onlyNewFromVision(read, [...known, ...items]), usageId: result.usageId }
+  return { status: "read", kind, items: onlyNewFromVision(read, all), usageId: result.usageId, ...(owner && kind !== "other" ? { owner_id: owner } : {}) }
 }
 
 /** FLF-360: chờ trước lượt đọc lại thứ `round` (0-based) — `IMPORT_AI_RETRY_BACKOFF_MS`, số phần tử = số lượt tối đa. */
@@ -933,14 +953,14 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     // Phase 5: ảnh diagram của section (sau bảng tất định, trước lô chữ) ⇒ Gemini đọc từng ảnh; thực thể đọc được vào
     // known_keys để lô chữ dùng lại khoá. EMF/WMF / file gốc không còn ⇒ `unsupported` (không gọi AI, giữ ảnh gốc).
     const readImage = async (img: BlockLite): Promise<MeteredFailure | null> => {
-      const r = await readDiagramImage(img, { projectId, userId, section_id, heading, sectionBlocks, known, items, alloc, ownProvisional, targets })
+      const r = await readDiagramImage(img, { projectId, userId, section_id, heading, sectionBlocks, known, items, alloc, ownProvisional, targets, sectionFunction })
       if (r.status === "credits") return r.failure
       if (r.status !== "read") {
         diagramImages.push({ block_id: img.block_id, kind: r.status })
         return null
       }
       usageId = r.usageId
-      diagramImages.push({ block_id: img.block_id, kind: r.kind })
+      diagramImages.push({ block_id: img.block_id, kind: r.kind, ...(r.owner_id ? { owner_id: r.owner_id } : {}) })
       items.push(...r.items)
       return null
     }
@@ -1079,13 +1099,16 @@ export const rereadContextOf = (
     known,
     items: itemsOfDraft(draft),
     ownProvisional: provisionalScope(section_id, inputs.provisional),
-    targets: targetsOf(section_id)
+    targets: targetsOf(section_id),
+    sectionFunction: PROVISIONAL_SECTION.test(section_id) ? (inputs.provisional.get(section_id) ?? null) : null
   }
 }
 
 /** Gộp kết quả đọc lại một ảnh vào draft: loại ảnh thật; đọc được ⇒ phần tử mới vào field như lần đọc đầu. */
 export const applyRereadToDraft = (draft: IExtractionDraft & mongoose.Document, block_id: string, r: Exclude<DiagramRead, { status: "credits" }>, ctx: DiagramReadContext): void => {
-  draft.diagram_images = (draft.diagram_images ?? []).map((i) => (i.block_id === block_id ? { block_id, kind: r.status === "read" ? r.kind : r.status } : i))
+  draft.diagram_images = (draft.diagram_images ?? []).map((i) =>
+    i.block_id === block_id ? { block_id, kind: r.status === "read" ? r.kind : r.status, ...(r.status === "read" && r.owner_id ? { owner_id: r.owner_id } : {}) } : i
+  )
   draft.markModified("diagram_images")
   if (r.status !== "read") return
   for (const it of r.items) if (it.id) ctx.alloc.reserve(it.entity, it.id)

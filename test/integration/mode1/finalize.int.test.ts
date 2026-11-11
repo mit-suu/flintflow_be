@@ -348,7 +348,8 @@ describe("finalize — DocVersion 0.1 + baseline imported", () => {
     await assemble(projectId, "Lumen", applied.spine_version)
     const after = await draft()
     expect(JSON.stringify(after.get("fixed:5.1")!.blocks)).toContain("at least 10 characters")
-    expect(header(after.get("fixed:5.1")!.blocks[0])).not.toEqual(["BR ID", "Business Rule"])
+    // FLF-375: bảng dựng lại từ Spine vẫn mang đúng tiêu đề cột của bảng trong file (không đổi sang cột FlintFlow)
+    expect(header(after.get("fixed:5.1")!.blocks[0])).toEqual(["BR ID", "Business Rule"])
     for (const id of ["fixed:1", "fixed:2.1", "fixed:2.2.2", "fixed:4.2.3"]) expect(after.get(id)?.blocks).toEqual(before.get(id)?.blocks)
   })
 

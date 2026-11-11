@@ -28,8 +28,8 @@ describe("section registry", () => {
   })
 
   it("bảng field → section như srs-spine.md §4 (+3 dòng FLF-365: tham khảo, kiểm chứng, phân bổ), key không trùng", () => {
-    expect(FIELD_SECTION_MAP).toHaveLength(41)
-    expect(new Set(FIELD_SECTION_MAP.map((r) => r.key)).size).toBe(41)
+    expect(FIELD_SECTION_MAP).toHaveLength(44)
+    expect(new Set(FIELD_SECTION_MAP.map((r) => r.key)).size).toBe(44)
   })
 
   it("listSections trên fixture: 20 cố định + 6 feature + 89 function, feature/function nằm giữa 3.1.5 và 4.1", () => {

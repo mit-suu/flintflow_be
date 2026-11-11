@@ -35,7 +35,7 @@ const withoutFlows = (s: Spine) =>
 describe("renderers trên fixture 19 màn", () => {
   it("5 hình cố định (class tính một target) + wireframe cho 5 màn signed_off", () => {
     expect(layoutOwners(FIXTURE)).toEqual(["S01", "S05", "S07", "S09", "S10"])
-    expect(allTargets(FIXTURE)).toHaveLength(12)
+    expect(allTargets(FIXTURE)).toHaveLength(14)
   })
 
   it("mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot)", () => {
@@ -262,5 +262,26 @@ describe("tên hệ thống (FLF-177)", () => {
       s.project.name = "Du an giao hang"
     })
     expect(only(blank, "context").source).toContain(">Du an giao hang<")
+  })
+})
+
+describe("FLF-390 context: actor tổng quát không luồng riêng không vẽ", () => {
+  it("User (cha của staff) và Guest (cha của Customer) không có luồng ⇒ bỏ; actor con giữ đủ chiều vào / ra", () => {
+    const actors = [
+      { id: "A01", name: "Guest", kind: "human" as const, description: "" },
+      { id: "A02", name: "Customer", kind: "human" as const, description: "", parent_id: "A01", flows_in: ["orders"], flows_out: ["order status"] },
+      { id: "A03", name: "User", kind: "human" as const, description: "" },
+      { id: "A04", name: "Sales Staff", kind: "human" as const, description: "", parent_id: "A03", flows_in: ["order confirmation"], flows_out: ["order queue"] }
+    ]
+    const out = contextActors(actors)
+    expect(out.map((a) => a.name)).toEqual(["Customer", "Sales Staff"])
+    expect(out[0]).toMatchObject({ inbound: ["Orders"], outbound: ["Order Status"] })
+  })
+  it("actor cha có luồng riêng ⇒ vẫn vẽ", () => {
+    const out = contextActors([
+      { id: "A01", name: "Guest", kind: "human", description: "", flows_in: ["search keywords"] },
+      { id: "A02", name: "Customer", kind: "human", description: "", parent_id: "A01", flows_out: ["invoices"] }
+    ])
+    expect(out.map((a) => a.name)).toEqual(["Guest", "Customer"])
   })
 })
