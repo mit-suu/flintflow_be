@@ -192,7 +192,13 @@ const assignPartIds = (kind: DiagramKind, existing: Diagram[], parts: readonly {
 // ─── render ──────────────────────────────────────────────────────
 
 export interface RenderOptions {
+  /** Nhãn `changes[].by` của lô render (user id, hoặc mã CR khi ghi CR). */
   by: string
+  /**
+   * FLF-387: người gọi model khi `drawLayout` vẽ wireframe (giữ / trừ credit, log AI) — phải là user id thật. Thiếu ⇒ `by`
+   * (đường gọi mà `by` đã là user id). Ghi CR có `by` = mã CR nên phải truyền trường này.
+   */
+  userId?: string
   step_id?: string | null
   /** Compile lại cả hình có `source_hash` không đổi. */
   force?: boolean
@@ -317,7 +323,7 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
       } else {
         const drawn =
           part.kind === "screen_layout" && part.owner_id
-            ? await deps.drawLayout({ projectId, userId: options.by, spine, screenId: part.owner_id }).catch(() => null)
+            ? await deps.drawLayout({ projectId, userId: options.userId ?? options.by, spine, screenId: part.owner_id }).catch(() => null)
             : null
         compiled = await compileWithFix(part.kind, drawn ?? part.source, deps)
         // Salt của model không compile ⇒ vẽ bảng function thay vì để hình lỗi
