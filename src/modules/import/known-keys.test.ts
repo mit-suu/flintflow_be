@@ -26,7 +26,7 @@ const KNOWN: EntityItem[] = [
 
 const ids = (items: EntityItem[]) => items.map((it) => it.id)
 
-describe("scopeKnownKeys — known_keys theo lượt gọi", () => {
+describe("scopeKnownKeys - known_keys theo lượt gọi", () => {
   it("chỉ phần tử được nhắc (mã theo idKey, mention, tên) + loại luôn gửi; phần tử không liên quan bị bỏ", () => {
     const out = scopeKnownKeys(KNOWN, { provisional: [], section: [], text: "The learner registers (uc01) and must follow BR-01.", always: ["actors"] })
     // mã viết lệch dạng ("uc01") vẫn khớp UC-01; BR-02, UC-02, E01, G01 không ai nhắc

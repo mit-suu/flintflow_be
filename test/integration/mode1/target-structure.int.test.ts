@@ -28,7 +28,7 @@ const finalize = async (projectId: string, userId: string, importId: string, bod
   return (await ImportedDocument.findById(importId))!
 }
 
-describe("FLF-336 I-5 — so cấu trúc đích trước v0", () => {
+describe("FLF-336 I-5 - so cấu trúc đích trước v0", () => {
   it("ý định tự do + file thiếu mục ⇒ dừng incomplete (chế độ 4, không v0); gap report + GET /import có bản đồ mục; finalize lại (kể cả complete) ⇒ 409, không bao giờ có 0.1", async () => {
     const { projectId, userId, importId } = await importAtBaselining()
     // Dự án tạo qua picker FLF-335 (field chưa có trong model ở nhánh này ⇒ ghi thẳng collection)

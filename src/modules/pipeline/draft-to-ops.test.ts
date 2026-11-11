@@ -76,7 +76,7 @@ describe("draftOps × 10 ca op T02 (mock provider trả expected_ops)", () => {
     const file = `case-${String(i).padStart(2, "0")}.json`
     const opCase = readJson("op-cases", file) as OpCase
 
-    it(`${file} — ${opCase.name}`, async () => {
+    it(`${file} - ${opCase.name}`, async () => {
       const spine = baseOf(opCase)
       // Fixture T02 ghi id template (`S-5.1`); step registry đòi id vòng đầy đủ `S-5.1@<màn>`
       const stepId = opCase.step_id.startsWith("S-5.") && !opCase.step_id.includes("@") ? `${opCase.step_id}@${spine.progress.screen_cursor ?? "nonscreen"}` : opCase.step_id
@@ -108,7 +108,7 @@ describe("draftOps × 10 ca op T02 (mock provider trả expected_ops)", () => {
   }
 })
 
-describe("draftOps — luật phạm vi (BUG-02)", () => {
+describe("draftOps - luật phạm vi (BUG-02)", () => {
   it("bất biến 6 vẫn chặn khi step thấy function (case-10 chạy ở S-4.1)", async () => {
     const spine = structuredClone(FIXTURE)
     const opCase = readJson("op-cases", "case-10.json") as OpCase
@@ -147,7 +147,7 @@ describe("draftOps — luật phạm vi (BUG-02)", () => {
   })
 })
 
-describe("draftOps — chuẩn hoá op của model (BUG-03, BUG-29)", () => {
+describe("draftOps - chuẩn hoá op của model (BUG-03, BUG-29)", () => {
   it("model không tự để trống màn và không bịa confirmed_at", async () => {
     const spine = structuredClone(FIXTURE)
     const s = spine.screens[0]
@@ -371,7 +371,7 @@ describe("draftOps retry", () => {
   })
 })
 
-describe("draftOps — S-1.1 dựng lại tầm nhìn/mục tiêu từ addendum lõi", () => {
+describe("draftOps - S-1.1 dựng lại tầm nhìn/mục tiêu từ addendum lõi", () => {
   const core = (id: string, topic: string) => ({ id, topic, content: "Nội dung", content_en: "Content", target_section: "fixed:1", captured_at: "2026-09-30T00:00:00.000Z" })
   const briefSpine = (): Spine => ({
     ...structuredClone(FIXTURE),
@@ -406,10 +406,10 @@ describe("draftOps — S-1.1 dựng lại tầm nhìn/mục tiêu từ addendum 
   })
 })
 
-describe("contentGuidance — FLF-370 reference khai ở prompt_references vào prompt", () => {
+describe("contentGuidance - FLF-370 reference khai ở prompt_references vào prompt", () => {
   it("S-3.x (actors-and-usecases) kèm nguyên actor-rules sau thân skill", () => {
     const guidance = contentGuidance({ skill: "actors-and-usecases" })
-    expect(guidance).toContain("## S-3.1 — Actors")
+    expect(guidance).toContain("## S-3.1 - Actors")
     expect(guidance).toContain("## Reference: actor-rules")
     expect(guidance).toContain("university")
     expect(guidance.indexOf("## Reference: actor-rules")).toBeGreaterThan(guidance.indexOf("## Self-check"))

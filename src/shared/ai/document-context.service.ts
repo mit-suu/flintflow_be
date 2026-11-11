@@ -150,7 +150,7 @@ export const buildDocumentContext = async (
   const availableBudget = contextWindow - SAFETY_BUFFER_TOKENS - systemPromptEstimate - chatHistoryTokens - maxOutputTokens
 
   if (availableBudget <= 0) {
-    console.warn(`[DocumentContext] Token budget exhausted (available=${availableBudget}) — skipping document context`)
+    console.warn(`[DocumentContext] Token budget exhausted (available=${availableBudget}) - skipping document context`)
     return empty
   }
 
@@ -196,7 +196,7 @@ export const buildDocumentContext = async (
 
     // Dừng nếu thêm document này sẽ vượt budget
     if (totalTokens + snippetTokens > availableBudget) {
-      console.warn(`[DocumentContext] Budget limit reached at doc "${docName}" — truncating document list`)
+      console.warn(`[DocumentContext] Budget limit reached at doc "${docName}" - truncating document list`)
       break
     }
 

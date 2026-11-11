@@ -14,7 +14,7 @@ validateStartupAssets()
 
 const { env } = await import("./config/env.js")
 if (env.JOB_DRIVER !== "bullmq") {
-  console.error("[worker] JOB_DRIVER khác `bullmq` — job chạy inline trong API, worker không có việc gì. Thoát.")
+  console.error("[worker] JOB_DRIVER khác `bullmq` - job chạy inline trong API, worker không có việc gì. Thoát.")
   process.exit(1)
 }
 

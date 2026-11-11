@@ -46,7 +46,7 @@ const addMember = async (orgId: string, actor: Actor, role: OrgRole) => {
 }
 
 describe("Organization API (Pha 2)", () => {
-  it("UC-07 / Flow 8.2 — tạo org thì người tạo thành Lead đầu tiên", async () => {
+  it("UC-07 / Flow 8.2 - tạo org thì người tạo thành Lead đầu tiên", async () => {
     const org = await createOrg(lead)
 
     expect(org.name).toBe("Org A")
@@ -62,7 +62,7 @@ describe("Organization API (Pha 2)", () => {
     expect(res.status).toBe(400)
   })
 
-  it("UC-10 — danh sách org của tôi kèm vai trò từng nơi", async () => {
+  it("UC-10 - danh sách org của tôi kèm vai trò từng nơi", async () => {
     const a = await createOrg(lead, "Org A")
     const b = await createOrg(lead, "Org B")
     await addMember(b.id, analyst, "viewer")
@@ -83,7 +83,7 @@ describe("Organization API (Pha 2)", () => {
     expect(res.body.error.code).toBe("ORG_NOT_FOUND")
   })
 
-  it("UC-10 / Flow 9.3 — switch trả access token mới mang orgId", async () => {
+  it("UC-10 / Flow 9.3 - switch trả access token mới mang orgId", async () => {
     const org = await createOrg(lead)
     const res = await request(app).post(API + "/" + org.id + "/switch").set(bearer(lead))
 
@@ -105,7 +105,7 @@ describe("Organization API (Pha 2)", () => {
     expect(ok.body.data.name).toBe("Ten moi")
   })
 
-  it("UC-73 / Flow 9.5 — Lead đổi vai trò thành viên và người đó được báo", async () => {
+  it("UC-73 / Flow 9.5 - Lead đổi vai trò thành viên và người đó được báo", async () => {
     const org = await createOrg(lead)
     await addMember(org.id, analyst, "viewer")
 
@@ -126,7 +126,7 @@ describe("Organization API (Pha 2)", () => {
     expect(String(note?.organizationId)).toBe(org.id)
   })
 
-  it("UC-74 / Flow 9.6 — Lead xoá thành viên", async () => {
+  it("UC-74 / Flow 9.6 - Lead xoá thành viên", async () => {
     const org = await createOrg(lead)
     await addMember(org.id, analyst, "analyst")
 
@@ -135,7 +135,7 @@ describe("Organization API (Pha 2)", () => {
     expect(await Membership.countDocuments({ organizationId: org.id, userId: analyst.id })).toBe(0)
   })
 
-  it("UC-72 / Flow 9.7 — thành viên tự rời, Lead được báo", async () => {
+  it("UC-72 / Flow 9.7 - thành viên tự rời, Lead được báo", async () => {
     const org = await createOrg(lead)
     await addMember(org.id, analyst, "analyst")
 
@@ -190,7 +190,7 @@ describe("BR-02 Lead succession (Flow 9.8)", () => {
     expect(await Membership.countDocuments({ organizationId: org.id, role: "lead" })).toBe(1)
   })
 
-  it("hai request hạ hai Lead cuối cùng chạy song song — org vẫn còn Lead", async () => {
+  it("hai request hạ hai Lead cuối cùng chạy song song - org vẫn còn Lead", async () => {
     const org = await createOrg(lead)
     await addMember(org.id, analyst, "lead")
 

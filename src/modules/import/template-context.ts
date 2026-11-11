@@ -164,9 +164,9 @@ export const templatePromptBlock = (
     const examples = passages.filter((p) => p.kind === "example")
     const context = passages.filter((p) => p.kind === "context")
     const unknown = passages.filter((p) => p.kind === "unclassified")
-    if (examples.length) lines.push("Template example (style and structure only — DO NOT copy names, data or sentences):", ...examples.map((p) => `- ${p.text}`))
-    if (context.length) lines.push("Template context (customer background for this project — use as facts, rewrite in the document's voice):", ...context.map((p) => `- ${p.text}`))
-    if (unknown.length) lines.push("Template text (unclassified — use only if it matches this project, otherwise treat as an example):", ...unknown.map((p) => `- ${p.text}`))
+    if (examples.length) lines.push("Template example (style and structure only - DO NOT copy names, data or sentences):", ...examples.map((p) => `- ${p.text}`))
+    if (context.length) lines.push("Template context (customer background for this project - use as facts, rewrite in the document's voice):", ...context.map((p) => `- ${p.text}`))
+    if (unknown.length) lines.push("Template text (unclassified - use only if it matches this project, otherwise treat as an example):", ...unknown.map((p) => `- ${p.text}`))
     if (e.table_columns.length) lines.push("Template table columns (keep these columns and their order):", ...e.table_columns.map((c) => `- ${c.join(" | ")}`))
     if (lines.length > 1) parts.push(lines.join("\n"))
   }

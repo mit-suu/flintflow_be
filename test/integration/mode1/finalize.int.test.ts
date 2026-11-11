@@ -61,7 +61,7 @@ beforeEach(() => {
 
 const DATA_ROOTS = /^(project|actors|roles|use_cases|features|screens|permissions|entities|functions|nfrs|business_rules|common_requirements|messages|other_requirements|glossary)\b/
 
-describe("finalize — Spine", () => {
+describe("finalize - Spine", () => {
   it("bug #12b (QLHS 11/11): file ghi \"ký hiệu chân chim\" ⇒ dự án vẽ ERD theo crow's foot; file không ghi ⇒ giữ mặc định", async () => {
     const stated = await importFinalized({ srs: { overviewParagraphs: ["H7 · ERD (ký hiệu chân chim): vạch ngang = phía 1, chân chim = phía nhiều."] } })
     expect((await Project.findById(stated.projectId).lean())?.erdNotation).toBe("crowsfoot")
@@ -83,7 +83,7 @@ describe("finalize — Spine", () => {
     expect(result.spine_version).toBeGreaterThan(baseVersionBefore)
   })
 
-  it("kế hoạch step (FLF-183): steps[] seed theo template; không cờ stale/awaiting — step accepted có last_seq của lô import", async () => {
+  it("kế hoạch step (FLF-183): steps[] seed theo template; không cờ stale/awaiting - step accepted có last_seq của lô import", async () => {
     const { projectId } = await importFinalized()
     const spine = (await spineRepository.get(projectId))!
     // Step sở hữu section có nội dung ⇒ accepted; đầu mục FPT file không có ⇒ skipped như Brief (FLF-312 — mẫu FPT không bắt buộc)
@@ -105,7 +105,7 @@ describe("finalize — Spine", () => {
     expect(spine.screens.every((s) => s.detail_status !== "pending")).toBe(true)
   })
 
-  it("FLF-343: field độ tin thấp chưa xác nhận KHÔNG bị bỏ — vào Spine kèm đúng một cờ vàng Cần xem / field (mang đường dẫn); mapping tự nhận cũng có cờ", async () => {
+  it("FLF-343: field độ tin thấp chưa xác nhận KHÔNG bị bỏ - vào Spine kèm đúng một cờ vàng Cần xem / field (mang đường dẫn); mapping tự nhận cũng có cờ", async () => {
     const { projectId, importId, userId } = await importAtBaselining({ srs: { numberedOnly: true } })
     const before = (await spineRepository.get(projectId))!
     await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
@@ -125,7 +125,7 @@ describe("finalize — Spine", () => {
   })
 })
 
-describe("finalize — FieldAnchor, block, profile", () => {
+describe("finalize - FieldAnchor, block, profile", () => {
   it("mỗi thực thể (trừ project) có FieldAnchor trỏ vào block có thật của version 0.1", async () => {
     const { projectId } = await importFinalized()
     const spine = (await spineRepository.get(projectId))!
@@ -166,7 +166,7 @@ describe("finalize — FieldAnchor, block, profile", () => {
   })
 })
 
-describe("finalize — DocVersion 0.1 + baseline imported", () => {
+describe("finalize - DocVersion 0.1 + baseline imported", () => {
   it("DocVersion 0.1 kind imported: original_ref = bản gốc + stamp + bookmark; file_ref = bản render từ Spine + stamp (FLF-184); trỏ baseline imported", async () => {
     const { projectId, result, userId } = await importFinalized()
     const versions = await DocVersion.find({ projectId }).lean()
@@ -224,7 +224,7 @@ describe("finalize — DocVersion 0.1 + baseline imported", () => {
     for (const { anchor } of lines) expect(xml).toMatch(new RegExp(`<w:bookmarkStart [^>]*w:name="${anchor}"`))
   })
 
-  it("DoD V2: bản làm việc ghép sẵn theo layout — thứ tự + tiêu đề như file gốc, mục FPT thiếu chèn cạnh nhóm, mục ngoài FPT giữ nguyên văn", async () => {
+  it("DoD V2: bản làm việc ghép sẵn theo layout - thứ tự + tiêu đề như file gốc, mục FPT thiếu chèn cạnh nhóm, mục ngoài FPT giữ nguyên văn", async () => {
     const { projectId } = await importFinalized()
     const doc = await getDocument(projectId, "Lumen", { source: "draft" })
     const layout = (await TemplateProfile.findOne({ projectId }).lean())!.layout.filter((l) => l.heading_text)
@@ -301,7 +301,7 @@ describe("finalize — DocVersion 0.1 + baseline imported", () => {
     expect(table.rows.map((r) => r.map((c) => c.map((x) => x.text).join(""))[2])).toEqual(["Nightly Sync Job"])
   })
 
-  it("FLF-252: mục chức năng in theo file gốc — chưa sửa ⇒ đúng nguyên văn file; change request sửa chức năng ⇒ in từ Spine", async () => {
+  it("FLF-252: mục chức năng in theo file gốc - chưa sửa ⇒ đúng nguyên văn file; change request sửa chức năng ⇒ in từ Spine", async () => {
     const { projectId } = await importFinalized()
     const profile = (await TemplateProfile.findOne({ projectId }).lean())!
     const login = profile.function_originals.find((o) => o.section_id === "function:FR-3.2.2")!
@@ -332,7 +332,7 @@ describe("finalize — DocVersion 0.1 + baseline imported", () => {
     expect(JSON.stringify((await sectionOf()).blocks)).toContain("Learner clicks Sign in")
   })
 
-  it("FLF-366: mục FPT in theo đoạn của file — chưa sửa ⇒ nguyên văn (bảng BR đúng tiêu đề cột của file); CR sửa BR ⇒ chỉ đoạn đó in từ Spine", async () => {
+  it("FLF-366: mục FPT in theo đoạn của file - chưa sửa ⇒ nguyên văn (bảng BR đúng tiêu đề cột của file); CR sửa BR ⇒ chỉ đoạn đó in từ Spine", async () => {
     const { projectId } = await importFinalized({ srs: { extraRules: [["BR-02", "Accounts lock after 5 failed logins."]] } })
     const profile = (await TemplateProfile.findOne({ projectId }).lean())!
     const rules = profile.section_segments.find((r) => r.section_id === "fixed:5.1")!
@@ -387,7 +387,7 @@ describe("finalize — DocVersion 0.1 + baseline imported", () => {
   })
 })
 
-describe("finalize — lỗi", () => {
+describe("finalize - lỗi", () => {
   it("base_version lệch ⇒ 409 SPINE_VERSION_CONFLICT, không tạo gì", async () => {
     const { projectId, userId, importId } = await importAtBaselining()
     await expect(finalizeImport(projectId, userId, { import_id: importId, base_version: 999 })).rejects.toMatchObject({ statusCode: 409 })
@@ -437,7 +437,7 @@ describe("finalize — lỗi", () => {
   })
 })
 
-describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 phase 5)", () => {
+describe("ảnh - giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 phase 5)", () => {
   const PNG = buildPlaceholderPng(12, 7, 0x40)
   const EMF = Buffer.from([0x01, 0x00, 0x00, 0x00, 0x6c, 0x00, 0x00, 0x00, 0, 0, 0, 0])
   const srs = { images: [{ name: "image1.png", data: PNG }, { name: "image2.emf", data: EMF }] }
@@ -633,7 +633,7 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
   })
 
   it("FLF-361: ảnh sơ đồ ở 2.2.1 chưa đọc được (AI quá tải) ⇒ vẫn đánh dấu sơ đồ gốc use case: đoạn 2.2.1 ghi loại sơ đồ, không in PlantUML use case; cờ vàng ảnh vẫn còn", async () => {
-    const { projectId, userId, importId } = await importAtExtracting({ srs: { images: [{ name: "image1.png", data: PNG, caption: "Use Cases — Learner USECASE-IMG" }] } })
+    const { projectId, userId, importId } = await importAtExtracting({ srs: { images: [{ name: "image1.png", data: PNG, caption: "Use Cases - Learner USECASE-IMG" }] } })
     mockOverrides.next = (prompt) => (prompt.includes("# Read Diagram Image") ? new AiActionError(503, "high demand", "GEMINI_OVERLOADED") : fakeMode1(prompt))
     await runExtraction(projectId, userId, importId)
     mockOverrides.next = fakeMode1
@@ -690,7 +690,7 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
   })
 })
 
-describe("finalize — tương thích bản gốc cũ 0.0 (FLF-284)", () => {
+describe("finalize - tương thích bản gốc cũ 0.0 (FLF-284)", () => {
   it("import đang dở có block gắn 0.0 ⇒ finalize vẫn thấy block, tạo bản gốc mới 0.1", async () => {
     const ctx = await importAtBaselining()
     await DocBlock.updateMany({ projectId: ctx.projectId }, { $set: { doc_version: "0.0" } })

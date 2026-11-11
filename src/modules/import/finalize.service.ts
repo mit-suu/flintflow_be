@@ -429,7 +429,7 @@ const unreadImageFindings = (
     return unread.map((i, n) => ({
       rule: "image",
       section_id,
-      message: `${unread.length > 1 ? `Ảnh thứ ${n + 1}` : "Ảnh"} trong mục "${title}" không đọc được thành dữ liệu (${UNREAD_REASON[i.kind] ?? "không phải sơ đồ đọc được"}) — đã giữ ảnh gốc; cần thì cập nhật qua change request`,
+      message: `${unread.length > 1 ? `Ảnh thứ ${n + 1}` : "Ảnh"} trong mục "${title}" không đọc được thành dữ liệu (${UNREAD_REASON[i.kind] ?? "không phải sơ đồ đọc được"}) - đã giữ ảnh gốc; cần thì cập nhật qua change request`,
       block_ids: [i.block_id]
     }))
   })
@@ -489,7 +489,7 @@ export const needsReviewFindings = (
     .map((f) => ({
     rule: "needs_review",
     section_id: realSectionId(f.section_id, provisional),
-    message: `Cần xem: ${pathLabel(f.path, f.entity_name)} — ${f.origin === "vision" ? "đọc từ ảnh sơ đồ" : `độ tin ${percent(f.confidence)}`}; đã đưa vào bản 0.1, sai thì sửa bằng change request`,
+    message: `Cần xem: ${pathLabel(f.path, f.entity_name)} - ${f.origin === "vision" ? "đọc từ ảnh sơ đồ" : `độ tin ${percent(f.confidence)}`}; đã đưa vào bản 0.1, sai thì sửa bằng change request`,
     block_ids: [...f.source_block_ids],
     target_id: f.path
   }))
@@ -544,7 +544,7 @@ export const titleContentFindings = (spine: Spine, headingMap: readonly HeadingM
       {
         rule: "title_content_mismatch",
         section_id: h.content_mismatch.by_content,
-        message: `Tiêu đề "${h.heading_text}" giống mục "${byTitle}" nhưng nội dung là của mục "${byContent}" — đã xếp vào "${byContent}"; sai thì sửa bằng change request`,
+        message: `Tiêu đề "${h.heading_text}" giống mục "${byTitle}" nhưng nội dung là của mục "${byContent}" - đã xếp vào "${byContent}"; sai thì sửa bằng change request`,
         block_ids: [h.block_id],
         target_id: h.block_id
       }

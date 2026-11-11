@@ -221,7 +221,7 @@ export const createCr = async (projectId: string, userId: string, body: CreateCh
   const imported = await latestImport(projectId)
   const version = await latestDocVersion(projectId)
   if (!imported || !hasBaseline(imported.status) || !version) {
-    throw new Mode1Error("CR_REQUIRES_BASELINE", "Chưa có bản gốc của tài liệu — hoàn tất nhập tài liệu trước khi tạo change request")
+    throw new Mode1Error("CR_REQUIRES_BASELINE", "Chưa có bản gốc của tài liệu - hoàn tất nhập tài liệu trước khi tạo change request")
   }
   const counter = await CrCounter.findOneAndUpdate({ projectId }, { $inc: { seq: 1 } }, { upsert: true, returnDocument: "after" })
   const cr = await ChangeRequest.create({
@@ -258,7 +258,7 @@ export const submitCr = async (cr: IChangeRequest, userId: string): Promise<void
   // và người xác nhận là người đứng tên thay đổi)
   if (String(cr.created_by) !== String(userId)) {
     const who = (await userName(String(cr.created_by))) ?? cr.requester
-    throw new ApiError(403, `Đề xuất này đang treo ở ${who} — chỉ người đó xác nhận được (người xác nhận đứng tên thay đổi).`, "CR_NOT_REQUESTER")
+    throw new ApiError(403, `Đề xuất này đang treo ở ${who} - chỉ người đó xác nhận được (người xác nhận đứng tên thay đổi).`, "CR_NOT_REQUESTER")
   }
   const unconcluded = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id, conclusion: null }).distinct("location_id")
   if (unconcluded.length) {
@@ -270,7 +270,7 @@ export const submitCr = async (cr: IChangeRequest, userId: string): Promise<void
   if (!decidable) {
     throw new Mode1Error(
       "CR_NOTHING_TO_APPROVE",
-      "Mọi vị trí đều kết luận \"không liên quan\" — không có thay đổi nào để duyệt. Sửa kết luận ở vị trí cần đổi, hoặc huỷ change request.",
+      "Mọi vị trí đều kết luận \"không liên quan\" - không có thay đổi nào để duyệt. Sửa kết luận ở vị trí cần đổi, hoặc huỷ change request.",
       { location_count: await ChangeLocation.countDocuments({ projectId: cr.projectId, cr_id: cr.cr_id }) }
     )
   }
@@ -287,7 +287,7 @@ export const submitCr = async (cr: IChangeRequest, userId: string): Promise<void
   }
   if (check.same && !(await ChangeLocation.countDocuments({ projectId: cr.projectId, cr_id: cr.cr_id, conclusion: { $in: ["edit", "comment"] } }))) {
     // Mọi chỗ đã được người khác sửa giống hệt đề xuất ⇒ đóng, không ghi
-    cr.closed_reason = "Mọi chỗ của change request đã được người khác sửa giống đề xuất — không còn gì để ghi"
+    cr.closed_reason = "Mọi chỗ của change request đã được người khác sửa giống đề xuất - không còn gì để ghi"
     await transitionCr(cr, "cancelled")
     return
   }

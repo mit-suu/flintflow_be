@@ -873,7 +873,7 @@ export const readDiagramImage = async (img: BlockLite, ctx: DiagramReadContext):
     if (result.reason === "credits") return { status: "credits", failure: result }
     // AI đọc ảnh vẫn lỗi sau khi đã thử lại + model dự phòng (Gemini "high demand"…) ⇒ không dừng cả I-4 vì một ảnh: ảnh
     // gốc luôn được giữ (§4.13). FLF-360: lỗi tạm thời ⇒ `unavailable`, đọc lại sau khi chạy hết các mục; lỗi khác ⇒ thôi
-    console.warn(`[I-4] ${section_id}: đọc ảnh ${img.block_id} lỗi (${result.message}) — giữ ảnh gốc, đi tiếp`)
+    console.warn(`[I-4] ${section_id}: đọc ảnh ${img.block_id} lỗi (${result.message}) - giữ ảnh gốc, đi tiếp`)
     return { status: result.kind === "transient" ? "unavailable" : "failed" }
   }
   const all = [...known, ...items]

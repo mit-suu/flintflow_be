@@ -64,8 +64,8 @@ export const runImpact = async (cr: IChangeRequest): Promise<void> => {
     throw new Mode1Error(
       "CR_NO_LOCATIONS",
       empty.length
-        ? `Không có phần tử nào để sửa: ${emptyTitles} đang trống — sửa mô tả CR cho trỏ vào phần tử cụ thể rồi làm rõ lại`
-        : "Không tìm được phần nào trong tài liệu khớp với change request — sửa mô tả (nêu mã hoặc tên phần tử) rồi làm rõ lại",
+        ? `Không có phần tử nào để sửa: ${emptyTitles} đang trống - sửa mô tả CR cho trỏ vào phần tử cụ thể rồi làm rõ lại`
+        : "Không tìm được phần nào trong tài liệu khớp với change request - sửa mô tả (nêu mã hoặc tên phần tử) rồi làm rõ lại",
       { targets: { entity_paths: [...cr.targets.entity_paths], keywords: [...cr.targets.keywords] }, empty_sections: empty }
     )
   }

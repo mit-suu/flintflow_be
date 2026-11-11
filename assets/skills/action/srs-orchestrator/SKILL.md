@@ -2,7 +2,7 @@
 skill_id: srs-orchestrator
 kind: action
 version: 1.0.0
-description: Global state machine B-0 → S-9 — owns progress, step order and the S-5 screen loop
+description: Global state machine B-0 → S-9 - owns progress, step order and the S-5 screen loop
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 1024
@@ -28,9 +28,9 @@ Deterministic contract for the step runner (T13). **No model call.** It decides 
 
 ## Hierarchy
 
-- **Phase** (`B-0`…`B-2`, `S-1`…`S-9`) — milestone; opens with Intake, closes with the `[A]/[P]/[C]` menu.
-- **Step** (`<phase>.<n>`, S-5 uses `S-5.<n>@<screen_id>` and `S-5.<n>@nonscreen`) — the unit of commit and of progress.
-- **Section** — rendered from Spine fields. A step never writes a section.
+- **Phase** (`B-0`…`B-2`, `S-1`…`S-9`) - milestone; opens with Intake, closes with the `[A]/[P]/[C]` menu.
+- **Step** (`<phase>.<n>`, S-5 uses `S-5.<n>@<screen_id>` and `S-5.<n>@nonscreen`) - the unit of commit and of progress.
+- **Section** - rendered from Spine fields. A step never writes a section.
 
 Full step list: `references/step-table.md` (50 fixed steps + 5 × N). That table is the only source for step ids.
 
@@ -92,5 +92,5 @@ Opening a project whose current step is `in_progress`: revert `changes[first_seq
 ## Refuse
 
 - Advancing from a non-pipeline session.
-- Skipping a fixed phase (S-2…S-8) — the FPT template is a contract.
+- Skipping a fixed phase (S-2…S-8) - the FPT template is a contract.
 - Any percentage threshold for baseline. Gate on named red flags only.

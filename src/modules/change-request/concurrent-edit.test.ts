@@ -72,7 +72,7 @@ describe("classifyAtConfirm", () => {
   })
 })
 
-describe("locationDisplay — không lộ mã nội bộ", () => {
+describe("locationDisplay - không lộ mã nội bộ", () => {
   it("đoạn văn mục riêng ⇒ kind paragraph, nhãn là trích đoạn; trước / sau là câu, không JSON", () => {
     const s = base()
     s.custom_sections.push({ id: "CS11", heading: "", level: 4, source: "import", blocks: [{ kind: "paragraph", text: "UC-05, UC-06, UC-09 có thêm sơ đồ hoạt động.", rows: null, image_ref: null }] } as never)

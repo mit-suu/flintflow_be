@@ -171,7 +171,7 @@ const applySet = (state: WorkState, op: Op): void => {
   // thay nguyên phần tử: giữ nguyên khoá định danh
   const element = target.value
   if (!isRecord(element) || !isRecord(value)) {
-    throw opError("op_not_allowed", op.path, `Op set trên phần tử vô hướng không được hỗ trợ — dùng remove + add: "${op.path}"`)
+    throw opError("op_not_allowed", op.path, `Op set trên phần tử vô hướng không được hỗ trợ - dùng remove + add: "${op.path}"`)
   }
   const next = withElementDefaults(lastKey(op.path), value) as Record<string, unknown>
   for (const key of target.lockedKeys) {
@@ -280,13 +280,13 @@ const applyAdd = (state: WorkState, op: Op): void => {
       throw opError(
         "duplicate_id",
         op.path,
-        `Phần tử id "${value.id}" đã tồn tại trong "${op.path}" — muốn thêm phần tử MỚI thì bỏ trường "id" (hoặc dùng id tạm "$new1") để server cấp id; muốn sửa phần tử đó thì dùng set`
+        `Phần tử id "${value.id}" đã tồn tại trong "${op.path}" - muốn thêm phần tử MỚI thì bỏ trường "id" (hoặc dùng id tạm "$new1") để server cấp id; muốn sửa phần tử đó thì dùng set`
       )
     }
     // Phần tử không có id: một khoá chỉ một phần tử (path chọn phần tử theo `to` / `name`)
     const key = KEYED_ARRAYS.has(lastKey(op.path)) ? elementKeyOf(value) : null
     if (key !== null && target.parent.some((el) => elementKeyOf(el) === key)) {
-      throw opError("duplicate_id", op.path, `Phần tử "${key}" đã có trong "${op.path}" — sửa field của nó bằng set trên path có selector (${lastKey(op.path)}[${key}])`)
+      throw opError("duplicate_id", op.path, `Phần tử "${key}" đã có trong "${op.path}" - sửa field của nó bằng set trên path có selector (${lastKey(op.path)}[${key}])`)
     }
   } else if (target.parent.some((el) => !isRecord(el) && isDeepStrictEqual(el, value))) {
     throw opError("duplicate_id", op.path, `Giá trị "${String(value)}" đã có trong "${op.path}"`)
@@ -492,7 +492,7 @@ export const planTransaction = (spine: Spine, txn: Transaction, options: PlanOpt
  * revert đụng cùng chỗ; đặt lại `before` sẽ ghi đè im lặng thay đổi đó.
  */
 const revertConflict = (change: Change, detail: string): PathError =>
-  opError("revert_conflict", change.path, `"${change.path}" đã bị thay đổi sau đó (${detail}) — cần revert các thay đổi sau trước`)
+  opError("revert_conflict", change.path, `"${change.path}" đã bị thay đổi sau đó (${detail}) - cần revert các thay đổi sau trước`)
 
 /** Áp nghịch đảo một change lên `state`, ghi draft `op: "revert"`. */
 const invertChange = (state: WorkState, change: Change): void => {

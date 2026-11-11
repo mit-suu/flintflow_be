@@ -18,7 +18,7 @@ const OTP_COPY: Record<OtpPurpose, { title: string; heading: string; intro: stri
     title: "Mã đặt lại mật khẩu FlintFlow",
     heading: "Đặt lại mật khẩu",
     intro: "Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản FlintFlow của bạn. Nhập mã dưới đây để tiếp tục:",
-    ignore: "Nếu bạn không yêu cầu đặt lại mật khẩu, hãy bỏ qua email này — mật khẩu của bạn không thay đổi."
+    ignore: "Nếu bạn không yêu cầu đặt lại mật khẩu, hãy bỏ qua email này - mật khẩu của bạn không thay đổi."
   }
 }
 

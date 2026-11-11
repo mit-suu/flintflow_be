@@ -28,7 +28,7 @@ const exampleOps = (skill: string): unknown[] => {
   return (JSON.parse(json) as { ops: unknown[] }).ops
 }
 
-describe("FLF-365 — skill References / Apportioning / Verification", () => {
+describe("FLF-365 - skill References / Apportioning / Verification", () => {
   for (const skill of ["references-list", "requirement-apportioning", "verification-matrix"]) {
     it(`${skill}: nạp được (không stub), ví dụ op áp được lên Spine mẫu`, () => {
       expect(getSkill(skill).template).toContain("## Rules")

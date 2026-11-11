@@ -8,7 +8,7 @@ const pngSize = (png: Buffer) => ({ w: png.readUInt32BE(16), h: png.readUInt32BE
 const sampleScene = (): Scene => {
   const scene = new Scene()
   scene.rect("E", 0, 0, 160, 54, { name: "Analyst" })
-  scene.text("E.name", 80, 32, "Analyst — Quản lý", { owner: "E", bold: true, size: 15 })
+  scene.text("E.name", 80, 32, "Analyst - Quản lý", { owner: "E", bold: true, size: 15 })
   scene.circle("P", 400, 27, 60)
   scene.line("F", [160, 27], [340, 27])
   scene.arrow("F", "classic")

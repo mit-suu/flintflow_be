@@ -15,7 +15,7 @@ const clientInput = { promptVariables: { x: 1 }, documentLanguage: "vi", sourceL
 
 beforeEach(() => vi.clearAllMocks())
 
-describe("ai-action.controller — khối Document language chỉ server bật (FLF-265 D16)", () => {
+describe("ai-action.controller - khối Document language chỉ server bật (FLF-265 D16)", () => {
   it("POST /execute: bỏ documentLanguage / sourceLanguage / documentGlossary client gửi", async () => {
     const next = vi.fn()
     await executeAiActionHandler({ user: { id: USER }, body: { actionType: ActionType.DRAFT, input: clientInput } } as any, res(), next)

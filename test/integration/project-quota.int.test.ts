@@ -17,7 +17,7 @@ const fillTo = async (seeded: SeededFixture, total: number) => {
   for (let i = 2; i <= total; i += 1) expect((await create(seeded, `P${i}`)).status).toBe(201)
 }
 
-describe("UC-16 — giới hạn số dự án theo gói", () => {
+describe("UC-16 - giới hạn số dự án theo gói", () => {
   it("gói Free đủ trần ⇒ 402 PLAN_LIMIT_PROJECTS", async () => {
     const seeded = await seedFixture("minimal")
     await fillTo(seeded, planConfig.free.maxProjects)

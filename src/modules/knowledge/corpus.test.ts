@@ -4,7 +4,7 @@ import path from "node:path"
 import { afterEach, describe, it, expect } from "vitest"
 import { loadCorpus, stepsBySkill } from "./corpus.js"
 
-describe("loadCorpus — skill (assets/skills)", () => {
+describe("loadCorpus - skill (assets/skills)", () => {
   const docs = loadCorpus("assets/skills", { corpus: "skills" })
   const bySource = new Map(docs.map((d) => [d.source, d]))
 
@@ -32,7 +32,7 @@ describe("loadCorpus — skill (assets/skills)", () => {
   })
 })
 
-describe("loadCorpus — corpus khác (chuẩn ngoài, phase 2)", () => {
+describe("loadCorpus - corpus khác (chuẩn ngoài, phase 2)", () => {
   let dir: string
   afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
 

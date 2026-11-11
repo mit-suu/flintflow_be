@@ -25,7 +25,7 @@ export const MAX_TABLE_ROWS = 40
 
 const PRIORITY_LABEL: Readonly<Record<string, string>> = { must: "Must", should: "Should", could: "Could", wont: "Won't" }
 
-const priorityOf = (value: string | null): string => (value === null ? "— chưa xếp" : (PRIORITY_LABEL[value] ?? value))
+const priorityOf = (value: string | null): string => (value === null ? "- chưa xếp" : (PRIORITY_LABEL[value] ?? value))
 
 const clip = <T>(rows: T[]): { rows: T[]; truncated: number } => ({
   rows: rows.slice(0, MAX_TABLE_ROWS),
@@ -62,13 +62,13 @@ const permissionTable = (spine: Spine): GateTable => {
 
   const all = spine.screens.map((screen) => {
     const row = byScreen.get(screen.id) ?? new Map<string, string[]>()
-    return [screen.id, screen.name, ...roles.map((role) => (row.get(role.id) ?? []).sort().join(", ") || "—")]
+    return [screen.id, screen.name, ...roles.map((role) => (row.get(role.id) ?? []).sort().join(", ") || "-")]
   })
   const { rows, truncated } = clip(all)
   return { title_vi: "Ma trận quyền theo màn", columns: ["Mã màn", "Màn hình", ...roles.map((r) => r.name)], rows, truncated }
 }
 
-const DASH = "—"
+const DASH = "-"
 
 /** S-1.1: bản Brief của user (addendum lõi, ngôn ngữ user) cạnh bản tiếng Anh sẽ vào SRS §1 — ghép theo chỉ số. */
 const briefExtractionTable = (spine: Spine): GateTable => {

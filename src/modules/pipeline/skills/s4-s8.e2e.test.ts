@@ -451,11 +451,11 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
     const blocking = final.flags.filter((f) => f.level === "red" && f.resolved_at === null && NON_WAIVABLE.has(f.rule_id))
     expect(blocking, `unwaivable red flags: ${JSON.stringify(blocking)}`).toEqual([])
 
-    console.log("[T18 measured usage — mock, char/4 estimate]", JSON.stringify(measuredUsage))
+    console.log("[T18 measured usage - mock, char/4 estimate]", JSON.stringify(measuredUsage))
     console.log("[T18 draft calls per step]", JSON.stringify(draftCalls.map((c) => ({ step: c.step_id, n: c.function_ids.length }))))
   })
 
-  it("FLF-208 R2: chạy liền cả phase — bước yên lặng tự Accept, dừng ở bước luôn cần người và ở cổng chốt cuối", async () => {
+  it("FLF-208 R2: chạy liền cả phase - bước yên lặng tự Accept, dừng ở bước luôn cần người và ở cổng chốt cuối", async () => {
     seedSpine()
     seedSession()
     const deps: Partial<StepRunnerDeps> = { draftExecutor, elicitExecutor, renderDeps: renderStub() }
@@ -491,7 +491,7 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
     expect(after.steps.find((s) => s.id === second.stopped_at)?.status, "bước đang chờ user chưa accepted").not.toBe("accepted")
   })
 
-  it.each(["balanced", "strict"] as const)("FLF-208 R3 + FLF-220: hỏi gộp đầu giai đoạn ở mọi chế độ duyệt (%s) — chủ đề đã trả lời không bị hỏi lại", async (reviewMode) => {
+  it.each(["balanced", "strict"] as const)("FLF-208 R3 + FLF-220: hỏi gộp đầu giai đoạn ở mọi chế độ duyệt (%s) - chủ đề đã trả lời không bị hỏi lại", async (reviewMode) => {
     seedSpine()
     ;(db.spines[0].project as { review_mode: string }).review_mode = reviewMode
     seedSession()

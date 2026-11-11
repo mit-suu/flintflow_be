@@ -77,7 +77,7 @@ const snapshotCounts = async (projectId: string) => ({
   spine: (await spineRepository.get(projectId))!.spine_version
 })
 
-describe("re-upload — diff theo block", () => {
+describe("re-upload - diff theo block", () => {
   it("so với bản render 0.1 (FLF-186): thêm + xoá + sửa + di chuyển ⇒ đúng từng loại (khớp theo text); không tạo version, không đổi Spine/block", async () => {
     const { projectId, userId, importId } = await importFinalized()
     const before = await snapshotCounts(projectId)
@@ -138,7 +138,7 @@ describe("re-upload — diff theo block", () => {
 
 })
 
-describe("re-upload — từ chối", () => {
+describe("re-upload - từ chối", () => {
   it("stamp của project khác ⇒ IMPORT_STAMP_FOREIGN_PROJECT, không lưu diff/file", async () => {
     const { projectId, userId } = await importFinalized()
     const { pkg } = await editVersion(projectId, () => undefined)

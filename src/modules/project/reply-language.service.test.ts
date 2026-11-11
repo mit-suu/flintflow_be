@@ -56,7 +56,7 @@ describe("replyLanguageForSession (phiên đã nạp)", () => {
   })
 })
 
-describe("typedPartOf — chỉ đoán trên chữ user tự gõ, không trên nhãn thẻ AI viết", () => {
+describe("typedPartOf - chỉ đoán trên chữ user tự gõ, không trên nhãn thẻ AI viết", () => {
   const aiCard = JSON.stringify({
     reply: "Which hospital pilots first?",
     questions: [

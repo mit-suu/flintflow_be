@@ -59,7 +59,7 @@ export const isVectorSearchSupported = async (): Promise<boolean> => {
   } catch (err) {
     if (isVectorSearchUnsupported(err)) {
       support = false
-      console.warn("[C-3] Mongo không có $vectorSearch (không phải Atlas) — tìm vị trí CR theo từ khoá")
+      console.warn("[C-3] Mongo không có $vectorSearch (không phải Atlas) - tìm vị trí CR theo từ khoá")
     } else {
       console.warn(`[C-3] thăm dò $vectorSearch lỗi: ${err instanceof Error ? err.message : String(err)}`)
       return false
@@ -88,7 +88,7 @@ export const vectorCandidates = async (projectId: string, queryText: string, opt
     return rows.filter((r) => r.score >= minScore).sort((a, b) => b.score - a.score)
   } catch (err) {
     if (isVectorSearchUnsupported(err)) support = false
-    console.warn(`[C-3] tìm vị trí theo vector lỗi (project ${projectId}) — dùng từ khoá: ${err instanceof Error ? err.message : String(err)}`)
+    console.warn(`[C-3] tìm vị trí theo vector lỗi (project ${projectId}) - dùng từ khoá: ${err instanceof Error ? err.message : String(err)}`)
     return []
   }
 }

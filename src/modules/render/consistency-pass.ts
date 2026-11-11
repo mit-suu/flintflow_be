@@ -48,7 +48,7 @@ export const missingImageFindings = (diagramIds: readonly string[]): Consistency
   diagramIds.map((id) => ({
     rule: "diagram_png_missing" as const,
     path: `diagrams[id=${id}]`,
-    message: `Diagram ${id} has no PNG yet — a placeholder image is used until it is rendered`
+    message: `Diagram ${id} has no PNG yet - a placeholder image is used until it is rendered`
   }))
 
 /** `true` chỉ khi biến môi trường được đặt đúng chuỗi — mặc định tắt (S-8.4 nhánh LLM là stub). */

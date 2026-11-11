@@ -48,7 +48,7 @@ const INDEX_RE = /^\s*-?\d+\s*$/
 const parseSelector = (raw: string, path: string): Selector => {
   if (raw === "") return { kind: "append" }
   if (INDEX_RE.test(raw)) {
-    throw new PathError("index_selector_forbidden", path, `Không được dùng chỉ số mảng [${raw}] — dùng khoá, ví dụ [id=...]`)
+    throw new PathError("index_selector_forbidden", path, `Không được dùng chỉ số mảng [${raw}] - dùng khoá, ví dụ [id=...]`)
   }
   if (raw.startsWith("=")) {
     const value = raw.slice(1)

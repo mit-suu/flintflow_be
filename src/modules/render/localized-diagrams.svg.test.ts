@@ -36,7 +36,7 @@ const localizedView = (spine: Spine, name: string): Spine => {
   return view
 }
 
-describe("localizeDiagrams — hình svg (FLF-339)", () => {
+describe("localizeDiagrams - hình svg (FLF-339)", () => {
   it("bản dịch vừa hộp ⇒ nguồn svg theo ngôn ngữ, changedDiagramSources mang format svg", () => {
     const spine = canonical()
     const view = localizedView(spine, "Chuyên viên")

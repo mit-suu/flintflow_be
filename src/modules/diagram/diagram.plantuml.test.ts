@@ -14,7 +14,7 @@ const FIXTURE = spineSchema.parse(
 )
 
 const reachable = await isPlantUmlReachable()
-if (!reachable) console.warn("\n[diagram] PlantUML không reachable — test render thật bị SKIP (docker compose up -d plantuml).\n")
+if (!reachable) console.warn("\n[diagram] PlantUML không reachable - test render thật bị SKIP (docker compose up -d plantuml).\n")
 
 describe.skipIf(!reachable)("renderer × PlantUML server thật (DoD T10)", () => {
   // Chỉ kind vẽ bằng PlantUML (`puml`: sequence, wireframe salt). Kind `svg` (FLF-339) dựng SVG trong code — gửi SVG cho

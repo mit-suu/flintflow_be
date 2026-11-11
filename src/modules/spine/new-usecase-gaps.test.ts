@@ -9,7 +9,7 @@ const fn = (id: string, screen_id: string | null) => ({ id, screen_id }) as unkn
 
 const before: Parts = { use_cases: [uc("UC01", "Log In", ["FN001"])], functions: [fn("FN001", "S01")] }
 
-describe("newUseCaseGaps — FLF-298", () => {
+describe("newUseCaseGaps - FLF-298", () => {
   it("use case mới không có chức năng ⇒ no_function; use case cũ không bị xét", () => {
     const after: Parts = { ...before, use_cases: [uc("UC01", "Log In"), uc("UC27", "Send Absence Warning")] }
     expect(newUseCaseGaps(before, after)).toEqual([{ use_case_id: "UC27", name: "Send Absence Warning", kind: "no_function" }])

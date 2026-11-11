@@ -65,7 +65,7 @@ describe("preflightDocx", () => {
 
   it("FLF-331: CV / hoá đơn ⇒ từ chối NOT_SRS kèm lý do, chưa tới bước đọc file; SRS và mẫu FPT trống ⇒ nhận kèm document_kind", async () => {
     const cv = await makeDocx({
-      body: [p("NGUYEN VAN A"), p("Senior Backend Developer"), styled("u1", "Work Experience"), p("2021–2024: FPT Software — billing services."), styled("u1", "Education"), p("FPT University, Software Engineering"), styled("u1", "Skills"), p("Node.js, TypeScript, Docker"), p("Hobbies: football")].join("")
+      body: [p("NGUYEN VAN A"), p("Senior Backend Developer"), styled("u1", "Work Experience"), p("2021–2024: FPT Software - billing services."), styled("u1", "Education"), p("FPT University, Software Engineering"), styled("u1", "Skills"), p("Node.js, TypeScript, Docker"), p("Hobbies: football")].join("")
     })
     const rejected = await preflightDocx(cv)
     expect(rejected.status).toBe("rejected")
@@ -100,7 +100,7 @@ describe("preflightDocx", () => {
     expect((await preflightDocx(await pkg.toBuffer())).stamp).toEqual({ project_id: "p1", version: "0.2", source: "cr_revision", base_version: null, latest_cr: null, kind: null })
   })
 
-  it("FLF-334: đọc stamp mới (release gốc / CR / loại bản) — vẫn accepted như stamp cũ", async () => {
+  it("FLF-334: đọc stamp mới (release gốc / CR / loại bản) - vẫn accepted như stamp cũ", async () => {
     const pkg = await DocxPackage.load(await makeDocx({ body: p("x") }))
     await writeStamp(pkg, { project_id: "p1", version: "1.2", source: "cr_revision", base_version: "1.0", latest_cr: "CR-002", kind: "draft" })
     const res = await preflightDocx(await pkg.toBuffer())

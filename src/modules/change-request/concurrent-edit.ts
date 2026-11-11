@@ -161,7 +161,7 @@ export const checkBeforeWrite = async (cr: { projectId: mongoose.Types.ObjectId;
     if (outcome.kind === "same") {
       same++
       loc.conclusion = "not_related"
-      loc.reason = `Đã được ${who} sửa giống đề xuất của bạn — không ghi lại`
+      loc.reason = `Đã được ${who} sửa giống đề xuất của bạn - không ghi lại`
       loc.conflict = null
     } else if (outcome.kind === "rebased") {
       loc.proposal = outcome.proposal

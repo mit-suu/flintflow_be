@@ -61,10 +61,10 @@ export const VI_LABELS: Readonly<Record<string, string>> = {
   Validations: "Kiểm tra dữ liệu",
   "Business Rules": "Quy tắc nghiệp vụ",
   Screens: "Màn hình",
-  "Figure — System Context Diagram": "Hình — Sơ đồ ngữ cảnh hệ thống",
+  "Figure - System Context Diagram": "Hình - Sơ đồ ngữ cảnh hệ thống",
   "Use Case Diagram": "Sơ đồ use case",
   "Screens Flow Diagram": "Sơ đồ luồng màn hình",
-  "Screens flow —": "Luồng màn hình —",
+  "Screens flow -": "Luồng màn hình -",
   "Entity Relationship Diagram": "Sơ đồ quan hệ thực thể",
   "Class Diagram": "Sơ đồ lớp",
   "State Machine Diagram": "Sơ đồ trạng thái",
@@ -211,17 +211,17 @@ export interface RenderSentences {
 
 export const SENTENCES: Readonly<Record<DocumentLanguage, RenderSentences>> = {
   en: {
-    externalSystem: (name, kind, description) => `${name} (${kind}) — ${description}`,
+    externalSystem: (name, kind, description) => `${name} (${kind}) - ${description}`,
     featureLabel: (number, name) => (number ? `${number} ${name}` : name),
     relation: (verb, target, optional) => `${verb} ${target}${optional ? " (optional)" : ""}`,
-    screenLayoutCaption: (screenName) => `Screen Layout — ${screenName}`,
+    screenLayoutCaption: (screenName) => `Screen Layout - ${screenName}`,
     nfrStatement: (statement, metric, threshold) => `${statement} (${metric}: ${threshold})`
   },
   vi: {
-    externalSystem: (name, kind, description) => `${name} (${kind}) — ${description}`,
+    externalSystem: (name, kind, description) => `${name} (${kind}) - ${description}`,
     featureLabel: (number, name) => (number ? `${number} ${name}` : name),
     relation: (verb, target, optional) => `${verb} ${target}${optional ? ` ${VI_FPT_LABELS["(optional)"]}` : ""}`,
-    screenLayoutCaption: (screenName) => `${VI_LABELS["Screen Layout"]} — ${screenName}`,
+    screenLayoutCaption: (screenName) => `${VI_LABELS["Screen Layout"]} - ${screenName}`,
     nfrStatement: (statement, metric, threshold) => `${statement} (${metric}: ${threshold})`
   }
 }

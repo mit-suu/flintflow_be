@@ -95,7 +95,7 @@ describe("khôi phục trạng thái (BUG-07)", () => {
     expect(active?.questions).toHaveLength(1)
   })
 
-  it("lượt của bước đã rời registry vẫn bị bỏ — B-0.4 không phải đơn vị giai đoạn", async () => {
+  it("lượt của bước đã rời registry vẫn bị bỏ - B-0.4 không phải đơn vị giai đoạn", async () => {
     const run = await acquireRun(PROJECT, "B-0.4")
     await touchRun(PROJECT, "B-0.4", run.run_id, { status: "waiting_answer", questions: [{ id: "Q1", text: "?" }] })
 

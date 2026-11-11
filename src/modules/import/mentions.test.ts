@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest"
 import { normalizeCode, scanCodeMentions, scanMentions, scanNameMentions, type NamedEntity } from "./mentions.js"
 
-describe("scanCodeMentions — mã yêu cầu", () => {
+describe("scanCodeMentions - mã yêu cầu", () => {
   it("bắt mã UC/FR/NFR/BR/SCR, chuẩn hoá, không bắt nhầm trong từ khác", () => {
     expect(scanCodeMentions("See UC-01, UC02 and uc-3; FR-2.1, NFR_04, BR 12, SCR-05.")).toEqual([
       { entity: "use_case", id: "UC-01" },
@@ -58,7 +58,7 @@ describe("scanCodeMentions — mã yêu cầu", () => {
   })
 })
 
-describe("scanNameMentions — tên actor/entity sau I-4", () => {
+describe("scanNameMentions - tên actor/entity sau I-4", () => {
   const names: NamedEntity[] = [
     { entity: "actor", id: "A01", name: "Learner" },
     { entity: "entity", id: "E01", name: "Course" },

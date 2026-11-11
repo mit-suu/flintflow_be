@@ -13,7 +13,7 @@ const submission = (status: BaselineSubmission["status"]): BaselineSubmission =>
   rejection_comment_ids: []
 })
 
-describe("draft-lock — khoá sửa khi đang chờ Lead duyệt (FLF-293)", () => {
+describe("draft-lock - khoá sửa khi đang chờ Lead duyệt (FLF-293)", () => {
   it("chưa nộp hoặc Lead đã từ chối ⇒ sửa được", () => {
     expect(isDraftLocked({ baseline_submission: null })).toBe(false)
     expect(isDraftLocked({ baseline_submission: submission("rejected") })).toBe(false)
