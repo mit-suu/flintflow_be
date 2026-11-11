@@ -1,14 +1,10 @@
 ---
 skill_id: cr-material-image
 kind: action
-version: 1.0.0
+version: 1.0.1
 description: Mode 1 phase 7 — read one image a user attached to a change request as source material and return its text + a short description
-provider: gemini
-aiModel: gemini-3.5-flash
-# Model dự phòng khi model chính báo quá tải (503 high demand) — thử lần lượt; 2.5 đã khoá với key mới
-fallbackModels:
-  - gemini-3.6-flash
-  - gemini-3.5-flash-lite
+provider: anthropic
+aiModel: claude-haiku-5-5
 maxTokens: 4096
 temperature: 0
 reads:
