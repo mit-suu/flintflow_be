@@ -291,6 +291,60 @@ const RELATION_VERB = /^[a-z]+( [a-z]+)*$/
  * Cụm quan hệ "động từ + Thực thể" (bảng ERD FlintFlow xuất ra: "teaches Schedule Slot") ⇒ thực thể có tên dài nhất
  * nằm ở cuối cụm + động từ đứng trước (giữ làm nhãn quan hệ khi là tiếng Anh thường). Không thực thể nào ⇒ `null`.
  */
+const foldName = (s: string): string =>
+  s
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/đ/gi, "d")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+const initialsOf = (name: string): string =>
+  foldName(name)
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => w[0])
+    .join("")
+
+/** Thuộc tính tham chiếu của `child` trỏ tới `parentName` ("mã TK phụ huynh" ⇒ Tài khoản, "mã năm học" ⇒ Năm học). */
+const referencesName = (attributes: unknown, parentName: string): boolean => {
+  if (!Array.isArray(attributes)) return false
+  const full = foldName(parentName)
+  const ini = initialsOf(parentName)
+  return attributes.some((a) => {
+    const name = foldName(typeof a === "string" ? a : String((a as { name?: unknown })?.name ?? ""))
+    const m = /^(?:ma|id|fk)\s+(.+)$/.exec(name)
+    if (!m) return false
+    const rest = m[1]
+    return rest === full || rest.startsWith(`${full} `) || (ini.length >= 2 && (rest === ini || rest.startsWith(`${ini} `)))
+  })
+}
+
+/**
+ * QLHS 11/11 (bug #12): A ghi B là phía nhiều và B cũng ghi A là phía nhiều (bảng một chiều, AI đọc ảnh / đoạn văn ghi chiều
+ * ngược) ⇒ ERD vẽ hai quan hệ ngược nhau. Giữ một chiều: bên có thuộc tính khoá ngoại trỏ tới bên kia là con; không có
+ * bằng chứng ⇒ thực thể đứng trước trong tài liệu là cha. Cặp có bội số "1" (1–1) giữ nguyên.
+ */
+export const dropReciprocalRelations = (
+  entities: { id: string; value: Record<string, unknown>; relations: string[]; cardinality: Record<string, "1" | "N"> }[]
+): void => {
+  const byId = new Map(entities.map((e, i) => [e.id, { e, i }]))
+  for (const a of entities) {
+    for (const bId of [...a.relations]) {
+      const b = byId.get(bId)
+      if (!b || !b.e.relations.includes(a.id) || a.cardinality[bId] === "1" || b.e.cardinality[a.id] === "1") continue
+      const aName = String(a.value.name ?? a.id)
+      const bName = String(b.e.value.name ?? b.e.id)
+      const bIsChild = referencesName(b.e.value.attributes, aName)
+      const aIsChild = referencesName(a.value.attributes, bName)
+      const parentIsA = bIsChild !== aIsChild ? bIsChild : (byId.get(a.id)?.i ?? 0) < b.i
+      const [parent, child] = parentIsA ? [a, b.e] : [b.e, a]
+      child.relations = child.relations.filter((id) => id !== parent.id)
+      if (!parent.relations.includes(child.id)) parent.relations.push(child.id)
+    }
+  }
+}
+
 /** Bội số đầu mục quan hệ: "1–n", "n-1", "1:N", "1..*", "*–1", "1–1". */
 const MULTIPLICITY = /^\s*(1|n|\*|0\.\.1|1\.\.\*|0\.\.\*)\s*[–—\-:]\s*(1|n|\*|0\.\.1|1\.\.\*|0\.\.\*)\s+/i
 const isMany = (m: string): boolean => /n|\*/i.test(m)
@@ -517,6 +571,7 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
     const c = builtEntities.find((b) => b.id === child)
     if (c) c.relations = c.relations.filter((id) => id !== parent)
   }
+  dropReciprocalRelations(builtEntities)
   for (const b of builtEntities) {
     add("entities", { ...b.value, relations: b.relations, ...(Object.keys(b.cardinality).length ? { relation_cardinality: b.cardinality } : {}) })
   }
