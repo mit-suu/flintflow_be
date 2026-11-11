@@ -64,6 +64,8 @@ export const changeRequestDtoSchema = z.object({
   base_doc_version: z.string().min(1),
   result_doc_version: z.string().nullable(),
   created_by: id,
+  /** Tên người tạo CR (BA giữ đề xuất) — BF §3.2 "treo ở người đó". */
+  created_by_name: z.string().nullable().optional(),
   submitted_at: isoDateTime.nullable(),
   decided_by: id.nullable(),
   closed_reason: z.string().nullable(),
@@ -334,3 +336,11 @@ export type ChangeRequestDetail = z.infer<typeof changeRequestDetailSchema>
 export type CreateChangeRequest = z.infer<typeof createChangeRequestSchema>
 export type PatchLocationRequest = z.infer<typeof patchLocationRequestSchema>
 export type GroupDecisionRequest = z.infer<typeof groupDecisionRequestSchema>
+
+/** BF §3.2: `GET …/change-requests/pending-sections` — mục đang có bản sửa chưa xác nhận, ai giữ. */
+export const pendingSectionSchema = z.object({
+  section_id: z.string(),
+  title: z.string(),
+  items: z.array(z.object({ cr_id: crIdSchema, who: z.string() }))
+})
+export type PendingSection = z.infer<typeof pendingSectionSchema>

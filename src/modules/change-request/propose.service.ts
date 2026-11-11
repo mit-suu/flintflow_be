@@ -318,6 +318,8 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
             assumptions: out.conclusion === "not_related" ? [] : out.assumptions
           }
           loc.verify = null
+          // Đề xuất mới chụp nội dung hiện tại ⇒ xung đột cũ (nếu có, từ lần xác nhận trước) không còn ý nghĩa
+          loc.conflict = null
           await loc.save()
         }
         batch = batch.filter((l) => !matched.has(l))
@@ -372,6 +374,13 @@ export const draftInOwnerStep = async (cr: IChangeRequest, userId: string, locat
       await loc.save()
       return
     }
+  }
+  // Câu trả lời cho câu hỏi "Giữ bản nào?" là một vòng làm rõ thật sự: C-4 / C-5 / C-2 về sau đều thấy (không hỏi lại
+  // "ngưỡng gốc là 1 hay 3?" ở bước kiểm nhất quán)
+  if (loc.conflict?.question) {
+    cr.clarifications.push({ round: cr.clarifications.length + 1, questions: [loc.conflict.question.text], answers: [instruction], suggestions: [loc.conflict.question.suggestions] })
+    cr.markModified("clarifications")
+    await cr.save()
   }
   const result = await withMeteredAi<CrProposeOutput>({ projectId: String(cr.projectId), userId, stepId: `C-4:${cr.cr_id}` }, ActionType.CR_PROPOSE, {
     ...crHeader(cr),
