@@ -166,7 +166,8 @@ export const checkBeforeWrite = async (cr: { projectId: mongoose.Types.ObjectId;
         current_text: valueText(elementValue(current, loc.path)),
         proposal_text: loc.proposal.new_text,
         changed_by: who,
-        changed_at: edit?.at ?? null
+        changed_at: edit?.at ?? null,
+        proposed_at: loc.proposal.proposed_at ?? null
       }
     }
     loc.markModified("proposal")

@@ -149,7 +149,11 @@ export const changeLocationDtoSchema = z.object({
       current: z.string(),
       proposal: z.string().nullable(),
       changed_by: z.string(),
-      changed_at: isoDateTime.nullable()
+      changed_at: isoDateTime.nullable(),
+      /** Thời điểm AI soạn đề xuất ① (BF §3.2). */
+      proposed_at: isoDateTime.nullable(),
+      /** BF §3.2: AI hỏi lại khi yêu cầu gốc đụng thẳng phần vừa sửa — trả lời bằng một gợi ý hoặc gõ tự do. */
+      question: z.object({ text: z.string(), suggestions: z.array(z.string()) }).nullable()
     })
     .nullable()
     .optional(),

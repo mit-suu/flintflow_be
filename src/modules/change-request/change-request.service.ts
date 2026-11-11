@@ -168,7 +168,9 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
               current: asText(l.conflict.current_text),
               proposal: l.conflict.proposal_text ? asText(l.conflict.proposal_text) : null,
               changed_by: l.conflict.changed_by,
-              changed_at: toIso(l.conflict.changed_at)
+              changed_at: toIso(l.conflict.changed_at),
+              proposed_at: toIso(l.conflict.proposed_at),
+              question: l.conflict.question ?? null
             }
           : null,
         others_pending: pending.get(l.path) ?? []

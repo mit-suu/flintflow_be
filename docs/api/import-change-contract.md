@@ -711,7 +711,12 @@ Cả hai đều không tự chuyển sang mẫu chuẩn FlintFlow.
   - `display { kind, label, change: edit|add|remove|comment|none, before, after }` — tên chỗ + nội dung trước / sau dạng câu,
     không mã nội bộ (`kind` = tên mảng Spine hoặc `paragraph` · `table` · `image`). FE hiện cái này thay vì ghép path / id.
     `after = null` ở `edit` = đề xuất chưa chạy thử được (không phải xoá).
-  - `conflict { at_proposal, current, proposal, changed_by, changed_at } | null` — so sánh 3 cột khi xác nhận bị người khác sửa.
+  - `conflict { at_proposal, current, proposal, changed_by, changed_at, proposed_at, question } | null` — so sánh 3 cột khi xác
+    nhận bị người khác sửa. `proposed_at` = lúc AI soạn ① (FE in "① Lúc AI soạn (9:00)" / "② Hiện tại (BA2, 9:15)" và tô màu
+    ① so ② / ① so ③ như Track Changes). `question { text, suggestions } | null`: gọi `owner-step-draft` ("AI soạn lại trên nội
+    dung hiện tại") mà yêu cầu gốc **đụng thẳng** phần người kia vừa sửa ⇒ BE **không gọi model**, đặt câu hỏi + 2 gợi ý
+    (BF §3.2 "AI hỏi lại trong chat, không tự chọn"); client gọi lại `owner-step-draft` với `instruction` = câu trả lời ⇒ AI soạn,
+    `conflict` về `null`. `LocationProposal.proposed_at` ghi ở mọi chỗ AI soạn đề xuất.
   - `others_pending [{ cr_id, requester }]` — CR khác chưa đóng có đề xuất ở cùng phần tử.
   - `keyword_score?`, `recall_score?` (`FoundLocation` nội bộ) — C-3 xếp hạng từ khoá bằng BM25, trộn với vector bằng RRF;
     `found_by: keyword` nay giữ cả khi có vector.
