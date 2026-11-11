@@ -97,7 +97,7 @@ export const classifyAtConfirm = (current: Spine, path: string, proposal: Locati
 
 // ─── ai đã sửa ───────────────────────────────────────────────────
 
-const userName = async (id: string): Promise<string | null> => {
+export const userName = async (id: string): Promise<string | null> => {
   if (!mongoose.isValidObjectId(id)) return null
   const user = (await mongoose.connection.db?.collection("users").findOne({ _id: new mongoose.Types.ObjectId(id) }, { projection: { name: 1, email: 1 } })) as
     | { name?: string; email?: string }
@@ -148,7 +148,14 @@ export const checkBeforeWrite = async (cr: { projectId: mongoose.Types.ObjectId;
   for (const loc of locations) {
     if (loc.conclusion !== "edit" || !loc.proposal) continue
     const outcome = classifyAtConfirm(current, loc.path, loc.proposal)
-    if (outcome.kind === "unchanged") continue
+    if (outcome.kind === "unchanged") {
+      // Đề xuất đã soạn lại trên nội dung hiện tại ⇒ xung đột cũ hết hiệu lực
+      if (loc.conflict) {
+        loc.conflict = null
+        await loc.save()
+      }
+      continue
+    }
     const edit = await lastEditOf(cr.projectId, loc.path)
     const who = edit ? await actorName(cr.projectId, edit.by) : "người khác"
     if (outcome.kind === "same") {
@@ -166,7 +173,8 @@ export const checkBeforeWrite = async (cr: { projectId: mongoose.Types.ObjectId;
         current_text: valueText(elementValue(current, loc.path)),
         proposal_text: loc.proposal.new_text,
         changed_by: who,
-        changed_at: edit?.at ?? null
+        changed_at: edit?.at ?? null,
+        proposed_at: loc.proposal.proposed_at ?? null
       }
     }
     loc.markModified("proposal")
@@ -188,9 +196,10 @@ export const othersPending = async (projectId: mongoose.Types.ObjectId, crId: st
     .lean()
   if (!rows.length) return out
   const crs = await ChangeRequest.find({ projectId, cr_id: { $in: [...new Set(rows.map((r) => r.cr_id))] }, status: { $in: OPEN_STATUSES } })
-    .select("cr_id requester")
+    .select("cr_id requester created_by")
     .lean()
-  const open = new Map(crs.map((c) => [c.cr_id, c.requester ?? ""]))
+  // BF §3.2 "BA1 có bản sửa chưa xác nhận": người giữ đề xuất là BA đã tạo CR (không phải người yêu cầu ghi trong nguồn)
+  const open = new Map(await Promise.all(crs.map(async (c) => [c.cr_id, (await userName(String(c.created_by))) ?? c.requester ?? ""] as const)))
   for (const r of rows) {
     if (!open.has(r.cr_id)) continue
     const list = out.get(r.path) ?? []
@@ -198,4 +207,30 @@ export const othersPending = async (projectId: mongoose.Types.ObjectId, crId: st
     out.set(r.path, list)
   }
   return out
+}
+
+/**
+ * BF §3.2: "Người khác mở chỗ đó thấy dòng *BA1 có bản sửa chưa xác nhận ở mục này*" — mục (section) nào đang có đề xuất
+ * của CR chưa đóng, kèm ai giữ. Dùng cho tài liệu đang mở (mọi người), không chỉ trong CR khác.
+ */
+export interface PendingSectionRow {
+  section_id: string
+  items: { cr_id: string; who: string }[]
+}
+
+export const pendingSections = async (projectId: mongoose.Types.ObjectId | string): Promise<PendingSectionRow[]> => {
+  const crs = await ChangeRequest.find({ projectId, status: { $in: OPEN_STATUSES } }).select("cr_id requester created_by").lean()
+  if (!crs.length) return []
+  const who = new Map(await Promise.all(crs.map(async (c) => [c.cr_id, (await userName(String(c.created_by))) ?? c.requester ?? c.cr_id] as const)))
+  const rows = await ChangeLocation.find({ projectId, cr_id: { $in: [...who.keys()] }, conclusion: { $in: ["edit", "comment"] } })
+    .select("cr_id section_id")
+    .lean()
+  const bySection = new Map<string, Map<string, string>>()
+  for (const r of rows) {
+    if (!r.section_id || r.section_id === "misc") continue
+    const m = bySection.get(r.section_id) ?? new Map<string, string>()
+    m.set(r.cr_id, who.get(r.cr_id)!)
+    bySection.set(r.section_id, m)
+  }
+  return [...bySection].map(([section_id, m]) => ({ section_id, items: [...m].map(([cr_id, w]) => ({ cr_id, who: w })) }))
 }

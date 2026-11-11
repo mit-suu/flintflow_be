@@ -165,6 +165,25 @@ describe("erd.renderer — ba ký pháp trên một bộ xếp + đi đường",
     }
   })
 
+  it("FLF-375: tài liệu upload (một hình ERD gốc) mà ký pháp dự án không vừa một hình ⇒ thử ký pháp gọn hơn để giữ một hình", () => {
+    // Đồ thị kiểu TechMart: một thực thể trung tâm bậc cao (Order) + chuỗi ⇒ Chen (mỗi quan hệ một hình thoi) phải cắt,
+    // crowsfoot / idef1x vừa một hình
+    const ids = Array.from({ length: 15 }, (_, i) => `E${String(i + 1).padStart(2, "0")}`)
+    const links = (i: number): number[] => (i === 7 ? [0, 6, 8, 9, 10] : i === 4 ? [3, 8, 12, 13] : i === 8 ? [7, 11, 4] : [(i + 1) % 15])
+    // Thuộc tính như tài liệu thật: Chen vẽ dải ô-van dưới thân ⇒ cạnh dưới không có cổng, thực thể bậc cao hết chỗ
+    const attributes = [{ kind: "key", name: "id" }, { kind: "attribute", name: "name" }, { kind: "attribute", name: "created_at" }]
+    const dense = ids.map((id, i) => ({ ...entity(id, `Entity ${i + 1}`, Object.fromEntries(links(i).map((j, k) => [ids[j], { verb: ["has", "owns", "uses"][k % 3], card: k % 2 ? "N" : "1" }]))), attributes }) as Entity)
+    const chenParts = partitionErd(spineOf(dense), "chen")
+    expect(chenParts.length, "dự án FlintFlow tự soạn: Chen cắt như thường").toBeGreaterThan(1)
+
+    const uploaded: Spine = { ...spineOf(dense), custom_sections: [{ id: "CS01", heading: "", level: 2, source: "import", blocks: [] } as never] }
+    const parts = partitionErd(uploaded, "chen")
+    expect(parts).toHaveLength(1)
+    expect(parts[0].diagram.notation).not.toBe("chen")
+    expect(parts[0].diagram.entities.map((e) => e.id).sort()).toEqual(ids)
+    expect(renderErd(uploaded, null, undefined, { erdNotation: "chen" }).map((p) => p.issues)).toEqual([[]])
+  })
+
   it("thành phần liên thông nhỏ gộp chung một hình khi tổng ≤ giới hạn", () => {
     const pairs = Array.from({ length: 6 }, (_, i) => [entity(`A${i}`, `Parent ${i}`, { [`B${i}`]: {} }), entity(`B${i}`, `Child ${i}`)]).flat()
     expect(partitionErd(spineOf(pairs), "crowsfoot")).toHaveLength(1)

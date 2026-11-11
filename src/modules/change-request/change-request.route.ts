@@ -73,6 +73,19 @@ router.get("/:projectId/change-requests", authMiddleware, crController.listCrs)
 
 /**
  * @swagger
+ * /api/v1/projects/{projectId}/change-requests/pending-sections:
+ *   get:
+ *     tags: [Change request]
+ *     summary: BF §3.2 — mục đang có bản sửa chưa xác nhận (CR chưa đóng), ai giữ
+ *     parameters:
+ *       - $ref: '#/components/parameters/Mode1ProjectId'
+ *     responses:
+ *       200: { description: "`PendingSection[]` — { section_id, title, items[{ cr_id, who }] }" }
+ */
+router.get("/:projectId/change-requests/pending-sections", authMiddleware, crController.listPendingSections)
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/documents/{documentId}/extract:
  *   post:
  *     summary: FLF-338 §3.6.1 — AI rút danh sách yêu cầu từ tài liệu tham khảo (một lượt EXTRACT_REQUIREMENTS, báo credit trước ở FE)
