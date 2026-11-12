@@ -140,6 +140,12 @@ const envSchema = z.object({
   DOC_CONTEXT_TOP_K: z.coerce.number().int().min(1).max(50).default(10),
   /** Như trên cho lượt của step: step cần đủ ngữ cảnh để không hỏi lại điều tài liệu đã nói ⇒ lấy nhiều hơn, vẫn dưới trần token. */
   DOC_CONTEXT_DRAFT_TOP_K: z.coerce.number().int().min(1).max(100).default(30),
+  /**
+   * FLF-405: trần token phần chữ của **một** tài liệu tham khảo mỗi lần tải (business-flow §3.6, theo sức đọc của model
+   * tóm tắt — `summarize_document` đọc cả file trong một lượt). Vượt ⇒ `413 DOCUMENT_TOO_LONG`, chưa lưu / chưa tốn credit.
+   * Trần tổng mỗi dự án theo gói: `plan.config` `maxReferenceTokens`.
+   */
+  REFERENCE_MAX_TOKENS_PER_UPLOAD: z.coerce.number().int().min(1000).default(100000),
 
   // S-9.2 Quality Lens bằng LLM — mặc định TẮT (Phases §9.1, hoãn vì ngân sách).
   REVIEW_LLM_ENABLED: z

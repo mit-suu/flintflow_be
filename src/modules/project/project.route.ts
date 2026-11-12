@@ -156,6 +156,8 @@ router.post("/precheck-docx", authMiddleware, requireRole("lead", "analyst"), re
  *         description: >
  *           Danh sách tài liệu đang dùng (FLF-398: bản đã bị thay không trả); mỗi bản kèm `replaces: [{ id, name, doc_code }]`
  *           — các bản cũ nó đã thay
+ *           FLF-405: `meta { tokens_used, tokens_limit, tokens_per_upload_limit }` — token phần chữ của tài liệu còn hiệu lực
+ *           (bản đã bị thay, parse lỗi không tính) / trần tổng dự án theo gói / trần mỗi lần tải
  *       401:
  *         description: Chưa xác thực
  *   post:
@@ -194,6 +196,13 @@ router.post("/precheck-docx", authMiddleware, requireRole("lead", "analyst"), re
  *         description: File không hợp lệ
  *       404:
  *         description: "`DOCUMENT_NOT_FOUND` — `replace_document_id` không thuộc dự án"
+ *       413:
+ *         description: >
+ *           FLF-405 (business-flow §3.6) — trần một lần tải kiểm ngay sau khi trích chữ; trần dự án kiểm sau bước kiểm trùng /
+ *           hỏi bản mới (để "Thay bản cũ" được trừ token); cả hai trước khi lưu / upload / tóm tắt (không tốn credit):
+ *           `DOCUMENT_TOO_LONG` (vượt trần một lần tải `REFERENCE_MAX_TOKENS_PER_UPLOAD`, `meta { file, token_count, limit }`);
+ *           `PROJECT_DOCUMENT_QUOTA_EXCEEDED` (tổng tài liệu còn hiệu lực + file mới vượt trần dự án theo gói,
+ *           `meta { file, token_count, used, limit }`; "Thay bản cũ" trừ token bản bị thay). Multer quá 10 MB vẫn là `FILE_TOO_LARGE`
  *       409:
  *         description: >
  *           FLF-398 — `DUPLICATE_DOCUMENT` (trùng hệt nội dung, `meta { document, superseded_by? }`, không lưu, không tóm tắt);
