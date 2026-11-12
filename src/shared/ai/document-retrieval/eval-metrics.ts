@@ -4,10 +4,10 @@
  * chứa một trong các chuỗi `expect` (so không phân biệt hoa thường / dấu).
  */
 
-import { searchBm25 } from "./bm25.js"
+import { rankChunks } from "./rank.js"
 import type { ProjectChunkIndex } from "./chunk-index.service.js"
 import { chunkCost, selectChunks } from "./select.js"
-import { foldDiacritics, tokenize } from "./vi-tokenizer.js"
+import { foldDiacritics } from "./vi-tokenizer.js"
 
 export interface RetrievalQuestion {
   /** Câu hỏi như user gõ trong chat. */
@@ -39,10 +39,10 @@ export interface RetrievalReport {
 
 const fold = (s: string): string => foldDiacritics(s.normalize("NFC")).toLowerCase()
 
-export const evaluateRetrieval = (index: ProjectChunkIndex, questions: readonly RetrievalQuestion[], options: { topK: number; maxTokens: number; candidates?: number }): RetrievalReport => {
+export const evaluateRetrieval = (index: ProjectChunkIndex, questions: readonly RetrievalQuestion[], options: { topK: number; maxTokens: number; candidates?: number; codeWeight?: number }): RetrievalReport => {
   const textById = new Map(index.chunks.map((c) => [c.id, fold(`${c.titles.join("\n")}\n${c.paragraphs.join("\n")}`)]))
   const results: QuestionResult[] = questions.map((question) => {
-    const ranked = searchBm25(index.bm25, tokenize(question.q), options.candidates ?? 200)
+    const ranked = rankChunks(index.bm25, question.q, options.candidates ?? 200, options.codeWeight)
     const selected = selectChunks({ chunks: index.chunks, ranked, maxTokens: options.maxTokens, topK: options.topK })
     const wanted = question.expect.map(fold)
     const matches = (id: string): boolean => wanted.some((w) => textById.get(id)!.includes(w))

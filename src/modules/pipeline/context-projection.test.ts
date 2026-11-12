@@ -220,7 +220,9 @@ describe("buildStepContext", () => {
       actionType: "draft",
       stepId: "S-3.1",
       query: expect.stringContaining("Students and teachers"),
-      sectionTitles: expect.arrayContaining(["Actors", "Tác nhân"])
+      sectionTitles: expect.arrayContaining(["Actors", "Tác nhân"]),
+      broad: false,
+      focus: "Students and teachers"
     })
   })
 

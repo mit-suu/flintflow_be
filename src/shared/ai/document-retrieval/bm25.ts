@@ -33,8 +33,16 @@ export const buildBm25 = (docs: readonly { id: string; text: string }[], tokeniz
   return { ids: docs.map((d) => d.id), docTerms, docLen, avgLen: docLen.reduce((sum, n) => sum + n, 0) / Math.max(1, docs.length), df }
 }
 
+export interface Bm25SearchOptions {
+  k1?: number
+  b?: number
+  /** Hệ số nhân điểm của từng token câu hỏi (mặc định 1) — vd mã `uc-5` nặng hơn từ thường. */
+  weights?: ReadonlyMap<string, number>
+}
+
 /** Top `limit` theo điểm BM25 (k1 = 1,2; b = 0,75). Điểm 0 (không trùng token nào) bị bỏ. */
-export const searchBm25 = (index: Bm25Index, queryTokens: readonly string[], limit: number, k1 = 1.2, b = 0.75): Bm25Hit[] => {
+export const searchBm25 = (index: Bm25Index, queryTokens: readonly string[], limit: number, options: Bm25SearchOptions = {}): Bm25Hit[] => {
+  const { k1 = 1.2, b = 0.75, weights } = options
   const terms = [...new Set(queryTokens)]
   const n = index.ids.length
   const hits: (Bm25Hit & { order: number })[] = []
@@ -45,7 +53,7 @@ export const searchBm25 = (index: Bm25Index, queryTokens: readonly string[], lim
       if (!f) continue
       const df = index.df.get(t) ?? 0
       const idf = Math.log(1 + (n - df + 0.5) / (df + 0.5))
-      score += (idf * f * (k1 + 1)) / (f + k1 * (1 - b + (b * index.docLen[i]!) / (index.avgLen || 1)))
+      score += ((weights?.get(t) ?? 1) * idf * f * (k1 + 1)) / (f + k1 * (1 - b + (b * index.docLen[i]!) / (index.avgLen || 1)))
     }
     if (score > 0) hits.push({ id: index.ids[i]!, score, order: i })
   })

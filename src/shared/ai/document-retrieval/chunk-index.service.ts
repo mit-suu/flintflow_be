@@ -15,6 +15,7 @@ import { splitParagraphs } from "../document-paragraphs.js"
 import { buildBm25, type Bm25Index } from "./bm25.js"
 import { CHUNKER_VERSION, chunkParagraphs, type DocumentChunk, type OutlineEntry } from "./chunker.js"
 import { tokenize } from "./vi-tokenizer.js"
+import { codeInventory, type CodeFamily } from "./code-inventory.js"
 
 export interface IndexedDocumentRef {
   id: string
@@ -34,6 +35,8 @@ export interface ProjectChunkIndex {
   /** Theo thứ tự tài liệu (thứ tự `docs` truyền vào), rồi thứ tự chunk. */
   chunks: IndexedChunk[]
   bm25: Bm25Index
+  /** Danh mục mã của từng tài liệu (Code đếm trên toàn văn — mọi chunk), theo thứ tự `docs`. */
+  inventory: { ref: IndexedDocumentRef; families: CodeFamily[] }[]
 }
 
 /** Chữ để chấm BM25: tiêu đề mục (kể cả mục cha) + thân chunk. */
@@ -44,7 +47,8 @@ export const buildProjectIndex = (docs: readonly { ref: IndexedDocumentRef; chun
   const chunks: IndexedChunk[] = docs.flatMap(({ ref, chunks: list }) =>
     list.map((c) => ({ ...c, id: `${ref.id}:${c.ordinal}`, documentId: ref.id, docCode: ref.docCode, docName: ref.name }))
   )
-  return { chunks, bm25: buildBm25(chunks.map((c) => ({ id: c.id, text: searchText(c) })), tokenize) }
+  const inventory = docs.map(({ ref, chunks: list }) => ({ ref, families: codeInventory(list.flatMap((c) => c.paragraphs)) }))
+  return { chunks, bm25: buildBm25(chunks.map((c) => ({ id: c.id, text: searchText(c) })), tokenize), inventory }
 }
 
 // ─── cache ───────────────────────────────────────────────────────

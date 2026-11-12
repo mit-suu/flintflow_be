@@ -21,13 +21,13 @@ import { ProjectDocument } from "../../modules/project/project-document.model.js
 import { DOCUMENTS_READ, getStep } from "../../modules/pipeline/step-registry.js"
 import { ApiError } from "../utils/api-error.js"
 import { assignDocCodes } from "../../modules/project/document-code.service.js"
-import { formatCodedParagraphs, paragraphId } from "./document-paragraphs.js"
-import { searchBm25 } from "./document-retrieval/bm25.js"
+import { formatCodedParagraphs, paragraphId, splitParagraphs } from "./document-paragraphs.js"
 import { estimateDocTokens } from "./document-retrieval/chunker.js"
 import { loadProjectIndex, type IndexedChunk } from "./document-retrieval/chunk-index.service.js"
 import { isGlobalQuestion } from "./document-retrieval/query.js"
+import { rankChunks } from "./document-retrieval/rank.js"
+import { codeInventory, formatInventory } from "./document-retrieval/code-inventory.js"
 import { headChunks, pinnedChunkIds, selectChunks } from "./document-retrieval/select.js"
-import { tokenize } from "./document-retrieval/vi-tokenizer.js"
 
 // ─── Action-level: các action ngoài pipeline ────────────────────────────────
 
@@ -92,6 +92,14 @@ export interface DocumentContextRequest {
   query?: string
   /** Tiêu đề (mọi tên gọi) của các section step nuôi — chunk có tiêu đề khớp được lấy trước, không qua tìm kiếm. */
   sectionTitles?: readonly string[]
+  /** Step đọc rộng cả tài liệu (Brief, S-1) ⇒ kèm tóm tắt tài liệu nếu có. */
+  broad?: boolean
+  /**
+   * Tin nhắn mới nhất của user khi lượt gọi là lượt của step: tìm đoạn RIÊNG và lấy trước (tối đa `DOC_CONTEXT_TOP_K`), rồi
+   * mới lấp bằng `query` chung của step — trong câu hỏi chung dài (nhãn + từ khoá field) câu của user bị loãng (demo
+   * 2026-11-12: hỏi cổng thanh toán chỉ đổi 1/32 đoạn, đoạn "VietQR / SePay checkout" không được gửi).
+   */
+  focus?: string
 }
 
 export interface DocumentContextResult {
@@ -138,16 +146,24 @@ const buildFull = async (docs: readonly DocumentRow[]): Promise<{ text: string; 
     .lean()
   const textById = new Map(texts.map((t) => [t._id.toString(), t.extractedText ?? ""]))
   const parts: string[] = []
+  const inventory: { label: string; families: ReturnType<typeof codeInventory> }[] = []
   for (const doc of docs) {
     const text = textById.get(doc._id.toString())
     if (!text) continue
+    inventory.push({ label: docLabel(doc.docCode ?? null, nameOf(doc)), families: codeInventory(splitParagraphs(text)) })
     // FLF-292: mỗi đoạn mang mã `D<n>-P<m>` để model trích làm nguồn
     const content = doc.docCode ? formatCodedParagraphs(doc.docCode, text) : text
     const codeLabel = doc.docCode ? ` | mã tài liệu: D${doc.docCode}` : ""
     parts.push(`[Nguồn: ${nameOf(doc)} | documentId: ${doc._id.toString()}${codeLabel}]\n${content}`)
   }
-  return parts.length ? { text: wrap(parts), documentsUsed: parts.length } : null
+  if (!parts.length) return null
+  // FLF-393: danh mục mã Code đếm — câu hỏi "bao nhiêu / liệt kê" trả lời chính xác, không để model tự đếm
+  const inventoryText = formatInventory(inventory)
+  return { text: wrap(inventoryText ? [inventoryText, ...parts] : parts), documentsUsed: parts.length }
 }
+
+/** `D1 (srs.docx)` — nhãn tài liệu trong danh mục mã. */
+const docLabel = (docCode: number | null, name: string): string => (docCode ? `D${docCode} (${name})` : name)
 
 const renderChunk = (chunk: IndexedChunk): string => {
   const section = chunk.heading_path.length ? ` | mục: ${chunk.heading_path.join(" > ")}` : ""
@@ -211,28 +227,35 @@ export const buildDocumentContext = async (request: DocumentContextRequest): Pro
   const fullTokens = approx ?? index.chunks.reduce((sum, c) => sum + c.tokens, 0)
 
   const query = request.query?.trim() ?? ""
-  const ranked = query ? searchBm25(index.bm25, tokenize(query), BM25_CANDIDATES) : []
+  const focusRanked = request.focus?.trim() ? rankChunks(index.bm25, request.focus, env.DOC_CONTEXT_TOP_K) : []
+  const focusIds = new Set(focusRanked.map((h) => h.id))
+  const generalRanked = query ? rankChunks(index.bm25, query, BM25_CANDIDATES) : []
+  const ranked = [...focusRanked, ...generalRanked.filter((h) => !focusIds.has(h.id))]
   const pinnedIds = pinnedChunkIds(index.chunks, request.sectionTitles ?? [])
 
   // Tóm tắt đi kèm khi tìm đoạn không đủ trả lời: câu hỏi toàn cục, không khớp gì, hoặc step không nuôi mục nào của
   // tài liệu (Brief, S-1 đọc rộng) — BM25 không trả lời được câu hỏi về cả tài liệu.
-  const wantSummary = (!isStepCall && isGlobalQuestion(query)) || (ranked.length === 0 && pinnedIds.length === 0) || (isStepCall && pinnedIds.length === 0)
-  const header = estimateDocTokens(`${HEADER}\n${EXCERPT_NOTE}\n${FOOTER}`) + 8
+  const wantSummary =
+    (!isStepCall && isGlobalQuestion(query)) || (ranked.length === 0 && pinnedIds.length === 0) || (isStepCall && (request.broad === true || pinnedIds.length === 0))
+  // FLF-393: danh mục mã Code đếm trên toàn văn — luôn kèm, vì trích đoạn không đủ để đếm (business-flow §3.4: Code đếm)
+  const inventoryText = formatInventory(index.inventory.map((d) => ({ label: docLabel(d.ref.docCode, d.ref.name), families: d.families })))
+  const header = estimateDocTokens(`${HEADER}\n${EXCERPT_NOTE}\n${FOOTER}\n${inventoryText}`) + 8
   const summaries = wantSummary ? buildSummaries(documents, Math.floor((budget - header) * SUMMARY_BUDGET_SHARE)) : []
   const summaryTokens = summaries.reduce((sum, s) => sum + estimateDocTokens(s) + 1, 0)
   const chunkBudget = Math.max(0, budget - header - summaryTokens)
 
-  let selected = selectChunks({ chunks: index.chunks, ranked, pinnedIds, maxTokens: chunkBudget, topK: env.DOC_CONTEXT_TOP_K })
+  let selected = selectChunks({ chunks: index.chunks, ranked, pinnedIds, maxTokens: chunkBudget, topK: (isStepCall ? env.DOC_CONTEXT_DRAFT_TOP_K : env.DOC_CONTEXT_TOP_K) + focusRanked.length })
   // Không tìm được gì và không có tóm tắt ⇒ phần đầu tài liệu, để context không rỗng
   if (!selected.length && !summaries.length) selected = headChunks(index.chunks, chunkBudget)
   if (!selected.length && !summaries.length) return { ...EMPTY, fullTokens }
 
   // Trần là cứng: token chunk là ước lượng lúc cắt (nhãn mục dài có thể dôi ra) ⇒ đo lại chữ thật, dôi thì bớt chunk cuối
-  let contextText = wrap([...summaries, ...selected.map(renderChunk)], EXCERPT_NOTE)
+  const lead = inventoryText ? [inventoryText, ...summaries] : summaries
+  let contextText = wrap([...lead, ...selected.map(renderChunk)], EXCERPT_NOTE)
   let tokenCount = estimateDocTokens(contextText)
   while (tokenCount > budget && selected.length > 0) {
     selected = selected.slice(0, -1)
-    contextText = wrap([...summaries, ...selected.map(renderChunk)], EXCERPT_NOTE)
+    contextText = wrap([...lead, ...selected.map(renderChunk)], EXCERPT_NOTE)
     tokenCount = estimateDocTokens(contextText)
   }
   const documentsUsed = new Set(selected.map((c) => c.documentId)).size || summaries.length
