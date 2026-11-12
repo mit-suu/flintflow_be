@@ -234,6 +234,32 @@ router.post("/:id/import/extract", authMiddleware, importController.extract)
 
 /**
  * @swagger
+ * /api/v1/projects/{id}/import/drop-text:
+ *   patch:
+ *     summary: (FLF-412) Màn đọc khung — chọn Bỏ chữ theo vùng heading trước khi bấm Bắt đầu; vùng bỏ chữ chỉ còn khung
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [import_id, keys]
+ *             properties:
+ *               import_id: { type: string }
+ *               keys: { type: array, items: { type: string, example: B0012 }, description: "Cả tập khoá vùng (`text_sections[].key` của GET /import) chọn Bỏ chữ; khoá lạ bị bỏ qua" }
+ *     responses:
+ *       200: { description: "`{ import }` — đọc lại GET /import để có `structure_preview`, `text_sections`, `credit_estimate` mới" }
+ *       409: { description: IMPORT_INVALID_STATE (đã bấm Bắt đầu) }
+ */
+router.patch("/:id/import/drop-text", authMiddleware, importController.dropText)
+
+/**
+ * @swagger
  * /api/v1/projects/{id}/import/fields:
  *   patch:
  *     summary: (Bản ghi cũ ở fields_review) xác nhận / sửa / bỏ field độ tin thấp (UC-22, nút 1.9)

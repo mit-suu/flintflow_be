@@ -119,7 +119,7 @@ export const buildV1Source = (opts: SourceOptions = {}): Promise<Buffer> =>
   })
 
 /** Mẫu v2: heading đánh lại, thêm mục New, bảng Overview thêm cột Owner, Record of Changes thêm cột Author, lề hẹp hơn, settings có attachedTemplate UNC. */
-export const buildV2Template = (opts: { orphanNumId?: boolean } = {}): Promise<Buffer> =>
+export const buildV2Template = (opts: { orphanNumId?: boolean; leftoverInNew?: boolean } = {}): Promise<Buffer> =>
   makeDocx({
     styles: STYLES_V2,
     sectPr: sect(2000),
@@ -133,6 +133,7 @@ export const buildV2Template = (opts: { orphanNumId?: boolean } = {}): Promise<B
       (opts.orphanNumId ? p("Guidance edited: write here", `<w:numPr><w:ilvl w:val="0"/><w:numId w:val="99"/></w:numPr>`) : p("Guidance edited: write here")) +
       h1("4. Brand New", "Heading1") +
       p("Guidance new: describe the new section") +
+      (opts.leftoverInNew ? p("Leftover text of an old project") + tbl([["Name", "Value"], ["Old row", "Old value"]], 7900, "TableGrid") : "") +
       h1("Record of Changes", "Heading1") +
       tbl([["Version", "Date", "Author", "Description"], ["x", "x", "x", "x"]], 7900, "TableGrid"),
     extraDocRels: rel("rId30", "settings", "settings.xml"),

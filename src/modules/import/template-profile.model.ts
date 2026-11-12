@@ -139,6 +139,8 @@ export interface ITemplateProfile extends Document {
    * import trước màn đọc khung không có ⇒ null.
    */
   structure_preview?: StructurePreview | null
+  /** FLF-412: khoá vùng heading (`block_id`) người dùng chọn Bỏ chữ ở màn đọc khung — áp vào file lúc bấm Bắt đầu rồi xoá. */
+  drop_text?: string[] | null
   /**
    * Chế độ 3 từ SRS đã viết: Spine lúc vào Luồng 2 — mốc so "nguyên vẹn" của bản in (mục chưa đổi so với mốc in nguyên văn
    * file gốc). Không có bản gốc 0.1 nên không dùng Spine lúc import. Khung mẫu / dự án khác ⇒ null.
@@ -236,6 +238,7 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
     target_structure: { type: Schema.Types.Mixed, default: null },
     template_context: { type: Schema.Types.Mixed, default: null },
     structure_preview: { type: Schema.Types.Mixed, default: null },
+    drop_text: { type: [String], default: null },
     flow2_entry_spine: { type: Schema.Types.Mixed, default: null },
     flow2_entry_at: { type: Date, default: null },
     migrated_base_at: { type: Date, default: null },

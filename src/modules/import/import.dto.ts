@@ -264,6 +264,9 @@ export const mappingPatchRequestSchema = z
  */
 export const extractRequestSchema = z.strictObject({ import_id: id, confirm_latest: z.boolean().optional() })
 
+/** FLF-412 `PATCH /projects/:id/import/drop-text`: cả tập vùng (khoá `block_id` của heading) người dùng chọn Bỏ chữ. */
+export const dropTextRequestSchema = z.strictObject({ import_id: id, keys: z.array(z.string().min(1).max(32)).max(500) })
+
 /** `PATCH /projects/:id/import/fields` (UC-22, nút 1.9). */
 export const fieldsPatchRequestSchema = z
   .strictObject({
@@ -365,6 +368,8 @@ export const getImportResponseSchema = z.object({
   target_structure: targetStructureSchema.nullable().optional(),
   /** Màn đọc khung: cấu trúc đích sơ bộ lúc upload (trước Bắt đầu); null khi chưa upload / import trước màn đọc khung. */
   structure_preview: structurePreviewSchema.nullable().optional(),
+  /** FLF-412: vùng heading có chữ + lựa chọn Bỏ chữ — chỉ có trước Bắt đầu (`extracting` chưa đọc lượt nào); khác ⇒ null. */
+  text_sections: z.array(z.object({ key: z.string(), title: z.string(), level: z.number().int(), dropped: z.boolean() })).nullable().optional(),
   /**
    * FLF-343: ước tính cả lượt một mạch (I-4 còn phải chạy + kiểm tra AI 1.11) — chỉ có khi import ở `mapping_review` hoặc `extracting` mà job chưa chạy / đang dừng; trạng
    * thái khác hoặc đang chạy ⇒ `null` / không có. Tính bằng chính kế hoạch lượt của lượt chạy (lô chữ sau phần đọc tất định +
