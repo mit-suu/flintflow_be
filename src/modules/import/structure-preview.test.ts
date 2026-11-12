@@ -212,4 +212,17 @@ describe("FLF-411 - màn đọc khung trên file thật (parse + khớp mẫu, k
     expect((await previewOfFixture("company-template-srs-filled")).summary).toMatchObject({ kind: "written", present: 20, missing: 0 })
     expect((await previewOfFixture("fixed-template-fu-it-srs-01")).summary).toMatchObject({ kind: "template", present: 0 })
   }, 30000)
+
+  it("U3-2…U3-4: SRS có sẵn + tick Bổ sung (tự do) ⇒ tính năng / chức năng của file là mục có / thiếu (không gộp thành một mục riêng); không phần nối không tiêu đề, không heading bao chương", async () => {
+    const preview = await previewOfFixture("techmart-srs-fpt", "free")
+    const functions = preview.sections.filter((s) => s.section_id.startsWith("function:"))
+    // UC-01…UC-20 — mỗi chức năng một mục
+    expect(functions).toHaveLength(20)
+    expect(functions.every((s) => s.status === "present")).toBe(true)
+    expect(preview.sections.some((s) => s.section_id.startsWith("custom:") && /^custom:/.test(s.title))).toBe(false)
+    expect(preview.sections.map((s) => s.title)).not.toContain("II. Software Requirement Specification")
+    expect(preview.sections.find((s) => /Security/.test(s.title))?.status).toBe("present")
+    // Giữ khung (không tick): như cũ, đủ khung
+    expect((await previewOfFixture("techmart-srs-fpt", "fixed")).summary).toMatchObject({ kind: "written", missing: 0 })
+  }, 30000)
 })

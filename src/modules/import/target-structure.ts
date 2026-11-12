@@ -140,11 +140,31 @@ export const compareTargetStructure = (
       const present = hasContent(spine, id, withContent)
       sections.push({ section_id: id, title: titleOf(id, layout), status: present ? "present" : "missing", owner_steps: stepsOf(id, spine) })
     }
-    const custom = new Set<string>()
-    for (const entry of layout) {
-      if (!entry.section_id.startsWith("custom:") || custom.has(entry.section_id)) continue
-      custom.add(entry.section_id)
-      sections.push({ section_id: entry.section_id, title: titleOf(entry.section_id, layout), status: "out_of_scope", owner_steps: [] })
+    // FLF-411 (U3-2…U3-4): mục của file ngoài mẫu FPT. Tính năng / chức năng của file (3.2 Account › 3.2.1 Register…) là phần
+    // Functional Requirements của mẫu FPT ⇒ có / thiếu như mục FPT, không gộp thành một mục riêng. Phần nối (mục riêng tiêu đề
+    // rỗng) và heading bao chỉ chứa mục con ("II. Software Requirement Specification") không phải mục — không "Ngoài phạm vi"
+    const seen = new Set<string>()
+    const wrappers = templateWrapperIds(layout)
+    const ordered = [...layout].sort((a, b) => a.order - b.order)
+    for (const [i, entry] of ordered.entries()) {
+      const id = entry.section_id
+      if (seen.has(id)) continue
+      seen.add(id)
+      if (/^(feature|function):/.test(id)) {
+        if (wrappers.has(id) && !hasContent(spine, id, withContent)) continue
+        const present = hasContent(spine, id, withContent) || childHasContent(ordered, i, spine, withContent)
+        sections.push({ section_id: id, title: titleOf(id, layout), status: present ? "present" : "missing", owner_steps: templateSectionOwnerSteps(id, spine) })
+        continue
+      }
+      // Mục FPT của file ngoài danh sách tối thiểu (vd 4.2.4 Security) có nội dung ⇒ vẫn hiện "có", không biến mất khỏi bản đồ
+      if (!id.startsWith("custom:") && !id.startsWith("group:") && !sections.some((s) => s.section_id === id)) {
+        if (!DERIVED_SECTIONS.has(id) && hasContent(spine, id, withContent)) sections.push({ section_id: id, title: titleOf(id, layout), status: "present", owner_steps: stepsOf(id, spine) })
+        continue
+      }
+      if (!id.startsWith("custom:") || !entry.heading_text.trim()) continue
+      if (isNonDraftHeading(id, entry.heading_text)) continue
+      if (wrappers.has(id) && !withContent.has(id)) continue
+      sections.push({ section_id: id, title: titleOf(id, layout), status: "out_of_scope", owner_steps: [] })
     }
   }
   const missing = sections.filter((s) => s.status === "missing").map((s) => s.section_id)
