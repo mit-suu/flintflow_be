@@ -13,7 +13,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../../fixtures/spine-fixture-19-screens.json"), "utf8")))
 const entityOf = (spine: Spine, id: string): Entity => spine.entities.find((e) => e.id === id)!
 
-describe("transitionLabel — event [guard] / action", () => {
+describe("transitionLabel - event [guard] / action", () => {
   it("ghép đủ ba phần; guard / action trống thì bỏ cả ký hiệu", () => {
     expect(transitionLabel({ event: "submit", guard: "all fields valid", action: "notify reviewer" })).toBe("submit [all fields valid] / notify reviewer")
     expect(transitionLabel({ event: "submit", guard: "all fields valid" })).toBe("submit [all fields valid]")
@@ -35,7 +35,7 @@ describe("stateMachineInput", () => {
   })
 })
 
-describe("renderStateMachine — mỗi entity có vòng đời một hình", () => {
+describe("renderStateMachine - mỗi entity có vòng đời một hình", () => {
   it("một hình cho mỗi entity có states (theo id); chủ = entity, section = fixed:3.1.5; tiêu đề SVG", () => {
     const parts = renderStateMachine(FIXTURE)
     expect(parts.map((p) => [p.kind, p.format, p.owner_kind, p.owner_id, p.section])).toEqual([
@@ -46,12 +46,12 @@ describe("renderStateMachine — mỗi entity có vòng đời một hình", () 
       expect(p.issues, p.owner_id!).toEqual([])
       expect(p.source).toContain("#7ACFF5")
     }
-    expect(svgTitleOf(parts[0].source)).toBe("State Machine Diagram — User")
+    expect(svgTitleOf(parts[0].source)).toBe("State Machine Diagram - User")
   })
 
   it("nhãn máy theo ngôn ngữ tài liệu; chữ trên hình là chữ của Spine (nhãn dài gói dòng)", () => {
     const [user] = renderStateMachine(FIXTURE, null, DIAGRAM_LABELS.vi)
-    expect(svgTitleOf(user.source)).toBe("Sơ đồ trạng thái — User")
+    expect(svgTitleOf(user.source)).toBe("Sơ đồ trạng thái - User")
     expect(user.source).toContain("administrator] / notify user")
   })
 

@@ -1,14 +1,14 @@
 # B-0 Intake
 
-> Tài liệu cho người. **Không nạp lúc chạy** — luật thực thi nằm trong `../SKILL.md`.
+> Tài liệu cho người. **Không nạp lúc chạy** - luật thực thi nằm trong `../SKILL.md`.
 
 ## B-0.1 Brain Dump
 
 FLF-221: mở đầu kiểu "kể hết → AI chỉ hỏi phần thiếu". User gõ ý tưởng vào ô chat là B-0.1 chạy (tin nhắn vào
-transcript của step). FLF-232: vòng hỏi **không** hỏi `system_name` (server chỉ để B-2.3 hỏi — `askableFields`) mà hỏi `form_factor` +
+transcript của step). FLF-232: vòng hỏi **không** hỏi `system_name` (server chỉ để B-2.3 hỏi - `askableFields`) mà hỏi `form_factor` +
 `stakes` trong **một lượt hai thẻ** ("Nền tảng", "Tuân thủ"), lựa chọn khuyến nghị đầu tiên kèm lý do lấy từ ý tưởng,
 bỏ thẻ nào user đã nói rõ. Lượt soạn ghi hai field theo điều user chọn/nói (không tạo giả định cho giá trị user đã
-chọn; suy ra phần chưa ai nói **và phần option cố tình để mở** — xem mục "Hai trường phân loại" — kèm giả định), và `notes` là tin nhắn cổng (2–4 câu) để user chốt ở cổng B-0.1. User bấm "Mình chưa có ý tưởng" (`intent: "no_idea"`) ⇒ vòng hỏi chỉ đưa 2–3 câu gợi mở bằng văn xuôi, không
+chọn; suy ra phần chưa ai nói **và phần option cố tình để mở** - xem mục "Hai trường phân loại" - kèm giả định), và `notes` là tin nhắn cổng (2–4 câu) để user chốt ở cổng B-0.1. User bấm "Mình chưa có ý tưởng" (`intent: "no_idea"`) ⇒ vòng hỏi chỉ đưa 2–3 câu gợi mở bằng văn xuôi, không
 thẻ lựa chọn, không "(Khuyến nghị)". B-0.2/B-0.3 không gọi model khi field đã có; B-0 không có phỏng vấn gộp đầu giai
 đoạn.
 
@@ -17,12 +17,12 @@ tin nhắn tự do, tài liệu upload (`document-context` đưa vào content gu
 `project{}` nếu project được tạo lại.
 
 Sau khi nghe: đọc lại một bản tóm tắt ngắn để user xác nhận, rồi ghi **một `addendum[]` cho mỗi chủ đề
-tách bạch**. Không gộp cả buổi nói thành một entry — entry to thì S-1 không tách ra được, và B-2.2 không
+tách bạch**. Không gộp cả buổi nói thành một entry - entry to thì S-1 không tách ra được, và B-2.2 không
 triage được từng phần.
 
-## Tên hệ thống — `project.system_name` (FLF-177)
+## Tên hệ thống - `project.system_name` (FLF-177)
 
-Tên **tiếng Anh** in lên boundary sơ đồ use case, sơ đồ ngữ cảnh và bìa/tiêu đề/tên file docx — tách khỏi
+Tên **tiếng Anh** in lên boundary sơ đồ use case, sơ đồ ngữ cảnh và bìa/tiêu đề/tên file docx - tách khỏi
 tên project làm việc (`Project.name` ở FE, không đồng bộ). FLF-232: **không** hỏi ở B-0.1 (câu đầu tiên sau khi
 user kể ý tưởng không nên là đặt tên) mà hỏi ở **B-2.3**, khi vision/goals/phạm vi đã đủ để gợi ý cho hay:
 
@@ -41,13 +41,13 @@ user kể ý tưởng không nên là đặt tên) mà hỏi ở **B-2.3**, khi 
 | `form_factor` | **mảng**, phần tử đầu là nền tảng chính (`["web_app","mobile_app"]`); giá trị `web_app`, `mobile_app`, `desktop_app`, `api_service`, `cli`, `embedded` | S-4.1 hình dung màn; S-6.2 ngưỡng usability; S-7.2 common requirements |
 | `stakes` | `internal`, `production`, `regulated` | S-6.3/S-6.4 lấy ngưỡng mặc định theo cột này; S-6.5 có cần mục tuân thủ không |
 
-Thẻ "Tuân thủ" ở B-0.1 **chỉ phân biệt có pháp luật hay chỉ quy định nội bộ** — hai option: *Tuân thủ quy
+Thẻ "Tuân thủ" ở B-0.1 **chỉ phân biệt có pháp luật hay chỉ quy định nội bộ** - hai option: *Tuân thủ quy
 định nội bộ* và *Tuân thủ quy định nội bộ và pháp luật*. Option sau ⇒ `regulated`. Option trước **không
 quyết hết giá trị**: `internal` vs `production` là câu hỏi đối tượng dùng, không phải tuân thủ, nên nó luôn
 được suy ra kèm `assumptions[]` (`path: "project.stakes"`).
 
 `stakes` là trường hay bị đoán nhất và cũng là trường đắt nhất khi đoán sai: `internal` cho một sản phẩm
-có thanh toán thật kéo mọi ngưỡng NFR xuống quá thấp — mất cả **mã hoá khi lưu/khi truyền** và **xoay khoá
+có thanh toán thật kéo mọi ngưỡng NFR xuống quá thấp - mất cả **mã hoá khi lưu/khi truyền** và **xoay khoá
 bí mật**. Vì vậy luật suy là **fail-safe về `production`**: chỉ ghi `internal` khi ý tưởng chứng minh hệ
 thống dùng trong nhóm làm; không rõ ⇒ `production`.
 
@@ -55,5 +55,5 @@ thống dùng trong nhóm làm; không rõ ⇒ `production`.
 
 `working_mode` (Coaching/Fast) đã bỏ: AI tự quyết hỏi nhiều hay ít, còn dừng để duyệt ở đâu là chế độ duyệt
 trong menu cài đặt AI ("Mọi bước" / "Cuối giai đoạn"). Step "Cách làm việc" cũ chỉ còn ghi field này nên
-đã bị bỏ khỏi registry ở FLF-221 — B-0 còn 3 step. Field `project.working_mode` còn trong schema (hợp đồng
+đã bị bỏ khỏi registry ở FLF-221 - B-0 còn 3 step. Field `project.working_mode` còn trong schema (hợp đồng
 đóng băng) nhưng không ai ghi hay đọc nữa.

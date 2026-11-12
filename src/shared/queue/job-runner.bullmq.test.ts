@@ -30,7 +30,7 @@ const until = async (check: () => boolean, ms = 10_000) => {
 
 const run = Date.now().toString(36)
 
-describe.skipIf(!process.env.TEST_REDIS_URL)("job-runner — driver bullmq (Redis thật)", () => {
+describe.skipIf(!process.env.TEST_REDIS_URL)("job-runner - driver bullmq (Redis thật)", () => {
   beforeAll(async () => {
     await getQueue("system").obliterate({ force: true })
     await startWorkers()
@@ -42,7 +42,7 @@ describe.skipIf(!process.env.TEST_REDIS_URL)("job-runner — driver bullmq (Redi
     await closeRedis()
   })
 
-  it("startJob: một key một job — lượt thứ hai khi đang chạy trả false; xong thì key được gỡ", async () => {
+  it("startJob: một key một job - lượt thứ hai khi đang chạy trả false; xong thì key được gỡ", async () => {
     const gate = deferred()
     const process = vi.fn(() => gate.promise)
     const job = defineJob<{ n: number }>({ queue: "system", name: `exclusive-${run}`, process })

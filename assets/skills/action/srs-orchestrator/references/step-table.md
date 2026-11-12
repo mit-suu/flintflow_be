@@ -1,4 +1,4 @@
-# Step table — source: Product-Brief-to-SRS-Phases.md §6.4
+# Step table - source: Product-Brief-to-SRS-Phases.md §6.4
 
 Count: Brief 12 · SRS 38 fixed + 5 × N = **50 fixed + 5 × N**. N = 1 → 55 · N = 20 → 150.
 
@@ -23,10 +23,10 @@ Count: Brief 12 · SRS 38 fixed + 5 × N = **50 fixed + 5 × N**. N = 1 → 55 �
 
 | Step | Name | Section | Content / renderer skill | Model call |
 | --- | --- | --- | --- | :---: |
-| S-1.1 | Brief Extraction | — | project-classifier | ✔ |
-| S-1.2 | Project Classification | — | project-classifier | ✔ |
-| S-1.3 | Conflict & Assumption Review | — | project-classifier | ✔ |
-| S-1.4 | Gap List | — | project-classifier | ✔ |
+| S-1.1 | Brief Extraction | - | project-classifier | ✔ |
+| S-1.2 | Project Classification | - | project-classifier | ✔ |
+| S-1.3 | Conflict & Assumption Review | - | project-classifier | ✔ |
+| S-1.4 | Gap List | - | project-classifier | ✔ |
 | S-2.1 | Product Overview | fixed:1 | product-overview | ✔ |
 | S-2.2 | Release 1.0 Scope | fixed:1 | product-overview | ✔ |
 | S-2.3 | External Systems | fixed:1 | product-overview | ✔ |
@@ -38,20 +38,20 @@ Count: Brief 12 · SRS 38 fixed + 5 × N = **50 fixed + 5 × N**. N = 1 → 55 �
 | S-3.4 | Use Case Relationships | fixed:2.2.2 | actors-and-usecases | ✔ |
 | S-3.5 | Use Case Descriptions | fixed:2.2.2 | actors-and-usecases | ✔ |
 | S-3.6 | Use Case Diagram | fixed:2.2.1 | renderer/usecase | ✔ |
-| S-4.1 | Screen Inventory — fixes N and screen_queue | fixed:3.1.2 | screens-and-flow | ✔ |
+| S-4.1 | Screen Inventory - fixes N and screen_queue | fixed:3.1.2 | screens-and-flow | ✔ |
 | S-4.2 | Screens Flow | fixed:3.1.1 | screens-and-flow + renderer/screen-flow | ✔ |
 | S-4.3 | Screen Authorization | fixed:3.1.3 | authorization-matrix | ✔ |
 | S-4.4 | Non-Screen Functions | fixed:3.1.4 | non-screen-functions | ✔ |
 | S-4.5 | Entity Relationship Diagram | fixed:3.1.5 | entities-erd + renderer/erd | ✔ |
-| S-5.1@X | Screen Queue | — | (orchestrator) | ✘ |
+| S-5.1@X | Screen Queue | - | (orchestrator) | ✘ |
 | S-5.2@X | Trigger & Description | function:* | function-detail | ✔ |
 | S-5.3@X | Screen Layout (core screens only) | function:<primary> | renderer/screen-layout | ✔ |
 | S-5.4@X | Function Details (≤ 6 functions per call) | function:* | function-detail | ✔ |
-| S-5.5@X | Screen Sign-off | — | (gate-check) | ✘ |
+| S-5.5@X | Screen Sign-off | - | (gate-check) | ✘ |
 | S-6.1 | External Interfaces | fixed:4.1 | nfr-quality-attributes | ✔ |
 | S-6.2 | Usability | fixed:4.2.1 | nfr-quality-attributes | ✔ |
-| S-6.3 | Reliability — must have numbers | fixed:4.2.2 | nfr-quality-attributes | ✔ |
-| S-6.4 | Performance — must have numbers | fixed:4.2.3 | nfr-quality-attributes | ✔ |
+| S-6.3 | Reliability - must have numbers | fixed:4.2.2 | nfr-quality-attributes | ✔ |
+| S-6.4 | Performance - must have numbers | fixed:4.2.3 | nfr-quality-attributes | ✔ |
 | S-6.5 | Domain-Specific Attributes | fixed:4.2.4 | nfr-quality-attributes | ✔ |
 | S-7.1 | Business Rules (from validations[kind=business]) | fixed:5.1 | appendix-content | ✔ |
 | S-7.2 | Common Requirements | fixed:5.2 | appendix-content | ✔ |
@@ -61,8 +61,8 @@ Count: Brief 12 · SRS 38 fixed + 5 × N = **50 fixed + 5 × N**. N = 1 → 55 �
 | S-8.2 | Document Assembly | all | output/assemble-srs | ✘ |
 | S-8.3 | Record of Changes | fixed:I | output/assemble-srs | ✘ |
 | S-8.4 | Consistency Pass | all | deterministic-check + review-section (consistency_pass) | ✔ |
-| S-9.1 | Completeness & Assumption Sweep | — | output/srs-completeness-score | ✘ |
-| S-9.2 | Quality Lens Run → yellow flags | — | review-section | ✔ |
-| S-9.3 | Business Goal Validation | — | review-section | ✔ |
-| S-9.4 | Requirement Prioritization | — | (T19) | ✔ |
-| S-9.5 | Baseline Sign-off | — | deterministic-check | ✘ |
+| S-9.1 | Completeness & Assumption Sweep | - | output/srs-completeness-score | ✘ |
+| S-9.2 | Quality Lens Run → yellow flags | - | review-section | ✔ |
+| S-9.3 | Business Goal Validation | - | review-section | ✔ |
+| S-9.4 | Requirement Prioritization | - | (T19) | ✔ |
+| S-9.5 | Baseline Sign-off | - | deterministic-check | ✘ |

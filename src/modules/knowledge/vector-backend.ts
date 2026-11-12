@@ -103,7 +103,7 @@ export const isAtlasVectorSearchSupported = async (): Promise<boolean> => {
   } catch (err) {
     if (isVectorSearchUnsupported(err)) {
       atlasSupport = false
-      console.warn("[knowledge] Mongo không có $vectorSearch (không phải Atlas) — dùng backend vector trong bộ nhớ nếu có embedding")
+      console.warn("[knowledge] Mongo không có $vectorSearch (không phải Atlas) - dùng backend vector trong bộ nhớ nếu có embedding")
     } else {
       console.warn(`[knowledge] thăm dò $vectorSearch lỗi: ${err instanceof Error ? err.message : String(err)}`)
       return false

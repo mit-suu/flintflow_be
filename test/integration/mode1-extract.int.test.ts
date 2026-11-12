@@ -57,7 +57,7 @@ const importToGapReview = async () => {
   return s
 }
 
-describe("mode 1 — trích field (I-4) + xác nhận", () => {
+describe("mode 1 - trích field (I-4) + xác nhận", () => {
   it("FLF-343: bảng khớp cột trích tất định, chữ gọi AI theo section; một lần Bắt đầu chạy tới gap_review, field độ tin thấp vào baseline + cờ Cần xem", async () => {
     const { c, id, projectId } = await startImport()
     const { res, run: polled } = await c.extractAndWait(id)
@@ -123,7 +123,7 @@ describe("mode 1 — trích field (I-4) + xác nhận", () => {
   }, 30_000)
 })
 
-describe("mode 1 — I-4 chạy nền", () => {
+describe("mode 1 - I-4 chạy nền", () => {
   it("gọi extract hai lần khi đang chạy ⇒ một job; job mất (máy chủ khởi động lại) ⇒ GET đánh dấu resume_later", async () => {
     const { c, id } = await startImport()
     const [a, b] = await Promise.all([c.post("/import/extract", { import_id: id, confirm_latest: true }), c.post("/import/extract", { import_id: id, confirm_latest: true })])
@@ -142,7 +142,7 @@ describe("mode 1 — I-4 chạy nền", () => {
   })
 })
 
-describe("mode 1 — finalize, check, gap report", () => {
+describe("mode 1 - finalize, check, gap report", () => {
   it("finalize một mạch (FLF-343): Spine một txn by import, version 0.1 (bản gốc) có stamp + bookmark, baseline imported, cờ AI vàng, gap report", async () => {
     const { c, id, projectId } = await startImport()
     const { run } = await c.extractAndWait(id)
@@ -227,7 +227,7 @@ describe("mode 1 — finalize, check, gap report", () => {
   })
 })
 
-describe("mode 1 — re-upload (UC-24)", () => {
+describe("mode 1 - re-upload (UC-24)", () => {
   it("file sửa ngoài FlintFlow ⇒ diff theo block, không tạo version; /import sau baseline bị chặn", async () => {
     const { c, projectId } = await importToGapReview()
     const version = await DocVersion.findOne({ projectId, version: "0.1" }).lean()

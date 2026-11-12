@@ -144,7 +144,7 @@ describe("compileWithFix", () => {
 describe("renderAll / renderDiagram qua op engine", () => {
   beforeEach(() => db.reset())
 
-  it("render cả bộ fixture: 30 hình ok (usecase và class mỗi feature một hình — 6 phần; screen_flow một hình cho cả hệ thống; state_machine mỗi entity có vòng đời một hình; sequence mỗi function đủ tiêu chí một hình; activity mỗi use case có nút một hình; deployment một hình cho hệ thống), giữ id D01–D05, một transaction, file SVG+PNG trong store", async () => {
+  it("render cả bộ fixture: 30 hình ok (usecase và class mỗi feature một hình - 6 phần; screen_flow một hình cho cả hệ thống; state_machine mỗi entity có vòng đời một hình; sequence mỗi function đủ tiêu chí một hình; activity mỗi use case có nút một hình; deployment một hình cho hệ thống), giữ id D01–D05, một transaction, file SVG+PNG trong store", async () => {
     await seed()
     const { deps, store } = makeDeps()
     const result = await renderAll(PROJECT, { by: USER, deps })
@@ -303,7 +303,7 @@ describe("renderAll / renderDiagram qua op engine", () => {
     expect(await noAutoFix({ kind: "erd", puml: "@startuml\nBAD\n@enduml", error: "x", line: "2", attempt: 1 })).toBeNull()
   })
 
-  it("class: mỗi feature một nhóm id riêng — bỏ entity của một feature chỉ xoá hình feature đó, id các feature khác giữ nguyên", async () => {
+  it("class: mỗi feature một nhóm id riêng - bỏ entity của một feature chỉ xoá hình feature đó, id các feature khác giữ nguyên", async () => {
     await seed()
     const { deps } = makeDeps()
     const first = await renderAll(PROJECT, { by: USER, deps })
@@ -400,6 +400,17 @@ describe("screen_layout do model vẽ (FLF-214)", () => {
     expect(drawLayout).toHaveBeenCalledTimes(1)
   })
 
+  it("FLF-387: `by` là mã CR, có `userId` ⇒ model gọi bằng userId, change vẫn ghi mã CR", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    const drawLayout = vi.fn(async () => SALT)
+    const drawn = await renderDiagram(PROJECT, "screen_layout", "S01", { by: "CR-002", userId: USER, deps: { ...deps, drawLayout } })
+    expect(drawLayout).toHaveBeenCalledWith(expect.objectContaining({ userId: USER, screenId: "S01" }))
+    expect(drawn.diagrams[0]).toMatchObject({ owner_id: "S01", source: SALT })
+    const changes = await db.Change.find({})
+    expect(changes[changes.length - 1]).toMatchObject({ by: "CR-002" })
+  })
+
   it("salt của model không compile, model trả null hoặc ném ⇒ bảng function, vẫn ok", async () => {
     await seed()
     const table = renderKind(FIXTURE, "screen_layout", "S01")[0].source
@@ -411,7 +422,7 @@ describe("screen_layout do model vẽ (FLF-214)", () => {
   })
 })
 
-describe("renderChangedIfAvailable — FLF-311 vẽ lại sau lô thêm use case / màn", () => {
+describe("renderChangedIfAvailable - FLF-311 vẽ lại sau lô thêm use case / màn", () => {
   beforeEach(() => {
     db.reset()
     plantuml.reachable = true
@@ -522,17 +533,17 @@ describe("đường vẽ svg (FLF-339)", () => {
   })
 })
 
-describe("sameDiagramSubject — hình cũ có còn là cùng hình để trả về khi vẽ lại lỗi", () => {
+describe("sameDiagramSubject - hình cũ có còn là cùng hình để trả về khi vẽ lại lỗi", () => {
   type D = Spine["diagrams"][number]
   const svg = (title: string) => `<svg xmlns="http://www.w3.org/2000/svg"><title>${title}</title></svg>`
-  const base: D = { id: "D02-2", kind: "usecase", format: "svg", source: svg("Use Cases — Authentication (2/3)"), section: "fixed:2.2.1", owner_kind: null, owner_id: null, render_status: "ok", source_hash: "h1", rendered_at: "2026-10-31T00:00:00.000Z" }
+  const base: D = { id: "D02-2", kind: "usecase", format: "svg", source: svg("Use Cases - Authentication (2/3)"), section: "fixed:2.2.1", owner_kind: null, owner_id: null, render_status: "ok", source_hash: "h1", rendered_at: "2026-10-31T00:00:00.000Z" }
 
   it("cùng phần (cùng tiêu đề), dữ liệu đổi ⇒ cùng hình", () => {
     expect(sameDiagramSubject(base, { ...base, source_hash: "h2", render_status: "error", error: "lỗi bố cục" })).toBe(true)
   })
 
   it("cùng id nhưng cách chia đổi (theo actor → theo feature) ⇒ khác hình", () => {
-    expect(sameDiagramSubject({ ...base, source: svg("Use Cases — Patient (2/4)") }, base)).toBe(false)
+    expect(sameDiagramSubject({ ...base, source: svg("Use Cases - Patient (2/4)") }, base)).toBe(false)
   })
 
   it("khác chủ, khác loại hoặc khác mục ⇒ khác hình", () => {

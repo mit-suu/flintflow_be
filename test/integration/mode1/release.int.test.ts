@@ -81,7 +81,7 @@ const released = async (c: Mode1Api) => {
   return releaseResponseSchema.parse(res.body.data)
 }
 
-describe("release — chặn", () => {
+describe("release - chặn", () => {
   it("đỏ > 0 ⇒ 422 RELEASE_RED_FLAGS_OPEN kèm cờ; không tạo version, không lưu file, Spine không có baseline release", async () => {
     const { c, projectId } = await projectWithRevision()
     await addRedFlag(projectId)
@@ -119,7 +119,7 @@ describe("release — chặn", () => {
   })
 })
 
-describe("release — bản sạch + baseline", () => {
+describe("release - bản sạch + baseline", () => {
   it("1.0 = render snapshot Spine (FLF-186): stamp release, nội dung sau CR, không Track Changes; baseline type release snapshot Spine", async () => {
     const { c, projectId } = await projectWithRevision()
     const spineBefore = (await spineRepository.get(projectId))!
@@ -159,7 +159,7 @@ describe("release — bản sạch + baseline", () => {
   })
 })
 
-describe("release — gom CR", () => {
+describe("release - gom CR", () => {
   it("2.0 chỉ gom CR written sau 1.0, theo thứ tự ghi; CR huỷ không được gom; baseline release thứ hai", async () => {
     const { c, projectId } = await projectWithRevision()
     expect((await released(c)).cr_ids).toEqual(["CR-001"])
@@ -207,7 +207,7 @@ describe("release — gom CR", () => {
   })
 })
 
-describe("release — lỗi giữa chừng", () => {
+describe("release - lỗi giữa chừng", () => {
   it("snapshot baseline lỗi ⇒ xoá file vừa lưu (không mồ côi), không tạo version; chạy lại được", async () => {
     const { c, projectId } = await projectWithRevision()
     const filesBefore = await gridFsFileCount(projectId)
@@ -224,7 +224,7 @@ describe("release — lỗi giữa chừng", () => {
   })
 })
 
-describe("doc-file.store — GridFS", () => {
+describe("doc-file.store - GridFS", () => {
   it("save/load giữ nguyên byte + metadata; ref hợp lệ nhưng không có / ref sai ⇒ DocFileNotFoundError", async () => {
     const data = Buffer.from([0, 1, 2, 250, 255])
     const ref = await gridFsDocFileStore.save(data, { projectId: "P1", kind: "upload", name: "SRS.docx" })

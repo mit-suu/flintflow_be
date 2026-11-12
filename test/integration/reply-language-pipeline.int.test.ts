@@ -43,7 +43,7 @@ const runHttp = async (seeded: SeededFixture, path: string, body: Record<string,
 
 const sessionOf = async (seeded: SeededFixture) => ChatSession.findById(seeded.sessionId).lean()
 
-describe("FLF-260 pipeline — ngôn ngữ trả lời qua HTTP", () => {
+describe("FLF-260 pipeline - ngôn ngữ trả lời qua HTTP", () => {
   it("/run mở bằng tin tiếng Anh ⇒ phiên ghi en, prompt hỏi và soạn đều kết thúc bằng khối English", { timeout: 60_000 }, async () => {
     const seeded = await seedFixture("minimal", { mutate: startAt("S-3.1") })
     const events = await runHttp(seeded, "steps/S-3.1/run", { message: "We need to describe who uses the booking system" })

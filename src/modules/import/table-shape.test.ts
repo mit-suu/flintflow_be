@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { columnRole, groupOf, headerRowIndex, isMarkMatrix, markActions, markMatrixColumns, tableShape } from "./table-shape.js"
 
-describe("columnRole — vai trò cột theo dữ liệu (FLF-252)", () => {
+describe("columnRole - vai trò cột theo dữ liệu (FLF-252)", () => {
   it("số thứ tự tăng dần ⇒ row_no; số lặp / không liền mạch ⇒ không phải", () => {
     expect(columnRole(["1", "2", "3", "4"]).role).toBe("row_no")
     expect(columnRole(["1.", "2.", "3."]).role).toBe("row_no")
@@ -74,7 +74,7 @@ describe("tableShape", () => {
     expect(markActions("X")).toEqual(["access"])
     expect(markActions("view, create")).toEqual(["view", "create"])
     expect(markActions(" ")).toEqual([])
-    expect(markActions("—")).toEqual([])
+    expect(markActions("-")).toEqual([])
   })
 
   it("ma trận có cột '#' đứng đầu (SRS thật): bỏ cột số thứ tự, cột tên là cột kế tiếp", () => {
@@ -88,12 +88,12 @@ describe("tableShape", () => {
     expect(isMarkMatrix(tableShape([["#", "Screen"], ["1", "Login"], ["2", "Home"]]))).toBe(false)
   })
 
-  it("ma trận FlintFlow xuất ra: ô '—' là không có quyền, không làm hỏng nhận dạng cột", () => {
+  it("ma trận FlintFlow xuất ra: ô '-' là không có quyền, không làm hỏng nhận dạng cột", () => {
     const shape = tableShape([
       ["Screen", "Exam Manager", "Lecturer", "Student"],
       ["Login", "view", "view", "view"],
-      ["Exam Management", "view, create, update, delete", "—", "—"],
-      ["Paper Submission", "view", "view, create, update", "—"]
+      ["Exam Management", "view, create, update, delete", "-", "-"],
+      ["Paper Submission", "view", "view, create, update", "-"]
     ])
     expect(shape.columns.map((c) => c.role)).toEqual(["name", "mark", "mark", "mark"])
     expect(isMarkMatrix(shape)).toBe(true)

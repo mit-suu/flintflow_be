@@ -43,7 +43,7 @@ beforeEach(() => {
 
 const EXCLUDED = [...MODE1_RULE_PROFILE.exclude]
 
-describe("check — hồ sơ luật mode 1", () => {
+describe("check - hồ sơ luật mode 1", () => {
   it("luật loại trừ không bắn cờ dù Spine import có điều kiện kích hoạt; luật hạ mức chỉ ra vàng", async () => {
     const { projectId } = await importFinalized()
     const spine = (await spineRepository.get(projectId))!
@@ -63,7 +63,7 @@ describe("check — hồ sơ luật mode 1", () => {
   })
 })
 
-describe("check — AI semantic (1.11)", () => {
+describe("check - AI semantic (1.11)", () => {
   it("finding của AI chỉ ra cờ vàng rule import_semantic, section bịa ⇒ fixed:I; trừ credit một lô map + một lượt kiểm chéo", async () => {
     const { projectId, userId, result } = await importFinalized()
     expect(semanticCalls).toBe(1)

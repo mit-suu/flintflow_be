@@ -60,7 +60,7 @@ describe("credit-reservation.service", () => {
     projectOrg.id = null
   })
 
-  it("FLF-333: knowledge_answer 0 credit — reserve không đụng ví / sổ, deduct và release là no-op", async () => {
+  it("FLF-333: knowledge_answer 0 credit - reserve không đụng ví / sổ, deduct và release là no-op", async () => {
     expect(await getActionCost(ActionType.KNOWLEDGE_ANSWER)).toBe(0)
     await getOrCreateWallet(USER, undefined, ORG)
     const balanceBefore = walletOf().balance
@@ -132,7 +132,7 @@ describe("credit-reservation.service", () => {
     })
   })
 
-  describe("ví tổ chức (FLF-310 — bỏ ví cá nhân)", () => {
+  describe("ví tổ chức (FLF-310 - bỏ ví cá nhân)", () => {
     it("không gắn project ⇒ trừ ví org đang chọn; ví mang organizationId, ledger cũng vậy", async () => {
       const reservation = await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
       expect(reservation.organizationId).toBe(ORG)

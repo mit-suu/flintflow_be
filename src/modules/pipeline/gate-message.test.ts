@@ -64,7 +64,7 @@ describe("composeStepGateMessage", () => {
 
   it("notes kể điều đó như SỰ THẬT trong câu tóm tắt ⇒ chưa tính là đã nói (user không biết đó là điều cần xác nhận)", () => {
     const notes =
-      "Tổng quan dự án đã đủ: bệnh viện công cần phần mềm quản lý khám ngoại trú từ đặt lịch đến thanh toán bhyt, bệnh nhân tự đặt lịch và thanh toán trên app/web, còn nhân viên làm trên web. Tôi đoán sẽ có dịch vụ gửi SMS để gọi bệnh nhân chưa cài app — nếu khác bạn cứ nói. Xem lại các điểm này xong thì mình đi tiếp nhé."
+      "Tổng quan dự án đã đủ: bệnh viện công cần phần mềm quản lý khám ngoại trú từ đặt lịch đến thanh toán bhyt, bệnh nhân tự đặt lịch và thanh toán trên app/web, còn nhân viên làm trên web. Tôi đoán sẽ có dịch vụ gửi SMS để gọi bệnh nhân chưa cài app - nếu khác bạn cứ nói. Xem lại các điểm này xong thì mình đi tiếp nhé."
     const asFact = "Bệnh nhân chủ yếu dùng app điện thoại để đặt lịch và thanh toán, còn các vai trò nhân viên làm trên web."
     const asHedged = "Sẽ có dịch vụ gửi SMS để gọi bệnh nhân chưa cài app."
     expect([...spokenAssumptionIds(notes, [as("AS3", asFact), as("AS8", asHedged)])]).toEqual(["AS8"])
@@ -84,7 +84,7 @@ describe("composeStepGateMessage", () => {
 describe("tin cổng nói một lần (FLF-241)", () => {
   // Tin cổng thật của B-0.1, project 6abeb75e5d7e3382e3ceeb19 — 4 câu, câu 3 do server chèn và trùng ý câu 2.
   const notesB01 =
-    "Vậy là phần mềm khám ngoại trú cho bệnh viện tỉnh, chạy trên cả web và ứng dụng di động. Tôi đoán hệ thống chỉ phục vụ một bệnh viện, không phải nhiều cơ sở — nếu khác bạn cứ nói nhé. Đúng vậy thì mình đi tiếp."
+    "Vậy là phần mềm khám ngoại trú cho bệnh viện tỉnh, chạy trên cả web và ứng dụng di động. Tôi đoán hệ thống chỉ phục vụ một bệnh viện, không phải nhiều cơ sở - nếu khác bạn cứ nói nhé. Đúng vậy thì mình đi tiếp."
   const statementB01 = "Hệ thống phục vụ một bệnh viện đa khoa tuyến tỉnh; không bao gồm triển khai liên bệnh viện hoặc nhiều cơ sở"
 
   it("tin giữ đúng 3 câu của model, không có câu 'Tôi tạm hiểu là …' do server chèn", () => {
@@ -208,7 +208,7 @@ describe("composePhaseGateMessage", () => {
     expect(message).not.toMatch(FORBIDDEN)
   })
 
-  it("một câu đếm bất kể N lớn bao nhiêu — không còn 8 câu nối nhau", () => {
+  it("một câu đếm bất kể N lớn bao nhiêu - không còn 8 câu nối nhau", () => {
     const message = composePhaseGateMessage({ lastMessage: "Xong.", unspokenCount: 8 })!
     expect(message).toBe(`Xong. ${COUNT(8)}`)
     expect(message.match(/tạm hiểu/g)).toHaveLength(1)
@@ -301,12 +301,12 @@ describe("gateMessageOfRun", () => {
     expect(gateMessageOfRun({ gate_payload: { message_vi: "Tôi đã ghi ba nhóm người dùng." } })).toBe("Tôi đã ghi ba nhóm người dùng.")
   })
 
-  it("bước cuối giai đoạn ưu tiên tin cả giai đoạn — đúng tin user đọc trên thẻ", () => {
+  it("bước cuối giai đoạn ưu tiên tin cả giai đoạn - đúng tin user đọc trên thẻ", () => {
     const run = { gate_payload: { message_vi: "tin của bước" }, phase_gate: { message_vi: "tin của cả giai đoạn" } }
     expect(gateMessageOfRun(run)).toBe("tin của cả giai đoạn")
   })
 
-  it("không có tin thì không ghi gì — tin rỗng hay thiếu đều là null", () => {
+  it("không có tin thì không ghi gì - tin rỗng hay thiếu đều là null", () => {
     expect(gateMessageOfRun(null)).toBeNull()
     expect(gateMessageOfRun({})).toBeNull()
     expect(gateMessageOfRun({ gate_payload: null, phase_gate: null })).toBeNull()
@@ -326,7 +326,7 @@ describe("gateAssumptionIdsOfRun", () => {
     expect([...gateAssumptionIdsOfRun({ gate_payload: { new_assumptions: [brief("AS1"), brief("AS3")] } })]).toEqual(["AS1", "AS3"])
   })
 
-  it("bước cuối giai đoạn ưu tiên danh sách của cổng giai đoạn — đúng thẻ user đang đọc", () => {
+  it("bước cuối giai đoạn ưu tiên danh sách của cổng giai đoạn - đúng thẻ user đang đọc", () => {
     const run = { gate_payload: { new_assumptions: [brief("AS1")] }, phase_gate: { new_assumptions: [brief("AS2"), brief("AS9")] } }
     expect([...gateAssumptionIdsOfRun(run)]).toEqual(["AS2", "AS9"])
   })
@@ -363,7 +363,7 @@ describe("FLF-260: tin cổng tiếng Anh", () => {
 
   describe("dò lời đoán tiếng Anh", () => {
     it("câu đoán kèm đuôi 'tell me if not' ⇒ tính là đã nói, kể cả khi điều đó có dấu chấm cuối", () => {
-      const notes = "I'm assuming staff use desktop computers — tell me if not."
+      const notes = "I'm assuming staff use desktop computers - tell me if not."
       expect([...spokenAssumptionIds(notes, [as("AS1", "Staff use desktop computers")])]).toEqual(["AS1"])
       expect([...spokenAssumptionIds(notes, [as("AS1", "Staff use desktop computers.")])]).toEqual(["AS1"])
     })
@@ -379,17 +379,17 @@ describe("FLF-260: tin cổng tiếng Anh", () => {
         "My guess is that staff use desktop computers at the front desk.",
         "Staff probably use desktop computers at the front desk.",
         "Staff use desktop computers at the front desk; if that's wrong, say so.",
-        "Staff use desktop computers at the front desk — let me know if anything is off.",
+        "Staff use desktop computers at the front desk - let me know if anything is off.",
         "Correct me if I'm wrong, but staff use desktop computers at the front desk."
       ])
         expect([...spokenAssumptionIds(notes, [as("AS1", statement)])], notes).toEqual(["AS1"])
     })
 
     it("diễn lại + đuôi 'tell me if not': chữ 'not' của lời mời không đảo chiều phủ định của nội dung", () => {
-      const notes = "I'm assuming reception staff check patients in on desktop computers — tell me if not."
+      const notes = "I'm assuming reception staff check patients in on desktop computers - tell me if not."
       expect([...spokenAssumptionIds(notes, [as("AS1", "Reception staff use desktop computers to check patients in.")])]).toEqual(["AS1"])
       // Chiều ngược lại: câu khẳng định không được khớp điều PHỦ ĐỊNH nhờ chữ "not" của lời mời
-      const affirmative = "I'm assuming patients need to install an app to book — tell me if not."
+      const affirmative = "I'm assuming patients need to install an app to book - tell me if not."
       expect([...spokenAssumptionIds(affirmative, [as("AS2", "Patients do not need to install an app to book")])]).toEqual([])
     })
 
@@ -398,13 +398,13 @@ describe("FLF-260: tin cổng tiếng Anh", () => {
       expect([...spokenAssumptionIds("I'm assuming patients don't need to install an app to book appointments.", [as("AS1", statement)])]).toEqual([])
       expect([...spokenAssumptionIds("I'm assuming patients cannot install an app to book appointments.", [as("AS1", "Patients can install an app to book appointments")])]).toEqual([])
       // Cùng chiều phủ định, một bên viết gọn một bên viết đủ, kèm đuôi "tell me if not" ⇒ vẫn là đã nói
-      const notes = "I'm assuming patients don't need to install an app to book appointments — tell me if not."
+      const notes = "I'm assuming patients don't need to install an app to book appointments - tell me if not."
       expect([...spokenAssumptionIds(notes, [as("AS2", "Patients do not need to install an app to book appointments.")])]).toEqual(["AS2"])
     })
 
     it("so nguyên văn theo cụm trọn từ: bỏ dấu chấm cuối không làm 'web' khớp vào giữa 'website'", () => {
       expect([...spokenAssumptionIds("I'm assuming patients book on the website.", [as("AS1", "Web.")])]).toEqual([])
-      expect([...spokenAssumptionIds("I'm assuming patients book on the web — tell me if not.", [as("AS1", "On the web.")])]).toEqual(["AS1"])
+      expect([...spokenAssumptionIds("I'm assuming patients book on the web - tell me if not.", [as("AS1", "On the web.")])]).toEqual(["AS1"])
       expect([...spokenAssumptionIds("Tôi đoán bạn dùng trên website.", [as("AS1", "Dùng trên web")])]).toEqual([])
     })
 

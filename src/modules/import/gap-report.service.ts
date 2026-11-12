@@ -273,7 +273,7 @@ export const renderGapReportDocx = async (report: GapReport, projectName: string
       ]
     : []
   const children: (Paragraph | Table)[] = [
-    new Paragraph({ text: `Báo cáo thiếu sót — ${projectName}`, heading: HeadingLevel.TITLE }),
+    new Paragraph({ text: `Báo cáo thiếu sót - ${projectName}`, heading: HeadingLevel.TITLE }),
     new Paragraph({ children: [new TextRun({ text: `Phiên bản tài liệu ${report.doc_version} · tạo lúc ${formatReportTime(report.generated_at)}`, italics: true })] }),
     ...(report.preliminary
       ? [new Paragraph({ children: [new TextRun({ text: "Báo cáo sơ bộ: FlintFlow mới đọc khung tài liệu, chưa đọc nội dung. Kết quả sau khi đọc chi tiết có thể khác.", italics: true })] })]

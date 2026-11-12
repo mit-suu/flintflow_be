@@ -9,7 +9,7 @@ import { ReuploadDiff } from "./reupload-diff.model.js"
 
 const oid = () => new mongoose.Types.ObjectId()
 
-describe("model import — index", () => {
+describe("model import - index", () => {
   it("DocBlock: unique (projectId, doc_version, block_id) + tra khoá theo CR", () => {
     expect(DocBlock.schema.indexes()).toContainEqual([{ projectId: 1, doc_version: 1, block_id: 1 }, { unique: true }])
     expect(DocBlock.schema.indexes()).toContainEqual([{ projectId: 1, locked_by_cr: 1 }, {}])
@@ -27,7 +27,7 @@ describe("model import — index", () => {
   })
 })
 
-describe("model import — mặc định và ràng buộc", () => {
+describe("model import - mặc định và ràng buộc", () => {
   it("ImportedDocument mới: status uploaded, không pause, không stamp", () => {
     const doc = new ImportedDocument({
       projectId: oid(),

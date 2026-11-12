@@ -99,8 +99,11 @@ const entityBox = (e: ErdEntityInput, notation: ErdNotation, degree: number, sel
   const headerH = Math.max(38, nameLines.length * NAME_LINE + 16)
   const attrH = rows.length > 0 ? 12 + rows.length * ATTR_LINE + rows.filter((r) => r.gapBefore).length * 8 : 0
   const attrW = Math.max(0, ...rows.map((r) => textWidth(r.text, ATTR_SIZE, r.pk)))
-  // đủ chỗ cho các cổng: tối đa nửa số đầu mút dồn vào một cạnh
-  const slots = Math.max(1, Math.ceil((degree - 2 * selfLoops) / 2) + 2 * selfLoops)
+  // đủ chỗ cho các cổng: tối đa nửa số đầu mút dồn vào một cạnh. FLF-375: Chen có dải ô-van bên dưới nên chỉ ba cạnh có
+  // cổng (L / R / T) ⇒ chia cho 3 cạnh thay vì 4 — trước đây thực thể bậc cao (Order: 10 quan hệ) hết chỗ cổng, router bỏ
+  // cuộc và hình bị cắt làm 5
+  const usableSides = notation === "chen" && (e.attributes ?? []).some((a) => a.fk !== true) ? 3 : 4
+  const slots = Math.max(1, Math.ceil((degree - 2 * selfLoops) / (usableSides / 2)) + 2 * selfLoops)
   const portSpan = 2 * o.portMargin + (slots - 1) * o.portPitch
   const boxW = Math.max(110, Math.ceil(nameW + 28), Math.ceil(attrW + 24), portSpan)
   const boxH = Math.max(headerH + attrH, portSpan)
@@ -215,7 +218,8 @@ const placeholder = (label: string): Scene => {
 }
 
 /** Scene của một hình ERD; `null` khi không tìm được đường cho mọi cạnh dù nới khe (người gọi tách hình). */
-export const layoutErd = (d: ErdDiagram): Scene | null => {
+/** `detours`: cho phép đường vòng nhiều góc khi đường thường không có (tài liệu upload giữ một hình — bug #12). */
+export const layoutErd = (d: ErdDiagram, opts: { detours?: boolean } = {}): Scene | null => {
   if (d.entities.length === 0) return placeholder(d.emptyLabel)
   const notation = d.notation
   const known = new Set(d.entities.map((e) => e.id))
@@ -293,7 +297,7 @@ export const layoutErd = (d: ErdDiagram): Scene | null => {
   }
 
   const holder: { plan: Plan | null } = { plan: null }
-  const layout = routeOnGrid(nodes, edges, cells, { ...DEFAULT_ROUTE_OPTIONS, ...OPTIONS[notation] }, (l) => ((holder.plan = plan(l)), holder.plan !== null))
+  const layout = routeOnGrid(nodes, edges, cells, { ...DEFAULT_ROUTE_OPTIONS, ...OPTIONS[notation], ...(opts.detours ? { detours: true } : {}) }, (l) => ((holder.plan = plan(l)), holder.plan !== null))
   if (!layout || !holder.plan) return null
   const { centers, requests } = holder.plan
 
@@ -372,7 +376,7 @@ const drawEntity = (scene: Scene, e: EntityBox, placed: PlacedNode, notation: Er
         const half = textWidth(v.name, ATTR_SIZE, true) / 2
         scene.decoration(`${ovalId}#key`, ovalId, [[cx - half, cy + 8], [cx + half, cy + 8]])
       }
-      scene.line(`${ovalId}#link`, [x + (w * (i + 1)) / (e.ovals.length + 1), y + h], [cx, cy - v.ry], { name: `${name} — ${v.name}` })
+      scene.line(`${ovalId}#link`, [x + (w * (i + 1)) / (e.ovals.length + 1), y + h], [cx, cy - v.ry], { name: `${name} - ${v.name}` })
       left += 2 * v.rx + 10
     })
   }

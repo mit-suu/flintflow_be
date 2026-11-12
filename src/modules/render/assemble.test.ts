@@ -307,12 +307,12 @@ describe("assemble()", () => {
     expect(cacheDb.findOneAndUpdate).toHaveBeenCalledTimes(1)
   })
 
-  describe("ảnh render_status=ok nhưng PNG tải lỗi — không còn '200 nhưng không cache' im lặng", () => {
+  describe("ảnh render_status=ok nhưng PNG tải lỗi - không còn '200 nhưng không cache' im lặng", () => {
     const diagram = { id: "D01", kind: "context" as const, section: "fixed:1", owner_kind: null, owner_id: null, format: "puml" as const, source: "@startuml\n@enduml", render_status: "ok" as const, source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" }
     const imagesOf = (doc: { sections: { blocks: { type: string; png?: unknown; caption?: string }[] }[] }) =>
       doc.sections.flatMap((s) => s.blocks.filter((b) => b.type === "image"))
 
-    it("vẫn ghi cache (ảnh là tham chiếu) kèm missing_diagram_ids; findings có diagram_png_missing — cả khi trúng cache", async () => {
+    it("vẫn ghi cache (ảnh là tham chiếu) kèm missing_diagram_ids; findings có diagram_png_missing - cả khi trúng cache", async () => {
       vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 13, diagrams: [diagram] }))
 
       const result = await assemble(PROJECT, "Demo", 13, { loadDiagramPng: async () => null })
@@ -353,10 +353,10 @@ describe("assemble()", () => {
       const pending = imagesOf(await getDocument(PROJECT, "Demo", { source: "draft" }, { loadDiagramPng: async () => null }))
       expect(pending).toHaveLength(1)
       expect(pending[0].png).toBe(DIAGRAM_PLACEHOLDER_PNG)
-      expect(pending[0].caption).toBe("Figure — System Context Diagram — image pending: diagram D01 has not been rendered yet")
+      expect(pending[0].caption).toBe("Figure - System Context Diagram - image pending: diagram D01 has not been rendered yet")
 
       const rendered = imagesOf(await getDocument(PROJECT, "Demo", { source: "draft" }, { loadDiagramPng: async () => "BASE64PNG" }))
-      expect(rendered).toEqual([{ type: "image", png: "BASE64PNG", caption: "Figure — System Context Diagram" }])
+      expect(rendered).toEqual([{ type: "image", png: "BASE64PNG", caption: "Figure - System Context Diagram" }])
       expect(cacheDb.docs).toHaveLength(1)
     })
 
@@ -368,7 +368,7 @@ describe("assemble()", () => {
     })
   })
 
-  describe("review T6 — cache không lưu base64 ảnh; đọc lại có ảnh", () => {
+  describe("review T6 - cache không lưu base64 ảnh; đọc lại có ảnh", () => {
     const diagram = { id: "D01", kind: "context" as const, section: "fixed:1", owner_kind: null, owner_id: null, format: "puml" as const, source: "@startuml\n@enduml", render_status: "ok" as const, source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" }
 
     it("cache lưu diagram-ref:<id> thay vì base64; getDocument rehydrate PNG thật", async () => {
@@ -387,7 +387,7 @@ describe("assemble()", () => {
     })
   })
 
-  describe("review T10 — race upsert E11000", () => {
+  describe("review T10 - race upsert E11000", () => {
     it("findOneAndUpdate ném E11000 (writer khác vừa thắng) ⇒ đọc lại, không lộ lỗi", async () => {
       vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 17 }))
       cacheDb.findOneAndUpdate.mockImplementationOnce(async (filter: Doc) => {
@@ -401,7 +401,7 @@ describe("assemble()", () => {
     })
   })
 
-  describe("review Th2 — findings S-8.4 trả qua kết quả, không chỉ console.warn", () => {
+  describe("review Th2 - findings S-8.4 trả qua kết quả, không chỉ console.warn", () => {
     it("assemble() trả findings chứa dead_reference khi spine có tham chiếu chết", async () => {
       vi.mocked(spineRepository.get).mockResolvedValue(
         spineRecord({
@@ -414,7 +414,7 @@ describe("assemble()", () => {
     })
   })
 
-  describe("review T7 — §I hiển thị tên người ghi thay vì userId thô", () => {
+  describe("review T7 - §I hiển thị tên người ghi thay vì userId thô", () => {
     it("system ⇒ 'System'; user có tên ⇒ tên; user không còn ⇒ id rút gọn", async () => {
       changeDb.setRows([
         { projectId: PROJECT, txn: "t1", at: new Date("2026-09-01T00:00:00.000Z"), by: "650000000000000000000010", reason: "seed", op: "add", step_id: null, seq: 1 },
@@ -433,7 +433,7 @@ describe("assemble()", () => {
     })
   })
 
-  describe("T15 (mode 1 v3) — giữ Record of Changes của file gốc", () => {
+  describe("T15 (mode 1 v3) - giữ Record of Changes của file gốc", () => {
     it("dòng cũ của khách đứng đầu bảng §I, lịch sử FlintFlow nối tiếp bên dưới", async () => {
       changeDb.setRows([{ projectId: PROJECT, txn: "t1", at: new Date("2026-09-22T00:00:00.000Z"), by: "system", reason: "CR-001: Faster response", op: "set", step_id: null, seq: 1 }])
       vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 23 }))
@@ -449,7 +449,7 @@ describe("assemble()", () => {
   })
 })
 
-describe("getDocument() — source=draft", () => {
+describe("getDocument() - source=draft", () => {
   it("chưa từng assemble ⇒ NoWorkingDraftError (409 NO_WORKING_DRAFT)", async () => {
     await expect(getDocument(PROJECT, "Demo", { source: "draft" })).rejects.toBeInstanceOf(NoWorkingDraftError)
     await expect(getDocument(PROJECT, "Demo", { source: "draft" })).rejects.toMatchObject({ statusCode: 409, code: "NO_WORKING_DRAFT" })
@@ -593,7 +593,7 @@ describe("getDocument() — source=draft", () => {
   })
 })
 
-describe("getDocument() — source=baseline", () => {
+describe("getDocument() - source=baseline", () => {
   it("baseline_id không tồn tại/không hợp lệ ⇒ 404 BASELINE_NOT_FOUND", async () => {
     baselineDb.findOne.mockResolvedValue(null)
     await expect(getDocument(PROJECT, "Demo", { source: "baseline" })).rejects.toMatchObject({ statusCode: 404, code: "BASELINE_NOT_FOUND" })
@@ -612,7 +612,7 @@ describe("getDocument() — source=baseline", () => {
     expect(doc.flagsAppendix?.waived).toHaveLength(1)
   })
 
-  it("review T5: cache theo baseline._id — lần đọc thứ hai không dựng lại (Baseline.findOne chỉ gọi một lần)", async () => {
+  it("review T5: cache theo baseline._id - lần đọc thứ hai không dựng lại (Baseline.findOne chỉ gọi một lần)", async () => {
     baselineDb.findOne.mockResolvedValue({ _id: BASELINE_ID, projectId: PROJECT, version: "v1.0", at: new Date().toISOString(), checked_at_version: 9, waived_count: 1, snapshot: baseSpine() })
 
     await getDocument(PROJECT, "Demo", { source: "baseline", baseline_id: BASELINE_ID })
@@ -649,13 +649,13 @@ describe("getDocument() — source=baseline", () => {
     const images = (doc: { sections: { blocks: { type: string; png?: unknown; caption?: string }[] }[] }) => doc.sections.flatMap((s) => s.blocks.filter((b) => b.type === "image"))
 
     const first = images(await getDocument(PROJECT, "Demo", { source: "baseline", baseline_id: BASELINE_ID }, { loadDiagramPng: async () => null }))
-    expect(first).toEqual([{ type: "image", png: DIAGRAM_PLACEHOLDER_PNG, caption: "Figure — System Context Diagram — image pending: diagram D01 has not been rendered yet" }])
+    expect(first).toEqual([{ type: "image", png: DIAGRAM_PLACEHOLDER_PNG, caption: "Figure - System Context Diagram - image pending: diagram D01 has not been rendered yet" }])
     const cached = cacheDb.docs.filter((d) => d.baseline_id === BASELINE_ID)
     expect(cached).toHaveLength(1)
     expect(cached[0].missing_diagram_ids).toEqual(["D01"])
 
     const second = images(await getDocument(PROJECT, "Demo", { source: "baseline", baseline_id: BASELINE_ID }, { loadDiagramPng: async () => "BASE64PNG" }))
-    expect(second).toEqual([{ type: "image", png: "BASE64PNG", caption: "Figure — System Context Diagram" }])
+    expect(second).toEqual([{ type: "image", png: "BASE64PNG", caption: "Figure - System Context Diagram" }])
     // Lần hai trúng cache theo `_id` đã biết ⇒ không tải snapshot Baseline (FLF-381), không dựng lại (cache 1 bản)
     expect(baselineDb.findOne).toHaveBeenCalledTimes(1)
     expect(cacheDb.docs.filter((d) => d.baseline_id === BASELINE_ID)).toHaveLength(1)
@@ -716,7 +716,7 @@ describe("_internal.buildNumberMap", () => {
   })
 })
 
-describe("_internal.buildDocument — review C4/Th1 heading nhóm", () => {
+describe("_internal.buildDocument - review C4/Th1 heading nhóm", () => {
   it("chèn group:2.2/3.1/4.2 trước section con đầu tiên; heading Unassigned Functions trước function mồ côi", async () => {
     const spine: Spine = { ...baseSpine(), functions: [...baseSpine().functions, { id: "FN9", screen_id: null, feature_id: "DEAD", order: 0, name: "Orphan", trigger: "t", description: "d", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null }] }
     const doc = await _internal.buildDocument(
@@ -733,7 +733,7 @@ describe("_internal.buildDocument — review C4/Th1 heading nhóm", () => {
   })
 })
 
-describe("_internal.buildDocument — tên hệ thống (FLF-177)", () => {
+describe("_internal.buildDocument - tên hệ thống (FLF-177)", () => {
   const build = (spine: Spine) =>
     _internal.buildDocument(
       { projectId: PROJECT, projectName: "Du an giao hang", spine, statusChanges: [], recordChanges: [], source: "draft", version: "v0.1" },
@@ -751,8 +751,8 @@ describe("_internal.buildDocument — tên hệ thống (FLF-177)", () => {
   })
 })
 
-describe("DoD1 — snapshot RenderedDocument từ fixture 19 màn", () => {
-  it("snapshot ổn định (generatedAt cố định, ảnh thay bằng độ dài — không lưu base64 lớn)", async () => {
+describe("DoD1 - snapshot RenderedDocument từ fixture 19 màn", () => {
+  it("snapshot ổn định (generatedAt cố định, ảnh thay bằng độ dài - không lưu base64 lớn)", async () => {
     const spine = spineSchema.parse(
       JSON.parse(readFileSync(new URL("../../../fixtures/spine-fixture-19-screens.json", import.meta.url), "utf8"))
     )
@@ -776,7 +776,7 @@ describe("DoD1 — snapshot RenderedDocument từ fixture 19 màn", () => {
 
 // ─── FLF-265 §3.2 + §3.5: ngôn ngữ tài liệu ≠ ngôn ngữ gốc — bản xem đã dịch, không qua cache ──
 
-describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dịch)", () => {
+describe("FLF-265 - tài liệu theo ngôn ngữ dự án (bản xem đã dịch)", () => {
   const LANG_VI = { locale: "vi", source: "en" } as const
   const NOW = () => new Date("2026-09-15T00:00:00.000Z")
   const fixture19 = (): Spine =>
@@ -923,7 +923,7 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
     expect(terms.some((m) => m.includes('"XYZ"'))).toBe(false)
   })
 
-  it("chỉ caller bật reuseTranslated (GET /document) mới dùng lại bản đã dựng — export (không bật / freshTemplate) dựng mới, ảnh theo loader của chính nó", async () => {
+  it("chỉ caller bật reuseTranslated (GET /document) mới dùng lại bản đã dựng - export (không bật / freshTemplate) dựng mới, ảnh theo loader của chính nó", async () => {
     vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 52, diagrams: [contextDiagram] }))
     const resolveTranslations = overlay()
     // GET: ảnh dạng tham chiếu, bản dựng được nhớ
@@ -979,7 +979,7 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
     ])
   })
 
-  describe("FLF-383 — bản dịch lưu trong rendered_documents, sống qua restart", () => {
+  describe("FLF-383 - bản dịch lưu trong rendered_documents, sống qua restart", () => {
     const translatedRows = () => cacheDb.docs.filter((d) => "locale" in d)
     /** Giả lập tiến trình mới: mọi bộ nhớ RAM rỗng, DB giữ nguyên. */
     const restart = () => {
@@ -987,7 +987,7 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
       clearChangeLogs()
     }
 
-    it("draft: lượt sau restart đọc hàng đã lưu — không tải Spine, không đọc changes, body như bản dựng", async () => {
+    it("draft: lượt sau restart đọc hàng đã lưu - không tải Spine, không đọc changes, body như bản dựng", async () => {
       vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 61 }))
       const resolveTranslations = overlay()
       const first = await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI, reuseTranslated: true }, { resolveTranslations })
@@ -1091,7 +1091,7 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
 
   it("ảnh chưa có PNG ⇒ placeholder, chú thích tiếng Việt (draft + baseline)", async () => {
     const resolveTranslations = overlay()
-    const pending = "Hình — Sơ đồ ngữ cảnh hệ thống — ảnh đang chờ: sơ đồ D01 chưa được render"
+    const pending = "Hình - Sơ đồ ngữ cảnh hệ thống - ảnh đang chờ: sơ đồ D01 chưa được render"
     vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 81, diagrams: [contextDiagram] }))
     const draft = await getDocument(PROJECT, "Demo", { source: "draft", languages: LANG_VI }, { resolveTranslations, loadDiagramPng: async () => null })
     expect(imagesOf(draft)).toEqual([{ type: "image", png: DIAGRAM_PLACEHOLDER_PNG, caption: pending }])
@@ -1113,7 +1113,7 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
     expect(result.translation).toEqual({ locale: "vi", source_locale: "en", missing: units.length - 1 })
   })
 
-  describe("N1 — ảnh sơ đồ theo ngôn ngữ", () => {
+  describe("N1 - ảnh sơ đồ theo ngôn ngữ", () => {
     /** Fixture 19 màn với `diagrams[]` vẽ bằng renderer hiện tại (như sau một lượt vẽ thật). */
     const renderedFixture = (): Spine => {
       const spine = fixture19()
@@ -1228,7 +1228,7 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
     })
   })
 
-  it("chưa có Spine ⇒ NoWorkingDraftError; baseline không có ⇒ 404 — như đường gốc, không tra lớp bản dịch", async () => {
+  it("chưa có Spine ⇒ NoWorkingDraftError; baseline không có ⇒ 404 - như đường gốc, không tra lớp bản dịch", async () => {
     const resolveTranslations = overlay()
     vi.mocked(spineRepository.get).mockResolvedValue(null)
     await expect(getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI, reuseTranslated: true }, { resolveTranslations })).rejects.toBeInstanceOf(NoWorkingDraftError)

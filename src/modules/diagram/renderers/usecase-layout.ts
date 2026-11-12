@@ -41,6 +41,11 @@ export interface Relation {
   to: string
   kind: RelationKind
 }
+/** Generalization actor người → actor người (đường liền, tam giác rỗng ở `parent`), vẽ ngay trên sơ đồ use case. */
+export interface Generalization {
+  child: string
+  parent: string
+}
 export interface UseCaseDiagram {
   system: string
   /** Thứ tự dọc từ trên xuống. */
@@ -48,6 +53,11 @@ export interface UseCaseDiagram {
   actors: DiagramActor[]
   associations: Association[]
   relations: Relation[]
+  /**
+   * QLHS 11/11 bug #13: tài liệu upload vẽ cạnh kế thừa (vd mọi vai trò → `User`) ngay trên hình — không có hình phân cấp
+   * riêng. Actor cha ở cột sát khung, actor con ở cột ngoài cùng bên trái. Thiếu ⇒ hình như cũ.
+   */
+  generalizations?: Generalization[]
 }
 
 const TEXT_SIZE = 16
@@ -64,6 +74,15 @@ const MAX_ACTOR_LINES = 2
 /** Nhãn `<<include>>` / `<<extend>>` lệch phải đường dọc. */
 const RELATION_LABEL_OFFSET = 14
 const ACTOR_GAP_Y = 26
+/** Actor nhiều cha: thanh gom của cha thứ k lệch sang trái k bước; nhánh tới cha thứ k thấp hơn hông k bước. */
+const GENERALIZATION_BUS_STEP = 14
+const GENERALIZATION_STUB_STEP = 10
+/** Khoảng ngang giữa cột actor cha và cột actor con (cạnh generalization nằm trong khoảng này). */
+const GENERALIZATION_COLUMN_GAP = 110
+/** Đầu / cuối cạnh generalization cách hình que để không chạm tay / chữ. */
+const GENERALIZATION_PAD = 8
+/** Đoạn thân mang tam giác chung khi một actor cha có ≥ 2 actor con. */
+const GENERALIZATION_TRUNK = 36
 /** Khoảng cách actor ↔ khung: thử lần lượt tới khi `checkScene` sạch (đường thoải hơn thì không quệt chữ actor khác). */
 export const ACTOR_BOUNDARY_GAPS: readonly number[] = [120, 200, 300, 440]
 
@@ -210,16 +229,34 @@ const buildScene = (d: UseCaseDiagram, option: LayoutOption): Scene => {
   const right = d.actors.filter((a) => sideOf(a) === "right")
   const metrics = new Map(d.actors.map((a) => [a.id, figureMetrics(actorLines(a))]))
   const colWidth = (list: DiagramActor[]): number => Math.max(0, ...list.map((a) => metrics.get(a.id)!.width))
-  const leftX = -half - gap - colWidth(left) / 2
+  // Generalization (chỉ giữa hai actor bên trái): tầng = số tổ tiên có trên hình; tầng 0 sát khung, con ra ngoài
+  const generalizations = (d.generalizations ?? []).filter((g) => left.some((a) => a.id === g.child) && left.some((a) => a.id === g.parent) && g.child !== g.parent)
+  const parentOf = new Map(generalizations.map((g) => [g.child, g.parent]))
+  const level = (id: string): number => {
+    let n = 0
+    for (let cur = parentOf.get(id), seen = new Set([id]); cur !== undefined && !seen.has(cur); cur = parentOf.get(cur)) {
+      seen.add(cur)
+      n++
+    }
+    return n
+  }
+  const levels: DiagramActor[][] = []
+  for (const a of left) (levels[level(a.id)] ??= []).push(a)
+  const levelX: number[] = []
+  levels.forEach((list = [], i) => {
+    levelX[i] = i === 0 ? -half - gap - colWidth(list) / 2 : levelX[i - 1] - colWidth(levels[i - 1] ?? []) / 2 - GENERALIZATION_COLUMN_GAP - colWidth(list) / 2
+  })
   const rightX = half + gap + colWidth(right) / 2
 
   // Actor ở trung điểm các use case nó nối. Actor chen nhau thì gộp thành khối xếp liền, khối CĂN GIỮA quanh trung
   // bình vị trí mong muốn của các actor trong khối (không chỉ đẩy xuống): nhiều actor cùng nối một use case thì toả đều
   // trên dưới use case đó, đường association của actor ngoài cùng bớt dốc nên không quệt qua chữ actor kề bên.
-  const place = (list: DiagramActor[]): Map<string, number> => {
+  const place = (list: DiagramActor[], fallback: (id: string) => number | undefined = () => undefined): Map<string, number> => {
     const want = new Map(
       list.map((a): [string, number] => {
         const ys = d.associations.filter((x) => x.actorId === a.id).map((x) => rows[index.get(x.useCaseId) ?? 0]?.cy ?? BOUND_PAD_TOP)
+        // Actor con không còn use case riêng ⇒ đứng ngang actor cha
+        if (ys.length === 0 && fallback(a.id) !== undefined) return [a.id, fallback(a.id)!]
         return [a.id, (ys.length > 0 ? (Math.min(...ys) + Math.max(...ys)) / 2 : BOUND_PAD_TOP) - FIGURE.armY]
       })
     )
@@ -228,8 +265,9 @@ const buildScene = (d: UseCaseDiagram, option: LayoutOption): Scene => {
     )
     return new Map(blocks.flatMap((b) => b.items.map((item, i): [string, number] => [item.id, b.top + b.offsets[i]])))
   }
-  const tops = new Map([...place(left), ...place(right)])
-  const columnX = (a: DiagramActor): number => (sideOf(a) === "left" ? leftX : rightX)
+  const tops = new Map(place(right))
+  for (const list of levels) if (list) for (const [id, top] of place(list, (id) => tops.get(parentOf.get(id) ?? ""))) tops.set(id, top)
+  const columnX = (a: DiagramActor): number => (sideOf(a) === "left" ? levelX[level(a.id)] : rightX)
   const hand = (a: DiagramActor): [number, number] => [columnX(a) + (sideOf(a) === "left" ? FIGURE.arm / 2 : -FIGURE.arm / 2), tops.get(a.id)! + FIGURE.armY]
 
   scene.rect("system", -half, 0, 2 * half, boundBottom, { fill: FILL, container: true, name: d.system })
@@ -241,7 +279,43 @@ const buildScene = (d: UseCaseDiagram, option: LayoutOption): Scene => {
     const row = rows[index.get(link.useCaseId) ?? -1]
     if (!actor || !row) throw new Error(`usecase-layout: association ${link.actorId} → ${link.useCaseId} trỏ tới phần tử không có trong hình`)
     const to: [number, number] = [sideOf(actor) === "left" ? cx - rx : cx + rx, row.cy]
-    scene.line(`${link.actorId}~${link.useCaseId}`, hand(actor), to, { name: `${actor.name} — ${row.name}` })
+    scene.line(`${link.actorId}~${link.useCaseId}`, hand(actor), to, { name: `${actor.name} - ${row.name}` })
+  }
+
+  // Generalization kiểu "shared target" của UML, gồm các đoạn thẳng (kind này không cho đường gấp khúc): mỗi actor con
+  // một nhánh ngang từ hông hình que sang thanh dọc nằm giữa khe hai cột (tên actor không bao giờ lấn vào khe), thanh dọc
+  // gom mọi nhánh về ngang tay actor cha, rồi đoạn thân ngang mang MỘT tam giác rỗng chạm ngay trái tay actor cha.
+  const childrenOf = new Map<string, string[]>()
+  for (const g of generalizations) childrenOf.set(g.parent, [...(childrenOf.get(g.parent) ?? []), g.child])
+  // TechMart 11/11: actor có HAI cha trên hình (Customer → Guest theo file, Customer → User chỉ trên hình) ⇒ mỗi cha một
+  // thanh gom lệch nhau trong khe, nhánh của từng cha ở độ cao riêng dưới hông — không đoạn nào chồng lên nhau
+  const parentsOfChild = new Map<string, string[]>()
+  for (const g of generalizations) parentsOfChild.set(g.child, [...(parentsOfChild.get(g.child) ?? []), g.parent])
+  const busSlot = new Map<string, number>()
+  for (const parentId of childrenOf.keys()) {
+    const sameLevel = [...childrenOf.keys()].filter((id) => level(id) === level(parentId))
+    busSlot.set(parentId, sameLevel.indexOf(parentId))
+  }
+  for (const [parentId, kids] of childrenOf) {
+    const parent = d.actors.find((a) => a.id === parentId)!
+    const [pl, cl] = [level(parentId), level(parentId) + 1]
+    const tip: [number, number] = [columnX(parent) - FIGURE.arm / 2 - GENERALIZATION_PAD, tops.get(parentId)! + FIGURE.armY]
+    const childEdge = levelX[cl] + Math.max(FIGURE.arm, colWidth(levels[cl] ?? [])) / 2
+    const parentEdge = levelX[pl] - Math.max(FIGURE.arm, colWidth(levels[pl] ?? [])) / 2
+    const busX = Math.min((childEdge + parentEdge) / 2, tip[0] - GENERALIZATION_TRUNK) - (busSlot.get(parentId) ?? 0) * GENERALIZATION_BUS_STEP
+    const ys = [tip[1]]
+    for (const childId of kids) {
+      const child = d.actors.find((a) => a.id === childId)!
+      const lane = Math.max(0, (parentsOfChild.get(childId) ?? []).indexOf(parentId))
+      const hip: [number, number] = [columnX(child), tops.get(childId)! + FIGURE.bodyBottom + lane * GENERALIZATION_STUB_STEP]
+      ys.push(hip[1])
+      scene.line(`gen:${childId}>${parentId}`, hip, [busX, hip[1]], { name: `${child.name} → ${parent.name}` })
+    }
+    const [top, bottom] = [Math.min(...ys), Math.max(...ys)]
+    if (bottom - top > 0.5) scene.line(`gen:bus>${parentId}`, [busX, top], [busX, bottom], { name: `→ ${parent.name} (thanh gom)` })
+    const trunk = `gen:*>${parentId}`
+    scene.line(trunk, [busX, tip[1]], tip, { name: `→ ${parent.name}` })
+    scene.arrow(trunk, "triangle")
   }
 
   for (const rel of d.relations) {
@@ -273,6 +347,8 @@ const buildScene = (d: UseCaseDiagram, option: LayoutOption): Scene => {
  * là actor phụ như officer / admin — sang phải; actor `system`/`time` vẫn bên phải. Không cần chia ⇒ `null`.
  */
 export const splitSides = (d: UseCaseDiagram): Map<string, ActorSide> | null => {
+  // Có generalization trên hình ⇒ mọi actor người bên trái, cạnh kế thừa không băng qua khung hệ thống
+  if ((d.generalizations ?? []).length > 0) return null
   const humans = d.actors.filter((a) => a.kind === "human")
   const humanIds = new Set(humans.map((h) => h.id))
   const shared = d.rows.some((r) => d.associations.filter((x) => x.useCaseId === r.id && humanIds.has(x.actorId)).length >= 2)

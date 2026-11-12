@@ -147,7 +147,7 @@ describe("getStep / phaseOf / nextStep", () => {
   })
 })
 
-describe("registry — Brief giữ tầm nhìn/mục tiêu ở addendum, S-1.1 dựng project.vision/goals", () => {
+describe("registry - Brief giữ tầm nhìn/mục tiêu ở addendum, S-1.1 dựng project.vision/goals", () => {
   it("B-1.1 không ghi project.vision/goals nhưng vẫn ghi addendum, other_requirements, assumptions", () => {
     expect(getStep("B-1.1").writes).toEqual(["addendum", "other_requirements", "assumptions"])
   })
@@ -165,7 +165,7 @@ describe("registry — Brief giữ tầm nhìn/mục tiêu ở addendum, S-1.1 d
 })
 
 describe("isPhaseUnit", () => {
-  it("nhận đơn vị giai đoạn, từ chối id bước — hai thứ khác nhau dù trông giống", () => {
+  it("nhận đơn vị giai đoạn, từ chối id bước - hai thứ khác nhau dù trông giống", () => {
     for (const unit of [...PHASES, "S-5@S03", "S-5@nonscreen"]) expect(isPhaseUnit(unit), unit).toBe(true)
     for (const step of ["B-1.1", "S-5.4@S03", "B-0.4"]) expect(isPhaseUnit(step), step).toBe(false)
   })

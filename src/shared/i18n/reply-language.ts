@@ -142,6 +142,30 @@ export const detectMessageLanguage = (input: string | null | undefined, options:
   return null
 }
 
+/**
+ * Đếm từ theo ngôn ngữ trong một đoạn chữ tài liệu (QLHS 11/11 bug #17 — C-5 bắt chữ viết khác ngôn ngữ tài liệu): `vi` = từ có
+ * dấu chỉ tiếng Việt mới có hoặc âm tiết Việt không dấu; `en` = từ tiếng Anh thông dụng (từ yếu "the/to…" chỉ tính khi đã có
+ * từ mạnh). Khác `detectMessageLanguage`: không bỏ tên riêng viết hoa — nơi gọi tự bỏ phần trích nguyên văn.
+ */
+export const wordLanguageCounts = (input: string): { words: number; vi: number; en: number } => {
+  const text = NOISE.reduce((acc, pattern) => acc.replace(pattern, " "), input.normalize("NFC"))
+  let words = 0
+  let vi = 0
+  let strong = 0
+  let weak = 0
+  for (const match of text.matchAll(WORD)) {
+    words += 1
+    const lower = match[0].toLowerCase()
+    if (VI_MARK.test(lower) || VI_PLAIN.has(stripMarks(lower))) vi += 1
+    else if (EN_WORDS.has(lower.replace(/’/g, "'"))) strong += 1
+    else if (EN_WEAK.has(lower)) weak += 1
+  }
+  return { words, vi, en: strong > 0 ? strong + weak : 0 }
+}
+
+/** Có chữ có dấu chỉ tiếng Việt mới có. */
+export const hasVietnameseMarks = (text: string): boolean => VI_MARK.test(text.normalize("NFC").toLowerCase())
+
 /** Ứng viên hợp lệ đầu tiên thắng (tin vừa gõ → ngôn ngữ phiên → ngôn ngữ tài khoản); không có ⇒ tiếng Việt. */
 export const resolveReplyLanguage = (...candidates: unknown[]): ReplyLanguage =>
   candidates.find(isUserLocale) ?? DEFAULT_REPLY_LANGUAGE
@@ -153,20 +177,20 @@ const DIRECTIVE: Readonly<Record<ReplyLanguage, string>> = {
   en: [
     "## Reply language",
     "",
-    "Reply language: **English**. Write everything the user reads in this turn in English — the reply, questions,",
+    "Reply language: **English**. Write everything the user reads in this turn in English - the reply, questions,",
     "option labels and descriptions, card headers, gate notes, clarification questions, reasons, and the user-facing",
-    "assumption texts (`statement_vi`, `rationale_vi`) — even when earlier turns, the document context or the examples",
+    "assumption texts (`statement_vi`, `rationale_vi`) - even when earlier turns, the document context or the examples",
     "above are in Vietnamese. Mark a recommended option with ` (Recommended)`. Leave unchanged: ids, keys, paths,",
     "`topic_key` values, every value the rules above keep in English or in the document's language, and the names of",
-    "buttons, panels and tabs the rules above quote from the interface — the interface is in Vietnamese, so quote them",
+    "buttons, panels and tabs the rules above quote from the interface - the interface is in Vietnamese, so quote them",
     "exactly as written (an English gloss in parentheses is fine)."
   ].join("\n"),
   vi: [
     "## Reply language",
     "",
-    "Reply language: **Vietnamese (tiếng Việt)**. Write everything the user reads in this turn in Vietnamese — the",
+    "Reply language: **Vietnamese (tiếng Việt)**. Write everything the user reads in this turn in Vietnamese - the",
     "reply, questions, option labels and descriptions, card headers, gate notes, clarification questions, reasons, and",
-    "the user-facing assumption texts (`statement_vi`, `rationale_vi`) — even when the latest message, earlier turns or",
+    "the user-facing assumption texts (`statement_vi`, `rationale_vi`) - even when the latest message, earlier turns or",
     "the document context are in English. Mark a recommended option with ` (Khuyến nghị)`. Leave unchanged: ids, keys,",
     "paths, `topic_key` values, and every value the rules above keep in English or in the document's language."
   ].join("\n")

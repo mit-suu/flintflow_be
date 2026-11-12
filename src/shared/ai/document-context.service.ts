@@ -98,6 +98,7 @@ export interface DocumentContextResult {
  * @param chatHistoryTokens - Token ước lượng của chat history hiện có (cho CHAT action)
  * @param modelName      - Tên model AI đang dùng (để tính context window)
  * @param maxOutputTokens - maxTokens output dự kiến (từ frontmatter của prompt/skill)
+ * @param filter         - `since`: chỉ tài liệu tải lên từ lúc này (lượt chat trả lời câu hỏi đang chờ — tài liệu mới đính kèm)
  */
 export const buildDocumentContext = async (
   projectId: string,
@@ -105,7 +106,8 @@ export const buildDocumentContext = async (
   stepId?: string,
   chatHistoryTokens: number = 0,
   modelName?: string,
-  maxOutputTokens: number = DEFAULT_MAX_OUTPUT_TOKENS
+  maxOutputTokens: number = DEFAULT_MAX_OUTPUT_TOKENS,
+  filter: { since?: Date } = {}
 ): Promise<DocumentContextResult> => {
   const empty: DocumentContextResult = {
     contextText: "",
@@ -126,9 +128,12 @@ export const buildDocumentContext = async (
 
   // FLF-292: tài liệu cũ chưa có số ⇒ gán bù trước khi đọc, để mã đoạn trong prompt ổn định qua các lượt
   await assignDocCodes(projectId)
+  // FLF-398: bản đã bị thay (người dùng chọn "Thay bản cũ") không vào ngữ cảnh model — chỉ bản đang dùng
   const documents = await ProjectDocument.find({
     projectId,
-    parseStatus: "success"
+    parseStatus: "success",
+    supersededBy: null,
+    ...(filter.since ? { createdAt: { $gte: filter.since } } : {})
   })
     .select("_id originalName extractedText summary summaryStatus tokenCount docCode")
     .sort({ docCode: 1, createdAt: 1 })
@@ -145,7 +150,7 @@ export const buildDocumentContext = async (
   const availableBudget = contextWindow - SAFETY_BUFFER_TOKENS - systemPromptEstimate - chatHistoryTokens - maxOutputTokens
 
   if (availableBudget <= 0) {
-    console.warn(`[DocumentContext] Token budget exhausted (available=${availableBudget}) — skipping document context`)
+    console.warn(`[DocumentContext] Token budget exhausted (available=${availableBudget}) - skipping document context`)
     return empty
   }
 
@@ -191,7 +196,7 @@ export const buildDocumentContext = async (
 
     // Dừng nếu thêm document này sẽ vượt budget
     if (totalTokens + snippetTokens > availableBudget) {
-      console.warn(`[DocumentContext] Budget limit reached at doc "${docName}" — truncating document list`)
+      console.warn(`[DocumentContext] Budget limit reached at doc "${docName}" - truncating document list`)
       break
     }
 

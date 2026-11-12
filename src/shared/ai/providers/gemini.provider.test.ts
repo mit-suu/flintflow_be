@@ -12,7 +12,7 @@ const ok = { data: { candidates: [{ content: { parts: [{ text: "{}" }] }, finish
 
 beforeEach(() => post.mockReset().mockResolvedValue(ok))
 
-describe("callGemini — ảnh (mode 1 v3 phase 5)", () => {
+describe("callGemini - ảnh (mode 1 v3 phase 5)", () => {
   it("ảnh đi sau chữ dạng inline_data base64; không ảnh ⇒ chỉ một part chữ", async () => {
     await callGemini("Read this", { provider: "gemini", model: "gemini-3.5-flash" }, { images: [{ mime: "image/png", data: "iVBORw0K" }] })
     expect(post.mock.calls[0][1].contents).toEqual([{ parts: [{ text: "Read this" }, { inline_data: { mime_type: "image/png", data: "iVBORw0K" } }] }])
@@ -21,7 +21,7 @@ describe("callGemini — ảnh (mode 1 v3 phase 5)", () => {
   })
 })
 
-describe("callLLM — ảnh chỉ cho provider có vision", () => {
+describe("callLLM - ảnh chỉ cho provider có vision", () => {
   it("gửi ảnh cho glm ⇒ AI_PROVIDER_NO_VISION (không gọi mạng); gemini ⇒ đi qua", async () => {
     await expect(callLLM("x", { provider: "glm", model: "" }, { images: [{ mime: "image/jpeg", data: "/9j/" }] })).rejects.toMatchObject({ code: "AI_PROVIDER_NO_VISION" })
     expect(post).not.toHaveBeenCalled()
@@ -35,7 +35,7 @@ const HIGH_DEMAND = "This model is currently experiencing high demand. Spikes in
 const modelOf = (call: unknown[]) => /models\/([^:]+):/.exec(String(call[0]))?.[1]
 const cfg = { provider: "gemini", model: "gemini-3.5-flash", fallbackModels: ["gemini-3.6-flash", "gemini-3.5-flash-lite"] }
 
-describe("callGemini — model dự phòng khi quá tải", () => {
+describe("callGemini - model dự phòng khi quá tải", () => {
   it("model chính 503 ⇒ chuyển model dự phòng đầu tiên; trả `model` đã trả lời", async () => {
     post.mockRejectedValueOnce(httpError(503, HIGH_DEMAND)).mockResolvedValueOnce(ok)
     await expect(callGemini("x", cfg)).resolves.toMatchObject({ model: "gemini-3.6-flash", promptTokens: 300 })

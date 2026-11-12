@@ -30,7 +30,7 @@ const refreshTokenOf = (res: request.Response): string => {
 // UC-06 Log Out
 // ═══════════════════════════════════════════════════════════════════
 
-describe("UC-06 — đăng xuất", () => {
+describe("UC-06 - đăng xuất", () => {
   const EMAIL = "logout-user@flintflow.test"
   let userId: string
 
@@ -152,7 +152,7 @@ describe("UC-06 — đăng xuất", () => {
 // UC-15 Remove Organization Member
 // ═══════════════════════════════════════════════════════════════════
 
-describe("UC-15 — xoá thành viên tổ chức", () => {
+describe("UC-15 - xoá thành viên tổ chức", () => {
   interface Actor {
     id: string
     email: string
@@ -215,7 +215,7 @@ describe("UC-15 — xoá thành viên tổ chức", () => {
     expect(org.body.error.code).toBe("ORG_NOT_FOUND")
   })
 
-  it("BR-02 — Lead duy nhất không bị xoá ⇒ 409 LAST_LEAD, org vẫn còn Lead", async () => {
+  it("BR-02 - Lead duy nhất không bị xoá ⇒ 409 LAST_LEAD, org vẫn còn Lead", async () => {
     await join("viewer@flintflow.test", "viewer")
 
     const res = await remove(lead.id, lead)
@@ -224,7 +224,7 @@ describe("UC-15 — xoá thành viên tổ chức", () => {
     expect(await Membership.countDocuments({ organizationId: seeded.orgId, role: "lead" })).toBe(1)
   })
 
-  it("BR-02 — đã có Lead thứ hai thì xoá được một Lead", async () => {
+  it("BR-02 - đã có Lead thứ hai thì xoá được một Lead", async () => {
     const secondLead = await join("lead2@flintflow.test", "lead")
 
     const res = await remove(lead.id, secondLead)
@@ -266,7 +266,7 @@ describe("UC-15 — xoá thành viên tổ chức", () => {
 // UC-58 View User List
 // ═══════════════════════════════════════════════════════════════════
 
-describe("UC-58 — xem danh sách người dùng", () => {
+describe("UC-58 - xem danh sách người dùng", () => {
   let adminToken: string
   let ids: Record<"admin" | "alice" | "bob" | "carol", string>
 
@@ -387,7 +387,7 @@ describe("UC-58 — xem danh sách người dùng", () => {
 // UC-65 View User Feedback
 // ═══════════════════════════════════════════════════════════════════
 
-describe("UC-65 — xem góp ý của người dùng", () => {
+describe("UC-65 - xem góp ý của người dùng", () => {
   let adminToken: string
   let adminId: string
 

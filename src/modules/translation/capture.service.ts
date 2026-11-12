@@ -119,7 +119,7 @@ export const captureLocalized = async (
     }
     return units.length
   } catch (err) {
-    console.warn("[captureLocalized] Không lưu được bản dịch kèm lượt ghi — các câu này thành 'thiếu':", err)
+    console.warn("[captureLocalized] Không lưu được bản dịch kèm lượt ghi - các câu này thành 'thiếu':", err)
     return 0
   }
 }

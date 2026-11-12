@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { markdownToBlocks } from "./markdown-to-blocks.js"
 
-describe("markdownToBlocks — ca biên (review T05)", () => {
+describe("markdownToBlocks - ca biên (review T05)", () => {
   it("đoạn có `|` rồi đường kẻ `---` không bị hiểu thành bảng", () => {
     const blocks = markdownToBlocks("Input | Output mapping\n---\nNext paragraph")
     expect(blocks.map((b) => b.type)).toEqual(["paragraph", "paragraph"])

@@ -39,18 +39,18 @@ Definitions, examples and when each applies: `references/lenses.md`.
 
 | Lens | Used by |
 | --- | --- |
-| `ambiguity` — vague or untestable wording | every step's Review; S-9.2 |
-| `fr_nfr_conflict` — function contradicts an NFR | S-9.2 |
-| `security_risk` — missing authz, sensitive data handling | S-9.2 |
-| `semantic_duplicate` — two elements say the same thing | S-8.4 (`consistency_pass`) |
-| `term_drift` — prose uses a name that differs from the keyed name / glossary | S-8.4 (`consistency_pass`) |
-| `goal_coverage` — a business goal no function or NFR serves | S-9.3 |
+| `ambiguity` - vague or untestable wording | every step's Review; S-9.2 |
+| `fr_nfr_conflict` - function contradicts an NFR | S-9.2 |
+| `security_risk` - missing authz, sensitive data handling | S-9.2 |
+| `semantic_duplicate` - two elements say the same thing | S-8.4 (`consistency_pass`) |
+| `term_drift` - prose uses a name that differs from the keyed name / glossary | S-8.4 (`consistency_pass`) |
+| `goal_coverage` - a business goal no function or NFR serves | S-9.3 |
 
 ## Rules
 
 1. Apply **only** the lenses listed in *Lenses to apply*.
 2. **Level is always `yellow`.** Never output `red`.
-3. `rule_id` = the lens name. `section_id` = logical key (`function:FN07`, `fixed:4.2.3`) — never a section number.
+3. `rule_id` = the lens name. `section_id` = logical key (`function:FN07`, `fixed:4.2.3`) - never a section number.
 4. `message` in the **user's language**: name the element, quote the problem phrase (in English as written), and say what would fix it. One problem per flag.
 5. **Be specific or stay silent.** "Could be clearer" is not a flag. No flag without a concrete quote or element id.
 6. Do not repeat anything already in *Already open flags*.
@@ -69,7 +69,7 @@ Return **only** JSON, no fence, no commentary.
       "level": "yellow",
       "rule_id": "ambiguity",
       "section_id": "function:FN07",
-      "message": "Validation \"amount must be reasonable\" không kiểm thử được — nêu giới hạn cụ thể (vd ≤ 50,000,000 VND)."
+      "message": "Validation \"amount must be reasonable\" không kiểm thử được - nêu giới hạn cụ thể (vd ≤ 50,000,000 VND)."
     }
   ]
 }

@@ -219,13 +219,13 @@ const draftBatch = async (
       await cr.save()
       return "paused"
     }
-    console.warn(`[C-4] ${cr.cr_id}: soạn lô ${VERB_OF[intent]} use case lỗi (${err.message}) — đề xuất theo từng vị trí`)
+    console.warn(`[C-4] ${cr.cr_id}: soạn lô ${VERB_OF[intent]} use case lỗi (${err.message}) - đề xuất theo từng vị trí`)
     return "skipped"
   }
   if (drafted.clarification || !drafted.ops.length) return "skipped"
   const batch = concreteBatch(spine, drafted.ops)
   if (!batch) {
-    console.warn(`[C-4] ${cr.cr_id}: lô ${VERB_OF[intent]} use case không áp thử được — đề xuất theo từng vị trí`)
+    console.warn(`[C-4] ${cr.cr_id}: lô ${VERB_OF[intent]} use case không áp thử được - đề xuất theo từng vị trí`)
     return "skipped"
   }
   return { drafted, batch }
@@ -267,7 +267,7 @@ const attachBatch = async (
   // baseline hỏi giữ / bỏ, CR không có lượt hỏi đó) ⇒ giả định của vị trí use case để Lead xác nhận khi duyệt
   const notes = [
     ...(drafted.notes?.trim() ? [drafted.notes.trim()] : []),
-    ...(drafted.proposed ?? []).map((name) => `AI đề xuất thêm use case "${name}" để luồng có người xử lý / theo dõi — bỏ nếu không cần`)
+    ...(drafted.proposed ?? []).map((name) => `AI đề xuất thêm use case "${name}" để luồng có người xử lý / theo dõi - bỏ nếu không cần`)
   ]
   const noteHolder = bundle.find((b) => b.path === "use_cases[]") ?? bundle.find((b) => b.path.startsWith("use_cases[id="))
   for (const b of bundle) {
@@ -275,6 +275,7 @@ const attachBatch = async (
     loc.conclusion = "edit"
     loc.reason = REASON_OF[intent]
     loc.proposal = {
+      proposed_at: new Date(),
       ...snapshotOf(spine, b.path),
       new_text: bundleNewText(spine, batch.after, b.path),
       comment_text: null,

@@ -323,8 +323,8 @@ Plan: `claude_plan/mode1-v3/phase-2-be-flow3.md`.
 Plan: `claude_plan/mode1-v3/phase-5-vision.md`.
 
 - **Ảnh gốc (T3)**: block ảnh của file upload giữ `image_ref` (part `word/media/*`). Ảnh dưới mục FPT không được thay bằng diagram ⇒ phần nối nguyên văn của mục (`custom_sections[].blocks[].image_ref`); bản render (0.0, bản làm việc, version CR) nhúng lại **đúng ảnh gốc** (PNG/JPEG). EMF/WMF / file gốc không còn ⇒ chỗ giữ ảnh + chú thích `original image could not be embedded (<part>)`.
-- **I-4 phần ảnh (1.8)**: `call_kind` mới **`import_extract_diagram`** (2 credit/ảnh, Gemini) — chỉ cho ảnh ở mục diagram (`fixed:1`, `2.1`, `2.2.1`, `2.2.2`, `3.1.1`, `3.1.5`), sau bảng tất định, trước lô chữ; `step_id` usage vẫn `I-4:<section>`. Hết credit ⇒ `paused` như lô chữ. Lỗi AI khác sau mọi lượt thử (2026-09-24: Gemini quá tải cả model dự phòng) ⇒ **không dừng** I-4: ảnh ghi `kind: unavailable`, giữ ảnh gốc + cờ vàng `import_image_unread` ("AI đọc ảnh đang quá tải"). FLF-360: lỗi tạm thời ⇒ `unavailable`, đọc lại sau khi chạy hết các mục (tối đa `IMPORT_AI_RETRY_BACKOFF_MS` lượt, giãn dần; #4 `reread`); vẫn chưa được ⇒ job nền đọc lại sau bản 0.1. Lỗi không tự khỏi ⇒ `kind: failed` (không đọc lại). Lô chữ lỗi tạm thời đọc lại cùng số lượt rồi mới `paused: resume_later`.
-  Môi trường không có vision (`GEMINI_KEY_MISSING`, `AI_PROVIDER_NO_VISION`) ⇒ không dừng: ảnh coi như định dạng không hỗ trợ (giữ ảnh + cờ vàng).
+- **I-4 phần ảnh (1.8)**: `call_kind` **`import_extract_diagram`** (2 credit/ảnh, Anthropic `claude-haiku-5-5`) — chỉ cho ảnh ở mục diagram (`fixed:1`, `2.1`, `2.2.1`, `2.2.2`, `3.1.1`, `3.1.5`), sau bảng tất định, trước lô chữ; `step_id` usage vẫn `I-4:<section>`. Hết credit ⇒ `paused` như lô chữ. Lỗi AI khác sau mọi lượt thử ⇒ **không dừng** I-4: giữ ảnh gốc + cờ vàng `import_image_unread` ("AI đọc ảnh đang quá tải"). FLF-360: lỗi tạm thời ⇒ `kind: unavailable`, đọc lại sau khi chạy hết các mục (tối đa `IMPORT_AI_RETRY_BACKOFF_MS` lượt, giãn dần; #4 `reread`); vẫn chưa được ⇒ job nền đọc lại sau bản 0.1. Lỗi không tự khỏi ⇒ `kind: failed` (không đọc lại). Lô chữ lỗi tạm thời đọc lại cùng số lượt rồi mới `paused: resume_later`. Hai action đọc ảnh không dự phòng sang Gemini; embedding giữ nguyên cấu hình riêng.
+  Môi trường không có vision (`ANTHROPIC_KEY_MISSING`, `GEMINI_KEY_MISSING`, `AI_PROVIDER_NO_VISION`) ⇒ không dừng: ảnh coi như định dạng không hỗ trợ (giữ ảnh + cờ vàng).
 - **Field từ ảnh**: `ReviewField.origin` thêm **`vision`**. Độ tin ≤ 0.7 và **luôn** vào `review_fields` (1.9) kể cả bằng ngưỡng — chưa xác nhận thì finalize bỏ. Danh sách tham chiếu (`actor_ids`, `includes`, `extends`, `relations`, `flow_to`) từ nhiều nguồn gộp hợp. `screens.flow_to` được trích.
 - **Finalize (1.10)** — **đổi ở §4.13** (giữ ảnh gốc): ảnh đọc được (use case / ERD / luồng màn / ngữ cảnh) ⇒ bỏ ảnh gốc, diagram PlantUML vẽ từ Spine thay; ảnh ở mục diagram không đọc được (`other` / định dạng không hỗ trợ) ⇒ giữ ảnh gốc + **cờ vàng `rule_id: import_image_unread`** (model-owned, recompute không đóng).
 
@@ -334,7 +334,7 @@ Plan: `claude_plan/mode1-v3/phase-7-cr-thieu-thong-tin.md`. Không thêm cạnh 
 
 - **Tài liệu bổ sung** (`ChangeRequestDto.materials[]`): `{ material_id: "M01", kind: text | file | image, name, text, truncated, round, added_at }`. Chỉ lưu chữ (≤ 20 000 ký tự, dài hơn thì cắt + `truncated`); `round` 0 = đính kèm lúc tạo, `n` = khi trả lời vòng `n`. Tối đa 10/CR. Chữ đi vào prompt 3.2, 3.6, 3.9 (tổng ≤ 12 000 ký tự/prompt).
   - `POST /change-requests` thêm `materials?: [{ name, text }]` (≤ 5 đoạn dán).
-  - **Mới** `POST /change-requests/:crId/materials` — JSON `{ name, text }` hoặc multipart `file` (.docx/.pdf/.txt/.md tách chữ tại chỗ; PNG/JPEG ⇒ `call_kind` mới **`cr_material_image`**, 1 credit, Gemini, usage `step_id: C-1:<cr_id>`; hết credit ⇒ 402, lỗi AI ⇒ 502, không lưu). Chỉ ở `draft` / `awaiting_answers`, khác ⇒ 409 `CR_INVALID_TRANSITION`. Trả 201 + chi tiết CR. Lỗi mới: 409 `CR_MATERIAL_LIMIT`, 422 `CR_MATERIAL_UNSUPPORTED`, 422 `CR_MATERIAL_EMPTY`.
+  - **Mới** `POST /change-requests/:crId/materials` — JSON `{ name, text }` hoặc multipart `file` (.docx/.pdf/.txt/.md tách chữ tại chỗ; PNG/JPEG ⇒ `call_kind` mới **`cr_material_image`**, 1 credit, Anthropic `claude-haiku-5-5`, usage `step_id: C-1:<cr_id>`; hết credit ⇒ 402, lỗi AI ⇒ 502, không lưu). Chỉ ở `draft` / `awaiting_answers`, khác ⇒ 409 `CR_INVALID_TRANSITION`. Trả 201 + chi tiết CR. Lỗi mới: 409 `CR_MATERIAL_LIMIT`, 422 `CR_MATERIAL_UNSUPPORTED`, 422 `CR_MATERIAL_EMPTY`.
   - **Mới** `DELETE /change-requests/:crId/materials/:mid` — cùng điều kiện trạng thái; không có ⇒ 404 `CR_MATERIAL_NOT_FOUND`.
 - **3.3**: `answers[]` nhận chuỗi **rỗng** (= "chưa biết"); vẫn phải đủ số câu, đúng thứ tự.
 - **Đáp án gợi ý**: `ChangeRequestDto.clarifications[].suggestions: string[][]` — song song `questions`, 0–4 đáp án AI gợi ý mỗi câu (`[]` nếu không có; CR cũ ⇒ `[]`). Chỉ để FE điền nhanh; BE nhận câu trả lời là chữ như cũ.
@@ -458,6 +458,8 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-11-12 | FLF-403 (thư viện mẫu tải dần) | Additive: `GET /orgs/:orgId/templates` nhận `?page`, `limit` (≤ 50, mặc định 20), `q`, `sort` (`uses` · `recent` · `name`); có `page` ⇒ trả một trang + `meta { page, limit, total, totalPages }`, `q` tìm không phân biệt dấu theo tên mẫu / tên file. Không có `page` ⇒ y như cũ (mảng, tối đa 100) cho ô chọn mẫu lúc tạo dự án |
+| 2026-11-12 | contract-change FLF-403 (gỡ thư viện nội dung tổ chức) | **Breaking, bỏ endpoint**: `/orgs/:orgId/content-library` (GET/POST/PATCH/DELETE), #8e `GET /projects/:id/library-matches`, #8f `POST /projects/:id/library`; mã lỗi `ORG_CONTENT_DUPLICATE`, `ORG_CONTENT_NOT_FOUND`, `CUSTOM_SECTION_EMPTY`, `CUSTOM_SECTION_NOT_FOUND` không còn. Lý do: nội dung mục riêng (References, Document Conventions…) thuộc từng dự án, khớp theo tiêu đề giữa các dự án là sai giả định; phần dùng lại được là khung mẫu (`OrgTemplate`). Collection `org_content_entries` không còn được đọc / ghi |
 | 2026-11-06 | FLF-360 (AI quá tải lúc import: tự đọc lại) | Additive: #4 trả thêm `reread: { kind: "images" \| "text", done, total, section_id } \| null` (đang đọc lại — FE hiện "Đang đọc lại ảnh N/M"). Hành vi §4.10: lô chữ lỗi tạm thời (quá tải, 503, 429 không phải hết tiền, timeout, mạng) đọc lại tối đa 3 lượt giãn dần rồi mới `paused: resume_later`; ảnh `unavailable` đọc lại sau khi chạy hết các mục; lỗi AI không tự khỏi ghi `diagram_images.kind = failed` (không đọc lại). Ảnh vẫn chưa đọc được sau bản 0.1 ⇒ job nền `import/reread-images` đọc lại theo lịch, ghi lô `by: import` (không version mới), đóng cờ `import_image_unread`. `credit_estimate` tính cả ảnh chờ đọc lại |
 | 2026-11-06 | FLF-278 (dự án "Upload SRS có sẵn": tải về giống file upload) | Hành vi, không đổi shape: export / version của dự án có sẵn (mẫu công ty hoặc cấu trúc FlintFlow đủ mục) dùng file upload làm nền, mục chưa đổi in nguyên văn, bảng lịch sử không thêm dòng import; SRS có field không còn 422. Xem §FLF-278 "Dự án Upload SRS có sẵn" |
 | 2026-11-05 | FLF-278 (kết quả đọc theo loại dự án; bảng mẫu trống) | Hành vi, không đổi shape: #8b chỉ cho dự án mới theo mẫu bắt buộc (dự án có sẵn ⇒ `409 IMPORT_INVALID_STATE`); #8 `complete: true` ở `incomplete` bị chặn với dự án mới theo mẫu bắt buộc (`409`, `meta.allowed = ["drafting"]`). Bảng mẫu chỉ có tiêu đề + hàng chỗ trống tính là trống ở I-5 / cờ `template_section_empty`, không sinh item ở I-4. Xem §FLF-278 "Luồng 2 cho phần thiếu" |
@@ -557,14 +559,10 @@ baseline 1.0 ⇒ FLF-318 đưa dự án về mode 1, lần import mẫu `draftin
 |---|---|---|---|
 | `POST /projects/:id/import/save-to-org` | lead, analyst | `{ name }` | 201 `OrgTemplateSummary` (lưu bản sao file mẫu + mapping đã xác nhận); `409 IMPORT_INVALID_STATE` khi chưa qua 1.5 |
 | `POST /projects/:id/import/from-org` | lead, analyst | `{ org_template_id, intent? }` | 201 `{ import }` — import từ file đã lưu, không hỏi "bản mới nhất", mapping áp sẵn; `404 ORG_TEMPLATE_NOT_FOUND` (kể cả tổ chức khác) |
-| `GET /orgs/:orgId/templates` · `DELETE …/:templateId` | thành viên · lead, analyst | — | `OrgTemplateSummary[]` · `{ deleted }` |
-| `GET /orgs/:orgId/content-library` · `POST` · `PATCH …/:entryId` · `DELETE …/:entryId` | thành viên · lead, analyst | `{ title, blocks[] }` | `ContentEntry`; trùng tiêu đề chuẩn hoá ⇒ ghi đè (POST) / `409 ORG_CONTENT_DUPLICATE` (PATCH) |
-| `GET /projects/:id/library-matches` | thành viên | — | `[{ custom_section_id, heading, empty, entry }]` |
-| `POST /projects/:id/library` | lead, analyst | `{ custom_section_id }` | 201 `ContentEntry`; `422 CUSTOM_SECTION_EMPTY` |
+| `GET /orgs/:orgId/templates` · `DELETE …/:templateId` | thành viên · lead, analyst | query `page?`, `limit?`, `q?`, `sort?` (FLF-403) | `OrgTemplateSummary[]` (+ `meta` khi có `page`) · `{ deleted }` |
 | `GET /admin/template-gaps?limit=` | admin | — | `{ projects, rows[{ key, samples, projects, empty, suggested_destination }] }` |
 
-Áp nội dung thư viện: trước baseline FE gửi lô `set custom_sections[id=…]` qua `POST /changes/preview` + `POST /changes {ops, preview_id}`
-(không gọi model); sau baseline FE điền sẵn lệnh vào chat ⇒ change request như mọi lệnh sửa.
+Thư viện nội dung tổ chức (`content-library`, `library-matches`, `POST /library`) đã gỡ ở FLF-403 — xem nhật ký đầu file.
 
 ### Dự án "Upload SRS có sẵn": tải về giống file upload (2026-11-06, không đổi shape)
 
@@ -711,7 +709,21 @@ Cả hai đều không tự chuyển sang mẫu chuẩn FlintFlow.
   - `display { kind, label, change: edit|add|remove|comment|none, before, after }` — tên chỗ + nội dung trước / sau dạng câu,
     không mã nội bộ (`kind` = tên mảng Spine hoặc `paragraph` · `table` · `image`). FE hiện cái này thay vì ghép path / id.
     `after = null` ở `edit` = đề xuất chưa chạy thử được (không phải xoá).
-  - `conflict { at_proposal, current, proposal, changed_by, changed_at } | null` — so sánh 3 cột khi xác nhận bị người khác sửa.
+  - `conflict { at_proposal, current, proposal, changed_by, changed_at, proposed_at, question } | null` — so sánh 3 cột khi xác
+    nhận bị người khác sửa. `proposed_at` = lúc AI soạn ① (FE in "① Lúc AI soạn (9:00)" / "② Hiện tại (BA2, 9:15)" và tô màu
+    ① so ② / ① so ③ như Track Changes). `question { text, suggestions } | null`: gọi `owner-step-draft` ("AI soạn lại trên nội
+    dung hiện tại") mà yêu cầu gốc **đụng thẳng** phần người kia vừa sửa ⇒ BE **không gọi model**, đặt câu hỏi + 2 gợi ý
+    (BF §3.2 "AI hỏi lại trong chat, không tự chọn"); client gọi lại `owner-step-draft` với `instruction` = câu trả lời ⇒ AI soạn,
+    `conflict` về `null`. `LocationProposal.proposed_at` ghi ở mọi chỗ AI soạn đề xuất.
+- (11/11 chiều, BF §3.2) `ChangeRequest.created_by_name` (tuỳ chọn) — tên BA giữ đề xuất. `POST …/submit` của người **không
+  phải** người tạo CR ⇒ **403 `CR_NOT_REQUESTER`** ("Đề xuất này đang treo ở <ai> — chỉ người đó xác nhận được"). Lúc ghi mà
+  luật Spine gãy trên nội dung hiện tại (`TransactionRejectedError`) ⇒ không còn 422 thô: CR chạy lại kiểm (C-5), chỗ gãy mang
+  cờ đỏ (`verify.violations`), trạng thái theo luật kiểm (`proposing` / `manual_fix`); người khác ghi đúng lúc (lệch
+  `spine_version`) ⇒ BE tự kiểm lại trên bản mới một lần rồi ghi ("ai xác nhận trước thì ghi trước").
+- Endpoint mới `GET …/change-requests/pending-sections` ⇒ `PendingSection[] { section_id, title, items[{ cr_id, who }] }`:
+  mục đang có đề xuất (`edit` / `comment`) của CR chưa đóng, `who` = tên BA tạo CR (fallback `requester`). FE in dưới tiêu đề
+  mục trong tài liệu: "<ai> (CR-003) có bản sửa chưa xác nhận ở mục này" (BF §3.2). `others_pending[].requester` trong chi
+  tiết CR nay cũng là tên BA tạo CR.
   - `others_pending [{ cr_id, requester }]` — CR khác chưa đóng có đề xuất ở cùng phần tử.
   - `keyword_score?`, `recall_score?` (`FoundLocation` nội bộ) — C-3 xếp hạng từ khoá bằng BM25, trộn với vector bằng RRF;
     `found_by: keyword` nay giữ cả khi có vector.

@@ -42,5 +42,5 @@ stub: false
 ## Layout
 
 - Grid placement by parent → child rank; right-angle lines only (`allowBends`), straight when nothing is in the way, otherwise L / Z / U bends. No line through a shape or text, no overlapping lines (`checkScene` issues must be empty). Self relations are a small U loop on one side.
-- More than 25 classes in a feature ⇒ split (connected components packed, a larger one cut breadth-first, relations across a cut not drawn); a diagram that fails the geometry check is split again. Title `Class Diagram — <feature> (i/n)`; the first part of each feature keeps the original diagram id.
+- More than 25 classes in a feature ⇒ split (connected components packed, a larger one cut breadth-first, relations across a cut not drawn); a diagram that fails the geometry check is split again. Title `Class Diagram - <feature> (i/n)`; the first part of each feature keeps the original diagram id.
 - All fills `#7ACFF5`, stroke / text black. Samples: `docs/diagram_guideline/class/`, `docs/diagram_image_test/class/`.

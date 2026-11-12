@@ -107,7 +107,7 @@ beforeEach(() => {
 
 // ─── UC-27 ──────────────────────────────────────────────────────────
 
-describe("UC-27 — nhập yêu cầu stakeholder (B-0.1)", () => {
+describe("UC-27 - nhập yêu cầu stakeholder (B-0.1)", () => {
   it("nhập ghi chú cuộc họp ⇒ tin vào transcript B-0.1, AI đọc đúng tin, bóc thành addendum và dừng ở cổng chốt ý tưởng", { timeout: 60_000 }, async () => {
     const seeded = await seedFixture("minimal", { mutate: emptyBrief })
     const prompts: { kind: string; step: string | null; text: string }[] = []
@@ -197,7 +197,7 @@ describe("UC-27 — nhập yêu cầu stakeholder (B-0.1)", () => {
 
 // ─── UC-28 ──────────────────────────────────────────────────────────
 
-describe("UC-28 — hoàn thiện Product Brief (B-0 … B-1)", () => {
+describe("UC-28 - hoàn thiện Product Brief (B-0 … B-1)", () => {
   it("AI hỏi điều còn thiếu; trả lời qua /answer ⇒ ghi sổ quyết định, soạn tới cổng; mỗi lượt gọi giữ rồi trừ đúng credit (UC-57)", { timeout: 60_000 }, async () => {
     const seeded = await seedFixture("minimal", { mutate: emptyBrief })
     mockOverrides.next = (prompt) => {
@@ -329,7 +329,7 @@ describe("UC-28 — hoàn thiện Product Brief (B-0 … B-1)", () => {
 
 // ─── UC-30 ──────────────────────────────────────────────────────────
 
-describe("UC-30 — duyệt Product Brief (B-2.3)", () => {
+describe("UC-30 - duyệt Product Brief (B-2.3)", () => {
   it("brief chưa duyệt ⇒ bước phân tích/soạn SRS (S-1.1, S-2.1) bị khoá: 409 STEP_NOT_RUNNABLE, không gọi model", async () => {
     const seeded = await seedFixture("minimal", { mutate: startAt("B-2.3") })
     for (const stepId of ["S-1.1", "S-2.1"]) {

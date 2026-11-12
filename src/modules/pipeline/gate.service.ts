@@ -394,7 +394,7 @@ export const gate = async (
               ],
               by: userId,
               step_id: stepId,
-              reason: "gate: regenerate — reset dải seq"
+              reason: "gate: regenerate - reset dải seq"
             })
             baseVersion = resetRange.spine_version
             range = { startSeq: await spineRepository.nextSeq(projectId), existing: { first_seq: null, last_seq: null } }

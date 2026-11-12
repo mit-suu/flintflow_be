@@ -37,7 +37,7 @@ const sectionPattern = (section: string): RegExp =>
 const ROWS = kindRows(SKILL)
 const rowOf = (kind: string): KindRow | undefined => ROWS.find((r) => r.kind === kind)
 
-describe("plantuml-conventions — bảng Kinds khớp renderer", () => {
+describe("plantuml-conventions - bảng Kinds khớp renderer", () => {
   it("đủ 10 kind, không trùng; owner_kind và path thuộc tập đã chốt", () => {
     expect(ROWS.map((r) => r.kind)).toEqual(["context", "usecase", "screen_flow", "erd", "class", "sequence", "activity", "deployment", "state_machine", "screen_layout"])
     for (const r of ROWS) {
