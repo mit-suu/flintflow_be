@@ -147,6 +147,7 @@ import { NO_QUESTION_ACK_VI } from "../fast-path.js"
 import { getRunState } from "../run-state.service.js"
 import { ApiError } from "../../../shared/utils/api-error.js"
 import { gate } from "../gate.service.js"
+import { resetUserMessageClaims } from "../../project/user-message-dedupe.js"
 import { stepEventSchema, type StepEvent } from "../pipeline.dto.js"
 import { briefCoreEntries } from "../../spine/brief-core.js"
 
@@ -236,6 +237,7 @@ const runAndAccept = async (stepId: string, message?: string): Promise<StepEvent
 }
 
 beforeEach(() => {
+  resetUserMessageClaims()
   db.reset()
   elicitTurns = []
 })
