@@ -108,20 +108,20 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
 
   // FLF-318: CR thêm use case / màn ⇒ bố cục màn mới vẽ như chat FLF-311 (wireframe của model), không để cờ `diagram_stale`
   const newScreens = plan ? addedScreenIds(current, plan.spine) : []
-  await redrawDiagrams(projectId, cr.cr_id, projectName, next, { file: fileRef, tracked: trackedRef }, tracked, newScreens)
+  await redrawDiagrams(projectId, cr.cr_id, userId, projectName, next, { file: fileRef, tracked: trackedRef }, tracked, newScreens)
 
   try {
     // Mode 1 luôn ở sau baseline v0 ⇒ tính cả luật S-9: CR xác nhận giả định thì cờ `unconfirmed_assumption` đóng ngay
     await flagsService.recompute(projectId, { by: cr.cr_id, ruleProfile: await mode1RuleProfileFor(projectId), atBaseline: true })
   } catch (err) {
-    console.warn(`[C-7] ${cr.cr_id}: đã ghi ${next} nhưng recompute cờ lỗi — cờ sẽ được tính lại ở lần recompute sau`, err)
+    console.warn(`[C-7] ${cr.cr_id}: đã ghi ${next} nhưng recompute cờ lỗi - cờ sẽ được tính lại ở lần recompute sau`, err)
   }
   await unlockPaths(projectId, cr.cr_id)
   try {
     const latest = await spineRepository.get(projectId)
     await assemble(projectId, projectName, latest?.spine_version ?? spineVersion)
   } catch (err) {
-    console.warn(`[C-7] ${cr.cr_id}: đã ghi ${next} nhưng ghép lại bản làm việc lỗi — workspace ghép lại khi mở`, err)
+    console.warn(`[C-7] ${cr.cr_id}: đã ghi ${next} nhưng ghép lại bản làm việc lỗi - workspace ghép lại khi mở`, err)
   }
   // Spine vừa đổi ⇒ embed lại phần tử đổi chữ cho C-3 của CR sau — chạy nền, không chặn/không làm hỏng C-7
   if (ops.length) scheduleEmbeddingSync(projectId)
@@ -136,15 +136,19 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
 const redrawDiagrams = async (
   projectId: string,
   crId: string,
+  userId: string,
   projectName: string,
   version: string,
   refs: { file: string; tracked: string | null },
   tracked: (file: Buffer) => Promise<string | null>,
   newScreenIds: readonly string[] = []
 ): Promise<void> => {
-  // Màn mới vẽ trước bằng model (`layoutRenderDeps`); lượt vẽ lại toàn bộ sau đó thấy hash khớp nên giữ nguyên hình đó
-  const fresh = newScreenIds.length ? await renderChangedIfAvailable(projectId, newScreenIds, { by: crId, step_id: null, deps: layoutRenderDeps() }) : null
-  const drawn = await renderAllIfAvailable(projectId, { by: crId, step_id: null })
+  // Màn mới vẽ trước bằng model (`layoutRenderDeps`); lượt vẽ lại toàn bộ sau đó thấy hash khớp nên giữ nguyên hình đó.
+  // FLF-387: model gọi bằng user ghi CR — mã CR không phải user id (giữ credit hỏng ⇒ màn mới rơi về bảng function)
+  const fresh = newScreenIds.length ? await renderChangedIfAvailable(projectId, newScreenIds, { by: crId, userId, step_id: null, deps: layoutRenderDeps() }) : null
+  // TechMart 11/11: màn có sẵn mà CR đổi dữ liệu (hình lệch) cũng vẽ lại bằng model như màn mới — dep mặc định không gọi
+  // model nên wireframe bị thay bằng bảng chức năng dự phòng
+  const drawn = await renderAllIfAvailable(projectId, { by: crId, userId, step_id: null, deps: layoutRenderDeps() })
   if (![fresh, drawn].some((r) => r && (r.rendered.length || r.removed.length))) return
   try {
     const latest = stripRecord((await spineRepository.get(projectId))!)
@@ -157,7 +161,7 @@ const redrawDiagrams = async (
     await docFileStore().remove(refs.file)
     if (refs.tracked) await docFileStore().remove(refs.tracked)
   } catch (err) {
-    console.warn(`[C-7] ${crId}: đã vẽ lại hình nhưng in lại ${version} lỗi — file version giữ hình cũ`, err)
+    console.warn(`[C-7] ${crId}: đã vẽ lại hình nhưng in lại ${version} lỗi - file version giữ hình cũ`, err)
   }
 }
 
@@ -175,7 +179,7 @@ const saveTracked = async (
     const out = await buildTrackedDocx(await docFileStore().load(prevRef), file, { author: crId, date }, comments)
     return await docFileStore().save(out.data, { projectId, kind: "version", name: `${version}_tracked` })
   } catch (err) {
-    console.warn(`[C-7] ${crId}: dựng bản có đánh dấu của ${version} lỗi — chỉ còn bản sạch`, err)
+    console.warn(`[C-7] ${crId}: dựng bản có đánh dấu của ${version} lỗi - chỉ còn bản sạch`, err)
     return null
   }
 }

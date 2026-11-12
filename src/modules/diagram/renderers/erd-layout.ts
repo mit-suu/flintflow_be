@@ -218,7 +218,8 @@ const placeholder = (label: string): Scene => {
 }
 
 /** Scene của một hình ERD; `null` khi không tìm được đường cho mọi cạnh dù nới khe (người gọi tách hình). */
-export const layoutErd = (d: ErdDiagram): Scene | null => {
+/** `detours`: cho phép đường vòng nhiều góc khi đường thường không có (tài liệu upload giữ một hình — bug #12). */
+export const layoutErd = (d: ErdDiagram, opts: { detours?: boolean } = {}): Scene | null => {
   if (d.entities.length === 0) return placeholder(d.emptyLabel)
   const notation = d.notation
   const known = new Set(d.entities.map((e) => e.id))
@@ -296,7 +297,7 @@ export const layoutErd = (d: ErdDiagram): Scene | null => {
   }
 
   const holder: { plan: Plan | null } = { plan: null }
-  const layout = routeOnGrid(nodes, edges, cells, { ...DEFAULT_ROUTE_OPTIONS, ...OPTIONS[notation] }, (l) => ((holder.plan = plan(l)), holder.plan !== null))
+  const layout = routeOnGrid(nodes, edges, cells, { ...DEFAULT_ROUTE_OPTIONS, ...OPTIONS[notation], ...(opts.detours ? { detours: true } : {}) }, (l) => ((holder.plan = plan(l)), holder.plan !== null))
   if (!layout || !holder.plan) return null
   const { centers, requests } = holder.plan
 
@@ -375,7 +376,7 @@ const drawEntity = (scene: Scene, e: EntityBox, placed: PlacedNode, notation: Er
         const half = textWidth(v.name, ATTR_SIZE, true) / 2
         scene.decoration(`${ovalId}#key`, ovalId, [[cx - half, cy + 8], [cx + half, cy + 8]])
       }
-      scene.line(`${ovalId}#link`, [x + (w * (i + 1)) / (e.ovals.length + 1), y + h], [cx, cy - v.ry], { name: `${name} — ${v.name}` })
+      scene.line(`${ovalId}#link`, [x + (w * (i + 1)) / (e.ovals.length + 1), y + h], [cx, cy - v.ry], { name: `${name} - ${v.name}` })
       left += 2 * v.rx + 10
     })
   }

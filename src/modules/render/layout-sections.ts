@@ -45,13 +45,13 @@ import {
   segmentItemHashes,
   type SectionSegments
 } from "../spine/segment-hash.js"
-import type { CustomBlock, CustomSection, Spine } from "../spine/spine.types.js"
+import type { CustomBlock, CustomSection, OriginalDiagram, Spine } from "../spine/spine.types.js"
 import type { Block, InlineRun, RenderedSection, RocRow, TableCell } from "./rendered-document.types.js"
 import { mediaId } from "./import-media.js"
 import { appendToFileTables, conformBlocksToFileTable } from "./file-table.js"
 import { elementOfKey, isLabelLine, refreshTailBlock } from "./element-tail.js"
 import { functionFieldValues, patchFunctionOriginal, type FunctionFieldValues, type FunctionOriginalBlock } from "./function-original.js"
-import { defaultSectionTitle, functionDiagramBlocks, renderContentSlot, renderSection, type SectionRenderContext } from "./section-renderer.js"
+import { defaultSectionTitle, functionDiagramBlocks, generatedDiagramBlocks, renderContentSlot, renderSection, type SectionRenderContext } from "./section-renderer.js"
 import { bindFixedTemplateSlots, isContentSlot, slotParents } from "../import/content-slots.js"
 import { isInstructionText, isRealText, splitInstruction, tableBodyHasRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
 
@@ -267,7 +267,14 @@ const customTable = (rows: string[][]): Block | null => {
  * Khối nguyên văn: đoạn · danh sách (gộp dòng liền nhau) · bảng · ảnh. Ảnh có `image_ref` + `imagePng` ⇒ khối ảnh thật
  * (tham chiếu ảnh gốc của file upload — phase 5, T3); không có ⇒ dòng chú thích như trước.
  */
-export const customBlocks = (blocks: readonly CustomBlock[], imagePng?: (imageRef: string) => string | undefined): Block[] => {
+/** Chỗ đặt hình vẽ lại (bug #16): khối ảnh không còn file nhưng giữ `diagram` ⇒ hình FlintFlow in đúng chỗ đó. */
+export const redrawSlotOf = (b: CustomBlock): OriginalDiagram | null => (b.kind === "image" && !b.image_ref && b.diagram ? b.diagram : null)
+
+export const customBlocks = (
+  blocks: readonly CustomBlock[],
+  imagePng?: (imageRef: string) => string | undefined,
+  redrawn?: (d: OriginalDiagram) => Block[]
+): Block[] => {
   const out: Block[] = []
   for (const b of blocks) {
     switch (b.kind) {
@@ -287,6 +294,11 @@ export const customBlocks = (blocks: readonly CustomBlock[], imagePng?: (imageRe
         break
       }
       case "image": {
+        const slot = redrawSlotOf(b)
+        if (slot) {
+          out.push(...(redrawn?.(slot) ?? []))
+          break
+        }
         const png = b.image_ref ? imagePng?.(b.image_ref) : undefined
         if (png) out.push({ type: "image", png, ...(b.text.trim() ? { caption: b.text.trim() } : {}) })
         else out.push({ type: "paragraph", runs: [{ text: b.text.trim() ? `[Image: ${b.text.trim()}]` : "[Image]", italic: true }] })
@@ -347,7 +359,11 @@ export const sectionsNotInserted = (spine: Spine, template: TemplateLayout): Set
     if (!inLayout.has(id) && !spine.functions.some((f) => f.feature_id === feature.id && inserted(f))) out.add(id)
   }
   if (template.fixedTemplate) {
-    for (const def of listSections(spine)) if (!inLayout.has(def.id)) out.add(def.id)
+    // TechMart 11/11 (user chốt): mẫu cố định vẫn chèn feature / chức năng MỚI (CR thêm use case có chức năng riêng) dưới
+    // đúng feature — chương chức năng là phần lặp của mẫu; mục khác ngoài khung mẫu vẫn không chèn
+    // Chỉ khi khung mẫu vốn có mục feature / chức năng riêng; mẫu in chức năng thành bảng (FU, `slot:*`) thì chèn sẽ in trùng
+    const repeats = [...inLayout].some(isRepeatingSection)
+    for (const def of listSections(spine)) if (!inLayout.has(def.id) && !(repeats && isRepeatingSection(def.id))) out.add(def.id)
   }
   // Mục FPT đã in qua các phần nhỏ của nó (`slot:*`) ⇒ không chèn lại cả mục (dữ liệu in hai lần)
   for (const id of inLayout) for (const parent of slotParents(id)) if (!inLayout.has(parent)) out.add(parent)
@@ -375,6 +391,7 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
   const customById = new Map(spine.custom_sections.map((c) => [c.id, c]))
   const placed: Placed[] = []
   const used = new Set<string>()
+  const insertMissing = (candidates: readonly SectionDef[]) => insertMissingSections(placed, used, defs, candidates, spine, template)
 
   for (const entry of [...template.layout].sort((a, b) => a.order - b.order)) {
     const id = entry.section_id
@@ -421,7 +438,10 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
     used.add(id)
   }
 
-  if (template.fixedTemplate) return placed
+  if (template.fixedTemplate) {
+    insertMissing(defs.filter((d) => isRepeatingSection(d.id)))
+    return placed
+  }
 
   // Mục riêng thêm tay (chat) chưa có trong layout ⇒ cuối tài liệu
   for (const c of spine.custom_sections) {
@@ -434,13 +454,28 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
 
   insertDistribution(placed, used, spine, template)
 
-  // Section FPT thiếu trong layout ⇒ chèn cạnh mục anh em cùng nhóm mẫu FPT (sau anh em đứng trước, không có thì trước
-  // anh em đứng sau); nhóm chưa có mục nào ⇒ sau section FPT gần nhất đứng trước theo thứ tự mẫu
+  insertMissing(defs)
+  return placed
+}
+
+/** Mục lặp của mẫu (feature, chức năng) — CR thêm được dù mẫu cố định. */
+const isRepeatingSection = (id: string): boolean => /^(feature|function):/.test(id)
+
+/**
+ * Section FPT thiếu trong layout ⇒ chèn cạnh mục anh em cùng nhóm mẫu FPT (sau anh em đứng trước, không có thì trước
+ * anh em đứng sau); nhóm chưa có mục nào ⇒ sau section FPT gần nhất đứng trước theo thứ tự mẫu. `candidates` ⊆ `defs`.
+ */
+const insertMissingSections = (placed: Placed[], used: Set<string>, defs: SectionDef[], candidates: readonly SectionDef[], spine: Spine, template: TemplateLayout): void => {
+  const wanted = new Set(candidates.map((d) => d.id))
   defs.forEach((def, i) => {
-    if (used.has(def.id)) return
+    if (used.has(def.id) || !wanted.has(def.id)) return
     const sibling = (d: SectionDef) => def.parent !== undefined && d.parent === def.parent && used.has(d.id)
     const before = defs.slice(0, i).reverse()
-    const anchor = before.find(sibling) ?? null
+    // TechMart 11/11: chức năng mới (chưa có trong file) đứng SAU mọi chức năng của file trong cùng feature — không chen
+    // giữa làm đổi số mục của file ("Write Product Review" 3.3.3 ⇒ 3.3.4)
+    const placedAt = (d: SectionDef) => placed.findIndex((p) => p.section_id === d.id)
+    const lastPlacedSibling = def.id.startsWith("function:") ? (defs.filter(sibling).sort((a, b) => placedAt(b) - placedAt(a))[0] ?? null) : null
+    const anchor = lastPlacedSibling ?? before.find(sibling) ?? null
     const next = anchor ? null : (defs.slice(i + 1).find(sibling) ?? null)
     const group = anchor || next || !def.parent ? null : `${GROUP_PREFIX}${def.parent}`
     const groupAt = group ? placed.findIndex((p) => p.section_id === group) : -1
@@ -455,7 +490,6 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
     }
     used.add(def.id)
   })
-  return placed
 }
 
 const DESIGN_HEADING = /design and implementation|thiết kế và triển khai/i
@@ -487,6 +521,20 @@ const insertDistribution = (placed: Placed[], used: Set<string>, spine: Spine, t
   used.add("slot:distribution")
 }
 
+/**
+ * TechMart 11/11: mục chức năng của file ghi mã use case sau tên ("Search Products (UC-03)") ⇒ chức năng mới thêm cùng kiểu
+ * ("Compare Products (UC-21)") khi chức năng đó hiện thực một use case.
+ */
+const USE_CASE_SUFFIX = /\((UC|US)[-_ ]?\d+[a-z]?\)\s*$/i
+const withUseCaseCode = (title: string, def: SectionDef, placed: readonly Placed[], spine: Spine): string => {
+  if (!def.id.startsWith("function:") || USE_CASE_SUFFIX.test(title)) return title
+  const fileUsesCodes = placed.some((p) => p.section_id.startsWith("function:") && p.fromLayout && USE_CASE_SUFFIX.test(p.title))
+  if (!fileUsesCodes) return title
+  const fnId = def.id.slice("function:".length)
+  const uc = spine.use_cases.find((u) => u.function_ids.includes(fnId))
+  return uc ? `${title} (${uc.id})` : title
+}
+
 const insertionPoint = (
   placed: Placed[],
   def: SectionDef,
@@ -494,7 +542,7 @@ const insertionPoint = (
   template: TemplateLayout,
   spine: Spine
 ): [number, number, Placed] => {
-  const title = defaultSectionTitle(spine, def.id, template.language)
+  const title = withUseCaseCode(defaultSectionTitle(spine, def.id, template.language), def, placed, spine)
   const make = (level: number): Placed => ({ section_id: def.id, kind: "fpt", title, level: clampLevel(level), fromLayout: false, typed: false })
   if (anchor.before) {
     const at = placed.findIndex((p) => p.section_id === anchor.before!.id)
@@ -643,7 +691,9 @@ export const buildLayoutSections = (
   // FLF-366: loại sơ đồ có ảnh gốc trong một đoạn ⇒ sơ đồ FlintFlow của nó chỉ in tại chỗ ảnh đó (khi CR đã bỏ ảnh)
   const records = template.sectionSegments ?? []
   const recordedKinds = new Set<string>(records.flatMap((r) => r.parts.flatMap((p) => (p.kind === "original" ? p.diagrams.map((d) => originalKey(d.kind, d.owner_id)) : []))))
-  const hiddenKinds = new Set<string>([...kept, ...recordedKinds])
+  // Bug #16: chỗ đặt hình vẽ lại (CR bỏ ảnh gốc, giữ vị trí) ⇒ hình FlintFlow chỉ in tại chỗ đó, không in ở mục mặc định
+  const slotKinds = spine.custom_sections.flatMap((c) => c.blocks.flatMap((b) => { const d = redrawSlotOf(b); return d ? [originalKey(d.kind, d.owner_id)] : [] }))
+  const hiddenKinds = new Set<string>([...kept, ...recordedKinds, ...slotKinds])
   // FLF-390: sequence / activity ẩn theo function chủ (`<kind>@<owner>`), không ẩn cả loại
   const contentSpine: Spine = hiddenKinds.size ? { ...spine, diagrams: spine.diagrams.filter((d) => !hiddenKinds.has(diagramKey(d))) } : spine
   const nonScreen = nonScreenTableIds(spine, template)
@@ -665,7 +715,7 @@ export const buildLayoutSections = (
     const out: Block[] = []
     let run: CustomBlock[] = []
     const flush = () => {
-      if (run.length) out.push(...customBlocks(guidanceWhileEmpty(run), (ref) => opts.diagramPng(mediaId(ref))))
+      if (run.length) out.push(...customBlocks(guidanceWhileEmpty(run), (ref) => opts.diagramPng(mediaId(ref)), slotFor(sectionId, number)))
       run = []
     }
     for (const b of blocks) {
@@ -712,6 +762,9 @@ export const buildLayoutSections = (
       ...(state?.awaiting_reaccept !== undefined ? { awaiting_reaccept: state.awaiting_reaccept } : {})
     }
   }
+  /** Bug #16: hình FlintFlow tại chỗ đặt hình vẽ lại của khối ảnh gốc đã bỏ. */
+  const slotFor = (sectionId: string, number: string) => (d: OriginalDiagram): Block[] =>
+    generatedDiagramBlocks(spine, d.kind, d.owner_id, contextFor(sectionId, number))
   // FLF-366: đoạn nguyên văn của mục FPT
   const segmentsOf = new Map(records.map((r) => [r.section_id, r]))
   const homed = homedItems(records)
@@ -754,7 +807,7 @@ export const buildLayoutSections = (
           const element = elementOfKey(spine, part.items[0])
           // Phần tử bị xoá ⇒ bỏ cả tiêu đề lẫn đuôi; đổi ⇒ giữ định dạng file, thay giá trị theo nhãn (không chèn bảng FlintFlow)
           if (element) {
-            out.push(...customBlocks(part.blocks, originalPng))
+            out.push(...customBlocks(part.blocks, originalPng, slotFor(n.section_id, n.number)))
             for (let j = i + 1; j < end; j++) {
               const tail = parts[j] as Extract<typeof part, { kind: "spine" }>
               out.push(...customBlocks(tail.blocks.map((b) => refreshTailBlock(b, element)), originalPng))
@@ -763,16 +816,19 @@ export const buildLayoutSections = (
           i = end - 1
           continue
         }
-        out.push(...(isVerbatim(spine, part) ? customBlocks(part.blocks, originalPng) : rebuild(part.items, part.blocks)))
+        out.push(...(isVerbatim(spine, part) ? customBlocks(part.blocks, originalPng, slotFor(n.section_id, n.number)) : rebuild(part.items, part.blocks)))
         continue
       }
       const blocks = customById.get(`${CUSTOM_PREFIX}${part.custom_id}`)?.blocks ?? []
       // FLF-364: dãy có nội dung thật ⇒ bỏ chữ hướng dẫn của mẫu, như mọi phần nối
-      out.push(...customBlocks(guidanceWhileEmpty(blocks), originalPng))
+      out.push(...customBlocks(guidanceWhileEmpty(blocks), originalPng, slotFor(n.section_id, n.number)))
       // Ảnh sơ đồ gốc CR đã bỏ (đề xuất vẽ lại, §4.13) ⇒ sơ đồ FlintFlow cùng loại đúng chỗ ảnh; loại còn ảnh gốc ở chỗ khác thì thôi
       const present = new Set(blocks.flatMap((b) => (b.image_ref ? [b.image_ref] : [])))
+      // Bug #16: khối giữ chỗ đã in hình vẽ lại ngay chỗ ảnh ⇒ không in lần nữa
+      const slotted = new Set(blocks.flatMap((b) => { const d = redrawSlotOf(b); return d ? [originalKey(d.kind, d.owner_id)] : [] }))
       for (const d of part.diagrams.filter((x) => !present.has(x.image_ref))) {
         const key = originalKey(d.kind, d.owner_id)
+        if (slotted.has(key)) continue
         if (kept.has(key) || redrawn.has(key)) continue
         redrawn.add(key)
         const kind = d.kind
@@ -838,7 +894,7 @@ export const buildLayoutSections = (
       const kept = template.fixedTemplate
         ? sourceBlocks.filter((b) => !isInstructionText(b.text) && (b.kind !== "table" || tableBodyHasRealText(b.rows)))
         : guidanceWhileEmpty(sourceBlocks)
-      const blocks = [...sliceBlocks(n), ...customBlocks(kept, (ref) => opts.diagramPng(mediaId(ref)))]
+      const blocks = [...sliceBlocks(n), ...customBlocks(kept, (ref) => opts.diagramPng(mediaId(ref)), slotFor(n.section_id, n.number))]
       if (n.kind === "continuation") {
         // Chủ = section gần nhất phía trước có cấp nhỏ hơn (phần nối có cấp = cấp chủ + 1, xem import/step-plan.ts)
         let owner = levels.length - 1
@@ -850,7 +906,7 @@ export const buildLayoutSections = (
           continue
         }
       }
-      push({ ...base, heading: base.heading || "—", blocks }, n.level)
+      push({ ...base, heading: base.heading || "-", blocks }, n.level)
       continue
     }
     if (n.kind === "slot") {
@@ -863,7 +919,7 @@ export const buildLayoutSections = (
         const original = sourceId ? customById.get(sourceId) : undefined
         const renderedText = JSON.stringify(blocks)
         const retained = original?.blocks.filter((b) => !isInstructionText(b.text) && (b.kind !== "table" || tableBodyHasRealText(b.rows)) && (!b.text.trim() || !renderedText.includes(b.text))) ?? []
-        blocks.push(...customBlocks(retained, (ref) => opts.diagramPng(mediaId(ref))))
+        blocks.push(...customBlocks(retained, (ref) => opts.diagramPng(mediaId(ref)), slotFor(n.section_id, n.number)))
       }
       // FLF-364 (câu 10): phần nhỏ chưa có dữ liệu ⇒ in chữ hướng dẫn của mẫu (mẫu bắt buộc thì không)
       push({ ...base, blocks: blocks.length || template.fixedTemplate ? blocks : guidanceBlocks(n.guidance) }, n.level)

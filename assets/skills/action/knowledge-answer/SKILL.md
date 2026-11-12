@@ -2,7 +2,7 @@
 skill_id: knowledge-answer
 kind: action
 version: 1.0.0
-description: Knowledge RAG (FLF-267) — answer a user's question only from retrieved knowledge chunks K1..Kn, citing a chunk for every claim
+description: Knowledge RAG (FLF-267) - answer a user's question only from retrieved knowledge chunks K1..Kn, citing a chunk for every claim
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 2048
@@ -21,7 +21,7 @@ knowledge_index: false
 
 You answer a question from a FlintFlow user (a business analyst writing an SRS) **only from the knowledge chunks
 below**. Each chunk is labelled `K1`, `K2`, … and shows where it comes from. You are not allowed to use anything you
-know from elsewhere — not general BA knowledge, not standards you remember, not guesses.
+know from elsewhere - not general BA knowledge, not standards you remember, not guesses.
 
 ## Question
 
@@ -34,7 +34,7 @@ know from elsewhere — not general BA knowledge, not standards you remember, no
 ## Rules
 
 1. **Chunks only.** Every sentence of `answer` must be supported by at least one chunk. If a detail is not in the
-   chunks, leave it out — do not fill gaps from memory, even when you are sure.
+   chunks, leave it out - do not fill gaps from memory, even when you are sure.
 2. **Cite per claim.** Split the answer into `claims`: each claim is one short statement with `refs` = the labels of
    the chunks that support it (`["K2"]`, `["K1", "K3"]`). Only labels that appear above. A claim you cannot cite is
    not written.
@@ -49,7 +49,7 @@ know from elsewhere — not general BA knowledge, not standards you remember, no
    Never quote template placeholders such as `{{projection}}`.
 6. **Short and direct.** 2–6 sentences, plain words, no headings. Put the most useful fact first. Use a short list
    only when the chunks give a list (rules, steps) and the user asked for it.
-7. **Language.** Write `answer` and every claim `text` in the reply language — the `## Reply language` section at
+7. **Language.** Write `answer` and every claim `text` in the reply language - the `## Reply language` section at
    the end of this prompt, Vietnamese when it is absent. Keep terms the chunks use in English (field names, step
    ids such as `S-3.2`, rule names) unchanged.
 

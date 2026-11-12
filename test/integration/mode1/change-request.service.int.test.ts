@@ -20,7 +20,7 @@ beforeEach(() => resetCrMock())
 
 const body = (over: Record<string, unknown> = {}) => ({ title: "Faster response time", description: "Response time must be 1 second.", ...CR_BODY, ...over })
 
-describe("C-1 tạo CR — kiểm đầu vào", () => {
+describe("C-1 tạo CR - kiểm đầu vào", () => {
   it("thiếu source / thiếu requester / requester rỗng ⇒ 400 CR_SOURCE_REQUIRED; nguồn lạ ⇒ 400 VALIDATION_ERROR; không tạo gì", async () => {
     const { c, projectId } = await importedProject()
     const { source: _s, ...noSource } = body()
@@ -60,7 +60,7 @@ describe("C-1 tạo CR — kiểm đầu vào", () => {
   })
 })
 
-describe("C-1 BR-03 — phải có baseline", () => {
+describe("C-1 BR-03 - phải có baseline", () => {
   it("project chưa import ⇒ 409 CR_REQUIRES_BASELINE (HTTP + service)", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)

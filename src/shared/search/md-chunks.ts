@@ -48,7 +48,7 @@ export const markdownParser = (): Promise<MarkdownParser | null> => {
       parser.setLanguage(language)
       return parser as unknown as MarkdownParser
     } catch (err) {
-      if (!warned) console.warn("[md-chunks] không nạp được Tree-sitter Markdown — cắt theo dòng trống", err)
+      if (!warned) console.warn("[md-chunks] không nạp được Tree-sitter Markdown - cắt theo dòng trống", err)
       warned = true
       return null
     }

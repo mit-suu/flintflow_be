@@ -25,6 +25,14 @@ export interface IProjectDocument extends Document {
    * Chữ phẳng mất style heading nên phải chụp lúc upload; file khác / tài liệu cũ không có ⇒ chunker dò heading trên chữ.
    */
   outline?: { p: number; level: number }[] | null
+  /** FLF-398: SHA-256 của bytes file — nhận diện tải trùng. Tài liệu upload trước FLF-398 chưa có (so chữ đã đọc thay). */
+  contentHash?: string | null
+  /**
+   * FLF-398: tài liệu này đã được bản mới thay (người dùng chọn "Thay bản cũ"). Không xoá, không đổi mã — trích dẫn cũ `D<n>-P…`
+   * còn mở được — nhưng không còn trong danh sách mặc định và ngữ cảnh model. Xoá bản mới ⇒ bản này dùng lại.
+   */
+  supersededBy?: mongoose.Types.ObjectId | null
+  supersededAt?: Date | null
   createdAt: Date
   updatedAt: Date
 }
@@ -114,11 +122,25 @@ const projectDocumentSchema = new Schema<IProjectDocument>(
     outline: {
       type: [new Schema({ p: { type: Number, required: true, min: 0 }, level: { type: Number, required: true, min: 1 } }, { _id: false })],
       default: undefined
+    },
+    contentHash: {
+      type: String,
+      default: null
+    },
+    supersededBy: {
+      type: Schema.Types.ObjectId,
+      ref: "ProjectDocument",
+      default: null
+    },
+    supersededAt: {
+      type: Date,
+      default: null
     }
   },
   { timestamps: true }
 )
 
 projectDocumentSchema.index({ projectId: 1, createdAt: -1 })
+projectDocumentSchema.index({ projectId: 1, contentHash: 1 })
 
 export const ProjectDocument = mongoose.model<IProjectDocument>("ProjectDocument", projectDocumentSchema)

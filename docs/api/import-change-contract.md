@@ -458,6 +458,8 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-11-12 | FLF-403 (thư viện mẫu tải dần) | Additive: `GET /orgs/:orgId/templates` nhận `?page`, `limit` (≤ 50, mặc định 20), `q`, `sort` (`uses` · `recent` · `name`); có `page` ⇒ trả một trang + `meta { page, limit, total, totalPages }`, `q` tìm không phân biệt dấu theo tên mẫu / tên file. Không có `page` ⇒ y như cũ (mảng, tối đa 100) cho ô chọn mẫu lúc tạo dự án |
+| 2026-11-12 | contract-change FLF-403 (gỡ thư viện nội dung tổ chức) | **Breaking, bỏ endpoint**: `/orgs/:orgId/content-library` (GET/POST/PATCH/DELETE), #8e `GET /projects/:id/library-matches`, #8f `POST /projects/:id/library`; mã lỗi `ORG_CONTENT_DUPLICATE`, `ORG_CONTENT_NOT_FOUND`, `CUSTOM_SECTION_EMPTY`, `CUSTOM_SECTION_NOT_FOUND` không còn. Lý do: nội dung mục riêng (References, Document Conventions…) thuộc từng dự án, khớp theo tiêu đề giữa các dự án là sai giả định; phần dùng lại được là khung mẫu (`OrgTemplate`). Collection `org_content_entries` không còn được đọc / ghi |
 | 2026-11-06 | FLF-360 (AI quá tải lúc import: tự đọc lại) | Additive: #4 trả thêm `reread: { kind: "images" \| "text", done, total, section_id } \| null` (đang đọc lại — FE hiện "Đang đọc lại ảnh N/M"). Hành vi §4.10: lô chữ lỗi tạm thời (quá tải, 503, 429 không phải hết tiền, timeout, mạng) đọc lại tối đa 3 lượt giãn dần rồi mới `paused: resume_later`; ảnh `unavailable` đọc lại sau khi chạy hết các mục; lỗi AI không tự khỏi ghi `diagram_images.kind = failed` (không đọc lại). Ảnh vẫn chưa đọc được sau bản 0.1 ⇒ job nền `import/reread-images` đọc lại theo lịch, ghi lô `by: import` (không version mới), đóng cờ `import_image_unread`. `credit_estimate` tính cả ảnh chờ đọc lại |
 | 2026-11-06 | FLF-278 (dự án "Upload SRS có sẵn": tải về giống file upload) | Hành vi, không đổi shape: export / version của dự án có sẵn (mẫu công ty hoặc cấu trúc FlintFlow đủ mục) dùng file upload làm nền, mục chưa đổi in nguyên văn, bảng lịch sử không thêm dòng import; SRS có field không còn 422. Xem §FLF-278 "Dự án Upload SRS có sẵn" |
 | 2026-11-05 | FLF-278 (kết quả đọc theo loại dự án; bảng mẫu trống) | Hành vi, không đổi shape: #8b chỉ cho dự án mới theo mẫu bắt buộc (dự án có sẵn ⇒ `409 IMPORT_INVALID_STATE`); #8 `complete: true` ở `incomplete` bị chặn với dự án mới theo mẫu bắt buộc (`409`, `meta.allowed = ["drafting"]`). Bảng mẫu chỉ có tiêu đề + hàng chỗ trống tính là trống ở I-5 / cờ `template_section_empty`, không sinh item ở I-4. Xem §FLF-278 "Luồng 2 cho phần thiếu" |
@@ -557,14 +559,10 @@ baseline 1.0 ⇒ FLF-318 đưa dự án về mode 1, lần import mẫu `draftin
 |---|---|---|---|
 | `POST /projects/:id/import/save-to-org` | lead, analyst | `{ name }` | 201 `OrgTemplateSummary` (lưu bản sao file mẫu + mapping đã xác nhận); `409 IMPORT_INVALID_STATE` khi chưa qua 1.5 |
 | `POST /projects/:id/import/from-org` | lead, analyst | `{ org_template_id, intent? }` | 201 `{ import }` — import từ file đã lưu, không hỏi "bản mới nhất", mapping áp sẵn; `404 ORG_TEMPLATE_NOT_FOUND` (kể cả tổ chức khác) |
-| `GET /orgs/:orgId/templates` · `DELETE …/:templateId` | thành viên · lead, analyst | — | `OrgTemplateSummary[]` · `{ deleted }` |
-| `GET /orgs/:orgId/content-library` · `POST` · `PATCH …/:entryId` · `DELETE …/:entryId` | thành viên · lead, analyst | `{ title, blocks[] }` | `ContentEntry`; trùng tiêu đề chuẩn hoá ⇒ ghi đè (POST) / `409 ORG_CONTENT_DUPLICATE` (PATCH) |
-| `GET /projects/:id/library-matches` | thành viên | — | `[{ custom_section_id, heading, empty, entry }]` |
-| `POST /projects/:id/library` | lead, analyst | `{ custom_section_id }` | 201 `ContentEntry`; `422 CUSTOM_SECTION_EMPTY` |
+| `GET /orgs/:orgId/templates` · `DELETE …/:templateId` | thành viên · lead, analyst | query `page?`, `limit?`, `q?`, `sort?` (FLF-403) | `OrgTemplateSummary[]` (+ `meta` khi có `page`) · `{ deleted }` |
 | `GET /admin/template-gaps?limit=` | admin | — | `{ projects, rows[{ key, samples, projects, empty, suggested_destination }] }` |
 
-Áp nội dung thư viện: trước baseline FE gửi lô `set custom_sections[id=…]` qua `POST /changes/preview` + `POST /changes {ops, preview_id}`
-(không gọi model); sau baseline FE điền sẵn lệnh vào chat ⇒ change request như mọi lệnh sửa.
+Thư viện nội dung tổ chức (`content-library`, `library-matches`, `POST /library`) đã gỡ ở FLF-403 — xem nhật ký đầu file.
 
 ### Dự án "Upload SRS có sẵn": tải về giống file upload (2026-11-06, không đổi shape)
 

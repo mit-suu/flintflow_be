@@ -20,7 +20,7 @@ const item = (over: Partial<IExtractionItem>): IExtractionItem => ({
   ...over
 })
 
-describe("planExtractionCrs (FLF-338 §3.6.1 — BA duyệt danh sách rút)", () => {
+describe("planExtractionCrs (FLF-338 §3.6.1 - BA duyệt danh sách rút)", () => {
   const items = [
     item({ id: "R1", group: "G1" }),
     item({ id: "R2", group: "G1", label: "modification", text: "Export must finish within 5 seconds.", entity_paths: ["nfrs[id=NFR-01]"] }),
@@ -82,7 +82,7 @@ describe("planExtractionCrs (FLF-338 §3.6.1 — BA duyệt danh sách rút)", (
   })
 })
 
-describe("normalizeItems — Code kiểm lại đầu ra model", () => {
+describe("normalizeItems - Code kiểm lại đầu ra model", () => {
   const spine = { use_cases: [{ id: "UC-01" }], project: {} } as unknown as Spine
   const paragraphs = ["Meeting on Monday.", "Finance asked that every report can be exported to CSV.", "Login stays as is."]
 

@@ -37,7 +37,7 @@ const unit = (key: string): TranslationUnit | undefined => UNITS.find((u) => u.k
 const isDiagramOnly = (u: TranslationUnit): boolean =>
   u.ref.group === "diagrams" || (u.ref.group !== "project" && (DIAGRAM_TEXT_FIELDS[u.ref.group] ?? []).includes(u.ref.field))
 
-describe("translationUnits — bảng §2.1 trên fixture 19 màn", () => {
+describe("translationUnits - bảng §2.1 trên fixture 19 màn", () => {
   it("khoá theo id, không trùng key, đủ mọi nhóm của bảng", () => {
     expect(new Set(UNITS.map((u) => u.key)).size).toBe(UNITS.length)
     // N1: + nhãn wireframe (`diagrams`) — fixture có một wireframe salt (D05)
@@ -163,7 +163,7 @@ describe("danh sách field trùng phạm vi non_english_content", () => {
   })
 })
 
-describe("unitsOfValue — cặp (hash câu Anh, câu dịch) của một op", () => {
+describe("unitsOfValue - cặp (hash câu Anh, câu dịch) của một op", () => {
   const fn = FIXTURE.functions[0]
 
   it("add functions[] cả object ⇒ mọi field chữ + validation lồng theo id", () => {
@@ -253,7 +253,7 @@ describe("unitsOfValue — cặp (hash câu Anh, câu dịch) của một op", (
     expect(unitsOfValue("actors[]", a, { ...a, id: "A99", name: "Khác" })).toEqual([])
   })
 
-  it("op add chưa có id (server cấp — apply-change-op) ⇒ vẫn ra cặp theo vị trí; hash không phụ thuộc id", () => {
+  it("op add chưa có id (server cấp - apply-change-op) ⇒ vẫn ra cặp theo vị trí; hash không phụ thuộc id", () => {
     const uc = { name: "Send Reminder", description: "Sends a reminder to the patient." }
     const pairs = unitsOfValue("use_cases[]", uc, { name: "Gửi nhắc", description: "Gửi nhắc cho bệnh nhân." })
     expect(pairs.map((p) => [p.sourceHash, p.text])).toEqual([
@@ -297,7 +297,7 @@ describe("unitsOfValue — cặp (hash câu Anh, câu dịch) của một op", (
   })
 })
 
-describe("N1 — chữ trên sơ đồ: mũi tên, động từ ERD, nhãn wireframe", () => {
+describe("N1 - chữ trên sơ đồ: mũi tên, động từ ERD, nhãn wireframe", () => {
   const A = FIXTURE.actors[0]
   const E = FIXTURE.entities[0]
 

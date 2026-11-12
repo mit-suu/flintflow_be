@@ -44,7 +44,7 @@ const lastPoint = (p: Path) => p.points[p.points.length - 1]
 /** Id các đường của cạnh (`flow:<từ>><tới>`), bỏ phần phụ (`#end`…). */
 const ids = (scene: ReturnType<typeof layoutScreenFlow>): string[] => scene.elements.filter((e) => e.id.startsWith("flow:") && !e.id.includes("#")).map((e) => e.id)
 
-describe("layoutScreenFlow — ký pháp template FPT", () => {
+describe("layoutScreenFlow - ký pháp template FPT", () => {
   const home: FlowDiagram = {
     nodes: [node("H", { name: "Home", shared: true }), node("L", { name: "Login", shared: true }), node("B", { name: "Blogs" }), node("P", { name: "Import", popup: true }), node("O", { name: "Order Details", tabs: ["Products Info", "Receiver Info"] })],
     edges: [["H", "L"], ["H", "B"], ["H", "P"], ["B", "O"]]

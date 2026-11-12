@@ -13,7 +13,7 @@ const expectAiError = (fn: () => unknown, code: string) => {
   throw new Error(`Expected AiActionError ${code}`)
 }
 
-describe("parseResponse — schema pipeline (T03)", () => {
+describe("parseResponse - schema pipeline (T03)", () => {
   it("DRAFT nhận opTransaction hợp lệ, kể cả bọc code fence", () => {
     const raw = '```json\n{"ops":[{"op":"set","path":"actors[id=A03].name","value":"Administrator","reason":"typo"},{"op":"renumber","path":"features[]"}]}\n```'
     const out = parseResponse<OpTransaction>(raw, ActionType.DRAFT)
@@ -22,7 +22,7 @@ describe("parseResponse — schema pipeline (T03)", () => {
     expect(out.ops[0].path).toBe("actors[id=A03].name")
   })
 
-  it("DRAFT từ chối op lạ — không trả raw text", () => {
+  it("DRAFT từ chối op lạ - không trả raw text", () => {
     expectAiError(
       () => parseResponse('{"ops":[{"op":"replace","path":"actors[]"}]}', ActionType.DRAFT),
       "SCHEMA_MISMATCH"
@@ -78,7 +78,7 @@ describe("parseResponse — schema pipeline (T03)", () => {
   })
 })
 
-describe("parseResponse — mode 1 (FLF-171)", () => {
+describe("parseResponse - mode 1 (FLF-171)", () => {
   const json = (v: unknown) => JSON.stringify(v)
 
   it("IMPORT_EXTRACT_FIELDS: theo thực thể, bắt buộc block nguồn, field_confidence mặc định {}", () => {
@@ -137,7 +137,7 @@ describe("parseResponse — mode 1 (FLF-171)", () => {
   })
 })
 
-describe("parseResponse — translate_document (FLF-265)", () => {
+describe("parseResponse - translate_document (FLF-265)", () => {
   it("nhận lô có chuỗi và mảng chuỗi", () => {
     const raw =
       '```json\n{"items":[{"key":"actors[id=A01].name","text":"Quản trị viên"},{"key":"functions[id=FN3].normal","text":["Bước 1","Bước 2"]}]}\n```'
@@ -172,14 +172,14 @@ describe("parseResponse — translate_document (FLF-265)", () => {
     ])
   })
 
-  it("chữ rỗng không làm hỏng cả lô — service bỏ đơn vị đó sau (fitTranslation)", () => {
+  it("chữ rỗng không làm hỏng cả lô - service bỏ đơn vị đó sau (fitTranslation)", () => {
     const raw = '{"items":[{"key":"a","text":"Một"},{"key":"b","text":"  "}]}'
     const out = parseResponse<{ items: { key: string; text: string }[] }>(raw, ActionType.TRANSLATE_DOCUMENT)
     expect(out.items.map((i) => i.key)).toEqual(["a", "b"])
   })
 })
 
-describe("parseResponse — localized cạnh ops (FLF-265 D16)", () => {
+describe("parseResponse - localized cạnh ops (FLF-265 D16)", () => {
   const localized = [{ path: "actors[id=A03].name", value: "Quản trị viên" }]
   const op = { op: "set", path: "actors[id=A03].name", value: "Administrator" }
 
@@ -202,14 +202,14 @@ describe("parseResponse — localized cạnh ops (FLF-265 D16)", () => {
     expect(parseResponse<OpTransaction>(JSON.stringify({ ops: [op], localized: null }), ActionType.REVISION).ops).toEqual([op])
   })
 
-  it("op vẫn theo opSchema đóng băng — localized nằm cạnh ops, không phải field của op", () => {
+  it("op vẫn theo opSchema đóng băng - localized nằm cạnh ops, không phải field của op", () => {
     expectAiError(() => parseResponse(JSON.stringify({ ops: [{ op: "move", path: "actors[]" }], localized }), ActionType.DRAFT), "SCHEMA_MISMATCH")
     const out = parseResponse<OpTransaction>(JSON.stringify({ ops: [{ ...op, localized: "x" }] }), ActionType.DRAFT)
     expect(out.ops[0]).not.toHaveProperty("localized")
   })
 })
 
-describe("parseResponse — sources cạnh ops (FLF-292)", () => {
+describe("parseResponse - sources cạnh ops (FLF-292)", () => {
   const op = { op: "set", path: "nfrs[id=N03].threshold", value: "3 s" }
   const sources = [{ path: "nfrs[id=N03]", paras: ["D1-P07"] }]
 
@@ -218,9 +218,24 @@ describe("parseResponse — sources cạnh ops (FLF-292)", () => {
     expect(parseResponse<OpTransaction>(JSON.stringify({ ops: [op] }), ActionType.DRAFT)).not.toHaveProperty("sources")
   })
 
-  it("mục sai khuôn bị bỏ, không phải mảng ⇒ coi như không có — không bao giờ làm hỏng lượt ghi", () => {
+  it("mục sai khuôn bị bỏ, không phải mảng ⇒ coi như không có - không bao giờ làm hỏng lượt ghi", () => {
     const messy = { ops: [op], sources: [{ path: "nfrs[id=N03]", paras: [] }, { paras: ["D1-P01"] }, { path: "x", paras: "D1-P01" }, null, ...sources] }
     expect(parseResponse<OpTransaction>(JSON.stringify(messy), ActionType.DRAFT).sources).toEqual(sources)
     expect(parseResponse<OpTransaction>(JSON.stringify({ ops: [op], sources: "D1-P07" }), ActionType.REVISION).sources).toBeUndefined()
+  })
+})
+
+describe("IMPORT_EXTRACT_DIAGRAM - sơ đồ triển khai (FLF-390, QLHS 11/11 bug #11)", () => {
+  it("item deployment_nodes đọc từ ảnh qua được schema (trước đây trượt ⇒ ảnh H6 'failed', Spine không có nút triển khai)", () => {
+    const out = {
+      section_id: "slot:distribution",
+      diagram_kind: "deployment",
+      items: [
+        { entity: "deployment_nodes", key: null, value: { name: "Máy chủ ứng dụng", kind: "device", parent: null, artifacts: [], components: ["QLHS API"], links: [{ to: "CSDL", protocol: "TCP" }] }, confidence: 0.9, source_block_ids: ["B0537"] }
+      ],
+      unmapped_block_ids: []
+    }
+    const parsed = parseResponse<{ items: { entity: string }[] }>(JSON.stringify(out), ActionType.IMPORT_EXTRACT_DIAGRAM)
+    expect(parsed.items.map((i) => i.entity)).toEqual(["deployment_nodes"])
   })
 })

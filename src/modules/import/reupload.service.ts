@@ -41,7 +41,7 @@ export const reupload = async (projectId: string, userId: string, file: Uploaded
   const current = await latestImport(projectId)
   const version = await latestDocVersion(projectId)
   if (!current || !hasBaseline(current.status) || !version) {
-    throw new Mode1Error("IMPORT_INVALID_STATE", "Dự án chưa có bản gốc — hãy tải tài liệu lên lần đầu trước.", {
+    throw new Mode1Error("IMPORT_INVALID_STATE", "Dự án chưa có bản gốc - hãy tải tài liệu lên lần đầu trước.", {
       status: current?.status ?? "uploaded",
       to: "uploaded",
       allowed: []
@@ -55,7 +55,7 @@ export const reupload = async (projectId: string, userId: string, file: Uploaded
     throw new Mode1Error("IMPORT_FILE_REJECTED", "File chưa so được, xem danh sách lỗi", { import_id: String(current._id), issues: pre.issues })
   }
   if (!pre.stamp) {
-    throw new Mode1Error("IMPORT_REUPLOAD_NO_STAMP", "File không mang stamp của project — chỉ file tải từ FlintFlow mới so khác biệt được")
+    throw new Mode1Error("IMPORT_REUPLOAD_NO_STAMP", "File không mang stamp của project - chỉ file tải từ FlintFlow mới so khác biệt được")
   }
 
   const lite = (x: OoxmlBlock[]) => x.map((b) => ({ block_id: null, para_id: b.para_id, text: b.text, text_hash: b.text_hash }))

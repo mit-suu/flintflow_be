@@ -48,7 +48,7 @@ beforeEach(async () => {
   seeded = await seedFixture("full")
 })
 
-describe("FLF-292 — mã đoạn và nguồn của yêu cầu", () => {
+describe("FLF-292 - mã đoạn và nguồn của yêu cầu", () => {
   it("mỗi tài liệu nhận số riêng theo thứ tự upload; prompt Draft mang mã đoạn", async () => {
     expect((await upload(MINUTES, "minutes.txt")).status).toBe(201)
     expect((await upload(EMAIL, "email.txt")).status).toBe(201)

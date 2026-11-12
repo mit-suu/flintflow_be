@@ -20,7 +20,7 @@ const spine = (): Spine => {
 
 const entries = [ctx("fixed:1", "1 Product Overview"), ctx("fixed:2.1", "2.1 Actors"), ctx("custom:CS02", "Dự toán")]
 
-describe("FLF-378 template-guidance — prompt bước soạn nhận mẫu bắt buộc", () => {
+describe("FLF-378 template-guidance - prompt bước soạn nhận mẫu bắt buộc", () => {
   it("Brief (B-1 / S-1) đọc cả mẫu + luật dùng mẫu trong Brief; không ghi mục riêng", () => {
     expect(templateEntriesForStep(entries, "B-1.1").map((e) => e.section_id)).toEqual(["fixed:1", "fixed:2.1", "custom:CS02"])
     const brief = buildTemplateStepContext(entries, "S-1.1", spine())

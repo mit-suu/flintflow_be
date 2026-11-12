@@ -30,7 +30,7 @@ const uploaded = async (numberedOnly = false) => {
   return { seeded, projectId, c, id }
 }
 
-describe("FLF-343 — bản ghi cũ", () => {
+describe("FLF-343 - bản ghi cũ", () => {
   it("awaiting_latest_confirm: Bắt đầu không xác nhận ⇒ 409, không tách file; có confirm_latest ⇒ tách file rồi chạy một mạch tới gap_review", async () => {
     const { c, id, projectId } = await uploaded()
     await ImportedDocument.updateOne({ _id: id }, { $set: { status: "awaiting_latest_confirm", confirmed_latest_at: null } })

@@ -61,7 +61,7 @@ beforeEach(() => {
   routeReplaceCr("99.5%", "99.9%")
 })
 
-describe("FLF-318 — chuyển dự án tạo SRS sang mode 1 khi Lead ký baseline", () => {
+describe("FLF-318 - chuyển dự án tạo SRS sang mode 1 khi Lead ký baseline", () => {
   it("ký ⇒ mode import / delivered, ImportedDocument + TemplateProfile + DocVersion 1.0 trỏ baseline vừa ký; Spine không thêm lô", async () => {
     const { seeded, c } = await fptProject()
     const signed = await signOff(c)
@@ -431,7 +431,7 @@ const missingOf = async (c: ReturnType<typeof mode1Api>, query: string): Promise
   return res.body.data.missing as number
 }
 
-describe("FLF-334 B — tải version của dự án chuyển đổi theo ngôn ngữ còn lại", () => {
+describe("FLF-334 B - tải version của dự án chuyển đổi theo ngôn ngữ còn lại", () => {
   it("CR đổi chữ sau 1.0 ⇒ 1.0 lang=vi 409; Dịch nốt { locale: vi, version: 1.0 } qua API ⇒ tải được; bản nháp CR / tracked / import thật ⇒ không có", async () => {
     const { seeded, c } = await fptProject()
     expect((await signOff(c)).status).toBe(201)

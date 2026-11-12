@@ -75,7 +75,7 @@ export const docxToPdf = async (docx: Buffer, fileName: string): Promise<Buffer>
   if (!isPdf(data)) {
     throw new PdfConverterError(
       `${baseUrl()} trả HTTP ${res.status} kèm content-type "${res.headers.get("content-type") ?? "(trống)"}" ` +
-        "nhưng nội dung không phải PDF — server đang nghe ở cổng này không phải Gotenberg"
+        "nhưng nội dung không phải PDF - server đang nghe ở cổng này không phải Gotenberg"
     )
   }
   return data

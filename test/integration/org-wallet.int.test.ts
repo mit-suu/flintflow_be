@@ -38,7 +38,7 @@ const createOrg = async (name = "Org A") => {
   return res.body.data.id as string
 }
 
-describe("nợ Pha 2 — tạo org là mở ví (Flow 8.2)", () => {
+describe("nợ Pha 2 - tạo org là mở ví (Flow 8.2)", () => {
   it("org mới có ngay ví credit free và gói free", async () => {
     const orgId = await createOrg()
 
@@ -90,7 +90,7 @@ describe("nợ Pha 2 — tạo org là mở ví (Flow 8.2)", () => {
   })
 })
 
-describe("lỗ hổng Pha 1 — Flow 10.4 nay phủ mọi route đã đăng nhập", () => {
+describe("lỗ hổng Pha 1 - Flow 10.4 nay phủ mọi route đã đăng nhập", () => {
   it("tài khoản bị khoá mất quyền ở thông báo, hồ sơ và billing, không chỉ /projects", async () => {
     const orgId = await createOrg()
     const token = await authAs({ _id: lead.id, email: lead.email, orgId })
@@ -107,7 +107,7 @@ describe("lỗ hổng Pha 1 — Flow 10.4 nay phủ mọi route đã đăng nh�
     }
   })
 
-  it("webhook thanh toán KHÔNG bị chặn — nó không mang token", async () => {
+  it("webhook thanh toán KHÔNG bị chặn - nó không mang token", async () => {
     // Không có Authorization: guard chặn thì đây sẽ là 401, làm hỏng luồng nạp tiền thật.
     const res = await request(app).post("/api/v1/billing/payment-callback").send({})
     expect(res.status).not.toBe(401)
@@ -168,7 +168,7 @@ describe("gọi AI trừ vào ví của org sở hữu project (business-flow.md
   })
 })
 
-describe("FLF-310 — GET /users/me: credit của tổ chức đang chọn", () => {
+describe("FLF-310 - GET /users/me: credit của tổ chức đang chọn", () => {
   it("trả số dư khả dụng + tên org đang chọn; không đọc ví cá nhân cũ, không tạo ví", async () => {
     const orgId = await createOrg("Org Hồ sơ")
     await CreditWallet.updateOne({ organizationId: orgId }, { balance: 321, reserved: 21 })

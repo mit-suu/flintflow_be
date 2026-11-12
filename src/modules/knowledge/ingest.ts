@@ -42,7 +42,7 @@ export const ingestChunks = async (chunks: readonly KnowledgeChunkDraft[], optio
   const foreign = chunks.find((c) => c.corpus !== corpus)
   if (foreign) throw new Error(`Chunk ${foreign.chunk_id} thuộc corpus "${foreign.corpus}", không phải "${corpus}"`)
   if (!options.embed && !embeddingAvailable()) {
-    throw new AiActionError(503, "Embedding chưa bật (EMBEDDING_PROVIDER=off hoặc thiếu GEMINI_API_KEY) — không ingest được tri thức", "EMBEDDING_UNAVAILABLE")
+    throw new AiActionError(503, "Embedding chưa bật (EMBEDDING_PROVIDER=off hoặc thiếu GEMINI_API_KEY) - không ingest được tri thức", "EMBEDDING_UNAVAILABLE")
   }
   const modelId = options.modelId ?? embeddingModelId()
   // Ingest là script chạy lô ⇒ chờ hết rate limit theo phút thay vì hỏng giữa chừng

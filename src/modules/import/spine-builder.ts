@@ -61,8 +61,8 @@ export const droppedPermissionFindings = (
     const list = [...others].filter(Boolean).join(", ")
     const message =
       missing === "screen"
-        ? `Bảng phân quyền có "${name}"${list ? ` (quyền của ${list})` : ""} nhưng phần mô tả màn hình không có màn này — quyền chưa vào dữ liệu; thêm màn hoặc sửa tên cho khớp qua change request`
-        : `Bảng phân quyền có vai trò "${name}" không khớp vai trò / tác nhân nào — quyền${list ? ` trên ${list}` : ""} chưa vào dữ liệu; sửa tên cho khớp qua change request`
+        ? `Bảng phân quyền có "${name}"${list ? ` (quyền của ${list})` : ""} nhưng phần mô tả màn hình không có màn này - quyền chưa vào dữ liệu; thêm màn hoặc sửa tên cho khớp qua change request`
+        : `Bảng phân quyền có vai trò "${name}" không khớp vai trò / tác nhân nào - quyền${list ? ` trên ${list}` : ""} chưa vào dữ liệu; sửa tên cho khớp qua change request`
     return { rule: "unresolved_permission", section_id: "fixed:3.1.3", message, block_ids: blockIds }
   })
 }
@@ -79,6 +79,31 @@ const strList = (v: unknown): string[] => {
   if (Array.isArray(v)) return v.map(str).filter(Boolean)
   const s = str(v)
   return s ? s.split(/\n+/).map((x) => x.replace(/^\s*(?:\d+[.)]|[-•*])\s*/, "").trim()).filter(Boolean) : []
+}
+
+// QLHS 11/11 bug #14: dòng chữ nhỏ dưới tên nút ("GV, phụ huynh") là mô tả, không phải component
+const SOFTWARE_WORD = /\b(service|server|api|app|application|module|component|bundle|database|db|gateway|worker|client|frontend|backend|engine|runtime|daemon|plugin|library|sdk)\b/i
+/** Tên giống phần mềm: file / đường dẫn (`api.js`, `bin/app`), PascalCase liền (`ApiGateway`), `<<…>>`, hoặc từ khoá phần mềm. */
+const looksSoftware = (s: string): boolean =>
+  /\.\w{1,5}$|[/\\]|<<|>>/.test(s) || /^[A-Z][a-z0-9]+[A-Z]\w*$/.test(s) || SOFTWARE_WORD.test(s)
+/** Mảnh văn xuôi: chữ thường đầu + nhiều từ (`phụ huynh`), có dấu phẩy (`30 bản, tách biệt`), số + từ (`30 bản`). */
+const looksProse = (s: string): boolean => /^\p{Ll}\S*\s/u.test(s) || s.includes(",") || /^\d+\s+\p{L}/u.test(s)
+
+/**
+ * Lưới an toàn cho `components` của nút triển khai đọc từ ảnh. Chỉ chuyển khi nút chưa có mô tả, MỌI mảnh đều ngắn
+ * (≤ 40 ký tự, ≤ 5 từ), không mảnh nào giống phần mềm, và ít nhất một mảnh là văn xuôi ⇒ nối ", " thành mô tả.
+ * Tên đơn lẻ mơ hồ ("Docker", "Web Browser", "API Service", "nginx") không phải văn xuôi ⇒ giữ là component.
+ * Nút đã có mô tả: bỏ những component chỉ lặp lại chữ trong mô tả.
+ */
+export const splitSubtitleComponents = (components: string[], description: string): { components: string[]; description: string } => {
+  if (components.length === 0) return { components, description }
+  if (description) {
+    const d = description.toLowerCase()
+    return { components: components.filter((c) => !d.includes(c.toLowerCase())), description }
+  }
+  const short = components.every((c) => c.length <= 40 && c.split(/\s+/).length <= 5)
+  if (short && !components.some(looksSoftware) && components.some(looksProse)) return { components: [], description: components.join(", ") }
+  return { components, description }
 }
 
 /**
@@ -266,6 +291,77 @@ const RELATION_VERB = /^[a-z]+( [a-z]+)*$/
  * Cụm quan hệ "động từ + Thực thể" (bảng ERD FlintFlow xuất ra: "teaches Schedule Slot") ⇒ thực thể có tên dài nhất
  * nằm ở cuối cụm + động từ đứng trước (giữ làm nhãn quan hệ khi là tiếng Anh thường). Không thực thể nào ⇒ `null`.
  */
+const foldName = (s: string): string =>
+  s
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/đ/gi, "d")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+const initialsOf = (name: string): string =>
+  foldName(name)
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => w[0])
+    .join("")
+
+/** Thuộc tính tham chiếu của `child` trỏ tới `parentName` ("mã TK phụ huynh" ⇒ Tài khoản, "mã năm học" ⇒ Năm học). */
+const referencesName = (attributes: unknown, parentName: string): boolean => {
+  if (!Array.isArray(attributes)) return false
+  const full = foldName(parentName)
+  const ini = initialsOf(parentName)
+  return attributes.some((a) => {
+    const name = foldName(typeof a === "string" ? a : String((a as { name?: unknown })?.name ?? ""))
+    const m = /^(?:ma|id|fk)\s+(.+)$/.exec(name)
+    if (!m) return false
+    const rest = m[1]
+    return rest === full || rest.startsWith(`${full} `) || (ini.length >= 2 && (rest === ini || rest.startsWith(`${ini} `)))
+  })
+}
+
+/**
+ * QLHS 11/11 (bug #12): A ghi B là phía nhiều và B cũng ghi A là phía nhiều (bảng một chiều, AI đọc ảnh / đoạn văn ghi chiều
+ * ngược) ⇒ ERD vẽ hai quan hệ ngược nhau. Giữ một chiều: bên có thuộc tính khoá ngoại trỏ tới bên kia là con; không có
+ * bằng chứng ⇒ thực thể đứng trước trong tài liệu là cha. Cặp có bội số "1" (1–1) giữ nguyên.
+ */
+export const dropReciprocalRelations = (
+  entities: { id: string; value: Record<string, unknown>; relations: string[]; cardinality: Record<string, "1" | "N"> }[]
+): void => {
+  const byId = new Map(entities.map((e, i) => [e.id, { e, i }]))
+  for (const a of entities) {
+    for (const bId of [...a.relations]) {
+      const b = byId.get(bId)
+      if (!b || !b.e.relations.includes(a.id) || a.cardinality[bId] === "1" || b.e.cardinality[a.id] === "1") continue
+      const aName = String(a.value.name ?? a.id)
+      const bName = String(b.e.value.name ?? b.e.id)
+      const bIsChild = referencesName(b.e.value.attributes, aName)
+      const aIsChild = referencesName(a.value.attributes, bName)
+      const parentIsA = bIsChild !== aIsChild ? bIsChild : (byId.get(a.id)?.i ?? 0) < b.i
+      const [parent, child] = parentIsA ? [a, b.e] : [b.e, a]
+      child.relations = child.relations.filter((id) => id !== parent.id)
+      if (!parent.relations.includes(child.id)) parent.relations.push(child.id)
+    }
+  }
+}
+
+/** Bội số đầu mục quan hệ: "1–n", "n-1", "1:N", "1..*", "*–1", "1–1". */
+const MULTIPLICITY = /^\s*(1|n|\*|0\.\.1|1\.\.\*|0\.\.\*)\s*[–—\-:]\s*(1|n|\*|0\.\.1|1\.\.\*|0\.\.\*)\s+/i
+const isMany = (m: string): boolean => /n|\*/i.test(m)
+
+/**
+ * Mục của ô "Quan hệ" kèm phía: `child` (thực thể này là phía 1, mục là phía nhiều — mặc định), `one` (1–1), `parent`
+ * (n–1: mục là cha của thực thể này). Mục không ghi bội số dùng bội số của mục đứng trước ("1–n Điểm, Điểm danh").
+ */
+export const relationRefs = (refs: readonly string[]): { ref: string; side: "child" | "one" | "parent" }[] => {
+  let side: "child" | "one" | "parent" = "child"
+  return refs.map((raw) => {
+    const m = MULTIPLICITY.exec(raw)
+    if (m) side = isMany(m[1]) && !isMany(m[2]) ? "parent" : !isMany(m[1]) && !isMany(m[2]) ? "one" : "child"
+    return { ref: m ? raw.slice(m[0].length).trim() : raw.trim(), side }
+  })
+}
+
 export const relationPhrase = (ref: string, pool: { id: string; name?: string }[]): { id: string; verb: string } | null => {
   const key = nameKey(ref)
   const hits = pool
@@ -427,29 +523,57 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
     })
   }
   for (const r of of("roles").filter(skip(spine.roles))) add("roles", { id: r.id, name: str(r.value.name) || r.id, actor_id: resolveActor(r.value.actor_id ?? r.value.actor) })
+  // QLHS 11/11: cột "Quan hệ" ghi chiều ("1–n Học kỳ", "n–1 Học sinh"). `relations` của Spine chỉ chứa phía nhiều của
+  // thực thể này ⇒ "n–1 X" là quan hệ của X (X → thực thể này), không phải của thực thể này; bỏ chiều thì mỗi cặp bị vẽ
+  // hai lần ngược nhau trên ERD.
+  const builtEntities: { id: string; value: Record<string, unknown>; relations: string[]; cardinality: Record<string, "1" | "N"> }[] = []
+  const parentLinks: { parent: string; child: string }[] = []
   for (const e of of("entities").filter(skip(spine.entities))) {
     const relations: string[] = []
+    const cardinality: Record<string, "1" | "N"> = {}
     const verbs: Record<string, string> = {}
-    for (const ref of strList(e.value.relations)) {
+    for (const { ref, side } of relationRefs(strList(e.value.relations))) {
       const direct = resolveEntity(ref)
       const hit = direct ? { id: direct, verb: "" } : relationPhrase(ref, entityPool)
-      if (!hit || hit.id === e.id || relations.includes(hit.id)) continue
+      if (!hit || hit.id === e.id) continue
+      if (side === "parent") {
+        parentLinks.push({ parent: hit.id, child: e.id! })
+        continue
+      }
+      if (relations.includes(hit.id)) continue
       relations.push(hit.id)
+      if (side === "one") cardinality[hit.id] = "1"
       if (hit.verb) verbs[hit.id] = hit.verb
     }
     const attributes = attributesOf(e.value.attributes)
     const featureIds = [...new Set(strList(e.value.feature_ids ?? e.value.features).flatMap((ref) => resolveFeature(ref) ?? []))]
     const lifecycle = lifecycleOf(e.id ?? "", e.value.states, e.value.transitions)
-    add("entities", {
-      id: e.id,
-      name: str(e.value.name) || e.id,
-      description: str(e.value.description),
+    builtEntities.push({
+      id: e.id!,
       relations,
-      ...(Object.keys(verbs).length ? { relation_verbs: verbs } : {}),
-      ...(attributes.length ? { attributes } : {}),
-      ...(featureIds.length ? { feature_ids: featureIds } : {}),
-      ...(lifecycle.states.length ? lifecycle : {})
+      cardinality,
+      value: {
+        id: e.id,
+        name: str(e.value.name) || e.id,
+        description: str(e.value.description),
+        ...(Object.keys(verbs).length ? { relation_verbs: verbs } : {}),
+        ...(attributes.length ? { attributes } : {}),
+        ...(featureIds.length ? { feature_ids: featureIds } : {}),
+        ...(lifecycle.states.length ? lifecycle : {})
+      }
     })
+  }
+  for (const { parent, child } of parentLinks) {
+    const p = builtEntities.find((b) => b.id === parent)
+    // Cha đã có trong Spine (không dựng lại ở lô này) thì thôi — không sửa phần tử cũ từ import
+    if (p && !p.relations.includes(child)) p.relations.push(child)
+    // Chiều ngược (con cũng ghi cha là "1–n") bị bỏ: chỉ giữ cha → con
+    const c = builtEntities.find((b) => b.id === child)
+    if (c) c.relations = c.relations.filter((id) => id !== parent)
+  }
+  dropReciprocalRelations(builtEntities)
+  for (const b of builtEntities) {
+    add("entities", { ...b.value, relations: b.relations, ...(Object.keys(b.cardinality).length ? { relation_cardinality: b.cardinality } : {}) })
   }
   for (const b of of("business_rules").filter(skip(spine.business_rules))) {
     add("business_rules", { id: b.id, tier: ruleTierOfSections(b.sections) ?? oneOf(b.value.tier, ["high", "detail"], "detail"), statement: str(b.value.statement ?? b.value.rule ?? b.value.description), source_validation_ids: [] })
@@ -643,14 +767,20 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
       }
     }
     for (const n of [...nodeItems].sort((a, b) => depth(a.id!) - depth(b.id!))) {
-      const description = str(n.value.description)
+      // Mô tả nút (dòng chữ phụ dưới tên): mảng thì nối ", ", không tách
+      const rawDescription = n.value.description ?? n.value.subtitle
+      const fixed = splitSubtitleComponents(
+        strList(n.value.components),
+        Array.isArray(rawDescription) ? rawDescription.map(str).filter(Boolean).join(", ") : str(rawDescription)
+      )
+      const description = fixed.description
       add("deployment_nodes", {
         id: n.id,
         name: str(n.value.name) || n.id,
         kind: oneOf(n.value.kind, ["device", "execution_environment", "node"], "node"),
         parent_id: parentOf.get(n.id!) ?? null,
         artifacts: strList(n.value.artifacts),
-        components: strList(n.value.components),
+        components: fixed.components,
         ...(description ? { description } : {})
       })
     }

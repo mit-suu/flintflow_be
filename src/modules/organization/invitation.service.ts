@@ -353,11 +353,11 @@ export const revokeInvitation = async (
     // Lời mời của người khác không có trong danh sách của Analyst ⇒ coi như không tồn tại
     if (String(invitation.invitedByUserId) !== userId) throw notFound()
     if (state !== "awaiting_approval") {
-      throw new ApiError(403, "Lời mời đã được Lead xử lý — chỉ Lead thu hồi được", "ORG_ROLE_FORBIDDEN")
+      throw new ApiError(403, "Lời mời đã được Lead xử lý - chỉ Lead thu hồi được", "ORG_ROLE_FORBIDDEN")
     }
   }
   if (state === "accepted") {
-    throw new ApiError(409, "Mã đã được dùng — hãy xoá thành viên nếu muốn thu hồi quyền", "INVITE_ALREADY_USED")
+    throw new ApiError(409, "Mã đã được dùng - hãy xoá thành viên nếu muốn thu hồi quyền", "INVITE_ALREADY_USED")
   }
   if (state !== "revoked" && state !== "rejected") {
     invitation.revokedAt = new Date()

@@ -246,7 +246,10 @@ export const IMPORT_EXTRACT_ENTITIES = [
   "glossary",
   // FLF-365: mẫu IEEE 29148
   "references",
-  "verifications"
+  "verifications",
+  // FLF-390: nút triển khai đọc từ sơ đồ triển khai (skill `import-extract-diagram` đã mô tả; thiếu ở đây ⇒ mọi lần đọc
+  // ảnh deployment trượt schema, QLHS 11/11 bug #11)
+  "deployment_nodes"
 ] as const
 
 const blockIdRef = z.string().regex(/^B\d{4,}$/)

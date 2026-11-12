@@ -1,4 +1,4 @@
-# Skills — prompt asset theo BMAD (T03)
+# Skills - prompt asset theo BMAD (T03)
 
 Nguồn sự thật cho mọi prompt của pipeline B-0 → S-9 (`Product-Brief-to-SRS-Phases.md` §8). **Không có DB override**: sửa file ở đây, commit, deploy. Trang admin prompt chỉ đọc.
 
@@ -14,7 +14,7 @@ assets/skills/
 └─ <kind>/<skill_id>/
    ├─ SKILL.md            luôn nạp, ≤ ~150 dòng
    ├─ references/*.md     nạp có điều kiện: getSkill(id, { references: [...] }); skill nội dung của step chỉ
-   │                      đưa vào prompt những file khai ở `prompt_references` — còn lại model KHÔNG thấy
+   │                      đưa vào prompt những file khai ở `prompt_references` - còn lại model KHÔNG thấy
    └─ assets/*-template.md nạp lúc render (không tính vào asset_version)
 ```
 
@@ -22,23 +22,23 @@ assets/skills/
 
 ```yaml
 ---
-skill_id: draft-to-ops          # BẮT BUỘC — trùng tên thư mục, duy nhất toàn cây
-kind: action                    # BẮT BUỘC — action | content | renderer | output, trùng thư mục cha
-version: 1.0.0                  # BẮT BUỘC — semver do người sửa tăng (asset_version tự tính)
+skill_id: draft-to-ops          # BẮT BUỘC - trùng tên thư mục, duy nhất toàn cây
+kind: action                    # BẮT BUỘC - action | content | renderer | output, trùng thư mục cha
+version: 1.0.0                  # BẮT BUỘC - semver do người sửa tăng (asset_version tự tính)
 description: Một câu mô tả      # tuỳ chọn
-provider: anthropic                   # BẮT BUỘC — anthropic | glm | gemini | modal
+provider: anthropic                   # BẮT BUỘC - anthropic | glm | gemini | modal
 aiModel: claude-haiku-5-5  # BẮT BUỘC
 maxTokens: 4096                 # BẮT BUỘC, > 0
 temperature: 0.2                # BẮT BUỘC
-reads:                          # BẮT BUỘC — field Spine skill được nạp (cột Sở hữu/Đọc/Suy dẫn, srs-spine §4)
+reads:                          # BẮT BUỘC - field Spine skill được nạp (cột Sở hữu/Đọc/Suy dẫn, srs-spine §4)
   - screens[]
   - functions[]
-writes:                         # BẮT BUỘC — field Spine skill được phát op; [] nếu không ghi
+writes:                         # BẮT BUỘC - field Spine skill được phát op; [] nếu không ghi
   - functions[]
-output_schema: opTransaction    # BẮT BUỘC — một tên hoặc mảng tên (bảng dưới)
-language: en                    # BẮT BUỘC — en: nội dung render vào SRS · user: theo ngôn ngữ user
-stub: true                      # tuỳ chọn — skill chờ task sau điền nội dung
-prompt_references:              # tuỳ chọn — reference luôn nạp kèm thân khi là skill nội dung của step (FLF-370)
+output_schema: opTransaction    # BẮT BUỘC - một tên hoặc mảng tên (bảng dưới)
+language: en                    # BẮT BUỘC - en: nội dung render vào SRS · user: theo ngôn ngữ user
+stub: true                      # tuỳ chọn - skill chờ task sau điền nội dung
+prompt_references:              # tuỳ chọn - reference luôn nạp kèm thân khi là skill nội dung của step (FLF-370)
   - actor-rules                 #   tên file trong references/ (không đuôi .md); thiếu file ⇒ lỗi lúc nạp
 ---
 ```
@@ -52,14 +52,14 @@ prompt_references:              # tuỳ chọn — reference luôn nạp kèm th
 | `changeInstruction` | `{clarification_needed?, txn?, ops?, notes?}` | change_instruction |
 | `renderFix` | `{puml, notes?}` | render_fix |
 | `importExtract` | `{section_id, items: [{entity, key, value, confidence, field_confidence, source_block_ids}], unmapped_block_ids}` | import_extract_fields (mode 1) |
-| `importExtractDiagram` | `importExtract` + `diagram_kind: usecase \| erd \| screen_flow \| context \| other` — một ảnh kèm prompt (Gemini) | import_extract_diagram (mode 1 v3 phase 5) |
-| `findings` | `{findings: [{rule, section_id, message, block_ids}]}` — chỉ cờ vàng | import_semantic_check, import_cross_check, cr_consistency (mode 1) |
+| `importExtractDiagram` | `importExtract` + `diagram_kind: usecase \| erd \| screen_flow \| context \| other` - một ảnh kèm prompt (Gemini) | import_extract_diagram (mode 1 v3 phase 5) |
+| `findings` | `{findings: [{rule, section_id, message, block_ids}]}` - chỉ cờ vàng | import_semantic_check, import_cross_check, cr_consistency (mode 1) |
 | `crClarify` | `{ambiguous, questions[], suggestions[][], missing_info[], targets: {entity_paths[], keywords[]}}` | cr_clarify (mode 1; `missing_info`, `suggestions` phase 7) |
 | `crPropose` | `{locations: [{location_id, conclusion, reason, new_text?, comment_text?, spine_ops, assumptions[]}]}` | cr_propose (mode 1; `assumptions` phase 7) |
-| `crMaterialImage` | `{text}` — chữ chép nguyên văn + `Description:`; một ảnh kèm prompt (Gemini) | cr_material_image (mode 1 v3 phase 7) |
-| `knowledgeAnswer` | `{grounded, answer, claims: [{text, refs[]}]}` — `refs` là nhãn chunk `K1…`, code hậu kiểm | knowledge_answer (FLF-267) |
-| `puml` | text `.puml` (renderer, T10 chốt) | — |
-| `none` | không gọi model — skill mô tả logic tất định cho code | — |
+| `crMaterialImage` | `{text}` - chữ chép nguyên văn + `Description:`; một ảnh kèm prompt (Gemini) | cr_material_image (mode 1 v3 phase 7) |
+| `knowledgeAnswer` | `{grounded, answer, claims: [{text, refs[]}]}` - `refs` là nhãn chunk `K1…`, code hậu kiểm | knowledge_answer (FLF-267) |
+| `puml` | text `.puml` (renderer, T10 chốt) | - |
+| `none` | không gọi model - skill mô tả logic tất định cho code | - |
 
 ActionType → skill hành động: `SKILL_BY_ACTION_TYPE` trong `src/shared/ai/ai-action.types.ts`. Skill nội dung/renderer của step do step runner (T13) ghép thêm.
 
@@ -72,7 +72,7 @@ ActionType → skill hành động: `SKILL_BY_ACTION_TYPE` trong `src/shared/ai/
 - `reads`/`writes` viết dạng **block list** (`- actors[]`). Flow list `[actors[], roles[]]` là YAML sai vì `[`/`]` trong giá trị.
 - Nội dung render vào SRS: **tiếng Anh**. Hội thoại, `flags[].message`, `changes[].reason`: theo user (Phases §1.3). Prompt có khối `## Document language` (FLF-265, dự án có ngôn ngữ tài liệu khác tiếng Anh) ⇒ thêm `localized` theo khối đó; `ops` vẫn tiếng Anh.
 - Model chỉ phát op; không bao giờ sinh lại cả section.
-- Không nhắc số hiệu section (`3.4`) trong văn xuôi — dùng khoá logic (`feature:F2`).
+- Không nhắc số hiệu section (`3.4`) trong văn xuôi - dùng khoá logic (`feature:F2`).
 - Placeholder `{{name}}` được `interpolatePrompt` thay lúc chạy.
 - `skill_id` là hợp đồng với T11/T13: đổi tên phải qua PR `contract-change`.
 

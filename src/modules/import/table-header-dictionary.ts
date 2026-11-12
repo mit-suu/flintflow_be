@@ -103,7 +103,9 @@ export const TABLE_ENTITIES: readonly TableEntityDef[] = [
     columns: [
       { field: "name", headers: ["entity", "entity name", "table", "object", "thực thể", "tên thực thể"] },
       { field: "description", headers: ["description", "mô tả"] },
-      { field: "relations", headers: ["relations", "relationships", "related entities", "quan hệ", "liên kết"] }
+      { field: "relations", headers: ["relations", "relationships", "related entities", "quan hệ", "liên kết"] },
+      // QLHS 11/11 bug #12c: cột thuộc tính của bảng từ điển dữ liệu ⇒ `attributes` (ô "mã, họ tên, …" tách thành thuộc tính)
+      { field: "attributes", headers: ["attributes", "attribute", "key attributes", "main attributes", "fields", "thuộc tính", "thuộc tính chính", "các thuộc tính"] }
     ],
     required: ["name"]
   },

@@ -29,7 +29,7 @@ import { Project } from "../project/project.model.js"
 import { assemble } from "../render/assemble.service.js"
 import { snapshotBaseline } from "../pipeline/s9/baseline.service.js"
 import { Baseline } from "../spine/baseline.model.js"
-import { applyTransaction } from "../spine/op-engine.js"
+import { applyTransaction, planTransaction } from "../spine/op-engine.js"
 import { OWNER_DIAGRAM_KINDS, inferDiagramKind, isOriginalDiagramKind, originalDiagramValue, ownerOfSection } from "../spine/original-diagram.js"
 import { rehashSegments, segmentKeyOfPath } from "../spine/segment-hash.js"
 import * as spineRepository from "../spine/spine.repository.js"
@@ -38,11 +38,13 @@ import type { Baseline as BaselineEntry, OriginalDiagramKind, Spine } from "../s
 import { countOpenFlags, findingOpsInOrder, runImportCheck, stripRecord, type Finding } from "./check.service.js"
 import { legacyRecordRows } from "./legacy-record.js"
 import { DocBlock } from "./doc-block.model.js"
+import { erdNotationOfDocument } from "./erd-notation-detect.js"
 import { captionOf } from "./extract.service.js"
 import { canonicalFieldIds, collectEntities, idKey, imageOnlyGenericActors, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
 import { ExtractionDraft, type IExtractionDraft } from "./extraction-draft.model.js"
 import { FieldAnchor } from "./field-anchor.model.js"
 import { needsConfirm } from "./import.constants.js"
+import { hasOwnScreenFlow, inferScreenFlow, inferredFlowFindings, inferredFlowOps, type InferredFlowEdge } from "./inferred-screen-flow.js"
 import type { FinalizeRequest } from "./import.dto.js"
 import { assertImportStatus, loadImportFile, recomputeBlockSections, requireImport, toReviewFields, transitionImport } from "./import.service.js"
 import { pathLabel } from "../spine/human-labels.js"
@@ -109,6 +111,10 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const entities = [...collectEntities(accepted)].filter(([key]) => !genericActors.has(key)).map(([, e]) => e)
   const droppedPermissions: DroppedPermission[] = []
   const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value, sections: e.sections })), droppedPermissions)
+  // QLHS 11/11 bug #15: file không có sơ đồ / mục luồng màn, chỉ ghi vài chuyển màn ⇒ suy Đăng nhập → màn của từng vai (cùng
+  // lô thực thể để dấu đoạn / hash tính trên dữ liệu đã có cạnh); cờ "Cần xem" liệt kê cạnh suy ra ở lô kế hoạch step
+  const inferredFlow = hasOwnScreenFlow(drafts, profile.heading_map, provisional) ? [] : inferFlowAfter(stripRecord(before), ops)
+  ops.push(...inferredFlowOps(inferredFlow))
 
   // 2. File gốc của bản 0.1 (ghi file trước; lô Spine hỏng thì xoá file, không để mồ côi)
   const parsed = await parseDocument(await loadImportFile(doc))
@@ -175,6 +181,10 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     image_ref: b.image_ref ?? null,
     ...(b.number_label ? { number_label: b.number_label } : {})
   }))
+  // QLHS 11/11 bug #12b: file ghi ký pháp ERD (danh mục hình / chú thích "ký hiệu chân chim") ⇒ dự án vẽ lại ERD đúng ký
+  // pháp đó; không ghi ⇒ giữ ký pháp của dự án. Ghi trước khi vẽ sơ đồ (bước 4)
+  const fileNotation = erdNotationOfDocument(layoutBlocks)
+  if (fileNotation) await Project.updateOne({ _id: projectId }, { $set: { erdNotation: fileNotation } })
   // Văn xuôi I-4 không trích được ⇒ phần nối của section (FLF-184) — render từ Spine không mất nội dung file gốc
   const unmappedIds = new Set(drafts.flatMap((d) => d.unmapped_block_ids ?? []))
   // Phase 5 (T3): ảnh dưới mục FPT ⇒ giữ nguyên văn (phần nối của mục) để bản render nhúng lại ảnh gốc. Trước đây bản
@@ -245,7 +255,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
         }),
         rule: IMPORT_NEEDS_REVIEW_RULE
       },
-      { findings: titleContentFindings(stripRecord(seeded), profile.heading_map, layout), rule: IMPORT_TITLE_CONTENT_RULE }
+      { findings: titleContentFindings(stripRecord(seeded), profile.heading_map, layout), rule: IMPORT_TITLE_CONTENT_RULE },
+      { findings: inferredFlowFindings(seeded, inferredFlow), rule: IMPORT_NEEDS_REVIEW_RULE }
     ]),
     ...seedStepOps(stripRecord(seeded), plan, { firstSeq: seqRange.first, lastSeq: seqRange.last, at: new Date().toISOString(), ...(draftOwners ? { draftOwners } : {}) })
   ]
@@ -418,11 +429,22 @@ const unreadImageFindings = (
     return unread.map((i, n) => ({
       rule: "image",
       section_id,
-      message: `${unread.length > 1 ? `Ảnh thứ ${n + 1}` : "Ảnh"} trong mục "${title}" không đọc được thành dữ liệu (${UNREAD_REASON[i.kind] ?? "không phải sơ đồ đọc được"}) — đã giữ ảnh gốc; cần thì cập nhật qua change request`,
+      message: `${unread.length > 1 ? `Ảnh thứ ${n + 1}` : "Ảnh"} trong mục "${title}" không đọc được thành dữ liệu (${UNREAD_REASON[i.kind] ?? "không phải sơ đồ đọc được"}) - đã giữ ảnh gốc; cần thì cập nhật qua change request`,
       block_ids: [i.block_id]
     }))
   })
   return findings
+}
+
+/** Cạnh luồng màn suy ra trên Spine SAU lô thực thể (áp thử, không ghi). Lô hỏng ⇒ không suy (applyTransaction báo lỗi). */
+const inferFlowAfter = (spine: Spine, ops: Op[]): InferredFlowEdge[] => {
+  if (!ops.length) return []
+  try {
+    const planned = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import", step_id: null }, { startSeq: 1 })
+    return inferScreenFlow(planned.spine)
+  } catch {
+    return []
+  }
 }
 
 const percent = (n: number): string => `${Math.round(n * 100)}%`
@@ -467,7 +489,7 @@ export const needsReviewFindings = (
     .map((f) => ({
     rule: "needs_review",
     section_id: realSectionId(f.section_id, provisional),
-    message: `Cần xem: ${pathLabel(f.path, f.entity_name)} — ${f.origin === "vision" ? "đọc từ ảnh sơ đồ" : `độ tin ${percent(f.confidence)}`}; đã đưa vào bản 0.1, sai thì sửa bằng change request`,
+    message: `Cần xem: ${pathLabel(f.path, f.entity_name)} - ${f.origin === "vision" ? "đọc từ ảnh sơ đồ" : `độ tin ${percent(f.confidence)}`}; đã đưa vào bản 0.1, sai thì sửa bằng change request`,
     block_ids: [...f.source_block_ids],
     target_id: f.path
   }))
@@ -522,7 +544,7 @@ export const titleContentFindings = (spine: Spine, headingMap: readonly HeadingM
       {
         rule: "title_content_mismatch",
         section_id: h.content_mismatch.by_content,
-        message: `Tiêu đề "${h.heading_text}" giống mục "${byTitle}" nhưng nội dung là của mục "${byContent}" — đã xếp vào "${byContent}"; sai thì sửa bằng change request`,
+        message: `Tiêu đề "${h.heading_text}" giống mục "${byTitle}" nhưng nội dung là của mục "${byContent}" - đã xếp vào "${byContent}"; sai thì sửa bằng change request`,
         block_ids: [h.block_id],
         target_id: h.block_id
       }

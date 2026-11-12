@@ -275,7 +275,7 @@ export const reconcile = async (
       notes:
         briefs.length === 0
           ? "Không có section nào đang stale."
-          : `${briefs.length} section vẫn đúng nội dung — xác nhận không đổi để gỡ cờ, hoặc sửa tay qua chat.`
+          : `${briefs.length} section vẫn đúng nội dung - xác nhận không đổi để gỡ cờ, hoặc sửa tay qua chat.`
     }
   }
 

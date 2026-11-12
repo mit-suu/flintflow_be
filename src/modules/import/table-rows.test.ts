@@ -28,7 +28,7 @@ describe("tableGrid", () => {
 })
 
 describe("tableRows", () => {
-  it("FLF-251: dùng rows đã lưu — ô tiêu đề có xuống dòng không làm gãy hàng như khi tách text", () => {
+  it("FLF-251: dùng rows đã lưu - ô tiêu đề có xuống dòng không làm gãy hàng như khi tách text", () => {
     const rows = [
       ["Date", "A*\nM, D", "In charge", "Change Description"],
       ["29/07/2026", "A", "QuynhTTN", "Added User Requirements"]

@@ -33,7 +33,14 @@ export const uploadDocument = catchAsync(async (req: Request, res: Response) => 
   const projectId = Array.isArray(req.params.projectId) ? req.params.projectId[0] : req.params.projectId
   const file = (req as Request & { file?: Express.Multer.File }).file
 
-  const document = await projectDocumentService.uploadProjectDocument(requireOrgId(req), userId, projectId, file as Express.Multer.File)
+  // FLF-398: lựa chọn sau `409 POSSIBLE_NEW_VERSION` — gửi kèm form (multipart): `replace_document_id` hoặc `keep_both=true`
+  const body = (req.body ?? {}) as { replace_document_id?: unknown; keep_both?: unknown }
+  const replaceDocumentId = typeof body.replace_document_id === "string" && body.replace_document_id.trim() ? body.replace_document_id.trim() : null
+  const keepBoth = body.keep_both === true || body.keep_both === "true"
+  const document = await projectDocumentService.uploadProjectDocument(requireOrgId(req), userId, projectId, file as Express.Multer.File, {
+    replaceDocumentId,
+    keepBoth
+  })
   // Business-flow §3.6: file trông như SRS đính kèm ở chat / ô tham khảo ⇒ FE gợi ý (cập nhật phiên bản mới / dùng làm tham khảo)
   const precheck = file ? await precheckDocx(file.buffer, document.originalName ?? file.originalname, { projectId }).catch(() => null) : null
   return sendSuccess(res, 201, { ...document.toJSON(), precheck })
