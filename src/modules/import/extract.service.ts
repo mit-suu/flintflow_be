@@ -19,6 +19,7 @@ import type { DiagramImageKind, ImportExtractDiagramOutput, ImportExtractOutput 
 import { loadImportImage } from "../render/import-media.js"
 import { IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { DocBlock, type IDocBlock } from "./doc-block.model.js"
+import { isPlaceholderRow, isPlaceholderText, templateMarks } from "./template-markers.js"
 import { isTemplateContent, isTemplateFile } from "./structure-preview.js"
 import { DIAGRAM_SECTIONS, DIAGRAM_TARGETS, NFR_CATEGORY_BY_SECTION, isExtractableSection, schemaExcerptFor, targetsOf } from "./extract-targets.js"
 import {
@@ -185,6 +186,9 @@ export const settleSection = (
       // QLHS 11/11 (bug #10, #12c): bảng từ điển dữ liệu (có cột thuộc tính) luôn giữ nguyên văn tại chỗ — bản in theo file
       // upload; Spine vẫn nhận tên / quan hệ / thuộc tính đọc được từ bảng
       if (hasAttributeColumn(rows)) out.verbatim.add(t.block_id)
+      // FLF-411: bảng toàn chỗ điền của mẫu (ma trận "Role-Name1 | <<Screen Name1>>") không cho phần tử nào ⇒ giữ nguyên văn;
+      // bảng thông báo có cột ngoài Spine (5.3 "Message Type", "Context") ⇒ giữ nguyên văn, Spine vẫn nhận mã / nội dung
+      if (!items.length || hasUnmappedMessageColumn(t, rows, profile)) out.verbatim.add(t.block_id)
       continue
     }
     if (!targets.includes("use_cases")) continue
@@ -246,17 +250,25 @@ const matrixItems = (
   indented: ReadonlySet<string>
 ): EntityItem[] | null => {
   const screenCol = cols.find((c) => c.field_path === "permissions[].screen_id")?.column_index
-  const roleCols = cols.filter((c) => c.field_path === "permissions[].role_id" && shape.headers[c.column_index]).map((c) => c.column_index)
-  if (screenCol === undefined || !roleCols.length) return null
+  const allRoleCols = cols.filter((c) => c.field_path === "permissions[].role_id" && shape.headers[c.column_index]).map((c) => c.column_index)
+  if (screenCol === undefined || !allRoleCols.length) return null
+  // FLF-411: cột vai trò của mẫu ("Role-Name1", "…", "<<Role>>") không phải vai trò thật
+  const roleCols = allRoleCols.filter((c) => !isPlaceholderRole(shape.headers[c]))
   const base = { id: null, confidence, field_confidence: {}, source_block_ids: [table.block_id], origin: "deterministic" as const }
   const roles = roleCols.map((c) => ({ ...base, entity: "roles", value: { name: shape.headers[c], actor_id: shape.headers[c] } }))
   let parent: string | null = null
+  let parentIsPlaceholder = false
   const permissions = shape.body.flatMap((r) => {
     const raw = (grid[r][screenCol] ?? "").trim()
     if (!raw) return []
     const sub = parent !== null && (indented.has(`${r}:${screenCol}`) || SUB_ROW_MARKER.test(raw))
     const screen = sub ? raw.replace(SUB_ROW_MARKER, "") : raw
-    if (!sub) parent = screen
+    if (!sub) {
+      parent = screen
+      parentIsPlaceholder = isPlaceholderText(screen)
+    }
+    // FLF-411: màn chỗ điền của mẫu (`<<Screen Name1>>`) và thao tác dưới nó không thành quyền
+    if (isPlaceholderText(screen) || (sub && parentIsPlaceholder)) return []
     const extra = sub ? { parent_screen: parent } : {}
     return roleCols.flatMap((c) =>
       markActions(grid[r][c] ?? "").map((action) => ({ ...base, entity: "permissions", value: { screen_id: screen, role_id: shape.headers[c], action, ...extra } }))
@@ -294,9 +306,12 @@ export const deterministicTableItems = (
   return shape.body.flatMap((r) => {
     // Hàng chỗ trống của mẫu (`[FR-xxx] | [The system shall ...]`) không phải dữ liệu — không thành phần tử Spine
     if (!grid[r].some((cell) => isRealText(cell))) return []
+    // FLF-411: dòng mẫu (`3 | .. |`, `1 | <<Feature Name>> | <<Function Name1>>`) không phải dữ liệu; ô chỗ điền là trống
+    if (isPlaceholderRow(grid[r])) return []
     const value: Record<string, unknown> = {}
     for (const [col, field] of fields) {
       let cell: string | undefined = grid[r][col]?.trim()
+      if (cell && isPlaceholderText(cell)) cell = ""
       if (!cell && FILL_DOWN_FIELDS.has(field)) cell = above.get(field)
       if (!cell) continue
       if (FILL_DOWN_FIELDS.has(field)) above.set(field, cell)
@@ -353,6 +368,17 @@ const blockLines = (blocks: BlockLite[]): string => blocks.map((b) => `[${b.bloc
 const ATTRIBUTE_COLUMN = /thuộc tính|attribute/i
 /** Hàng tiêu đề của bảng có cột thuộc tính (bảng từ điển dữ liệu). */
 export const hasAttributeColumn = (rows: readonly (readonly string[])[] | null | undefined): boolean => ATTRIBUTE_COLUMN.test((rows?.[0] ?? []).join(" | "))
+/** FLF-411: nhãn cột vai trò của mẫu ("Role-Name1", "Role Name 2", "…", "<<Role>>"). */
+export const isPlaceholderRole = (header: string): boolean => isPlaceholderText(header) || /^role[\s_-]*name\s*\d*$/i.test(header.trim())
+
+/** FLF-411: bảng thông báo có cột ngoài `Message` của Spine (không map, không phải cột số thứ tự) — vd "Message Type", "Context". */
+const hasUnmappedMessageColumn = (table: BlockLite, rows: readonly (readonly string[])[], profile: ITemplateProfile): boolean => {
+  const cols = profile.table_map.filter((t) => t.block_id === table.block_id)
+  if (!cols.some((c) => c.field_path?.startsWith("messages["))) return false
+  const mapped = new Set(cols.filter((c) => c.field_path).map((c) => c.column_index))
+  return (rows[0] ?? []).some((h, i) => h.trim() && !mapped.has(i) && !/^(#|no\.?|stt|số tt)$/i.test(h.trim()))
+}
+
 export const tablesToKeepVerbatim = (batch: readonly Pick<BlockLite, "block_id" | "kind" | "rows">[], items: readonly EntityItem[]): string[] =>
   batch
     .filter((b) => b.kind === "table" && ATTRIBUTE_COLUMN.test((b.rows?.[0] ?? []).join(" | ")))
@@ -721,7 +747,9 @@ export interface PlannedSection {
  * và lúc finalize, mapping chỉ sửa ở `mapping_review` ⇒ trong lúc `extracting` chạy lại cho đúng các lô cũ.
  */
 export const sectionAiSteps = (sectionId: string, blocks: BlockLite[], settled: Settled): SectionAiStep[] => {
-  const sectionBlocks = blocks.filter((b) => b.section_id === sectionId)
+  // FLF-411: chữ của mẫu (khoảng hướng dẫn nhiều đoạn, `<<Sample … >>` kèm hình, chỗ điền — BF §3.1.1) không gửi AI / vision
+  const marks = templateMarks(blocks)
+  const sectionBlocks = blocks.filter((b) => b.section_id === sectionId && !marks.has(b.block_id))
   const tablePrefixes = sectionBlocks.filter((b) => b.kind === "table").map((b) => `${b.anchor.xml_path}/`)
   const aiBlocks = sectionBlocks
     .filter(

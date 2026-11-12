@@ -22,6 +22,8 @@ import { isContentSlot, slotHasData } from "./content-slots.js"
 import { templateWrapperIds } from "./template-wrappers.js"
 import { displayHeading } from "./heading-label.js"
 import { templateSectionOwnerSteps } from "./template-step-headings.js"
+import { isPlaceholderText } from "./template-markers.js"
+import { splitHeadingNumber } from "./text-similarity.js"
 
 export type TargetSectionStatus = "present" | "missing" | "out_of_scope"
 export type TemplateIntent = "fixed" | "free"
@@ -56,7 +58,14 @@ const NON_DRAFT_TITLES: ReadonlySet<string> = new Set(
 const normalizeTitle = (text: string): string =>
   text.trim().replace(/^[\dIVXivx]+(\.[\dIVXivx]+)*\.?\s+/, "").replace(/\s+/g, " ").toLowerCase()
 export const isNonDraftHeading = (sectionId: string, headingText: string): boolean =>
-  DERIVED_SECTIONS.has(sectionId) || NON_DRAFT_TITLES.has(normalizeTitle(headingText))
+  DERIVED_SECTIONS.has(sectionId) || NON_DRAFT_TITLES.has(normalizeTitle(headingText)) || isPlaceholderHeading(sectionId, headingText)
+
+/**
+ * FLF-411: heading chỗ điền của mẫu ("4.2.4 …", "5.3 …") không phải mục cần soạn / mục bắt buộc. Khung tính năng / chức năng
+ * (`3.2 <<Feature Name 1>>` ⇒ `feature:*` / `function:*`) vẫn là chỗ in tính năng thật nên không tính.
+ */
+const isPlaceholderHeading = (sectionId: string, headingText: string): boolean =>
+  !/^(feature|function):/.test(sectionId) && isPlaceholderText(splitHeadingNumber(headingText).title)
 
 export interface CompareOptions {
   /**
