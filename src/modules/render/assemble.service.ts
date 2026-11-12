@@ -330,8 +330,9 @@ const materializeImages = (doc: RenderedDocument, resolve: (diagramId: string) =
     if (id === null || !isImageBlock(b)) return b
     const png = resolve(id)
     if (png) return { ...b, png }
-    // Ảnh gốc không nhúng được (EMF/WMF, file gốc không còn) ⇒ chỗ giữ ảnh + chú thích nói đúng lý do
-    if (isMediaId(id)) return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: `${b.caption ? `${b.caption} - ` : ""}${assembleTextFor(language).mediaNotEmbedded}` }
+    // Ảnh gốc không nhúng được (EMF/WMF, file gốc không còn) ⇒ chỗ giữ ảnh trống, giữ chú thích gốc nếu có — FLF-411 U1-7:
+    // không in câu kỹ thuật ("không nhúng được ảnh gốc…") vào tài liệu của người dùng; lý do đã có ở cờ `import_image_unread`
+    if (isMediaId(id)) return { ...b, png: DIAGRAM_PLACEHOLDER_PNG }
     return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: pendingImageCaption(b.caption, id, language) }
   }
   return { ...doc, sections: doc.sections.map((s) => ({ ...s, blocks: s.blocks.map(materialize) })) }
