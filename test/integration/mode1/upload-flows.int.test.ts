@@ -45,7 +45,9 @@ const uploadAndFinalize = async (file: URL, completeToStandard: boolean) => {
   const uploaded = await request(app).post(`/api/v1/projects/${projectId}/import`).set(H(seeded)).attach("file", await readFile(file), "SRS.docx")
   expect(uploaded.status, JSON.stringify(uploaded.body.error)).toBe(201)
   const importId = String(uploaded.body.data.import.id)
-  const preview = (await request(app).get(`/api/v1/projects/${projectId}/import`).set(H(seeded))).body.data.structure_preview
+  const view = (await request(app).get(`/api/v1/projects/${projectId}/import`).set(H(seeded))).body.data
+  const preview = view.structure_preview
+  const estimate = view.credit_estimate
   const doc = (await ImportedDocument.findById(importId))!
   await acceptLatest(doc, true)
   await runExtraction(projectId, seeded.userId, importId)
@@ -55,7 +57,7 @@ const uploadAndFinalize = async (file: URL, completeToStandard: boolean) => {
   const project = (await Project.findById(projectId).lean())!
   const spine = (await spineRepository.get(projectId))!
   const profile = (await TemplateProfile.findOne({ projectId }).lean())!
-  return { seeded, projectId, preview, usageAfterRead, project, spine, profile, status: (await ImportedDocument.findById(importId))!.status }
+  return { seeded, projectId, preview, estimate, usageAfterRead, project, spine, profile, status: (await ImportedDocument.findById(importId))!.status }
 }
 
 describe("FLF-411 - ba luồng upload", () => {
@@ -63,8 +65,9 @@ describe("FLF-411 - ba luồng upload", () => {
     const r = await uploadAndFinalize(REPORT3_TEMPLATE, false)
     expect(r.preview.summary).toMatchObject({ kind: "template", present: 0 })
     expect(r.preview.intent).toBe("fixed")
-    // Không gọi AI đọc chữ / hình mẫu
+    // Không gọi AI đọc chữ / hình mẫu; FLF-411 (U1-8): màn đọc khung không báo credit (không đọc, không kiểm tra AI)
     expect(r.usageAfterRead).toBe(0)
+    expect(r.estimate).toMatchObject({ ai_calls: 0, credits: 0 })
     // Không dữ liệu Cafeteria của mẫu
     expect(r.spine.project.system_name ?? null).toBeNull()
     expect(r.spine.actors).toHaveLength(0)
