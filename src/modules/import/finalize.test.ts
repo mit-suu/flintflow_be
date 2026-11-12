@@ -142,7 +142,8 @@ describe("FLF-343 needsReviewFindings - chỗ độ tin thấp vào baseline kè
       ["fixed:2.1", "B0001"],
       ["fixed:I", "B0002"],
       ["fixed:2.1", "B0010"],
-      ["fixed:2.1", "actors[id=A01].kind"],
+      // FLF-411 (U2-5): field đọc bằng chữ gộp theo phần tử, target = đường dẫn phần tử
+      ["fixed:2.1", "actors[id=A01]"],
       // FLF-411 (U2-1): field đọc từ ảnh gộp theo ảnh, target = block ảnh
       ["fixed:2.1", "B0005"]
     ])
@@ -184,6 +185,42 @@ describe("FLF-411 (U2-1) needsReviewFindings - đọc từ ảnh sơ đồ: mộ
     )
     expect(out[1].message).toContain('ảnh sơ đồ thứ 2 trong mục "Context Diagram" (tác nhân "Payment Gateway")')
     for (const f of out) expect(f.message).not.toMatch(/A0\d|flows_|\[id=/)
+  })
+})
+
+describe("FLF-411 (U2-5) needsReviewFindings - đọc bằng chữ: một cờ mỗi phần tử, nêu tên và các trường", () => {
+  it("nhiều field độ tin thấp của một phần tử ⇒ một cờ; không tên ⇒ trích câu; không mã nội bộ / khoá thô", async () => {
+    const { needsReviewFindings } = await import("./finalize.service.js")
+    const drafts = [
+      {
+        section_id: "fixed:5.4",
+        fields: [
+          field("other_requirements[id=OR-02].category", "legal", 0.69),
+          field("other_requirements[id=OR-02].statement", "The system shall keep invoices for 10 years", 0.65)
+        ]
+      },
+      {
+        section_id: "fixed:3.1.4",
+        fields: [
+          field("functions[id=FR-3.2.1].name", "Login", 0.95),
+          field("functions[id=FR-3.2.1].trigger", "User clicks Log in", 0.61),
+          field("functions[id=FR-3.2.1].description", "Logs the user in", 0.66)
+        ]
+      }
+    ]
+    const spine = {
+      ...createEmptySpine(),
+      other_requirements: [{ id: "OR-02", statement: "The system shall keep invoices for 10 years" }],
+      functions: [{ id: "FR-3.2.1", name: "Login" }]
+    } as unknown as Parameters<typeof needsReviewFindings>[0]
+    const out = needsReviewFindings(spine, drafts, { heading_map: [], table_map: [] }, [], new Map(), () => null)
+    expect(out.map((f) => [f.section_id, f.target_id])).toEqual([
+      ["fixed:5.4", "other_requirements[id=OR-02]"],
+      ["fixed:3.1.4", "functions[id=FR-3.2.1]"]
+    ])
+    expect(out[0].message).toMatch(/^Cần xem: Yêu cầu khác "The system shall keep invoices for 10 years" - .+, .+ \(độ tin 65%\)/)
+    expect(out[1].message).toMatch(/^Cần xem: Chức năng "Login" - .+, .+ \(độ tin 61%\)/)
+    for (const f of out) expect(f.message).not.toMatch(/OR-02|FR-3|\[id=|category|trigger/)
   })
 })
 
@@ -246,6 +283,6 @@ describe("FLF-343 needsReviewFindings - trùng đường dẫn, phần tử bị
     ]
     const spine = { ...createEmptySpine(), actors: [{ id: "A01" }] } as unknown as Parameters<typeof needsReviewFindings>[0]
     const out = needsReviewFindings(spine, drafts, { heading_map: [], table_map: [] }, [], new Map(), () => null)
-    expect(out.map((f) => f.target_id)).toEqual(["actors[id=A01].kind"])
+    expect(out.map((f) => f.target_id)).toEqual(["actors[id=A01]"])
   })
 })

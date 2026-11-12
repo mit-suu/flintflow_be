@@ -105,15 +105,15 @@ describe("finalize - Spine", () => {
     expect(spine.screens.every((s) => s.detail_status !== "pending")).toBe(true)
   })
 
-  it("FLF-343: field độ tin thấp chưa xác nhận KHÔNG bị bỏ - vào Spine kèm đúng một cờ vàng Cần xem / field (mang đường dẫn); mapping tự nhận cũng có cờ", async () => {
+  it("FLF-343: field độ tin thấp chưa xác nhận KHÔNG bị bỏ - vào Spine kèm đúng một cờ vàng Cần xem / phần tử (FLF-411 U2-5, mang đường dẫn phần tử); mapping tự nhận cũng có cờ", async () => {
     const { projectId, importId, userId } = await importAtBaselining({ srs: { numberedOnly: true } })
     const before = (await spineRepository.get(projectId))!
     await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
     const spine = (await spineRepository.get(projectId))!
     expect(spine.functions.map((f) => f.trigger)).toEqual(["Learner submits the form", "Learner submits the form"])
     const review = spine.flags.filter((f) => f.rule_id === "import_needs_review" && f.resolved_at === null)
-    const fieldFlags = review.filter((f) => f.target_id?.includes("].trigger"))
-    expect(fieldFlags.map((f) => f.target_id).sort()).toEqual(["functions[id=FR-3.2.1].trigger", "functions[id=FR-3.2.2].trigger"])
+    const fieldFlags = review.filter((f) => f.target_id?.startsWith("functions["))
+    expect(fieldFlags.map((f) => f.target_id).sort()).toEqual(["functions[id=FR-3.2.1]", "functions[id=FR-3.2.2]"])
     expect(fieldFlags.every((f) => f.level === "yellow" && f.message.startsWith("Cần xem:") && f.section_id.startsWith("function:FR-3.2."))).toBe(true)
     // heading không style (độ tin 0.75) ⇒ mỗi heading tự nhận một cờ, target = block heading
     const profile = (await TemplateProfile.findOne({ projectId }).lean())!
