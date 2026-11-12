@@ -116,6 +116,7 @@ vi.mock("../pipeline/step-runner.service.js", async (importOriginal) => {
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { createChatSession, deleteChatSession, getChatSessions, sendMessageAndGetResponse, sendMessageStream, assertChatSessionOwnership, PIPELINE_SESSION_LOCKED } from "./chat-session.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { resetUserMessageClaims } from "./user-message-dedupe.js"
 import { TransactionRejectedError } from "../spine/op-engine.js"
 import { previewPayload } from "../spine/change-transcript.js"
 import type { ChangePreviewResult } from "../spine/change.service.js"
@@ -124,6 +125,7 @@ const PROJECT = "650000000000000000000001"
 const OTHER_PROJECT = "650000000000000000000002"
 
 beforeEach(() => {
+  resetUserMessageClaims()
   db.reset()
   aiMocks.executeAiAction.mockReset()
   aiMocks.executeAiActionStream.mockReset()
@@ -676,5 +678,93 @@ describe("FLF-355 - chat: một lượt một loại câu, loại kia hỏi ở 
     await sendMessageStream(PROJECT, id, "Lễ tân", "overview", USER, res())
     expect(aiMocks.executeAiActionStream).toHaveBeenCalledTimes(1)
     expect(events).toEqual([expect.objectContaining({ type: "finish", data: { reply: "Cảm ơn bạn. Mình hỏi thêm mấy câu nữa nhé:", questions: [{ question: "Nền tảng?", options: [{ label: "Web" }, { label: "Mobile" }], multiple: false }] } })])
+  })
+})
+
+describe("FLF-400 - tin user gửi lặp liền tay", () => {
+  const USER_ID = "650000000000000000000099"
+  const reply = { data: { reply: "ok", questions: [] }, tokensUsed: {}, cost: 0 }
+  const plainSession = async (): Promise<string> => {
+    await createChatSession(PROJECT)
+    return String((await createChatSession(PROJECT))._id)
+  }
+  const userMessages = (id: string, content: string) =>
+    (db.rows.find((r) => r._id === id)!.messages as Array<{ role: string; content: string }>).filter((m) => m.role === "user" && m.content === content)
+  /** Lượt gọi model treo tới khi test cho chạy tiếp — lần gửi thứ hai tới khi lượt đầu còn đang chạy. */
+  const heldAi = () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    return { gate, release }
+  }
+  const sseResponse = () => {
+    const res = {
+      destroyed: false,
+      writableEnded: false,
+      events: [] as Array<Record<string, unknown>>,
+      write: (chunk: string) => {
+        res.events.push(JSON.parse(chunk.replace(/^data: /, "")) as Record<string, unknown>)
+        return true
+      },
+      end: () => {
+        res.writableEnded = true
+      }
+    }
+    return res
+  }
+
+  it("JSON: gửi 2 lần khi lượt đầu còn chạy ⇒ gọi AI 1 lần, transcript 1 tin user; xong rồi gửi lại câu đó vẫn được", async () => {
+    const id = await plainSession()
+    const held = heldAi()
+    aiMocks.executeAiAction.mockImplementation(async () => {
+      await held.gate
+      return reply
+    })
+
+    const first = sendMessageAndGetResponse(PROJECT, id, "Giải thích luồng đặt lịch", "overview", USER_ID)
+    const second = await sendMessageAndGetResponse(PROJECT, id, "Giải thích luồng đặt lịch", "overview", USER_ID)
+    held.release()
+    await first
+
+    expect(aiMocks.executeAiAction).toHaveBeenCalledTimes(1)
+    expect(userMessages(id, "Giải thích luồng đặt lịch")).toHaveLength(1)
+    expect(String(second._id)).toBe(id)
+
+    await sendMessageAndGetResponse(PROJECT, id, "Giải thích luồng đặt lịch", "overview", USER_ID)
+    expect(aiMocks.executeAiAction).toHaveBeenCalledTimes(2)
+  })
+
+  it("SSE: bản trùng nhận một `finish` rỗng, không gọi stream CHAT lần hai, không ghi tin", async () => {
+    const id = await plainSession()
+    const held = heldAi()
+    aiMocks.executeAiActionStream.mockImplementation(async () => {
+      await held.gate
+      return reply
+    })
+
+    const firstRes = sseResponse()
+    const first = sendMessageStream(PROJECT, id, "Explain the booking flow", "overview", USER_ID, firstRes as unknown as Response)
+    const dupRes = sseResponse()
+    await sendMessageStream(PROJECT, id, "Explain the booking flow", "overview", USER_ID, dupRes as unknown as Response)
+    held.release()
+    await first
+
+    expect(dupRes.events).toEqual([expect.objectContaining({ type: "finish", data: { reply: "" } })])
+    expect(aiMocks.executeAiActionStream).toHaveBeenCalledTimes(1)
+    expect(userMessages(id, "Explain the booking flow")).toHaveLength(1)
+    expect(firstRes.events[firstRes.events.length - 1]).toMatchObject({ type: "finish", data: { reply: "ok" } })
+  })
+
+  it("lượt đầu lỗi AI ⇒ nhả ngay, 'Thử lại ngay' gửi lại đúng câu đó đi được", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const id = await plainSession()
+    aiMocks.executeAiActionStream.mockRejectedValueOnce(new Error("AI down")).mockResolvedValueOnce(reply)
+
+    await sendMessageStream(PROJECT, id, "Explain the booking flow", "overview", USER_ID, sseResponse() as unknown as Response)
+    const retry = sseResponse()
+    await sendMessageStream(PROJECT, id, "Explain the booking flow", "overview", USER_ID, retry as unknown as Response)
+
+    expect(aiMocks.executeAiActionStream).toHaveBeenCalledTimes(2)
+    expect(retry.events[retry.events.length - 1]).toMatchObject({ type: "finish", data: { reply: "ok" } })
+    vi.restoreAllMocks()
   })
 })
