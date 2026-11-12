@@ -66,7 +66,7 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
     ...(recordSnapshot ? { recordChanges: recordSnapshot } : {}),
     version: next,
     stampSource: "cr_revision",
-    pendingRecord: (plan?.changes ?? []).map((c) => ({ txn: c.txn, at: c.at, by: c.by, reason: c.reason ?? null, op: c.op, step_id: c.step_id ?? null }))
+    pendingRecord: (plan?.changes ?? []).map((c) => ({ txn: c.txn, at: c.at, by: c.by, reason: c.reason ?? null, op: c.op, path: c.path, step_id: c.step_id ?? null }))
   })
   const fileRef = await docFileStore().save(buffer, { projectId, kind: "version", name: next })
   const layout = await loadLayout(projectId)
