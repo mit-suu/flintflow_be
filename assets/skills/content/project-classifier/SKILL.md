@@ -2,7 +2,7 @@
 skill_id: project-classifier
 kind: content
 version: 0.2.0
-description: "S-1 Analyze & Validate Brief — extraction, project type/domain/complexity, conflicts, gap list"
+description: "S-1 Analyze & Validate Brief - extraction, project type/domain/complexity, conflicts, gap list"
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 6144
@@ -24,27 +24,27 @@ stub: false
 # Project Classifier
 
 Covers **S-1.1 Brief Extraction, S-1.2 Project Classification, S-1.3 Conflict & Assumption Review,
-S-1.4 Gap List**. This skill never touches SRS sections — its output feeds the classifier fields that
+S-1.4 Gap List**. This skill never touches SRS sections - its output feeds the classifier fields that
 later steps (S-2 NFR thresholds, S-6 non-functional tiers) read from `project`.
 
 Fields this step may write (registry): `project`, `assumptions`. Projection carries `project` (name,
-vision, goals, existing type/domain/complexity), `addendum[]`, `assumptions[]`, `other_requirements[]` —
+vision, goals, existing type/domain/complexity), `addendum[]`, `assumptions[]`, `other_requirements[]` -
 the surrounding `draft-to-ops` prompt already substitutes the actual step id, projection, addendum and
 answers around this content; do not restate `{{...}}` placeholders here, they are not interpolated inside
 skill content (only in the outer action prompt).
 
-## S-1.2 — Project Classification
+## S-1.2 - Project Classification
 
 Set exactly three scalar fields on `project`, from the Brief and any addendum:
 
-- `project.type` — one line, e.g. `web_application`, `mobile_app`, `api_service`, `desktop_application`.
-- `project.domain` — one line business/technical domain, e.g. `Requirements engineering / AI-assisted
-  documentation`. Not a taxonomy id — free text, English, no jargon the user did not use.
-- `project.complexity` — one of `low`, `medium`, `high`, judged from actor count, integration count and
+- `project.type` - one line, e.g. `web_application`, `mobile_app`, `api_service`, `desktop_application`.
+- `project.domain` - one line business/technical domain, e.g. `Requirements engineering / AI-assisted
+  documentation`. Not a taxonomy id - free text, English, no jargon the user did not use.
+- `project.complexity` - one of `low`, `medium`, `high`, judged from actor count, integration count and
   stakes (`project.stakes`, already set at B-0.3).
 
 If the Brief already fully determines these three fields (already non-null and consistent with the
-addendum), emit `ops: []` and say so in `notes` — do not restate unchanged values as a no-op `set`.
+addendum), emit `ops: []` and say so in `notes` - do not restate unchanged values as a no-op `set`.
 
 ## S-1.3 / S-1.4
 
@@ -55,10 +55,10 @@ a different step; here only `assumptions[]` may be added, flagging the gap for l
 
 ## Rules
 
-1. Never invent `project.type`/`domain` values not supported by the Brief or addendum — take the
+1. Never invent `project.type`/`domain` values not supported by the Brief or addendum - take the
    most reasonable default + an `assumptions[]` entry, same as `draft-to-ops` rule 10.
 2. English for every value (`draft-to-ops` rule 6).
-3. One `set` per field — do not wrap the three fields in a single object `set` on `project` (that would
+3. One `set` per field - do not wrap the three fields in a single object `set` on `project` (that would
    overwrite sibling fields such as `vision` outside this step's intent).
 
 ## Example (S-1.2)

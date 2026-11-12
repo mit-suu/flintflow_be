@@ -44,7 +44,7 @@ const login = () => {
     .then((res) => ({ agent, res }))
 }
 
-describe("UC-66 — khoá tài khoản", () => {
+describe("UC-66 - khoá tài khoản", () => {
   it("lưu lý do, thu hồi mọi phiên; token còn hạn bị chặn, refresh và đăng nhập lại đều bị từ chối", async () => {
     const { agent, res: loggedIn } = await login()
     expect(loggedIn.status).toBe(200)
@@ -143,7 +143,7 @@ describe("UC-66 — khoá tài khoản", () => {
   })
 })
 
-describe("UC-67 — mở khoá tài khoản", () => {
+describe("UC-67 - mở khoá tài khoản", () => {
   it("xoá lý do khoá, ghi lý do mở khoá và cho đăng nhập lại", async () => {
     await setStatus(memberId, { isActive: false, reason: "Nghi bị chiếm tài khoản" })
 

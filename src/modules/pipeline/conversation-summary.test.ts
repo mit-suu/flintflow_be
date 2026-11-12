@@ -45,7 +45,7 @@ describe("formatRecentTurns", () => {
   })
 })
 
-describe("buildConversationSummary — tầm nhìn/mục tiêu của Brief", () => {
+describe("buildConversationSummary - tầm nhìn/mục tiêu của Brief", () => {
   const entry = (id: string, topic: string, content: string) => ({ id, topic, content, content_en: "en", target_section: "fixed:1", captured_at: "2026-09-30T00:00:00.000Z" })
 
   it("đọc addendum lõi (ngôn ngữ user) khi project.vision/goals còn trống", () => {

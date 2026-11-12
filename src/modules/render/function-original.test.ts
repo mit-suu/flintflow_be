@@ -55,7 +55,7 @@ const LOGIN: FunctionOriginalBlock[] = [
   item("The system opens the home page matching the user's role."),
   head("Screen layout"),
   { kind: "image", text: "", rows: null, image_ref: "word/media/image9.png" },
-  para("Screen Layout — Login"),
+  para("Screen Layout - Login"),
   head("Function details"),
   item("Data: User, Student"),
   para("Validation:"),
@@ -75,7 +75,7 @@ const LOGIN: FunctionOriginalBlock[] = [
 const spine = createEmptySpine({ name: "FAP" })
 const texts = (blocks: readonly FunctionOriginalBlock[]) => blocks.map((b) => (b.kind === "image" ? "[image]" : b.kind === "heading" ? `# ${b.text}` : b.text))
 
-describe("FLF-361 mục chức năng sau CR — chỉ sửa đúng phần tử đã đổi", () => {
+describe("FLF-361 mục chức năng sau CR - chỉ sửa đúng phần tử đã đổi", () => {
   const before = functionFieldValues(spine, fnOf())
   const tagged = tagFunctionBlocks(LOGIN, before)
 

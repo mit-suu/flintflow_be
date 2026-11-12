@@ -252,7 +252,7 @@ describe("billing.service", () => {
   })
 
   describe("getCheckout (polling)", () => {
-    it("remote đã paid thì chốt luôn — fallback khi callback không tới", async () => {
+    it("remote đã paid thì chốt luôn - fallback khi callback không tới", async () => {
       const { intentId } = await billingService.createCheckout(ORG, USER, "pack_100")
       vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1"))
 

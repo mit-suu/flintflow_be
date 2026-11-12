@@ -157,7 +157,7 @@ export const normalizeItems = (out: ExtractRequirementsOutput, docCode: number, 
 export const extractRequirements = async (projectId: string, userId: string, documentId: string): Promise<IRequirementExtraction> => {
   const doc = await requireDocument(projectId, documentId)
   if (doc.parseStatus !== "success" || !doc.extractedText?.trim()) {
-    throw new Mode1Error("EXTRACTION_DOCUMENT_UNREADABLE", "Tài liệu chưa đọc được chữ — tải lại file .docx / .pdf / .txt / .md.")
+    throw new Mode1Error("EXTRACTION_DOCUMENT_UNREADABLE", "Tài liệu chưa đọc được chữ - tải lại file .docx / .pdf / .txt / .md.")
   }
   if (!doc.docCode) {
     await assignDocCodes(projectId)
@@ -167,7 +167,7 @@ export const extractRequirements = async (projectId: string, userId: string, doc
   if (!doc.docCode) throw new ApiError(500, "Không gán được mã tài liệu.", "DOCUMENT_CODE_MISSING")
   const existing = await RequirementExtraction.findOne({ projectId, documentId: doc._id })
   if (existing?.status === "approved") {
-    throw new Mode1Error("EXTRACTION_ALREADY_APPROVED", "Danh sách rút từ tài liệu này đã được duyệt — các change request đã tạo.", { approved_at: existing.approved_at })
+    throw new Mode1Error("EXTRACTION_ALREADY_APPROVED", "Danh sách rút từ tài liệu này đã được duyệt - các change request đã tạo.", { approved_at: existing.approved_at })
   }
 
   const record = await spineRepository.get(projectId)
@@ -207,7 +207,7 @@ export const approveExtraction = async (projectId: string, userId: string, docum
   const extraction = await RequirementExtraction.findOne({ projectId, documentId })
   if (!extraction) throw new ApiError(404, "Chưa rút yêu cầu từ tài liệu này.", "EXTRACTION_NOT_FOUND")
   if (extraction.status === "approved") {
-    throw new Mode1Error("EXTRACTION_ALREADY_APPROVED", "Danh sách này đã được duyệt — các change request đã tạo.", { approved_at: extraction.approved_at })
+    throw new Mode1Error("EXTRACTION_ALREADY_APPROVED", "Danh sách này đã được duyệt - các change request đã tạo.", { approved_at: extraction.approved_at })
   }
   const plan = planExtractionCrs(extraction.items, input.decisions)
   const record = await spineRepository.get(projectId)

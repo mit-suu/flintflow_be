@@ -233,7 +233,7 @@ describe("neo bookmark", () => {
     ])
   })
 
-  it("FLF-252: heading gõ chung đoạn — chỉ heading mang bookmark; đọc lại ổn định, phần chữ sau tìm lại theo nội dung", async () => {
+  it("FLF-252: heading gõ chung đoạn - chỉ heading mang bookmark; đọc lại ổn định, phần chữ sau tìm lại theo nội dung", async () => {
     const pkg = await load(p("4.2.3 Performance") + brParagraph("4.2.4 Security", "The system must ensure security."))
     const blocks = await readBlocks(pkg)
     let n = 0
@@ -265,7 +265,7 @@ describe("neo bookmark", () => {
   })
 })
 
-describe("readBlocks — bổ sung P4", () => {
+describe("readBlocks - bổ sung P4", () => {
   it("heading theo chuỗi basedOn (style riêng dựa trên heading 2), style vòng không treo; đoạn số mục kết thúc dấu câu không phải heading", async () => {
     const styles =
       `<w:style w:type="paragraph" w:styleId="u2"><w:name w:val="heading 2"/></w:style>` +
@@ -514,7 +514,7 @@ const NUMBERING =
   `</w:numbering>`
 const loadWithNumbering = async (body: string, styles?: string) => DocxPackage.load(await makeDocx({ body, ...(styles ? { styles } : {}), extraParts: { "word/numbering.xml": NUMBERING } }))
 
-describe("readBlocks — tín hiệu heading FLF-343", () => {
+describe("readBlocks - tín hiệu heading FLF-343", () => {
   const bold = (text: string, pPr = "") => `<w:p>${pPr ? `<w:pPr>${pPr}</w:pPr>` : ""}<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">${text}</w:t></w:r></w:p>`
   const sized = (text: string, sz: number) => `<w:p><w:r><w:rPr><w:sz w:val="${sz}"/></w:rPr><w:t xml:space="preserve">${text}</w:t></w:r></w:p>`
   const body = "This paragraph is ordinary body text written in a full sentence for the reader."
@@ -704,7 +704,7 @@ describe("readBlocks — tín hiệu heading FLF-343", () => {
     expect(blocks.every((b) => b.level === null || Number.isFinite(b.level))).toBe(true)
   })
 
-  it("âm tính: danh sách khoá<tab>giá trị ≥ 3 dòng không bị coi là mục lục gõ tay — không mất đoạn nào", async () => {
+  it("âm tính: danh sách khoá<tab>giá trị ≥ 3 dòng không bị coi là mục lục gõ tay - không mất đoạn nào", async () => {
     const blocks = await readBlocks(await load(p(body) + p("Port\t8080") + p("Timeout\t30") + p("Retries\t3") + p(body)))
     expect(blocks.map((b) => b.text)).toEqual([body, "Port\t8080", "Timeout\t30", "Retries\t3", body])
   })
@@ -738,7 +738,7 @@ describe("readBlocks — tín hiệu heading FLF-343", () => {
   })
 })
 
-describe("FLF-364 — kiểu chữ hướng dẫn (tín hiệu phụ)", () => {
+describe("FLF-364 - kiểu chữ hướng dẫn (tín hiệu phụ)", () => {
   const run = (text: string, rPr = "") => `<w:r>${rPr ? `<w:rPr>${rPr}</w:rPr>` : ""}<w:t xml:space="preserve">${text}</w:t></w:r>`
   const para = (...runs: string[]) => `<w:p>${runs.join("")}</w:p>`
 

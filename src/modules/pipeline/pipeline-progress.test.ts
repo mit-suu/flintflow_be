@@ -25,7 +25,7 @@ const spineAfterAccepting = (count: number): Spine => {
   return spine
 }
 
-describe("buildPipelineProgressReport — current_step là step tới lượt, không phải step vừa accepted", () => {
+describe("buildPipelineProgressReport - current_step là step tới lượt, không phải step vừa accepted", () => {
   it("accept N step đầu ⇒ current_step = step thứ N+1 theo orderedSteps()", () => {
     const spine = spineAfterAccepting(3)
     const expected = orderedSteps(spine)[3].id
@@ -53,7 +53,7 @@ describe("buildPipelineProgressReport — current_step là step tới lượt, k
     expect(buildPipelineProgressReport(reopened, []).progress.current_step).toBe("S-5.1@S05")
   })
 
-  it("Spine không có bản ghi step Brief (fixture 19 màn) ⇒ B-0.1 — theo đúng luật nextStep(), dù con trỏ Spine ghi S-9.5", () => {
+  it("Spine không có bản ghi step Brief (fixture 19 màn) ⇒ B-0.1 - theo đúng luật nextStep(), dù con trỏ Spine ghi S-9.5", () => {
     expect(FIXTURE.progress.current_step).toBe("S-9.5")
     expect(FIXTURE.steps.some((s) => s.id.startsWith("B-"))).toBe(false)
     expect(buildPipelineProgressReport(FIXTURE, []).progress.current_step).toBe("B-0.1")

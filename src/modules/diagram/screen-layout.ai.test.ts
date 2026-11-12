@@ -13,7 +13,7 @@ const FIXTURE: Spine = spineSchema.parse(
 )
 
 describe("screen-layout.ai (FLF-214)", () => {
-  it("layoutContext: chỉ màn cần vẽ — function theo order kèm trigger + validation, màn đích theo tên", () => {
+  it("layoutContext: chỉ màn cần vẽ - function theo order kèm trigger + validation, màn đích theo tên", () => {
     const context = layoutContext(FIXTURE, "S01")!
     expect(context.system_name).toBe("FlintFlow")
     expect(context.screen).toEqual({ name: "Login", description: expect.any(String), is_popup: false, tabs: [] })

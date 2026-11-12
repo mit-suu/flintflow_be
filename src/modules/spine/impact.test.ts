@@ -15,7 +15,7 @@ const FIXTURE = load("spine-fixture-19-screens.json")
 const ids = (impact: { sections: { id: string; relation: string }[] }, relation: string): string[] =>
   impact.sections.filter((s) => s.relation === relation).map((s) => s.id).sort()
 
-describe("impactOf — section theo 3 cột bảng §4", () => {
+describe("impactOf - section theo 3 cột bảng §4", () => {
   it("đổi tên actor người dùng: sở hữu fixed:2.1, đọc fixed:2.2.2 + fixed:3.1.3", () => {
     const impact = impactOf(FIXTURE, ["actors[id=A01].name"])
 
@@ -48,7 +48,7 @@ describe("impactOf — section theo 3 cột bảng §4", () => {
   })
 })
 
-describe("referrersOf — khoá đang trỏ tới phần tử bị đụng", () => {
+describe("referrersOf - khoá đang trỏ tới phần tử bị đụng", () => {
   it("actor A01 được use case và role trỏ tới", () => {
     const referrers = referrersOf(FIXTURE, new Set(["A01"]))
     expect(referrers.some((r) => r.path === "use_cases[id=UC02].actor_ids[=A01]")).toBe(true)
@@ -61,7 +61,7 @@ describe("referrersOf — khoá đang trỏ tới phần tử bị đụng", () 
   })
 })
 
-describe("diagramsToRerender — so source_hash trước/sau", () => {
+describe("diagramsToRerender - so source_hash trước/sau", () => {
   it("đổi tên actor human: context, usecase và screen_flow (tiêu đề sơ đồ theo actor) cùng vẽ lại", () => {
     const after = structuredClone(FIXTURE)
     after.actors[0].name = "Product Owner"

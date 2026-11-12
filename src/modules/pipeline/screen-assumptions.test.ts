@@ -15,7 +15,7 @@ const assumption = (over: Partial<Assumption>): Assumption => ({
 
 const spineWith = (assumptions: Assumption[]): Spine => ({ assumptions }) as unknown as Spine
 
-describe("retireFrameOnlyAssumptionOps — màn ký xong ở S-5.5 thì giả định 'chỉ giữ khung' không còn đúng", () => {
+describe("retireFrameOnlyAssumptionOps - màn ký xong ở S-5.5 thì giả định 'chỉ giữ khung' không còn đúng", () => {
   it("gỡ giả định S-4.1 trỏ detail_status của đúng màn đó, bất kể trạng thái", () => {
     const spine = spineWith([
       assumption({ id: "AS01" }),

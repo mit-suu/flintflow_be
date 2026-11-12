@@ -26,7 +26,7 @@ const api = (seeded: SeededFixture, projectId: string) => {
   }
 }
 
-describe("mode 1 import — upload, preflight, parse, mapping", () => {
+describe("mode 1 import - upload, preflight, parse, mapping", () => {
   it("FLF-343: file không stamp ⇒ tách block + profile ngay ⇒ extracting chưa chạy (màn báo credit); Bắt đầu không xác nhận bản mới nhất ⇒ IMPORT_NEEDS_LATEST_CONFIRM", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)
@@ -61,7 +61,7 @@ describe("mode 1 import — upload, preflight, parse, mapping", () => {
     expect(again.body.error.code).toBe("IMPORT_INVALID_STATE")
   })
 
-  it("FLF-343: heading không style ⇒ không dừng ở mapping_review — mục độ tin thấp tự nhận (giữ độ tin, auto_confirmed)", async () => {
+  it("FLF-343: heading không style ⇒ không dừng ở mapping_review - mục độ tin thấp tự nhận (giữ độ tin, auto_confirmed)", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)
     const c = api(seeded, projectId)

@@ -97,7 +97,7 @@ export const runTranslation = async (
   if (!spine) return none
 
   const token = await repository.acquireRunLock(projectId, locale)
-  if (!token) throw new ApiError(409, "Tài liệu đang được dịch ở một lượt khác — đợi lượt đó xong rồi chạy lại.", TRANSLATION_RUNNING)
+  if (!token) throw new ApiError(409, "Tài liệu đang được dịch ở một lượt khác - đợi lượt đó xong rồi chạy lại.", TRANSLATION_RUNNING)
   try {
     return await runBatches(projectId, userId, locale, source, spine, options, executor)
   } finally {
@@ -175,7 +175,7 @@ const runBatches = async (
     }
     if (accepted.length === 0) {
       // Trả credit mà không tiến ⇒ dừng, không đốt thêm lô nào
-      console.warn(`[Translation] Một lô của project ${projectId} không có bản dịch hợp lệ nào — dừng`)
+      console.warn(`[Translation] Một lô của project ${projectId} không có bản dịch hợp lệ nào - dừng`)
       break
     }
   }

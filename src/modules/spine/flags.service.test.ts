@@ -192,7 +192,7 @@ const seed = async (spine: Spine) => {
 const nfrFlag = (flags: Flag[]) => flags.filter((f) => f.rule_id === "nfr_missing_number")
 const current = async () => (await repo.get(PROJECT))!
 
-describe("planFlagOps — luật chỉ chạy ở S-9", () => {
+describe("planFlagOps - luật chỉ chạy ở S-9", () => {
   it("check thường không đóng cờ S-9 đang mở (không chạy luật ≠ hết lỗi); check at_baseline thì đóng", () => {
     const spine = withFlags([flag({ rule_id: "unconfirmed_assumption" })])
     expect(planFlagOps(spine, []).resolved).toEqual([])
@@ -247,7 +247,7 @@ describe("planFlagOps — luật chỉ chạy ở S-9", () => {
 describe("recompute / waive qua op engine", () => {
   beforeEach(() => db.reset())
 
-  it("vòng đời (cờ vàng — FLF-329 cờ đỏ không waive được): mở → waive → giữ → hết hạn khi nội dung đổi → đóng → tái phát là dòng mới", async () => {
+  it("vòng đời (cờ vàng - FLF-329 cờ đỏ không waive được): mở → waive → giữ → hết hạn khi nội dung đổi → đóng → tái phát là dòng mới", async () => {
     const VI = "Người sáng lập khởi nghiệp, người viết tài liệu yêu cầu phần mềm qua hệ thống."
     const EN = "Startup founder who authors the SRS through the guided pipeline."
     const a01Flag = (flags: Flag[]) => flags.filter((f) => f.rule_id === "non_english_content" && f.target_id === "A01")

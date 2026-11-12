@@ -37,7 +37,7 @@ describe("slotOwnerSteps (FLF-278)", () => {
   })
 })
 
-describe("templateSectionsByStep — mẫu FU-IT-SRS-01", () => {
+describe("templateSectionsByStep - mẫu FU-IT-SRS-01", () => {
   it("mỗi bước kèm heading nguyên văn của mẫu mà bước đó soạn, theo thứ tự mẫu", () => {
     const byStep = templateSectionsByStep(layout)
     expect(byStep.get("S-2.1")).toEqual(["1.1 Purpose", "1.2 Scope"])

@@ -40,13 +40,13 @@ const EXPECTED: [ImportStatus, ImportStatus][] = [
 const key = (from: ImportStatus, to: ImportStatus) => `${from}→${to}`
 const allowed = new Set(EXPECTED.map(([f, t]) => key(f, t)))
 
-describe("import.state — cạnh chuyển trạng thái", () => {
+describe("import.state - cạnh chuyển trạng thái", () => {
   it.each(EXPECTED)("%s → %s hợp lệ", (from, to) => {
     expect(canTransition(from, to)).toBe(true)
     expect(() => assertTransition(from, to)).not.toThrow()
   })
 
-  it("mọi cặp (from, to) ngoài bảng đều bị từ chối — 100% cạnh có test", () => {
+  it("mọi cặp (from, to) ngoài bảng đều bị từ chối - 100% cạnh có test", () => {
     for (const from of IMPORT_STATUSES) {
       for (const to of IMPORT_STATUSES) {
         expect(canTransition(from, to), key(from, to)).toBe(allowed.has(key(from, to)))
@@ -74,7 +74,7 @@ describe("import.state — cạnh chuyển trạng thái", () => {
   })
 })
 
-describe("import.state — trạng thái đặc biệt", () => {
+describe("import.state - trạng thái đặc biệt", () => {
   it("chỉ preflight_rejected và change_requested là trạng thái cuối", () => {
     expect(IMPORT_STATUSES.filter(isTerminal)).toEqual(["preflight_rejected", "change_requested"])
   })

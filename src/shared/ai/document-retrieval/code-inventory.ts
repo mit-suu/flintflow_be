@@ -76,9 +76,9 @@ export const describeFamily = (f: CodeFamily): string => {
 }
 
 export const INVENTORY_HEADER =
-  "[Danh mục mã trong tài liệu — Code đếm trên TOÀN VĂN các mã được định nghĩa (mã mở đầu một dòng; mã chỉ được nhắc tới trong câu " +
+  "[Danh mục mã trong tài liệu - Code đếm trên TOÀN VĂN các mã được định nghĩa (mã mở đầu một dòng; mã chỉ được nhắc tới trong câu " +
   "không tính), chính xác. Hỏi \"bao nhiêu\" / \"liệt kê\" thì trả lời đúng con số này, không ước lượng, không nói \"khoảng\" / " +
-  "\"ít nhất\". Code inventory of codes defined over the full text — exact.]"
+  "\"ít nhất\". Code inventory of codes defined over the full text - exact.]"
 
 /** Một dòng cho mỗi tài liệu có mã; không tài liệu nào có mã ⇒ `""`. */
 export const formatInventory = (docs: readonly { label: string; families: readonly CodeFamily[] }[]): string => {

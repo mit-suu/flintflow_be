@@ -48,7 +48,7 @@ export class BaselineBlockedError extends ApiError {
   readonly flags: Flag[]
 
   constructor(flags: Flag[]) {
-    super(422, `Còn ${flags.length} cờ đỏ chưa xử lý — không ghi được baseline`, BASELINE_BLOCKED)
+    super(422, `Còn ${flags.length} cờ đỏ chưa xử lý - không ghi được baseline`, BASELINE_BLOCKED)
     this.flags = flags
   }
 }

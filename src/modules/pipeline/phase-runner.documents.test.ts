@@ -23,7 +23,7 @@ beforeEach(() => vi.mocked(buildDocumentContext).mockClear())
 
 describe("unitDocuments — lượt phỏng vấn đầu giai đoạn (FLF-393)", () => {
   it("tin user vừa gõ đứng đầu câu hỏi tìm đoạn (demo 2026-11-12: thiếu nó ⇒ chỉ thấy bìa + mục lục)", async () => {
-    expect(await unitDocuments("p", FIXTURE, "B-0", "UC-05 là gì và BR-02 nói gì?")).toBe("DOC")
+    expect(await unitDocuments("p", FIXTURE, "B-0", { userMessage: "UC-05 là gì và BR-02 nói gì?" })).toBe("DOC")
     const request = vi.mocked(buildDocumentContext).mock.calls[0]![0]
     expect(request).toMatchObject({ projectId: "p", actionType: "draft", stepId: "B-0.1" })
     expect(request.query?.split("\n")[0]).toBe("UC-05 là gì và BR-02 nói gì?")
@@ -38,7 +38,7 @@ describe("unitDocuments — lượt phỏng vấn đầu giai đoạn (FLF-393)"
   })
 
   it("giai đoạn không bước nào đọc tài liệu ⇒ rỗng, không gọi", async () => {
-    expect(await unitDocuments("p", FIXTURE, "S-9", "bất kỳ")).toBe("")
+    expect(await unitDocuments("p", FIXTURE, "S-9", { userMessage: "bất kỳ" })).toBe("")
     expect(buildDocumentContext).not.toHaveBeenCalled()
   })
 })

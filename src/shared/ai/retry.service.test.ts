@@ -5,7 +5,7 @@ import { MAX_OVERLOAD_WAIT_MS, isOverloadError, isTransientError, providerRetryD
 const overloaded = (retryDelay?: string) =>
   new AiActionError(503, "high demand", "GEMINI_OVERLOADED", retryDelay ? { error: { details: [{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay }] } } : undefined)
 
-describe("retry — chờ khi nhà cung cấp quá tải", () => {
+describe("retry - chờ khi nhà cung cấp quá tải", () => {
   it("503 / 429 / timeout Gemini là quá tải; lỗi 500 thường không", () => {
     expect(isOverloadError(overloaded())).toBe(true)
     expect(isOverloadError(new AiActionError(429, "rate", "RATE_LIMIT_EXCEEDED"))).toBe(true)

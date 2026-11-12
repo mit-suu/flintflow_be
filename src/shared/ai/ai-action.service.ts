@@ -285,7 +285,7 @@ export const executeAiAction = async <T = any>(
           // FLF-265 D16: đầu ra kèm `localized` dài hơn ⇒ dễ bị cắt / hỏng JSON. Lượt ghi Spine quan trọng hơn bản dịch:
           // thử lại NGAY một lần không kèm khối (câu đó thành "thiếu", dịch theo lô sau); các lượt retry sau cũng không kèm.
           if (!withoutLocalized || !isOutputFailure(error)) throw error
-          console.warn(`[executeAiAction] '${actionType}': đầu ra kèm localized lỗi (${error.code}) — thử lại một lần không kèm khối Document language`)
+          console.warn(`[executeAiAction] '${actionType}': đầu ra kèm localized lỗi (${error.code}) - thử lại một lần không kèm khối Document language`)
           const failedResponse = callResponse as LLMResponse | null
           discardedTokens = { promptTokens: failedResponse?.promptTokens ?? 0, completionTokens: failedResponse?.completionTokens ?? 0 }
           // Lượt kèm khối có log riêng (prompt + chữ thô + token) — dữ liệu để chỉnh `LOCALIZED_MAX_TOKENS_FACTOR`

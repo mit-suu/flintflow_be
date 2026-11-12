@@ -24,10 +24,10 @@ export const patchLocation = async (cr: IChangeRequest, locationId: string, body
   if (!conclusion) throw new Mode1Error("CR_LOCATION_UNCONCLUDED", "Cần chọn kết luận cho vị trí", { location_ids: [locationId] })
   // Nguyên tắc 6: "Chấp nhận" chỉ nhận đúng nội dung AI đã soạn — chưa có thì gõ hướng sửa ("Sửa lại"), không gõ thay AI
   if (conclusion === "edit" && !loc.proposal?.spine_ops?.length) {
-    throw new Mode1Error("CR_NO_PROPOSAL", "Chỗ này chưa có đề xuất của AI — gõ hướng sửa để AI soạn", { location_ids: [locationId] })
+    throw new Mode1Error("CR_NO_PROPOSAL", "Chỗ này chưa có đề xuất của AI - gõ hướng sửa để AI soạn", { location_ids: [locationId] })
   }
   if (conclusion === "comment" && !loc.proposal?.comment_text) {
-    throw new Mode1Error("CR_NO_PROPOSAL", "Chỗ này chưa có ghi chú do AI soạn — gõ hướng sửa để AI soạn", { location_ids: [locationId] })
+    throw new Mode1Error("CR_NO_PROPOSAL", "Chỗ này chưa có ghi chú do AI soạn - gõ hướng sửa để AI soạn", { location_ids: [locationId] })
   }
 
   const record = await spineRepository.get(String(cr.projectId))

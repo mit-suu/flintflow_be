@@ -76,7 +76,7 @@ const HEADER = "--- TÀI LIỆU THAM KHẢO (Source Documents) ---"
 const FOOTER = "--- HẾT TÀI LIỆU ---"
 const EXCERPT_NOTE =
   "(Tài liệu đã tải lên quá dài nên dưới đây chỉ là các trích đoạn liên quan nhất tới lượt này; tài liệu còn những phần khác không hiển thị. " +
-  "Only the most relevant excerpts of the uploaded documents are shown — other parts exist but are not included; do not conclude that something is absent from the documents.)"
+  "Only the most relevant excerpts of the uploaded documents are shown - other parts exist but are not included; do not conclude that something is absent from the documents.)"
 
 // ─── Main export ─────────────────────────────────────────────────────────────
 
@@ -100,6 +100,8 @@ export interface DocumentContextRequest {
    * 2026-11-12: hỏi cổng thanh toán chỉ đổi 1/32 đoạn, đoạn "VietQR / SePay checkout" không được gửi).
    */
   focus?: string
+  /** FLF-398: chỉ tài liệu tải lên từ lúc này (tài liệu đính kèm cùng câu trả lời của câu đang chờ). */
+  since?: Date
 }
 
 export interface DocumentContextResult {
@@ -200,7 +202,14 @@ export const buildDocumentContext = async (request: DocumentContextRequest): Pro
 
   // FLF-292: tài liệu cũ chưa có số ⇒ gán bù trước khi đọc, để mã đoạn trong prompt ổn định qua các lượt
   await assignDocCodes(projectId)
-  const documents: DocumentRow[] = await ProjectDocument.find({ projectId, parseStatus: "success" })
+  // FLF-398: bản đã bị thay (người dùng chọn "Thay bản cũ") không vào ngữ cảnh model - chỉ bản đang dùng.
+  // `since`: chỉ tài liệu tải lên từ lúc đó (lượt chat trả lời câu đang chờ - tài liệu vừa đính kèm cùng câu trả lời)
+  const documents: DocumentRow[] = await ProjectDocument.find({
+    projectId,
+    parseStatus: "success",
+    supersededBy: null,
+    ...(request.since ? { createdAt: { $gte: request.since } } : {})
+  })
     .select("_id originalName summary summaryStatus tokenCount docCode")
     .sort({ docCode: 1, createdAt: 1 })
     .lean()

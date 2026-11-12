@@ -326,8 +326,6 @@ router.post("/:id/import/continue", authMiddleware, importController.continueFlo
 // FLF-278 trên FLF-335/336 — mẫu / thư viện nội dung của tổ chức, đi qua dự án (contract §FLF-278)
 router.post("/:id/import/from-org", authMiddleware, orgLibrary.importFromOrg)
 router.post("/:id/import/save-to-org", authMiddleware, orgLibrary.saveToOrg)
-router.get("/:id/library-matches", authMiddleware, orgLibrary.libraryMatches)
-router.post("/:id/library", authMiddleware, orgLibrary.saveSectionToLibrary)
 
 /**
  * @swagger

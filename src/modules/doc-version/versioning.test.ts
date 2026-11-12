@@ -12,7 +12,7 @@ import {
   type LineageVersion
 } from "./versioning.js"
 
-describe("versioning — G4", () => {
+describe("versioning - G4", () => {
   it.each([
     ["0.0", "0.1"],
     ["0.2", "0.3"],
@@ -90,7 +90,7 @@ describe("versioning — G4", () => {
     expect(versionFileName({ name: "Dự án", release: true, base: "1.0" })).toBe("Dự án_v1.0.docx")
   })
 
-  describe("versionLineage — release gốc + CR mới nhất theo version", () => {
+  describe("versionLineage - release gốc + CR mới nhất theo version", () => {
     const v = (version: string, kind: string, cr_ids: string[] = []): LineageVersion => ({ version, kind, cr_ids })
     const history = [v("0.1", "imported"), v("0.2", "cr_revision", ["CR-001"]), v("1.0", "release", ["CR-001"]), v("1.1", "cr_revision", ["CR-002"]), v("1.2", "cr_revision", ["CR-003"])]
 

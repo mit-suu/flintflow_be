@@ -33,7 +33,7 @@ export const crSummary = async (cr: IChangeRequest): Promise<string> => {
     const d = locationDisplay(spine, l.path, l.conclusion ?? null, l.proposal ?? null)
     const kind = isDiagramLocation(l) ? "original diagram image" : d.kind
     const verdict = l.conclusion ? CONCLUSION_TEXT[l.conclusion] : "not decided yet"
-    return `- [${kind}] ${d.label || "(no title)"} — ${verdict}${l.reason ? `: ${l.reason}` : ""}`
+    return `- [${kind}] ${d.label || "(no title)"} - ${verdict}${l.reason ? `: ${l.reason}` : ""}`
   })
   return [
     `Open change request ${cr.cr_id}: "${cr.title}"`,
@@ -68,6 +68,6 @@ export const handleCrMessage = async (cr: IChangeRequest, userId: string, text: 
     userId
   )
   const reply = typeof result.data?.reply === "string" ? result.data.reply : typeof result.data === "string" ? result.data : ""
-  if (!reply.trim()) throw new ApiError(502, "AI chưa trả lời được câu này — thử hỏi lại", "AI_PROVIDER_ERROR")
+  if (!reply.trim()) throw new ApiError(502, "AI chưa trả lời được câu này - thử hỏi lại", "AI_PROVIDER_ERROR")
   return { kind: "answer", reply }
 }

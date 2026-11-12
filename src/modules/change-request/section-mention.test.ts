@@ -9,7 +9,7 @@ const HEADINGS: HeadingRef[] = [
   { text: "5.9 Team Notes", section_id: "custom:CS02" }
 ]
 
-describe("mentionedSections — mục người yêu cầu gọi tên", () => {
+describe("mentionedSections - mục người yêu cầu gọi tên", () => {
   it("CR-008: \"phần 3.1.3 Screen Authorization\" ⇒ mục FPT theo TÊN (không theo số 3.1.3 của tài liệu = ERD)", () => {
     expect(mentionedSections("tạo bảng cho phần 3.1.3 Screen Authorization", HEADINGS)).toEqual(["fixed:3.1.3"])
     expect(mentionedSections("phần bạn tạo ở NFR-07 là phải ở 3.1.3  Phân quyền màn hình", HEADINGS)).toEqual(["fixed:3.1.3"])

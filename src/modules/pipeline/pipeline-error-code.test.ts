@@ -12,7 +12,7 @@ describe("pipeline-error-code (FLF-332)", () => {
     expect(toPipelineErrorCode(new Error("boom"))).toBe("NOT_IMPLEMENTED")
   })
 
-  it("runErrorOf: AiActionError không còn thành UNKNOWN — cùng mã với sự kiện SSE để run-state biết lượt gãy vì AI", () => {
+  it("runErrorOf: AiActionError không còn thành UNKNOWN - cùng mã với sự kiện SSE để run-state biết lượt gãy vì AI", () => {
     expect(runErrorOf(new AiActionError(503, "Nhà cung cấp AI lỗi", "GLM_ERROR")).code).toBe("AI_PROVIDER_ERROR")
     expect(runErrorOf(new ApiError(409, "lệch version", "SPINE_VERSION_CONFLICT")).code).toBe("SPINE_VERSION_CONFLICT")
     expect(runErrorOf(new Error("raw provider text")).code).toBe("UNKNOWN")
