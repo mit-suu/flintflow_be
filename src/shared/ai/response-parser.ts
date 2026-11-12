@@ -176,7 +176,11 @@ const elicitBaseSchema = z.object({
  * đúng ý — server kiểm lại từng dòng (`topic_key` phải là câu đang chờ, câu có lựa chọn phải khớp nhãn), không tin mù.
  */
 export const elicitSchema = elicitBaseSchema.extend({
-  settled: z.array(z.object({ topic_key: z.string().min(1), answer: z.string() })).optional(),
+  /**
+   * FLF-393 (business-flow §3.6): câu chờ mà tài liệu tham khảo đã trả lời ⇒ chốt kèm `source_paras` (mã đoạn `D1-P391`).
+   * Server tra mã ra chữ thật và đòi câu trả lời là trích đoạn nguyên văn của đoạn đó, rồi ghi nguồn cho quyết định.
+   */
+  settled: z.array(z.object({ topic_key: z.string().min(1), answer: z.string(), source_paras: z.array(z.string()).max(5).optional() })).optional(),
   /** `topic_key` của câu đang chờ mà tin này KHÔNG trả lời — server không tự chốt câu đó bằng luật trả-lời-lặp. */
   still_open: z.array(z.string()).optional()
 })

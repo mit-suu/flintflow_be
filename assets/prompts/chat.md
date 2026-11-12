@@ -30,10 +30,10 @@ Hiện tại, cuộc trò chuyện đang ở bước: **{{step_name}}**
    mục "## Reply language" cuối prompt; không có mục đó thì viết tiếng Việt.
    Không lặp lại các câu hỏi của mảng "questions" trong "reply" — giao diện đã hiện chúng ngay bên dưới.
 2. Tập trung làm rõ các thông tin liên quan đến bước hiện tại: **{{step_name}}**, tham chiếu tài liệu nguồn nếu có.
-3. Nếu cần hỏi làm rõ, đưa tối đa 4 câu vào mảng "questions". **Mặc định hỏi bằng văn xuôi**: câu chỉ có
-   "question", người dùng trả lời bằng ô chat. Chỉ thêm "options" khi người dùng thật sự phải chọn: không gian
-   đáp án rời rạc, chọn giữa các phương án có đánh đổi, xác nhận giá trị đã chốt. Câu mở (mô tả nghiệp vụ, liệt kê
-   theo lời người dùng, con số đặc thù) thì **không** có options. Một lượt chỉ hỏi MỘT loại: toàn câu có options hoặc toàn câu mở, không trộn — loại kia để lượt sau. Điều gì có mặc định hợp lý thì đừng hỏi — nói rõ
+3. Nếu cần hỏi làm rõ, đưa tối đa 4 câu vào mảng "questions". **Mặc định hỏi kèm đáp án gợi ý** (thẻ có "options",
+   nguyên tắc 6 của business flow: mỗi câu kèm đáp án gợi ý; giao diện luôn có ô "Khác…" để người dùng tự gõ): phương án,
+   có/không, "đã chọn chưa", con số hay ngưỡng, xác nhận giá trị đã chốt. Chỉ hỏi văn xuôi (không "options") khi không thể
+   gợi ý đáp án hợp lý: mô tả nghiệp vụ theo lời người dùng, tên hay dữ kiện chỉ người dùng biết. Một lượt chỉ hỏi MỘT loại: toàn câu có options hoặc toàn câu mở, không trộn — loại kia để lượt sau. Điều gì có mặc định hợp lý thì đừng hỏi — nói rõ
    giả định trong "reply".
    - "header": nhãn tab ≤ 12 ký tự (ví dụ "Nền tảng").
    - "options": 2-4 lựa chọn `{ "label", "description" }`; phương án khuyến nghị đứng đầu, "label" có đuôi

@@ -156,6 +156,7 @@ import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { orderedSteps } from "./step-registry.js"
 import { AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction, ElicitOutput } from "../../shared/ai/response-parser.js"
+import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
 import { runStep, runDraftPhase, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, settleFromChat, settleRepeatedAnswer, settleWithoutModel, askTranscript, nextPendingAfterChat, isSubstantiveAnswer, isBareAgreement, noChangeReason, replyLanguageAfterMessage, CALL_LIMIT, CHAT_BUDGET_REPLY, CHAT_BUDGET_REPLY_EN, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
 import { cancelRun, getRunState, resetMemoryRuns } from "./run-state.service.js"
 import { gate } from "./gate.service.js"
@@ -1730,6 +1731,20 @@ describe("nextPendingAfterChat: dùng sổ quyết định sau khi ghi đáp án
   it("AI chỉ viết lại câu đã chốt ⇒ hỏi lại nguyên văn câu còn chờ, không kết thúc im lặng", () => {
     expect(nextPendingAfterChat(decided, [his], [server] as never, "")).toEqual([his])
   })
+
+  it("FLF-393: AI hỏi thêm câu mới mà không viết lại câu đang chờ ⇒ câu đang chờ (kèm lựa chọn) vẫn còn, sau câu mới", () => {
+    const stakes = { topic_key: "stakes", question: "Yếu tố tuân thủ, pháp lý thế nào?", options: [{ label: "Có quy định pháp luật" }, { label: "Chỉ quy định nội bộ" }] }
+    const credit = { topic_key: "credit_topup", question: "Người dùng nạp credit bằng cách nào?", options: [], inline: true }
+    const next = nextPendingAfterChat({ decisions: [] } as never, [stakes] as never, [credit] as never, "Tài liệu có nói cổng thanh toán nào không?")
+    expect(next.map((q) => q.topic_key)).toEqual(["credit_topup", "stakes"])
+    expect(next[1]).toMatchObject({ options: stakes.options })
+  })
+
+  it("AI viết lại chính câu đang chờ (cùng topic_key) ⇒ không bị lặp", () => {
+    const stakes = { topic_key: "stakes", question: "Tuân thủ?", options: [{ label: "A" }, { label: "B" }] }
+    const rewritten = { topic_key: "stakes", question: "Dự án có chịu quy định pháp luật nào không?", options: [{ label: "A" }, { label: "B" }] }
+    expect(nextPendingAfterChat({ decisions: [] } as never, [stakes] as never, [rewritten] as never, "")).toHaveLength(1)
+  })
 })
 
 describe("phỏng vấn đầu giai đoạn: transcript", () => {
@@ -2379,5 +2394,37 @@ describe("FLF-358: prompt elicit-loop đã render không còn {{assumptions}} �
       }
     }
     expect(r.prompts.every((p) => !p.prompt.includes("{{assumptions}}"))).toBe(true)
+  })
+
+  it("FLF-393: lượt chat khi còn câu chờ nhận đoạn tài liệu khớp tin nhắn (trước đây: không có tài liệu ⇒ \"không thấy\")", async () => {
+    vi.mocked(buildDocumentContext).mockImplementation(async (request) =>
+      request.actionType === "chat"
+        ? { contextText: "--- TÀI LIỆU --- [D1-P391] VietQR / SePay checkout processes credit pack purchases", tokenCount: 30, documentsUsed: 1, usedSummary: false, mode: "retrieved", chunksUsed: 1, fullTokens: 999 }
+        : { contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false, mode: "none", chunksUsed: 0, fullTokens: 0 }
+    )
+    try {
+      const spine = repo.createEmptySpine({ name: "Clinic", domain: null })
+      spine.project.review_mode = "fast"
+      spine.steps = ["B-0.1", "B-0.2", "B-0.3"].map((id) => ({ id, status: "accepted" as const, first_seq: null, last_seq: null, accepted_at: "2026-09-28T00:00:00.000Z" }))
+      db.spines[0] = { _id: crypto.randomUUID(), projectId: PROJECT, ...spine }
+      seedSession(true)
+      const question = [{ question: "Bệnh nhân đặt lịch thế nào?", options: [], topic_key: "current_booking" }] as never as ElicitOutput["questions"]
+      const r = rendering((kind) => (kind === "chat" ? chatTurnReply("Rõ.") : kind === "interview" ? elicitReply("Mình hỏi nhanh một câu.", question) : elicitReply("", [])))
+      const { events, emit } = collectEvents()
+      const run = runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: r.elicitExecutor, draftExecutor: async () => draftReply([]) })
+      await waitForCount(events, "answer_needed", 1)
+      expect(submitAnswer(PROJECT, "B-1", SESSION, { answers: [], message: "Tài liệu có nói cổng thanh toán nào không?" })).toBe(true)
+      await run
+
+      // Câu hỏi tìm đoạn = tin user (tiêu điểm) + câu đang chờ — model nhắc lại câu chờ cũng phải thấy đoạn về nó
+      expect(buildDocumentContext).toHaveBeenCalledWith(
+        expect.objectContaining({ actionType: "chat", focus: "Tài liệu có nói cổng thanh toán nào không?", query: "Tài liệu có nói cổng thanh toán nào không?\nBệnh nhân đặt lịch thế nào?" })
+      )
+      const chat = r.prompts.filter((p) => p.kind === "chat")
+      expect(chat.length).toBeGreaterThan(0)
+      expect(chat[0]!.prompt).toContain("VietQR / SePay checkout")
+    } finally {
+      vi.mocked(buildDocumentContext).mockImplementation(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false, mode: "none", chunksUsed: 0, fullTokens: 0 }))
+    }
   })
 })

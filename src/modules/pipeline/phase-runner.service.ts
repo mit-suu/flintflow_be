@@ -22,7 +22,7 @@ import { mergeStepDocumentQueries, stepDocumentQuery } from "./step-document-que
 import { SYSTEM_NAME_FIELD, askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
 import { FAST_PATH_PHASES, interviewBudget, interviewGuidance, interviewProjection, noQuestionAck, reconcileReply, trimTailQuestion, withoutQuestions } from "./fast-path.js"
 import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, currentBatch, followUpQuestions, followUpReply, indexOfQuestion, shapeQuestions } from "./question-shape.js"
-import { askTranscript, chatBudgetLeft, chatBudgetReply, nextPendingAfterChat, replyLanguageAfterMessage, runChatTurn, settleWithoutModel, listenForAnswer, type AnswerPayload } from "./step-runner.service.js"
+import { askTranscript, captureSettledSources, chatBudgetLeft, chatBudgetReply, nextPendingAfterChat, replyLanguageAfterMessage, runChatTurn, settleWithoutModel, listenForAnswer, type AnswerPayload } from "./step-runner.service.js"
 import { replyLanguageForSessionId } from "../project/reply-language.service.js"
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import * as meter from "./meter.service.js"
@@ -71,11 +71,14 @@ export const isPhaseTerminal = (spine: Spine, step: ExpandedStep): boolean => {
  * FLF-292: tài liệu upload cho lượt hỏi gộp đầu giai đoạn — nạp khi có bước nào trong đơn vị đọc `documents` (cùng ngân
  * sách token với lượt Draft của bước đó). Không bước nào đọc ⇒ `""`.
  */
-export const unitDocuments = async (projectId: string, spine: Spine, unit: string): Promise<string> => {
+export const unitDocuments = async (projectId: string, spine: Spine, unit: string, userMessage?: string): Promise<string> => {
   const steps = orderedSteps(spine).filter((s) => phaseUnitOf(s) === unit && stepNeedsSourceDocuments(s.id))
   if (!steps.length) return ""
   // FLF-393: lượt hỏi gộp hỏi thay cho mọi bước đọc tài liệu của đơn vị ⇒ tìm đoạn theo section của cả các bước đó
-  const retrieval = mergeStepDocumentQueries(steps.map((s) => stepDocumentQuery(spine, s.id, sectionsFedBy(spine, s.id))))
+  const merged = mergeStepDocumentQueries(steps.map((s) => stepDocumentQuery(spine, s.id, sectionsFedBy(spine, s.id))))
+  // Tin user vừa gõ để mở giai đoạn đứng đầu câu hỏi: thiếu nó thì BM25 chỉ có nhãn bước ("Brain Dump"), không khớp gì và
+  // rơi về đầu tài liệu (demo 2026-11-12: hỏi UC-05 / BR-02, model chỉ thấy bìa + mục lục)
+  const retrieval = userMessage?.trim() ? { ...merged, query: [userMessage.trim(), merged.query].join("\n"), focus: userMessage.trim() } : merged
   return (await buildDocumentContext({ projectId, actionType: ActionType.DRAFT, stepId: steps[0]!.id, ...retrieval })).contextText
 }
 
@@ -197,6 +200,8 @@ const interviewChatTurn = async (
   await recordInterviewAnswers(projectId, unit, sessionId, userId, turn.reply, asked, [...cardAnswers, ...settled], {
     settledIds: new Set(settled.map((a) => a.question_id))
   })
+  // FLF-393: câu chốt bằng tài liệu tham khảo ⇒ ghi nguồn cho quyết định vừa vào sổ (business-flow §3.6)
+  if (settled.some((a) => a.source_paras?.length)) await captureSettledSources(projectId, unit, (await load(projectId)).spine, asked, settled)
   const answered = new Set([...cardAnswers, ...settled].map((a) => indexOfQuestion(asked, a.question_id)))
   if (closing) {
     const closingReply = withoutQuestions(turn.reply, language)
@@ -338,7 +343,7 @@ const runPhaseInterview = async (
   }))].filter((field) => field !== SYSTEM_NAME_FIELD)
   if (missing.length === 0) return "skipped"
 
-  const run = await acquireRun(projectId, unit, { sessionId, by: userId, stage: "ask", detail_vi: "Xem giai đoạn này còn thiếu gì để hỏi bạn" })
+  const run = await acquireRun(projectId, unit, { sessionId, by: userId, stage: "ask", detail_vi: userMessage ? "Đọc tin nhắn của bạn và tài liệu để trả lời" : "Xem giai đoạn này còn thiếu gì để hỏi bạn" })
   if (deps.abort) registerAbort(run.run_id, deps.abort)
   let outcome: InterviewOutcome | null = null
   try {
@@ -386,7 +391,7 @@ const askPhaseInterview = async (
           assumptions: assumptionsForPrompt(spine, unit),
           content_guidance: fast ? interviewGuidance(spine, unit) : "",
           // FLF-292: lượt hỏi gộp thấy tài liệu upload ⇒ chỉ hỏi điều tài liệu chưa có
-          documents: (await unitDocuments(projectId, spine, unit)) || "(none)",
+          documents: (await unitDocuments(projectId, spine, unit, userMessage)) || "(none)",
           decisions: ledgerForPrompt(spine),
           // FLF-221: user mở giai đoạn bằng một tin chat — lượt hỏi gộp phải thấy điều user vừa nói. FLF-232: kèm đuôi hội
           // thoại của các bước trước, để sang giai đoạn mới AI nối mạch thay vì chào lại.
