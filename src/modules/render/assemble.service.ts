@@ -68,6 +68,7 @@ import { documentTranslationMetaSchema } from "../pipeline/pipeline.dto.js"
 import { RenderedDocumentCache } from "./rendered-document.model.js"
 import { cacheMemoKey, createMemo } from "./rendered-document-memo.js"
 import { buildLayoutSections, type TemplateLayout } from "./layout-sections.js"
+import { rearrangeOf } from "./source-fidelity.js"
 // Mode 1 v2 (FLF-184): layout của file người dùng upload — chỉ đọc
 import { TemplateProfile } from "../import/template-profile.model.js"
 import { Project } from "../project/project.model.js"
@@ -654,7 +655,7 @@ export type DocumentTranslationMeta = z.infer<typeof documentTranslationMetaSche
 export const loadTemplateLayout: TemplateLoader = async (projectId) => {
   const profile = (await TemplateProfile.findOne(
     { projectId },
-    { layout: 1, language: 1, template_family: 1, legacy_record_of_changes: 1, non_screen_table: 1, function_originals: 1, section_slices: 1, section_segments: 1 },
+    { layout: 1, language: 1, template_family: 1, legacy_record_of_changes: 1, non_screen_table: 1, function_originals: 1, section_slices: 1, section_segments: 1, target_structure: 1, flow2_entry_at: 1 },
     { lean: true }
   )) as
     | {
@@ -666,12 +667,17 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
         function_originals?: TemplateLayout["functionOriginals"]
         section_slices?: TemplateLayout["sectionSlices"]
         section_segments?: TemplateLayout["sectionSegments"]
+        target_structure?: { sections?: { section_id: string; status: string }[] } | null
+        flow2_entry_at?: Date | null
       }
     | null
   if (!profile?.layout?.length) return null
   // Chế độ 3 (mẫu bắt buộc, FLF-335): in đúng các mục của mẫu, không chèn mục FlintFlow ngoài mẫu (business-flow 2.10)
   const project = (await Project.findById(projectId, { template_intent: 1 }, { lean: true })) as { template_intent?: string | null } | null
+  // FLF-416 chế độ 4 đã vào Luồng 2: mục Ngoài phạm vi của file xuống cuối tài liệu (bố cục sắp lại theo mẫu chuẩn)
+  const rearrange = project?.template_intent === "free" ? rearrangeOf(project, profile) : null
   return {
+    ...(rearrange?.moveToEnd.length ? { moveToEnd: rearrange.moveToEnd } : {}),
     ...(project?.template_intent === "fixed" ? { fixedTemplate: true } : {}),
     layout: profile.layout,
     language: profile.language ?? "en",

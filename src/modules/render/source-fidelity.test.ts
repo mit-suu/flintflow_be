@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { RenderedDocument } from "./rendered-document.types.js"
-import { pristineSectionIds, sourceBasedFrom } from "./source-fidelity.js"
+import { pristineSectionIds, rearrangeOf, sourceBasedFrom } from "./source-fidelity.js"
 
 const doc = (sections: RenderedDocument["sections"]): RenderedDocument => ({
   projectId: "p", projectName: "Portal", version: "0.1", source: "draft", generatedAt: "2026-11-06T00:00:00Z", recordOfChanges: [], sections
@@ -38,7 +38,36 @@ describe("sourceBasedFrom - dự án 'Upload SRS có sẵn' dùng file upload l�
     expect(sourceBasedFrom({ start_kind: "existing", template_intent: "fixed", mode: "fpt" }, entered)).toBe(true)
     expect(sourceBasedFrom({ start_kind: "existing", template_intent: "fixed", mode: "import", converted_from: "fpt" }, entered)).toBe(true)
     expect(sourceBasedFrom({ start_kind: "existing", template_intent: "fixed", mode: "import" }, { ...entered, structure_preview: preview("template"), flow2_entry_at: null })).toBe(false)
-    expect(sourceBasedFrom({ start_kind: "existing", template_intent: "free", mode: "fpt" }, entered)).toBe(false)
+    expect(sourceBasedFrom({ start_kind: "existing", template_intent: "free", mode: "fpt" }, { ...entered, flow2_entry_at: null })).toBe(false)
+  })
+
+  it("FLF-416 chế độ 4 đã vào Luồng 2 (mode fpt, kể cả sau 1.0): file khách là nền; khung mẫu thì không", () => {
+    const preview = (kind: "written" | "template") => ({
+      summary: { present: 0, missing: 0, out_of_scope: 0, kind },
+      sections: [],
+      resolved_mode: 4 as const,
+      intent: "free" as const,
+      computed_at: "2026-11-12T00:00:00.000Z"
+    })
+    const entered = { source_file_ref: "file", target_structure: { resolved_mode: 4 }, structure_preview: preview("written"), flow2_entry_at: "2026-11-12T00:00:00.000Z" }
+    expect(sourceBasedFrom({ start_kind: "existing", template_intent: "free", mode: "fpt" }, entered)).toBe(true)
+    expect(sourceBasedFrom({ start_kind: "existing", template_intent: "free", mode: "import", converted_from: "fpt" }, entered)).toBe(true)
+    expect(sourceBasedFrom({ start_kind: "existing", template_intent: "free", mode: "fpt" }, { ...entered, structure_preview: preview("template") })).toBe(false)
+  })
+})
+
+describe("rearrangeOf - FLF-416 sắp lại bố cục chế độ 4", () => {
+  const sections = [
+    { section_id: "fixed:V.5", status: "missing" },
+    { section_id: "custom:c1", status: "out_of_scope" },
+    { section_id: "fixed:II.1", status: "present" }
+  ]
+  it("chế độ 4 đã vào Luồng 2 ⇒ mục Ngoài phạm vi xuống cuối", () => {
+    expect(rearrangeOf({ template_intent: "free", mode: "fpt" }, { source_file_ref: "f", target_structure: { resolved_mode: 4, sections }, flow2_entry_at: "2026-11-12" })).toEqual({ moveToEnd: ["custom:c1"] })
+  })
+  it("giữ khung (chế độ 3), chưa vào Luồng 2 ⇒ không sắp lại", () => {
+    expect(rearrangeOf({ template_intent: "fixed", mode: "fpt" }, { source_file_ref: "f", target_structure: { resolved_mode: 3, sections }, flow2_entry_at: "2026-11-12" })).toBeNull()
+    expect(rearrangeOf({ template_intent: "free", mode: "import" }, { source_file_ref: "f", target_structure: { resolved_mode: 4, sections } })).toBeNull()
   })
 })
 

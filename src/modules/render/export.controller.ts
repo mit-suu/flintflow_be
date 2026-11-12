@@ -105,8 +105,9 @@ const buildExportDocx = async (req: Request, res: Response): Promise<ExportedDoc
 
   // FLF-344: dự án mode 1 (import thật lẫn chuyển từ mode 2) — mục lục ghi sẵn như file version; mode 2 giữ field TOC rỗng
   // Dự án "Upload SRS có sẵn": mục chưa đổi so với lúc import in nguyên văn từ file upload — kể cả SRS viết dở giữ khung đang
-  // soạn phần thiếu ở Luồng 2 (`mode = fpt`); `sourceFidelityFor` tự trả `undefined` với dự án không có file nền
-  const fidelity = mode === "import" || templateIntent === "fixed"
+  // soạn phần thiếu ở Luồng 2 (`mode = fpt`), cả chế độ 4 tick bổ sung theo mẫu chuẩn (FLF-416, `free`); `sourceFidelityFor` tự
+  // trả `undefined` với dự án không có file nền
+  const fidelity = mode === "import" || templateIntent === "fixed" || templateIntent === "free"
     ? await sourceFidelityFor(projectId, parsed.data, (spine) => renderSpineDocument(projectId, projectName, spine, {
         version: parsed.data.version, source: parsed.data.source, languages: { locale, source: sourceLanguage }
       }, template ? { loadTemplate: async () => template.layout } : undefined), { otherLanguage })

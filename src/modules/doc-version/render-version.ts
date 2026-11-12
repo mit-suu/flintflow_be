@@ -55,7 +55,10 @@ export const renderVersionFile = async (projectId: string, projectName: string, 
     : renderSpineDocument(projectId, projectName, snapshot, renderOptions)
   const doc = await render(spine)
   // Dự án "Upload SRS có sẵn": mục chưa đổi so với lúc import in nguyên văn từ file upload (bản 0.1 = chính file upload)
-  const fidelity = await sourceFidelityFor(projectId, doc, render, { otherLanguage: !!opts.languages })
+  // FLF-416: dự án chuyển từ Luồng 2 (chế độ 3 / 4, có file khách) dựng bằng đúng ngôn ngữ chữ gốc ⇒ vẫn in theo file nền;
+  // chỉ bản dịch sang ngôn ngữ khác mới bỏ file nền
+  const otherLanguage = !!opts.languages && opts.languages.locale !== opts.languages.source
+  const fidelity = await sourceFidelityFor(projectId, doc, render, { otherLanguage })
   // Version file của dự án import thật ⇒ phụ lục cờ tiếng Việt (thông điệp cờ đã là tiếng Việt), bỏ qua ngôn ngữ tài
   // liệu ⇒ chữ cố định của file giữ như trước FLF-265. Dự án chuyển từ mode 2 (FLF-318) theo ngôn ngữ tài liệu.
   const options = languages ? writerOptionsFor("import", languages.locale, "fpt") : writerOptionsFor("import")

@@ -8,7 +8,7 @@ import { assignBlockSections, matchProfile } from "../import/profile-match.servi
 import { buildLayout } from "../import/step-plan.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
-import { buildLayoutSections, customBlocks, functionSourceHash, numberSections, placeSections, repairFixedTemplateLayout, romanValue, type TemplateLayout, type TemplateLayoutEntry } from "./layout-sections.js"
+import { buildLayoutSections, customBlocks, functionSourceHash, moveSectionsToEnd, numberSections, placeSections, repairFixedTemplateLayout, romanValue, type TemplateLayout, type TemplateLayoutEntry } from "./layout-sections.js"
 
 const entry = (order: number, heading_text: string, level: number, section_id: string): TemplateLayoutEntry => ({ order, heading_text, level, section_id })
 
@@ -818,5 +818,31 @@ describe("FLF-411 (U2-2) - dòng chia phần của mẫu", () => {
       custom_sections: [{ id: "A", heading: "II. Software Requirement Specification", level: 1, source: "import", blocks: [{ kind: "paragraph", text: "This part specifies the system.", rows: null, image_ref: null }] }]
     }
     expect(buildLayoutSections(withText, layout, [], { diagramPng: () => undefined }).sections.find((x) => x.heading.includes("Software Requirement"))!.id).toBe("custom:A")
+  })
+})
+
+describe("FLF-416 chế độ 4: mục Ngoài phạm vi xuống cuối (moveToEnd)", () => {
+  it("moveSectionsToEnd: mục + mục con / phần nối đi cùng, thứ tự tương đối giữ nguyên", () => {
+    const list = [
+      { section_id: "fixed:1", level: 1 },
+      { section_id: "custom:A", level: 1 },
+      { section_id: "custom:A1", level: 2 },
+      { section_id: "custom:N", level: 1, kind: "continuation" },
+      { section_id: "fixed:2", level: 1 },
+      { section_id: "custom:B", level: 2 },
+      { section_id: "fixed:3", level: 2 }
+    ]
+    expect(moveSectionsToEnd(list, new Set(["custom:A", "custom:B"])).map((p) => p.section_id)).toEqual(
+      ["fixed:1", "fixed:2", "fixed:3", "custom:A", "custom:A1", "custom:N", "custom:B"]
+    )
+  })
+
+  it("placeSections: mục Ngoài phạm vi giữa file chuyển xuống cuối, mục FPT chèn thêm vẫn đúng chỗ", () => {
+    const layout: TemplateLayout = { ...LAYOUT, layout: [entry(0, "1 Giới thiệu", 1, "fixed:1"), entry(1, "Phụ lục A Biên bản họp", 1, "custom:CS02"), entry(2, "2 Actors", 1, "fixed:2.1")] }
+    const before = placeSections(spine(), layout).map((p) => p.section_id)
+    const after = placeSections(spine(), { ...layout, moveToEnd: ["custom:CS02"] }).map((p) => p.section_id)
+    expect(before.indexOf("custom:CS02")).toBeLessThan(before.indexOf("fixed:2.1"))
+    expect(after[after.length - 1]).toBe("custom:CS02")
+    expect(after.filter((id) => id !== "custom:CS02")).toEqual(before.filter((id) => id !== "custom:CS02"))
   })
 })
