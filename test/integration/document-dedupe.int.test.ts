@@ -128,7 +128,7 @@ describe("FLF-398 - bản mới của tài liệu đã có", () => {
     expect(list.body.data.map((d: { originalName: string }) => d.originalName)).toEqual(["SRS_KhachHang_v2.txt"])
     expect(list.body.data[0].replaces).toEqual([{ id: v1Id, name: "SRS_KhachHang_v1.txt", doc_code: 1 }])
 
-    const ctx = await buildDocumentContext(seeded.projectId, ActionType.DRAFT, "S-6.4")
+    const ctx = await buildDocumentContext({ projectId: seeded.projectId, actionType: ActionType.DRAFT, stepId: "S-6.4" })
     expect(ctx.contextText).toContain("2 giây")
     expect(ctx.contextText).not.toContain("3 giây")
 
