@@ -21,7 +21,8 @@ import { isBriefPhase } from "../spine/brief-core.js"
 import { listSections, sectionsOfPath, stepsOf } from "../spine/section-registry.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
-import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
+import { buildDocumentContext, stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
+import { stepDocumentQuery } from "./step-document-query.js"
 import { ChatSession } from "../project/chat-session.model.js"
 import { DOCUMENTS_READ, getStep, orderedSteps } from "./step-registry.js"
 import { buildTemplateStepContext, loadTemplateContext } from "./template-guidance.js"
@@ -417,7 +418,9 @@ export const buildStepContext = async (projectId: string, stepId: string, option
   }
   const transcriptTail = await loadTranscriptTail(options.sessionId, stepId)
   const base = JSON.stringify(projected.projection) + JSON.stringify(projected.addendum) + transcriptTail
-  const docs = await buildDocumentContext(projectId, ActionType.DRAFT, stepId, estimateTokens(base), options.modelName, options.maxOutputTokens)
+  // FLF-393: tài liệu vượt trần ⇒ chỉ đoạn của section step nuôi + đoạn BM25 theo nhãn step và câu trả lời của user
+  const retrieval = stepNeedsSourceDocuments(stepId) ? stepDocumentQuery(spine, stepId, sectionsFedBy(spine, stepId), transcriptTail) : null
+  const docs = await buildDocumentContext({ projectId, actionType: ActionType.DRAFT, stepId, ...(retrieval ?? {}) })
 
   return {
     ...projected,
