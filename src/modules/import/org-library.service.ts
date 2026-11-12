@@ -14,7 +14,7 @@ import { isRealText, tableBodyHasRealText } from "../../shared/utils/instruction
 import { Mode1Error } from "./mode1.errors.js"
 import { latestImport, loadImportFile, uploadImport } from "./import.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
-import { OrgContentEntry, OrgTemplate, type IOrgContentEntry } from "./org-library.model.js"
+import { OrgContentEntry, OrgTemplate, type IOrgContentEntry, type OrgTemplateColumn } from "./org-library.model.js"
 import {
   assertCanPublish,
   createDraftVersion,
@@ -23,13 +23,13 @@ import {
   listOrgTemplates,
   publishVersion,
   resolveImportVersion,
-  toColumns,
   type OrgTemplateSummary,
   type TemplateActor
 } from "./org-template-versions.service.js"
 import { Project } from "../project/project.model.js"
 import { TemplateProfile } from "./template-profile.model.js"
 import { normalizeTitle } from "./org-mapping.js"
+import { buildSkeleton, scrubProjectName, type PendingDecision } from "./template-skeleton.js"
 import type { TemplateIntent } from "./target-structure.js"
 
 export { applyOrgMapping, normalizeTitle } from "./org-mapping.js"
@@ -41,6 +41,36 @@ const MAPPED_STATUSES: ReadonlySet<string> = new Set(["extracting", "fields_revi
 
 export type { OrgTemplateSummary } from "./org-template-versions.service.js"
 export { deleteFamily as deleteOrgTemplate, listOrgTemplates } from "./org-template-versions.service.js"
+
+/**
+ * FLF-412: lưu dự án thành mẫu tổ chức = **chỉ khung** (luật mẫu khung tự lưu D12 — heading khung, tiêu đề cột, chữ hướng dẫn),
+ * không lưu nguyên file của khách. Lead chủ động lưu nên mọi heading cần duyệt đều giữ, tên dự án trong chữ thành chỗ trống.
+ * Mục nào khớp heading của dự án thì giữ mapping của dự án (`profile.heading_map`), còn lại theo lần khớp lại của khung.
+ */
+const cleanSkeletonOf = async (
+  projectId: string,
+  doc: IImportedDocument,
+  profile: { heading_map: { heading_text: string; section_id: string }[]; language?: string | null }
+): Promise<{ buffer: Buffer; headings: { heading_text: string; section_id: string }[]; table_map: OrgTemplateColumn[] }> => {
+  const project = await Project.findById(projectId, { name: 1 }).lean()
+  const opts = { projectName: project?.name ?? "", language: profile.language === "vi" ? ("vi" as const) : ("en" as const) }
+  const source = await loadImportFile(doc)
+  const first = await buildSkeleton(source, opts)
+  const decisions = new Map<string, PendingDecision>(first.review.map((r) => [r.key, { decision: "generic", text: scrubProjectName(r.heading_text, opts) }]))
+  const built = decisions.size ? await buildSkeleton(source, opts, decisions) : first
+  if (built.empty) throw new Mode1Error("IMPORT_INVALID_STATE", "Tài liệu không có heading nào để lưu thành mẫu", { status: doc.status, to: doc.status, allowed: [] })
+  // Cùng tên ở hai nhánh ("Overview" dưới mục 1 và mục 3) ⇒ khớp theo thứ tự xuất hiện, không gom về lần đầu
+  const ownSections = new Map<string, string[]>()
+  for (const h of profile.heading_map) {
+    const key = normalizeTitle(scrubProjectName(h.heading_text, opts))
+    ownSections.set(key, [...(ownSections.get(key) ?? []), h.section_id])
+  }
+  return {
+    buffer: built.buffer,
+    headings: built.headings.map((h) => ({ heading_text: h.heading_text, section_id: ownSections.get(normalizeTitle(h.heading_text))?.shift() ?? h.section_id })),
+    table_map: built.table_map
+  }
+}
 
 /**
  * Lưu file + mapping đã xác nhận của lần import gần nhất thành mẫu của tổ chức (họ mới, hoặc bản mới của `template_id`).
@@ -62,10 +92,10 @@ export const saveImportToOrg = async (
   const existing = body.template_id ? await findFamily(orgId, body.template_id) : null
   const family = existing ?? (await OrgTemplate.create({ orgId, name: body.name.trim(), created_by: actor.userId, latest_version: 0 }))
   try {
-    const buffer = await loadImportFile(doc)
-    const draft = await createDraftVersion(orgId, actor, family, { buffer, originalname: doc.original_name, size: doc.size }, {
-      headings: profile.heading_map.map((h) => ({ heading_text: h.heading_text, section_id: h.section_id })),
-      table_map: toColumns(profile.table_map ?? []),
+    const skeleton = await cleanSkeletonOf(projectId, doc, profile)
+    const draft = await createDraftVersion(orgId, actor, family, { buffer: skeleton.buffer, originalname: doc.original_name, size: skeleton.buffer.length }, {
+      headings: skeleton.headings,
+      table_map: skeleton.table_map,
       language: profile.language ?? "en",
       template_family: profile.template_family ?? null
     })

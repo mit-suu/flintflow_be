@@ -19,6 +19,7 @@ import { OrgTemplate, OrgTemplateVersion, type IOrgTemplate, type IOrgTemplateVe
 import { parseDocument } from "./parse.service.js"
 import { normalizeTemplateFamily } from "./part-bank.js"
 import { preflightDocx } from "./preflight.service.js"
+import { textRegions } from "./drop-text.js"
 import { autoConfirmMapping, matchProfile } from "./profile-match.service.js"
 import { isKnownSectionId } from "./section-catalog.js"
 import type { TableMapEntry } from "./template-profile.model.js"
@@ -62,10 +63,13 @@ export const analyzeTemplateFile = async (buffer: Buffer): Promise<AnalyzedTempl
   const { blocks } = await parseDocument(buffer)
   const matched = matchProfile(blocks, { fixedTemplate: true })
   autoConfirmMapping(matched)
+  // FLF-412: vùng heading còn chữ thật (mẫu chưa xoá nội dung cũ) ⇒ cảnh báo ở màn rà mapping
+  const withText = new Set(textRegions(blocks, matched.heading_map).filter((r) => r.has_text).map((r) => r.key))
   return {
     headings: matched.heading_map.map((h) => ({
       heading_text: h.heading_text,
       section_id: h.section_id,
+      ...(withText.has(h.block_id) ? { has_text: true } : {}),
       ...(h.auto_confirmed ? { auto_confirmed: true } : {}),
       ...(h.guidance ? { guidance: h.guidance } : {})
     })),
@@ -399,7 +403,7 @@ const detailOf = (family: IOrgTemplate, v: IOrgTemplateVersion, projectCount = 0
   ...versionSummary(v, projectCount, names),
   template_id: String(family._id),
   name: family.name,
-  headings: v.headings.map((h, index) => ({ index, heading_text: h.heading_text, section_id: h.section_id, ...(h.auto_confirmed ? { auto_confirmed: true } : {}), ...(h.guidance ? { guidance: h.guidance } : {}) }))
+  headings: v.headings.map((h, index) => ({ index, heading_text: h.heading_text, section_id: h.section_id, ...(h.auto_confirmed ? { auto_confirmed: true } : {}), ...(h.guidance ? { guidance: h.guidance } : {}), ...(h.has_text ? { has_text: true } : {}) }))
 })
 
 /** Bản ghi cũ chưa migrate đọc như bản 1 đã đăng (không ghi gì). */

@@ -19,6 +19,7 @@ import type { DiagramImageKind, ImportExtractDiagramOutput, ImportExtractOutput 
 import { loadImportImage } from "../render/import-media.js"
 import { IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { DocBlock, type IDocBlock } from "./doc-block.model.js"
+import { applyDropToBlocks, planDrop, textRegions } from "./drop-text.js"
 import { isTemplateFile } from "./structure-preview.js"
 import { DIAGRAM_SECTIONS, DIAGRAM_TARGETS, NFR_CATEGORY_BY_SECTION, isExtractableSection, schemaExcerptFor, targetsOf } from "./extract-targets.js"
 import {
@@ -789,7 +790,10 @@ export const isTemplateOnlyProject = async (projectId: string): Promise<boolean>
 export const loadExtractionInputs = async (projectId: string): Promise<ExtractionInputs | null> => {
   const profile = await TemplateProfile.findOne({ projectId })
   if (!profile) return null
-  const blocks = await DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }).sort({ "anchor.ordinal": 1 }).lean<BlockLite[]>()
+  const stored = await DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }).sort({ "anchor.ordinal": 1 }).lean<BlockLite[]>()
+  // FLF-412: lựa chọn Bỏ chữ chưa áp vào file (trước Bắt đầu) ⇒ ước tính như file đã bỏ chữ. Ý định chỉ quyết định có bỏ heading
+  // mục riêng hay không — heading không tốn lượt đọc nên không cần biết
+  const blocks = profile.drop_text?.length ? applyDropToBlocks(stored, planDrop(stored, textRegions(stored, profile.heading_map), new Set(profile.drop_text), "fixed")) : stored
   return { profile, blocks, provisional: resolveProvisional(profile.heading_map), plan: extractionPlan(blocks) }
 }
 
