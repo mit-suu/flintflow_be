@@ -18,6 +18,8 @@ import { stableStringify } from "../spine/source-hash.js"
 import { parsePath, type Segment } from "../spine/path-resolver.js"
 import { PROJECT_TEXT_FIELDS, SRS_TEXT_FIELDS, SRS_TEXT_GROUPS, VALIDATION_TEXT_FIELDS, type SrsTextGroup } from "../spine/srs-text-fields.js"
 import { wireframeLabels } from "../diagram/salt-text.js"
+import { screenSpecOf } from "../diagram/renderers/screen-mockup.js"
+import { specLabels } from "../diagram/screen-spec.js"
 
 export type UnitValue = string | string[]
 
@@ -247,7 +249,12 @@ const diagramUnits = (spine: Partial<Pick<Spine, "project" | "screens" | "diagra
   (spine.diagrams ?? []).flatMap((d) => {
     if (d.kind !== "screen_layout" || d.render_status !== "ok" || !d.owner_id) return []
     const screen = spine.screens?.find((s) => s.id === d.owner_id)
-    // svg (FLF-339): chữ trên hình đều lấy từ field Spine đã có đơn vị dịch ⇒ không có đơn vị riêng
+    // Mockup màn (FLF-410): chữ của ScreenSpec do model viết ⇒ một đơn vị mỗi màn, gắn vào phần đầu (id không hậu tố) — mọi
+    // nền tảng cùng một spec. svg khác (FLF-339): chữ trên hình đều lấy từ field Spine đã có đơn vị dịch
+    if (d.format === "svg") {
+      const stored = /-[0-9]+$/.test(d.id) ? null : screenSpecOf(d.source)
+      return stored ? unitOf({ group: "diagrams", id: d.id, field: "labels" }, specLabels(stored.spec)) : []
+    }
     if (d.format !== "puml") return []
     const labels = wireframeLabels(d.source, [screen?.name, spine.project?.system_name, spine.project?.name])
     return unitOf({ group: "diagrams", id: d.id, field: "labels" }, labels)
