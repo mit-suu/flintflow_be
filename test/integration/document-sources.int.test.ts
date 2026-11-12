@@ -15,6 +15,8 @@ vi.mock("../../src/shared/utils/cloudinary.js", () => ({
 
 import app from "../../src/app.js"
 import { ProjectDocument } from "../../src/modules/project/project-document.model.js"
+import { ProjectDocumentChunk } from "../../src/modules/project/project-document-chunk.model.js"
+import { env } from "../../src/config/env.js"
 import { captureSources } from "../../src/modules/project/requirement-source.service.js"
 import { buildDocumentContext } from "../../src/shared/ai/document-context.service.js"
 import { ActionType } from "../../src/shared/ai/ai-action.types.js"
@@ -57,7 +59,7 @@ describe("FLF-292 - mã đoạn và nguồn của yêu cầu", () => {
       ["email.txt", 2]
     ])
 
-    const ctx = await buildDocumentContext(seeded.projectId, ActionType.DRAFT, "S-6.4")
+    const ctx = await buildDocumentContext({ projectId: seeded.projectId, actionType: ActionType.DRAFT, stepId: "S-6.4" })
     expect(ctx.contextText).toContain("mã tài liệu: D1")
     expect(ctx.contextText).toContain("[D1-P03] Trang thanh toán phải xong trong 3 giây.")
     expect(ctx.contextText).toContain("[D2-P02] Chỉ nhận thanh toán online, không COD.")
@@ -78,7 +80,7 @@ describe("FLF-292 - mã đoạn và nguồn của yêu cầu", () => {
       parseStatus: "success",
       summaryStatus: "pending"
     })
-    await buildDocumentContext(seeded.projectId, ActionType.DRAFT, "S-6.4")
+    await buildDocumentContext({ projectId: seeded.projectId, actionType: ActionType.DRAFT, stepId: "S-6.4" })
     expect((await ProjectDocument.findById(legacy._id).lean())?.docCode).toBe(2)
   })
 
@@ -106,6 +108,32 @@ describe("FLF-292 - mã đoạn và nguồn của yêu cầu", () => {
     await captureSources(seeded.projectId, "S-6.4", await spineOf(), [{ path: "nfrs[id=N03]", paras: ["D1-P02"] }])
     const res = await request(app).get(projectUrl(seeded.projectId, "/sources")).set(bearer(seeded.token))
     expect(res.body.data.sources.map((s: { refs: Array<{ para_id: string }> }) => s.refs.map((r) => r.para_id))).toEqual([["D1-P02"]])
+  })
+
+  it("FLF-393: SRS lớn ⇒ chunk lưu lúc upload, chat chỉ nhận đoạn liên quan dưới trần, xoá tài liệu xoá chunk", async () => {
+    const useCase = (n: number) =>
+      [`UC-${String(n).padStart(2, "0")} ${n === 42 ? "Hoàn tiền khi huỷ lịch" : `Chức năng số ${n}`}`, ...Array.from({ length: 6 }, (_, i) => `Bước ${i + 1}: hệ thống kiểm tra dữ liệu của chức năng ${n}, ghi nhận kết quả và thông báo cho người dùng liên quan.`)].join("\n\n")
+    const srs = ["1 Giới thiệu", "Đặc tả hệ thống đặt lịch khám.", "2 Use Cases", ...Array.from({ length: 150 }, (_, i) => useCase(i + 1))].join("\n\n")
+
+    const res = await upload(srs, "srs.txt")
+    expect(res.status).toBe(201)
+    const documentId = String(res.body.data?._id ?? (await ProjectDocument.findOne({ projectId: seeded.projectId }).lean())!._id)
+    const chunkCount = await ProjectDocumentChunk.countDocuments({ documentId })
+    expect(chunkCount).toBeGreaterThan(20)
+
+    const ctx = await buildDocumentContext({ projectId: seeded.projectId, actionType: ActionType.CHAT, query: "uc-42 hoan tien" })
+    expect(ctx.mode).toBe("retrieved")
+    expect(ctx.tokenCount).toBeLessThanOrEqual(env.DOC_CONTEXT_CHAT_TOKENS)
+    expect(ctx.fullTokens).toBeGreaterThan(env.DOC_CONTEXT_CHAT_TOKENS)
+    expect(ctx.contextText).toContain("UC-42 Hoàn tiền khi huỷ lịch")
+    expect(ctx.contextText).toMatch(/\[D1-P\d+\] UC-42 Hoàn tiền khi huỷ lịch/)
+
+    // Step không đọc `documents` vẫn không nạp gì
+    expect((await buildDocumentContext({ projectId: seeded.projectId, actionType: ActionType.DRAFT, stepId: "S-3.4" })).contextText).toBe("")
+
+    const del = await request(app).delete(projectUrl(seeded.projectId, "/documents/" + documentId)).set(bearer(seeded.token))
+    expect(del.status).toBeLessThan(300)
+    expect(await ProjectDocumentChunk.countDocuments({ documentId })).toBe(0)
   })
 
   it("org khác ⇒ 404 PROJECT_NOT_FOUND", async () => {

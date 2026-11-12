@@ -4,6 +4,8 @@
  * ký pháp để đổi ký pháp ⇒ `diagram_stale` ⇒ vẽ lại.
  */
 
+import type { ScreenMockupState, ScreenTheme } from "./screen-theme.js"
+
 export const ERD_NOTATIONS = ["chen", "crowsfoot", "idef1x"] as const
 export type ErdNotation = (typeof ERD_NOTATIONS)[number]
 
@@ -13,6 +15,10 @@ export const DEFAULT_ERD_NOTATION: ErdNotation = "chen"
 /** Dữ liệu ngoài Spine mà renderer / hash sơ đồ cần thêm. Thiếu field ⇒ mặc định. */
 export interface RenderContext {
   erdNotation?: ErdNotation
+  /** Theme mockup màn (FLF-410) — thiếu ⇒ `DEFAULT_SCREEN_THEME`. */
+  screenTheme?: ScreenTheme
+  /** Màn import đã chọn vẽ lại ảnh gốc bằng mockup (FLF-410) — thiếu ⇒ không màn nào. */
+  screenMockups?: ScreenMockupState[]
 }
 
 export const toErdNotation = (value: unknown): ErdNotation | null =>

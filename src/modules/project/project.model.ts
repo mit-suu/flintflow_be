@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from "mongoose"
 import { IMPORT_STATUSES, type ImportStatus } from "../import/import.state.js"
 import { USER_LOCALES, type UserLocale } from "../../shared/i18n/locale.js"
 import { DEFAULT_ERD_NOTATION, ERD_NOTATIONS, type ErdNotation } from "../../shared/diagram/erd-notation.js"
+import { SCREEN_MOCKUP_MODES, SCREEN_PLATFORMS, type ScreenMockupState, type ScreenTheme } from "../../shared/diagram/screen-theme.js"
 
 export type ProjectStatus = "active" | "archived"
 
@@ -56,6 +57,13 @@ export interface IProject extends Document {
   documentLanguage?: UserLocale
   /** Ký pháp ERD của cả tài liệu (§3.1.5): `chen` | `crowsfoot` | `idef1x`. Không nằm trong Spine; dự án cũ chưa có field đọc là `chen` (mặc định schema). */
   erdNotation: ErdNotation
+  /**
+   * Theme mockup §3.x.y Screen Layout (FLF-410): màu chính, domain, nền tảng. Không nằm trong Spine; đọc qua `screenThemeOf`
+   * (`shared/diagram/screen-theme.ts`). Field null = chưa chọn ⇒ mặc định / suy từ `form_factor`.
+   */
+  screenTheme?: ScreenTheme
+  /** FLF-410: màn import đã vẽ lại ảnh gốc bằng mockup (kiểu, bật / tắt, ảnh bị thay). Đọc qua `screenMockupsOf`. */
+  screenMockups?: ScreenMockupState[]
   /** Thư mục chứa dự án (`modules/folder`); null = ngoài thư mục. */
   folderId: mongoose.Types.ObjectId | null
   /** Lần gần nhất user mở dự án (GET /projects/:id) — sắp xếp "Mới mở" trên dashboard. */
@@ -150,6 +158,31 @@ const projectSchema = new Schema<IProject>(
       type: String,
       enum: [...ERD_NOTATIONS],
       default: DEFAULT_ERD_NOTATION
+    },
+    screenTheme: {
+      type: new Schema(
+        {
+          primaryColor: { type: String, default: null },
+          domain: { type: String, default: null },
+          platforms: { type: [{ type: String, enum: [...SCREEN_PLATFORMS] }], default: null }
+        },
+        { _id: false }
+      ),
+      default: () => ({ primaryColor: null, domain: null, platforms: null })
+    },
+    screenMockups: {
+      type: [
+        new Schema(
+          {
+            screen_id: { type: String, required: true },
+            mode: { type: String, enum: [...SCREEN_MOCKUP_MODES], required: true },
+            enabled: { type: Boolean, default: true },
+            image_indexes: { type: [Number], default: [] }
+          },
+          { _id: false }
+        )
+      ],
+      default: []
     },
     folderId: {
       type: Schema.Types.ObjectId,

@@ -78,6 +78,13 @@ export interface IImportedDocument extends Document {
    * động lại giữa `baselining`) được hoàn về mốc này trước khi chạy lại. `null` = chưa finalize lần nào.
    */
   finalize_checkpoint: FinalizeCheckpoint | null
+  /**
+   * Mã lần chạy finalize / kiểm tra hiện hành (`finalize-jobs.ts`). Mỗi lần bật job sinh mã mới; lần chạy cũ (bị thay sau khi
+   * treo) thấy mã lệch thì dừng, không ghi đè. `null` = chưa chạy lần nào kể từ khi có cơ chế này.
+   */
+  finalize_run_id: string | null
+  /** Nhịp tim của lần chạy hiện hành — quá `FINALIZE_STALE_MS` không đập ⇒ coi là job mất dù queue còn giữ job. */
+  finalize_heartbeat_at: Date | null
   /** FLF-336: người dùng bấm "Hoàn thiện" ở màn Kết quả đọc file ⇒ lần finalize kế không dừng ở `incomplete` nữa. */
   complete_requested: boolean
   /** Màn đọc khung: mục mà I-5 cuối khác bản sơ bộ lúc upload (rỗng ⇒ khớp; null ⇒ chưa finalize / import trước màn đọc khung). */
@@ -174,6 +181,8 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
       ),
       default: null
     },
+    finalize_run_id: { type: String, default: null },
+    finalize_heartbeat_at: { type: Date, default: null },
     created_by: { type: Schema.Types.ObjectId, ref: "User", required: true }
   },
   { timestamps: true }

@@ -8,7 +8,7 @@ thiếu dữ liệu") để nhóm chọn ưu tiên theo số liệu thật thay 
 ## 1. Vấn đề
 
 Pipeline hỏi một bộ thông tin cố định theo khung FPT. Bước 09 cho phép map **một phần** dữ liệu Spine vào heading của
-mẫu khách; đợt 1–3 cho BA tự điền, nhờ AI soạn hoặc dùng thư viện tổ chức cho phần còn lại. Nhưng các heading dưới
+mẫu khách; đợt 1–3 cho BA tự điền hoặc nhờ AI soạn phần còn lại. Nhưng các heading dưới
 đây vẫn **không có nguồn dữ liệu trong Spine** — mỗi dự án phải điền tay, AI soạn thì phải hỏi lại BA:
 
 | Nhóm heading thường gặp (IEEE 830 / mẫu công ty) | Hiện tại | Ghi chú |
@@ -16,7 +16,7 @@ mẫu khách; đợt 1–3 cho BA tự điền, nhờ AI soạn hoặc dùng th�
 | Security, Availability, Maintainability, Portability, Safety | `nfrs[].category` chỉ có `interface`, `usability`, `reliability`, `performance`, `other`; luật gợi ý chặn (`suggestDestination` → `null`) | ISO/IEC 25010 có 8 đặc tính; Security/Availability gần như mẫu nào cũng có |
 | Hardware Interfaces, Communications Interfaces | §4.1 chỉ có hệ thống ngoài (actor `system`) | Thiết bị, cảm biến, giao thức, cổng |
 | Design and Implementation Constraints, Operating Environment | Không có | Công nghệ bắt buộc, hạ tầng, phiên bản OS/trình duyệt |
-| References, Document Conventions | Không có (nội dung chuẩn của tổ chức) | Đã giải bằng thư viện nội dung tổ chức (đợt 3) — **không cần** thêm vào Spine |
+| References, Document Conventions | Không có | Nội dung khác nhau theo từng dự án — BA viết qua chat / "Nhờ AI soạn" như mục riêng khác (thư viện nội dung tổ chức đã gỡ ở FLF-403) |
 | Legal / Regulatory, Data Retention / Archiving | Không có | Bắt buộc với ngân hàng, y tế, chính phủ |
 
 ## 2. Đề xuất theo thứ tự ưu tiên
@@ -49,8 +49,8 @@ khoảng 10–20 dự án thật khoá mẫu.
 
 ### Không đề xuất
 
-- References / Document Conventions / chính sách chung của công ty: nội dung không thuộc từng dự án — dùng thư viện
-  nội dung tổ chức (`OrgContentEntry`, đợt 3).
+- Thêm References / Document Conventions vào Spine: là mục riêng của từng dự án, BA viết qua chat. Thư viện nội dung tổ
+  chức (`OrgContentEntry`, đợt 3) đã gỡ ở FLF-403 vì cùng tiêu đề ở hai dự án không có nghĩa cùng nội dung.
 - Tự sinh nội dung bằng AI cho mọi mục riêng ở cuối pipeline (cách 4 cũ): đã thay bằng "Nhờ AI soạn" theo yêu cầu
   (đợt 2) để BA kiểm soát và không bịa.
 

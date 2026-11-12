@@ -1,20 +1,16 @@
 /**
- * FLF-278 trên FLF-335/336 — mẫu và thư viện nội dung cấp tổ chức.
+ * FLF-278 trên FLF-335/336 — mẫu cấp tổ chức.
  *
- * Quyền: mọi thành viên xem / dùng; chỉ Lead đăng mẫu (FLF-395); Lead + Analyst sửa / xoá (route `requireRole`; route dự án đi qua chuỗi guard
- * `/projects` + `viewerReadOnly`). Không ghi Spine ở đây: dùng mẫu = một lần import mới (luồng 1 như upload, mapping áp sẵn);
- * nội dung thư viện vào dự án qua bản xem trước (trước baseline) hoặc change request (sau baseline) do FE gửi.
+ * Quyền: mọi thành viên xem / dùng; chỉ Lead đăng / xoá mẫu (FLF-395) (route `requireRole`; route dự án đi qua chuỗi guard
+ * `/projects` + `viewerReadOnly`). Không ghi Spine ở đây: dùng mẫu = một lần import mới (luồng 1 như upload, mapping áp sẵn).
  */
 import mongoose from "mongoose"
 import { docFileStore } from "../doc-version/doc-file.store.js"
-import * as spineRepository from "../spine/spine.repository.js"
-import type { CustomBlock, CustomSection } from "../spine/spine.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { isRealText, tableBodyHasRealText } from "../../shared/utils/instruction-text.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { latestImport, loadImportFile, uploadImport } from "./import.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
-import { OrgContentEntry, OrgTemplate, type IOrgContentEntry } from "./org-library.model.js"
+import { OrgTemplate } from "./org-library.model.js"
 import {
   assertCanPublish,
   createDraftVersion,
@@ -29,7 +25,6 @@ import {
 } from "./org-template-versions.service.js"
 import { Project } from "../project/project.model.js"
 import { TemplateProfile } from "./template-profile.model.js"
-import { normalizeTitle } from "./org-mapping.js"
 import type { TemplateIntent } from "./target-structure.js"
 
 export { applyOrgMapping, normalizeTitle } from "./org-mapping.js"
@@ -105,100 +100,4 @@ export const importFromOrg = async (
     Project.updateOne({ _id: projectId, organizationId: orgId }, { $set: { template_ref: { template_id: family._id, version: version.version } } })
   ])
   return doc
-}
-
-// ─── thư viện nội dung ───────────────────────────────────────────
-
-export interface ContentEntryView {
-  id: string
-  title: string
-  blocks: CustomBlock[]
-  updated_at: string
-}
-
-const entryView = (e: IOrgContentEntry): ContentEntryView => ({
-  id: String(e._id),
-  title: e.title,
-  blocks: e.blocks.map((b) => ({ kind: b.kind, text: b.text, rows: null, image_ref: null })),
-  updated_at: e.updatedAt.toISOString()
-})
-
-const duplicate = (err: unknown): never => {
-  if (err instanceof mongoose.mongo.MongoServerError && err.code === 11000) throw new ApiError(409, "Thư viện đã có mục cùng tiêu đề.", "ORG_CONTENT_DUPLICATE")
-  throw err
-}
-
-export interface ContentInput {
-  title: string
-  blocks: { kind: "paragraph" | "list_item"; text: string }[]
-}
-
-const toBlocks = (blocks: ContentInput["blocks"]): CustomBlock[] => blocks.map((b) => ({ kind: b.kind, text: b.text.trim(), rows: null, image_ref: null }))
-
-export const listContent = async (orgId: string): Promise<ContentEntryView[]> => (await OrgContentEntry.find({ orgId }).sort({ title: 1 }).limit(500)).map(entryView)
-
-/** Thêm hoặc ghi đè theo tiêu đề (cùng khoá chuẩn hoá ⇒ cùng một mục). */
-export const upsertContent = async (orgId: string, userId: string, input: ContentInput): Promise<ContentEntryView> => {
-  const key = normalizeTitle(input.title)
-  if (!key) throw new ApiError(400, "Tiêu đề không hợp lệ.", "VALIDATION_ERROR")
-  const saved = await OrgContentEntry.findOneAndUpdate(
-    { orgId, key },
-    { $set: { title: input.title.trim(), blocks: toBlocks(input.blocks), updated_by: userId } },
-    { upsert: true, returnDocument: "after", runValidators: true }
-  ).catch(duplicate)
-  return entryView(saved!)
-}
-
-export const updateContent = async (orgId: string, userId: string, entryId: string, input: Partial<ContentInput>): Promise<ContentEntryView> => {
-  const set = {
-    updated_by: userId,
-    ...(input.title !== undefined ? { title: input.title.trim(), key: normalizeTitle(input.title) } : {}),
-    ...(input.blocks !== undefined ? { blocks: toBlocks(input.blocks) } : {})
-  }
-  const saved = mongoose.isValidObjectId(entryId)
-    ? await OrgContentEntry.findOneAndUpdate({ _id: entryId, orgId }, { $set: set }, { returnDocument: "after", runValidators: true }).catch(duplicate)
-    : null
-  if (!saved) throw new ApiError(404, "Không tìm thấy mục trong thư viện.", "ORG_CONTENT_NOT_FOUND")
-  return entryView(saved)
-}
-
-export const deleteContent = async (orgId: string, entryId: string): Promise<void> => {
-  if (!mongoose.isValidObjectId(entryId) || !(await OrgContentEntry.deleteOne({ _id: entryId, orgId })).deletedCount) {
-    throw new ApiError(404, "Không tìm thấy mục trong thư viện.", "ORG_CONTENT_NOT_FOUND")
-  }
-}
-
-const customSectionsOf = async (projectId: string): Promise<CustomSection[]> => {
-  const spine = await spineRepository.get(projectId)
-  if (!spine) throw new ApiError(404, "Không tìm thấy dữ liệu dự án.", "SPINE_NOT_FOUND")
-  return spine.custom_sections.filter((c) => c.heading.trim())
-}
-
-const hasRealContent = (c: CustomSection) => c.blocks.some((b) => b.image_ref || (b.kind === "table" ? tableBodyHasRealText(b.rows) : isRealText(b.text)))
-
-/** Lưu nội dung đã viết của một mục riêng vào thư viện tổ chức (chỉ đoạn chữ / gạch đầu dòng thật, bỏ chữ hướng dẫn). */
-export const saveSectionToLibrary = async (projectId: string, orgId: string, userId: string, customSectionId: string): Promise<ContentEntryView> => {
-  const section = (await customSectionsOf(projectId)).find((c) => c.id === customSectionId)
-  if (!section) throw new ApiError(404, "Không tìm thấy mục riêng.", "CUSTOM_SECTION_NOT_FOUND")
-  const blocks = section.blocks.filter((b) => (b.kind === "paragraph" || b.kind === "list_item") && isRealText(b.text))
-  if (!blocks.length) throw new ApiError(422, "Mục chưa có đoạn chữ nào để lưu.", "CUSTOM_SECTION_EMPTY")
-  return upsertContent(orgId, userId, { title: section.heading, blocks: blocks.map((b) => ({ kind: b.kind as "paragraph" | "list_item", text: b.text.slice(0, 4000) })) })
-}
-
-export interface LibraryMatch {
-  custom_section_id: string
-  heading: string
-  /** Mục chưa có chữ thật (trống hoặc chỉ còn chữ hướng dẫn của mẫu). */
-  empty: boolean
-  entry: ContentEntryView
-}
-
-/** Mục riêng của dự án trùng tiêu đề với mục trong thư viện tổ chức. Không ghi gì. */
-export const libraryMatches = async (projectId: string, orgId: string): Promise<LibraryMatch[]> => {
-  const [sections, entries] = await Promise.all([customSectionsOf(projectId), OrgContentEntry.find({ orgId }).limit(500)])
-  const byKey = new Map(entries.map((e) => [e.key, e]))
-  return sections.flatMap((c) => {
-    const entry = byKey.get(normalizeTitle(c.heading))
-    return entry ? [{ custom_section_id: c.id, heading: c.heading, empty: !hasRealContent(c), entry: entryView(entry) }] : []
-  })
 }
