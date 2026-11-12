@@ -1,4 +1,4 @@
-# Three-Lens Review — cách hỏi
+# Three-Lens Review - cách hỏi
 
 > Tài liệu cho người. **Không nạp lúc chạy**.
 

@@ -40,6 +40,10 @@ export interface DiagramLabels {
   stateMachineTitle: (entity: string) => string
   /** Tiêu đề (chú thích ảnh) sơ đồ tuần tự hệ thống của một function. */
   sequenceTitle: (fn: string) => string
+  /** Tiêu đề (chú thích ảnh) sơ đồ activity — luồng xử lý của một use case (FLF-390). */
+  activityTitle: (useCase: string) => string
+  /** Tiêu đề (chú thích ảnh) sơ đồ triển khai của hệ thống (FLF-390). */
+  deploymentTitle: string
   /** Guard của nhánh lỗi khi message lỗi chưa ghi guard. */
   errorGuard: string
   /** Bảng function — hình bố cục màn khi chưa có wireframe. */
@@ -53,7 +57,7 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     system: "System",
     defaultIn: { human: "User Input", system: "Service Response", time: "Scheduled Trigger" },
     defaultOut: { human: "Processing Result", system: "Service Request", time: "Job Status" },
-    useCasesTitle: (groups) => `Use Cases — ${groups}`,
+    useCasesTitle: (groups) => `Use Cases - ${groups}`,
     actorHierarchyTitle: "Actor Hierarchy",
     otherGroup: "Other",
     screensFlowTitle: (part) => (part ? `Screens flow (${part})` : "Screens flow"),
@@ -62,9 +66,11 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     noEntities: "No entities yet",
     erdTitle: "Entity Relationship Diagram",
     relationVerb: "has",
-    classTitle: (feature) => `Class Diagram — ${feature}`,
-    stateMachineTitle: (entity) => `State Machine Diagram — ${entity}`,
-    sequenceTitle: (fn) => `System Sequence Diagram — ${fn}`,
+    classTitle: (feature) => `Class Diagram - ${feature}`,
+    stateMachineTitle: (entity) => `State Machine Diagram - ${entity}`,
+    sequenceTitle: (fn) => `System Sequence Diagram - ${fn}`,
+    activityTitle: (useCase) => `Activity Diagram - ${useCase}`,
+    deploymentTitle: "Deployment Diagram",
     errorGuard: "error",
     functionColumn: "Function",
     descriptionColumn: "Description",
@@ -74,7 +80,7 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     system: "Hệ thống",
     defaultIn: { human: "dữ liệu người dùng nhập", system: "phản hồi dịch vụ", time: "kích hoạt theo lịch" },
     defaultOut: { human: "kết quả xử lý", system: "yêu cầu dịch vụ", time: "trạng thái tác vụ" },
-    useCasesTitle: (groups) => `Sơ đồ use case — ${groups}`,
+    useCasesTitle: (groups) => `Sơ đồ use case - ${groups}`,
     actorHierarchyTitle: "Phân cấp tác nhân",
     otherGroup: "Khác",
     screensFlowTitle: (part) => (part ? `Luồng màn hình (${part})` : "Luồng màn hình"),
@@ -83,9 +89,11 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     noEntities: "Chưa có thực thể",
     erdTitle: "Sơ đồ quan hệ thực thể",
     relationVerb: "có",
-    classTitle: (feature) => `Sơ đồ lớp — ${feature}`,
-    stateMachineTitle: (entity) => `Sơ đồ trạng thái — ${entity}`,
-    sequenceTitle: (fn) => `Sơ đồ tuần tự hệ thống — ${fn}`,
+    classTitle: (feature) => `Sơ đồ lớp - ${feature}`,
+    stateMachineTitle: (entity) => `Sơ đồ trạng thái - ${entity}`,
+    sequenceTitle: (fn) => `Sơ đồ tuần tự hệ thống - ${fn}`,
+    activityTitle: (useCase) => `Sơ đồ hoạt động - ${useCase}`,
+    deploymentTitle: "Sơ đồ triển khai",
     errorGuard: "có lỗi",
     functionColumn: "Chức năng",
     descriptionColumn: "Mô tả",

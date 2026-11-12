@@ -142,7 +142,7 @@ const scopeErrors = (
       op_index: index,
       path: op.path,
       message:
-        `Step ${stepId ?? ""} không thấy ${target.collection}[id=${target.id}] trong projection — không được sửa/xoá phần tử ngoài phạm vi. ` +
+        `Step ${stepId ?? ""} không thấy ${target.collection}[id=${target.id}] trong projection - không được sửa/xoá phần tử ngoài phạm vi. ` +
         `Muốn thêm phần tử MỚI thì dùng op add vào "${target.collection}[]" và bỏ trống "id" (server cấp id).`
     })
   })
@@ -170,7 +170,7 @@ const briefCoreScopeErrors = (spine: Spine, ops: readonly Op[]): ValidationError
       rule: "op_out_of_scope",
       op_index: index,
       path: op.path,
-      message: `Step ${BRIEF_EXTRACTION_STEP} chỉ được sửa entry addendum topic vision/goals (add phải mang topic vision hoặc goals) — entry khác thuộc về Brief.`
+      message: `Step ${BRIEF_EXTRACTION_STEP} chỉ được sửa entry addendum topic vision/goals (add phải mang topic vision hoặc goals) - entry khác thuộc về Brief.`
     })
   })
   return errors
@@ -234,7 +234,7 @@ export const briefExtractionErrors = (spine: Spine, ops: readonly Op[], stepId: 
     errors.push({
       rule: "brief_extraction_incomplete",
       path: "project.goals",
-      message: `project.goals có ${goals.length} mục nhưng addendum có ${core.goals.length} entry topic goals — phải 1:1, không gộp, không bịa thêm.`
+      message: `project.goals có ${goals.length} mục nhưng addendum có ${core.goals.length} entry topic goals - phải 1:1, không gộp, không bịa thêm.`
     })
   }
   return errors
@@ -489,7 +489,7 @@ export const sanitizeModelOps = (
         rule: "op_not_allowed",
         op_index: index,
         path: op.path,
-        message: "detail_status của màn do vòng S-5 và user quyết — model không được đặt. Muốn để lại màn nào thì nêu trong notes để user quyết ở gate."
+        message: "detail_status của màn do vòng S-5 và user quyết - model không được đặt. Muốn để lại màn nào thì nêu trong notes để user quyết ở gate."
       })
       return op
     }
@@ -527,7 +527,7 @@ export const sanitizeModelOps = (
           path: op.path,
           message:
             badEnum === "form_factor"
-              ? `project.form_factor là mảng, mỗi phần tử một trong: ${PROJECT_ENUM_VALUES.form_factor.join(", ")} — nền tảng chính đứng đầu, ví dụ ["web_app","mobile_app"].`
+              ? `project.form_factor là mảng, mỗi phần tử một trong: ${PROJECT_ENUM_VALUES.form_factor.join(", ")} - nền tảng chính đứng đầu, ví dụ ["web_app","mobile_app"].`
               : `project.${badEnum} chỉ nhận một trong: ${PROJECT_ENUM_VALUES[badEnum].join(", ")}.`
         })
         return op
@@ -560,7 +560,7 @@ export const sanitizeModelOps = (
           rule: "op_not_allowed",
           op_index: index,
           path: op.path,
-          message: `Giả định này đã có (${same.id}, ${same.status}) — không thêm lại. Điều user đã nói hoặc đã xác nhận là sự thật, không phải giả định mới.`
+          message: `Giả định này đã có (${same.id}, ${same.status}) - không thêm lại. Điều user đã nói hoặc đã xác nhận là sự thật, không phải giả định mới.`
         })
         return op
       }
@@ -663,20 +663,20 @@ export const erdShapeErrors = (after: Spine): ValidationError[] => {
     const key = e.name.toLowerCase().replace(/[^a-z0-9]/g, "")
     byName.set(key, [...(byName.get(key) ?? []), e.id])
     if (ENTITY_NAME_FORBIDDEN.test(e.name.trim())) {
-      errors.push({ rule: "erd_entity_name_invalid", path: `entities[id=${e.id}].name`, message: `"${e.name}" là tên màn hình/thành phần kỹ thuật, không phải thứ được lưu — đặt tên theo dữ liệu (vd "Exam List" ⇒ "Exam")` })
+      errors.push({ rule: "erd_entity_name_invalid", path: `entities[id=${e.id}].name`, message: `"${e.name}" là tên màn hình/thành phần kỹ thuật, không phải thứ được lưu - đặt tên theo dữ liệu (vd "Exam List" ⇒ "Exam")` })
     }
     for (const [target, verb] of Object.entries(e.relation_verbs ?? {})) {
       if (PASSIVE_VERB.test(verb.trim())) {
         errors.push({
           rule: "erd_relation_verb_passive",
           path: `entities[id=${e.id}].relation_verbs`,
-          message: `"${e.name} ${verb} ${names.get(target) ?? target}" bị động hoặc đọc con → cha — GIỮ chiều quan hệ đã chọn bằng hai câu hỏi bản số, chỉ viết lại động từ ở thể chủ động từ phía cha (vd "Score Record receives Regrade Appeal"); không đảo chiều chỉ để hợp động từ`
+          message: `"${e.name} ${verb} ${names.get(target) ?? target}" bị động hoặc đọc con → cha - GIỮ chiều quan hệ đã chọn bằng hai câu hỏi bản số, chỉ viết lại động từ ở thể chủ động từ phía cha (vd "Score Record receives Regrade Appeal"); không đảo chiều chỉ để hợp động từ`
         })
       }
     }
   }
   for (const ids of byName.values()) {
-    if (ids.length > 1) errors.push({ rule: "erd_duplicate_name", path: "entities", message: `Trùng tên entity "${names.get(ids[0])}": ${ids.join(", ")} — gộp thành một` })
+    if (ids.length > 1) errors.push({ rule: "erd_duplicate_name", path: "entities", message: `Trùng tên entity "${names.get(ids[0])}": ${ids.join(", ")} - gộp thành một` })
   }
   // Mô tả nhắc đúng tên (số ít/nhiều) entity khác ⇒ hai entity phải nối trực tiếp hoặc có chung một con (entity
   // trung gian như Seat Assignment giữa Room và Slot). Bắt "registration for one exam slot" mà không có Slot → Registration.
@@ -715,7 +715,7 @@ export const erdShapeErrors = (after: Spine): ValidationError[] => {
       errors.push({
         rule: "erd_description_unlinked",
         path: `entities[id=${e.id}].description`,
-        message: `Mô tả của "${e.name}" nhắc tới ${unlinked.map((o) => `"${o.name}"`).join(", ")} nhưng không có quan hệ trực tiếp, không qua chuỗi cha → con, cũng không chung entity trung gian — thêm quan hệ theo hai câu hỏi bản số, hoặc viết lại mô tả đúng thứ được lưu`
+        message: `Mô tả của "${e.name}" nhắc tới ${unlinked.map((o) => `"${o.name}"`).join(", ")} nhưng không có quan hệ trực tiếp, không qua chuỗi cha → con, cũng không chung entity trung gian - thêm quan hệ theo hai câu hỏi bản số, hoặc viết lại mô tả đúng thứ được lưu`
       })
     }
   }
@@ -732,7 +732,7 @@ export const erdShapeErrors = (after: Spine): ValidationError[] => {
       errors.push({
         rule: "erd_cardinality_unjustified",
         path: `entities[id=${e.id}].relation_cardinality`,
-        message: `"${e.name}" đánh dấu một–một với ${unjustified.map(([t]) => `"${names.get(t)}"`).join(", ")} nhưng không có giả định ở entities[id=${e.id}].relation_cardinality nêu tên entity con — thêm giả định dẫn bằng chứng (FN/BR/UC/AS), hoặc bỏ "1" (mặc định N)`
+        message: `"${e.name}" đánh dấu một–một với ${unjustified.map(([t]) => `"${names.get(t)}"`).join(", ")} nhưng không có giả định ở entities[id=${e.id}].relation_cardinality nêu tên entity con - thêm giả định dẫn bằng chứng (FN/BR/UC/AS), hoặc bỏ "1" (mặc định N)`
       })
     }
   }
@@ -742,7 +742,7 @@ export const erdShapeErrors = (after: Spine): ValidationError[] => {
       errors.push({
         rule: "erd_cardinality_no_evidence",
         path: `assumptions[id=${a.id}].rationale`,
-        message: `Giả định ${a.id} về bản số không dẫn id bằng chứng nào — rationale phải nêu FN/BR/UC/AS cụ thể (vd "BR55: tối đa một đơn phúc khảo mỗi lượt thi"); không có bằng chứng thì để N`
+        message: `Giả định ${a.id} về bản số không dẫn id bằng chứng nào - rationale phải nêu FN/BR/UC/AS cụ thể (vd "BR55: tối đa một đơn phúc khảo mỗi lượt thi"); không có bằng chứng thì để N`
       })
     }
   }
@@ -754,7 +754,7 @@ export const erdShapeErrors = (after: Spine): ValidationError[] => {
       errors.push({
         rule: "erd_cardinality_unset",
         path: `entities[id=${target.id}].relation_cardinality`,
-        message: `Giả định ${a.id} nói về bản số của "${target.name}" nhưng entity không đặt relation_cardinality — ghi {"<id con>": "1"} cho quan hệ một–một`
+        message: `Giả định ${a.id} nói về bản số của "${target.name}" nhưng entity không đặt relation_cardinality - ghi {"<id con>": "1"} cho quan hệ một–một`
       })
     }
   }
@@ -767,7 +767,7 @@ export const erdShapeErrors = (after: Spine): ValidationError[] => {
       errors.push({
         rule: "erd_dependent_without_parent",
         path: `entities[id=${e.id}]`,
-        message: `"${e.name}" không có cha nhưng không khai root — nếu là dữ liệu chủ tồn tại độc lập (User, Course, Room…) đặt "root": true; nếu phụ thuộc thì thêm cha mà mô tả của nó nói "of/for/in/against"`
+        message: `"${e.name}" không có cha nhưng không khai root - nếu là dữ liệu chủ tồn tại độc lập (User, Course, Room…) đặt "root": true; nếu phụ thuộc thì thêm cha mà mô tả của nó nói "of/for/in/against"`
       })
     }
   }
@@ -786,7 +786,7 @@ export const erdShapeErrors = (after: Spine): ValidationError[] => {
           errors.push({
             rule: "erd_cardinality_contradiction",
             path: `entities[id=${parent.id}].relation_cardinality`,
-            message: `Giả định ${a.id} dựa vào "một ${childName} cho mỗi ${parent.name}" nhưng quan hệ "${parent.name}" → "${childName}" đang là N — đặt "1" kèm giả định dẫn bằng chứng riêng, hoặc sửa lập luận của ${a.id}`
+            message: `Giả định ${a.id} dựa vào "một ${childName} cho mỗi ${parent.name}" nhưng quan hệ "${parent.name}" → "${childName}" đang là N - đặt "1" kèm giả định dẫn bằng chứng riêng, hoặc sửa lập luận của ${a.id}`
           })
         }
       }
@@ -803,7 +803,7 @@ export const erdShapeErrors = (after: Spine): ValidationError[] => {
       errors.push({
         rule: "erd_confirmed_many_to_many",
         path: `entities[id=${x.relations.includes(y.id) ? x.id : y.id}].relations`,
-        message: `Giả định đã xác nhận ${a.id} nói "${x.name}" và "${y.name}" là nhiều–nhiều nhưng ERD nối thẳng hai entity — thêm entity trung gian làm con của cả hai`
+        message: `Giả định đã xác nhận ${a.id} nói "${x.name}" và "${y.name}" là nhiều–nhiều nhưng ERD nối thẳng hai entity - thêm entity trung gian làm con của cả hai`
       })
     }
   }
@@ -811,7 +811,7 @@ export const erdShapeErrors = (after: Spine): ValidationError[] => {
     errors.push({
       rule: "erd_relation_cycle",
       path: "entities",
-      message: `Chuỗi cha–con khép vòng giữa ${cycle.map((id) => `"${names.get(id)}"`).join(", ")} — có quan hệ sai chiều, xét lại bằng hai câu hỏi bản số`
+      message: `Chuỗi cha–con khép vòng giữa ${cycle.map((id) => `"${names.get(id)}"`).join(", ")} - có quan hệ sai chiều, xét lại bằng hai câu hỏi bản số`
     })
   }
   const orphans = orphanEntities(after)
@@ -829,7 +829,7 @@ export const erdShapeErrors = (after: Spine): ValidationError[] => {
     const verbs = e.relation_verbs ?? {}
     const missing = [...new Set(e.relations)].filter((t) => names.has(t) && !verbs[t]?.trim())
     if (missing.length > 0) {
-      errors.push({ rule: "erd_relation_verb_missing", path, message: `"${e.name}" thiếu động từ cho quan hệ tới ${missing.join(", ")} — thêm key vào relation_verbs` })
+      errors.push({ rule: "erd_relation_verb_missing", path, message: `"${e.name}" thiếu động từ cho quan hệ tới ${missing.join(", ")} - thêm key vào relation_verbs` })
     }
     const extra = [...Object.keys(verbs), ...Object.keys(e.relation_cardinality ?? {}), ...(e.relation_optional ?? [])].filter((t) => !e.relations.includes(t))
     if (extra.length > 0) {
@@ -840,7 +840,7 @@ export const erdShapeErrors = (after: Spine): ValidationError[] => {
       errors.push({
         rule: "erd_many_to_many",
         path: `entities[id=${e.id}].relations`,
-        message: `"${e.name}" và "${names.get(t)}" trỏ lẫn nhau — tách quan hệ nhiều–nhiều thành entity trung gian`
+        message: `"${e.name}" và "${names.get(t)}" trỏ lẫn nhau - tách quan hệ nhiều–nhiều thành entity trung gian`
       })
     }
   }
@@ -850,7 +850,7 @@ export const erdShapeErrors = (after: Spine): ValidationError[] => {
       errors.push({
         rule: "erd_feature_missing",
         path: `entities[id=${e.id}].feature_ids`,
-        message: `"${e.name}" chưa có feature_ids — ghi id các feature dùng entity này (class diagram vẽ mỗi feature một hình)`
+        message: `"${e.name}" chưa có feature_ids - ghi id các feature dùng entity này (class diagram vẽ mỗi feature một hình)`
       })
     }
     const seen = new Set<string>()
@@ -860,7 +860,7 @@ export const erdShapeErrors = (after: Spine): ValidationError[] => {
         seen.add(key)
         continue
       }
-      errors.push({ rule: "erd_attribute_duplicate", path: `entities[id=${e.id}].attributes`, message: `"${e.name}" có hai thuộc tính trùng tên "${a.name}" — gộp thành một` })
+      errors.push({ rule: "erd_attribute_duplicate", path: `entities[id=${e.id}].attributes`, message: `"${e.name}" có hai thuộc tính trùng tên "${a.name}" - gộp thành một` })
     }
   }
   errors.push(...lifecycleErrors(after))
@@ -876,6 +876,147 @@ const interactionOwners = (ops: readonly Op[]): string[] => [
     })
   )
 ]
+
+/** FLF-390: lô op đụng tới sơ đồ triển khai. */
+const touchesDeployment = (ops: readonly Op[]): boolean => ops.some((op) => op.path.startsWith("deployment_nodes") || op.path.startsWith("deployment_links"))
+
+/**
+ * Sơ đồ triển khai: tên nút không trùng; nút cha có thật, không vòng cha, môi trường thực thi không chứa thiết bị; đường
+ * truyền thông nối hai nút có thật, khác nhau, mỗi cặp nút một đường.
+ */
+export const deploymentErrors = (after: Spine): ValidationError[] => {
+  const errors: ValidationError[] = []
+  const nodes = after.deployment_nodes ?? []
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const names = new Set<string>()
+  for (const n of nodes) {
+    const at = `deployment_nodes[id=${n.id}]`
+    const key = n.name.trim().toLowerCase()
+    if (names.has(key)) errors.push({ rule: "deployment_node_name_duplicate", path: at, message: `Hai nút triển khai trùng tên "${n.name}" - gộp thành một` })
+    names.add(key)
+    if (n.parent_id === null) continue
+    const parent = byId.get(n.parent_id)
+    if (!parent) {
+      errors.push({ rule: "deployment_parent_unknown", path: at, message: `Nút "${n.name}" nằm trong ${n.parent_id} nhưng nút đó không có` })
+      continue
+    }
+    if (n.kind === "device" && parent.kind === "execution_environment") {
+      errors.push({ rule: "deployment_parent_invalid", path: at, message: `Thiết bị "${n.name}" không nằm trong môi trường thực thi "${parent.name}" - môi trường thực thi chạy trên thiết bị, không ngược lại` })
+    }
+    const seen = new Set([n.id])
+    for (let p: string | null = n.parent_id; p !== null; p = byId.get(p)?.parent_id ?? null) {
+      if (seen.has(p)) {
+        errors.push({ rule: "deployment_parent_cycle", path: at, message: `Nút "${n.name}" nằm trong chính nó qua chuỗi nút cha - bỏ một parent_id` })
+        break
+      }
+      seen.add(p)
+    }
+  }
+  const pairs = new Set<string>()
+  for (const l of after.deployment_links ?? []) {
+    const at = `deployment_links[from=${l.from},to=${l.to}]`
+    if (!byId.has(l.from) || !byId.has(l.to)) {
+      errors.push({ rule: "deployment_link_unknown", path: at, message: `Đường truyền thông ${l.from} - ${l.to} nối tới nút không có` })
+      continue
+    }
+    if (l.from === l.to) errors.push({ rule: "deployment_link_self", path: at, message: `Đường truyền thông của "${byId.get(l.from)!.name}" nối với chính nó` })
+    const key = [l.from, l.to].sort().join("|")
+    if (pairs.has(key)) errors.push({ rule: "deployment_link_duplicate", path: at, message: `Hai đường truyền thông giữa cùng hai nút ${l.from} - ${l.to} - gộp thành một (ghi các giao thức chung một nhãn)` })
+    pairs.add(key)
+  }
+  return errors
+}
+
+/** FLF-390: id use case mà lô op đụng tới `activity_nodes` / `activity_flows` (hoặc ghi / thêm cả use case). */
+const activityOwners = (ops: readonly Op[]): string[] => [
+  ...new Set(
+    ops.flatMap((op) => {
+      if (op.path === "use_cases[]" && op.value && typeof op.value === "object" && typeof (op.value as { id?: unknown }).id === "string") return [(op.value as { id: string }).id]
+      const m = /^use_cases\[id=([^\],]+)\](\..*)?$/.exec(op.path)
+      return m && (m[2] === undefined || m[2].startsWith(".activity_")) ? [m[1]] : []
+    })
+  )
+]
+
+/**
+ * Luồng xử lý (sơ đồ activity) của use case: đúng một initial; id nút không trùng trên toàn Spine; action có chữ; flow
+ * nối hai nút CÓ THẬT của cùng use case, không tự trỏ; initial không có flow vào, final không có flow ra; decision có
+ * ≥ 2 nhánh ra và mọi nhánh có guard; fork có ≥ 2 nhánh ra, join ≥ 2 nhánh vào; làn là actor có thật hoặc `system`;
+ * mọi nút tới được từ initial. Use case không có nút thì không bị soi. Chỉ soi use case có trong `ids`.
+ */
+export const activityErrors = (after: Spine, ids: readonly string[]): ValidationError[] => {
+  const errors: ValidationError[] = []
+  const owner = new Map<string, string>()
+  for (const u of after.use_cases) for (const n of u.activity_nodes ?? []) if (!owner.has(n.id)) owner.set(n.id, u.id)
+  const actors = new Set(after.actors.map((a) => a.id))
+  for (const fn of after.use_cases.filter((u) => ids.includes(u.id))) {
+    const nodes = fn.activity_nodes ?? []
+    const flows = fn.activity_flows ?? []
+    const path = (field: string) => `use_cases[id=${fn.id}].${field}`
+    if (nodes.length === 0) {
+      if (flows.length > 0) errors.push({ rule: "activity_node_unknown", path: path("activity_flows"), message: `"${fn.name}" có activity_flows nhưng chưa có activity_nodes` })
+      continue
+    }
+    const seen = new Set<string>()
+    for (const n of nodes) {
+      if (seen.has(n.id) || owner.get(n.id) !== fn.id) {
+        errors.push({ rule: "activity_node_id_duplicate", path: path("activity_nodes"), message: `Id nút "${n.id}" của "${fn.name}" bị trùng - id nút activity duy nhất trên toàn Spine` })
+      }
+      seen.add(n.id)
+      if (n.kind === "action" && (n.name ?? "").trim() === "") {
+        errors.push({ rule: "activity_action_unnamed", path: path(`activity_nodes[id=${n.id}]`), message: `"${fn.name}": action ${n.id} chưa có chữ (cụm động từ mô tả việc làm)` })
+      }
+      if (typeof n.lane === "string" && n.lane !== SYSTEM_LIFELINE && !actors.has(n.lane)) {
+        errors.push({ rule: "activity_lane_unknown", path: path(`activity_nodes[id=${n.id}]`), message: `"${fn.name}": làn "${n.lane}" của ${n.id} không phải actor có thật hay "system"` })
+      }
+    }
+    const initial = nodes.filter((n) => n.kind === "initial")
+    if (initial.length !== 1) {
+      errors.push({ rule: "activity_initial_invalid", path: path("activity_nodes"), message: `"${fn.name}" phải có đúng một nút initial (đang có ${initial.length})` })
+    }
+    const kind = new Map(nodes.map((n) => [n.id, n.kind]))
+    const outs = (id: string) => flows.filter((f) => f.from === id)
+    const ins = (id: string) => flows.filter((f) => f.to === id)
+    for (const f of flows) {
+      const at = path(`activity_flows[from=${f.from},to=${f.to}]`)
+      if (!kind.has(f.from) || !kind.has(f.to)) {
+        errors.push({ rule: "activity_node_unknown", path: at, message: `Flow ${f.from} → ${f.to} của "${fn.name}" trỏ tới nút không nằm trong activity_nodes của use case` })
+      } else if (f.from === f.to) {
+        errors.push({ rule: "activity_flow_self", path: at, message: `Flow ${f.from} → ${f.to} của "${fn.name}" tự trỏ - vòng lặp phải đi qua một decision` })
+      } else if (kind.get(f.to) === "initial") {
+        errors.push({ rule: "activity_flow_into_initial", path: at, message: `Flow ${f.from} → ${f.to} của "${fn.name}" đi vào nút initial` })
+      } else if (kind.get(f.from) === "final") {
+        errors.push({ rule: "activity_flow_from_final", path: at, message: `Flow ${f.from} → ${f.to} của "${fn.name}" đi ra từ nút final` })
+      }
+    }
+    for (const n of nodes) {
+      const at = path(`activity_nodes[id=${n.id}]`)
+      if (n.kind === "decision") {
+        const branches = outs(n.id)
+        if (branches.length < 2) errors.push({ rule: "activity_decision_branches", path: at, message: `"${fn.name}": decision ${n.id} cần ít nhất 2 nhánh ra (đang có ${branches.length})` })
+        if (branches.some((b) => (b.guard ?? "").trim() === "")) errors.push({ rule: "activity_guard_missing", path: at, message: `"${fn.name}": mọi nhánh ra của decision ${n.id} cần guard (điều kiện, không có ngoặc vuông)` })
+      }
+      if (n.kind === "fork" && outs(n.id).length < 2) errors.push({ rule: "activity_fork_branches", path: at, message: `"${fn.name}": fork ${n.id} cần ít nhất 2 nhánh ra` })
+      if (n.kind === "join" && ins(n.id).length < 2) errors.push({ rule: "activity_join_branches", path: at, message: `"${fn.name}": join ${n.id} cần ít nhất 2 nhánh vào` })
+    }
+    if (initial.length === 1) {
+      const reached = new Set([initial[0].id])
+      for (let grew = true; grew; ) {
+        grew = false
+        for (const f of flows)
+          if (reached.has(f.from) && kind.has(f.to) && !reached.has(f.to)) {
+            reached.add(f.to)
+            grew = true
+          }
+      }
+      const lost = nodes.filter((n) => !reached.has(n.id))
+      if (lost.length > 0) {
+        errors.push({ rule: "activity_node_unreachable", path: path("activity_nodes"), message: `"${fn.name}": nút ${lost.map((n) => n.id).join(", ")} không tới được từ initial - thêm flow hoặc bỏ nút` })
+      }
+    }
+  }
+  return errors
+}
 
 /**
  * Message của sơ đồ tuần tự hệ thống (hộp đen): mỗi message có đúng một đầu là `system`; message đầu tiên là request
@@ -901,12 +1042,12 @@ export const interactionErrors = (after: Spine, ids: readonly string[]): Validat
         errors.push({ rule: "interaction_guard_missing", path: where, message: `"${fn.name}": message lỗi "${i.message}" cần guard (điều kiện của nhánh lỗi)` })
       }
       const key = `${i.from}|${i.to}|${i.message}|${i.kind}|${i.flow}`
-      if (keys.has(key)) errors.push({ rule: "interaction_duplicate", path: where, message: `"${fn.name}": message "${i.message}" trùng khoá — đổi chữ message của nhánh sau` })
+      if (keys.has(key)) errors.push({ rule: "interaction_duplicate", path: where, message: `"${fn.name}": message "${i.message}" trùng khoá - đổi chữ message của nhánh sau` })
       keys.add(key)
       for (const end of [i.from, i.to]) {
         const actor = after.actors.find((a) => a.id === end)
         if (actor?.kind === "human" && hasModelledHuman && !modelled.has(actor.id)) {
-          errors.push({ rule: "interaction_actor_not_modelled", path: where, message: `"${fn.name}": actor "${actor.name}" không phải actor của use case gắn function — dùng đúng actor trong mô hình use case (giữ actor tổng quát): ${humans.filter((a) => modelled.has(a.id)).map((a) => `${a.id} ${a.name}`).join(", ")}` })
+          errors.push({ rule: "interaction_actor_not_modelled", path: where, message: `"${fn.name}": actor "${actor.name}" không phải actor của use case gắn function - dùng đúng actor trong mô hình use case (giữ actor tổng quát): ${humans.filter((a) => modelled.has(a.id)).map((a) => `${a.id} ${a.name}`).join(", ")}` })
         }
       }
     })
@@ -933,7 +1074,7 @@ export const lifecycleErrors = (after: Spine): ValidationError[] => {
     for (const s of states) {
       const other = owner.get(s.id)
       if (other !== undefined) {
-        errors.push({ rule: "state_id_duplicate", path: path("states"), message: `Id trạng thái "${s.id}" của "${e.name}" đã dùng ở entity ${other} — id trạng thái duy nhất trên toàn Spine` })
+        errors.push({ rule: "state_id_duplicate", path: path("states"), message: `Id trạng thái "${s.id}" của "${e.name}" đã dùng ở entity ${other} - id trạng thái duy nhất trên toàn Spine` })
       }
       owner.set(s.id, e.id)
     }
@@ -958,7 +1099,7 @@ export const lifecycleErrors = (after: Spine): ValidationError[] => {
       if (!ids.has(t.from) || !ids.has(t.to)) {
         errors.push({ rule: "transition_state_unknown", path: at, message: `Chuyển "${t.event}" của "${e.name}" nối ${t.from} → ${t.to} nhưng id đó không nằm trong states của entity` })
       } else if (finals.has(t.from)) {
-        errors.push({ rule: "transition_from_final", path: at, message: `Chuyển "${t.event}" của "${e.name}" đi ra từ trạng thái kết thúc ${t.from} — bỏ final hoặc bỏ chuyển` })
+        errors.push({ rule: "transition_from_final", path: at, message: `Chuyển "${t.event}" của "${e.name}" đi ra từ trạng thái kết thúc ${t.from} - bỏ final hoặc bỏ chuyển` })
       }
     }
     if (initial.length === 1) {
@@ -972,7 +1113,7 @@ export const lifecycleErrors = (after: Spine): ValidationError[] => {
       }
       const lost = states.filter((s) => !reached.has(s.id))
       if (lost.length > 0) {
-        errors.push({ rule: "state_unreachable", path: path("states"), message: `"${e.name}": trạng thái ${lost.map((s) => `"${s.name}"`).join(", ")} không tới được từ trạng thái initial — thêm chuyển hoặc bỏ trạng thái` })
+        errors.push({ rule: "state_unreachable", path: path("states"), message: `"${e.name}": trạng thái ${lost.map((s) => `"${s.name}"`).join(", ")} không tới được từ trạng thái initial - thêm chuyển hoặc bỏ trạng thái` })
       }
     }
   }
@@ -1058,7 +1199,7 @@ export const requiredArrayErrors = (spine: Spine, ops: readonly Op[], stepId: st
     : emptyProtectedArraysOf(spine, stepId).map((a) => ({
         rule: "required_array_empty",
         path: a.label,
-        message: `${a.name} (\`${a.label}\`) là mục bắt buộc của bước này nhưng vẫn trống — thêm ít nhất một phần tử từ những gì user đã chốt ở các bước trước`
+        message: `${a.name} (\`${a.label}\`) là mục bắt buộc của bước này nhưng vẫn trống - thêm ít nhất một phần tử từ những gì user đã chốt ở các bước trước`
       }))
 
 /**
@@ -1100,7 +1241,7 @@ export const useCaseWiringErrors = (spine: Spine, ops: readonly Op[], stepId: st
       .map((uc) => ({
         rule: "usecase_not_wired",
         path: `use_cases[id=${uc.id}].function_ids`,
-        message: `Use case ${uc.id} "${uc.name}" chưa gắn chức năng nào — thêm id chức năng hiện thực nó bằng {"op":"add","path":"use_cases[id=${uc.id}].function_ids[]","value":"<FN id>"}`
+        message: `Use case ${uc.id} "${uc.name}" chưa gắn chức năng nào - thêm id chức năng hiện thực nó bằng {"op":"add","path":"use_cases[id=${uc.id}].function_ids[]","value":"<FN id>"}`
       }))
   } catch {
     return []
@@ -1149,7 +1290,7 @@ export const validateOps = (spine: Spine, ops: unknown, options: ValidateOptions
 
   try {
     const plan = planTransaction(spine, { base_version: spine.spine_version, ops: parsed, by: "op-validator", step_id: options.stepId ?? null }, { startSeq: 1 })
-    return [...(touchesErd(spine, parsed) ? erdShapeErrors(plan.spine) : []), ...interactionErrors(plan.spine, interactionOwners(parsed))]
+    return [...(touchesErd(spine, parsed) ? erdShapeErrors(plan.spine) : []), ...interactionErrors(plan.spine, interactionOwners(parsed)), ...activityErrors(plan.spine, activityOwners(parsed)), ...(touchesDeployment(parsed) ? deploymentErrors(plan.spine) : [])]
   } catch (err) {
     if (err instanceof TransactionRejectedError) {
       return err.violations.map((v) => ({

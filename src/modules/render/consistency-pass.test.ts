@@ -25,6 +25,8 @@ const emptySpine = (): Spine => ({
   custom_sections: [],
   references: [],
   verifications: [],
+  deployment_nodes: [],
+  deployment_links: [],
   diagrams: [],
   assumptions: [],
   decisions: [],
@@ -44,7 +46,7 @@ const section = (over: Partial<RenderedSection>): RenderedSection => ({
   ...over
 })
 
-describe("runConsistencyPass — tất định", () => {
+describe("runConsistencyPass - tất định", () => {
   it("phát hiện tham chiếu chết (dead_reference) qua reference-fields", async () => {
     const spine: Spine = { ...emptySpine(), screens: [{ id: "S1", feature_id: "MISSING", name: "S", description: "", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: null, detail_status: "pending" }] }
     const findings = await runConsistencyPass(spine, [])

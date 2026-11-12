@@ -23,7 +23,7 @@ const asLegacyProject = async (projectId: string) => {
   await DocVersion.updateOne({ projectId, kind: "cr_revision", version: "0.2" }, { $set: { version: "0.1", based_on: "0.0" } })
 }
 
-describe("project cũ ở 0.0 — quyền tải của Viewer", () => {
+describe("project cũ ở 0.0 - quyền tải của Viewer", () => {
   it("Viewer tải được bản gốc 0.0, không tải được bản nháp CR 0.1", async () => {
     const { seeded, projectId, c } = await importedProject()
     expect(await writeCr(c, "Faster", "1 second instead of 2 seconds")).toEqual({ crId: "CR-001", version: "0.2" })

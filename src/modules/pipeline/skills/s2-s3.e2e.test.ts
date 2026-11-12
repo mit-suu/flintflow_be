@@ -454,7 +454,7 @@ describe("T14: S-1.2 -> S-3.6 content skills end to end on spine-fixture-minimal
 
     // Measured (estimated) usage per step for docs/measurements.md — printed so a real run can be
     // transcribed by hand; not asserted on exact numbers (mock estimate, not real provider pricing).
-    console.log("[T14 measured usage — mock, char/4 estimate]", JSON.stringify(measuredUsage))
+    console.log("[T14 measured usage - mock, char/4 estimate]", JSON.stringify(measuredUsage))
   })
 
   it("Th12: every content SKILL.md is <= 150 lines and its frontmatter writes[] stay inside the step-registry writes[] of the steps it is mapped to (STEP_SKILLS)", () => {

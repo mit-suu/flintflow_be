@@ -30,7 +30,7 @@ const outputOf = (actionType: string): unknown => {
   return json(text as string)
 }
 
-describe("mockOutputFor — đúng schema theo ActionType", () => {
+describe("mockOutputFor - đúng schema theo ActionType", () => {
   it.each([ActionType.DRAFT, ActionType.REGENERATE, ActionType.REVISION, ActionType.GLOSSARY_SCAN, ActionType.RECONCILE])(
     "%s trả opTransaction với lô op rỗng",
     (actionType) => {
@@ -59,7 +59,7 @@ describe("mockOutputFor — đúng schema theo ActionType", () => {
     expect(() => changeInstructionSchema.parse({ ops: [] })).toThrow()
   })
 
-  it("import (mode 1 I-4, 1.11) trả output hợp schema — chạy được luồng import với mock", () => {
+  it("import (mode 1 I-4, 1.11) trả output hợp schema - chạy được luồng import với mock", () => {
     expect(importExtractSchema.parse(outputOf(ActionType.IMPORT_EXTRACT_FIELDS)).items).toEqual([])
     expect(importExtractDiagramSchema.parse(outputOf(ActionType.IMPORT_EXTRACT_DIAGRAM)).diagram_kind).toBe("other")
     expect(findingsSchema.parse(outputOf(ActionType.IMPORT_SEMANTIC_CHECK)).findings).toEqual([])
@@ -98,7 +98,7 @@ describe("mockOutputFor — đúng schema theo ActionType", () => {
     expect(mockTranslateItems("Items:\nkhông phải JSON")).toEqual([])
   })
 
-  it("ActionType ngoài pipeline (chat) không có output riêng — rơi về văn bản tự do", () => {
+  it("ActionType ngoài pipeline (chat) không có output riêng - rơi về văn bản tự do", () => {
     expect(mockOutputFor(ActionType.CHAT, "xin chào")).toBeNull()
     expect(mockOutputFor(undefined, "xin chào")).toBeNull()
   })

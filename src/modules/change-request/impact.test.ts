@@ -7,7 +7,9 @@ import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import { formatLocationId } from "./cr-impact.service.js"
 import {
+  KEYWORD_MAX_HITS,
   MAX_LOCATIONS,
+  rankByKeywords,
   elementPathOf,
   elementValue,
   emptySectionTargets,
@@ -27,7 +29,7 @@ const spine = (): Spine => {
   s.actors.push({ id: "A01", name: "Learner", kind: "human", description: "A person who enrolls." } as never, { id: "A02", name: "Admin", kind: "human", description: "Manages courses." } as never)
   s.use_cases.push({ id: "UC-01", name: "Register account", actor_ids: ["A01"], function_ids: [], description: "Create an account with email.", includes: [], extends: [] } as never)
   s.nfrs.push({ id: "NFR-01", category: "performance", kind: "quantitative", statement: "The system shall respond within 2 seconds.", metric: "response time", threshold: "2 s", priority: null } as never)
-  s.custom_sections.push({ id: "CS02", heading: "Appendix A — Meeting notes", level: 1, source: "import", blocks: [{ kind: "paragraph", text: "Learner feedback about registration.", rows: null, image_ref: null }] })
+  s.custom_sections.push({ id: "CS02", heading: "Appendix A - Meeting notes", level: 1, source: "import", blocks: [{ kind: "paragraph", text: "Learner feedback about registration.", rows: null, image_ref: null }] })
   return s
 }
 
@@ -77,7 +79,7 @@ describe("C-3 findSpineLocations", () => {
     expect(isArrayPath("business_rules[id=BR-01]")).toBe(false)
   })
 
-  it("FLF-278: đích là phần nhỏ của mẫu (`slot:*`) ⇒ đổi sang mục FPT cha / mảng dữ liệu — CR nhắm mục mẫu trống có vị trí thêm mới", () => {
+  it("FLF-278: đích là phần nhỏ của mẫu (`slot:*`) ⇒ đổi sang mục FPT cha / mảng dữ liệu - CR nhắm mục mẫu trống có vị trí thêm mới", () => {
     expect(expandSlotTargets(["slot:business_rules", "slot:functional_requirements", "slot:vision", "actors[id=A01]"])).toEqual(["fixed:5.1", "functions[]", "fixed:1", "actors[id=A01]"])
     const found = findSpineLocations(spine(), ["slot:business_rules"], [])
     expect(found.map((f) => [f.path, f.section_id])).toEqual([["business_rules[]", "fixed:5.1"]])
@@ -117,7 +119,7 @@ describe("C-3 findSpineLocations", () => {
     expect(findSpineLocations(spine(), ["fixed:2.2.1"], []).map((f) => [f.path, f.section_id])).toEqual([["use_cases[id=UC-01]", "fixed:2.2.1"]])
   })
 
-  it("mục có phần tử nhưng cờ vẫn coi là chưa có dữ liệu (5.1 chỉ có rule tier=high) ⇒ thêm vị trí thêm mới — cùng tiêu chí với cờ", () => {
+  it("mục có phần tử nhưng cờ vẫn coi là chưa có dữ liệu (5.1 chỉ có rule tier=high) ⇒ thêm vị trí thêm mới - cùng tiêu chí với cờ", () => {
     const s = spine()
     s.business_rules.push({ id: "BR-01", tier: "high", statement: "Only paid learners can study." } as never)
     const paths = findSpineLocations(s, ["fixed:5.1"], []).map((f) => f.path)
@@ -137,10 +139,20 @@ describe("C-3 findSpineLocations", () => {
     expect(findSpineLocations(spine(), [], ["2 seconds"]).map((f) => f.path)).toEqual(["nfrs[id=NFR-01]"])
   })
 
-  it(`tối đa ${MAX_LOCATIONS} vị trí`, () => {
+  it(`FLF-375: từ khoá xếp hạng BM25 - tối đa ${KEYWORD_MAX_HITS} phần tử khớp nhất (không còn trả mọi phần tử chứa chữ)`, () => {
     const s = spine()
     for (let i = 0; i < MAX_LOCATIONS + 10; i++) s.glossary.push({ id: `G${i}`, term: `login ${i}`, definition: "login term" } as never)
-    expect(findSpineLocations(s, [], ["login"])).toHaveLength(MAX_LOCATIONS)
+    const found = findSpineLocations(s, [], ["login"])
+    expect(found).toHaveLength(KEYWORD_MAX_HITS)
+    expect(found.every((f) => f.found_by.includes("keyword") && (f.keyword_score ?? 0) > 0)).toBe(true)
+  })
+
+  it("FLF-375: phần tử nói nhiều về yêu cầu xếp trên phần tử chỉ nhắc qua một lần", () => {
+    const s = spine()
+    s.glossary.push({ id: "G1", term: "Excel import", definition: "Import and export student lists and grade sheets with Excel files." } as never)
+    s.glossary.push({ id: "G2", term: "Report", definition: "A PDF report; an Excel copy is optional." } as never)
+    const [first] = rankByKeywords([{ path: "glossary[id=G2]", value: s.glossary[s.glossary.length - 1] }, { path: "glossary[id=G1]", value: s.glossary[s.glossary.length - 2] }], ["import export Excel"])
+    expect(first.path).toBe("glossary[id=G1]")
   })
 })
 

@@ -33,7 +33,7 @@ describe("wireframeWidgets (FLF-214)", () => {
     ])
   })
 
-  it("bỏ qua hàng đệm quanh khung ngoài (padFrame) — cùng danh sách widget như bản không đệm", () => {
+  it("bỏ qua hàng đệm quanh khung ngoài (padFrame) - cùng danh sách widget như bản không đệm", () => {
     const body = ["{", "  <b>FLINTFLOW", "  Login", "}", "..", "Email", '"john@example.com       "', "[        Log in        ]"]
     const padded = salt(".", "{ . | . | {", ...body.map((l) => `  ${l}`), "} | . | . }", ".")
     expect(wireframeWidgets(padded, "Login")).toEqual(["Email input", "Log in button"])
@@ -71,7 +71,7 @@ describe("wireframeWidgets (FLF-214)", () => {
     ])
   })
 
-  it("FLF-265: tiếng Việt — tên loại widget đứng trước, chữ trên widget giữ nguyên từ puml", () => {
+  it("FLF-265: tiếng Việt - tên loại widget đứng trước, chữ trên widget giữ nguyên từ puml", () => {
     const puml = salt(
       "<b>Log in to your account",
       "Email",
@@ -138,7 +138,7 @@ describe("wireframeWidgets (FLF-214)", () => {
     ])
   })
 
-  it("FLF-265: describeInterface — 'Màn hình X: …' / 'Pop-up X: …', mô tả màn giữ nguyên; mặc định tiếng Anh", () => {
+  it("FLF-265: describeInterface - 'Màn hình X: …' / 'Pop-up X: …', mô tả màn giữ nguyên; mặc định tiếng Anh", () => {
     const screen = { id: "S1", feature_id: "F1", name: "Login", description: "Entry screen.", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: 1, detail_status: "signed_off" as const }
     const layout = { id: "D1", kind: "screen_layout" as const, section: "function:FN1", owner_kind: "screen", owner_id: "S1", render_status: "ok" as const, source_hash: "h", rendered_at: "2026-09-01T00:00:00.000Z" }
     const withLayout = { diagrams: [{ ...layout, format: "puml", source: salt("Email", '"a@b.c   "', "[ Log in ]") }] } as unknown as Spine
@@ -149,7 +149,7 @@ describe("wireframeWidgets (FLF-214)", () => {
     expect(describeInterface(noLayout, { ...screen, is_popup: true })).toBe("Login pop-up: Entry screen.")
   })
 
-  it("FLF-265: bản xem đã dịch — dòng tên màn đầu wireframe so với tên GỐC (wireframeName), câu in tên đã dịch", () => {
+  it("FLF-265: bản xem đã dịch - dòng tên màn đầu wireframe so với tên GỐC (wireframeName), câu in tên đã dịch", () => {
     const screen = { id: "S1", feature_id: "F1", name: "Đăng nhập", description: "Màn vào.", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: 1, detail_status: "signed_off" as const }
     const layout = { id: "D1", kind: "screen_layout" as const, section: "function:FN1", owner_kind: "screen", owner_id: "S1", render_status: "ok" as const, source_hash: "h", rendered_at: "2026-09-01T00:00:00.000Z" }
     const withLayout = { diagrams: [{ ...layout, format: "puml", source: salt("Login", "Email", '"a@b.c   "', "[ Log in ]") }] } as unknown as Spine
@@ -158,7 +158,7 @@ describe("wireframeWidgets (FLF-214)", () => {
     expect(describeInterface(withLayout, screen, "vi")).toBe('Màn hình Đăng nhập: chữ "Login", ô nhập Email, nút Log in.')
   })
 
-  it("N1: wireframe đã dịch — dòng tên màn là tên đã dịch (bỏ qua như tên gốc), chữ trên widget là chữ dịch", () => {
+  it("N1: wireframe đã dịch - dòng tên màn là tên đã dịch (bỏ qua như tên gốc), chữ trên widget là chữ dịch", () => {
     const screen = { id: "S1", feature_id: "F1", name: "Đăng nhập", description: "Màn vào.", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: 1, detail_status: "signed_off" as const }
     const layout = { id: "D1", kind: "screen_layout" as const, section: "function:FN1", owner_kind: "screen", owner_id: "S1", render_status: "ok" as const, source_hash: "h", rendered_at: "2026-09-01T00:00:00.000Z" }
     const localized = { diagrams: [{ ...layout, format: "puml", source: salt("Đăng nhập", "Email", '"a@b.c   "', "Giá", '"1"', "đến", '"9"', "[ Đăng nhập ]") }] } as unknown as Spine
@@ -170,7 +170,7 @@ describe("wireframeWidgets (FLF-214)", () => {
     expect(wireframeWidgets(salt("[ OK ]", "Vị trí", "{+", "Hình ảnh phòng", "}"), "X", "vi")).toEqual(["nút OK", "Vị trí (vùng hình ảnh phòng)"])
   })
 
-  it("không phải wireframe (bảng function của Spine cũ — mọi ngôn ngữ, hình PlantUML khác) ⇒ null", () => {
+  it("không phải wireframe (bảng function của Spine cũ - mọi ngôn ngữ, hình PlantUML khác) ⇒ null", () => {
     expect(wireframeWidgets("@startsalt\n{+\n  <b>Login\n  {#\n    <b>Function | <b>Description\n  }\n}\n@endsalt\n", "Login")).toBeNull()
     expect(wireframeWidgets("@startsalt\n{+\n  <b>Đăng nhập\n  {#\n    <b>Chức năng | <b>Mô tả\n  }\n}\n@endsalt\n", "Đăng nhập")).toBeNull()
     expect(wireframeWidgets("@startuml\nA -> B\n@enduml\n", "Login")).toBeNull()

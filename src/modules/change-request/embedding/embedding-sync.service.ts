@@ -72,7 +72,7 @@ const embeddingSyncJob = defineJob<{ projectId: string }>({
     if (res && (res.embedded || res.removed)) console.log(`[embedding] project ${projectId}: embed ${res.embedded}, xoá ${res.removed}, giữ ${res.kept}`)
   },
   onFinalFailure: async ({ projectId }, err) => {
-    console.warn(`[embedding] đồng bộ index embedding lỗi (project ${projectId}) — index giữ bản cũ tới lượt sau: ${err instanceof Error ? err.message : String(err)}`)
+    console.warn(`[embedding] đồng bộ index embedding lỗi (project ${projectId}) - index giữ bản cũ tới lượt sau: ${err instanceof Error ? err.message : String(err)}`)
   }
 })
 

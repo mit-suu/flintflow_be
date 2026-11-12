@@ -35,7 +35,7 @@ const withoutFlows = (s: Spine) =>
 describe("renderers trên fixture 19 màn", () => {
   it("5 hình cố định (class tính một target) + wireframe cho 5 màn signed_off", () => {
     expect(layoutOwners(FIXTURE)).toEqual(["S01", "S05", "S07", "S09", "S10"])
-    expect(allTargets(FIXTURE)).toHaveLength(12)
+    expect(allTargets(FIXTURE)).toHaveLength(14)
   })
 
   it("mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot)", () => {
@@ -60,7 +60,7 @@ describe("renderers trên fixture 19 màn", () => {
     }
   })
 
-  it("context: SVG — một hình tròn, mỗi actor một hộp, mỗi luồng một đoạn thẳng có đầu mũi tên và một nhãn", () => {
+  it("context: SVG - một hình tròn, mỗi actor một hộp, mỗi luồng một đoạn thẳng có đầu mũi tên và một nhãn", () => {
     const part = only(FIXTURE, "context")
     const svg = part.source
     expect(part.section).toBe("fixed:1")
@@ -80,7 +80,7 @@ describe("renderers trên fixture 19 màn", () => {
     expect(svg.match(/<rect [^>]*fill="#fff" transform=/g)).toHaveLength(flows)
   })
 
-  it("context: nhãn là tên gói dữ liệu Title Case của flows_in / flows_out — actor một chiều không bịa chiều còn lại", () => {
+  it("context: nhãn là tên gói dữ liệu Title Case của flows_in / flows_out - actor một chiều không bịa chiều còn lại", () => {
     const svg = only(FIXTURE, "context").source
     const actors = contextActors(FIXTURE.actors)
     for (const a of FIXTURE.actors) {
@@ -113,7 +113,7 @@ describe("renderers trên fixture 19 màn", () => {
   it.each([
     { name: "6 nhãn một chiều", count: 6 },
     { name: "12 nhãn một chiều", count: 12 }
-  ])("context: không giới hạn, không gộp — mỗi phần tử là một mũi tên ($name)", ({ count }) => {
+  ])("context: không giới hạn, không gộp - mỗi phần tử là một mũi tên ($name)", ({ count }) => {
     const labels = Array.from({ length: count }, (_, i) => `Flow ${i}`)
     const spine = mutate((s) => {
       const a = s.actors.find((x) => x.id === "A01")!
@@ -262,5 +262,26 @@ describe("tên hệ thống (FLF-177)", () => {
       s.project.name = "Du an giao hang"
     })
     expect(only(blank, "context").source).toContain(">Du an giao hang<")
+  })
+})
+
+describe("FLF-390 context: actor tổng quát không luồng riêng không vẽ", () => {
+  it("User (cha của staff) và Guest (cha của Customer) không có luồng ⇒ bỏ; actor con giữ đủ chiều vào / ra", () => {
+    const actors = [
+      { id: "A01", name: "Guest", kind: "human" as const, description: "" },
+      { id: "A02", name: "Customer", kind: "human" as const, description: "", parent_id: "A01", flows_in: ["orders"], flows_out: ["order status"] },
+      { id: "A03", name: "User", kind: "human" as const, description: "" },
+      { id: "A04", name: "Sales Staff", kind: "human" as const, description: "", parent_id: "A03", flows_in: ["order confirmation"], flows_out: ["order queue"] }
+    ]
+    const out = contextActors(actors)
+    expect(out.map((a) => a.name)).toEqual(["Customer", "Sales Staff"])
+    expect(out[0]).toMatchObject({ inbound: ["Orders"], outbound: ["Order Status"] })
+  })
+  it("actor cha có luồng riêng ⇒ vẫn vẽ", () => {
+    const out = contextActors([
+      { id: "A01", name: "Guest", kind: "human", description: "", flows_in: ["search keywords"] },
+      { id: "A02", name: "Customer", kind: "human", description: "", parent_id: "A01", flows_out: ["invoices"] }
+    ])
+    expect(out.map((a) => a.name)).toEqual(["Guest", "Customer"])
   })
 })

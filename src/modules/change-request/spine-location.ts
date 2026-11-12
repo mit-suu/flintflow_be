@@ -10,8 +10,9 @@
  */
 
 import { createHash } from "node:crypto"
+import { Bm25, reciprocalRankFusion } from "../../shared/search/bm25.js"
 import { sectionHasData } from "../spine/deterministic-check.js"
-import { ORIGINAL_DIAGRAM_DATA, ORIGINAL_DIAGRAM_SECTION, originalDiagramOf } from "../spine/original-diagram.js"
+import { ORIGINAL_DIAGRAM_DATA, OWNER_COLLECTION, OWNER_DIAGRAM_KINDS, originalDiagramOf, originalSectionOf } from "../spine/original-diagram.js"
 import { impactOf } from "../spine/impact.service.js"
 import { ownerStepOf, sectionsOfPath } from "../spine/section-registry.js"
 import type { Spine } from "../spine/spine.types.js"
@@ -197,6 +198,35 @@ const textOf = (value: unknown): string => {
 const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 const wordPattern = (s: string): RegExp => new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegex(s)}(?![\\p{L}\\p{N}])`, "iu")
 
+/** Tỉ lệ điểm BM25 tối thiểu so với phần tử khớp nhất, và số phần tử tối đa lấy theo từ khoá (FLF-375). */
+export const KEYWORD_MIN_RATIO = 0.35
+export const KEYWORD_MAX_HITS = 15
+
+/**
+ * FLF-375: phần tử Spine xếp theo BM25 của từ khoá C-2 (`shared/search/bm25.ts` — tách âm tiết Việt, bỏ dấu, giữ mã).
+ * Mỗi từ khoá là một ý riêng ⇒ chấm **theo từng từ khoá**: giữ phần tử có điểm ≥ `KEYWORD_MIN_RATIO` × điểm cao nhất của
+ * chính từ khoá đó (phần tử chỉ khớp một ý không bị ý khác lấn át), hợp lại theo điểm chuẩn hoá, tối đa `KEYWORD_MAX_HITS`.
+ */
+export const rankByKeywords = (elements: readonly { path: string; value: unknown }[], keywords: readonly string[]): { path: string; score: number }[] => {
+  const terms = [...new Set(keywords.map((k) => k.trim()).filter((k) => k.length >= 2))]
+  if (!terms.length) return []
+  const index = new Bm25(elements, (e) => textOf(e.value))
+  const best = new Map<string, number>()
+  for (const term of terms) {
+    const hits = index.search(term)
+    const top = hits[0]?.score ?? 0
+    for (const h of hits) {
+      if (h.score < top * KEYWORD_MIN_RATIO) continue
+      const norm = top ? h.score / top : 0
+      best.set(h.item.path, Math.max(best.get(h.item.path) ?? 0, norm))
+    }
+  }
+  return [...best.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, KEYWORD_MAX_HITS)
+    .map(([path, score]) => ({ path, score }))
+}
+
 /** Section chứa phần tử (ưu tiên section sở hữu). Không ra section ⇒ `misc`. */
 export const sectionOfElement = (spine: Spine, path: string): string => {
   if (path === PROJECT_PATH) return "fixed:1"
@@ -224,6 +254,10 @@ export interface FoundLocation {
   owner_step: string | null
   /** Chỉ có khi `found_by` chứa `vector`: điểm gần nghĩa (0..1). */
   vector_score?: number
+  /** FLF-375: chỉ có khi `found_by` chứa `keyword` — điểm BM25 của phần tử theo từ khoá. */
+  keyword_score?: number
+  /** FLF-375: điểm trộn RRF (BM25 + vector) của vị trí tìm theo từ khoá / nghĩa — thứ tự giữ lại khi phải cắt. */
+  recall_score?: number
 }
 
 /** Ứng viên từ Atlas Vector Search: path phần tử + điểm. Path không còn trong Spine bị bỏ. */
@@ -240,11 +274,11 @@ const isRecallOnly = (f: Pick<FoundLocation, "found_by">): boolean => f.found_by
  * Có ⇒ ưu tiên vị trí đồ thị (không bị ứng viên vector đẩy ra), chỗ còn lại cho ứng viên vector điểm cao nhất.
  */
 export const capLocations = (found: readonly FoundLocation[], room: number): FoundLocation[] => {
-  if (!found.some((f) => f.found_by.includes("vector"))) return found.slice(0, room)
+  if (!found.some((f) => f.found_by.includes("vector") || f.recall_score !== undefined)) return found.slice(0, room)
   const graph = found.filter((f) => !isRecallOnly(f))
   const recall = found
     .filter(isRecallOnly)
-    .sort((a, b) => (b.vector_score ?? 0) - (a.vector_score ?? 0))
+    .sort((a, b) => (b.recall_score ?? b.vector_score ?? 0) - (a.recall_score ?? a.vector_score ?? 0))
     .slice(0, Math.max(0, room - graph.length))
   const keep = new Set([...graph.slice(0, room), ...recall].map((f) => f.path))
   return found.filter((f) => keep.has(f.path))
@@ -308,20 +342,21 @@ export const findSpineLocations = (
     }
   }
 
-  const patterns = keywords
-    .map((k) => k.trim())
-    .filter((k) => k.length >= 3)
-    .map(wordPattern)
+  // FLF-375: từ khoá xếp hạng bằng BM25 (thay regex có / không) — chỉ giữ phần tử điểm đủ cao so với phần tử khớp nhất,
+  // bớt chỗ "không liên quan" AI phải đọc; có vector thì KHÔNG bỏ từ khoá nữa mà trộn hai nguồn bằng RRF
+  const keywordRanked = rankByKeywords(elements, keywords)
+  const keywordScores = new Map(keywordRanked.map((r) => [r.path, r.score]))
+  for (const r of keywordRanked) hit(r.path, "keyword")
   const scores = new Map<string, number>()
-  if (vector.length) {
-    for (const v of vector) {
-      if (!exists.has(v.ref)) continue
-      hit(v.ref, "vector")
-      scores.set(v.ref, Math.max(scores.get(v.ref) ?? 0, v.score))
-    }
-  } else {
-    for (const e of elements) if (patterns.some((re) => re.test(textOf(e.value)))) hit(e.path, "keyword")
+  for (const v of vector) {
+    if (!exists.has(v.ref)) continue
+    hit(v.ref, "vector")
+    scores.set(v.ref, Math.max(scores.get(v.ref) ?? 0, v.score))
   }
+  const fused = reciprocalRankFusion([
+    keywordRanked.map((r) => r.path),
+    [...scores.entries()].sort((a, b) => b[1] - a[1]).map(([path]) => path)
+  ])
 
   const found: FoundLocation[] = elements
     .filter((e) => hits.has(e.path))
@@ -334,7 +369,9 @@ export const findSpineLocations = (
         found_by: [...h.found_by],
         entity_paths: [...h.entity_paths],
         owner_step: section_id === "misc" || section_id.startsWith("custom:") ? null : ownerStepOf(section_id, spine),
-        ...(scores.has(e.path) ? { vector_score: scores.get(e.path)! } : {})
+        ...(scores.has(e.path) ? { vector_score: scores.get(e.path)! } : {}),
+        ...(keywordScores.has(e.path) ? { keyword_score: keywordScores.get(e.path)! } : {}),
+        ...(fused.has(e.path) ? { recall_score: fused.get(e.path)! } : {})
       }
     })
 
@@ -400,18 +437,35 @@ export const originalDiagramLocations = (spine: Spine, targets: readonly string[
   const touched = new Set(found.map((f) => arrayKeyOf(f.path)).filter((k): k is string => !!k))
   const out: FoundLocation[] = []
   for (const c of spine.custom_sections) {
-    const kinds = [...new Set(c.blocks.map(originalDiagramOf).flatMap((d) => (d ? [d.kind] : [])))]
-    if (!kinds.length) continue
+    const diagrams = c.blocks.map(originalDiagramOf).flatMap((d) => (d ? [d] : []))
+    if (!diagrams.length) continue
     const path = `custom_sections[id=${c.id}]`
-    const hit = kinds.filter(
-      (k) =>
-        ORIGINAL_DIAGRAM_DATA[k].some((a) => touched.has(a)) ||
-        targets.includes(ORIGINAL_DIAGRAM_SECTION[k]) ||
-        targets.includes(`custom:${c.id}`) ||
-        targets.some((t) => elementPathOf(t) === path)
+    // FLF-390: sơ đồ gắn phần tử ⇒ dữ liệu của hình là chính chủ đó (function / use case) và actor, không phải cả mảng
+    const touches = (d: (typeof diagrams)[number]) =>
+      OWNER_DIAGRAM_KINDS.has(d.kind)
+        ? found.some((f) => f.path.startsWith(`${OWNER_COLLECTION[d.kind]}[id=${d.owner_id}]`)) || touched.has("actors")
+        : ORIGINAL_DIAGRAM_DATA[d.kind].some((a) => touched.has(a))
+    const hit = diagrams.filter(
+      (d) => touches(d) || targets.includes(originalSectionOf(d)) || targets.includes(`custom:${c.id}`) || targets.some((t) => elementPathOf(t) === path)
     )
     if (!hit.length) continue
-    out.push({ path, section_id: sectionOfElement(spine, path), found_by: ["diagram"], entity_paths: hit.map((k) => ORIGINAL_DIAGRAM_SECTION[k]), owner_step: null })
+    out.push({ path, section_id: sectionOfElement(spine, path), found_by: ["diagram"], entity_paths: [...new Set(hit.map(originalSectionOf))], owner_step: null })
+  }
+  return out
+}
+
+/**
+ * FLF-375: vị trí của lô thêm / xoá use case đã duyệt trong chat (FLF-318) cũng phải kèm sơ đồ gốc mà lô làm lệch —
+ * trước đây nhánh này bỏ qua ⇒ thêm use case xong, sơ đồ use case / luồng màn của file vẫn là hình cũ.
+ */
+export const withOriginalDiagrams = (spine: Spine, targets: readonly string[], found: FoundLocation[]): FoundLocation[] => {
+  const out = found.map((f) => ({ ...f }))
+  for (const d of originalDiagramLocations(spine, targets, found)) {
+    const same = out.find((f) => f.path === d.path)
+    if (same) {
+      same.found_by = [...new Set([...same.found_by, ...d.found_by])]
+      same.entity_paths = [...new Set([...same.entity_paths, ...d.entity_paths])]
+    } else out.push(d)
   }
   return out
 }

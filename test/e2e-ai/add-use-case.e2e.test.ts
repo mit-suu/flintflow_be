@@ -22,7 +22,7 @@ const INSTRUCTION =
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const OUT_DIR = path.resolve(__dirname, "results")
 
-describe.skipIf(!enabled)("Thêm use case kéo theo đủ phần liên quan — provider thật (E2E_AI=1)", () => {
+describe.skipIf(!enabled)("Thêm use case kéo theo đủ phần liên quan - provider thật (E2E_AI=1)", () => {
   it("một bản xem trước đủ UC + chức năng + màn + luồng + phân quyền + thông báo", { timeout: 15 * 60_000 }, async () => {
     const changeService = await import("../../src/modules/spine/change.service.js")
     const repo = await import("../../src/modules/spine/spine.repository.js")
@@ -48,7 +48,7 @@ describe.skipIf(!enabled)("Thêm use case kéo theo đủ phần liên quan — 
     const shown = await changeService.preview(projectId, userId, { base_version: before.spine_version, instruction: INSTRUCTION }, {}, deps)
     const previewMs = Date.now() - started
 
-    const lines: string[] = [`# Thêm use case — provider thật (${new Date().toISOString()})`, "", `Lệnh: ${INSTRUCTION}`, ""]
+    const lines: string[] = [`# Thêm use case - provider thật (${new Date().toISOString()})`, "", `Lệnh: ${INSTRUCTION}`, ""]
     lines.push(`- preview: ok=${shown.ok}, ${shown.changes.length} thay đổi, ${previewMs} ms`)
     if (shown.clarification) lines.push(`- câu hỏi làm rõ: ${shown.clarification}`)
     if (shown.violations.length) lines.push(`- vi phạm: ${JSON.stringify(shown.violations)}`)
@@ -104,7 +104,7 @@ describe.skipIf(!enabled)("Thêm use case kéo theo đủ phần liên quan — 
   })
 })
 
-describe.skipIf(enabled)("Thêm use case kéo theo đủ phần liên quan — provider thật", () => {
+describe.skipIf(enabled)("Thêm use case kéo theo đủ phần liên quan - provider thật", () => {
   it.skip("bỏ qua: đặt E2E_AI=1 để gọi provider thật (tốn credit)", () => {})
 })
 
@@ -121,7 +121,7 @@ const fapLog = (line: string): void => {
 `)
   console.log(line)
 }
-describe.skipIf(!enabled || !fapSpine)("FAP thật — kiểm trùng use case + màn riêng (E2E_FAP_SPINE)", () => {
+describe.skipIf(!enabled || !fapSpine)("FAP thật - kiểm trùng use case + màn riêng (E2E_FAP_SPINE)", () => {
   const CR = { requester: "Phòng đào tạo", source: { kind: "verbal" as const, ref: null } }
 
   const seedFap = async () =>
@@ -140,7 +140,7 @@ describe.skipIf(!enabled || !fapSpine)("FAP thật — kiểm trùng use case + 
     const repo = await import("../../src/modules/spine/spine.repository.js")
     const { projectId, userId } = await seedFap()
     const before = (await repo.get(projectId))!
-    const instruction = "thêm use case Suspend Student Account — Phòng quản lý đào tạo khóa tài khoản đăng nhập của sinh viên; chỉ Phòng quản lý đào tạo mở khóa thủ công"
+    const instruction = "thêm use case Suspend Student Account - Phòng quản lý đào tạo khóa tài khoản đăng nhập của sinh viên; chỉ Phòng quản lý đào tạo mở khóa thủ công"
     const shown = await changeService.preview(projectId, userId, { base_version: before.spine_version, instruction, change_request: CR }, {}, { renderAfterChange: async () => undefined })
     // Chưa nói màn hay popup ⇒ hỏi trước (FLF-311); hoặc đã soạn thì bản xem trước phải cảnh báo trùng UC20
     const asked = Boolean(shown.clarification)
@@ -192,7 +192,7 @@ describe.skipIf(!enabled || !fapSpine)("FAP thật — kiểm trùng use case + 
     }
   })
 
-  it("E. FLF-318 — 'thêm UC phúc khảo điểm cho học sinh' ⇒ hỏi ai xử lý / đề xuất UC xử lý; trả lời xong lô có đủ luồng (không cụt)", { timeout: 15 * 60_000 }, async () => {
+  it("E. FLF-318 - 'thêm UC phúc khảo điểm cho học sinh' ⇒ hỏi ai xử lý / đề xuất UC xử lý; trả lời xong lô có đủ luồng (không cụt)", { timeout: 15 * 60_000 }, async () => {
     const changeService = await import("../../src/modules/spine/change.service.js")
     const repo = await import("../../src/modules/spine/spine.repository.js")
     const { projectId, userId } = await seedFap()
@@ -226,7 +226,7 @@ describe.skipIf(!enabled || !fapSpine)("FAP thật — kiểm trùng use case + 
   })
 
   // Cần Spine FAP đã có luồng phúc khảo (Request / Decide / Approve / View Status) — bỏ qua khi không có
-  it("F. FLF-318 — 'xoá UC phúc khảo điểm' ⇒ hỏi trước về use case cùng luồng; 'Xoá cả luồng' ⇒ xoá 4 UC + chức năng + màn, không sót", { timeout: 15 * 60_000 }, async (ctx) => {
+  it("F. FLF-318 - 'xoá UC phúc khảo điểm' ⇒ hỏi trước về use case cùng luồng; 'Xoá cả luồng' ⇒ xoá 4 UC + chức năng + màn, không sót", { timeout: 15 * 60_000 }, async (ctx) => {
     const changeService = await import("../../src/modules/spine/change.service.js")
     const repo = await import("../../src/modules/spine/spine.repository.js")
     const { removalLeftovers } = await import("../../src/modules/spine/use-case-propagation.js")
@@ -275,13 +275,13 @@ describe.skipIf(!enabled || !fapSpine)("FAP thật — kiểm trùng use case + 
     return cr.clarifications.at(-1)?.questions ?? []
   }
 
-  it("G. FLF-318 — CR 'thêm UC phúc khảo điểm cho học sinh' ⇒ bước làm rõ hỏi ai xử lý (như chat trước baseline)", { timeout: 15 * 60_000 }, async () => {
+  it("G. FLF-318 - CR 'thêm UC phúc khảo điểm cho học sinh' ⇒ bước làm rõ hỏi ai xử lý (như chat trước baseline)", { timeout: 15 * 60_000 }, async () => {
     const questions = await crClarifyQuestions("thêm UC phúc khảo điểm cho học sinh")
     fapLog(`[FAP G] câu hỏi C-2: ${JSON.stringify(questions)}`)
     expect(questions.join("\n")).toMatch(/xử lý|duyệt|chấm lại|giảng viên|lecturer|academic|phòng/i)
   })
 
-  it("H. FLF-318 — CR 'xoá UC phúc khảo điểm' ⇒ bước làm rõ hỏi có xoá cả luồng không (như chat trước baseline)", { timeout: 15 * 60_000 }, async (ctx) => {
+  it("H. FLF-318 - CR 'xoá UC phúc khảo điểm' ⇒ bước làm rõ hỏi có xoá cả luồng không (như chat trước baseline)", { timeout: 15 * 60_000 }, async (ctx) => {
     const flow = (JSON.parse(fs.readFileSync(fapSpine!, "utf8")) as { use_cases: { name: string }[] }).use_cases.filter((u) => /grade review/i.test(u.name))
     if (flow.length < 2) return ctx.skip()
     const questions = await crClarifyQuestions("xoá UC phúc khảo điểm")
@@ -289,7 +289,7 @@ describe.skipIf(!enabled || !fapSpine)("FAP thật — kiểm trùng use case + 
     expect(questions.join("\n")).toMatch(/luồng|Decide|Approve|View Grade Review Status|cả/i)
   })
 
-  it("I. FLF-318 — sau baseline: bản xem trước 'thêm UC phúc khảo điểm' (vòng hỏi đáp như trước baseline) ⇒ Tạo CR kèm preview_id ⇒ đề xuất dùng đúng lô ⇒ BA xác nhận ghi 1.1 đủ luồng", { timeout: 25 * 60_000 }, async () => {
+  it("I. FLF-318 - sau baseline: bản xem trước 'thêm UC phúc khảo điểm' (vòng hỏi đáp như trước baseline) ⇒ Tạo CR kèm preview_id ⇒ đề xuất dùng đúng lô ⇒ BA xác nhận ghi 1.1 đủ luồng", { timeout: 25 * 60_000 }, async () => {
     const repo = await import("../../src/modules/spine/spine.repository.js")
     const changeService = await import("../../src/modules/spine/change.service.js")
     const { signOff } = await import("../../src/modules/pipeline/s9/baseline.service.js")

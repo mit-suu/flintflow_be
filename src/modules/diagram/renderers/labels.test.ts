@@ -69,7 +69,7 @@ describe("nhãn máy trên sơ đồ theo ngôn ngữ (FLF-265 N1)", () => {
     expect(parts.length).toBeGreaterThan(1)
     // chưa có feature ⇒ nhóm theo actor chính; nhóm quá trần tách đều, tiêu đề mang (i/n)
     expect(svgTitleOf(parts[0].source)).toBe(VI.useCasesTitle(`${actor.name} (1/${parts.length})`))
-    expect(svgTitleOf(parts[0].source)).toMatch(/^Sơ đồ use case — /)
+    expect(svgTitleOf(parts[0].source)).toMatch(/^Sơ đồ use case - /)
     expect(parts.map((p) => p.source).join("\n")).toContain("&lt;&lt;include&gt;&gt;")
   })
 

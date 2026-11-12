@@ -123,7 +123,7 @@ describe("projectStep", () => {
     expect(overview.emptyFields.every((f) => f.startsWith("project"))).toBe(true)
   })
 
-  it("FLF-220: project.working_mode đã nghỉ — không vào projection, không tính là field trống", () => {
+  it("FLF-220: project.working_mode đã nghỉ - không vào projection, không tính là field trống", () => {
     const spine = structuredClone(FIXTURE)
     spine.project = {
       ...spine.project,
@@ -196,7 +196,7 @@ describe("projectStep", () => {
 describe("buildStepContext", () => {
   beforeEach(() => {
     vi.mocked(get).mockResolvedValue({ projectId: "p", ...structuredClone(FIXTURE) })
-    vi.mocked(buildDocumentContext).mockResolvedValue({ contextText: "DOC", tokenCount: 7, documentsUsed: 1, usedSummary: false })
+    vi.mocked(buildDocumentContext).mockResolvedValue({ contextText: "DOC", tokenCount: 7, documentsUsed: 1, usedSummary: false, mode: "full", chunksUsed: 0, fullTokens: 7 })
     vi.mocked(ChatSession.findById).mockReturnValue({
       lean: async () => ({
         messages: [
@@ -214,7 +214,16 @@ describe("buildStepContext", () => {
     expect(ctx.transcriptTail).not.toContain("Other phase")
     expect(ctx.documents).toBe("DOC")
     expect(ctx.contextTokens).toBeGreaterThan(7)
-    expect(buildDocumentContext).toHaveBeenCalledWith("p", "draft", "S-3.1", expect.any(Number), undefined, undefined)
+    // FLF-393: step gửi kèm câu hỏi tìm đoạn (nhãn step + câu trả lời của user) và tiêu đề section nó nuôi (S-3.1 ⇒ Actors)
+    expect(buildDocumentContext).toHaveBeenCalledWith({
+      projectId: "p",
+      actionType: "draft",
+      stepId: "S-3.1",
+      query: expect.stringContaining("Students and teachers"),
+      sectionTitles: expect.arrayContaining(["Actors", "Tác nhân"]),
+      broad: false,
+      focus: "Students and teachers"
+    })
   })
 
   it("transcriptTail kèm lượt phỏng vấn đầu giai đoạn (câu trả lời mở không vào sổ quyết định)", async () => {
@@ -241,7 +250,7 @@ describe("buildStepContext", () => {
   })
 })
 
-describe("addendumForUnit — lượt hỏi gộp / chat thấy điều user đã kể", () => {
+describe("addendumForUnit - lượt hỏi gộp / chat thấy điều user đã kể", () => {
   it("Brief và S-1 (step hoặc đơn vị giai đoạn) ⇒ toàn bộ addendum, dạng gửi model", () => {
     expect(FIXTURE.addendum.length).toBeGreaterThan(0)
     for (const unit of ["B-1", "B-1.3", "S-1"]) {
@@ -257,7 +266,7 @@ describe("addendumForUnit — lượt hỏi gộp / chat thấy điều user đ�
   })
 })
 
-describe("openAssumptionsFor — biến {{assumptions}} của elicit-loop (FLF-358)", () => {
+describe("openAssumptionsFor - biến {{assumptions}} của elicit-loop (FLF-358)", () => {
   /** FIXTURE: AS01 nfrs[id=N05].threshold (S-6.3), AS02 actors[id=A05].name (S-2.3), AS03 screens[id=S07].tabs (S-4.2). */
   const withStatus = (status: Record<string, "unconfirmed" | "confirmed" | "rejected">): Spine => {
     const spine = structuredClone(FIXTURE)

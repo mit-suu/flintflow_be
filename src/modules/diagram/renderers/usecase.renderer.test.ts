@@ -244,7 +244,7 @@ describe("renderer thuần, tất định", () => {
 
   it("nhãn theo ngôn ngữ tài liệu: tiêu đề tiếng Việt, ký pháp UML giữ nguyên", () => {
     const vi = RENDERERS.usecase(FIXTURE, null, DIAGRAM_LABELS.vi)
-    expect(svgTitleOf(vi[0].source)).toMatch(/^Sơ đồ use case — /)
+    expect(svgTitleOf(vi[0].source)).toMatch(/^Sơ đồ use case - /)
     expect(vi.map((p) => p.source).join("\n")).toContain("&lt;&lt;include&gt;&gt;")
   })
 
@@ -277,10 +277,27 @@ describe("dữ liệu thật: Log In / Reset Password chung nhiều actor (Outpa
     expect(parts.flatMap((p) => p.issues ?? [])).toEqual([])
     const members = parts.flatMap((p) => p.members ?? [])
     expect([...new Set(members)].sort()).toEqual(spine.use_cases.map((u) => u.id).sort())
-    expect(titles(spine)).toContain("Use Cases — Authentication")
+    expect(titles(spine)).toContain("Use Cases - Authentication")
   })
 
   it("tất định: hai lượt render ⇒ cùng nguồn", () => {
     expect(renderKind(structuredClone(spine), "usecase").map((p) => p.source)).toEqual(renderKind(spine, "usecase").map((p) => p.source))
+  })
+})
+
+describe("FLF-390 actor con không nối lại use case cha đã có", () => {
+  it("use case gắn Guest + Customer, Customer kế thừa Guest ⇒ hình chỉ nối Guest", () => {
+    const spine = mutate((s) => {
+      const [a1, a2] = s.actors.filter((a) => a.kind === "human")
+      a1.parent_id = null
+      a2.parent_id = a1.id
+      s.use_cases = [uc(1, { actor_ids: [a1.id, a2.id] }), uc(2, { actor_ids: [a2.id] })]
+      for (const a of s.actors) if (a.id !== a2.id && a.parent_id === a2.id) a.parent_id = null
+    })
+    const [a1, a2] = spine.actors.filter((a) => a.kind === "human")
+    const assoc = partitionUseCases(spine).flatMap((p) => p.associations)
+    expect(assoc).toContainEqual({ actorId: a1.id, useCaseId: "UC001" })
+    expect(assoc).not.toContainEqual({ actorId: a2.id, useCaseId: "UC001" })
+    expect(assoc).toContainEqual({ actorId: a2.id, useCaseId: "UC002" })
   })
 })

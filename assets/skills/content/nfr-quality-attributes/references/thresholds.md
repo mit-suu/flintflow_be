@@ -1,6 +1,6 @@
 # Default NFR thresholds
 
-> Human-facing reference. **Not loaded at runtime** — the table the model uses is inlined in `../SKILL.md`.
+> Human-facing reference. **Not loaded at runtime** - the table the model uses is inlined in `../SKILL.md`.
 
 ## How the defaults are chosen
 

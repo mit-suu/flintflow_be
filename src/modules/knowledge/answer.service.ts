@@ -172,7 +172,7 @@ export const assertKnowledgeDailyLimit = async (userId: string): Promise<void> =
   const limit = env.KNOWLEDGE_DAILY_LIMIT
   const used = await AiActionLog.countDocuments({ userId, actionType: ActionType.KNOWLEDGE_ANSWER, createdAt: { $gte: startOfToday() } })
   if (used >= limit) {
-    throw new ApiError(429, `Bạn đã hỏi ${used} câu tri thức hôm nay — hạn mức ${limit} câu/ngày để tránh lạm dụng (không tốn credit). Mai hỏi tiếp nhé.`, KNOWLEDGE_DAILY_LIMIT, { limit, used })
+    throw new ApiError(429, `Bạn đã hỏi ${used} câu tri thức hôm nay - hạn mức ${limit} câu/ngày để tránh lạm dụng (không tốn credit). Mai hỏi tiếp nhé.`, KNOWLEDGE_DAILY_LIMIT, { limit, used })
   }
 }
 

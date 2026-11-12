@@ -26,7 +26,7 @@ const clarifyWithAmend = (p: string): string | undefined => {
   })
 }
 
-describe("phase 8 — gộp thêm lệnh sửa vào CR chưa nộp", () => {
+describe("phase 8 - gộp thêm lệnh sửa vào CR chưa nộp", () => {
   it("draft ⇒ chỉ ghi lại; bước làm rõ đầu tiên đọc cả lệnh gộp", async () => {
     const { c } = await importedProject()
     const crId = await newCr(c)
@@ -47,14 +47,14 @@ describe("phase 8 — gộp thêm lệnh sửa vào CR chưa nộp", () => {
     const amended = detail(await c.post(`${cr}/amend`, { instruction: "Also apply the new threshold to the login use case" }))
     expect(amended.change_request.status).toBe("impact_review")
     // khoá cũ còn nguyên khi quay lại làm rõ
-    expect(await lockedPaths(projectId, crId)).toEqual(expect.arrayContaining(before.map((l) => l.path)))
+    expect(await lockedPaths(projectId, crId)).toEqual([]) // FLF-375: không khoá
 
     const impact = detail(await c.post(`${cr}/impact`))
     for (const old of before) expect(impact.locations.find((l) => l.location_id === old.id)).toMatchObject({ path: old.path, conclusion: old.conclusion, proposal: old.proposal })
     const fresh = impact.locations.filter((l) => !before.some((b) => b.id === l.location_id))
     expect(fresh.map((l) => l.path)).toContain(UC)
     expect(fresh.every((l) => l.conclusion === null)).toBe(true)
-    expect(await lockedPaths(projectId, crId)).toContain(UC)
+    expect(await lockedPaths(projectId, crId)).toEqual([]) // FLF-375: không khoá
 
     const proposeCalls = promptsOf("# CR Propose").length
     detail(await c.post(`${cr}/propose`))
@@ -78,7 +78,7 @@ describe("phase 8 — gộp thêm lệnh sửa vào CR chưa nộp", () => {
   })
 })
 
-describe("phase 8 — \"Sửa lại\" một vị trí theo hướng người dùng", () => {
+describe("phase 8 - \"Sửa lại\" một vị trí theo hướng người dùng", () => {
   it("ready_to_submit ⇒ soạn lại vị trí, ghi đề xuất (manual), CR về verifying; impact_review ⇒ 409", async () => {
     const { c } = await importedProject()
     const early = await newCr(c)
@@ -115,7 +115,7 @@ describe("CR cần phần tử chưa có (2026-09-24: CR thêm bảng vào mục
     const { c, projectId } = await importedProject()
     // mục ERD đã có dữ liệu (đúng ca người dùng gặp: thêm bảng vào mục có sẵn)
     await Spine.updateOne({ projectId }, { $push: { entities: { id: "E-01", name: "Đơn đặt", description: "Đơn đặt món", relations: [] } }, $inc: { spine_version: 1 } })
-    const crId = await newCr(c, "Phân quyền màn hình", "Điều phối viên gán / thu hồi quyền truy cập từng màn hình cho người dùng — cần bảng lưu quyền.")
+    const crId = await newCr(c, "Phân quyền màn hình", "Điều phối viên gán / thu hồi quyền truy cập từng màn hình cho người dùng - cần bảng lưu quyền.")
     const cr = `/change-requests/${crId}`
     detail(await c.post(`${cr}/clarify`))
     const impact = detail(await c.post(`${cr}/impact`))

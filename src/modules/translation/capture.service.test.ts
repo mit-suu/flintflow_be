@@ -16,7 +16,7 @@ beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {})
 })
 
-describe("localizedUnitsOf — ghép localized với op cùng path (hàm thuần)", () => {
+describe("localizedUnitsOf - ghép localized với op cùng path (hàm thuần)", () => {
   it("add phần tử cả object + set một field mảng ⇒ đúng các cặp (hash câu Anh, câu dịch)", () => {
     const ops: Op[] = [
       { op: "add", path: "actors[]", value: { id: "A10", name: "Librarian", description: "Manages books.", kind: "human" } },

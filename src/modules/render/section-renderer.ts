@@ -19,6 +19,7 @@ import { svgTitleOf } from "../diagram/renderers/common.js"
 import { diagramLabelsFor } from "../diagram/renderers/labels.js"
 import { SYSTEM_LIFELINE } from "../spine/spine.schema.js"
 import { ACTOR_HIERARCHY_SECTION } from "../diagram/renderers/usecase.renderer.js"
+import { activitySectionOf } from "../diagram/renderers/activity.renderer.js"
 import { DEFAULT_RELATION_VERB, relationVerb } from "../diagram/renderers/erd.renderer.js"
 import { describeInterface } from "./interface-description.js"
 import { diagramErrorMarker } from "./diagram-placeholder.js"
@@ -39,7 +40,8 @@ import {
   sentencesFor,
   slotTextFor
 } from "./labels.js"
-import type { Change, DiagramKind, Nfr, NfrCategory, Spine } from "../spine/spine.types.js"
+import type { Change, DiagramKind, Nfr, NfrCategory, OriginalDiagramKind, Spine } from "../spine/spine.types.js"
+import { screenSpecOf } from "../diagram/renderers/screen-mockup.js"
 
 /**
  * T15 review T5: `fixed:I` không cần `before`/`value` (chỉ mô tả A/M/D + ngày/người/lý do) — caller
@@ -164,6 +166,8 @@ const localizeBlocks = (blocks: Block[], language: string | undefined, fpt = fal
 // ─── context tiêm từ assemble.service ────────────────────────────
 
 export interface SectionRenderContext {
+  /** FLF-390: tài liệu có mục "Phân tán" (`slot:distribution`, mẫu IEEE) ⇒ sơ đồ triển khai in ở đó, không ở §4.1. */
+  distributionSlot?: boolean
   /** Preserve the fixed source outline; child slots own their data instead of the aggregate parent. */
   fixedTemplate?: boolean
   /**
@@ -260,13 +264,25 @@ const diagramImages = (
   parts.forEach((d, i) => {
     const caption = captionOf(d) ?? (parts.length > 1 ? `${captionBase} (${i + 1}/${parts.length})` : captionBase)
     if (d.render_status === "error") {
-      out.push(image(diagramErrorMarker(d.id), `${caption} — ${notDrawn}`))
+      out.push(image(diagramErrorMarker(d.id), `${caption} - ${notDrawn}`))
       return
     }
     const png = ctx.diagramPng(d.id)
     if (png) out.push(image(png, caption))
   })
   return out
+}
+
+/**
+ * Chú thích mockup màn (FLF-410): màn có hình cho cả web và mobile ⇒ `<base> (Web)` / `<base> (Mobile)` thay `(1/2)`; một
+ * hình ⇒ không hậu tố. Wireframe salt cũ / bảng function ⇒ chú thích mặc định.
+ */
+export const screenLayoutImages = (spine: Spine, screenId: string, ctx: SectionRenderContext, captionBase: string): ImageBlock[] => {
+  const parts = spine.diagrams.filter((d) => d.kind === "screen_layout" && d.owner_id === screenId)
+  return diagramImages(spine, "screen_layout", screenId, ctx, captionBase, (d) => {
+    const platform = parts.length > 1 && d.format === "svg" ? screenSpecOf(d.source)?.platform : undefined
+    return platform ? `${captionBase} (${platform === "mobile" ? "Mobile" : "Web"})` : null
+  })
 }
 
 // ─── fixed:1 Product Overview ─────────────────────────────────────
@@ -294,7 +310,7 @@ const productOverview = (spine: Spine, ctx: SectionRenderContext): Block[] => {
     const say = sentencesFor(lang)
     blocks.push(heading("External Systems", 2), bulletList(nonHuman.map((a) => say.externalSystem(a.name, enumLabel(lang, "actor_kind", a.kind), a.description))))
   }
-  if (!represented?.has("slot:context")) blocks.push(...diagramImages(spine, "context", undefined, ctx, "Figure — System Context Diagram"))
+  if (!represented?.has("slot:context")) blocks.push(...diagramImages(spine, "context", undefined, ctx, "Figure - System Context Diagram"))
   return blocks
 }
 
@@ -383,14 +399,14 @@ const screenAuthorization = (spine: Spine, ctx: SectionRenderContext): Block[] =
   // mục trống như chưa làm gì — ma trận toàn "—" thì đọc thành "không ai được vào màn nào", sai nghĩa
   if (spine.permissions.length === 0) {
     if (spine.roles.length === 0) return []
-    const actorName = (id: string | null) => spine.actors.find((a) => a.id === id)?.name ?? "—"
+    const actorName = (id: string | null) => spine.actors.find((a) => a.id === id)?.name ?? "-"
     return [tableBlock(["Role", "Actor"], spine.roles.map((r) => [r.name, actorName(r.actor_id)]))]
   }
   const actionsOf = (screenId: string, roleId: string): string =>
     spine.permissions
       .filter((p) => p.screen_id === screenId && p.role_id === roleId)
       .map((p) => enumLabel(fptLanguage(ctx), "permission_action", p.action))
-      .join(", ") || "—"
+      .join(", ") || "-"
   const matrix = tableBlock(
     [fptLabelFor(fptLanguage(ctx), "Screen"), ...spine.roles.map((r) => r.name)],
     spine.screens.map((s) => [s.name, ...spine.roles.map((r) => actionsOf(s.id, r.id))])
@@ -477,9 +493,11 @@ const erd = (spine: Spine, ctx: SectionRenderContext): Block[] => {
 const featureOverview = (spine: Spine, featureId: string, ctx: SectionRenderContext): Block[] => {
   // Class diagram (domain) của feature đứng đầu mục §3.x — IEEE 830 A.3 tổ chức theo đối tượng
   const classDiagrams: Block[] = diagramImages(spine, "class", featureId, ctx, "Class Diagram", svgCaption)
-  if (ctx.functionLayout === "fpt") return classDiagrams
+  // FLF-390: sơ đồ activity của use case thuộc tính năng (phần chức năng) — chỉ có khi đã có dữ liệu luồng
+  const activities = useCaseActivities(spine, `feature:${featureId}`, ctx)
+  if (ctx.functionLayout === "fpt") return [...classDiagrams, ...activities]
   const screens = spine.screens.filter((s) => s.feature_id === featureId)
-  return screens.length === 0 ? classDiagrams : [...classDiagrams, p(`Screens: ${screens.map((s) => s.name).join(", ")}`)]
+  return [...classDiagrams, ...(screens.length === 0 ? [] : [p(`Screens: ${screens.map((s) => s.name).join(", ")}`)]), ...activities]
 }
 
 /** Mục con trống của §3.x.y mẫu FPT: giữ đủ khung mục như template, không bịa nội dung. */
@@ -616,7 +634,7 @@ const fptFunctionDetail = (spine: Spine, functionId: string, ctx: SectionRenderC
   const rules = unique(ruleStatements(spine, fn), ruleStatements(canonical ?? spine, source))
   const layout =
     screen && screen.primary_function_id === fn.id
-      ? diagramImages(spine, "screen_layout", screen.id, ctx, sentencesFor(lang).screenLayoutCaption(screen.name))
+      ? screenLayoutImages(spine, screen.id, ctx, sentencesFor(lang).screenLayoutCaption(screen.name))
       : []
 
   // Nhãn heading / mục con giữ tiếng Anh ở đây — `localizeBlocks` dịch sau (bảng `VI_FPT_LABELS`)
@@ -663,7 +681,7 @@ const legacyFunctionDetail = (spine: Spine, functionId: string, ctx: SectionRend
 
   const owningScreen = fn.screen_id ? spine.screens.find((s) => s.id === fn.screen_id) : undefined
   if (owningScreen && owningScreen.primary_function_id === fn.id) {
-    blocks.push(...diagramImages(spine, "screen_layout", owningScreen.id, ctx, `Screen Layout — ${owningScreen.name}`))
+    blocks.push(...screenLayoutImages(spine, owningScreen.id, ctx, `Screen Layout - ${owningScreen.name}`))
   }
   return blocks
 }
@@ -687,6 +705,80 @@ const sequenceBlocks = (spine: Spine, functionId: string, ctx: SectionRenderCont
   const labels = diagramLabelsFor(ctx.language)
   const images = diagramImages(spine, "sequence", functionId, ctx, labels.sequenceTitle(fn.name))
   return images.length === 0 ? [] : [...images, p(sequenceDescription(spine, fn, isVietnamese(ctx.language)))]
+}
+
+/** FLF-390: đoạn mô tả dưới sơ đồ activity — số bước, số điểm rẽ nhánh / song song, các làn (không nhắc lại từng bước). */
+const activityDescription = (spine: Spine, uc: Spine["use_cases"][number], vi: boolean): string => {
+  const nodes = uc.activity_nodes ?? []
+  const actions = nodes.filter((n) => n.kind === "action").length
+  const decisions = nodes.filter((n) => n.kind === "decision").length
+  const forks = nodes.filter((n) => n.kind === "fork").length
+  const laneIds = [...new Set(nodes.flatMap((n) => (typeof n.lane === "string" ? [n.lane] : [])))]
+  const lanes = laneIds.map((id) => (id === SYSTEM_LIFELINE ? (vi ? "hệ thống" : "the system") : (spine.actors.find((a) => a.id === id)?.name ?? id)))
+  return vi
+    ? `Sơ đồ mô tả luồng xử lý của use case "${uc.name}" gồm ${actions} bước${decisions > 0 ? `, ${decisions} điểm rẽ nhánh (điều kiện ghi trong ngoặc vuông)` : ""}${forks > 0 ? `, ${forks} điểm chạy song song` : ""}${lanes.length > 0 ? `; mỗi làn là phần việc của ${lanes.join(", ")}` : ""}.`
+    : `The diagram shows the processing flow of the use case "${uc.name}" in ${actions} actions${decisions > 0 ? `, ${decisions} decisions (conditions in square brackets)` : ""}${forks > 0 ? `, ${forks} parallel splits` : ""}${lanes.length > 0 ? `; each lane is the work of ${lanes.join(", ")}` : ""}.`
+}
+
+/** Sơ đồ activity của use case (nếu đã vẽ), kèm đoạn mô tả; chú thích theo ngôn ngữ tài liệu. */
+const activityBlocks = (spine: Spine, useCaseId: string, ctx: SectionRenderContext): Block[] => {
+  const uc = spine.use_cases.find((u) => u.id === useCaseId)
+  if (!uc) return []
+  const labels = diagramLabelsFor(ctx.language)
+  const images = diagramImages(spine, "activity", useCaseId, ctx, labels.activityTitle(uc.name))
+  return images.length === 0 ? [] : [...images, p(activityDescription(spine, uc, isVietnamese(ctx.language)))]
+}
+
+/**
+ * FLF-390: sơ đồ activity của các use case thuộc mục `sectionId` — phần chức năng (`feature:<id>`, tính năng chứa use case)
+ * hoặc mục đặc tả use case khi use case chưa thuộc tính năng nào. Theo id use case.
+ */
+const useCaseActivities = (spine: Spine, sectionId: string, ctx: SectionRenderContext): Block[] =>
+  [...spine.use_cases]
+    .filter((u) => (u.activity_nodes ?? []).length > 0 && activitySectionOf(u, spine) === sectionId)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .flatMap((u) => activityBlocks(spine, u.id, ctx))
+
+/**
+ * FLF-390: hình FlintFlow (kèm mô tả) của sơ đồ gắn một phần tử — thay ảnh gốc đã lệch dữ liệu trong mục nguyên văn.
+ * `sequence`: chủ là function; `activity`: chủ là use case.
+ */
+export const functionDiagramBlocks = (spine: Spine, ownerId: string, kind: "sequence" | "activity", ctx: SectionRenderContext): Block[] =>
+  kind === "sequence" ? sequenceBlocks(spine, ownerId, ctx) : activityBlocks(spine, ownerId, ctx)
+
+/**
+ * QLHS 11/11 (bug #16): hình FlintFlow vẽ lại thay một ảnh sơ đồ gốc — in đúng chỗ ảnh cũ (CR giữ chỗ đặt hình thay vì
+ * xoá ảnh), không chạy về mục mặc định của loại sơ đồ.
+ */
+export const generatedDiagramBlocks = (spine: Spine, kind: OriginalDiagramKind, ownerId: string | null | undefined, ctx: SectionRenderContext): Block[] => {
+  if (kind === "sequence" || kind === "activity") return ownerId ? functionDiagramBlocks(spine, ownerId, kind, ctx) : []
+  if (kind === "deployment") return deploymentBlocks(spine, ctx)
+  const labels = diagramLabelsFor(ctx.language)
+  const caption = kind === "context" ? "Figure - System Context Diagram" : kind === "usecase" ? "Use Case Diagram" : kind === "screen_flow" ? labels.screensFlowTitle() : labels.erdTitle
+  return diagramImages(spine, kind, undefined, ctx, caption, svgCaption, (d) => kind !== "usecase" || d.section !== ACTOR_HIERARCHY_SECTION)
+}
+
+/**
+ * FLF-390: sơ đồ triển khai của hệ thống (nếu đã vẽ), kèm đoạn mô tả — mẫu IEEE in dưới "Phân tán" (`slot:distribution`),
+ * mẫu FPT (chỉ khi người dùng yêu cầu) dưới danh sách giao tiếp ngoài §4.1.
+ */
+const deploymentBlocks = (spine: Spine, ctx: SectionRenderContext): Block[] => {
+  const labels = diagramLabelsFor(ctx.language)
+  const images = diagramImages(spine, "deployment", undefined, ctx, labels.deploymentTitle)
+  if (images.length === 0) return []
+  const nodes = spine.deployment_nodes ?? []
+  const devices = nodes.filter((n) => n.kind === "device").length
+  const envs = nodes.filter((n) => n.kind === "execution_environment").length
+  const links = (spine.deployment_links ?? []).length
+  const vi = isVietnamese(ctx.language)
+  return [
+    ...images,
+    p(
+      vi
+        ? `Sơ đồ mô tả cách phần mềm được triển khai lên ${nodes.length} nút (${devices} thiết bị, ${envs} môi trường thực thi) và ${links} đường truyền thông giữa chúng; khối hộp là nút, nút con lồng trong nút chứa nó, nhãn trên đường là giao thức.`
+        : `The diagram shows how the software is deployed on ${nodes.length} nodes (${devices} devices, ${envs} execution environments) and the ${links} communication paths between them; a box is a node, a nested box runs inside its container and the label on a line is the protocol.`
+    )
+  ]
 }
 
 const functionDetail = (spine: Spine, functionId: string, ctx: SectionRenderContext): Block[] => [
@@ -748,7 +840,7 @@ const blocksFor = (spine: Spine, sectionId: string, ctx: SectionRenderContext): 
     case "fixed:2.2.1":
       return useCaseDiagram(spine, ctx)
     case "fixed:2.2.2":
-      return useCaseTable(spine)
+      return [...useCaseTable(spine), ...useCaseActivities(spine, "fixed:2.2.2", ctx)]
     case "fixed:3.1.1":
       return screensFlow(spine, ctx)
     case "fixed:3.1.2":
@@ -760,7 +852,7 @@ const blocksFor = (spine: Spine, sectionId: string, ctx: SectionRenderContext): 
     case "fixed:3.1.5":
       return erd(spine, ctx)
     case "fixed:4.1":
-      return nfrList(spine, "interface", ctx)
+      return [...nfrList(spine, "interface", ctx), ...(ctx.distributionSlot ? [] : deploymentBlocks(spine, ctx))]
     case "fixed:4.2.1":
       return nfrTable(spine, "usability", ctx)
     case "fixed:4.2.2":
@@ -1050,7 +1142,7 @@ const slotBlocks = (spine: Spine, slotId: string, ctx: SectionRenderContext): Bl
       return rules.length ? [bulletList(rules.map((r) => r.statement))] : []
     }
     case "slot:context":
-      return [...externalSystems(spine, ctx), ...diagramImages(spine, "context", undefined, ctx, "Figure — System Context Diagram")]
+      return [...externalSystems(spine, ctx), ...diagramImages(spine, "context", undefined, ctx, "Figure - System Context Diagram")]
     case "slot:features": {
       if (spine.features.length === 0) return []
       const say = sentencesFor(fptLanguage(ctx))
@@ -1133,6 +1225,8 @@ const slotBlocks = (spine: Spine, slotId: string, ctx: SectionRenderContext): Bl
         ...screensFlow(spine, ctx),
         ...diagramImages(spine, "erd", undefined, ctx, "Entity Relationship Diagram", svgCaption)
       ]
+    case "slot:distribution":
+      return deploymentBlocks(spine, ctx)
     default:
       throw new Error(`section-renderer: unknown content slot "${slotId}"`)
   }

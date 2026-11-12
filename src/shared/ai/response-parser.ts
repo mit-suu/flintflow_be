@@ -176,7 +176,11 @@ const elicitBaseSchema = z.object({
  * đúng ý — server kiểm lại từng dòng (`topic_key` phải là câu đang chờ, câu có lựa chọn phải khớp nhãn), không tin mù.
  */
 export const elicitSchema = elicitBaseSchema.extend({
-  settled: z.array(z.object({ topic_key: z.string().min(1), answer: z.string() })).optional(),
+  /**
+   * FLF-393 (business-flow §3.6): câu chờ mà tài liệu tham khảo đã trả lời ⇒ chốt kèm `source_paras` (mã đoạn `D1-P391`).
+   * Server tra mã ra chữ thật và đòi câu trả lời là trích đoạn nguyên văn của đoạn đó, rồi ghi nguồn cho quyết định.
+   */
+  settled: z.array(z.object({ topic_key: z.string().min(1), answer: z.string(), source_paras: z.array(z.string()).max(5).optional() })).optional(),
   /** `topic_key` của câu đang chờ mà tin này KHÔNG trả lời — server không tự chốt câu đó bằng luật trả-lời-lặp. */
   still_open: z.array(z.string()).optional()
 })
@@ -242,7 +246,10 @@ export const IMPORT_EXTRACT_ENTITIES = [
   "glossary",
   // FLF-365: mẫu IEEE 29148
   "references",
-  "verifications"
+  "verifications",
+  // FLF-390: nút triển khai đọc từ sơ đồ triển khai (skill `import-extract-diagram` đã mô tả; thiếu ở đây ⇒ mọi lần đọc
+  // ảnh deployment trượt schema, QLHS 11/11 bug #11)
+  "deployment_nodes"
 ] as const
 
 const blockIdRef = z.string().regex(/^B\d{4,}$/)
@@ -270,8 +277,8 @@ export const importExtractSchema = z.object({
   unmapped_block_ids: z.array(blockIdRef).default([])
 })
 
-/** Loại diagram mà I-4 đọc được từ ảnh (mode 1 v3 phase 5); `other` ⇒ không đọc, giữ ảnh gốc. */
-export const DIAGRAM_IMAGE_KINDS = ["usecase", "erd", "screen_flow", "context", "other"] as const
+/** Loại diagram mà I-4 đọc được từ ảnh (mode 1 v3 phase 5; FLF-390 thêm sequence, activity); `other` ⇒ không đọc, giữ ảnh gốc. */
+export const DIAGRAM_IMAGE_KINDS = ["usecase", "erd", "screen_flow", "context", "sequence", "activity", "deployment", "other"] as const
 export type DiagramImageKind = (typeof DIAGRAM_IMAGE_KINDS)[number]
 
 /** I-4 phần ảnh: cùng hình item với `importExtract` + loại diagram. `other` thì `items` rỗng. */

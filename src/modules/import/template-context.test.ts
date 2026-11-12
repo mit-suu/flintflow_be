@@ -7,7 +7,7 @@ const para = (text: string): CustomBlock => ({ kind: "paragraph", text, rows: nu
 const table = (rows: string[][]): CustomBlock => ({ kind: "table", text: "", rows, image_ref: null })
 const entry = (order: number, section_id: string, heading_text: string, extra: Partial<LayoutEntry> = {}): LayoutEntry => ({ order, section_id, heading_text, level: 1, ...extra })
 
-describe("FLF-378 template-context — chữ trong mẫu là hướng dẫn / ví dụ / ngữ cảnh", () => {
+describe("FLF-378 template-context - chữ trong mẫu là hướng dẫn / ví dụ / ngữ cảnh", () => {
   it("luật tất định: dấu hiệu ví dụ / chỗ điền", () => {
     expect(looksLikeExample("Ví dụ: Hệ thống quản lý thư viện")).toBe(true)
     expect(looksLikeExample("e.g. FR-001 The user logs in")).toBe(true)
@@ -66,7 +66,7 @@ describe("FLF-378 template-context — chữ trong mẫu là hướng dẫn / v�
       (id) => (id === "fixed:1" ? "purpose, scope" : null)
     )
     expect(text).toContain("Template guidance:\n- Mô tả mục đích")
-    expect(text).toContain("Template example (style and structure only — DO NOT copy")
+    expect(text).toContain("Template example (style and structure only - DO NOT copy")
     expect(text).toContain("Template context (customer background")
     expect(text).toContain("- Quản lý kho Minh Phát phục vụ ba chi nhánh")
     expect(text).toContain("Template table columns (keep these columns and their order):\n- ID | Mô tả")

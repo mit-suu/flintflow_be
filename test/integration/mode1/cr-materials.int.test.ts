@@ -44,7 +44,7 @@ const createCr = async (c: Awaited<ReturnType<typeof importedProject>>["c"], mat
   return changeRequestDetailSchema.parse(res.body.data)
 }
 
-describe("phase 7 — hỏi dữ kiện thiếu, bổ sung tài liệu, giả định", () => {
+describe("phase 7 - hỏi dữ kiện thiếu, bổ sung tài liệu, giả định", () => {
   it("3.1 dán tài liệu ⇒ 3.2 hỏi dữ kiện ⇒ upload file + để trống câu trả lời ⇒ 3.2 đi tiếp kèm missing_info ⇒ 3.6 ghi giả định", async () => {
     routeCr(factsRoute)
     const { c, projectId } = await importedProject()
@@ -74,7 +74,7 @@ describe("phase 7 — hỏi dữ kiện thiếu, bổ sung tài liệu, giả đ
     expect(answered.change_request.status).toBe("impact_review")
     expect(answered.change_request.missing_info).toEqual([STILL_MISSING])
     const second = promptsOf("# CR Clarify")[1]
-    expect(second).toContain(`Q1.1: ${MISSING_QUESTION}\nA: (no answer — unknown)`)
+    expect(second).toContain(`Q1.1: ${MISSING_QUESTION}\nA: (no answer - unknown)`)
     expect(second).toContain("[M02] biên-bản.txt (attached with the answers of round 1)")
 
     // qua 3.4 thì không đính kèm nữa

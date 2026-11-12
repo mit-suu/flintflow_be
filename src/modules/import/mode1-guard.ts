@@ -86,7 +86,7 @@ export const prefillFrom = (instruction: string | undefined, fallback = "Sửa t
 }
 
 export const changeRequiresCr = (prefill: CrPrefill): Mode1Error =>
-  new Mode1Error("CHANGE_REQUIRES_CR", "Tài liệu đã chốt bản gốc — mọi sửa phải qua change request", { prefill })
+  new Mode1Error("CHANGE_REQUIRES_CR", "Tài liệu đã chốt bản gốc - mọi sửa phải qua change request", { prefill })
 
 export const assertChangesAllowed = async (projectId: string, prefill: CrPrefill): Promise<void> => {
   if (await changesRequireCr(projectId)) throw changeRequiresCr(prefill)
@@ -96,9 +96,9 @@ export const assertChangesAllowed = async (projectId: string, prefill: CrPrefill
 export type Mode1Forbidden = "steps" | "signoff" | "waive"
 
 const FORBIDDEN: Record<Mode1Forbidden, { code: Mode1ErrorCode; message: string }> = {
-  steps: { code: "MODE1_NO_STEPS", message: "Dự án tải SRS lên không chạy theo từng bước — hãy sửa tài liệu bằng change request." },
-  signoff: { code: "MODE1_NO_SIGNOFF", message: "Dự án tải SRS lên không ký baseline theo cách này — hãy phát hành phiên bản khi đã xử lý hết cờ đỏ." },
-  waive: { code: "MODE1_NO_WAIVE", message: "Dự án tải SRS lên không bỏ qua cờ được — hãy xử lý cờ bằng change request." }
+  steps: { code: "MODE1_NO_STEPS", message: "Dự án tải SRS lên không chạy theo từng bước - hãy sửa tài liệu bằng change request." },
+  signoff: { code: "MODE1_NO_SIGNOFF", message: "Dự án tải SRS lên không ký baseline theo cách này - hãy phát hành phiên bản khi đã xử lý hết cờ đỏ." },
+  waive: { code: "MODE1_NO_WAIVE", message: "Dự án tải SRS lên không bỏ qua cờ được - hãy xử lý cờ bằng change request." }
 }
 
 /**

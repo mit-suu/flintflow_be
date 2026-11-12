@@ -173,11 +173,11 @@ export const getDocumentImageController = catchAsync(async (req: Request, res: R
   }
   const image = await readImageRef(projectId, ref)
   if (!image.ok) {
-    if (image.reason === "changed") throw new ApiError(409, "Ảnh này vừa được vẽ lại — tải lại tài liệu để xem bản mới.", "IMAGE_CHANGED")
+    if (image.reason === "changed") throw new ApiError(409, "Ảnh này vừa được vẽ lại - tải lại tài liệu để xem bản mới.", "IMAGE_CHANGED")
     // Ảnh gốc có bytes nhưng không phải PNG/JPEG — lỗi vĩnh viễn, client hiện chỗ giữ ảnh thay vì báo lỗi
     if (image.reason === "unsupported") throw new ApiError(415, "Không nhúng được ảnh gốc (định dạng không hỗ trợ).", "MEDIA_NOT_EMBEDDABLE")
     // Không tải được file gốc từ storage — có thể tạm thời, client cho thử lại
-    if (image.reason === "unavailable") throw new ApiError(503, "Tạm thời không tải được ảnh — thử lại sau.", "IMAGE_UNAVAILABLE")
+    if (image.reason === "unavailable") throw new ApiError(503, "Tạm thời không tải được ảnh - thử lại sau.", "IMAGE_UNAVAILABLE")
     throw notFound()
   }
   res.setHeader("Content-Type", image.contentType)

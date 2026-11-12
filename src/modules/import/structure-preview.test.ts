@@ -10,7 +10,7 @@ const heading = (id: string, text: string, section: string, level = 1): LayoutBl
 const para = (id: string, text: string, section: string): LayoutBlock => ({ block_id: id, kind: "paragraph", level: null, text, section_id: section })
 const AT = "2026-11-08T00:00:00.000Z"
 
-describe("fileKindOf — khung mẫu hay SRS đã viết", () => {
+describe("fileKindOf - khung mẫu hay SRS đã viết", () => {
   const layout = [
     entry(0, "fixed:1", "1 Overview"),
     entry(1, "fixed:2.1", "2.1 Actors"),
@@ -35,7 +35,7 @@ describe("fileKindOf — khung mẫu hay SRS đã viết", () => {
   })
 })
 
-describe("previewStructure — màn đọc khung lúc upload", () => {
+describe("previewStructure - màn đọc khung lúc upload", () => {
   const spine = createEmptySpine({ name: "Lumen" })
 
   it("giữ khung, SRS đã viết ⇒ mục có chữ thật present, mục chỉ có heading missing, chế độ 3; sắp theo thứ tự file", () => {
@@ -76,7 +76,7 @@ describe("previewStructure — màn đọc khung lúc upload", () => {
     expect(previewStructure(blocks, new Map(ids.map((id, i) => [`h${i}`, id])), spine, "fixed", AT).summary.kind).toBe("written")
   })
 
-  it("giữ khung, khung mẫu (gần như trống) ⇒ mọi mục của mẫu thiếu, kể cả mục có ví dụ — luôn chế độ 3", () => {
+  it("giữ khung, khung mẫu (gần như trống) ⇒ mọi mục của mẫu thiếu, kể cả mục có ví dụ - luôn chế độ 3", () => {
     const ids = ["fixed:1", "fixed:2.1", "fixed:2.2", "fixed:2.3", "fixed:3.1.1", "fixed:5.1"]
     const blocks = ids.flatMap((id, i) => [heading(`h${i}`, `${i + 1} Section ${i}`, id)])
     blocks.push(para("ex", "Example: The system shall allow the user to log in.", "fixed:1"))
@@ -100,7 +100,7 @@ describe("previewStructure — màn đọc khung lúc upload", () => {
   })
 })
 
-describe("toPreview — thứ tự", () => {
+describe("toPreview - thứ tự", () => {
   it("mục không có trong file nhận thứ tự sau mọi heading của file, giữ thứ tự mẫu", () => {
     const structure: TargetStructure = {
       target: "fpt",
@@ -123,7 +123,7 @@ describe("toPreview — thứ tự", () => {
   })
 })
 
-describe("structureChanges — kết quả cuối lệch bản sơ bộ", () => {
+describe("structureChanges - kết quả cuối lệch bản sơ bộ", () => {
   const preview: StructurePreview = {
     summary: { present: 3, missing: 0, out_of_scope: 0, kind: "written" },
     resolved_mode: 1,

@@ -63,7 +63,7 @@ const crToReady = async (c: ReturnType<typeof mode1Api>) => {
   return { crId, cr, impact, proposed, verified }
 }
 
-describe("mode 1 — change request", () => {
+describe("mode 1 - change request", () => {
   it("chưa có baseline ⇒ CR_REQUIRES_BASELINE; thiếu nguồn ⇒ CR_SOURCE_REQUIRED", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)
@@ -88,7 +88,7 @@ describe("mode 1 — change request", () => {
     const byPath = (p: string) => impact.locations.find((l) => l.path === p)!
     expect(byPath("nfrs[id=NFR-01]").found_by.sort()).toEqual(["keyword", "spine_link"])
     expect(byPath("business_rules[id=BR-01]").found_by).toEqual(["keyword"])
-    expect(await lockedPaths(projectId, "CR-001")).toEqual(impact.locations.map((l) => l.path).sort())
+    expect(await lockedPaths(projectId, "CR-001")).toEqual([]) // FLF-375 §3.2: không khoá
 
     expect(proposed.change_request.status).toBe("proposing")
     expect(proposed.groups.map((g) => g.title).sort()).toEqual(["4.2.3 Performance", "5.1 Business Rules"])
@@ -121,28 +121,24 @@ describe("mode 1 — change request", () => {
     expect(await Notification.countDocuments({ userId: seeded.userId, type: "change_request_decided" })).toBe(0)
   })
 
-  it("hai CR cùng chạm một phần tử ⇒ CR thứ hai nhận 409 PATH_LOCKED; huỷ CR-001 ⇒ mở khoá, CR-002 khoá được", async () => {
+  it("FLF-375 §3.2: hai CR cùng chạm một phần tử ⇒ cả hai tìm được vị trí (không khoá); CR-002 thấy CR-001 có bản sửa chưa xác nhận", async () => {
     const { c, projectId } = await importedProject()
     const first = await newCr(c)
     detail(await c.post(`/change-requests/${first}/clarify`))
-    detail(await c.post(`/change-requests/${first}/impact`))
+    const firstImpact = detail(await c.post(`/change-requests/${first}/impact`))
+    detail(await c.post(`/change-requests/${first}/propose`))
     const second = await newCr(c, "Tighter performance", "Also about the 2 seconds response time.")
     detail(await c.post(`/change-requests/${second}/clarify`))
-    const locked = await c.post(`/change-requests/${second}/impact`)
-    expect(locked.status).toBe(409)
-    expect(locked.body.error.code).toBe("PATH_LOCKED")
-    expect(locked.body.meta.locked[0].cr_id).toBe("CR-001")
-    // CR-002 không giữ khoá nào sau khi thất bại
-    expect(detail(await c.get(`/change-requests/${second}`)).locations).toEqual([])
-
-    const cancelled = detail(await c.post(`/change-requests/${first}/cancel`, { reason: "Trùng với CR khác" }))
-    expect(cancelled.change_request.status).toBe("cancelled")
+    const secondImpact = detail(await c.post(`/change-requests/${second}/impact`))
+    const shared = secondImpact.locations.find((l) => firstImpact.locations.some((f) => f.path === l.path))!
+    expect(shared).toBeDefined()
+    const again = detail(await c.get(`/change-requests/${second}`)).locations.find((l) => l.path === shared.path)!
+    expect(again.others_pending?.map((o) => o.cr_id)).toContain(first)
     expect(await lockedPaths(projectId, first)).toEqual([])
-    const retry = detail(await c.post(`/change-requests/${second}/impact`))
-    expect(await lockedPaths(projectId, second)).toEqual(retry.locations.map((l) => l.path).sort())
+    expect(await lockedPaths(projectId, second)).toEqual([])
   })
 
-  it("verify trượt 3 lần ⇒ manual_fix; sửa tay ⇒ verify đạt", async () => {
+  it("verify trượt 3 lần ⇒ manual_fix (Cần bạn quyết); gõ hướng sửa cho AI soạn lại ⇒ verify đạt (FLF-375: không sửa tay)", async () => {
     routeCr = (p) => fakeCrClarify(PERF_TARGETS)(p) ?? fakeCrProposeNoChange(p)
     const { c } = await importedProject()
     const crId = await newCr(c)
@@ -160,12 +156,10 @@ describe("mode 1 — change request", () => {
     expect(perf.redo_count).toBe(2)
     expect(perf.verify?.violations[0].rule).toBe("edit_no_change")
 
+    routeCr = (p) => fakeCrClarify(PERF_TARGETS)(p) ?? fakeCrPropose(p)
     for (const l of d.locations) {
-      const body =
-        l.location_id === perf.location_id
-          ? { conclusion: "edit", new_value: { ...JSON.parse(perf.current_text), threshold: "1 s" } }
-          : { conclusion: "not_related", reason: "Không liên quan tới thời gian phản hồi" }
-      detail(await c.patch(`${cr}/locations/${l.location_id}`, body))
+      if (l.location_id === perf.location_id) detail(await c.post(`${cr}/locations/${l.location_id}/owner-step-draft`, { instruction: "Đặt ngưỡng 1 giây cho 95% request" }))
+      else detail(await c.patch(`${cr}/locations/${l.location_id}`, { conclusion: "not_related", reason: "Không liên quan tới thời gian phản hồi" }))
     }
     const ok = detail(await c.post(`${cr}/verify`))
     expect(ok.change_request.status).toBe("ready_to_submit")

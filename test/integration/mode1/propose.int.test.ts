@@ -62,7 +62,7 @@ describe("C-4 chọn skill của owner step", () => {
     expect(nfr).toContain("Response time must be 1 second instead of 2 seconds.")
   })
 
-  it("mục riêng (không step sở hữu) ⇒ skill (none — free-form section …)", async () => {
+  it("mục riêng (không step sở hữu) ⇒ skill (none - free-form section …)", async () => {
     routeCr((p) => clarifyWide(p) ?? fakeCrPropose(p))
     const { c } = await importedProject()
     const { cr, impact } = await crToImpact(c)
@@ -71,7 +71,7 @@ describe("C-4 chọn skill của owner step", () => {
     detail(await c.post(`${cr}/propose`))
     const prompts = promptsOf("# CR Propose")
     expect(prompts).toHaveLength(3)
-    expect(prompts.find((p) => p.includes(`] ${custom.path} (`))).toContain("(none — free-form section kept verbatim from the uploaded file)")
+    expect(prompts.find((p) => p.includes(`] ${custom.path} (`))).toContain("(none - free-form section kept verbatim from the uploaded file)")
   })
 
   it("phase 8: \"Sửa lại\" một vị trí mục riêng ⇒ AI soạn lại theo hướng BA (không còn CR_NO_OWNER_STEP)", async () => {
@@ -84,7 +84,7 @@ describe("C-4 chọn skill của owner step", () => {
     expect(redone.locations.find((l) => l.location_id === custom.location_id)).toMatchObject({ manual: true, verify: null })
     const prompt = promptsOf("# CR Propose").at(-1)!
     expect(prompt).toContain("free-form section): Ghi rõ nhóm họp mỗi thứ Hai")
-    expect(prompt).toContain("(none — free-form section kept verbatim from the uploaded file)")
+    expect(prompt).toContain("(none - free-form section kept verbatim from the uploaded file)")
   })
 })
 
@@ -242,16 +242,14 @@ describe("gom change group", () => {
     expect(submitted.locations.find((l) => l.location_id === br.location_id)?.group_id).toBeNull()
   })
 
-  it("sửa tay bằng new_value ⇒ op set cả phần tử; giá trị sau hiện trong new_text", async () => {
+  it("FLF-375 (nguyên tắc 6): không sửa tay bằng new_value / spine_ops ⇒ 400, đề xuất không đổi", async () => {
     const { c } = await importedProject()
     const { cr, impact } = await crToImpact(c)
     const br = impact.locations.find((l) => l.path === BR)!
     const value = { ...JSON.parse(br.current_text), statement: "Passwords must have at least 12 characters." }
-    const d = detail(await c.patch(`${cr}/locations/${br.location_id}`, { conclusion: "edit", reason: "Chính sách mới", new_value: value }))
-    const loc = d.locations.find((l) => l.location_id === br.location_id)!
-    expect(loc.proposal?.spine_ops).toEqual([{ op: "set", path: BR, value }])
-    expect(loc.proposal?.new_text).toContain("12 characters")
-    expect(loc.manual).toBe(true)
+    expect((await c.patch(`${cr}/locations/${br.location_id}`, { conclusion: "edit", reason: "Chính sách mới", new_value: value })).status).toBe(400)
+    expect((await c.patch(`${cr}/locations/${br.location_id}`, { conclusion: "edit", spine_ops: [{ op: "set", path: BR, value }] })).status).toBe(400)
+    expect(detail(await c.get(cr)).locations.find((l) => l.location_id === br.location_id)).toMatchObject({ manual: false, proposal: null })
   })
 })
 
@@ -260,7 +258,8 @@ describe("C-4 chạy lại", () => {
     const { c, projectId } = await importedProject()
     const { cr, impact } = await crToImpact(c)
     const br = impact.locations.find((l) => l.path === BR)!
-    detail(await c.patch(`${cr}/locations/${br.location_id}`, { conclusion: "comment", comment_text: "Ghi chú tay" }))
+    // Người dùng tự quyết chỗ này (giữ nguyên + lý do) ⇒ AI không đè
+    detail(await c.patch(`${cr}/locations/${br.location_id}`, { conclusion: "not_related", reason: "Khách giữ nguyên chính sách mật khẩu" }))
     detail(await c.post(`${cr}/propose`))
     expect(promptsOf("# CR Propose").flatMap(promptLocations).map((l) => l.path)).toEqual([NFR])
 
@@ -278,7 +277,7 @@ describe("C-4 chạy lại", () => {
     expect(redo).toHaveLength(1)
     expect(promptLocations(redo[0]).map((l) => l.path)).toEqual([NFR])
     expect(redo[0]).toContain("Previous proposal failed checks: Đề xuất không thay đổi gì ở phần tử này")
-    expect(d.locations.find((l) => l.location_id === br.location_id)).toMatchObject({ manual: true, proposal: { comment_text: "Ghi chú tay" } })
+    expect(d.locations.find((l) => l.location_id === br.location_id)).toMatchObject({ manual: true, conclusion: "not_related", reason: "Khách giữ nguyên chính sách mật khẩu" })
   })
 
   it("propose sai trạng thái ⇒ 409; thiếu Spine ⇒ ném; PATCH vị trí không có / thiếu kết luận / edit thiếu giá trị ⇒ lỗi", async () => {
@@ -290,7 +289,10 @@ describe("C-4 chạy lại", () => {
     const noConclusion = await c.patch(`${cr}/locations/L001`, { reason: "Chỉ ghi lý do" })
     expect(noConclusion.status).toBe(409)
     expect(noConclusion.body.error.code).toBe("CR_LOCATION_UNCONCLUDED")
-    expect((await c.patch(`${cr}/locations/L001`, { conclusion: "edit" })).status).toBe(400)
+    // Chấp nhận khi AI chưa soạn đề xuất ⇒ 409 CR_NO_PROPOSAL (gõ hướng sửa, không gõ thay AI)
+    const noProposal = await c.patch(`${cr}/locations/L001`, { conclusion: "edit" })
+    expect(noProposal.status).toBe(409)
+    expect(noProposal.body.error.code).toBe("CR_NO_PROPOSAL")
 
     await ChangeRequest.updateOne({ projectId, cr_id: crId }, { $set: { status: "draft" } })
     expect((await c.post(`${cr}/propose`)).body.error.code).toBe("CR_INVALID_TRANSITION")

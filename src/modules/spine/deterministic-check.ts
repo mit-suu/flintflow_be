@@ -19,7 +19,7 @@ import { hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
 import { actorParents, ancestorsOf, generalizationProblems, type GeneralizationProblem } from "./actor-generalization.js"
 import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "./source-hash.js"
 import type { ErdNotation, RenderContext } from "../../shared/diagram/erd-notation.js"
-import { ORIGINAL_DIAGRAM_LABELS, ORIGINAL_DIAGRAM_SECTION, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds } from "./original-diagram.js"
+import { ORIGINAL_DIAGRAM_LABELS, diagramKey, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds, originalSectionOf } from "./original-diagram.js"
 import { isVerbatim, type SectionSegments } from "./segment-hash.js"
 import { NFR_CATEGORY_LABELS, capitalize, diagramLabel, pathLabel, quotedSectionLabel } from "./human-labels.js"
 import { PROJECT_TEXT_FIELDS, SRS_TEXT_FIELDS, VALIDATION_TEXT_FIELDS, pickTextFields } from "./srs-text-fields.js"
@@ -160,6 +160,8 @@ export interface RuleProfile {
 export interface CheckOptions {
   /** Ký pháp ERD của dự án (ngoài Spine) — vào hash hình ERD của cờ `diagram_stale`. */
   erdNotation?: ErdNotation
+  /** Toàn bộ dữ liệu ngoài Spine của hình (ký pháp ERD, theme mockup màn…) — có ⇒ thay `erdNotation`. */
+  renderContext?: RenderContext
   atBaseline?: boolean
   ruleProfile?: RuleProfile
 }
@@ -172,7 +174,7 @@ export const applyRuleProfile = (candidates: FlagCandidate[], profile: RuleProfi
         .map((c) => (profile.downgrade.has(c.rule_id) && c.level === "red" ? { ...c, level: "yellow" as const } : c))
     : candidates
 
-const RENDER_STEP: Readonly<Record<string, string>> = { context: "S-2.5", usecase: "S-3.6", screen_flow: "S-4.2", erd: "S-4.5", class: "S-4.5", state_machine: "S-4.5", sequence: "S-5.4" }
+const RENDER_STEP: Readonly<Record<string, string>> = { context: "S-2.5", usecase: "S-3.6", screen_flow: "S-4.2", erd: "S-4.5", class: "S-4.5", state_machine: "S-4.5", sequence: "S-5.4", activity: "S-3.5", deployment: "S-6.1" }
 
 export const renderStepOf = (d: Pick<Diagram, "kind" | "owner_id">): string =>
   RENDER_STEP[d.kind] ?? (d.owner_id ? `S-5.3@${d.owner_id}` : "S-5.3")
@@ -333,6 +335,9 @@ const deadReferenceWhere = (spine: Spine, hit: ReferenceHit): Where => {
   switch (hit.field.path) {
     case "use_cases[].actor_ids[]":
     case "use_cases[].function_ids[]":
+    case "use_cases[].activity_nodes[].lane":
+    case "use_cases[].activity_flows[].from":
+    case "use_cases[].activity_flows[].to":
       return { section: "fixed:2.2.2", step: "S-3.2" }
     case "use_cases[].includes[]":
     case "use_cases[].extends[]":
@@ -363,6 +368,10 @@ const deadReferenceWhere = (spine: Spine, hit: ReferenceHit): Where => {
       return { section: `function:${owner}`, step: owner ? functionStep(spine, owner) : "S-5.4" }
     case "entities[].transitions[].business_rule_ids[]":
       return { section: "fixed:3.1.5", step: "S-4.5" }
+    case "deployment_nodes[].parent_id":
+    case "deployment_links[].from":
+    case "deployment_links[].to":
+      return { section: "fixed:4.1", step: "S-6.1" }
     case "business_rules[].source_validation_ids[]":
       return { section: "fixed:5.1", step: "S-7.1" }
     case "messages[].function_ids[]":
@@ -408,7 +417,7 @@ const deadReference = (spine: Spine): FlagCandidate[] =>
  */
 const printedDiagrams = (spine: Spine): Spine["diagrams"] => {
   const kept: ReadonlySet<string> = keptOriginalKinds(spine)
-  return kept.size ? spine.diagrams.filter((d) => !kept.has(d.kind)) : spine.diagrams
+  return kept.size ? spine.diagrams.filter((d) => !kept.has(diagramKey(d))) : spine.diagrams
 }
 
 const renderError = (spine: Spine): FlagCandidate[] =>
@@ -462,9 +471,9 @@ const originalDiagramStale = (spine: Spine): FlagCandidate[] =>
     .map((k) => ({
       level: "yellow",
       rule_id: "original_diagram_stale",
-      section_id: ORIGINAL_DIAGRAM_SECTION[k.diagram.kind],
+      section_id: originalSectionOf(k.diagram),
       target_id: k.custom_id,
-      message: `${ORIGINAL_DIAGRAM_LABELS[k.diagram.kind]} (hình gốc của tài liệu) không còn khớp dữ liệu — tạo change request để vẽ lại bằng FlintFlow`,
+      message: `${ORIGINAL_DIAGRAM_LABELS[k.diagram.kind]} (hình gốc của tài liệu) không còn khớp dữ liệu - tạo change request để vẽ lại bằng FlintFlow`,
       remediation_step: RENDER_STEP[k.diagram.kind]
     }))
 
@@ -511,7 +520,7 @@ export const originalTextMentionsChanged = (spine: Spine, records: readonly Sect
           rule_id: "original_text_mentions_changed",
           section_id: r.section_id,
           target_id: m.path,
-          message: `Đoạn văn giữ nguyên từ file gốc ở ${quotedSectionLabel(r.section_id, spine)} nhắc tới "${token}" — ${el ? `phần tử này đã đổi tên thành "${el.name}"` : "phần tử này đã bị xoá"}; xem lại đoạn văn, cần thì sửa bằng change request`,
+          message: `Đoạn văn giữ nguyên từ file gốc ở ${quotedSectionLabel(r.section_id, spine)} nhắc tới "${token}" - ${el ? `phần tử này đã đổi tên thành "${el.name}"` : "phần tử này đã bị xoá"}; xem lại đoạn văn, cần thì sửa bằng change request`,
           remediation_step: ownerStepOf(r.section_id, spine)
         })
       }
@@ -650,7 +659,7 @@ const sectionsAtBaseline = (spine: Spine, changes: Pick<Change, "seq" | "path" |
         rule_id: "section_awaiting_reaccept",
         section_id: s.id,
         target_id: null,
-        message: `Bước soạn ${quotedSectionLabel(s.id, spine)} đã mở lại — chạy lại bước đó rồi duyệt để gỡ`,
+        message: `Bước soạn ${quotedSectionLabel(s.id, spine)} đã mở lại - chạy lại bước đó rồi duyệt để gỡ`,
         remediation_step: awaitingOwnerOf(s.id, spine)
       }))
   ]
@@ -682,7 +691,7 @@ const screenPlaceholder = (spine: Spine, atBaseline: boolean): FlagCandidate[] =
           rule_id: "screen_placeholder",
           section_id: s.primary_function_id ? `function:${s.primary_function_id}` : "fixed:3.1.2",
           target_id: s.id,
-          message: `Màn hình "${s.name}" bị để trống mà chưa ai chốt — mở lại để mô tả, hoặc chốt "để sau" kèm lý do`,
+          message: `Màn hình "${s.name}" bị để trống mà chưa ai chốt - mở lại để mô tả, hoặc chốt "để sau" kèm lý do`,
           remediation_step: `S-5.1@${s.id}`
         }))
 }
@@ -702,7 +711,7 @@ const functionWithoutUseCase = (spine: Spine, gate: StepGate): FlagCandidate[] =
       rule_id: "function_without_uc",
       section_id: `function:${f.id}`,
       target_id: f.id,
-      message: `Chức năng nền "${f.name}" không thuộc use case nào — thiếu use case (vd cơ chế chạy theo lịch) hay thiếu liên kết?`,
+      message: `Chức năng nền "${f.name}" không thuộc use case nào - thiếu use case (vd cơ chế chạy theo lịch) hay thiếu liên kết?`,
       remediation_step: "S-3.2"
     }))
 }
@@ -835,7 +844,7 @@ const fixedTemplateGaps = (spine: Spine, layout: ReadonlySet<string>, wrappers: 
       rule_id: "template_section_absent",
       section_id: id,
       target_id: null,
-      message: `Mẫu bắt buộc không có mục ${quotedSectionLabel(id, spine)} — dữ liệu của mục này không in vào tài liệu`,
+      message: `Mẫu bắt buộc không có mục ${quotedSectionLabel(id, spine)} - dữ liệu của mục này không in vào tài liệu`,
       remediation_step: ownerStepOf(id, spine)
     })
   ),
@@ -927,7 +936,7 @@ const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
         const partners = [...new Set(a.relations)].filter((b) => b > a.id && byEntity.get(b)?.relations.includes(a.id)).sort()
         if (partners.length === 0) return []
         const names = partners.map((b) => `"${byEntity.get(b)!.name}"`).join(", ")
-        return [yellow("unresolved_many_to_many", "fixed:3.1.5", a.id, `"${a.name}" và ${names} trỏ lẫn nhau — quan hệ nhiều–nhiều cần entity trung gian`, "S-4.5")]
+        return [yellow("unresolved_many_to_many", "fixed:3.1.5", a.id, `"${a.name}" và ${names} trỏ lẫn nhau - quan hệ nhiều–nhiều cần entity trung gian`, "S-4.5")]
       })
     })
   ]
@@ -1279,10 +1288,10 @@ export const sharedAccessMessage = (spine: Pick<Spine, "actors" | "use_cases">, 
   const actors = group.actorIds.map((id) => actorName.get(id) ?? id).join(", ")
   if (group.commonParent !== null) {
     const parent = actorName.get(group.commonParent) ?? group.commonParent
-    return `Use case ${useCases} đang gắn cho ${actors} trong khi các tác nhân này đã kế thừa "${parent}" — chỉ gắn các use case này cho "${parent}", bỏ khỏi tác nhân con`
+    return `Use case ${useCases} đang gắn cho ${actors} trong khi các tác nhân này đã kế thừa "${parent}" - chỉ gắn các use case này cho "${parent}", bỏ khỏi tác nhân con`
   }
   return (
-    `Use case ${useCases} đang gắn riêng cho ${actors} — các tác nhân này cùng đăng nhập vào sản phẩm nên cần một tác nhân ` +
+    `Use case ${useCases} đang gắn riêng cho ${actors} - các tác nhân này cùng đăng nhập vào sản phẩm nên cần một tác nhân ` +
     `tổng quát (vd. "User") làm cha, và use case dùng chung chỉ gắn cho tác nhân tổng quát đó`
   )
 }
@@ -1377,7 +1386,7 @@ const systemNameMissing = (spine: Spine): FlagCandidate[] =>
           rule_id: "system_name_missing",
           section_id: "fixed:1",
           target_id: null,
-          message: `Chưa chốt tên hệ thống (tiếng Anh) — sơ đồ và bìa tài liệu đang dùng tên dự án "${spine.project.name}"`,
+          message: `Chưa chốt tên hệ thống (tiếng Anh) - sơ đồ và bìa tài liệu đang dùng tên dự án "${spine.project.name}"`,
           remediation_step: "B-2.3"
         }
       ]
@@ -1509,7 +1518,7 @@ export const runDeterministicCheck = (
     ...arrayEmpty(spine, gate),
     ...deadReference(spine),
     ...renderError(spine),
-    ...diagramStale(spine, { erdNotation: options.erdNotation }),
+    ...diagramStale(spine, options.renderContext ?? { erdNotation: options.erdNotation }),
     ...originalDiagramStale(spine),
     ...nfrMissingNumber(spine, gate),
     ...useCaseRelations(spine),

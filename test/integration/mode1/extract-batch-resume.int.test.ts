@@ -57,7 +57,7 @@ const snapshot = async (importId: string) =>
   }))
 const deducted = async (projectId: string, step: string) => Usage.countDocuments({ projectId, step_id: step, state: "deducted" })
 
-describe("I-4 — chạy tiếp theo từng lô", () => {
+describe("I-4 - chạy tiếp theo từng lô", () => {
   it("mục 3 lô, lô 2 lỗi ⇒ chạy tiếp từ lô 2: lô 1 không gọi lại, không trừ hai lần, kết quả như chạy một mạch", async () => {
     // chạy một mạch làm mốc
     const ref = await importAtExtracting(LONG)
@@ -116,7 +116,7 @@ describe("I-4 — chạy tiếp theo từng lô", () => {
   }, 60_000)
 })
 
-describe("I-4 — ước tính credit", () => {
+describe("I-4 - ước tính credit", () => {
   const PNG = buildPlaceholderPng(12, 7, 0x40)
   const EMF = Buffer.from([0x01, 0x00, 0x00, 0x00, 0x6c, 0x00, 0x00, 0x00, 0, 0, 0, 0])
   const IMAGES = {

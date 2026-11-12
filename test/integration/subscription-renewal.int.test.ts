@@ -31,7 +31,7 @@ const seedOrg = async (opts: { plan: "free" | "pro"; periodEnd: Date; balance: n
 
 const walletOf = (organizationId: mongoose.Types.ObjectId) => CreditWallet.findOne({ organizationId }).lean()
 
-describe("UC-80 — Billing Scheduler", () => {
+describe("UC-80 - Billing Scheduler", () => {
   it("Pro hết kỳ ⇒ về Free, nạp ví tới hạn mức Free, thông báo plan_expired", async () => {
     const { userId, organizationId, subId } = await seedOrg({ plan: "pro", periodEnd: new Date(NOW.getTime() - DAY), balance: 40 })
 

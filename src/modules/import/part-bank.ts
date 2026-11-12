@@ -132,7 +132,7 @@ const IEEE_SEEDS: readonly IeeeSeed[] = [
     titles: [
       "Other Requirements", "Yêu cầu khác", "Standards Compliance", "Compliance", "Tuân thủ", "Design and Implementation", "Thiết kế và triển khai",
       "Tuân thủ tiêu chuẩn", "Supporting Information", "Thông tin hỗ trợ", "Operations", "Vận hành", "Site Adaptation Requirements", "Yêu cầu thích ứng",
-      "User Documentation", "Tài liệu người dùng", "Installation", "Cài đặt", "Build and Delivery", "Build và phát hành", "Distribution", "Phân tán",
+      "User Documentation", "Tài liệu người dùng", "Installation", "Cài đặt", "Build and Delivery", "Build và phát hành",
       "Cost", "Chi phí", "Deadline", "Thời hạn", "Proof of Concept", "Thử nghiệm khái niệm", "Change Management", "Quản lý thay đổi", "AI/ML",
       "Data Retention", "Lưu giữ dữ liệu", "Frequency of Use and Access", "Tần suất và cách truy cập"
     ]
@@ -177,6 +177,8 @@ const IEEE_SEEDS: readonly IeeeSeed[] = [
     parents: ["part:ieee:requirements"]
   },
   { id: "part:ieee:verification", target: "slot:verification", titles: ["Verification", "Kiểm chứng"] },
+  // FLF-390: "Phân tán" của "Thiết kế và triển khai" — nơi in sơ đồ triển khai (trước đây giữ nguyên văn trong 5.4)
+  { id: "part:ieee:distribution", target: "slot:distribution", titles: ["Distribution", "Phân tán", "Deployment View", "Deployment Diagram", "Sơ đồ triển khai"] },
   // Tên tài liệu dùng làm heading (FPT "II. Software Requirement Specification") — chỉ là heading, giữ nguyên văn
   {
     id: "part:doc_title",
@@ -259,6 +261,7 @@ const SKILL_BY_TARGET: readonly [RegExp, string][] = [
   [/^slot:references$/, "references-list"],
   [/^slot:apportioning$/, "requirement-apportioning"],
   [/^slot:verification$/, "verification-matrix"],
+  [/^slot:distribution$/, "nfr-quality-attributes"],
   [/^(fixed:1|slot:(vision|goals|scope|context|platforms))$/, "product-overview"],
   [/^slot:high_rules$/, "high-level-rules"],
   [/^(fixed:2\.|group:2)/, "actors-and-usecases"],

@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
 
 import { crToReady, crToReview, newCr, detail, importedProject, lockedPaths, resetCrMock, type Mode1Client } from "../../helpers/mode1-cr-p4.js"
-import { lockPaths } from "../../../src/modules/change-request/lock.service.js"
+import { SpineLock } from "../../../src/modules/change-request/spine-lock.model.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 import { ChangeGroup } from "../../../src/modules/change-request/change-group.model.js"
 import { ChangeLocation } from "../../../src/modules/change-request/change-location.model.js"
@@ -89,7 +89,7 @@ describe("C-6 BA xác nhận ⇒ ghi ngay (FLF-330)", () => {
   })
 })
 
-describe("Luồng cũ (CR tạo trước FLF-330 còn in_review) — duyệt từng group, sửa lại, đóng vẫn chạy", () => {
+describe("Luồng cũ (CR tạo trước FLF-330 còn in_review) - duyệt từng group, sửa lại, đóng vẫn chạy", () => {
   it("từ chối G02 ⇒ mở khoá phần tử của G02, G01 vẫn khoá; duyệt G01 ⇒ written", async () => {
     const { c, projectId, seeded } = await importedProject()
     const { crId, cr, submitted } = await legacyInReview(c, projectId)
@@ -99,7 +99,7 @@ describe("Luồng cũ (CR tạo trước FLF-330 còn in_review) — duyệt t�
     const rejected = detail(await decide(c, cr, g2.group_id, "rejected", REASON))
     expect(rejected.change_request.status).toBe("in_review")
     expect(rejected.groups.find((g) => g.group_id === g2.group_id)).toMatchObject({ decision: "rejected", reason: REASON, decided_by: seeded.userId })
-    expect(await lockedPaths(projectId, crId)).toEqual(pathsOf(g1.group_id))
+    expect(await lockedPaths(projectId, crId)).toEqual([]) // FLF-375: không khoá
     expect(await DocVersion.countDocuments({ projectId })).toBe(1)
 
     const written = detail(await decide(c, cr, g1.group_id, "approved"))
@@ -132,7 +132,7 @@ describe("Luồng cũ (CR tạo trước FLF-330 còn in_review) — duyệt t�
     expect(revised.change_request).toMatchObject({ status: "proposing", submitted_at: null })
     expect(revised.groups).toEqual([])
     expect(revised.locations.every((l) => l.conclusion === null && l.proposal === null && l.verify === null && l.group_id === null && l.redo_count === 0 && !l.manual)).toBe(true)
-    expect(await lockedPaths(projectId, crId)).toEqual(submitted.locations.map((l) => l.path).sort())
+    expect(await lockedPaths(projectId, crId)).toEqual([]) // FLF-375: không khoá
     expect(await ChangeGroup.countDocuments({ projectId, cr_id: crId })).toBe(0)
 
     const again = detail(await c.post(`${cr}/propose`))
@@ -140,17 +140,18 @@ describe("Luồng cũ (CR tạo trước FLF-330 còn in_review) — duyệt t�
     expect(detail(await c.post(`${cr}/verify`)).change_request.status).toBe("ready_to_submit")
   })
 
-  it("revise khi phần tử đã bị CR khác giành ⇒ 409 PATH_LOCKED; close ⇒ rejected, mở hết khoá, không tạo version", async () => {
+  it("FLF-375: dòng khoá cũ của CR khác không chặn revise (không còn khoá chỗ đang sửa)", async () => {
+    const { c, projectId } = await importedProject()
+    const { cr, submitted } = await legacyInReview(c, projectId)
+    for (const g of submitted.groups) detail(await decide(c, cr, g.group_id, "rejected", REASON))
+    await SpineLock.create({ projectId, path: "business_rules[id=BR-01]", cr_id: "CR-777" })
+    expect(detail(await c.post(`${cr}/revise`)).change_request.status).toBe("proposing")
+  })
+
+  it("mọi group bị từ chối rồi close ⇒ rejected, không tạo version", async () => {
     const { c, projectId, seeded } = await importedProject()
     const { crId, cr, submitted } = await legacyInReview(c, projectId)
     for (const g of submitted.groups) detail(await decide(c, cr, g.group_id, "rejected", REASON))
-    await lockPaths(projectId, "CR-777", ["business_rules[id=BR-01]"])
-    const res = await c.post(`${cr}/revise`)
-    expect(res.status).toBe(409)
-    expect(res.body.error.code).toBe("PATH_LOCKED")
-    expect(await ChangeGroup.countDocuments({ projectId, cr_id: crId, decision: "rejected" })).toBe(2)
-    expect(await ChangeLocation.countDocuments({ projectId, cr_id: crId, proposal: { $ne: null } })).toBe(2)
-
     const closed = detail(await c.post(`${cr}/close`, { reason: "Khách hàng bỏ yêu cầu" }))
     expect(closed.change_request).toMatchObject({ status: "rejected", closed_reason: "Khách hàng bỏ yêu cầu", decided_by: seeded.userId })
     expect(await lockedPaths(projectId, crId)).toEqual([])

@@ -73,7 +73,7 @@ beforeEach(() => {
 
 // ─── UC-33 ──────────────────────────────────────────────────────────
 
-describe("UC-33 — hoàn tác thay đổi gần nhất", () => {
+describe("UC-33 - hoàn tác thay đổi gần nhất", () => {
   it("hoàn tác ⇒ Spine về giá trị trước lô, lịch sử giữ nguyên và thêm lô revert", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
@@ -155,7 +155,7 @@ describe("UC-33 — hoàn tác thay đổi gần nhất", () => {
 
 // ─── UC-34 ──────────────────────────────────────────────────────────
 
-describe("UC-34 — hoà giải section stale", () => {
+describe("UC-34 - hoà giải section stale", () => {
   it("không có section stale ⇒ preview rỗng, không gọi AI, không ghi", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
@@ -271,7 +271,7 @@ describe("UC-34 — hoà giải section stale", () => {
 
 // ─── UC-35 ──────────────────────────────────────────────────────────
 
-describe("UC-35 — định nghĩa glossary của SRS", () => {
+describe("UC-35 - định nghĩa glossary của SRS", () => {
   it("trước baseline: thêm thuật ngữ chuẩn ⇒ ghi vào glossary", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
@@ -308,7 +308,7 @@ describe("UC-35 — định nghĩa glossary của SRS", () => {
 
 // ─── UC-37 ──────────────────────────────────────────────────────────
 
-describe("UC-37 — xếp mức ưu tiên requirement", () => {
+describe("UC-37 - xếp mức ưu tiên requirement", () => {
   it("tác giả gán Must/Should/Could/Won't cho function và NFR", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
@@ -363,7 +363,7 @@ describe("UC-37 — xếp mức ưu tiên requirement", () => {
 
 // ─── UC-38 ──────────────────────────────────────────────────────────
 
-describe("UC-38 — Analyst nộp baseline SRS để duyệt", () => {
+describe("UC-38 - Analyst nộp baseline SRS để duyệt", () => {
   it("còn cờ đỏ ⇒ 422 BASELINE_BLOCKED, không có baseline (BR-04)", async () => {
     const seeded = await seedFixture("minimal")
     const analyst = client(seeded, await join(seeded, "analyst"))
@@ -414,7 +414,7 @@ describe("UC-38 — Analyst nộp baseline SRS để duyệt", () => {
 
 // ─── UC-39 ──────────────────────────────────────────────────────────
 
-describe("UC-39 — Lead duyệt baseline SRS", () => {
+describe("UC-39 - Lead duyệt baseline SRS", () => {
   it("Lead tự duyệt khi 0 cờ đỏ ⇒ baseline 1.0 được khoá", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
@@ -553,7 +553,7 @@ describe("UC-39 — Lead duyệt baseline SRS", () => {
 
 // ─── UC-47 ──────────────────────────────────────────────────────────
 
-describe("UC-47 — Analyst sửa SRS theo comment từ chối baseline", () => {
+describe("UC-47 - Analyst sửa SRS theo comment từ chối baseline", () => {
   /** Section đầu tiên có nội dung của bản nháp — chỗ ghim comment. */
   const firstSection = async (api: ReturnType<typeof client>): Promise<{ id: string }> => {
     const res = await api.get("/document")

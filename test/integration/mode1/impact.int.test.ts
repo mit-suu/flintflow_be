@@ -39,7 +39,7 @@ describe("C-3 trên Spine", () => {
     // giá trị hiện tại của phần tử đi kèm; chưa kết luận
     expect(byPath.get("use_cases[id=UC-01]")?.current_text).toContain('"id": "UC-01"')
     expect(d.locations.every((l) => l.conclusion === null && l.group_id === null)).toBe(true)
-    expect(await lockedPaths(projectId, crId)).toEqual(d.locations.map((l) => l.path).sort())
+    expect(await lockedPaths(projectId, crId)).toEqual([]) // FLF-375: không khoá
   })
 
   it("từ khoá tìm trong mọi phần tử (ranh giới từ); phần tử nhắc mã đích ⇒ mention", async () => {
@@ -67,7 +67,7 @@ describe("C-3 trên Spine", () => {
     const d = detail(await c.post(`${cr}/impact`))
     expect(d.locations.length).toBeGreaterThan(0)
     for (const l of d.locations) expect(l).toMatchObject({ section_id: "fixed:2.2.2", found_by: ["spine_link"], entity_paths: ["fixed:2.2.2"] })
-    expect(await lockedPaths(projectId, crId)).toEqual(d.locations.map((l) => l.path).sort())
+    expect(await lockedPaths(projectId, crId)).toEqual([]) // FLF-375: không khoá
 
     // Đích không còn phần tử nào + từ khoá không khớp ⇒ 0 vị trí ⇒ 409 CR_NO_LOCATIONS (mode 1 v3: không còn "chạy step")
     await ChangeRequest.updateOne({ projectId, cr_id: crId }, { $set: { targets: { entity_paths: ["actors[id=A99]"], keywords: ["zzzqqq"] } } })
@@ -77,7 +77,7 @@ describe("C-3 trên Spine", () => {
     expect(res.body.error.message).not.toContain("step")
     expect(res.body.meta.empty_sections).toEqual([])
     // lượt trước đã khoá use case — lượt hỏng không được ghi/đổi gì
-    expect(await lockedPaths(projectId, crId)).toEqual(d.locations.map((l) => l.path).sort())
+    expect(await lockedPaths(projectId, crId)).toEqual([]) // FLF-375: không khoá
   })
 
   it("mục FPT còn trống mà đổ được bằng mảng ⇒ vị trí thêm mới `arr[]`, khoá cả mảng (phương án B)", async () => {
@@ -94,7 +94,7 @@ describe("C-3 trên Spine", () => {
       current_text: "[]", // giá trị của vị trí là cả mảng ⇒ C-5 biết mảng có bị ai khác thêm/bớt không
       conclusion: null
     })
-    expect(await lockedPaths(projectId, crId)).toEqual(["other_requirements[]"])
+    expect(await lockedPaths(projectId, crId)).toEqual([]) // FLF-375: không khoá
   })
 })
 
@@ -107,7 +107,7 @@ describe("C-3 tìm lại", () => {
     await ChangeRequest.updateOne({ projectId, cr_id: crId }, { $set: { targets: { entity_paths: ["functions[id=FR-3.2.2]"], keywords: [] } } })
     const again = detail(await c.post(`${cr}/impact`))
     expect(again.locations[0]).toMatchObject({ location_id: "L001", path: "functions[id=FR-3.2.2]" })
-    expect(await lockedPaths(projectId, crId)).toEqual(again.locations.map((l) => l.path).sort())
+    expect(await lockedPaths(projectId, crId)).toEqual([]) // FLF-375: không khoá
     expect(await ChangeLocation.countDocuments({ projectId, cr_id: crId })).toBe(again.locations.length)
   })
 

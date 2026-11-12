@@ -42,7 +42,7 @@ export class RejectionCommentsOpenError extends ApiError {
   constructor(commentIds: string[]) {
     super(
       422,
-      `Còn ${commentIds.length} comment của lượt từ chối trước chưa xử lý — xử lý hết rồi gửi lại.`,
+      `Còn ${commentIds.length} comment của lượt từ chối trước chưa xử lý - xử lý hết rồi gửi lại.`,
       REJECTION_COMMENTS_OPEN
     )
     this.commentIds = commentIds
@@ -97,7 +97,7 @@ export const submitForApproval = async (actor: ApprovalActor, baseVersion: numbe
 
   const current = spine.baseline_submission
   if (current?.status === "pending") {
-    throw new ApiError(409, "Tài liệu đang chờ Lead duyệt — không gửi lại được.", BASELINE_ALREADY_SUBMITTED)
+    throw new ApiError(409, "Tài liệu đang chờ Lead duyệt - không gửi lại được.", BASELINE_ALREADY_SUBMITTED)
   }
 
   // Lượt nộp lại sau khi bị từ chối: mọi comment Lead đã ghim phải được xử lý trước (UC-47).

@@ -4,7 +4,7 @@ import type { LayoutEntry } from "./template-profile.model.js"
 
 const e = (order: number, section_id: string, heading_text: string, level: number): LayoutEntry => ({ order, section_id, heading_text, level })
 
-describe("templateWrapperIds (FLF-278 — heading bao của mẫu bắt buộc)", () => {
+describe("templateWrapperIds (FLF-278 - heading bao của mẫu bắt buộc)", () => {
   it("mục riêng có heading con sâu hơn ngay sau ⇒ heading bao; mục riêng lá / mục FPT / nhóm thì không", () => {
     const layout = [
       e(0, "fixed:1", "1 Introduction", 1),

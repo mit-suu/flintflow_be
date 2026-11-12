@@ -21,8 +21,8 @@ const FIXTURE = load("spine-fixture-19-screens.json")
 
 describe("REFERENCE_FIELDS", () => {
   it("đủ 24 field của srs-spine.md §4.1, không trùng", () => {
-    expect(REFERENCE_FIELDS).toHaveLength(31)
-    expect(new Set(REFERENCE_FIELDS.map((f) => f.path)).size).toBe(31)
+    expect(REFERENCE_FIELDS).toHaveLength(37)
+    expect(new Set(REFERENCE_FIELDS.map((f) => f.path)).size).toBe(37)
   })
 
   it("mọi field đều được iterate trên fixture đầy đủ (trừ flags rỗng)", () => {

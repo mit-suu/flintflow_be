@@ -64,7 +64,7 @@ describe("hồ sơ luật mode 1", () => {
     expect(out.filter((c) => c.level === "red").map((c) => c.rule_id).sort()).toEqual(["dead_reference", "diagram_stale", "render_error", "unconfirmed_assumption"])
   })
 
-  it("Spine rỗng (import chưa trích được gì): mode 1 không có cờ đỏ — mục FPT thiếu không bắt buộc, chỉ vào gap report", () => {
+  it("Spine rỗng (import chưa trích được gì): mode 1 không có cờ đỏ - mục FPT thiếu không bắt buộc, chỉ vào gap report", () => {
     const empty = createEmptySpine({ name: "Lumen" })
     const mode2 = runDeterministicCheck(empty, [], { atBaseline: true })
     expect(mode2.some((f) => f.rule_id === "array_empty" && f.level === "red")).toBe(true)
@@ -96,7 +96,7 @@ describe("hồ sơ luật mode 1", () => {
   })
 })
 
-describe("findingOps — AI semantic check chỉ ra vàng", () => {
+describe("findingOps - AI semantic check chỉ ra vàng", () => {
   const spine = (flags: Flag[] = []): Spine => ({ ...structuredClone(FULL), flags, spine_version: 7 })
 
   it("mọi finding ⇒ op thêm cờ vàng rule import_semantic, remediation C-1, id tiếp theo id lớn nhất", () => {
@@ -193,7 +193,7 @@ describe("tiện ích check", () => {
   })
 })
 
-describe("1.11 map-reduce — chia lô, phạm vi, kiểm chéo", () => {
+describe("1.11 map-reduce - chia lô, phạm vi, kiểm chéo", () => {
   const block = (n: number, section: string | null, text: string, mentions: CheckBlock["mentions"] = []): CheckBlock => ({
     block_id: `B${String(n).padStart(4, "0")}`,
     section_id: section,

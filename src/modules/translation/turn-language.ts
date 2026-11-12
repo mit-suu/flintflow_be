@@ -43,7 +43,7 @@ const spineSeeds = async (projectId: string, locale: UserLocale): Promise<Glossa
     const doc = await SpineModel.findOne({ projectId }, { glossary: 1 }).lean<{ glossary?: { term: string; term_native?: string }[] }>()
     return seedEntriesOf(locale, doc?.glossary)
   } catch (err) {
-    console.warn("[documentLanguageForTurn] Không đọc được glossary của Spine — chỉ dùng glossary đã lưu:", err)
+    console.warn("[documentLanguageForTurn] Không đọc được glossary của Spine - chỉ dùng glossary đã lưu:", err)
     return []
   }
 }
@@ -58,7 +58,7 @@ export const documentLanguageForTurn = async (projectId: string): Promise<TurnDo
     const [seeds, stored] = await Promise.all([spineSeeds(projectId, locale), repository.loadGlossary(projectId, locale)])
     return { locale, source, glossary: mergeGlossary(seeds, stored) }
   } catch (err) {
-    console.warn("[documentLanguageForTurn] Không đọc được ngôn ngữ tài liệu — lượt này không kèm bản dịch:", err)
+    console.warn("[documentLanguageForTurn] Không đọc được ngôn ngữ tài liệu - lượt này không kèm bản dịch:", err)
     return null
   }
 }

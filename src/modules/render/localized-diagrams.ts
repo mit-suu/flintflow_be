@@ -12,6 +12,8 @@
  *   case (`members`), phần không khớp dùng ảnh gốc.
  * - Wireframe model vẽ: thay chữ trên widget theo đơn vị `diagrams[id=…].labels` (`diagram/salt-text.ts`), dòng tên màn
  *   theo tên màn đã dịch; nhãn chưa dịch giữ chữ gốc.
+ * - Mockup SVG (FLF-410): thay chữ trong ScreenSpec đã lưu theo đơn vị `labels` của phần đầu màn rồi vẽ lại bằng code
+ *   (`renderScreenMockup`, cùng theme / nền tảng). Chữ dịch làm vỡ bố cục ⇒ dùng ảnh gốc.
  */
 
 import { createHash } from "node:crypto"
@@ -20,6 +22,12 @@ import type { RenderContext } from "../../shared/diagram/erd-notation.js"
 import { RENDERERS, type DiagramKind, type RenderedPart } from "../diagram/renderers/index.js"
 import { diagramLabelsFor } from "../diagram/renderers/labels.js"
 import { isWireframeSalt, localizeSalt } from "../diagram/salt-text.js"
+import { MOCKUP_MARGIN, renderScreenMockup, screenSpecOf } from "../diagram/renderers/screen-mockup.js"
+import { mapSpecText } from "../diagram/screen-spec.js"
+import { resolveScreenTheme } from "../../shared/diagram/screen-theme.js"
+import { checkScene } from "../../shared/diagram/svg-geometry.js"
+import { svgTitleOf } from "../diagram/renderers/common.js"
+import { systemName } from "../spine/system-name.js"
 import type { DiagramSource } from "../diagram/localized-diagram.service.js"
 
 const memberKey = (part: RenderedPart): string => (part.members ?? []).join(",")
@@ -99,7 +107,36 @@ export const localizeDiagrams = (
     return found
   }
 
+  /** Mockup: spec đã lưu ⇒ chữ dịch ⇒ vẽ lại cùng nền tảng; không có spec / vỡ bố cục ⇒ nguồn gốc. */
+  const localizedMockup = (source: Diagram): string => {
+    const stored = screenSpecOf(source.source)
+    if (!stored) return source.source
+    const words = wireframeText.get(source.id) ?? wireframeText.get(source.id.replace(/-[0-9]+$/, ""))
+    const spec = mapSpecText(stored.spec, (text) => words?.get(text) ?? text)
+    const name = screenName(view, source.owner_id) ?? ""
+    const originalName = screenName(canonical, source.owner_id) ?? ""
+    const title = (svgTitleOf(source.source) ?? "").replace(originalName, name)
+    const scene = renderScreenMockup({
+      spec,
+      theme: resolveScreenTheme(context.screenTheme, canonical.project.form_factor),
+      platform: stored.platform,
+      systemName: systemName(view.project),
+      screenName: name,
+      title,
+      contentHash: stored.contentHash,
+      mode: stored.mode,
+      allowedPlatforms: stored.allowed
+    })
+    const issues = checkScene(scene, { allowBends: true })
+    if (issues.length > 0) {
+      console.warn(`[diagram] Bản ${language} của ${source.id} vi phạm bố cục - dùng ảnh gốc: ${issues.map((i) => i.message).join("; ")}`)
+      return source.source
+    }
+    return scene.toSvg(title, MOCKUP_MARGIN)
+  }
+
   const localized = (source: Diagram): string => {
+    if (source.kind === "screen_layout" && source.format === "svg") return localizedMockup(source)
     if (source.format === "puml" && isWireframeSalt(source.source)) {
       const title = screenName(canonical, source.owner_id)
       const translatedTitle = screenName(view, source.owner_id)
@@ -114,7 +151,7 @@ export const localizeDiagrams = (
     if (!part || part.format !== source.format) return source.source
     // Chữ dịch dài hơn làm vỡ bố cục SVG ⇒ tài liệu dùng ảnh gốc, không in hình đè chữ
     if (part.issues?.length) {
-      console.warn(`[diagram] Bản ${language} của ${source.id} vi phạm bố cục — dùng ảnh gốc: ${part.issues.map((i) => `${i.rule} ${i.message}`).join("; ")}`)
+      console.warn(`[diagram] Bản ${language} của ${source.id} vi phạm bố cục - dùng ảnh gốc: ${part.issues.map((i) => `${i.rule} ${i.message}`).join("; ")}`)
       return source.source
     }
     return part.source

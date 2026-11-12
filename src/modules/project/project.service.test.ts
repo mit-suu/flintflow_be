@@ -169,7 +169,7 @@ describe("createProject", () => {
     expect(mocks.Project.create).toHaveBeenCalled()
   })
 
-  it("FLF-335: source quyết định mode — mới không mẫu ⇒ fpt; mới có mẫu bắt buộc ⇒ import + fixed; có sẵn ⇒ import; client cũ customer_template không còn 501", async () => {
+  it("FLF-335: source quyết định mode - mới không mẫu ⇒ fpt; mới có mẫu bắt buộc ⇒ import + fixed; có sẵn ⇒ import; client cũ customer_template không còn 501", async () => {
     expect(projectService.resolveProjectStart("fpt", { source: "new", has_required_template: false })).toEqual({ mode: "fpt", start_kind: "new", has_required_template: false, template_intent: null })
     expect(projectService.resolveProjectStart("fpt", { source: "new", has_required_template: true })).toEqual({ mode: "import", start_kind: "new", has_required_template: true, template_intent: "fixed" })
     expect(projectService.resolveProjectStart("fpt", { source: "existing" })).toEqual({ mode: "import", start_kind: "existing", has_required_template: null, template_intent: null })
@@ -186,7 +186,7 @@ describe("createProject", () => {
   })
 })
 
-describe("resolveProjectStart — hộp Tạo dự án hai ô", () => {
+describe("resolveProjectStart - hộp Tạo dự án hai ô", () => {
   it("không SRS ⇒ fpt; có SRS ⇒ import + fixed; có SRS + tick Bổ sung ⇒ import + free; has_srs_file thắng source / mode", () => {
     expect(projectService.resolveProjectStart("fpt", { has_srs_file: false })).toEqual({ mode: "fpt", start_kind: "new", has_required_template: false, template_intent: null })
     expect(projectService.resolveProjectStart("fpt", { has_srs_file: true })).toEqual({ mode: "import", start_kind: "existing", has_required_template: null, template_intent: "fixed" })
@@ -199,7 +199,7 @@ describe("resolveProjectStart — hộp Tạo dự án hai ô", () => {
   })
 })
 
-describe("createProject — ngôn ngữ tài liệu (FLF-265)", () => {
+describe("createProject - ngôn ngữ tài liệu (FLF-265)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.Project.create.mockResolvedValue({ id: PROJECT })

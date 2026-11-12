@@ -146,7 +146,7 @@ const translateAll = async (projectId: string): Promise<void> => {
   await saveTranslations(projectId, "vi", "en", entries, "machine")
 }
 
-describe("FLF-334 B — tải theo ngôn ngữ còn lại (mode 2)", () => {
+describe("FLF-334 B - tải theo ngôn ngữ còn lại (mode 2)", () => {
   it("dự án en, lang=vi còn thiếu ⇒ 409 TRANSLATION_INCOMPLETE { locale, missing, total } khớp /translations/status?locale=vi", async () => {
     const status = await api.get("/translations/status?locale=vi")
     expect(status.status).toBe(200)

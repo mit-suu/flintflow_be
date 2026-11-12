@@ -28,13 +28,13 @@ describe("import-media (mode 1 v3 phase 5, T3)", () => {
     expect(embeddableImage(Buffer.alloc(0))).toBe(false)
   })
 
-  it("embeddableMediaPart: theo đuôi part Word đặt (png / jpg / jpeg) — không mở file", () => {
+  it("embeddableMediaPart: theo đuôi part Word đặt (png / jpg / jpeg) - không mở file", () => {
     for (const part of ["word/media/image1.png", "word/media/image2.JPG", "word/media/image3.jpeg"]) expect(embeddableMediaPart(part)).toBe(true)
     for (const part of ["word/media/image4.emf", "word/media/image5.wmf", "word/media/image6.gif", "word/media/png"]) expect(embeddableMediaPart(part)).toBe(false)
   })
 })
 
-describe("readImportImage — giữ lý do khi không đọc được ảnh gốc", () => {
+describe("readImportImage - giữ lý do khi không đọc được ảnh gốc", () => {
   beforeEach(async () => {
     clearImportMediaCache()
     files.clear()

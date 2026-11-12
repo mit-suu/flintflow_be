@@ -70,6 +70,7 @@ import { buildLayoutSections, type TemplateLayout } from "./layout-sections.js"
 // Mode 1 v2 (FLF-184): layout của file người dùng upload — chỉ đọc
 import { TemplateProfile } from "../import/template-profile.model.js"
 import { Project } from "../project/project.model.js"
+import { screenMockupsOf } from "../../shared/diagram/screen-theme.js"
 import { MEDIA_PREFIX, isMediaId, loadImportMedia, mediaId } from "./import-media.js"
 import type {
   Block,
@@ -331,7 +332,7 @@ const materializeImages = (doc: RenderedDocument, resolve: (diagramId: string) =
     const png = resolve(id)
     if (png) return { ...b, png }
     // Ảnh gốc không nhúng được (EMF/WMF, file gốc không còn) ⇒ chỗ giữ ảnh + chú thích nói đúng lý do
-    if (isMediaId(id)) return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: `${b.caption ? `${b.caption} — ` : ""}${assembleTextFor(language).mediaNotEmbedded}` }
+    if (isMediaId(id)) return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: `${b.caption ? `${b.caption} - ` : ""}${assembleTextFor(language).mediaNotEmbedded}` }
     return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: pendingImageCaption(b.caption, id, language) }
   }
   return { ...doc, sections: doc.sections.map((s) => ({ ...s, blocks: s.blocks.map(materialize) })) }
@@ -344,7 +345,7 @@ const resolveLoaded =
 
 const warnMissingImages = (images: ImageLoadResult, target: string): void => {
   if (images.missing.length > 0) {
-    console.warn(`[assemble] ${images.missing.length} diagram PNG chưa tải được cho ${target} (${images.missing.join(", ")}) — tài liệu dùng placeholder tới khi có ảnh`)
+    console.warn(`[assemble] ${images.missing.length} diagram PNG chưa tải được cho ${target} (${images.missing.join(", ")}) - tài liệu dùng placeholder tới khi có ảnh`)
   }
 }
 
@@ -640,12 +641,13 @@ export type DocumentTranslationMeta = z.infer<typeof documentTranslationMetaSche
 export const loadTemplateLayout: TemplateLoader = async (projectId) => {
   const profile = (await TemplateProfile.findOne(
     { projectId },
-    { layout: 1, language: 1, legacy_record_of_changes: 1, non_screen_table: 1, function_originals: 1, section_slices: 1, section_segments: 1 },
+    { layout: 1, language: 1, template_family: 1, legacy_record_of_changes: 1, non_screen_table: 1, function_originals: 1, section_slices: 1, section_segments: 1 },
     { lean: true }
   )) as
     | {
         layout?: TemplateLayout["layout"]
         language?: string
+        template_family?: string
         legacy_record_of_changes?: TemplateLayout["legacyRecord"]
         non_screen_table?: string[]
         function_originals?: TemplateLayout["functionOriginals"]
@@ -655,15 +657,19 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
     | null
   if (!profile?.layout?.length) return null
   // Chế độ 3 (mẫu bắt buộc, FLF-335): in đúng các mục của mẫu, không chèn mục FlintFlow ngoài mẫu (business-flow 2.10)
-  const project = (await Project.findById(projectId, { template_intent: 1 }, { lean: true })) as { template_intent?: string | null } | null
+  const project = (await Project.findById(projectId, { template_intent: 1, screenMockups: 1 }, { lean: true })) as { template_intent?: string | null; screenMockups?: unknown } | null
+  const mockups = screenMockupsOf(project).filter((m) => m.enabled)
   return {
     ...(project?.template_intent === "fixed" ? { fixedTemplate: true } : {}),
     layout: profile.layout,
     language: profile.language ?? "en",
+    ...(profile.template_family ? { family: profile.template_family } : {}),
     legacyRecord: profile.legacy_record_of_changes ?? [],
     // FLF-252: import trước khi có các field này ⇒ không truyền, bản in giữ cách cũ
     ...(profile.non_screen_table?.length ? { nonScreenTable: profile.non_screen_table } : {}),
     ...(profile.function_originals?.length ? { functionOriginals: profile.function_originals } : {}),
+    // FLF-410: màn đã bật mockup thay ảnh gốc
+    ...(mockups.length ? { screenMockups: mockups } : {}),
     ...(profile.section_slices?.length ? { sectionSlices: profile.section_slices } : {}),
     // FLF-366: import trước khi có đoạn nguyên văn ⇒ không truyền, bản in như cũ
     ...(profile.section_segments?.length ? { sectionSegments: profile.section_segments } : {})
@@ -911,7 +917,7 @@ export async function assemble(
       findings: [...missingImageFindings(stillMissing), ...omittedTemplateSectionFindings(record, omitted)]
     }
   }
-  if (cached) console.warn(`[render] cache tài liệu v${record.spine_version} của project ${projectId} không hợp khuôn — dựng lại`)
+  if (cached) console.warn(`[render] cache tài liệu v${record.spine_version} của project ${projectId} không hợp khuôn - dựng lại`)
 
   const { projectId: _projectId, ...spine } = record
   const changes = await spineRepository.listChanges(projectId)
@@ -1026,7 +1032,7 @@ const loadDraftCache = async (
   ])
   if (cached === null) return null
   if (cached === "invalid") {
-    console.warn(`[render] cache tài liệu của project ${projectId} không hợp khuôn — dựng lại`)
+    console.warn(`[render] cache tài liệu của project ${projectId} không hợp khuôn - dựng lại`)
     return null
   }
   return { doc: await rehydrateImages(cached.doc, projectId, load), assembledAtVersion: cached.assembledAtVersion }
@@ -1205,7 +1211,7 @@ const getBaselineDocument = async (
   const cached = await readCachedDocument(cacheFilter)
   if (cached !== null && cached !== "invalid") return rehydrateImages(cached.doc, projectId, deps.loadDiagramPng)
   // Cache hỏng: snapshot của baseline là bất biến nên dựng lại từ nó luôn đúng — không trả lỗi cho người dùng
-  if (cached === "invalid") console.warn(`[render] cache baseline ${baselineIdStr} của project ${projectId} không hợp khuôn — dựng lại`)
+  if (cached === "invalid") console.warn(`[render] cache baseline ${baselineIdStr} của project ${projectId} không hợp khuôn - dựng lại`)
 
   const baseline = await findBaseline(projectId, baselineIdStr)
   const spine = baselineSpine(baseline.snapshot)
@@ -1291,7 +1297,7 @@ const loadStoredTranslated = async (projectId: string, key: TranslatedKey): Prom
   if (!row) return null
   const parsed = storedTranslatedSchema.safeParse(row)
   if (!parsed.success) {
-    console.warn(`[render] bản dịch ${key.locale} (${key.view}) đã lưu của project ${projectId} không hợp khuôn — dựng lại`)
+    console.warn(`[render] bản dịch ${key.locale} (${key.view}) đã lưu của project ${projectId} không hợp khuôn - dựng lại`)
     return null
   }
   const { doc, translation, localized_refs, image_language } = parsed.data

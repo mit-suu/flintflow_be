@@ -12,6 +12,7 @@ import { Mode1Error } from "../import/mode1.errors.js"
 import {
   addMaterialRequestSchema,
   amendRequestSchema,
+  crMessageRequestSchema,
   answersRequestSchema,
   closeRequestSchema,
   createChangeRequestSchema,
@@ -33,6 +34,7 @@ import * as crService from "./change-request.service.js"
 import * as extractionService from "./extraction.service.js"
 import type { IRequirementExtraction } from "./requirement-extraction.model.js"
 import { amendCr, answerClarification, runClarify } from "./clarify.service.js"
+import { handleCrMessage } from "./cr-message.service.js"
 import { runImpact } from "./cr-impact.service.js"
 import { decideGroup } from "./decision.service.js"
 import { patchLocation } from "./location.service.js"
@@ -42,6 +44,8 @@ import { runVerify } from "./verify.service.js"
 import { assertConvertible, markConverted } from "../comment/comment.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { TransactionRejectedError } from "../spine/op-engine.js"
+import * as spineRepository from "../spine/spine.repository.js"
 
 const loadCr = async (req: Request): Promise<{ auth: Mode1Auth; cr: IChangeRequest }> => {
   const auth = await authorizeMode1(req)
@@ -175,6 +179,14 @@ export const amend = mode1Handler(async (req, res) => {
   return detail(res, cr)
 })
 
+/** FLF-375: tin nhắn trong lúc CR mở — lệnh sửa gộp vào CR, câu hỏi được trả lời (không thành yêu cầu bổ sung). */
+export const message = mode1Handler(async (req, res) => {
+  const { auth, cr } = await loadCr(req)
+  const body = parseInput(crMessageRequestSchema, req.body)
+  const outcome = await handleCrMessage(cr, auth.userId, body.text, body.language)
+  return sendSuccess(res, 200, { ...(await crService.toDetail(cr)), message: outcome })
+})
+
 export const listCrs = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const query = parseInput(listChangeRequestsQuerySchema, req.query)
@@ -198,7 +210,33 @@ export const answers = mode1Handler(async (req, res) => {
 export const impact = action((cr) => runImpact(cr))
 export const propose = action((cr, auth) => runPropose(cr, auth.userId))
 export const verify = action((cr, auth) => runVerify(cr, auth.userId))
-export const submit = action((cr, auth) => crService.submitCr(cr, auth.userId))
+/**
+ * C-6 xác nhận & ghi (BF §3.2): luật Spine gãy trên nội dung hiện tại ⇒ **cờ đỏ trước khi ghi** (chạy lại kiểm, không ném
+ * lỗi thô); người khác ghi đúng lúc này (lệch spine_version) ⇒ "ai xác nhận trước thì ghi trước" — kiểm lại trên bản mới
+ * một lần nữa rồi ghi.
+ */
+export const submit = action(async (cr, auth) => {
+  try {
+    await crService.submitCr(cr, auth.userId)
+  } catch (err) {
+    if (err instanceof TransactionRejectedError) {
+      cr.submitted_at = null
+      await runVerify(cr, auth.userId)
+      return
+    }
+    if (err instanceof ApiError && err.code === spineRepository.SPINE_VERSION_CONFLICT) {
+      await crService.submitCr(cr, auth.userId)
+      return
+    }
+    throw err
+  }
+})
+
+/** BF §3.2: mục đang có bản sửa chưa xác nhận của CR chưa đóng — hiện trong tài liệu cho mọi người. */
+export const listPendingSections = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  return sendSuccess(res, 200, await crService.listPendingSections(auth.projectId))
+})
 export const revise = action((cr) => crService.reviseCr(cr))
 
 export const updateLocation = mode1Handler(async (req, res) => {

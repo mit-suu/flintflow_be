@@ -65,7 +65,8 @@ export interface IExtractionDraft extends Document {
    * khỏi (không đọc lại). Finalize: mọi ảnh giữ nguyên (§4.13); 4 loại diagram đọc được ⇒ đánh dấu sơ đồ gốc, còn lại ⇒
    * cờ vàng `import_image_unread`.
    */
-  diagram_images: { block_id: string; kind: DiagramImageKind | "unsupported" | "unavailable" | "failed" }[]
+  /** FLF-390: `owner_id` = function chủ của ảnh sequence / activity. */
+  diagram_images: { block_id: string; kind: DiagramImageKind | "unsupported" | "unavailable" | "failed"; owner_id?: string | null }[]
   /** Usage của lượt gọi AI (null nếu section chỉ trích deterministic). */
   usage_id: string | null
   partial: ExtractionProgress | null
@@ -101,7 +102,7 @@ const extractionDraftSchema = new Schema<IExtractionDraft>(
     },
     ops: { type: [Schema.Types.Mixed], default: [] },
     unmapped_block_ids: { type: [String], default: [] },
-    diagram_images: { type: [new Schema({ block_id: { type: String, required: true }, kind: { type: String, required: true } }, opts)], default: [] },
+    diagram_images: { type: [new Schema({ block_id: { type: String, required: true }, kind: { type: String, required: true }, owner_id: { type: String, default: undefined } }, opts)], default: [] },
     usage_id: { type: String, default: null },
     partial: { type: Schema.Types.Mixed, default: null },
     error: { type: String, default: null }

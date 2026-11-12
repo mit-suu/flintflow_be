@@ -36,7 +36,7 @@ const BLOCKS: LayoutBlock[] = [
   { block_id: "B0008", kind: "table_cell", level: null, text: "Doc", section_id: null },
   h("B0009", "2 Actors", 1, "fixed:2.1"),
   h("B0010", "5.1 Business Rules", 2, "fixed:5.1"),
-  h("B0011", "Appendix A — Meeting notes", 1),
+  h("B0011", "Appendix A - Meeting notes", 1),
   { block_id: "B0012", kind: "list_item", level: null, text: "Kick-off 12/09", section_id: null },
   { block_id: "B0013", kind: "image", level: null, text: "", section_id: null },
   p("B0014", "   ", null),
@@ -66,7 +66,7 @@ describe("buildLayout", () => {
       ["1.4 References", 2, "custom:CS01"],
       ["2 Actors", 1, "fixed:2.1"],
       ["5.1 Business Rules", 2, "fixed:5.1"],
-      ["Appendix A — Meeting notes", 1, "custom:CS02"],
+      ["Appendix A - Meeting notes", 1, "custom:CS02"],
       ["1.2 Scope", 2, "custom:CS03"]
     ])
     expect(layout.map((l) => l.order)).toEqual([0, 1, 2, 3, 4, 5])
@@ -142,7 +142,7 @@ describe("buildLayout", () => {
     expect(sectionSlices([{ custom_id: "CS02", section_id: "fixed:1", block_ids: ["B0009"] }], [{ entity: "project", id: null, source_block_ids: ["B0009"] }])).toEqual([])
   })
 
-  it("FLF-366: mẫu bắt buộc (segment: false) ⇒ không chia đoạn — heading con cùng section bỏ, không có phần nối thêm", () => {
+  it("FLF-366: mẫu bắt buộc (segment: false) ⇒ không chia đoạn - heading con cùng section bỏ, không có phần nối thêm", () => {
     const { layout, segments } = buildLayout(BLOCKS, HEADINGS, new Set(), { segment: false })
     expect(segments).toEqual([])
     expect(layout.map((l) => l.section_id)).toEqual(["fixed:1", "custom:CS01", "fixed:2.1", "fixed:5.1", "custom:CS02", "custom:CS03"])
@@ -199,7 +199,7 @@ describe("buildLayout", () => {
   })
 })
 
-describe("sectionSegments — đoạn nguyên văn theo mục (FLF-366)", () => {
+describe("sectionSegments - đoạn nguyên văn theo mục (FLF-366)", () => {
   it("phần tử thuộc đoạn chứa nhiều khối nguồn nhất (theo mảng mục đó in, không theo loại); đoạn không trích được gì ⇒ rỗng; dấu + known + tên nhắc tới", () => {
     const blocks: LayoutBlock[] = [
       h("B01", "5.1 Business Rules", 1, "fixed:5.1"),
@@ -215,7 +215,7 @@ describe("sectionSegments — đoạn nguyên văn theo mục (FLF-366)", () => 
       business_rules: [
         { id: "BR-01", tier: "detail", statement: "One check-in", source_validation_ids: [] },
         { id: "BR-02", tier: "detail", statement: "Late", source_validation_ids: [] },
-        { id: "BR-09", tier: "high", statement: "Cấp cao — in ở mục 1", source_validation_ids: [] }
+        { id: "BR-09", tier: "high", statement: "Cấp cao - in ở mục 1", source_validation_ids: [] }
       ]
     }
     const records = sectionSegments(
@@ -255,7 +255,7 @@ describe("sectionSegments — đoạn nguyên văn theo mục (FLF-366)", () => 
   })
 })
 
-describe("functionOriginals — nguyên văn mục chức năng (FLF-252)", () => {
+describe("functionOriginals - nguyên văn mục chức năng (FLF-252)", () => {
   it("mọi khối dưới heading chức năng đúng thứ tự: nhãn, gạch đầu dòng, ảnh, bảng; FLF-361: heading con giữ kiểu heading (cấp tương đối); bỏ heading mở mục và ô bảng", () => {
     const fn = "function:FR-3.2.2"
     const blocks: LayoutBlock[] = [
@@ -346,7 +346,7 @@ describe("sectionsWithContent", () => {
   })
 })
 
-describe("buildStepPlan (FLF-312 — mẫu FPT không bắt buộc)", () => {
+describe("buildStepPlan (FLF-312 - mẫu FPT không bắt buộc)", () => {
   const { layout } = buildLayout(BLOCKS, HEADINGS)
   const plan = buildStepPlan(layout, sectionsWithContent(BLOCKS))
   const of = (id: string) => plan.find((s) => s.step_id === id)!
@@ -360,8 +360,8 @@ describe("buildStepPlan (FLF-312 — mẫu FPT không bắt buộc)", () => {
 
   it("có nội dung ⇒ applied; có heading nhưng trống ⇒ enabled; file không có ⇒ hidden (bật được)", () => {
     expect(of("S-2.1")).toMatchObject({ state: "applied", section_ids: ["fixed:1"], reason: "Có trong file, đã có nội dung" })
-    expect(of("S-7.1")).toMatchObject({ state: "enabled", reason: "Đầu mục có trong file nhưng trống — chạy step nếu muốn AI soạn" })
-    expect(of("S-6.4")).toMatchObject({ state: "hidden", section_ids: ["fixed:4.2.3"], reason: "File không có đầu mục này — bật nếu muốn AI soạn thêm" })
+    expect(of("S-7.1")).toMatchObject({ state: "enabled", reason: "Đầu mục có trong file nhưng trống - chạy step nếu muốn AI soạn" })
+    expect(of("S-6.4")).toMatchObject({ state: "hidden", section_ids: ["fixed:4.2.3"], reason: "File không có đầu mục này - bật nếu muốn AI soạn thêm" })
     expect(of("S-4.1").section_ids).toEqual(["fixed:3.1.2", "feature:*"])
   })
 
@@ -419,7 +419,7 @@ describe("seedStepOps + step engine với step skipped", () => {
   })
 })
 
-describe("FLF-364 (câu 10) — chữ hướng dẫn dưới mục FPT giữ ở layout entry", () => {
+describe("FLF-364 (câu 10) - chữ hướng dẫn dưới mục FPT giữ ở layout entry", () => {
   it("đoạn hướng dẫn dưới mục FPT ⇒ template_guidance nguyên văn, không thành phần nối; dưới heading lạ ⇒ khối của mục riêng", () => {
     const blocks: LayoutBlock[] = [
       h("B0001", "2.1 Actors", 2),
@@ -436,7 +436,7 @@ describe("FLF-364 (câu 10) — chữ hướng dẫn dưới mục FPT giữ ở
   })
 })
 
-describe("FLF-378 luồng C — dự án mới theo mẫu bắt buộc: không bước nào accepted sẵn", () => {
+describe("FLF-378 luồng C - dự án mới theo mẫu bắt buộc: không bước nào accepted sẵn", () => {
   const { layout } = buildLayout(BLOCKS, HEADINGS)
   // S-2.1 sở hữu fixed:1 (file có chữ thật), S-7.1 sở hữu mục có heading mà trống; S-5.2 = vòng S-5 sở hữu mục mẫu
   const draftOwners = new Set(["S-2.1", "S-7.1", "S-5.2"])
@@ -444,7 +444,7 @@ describe("FLF-378 luồng C — dự án mới theo mẫu bắt buộc: không b
   const of = (id: string) => plan.find((s) => s.step_id === id)!
 
   it("bước sở hữu mục mẫu ⇒ enabled kể cả khi mục có chữ (chữ mẫu là ví dụ); bước mẫu không có ⇒ hidden; Record of Changes / bước ghép giữ nguyên", () => {
-    expect(of("S-2.1")).toMatchObject({ state: "enabled", reason: "Mục của mẫu bắt buộc — FlintFlow soạn" })
+    expect(of("S-2.1")).toMatchObject({ state: "enabled", reason: "Mục của mẫu bắt buộc - FlintFlow soạn" })
     expect(of("S-7.1").state).toBe("enabled")
     expect(of("S-6.4")).toMatchObject({ state: "hidden", reason: "Mẫu không có mục này" })
     expect(of("S-8.3").state).toBe("applied")
@@ -468,7 +468,7 @@ describe("FLF-378 luồng C — dự án mới theo mẫu bắt buộc: không b
   })
 })
 
-describe("FLF-361 textMentions — mã trong chữ khớp id Spine giữ dạng tài liệu", () => {
+describe("FLF-361 textMentions - mã trong chữ khớp id Spine giữ dạng tài liệu", () => {
   it("chữ ghi UC-01, Spine giữ UC01 ⇒ mention ghi id thật UC01; mã không có trong Spine ⇒ bỏ", () => {
     const empty = createEmptySpine({ name: "FAP" })
     const spine = { ...empty, use_cases: [{ id: "UC01", name: "Take attendance", actor_ids: [], description: "", includes: [], extends: [], function_ids: [] }] } as Spine

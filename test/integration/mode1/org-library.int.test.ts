@@ -1,8 +1,8 @@
 /**
- * FLF-278 trên FLF-335/336 — mẫu và thư viện nội dung cấp tổ chức, API + Mongo thật:
+ * FLF-278 trên FLF-335/336 — mẫu cấp tổ chức, API + Mongo thật:
  *  A. Lưu file mẫu + mapping đã xác nhận ⇒ dự án khác của tổ chức dùng lại: import từ chính file, mapping áp sẵn, đi thẳng
  *     tới trích dữ liệu (không qua 1.5); tổ chức khác không thấy; Viewer chỉ xem.
- *  B. Thư viện nội dung: CRUD theo tiêu đề chuẩn hoá, gợi ý cho mục riêng trùng tiêu đề, lưu ngược mục đã viết.
+ *  B. Trang Thư viện: phân trang, tìm không dấu, sắp xếp.
  *  C. Admin xem heading mẫu bắt buộc thành mục riêng.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -22,8 +22,6 @@ import { TemplateProfile } from "../../../src/modules/import/template-profile.mo
 import { OrgTemplate } from "../../../src/modules/import/org-library.model.js"
 import { Membership } from "../../../src/modules/organization/membership.model.js"
 import { User } from "../../../src/modules/user/user.model.js"
-import { applyTransaction } from "../../../src/modules/spine/op-engine.js"
-import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 
 beforeEach(() => {
   resetMockLlm()
@@ -54,7 +52,7 @@ const viewerOf = async (orgId: string) => {
   return authAs({ _id: user._id, email: user.email, orgId })
 }
 
-describe("FLF-278 — mẫu và thư viện nội dung của tổ chức (luồng import)", () => {
+describe("FLF-278 - mẫu và thư viện nội dung của tổ chức (luồng import)", () => {
   it("A. lưu mẫu + mapping ⇒ dự án khác dùng lại, mapping áp sẵn, bỏ qua xác nhận; tổ chức khác không dùng được", async () => {
     const owner = await seedFixture("minimal", { balance: 1000 })
     const first = await mappedProject(owner)
@@ -93,38 +91,41 @@ describe("FLF-278 — mẫu và thư viện nội dung của tổ chức (luồn
     expect(await OrgTemplate.countDocuments({ orgId: owner.orgId })).toBe(0)
   })
 
-  it("B. thư viện nội dung: gợi ý cho mục riêng trùng tiêu đề, lưu ngược mục đã viết, Viewer bị chặn sửa", async () => {
-    const owner = await seedFixture("minimal", { balance: 1000 })
-    const projectId = await createMode1Project(owner)
-    const spine = (await spineRepository.get(projectId))!
-    const block = (text: string) => ({ kind: "paragraph", text, rows: null, image_ref: null })
-    await applyTransaction(projectId, {
-      base_version: spine.spine_version,
-      ops: [
-        { op: "add", path: "custom_sections[]", value: { id: "CS01", heading: "Document Conventions", level: 1, blocks: [block("[Describe conventions.]")], source: "import" } },
-        { op: "add", path: "custom_sections[]", value: { id: "CS02", heading: "References", level: 1, blocks: [block("IEEE 830-1998")], source: "import" } }
-      ],
-      by: "test",
-      step_id: null
-    })
-    const library = `/api/v1/orgs/${owner.orgId}/content-library`
-    const created = await request(app).post(library).set(H(owner.token)).send({ title: "1.2 Document conventions", blocks: [{ kind: "paragraph", text: "Terms in bold." }] })
-    expect(created.status, JSON.stringify(created.body.error)).toBe(201)
+  it("B. trang Thư viện: phân trang, tìm không dấu theo tên / file, sắp xếp; không có page ⇒ danh sách cũ", async () => {
+    const owner = await seedFixture("minimal")
+    const names = ["Ngân hàng số", "Bệnh viện HIS", "Logistics", "Ăn uống", "Bảo hiểm"]
+    await OrgTemplate.insertMany(
+      names.map((name, i) => ({
+        orgId: owner.orgId,
+        name,
+        source_file: { name: i === 2 ? "kho van ngan hang.docx" : `f${i}.docx`, size: 1, sha256: "0".repeat(63) + String(i) },
+        file_ref: `x/${i}`,
+        headings: [{ heading_text: "Intro", section_id: "fixed:1" }],
+        created_by: owner.userId,
+        uses: i,
+        createdAt: new Date(2026, 0, i + 1)
+      }))
+    )
+    const list = (query: string) => request(app).get(`/api/v1/orgs/${owner.orgId}/templates${query}`).set(H(owner.token))
 
-    const matches = await request(app).get(`/api/v1/projects/${projectId}/library-matches`).set(H(owner.token))
-    expect(matches.status).toBe(200)
-    expect(matches.body.data).toMatchObject([{ custom_section_id: "CS01", heading: "Document Conventions", empty: true, entry: { id: created.body.data.id } }])
+    const first = await list("?page=1&limit=2")
+    expect(first.status, JSON.stringify(first.body.error)).toBe(200)
+    expect(first.body.data.map((t: { name: string }) => t.name)).toEqual(["Bảo hiểm", "Ăn uống"])
+    expect(first.body.meta).toEqual({ page: 1, limit: 2, total: 5, totalPages: 3 })
+    expect((await list("?page=3&limit=2")).body.data.map((t: { name: string }) => t.name)).toEqual(["Ngân hàng số"])
 
-    const back = await request(app).post(`/api/v1/projects/${projectId}/library`).set(H(owner.token)).send({ custom_section_id: "CS02" })
-    expect(back.status, JSON.stringify(back.body.error)).toBe(201)
-    expect(back.body.data).toMatchObject({ title: "References", blocks: [{ kind: "paragraph", text: "IEEE 830-1998" }] })
-    const empty = await request(app).post(`/api/v1/projects/${projectId}/library`).set(H(owner.token)).send({ custom_section_id: "CS01" })
-    expect(empty.status).toBe(422)
+    // Gõ không dấu khớp tên có dấu và cả tên file
+    const search = await list("?page=1&q=ngan%20hang&sort=recent")
+    expect(search.body.data.map((t: { name: string }) => t.name)).toEqual(["Logistics", "Ngân hàng số"])
+    expect(search.body.meta.total).toBe(2)
 
-    const viewer = await viewerOf(owner.orgId)
-    expect((await request(app).get(library).set(H(viewer))).body.data).toHaveLength(2)
-    expect((await request(app).patch(`${library}/${created.body.data.id}`).set(H(viewer)).send({ title: "Hack" })).status).toBe(403)
-    expect((await request(app).delete(`${library}/${created.body.data.id}`).set(H(owner.token))).status).toBe(200)
+    const byName = await list("?page=1&sort=name")
+    expect(byName.body.data.map((t: { name: string }) => t.name)).toEqual(["Ăn uống", "Bảo hiểm", "Bệnh viện HIS", "Logistics", "Ngân hàng số"])
+
+    const legacy = await list("")
+    expect(legacy.body.data).toHaveLength(5)
+    expect(legacy.body.meta).toBeUndefined()
+    expect((await list("?page=0")).status).toBe(400)
   })
 
   it("C. admin xem heading mẫu bắt buộc thành mục riêng còn trống", async () => {

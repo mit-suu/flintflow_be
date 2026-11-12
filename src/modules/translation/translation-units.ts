@@ -18,6 +18,8 @@ import { stableStringify } from "../spine/source-hash.js"
 import { parsePath, type Segment } from "../spine/path-resolver.js"
 import { PROJECT_TEXT_FIELDS, SRS_TEXT_FIELDS, SRS_TEXT_GROUPS, VALIDATION_TEXT_FIELDS, type SrsTextGroup } from "../spine/srs-text-fields.js"
 import { wireframeLabels } from "../diagram/salt-text.js"
+import { screenSpecOf } from "../diagram/renderers/screen-mockup.js"
+import { specLabels } from "../diagram/screen-spec.js"
 
 export type UnitValue = string | string[]
 
@@ -85,6 +87,8 @@ export const DIAGRAM_TEXT_FIELDS: Readonly<Partial<Record<SrsTextGroup, readonly
   entities: ["relation_verbs", "attributes", "states", "transitions"],
   // message của sơ đồ tuần tự hệ thống (`functions[].interactions`): đơn vị mảng chữ theo thứ tự mảng, xem `ARRAY_TEXT_KEYS`
   functions: ["interactions"],
+  // FLF-390: chữ trong nút activity (`activity_nodes[].name`) và guard của control flow (`activity_flows[].guard`) của use case
+  use_cases: ["activity_nodes", "activity_flows"],
   // nhãn trên cạnh luồng màn: `flow_to[].trigger` / `.guard` (đơn vị là mảng chữ theo thứ tự `to`, xem `flowTexts`)
   screens: ["flow_to"]
 }
@@ -101,7 +105,7 @@ const FLOW_FIELD = "flow_to"
  * Mảng phần tử entity có chữ hiển thị: một đơn vị mảng chữ theo thứ tự mảng, mỗi phần tử lần lượt các khoá chữ (cái nào có).
  * `attributes`: tên, mô tả · `states`: tên trạng thái · `transitions`: sự kiện, điều kiện, hành động.
  */
-const ARRAY_TEXT_KEYS: Readonly<Record<string, readonly string[]>> = { attributes: ["name", "description"], states: ["name"], transitions: ["event", "guard", "action"], interactions: ["message", "guard"] }
+const ARRAY_TEXT_KEYS: Readonly<Record<string, readonly string[]>> = { attributes: ["name", "description"], states: ["name"], transitions: ["event", "guard", "action"], interactions: ["message", "guard"], activity_nodes: ["name"], activity_flows: ["guard"] }
 
 const byTarget = (edges: readonly Row[]): Row[] => [...edges].sort((a, b) => (String(a.to) < String(b.to) ? -1 : String(a.to) > String(b.to) ? 1 : 0))
 const textOf = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v : null)
@@ -245,7 +249,12 @@ const diagramUnits = (spine: Partial<Pick<Spine, "project" | "screens" | "diagra
   (spine.diagrams ?? []).flatMap((d) => {
     if (d.kind !== "screen_layout" || d.render_status !== "ok" || !d.owner_id) return []
     const screen = spine.screens?.find((s) => s.id === d.owner_id)
-    // svg (FLF-339): chữ trên hình đều lấy từ field Spine đã có đơn vị dịch ⇒ không có đơn vị riêng
+    // Mockup màn (FLF-410): chữ của ScreenSpec do model viết ⇒ một đơn vị mỗi màn, gắn vào phần đầu (id không hậu tố) — mọi
+    // nền tảng cùng một spec. svg khác (FLF-339): chữ trên hình đều lấy từ field Spine đã có đơn vị dịch
+    if (d.format === "svg") {
+      const stored = /-[0-9]+$/.test(d.id) ? null : screenSpecOf(d.source)
+      return stored ? unitOf({ group: "diagrams", id: d.id, field: "labels" }, specLabels(stored.spec)) : []
+    }
     if (d.format !== "puml") return []
     const labels = wireframeLabels(d.source, [screen?.name, spine.project?.system_name, spine.project?.name])
     return unitOf({ group: "diagrams", id: d.id, field: "labels" }, labels)

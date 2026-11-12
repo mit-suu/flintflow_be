@@ -51,8 +51,10 @@ import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
 import * as meter from "./meter.service.js"
 import { documentLanguageForTurn, type TurnDocumentLanguage } from "../translation/turn-language.js"
 import { captureForTurn } from "../translation/capture.service.js"
-import { captureSources } from "../project/requirement-source.service.js"
+import { captureSources, paragraphTexts } from "../project/requirement-source.service.js"
+import { paragraphId, parseParagraphId } from "../../shared/ai/document-paragraphs.js"
 import { ActionType, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
+import { buildDocumentContext, stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 import type { ElicitOutput, OpTransaction, ReviewOutput } from "../../shared/ai/response-parser.js"
@@ -275,6 +277,11 @@ export const assertRangeOwnedByStep = async (projectId: string, stepId: string, 
 export interface AnswerInput {
   question_id: string
   answer: string | string[]
+  /**
+   * FLF-393: câu chốt bằng tài liệu tham khảo (không phải user tự trả lời) — mã đoạn nguồn đã kiểm tra được ra chữ. Sau khi
+   * ghi sổ quyết định, nguồn được lưu cho `decisions[id=…]` (business-flow §3.6 "Ghi nguồn", UC-53).
+   */
+  source_paras?: string[]
 }
 
 /**
@@ -448,7 +455,7 @@ export const CHAT_RESERVED_CALLS = MAX_SCHEMA_RETRIES + 1 + 1
 /** Câu trả lời cố định khi hết ngân sách chat — không gọi model. */
 export const CHAT_BUDGET_REPLY = "Phần còn lại tôi sẽ tạm hiểu theo hướng hợp lý nhất, bạn xem lại rồi nói tôi nếu chỗ nào khác nhé."
 /** Bản tiếng Anh của `CHAT_BUDGET_REPLY` cho phiên trả lời tiếng Anh (FLF-260). */
-export const CHAT_BUDGET_REPLY_EN = "For the rest, I'll go with the most sensible reading — take a look and tell me if anything should be different."
+export const CHAT_BUDGET_REPLY_EN = "For the rest, I'll go with the most sensible reading - take a look and tell me if anything should be different."
 
 /** Câu hết ngân sách chat theo ngôn ngữ trả lời của phiên; thiếu ⇒ tiếng Việt. */
 export const chatBudgetReply = (language: ReplyLanguage = "vi"): string => byLanguage(language, { vi: CHAT_BUDGET_REPLY, en: CHAT_BUDGET_REPLY_EN })
@@ -476,10 +483,15 @@ export const replyLanguageAfterMessage = async (
  */
 export const settleFromChat = (
   asked: PendingAnswerState["asked"],
-  settled: readonly { topic_key: string; answer: string }[] | undefined,
+  settled: readonly { topic_key: string; answer: string; source_paras?: readonly string[] }[] | undefined,
   message: string,
   /** Tin user chỉ là "Đúng rồi" với đề xuất AI vừa nêu ⇒ đề xuất đó (lời AI trước) cũng là nguồn trích đoạn hợp lệ. */
-  agreedProposal?: string
+  agreedProposal?: string,
+  /**
+   * FLF-393: chữ của các đoạn tài liệu tham khảo model dẫn (`D1-P391` ⇒ chữ, đã tra trong DB). Câu chờ mà tin user không trả
+   * lời được chốt bằng tài liệu chỉ khi: có mã đoạn tra được, và câu mở thì câu trả lời là trích đoạn nguyên văn của đoạn đó.
+   */
+  documentParagraphs?: ReadonlyMap<string, string>
 ): AnswerInput[] => {
   const ids = questionIdsFor(asked)
   const out: AnswerInput[] = []
@@ -499,6 +511,13 @@ export const settleFromChat = (
     const index = asked.findIndex((q, i) => q.topic_key === item.topic_key && !done.has(i))
     if (index < 0) continue
     const question = asked[index]
+    // FLF-393: đoạn tài liệu model dẫn mà tra được ra chữ — mã bịa / sai khuôn bị bỏ
+    const docParas = [...new Set((item.source_paras ?? []).flatMap((raw) => {
+      const parsed = parseParagraphId(raw)
+      const key = parsed ? paragraphId(parsed.docCode, parsed.index) : null
+      return key && documentParagraphs?.has(key) ? [key] : []
+    }))]
+    const docText = docParas.map((key) => documentParagraphs!.get(key)!).join("\n")
     if (question.options.length === 0) {
       // Trích đoạn model báo (đã kiểm là chuỗi con) trước: một danh sách đánh số nằm trong MỘT câu trả lời ("Tính
       // năng: 1. … 2. …") không được tách sang câu khác. Model diễn lại ⇒ mới dùng đoạn đánh số theo thứ tự câu mở.
@@ -506,8 +525,17 @@ export const settleFromChat = (
         verifiedExcerpt(item.answer, message) ??
         (agreedProposal ? verifiedExcerpt(item.answer, agreedProposal) : undefined) ??
         (useNumbered ? numbered.get(openIndexes.indexOf(index)) : undefined)
+      if (!text) {
+        // Không phải điều user nói ⇒ chỉ chốt bằng tài liệu: câu trả lời phải là trích đoạn nguyên văn của đoạn được dẫn
+        const quoted = docText ? verifiedExcerpt(item.answer, docText) : undefined
+        if (!quoted || openTexts.some((t) => sameText(t, quoted))) continue
+        out.push({ question_id: ids[index], answer: quoted, source_paras: docParas })
+        openTexts.push(quoted)
+        done.add(index)
+        continue
+      }
       // Nguyên văn cả tin nhắn hoặc đoạn đã gán cho câu khác ⇒ không tách được cho câu này, câu vẫn chờ
-      if (!text || (openSettled.size > 1 && sameText(text, message)) || openTexts.some((t) => sameText(t, text))) continue
+      if ((openSettled.size > 1 && sameText(text, message)) || openTexts.some((t) => sameText(t, text))) continue
       out.push({ question_id: ids[index], answer: text })
       openTexts.push(text)
       done.add(index)
@@ -518,7 +546,8 @@ export const settleFromChat = (
     const labels = parts.map(labelOf)
     if (labels.length === 0 || labels.some((l) => l === undefined)) continue
     const clean = (labels as string[]).map(stripRecommended)
-    out.push({ question_id: ids[index], answer: question.multiple ? clean : clean[0] })
+    // Câu có lựa chọn chốt kèm đoạn tài liệu tra được ⇒ giữ nguồn (lựa chọn không phải trích đoạn nên chỉ kiểm mã đoạn)
+    out.push({ question_id: ids[index], answer: question.multiple ? clean : clean[0], ...(docParas.length ? { source_paras: docParas } : {}) })
     done.add(index)
   }
   return out
@@ -546,6 +575,21 @@ export interface ChatTurnInput {
   closing?: boolean
   /** FLF-260: ngôn ngữ trả lời của lượt — có thì đi vào lời gọi model (`buildPrompt` nối khối "Reply language"). */
   replyLanguage?: ReplyLanguage
+  /**
+   * Tài liệu tải lên SAU lượt hỏi (đính kèm cùng câu trả lời) — `newDocumentsSince`. Rỗng / thiếu ⇒ `(none)`: tài liệu cũ đã
+   * được đọc ở lượt hỏi.
+   */
+  documents?: string
+}
+
+/**
+ * Tài liệu đính kèm sau lúc hỏi cho lượt chat trả lời (bước `stepId` đọc `documents`). `askedAt` thiếu (trạng thái chờ cũ) ⇒
+ * mọi tài liệu của bước. Bước không đọc tài liệu ⇒ `""`.
+ */
+export const newDocumentsSince = async (projectId: string, stepId: string, askedAt: string | undefined): Promise<string> => {
+  if (!stepNeedsSourceDocuments(stepId)) return ""
+  const since = askedAt ? new Date(askedAt) : undefined
+  return (await buildDocumentContext({ projectId, actionType: ActionType.DRAFT, stepId, ...(since && !Number.isNaN(since.getTime()) ? { since } : {}) })).contextText
 }
 
 /**
@@ -563,7 +607,10 @@ export const nextPendingAfterChat = (
   // Sổ quyết định phải đã ghi câu trả lời thẻ của lượt này (caller đọc lại Spine sau khi ghi) — câu viết lại hỏi lại chủ đề
   // vừa chốt bị bỏ. Bỏ hết mà vẫn còn câu chưa trả lời ⇒ hỏi lại đúng những câu đó, không để lượt kết thúc trong im lặng.
   const filtered = revised.length === 0 ? [] : shapeQuestions(filterAskedQuestions(spine, revised).questions).asked
-  const next = filtered.length === 0 ? remaining : filtered
+  // FLF-393 (demo 2026-11-12): AI hỏi thêm một câu mới mà không viết lại câu đang chờ ⇒ câu đó (kèm thẻ lựa chọn) từng bị
+  // thay mất dù user chưa trả lời. Câu chưa trả lời mà AI không viết lại (theo `topic_key`) được giữ nguyên, sau câu mới.
+  const rewritten = new Set(filtered.map((q) => q.topic_key ?? q.question))
+  const next = filtered.length === 0 ? remaining : [...filtered, ...remaining.filter((q) => !rewritten.has(q.topic_key ?? q.question))]
   if (!isSubstantiveAnswer(message)) return next
   // Đếm theo chủ đề, kể cả khi AI viết lại câu
   const repliedOf = (topic: string | undefined): number => (remaining.find((q) => q.topic_key === topic)?.replied ?? 0) + 1
@@ -691,8 +738,24 @@ export const runChatTurn = async (input: ChatTurnInput): Promise<{ reply: string
           // FLF-358: giả định còn mở của bước — trước đây thiếu, prompt còn nguyên "{{assumptions}}"
           assumptions: assumptionsForPrompt(input.spine, input.unit),
           content_guidance: "",
-          // FLF-292: lượt chat khi còn câu chờ chỉ ghép câu trả lời — tài liệu đã được đọc ở lượt hỏi trước
-          documents: "(none)",
+          // FLF-398: tài liệu đính kèm SAU lượt hỏi (cùng câu trả lời) - nơi gọi nạp đúng phần đó, đặt trước.
+          // FLF-393: cộng thêm đoạn khớp tin nhắn + câu đang chờ trong mọi tài liệu (trần token của chat): user hay hỏi thông tin
+          // giữa lúc có câu chờ ("tài liệu có nói … không?"), model nhắc lại câu chờ cũng phải thấy đoạn nói về nó - thiếu thì
+          // model trả lời "tài liệu chưa nói rõ" (demo 2026-11-12). Tin user là tiêu điểm, lấy đoạn trước.
+          documents:
+            [
+              input.documents?.trim() ?? "",
+              (
+                await buildDocumentContext({
+                  projectId: input.projectId,
+                  actionType: ActionType.CHAT,
+                  query: [input.message, ...input.asked.map((q) => q.question)].join("\n"),
+                  focus: input.message
+                })
+              ).contextText.trim()
+            ]
+              .filter(Boolean)
+              .join("\n\n") || "(none)",
           decisions: ledgerForPrompt(input.spine),
           ...conversation,
           user_message: input.message
@@ -717,9 +780,33 @@ export const runChatTurn = async (input: ChatTurnInput): Promise<{ reply: string
   // "Đúng rồi, đi tiếp" sau khi AI đề xuất mặc định cho câu mở: model chốt bằng chữ của đề xuất, không có trong tin user.
   // Trước đây đoạn đó bị bỏ ⇒ câu bị gắn lại mãi (E2E FAP, vòng S17).
   const proposal = input.sessionId && isBareAgreement(input.message) ? await loadLastAiReply(input.sessionId, input.unit) : null
-  const verified = settleFromChat(input.asked, result.data.settled, input.message, proposal ?? undefined)
+  // FLF-393: câu chốt bằng tài liệu — tra chữ thật của các đoạn model dẫn để kiểm trích đoạn
+  const cited = (result.data.settled ?? []).flatMap((s) => s.source_paras ?? [])
+  const documentParagraphs = cited.length ? await paragraphTexts(input.projectId, cited) : undefined
+  const verified = settleFromChat(input.asked, result.data.settled, input.message, proposal ?? undefined, documentParagraphs)
   const settled = input.closing ? verified : settleRepeatedAnswer(input.asked, verified, input.message, result.data.still_open ?? [])
   return { reply: result.data.reply, settled, questions: result.data.questions ?? [] }
+}
+
+/**
+ * FLF-393 (business-flow §3.6 "Ghi nguồn"): câu chờ được chốt bằng tài liệu tham khảo ⇒ sau khi sổ quyết định đã ghi, lưu
+ * nguồn (tài liệu + đoạn + câu trích) cho `decisions[id=…]` của chủ đề đó — xem ở bản đồ truy vết (UC-53). `spine` là Spine
+ * SAU khi ghi sổ. Lỗi chỉ log (như mọi lượt ghi nguồn).
+ */
+export const captureSettledSources = async (
+  projectId: string,
+  unit: string,
+  spine: Spine,
+  asked: PendingAnswerState["asked"],
+  settled: readonly AnswerInput[]
+): Promise<number> => {
+  const entries = settled.flatMap((a) => {
+    if (!a.source_paras?.length) return []
+    const topic = asked[indexOfQuestion(asked, a.question_id)]?.topic_key
+    const decision = topic ? [...spine.decisions].reverse().find((d) => d.topic_key === topic && d.superseded_by === null) : undefined
+    return decision ? [{ path: `decisions[id=${decision.id}]`, paras: a.source_paras }] : []
+  })
+  return entries.length ? captureSources(projectId, unit, spine, entries) : 0
 }
 
 /** Còn đủ lượt gọi cho một lượt chat mà vẫn chừa Draft + Review không. */
@@ -807,21 +894,21 @@ export const B0_FIELD_STEPS: Readonly<Record<string, "form_factor" | "stakes">> 
 /** Lý do ở gate khi B-0.2/B-0.3 bỏ qua vì field đã có — không phải "AI không soạn được gì". Theo ngôn ngữ trả lời (FLF-260). */
 const B0_ALREADY_SET_REASON: Readonly<Record<"form_factor" | "stakes", Readonly<Record<ReplyLanguage, string>>>> = Object.freeze({
   form_factor: {
-    vi: "Nền tảng đã rõ từ những gì bạn kể — không cần hỏi lại. Muốn đổi thì nhắn điều cần sửa.",
-    en: "The platform is already clear from what you told me — no need to ask again. To change it, just tell me what to fix."
+    vi: "Nền tảng đã rõ từ những gì bạn kể - không cần hỏi lại. Muốn đổi thì nhắn điều cần sửa.",
+    en: "The platform is already clear from what you told me - no need to ask again. To change it, just tell me what to fix."
   },
   stakes: {
-    vi: "Phần tuân thủ tôi đã ghi theo lựa chọn và ý tưởng của bạn — không cần hỏi lại. Muốn đổi thì nhắn điều cần sửa.",
-    en: "I've recorded the compliance part from your choices and your idea — no need to ask again. To change it, just tell me what to fix."
+    vi: "Phần tuân thủ tôi đã ghi theo lựa chọn và ý tưởng của bạn - không cần hỏi lại. Muốn đổi thì nhắn điều cần sửa.",
+    en: "I've recorded the compliance part from your choices and your idea - no need to ask again. To change it, just tell me what to fix."
   }
 })
 
 /** B-0.2/B-0.3 chỉ chốt một field: hỏi nhiều hơn một câu là hỏi lan sang việc của bước khác. */
 const B0_FIELD_MAX_QUESTIONS = 1
 
-const NO_IDEA_USER_MESSAGE = "[no_idea] Mình chưa có ý tưởng cụ thể — gợi ý giúp mình bắt đầu từ đâu."
+const NO_IDEA_USER_MESSAGE = "[no_idea] Mình chưa có ý tưởng cụ thể - gợi ý giúp mình bắt đầu từ đâu."
 /** Bản tiếng Anh của câu thay thế trên (FLF-260) — chỉ đi vào prompt; giữ tiền tố `[no_idea]` mà skill elicit-loop dò. */
-const NO_IDEA_USER_MESSAGE_EN = "[no_idea] I don't have a concrete idea yet — suggest where I could start."
+const NO_IDEA_USER_MESSAGE_EN = "[no_idea] I don't have a concrete idea yet - suggest where I could start."
 
 /** `calls_used`/`regenerate_used` của vòng hiện tại của step. */
 const usageCounts = meter.roundCounts
@@ -1339,7 +1426,7 @@ export const runStep = async (
     let reopenedAccepted = false
 
     if (existingStep?.status === "skipped") {
-      throw new ApiError(409, `Step ${stepId} không áp dụng cho template của dự án — bật lại ở kế hoạch step trước khi chạy`, STEP_NOT_RUNNABLE)
+      throw new ApiError(409, `Step ${stepId} không áp dụng cho template của dự án - bật lại ở kế hoạch step trước khi chạy`, STEP_NOT_RUNNABLE)
     }
     // BUG-03: S-5.1 của màn placeholder chạy lại được ngay (kể cả đã accepted bằng accept_as_is "để sau") —
     // đó chính là cách user mở lại một màn đã bị bỏ qua.
@@ -1348,7 +1435,7 @@ export const runStep = async (
       (existingStep?.status === "accepted" && isReopenableStaleStep(spine, stepId, await spineRepository.listChanges(projectId)))
     if (existingStep?.status === "accepted" && !reopenLoop) {
       if (!d.reopen) {
-        throw new ApiError(409, `Step ${stepId} đã accepted — chạy lại phải mở lại bước (reopen) hoặc gate revision/regenerate (B7)`, STEP_NOT_RUNNABLE)
+        throw new ApiError(409, `Step ${stepId} đã accepted - chạy lại phải mở lại bước (reopen) hoặc gate revision/regenerate (B7)`, STEP_NOT_RUNNABLE)
       }
       // Mở lại đúng như gate revision/regenerate: vòng mới, bỏ mốc seq và thời điểm chốt cũ (B7/F1)
       const reopened = await applyTransaction(projectId, {
@@ -1521,12 +1608,15 @@ export const runStep = async (
       }
     }
 
+    /** FLF-398: lúc đặt các câu đang chờ — lượt chat trả lời nạp tài liệu tải lên sau lúc này. */
+    let askedAt: string | undefined
     /**
      * Hỏi lại những câu còn chờ: phát `answer_needed`, lưu lượt chờ (FLF-222) rồi nhả khoá. Trả lượt nghe đã đăng ký TRƯỚC
      * khi công bố — câu trả lời tới ngay sau `answer_needed` / `waiting_answer` vẫn về đúng luồng này.
      */
     const announceWaiting = async (asked: PendingAnswerState["asked"]): Promise<{ answer: Promise<AnswerPayload> }> => {
       const listener = listenForAnswer(projectId, stepId, sessionId, d.signal)
+      askedAt = new Date().toISOString()
       const { questions } = shapeQuestions(asked)
       const answerNeeded: StepEvent = { type: "answer_needed", step_id: stepId, questions }
       try {
@@ -1536,7 +1626,7 @@ export const runStep = async (
           stage: "ask",
           detail_vi: `Chờ bạn trả lời ${questions.length} câu`,
           questions,
-          pending_answer: { kind: "step", unit: stepId, session_id: sessionId, asked, base_answers_text: answersText },
+          pending_answer: { kind: "step", unit: stepId, session_id: sessionId, asked, base_answers_text: answersText, asked_at: askedAt },
           release: true,
           appendEvent: { ...answerNeeded, at: new Date().toISOString() }
         })
@@ -1611,7 +1701,7 @@ export const runStep = async (
             const budgetReply = chatBudgetReply(replyLanguage)
             emit({ type: "elicit", step_id: stepId, delta: budgetReply })
             await pushTranscript(projectId, sessionId, stepId, "ai", budgetReply)
-            const note = [`User nhắn: ${message}`, ...left.map((q) => `Chưa trả lời — tự giả định và ghi assumptions[]: ${q.question}`)].join("\n")
+            const note = [`User nhắn: ${message}`, ...left.map((q) => `Chưa trả lời - tự giả định và ghi assumptions[]: ${q.question}`)].join("\n")
             answersText = `${answersText}\n${note}`.trim()
           }
           return
@@ -1619,6 +1709,8 @@ export const runStep = async (
 
         assertNotAborted(d.signal, stepId)
         tracker.stage("ask", { detail_vi: "Đọc tin nhắn của bạn" })
+        // FLF-398: tệp đính kèm cùng câu trả lời — AI đọc được ngay lượt này
+        const freshDocuments = await newDocumentsSince(projectId, stepId, askedAt)
         const turn = await tracker.beat("ask", () =>
           runChatTurn({
             projectId,
@@ -1632,7 +1724,8 @@ export const runStep = async (
             projection: elicitProjection(spine, stepId),
             spine,
             elicitExecutor: d.elicitExecutor,
-            replyLanguage
+            replyLanguage,
+            documents: freshDocuments
           })
         )
         const settled = turn.settled.filter((a) => !answeredByCard.has(indexOfQuestion(pending, a.question_id)))
@@ -1640,6 +1733,8 @@ export const runStep = async (
           transcript: [],
           settledIds: new Set(settled.map((a) => a.question_id))
         })
+        // FLF-393: câu chốt bằng tài liệu tham khảo ⇒ ghi nguồn cho quyết định vừa vào sổ (business-flow §3.6)
+        if (settled.some((a) => a.source_paras?.length)) await captureSettledSources(projectId, stepId, (await refresh(projectId)).spine, pending, settled)
         const answered = new Set([...cardAnswers, ...settled].map((a) => indexOfQuestion(pending, a.question_id)))
         const remaining = nextPendingAfterChat(spine, pending.filter((_, i) => !answered.has(i)), turn.questions, message)
         // Câu hỏi đuôi trong lời AI tính vào trần câu hỏi của lượt (FLF-235)
@@ -1687,7 +1782,8 @@ export const runStep = async (
         ;({ spine, spineVersion } = await refresh(projectId))
       } else if (shouldElicit) {
         assertNotAborted(d.signal, stepId)
-        tracker.stage("ask", { detail_vi: "Xem bước này còn thiếu gì để hỏi bạn" })
+        // FLF-393: user vừa nhắn (hỏi thông tin, kể ý tưởng) thì lượt này là đọc và trả lời — "còn thiếu gì" chỉ đúng khi tự hỏi
+        tracker.stage("ask", { detail_vi: userMessage ? "Đọc tin nhắn của bạn và tài liệu để trả lời" : "Xem bước này còn thiếu gì để hỏi bạn" })
         const { calls_used: callsBeforeElicit } = await meter.roundCounts(projectId, stepId, stepStateForRound?.first_seq ?? null)
         if (callsBeforeElicit >= CALLS_LIMIT) throw new ApiError(409, `Bước này đã dùng hết ${CALLS_LIMIT} lượt gọi AI.`, CALL_LIMIT)
 
@@ -1720,7 +1816,7 @@ export const runStep = async (
                 ...conversation,
                 user_message: noIdeaYet
                   ? byLanguage(replyLanguage, { vi: NO_IDEA_USER_MESSAGE, en: NO_IDEA_USER_MESSAGE_EN })
-                  : (userMessage ?? "(tự động — vòng elicit đầu step)")
+                  : (userMessage ?? "(tự động - vòng elicit đầu step)")
               },
               replyLanguage
             },
@@ -1938,14 +2034,14 @@ export const elicitGuidance = (ctx: StepContext): string => {
 export const noChangeReason = (templateId: string, needsDraft: boolean, language: ReplyLanguage = "vi"): string => {
   if (LOOP_BOOKKEEPING_TEMPLATES.has(templateId)) {
     return byLanguage(language, {
-      vi: "Bước sổ sách của vòng màn hình — không có nội dung để ghi.",
-      en: "A bookkeeping step of the screen loop — there's no content to write."
+      vi: "Bước sổ sách của vòng màn hình - không có nội dung để ghi.",
+      en: "A bookkeeping step of the screen loop - there's no content to write."
     })
   }
   if (!needsDraft) {
     return byLanguage(language, {
-      vi: "Bước tất định — chỉ kiểm tra lại, không sinh nội dung mới.",
-      en: "A deterministic step — it only re-checks, it doesn't produce new content."
+      vi: "Bước tất định - chỉ kiểm tra lại, không sinh nội dung mới.",
+      en: "A deterministic step - it only re-checks, it doesn't produce new content."
     })
   }
   return byLanguage(language, { vi: "AI không tìm thấy gì cần thêm hoặc sửa ở bước này.", en: "The AI found nothing to add or change in this step." })

@@ -40,7 +40,7 @@ const sampleImport = () => ({
   updated_at: AT
 })
 
-describe("import.dto — request", () => {
+describe("import.dto - request", () => {
   it("confirm-latest cần import_id, không nhận field lạ", () => {
     expect(confirmLatestRequestSchema.safeParse({ import_id: IMPORT_ID }).success).toBe(true)
     expect(confirmLatestRequestSchema.safeParse({}).success).toBe(false)
@@ -84,7 +84,7 @@ describe("import.dto — request", () => {
   })
 })
 
-describe("import.dto — response", () => {
+describe("import.dto - response", () => {
   it("ImportedDocument hợp lệ; sha256 phải 64 ký tự; status phải thuộc máy trạng thái", () => {
     expect(importedDocumentDtoSchema.safeParse(sampleImport()).success).toBe(true)
     expect(importedDocumentDtoSchema.safeParse({ ...sampleImport(), sha256: "abc" }).success).toBe(false)
@@ -164,7 +164,7 @@ describe("import.dto — response", () => {
       doc_version: "0.1",
       generated_at: AT,
       totals: { red: 0, yellow: 1, low_confidence_fields: 0, unrendered_diagrams: 0 },
-      layout: [{ order: 0, section_id: "custom:CS01", heading: "Phụ lục B — Biên bản họp", level: 1, kind: "custom", red: 0, yellow: 0 }],
+      layout: [{ order: 0, section_id: "custom:CS01", heading: "Phụ lục B - Biên bản họp", level: 1, kind: "custom", red: 0, yellow: 0 }],
       sections: [],
       unrendered_diagrams: [],
       low_confidence_fields: []
@@ -182,7 +182,7 @@ describe("import.dto — response", () => {
   })
 })
 
-describe("mode 1 v2 — layout + step-plan (FLF-182, contract-change)", () => {
+describe("mode 1 v2 - layout + step-plan (FLF-182, contract-change)", () => {
   const profile = { doc_version: "0.1", heading_map: [], table_map: [], language: "en" }
 
   it("profile cũ không có layout ⇒ []; layout mang section FPT hoặc custom:<id>", () => {
@@ -197,7 +197,7 @@ describe("mode 1 v2 — layout + step-plan (FLF-182, contract-change)", () => {
 
   it("step-plan: state applied | hidden | enabled", () => {
     const steps = [
-      { step_id: "S-7.1", state: "hidden", section_ids: ["fixed:5.1"], reason: "File không có đầu mục này — bật nếu muốn AI soạn thêm" },
+      { step_id: "S-7.1", state: "hidden", section_ids: ["fixed:5.1"], reason: "File không có đầu mục này - bật nếu muốn AI soạn thêm" },
       { step_id: "B-0.1", state: "hidden", section_ids: [], reason: "Không sinh đầu mục" }
     ]
     expect(stepPlanResponseSchema.parse({ steps }).steps).toHaveLength(2)
@@ -225,7 +225,7 @@ describe("mode1.errors", () => {
   })
 })
 
-describe("FLF-343 — import một mạch", () => {
+describe("FLF-343 - import một mạch", () => {
   it("POST /import/extract nhận confirm_latest (tuỳ chọn); khoá lạ ⇒ lỗi", () => {
     expect(extractRequestSchema.parse({ import_id: "i1" })).toEqual({ import_id: "i1" })
     expect(extractRequestSchema.parse({ import_id: "i1", confirm_latest: true })).toEqual({ import_id: "i1", confirm_latest: true })

@@ -1,14 +1,15 @@
 ---
 skill_id: screen-layout
 kind: renderer
-version: 2.1.0
-description: "S-5.3 Screen Layout — the model draws a low-fi PlantUML Salt wireframe of one core screen from its functions"
+version: 3.1.0
+description: "S-5.3 Screen Layout - the model describes one screen as a JSON ScreenSpec; code draws the web / mobile mockup in the project theme"
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 4096
 temperature: 0.2
 reads:
   - "project.system_name"
+  - "project.form_factor"
   - "screens[id=<owner>].name"
   - "screens[id=<owner>].description"
   - "screens[id=<owner>].is_popup"
@@ -26,122 +27,70 @@ stub: false
 ---
 # Screen Layout
 
-You draw the wireframe of **one** screen as PlantUML **Salt**, the picture under §3.x.y of the SRS.
-Code calls you from `src/modules/diagram/diagram.service.ts` (call kind `render_fix`) only for core screens
-(`signed_off` with a `primary_function_id`), compile-checks your Salt on the PlantUML server and, when it
-does not compile, falls back to a plain `Function | Description` table. You write nothing into the Spine.
+You describe **one** screen as a JSON **ScreenSpec**: what the user sees and can do, top to bottom. Code turns the
+spec into the mockup under §3.x.y of the SRS: browser frame for web, phone frame for mobile, header in the
+project's brand colour, boxed inputs, solid / outlined buttons. Colours, pixels, fonts and the domain are the
+project theme, **never** yours. Code calls you from `src/modules/diagram/screen-layout.ai.ts` (call kind
+`render_fix`); a spec that fails the schema falls back to a plain `Function | Description` table. You write
+nothing into the Spine.
 
 ## Input
 
-A JSON object: `system_name` (may be null), `screen` (`name`, `description`, `is_popup`, `tabs[]`),
-`functions[]` (`name`, `trigger`, `description`, `validations[]`) and `navigates_to[]` (names of the
-screens this one opens).
+A JSON object:
+- `system_name` (may be null), `form_factor[]`, `allowed_platforms[]` (`web` / `mobile`: the platforms this
+  project ships).
+- `screen` (`name`, `description`, `is_popup`, `tabs[]`), `functions[]` (`name`, `trigger`, `description`,
+  `validations[]`), `navigates_to[]` (names of the screens this one opens).
+- Screens imported with an original picture also get `mode` and `original_images[]`; their rules come in an
+  extra reference below.
 
-## What to draw
-
-Low-fi: what the user sees and can do on the screen, top to bottom — not colours, not pixels.
+## What to put on the screen
 
 1. **Every function the user triggers here has its control**, labelled as in `trigger`: "clicks the Log in
-   button" → `[ Log in ]`, "clicks the Sign up link" → `<u>Sign up</u>`, "checks the terms checkbox" →
-   `[ ] I accept the terms`, "selects a status filter" → a dropdown. System-side functions (streaming,
-   background jobs, "the system…") get no control.
-2. **Every field a validation mentions has an input**: "Email must be a valid address" → an `Email` label and
-   an input; a password gets a masked input; min/max price → two inputs on one row.
-3. `navigates_to[]` screens are reached through a button or link already drawn — do not add a second one.
-4. Lists / results / history → a `{#` table with the real column names and one or two sample rows.
-5. Real labels in English, taken from the input; sample values that look real (`john@example.com`,
-   `2,500,000,000`). No lorem ipsum, no Vietnamese diacritics, no ids (`FN001`, `S03`).
-6. Keep it one screen: at most ~25 lines of widgets. Do not draw the functions' `normal[]` steps.
+   button" ⇒ a button `Log in`, "clicks the Sign up link" ⇒ a link, "checks the terms checkbox" ⇒ a checkbox,
+   "selects a status filter" ⇒ a `select` field. System-side functions ("the system sends…") get no control.
+2. **Every field a validation mentions has an input**: "Email must be a valid address" ⇒ field `Email`
+   (required when the validation says so); a password gets `kind: "password"`, a date `kind: "date"`.
+3. `navigates_to[]` screens are reached through a button, link or `nav` item: never twice.
+4. Lists / results / history ⇒ `table` with the real column names and 2-3 sample rows; cart-like lists ⇒ `items`.
+5. Real labels taken from the input, in the **language of the input** (English input ⇒ English). Sample values
+   look real (`an.nguyen@example.com`, `18,990,000 VND`). No lorem ipsum, no ids (`FN001`, `S03`), no em dash.
+6. One screen only, at most 20 blocks. Do not list the functions' steps.
 
-## Layout
-
-```
-@startsalt
-{
-  {+
-    {
-      <b>SYSTEM NAME
-      Screen name
-    }
-    ..
-    ...widgets, one per line, top to bottom...
-  }
-}
-@endsalt
-```
-
-- Draw the frame exactly as above, no `.` spacer rows/columns around the content: code pads the frame for you.
-- The header is `system_name` in capitals, then the screen name; without `system_name` only the screen name.
-- **Pop-up** (`is_popup: true`): no header, the whole body is a titled box `{^"Screen name"` … `}` instead of `{+`.
-- **Tabs** (`tabs[]` not empty): right under the header, `{/ <b>First tab | Second tab | Third tab }`, then
-  draw the content of the first tab.
-
-## Salt cheat sheet (anything else breaks the compile)
-
-| Widget | Salt |
-| --- | --- |
-| Heading / plain text | `<b>Log in to your account` / `Don't have an account?` |
-| Text input (label on the line above) | `Email` then `"john@example.com          "` — pad with spaces for width |
-| Password | `"........                  "` — dots, **never `**`** (that is bold) |
-| Button / main button | `[ Cancel ]` / `[        Log in        ]` (wider) |
-| Link | `<u>Forgot password?</u>` |
-| Checkbox | `[ ] Remember me` · `[X] Checked` |
-| Radio group | `{ (X) Fast \| ( ) Coaching }` |
-| Dropdown | `^All statuses        ^` |
-| Multi-line text | `{+` then the placeholder line, `.`, `.`, then `}` |
-| Widgets on one row | `{ [ ] Remember me \| <u>Forgot password?</u> }` |
-| Table | `{#` then `<b>Name \| <b>Status` then `Sunrise Villa \| Approved` then `}` |
-| Separator | `..` alone on its line |
-| Image / map placeholder | `{+` then `Map area` then `}` |
-
-**One widget per line.** Two widgets side by side only inside a row `{ a | b }` — a bare `"...." [ Show ]` on
-one line prints as plain text. Password with a show toggle: `{ "........          " | [ Show ] }`.
-Inside text never use `" [ ] { } | ^ # < >` except as the syntax above. `[text]` is a **button**, not an
-input — an input is always in double quotes.
-
-## Example
-
-Input: Login, functions "Submit Credentials" (trigger "clicks the Log in button", validations on Email and
-Password), "Open Forgot Password" ("clicks the Forgot password link"), "Navigate to Register" ("clicks the
-Sign up link"), "Log In with Google" ("clicks the Google button").
+## Spec shape
 
 ```
-@startsalt
-{
-  {+
-    {
-      <b>FLINTFLOW
-      Login
-    }
-    ..
-    <b>Log in to your account
-    Email
-    "john@example.com              "
-    Password
-    "........                      "
-    { [ ] Remember me | <u>Forgot password?</u> }
-    [            Log in            ]
-    [ Continue with Google ]
-    ..
-    { Don't have an account? | <u>Sign up</u> }
-  }
-}
-@endsalt
+{ "title": "Create your account", "path": "/signup", "platforms": ["web", "mobile"],
+  "nav": ["Home", "Orders"], "back": true, "columns": 2, "popup": false, "tabs": ["Profile", "Security"],
+  "blocks": [ ...see the block table in the reference below... ] }
 ```
+
+- `title`: the heading on the screen. `path`: a short route for the address bar (`/signup`, `/admin/orders`).
+- `platforms` ⊆ `allowed_platforms`: where this screen exists. Admin / back-office screens and heavy data
+  entry (wide tables, many filters) are usually **web only**; everything else gets every allowed platform.
+- `nav`: top menu items when the screen shows the app's main navigation (≤ 6). `back`: true when the screen
+  is reached from another one and returns to it (detail, form, checkout).
+- `columns` (1-3, web only): how many fields per row. 2 for sign-up / profile forms with 4+ fields, 3 for
+  filter rows, 1 for short forms (log in).
+- `popup: true` when `screen.is_popup`: a dialog over the previous screen, no header or nav.
+- `tabs` = `screen.tabs` when not empty; draw the content of the first tab.
+- Optional keys may be left out; never add keys that are not listed.
 
 ## Output
 
-Only a fenced json block, the Salt in `puml` with `\n` line breaks:
+Only a fenced json block. `puml` holds the envelope **as a JSON string** (escaped quotes):
 
 ```json
-{ "puml": "@startsalt\n{\n  {+\n    ...\n  }\n}\n@endsalt\n", "notes": "one short sentence on anything you had to guess" }
+{ "puml": "{\"spec\":{\"title\":\"Log in\",\"path\":\"/login\",\"platforms\":[\"web\"],\"blocks\":[...]},\"screen_images\":[0],\"primary_color\":\"#E4572E\"}", "notes": "one short sentence on anything you had to guess" }
 ```
+
+`screen_images` only when the input has `original_images`; `primary_color` only in mode `original`.
 
 ## Self-check
 
-- [ ] Starts with `@startsalt`, ends with `@endsalt`, one diagram, braces balanced.
-- [ ] Every user-triggered function has its button/link/control; every validated field has an input.
-- [ ] Inputs in double quotes, buttons in brackets, password as dots, no `**`.
-- [ ] Every line holds one widget, or one `{ … | … }` row — never two bare widgets.
-- [ ] Pop-up drawn as `{^"Name"`, tabs as `{/ … }`, header only on non-pop-up screens.
-- [ ] English only, no ids, no diacritics.
+- [ ] `puml` parses as JSON with a `spec` that has `title`, `path`, `platforms`, `blocks` and only the keys above.
+- [ ] Every block `type` is in the block table; strings are short (labels ≤ 60, table cells ≤ 40 characters).
+- [ ] Every user-triggered function has its control; every validated field has an input.
+- [ ] `platforms` only from `allowed_platforms`; popup / tabs follow the input.
+- [ ] No colours, sizes or ids in the spec; no em dash.
+- [ ] `qty` and `columns` are JSON numbers (`1`, not `"1"`); `required`, `primary`, `strong`, `back`, `popup` are `true` / `false`.
