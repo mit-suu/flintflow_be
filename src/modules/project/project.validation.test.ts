@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import type { Request, Response } from "express"
-import { CreateProjectSchema, UpdateDocumentLanguageSchema, UpdateErdNotationSchema, parseKnowledgeFlag, projectModeSchema, validateRequest } from "./project.validation.js"
+import { CreateProjectSchema, UpdateDocumentLanguageSchema, UpdateErdNotationSchema, UpdateScreenThemeSchema, parseKnowledgeFlag, projectModeSchema, validateRequest } from "./project.validation.js"
 import { Project, PROJECT_MODES } from "./project.model.js"
 
 describe("documentLanguage (FLF-265)", () => {
@@ -108,5 +108,20 @@ describe("erdNotation", () => {
     expect(new Project({ name: "x" }).erdNotation).toBe("chen")
     expect(new Project({ name: "x", erdNotation: "idef1x" }).erdNotation).toBe("idef1x")
     expect(new Project({ name: "x", erdNotation: "uml" }).validateSync()?.errors.erdNotation).toBeDefined()
+  })
+})
+
+describe("UpdateScreenThemeSchema (FLF-410)", () => {
+  it("nhận từng field, chuẩn hoá màu + domain; null = về mặc định", () => {
+    expect(UpdateScreenThemeSchema.parse({ primaryColor: "#e4572e" })).toEqual({ primaryColor: "#E4572E" })
+    expect(UpdateScreenThemeSchema.parse({ domain: "https://Shop.Example.com/cart" })).toEqual({ domain: "shop.example.com" })
+    expect(UpdateScreenThemeSchema.parse({ domain: "" })).toEqual({ domain: null })
+    expect(UpdateScreenThemeSchema.parse({ primaryColor: null, domain: null, platforms: null })).toEqual({ primaryColor: null, domain: null, platforms: null })
+    expect(UpdateScreenThemeSchema.parse({ platforms: ["web", "mobile"] })).toEqual({ platforms: ["web", "mobile"] })
+  })
+
+  it("sai ⇒ không qua", () => {
+    for (const body of [{}, { primaryColor: "red" }, { primaryColor: "#FFF" }, { domain: "not a host" }, { platforms: [] }, { platforms: ["web", "web"] }, { platforms: ["tv"] }, { primaryColor: "#FFFFFF", extra: 1 }])
+      expect(UpdateScreenThemeSchema.safeParse(body).success, JSON.stringify(body)).toBe(false)
   })
 })

@@ -70,6 +70,7 @@ import { buildLayoutSections, type TemplateLayout } from "./layout-sections.js"
 // Mode 1 v2 (FLF-184): layout của file người dùng upload — chỉ đọc
 import { TemplateProfile } from "../import/template-profile.model.js"
 import { Project } from "../project/project.model.js"
+import { screenMockupsOf } from "../../shared/diagram/screen-theme.js"
 import { MEDIA_PREFIX, isMediaId, loadImportMedia, mediaId } from "./import-media.js"
 import type {
   Block,
@@ -656,7 +657,8 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
     | null
   if (!profile?.layout?.length) return null
   // Chế độ 3 (mẫu bắt buộc, FLF-335): in đúng các mục của mẫu, không chèn mục FlintFlow ngoài mẫu (business-flow 2.10)
-  const project = (await Project.findById(projectId, { template_intent: 1 }, { lean: true })) as { template_intent?: string | null } | null
+  const project = (await Project.findById(projectId, { template_intent: 1, screenMockups: 1 }, { lean: true })) as { template_intent?: string | null; screenMockups?: unknown } | null
+  const mockups = screenMockupsOf(project).filter((m) => m.enabled)
   return {
     ...(project?.template_intent === "fixed" ? { fixedTemplate: true } : {}),
     layout: profile.layout,
@@ -666,6 +668,8 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
     // FLF-252: import trước khi có các field này ⇒ không truyền, bản in giữ cách cũ
     ...(profile.non_screen_table?.length ? { nonScreenTable: profile.non_screen_table } : {}),
     ...(profile.function_originals?.length ? { functionOriginals: profile.function_originals } : {}),
+    // FLF-410: màn đã bật mockup thay ảnh gốc
+    ...(mockups.length ? { screenMockups: mockups } : {}),
     ...(profile.section_slices?.length ? { sectionSlices: profile.section_slices } : {}),
     // FLF-366: import trước khi có đoạn nguyên văn ⇒ không truyền, bản in như cũ
     ...(profile.section_segments?.length ? { sectionSegments: profile.section_segments } : {})

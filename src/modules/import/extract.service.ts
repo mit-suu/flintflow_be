@@ -17,6 +17,8 @@ import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { getActionCost, getOrCreateWallet, resolveWalletOrg } from "../../shared/ai/credit-reservation.service.js"
 import type { DiagramImageKind, ImportExtractDiagramOutput, ImportExtractOutput } from "../../shared/ai/response-parser.js"
 import { loadImportImage } from "../render/import-media.js"
+// Caption ảnh màn hình dùng chung với mockup màn (FLF-410: dự phòng khi model không chỉ ra ảnh nào là ảnh màn hình)
+import { SCREEN_CAPTION } from "../diagram/screen-originals.js"
 import { IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { DocBlock, type IDocBlock } from "./doc-block.model.js"
 import { isTemplateFile } from "./structure-preview.js"
@@ -505,7 +507,7 @@ export const captionOf = (img: Pick<BlockLite, "block_id">, sectionBlocks: Pick<
 /** Caption chỉ hình là sơ đồ đọc được (use case, ngữ cảnh, ERD / class, luồng màn; FLF-390: sequence, activity). */
 const DIAGRAM_CAPTION = /(use[\s-]?case|context|erd|entity[\s-]?relationship|class diagram|data model|screens?[\s-]?flow|navigation|sequence|tuần tự|activity|hoạt động|luồng xử lý|workflow|deployment|triển khai|sơ đồ|biểu đồ|diagram)/i
 /** Caption chỉ hình không phải loại sơ đồ đọc được (ảnh màn hình, wireframe, state machine…) — đọc chỉ tốn credit. */
-const NOT_DIAGRAM_CAPTION = /(layout|screenshot|screen shot|mock-?up|wireframe|prototype|giao diện|state machine|component diagram)/i
+const NOT_DIAGRAM_CAPTION = new RegExp(`${SCREEN_CAPTION.source.slice(0, -1)}|state machine|component diagram)`, "i")
 
 /**
  * Ảnh có gửi AI đọc không (FLF-252): caption nói là ảnh màn hình / sơ đồ khác loại ⇒ không; ảnh ở mục thường có sơ đồ

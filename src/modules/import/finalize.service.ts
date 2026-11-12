@@ -39,6 +39,7 @@ import { countOpenFlags, findingOpsInOrder, runImportCheck, stripRecord, type Fi
 import { legacyRecordRows } from "./legacy-record.js"
 import { DocBlock } from "./doc-block.model.js"
 import { erdNotationOfDocument } from "./erd-notation-detect.js"
+import { fillScreenDomain } from "../diagram/screen-domain.js"
 import { captionOf } from "./extract.service.js"
 import { canonicalFieldIds, collectEntities, idKey, imageOnlyGenericActors, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
 import { ExtractionDraft, type IExtractionDraft } from "./extraction-draft.model.js"
@@ -185,6 +186,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // pháp đó; không ghi ⇒ giữ ký pháp của dự án. Ghi trước khi vẽ sơ đồ (bước 4)
   const fileNotation = erdNotationOfDocument(layoutBlocks)
   if (fileNotation) await Project.updateOne({ _id: projectId }, { $set: { erdNotation: fileNotation } })
+  // FLF-410: file ghi URL sản phẩm (`https://techmart.vn/...`) ⇒ domain trên thanh địa chỉ của mockup màn (chỉ khi còn trống)
+  await fillScreenDomain(projectId, layoutBlocks.map((b) => [b.text, ...(b.rows ?? []).flat()].join("\n")).join("\n"))
   // Văn xuôi I-4 không trích được ⇒ phần nối của section (FLF-184) — render từ Spine không mất nội dung file gốc
   const unmappedIds = new Set(drafts.flatMap((d) => d.unmapped_block_ids ?? []))
   // Phase 5 (T3): ảnh dưới mục FPT ⇒ giữ nguyên văn (phần nối của mục) để bản render nhúng lại ảnh gốc. Trước đây bản
