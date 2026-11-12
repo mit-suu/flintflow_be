@@ -23,7 +23,7 @@ import type { Flag, Spine, SpineRecord } from "../spine/spine.types.js"
 import { Usage } from "../spine/usage.model.js"
 import { IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { DocBlock } from "./doc-block.model.js"
-import { chunkBlocks } from "./extract.service.js"
+import { chunkBlocks, isTemplateOnlyProject } from "./extract.service.js"
 import { idKey } from "./extracted-entities.js"
 import { FieldAnchor } from "./field-anchor.model.js"
 import type { MentionEntity } from "./import.constants.js"
@@ -350,7 +350,8 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string): Pr
   const done = new Set<string>(
     await Usage.find({ projectId, step_id: { $regex: /^I-1\.11(:|$)/ }, state: "deducted" }).distinct("step_id")
   )
-  if (!done.has(SEMANTIC_CHECK_STEP)) {
+  // FLF-411 (U1-8): khung mẫu (chữ là hướng dẫn / ví dụ, Spine không nhận nội dung) ⇒ không có gì để AI đối chiếu, không trừ credit
+  if (!done.has(SEMANTIC_CHECK_STEP) && !(await isTemplateOnlyProject(projectId))) {
     const failure = await runSemanticCheck(projectId, userId, done)
     if (failure) {
       doc.paused = { reason: failure.reason, at: new Date() }
@@ -371,6 +372,8 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string): Pr
  * (`function:@B0012`) đổi sang id thật ngắn hơn nên số lô không tăng; tài liệu không có phần tử nào thì lượt kiểm chéo không chạy.
  */
 export const estimateCheckCalls = async (projectId: string): Promise<{ batches: number; calls: number; credits: number }> => {
+  // FLF-411 (U1-8): khung mẫu không chạy 1.11 (`runImportCheck`) ⇒ màn đọc khung không báo "Dự kiến ~6 credit"
+  if (await isTemplateOnlyProject(projectId)) return { batches: 0, calls: 0, credits: 0 }
   const blocks = await DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS }, kind: { $in: ["paragraph", "list_item", "table_cell"] } })
     .sort({ "anchor.ordinal": 1 })
     .select("block_id text section_id")
