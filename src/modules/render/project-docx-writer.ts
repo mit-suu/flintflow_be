@@ -97,7 +97,9 @@ export const writeProjectDocx = async (
 
 const sourceWriteOptions = (fidelity: SourceFidelity, binding: Pick<TemplateSourceBinding, "legacy_record_of_changes">) => ({
   keepSource: fidelity.keepSource,
-  legacyRecordCount: binding.legacy_record_of_changes?.length ?? 0
+  legacyRecordCount: binding.legacy_record_of_changes?.length ?? 0,
+  // FLF-416 chế độ 4: chèn mục FPT soạn thêm thành heading mới, mục Ngoài phạm vi xuống cuối
+  ...(fidelity.rearrange ? { rearrange: fidelity.rearrange } : {})
 })
 
 export interface FixedTemplateContext {
