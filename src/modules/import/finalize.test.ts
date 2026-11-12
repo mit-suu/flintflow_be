@@ -73,6 +73,19 @@ describe("finalize - field ⇒ thực thể ⇒ op", () => {
     expect([...collectEntities(fields).values()].map((e) => e.id)).toEqual(["UC-01", "UC-02", "UC-03", "E15"])
   })
 
+  it("FLF-411 (#7): use case chỉ có trên sơ đồ (mục trước bảng) đứng SAU các dòng bảng, giữa chúng theo thứ tự ảnh", () => {
+    const fields = [
+      // 2.2.1: sơ đồ use case có UC-01…UC-04, chỉ UC-01, UC-02 có dòng trong bảng 2.2.2
+      field("use_cases[id=UC-03].name", "Pay", 0.7, false, { origin: "vision" }),
+      field("use_cases[id=UC-01].name", "View Menu", 0.7, false, { origin: "vision" }),
+      field("use_cases[id=UC-04].name", "Rate", 0.7, false, { origin: "vision" }),
+      field("use_cases[id=UC-02].name", "Order a Meal", 0.7, false, { origin: "vision" }),
+      field("use_cases[id=UC-01].description", "Patron views the menu", 1, false, { origin: "deterministic" }),
+      field("use_cases[id=UC-02].description", "Patron orders", 1, false, { origin: "deterministic" })
+    ]
+    expect([...collectEntities(fields).values()].map((e) => e.id)).toEqual(["UC-01", "UC-02", "UC-03", "UC-04"])
+  })
+
   it("mọi thực thể thành một lô op duy nhất, chạy khô hợp lệ trên Spine rỗng với by import", () => {
     const fields = [
       field("project.vision", "Lumen is an online learning platform."),
