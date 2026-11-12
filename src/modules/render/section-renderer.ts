@@ -22,6 +22,7 @@ import { ACTOR_HIERARCHY_SECTION } from "../diagram/renderers/usecase.renderer.j
 import { activitySectionOf } from "../diagram/renderers/activity.renderer.js"
 import { DEFAULT_RELATION_VERB, relationVerb } from "../diagram/renderers/erd.renderer.js"
 import { describeInterface } from "./interface-description.js"
+import { crRecordDescription } from "./cr-record.js"
 import { diagramErrorMarker } from "./diagram-placeholder.js"
 import { matchTableHeader } from "../import/table-header-dictionary.js"
 import { loadStepRegistry } from "../pipeline/step-registry.js"
@@ -997,11 +998,13 @@ const MACHINE_REASON = /^Cascade:/
  * không cần DB). Nhiều người sửa trong ngày ⇒ liệt kê tên không trùng.
  *
  * `language` (FLF-265, nội bộ): câu máy sinh + nhãn phase theo ngôn ngữ tài liệu; không truyền ⇒ tiếng Anh như trước.
+ * `spine` (FLF-411 U2-6): tra tên phần tử cho mô tả dòng CR dựng từ thay đổi (`cr-record.ts`); không truyền ⇒ chỉ loại phần tử.
  */
 export function buildRecordOfChanges(
   changes: ChangeRecordRow[],
   resolveInCharge: (by: string) => string = (by) => by,
-  language?: string
+  language?: string,
+  spine?: Spine
 ): RocRow[] {
   const text = recordTextFor(language)
   const order: string[] = []
@@ -1036,8 +1039,11 @@ export function buildRecordOfChanges(
   let crs = 0
   let baselines = 0
   const seenPhases = new Set<string>()
-  const describe = (row: (typeof rows)[number], reasons: readonly string[]): string => {
+  const describe = (row: (typeof rows)[number], reasons: readonly string[], raw: readonly string[]): string => {
     if (row.baseline) return reasons.length > 0 ? describeRow(reasons, language) : text.baselineSigned
+    // FLF-411 (U2-6): dòng CR theo ngôn ngữ tài liệu — tiêu đề CR khác ngôn ngữ (câu chat tiếng Việt) ⇒ mô tả từ thay đổi
+    const crId = row.cr ? row.changes.find((c) => CR_ACTOR.test(c.by))?.by : undefined
+    if (crId) return crRecordDescription(crId, raw, row.changes, language, spine)
     // Dòng của quy trình: mô tả bằng giai đoạn, kiểu FPT "Create/Update <mục>" — reason từng op là của model
     const label = phaseLabelOf(row.phase, language)
     if (label) {
@@ -1080,7 +1086,7 @@ export function buildRecordOfChanges(
       version,
       change_type: changeTypeOf(new Set(row.changes.map((c) => c.op))),
       in_charge: [...new Set(row.changes.map((c) => resolveInCharge(c.by)))].join(", "),
-      description: describe(row, reasons)
+      description: describe(row, reasons, raw)
     })
   }
   return out
