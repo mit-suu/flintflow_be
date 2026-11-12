@@ -213,6 +213,12 @@ const envSchema = z.object({
     .default("120000,600000,1800000,3600000,10800000")
     .transform((v) => v.split(",").map((x) => x.trim()).filter(Boolean).map(Number))
     .refine((v) => v.every((n) => Number.isFinite(n) && n >= 0), { message: "danh sách số ms ≥ 0, cách nhau dấu phẩy" }),
+  /**
+   * FLF-392: số section I-4 gọi AI cùng lúc trong một import (1 = mỗi lúc một section; known_keys vẫn là bản chụp chung lúc
+   * bắt đầu, không phải bản tuần tự trước FLF-392). Đồng thời thật: driver `inline` = số import đang
+   * trích × giá trị này; driver `bullmq` = `JOB_IMPORT_CONCURRENCY` × giá trị này.
+   */
+  IMPORT_EXTRACT_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(4),
   /** Số job import (I-4 / finalize, mỗi job vài phút gọi AI) một worker chạy song song. */
   JOB_IMPORT_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(2),
   /**
