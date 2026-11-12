@@ -123,6 +123,14 @@ export async function writeTemplateDocx(
   }
   for (const slot of slots) {
     if (handledSlots.has(slot)) continue
+    // FLF-411 #25: dự án có sẵn — mục đã đổi so với lúc import (không nguyên trạng) mà bản in mới không còn dữ liệu (xoá qua CR) ⇒
+    // bỏ thân gốc, giữ heading + chữ hướng dẫn của mẫu (BF §3.1.1: hướng dẫn chỉ xoá khi mục được điền). Trước đây slot trống bị
+    // bỏ qua ⇒ dữ liệu đã xoá in lại nguyên văn từ file gốc. Mục nguyên trạng (kể cả vốn trống) vẫn giữ nguyên văn.
+    if (keep && slot.section_id !== "fixed:I" && slot.sections.length && !slot.sections.every((s) => keep.has(s.id)) && guidanceOnly(slot.sections, slot.section_id)) {
+      const guidance = slot.sections.flatMap((s) => s.blocks.flatMap((b) => (b.type === "paragraph" ? [b.runs] : [])))
+      clearToGuidance(xml, slot.heading.element, slot.nodes, guidance, bodyPatternFor(bodyPattern, bodyStyleId))
+      continue
+    }
     if (!slot.sections.some((s) => s.blocks.length || s.id !== slot.section_id)) {
       if (sourceOptions.stripTemplateText && slot.section_id !== "fixed:I") stripTemplateBody(slot.nodes)
       continue
@@ -235,6 +243,54 @@ const stripTemplateBody = (nodes: readonly Element[]): void => {
   }
 }
 
+/** Bản in của slot không có dữ liệu: không có mục con, mọi khối (nếu có) là đoạn hướng dẫn của mẫu (`[…]` / `{…}`). */
+const guidanceOnly = (sections: readonly RenderedSection[], slotId: string): boolean =>
+  sections.every((s) => s.id === slotId && s.blocks.every((b) => b.type === "paragraph" && isInstructionText(b.runs.map((r) => r.text).join(""))))
+
+const paragraphText = (p: Element): string => wAll(p, "t").map((t) => t.textContent ?? "").join("").trim()
+
+/**
+ * Đoạn hướng dẫn của mẫu trong thân gốc: đoạn chữ thuần nằm trọn trong ngoặc, kể cả khối hướng dẫn nhiều đoạn (đoạn đầu mở
+ * `[` / `{`, đoạn cuối đóng `]` / `}`).
+ */
+const guidanceNodes = (nodes: readonly Element[]): Set<Element> => {
+  const out = new Set<Element>()
+  let open: Element[] | null = null
+  for (const node of nodes) {
+    const text = isW(node, "p") && !isLayoutParagraph(node) && !hasOpaqueContent(node) ? paragraphText(node) : null
+    if (open) {
+      if (text === null) { open = null; continue }
+      open.push(node)
+      if (/[\]}]$/.test(text)) { open.forEach((n) => out.add(n)); open = null }
+      continue
+    }
+    if (!text) continue
+    if (isInstructionText(text)) out.add(node)
+    else if (/^[[{]/.test(text)) open = [node]
+  }
+  return out
+}
+
+/**
+ * FLF-411 #25: thân gốc của mục bị xoá hết dữ liệu ⇒ bỏ đoạn, ảnh, field; bảng giữ hàng tiêu đề (bảng một hàng bỏ hẳn); giữ ngắt
+ * trang / section và đoạn hướng dẫn của mẫu. File gốc không có hướng dẫn mà bản in mang hướng dẫn (`template_guidance`) ⇒ in
+ * hướng dẫn đó sau heading.
+ */
+const clearToGuidance = (xml: Document, heading: Element, nodes: readonly Element[], guidance: readonly InlineRun[][], pattern?: Element): void => {
+  const kept = guidanceNodes(nodes)
+  for (const node of nodes) {
+    if (kept.has(node) || (isW(node, "p") && isLayoutParagraph(node))) continue
+    if (isW(node, "tbl") && wKids(node, "tr").length > 1) stripSampleRows(node)
+    else node.parentNode?.removeChild(node)
+  }
+  if (kept.size || !guidance.length) return
+  const parent = heading.parentNode!
+  const remaining = nodes.filter((n) => n.parentNode === parent)
+  // Trước bảng còn lại (nếu có), không thì ngay sau heading — ngắt trang cuối mục vẫn đứng sau hướng dẫn
+  const ref = remaining.find((n) => !(isW(n, "p") && isLayoutParagraph(n))) ?? heading.nextSibling
+  for (const runs of guidance) parent.insertBefore(paragraph(xml, runs, pattern), ref)
+}
+
 type RecordRow = RenderedDocument["recordOfChanges"][number]
 
 const RECORD_FIELDS: Record<string, keyof RecordRow> = {
@@ -246,21 +302,28 @@ const RECORD_FIELDS: Record<string, keyof RecordRow> = {
 const recordFieldOf = (header: string): keyof RecordRow | null => RECORD_FIELDS[columnKey(header)] ?? recordColumnOfHeader(header) ?? null
 
 /**
- * Thêm dòng lịch sử vào cuối bảng gốc: nhân bản dòng dữ liệu cuối (giữ định dạng ô), ghi chữ theo cột của bảng, cột lạ
- * ("No.", "Approved by"…) để trống.
+ * Thêm dòng lịch sử vào bảng gốc: điền trước các dòng trống cuối bảng (bảng mẫu thường kẻ sẵn nhiều dòng trống — FLF-411
+ * #26: dòng mới không được nằm dưới 13 dòng trống), hết dòng trống mới nhân bản dòng cuối (giữ định dạng ô) thêm vào cuối.
+ * Ghi chữ theo cột của bảng, cột lạ ("No.", "Approved by"…) để trống.
  */
 function appendRecordRows(sourceTable: Element, rows: readonly RecordRow[]): void {
   const trs = wKids(sourceTable, "tr")
   if (trs.length < 2) return
   const headers = wKids(trs[0], "tc").map((cell) => wAll(cell, "t").map((t) => t.textContent ?? "").join(""))
   const model = trs[trs.length - 1]
+  // Dòng trống = sau dòng có chữ cuối cùng (không điền vào khoảng trống xen giữa các dòng lịch sử cũ)
+  const isBlank = (tr: Element) => !wAll(tr, "t").some((t) => t.textContent?.trim())
+  const body = trs.slice(1)
+  const lastFilled = body.reduce((last, tr, i) => (isBlank(tr) ? last : i), -1)
+  const blanks = body.slice(lastFilled + 1)
   for (const row of rows) {
-    const tr = model.cloneNode(true) as Element
+    const blank = blanks.shift()
+    const tr = blank ?? model.cloneNode(true) as Element
     wKids(tr, "tc").forEach((cell, i) => {
       const field = recordFieldOf(headers[i] ?? "")
       setCellText(cell, field ? String(row[field] ?? "") : "")
     })
-    sourceTable.appendChild(tr)
+    if (!blank) sourceTable.appendChild(tr)
   }
 }
 
