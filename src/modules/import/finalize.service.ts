@@ -39,6 +39,7 @@ import { countOpenFlags, findingOpsInOrder, runImportCheck, stripRecord, type Fi
 import { legacyRecordRows } from "./legacy-record.js"
 import { DocBlock } from "./doc-block.model.js"
 import { erdNotationOfDocument } from "./erd-notation-detect.js"
+import { fillScreenDomain } from "../diagram/screen-domain.js"
 import { captionOf } from "./extract.service.js"
 import { canonicalFieldIds, collectEntities, idKey, imageOnlyGenericActors, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
 import { ExtractionDraft, type IExtractionDraft } from "./extraction-draft.model.js"
@@ -78,6 +79,20 @@ export interface FinalizeResult {
   target_structure: TargetStructure | null
 }
 
+/**
+ * Log thời gian từng bước finalize (một dòng / bước, không ghi dữ liệu): SRS ~200 trang mất nhiều phút, cần biết bước nào
+ * chậm hay treo khi job không xong.
+ */
+const stepTimer = (importId: string) => {
+  const start = Date.now()
+  let last = start
+  return (step: string): void => {
+    const now = Date.now()
+    console.log(`[finalize] import ${importId}: ${step} xong sau ${now - last} ms (tổng ${now - start} ms)`)
+    last = now
+  }
+}
+
 const loadSpine = async (projectId: string) => {
   const record = await spineRepository.get(projectId)
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
@@ -98,9 +113,30 @@ export const assertCanFinalize = async (projectId: string, body: Pick<FinalizeRe
   return { doc, before, profile }
 }
 
-export const finalizeImport = async (projectId: string, userId: string, body: FinalizeRequest): Promise<FinalizeResult> => {
+/**
+ * Lần chạy nền truyền vào (FLF-391): `guard` gọi giữa các bước / lượt AI — ném lỗi khi lần chạy đã hết giờ hoặc bị lần mới
+ * thay ⇒ dừng tại đó, và cũng là mốc "còn tiến triển"; `progress` báo tiến triển trong một bước dài (từng diagram).
+ */
+export interface FinalizeRunOptions {
+  guard?: () => Promise<void>
+  progress?: () => void
+}
+
+export const finalizeImport = async (projectId: string, userId: string, body: FinalizeRequest, run: FinalizeRunOptions = {}): Promise<FinalizeResult> => {
   const { doc, before, profile } = await assertCanFinalize(projectId, body)
   const provisional = resolveProvisional(profile.heading_map)
+  const mark = stepTimer(String(doc._id))
+  // File đã lưu mà chưa có DocVersion trỏ tới — lần chạy bị dừng ở `guard` thì xoá, không để mồ côi trong GridFS
+  const unownedRefs: string[] = []
+  const step = async (name: string): Promise<void> => {
+    mark(name)
+    try {
+      await run.guard?.()
+    } catch (err) {
+      await Promise.all(unownedRefs.map((ref) => docFileStore().remove(ref).catch(() => undefined)))
+      throw err
+    }
+  }
 
   // 1. Thực thể ⇒ op
   const drafts = await ExtractionDraft.find({ import_id: doc._id }).lean()
@@ -121,6 +157,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const parsed = await parseDocument(await loadImportFile(doc))
   await writeStamp(parsed.pkg, { project_id: projectId, version: IMPORTED_DOC_VERSION, source: "import" })
   const fileRef = await docFileStore().save(await parsed.pkg.toBuffer(), { projectId, kind: "version", name: IMPORTED_DOC_VERSION })
+  unownedRefs.push(fileRef)
+  await step("tách file gốc + lưu bản gốc")
 
   let spineVersion = before.spine_version
   let seqRange: { first: number | null; last: number | null } = { first: null, last: null }
@@ -135,6 +173,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     await docFileStore().remove(fileRef)
     throw err
   }
+  await step("lô thực thể vào Spine")
 
   // 3. Liên kết Spine ↔ block, section thật cho feature/function, mention theo tên
   const anchors = entities
@@ -168,6 +207,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     }
   }))
   if (updates.length) await DocBlock.bulkWrite(updates)
+  await step("neo field + mention theo tên")
 
   // 3b. Layout + mục riêng + kế hoạch step theo template người dùng (mode 1 v2, D2/D6)
   const ordered = await DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }).sort({ "anchor.ordinal": 1 }).lean()
@@ -186,6 +226,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // pháp đó; không ghi ⇒ giữ ký pháp của dự án. Ghi trước khi vẽ sơ đồ (bước 4)
   const fileNotation = erdNotationOfDocument(layoutBlocks)
   if (fileNotation) await Project.updateOne({ _id: projectId }, { $set: { erdNotation: fileNotation } })
+  // FLF-410: file ghi URL sản phẩm (`https://techmart.vn/...`) ⇒ domain trên thanh địa chỉ của mockup màn (chỉ khi còn trống)
+  await fillScreenDomain(projectId, layoutBlocks.map((b) => [b.text, ...(b.rows ?? []).flat()].join("\n")).join("\n"))
   // Văn xuôi I-4 không trích được ⇒ phần nối của section (FLF-184) — render từ Spine không mất nội dung file gốc
   const unmappedIds = new Set(drafts.flatMap((d) => d.unmapped_block_ids ?? []))
   // Phase 5 (T3): ảnh dưới mục FPT ⇒ giữ nguyên văn (phần nối của mục) để bản render nhúng lại ảnh gốc. Trước đây bản
@@ -262,6 +304,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     ...seedStepOps(stripRecord(seeded), plan, { firstSeq: seqRange.first, lastSeq: seqRange.last, at: new Date().toISOString(), ...(draftOwners ? { draftOwners } : {}) })
   ]
   await applyTransaction(projectId, { base_version: seeded.spine_version, ops: planOps, by: "import", reason: "Import: kế hoạch step theo template", step_id: null })
+  await step("layout + lô kế hoạch step")
   profile.layout = layout
   profile.step_plan = plan
   profile.section_slices = sliceItems
@@ -323,7 +366,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
 
   // 4. Diagram từ Spine (use case, ERD, luồng màn, ngữ cảnh) ⇒ bản render có hình như mode 2 cho loại người dùng chưa có
   // hình; loại đã có sơ đồ gốc thì hình PlantUML vẫn vẽ sẵn (in ra ngay khi CR bỏ ảnh gốc) nhưng không in (§4.13)
-  await renderDiagramsIfAvailable(projectId)
+  await renderDiagramsIfAvailable(projectId, run.progress)
+  await step("vẽ diagram")
 
   // Baseline imported + DocVersion 0.1 — chụp Spine sau lô kế hoạch step; file 0.1 = bản render của đúng snapshot đó
   const planned = await loadSpine(projectId)
@@ -334,6 +378,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     await renderVersionFile(projectId, projectName, stripRecord(planned), { version: IMPORTED_DOC_VERSION, stampSource: "import", templateSource, ...(recordSnapshot ? { recordChanges: recordSnapshot } : {}) }),
     { projectId, kind: "version", name: IMPORTED_DOC_VERSION }
   )
+  unownedRefs.push(renderedRef)
+  await step("render file 0.1")
   let baseline: BaselineEntry
   try {
     const snap = await snapshotBaseline(projectId, stripRecord(planned), {
@@ -363,14 +409,18 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     record_snapshot: recordSnapshot,
     created_by: userId
   })
+  unownedRefs.length = 0
+  await step("baseline + DocVersion 0.1")
   // Index embedding cho C-3 (hybrid retrieval) từ baseline v0 — chạy nền, không chặn/không làm hỏng finalize. Gọi ngay
   // sau baseline vì bước check có thể dừng (hết credit ⇒ paused); check ghi thêm thì lượt cuối hàm đồng bộ phần đổi.
   scheduleEmbeddingSync(projectId)
 
   await transitionImport(doc, "checking")
-  await runImportCheck(doc, userId)
+  await runImportCheck(doc, userId, run.guard)
+  await step("kiểm tra 1.11–1.12")
   const after = await loadSpine(projectId)
   await assembleWorkingDraft(projectId, projectName, after.spine_version)
+  await step("ghép bản làm việc")
   scheduleEmbeddingSync(projectId)
   // FLF-360: còn ảnh AI chưa đọc được vì quá tải ⇒ hẹn job đọc lại nền (không tạo version mới khi đọc được). Import động:
   // reread-jobs dùng lại `refreshSegmentHashes` của file này
@@ -558,8 +608,8 @@ export const titleContentFindings = (spine: Spine, headingMap: readonly HeadingM
  * Vẽ lại mọi diagram từ Spine vừa import. PlantUML không có mặt (dev/test, sự cố) ⇒ bỏ qua thay vì ghi hàng loạt
  * `render_error`: người dùng vẽ lại sau ở workspace. Lỗi vẽ không chặn import.
  */
-const renderDiagramsIfAvailable = async (projectId: string): Promise<void> => {
-  await renderAllIfAvailable(projectId, { by: "import", step_id: null })
+const renderDiagramsIfAvailable = async (projectId: string, onProgress?: () => void): Promise<void> => {
+  await renderAllIfAvailable(projectId, { by: "import", step_id: null, ...(onProgress ? { onProgress } : {}) })
 }
 
 /** Ghép sẵn bản làm việc (S-8.2) — lỗi chỉ ghi log: workspace tự `POST /assemble` lại được. */
@@ -620,8 +670,9 @@ export const rollbackPartialFinalize = async (doc: IImportedDocument): Promise<v
 }
 
 /** UC-61/UC-75 cho bước check: chạy lại phần còn thiếu của 1.11–1.12. */
-export const resumeCheck = async (doc: IImportedDocument, userId: string): Promise<void> => {
-  await runImportCheck(doc, userId)
+export const resumeCheck = async (doc: IImportedDocument, userId: string, run: FinalizeRunOptions = {}): Promise<void> => {
+  await run.guard?.()
+  await runImportCheck(doc, userId, run.guard)
   // FLF-395: finalize dừng sau bản 0.1 (vd hết credit ở bước kiểm) ⇒ lần chạy tiếp mới tới chỗ tự lưu khung
   const v01 = await DocVersion.findOne({ projectId: doc.projectId, version: IMPORTED_DOC_VERSION }).select("file_ref").lean()
   if (v01?.file_ref) await autoSaveSkeleton(String(doc.projectId), userId, v01.file_ref)

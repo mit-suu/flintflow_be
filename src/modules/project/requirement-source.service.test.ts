@@ -27,7 +27,7 @@ vi.mock("./requirement-source.model.js", () => ({
   }
 }))
 
-const { captureSources, entityExists, entityPathOf, listSources, resolveParagraphs } = await import("./requirement-source.service.js")
+const { captureSources, entityExists, entityPathOf, listSources, paragraphTexts, resolveParagraphs } = await import("./requirement-source.service.js")
 
 const DOC_ID = new mongoose.Types.ObjectId()
 const MINUTES = "Biên bản họp kick-off\n\nKhách hàng, người bán và admin dùng hệ thống.\n\nThanh toán xong trong 3 giây."
@@ -75,6 +75,24 @@ describe("resolveParagraphs", () => {
     const out = await resolveParagraphs("p1", ["D1-P03", "d1-p02", "D2-P01", "D1-P09", "K1"])
     expect([...out.keys()].sort()).toEqual(["D1-P02", "D1-P03"])
     expect(out.get("D1-P03")).toEqual({ document_id: DOC_ID, para_id: "D1-P03", quote: "Thanh toán xong trong 3 giây." })
+  })
+})
+
+describe("FLF-393 — nguồn của câu hỏi chốt bằng tài liệu", () => {
+  it("quyết định (`decisions[id=…]`) gắn được nguồn như mọi phần tử", async () => {
+    expect(entityPathOf("decisions[id=D2]")).toBe("decisions[id=D2]")
+    const withDecision = { ...spine, decisions: [{ id: "D2" }] } as unknown as Spine
+    expect(entityExists(withDecision, "decisions[id=D2]")).toBe(true)
+    expect(await captureSources("p1", "B-0.1", withDecision, [{ path: "decisions[id=D2]", paras: ["D1-P03"] }])).toBe(1)
+    expect(sources.upserts[0]?.filter).toEqual({ projectId: "p1", entity_path: "decisions[id=D2]" })
+  })
+
+  it("paragraphTexts trả chữ đầy đủ của đoạn (không cắt như quote), bỏ mã không tra được", async () => {
+    const long = "x".repeat(800)
+    docs.rows = [{ _id: DOC_ID, docCode: 1, extractedText: `Mở đầu\n\n${long}`, originalName: "a.docx" }]
+    const out = await paragraphTexts("p1", ["d1-p02", "D1-P09", "K1"])
+    expect([...out.keys()]).toEqual(["D1-P02"])
+    expect(out.get("D1-P02")).toHaveLength(800)
   })
 })
 

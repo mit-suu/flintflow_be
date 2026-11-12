@@ -1,0 +1,956 @@
+[
+  {
+    "section_id": "feature:@B0044",
+    "status": "done",
+    "error": null,
+    "usage": null,
+    "unmapped": [],
+    "images": [],
+    "partial": null,
+    "fields": [
+      {
+        "path": "features[id=F-3.2].name",
+        "value": "Authentication",
+        "confidence": 0.85,
+        "source_block_ids": [
+          "B0044"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      }
+    ]
+  },
+  {
+    "section_id": "fixed:1",
+    "status": "done",
+    "error": null,
+    "usage": "I-4:fixed:1 import_extract_fields",
+    "unmapped": [],
+    "images": [],
+    "partial": null,
+    "fields": [
+      {
+        "path": "project.vision",
+        "value": "Lumen is an online learning platform for small training centers.",
+        "confidence": 0.94,
+        "source_block_ids": [
+          "B0002",
+          "B0007",
+          "B0011"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A03].name",
+        "value": "Shared Persona",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0002",
+          "B0007",
+          "B0011"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A03].kind",
+        "value": "human",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0002",
+          "B0007",
+          "B0011"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A04].name",
+        "value": "Persona fixed:1 B0002",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0002"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A04].kind",
+        "value": "human",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0002"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-90].name",
+        "value": "Self keyed flow",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0002"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-90].actor_ids",
+        "value": [
+          "Shared Persona"
+        ],
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0002"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-91].name",
+        "value": "Flow fixed:1 B0002",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0002"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-91].actor_ids",
+        "value": [
+          "Shared Persona"
+        ],
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0002"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A05].name",
+        "value": "Persona fixed:1 B0007",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0007"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A05].kind",
+        "value": "human",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0007"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-92].name",
+        "value": "Flow fixed:1 B0007",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0007"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-92].actor_ids",
+        "value": [
+          "Shared Persona"
+        ],
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0007"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A06].name",
+        "value": "Persona fixed:1 B0011",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0011"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A06].kind",
+        "value": "human",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0011"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-93].name",
+        "value": "Flow fixed:1 B0011",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0011"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-93].actor_ids",
+        "value": [
+          "Shared Persona"
+        ],
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0011"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      }
+    ]
+  },
+  {
+    "section_id": "fixed:2.1",
+    "status": "done",
+    "error": null,
+    "usage": null,
+    "unmapped": [],
+    "images": [],
+    "partial": null,
+    "fields": [
+      {
+        "path": "actors[id=A01].name",
+        "value": "Learner",
+        "confidence": 0.95,
+        "source_block_ids": [
+          "B0015"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A01].description",
+        "value": "A person who enrolls in courses.",
+        "confidence": 0.95,
+        "source_block_ids": [
+          "B0015"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A02].name",
+        "value": "Admin",
+        "confidence": 0.95,
+        "source_block_ids": [
+          "B0015"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A02].description",
+        "value": "Manages courses and users.",
+        "confidence": 0.95,
+        "source_block_ids": [
+          "B0015"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      }
+    ]
+  },
+  {
+    "section_id": "fixed:2.2.1",
+    "status": "done",
+    "error": null,
+    "usage": "I-4:fixed:2.2.1 import_extract_fields",
+    "unmapped": [],
+    "images": [
+      {
+        "block_id": "B0025",
+        "kind": "usecase"
+      },
+      {
+        "block_id": "B0027",
+        "kind": "other"
+      }
+    ],
+    "partial": null,
+    "fields": [
+      {
+        "path": "actors[id=A07].name",
+        "value": "Guest",
+        "confidence": 0.69,
+        "source_block_ids": [
+          "B0024",
+          "B0025"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A07].kind",
+        "value": "human",
+        "confidence": 0.69,
+        "source_block_ids": [
+          "B0024",
+          "B0025"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-02].name",
+        "value": "Log in",
+        "confidence": 0.94,
+        "source_block_ids": [
+          "B0024",
+          "B0025"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-02].actor_ids",
+        "value": [
+          "Learner",
+          "Guest"
+        ],
+        "confidence": 0.7,
+        "source_block_ids": [
+          "B0024",
+          "B0025"
+        ],
+        "origin": "vision",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A03].name",
+        "value": "Shared Persona",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0024"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A03].kind",
+        "value": "human",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0024"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A08].name",
+        "value": "Persona fixed:2.2.1 B0024",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0024"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A08].kind",
+        "value": "human",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0024"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-94].name",
+        "value": "Flow fixed:2.2.1 B0024",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0024"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-94].actor_ids",
+        "value": [
+          "Shared Persona"
+        ],
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0024"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      }
+    ]
+  },
+  {
+    "section_id": "fixed:2.2.2",
+    "status": "done",
+    "error": null,
+    "usage": null,
+    "unmapped": [],
+    "images": [],
+    "partial": null,
+    "fields": [
+      {
+        "path": "use_cases[id=UC-01].name",
+        "value": "Register account",
+        "confidence": 0.95,
+        "source_block_ids": [
+          "B0030"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-01].actor_ids",
+        "value": [
+          "Learner"
+        ],
+        "confidence": 0.95,
+        "source_block_ids": [
+          "B0030"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-02].name",
+        "value": "Log in",
+        "confidence": 0.95,
+        "source_block_ids": [
+          "B0030"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-02].actor_ids",
+        "value": [
+          "Learner"
+        ],
+        "confidence": 0.95,
+        "source_block_ids": [
+          "B0030"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      }
+    ]
+  },
+  {
+    "section_id": "fixed:3.1.2",
+    "status": "done",
+    "error": null,
+    "usage": "I-4:fixed:3.1.2 import_extract_fields",
+    "unmapped": [],
+    "images": [],
+    "partial": null,
+    "fields": [
+      {
+        "path": "screens[id=SCR-01].name",
+        "value": "Login screen",
+        "confidence": 0.94,
+        "source_block_ids": [
+          "B0043"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "screens[id=SCR-01].description",
+        "value": "Lets the learner sign in.",
+        "confidence": 0.94,
+        "source_block_ids": [
+          "B0043"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A03].name",
+        "value": "Shared Persona",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0043"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A03].kind",
+        "value": "human",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0043"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A09].name",
+        "value": "Persona fixed:3.1.2 B0043",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0043"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A09].kind",
+        "value": "human",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0043"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-95].name",
+        "value": "Flow fixed:3.1.2 B0043",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0043"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-95].actor_ids",
+        "value": [
+          "Shared Persona"
+        ],
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0043"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      }
+    ]
+  },
+  {
+    "section_id": "fixed:4.2.3",
+    "status": "done",
+    "error": null,
+    "usage": "I-4:fixed:4.2.3 import_extract_fields",
+    "unmapped": [],
+    "images": [],
+    "partial": null,
+    "fields": [
+      {
+        "path": "nfrs[id=NFR-01].statement",
+        "value": "The system shall respond within 2 seconds for 95% of requests.",
+        "confidence": 0.94,
+        "source_block_ids": [
+          "B0053"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "nfrs[id=NFR-01].kind",
+        "value": "quantitative",
+        "confidence": 0.94,
+        "source_block_ids": [
+          "B0053"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "nfrs[id=NFR-01].metric",
+        "value": "response time",
+        "confidence": 0.94,
+        "source_block_ids": [
+          "B0053"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "nfrs[id=NFR-01].threshold",
+        "value": "2 s",
+        "confidence": 0.94,
+        "source_block_ids": [
+          "B0053"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "nfrs[id=NFR-01].category",
+        "value": "performance",
+        "confidence": 0.94,
+        "source_block_ids": [
+          "B0053"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A03].name",
+        "value": "Shared Persona",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0053"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A03].kind",
+        "value": "human",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0053"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A12].name",
+        "value": "Persona fixed:4.2.3 B0053",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0053"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A12].kind",
+        "value": "human",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0053"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-98].name",
+        "value": "Flow fixed:4.2.3 B0053",
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0053"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-98].actor_ids",
+        "value": [
+          "Shared Persona"
+        ],
+        "confidence": 0.75,
+        "source_block_ids": [
+          "B0053"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      }
+    ]
+  },
+  {
+    "section_id": "fixed:5.1",
+    "status": "done",
+    "error": null,
+    "usage": null,
+    "unmapped": [],
+    "images": [],
+    "partial": null,
+    "fields": [
+      {
+        "path": "business_rules[id=BR-01].statement",
+        "value": "Passwords must have at least 8 characters.",
+        "confidence": 0.95,
+        "source_block_ids": [
+          "B0056"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      }
+    ]
+  },
+  {
+    "section_id": "function:@B0045",
+    "status": "done",
+    "error": null,
+    "usage": "I-4:function:@B0045 import_extract_fields",
+    "unmapped": [],
+    "images": [],
+    "partial": null,
+    "fields": [
+      {
+        "path": "functions[id=FR-3.2.1].name",
+        "value": "Register account",
+        "confidence": 0.85,
+        "source_block_ids": [
+          "B0045",
+          "B0046"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      },
+      {
+        "path": "functions[id=FR-3.2.1].feature_id",
+        "value": "F-3.2",
+        "confidence": 0.85,
+        "source_block_ids": [
+          "B0045",
+          "B0046"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      },
+      {
+        "path": "functions[id=FR-3.2.1].trigger",
+        "value": "Learner submits the form",
+        "confidence": 0.55,
+        "source_block_ids": [
+          "B0045",
+          "B0046"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      },
+      {
+        "path": "functions[id=FR-3.2.1].normal",
+        "value": [
+          "Enter email",
+          "Submit"
+        ],
+        "confidence": 0.85,
+        "source_block_ids": [
+          "B0045",
+          "B0046"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      },
+      {
+        "path": "functions[id=FR-3.2.1].abnormal",
+        "value": [
+          "Wrong password"
+        ],
+        "confidence": 0.85,
+        "source_block_ids": [
+          "B0045",
+          "B0046"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A03].name",
+        "value": "Shared Persona",
+        "confidence": 0.73,
+        "source_block_ids": [
+          "B0046"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A03].kind",
+        "value": "human",
+        "confidence": 0.73,
+        "source_block_ids": [
+          "B0046"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A10].name",
+        "value": "Persona function:@B0045 B0046",
+        "confidence": 0.73,
+        "source_block_ids": [
+          "B0046"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A10].kind",
+        "value": "human",
+        "confidence": 0.73,
+        "source_block_ids": [
+          "B0046"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-96].name",
+        "value": "Flow function:@B0045 B0046",
+        "confidence": 0.73,
+        "source_block_ids": [
+          "B0046"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-96].actor_ids",
+        "value": [
+          "Shared Persona"
+        ],
+        "confidence": 0.73,
+        "source_block_ids": [
+          "B0046"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      }
+    ]
+  },
+  {
+    "section_id": "function:@B0047",
+    "status": "done",
+    "error": null,
+    "usage": "I-4:function:@B0047 import_extract_fields",
+    "unmapped": [],
+    "images": [],
+    "partial": null,
+    "fields": [
+      {
+        "path": "functions[id=FR-3.2.2].name",
+        "value": "Log in to system",
+        "confidence": 0.85,
+        "source_block_ids": [
+          "B0047",
+          "B0048"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      },
+      {
+        "path": "functions[id=FR-3.2.2].feature_id",
+        "value": "F-3.2",
+        "confidence": 0.85,
+        "source_block_ids": [
+          "B0047",
+          "B0048"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      },
+      {
+        "path": "functions[id=FR-3.2.2].trigger",
+        "value": "Learner submits the form",
+        "confidence": 0.55,
+        "source_block_ids": [
+          "B0047",
+          "B0048"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      },
+      {
+        "path": "functions[id=FR-3.2.2].normal",
+        "value": [
+          "Enter email",
+          "Submit"
+        ],
+        "confidence": 0.85,
+        "source_block_ids": [
+          "B0047",
+          "B0048"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      },
+      {
+        "path": "functions[id=FR-3.2.2].abnormal",
+        "value": [
+          "Wrong password"
+        ],
+        "confidence": 0.85,
+        "source_block_ids": [
+          "B0047",
+          "B0048"
+        ],
+        "origin": "deterministic",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A03].name",
+        "value": "Shared Persona",
+        "confidence": 0.73,
+        "source_block_ids": [
+          "B0048"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A03].kind",
+        "value": "human",
+        "confidence": 0.73,
+        "source_block_ids": [
+          "B0048"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A11].name",
+        "value": "Persona function:@B0047 B0048",
+        "confidence": 0.73,
+        "source_block_ids": [
+          "B0048"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "actors[id=A11].kind",
+        "value": "human",
+        "confidence": 0.73,
+        "source_block_ids": [
+          "B0048"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-97].name",
+        "value": "Flow function:@B0047 B0048",
+        "confidence": 0.73,
+        "source_block_ids": [
+          "B0048"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      },
+      {
+        "path": "use_cases[id=UC-97].actor_ids",
+        "value": [
+          "Shared Persona"
+        ],
+        "confidence": 0.73,
+        "source_block_ids": [
+          "B0048"
+        ],
+        "origin": "ai",
+        "confirmed": false
+      }
+    ]
+  }
+]

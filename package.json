@@ -49,6 +49,7 @@
     "eval:elicit-brief": "tsx src/scripts/eval-elicit-brief.ts",
     "eval:knowledge": "tsx src/scripts/eval-knowledge.ts",
     "eval:import-match": "tsx src/scripts/eval-import-match.ts",
+    "eval:doc-retrieval": "tsx src/scripts/eval-doc-retrieval.ts",
     "seed:e2e-user": "tsx src/scripts/seed-e2e-user.ts"
   },
   "dependencies": {

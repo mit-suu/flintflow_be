@@ -57,12 +57,17 @@ export const mockCalls: RecordedCall[] = []
 export const mockImages: { mime: string; bytes: number }[][] = []
 
 /** Ghi đè từng lượt (vd ép lỗi); trả `undefined` để đi đường mặc định. */
-export const mockOverrides: { next?: (prompt: string) => string | Error | undefined } = {}
+export const mockOverrides: {
+  next?: (prompt: string) => string | Error | undefined
+  /** Chạy (và chờ) trước khi trả lời lượt này — trễ để xáo thứ tự xong của các lượt song song, ghi DB giữa lượt… */
+  before?: (prompt: string) => Promise<void> | void
+} = {}
 
 export const resetMockLlm = (): void => {
   mockCalls.length = 0
   mockImages.length = 0
   mockOverrides.next = undefined
+  mockOverrides.before = undefined
 }
 
 export const mockCallLLM = async (
@@ -72,6 +77,7 @@ export const mockCallLLM = async (
 ): Promise<{ text: string; promptTokens: number; completionTokens: number; raw: unknown }> => {
   const { kind, stepId } = detectCall(prompt)
   mockImages.push((options.images ?? []).map((i) => ({ mime: i.mime, bytes: Buffer.from(i.data, "base64").length })))
+  await mockOverrides.before?.(prompt)
   const override = mockOverrides.next?.(prompt)
   if (override instanceof Error) throw override
 
