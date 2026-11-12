@@ -54,6 +54,7 @@ import { functionFieldValues, patchFunctionOriginal, type FunctionFieldValues, t
 import { defaultSectionTitle, functionDiagramBlocks, generatedDiagramBlocks, renderContentSlot, renderSection, type SectionRenderContext } from "./section-renderer.js"
 import { bindFixedTemplateSlots, isContentSlot, slotParents } from "../import/content-slots.js"
 import { isInstructionText, isRealText, splitInstruction, tableBodyHasRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
+import { templateWrapperIds } from "../import/template-wrappers.js"
 
 /** Một mục layout (cùng hình `LayoutEntry` của `import/template-profile.model.ts`). */
 export interface TemplateLayoutEntry {
@@ -882,6 +883,7 @@ export const buildLayoutSections = (
     out.push(section)
     levels.push(level)
   }
+  const wrapperIds = templateWrapperIds(template.layout)
   for (const n of numbered) {
     const base = { id: n.section_id, number: n.number, heading: n.title, level: n.renderLevel }
     if (n.kind === "group") {
@@ -895,6 +897,12 @@ export const buildLayoutSections = (
         ? sourceBlocks.filter((b) => !isInstructionText(b.text) && (b.kind !== "table" || tableBodyHasRealText(b.rows)))
         : guidanceWhileEmpty(sourceBlocks)
       const blocks = [...sliceBlocks(n), ...customBlocks(kept, (ref) => opts.diagramPng(mediaId(ref)), slotFor(n.section_id, n.number))]
+      // FLF-411 (U2-2): heading bao chỉ chứa mục con, không có chữ — dòng chia phần của mẫu ("II. Software Requirement
+      // Specification" tách Record of Changes với thân SRS) ⇒ heading nhóm, không phải mục "còn trống"
+      if (n.kind === "custom" && wrapperIds.has(n.section_id) && blocks.length === 0) {
+        push({ ...base, id: `${GROUP_PREFIX}${n.section_id}`, blocks: [] }, n.level)
+        continue
+      }
       if (n.kind === "continuation") {
         // Chủ = section gần nhất phía trước có cấp nhỏ hơn (phần nối có cấp = cấp chủ + 1, xem import/step-plan.ts)
         let owner = levels.length - 1
