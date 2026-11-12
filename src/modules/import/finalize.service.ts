@@ -66,6 +66,7 @@ import { buildTemplateContext } from "./template-context.js"
 import { compareTargetStructure, type TargetStructure, type TemplateIntent } from "./target-structure.js"
 import { titleOfSection } from "./gap-report.service.js"
 import { scheduleEmbeddingSync } from "../change-request/embedding/embedding-sync.service.js"
+import { stripTemplateMarks } from "./template-markers.js"
 
 export interface FinalizeResult {
   doc: IImportedDocument
@@ -229,17 +230,19 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const sliceItems = sectionSlices(slices, entities)
   // FLF-336 I-5: so cấu trúc đích (trước kế hoạch step) — ý định theo `Project.template_intent` (FLF-335); dự án cũ ⇒ tự do.
   // Heading lặp (vd "Business Rules" của từng chức năng) mà nội dung đã trích vào Spine qua slice vẫn là mục có nội dung
+  // FLF-411: chữ của mẫu (hướng dẫn nhiều đoạn, `<<Sample … >>`, chỗ điền) không làm mục "có nội dung" — khớp màn đọc khung
+  const authoredBlocks = stripTemplateMarks(layoutBlocks)
   const withContent = new Set([
-    ...sectionsWithContent(layoutBlocks),
+    ...sectionsWithContent(authoredBlocks),
     ...customSectionsWithContent(customSections),
-    ...repeatSectionsWithContent(slices, layoutBlocks),
+    ...repeatSectionsWithContent(slices, authoredBlocks),
     ...sliceItems.filter((sl) => sl.items.length).map((sl) => `custom:${sl.custom_id}`)
   ])
   const structure = compareTargetStructure(layout, withContent, stripRecord(seeded), intent, undefined, { draftAll })
   // Bước sở hữu mục của mẫu (id bước mẫu, bỏ `@màn`) — dự án mới theo mẫu bắt buộc: chờ soạn hết, không bước nào `accepted` sẵn
   const draftOwners = draftAll ? new Set(structure.sections.flatMap((s) => s.owner_steps.map((id) => id.split("@")[0]))) : undefined
   // Kế hoạch đọc Spine đã nạp dữ liệu: mục trích không ra gì thì vẫn là "thiếu", đừng đánh dấu step đã xong
-  const plan = buildStepPlan(layout, sectionsWithContent(layoutBlocks), stripRecord(seeded), draftOwners ? { draftOwners } : {})
+  const plan = buildStepPlan(layout, sectionsWithContent(authoredBlocks), stripRecord(seeded), draftOwners ? { draftOwners } : {})
   // FLF-252: quyền của ma trận không khớp màn / vai trò nào ⇒ cờ vàng (trước đây bỏ im lặng), neo vào bảng phân quyền
   const matrixBlocks = [...new Set(entities.filter((e) => e.entity === "permissions").flatMap((e) => [...e.source_block_ids]))].slice(0, 1)
   const planOps = [
