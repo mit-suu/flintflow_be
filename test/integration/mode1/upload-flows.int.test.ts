@@ -3,7 +3,8 @@
  *
  * 1. Up **template trống** (giữ khung) ⇒ khung mẫu: không trích chữ / hình mẫu, soạn đủ mọi mục (luồng C), không dữ liệu ví dụ.
  * 2. Up **SRS có sẵn, không tick** "Bổ sung các mục còn thiếu theo mẫu chuẩn FlintFlow" ⇒ giữ đúng khung file (chế độ 1 khi đủ mục).
- * 3. Up **SRS có sẵn, tick** ⇒ đích là mẫu FlintFlow (bổ sung mục thiếu).
+ * 3. Up **SRS có sẵn, tick** ⇒ đích là mẫu FlintFlow (bổ sung mục thiếu). FLF-416: còn thiếu ⇒ chế độ 4 vào Luồng 2 như chế độ 3
+ *    (bước của mục thiếu chờ soạn, bước của mục khách đã viết giữ chốt).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
@@ -21,6 +22,13 @@ import { TemplateProfile } from "../../../src/modules/import/template-profile.mo
 import { Project } from "../../../src/modules/project/project.model.js"
 import { Usage } from "../../../src/modules/spine/usage.model.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
+import { applyTransaction } from "../../../src/modules/spine/op-engine.js"
+import { docFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
+import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.js"
+import { readZipText } from "../../../src/modules/render/zip.test-helper.js"
+import { parseDocument } from "../../../src/modules/import/parse.service.js"
+import { snapshotBaseline } from "../../../src/modules/pipeline/s9/baseline.service.js"
+import { convertFromFpt } from "../../../src/modules/import/convert-from-fpt.service.js"
 
 beforeEach(() => {
   resetMockLlm()
@@ -29,6 +37,7 @@ beforeEach(() => {
 
 const REPORT3_TEMPLATE = new URL("../../../fixtures/fpt-report3-blank-template.docx", import.meta.url)
 const WRITTEN_SRS = new URL("../../../fixtures/existing-srs-fu-student-portal.docx", import.meta.url)
+const TECHMART_SRS = new URL("../../../fixtures/techmart-srs-fpt.docx", import.meta.url)
 
 const H = (s: SeededFixture) => ({ Authorization: `Bearer ${s.token}` })
 
@@ -99,6 +108,85 @@ describe("FLF-411 - ba luồng upload", () => {
     expect([1, 4]).toContain(r.profile.target_structure?.resolved_mode)
     expect(r.spine.actors.length).toBeGreaterThan(0)
   }, 120000)
+
+  it("3b. FLF-416 - TechMart (thiếu Glossary) + tick ⇒ chế độ 4 vào Luồng 2: soạn bước mục thiếu, giữ chốt mục khách đã viết", async () => {
+    const r = await uploadAndFinalize(TECHMART_SRS, true)
+    expect(r.preview.intent).toBe("free")
+    expect(r.preview.summary.kind).toBe("written")
+    const structure = r.profile.target_structure!
+    expect(structure.resolved_mode).toBe(4)
+    const missing = structure.sections.filter((s) => s.status === "missing")
+    const present = structure.sections.filter((s) => s.status === "present")
+    expect(missing.length).toBeGreaterThan(0)
+    expect(missing.some((s) => /glossary|thuật ngữ/i.test(s.title))).toBe(true)
+    // Luồng 2 như chế độ 3: mode fpt, import đang soạn, có Spine mốc cho bản in theo file khách
+    expect(r.status).toBe("drafting")
+    expect(r.project).toMatchObject({ mode: "fpt", import_state: "drafting", template_intent: "free" })
+    expect(r.profile.flow2_entry_at).toBeTruthy()
+    expect(r.profile.flow2_entry_spine).toBeTruthy()
+    const statusOf = (id: string) => r.spine.steps.filter((st) => st.id === id || st.id.startsWith(`${id}@`)).map((st) => st.status)
+    const keepOwners = new Set(present.flatMap((s) => s.owner_steps))
+    // Bước sở hữu mục thiếu (không trùng bước giữ chốt) chờ soạn
+    const draftOwners = [...new Set(missing.flatMap((s) => s.owner_steps))].filter((o) => !keepOwners.has(o))
+    expect(draftOwners.length).toBeGreaterThan(0)
+    for (const owner of draftOwners) expect(statusOf(owner), owner).toContain("pending")
+    // Bước sở hữu mục khách đã viết giữ chốt
+    for (const owner of keepOwners) expect(statusOf(owner).includes("pending"), owner).toBe(false)
+    // Brief mở lại (2.4): B-1.1 chờ chạy, B-0 bỏ qua
+    expect(r.spine.steps.find((st) => st.id === "B-1.1")?.status).toBe("pending")
+    expect(r.spine.progress.current_step).toBe("B-1.1")
+
+    // Bản in (2.10): file khách là nền (giữ style), Glossary soạn thêm chèn thành heading mới đúng vị trí mẫu chuẩn
+    const term = "Checkout Basket FLF416"
+    await applyTransaction(r.projectId, {
+      base_version: r.spine.spine_version, by: r.seeded.userId, reason: "Draft glossary", step_id: null,
+      ops: [{ op: "add", path: "glossary[]", value: { id: "G-416", term, definition: "Giỏ hàng lúc thanh toán." } }]
+    })
+    const original = await docFileStore().load(r.profile.source_file_ref!)
+    const exported = await request(app)
+      .get(`/api/v1/projects/${r.projectId}/export/word?source=draft`)
+      .set(H(r.seeded))
+      .buffer(true)
+      .parse((res, callback) => {
+        const chunks: Buffer[] = []
+        res.on("data", (chunk: Buffer) => chunks.push(chunk))
+        res.on("end", () => callback(null, Buffer.concat(chunks)))
+      })
+    expect(exported.status, String(exported.body)).toBe(200)
+    expect(readZipText(exported.body as Buffer, "word/styles.xml")).toBe(readZipText(original, "word/styles.xml"))
+    const printed = (await parseDocument(exported.body as Buffer)).blocks
+    const glossaryAt = printed.findIndex((b) => b.kind === "heading" && /glossary|thuật ngữ/i.test(b.text))
+    expect(glossaryAt).toBeGreaterThan(0)
+    expect(printed.slice(glossaryAt).some((b) => JSON.stringify(b.rows ?? b.text).includes(term))).toBe(true)
+    // Mục khách đã viết vẫn in nguyên văn: heading của file giữ nguyên thứ tự
+    const sourceHeadings = (await parseDocument(original)).blocks.filter((b) => b.kind === "heading").map((b) => b.text)
+    const printedHeadings = printed.filter((b) => b.kind === "heading").map((b) => b.text)
+    expect(printedHeadings.filter((t) => sourceHeadings.includes(t))).toEqual(sourceHeadings)
+
+    // BF §1: chốt baseline 1.0 ⇒ quy về C-* — dự án chuyển sang sửa bằng CR, bản 1.0 vẫn là file của khách
+    const { projectId: _id, ...current } = (await spineRepository.get(r.projectId))!
+    await snapshotBaseline(r.projectId, current, { base_version: current.spine_version, version: "1.0", type: "generated", doc_version: null, by: r.seeded.userId, step_id: null })
+    expect(await convertFromFpt(r.projectId, r.seeded.userId, { quiet: true })).toMatchObject({ doc_version: "1.0" })
+    expect((await Project.findById(r.projectId).lean())!).toMatchObject({ mode: "import", import_state: "delivered", converted_from: "fpt", template_intent: "free" })
+    const v1 = (await DocVersion.findOne({ projectId: r.projectId, version: "1.0" }).lean())!
+    const v1File = await docFileStore().load(v1.file_ref)
+    expect(readZipText(v1File, "word/styles.xml")).toBe(readZipText(original, "word/styles.xml"))
+    expect(readZipText(v1File, "word/document.xml")).toContain(term)
+    expect(await ImportedDocument.countDocuments({ projectId: r.projectId, status: "drafting" })).toBe(0)
+    // Bản nháp sau 1.0 (luồng CR) vẫn in trên file của khách
+    const afterExport = await request(app)
+      .get(`/api/v1/projects/${r.projectId}/export/word?source=draft`)
+      .set(H(r.seeded))
+      .buffer(true)
+      .parse((res, callback) => {
+        const chunks: Buffer[] = []
+        res.on("data", (chunk: Buffer) => chunks.push(chunk))
+        res.on("end", () => callback(null, Buffer.concat(chunks)))
+      })
+    expect(afterExport.status, String(afterExport.body)).toBe(200)
+    expect(readZipText(afterExport.body as Buffer, "word/styles.xml")).toBe(readZipText(original, "word/styles.xml"))
+    expect(readZipText(afterExport.body as Buffer, "word/document.xml")).toContain(term)
+  }, 180000)
 
   it("1b. up template trống, tick Bổ sung theo mẫu chuẩn ⇒ vẫn là khung mẫu, không nhập chữ / hình ví dụ của mẫu làm dữ liệu", async () => {
     const r = await uploadAndFinalize(REPORT3_TEMPLATE, true)
