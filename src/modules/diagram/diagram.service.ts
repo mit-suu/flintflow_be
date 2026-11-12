@@ -16,8 +16,9 @@
  *   chuyển sang lỗi thì xoá file cũ.
  * - Hình không đổi (`source_hash` giống, đang `ok`) thì không compile lại, không ghi — trừ khi `force`
  *   (vd renderer đổi template mà dữ liệu nguồn không đổi).
- * - `screen_layout`: có `deps.drawLayout` (FLF-214) thì model vẽ wireframe salt theo skill `screen-layout`;
- *   model không vẽ được hoặc salt không compile ⇒ bảng function của renderer code như trước.
+ * - `screen_layout` (FLF-410, `screen-layout-parts.ts`): mockup SVG theo theme dự án, mỗi nền tảng một hình. Spec màn
+ *   do model (`deps.drawLayout`, skill `screen-layout`) lưu kèm SVG; ngữ cảnh model không đổi ⇒ dùng lại spec, không gọi
+ *   model (đổi theme vẽ lại 0 token). Model không vẽ được / spec sai ⇒ bảng function của renderer code như trước.
  */
 
 import * as repository from "../spine/spine.repository.js"
@@ -33,6 +34,9 @@ import { CONTENT_TYPES, gridFsDiagramStore, type DiagramFileFormat, type Diagram
 import { allTargets, renderKind, targetOfDiagram, type DiagramKind, type RenderTarget, type RenderedDiagramPart } from "./renderers/index.js"
 import { svgTitleOf } from "./renderers/common.js"
 import { aiScreenLayout, noAiLayout, type DrawLayout } from "./screen-layout.ai.js"
+import { screenLayoutParts, type LoadOriginal } from "./screen-layout-parts.js"
+import { loadScreenOriginal } from "./screen-originals.js"
+import type { ScreenEnvelope } from "./screen-spec.js"
 import type { RenderContext } from "../../shared/diagram/erd-notation.js"
 import { loadRenderContext } from "./render-context.js"
 
@@ -58,8 +62,10 @@ export interface DiagramServiceDeps {
   renderSvgPng: (svg: string) => Promise<Buffer>
   store: DiagramFileStore
   fix: FixPuml
-  /** Wireframe màn bằng model; mặc định không gọi model (bảng function). Nơi gọi thật cắm `aiScreenLayout`. */
+  /** Spec mockup màn bằng model; mặc định không gọi model (bảng function). Nơi gọi thật cắm `aiScreenLayout`. */
   drawLayout: DrawLayout
+  /** Ảnh gốc của màn import đã bật mockup (kiểu vẽ + ảnh); thiếu ⇒ không màn nào có ảnh gốc. */
+  loadOriginal?: LoadOriginal
   /** Dữ liệu ngoài Spine cho hình (ký pháp ERD của dự án). */
   renderContext: (projectId: string) => Promise<RenderContext>
   now: () => Date
@@ -85,6 +91,7 @@ export const defaultDeps = (): DiagramServiceDeps => ({
   store: gridFsDiagramStore,
   fix: noAutoFix,
   drawLayout: noAiLayout,
+  loadOriginal: loadScreenOriginal(),
   renderContext: loadRenderContext,
   now: () => new Date()
 })
@@ -202,6 +209,10 @@ export interface RenderOptions {
   step_id?: string | null
   /** Compile lại cả hình có `source_hash` không đổi. */
   force?: boolean
+  /** `screen_layout`: chỉ vẽ lại từ spec đã lưu — màn chưa có spec giữ nguyên hình, không gọi model (đổi theme). */
+  specOnly?: boolean
+  /** Kết quả lượt model vẽ mockup của từng màn (ảnh màn hình, màu ảnh gốc). */
+  onLayoutDrawn?: (screenId: string, envelope: ScreenEnvelope | null) => void
   deps?: Partial<DiagramServiceDeps>
 }
 
@@ -302,7 +313,26 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
 
   for (const target of targets) {
     const existing = spine.diagrams.filter((d) => sameTarget(d, target)).sort((a, b) => (a.id < b.id ? -1 : 1))
-    const parts = renderKind(spine, target.kind, target.owner_id, context)
+    const parts =
+      target.kind === "screen_layout" && target.owner_id
+        ? await screenLayoutParts({
+            projectId,
+            userId: options.userId ?? options.by,
+            spine,
+            screenId: target.owner_id,
+            context,
+            existing,
+            force: options.force ?? false,
+            specOnly: options.specOnly ?? false,
+            drawLayout: deps.drawLayout,
+            loadOriginal: deps.loadOriginal,
+            onDrawn: options.onLayoutDrawn
+          })
+        : renderKind(spine, target.kind, target.owner_id, context)
+    if (parts === null) {
+      produced.push(...existing)
+      continue
+    }
     const ids = assignPartIds(target.kind, existing, parts, nextId)
 
     for (const [i, part] of parts.entries()) {
@@ -320,15 +350,7 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
           produced.push(previous)
           continue
         }
-      } else {
-        const drawn =
-          part.kind === "screen_layout" && part.owner_id
-            ? await deps.drawLayout({ projectId, userId: options.userId ?? options.by, spine, screenId: part.owner_id }).catch(() => null)
-            : null
-        compiled = await compileWithFix(part.kind, drawn ?? part.source, deps)
-        // Salt của model không compile ⇒ vẽ bảng function thay vì để hình lỗi
-        if (drawn !== null && !compiled.ok) compiled = await compileWithFix(part.kind, part.source, deps)
-      }
+      } else compiled = await compileWithFix(part.kind, part.source, deps)
       const diagram: Diagram = {
         id,
         kind: part.kind,
@@ -369,6 +391,21 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
   })
   await syncFiles(projectId, toStore, [...removed, ...errored], deps)
   return { spine_version: result.spine_version, diagrams: produced, rendered, removed }
+}
+
+/**
+ * Đổi theme mockup (FLF-410): vẽ lại mọi `screen_layout` đang có từ spec đã lưu — không gọi model, không credit. Màn chưa
+ * có spec (bảng function, wireframe Salt cũ) giữ nguyên tới lượt vẽ kế tiếp.
+ */
+export const redrawScreenLayoutsFromSpec = async (projectId: string, options: Omit<RenderOptions, "specOnly" | "force">): Promise<RenderResult> => {
+  const spine = stripRecord(await loadSpine(projectId))
+  const owners = [...new Set(spine.diagrams.filter((d) => d.kind === "screen_layout" && d.owner_id).map((d) => d.owner_id as string))]
+  return renderDiagrams(
+    projectId,
+    owners.map((id) => ({ kind: "screen_layout" as const, owner_id: id })),
+    // force: vẽ lại cả hình chưa stale (renderer đổi khung / lề) — specOnly bảo đảm không gọi model
+    { ...options, specOnly: true, force: true, deps: { ...options.deps, drawLayout: noAiLayout } }
+  )
 }
 
 export const renderDiagram = (projectId: string, kind: DiagramKind, ownerId: string | null, options: RenderOptions) =>

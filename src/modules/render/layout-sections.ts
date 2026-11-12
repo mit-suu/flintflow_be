@@ -51,7 +51,10 @@ import { mediaId } from "./import-media.js"
 import { appendToFileTables, conformBlocksToFileTable } from "./file-table.js"
 import { elementOfKey, isLabelLine, refreshTailBlock } from "./element-tail.js"
 import { functionFieldValues, patchFunctionOriginal, type FunctionFieldValues, type FunctionOriginalBlock } from "./function-original.js"
-import { defaultSectionTitle, functionDiagramBlocks, generatedDiagramBlocks, renderContentSlot, renderSection, type SectionRenderContext } from "./section-renderer.js"
+import { defaultSectionTitle, functionDiagramBlocks, generatedDiagramBlocks, renderContentSlot, renderSection, screenLayoutImages, type SectionRenderContext } from "./section-renderer.js"
+import { sentencesFor } from "./labels.js"
+import { originalSectionOfScreen } from "../diagram/screen-originals.js"
+import type { ScreenMockupState } from "../../shared/diagram/screen-theme.js"
 import { bindFixedTemplateSlots, isContentSlot, slotParents } from "../import/content-slots.js"
 import { isInstructionText, isRealText, splitInstruction, tableBodyHasRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
 
@@ -117,6 +120,8 @@ export interface TemplateLayout {
    * (chưa change request nào sửa chức năng đó) ⇒ mục in nguyên văn file; lệch ⇒ in từ Spine như cũ.
    */
   functionOriginals?: readonly FunctionOriginal[]
+  /** FLF-410: màn đã bật "Vẽ lại bằng mockup" (`Project.screenMockups`) — mockup thay ảnh màn hình trong mục nguyên văn. */
+  screenMockups?: readonly ScreenMockupState[]
   /**
    * Mẫu IEEE: heading lặp lại một section FPT (`custom_id`, vd Availability dưới 4.2.2) + phần tử trích từ nó
    * (`nfrs:NFR-03`). Phần tử in dưới heading đó, lần đầu của section chỉ in phần còn lại (kể cả phần tử thêm sau).
@@ -707,6 +712,15 @@ export const buildLayoutSections = (
     if (functionSourceHash(fn) === o.source_hash) return [...o.blocks]
     return o.field_values ? patchFunctionOriginal(o.blocks, o.field_values, functionFieldValues(spine, fn)) : null
   }
+  /** FLF-410: mục nguyên văn ⇒ màn đã bật mockup (có hình mockup đã vẽ) + index ảnh bị thay. */
+  const mockupBySection = new Map<string, { screenId: string; indexes: readonly number[]; caption: string }>()
+  for (const state of template.screenMockups ?? []) {
+    if (!state.enabled) continue
+    const drawn = spine.diagrams.some((d) => d.kind === "screen_layout" && d.owner_id === state.screen_id && d.format === "svg" && d.render_status === "ok")
+    const section = drawn ? originalSectionOfScreen(spine, template.functionOriginals ?? [], state.screen_id) : null
+    const screen = spine.screens.find((s) => s.id === state.screen_id)
+    if (section && screen) mockupBySection.set(section.section_id, { screenId: screen.id, indexes: state.image_indexes, caption: sentencesFor(template.language).screenLayoutCaption(screen.name) })
+  }
   /**
    * Heading con của mục chức năng: cấp tương đối heading mục ⇒ dời theo cấp in của mục. FLF-390: ảnh sơ đồ gốc gắn phần
    * tử (sequence của function, activity của use case) mà dữ liệu đã đổi ⇒ thay bằng hình FlintFlow vẽ lại tại đúng chỗ ảnh.
@@ -718,7 +732,22 @@ export const buildLayoutSections = (
       if (run.length) out.push(...customBlocks(guidanceWhileEmpty(run), (ref) => opts.diagramPng(mediaId(ref)), slotFor(sectionId, number)))
       run = []
     }
+    // FLF-410: màn của mục đã bật mockup ⇒ mockup thay các ảnh màn hình, đặt ở chỗ ảnh đầu tiên bị bỏ (mục không ảnh ⇒ đầu mục)
+    const mockup = mockupBySection.get(sectionId)
+    const mockupBlocks = () => (mockup ? screenLayoutImages(spine, mockup.screenId, contextFor(sectionId, number), mockup.caption) : [])
+    let placed = false
+    let imageOrdinal = -1
+    if (mockup && mockup.indexes.length === 0) {
+      out.push(...mockupBlocks())
+      placed = true
+    }
     for (const b of blocks) {
+      if (mockup && b.kind === "image" && b.image_ref && mockup.indexes.includes(++imageOrdinal)) {
+        flush()
+        if (!placed) out.push(...mockupBlocks())
+        placed = true
+        continue
+      }
       const d = b.kind === "image" ? b.diagram : undefined
       if (d && OWNER_DIAGRAM_KINDS.has(d.kind) && d.owner_id && isOriginalStale(spine, d)) {
         flush()
