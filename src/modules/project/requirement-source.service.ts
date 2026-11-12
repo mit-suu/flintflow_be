@@ -29,7 +29,9 @@ export const SOURCE_COLLECTIONS = [
   "messages",
   "other_requirements",
   "glossary",
-  "addendum"
+  "addendum",
+  // FLF-393: câu hỏi chốt bằng tài liệu tham khảo — nguồn của quyết định (business-flow §3.6 "Ghi nguồn", UC-53)
+  "decisions"
 ] as const
 
 type SourceCollection = (typeof SOURCE_COLLECTIONS)[number]
@@ -91,6 +93,28 @@ export const resolveParagraphs = async (projectId: string, paraIds: readonly str
     const doc = paragraphsByCode.get(docCode)
     const text = doc?.paragraphs[index]
     if (doc && text) out.set(id, { document_id: doc.id, para_id: id, quote: text.slice(0, QUOTE_MAX_CHARS) })
+  }
+  return out
+}
+
+/**
+ * Chữ ĐẦY ĐỦ của các đoạn (không cắt như `quote`) — để kiểm một câu trả lời có đúng là trích đoạn của đoạn được dẫn không
+ * (FLF-393). Khoá là mã chuẩn hoá (`D1-P391`).
+ */
+export const paragraphTexts = async (projectId: string, paraIds: readonly string[]): Promise<Map<string, string>> => {
+  const wanted = new Map<string, { docCode: number; index: number }>()
+  for (const raw of paraIds) {
+    const parsed = parseParagraphId(raw)
+    if (parsed) wanted.set(paragraphId(parsed.docCode, parsed.index), parsed)
+  }
+  const out = new Map<string, string>()
+  if (wanted.size === 0) return out
+  const codes = [...new Set([...wanted.values()].map((w) => w.docCode))]
+  const docs = await ProjectDocument.find({ projectId, docCode: { $in: codes }, parseStatus: "success" }).select("docCode extractedText").lean()
+  const paragraphsByCode = new Map(docs.map((d) => [d.docCode as number, splitParagraphs(d.extractedText ?? "")]))
+  for (const [id, { docCode, index }] of wanted) {
+    const text = paragraphsByCode.get(docCode)?.[index]
+    if (text) out.set(id, text)
   }
   return out
 }
