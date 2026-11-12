@@ -25,7 +25,7 @@ beforeEach(() => {
   Object.assign(env, { GEMINI_API_KEY: "test-key", AI_PROVIDER_OVERRIDE: "", EMBEDDING_PROVIDER: "gemini" })
 })
 
-describe("embeddingProvider — chọn provider như callLLM", () => {
+describe("embeddingProvider - chọn provider như callLLM", () => {
   it("off ⇒ null kể cả khi override mock; gemini thiếu key ⇒ null; override mock ⇒ mock", () => {
     env.EMBEDDING_PROVIDER = "off"
     env.AI_PROVIDER_OVERRIDE = "mock"
@@ -42,7 +42,7 @@ describe("embeddingProvider — chọn provider như callLLM", () => {
   })
 })
 
-describe("embedTexts — Gemini", () => {
+describe("embedTexts - Gemini", () => {
   it("chia lô 100, giữ thứ tự, gửi taskType + outputDimensionality, key qua header; vector chuẩn hoá L2", async () => {
     post.mockImplementation(async (_url: string, body: { requests: unknown[] }) => ok(body.requests.length))
     const texts = Array.from({ length: EMBED_BATCH_SIZE + 5 }, (_, i) => `t${i}`)

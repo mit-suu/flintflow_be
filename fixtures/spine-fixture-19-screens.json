@@ -712,7 +712,78 @@
       ],
       "description": "A user authenticates with email/password or Google and receives a session.",
       "includes": [],
-      "extends": []
+      "extends": [],
+      "activity_nodes": [
+        {
+          "id": "UC02-AN1",
+          "kind": "initial"
+        },
+        {
+          "id": "UC02-AN2",
+          "kind": "action",
+          "name": "Submit email and password",
+          "lane": "A01"
+        },
+        {
+          "id": "UC02-AN3",
+          "kind": "action",
+          "name": "Check credentials",
+          "lane": "system"
+        },
+        {
+          "id": "UC02-AN4",
+          "kind": "decision",
+          "name": "Credentials valid?"
+        },
+        {
+          "id": "UC02-AN5",
+          "kind": "action",
+          "name": "Show authentication error",
+          "lane": "system"
+        },
+        {
+          "id": "UC02-AN6",
+          "kind": "action",
+          "name": "Open project dashboard",
+          "lane": "system"
+        },
+        {
+          "id": "UC02-AN7",
+          "kind": "final"
+        }
+      ],
+      "activity_flows": [
+        {
+          "from": "UC02-AN1",
+          "to": "UC02-AN2"
+        },
+        {
+          "from": "UC02-AN2",
+          "to": "UC02-AN3"
+        },
+        {
+          "from": "UC02-AN3",
+          "to": "UC02-AN4"
+        },
+        {
+          "from": "UC02-AN4",
+          "to": "UC02-AN5",
+          "guard": "credentials do not match"
+        },
+        {
+          "from": "UC02-AN4",
+          "to": "UC02-AN6",
+          "guard": "credentials match"
+        },
+        {
+          "from": "UC02-AN5",
+          "to": "UC02-AN2"
+        },
+        {
+          "from": "UC02-AN6",
+          "to": "UC02-AN7"
+        }
+      ]
     },
     {
       "id": "UC03",
@@ -4589,6 +4660,71 @@
       "content_en": "Emphasize the differentiator: every SRS sentence is traceable to a structured field.",
       "target_section": "fixed:1",
       "captured_at": "2026-09-01T09:05:00.000Z"
+    }
+  ],
+  "deployment_nodes": [
+    {
+      "id": "DN01",
+      "name": "User Device",
+      "kind": "device",
+      "parent_id": null,
+      "artifacts": [],
+      "components": [
+        "Web Browser"
+      ]
+    },
+    {
+      "id": "DN02",
+      "name": "Application Server",
+      "kind": "device",
+      "parent_id": null,
+      "artifacts": [],
+      "components": []
+    },
+    {
+      "id": "DN03",
+      "name": "Node.js Runtime",
+      "kind": "execution_environment",
+      "parent_id": "DN02",
+      "artifacts": [
+        "api-bundle.js"
+      ],
+      "components": [
+        "API Service"
+      ]
+    },
+    {
+      "id": "DN04",
+      "name": "MongoDB Atlas",
+      "kind": "node",
+      "parent_id": null,
+      "artifacts": [],
+      "components": []
+    },
+    {
+      "id": "DN05",
+      "name": "LLM Provider",
+      "kind": "node",
+      "parent_id": null,
+      "artifacts": [],
+      "components": []
+    }
+  ],
+  "deployment_links": [
+    {
+      "from": "DN01",
+      "to": "DN03",
+      "protocol": "HTTPS"
+    },
+    {
+      "from": "DN03",
+      "to": "DN04",
+      "protocol": "MongoDB wire protocol"
+    },
+    {
+      "from": "DN03",
+      "to": "DN05",
+      "protocol": "HTTPS"
     }
   ],
   "diagrams": [

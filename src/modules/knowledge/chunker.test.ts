@@ -156,20 +156,20 @@ describe(`cắt section > ${CHUNK_MAX_TOKENS} token`, () => {
 describe("header ngữ cảnh", () => {
   it("chỉ nằm trong embed_text, không nằm trong text hiển thị", () => {
     const [chunk] = chunkDocument(doc(["## Rules", prose(120)].join("\n"))).chunks
-    expect(chunk!.embed_text).toBe(`Skill: demo-skill (content) — Demo skill for tests\nSection: Rules\n---\n${chunk!.text}`)
+    expect(chunk!.embed_text).toBe(`Skill: demo-skill (content) - Demo skill for tests\nSection: Rules\n---\n${chunk!.text}`)
     expect(chunk!.text.startsWith("## Rules")).toBe(true)
   })
 
   it("corpus chuẩn ngoài dùng `Source:` và loại nguồn", () => {
     expect(contextualHeader({ source: "ISO 29148", source_kind: "standard", topic: "requirements", description: "" }, "5.2")).toBe(
-      "Source: ISO 29148 (standard) — requirements\nSection: 5.2\n---\n"
+      "Source: ISO 29148 (standard) - requirements\nSection: 5.2\n---\n"
     )
   })
 })
 
 describe("slugify", () => {
   it("bỏ dấu, đ ⇒ d, ký tự lạ ⇒ gạch", () => {
-    expect(slugify("Điều kiện chốt — KHÔNG")).toBe("dieu-kien-chot-khong")
+    expect(slugify("Điều kiện chốt - KHÔNG")).toBe("dieu-kien-chot-khong")
     expect(slugify("Change instruction (`change_instruction`)")).toBe("change-instruction-change-instruction")
     expect(slugify("***")).toBe("section")
   })

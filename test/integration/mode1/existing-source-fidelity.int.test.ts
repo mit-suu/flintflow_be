@@ -79,7 +79,7 @@ const exportDraft = async (seeded: SeededFixture, projectId: string): Promise<Bu
   return res.body as Buffer
 }
 
-describe("Upload SRS có sẵn — tải về giống file upload", () => {
+describe("Upload SRS có sẵn - tải về giống file upload", () => {
   it.each([
     ["cấu trúc FlintFlow (chế độ 1)", FPT_SRS, "free" as const],
     ["mẫu cố định của công ty, có field + bookmark", COMPANY_SRS, "fixed" as const]

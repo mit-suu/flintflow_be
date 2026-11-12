@@ -86,10 +86,12 @@ describe("skill trên đĩa (assets/skills)", () => {
     // +1 renderer: renderer/state-machine (state machine diagram, mỗi entity có vòng đời một hình).
     // +1 renderer: renderer/sequence (System Sequence Diagram, mỗi function cần sơ đồ một hình).
     // +3 content FLF-365: references-list, requirement-apportioning, verification-matrix (mục IEEE 29148, Mode 1).
-    expect(listSkillAssets()).toHaveLength(48)
+    // +1 renderer FLF-390: renderer/activity (activity diagram, luồng xử lý mỗi function một hình).
+    // +1 renderer FLF-390: renderer/deployment (deployment diagram của hệ thống, §4.1).
+    expect(listSkillAssets()).toHaveLength(50)
     expect(byKind("action")).toBe(20)
     expect(byKind("content")).toBe(18)
-    expect(byKind("renderer")).toBe(8)
+    expect(byKind("renderer")).toBe(10)
     expect(byKind("output")).toBe(2)
   })
 
@@ -132,8 +134,10 @@ describe("skill trên đĩa (assets/skills)", () => {
     "content/requirement-apportioning",
     "content/verification-matrix",
     "output/srs-completeness-score",
+    "renderer/activity",
     "renderer/class",
     "renderer/context",
+    "renderer/deployment",
     "renderer/erd",
     "renderer/screen-flow",
     "renderer/screen-layout",
@@ -243,11 +247,12 @@ describe("computeSkillAssetVersion", () => {
   })
 })
 
-describe("fallbackModels (model dự phòng khi quá tải)", () => {
-  it("skill Gemini đọc ảnh khai 2 model dự phòng, tới providerConfig; skill không khai ⇒ không có", async () => {
+describe("provider đọc ảnh", () => {
+  it("hai action đọc ảnh dùng Claude, không còn model dự phòng Gemini", async () => {
     for (const action of [ActionType.IMPORT_EXTRACT_DIAGRAM, ActionType.CR_MATERIAL_IMAGE]) {
       const { providerConfig } = await getPromptTemplate(action)
-      expect(providerConfig).toMatchObject({ provider: "gemini", model: "gemini-3.5-flash", fallbackModels: ["gemini-3.6-flash", "gemini-3.5-flash-lite"] })
+      expect(providerConfig).toMatchObject({ provider: "anthropic", model: "claude-haiku-5-5" })
+      expect(providerConfig.fallbackModels).toBeUndefined()
     }
     expect((await getPromptTemplate(ActionType.CR_PROPOSE)).providerConfig.fallbackModels).toBeUndefined()
   })
@@ -303,7 +308,7 @@ describe("FLF-243: skill đặt tên use case nêu đủ luật mà cờ vàng u
     expect(text).toMatch(/at most 5 words/)
   })
 
-  it.each(["content/actors-and-usecases", "action/apply-change-op"])("%s: U4 nói đúng luật code — chỉ cấm actor làm chủ ngữ", (dir) => {
+  it.each(["content/actors-and-usecases", "action/apply-change-op"])("%s: U4 nói đúng luật code - chỉ cấm actor làm chủ ngữ", (dir) => {
     const text = skill(dir)
     expect(text).toContain("never the subject")
     expect(text).toContain("Create Student Record")
@@ -320,13 +325,13 @@ describe("FLF-260: skill chat viết theo ngôn ngữ trả lời nối ở cu�
     expect(text).toContain("Vietnamese when it is absent")
   })
 
-  it("thẻ tuân thủ có cặp nhãn tiếng Anh cố định — server dò chữ 'law' trong câu trả lời đã chốt để ghi project.stakes", () => {
+  it("thẻ tuân thủ có cặp nhãn tiếng Anh cố định - server dò chữ 'law' trong câu trả lời đã chốt để ghi project.stakes", () => {
     expect(skill("action/elicit-loop")).toContain('(English reply: "Internal rules only" / "Internal rules and the law")')
     // draft-to-ops phải nhận ra vế nội bộ bằng tiếng Anh: vế này không tự quyết internal hay production
     expect(skill("action/draft-to-ops")).toContain('English reply: "Internal rules only"')
   })
 
-  it("trích đoạn chốt câu hỏi mở không bị dịch theo ngôn ngữ trả lời — server chỉ nhận chuỗi con của tin user", () => {
+  it("trích đoạn chốt câu hỏi mở không bị dịch theo ngôn ngữ trả lời - server chỉ nhận chuỗi con của tin user", () => {
     expect(skill("action/elicit-loop")).toContain("never paraphrased, translated or shortened")
   })
 })

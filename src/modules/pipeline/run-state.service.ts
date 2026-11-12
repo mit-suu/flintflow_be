@@ -50,6 +50,11 @@ export interface PendingAnswerState {
   base_answers_text: string
   /** Lời AI của lượt phỏng vấn giai đoạn — chỉ ghi vào transcript sau khi có câu trả lời nên phải giữ lại. */
   reply?: string
+  /**
+   * Lúc đặt các câu đang chờ (ISO). Lượt chat trả lời nạp tài liệu tải lên SAU lúc này (đính kèm cùng câu trả lời) — tài liệu
+   * cũ hơn đã có ở lượt hỏi. Trạng thái lưu trước khi có trường này ⇒ nạp mọi tài liệu của bước.
+   */
+  asked_at?: string
 }
 
 export interface RunStateDoc {
@@ -141,7 +146,7 @@ export interface AcquireOptions {
 
 const lockedMessage = (doc: RunStateDoc): string => {
   const since = new Date(doc.started_at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })
-  return `Bước ${doc.step_id} đang chạy ở lượt trước (bắt đầu ${since}) — huỷ lượt đó rồi chạy lại`
+  return `Bước ${doc.step_id} đang chạy ở lượt trước (bắt đầu ${since}) - huỷ lượt đó rồi chạy lại`
 }
 
 /**

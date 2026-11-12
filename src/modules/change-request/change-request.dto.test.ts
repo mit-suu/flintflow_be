@@ -19,7 +19,7 @@ import { ChangeGroup } from "./change-group.model.js"
 const AT = "2026-09-18T08:00:00.000Z"
 const oid = () => new mongoose.Types.ObjectId()
 
-describe("change-request DTO — request", () => {
+describe("change-request DTO - request", () => {
   const create = {
     title: "Đăng xuất mọi thiết bị",
     description: "Logging out must sign the user out of all devices.",
@@ -36,7 +36,7 @@ describe("change-request DTO — request", () => {
     expect(createChangeRequestSchema.safeParse({ ...create, source: { kind: "rumor" } }).success).toBe(false)
   })
 
-  it("mode 1 v3: tạo CR chỉ nhận 6 nguồn BPMN 3.1 — `chat` bị từ chối (lệnh trong chat là yêu cầu miệng); preview_id tuỳ chọn", () => {
+  it("mode 1 v3: tạo CR chỉ nhận 6 nguồn BPMN 3.1 - `chat` bị từ chối (lệnh trong chat là yêu cầu miệng); preview_id tuỳ chọn", () => {
     expect(createChangeRequestSchema.safeParse({ ...create, source: { kind: "chat", ref: "chat-session 66f0…" } }).success).toBe(false)
     expect(createChangeRequestSchema.parse({ ...create, source: { kind: "verbal", ref: "chat:66f0" } }).source.kind).toBe("verbal")
     expect(createChangeRequestSchema.parse({ ...create, preview_id: "p-1" }).preview_id).toBe("p-1")
@@ -61,14 +61,15 @@ describe("change-request DTO — request", () => {
     expect(materialParamsSchema.safeParse({ crId: "CR-001", mid: "X1" }).success).toBe(false)
   })
 
-  it("sửa vị trí: kết luận nào cần field đó", () => {
+  it("quyết định một chỗ: chấp nhận đề xuất AI hoặc giữ nguyên + lý do; không nhận nội dung tự gõ (FLF-375)", () => {
     expect(patchLocationRequestSchema.safeParse({}).success).toBe(false)
-    // FLF-186: edit bằng giá trị mới của phần tử hoặc op Spine; new_text (bản theo block) không còn
-    expect(patchLocationRequestSchema.safeParse({ conclusion: "edit", new_value: { id: "UC-2.4", name: "Sign out of all devices" } }).success).toBe(true)
-    expect(patchLocationRequestSchema.safeParse({ conclusion: "edit", spine_ops: [{ op: "set", path: "use_cases[id=UC-2.4].name", value: "Sign out" }] }).success).toBe(true)
-    expect(patchLocationRequestSchema.safeParse({ conclusion: "edit" }).success).toBe(false)
-    expect(patchLocationRequestSchema.safeParse({ conclusion: "edit", new_text: "3.2.4 Sign out of all devices" }).success).toBe(false)
-    expect(patchLocationRequestSchema.safeParse({ conclusion: "comment" }).success).toBe(false)
+    // Chấp nhận đúng đề xuất AI đã soạn (không kèm nội dung)
+    expect(patchLocationRequestSchema.safeParse({ conclusion: "edit" }).success).toBe(true)
+    expect(patchLocationRequestSchema.safeParse({ conclusion: "comment" }).success).toBe(true)
+    // Nguyên tắc 6: không sửa tay — giá trị mới / op tự viết / ghi chú tự gõ đều bị từ chối
+    expect(patchLocationRequestSchema.safeParse({ conclusion: "edit", new_value: { id: "UC-2.4", name: "Sign out of all devices" } }).success).toBe(false)
+    expect(patchLocationRequestSchema.safeParse({ conclusion: "edit", spine_ops: [{ op: "set", path: "use_cases[id=UC-2.4].name", value: "Sign out" }] }).success).toBe(false)
+    expect(patchLocationRequestSchema.safeParse({ conclusion: "comment", comment_text: "tự gõ" }).success).toBe(false)
     expect(patchLocationRequestSchema.safeParse({ conclusion: "not_related" }).success).toBe(false)
     expect(patchLocationRequestSchema.safeParse({ conclusion: "not_related", reason: "Chỉ nói về đăng nhập" }).success).toBe(true)
   })
@@ -89,7 +90,7 @@ describe("change-request DTO — request", () => {
   })
 })
 
-describe("change-request DTO — response", () => {
+describe("change-request DTO - response", () => {
   it("chi tiết CR: CR + vị trí + group + câu hỏi đang chờ", () => {
     const detail = {
       change_request: {

@@ -94,7 +94,7 @@ const compileAndStore = async (
       return checked.ok ? { ok: true as const, png: await deps.renderPng(diagram.source) } : checked
     })
     if (!drawn.ok) {
-      console.warn(`[diagram] Bản ${locale} của ${diagramId} (project ${projectId}) không compile được — dùng ảnh gốc: ${drawn.error}`)
+      console.warn(`[diagram] Bản ${locale} của ${diagramId} (project ${projectId}) không compile được - dùng ảnh gốc: ${drawn.error}`)
       remember(key, deps.now() + COMPILE_FAILURE_TTL_MS, deps.now())
       return null
     }

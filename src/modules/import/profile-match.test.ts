@@ -78,7 +78,7 @@ describe("matchTableHeader", () => {
 
   const fields = (headers: string[], section: string | null) => matchTableHeader(headers, section).columns.map((c) => c.field_path)
 
-  it("FLF-251: gán cột theo điểm cao nhất cả bảng — khớp đúng tên thắng khớp gần; cột ký hiệu # không khớp", () => {
+  it("FLF-251: gán cột theo điểm cao nhất cả bảng - khớp đúng tên thắng khớp gần; cột ký hiệu # không khớp", () => {
     // trước đây "Message Type" (khớp gần "message") giành mất nội dung, cột "Content" thật bị bỏ
     expect(fields(["#", "Message Code", "Message Type", "Context", "Content"], "fixed:5.3")).toEqual([null, "messages[].code", null, null, "messages[].text"])
   })
@@ -118,7 +118,7 @@ describe("matchTableHeader", () => {
   })
 })
 
-describe("matchTable — khớp theo cả dữ liệu dưới tiêu đề (FLF-252)", () => {
+describe("matchTable - khớp theo cả dữ liệu dưới tiêu đề (FLF-252)", () => {
   const paths = (rows: string[][], section: string | null) => matchTable(rows, section).columns.map((c) => c.field_path)
 
   it("cột '#' chứa mã ⇒ cột mã; cột 'ID' chỉ chứa số thứ tự ⇒ không dùng làm mã", () => {
@@ -168,7 +168,7 @@ describe("matchTable — khớp theo cả dữ liệu dưới tiêu đề (FLF-2
 })
 
 describe("matchTables (FLF-251)", () => {
-  it("chỉ bảng ở section có trích mới cần map cột — bỏ bảng Record of Changes, bảng dưới heading nhóm / không khớp", () => {
+  it("chỉ bảng ở section có trích mới cần map cột - bỏ bảng Record of Changes, bảng dưới heading nhóm / không khớp", () => {
     const tbl = (block_id: string, rows: string[][]): ProfileBlock => ({ block_id, kind: "table", level: null, text: "", rows })
     const blocks = [
       tbl("B0002", [["Date", "A*\nM, D", "In charge", "Change Description"], ["29/07/2026", "A", "QuynhTTN", "Added"]]),
@@ -248,7 +248,7 @@ const heading = (n: number, level: number, text: string, detector: ProfileBlock[
 })
 const mapOf = (blocks: ProfileBlock[]) => Object.fromEntries(matchHeadings(blocks).map((h) => [h.heading_text, h]))
 
-describe("matchHeadings — khớp gần, unmapped, ngưỡng 0.8", () => {
+describe("matchHeadings - khớp gần, unmapped, ngưỡng 0.8", () => {
   it("heading tiếng Việt khớp alias của section cố định", () => {
     const map = mapOf([heading(1, 1, "2 Yêu cầu người dùng"), heading(2, 2, "2.1 Tác nhân"), heading(3, 1, "5 Phụ lục"), heading(4, 2, "5.5 Thuật ngữ")])
     expect(map["2 Yêu cầu người dùng"].section_id).toBe("group:2")
@@ -265,7 +265,7 @@ describe("matchHeadings — khớp gần, unmapped, ngưỡng 0.8", () => {
     expect(needsMappingReview({ heading_map: matchHeadings(blocks), table_map: [] })).toBe(true)
   })
 
-  it("FLF-363: số mục không tham gia khớp — số lệch mẫu, không số hay số Word đều khớp theo tên, độ tin như nhau", () => {
+  it("FLF-363: số mục không tham gia khớp - số lệch mẫu, không số hay số Word đều khớp theo tên, độ tin như nhau", () => {
     const map = mapOf([heading(1, 1, "4 Non-Functional Requirements"), heading(2, 2, "4.7 Quality Attributes"), heading(3, 3, "4.7.9 Performance")])
     expect(map["4.7.9 Performance"]).toMatchObject({ section_id: "fixed:4.2.3", confidence: 1 })
     expect(map["4.7 Quality Attributes"]).toMatchObject({ section_id: "group:4.2", confidence: 1 })
@@ -330,7 +330,7 @@ describe("matchHeadings — khớp gần, unmapped, ngưỡng 0.8", () => {
   })
 })
 
-describe("mẫu IEEE 830 + D6 (FLF-183) — FLF-363 khớp theo ngân hàng phần chung", () => {
+describe("mẫu IEEE 830 + D6 (FLF-183) - FLF-363 khớp theo ngân hàng phần chung", () => {
   it("heading IEEE khớp section FPT, độ tin đủ; chương Specific Requirements chứa cả phi chức năng ⇒ chỉ là heading", () => {
     const map = mapOf([
       heading(1, 1, "1. Introduction"),
@@ -349,7 +349,7 @@ describe("mẫu IEEE 830 + D6 (FLF-183) — FLF-363 khớp theo ngân hàng ph�
     expect(map["3.1 External interface requirements"].section_id).toBe("fixed:4.1")
   })
 
-  it("dàn mục IEEE 830 ⇒ nhãn IEEE, mỗi mục trích vào đúng section FPT, mục chỉ có ở IEEE giữ nguyên văn — không còn dòng sai độ tin cao", () => {
+  it("dàn mục IEEE 830 ⇒ nhãn IEEE, mỗi mục trích vào đúng section FPT, mục chỉ có ở IEEE giữ nguyên văn - không còn dòng sai độ tin cao", () => {
     const outline = [
       "1. Introduction", "1.1. Purpose", "1.3. Definitions, acronyms & abbreviations", "1.4. References",
       "2. Overall description", "2.1. Product perspective", "2.1.3. Hardware interfaces", "2.3. User characteristics", "2.4. Constraints",
@@ -461,7 +461,7 @@ describe("mẫu IEEE 830 + D6 (FLF-183) — FLF-363 khớp theo ngân hàng ph�
   })
 })
 
-describe("FLF-363 — ngân hàng phần chung FPT + IEEE 29148", () => {
+describe("FLF-363 - ngân hàng phần chung FPT + IEEE 29148", () => {
   const outline = (rows: [number, string][]) => rows.map(([level, text], i) => heading(i + 1, level, text))
   const sections = (rows: [number, string][]) =>
     Object.fromEntries(matchHeadings(outline(rows)).map((h) => [h.heading_text, h.section_id.replace(/@B\d+/, "@")]))
@@ -550,7 +550,7 @@ describe("FLF-363 — ngân hàng phần chung FPT + IEEE 29148", () => {
   })
 })
 
-describe("FLF-363 — nội dung dưới heading (D1–D2)", () => {
+describe("FLF-363 - nội dung dưới heading (D1–D2)", () => {
   const table = (n: number, rows: string[][]): ProfileBlock => ({ block_id: `B${String(n).padStart(4, "0")}`, kind: "table", level: null, text: "", rows })
   const para = (n: number, text: string): ProfileBlock => ({ block_id: `B${String(n).padStart(4, "0")}`, kind: "paragraph", level: null, text })
   const actors = [["Actor", "Description"], ["Student", "Đăng ký môn học"], ["Admin", "Quản trị"]]
@@ -592,7 +592,7 @@ describe("FLF-363 — nội dung dưới heading (D1–D2)", () => {
   })
 })
 
-describe("FLF-364 — chữ hướng dẫn của mẫu trong [ ] / { }", () => {
+describe("FLF-364 - chữ hướng dẫn của mẫu trong [ ] / { }", () => {
   const block = (n: number, kind: ProfileBlock["kind"], text: string, extra: Partial<ProfileBlock> = {}): ProfileBlock => ({
     block_id: `B${String(n).padStart(4, "0")}`,
     kind,
@@ -633,7 +633,7 @@ describe("FLF-364 — chữ hướng dẫn của mẫu trong [ ] / { }", () => {
   })
 })
 
-describe("FLF-362 — nhãn số Word đi theo heading_map", () => {
+describe("FLF-362 - nhãn số Word đi theo heading_map", () => {
   it("heading có number_label ⇒ heading_map mang number_label, heading_text giữ nguyên chữ; heading không nhãn ⇒ không có field", () => {
     const blocks: ProfileBlock[] = [
       { block_id: "B0001", kind: "heading", level: 1, text: "Product Overview", number_label: "1." },
@@ -645,7 +645,7 @@ describe("FLF-362 — nhãn số Word đi theo heading_map", () => {
   })
 })
 
-describe("FLF-343 — tín hiệu heading, tự nhận mapping độ tin thấp", () => {
+describe("FLF-343 - tín hiệu heading, tự nhận mapping độ tin thấp", () => {
   it("detectorCap: style / outline không giới hạn; số mục gõ tay 0.75, có in đậm 0.9, trùng mục lục 0.95; numPr / format in đậm 0.85", () => {
     expect(detectorCap("style")).toBe(1)
     expect(detectorCap("numbering_pattern")).toBe(0.75)
@@ -657,7 +657,7 @@ describe("FLF-343 — tín hiệu heading, tự nhận mapping độ tin thấp"
     expect(detectorCap("format", ["bold", "large"])).toBe(0.85)
   })
 
-  it("FLF-363: auto_number (số Word tự sinh) không tham gia chấm — heading vào đúng mục theo tên, heading_text giữ nguyên chữ", () => {
+  it("FLF-363: auto_number (số Word tự sinh) không tham gia chấm - heading vào đúng mục theo tên, heading_text giữ nguyên chữ", () => {
     const blocks = [
       { block_id: "B0001", kind: "heading" as const, level: 1, text: "Functional Requirements", heading_detector: "numbering" as const, heading_signals: ["bold", "numpr"] as const, auto_number: "3" },
       { block_id: "B0002", kind: "heading" as const, level: 2, text: "Authentication", heading_detector: "numbering" as const, heading_signals: ["bold", "numpr"] as const, auto_number: "3.2" },
@@ -694,7 +694,7 @@ describe("FLF-343 — tín hiệu heading, tự nhận mapping độ tin thấp"
   })
 })
 
-describe("FLF-364 — nhận phần theo chữ hướng dẫn (sau tên, trước nội dung)", () => {
+describe("FLF-364 - nhận phần theo chữ hướng dẫn (sau tên, trước nội dung)", () => {
   const para = (n: number, text: string): ProfileBlock => ({ block_id: `B${String(n).padStart(4, "0")}`, kind: "paragraph", level: null, text })
 
   it("heading lạ, hướng dẫn nhắc đúng một phần ⇒ nhận phần đó, độ tin 0.7; nhắc nhiều phần / không nhắc ⇒ giữ nguyên", () => {

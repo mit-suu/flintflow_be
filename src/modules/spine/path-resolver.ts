@@ -48,7 +48,7 @@ const INDEX_RE = /^\s*-?\d+\s*$/
 const parseSelector = (raw: string, path: string): Selector => {
   if (raw === "") return { kind: "append" }
   if (INDEX_RE.test(raw)) {
-    throw new PathError("index_selector_forbidden", path, `Không được dùng chỉ số mảng [${raw}] — dùng khoá, ví dụ [id=...]`)
+    throw new PathError("index_selector_forbidden", path, `Không được dùng chỉ số mảng [${raw}] - dùng khoá, ví dụ [id=...]`)
   }
   if (raw.startsWith("=")) {
     const value = raw.slice(1)
@@ -130,6 +130,10 @@ export const selectorFor = (element: unknown): Selector | null => {
   // Chuyển trạng thái `entities[].transitions[]` không có id — khoá là from + to + event (trước nhánh `to` của flow_to)
   if (isRecord(element) && typeof element.from === "string" && typeof element.to === "string" && typeof element.event === "string") {
     return { kind: "match", pairs: [["from", element.from], ["to", element.to], ["event", element.event]] }
+  }
+  // Control flow sơ đồ activity `functions[].activity_flows[]` không có id — khoá là from + to (trước nhánh `to` của flow_to)
+  if (isRecord(element) && typeof element.from === "string" && typeof element.to === "string") {
+    return { kind: "match", pairs: [["from", element.from], ["to", element.to]] }
   }
   // Cạnh luồng màn `screens[].flow_to[]` không có id — khoá là màn đích
   if (isRecord(element) && typeof element.to === "string") return { kind: "match", pairs: [["to", element.to]] }

@@ -13,16 +13,20 @@ reads:
   - "actors[]"
 writes:
   - "nfrs[]"
+  - "deployment_nodes[]"
+  - "deployment_links[]"
   - "assumptions[]"
 output_schema: opTransaction
 language: en
 stub: false
+prompt_references: [deployment]
 ---
 # NFR And Quality Attributes
 
 Covers **S-6.1 External Interfaces, S-6.2 Usability, S-6.3 Reliability, S-6.4 Performance,
-S-6.5 Domain-Specific Attributes** — feeds `fixed:4.1` and `fixed:4.2.1`…`fixed:4.2.4`. One step writes
-one category, so only emit rows for the category named by the current step.
+S-6.5 Domain-Specific Attributes** - feeds `fixed:4.1` and `fixed:4.2.1`…`fixed:4.2.4`. One step writes
+one category, so only emit rows for the category named by the current step. Deployment diagram data
+(`deployment_nodes`, `deployment_links`) only on the user's request or for the IEEE Distribution part: reference `deployment`.
 `references/thresholds.md` is **not loaded at runtime**; the default table is inlined below.
 
 Shape: `{id, category, statement, kind, metric?, threshold?, priority: null}` where `category` is
@@ -33,23 +37,23 @@ Shape: `{id, category, statement, kind, metric?, threshold?, priority: null}` wh
 `kind: "quantitative"` with a non-empty `metric` AND `threshold`.** A row without them opens the red flag
 `nfr_missing_number`, which blocks the baseline. "The system should be fast" is not a requirement.
 
-## S-6.1 — External interfaces (`category: "interface"`)
+## S-6.1 - External interfaces (`category: "interface"`)
 
 One row per boundary the product talks across. Sweep: every `actors[kind=system]` (payment gateway, AI
 provider, mail, storage, identity provider); the user-facing client (browser/mobile, per
 `project.form_factor`); file formats consumed or produced (upload types, `.docx` export); and any
-inbound API we expose. `statement` names the counterpart, the direction and the shape of exchange —
+inbound API we expose. `statement` names the counterpart, the direction and the shape of exchange -
 "The system exchanges JSON over HTTPS with the payment gateway and accepts signed webhook callbacks."
 These are usually `descriptive`; make one quantitative when a contract exists (a rate limit, an SLA).
 
-## S-6.2 — Usability (`category: "usability"`)
+## S-6.2 - Usability (`category: "usability"`)
 
 Accessibility level, language/localisation, input device and screen size range, learnability, and how
 errors are surfaced. Prefer a checkable statement over an adjective: "Every screen meets WCAG 2.1 AA for
 contrast and keyboard navigation" beats "the UI is easy to use". `descriptive` is acceptable here, but a
-row that cannot be checked by a reviewer is not a requirement — rewrite it.
+row that cannot be checked by a reviewer is not a requirement - rewrite it.
 
-## S-6.3 — Reliability, S-6.4 — Performance (quantitative, always)
+## S-6.3 - Reliability, S-6.4 - Performance (quantitative, always)
 
 Pick `metric` and `threshold` from the defaults below, scaled by `project.stakes` × `project.complexity`,
 unless the Brief states a number. Both fields are short strings: `metric: "p95 response time"`,
@@ -66,12 +70,12 @@ unless the Brief states a number. Both fields are short strings: `metric: "p95 r
 | performance | Concurrent users supported | >= 50 | >= 500 | >= 5000 |
 | performance | Throughput (writes/min) | >= 30 | >= 300 | >= 1000 |
 
-Take at least three rows per category. A long-running AI or render step gets its own performance row —
+Take at least three rows per category. A long-running AI or render step gets its own performance row -
 do not fold it into the interactive budget, the numbers differ by two orders of magnitude. Any number
 you chose from this table rather than from the Brief gets an `assumptions[]` entry
 (`status: "unconfirmed"`) pointing at the `nfrs[]` row.
 
-## S-6.5 — Domain-specific (`category: "other"`)
+## S-6.5 - Domain-specific (`category: "other"`)
 
 Only what this domain forces: security/authn-authz posture, privacy and data residency, retention,
 auditability, regulatory regime, portability, cost ceilings. Skip the category honestly (`ops: []` plus a
@@ -81,7 +85,7 @@ retention periods, key rotation intervals, audit-log horizons.
 ## Rules
 
 1. Only the category of the current step; ids continue the existing sequence (`draft-to-ops` rule 5).
-2. `priority` stays `null` — MoSCoW is assigned at S-9.4.
+2. `priority` stays `null` - MoSCoW is assigned at S-9.4.
 3. `metric`/`threshold` are omitted entirely for `descriptive` rows, never set to `""`.
 4. One requirement per row: "fast and always available" is two rows.
 5. English values, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).

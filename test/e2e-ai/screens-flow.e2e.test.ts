@@ -24,7 +24,7 @@ const AUTO_ANSWER = "Use the product brief and your best judgement; keep it cons
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const OUT_DIR = path.resolve(__dirname, "results")
 
-describe.skipIf(!enabled)("Screens Flow theo actor, không màn mồ côi — provider thật (E2E_AI=1)", () => {
+describe.skipIf(!enabled)("Screens Flow theo actor, không màn mồ côi - provider thật (E2E_AI=1)", () => {
   it("S-4.1 → S-4.4", { timeout: 20 * 60_000 }, async () => {
     const { orderedSteps } = await import("../../src/modules/pipeline/step-registry.js")
     const { runStep, submitAnswer } = await import("../../src/modules/pipeline/step-runner.service.js")
@@ -110,18 +110,18 @@ describe.skipIf(!enabled)("Screens Flow theo actor, không màn mồ côi — pr
     const usages = await Usage.find({ projectId, state: "deducted" }).lean()
 
     const checks = [
-      { name: "Không màn mồ côi", pass: orphans.length === 0, detail: orphans.map((o) => `${o.screen.id} ${o.screen.name}: ${o.why}`).join("; ") || "—" },
-      { name: "Luồng một chiều trong dữ liệu (không cặp A⇄B)", pass: twoWay.length === 0, detail: twoWay.join(", ") || "—" },
+      { name: "Không màn mồ côi", pass: orphans.length === 0, detail: orphans.map((o) => `${o.screen.id} ${o.screen.name}: ${o.why}`).join("; ") || "-" },
+      { name: "Luồng một chiều trong dữ liệu (không cặp A⇄B)", pass: twoWay.length === 0, detail: twoWay.join(", ") || "-" },
       {
         name: "Hình lưu trong Spine đã tách theo feature (tự vẽ lại)",
-        pass: storedFlow.length >= featuresWithScreens.length && storedTitles.every((t) => t.startsWith("Screens flow — ")),
+        pass: storedFlow.length >= featuresWithScreens.length && storedTitles.every((t) => t.startsWith("Screens flow - ")),
         detail: storedTitles.join(" · ")
       },
-      { name: "Mỗi actor người có ≥ 1 màn", pass: humansWithScreens.length === humans.length, detail: humans.filter((a) => !humansWithScreens.includes(a)).map((a) => a.name).join(", ") || "—" }
+      { name: "Mỗi actor người có ≥ 1 màn", pass: humansWithScreens.length === humans.length, detail: humans.filter((a) => !humansWithScreens.includes(a)).map((a) => a.name).join(", ") || "-" }
     ]
 
     const report = [
-      `# Screens Flow theo actor — provider thật (${new Date().toISOString()})`,
+      `# Screens Flow theo actor - provider thật (${new Date().toISOString()})`,
       "",
       "Sinh bởi `test/e2e-ai/screens-flow.e2e.test.ts`. Đầu vào: fixture 19 màn đã bỏ mọi feature/màn/function/quyền (trạng thái sau S-3).",
       "",
@@ -154,6 +154,6 @@ describe.skipIf(!enabled)("Screens Flow theo actor, không màn mồ côi — pr
   })
 })
 
-describe.skipIf(enabled)("Screens Flow theo actor — provider thật", () => {
+describe.skipIf(enabled)("Screens Flow theo actor - provider thật", () => {
   it.skip("bỏ qua: đặt E2E_AI=1 để gọi provider thật (tốn credit)", () => {})
 })

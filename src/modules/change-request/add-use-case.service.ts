@@ -31,8 +31,7 @@ import type { IChangeRequest } from "./change-request.model.js"
 import { ChangeLocation, type IChangeLocation } from "./change-location.model.js"
 import { formatLocationId } from "./cr-impact.service.js"
 import { answersText } from "./cr-context.js"
-import { lockPaths } from "./lock.service.js"
-import { SECTION_FILL_ARRAYS, addedElements, elementPathOf, elementValue, isArrayPath, sectionOfElement, snapshotOf, valueText } from "./spine-location.js"
+import { SECTION_FILL_ARRAYS, addedElements, elementPathOf, elementValue, isArrayPath, originalDiagramLocations, sectionOfElement, snapshotOf, valueText } from "./spine-location.js"
 
 /** Lý do của vị trí do lô thêm / xoá use case soạn — nhận ra để không soạn lại ở vòng đề xuất sau. */
 export const ADD_USE_CASE_REASON = "Thêm use case kèm chức năng, màn, luồng màn và phân quyền liên quan"
@@ -220,13 +219,13 @@ const draftBatch = async (
       await cr.save()
       return "paused"
     }
-    console.warn(`[C-4] ${cr.cr_id}: soạn lô ${VERB_OF[intent]} use case lỗi (${err.message}) — đề xuất theo từng vị trí`)
+    console.warn(`[C-4] ${cr.cr_id}: soạn lô ${VERB_OF[intent]} use case lỗi (${err.message}) - đề xuất theo từng vị trí`)
     return "skipped"
   }
   if (drafted.clarification || !drafted.ops.length) return "skipped"
   const batch = concreteBatch(spine, drafted.ops)
   if (!batch) {
-    console.warn(`[C-4] ${cr.cr_id}: lô ${VERB_OF[intent]} use case không áp thử được — đề xuất theo từng vị trí`)
+    console.warn(`[C-4] ${cr.cr_id}: lô ${VERB_OF[intent]} use case không áp thử được - đề xuất theo từng vị trí`)
     return "skipped"
   }
   return { drafted, batch }
@@ -244,12 +243,6 @@ const attachBatch = async (
   const bundle = distributeOps(spine, batch.after, batch.ops)
   const byPath = new Map(locations.map((l) => [l.path, l]))
   const missing = bundle.filter((b) => !byPath.has(b.path))
-  try {
-    await lockPaths(cr.projectId, cr.cr_id, [...missing.map((b) => b.path), ...bundle.flatMap((b) => b.new_elements)])
-  } catch (err) {
-    console.warn(`[C-4] ${cr.cr_id}: không giữ được khoá cho lô use case — đề xuất theo từng vị trí`, err)
-    return "skipped"
-  }
   let next = locations.reduce((n, l) => Math.max(n, Number(l.location_id.slice(1)) || 0), 0)
   for (const b of missing) {
     const created = await ChangeLocation.create({
@@ -265,11 +258,16 @@ const attachBatch = async (
     })
     byPath.set(b.path, created)
   }
+  // FLF-375: lô chạm thêm mảng (màn, actor…) mà C-3 chưa thấy ⇒ sơ đồ gốc thể hiện dữ liệu đó cũng là vị trí "vẽ lại"
+  for (const d of originalDiagramLocations(spine, cr.targets.entity_paths, [...byPath.keys()].map((path) => ({ path })))) {
+    if (byPath.has(d.path)) continue
+    byPath.set(d.path, await ChangeLocation.create({ projectId: cr.projectId, cr_id: cr.cr_id, location_id: formatLocationId(++next), ...d, vector_score: null }))
+  }
   // Ghi chú của lô (phần còn thiếu FLF-298 / phần còn sót khi xoá) và use case AI tự đề xuất thêm (luật 3e — chat trước
   // baseline hỏi giữ / bỏ, CR không có lượt hỏi đó) ⇒ giả định của vị trí use case để Lead xác nhận khi duyệt
   const notes = [
     ...(drafted.notes?.trim() ? [drafted.notes.trim()] : []),
-    ...(drafted.proposed ?? []).map((name) => `AI đề xuất thêm use case "${name}" để luồng có người xử lý / theo dõi — bỏ nếu không cần`)
+    ...(drafted.proposed ?? []).map((name) => `AI đề xuất thêm use case "${name}" để luồng có người xử lý / theo dõi - bỏ nếu không cần`)
   ]
   const noteHolder = bundle.find((b) => b.path === "use_cases[]") ?? bundle.find((b) => b.path.startsWith("use_cases[id="))
   for (const b of bundle) {
@@ -277,6 +275,7 @@ const attachBatch = async (
     loc.conclusion = "edit"
     loc.reason = REASON_OF[intent]
     loc.proposal = {
+      proposed_at: new Date(),
       ...snapshotOf(spine, b.path),
       new_text: bundleNewText(spine, batch.after, b.path),
       comment_text: null,

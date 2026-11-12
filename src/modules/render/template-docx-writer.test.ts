@@ -15,7 +15,7 @@ const sourceTable = `<w:tbl><w:tblPr><w:tblW w:w="6000" w:type="dxa"/><w:tblBord
 async function template(table = sourceTable) {
   const zip = new JSZip()
   zip.file("[Content_Types].xml", `<Types xmlns="${NS.ct}"><Default Extension="xml" ContentType="application/xml"/></Types>`)
-  zip.file("word/document.xml", `<w:document xmlns:w="${NS.w}" xmlns:r="${NS.r}"><w:body><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>[Project</w:t></w:r><w:r><w:rPr><w:i/></w:rPr><w:t> name] — [Version] — [Date]</w:t></w:r></w:p>${heading("Requirements")}${body}${table}<w:p><w:r><w:br w:type="page"/></w:r></w:p>${heading("Repeated", 2)}${body}${heading("Repeated", 2)}${body}${heading("Unmapped")}${body}<w:sectPr><w:headerReference w:type="default" r:id="rId1"/><w:pgMar w:top="1134" w:left="1134"/></w:sectPr></w:body></w:document>`)
+  zip.file("word/document.xml", `<w:document xmlns:w="${NS.w}" xmlns:r="${NS.r}"><w:body><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>[Project</w:t></w:r><w:r><w:rPr><w:i/></w:rPr><w:t> name] - [Version] - [Date]</w:t></w:r></w:p>${heading("Requirements")}${body}${table}<w:p><w:r><w:br w:type="page"/></w:r></w:p>${heading("Repeated", 2)}${body}${heading("Repeated", 2)}${body}${heading("Unmapped")}${body}<w:sectPr><w:headerReference w:type="default" r:id="rId1"/><w:pgMar w:top="1134" w:left="1134"/></w:sectPr></w:body></w:document>`)
   zip.file("word/styles.xml", styles)
   zip.file("word/numbering.xml", `<w:numbering xmlns:w="${NS.w}" />`)
   zip.file("word/header1.xml", `<w:hdr xmlns:w="${NS.w}"><w:p><w:r><w:t>Company header</w:t></w:r></w:p></w:hdr>`)
@@ -82,7 +82,7 @@ describe("writeTemplateDocx", () => {
     expect(wAll(single.element, "vMerge")).toHaveLength(0)
   })
 
-  it("FLF-372: mục có ảnh gốc (sơ đồ) thay được khi bản in của mục mang lại ảnh — ảnh không mất", async () => {
+  it("FLF-372: mục có ảnh gốc (sơ đồ) thay được khi bản in của mục mang lại ảnh - ảnh không mất", async () => {
     const zip = await JSZip.loadAsync(await template())
     zip.file("word/document.xml", (await zip.file("word/document.xml")!.async("string")).replace(body, `<w:p><w:r><w:drawing/></w:r></w:p>${body}`))
     const input = await zip.generateAsync({ type: "nodebuffer" }), parsed = await parseDocument(input), doc = document()
@@ -119,7 +119,7 @@ describe("writeTemplateDocx", () => {
     const originalZip = await JSZip.loadAsync(input), resultZip = await JSZip.loadAsync(output)
     for (const name of ["word/styles.xml", "word/numbering.xml", "word/header1.xml", "word/footer1.xml", "word/theme/theme1.xml", "word/media/flintflow1.png"]) expect(await resultZip.file(name)!.async("nodebuffer")).toEqual(await originalZip.file(name)!.async("nodebuffer"))
     const result = await DocxPackage.load(output), xml = await result.requireXml("word/document.xml")
-    expect(wAll(xml, "t").map((t) => t.textContent).join("")).toContain("Club Manager — v0 — 2026-11-04")
+    expect(wAll(xml, "t").map((t) => t.textContent).join("")).toContain("Club Manager - v0 - 2026-11-04")
     expect(wAll(xml, "t").map((t) => t.textContent).join("")).not.toContain("Changed title")
     expect(wAll(xml, "pgMar")[0].getAttributeNS(NS.w, "left")).toBe("1134")
     expect(wAll(xml, "br").filter((b) => wAttr(b, "type") === "page")).toHaveLength(1)
@@ -165,7 +165,7 @@ describe("writeTemplateDocx", () => {
     await expect(writeTemplateDocx(doc, input, [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:1" }])).rejects.toMatchObject({ code: "TEMPLATE_LAYOUT_UNAVAILABLE" })
   })
 
-  it("mismatched table schemas never guess columns or append overflow — the FlintFlow table is written as is (FLF-372)", async () => {
+  it("mismatched table schemas never guess columns or append overflow - the FlintFlow table is written as is (FLF-372)", async () => {
     const input = await template(), parsed = await parseDocument(input), doc = document()
     doc.sections = [{ id: "fixed:1", number: "1", heading: "Requirements", level: 1, blocks: [{ type: "table", header: [runs("ID"), runs("Name"), runs("Role"), runs("Permissions")], rows: [[runs("A01"), runs("Manager"), runs("Manage club"), runs("Approve members")]] }] }]
     const output = await writeTemplateDocx(doc, input, [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:1" }])
@@ -236,7 +236,7 @@ describe("writeTemplateDocx", () => {
     ])
   })
 
-  it("FLF-378: mẫu của dự án mới (stripTemplateText) — mục chưa soạn bỏ hướng dẫn / ví dụ, bảng mẫu giữ tiêu đề bỏ dòng mẫu", async () => {
+  it("FLF-378: mẫu của dự án mới (stripTemplateText) - mục chưa soạn bỏ hướng dẫn / ví dụ, bảng mẫu giữ tiêu đề bỏ dòng mẫu", async () => {
     const input = await template(), parsed = await parseDocument(input)
     const requirements = parsed.blocks.find((b) => b.kind === "heading")!
     const doc = document()
@@ -251,7 +251,7 @@ describe("writeTemplateDocx", () => {
     expect(between.find((b) => b.kind === "table")!.rows).toEqual([["A", "B"]])
   })
 
-  it("FLF-378: mục đã soạn — bảng mẫu không được điền vẫn bỏ dòng mẫu khi stripTemplateText", async () => {
+  it("FLF-378: mục đã soạn - bảng mẫu không được điền vẫn bỏ dòng mẫu khi stripTemplateText", async () => {
     const input = await template(), parsed = await parseDocument(input), doc = document()
     doc.sections = [{ id: "fixed:1", heading: "Requirements", number: "1", level: 1, blocks: [{ type: "paragraph", runs: runs("Drafted requirement") }] }]
     const output = await parseDocument(await writeTemplateDocx(doc, input, [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:1" }], [], { stripTemplateText: true }))

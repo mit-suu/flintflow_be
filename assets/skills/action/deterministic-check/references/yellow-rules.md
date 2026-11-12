@@ -1,10 +1,10 @@
-# Yellow flags — source: srs-spine.md §8.1 (cardinality) + use case relations and naming
+# Yellow flags - source: srs-spine.md §8.1 (cardinality) + use case relations and naming
 
 Deterministic, non-blocking, each with a `rule_id`.
 
 | `rule_id` | Condition | `remediation_step` |
 | --- | --- | --- |
-| `orphan_actor` | An actor of any kind (human, system, time) is in no `use_cases[].actor_ids[]` — the diagram only declares actors that have an edge, so it would vanish silently | S-3.2 |
+| `orphan_actor` | An actor of any kind (human, system, time) is in no `use_cases[].actor_ids[]` - the diagram only declares actors that have an edge, so it would vanish silently | S-3.2 |
 | `usecase_no_function` | `use_cases[].function_ids[]` empty | S-3.2 |
 | `screen_no_function` | A screen has no function | S-4.1 |
 | `orphan_screen` | A screen no human actor uses (once any screen ↔ actor link exists), or, once any `flow_to` edge exists, a screen with no incoming and no outgoing edge, or a pop-up nothing opens | S-4.2 |
@@ -15,14 +15,14 @@ Deterministic, non-blocking, each with a `rule_id`.
 | `usecase_auth_relation` | An authentication / account-access use case (Log In, Sign In, Register, Reset Password, Recover Account… and their Vietnamese forms, matched as whole phrases) is included by another use case, or itself extends one | S-3.4 |
 | `usecase_name_semantic` | Use case name breaks U2 (two goals joined), U3 (vague verb such as Manage/Handle), or U8 (duplicate name) | S-3.2 |
 | `usecase_name_style` | Use case name breaks U1 (Title Case, no trailing period), U4 (actor as the subject: "<Actor> …" at the start or "… by <Actor>"), U5 (UI or technical term), or U6 (more than 5 words) | S-3.2 |
-| `actor_name_shape` | Actor name breaks A2 (bare `User`/`System`/`Actor`/`Person` — not raised for a general actor that other actors specialize via `parent_id`) or A7 (duplicate name) | S-3.1 |
-| `actor_generalization_invalid` | `actors[].parent_id` is not a human → human generalization: a `system`/`time` actor specializes or is specialized, the actor points at itself, or the edges form a cycle. The renderer ignores such an edge. (A dead id is `dead_reference`.) `orphan_actor` treats an actor whose ancestor has a use case as used — it inherits it | S-3.1 |
-| `actor_generalization_children_unlisted` | A general actor (valid `parent_id` children) whose `description` does not mention the name of every child actor — §2.1 and the actor hierarchy diagram would show the general actor without saying which roles it covers | S-3.1 |
-| `actor_generalization_missing` | An account-access use case (Log In, Reset Password, Register Account… — same matcher as `usecase_auth_relation`) lists ≥ 2 human actors directly: they sign in to the same product, so a general human actor (`User`) must be their `parent_id` and the shared use case lists only that general actor. One flag per set of actors; when they already share a parent, the message says to keep the use case on the parent only. System/time actors (an identity provider) do not count. Gated on S-3.2 | S-3.1 |
-| `orphan_entity` | The ERD is not one connected graph (relations read both ways, a self-relation does not count): every entity outside the main component — the largest, ties go to the one holding the lowest id — whether it stands alone or sits in a detached cluster. Skipped with fewer than two entities | S-4.5 |
-| `unresolved_many_to_many` | (Also enforced at draft time: `validateOps` rejects an S-4.5 batch that leaves a mutual pair, a split ERD or a relation without a verb — this flag and `orphan_entity` only catch data from other paths.) Two entities list each other in `relations` (A → B and B → A): a many-to-many not resolved into an associative entity, so the ERD is not in 1NF. One flag per entity, on the lower id of each pair | S-4.5 |
+| `actor_name_shape` | Actor name breaks A2 (bare `User`/`System`/`Actor`/`Person` - not raised for a general actor that other actors specialize via `parent_id`) or A7 (duplicate name) | S-3.1 |
+| `actor_generalization_invalid` | `actors[].parent_id` is not a human → human generalization: a `system`/`time` actor specializes or is specialized, the actor points at itself, or the edges form a cycle. The renderer ignores such an edge. (A dead id is `dead_reference`.) `orphan_actor` treats an actor whose ancestor has a use case as used - it inherits it | S-3.1 |
+| `actor_generalization_children_unlisted` | A general actor (valid `parent_id` children) whose `description` does not mention the name of every child actor - §2.1 and the actor hierarchy diagram would show the general actor without saying which roles it covers | S-3.1 |
+| `actor_generalization_missing` | An account-access use case (Log In, Reset Password, Register Account… - same matcher as `usecase_auth_relation`) lists ≥ 2 human actors directly: they sign in to the same product, so a general human actor (`User`) must be their `parent_id` and the shared use case lists only that general actor. One flag per set of actors; when they already share a parent, the message says to keep the use case on the parent only. System/time actors (an identity provider) do not count. Gated on S-3.2 | S-3.1 |
+| `orphan_entity` | The ERD is not one connected graph (relations read both ways, a self-relation does not count): every entity outside the main component - the largest, ties go to the one holding the lowest id - whether it stands alone or sits in a detached cluster. Skipped with fewer than two entities | S-4.5 |
+| `unresolved_many_to_many` | (Also enforced at draft time: `validateOps` rejects an S-4.5 batch that leaves a mutual pair, a split ERD or a relation without a verb - this flag and `orphan_entity` only catch data from other paths.) Two entities list each other in `relations` (A → B and B → A): a many-to-many not resolved into an associative entity, so the ERD is not in 1NF. One flag per entity, on the lower id of each pair | S-4.5 |
 | `system_name_missing` | A context or use case diagram exists but `project.system_name` is empty, so the diagrams and cover print the working project name (excluded in mode 1) | B-2.3 |
-| `original_diagram_stale` | Mode 1 only: a diagram kept as the **user's original image** (`custom_sections[].blocks[].diagram`, §4.13) no longer matches the Spine data it shows (`computeSourceHash` ≠ hash at import) — e.g. a CR added a use case and the reviewer rejected the redraw. Section = the FPT section of that diagram kind | render step of the kind |
+| `original_diagram_stale` | Mode 1 only: a diagram kept as the **user's original image** (`custom_sections[].blocks[].diagram`, §4.13) no longer matches the Spine data it shows (`computeSourceHash` ≠ hash at import) - e.g. a CR added a use case and the reviewer rejected the redraw. Section = the FPT section of that diagram kind | render step of the kind |
 
 Cardinality is **yellow, not red**: as red, every `placeholder` screen of round one would hit `screen_no_function` and need mass waivers.
 
@@ -43,12 +43,12 @@ The cardinality rules, `orphan_screen` and `usecase_floating` / `function_withou
 | `unresolved_many_to_many` | S-4.5 | same source as `orphan_entity` |
 | `orphan_entity` | S-4.5 | `entities[].relations[]` is written there; the whole ERD must be one connected graph. Skipped when there is only one entity |
 
-"Waits for" means that step is `accepted`. `at_baseline` (S-9) and mode 1 open every gate — see `red-rules.md`. `screen_placeholder` has its own gate (past the S-5 loop) and `system_name_missing` its own condition (a diagram exists); the naming, language and relation rules judge data that is already there, so they never wait.
+"Waits for" means that step is `accepted`. `at_baseline` (S-9) and mode 1 open every gate - see `red-rules.md`. `screen_placeholder` has its own gate (past the S-5 loop) and `system_name_missing` its own condition (a diagram exists); the naming, language and relation rules judge data that is already there, so they never wait.
 
 ## `non_english_content`
 
 - Scan only fields that render into the SRS (Owns column of srs-spine §4).
-- Skip `addendum[].content` (verbatim user text), `glossary[].term_native`, `changes[].reason`, `flags[].message`, `waive_reason` — those follow the user's language by design (Phases §1.3).
+- Skip `addendum[].content` (verbatim user text), `glossary[].term_native`, `changes[].reason`, `flags[].message`, `waive_reason` - those follow the user's language by design (Phases §1.3).
 - Detection: any character in the Vietnamese diacritic ranges (e.g. `/[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i`).
 - `target_id` = element id; `message` names the field path.
 
@@ -62,4 +62,4 @@ Authentication is a **precondition** of a protected use case (a state the actor 
 
 ## LLM yellow flags
 
-Not here — see `review-section` (S-9.2, UC 6.9): FR↔NFR contradictions, security risks, ambiguous wording. Out of scope for round one (Phases §9.1) but the schema is ready.
+Not here - see `review-section` (S-9.2, UC 6.9): FR↔NFR contradictions, security risks, ambiguous wording. Out of scope for round one (Phases §9.1) but the schema is ready.

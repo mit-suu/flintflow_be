@@ -1,8 +1,8 @@
 ---
 skill_id: cr-propose
 kind: action
-version: 2.6.0
-description: Mode 1 C-4 — for every affected Spine element conclude edit | comment | not_related and propose the Spine ops
+version: 2.7.0
+description: Mode 1 C-4 - for every affected Spine element conclude edit | comment | not_related and propose the Spine ops
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 6144
@@ -23,14 +23,15 @@ language: user
 
 You change an SRS whose single source of truth is structured data (the Spine). The document is re-rendered from the
 Spine after approval, so an edit is a set of Spine ops, not new prose. Change only what the change request requires
-and keep every other field exactly as it is — each changed field is a revision the reviewer must read.
+and keep every other field exactly as it is - each changed field is a revision the reviewer must read.
 
 ## Context
 
 - CR {{cr_id}}: {{title}}
+- Document language: {{document_language}}
 - Description: {{description}}
 - Clarification answers (an empty answer means "I don't know"; when rounds disagree, the later round wins): {{answers}}
-- Source material attached by the user (the requester's own documents — the primary source of facts):
+- Source material attached by the user (the requester's own documents - the primary source of facts):
 {{materials}}
 - Facts the clarify step reported as still missing: {{missing_info}}
 - Where this change belongs (named by the requester, or found):
@@ -53,19 +54,19 @@ and keep every other field exactly as it is — each changed field is a revision
 3. A location whose path is a whole array (`other_requirements[]`, `entities[]`) is where **new elements** are added.
    **EMPTY SECTION** = the section has no elements yet; **ADD NEW** = it has some (listed as the value, so you can
    avoid duplicates; "Ids already used" lists every id). Its only valid `edit` is `add` ops into **that same array**: add
-   every element the change needs that does not exist yet — asked for explicitly *or* required to carry the change
+   every element the change needs that does not exist yet - asked for explicitly *or* required to carry the change
    out (a new stored data concept ⇒ a new entity with its fields and relations; a new access rule ⇒ a new permission;
    a new screen ⇒ a new screen). Give a new element an id in the document's scheme (`UC-126`, `SCR-85`) that is
-   **not** in "Ids already used" — the server renumbers a clashing id and the references to it in the other new
+   **not** in "Ids already used" - the server renumbers a clashing id and the references to it in the other new
    elements of this CR. Text in the document's language. Nothing new needed ⇒ `not_related` with the reason. Never touch another array from such a location.
    Reference fields (`actor_id`, `role_id`, `screen_id`, `entity_id`, relations…) point to **existing elements
-   by id** whenever one matches (a new role "Chủ bếp" ⇒ `actor_id` of the actor named "Chủ bếp") — never leave them
+   by id** whenever one matches (a new role "Chủ bếp" ⇒ `actor_id` of the actor named "Chủ bếp") - never leave them
    empty when a match exists. Elements added by another add location of the same CR can be referenced by the ids
    you give them (all ops apply together, in location order). A section made of several arrays is only done when
    **all** its parts are filled: Screen Authorization = roles **and** the permissions matrix (`permissions[]`: one
    element per role × screen that may be accessed, `action` like "view" / "edit"); adding roles alone leaves the
    table empty.
-4. Diagrams (use case, entity–relationship, screen flow, context) are **drawn from the elements** — change a diagram
+4. Diagrams (use case, entity–relationship, screen flow, context) are **drawn from the elements** - change a diagram
    by editing or adding those elements (rules 2–3), never by a comment. `comment` ⇒ only a decision the stakeholder
    must make, or a change no op can express. Nothing changes; `comment_text` tells the reviewer what to check. No
    `spine_ops`. If the change needs a new element and this location's section has an ADD NEW / EMPTY SECTION
@@ -73,7 +74,7 @@ and keep every other field exactly as it is — each changed field is a revision
 5. When *Where this change belongs* names a section, the new or changed content goes **there**: new elements only
    through that section's add location, even if it is not in this batch. Never move the content into another
    section's element (an NFR, a screen description, an actor) as a substitute, and never add new elements from an
-   element location — conclude `not_related` (or edit only what truly changes in this element) instead.
+   element location - conclude `not_related` (or edit only what truly changes in this element) instead.
 6. `not_related` ⇒ the search hit is a false positive (same word, different meaning); say why. No `spine_ops`.
 7. When a location lists "Previous proposal failed checks", fix exactly that problem.
 8. Facts (numbers, thresholds, rules, actors, flows, fields, names) come only from the CR, the answers, the attached
@@ -85,7 +86,13 @@ and keep every other field exactly as it is — each changed field is a revision
    the CR" ⇒ also edit the old element / passage that said otherwise so the document no longer says both (a passage
    kept verbatim: set that `custom_sections` element's `blocks`, changing only the conflicting sentence); when no op
    can express it, conclude `comment` naming the passage to fix. "keep it as it is" ⇒ do not change that content.
-10. `reason`, `comment_text` and `assumptions`: User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`, `feature:@B0012`), element paths (`actors[id=A02].name`), block ids (`B0012`) or location ids (`L001`). Name a section by its heading and an element by its name or document code (`UC-01` is fine).
+10. **Language.** All new or changed text - values in `spine_ops`, `reason`, `comment_text`, `assumptions` - is in the
+    *Document language* above, matching the language and terms the element's current value and the glossary already
+    use (a Vietnamese document gets a Vietnamese step "Sau khi GVCN lưu điểm danh, …", never an English one "After the
+    teacher saves…"; a new label in `flows_in` / `flows_out` follows the existing labels). Never translate content
+    into the language of the change request or the material. Names quoted from the document or the CR keep their
+    original form. A proposal with text in another language fails the checks and is redone.
+11. `reason`, `comment_text` and `assumptions`: User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`, `feature:@B0012`), element paths (`actors[id=A02].name`), block ids (`B0012`) or location ids (`L001`). Name a section by its heading and an element by its name or document code (`UC-01` is fine).
 
 ## Output
 

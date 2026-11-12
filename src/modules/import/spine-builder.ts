@@ -6,8 +6,9 @@
  */
 
 import type { Op } from "../spine/op.types.js"
-import type { EntityAttribute, EntityState, EntityTransition, FlowEdge, Spine } from "../spine/spine.types.js"
+import type { ActivityFlow, ActivityNode, ActivityNodeKind, EntityAttribute, EntityState, EntityTransition, FlowEdge, FunctionInteraction, Spine } from "../spine/spine.types.js"
 import { IdAllocator, compactKey, idKey, nameKey } from "./extracted-entities.js"
+import { foldText } from "./text-similarity.js"
 
 export interface BuiltEntity {
   entity: string
@@ -60,8 +61,8 @@ export const droppedPermissionFindings = (
     const list = [...others].filter(Boolean).join(", ")
     const message =
       missing === "screen"
-        ? `Bảng phân quyền có "${name}"${list ? ` (quyền của ${list})` : ""} nhưng phần mô tả màn hình không có màn này — quyền chưa vào dữ liệu; thêm màn hoặc sửa tên cho khớp qua change request`
-        : `Bảng phân quyền có vai trò "${name}" không khớp vai trò / tác nhân nào — quyền${list ? ` trên ${list}` : ""} chưa vào dữ liệu; sửa tên cho khớp qua change request`
+        ? `Bảng phân quyền có "${name}"${list ? ` (quyền của ${list})` : ""} nhưng phần mô tả màn hình không có màn này - quyền chưa vào dữ liệu; thêm màn hoặc sửa tên cho khớp qua change request`
+        : `Bảng phân quyền có vai trò "${name}" không khớp vai trò / tác nhân nào - quyền${list ? ` trên ${list}` : ""} chưa vào dữ liệu; sửa tên cho khớp qua change request`
     return { rule: "unresolved_permission", section_id: "fixed:3.1.3", message, block_ids: blockIds }
   })
 }
@@ -78,6 +79,31 @@ const strList = (v: unknown): string[] => {
   if (Array.isArray(v)) return v.map(str).filter(Boolean)
   const s = str(v)
   return s ? s.split(/\n+/).map((x) => x.replace(/^\s*(?:\d+[.)]|[-•*])\s*/, "").trim()).filter(Boolean) : []
+}
+
+// QLHS 11/11 bug #14: dòng chữ nhỏ dưới tên nút ("GV, phụ huynh") là mô tả, không phải component
+const SOFTWARE_WORD = /\b(service|server|api|app|application|module|component|bundle|database|db|gateway|worker|client|frontend|backend|engine|runtime|daemon|plugin|library|sdk)\b/i
+/** Tên giống phần mềm: file / đường dẫn (`api.js`, `bin/app`), PascalCase liền (`ApiGateway`), `<<…>>`, hoặc từ khoá phần mềm. */
+const looksSoftware = (s: string): boolean =>
+  /\.\w{1,5}$|[/\\]|<<|>>/.test(s) || /^[A-Z][a-z0-9]+[A-Z]\w*$/.test(s) || SOFTWARE_WORD.test(s)
+/** Mảnh văn xuôi: chữ thường đầu + nhiều từ (`phụ huynh`), có dấu phẩy (`30 bản, tách biệt`), số + từ (`30 bản`). */
+const looksProse = (s: string): boolean => /^\p{Ll}\S*\s/u.test(s) || s.includes(",") || /^\d+\s+\p{L}/u.test(s)
+
+/**
+ * Lưới an toàn cho `components` của nút triển khai đọc từ ảnh. Chỉ chuyển khi nút chưa có mô tả, MỌI mảnh đều ngắn
+ * (≤ 40 ký tự, ≤ 5 từ), không mảnh nào giống phần mềm, và ít nhất một mảnh là văn xuôi ⇒ nối ", " thành mô tả.
+ * Tên đơn lẻ mơ hồ ("Docker", "Web Browser", "API Service", "nginx") không phải văn xuôi ⇒ giữ là component.
+ * Nút đã có mô tả: bỏ những component chỉ lặp lại chữ trong mô tả.
+ */
+export const splitSubtitleComponents = (components: string[], description: string): { components: string[]; description: string } => {
+  if (components.length === 0) return { components, description }
+  if (description) {
+    const d = description.toLowerCase()
+    return { components: components.filter((c) => !d.includes(c.toLowerCase())), description }
+  }
+  const short = components.every((c) => c.length <= 40 && c.split(/\s+/).length <= 5)
+  if (short && !components.some(looksSoftware) && components.some(looksProse)) return { components: [], description: components.join(", ") }
+  return { components, description }
 }
 
 /**
@@ -114,6 +140,9 @@ const looseKey = (name: string): string =>
   nameKey(name.replace(/\([^)]*\)/g, " "))
     .replace(/\s*\b(screen|page|form|dialog|popup|modal|man hinh|trang)$/, "")
     .trim()
+
+/** Câu mô tả actor nói nó kế thừa actor khác (tiếng Anh / tiếng Việt), tới hết câu. */
+const INHERITS = /\b(inherits?|inheriting|specialization of|is a kind of)\b|kế thừa|thừa hưởng/i
 
 /** Chuỗi chỉ là mã phần tử (`F-09`, `UC01`, `FR-3.2`) — không dùng làm tên khi tạo phần tử mới. */
 const CODE_LIKE = /^[A-Za-z]{1,6}[-_ ]?\d+(?:\.\d+)*$/
@@ -183,6 +212,78 @@ const lifecycleOf = (entityId: string, rawStates: unknown, rawTransitions: unkno
   return { states: out, transitions }
 }
 
+const SYSTEM_END = "system"
+const NODE_KINDS: readonly ActivityNodeKind[] = ["initial", "final", "action", "decision", "merge", "fork", "join"]
+/** Chữ nằm trong selector của path (message, khoá) không chứa `,` `[` `]`. */
+const selectorText = (v: unknown): string => str(v).replace(/[,[\]]/g, " ").replace(/\s+/g, " ").trim()
+
+/**
+ * FLF-390: message actor ↔ hệ thống đọc từ sơ đồ tuần tự: `from` / `to` là actor (mã / tên) hoặc `system`. Message không
+ * có đúng một đầu `system`, actor không khớp, thiếu chữ hay trùng khoá ⇒ bỏ (không đoán). Nhánh lỗi thiếu guard ⇒ bỏ.
+ */
+const interactionsOf = (raw: unknown, resolveActor: (ref: string) => string | null): FunctionInteraction[] => {
+  const out: FunctionInteraction[] = []
+  const end = (ref: unknown): string | null => {
+    const text = str(ref)
+    if (!text) return null
+    return /^(the\s+)?system$|^hệ thống$/i.test(text) ? SYSTEM_END : resolveActor(text)
+  }
+  for (const item of Array.isArray(raw) ? raw : []) {
+    if (!item || typeof item !== "object") continue
+    const rec = item as Record<string, unknown>
+    const from = end(rec.from)
+    const to = end(rec.to)
+    const message = selectorText(rec.message)
+    if (!from || !to || !message || (from === SYSTEM_END) === (to === SYSTEM_END)) continue
+    const kind = oneOf(rec.kind, ["request", "response"], from === SYSTEM_END ? "response" : "request")
+    const flow = oneOf(rec.flow, ["normal", "abnormal"], "normal")
+    const guard = str(rec.guard)
+    if (flow === "abnormal" && !guard) continue
+    if (out.some((i) => i.from === from && i.to === to && i.message === message && i.kind === kind && i.flow === flow)) continue
+    out.push({ from, to, message, kind, flow, ...(guard ? { guard } : {}) })
+  }
+  return out
+}
+
+/**
+ * FLF-390: luồng xử lý đọc từ sơ đồ activity: nút `{ id (tạm, N1…), kind, name, lane }` ⇒ id `<use case>-AN<n>` theo thứ tự;
+ * làn = actor (mã / tên) hoặc `system`, không khớp ⇒ bỏ làn. Flow nối hai nút có thật, không tự trỏ, không trùng.
+ */
+const activityOf = (ownerId: string, rawNodes: unknown, rawFlows: unknown, resolveActor: (ref: string) => string | null): { activity_nodes: ActivityNode[]; activity_flows: ActivityFlow[] } => {
+  const nodes: ActivityNode[] = []
+  const local = new Map<string, string>()
+  for (const item of Array.isArray(rawNodes) ? rawNodes : []) {
+    if (!item || typeof item !== "object") continue
+    const rec = item as Record<string, unknown>
+    const kind = NODE_KINDS.find((k) => k === str(rec.kind).toLowerCase())
+    if (!kind) continue
+    const id = `${ownerId}-AN${nodes.length + 1}`
+    const ref = str(rec.id)
+    if (ref) local.set(ref.toLowerCase(), id)
+    const name = str(rec.name)
+    if (name && !local.has(name.toLowerCase())) local.set(name.toLowerCase(), id)
+    const laneText = str(rec.lane)
+    const lane = laneText ? (/^(the\s+)?system$|^hệ thống$/i.test(laneText) ? SYSTEM_END : resolveActor(laneText)) : null
+    nodes.push({ id, kind, ...(name && kind !== "initial" && kind !== "final" ? { name } : {}), ...(lane ? { lane } : {}) })
+  }
+  if (!nodes.length) return { activity_nodes: [], activity_flows: [] }
+  const find = (ref: unknown): string | null => {
+    const text = str(ref).toLowerCase()
+    return text ? (local.get(text) ?? nodes.find((n) => n.id.toLowerCase() === text)?.id ?? null) : null
+  }
+  const flows: ActivityFlow[] = []
+  for (const item of Array.isArray(rawFlows) ? rawFlows : []) {
+    if (!item || typeof item !== "object") continue
+    const rec = item as Record<string, unknown>
+    const from = find(rec.from)
+    const to = find(rec.to)
+    if (!from || !to || from === to || flows.some((f) => f.from === from && f.to === to)) continue
+    const guard = str(rec.guard).replace(/^\[|\]$/g, "").trim()
+    flows.push({ from, to, ...(guard ? { guard } : {}) })
+  }
+  return { activity_nodes: nodes, activity_flows: flows }
+}
+
 /** Động từ quan hệ hợp lệ của Spine (`relation_verbs`): tiếng Anh viết thường. */
 const RELATION_VERB = /^[a-z]+( [a-z]+)*$/
 
@@ -190,6 +291,77 @@ const RELATION_VERB = /^[a-z]+( [a-z]+)*$/
  * Cụm quan hệ "động từ + Thực thể" (bảng ERD FlintFlow xuất ra: "teaches Schedule Slot") ⇒ thực thể có tên dài nhất
  * nằm ở cuối cụm + động từ đứng trước (giữ làm nhãn quan hệ khi là tiếng Anh thường). Không thực thể nào ⇒ `null`.
  */
+const foldName = (s: string): string =>
+  s
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/đ/gi, "d")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+const initialsOf = (name: string): string =>
+  foldName(name)
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => w[0])
+    .join("")
+
+/** Thuộc tính tham chiếu của `child` trỏ tới `parentName` ("mã TK phụ huynh" ⇒ Tài khoản, "mã năm học" ⇒ Năm học). */
+const referencesName = (attributes: unknown, parentName: string): boolean => {
+  if (!Array.isArray(attributes)) return false
+  const full = foldName(parentName)
+  const ini = initialsOf(parentName)
+  return attributes.some((a) => {
+    const name = foldName(typeof a === "string" ? a : String((a as { name?: unknown })?.name ?? ""))
+    const m = /^(?:ma|id|fk)\s+(.+)$/.exec(name)
+    if (!m) return false
+    const rest = m[1]
+    return rest === full || rest.startsWith(`${full} `) || (ini.length >= 2 && (rest === ini || rest.startsWith(`${ini} `)))
+  })
+}
+
+/**
+ * QLHS 11/11 (bug #12): A ghi B là phía nhiều và B cũng ghi A là phía nhiều (bảng một chiều, AI đọc ảnh / đoạn văn ghi chiều
+ * ngược) ⇒ ERD vẽ hai quan hệ ngược nhau. Giữ một chiều: bên có thuộc tính khoá ngoại trỏ tới bên kia là con; không có
+ * bằng chứng ⇒ thực thể đứng trước trong tài liệu là cha. Cặp có bội số "1" (1–1) giữ nguyên.
+ */
+export const dropReciprocalRelations = (
+  entities: { id: string; value: Record<string, unknown>; relations: string[]; cardinality: Record<string, "1" | "N"> }[]
+): void => {
+  const byId = new Map(entities.map((e, i) => [e.id, { e, i }]))
+  for (const a of entities) {
+    for (const bId of [...a.relations]) {
+      const b = byId.get(bId)
+      if (!b || !b.e.relations.includes(a.id) || a.cardinality[bId] === "1" || b.e.cardinality[a.id] === "1") continue
+      const aName = String(a.value.name ?? a.id)
+      const bName = String(b.e.value.name ?? b.e.id)
+      const bIsChild = referencesName(b.e.value.attributes, aName)
+      const aIsChild = referencesName(a.value.attributes, bName)
+      const parentIsA = bIsChild !== aIsChild ? bIsChild : (byId.get(a.id)?.i ?? 0) < b.i
+      const [parent, child] = parentIsA ? [a, b.e] : [b.e, a]
+      child.relations = child.relations.filter((id) => id !== parent.id)
+      if (!parent.relations.includes(child.id)) parent.relations.push(child.id)
+    }
+  }
+}
+
+/** Bội số đầu mục quan hệ: "1–n", "n-1", "1:N", "1..*", "*–1", "1–1". */
+const MULTIPLICITY = /^\s*(1|n|\*|0\.\.1|1\.\.\*|0\.\.\*)\s*[–—\-:]\s*(1|n|\*|0\.\.1|1\.\.\*|0\.\.\*)\s+/i
+const isMany = (m: string): boolean => /n|\*/i.test(m)
+
+/**
+ * Mục của ô "Quan hệ" kèm phía: `child` (thực thể này là phía 1, mục là phía nhiều — mặc định), `one` (1–1), `parent`
+ * (n–1: mục là cha của thực thể này). Mục không ghi bội số dùng bội số của mục đứng trước ("1–n Điểm, Điểm danh").
+ */
+export const relationRefs = (refs: readonly string[]): { ref: string; side: "child" | "one" | "parent" }[] => {
+  let side: "child" | "one" | "parent" = "child"
+  return refs.map((raw) => {
+    const m = MULTIPLICITY.exec(raw)
+    if (m) side = isMany(m[1]) && !isMany(m[2]) ? "parent" : !isMany(m[1]) && !isMany(m[2]) ? "one" : "child"
+    return { ref: m ? raw.slice(m[0].length).trim() : raw.trim(), side }
+  })
+}
+
 export const relationPhrase = (ref: string, pool: { id: string; name?: string }[]): { id: string; verb: string } | null => {
   const key = nameKey(ref)
   const hits = pool
@@ -316,33 +488,92 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
     return id
   }
 
+  // FLF-390: actor cha (generalization vẽ trên sơ đồ use case / "inherits everything a Guest can do" trong bảng 2.1) và
+  // luồng dữ liệu vào / ra của sơ đồ ngữ cảnh — trước đây bỏ ⇒ hình ngữ cảnh chỉ còn nhãn dự phòng một chiều, use case nối
+  // cả cha lẫn con. Cha chỉ người ↔ người, không tự trỏ chính nó (vòng do `actorParents` chặn lúc vẽ).
+  const actorKind = new Map<string, string>([
+    ...spine.actors.map((a) => [a.id, a.kind] as [string, string]),
+    ...of("actors").map((a) => [a.id!, oneOf(a.value.kind, ["human", "system", "time"], "human")] as [string, string])
+  ])
+  // Mô tả ghi "Inherits everything a Guest can do" / "kế thừa Khách" ⇒ cha là actor người DUY NHẤT được nhắc tên sau từ đó
+  const actorNames = [...spine.actors.map((a) => ({ id: a.id, name: a.name })), ...of("actors").map((a) => ({ id: a.id!, name: str(a.value.name) }))]
+  const inheritedFrom = (selfId: string, description: string): string | null => {
+    const m = INHERITS.exec(description)
+    if (!m) return null
+    const rest = description.slice(m.index)
+    const tail = ` ${foldText(rest.split(/[.;](?:\s|$)/)[0])} `
+    const hits = actorNames.filter((x) => x.id !== selfId && actorKind.get(x.id) === "human" && x.name && tail.includes(` ${foldText(x.name)} `))
+    return new Set(hits.map((x) => x.id)).size === 1 ? hits[0].id : null
+  }
   for (const a of of("actors").filter(skip(spine.actors))) {
-    add("actors", { id: a.id, name: str(a.value.name) || a.id, kind: oneOf(a.value.kind, ["human", "system", "time"], "human"), description: str(a.value.description) })
+    const kind = oneOf(a.value.kind, ["human", "system", "time"], "human")
+    const parentRef = str(a.value.parent_id ?? a.value.parent)
+    const parent = parentRef ? resolveActor(parentRef) : inheritedFrom(a.id!, str(a.value.description))
+    const parentId = parent && parent !== a.id && kind === "human" && actorKind.get(parent) === "human" ? parent : null
+    const flowsIn = [...new Set(strList(a.value.flows_in))]
+    const flowsOut = [...new Set(strList(a.value.flows_out))]
+    add("actors", {
+      id: a.id,
+      name: str(a.value.name) || a.id,
+      kind,
+      description: str(a.value.description),
+      ...(flowsIn.length ? { flows_in: flowsIn } : {}),
+      ...(flowsOut.length ? { flows_out: flowsOut } : {}),
+      ...(parentId ? { parent_id: parentId } : {})
+    })
   }
   for (const r of of("roles").filter(skip(spine.roles))) add("roles", { id: r.id, name: str(r.value.name) || r.id, actor_id: resolveActor(r.value.actor_id ?? r.value.actor) })
+  // QLHS 11/11: cột "Quan hệ" ghi chiều ("1–n Học kỳ", "n–1 Học sinh"). `relations` của Spine chỉ chứa phía nhiều của
+  // thực thể này ⇒ "n–1 X" là quan hệ của X (X → thực thể này), không phải của thực thể này; bỏ chiều thì mỗi cặp bị vẽ
+  // hai lần ngược nhau trên ERD.
+  const builtEntities: { id: string; value: Record<string, unknown>; relations: string[]; cardinality: Record<string, "1" | "N"> }[] = []
+  const parentLinks: { parent: string; child: string }[] = []
   for (const e of of("entities").filter(skip(spine.entities))) {
     const relations: string[] = []
+    const cardinality: Record<string, "1" | "N"> = {}
     const verbs: Record<string, string> = {}
-    for (const ref of strList(e.value.relations)) {
+    for (const { ref, side } of relationRefs(strList(e.value.relations))) {
       const direct = resolveEntity(ref)
       const hit = direct ? { id: direct, verb: "" } : relationPhrase(ref, entityPool)
-      if (!hit || hit.id === e.id || relations.includes(hit.id)) continue
+      if (!hit || hit.id === e.id) continue
+      if (side === "parent") {
+        parentLinks.push({ parent: hit.id, child: e.id! })
+        continue
+      }
+      if (relations.includes(hit.id)) continue
       relations.push(hit.id)
+      if (side === "one") cardinality[hit.id] = "1"
       if (hit.verb) verbs[hit.id] = hit.verb
     }
     const attributes = attributesOf(e.value.attributes)
     const featureIds = [...new Set(strList(e.value.feature_ids ?? e.value.features).flatMap((ref) => resolveFeature(ref) ?? []))]
     const lifecycle = lifecycleOf(e.id ?? "", e.value.states, e.value.transitions)
-    add("entities", {
-      id: e.id,
-      name: str(e.value.name) || e.id,
-      description: str(e.value.description),
+    builtEntities.push({
+      id: e.id!,
       relations,
-      ...(Object.keys(verbs).length ? { relation_verbs: verbs } : {}),
-      ...(attributes.length ? { attributes } : {}),
-      ...(featureIds.length ? { feature_ids: featureIds } : {}),
-      ...(lifecycle.states.length ? lifecycle : {})
+      cardinality,
+      value: {
+        id: e.id,
+        name: str(e.value.name) || e.id,
+        description: str(e.value.description),
+        ...(Object.keys(verbs).length ? { relation_verbs: verbs } : {}),
+        ...(attributes.length ? { attributes } : {}),
+        ...(featureIds.length ? { feature_ids: featureIds } : {}),
+        ...(lifecycle.states.length ? lifecycle : {})
+      }
     })
+  }
+  for (const { parent, child } of parentLinks) {
+    const p = builtEntities.find((b) => b.id === parent)
+    // Cha đã có trong Spine (không dựng lại ở lô này) thì thôi — không sửa phần tử cũ từ import
+    if (p && !p.relations.includes(child)) p.relations.push(child)
+    // Chiều ngược (con cũng ghi cha là "1–n") bị bỏ: chỉ giữ cha → con
+    const c = builtEntities.find((b) => b.id === child)
+    if (c) c.relations = c.relations.filter((id) => id !== parent)
+  }
+  dropReciprocalRelations(builtEntities)
+  for (const b of builtEntities) {
+    add("entities", { ...b.value, relations: b.relations, ...(Object.keys(b.cardinality).length ? { relation_cardinality: b.cardinality } : {}) })
   }
   for (const b of of("business_rules").filter(skip(spine.business_rules))) {
     add("business_rules", { id: b.id, tier: ruleTierOfSections(b.sections) ?? oneOf(b.value.tier, ["high", "detail"], "detail"), statement: str(b.value.statement ?? b.value.rule ?? b.value.description), source_validation_ids: [] })
@@ -363,6 +594,15 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
   }
   // functions: order duy nhất trong (feature, có màn / không màn)
   const orderIn = new Map<string, number>()
+  // FLF-390: luồng đọc từ sơ đồ tuần tự (function) / activity (use case) trong ảnh — chỉ ghi khi có
+  const functionDiagramData = (_fnId: string, value: Record<string, unknown>) => {
+    const interactions = interactionsOf(value.interactions, resolveActor)
+    return interactions.length ? { interactions } : {}
+  }
+  const useCaseActivity = (ucId: string, value: Record<string, unknown>) => {
+    const activity = activityOf(ucId, value.activity_nodes, value.activity_flows, resolveActor)
+    return activity.activity_nodes.length ? activity : {}
+  }
   for (const f of of("functions").filter(skip(spine.functions))) {
     const screenId = resolveScreen(f.value.screen_id)
     const featureId = screenId ? featureOf(ops, screenId) ?? featureOr(f.value.feature_id) : featureOr(f.value.feature_id)
@@ -387,7 +627,8 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
         })
         .filter((v) => v.statement),
       business_rule_ids: strList(f.value.business_rule_ids).map(resolveRule).filter((x): x is string => !!x),
-      priority: priority(f.value.priority)
+      priority: priority(f.value.priority),
+      ...functionDiagramData(f.id!, f.value)
     })
   }
   // Tài liệu không ghi chức năng hiện thực use case ⇒ chức năng trùng hẳn tên (SRS FPT đặt tên use case và chức năng như
@@ -405,9 +646,12 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
       function_ids: functionIds,
       description: str(u.value.description),
       includes: [...new Set(strList(u.value.includes).map(resolveUseCase).filter((x): x is string => !!x && x !== u.id))],
-      extends: [...new Set(strList(u.value.extends).map(resolveUseCase).filter((x): x is string => !!x && x !== u.id))]
+      extends: [...new Set(strList(u.value.extends).map(resolveUseCase).filter((x): x is string => !!x && x !== u.id))],
+      ...useCaseActivity(u.id!, u.value)
     })
   }
+  // FLF-375: KHÔNG tự thêm actor `User` lúc import — bản 0.1 ghi nhận nguyên trạng file (business-flow §2); thiếu actor
+  // tổng quát chỉ là cờ vàng `actor_generalization_missing`. Luật `User` áp khi vẽ sơ đồ (`diagram/renderers/drawn-user.ts`).
   // Ô ghi nhiều màn ("Search Results / Product Detail") ⇒ từng màn, khi cả chuỗi không là một màn và mọi phần đều khớp màn
   const resolveScreens = (ref: unknown): string[] => {
     const one = resolveScreen(ref)
@@ -495,6 +739,63 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
       ...opt("status"),
       ...opt("evidence")
     })
+  }
+  // FLF-390: sơ đồ triển khai — nút (cha theo tên / mã, cha trước con) và đường truyền thông ghi trên nút (`links`)
+  const nodeItems = of("deployment_nodes").filter(skip(spine.deployment_nodes ?? []))
+  if (nodeItems.length) {
+    const resolveNode = resolver("deployment_nodes", pool("deployment_nodes", spine.deployment_nodes ?? []))
+    const parentOf = new Map(nodeItems.map((n) => [n.id!, ((): string | null => {
+      const ref = str(n.value.parent_id ?? n.value.parent)
+      const id = ref ? resolveNode(ref) : null
+      return id && id !== n.id ? id : null
+    })()]))
+    const depth = (id: string, seen = new Set<string>()): number => {
+      const p = parentOf.get(id)
+      if (!p || seen.has(p) || !parentOf.has(p)) return 0
+      seen.add(id)
+      return 1 + depth(p, seen)
+    }
+    // Vòng cha (A trong B, B trong A) ⇒ bỏ cha của nút sau
+    for (const n of nodeItems) {
+      const seen = new Set<string>([n.id!])
+      for (let p = parentOf.get(n.id!) ?? null; p; p = parentOf.get(p) ?? null) {
+        if (seen.has(p)) {
+          parentOf.set(n.id!, null)
+          break
+        }
+        seen.add(p)
+      }
+    }
+    for (const n of [...nodeItems].sort((a, b) => depth(a.id!) - depth(b.id!))) {
+      // Mô tả nút (dòng chữ phụ dưới tên): mảng thì nối ", ", không tách
+      const rawDescription = n.value.description ?? n.value.subtitle
+      const fixed = splitSubtitleComponents(
+        strList(n.value.components),
+        Array.isArray(rawDescription) ? rawDescription.map(str).filter(Boolean).join(", ") : str(rawDescription)
+      )
+      const description = fixed.description
+      add("deployment_nodes", {
+        id: n.id,
+        name: str(n.value.name) || n.id,
+        kind: oneOf(n.value.kind, ["device", "execution_environment", "node"], "node"),
+        parent_id: parentOf.get(n.id!) ?? null,
+        artifacts: strList(n.value.artifacts),
+        components: fixed.components,
+        ...(description ? { description } : {})
+      })
+    }
+    const linked = new Set((spine.deployment_links ?? []).map((l) => [l.from, l.to].sort().join("|")))
+    for (const n of nodeItems) {
+      for (const raw of Array.isArray(n.value.links) ? n.value.links : []) {
+        const rec: Record<string, unknown> = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : { to: raw }
+        const to = resolveNode(str(rec.to))
+        const key = to ? [n.id!, to].sort().join("|") : ""
+        if (!to || to === n.id || linked.has(key)) continue
+        linked.add(key)
+        const protocol = str(rec.protocol ?? rec.label)
+        add("deployment_links", { from: n.id, to, ...(protocol ? { protocol } : {}) })
+      }
+    }
   }
   // Màn chưa có function nào ⇒ placeholder: workspace không mở vòng S-5 rỗng cho nó (FLF-183, mode 1 v2)
   const screensWithFunction = new Set(ops.filter((o) => o.path === "functions[]").map((o) => (o.value as { screen_id: string | null }).screen_id))

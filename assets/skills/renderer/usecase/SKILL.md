@@ -39,7 +39,7 @@ stub: false
 - **Association** (actor – use case): solid line, NO arrowhead, ONE straight segment from the actor's hand to the left (human) or right (system/time) vertex of the ellipse. It never crosses another ellipse (same-size column ⇒ proven geometrically).
 - `<<include>>`: dashed, **open arrowhead**, `base → included`. `<<extend>>`: dashed, open arrowhead, `extension → base`. Drawn as a vertical segment between two **adjacent** ellipses, label right of the line. Extension points and conditions are not drawn (they live in the use case table §2.2.2).
 - **Generalization** between actors: solid line, hollow triangle at the general actor (own diagram, below). Use cases have no parent field in the Spine, so no use case generalization is drawn.
-- No title drawn inside the picture: the document caption comes from the SVG `<title>` (`Use Cases — <feature>` / `Actor Hierarchy`).
+- No title drawn inside the picture: the document caption comes from the SVG `<title>` (`Use Cases - <feature>` / `Actor Hierarchy`).
 
 ## One diagram per feature
 
@@ -50,13 +50,14 @@ stub: false
 
 ## Actors as modelled
 
-- A use case is linked to **every** actor in `actor_ids`; several human actors may share one use case on a diagram. A general actor stays general (`User`) — never expanded to leaf actors, never merged.
+- A use case is linked to **every** actor in `actor_ids`; several human actors may share one use case on a diagram. A general actor stays general (`User`) - never expanded to leaf actors, never merged.
+- An actor whose ancestor (`parent_id` chain) is also in `actor_ids` gets **no** edge to that use case: it inherits the association through the parent (`Guest, Customer` with `Customer --|> Guest` ⇒ only Guest is linked).
 - A **human** actor is not connected to a use case that is the target of an `<<include>>` or the source of an `<<extend>>` drawn in the same diagram: it reaches it through the base. A human actor left with no edge keeps the edge to its smallest use case id. `system`/`time` actors keep every edge.
 - Only actors with an edge in that diagram are drawn.
 
 ## Include / extend placement
 
-- A relation is drawn only when both use cases are in the same diagram. A use case has two neighbours in a column, so the relation graph is cut into simple chains (`relationChains`): an extension of two bases sits between them; a use case with more than two relations, or a cycle, appears in several diagrams of the group — every relation exactly once, always between adjacent rows.
+- A relation is drawn only when both use cases are in the same diagram. A use case has two neighbours in a column, so the relation graph is cut into simple chains (`relationChains`): an extension of two bases sits between them; a use case with more than two relations, or a cycle, appears in several diagrams of the group - every relation exactly once, always between adjacent rows.
 - Order inside a diagram: chains and single use cases sorted by main actor, then id.
 
 ## Actor hierarchy diagram

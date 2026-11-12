@@ -236,11 +236,11 @@ export const recompute = async (projectId: string, options: RecomputeOptions): P
   const spine = stripRecord(record)
   const atBaseline = options.atBaseline ?? false
   const ruleProfile = options.ruleProfile ?? (await ruleProfileResolver(projectId))
-  const { erdNotation } = await loadRenderContext(projectId)
-  const candidates = runDeterministicCheck(spine, changes, { atBaseline, ruleProfile, erdNotation })
+  const renderContext = await loadRenderContext(projectId)
+  const candidates = runDeterministicCheck(spine, changes, { atBaseline, ruleProfile, renderContext })
   const baselineCandidates = atBaseline
     ? undefined
-    : runDeterministicCheck(spine, changes, { atBaseline: true, ruleProfile, erdNotation }).filter((c) => AT_BASELINE_RULES.has(c.rule_id))
+    : runDeterministicCheck(spine, changes, { atBaseline: true, ruleProfile, renderContext }).filter((c) => AT_BASELINE_RULES.has(c.rule_id))
   const plan = planFlagOps(spine, candidates, new Date(), { atBaseline, baselineCandidates, changes })
 
   if (plan.ops.length === 0) {
@@ -273,8 +273,8 @@ export const waive = async (projectId: string, flagId: string, reason: string, u
     throw new ApiError(
       400,
       flag.level === "red"
-        ? "Cờ đỏ không bỏ qua được — hãy sửa dữ liệu, hoặc chọn Giữ nguyên kèm lý do (cờ vẫn chặn chốt bản)."
-        : "Cờ này không bỏ qua được — cần sửa dữ liệu.",
+        ? "Cờ đỏ không bỏ qua được - hãy sửa dữ liệu, hoặc chọn Giữ nguyên kèm lý do (cờ vẫn chặn chốt bản)."
+        : "Cờ này không bỏ qua được - cần sửa dữ liệu.",
       FLAG_NOT_WAIVABLE,
       { rule_id: flag.rule_id, level: flag.level }
     )

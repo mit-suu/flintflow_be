@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`renderSection — fixed sections > fixed:1 — vision, goals, release scope, high business rules, external systems, context diagram 1`] = `
+exports[`renderSection - fixed sections > fixed:1 - vision, goals, release scope, high business rules, external systems, context diagram 1`] = `
 {
   "blocks": [
     {
@@ -85,14 +85,14 @@ exports[`renderSection — fixed sections > fixed:1 — vision, goals, release s
       "items": [
         [
           {
-            "text": "Payment Gateway (system) — Processes payments.",
+            "text": "Payment Gateway (system) - Processes payments.",
           },
         ],
       ],
       "type": "bullet_list",
     },
     {
-      "caption": "Figure — System Context Diagram",
+      "caption": "Figure - System Context Diagram",
       "png": "png-d01",
       "type": "image",
     },

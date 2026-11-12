@@ -2,7 +2,7 @@
 skill_id: product-brief
 kind: content
 version: 0.5.0
-description: "B-0 Intake, B-1 Product Brief, B-2 Brief Finalize — adapted from BMAD bmad-product-brief"
+description: "B-0 Intake, B-1 Product Brief, B-2 Brief Finalize - adapted from BMAD bmad-product-brief"
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 6144
@@ -29,31 +29,31 @@ section it will later feed. S-1 turns that into structure; S-2 onward writes the
 
 Two habits decide whether this phase is useful:
 
-- **Write as you go.** Every step ends with ops. A fact that stays in the chat transcript is lost — the
+- **Write as you go.** Every step ends with ops. A fact that stays in the chat transcript is lost - the
   transcript is not read by later steps, only the Spine is.
 - **Record the unknown, do not invent it.** Anything the user has not said becomes an `assumptions[]`
   entry (`status: "unconfirmed"`) or an `other_requirements[kind=open_question]`, never a confident
-  sentence in the brief. What the user **did** say or pick (chat, cards, decisions ledger) is a fact —
-  never an assumption, and never an assumption about their answer ("the goal is qualitative") — **except the part an
+  sentence in the brief. What the user **did** say or pick (chat, cards, decisions ledger) is a fact -
+  never an assumption, and never an assumption about their answer ("the goal is qualitative") - **except the part an
   option deliberately leaves open** (B-0.1 compliance card: picking the internal-rules-only option does not decide `project.stakes`
   between `internal` and `production`, so that half is inferred and does get an `assumptions[]` entry). A user "yes/xác nhận"
-  to a proposal makes it a fact: never re-add an existing assumption and never set its `status` (the user confirms at the gate); each assumption's `path` is the field it is about. **Never say the user agreed, nodded or confirmed** unless it is in the decisions ledger or this turn's answers — an `unconfirmed` assumption is still yours.
+  to a proposal makes it a fact: never re-add an existing assumption and never set its `status` (the user confirms at the gate); each assumption's `path` is the field it is about. **Never say the user agreed, nodded or confirmed** unless it is in the decisions ledger or this turn's answers - an `unconfirmed` assumption is still yours.
 
-`references/*.md` are **not loaded at runtime** — the rules below are what you get.
+`references/*.md` are **not loaded at runtime** - the rules below are what you get.
 
-## B-0 — Intake (3 steps)
+## B-0 - Intake (3 steps)
 
-- **B-0.1 Brain Dump — listen first.** The user's chat message is the idea; uploaded documents (if any)
-  arrive in the content guidance. In one pass: write **one `addendum[]` entry per distinct topic** —
+- **B-0.1 Brain Dump - listen first.** The user's chat message is the idea; uploaded documents (if any)
+  arrive in the content guidance. In one pass: write **one `addendum[]` entry per distinct topic** -
   `{id, topic, content (user's own words/language), content_en (English, for rendering), target_section,
   captured_at}`; set **`project.system_name`** (English name on diagrams and cover, never `project.name`)
-  only if the user already gave one — otherwise leave it null (B-2.3 asks; never suggest a name here);
-  set **`project.form_factor` and `project.stakes`** from what the user picked on the cards or said — the value a user **picked outright** never becomes an assumption, but whatever an option leaves open, and anything neither picked nor said, is inferred **with an `assumptions[]` entry** and its reason.
-  **`project.stakes`** — the only valid values are `internal`, `production`, `regulated`. The answer naming the law ⇒ write `regulated` and **no assumption** for it: the user decided it, nothing is left to judge, and the server rejects any other value for that answer. Your judgement is needed only for the other answer: "Tuân thủ quy định nội bộ" does **not** decide the value on its own — write `internal` **only when the idea proves the system is used inside the team building it** (an internal trial, no users outside that team); **in every other case, including when it is unclear, write `production`** — and always add an `assumptions[]` entry with `path: "project.stakes"` for that inferred part. Guessing `internal` costs the document its encryption and secret-rotation requirements, so the uncertain direction is `production`.
+  only if the user already gave one **or an uploaded document states it** (cover, title, "X là …" / "X is …", in Latin letters without diacritics - say "theo tài liệu" in `notes`) - otherwise leave it null (B-2.3 asks; never invent a name here);
+  set **`project.form_factor` and `project.stakes`** from what the user picked on the cards or said - the value a user **picked outright** never becomes an assumption, but whatever an option leaves open, and anything neither picked nor said, is inferred **with an `assumptions[]` entry** and its reason.
+  **`project.stakes`** - the only valid values are `internal`, `production`, `regulated`. The answer naming the law ⇒ write `regulated` and **no assumption** for it: the user decided it, nothing is left to judge, and the server rejects any other value for that answer. **An uploaded document that names a law or decree the system must comply with** (personal data, payment, invoicing, medical / veterinary rules…) counts the same: `regulated`, no assumption, cite it in `notes` ("theo tài liệu"). Your judgement is needed only for the other answer: "Tuân thủ quy định nội bộ" does **not** decide the value on its own - write `internal` **only when the idea proves the system is used inside the team building it** (an internal trial, no users outside that team); **in every other case, including when it is unclear, write `production`** - and always add an `assumptions[]` entry with `path: "project.stakes"` for that inferred part. Guessing `internal` costs the document its encryption and secret-rotation requirements, so the uncertain direction is `production`.
   `notes`: the gate message (`draft-to-ops` rule 15: "tôi" not "mình", no "bước/giai đoạn/giả định/addendum/brief"), not a field list.
-- **B-0.2 `project.form_factor`** — an **array** of platforms, main one first (`["web_app","mobile_app"]` when the
+- **B-0.2 `project.form_factor`** - an **array** of platforms, main one first (`["web_app","mobile_app"]` when the
   user says "cả web và app"), values `web_app`, `mobile_app`, `desktop_app`, `api_service`, `cli`, `embedded`. Runs only when B-0.1 could not infer it (or on a revision).
-- **B-0.3 `project.stakes`** — `internal` | `production` | `regulated`. The B-0.1 card only separates "law applies too" from "internal rules only", so **whenever the internal-rules-only answer was picked** `internal` vs `production` is inferred — same fail-safe, unclear ⇒ `production`. Drives NFR defaults at S-6; a
+- **B-0.3 `project.stakes`** - `internal` | `production` | `regulated`. The B-0.1 card only separates "law applies too" from "internal rules only", so **whenever the internal-rules-only answer was picked** `internal` vs `production` is inferred - same fail-safe, unclear ⇒ `production`. Drives NFR defaults at S-6; a
   guess comes with an `assumptions[]` entry. B-0.3 closes B-0: on a revision it may fix any B-0 field.
 - Never ask how the user wants to work and never write `project.working_mode` (retired): how much to ask
   is your call, and where the run stops for review is the AI settings menu.
@@ -62,62 +62,62 @@ Two habits decide whether this phase is useful:
 
 A policy sentence has three parts: **the trigger, the window, and the consequence**. Keep them apart, and
 never merge two policies into one rule. Lượt test: "huỷ hoặc đổi lịch sau hạn 2 giờ thì mất cọc" was
-written down as a *no-show* rule — two different triggers (the customer cancelled late vs the customer
+written down as a *no-show* rule - two different triggers (the customer cancelled late vs the customer
 never showed up) collapsed into one, so the document stated a policy nobody agreed to.
 
 When the user gives a number (2 hours, 15 minutes, 50.000đ), it belongs in the rule verbatim. When they
 give a policy you are not sure how to classify, write it with the user's own trigger wording and ask at
-the next turn — do not pick the neighbouring concept because it sounds close.
+the next turn - do not pick the neighbouring concept because it sounds close.
 
-## B-1 — The brief (6 steps)
+## B-1 - The brief (6 steps)
 
-**Draft first, ask last.** Each step writes from what is already known — vision, goals, every addendum, the
-decisions ledger, the user's answers — and records what it inferred as `assumptions[]`. The phase interview
+**Draft first, ask last.** Each step writes from what is already known - vision, goals, every addendum, the
+decisions ledger, the user's answers - and records what it inferred as `assumptions[]`. The phase interview
 before B-1.1 was the only asking turn: **no B-1 step asks**; a gap becomes a stated assumption, and the server reads
 every unconfirmed one back to the user at the B-1.6 gate. Never re-ask what an addendum or decision already holds,
-never write a section the product does not need. B-1 never writes `project.vision`/`project.goals` — vision and goals are addendum entries `topic: "vision"` / `"goals"`; S-1.1 turns them into the English SRS fields. Everything else is an addendum aimed at a section.
+never write a section the product does not need. B-1 never writes `project.vision`/`project.goals` - vision and goals are addendum entries `topic: "vision"` / `"goals"`; S-1.1 turns them into the English SRS fields. Everything else is an addendum aimed at a section.
 
 | Step | Writes | `target_section` |
 | --- | --- | --- |
-| B-1.1 Vision, problem, opportunity | addendum `vision` (ONE entry: who, what changes, why it matters) + addendum `goals` (ONE entry PER goal, 3–6, outcome-shaped — **exactly the goals the user approved**: the goals list in the decisions ledger / the answers, or the list the user agreed to in the recent turns; same count, same wording — never a goal you thought of while drafting; restate that list in `notes`) + problem/why-now; `content` in the user's language, `content_en` English | `fixed:1` |
+| B-1.1 Vision, problem, opportunity | addendum `vision` (ONE entry: who, what changes, why it matters) + addendum `goals` (ONE entry PER goal, 3–6, outcome-shaped - **exactly the goals the user approved**: the goals list in the decisions ledger / the answers, or the list the user agreed to in the recent turns; same count, same wording - never a goal you thought of while drafting; restate that list in `notes`) + problem/why-now; `content` in the user's language, `content_en` English | `fixed:1` |
 | B-1.2 Target users & jobs-to-be-done | addendum per persona/stakeholder, with the job each one needs done | `fixed:2.1` |
-| B-1.3 Value proposition & differentiation | addendum: what makes this worth using over the current way, per user group, drawn from vision/goals/B-1.2 — never invent a moat; no competitor questions or competitor assumptions for internal or public-sector projects | `fixed:1` |
+| B-1.3 Value proposition & differentiation | addendum: what makes this worth using over the current way, per user group, drawn from vision/goals/B-1.2 - never invent a moat; no competitor questions or competitor assumptions for internal or public-sector projects | `fixed:1` |
 | B-1.4 MVP scope & feature hypotheses | addendum per capability, and the explicit not-now list | `fixed:1`, `fixed:3.1.2` |
 | B-1.5 Success metrics & learning goals | addendum per metric, with a number where the user gave one | `fixed:4.2.2`, `fixed:4.2.3` |
-| B-1.6 Risks, assumptions, open questions | `other_requirements[]` (`kind` = `risk` / `assumption` / `open_question`; `statement` English + `statement_vi` in the user's language, same meaning) **and** `assumptions[]` for anything you filled in yourself. `notes` = the closing brief summary, 2–4 sentences: problem & goals (read from the vision/goals addendum), main users, first-release scope, how success is measured, the biggest risk. Do NOT list assumptions in `notes` — the server says them | `fixed:5.4` |
+| B-1.6 Risks, assumptions, open questions | `other_requirements[]` (`kind` = `risk` / `assumption` / `open_question`; `statement` English + `statement_vi` in the user's language, same meaning) **and** `assumptions[]` for anything you filled in yourself. `notes` = the closing brief summary, 2–4 sentences: problem & goals (read from the vision/goals addendum), main users, first-release scope, how success is measured, the biggest risk. Do NOT list assumptions in `notes` - the server says them | `fixed:5.4` |
 
 Goal entries are outcomes, not features: "cut the time to a first usable SRS from weeks to a day",
 not "add an export button". 3–6 of them; more than that and none of them is a goal.
 
-## B-2 — Finalize (3 steps)
+## B-2 - Finalize (3 steps)
 
 - **B-2.1 Assumption Sweep.** Present every `assumptions[status=unconfirmed]` gathered so far. The user
-  confirms or rejects, one by one or the whole batch. Write `status` + `confirmed_at` only for what the user decided in THIS turn (card answers / chat) — with no answer leave `status` alone, never invent a reason; a rejected
-  assumption means the underlying value is wrong — say what needs to change rather than leaving it.
+  confirms or rejects, one by one or the whole batch. Write `status` + `confirmed_at` only for what the user decided in THIS turn (card answers / chat) - with no answer leave `status` alone, never invent a reason; a rejected
+  assumption means the underlying value is wrong - say what needs to change rather than leaving it.
 - **B-2.2 Addendum Triage.** Go through `addendum[]`: **keep** (fix `target_section` if it is aimed at the
-  wrong place), **park** (true but not this release — retarget it to `fixed:5.4` so S-7.4 picks it up as
+  wrong place), **park** (true but not this release - retarget it to `fixed:5.4` so S-7.4 picks it up as
   an Other Requirement), or **drop** (only when the content is *wrong*, never when it is merely deferred).
-  May write `addendum[]` and `assumptions[]` only — parking is a retarget, not a move into
+  May write `addendum[]` and `assumptions[]` only - parking is a retarget, not a move into
   `other_requirements[]`. `vision`/`goals` entries are always **keep** at `fixed:1`. Last cheap moment to fix a `target_section`.
 - **B-2.3 Three-Lens Review.** Read the brief back through three lenses, one short paragraph each:
   **Skeptic** (what would make this fail, what is asserted without evidence), **Opportunity** (what the
   brief is under-claiming, what adjacent value is one step away), **Contextual** (what the domain,
   `stakes` and `form_factor` imply that nobody said out loud). Anything the lenses surface becomes an
-  `other_requirements[]` or an `assumptions[]` entry — a lens finding with no op is a lens finding that
+  `other_requirements[]` or an `assumptions[]` entry - a lens finding with no op is a lens finding that
   never happened. `project.system_name` still null ⇒ if the answers hold a name the user picked, `set` it; none
   picked ⇒ leave it null, never invent one. Then hand over: accepting this gate opens S-1.
 
 ## Rules
 
-1. Ids continue the existing sequence (`draft-to-ops` rule 5) — check the projection first.
+1. Ids continue the existing sequence (`draft-to-ops` rule 5) - check the projection first.
 2. `addendum[].target_section` must be a real section key (`fixed:*`, or `feature:<id>` / `function:<id>`
    once those exist). Unsure ⇒ `fixed:5.4`, and say so in `notes`.
 3. `content` keeps the user's own words and language; `content_en` is the English version that will be
-   rendered. Both are required, never empty. A vision/goals correction at any Brief gate ⇒ `set addendum[id=…].content` + `.content_en` (`add`/`remove` a `goals` entry), never `project.vision`/`project.goals`. An `assumptions[]` entry about vision/goals gets `path: "addendum[id=<that vision/goals entry>]"`, never `project.vision`/`project.goals`. A gate correction keeps the user's words: "cả web và app" ⇒ `set project.form_factor` to `["web_app","mobile_app"]` (array, main platform first) — never "chỉ web".
-4. Never write `actors[]`, `use_cases[]`, `screens[]`, `functions[]` or any section here — the Brief is
+   rendered. Both are required, never empty. A vision/goals correction at any Brief gate ⇒ `set addendum[id=…].content` + `.content_en` (`add`/`remove` a `goals` entry), never `project.vision`/`project.goals`. An `assumptions[]` entry about vision/goals gets `path: "addendum[id=<that vision/goals entry>]"`, never `project.vision`/`project.goals`. A gate correction keeps the user's words: "cả web và app" ⇒ `set project.form_factor` to `["web_app","mobile_app"]` (array, main platform first) - never "chỉ web".
+4. Never write `actors[]`, `use_cases[]`, `screens[]`, `functions[]` or any section here - the Brief is
    input to the SRS, not the SRS. Those come from S-2 onward.
 5. Ask what changes the brief; fill the rest with the most reasonable reading plus `assumptions[]`
-   entries — the user reviews them at B-2.1.
+   entries - the user reviews them at B-2.1.
 6. `reply` to the user is in **their language**; `content_en` and anything destined for the document is
    English (`draft-to-ops` rules 6–7).
 
@@ -137,9 +137,9 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
 
 ## Self-check
 
-- [ ] Every step ended with at least one op — nothing important left only in the chat.
-- [ ] `form_factor`, `stakes` set by the end of B-0; `system_name` (English, user-picked only) by the end of B-2.
-- [ ] Addendum `vision` + 3–6 `goals` (each `content` + `content_en`) by the end of B-1.1 — the goals the user approved, same count; no `project.vision`/`goals`.
+- [ ] Every step ended with at least one op - nothing important left only in the chat.
+- [ ] `form_factor`, `stakes` set by the end of B-0; `system_name` (English, user-picked or stated in an uploaded document) by the end of B-2.
+- [ ] Addendum `vision` + 3–6 `goals` (each `content` + `content_en`) by the end of B-1.1 - the goals the user approved, same count; no `project.vision`/`goals`.
 - [ ] Every `rationale`/`rationale_vi` quotes only what the user actually said or picked; what you inferred says so ("tôi suy ra từ…").
 - [ ] Every addendum has `content`, `content_en` and a real `target_section`.
 - [ ] Everything you filled in yourself has an `assumptions[]` entry, not a confident sentence.

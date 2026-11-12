@@ -44,12 +44,12 @@ const creditBalanceOf = async (projectId: string): Promise<number> => {
 const sourceFiles = async (projectId: string) =>
   mongoose.connection.db!.collection("source-docs.files").countDocuments({ "metadata.projectId": projectId })
 
-describe("preflight — FLF-331 nhận diện SRS", () => {
+describe("preflight - FLF-331 nhận diện SRS", () => {
   it("upload CV ⇒ IMPORT_FILE_REJECTED với NOT_SRS, bản ghi preflight_rejected, không lưu file, không parse, credit không đổi", async () => {
     const { projectId, userId } = await project()
     const before = await creditBalanceOf(projectId)
     const cv = await makeDocx({
-      body: [p("NGUYEN VAN A"), p("Senior Backend Developer"), p("Work Experience"), p("2021–2024: FPT Software — billing services."), p("Education"), p("FPT University, Software Engineering"), p("Skills"), p("Node.js, TypeScript, Docker"), p("Hobbies: football")].join("")
+      body: [p("NGUYEN VAN A"), p("Senior Backend Developer"), p("Work Experience"), p("2021–2024: FPT Software - billing services."), p("Education"), p("FPT University, Software Engineering"), p("Skills"), p("Node.js, TypeScript, Docker"), p("Hobbies: football")].join("")
     })
     const err = await uploadImport(projectId, userId, fileOf(cv)).catch((e: unknown) => e)
     expect(err).toMatchObject({ code: "IMPORT_FILE_REJECTED" })
@@ -65,8 +65,8 @@ describe("preflight — FLF-331 nhận diện SRS", () => {
   })
 })
 
-describe("preflight — 3 nhánh stamp", () => {
-  it("FLF-343: không stamp ⇒ tách file ngay (extracting chưa chạy), chưa xác nhận bản mới nhất — hỏi cùng màn báo credit; lưu file gốc", async () => {
+describe("preflight - 3 nhánh stamp", () => {
+  it("FLF-343: không stamp ⇒ tách file ngay (extracting chưa chạy), chưa xác nhận bản mới nhất - hỏi cùng màn báo credit; lưu file gốc", async () => {
     const { projectId, userId } = await project()
     const doc = await uploadImport(projectId, userId, fileOf(await makeSrsDocx()))
     expect(doc).toMatchObject({ status: "extracting", stamp: null, confirmed_latest_at: null, extract_cursor: null })
@@ -120,7 +120,7 @@ describe("preflight — 3 nhánh stamp", () => {
   })
 })
 
-describe("preflight — từ chối", () => {
+describe("preflight - từ chối", () => {
   it("Track Changes tác giả lạ ⇒ bản ghi preflight_rejected kèm issue có vị trí, không lưu file", async () => {
     const { projectId, userId } = await project()
     const bad = await makeDocx({ body: p("A") + `<w:p><w:del w:id="1" w:author="Nguyen Van A"><w:r><w:delText>B</w:delText></w:r></w:del><w:r><w:t>C</w:t></w:r></w:p>` })

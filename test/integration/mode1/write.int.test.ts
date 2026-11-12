@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
 
+import { ChangeLocation } from "../../../src/modules/change-request/change-location.model.js"
 import { PERF_TARGETS, crToImpact, crToReady, crToReview, detail, gridFsFiles, importedProject, lockedPaths, resetCrMock, type Mode1Client } from "../../helpers/mode1-cr-p4.js"
 import { fakeCrClarify, fakeCrPropose, promptLocations } from "../../helpers/mode1.js"
 import { DocxPackage, acceptAll, readBlocks, readStamp } from "../../../src/modules/docx-ooxml/index.js"
@@ -95,7 +96,7 @@ describe("C-7 ghi Spine + render version mới", () => {
         locations: promptLocations(p).map((l) => ({
           location_id: l.location_id,
           conclusion: "edit",
-          reason: "Mục còn trống — bổ sung yêu cầu khác",
+          reason: "Mục còn trống - bổ sung yêu cầu khác",
           spine_ops: [{ op: "add", path: "other_requirements[]", value: { id: "OR-01", kind: "assumption", statement: "The system runs on Chrome 120 or newer." } }]
         }))
       })
@@ -171,15 +172,15 @@ describe("C-7 ghi Spine + render version mới", () => {
     expect(JSON.stringify(perf.blocks)).toContain("1 s")
   })
 
-  it("0.2 → 0.3: CR ghi sau render từ Spine đã có thay đổi của CR trước; khoá của CR đang mở không bị đụng khi CR khác ghi", async () => {
+  it("0.2 → 0.3: CR ghi sau render từ Spine đã có thay đổi của CR trước; CR đang mở không bị ảnh hưởng khi CR khác ghi", async () => {
     const { c, projectId } = await importedProject()
-    // CR-001 (UC-01/FR-3.2.2) khoá phần tử; CR-002 (perf) ghi trước ⇒ 0.2, rồi CR-001 ghi ⇒ 0.3
+    // CR-001 (UC-01/FR-3.2.2) đang mở; CR-002 (perf) ghi trước ⇒ 0.2, rồi CR-001 ghi ⇒ 0.3 (FLF-375: không khoá)
     const ucCr = await crToImpact(c, "Rename registration", "Rename UC-01 and adjust the login function.")
-    const ucPaths = await lockedPaths(projectId, ucCr.crId)
+    const ucPaths = (await ChangeLocation.find({ projectId, cr_id: ucCr.crId }).distinct("path")) as string[]
     expect(ucPaths).toEqual(expect.arrayContaining(["functions[id=FR-3.2.2]", "use_cases[id=UC-01]"]))
     const perfCr = await crToReview(c)
     await approveAll(c, perfCr.cr, perfCr.submitted.groups)
-    expect(await lockedPaths(projectId, ucCr.crId)).toEqual(ucPaths)
+    expect(((await ChangeLocation.find({ projectId, cr_id: ucCr.crId }).distinct("path")) as string[]).sort()).toEqual([...ucPaths].sort())
 
     detail(await c.post(`${ucCr.cr}/propose`))
     expect(detail(await c.post(`${ucCr.cr}/verify`)).change_request.status).toBe("ready_to_submit")
@@ -197,20 +198,16 @@ describe("C-7 ghi Spine + render version mới", () => {
 })
 
 describe("C-6 chặn trước khi ghi (FLF-330: Code kiểm lại trên nội dung hiện tại lúc BA xác nhận)", () => {
-  it("giá trị tại path đổi sau khi kiểm ⇒ xác nhận 409 CR_VALUE_CHANGED, không ghi gì, vẫn giữ khoá, CR vẫn ready_to_submit", async () => {
+  it("FLF-375 §3.2: chữ đề xuất định đổi đã bị người khác sửa ⇒ không ghi gì, 'Cần bạn quyết' (so 3 cột), không file mồ côi", async () => {
     const { c, projectId } = await importedProject()
-    const { crId, cr } = await crToReady(c)
-    const held = await lockedPaths(projectId, crId)
+    const { cr } = await crToReady(c)
     await Spine.updateOne({ projectId, "nfrs.id": "NFR-01" }, { $set: { "nfrs.$.threshold": "5 s" }, $inc: { spine_version: 1 } })
     const files = await gridFsFiles(projectId)
-    const res = await confirm(c, cr)
-    expect(res.status).toBe(409)
-    expect(res.body.error.code).toBe("CR_VALUE_CHANGED")
-    expect(res.body.meta).toMatchObject({ path: "nfrs[id=NFR-01]" })
+    const d = detail(await confirm(c, cr))
+    expect(d.change_request.status).toBe("manual_fix")
+    expect(d.locations.find((l) => l.path === "nfrs[id=NFR-01]")!.conflict).toMatchObject({ current: expect.stringContaining("5 s") })
     expect(await gridFsFiles(projectId)).toBe(files)
-    expect(await lockedPaths(projectId, crId)).toEqual(held)
-    expect(detail(await c.get(cr)).change_request.status).toBe("ready_to_submit")
-    expect(await ChangeGroup.countDocuments({ projectId, cr_id: crId, decision: "pending" })).toBeGreaterThan(0)
+    expect(await DocVersion.countDocuments({ projectId })).toBe(1)
   })
 })
 
@@ -269,12 +266,9 @@ describe("C-7 lỗi giữa chừng", () => {
     expect(await lockedPaths(projectId, crId)).toEqual([])
   })
 
-  it("Spine đổi ở phiên khác sau khi đã tạo version ⇒ 409, xoá version + file vừa tạo, CR giữ nguyên; tải lại rồi ghi được", async () => {
+  it("Spine đổi ở phiên khác sau khi đã tạo version ⇒ bỏ version + file vừa tạo, kiểm lại trên bản mới rồi ghi (BF §3.2 'ai xác nhận trước thì ghi trước') - một lần bấm", async () => {
     const { c, projectId } = await importedProject()
     const { crId, cr } = await crToReady(c)
-    const held = await lockedPaths(projectId, crId)
-    const files = await gridFsFiles(projectId)
-    const base = await c.spineVersion()
     const create = DocVersion.create.bind(DocVersion)
     // "phiên khác" ghi Spine ngay sau khi version 0.2 được tạo, trước bước op Spine của CR
     vi.spyOn(DocVersion, "create").mockImplementationOnce((async (doc: unknown) => {
@@ -282,19 +276,15 @@ describe("C-7 lỗi giữa chừng", () => {
       await Spine.updateOne({ projectId }, { $inc: { spine_version: 1 } })
       return created
     }) as never)
-    const res = await confirm(c, cr)
-    expect(res.status).toBe(409)
-    expect(res.body.error.code).toBe(spineRepository.SPINE_VERSION_CONFLICT)
-    await expectNothingWritten(c, projectId, crId, cr, files, held)
-    expect((await spineRepository.listChanges(projectId)).filter((ch) => ch.by === crId)).toEqual([])
-
-    const retry = detail(await confirm(c, cr))
-    expect(retry.change_request).toMatchObject({ status: "written", result_doc_version: "0.2" })
+    // FLF-375: không trả 409 bắt người dùng tải lại — BE kiểm lại từng chỗ trên nội dung mới rồi ghi
+    const written = detail(await confirm(c, cr))
+    expect(written.change_request).toMatchObject({ status: "written", result_doc_version: "0.2" })
     expect(await DocVersion.countDocuments({ projectId, version: "0.2" })).toBe(1)
+    expect((await spineRepository.listChanges(projectId)).filter((ch) => ch.by === crId).length).toBeGreaterThan(0)
   })
 })
 
-describe("C-6 BA bỏ riêng một vị trí trước khi xác nhận (FLF-330 — thay cho Lead từ chối từng group)", () => {
+describe("C-6 BA bỏ riêng một vị trí trước khi xác nhận (FLF-330 - thay cho Lead từ chối từng group)", () => {
   it("vị trí edit đặt not_related, chỉ còn comment ⇒ vẫn lên 0.2, không op Spine của CR", async () => {
     const { c, projectId } = await importedProject()
     const { crId, cr, verified } = await crToReady(c)

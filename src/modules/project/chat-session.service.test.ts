@@ -190,7 +190,7 @@ describe("chat-session bất biến 7 (srs-spine.md §6)", () => {
     expect(remaining[0].is_pipeline).toBe(true)
   })
 
-  it("sendMessage* ở session KHÔNG pipeline chỉ cho CHAT — discoveryStep bị bỏ qua, không gọi CHAT_DISCOVERY", async () => {
+  it("sendMessage* ở session KHÔNG pipeline chỉ cho CHAT - discoveryStep bị bỏ qua, không gọi CHAT_DISCOVERY", async () => {
     const pipeline = await createChatSession(PROJECT)
     const chatOnly = await createChatSession(PROJECT)
     expect(pipeline.is_pipeline).toBe(true)
@@ -216,7 +216,7 @@ describe("chat-session bất biến 7 (srs-spine.md §6)", () => {
   })
 })
 
-describe("assertChatSessionOwnership (F5 — chặn IDOR: chatId phải thuộc đúng projectId)", () => {
+describe("assertChatSessionOwnership (F5 - chặn IDOR: chatId phải thuộc đúng projectId)", () => {
   it("chatId thuộc project khác ⇒ 404 CHAT_SESSION_NOT_FOUND (không lộ chatId có tồn tại hay không)", async () => {
     const session = await createChatSession(PROJECT)
 
@@ -239,7 +239,7 @@ describe("assertChatSessionOwnership (F5 — chặn IDOR: chatId phải thuộc 
   })
 })
 
-describe("T17 — lệnh sửa đi qua change flow (mọi session)", () => {
+describe("T17 - lệnh sửa đi qua change flow (mọi session)", () => {
   const USER = "650000000000000000000010"
 
   it("lệnh sửa: gọi change.service.preview, ghi thẻ preview vào transcript, KHÔNG gọi CHAT", async () => {
@@ -351,7 +351,7 @@ describe("T17 — lệnh sửa đi qua change flow (mọi session)", () => {
   })
 })
 
-describe("FLF-244 — ngữ cảnh CHAT: không lặp tin hiện tại, có tóm tắt hội thoại", () => {
+describe("FLF-244 - ngữ cảnh CHAT: không lặp tin hiện tại, có tóm tắt hội thoại", () => {
   const USER = "650000000000000000000010"
   const reply = { data: { reply: "ok", questions: [] }, tokensUsed: {}, cost: 0 }
   const historyOf = () => (aiMocks.executeAiAction.mock.calls[0][1] as { promptVariables: { chat_history: string; input_text: string } }).promptVariables
@@ -389,7 +389,7 @@ describe("FLF-244 — ngữ cảnh CHAT: không lặp tin hiện tại, có tóm
   })
 })
 
-describe("FLF-260 — chat trả lời theo ngôn ngữ user đang viết", () => {
+describe("FLF-260 - chat trả lời theo ngôn ngữ user đang viết", () => {
   const USER = "650000000000000000000010"
   const reply = { data: { reply: "ok", questions: [] }, tokensUsed: {}, cost: 0 }
   const PREVIEW = {
@@ -607,7 +607,7 @@ describe("FLF-260 — chat trả lời theo ngôn ngữ user đang viết", () =
   })
 })
 
-describe("FLF-355 — chat: một lượt một loại câu, loại kia hỏi ở lượt kế", () => {
+describe("FLF-355 - chat: một lượt một loại câu, loại kia hỏi ở lượt kế", () => {
   const USER = "650000000000000000000010"
   const MIXED = {
     reply: "Mình hỏi thêm.",

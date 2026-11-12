@@ -17,7 +17,7 @@ const flag = (over: Partial<Flag>): Flag =>
     rule_id: "import_image_unread",
     section_id: "fixed:2.2.1",
     target_id: "B0010",
-    message: 'Ảnh trong mục "Use Case Diagram" không đọc được thành dữ liệu (AI đọc ảnh đang quá tải, chưa đọc được) — đã giữ ảnh gốc',
+    message: 'Ảnh trong mục "Use Case Diagram" không đọc được thành dữ liệu (AI đọc ảnh đang quá tải, chưa đọc được) - đã giữ ảnh gốc',
     remediation_step: "C-1",
     opened_at_version: 1,
     resolved_at: null,
@@ -37,7 +37,7 @@ const spine = (): Spine => {
     ],
     use_cases: [{ id: "UC01", name: "Take Attendance", actor_ids: ["A01"], description: "Mark students.", includes: [], extends: [], function_ids: [] }],
     custom_sections: [
-      { id: "CS01", heading: "", level: 2, source: "import", blocks: [{ kind: "image", text: "Use Cases — Lecturer", rows: null, image_ref: "word/media/image1.png", diagram: { kind: "usecase", source_hash: "inferred" } }] }
+      { id: "CS01", heading: "", level: 2, source: "import", blocks: [{ kind: "image", text: "Use Cases - Lecturer", rows: null, image_ref: "word/media/image1.png", diagram: { kind: "usecase", source_hash: "inferred" } }] }
     ],
     flags: [flag({}), flag({ id: "FL002", target_id: "B0099" })]
   } as Spine
@@ -47,7 +47,7 @@ const item = (entity: string, id: string | null, value: Record<string, unknown>)
 
 const apply = (s: Spine, ops: ReturnType<typeof rereadOps>) => planTransaction(s, { base_version: s.spine_version, ops, by: "import" }, { startSeq: 1 }).spine
 
-describe("FLF-360 rereadOps — phần đọc lại từ ảnh vào Spine đã có", () => {
+describe("FLF-360 rereadOps - phần đọc lại từ ảnh vào Spine đã có", () => {
   it("phần tử đã có: nối thêm quan hệ (ghi bằng tên hay mã khác dạng), không ghi đè field đã có chữ; điền field đang trống", () => {
     const s = spine()
     const ops = rereadOps(s, [
@@ -81,7 +81,7 @@ describe("FLF-360 rereadOps — phần đọc lại từ ảnh vào Spine đã c
   })
 })
 
-describe("FLF-360 imageRereadOps — dữ liệu + gắn sơ đồ gốc + đóng cờ của đúng ảnh", () => {
+describe("FLF-360 imageRereadOps - dữ liệu + gắn sơ đồ gốc + đóng cờ của đúng ảnh", () => {
   it("khối ảnh gắn diagram loại thật với hash dữ liệu SAU lô; chỉ đóng cờ import_image_unread của ảnh đó", () => {
     const s = spine()
     const read = { status: "read" as const, kind: "usecase" as const, items: [item("use_cases", "UC01", { actor_ids: ["Student"] })], usageId: "u1" }
@@ -101,7 +101,7 @@ describe("FLF-360 imageRereadOps — dữ liệu + gắn sơ đồ gốc + đón
   })
 })
 
-describe("FLF-360 touchedPath — path cho dấu đoạn FLF-366", () => {
+describe("FLF-360 touchedPath - path cho dấu đoạn FLF-366", () => {
   it("op thêm phần tử ⇒ path theo id; op khác giữ nguyên", () => {
     expect(touchedPath({ op: "add", path: "actors[]", value: { id: "A03", name: "Guest" } })).toBe("actors[id=A03]")
     expect(touchedPath({ op: "add", path: "screens[id=S1].flow_to[]", value: { to: "S2" } })).toBe("screens[id=S1].flow_to[]")

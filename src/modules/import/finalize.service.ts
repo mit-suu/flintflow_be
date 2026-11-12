@@ -29,8 +29,8 @@ import { Project } from "../project/project.model.js"
 import { assemble } from "../render/assemble.service.js"
 import { snapshotBaseline } from "../pipeline/s9/baseline.service.js"
 import { Baseline } from "../spine/baseline.model.js"
-import { applyTransaction } from "../spine/op-engine.js"
-import { inferDiagramKind, isOriginalDiagramKind, originalDiagramHash } from "../spine/original-diagram.js"
+import { applyTransaction, planTransaction } from "../spine/op-engine.js"
+import { OWNER_DIAGRAM_KINDS, inferDiagramKind, isOriginalDiagramKind, originalDiagramValue, ownerOfSection } from "../spine/original-diagram.js"
 import { rehashSegments, segmentKeyOfPath } from "../spine/segment-hash.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Op } from "../spine/op.types.js"
@@ -38,11 +38,14 @@ import type { Baseline as BaselineEntry, OriginalDiagramKind, Spine } from "../s
 import { countOpenFlags, findingOpsInOrder, runImportCheck, stripRecord, type Finding } from "./check.service.js"
 import { legacyRecordRows } from "./legacy-record.js"
 import { DocBlock } from "./doc-block.model.js"
+import { erdNotationOfDocument } from "./erd-notation-detect.js"
+import { fillScreenDomain } from "../diagram/screen-domain.js"
 import { captionOf } from "./extract.service.js"
 import { canonicalFieldIds, collectEntities, idKey, imageOnlyGenericActors, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
 import { ExtractionDraft, type IExtractionDraft } from "./extraction-draft.model.js"
 import { FieldAnchor } from "./field-anchor.model.js"
 import { needsConfirm } from "./import.constants.js"
+import { hasOwnScreenFlow, inferScreenFlow, inferredFlowFindings, inferredFlowOps, type InferredFlowEdge } from "./inferred-screen-flow.js"
 import type { FinalizeRequest } from "./import.dto.js"
 import { assertImportStatus, loadImportFile, recomputeBlockSections, requireImport, toReviewFields, transitionImport } from "./import.service.js"
 import { pathLabel } from "../spine/human-labels.js"
@@ -75,6 +78,20 @@ export interface FinalizeResult {
   target_structure: TargetStructure | null
 }
 
+/**
+ * Log thời gian từng bước finalize (một dòng / bước, không ghi dữ liệu): SRS ~200 trang mất nhiều phút, cần biết bước nào
+ * chậm hay treo khi job không xong.
+ */
+const stepTimer = (importId: string) => {
+  const start = Date.now()
+  let last = start
+  return (step: string): void => {
+    const now = Date.now()
+    console.log(`[finalize] import ${importId}: ${step} xong sau ${now - last} ms (tổng ${now - start} ms)`)
+    last = now
+  }
+}
+
 const loadSpine = async (projectId: string) => {
   const record = await spineRepository.get(projectId)
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
@@ -95,9 +112,30 @@ export const assertCanFinalize = async (projectId: string, body: Pick<FinalizeRe
   return { doc, before, profile }
 }
 
-export const finalizeImport = async (projectId: string, userId: string, body: FinalizeRequest): Promise<FinalizeResult> => {
+/**
+ * Lần chạy nền truyền vào (FLF-391): `guard` gọi giữa các bước / lượt AI — ném lỗi khi lần chạy đã hết giờ hoặc bị lần mới
+ * thay ⇒ dừng tại đó, và cũng là mốc "còn tiến triển"; `progress` báo tiến triển trong một bước dài (từng diagram).
+ */
+export interface FinalizeRunOptions {
+  guard?: () => Promise<void>
+  progress?: () => void
+}
+
+export const finalizeImport = async (projectId: string, userId: string, body: FinalizeRequest, run: FinalizeRunOptions = {}): Promise<FinalizeResult> => {
   const { doc, before, profile } = await assertCanFinalize(projectId, body)
   const provisional = resolveProvisional(profile.heading_map)
+  const mark = stepTimer(String(doc._id))
+  // File đã lưu mà chưa có DocVersion trỏ tới — lần chạy bị dừng ở `guard` thì xoá, không để mồ côi trong GridFS
+  const unownedRefs: string[] = []
+  const step = async (name: string): Promise<void> => {
+    mark(name)
+    try {
+      await run.guard?.()
+    } catch (err) {
+      await Promise.all(unownedRefs.map((ref) => docFileStore().remove(ref).catch(() => undefined)))
+      throw err
+    }
+  }
 
   // 1. Thực thể ⇒ op
   const drafts = await ExtractionDraft.find({ import_id: doc._id }).lean()
@@ -109,11 +147,17 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const entities = [...collectEntities(accepted)].filter(([key]) => !genericActors.has(key)).map(([, e]) => e)
   const droppedPermissions: DroppedPermission[] = []
   const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value, sections: e.sections })), droppedPermissions)
+  // QLHS 11/11 bug #15: file không có sơ đồ / mục luồng màn, chỉ ghi vài chuyển màn ⇒ suy Đăng nhập → màn của từng vai (cùng
+  // lô thực thể để dấu đoạn / hash tính trên dữ liệu đã có cạnh); cờ "Cần xem" liệt kê cạnh suy ra ở lô kế hoạch step
+  const inferredFlow = hasOwnScreenFlow(drafts, profile.heading_map, provisional) ? [] : inferFlowAfter(stripRecord(before), ops)
+  ops.push(...inferredFlowOps(inferredFlow))
 
   // 2. File gốc của bản 0.1 (ghi file trước; lô Spine hỏng thì xoá file, không để mồ côi)
   const parsed = await parseDocument(await loadImportFile(doc))
   await writeStamp(parsed.pkg, { project_id: projectId, version: IMPORTED_DOC_VERSION, source: "import" })
   const fileRef = await docFileStore().save(await parsed.pkg.toBuffer(), { projectId, kind: "version", name: IMPORTED_DOC_VERSION })
+  unownedRefs.push(fileRef)
+  await step("tách file gốc + lưu bản gốc")
 
   let spineVersion = before.spine_version
   let seqRange: { first: number | null; last: number | null } = { first: null, last: null }
@@ -128,6 +172,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     await docFileStore().remove(fileRef)
     throw err
   }
+  await step("lô thực thể vào Spine")
 
   // 3. Liên kết Spine ↔ block, section thật cho feature/function, mention theo tên
   const anchors = entities
@@ -161,6 +206,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     }
   }))
   if (updates.length) await DocBlock.bulkWrite(updates)
+  await step("neo field + mention theo tên")
 
   // 3b. Layout + mục riêng + kế hoạch step theo template người dùng (mode 1 v2, D2/D6)
   const ordered = await DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }).sort({ "anchor.ordinal": 1 }).lean()
@@ -175,6 +221,12 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     image_ref: b.image_ref ?? null,
     ...(b.number_label ? { number_label: b.number_label } : {})
   }))
+  // QLHS 11/11 bug #12b: file ghi ký pháp ERD (danh mục hình / chú thích "ký hiệu chân chim") ⇒ dự án vẽ lại ERD đúng ký
+  // pháp đó; không ghi ⇒ giữ ký pháp của dự án. Ghi trước khi vẽ sơ đồ (bước 4)
+  const fileNotation = erdNotationOfDocument(layoutBlocks)
+  if (fileNotation) await Project.updateOne({ _id: projectId }, { $set: { erdNotation: fileNotation } })
+  // FLF-410: file ghi URL sản phẩm (`https://techmart.vn/...`) ⇒ domain trên thanh địa chỉ của mockup màn (chỉ khi còn trống)
+  await fillScreenDomain(projectId, layoutBlocks.map((b) => [b.text, ...(b.rows ?? []).flat()].join("\n")).join("\n"))
   // Văn xuôi I-4 không trích được ⇒ phần nối của section (FLF-184) — render từ Spine không mất nội dung file gốc
   const unmappedIds = new Set(drafts.flatMap((d) => d.unmapped_block_ids ?? []))
   // Phase 5 (T3): ảnh dưới mục FPT ⇒ giữ nguyên văn (phần nối của mục) để bản render nhúng lại ảnh gốc. Trước đây bản
@@ -182,7 +234,9 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // của người dùng** — dữ liệu đọc được chỉ vào Spine; khối ảnh mang `diagram` (loại + hash dữ liệu lúc import) để bản
   // render ẩn PlantUML cùng loại, và CR chạm dữ liệu đó sau này đề xuất vẽ lại bằng PlantUML.
   const imageRead = new Map(
-    drafts.flatMap((d) => (d.diagram_images ?? []).filter((i) => isOriginalDiagramKind(i.kind)).map((i) => [i.block_id, i.kind as OriginalDiagramKind] as const))
+    drafts.flatMap((d) =>
+      (d.diagram_images ?? []).filter((i) => isOriginalDiagramKind(i.kind)).map((i) => [i.block_id, { kind: i.kind as OriginalDiagramKind, owner: i.owner_id ?? null }] as const)
+    )
   )
   // FLF-361: ảnh gửi đọc mà chưa đọc được (EMF / AI quá tải) ⇒ suy loại theo caption / mục để vẫn ẩn PlantUML cùng loại
   // (lưới an toàn khi FLF-360 đọc lại vẫn không được). Cờ vàng `import_image_unread` giữ nguyên — dữ liệu ảnh chưa vào Spine
@@ -191,8 +245,12 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   for (const b of layoutBlocks) {
     if (b.kind !== "image" || !b.image_ref || !b.section_id) continue
     unmappedIds.add(b.block_id)
-    const kind = imageRead.get(b.block_id) ?? (imageUnread.has(b.block_id) ? inferDiagramKind(b.section_id, captionOf(b, layoutBlocks.filter((x) => x.section_id === b.section_id))) : null)
-    if (kind) b.diagram = { kind, source_hash: originalDiagramHash(imported, kind) }
+    const readAs = imageRead.get(b.block_id)
+    const inferred = !readAs && imageUnread.has(b.block_id) ? inferDiagramKind(b.section_id, captionOf(b, layoutBlocks.filter((x) => x.section_id === b.section_id))) : null
+    const kind = readAs?.kind ?? inferred
+    // FLF-390: sơ đồ gắn function (sequence / activity) cần chủ — đọc được ⇒ function nhận dữ liệu, chưa đọc ⇒ function của mục
+    const owner = kind && OWNER_DIAGRAM_KINDS.has(kind) ? (readAs?.owner ?? ownerOfSection(b.section_id)) : null
+    if (kind && (!OWNER_DIAGRAM_KINDS.has(kind) || owner)) b.diagram = originalDiagramValue(imported, kind, owner)
   }
   const project = await Project.findById(projectId).lean()
   const intentRaw = (project as { template_intent?: string | null } | null)?.template_intent ?? null
@@ -239,11 +297,13 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
         }),
         rule: IMPORT_NEEDS_REVIEW_RULE
       },
-      { findings: titleContentFindings(stripRecord(seeded), profile.heading_map, layout), rule: IMPORT_TITLE_CONTENT_RULE }
+      { findings: titleContentFindings(stripRecord(seeded), profile.heading_map, layout), rule: IMPORT_TITLE_CONTENT_RULE },
+      { findings: inferredFlowFindings(seeded, inferredFlow), rule: IMPORT_NEEDS_REVIEW_RULE }
     ]),
     ...seedStepOps(stripRecord(seeded), plan, { firstSeq: seqRange.first, lastSeq: seqRange.last, at: new Date().toISOString(), ...(draftOwners ? { draftOwners } : {}) })
   ]
   await applyTransaction(projectId, { base_version: seeded.spine_version, ops: planOps, by: "import", reason: "Import: kế hoạch step theo template", step_id: null })
+  await step("layout + lô kế hoạch step")
   profile.layout = layout
   profile.step_plan = plan
   profile.section_slices = sliceItems
@@ -305,7 +365,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
 
   // 4. Diagram từ Spine (use case, ERD, luồng màn, ngữ cảnh) ⇒ bản render có hình như mode 2 cho loại người dùng chưa có
   // hình; loại đã có sơ đồ gốc thì hình PlantUML vẫn vẽ sẵn (in ra ngay khi CR bỏ ảnh gốc) nhưng không in (§4.13)
-  await renderDiagramsIfAvailable(projectId)
+  await renderDiagramsIfAvailable(projectId, run.progress)
+  await step("vẽ diagram")
 
   // Baseline imported + DocVersion 0.1 — chụp Spine sau lô kế hoạch step; file 0.1 = bản render của đúng snapshot đó
   const planned = await loadSpine(projectId)
@@ -316,6 +377,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     await renderVersionFile(projectId, projectName, stripRecord(planned), { version: IMPORTED_DOC_VERSION, stampSource: "import", templateSource, ...(recordSnapshot ? { recordChanges: recordSnapshot } : {}) }),
     { projectId, kind: "version", name: IMPORTED_DOC_VERSION }
   )
+  unownedRefs.push(renderedRef)
+  await step("render file 0.1")
   let baseline: BaselineEntry
   try {
     const snap = await snapshotBaseline(projectId, stripRecord(planned), {
@@ -345,14 +408,18 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     record_snapshot: recordSnapshot,
     created_by: userId
   })
+  unownedRefs.length = 0
+  await step("baseline + DocVersion 0.1")
   // Index embedding cho C-3 (hybrid retrieval) từ baseline v0 — chạy nền, không chặn/không làm hỏng finalize. Gọi ngay
   // sau baseline vì bước check có thể dừng (hết credit ⇒ paused); check ghi thêm thì lượt cuối hàm đồng bộ phần đổi.
   scheduleEmbeddingSync(projectId)
 
   await transitionImport(doc, "checking")
-  await runImportCheck(doc, userId)
+  await runImportCheck(doc, userId, run.guard)
+  await step("kiểm tra 1.11–1.12")
   const after = await loadSpine(projectId)
   await assembleWorkingDraft(projectId, projectName, after.spine_version)
+  await step("ghép bản làm việc")
   scheduleEmbeddingSync(projectId)
   // FLF-360: còn ảnh AI chưa đọc được vì quá tải ⇒ hẹn job đọc lại nền (không tạo version mới khi đọc được). Import động:
   // reread-jobs dùng lại `refreshSegmentHashes` của file này
@@ -412,11 +479,22 @@ const unreadImageFindings = (
     return unread.map((i, n) => ({
       rule: "image",
       section_id,
-      message: `${unread.length > 1 ? `Ảnh thứ ${n + 1}` : "Ảnh"} trong mục "${title}" không đọc được thành dữ liệu (${UNREAD_REASON[i.kind] ?? "không phải sơ đồ đọc được"}) — đã giữ ảnh gốc; cần thì cập nhật qua change request`,
+      message: `${unread.length > 1 ? `Ảnh thứ ${n + 1}` : "Ảnh"} trong mục "${title}" không đọc được thành dữ liệu (${UNREAD_REASON[i.kind] ?? "không phải sơ đồ đọc được"}) - đã giữ ảnh gốc; cần thì cập nhật qua change request`,
       block_ids: [i.block_id]
     }))
   })
   return findings
+}
+
+/** Cạnh luồng màn suy ra trên Spine SAU lô thực thể (áp thử, không ghi). Lô hỏng ⇒ không suy (applyTransaction báo lỗi). */
+const inferFlowAfter = (spine: Spine, ops: Op[]): InferredFlowEdge[] => {
+  if (!ops.length) return []
+  try {
+    const planned = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import", step_id: null }, { startSeq: 1 })
+    return inferScreenFlow(planned.spine)
+  } catch {
+    return []
+  }
 }
 
 const percent = (n: number): string => `${Math.round(n * 100)}%`
@@ -461,7 +539,7 @@ export const needsReviewFindings = (
     .map((f) => ({
     rule: "needs_review",
     section_id: realSectionId(f.section_id, provisional),
-    message: `Cần xem: ${pathLabel(f.path, f.entity_name)} — ${f.origin === "vision" ? "đọc từ ảnh sơ đồ" : `độ tin ${percent(f.confidence)}`}; đã đưa vào bản 0.1, sai thì sửa bằng change request`,
+    message: `Cần xem: ${pathLabel(f.path, f.entity_name)} - ${f.origin === "vision" ? "đọc từ ảnh sơ đồ" : `độ tin ${percent(f.confidence)}`}; đã đưa vào bản 0.1, sai thì sửa bằng change request`,
     block_ids: [...f.source_block_ids],
     target_id: f.path
   }))
@@ -516,7 +594,7 @@ export const titleContentFindings = (spine: Spine, headingMap: readonly HeadingM
       {
         rule: "title_content_mismatch",
         section_id: h.content_mismatch.by_content,
-        message: `Tiêu đề "${h.heading_text}" giống mục "${byTitle}" nhưng nội dung là của mục "${byContent}" — đã xếp vào "${byContent}"; sai thì sửa bằng change request`,
+        message: `Tiêu đề "${h.heading_text}" giống mục "${byTitle}" nhưng nội dung là của mục "${byContent}" - đã xếp vào "${byContent}"; sai thì sửa bằng change request`,
         block_ids: [h.block_id],
         target_id: h.block_id
       }
@@ -527,8 +605,8 @@ export const titleContentFindings = (spine: Spine, headingMap: readonly HeadingM
  * Vẽ lại mọi diagram từ Spine vừa import. PlantUML không có mặt (dev/test, sự cố) ⇒ bỏ qua thay vì ghi hàng loạt
  * `render_error`: người dùng vẽ lại sau ở workspace. Lỗi vẽ không chặn import.
  */
-const renderDiagramsIfAvailable = async (projectId: string): Promise<void> => {
-  await renderAllIfAvailable(projectId, { by: "import", step_id: null })
+const renderDiagramsIfAvailable = async (projectId: string, onProgress?: () => void): Promise<void> => {
+  await renderAllIfAvailable(projectId, { by: "import", step_id: null, ...(onProgress ? { onProgress } : {}) })
 }
 
 /** Ghép sẵn bản làm việc (S-8.2) — lỗi chỉ ghi log: workspace tự `POST /assemble` lại được. */
@@ -589,7 +667,8 @@ export const rollbackPartialFinalize = async (doc: IImportedDocument): Promise<v
 }
 
 /** UC-61/UC-75 cho bước check: chạy lại phần còn thiếu của 1.11–1.12. */
-export const resumeCheck = async (doc: IImportedDocument, userId: string): Promise<void> => {
-  await runImportCheck(doc, userId)
+export const resumeCheck = async (doc: IImportedDocument, userId: string, run: FinalizeRunOptions = {}): Promise<void> => {
+  await run.guard?.()
+  await runImportCheck(doc, userId, run.guard)
 }
 

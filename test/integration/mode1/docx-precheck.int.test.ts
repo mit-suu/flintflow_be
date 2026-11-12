@@ -40,18 +40,18 @@ const MINUTES = () =>
 const precheck = (seeded: SeededFixture, buffer: Buffer, name: string) =>
   request(app).post("/api/v1/projects/precheck-docx").set(H(seeded)).attach("file", buffer, name)
 
-describe("precheck-docx — hộp Tạo dự án", () => {
+describe("precheck-docx - hộp Tạo dự án", () => {
   it("SRS ⇒ looks_like_srs; biên bản họp .docx ⇒ false; file không phải .docx ⇒ false; không lưu file", async () => {
     const seeded = await seedFixture("minimal")
     const srs = await precheck(seeded, await readFile(SRS), "SRS cu.docx")
     expect(srs.status, JSON.stringify(srs.body.error)).toBe(200)
-    expect(srs.body.data).toEqual({ looks_like_srs: true, stamp: null })
+    expect(srs.body.data).toEqual({ looks_like_srs: true, srs_suggestion: "strong", stamp: null })
 
     const minutes = await precheck(seeded, await MINUTES(), "Bien ban hop.docx")
-    expect(minutes.body.data).toEqual({ looks_like_srs: false, stamp: null })
+    expect(minutes.body.data).toEqual({ looks_like_srs: false, srs_suggestion: "none", stamp: null })
 
     const pdf = await precheck(seeded, Buffer.from("%PDF-1.4 fake"), "Ghi chu.pdf")
-    expect(pdf.body.data).toEqual({ looks_like_srs: false, stamp: null })
+    expect(pdf.body.data).toEqual({ looks_like_srs: false, srs_suggestion: "none", stamp: null })
     expect(await ProjectDocument.countDocuments({})).toBe(0)
   })
 
@@ -60,7 +60,7 @@ describe("precheck-docx — hộp Tạo dự án", () => {
     const pkg = await DocxPackage.load(await readFile(SRS))
     await writeStamp(pkg, { project_id: seeded.projectId, version: "1.0", source: "baseline" })
     const res = await precheck(seeded, await pkg.toBuffer(), "SRS_v1.0.docx")
-    expect(res.body.data).toEqual({ looks_like_srs: true, stamp: { project_id: seeded.projectId } })
+    expect(res.body.data).toEqual({ looks_like_srs: true, srs_suggestion: "strong", stamp: { project_id: seeded.projectId } })
   })
 
   it("thiếu file ⇒ 400 FILE_REQUIRED", async () => {
@@ -81,11 +81,11 @@ describe("precheck kèm tài liệu đính kèm trong dự án", () => {
 
     const again = await request(app).post(`/api/v1/projects/${projectId}/documents`).set(H(seeded)).attach("file", await readFile(SRS), "SRS ban moi.docx")
     expect(again.status, JSON.stringify(again.body.error)).toBe(201)
-    expect(again.body.data.precheck).toMatchObject({ looks_like_srs: true, stamp: null })
+    expect(again.body.data.precheck).toMatchObject({ looks_like_srs: true, srs_suggestion: "strong", stamp: null })
     expect(again.body.data.precheck.heading_overlap).toBeGreaterThan(0.9)
     expect(again.body.data.originalName).toBe("SRS ban moi.docx")
 
     const minutes = await request(app).post(`/api/v1/projects/${projectId}/documents`).set(H(seeded)).attach("file", await MINUTES(), "Bien ban.docx")
-    expect(minutes.body.data.precheck).toEqual({ looks_like_srs: false, stamp: null })
+    expect(minutes.body.data.precheck).toEqual({ looks_like_srs: false, srs_suggestion: "none", stamp: null })
   })
 })

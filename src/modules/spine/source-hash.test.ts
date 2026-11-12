@@ -67,7 +67,7 @@ describe("computeSourceHash", () => {
   })
 })
 
-describe("computeSourceHash — tên hệ thống (FLF-177)", () => {
+describe("computeSourceHash - tên hệ thống (FLF-177)", () => {
   const usecase = { kind: "usecase" as const, owner_id: null }
   const context = { kind: "context" as const, owner_id: null }
 
@@ -97,7 +97,7 @@ describe("computeSourceHash — tên hệ thống (FLF-177)", () => {
   })
 })
 
-describe("renderedDiagramHash — hash của hình đã vẽ theo engine (FLF-339)", () => {
+describe("renderedDiagramHash - hash của hình đã vẽ theo engine (FLF-339)", () => {
   const targets = [
     { kind: "context" as const, owner_id: null },
     { kind: "usecase" as const, owner_id: null },
@@ -116,14 +116,33 @@ describe("renderedDiagramHash — hash của hình đã vẽ theo engine (FLF-33
     const context = targets[0]
     expect(renderedDiagramHash(FIXTURE, context, svgContext)).not.toBe(renderedDiagramHash(FIXTURE, context))
     // kind không đổi engine ⇒ hash giữ nguyên
-    expect(renderedDiagramHash(FIXTURE, targets[4], svgContext)).toBe(computeSourceHash(FIXTURE, targets[4]))
+    const sequence = { kind: "sequence" as const, owner_id: FIXTURE.functions[0].id }
+    expect(renderedDiagramHash(FIXTURE, sequence, svgContext)).toBe(computeSourceHash(FIXTURE, sequence))
     expect(originalDiagramHash(FIXTURE, "context")).toBe(computeSourceHash(FIXTURE, context))
     // vẫn theo dữ liệu: sửa tên actor làm hình svg cũ
     const renamed = mutate((s) => (s.actors[0].name = "Renamed"))
     expect(renderedDiagramHash(renamed, context, svgContext)).not.toBe(renderedDiagramHash(FIXTURE, context, svgContext))
   })
 
-  it("ERD: ký pháp của dự án (ngoài Spine) nằm trong hash hình — đổi ký pháp ⇒ hình cũ, thiếu ký pháp = chen", () => {
+  it("screen_layout (FLF-410): theme đã resolve nằm trong hash hình; dữ liệu ảnh gốc không đổi theo theme", () => {
+    const layout = targets[4]
+    const base = renderedDiagramHash(FIXTURE, layout)
+    // engine svg ⇒ wireframe Salt cũ (hash plantuml) thành stale
+    expect(base).not.toBe(computeSourceHash(FIXTURE, layout))
+    // theme thiếu = theme mặc định đã resolve
+    expect(renderedDiagramHash(FIXTURE, layout, undefined, { screenTheme: { primaryColor: null, domain: null, platforms: null } })).toBe(base)
+    expect(renderedDiagramHash(FIXTURE, layout, undefined, { screenTheme: { primaryColor: "#3F5591", domain: null, platforms: ["web"] } })).toBe(base)
+    for (const screenTheme of [
+      { primaryColor: "#E4572E", domain: null, platforms: null },
+      { primaryColor: null, domain: "shop.vn", platforms: null },
+      { primaryColor: null, domain: null, platforms: ["web", "mobile"] as ("web" | "mobile")[] }
+    ])
+      expect(renderedDiagramHash(FIXTURE, layout, undefined, { screenTheme })).not.toBe(base)
+    // ký pháp ERD không ảnh hưởng hình màn
+    expect(renderedDiagramHash(FIXTURE, layout, undefined, { erdNotation: "idef1x" })).toBe(base)
+  })
+
+  it("ERD: ký pháp của dự án (ngoài Spine) nằm trong hash hình - đổi ký pháp ⇒ hình cũ, thiếu ký pháp = chen", () => {
     const erd = targets[3]
     const chen = renderedDiagramHash(FIXTURE, erd, undefined, { erdNotation: "chen" })
     expect(renderedDiagramHash(FIXTURE, erd)).toBe(chen)
@@ -149,7 +168,7 @@ describe("renderedDiagramHash — hash của hình đã vẽ theo engine (FLF-33
   })
 })
 
-describe("renderedDiagramHash — usecase", () => {
+describe("renderedDiagramHash - usecase", () => {
   it("bộ xếp thử nhiều phương án (svg@2) làm hình use case svg@1 cũ thành stale", () => {
     const usecase = { kind: "usecase" as const, owner_id: null }
     expect(DIAGRAM_ENGINES.context).toBe("svg@2")
@@ -158,7 +177,7 @@ describe("renderedDiagramHash — usecase", () => {
   })
 })
 
-describe("renderedDiagramHash — screen_flow theo template FPT", () => {
+describe("renderedDiagramHash - screen_flow theo template FPT", () => {
   const flow = { kind: "screen_flow" as const, owner_id: null }
 
   it("bố cục mới (svg@3: chỉ vẽ cây, tách theo actor) làm hình svg@2 cũ thành stale", () => {

@@ -137,7 +137,7 @@ const without = <T extends { spine_version: number }>({ spine_version: _v, ...re
 describe("10 ca op T02 (fixtures/op-cases)", () => {
   for (const { file, opCase } of CASES) {
     if (opCase.must_reject) {
-      it(`${file} — ${opCase.name}: từ chối ${opCase.must_reject}`, () => {
+      it(`${file} - ${opCase.name}: từ chối ${opCase.must_reject}`, () => {
         const base = baseOf(opCase)
         const err = rejection(() => planTransaction(base, txn(opCase.expected_ops), { startSeq: 1 }))
         expect(err.statusCode).toBe(422)
@@ -146,7 +146,7 @@ describe("10 ca op T02 (fixtures/op-cases)", () => {
       continue
     }
 
-    it(`${file} — ${opCase.name}: áp được, seq liên tục, revert về deep-equal`, () => {
+    it(`${file} - ${opCase.name}: áp được, seq liên tục, revert về deep-equal`, () => {
       const base = baseOf(opCase)
       const plan = planTransaction(base, txn(opCase.expected_ops, { step_id: opCase.step_id }), { startSeq: 7 })
 
@@ -305,6 +305,16 @@ describe("các loại op", () => {
       [{ op: "set", path: "actors[id=A01].name" }]
     ].map((ops) => rejection(() => planTransaction(FIXTURE, txn(ops as Op[]), { startSeq: 1 })).violations[0].rule)
     expect(rules).toEqual(["duplicate_id", "op_not_allowed", "index_selector_forbidden", "schema_invalid", "op_not_allowed", "op_value_missing"])
+  })
+
+  it("FLF-375: set cả mảng khối văn bản (không có id) của mục riêng được, ghi before", () => {
+    const base = structuredClone(FIXTURE)
+    base.custom_sections.push({ id: "CS90", heading: "", level: 4, source: "import", blocks: [{ kind: "paragraph", text: "UC-05, UC-06, UC-09 có thêm sơ đồ hoạt động.", rows: null, image_ref: null }] } as never)
+    const value = [{ kind: "paragraph", text: "UC-05, UC-06 có thêm sơ đồ hoạt động.", rows: null, image_ref: null }]
+    const plan = planTransaction(base, txn([{ op: "set", path: "custom_sections[id=CS90].blocks", value } as Op]), { startSeq: 1 })
+    expect(plan.spine.custom_sections.find((c) => c.id === "CS90")?.blocks).toEqual(value)
+    expect(plan.changes[0]).toMatchObject({ op: "set", path: "custom_sections[id=CS90].blocks" })
+    expect((plan.changes[0].before as { text: string }[])[0].text).toContain("UC-09")
   })
 
   it("không xoá được section bắt buộc và màn đang là screen_cursor", () => {

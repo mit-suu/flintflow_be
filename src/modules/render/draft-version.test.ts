@@ -15,7 +15,7 @@ const baseline = (version: string, at: string): Baseline => ({
 
 const change = (txn: string, path: string, at: string) => ({ txn, path, at })
 
-describe("draftVersionLabel — FLF-295", () => {
+describe("draftVersionLabel - FLF-295", () => {
   it("chưa có baseline ⇒ v0, không lộ spine_version", () => {
     expect(draftVersionLabel({ baselines: [] }, [change("t1", "use_cases[id=UC27].name", "2026-10-17T10:00:00.000Z")])).toBe("v0")
   })

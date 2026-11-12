@@ -16,7 +16,7 @@ const decision = (over: Partial<Decision> = {}): Decision => ({
 const spineWith = (decisions: Decision[]): Spine => ({ decisions } as unknown as Spine)
 
 describe("normalizeTopicKey", () => {
-  it("gom từ đồng nghĩa về một khoá — uptime và availability không được thành hai chủ đề", () => {
+  it("gom từ đồng nghĩa về một khoá - uptime và availability không được thành hai chủ đề", () => {
     expect(normalizeTopicKey("availability", "")).toBe("uptime")
     expect(normalizeTopicKey("SLA", "")).toBe("uptime")
     expect(normalizeTopicKey("slot_hold", "")).toBe("slot_hold_minutes")
@@ -84,7 +84,7 @@ describe("decisionOps", () => {
     expect(decisionOps(spineWith([]), "S-6.1", [{ topic_key: "uptime", question: "Uptime?", answer: "  " }])).toEqual([])
   })
 
-  it("bỏ đuôi (Khuyến nghị)/(Recommended) — nhãn của thẻ hỏi, không phải giá trị đã chốt", () => {
+  it("bỏ đuôi (Khuyến nghị)/(Recommended) - nhãn của thẻ hỏi, không phải giá trị đã chốt", () => {
     expect(decisionOps(spineWith([decision()]), "S-6.1", [{ topic_key: "uptime", question: "Uptime?", answer: "99% (Khuyến nghị)" }])).toEqual([])
     const ops = decisionOps(spineWith([]), "S-6.1", [{ topic_key: "uptime", question: "Uptime?", answer: "99.9% (Recommended)" }])
     expect(ops[0].value).toMatchObject({ answer: "99.9%" })

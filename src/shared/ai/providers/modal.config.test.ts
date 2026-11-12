@@ -32,7 +32,7 @@ describe("modalBaseUrl", () => {
     expect(modalBaseUrl()).toBe("https://modal.test/v1")
   })
 
-  it("env rỗng thì đọc process.env — env đóng băng lúc import, script/test đặt biến sau đó", () => {
+  it("env rỗng thì đọc process.env - env đóng băng lúc import, script/test đặt biến sau đó", () => {
     process.env.MODAL_BASE_URL = "https://late.test/v1"
     expect(modalBaseUrl()).toBe("https://late.test/v1")
   })

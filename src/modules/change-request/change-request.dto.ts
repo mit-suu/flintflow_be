@@ -64,6 +64,8 @@ export const changeRequestDtoSchema = z.object({
   base_doc_version: z.string().min(1),
   result_doc_version: z.string().nullable(),
   created_by: id,
+  /** Tên người tạo CR (BA giữ đề xuất) — BF §3.2 "treo ở người đó". */
+  created_by_name: z.string().nullable().optional(),
   submitted_at: isoDateTime.nullable(),
   decided_by: id.nullable(),
   closed_reason: z.string().nullable(),
@@ -128,7 +130,37 @@ export const changeLocationDtoSchema = z.object({
       at: isoDateTime
     })
     .nullable(),
-  group_id: groupIdSchema.nullable()
+  group_id: groupIdSchema.nullable(),
+  /**
+   * FLF-375: tên chỗ + nội dung trước / sau người đọc được (không mã nội bộ) — FE hiện cái này, không tự ghép path / id.
+   * `kind`: tên mảng Spine hoặc `paragraph` · `table` · `image` (khối văn bản của file).
+   */
+  display: z
+    .object({
+      kind: z.string(),
+      label: z.string(),
+      change: z.enum(["edit", "add", "remove", "comment", "none"]),
+      before: z.string().nullable(),
+      after: z.string().nullable()
+    })
+    .optional(),
+  /** FLF-375 (§3.2 "Hai người sửa cùng lúc"): lúc xác nhận, người khác đã sửa đúng phần đề xuất định đổi ⇒ so 3 cột. */
+  conflict: z
+    .object({
+      at_proposal: z.string(),
+      current: z.string(),
+      proposal: z.string().nullable(),
+      changed_by: z.string(),
+      changed_at: isoDateTime.nullable(),
+      /** Thời điểm AI soạn đề xuất ① (BF §3.2). */
+      proposed_at: isoDateTime.nullable(),
+      /** BF §3.2: AI hỏi lại khi yêu cầu gốc đụng thẳng phần vừa sửa — trả lời bằng một gợi ý hoặc gõ tự do. */
+      question: z.object({ text: z.string(), suggestions: z.array(z.string()) }).nullable()
+    })
+    .nullable()
+    .optional(),
+  /** FLF-375: CR khác chưa đóng đang có bản sửa chưa xác nhận ở đúng chỗ này. */
+  others_pending: z.array(z.object({ cr_id: z.string(), requester: z.string() })).optional()
 })
 
 export const changeGroupDtoSchema = z.object({
@@ -217,29 +249,26 @@ export const answersRequestSchema = z.strictObject({ answers: z.array(z.string()
 /** `POST …/:crId/amend` (phase 8): gộp thêm một lệnh sửa vào CR chưa nộp. */
 export const amendRequestSchema = z.strictObject({ instruction: text(4000) })
 
+/** FLF-375: `POST …/:crId/messages` — tin nhắn trong lúc CR mở: lệnh sửa ⇒ gộp vào CR, câu hỏi ⇒ AI trả lời. */
+export const crMessageRequestSchema = z.strictObject({ text: text(4000), language: z.enum(["vi", "en"]).optional() })
+
 /** `POST …/:crId/materials` dạng JSON (dán chữ). Upload file dùng multipart `file`. */
 export const addMaterialRequestSchema = z.strictObject({ name: text(200), text: text(CR_MATERIAL_MAX_CHARS * 2) })
 
 export const materialParamsSchema = z.object({ crId: crIdSchema, mid: materialIdSchema })
 
-/** `PATCH …/:crId/locations/:locId` (UC-81) — sửa tay / kết luận tay ⇒ `manual = true`. */
+/**
+ * `PATCH …/:crId/locations/:locId` (UC-81) — quyết định của người dùng: chấp nhận đề xuất AI (`edit` / `comment`) hoặc
+ * giữ nguyên / bỏ (`not_related` + lý do). FLF-375 (nguyên tắc 6): không nhận nội dung tự gõ (`new_value`, `spine_ops`,
+ * `comment_text` ⇒ 400) — muốn khác thì gõ hướng sửa cho AI.
+ */
 export const patchLocationRequestSchema = z
   .strictObject({
     conclusion: z.enum(LOCATION_CONCLUSIONS).optional(),
-    reason: text(2000).optional(),
-    /** FLF-186: giá trị mới của cả phần tử ⇒ op `set` tại `path` của vị trí. */
-    new_value: z.unknown().optional(),
-    /** FLF-186: op Spine tự viết (định dạng `op.types.ts`), thay cho `new_value`. */
-    spine_ops: z.array(z.record(z.string(), z.unknown())).min(1).max(50).optional(),
-    comment_text: text(2000).optional()
+    reason: text(2000).optional()
   })
   .refine((v) => Object.keys(v).length > 0, { message: "Cần ít nhất một field để sửa" })
-  .refine((v) => v.conclusion !== "edit" || v.new_value !== undefined || v.spine_ops !== undefined, {
-    message: "Kết luận “Sửa” cần có nội dung mới.",
-    path: ["new_value"]
-  })
-  .refine((v) => v.conclusion !== "comment" || v.comment_text !== undefined, { message: "Kết luận “Ghi chú” cần có nội dung ghi chú.", path: ["comment_text"] })
-  .refine((v) => v.conclusion !== "not_related" || v.reason !== undefined, { message: "Kết luận “Không liên quan” cần có lý do.", path: ["reason"] })
+  .refine((v) => v.conclusion !== "not_related" || v.reason !== undefined, { message: "Giữ nguyên / bỏ chỗ này cần có lý do.", path: ["reason"] })
 
 /**
  * `POST …/:crId/groups/:gid/decision` (UC-52, BPMN 3.12 "quyết định từng group, kèm lý do"). Mode 1 v3: **cả duyệt
@@ -307,3 +336,11 @@ export type ChangeRequestDetail = z.infer<typeof changeRequestDetailSchema>
 export type CreateChangeRequest = z.infer<typeof createChangeRequestSchema>
 export type PatchLocationRequest = z.infer<typeof patchLocationRequestSchema>
 export type GroupDecisionRequest = z.infer<typeof groupDecisionRequestSchema>
+
+/** BF §3.2: `GET …/change-requests/pending-sections` — mục đang có bản sửa chưa xác nhận, ai giữ. */
+export const pendingSectionSchema = z.object({
+  section_id: z.string(),
+  title: z.string(),
+  items: z.array(z.object({ cr_id: crIdSchema, who: z.string() }))
+})
+export type PendingSection = z.infer<typeof pendingSectionSchema>

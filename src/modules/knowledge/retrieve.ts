@@ -201,14 +201,14 @@ const vectorSearch = async (backend: VectorBackend, query: string, filter: Vecto
   try {
     ;[queryVector] = (await embedTexts([query], { taskType: "RETRIEVAL_QUERY" })) as [number[]]
   } catch (err) {
-    console.warn(`[knowledge] embed câu hỏi lỗi — chỉ tìm từ khoá: ${err instanceof Error ? err.message : String(err)}`)
+    console.warn(`[knowledge] embed câu hỏi lỗi - chỉ tìm từ khoá: ${err instanceof Error ? err.message : String(err)}`)
     return { backend: null, hits: [] }
   }
   try {
     return { backend, hits: await backend.search(queryVector, filter, limit) }
   } catch (err) {
     if (backend === atlasBackend && isVectorSearchUnsupported(err)) return { backend: memoryBackend, hits: await memoryBackend.search(queryVector, filter, limit) }
-    console.warn(`[knowledge] tìm vector lỗi — chỉ tìm từ khoá: ${err instanceof Error ? err.message : String(err)}`)
+    console.warn(`[knowledge] tìm vector lỗi - chỉ tìm từ khoá: ${err instanceof Error ? err.message : String(err)}`)
     return { backend: null, hits: [] }
   }
 }

@@ -27,21 +27,21 @@ Covers **S-1.1 Brief Extraction · S-1.3 Conflict & Assumption Review · S-1.4 G
 (S-1.2 Project Classification is a different skill, `project-classifier`.)
 
 S-1 is the hinge between a conversation and a document: the Brief has already been captured as
-`project{}` + `addendum[]` by B-0…B-2, and this phase makes that material **usable** — complete enough,
+`project{}` + `addendum[]` by B-0…B-2, and this phase makes that material **usable** - complete enough,
 consistent enough, and honest about what is still missing. It writes **no SRS section**; S-2 is the first
 step that does.
 
 `references/*.md` are not loaded at runtime; the rules are here.
 
-## S-1.1 — Brief Extraction
+## S-1.1 - Brief Extraction
 
-The Brief keeps vision and goals in the user's language as addendum entries (`topic: "vision"` — one entry;
-`topic: "goals"` — one entry per goal), each with `content_en`. B-* never writes `project.vision`/`project.goals`;
+The Brief keeps vision and goals in the user's language as addendum entries (`topic: "vision"` - one entry;
+`topic: "goals"` - one entry per goal), each with `content_en`. B-* never writes `project.vision`/`project.goals`;
 **this step builds them, in English, for SRS §1.**
 
-- **Always** `set project.vision` when a `vision` entry exists (one English sentence: who, what changes, why it matters —
+- **Always** `set project.vision` when a `vision` entry exists (one English sentence: who, what changes, why it matters -
   from its `content_en`), and `set project.goals` when `goals` entries exist (the full array, 1:1 with the `goals`
-  entries in addendum order, from each `content_en`) — even when the fields already have values. No entry ⇒ do not
+  entries in addendum order, from each `content_en`) - even when the fields already have values. No entry ⇒ do not
   write that field. Never merge two goals, never invent a goal no entry supports. Any batch that sets `project.goals`
   (also a revision) must have exactly one item per `goals` entry; the server rejects a mismatch.
 - No such addenda (older project, imported brief): fill `project.vision`/`goals[]` only when empty or clearly weaker
@@ -57,43 +57,43 @@ The Brief keeps vision and goals in the user's language as addendum entries (`to
 
 Nothing to extract is a valid outcome: return `ops: []` and say so in `notes`.
 
-## S-1.3 — Conflict & Assumption Review
+## S-1.3 - Conflict & Assumption Review
 
 Two jobs, both about honesty rather than volume.
 
 **Conflicts.** Two addenda that cannot both be true ("mobile first" vs "desktop dashboard for analysts"),
 an addendum that contradicts `project.goals[]`, or a metric that contradicts the stated scope. For each
 one: open an `other_requirements[kind=open_question]` stating **both sides and what depends on the
-answer** — never pick a winner silently. A conflict the user has to discover at S-4 costs a whole phase.
+answer** - never pick a winner silently. A conflict the user has to discover at S-4 costs a whole phase.
 
 **Assumptions.** Sweep `assumptions[status=unconfirmed]` again, but only the ones whose truth changes
 what the document will say. Present those; leave the rest for S-9.1's sweep. Do not mass-confirm:
 `status` moves to `confirmed` only on the user's word, and `confirmed_at` is set at the same time.
 
-## S-1.4 — Gap List
+## S-1.4 - Gap List
 
 What the SRS will need and the Brief does not have yet. Write each as
-`other_requirements[kind=open_question]` — one per gap, phrased as the question a reviewer would ask; `statement` English, `statement_vi` in the user's language.
+`other_requirements[kind=open_question]` - one per gap, phrased as the question a reviewer would ask; `statement` English, `statement_vi` in the user's language.
 
 Sweep these, and say in `notes` when one genuinely does not apply:
 
-1. **Who else uses it** — an admin, a support role, an approver; almost every product has a second human
+1. **Who else uses it** - an admin, a support role, an approver; almost every product has a second human
    actor the Brief forgot.
-2. **What it talks to** — payment, mail, identity, storage, an AI provider; these become `system` actors
+2. **What it talks to** - payment, mail, identity, storage, an AI provider; these become `system` actors
    at S-3.1 and interface NFRs at S-6.1.
-3. **What runs on a schedule** — expiry, retry, digest, cleanup; these become the `@nonscreen` round.
-4. **What must not happen** — the destructive or money-moving action that needs a rule.
-5. **Numbers** — any "fast", "reliable", "secure" with no figure behind it (S-6.3/S-6.4 will need one).
-6. **Data that outlives a session** — what is stored, and for how long.
+3. **What runs on a schedule** - expiry, retry, digest, cleanup; these become the `@nonscreen` round.
+4. **What must not happen** - the destructive or money-moving action that needs a rule.
+5. **Numbers** - any "fast", "reliable", "secure" with no figure behind it (S-6.3/S-6.4 will need one).
+6. **Data that outlives a session** - what is stored, and for how long.
 
 A gap list is not a complaint list: each entry should be answerable in one sentence by the user.
 
 ## Rules
 
-1. Ids continue the existing sequence (`draft-to-ops` rule 5) — check the projection first.
+1. Ids continue the existing sequence (`draft-to-ops` rule 5) - check the projection first.
 2. Write only `project`, `other_requirements[]`, `assumptions[]`. No `actors[]`, `use_cases[]`,
    `screens[]`, `functions[]`, `sections[]`; `addendum[]` only for the S-1.1 revision on `vision`/`goals` entries.
-3. `project.goals[]` is sent as the **full array** (`set` replaces it) — include the goals already there.
+3. `project.goals[]` is sent as the **full array** (`set` replaces it) - include the goals already there.
 4. English values, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).
 5. Still unclear: record the most reasonable reading plus an `assumptions[]` entry (`draft-to-ops`
    rule 10).
@@ -127,7 +127,7 @@ A gap list is not a complaint list: each entry should be answerable in one sente
 
 - [ ] S-1.1 rebuilt `project.vision` + `goals[]` (English) 1:1 from the `vision`/`goals` addenda.
 - [ ] `addendum[]` untouched except S-1.1 revision on `vision`/`goals`; no SRS collection written.
-- [ ] Every conflict is an `open_question` naming both sides — none silently resolved.
+- [ ] Every conflict is an `open_question` naming both sides - none silently resolved.
 - [ ] Assumptions only moved to `confirmed` on the user's word, with `confirmed_at`.
 - [ ] The six gap themes are covered or explained in `notes`.
 - [ ] Every gap is answerable in one sentence.

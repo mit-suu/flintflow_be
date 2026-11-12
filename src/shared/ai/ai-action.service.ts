@@ -15,7 +15,7 @@ import { MAX_DIRECTIVE_TERMS, documentLanguageDirective, shouldLocalize, termsIn
 import { callLLM } from "./providers/llm.router.js"
 import type { LLMResponse, LlmImage } from "./providers/provider.types.js"
 import { getAiSdkModel } from "./providers/ai-sdk.provider.js"
-import { ANTHROPIC_EFFORT, anthropicMaxTokens } from "./providers/anthropic.provider.js"
+import { ANTHROPIC_EFFORT, ANTHROPIC_THINKING_HEADROOM_TOKENS, anthropicMaxTokens } from "./providers/anthropic.provider.js"
 import { stripReasoning } from "./providers/glm.provider.js"
 import { JsonStreamExtractor } from "./utils/json-stream-extractor.js"
 import { parseResponse } from "./response-parser.js"
@@ -103,6 +103,16 @@ const releaseQuietly = async (reservation: CreditReservation): Promise<void> => 
 export const LOCALIZED_MAX_TOKENS_FACTOR = 2
 
 /** Đầu ra hỏng / bị cắt — khi khối "Document language" đang bật thì thử lại một lần không kèm khối. */
+/**
+ * FLF-393: cấu hình cho lượt gọi lại khi đầu ra bị cắt — **gấp đôi tổng ngân sách đầu ra** thật gửi provider. Anthropic cộng
+ * sẵn `ANTHROPIC_THINKING_HEADROOM_TOKENS` vào `maxTokens` (`anthropicMaxTokens`) nên tính trên tổng đó: elicit 2048 + 4096 =
+ * 6144 ⇒ 12288. Provider khác: gấp đôi `maxTokens`.
+ */
+export const widenedOutputConfig = (config: AiProviderConfig): AiProviderConfig => ({
+  ...config,
+  maxTokens: config.provider === "anthropic" ? 2 * anthropicMaxTokens(config) - ANTHROPIC_THINKING_HEADROOM_TOKENS : 2 * (config.maxTokens || 2048)
+})
+
 const OUTPUT_FAILURE_CODES = new Set(["PARSE_FAILED", "SCHEMA_MISMATCH", "RESPONSE_TRUNCATED", "GLM_EMPTY_OUTPUT"])
 
 const isOutputFailure = (error: unknown): error is AiActionError => error instanceof AiActionError && OUTPUT_FAILURE_CODES.has(error.code)
@@ -232,6 +242,8 @@ export const executeAiAction = async <T = any>(
   // Lượt parse lỗi mới là lượt cần đọc lại output gốc nhất, mà log thất bại được tạo ngoài vòng retry — giữ
   // chữ thô ở đây để nó không mất theo scope của lượt thử.
   let lastRawText: string | null = null
+  // FLF-393: có lượt bị cắt ở `max_tokens` ⇒ các lần thử lại (BR-09) gọi với ngân sách đầu ra gấp đôi
+  let widenOutput = false
 
   try {
     const result = await executeWithInRequestRetry(async (attempt) => {
@@ -243,10 +255,22 @@ export const executeAiAction = async <T = any>(
         const callAndParse = async () => {
           callResponse = null
           if (options.signal?.aborted) throw new AiActionError(499, "Lượt chạy đã bị huỷ", "RUN_CANCELLED")
-          const response = await callLLM(finalPrompt, providerConfig, {
+          const callOptions = {
             ...(options.signal ? { signal: options.signal } : {}),
             ...(options.images?.length ? { images: options.images } : {})
-          })
+          }
+          // FLF-393: lượt trước bị cắt vì hết `max_tokens` (Claude 5.x suy nghĩ ăn vào cùng ngân sách, prompt dài ⇒ suy nghĩ
+          // dài) ⇒ lần thử lại của BR-09 (`retry.service`: 2 lần, chờ lâu dần) dùng ngân sách đầu ra gấp đôi. Không thêm lượt gọi
+          // nào ngoài 2 lần thử lại đó.
+          const config = widenOutput ? widenedOutputConfig(providerConfig) : providerConfig
+          if (widenOutput) console.warn(`[executeAiAction] '${String(actionType)}' thử lại sau khi bị cắt — maxTokens ${providerConfig.maxTokens ?? "mặc định"} → ${config.maxTokens}`)
+          let response: LLMResponse
+          try {
+            response = await callLLM(finalPrompt, config, callOptions)
+          } catch (error) {
+            if ((error as { code?: string } | null)?.code === "RESPONSE_TRUNCATED") widenOutput = true
+            throw error
+          }
           callResponse = response
           lastRawText = response.text
           return { llmRes: response, parsedData: parseResponse<T>(response.text, actionType) }
@@ -261,7 +285,7 @@ export const executeAiAction = async <T = any>(
           // FLF-265 D16: đầu ra kèm `localized` dài hơn ⇒ dễ bị cắt / hỏng JSON. Lượt ghi Spine quan trọng hơn bản dịch:
           // thử lại NGAY một lần không kèm khối (câu đó thành "thiếu", dịch theo lô sau); các lượt retry sau cũng không kèm.
           if (!withoutLocalized || !isOutputFailure(error)) throw error
-          console.warn(`[executeAiAction] '${actionType}': đầu ra kèm localized lỗi (${error.code}) — thử lại một lần không kèm khối Document language`)
+          console.warn(`[executeAiAction] '${actionType}': đầu ra kèm localized lỗi (${error.code}) - thử lại một lần không kèm khối Document language`)
           const failedResponse = callResponse as LLMResponse | null
           discardedTokens = { promptTokens: failedResponse?.promptTokens ?? 0, completionTokens: failedResponse?.completionTokens ?? 0 }
           // Lượt kèm khối có log riêng (prompt + chữ thô + token) — dữ liệu để chỉnh `LOCALIZED_MAX_TOKENS_FACTOR`

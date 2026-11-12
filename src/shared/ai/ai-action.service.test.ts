@@ -17,9 +17,18 @@ vi.mock("./providers/llm.router.js", () => ({ callLLM: vi.fn() }))
 vi.mock("./providers/ai-sdk.provider.js", () => ({ getAiSdkModel: vi.fn(() => ({})) }))
 vi.mock("ai", () => ({ streamText: vi.fn() }))
 vi.mock("./response-parser.js", () => ({ parseResponse: vi.fn() }))
-// Chạy đúng một lần: test hành vi credit, không test backoff của retry
+// Chạy đúng một lần: test hành vi credit, không test backoff của retry — trừ lượt bị cắt (`RESPONSE_TRUNCATED`): BR-09 thử
+// lại 2 lần, mô phỏng ở đây không chờ (FLF-393)
 vi.mock("./retry.service.js", () => ({
-  executeWithInRequestRetry: (fn: (attempt: number) => Promise<unknown>) => fn(0)
+  executeWithInRequestRetry: async (fn: (attempt: number) => Promise<unknown>) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await fn(attempt)
+      } catch (error) {
+        if (attempt >= 2 || (error as { code?: string }).code !== "RESPONSE_TRUNCATED") throw error
+      }
+    }
+  }
 }))
 vi.mock("../../modules/admin/ai-action-log.model.js", () => ({
   AiActionLog: { create: vi.fn() }
@@ -28,7 +37,7 @@ vi.mock("../../modules/admin/ai-action-log.model.js", () => ({
 const envMock = vi.hoisted(() => ({ AI_PROVIDER_OVERRIDE: "" }))
 vi.mock("../../config/env.js", () => ({ env: envMock }))
 
-import { LOCALIZED_MAX_TOKENS_FACTOR, executeAiAction, executeAiActionStream } from "./ai-action.service.js"
+import { LOCALIZED_MAX_TOKENS_FACTOR, executeAiAction, executeAiActionStream, widenedOutputConfig } from "./ai-action.service.js"
 import { documentLanguageDirective } from "../i18n/document-language.js"
 import { reserveCredit, deductCredit, releaseCredit } from "./credit-reservation.service.js"
 import { callLLM } from "./providers/llm.router.js"
@@ -62,7 +71,7 @@ const fakeStream = (chunks: string[]) =>
     usage: Promise.resolve({ inputTokens: 10, outputTokens: 20 })
   }) as any
 
-describe("executeAiAction — thứ tự parse → deduct", () => {
+describe("executeAiAction - thứ tự parse → deduct", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.spyOn(console, "error").mockImplementation(() => {})
@@ -125,7 +134,54 @@ describe("executeAiAction — thứ tự parse → deduct", () => {
   })
 })
 
-describe("executeAiAction — ngôn ngữ trả lời (FLF-260)", () => {
+describe("executeAiAction - đầu ra bị cắt ở max_tokens (FLF-393)", () => {
+  const truncated = () => new AiActionError(422, "Anthropic response was truncated (max_tokens=6144)", "RESPONSE_TRUNCATED")
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    vi.spyOn(mongoose, "startSession").mockRejectedValue(new Error("Transaction numbers are only allowed on a replica set member or mongos"))
+    vi.mocked(reserveCredit).mockResolvedValue(reservation)
+    vi.mocked(deductCredit).mockResolvedValue(undefined)
+    vi.mocked(releaseCredit).mockResolvedValue(true)
+    vi.mocked(AiActionLog.create).mockResolvedValue({ _id: "log-1" } as any)
+    vi.mocked(parseResponse).mockReturnValue({ ok: true })
+  })
+
+  it("bị cắt ⇒ lần thử lại của BR-09 dùng ngân sách gấp đôi, thành công thì trừ credit một lần", async () => {
+    vi.mocked(callLLM).mockRejectedValueOnce(truncated()).mockResolvedValueOnce({ text: "{}", promptTokens: 1, completionTokens: 1 } as any)
+    await expect(executeAiAction(ActionType.DRAFT, { promptVariables: {} }, undefined, USER)).resolves.toBeDefined()
+    expect(callLLM).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(callLLM).mock.calls[1][1]).toMatchObject({ maxTokens: 4096 })
+    expect(deductCredit).toHaveBeenCalledTimes(1)
+  })
+
+  it("vẫn bị cắt ⇒ đúng 1 + 2 lần thử lại của BR-09 (không thêm lượt nào), báo lỗi, hoàn credit", async () => {
+    vi.mocked(callLLM).mockRejectedValue(truncated())
+    await expect(executeAiAction(ActionType.DRAFT, { promptVariables: {} }, undefined, USER)).rejects.toMatchObject({ code: "RESPONSE_TRUNCATED" })
+    expect(callLLM).toHaveBeenCalledTimes(3)
+    expect(vi.mocked(callLLM).mock.calls[0][1]).not.toMatchObject({ maxTokens: 4096 })
+    expect(vi.mocked(callLLM).mock.calls[2][1]).toMatchObject({ maxTokens: 4096 })
+    expect(deductCredit).not.toHaveBeenCalled()
+    expect(releaseCredit).toHaveBeenCalled()
+  })
+
+  it("lỗi khác ⇒ không đổi ngân sách", async () => {
+    vi.mocked(callLLM).mockRejectedValue(new Error("provider down"))
+    await expect(executeAiAction(ActionType.DRAFT, { promptVariables: {} }, undefined, USER)).rejects.toThrow("provider down")
+    expect(callLLM).toHaveBeenCalledTimes(1)
+  })
+
+  it("widenedOutputConfig: Anthropic gấp đôi TỔNG ngân sách gửi đi (gồm phần dành cho suy nghĩ), provider khác gấp đôi maxTokens", () => {
+    // elicit: 2048 + 4096 = 6144 ⇒ 12288 = 8192 + 4096
+    expect(widenedOutputConfig({ provider: "anthropic", maxTokens: 2048 } as any).maxTokens).toBe(8192)
+    expect(widenedOutputConfig({ provider: "gemini", maxTokens: 3000 } as any).maxTokens).toBe(6000)
+    expect(widenedOutputConfig({ provider: "gemini" } as any).maxTokens).toBe(4096)
+  })
+})
+
+describe("executeAiAction - ngôn ngữ trả lời (FLF-260)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.spyOn(console, "error").mockImplementation(() => {})
@@ -156,7 +212,7 @@ describe("executeAiAction — ngôn ngữ trả lời (FLF-260)", () => {
   })
 })
 
-describe("executeAiAction — ngôn ngữ tài liệu (FLF-265 D16)", () => {
+describe("executeAiAction - ngôn ngữ tài liệu (FLF-265 D16)", () => {
   const vi_ = { documentLanguage: "vi", sourceLanguage: "en" }
 
   beforeEach(() => {
@@ -316,7 +372,7 @@ describe("executeAiAction — ngôn ngữ tài liệu (FLF-265 D16)", () => {
   })
 })
 
-describe("executeAiActionStream — thứ tự parse → deduct", () => {
+describe("executeAiActionStream - thứ tự parse → deduct", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.spyOn(console, "error").mockImplementation(() => {})
@@ -369,7 +425,7 @@ describe("executeAiActionStream — thứ tự parse → deduct", () => {
   })
 })
 
-describe("executeAiActionStream — AI_PROVIDER_OVERRIDE (FLF-244)", () => {
+describe("executeAiActionStream - AI_PROVIDER_OVERRIDE (FLF-244)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.spyOn(console, "error").mockImplementation(() => {})

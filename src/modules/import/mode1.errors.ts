@@ -32,6 +32,8 @@ export const MODE1_ERROR_STATUS = {
   CR_NOTHING_TO_APPROVE: 409,
   /** 3.9 sửa trong step sở hữu: vị trí thuộc mục riêng (`custom:*`), không có step sở hữu. */
   CR_NO_OWNER_STEP: 409,
+  /** FLF-375: chấp nhận một chỗ mà AI chưa soạn đề xuất / ghi chú — người dùng gõ hướng sửa, không gõ thay AI. */
+  CR_NO_PROPOSAL: 409,
   /** FLF-186: giá trị tại path đã đổi kể từ lúc đề xuất (thay `CR_OLD_TEXT_MISMATCH`). */
   CR_VALUE_CHANGED: 409,
   /** Mode 1 v3 phase 7: CR đã có đủ số tài liệu bổ sung tối đa (`CR_MAX_MATERIALS`). */

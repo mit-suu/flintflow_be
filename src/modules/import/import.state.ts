@@ -52,7 +52,7 @@ export const IMPORT_STATUS_LABELS: Readonly<Record<ImportStatus, string>> = {
   extracting: "Đang trích dữ liệu",
   fields_review: "Duyệt dữ liệu trích",
   baselining: "Đang chốt bản gốc",
-  incomplete: "Chưa hoàn thiện — chờ bạn quyết",
+  incomplete: "Chưa hoàn thiện - chờ bạn quyết",
   drafting: "Đang soạn phần còn thiếu",
   checking: "Đang kiểm tra",
   gap_review: "Xem báo cáo thiếu sót",

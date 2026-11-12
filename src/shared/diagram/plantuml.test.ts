@@ -30,7 +30,7 @@ describe("encodePlantUml (thuần, không cần server)", () => {
 const reachable = await isPlantUmlReachable()
 if (!reachable) {
   console.warn(
-    "\n[probe] PlantUML không reachable — probe test bị SKIP.\n" +
+    "\n[probe] PlantUML không reachable - probe test bị SKIP.\n" +
       "        Chạy `docker compose up -d plantuml` rồi `npm test` lại để\n" +
       "        trả lời câu hỏi thực nghiệm: header hay svg-scan phát hiện lỗi?\n"
   )
@@ -60,7 +60,7 @@ describe.skipIf(!reachable)("PlantUML probe (cần server)", () => {
     expect(result.ok).toBe(false)
   })
 
-  it("@startdot SAI (Screens Flow vẽ bằng DOT) phải bị phát hiện — server trả 200 + text `Error:`, không phải SVG", async () => {
+  it("@startdot SAI (Screens Flow vẽ bằng DOT) phải bị phát hiện - server trả 200 + text `Error:`, không phải SVG", async () => {
     const result = await checkPlantUml("@startdot\ndigraph g {\n  A -> ;\n}\n@enddot\n")
     expect(result.ok).toBe(false)
     expect(result.ok === false && result.error).toContain("syntax error")

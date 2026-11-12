@@ -51,15 +51,15 @@ beforeEach(async () => {
 
 // ─── UC-18 ──────────────────────────────────────────────────────────
 
-describe("UC-18 — đổi tên dự án", () => {
+describe("UC-18 - đổi tên dự án", () => {
   const rename = (token: string, name: unknown, projectId = seeded.projectId) =>
     request(app).patch(projectUrl(projectId, "/name")).set(bearer(token)).send({ name })
 
   it("Lead đổi tên ⇒ 200, tên mới được lưu", async () => {
-    const res = await rename(lead, "Lumen — bản đổi tên")
+    const res = await rename(lead, "Lumen - bản đổi tên")
     expect(res.status).toBe(200)
-    expect(res.body.data.name).toBe("Lumen — bản đổi tên")
-    expect((await Project.findById(seeded.projectId))?.name).toBe("Lumen — bản đổi tên")
+    expect(res.body.data.name).toBe("Lumen - bản đổi tên")
+    expect((await Project.findById(seeded.projectId))?.name).toBe("Lumen - bản đổi tên")
   })
 
   it("Analyst (Author) cũng đổi tên được", async () => {
@@ -108,7 +108,7 @@ describe("UC-18 — đổi tên dự án", () => {
 
 // ─── UC-19 ──────────────────────────────────────────────────────────
 
-describe("UC-19 — xoá dự án", () => {
+describe("UC-19 - xoá dự án", () => {
   const remove = (token: string, projectId = seeded.projectId, hard = true) =>
     request(app)
       .delete(projectUrl(projectId) + (hard ? "?hard=true" : ""))
@@ -162,7 +162,7 @@ describe("UC-19 — xoá dự án", () => {
 
 // ─── UC-20 ──────────────────────────────────────────────────────────
 
-describe("UC-20 — xem tiến độ SRS", () => {
+describe("UC-20 - xem tiến độ SRS", () => {
   /** Fixture minimal ở lượt ký bản ⇒ mở cờ đỏ (xem flags.int.test.ts). */
   const openRedFlags = async (): Promise<number> => {
     const res = await request(app)
@@ -229,7 +229,7 @@ describe("UC-20 — xem tiến độ SRS", () => {
 
 // ─── UC-21 ──────────────────────────────────────────────────────────
 
-describe("UC-21 — đính kèm tài liệu tham khảo", () => {
+describe("UC-21 - đính kèm tài liệu tham khảo", () => {
   const upload = (token: string, buffer: Buffer, filename: string, contentType?: string) =>
     request(app)
       .post(projectUrl(seeded.projectId, "/documents"))

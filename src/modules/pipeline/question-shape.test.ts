@@ -26,7 +26,7 @@ describe("shapeOptions", () => {
     ])
   })
 
-  it("FLF-260: 'Custom' trơn là phương án thật — không lọc, kể cả khi được khuyến nghị", () => {
+  it("FLF-260: 'Custom' trơn là phương án thật - không lọc, kể cả khi được khuyến nghị", () => {
     expect(shapeOptions(opts("Default theme (Recommended)", "Custom")).map((o) => o.label)).toEqual(["Default theme (Recommended)", "Custom"])
     expect(shapeOptions(opts("Custom (Recommended)", "Standard")).map((o) => o.label)).toEqual(["Custom (Recommended)", "Standard"])
     expect(shapeOptions(opts("Standard", "Custom", "Premium")).map((o) => o.label)).toEqual(["Standard", "Custom", "Premium"])
@@ -270,7 +270,7 @@ describe("inline (FLF-232)", () => {
   })
 })
 
-describe("elicitSchema — inline (FLF-232)", () => {
+describe("elicitSchema - inline (FLF-232)", () => {
   it("nhận inline boolean; thiếu hoặc null ⇒ không có; câu dạng chuỗi trơn vẫn parse", () => {
     const parsed = elicitSchema.parse({
       reply: "ok",

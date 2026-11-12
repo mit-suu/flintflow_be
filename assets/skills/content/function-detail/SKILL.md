@@ -2,7 +2,7 @@
 skill_id: function-detail
 kind: content
 version: 0.3.0
-description: "S-5.2 and S-5.4 per screen — trigger, description, normal/abnormal flows, validations, actor-system interactions (<= 6 functions per call)"
+description: "S-5.2 and S-5.4 per screen - trigger, description, normal/abnormal flows, validations, actor-system interactions (<= 6 functions per call)"
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 6144
@@ -27,12 +27,12 @@ stub: false
 # Function Detail
 
 Covers the S-5 loop for one screen (or the `@nonscreen` round): **S-5.2 Trigger & Description** and
-**S-5.4 Function Details** — feeds every `function:<id>` section of §3. S-5.1 (pick the screen) and S-5.5
+**S-5.4 Function Details** - feeds every `function:<id>` section of §3. S-5.1 (pick the screen) and S-5.5
 (sign-off) are bookkeeping done in code, and S-5.3 is the wireframe renderer; none of them calls you.
-`references/{batching,validation-kinds,abnormal-flow-patterns}.md` are **not loaded at runtime** — the
+`references/{batching,validation-kinds,abnormal-flow-patterns}.md` are **not loaded at runtime** - the
 rules are inlined here.
 
-## Batching — read this first
+## Batching - read this first
 
 The projection you receive holds **only the functions in scope for this call**, at most six
 (`step-runner.service.ts#FUNCTION_BATCH_SIZE`). A screen with 15 functions is drafted in three calls.
@@ -40,41 +40,41 @@ Therefore: **emit ops only for `functions[]` ids present in the projection.** Do
 do not "finish" one you saw in an earlier call, do not renumber. The other batches are someone else's
 turn, and touching them overwrites work already accepted.
 
-## S-5.2 — Trigger and description
+## S-5.2 - Trigger and description
 
 For each function in the batch, `set` two fields:
 
-- `trigger`: one sentence naming **who does what, where** — "The author clicks Run on the current step in
-  the Project Workspace." For an `@nonscreen` function the trigger is the event and cadence — "Every 5
+- `trigger`: one sentence naming **who does what, where** - "The author clicks Run on the current step in
+  the Project Workspace." For an `@nonscreen` function the trigger is the event and cadence - "Every 5
   minutes." / "The payment gateway POSTs a `payment.succeeded` webhook."
-- `description`: one sentence on purpose and outcome — what is true after it succeeds that was not true
+- `description`: one sentence on purpose and outcome - what is true after it succeeds that was not true
   before. Not a restatement of the name, not a UI walkthrough.
 
 Also fix the surroundings while you are here: the actor/role that can invoke it must have a matching
 `permissions[]` row (S-4.3); when it does not, record an `assumptions[]` entry rather than writing
-permissions yourself. If the screen's `description` turns out to be wrong or empty, `set` it — `screens`
+permissions yourself. If the screen's `description` turns out to be wrong or empty, `set` it - `screens`
 is writable in this step.
 
-## S-5.4 — Flows and validations
+## S-5.4 - Flows and validations
 
 For each function in the batch, write three things: `set` for the two string arrays, one `add` per
 validation.
 
-**`normal[]`** — the success path, 3–7 numbered-in-order sentences, each one actor-visible step:
+**`normal[]`** - the success path, 3–7 numbered-in-order sentences, each one actor-visible step:
 actor action → system reaction → next state. Start at the trigger's aftermath, end at the outcome named
 in `description`. No implementation detail (no table names, no endpoint paths, no framework words).
 
-**`abnormal[]`** — what else really happens, one sentence each: what goes wrong, what the system does,
+**`abnormal[]`** - what else really happens, one sentence each: what goes wrong, what the system does,
 what the user is left with. Sweep these six patterns and cover the ones that apply (say in `notes` when
-one does not): (1) **invalid input** — a validation fails, the form keeps its values except secrets;
-(2) **not found / already gone** — the target was deleted or never existed; (3) **not permitted** — the
-role lacks the action, per the S-4.3 matrix; (4) **conflict** — someone else changed it first, or the
-same thing is submitted twice; (5) **dependency failure** — an external system (AI provider, payment
+one does not): (1) **invalid input** - a validation fails, the form keeps its values except secrets;
+(2) **not found / already gone** - the target was deleted or never existed; (3) **not permitted** - the
+role lacks the action, per the S-4.3 matrix; (4) **conflict** - someone else changed it first, or the
+same thing is submitted twice; (5) **dependency failure** - an external system (AI provider, payment
 gateway, mail, PlantUML) errors or times out, and whether the work is retried, queued or lost;
-(6) **limit reached** — quota, credit balance, rate limit, file size. A function with an empty
+(6) **limit reached** - quota, credit balance, rate limit, file size. A function with an empty
 `abnormal[]` is almost always under-specified; only a pure read with no parameters justifies it.
 
-**`validations[]`** — one `add` op **per rule**, not a `set` on the array: an array whose elements carry
+**`validations[]`** - one `add` op **per rule**, not a `set` on the array: an array whose elements carry
 an `id` can only be changed element by element (`op_not_allowed` otherwise). Path
 `functions[id=FN001].validations[]`, value `{id, kind, statement}` with `id` prefixed by the function id
 (`FN001-V1`). `kind` is exactly one of:
@@ -90,11 +90,11 @@ rows** via `source_validation_ids`, so a domain rule written as `format` is lost
 per-field shape rules in `format`/`required` and the policy in `business`.
 
 Wire the function to rules that already exist by appending to `business_rule_ids` (send the **full array**
-— `set` replaces it); do not create `business_rules[]` here, that is S-7.1.
+- `set` replaces it); do not create `business_rules[]` here, that is S-7.1.
 
-**`interactions[]`** — the actor ↔ system messages the System Sequence Diagram is drawn from; one `set` of the whole
+**`interactions[]`** - the actor ↔ system messages the System Sequence Diagram is drawn from; one `set` of the whole
 array per function. Write it **only when the function needs the diagram** (otherwise leave it out): at least 2 messages
-AND (a `system`/`time` actor takes part, OR a message is abnormal or guarded, OR the function has no screen — an
+AND (a `system`/`time` actor takes part, OR a message is abnormal or guarded, OR the function has no screen - an
 `@nonscreen` function). Element: `{from, to, message, kind, flow, guard?}`.
 
 - `from` / `to`: an actor id from the projection or the literal `system`; **exactly one end is `system`** (black box:
@@ -105,7 +105,7 @@ AND (a `system`/`time` actor takes part, OR a message is abnormal or guarded, OR
   function (an actor → `system`; a webhook or cron actor → `system` for `@nonscreen`). A request that gets an answer
   back is drawn synchronous, one with no answer asynchronous.
 - `message`: what is passed, in plain words ("Submit email and password"), no method call, no `,` `[` `]`.
-  Two messages with the same `from`, `to`, `message`, `kind`, `flow` collide — reword the second.
+  Two messages with the same `from`, `to`, `message`, `kind`, `flow` collide - reword the second.
 - `flow`: `normal` or `abnormal`. Every `abnormal` message needs a `guard` (the condition, "credentials do not match").
   Place the abnormal messages of a failure directly after the request that can fail, **before** the rest of the normal
   flow: the diagram draws them as an `alt` branch and the normal rest as its `else`. A `normal` message with a `guard`
@@ -113,9 +113,9 @@ AND (a `system`/`time` actor takes part, OR a message is abnormal or guarded, OR
 
 ## Rules
 
-1. Only ids in the projection; `set` on existing fields of a function — never `add` a new `functions[]`
+1. Only ids in the projection; `set` on existing fields of a function - never `add` a new `functions[]`
    row in S-5. The one `add` you do use is per `validations[]` element (see above).
-2. Do not touch `order`, `screen_id`, `feature_id`, `priority` or `detail_status` — the loop and S-9.4 own
+2. Do not touch `order`, `screen_id`, `feature_id`, `priority` or `detail_status` - the loop and S-9.4 own
    those. `detail_status` in particular is set by code, never by an op you emit.
 3. Validation ids unique within the function; never reuse an id for a different statement.
 4. English values, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).

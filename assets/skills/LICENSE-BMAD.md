@@ -1,4 +1,4 @@
-# Third-party notice — BMAD Method
+# Third-party notice - BMAD Method
 
 Parts of the skills in this directory are adapted from the **BMAD Method** (`bmm-skills`, `core-skills`), per `Product-Brief-to-SRS-Phases.md` §8.1:
 

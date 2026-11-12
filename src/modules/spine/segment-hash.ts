@@ -178,6 +178,8 @@ export interface SegmentMention {
 export interface SegmentDiagram {
   image_ref: string
   kind: OriginalDiagramKind
+  /** FLF-390: chủ (function) của sơ đồ `sequence` / `activity`. */
+  owner_id?: string | null
 }
 
 export type SegmentPart =
@@ -220,7 +222,7 @@ export const rehashSegments = (records: readonly SectionSegments[], spine: Spine
         // Ảnh vừa được gắn `diagram` (FLF-360 đọc lại ảnh sau 0.1) ⇒ ghi loại sơ đồ vào đoạn; ảnh đã ghi giữ nguyên (CR bỏ ảnh ⇒ vẽ lại tại chỗ)
         const blocks = spine.custom_sections.find((c) => c.id === p.custom_id)?.blocks ?? []
         const recorded = new Set(p.diagrams.map((d) => d.image_ref))
-        const added = blocks.flatMap((b) => (b.kind === "image" && b.image_ref && b.diagram && !recorded.has(b.image_ref) ? [{ image_ref: b.image_ref, kind: b.diagram.kind }] : []))
+        const added = blocks.flatMap((b) => (b.kind === "image" && b.image_ref && b.diagram && !recorded.has(b.image_ref) ? [{ image_ref: b.image_ref, kind: b.diagram.kind, ...(b.diagram.owner_id ? { owner_id: b.diagram.owner_id } : {}) }] : []))
         return added.length ? { ...p, diagrams: [...p.diagrams, ...added] } : p
       }),
       known: [...known].map(([key, hash]) => ({ key, hash }))

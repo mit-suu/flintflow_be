@@ -127,7 +127,7 @@ describe("projectLanguages", () => {
   })
 })
 
-describe("translationStatus — GET /translations/status", () => {
+describe("translationStatus - GET /translations/status", () => {
   it("dự án vi: đếm đơn vị, phần thiếu, số lô và credit ước tính; không gọi model", async () => {
     const units = translationUnits(FIXTURE)
     seedTranslation(FIXTURE.actors[0].name, "Khách")
@@ -173,7 +173,7 @@ describe("translationStatus — GET /translations/status", () => {
   })
 })
 
-describe("FLF-334 B — tải theo ngôn ngữ khác", () => {
+describe("FLF-334 B - tải theo ngôn ngữ khác", () => {
   it("targetLocale: yêu cầu ⇒ theo yêu cầu; mode 1 import thật hỏi ngôn ngữ khác ⇒ 409; dự án chuyển đổi ⇒ theo yêu cầu", () => {
     const languages = { locale: "en" as const, source: "en" as const }
     expect(targetLocale({ mode: "fpt" }, languages, "vi")).toBe("vi")

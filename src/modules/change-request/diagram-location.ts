@@ -9,9 +9,13 @@
 import { planTransaction } from "../spine/op-engine.js"
 import { userOpSchema, type Op } from "../spine/op.types.js"
 import { ORIGINAL_DIAGRAM_LABELS, isOriginalStale, originalDiagramOf } from "../spine/original-diagram.js"
-import type { CustomSection, Spine } from "../spine/spine.types.js"
+import type { CustomBlock, CustomSection, Spine } from "../spine/spine.types.js"
 import type { IChangeLocation, LocationProposal } from "./change-location.model.js"
 import { elementValue, valueText } from "./spine-location.js"
+
+/** Dòng chú thích hình: "H2 · …", "Hình 2 …", "Figure 2 …", "Fig. 3 …" (đoạn ngắn, không phải văn xuôi). */
+export const isFigureCaption = (b: CustomBlock): boolean =>
+  b.kind === "paragraph" && b.text.trim().length <= 200 && /^(h\d+\b|hình\s*\d+|figure\s*\d+|fig\.?\s*\d+)/i.test(b.text.trim())
 
 export const isDiagramLocation = (l: Pick<IChangeLocation, "found_by">): boolean => l.found_by.includes("diagram")
 
@@ -21,24 +25,41 @@ export interface RedrawDecision {
   proposal: LocationProposal
 }
 
-/** Op `edit` của các vị trí khác trong CR — dữ liệu Spine sau CR. Op sai định dạng bị bỏ (C-5 báo ở vị trí của nó). */
-const otherEditOps = (locations: readonly Pick<IChangeLocation, "path" | "conclusion" | "proposal" | "found_by">[]): Op[] =>
+/**
+ * Op `edit` của các vị trí khác trong CR, gom theo vị trí — dữ liệu Spine sau CR. Op sai định dạng bị bỏ (C-5 báo ở vị
+ * trí của nó).
+ */
+const otherEditOps = (locations: readonly Pick<IChangeLocation, "path" | "conclusion" | "proposal" | "found_by">[]): Op[][] =>
   locations
     .filter((l) => !isDiagramLocation(l) && l.conclusion === "edit")
-    .flatMap((l) => l.proposal?.spine_ops ?? [])
-    .flatMap((raw) => {
-      const parsed = userOpSchema.safeParse(raw)
-      return parsed.success ? [parsed.data] : []
-    })
+    .map((l) =>
+      (l.proposal?.spine_ops ?? []).flatMap((raw) => {
+        const parsed = userOpSchema.safeParse(raw)
+        return parsed.success ? [parsed.data] : []
+      })
+    )
+    .filter((ops) => ops.length > 0)
 
-/** Spine sau khi áp đề xuất của CR (chạy khô); op của CR hỏng ⇒ Spine hiện tại (C-5 báo lỗi ở vị trí gây ra). */
-const spineAfter = (spine: Spine, ops: Op[]): Spine => {
-  if (!ops.length) return spine
+const tryApply = (spine: Spine, ops: Op[]): Spine | null => {
   try {
     return planTransaction(spine, { base_version: spine.spine_version, ops, by: "preview" }, { startSeq: 1 }).spine
   } catch {
-    return spine
+    return null
   }
+}
+
+/**
+ * Spine sau khi áp đề xuất của CR (chạy khô). Áp cả CR một lần trước (các op phụ thuộc nhau — xoá use case cùng chức
+ * năng của nó — chỉ hợp lệ khi đi cùng nhau); hỏng ⇒ áp **từng vị trí**, vị trí hỏng thì bỏ riêng nó (C-5 báo ở vị trí
+ * gây ra). FLF-375: trước đây một op hỏng làm cả CR coi như không đổi gì ⇒ sơ đồ gốc kết luận nhầm "giữ nguyên".
+ */
+const spineAfter = (spine: Spine, groups: Op[][]): Spine => {
+  if (!groups.length) return spine
+  const whole = tryApply(spine, groups.flat())
+  if (whole) return whole
+  let current = spine
+  for (const ops of groups) current = tryApply(current, ops) ?? current
+  return current
 }
 
 /**
@@ -61,12 +82,19 @@ export const redrawDecision = (
   if (!stale.size) {
     return {
       conclusion: "not_related",
-      reason: "Change request này không đổi dữ liệu mà hình gốc thể hiện — giữ nguyên hình của tài liệu",
+      reason: "Change request này không đổi dữ liệu mà hình gốc thể hiện - giữ nguyên hình của tài liệu",
       proposal: { old_text, new_text: null, comment_text: null, spine_ops: [], assumptions: [] }
     }
   }
   const labels = [...new Set([...stale].map((b) => ORIGINAL_DIAGRAM_LABELS[originalDiagramOf(b)!.kind]))].join(", ")
-  const blocks = custom.blocks.filter((b) => !stale.has(b))
+  // FLF-375 (B12): chú thích ngay sau ảnh ("H2 · sơ đồ use case tổng quát: 5 tác nhân, 10 use case") mô tả HÌNH CŨ — thay
+  // hình mà giữ chú thích thì tài liệu tự mâu thuẫn (AI kiểm hỏi lại mãi). Bỏ chú thích cùng ảnh; hình vẽ lại có tiêu đề riêng.
+  const captions = new Set(custom.blocks.filter((b, i) => i > 0 && stale.has(custom.blocks[i - 1]) && isFigureCaption(b)))
+  // Bug #16 (QLHS 11/11): giữ CHỖ của ảnh gốc (khối ảnh không file, còn `diagram`) ⇒ hình vẽ lại in đúng chỗ đó; trước đây xoá
+  // hẳn ảnh nên hình mới chạy về mục mặc định của loại sơ đồ (activity ⇒ 2.3) hoặc không in (ngữ cảnh ở mục không có đoạn ghi)
+  const blocks = custom.blocks
+    .filter((b) => !captions.has(b))
+    .map((b): CustomBlock => (stale.has(b) ? { kind: "image", text: "", rows: null, image_ref: null, diagram: b.diagram } : b))
   return {
     conclusion: "edit",
     reason: `${labels} (hình gốc của tài liệu) không còn khớp dữ liệu sau change request này ⇒ thay bằng sơ đồ FlintFlow vẽ lại từ dữ liệu mới. Không đồng ý ⇒ giữ hình gốc, tài liệu có cờ vàng "Hình gốc lệch dữ liệu".`,
@@ -75,7 +103,8 @@ export const redrawDecision = (
       new_text: valueText({ ...custom, blocks }),
       comment_text: null,
       // Bỏ từng khối ảnh theo khoá `image_ref` (op engine không cho `set` cả mảng object)
-      spine_ops: [...stale].map((b) => ({ op: "remove", path: `${path}.blocks[image_ref=${b.image_ref}]`, reason: `Vẽ lại ${labels} bằng FlintFlow` })),
+      // Cả mảng khối (khối văn bản không có id — op `set` được sau FLF-375): bỏ ảnh lệch + chú thích của nó
+      spine_ops: [{ op: "set", path: `${path}.blocks`, value: blocks, reason: `Vẽ lại ${labels} bằng FlintFlow` }],
       assumptions: []
     }
   }

@@ -54,7 +54,7 @@ describe("detectMessageLanguage", () => {
     "Update màn hình login cho admin",
     "Add thêm cho mình 1 actor nữa",
     "update screen login"
-  ])("người Việt chêm tiếng Anh / gõ không dấu — không bao giờ ra en: %s", (text) => {
+  ])("người Việt chêm tiếng Anh / gõ không dấu - không bao giờ ra en: %s", (text) => {
     expect(detectMessageLanguage(text)).not.toBe("en")
     expect(detectMessageLanguage(text, { lenient: true })).not.toBe("en")
   })
@@ -118,7 +118,7 @@ describe("byLanguage", () => {
 })
 
 describe("replyLanguageDirective", () => {
-  it("nêu rõ ngôn ngữ và đuôi khuyến nghị — đuôi đó parser của BE đã nhận", () => {
+  it("nêu rõ ngôn ngữ và đuôi khuyến nghị - đuôi đó parser của BE đã nhận", () => {
     const en = replyLanguageDirective("en")
     const vi = replyLanguageDirective("vi")
     expect(en).toContain("Reply language: **English**")

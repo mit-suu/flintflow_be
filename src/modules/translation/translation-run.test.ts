@@ -53,7 +53,7 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe("runTranslation — chia lô, chỉ phần thiếu", () => {
+describe("runTranslation - chia lô, chỉ phần thiếu", () => {
   it("dịch tối đa max_batches lô (mặc định 5), trả translated / remaining / credits_used", async () => {
     const spine = spineWith(BATCH_MAX_UNITS * 6 + 3)
     mocks.getSpine.mockResolvedValue(spine)
@@ -74,7 +74,7 @@ describe("runTranslation — chia lô, chỉ phần thiếu", () => {
     expect(sentKeys).not.toContain("business_rules[id=BR1].statement")
   })
 
-  it("lô chỉ gửi {key, text} + glossary con + ngôn ngữ — không nạp Spine", async () => {
+  it("lô chỉ gửi {key, text} + glossary con + ngôn ngữ - không nạp Spine", async () => {
     const spine = spineWith(2)
     spine.glossary = [
       { id: "G01", term: "Order", term_native: "Đơn hàng", definition: "A purchase." },
@@ -142,7 +142,7 @@ describe("runTranslation — chia lô, chỉ phần thiếu", () => {
   })
 })
 
-describe("runTranslation — kết quả lỗi", () => {
+describe("runTranslation - kết quả lỗi", () => {
   it("lỗi parse ở lô đầu ⇒ ném ra, không ghi gì", async () => {
     mocks.getSpine.mockResolvedValue(spineWith(3))
     const executor: TranslateDocumentExecutor = vi.fn(async () => {
@@ -218,7 +218,7 @@ describe("runTranslation — kết quả lỗi", () => {
   })
 })
 
-describe("runTranslation — lô hỏng, không tiến, lỗi ghi", () => {
+describe("runTranslation - lô hỏng, không tiến, lỗi ghi", () => {
   const parseError = () => new AiActionError(422, "AI response failed Zod schema validation", "SCHEMA_MISMATCH")
 
   /** Executor: các lô thứ `bad` (đếm từ 1) parse lỗi, còn lại dịch bình thường. */
@@ -329,7 +329,7 @@ describe("runTranslation — lô hỏng, không tiến, lỗi ghi", () => {
   })
 })
 
-describe("runTranslation — một lượt mỗi (dự án, ngôn ngữ)", () => {
+describe("runTranslation - một lượt mỗi (dự án, ngôn ngữ)", () => {
   it("lượt chồng lên ⇒ 409 TRANSLATION_RUNNING, không gọi model; xong thì nhả khoá", async () => {
     mocks.getSpine.mockResolvedValue(spineWith(BATCH_MAX_UNITS * 2))
     let release!: () => void

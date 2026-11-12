@@ -11,6 +11,10 @@ describe("content-slots (FLF-278 trên FLF-335/336)", () => {
     expect(suggestSlot("1.6 References")).toBeNull()
     expect(suggestSlot("3.2 Hardware Interfaces")).toBeNull()
     expect(suggestSlot("Phạm vi dự án")).toBe("slot:scope")
+    // QLHS 11/11: mục chỉ ghi "3.5.3 Triển khai" chứa sơ đồ triển khai; "3.5 Thiết kế và triển khai" thì không
+    expect(suggestSlot("3.5.3 Triển khai")).toBe("slot:distribution")
+    expect(suggestSlot("4.3 Deployment")).toBe("slot:distribution")
+    expect(suggestSlot("3.5 Thiết kế và triển khai")).toBeNull()
   })
 
   it("chồng lấn với mục FPT cha; mục cha có mặt qua phần nhỏ", () => {

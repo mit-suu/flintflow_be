@@ -20,7 +20,7 @@ beforeEach(() => resetCrMock())
 
 const body = (over: Record<string, unknown> = {}) => ({ title: "Faster response time", description: "Response time must be 1 second.", ...CR_BODY, ...over })
 
-describe("C-1 tạo CR — kiểm đầu vào", () => {
+describe("C-1 tạo CR - kiểm đầu vào", () => {
   it("thiếu source / thiếu requester / requester rỗng ⇒ 400 CR_SOURCE_REQUIRED; nguồn lạ ⇒ 400 VALIDATION_ERROR; không tạo gì", async () => {
     const { c, projectId } = await importedProject()
     const { source: _s, ...noSource } = body()
@@ -60,7 +60,7 @@ describe("C-1 tạo CR — kiểm đầu vào", () => {
   })
 })
 
-describe("C-1 BR-03 — phải có baseline", () => {
+describe("C-1 BR-03 - phải có baseline", () => {
   it("project chưa import ⇒ 409 CR_REQUIRES_BASELINE (HTTP + service)", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)
@@ -148,7 +148,8 @@ describe("đọc, lọc, chuyển trạng thái, huỷ", () => {
   it("huỷ CR đang giữ khoá ⇒ cancelled + lý do, mở khoá; huỷ lần hai (trạng thái cuối) ⇒ 409", async () => {
     const { c, projectId } = await importedProject()
     const { crId, cr } = await crToImpact(c)
-    expect((await lockedPaths(projectId, crId)).length).toBeGreaterThan(0)
+    // FLF-375 (§3.2): không khoá chỗ đang sửa
+    expect(await lockedPaths(projectId, crId)).toEqual([])
     const cancelled = detail(await c.post(`${cr}/cancel`, { reason: "Khách hàng rút yêu cầu" }))
     expect(cancelled.change_request).toMatchObject({ status: "cancelled", closed_reason: "Khách hàng rút yêu cầu", paused: null })
     expect(await lockedPaths(projectId, crId)).toEqual([])
