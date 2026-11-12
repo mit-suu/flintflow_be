@@ -155,6 +155,11 @@ export interface RuleProfile {
    * (đoạn in nguyên văn nhắc tới tên / mã phần tử đã đổi tên hay bị xoá so với lúc import). Không đặt ⇒ luật không chạy.
    */
   sectionSegments?: readonly SectionSegments[]
+  /**
+   * FLF-411 (#19): tên mục theo heading của mẫu dự án dùng (`TemplateProfile.layout`: số Word + chữ heading), khoá theo
+   * `section_id` — câu cờ in "2.2.1 Diagram(s)" của mẫu chứ không phải tên mục FlintFlow "2.2.1 Use Case Diagram".
+   */
+  templateHeadings?: ReadonlyMap<string, string>
 }
 
 export interface CheckOptions {
@@ -272,7 +277,13 @@ export const SECTION_HAS_DATA: Readonly<Record<string, (s: Spine) => boolean>> =
 /** Mục đã có dữ liệu trong Spine chưa — luật `section_empty` soi đúng chỗ này; mục ngoài bảng ⇒ `null` (không soi được). */
 export const sectionHasData = (spine: Spine, sectionId: string): boolean | null => SECTION_HAS_DATA[sectionId]?.(spine) ?? null
 
-const sectionEmpty = (spine: Spine, gate: StepGate): FlagCandidate[] =>
+/** Tên mục cho câu cờ: heading của mẫu khi có (FLF-411 #19), không thì nhãn chung theo Spine (`human-labels`). */
+const sectionNameOf = (id: string, spine: Spine, headings?: ReadonlyMap<string, string>): string => {
+  const heading = headings?.get(id)?.trim()
+  return heading ? `"${heading}"` : quotedSectionLabel(id, spine)
+}
+
+const sectionEmpty = (spine: Spine, gate: StepGate, headings?: ReadonlyMap<string, string>): FlagCandidate[] =>
   REQUIRED_FIXED_SECTION_IDS.filter((id) => !DERIVED_SECTION_IDS.has(id))
     .filter((id) => !(SECTION_HAS_DATA[id]?.(spine) ?? true))
     // Mọi step sở hữu phải chốt: §1 do S-2.1…S-2.5 nuôi, chốt mỗi S-2.1 chưa nói lên mục đã xong
@@ -282,7 +293,7 @@ const sectionEmpty = (spine: Spine, gate: StepGate): FlagCandidate[] =>
       rule_id: "section_empty",
       section_id: id,
       target_id: null,
-      message: `Mục bắt buộc ${quotedSectionLabel(id)} chưa có dữ liệu`,
+      message: `Mục bắt buộc ${sectionNameOf(id, spine, headings)} chưa có dữ liệu`,
       remediation_step: ownerStepOf(id)
     }))
 
@@ -1512,7 +1523,7 @@ export const runDeterministicCheck = (
   const atBaseline = options.atBaseline ?? false
   const gate = stepGate(spine, atBaseline || (options.ruleProfile?.skipOwnerStepGate ?? false))
   const candidates: FlagCandidate[] = applyRuleProfile([
-    ...sectionEmpty(spine, gate),
+    ...sectionEmpty(spine, gate, options.ruleProfile?.templateHeadings),
     ...arrayEmpty(spine, gate),
     ...deadReference(spine),
     ...renderError(spine),

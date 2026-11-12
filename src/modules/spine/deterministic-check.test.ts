@@ -751,6 +751,14 @@ describe("thông điệp cờ cho người đọc (mode 1: không in mã kỹ th
     expect(flags.find((f) => f.rule_id === "array_empty" && f.target_id === "actors")?.message).toBe("Danh sách tác nhân đang trống")
   })
 
+  it("FLF-411 (#19): hồ sơ luật mang heading của mẫu ⇒ section_empty gọi mục theo heading mẫu, mục mẫu không đặt tên thì như cũ", () => {
+    const templateHeadings = new Map([["fixed:2.2.1", "2.2.1 Diagram(s)"]])
+    const profile = { exclude: new Set<string>(), downgrade: new Set<string>(), templateHeadings }
+    const flags = runDeterministicCheck(createEmptySpine(), [], { atBaseline: true, ruleProfile: profile })
+    expect(flags.find((f) => f.rule_id === "section_empty" && f.section_id === "fixed:2.2.1")?.message).toBe('Mục bắt buộc "2.2.1 Diagram(s)" chưa có dữ liệu')
+    expect(flags.find((f) => f.rule_id === "section_empty" && f.section_id === "fixed:5.3")?.message).toBe('Mục bắt buộc "5.3 Application Messages List" chưa có dữ liệu')
+  })
+
   it("Spine mẫu 19 màn, kể cả luật S-9", () => {
     check(runDeterministicCheck(FIXTURE, [], { atBaseline: true }))
   })
