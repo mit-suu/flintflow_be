@@ -113,9 +113,14 @@ const enqueueInline = <T>(def: JobDef<T>, data: T, opts: EnqueueOptions): Promis
       inlineAgain.delete(k)
     }
   }
-  const run = loop().finally(() => inlineRunning.delete(k))
+  const run: Promise<void> = loop().finally(() => releaseInline(k, run))
   inlineRunning.set(k, run)
   return def.inlineAwait ? run : Promise.resolve()
+}
+
+/** Chỉ gỡ khoá khi nó còn là của lượt này — khoá đã bị `releaseJobKey` gỡ và lượt mới chiếm thì giữ nguyên. */
+const releaseInline = (k: string, run: Promise<void>): void => {
+  if (inlineRunning.get(k) === run) inlineRunning.delete(k)
 }
 
 // ─── Driver BullMQ ───────────
@@ -196,13 +201,13 @@ export const startJob = async <T>(def: JobDef<T>, data: T, { key, prepare }: Sta
     const k = inlineKey(def as JobDef<unknown>, key)
     if (inlineRunning.has(k)) return false
     const prepared = prepare ? prepare() : Promise.resolve()
-    const run = prepared
+    const run: Promise<void> = prepared
       .then(
         () => runJob(def, data, INLINE_CTX),
         (err: unknown) => reportFinalFailure(def, data, err)
       )
       .then(noop, noop)
-      .finally(() => inlineRunning.delete(k))
+      .finally(() => releaseInline(k, run))
     inlineRunning.set(k, run)
     await prepared.catch(noop) // lỗi đã đi vào onFinalFailure (⇒ paused); client poll thấy
     return true
@@ -229,14 +234,39 @@ export const startJob = async <T>(def: JobDef<T>, data: T, { key, prepare }: Sta
   }
 }
 
-/** Có job cùng key đang chờ / chạy / chờ retry không. */
-export const isJobActive = async <T>(def: JobDef<T>, key: string): Promise<boolean> => {
-  if (!usesQueue()) return inlineRunning.has(inlineKey(def as JobDef<unknown>, key))
+/**
+ * Trạng thái job cùng key chưa xong: `active` (đang chạy), `waiting` / `delayed` / … (chờ chạy, chờ retry); `null` = không có.
+ * Driver inline: đang chạy ⇒ `active`.
+ */
+export const jobState = async <T>(def: JobDef<T>, key: string): Promise<string | null> => {
+  if (!usesQueue()) return inlineRunning.has(inlineKey(def as JobDef<unknown>, key)) ? "active" : null
   const queue = getQueue(def.queue)
   const id = await queue.getDeduplicationJobId(key)
-  if (!id) return false
+  if (!id) return null
   const job = await queue.getJob(id)
-  return job ? ACTIVE_STATES.has(await job.getState()) : false
+  if (!job) return null
+  const state = await job.getState()
+  return ACTIVE_STATES.has(state) ? state : null
+}
+
+/** Có job cùng key đang chờ / chạy / chờ retry không. */
+export const isJobActive = async <T>(def: JobDef<T>, key: string): Promise<boolean> => (await jobState(def, key)) !== null
+
+/**
+ * Gỡ khoá chống trùng của job đang kẹt (còn trong queue / map nhưng không chạy tiếp) để `startJob` cùng key chạy được lần
+ * mới. Không dừng được lượt cũ — nghiệp vụ tự chặn lượt cũ ghi đè (vd. mã lần chạy của finalize).
+ */
+export const releaseJobKey = async <T>(def: JobDef<T>, key: string): Promise<void> => {
+  if (!usesQueue()) {
+    inlineRunning.delete(inlineKey(def as JobDef<unknown>, key))
+    return
+  }
+  const queue = getQueue(def.queue)
+  const id = await queue.getDeduplicationJobId(key)
+  const job = id ? await queue.getJob(id) : undefined
+  // Gỡ qua job: chỉ xoá khi key còn trỏ đúng job kẹt — request khác vừa bật job mới cùng key thì giữ nguyên
+  if (job) await job.removeDeduplicationKey()
+  else if (id) await queue.removeDeduplicationKey(key)
 }
 
 /** Chờ job cùng key xong (thành công hay lỗi đều resolve). Không có ⇒ resolve ngay. */

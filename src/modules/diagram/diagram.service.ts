@@ -214,6 +214,8 @@ export interface RenderOptions {
   /** Kết quả lượt model vẽ mockup của từng màn (ảnh màn hình, màu ảnh gốc). */
   onLayoutDrawn?: (screenId: string, envelope: ScreenEnvelope | null) => void
   deps?: Partial<DiagramServiceDeps>
+  /** Gọi sau mỗi hình vẽ xong — lượt chạy dài (finalize import) báo còn tiến triển, không bị coi là treo (FLF-391). */
+  onProgress?: () => void
 }
 
 export interface RenderResult {
@@ -312,6 +314,7 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
   const errored: string[] = []
 
   for (const target of targets) {
+    options.onProgress?.()
     const existing = spine.diagrams.filter((d) => sameTarget(d, target)).sort((a, b) => (a.id < b.id ? -1 : 1))
     const parts =
       target.kind === "screen_layout" && target.owner_id
