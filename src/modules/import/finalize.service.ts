@@ -60,7 +60,7 @@ import { buildLayout, buildStepPlan, customSectionOps, customSectionsWithContent
 import { functionSourceHash } from "../render/layout-sections.js"
 import { functionFieldValues, tagFunctionBlocks } from "../render/function-original.js"
 import { isTemplateFile, structureChanges } from "./structure-preview.js"
-import { enterFlow2 } from "./flow2.service.js"
+import { enterFlow2, entersFlow2 } from "./flow2.service.js"
 import { TemplateProfile, type HeadingMapEntry, type LayoutEntry, type TableMapEntry } from "./template-profile.model.js"
 import { buildTemplateContext } from "./template-context.js"
 import { compareTargetStructure, type TargetStructure, type TemplateIntent } from "./target-structure.js"
@@ -312,11 +312,11 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // FLF-378: dự án mới theo mẫu bắt buộc luôn dừng — không bao giờ có baseline / DocVersion 0.1 chụp từ mẫu
   if (draftAll || (structureGate && structure.missing.length > 0 && !doc.complete_requested)) {
     await transitionImport(doc, "incomplete")
-    // D4: file thiếu cấu trúc đích không có bản gốc 0.1. Giữ khung (chế độ 3) ⇒ sang Luồng 2 soạn phần thiếu ngay, không chờ
-    // bấm; bổ sung theo mẫu chuẩn (chế độ 4) chưa soạn được ⇒ dừng ở `incomplete` (gap report + DRAFT)
-    // Chuyển lỗi (vd xung đột phiên bản Spine) ⇒ giữ `incomplete` chế độ 3: workspace có nút "Soạn phần còn thiếu"
+    // D4: file thiếu cấu trúc đích không có bản gốc 0.1. Giữ khung (chế độ 3) lẫn bổ sung theo mẫu chuẩn (chế độ 4, FLF-416) ⇒
+    // sang Luồng 2 soạn phần thiếu ngay, không chờ bấm
+    // Chuyển lỗi (vd xung đột phiên bản Spine) ⇒ giữ `incomplete`: workspace có nút "Soạn phần còn thiếu"
     // (`POST /import/continue`), không chạy lại finalize
-    if (structure.resolved_mode === 3 && intent === "fixed") {
+    if (entersFlow2(intent, structure.resolved_mode)) {
       await enterFlow2(doc, userId).catch((err: unknown) => console.error(`[import] Chuyển Luồng 2 cho import ${String(doc._id)} lỗi:`, err))
     }
     const stopped = await loadSpine(projectId)
