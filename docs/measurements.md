@@ -716,3 +716,42 @@ Chặng đã bỏ:
 
 So nội dung: body (bỏ `generatedAt`) của cả 5 cấu hình deep-equal với mốc FLF-381, kể cả lượt đọc từ bản dịch đã lưu
 (khác duy nhất là thứ tự key `watermark` / `format`, do đi qua `renderedDocumentSchema` như hàng draft gốc).
+
+## Tài liệu upload trong prompt — trích đoạn thay toàn văn (FLF-393)
+
+Nguồn: `npm run eval:doc-retrieval` (không DB, không gọi model), file `fixtures/existing-srs-fu-student-portal.docx`
+(347 đoạn, 36 heading đọc từ style Word ⇒ 17 chunk, trung bình 325 token), bộ câu hỏi
+`fixtures/doc-retrieval/questions-fu-student-portal.json` (16 câu: mã UC/FN/MSG, tên màn hình, luật, NFR, thuật ngữ, giao
+diện), top-k 10. Token ước lượng ký tự / 3 (thước của ngân sách tài liệu). Đo 2026-11-11.
+
+| Trần tài liệu | Recall | Token tài liệu / câu hỏi (TB · lớn nhất) | So với toàn văn ~5.251 |
+| ---: | ---: | --- | ---: |
+| 12.000 (mặc định chat) | 16/16 | 2.885 · 4.269 | −45% |
+| 2.000 | 16/16 | 1.630 · 1.981 | −69% |
+| 1.200 | 16/16 | 994 · 1.194 | −81% |
+
+File mẫu chỉ ~5k token nên **khi chạy thật nó vẫn được gửi nguyên văn** (dưới trần 12k); ba dòng trên mô phỏng đường trích
+đoạn để đo chất lượng tìm. Với tài liệu vượt trần, token tài liệu mỗi lượt không bao giờ vượt `DOC_CONTEXT_CHAT_TOKENS`
+(chat) / `DOC_CONTEXT_DRAFT_TOKENS` (step) — trước FLF-393 là cả tài liệu tới 1M token với model Claude 5.5. Unit test
+`document-context.service.test.ts` dựng SRS giả ~40k token (150 use case): lượt chat ≤ 12k, đúng đoạn UC-37 kể cả hỏi
+không dấu. Chưa đo bằng provider thật (`promptTokens` thật của tiếng Việt cao hơn ước lượng ký tự / 4).
+
+### Demo trên UI với SRS thật cỡ lớn (FLF-393, 2026-11-12)
+
+FE `develop` + BE nhánh FLF-393, tài liệu tham khảo `Report3_Software_Requirement_Specification.docx` (bản bỏ ảnh để lọt
+giới hạn upload 10MB: 436.400 ký tự, 3.870 đoạn, 243 heading từ style Word ⇒ 427 chunk). Bước B-0.1, câu hỏi "UC-05 là use
+case gì và quy tắc BR-02 nói gì". Log `[DocumentContext]`: `mode=retrieved chunks=10/427 tokens=4927/16000 full=145467`
+⇒ phần tài liệu mỗi lượt giảm ~97%; model trả lời đúng UC-05 (Change Password) và BR-02 (Lead succession).
+
+Demo lộ hai lỗi, đã sửa cùng nhánh: (1) lượt phỏng vấn đầu giai đoạn không đưa tin user vào câu hỏi tìm đoạn ⇒ BM25 chỉ có
+nhãn bước, rơi về đầu tài liệu (model chỉ thấy bìa + mục lục); (2) câu hỏi tự nhiên dài làm loãng mã — đoạn đúng của
+UC-05 / BR-02 ở hạng 16 / 31. Nhân trọng số token mã ×4 (`document-retrieval/rank.ts`): câu demo trúng cả hai, bộ 16 câu
+của SRS mẫu giữ 16/16. Giới hạn còn lại: hỏi tiếng Việt trên tài liệu tiếng Anh ("đổi mật khẩu" ↔ "Change Password")
+BM25 không khớp — cần vector / hybrid (ngoài phạm vi ticket).
+
+Lượt demo thứ hai lộ lỗi thứ ba: AI vẫn hỏi lại nền tảng / tuân thủ dù tài liệu đã nói (P3180 "responsive web-based
+interface", P3230 "NFR-35 … Privacy") — câu hỏi tìm đoạn của bước Brief chỉ có nhãn bước + câu của user, không biết bước cần
+hỏi field nào, và top-k 10 chỉ dùng ~4.6k / 16k token. Sửa: câu hỏi thêm từ khoá EN/VI theo field step đọc
+(`FIELD_SEARCH_TERMS`, `step-document-query.ts`), Brief/S-1 ghim mục Product Overview và kèm summary, lượt của step lấy tới
+`DOC_CONTEXT_DRAFT_TOP_K = 30`. Cùng lượt đó: 32 chunk ~14.5k token, có đủ Overview (P347), nền tảng (P3180), NFR-35
+(P3230), UC-05, BR-02 (trước: 10 chunk, chỉ UC-05 + BR-02).

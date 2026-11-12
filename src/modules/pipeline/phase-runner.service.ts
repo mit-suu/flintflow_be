@@ -17,11 +17,12 @@
 
 import { runStep, defaultStepRunnerDeps, recordUserMessage, B0_FIELD_STEPS, type Emit, type GateResolution, type StepRunnerDeps } from "./step-runner.service.js"
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
-import { addendumForUnit, assumptionsForPrompt, loadConversationVariables, projectStep } from "./context-projection.js"
+import { addendumForUnit, assumptionsForPrompt, loadConversationVariables, projectStep, sectionsFedBy } from "./context-projection.js"
+import { mergeStepDocumentQueries, stepDocumentQuery } from "./step-document-query.js"
 import { SYSTEM_NAME_FIELD, askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
 import { FAST_PATH_PHASES, interviewBudget, interviewGuidance, interviewProjection, noQuestionAck, reconcileReply, trimTailQuestion, withoutQuestions } from "./fast-path.js"
 import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, currentBatch, followUpQuestions, followUpReply, indexOfQuestion, shapeQuestions } from "./question-shape.js"
-import { askTranscript, chatBudgetLeft, chatBudgetReply, nextPendingAfterChat, replyLanguageAfterMessage, runChatTurn, settleWithoutModel, listenForAnswer, type AnswerPayload } from "./step-runner.service.js"
+import { askTranscript, captureSettledSources, chatBudgetLeft, chatBudgetReply, nextPendingAfterChat, replyLanguageAfterMessage, runChatTurn, settleWithoutModel, listenForAnswer, type AnswerPayload } from "./step-runner.service.js"
 import { replyLanguageForSessionId } from "../project/reply-language.service.js"
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import * as meter from "./meter.service.js"
@@ -70,10 +71,22 @@ export const isPhaseTerminal = (spine: Spine, step: ExpandedStep): boolean => {
  * FLF-292: tài liệu upload cho lượt hỏi gộp đầu giai đoạn — nạp khi có bước nào trong đơn vị đọc `documents` (cùng ngân
  * sách token với lượt Draft của bước đó). Không bước nào đọc ⇒ `""`.
  */
-export const unitDocuments = async (projectId: string, spine: Spine, unit: string, since?: Date): Promise<string> => {
-  const step = orderedSteps(spine).find((s) => phaseUnitOf(s) === unit && stepNeedsSourceDocuments(s.id))
-  if (!step) return ""
-  return (await buildDocumentContext(projectId, ActionType.DRAFT, step.id, 0, undefined, undefined, since ? { since } : {})).contextText
+export const unitDocuments = async (
+  projectId: string,
+  spine: Spine,
+  unit: string,
+  options: { userMessage?: string; since?: Date } = {}
+): Promise<string> => {
+  const steps = orderedSteps(spine).filter((s) => phaseUnitOf(s) === unit && stepNeedsSourceDocuments(s.id))
+  if (!steps.length) return ""
+  // FLF-393: lượt hỏi gộp hỏi thay cho mọi bước đọc tài liệu của đơn vị ⇒ tìm đoạn theo section của cả các bước đó
+  const merged = mergeStepDocumentQueries(steps.map((s) => stepDocumentQuery(spine, s.id, sectionsFedBy(spine, s.id))))
+  // Tin user vừa gõ để mở giai đoạn đứng đầu câu hỏi: thiếu nó thì BM25 chỉ có nhãn bước ("Brain Dump"), không khớp gì và
+  // rơi về đầu tài liệu (demo 2026-11-12: hỏi UC-05 / BR-02, model chỉ thấy bìa + mục lục)
+  const userMessage = options.userMessage?.trim()
+  const retrieval = userMessage ? { ...merged, query: [userMessage, merged.query].join("\n"), focus: userMessage } : merged
+  // FLF-398: `since` - chỉ tài liệu đính kèm sau lượt hỏi (cùng câu trả lời)
+  return (await buildDocumentContext({ projectId, actionType: ActionType.DRAFT, stepId: steps[0]!.id, ...retrieval, ...(options.since ? { since: options.since } : {}) })).contextText
 }
 
 /**
@@ -181,7 +194,7 @@ const interviewChatTurn = async (
     stepName: `Phỏng vấn đầu giai đoạn ${unit}`,
     // FLF-398: tệp đính kèm cùng câu trả lời (tải sau lúc hỏi) — thiếu thì AI báo "tệp chưa mở được"; trạng thái cũ chưa có
     // `asked_at` ⇒ mọi tài liệu của giai đoạn
-    documents: await unitDocuments(projectId, spine, unit, askedAt && !Number.isNaN(new Date(askedAt).getTime()) ? new Date(askedAt) : undefined),
+    documents: await unitDocuments(projectId, spine, unit, askedAt && !Number.isNaN(new Date(askedAt).getTime()) ? { since: new Date(askedAt) } : {}),
     asked,
     message,
     // Lời AI lúc đặt các câu đang chờ + tin user: thiếu lời AI thì model không biết user đang trả lời câu nào
@@ -199,6 +212,8 @@ const interviewChatTurn = async (
   await recordInterviewAnswers(projectId, unit, sessionId, userId, turn.reply, asked, [...cardAnswers, ...settled], {
     settledIds: new Set(settled.map((a) => a.question_id))
   })
+  // FLF-393: câu chốt bằng tài liệu tham khảo ⇒ ghi nguồn cho quyết định vừa vào sổ (business-flow §3.6)
+  if (settled.some((a) => a.source_paras?.length)) await captureSettledSources(projectId, unit, (await load(projectId)).spine, asked, settled)
   const answered = new Set([...cardAnswers, ...settled].map((a) => indexOfQuestion(asked, a.question_id)))
   if (closing) {
     const closingReply = withoutQuestions(turn.reply, language)
@@ -340,7 +355,7 @@ const runPhaseInterview = async (
   }))].filter((field) => field !== SYSTEM_NAME_FIELD)
   if (missing.length === 0) return "skipped"
 
-  const run = await acquireRun(projectId, unit, { sessionId, by: userId, stage: "ask", detail_vi: "Xem giai đoạn này còn thiếu gì để hỏi bạn" })
+  const run = await acquireRun(projectId, unit, { sessionId, by: userId, stage: "ask", detail_vi: userMessage ? "Đọc tin nhắn của bạn và tài liệu để trả lời" : "Xem giai đoạn này còn thiếu gì để hỏi bạn" })
   if (deps.abort) registerAbort(run.run_id, deps.abort)
   let outcome: InterviewOutcome | null = null
   try {
@@ -388,7 +403,7 @@ const askPhaseInterview = async (
           assumptions: assumptionsForPrompt(spine, unit),
           content_guidance: fast ? interviewGuidance(spine, unit) : "",
           // FLF-292: lượt hỏi gộp thấy tài liệu upload ⇒ chỉ hỏi điều tài liệu chưa có
-          documents: (await unitDocuments(projectId, spine, unit)) || "(none)",
+          documents: (await unitDocuments(projectId, spine, unit, { userMessage })) || "(none)",
           decisions: ledgerForPrompt(spine),
           // FLF-221: user mở giai đoạn bằng một tin chat — lượt hỏi gộp phải thấy điều user vừa nói. FLF-232: kèm đuôi hội
           // thoại của các bước trước, để sang giai đoạn mới AI nối mạch thay vì chào lại.
