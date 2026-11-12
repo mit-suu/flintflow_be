@@ -22,6 +22,8 @@ const unavailable = (reason: string): never => {
  * - Mục phải dựng lại mà có field / bookmark / công thức ⇒ giữ các đoạn đó tại chỗ; slot không ghi an toàn được ⇒ giữ
  *   nguyên slot (cảnh báo) thay vì hỏng cả file.
  */
+const GROUP_OF_CUSTOM = "group:custom:"
+
 export interface SourceWriteOptions {
   keepSource?: ReadonlySet<string>
   legacyRecordCount?: number
@@ -62,7 +64,10 @@ export async function writeTemplateDocx(
   })
   if (new Set(slots.map((s) => s.block_id)).size !== slots.length) unavailable("Duplicate mapped heading")
   const ancestors: { level: number; slot: typeof slots[number] }[] = []
-  for (const section of doc.sections) {
+  for (const raw of doc.sections) {
+    // FLF-411 (U2-2): dòng chia phần của mẫu dựng thành heading nhóm `group:custom:X` cho màn Xem — trong file nó vẫn là slot
+    // `custom:X` của chính heading đó (ghi như trước)
+    const section = raw.id.startsWith(`${GROUP_OF_CUSTOM}`) ? { ...raw, id: raw.id.slice("group:".length) } : raw
     while (ancestors.length && ancestors[ancestors.length - 1].level >= section.level) ancestors.pop()
     const own = slots.find((s) => s.section_id === section.id)
     const slot = own ?? ancestors[ancestors.length - 1]?.slot
