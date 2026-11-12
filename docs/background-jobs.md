@@ -44,6 +44,28 @@ Vì sao chạy lại được an toàn:
 - **Hết lượt retry** thì `onFinalFailure` đưa nghiệp vụ về trạng thái nhất quán, ví dụ `paused: resume_later` cho
   import, hoặc in OTP ra console như trước.
 
+### Finalize không treo im lặng (FLF-391)
+
+Job còn trong queue chưa chắc là job còn chạy: treo ở một bước, hoặc tiến trình chết mà chưa có worker dọn job stalled,
+đều để job ở `active`. Trước đây `GET /import` chỉ hỏi "còn job không" nên import kẹt `baselining` vô hạn, FE không có nút
+"Tiếp tục". Job `finalize` (cả lượt kiểm tra 1.11–1.12) nay có:
+
+| Cơ chế | Env (mặc định) | Hành vi |
+|---|---|---|
+| Đứng im quá lâu (treo trong tiến trình sống) | `FINALIZE_IDLE_TIMEOUT_MS` (15 phút) | Đồng hồ đặt lại sau mỗi bước finalize, mỗi lượt AI kiểm tra, mỗi diagram; quá hạn ⇒ lỗi tạm thời ⇒ retry; hết lượt ⇒ `paused: resume_later` (ở `baselining` còn hoàn về mốc). Lần chạy chậm mà vẫn tiến không bị cắt |
+| Nhịp tim | `FINALIZE_HEARTBEAT_MS` (30 s) | Lần chạy ghi `finalize_heartbeat_at` lên import (không đổi `updatedAt`) |
+| Ngưỡng coi là mất (tiến trình chết) | `FINALIZE_STALE_MS` (5 phút) | Job `active` mà nhịp tim cũ hơn ngưỡng (bản ghi cũ: lần cập nhật cuối) ⇒ `GET /import` gắn `paused: resume_later`; job đang chờ / chờ retry không tính |
+| Mã lần chạy | — | Mỗi lần bật job sinh `finalize_run_id` (lần thử n > 1: `<mã>#n`, hết giờ ⇒ mã bị vô hiệu ngay). Resume gỡ khoá job kẹt (`releaseJobKey`, chỉ khi khoá còn trỏ đúng job đó) rồi bật lần mới; lần cũ thấy mã lệch thì dừng ở bước / lượt AI kế tiếp — không chạy chồng, không ghi bản 0.1 / baseline thứ hai, không dừng hộ lần mới |
+
+Mỗi bước finalize ghi một dòng log `[finalize] import <id>: <bước> xong sau <ms> (tổng <ms>)` để biết bước nào chậm.
+Số đo SRS ~200 trang (3.775 block, 40 màn, 99 function), không vẽ diagram: 1.10 ≈ 53 s, kiểm tra 1.11 ≈ 74 s. Vẽ diagram
+(PlantUML bật, wireframe từng màn có gọi AI) chạy tuần tự từng hình nên có thể tới hàng chục phút — mỗi hình xong đặt lại
+đồng hồ đứng im nên không bị cắt.
+
+Còn chấp nhận: lần chạy cũ có thể thắng lần mới ở khoảng hẹp giữa lượt kiểm mã cuối và lúc ghi DocVersion 0.1 — index duy
+nhất + khoá `spine_version` không cho có bản thứ hai, lần mới lỗi rồi retry (hoàn về mốc) tự sửa. Job tạo bởi bản code trước
+FLF-391 (không có nhịp tim) chạy quá 5 phút bị coi là mất khi deploy chồng — chỉ ảnh hưởng lượt deploy đầu.
+
 ## Hai driver (`JOB_DRIVER`)
 
 - **`inline`** (mặc định): job chạy trong tiến trình API, một lần, không retry, đúng hành vi cũ. Dev, test và CI
