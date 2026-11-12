@@ -19,6 +19,7 @@ import { writeTemplateDocx } from "../render/template-docx-writer.js"
 import { columnIdentity, DROP_FROM_PRINT, RECORD_OF_CHANGES, isFreeTextSection, type MigrationGroups } from "./classify.js"
 import { UNMAPPED_SECTION } from "../import/import.constants.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { isInstructionText, splitInstruction } from "../../shared/utils/instruction-text.js"
 import { createTransplanter, enforceRelsAllowList, pruneUnreferencedParts, requestFieldUpdate, validateDocxStructure, type DroppedItem } from "./ooxml-transplant.js"
 import type { NewHeading, OldHeading, PairingResult } from "./pair-sections.js"
 
@@ -117,6 +118,24 @@ const isLayoutOnly = (n: Element): boolean => isW(n, "p") && (hasSectPr(n) || ha
 
 /** Chữ hướng dẫn / bảng mẫu dưới heading mẫu đích: bỏ khi mục đã có nội dung thật. Ngắt trang / section / mục lục giữ nguyên. */
 const isGuidance = (n: Element): boolean => isW(n, "tbl") || (isW(n, "p") && !hasSectPr(n) && !hasPageBreak(n) && !hasField(n))
+
+/**
+ * Mục thiếu (D7): thân mục của mẫu đích chỉ còn **trống + chữ hướng dẫn** — đoạn hướng dẫn (`isInstructionText`, hoặc chứa chữ
+ * hướng dẫn mẫu đã nhận cho heading này) và hàng tiêu đề bảng. Chữ khác còn sót trong file mẫu (nội dung dự án cũ, ảnh, dòng
+ * bảng) không in ra.
+ */
+const keepGuidanceOnly = (nodes: readonly Element[], guidance: string | undefined): void => {
+  const own = splitInstruction(guidance ?? "").guidance.concat(guidance?.trim() ? [guidance.trim()] : [])
+  const isOwnGuidance = (text: string) => own.some((g) => text.includes(g)) || splitInstruction(text).guidance.some((g) => !!guidance?.includes(g))
+  for (const n of nodes) {
+    if (isW(n, "tbl")) {
+      for (const tr of wKids(n, "tr").slice(1)) removeNode(tr)
+      continue
+    }
+    const text = wAll(n, "t").map((t) => t.textContent ?? "").join("").trim()
+    if (!text || !(isInstructionText(text) || isOwnGuidance(text))) removeNode(n)
+  }
+}
 
 const elementsAfter = (el: Element, stop: (n: Element) => boolean): Element[] => {
   const out: Element[] = []
@@ -733,7 +752,10 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
           for (const n of elementsAfter(el, isTargetStop)) removeNode(n)
           removeNode(el)
           report({ ...base, key: heading.key, old_key: null, mode: "removed", reason: "Heading ví dụ của mẫu: mục cha đã có phần tử riêng" })
-        } else if (!movedPl.length) report({ ...base, key: heading.key, old_key: null, mode: "guidance" })
+        } else if (!movedPl.length) {
+          keepGuidanceOnly(guidanceBefore, heading.guidance)
+          report({ ...base, key: heading.key, old_key: null, mode: "guidance" })
+        }
         return
       }
       // Bản chụp: mục chưa sửa giữ nguyên văn khối — không chép lại từ file hiện tại (tránh in hai lần)

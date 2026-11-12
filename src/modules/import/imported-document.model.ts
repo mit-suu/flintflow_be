@@ -51,6 +51,8 @@ export interface FinalizeCheckpoint {
 export interface IImportedDocument extends Document {
   projectId: mongoose.Types.ObjectId
   file_ref: string | null
+  /** FLF-412: đang viết lại file theo lựa chọn Bỏ chữ (lúc bấm Bắt đầu) — khoá để hai lần Bắt đầu / chọn lại không chen vào. */
+  drop_applying?: boolean
   sha256: string
   original_name: string
   size: number
@@ -109,6 +111,7 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
   {
     projectId: { type: Schema.Types.ObjectId, ref: "Project", required: true },
     file_ref: { type: String, default: null },
+    drop_applying: { type: Boolean, default: false },
     sha256: { type: String, required: true },
     original_name: { type: String, required: true },
     size: { type: Number, required: true, min: 0 },

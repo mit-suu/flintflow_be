@@ -61,6 +61,17 @@ const regions = async (buf: Buffer): Promise<{ heading: string; xml: string }[]>
 }
 
 describe("buildBaseFile — v1 sang v2", () => {
+  it("mục thiếu chỉ in chữ hướng dẫn + hàng tiêu đề bảng của mẫu đích, không in chữ còn sót trong file mẫu (D7)", async () => {
+    const result = await buildBaseFile(await forwardInput({ target: await buildV2Template({ leftoverInNew: true }), spineOnly: new Set(["fixed:4.1"]), renderFromSpine: async () => renderedDoc([section("fixed:4.1", "3. Edited", "Edited from spine")]) }))
+    expect(modeOf(result, "n3")?.mode).toBe("guidance")
+    const doc = await docText(result.buffer)
+    expect(doc).toContain("Guidance new: describe the new section")
+    expect(doc).not.toContain("Leftover text of an old project")
+    expect(doc).not.toContain("Old row")
+    const brandNew = (await regions(result.buffer)).find((r) => r.heading === "4. Brand New")!
+    expect(brandNew.xml).toContain("Name")
+  })
+
   it("chép nội dung mục khớp theo style mẫu đích, mục thiếu giữ hướng dẫn, mục riêng đặt sau mục đứng trước", async () => {
     const result = await buildBaseFile(await forwardInput({ spineOnly: new Set(["fixed:4.1"]), renderFromSpine: async () => renderedDoc([section("fixed:4.1", "3. Edited", "Edited from spine")]) }))
     expect(result.problems).toEqual([])
