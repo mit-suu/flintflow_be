@@ -5,6 +5,7 @@ import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
+import { templateCurrentOf, templateUpdateOf } from "../import/template-update.js"
 import type { CreateProjectDTO, DisableScreenMockupsDTO, MoveProjectDTO, RunScreenMockupsDTO, UpdateDocumentLanguageDTO, UpdateErdNotationDTO, UpdateScreenThemeDTO } from "./project.validation.js"
 import { ScreenMockupsQuerySchema } from "./project.validation.js"
 import { validationError } from "../../shared/utils/validation-message.js"
@@ -44,8 +45,10 @@ export const getProject = catchAsync(async (req: Request, res: Response) => {
   const orgId = requireOrgId(req)
   const project = await projectService.openProject(projectId, orgId)
   // FLF-318: dự án tạo SRS đã ký baseline mà chưa chuyển sang mode 1 (lượt ký lỗi giữa chừng / ký trước khi deploy)
-  if (await retryPendingConversion(project, userId)) return sendSuccess(res, 200, await projectService.getProjectById(projectId, orgId))
-  return sendSuccess(res, 200, project)
+  const current = (await retryPendingConversion(project, userId)) ? await projectService.getProjectById(projectId, orgId) : project
+  // FLF-395: bản mẫu tổ chức mới hơn bản dự án đang theo (chỉ Lead / Analyst)
+  const [templateUpdate, templateCurrent] = await Promise.all([templateUpdateOf(current, req.orgContext?.role), templateCurrentOf(current)])
+  return sendSuccess(res, 200, { ...current.toJSON(), template_update: templateUpdate, template_current: templateCurrent })
 })
 
 export const deleteProject = catchAsync(async (req: Request, res: Response) => {
