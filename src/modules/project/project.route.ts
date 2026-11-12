@@ -116,7 +116,9 @@ router.post("/", authMiddleware, validateRequest(CreateProjectSchema), projectCo
  *     summary: "Kiểm file có trông như SRS không (business-flow §3.6) — hộp Tạo dự án, ô Tài liệu tham khảo"
  *     description: >
  *       Code nhận diện như preflight I-1 (dấu version FlintFlow + loại tài liệu), không gọi AI, không lưu file. Chỉ .docx;
- *       định dạng khác ⇒ `looks_like_srs: false`. Giới hạn kích thước như upload SRS.
+ *       định dạng khác ⇒ `looks_like_srs: false`, `srs_suggestion: "none"`. Giới hạn kích thước như upload SRS. FLF-409:
+ *       `srs_suggestion` `strong` (dấu version / tiêu đề SRS / đủ hình thức SRS) ⇒ hỏi chuyển sang ô SRS, `possible` ⇒ nhắc nhẹ,
+ *       `none` ⇒ không gợi ý; `looks_like_srs` = `strong`.
  *     tags: [Projects]
  *     security:
  *       - BearerAuth: []
@@ -131,7 +133,7 @@ router.post("/", authMiddleware, validateRequest(CreateProjectSchema), projectCo
  *               file: { type: string, format: binary }
  *     responses:
  *       200:
- *         description: "`{ looks_like_srs: boolean, stamp: { project_id } | null }`"
+ *         description: "`{ looks_like_srs: boolean, srs_suggestion: strong | possible | none, stamp: { project_id } | null }`"
  *       400: { description: FILE_REQUIRED }
  *       413: { description: FILE_TOO_LARGE }
  */
@@ -189,7 +191,7 @@ router.post("/precheck-docx", authMiddleware, requireRole("lead", "analyst"), re
  *                 description: "FLF-398 — \"Giữ cả hai\": không hỏi bản mới nữa (trùng hệt vẫn chặn)"
  *     responses:
  *       201:
- *         description: "Upload thành công — tài liệu kèm `precheck { looks_like_srs, stamp, heading_overlap? }` (business-flow §3.6; `null` nếu kiểm lỗi)"
+ *         description: "Upload thành công - tài liệu kèm `precheck { looks_like_srs, srs_suggestion, stamp, heading_overlap? }` (business-flow §3.6; `null` nếu kiểm lỗi)"
  *       400:
  *         description: File không hợp lệ
  *       404:
