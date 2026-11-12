@@ -91,6 +91,20 @@ describe("FLF-412 - Bỏ chữ theo vùng ở màn đọc khung", () => {
     expect(late.body.error.code).toBe("IMPORT_INVALID_STATE")
   })
 
+  it("bấm Bắt đầu hai lần liền tay khi có vùng Bỏ chữ ⇒ cả hai 200, file chỉ viết lại một lần", async () => {
+    const { seeded, projectId, importId } = await upload({ has_srs_file: true })
+    const sections = (await view(seeded, projectId)).text_sections as TextSection[]
+    expect((await drop(seeded, projectId, importId, [sections[0]!.key])).status).toBe(200)
+    const originalRef = (await ImportedDocument.findById(importId))!.file_ref
+    const start = () => request(app).post(`/api/v1/projects/${projectId}/import/extract`).set(H(seeded)).send({ import_id: importId, confirm_latest: true })
+    const [a, b] = await Promise.all([start(), start()])
+    expect([a.status, b.status], JSON.stringify([a.body.error, b.body.error])).toEqual([200, 200])
+    await waitForExtraction(importId)
+    const doc = (await ImportedDocument.findById(importId))!
+    expect(doc.file_ref).not.toBe(originalRef)
+    expect(doc.drop_applying).toBe(false)
+  })
+
   it("đang viết lại file (Bắt đầu chưa xong) ⇒ không chọn lại được", async () => {
     const { seeded, projectId, importId } = await upload({ has_srs_file: true })
     await ImportedDocument.updateOne({ _id: importId }, { $set: { drop_applying: true } })

@@ -429,16 +429,32 @@ export const setDropText = async (projectId: string, body: { import_id: string; 
   return doc
 }
 
+/** Thời gian tối đa chờ lần Bắt đầu kia viết lại file xong (file lớn tách lại mất vài giây). */
+const DROP_WAIT_MS = 60_000
+const DROP_POLL_MS = 200
+
+/** Lần Bắt đầu khác đang viết lại file ⇒ chờ nó xong (khoá nhả) rồi đi tiếp; quá lâu ⇒ báo thử lại. */
+const waitDropApplied = async (doc: IImportedDocument): Promise<void> => {
+  for (let waited = 0; waited < DROP_WAIT_MS; waited += DROP_POLL_MS) {
+    await new Promise((resolve) => setTimeout(resolve, DROP_POLL_MS))
+    const current = await ImportedDocument.findById(doc._id, { drop_applying: 1 }).lean()
+    if (!current?.drop_applying) return
+  }
+  throw new Mode1Error("IMPORT_INVALID_STATE", "File đang được chuẩn bị, thử lại sau giây lát", { status: doc.status, to: doc.status, allowed: ["extracting"] })
+}
+
 /**
  * Bấm Bắt đầu: còn vùng Bỏ chữ ⇒ viết lại file (vùng đó chỉ còn khung) thành file của import rồi tách lại. Mọi bước sau đọc file
  * mới — không còn chữ cũ để trích, in, hay đưa cho AI; file tải lên gốc bị xoá (không giữ chữ cũ của khách). Không có lựa chọn /
- * đã bắt đầu ⇒ không làm gì. Khoá `drop_applying` để hai lần Bắt đầu không cùng viết lại; lỗi giữa chừng ⇒ quay về file gốc và
- * giữ lựa chọn để bấm lại.
+ * đã bắt đầu ⇒ không làm gì. Khoá `drop_applying` để hai lần Bắt đầu không cùng viết lại: lần sau chờ lần trước viết xong rồi đi
+ * tiếp (cùng một job I-4), không báo lỗi; lỗi giữa chừng ⇒ quay về file gốc và giữ lựa chọn để bấm lại.
  */
 export const applyDropText = async (doc: IImportedDocument): Promise<void> => {
   if (!(await extractionNotStarted(doc))) return
+  // Không có vùng Bỏ chữ ⇒ không cần khoá (hai lần Bắt đầu liền tay không chặn nhau)
+  if (!(await TemplateProfile.exists({ projectId: doc.projectId, "drop_text.0": { $exists: true } }))) return
   const locked = await ImportedDocument.findOneAndUpdate({ _id: doc._id, drop_applying: { $ne: true } }, { $set: { drop_applying: true } })
-  if (!locked) throw new Mode1Error("IMPORT_INVALID_STATE", "File đang được chuẩn bị, thử lại sau giây lát", { status: doc.status, to: doc.status, allowed: ["extracting"] })
+  if (!locked) return waitDropApplied(doc)
   const originalRef = doc.file_ref
   try {
     const profile = await TemplateProfile.findOne({ projectId: doc.projectId }, { heading_map: 1, drop_text: 1 }).lean()
