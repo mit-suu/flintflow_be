@@ -755,3 +755,47 @@ hỏi field nào, và top-k 10 chỉ dùng ~4.6k / 16k token. Sửa: câu hỏi 
 (`FIELD_SEARCH_TERMS`, `step-document-query.ts`), Brief/S-1 ghim mục Product Overview và kèm summary, lượt của step lấy tới
 `DOC_CONTEXT_DRAFT_TOP_K = 30`. Cùng lượt đó: 32 chunk ~14.5k token, có đủ Overview (P347), nền tảng (P3180), NFR-35
 (P3230), UC-05, BR-02 (trước: 10 chunk, chỉ UC-05 + BR-02).
+
+## FLF-410 — Screen Layout: Salt vs ScreenSpec mockup, provider thật (2026-11-12)
+
+Dự án import TechMart (`6af462bbcfb03275b8d3684e`), 10 màn đầu có ảnh gốc (SCR-01, 02, 04, 05, 07, 08, 09, 11, 13, 14;
+mỗi mục 1 ảnh). Model `claude-haiku-5-5` (frontmatter skill `screen-layout`), `maxTokens 4096`, `temperature 0.2`. Gọi
+thẳng `callLLM` với đúng prompt `aiScreenLayout` dựng (không trừ credit, không ghi `AiActionLog`), mỗi màn 3 lượt:
+
+- `salt`: skill 2.1.0 + `layoutContext` của develop (`cf53710`).
+- `system`: skill 3.0.0 + reference `blocks`, `allowed_platforms = [web]`, `original_images` chỉ chú thích.
+- `original`: như `system` + ảnh gốc (PNG / JPEG của file import).
+
+Hợp lệ = `extractSalt` (Salt) / `parseScreenEnvelope` (spec). `screen_images` đúng = khớp index ảnh mà regex chú thích
+`SCREEN_CAPTION` chọn (mỗi mục chỉ 1 ảnh nên chỉ đo được lượt model có trả trường này hay không chọn sai).
+
+| Kiểu | Token vào TB | Token ra TB | Thời gian TB | Hợp lệ | `screen_images` đúng |
+|---|---|---|---|---|---|
+| `salt` (develop) | 2 507 | 1 071 | 5,3 s | 10/10 | - |
+| `system` | 3 947 (+57%) | 1 613 (+51%) | 7,3 s | 10/10 | 9/10 (SCR-11 chọn sai, rơi về regex vẫn đúng ảnh) |
+| `original` | 5 154 (+106%) | 1 642 (+53%) | 7,4 s | 9/10 (SCR-13 sai schema ⇒ bảng Function) | 9/9 |
+
+- (Lượt 1) Ngưỡng plan "kiểu `system` ≤ Salt + 20%" **không đạt**: tổng token / màn 5 560 so với 3 578 (+55%). Vào tăng
+  ~1 440 token cố định: thân skill 6,3k ký tự + reference `blocks` 3,0k (Salt 5,9k), và hai mục `Mode original` /
+  `Which pictures are screens` vẫn nằm trong prompt của màn không có ảnh gốc. Ra tăng vì JSON dài hơn Salt.
+- Credit người dùng không đổi: `RENDER_FIX` tính giá cố định theo lượt, không theo token.
+- Kiểu `original` so với `system`: vào +31% (1 ảnh ~1 200 token), ra gần bằng. Câu "tốn token gấp khoảng 2-3 lần" của plan
+  là quá cao với ảnh 1 màn; FE hiện ghi "AI xem cả ảnh nên vẽ lâu hơn", không nêu hệ số.
+
+### Lượt 2: luật ảnh gốc chỉ nối khi màn có ảnh gốc (skill 3.1.0, cùng ngày)
+
+Hai mục `Mode original` / `Which pictures are screens` chuyển sang reference `originals`, `layoutReferences` chỉ nối khi
+input có ảnh gốc. Cùng 10 màn, thêm kiểu `new` = màn không có ảnh gốc (như màn của dự án tạo mới).
+
+| Kiểu | Token vào TB | Token ra TB | Tổng so Salt | Thời gian TB | Hợp lệ |
+|---|---|---|---|---|---|
+| `salt` (develop) | 2 507 | 1 193 | - | 6,2 s | 10/10 |
+| `new` (không ảnh gốc) | 3 467 | 1 293 | **+29%** | 5,8 s | 9/10 |
+| `system` (màn import) | 4 013 | 1 568 | +51% | 7,0 s | 10/10 |
+| `original` | 5 220 | 1 667 | +86% | 7,5 s | 8/10 |
+
+- Màn không có ảnh gốc giảm từ +55% xuống **+29%** tổng token so với Salt. Ngưỡng plan đổi thành: màn không có ảnh gốc
+  ≤ Salt + 30% tổng token (mốc đo này); màn import có ảnh gốc ghi số, không đặt ngưỡng.
+- Đầu ra Salt dao động giữa hai lượt (1 071 / 1 193, ~10%): so sánh dưới 10% coi là nhiễu.
+- Màn lỗi rơi về bảng Function: `new` SCR-05, `original` SCR-07 và SCR-13 (SCR-13 lỗi ở cả hai lượt). `screen_images` của
+  `system` 6/8: lượt sai trả rỗng ⇒ code dùng regex chú thích, vẫn đúng ảnh (mỗi mục 1 ảnh).
