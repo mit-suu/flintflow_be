@@ -145,6 +145,12 @@ export const aiItemId = (known: readonly EntityItem[], entity: string, key: stri
 }
 
 /**
+ * Nguồn id cho `itemsFromAi`: `IdAllocator` thật lúc ghép section, hoặc nguồn nháp không cấp mã (FLF-392 — dựng known_keys
+ * lúc đọc song song; phần tử AI mới không có id nên không vào prompt).
+ */
+export type IdSource = Pick<IdAllocator, "next" | "reserve">
+
+/**
  * Cấp id mới không trùng id đã có của từng mảng — so theo `idKey`: đã có "A-01" thì không cấp "A01". FLF-361: khuôn theo
  * id đang có (`formatFor`, như CR — FLF-307): tài liệu đánh `UC01` ⇒ id mới `UC03`, không `UC-03` lạc khuôn.
  */
