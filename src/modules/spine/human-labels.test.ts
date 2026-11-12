@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest"
 import {
   capitalize,
   diagramLabel,
+  elementLabel,
   humanizeText,
   nameElementIds,
   pathLabel,
@@ -100,5 +101,18 @@ describe("nameElementIds", () => {
   it("mã trong ngoặc không đi sau tên ⇒ thay bằng tên; mã đã có nháy không bị nháy kép; mã lạ và mã use case giữ nguyên", () => {
     expect(nameElementIds("Đổi màn (S02) cho actor 'A03' ở FN010?", spine)).toBe("Đổi màn 'Reset Password' cho actor 'Teacher' ở 'Take Attendance'?")
     expect(nameElementIds("UC-01 và S99 không đổi; S011 và S01x cũng vậy", spine)).toBe("UC-01 và S99 không đổi; S011 và S01x cũng vậy")
+  })
+})
+
+describe("elementLabel (FLF-411 U2-5)", () => {
+  it("tên phần tử thay mã nội bộ; không tên ⇒ trích câu chính; mã use case giữ", () => {
+    expect(elementLabel("actors", "A02", { id: "A02", name: "Customer" })).toBe('tác nhân "Customer"')
+    expect(elementLabel("glossary", "G1", { term: "SKU" })).toBe('thuật ngữ "SKU"')
+    expect(elementLabel("other_requirements", "OR-02", { statement: "  The system   shall export reports" })).toBe('yêu cầu khác "The system shall export reports"')
+    expect(elementLabel("business_rules", "BR-1", { statement: "x".repeat(80) })).toBe(`quy tắc nghiệp vụ "${"x".repeat(60)}…"`)
+    expect(elementLabel("use_cases", "UC-01", null)).toBe("use case UC-01")
+    expect(elementLabel("functions", "FR-3.2.1", null, "Login")).toBe('chức năng "Login"')
+    expect(elementLabel("messages", "MSG-1", null)).toBe("thông báo hệ thống")
+    expect(elementLabel("project", null)).toBe("Thông tin dự án")
   })
 })
