@@ -188,7 +188,7 @@ interface Cell {
   col: number
 }
 
-/** Kích thước hình theo loại nút; hình thoi có câu hỏi thành lục giác dẹt (như PlantUML `if`) đủ chứa chữ. */
+/** Kích thước hình theo loại nút; decision / merge là **hình thoi** đúng UML (QLHS 11/11 — trước đây lục giác dẹt), câu hỏi nằm trong thoi. */
 const sizeOf = (kind: CellKind, name: string): Pick<Cell, "lines" | "w" | "h" | "span"> => {
   switch (kind) {
     case "action": {
@@ -198,10 +198,12 @@ const sizeOf = (kind: CellKind, name: string): Pick<Cell, "lines" | "w" | "h" | 
     case "decision":
     case "merge": {
       if (name === "") return { lines: [], w: DIAMOND, h: DIAMOND, span: DIAMOND / 2 - 6 }
-      const lines = wrapText(name, TEXT, TEXT_W - DIAMOND)
-      const h = Math.max(DIAMOND, lines.length * LINE + 12)
-      const w = Math.min(CELL_W, Math.max(...lines.map((l) => textWidth(l, TEXT))) + h + 12)
-      return { lines, w, h, span: w / 2 - 6 }
+      // Chữ nhật chữ (tw × th) nằm trong thoi khi tw/w + th/h ≤ 1 ⇒ thoi gấp đôi khối chữ mỗi chiều
+      const lines = wrapText(name, TEXT, CELL_W / 2 - 8)
+      const tw = Math.max(...lines.map((l) => textWidth(l, TEXT)))
+      const w = Math.max(DIAMOND, 2 * tw + 16)
+      const h = Math.max(DIAMOND, 2 * lines.length * LINE + 12)
+      return { lines, w, h, span: w / 4 }
     }
     case "fork":
     case "join":
@@ -480,9 +482,8 @@ export const layoutActivity = (d: ActivityLayoutInput): Scene => {
       }
       case "decision":
       case "merge": {
-        const k = c.h / 2
-        const flat = c.w / 2 - k
-        return cy + sign * (k - Math.max(0, Math.abs(dx) - flat))
+        // Cạnh thoi: cao h/2 ở giữa, về 0 ở hai đỉnh trái / phải
+        return cy + sign * (c.h / 2) * Math.max(0, 1 - Math.abs(dx) / (c.w / 2))
       }
       default:
         return cy + (sign * c.h) / 2
@@ -514,14 +515,11 @@ export const layoutActivity = (d: ActivityLayoutInput): Scene => {
         break
       case "decision":
       case "merge": {
-        const k = c.h / 2
         const pts: Point[] = [
           [cx - c.w / 2, cy],
-          [cx - c.w / 2 + k, top],
-          [cx + c.w / 2 - k, top],
+          [cx, top],
           [cx + c.w / 2, cy],
-          [cx + c.w / 2 - k, top + c.h],
-          [cx - c.w / 2 + k, top + c.h]
+          [cx, top + c.h]
         ]
         scene.polygon(c.key, pts, { name: c.name || (c.kind === "decision" ? "Decision" : "Merge"), fill: PAPER })
         c.lines.forEach((line, i) => scene.text(`${c.key}#t${i}`, cx, cy + (i - (c.lines.length - 1) / 2) * LINE, line, { owner: c.key, size: TEXT, baseline: "central", name: line }))

@@ -242,7 +242,7 @@ describe("GET /projects/:projectId/export/word", () => {
   })
 })
 
-describe("FLF-265 §3.1 — ngôn ngữ tài liệu theo project", () => {
+describe("FLF-265 §3.1 - ngôn ngữ tài liệu theo project", () => {
   const sample = renderedDocumentSchema.parse(
     JSON.parse(readFileSync(new URL("../../../fixtures/rendered-document-sample.json", import.meta.url), "utf8"))
   ) as RenderedDocument
@@ -291,7 +291,7 @@ describe("FLF-265 §3.1 — ngôn ngữ tài liệu theo project", () => {
       expect((outcome.body as { meta: unknown }).meta).toEqual({ translation: { ...translation, missing: 0 } })
     })
 
-    it("?lang=en trên dự án vi bị bỏ qua — ngôn ngữ vẫn theo project", async () => {
+    it("?lang=en trên dự án vi bị bỏ qua - ngôn ngữ vẫn theo project", async () => {
       asProject(VI_PROJECT)
       vi.mocked(getDocumentWithMeta).mockResolvedValue({ doc: sample, translation })
 
@@ -372,7 +372,7 @@ describe("FLF-265 §3.1 — ngôn ngữ tài liệu theo project", () => {
       }
     })
 
-    describe("FLF-334 B — ?lang= tải theo ngôn ngữ khác", () => {
+    describe("FLF-334 B - ?lang= tải theo ngôn ngữ khác", () => {
       const snapshot = { project: { name: "Demo" } } as unknown as Spine
 
       it("không lang / lang = ngôn ngữ tài liệu ⇒ như trước: không kiểm bản dịch, tên không hậu tố", async () => {

@@ -54,7 +54,7 @@ export const elementText = (value: unknown): string => {
   const parts = BODY_FIELDS.map((f) => value[f]).filter((v): v is string => typeof v === "string" && v.trim().length > 0)
   const unique = parts.filter((p, i) => parts.indexOf(p) === i)
   const detail = DETAIL_FIELDS.map((f) => value[f]).filter((v): v is string => typeof v === "string" && v.trim().length > 0).join(": ")
-  return [id && !unique.some((p) => p.includes(id)) ? id : "", ...unique, detail ? `(${detail})` : ""].filter(Boolean).join(" — ")
+  return [id && !unique.some((p) => p.includes(id)) ? id : "", ...unique, detail ? `(${detail})` : ""].filter(Boolean).join(" - ")
 }
 
 const elementLabel = (value: unknown): string => {

@@ -1,4 +1,4 @@
-# Deterministic check — implementation notes (T09)
+# Deterministic check - implementation notes (T09)
 
 Rule tables: `red-rules.md`, `yellow-rules.md`. Code: `src/modules/spine/deterministic-check.ts`. This file records how the code resolves points the tables leave open. It is documentation only and is never sent to a model.
 

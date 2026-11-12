@@ -20,7 +20,7 @@ const mutate = (fn: (s: Spine) => void): Spine => {
   return s
 }
 
-describe("entities[].attributes / feature_ids — schema", () => {
+describe("entities[].attributes / feature_ids - schema", () => {
   it("fixture có hai field; Spine cũ thiếu cả hai vẫn hợp lệ (đọc như [])", () => {
     expect(entityOf(FIXTURE, "E01").attributes?.[0]).toEqual({ name: "email", kind: "key", required: true })
     expect(entityOf(FIXTURE, "E01").feature_ids).toEqual(["F1", "F2", "F5", "F6"])
@@ -64,7 +64,7 @@ describe("entity-features", () => {
   })
 })
 
-describe("op engine — attributes", () => {
+describe("op engine - attributes", () => {
   it("path chọn thuộc tính theo tên; sửa required / description, không đổi tên", () => {
     expect(resolve(FIXTURE, "entities[id=E01].attributes[name=email]")).toMatchObject({ kind: "element", value: { name: "email", kind: "key" } })
     const plan = planTransaction(FIXTURE, txn([{ op: "set", path: "entities[id=E01].attributes[name=avatar].required", value: true }]), { startSeq: 1 })
@@ -95,7 +95,7 @@ describe("op engine — attributes", () => {
   })
 })
 
-describe("op engine — feature_ids", () => {
+describe("op engine - feature_ids", () => {
   it("feature_ids là khoá tham chiếu: id chết ⇒ dead_reference; xoá feature gỡ id khỏi feature_ids (cascade pull)", () => {
     const dead = mutate((s) => (entityOf(s, "E03").feature_ids = ["F3", "F99"]))
     expect(findDeadReferences(dead).map((h) => h.refPath)).toContain("entities[id=E03].feature_ids[=F99]")
@@ -114,10 +114,10 @@ describe("op engine — feature_ids", () => {
   })
 })
 
-describe("source hash — class và ERD với attributes", () => {
+describe("source hash - class và ERD với attributes", () => {
   const cls = (owner: string) => ({ kind: "class" as const, owner_id: owner })
 
-  it("class: hash theo từng feature — đổi thuộc tính / tên entity / tên feature của feature đó làm cũ, feature khác thì không", () => {
+  it("class: hash theo từng feature - đổi thuộc tính / tên entity / tên feature của feature đó làm cũ, feature khác thì không", () => {
     const base = renderedDiagramHash(FIXTURE, cls("F3"))
     expect(renderedDiagramHash(structuredClone(FIXTURE), cls("F3"))).toBe(base)
     const attr = mutate((s) => (entityOf(s, "E04").attributes = [{ name: "session code", kind: "key", required: false }]))

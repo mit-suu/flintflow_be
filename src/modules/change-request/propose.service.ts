@@ -35,6 +35,9 @@ import { addedElements, elementValue, isArrayPath, isSectionTarget, opElement, s
 import { isDiagramLocation, refreshDiagramLocations } from "./diagram-location.js"
 import { reassignDuplicateIds } from "./new-ids.js"
 import { proposeUseCaseBatch } from "./add-use-case.service.js"
+import { elementText } from "./location-display.js"
+import { directHit } from "./word-diff.js"
+import { crDocumentLanguage, documentLanguageText } from "./cr-language.js"
 
 /**
  * Số vị trí gửi trong một lượt C-4. Trước là 12: prompt kèm giá trị JSON của từng phần tử (tới 2500 ký tự) và câu
@@ -70,7 +73,7 @@ export const ownerKeyOf = (spine: Pick<Spine, "custom_sections">, loc: Pick<ICha
 }
 
 export const ownerSkillText = (ownerKey: string | null): string => {
-  if (!ownerKey) return "(none — free-form section kept verbatim from the uploaded file)"
+  if (!ownerKey) return "(none - free-form section kept verbatim from the uploaded file)"
   const skillId = ownerKey.startsWith(SKILL_KEY) ? ownerKey.slice(SKILL_KEY.length) : STEP_SKILLS[parseStepId(ownerKey).base]
   if (!skillId) return "(none)"
   try {
@@ -143,8 +146,8 @@ export const locationPromptText = (spine: Spine, l: PromptLocation, seedOps: rea
   const how = !isArrayPath(l.path)
     ? ""
     : isEmpty
-      ? "\n  EMPTY SECTION — the only valid edit is adding new elements to this array (`add` ops)."
-      : `\n  ADD NEW — the only valid edit is adding new elements to this array (\`add\` ops) that the change needs and that do not exist yet (value above = existing elements, to avoid duplicates). Existing elements are separate locations. Nothing new needed ⇒ not_related.${existingIdsText(spine, l.path)}`
+      ? "\n  EMPTY SECTION - the only valid edit is adding new elements to this array (`add` ops)."
+      : `\n  ADD NEW - the only valid edit is adding new elements to this array (\`add\` ops) that the change needs and that do not exist yet (value above = existing elements, to avoid duplicates). Existing elements are separate locations. Nothing new needed ⇒ not_related.${existingIdsText(spine, l.path)}`
   // Mode 1 v3: op người yêu cầu đã xem trước cho đúng vị trí này — gợi ý, AI vẫn tự kết luận
   const mine = seedOpsFor(seedOps, l.path)
   const suggested = mine.length ? `\n  Requester's previewed ops for this location (suggestion): ${JSON.stringify(mine)}` : ""
@@ -177,7 +180,7 @@ export const templateGuidanceBySection = (profile: {
     const parent = [...stack].reverse().find((s) => s.guidance)?.guidance ?? null
     stack.push({ level: l.level, guidance: own })
     if (!own) continue
-    const text = parent && parent !== own ? `${parent} — ${own}` : own
+    const text = parent && parent !== own ? `${parent} - ${own}` : own
     const prev = out.get(l.section_id)
     out.set(l.section_id, (prev ? `${prev} · ${text}` : text).slice(0, GUIDANCE_PROMPT_CHARS))
   }
@@ -250,6 +253,8 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
   const spine = stripRecord(record)
   // FLF-364: hướng dẫn của mẫu upload theo mục (Mode 1) — ngữ cảnh soạn đúng ý người làm mẫu
   const guidance = templateGuidanceBySection(await TemplateProfile.findOne({ projectId: cr.projectId }).select("heading_map layout").lean())
+  // QLHS 11/11 bug #17: nói rõ ngôn ngữ tài liệu — thiếu dòng này model viết bước mới bằng tiếng Anh vào tài liệu tiếng Việt
+  const documentLanguage = documentLanguageText(await crDocumentLanguage(String(cr.projectId), spine))
   let locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
 
   // FLF-318: CR thêm / xoá use case ⇒ soạn trọn lô một lượt như chat trước baseline (luật 3e / 3g), vị trí còn
@@ -286,14 +291,15 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
           materials: await relevantMaterialsText(cr, crQuery(cr, ...batch.map((l) => locationPromptText(spine, l, cr.seed?.ops ?? [])))),
           missing_info: missingInfoText(cr),
           locations: batch.map((l) => locationPromptText(spine, l, cr.seed?.ops ?? [])).join("\n"),
-          glossary: glossaryText(spine)
+          glossary: glossaryText(spine),
+          document_language: documentLanguage
         })
         if (!result.ok) {
           if (result.reason !== "credits" && batch.length > 1) {
             // Lô quá nặng cho một lượt gọi (prompt dài ⇒ model suy nghĩ hết ngân sách) ⇒ chia đôi, thử lại từng nửa
             // thay vì dừng cả CR. Hết credit thì vẫn dừng để người dùng nạp rồi resume.
             const half = Math.ceil(batch.length / 2)
-            console.warn(`[C-4] ${cr.cr_id}: lô ${batch.length} vị trí lỗi (${result.message}) — chia đôi và thử lại`)
+            console.warn(`[C-4] ${cr.cr_id}: lô ${batch.length} vị trí lỗi (${result.message}) - chia đôi và thử lại`)
             queue.unshift(batch.slice(0, half), batch.slice(half))
             batch = []
             break
@@ -308,6 +314,7 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
           loc.conclusion = out.conclusion
           loc.reason = out.reason
           loc.proposal = {
+            proposed_at: new Date(),
             ...snapshotOf(spine, loc.path),
             new_text: out.conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
             comment_text: out.conclusion === "comment" ? (out.comment_text ?? null) : null,
@@ -315,11 +322,13 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
             assumptions: out.conclusion === "not_related" ? [] : out.assumptions
           }
           loc.verify = null
+          // Đề xuất mới chụp nội dung hiện tại ⇒ xung đột cũ (nếu có, từ lần xác nhận trước) không còn ý nghĩa
+          loc.conflict = null
           await loc.save()
         }
         batch = batch.filter((l) => !matched.has(l))
       }
-      if (batch.length) console.warn(`[C-4] ${cr.cr_id}: model bỏ sót ${batch.map((l) => l.location_id).join(", ")} sau ${PROPOSE_ATTEMPTS} lượt — chờ sửa tay`)
+      if (batch.length) console.warn(`[C-4] ${cr.cr_id}: model bỏ sót ${batch.map((l) => l.location_id).join(", ")} sau ${PROPOSE_ATTEMPTS} lượt - chờ sửa tay`)
     }
   }
   await fixDuplicateIds(spine, locations)
@@ -354,6 +363,29 @@ export const draftInOwnerStep = async (cr: IChangeRequest, userId: string, locat
     if (cr.status === "ready_to_submit") await transitionCr(cr, "verifying")
     return
   }
+  // BF §3.2 "AI soạn lại trên nội dung hiện tại": yêu cầu gốc đụng thẳng phần người khác vừa sửa ⇒ hỏi lại trong chat,
+  // không gọi AI (không tốn credit), không tự chọn. Người dùng trả lời (chọn gợi ý / gõ) ⇒ gọi lại đường này với câu trả lời.
+  if (loc.conflict && !loc.conflict.question && loc.conflict.proposal_text) {
+    const text = (json: string) => elementText(JSON.parse(json))
+    const hit = directHit(text(loc.conflict.at_proposal_text), text(loc.conflict.current_text), text(loc.conflict.proposal_text))
+    if (hit) {
+      const who = loc.conflict.changed_by
+      loc.conflict.question = {
+        text: `${who} vừa đổi “${hit.original}” thành “${hit.theirs}”, còn yêu cầu của bạn muốn đổi thành “${hit.yours}”. Giữ bản nào?`,
+        suggestions: [`Dùng “${hit.yours}” theo yêu cầu của tôi`, `Giữ “${hit.theirs}” của ${who} và soạn phần còn lại`]
+      }
+      loc.markModified("conflict")
+      await loc.save()
+      return
+    }
+  }
+  // Câu trả lời cho câu hỏi "Giữ bản nào?" là một vòng làm rõ thật sự: C-4 / C-5 / C-2 về sau đều thấy (không hỏi lại
+  // "ngưỡng gốc là 1 hay 3?" ở bước kiểm nhất quán)
+  if (loc.conflict?.question) {
+    cr.clarifications.push({ round: cr.clarifications.length + 1, questions: [loc.conflict.question.text], answers: [instruction], suggestions: [loc.conflict.question.suggestions] })
+    cr.markModified("clarifications")
+    await cr.save()
+  }
   const result = await withMeteredAi<CrProposeOutput>({ projectId: String(cr.projectId), userId, stepId: `C-4:${cr.cr_id}` }, ActionType.CR_PROPOSE, {
     ...crHeader(cr),
     answers: `${answersText(cr)}
@@ -369,7 +401,8 @@ Analyst's instruction for ${loc.location_id} (${loc.owner_step ? `fix in owner s
     materials: await relevantMaterialsText(cr, crQuery(cr, instruction, locationPromptText(spine, loc, cr.seed?.ops ?? []))),
     missing_info: missingInfoText(cr),
     locations: locationPromptText(spine, loc, cr.seed?.ops ?? []),
-    glossary: glossaryText(spine)
+    glossary: glossaryText(spine),
+    document_language: documentLanguageText(await crDocumentLanguage(String(cr.projectId), spine))
   })
   if (!result.ok) {
     // `manual_fix` không phải bước pause được (Flow 4/5 của CR chỉ ở clarifying/proposing/verifying) ⇒ báo lỗi, giữ nguyên
@@ -377,11 +410,12 @@ Analyst's instruction for ${loc.location_id} (${loc.owner_step ? `fix in owner s
     throw new ApiError(502, result.userMessage, "AI_PROVIDER_ERROR", result.code ? { cause_code: result.code } : undefined)
   }
   const out = matchProposals([loc], result.data.locations).get(loc)
-  if (!out) throw new ApiError(502, "AI chưa đưa ra đề xuất cho chỗ này — thử lại, hoặc gõ hướng sửa cụ thể hơn", "AI_PROVIDER_ERROR")
+  if (!out) throw new ApiError(502, "AI chưa đưa ra đề xuất cho chỗ này - thử lại, hoặc gõ hướng sửa cụ thể hơn", "AI_PROVIDER_ERROR")
   const ops = out.conclusion === "not_related" ? [] : out.spine_ops
   loc.conclusion = out.conclusion
   loc.reason = out.reason
   loc.proposal = {
+    proposed_at: new Date(),
     ...snapshotOf(spine, loc.path),
     new_text: out.conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
     comment_text: out.conclusion === "comment" ? (out.comment_text ?? null) : null,

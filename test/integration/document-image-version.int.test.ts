@@ -175,7 +175,7 @@ describe("GET /version", () => {
   })
 })
 
-describe("FLF-383 — bản xem đã dịch lưu trong rendered_documents", () => {
+describe("FLF-383 - bản xem đã dịch lưu trong rendered_documents", () => {
   it("GET /document (vi) lưu đúng một hàng bản dịch; tiến trình mới (RAM rỗng) trả y hệt; export Word cùng ngôn ngữ dựng mới, nhúng PNG", async () => {
     expect((await lead.patch("/document-language", { documentLanguage: "vi" })).status).toBe(200)
     const first = await lead.get("/document?source=draft")

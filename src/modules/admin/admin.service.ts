@@ -459,7 +459,7 @@ export const getAiActionPayload = async (logId: string) => {
   if (!payload) {
     throw new ApiError(
       404,
-      "Không còn prompt/response của lượt gọi này — lượt chạy trước khi bật việc lưu, hoặc đã quá hạn giữ.",
+      "Không còn prompt/response của lượt gọi này - lượt chạy trước khi bật việc lưu, hoặc đã quá hạn giữ.",
       "AI_PAYLOAD_NOT_FOUND"
     )
   }

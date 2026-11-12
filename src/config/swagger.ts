@@ -9,7 +9,7 @@ const options = {
       description:
         "FlintFlow Backend API. Nội dung SRS nằm trong Spine (một document mỗi project) và chỉ đổi qua op " +
         "(POST /projects/{id}/changes, step runner). Hợp đồng chuẩn của Spine/pipeline/change/flags/export là " +
-        "docs/api/pipeline-contract.md — swagger ở đây sinh từ JSDoc của route và có thể tóm tắt hơn.",
+        "docs/api/pipeline-contract.md - swagger ở đây sinh từ JSDoc của route và có thể tóm tắt hơn.",
       contact: {
         name: "FlintFlow Team"
       }

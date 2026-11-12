@@ -186,9 +186,12 @@ nguyên trạng: baseline v1 đã ký, CR nguồn `chat` (enum giữ để đọ
 **từ nay** đổi: sau import mọi sửa qua CR (`CHANGE_REQUIRES_CR`), không chạy step / ký v1 / waive (`MODE1_NO_*`),
 CR mới không nhận nguồn `chat`. Version cũ không có bản có đánh dấu (`has_tracked_file: false` ⇒ tải `tracked` trả
 bản thường); import cũ không có `image_ref` nên bản render cũ vẫn thiếu ảnh — muốn có ảnh thì import lại file.
-Đọc ảnh diagram (phase 5) cần `GEMINI_API_KEY`; thiếu key ⇒ I-4 **không dừng**, ảnh được giữ nguyên + cờ vàng
-`import_image_unread` (không trích được thực thể từ ảnh). Key free tier hết quota ngày sau ~20 ảnh ⇒ lượt lỗi thành
-`paused: resume_later` — môi trường thật dùng key trả phí.
+Đọc ảnh diagram khi import và ảnh tài liệu bổ sung của CR dùng Anthropic `claude-haiku-5-5`, cần
+`ANTHROPIC_API_KEY` (cấu hình tại hai skill [import-extract-diagram](../assets/skills/action/import-extract-diagram/SKILL.md)
+và [cr-material-image](../assets/skills/action/cr-material-image/SKILL.md)).
+Thiếu key ⇒ I-4 **không dừng**, ảnh được giữ nguyên + cờ vàng `import_image_unread` (không trích được thực thể từ ảnh).
+Credit, schema kết quả và cơ chế thử lại không đổi; không dự phòng sang Gemini khi đọc ảnh. Các action chữ giữ
+provider/model hiện hành; embedding C-3 và knowledge vẫn dùng `EMBEDDING_PROVIDER` / `GEMINI_API_KEY` riêng.
 
 Trong docker compose, image production không có `tsx` nhưng có bản đã biên dịch:
 

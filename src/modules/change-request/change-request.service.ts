@@ -13,7 +13,7 @@ import { latestImport, transitionImport } from "../import/import.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { toIso } from "../import/mode1.http.js"
 import { clipMaterialText, formatCrId, formatMaterialId } from "./change-request.constants.js"
-import type { ChangeRequestDetail, CreateChangeRequest } from "./change-request.dto.js"
+import type { ChangeRequestDetail, CreateChangeRequest, PendingSection } from "./change-request.dto.js"
 import { ChangeRequest, CrCounter, type CrSeed, type IChangeRequest } from "./change-request.model.js"
 import { CR_STATUS_LABELS, assertTransition, isTerminal, type CrStatus } from "./change-request.state.js"
 import { ChangeGroup } from "./change-group.model.js"
@@ -25,7 +25,7 @@ import * as spineRepository from "../spine/spine.repository.js"
 import { notify } from "../notification/notification.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { unlockPaths } from "./lock.service.js"
-import { checkBeforeWrite, othersPending } from "./concurrent-edit.js"
+import { checkBeforeWrite, othersPending, pendingSections, userName } from "./concurrent-edit.js"
 import { elementText, locationDisplay } from "./location-display.js"
 import { previewAfter } from "./propose.service.js"
 import { addedElements, currentText, isArrayPath, opElement, valueText } from "./spine-location.js"
@@ -125,7 +125,7 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
   const pending = await othersPending(cr.projectId, cr.cr_id, locations.map((l) => l.path))
   const asText = (json: string | null | undefined) => (json ? elementText(parseJson(json)) : "")
   return {
-    change_request: toCrDto(cr),
+    change_request: { ...toCrDto(cr), created_by_name: (await userName(String(cr.created_by))) ?? null },
     locations: locations.map((l) => {
       return {
         location_id: l.location_id,
@@ -168,7 +168,9 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
               current: asText(l.conflict.current_text),
               proposal: l.conflict.proposal_text ? asText(l.conflict.proposal_text) : null,
               changed_by: l.conflict.changed_by,
-              changed_at: toIso(l.conflict.changed_at)
+              changed_at: toIso(l.conflict.changed_at),
+              proposed_at: toIso(l.conflict.proposed_at),
+              question: l.conflict.question ?? null
             }
           : null,
         others_pending: pending.get(l.path) ?? []
@@ -194,6 +196,15 @@ export const listCrs = async (projectId: string, status?: CrStatus): Promise<Cha
   return crs.map(toCrDto)
 }
 
+/** BF §3.2: mục nào của tài liệu đang có bản sửa chưa xác nhận (CR chưa đóng), ai giữ — cho tài liệu đang mở. */
+export const listPendingSections = async (projectId: string): Promise<PendingSection[]> => {
+  const rows = await pendingSections(projectId)
+  if (!rows.length) return []
+  const [record, layout] = await Promise.all([spineRepository.get(projectId), loadLayout(projectId)])
+  const spine = record ? stripRecord(record) : null
+  return rows.map((r) => ({ ...r, title: spine ? titleOfSection(spine, r.section_id, layout) : r.section_id }))
+}
+
 // ─── C-1 tạo ─────────────────────────────────────────────────────
 
 /** Bản xem trước ⇒ gợi ý của CR: lệnh, op, phần tử bị op chạm. Hết hạn / của người khác ⇒ `null`. */
@@ -210,7 +221,7 @@ export const createCr = async (projectId: string, userId: string, body: CreateCh
   const imported = await latestImport(projectId)
   const version = await latestDocVersion(projectId)
   if (!imported || !hasBaseline(imported.status) || !version) {
-    throw new Mode1Error("CR_REQUIRES_BASELINE", "Chưa có bản gốc của tài liệu — hoàn tất nhập tài liệu trước khi tạo change request")
+    throw new Mode1Error("CR_REQUIRES_BASELINE", "Chưa có bản gốc của tài liệu - hoàn tất nhập tài liệu trước khi tạo change request")
   }
   const counter = await CrCounter.findOneAndUpdate({ projectId }, { $inc: { seq: 1 } }, { upsert: true, returnDocument: "after" })
   const cr = await ChangeRequest.create({
@@ -243,6 +254,12 @@ export const createCr = async (projectId: string, userId: string, body: CreateCh
  */
 export const submitCr = async (cr: IChangeRequest, userId: string): Promise<void> => {
   assertCrStatus(cr, ["ready_to_submit"], "written")
+  // BF §3.2: đề xuất chưa xác nhận **treo ở người yêu cầu** — không đưa cho người khác xác nhận (họ không có bối cảnh,
+  // và người xác nhận là người đứng tên thay đổi)
+  if (String(cr.created_by) !== String(userId)) {
+    const who = (await userName(String(cr.created_by))) ?? cr.requester
+    throw new ApiError(403, `Đề xuất này đang treo ở ${who} - chỉ người đó xác nhận được (người xác nhận đứng tên thay đổi).`, "CR_NOT_REQUESTER")
+  }
   const unconcluded = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id, conclusion: null }).distinct("location_id")
   if (unconcluded.length) {
     throw new Mode1Error("CR_LOCATION_UNCONCLUDED", `Còn ${unconcluded.length} vị trí chưa có kết luận`, { location_ids: unconcluded })
@@ -253,7 +270,7 @@ export const submitCr = async (cr: IChangeRequest, userId: string): Promise<void
   if (!decidable) {
     throw new Mode1Error(
       "CR_NOTHING_TO_APPROVE",
-      "Mọi vị trí đều kết luận \"không liên quan\" — không có thay đổi nào để duyệt. Sửa kết luận ở vị trí cần đổi, hoặc huỷ change request.",
+      "Mọi vị trí đều kết luận \"không liên quan\" - không có thay đổi nào để duyệt. Sửa kết luận ở vị trí cần đổi, hoặc huỷ change request.",
       { location_count: await ChangeLocation.countDocuments({ projectId: cr.projectId, cr_id: cr.cr_id }) }
     )
   }
@@ -270,7 +287,7 @@ export const submitCr = async (cr: IChangeRequest, userId: string): Promise<void
   }
   if (check.same && !(await ChangeLocation.countDocuments({ projectId: cr.projectId, cr_id: cr.cr_id, conclusion: { $in: ["edit", "comment"] } }))) {
     // Mọi chỗ đã được người khác sửa giống hệt đề xuất ⇒ đóng, không ghi
-    cr.closed_reason = "Mọi chỗ của change request đã được người khác sửa giống đề xuất — không còn gì để ghi"
+    cr.closed_reason = "Mọi chỗ của change request đã được người khác sửa giống đề xuất - không còn gì để ghi"
     await transitionCr(cr, "cancelled")
     return
   }

@@ -57,7 +57,7 @@ export const DIAGRAM_PLACEHOLDER_PNG = buildPlaceholderPng(DIAGRAM_PLACEHOLDER_W
 
 /** Caption cho ảnh placeholder — mặc định tiếng Anh; `language` (FLF-265) theo ngôn ngữ tài liệu mẫu FPT. */
 export const pendingImageCaption = (caption: string | undefined, diagramId: string, language?: string): string =>
-  `${caption ? `${caption} — ` : ""}${assembleTextFor(language).imagePending(diagramId)}`
+  `${caption ? `${caption} - ` : ""}${assembleTextFor(language).imagePending(diagramId)}`
 
 /**
  * Ô `png` của sơ đồ vẽ lỗi (`render_status = "error"`): `diagram-error:<id>` thay cho PNG. Hình lỗi vẫn giữ chỗ trong

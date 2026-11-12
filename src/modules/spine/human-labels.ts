@@ -131,7 +131,7 @@ const parsePathLabel = (path: string, entityName?: string): string | null => {
     field = null
   }
   if (entityName && parts[0].selector) out[0] += ` (${entityName})`
-  return field ? `${out.join(" › ")} — ${fieldLabel(field)}` : out.join(" › ")
+  return field ? `${out.join(" › ")} - ${fieldLabel(field)}` : out.join(" › ")
 }
 
 /**
@@ -277,7 +277,8 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   op_outside_section: "Sửa ngoài phạm vi của vị trí",
   comment_empty: "Comment còn trống",
   op_invalid: "Nội dung sửa sai định dạng",
-  new_red_flag: "Làm phát sinh lỗi đỏ mới"
+  new_red_flag: "Làm phát sinh lỗi đỏ mới",
+  wrong_language: "Viết khác ngôn ngữ tài liệu"
 }
 
 /** Mã lạ ⇒ chuỗi rỗng: câu thông điệp đã đủ nghĩa (như FE). */

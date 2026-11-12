@@ -137,7 +137,7 @@ const without = <T extends { spine_version: number }>({ spine_version: _v, ...re
 describe("10 ca op T02 (fixtures/op-cases)", () => {
   for (const { file, opCase } of CASES) {
     if (opCase.must_reject) {
-      it(`${file} — ${opCase.name}: từ chối ${opCase.must_reject}`, () => {
+      it(`${file} - ${opCase.name}: từ chối ${opCase.must_reject}`, () => {
         const base = baseOf(opCase)
         const err = rejection(() => planTransaction(base, txn(opCase.expected_ops), { startSeq: 1 }))
         expect(err.statusCode).toBe(422)
@@ -146,7 +146,7 @@ describe("10 ca op T02 (fixtures/op-cases)", () => {
       continue
     }
 
-    it(`${file} — ${opCase.name}: áp được, seq liên tục, revert về deep-equal`, () => {
+    it(`${file} - ${opCase.name}: áp được, seq liên tục, revert về deep-equal`, () => {
       const base = baseOf(opCase)
       const plan = planTransaction(base, txn(opCase.expected_ops, { step_id: opCase.step_id }), { startSeq: 7 })
 

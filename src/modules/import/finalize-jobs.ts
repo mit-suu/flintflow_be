@@ -98,7 +98,7 @@ export const startFinalize = async (projectId: string, userId: string, body: Fin
   if (doc.status === "incomplete") {
     throw new Mode1Error(
       "IMPORT_INVALID_STATE",
-      "File còn thiếu mục của cấu trúc đích nên chưa tạo được bản gốc — soạn phần còn thiếu với FlintFlow, hoặc tải báo cáo thiếu sót và bản DRAFT.",
+      "File còn thiếu mục của cấu trúc đích nên chưa tạo được bản gốc - soạn phần còn thiếu với FlintFlow, hoặc tải báo cáo thiếu sót và bản DRAFT.",
       { status: doc.status, to: "drafting", allowed: ["drafting"] }
     )
   }

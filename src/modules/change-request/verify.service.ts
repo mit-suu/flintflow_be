@@ -34,12 +34,14 @@ import { ChangeLocation, type IChangeLocation, type VerifyViolation } from "./ch
 import { newContradictions } from "./clarify.service.js"
 import { answersText, crHeader, glossaryText, plainValues, relatedElements, relatedPassages, truncate } from "./cr-context.js"
 import { regroup } from "./group.service.js"
+import { crDocumentLanguage, foreignTexts, wrongLanguageMessage } from "./cr-language.js"
+import type { UserLocale } from "../../shared/i18n/locale.js"
 import { refreshDiagramLocations } from "./diagram-location.js"
 import { fixDuplicateIds } from "./propose.service.js"
 import { elementValue, isArrayPath, listElements, opElement, sectionOfElement, unchangedSince, valueText } from "./spine-location.js"
 
 export const valueChanged = (loc: Pick<IChangeLocation, "location_id" | "path">): Mode1Error =>
-  new Mode1Error("CR_VALUE_CHANGED", `${pathLabel(loc.path)} đã bị sửa ở chỗ khác kể từ lúc đề xuất — tải lại rồi đề xuất lại`, { location_id: loc.location_id, path: loc.path })
+  new Mode1Error("CR_VALUE_CHANGED", `${pathLabel(loc.path)} đã bị sửa ở chỗ khác kể từ lúc đề xuất - tải lại rồi đề xuất lại`, { location_id: loc.location_id, path: loc.path })
 
 type CheckLocation = Pick<IChangeLocation, "location_id" | "path" | "conclusion" | "proposal">
 
@@ -71,7 +73,26 @@ export const ownedElements = (crId: string, locations: readonly Pick<IChangeLoca
   return owned
 }
 
-export const checkLocation = (cr: Pick<IChangeRequest, "cr_id">, loc: CheckLocation, spine: Spine, locks: ReadonlyMap<string, string>): VerifyViolation[] => {
+/** Chữ mới của đề xuất viết khác ngôn ngữ tài liệu (QLHS 11/11 bug #17) — `new_text` là JSON giá trị sau khi sửa. */
+const languageViolation = (loc: CheckLocation, current: unknown, language: UserLocale): VerifyViolation[] => {
+  let after: unknown
+  try {
+    after = JSON.parse(loc.proposal?.new_text ?? "null")
+  } catch {
+    return []
+  }
+  const texts = foreignTexts(language, current, after)
+  return texts.length ? [{ rule: "wrong_language", message: wrongLanguageMessage(pathLabel(loc.path), language, texts) }] : []
+}
+
+/** `language`: ngôn ngữ chữ của tài liệu (`crDocumentLanguage`) — thiếu ⇒ không kiểm ngôn ngữ. */
+export const checkLocation = (
+  cr: Pick<IChangeRequest, "cr_id">,
+  loc: CheckLocation,
+  spine: Spine,
+  locks: ReadonlyMap<string, string>,
+  language?: UserLocale
+): VerifyViolation[] => {
   if (!loc.conclusion) return [{ rule: "unconcluded", message: "Vị trí chưa có kết luận" }]
   if (loc.conclusion === "not_related") return []
   const current = elementValue(spine, loc.path)
@@ -81,19 +102,19 @@ export const checkLocation = (cr: Pick<IChangeRequest, "cr_id">, loc: CheckLocat
   if (!p) return [...out, { rule: "no_proposal", message: "Thiếu đề xuất" }]
   // FLF-375 (§3.2): trước khi xác nhận, đề xuất chưa có giá trị kiểm tra — chữ cũ đã đổi (người khác vừa ghi) ⇒ AI soạn
   // lại trên nội dung hiện tại như một lỗi kiểm thường; lúc xác nhận mới so 3 cột (`concurrent-edit.ts`)
-  if (!unchangedSince(spine, loc.path, p)) return [...out, { rule: "value_changed", message: `${pathLabel(loc.path)} vừa được sửa ở chỗ khác — soạn lại trên nội dung hiện tại`, path: loc.path }]
+  if (!unchangedSince(spine, loc.path, p)) return [...out, { rule: "value_changed", message: `${pathLabel(loc.path)} vừa được sửa ở chỗ khác - soạn lại trên nội dung hiện tại`, path: loc.path }]
   if (loc.conclusion === "edit") {
     if (!p.spine_ops.length) out.push({ rule: "edit_without_ops", message: "Kết luận là sửa nhưng chưa có nội dung sửa" })
     else if (p.new_text !== null && p.new_text === p.old_text) out.push({ rule: "edit_no_change", message: "Đề xuất không thay đổi gì ở phần tử này" })
     for (const el of opElements(loc)) {
-      if (el !== loc.path && locks.get(el) !== cr.cr_id) out.push({ rule: "op_path_not_locked", message: `Đề xuất sửa cả ${pathLabel(el)} — phần này không thuộc các vị trí của change request`, path: el })
+      if (el !== loc.path && locks.get(el) !== cr.cr_id) out.push({ rule: "op_path_not_locked", message: `Đề xuất sửa cả ${pathLabel(el)} - phần này không thuộc các vị trí của change request`, path: el })
     }
     // Vị trí "mục trống" (`arr[]`): chỉ được thêm phần tử vào đúng mảng đó, không lấn sang mảng khác
     if (isArrayPath(loc.path)) {
       const array = loc.path.slice(0, -2)
       for (const raw of p.spine_ops) {
         const path = opPath(raw)
-        if (!path.startsWith(array)) out.push({ rule: "op_outside_section", message: `Đề xuất sửa ${pathLabel(path)} — vị trí này chỉ được thêm mới vào ${pathLabel(loc.path)}`, path })
+        if (!path.startsWith(array)) out.push({ rule: "op_outside_section", message: `Đề xuất sửa ${pathLabel(path)} - vị trí này chỉ được thêm mới vào ${pathLabel(loc.path)}`, path })
       }
     } else {
       // Phần tử mới chỉ thêm từ ô "thêm mới" của đúng mục (2026-09-24: AI chèn bảng phân quyền thành mục riêng mới từ vị
@@ -101,10 +122,11 @@ export const checkLocation = (cr: Pick<IChangeRequest, "cr_id">, loc: CheckLocat
       for (const raw of p.spine_ops) {
         const path = opPath(raw)
         if (isArrayPath(path)) {
-          out.push({ rule: "add_outside_slot", message: `Đề xuất thêm ${pathLabel(path)} từ ${pathLabel(loc.path)} — phần tử mới phải thêm ở ô “thêm mới” của đúng mục`, path })
+          out.push({ rule: "add_outside_slot", message: `Đề xuất thêm ${pathLabel(path)} từ ${pathLabel(loc.path)} - phần tử mới phải thêm ở ô “thêm mới” của đúng mục`, path })
         }
       }
     }
+    if (language) out.push(...languageViolation(loc, current, language))
   }
   if (loc.conclusion === "comment" && !p.comment_text?.trim()) out.push({ rule: "comment_empty", message: "Kết luận là ghi chú nhưng chưa có nội dung ghi chú" })
   return out
@@ -137,7 +159,7 @@ export const checkSpineOps = (spine: Spine, cr: Pick<IChangeRequest, "cr_id">, l
     const newRed = runDeterministicCheck(plan.spine, [], { ruleProfile: MODE1_RULE_PROFILE }).filter(
       (c) => c.level === "red" && c.rule_id !== "diagram_stale" && !before.has(flagKey(c))
     )
-    for (const c of newRed) for (const locId of new Set(owner)) push(locId, { rule: "new_red_flag", message: `Đề xuất làm phát sinh lỗi đỏ mới: ${ruleLabel(c.rule_id) ? `${ruleLabel(c.rule_id)} — ` : ""}${c.message}` })
+    for (const c of newRed) for (const locId of new Set(owner)) push(locId, { rule: "new_red_flag", message: `Đề xuất làm phát sinh lỗi đỏ mới: ${ruleLabel(c.rule_id) ? `${ruleLabel(c.rule_id)} - ` : ""}${c.message}` })
   } catch (err) {
     if (!(err instanceof TransactionRejectedError)) throw err
     for (const v of err.violations) {
@@ -227,7 +249,9 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
   await refreshDiagramLocations(spine, locations)
   const locks = ownedElements(cr.cr_id, locations)
 
-  const violations = new Map(locations.map((l) => [l.location_id, checkLocation(cr, l, spine, locks)]))
+  // QLHS 11/11 bug #17: chữ mới phải cùng ngôn ngữ tài liệu — lệch ⇒ vi phạm, AI làm lại như mọi lỗi kiểm code
+  const language = await crDocumentLanguage(String(cr.projectId), spine)
+  const violations = new Map(locations.map((l) => [l.location_id, checkLocation(cr, l, spine, locks, language)]))
   for (const [locId, vs] of checkSpineOps(spine, cr, locations)) violations.set(locId, [...(violations.get(locId) ?? []), ...vs])
 
   // AI consistency (FLF-307): chỉ khi cả CR đã qua kiểm code — vòng nào còn trượt thì AI làm lại, nhận xét lúc đó vô

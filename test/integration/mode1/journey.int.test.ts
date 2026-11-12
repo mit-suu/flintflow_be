@@ -100,7 +100,7 @@ const download = async (c: Client, path: string) => {
   return res.body as Buffer
 }
 
-describe("mode 1 v3 — hành trình BPMN trên một dự án", () => {
+describe("mode 1 v3 - hành trình BPMN trên một dự án", () => {
   it("1.1 → 1.13 ⇒ CR gap_report (0.2 + bản đánh dấu) ⇒ CR từ bản xem trước (0.3) ⇒ release 1.0 ⇒ upload lại ⇒ CR reupload", { timeout: 240_000 }, async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded, "Lumen journey")
@@ -145,13 +145,13 @@ describe("mode 1 v3 — hành trình BPMN trên một dự án", () => {
     expect(guarded.body.error?.code).toBe("CHANGE_REQUIRES_CR")
     expect(changeRequiresCrMetaSchema.parse(guarded.body.meta).prefill.source).toEqual({ kind: "verbal", ref: null })
     expect(await c.spineVersion(), "không lượt nào ở trên được ghi Spine").toBe(v0)
-    expect((await c.get("/change-requests")).body.data, "không tự tạo CR — 3.1 là việc của BA").toEqual([])
+    expect((await c.get("/change-requests")).body.data, "không tự tạo CR - 3.1 là việc của BA").toEqual([])
 
     // ── 3.1 nguồn gap_report ⇒ … ⇒ 3.14 ⇒ 0.2 ────────────────────────────────────────────────────────────
     routeGapCr()
     const gapCr = await runCrToWritten(c, {
       title: "Fill Other Requirements",
-      description: "Gap report: section 5.4 Other Requirements is empty — add the browser assumption.",
+      description: "Gap report: section 5.4 Other Requirements is empty - add the browser assumption.",
       source: { kind: "gap_report", ref: "fixed:5.4" },
       requester: "BA Minh"
     })

@@ -119,7 +119,7 @@ export const undoLast = async (projectId: string, userId: string, options: UndoO
   const record = await repository.get(projectId)
   assertDraftUnlocked(record)
   if ((record?.baselines.length ?? 0) > 0) {
-    throw new ApiError(409, "Dự án đã có baseline — không hoàn tác được. Muốn gỡ thay đổi, hãy gõ lệnh sửa trong chat để tạo change request mới.", UNDO_AFTER_BASELINE)
+    throw new ApiError(409, "Dự án đã có baseline - không hoàn tác được. Muốn gỡ thay đổi, hãy gõ lệnh sửa trong chat để tạo change request mới.", UNDO_AFTER_BASELINE)
   }
   const changes = await repository.listChanges(projectId)
   const target = findUndoTarget(changes)

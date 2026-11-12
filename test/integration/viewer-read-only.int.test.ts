@@ -63,7 +63,7 @@ describe("Viewer bị chặn ở mọi thao tác ghi", () => {
     }
   })
 
-  it("duyệt baseline là việc của Lead — Analyst cũng 403", async () => {
+  it("duyệt baseline là việc của Lead - Analyst cũng 403", async () => {
     for (const path of leadOnly(seeded.projectId)) {
       const res = await request(app).post(path).set(bearer(analyst)).send({})
       expect(res.status, path).toBe(403)
@@ -80,7 +80,7 @@ describe("Viewer vẫn đọc được", () => {
     }
   })
 
-  it("không đọc được dữ liệu làm việc (Spine, cờ, change, nguồn, chat, step) — UC-47", async () => {
+  it("không đọc được dữ liệu làm việc (Spine, cờ, change, nguồn, chat, step) - UC-47", async () => {
     for (const suffix of ["/spine", "/flags", "/changes", "/sources", "/documents", "/chats", "/steps", "/change-requests"]) {
       const path = "/api/v1/projects/" + seeded.projectId + suffix
       const res = await request(app).get(path).set(bearer(viewer))
@@ -89,7 +89,7 @@ describe("Viewer vẫn đọc được", () => {
     }
   })
 
-  it("không tải được bản nháp (chỉ bản đã phát hành — UC-50)", async () => {
+  it("không tải được bản nháp (chỉ bản đã phát hành - UC-50)", async () => {
     const res = await request(app).get("/api/v1/projects/" + seeded.projectId + "/export/word?source=draft").set(bearer(viewer))
     expect(res.status).toBe(403)
   })

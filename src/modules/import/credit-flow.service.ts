@@ -72,8 +72,8 @@ export const notifyTopUpNeeded = async (projectId: string, stepId: string): Prom
     for (const recipient of recipients) {
       await notify(recipient, {
         type: TOPUP_NEEDED,
-        title: "Hết credit — bước AI đang dừng",
-        body: `Dự án "${project.name ?? projectId}" dừng ở ${step} vì không đủ credit. Nạp thêm để chạy tiếp — sau khi thanh toán thành công, bước sẽ tự chạy lại.`,
+        title: "Hết credit - bước AI đang dừng",
+        body: `Dự án "${project.name ?? projectId}" dừng ở ${step} vì không đủ credit. Nạp thêm để chạy tiếp - sau khi thanh toán thành công, bước sẽ tự chạy lại.`,
         link: "/home/billing",
         ...(organizationId ? { organizationId } : {}),
         meta: { project_id: projectId, step_id: stepId }

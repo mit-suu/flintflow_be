@@ -53,9 +53,9 @@ Price table: `references/credit-rules.md`.
 2. **Expiry**: `reserved` rows past `expires_at` are released by a sweeper. Closing the tab mid-call must not leave credit hanging.
 3. **Deterministic steps** S-8.2, S-8.3, S-9.1, S-9.5 never Meter. Running out of credit must never block writing `baselines[]`.
 4. **Refunded rows** are excluded from reported cost (UC 10.3) but included in real provider cost.
-5. **Schema retries** of the same call are separate reservations with `attempt` 1–2 — the provider charged for them.
+5. **Schema retries** of the same call are separate reservations with `attempt` 1–2 - the provider charged for them.
 6. `[P]` Party mode is the most expensive action; show the estimate and ask before running.
-7. The call counter of `gate-check` is derived from `usage[]` rows — keep `step_id` and `call_kind` accurate.
+7. The call counter of `gate-check` is derived from `usage[]` rows - keep `step_id` and `call_kind` accurate.
 
 ## Refuse
 

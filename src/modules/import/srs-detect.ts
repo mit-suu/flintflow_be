@@ -184,7 +184,7 @@ export const classifyDocument = (blocks: readonly DetectableBlock[]): DocumentKi
       kind: isTemplate ? "srs_template" : "srs",
       confidence: round(Math.min(1, 0.5 + net / 12)),
       signals,
-      reasons: isTemplate ? ["Tài liệu chủ yếu là đầu mục — coi là mẫu SRS (trống hoặc điền dở)"] : []
+      reasons: isTemplate ? ["Tài liệu chủ yếu là đầu mục - coi là mẫu SRS (trống hoặc điền dở)"] : []
     }
   }
 
@@ -203,6 +203,6 @@ export const classifyDocument = (blocks: readonly DetectableBlock[]): DocumentKi
     return { kind: "not_srs", confidence: 0.6, signals, reasons }
   }
 
-  reasons.push(`Chưa chắc đây là SRS: ${missing} đủ rõ — hãy xem lại kết quả đọc file trước khi đi tiếp.`)
+  reasons.push(`Chưa chắc đây là SRS: ${missing} đủ rõ - hãy xem lại kết quả đọc file trước khi đi tiếp.`)
   return { kind: "unknown", confidence: round(Math.max(0, Math.min(0.49, 0.2 + net / 10))), signals, reasons }
 }

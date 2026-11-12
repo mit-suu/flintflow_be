@@ -62,7 +62,7 @@ describe("C-4 chọn skill của owner step", () => {
     expect(nfr).toContain("Response time must be 1 second instead of 2 seconds.")
   })
 
-  it("mục riêng (không step sở hữu) ⇒ skill (none — free-form section …)", async () => {
+  it("mục riêng (không step sở hữu) ⇒ skill (none - free-form section …)", async () => {
     routeCr((p) => clarifyWide(p) ?? fakeCrPropose(p))
     const { c } = await importedProject()
     const { cr, impact } = await crToImpact(c)
@@ -71,7 +71,7 @@ describe("C-4 chọn skill của owner step", () => {
     detail(await c.post(`${cr}/propose`))
     const prompts = promptsOf("# CR Propose")
     expect(prompts).toHaveLength(3)
-    expect(prompts.find((p) => p.includes(`] ${custom.path} (`))).toContain("(none — free-form section kept verbatim from the uploaded file)")
+    expect(prompts.find((p) => p.includes(`] ${custom.path} (`))).toContain("(none - free-form section kept verbatim from the uploaded file)")
   })
 
   it("phase 8: \"Sửa lại\" một vị trí mục riêng ⇒ AI soạn lại theo hướng BA (không còn CR_NO_OWNER_STEP)", async () => {
@@ -84,7 +84,7 @@ describe("C-4 chọn skill của owner step", () => {
     expect(redone.locations.find((l) => l.location_id === custom.location_id)).toMatchObject({ manual: true, verify: null })
     const prompt = promptsOf("# CR Propose").at(-1)!
     expect(prompt).toContain("free-form section): Ghi rõ nhóm họp mỗi thứ Hai")
-    expect(prompt).toContain("(none — free-form section kept verbatim from the uploaded file)")
+    expect(prompt).toContain("(none - free-form section kept verbatim from the uploaded file)")
   })
 })
 

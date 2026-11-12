@@ -39,7 +39,7 @@ const finalize = async (projectId: string, userId: string, importId: string, bod
   return (await ImportedDocument.findById(importId))!
 }
 
-describe("chế độ 3 — mẫu bắt buộc", () => {
+describe("chế độ 3 - mẫu bắt buộc", () => {
   // File giữ khung còn thiếu mục: không có bản gốc 0.1 — tự sang Luồng 2 (`flow2.int.test.ts`); luật cờ của mẫu áp ở Luồng 2.
   it("I-5 tính đúng mục riêng có chữ / chỉ chữ hướng dẫn; bản in không thêm mục ngoài mẫu; cờ vàng mục thiếu / trống", async () => {
     const { projectId, userId, importId } = await importAtBaselining({
@@ -92,7 +92,7 @@ describe("chế độ 3 — mẫu bắt buộc", () => {
   })
 })
 
-describe("mẫu FU-IT-SRS-01 (dự án mới, mẫu bắt buộc) — bảng mẫu trống", () => {
+describe("mẫu FU-IT-SRS-01 (dự án mới, mẫu bắt buộc) - bảng mẫu trống", () => {
   it("bảng chỉ có tiêu đề + hàng chỗ trống (3.2 / 5.1 / 5.2) ⇒ 'Sẽ soạn', không trích hàng chỗ trống thành dữ liệu", async () => {
     const seeded = await seedFixture("minimal", { balance: 1000 })
     const projectId = await createMode1Project(seeded)
