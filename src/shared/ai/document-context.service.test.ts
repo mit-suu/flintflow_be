@@ -213,6 +213,14 @@ describe("buildDocumentContext (FLF-393)", () => {
     expect(full.contextText).toContain("UC: 3 mã (UC-01 → UC-04, không có UC-03)")
   })
 
+  it("step đọc rộng luôn thấy đoạn đầu (bìa / tiêu đề mang tên sản phẩm) dù câu hỏi không khớp; step thường thì không ép", async () => {
+    store.docs = [doc("d1", 1, BIG_SRS)]
+    const broad = await buildDocumentContext({ projectId: "p", actionType: ActionType.DRAFT, stepId: "B-0.1", query: "Hiệu năng trang thanh toán phản hồi", broad: true })
+    expect(broad.contextText).toContain("[D1-P01] 1 Giới thiệu")
+    const narrow = await buildDocumentContext({ projectId: "p", actionType: ActionType.DRAFT, stepId: "S-6.4", query: "Hiệu năng trang thanh toán phản hồi" })
+    expect(narrow.contextText).not.toContain("[D1-P01] 1 Giới thiệu")
+  })
+
   it("nhiều tài liệu: tài liệu nhỏ đi cùng SRS lớn vẫn tìm được, nhãn nguồn đúng tài liệu", async () => {
     store.docs = [doc("d1", 1, BIG_SRS), doc("d2", 2, "Email khách hàng\n\nChỉ nhận thanh toán online qua ví MoMo, không COD.")]
     const ctx = await buildDocumentContext({ projectId: "p", actionType: ActionType.CHAT, query: "ví MoMo" })

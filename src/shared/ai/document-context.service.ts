@@ -231,7 +231,10 @@ export const buildDocumentContext = async (request: DocumentContextRequest): Pro
   const focusIds = new Set(focusRanked.map((h) => h.id))
   const generalRanked = query ? rankChunks(index.bm25, query, BM25_CANDIDATES) : []
   const ranked = [...focusRanked, ...generalRanked.filter((h) => !focusIds.has(h.id))]
-  const pinnedIds = pinnedChunkIds(index.chunks, request.sectionTitles ?? [])
+  // Step đọc rộng (Brief, S-1) luôn thấy đoạn đầu mỗi tài liệu: bìa / tiêu đề thường mang tên sản phẩm và không có heading
+  // nên không được ghim theo mục — thiếu nó thì B-0.1 không ghi được tên, B-2.3 lại hỏi (demo 2026-11-12, "PetCare Hub")
+  const coverIds = request.broad ? index.chunks.filter((c) => c.ordinal === 0).map((c) => c.id) : []
+  const pinnedIds = [...new Set([...coverIds, ...pinnedChunkIds(index.chunks, request.sectionTitles ?? [])])]
 
   // Tóm tắt đi kèm khi tìm đoạn không đủ trả lời: câu hỏi toàn cục, không khớp gì, hoặc step không nuôi mục nào của
   // tài liệu (Brief, S-1 đọc rộng) — BM25 không trả lời được câu hỏi về cả tài liệu.
