@@ -96,6 +96,21 @@ const KNOWN_HEADINGS: ReadonlyMap<string, string> = (() => {
   return map
 })()
 
+/** Chương lớn của một phần (`fixed:3.1.4` / `group:3.1` ⇒ `3`, `fixed:I` ⇒ `I`); phần `keep` / `feature`… ⇒ `null`. */
+const CHAPTER_OF_PART: ReadonlyMap<string, string> = (() => {
+  const map = new Map<string, string>()
+  for (const part of PART_BANK) {
+    const chapter = /^(?:fixed|group):([^.]+)/.exec(part.target)?.[1]
+    if (chapter) map.set(part.id.replace(/^part:/, ""), chapter)
+  }
+  return map
+})()
+
+/** Bảng lịch sử thay đổi: hàng đầu có cột phiên bản và cột ngày. */
+const REVISION_VERSION_CELL = /\b(version|ver|rev(ision)?)\b|phiên\s*bản/i
+const REVISION_DATE_CELL = /\bdate\b|ngày/i
+const TOC_TEXT = /^(table\s+of\s+contents|contents|mục\s+lục)$/i
+
 const isHeading = (b: DetectableBlock): boolean => b.kind === "heading" || (b.level !== null && b.kind !== "table")
 
 /** Heading khớp danh mục: so cả câu, rồi so phần sau dấu `:` / `-` (vd "Chương 2: Use Case"). */
@@ -138,6 +153,19 @@ export const classifyDocument = (blocks: readonly DetectableBlock[]): DocumentKi
   const headingScore = Math.min(6, matched.size)
   score += headingScore
   for (const id of matched) signals.push(`heading:${id}`)
+
+  // 2b. Hình thức của một bộ tài liệu (FLF-409) - chỉ ghi signal, không cộng điểm `kind`: chương lớn của heading khớp,
+  // heading nhiều cấp, lịch sử thay đổi, mục lục. Gợi ý "trông như SRS" ở ô tham khảo dựa vào đây (`docx-precheck.ts`).
+  const chapters = new Set([...matched].map((id) => CHAPTER_OF_PART.get(id)).filter((c): c is string => !!c))
+  for (const c of chapters) signals.push(`chapter:${c}`)
+  const levels = new Set(headings.map((h) => h.level).filter((l): l is number => l !== null))
+  if (levels.size >= 2 && headings.length >= 5) signals.push("form:levels")
+  const revisionTable = blocks.some((b) => {
+    const header = b.kind === "table" ? b.rows?.[0] : undefined
+    return !!header && header.some((c) => REVISION_VERSION_CELL.test(c)) && header.some((c) => REVISION_DATE_CELL.test(c))
+  })
+  if (chapters.has("I") || revisionTable) signals.push("form:revision")
+  if (textBlocks.some((b) => b.kind !== "table" && TOC_TEXT.test(normalize(b.text)))) signals.push("form:toc")
 
   // 3. Từ khoá (trần 4)
   const keywordHits = Object.entries(cfg.keywords).filter(([, re]) => re.test(allText)).map(([k]) => k)

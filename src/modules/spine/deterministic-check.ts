@@ -182,6 +182,8 @@ export interface RuleProfile {
 export interface CheckOptions {
   /** Ký pháp ERD của dự án (ngoài Spine) — vào hash hình ERD của cờ `diagram_stale`. */
   erdNotation?: ErdNotation
+  /** Toàn bộ dữ liệu ngoài Spine của hình (ký pháp ERD, theme mockup màn…) — có ⇒ thay `erdNotation`. */
+  renderContext?: RenderContext
   atBaseline?: boolean
   ruleProfile?: RuleProfile
 }
@@ -1613,7 +1615,7 @@ export const runDeterministicCheck = (
     ...arrayEmpty(spine, gate),
     ...deadReference(spine),
     ...renderError(spine),
-    ...diagramStale(spine, { erdNotation: options.erdNotation }),
+    ...diagramStale(spine, options.renderContext ?? { erdNotation: options.erdNotation }),
     ...originalDiagramStale(spine),
     ...nfrMissingNumber(spine, gate),
     ...useCaseRelations(spine),

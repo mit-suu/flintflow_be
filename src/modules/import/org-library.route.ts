@@ -6,12 +6,10 @@ import { requireRole } from "../../shared/auth/require-role.middleware.js"
 import * as controller from "./org-library.controller.js"
 
 /**
- * FLF-278 trên FLF-335/336 — mẫu và thư viện nội dung của tổ chức. Mọi thành viên xem; chỉ Lead đăng / xoá mẫu và bản (FLF-395);
- * Lead + Analyst sửa / xoá (Viewer bị
+ * FLF-278 trên FLF-335/336 — mẫu của tổ chức. Mọi thành viên xem; chỉ Lead đăng / xoá mẫu và bản (FLF-395; vai trò khác bị
  * chặn ở `requireRole`). Mount ở `/api/v1/orgs` cạnh route tổ chức.
  */
 const inOrg = [authMiddleware, requireActiveAccount, orgContextFromParam()] as const
-const editor = requireRole("lead", "analyst")
 /** FLF-395: chỉ Lead đăng mẫu dùng chung cho org (chặn trước khi nhận file). */
 const lead = requireRole("lead")
 
@@ -23,8 +21,4 @@ router.post("/:orgId/templates/:templateId/versions", ...inOrg, lead, controller
 router.get("/:orgId/templates/:templateId/versions/:version", ...inOrg, controller.getTemplateVersion)
 router.post("/:orgId/templates/:templateId/versions/:version/publish", ...inOrg, lead, controller.publishTemplateVersion)
 router.delete("/:orgId/templates/:templateId/versions/:version", ...inOrg, lead, controller.deleteTemplateVersion)
-router.get("/:orgId/content-library", ...inOrg, controller.listContent)
-router.post("/:orgId/content-library", ...inOrg, editor, controller.upsertContent)
-router.patch("/:orgId/content-library/:entryId", ...inOrg, editor, controller.updateContent)
-router.delete("/:orgId/content-library/:entryId", ...inOrg, editor, controller.deleteContent)
 export default router

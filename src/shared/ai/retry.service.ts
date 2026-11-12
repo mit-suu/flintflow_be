@@ -27,6 +27,8 @@ export const isTransientError = (error: any): boolean => {
       error.code === "RATE_LIMIT_EXCEEDED" ||
       error.code === "PARSE_FAILED" ||
       error.code === "SCHEMA_MISMATCH" ||
+      // BR-09: bị cắt ở `max_tokens` cũng là lượt gọi lỗi ⇒ thử lại 2 lần như mọi lỗi khác (FLF-393: lần thử lại gấp đôi ngân sách)
+      error.code === "RESPONSE_TRUNCATED" ||
       error.statusCode === 429 ||
       error.statusCode >= 500
     ) {

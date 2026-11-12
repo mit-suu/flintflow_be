@@ -14,6 +14,7 @@ import { Project } from "../project/project.model.js"
 import { TemplateMigration } from "../template-migration/template-migration.model.js"
 import { User } from "../user/user.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { vietnameseSearchPattern } from "../../shared/utils/vi-search.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { OrgTemplate, OrgTemplateVersion, type IOrgTemplate, type IOrgTemplateVersion, type OrgTemplateColumn, type OrgTemplateHeading } from "./org-library.model.js"
 import { parseDocument } from "./parse.service.js"
@@ -436,9 +437,48 @@ export interface OrgTemplateSummary {
   versions: TemplateVersionSummary[]
 }
 
-/** Thư viện mẫu của org: mỗi họ kèm các bản + số dự án theo từng bản — 3 truy vấn cho cả trang, không N+1. */
-export const listOrgTemplates = async (orgId: string, role: OrgRole): Promise<OrgTemplateSummary[]> => {
-  const families = await OrgTemplate.find({ orgId, project_id: null }).sort({ uses: -1, updatedAt: -1 }).limit(100)
+/** Thư viện mẫu của org (ô chọn mẫu lúc tạo dự án): tối đa 100 họ, dùng nhiều trước. */
+export const listOrgTemplates = async (orgId: string, role: OrgRole): Promise<OrgTemplateSummary[]> =>
+  summarizeFamilies(orgId, role, await OrgTemplate.find({ orgId, project_id: null }).sort({ uses: -1, updatedAt: -1 }).limit(100))
+
+const TEMPLATE_SORTS = {
+  uses: { uses: -1, createdAt: -1 },
+  recent: { createdAt: -1 },
+  name: { name: 1 }
+} as const
+
+/**
+ * Một trang của trang Thư viện mẫu (FLF-403) kèm tổng số họ khớp: tìm không dấu theo tên mẫu / tên file (file của bản nào
+ * cũng được), sắp theo tên dùng collation tiếng Việt. Vai trò khác Lead không thấy họ chỉ có bản nháp (lọc ngay ở truy vấn
+ * để `total` khớp số dòng).
+ */
+export const listOrgTemplatesPage = async (
+  orgId: string,
+  role: OrgRole,
+  query: { q?: string; sort: keyof typeof TEMPLATE_SORTS; page: number; limit: number }
+): Promise<{ items: OrgTemplateSummary[]; meta: { page: number; limit: number; total: number; totalPages: number } }> => {
+  const { q, sort, page, limit } = query
+  const and: Record<string, unknown>[] = [{ orgId, project_id: null }]
+  if (role !== "lead") and.push({ $or: [{ latest_version: { $gt: 0 } }, { version_seq: 0, file_ref: { $exists: true } }] })
+  if (q) {
+    const pattern = vietnameseSearchPattern(q)
+    const byFile = await OrgTemplateVersion.distinct("template_id", { orgId, visibility: "org", "source_file.name": pattern })
+    and.push({ $or: [{ name: pattern }, { "source_file.name": pattern }, { _id: { $in: byFile } }] })
+  }
+  const filter = { $and: and }
+  const [total, families] = await Promise.all([
+    OrgTemplate.countDocuments(filter),
+    OrgTemplate.find(filter)
+      .sort({ ...TEMPLATE_SORTS[sort], _id: 1 })
+      .collation({ locale: "vi" })
+      .skip((page - 1) * limit)
+      .limit(limit)
+  ])
+  return { items: await summarizeFamilies(orgId, role, families), meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } }
+}
+
+/** Mỗi họ kèm các bản + số dự án theo từng bản — 3 truy vấn cho cả trang, không N+1. */
+const summarizeFamilies = async (orgId: string, role: OrgRole, families: IOrgTemplate[]): Promise<OrgTemplateSummary[]> => {
   if (!families.length) return []
   const ids = families.map((f) => f._id)
   const [versions, counts] = await Promise.all([

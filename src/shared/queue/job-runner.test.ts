@@ -4,7 +4,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { UnrecoverableError } from "bullmq"
 import { ApiError } from "../utils/api-error.js"
-import { defineJob, enqueueJob, isJobActive, runJob, startJob, waitForJob } from "./job-runner.js"
+import { defineJob, enqueueJob, isJobActive, jobState, releaseJobKey, runJob, startJob, waitForJob } from "./job-runner.js"
 
 const deferred = () => {
   let resolve!: () => void
@@ -50,6 +50,30 @@ describe("startJob (inline)", () => {
     await expect(startJob(job, { n: 1 }, { key: "e" })).resolves.toBe(true)
     await waitForJob(job, "e")
     expect(onFinalFailure).toHaveBeenCalledTimes(1)
+  })
+
+  it("FLF-391 releaseJobKey: job kẹt vẫn giữ key ⇒ gỡ khoá cho lần mới chạy; lượt cũ xong muộn không gỡ khoá của lượt mới", async () => {
+    const stuck = deferred()
+    const fresh = deferred()
+    const process = vi.fn().mockImplementationOnce(() => stuck.promise).mockImplementationOnce(() => fresh.promise)
+    const job = def({ process })
+
+    expect(await startJob(job, { n: 1 }, { key: "s" })).toBe(true)
+    expect(await jobState(job, "s")).toBe("active")
+    expect(await startJob(job, { n: 2 }, { key: "s" })).toBe(false)
+
+    await releaseJobKey(job, "s")
+    expect(await jobState(job, "s")).toBeNull()
+    expect(await startJob(job, { n: 3 }, { key: "s" })).toBe(true)
+    expect(process).toHaveBeenCalledTimes(2)
+
+    // lượt cũ xong ⇒ lượt mới vẫn giữ key (một job mỗi key)
+    stuck.resolve()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(await isJobActive(job, "s")).toBe(true)
+    fresh.resolve()
+    await waitForJob(job, "s")
+    expect(await isJobActive(job, "s")).toBe(false)
   })
 })
 

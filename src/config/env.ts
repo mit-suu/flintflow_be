@@ -129,6 +129,18 @@ const envSchema = z.object({
   /** `atlas` = `$vectorSearch` (Mongo không hỗ trợ ⇒ tự lùi về `memory`); `memory` = cosine vét cạn trong process. */
   KNOWLEDGE_VECTOR_BACKEND: z.enum(["atlas", "memory"]).default("atlas"),
 
+  // ─── Tài liệu upload trong prompt (FLF-393, `shared/ai/document-context.service.ts`) ───────────
+  // Trần token CỨNG của phần tài liệu mỗi lượt gọi (ước lượng ký tự / 3). Tổng tài liệu ≤ trần ⇒ gửi nguyên văn như trước;
+  // vượt ⇒ chỉ gửi các đoạn liên quan (cây section + BM25). Không còn lấy context window của model làm ngân sách.
+  /** Lượt chat tự do. */
+  DOC_CONTEXT_CHAT_TOKENS: z.coerce.number().int().min(1000).default(12000),
+  /** Lượt hỏi / soạn của step pipeline (Elicit, Draft, Revision, Regenerate, phỏng vấn đầu giai đoạn). */
+  DOC_CONTEXT_DRAFT_TOKENS: z.coerce.number().int().min(1000).default(16000),
+  /** Số đoạn BM25 tối đa mỗi lượt chat (không tính đoạn ghim). */
+  DOC_CONTEXT_TOP_K: z.coerce.number().int().min(1).max(50).default(10),
+  /** Như trên cho lượt của step: step cần đủ ngữ cảnh để không hỏi lại điều tài liệu đã nói ⇒ lấy nhiều hơn, vẫn dưới trần token. */
+  DOC_CONTEXT_DRAFT_TOP_K: z.coerce.number().int().min(1).max(100).default(30),
+
   // S-9.2 Quality Lens bằng LLM — mặc định TẮT (Phases §9.1, hoãn vì ngân sách).
   REVIEW_LLM_ENABLED: z
     .string()
@@ -203,6 +215,16 @@ const envSchema = z.object({
     .refine((v) => v.every((n) => Number.isFinite(n) && n >= 0), { message: "danh sách số ms ≥ 0, cách nhau dấu phẩy" }),
   /** Số job import (I-4 / finalize, mỗi job vài phút gọi AI) một worker chạy song song. */
   JOB_IMPORT_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(2),
+  /**
+   * FLF-391: job finalize / kiểm tra quá bao lâu (ms) không tiến thêm (bước finalize, lượt AI kiểm tra, diagram vẽ xong) ⇒
+   * coi là treo: lỗi tạm thời (retry, rồi `paused`). Tính theo lúc đứng im, không theo tổng — SRS lớn vẽ hàng trăm diagram
+   * chạy vài chục phút vẫn xong.
+   */
+  FINALIZE_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(15 * 60 * 1000),
+  /** FLF-391: chu kỳ job finalize ghi nhịp tim lên import (ms). */
+  FINALIZE_HEARTBEAT_MS: z.coerce.number().int().positive().default(30_000),
+  /** FLF-391: job đang chạy mà nhịp tim cũ hơn mức này (ms) ⇒ coi là mất: `GET /import` gắn `paused`, resume chạy lại được. */
+  FINALIZE_STALE_MS: z.coerce.number().int().positive().default(5 * 60 * 1000),
 
   // Reservation credit quá TTL sẽ bị cron dọn (expireStaleReservations).
   CREDIT_RESERVE_TTL_MS: z.coerce.number().int().positive().default(10 * 60 * 1000),
