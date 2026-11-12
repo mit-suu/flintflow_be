@@ -14,6 +14,8 @@ export interface OrgTemplateHeading {
   auto_confirmed?: boolean
   /** FLF-395: chữ hướng dẫn của mẫu dưới heading (đọc từ file mẫu). */
   guidance?: string
+  /** FLF-412: file mẫu còn chữ thật dưới heading này (chưa xoá nội dung cũ) — màn rà mapping cảnh báo Lead trước khi đăng. */
+  has_text?: boolean
 }
 
 /** FLF-395: mapping cột bảng của mẫu (không giữ dữ liệu mẫu `samples`). */
@@ -33,7 +35,8 @@ const headingSchema = new Schema(
     heading_text: { type: String, required: true },
     section_id: { type: String, required: true },
     auto_confirmed: { type: Boolean, default: undefined },
-    guidance: { type: String, default: undefined }
+    guidance: { type: String, default: undefined },
+    has_text: { type: Boolean, default: undefined }
   },
   opts
 )
