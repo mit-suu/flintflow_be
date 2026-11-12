@@ -143,10 +143,47 @@ describe("FLF-343 needsReviewFindings - chỗ độ tin thấp vào baseline kè
       ["fixed:I", "B0002"],
       ["fixed:2.1", "B0010"],
       ["fixed:2.1", "actors[id=A01].kind"],
-      ["fixed:2.1", "actors[id=A02].kind"]
+      // FLF-411 (U2-1): field đọc từ ảnh gộp theo ảnh, target = block ảnh
+      ["fixed:2.1", "B0005"]
     ])
     expect(out.every((f) => f.message.startsWith("Cần xem:"))).toBe(true)
     expect(out[4].message).toContain("đọc từ ảnh")
+  })
+})
+
+describe("FLF-411 (U2-1) needsReviewFindings - đọc từ ảnh sơ đồ: một cờ mỗi ảnh, nêu tên phần tử", () => {
+  it("nhiều field của nhiều actor trên một ảnh ⇒ một cờ; hai ảnh cùng mục ⇒ hai cờ đánh số; không mã nội bộ, không khoá thô", async () => {
+    const { needsReviewFindings } = await import("./finalize.service.js")
+    const vision = (path: string, value: unknown, block: string) => field(path, value, 0.7, false, { origin: "vision", source_block_ids: [block] })
+    const drafts = [
+      {
+        section_id: "fixed:1",
+        fields: [
+          vision("project.system_name", "ShuttleBook", "B0100"),
+          vision("actors[id=A02].name", "Customer", "B0100"),
+          vision("actors[id=A02].kind", "human", "B0100"),
+          vision("actors[id=A02].flows_in", ["Booking info"], "B0100"),
+          vision("actors[id=A02].flows_out", ["Booking request"], "B0100"),
+          vision("actors[id=A07].kind", "system", "B0100"),
+          vision("actors[id=A07].flows_in", ["Payment result"], "B0101")
+        ]
+      }
+    ]
+    const spine = {
+      ...createEmptySpine(),
+      actors: [
+        { id: "A02", name: "Customer", flows_in: ["Booking info"], flows_out: ["Booking request"] },
+        { id: "A07", name: "Payment Gateway", flows_in: ["Payment result"], flows_out: [] }
+      ]
+    } as unknown as Parameters<typeof needsReviewFindings>[0]
+    const layout = [{ order: 0, heading_text: "Context Diagram", level: 2, section_id: "fixed:1" }]
+    const out = needsReviewFindings(spine, drafts, { heading_map: [], table_map: [] }, layout, new Map(), () => null)
+    expect(out.map((f) => f.target_id)).toEqual(["B0100", "B0101"])
+    expect(out[0].message).toBe(
+      'Cần xem: dữ liệu đọc từ ảnh sơ đồ thứ 1 trong mục "Context Diagram" (Tên hệ thống, tác nhân "Customer", tác nhân "Payment Gateway"); đã đưa vào bản 0.1, sai thì sửa bằng change request'
+    )
+    expect(out[1].message).toContain('ảnh sơ đồ thứ 2 trong mục "Context Diagram" (tác nhân "Payment Gateway")')
+    for (const f of out) expect(f.message).not.toMatch(/A0\d|flows_|\[id=/)
   })
 })
 
@@ -167,7 +204,9 @@ describe("FLF-361 needsReviewFindings - không hỏi lại chỗ không vào Spi
       business_rules: [{ id: "BR-01", tier: "detail" }]
     } as unknown as Parameters<typeof needsReviewFindings>[0]
     const out = needsReviewFindings(spine, drafts, { heading_map: [], table_map: [] }, [], new Map(), () => null)
-    expect(out.map((f) => f.target_id)).toEqual(["use_cases[id=UC-11].actor_ids"])
+    // FLF-411 (U2-1): cờ đọc từ ảnh theo ảnh (block B0005), chỉ còn chỗ đã vào Spine
+    expect(out.map((f) => f.target_id)).toEqual(["B0005"])
+    expect(out[0].message).toContain("(use case UC-11)")
   })
 })
 

@@ -35,6 +35,21 @@ export const isMode1Project = async (projectId: string): Promise<boolean> =>
  * Hồ sơ luật của project: mode 1 ⇒ `MODE1_RULE_PROFILE`; thêm chế độ 3 (mẫu bắt buộc, `template_intent = fixed`) ⇒ kèm
  * các mục của mẫu để bật cờ vàng `template_section_absent` / `template_section_empty` (FLF-278 trên FLF-335/336).
  */
+/**
+ * Tên mục FPT theo heading của mẫu: số Word tự đánh (`number_label`, không nằm trong chữ) + chữ heading. Chữ đã mở đầu
+ * bằng số thì giữ nguyên. Chỉ mục FPT (`fixed:*`) — mục riêng đã có tên riêng ở `custom_sections`.
+ */
+export const templateHeadingsOf = (layout: readonly Pick<LayoutEntry, "section_id" | "heading_text" | "number_label">[]): Map<string, string> => {
+  const map = new Map<string, string>()
+  for (const l of layout) {
+    const text = l.heading_text.trim()
+    if (!l.section_id.startsWith("fixed:") || !text || map.has(l.section_id)) continue
+    const number = l.number_label?.trim()
+    map.set(l.section_id, number && !/^\d/.test(text) ? `${number} ${text}` : text)
+  }
+  return map
+}
+
 export const ruleProfileOf = async (projectId: string): Promise<RuleProfile | undefined> => {
   const project = (await Project.findById(projectId).select("mode template_intent").lean()) as { mode?: string; template_intent?: string | null } | null
   const mode1 = project?.mode === "import"
@@ -57,8 +72,12 @@ export const ruleProfileOf = async (projectId: string): Promise<RuleProfile | un
   const templateWrappers = templateWrapperIds(layout)
   // Heading lặp có nội dung đã trích vào Spine (slice) ⇒ không phải mục trống
   const templateFilled = new Set((profile?.section_slices ?? []).filter((sl) => sl.items.length).map((sl) => `custom:${sl.custom_id}`))
+  // FLF-411 (#19): câu cờ gọi mục theo heading của mẫu ("2.2.1 Diagram(s)"), không theo tên mục FlintFlow
+  const templateHeadings = templateHeadingsOf(layout)
   // Luồng 2 của chế độ 3 (`mode = fpt`, flow2.service): đủ luật tạo mới, chỉ trên các mục của mẫu
-  return mode1 ? mode1Profile({ templateLayout, templateWrappers, templateFilled }) : { exclude: new Set(), downgrade: new Set(), templateLayout, templateWrappers, templateFilled }
+  return mode1
+    ? mode1Profile({ templateLayout, templateWrappers, templateFilled, templateHeadings })
+    : { exclude: new Set(), downgrade: new Set(), templateLayout, templateWrappers, templateFilled, templateHeadings }
 }
 
 flagsService.setRuleProfileResolver(ruleProfileOf)

@@ -45,9 +45,9 @@ import { ExtractionDraft, type IExtractionDraft } from "./extraction-draft.model
 import { FieldAnchor } from "./field-anchor.model.js"
 import { needsConfirm } from "./import.constants.js"
 import { hasOwnScreenFlow, inferScreenFlow, inferredFlowFindings, inferredFlowOps, type InferredFlowEdge } from "./inferred-screen-flow.js"
-import type { FinalizeRequest } from "./import.dto.js"
+import type { FinalizeRequest, ReviewField } from "./import.dto.js"
 import { assertImportStatus, loadImportFile, recomputeBlockSections, requireImport, toReviewFields, transitionImport } from "./import.service.js"
-import { pathLabel } from "../spine/human-labels.js"
+import { ENTITY_LABELS, fieldLabel, pathLabel } from "../spine/human-labels.js"
 import { isContentSection } from "./section-catalog.js"
 import type { FinalizeCheckpoint, IImportedDocument } from "./imported-document.model.js"
 import { scanMentions, type NamedEntity } from "./mentions.js"
@@ -487,15 +487,17 @@ export const needsReviewFindings = (
     const keys = new Set(now.filter((x): x is string => typeof x === "string").map(idKey))
     return (f.value as string[]).some((v) => keys.has(idKey(v)))
   }
-  const fields = toReviewFields(drafts, (f) => !f.confirmed && needsConfirm(f) && inSpine(f.path))
-    .filter((f) => landed(f))
+  const review = toReviewFields(drafts, (f) => !f.confirmed && needsConfirm(f) && inSpine(f.path)).filter((f) => landed(f))
+  const fields = review
+    .filter((f) => f.origin !== "vision")
     .map((f) => ({
-    rule: "needs_review",
-    section_id: realSectionId(f.section_id, provisional),
-    message: `Cần xem: ${pathLabel(f.path, f.entity_name)} - ${f.origin === "vision" ? "đọc từ ảnh sơ đồ" : `độ tin ${percent(f.confidence)}`}; đã đưa vào bản 0.1, sai thì sửa bằng change request`,
-    block_ids: [...f.source_block_ids],
-    target_id: f.path
-  }))
+      rule: "needs_review",
+      section_id: realSectionId(f.section_id, provisional),
+      message: `Cần xem: ${pathLabel(f.path, f.entity_name)} - độ tin ${percent(f.confidence)}; đã đưa vào bản 0.1, sai thì sửa bằng change request`,
+      block_ids: [...f.source_block_ids],
+      target_id: f.path
+    }))
+  const images = visionReviewFindings(spine, review.filter((f) => f.origin === "vision"), layout, provisional)
   // Heading đổi mục theo nội dung đã có cờ riêng nêu cả hai mục (`titleContentFindings`)
   const headings = profile.heading_map
     .filter((h) => h.auto_confirmed && !h.content_mismatch)
@@ -525,10 +527,69 @@ export const needsReviewFindings = (
     }))
   // Một chỗ một cờ: cùng đường dẫn (field trích ở hai section, cùng block heading / bảng) chỉ giữ lần đầu
   const seen = new Set<string>()
-  return [...headings, ...columns, ...fields].filter((f) => {
+  return [...headings, ...columns, ...fields, ...images].filter((f) => {
     if (seen.has(f.target_id)) return false
     seen.add(f.target_id)
     return true
+  })
+}
+
+/** Số phần tử tối đa nêu tên trong một cờ ảnh; còn lại ghi "và N phần tử khác". */
+const VISION_NAMES_SHOWN = 6
+
+/** Tên phần tử cho người đọc: `tác nhân "Customer"`, `Tên hệ thống` — không mã nội bộ (A02), không khoá thô (flows_in). */
+const visionElementName = (spine: Spine, f: Pick<ReviewField, "path" | "entity_name">): string | null => {
+  const p = parseFieldPath(f.path)
+  if (!p) return null
+  if (p.entity === "project") return fieldLabel(p.field)
+  const label = (ENTITY_LABELS[p.entity] ?? "Phần tử").toLowerCase()
+  const el = ((spine as unknown as Record<string, unknown>)[p.entity] as { id?: unknown; name?: unknown }[] | undefined)?.find(
+    (x) => typeof x.id === "string" && idKey(x.id) === idKey(p.id ?? "")
+  )
+  const name = f.entity_name ?? (typeof el?.name === "string" && el.name.trim() ? el.name.trim() : null)
+  if (name) return `${label} "${name}"`
+  // Mã use case (UC-01) là mã của tài liệu, in được; mã phần tử khác là mã nội bộ ⇒ chỉ loại phần tử
+  return p.entity === "use_cases" && p.id ? `${label} ${p.id}` : label
+}
+
+/**
+ * FLF-411 (U2-1): field đọc từ ảnh sơ đồ ⇒ **một cờ mỗi ảnh** (trước đây mỗi field một cờ: 138 cờ cho một SRS đủ). Câu nêu mục
+ * theo tiêu đề trong file và tên các phần tử đọc được (`human-labels`), không mã nội bộ / khoá thô. `target_id` = block ảnh.
+ */
+const visionReviewFindings = (
+  spine: Spine,
+  fields: readonly ReviewField[],
+  layout: readonly LayoutEntry[],
+  provisional: ReturnType<typeof resolveProvisional>
+): (Finding & { target_id: string })[] => {
+  const groups = new Map<string, { section_id: string; image: string | null; fields: ReviewField[] }>()
+  for (const f of fields) {
+    const section_id = realSectionId(f.section_id, provisional)
+    const image = f.source_block_ids[0] ?? null
+    const key = `${section_id}|${image ?? ""}`
+    const group = groups.get(key) ?? { section_id, image, fields: [] }
+    group.fields.push(f)
+    groups.set(key, group)
+  }
+  const perSection = new Map<string, number>()
+  for (const g of groups.values()) perSection.set(g.section_id, (perSection.get(g.section_id) ?? 0) + 1)
+  const seenInSection = new Map<string, number>()
+  return [...groups.values()].map((g) => {
+    const n = (seenInSection.get(g.section_id) ?? 0) + 1
+    seenInSection.set(g.section_id, n)
+    const title = titleOfSection(spine, g.section_id, layout)
+    const names = [...new Set(g.fields.map((f) => visionElementName(spine, f)).filter((x): x is string => x !== null))]
+    const shown = names.slice(0, VISION_NAMES_SHOWN).join(", ")
+    const rest = names.length - VISION_NAMES_SHOWN
+    const what = names.length ? ` (${shown}${rest > 0 ? ` và ${rest} phần tử khác` : ""})` : ""
+    const which = (perSection.get(g.section_id) ?? 0) > 1 ? `ảnh sơ đồ thứ ${n}` : "ảnh sơ đồ"
+    return {
+      rule: "needs_review",
+      section_id: g.section_id,
+      message: `Cần xem: dữ liệu đọc từ ${which} trong mục "${title}"${what}; đã đưa vào bản 0.1, sai thì sửa bằng change request`,
+      block_ids: [...new Set(g.fields.flatMap((f) => f.source_block_ids))],
+      target_id: g.image ?? `vision:${g.section_id}`
+    }
   })
 }
 
