@@ -1,0 +1,8 @@
+[
+  { "q": "Ý tưởng nằm trong tài liệu SRS mình đã tải lên. Trước khi bắt đầu, cho mình biết UC-05 là use case gì và quy tắc BR-02 nói gì, kèm mã đoạn nguồn.", "expect": ["UC-05\nChange Password"], "kind": "code" },
+  { "q": "Ý tưởng nằm trong tài liệu SRS mình đã tải lên. Trước khi bắt đầu, cho mình biết UC-05 là use case gì và quy tắc BR-02 nói gì, kèm mã đoạn nguồn.", "expect": ["Lead succession"], "kind": "code" },
+  { "q": "Tài liệu có nói hệ thống nhận thanh toán qua cổng nào và nạp credit thế nào không?", "expect": ["VietQR", "Purchase AI Credits", "Purchase AI credits"], "kind": "vi_cross_lang" },
+  { "q": "đổi mật khẩu", "expect": ["Change Password", "Change password"], "kind": "vi_cross_lang" },
+  { "q": "quên mật khẩu thì làm sao", "expect": ["Forgot password", "Reset password", "reset a password"], "kind": "vi_cross_lang" },
+  { "q": "hệ thống chạy trên nền tảng nào, có app di động không", "expect": ["web-based interface"], "kind": "vi_cross_lang" }
+]

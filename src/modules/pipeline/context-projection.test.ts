@@ -196,7 +196,7 @@ describe("projectStep", () => {
 describe("buildStepContext", () => {
   beforeEach(() => {
     vi.mocked(get).mockResolvedValue({ projectId: "p", ...structuredClone(FIXTURE) })
-    vi.mocked(buildDocumentContext).mockResolvedValue({ contextText: "DOC", tokenCount: 7, documentsUsed: 1, usedSummary: false })
+    vi.mocked(buildDocumentContext).mockResolvedValue({ contextText: "DOC", tokenCount: 7, documentsUsed: 1, usedSummary: false, mode: "full", chunksUsed: 0, fullTokens: 7 })
     vi.mocked(ChatSession.findById).mockReturnValue({
       lean: async () => ({
         messages: [
@@ -214,7 +214,16 @@ describe("buildStepContext", () => {
     expect(ctx.transcriptTail).not.toContain("Other phase")
     expect(ctx.documents).toBe("DOC")
     expect(ctx.contextTokens).toBeGreaterThan(7)
-    expect(buildDocumentContext).toHaveBeenCalledWith("p", "draft", "S-3.1", expect.any(Number), undefined, undefined)
+    // FLF-393: step gửi kèm câu hỏi tìm đoạn (nhãn step + câu trả lời của user) và tiêu đề section nó nuôi (S-3.1 ⇒ Actors)
+    expect(buildDocumentContext).toHaveBeenCalledWith({
+      projectId: "p",
+      actionType: "draft",
+      stepId: "S-3.1",
+      query: expect.stringContaining("Students and teachers"),
+      sectionTitles: expect.arrayContaining(["Actors", "Tác nhân"]),
+      broad: false,
+      focus: "Students and teachers"
+    })
   })
 
   it("transcriptTail kèm lượt phỏng vấn đầu giai đoạn (câu trả lời mở không vào sổ quyết định)", async () => {

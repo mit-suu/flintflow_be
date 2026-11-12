@@ -20,6 +20,11 @@ export interface IProjectDocument extends Document {
   summaryStatus: "pending" | "success" | "failed"
   /** Số tài liệu trong project (FLF-292) — phần `D<n>` của mã đoạn `D1-P03`; gán một lần, không đổi khi xoá tài liệu khác. */
   docCode?: number | null
+  /**
+   * FLF-393: heading thật của file .docx, đã khớp về chỉ số đoạn của `splitParagraphs` — `p` là đoạn, `level` là cấp.
+   * Chữ phẳng mất style heading nên phải chụp lúc upload; file khác / tài liệu cũ không có ⇒ chunker dò heading trên chữ.
+   */
+  outline?: { p: number; level: number }[] | null
   /** FLF-398: SHA-256 của bytes file — nhận diện tải trùng. Tài liệu upload trước FLF-398 chưa có (so chữ đã đọc thay). */
   contentHash?: string | null
   /**
@@ -113,6 +118,10 @@ const projectDocumentSchema = new Schema<IProjectDocument>(
       type: Number,
       default: null,
       min: 1
+    },
+    outline: {
+      type: [new Schema({ p: { type: Number, required: true, min: 0 }, level: { type: Number, required: true, min: 1 } }, { _id: false })],
+      default: undefined
     },
     contentHash: {
       type: String,
