@@ -163,7 +163,7 @@ vi.mock("./consistency-pass.js", async (importOriginal) => {
 vi.mock("../translation/translation.repository.js", () => ({ findByHashes: vi.fn(), translationRevision: vi.fn(async () => null) }))
 
 import * as spineRepository from "../spine/spine.repository.js"
-import { _internal, assemble, getDocument, getDocumentWithMeta, getDraftMeta, NoWorkingDraftError, type TranslationResolver } from "./assemble.service.js"
+import { _internal, assemble, isExistingSrs, getDocument, getDocumentWithMeta, getDraftMeta, NoWorkingDraftError, type TranslationResolver } from "./assemble.service.js"
 import { clearDocumentMemo } from "./rendered-document-memo.js"
 import { clearChangeLogs } from "../spine/change-log.js"
 import { runConsistencyPass } from "./consistency-pass.js"
@@ -1238,5 +1238,18 @@ describe("FLF-265 - tài liệu theo ngôn ngữ dự án (bản xem đã dịch
       code: "BASELINE_NOT_FOUND"
     })
     expect(resolveTranslations).not.toHaveBeenCalled()
+  })
+})
+
+describe("FLF-373 — isExistingSrs: dự án upload SRS có sẵn", () => {
+  it("theo start_kind; dự án import cũ chưa có start_kind là SRS có sẵn, trừ mẫu bắt buộc", () => {
+    expect(isExistingSrs({ mode: "import", start_kind: "existing", template_intent: "free" })).toBe(true)
+    expect(isExistingSrs({ mode: "import", start_kind: "existing", template_intent: "fixed" })).toBe(true)
+    expect(isExistingSrs({ mode: "import", start_kind: "new", template_intent: "fixed" })).toBe(false)
+    expect(isExistingSrs({ mode: "fpt", start_kind: "new", template_intent: null })).toBe(false)
+    expect(isExistingSrs({ mode: "import" })).toBe(true)
+    expect(isExistingSrs({ mode: "import", template_intent: "fixed" })).toBe(false)
+    expect(isExistingSrs({ mode: "fpt" })).toBe(false)
+    expect(isExistingSrs(null)).toBe(false)
   })
 })

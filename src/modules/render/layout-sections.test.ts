@@ -465,6 +465,22 @@ describe("FLF-252 - mục chức năng in theo file gốc", () => {
     expect(text(fn.blocks)).not.toContain("Function Trigger")
     expect(fn.blocks[0]).toEqual({ type: "paragraph", runs: [{ text: "Screen layout:" }] })
   })
+
+  it("FLF-373: SRS có sẵn ⇒ câu có ký hiệu wireframe `{ … }` / `[ … ]` của file giữ nguyên; đoạn trọn trong ngoặc vẫn bỏ", () => {
+    const s = withContinuation(spine())
+    const INTERFACE = 'Interface: Student List screen: "{ Search" text, ""Search by name or email " | [ Search ] }" text, "{ Status filter" text, "^All statuses ^ }" text, Show inactive students checkbox'
+    const base = original(s)
+    const withInterface = { ...base, blocks: [...base.blocks, { kind: "list_item" as const, text: INTERFACE, rows: null, image_ref: null }, { kind: "paragraph" as const, text: "[Describe the alternative flows of the function.]", rows: null, image_ref: null }] }
+    const tpl: TemplateLayout = { ...template(s), functionOriginals: [withInterface] }
+
+    const kept = text(buildLayoutSections(s, { ...tpl, existingSrs: true }, [], { diagramPng: (id) => `ref:${id}` }).sections.find((x) => x.id === "function:FN01")!.blocks)
+    expect(kept).toContain(JSON.stringify(INTERFACE).slice(1, -1))
+    expect(kept).not.toContain("Describe the alternative flows")
+
+    // dự án theo mẫu (không phải SRS có sẵn) ⇒ luật FLF-364 như cũ: đoạn ngoặc trong câu là hướng dẫn
+    const stripped = text(buildLayoutSections(s, tpl, [], { diagramPng: (id) => `ref:${id}` }).sections.find((x) => x.id === "function:FN01")!.blocks)
+    expect(stripped).not.toContain("[ Search ]")
+  })
 })
 
 describe("mẫu IEEE - nhiều heading cùng một section FPT (Reliability + Availability ⇒ 4.2.2)", () => {
@@ -715,6 +731,14 @@ describe("FLF-364 (câu 10) - chữ hướng dẫn của mẫu in khi mục tr�
     expect(custom).toContain("Họp thứ Hai hằng tuần.")
     expect(custom).not.toContain("[Ghi lịch họp")
     expect(custom).not.toContain("ghi rõ giờ họp")
+  })
+
+  it("FLF-373: SRS có sẵn ⇒ mục riêng có dữ liệu chỉ bỏ đoạn trọn trong ngoặc, đoạn ngoặc trong câu là chữ của file", () => {
+    const s = empty([para("[Ghi lịch họp, người tham gia]"), para("Họp thứ Hai hằng tuần {ghi rõ giờ họp nếu có}."), para('Màn tìm kiếm: "{ Search" text | [ Search ] }"')])
+    const custom = textOf(buildLayoutSections(s, { ...guideLayout, existingSrs: true }, [], { diagramPng: () => undefined }).sections, "custom:CS01")
+    expect(custom).not.toContain("[Ghi lịch họp")
+    expect(custom).toContain("Họp thứ Hai hằng tuần {ghi rõ giờ họp nếu có}.")
+    expect(custom).toContain("[ Search ] }")
   })
 })
 
