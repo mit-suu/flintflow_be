@@ -54,7 +54,8 @@ const main = async (): Promise<void> => {
   const topK = Number(arg("top-k") ?? env.DOC_CONTEXT_TOP_K)
   const maxTokens = Number(arg("max-tokens") ?? env.DOC_CONTEXT_CHAT_TOKENS)
   const index = buildProjectIndex([{ ref: { id: "doc", docCode: 1, name: path.basename(file) }, chunks }])
-  const report = evaluateRetrieval(index, questions, { topK, maxTokens })
+  const codeWeight = arg("code-weight") ? Number(arg("code-weight")) : undefined
+  const report = evaluateRetrieval(index, questions, { topK, maxTokens, ...(codeWeight !== undefined ? { codeWeight } : {}) })
 
   console.log(`\nCâu hỏi: ${questionsFile} (${questions.length} câu) · top-k ${topK} · trần ${maxTokens} token`)
   console.log(`Recall: ${(report.recall * 100).toFixed(1)}%`)

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest"
 import { spineSchema } from "../spine/spine.schema.js"
 import type { Spine } from "../spine/spine.types.js"
 import { sectionsFedBy } from "./context-projection.js"
-import { mergeStepDocumentQueries, stepDocumentQuery } from "./step-document-query.js"
+import { FIELD_SEARCH_TERMS, mergeStepDocumentQueries, readFieldKeys, stepDocumentQuery } from "./step-document-query.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../fixtures/spine-fixture-19-screens.json"), "utf8")))
@@ -29,12 +29,31 @@ describe("stepDocumentQuery (FLF-393)", () => {
     expect(q.query).toContain(screen.name)
   })
 
-  it("step Brief không nuôi section nào ⇒ chỉ có câu hỏi BM25 (nhãn step + câu trả lời của user)", () => {
+  it("step Brief đọc rộng: ghim mục tổng quan, kèm từ khoá của field cần hỏi (nền tảng, tuân thủ) + câu trả lời của user", () => {
     const q = queryOf("B-0.1", "AI: Bạn muốn làm gì?\nUser: Ứng dụng đặt lịch khám cho phòng khám nhỏ")
-    expect(q.sectionTitles).toEqual([])
+    expect(q.broad).toBe(true)
+    expect(q.sectionTitles).toEqual(expect.arrayContaining(["Product Overview", "Introduction", "Tổng quan"]))
     expect(q.query).toContain("Brain Dump")
+    expect(q.query).toContain(FIELD_SEARCH_TERMS["project.form_factor"])
+    expect(q.query).toContain(FIELD_SEARCH_TERMS["project.stakes"])
     expect(q.query).toContain("Ứng dụng đặt lịch khám")
     expect(q.query).not.toContain("Bạn muốn làm gì")
+  })
+
+  it("step soạn mục cụ thể không đọc rộng; vẫn có từ khoá theo field nó đọc", () => {
+    expect(queryOf("S-3.1").broad).toBe(false)
+    expect(queryOf("S-6.4").query).toContain(FIELD_SEARCH_TERMS.nfrs)
+  })
+
+  it("readFieldKeys: tách field của project, gốc mảng bỏ bộ lọc / cột", () => {
+    expect(readFieldKeys(["project:name,form_factor", "actors[kind!=human]:id,name", "documents", "assumptions[status=unconfirmed]"])).toEqual([
+      "project.name",
+      "project.form_factor",
+      "actors",
+      "documents",
+      "assumptions"
+    ])
+    expect(readFieldKeys(["project"])).toEqual(expect.arrayContaining(["project.vision", "project.stakes"]))
   })
 
   it("mergeStepDocumentQueries: gộp không lặp", () => {

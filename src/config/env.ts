@@ -136,8 +136,10 @@ const envSchema = z.object({
   DOC_CONTEXT_CHAT_TOKENS: z.coerce.number().int().min(1000).default(12000),
   /** Lượt hỏi / soạn của step pipeline (Elicit, Draft, Revision, Regenerate, phỏng vấn đầu giai đoạn). */
   DOC_CONTEXT_DRAFT_TOKENS: z.coerce.number().int().min(1000).default(16000),
-  /** Số đoạn BM25 tối đa mỗi lượt (không tính đoạn ghim theo section của step). */
+  /** Số đoạn BM25 tối đa mỗi lượt chat (không tính đoạn ghim). */
   DOC_CONTEXT_TOP_K: z.coerce.number().int().min(1).max(50).default(10),
+  /** Như trên cho lượt của step: step cần đủ ngữ cảnh để không hỏi lại điều tài liệu đã nói ⇒ lấy nhiều hơn, vẫn dưới trần token. */
+  DOC_CONTEXT_DRAFT_TOP_K: z.coerce.number().int().min(1).max(100).default(30),
 
   // S-9.2 Quality Lens bằng LLM — mặc định TẮT (Phases §9.1, hoãn vì ngân sách).
   REVIEW_LLM_ENABLED: z

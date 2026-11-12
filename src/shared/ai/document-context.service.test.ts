@@ -174,6 +174,45 @@ describe("buildDocumentContext (FLF-393)", () => {
     expect(ctx.tokenCount).toBeLessThanOrEqual(env.DOC_CONTEXT_DRAFT_TOKENS)
   })
 
+  it("step đọc rộng (Brief) có ghim mục tổng quan vẫn kèm tóm tắt; top-k của step lớn hơn của chat", async () => {
+    store.docs = [doc("d1", 1, BIG_SRS, "SRS của hệ thống đặt lịch khám.")]
+    const ctx = await buildDocumentContext({ projectId: "p", actionType: ActionType.DRAFT, stepId: "B-0.1", query: "Giới thiệu", sectionTitles: ["Giới thiệu"], broad: true })
+    expect(ctx.usedSummary).toBe(true)
+    expect(ctx.contextText).toContain("Tài liệu đặc tả hệ thống đặt lịch khám.")
+    expect(env.DOC_CONTEXT_DRAFT_TOP_K).toBeGreaterThan(env.DOC_CONTEXT_TOP_K)
+    const wide = await buildDocumentContext({ projectId: "p", actionType: ActionType.DRAFT, stepId: "S-6.4", query: "hệ thống kiểm tra dữ liệu ghi nhận kết quả" })
+    expect(wide.chunksUsed).toBeGreaterThan(env.DOC_CONTEXT_TOP_K)
+    expect(wide.tokenCount).toBeLessThanOrEqual(env.DOC_CONTEXT_DRAFT_TOKENS)
+  })
+
+  it("step: tin nhắn mới nhất của user (focus) được tìm riêng và lấy trước, không bị câu hỏi chung của step làm loãng", async () => {
+    store.docs = [doc("d1", 1, BIG_SRS)]
+    const generalOnly = await buildDocumentContext({ projectId: "p", actionType: ActionType.DRAFT, stepId: "B-0.1", query: "Hiệu năng trang thanh toán phản hồi" })
+    expect(generalOnly.contextText).not.toContain("UC-37 Hoàn tiền khi huỷ lịch")
+    const withFocus = await buildDocumentContext({
+      projectId: "p",
+      actionType: ActionType.DRAFT,
+      stepId: "B-0.1",
+      query: "Hiệu năng trang thanh toán phản hồi",
+      focus: "hoàn tiền khi huỷ lịch"
+    })
+    expect(withFocus.contextText).toContain("UC-37 Hoàn tiền khi huỷ lịch")
+    expect(withFocus.tokenCount).toBeLessThanOrEqual(env.DOC_CONTEXT_DRAFT_TOKENS)
+  })
+
+  it("danh mục mã Code đếm trên toàn văn luôn đi kèm — trích đoạn hay nguyên văn đều trả lời được \"bao nhiêu\" chính xác", async () => {
+    store.docs = [doc("d1", 1, BIG_SRS)]
+    const retrieved = await buildDocumentContext({ projectId: "p", actionType: ActionType.CHAT, query: "UC-37" })
+    expect(retrieved.mode).toBe("retrieved")
+    expect(retrieved.contextText).toContain("- D1 (d1.txt): UC: 150 mã (UC-01 → UC-150, liên tục)")
+    expect(retrieved.tokenCount).toBeLessThanOrEqual(env.DOC_CONTEXT_CHAT_TOKENS)
+
+    store.docs = [doc("d1", 1, "Biên bản\n\nUC-01 Đăng nhập\n\nUC-02 Đặt lịch\n\nUC-04 Huỷ lịch")]
+    const full = await buildDocumentContext({ projectId: "p", actionType: ActionType.CHAT, query: "bao nhiêu use case" })
+    expect(full.mode).toBe("full")
+    expect(full.contextText).toContain("UC: 3 mã (UC-01 → UC-04, không có UC-03)")
+  })
+
   it("nhiều tài liệu: tài liệu nhỏ đi cùng SRS lớn vẫn tìm được, nhãn nguồn đúng tài liệu", async () => {
     store.docs = [doc("d1", 1, BIG_SRS), doc("d2", 2, "Email khách hàng\n\nChỉ nhận thanh toán online qua ví MoMo, không COD.")]
     const ctx = await buildDocumentContext({ projectId: "p", actionType: ActionType.CHAT, query: "ví MoMo" })
