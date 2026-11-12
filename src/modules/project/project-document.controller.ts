@@ -8,6 +8,7 @@ import { listSources } from "./requirement-source.service.js"
 import { getProjectById } from "./project.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { precheckDocx } from "../import/docx-precheck.js"
+import { referenceTokenMeta } from "./document-token-limit.js"
 
 /** FLF-292: nguồn tài liệu của từng phần tử Spine (phần tử đã xoá khỏi Spine không trả về). */
 export const getSources = catchAsync(async (req: Request, res: Response) => {
@@ -62,8 +63,10 @@ export const getDocuments = catchAsync(async (req: Request, res: Response) => {
   }
 
   const projectId = Array.isArray(req.params.projectId) ? req.params.projectId[0] : req.params.projectId
-  const documents = await projectDocumentService.getProjectDocuments(requireOrgId(req), projectId)
-  return sendSuccess(res, 200, documents)
+  const orgId = requireOrgId(req)
+  const documents = await projectDocumentService.getProjectDocuments(orgId, projectId)
+  // FLF-405: FE hiện "đã dùng x / y token" của tài liệu tham khảo
+  return sendSuccess(res, 200, documents, await referenceTokenMeta(orgId, projectId))
 })
 
 export const deleteDocument = catchAsync(async (req: Request, res: Response) => {
