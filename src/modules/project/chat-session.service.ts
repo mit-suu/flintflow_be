@@ -24,6 +24,7 @@ const NO_SPINE_INDEX = "(tài liệu chưa có dữ liệu)"
 const lastAiContentOf = (session: { messages: readonly IChatMessage[] }): string | undefined =>
   [...session.messages].reverse().find((m) => m.role === "ai")?.content
 import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
+import { claimUserMessage } from "./user-message-dedupe.js"
 
 /**
  * FLF-220: câu hỏi trong tin nhắn CHAT đi qua cùng luật hình dạng với pipeline (≤ 4 câu, 2–4 lựa chọn, bỏ
@@ -242,7 +243,34 @@ const answerKnowledgeTurn = async (
   return { payload, answer }
 }
 
+/**
+ * FLF-400: tin trùng (cùng phiên + bước + nội dung) tới khi lượt đầu CÒN ĐANG CHẠY ⇒ không ghi tin, không gọi AI, trả phiên
+ * như hiện có — giống lượt tin được nhận làm câu trả lời của step. Lượt đầu xong (kể cả lỗi / bị dừng) là nhả: gửi lại câu
+ * giống hệt sau khi AI đã trả lời ("ok" rồi "ok") là ý của user, và "Thử lại ngay" (FLF-332) phải đi được.
+ */
 export const sendMessageAndGetResponse = async (
+  projectId: string,
+  chatSessionId: string,
+  content: string,
+  step: string,
+  userId: string,
+  discoveryStep?: number,
+  options: SendMessageOptions = {}
+): Promise<IChatSession> => {
+  const claim = claimUserMessage(chatSessionId, step, content)
+  if (!claim) {
+    const session = await ChatSession.findById(chatSessionId)
+    if (!session) throw new ApiError(404, "Không tìm thấy phiên trò chuyện.", "CHAT_SESSION_NOT_FOUND")
+    return session
+  }
+  try {
+    return await chatTurn(projectId, chatSessionId, content, step, userId, discoveryStep, options)
+  } finally {
+    claim.release(false)
+  }
+}
+
+const chatTurn = async (
   projectId: string,
   chatSessionId: string,
   content: string,
@@ -375,7 +403,40 @@ export const sendMessageAndGetResponse = async (
   return session
 }
 
+/** FLF-400: tin trùng ⇒ một sự kiện `finish` với phiên hiện có và `reply` rỗng (như tin vào hàng chờ trả lời của step). */
 export const sendMessageStream = async (
+  projectId: string,
+  chatSessionId: string,
+  content: string,
+  step: string,
+  userId: string,
+  res: Response,
+  discoveryStep?: number,
+  options: SendMessageOptions = {}
+): Promise<void> => {
+  const claim = claimUserMessage(chatSessionId, step, content)
+  if (!claim) {
+    const session = await ChatSession.findById(chatSessionId)
+    try {
+      if (!res.destroyed && !res.writableEnded) {
+        res.write(
+          session
+            ? `data: ${JSON.stringify({ type: "finish", session, data: { reply: "" }, tokensUsed: null, cost: 0 })}\n\n`
+            : `data: ${JSON.stringify({ type: "error", error: "Không tìm thấy phiên trò chuyện." })}\n\n`
+        )
+        res.end()
+      }
+    } catch (_) {}
+    return
+  }
+  try {
+    await streamChatTurn(projectId, chatSessionId, content, step, userId, res, discoveryStep, options)
+  } finally {
+    claim.release(false)
+  }
+}
+
+const streamChatTurn = async (
   projectId: string,
   chatSessionId: string,
   content: string,

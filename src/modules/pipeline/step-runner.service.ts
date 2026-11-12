@@ -25,6 +25,7 @@
 import { randomUUID } from "node:crypto"
 import { env } from "../../config/env.js"
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
+import { claimUserMessage } from "../project/user-message-dedupe.js"
 import { Project } from "../project/project.model.js"
 import { replyLanguageForSessionId } from "../project/reply-language.service.js"
 import { assemble } from "../render/assemble.service.js"
@@ -776,10 +777,21 @@ export const askTranscript = (reply: string, asked: readonly { question: string;
         questions: asked.map((q) => ({ question: q.question, ...(q.inline && !q.options?.length ? { inline: true } : {}) }))
       })
 
-/** Lọc cả `projectId`: session của project khác không bao giờ bị ghi, kể cả khi lời gọi quên kiểm session trước. */
+/**
+ * Lọc cả `projectId`: session của project khác không bao giờ bị ghi, kể cả khi lời gọi quên kiểm session trước.
+ * FLF-400: tin user trùng hệt tin vừa ghi cho cùng bước (hai request chạy giai đoạn / trả lời gửi liền tay) ⇒ không ghi lần hai.
+ */
 const pushTranscript = async (projectId: string, sessionId: string, stepId: string, role: "user" | "ai", content: string): Promise<void> => {
+  const claim = role === "user" ? claimUserMessage(sessionId, stepId, content) : undefined
+  if (claim === null) return
   const msg: IChatMessage = { role, content, step: stepId, createdAt: new Date() }
-  await ChatSession.updateOne({ _id: sessionId, projectId }, { $push: { messages: msg } })
+  let ok = false
+  try {
+    await ChatSession.updateOne({ _id: sessionId, projectId }, { $push: { messages: msg } })
+    ok = true
+  } finally {
+    claim?.release(ok)
+  }
 }
 
 /**

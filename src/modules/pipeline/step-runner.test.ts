@@ -156,7 +156,7 @@ import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { orderedSteps } from "./step-registry.js"
 import { AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction, ElicitOutput } from "../../shared/ai/response-parser.js"
-import { runStep, runDraftPhase, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, settleFromChat, settleRepeatedAnswer, settleWithoutModel, askTranscript, nextPendingAfterChat, isSubstantiveAnswer, isBareAgreement, noChangeReason, replyLanguageAfterMessage, CALL_LIMIT, CHAT_BUDGET_REPLY, CHAT_BUDGET_REPLY_EN, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
+import { runStep, runDraftPhase, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, settleFromChat, settleRepeatedAnswer, settleWithoutModel, askTranscript, recordUserMessage, recordAiMessage, nextPendingAfterChat, isSubstantiveAnswer, isBareAgreement, noChangeReason, replyLanguageAfterMessage, CALL_LIMIT, CHAT_BUDGET_REPLY, CHAT_BUDGET_REPLY_EN, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
 import { cancelRun, getRunState, resetMemoryRuns } from "./run-state.service.js"
 import { gate } from "./gate.service.js"
 import { resumePhaseInterview, runPhase } from "./phase-runner.service.js"
@@ -168,6 +168,7 @@ import { fakeRepository, resetStore, store as translationStore } from "../transl
 import { hashSource } from "../translation/translation-units.js"
 import { documentLanguageForTurn } from "../translation/turn-language.js"
 import { buildStepContext } from "./context-projection.js"
+import { resetUserMessageClaims } from "../project/user-message-dedupe.js"
 import { getPromptTemplate, interpolatePrompt } from "../../shared/ai/prompt-registry.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
@@ -246,6 +247,7 @@ const collectEvents = () => {
 let actualApplyTransaction: typeof applyTransaction
 
 beforeEach(async () => {
+  resetUserMessageClaims()
   resetMemoryRuns()
   db.reset()
   const actual = await vi.importActual<typeof import("../spine/op-engine.js")>("../spine/op-engine.js")
@@ -2453,5 +2455,24 @@ describe("FLF-358: prompt elicit-loop đã render không còn {{assumptions}} �
       }
     }
     expect(r.prompts.every((p) => !p.prompt.includes("{{assumptions}}"))).toBe(true)
+  })
+})
+
+describe("step-runner: tin user ghi lặp vào transcript (FLF-400)", () => {
+  it("cùng tin cho cùng bước ghi 2 lần liền (2 request chạy giai đoạn) ⇒ transcript 1 tin; bước khác / tin AI vẫn ghi", async () => {
+    seedSession(true)
+    await Promise.all([recordUserMessage(PROJECT, SESSION, "B-1.5", "Bắt đầu nhé"), recordUserMessage(PROJECT, SESSION, "B-1.5", "Bắt đầu nhé")])
+    await recordUserMessage(PROJECT, SESSION, "B-1.5", "Bắt đầu nhé")
+    await recordUserMessage(PROJECT, SESSION, "B-1.6", "Bắt đầu nhé")
+    await recordAiMessage(PROJECT, SESSION, "B-1.5", "Ổn chưa?")
+    await recordAiMessage(PROJECT, SESSION, "B-1.5", "Ổn chưa?")
+
+    const messages = db.sessions.find((s) => s._id === SESSION)!.messages as Array<{ role: string; step: string; content: string }>
+    expect(messages.map((m) => [m.role, m.step, m.content])).toEqual([
+      ["user", "B-1.5", "Bắt đầu nhé"],
+      ["user", "B-1.6", "Bắt đầu nhé"],
+      ["ai", "B-1.5", "Ổn chưa?"],
+      ["ai", "B-1.5", "Ổn chưa?"]
+    ])
   })
 })
