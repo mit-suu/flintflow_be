@@ -41,6 +41,7 @@ import {
   slotTextFor
 } from "./labels.js"
 import type { Change, DiagramKind, Nfr, NfrCategory, OriginalDiagramKind, Spine } from "../spine/spine.types.js"
+import { isPlaceholderText } from "../import/template-markers.js"
 
 /**
  * T15 review T5: `fixed:I` không cần `before`/`value` (chỉ mô tả A/M/D + ngày/người/lý do) — caller
@@ -402,6 +403,9 @@ const screenAuthorization = (spine: Spine, ctx: SectionRenderContext): Block[] =
   return [matrix]
 }
 
+/** FLF-411: tính năng / chức năng khung của mẫu (`<<Feature Name 1>>`, `<<Function Name 1>>`) — không in thành dữ liệu. */
+const isTemplateSlotName = (name: string | null | undefined): boolean => isPlaceholderText(name)
+
 /** Cột của bảng 3.1.4 khi không biết cột của file (project nhập trước FLF-366): như mẫu FPT, như trước. */
 const FPT_NON_SCREEN_HEADER = ["#", "Feature", "System Function", "Description"]
 
@@ -410,9 +414,13 @@ const nonScreenFunctions = (spine: Spine, ctx: SectionRenderContext): Block[] =>
   if (listed) {
     // FLF-252: tài liệu nhập — đúng các dòng bảng 3.1.4 của file. FLF-361: cột theo tiêu đề cột của bảng trong file
     // (FAP: Name · Trigger · Description — trước đây luôn in cột mẫu FPT nên mất cột Trigger khi bảng dựng lại)
-    const fns = spine.functions.filter((f) => listed.has(f.id))
+    // FLF-411: chức năng khung của mẫu (`<<Function Name 1>>`, tạo từ heading chỗ điền) không phải dữ liệu — FLF-413 lấp khung
+    const fns = spine.functions.filter((f) => listed.has(f.id) && !isTemplateSlotName(f.name))
     if (fns.length === 0) return []
-    const featureName = (id: string) => spine.features.find((f) => f.id === id)?.name ?? id
+    const featureName = (id: string) => {
+      const name = spine.features.find((f) => f.id === id)?.name ?? id
+      return isTemplateSlotName(name) ? "" : name
+    }
     const header = ctx.nonScreenHeader?.length ? [...ctx.nonScreenHeader] : FPT_NON_SCREEN_HEADER
     const fields = matchTableHeader(header, "fixed:3.1.4").columns.map((c) => c.field_path?.replace(/^functions\[\]\./, "") ?? null)
     const cell = (f: Spine["functions"][number], i: number, field: string | null, title: string): string => {
@@ -435,7 +443,7 @@ const nonScreenFunctions = (spine: Spine, ctx: SectionRenderContext): Block[] =>
     }
     return [tableBlock(header, fns.map((f, i) => header.map((title, c) => cell(f, i, fields[c] ?? null, title))))]
   }
-  const fns = spine.functions.filter((f) => f.screen_id === null)
+  const fns = spine.functions.filter((f) => f.screen_id === null && !isTemplateSlotName(f.name))
   if (fns.length === 0) return []
   return [tableBlock(["Name", "Trigger", "Description"], fns.map((f) => [f.name, f.trigger, f.description]))]
 }
@@ -1131,15 +1139,19 @@ const slotBlocks = (spine: Spine, slotId: string, ctx: SectionRenderContext): Bl
     case "slot:context":
       return [...externalSystems(spine, ctx), ...diagramImages(spine, "context", undefined, ctx, "Figure - System Context Diagram")]
     case "slot:features": {
-      if (spine.features.length === 0) return []
+      const features = spine.features.filter((f) => !isTemplateSlotName(f.name))
+      if (features.length === 0) return []
       const say = sentencesFor(fptLanguage(ctx))
-      const rows = [...spine.features]
+      const rows = [...features]
         .sort((a, b) => a.order - b.order)
-        .map((f) => [say.featureLabel(ctx.numberOf(`feature:${f.id}`), f.name), spine.functions.filter((fn) => fn.feature_id === f.id).map((fn) => fn.name).join(", ")])
+        .map((f) => [
+          say.featureLabel(ctx.numberOf(`feature:${f.id}`), f.name),
+          spine.functions.filter((fn) => fn.feature_id === f.id && !isTemplateSlotName(fn.name)).map((fn) => fn.name).join(", ")
+        ])
       return [tableBlock([text.feature, text.functions], rows)]
     }
     case "slot:functional_requirements": {
-      const rows = [...spine.functions].sort((a, b) => a.order - b.order).map((fn) => [
+      const rows = [...spine.functions].filter((fn) => !isTemplateSlotName(fn.name)).sort((a, b) => a.order - b.order).map((fn) => [
         fn.id,
         [fn.name, fn.description, fn.trigger, ...fn.normal, ...fn.abnormal, ...fn.validations.map((v) => v.statement)].filter(Boolean).join("\n"),
         fn.priority ?? ""

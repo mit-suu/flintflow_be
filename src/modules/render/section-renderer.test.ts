@@ -288,6 +288,14 @@ describe("renderSection - fixed sections", () => {
     expect(table.type === "table" && table.rows[0][0]).toEqual([{ text: "Nightly Aggregate" }])
   })
 
+  it("FLF-411: chức năng khung của mẫu (<<Function Name 1>>) không in ở bảng 3.1.4", () => {
+    const s = spine()
+    const slot = { ...s.functions.find((f) => f.screen_id === null)!, id: "FR-3.2.1", name: "<<Function Name 1>>" }
+    const section = renderSection({ ...s, functions: [...s.functions, slot] }, "fixed:3.1.4", ctx({ number: "3.1.4" }))
+    const table = section.blocks[0]
+    expect(table.type === "table" && table.rows.map((r) => r[0][0])).toEqual([{ text: "Nightly Aggregate" }])
+  })
+
   it("fixed:3.1.5 - erd image + bảng entity", () => {
     const section = renderSection(spine(), "fixed:3.1.5", ctx({ number: "3.1.5" }))
     expect(section.blocks[0]).toEqual({ type: "image", png: "png-d04", caption: "Entity Relationship Diagram" })
