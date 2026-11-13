@@ -196,3 +196,27 @@ export const compareVersions = async (projectId: string, from: string, to: strin
   const { blocks, summary } = diffBlockLists(lite(a), lite(b))
   return { from, to, summary, blocks }
 }
+
+/** Tiêu đề cột người thực hiện của bảng Record of Changes (en / vi, `render/labels.ts`). */
+const IN_CHARGE_HEADER = /^(in charge|người thực hiện)$/i
+
+/** Hàm thuần: chữ của một bảng (dòng `\n`, ô ` | `) mà dòng đầu có cột "In charge" ⇒ ô cột đó ở các dòng thân thành trống. */
+export const blankInChargeColumn = (text: string): string => {
+  const [head, ...rows] = text.split("\n")
+  const col = head.split(" | ").findIndex((c) => IN_CHARGE_HEADER.test(c.trim()))
+  if (col < 0 || !rows.length) return text
+  return [head, ...rows.map((r) => r.split(" | ").map((c, i) => (i === col ? "" : c)).join(" | "))].join("\n")
+}
+
+/**
+ * UC-47 / UC-48: Viewer không thấy ai thực hiện thay đổi — FLF-411 (U2-6) in tên người tạo CR vào cột "In charge" của Record of
+ * Changes, nên bản so sánh cho Viewer che cột đó (bản nháp 0.x Viewer cũng không tải được).
+ */
+export const compareForViewer = (res: CompareResponse): CompareResponse => ({
+  ...res,
+  blocks: res.blocks.map((b) => ({
+    ...b,
+    ...(typeof b.before === "string" ? { before: blankInChargeColumn(b.before) } : {}),
+    ...(typeof b.after === "string" ? { after: blankInChargeColumn(b.after) } : {})
+  }))
+})
