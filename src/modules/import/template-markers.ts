@@ -42,7 +42,9 @@ export const isPlaceholderRow = (row: readonly string[]): boolean => {
 export const cleanTableRows = (rows: readonly (readonly string[])[]): string[][] => {
   if (!rows.length) return []
   const [header, ...body] = rows
-  return [[...header], ...body.filter((r) => !isPlaceholderRow(r)).map((r) => r.map((c) => (isPlaceholderText(c) ? "" : c)))]
+  const kept = body.filter((r) => !isPlaceholderRow(r)).map((r) => r.map((c) => (isPlaceholderText(c) ? "" : c)))
+  // Bỏ hết thân ⇒ giữ một dòng trống: bảng một dòng bị `tableBodyHasRealText` coi là bảng không tiêu đề (tiêu đề thành "dữ liệu")
+  return [[...header], ...(kept.length || !body.length ? kept : [header.map(() => "")])]
 }
 
 const depth = (text: string, open: string, close: string): number => [...text].reduce((d, ch) => d + (ch === open ? 1 : ch === close ? -1 : 0), 0)
