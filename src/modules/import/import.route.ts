@@ -328,9 +328,11 @@ router.post("/:id/import/finalize", authMiddleware, importController.finalize)
  * @swagger
  * /api/v1/projects/{id}/import/continue:
  *   post:
- *     summary: Chế độ 3 (dự án mới theo mẫu bắt buộc) — soạn các mục của mẫu với FlintFlow (Luồng 2) thay vì Hoàn thiện
+ *     summary: Chế độ 3 / 4 — soạn phần còn thiếu với FlintFlow (Luồng 2) thay vì Hoàn thiện
  *     description: |
- *       Chỉ từ `incomplete` khi `target_structure.resolved_mode = 3`. Mở lại bước Brief (B-1…S-1), đặt bước sở hữu **mọi mục
+ *       Chỉ từ `incomplete` khi giữ khung + `target_structure.resolved_mode = 3`, hoặc tick bổ sung theo mẫu chuẩn + `resolved_mode = 4`
+ *       (FLF-416; chế độ 4 chỉ mở bước của mục FPT còn thiếu, bản in sắp lại bố cục: mục FPT soạn thêm chèn đúng vị trí, mục Ngoài
+ *       phạm vi xuống cuối). Thường finalize đã tự chuyển; endpoint này cho bản ghi cũ. Mở lại bước Brief (B-1…S-1), đặt bước sở hữu **mọi mục
  *       của mẫu** về `pending` (FLF-378 — chữ trong mẫu là ví dụ, không phải nội dung đã chốt), chuyển dự án sang luồng tạo mới (`mode = fpt`, `import_state = drafting`). Bản in vẫn theo mẫu; ký
  *       baseline 1.0 ⇒ dự án về mode 1 (FLF-318).
  *     tags: [Import (mode 1)]

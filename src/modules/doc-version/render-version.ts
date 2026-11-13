@@ -68,9 +68,11 @@ export const renderVersionFile = async (projectId: string, projectName: string, 
     : renderSpineDocument(projectId, projectName, snapshot, renderOptions)
   const doc = await render(spine)
   // Dự án "Upload SRS có sẵn": mục chưa đổi so với lúc import in nguyên văn từ file upload (bản 0.1 = chính file upload)
+  // FLF-416: dự án chuyển từ Luồng 2 (chế độ 3 / 4, có file khách) dựng bằng đúng ngôn ngữ chữ gốc ⇒ vẫn in theo file nền;
+  // chỉ bản dịch sang ngôn ngữ khác mới bỏ file nền
   const anchor = anchorForBinding(opts.templateSource)
   const fidelity = await sourceFidelityFor(projectId, doc, render, {
-    otherLanguage: !!opts.languages,
+    otherLanguage: !!opts.languages && opts.languages.locale !== opts.languages.source,
     ...(anchor ? { anchor } : {}),
     ...(opts.versionCreatedAt ? { versionCreatedAt: opts.versionCreatedAt } : {})
   })
