@@ -92,6 +92,9 @@ export const mockOutputFor = (actionType: string | undefined, prompt: string): s
   if (actionType === "translate") {
     return fenced({ statement: "[MOCK AI] Translated assumption." })
   }
+  if (actionType === "template_migration_resolve") {
+    return fenced({ ops: [], choice: null, notes: "[MOCK AI] Không giải quyết được." })
+  }
   if (actionType === "translate_document") {
     return fenced({ items: mockTranslateItems(prompt) })
   }

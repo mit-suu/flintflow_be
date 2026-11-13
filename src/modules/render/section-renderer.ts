@@ -42,6 +42,7 @@ import {
   slotTextFor
 } from "./labels.js"
 import type { Change, DiagramKind, Nfr, NfrCategory, OriginalDiagramKind, Spine } from "../spine/spine.types.js"
+import { screenSpecOf } from "../diagram/renderers/screen-mockup.js"
 import { isPlaceholderText } from "../import/template-markers.js"
 
 /**
@@ -272,6 +273,18 @@ const diagramImages = (
     if (png) out.push(image(png, caption))
   })
   return out
+}
+
+/**
+ * Chú thích mockup màn (FLF-410): màn có hình cho cả web và mobile ⇒ `<base> (Web)` / `<base> (Mobile)` thay `(1/2)`; một
+ * hình ⇒ không hậu tố. Wireframe salt cũ / bảng function ⇒ chú thích mặc định.
+ */
+export const screenLayoutImages = (spine: Spine, screenId: string, ctx: SectionRenderContext, captionBase: string): ImageBlock[] => {
+  const parts = spine.diagrams.filter((d) => d.kind === "screen_layout" && d.owner_id === screenId)
+  return diagramImages(spine, "screen_layout", screenId, ctx, captionBase, (d) => {
+    const platform = parts.length > 1 && d.format === "svg" ? screenSpecOf(d.source)?.platform : undefined
+    return platform ? `${captionBase} (${platform === "mobile" ? "Mobile" : "Web"})` : null
+  })
 }
 
 // ─── fixed:1 Product Overview ─────────────────────────────────────
@@ -630,7 +643,7 @@ const fptFunctionDetail = (spine: Spine, functionId: string, ctx: SectionRenderC
   const rules = unique(ruleStatements(spine, fn), ruleStatements(canonical ?? spine, source))
   const layout =
     screen && screen.primary_function_id === fn.id
-      ? diagramImages(spine, "screen_layout", screen.id, ctx, sentencesFor(lang).screenLayoutCaption(screen.name))
+      ? screenLayoutImages(spine, screen.id, ctx, sentencesFor(lang).screenLayoutCaption(screen.name))
       : []
 
   // Nhãn heading / mục con giữ tiếng Anh ở đây — `localizeBlocks` dịch sau (bảng `VI_FPT_LABELS`)
@@ -677,7 +690,7 @@ const legacyFunctionDetail = (spine: Spine, functionId: string, ctx: SectionRend
 
   const owningScreen = fn.screen_id ? spine.screens.find((s) => s.id === fn.screen_id) : undefined
   if (owningScreen && owningScreen.primary_function_id === fn.id) {
-    blocks.push(...diagramImages(spine, "screen_layout", owningScreen.id, ctx, `Screen Layout - ${owningScreen.name}`))
+    blocks.push(...screenLayoutImages(spine, owningScreen.id, ctx, `Screen Layout - ${owningScreen.name}`))
   }
   return blocks
 }

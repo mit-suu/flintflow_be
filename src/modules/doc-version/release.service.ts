@@ -1,3 +1,4 @@
+import { assertNoMigrationRunning } from "../template-migration/migration-guard.js"
 import { listChangesForRecord } from "../render/assemble.service.js"
 import { captureTemplateSourceBinding } from "./template-source-binding.js"
 /**
@@ -24,6 +25,7 @@ import { DocVersion, type IDocVersion } from "./doc-version.model.js"
 import { listDocVersions } from "./doc-version.service.js"
 import { renderVersionFile } from "./render-version.js"
 import { nextMajor } from "./versioning.js"
+import { autoSaveSkeleton } from "../import/template-skeleton.service.js"
 
 export interface ReleaseResult {
   version: IDocVersion
@@ -33,6 +35,7 @@ export interface ReleaseResult {
 }
 
 export const release = async (projectId: string, userId: string, baseVersion: number): Promise<ReleaseResult> => {
+  await assertNoMigrationRunning(projectId)
   const before = await spineRepository.get(projectId)
   if (!before) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   if (before.spine_version !== baseVersion) {
@@ -98,5 +101,7 @@ export const release = async (projectId: string, userId: string, baseVersion: nu
     record_snapshot: recordSnapshot ? [...recordSnapshot, releaseRow] : null,
     created_by: userId
   })
+  // FLF-395 (D12): khung đổi ở lần phát hành này ⇒ bản mới của mẫu khung tự lưu (lỗi không chặn phát hành)
+  await autoSaveSkeleton(projectId, userId, fileRef)
   return { version, baseline, cr_ids: crIds, spine_version: spineVersion }
 }

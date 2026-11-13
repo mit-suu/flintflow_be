@@ -96,6 +96,14 @@ describe("placeSections - thứ tự theo file, chèn đầu mục FPT thiếu",
     expect(ids).toEqual(fileOrder)
   })
 
+  it("mẫu bắt buộc: phần nối (heading rỗng) mà mục riêng không còn ⇒ bỏ, không dựng mục trống \"—\" (test tay 11/11)", () => {
+    const s = spine()
+    const layout = [entry(0, "1 Introduction", 1, "fixed:1"), entry(1, "", 2, "custom:CSGONE"), entry(2, "Phạm vi", 2, "custom:CSNEW")]
+    const { sections } = buildLayoutSections(s, { language: "en", fixedTemplate: true, layout }, [], { diagramPng: () => undefined })
+    expect(sections.map((x) => x.id)).not.toContain("custom:CSGONE")
+    expect(sections.some((x) => x.heading === "—")).toBe(false)
+  })
+
   it("function mới của feature (chưa có trong layout) ⇒ mục con của feature, sau function cũ", () => {
     const s = spine()
     s.functions.push({ ...s.functions[0], id: "FN02", order: 1, name: "Quên mật khẩu" })

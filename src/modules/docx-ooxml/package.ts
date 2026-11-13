@@ -9,11 +9,21 @@ import { NS, OoxmlError, parseXml, serializeXml } from "./xml.js"
 
 /** Chặn zip bomb: tổng dung lượng giải nén tối đa. */
 export const MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
+/** Chặn gói có quá nhiều mục (docx thật vài trăm mục). */
+export const MAX_ZIP_ENTRIES = 5000
 
 export interface Relationship {
   id: string
   type: string
   target: string
+  /** `TargetMode` của rels — chỉ có khi gói khai báo (`External` = liên kết ra ngoài, `target` là URL chứ không phải part). */
+  targetMode?: "External" | "Internal"
+}
+
+export interface AddRelationshipOptions {
+  idPrefix?: string
+  /** `External` ⇒ ghi `TargetMode="External"` (URL ngoài gói). */
+  targetMode?: "External"
 }
 
 /** `word/document.xml` ⇒ `word/_rels/document.xml.rels`; `""` (gốc gói) ⇒ `_rels/.rels`. */
@@ -24,21 +34,86 @@ export const relsPathOf = (partName: string): string => {
 
 type ZipEntryWithSize = JSZip.JSZipObject & { _data?: { uncompressedSize?: number } }
 
+/** `internalStream` có ở JSZip runtime nhưng thiếu trong typings. */
+interface ZipStream {
+  on(event: "data", cb: (chunk: Uint8Array) => void): ZipStream
+  on(event: "error", cb: (err: Error) => void): ZipStream
+  on(event: "end", cb: () => void): ZipStream
+  pause(): ZipStream
+  resume(): ZipStream
+}
+type StreamableEntry = JSZip.JSZipObject & { internalStream(type: "uint8array"): ZipStream }
+
 export class DocxPackage {
   private readonly parts = new Map<string, Document>()
   private readonly originalXml = new Map<string, string>()
+  /** Byte đã thực sự giải nén (mỗi part tính một lần) — kích thước khai báo trong zip có thể bị khai man. */
+  private inflated = 0
+  private readonly counted = new Set<string>()
+  /** Hai lượt đọc cùng một part cùng lúc dùng chung một luồng — không giải nén / đếm byte hai lần. */
+  private readonly inflight = new Map<string, Promise<Buffer>>()
 
-  private constructor(private readonly zip: JSZip) {}
+  private constructor(
+    private readonly zip: JSZip,
+    private readonly limit: number
+  ) {}
 
-  static async load(data: Buffer | Uint8Array, opts: { maxUncompressedBytes?: number } = {}): Promise<DocxPackage> {
+  static async load(data: Buffer | Uint8Array, opts: { maxUncompressedBytes?: number; maxEntries?: number } = {}): Promise<DocxPackage> {
     const zip = await JSZip.loadAsync(data)
     const limit = opts.maxUncompressedBytes ?? MAX_UNCOMPRESSED_BYTES
+    const maxEntries = opts.maxEntries ?? MAX_ZIP_ENTRIES
+    const entries = Object.keys(zip.files).length
+    if (entries > maxEntries) throw new OoxmlError("PACKAGE_TOO_LARGE", `Gói có ${entries} mục vượt giới hạn ${maxEntries}`)
+    // Kiểm sớm theo kích thước khai báo (rẻ); giới hạn thật áp lúc giải nén từng part (`inflate`)
     let total = 0
     zip.forEach((_path, entry) => {
       total += (entry as ZipEntryWithSize)._data?.uncompressedSize ?? 0
     })
     if (total > limit) throw new OoxmlError("PACKAGE_TOO_LARGE", `Gói giải nén ${total} byte vượt giới hạn ${limit}`)
-    return new DocxPackage(zip)
+    return new DocxPackage(zip, limit)
+  }
+
+  /** Giải nén một part theo luồng, đếm byte thật và dừng ngay khi tổng của gói vượt giới hạn. */
+  private inflate(name: string, file: JSZip.JSZipObject): Promise<Buffer> {
+    const pending = this.inflight.get(name)
+    if (pending) return pending
+    const first = !this.counted.has(name)
+    const run = new Promise<Buffer>((resolve, reject) => {
+      const chunks: Uint8Array[] = []
+      let failed = false
+      // Đếm ngay từng chunk (part đọc song song cũng tính chung trần); luồng lỗi ⇒ trả lại để lượt đọc lại không bị tính hai lần
+      let read = 0
+      const stream = (file as StreamableEntry).internalStream("uint8array")
+      stream
+        .on("data", (chunk: Uint8Array) => {
+          if (failed) return
+          if (first) {
+            read += chunk.length
+            this.inflated += chunk.length
+          }
+          if (this.inflated > this.limit) {
+            failed = true
+            stream.pause()
+            reject(new OoxmlError("PACKAGE_TOO_LARGE", `Gói giải nén vượt giới hạn ${this.limit} byte`))
+            return
+          }
+          chunks.push(chunk)
+        })
+        .on("error", (err: Error) => {
+          if (failed) return
+          failed = true
+          this.inflated -= read
+          reject(err)
+        })
+        .on("end", () => {
+          if (failed) return
+          this.counted.add(name)
+          resolve(Buffer.concat(chunks))
+        })
+        .resume()
+    }).finally(() => this.inflight.delete(name))
+    this.inflight.set(name, run)
+    return run
   }
 
   has(name: string): boolean {
@@ -54,7 +129,7 @@ export class DocxPackage {
     if (cached) return cached
     const file = this.zip.file(name)
     if (!file) return null
-    const doc = parseXml(await file.async("string"), name)
+    const doc = parseXml((await this.inflate(name, file)).toString("utf8").replace(/^﻿/, ""), name)
     this.parts.set(name, doc)
     this.originalXml.set(name, serializeXml(doc))
     return doc
@@ -63,7 +138,7 @@ export class DocxPackage {
   /** Nội dung nhị phân của một part (ảnh `word/media/*`…) — không có ⇒ `null`. Mode 1 v3 phase 5 (T3). */
   async binary(name: string): Promise<Buffer | null> {
     const file = this.zip.file(name)
-    return file ? file.async("nodebuffer") : null
+    return file ? this.inflate(name, file) : null
   }
 
   /** Add a binary part without replacing any existing package part. */
@@ -75,6 +150,13 @@ export class DocxPackage {
     override.setAttribute("PartName", `/${name}`)
     override.setAttribute("ContentType", contentType)
     ct.documentElement.appendChild(override)
+  }
+
+  /** Xoá hẳn một part khỏi gói (không đụng `[Content_Types].xml` / rels — người gọi dọn phần khai báo). */
+  removePart(name: string): void {
+    this.zip.remove(name)
+    this.parts.delete(name)
+    this.originalXml.delete(name)
   }
 
   async requireXml(name: string): Promise<Document> {
@@ -100,15 +182,20 @@ export class DocxPackage {
   async relationships(ownerPart: string): Promise<Relationship[]> {
     const rels = await this.xml(relsPathOf(ownerPart))
     if (!rels) return []
-    return Array.from(rels.getElementsByTagNameNS(NS.rels, "Relationship")).map((r) => ({
-      id: r.getAttribute("Id") ?? "",
-      type: r.getAttribute("Type") ?? "",
-      target: r.getAttribute("Target") ?? ""
-    }))
+    return Array.from(rels.getElementsByTagNameNS(NS.rels, "Relationship")).map((r) => {
+      const mode = r.getAttribute("TargetMode")
+      return {
+        id: r.getAttribute("Id") ?? "",
+        type: r.getAttribute("Type") ?? "",
+        target: r.getAttribute("Target") ?? "",
+        ...(mode === "External" || mode === "Internal" ? { targetMode: mode } : {})
+      }
+    })
   }
 
-  /** Thêm quan hệ từ `ownerPart` tới `target` (đường dẫn tương đối như Word ghi). Trả `Id` mới. */
-  async addRelationship(ownerPart: string, type: string, target: string, idPrefix = "rIdFF"): Promise<string> {
+  /** Thêm quan hệ từ `ownerPart` tới `target` (đường dẫn tương đối như Word ghi, hoặc URL khi `targetMode: "External"`). Trả `Id` mới. */
+  async addRelationship(ownerPart: string, type: string, target: string, opts: AddRelationshipOptions = {}): Promise<string> {
+    const idPrefix = opts.idPrefix ?? "rIdFF"
     const path = relsPathOf(ownerPart)
     let rels = await this.xml(path)
     if (!rels) {
@@ -122,6 +209,7 @@ export class DocxPackage {
     rel.setAttribute("Id", `${idPrefix}${k}`)
     rel.setAttribute("Type", type)
     rel.setAttribute("Target", target)
+    if (opts.targetMode) rel.setAttribute("TargetMode", opts.targetMode)
     rels.documentElement.appendChild(rel)
     return `${idPrefix}${k}`
   }

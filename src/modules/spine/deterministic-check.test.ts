@@ -29,13 +29,13 @@ const withSystemNameStep = (s: Spine, status: StepStatus): void => {
 }
 
 describe("RULES", () => {
-  it("13 luật đỏ + 26 luật vàng (FLF-278: template_section_absent / _empty; FLF-365: verification_orphan; FLF-366: original_text_mentions_changed; FLF-370: actor_generalization_missing); mọi luật đỏ không waive được (FLF-329)", () => {
-    expect(RULES.filter((r) => r.level === "red")).toHaveLength(13)
+  it("14 luật đỏ + 27 luật vàng (FLF-278: template_section_absent / _empty; FLF-365: verification_orphan; FLF-366: original_text_mentions_changed; FLF-370: actor_generalization_missing); mọi luật đỏ không waive được (FLF-329)", () => {
+    expect(RULES.filter((r) => r.level === "red")).toHaveLength(14)
     // FLF-177: thêm screen_placeholder (BUG-03), function_without_uc (BUG-12),
     // derived_from_changed_assumption (BUG-14); mode 1 §4.13: original_diagram_stale;
     // FLF-225: orphan_entity, unresolved_many_to_many (ERD); actor_generalization_invalid, actor_generalization_children_unlisted; screen_actor_ambiguous đã bỏ cùng làn của luồng màn;
-    // FLF-370: actor_generalization_missing; FLF-365: verification_orphan; FLF-366: original_text_mentions_changed
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(26)
+    // FLF-370: actor_generalization_missing; FLF-365: verification_orphan; FLF-366: original_text_mentions_changed; đổi mẫu: template_section_migration_missing (đỏ) + section_reference_after_migration (vàng)
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(27)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(RULES.filter((r) => r.level === "red").map((r) => r.rule_id).sort())
     expect(RULES.filter((r) => r.level === "yellow").every((r) => r.waivable)).toBe(true)
   })

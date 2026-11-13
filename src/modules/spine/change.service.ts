@@ -15,6 +15,7 @@
  * Model chỉ sinh op — `apply-change-op/SKILL.md`. Lệnh mơ hồ ⇒ `clarification` (UC 6.11), không đoán bừa.
  */
 
+import { assertNoMigrationRunning } from "../template-migration/migration-guard.js"
 import { randomUUID } from "node:crypto"
 import { TransactionRejectedError, applyTransaction, planTransaction } from "./op-engine.js"
 import * as repository from "./spine.repository.js"
@@ -1043,6 +1044,7 @@ export const apply = async (
   deps: Partial<ChangeDeps> = {}
 ): Promise<ChangeApplyResult> => {
   const d: ChangeDeps = { ...defaultChangeDeps(), ...deps }
+  await assertNoMigrationRunning(projectId)
   const record = await loadSpine(projectId, init)
   assertVersion(record, body.base_version)
   assertDraftUnlocked(record)
