@@ -5,6 +5,7 @@ import { catchAsync } from "../../shared/utils/catch-async.js"
 import {
   adjustOrgCreditsSchema,
   aiCostQuerySchema,
+  feedbackQuerySchema,
   logIdParamSchema,
   orgIdParamSchema,
   orgsQuerySchema,
@@ -43,7 +44,9 @@ export const getAiCost = catchAsync(async (req: Request, res: Response) => {
   const query = parseWith(aiCostQuerySchema, req.query)
   const range = resolveDateRange(query)
   const report = await adminService.getAiCost(range, query.groupBy)
-  return sendSuccess(res, 200, report)
+  // `totals` của báo cáo là trên toàn bộ nhóm; chỉ `rows` theo trang
+  const { rows, meta } = adminService.paginateRows(report.rows, query.page, query.limit)
+  return sendSuccess(res, 200, { ...report, rows }, meta)
 })
 
 export const getAiActionPayload = catchAsync(async (req: Request, res: Response) => {
@@ -52,9 +55,10 @@ export const getAiActionPayload = catchAsync(async (req: Request, res: Response)
   return sendSuccess(res, 200, payload)
 })
 
-export const listFeedback = catchAsync(async (_req: Request, res: Response) => {
-  const items = await adminService.listFeedback()
-  return sendSuccess(res, 200, items, { total: items.length })
+export const listFeedback = catchAsync(async (req: Request, res: Response) => {
+  const query = parseWith(feedbackQuerySchema, req.query)
+  const result = await adminService.listFeedback(query)
+  return sendSuccess(res, 200, result.items, result.meta)
 })
 
 export const listOrgs = catchAsync(async (req: Request, res: Response) => {
