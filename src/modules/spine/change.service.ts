@@ -15,6 +15,7 @@
  * Model chỉ sinh op — `apply-change-op/SKILL.md`. Lệnh mơ hồ ⇒ `clarification` (UC 6.11), không đoán bừa.
  */
 
+import { assertNoMigrationRunning } from "../template-migration/migration-guard.js"
 import { randomUUID } from "node:crypto"
 import { TransactionRejectedError, applyTransaction, planTransaction } from "./op-engine.js"
 import * as repository from "./spine.repository.js"
@@ -404,7 +405,11 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
     if (entries.length > 0) projection.brief_core = entries.map(({ id, topic, content, content_en }) => ({ id, topic, content, content_en }))
   }
 
-  if (matched > 0) return { ...projection, existing_ids: existingIds }
+  // FLF-411 (#18): "đổi tên hệ thống thành …" — thiếu `project` model đoán `project.name` (tên dự án). Luôn kèm hai tên
+  // (gọn, không cả `project`) để model thấy `system_name` là field đang hiện ở tiêu đề / tên file.
+  const project = { name: spine.project.name, system_name: spine.project.system_name ?? null }
+
+  if (matched > 0) return { project, ...projection, existing_ids: existingIds }
 
   const index: Record<string, unknown> = {}
   for (const collection of TARGET_COLLECTIONS) {
@@ -415,7 +420,7 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
   if (spine.custom_sections.length > 0) {
     index.custom_sections = spine.custom_sections.slice(0, PROJECTION_ELEMENT_LIMIT).map(({ id, heading }) => ({ id, label: heading }))
   }
-  return { ...index, ...(projection.brief_core ? { brief_core: projection.brief_core } : {}), existing_ids: existingIds }
+  return { project, ...index, ...(projection.brief_core ? { brief_core: projection.brief_core } : {}), existing_ids: existingIds }
 }
 
 // ─── nhận diện lệnh sửa trong chat thường ────────────────────────
@@ -1039,6 +1044,7 @@ export const apply = async (
   deps: Partial<ChangeDeps> = {}
 ): Promise<ChangeApplyResult> => {
   const d: ChangeDeps = { ...defaultChangeDeps(), ...deps }
+  await assertNoMigrationRunning(projectId)
   const record = await loadSpine(projectId, init)
   assertVersion(record, body.base_version)
   assertDraftUnlocked(record)

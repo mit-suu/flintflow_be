@@ -1,4 +1,5 @@
 import { erdNotationOf, type ErdNotation } from "../../shared/diagram/erd-notation.js"
+import { screenThemeOf, type ScreenTheme } from "../../shared/diagram/screen-theme.js"
 import { Project, IProject, WITH_DELETED, type ProjectMode, type ProjectStartKind, type TemplateIntent } from "./project.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ChatSession } from "./chat-session.model.js"
@@ -351,6 +352,35 @@ export const setErdNotation = async (projectId: string, orgId: string, erdNotati
   if (!project) throw notFound()
   if (erdNotationOf(before) !== erdNotation) await redrawErd(projectId, userId)
   return project
+}
+
+/**
+ * Đổi theme mockup màn (FLF-410). Chỉ ghi field của Project — Spine không đổi. Theme đã resolve nằm trong hash hình
+ * `screen_layout` ⇒ đổi xong mọi mockup đã vẽ thành stale; vẽ lại ngay bằng spec đã lưu trong SVG (0 lượt model, 0 credit).
+ * Màn chưa có spec (bảng function, wireframe cũ) giữ nguyên đến lượt vẽ kế tiếp. Vẽ lại lỗi chỉ ghi log.
+ */
+export const setScreenTheme = async (projectId: string, orgId: string, patch: Partial<ScreenTheme>, userId: string): Promise<IProject> => {
+  const notFound = () => new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
+  if (!mongoose.isValidObjectId(projectId)) throw notFound()
+  const before = await Project.findOne({ _id: projectId, organizationId: orgId }).select("screenTheme").lean()
+  if (!before) throw notFound()
+  const next: ScreenTheme = { ...screenThemeOf(before), ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) }
+  const project = await Project.findOneAndUpdate({ _id: projectId, organizationId: orgId }, { $set: { screenTheme: next } }, { new: true })
+  if (!project) throw notFound()
+  if (JSON.stringify(screenThemeOf(before)) !== JSON.stringify(screenThemeOf(project))) await redrawScreenLayouts(projectId, userId)
+  return project
+}
+
+/** Vẽ lại mockup đã có bằng spec đã lưu — không gọi model. Lỗi chỉ ghi log. */
+export const redrawScreenLayouts = async (projectId: string, userId: string): Promise<void> => {
+  try {
+    const spine = await spineRepository.get(projectId)
+    if (!spine?.diagrams.some((d) => d.kind === "screen_layout")) return
+    const { redrawScreenLayoutsFromSpec } = await import("../diagram/diagram.service.js")
+    await redrawScreenLayoutsFromSpec(projectId, { by: userId, step_id: null })
+  } catch (err) {
+    console.warn(`[project] vẽ lại mockup màn sau khi đổi theme lỗi (project ${projectId}): ${err instanceof Error ? err.message : String(err)}`)
+  }
 }
 
 const redrawErd = async (projectId: string, userId: string): Promise<void> => {

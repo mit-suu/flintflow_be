@@ -16,6 +16,12 @@ describe("buildChatSpineIndex", () => {
     expect(text).not.toContain("secret prose")
   })
 
+  it("FLF-411 (#18): có project ⇒ dòng System name theo dữ liệu hiện tại; chưa đặt ⇒ (not set)", () => {
+    expect(buildChatSpineIndex({ project: { system_name: "ShuttleBook" } })).toContain("- System name: ShuttleBook")
+    expect(buildChatSpineIndex({ project: { system_name: null } })).toContain("- System name: (not set)")
+    expect(buildChatSpineIndex({ use_cases: [] })).not.toContain("System name")
+  })
+
   it("quá trần phần tử ⇒ ghi phần còn lại dạng +N", () => {
     const text = buildChatSpineIndex({ use_cases: Array.from({ length: SPINE_INDEX_MAX_ITEMS + 5 }, (_, i) => uc(i + 1)) })
     expect(text).toContain(`- Use cases: ${SPINE_INDEX_MAX_ITEMS + 5} -`)

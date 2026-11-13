@@ -165,6 +165,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    unchanged - renaming a neighbour "while we are here" is how two functions of another screen got
    overwritten in the UI test.
 9. Projection has `brief_core` ⇒ vision/goals are those addendum entries: `set addendum[id=…].content` (user's language) and `.content_en` (English); `add` a `goals` entry for a new goal, `remove` one for a dropped goal; never `project.vision`/`project.goals`.
+9b. **System name vs project name** (projection `project`): "tên hệ thống" / system name / product name ⇒ `set project.system_name` (English; it is the name on the cover, headers, diagrams and file name); `project.name` only when the user explicitly says project name ("tên dự án").
 10. **Use case names you word yourself** (a new use case, a split, a rename the user describes but does not spell
    out) follow the naming rules code checks after you: Title Case, no trailing period; one goal - no "and", "/"
    or comma (two goals ⇒ two use cases); a concrete verb, never Manage, Handle, Process, Maintain, Administer,

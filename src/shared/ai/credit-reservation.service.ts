@@ -45,7 +45,11 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   // giới hạn số câu mỗi ngày (`KNOWLEDGE_DAILY_LIMIT`), không chuyển sang trừ credit. Vẫn ghi `AiActionLog` cho admin.
   [ActionType.KNOWLEDGE_ANSWER]: 0,
   // FLF-338: đọc cả tài liệu thô một lượt + gán nhãn so với SRS
-  [ActionType.EXTRACT_REQUIREMENTS]: 3
+  [ActionType.EXTRACT_REQUIREMENTS]: 3,
+  // FLF-395: một lượt ngắn cho cả danh sách heading chờ duyệt
+  [ActionType.SKELETON_GENERIC_NAMES]: 1,
+  // D8: một lượt mỗi mục BA chọn "chuyển vào mục có cấu trúc" / "AI giải quyết" khi đổi mẫu (đã báo credit trước ở `credit_estimate`)
+  [ActionType.TEMPLATE_MIGRATION_RESOLVE]: 3
 }
 
 /** Một lần giữ credit. Truyền nguyên object này cho deduct/release. */

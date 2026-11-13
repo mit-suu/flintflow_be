@@ -50,7 +50,7 @@ import { originalDiagramHash } from "../../../src/modules/spine/original-diagram
 import { assemble, getDocument } from "../../../src/modules/render/assemble.service.js"
 import { downloadVersion, toVersionDto } from "../../../src/modules/doc-version/versions.service.js"
 import { SRS_FIXTURE_TEXT } from "../../../src/modules/import/testing/srs-fixture.js"
-import { buildPlaceholderPng } from "../../../src/modules/render/diagram-placeholder.js"
+import { DIAGRAM_PLACEHOLDER_PNG, buildPlaceholderPng } from "../../../src/modules/render/diagram-placeholder.js"
 import { clearImportMediaCache } from "../../../src/modules/render/import-media.js"
 import { readZipText } from "../../../src/modules/render/zip.test-helper.js"
 
@@ -105,15 +105,15 @@ describe("finalize - Spine", () => {
     expect(spine.screens.every((s) => s.detail_status !== "pending")).toBe(true)
   })
 
-  it("FLF-343: field độ tin thấp chưa xác nhận KHÔNG bị bỏ - vào Spine kèm đúng một cờ vàng Cần xem / field (mang đường dẫn); mapping tự nhận cũng có cờ", async () => {
+  it("FLF-343: field độ tin thấp chưa xác nhận KHÔNG bị bỏ - vào Spine kèm đúng một cờ vàng Cần xem / phần tử (FLF-411 U2-5, mang đường dẫn phần tử); mapping tự nhận cũng có cờ", async () => {
     const { projectId, importId, userId } = await importAtBaselining({ srs: { numberedOnly: true } })
     const before = (await spineRepository.get(projectId))!
     await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
     const spine = (await spineRepository.get(projectId))!
     expect(spine.functions.map((f) => f.trigger)).toEqual(["Learner submits the form", "Learner submits the form"])
     const review = spine.flags.filter((f) => f.rule_id === "import_needs_review" && f.resolved_at === null)
-    const fieldFlags = review.filter((f) => f.target_id?.includes("].trigger"))
-    expect(fieldFlags.map((f) => f.target_id).sort()).toEqual(["functions[id=FR-3.2.1].trigger", "functions[id=FR-3.2.2].trigger"])
+    const fieldFlags = review.filter((f) => f.target_id?.startsWith("functions["))
+    expect(fieldFlags.map((f) => f.target_id).sort()).toEqual(["functions[id=FR-3.2.1]", "functions[id=FR-3.2.2]"])
     expect(fieldFlags.every((f) => f.level === "yellow" && f.message.startsWith("Cần xem:") && f.section_id.startsWith("function:FR-3.2."))).toBe(true)
     // heading không style (độ tin 0.75) ⇒ mỗi heading tự nhận một cờ, target = block heading
     const profile = (await TemplateProfile.findOne({ projectId }).lean())!
@@ -444,7 +444,7 @@ describe("ảnh - giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 phase
 
   beforeEach(() => clearImportMediaCache())
 
-  it("ảnh dưới mục FPT ⇒ block image_ref ⇒ phần nối nguyên văn của mục; bản render 0.1 nhúng lại đúng bytes PNG, EMF ⇒ chỗ giữ ảnh có lý do", async () => {
+  it("ảnh dưới mục FPT ⇒ block image_ref ⇒ phần nối nguyên văn của mục; bản render 0.1 nhúng lại đúng bytes PNG, EMF ⇒ chỗ giữ ảnh trống", async () => {
     const { projectId } = await importFinalized({ srs })
     const blocks = await DocBlock.find({ projectId, doc_version: "0.1", kind: "image" }).lean()
     expect(blocks.map((b) => b.image_ref).sort()).toEqual(["word/media/image1.png", "word/media/image2.emf"])
@@ -460,7 +460,8 @@ describe("ảnh - giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 phase
     )
     expect(media.some((m) => m.equals(PNG))).toBe(true)
     const texts = (await readBlocks(rendered)).map((b) => b.text)
-    expect(texts.some((t) => t.includes("original image could not be embedded (unsupported format)"))).toBe(true)
+    // FLF-411 U1-7: EMF ⇒ chỗ giữ ảnh trống, không in câu kỹ thuật vào tài liệu
+    expect(texts.some((t) => t.includes("could not be embedded") || t.includes("không nhúng được"))).toBe(false)
     // không in đường dẫn file ảnh trong tài liệu
     expect(texts.some((t) => t.includes("word/media/"))).toBe(false)
 
@@ -686,7 +687,8 @@ describe("ảnh - giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 phase
     await ImportedDocument.updateMany({ projectId }, { $set: { file_ref: null } })
     clearImportMediaCache()
     const doc = await getDocument(projectId, "Lumen", { source: "draft" })
-    expect(JSON.stringify(doc)).toContain("original image could not be embedded (unsupported format)")
+    expect(JSON.stringify(doc)).toContain(DIAGRAM_PLACEHOLDER_PNG)
+    expect(JSON.stringify(doc)).not.toContain("could not be embedded")
   })
 })
 

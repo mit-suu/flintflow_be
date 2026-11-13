@@ -93,3 +93,23 @@ describe("Scene.toSvg - tất định", () => {
     `)
   })
 })
+
+describe("Scene - màu tuỳ chọn + metadata (FLF-410)", () => {
+  it("metadata: chỉ toSvg sinh markup, chữ được escape, id sai / trùng ⇒ ném", () => {
+    const scene = new Scene()
+    scene.rect("R", 0, 0, 10, 10, { stroke: "none", fill: "#3F5591" })
+    scene.text("T", 5, 5, "x", { color: "#FFFFFF" })
+    scene.metadata("ff-screen-spec", `{"t":"</metadata><script>alert(1)</script>"}`)
+    const svg = scene.toSvg()
+    expect(parse(svg).errors).toEqual([])
+    expect(elementNames(svg).every((n) => SVG_ELEMENT_WHITELIST.has(n))).toBe(true)
+    expect(svg).not.toContain("<script")
+    expect(parse(svg).doc.getElementsByTagName("metadata")[0].textContent).toBe(`{"t":"</metadata><script>alert(1)</script>"}`)
+    expect(svg).toContain('<rect x="0" y="0" width="10" height="10" fill="#3F5591" stroke="none"/>')
+    expect(svg).toContain('fill="#FFFFFF">x</text>')
+    expect(() => scene.metadata("ff-screen-spec", "{}")).toThrow(/trùng/)
+    expect(() => scene.metadata(`x" onload="y`, "{}")).toThrow(/không hợp lệ/)
+    expect(() => scene.rect("Z", 0, 0, 1, 1, { stroke: `red" onload="x` })).toThrow(/màu/)
+    expect(() => scene.text("Z2", 0, 0, "x", { color: "url(#x)" })).toThrow(/màu/)
+  })
+})
