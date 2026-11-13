@@ -312,3 +312,16 @@ describe("openAssumptionsFor - biến {{assumptions}} của elicit-loop (FLF-358
     expect(assumptionsForPrompt(withStatus({ AS01: "unconfirmed" }), "S-6.3")).toHaveLength(1)
   })
 })
+
+describe("FLF-413 - khung của mẫu không vào projection", () => {
+  it("S-4.1 / S-4.4 không thấy tính năng / chức năng tên chỗ điền", () => {
+    const spine: Spine = structuredClone(FIXTURE)
+    spine.features = [...spine.features, { id: "F-3.2", name: "<<Feature Name 1>>", order: spine.features.length }]
+    spine.functions = [...spine.functions, { ...spine.functions[0], id: "FR-3.2.1", feature_id: "F-3.2", screen_id: null, order: 0, name: "<<Function Name 1>>", validations: [] }]
+    for (const stepId of ["S-4.1", "S-4.4"]) {
+      const text = JSON.stringify(projectStep(spine, stepId).projection)
+      expect(text, stepId).not.toContain("<<")
+    }
+    expect(JSON.stringify(projectStep(spine, "S-4.1").projection)).toContain(FIXTURE.features[0].name)
+  })
+})
