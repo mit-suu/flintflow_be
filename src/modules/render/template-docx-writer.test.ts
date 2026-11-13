@@ -5,7 +5,7 @@ import { DocxPackage, readStamp } from "../docx-ooxml/index.js"
 import { NS, wAll, wAttr, wKid, wKids } from "../docx-ooxml/xml.js"
 import { parseDocument } from "../import/parse.service.js"
 import type { RenderedDocument } from "./rendered-document.types.js"
-import { writeTemplateDocx } from "./template-docx-writer.js"
+import { isFrameHeading, writeTemplateDocx } from "./template-docx-writer.js"
 
 const styles = `<w:styles xmlns:w="${NS.w}"><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/></w:style><w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/></w:style></w:styles>`
 const heading = (text: string, level = 1) => `<w:p><w:pPr><w:pStyle w:val="Heading${level}"/><w:keepNext/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>${text}</w:t></w:r></w:p>`
@@ -423,5 +423,14 @@ describe("writeTemplateDocx", () => {
       expect(blocks.some((b) => b.kind === "heading" && b.text === "Child")).toBe(false)
       expect(blocks.some((b) => b.text === "Child text")).toBe(true)
     })
+  })
+})
+
+describe("FLF-413 - isFrameHeading", () => {
+  it("heading mục lặp có chữ là chỗ điền (bỏ số gõ tay) ⇒ khung", () => {
+    expect(isFrameHeading("feature:F-3.2", "3.2 <<Feature Name 1>>")).toBe(true)
+    expect(isFrameHeading("function:FR-3.2.1", "3.2.1 <<Function Name 1>>")).toBe(true)
+    expect(isFrameHeading("feature:F-3.2", "3.2 Booking")).toBe(false)
+    expect(isFrameHeading("fixed:3.1", "<<Overview>>")).toBe(false)
   })
 })
