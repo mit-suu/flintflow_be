@@ -59,7 +59,7 @@ export const deleteProject = catchAsync(async (req: Request, res: Response) => {
 
   const projectId = req.params.projectId as string
   const hard = req.query.hard === "true"
-  const result = await projectService.deleteProject(projectId, requireOrgId(req), hard)
+  const result = await projectService.deleteProject(projectId, requireOrgId(req), hard, userId)
   return sendSuccess(res, 200, result)
 })
 

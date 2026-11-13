@@ -21,7 +21,7 @@ vi.mock("../../../src/shared/utils/cloudinary.js", () => ({
 import app from "../../../src/app.js"
 import { User } from "../../../src/modules/user/user.model.js"
 import { Membership, type OrgRole } from "../../../src/modules/organization/membership.model.js"
-import { Project } from "../../../src/modules/project/project.model.js"
+import { Project, WITH_DELETED } from "../../../src/modules/project/project.model.js"
 import { ChatSession } from "../../../src/modules/project/chat-session.model.js"
 import { ProjectDocument } from "../../../src/modules/project/project-document.model.js"
 import { Spine } from "../../../src/modules/spine/spine.model.js"
@@ -114,14 +114,19 @@ describe("UC-19 - xoá dự án", () => {
       .delete(projectUrl(projectId) + (hard ? "?hard=true" : ""))
       .set(bearer(token))
 
-  it("Lead xoá vĩnh viễn ⇒ 200, dự án và dữ liệu đi kèm (Spine, phiên chat) biến mất", async () => {
+  it("Lead xoá vĩnh viễn ⇒ 200, dự án biến khỏi app; FLF-401: BE chỉ xoá mềm — bản ghi, Spine, phiên chat còn nguyên", async () => {
+    const chatsBefore = await ChatSession.countDocuments({ projectId: seeded.projectId })
     const res = await remove(lead)
     expect(res.status).toBe(200)
     expect(res.body.data).toMatchObject({ _id: seeded.projectId, status: "deleted" })
 
+    // Truy vấn thường không thấy dự án đã xoá; bật WITH_DELETED mới thấy, kèm dấu xoá
     expect(await Project.countDocuments({ _id: seeded.projectId })).toBe(0)
-    expect(await Spine.countDocuments({ projectId: seeded.projectId })).toBe(0)
-    expect(await ChatSession.countDocuments({ projectId: seeded.projectId })).toBe(0)
+    const kept = await Project.findById(seeded.projectId).setOptions(WITH_DELETED).lean()
+    expect(kept?.deletedAt).toBeInstanceOf(Date)
+    expect(String(kept?.deletedBy)).toBe(String(seeded.userId))
+    expect(await Spine.countDocuments({ projectId: seeded.projectId })).toBe(1)
+    expect(await ChatSession.countDocuments({ projectId: seeded.projectId })).toBe(chatsBefore)
 
     const open = await request(app).get(projectUrl(seeded.projectId)).set(bearer(lead))
     expect(open.status).toBe(404)
