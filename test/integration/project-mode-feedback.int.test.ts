@@ -94,4 +94,31 @@ describe("feedback", () => {
     expect(res.body.data.map((f: { message: string }) => f.message)).toEqual(["Thêm dark mode", "Nút lưu không chạy"])
     expect(res.body.data[0].user).toMatchObject({ _id: seeded.userId, name: "Fixture User" })
   })
+
+  it("FLF-404: admin đọc góp ý theo trang; q tìm không dấu trong nội dung hoặc email người gửi", async () => {
+    const seeded = await seedFixture("minimal")
+    const admin = await User.create({ email: "admin-page@flintflow.test", password: "admin-password-123", name: "Admin", role: "admin", emailVerified: true })
+    const adminToken = await authAs({ _id: admin._id, email: admin.email, role: "admin" })
+    const auth = { Authorization: `Bearer ${adminToken}` }
+    for (const message of ["Không đăng nhập được", "Nút lưu chậm", "Thêm dark mode", "Lỗi xuất Word", "Đăng xuất bị treo"]) {
+      expect((await request(app).post("/api/v1/feedback").set(as(seeded)).send({ category: "bug", message })).status).toBe(201)
+    }
+
+    const page2 = await request(app).get("/api/v1/admin/feedback?page=2&limit=2").set(auth)
+    expect(page2.status).toBe(200)
+    expect(page2.body.meta).toEqual({ page: 2, limit: 2, total: 5, totalPages: 3 })
+    expect(page2.body.data.map((f: { message: string }) => f.message)).toEqual(["Thêm dark mode", "Nút lưu chậm"])
+
+    // "dang" khớp "đăng nhập" và "Đăng xuất" (không dấu, không phân biệt hoa thường)
+    const search = await request(app).get("/api/v1/admin/feedback?q=dang").set(auth)
+    expect(search.body.meta.total).toBe(2)
+    expect(search.body.data.map((f: { message: string }) => f.message)).toEqual(["Đăng xuất bị treo", "Không đăng nhập được"])
+
+    // Theo email người gửi ⇒ cả 5 góp ý của fixture
+    const sender = await User.findById(seeded.userId).lean()
+    const bySender = await request(app).get(`/api/v1/admin/feedback?q=${encodeURIComponent(sender!.email.split("@")[0])}`).set(auth)
+    expect(bySender.body.meta.total).toBe(5)
+
+    expect((await request(app).get("/api/v1/admin/feedback?limit=500").set(auth)).status).toBe(400)
+  })
 })
