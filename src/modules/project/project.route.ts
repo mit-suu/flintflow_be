@@ -106,6 +106,49 @@ const upload = multer({
  *       401:
  *         description: Chưa xác thực
  */
+/**
+ * @swagger
+ * /api/v1/projects:
+ *   get:
+ *     summary: Dự án của tổ chức đang mở — không có `page` ⇒ mảng (mới tạo trước); có `page` ⇒ một trang (FLF-404)
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         description: Bật phân trang; bỏ trống ⇒ trả mọi dự án như cũ
+ *         schema: { type: integer, minimum: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, maximum: 100, default: 24 }
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [active, archived] }
+ *       - in: query
+ *         name: mode
+ *         description: Chỉ khi có page
+ *         schema: { type: string, enum: [import, fpt, customer_template] }
+ *       - in: query
+ *         name: q
+ *         description: Chỉ khi có page — tìm tên không phân biệt dấu
+ *         schema: { type: string, maxLength: 100 }
+ *       - in: query
+ *         name: sort
+ *         description: Chỉ khi có page — created (mới tạo trước) · updated (sửa gần nhất) · opened (mở gần nhất, chưa mở xếp cuối)
+ *         schema: { type: string, enum: [created, updated, opened], default: created }
+ *       - in: query
+ *         name: folder
+ *         description: Chỉ khi có page — id thư mục, hoặc none = dự án ngoài thư mục
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: "Project[]; có page thì meta gồm page, limit, total, totalPages"
+ *       400:
+ *         description: VALIDATION_ERROR — tham số phân trang / lọc không hợp lệ
+ *       401:
+ *         description: Chưa xác thực
+ */
 router.get("/", authMiddleware, projectController.getProjects)
 router.post("/", authMiddleware, validateRequest(CreateProjectSchema), projectController.createProject)
 

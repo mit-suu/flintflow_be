@@ -5,7 +5,8 @@ import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
-import type { CreateProjectDTO, MoveProjectDTO, UpdateDocumentLanguageDTO, UpdateErdNotationDTO } from "./project.validation.js"
+import { ListProjectsQuerySchema, type CreateProjectDTO, type MoveProjectDTO, type UpdateDocumentLanguageDTO, type UpdateErdNotationDTO } from "./project.validation.js"
+import { validationError } from "../../shared/utils/validation-message.js"
 
 export const createProject = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
@@ -23,6 +24,14 @@ export const getProjects = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
     throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
+  }
+
+  // FLF-404: có `page` ⇒ một trang + meta; không ⇒ mảng như cũ (client chưa phân trang)
+  if (req.query.page !== undefined) {
+    const parsed = ListProjectsQuerySchema.safeParse(req.query)
+    if (!parsed.success) throw validationError(parsed.error)
+    const result = await projectService.listProjectsPage(requireOrgId(req), parsed.data)
+    return sendSuccess(res, 200, result.items, result.meta)
   }
 
   const status = req.query.status as string | undefined
