@@ -106,11 +106,10 @@ const buildExportDocx = async (req: Request, res: Response): Promise<ExportedDoc
   // FLF-344: dự án mode 1 (import thật lẫn chuyển từ mode 2) — mục lục ghi sẵn như file version; mode 2 giữ field TOC rỗng
   // Dự án "Upload SRS có sẵn": mục chưa đổi so với lúc import in nguyên văn từ file upload — kể cả SRS viết dở giữ khung đang
   // soạn phần thiếu ở Luồng 2 (`mode = fpt`); `sourceFidelityFor` tự trả `undefined` với dự án không có file nền
-  const fidelity = mode === "import" || templateIntent === "fixed"
-    ? await sourceFidelityFor(projectId, parsed.data, (spine) => renderSpineDocument(projectId, projectName, spine, {
-        version: parsed.data.version, source: parsed.data.source, languages: { locale, source: sourceLanguage }
-      }, template ? { loadTemplate: async () => template.layout } : undefined), { otherLanguage })
-    : undefined
+  // Không chặn theo mode / template_intent: dự án đã đổi mẫu (`migrated_base_at`) ở mọi chế độ cũng lấy file nền mới làm nền, giống file version
+  const fidelity = await sourceFidelityFor(projectId, parsed.data, (spine) => renderSpineDocument(projectId, projectName, spine, {
+    version: parsed.data.version, source: parsed.data.source, languages: { locale, source: sourceLanguage }
+  }, template ? { loadTemplate: async () => template.layout } : undefined), { otherLanguage })
   const buffer = await writeProjectDocx(parsed.data, { ...writerOptionsFor(mode, locale, convertedFrom), ...(mode === "import" ? { tocEntries: true } : {}) }, templateIntent, template ?? undefined, fidelity)
   // review C2: source=draft — đính kèm độ mới của bản đang xuất (baseline bất biến, không cần).
   // FLF-265: bản dịch không ghi cache ⇒ độ mới của chính bản vừa dựng.

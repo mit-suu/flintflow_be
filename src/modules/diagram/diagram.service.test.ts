@@ -85,7 +85,12 @@ import { runDeterministicCheck } from "../spine/deterministic-check.js"
 import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { createMemoryDiagramStore } from "./diagram-file.store.js"
 import { renderKind } from "./renderers/index.js"
-import { compileWithFix, defaultDeps, loadDiagramFile, noAutoFix, renderAll, renderChangedIfAvailable, renderDiagram, sameDiagramSubject, staleDiagrams, staleRenderedDiagrams, type DiagramServiceDeps } from "./diagram.service.js"
+import { compileWithFix, defaultDeps, loadDiagramFile, noAutoFix, redrawScreenLayoutsFromSpec, renderAll, renderChangedIfAvailable, renderDiagram, renderDiagrams, sameDiagramSubject, staleDiagrams, staleRenderedDiagrams, type DiagramServiceDeps } from "./diagram.service.js"
+import type { RenderContext } from "../../shared/diagram/erd-notation.js"
+import { svgTitleOf } from "./renderers/common.js"
+import { screenSpecOf } from "./renderers/screen-mockup.js"
+import type { ScreenEnvelope, ScreenSpec } from "./screen-spec.js"
+import { SIGNUP_SPEC } from "./screen-spec.samples.js"
 import { applyTransaction } from "../spine/op-engine.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -381,44 +386,120 @@ describe("renderAll / renderDiagram qua op engine", () => {
   })
 })
 
-describe("screen_layout do model vẽ (FLF-214)", () => {
-  const SALT = ["@startsalt", "{", "  {+", "    Email", "    \"john@example.com  \"", "    [ Log in ]", "  }", "}", "@endsalt", ""].join("\n")
+describe("screen_layout: mockup SVG theo theme dự án (FLF-410)", () => {
+  const BOTH: RenderContext = { screenTheme: { primaryColor: "#3F5591", domain: "flintflow.io", platforms: ["web", "mobile"] } }
+  const envelope = (spec: ScreenSpec = { ...SIGNUP_SPEC, platforms: ["web", "mobile"] }): ScreenEnvelope => ({ spec, screenImages: null, primaryColor: null })
+  const withContext = (deps: Partial<DiagramServiceDeps>, context: RenderContext): Partial<DiagramServiceDeps> => ({
+    ...deps,
+    renderContext: async () => context,
+    renderSvgPng: async () => Buffer.from("png")
+  })
 
-  it("drawLayout trả salt ⇒ lưu salt đó; mặc định không gọi model ⇒ bảng function", async () => {
+  it("model trả spec ⇒ một hình mỗi nền tảng (Web / Mobile), cùng mục; spec lưu trong SVG", async () => {
     await seed()
     const { deps } = makeDeps()
-    const drawLayout = vi.fn(async () => SALT)
-    const drawn = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...deps, drawLayout } })
-    expect(drawLayout).toHaveBeenCalledWith(expect.objectContaining({ projectId: PROJECT, userId: USER, screenId: "S01" }))
-    expect(drawn.diagrams[0]).toMatchObject({ owner_id: "S01", render_status: "ok", source: SALT })
-
-    // Không cắm drawLayout (test, script) ⇒ bảng function của renderer code
-    const plain = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps, force: true })
-    expect(plain.diagrams[0].source).toBe(renderKind(FIXTURE, "screen_layout", "S01")[0].source)
-    // Hình khác không gọi model
-    await renderDiagram(PROJECT, "erd", null, { by: USER, deps: { ...deps, drawLayout } })
+    const drawLayout = vi.fn(async () => envelope())
+    const drawn = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...withContext(deps, BOTH), drawLayout } })
     expect(drawLayout).toHaveBeenCalledTimes(1)
+    expect(drawLayout).toHaveBeenCalledWith(expect.objectContaining({ projectId: PROJECT, userId: USER, screenId: "S01", platforms: ["web", "mobile"] }))
+    expect(drawn.diagrams).toHaveLength(2)
+    const [web, mobile] = drawn.diagrams
+    expect(mobile.id).toBe(`${web.id}-2`)
+    expect(web).toMatchObject({ format: "svg", render_status: "ok", section: mobile.section, owner_id: "S01" })
+    expect(svgTitleOf(web.source)).toBe("Screen Layout - Login (Web)")
+    expect(svgTitleOf(mobile.source)).toBe("Screen Layout - Login (Mobile)")
+    expect(web.source).toContain("https://flintflow.io/signup")
+    expect(screenSpecOf(web.source)?.spec.title).toBe(SIGNUP_SPEC.title)
+  })
+
+  it("màn chỉ web (spec thu hẹp) ⇒ một hình, chú thích không hậu tố", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    const drawn = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...withContext(deps, BOTH), drawLayout: async () => envelope({ ...SIGNUP_SPEC, platforms: ["web"] }) } })
+    expect(drawn.diagrams).toHaveLength(1)
+    expect(svgTitleOf(drawn.diagrams[0].source)).toBe("Screen Layout - Login")
+  })
+
+  it("đổi màu / domain / nền tảng ⇒ hình stale, vẽ lại từ spec đã lưu, 0 lượt model", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    const drawLayout = vi.fn(async () => envelope())
+    await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...withContext(deps, BOTH), drawLayout } })
+    // vẽ lại cùng theme, force ⇒ vẫn không gọi model (contentHash khớp)
+    await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, force: true, deps: { ...withContext(deps, BOTH), drawLayout } })
+    const orange: RenderContext = { screenTheme: { primaryColor: "#E4572E", domain: null, platforms: ["web"] } }
+    const record = await repo.get(PROJECT)
+    expect(staleDiagrams(record!, orange).map((d) => d.owner_id)).toContain("S01")
+    const redrawn = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...withContext(deps, orange), drawLayout } })
+    expect(drawLayout).toHaveBeenCalledTimes(1)
+    expect(redrawn.diagrams).toHaveLength(1)
+    expect(redrawn.removed).toHaveLength(1)
+    expect(redrawn.diagrams[0].source).toContain("#E4572E")
+    expect(redrawn.diagrams[0].source).not.toContain("https://")
+  })
+
+  it("sửa validation của một function ⇒ chỉ màn đó gọi model lại", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    const drawLayout = vi.fn(async () => envelope())
+    const targets = [
+      { kind: "screen_layout" as const, owner_id: "S01" },
+      { kind: "screen_layout" as const, owner_id: "S05" }
+    ]
+    const first = await renderDiagrams(PROJECT, targets, { by: USER, deps: { ...withContext(deps, BOTH), drawLayout } })
+    expect(drawLayout).toHaveBeenCalledTimes(2)
+    const fn = FIXTURE.functions.find((f) => f.screen_id === "S01" && f.validations.length > 0)!
+    await applyTransaction(PROJECT, {
+      base_version: first.spine_version,
+      ops: [{ op: "set", path: `functions[id=${fn.id}].validations[id=${fn.validations[0].id}].statement`, value: "Email must be at most 120 characters." }],
+      by: USER,
+      reason: "test"
+    })
+    await renderDiagrams(PROJECT, targets, { by: USER, force: true, deps: { ...withContext(deps, BOTH), drawLayout } })
+    expect(drawLayout).toHaveBeenCalledTimes(3)
+    expect(drawLayout).toHaveBeenLastCalledWith(expect.objectContaining({ screenId: "S01" }))
+  })
+
+  it("redrawScreenLayoutsFromSpec: màn chưa có spec giữ nguyên hình, không gọi model", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    // S01 có spec, S05 rơi về bảng function
+    await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...withContext(deps, BOTH), drawLayout: async () => envelope() } })
+    await renderDiagram(PROJECT, "screen_layout", "S05", { by: USER, deps: { ...withContext(deps, BOTH), drawLayout: async () => null } })
+    const before = (await repo.get(PROJECT))!.diagrams.find((d) => d.owner_id === "S05")!
+    const drawLayout = vi.fn(async () => envelope())
+    const red: RenderContext = { screenTheme: { primaryColor: "#B00020", domain: null, platforms: ["web", "mobile"] } }
+    const result = await redrawScreenLayoutsFromSpec(PROJECT, { by: USER, deps: { ...withContext(deps, red), drawLayout } })
+    expect(drawLayout).not.toHaveBeenCalled()
+    expect(result.diagrams.filter((d) => d.owner_id === "S01").every((d) => d.source.includes("#B00020"))).toBe(true)
+    expect(result.diagrams.find((d) => d.owner_id === "S05")).toEqual(before)
   })
 
   it("FLF-387: `by` là mã CR, có `userId` ⇒ model gọi bằng userId, change vẫn ghi mã CR", async () => {
     await seed()
     const { deps } = makeDeps()
-    const drawLayout = vi.fn(async () => SALT)
-    const drawn = await renderDiagram(PROJECT, "screen_layout", "S01", { by: "CR-002", userId: USER, deps: { ...deps, drawLayout } })
+    const drawLayout = vi.fn(async () => envelope())
+    await renderDiagram(PROJECT, "screen_layout", "S01", { by: "CR-002", userId: USER, deps: { ...withContext(deps, BOTH), drawLayout } })
     expect(drawLayout).toHaveBeenCalledWith(expect.objectContaining({ userId: USER, screenId: "S01" }))
-    expect(drawn.diagrams[0]).toMatchObject({ owner_id: "S01", source: SALT })
     const changes = await db.Change.find({})
     expect(changes[changes.length - 1]).toMatchObject({ by: "CR-002" })
   })
 
-  it("salt của model không compile, model trả null hoặc ném ⇒ bảng function, vẫn ok", async () => {
+  it("model trả null / ném; không cắm model ⇒ bảng function (puml), vẫn ok, không render_error", async () => {
     await seed()
     const table = renderKind(FIXTURE, "screen_layout", "S01")[0].source
-    const { deps } = makeDeps(async (source) => render(source !== SALT))
-    for (const drawLayout of [async () => SALT, async () => null, async () => Promise.reject(new Error("no credit"))]) {
-      const result = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...deps, drawLayout }, force: true })
-      expect(result.diagrams[0]).toMatchObject({ render_status: "ok", source: table })
+    const { deps } = makeDeps()
+    for (const drawLayout of [async () => null, async () => Promise.reject(new Error("no credit"))]) {
+      const result = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...withContext(deps, BOTH), drawLayout }, force: true })
+      expect(result.diagrams).toHaveLength(1)
+      expect(result.diagrams[0]).toMatchObject({ render_status: "ok", format: "puml", source: table })
     }
+    const plain = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: withContext(deps, BOTH), force: true })
+    expect(plain.diagrams[0].source).toBe(table)
+    // Hình khác không gọi model
+    const drawLayout = vi.fn(async () => envelope())
+    await renderDiagram(PROJECT, "erd", null, { by: USER, deps: { ...withContext(deps, BOTH), drawLayout } })
+    expect(drawLayout).not.toHaveBeenCalled()
   })
 })
 

@@ -51,6 +51,8 @@ export interface FinalizeCheckpoint {
 export interface IImportedDocument extends Document {
   projectId: mongoose.Types.ObjectId
   file_ref: string | null
+  /** FLF-412: đang viết lại file theo lựa chọn Bỏ chữ (lúc bấm Bắt đầu) — khoá để hai lần Bắt đầu / chọn lại không chen vào. */
+  drop_applying?: boolean
   sha256: string
   original_name: string
   size: number
@@ -63,6 +65,8 @@ export interface IImportedDocument extends Document {
   intent: TemplateIntent | null
   /** FLF-278: lần import tạo từ mẫu đã lưu của tổ chức (`OrgTemplate`) — mapping heading áp sẵn, không phải xác nhận lại. */
   org_template_id?: mongoose.Types.ObjectId | null
+  /** FLF-395: bản của mẫu tổ chức lúc import — đọc mapping theo đúng bản này, đăng bản mới giữa chừng không đổi. */
+  org_template_version?: number | null
   /** Section đang/sắp trích ở I-4; resume chạy tiếp từ đây, không trích lại section `done`. */
   extract_cursor: string | null
   /**
@@ -76,6 +80,13 @@ export interface IImportedDocument extends Document {
    * động lại giữa `baselining`) được hoàn về mốc này trước khi chạy lại. `null` = chưa finalize lần nào.
    */
   finalize_checkpoint: FinalizeCheckpoint | null
+  /**
+   * Mã lần chạy finalize / kiểm tra hiện hành (`finalize-jobs.ts`). Mỗi lần bật job sinh mã mới; lần chạy cũ (bị thay sau khi
+   * treo) thấy mã lệch thì dừng, không ghi đè. `null` = chưa chạy lần nào kể từ khi có cơ chế này.
+   */
+  finalize_run_id: string | null
+  /** Nhịp tim của lần chạy hiện hành — quá `FINALIZE_STALE_MS` không đập ⇒ coi là job mất dù queue còn giữ job. */
+  finalize_heartbeat_at: Date | null
   /** FLF-336: người dùng bấm "Hoàn thiện" ở màn Kết quả đọc file ⇒ lần finalize kế không dừng ở `incomplete` nữa. */
   complete_requested: boolean
   /** Màn đọc khung: mục mà I-5 cuối khác bản sơ bộ lúc upload (rỗng ⇒ khớp; null ⇒ chưa finalize / import trước màn đọc khung). */
@@ -100,6 +111,7 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
   {
     projectId: { type: Schema.Types.ObjectId, ref: "Project", required: true },
     file_ref: { type: String, default: null },
+    drop_applying: { type: Boolean, default: false },
     sha256: { type: String, required: true },
     original_name: { type: String, required: true },
     size: { type: Number, required: true, min: 0 },
@@ -158,6 +170,7 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
     structure_changes: { type: Schema.Types.Mixed, default: null },
     intent: { type: String, enum: [...TEMPLATE_INTENTS, null], default: null },
     org_template_id: { type: Schema.Types.ObjectId, ref: "OrgTemplate", default: null },
+    org_template_version: { type: Number, default: null, min: 1 },
     finalize_checkpoint: {
       type: new Schema(
         {
@@ -171,6 +184,8 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
       ),
       default: null
     },
+    finalize_run_id: { type: String, default: null },
+    finalize_heartbeat_at: { type: Date, default: null },
     created_by: { type: Schema.Types.ObjectId, ref: "User", required: true }
   },
   { timestamps: true }

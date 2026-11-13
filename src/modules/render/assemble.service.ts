@@ -43,6 +43,7 @@ import { Baseline } from "../spine/baseline.model.js"
 import { createChangeLog } from "../spine/change-log.js"
 // T15 review T7: tra tên người ghi thay cho userId thô trong §I (chỉ đọc).
 import { User } from "../user/user.model.js"
+import { ChangeRequest } from "../change-request/change-request.model.js"
 import { loadDiagramFile } from "../diagram/diagram.service.js"
 import { localizedDiagramPng, type DiagramSource } from "../diagram/localized-diagram.service.js"
 import { capitalize, sectionLabel } from "../spine/human-labels.js"
@@ -70,6 +71,7 @@ import { buildLayoutSections, type TemplateLayout } from "./layout-sections.js"
 // Mode 1 v2 (FLF-184): layout của file người dùng upload — chỉ đọc
 import { TemplateProfile } from "../import/template-profile.model.js"
 import { Project } from "../project/project.model.js"
+import { screenMockupsOf } from "../../shared/diagram/screen-theme.js"
 import { MEDIA_PREFIX, isMediaId, loadImportMedia, mediaId } from "./import-media.js"
 import type {
   Block,
@@ -83,6 +85,7 @@ import type {
 import { renderedDocumentSchema } from "./rendered-document.schema.js"
 import { draftVersionLabel } from "./draft-version.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { withoutTemplateMigration } from "../doc-version/template-migration-change.js"
 
 export const NO_WORKING_DRAFT = "NO_WORKING_DRAFT"
 
@@ -330,8 +333,9 @@ const materializeImages = (doc: RenderedDocument, resolve: (diagramId: string) =
     if (id === null || !isImageBlock(b)) return b
     const png = resolve(id)
     if (png) return { ...b, png }
-    // Ảnh gốc không nhúng được (EMF/WMF, file gốc không còn) ⇒ chỗ giữ ảnh + chú thích nói đúng lý do
-    if (isMediaId(id)) return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: `${b.caption ? `${b.caption} - ` : ""}${assembleTextFor(language).mediaNotEmbedded}` }
+    // Ảnh gốc không nhúng được (EMF/WMF, file gốc không còn) ⇒ chỗ giữ ảnh trống, giữ chú thích gốc nếu có — FLF-411 U1-7:
+    // không in câu kỹ thuật ("không nhúng được ảnh gốc…") vào tài liệu của người dùng; lý do đã có ở cờ `import_image_unread`
+    if (isMediaId(id)) return { ...b, png: DIAGRAM_PLACEHOLDER_PNG }
     return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: pendingImageCaption(b.caption, id, language) }
   }
   return { ...doc, sections: doc.sections.map((s) => ({ ...s, blocks: s.blocks.map(materialize) })) }
@@ -438,7 +442,8 @@ const recordChangeLog = createChangeLog<ChangeRecordRow>(RECORD_CHANGE_PROJECTIO
   step_id: d.step_id
 }))
 
-export const listChangesForRecord = (projectId: string): Promise<ChangeRecordRow[]> => recordChangeLog.list(projectId)
+/** Record of Changes không ghi dòng nào do đổi mẫu sinh ra (dòng `Baseline <số>` của lần phát hành vẫn có). */
+export const listChangesForRecord = async (projectId: string): Promise<ChangeRecordRow[]> => withoutTemplateMigration(await recordChangeLog.list(projectId))
 
 const SYSTEM_ACTOR = "system"
 const IMPORT_ACTOR = "import"
@@ -449,12 +454,21 @@ const shortenId = (id: string): string => (id.length > 10 ? `${id.slice(0, 8)}�
  * txn của §I) để hiển thị thay vì id. `"system"` luôn hiển thị "System"; user không còn (đã xoá)
  * giữ id rút gọn thay vì id đầy đủ.
  */
-const buildInChargeResolver = async (changes: ChangeRecordRow[]): Promise<(by: string) => string> => {
-  const ids = [...new Set(changes.map((c) => c.by))].filter((id) => id !== SYSTEM_ACTOR && mongoose.isValidObjectId(id))
+const buildInChargeResolver = async (changes: ChangeRecordRow[], projectId?: string): Promise<(by: string) => string> => {
+  // FLF-411 (U2-6): lô ghi của change request mang `by = mã CR` ⇒ "In charge" là người tạo CR (tên), không phải "CR-001"
+  const crIds = projectId ? [...new Set(changes.map((c) => c.by))].filter((id) => CR_ACTOR.test(id)) : []
+  const crs = crIds.length === 0
+    ? []
+    : ((await ChangeRequest.find({ projectId, cr_id: { $in: crIds } }, { cr_id: 1, requester: 1, created_by: 1 }).lean()) as { cr_id: string; requester?: string; created_by?: unknown }[])
+  const ids = [...new Set([...changes.map((c) => c.by), ...crs.map((c) => String(c.created_by ?? ""))])].filter((id) => id !== SYSTEM_ACTOR && mongoose.isValidObjectId(id))
   const users = ids.length === 0
     ? []
     : ((await User.find({ _id: { $in: ids } }, { name: 1, email: 1 }, { lean: true })) as { _id: unknown; name?: string; email: string }[])
   const nameById = new Map(users.map((u) => [String(u._id), (u.name && u.name.trim()) || u.email]))
+  for (const cr of crs) {
+    const name = nameById.get(String(cr.created_by ?? "")) ?? cr.requester?.trim()
+    if (name) nameById.set(cr.cr_id, name)
+  }
   return (by: string): string => {
     if (by === SYSTEM_ACTOR) return "System"
     // Mode 1: lô ghi lúc nhập tài liệu (finalize/check) mang `by: "import"` — không phải người, không in mã thô
@@ -462,6 +476,9 @@ const buildInChargeResolver = async (changes: ChangeRecordRow[]): Promise<(by: s
     return nameById.get(by) ?? shortenId(by)
   }
 }
+
+/** Lô ghi của một change request (`change-request/write.service`: `by` = mã CR). */
+const CR_ACTOR = /^CR-\d{3,}$/
 
 /**
  * FLF-265: tài liệu tiếng Việt in `"system"` thành "Hệ thống" — resolver do caller dựng (tra `User`) giữ nguyên cho
@@ -656,7 +673,8 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
     | null
   if (!profile?.layout?.length) return null
   // Chế độ 3 (mẫu bắt buộc, FLF-335): in đúng các mục của mẫu, không chèn mục FlintFlow ngoài mẫu (business-flow 2.10)
-  const project = (await Project.findById(projectId, { template_intent: 1 }, { lean: true })) as { template_intent?: string | null } | null
+  const project = (await Project.findById(projectId, { template_intent: 1, screenMockups: 1 }, { lean: true })) as { template_intent?: string | null; screenMockups?: unknown } | null
+  const mockups = screenMockupsOf(project).filter((m) => m.enabled)
   return {
     ...(project?.template_intent === "fixed" ? { fixedTemplate: true } : {}),
     layout: profile.layout,
@@ -666,6 +684,8 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
     // FLF-252: import trước khi có các field này ⇒ không truyền, bản in giữ cách cũ
     ...(profile.non_screen_table?.length ? { nonScreenTable: profile.non_screen_table } : {}),
     ...(profile.function_originals?.length ? { functionOriginals: profile.function_originals } : {}),
+    // FLF-410: màn đã bật mockup thay ảnh gốc
+    ...(mockups.length ? { screenMockups: mockups } : {}),
     ...(profile.section_slices?.length ? { sectionSlices: profile.section_slices } : {}),
     // FLF-366: import trước khi có đoạn nguyên văn ⇒ không truyền, bản in như cũ
     ...(profile.section_segments?.length ? { sectionSegments: profile.section_segments } : {})
@@ -832,7 +852,7 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
     // T15 (mode 1 v3): lịch sử sửa đổi của khách (file gốc) đứng trước, lịch sử FlintFlow nối tiếp. File đã có bảng lịch sử
     // của riêng nó ⇒ không thêm dòng chỉ vì import / ký bản gốc 0.1 (lô `by = import`): bản 0.1 giữ đúng bảng của file, mỗi
     // change request mới thành một dòng
-    recordOfChanges: [...(input.template?.legacyRecord ?? []), ...buildRecordOfChanges(withoutImportRows(input.recordChanges, input.template?.legacyRecord?.length ?? 0), inChargeFor(deps.resolveInCharge, language), language)],
+    recordOfChanges: [...(input.template?.legacyRecord ?? []), ...buildRecordOfChanges(withoutTemplateMigration(withoutImportRows(input.recordChanges, input.template?.legacyRecord?.length ?? 0)), inChargeFor(deps.resolveInCharge, language), language, spine)],
     flagsAppendix: buildFlagsAppendix(spine, input.statusChanges, numbers, source, states, titles, language, translated?.localized)
   }
   if (source === "draft") refDoc.watermark = "DRAFT"
@@ -918,7 +938,7 @@ export async function assemble(
   const { projectId: _projectId, ...spine } = record
   const changes = await spineRepository.listChanges(projectId)
   const recordChanges = await listChangesForRecord(projectId)
-  const resolveInCharge = await buildInChargeResolver(recordChanges)
+  const resolveInCharge = await buildInChargeResolver(recordChanges, projectId)
   const template = await (merged.loadTemplate ?? loadTemplateLayout)(projectId)
 
   let findings: ConsistencyFinding[] = []
@@ -1215,7 +1235,7 @@ const getBaselineDocument = async (
   // §I hiển thị lịch sử đầy đủ hiện có (chưa có mốc "seq tại lúc ký" trong Baseline — T19 chưa chốt);
   // status/stale của section thì tính với changes rỗng vì không có gì để so — tránh stale giả cho bản đã ký.
   const recordChanges = await listChangesForRecord(projectId)
-  const resolveInCharge = await buildInChargeResolver(recordChanges)
+  const resolveInCharge = await buildInChargeResolver(recordChanges, projectId)
 
   const { refDoc, images } = await buildDocumentParts(
     {
@@ -1399,7 +1419,7 @@ const getTranslatedDraftDocument = async (
   if (beforeRender) await beforeRender(spine)
   const changes = await spineRepository.listChanges(projectId)
   const recordChanges = await listChangesForRecord(projectId)
-  const resolveInCharge = await buildInChargeResolver(recordChanges)
+  const resolveInCharge = await buildInChargeResolver(recordChanges, projectId)
   const template = await (deps.loadTemplate ?? loadTemplateLayout)(projectId)
 
   const built = await buildDocumentParts(
@@ -1452,7 +1472,7 @@ const getTranslatedBaselineDocument = async (
   if (beforeRender) await beforeRender(spine)
   // §I + status rỗng như bản baseline gốc (`getBaselineDocument`)
   const recordChanges = savedRecords ?? await listChangesForRecord(projectId)
-  const resolveInCharge = await buildInChargeResolver(recordChanges)
+  const resolveInCharge = await buildInChargeResolver(recordChanges, projectId)
   const template = await (deps.loadTemplate ?? loadTemplateLayout)(projectId)
 
   const built = await buildDocumentParts(
@@ -1553,7 +1573,7 @@ export async function renderSpineDocument(
 ): Promise<RenderedDocument> {
   const merged: AssembleDeps = { ...defaultDeps(), ...deps }
   const recordChanges = [...(opts.recordChanges ?? await listChangesForRecord(projectId)), ...(opts.pendingRecord ?? [])]
-  const resolveInCharge = await buildInChargeResolver(recordChanges)
+  const resolveInCharge = await buildInChargeResolver(recordChanges, projectId)
   return buildDocument(
     {
       projectId,
