@@ -17,6 +17,7 @@ import path from "node:path"
 import { z } from "zod"
 import { getAssetsRoot } from "../../config/paths.js"
 import type { Spine, StepStatus } from "../spine/spine.types.js"
+import { isTemplateFrame } from "../spine/template-frames.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
 export const STEP_NOT_FOUND = "STEP_NOT_FOUND"
@@ -154,7 +155,8 @@ export const loopKeys = (spine: Pick<Spine, "screens" | "functions">): string[] 
   const screens = [...spine.screens]
     .sort((a, b) => (a.queue_order ?? Number.MAX_SAFE_INTEGER) - (b.queue_order ?? Number.MAX_SAFE_INTEGER) || (a.id < b.id ? -1 : 1))
     .map((s) => s.id)
-  return spine.functions.some((f) => f.screen_id === null) ? [...screens, NONSCREEN_LOOP] : screens
+  // FLF-413: khung `<<Function Name>>` của mẫu không mở vòng không màn
+  return spine.functions.some((f) => f.screen_id === null && !isTemplateFrame(f)) ? [...screens, NONSCREEN_LOOP] : screens
 }
 
 export const expandS5 = (spine: Pick<Spine, "screens" | "functions">): ExpandedStep[] => {

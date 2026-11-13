@@ -38,6 +38,8 @@ import {
 } from "./step-runner.service.js"
 import { gateActionSchema, type ChangeSummary } from "./pipeline.dto.js"
 import { retireFrameOnlyAssumptionOps } from "./screen-assumptions.js"
+import { hasTemplateFrames, templateFrameOps, type FramePlan } from "../spine/template-frames.js"
+import { TemplateProfile } from "../import/template-profile.model.js"
 import { composeStepGateMessage, gateAssumptionIdsOfRun, type GateAssumptionBrief } from "./gate-message.js"
 import { acquireRun, finishRun, getRunState, type PatchRun } from "./run-state.service.js"
 import type { RunStatus } from "./run-state.model.js"
@@ -148,6 +150,41 @@ const loopScreenStatusOps = (spine: Spine, stepId: string, asIs: boolean): Op[] 
   return []
 }
 
+/**
+ * FLF-413: accept S-4.1 / S-4.4 ⇒ tính năng / chức năng thật lấp khung `<<Feature Name>>` / `<<Function Name>>` của mẫu bắt buộc,
+ * cùng lô accept (01 §4). Khung chức năng còn trống chỉ xoá khi S-4.4 cũng xong (S-4.4 còn sinh chức năng không màn — 03 #3).
+ */
+const FRAME_FILL_STEPS = new Set(["S-4.1", "S-4.4"])
+
+const templateFramePlan = async (projectId: string, spine: Spine, stepId: string): Promise<FramePlan | null> => {
+  if (!FRAME_FILL_STEPS.has(stepId) || !hasTemplateFrames(spine)) return null
+  const profile = await TemplateProfile.findOne({ projectId }, { layout: 1 }).lean()
+  const nonScreen = spine.steps.find((s) => s.id === "S-4.4")
+  const dropEmptyFunctionFrames = stepId === "S-4.4" || !nonScreen || nonScreen.status === "accepted" || nonScreen.status === "skipped"
+  return templateFrameOps(spine, { layout: profile?.layout ?? [], dropEmptyFunctionFrames })
+}
+
+/**
+ * FLF-413 P4: khung bị bỏ ⇒ hướng dẫn / nguyên văn / kế hoạch step của mục đó trong TemplateProfile không còn mục để gắn; khung
+ * đã lấp ⇒ bỏ nguyên văn (là chữ của mẫu).
+ * `heading_map` / `layout` / `DocBlock` / `FieldAnchor` giữ (bất biến xuất: mọi heading của file mẫu phải có trong heading_map;
+ * bản in bỏ heading khung theo Spine). Gọi sau lô accept — lỗi chỉ log, Spine đã đúng.
+ */
+const pruneDroppedFrames = async (projectId: string, plan: FramePlan | null): Promise<void> => {
+  if (!plan?.dropped.length && !plan?.filled.length) return
+  const ids = plan.dropped.map((d) => `${d.kind}:${d.id}`)
+  // Khung đã lấp: "nguyên văn" của mục là hướng dẫn + hình mẫu của template, không phải nội dung ⇒ bỏ để bản in dựng từ Spine
+  const originals = [...ids, ...plan.filled.map((f) => `${f.kind}:${f.frame}`)]
+  try {
+    await TemplateProfile.updateOne(
+      { projectId },
+      { $pull: { template_context: { section_id: { $in: ids } }, function_originals: { section_id: { $in: originals } }, "step_plan.$[].section_ids": { $in: ids } } }
+    )
+  } catch (err) {
+    console.warn(`[gate] FLF-413: không dọn được TemplateProfile của khung đã bỏ (${(err as Error).message})`)
+  }
+}
+
 const phaseFullyAccepted = (spine: Spine, phase: string): boolean =>
   orderedSteps(spine)
     .filter((s) => s.phase === phase)
@@ -203,10 +240,12 @@ const assertVersion = (record: SpineRecord, baseVersion: number): void => {
  */
 const doAccept = async (projectId: string, stepId: string, userId: string, record: SpineRecord, yellowFlagNote: string | null): Promise<number> => {
   const spine = stripRecord(record)
+  const frames = await templateFramePlan(projectId, spine, stepId)
   const ops: Op[] = [
     { op: "set", path: `steps[id=${stepId}].status`, value: "accepted" },
     { op: "set", path: `steps[id=${stepId}].accepted_at`, value: new Date().toISOString() },
-    ...loopScreenStatusOps(spine, stepId, yellowFlagNote !== null)
+    ...loopScreenStatusOps(spine, stepId, yellowFlagNote !== null),
+    ...(frames?.ops ?? [])
   ]
 
   if (yellowFlagNote !== null) {
@@ -233,6 +272,7 @@ const doAccept = async (projectId: string, stepId: string, userId: string, recor
   }
 
   const applied = await applyTransaction(projectId, { base_version: record.spine_version, ops, by: userId, step_id: stepId, reason: yellowFlagNote ? "gate: accept_as_is" : "gate: accept" })
+  await pruneDroppedFrames(projectId, frames)
 
   const def = getStep(stepId)
   const afterSpine = stripRecord(applied.spine)
