@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from "mongoose"
 import { IMPORT_STATUSES, type ImportStatus } from "../import/import.state.js"
 import { USER_LOCALES, type UserLocale } from "../../shared/i18n/locale.js"
 import { DEFAULT_ERD_NOTATION, ERD_NOTATIONS, type ErdNotation } from "../../shared/diagram/erd-notation.js"
+import { SCREEN_MOCKUP_MODES, SCREEN_PLATFORMS, type ScreenMockupState, type ScreenTheme } from "../../shared/diagram/screen-theme.js"
 
 export type ProjectStatus = "active" | "archived"
 
@@ -36,6 +37,11 @@ export interface IProject extends Document {
   has_required_template: boolean | null
   /** FLF-335: `fixed` ngay lúc tạo với dự án mới có mẫu bắt buộc; dự án có sẵn ghi lúc upload (#2 `intent`); cũ `null`. */
   template_intent: TemplateIntent | null
+  /**
+   * FLF-395: mẫu tổ chức + bản (version) dự án đang theo. `null` = chưa gắn mẫu (mẫu tự do / FPT). Ghi khi import từ mẫu
+   * org, lưu vào thư viện, đổi mẫu xong, tự lưu khung. Bản org mới hơn ⇒ `template_update` ở chi tiết project.
+   */
+  template_ref: { template_id: mongoose.Types.ObjectId; version: number } | null
   /** Mode 1: bản sao rút gọn `ImportedDocument.status` để hiện danh sách (UC-14, UC-19); mode khác luôn `null`. */
   import_state: ImportStatus | null
   /**
@@ -51,6 +57,13 @@ export interface IProject extends Document {
   documentLanguage?: UserLocale
   /** Ký pháp ERD của cả tài liệu (§3.1.5): `chen` | `crowsfoot` | `idef1x`. Không nằm trong Spine; dự án cũ chưa có field đọc là `chen` (mặc định schema). */
   erdNotation: ErdNotation
+  /**
+   * Theme mockup §3.x.y Screen Layout (FLF-410): màu chính, domain, nền tảng. Không nằm trong Spine; đọc qua `screenThemeOf`
+   * (`shared/diagram/screen-theme.ts`). Field null = chưa chọn ⇒ mặc định / suy từ `form_factor`.
+   */
+  screenTheme?: ScreenTheme
+  /** FLF-410: màn import đã vẽ lại ảnh gốc bằng mockup (kiểu, bật / tắt, ảnh bị thay). Đọc qua `screenMockupsOf`. */
+  screenMockups?: ScreenMockupState[]
   /** Thư mục chứa dự án (`modules/folder`); null = ngoài thư mục. */
   folderId: mongoose.Types.ObjectId | null
   /** Lần gần nhất user mở dự án (GET /projects/:id) — sắp xếp "Mới mở" trên dashboard. */
@@ -112,6 +125,16 @@ const projectSchema = new Schema<IProject>(
       enum: [...TEMPLATE_INTENTS, null],
       default: null
     },
+    template_ref: {
+      type: new Schema(
+        {
+          template_id: { type: Schema.Types.ObjectId, ref: "OrgTemplate", required: true },
+          version: { type: Number, required: true, min: 1 }
+        },
+        { _id: false }
+      ),
+      default: null
+    },
     import_state: {
       type: String,
       enum: [...IMPORT_STATUSES, null],
@@ -136,6 +159,31 @@ const projectSchema = new Schema<IProject>(
       enum: [...ERD_NOTATIONS],
       default: DEFAULT_ERD_NOTATION
     },
+    screenTheme: {
+      type: new Schema(
+        {
+          primaryColor: { type: String, default: null },
+          domain: { type: String, default: null },
+          platforms: { type: [{ type: String, enum: [...SCREEN_PLATFORMS] }], default: null }
+        },
+        { _id: false }
+      ),
+      default: () => ({ primaryColor: null, domain: null, platforms: null })
+    },
+    screenMockups: {
+      type: [
+        new Schema(
+          {
+            screen_id: { type: String, required: true },
+            mode: { type: String, enum: [...SCREEN_MOCKUP_MODES], required: true },
+            enabled: { type: Boolean, default: true },
+            image_indexes: { type: [Number], default: [] }
+          },
+          { _id: false }
+        )
+      ],
+      default: []
+    },
     folderId: {
       type: Schema.Types.ObjectId,
       ref: "Folder",
@@ -153,5 +201,6 @@ const projectSchema = new Schema<IProject>(
 projectSchema.index({ userId: 1, status: 1 })
 // Cùng truy vấn danh sách nhưng theo org (task-26 Pha 4 sẽ thay index theo userId ở trên)
 projectSchema.index({ organizationId: 1, status: 1 })
+projectSchema.index({ "template_ref.template_id": 1 }, { sparse: true })
 
 export const Project = mongoose.model<IProject>("Project", projectSchema)

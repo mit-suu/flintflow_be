@@ -313,5 +313,115 @@ describe("writeTemplateDocx", () => {
       const table = result.blocks.find((b) => b.kind === "table")!
       expect(table.rows).toEqual([["Author", "Approved by"], ["Hoai Linh", "Head of IT"], ["Editor", ""]])
     })
+
+    it("FLF-411 #26: bảng lịch sử có dòng trống kẻ sẵn ⇒ điền dòng trống đầu tiên, hết dòng trống mới thêm vào cuối", async () => {
+      const blank = `<w:tr>${cell("")}${cell("")}</w:tr>`
+      const history = sourceTable.replace("<w:t>A</w:t>", "<w:t>Author</w:t>").replace("<w:t>B</w:t>", "<w:t>Description</w:t>")
+        .replace("<w:t>sample</w:t>", "<w:t>Hoai Linh</w:t>").replace("<w:t>sample</w:t>", "<w:t>Initial version</w:t>")
+        .replace("</w:tbl>", `${blank}${blank}</w:tbl>`)
+      const input = await template(history), parsed = await parseDocument(input)
+      const map = [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:I" }]
+      const record = (n: number) => ({ date: "2026-11-12", version: `1.${n}`, in_charge: `Editor ${n}`, description: `CR-00${n}`, change_type: "M" as const })
+      const rowsOf = async (records: ReturnType<typeof record>[]) => {
+        const doc = document()
+        doc.recordOfChanges = [{ date: "2026-09-01", version: "1.0", in_charge: "Hoai Linh", description: "Initial version", change_type: "A" }, ...records]
+        const result = await parseDocument(await writeTemplateDocx(doc, input, map, [], { keepSource: new Set(), legacyRecordCount: 1 }))
+        return result.blocks.find((b) => b.kind === "table")!.rows
+      }
+      expect(await rowsOf([record(1)])).toEqual([["Author", "Description"], ["Hoai Linh", "Initial version"], ["Editor 1", "CR-001"], ["", ""]])
+      expect(await rowsOf([record(1), record(2), record(3)])).toEqual([
+        ["Author", "Description"], ["Hoai Linh", "Initial version"], ["Editor 1", "CR-001"], ["Editor 2", "CR-002"], ["Editor 3", "CR-003"]
+      ])
+    })
+
+    describe("FLF-411 #25: mục bị xoá hết dữ liệu (không nguyên trạng, bản in rỗng)", () => {
+      const guidance = body.replace("Replace this guidance.", "[Describe the requirements of the system.]")
+      const withGuidance = async () => {
+        const zip = await JSZip.loadAsync(await template())
+        zip.file("word/document.xml", (await zip.file("word/document.xml")!.async("string")).replace(`${heading("Requirements")}${body}`, `${heading("Requirements")}${guidance}${body}`))
+        return zip.generateAsync({ type: "nodebuffer" })
+      }
+      const between = async (output: Buffer) => {
+        const blocks = (await parseDocument(output)).blocks
+        return blocks.slice(blocks.findIndex((b) => b.text === "Requirements") + 1, blocks.findIndex((b) => b.text === "Repeated"))
+      }
+      const emptied = (blocks: RenderedDocument["sections"][number]["blocks"] = []) => {
+        const doc = document()
+        doc.sections = [{ id: "fixed:1", heading: "Requirements", number: "1", level: 1, blocks }]
+        return doc
+      }
+
+      it("bỏ đoạn dữ liệu gốc, bảng chỉ còn hàng tiêu đề, giữ heading + đoạn hướng dẫn của mẫu", async () => {
+        const input = await withGuidance(), parsed = await parseDocument(input)
+        const map = [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:1" }]
+        const blocks = await between(await writeTemplateDocx(emptied(), input, map, [], { keepSource: new Set() }))
+        expect(blocks.map((b) => b.text)).toContain("[Describe the requirements of the system.]")
+        expect(blocks.some((b) => b.text === "Replace this guidance.")).toBe(false)
+        expect(blocks.find((b) => b.kind === "table")!.rows).toEqual([["A", "B"]])
+      })
+
+      it("mục nguyên trạng vốn trống ⇒ vẫn in nguyên văn file gốc", async () => {
+        const input = await withGuidance(), parsed = await parseDocument(input)
+        const map = [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:1" }]
+        const xml = await bodyXml(await writeTemplateDocx(emptied(), input, map, [], { keepSource: new Set(["fixed:1"]) }))
+        expect(xml).toBe(await bodyXml(input))
+      })
+
+      it("file gốc không có hướng dẫn ⇒ in hướng dẫn của mẫu mà bản in mang theo", async () => {
+        const input = await template(), parsed = await parseDocument(input)
+        const map = [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:1" }]
+        const doc = emptied([{ type: "paragraph", runs: runs("[List the requirements.]") }])
+        const blocks = await between(await writeTemplateDocx(doc, input, map, [], { keepSource: new Set() }))
+        expect(blocks[0].text).toBe("[List the requirements.]")
+        expect(blocks.some((b) => b.text === "Replace this guidance.")).toBe(false)
+      })
+    })
+  })
+
+  describe("FLF-416 chế độ 4: sắp lại bố cục file khách (rearrange)", () => {
+    it("mục FPT soạn thêm ⇒ heading mới theo style heading cùng cấp, đúng vị trí bản in; mục Ngoài phạm vi (kèm mục con) xuống cuối", async () => {
+      const input = await template(), parsed = await parseDocument(input), doc = document()
+      const heads = parsed.blocks.filter((b) => b.kind === "heading")
+      // File: Requirements (H1, Ngoài phạm vi) › Repeated, Repeated (H2) · Unmapped (H1, mục FPT có sẵn)
+      const map = [
+        { block_id: heads[0].block_id, section_id: "custom:cost" },
+        { block_id: heads[1].block_id, section_id: "custom:cost-a" },
+        { block_id: heads[2].block_id, section_id: "custom:cost-b" },
+        { block_id: heads[3].block_id, section_id: "fixed:2" }
+      ]
+      doc.sections = [
+        { id: "fixed:2", heading: "Unmapped", number: "1", level: 1, blocks: [] },
+        { id: "fixed:V.5", heading: "Glossary", number: "2", level: 1, blocks: [{ type: "paragraph", runs: runs("Drafted glossary") }, { type: "table", header: [runs("Term"), runs("Meaning")], rows: [[runs("SRS"), runs("Software Requirements Specification")]] }] },
+        { id: "custom:cost", heading: "Requirements", number: "3", level: 1, blocks: [] },
+        { id: "custom:cost-a", heading: "Repeated", number: "3.1", level: 2, blocks: [] },
+        { id: "custom:cost-b", heading: "Repeated", number: "3.2", level: 2, blocks: [] }
+      ]
+      const keep = new Set(["fixed:2", "custom:cost", "custom:cost-a", "custom:cost-b"])
+      const out = await writeTemplateDocx(doc, input, map, [], { keepSource: keep, rearrange: { moveToEnd: ["custom:cost"] } })
+      const blocks = (await parseDocument(out)).blocks
+      expect(blocks.filter((b) => b.kind === "heading").map((b) => b.text)).toEqual(["Unmapped", "Glossary", "Requirements", "Repeated", "Repeated"])
+      const glossary = blocks.find((b) => b.kind === "heading" && b.text === "Glossary")!
+      expect(wAttr(wKid(wKid(glossary.element, "pPr")!, "pStyle"), "val")).toBe("Heading1")
+      // Nội dung mục chèn ngay dưới heading mới, bảng là bảng thật
+      const at = (pred: (b: (typeof blocks)[number]) => boolean) => blocks.findIndex(pred)
+      expect(at((b) => b.text === "Drafted glossary")).toBeGreaterThan(at((b) => b.text === "Glossary"))
+      expect(at((b) => b.kind === "table" && b.rows?.[0]?.[0] === "Term")).toBeLessThan(at((b) => b.text === "Requirements"))
+      // Bảng của mục Ngoài phạm vi đi cùng mục; sectPr của thân vẫn cuối cùng
+      expect(at((b) => b.kind === "table" && b.rows?.[0]?.[0] === "A")).toBeGreaterThan(at((b) => b.text === "Requirements"))
+      const xml = await (await JSZip.loadAsync(out)).file("word/document.xml")!.async("string")
+      expect(xml.trimEnd()).toMatch(/<\/w:sectPr><\/w:body><\/w:document>$/)
+    })
+
+    it("không rearrange ⇒ như cũ: mục không có heading gộp vào mục cha thành đoạn đậm", async () => {
+      const input = await template(), parsed = await parseDocument(input), doc = document()
+      const map = [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:1" }]
+      doc.sections = [
+        { id: "fixed:1", heading: "Requirements", number: "1", level: 1, blocks: [{ type: "paragraph", runs: runs("Own") }] },
+        { id: "fixed:1.9", heading: "Child", number: "1.1", level: 2, blocks: [{ type: "paragraph", runs: runs("Child text") }] }
+      ]
+      const blocks = (await parseDocument(await writeTemplateDocx(doc, input, map, [], { keepSource: new Set() }))).blocks
+      expect(blocks.some((b) => b.kind === "heading" && b.text === "Child")).toBe(false)
+      expect(blocks.some((b) => b.text === "Child text")).toBe(true)
+    })
   })
 })

@@ -3,7 +3,8 @@
  * (không qua HTTP) để test I-4 / finalize / check / gap report / re-upload ở tầng service.
  * Provider AI giả: file test tự `vi.mock` `llm.router` bằng `mock-llm.ts` và đặt `mockOverrides.next`.
  */
-import { expect } from "vitest"
+import { afterEach, beforeEach, expect } from "vitest"
+import { env } from "../../src/config/env.js"
 import { seedFixture } from "../setup.js"
 import { createMode1Project } from "./mode1.js"
 import { makeSrsDocx, type SrsFixtureOptions } from "../../src/modules/import/testing/srs-fixture.js"
@@ -11,6 +12,21 @@ import { acceptLatest, uploadImport } from "../../src/modules/import/import.serv
 import { runExtraction } from "../../src/modules/import/extract.service.js"
 import { finalizeImport } from "../../src/modules/import/finalize.service.js"
 import * as spineRepository from "../../src/modules/spine/spine.repository.js"
+
+/**
+ * Đặt `IMPORT_EXTRACT_CONCURRENCY` cho mọi test của file (FLF-392). Test khẳng định thứ tự lượt gọi / số dư ví theo bản
+ * tuần tự đặt 1; kịch bản song song nằm ở `extract-parallel.int.test.ts`.
+ */
+export const useExtractConcurrency = (n: number): void => {
+  let prev = env.IMPORT_EXTRACT_CONCURRENCY
+  beforeEach(() => {
+    prev = env.IMPORT_EXTRACT_CONCURRENCY
+    env.IMPORT_EXTRACT_CONCURRENCY = n
+  })
+  afterEach(() => {
+    env.IMPORT_EXTRACT_CONCURRENCY = prev
+  })
+}
 
 export const fileOf = (buffer: Buffer, originalname = "SRS_Lumen.docx") => ({ buffer, originalname, size: buffer.length })
 

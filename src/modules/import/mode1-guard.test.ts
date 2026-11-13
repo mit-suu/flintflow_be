@@ -21,7 +21,7 @@ vi.mock("../spine/spine.repository.js", () => ({
 }))
 
 import { isChangeInstruction } from "../spine/change.service.js"
-import { assertChangesAllowed, assertNotMode1, changeRequiresCr, changesRequireCr, isMode1Project, prefillFrom } from "./mode1-guard.js"
+import { assertChangesAllowed, assertNotMode1, changeRequiresCr, changesRequireCr, isMode1Project, prefillFrom, templateHeadingsOf } from "./mode1-guard.js"
 import { Mode1Error } from "./mode1.errors.js"
 
 beforeEach(() => {
@@ -123,5 +123,23 @@ describe("điều kiện chặn chat - isChangeInstruction", () => {
     expect(isChangeInstruction("What does UC-01 do?")).toBe(false)
     expect(isChangeInstruction("Why rename the actor")).toBe(false)
     expect(isChangeInstruction("")).toBe(false)
+  })
+})
+
+describe("templateHeadingsOf - FLF-411 (#19) tên mục theo heading của mẫu", () => {
+  it("số Word + chữ heading; chữ đã có số thì giữ; bỏ mục riêng, heading rỗng, trùng mục lấy cái đầu", () => {
+    const map = templateHeadingsOf([
+      { section_id: "fixed:2.2.1", heading_text: "Diagram(s)", number_label: "2.2.1" },
+      { section_id: "fixed:4.2.2", heading_text: "4.2.2 Reliability", number_label: "4.2.2" },
+      { section_id: "fixed:5.3", heading_text: "Messages" },
+      { section_id: "fixed:2.2.1", heading_text: "Khác", number_label: "9" },
+      { section_id: "custom:CS01", heading_text: "Phụ lục", number_label: "6" },
+      { section_id: "fixed:5.4", heading_text: "  " }
+    ])
+    expect([...map]).toEqual([
+      ["fixed:2.2.1", "2.2.1 Diagram(s)"],
+      ["fixed:4.2.2", "4.2.2 Reliability"],
+      ["fixed:5.3", "Messages"]
+    ])
   })
 })
