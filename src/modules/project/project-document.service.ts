@@ -13,6 +13,7 @@ import { splitParagraphs } from "../../shared/ai/document-paragraphs.js"
 import { alignOutline, extractDocxHeadings, isDocx } from "../../shared/ai/document-retrieval/docx-outline.js"
 import { deleteDocumentChunks, saveDocumentChunks } from "../../shared/ai/document-retrieval/chunk-index.service.js"
 import type { OutlineEntry } from "../../shared/ai/document-retrieval/chunker.js"
+import { assertReferenceProjectQuota, assertReferenceUploadLimit, type ReferenceTokenLimits } from "./document-token-limit.js"
 
 /**
  * FLF-393: heading thật của file .docx, khớp về chỉ số đoạn - chữ phẳng mất style heading nên chỉ lấy được lúc còn buffer.
@@ -94,6 +95,13 @@ export const uploadProjectDocument = async (
     console.warn(`[DocumentParser] Failed to parse "${originalName}" (parseStatus=failed): ${parseErr?.message}`)
   }
 
+  // FLF-405: trần token mỗi lần tải — ngay sau khi trích chữ, chưa lưu / chưa tốn credit. Parse lỗi (không có chữ để đếm)
+  // ⇒ giữ hành vi cũ: lưu `failed`, không tính vào tổng.
+  let tokenLimits: ReferenceTokenLimits | null = null
+  if (parsed) {
+    tokenLimits = await assertReferenceUploadLimit({ orgId: project.organizationId ?? orgId, file: originalName, tokenCount: parsed.tokenCount })
+  }
+
   // Step 2 (FLF-398): trùng hệt ⇒ chặn; có thể là bản mới ⇒ hỏi (trừ khi người dùng đã chọn). Chưa ghi gì, chưa tốn credit.
   const contentHash = contentHashOf(file.buffer)
   const existing = await existingDocuments(project._id)
@@ -117,6 +125,18 @@ export const uploadProjectDocument = async (
         candidates
       })
     }
+  }
+
+  // FLF-405: trần tổng dự án theo gói — sau bước hỏi bản mới để "Thay bản cũ" được trừ token bản bị thay; vẫn trước
+  // Cloudinary / ghi DB.
+  if (parsed && tokenLimits) {
+    await assertReferenceProjectQuota({
+      limits: tokenLimits,
+      projectId: project._id,
+      file: originalName,
+      tokenCount: parsed.tokenCount,
+      replaceDocumentId: replaced?.id ?? null
+    })
   }
 
   // Step 3: Upload lên Cloudinary
