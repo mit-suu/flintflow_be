@@ -3,7 +3,8 @@
 /** Nguồn của CR (UC-48): bắt buộc, để truy vết yêu cầu sửa đến từ đâu. */
 /** `chat` (FLF-182): CR tự tạo từ lệnh sửa trong chat sau baseline v1 (mode 1 v2, D3). */
 /** `reference_document` (FLF-338): CR tạo từ danh sách rút yêu cầu của tài liệu thô — `ref` = tên tài liệu + mã đoạn. */
-export const CR_SOURCE_KINDS = ["stakeholder_email", "meeting_minutes", "gap_report", "reupload", "viewer_comment", "verbal", "chat", "reference_document"] as const
+/** `template_migration`: CR do hệ thống tạo khi áp dụng một lần đổi mẫu — chỉ đường ghi riêng của `template-migration` sinh ra, client không tạo được. */
+export const CR_SOURCE_KINDS = ["stakeholder_email", "meeting_minutes", "gap_report", "reupload", "viewer_comment", "verbal", "chat", "reference_document", "template_migration"] as const
 export type CrSourceKind = (typeof CR_SOURCE_KINDS)[number]
 
 /**

@@ -145,6 +145,12 @@ export const aiItemId = (known: readonly EntityItem[], entity: string, key: stri
 }
 
 /**
+ * Nguồn id cho `itemsFromAi`: `IdAllocator` thật lúc ghép section, hoặc nguồn nháp không cấp mã (FLF-392 — dựng known_keys
+ * lúc đọc song song; phần tử AI mới không có id nên không vào prompt).
+ */
+export type IdSource = Pick<IdAllocator, "next" | "reserve">
+
+/**
  * Cấp id mới không trùng id đã có của từng mảng — so theo `idKey`: đã có "A-01" thì không cấp "A01". FLF-361: khuôn theo
  * id đang có (`formatFor`, như CR — FLF-307): tài liệu đánh `UC01` ⇒ id mới `UC03`, không `UC-03` lạc khuôn.
  */
@@ -276,8 +282,8 @@ export const mergeFieldValue = (field: string, prev: unknown, next: unknown): un
 export const refTarget = (ref: unknown): unknown => (typeof ref === "object" && ref !== null && "to" in ref ? (ref as { to: unknown }).to : ref)
 
 /**
- * Thứ tự phần tử theo nơi chữ / bảng định nghĩa nó (field không đọc từ ảnh đầu tiên), không có thì nơi ảnh nhắc đầu tiên
- * (FLF-252): quan hệ đọc từ sơ đồ use case ở 2.2.1 không còn kéo vài use case lên trước cả bảng 2.2.2 khi in.
+ * Thứ tự phần tử theo nơi chữ / bảng định nghĩa nó (field không đọc từ ảnh đầu tiên); phần tử chỉ có trong ảnh xếp sau
+ * hết, theo nơi ảnh nhắc đầu tiên (FLF-252, FLF-411 #7): quan hệ đọc từ sơ đồ use case ở 2.2.1 không còn kéo vài use case lên trước cả bảng 2.2.2 khi in.
  */
 export const collectEntities = (
   fields: (ExtractedField & { section_id?: string })[]
@@ -298,7 +304,9 @@ export const collectEntities = (
     if (f.section_id) cur.sections.add(f.section_id)
     out.set(key, cur)
   })
-  const at = (key: string): number => rank.get(key)!.main ?? rank.get(key)!.any
+  // FLF-411 (#7): phần tử chỉ đọc từ ảnh đứng SAU mọi phần tử chữ / bảng định nghĩa (giữa chúng giữ thứ tự ảnh nhắc tới) —
+  // trước đây xếp theo chỗ ảnh nhắc đầu tiên ⇒ UC-03…UC-16 của sơ đồ 2.2.1 đứng trước UC-01, UC-02 của bảng 2.2.2
+  const at = (key: string): number => rank.get(key)!.main ?? fields.length + rank.get(key)!.any
   return new Map([...out].sort(([a], [b]) => at(a) - at(b)))
 }
 

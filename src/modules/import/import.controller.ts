@@ -12,6 +12,7 @@ import {
   IMPORT_FILE_FIELD,
   confirmLatestRequestSchema,
   extractRequestSchema,
+  dropTextRequestSchema,
   fieldsPatchRequestSchema,
   finalizeRequestSchema,
   continueFlow2RequestSchema,
@@ -119,6 +120,14 @@ const startExtractionResponse = async (projectId: string, userId: string, import
   const summary = await importService.extractionSummary(String(doc._id))
   return { import: importService.toImportDto(doc), sections: summary.sections }
 }
+
+/** FLF-412: lưu lựa chọn Bỏ chữ theo vùng (trước Bắt đầu) + tính lại bản sơ bộ; FE đọc lại `GET /import` để có bản sơ bộ + credit mới. */
+export const dropText = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(dropTextRequestSchema, req.body)
+  const doc = await importService.setDropText(auth.projectId, body)
+  return sendSuccess(res, 200, { import: importService.toImportDto(doc) })
+})
 
 export const patchFields = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)

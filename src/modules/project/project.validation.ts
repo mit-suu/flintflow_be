@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from "express"
 import { validationError } from "../../shared/utils/validation-message.js"
 import { USER_LOCALES } from "../../shared/i18n/locale.js"
 import { ERD_NOTATIONS } from "../../shared/diagram/erd-notation.js"
+import { HEX_COLOR, MAX_DOMAIN_LENGTH, normalizeDomain, SCREEN_MOCKUP_MODES, SCREEN_PLATFORMS } from "../../shared/diagram/screen-theme.js"
 import { PROJECT_MODES, PROJECT_START_KINDS } from "./project.model.js"
 
 /** Client cũ (trước FLF-335) gửi `mode`; không gửi ⇒ `fpt`. Có `source` thì `mode` bị bỏ qua — Code suy ra. */
@@ -42,6 +43,60 @@ export const UpdateDocumentLanguageSchema = z.strictObject({
 /** PATCH /projects/:id/erd-notation (Lead/Analyst): ký pháp ERD của dự án. */
 export const UpdateErdNotationSchema = z.strictObject({
   erdNotation: z.enum(ERD_NOTATIONS)
+})
+
+/**
+ * PATCH /projects/:id/screen-theme (Lead/Analyst, FLF-410): theme mockup màn. Gửi field nào đổi field đó (ít nhất một);
+ * `null` = về mặc định. Domain nhận cả URL (`https://shop.vn/`) ⇒ chuẩn hoá thành hostname; chuỗi rỗng = `null`.
+ */
+export const UpdateScreenThemeSchema = z
+  .strictObject({
+    primaryColor: z.string().regex(HEX_COLOR, "Màu chính phải dạng #RRGGBB.").transform((c) => c.toUpperCase()).nullable().optional(),
+    domain: z
+      .string()
+      .trim()
+      .max(MAX_DOMAIN_LENGTH + 16)
+      .nullable()
+      .optional()
+      .transform((d, ctx) => {
+        if (d === undefined || d === null || d === "") return d === undefined ? undefined : null
+        const host = normalizeDomain(d)
+        if (!host) {
+          ctx.addIssue({ code: "custom", message: "Domain không hợp lệ (vd: shop.example.com)." })
+          return z.NEVER
+        }
+        return host
+      }),
+    platforms: z
+      .array(z.enum(SCREEN_PLATFORMS))
+      .min(1, "Chọn ít nhất một nền tảng.")
+      .refine((p) => new Set(p).size === p.length, "Nền tảng bị trùng.")
+      .nullable()
+      .optional()
+  })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), "Cần ít nhất một trường để đổi.")
+
+/** FLF-410: POST /projects/:id/screen-mockups — vẽ lại ảnh gốc bằng mockup (một màn / mọi màn có ảnh gốc). */
+export const RunScreenMockupsSchema = z
+  .strictObject({
+    mode: z.enum(SCREEN_MOCKUP_MODES),
+    scope: z.enum(["screen", "all"]),
+    screen_id: z.string().trim().min(1).max(40).optional(),
+    /** Nhiều màn một lượt (thử lại các màn lỗi) — dùng với scope = screen thay `screen_id`. */
+    screen_ids: z.array(z.string().trim().min(1).max(40)).min(1).max(200).optional()
+  })
+  .refine((v) => v.scope === "all" || v.screen_id !== undefined || v.screen_ids !== undefined, { message: "Cần screen_id hoặc screen_ids khi scope = screen.", path: ["screen_id"] })
+
+/** FLF-410: DELETE /projects/:id/screen-mockups — dùng lại ảnh gốc, giữ hình đã vẽ. */
+export const DisableScreenMockupsSchema = z
+  .strictObject({ scope: z.enum(["screen", "all"]), screen_id: z.string().trim().min(1).max(40).optional() })
+  .refine((v) => v.scope === "all" || v.screen_id !== undefined, { message: "Cần screen_id khi scope = screen.", path: ["screen_id"] })
+
+/** FLF-410: query của GET /projects/:id/screen-mockups — có `mode` ⇒ ước tính credit, không ⇒ tóm tắt. */
+export const ScreenMockupsQuerySchema = z.object({
+  mode: z.enum(SCREEN_MOCKUP_MODES).optional(),
+  scope: z.enum(["screen", "all"]).optional(),
+  screen_id: z.string().trim().min(1).max(40).optional()
 })
 
 export const RenameProjectSchema = z.object({
@@ -91,6 +146,9 @@ export type MoveProjectDTO = z.infer<typeof MoveProjectSchema>
 export type CreateProjectDTO = z.infer<typeof CreateProjectSchema>
 export type RenameProjectDTO = z.infer<typeof RenameProjectSchema>
 export type UpdateErdNotationDTO = z.infer<typeof UpdateErdNotationSchema>
+export type UpdateScreenThemeDTO = z.infer<typeof UpdateScreenThemeSchema>
+export type RunScreenMockupsDTO = z.infer<typeof RunScreenMockupsSchema>
+export type DisableScreenMockupsDTO = z.infer<typeof DisableScreenMockupsSchema>
 export type UpdateDocumentLanguageDTO = z.infer<typeof UpdateDocumentLanguageSchema>
 
 export const validateRequest = (schema: z.ZodSchema) => {

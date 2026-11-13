@@ -124,6 +124,21 @@ const paragraphLike = (like: Element): Element => {
 
 const isParagraph = (b: OoxmlBlock): boolean => b.kind !== "table" && isW(b.element, "p")
 
+/** Chữ hướng dẫn của mẫu: cả đoạn nằm trong ngoặc — mẫu đích có thể đổi chữ này mà nội dung của khách không đổi. */
+const GUIDANCE_RE = /^\s*[\[(\uFF08\uFF3B].*[\])\uFF09\uFF3D]\s*$/s
+export const isGuidanceText = (text: string): boolean => GUIDANCE_RE.test(text)
+
+export interface TrackedOptions {
+  /**
+   * Lần đổi mẫu (D11): chỉ so nội dung — bỏ heading (do mẫu đích đặt) và chữ hướng dẫn của mẫu, vì hai thứ này đổi theo mẫu
+   * chứ không phải thay đổi của khách. Mục chuyển sang mẫu mới giữ nguyên thứ tự nên so theo cặp đoạn của phần còn lại.
+   */
+  contentOnly?: boolean
+}
+
+const comparable = (blocks: readonly OoxmlBlock[], contentOnly: boolean): OoxmlBlock[] =>
+  blocks.filter(isParagraph).filter((b) => !contentOnly || (b.kind !== "heading" && !isGuidanceText(b.text)))
+
 export interface TrackedResult {
   data: Buffer
   /** Số đoạn được đánh dấu. */
@@ -136,10 +151,17 @@ export interface TrackedResult {
  * Ghi khác biệt bản `prevFile` → `nextFile` vào `nextFile` dạng Track Changes (tác giả `who.author`), gắn `comments` ở
  * tiêu đề mục. Không đổi nội dung cuối của bản mới: accept-all ra đúng bản render mới.
  */
-export const buildTrackedDocx = async (prevFile: Buffer, nextFile: Buffer, who: { author: string; date: Date }, comments: readonly TrackedComment[] = []): Promise<TrackedResult> => {
-  const prev = (await readBlocks(await DocxPackage.load(prevFile))).filter(isParagraph)
+export const buildTrackedDocx = async (
+  prevFile: Buffer,
+  nextFile: Buffer,
+  who: { author: string; date: Date },
+  comments: readonly TrackedComment[] = [],
+  options: TrackedOptions = {}
+): Promise<TrackedResult> => {
+  const contentOnly = !!options.contentOnly
+  const prev = comparable(await readBlocks(await DocxPackage.load(prevFile)), contentOnly)
   const pkg = await DocxPackage.load(nextFile)
-  const next = (await readBlocks(pkg)).filter(isParagraph)
+  const next = comparable(await readBlocks(pkg), contentOnly)
   const author = { author: who.author, date: who.date, ids: new RevisionIds(await pkg.requireXml(MAIN_PART)) }
 
   let changes = 0

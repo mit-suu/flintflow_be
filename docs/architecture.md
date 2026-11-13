@@ -181,8 +181,9 @@ diff gộp; user xác nhận thì áp một transaction, section về `awaiting_
 
 ## 6. Render & export
 
-- `modules/diagram`: 5 renderer (`context`, `usecase`, `screen_flow`, `erd`, `screen_layout`) sinh `.puml`
-  từ field, compile-check qua PlantUML server, lưu SVG/PNG ở GridFS; chỉ render lại khi `source_hash` đổi.
+- `modules/diagram`: renderer theo `kind`, hai engine: `puml` (sinh `.puml` từ field, compile-check qua PlantUML
+  server) và `svg` (dựng `Scene`, PNG bằng resvg); lưu SVG/PNG ở GridFS; chỉ render lại khi `source_hash` đổi.
+  `screen_layout` (FLF-410) là mockup SVG: model trả ScreenSpec JSON, code vẽ theo theme dự án (`Project.screenTheme`).
 - `modules/render`: `section-registry` (template FPT) → render từng section từ field → `RenderedDocument`
   (JSON, đồng bộ tay với FE) → `docx-writer` (watermark DRAFT với bản nháp). Có cache theo `spine_version`.
 

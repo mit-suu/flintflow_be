@@ -96,6 +96,14 @@ describe("placeSections - thứ tự theo file, chèn đầu mục FPT thiếu",
     expect(ids).toEqual(fileOrder)
   })
 
+  it("mẫu bắt buộc: phần nối (heading rỗng) mà mục riêng không còn ⇒ bỏ, không dựng mục trống \"—\" (test tay 11/11)", () => {
+    const s = spine()
+    const layout = [entry(0, "1 Introduction", 1, "fixed:1"), entry(1, "", 2, "custom:CSGONE"), entry(2, "Phạm vi", 2, "custom:CSNEW")]
+    const { sections } = buildLayoutSections(s, { language: "en", fixedTemplate: true, layout }, [], { diagramPng: () => undefined })
+    expect(sections.map((x) => x.id)).not.toContain("custom:CSGONE")
+    expect(sections.some((x) => x.heading === "—")).toBe(false)
+  })
+
   it("function mới của feature (chưa có trong layout) ⇒ mục con của feature, sau function cũ", () => {
     const s = spine()
     s.functions.push({ ...s.functions[0], id: "FN02", order: 1, name: "Quên mật khẩu" })
@@ -799,5 +807,24 @@ describe("TechMart 11/11 - chức năng mới trong mẫu cố định", () => {
     const ids = placed.map((p) => p.section_id)
     expect(ids.indexOf("function:FN09")).toBe(ids.indexOf("function:FN01") + 1)
     expect(placed.find((p) => p.section_id === "function:FN09")?.title).toBe("So sánh (UC-21)")
+  })
+})
+
+describe("FLF-411 (U2-2) - dòng chia phần của mẫu", () => {
+  it("'II. Software Requirement Specification' (heading bao, không chữ) ⇒ heading nhóm, không phải mục còn trống; heading bao có chữ vẫn là mục", () => {
+    const layout: TemplateLayout = {
+      language: "en",
+      layout: [entry(0, "I. Record of Changes", 1, "fixed:I"), entry(1, "II. Software Requirement Specification", 1, "custom:A"), entry(2, "1. Product Overview", 2, "fixed:1")]
+    }
+    const s: Spine = { ...createEmptySpine({ name: "x" }), custom_sections: [{ id: "A", heading: "II. Software Requirement Specification", level: 1, source: "import", blocks: [] }] }
+    const { sections } = buildLayoutSections(s, layout, [], { diagramPng: () => undefined })
+    const divider = sections.find((x) => x.heading.includes("Software Requirement Specification"))!
+    expect(divider.id).toBe("group:custom:A")
+    expect(divider.blocks).toEqual([])
+    const withText: Spine = {
+      ...s,
+      custom_sections: [{ id: "A", heading: "II. Software Requirement Specification", level: 1, source: "import", blocks: [{ kind: "paragraph", text: "This part specifies the system.", rows: null, image_ref: null }] }]
+    }
+    expect(buildLayoutSections(withText, layout, [], { diagramPng: () => undefined }).sections.find((x) => x.heading.includes("Software Requirement"))!.id).toBe("custom:A")
   })
 })
