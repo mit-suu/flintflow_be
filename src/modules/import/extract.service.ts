@@ -1,9 +1,11 @@
 /**
  * I-4 trích field Spine (nút 1.8) + xác nhận field (1.9, UC-22). FLF-171, plan §6 2C.
- * Theo từng section đã map, theo thứ tự tài liệu:
+ * Theo từng section đã map:
  *   1. Bảng khớp đủ cột (template profile) ⇒ trích tất định, không tốn credit (G7).
  *   2. Feature/function của §3.2+ ⇒ tên + quan hệ lấy từ heading (tất định).
- *   3. Phần chữ còn lại ⇒ `IMPORT_EXTRACT_FIELDS` (chỉ text block, G6) qua `withMeteredAi`.
+ *   3. Phần chữ còn lại ⇒ `IMPORT_EXTRACT_FIELDS` (chỉ text block, G6) qua `withMeteredAi`. FLF-392: tối đa
+ *      `IMPORT_EXTRACT_CONCURRENCY` section gọi AI song song (chỉ lưu output thô); cấp mã / ghép tên / lọc chạy ở bước ghép,
+ *      tuần tự theo thứ tự tài liệu ⇒ kết quả như chạy tuần tự.
  *   4. Lưu `ExtractionDraft` rồi sang `baselining` (FLF-343: không dừng ở `fields_review` — field độ tin < 0.7 / đọc từ ảnh vẫn vào
  *      baseline 0.1, finalize gắn cờ vàng "Cần xem"). Job nền nối tiếp finalize (`extract-jobs.ts`).
  * Hết credit / AI lỗi sau retry ⇒ `paused`, giữ `extract_cursor`; chạy tiếp bỏ qua section đã `done`.
@@ -17,13 +19,17 @@ import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { getActionCost, getOrCreateWallet, resolveWalletOrg } from "../../shared/ai/credit-reservation.service.js"
 import type { DiagramImageKind, ImportExtractDiagramOutput, ImportExtractOutput } from "../../shared/ai/response-parser.js"
 import { loadImportImage } from "../render/import-media.js"
+// Caption ảnh màn hình dùng chung với mockup màn (FLF-410: dự phòng khi model không chỉ ra ảnh nào là ảnh màn hình)
+import { SCREEN_CAPTION } from "../diagram/screen-originals.js"
 import { IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { DocBlock, type IDocBlock } from "./doc-block.model.js"
+import { applyDropToBlocks, planDrop, textRegions } from "./drop-text.js"
 import { isPlaceholderRow, isPlaceholderText, templateMarks } from "./template-markers.js"
 import { isTemplateContent, isTemplateFile } from "./structure-preview.js"
 import { DIAGRAM_SECTIONS, DIAGRAM_TARGETS, NFR_CATEGORY_BY_SECTION, isExtractableSection, schemaExcerptFor, targetsOf } from "./extract-targets.js"
 import {
   IdAllocator,
+  type IdSource,
   REF_LIST_FIELDS,
   aiItemId,
   compactKey,
@@ -40,7 +46,7 @@ import {
   type EntityItem,
   type ProvisionalEntity
 } from "./extracted-entities.js"
-import { ExtractionDraft, type ExtractedField, type IExtractionDraft } from "./extraction-draft.model.js"
+import { ExtractionDraft, type ExtractedField, type ExtractionProgress, type IExtractionDraft, type RawAiStep } from "./extraction-draft.model.js"
 import { FIELD_CONFIDENCE_THRESHOLD, VISION_CONFIDENCE_CAP, needsConfirm, type FieldOrigin, type MentionEntity } from "./import.constants.js"
 import type { FieldsPatchRequest, GetImportResponse } from "./import.dto.js"
 import { Project } from "../project/project.model.js"
@@ -48,6 +54,8 @@ import { assertImportStatus, extractionSummary, requireImport, transitionImport 
 import { ImportedDocument, type IImportedDocument } from "./imported-document.model.js"
 import { knownKeysText, scopeKnownKeys } from "./known-keys.js"
 import { VISION_UNAVAILABLE, withMeteredAi, type MeteredResult } from "./metered-ai.js"
+import { notifyTopUpNeeded } from "./credit-flow.service.js"
+import { runOrdered, type PoolRead, type PoolStop } from "./ordered-pool.js"
 import { delay } from "../../shared/ai/retry.service.js"
 import { env } from "../../config/env.js"
 import { Mode1Error } from "./mode1.errors.js"
@@ -450,7 +458,7 @@ export const itemsFromAi = (
   out: ImportExtractOutput,
   ctx: {
     sectionId: string
-    alloc: IdAllocator
+    alloc: IdSource
     known: EntityItem[]
     sectionFunction: ProvisionalEntity | null
     validBlocks: Set<string>
@@ -531,7 +539,7 @@ export const captionOf = (img: Pick<BlockLite, "block_id">, sectionBlocks: Pick<
 /** Caption chỉ hình là sơ đồ đọc được (use case, ngữ cảnh, ERD / class, luồng màn; FLF-390: sequence, activity). */
 const DIAGRAM_CAPTION = /(use[\s-]?case|context|erd|entity[\s-]?relationship|class diagram|data model|screens?[\s-]?flow|navigation|sequence|tuần tự|activity|hoạt động|luồng xử lý|workflow|deployment|triển khai|sơ đồ|biểu đồ|diagram)/i
 /** Caption chỉ hình không phải loại sơ đồ đọc được (ảnh màn hình, wireframe, state machine…) — đọc chỉ tốn credit. */
-const NOT_DIAGRAM_CAPTION = /(layout|screenshot|screen shot|mock-?up|wireframe|prototype|giao diện|state machine|component diagram)/i
+const NOT_DIAGRAM_CAPTION = new RegExp(`${SCREEN_CAPTION.source.slice(0, -1)}|state machine|component diagram)`, "i")
 
 /**
  * Ảnh có gửi AI đọc không (FLF-252): caption nói là ảnh màn hình / sơ đồ khác loại ⇒ không; ảnh ở mục thường có sơ đồ
@@ -818,7 +826,10 @@ export const isTemplateOnlyProject = async (projectId: string): Promise<boolean>
 export const loadExtractionInputs = async (projectId: string): Promise<ExtractionInputs | null> => {
   const profile = await TemplateProfile.findOne({ projectId })
   if (!profile) return null
-  const blocks = await DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }).sort({ "anchor.ordinal": 1 }).lean<BlockLite[]>()
+  const stored = await DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }).sort({ "anchor.ordinal": 1 }).lean<BlockLite[]>()
+  // FLF-412: lựa chọn Bỏ chữ chưa áp vào file (trước Bắt đầu) ⇒ ước tính như file đã bỏ chữ. Ý định chỉ quyết định có bỏ heading
+  // mục riêng hay không — heading không tốn lượt đọc nên không cần biết
+  const blocks = profile.drop_text?.length ? applyDropToBlocks(stored, planDrop(stored, textRegions(stored, profile.heading_map), new Set(profile.drop_text), "fixed")) : stored
   return { profile, blocks, provisional: resolveProvisional(profile.heading_map), plan: extractionPlan(blocks) }
 }
 
@@ -845,9 +856,16 @@ export interface DiagramReadContext {
   /** Phần tử đã biết (section khác + phần đọc tất định) và phần tử của chính section (đã đọc tới giờ). */
   known: readonly EntityItem[]
   items: readonly EntityItem[]
-  alloc: IdAllocator
+  alloc: IdSource
   ownProvisional: EntityItem[]
   targets: readonly string[]
+  /** `false`: hết credit không tự báo nạp (I-4 song song báo một lần — FLF-392). */
+  notifyTopUp?: boolean
+  /**
+   * I-4 song song: section khác vừa dừng (Dừng / hết credit / AI lỗi) trong lúc ảnh này đang tải ⇒ không bắt đầu lượt AI.
+   * Kiểm ngay trước khi gọi model, sau bước tải ảnh.
+   */
+  stopped?: () => boolean
   /** FLF-390: function tạm của mục function — chủ của ảnh sequence / activity trong mục đó. */
   sectionFunction?: ProvisionalEntity | null
 }
@@ -865,11 +883,20 @@ export type DiagramRead =
 /** FLF-390: sơ đồ của một phần tử — dữ liệu đọc được nằm trên chủ đó: sơ đồ tuần tự ↔ function, activity ↔ use case. */
 const OWNER_ENTITY: Readonly<Record<string, "functions" | "use_cases">> = { sequence: "functions", activity: "use_cases" }
 
-export const readDiagramImage = async (img: BlockLite, ctx: DiagramReadContext): Promise<DiagramRead> => {
-  const { projectId, userId, section_id, heading, sectionBlocks, known, items, alloc, ownProvisional, targets } = ctx
-  const sectionFunction = ctx.sectionFunction?.entity === "functions" ? ctx.sectionFunction : null
+/** Kết quả gọi AI đọc một ảnh, chưa cấp mã / ghép tên (FLF-392: output thô lưu ở `partial.raw_steps`). */
+export type DiagramCall =
+  | { status: "read"; data: ImportExtractDiagramOutput; usageId: string }
+  | { status: "unsupported" | "unavailable" | "failed" }
+  | { status: "credits"; failure: MeteredFailure }
+  /** `ctx.stopped()` bật trước khi gọi model ⇒ không gọi, không trừ credit, không lưu lượt. */
+  | { status: "stopped" }
+
+/** Gọi AI đọc một ảnh sơ đồ (known_keys theo phần tử đã biết + của section) — không cấp mã. */
+export const callDiagramAi = async (img: BlockLite, ctx: Omit<DiagramReadContext, "alloc">): Promise<DiagramCall> => {
+  const { projectId, userId, section_id, heading, sectionBlocks, known, items, ownProvisional, targets } = ctx
   const image = await loadImportImage(projectId, img.image_ref!)
   if (!image) return { status: "unsupported" }
+  if (ctx.stopped?.()) return { status: "stopped" }
   const caption = captionOf(img, sectionBlocks)
   const result = await withMeteredAi<ImportExtractDiagramOutput>(
     { projectId, userId, stepId: `I-4:${section_id}` },
@@ -893,7 +920,7 @@ export const readDiagramImage = async (img: BlockLite, ctx: DiagramReadContext):
         })
       )
     },
-    { images: [image] }
+    { images: [image], notifyTopUp: ctx.notifyTopUp }
   )
   if (!result.ok) {
     // Môi trường không có vision (thiếu GEMINI_API_KEY / provider không nhận ảnh) ⇒ không dừng import vì ảnh: giữ ảnh
@@ -905,19 +932,33 @@ export const readDiagramImage = async (img: BlockLite, ctx: DiagramReadContext):
     console.warn(`[I-4] ${section_id}: đọc ảnh ${img.block_id} lỗi (${result.message}) - giữ ảnh gốc, đi tiếp`)
     return { status: result.kind === "transient" ? "unavailable" : "failed" }
   }
+  return { status: "read", data: result.data, usageId: result.usageId }
+}
+
+/**
+ * Phần tử của một ảnh đã đọc: cấp mã / ghép tên với phần tử đã biết + của section, chiều quan hệ, chỉ phần mới; FLF-390:
+ * chủ của sơ đồ tuần tự / activity (`owner_id`).
+ */
+export const diagramItems = (
+  data: ImportExtractDiagramOutput,
+  blockId: string,
+  ctx: Pick<DiagramReadContext, "section_id" | "heading" | "known" | "items" | "alloc" | "sectionFunction">
+): { kind: DiagramImageKind | "other"; items: EntityItem[]; owner_id?: string } => {
+  const { section_id, heading, known, items, alloc } = ctx
+  const sectionFunction = ctx.sectionFunction?.entity === "functions" ? ctx.sectionFunction : null
   const all = [...known, ...items]
   const knownIds = (entity: string) => new Set(all.filter((k) => k.entity === entity && k.id).map((k) => k.id as string))
   const knownFunctions = knownIds("functions")
   if (sectionFunction) knownFunctions.add(sectionFunction.id)
   const knownUseCases = knownIds("use_cases")
-  const ownerEntity = OWNER_ENTITY[result.data.diagram_kind]
+  const ownerEntity = OWNER_ENTITY[data.diagram_kind]
   const read =
-    result.data.diagram_kind === "other"
+    data.diagram_kind === "other"
       ? []
       : dropMutualRelations(
           orientRelations(
             visionItems(
-              itemsFromAi(result.data, { sectionId: section_id, alloc, known: all, sectionFunction, validBlocks: new Set([img.block_id]), fromImage: true, sectionConfidence: heading?.confidence ?? null })
+              itemsFromAi(data, { sectionId: section_id, alloc, known: all, sectionFunction, validBlocks: new Set([blockId]), fromImage: true, sectionConfidence: heading?.confidence ?? null })
             ),
             all
           ),
@@ -925,23 +966,35 @@ export const readDiagramImage = async (img: BlockLite, ctx: DiagramReadContext):
         )
           // FLF-390: hình không tạo chức năng mới; sơ đồ activity không tạo use case mới — chỉ thêm luồng cho phần tử đã có
           .filter((it) => it.entity !== "functions" || (it.id !== null && knownFunctions.has(it.id)))
-          .filter((it) => result.data.diagram_kind !== "activity" || it.entity !== "use_cases" || (it.id !== null && knownUseCases.has(it.id)))
+          .filter((it) => data.diagram_kind !== "activity" || it.entity !== "use_cases" || (it.id !== null && knownUseCases.has(it.id)))
   // Sơ đồ gắn phần tử: chủ = phần tử nhận dữ liệu của hình; sơ đồ tuần tự trong mục function ⇒ function của mục (không có
   // chủ ⇒ không biết chủ, coi như hình khác)
   const owner = ownerEntity ? (read.find((it) => it.entity === ownerEntity)?.id ?? (ownerEntity === "functions" ? sectionFunction?.id : null) ?? null) : null
-  const kind = !read.length || (ownerEntity && !owner) ? "other" : result.data.diagram_kind
+  const kind = !read.length || (ownerEntity && !owner) ? "other" : data.diagram_kind
   // Phần tử ảnh trùng phần tử đã có (chữ, bảng, ảnh trước) ⇒ chỉ giữ phần mới để bước 1.9 chỉ hỏi phần ảnh thêm vào (FLF-252)
-  return { status: "read", kind, items: onlyNewFromVision(read, all), usageId: result.usageId, ...(owner && kind !== "other" ? { owner_id: owner } : {}) }
+  return { kind, items: onlyNewFromVision(read, all), ...(owner && kind !== "other" ? { owner_id: owner } : {}) }
+}
+
+export const readDiagramImage = async (img: BlockLite, ctx: DiagramReadContext): Promise<DiagramRead> => {
+  const r = await callDiagramAi(img, ctx)
+  // Không truyền `stopped` ở đây nên không có "stopped"; nếu có thì coi như ảnh chưa đọc được (đọc lại sau)
+  if (r.status === "stopped") return { status: "unavailable" }
+  if (r.status !== "read") return r
+  return { status: "read", ...diagramItems(r.data, img.block_id, ctx), usageId: r.usageId }
 }
 
 /** FLF-360: chờ trước lượt đọc lại thứ `round` (0-based) — `IMPORT_AI_RETRY_BACKOFF_MS`, số phần tử = số lượt tối đa. */
 export const importRetryBackoff = (): readonly number[] => env.IMPORT_AI_RETRY_BACKOFF_MS
 
-/**
- * Chạy (hoặc chạy tiếp) I-4 cho import đang ở `extracting`. Trả trạng thái mới nhất kể cả khi dừng vì credit/lỗi AI.
- * Tiến độ lưu sau từng lượt AI (`ExtractionDraft.partial`): section nhiều lô dừng ở lô k ⇒ chạy tiếp từ lô k, không gọi
- * (và không trừ credit) lại các lô trước.
- */
+/** FLF-392: số section gọi AI cùng lúc (`IMPORT_EXTRACT_CONCURRENCY`, 1 = mỗi lúc một section). */
+export const extractConcurrency = (): number => env.IMPORT_EXTRACT_CONCURRENCY
+
+/** Giãn cách đọc lại ±20% — N section lỗi cùng đợt quá tải không cùng thử lại một nhịp (FLF-392). */
+const jitter = (ms: number): number => Math.round(ms * (0.8 + Math.random() * 0.4))
+
+/** Nhịp kiểm tín hiệu dừng trong lúc chờ đọc lại — dừng không phải chờ hết giãn cách. */
+const STOP_TICK_MS = 1_000
+
 /**
  * Người dùng đã bấm Dừng (`paused: user`, đặt bởi request khác qua `requestStop`) — đọc lại từ DB vì `doc` trong bộ nhớ của
  * job không thấy. Có ⇒ chép `paused` vào `doc` để kết quả trả về đúng trạng thái dừng.
@@ -953,7 +1006,133 @@ export const userStopRequested = async (doc: IImportedDocument): Promise<boolean
   return true
 }
 
+/** Nguồn id nháp cho known_keys lúc đọc: không cấp mã — phần tử AI mới không có id nên không vào prompt (FLF-392). */
+const DRAFT_IDS: IdSource = { next: () => "", reserve: () => undefined }
+
+/** Phần đã đọc của một section: phần tử chưa gộp, block giữ nguyên văn, ảnh, usage của lượt cuối đọc được. */
+interface SectionState {
+  items: EntityItem[]
+  unmapped: string[]
+  diagramImages: IExtractionDraft["diagram_images"]
+  usageId: string | null
+}
+
+/** Ngữ cảnh tĩnh của một section — chung cho lúc đọc (gọi AI) và lúc ghép (replay). */
+const sectionContext = (planned: PlannedSection, inputs: Pick<ExtractionInputs, "blocks" | "profile" | "provisional">) => {
+  const { section_id } = planned
+  const sectionBlocks = inputs.blocks.filter((b) => b.section_id === section_id)
+  const sectionFunction = PROVISIONAL_SECTION.test(section_id) ? (inputs.provisional.get(section_id) ?? null) : null
+  return {
+    planned,
+    section_id,
+    sectionBlocks,
+    heading: inputs.profile.heading_map.find((h) => h.section_id === section_id),
+    targets: targetsOf(section_id),
+    ownProvisional: provisionalScope(section_id, inputs.provisional),
+    sectionFunction: sectionFunction?.entity === "functions" ? sectionFunction : null,
+    mentionedRules: new Set(sectionBlocks.flatMap((b) => (b.mentions ?? []).filter((m) => m.entity === "business_rule").map((m) => idKey(m.id)))),
+    /** Phần tử của chính section trước mọi lượt AI: feature / function tạm + phần đọc tất định. */
+    own: [...provisionalItems(section_id, inputs.provisional), ...planned.settled.items]
+  }
+}
+type SectionContext = ReturnType<typeof sectionContext>
+
+/** Số lượt đầu đã xử lý sẵn vào `items` (bản ghi trước FLF-392) — các lượt sau nằm ở `raw_steps`. */
+const preprocessedSteps = (progress: ExtractionProgress | null): number => (progress ? progress.steps_done - (progress.raw_steps?.length ?? 0) : 0)
+
+/** Trạng thái đầu của section: phần tử của chính section + phần đã xử lý sẵn của bản ghi trước FLF-392. */
+const initialState = (sc: SectionContext, progress: ExtractionProgress | null): SectionState => ({
+  items: [...sc.own, ...(progress?.items ?? [])],
+  // Bảng đặc tả use case đã đọc tất định nhưng Spine không chứa hết (luồng, tiền / hậu điều kiện) ⇒ giữ nguyên văn
+  unmapped: progress?.unmapped_block_ids ? [...progress.unmapped_block_ids] : [...sc.planned.settled.verbatim],
+  diagramImages: progress?.diagram_images ? [...progress.diagram_images] : [],
+  usageId: progress?.usage_id ?? null
+})
+
+/**
+ * Xử lý output một lượt AI vào phần đã đọc của section: cấp mã (`ids`), ghép tên với `known` + phần tử section đã có, lọc.
+ * Cùng một hàm cho known_keys lúc đọc (`DRAFT_IDS`, known bản chụp) và lúc ghép (allocator thật, known theo thứ tự tài liệu)
+ * ⇒ ghép replay đúng code xử lý của bản tuần tự.
+ */
+const applyRawStep = (state: SectionState, step: SectionAiStep, raw: RawAiStep, sc: SectionContext, ids: IdSource, known: readonly EntityItem[]): void => {
+  if (raw.kind === "image") {
+    if (raw.status !== "read") {
+      state.diagramImages.push({ block_id: raw.block_id, kind: raw.status })
+      return
+    }
+    const r = diagramItems(raw.data!, raw.block_id, { section_id: sc.section_id, heading: sc.heading, known, items: state.items, alloc: ids, sectionFunction: sc.sectionFunction })
+    state.usageId = raw.usage_id ?? state.usageId
+    state.diagramImages.push({ block_id: raw.block_id, kind: r.kind, ...(r.owner_id ? { owner_id: r.owner_id } : {}) })
+    state.items.push(...r.items)
+    return
+  }
+  const batch = step.kind === "text" ? step.batch : []
+  state.usageId = raw.usage_id
+  // Văn xuôi không trích được ⇒ finalize giữ nguyên văn làm phần nối của section (mode 1 v2 — FLF-184)
+  const inBatch = new Set(batch.map((b) => b.block_id))
+  state.unmapped.push(...raw.data.unmapped_block_ids.filter((id) => inBatch.has(id) && !state.unmapped.includes(id)))
+  state.items.push(
+    ...keepMentionedRules(
+      itemsFromAi(raw.data, {
+        sectionId: sc.section_id,
+        alloc: ids,
+        known: [...known, ...state.items],
+        sectionFunction: sc.sectionFunction,
+        validBlocks: inBatch,
+        blockText: new Map(batch.map((b) => [b.block_id, b.text])),
+        sectionConfidence: sc.heading?.confidence ?? null
+      }),
+      sc.mentionedRules
+    )
+  )
+  state.unmapped.push(...tablesToKeepVerbatim(batch, state.items).filter((id) => !state.unmapped.includes(id)))
+}
+
+/** Số lần tự chạy tiếp trong một job khi ví được nạp trong lúc dừng vì hết credit (chặn vòng lặp). */
+const TOPUP_RECHECKS = 3
+
+/** Ví của org sở hữu dự án còn đủ cho ít nhất một lượt I-4 (lượt rẻ nhất) — cùng ví lượt gọi AI trừ. */
+const walletCoversNextStep = async (projectId: string, userId: string): Promise<boolean> => {
+  const orgId = await resolveWalletOrg(projectId)
+  if (!orgId) return false
+  const [wallet, textCost, imageCost] = await Promise.all([
+    getOrCreateWallet(userId, undefined, orgId),
+    getActionCost(ActionType.IMPORT_EXTRACT_FIELDS),
+    getActionCost(ActionType.IMPORT_EXTRACT_DIAGRAM)
+  ])
+  return wallet.balance - wallet.reserved >= Math.min(textCost, imageCost)
+}
+
+type ExtractionDraftDoc = IExtractionDraft & mongoose.Document
+
+const isFailure = (r: RawAiStep | MeteredFailure): r is MeteredFailure => "ok" in r
+
+/**
+ * Chạy (hoặc chạy tiếp) I-4 cho import đang ở `extracting`. Trả trạng thái mới nhất kể cả khi dừng vì credit/lỗi AI.
+ * FLF-392: tối đa `IMPORT_EXTRACT_CONCURRENCY` section gọi AI cùng lúc (lượt trong một section vẫn nối đuôi); output thô
+ * của mỗi lượt lưu ở `ExtractionDraft.partial.raw_steps` ngay sau lượt đó. Section được **ghép** (replay cấp mã / ghép tên /
+ * lọc, rồi `done`) nối tiếp theo thứ tự tài liệu khi mọi section đứng trước đã ghép ⇒ kết quả như chạy tuần tự. Dừng / hết
+ * credit / AI lỗi ⇒ không lượt AI mới nào bắt đầu; chạy tiếp không gọi (và không trừ credit) lại lượt đã lưu.
+ */
 export const runExtraction = async (projectId: string, userId: string, importId: string): Promise<ExtractionRun> => {
+  const started = Date.now()
+  const stats = { calls: 0 }
+  try {
+    for (let rechecks = 0; ; rechecks++) {
+      const run = await extractSections(projectId, userId, importId, stats)
+      if (run.doc.paused?.reason !== "credits" || rechecks >= TOPUP_RECHECKS || !(await walletCoversNextStep(projectId, userId))) return run
+      // `paused: credits` ghi ngay lúc lượt đầu hết credit, các section khác còn dừng dần — Lead nạp tiền trong lúc đó thì lượt
+      // nạp gọi `startExtraction` khi job này còn chạy (bị bỏ qua) ⇒ ví đã đủ: tự chạy tiếp ngay, không chờ bấm Tiếp tục
+      const cleared = await ImportedDocument.updateOne({ _id: run.doc._id, "paused.reason": "credits" }, { $set: { paused: null } })
+      if (!cleared.modifiedCount) return run
+    }
+  } finally {
+    // Đo thời gian I-4 riêng (FLF-392, docs/measurements.md)
+    console.info(`[I-4] import ${importId}: ${stats.calls} lượt AI, ${Date.now() - started} ms, song song ${extractConcurrency()}`)
+  }
+}
+
+const extractSections = async (projectId: string, userId: string, importId: string, stats: { calls: number }): Promise<ExtractionRun> => {
   const doc = await requireImport(projectId, importId)
   assertImportStatus(doc, ["extracting"], "extracting")
   const inputs = await loadExtractionInputs(projectId)
@@ -1012,139 +1191,178 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     }
     known.push(...found.items)
   }
-  // Phần tử của các lượt đã xong ở lần chạy trước (section dừng giữa chừng) giữ chỗ id như khi chúng được cấp
+  // Phần tử đã xử lý sẵn của bản ghi trước FLF-392 (section dừng giữa chừng) giữ chỗ id như khi chúng được cấp. Output thô
+  // (`raw_steps`) không giữ chỗ trước: ghép replay cấp mã đúng thứ tự tài liệu
   for (const p of pending) {
     const d = draftOf.get(p.section_id)!
-    if (stepsDoneOf(d, p) > 0) for (const it of d.partial!.items) if (it.id) alloc.reserve(it.entity, it.id)
+    if (stepsDoneOf(d, p) > 0) for (const it of d.partial!.items ?? []) if (it.id) alloc.reserve(it.entity, it.id)
   }
 
-  const stoppedByUser = async (): Promise<ExtractionRun> => ({ doc, sections: (await extractionSummary(doc._id as mongoose.Types.ObjectId)).sections })
+  // known_keys lúc đọc: bản chụp sau phần đọc tất định, chung cho mọi section đọc song song (không đổi trong lượt chạy)
+  const view: readonly EntityItem[] = [...known]
+  const stop: PoolStop = { aborted: false }
+  const order = pending.map((p) => p.section_id)
 
-  for (const planned of pending) {
-    // Người dùng bấm Dừng ⇒ không sang mục mới (mục đã xong giữ nguyên, chạy tiếp từ mục này)
-    if (await userStopRequested(doc)) return stoppedByUser()
-    const { section_id, steps } = planned
-    const draft = draftOf.get(section_id)!
-    doc.extract_cursor = section_id
-    await doc.save()
-
-    const sectionBlocks = blocks.filter((b) => b.section_id === section_id)
-    const { items: settledItems, verbatim } = planned.settled
-    const items: EntityItem[] = [...provisionalItems(section_id, provisional), ...settledItems]
-    const ownCount = items.length
-    const targets = targetsOf(section_id)
-    const mentionedRules = new Set(sectionBlocks.flatMap((b) => (b.mentions ?? []).filter((m) => m.entity === "business_rule").map((m) => idKey(m.id))))
-    // Chạy tiếp section dừng giữa chừng: dùng lại kết quả các lượt đã xong (đã trừ credit), bắt đầu ở lượt hỏng
-    const skip = stepsDoneOf(draft, planned)
-    const progress = skip > 0 ? draft.partial! : null
-    if (progress) items.push(...progress.items)
-    let usageId: string | null = progress?.usage_id ?? null
-    // Bảng đặc tả use case đã đọc tất định nhưng Spine không chứa hết (luồng, tiền / hậu điều kiện) ⇒ giữ nguyên văn
-    const unmapped: string[] = progress ? [...progress.unmapped_block_ids] : [...verbatim]
-    const diagramImages: IExtractionDraft["diagram_images"] = progress ? [...progress.diagram_images] : []
-    const heading = profile.heading_map.find((h) => h.section_id === section_id)
-    const sectionFunction = PROVISIONAL_SECTION.test(section_id) ? (provisional.get(section_id) ?? null) : null
-    const ownProvisional = provisionalScope(section_id, provisional)
-    const pause = async (result: { reason: "credits" | "resume_later"; userMessage: string }): Promise<ExtractionRun> => {
-      doc.paused = { reason: result.reason, at: new Date() }
+  // `doc` (ImportedDocument) chỉ ghi qua một hàng đợi nối tiếp — nhiều section không `save()` cùng lúc (ParallelSaveError)
+  let docQueue: Promise<void> = Promise.resolve()
+  const writeDoc = (mutate: () => void): Promise<void> => {
+    const write = docQueue.then(async () => {
+      mutate()
       await doc.save()
-      // Nói rõ mục nào — theo tiêu đề trong file, không in khoá section. Câu cho user (FLF-247); text thô của provider
-      // đã log ở metered-ai
-      draft.error = `Mục "${heading?.heading_text?.trim() || capitalize(sectionLabel(section_id))}": ${result.userMessage}`.slice(0, 500)
-      if (result.reason === "resume_later") draft.status = "failed"
-      await draft.save()
-      return { doc, sections: (await extractionSummary(doc._id as mongoose.Types.ObjectId)).sections }
-    }
+    })
+    docQueue = write.catch(() => undefined)
+    return write
+  }
 
-    // Phase 5: ảnh diagram của section (sau bảng tất định, trước lô chữ) ⇒ Gemini đọc từng ảnh; thực thể đọc được vào
-    // known_keys để lô chữ dùng lại khoá. EMF/WMF / file gốc không còn ⇒ `unsupported` (không gọi AI, giữ ảnh gốc).
-    const readImage = async (img: BlockLite): Promise<MeteredFailure | null> => {
-      const r = await readDiagramImage(img, { projectId, userId, section_id, heading, sectionBlocks, known, items, alloc, ownProvisional, targets, sectionFunction })
+  // FLF-360: section đang đọc lại lô chữ; FE thấy trạng thái của section đứng đầu theo thứ tự tài liệu
+  const rereading = new Map<string, NonNullable<IImportedDocument["reread"]>>()
+  const setRereadingOf = (section_id: string, state: IImportedDocument["reread"]): Promise<void> => {
+    if (state) rereading.set(section_id, state)
+    else if (!rereading.delete(section_id)) return Promise.resolve()
+    const first = order.find((s) => rereading.has(s))
+    return writeDoc(() => {
+      doc.reread = first ? rereading.get(first)! : null
+      doc.markModified("reread")
+    })
+  }
+
+  /** Tín hiệu dừng chung: đã bật, hoặc người dùng vừa bấm Dừng (đọc DB). */
+  const stopNow = async (): Promise<boolean> => {
+    if (stop.aborted) return true
+    if (await userStopRequested(doc)) stop.aborted = true
+    return stop.aborted
+  }
+  /** Chờ đọc lại, bỏ ngang khi có tín hiệu dừng. `false` = đã dừng. */
+  const waitOrStop = async (ms: number): Promise<boolean> => {
+    for (let left = ms; left > 0; left -= STOP_TICK_MS) {
+      await delay(Math.min(STOP_TICK_MS, left))
+      if (await stopNow()) return false
+    }
+    return !(await stopNow())
+  }
+
+  // Hết credit / AI lỗi: ghi `paused` ngay (nạp tiền trong lúc các section khác dừng dần vẫn tự chạy tiếp) và có điều kiện —
+  // `paused: user` đã có thì giữ; lỗi đầu tiên thắng. Hết credit ⇒ báo nạp đúng một lần
+  let pauseWritten = false
+  const pause = async (failure: MeteredFailure, sc: SectionContext, draft: ExtractionDraftDoc): Promise<void> => {
+    stop.aborted = true
+    if (!pauseWritten) {
+      pauseWritten = true
+      const res = await ImportedDocument.updateOne({ _id: doc._id, paused: null }, { $set: { paused: { reason: failure.reason, at: new Date() } } })
+      if (res.modifiedCount && failure.reason === "credits") void notifyTopUpNeeded(projectId, `I-4:${sc.section_id}`)
+    }
+    // Nói rõ mục nào — theo tiêu đề trong file, không in khoá section. Câu cho user (FLF-247); text thô của provider đã log
+    // ở metered-ai
+    draft.error = `Mục "${sc.heading?.heading_text?.trim() || capitalize(sectionLabel(sc.section_id))}": ${failure.userMessage}`.slice(0, 500)
+    if (failure.reason === "resume_later") draft.status = "failed"
+    await draft.save()
+  }
+
+  /**
+   * Một lượt AI: ảnh diagram hoặc lô chữ. Trả output thô (đã parse schema, chưa cấp mã) hoặc lỗi credit / AI; `null` = có
+   * tín hiệu dừng trong lúc tải ảnh, chưa gọi model.
+   */
+  const callStep = async (sc: SectionContext, step: SectionAiStep, state: SectionState): Promise<RawAiStep | MeteredFailure | null> => {
+    const { section_id, heading, targets, ownProvisional } = sc
+    if (step.kind === "image") {
+      const r = await callDiagramAi(step.block, { projectId, userId, section_id, heading, sectionBlocks: sc.sectionBlocks, known: view, items: state.items, ownProvisional, targets, notifyTopUp: false, stopped: () => stop.aborted })
+      if (r.status === "stopped") return null
+      if (r.status !== "unsupported") stats.calls++
       if (r.status === "credits") return r.failure
-      if (r.status !== "read") {
-        diagramImages.push({ block_id: img.block_id, kind: r.status })
-        return null
-      }
-      usageId = r.usageId
-      diagramImages.push({ block_id: img.block_id, kind: r.kind, ...(r.owner_id ? { owner_id: r.owner_id } : {}) })
-      items.push(...r.items)
-      return null
+      if (r.status === "read") return { kind: "image", block_id: step.block.block_id, status: "read", data: r.data, usage_id: r.usageId }
+      return { kind: "image", block_id: step.block.block_id, status: r.status }
     }
-
-    const readBatch = async (batch: BlockLite[]): Promise<MeteredFailure | null> => {
-      const text = blockLines(batch)
-      const result = await withMeteredAi<ImportExtractOutput>({ projectId, userId, stepId: `I-4:${section_id}` }, ActionType.IMPORT_EXTRACT_FIELDS, {
+    const text = blockLines(step.batch)
+    stats.calls++
+    const result = await withMeteredAi<ImportExtractOutput>(
+      { projectId, userId, stepId: `I-4:${section_id}` },
+      ActionType.IMPORT_EXTRACT_FIELDS,
+      {
         section_id,
         heading_text: heading?.heading_text ?? section_id,
         target_entities: targets.join(", "),
         schema_excerpt: schemaExcerptFor(targets),
-        // Chỉ phần tử lô này có thể nhắc tới (không còn cả tài liệu) — ghép mã / tên ở `itemsFromAi` vẫn dùng toàn bộ `known`
+        // Chỉ phần tử lô này có thể nhắc tới (không còn cả tài liệu) — ghép mã / tên lúc ghép section vẫn dùng toàn bộ `known`
         known_keys: knownKeysText(
-          scopeKnownKeys([...known, ...items], {
+          scopeKnownKeys([...view, ...state.items], {
             provisional: ownProvisional,
-            section: items,
+            section: state.items,
             text: `${heading?.heading_text ?? ""}\n${text}`,
-            mentions: batch.flatMap((b) => b.mentions ?? []),
+            mentions: step.batch.flatMap((b) => b.mentions ?? []),
             always: ALWAYS_KNOWN
           })
         ),
         blocks: text
-      })
-      if (!result.ok) return result
-      usageId = result.usageId
-      // Văn xuôi không trích được ⇒ finalize giữ nguyên văn làm phần nối của section (mode 1 v2 — FLF-184)
-      const inBatch = new Set(batch.map((b) => b.block_id))
-      unmapped.push(...result.data.unmapped_block_ids.filter((id) => inBatch.has(id) && !unmapped.includes(id)))
-      items.push(
-        ...keepMentionedRules(
-          itemsFromAi(result.data, {
-            sectionId: section_id,
-            alloc,
-            known: [...known, ...items],
-            sectionFunction: sectionFunction?.entity === "functions" ? sectionFunction : null,
-            validBlocks: new Set(batch.map((b) => b.block_id)),
-            blockText: new Map(batch.map((b) => [b.block_id, b.text])),
-            sectionConfidence: heading?.confidence ?? null
-          }),
-          mentionedRules
-        )
-      )
-      unmapped.push(...tablesToKeepVerbatim(batch, items).filter((id) => !unmapped.includes(id)))
-      return null
-    }
+      },
+      { notifyTopUp: false }
+    )
+    return result.ok ? { kind: "text", data: result.data, usage_id: result.usageId } : result
+  }
 
-    for (const [i, step] of steps.entries()) {
-      if (i < skip) continue
-      // Dừng giữa mục nhiều lượt: các lượt trước đã lưu ở `partial` (dưới đây) ⇒ chạy tiếp bắt đầu đúng lượt này
-      if (i > skip && (await userStopRequested(doc))) return stoppedByUser()
-      let failed = step.kind === "image" ? await readImage(step.block) : await readBatch(step.batch)
+  /**
+   * Đọc một section: các lượt còn lại nối đuôi (ảnh trước, rồi lô chữ), chỉ gọi AI và lưu output thô sau mỗi lượt. Trả tiến
+   * độ đầy đủ để ghép; dừng / lỗi ⇒ `{ ok: false }` (tiến độ đã lưu, chạy tiếp bắt đầu đúng lượt chưa xong).
+   */
+  const readSection = async (planned: PlannedSection): Promise<PoolRead<ExtractionProgress | null>> => {
+    const draft = draftOf.get(planned.section_id)!
+    const sc = sectionContext(planned, inputs)
+    let progress: ExtractionProgress | null = stepsDoneOf(draft, planned) > 0 ? (draft.partial as ExtractionProgress) : null
+    const raw: RawAiStep[] = [...(progress?.raw_steps ?? [])]
+    const base = preprocessedSteps(progress)
+    // known_keys của lượt sau thấy phần tử section đã đọc tới giờ (chưa có mã: chỉ phần tử đã biết mới có id trong prompt)
+    const state = initialState(sc, progress)
+    for (const [j, r] of raw.entries()) applyRawStep(state, planned.steps[base + j], r, sc, DRAFT_IDS, view)
+
+    // Người dùng bấm Dừng ⇒ không sang mục mới (mục đã xong giữ nguyên, chạy tiếp từ mục này)
+    if (await stopNow()) return { ok: false }
+    const first = base + raw.length
+    for (let i = first; i < planned.steps.length; i++) {
+      // Dừng giữa mục nhiều lượt: các lượt trước đã lưu ở `partial` ⇒ chạy tiếp bắt đầu đúng lượt này
+      if (i > first && (await stopNow())) return { ok: false }
+      const step = planned.steps[i]
+      let res = await callStep(sc, step, state)
+      if (res === null) return { ok: false }
       // FLF-360: lô chữ lỗi tạm thời (AI quá tải…) ⇒ đọc lại lô đó với giãn cách tăng dần, không dừng ngay; hết lượt mới
-      // `resume_later` (lượt đã xong giữ ở `partial`, chạy tiếp bắt đầu đúng lô này). Không bỏ qua lô chữ rồi đi tiếp.
+      // `resume_later`. Không bỏ qua lô chữ rồi đi tiếp. Có tín hiệu dừng ⇒ thôi đọc lại (lô này chạy tiếp lần sau)
       const backoff = importRetryBackoff()
-      for (let round = 0; failed && step.kind === "text" && failed.kind === "transient" && round < backoff.length; round++) {
-        await setRereading(doc, { kind: "text", done: round + 1, total: backoff.length, section_id })
-        await delay(backoff[round])
-        failed = await readBatch(step.batch)
+      for (let round = 0; isFailure(res) && step.kind === "text" && res.kind === "transient" && round < backoff.length; round++) {
+        await setRereadingOf(sc.section_id, { kind: "text", done: round + 1, total: backoff.length, section_id: sc.section_id })
+        if (!(await waitOrStop(jitter(backoff[round])))) {
+          await setRereadingOf(sc.section_id, null)
+          return { ok: false }
+        }
+        // Chỉ lô chữ được đọc lại; `callStep` chỉ trả `null` cho lượt ảnh
+        res = (await callStep(sc, step, state))!
       }
-      if (doc.reread) await setRereading(doc, null)
-      if (failed) return pause(failed)
-      if (i + 1 === steps.length) break
-      // Lưu sau từng lượt đã trừ credit: dừng ở lượt sau thì lần chạy tiếp không gọi lại lượt này
-      draft.partial = {
-        plan_hash: planned.plan_hash,
-        steps_done: i + 1,
-        items: items.slice(ownCount),
-        unmapped_block_ids: [...unmapped],
-        diagram_images: [...diagramImages],
-        usage_id: usageId
+      await setRereadingOf(sc.section_id, null)
+      if (isFailure(res)) {
+        await pause(res, sc, draft)
+        return { ok: false }
       }
+      // Lưu như bản ghi DB (bỏ `undefined`) ⇒ ghép từ bộ nhớ hay từ DB (chạy tiếp) cho cùng kết quả
+      const step_raw = JSON.parse(JSON.stringify(res)) as RawAiStep
+      raw.push(step_raw)
+      applyRawStep(state, step, step_raw, sc, DRAFT_IDS, view)
+      // Lưu sau từng lượt đã trừ credit, kể cả lượt cuối (đọc xong mà chưa ghép): lần chạy tiếp không gọi lại lượt này
+      progress = { ...(progress ?? {}), plan_hash: planned.plan_hash, steps_done: i + 1, raw_steps: raw }
+      draft.partial = progress
       draft.markModified("partial")
       await draft.save()
     }
+    return { ok: true, value: progress }
+  }
 
-    const merged = mergeItems(items)
+  /** Ghép một section đã đọc xong (theo thứ tự tài liệu): replay output thô với allocator thật + phần tử đã biết ⇒ `done`. */
+  const commitSection = async (planned: PlannedSection, progress: ExtractionProgress | null, index: number): Promise<void> => {
+    const draft = draftOf.get(planned.section_id)!
+    const sc = sectionContext(planned, inputs)
+    const state = initialState(sc, progress)
+    const base = preprocessedSteps(progress)
+    for (const [j, r] of (progress?.raw_steps ?? []).entries()) applyRawStep(state, planned.steps[base + j], r, sc, alloc, known)
+
+    const merged = mergeItems(state.items)
     // Chức năng trích ngay dưới một tính năng (FLF-252 — danh sách yêu cầu của mẫu IEEE) thuộc tính năng đó khi tài liệu không ghi
-    const sectionFeature = provisional.get(section_id)
+    const sectionFeature = provisional.get(planned.section_id)
     if (sectionFeature?.entity === "features") {
       for (const it of merged) if (it.entity === "functions" && it.value.feature_id === undefined) it.value.feature_id = sectionFeature.id
     }
@@ -1152,16 +1370,34 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     draft.fields = merged.flatMap(flattenItem) as ExtractedField[]
     draft.status = "done"
     draft.error = null
-    draft.usage_id = usageId
-    draft.unmapped_block_ids = unmapped
-    draft.diagram_images = diagramImages
+    draft.usage_id = state.usageId
+    draft.unmapped_block_ids = state.unmapped
+    draft.diagram_images = state.diagramImages
     draft.partial = null
     draft.markModified("fields")
     draft.markModified("partial")
     await draft.save()
+    // Con trỏ = section đầu hàng chưa ghép (chạy tiếp / `markOrphanedExtraction` thấy đúng chỗ)
+    if (pending[index + 1]) await writeDoc(() => (doc.extract_cursor = pending[index + 1].section_id))
   }
 
-  if (await userStopRequested(doc)) return stoppedByUser()
+  const summary = async (): Promise<ExtractionRun> => ({ doc, sections: (await extractionSummary(doc._id as mongoose.Types.ObjectId)).sections })
+
+  // Đặt con trỏ trước khi mở pool: FE / `markOrphanedExtraction` thấy "đã bắt đầu" ngay
+  if (pending.length) await writeDoc(() => (doc.extract_cursor = pending[0].section_id))
+  try {
+    await runOrdered(pending, extractConcurrency(), { read: readSection, commit: (p, progress, i) => commitSection(p, progress, i), stop })
+  } finally {
+    await docQueue
+  }
+  if (stop.aborted) {
+    // `paused` (user / credits / resume_later) đã ghi thẳng DB — chép vào `doc` để kết quả trả về đúng trạng thái dừng
+    const fresh = await ImportedDocument.findById(doc._id, { paused: 1 }).lean()
+    doc.paused = fresh?.paused ?? null
+    return summary()
+  }
+
+  if (await userStopRequested(doc)) return summary()
   // FLF-360: ảnh AI chưa đọc được vì quá tải ⇒ đọc lại sau khi chạy hết các mục (đợt quá tải thường đã qua)
   const stopped = await rereadUnavailableImages({ projectId, userId, doc, blocks, profile, provisional, alloc, drafts: await ExtractionDraft.find({ import_id: doc._id }) })
   if (stopped) return stopped
@@ -1170,8 +1406,9 @@ export const runExtraction = async (projectId: string, userId: string, importId:
   await doc.save()
   // FLF-343: không dừng ở `fields_review` — field độ tin thấp vào baseline 0.1 kèm cờ "Cần xem" (finalize)
   await transitionImport(doc, "baselining")
-  return { doc, sections: (await extractionSummary(doc._id as mongoose.Types.ObjectId)).sections }
+  return summary()
 }
+
 
 // ─── FLF-360: đọc lại khi AI quá tải ─────────────────────────────
 
