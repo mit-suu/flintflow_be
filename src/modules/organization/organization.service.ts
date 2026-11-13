@@ -9,8 +9,8 @@ import { Subscription } from "../credits/subscription.model.js"
 import { planConfig } from "../billing/plan.config.js"
 import { markOnboarded } from "./onboarding.js"
 import { Invitation } from "./invitation.model.js"
-import { Project } from "../project/project.model.js"
-import { deleteProject } from "../project/project.service.js"
+import { Project, WITH_DELETED } from "../project/project.model.js"
+import { purgeProject } from "../project/project.service.js"
 import { Folder } from "../folder/folder.model.js"
 import { Notification } from "../notification/notification.model.js"
 import { PaymentIntent } from "../billing/payment-intent.model.js"
@@ -194,7 +194,7 @@ export interface DeleteOrganizationResult {
  * Xoá tổ chức — chỉ khi Lead là thành viên DUY NHẤT (không cướp dữ liệu của người khác, và BR-02 không
  * còn ý nghĩa khi org biến mất). Không có trong actors-and-use-cases.md; thêm theo yêu cầu 2026-09-26.
  *
- * Xoá sạch dự án (kể cả đã lưu trữ, qua `deleteProject(..., hard)` — cùng đường dọn Spine, tài liệu, sơ đồ
+ * Xoá sạch dự án (kể cả đã lưu trữ / đã xoá mềm, qua `purgeProject` — cùng đường dọn Spine, tài liệu, sơ đồ
  * như xoá một dự án), thư mục, ví, gói, mã mời, thông báo. GIỮ LẠI sổ giao dịch credit và PaymentIntent:
  * đó là hồ sơ tài chính, admin còn cần đối soát.
  *
@@ -235,9 +235,10 @@ export const deleteOrganization = async (
     throw new ApiError(409, "Tổ chức đang có thanh toán chờ xử lý - thử lại khi thanh toán kết thúc", "ORG_PAYMENT_PENDING")
   }
 
-  const projects = await Project.find({ organizationId: orgId }).select("_id").lean()
+  // FLF-401: xoá tổ chức dọn hẳn mọi dự án — kể cả dự án đã xoá mềm (deleteProject chỉ còn xoá mềm)
+  const projects = await Project.find({ organizationId: orgId }).setOptions(WITH_DELETED).select("_id").lean()
   for (const project of projects) {
-    await deleteProject(String(project._id), orgId, true)
+    await purgeProject(String(project._id), orgId)
   }
 
   await Promise.all([
