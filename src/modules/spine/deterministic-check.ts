@@ -161,7 +161,7 @@ export interface RuleProfile {
    * này không bắn `template_section_empty`.
    */
   templateMissing?: ReadonlySet<string>
-  /** `section_id` ⇒ heading của mục trong mẫu hiện tại (`TemplateProfile.layout`) — tên mục trong câu cờ lấy từ đây. */
+  /** `section_id` ⇒ heading của mục trong mẫu hiện tại (`TemplateProfile.layout`; mục FPT kèm số Word, FLF-411 #19) — tên mục trong câu cờ lấy từ đây. */
   templateHeadings?: ReadonlyMap<string, string>
   /** Mục giữ thành mục riêng (`keep_custom`) ở lần đổi mẫu gần nhất: dữ liệu vẫn in (mục riêng) ⇒ không bắn `template_section_absent`. */
   templateKept?: ReadonlySet<string>
@@ -296,6 +296,12 @@ export const SECTION_HAS_DATA: Readonly<Record<string, (s: Spine) => boolean>> =
 /** Mục đã có dữ liệu trong Spine chưa — luật `section_empty` soi đúng chỗ này; mục ngoài bảng ⇒ `null` (không soi được). */
 export const sectionHasData = (spine: Spine, sectionId: string): boolean | null => SECTION_HAS_DATA[sectionId]?.(spine) ?? null
 
+/** Tên mục cho câu cờ: heading của mẫu khi có (FLF-411 #19), không thì nhãn chung theo Spine (`human-labels`). */
+const sectionNameOf = (id: string, spine: Spine, headings?: ReadonlyMap<string, string>): string => {
+  const heading = headings?.get(id)?.trim()
+  return heading ? `"${heading}"` : quotedSectionLabel(id, spine)
+}
+
 /**
  * Mục khung ngoài bảng `SECTION_HAS_DATA` mà CR vẫn viết được vào mảng riêng (soi ngược `SECTION_FILL_ARRAYS` của đường soạn mục trống). Sau đổi mẫu mục
  * như vậy để trống phải chặn phát hành; "đã viết" = mảng có thêm phần tử so với lúc đổi mẫu (`templateFilled`, tính ở `mode1-guard`). Mục không có mảng
@@ -303,7 +309,7 @@ export const sectionHasData = (spine: Spine, sectionId: string): boolean | null 
  */
 export const UNMEASURED_FILL_ARRAYS: Readonly<Record<string, readonly (keyof Spine)[]>> = { "fixed:4.2.4": ["nfrs"], "fixed:5.5": ["glossary"] }
 
-const sectionEmpty = (spine: Spine, gate: StepGate): FlagCandidate[] =>
+const sectionEmpty = (spine: Spine, gate: StepGate, headings?: ReadonlyMap<string, string>): FlagCandidate[] =>
   REQUIRED_FIXED_SECTION_IDS.filter((id) => !DERIVED_SECTION_IDS.has(id))
     .filter((id) => !(SECTION_HAS_DATA[id]?.(spine) ?? true))
     // Mọi step sở hữu phải chốt: §1 do S-2.1…S-2.5 nuôi, chốt mỗi S-2.1 chưa nói lên mục đã xong
@@ -313,7 +319,7 @@ const sectionEmpty = (spine: Spine, gate: StepGate): FlagCandidate[] =>
       rule_id: "section_empty",
       section_id: id,
       target_id: null,
-      message: `Mục bắt buộc ${quotedSectionLabel(id)} chưa có dữ liệu`,
+      message: `Mục bắt buộc ${sectionNameOf(id, spine, headings)} chưa có dữ liệu`,
       remediation_step: ownerStepOf(id)
     }))
 
@@ -1611,7 +1617,7 @@ export const runDeterministicCheck = (
   const atBaseline = options.atBaseline ?? false
   const gate = stepGate(spine, atBaseline || (options.ruleProfile?.skipOwnerStepGate ?? false))
   const candidates: FlagCandidate[] = applyRuleProfile([
-    ...sectionEmpty(spine, gate),
+    ...sectionEmpty(spine, gate, options.ruleProfile?.templateHeadings),
     ...arrayEmpty(spine, gate),
     ...deadReference(spine),
     ...renderError(spine),

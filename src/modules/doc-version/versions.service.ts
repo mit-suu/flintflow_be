@@ -194,5 +194,29 @@ export const compareVersions = async (projectId: string, from: string, to: strin
   const [a, b] = await Promise.all([fileBlocksOfVersion(va), fileBlocksOfVersion(vb)])
   const lite = (x: OoxmlBlock[]) => x.map((blk) => ({ block_id: null, para_id: blk.para_id, text: blk.text, text_hash: blk.text_hash }))
   const { blocks, summary } = diffBlockLists(lite(a), lite(b))
-  return { from, to, summary, blocks }
+  return compareWithoutAuthors({ from, to, summary, blocks })
 }
+
+/** Tiêu đề cột người thực hiện của bảng Record of Changes (en / vi, `render/labels.ts`). */
+const IN_CHARGE_HEADER = /^(in charge|người thực hiện)$/i
+
+/** Hàm thuần: chữ của một bảng (dòng `\n`, ô ` | `) mà dòng đầu có cột "In charge" ⇒ ô cột đó ở các dòng thân thành trống. */
+export const blankInChargeColumn = (text: string): string => {
+  const [head, ...rows] = text.split("\n")
+  const col = head.split(" | ").findIndex((c) => IN_CHARGE_HEADER.test(c.trim()))
+  if (col < 0 || !rows.length) return text
+  return [head, ...rows.map((r) => r.split(" | ").map((c, i) => (i === col ? "" : c)).join(" | "))].join("\n")
+}
+
+/**
+ * UC-47 / UC-48: bản so sánh không nói ai thực hiện thay đổi, và Viewer thấy đúng các block như Lead — FLF-411 (U2-6) in tên người
+ * tạo CR vào cột "In charge" của Record of Changes, nên bản so sánh che cột đó cho mọi vai trò (tên vẫn ở trang Xem / file Word).
+ */
+export const compareWithoutAuthors = (res: CompareResponse): CompareResponse => ({
+  ...res,
+  blocks: res.blocks.map((b) => ({
+    ...b,
+    ...(typeof b.before === "string" ? { before: blankInChargeColumn(b.before) } : {}),
+    ...(typeof b.after === "string" ? { after: blankInChargeColumn(b.after) } : {})
+  }))
+})

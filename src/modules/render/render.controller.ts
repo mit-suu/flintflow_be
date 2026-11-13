@@ -31,6 +31,8 @@ import { viewerDocument } from "./viewer-projection.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { DIAGRAM_FILE_CSP } from "../diagram/diagram.controller.js"
 import { parseImageRef, readImageRef, refDiagramPngLoader, refLocalizedPngLoader } from "./image-ref.js"
+import { documentMediaParts } from "./import-media.js"
+import { TemplateProfile } from "../import/template-profile.model.js"
 import { documentVersion } from "./document-revision.js"
 
 const parse = <T extends z.ZodType>(schema: T, input: unknown): z.infer<T> => {
@@ -168,8 +170,9 @@ export const getDocumentImageController = catchAsync(async (req: Request, res: R
     if (!spine.diagrams.some((d) => d.id === ref.id)) throw notFound()
     if (ref.locale !== undefined && (ref.locale !== documentLanguage || ref.locale === sourceLanguage)) throw notFound()
   } else {
-    const parts = new Set(spine.custom_sections.flatMap((c) => c.blocks.flatMap((b) => (b.kind === "image" && b.image_ref ? [b.image_ref] : []))))
-    if (!parts.has(ref.id)) throw notFound()
+    // FLF-411: kể cả ảnh trong nguyên văn mục chức năng (hình mẫu của khung mẫu ở 3.2.1) — cùng nguồn bản in dùng
+    const profile = (await TemplateProfile.findOne({ projectId }, { function_originals: 1 }).lean()) as { function_originals?: Parameters<typeof documentMediaParts>[1] } | null
+    if (!documentMediaParts(spine.custom_sections, profile?.function_originals ?? []).has(ref.id)) throw notFound()
   }
   const image = await readImageRef(projectId, ref)
   if (!image.ok) {
