@@ -67,7 +67,8 @@ export const withDrawnUser = (spine: Spine): Spine => {
   const extra: [string, string][] = []
   const actors = [
     ...spine.actors.map((a) => {
-      if (!children.has(a.id) || a.id === userId) return a
+      // Đã kế thừa chính `User` trong file ⇒ cạnh đó đã có; thêm nữa là cạnh trùng (scene "trùng id gen:A06>A05", S-3.6 hỏng)
+      if (!children.has(a.id) || a.id === userId || a.parent_id === userId) return a
       if (a.parent_id && byId.has(a.parent_id)) {
         extra.push([a.id, userId])
         return a
