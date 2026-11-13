@@ -222,11 +222,11 @@ export const startFinalize = async (projectId: string, userId: string, body: Fin
   if (await isFinalizeAlive(current)) return current
   const { doc } = await assertCanFinalize(projectId, body)
   // D4 (quyết định 26/09): file thiếu cấu trúc đích không có bản gốc 0.1 — không còn "Hoàn thiện" (`complete: true`) từ
-  // `incomplete`. Giữ khung ⇒ soạn phần thiếu ở Luồng 2 (`POST /import/continue`); bổ sung theo mẫu chuẩn ⇒ tải gap report + DRAFT
+  // `incomplete`. Giữ khung lẫn bổ sung theo mẫu chuẩn (FLF-416) ⇒ soạn phần thiếu ở Luồng 2 (`POST /import/continue`)
   if (doc.status === "incomplete") {
     throw new Mode1Error(
       "IMPORT_INVALID_STATE",
-      "File còn thiếu mục của cấu trúc đích nên chưa tạo được bản gốc - soạn phần còn thiếu với FlintFlow, hoặc tải báo cáo thiếu sót và bản DRAFT.",
+      "File còn thiếu mục của cấu trúc đích nên chưa tạo được bản gốc - soạn phần còn thiếu với FlintFlow.",
       { status: doc.status, to: "drafting", allowed: ["drafting"] }
     )
   }

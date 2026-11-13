@@ -377,4 +377,51 @@ describe("writeTemplateDocx", () => {
       })
     })
   })
+
+  describe("FLF-416 chế độ 4: sắp lại bố cục file khách (rearrange)", () => {
+    it("mục FPT soạn thêm ⇒ heading mới theo style heading cùng cấp, đúng vị trí bản in; mục Ngoài phạm vi (kèm mục con) xuống cuối", async () => {
+      const input = await template(), parsed = await parseDocument(input), doc = document()
+      const heads = parsed.blocks.filter((b) => b.kind === "heading")
+      // File: Requirements (H1, Ngoài phạm vi) › Repeated, Repeated (H2) · Unmapped (H1, mục FPT có sẵn)
+      const map = [
+        { block_id: heads[0].block_id, section_id: "custom:cost" },
+        { block_id: heads[1].block_id, section_id: "custom:cost-a" },
+        { block_id: heads[2].block_id, section_id: "custom:cost-b" },
+        { block_id: heads[3].block_id, section_id: "fixed:2" }
+      ]
+      doc.sections = [
+        { id: "fixed:2", heading: "Unmapped", number: "1", level: 1, blocks: [] },
+        { id: "fixed:V.5", heading: "Glossary", number: "2", level: 1, blocks: [{ type: "paragraph", runs: runs("Drafted glossary") }, { type: "table", header: [runs("Term"), runs("Meaning")], rows: [[runs("SRS"), runs("Software Requirements Specification")]] }] },
+        { id: "custom:cost", heading: "Requirements", number: "3", level: 1, blocks: [] },
+        { id: "custom:cost-a", heading: "Repeated", number: "3.1", level: 2, blocks: [] },
+        { id: "custom:cost-b", heading: "Repeated", number: "3.2", level: 2, blocks: [] }
+      ]
+      const keep = new Set(["fixed:2", "custom:cost", "custom:cost-a", "custom:cost-b"])
+      const out = await writeTemplateDocx(doc, input, map, [], { keepSource: keep, rearrange: { moveToEnd: ["custom:cost"] } })
+      const blocks = (await parseDocument(out)).blocks
+      expect(blocks.filter((b) => b.kind === "heading").map((b) => b.text)).toEqual(["Unmapped", "Glossary", "Requirements", "Repeated", "Repeated"])
+      const glossary = blocks.find((b) => b.kind === "heading" && b.text === "Glossary")!
+      expect(wAttr(wKid(wKid(glossary.element, "pPr")!, "pStyle"), "val")).toBe("Heading1")
+      // Nội dung mục chèn ngay dưới heading mới, bảng là bảng thật
+      const at = (pred: (b: (typeof blocks)[number]) => boolean) => blocks.findIndex(pred)
+      expect(at((b) => b.text === "Drafted glossary")).toBeGreaterThan(at((b) => b.text === "Glossary"))
+      expect(at((b) => b.kind === "table" && b.rows?.[0]?.[0] === "Term")).toBeLessThan(at((b) => b.text === "Requirements"))
+      // Bảng của mục Ngoài phạm vi đi cùng mục; sectPr của thân vẫn cuối cùng
+      expect(at((b) => b.kind === "table" && b.rows?.[0]?.[0] === "A")).toBeGreaterThan(at((b) => b.text === "Requirements"))
+      const xml = await (await JSZip.loadAsync(out)).file("word/document.xml")!.async("string")
+      expect(xml.trimEnd()).toMatch(/<\/w:sectPr><\/w:body><\/w:document>$/)
+    })
+
+    it("không rearrange ⇒ như cũ: mục không có heading gộp vào mục cha thành đoạn đậm", async () => {
+      const input = await template(), parsed = await parseDocument(input), doc = document()
+      const map = [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:1" }]
+      doc.sections = [
+        { id: "fixed:1", heading: "Requirements", number: "1", level: 1, blocks: [{ type: "paragraph", runs: runs("Own") }] },
+        { id: "fixed:1.9", heading: "Child", number: "1.1", level: 2, blocks: [{ type: "paragraph", runs: runs("Child text") }] }
+      ]
+      const blocks = (await parseDocument(await writeTemplateDocx(doc, input, map, [], { keepSource: new Set() }))).blocks
+      expect(blocks.some((b) => b.kind === "heading" && b.text === "Child")).toBe(false)
+      expect(blocks.some((b) => b.text === "Child text")).toBe(true)
+    })
+  })
 })

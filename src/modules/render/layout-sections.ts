@@ -136,6 +136,11 @@ export interface TemplateLayout {
   fixedTemplate?: boolean
   /** FLF-366: đoạn nguyên văn của từng mục FPT `fixed:*` (`TemplateProfile.section_segments`). Không có ⇒ in như cũ. */
   sectionSegments?: readonly SectionSegments[]
+  /**
+   * FLF-416 chế độ 4 (business-flow §3.1.2 bước 2.10): mục **Ngoài phạm vi** của file (`custom:*`) giữ nguyên nội dung, chuyển
+   * xuống cuối tài liệu (cùng mục con / phần nối của nó). Không có ⇒ giữ đúng thứ tự file.
+   */
+  moveToEnd?: readonly string[]
 }
 
 export interface SectionSliceView {
@@ -463,7 +468,26 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
   insertDistribution(placed, used, spine, template)
 
   insertMissing(defs)
-  return placed
+  return template.moveToEnd?.length ? moveSectionsToEnd(placed, new Set(template.moveToEnd)) : placed
+}
+
+/**
+ * FLF-416: chuyển các mục trong `ids` (kèm mục con / phần nối đứng ngay sau, cấp sâu hơn) xuống cuối, giữ thứ tự tương đối. Mục
+ * con nằm trong vùng của mục đã chuyển đi cùng mục cha. Hàm thuần.
+ */
+export const moveSectionsToEnd = <T extends { section_id: string; level: number; kind?: string }>(placed: readonly T[], ids: ReadonlySet<string>): T[] => {
+  const kept: T[] = []
+  const moved: T[] = []
+  for (let i = 0; i < placed.length; i++) {
+    const head = placed[i]
+    if (!ids.has(head.section_id)) {
+      kept.push(head)
+      continue
+    }
+    moved.push(head)
+    while (i + 1 < placed.length && (placed[i + 1].level > head.level || placed[i + 1].kind === "continuation")) moved.push(placed[++i])
+  }
+  return [...kept, ...moved]
 }
 
 /** Mục lặp của mẫu (feature, chức năng) — CR thêm được dù mẫu cố định. */
