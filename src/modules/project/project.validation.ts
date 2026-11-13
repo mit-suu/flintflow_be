@@ -57,6 +57,25 @@ export const MoveProjectSchema = z.object({
  * FLF-267: body của `POST /chats/:chatId/messages(/stream)` chỉ kiểm thêm cờ `knowledge` (boolean thật — `"true"` bị từ
  * chối); `content` / `step` giữ cách kiểm cũ của controller để mã lỗi `CONTENT_REQUIRED` / `STEP_REQUIRED` không đổi.
  */
+/** Thứ tự danh sách dự án: tạo mới nhất (lưới mặc định) · sửa gần nhất · mở gần nhất (dự án chưa mở xếp cuối). */
+export const PROJECT_LIST_SORTS = ["created", "updated", "opened"] as const
+export type ProjectListSort = (typeof PROJECT_LIST_SORTS)[number]
+
+/**
+ * `GET /projects?page=…` (FLF-404): dashboard tải theo trang, lọc / tìm / sắp xếp ở BE. Không có `page` ⇒ endpoint trả
+ * mảng như cũ (client cũ, bộ lọc của trang Thanh toán). `folder`: id thư mục, hoặc `none` = dự án ngoài thư mục.
+ */
+export const ListProjectsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1),
+  limit: z.coerce.number().int().min(1).max(100).default(24),
+  status: z.enum(["active", "archived"], { message: "Trạng thái dự án không hợp lệ." }).optional(),
+  mode: z.enum(PROJECT_MODES, { message: "Cách làm SRS không hợp lệ." }).optional(),
+  q: z.string().trim().max(100, "Từ khoá tối đa 100 ký tự").optional(),
+  sort: z.enum(PROJECT_LIST_SORTS, { message: "Cách sắp xếp không hợp lệ." }).default("created"),
+  folder: z.union([z.literal("none"), z.string().regex(/^[a-f\d]{24}$/i, "Mã thư mục không hợp lệ.")]).optional()
+})
+export type ListProjectsQuery = z.infer<typeof ListProjectsQuerySchema>
+
 export const ChatKnowledgeFlagSchema = z.object({
   knowledge: z.boolean({ error: "Cờ hỏi tri thức (knowledge) phải là true hoặc false." }).optional()
 })
