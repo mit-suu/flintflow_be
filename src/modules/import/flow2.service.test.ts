@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { loadStepRegistry } from "../pipeline/step-registry.js"
 import type { StepState } from "../spine/spine.types.js"
-import { flow2Owners, flow2StepOps } from "./flow2.service.js"
+import { entersFlow2, flow2Owners, flow2StepOps } from "./flow2.service.js"
 
 const state = (id: string, status: StepState["status"]): StepState => ({ id, status, first_seq: null, last_seq: null, accepted_at: null })
 
@@ -92,5 +92,31 @@ describe("flow2Owners - bước cần soạn / bước giữ chốt", () => {
   })
   it("khung mẫu ⇒ soạn mọi mục của mẫu, không giữ bước nào", () => {
     expect(flow2Owners(sections, true)).toEqual({ draft: ["S-2.1", "S-3.1", "S-8.1"], keep: [] })
+  })
+})
+
+describe("entersFlow2 - file còn thiếu cấu trúc đích sang Luồng 2 (FLF-416)", () => {
+  it("giữ khung thiếu (chế độ 3) và tick bổ sung theo mẫu chuẩn còn thiếu (chế độ 4) ⇒ sang Luồng 2", () => {
+    expect(entersFlow2("fixed", 3)).toBe(true)
+    expect(entersFlow2("free", 4)).toBe(true)
+  })
+  it("đủ cấu trúc đích (chế độ 1), ý định lệch chế độ, dự án cũ không ý định ⇒ không", () => {
+    expect(entersFlow2("fixed", 1)).toBe(false)
+    expect(entersFlow2("free", 1)).toBe(false)
+    expect(entersFlow2("free", 3)).toBe(false)
+    expect(entersFlow2("fixed", 4)).toBe(false)
+    expect(entersFlow2(null, 4)).toBe(false)
+  })
+})
+
+describe("flow2Owners - chế độ 4 (đích = mẫu chuẩn FlintFlow)", () => {
+  it("soạn bước của mục FPT còn thiếu; giữ bước của mục có sẵn; mục Ngoài phạm vi không có bước", () => {
+    const { draft, keep } = flow2Owners([
+      { section_id: "fixed:II.1", title: "Product Overview", status: "present", owner_steps: ["S-1.1"] },
+      { section_id: "fixed:V.5", title: "Glossary", status: "missing", owner_steps: ["S-8.3"] },
+      { section_id: "custom:c1", title: "Cost", status: "out_of_scope", owner_steps: [] }
+    ], false)
+    expect(draft).toEqual(["S-8.3"])
+    expect(keep).toEqual(["S-1.1"])
   })
 })

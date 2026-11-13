@@ -3,9 +3,11 @@
  * nguyên văn OOXML gốc (đoạn, bảng, ảnh, chú thích, field); chỉ mục bị change request sửa mới dựng lại từ Spine.
  *
  * - `isSourceBasedProject`: dự án có sẵn có file nền — file không phải khung mẫu, không chuyển từ mode 2, profile có file
- *   nguồn, và (theo mẫu cố định của công ty) hoặc (cấu trúc tự do đủ mục FlintFlow — chế độ 1). Chế độ 4 (thiếu mục, phải chèn /
- *   sắp lại) giữ writer FPT. Chế độ 3 từ SRS đã viết sang Luồng 2 (`mode = fpt`, sau 1.0 là `converted_from = fpt`) vẫn lấy file
- *   của khách làm nền: mục khách viết in nguyên văn, mục FlintFlow soạn dựng từ Spine.
+ *   nguồn, và (theo mẫu cố định của công ty) hoặc (cấu trúc tự do đủ mục FlintFlow — chế độ 1). Chế độ 3 / 4 từ SRS đã viết sang
+ *   Luồng 2 (`mode = fpt`, sau 1.0 là `converted_from = fpt`) vẫn lấy file của khách làm nền: mục khách viết in nguyên văn, mục
+ *   FlintFlow soạn dựng từ Spine. Chế độ 4 chưa vào Luồng 2 (bản ghi cũ còn `incomplete`) giữ writer FPT.
+ * - FLF-416 chế độ 4 (`rearrangeOf`): bố cục sắp lại theo mẫu chuẩn — mục FPT soạn thêm chèn thành heading mới đúng vị trí mẫu
+ *   chuẩn trong file khách, mục **Ngoài phạm vi** giữ nguyên nội dung và chuyển xuống cuối tài liệu (business-flow §3.1.2).
  * - Sau đổi mẫu (`migrated_base_at`): file nền là file mới do FlintFlow dựng từ mẫu đích, mọi chế độ (kể cả chế độ 2 / `converted_from = fpt`
  *   / dự án mới / chế độ 4 — trước đó không có file nền) đều lấy file này làm nền; mốc "nguyên vẹn" = Spine lúc áp dụng đổi mẫu.
  * - `pristineSectionIds`: mục nguyên vẹn = bản in của mục từ Spine hiện tại **giống hệt** bản in từ Spine mốc (cùng layout,
@@ -18,7 +20,7 @@ import { DocVersion } from "../doc-version/doc-version.model.js"
 import { IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { TemplateMigration } from "../template-migration/template-migration.model.js"
 import { TemplateProfile } from "../import/template-profile.model.js"
-import { isTemplateFile, type StructurePreview } from "../import/structure-preview.js"
+import { isTemplateContent, isTemplateFile, type StructurePreview } from "../import/structure-preview.js"
 import { Project } from "../project/project.model.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { RenderedDocument } from "./rendered-document.types.js"
@@ -26,6 +28,14 @@ import type { RenderedDocument } from "./rendered-document.types.js"
 export interface SourceFidelity {
   /** Mục in nguyên văn từ file nền (không dựng lại). */
   keepSource: ReadonlySet<string>
+  /** FLF-416 chế độ 4: sắp lại bố cục theo mẫu chuẩn FlintFlow trong file khách. Không có ⇒ giữ đúng bố cục file. */
+  rearrange?: LayoutRearrange
+}
+
+/** FLF-416 — sắp lại bố cục file khách theo mẫu chuẩn FlintFlow (chế độ 4, business-flow §3.1.2 bước 2.10). */
+export interface LayoutRearrange {
+  /** Mục **Ngoài phạm vi** (`custom:*` của file): giữ nguyên nội dung, chuyển xuống cuối tài liệu. */
+  moveToEnd: readonly string[]
 }
 
 /**
@@ -55,9 +65,9 @@ interface ProjectFacts {
 
 interface ProfileFacts {
   source_file_ref?: string | null
-  target_structure?: { resolved_mode?: number | null } | null
+  target_structure?: { resolved_mode?: number | null; sections?: readonly { section_id: string; status: string }[] } | null
   structure_preview?: StructurePreview | null
-  /** Chế độ 3 từ SRS đã viết đã vào Luồng 2 (có Spine mốc). */
+  /** Chế độ 3 / 4 từ SRS đã viết đã vào Luồng 2 (có Spine mốc). */
   flow2_entry_at?: Date | string | null
   /** Đã đổi mẫu: `source_file_ref` là file nền mới do FlintFlow dựng. */
   migrated_base_at?: Date | string | null
@@ -71,18 +81,34 @@ export const sourceBasedFrom = (project: ProjectFacts | null, profile: ProfileFa
   // Khung mẫu: chữ trong file là hướng dẫn / ví dụ, không phải nội dung để in lại
   if (isTemplateFile(project, profile)) return false
   if (profile.flow2_entry_at && project.template_intent === "fixed") return true
+  // FLF-416 chế độ 4: SRS đã viết (không phải khung mẫu — chữ ví dụ của mẫu không in lại) đã vào Luồng 2
+  if (profile.flow2_entry_at && project.template_intent === "free") return !isTemplateContent(profile)
   if (project.start_kind === "new" || project.converted_from === "fpt" || project.mode !== "import") return false
   if (project.template_intent === "fixed") return true
   return profile.target_structure?.resolved_mode === 1
 }
 
-export const isSourceBasedProject = async (projectId: string, opts: { ignoreMigration?: boolean } = {}): Promise<boolean> => {
+/**
+ * Hàm thuần (FLF-416): dự án chế độ 4 đã vào Luồng 2 (tick bổ sung theo mẫu chuẩn, có Spine mốc) ⇒ sắp lại bố cục; khác ⇒ `null`
+ * (chế độ 3 giữ đúng thứ tự mẫu, chế độ 1 giữ đúng file).
+ */
+export const rearrangeOf = (project: ProjectFacts | null, profile: ProfileFacts | null): LayoutRearrange | null => {
+  if (project?.template_intent !== "free" || !profile?.flow2_entry_at) return null
+  const moveToEnd = (profile.target_structure?.sections ?? []).filter((s) => s.status === "out_of_scope").map((s) => s.section_id)
+  return { moveToEnd }
+}
+
+const loadFacts = async (projectId: string): Promise<[ProjectFacts | null, ProfileFacts | null]> => {
   const [project, profile] = await Promise.all([
     Project.findById(projectId, { start_kind: 1, converted_from: 1, template_intent: 1, mode: 1 }).lean(),
     TemplateProfile.findOne({ projectId }, { source_file_ref: 1, target_structure: 1, structure_preview: 1, flow2_entry_at: 1, migrated_base_at: 1 }).lean()
   ])
-  const facts = profile as ProfileFacts | null
-  return sourceBasedFrom(project as ProjectFacts | null, opts.ignoreMigration && facts ? { ...facts, migrated_base_at: null } : facts)
+  return [project as ProjectFacts | null, profile as ProfileFacts | null]
+}
+
+export const isSourceBasedProject = async (projectId: string, opts: { ignoreMigration?: boolean } = {}): Promise<boolean> => {
+  const [project, profile] = await loadFacts(projectId)
+  return sourceBasedFrom(project, opts.ignoreMigration && profile ? { ...profile, migrated_base_at: null } : profile)
 }
 
 /** Spine lúc import (bản gốc 0.1 / 0.0). Chưa có version ⇒ `null` (đang tạo chính bản 0.1: mọi mục nguyên vẹn). */
@@ -171,11 +197,13 @@ const fidelityFrom = async (
   current: RenderedDocument,
   renderImported: (spine: Spine) => Promise<RenderedDocument>,
   imported: Spine | null,
-  anchorById: boolean
+  anchorById: boolean,
+  rearrange: LayoutRearrange | null = null
 ): Promise<SourceFidelity> => {
+  const extra = rearrange ? { rearrange } : {}
   // Đang dựng chính bản 0.1 từ Spine vừa import ⇒ mọi mục nguyên vẹn
-  if (!imported) return { keepSource: new Set(current.sections.map((s) => s.id)) }
-  return { keepSource: pristineSectionIds(current, await renderImported(imported), { anchorById }) }
+  if (!imported) return { keepSource: new Set(current.sections.map((s) => s.id)), ...extra }
+  return { keepSource: pristineSectionIds(current, await renderImported(imported), { anchorById }), ...extra }
 }
 
 /**
@@ -190,13 +218,16 @@ export const sourceFidelityFor = async (
   opts: SourceFidelityOptions = {}
 ): Promise<SourceFidelity | undefined> => {
   if (opts.otherLanguage) return undefined
+  const [project, profile] = await loadFacts(projectId)
+  // FLF-416 chế độ 4: sắp lại bố cục theo dữ liệu hiện tại của dự án (bố cục, không phải mốc nguyên vẹn)
+  const rearrange = rearrangeOf(project, profile)
   if (opts.anchor) {
     if (!opts.anchor.source_based) return undefined
-    return fidelityFrom(current, renderImported, await anchorSpineOf(projectId, opts.anchor), opts.anchor.by_id)
+    return fidelityFrom(current, renderImported, await anchorSpineOf(projectId, opts.anchor), opts.anchor.by_id, rearrange)
   }
   const legacy = !!opts.versionCreatedAt && (await migratedAfter(projectId, opts.versionCreatedAt))
-  if (!(await isSourceBasedProject(projectId, { ignoreMigration: legacy }))) return undefined
+  if (!sourceBasedFrom(project, legacy && profile ? { ...profile, migrated_base_at: null } : profile)) return undefined
   const migrated = legacy ? null : await migratedBaseOf(projectId)
   const imported = migrated?.spine ?? (await flow2EntrySpineOf(projectId)) ?? (await importedSpineOf(projectId))
-  return fidelityFrom(current, renderImported, imported, !!migrated)
+  return fidelityFrom(current, renderImported, imported, !!migrated, rearrange)
 }
