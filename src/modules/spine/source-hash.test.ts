@@ -116,11 +116,30 @@ describe("renderedDiagramHash - hash của hình đã vẽ theo engine (FLF-339)
     const context = targets[0]
     expect(renderedDiagramHash(FIXTURE, context, svgContext)).not.toBe(renderedDiagramHash(FIXTURE, context))
     // kind không đổi engine ⇒ hash giữ nguyên
-    expect(renderedDiagramHash(FIXTURE, targets[4], svgContext)).toBe(computeSourceHash(FIXTURE, targets[4]))
+    const sequence = { kind: "sequence" as const, owner_id: FIXTURE.functions[0].id }
+    expect(renderedDiagramHash(FIXTURE, sequence, svgContext)).toBe(computeSourceHash(FIXTURE, sequence))
     expect(originalDiagramHash(FIXTURE, "context")).toBe(computeSourceHash(FIXTURE, context))
     // vẫn theo dữ liệu: sửa tên actor làm hình svg cũ
     const renamed = mutate((s) => (s.actors[0].name = "Renamed"))
     expect(renderedDiagramHash(renamed, context, svgContext)).not.toBe(renderedDiagramHash(FIXTURE, context, svgContext))
+  })
+
+  it("screen_layout (FLF-410): theme đã resolve nằm trong hash hình; dữ liệu ảnh gốc không đổi theo theme", () => {
+    const layout = targets[4]
+    const base = renderedDiagramHash(FIXTURE, layout)
+    // engine svg ⇒ wireframe Salt cũ (hash plantuml) thành stale
+    expect(base).not.toBe(computeSourceHash(FIXTURE, layout))
+    // theme thiếu = theme mặc định đã resolve
+    expect(renderedDiagramHash(FIXTURE, layout, undefined, { screenTheme: { primaryColor: null, domain: null, platforms: null } })).toBe(base)
+    expect(renderedDiagramHash(FIXTURE, layout, undefined, { screenTheme: { primaryColor: "#3F5591", domain: null, platforms: ["web"] } })).toBe(base)
+    for (const screenTheme of [
+      { primaryColor: "#E4572E", domain: null, platforms: null },
+      { primaryColor: null, domain: "shop.vn", platforms: null },
+      { primaryColor: null, domain: null, platforms: ["web", "mobile"] as ("web" | "mobile")[] }
+    ])
+      expect(renderedDiagramHash(FIXTURE, layout, undefined, { screenTheme })).not.toBe(base)
+    // ký pháp ERD không ảnh hưởng hình màn
+    expect(renderedDiagramHash(FIXTURE, layout, undefined, { erdNotation: "idef1x" })).toBe(base)
   })
 
   it("ERD: ký pháp của dự án (ngoài Spine) nằm trong hash hình - đổi ký pháp ⇒ hình cũ, thiếu ký pháp = chen", () => {
