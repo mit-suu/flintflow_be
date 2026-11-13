@@ -1,7 +1,7 @@
 import JSZip from "jszip"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { buildPlaceholderPng } from "./diagram-placeholder.js"
-import { MEDIA_PREFIX, clearImportMediaCache, embeddableImage, embeddableMediaPart, isMediaId, mediaId, readImportImage } from "./import-media.js"
+import { MEDIA_PREFIX, clearImportMediaCache, documentMediaParts, embeddableImage, embeddableMediaPart, isMediaId, mediaId, readImportImage } from "./import-media.js"
 
 const files = vi.hoisted(() => new Map<string, Buffer>())
 vi.mock("../doc-version/doc-file.store.js", () => ({
@@ -63,5 +63,16 @@ describe("readImportImage - giữ lý do khi không đọc được ảnh gốc"
     // Gói tải lỗi không được giữ trong cache — đợi một nhịp cho lượt dọn cache chạy
     await new Promise((r) => setTimeout(r, 0))
     expect(await readImportImage("F404", "word/media/ok.png")).toMatchObject({ ok: true })
+  })
+})
+
+describe("documentMediaParts (FLF-411)", () => {
+  it("ảnh của mục riêng + ảnh trong nguyên văn mục chức năng (hình mẫu 3.2.1 của khung mẫu); khối khác không tính", () => {
+    const parts = documentMediaParts(
+      [{ blocks: [{ kind: "image", image_ref: "word/media/image2.png" }, { kind: "paragraph", image_ref: null }] }],
+      [{ blocks: [{ kind: "heading" }, { kind: "image", image_ref: "word/media/image6.png" }] }]
+    )
+    expect([...parts]).toEqual(["word/media/image2.png", "word/media/image6.png"])
+    expect(documentMediaParts([]).size).toBe(0)
   })
 })

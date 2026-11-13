@@ -9,19 +9,52 @@ import { Baseline } from "../spine/baseline.model.js"
 import { spineSchema } from "../spine/spine.schema.js"
 import { listBaselineRefs } from "../spine/spine.repository.js"
 import { DocVersion, type IDocVersion } from "./doc-version.model.js"
+import { stripTemplateTextNow } from "../render/strip-template-text.js"
+import { currentFidelityAnchor, type FidelityAnchor } from "../render/source-fidelity.js"
+import type { ProjectLanguages } from "../translation/translation.service.js"
 
-export const FIXED_TEMPLATE_RENDERER_REVISION = "fixed-template-v2"
+/** Tăng khi cách dựng bản in version đổi (bỏ cache cũ): v3 = mốc nguyên vẹn + ngôn ngữ nhãn lấy từ binding của version. */
+export const FIXED_TEMPLATE_RENDERER_REVISION = "fixed-template-v3"
 
 /** Immutable source and mapping captured together when a version is written. */
 export type TemplateSourceBinding = Pick<ITemplateProfile,
   "heading_map" | "table_map" | "layout" | "template_family" | "language" |
   "legacy_record_of_changes" | "non_screen_table" | "function_originals" | "section_slices"
-> & { source_file_ref: string; source_sha256: string }
+> & {
+  source_file_ref: string
+  source_sha256: string
+  /**
+   * Mốc nguyên vẹn của bản in (xem `FidelityAnchor`) và ngôn ngữ nhãn chốt lúc ghi version. Version cũ chưa có ⇒ in lại theo
+   * cách tính trước đây (`sourceFidelityFor` với `versionCreatedAt`).
+   */
+  fidelity_anchor?: FidelityAnchor | null
+  languages?: ProjectLanguages | null
+  /** File nền lúc ghi version là khung mẫu (bản in bỏ chữ hướng dẫn / ví dụ của mẫu) — chốt để đổi mẫu về sau không đổi bản in cũ. */
+  strip_template_text?: boolean
+}
+
+/** Mốc nguyên vẹn đã chốt trong binding của version; chưa có ⇒ `undefined` (đường cũ). */
+export const anchorForBinding = (binding: Pick<TemplateSourceBinding, "fidelity_anchor"> | null | undefined): FidelityAnchor | undefined =>
+  binding?.fidelity_anchor ?? undefined
 
 export const templateLayoutUnavailable = () => new ApiError(409,
   "Không tìm thấy nguồn mẫu và snapshot phù hợp của phiên bản này.", "TEMPLATE_LAYOUT_UNAVAILABLE")
 
+/** Ngôn ngữ nhãn của dự án chuyển từ mode 2 — chốt vào binding để đổi ngôn ngữ tài liệu về sau không đổi bản in version cũ. */
+const captureLanguages = async (projectId: string): Promise<ProjectLanguages | null> => {
+  const project = await Project.findById(projectId, { mode: 1, converted_from: 1, documentLanguage: 1 }).lean()
+  if (project?.converted_from !== "fpt") return null
+  const { projectLanguages } = await import("../translation/translation.service.js")
+  return projectLanguages(projectId, project)
+}
+
 export const captureTemplateSourceBinding = async (projectId: string): Promise<TemplateSourceBinding | null> => {
+  const binding = await captureBinding(projectId)
+  if (!binding) return null
+  return { ...binding, fidelity_anchor: await currentFidelityAnchor(projectId), languages: await captureLanguages(projectId), strip_template_text: await stripTemplateTextNow(projectId) }
+}
+
+const captureBinding = async (projectId: string): Promise<TemplateSourceBinding | null> => {
   const project = await Project.findById(projectId, { template_intent: 1 }).lean()
   if (project?.template_intent !== "fixed") return null
   const profile = await TemplateProfile.findOne({ projectId }).lean()

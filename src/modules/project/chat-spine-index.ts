@@ -32,7 +32,16 @@ const COUNTED: ReadonlyArray<[CountedKey, string]> = [
   ["glossary", "Glossary terms"]
 ]
 
-export type SpineIndexSource = Partial<Pick<Spine, NamedKey | CountedKey>>
+export type SpineIndexSource = Partial<Pick<Spine, NamedKey | CountedKey>> & {
+  project?: Pick<Spine["project"], "system_name">
+}
+
+/**
+ * FLF-411 (#18): tên hệ thống hiện hành (tên in ở bìa, tiêu đề, sơ đồ, tên file) — để chat trả lời "hệ thống tên gì"
+ * theo dữ liệu SRS, không đoán theo lịch sử chat. Chưa đặt thì nói rõ là chưa đặt.
+ */
+const systemNameLine = (project: SpineIndexSource["project"]): string[] =>
+  project ? [`- System name: ${project.system_name?.trim() || "(not set)"}`] : []
 
 const namedLine = (label: string, items: ReadonlyArray<{ id: string; name: string }>): string => {
   if (items.length === 0) return `- ${label}: 0`
@@ -45,6 +54,7 @@ const namedLine = (label: string, items: ReadonlyArray<{ id: string; name: strin
 export const buildChatSpineIndex = (spine: SpineIndexSource | null | undefined): string => {
   if (!spine) return ""
   const lines = [
+    ...systemNameLine(spine.project),
     ...NAMED.map(([key, label]) => namedLine(label, spine[key] ?? [])),
     ...COUNTED.map(([key, label]) => `- ${label}: ${(spine[key] ?? []).length}`)
   ]

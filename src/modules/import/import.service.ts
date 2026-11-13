@@ -31,8 +31,9 @@ import { isKnownSectionId } from "./section-catalog.js"
 import { normalizeTemplateFamily } from "./part-bank.js"
 import { slotOverlaps } from "./content-slots.js"
 import { applyOrgMapping, orgTemplateHeadings } from "./org-mapping.js"
-import { TemplateProfile, type ITemplateProfile } from "./template-profile.model.js"
+import { TemplateProfile, type HeadingMapEntry, type ITemplateProfile } from "./template-profile.model.js"
 import { previewStructure } from "./structure-preview.js"
+import { applyDropToBlocks, applyDropToDom, cleanupDroppedPackage, planDrop, textRegions, validDropKeys } from "./drop-text.js"
 import * as spineRepository from "../spine/spine.repository.js"
 
 export interface UploadedFile {
@@ -178,7 +179,12 @@ export const uploadImport = async (
   projectId: string,
   userId: string,
   file: UploadedFile,
-  body: { /** FLF-278: import từ mẫu đã lưu của tổ chức (`org-library.service#importFromOrg`). */ org_template_id?: string } = {}
+  body: {
+    /** FLF-278: import từ mẫu đã lưu của tổ chức (`org-library.service#importFromOrg`). */
+    org_template_id?: string
+    /** FLF-395: bản của mẫu — mapping đọc theo đúng bản này. */
+    org_template_version?: number
+  } = {}
 ): Promise<IImportedDocument> => {
   const current = await latestImport(projectId)
   if (current && hasBaseline(current.status)) {
@@ -200,7 +206,7 @@ export const uploadImport = async (
     size: file.size,
     stamp: result.stamp,
     intent: await resolveUploadIntent(projectId),
-    ...(body.org_template_id ? { org_template_id: body.org_template_id } : {}),
+    ...(body.org_template_id ? { org_template_id: body.org_template_id, org_template_version: body.org_template_version ?? null } : {}),
     created_by: userId
   }
 
@@ -217,6 +223,8 @@ export const uploadImport = async (
   if (result.stamp || body.org_template_id) doc.confirmed_latest_at = new Date()
   // FLF-343: tách file + khớp mẫu ngay (tất định, không gọi AI) ⇒ màn báo credit có số; câu hỏi "bản mới nhất" (file không
   // stamp) trả lời cùng nút Bắt đầu (`POST /import/extract` `confirm_latest`)
+  // FLF-395: tải file riêng (không từ mẫu tổ chức) thay lần import trước ⇒ dự án không còn theo mẫu tổ chức nào
+  if (!body.org_template_id) await Project.updateOne({ _id: projectId, template_ref: { $ne: null } }, { $set: { template_ref: null } })
   await transitionImport(doc, "parsing")
   await parseOrReject(doc)
   return doc
@@ -314,15 +322,23 @@ const clearPreviousImportData = async (projectId: mongoose.Types.ObjectId): Prom
   ])
 }
 
-/** Cấu trúc đích sơ bộ của file vừa tách (ý định theo `import.intent`, Spine hiện tại — chưa trích gì). */
+/** Khối tối thiểu để tính bản sơ bộ (khối vừa tách hoặc DocBlock đã lưu). */
+type PreviewBlock = Pick<ParsedBlock, "block_id" | "kind" | "level" | "text"> & { rows?: string[][] | null; image_ref?: string | null; number_label?: string | null }
+
+/**
+ * Cấu trúc đích sơ bộ của file vừa tách (ý định theo `import.intent`, Spine hiện tại — chưa trích gì). FLF-412: vùng người dùng
+ * chọn Bỏ chữ (`dropKeys`) tính như file đã bỏ chữ — đúng như file sẽ được viết lại lúc bấm Bắt đầu.
+ */
 const previewOf = async (
   doc: IImportedDocument,
-  blocks: ParsedBlock[],
+  allBlocks: readonly PreviewBlock[],
   sections: ReadonlyMap<string, string | null>,
-  headingMap: readonly { block_id: string; section_id: string }[]
+  headingMap: readonly HeadingMapEntry[],
+  dropKeys: readonly string[] = []
 ) => {
   // Spine rỗng: lúc này chưa trích gì — dữ liệu của lần upload trước (chưa có bản gốc) không được làm mục "có nội dung"
   const plain = spineRepository.createEmptySpine({})
+  const blocks = dropKeys.length ? applyDropToBlocks(allBlocks, planDrop(allBlocks, textRegions(allBlocks, headingMap), new Set(dropKeys), doc.intent ?? "free")) : allBlocks
   const layoutBlocks = blocks.map((b) => ({
     block_id: b.block_id,
     kind: b.kind,
@@ -336,13 +352,17 @@ const previewOf = async (
   return previewStructure(layoutBlocks, new Map(headingMap.map((h) => [h.block_id, h.section_id])), plain, doc.intent ?? "free")
 }
 
-export const runParse = async (doc: IImportedDocument): Promise<void> => {
+/**
+ * Tách file của import thành block + profile + bản sơ bộ (thay dữ liệu tách trước đó). `orgDefaultDrop`: dự án dùng mẫu của
+ * tổ chức ⇒ mặc định Bỏ chữ mọi vùng có chữ (FLF-412 — mẫu không phải dữ liệu của dự án này).
+ */
+const parseImport = async (doc: IImportedDocument, opts: { orgDefaultDrop: boolean }): Promise<void> => {
   const sourceFile = await loadImportFile(doc)
   const { blocks } = await parseDocument(sourceFile)
   // Mẫu bắt buộc: profile lưu dùng đúng mapping của bản xuất (phần nhỏ, cha/con cùng mục) ⇒ I-5, kế hoạch step, cờ "Cần xem" khớp
   const matched = matchProfile(blocks, { fixedTemplate: doc.intent === "fixed" })
   // FLF-278: mẫu đã lưu của tổ chức ⇒ mapping BA đã xác nhận ở dự án trước áp sẵn (bỏ bước 1.5 nếu khớp đủ)
-  const saved = doc.org_template_id ? await orgTemplateHeadings(doc.org_template_id) : null
+  const saved = doc.org_template_id ? await orgTemplateHeadings(doc.org_template_id, doc.org_template_version ?? null) : null
   const profile = saved ? { ...matched, heading_map: applyOrgMapping(matched.heading_map, saved) } : matched
   // FLF-343: không dừng ở bước xác nhận mapping — mục độ tin thấp tự nhận (giữ độ tin), finalize gắn cờ "Cần xem"
   autoConfirmMapping(profile)
@@ -352,9 +372,113 @@ export const runParse = async (doc: IImportedDocument): Promise<void> => {
   await clearPreviousImportData(doc.projectId)
   await DocBlock.insertMany(blocks.map((b) => toBlockDoc(doc.projectId, b, sections.get(b.block_id) ?? null)))
   // Màn đọc khung (business-flow §3.1.2): cấu trúc đích sơ bộ bằng Code, trước khi người dùng bấm Bắt đầu — không gọi AI
-  const structure_preview = await previewOf(doc, blocks, sections, profile.heading_map)
-  await TemplateProfile.create({ projectId: doc.projectId, source: "imported", doc_version: IMPORTED_DOC_VERSION, ...profile, source_file_ref: doc.file_ref, source_sha256: createHash("sha256").update(sourceFile).digest("hex"), legacy_record_of_changes, structure_preview })
+  const drop_text = opts.orgDefaultDrop && doc.org_template_id ? textRegions(blocks, profile.heading_map).filter((r) => r.has_text).map((r) => r.key) : []
+  const structure_preview = await previewOf(doc, blocks, sections, profile.heading_map, drop_text)
+  await TemplateProfile.create({ projectId: doc.projectId, source: "imported", doc_version: IMPORTED_DOC_VERSION, ...profile, source_file_ref: doc.file_ref, source_sha256: createHash("sha256").update(sourceFile).digest("hex"), legacy_record_of_changes, structure_preview, drop_text: drop_text.length ? drop_text : null })
+}
+
+export const runParse = async (doc: IImportedDocument): Promise<void> => {
+  await parseImport(doc, { orgDefaultDrop: true })
   await transitionImport(doc, "extracting")
+}
+
+// ─── FLF-412 Bỏ chữ theo vùng (màn đọc khung) ─────────────────────
+
+/** Vùng heading có chữ của import (DocBlock đã lưu) — lựa chọn Giữ / Bỏ chữ của màn đọc khung. */
+export interface TextSectionView {
+  key: string
+  title: string
+  level: number
+  dropped: boolean
+}
+
+const storedBlocks = async (projectId: mongoose.Types.ObjectId | string) =>
+  DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } })
+    .sort({ "anchor.ordinal": 1 })
+    .select("block_id kind level text rows image_ref section_id number_label")
+    .lean()
+
+/** Chưa bấm Bắt đầu: còn ở `extracting`, chưa có lượt đọc nào, không dừng giữa chừng. Lựa chọn chỉ đổi được lúc này. */
+const extractionNotStarted = async (doc: IImportedDocument): Promise<boolean> =>
+  doc.status === "extracting" && !doc.extract_cursor && !doc.paused && !(await ExtractionDraft.exists({ import_id: doc._id }))
+
+export const textSectionsOf = async (doc: IImportedDocument, profile: Pick<ITemplateProfile, "heading_map" | "drop_text">): Promise<TextSectionView[] | null> => {
+  if (!(await extractionNotStarted(doc))) return null
+  const dropped = new Set(profile.drop_text ?? [])
+  return textRegions(await storedBlocks(doc.projectId), profile.heading_map)
+    .filter((r) => r.has_text)
+    .map((r) => ({ key: r.key, title: r.title, level: r.level, dropped: dropped.has(r.key) }))
+}
+
+/** Lưu lựa chọn Bỏ chữ (cả tập) + tính lại bản sơ bộ. Không ghi file — file chỉ viết lại lúc bấm Bắt đầu. */
+const NOT_BEFORE_START = (doc: IImportedDocument) =>
+  new Mode1Error("IMPORT_INVALID_STATE", "Chỉ chọn Giữ / Bỏ chữ trước khi bấm Bắt đầu", { status: doc.status, to: doc.status, allowed: ["extracting"] })
+
+export const setDropText = async (projectId: string, body: { import_id: string; keys: string[] }): Promise<IImportedDocument> => {
+  const doc = await requireImport(projectId, body.import_id)
+  // Đang viết lại file (đã bấm Bắt đầu) ⇒ lựa chọn không còn tác dụng
+  if (doc.drop_applying || !(await extractionNotStarted(doc))) throw NOT_BEFORE_START(doc)
+  const profile = await TemplateProfile.findOne({ projectId })
+  if (!profile) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa đọc xong bố cục tài liệu", { status: doc.status, to: doc.status, allowed: [] })
+  const blocks = await storedBlocks(doc.projectId)
+  const keys = validDropKeys(textRegions(blocks, profile.heading_map), body.keys)
+  const structure_preview = await previewOf(doc, blocks, new Map(blocks.map((b) => [b.block_id, b.section_id ?? null])), profile.heading_map, keys)
+  // Ghi có điều kiện: Bắt đầu chen vào giữa đã tách lại (profile mới) ⇒ không ghi vào profile đã thay
+  const written = await TemplateProfile.updateOne({ _id: profile._id }, { $set: { drop_text: keys.length ? keys : null, structure_preview } })
+  if (!written.matchedCount) throw NOT_BEFORE_START(doc)
+  return doc
+}
+
+/** Thời gian tối đa chờ lần Bắt đầu kia viết lại file xong (file lớn tách lại mất vài giây). */
+const DROP_WAIT_MS = 60_000
+const DROP_POLL_MS = 200
+
+/** Lần Bắt đầu khác đang viết lại file ⇒ chờ nó xong (khoá nhả) rồi đi tiếp; quá lâu ⇒ báo thử lại. */
+const waitDropApplied = async (doc: IImportedDocument): Promise<void> => {
+  for (let waited = 0; waited < DROP_WAIT_MS; waited += DROP_POLL_MS) {
+    await new Promise((resolve) => setTimeout(resolve, DROP_POLL_MS))
+    const current = await ImportedDocument.findById(doc._id, { drop_applying: 1 }).lean()
+    if (!current?.drop_applying) return
+  }
+  throw new Mode1Error("IMPORT_INVALID_STATE", "File đang được chuẩn bị, thử lại sau giây lát", { status: doc.status, to: doc.status, allowed: ["extracting"] })
+}
+
+/**
+ * Bấm Bắt đầu: còn vùng Bỏ chữ ⇒ viết lại file (vùng đó chỉ còn khung) thành file của import rồi tách lại. Mọi bước sau đọc file
+ * mới — không còn chữ cũ để trích, in, hay đưa cho AI; file tải lên gốc bị xoá (không giữ chữ cũ của khách). Không có lựa chọn /
+ * đã bắt đầu ⇒ không làm gì. Khoá `drop_applying` để hai lần Bắt đầu không cùng viết lại: lần sau chờ lần trước viết xong rồi đi
+ * tiếp (cùng một job I-4), không báo lỗi; lỗi giữa chừng ⇒ quay về file gốc và giữ lựa chọn để bấm lại.
+ */
+export const applyDropText = async (doc: IImportedDocument): Promise<void> => {
+  if (!(await extractionNotStarted(doc))) return
+  // Không có vùng Bỏ chữ ⇒ không cần khoá (hai lần Bắt đầu liền tay không chặn nhau)
+  if (!(await TemplateProfile.exists({ projectId: doc.projectId, "drop_text.0": { $exists: true } }))) return
+  const locked = await ImportedDocument.findOneAndUpdate({ _id: doc._id, drop_applying: { $ne: true } }, { $set: { drop_applying: true } })
+  if (!locked) return waitDropApplied(doc)
+  const originalRef = doc.file_ref
+  try {
+    const profile = await TemplateProfile.findOne({ projectId: doc.projectId }, { heading_map: 1, drop_text: 1 }).lean()
+    if (!profile?.drop_text?.length) return
+    const { pkg, blocks } = await parseDocument(await loadImportFile(doc))
+    applyDropToDom(blocks, planDrop(blocks, textRegions(blocks, profile.heading_map), new Set(profile.drop_text), doc.intent ?? "free"))
+    await cleanupDroppedPackage(pkg)
+    const rewrittenRef = await docFileStore().save(await pkg.toBuffer(), { projectId: String(doc.projectId), kind: "upload", name: doc.original_name })
+    doc.file_ref = rewrittenRef
+    await doc.save()
+    try {
+      await parseImport(doc, { orgDefaultDrop: false })
+    } catch (err) {
+      doc.file_ref = originalRef
+      await doc.save()
+      await parseImport(doc, { orgDefaultDrop: false }).catch(() => undefined)
+      await TemplateProfile.updateOne({ projectId: doc.projectId }, { $set: { drop_text: profile.drop_text } }).catch(() => undefined)
+      await docFileStore().remove(rewrittenRef).catch(() => undefined)
+      throw err
+    }
+    if (originalRef) await docFileStore().remove(originalRef).catch(() => undefined)
+  } finally {
+    await ImportedDocument.updateOne({ _id: doc._id }, { $set: { drop_applying: false } })
+  }
 }
 
 // ─── 1.7 xác nhận mapping ────────────────────────────────────────
@@ -491,5 +615,5 @@ export const getImportView = async (projectId: string): Promise<GetImportRespons
     extractionSummary(doc._id as mongoose.Types.ObjectId),
     DocBlock.countDocuments({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } })
   ])
-  return { import: toImportDto(doc), profile: profile ? toProfileDto(profile) : null, extraction, blocks_count: blocksCount, target_structure: profile?.target_structure ?? null, structure_preview: profile?.structure_preview ?? null }
+  return { import: toImportDto(doc), profile: profile ? toProfileDto(profile) : null, extraction, blocks_count: blocksCount, target_structure: profile?.target_structure ?? null, structure_preview: profile?.structure_preview ?? null, text_sections: profile ? await textSectionsOf(doc, profile) : null }
 }

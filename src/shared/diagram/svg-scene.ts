@@ -21,13 +21,17 @@ interface Common {
   owner?: string
   /** 1 = vẽ sau cùng (nhãn đường nằm trên mọi đường). */
   layer: 0 | 1
+  /** Màu nét (hex | `none`); thiếu ⇒ `INK`. Mockup màn (FLF-410) dùng viền xám / không viền. */
+  strokeColor?: string
+  /** Bề dày nét của hình; thiếu ⇒ `STROKE`. */
+  strokeWidth?: number
 }
 
 export type SceneElement =
   | (Common & { type: "rect"; x: number; y: number; w: number; h: number; fill: string; dashed: boolean; container: boolean; rotate: number; radius: number })
   | (Common & { type: "ellipse"; cx: number; cy: number; rx: number; ry: number; fill: string; dashed: boolean; container: boolean })
   | (Common & { type: "path"; points: Point[]; closed: boolean; fill: string; dashed: boolean; /** Bề dày nét; thiếu ⇒ theo vai trò. */ stroke?: number })
-  | (Common & { type: "text"; x: number; y: number; text: string; size: number; bold: boolean; anchor: Anchor; baseline: Baseline; rotate: number; italic: boolean })
+  | (Common & { type: "text"; x: number; y: number; text: string; size: number; bold: boolean; anchor: Anchor; baseline: Baseline; rotate: number; italic: boolean; /** Màu chữ; thiếu ⇒ `INK`. */ color?: string })
 
 export interface ShapeOptions {
   name?: string
@@ -37,6 +41,10 @@ export interface ShapeOptions {
   container?: boolean
   /** Bo góc (px) của hình chữ nhật — chỉ ảnh hưởng nét vẽ; bộ kiểm bố cục vẫn coi là hình chữ nhật, nên chữ phải cách góc ≥ bán kính. */
   radius?: number
+  /** Màu viền (hex | `none`); thiếu ⇒ đen. */
+  stroke?: string
+  /** Bề dày viền; thiếu ⇒ `STROKE`. */
+  strokeWidth?: number
 }
 
 export interface TextOptions {
@@ -50,6 +58,8 @@ export interface TextOptions {
   /** Độ, quay quanh (x, y). */
   rotate?: number
   owner?: string
+  /** Màu chữ (hex); thiếu ⇒ đen. */
+  color?: string
 }
 
 const COLOR = /^(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|none)$/
@@ -122,12 +132,22 @@ const uprightAngle = (a: Point, b: Point): number => {
   return deg
 }
 
-/** Phần tử `toSvg` được phép sinh — test injection kiểm SVG chỉ có các tên này. */
-export const SVG_ELEMENT_WHITELIST: ReadonlySet<string> = new Set(["svg", "g", "rect", "circle", "ellipse", "line", "polyline", "polygon", "path", "text", "title"])
+/** Phần tử `toSvg` được phép sinh — test injection kiểm SVG chỉ có các tên này. `metadata`: dữ liệu máy đọc (FLF-410). */
+export const SVG_ELEMENT_WHITELIST: ReadonlySet<string> = new Set(["svg", "g", "rect", "circle", "ellipse", "line", "polyline", "polygon", "path", "text", "title", "metadata"])
+
+/** Id metadata: chữ, số, gạch nối — đi thẳng vào thuộc tính `id`. */
+const METADATA_ID = /^[A-Za-z][A-Za-z0-9-]{0,63}$/
+
+/** Nét tuỳ chọn của hình: màu hợp lệ + bề dày. */
+const strokeOpts = (opts: { stroke?: string; strokeWidth?: number }): Pick<Common, "strokeColor" | "strokeWidth"> => ({
+  ...(opts.stroke !== undefined ? { strokeColor: color(opts.stroke, INK) } : {}),
+  ...(opts.strokeWidth !== undefined ? { strokeWidth: opts.strokeWidth } : {})
+})
 
 export class Scene {
   private readonly items: SceneElement[] = []
   private readonly ids = new Set<string>()
+  private readonly meta: { id: string; text: string }[] = []
 
   get elements(): readonly SceneElement[] {
     return this.items
@@ -150,7 +170,7 @@ export class Scene {
 
   rect(id: string, x: number, y: number, w: number, h: number, opts: ShapeOptions = {}): string {
     const fill = color(opts.fill, opts.container ? "none" : FILL)
-    return this.push({ type: "rect", id, name: opts.name ?? id, role: "shape", layer: 0, x, y, w, h, fill, dashed: opts.dashed ?? false, container: opts.container ?? false, rotate: 0, radius: opts.radius ?? 0 })
+    return this.push({ type: "rect", id, name: opts.name ?? id, role: "shape", layer: 0, x, y, w, h, fill, dashed: opts.dashed ?? false, container: opts.container ?? false, rotate: 0, radius: opts.radius ?? 0, ...strokeOpts(opts) })
   }
 
   circle(id: string, cx: number, cy: number, r: number, opts: ShapeOptions = {}): string {
@@ -159,7 +179,7 @@ export class Scene {
 
   ellipse(id: string, cx: number, cy: number, rx: number, ry: number, opts: ShapeOptions = {}): string {
     const fill = color(opts.fill, opts.container ? "none" : FILL)
-    return this.push({ type: "ellipse", id, name: opts.name ?? id, role: "shape", layer: 0, cx, cy, rx, ry, fill, dashed: opts.dashed ?? false, container: opts.container ?? false })
+    return this.push({ type: "ellipse", id, name: opts.name ?? id, role: "shape", layer: 0, cx, cy, rx, ry, fill, dashed: opts.dashed ?? false, container: opts.container ?? false, ...strokeOpts(opts) })
   }
 
   /** Đa giác lồi đóng kín là một hình (decision node của activity diagram…): chữ / đường không được xuyên vào trong. */
@@ -196,8 +216,19 @@ export class Scene {
       italic: opts.italic ?? false,
       anchor: opts.anchor ?? "middle",
       baseline: opts.baseline ?? "alphabetic",
-      rotate: opts.rotate ?? 0
+      rotate: opts.rotate ?? 0,
+      ...(opts.color !== undefined ? { color: color(opts.color, INK) } : {})
     })
+  }
+
+  /**
+   * Dữ liệu máy đọc đi kèm hình (FLF-410: spec màn để vẽ lại không gọi model): `<metadata id>` chứa `text` đã escape. Không
+   * vẽ gì, không vào bộ kiểm bố cục. Mỗi id một lần.
+   */
+  metadata(id: string, text: string): void {
+    if (!METADATA_ID.test(id)) throw new Error(`svg-scene: id metadata không hợp lệ ${JSON.stringify(id)}`)
+    if (this.meta.some((m) => m.id === id)) throw new Error(`svg-scene: trùng metadata ${id}`)
+    this.meta.push({ id, text })
   }
 
   private connector(lineId: string): Extract<SceneElement, { type: "path" }> {
@@ -246,15 +277,28 @@ export class Scene {
   }
 
   /** Nét trang trí thuộc `owner` (ký hiệu đầu mút ER, đường chia ngăn trong hộp): không chịu luật đường / hình của `checkScene`, chỉ bị chữ của phần tử khác cắt qua. */
-  decoration(id: string, owner: string, pts: Point[], opts: { closed?: boolean; fill?: string } = {}): string {
+  decoration(id: string, owner: string, pts: Point[], opts: { closed?: boolean; fill?: string; stroke?: string; strokeWidth?: number } = {}): string {
     if (pts.length < 2) throw new Error(`svg-scene: nét ${id} cần ít nhất 2 điểm`)
     const closed = opts.closed ?? false
-    return this.push({ type: "path", id, name: id, role: "decoration", owner, layer: 0, points: pts, closed, fill: closed ? color(opts.fill, PAPER) : "none", dashed: false, stroke: STROKE })
+    return this.push({
+      type: "path",
+      id,
+      name: id,
+      role: "decoration",
+      owner,
+      layer: 0,
+      points: pts,
+      closed,
+      fill: closed ? color(opts.fill, PAPER) : "none",
+      dashed: false,
+      stroke: opts.strokeWidth ?? STROKE,
+      ...(opts.stroke !== undefined ? { strokeColor: color(opts.stroke, INK) } : {})
+    })
   }
 
   /** Vòng tròn trang trí thuộc `owner` (số không / chấm đặc ở đầu mút). */
-  decorationCircle(id: string, owner: string, cx: number, cy: number, r: number, fill: string): string {
-    return this.push({ type: "ellipse", id, name: id, role: "decoration", owner, layer: 0, cx, cy, rx: r, ry: r, fill: color(fill, PAPER), dashed: false, container: false })
+  decorationCircle(id: string, owner: string, cx: number, cy: number, r: number, fill: string, opts: { stroke?: string } = {}): string {
+    return this.push({ type: "ellipse", id, name: id, role: "decoration", owner, layer: 0, cx, cy, rx: r, ry: r, fill: color(fill, PAPER), dashed: false, container: false, ...strokeOpts(opts) })
   }
 
   /** Đầu mũi tên ở `end` của đường (`"end"` = điểm cuối, `"start"` = điểm đầu). */
@@ -285,6 +329,7 @@ export class Scene {
       `<?xml version="1.0" encoding="UTF-8"?>`,
       `<svg xmlns="http://www.w3.org/2000/svg" width="${b.w}" height="${b.h}" viewBox="${b.x} ${b.y} ${b.w} ${b.h}">`,
       ...(title ? [`<title>${esc(title)}</title>`] : []),
+      ...this.meta.map((m) => `<metadata id="${m.id}">${esc(m.text)}</metadata>`),
       `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" fill="${PAPER}"/>`,
       ...body,
       `</svg>`,
@@ -293,7 +338,8 @@ export class Scene {
   }
 }
 
-const strokeAttrs = (dashed: boolean, width = STROKE): string => ` stroke="${INK}" stroke-width="${width}"${dashed ? ` stroke-dasharray="6,4"` : ""}`
+const strokeAttrs = (dashed: boolean, width = STROKE, ink = INK): string =>
+  ink === "none" ? ` stroke="none"` : ` stroke="${ink}" stroke-width="${width}"${dashed ? ` stroke-dasharray="6,4"` : ""}`
 const points = (pts: readonly Point[]): string => pts.map((p) => `${num(p[0])},${num(p[1])}`).join(" ")
 
 const markup = (el: SceneElement): string => {
@@ -301,27 +347,27 @@ const markup = (el: SceneElement): string => {
     case "rect": {
       const transform = el.rotate ? ` transform="rotate(${num(el.rotate)} ${num(el.x + el.w / 2)} ${num(el.y + el.h / 2)})"` : ""
       // nền nhãn: không viền
-      const stroke = el.role === "decoration" ? "" : strokeAttrs(el.dashed)
+      const stroke = el.role === "decoration" ? "" : strokeAttrs(el.dashed, el.strokeWidth, el.strokeColor)
       const round = el.radius > 0 ? ` rx="${num(el.radius)}" ry="${num(el.radius)}"` : ""
       return `<rect x="${num(el.x)}" y="${num(el.y)}" width="${num(el.w)}" height="${num(el.h)}"${round} fill="${el.fill}"${stroke}${transform}/>`
     }
     case "ellipse":
       return el.rx === el.ry
-        ? `<circle cx="${num(el.cx)}" cy="${num(el.cy)}" r="${num(el.rx)}" fill="${el.fill}"${strokeAttrs(el.dashed)}/>`
-        : `<ellipse cx="${num(el.cx)}" cy="${num(el.cy)}" rx="${num(el.rx)}" ry="${num(el.ry)}" fill="${el.fill}"${strokeAttrs(el.dashed)}/>`
+        ? `<circle cx="${num(el.cx)}" cy="${num(el.cy)}" r="${num(el.rx)}" fill="${el.fill}"${strokeAttrs(el.dashed, el.strokeWidth, el.strokeColor)}/>`
+        : `<ellipse cx="${num(el.cx)}" cy="${num(el.cy)}" rx="${num(el.rx)}" ry="${num(el.ry)}" fill="${el.fill}"${strokeAttrs(el.dashed, el.strokeWidth, el.strokeColor)}/>`
     case "path":
-      if (el.closed) return `<polygon points="${points(el.points)}" fill="${el.fill}"${strokeAttrs(el.dashed, el.stroke ?? (el.role === "shape" ? STROKE : 0.8))} stroke-linejoin="miter"/>`
+      if (el.closed) return `<polygon points="${points(el.points)}" fill="${el.fill}"${strokeAttrs(el.dashed, el.stroke ?? (el.role === "shape" ? STROKE : 0.8), el.strokeColor)} stroke-linejoin="miter"/>`
       if (el.points.length === 2) {
         const [a, b] = el.points
-        return `<line x1="${num(a[0])}" y1="${num(a[1])}" x2="${num(b[0])}" y2="${num(b[1])}"${strokeAttrs(el.dashed)}/>`
+        return `<line x1="${num(a[0])}" y1="${num(a[1])}" x2="${num(b[0])}" y2="${num(b[1])}"${strokeAttrs(el.dashed, el.strokeColor ? (el.stroke ?? STROKE) : STROKE, el.strokeColor)}/>`
       }
-      return `<polyline points="${points(el.points)}" fill="none"${strokeAttrs(el.dashed)}/>`
+      return `<polyline points="${points(el.points)}" fill="none"${strokeAttrs(el.dashed, el.strokeColor ? (el.stroke ?? STROKE) : STROKE, el.strokeColor)}/>`
     case "text": {
       const transform = el.rotate ? ` transform="rotate(${num(el.rotate)} ${num(el.x)} ${num(el.y)})"` : ""
       const baseline = el.baseline === "central" ? ` dominant-baseline="central"` : ""
       const weight = el.bold ? ` font-weight="bold"` : ""
       const style = el.italic ? ` font-style="italic"` : ""
-      return `<text x="${num(el.x)}" y="${num(el.y)}" font-family="${esc(FONT)}" font-size="${num(el.size)}" text-anchor="${el.anchor}"${baseline}${weight}${style} fill="${INK}"${transform}>${esc(el.text)}</text>`
+      return `<text x="${num(el.x)}" y="${num(el.y)}" font-family="${esc(FONT)}" font-size="${num(el.size)}" text-anchor="${el.anchor}"${baseline}${weight}${style} fill="${el.color ?? INK}"${transform}>${esc(el.text)}</text>`
     }
   }
 }

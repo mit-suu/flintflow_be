@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest"
 import { DocxPackage, acceptAll, listComments, paragraphText, readBlocks } from "../docx-ooxml/index.js"
-import { makeDocx, p } from "../docx-ooxml/testing/make-docx.js"
+import { VI_HEADING_STYLES, makeDocx, p } from "../docx-ooxml/testing/make-docx.js"
 import { wAll, wAttr } from "../docx-ooxml/xml.js"
 import { buildTrackedDocx, pairParagraphs, similarity } from "./tracked-version.js"
 
@@ -27,6 +27,21 @@ const rejectedTexts = async (data: Buffer): Promise<string[]> => {
   }
   return wAll(doc, "p").map(paragraphText).filter((t) => t.length > 0)
 }
+
+const heading = (t: string) => `<w:p><w:pPr><w:pStyle w:val="u1"/></w:pPr><w:r><w:t>${t}</w:t></w:r></w:p>`
+
+describe("buildTrackedDocx — contentOnly (đổi mẫu)", () => {
+  it("heading đổi chữ và chữ hướng dẫn đổi ⇒ không đánh dấu; nội dung đổi thật ⇒ vẫn đánh dấu", async () => {
+    const doc = (h: string, guide: string, body: string) => makeDocx({ body: heading(h) + p(guide) + p(body), styles: VI_HEADING_STYLES })
+    const prev = await doc("1. Introduction", "[Describe the purpose.]", "The system responds within 2 seconds.")
+    const next = await doc("Giới thiệu", "[Mô tả mục đích.]", "The system responds within 2 seconds.")
+    const who = { author: "CR-001", date: DATE }
+    expect((await buildTrackedDocx(prev, next, who)).changes).toBeGreaterThan(0)
+    expect((await buildTrackedDocx(prev, next, who, [], { contentOnly: true })).changes).toBe(0)
+    const edited = await doc("Giới thiệu", "[Mô tả mục đích.]", "The system responds within 1 second.")
+    expect((await buildTrackedDocx(prev, edited, who, [], { contentOnly: true })).changes).toBe(1)
+  })
+})
 
 const acceptedTexts = async (data: Buffer): Promise<string[]> => {
   const pkg = await DocxPackage.load(data)

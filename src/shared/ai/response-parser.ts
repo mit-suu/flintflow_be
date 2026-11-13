@@ -286,6 +286,23 @@ export const importExtractDiagramSchema = importExtractSchema.extend({
   diagram_kind: z.enum(DIAGRAM_IMAGE_KINDS)
 })
 
+/** FLF-395 (SKELETON_GENERIC_NAMES, D13): dạng chung gợi ý cho từng mục BA tự đặt; `generic: null` = không dùng lại được. */
+export const skeletonGenericNamesSchema = z.object({
+  suggestions: z.array(z.object({ key: z.string().min(1), generic: z.string().trim().min(1).max(300).nullable(), reason: z.string().nullable().default(null) })).max(200)
+})
+export type SkeletonGenericNamesOutput = z.infer<typeof skeletonGenericNamesSchema>
+
+/**
+ * D8 (TEMPLATE_MIGRATION_RESOLVE): `ops` thêm phần tử có cấu trúc từ chữ của một mục riêng (chỉ `add` vào mảng đích), `choice` chọn cách ghép cho
+ * conflict (một trong các lựa chọn cụ thể được đưa vào prompt). Một trong hai theo loại mục; mục không chuyển / chọn được ⇒ cả hai rỗng.
+ */
+export const templateMigrationResolveSchema = z.object({
+  ops: z.array(z.object({ op: z.literal("add"), path: z.string().min(1), value: z.unknown() })).max(100).default([]),
+  choice: z.string().trim().min(1).nullable().default(null),
+  notes: z.string().nullable().default(null)
+})
+export type TemplateMigrationResolveOutput = z.infer<typeof templateMigrationResolveSchema>
+
 /** Mode 1 v3 phase 7 (CR_MATERIAL_IMAGE): chữ đọc được trong ảnh + mô tả ngắn cấu trúc. */
 export const crMaterialImageSchema = z.object({ text: z.string().trim().min(1) })
 
@@ -433,7 +450,9 @@ export const OUTPUT_SCHEMA_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, s
   [ActionType.CR_CONSISTENCY]: "findings",
   [ActionType.CR_MATERIAL_IMAGE]: "crMaterialImage",
   [ActionType.KNOWLEDGE_ANSWER]: "knowledgeAnswer",
-  [ActionType.EXTRACT_REQUIREMENTS]: "extractRequirements"
+  [ActionType.EXTRACT_REQUIREMENTS]: "extractRequirements",
+  [ActionType.SKELETON_GENERIC_NAMES]: "skeletonGenericNames",
+  [ActionType.TEMPLATE_MIGRATION_RESOLVE]: "templateMigrationResolve"
 }
 
 const SCHEMAS: Record<string, z.ZodSchema> = {
@@ -461,7 +480,9 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.CR_CONSISTENCY]: findingsSchema,
   [ActionType.CR_MATERIAL_IMAGE]: crMaterialImageSchema,
   [ActionType.KNOWLEDGE_ANSWER]: knowledgeAnswerSchema,
-  [ActionType.EXTRACT_REQUIREMENTS]: extractRequirementsSchema
+  [ActionType.EXTRACT_REQUIREMENTS]: extractRequirementsSchema,
+  [ActionType.SKELETON_GENERIC_NAMES]: skeletonGenericNamesSchema,
+  [ActionType.TEMPLATE_MIGRATION_RESOLVE]: templateMigrationResolveSchema
 }
 
 export const extractJsonFromText = (

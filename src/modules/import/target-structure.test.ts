@@ -114,3 +114,13 @@ describe("compareTargetStructure (FLF-336 I-5 - so cấu trúc đích)", () => {
     expect(result.resolved_mode).toBe(1)
   })
 })
+
+describe("FLF-411 isNonDraftHeading - heading chỗ điền của mẫu", () => {
+  it("'4.2.4 …' không phải mục cần soạn; khung tính năng / chức năng <<…>> vẫn là chỗ in tính năng thật", async () => {
+    const { isNonDraftHeading } = await import("./target-structure.js")
+    expect(isNonDraftHeading("custom:CS09", "4.2.4 …")).toBe(true)
+    expect(isNonDraftHeading("custom:CS10", "5.3 …")).toBe(true)
+    expect(isNonDraftHeading("feature:@B0141", "3.2 <<Feature Name 1>>")).toBe(false)
+    expect(isNonDraftHeading("fixed:4.2.3", "4.2.3 Performance")).toBe(false)
+  })
+})

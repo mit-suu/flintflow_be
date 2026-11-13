@@ -20,6 +20,7 @@ import { acceptLatest, patchMapping, uploadImport } from "../../../src/modules/i
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
 import { OrgTemplate } from "../../../src/modules/import/org-library.model.js"
+import { classifySection } from "../../../src/modules/import/template-skeleton.js"
 import { Membership } from "../../../src/modules/organization/membership.model.js"
 import { User } from "../../../src/modules/user/user.model.js"
 
@@ -73,7 +74,11 @@ describe("FLF-278 - mẫu và thư viện nội dung của tổ chức (luồng 
     expect(String(doc.org_template_id)).toBe(saved.body.data.id)
     const fresh = (await TemplateProfile.findOne({ projectId: second }).lean())!
     const original = (await TemplateProfile.findOne({ projectId: first.projectId }).lean())!
-    expect(fresh.heading_map.map((h) => [h.heading_text, h.section_id])).toEqual(original.heading_map.map((h) => [h.heading_text, h.section_id]))
+    // FLF-412: mẫu lưu chỉ còn khung ⇒ không còn heading phần tử (UC, chức năng…) của dự án nguồn; mapping khung giữ như BA chốt
+    const framework = original.heading_map.filter((h) => classifySection(h) !== "element")
+    expect(fresh.heading_map.map((h) => [h.heading_text, h.section_id])).toEqual(framework.map((h) => [h.heading_text, h.section_id]))
+    // Mẫu tổ chức không phải dữ liệu của dự án này ⇒ không còn chữ nào để giữ / bỏ, không đọc nội dung cũ
+    expect((await request(app).get(`/api/v1/projects/${second}/import`).set(H(owner.token))).body.data.text_sections).toEqual([])
     expect(fresh.heading_map.every((h) => h.confirmed)).toBe(true)
     expect((await OrgTemplate.findById(saved.body.data.id))!.uses).toBe(1)
 
