@@ -1,6 +1,7 @@
 /**
- * Mục "Interface" của §3.x.y mẫu FPT (FLF-214): mô tả giao diện màn bằng lời, đọc từ wireframe salt đã vẽ
- * (`diagrams[kind=screen_layout]`) — luôn khớp với hình, không gọi model.
+ * Mục "Interface" của §3.x.y mẫu FPT (FLF-214): mô tả giao diện màn bằng lời, đọc từ hình đã vẽ
+ * (`diagrams[kind=screen_layout]`) — luôn khớp với hình, không gọi model. Mockup SVG (FLF-410) ⇒ đọc ScreenSpec lưu trong
+ * hình (`specWidgets`); wireframe salt cũ ⇒ đọc cú pháp salt (dưới đây).
  *
  * `Login screen: Email input, Password input (masked), Remember me checkbox, Forgot password? link, Log in button.`
  *
@@ -16,6 +17,8 @@
 
 import type { Spine } from "../spine/spine.types.js"
 import { isFunctionTable } from "../diagram/renderers/screen-layout.renderer.js"
+import { screenSpecOf } from "../diagram/renderers/screen-mockup.js"
+import type { ScreenSpec } from "../diagram/screen-spec.js"
 import { VI_WIDGET_LABELS, VI_WIDGET_NOTES, interfaceSentence, isVietnamese } from "./labels.js"
 
 type Screen = Spine["screens"][number]
@@ -221,6 +224,44 @@ const parseWireframe = (puml: string, screenNames: readonly string[]): Widget[] 
 }
 
 /**
+ * Widget của mockup SVG (FLF-410) đọc thẳng từ ScreenSpec đã lưu trong hình — không đoán từ cú pháp. Tiêu đề trang không phải
+ * widget; danh sách thẻ (`items`) là vùng danh sách, bảng tổng (`summary`) là bảng các dòng.
+ */
+export const specWidgets = (spec: ScreenSpec): Widget[] =>
+  [
+    ...(spec.tabs?.length ? [{ kind: "tabs" as const, items: [...spec.tabs] }] : []),
+    ...spec.blocks.flatMap((b): Widget[] => {
+      switch (b.type) {
+        case "fields":
+          return b.items.map((f): Widget =>
+            f.kind === "select" ? { kind: "dropdown", name: f.label } : f.kind === "textarea" ? { kind: "text_area", label: f.label } : { kind: "input", label: f.label, masked: f.kind === "password" }
+          )
+        case "checkbox":
+          return (b.options?.length ? b.options : b.label ? [b.label] : []).map((name): Widget => ({ kind: "checkbox", name }))
+        case "radio":
+          return b.options.map((name): Widget => ({ kind: "option", name }))
+        case "buttons":
+          return b.items.map((i): Widget => ({ kind: "button", name: i.label }))
+        case "link":
+          return [{ kind: "link", name: b.text }]
+        case "text":
+          return [{ kind: "text", text: b.text }]
+        case "search":
+        case "inline":
+          return [{ kind: "input", masked: false, placeholder: b.placeholder }, ...(b.button ? [{ kind: "button" as const, name: b.button }] : [])]
+        case "items":
+          return [{ kind: "table", items: b.items.map((i) => i.name) }]
+        case "table":
+          return [{ kind: "table", items: [...b.columns] }]
+        case "summary":
+          return [{ kind: "table", items: b.rows.map(([k]) => k) }]
+        case "image":
+          return [{ kind: "area", content: b.label }]
+      }
+    })
+  ]
+
+/**
  * Danh sách widget theo thứ tự trên màn, in theo ngôn ngữ (mặc định tiếng Anh); `null` nếu `puml` không phải
  * wireframe salt.
  */
@@ -236,7 +277,12 @@ export const wireframeWidgets = (puml: string, screenName: string | readonly str
  */
 export const describeInterface = (spine: Spine, screen: Screen, language?: string, wireframeName = screen.name): string | null => {
   const layout = spine.diagrams.find((d) => d.kind === "screen_layout" && d.owner_id === screen.id && d.render_status === "ok")
-  const widgets = layout?.format === "puml" ? wireframeWidgets(layout.source, [screen.name, wireframeName], language) : null
-  if (widgets) return interfaceSentence(language, screen.name, screen.is_popup, `${widgets.join(", ")}.`)
+  const spec = layout?.format === "svg" ? screenSpecOf(layout.source)?.spec : undefined
+  const widgets = spec
+    ? specWidgets(spec).map(isVietnamese(language) ? widgetVi : widgetEn)
+    : layout?.format === "puml"
+      ? wireframeWidgets(layout.source, [screen.name, wireframeName], language)
+      : null
+  if (widgets && widgets.length > 0) return interfaceSentence(language, screen.name, screen.is_popup, `${widgets.join(", ")}.`)
   return screen.description.trim() ? interfaceSentence(language, screen.name, screen.is_popup, screen.description.trim()) : null
 }

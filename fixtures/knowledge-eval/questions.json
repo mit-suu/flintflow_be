@@ -205,9 +205,9 @@
       "id": "q26",
       "type": "table_list",
       "language": "vi",
-      "question": "Trong wireframe Salt, vẽ ô mật khẩu, ô nhập chữ và nút bấm thế nào?",
-      "answer_points": ["Mật khẩu là chuỗi dấu chấm trong ngoặc kép, không dùng **", "Ô nhập luôn nằm trong ngoặc kép; [text] là nút bấm", "Mỗi dòng một widget, cạnh nhau thì dùng hàng { a | b }"],
-      "gold_chunk_ids": ["screen-layout#salt-cheat-sheet-anything-else-breaks-the-compile"]
+      "question": "Mockup Screen Layout: mỗi function và mỗi validation của màn được thể hiện trên màn thế nào?",
+      "answer_points": ["Mỗi function người dùng kích hoạt có control riêng, nhãn lấy theo trigger (nút, link, checkbox, select)", "Mỗi field mà validation nhắc tới có ô nhập; mật khẩu kind password, ngày kind date", "Function phía hệ thống không có control; màn trong navigates_to đi qua nút, link hoặc nav, không lặp"],
+      "gold_chunk_ids": ["screen-layout#what-to-put-on-the-screen"]
     },
     {
       "id": "q27",

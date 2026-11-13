@@ -12,7 +12,7 @@ import { compareQuerySchema, downloadQuerySchema, releaseRequestSchema, requestC
 import { getPackage, requestChanges, settleAfterRelease, submitPackage, type PackageActor } from "./review-package.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { release } from "./release.service.js"
-import { compareVersions, downloadVersion, listVersions, toVersionDto, versionBlocks } from "./versions.service.js"
+import { compareForViewer, compareVersions, downloadVersion, listVersions, toVersionDto, versionBlocks } from "./versions.service.js"
 import { requireDocVersion } from "./doc-version.service.js"
 import { isStableDocVersion } from "./versioning.js"
 import { isViewer } from "../../shared/auth/viewer-read-scope.middleware.js"
@@ -60,7 +60,8 @@ export const download = mode1Handler(async (req, res) => {
 export const compare = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const query = parseInput(compareQuerySchema, req.query)
-  return sendSuccess(res, 200, await compareVersions(auth.projectId, query.from, query.to))
+  const result = await compareVersions(auth.projectId, query.from, query.to)
+  return sendSuccess(res, 200, isViewer(req) ? compareForViewer(result) : result)
 })
 
 const packageActor = (req: Parameters<typeof authorizeMode1>[0], auth: Awaited<ReturnType<typeof authorizeMode1>>): PackageActor => ({

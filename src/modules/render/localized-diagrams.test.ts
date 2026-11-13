@@ -10,6 +10,11 @@ import { translationUnits, type TranslationUnit, type UnitValue } from "../trans
 import { localizeSpine, localizedDiagramSources, renderView } from "./localized-spine.js"
 import { _clearRenderCache, matchingPart } from "./localized-diagrams.js"
 import type { RenderedPart } from "../diagram/renderers/common.js"
+import { mockupParts } from "../diagram/screen-layout-parts.js"
+import { screenSpecOf } from "../diagram/renderers/screen-mockup.js"
+import { SIGNUP_SPEC } from "../diagram/screen-spec.samples.js"
+import { resolveScreenTheme } from "../../shared/diagram/screen-theme.js"
+import { describeInterface } from "./interface-description.js"
 
 const fixture = (): Spine =>
   spineSchema.parse(JSON.parse(readFileSync(new URL("../../../fixtures/spine-fixture-19-screens.json", import.meta.url), "utf8")))
@@ -201,5 +206,36 @@ describe("cache renderer trong tiến trình (FLF-369)", () => {
     const crow = renderView(localizeSpine(spine, units, translate(units), "vi", { erdNotation: "crowsfoot" }))
     // fixture vẽ ERD theo chen ⇒ bản crowsfoot không khớp nguồn đang lưu ⇒ giữ nguồn gốc; bản chen được dịch
     expect(chen.diagrams.find((d) => d.kind === "erd")!.source).not.toBe(crow.diagrams.find((d) => d.kind === "erd")!.source)
+  })
+})
+
+describe("mockup màn SVG (FLF-410) - nhãn dịch + vẽ lại bằng code", () => {
+  const withMockup = () => {
+    const { spine } = rendered()
+    const screen = spine.screens.find((s) => s.primary_function_id !== null && s.detail_status === "signed_off")!
+    const theme = resolveScreenTheme({ primaryColor: "#3F5591", domain: null, platforms: ["web", "mobile"] }, spine.project.form_factor)
+    const base = renderKind(spine, "screen_layout", screen.id)[0]
+    const parts = mockupParts(spine, base, SIGNUP_SPEC, theme, "hash", "system", ["web", "mobile"])!
+    const kept = spine.diagrams.filter((d) => !(d.kind === "screen_layout" && d.owner_id === screen.id))
+    const template = spine.diagrams.find((d) => d.kind === "screen_layout" && d.owner_id === screen.id)!
+    spine.diagrams = [...kept, ...parts.map((p, i): Diagram => ({ ...template, id: i === 0 ? "D90" : "D90-2", format: "svg", source: p.source }))]
+    return { spine, screen, context: { screenTheme: { primaryColor: "#3F5591", domain: null, platforms: ["web" as const, "mobile" as const] } } }
+  }
+
+  it("một đơn vị nhãn mỗi màn (phần đầu), cả hai nền tảng vẽ lại bằng chữ dịch; Interface đọc chữ dịch", () => {
+    const { spine, screen, context } = withMockup()
+    const units = translationUnits(spine)
+    expect(units.find((u) => u.key === "diagrams[id=D90].labels")?.value).toEqual(expect.arrayContaining(["Create account", "Full name"]))
+    expect(units.some((u) => u.key === "diagrams[id=D90-2].labels")).toBe(false)
+
+    const view = renderView(localizeSpine(spine, units, translate(units), "vi", context))
+    for (const id of ["D90", "D90-2"]) {
+      const d = view.diagrams.find((x) => x.id === id)!
+      expect(d.source).toContain(">vi: Create account<")
+      expect(screenSpecOf(d.source)?.platform).toBe(id === "D90" ? "web" : "mobile")
+    }
+    const viewScreen = view.screens.find((s) => s.id === screen.id)!
+    expect(describeInterface(view, viewScreen, "vi")).toContain("nút vi: Create account")
+    expect(describeInterface(spine, screen)).toContain("Create account button")
   })
 })

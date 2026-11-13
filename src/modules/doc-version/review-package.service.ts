@@ -11,6 +11,7 @@
  * `assertDraftUnlocked` khoá mọi đường sửa, kể cả `/changes` của mode 2 sau khi chuyển sang luồng import (FLF-318/314).
  */
 
+import { assertNoMigrationRunning } from "../template-migration/migration-guard.js"
 import mongoose from "mongoose"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ChangeRequest, type IChangeRequest } from "../change-request/change-request.model.js"
@@ -117,6 +118,7 @@ const notifyLeads = async (actor: PackageActor, crIds: string[], submission: Bas
  * đặt `baseline_submission = pending` ⇒ bản nháp khoá; báo Lead. Lead tự nộp cũng được (rồi tự duyệt).
  */
 export const submitPackage = async (actor: PackageActor, baseVersion: number): Promise<ReviewPackageDto> => {
+  await assertNoMigrationRunning(actor.projectId)
   const record = await spineRepository.get(actor.projectId)
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   if (record.spine_version !== baseVersion) {
@@ -156,6 +158,7 @@ export const submitPackage = async (actor: PackageActor, baseVersion: number): P
 
 /** C-7 Lead **Yêu cầu sửa** kèm lý do ⇒ `rejected`, mở khoá bản nháp; BA chat để sửa hoặc hoàn tác (CR mới) rồi gửi lại. */
 export const requestChanges = async (actor: PackageActor, input: { base_version: number; reason: string }): Promise<ReviewPackageDto> => {
+  await assertNoMigrationRunning(actor.projectId)
   const record = await spineRepository.get(actor.projectId)
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   if (record.spine_version !== input.base_version) {

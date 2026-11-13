@@ -18,6 +18,7 @@
  * vì chính các lần ghi flag, lô đó đẩy `waived_at_version` của waiver còn hiệu lực lên version mới.
  */
 
+import { assertNoMigrationRunning } from "../template-migration/migration-guard.js"
 import type { Change, Flag, Spine, SpineRecord } from "./spine.types.js"
 import type { ApplyResult, Op } from "./op.types.js"
 import * as repository from "./spine.repository.js"
@@ -236,11 +237,11 @@ export const recompute = async (projectId: string, options: RecomputeOptions): P
   const spine = stripRecord(record)
   const atBaseline = options.atBaseline ?? false
   const ruleProfile = options.ruleProfile ?? (await ruleProfileResolver(projectId))
-  const { erdNotation } = await loadRenderContext(projectId)
-  const candidates = runDeterministicCheck(spine, changes, { atBaseline, ruleProfile, erdNotation })
+  const renderContext = await loadRenderContext(projectId)
+  const candidates = runDeterministicCheck(spine, changes, { atBaseline, ruleProfile, renderContext })
   const baselineCandidates = atBaseline
     ? undefined
-    : runDeterministicCheck(spine, changes, { atBaseline: true, ruleProfile, erdNotation }).filter((c) => AT_BASELINE_RULES.has(c.rule_id))
+    : runDeterministicCheck(spine, changes, { atBaseline: true, ruleProfile, renderContext }).filter((c) => AT_BASELINE_RULES.has(c.rule_id))
   const plan = planFlagOps(spine, candidates, new Date(), { atBaseline, baselineCandidates, changes })
 
   if (plan.ops.length === 0) {
@@ -265,6 +266,7 @@ export const recompute = async (projectId: string, options: RecomputeOptions): P
 
 /** Waive một cờ: lý do user gõ ≥ 20 ký tự; cấm `array_empty`/`dead_reference`/`render_error`. */
 export const waive = async (projectId: string, flagId: string, reason: string, userId: string): Promise<Flag> => {
+  await assertNoMigrationRunning(projectId)
   const record = await load(projectId)
   const flag = record.flags.find((f) => f.id === flagId)
   if (!flag) throw new ApiError(404, "Không tìm thấy cờ này.", FLAG_NOT_FOUND)
@@ -311,6 +313,7 @@ export const waive = async (projectId: string, flagId: string, reason: string, u
  * `waived_by_user` không đổi — cờ đỏ vẫn chặn baseline / gửi gói / phát hành. Dùng được cho cả cờ vàng (ghi chú), mọi chế độ.
  */
 export const keep = async (projectId: string, flagId: string, reason: string, userId: string): Promise<Flag> => {
+  await assertNoMigrationRunning(projectId)
   const record = await load(projectId)
   const flag = record.flags.find((f) => f.id === flagId)
   if (!flag) throw new ApiError(404, "Không tìm thấy cờ này.", FLAG_NOT_FOUND)

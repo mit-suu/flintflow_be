@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { AiActionError } from "./ai-action.types.js"
-import { MAX_OVERLOAD_WAIT_MS, isOverloadError, providerRetryDelayMs, retryWaitMs } from "./retry.service.js"
+import { MAX_OVERLOAD_WAIT_MS, isOverloadError, isTransientError, providerRetryDelayMs, retryWaitMs } from "./retry.service.js"
 
 const overloaded = (retryDelay?: string) =>
   new AiActionError(503, "high demand", "GEMINI_OVERLOADED", retryDelay ? { error: { details: [{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay }] } } : undefined)
@@ -25,5 +25,15 @@ describe("retry - chờ khi nhà cung cấp quá tải", () => {
     expect(providerRetryDelayMs(new AiActionError(503, "x", "GEMINI_OVERLOADED"))).toBeNull()
     expect(retryWaitMs(overloaded("7s"), 0, [1000, 3000], () => 0)).toBe(7000)
     expect(retryWaitMs(overloaded("90s"), 0, [1000, 3000], () => 0)).toBe(MAX_OVERLOAD_WAIT_MS)
+  })
+})
+
+describe("retry — BR-09 (FLF-393)", () => {
+  it("đầu ra bị cắt ở max_tokens là lỗi gọi AI ⇒ được thử lại như mọi lỗi khác", () => {
+    expect(isTransientError(new AiActionError(422, "Anthropic response was truncated (max_tokens=6144)", "RESPONSE_TRUNCATED"))).toBe(true)
+  })
+
+  it("lỗi 422 khác vẫn không thử lại", () => {
+    expect(isTransientError(new AiActionError(422, "bad", "SOMETHING_ELSE"))).toBe(false)
   })
 })

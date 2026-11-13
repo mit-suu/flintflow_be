@@ -60,8 +60,8 @@ describe("hồ sơ luật mode 1", () => {
       else if (DOWNGRADED.includes(r.rule_id)) expect(hit?.level, r.rule_id).toBe("yellow")
       else expect(hit?.level, r.rule_id).toBe(r.level)
     }
-    // giữ đỏ: dead_reference, render_error, diagram_stale, unconfirmed_assumption
-    expect(out.filter((c) => c.level === "red").map((c) => c.rule_id).sort()).toEqual(["dead_reference", "diagram_stale", "render_error", "unconfirmed_assumption"])
+    // giữ đỏ: dead_reference, render_error, diagram_stale, unconfirmed_assumption, template_section_migration_missing (chỉ sinh khi hồ sơ mang danh sách mục thiếu sau đổi mẫu)
+    expect(out.filter((c) => c.level === "red").map((c) => c.rule_id).sort()).toEqual(["dead_reference", "diagram_stale", "render_error", "template_section_migration_missing", "unconfirmed_assumption"])
   })
 
   it("Spine rỗng (import chưa trích được gì): mode 1 không có cờ đỏ - mục FPT thiếu không bắt buộc, chỉ vào gap report", () => {

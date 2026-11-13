@@ -133,7 +133,7 @@ vi.mock("../spine/op-engine.js", async (importOriginal) => {
 })
 vi.mock("../../shared/ai/document-context.service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../shared/ai/document-context.service.js")>()
-  return { ...actual, buildDocumentContext: vi.fn(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false })) }
+  return { ...actual, buildDocumentContext: vi.fn(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false, mode: "none" as const, chunksUsed: 0, fullTokens: 0 })) }
 })
 vi.mock("../notification/notification.service.js", () => ({ notify: vi.fn(async () => null), notifyAdmins: vi.fn(async () => 0) }))
 vi.mock("../../shared/ai/credit-reservation.service.js", () => ({ refundDeductedCredit: vi.fn(async () => undefined) }))
@@ -156,6 +156,7 @@ import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { orderedSteps } from "./step-registry.js"
 import { AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction, ElicitOutput } from "../../shared/ai/response-parser.js"
+import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
 import { runStep, runDraftPhase, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, settleFromChat, settleRepeatedAnswer, settleWithoutModel, askTranscript, nextPendingAfterChat, isSubstantiveAnswer, isBareAgreement, noChangeReason, replyLanguageAfterMessage, CALL_LIMIT, CHAT_BUDGET_REPLY, CHAT_BUDGET_REPLY_EN, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
 import { cancelRun, getRunState, resetMemoryRuns } from "./run-state.service.js"
 import { gate } from "./gate.service.js"
@@ -170,7 +171,6 @@ import { documentLanguageForTurn } from "../translation/turn-language.js"
 import { buildStepContext } from "./context-projection.js"
 import { getPromptTemplate, interpolatePrompt } from "../../shared/ai/prompt-registry.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
-import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURES = path.resolve(__dirname, "../../../fixtures")
@@ -1366,10 +1366,10 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
     seedSession(true)
     // Chỉ lượt chat (có `since`) mới thấy tài liệu mới; lượt hỏi đầu không có tài liệu
     vi.mocked(buildDocumentContext).mockClear()
-    vi.mocked(buildDocumentContext).mockImplementation(async (_p, _a, _s, _c, _m, _o, filter) =>
-      filter?.since
-        ? { contextText: "[D3-P01] Quy trình khám ngoại trú: bệnh nhân lấy số từ 5 giờ sáng.", tokenCount: 20, documentsUsed: 1, usedSummary: false }
-        : { contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false }
+    vi.mocked(buildDocumentContext).mockImplementation(async (request) =>
+      request.since
+        ? { contextText: "[D3-P01] Quy trình khám ngoại trú: bệnh nhân lấy số từ 5 giờ sáng.", tokenCount: 20, documentsUsed: 1, usedSummary: false, mode: "none" as const, chunksUsed: 0, fullTokens: 0 }
+        : { contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false, mode: "none" as const, chunksUsed: 0, fullTokens: 0 }
     )
     const ASK = [{ question: "Hiện quy trình đang làm thế nào?", options: [], multiple: false, topic_key: "current_process" }] as never as ElicitOutput["questions"]
     const elicitExecutor = vi.fn(async (input: { promptVariables?: Record<string, unknown> }) =>
@@ -1389,14 +1389,14 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
 
     const chat = elicitExecutor.mock.calls.map(([input]) => (input as { promptVariables: Record<string, unknown> }).promptVariables).find((v) => v.chat_turn)
     expect(chat?.documents).toContain("bệnh nhân lấy số từ 5 giờ sáng")
-    const sinceCall = vi.mocked(buildDocumentContext).mock.calls.find((c) => c[6]?.since)
-    expect(sinceCall?.[2]).toBe("B-0.1")
-    expect(sinceCall![6]!.since!.getTime()).toBeGreaterThanOrEqual(before)
+    const sinceCall = vi.mocked(buildDocumentContext).mock.calls.find((c) => c[0].since)
+    expect(sinceCall?.[0].stepId).toBe("B-0.1")
+    expect(sinceCall![0].since!.getTime()).toBeGreaterThanOrEqual(before)
 
     const again = events.filter((e) => e.type === "answer_needed")[1] as Extract<StepEvent, { type: "answer_needed" }>
     submitAnswer(PROJECT, "B-0.1", SESSION, { answers: again.questions.map((q) => ({ question_id: q.id, answer: "ok" })) })
     await run
-    vi.mocked(buildDocumentContext).mockImplementation(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false }))
+    vi.mocked(buildDocumentContext).mockImplementation(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false, mode: "none" as const, chunksUsed: 0, fullTokens: 0 }))
   })
 
   it("AI viết lại câu còn chờ theo tin nhắn ⇒ hỏi bản mới, không hỏi lại nguyên văn", async () => {
@@ -1774,6 +1774,20 @@ describe("nextPendingAfterChat: dùng sổ quyết định sau khi ghi đáp án
 
   it("AI chỉ viết lại câu đã chốt ⇒ hỏi lại nguyên văn câu còn chờ, không kết thúc im lặng", () => {
     expect(nextPendingAfterChat(decided, [his], [server] as never, "")).toEqual([his])
+  })
+
+  it("FLF-393: AI hỏi thêm câu mới mà không viết lại câu đang chờ ⇒ câu đang chờ (kèm lựa chọn) vẫn còn, sau câu mới", () => {
+    const stakes = { topic_key: "stakes", question: "Yếu tố tuân thủ, pháp lý thế nào?", options: [{ label: "Có quy định pháp luật" }, { label: "Chỉ quy định nội bộ" }] }
+    const credit = { topic_key: "credit_topup", question: "Người dùng nạp credit bằng cách nào?", options: [], inline: true }
+    const next = nextPendingAfterChat({ decisions: [] } as never, [stakes] as never, [credit] as never, "Tài liệu có nói cổng thanh toán nào không?")
+    expect(next.map((q) => q.topic_key)).toEqual(["credit_topup", "stakes"])
+    expect(next[1]).toMatchObject({ options: stakes.options })
+  })
+
+  it("AI viết lại chính câu đang chờ (cùng topic_key) ⇒ không bị lặp", () => {
+    const stakes = { topic_key: "stakes", question: "Tuân thủ?", options: [{ label: "A" }, { label: "B" }] }
+    const rewritten = { topic_key: "stakes", question: "Dự án có chịu quy định pháp luật nào không?", options: [{ label: "A" }, { label: "B" }] }
+    expect(nextPendingAfterChat({ decisions: [] } as never, [stakes] as never, [rewritten] as never, "")).toHaveLength(1)
   })
 })
 
@@ -2350,10 +2364,10 @@ describe("FLF-260: runPhase - ngôn ngữ đi qua phỏng vấn đầu giai đo�
   it("FLF-398: đính kèm tệp khi trả lời lượt hỏi gộp B-1 ⇒ lượt chat nhận tài liệu tải sau lúc hỏi", async () => {
     seedB1()
     vi.mocked(buildDocumentContext).mockClear()
-    vi.mocked(buildDocumentContext).mockImplementation(async (_p, _a, _s, _c, _m, _o, filter) =>
-      filter?.since
-        ? { contextText: "[D3-P01] Bệnh nhân đặt lịch qua Zalo của phòng khám.", tokenCount: 15, documentsUsed: 1, usedSummary: false }
-        : { contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false }
+    vi.mocked(buildDocumentContext).mockImplementation(async (request) =>
+      request.since
+        ? { contextText: "[D3-P01] Bệnh nhân đặt lịch qua Zalo của phòng khám.", tokenCount: 15, documentsUsed: 1, usedSummary: false, mode: "none" as const, chunksUsed: 0, fullTokens: 0 }
+        : { contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false, mode: "none" as const, chunksUsed: 0, fullTokens: 0 }
     )
     const question = [{ question: "Bệnh nhân đặt lịch thế nào?", options: [], topic_key: "current_booking" }] as never as ElicitOutput["questions"]
     const t = tracked({ reply: "Mình hỏi nhanh một câu.", questions: question }, "Đã đọc tài liệu.")
@@ -2371,9 +2385,9 @@ describe("FLF-260: runPhase - ngôn ngữ đi qua phỏng vấn đầu giai đo�
 
     const chat = seen.find((v) => v.chat_turn)
     expect(chat?.documents).toContain("Bệnh nhân đặt lịch qua Zalo")
-    const since = vi.mocked(buildDocumentContext).mock.calls.map((c) => c[6]?.since).find(Boolean)
+    const since = vi.mocked(buildDocumentContext).mock.calls.map((c) => c[0].since).find(Boolean)
     expect(since!.getTime()).toBeGreaterThanOrEqual(before)
-    vi.mocked(buildDocumentContext).mockImplementation(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false }))
+    vi.mocked(buildDocumentContext).mockImplementation(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false, mode: "none" as const, chunksUsed: 0, fullTokens: 0 }))
   })
 
   it("/answer chạy tiếp lượt hỏi gộp đã tách kèm tin tiếng Anh ⇒ lượt chat nhận en", async () => {
@@ -2453,5 +2467,37 @@ describe("FLF-358: prompt elicit-loop đã render không còn {{assumptions}} �
       }
     }
     expect(r.prompts.every((p) => !p.prompt.includes("{{assumptions}}"))).toBe(true)
+  })
+
+  it("FLF-393: lượt chat khi còn câu chờ nhận đoạn tài liệu khớp tin nhắn (trước đây: không có tài liệu ⇒ \"không thấy\")", async () => {
+    vi.mocked(buildDocumentContext).mockImplementation(async (request) =>
+      request.actionType === "chat"
+        ? { contextText: "--- TÀI LIỆU --- [D1-P391] VietQR / SePay checkout processes credit pack purchases", tokenCount: 30, documentsUsed: 1, usedSummary: false, mode: "retrieved", chunksUsed: 1, fullTokens: 999 }
+        : { contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false, mode: "none", chunksUsed: 0, fullTokens: 0 }
+    )
+    try {
+      const spine = repo.createEmptySpine({ name: "Clinic", domain: null })
+      spine.project.review_mode = "fast"
+      spine.steps = ["B-0.1", "B-0.2", "B-0.3"].map((id) => ({ id, status: "accepted" as const, first_seq: null, last_seq: null, accepted_at: "2026-09-28T00:00:00.000Z" }))
+      db.spines[0] = { _id: crypto.randomUUID(), projectId: PROJECT, ...spine }
+      seedSession(true)
+      const question = [{ question: "Bệnh nhân đặt lịch thế nào?", options: [], topic_key: "current_booking" }] as never as ElicitOutput["questions"]
+      const r = rendering((kind) => (kind === "chat" ? chatTurnReply("Rõ.") : kind === "interview" ? elicitReply("Mình hỏi nhanh một câu.", question) : elicitReply("", [])))
+      const { events, emit } = collectEvents()
+      const run = runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: r.elicitExecutor, draftExecutor: async () => draftReply([]) })
+      await waitForCount(events, "answer_needed", 1)
+      expect(submitAnswer(PROJECT, "B-1", SESSION, { answers: [], message: "Tài liệu có nói cổng thanh toán nào không?" })).toBe(true)
+      await run
+
+      // Câu hỏi tìm đoạn = tin user (tiêu điểm) + câu đang chờ — model nhắc lại câu chờ cũng phải thấy đoạn về nó
+      expect(buildDocumentContext).toHaveBeenCalledWith(
+        expect.objectContaining({ actionType: "chat", focus: "Tài liệu có nói cổng thanh toán nào không?", query: "Tài liệu có nói cổng thanh toán nào không?\nBệnh nhân đặt lịch thế nào?" })
+      )
+      const chat = r.prompts.filter((p) => p.kind === "chat")
+      expect(chat.length).toBeGreaterThan(0)
+      expect(chat[0]!.prompt).toContain("VietQR / SePay checkout")
+    } finally {
+      vi.mocked(buildDocumentContext).mockImplementation(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false, mode: "none", chunksUsed: 0, fullTokens: 0 }))
+    }
   })
 })

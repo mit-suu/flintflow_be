@@ -71,6 +71,64 @@ describe("rearrangeOf - FLF-416 sắp lại bố cục chế độ 4", () => {
   })
 })
 
+describe("sourceBasedFrom - sau khi đổi mẫu file nền mới là nền ở mọi chế độ", () => {
+  const migrated = { source_file_ref: "new-base", migrated_base_at: "2026-11-10T00:00:00.000Z" }
+  const templatePreview = { summary: { present: 0, missing: 0, out_of_scope: 0, kind: "template" as const }, sections: [], resolved_mode: 3 as const, intent: "fixed" as const, computed_at: "2026-11-08T00:00:00.000Z" }
+
+  it("chế độ 1 (import, cấu trúc FlintFlow) và mẫu cố định của công ty", () => {
+    expect(sourceBasedFrom({ start_kind: "existing", template_intent: "free", mode: "import" }, { ...migrated, target_structure: { resolved_mode: 1 } })).toBe(true)
+    expect(sourceBasedFrom({ start_kind: "existing", template_intent: "fixed", mode: "import" }, migrated)).toBe(true)
+  })
+
+  it("chế độ 2 (mode fpt), converted_from = fpt, dự án mới, chế độ 4: trước đó false, sau đổi mẫu true", () => {
+    const before = { source_file_ref: "file", target_structure: { resolved_mode: 4 } }
+    const cases = [
+      { start_kind: "existing", template_intent: "free", mode: "fpt" },
+      { start_kind: "existing", template_intent: "free", mode: "import", converted_from: "fpt" },
+      { start_kind: "new", template_intent: "free", mode: "import" },
+      { start_kind: "existing", template_intent: "free", mode: "import" }
+    ]
+    for (const project of cases) {
+      expect(sourceBasedFrom(project, before)).toBe(false)
+      expect(sourceBasedFrom(project, { ...before, ...migrated })).toBe(true)
+    }
+  })
+
+  it("dự án mới theo khung mẫu (file là khung): sau đổi mẫu file mới là nền thật, không còn là khung", () => {
+    const project = { start_kind: "new", template_intent: "fixed", mode: "import" }
+    expect(sourceBasedFrom(project, { source_file_ref: "file", structure_preview: templatePreview })).toBe(false)
+    expect(sourceBasedFrom(project, { ...migrated, structure_preview: templatePreview })).toBe(true)
+  })
+
+  it("không có file nền thì không áp dù đã ghi mốc đổi mẫu; chưa đổi mẫu giữ hành vi cũ", () => {
+    expect(sourceBasedFrom({ start_kind: "existing", template_intent: "fixed", mode: "import" }, { source_file_ref: null, migrated_base_at: "2026-11-10T00:00:00.000Z" })).toBe(false)
+    expect(sourceBasedFrom({ start_kind: "existing", template_intent: "fixed", mode: "fpt" }, { source_file_ref: "file", target_structure: { resolved_mode: 1 }, migrated_base_at: null })).toBe(false)
+  })
+})
+
+describe("pristineSectionIds - khoá mục", () => {
+  const imported = doc([
+    { id: "fixed:1", number: "1", heading: "Product Overview", level: 1, blocks: [para("Same body.")] },
+    { id: "feature:F1", number: "3.1", heading: "Login", level: 2, blocks: [para("Overview")] },
+    { id: "function:FN1", number: "3.1.1", heading: "Sign in", level: 3, blocks: [para("Same")] },
+    { id: "custom:a", number: "9", heading: "Appendix", level: 1, blocks: [para("Body A")] }
+  ])
+  const renamed = doc([
+    { id: "fixed:1", number: "1", heading: "1. Introduction", level: 1, blocks: [para("Same body.")] },
+    { id: "feature:F1", number: "3.1", heading: "Sign-in feature", level: 2, blocks: [para("Overview")] },
+    { id: "function:FN1", number: "3.1.1", heading: "Log in", level: 3, blocks: [para("Same")] },
+    { id: "custom:a", number: "9", heading: "Appendix A", level: 1, blocks: [para("Body A")] }
+  ])
+
+  it("dự án chưa đổi mẫu: đổi heading (kể cả mục khung, feature, function) là sửa — giữ khoá cũ", () => {
+    expect(pristineSectionIds(renamed, imported)).toEqual(new Set())
+  })
+
+  it("dự án đã đổi mẫu: mục khung neo theo section_id; feature / function / custom đổi tên vẫn là sửa", () => {
+    expect(pristineSectionIds(renamed, imported, { anchorById: true })).toEqual(new Set(["fixed:1"]))
+  })
+})
+
 describe("pristineSectionIds - mục in giống hệt lúc import", () => {
   it("so heading + khối của từng mục; mục sửa / mục mới không nguyên vẹn; trạng thái duyệt không tính", () => {
     const imported = doc([

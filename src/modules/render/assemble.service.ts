@@ -72,6 +72,7 @@ import { rearrangeOf } from "./source-fidelity.js"
 // Mode 1 v2 (FLF-184): layout của file người dùng upload — chỉ đọc
 import { TemplateProfile } from "../import/template-profile.model.js"
 import { Project } from "../project/project.model.js"
+import { screenMockupsOf } from "../../shared/diagram/screen-theme.js"
 import { MEDIA_PREFIX, isMediaId, loadImportMedia, mediaId } from "./import-media.js"
 import type {
   Block,
@@ -85,6 +86,7 @@ import type {
 import { renderedDocumentSchema } from "./rendered-document.schema.js"
 import { draftVersionLabel } from "./draft-version.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { withoutTemplateMigration } from "../doc-version/template-migration-change.js"
 
 export const NO_WORKING_DRAFT = "NO_WORKING_DRAFT"
 
@@ -441,7 +443,8 @@ const recordChangeLog = createChangeLog<ChangeRecordRow>(RECORD_CHANGE_PROJECTIO
   step_id: d.step_id
 }))
 
-export const listChangesForRecord = (projectId: string): Promise<ChangeRecordRow[]> => recordChangeLog.list(projectId)
+/** Record of Changes không ghi dòng nào do đổi mẫu sinh ra (dòng `Baseline <số>` của lần phát hành vẫn có). */
+export const listChangesForRecord = async (projectId: string): Promise<ChangeRecordRow[]> => withoutTemplateMigration(await recordChangeLog.list(projectId))
 
 const SYSTEM_ACTOR = "system"
 const IMPORT_ACTOR = "import"
@@ -673,9 +676,10 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
     | null
   if (!profile?.layout?.length) return null
   // Chế độ 3 (mẫu bắt buộc, FLF-335): in đúng các mục của mẫu, không chèn mục FlintFlow ngoài mẫu (business-flow 2.10)
-  const project = (await Project.findById(projectId, { template_intent: 1 }, { lean: true })) as { template_intent?: string | null } | null
+  const project = (await Project.findById(projectId, { template_intent: 1, screenMockups: 1 }, { lean: true })) as { template_intent?: string | null; screenMockups?: unknown } | null
   // FLF-416 chế độ 4 đã vào Luồng 2: mục Ngoài phạm vi của file xuống cuối tài liệu (bố cục sắp lại theo mẫu chuẩn)
   const rearrange = project?.template_intent === "free" ? rearrangeOf(project, profile) : null
+  const mockups = screenMockupsOf(project).filter((m) => m.enabled)
   return {
     ...(rearrange?.moveToEnd.length ? { moveToEnd: rearrange.moveToEnd } : {}),
     ...(project?.template_intent === "fixed" ? { fixedTemplate: true } : {}),
@@ -686,6 +690,8 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
     // FLF-252: import trước khi có các field này ⇒ không truyền, bản in giữ cách cũ
     ...(profile.non_screen_table?.length ? { nonScreenTable: profile.non_screen_table } : {}),
     ...(profile.function_originals?.length ? { functionOriginals: profile.function_originals } : {}),
+    // FLF-410: màn đã bật mockup thay ảnh gốc
+    ...(mockups.length ? { screenMockups: mockups } : {}),
     ...(profile.section_slices?.length ? { sectionSlices: profile.section_slices } : {}),
     // FLF-366: import trước khi có đoạn nguyên văn ⇒ không truyền, bản in như cũ
     ...(profile.section_segments?.length ? { sectionSegments: profile.section_segments } : {})
@@ -852,7 +858,7 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
     // T15 (mode 1 v3): lịch sử sửa đổi của khách (file gốc) đứng trước, lịch sử FlintFlow nối tiếp. File đã có bảng lịch sử
     // của riêng nó ⇒ không thêm dòng chỉ vì import / ký bản gốc 0.1 (lô `by = import`): bản 0.1 giữ đúng bảng của file, mỗi
     // change request mới thành một dòng
-    recordOfChanges: [...(input.template?.legacyRecord ?? []), ...buildRecordOfChanges(withoutImportRows(input.recordChanges, input.template?.legacyRecord?.length ?? 0), inChargeFor(deps.resolveInCharge, language), language, spine)],
+    recordOfChanges: [...(input.template?.legacyRecord ?? []), ...buildRecordOfChanges(withoutTemplateMigration(withoutImportRows(input.recordChanges, input.template?.legacyRecord?.length ?? 0)), inChargeFor(deps.resolveInCharge, language), language, spine)],
     flagsAppendix: buildFlagsAppendix(spine, input.statusChanges, numbers, source, states, titles, language, translated?.localized)
   }
   if (source === "draft") refDoc.watermark = "DRAFT"
