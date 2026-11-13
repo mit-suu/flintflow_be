@@ -64,9 +64,10 @@ describe.skipIf(!enabled || !SRS)("Đo import mode 1 - provider thật (E2E_AI=1
 
     // một lần Bắt đầu: I-4 ⇒ baseline 0.1 ⇒ 1.11–1.12 (đo gộp)
     const { run } = await timed("one_pass", () => c.extractAndWait(importId, "/import/extract", 60 * 60_000))
-    expect(run?.import.paused ?? null, JSON.stringify(run?.sections.filter((s: { error: unknown }) => s.error))).toBeNull()
+    // I-4 phải xong (không section lỗi, đã qua `extracting`); finalize dừng (vd 1.11 lỗi) vẫn ghi số đo I-4, rồi mới đánh trượt
+    expect(run?.sections.filter((s: { error: unknown }) => s.error) ?? []).toEqual([])
     view = (await c.get("/import")).body.data
-    expect(view.import.status).toBe("gap_review")
+    expect(view.import.status).not.toBe("extracting")
 
     // ─── số đo ───────────────────────────────────────────────────
     const usage = await Usage.find({ projectId, state: "deducted" }).lean()
@@ -80,6 +81,17 @@ describe.skipIf(!enabled || !SRS)("Đo import mode 1 - provider thật (E2E_AI=1
       r.tokens_out += u.tokens_out ?? 0
       r.credits += u.cost ?? 0
       rows.set(g, r)
+    }
+    // Thời gian riêng của I-4 (one_pass gộp cả finalize): từ lượt I-4 đầu tiên được ghi tới lượt cuối được trừ credit
+    const i4 = usage.filter((u) => u.step_id.startsWith("I-4:")) as Array<(typeof usage)[number] & { createdAt: Date; updatedAt: Date }>
+    if (i4.length) {
+      timings.i4_span = (Math.max(...i4.map((u) => +new Date(u.updatedAt))) - Math.min(...i4.map((u) => +new Date(u.createdAt)))) / 1000
+    }
+    // Số lượt I-4 theo section ⇒ biết đường găng (section nhiều lượt nhất) khi chạy song song
+    const i4BySection: Record<string, number> = {}
+    for (const u of i4) {
+      const section = u.step_id.slice("I-4:".length)
+      i4BySection[section] = (i4BySection[section] ?? 0) + 1
     }
     const checkBlocks = await DocBlock.find({ projectId, doc_version: IMPORTED_DOC_VERSION, kind: { $in: ["paragraph", "list_item", "table_cell"] } })
       .select("block_id text section_id")
@@ -102,6 +114,7 @@ describe.skipIf(!enabled || !SRS)("Đo import mode 1 - provider thật (E2E_AI=1
       status: view.import.status,
       paused: view.import.paused,
       timings_s: timings,
+      i4_calls_by_section: i4BySection,
       steps: [...rows.values()].sort((a, b) => a.group.localeCompare(b.group)),
       total: {
         calls: usage.length,

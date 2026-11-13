@@ -4,6 +4,7 @@ import mammoth from "mammoth"
 import { HEADING_TABLE_SPACING, buildDocxFileName, exportLineage, writeDocx } from "./docx-writer.js"
 import { makePng, readZipEntries, readZipText } from "./zip.test-helper.js"
 import type { RenderedDocument } from "./rendered-document.types.js"
+import { writerOptionsFor } from "./labels.js"
 import { DocxPackage, readBlocks } from "../docx-ooxml/index.js"
 
 const sample = JSON.parse(
@@ -293,6 +294,16 @@ describe("writeDocx - phụ lục cờ theo ngôn ngữ (mode 1: tiếng Việt,
     expect(value).toContain("Mục còn trống")
     expect(value).not.toContain("section_empty")
     expect(value).not.toContain("Open Red Flags")
+  })
+
+  it("FLF-411 U3-5: bản DRAFT mode 1 tiếng Anh ⇒ khối trạng thái tiếng Anh", async () => {
+    const doc = withFlags()
+    doc.source = "draft"
+    const { value } = await mammoth.extractRawText({ buffer: await writeDocx(doc, writerOptionsFor("import", "en")) })
+    expect(value).toContain("Working Draft Status")
+    expect(value).toContain("Open red flags: 1")
+    expect(value).not.toContain("Tình trạng bản làm việc")
+    expect(value).not.toContain("Lỗi đỏ đang mở")
   })
 
   it("mặc định (mode 2) giữ nguyên tiếng Anh", async () => {

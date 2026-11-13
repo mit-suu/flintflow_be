@@ -14,6 +14,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { latestDocVersion } from "../doc-version/doc-version.service.js"
 import { stripRecord } from "../import/check.service.js"
 import { DocBlock } from "../import/doc-block.model.js"
+import { loadLayout } from "../import/gap-report.service.js"
 import { withMeteredAi } from "../import/metered-ai.js"
 import { listSections } from "../spine/section-registry.js"
 import * as spineRepository from "../spine/spine.repository.js"
@@ -23,7 +24,7 @@ import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus, transitionCr } from "./change-request.service.js"
 import { AMENDABLE_CR_STATUSES, MAX_CLARIFY_ROUNDS, canAskMore } from "./change-request.state.js"
 import { answersText, crHeader, crProjection, crQuery, relevantMaterialsText, truncate } from "./cr-context.js"
-import { mentionedSections, type HeadingRef } from "./section-mention.js"
+import { mentionedSections, mergeHeadings, type HeadingRef } from "./section-mention.js"
 
 /**
  * Tiêu đề mục của bản tài liệu mới nhất, theo thứ tự (kèm mã section đã khớp). Dự án chuyển từ mode 2 (FLF-318) không
@@ -36,14 +37,22 @@ const docHeadings = async (cr: IChangeRequest, spine: Spine): Promise<HeadingRef
     .sort({ "anchor.ordinal": 1 })
     .select("text section_id")
     .lean()
-  if (!headings.length) return listSections(spine).map((sec) => ({ text: sec.title_en, section_id: sec.id }))
-  return headings.map((h) => ({ text: h.text, section_id: h.section_id ?? null }))
+  const layout = await loadLayout(String(cr.projectId))
+  if (!headings.length && !layout) return listSections(spine).map((sec) => ({ text: sec.title_en, section_id: sec.id }))
+  return mergeHeadings(layout, headings.map((h) => ({ text: h.text, section_id: h.section_id ?? null })))
 }
 
 const outlineText = (headings: readonly HeadingRef[]): string =>
   truncate(headings.map((h) => `${h.text}${h.section_id ? ` (${h.section_id})` : ""}`).join("\n"), 3000)
 
 /** Chữ người yêu cầu viết: tiêu đề, mô tả, lệnh gộp thêm, câu trả lời (không lấy câu hỏi của AI). */
+/**
+ * CR tạo từ nút "Viết" của mục thiếu sau đổi mẫu mang `source.ref` = `section_id` của mục — đích ghi nội dung. Chỉ nhận khi đúng là
+ * mục có heading trong tài liệu hiện tại (ref là chữ tự do của form thì bỏ qua).
+ */
+export const sourceRefSections = (ref: string | null | undefined, headings: readonly HeadingRef[]): string[] =>
+  ref && headings.some((h) => h.section_id === ref) && !/^(group:|unmapped$)/.test(ref) ? [ref] : []
+
 const requesterText = (cr: IChangeRequest): string =>
   [cr.title, cr.description, ...(cr.amendments ?? []).map((a) => a.text), ...cr.clarifications.flatMap((c) => c.answers)].join("\n")
 
@@ -96,7 +105,7 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
   }
   const headings = await docHeadings(cr, spine)
   // Mục người yêu cầu gọi tên ("phần 3.1.3 Screen Authorization") luôn là đích — code nhận, không trông vào model.
-  const named = mentionedSections(requesterText(cr), headings)
+  const named = [...new Set([...mentionedSections(requesterText(cr), headings), ...sourceRefSections(cr.source?.ref, headings)])]
   const result = await withMeteredAi<CrClarifyOutput>({ projectId: String(cr.projectId), userId, stepId: `C-2:${cr.cr_id}` }, ActionType.CR_CLARIFY, {
     ...crHeader(cr),
     round: Math.min(asked + 1, MAX_CLARIFY_ROUNDS),

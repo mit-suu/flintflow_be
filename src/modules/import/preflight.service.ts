@@ -49,6 +49,8 @@ const REVISION_LABEL: Record<string, string> = {
   pPrChange: "đổi định dạng"
 }
 
+const INFLATED_TOO_LARGE = "Nội dung file sau giải nén quá lớn. Hãy nén ảnh trong Word (File → Compress Pictures) hoặc tách phụ lục rồi tải lại."
+
 export const preflightDocx = async (data: Buffer, opts: { maxBytes?: number } = {}): Promise<PreflightResult> => {
   const maxBytes = opts.maxBytes ?? IMPORT_MAX_FILE_BYTES
   if (data.length > maxBytes) return reject("FILE_TOO_LARGE", fileTooLargeMessage(data.length))
@@ -68,7 +70,7 @@ export const preflightDocx = async (data: Buffer, opts: { maxBytes?: number } = 
   try {
     pkg = await DocxPackage.load(data)
   } catch (err) {
-    if (err instanceof OoxmlError && err.code === "PACKAGE_TOO_LARGE") return reject("FILE_TOO_LARGE", "Nội dung file sau giải nén quá lớn. Hãy nén ảnh trong Word (File → Compress Pictures) hoặc tách phụ lục rồi tải lại.")
+    if (err instanceof OoxmlError && err.code === "PACKAGE_TOO_LARGE") return reject("FILE_TOO_LARGE", INFLATED_TOO_LARGE)
     return reject("CORRUPT_ZIP", "File .docx bị hỏng, không mở được")
   }
   if (!pkg.has(MAIN_PART)) return reject("NOT_DOCX", "File zip không phải tài liệu Word (thiếu word/document.xml)")
@@ -76,7 +78,9 @@ export const preflightDocx = async (data: Buffer, opts: { maxBytes?: number } = 
   let blocks: OoxmlBlock[]
   try {
     blocks = await readBlocks(pkg)
-  } catch {
+  } catch (err) {
+    // Kích thước khai báo bị ghi nhỏ ⇒ chỉ lộ ra lúc giải nén thật
+    if (err instanceof OoxmlError && err.code === "PACKAGE_TOO_LARGE") return reject("FILE_TOO_LARGE", INFLATED_TOO_LARGE)
     return reject("CORRUPT_ZIP", "Nội dung tài liệu bị hỏng (XML không hợp lệ)")
   }
   if (!blocks.some((b) => b.text.trim())) return reject("EMPTY_DOCUMENT", "Tài liệu không có nội dung chữ")

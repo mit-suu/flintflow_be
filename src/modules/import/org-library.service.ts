@@ -1,19 +1,31 @@
 /**
  * FLF-278 trên FLF-335/336 — mẫu cấp tổ chức.
  *
- * Quyền: mọi thành viên xem / dùng; Lead + Analyst lưu / sửa / xoá (route `requireRole`; route dự án đi qua chuỗi guard
+ * Quyền: mọi thành viên xem / dùng; chỉ Lead đăng / xoá mẫu (FLF-395) (route `requireRole`; route dự án đi qua chuỗi guard
  * `/projects` + `viewerReadOnly`). Không ghi Spine ở đây: dùng mẫu = một lần import mới (luồng 1 như upload, mapping áp sẵn).
  */
 import mongoose from "mongoose"
 import { docFileStore } from "../doc-version/doc-file.store.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { vietnameseSearchPattern } from "../../shared/utils/vi-search.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { latestImport, loadImportFile, uploadImport } from "./import.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
-import { OrgTemplate, type IOrgTemplate } from "./org-library.model.js"
+import { OrgTemplate, type OrgTemplateColumn } from "./org-library.model.js"
+import {
+  assertCanPublish,
+  createDraftVersion,
+  deleteFamily,
+  findFamily,
+  listOrgTemplates,
+  publishVersion,
+  resolveImportVersion,
+  type OrgTemplateSummary,
+  type TemplateActor
+} from "./org-template-versions.service.js"
+import { Project } from "../project/project.model.js"
 import { TemplateProfile } from "./template-profile.model.js"
-import { normalizeTemplateFamily } from "./part-bank.js"
+import { normalizeTitle } from "./org-mapping.js"
+import { buildSkeleton, scrubProjectName, type PendingDecision } from "./template-skeleton.js"
 import type { TemplateIntent } from "./target-structure.js"
 
 export { applyOrgMapping, normalizeTitle } from "./org-mapping.js"
@@ -23,104 +35,100 @@ const MAPPED_STATUSES: ReadonlySet<string> = new Set(["extracting", "fields_revi
 
 // ─── mẫu cấp tổ chức ─────────────────────────────────────────────
 
-export interface OrgTemplateSummary {
-  id: string
-  name: string
-  source_file_name: string
-  heading_count: number
-  custom_count: number
-  template_family: string | null
-  uses: number
-  created_at: string
-}
+export type { OrgTemplateSummary } from "./org-template-versions.service.js"
+export { deleteFamily as deleteOrgTemplate, listOrgTemplates } from "./org-template-versions.service.js"
 
-const summaryOf = (t: IOrgTemplate): OrgTemplateSummary => ({
-  id: String(t._id),
-  name: t.name,
-  source_file_name: t.source_file.name,
-  heading_count: t.headings.length,
-  custom_count: t.headings.filter((h) => h.section_id === "unmapped").length,
-  template_family: t.template_family ? normalizeTemplateFamily(t.template_family) : null,
-  uses: t.uses,
-  created_at: t.createdAt.toISOString()
-})
-
-export const listOrgTemplates = async (orgId: string): Promise<OrgTemplateSummary[]> =>
-  (await OrgTemplate.find({ orgId }).sort({ uses: -1, updatedAt: -1 }).limit(100)).map(summaryOf)
-
-const TEMPLATE_SORTS = {
-  uses: { uses: -1, createdAt: -1 },
-  recent: { createdAt: -1 },
-  name: { name: 1 }
-} as const
-
-/** Một trang của thư viện mẫu, kèm tổng số mẫu khớp. Sắp theo tên dùng collation tiếng Việt (Ă sau A, không xếp cuối). */
-export const listOrgTemplatesPage = async (
-  orgId: string,
-  query: { q?: string; sort: keyof typeof TEMPLATE_SORTS; page: number; limit: number }
-): Promise<{ items: OrgTemplateSummary[]; meta: { page: number; limit: number; total: number; totalPages: number } }> => {
-  const { q, sort, page, limit } = query
-  const filter: Record<string, unknown> = { orgId }
-  if (q) {
-    const pattern = vietnameseSearchPattern(q)
-    filter.$or = [{ name: pattern }, { "source_file.name": pattern }]
+/**
+ * FLF-412: lưu dự án thành mẫu tổ chức = **chỉ khung** (luật mẫu khung tự lưu D12 — heading khung, tiêu đề cột, chữ hướng dẫn),
+ * không lưu nguyên file của khách. Lead chủ động lưu nên mọi heading cần duyệt đều giữ, tên dự án trong chữ thành chỗ trống.
+ * Mục nào khớp heading của dự án thì giữ mapping của dự án (`profile.heading_map`), còn lại theo lần khớp lại của khung.
+ */
+const cleanSkeletonOf = async (
+  projectId: string,
+  doc: IImportedDocument,
+  profile: { heading_map: { heading_text: string; section_id: string }[]; language?: string | null }
+): Promise<{ buffer: Buffer; headings: { heading_text: string; section_id: string }[]; table_map: OrgTemplateColumn[] }> => {
+  const project = await Project.findById(projectId, { name: 1 }).lean()
+  const opts = { projectName: project?.name ?? "", language: profile.language === "vi" ? ("vi" as const) : ("en" as const) }
+  const source = await loadImportFile(doc)
+  const first = await buildSkeleton(source, opts)
+  const decisions = new Map<string, PendingDecision>(first.review.map((r) => [r.key, { decision: "generic", text: scrubProjectName(r.heading_text, opts) }]))
+  const built = decisions.size ? await buildSkeleton(source, opts, decisions) : first
+  if (built.empty) throw new Mode1Error("IMPORT_INVALID_STATE", "Tài liệu không có heading nào để lưu thành mẫu", { status: doc.status, to: doc.status, allowed: [] })
+  // Cùng tên ở hai nhánh ("Overview" dưới mục 1 và mục 3) ⇒ khớp theo thứ tự xuất hiện, không gom về lần đầu
+  const ownSections = new Map<string, string[]>()
+  for (const h of profile.heading_map) {
+    const key = normalizeTitle(scrubProjectName(h.heading_text, opts))
+    ownSections.set(key, [...(ownSections.get(key) ?? []), h.section_id])
   }
-  const [total, docs] = await Promise.all([
-    OrgTemplate.countDocuments(filter),
-    OrgTemplate.find(filter)
-      .sort({ ...TEMPLATE_SORTS[sort], _id: 1 })
-      .collation({ locale: "vi" })
-      .skip((page - 1) * limit)
-      .limit(limit)
-  ])
-  return { items: docs.map(summaryOf), meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } }
+  return {
+    buffer: built.buffer,
+    headings: built.headings.map((h) => ({ heading_text: h.heading_text, section_id: ownSections.get(normalizeTitle(h.heading_text))?.shift() ?? h.section_id })),
+    table_map: built.table_map
+  }
 }
 
-export const deleteOrgTemplate = async (orgId: string, templateId: string): Promise<void> => {
-  const found = mongoose.isValidObjectId(templateId) ? await OrgTemplate.findOneAndDelete({ _id: templateId, orgId }) : null
-  if (!found) throw new ApiError(404, "Không tìm thấy mẫu của tổ chức.", "ORG_TEMPLATE_NOT_FOUND")
-  await docFileStore().remove(found.file_ref).catch(() => undefined)
-}
-
-/** Lưu file mẫu + mapping đã xác nhận của lần import gần nhất thành mẫu của tổ chức. */
-export const saveImportToOrg = async (projectId: string, orgId: string, userId: string, name: string): Promise<OrgTemplateSummary> => {
+/**
+ * Lưu file + mapping đã xác nhận của lần import gần nhất thành mẫu của tổ chức (họ mới, hoặc bản mới của `template_id`).
+ * Chỉ Lead (FLF-395): đi qua `publishVersion` như mọi bản `org`; mapping đã chốt ở dự án nên đăng ngay. Dự án gắn bản này.
+ */
+export const saveImportToOrg = async (
+  projectId: string,
+  orgId: string,
+  actor: TemplateActor,
+  body: { name: string; template_id?: string }
+): Promise<OrgTemplateSummary> => {
+  assertCanPublish(actor)
   const doc = await latestImport(projectId)
   if (!doc || !doc.file_ref || !MAPPED_STATUSES.has(doc.status)) {
     throw new Mode1Error("IMPORT_INVALID_STATE", "Chỉ lưu được mẫu sau khi đã xác nhận mapping heading", { status: doc?.status ?? null, to: doc?.status ?? null, allowed: [] })
   }
   const profile = await TemplateProfile.findOne({ projectId }).lean()
   if (!profile?.heading_map?.length) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa đọc xong bố cục tài liệu", { status: doc.status, to: doc.status, allowed: [] })
-  const buffer = await loadImportFile(doc)
-  const fileRef = await docFileStore().save(buffer, { projectId: `org-${orgId}`, kind: "upload", name: doc.original_name })
-  const created = await OrgTemplate.create({
-    orgId,
-    name: name.trim(),
-    source_file: { name: doc.original_name, size: doc.size, sha256: doc.sha256 },
-    file_ref: fileRef,
-    template_family: profile.template_family ?? null,
-    headings: profile.heading_map.map((h) => ({ heading_text: h.heading_text, section_id: h.section_id })),
-    created_by: userId
-  })
-  return summaryOf(created)
+  const existing = body.template_id ? await findFamily(orgId, body.template_id) : null
+  const family = existing ?? (await OrgTemplate.create({ orgId, name: body.name.trim(), created_by: actor.userId, latest_version: 0 }))
+  try {
+    const skeleton = await cleanSkeletonOf(projectId, doc, profile)
+    const draft = await createDraftVersion(orgId, actor, family, { buffer: skeleton.buffer, originalname: doc.original_name, size: skeleton.buffer.length }, {
+      headings: skeleton.headings,
+      table_map: skeleton.table_map,
+      language: profile.language ?? "en",
+      template_family: profile.template_family ?? null
+    })
+    await publishVersion(orgId, actor, String(family._id), draft.version)
+    await Project.updateOne({ _id: projectId, organizationId: orgId }, { $set: { template_ref: { template_id: family._id, version: draft.version } } })
+  } catch (err) {
+    // Họ vừa tạo cho lần lưu này ⇒ dọn cả bản + file đã ghi, không để bản mồ côi
+    if (!existing) await deleteFamily(orgId, String(family._id)).catch(() => undefined)
+    throw err
+  }
+  const summary = (await listOrgTemplates(orgId, "lead")).find((t) => t.id === String(family._id))
+  if (!summary) throw new ApiError(404, "Không tìm thấy mẫu của tổ chức.", "ORG_TEMPLATE_NOT_FOUND")
+  return summary
 }
 
-/** Dự án dùng mẫu tổ chức: import từ đúng file đã lưu (không cần upload, không hỏi "bản mới nhất"), mapping áp sẵn. */
+/**
+ * Dự án dùng mẫu tổ chức: import từ đúng file của bản đã chọn (mặc định bản mới nhất — D16), mapping áp sẵn. Import nhớ
+ * (template_id, version) nên đăng bản mới giữa lúc upload và tách file không đổi mapping; dự án gắn bản đó.
+ */
 export const importFromOrg = async (
   projectId: string,
   orgId: string,
   userId: string,
   /** `intent` (client cũ) bỏ qua — ý định lấy từ Project. */
-  body: { org_template_id: string; intent?: TemplateIntent }
+  body: { org_template_id: string; version?: number; intent?: TemplateIntent }
 ): Promise<IImportedDocument> => {
-  const template = mongoose.isValidObjectId(body.org_template_id) ? await OrgTemplate.findOne({ _id: body.org_template_id, orgId }) : null
-  if (!template) throw new ApiError(404, "Không tìm thấy mẫu của tổ chức.", "ORG_TEMPLATE_NOT_FOUND")
-  const buffer = await docFileStore().load(template.file_ref)
+  const { family, version } = await resolveImportVersion(orgId, body.org_template_id, body.version)
+  const buffer = await docFileStore().load(version.file_ref)
   const doc = await uploadImport(
     projectId,
     userId,
-    { buffer, originalname: template.source_file.name, size: buffer.length },
-    { org_template_id: String(template._id) }
+    { buffer, originalname: version.source_file.name, size: buffer.length },
+    { org_template_id: String(family._id), org_template_version: version.version }
   )
-  await OrgTemplate.updateOne({ _id: template._id }, { $inc: { uses: 1 } })
+  await Promise.all([
+    OrgTemplate.updateOne({ _id: family._id }, { $inc: { uses: 1 } }),
+    Project.updateOne({ _id: projectId, organizationId: orgId }, { $set: { template_ref: { template_id: family._id, version: version.version } } })
+  ])
   return doc
 }
