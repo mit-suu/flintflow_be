@@ -20,6 +20,7 @@ import {
   type LayoutBlock
 } from "./step-plan.js"
 import { looksLikeExample } from "./template-context.js"
+import { sampleBlockIds, stripTemplateMarks } from "./template-markers.js"
 import { compareTargetStructure, isNonDraftHeading, type ResolvedMode, type TargetSectionStatus, type TargetStructure, type TemplateIntent } from "./target-structure.js"
 
 export type FileKind = "written" | "template"
@@ -66,19 +67,21 @@ const isExampleText = (b: { kind: string; text: string }): boolean => (b.kind ==
 /**
  * FLF-382 (khoảng trống FLF-388): mục **khách viết thật** — như mục có nội dung nhưng đoạn có dấu hiệu ví dụ / chỗ điền ("e.g.",
  * "Ví dụ:", "Nguyễn Văn A", "Hệ thống XYZ" — `looksLikeExample`) không tính. Mẫu mà mục nào cũng có câu ví dụ vẫn là khung mẫu.
+ * FLF-411: bỏ thêm chữ của mẫu (`stripTemplateMarks` — khoảng `[ … ]` nhiều đoạn, `<<Sample … >>`, chỗ điền) và bảng / hình mẫu ở
+ * mục có hướng dẫn (`sampleBlockIds`) — template FPT Capstone trống trước đây ra "SRS đã viết · 16/21".
  */
-export const authoredSections = (
+export const authoredSections = (blocks: readonly LayoutBlock[], headingSections: ReadonlyMap<string, string>): Set<string> => {
+  const samples = sampleBlockIds(blocks)
+  const real = stripTemplateMarks(blocks).filter((b) => !isExampleText(b) && !samples.has(b.block_id))
+  const { customSections, slices } = buildLayout(real, headingSections)
+  return contentSections(real, customSections, slices)
+}
+
+const contentSections = (
   blocks: readonly LayoutBlock[],
   customSections: Parameters<typeof customSectionsWithContent>[0],
   slices: Parameters<typeof repeatSectionsWithContent>[0]
-): Set<string> => {
-  const real = blocks.filter((b) => !isExampleText(b))
-  return new Set([
-    ...sectionsWithContent([...real]),
-    ...customSectionsWithContent(customSections.map((c) => ({ ...c, blocks: c.blocks.filter((b) => !isExampleText(b)) }))),
-    ...repeatSectionsWithContent(slices, [...real])
-  ])
-}
+): Set<string> => new Set([...sectionsWithContent([...blocks]), ...customSectionsWithContent(customSections), ...repeatSectionsWithContent(slices, [...blocks])])
 
 /** Hàm thuần: khung mẫu khi tỉ lệ mục có nội dung dưới `TEMPLATE_CONTENT_RATIO` (file không có heading nào ⇒ khung mẫu). */
 export const fileKindOf = (layout: readonly LayoutEntry[], withContent: ReadonlySet<string>): FileKind => {
@@ -117,9 +120,12 @@ export const previewStructure = (
   intent: TemplateIntent,
   at: string = new Date().toISOString()
 ): StructurePreview => {
-  const { layout, customSections, slices } = buildLayout(blocks, headingSections)
-  const withContent = new Set([...sectionsWithContent(blocks), ...customSectionsWithContent(customSections), ...repeatSectionsWithContent(slices, blocks)])
-  const kind = fileKindOf(layout, authoredSections(blocks, customSections, slices))
+  const { layout } = buildLayout(blocks, headingSections)
+  // FLF-411: mục chỉ có chữ của mẫu (hướng dẫn nhiều đoạn, `<<Sample … >>`, chỗ điền) là "Còn trống" — như I-5
+  const stripped = stripTemplateMarks(blocks)
+  const { customSections, slices } = buildLayout(stripped, headingSections)
+  const withContent = contentSections(stripped, customSections, slices)
+  const kind = fileKindOf(layout, authoredSections(blocks, headingSections))
   const structure = compareTargetStructure(layout, withContent, spine, intent, at, { draftAll: intent === "fixed" && kind === "template" })
   return toPreview(structure, layout, kind, at)
 }
@@ -174,3 +180,10 @@ export const isTemplateFile = (project: TemplateFileProject | null, profile: { s
   const kind = profile?.structure_preview?.summary.kind
   return kind ? kind === "template" : project.start_kind === "new"
 }
+
+/**
+ * FLF-411: màn đọc khung thấy file là **khung mẫu** (chữ là hướng dẫn / ví dụ), bất kể người dùng có tick "Bổ sung các mục còn
+ * thiếu theo mẫu chuẩn FlintFlow" hay không — chữ / hình ví dụ của mẫu không bao giờ là dữ liệu dự án (không trích, không gọi AI).
+ * Cách soạn tiếp vẫn theo `isTemplateFile` (giữ khung ⇒ luồng C).
+ */
+export const isTemplateContent = (profile: { structure_preview?: StructurePreview | null } | null): boolean => profile?.structure_preview?.summary.kind === "template"

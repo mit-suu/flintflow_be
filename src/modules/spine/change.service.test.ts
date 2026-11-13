@@ -880,6 +880,36 @@ describe("buildChangeProjection - chỉ thực thể được nhắc", () => {
   })
 })
 
+describe("FLF-411 (#18): đổi tên hệ thống ⇒ project.system_name, không phải tên dự án", () => {
+  it("projection luôn kèm project gọn { name, system_name } - cả khi khớp phần tử lẫn khi rơi về chỉ mục", () => {
+    const spine: Spine = { ...FIXTURE, project: { ...FIXTURE.project, name: "Dự án thử", system_name: "Old System" } }
+    const focused = buildChangeProjection(spine, "Đổi tên actor A01 thành Product Owner")
+    expect(focused.project).toEqual({ name: "Dự án thử", system_name: "Old System" })
+    const broad = buildChangeProjection(spine, "đổi tên hệ thống thành ShuttleBook")
+    expect(broad.project).toEqual({ name: "Dự án thử", system_name: "Old System" })
+    // Gọn: không mang vision / goals / release_scope
+    expect(Object.keys(broad.project as object)).toEqual(["name", "system_name"])
+  })
+
+  it("preview + apply op set project.system_name (mock model): qua kiểm path, ghi vào Spine, tên dự án giữ nguyên", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () =>
+      aiResult({ ops: [{ op: "set", path: "project.system_name", value: "ShuttleBook", reason: "đổi tên hệ thống theo yêu cầu" }] })
+    )
+
+    const result = await preview(PROJECT, USER, { base_version: 1, instruction: "đổi tên hệ thống thành ShuttleBook" }, {}, deps)
+    expect(result.ok).toBe(true)
+    expect(result.changes[0]).toMatchObject({ path: "project.system_name", value: "ShuttleBook" })
+    const variables = vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as Record<string, unknown>
+    expect((variables.projection as { project?: unknown }).project).toEqual({ name: FIXTURE.project.name, system_name: FIXTURE.project.system_name ?? null })
+
+    await apply(PROJECT, USER, { base_version: 1, instruction: "đổi tên hệ thống thành ShuttleBook", preview_id: result.preview_id }, {}, deps)
+    const record = await repo.get(PROJECT)
+    expect(record!.project.system_name).toBe("ShuttleBook")
+    expect(record!.project.name).toBe(FIXTURE.project.name)
+  })
+})
+
 // ─── apply ───────────────────────────────────────────────────────
 
 describe("apply - ghi Spine, section phụ thuộc thành stale", () => {

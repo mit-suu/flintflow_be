@@ -312,8 +312,10 @@ describe("labels - fixture 19 màn qua đường mode 2 (mẫu FPT)", () => {
 describe("labels - writerOptionsFor (FLF-265 §3.1)", () => {
   const sample = JSON.parse(readFileSync(new URL("../../../fixtures/rendered-document-sample.json", import.meta.url), "utf8")) as RenderedDocument
 
-  it("mode 1 ⇒ đúng tuỳ chọn trước FLF-265, bỏ qua ngôn ngữ tài liệu", () => {
-    for (const language of ["vi", "en", undefined] as const) expect(writerOptionsFor("import", language)).toEqual({ flagLanguage: "vi" })
+  it("mode 1 ⇒ writer như trước FLF-265; phụ lục cờ theo ngôn ngữ tài liệu (FLF-411 U3-5), không truyền ⇒ vi như cũ", () => {
+    expect(writerOptionsFor("import", "vi")).toEqual({ flagLanguage: "vi" })
+    expect(writerOptionsFor("import", "en")).toEqual({ flagLanguage: "en" })
+    expect(writerOptionsFor("import")).toEqual({ flagLanguage: "vi" })
     // FLF-318: dự án chuyển từ mode 2 theo ngôn ngữ tài liệu như mode 2
     expect(writerOptionsFor("import", "en", "fpt")).toEqual({ language: "en", flagLanguage: "en" })
   })
@@ -334,8 +336,11 @@ describe("labels - writerOptionsFor (FLF-265 §3.1)", () => {
     expect(vi).not.toContain(WRITER_TEXT.en.toc)
   })
 
-  it("mode 1 ra document.xml y hệt { flagLanguage: vi } cũ", async () => {
+  it("mode 1 ra document.xml y hệt { flagLanguage } cũ theo ngôn ngữ tài liệu; không truyền ⇒ vi", async () => {
     const before = readZipText(await writeDocx(sample, { flagLanguage: "vi" }), "word/document.xml")
-    expect(readZipText(await writeDocx(sample, writerOptionsFor("import", "en")), "word/document.xml")).toBe(before)
+    expect(readZipText(await writeDocx(sample, writerOptionsFor("import")), "word/document.xml")).toBe(before)
+    expect(readZipText(await writeDocx(sample, writerOptionsFor("import", "vi")), "word/document.xml")).toBe(before)
+    const en = readZipText(await writeDocx(sample, { flagLanguage: "en" }), "word/document.xml")
+    expect(readZipText(await writeDocx(sample, writerOptionsFor("import", "en")), "word/document.xml")).toBe(en)
   })
 })

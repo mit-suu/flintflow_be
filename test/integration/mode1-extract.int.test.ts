@@ -82,9 +82,10 @@ describe("mode 1 - trích field (I-4) + xác nhận", () => {
     const spine = (await spineRepository.get(projectId))!
     expect(spine.functions.map((f) => f.trigger)).toEqual(["Learner submits the form", "Learner submits the form"])
     const review = spine.flags.filter((f) => f.rule_id === "import_needs_review" && f.resolved_at === null)
+    // FLF-411 (U2-5): một cờ mỗi phần tử, target = đường dẫn phần tử
     expect(review.filter((f) => f.target_id?.startsWith("functions[")).map((f) => f.target_id).sort()).toEqual([
-      "functions[id=FR-3.2.1].trigger",
-      "functions[id=FR-3.2.2].trigger"
+      "functions[id=FR-3.2.1]",
+      "functions[id=FR-3.2.2]"
     ])
     expect(review.every((f) => f.level === "yellow")).toBe(true)
     // bước xác nhận field không còn

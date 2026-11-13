@@ -293,6 +293,12 @@ describe("Brief giữ tầm nhìn/mục tiêu ở addendum, S-1.1 dựng bản t
     expect(skill("action/apply-change-op")).toContain("brief_core")
   })
 
+  it("FLF-411 (#18): apply-change-op - \"tên hệ thống\" ghi project.system_name, project.name chỉ khi nói tên dự án", () => {
+    const text = skill("action/apply-change-op")
+    expect(text).toContain("`set project.system_name`")
+    expect(text).toContain("tên dự án")
+  })
+
   it("FLF-278: apply-change-op dạy ghi mục riêng của mẫu khách và soạn nháp không bịa, hỏi tối đa 3 câu", () => {
     const text = skill("action/apply-change-op")
     expect(text).toContain("custom_sections[id=…]")

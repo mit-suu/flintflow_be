@@ -39,6 +39,19 @@ export const currentImportFileRef = async (projectId: string): Promise<string | 
 }
 
 /**
+ * FLF-411: part ảnh gốc mà tài liệu được phép in (route `GET /document/image` chỉ trả các part này): ảnh của mục riêng
+ * (`custom_sections[].blocks`) + ảnh trong nguyên văn mục chức năng (`TemplateProfile.function_originals` — vd hình mock-up
+ * mẫu của 3.2.1 trong khung mẫu). Trước đây chỉ có mục riêng ⇒ ảnh nguyên văn chức năng bị 404, FE báo "Không tải được ảnh".
+ */
+export const documentMediaParts = (
+  customSections: readonly { blocks: readonly { kind: string; image_ref?: string | null }[] }[],
+  functionOriginals: readonly { blocks: readonly { kind: string; image_ref?: string | null }[] }[] = []
+): Set<string> =>
+  new Set(
+    [...customSections, ...functionOriginals].flatMap((c) => c.blocks.flatMap((b) => (b.kind === "image" && b.image_ref ? [b.image_ref] : [])))
+  )
+
+/**
  * Part có nhúng được không, đoán theo đuôi — KHÔNG mở file (tải + giải nén .docx gốc từ GridFS mất vài giây). Word đặt
  * đuôi part theo content type (`image3.png`, `image5.emf`), khớp với `imageMime` theo magic bytes. Lệch hiếm gặp (đuôi
  * `.png` mà bytes không phải PNG) chỉ làm route ảnh trả 404 — route vẫn kiểm bytes thật.

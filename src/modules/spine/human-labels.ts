@@ -173,6 +173,33 @@ export const nameElementIds = (text: string, spine: NamedElementSource): string 
   return withoutEcho.replace(new RegExp(`['"‘“]?(?<![\\w.-])(${alt})(?![\\w-]|\\.\\d)['"’”]?`, "g"), (_m, id: string) => quoted(id))
 }
 
+/** Field tên của phần tử, theo thứ tự ưu tiên; phần tử không có tên (quy tắc, thông báo…) thì trích câu chính. */
+const ELEMENT_NAME_FIELDS = ["name", "term", "title"] as const
+const ELEMENT_TEXT_FIELDS = ["statement", "text", "description", "content"] as const
+/** Số ký tự tối đa của câu trích khi phần tử không có tên. */
+const ELEMENT_QUOTE_MAX = 60
+
+const shortQuote = (text: string): string => {
+  const t = text.replace(/\s+/g, " ").trim()
+  return t.length > ELEMENT_QUOTE_MAX ? `${t.slice(0, ELEMENT_QUOTE_MAX).trimEnd()}…` : t
+}
+
+/**
+ * FLF-411 (U2-5): tên phần tử cho câu chữ, không mã nội bộ: `tác nhân "Customer"`, `yêu cầu khác "The system shall…"`,
+ * `use case UC-01` (mã use case là mã tài liệu). `el` = phần tử trong Spine (có thể thiếu); `name` = tên đọc được từ bản
+ * trích (thắng tên trong Spine). Không tên, không câu ⇒ chỉ loại phần tử. Chữ thường ở đầu để đặt giữa câu.
+ */
+export const elementLabel = (entity: string, id: string | null, el?: Record<string, unknown> | null, name?: string | null): string => {
+  if (entity === "project") return ENTITY_LABELS.project
+  const label = (ENTITY_LABELS[entity] ?? "Phần tử").toLowerCase()
+  const text = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null)
+  const own = text(name) ?? ELEMENT_NAME_FIELDS.map((f) => text(el?.[f])).find((x) => x !== null) ?? null
+  if (own) return `${label} "${own}"`
+  if (entity === "use_cases" && id) return `${label} ${id}`
+  const quote = ELEMENT_TEXT_FIELDS.map((f) => text(el?.[f])).find((x) => x !== null)
+  return quote ? `${label} "${shortQuote(quote)}"` : label
+}
+
 // ─── section ─────────────────────────────────────────────────────
 
 const FIXED_BY_ID: ReadonlyMap<string, { number: string; title: string }> = new Map(
