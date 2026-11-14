@@ -1,4 +1,4 @@
-import mongoose, { Schema, Document } from "mongoose"
+import mongoose, { Schema, Document, type MongooseQueryMiddleware, type Query } from "mongoose"
 import { IMPORT_STATUSES, type ImportStatus } from "../import/import.state.js"
 import { USER_LOCALES, type UserLocale } from "../../shared/i18n/locale.js"
 import { DEFAULT_ERD_NOTATION, ERD_NOTATIONS, type ErdNotation } from "../../shared/diagram/erd-notation.js"
@@ -68,6 +68,12 @@ export interface IProject extends Document {
   folderId: mongoose.Types.ObjectId | null
   /** Lần gần nhất user mở dự án (GET /projects/:id) — sắp xếp "Mới mở" trên dashboard. */
   lastOpenedAt: Date | null
+  /**
+   * FLF-401: "Xoá vĩnh viễn" ở FE chỉ xoá mềm — đánh dấu thời điểm + người xoá, dữ liệu giữ nguyên. Mọi truy vấn `Project`
+   * tự bỏ dự án có `deletedAt` (middleware bên dưới); cần thấy cả dự án đã xoá ⇒ `.setOptions(WITH_DELETED)`.
+   */
+  deletedAt?: Date | null
+  deletedBy?: mongoose.Types.ObjectId | null
   // Nội dung, tiến độ, baseline đều nằm ở Spine (modules/spine) — Project chỉ giữ metadata danh sách.
   createdAt: Date
   updatedAt: Date
@@ -192,10 +198,50 @@ const projectSchema = new Schema<IProject>(
     lastOpenedAt: {
       type: Date,
       default: null
+    },
+    deletedAt: {
+      type: Date,
+      default: null
+    },
+    deletedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null
     }
   },
   { timestamps: true }
 )
+
+/** FLF-401: option truy vấn để thấy cả dự án đã xoá mềm (xoá tổ chức dọn dữ liệu, tên dự án trong lịch sử thanh toán). */
+export const WITH_DELETED = Object.freeze({ withDeleted: true })
+
+/**
+ * FLF-401: dự án đã xoá mềm không đọc / sửa / đếm được ở bất cứ đâu — mọi lối truy cập (`getProjectById`, danh sách, thư mục,
+ * quota, thống kê, đọc theo id bên trong luồng) đi qua đây. Bộ lọc tự đặt `deletedAt` thì giữ nguyên.
+ */
+const QUERY_OPS = [
+  "find",
+  "findOne",
+  "countDocuments",
+  "updateOne",
+  "updateMany",
+  "findOneAndUpdate",
+  "findOneAndDelete",
+  "findOneAndReplace",
+  "replaceOne",
+  "deleteOne",
+  "deleteMany",
+  "distinct"
+] as const satisfies readonly MongooseQueryMiddleware[]
+// `deleteOne` có cả middleware document lẫn query — chỉ gắn vào query
+projectSchema.pre([...QUERY_OPS], { document: false, query: true }, function (this: Query<unknown, unknown>) {
+  if ((this.getOptions() as { withDeleted?: boolean }).withDeleted) return
+  if (!Object.prototype.hasOwnProperty.call(this.getFilter(), "deletedAt")) this.where({ deletedAt: null })
+})
+projectSchema.pre("aggregate", function () {
+  if ((this.options as { withDeleted?: boolean }).withDeleted) return
+  this.pipeline().unshift({ $match: { deletedAt: null } })
+})
 
 // Compound Index for dashboard list queries (UC06)
 projectSchema.index({ userId: 1, status: 1 })

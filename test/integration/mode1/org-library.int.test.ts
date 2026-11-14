@@ -144,5 +144,11 @@ describe("FLF-278 - mẫu và thư viện nội dung của tổ chức (luồng 
     const gaps = await request(app).get("/api/v1/admin/template-gaps?limit=5").set(H(admin))
     expect(gaps.status, JSON.stringify(gaps.body.error)).toBe(200)
     expect(gaps.body.data.rows).toEqual([{ key: "document conventions", samples: ["7 Document Conventions"], projects: 1, empty: 1, suggested_destination: null }])
+    // FLF-404: phân trang sau khi gom — trang vượt quá thì rỗng, meta vẫn đếm toàn bộ
+    expect(gaps.body.meta).toEqual({ page: 1, limit: 5, total: 1, totalPages: 1 })
+    const beyond = await request(app).get("/api/v1/admin/template-gaps?page=2&limit=5").set(H(admin))
+    expect(beyond.body.data.rows).toEqual([])
+    expect(beyond.body.data.projects).toBe(1)
+    expect(beyond.body.meta.total).toBe(1)
   })
 })
