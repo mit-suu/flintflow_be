@@ -1,7 +1,8 @@
 import mongoose, { Schema, Document, type MongooseQueryMiddleware, type Query } from "mongoose"
 import { IMPORT_STATUSES, type ImportStatus } from "../import/import.state.js"
 import { USER_LOCALES, type UserLocale } from "../../shared/i18n/locale.js"
-import { DEFAULT_ERD_NOTATION, ERD_NOTATIONS, type ErdNotation } from "../../shared/diagram/erd-notation.js"
+import { ERD_NOTATIONS, type ErdNotation } from "../../shared/diagram/erd-notation.js"
+import { SEQUENCE_LEVELS, type SequenceLevel } from "../../shared/diagram/sequence-level.js"
 import { SCREEN_MOCKUP_MODES, SCREEN_PLATFORMS, type ScreenMockupState, type ScreenTheme } from "../../shared/diagram/screen-theme.js"
 
 export type ProjectStatus = "active" | "archived"
@@ -55,8 +56,13 @@ export interface IProject extends Document {
    * ⇒ đọc qua `documentLanguageOf` (`document-language.ts`), đừng đọc thẳng.
    */
   documentLanguage?: UserLocale
-  /** Ký pháp ERD của cả tài liệu (§3.1.5): `chen` | `crowsfoot` | `idef1x`. Không nằm trong Spine; dự án cũ chưa có field đọc là `chen` (mặc định schema). */
-  erdNotation: ErdNotation
+  /**
+   * Ký pháp ERD của cả tài liệu (§3.1.5): `chen` | `crowsfoot` | `idef1x`. Không nằm trong Spine. FLF-418: không default — thiếu
+   * field = chưa chọn (S-4.5 hỏi trong khung chat); khi vẽ đọc qua `erdNotationOf` (thiếu ⇒ `chen`), đừng đọc thẳng.
+   */
+  erdNotation?: ErdNotation
+  /** FLF-418: mức Sequence Diagram `system` | `component`. Không default (thiếu = chưa chọn, S-5.4 lần đầu hỏi); đọc qua `sequenceLevelOf`. */
+  sequenceLevel?: SequenceLevel
   /**
    * Theme mockup §3.x.y Screen Layout (FLF-410): màu chính, domain, nền tảng. Không nằm trong Spine; đọc qua `screenThemeOf`
    * (`shared/diagram/screen-theme.ts`). Field null = chưa chọn ⇒ mặc định / suy từ `form_factor`.
@@ -160,10 +166,14 @@ const projectSchema = new Schema<IProject>(
       type: String,
       enum: [...USER_LOCALES]
     },
+    // FLF-418: KHÔNG default — thiếu field = người dùng chưa chọn; giá trị khi vẽ suy ra ở `erdNotationOf`
     erdNotation: {
       type: String,
-      enum: [...ERD_NOTATIONS],
-      default: DEFAULT_ERD_NOTATION
+      enum: [...ERD_NOTATIONS]
+    },
+    sequenceLevel: {
+      type: String,
+      enum: [...SEQUENCE_LEVELS]
     },
     screenTheme: {
       type: new Schema(

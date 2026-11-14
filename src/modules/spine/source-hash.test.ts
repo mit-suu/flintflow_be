@@ -116,8 +116,8 @@ describe("renderedDiagramHash - hash của hình đã vẽ theo engine (FLF-339)
     const context = targets[0]
     expect(renderedDiagramHash(FIXTURE, context, svgContext)).not.toBe(renderedDiagramHash(FIXTURE, context))
     // kind không đổi engine ⇒ hash giữ nguyên
-    const sequence = { kind: "sequence" as const, owner_id: FIXTURE.functions[0].id }
-    expect(renderedDiagramHash(FIXTURE, sequence, svgContext)).toBe(computeSourceHash(FIXTURE, sequence))
+    const deployment = { kind: "deployment" as const, owner_id: null }
+    expect(renderedDiagramHash(FIXTURE, deployment, svgContext)).toBe(computeSourceHash(FIXTURE, deployment))
     expect(originalDiagramHash(FIXTURE, "context")).toBe(computeSourceHash(FIXTURE, context))
     // vẫn theo dữ liệu: sửa tên actor làm hình svg cũ
     const renamed = mutate((s) => (s.actors[0].name = "Renamed"))
@@ -172,8 +172,13 @@ describe("renderedDiagramHash - usecase", () => {
   it("bộ xếp thử nhiều phương án (svg@2) làm hình use case svg@1 cũ thành stale", () => {
     const usecase = { kind: "usecase" as const, owner_id: null }
     expect(DIAGRAM_ENGINES.context).toBe("svg@2")
-    expect(DIAGRAM_ENGINES.usecase).toBe("svg@2")
+    expect(DIAGRAM_ENGINES.usecase).toBe("svg@3")
     expect(renderedDiagramHash(FIXTURE, usecase)).not.toBe(renderedDiagramHash(FIXTURE, usecase, { ...DIAGRAM_ENGINES, usecase: "svg@1" }))
+  })
+
+  it("FLF-421: phân cấp actor nối kiểu cây (svg@3) làm hình use case svg@2 cũ thành stale", () => {
+    const usecase = { kind: "usecase" as const, owner_id: null }
+    expect(renderedDiagramHash(FIXTURE, usecase)).not.toBe(renderedDiagramHash(FIXTURE, usecase, { ...DIAGRAM_ENGINES, usecase: "svg@2" }))
   })
 })
 
@@ -198,5 +203,35 @@ describe("renderedDiagramHash - screen_flow theo template FPT", () => {
     expect(sharedScreenIds(widened)).not.toEqual(shared)
     expect(computeSourceHash(widened, flow)).toBe(computeSourceHash(FIXTURE, flow))
     expect(renderedDiagramHash(widened, flow)).not.toBe(renderedDiagramHash(FIXTURE, flow))
+  })
+})
+
+describe("renderedDiagramHash - sequence theo mức của dự án (FLF-418)", () => {
+  const target = { kind: "sequence" as const, owner_id: "FN001" }
+  const withComponent = mutate((s) => {
+    s.functions.find((f) => f.id === "FN001")!.component_interactions = [
+      { from: "A01", to: "S01", message: "Submit email and password", kind: "request", flow: "normal" },
+      { from: "S01", to: "control", message: "Authenticate credentials", kind: "request", flow: "normal" }
+    ]
+  })
+
+  it("engine plantuml@2: hình plantuml@1 cũ stale một lượt; thiếu mức = system", () => {
+    expect(DIAGRAM_ENGINES.sequence).toBe("plantuml@2")
+    expect(renderedDiagramHash(FIXTURE, target)).not.toBe(computeSourceHash(FIXTURE, target))
+    expect(renderedDiagramHash(FIXTURE, target, DIAGRAM_ENGINES, {})).toBe(renderedDiagramHash(FIXTURE, target, DIAGRAM_ENGINES, { sequenceLevel: "system" }))
+  })
+
+  it("đổi mức ⇒ hash đổi; mức system không phụ thuộc component_interactions; mức component theo dữ liệu thành phần + tên feature", () => {
+    const system = { sequenceLevel: "system" as const }
+    const component = { sequenceLevel: "component" as const }
+    expect(renderedDiagramHash(withComponent, target, DIAGRAM_ENGINES, component)).not.toBe(renderedDiagramHash(withComponent, target, DIAGRAM_ENGINES, system))
+    expect(renderedDiagramHash(withComponent, target, DIAGRAM_ENGINES, system)).toBe(renderedDiagramHash(FIXTURE, target, DIAGRAM_ENGINES, system))
+    const renamedFeature = structuredClone(withComponent)
+    renamedFeature.features.find((f) => f.id === "F1")!.name = "Sign In"
+    expect(renderedDiagramHash(renamedFeature, target, DIAGRAM_ENGINES, component)).not.toBe(renderedDiagramHash(withComponent, target, DIAGRAM_ENGINES, component))
+  })
+
+  it("hash dữ liệu (ảnh gốc import) không đổi theo mức", () => {
+    expect(computeSourceHash(withComponent, target)).toBe(computeSourceHash(FIXTURE, target))
   })
 })

@@ -1,8 +1,8 @@
 ---
 skill_id: function-detail
 kind: content
-version: 0.3.0
-description: "S-5.2 and S-5.4 per screen - trigger, description, normal/abnormal flows, validations, actor-system interactions (<= 6 functions per call)"
+version: 0.4.0
+description: "S-5.2 and S-5.4 per screen - trigger, description, normal/abnormal flows, validations, actor-system interactions, component interactions when the project draws component-level sequence diagrams (<= 6 functions per call)"
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 6144
@@ -16,6 +16,7 @@ reads:
   - "permissions[]"
   - "business_rules[]"
   - "messages[]"
+  - "entities[]"
 writes:
   - "functions[]"
   - "screens[]"
@@ -111,6 +112,15 @@ AND (a `system`/`time` actor takes part, OR a message is abnormal or guarded, OR
   flow: the diagram draws them as an `alt` branch and the normal rest as its `else`. A `normal` message with a `guard`
   is optional ("include appendix is selected"). Reuse the sentences of `abnormal[]`; no extra behaviour.
 
+**`component_interactions[]`** - only when the projection has `sequence_level: "component"`, and only for functions that
+get `interactions` (same condition). Same element shape and the same `kind` / `flow` / `guard` / ordering rules, one `set`
+of the whole array, but the ends are the parts inside the system (Visual Paradigm boundary / control / entity):
+- an actor id (as in `interactions`), the function's own screen id (boundary; none for `@nonscreen` - the actor calls
+  `control` directly), the literal `control` (one controller per function, never named), or an entity id from the
+  projected `entities` (the function's feature only). No `system` end.
+- Typical path: actor → screen → `control` → entity, then the responses back the same way. An actor never talks to an
+  entity directly; only `control` may call itself ("Validate input"). Messages stay plain words, no method names.
+
 ## Rules
 
 1. Only ids in the projection; `set` on existing fields of a function - never `add` a new `functions[]`
@@ -139,6 +149,7 @@ AND (a `system`/`time` actor takes part, OR a message is abnormal or guarded, OR
 ## Self-check
 
 - [ ] `interactions`: only where needed, one `set` of the array, one end of each message is `system`, first is a normal request, abnormal ones guarded and before the rest of the normal flow.
+- [ ] `component_interactions`: only with `sequence_level: "component"`; ends are actor / own screen / `control` / feature entity; actor never ↔ entity.
 
 - [ ] Ops only for function ids present in this batch's projection.
 - [ ] Every function has a one-sentence `trigger` naming actor + place (or event + cadence).

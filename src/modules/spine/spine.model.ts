@@ -259,6 +259,8 @@ const functionSchema = new Schema(
     business_rule_ids: { type: [String], default: [] },
     priority,
     interactions: { type: [functionInteractionSchema], default: undefined },
+    // FLF-418: sơ đồ tuần tự mức thành phần — cùng hình dạng message
+    component_interactions: { type: [functionInteractionSchema], default: undefined },
     // FLF-365: bản phát hành (phân bổ yêu cầu) — thiếu = chưa phân bổ
     release: { type: String, default: undefined }
   },

@@ -6,7 +6,7 @@ import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { templateCurrentOf, templateUpdateOf } from "../import/template-update.js"
-import type { CreateProjectDTO, DisableScreenMockupsDTO, MoveProjectDTO, RunScreenMockupsDTO, UpdateDocumentLanguageDTO, UpdateErdNotationDTO, UpdateScreenThemeDTO } from "./project.validation.js"
+import type { CreateProjectDTO, DisableScreenMockupsDTO, MoveProjectDTO, RunScreenMockupsDTO, UpdateDocumentLanguageDTO, UpdateErdNotationDTO, UpdateScreenThemeDTO, UpdateSequenceLevelDTO } from "./project.validation.js"
 import { ListProjectsQuerySchema, ScreenMockupsQuerySchema } from "./project.validation.js"
 import { validationError } from "../../shared/utils/validation-message.js"
 import * as screenMockupService from "../diagram/screen-mockup.service.js"
@@ -119,6 +119,18 @@ export const setErdNotation = catchAsync(async (req: Request, res: Response) => 
 
   const { erdNotation } = req.body as UpdateErdNotationDTO
   const project = await projectService.setErdNotation(req.params.projectId as string, requireOrgId(req), erdNotation, userId)
+  return sendSuccess(res, 200, project)
+})
+
+/** Đổi mức Sequence Diagram (FLF-418) — body đã qua `UpdateSequenceLevelSchema` (strict); sơ đồ đã vẽ được vẽ lại ngay theo mức mới. */
+export const setSequenceLevel = catchAsync(async (req: Request, res: Response) => {
+  const userId = req.user?.userId
+  if (!userId) {
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
+  }
+
+  const { sequenceLevel } = req.body as UpdateSequenceLevelDTO
+  const project = await projectService.setSequenceLevel(req.params.projectId as string, requireOrgId(req), sequenceLevel, userId)
   return sendSuccess(res, 200, project)
 })
 
