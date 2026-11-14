@@ -246,7 +246,7 @@ export const executeAiAction = async <T = any>(
   let widenOutput = false
 
   try {
-    const result = await executeWithInRequestRetry(async (attempt) => {
+    const { llmRes, parsedData, tokensUsed, latencyMs } = await executeWithInRequestRetry(async (attempt) => {
       const startTime = Date.now()
 
       try {
@@ -311,57 +311,55 @@ export const executeAiAction = async <T = any>(
           completionTokens: llmRes.completionTokens + discardedTokens.completionTokens
         }
         const latencyMs = Date.now() - startTime
-
-        // Success: Deduct Credit (chỉ sau khi parse thành công)
-        if (!deducted) {
-          settledCost = await deductCredit(reservation, undefined, { tokensIn: tokensUsed.promptTokens, tokensOut: tokensUsed.completionTokens })
-          deducted = true
-        }
-
-        // Create success log
-        const logDoc = await AiActionLog.create({
-          projectId: projectId ? new mongoose.Types.ObjectId(projectId) : null,
-          userId: new mongoose.Types.ObjectId(userId),
-          actionType,
-          provider: providerConfig.provider,
-          // Model thật sự trả lời — khác model của skill khi Gemini đã chuyển sang model dự phòng
-          aiModel: llmRes.model ?? providerConfig.model,
-          status: "success",
-          promptTokens: llmRes.promptTokens,
-          completionTokens: llmRes.completionTokens,
-          latencyMs,
-          retryOfLogId: options.parentLogId ? new mongoose.Types.ObjectId(options.parentLogId) : null
-        })
-
-        currentLogId = logDoc._id.toString()
-        await capturePayload({
-          logId: currentLogId,
-          projectId,
-          userId,
-          actionType: String(actionType),
-          prompt: finalPrompt,
-          response: llmRes.text
-        })
-
-        return {
-          success: true,
-          data: parsedData,
-          rawText: llmRes.text,
-          actionType: actionType as ActionType,
-          provider: providerConfig.provider,
-          aiModel: llmRes.model ?? providerConfig.model,
-          tokensUsed: { ...tokensUsed, totalTokens: tokensUsed.promptTokens + tokensUsed.completionTokens },
-          latencyMs,
-          logId: currentLogId,
-          cost: settledCost
-        }
+        return { llmRes, parsedData, tokensUsed, latencyMs }
       } catch (error: any) {
         console.error(`[executeAiAction] Attempt ${attempt + 1} failed for action '${actionType}':`, error.message)
         throw error
       }
     })
 
-    return result
+    // Success: Deduct Credit & ghi log NGOÀI vòng retry (lỗi sổ cái / ghi log không bao giờ gọi lại LLM)
+    if (!deducted) {
+      settledCost = await deductCredit(reservation, undefined, { tokensIn: tokensUsed.promptTokens, tokensOut: tokensUsed.completionTokens })
+      deducted = true
+    }
+
+    const logDoc = await AiActionLog.create({
+      projectId: projectId ? new mongoose.Types.ObjectId(projectId) : null,
+      userId: new mongoose.Types.ObjectId(userId),
+      actionType,
+      provider: providerConfig.provider,
+      // Model thật sự trả lời — khác model của skill khi Gemini đã chuyển sang model dự phòng
+      aiModel: llmRes.model ?? providerConfig.model,
+      status: "success",
+      promptTokens: llmRes.promptTokens,
+      completionTokens: llmRes.completionTokens,
+      latencyMs,
+      retryOfLogId: options.parentLogId ? new mongoose.Types.ObjectId(options.parentLogId) : null
+    })
+
+    currentLogId = logDoc._id.toString()
+    await capturePayload({
+      logId: currentLogId,
+      projectId,
+      userId,
+      actionType: String(actionType),
+      prompt: finalPrompt,
+      response: llmRes.text
+    })
+
+    return {
+      success: true,
+      data: parsedData,
+      rawText: llmRes.text,
+      actionType: actionType as ActionType,
+      provider: providerConfig.provider,
+      aiModel: llmRes.model ?? providerConfig.model,
+      tokensUsed: { ...tokensUsed, totalTokens: tokensUsed.promptTokens + tokensUsed.completionTokens },
+      latencyMs,
+      logId: currentLogId,
+      cost: settledCost
+    }
   } catch (finalError: any) {
     // Step 4: On Error -> Release Credit (chỉ khi chưa trừ) & Record Failed Log
     if (!deducted) {

@@ -26,6 +26,8 @@ export interface ICreditTransaction extends Document {
   projectId?: mongoose.Types.ObjectId | null
   actionType: string
   amount: number
+  /** Chiều cộng/trừ tường minh cho `admin_adjust` (amount luôn lưu trị tuyệt đối). */
+  direction?: "credit" | "debit" | null
   type: CreditTransactionType
   balanceAfter: number
   state?: CreditReservationState
@@ -78,6 +80,11 @@ const creditTransactionSchema = new Schema<ICreditTransaction>(
     amount: {
       type: Number,
       required: true
+    },
+    direction: {
+      type: String,
+      enum: ["credit", "debit"],
+      default: null
     },
     type: {
       type: String,

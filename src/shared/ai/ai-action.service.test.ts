@@ -17,16 +17,22 @@ vi.mock("./providers/llm.router.js", () => ({ callLLM: vi.fn() }))
 vi.mock("./providers/ai-sdk.provider.js", () => ({ getAiSdkModel: vi.fn(() => ({})) }))
 vi.mock("ai", () => ({ streamText: vi.fn() }))
 vi.mock("./response-parser.js", () => ({ parseResponse: vi.fn() }))
+const retryState = vi.hoisted(() => ({ active: false }))
 // Chạy đúng một lần: test hành vi credit, không test backoff của retry — trừ lượt bị cắt (`RESPONSE_TRUNCATED`): BR-09 thử
 // lại 2 lần, mô phỏng ở đây không chờ (FLF-393)
 vi.mock("./retry.service.js", () => ({
   executeWithInRequestRetry: async (fn: (attempt: number) => Promise<unknown>) => {
-    for (let attempt = 0; ; attempt++) {
-      try {
-        return await fn(attempt)
-      } catch (error) {
-        if (attempt >= 2 || (error as { code?: string }).code !== "RESPONSE_TRUNCATED") throw error
+    retryState.active = true
+    try {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await fn(attempt)
+        } catch (error) {
+          if (attempt >= 2 || (error as { code?: string }).code !== "RESPONSE_TRUNCATED") throw error
+        }
       }
+    } finally {
+      retryState.active = false
     }
   }
 }))
@@ -131,6 +137,45 @@ describe("executeAiAction - thứ tự parse → deduct", () => {
 
     expect(deductCredit).not.toHaveBeenCalled()
     expect(releaseCredit).toHaveBeenCalledTimes(1)
+  })
+
+  it("deductCredit ném CREDIT_LEDGER_INCONSISTENT: quyết toán nằm ngoài vòng retry, gọi LLM đúng 1 lần và releaseCredit", async () => {
+    vi.mocked(parseResponse).mockReturnValue({ ok: true })
+    let deductInsideRetry: boolean | null = null
+    vi.mocked(deductCredit).mockImplementation(async () => {
+      deductInsideRetry = retryState.active
+      throw new AiActionError(500, "Sổ cái lệch", "CREDIT_LEDGER_INCONSISTENT")
+    })
+
+    await expect(executeAiAction(ActionType.DRAFT, {}, undefined, USER)).rejects.toMatchObject({
+      code: "CREDIT_LEDGER_INCONSISTENT"
+    })
+
+    expect(deductInsideRetry).toBe(false)
+    expect(callLLM).toHaveBeenCalledTimes(1)
+    expect(deductCredit).toHaveBeenCalledTimes(1)
+    expect(releaseCredit).toHaveBeenCalledTimes(1)
+    expect(logDocs().some((doc) => doc.status === "failed")).toBe(true)
+  })
+
+  it("deduct thành công rồi ghi log lỗi 500: chạy ngoài vòng retry, không gọi lại LLM và không release", async () => {
+    vi.mocked(parseResponse).mockReturnValue({ ok: true })
+    let logInsideRetry: boolean | null = null
+    vi.mocked(AiActionLog.create)
+      .mockImplementationOnce(async () => {
+        logInsideRetry = retryState.active
+        throw new AiActionError(500, "Mongo error", "LOG_WRITE_FAILED")
+      })
+      .mockResolvedValue({ _id: "log-failed" } as any)
+
+    await expect(executeAiAction(ActionType.DRAFT, {}, undefined, USER)).rejects.toMatchObject({
+      code: "LOG_WRITE_FAILED"
+    })
+
+    expect(logInsideRetry).toBe(false)
+    expect(callLLM).toHaveBeenCalledTimes(1)
+    expect(deductCredit).toHaveBeenCalledTimes(1)
+    expect(releaseCredit).not.toHaveBeenCalled()
   })
 })
 

@@ -50,7 +50,8 @@
     "eval:knowledge": "tsx src/scripts/eval-knowledge.ts",
     "eval:import-match": "tsx src/scripts/eval-import-match.ts",
     "eval:doc-retrieval": "tsx src/scripts/eval-doc-retrieval.ts",
-    "seed:e2e-user": "tsx src/scripts/seed-e2e-user.ts"
+    "seed:e2e-user": "tsx src/scripts/seed-e2e-user.ts",
+    "seed:e2e-billing": "tsx src/scripts/seed-e2e-billing.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.117",

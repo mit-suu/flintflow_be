@@ -16,6 +16,7 @@ import { fulfillTopupRequests } from "../../src/modules/billing/topup-request.se
 import { ChangeRequest } from "../../src/modules/change-request/change-request.model.js"
 import { ImportedDocument } from "../../src/modules/import/imported-document.model.js"
 import { StepRun } from "../../src/modules/pipeline/run-state.model.js"
+import { Spine } from "../../src/modules/spine/spine.model.js"
 
 const joinOrg = async (orgId: string, role: "lead" | "analyst") => {
   const email = `${role}-${Date.now()}-${Math.random().toString(16).slice(2)}@flintflow.test`
@@ -235,5 +236,185 @@ describe("POST /billing/topup-request", () => {
     expect(await fulfillTopupRequests(seeded.orgId, 60, { kind: "payment", userId: seeded.userId })).toBe(1)
     await notificationsOf(activeAnalyst.id, "credit_topped_up", 1)
     expect(await Notification.countDocuments({ userId: { $in: [demoted.id, removed.id] }, type: "credit_topped_up" })).toBe(0)
+  })
+
+  it("bỏ qua dự án archived và bỏ qua StepRun không còn tác dụng (đã accept/skip, placeholder loop, dự án convert FPT->import, phase interview đã vượt qua)", async () => {
+    const seeded = await seedFixture("minimal")
+    const archivedAuthor = await joinOrg(seeded.orgId, "analyst")
+    const acceptedAuthor = await joinOrg(seeded.orgId, "analyst")
+    const bypassedByRunAuthor = await joinOrg(seeded.orgId, "analyst")
+    const bypassedByDecisionAuthor = await joinOrg(seeded.orgId, "analyst")
+    const convertedAuthor = await joinOrg(seeded.orgId, "analyst")
+    const activePhaseAuthor = await joinOrg(seeded.orgId, "analyst")
+
+    const t0 = new Date("2026-11-14T10:00:00.000Z")
+    const t1 = new Date("2026-11-14T10:05:00.000Z")
+
+    // 1. Dự án archived có cả ChangeRequest + StepRun paused -> phải bị bỏ qua
+    const archivedProject = await Project.create({
+      userId: archivedAuthor.id,
+      organizationId: seeded.orgId,
+      name: "Archived Project",
+      mode: "fpt",
+      status: "archived"
+    })
+    await ChangeRequest.create({
+      projectId: archivedProject._id,
+      cr_id: "CR-002",
+      title: "Archived CR",
+      description: "Ignored",
+      source: { kind: "stakeholder_email", ref: null, note: null },
+      requester: "PM",
+      status: "proposing",
+      paused: { reason: "credits", at: t0 },
+      base_doc_version: "1.0",
+      created_by: new mongoose.Types.ObjectId(archivedAuthor.id)
+    })
+
+    // 2. Dự án đã convert từ mode 2 -> mode 1 còn sót StepRun mode 2 -> phải bị bỏ qua
+    const convertedProject = await Project.create({
+      userId: convertedAuthor.id,
+      organizationId: seeded.orgId,
+      name: "Converted Project",
+      mode: "import",
+      converted_from: "fpt",
+      status: "active"
+    })
+
+    // 3. Dự án active thứ 2 có Spine với B-1 decision đã chốt & S-3.1 accepted & SCR-PH placeholder
+    const bypassedDecisionProject = await Project.create({
+      userId: bypassedByDecisionAuthor.id,
+      organizationId: seeded.orgId,
+      name: "Decision Bypassed Project",
+      mode: "fpt",
+      status: "active"
+    })
+    await Spine.create({
+      projectId: bypassedDecisionProject._id,
+      screens: [{ id: "SCR-PH", feature_id: "F1", name: "Placeholder", detail_status: "placeholder" }],
+      steps: [
+        { id: "S-3.1", status: "accepted", first_seq: 1, last_seq: 1, accepted_at: t1 },
+        { id: "S-3.2", status: "skipped", first_seq: null, last_seq: null, accepted_at: null }
+      ],
+      decisions: [
+        { id: "D1", topic_key: "scope", question: "Q", answer: "A", step_id: "B-1", at: t1.toISOString(), superseded_by: null }
+      ]
+    })
+
+    // 4. Dự án active thứ 3 (dùng cho phase B-1 bị vượt qua bởi sub-step B-1.1 mới hơn, và B-2 vẫn đang dừng thật)
+    const activePhaseProject = await Project.create({
+      userId: activePhaseAuthor.id,
+      organizationId: seeded.orgId,
+      name: "Active Phase Project",
+      mode: "fpt",
+      status: "active"
+    })
+
+    await StepRun.create([
+      {
+        projectId: archivedProject._id,
+        step_id: "S-3.1",
+        run_id: "r-arch",
+        by: archivedAuthor.id,
+        status: "interrupted",
+        stage: "draft",
+        started_at: t0,
+        last_event_at: t0,
+        locked_until: t0,
+        error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit" }
+      },
+      {
+        projectId: convertedProject._id,
+        step_id: "S-3.1",
+        run_id: "r-conv",
+        by: convertedAuthor.id,
+        status: "interrupted",
+        stage: "draft",
+        started_at: t0,
+        last_event_at: t0,
+        locked_until: t0,
+        error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit" }
+      },
+      {
+        projectId: bypassedDecisionProject._id,
+        step_id: "S-3.1",
+        run_id: "r-acc",
+        by: acceptedAuthor.id,
+        status: "interrupted",
+        stage: "draft",
+        started_at: t0,
+        last_event_at: t0,
+        locked_until: t0,
+        error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit" }
+      },
+      {
+        projectId: bypassedDecisionProject._id,
+        step_id: "S-5.1@SCR-PH",
+        run_id: "r-ph",
+        by: acceptedAuthor.id,
+        status: "interrupted",
+        stage: "draft",
+        started_at: t0,
+        last_event_at: t0,
+        locked_until: t0,
+        error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit" }
+      },
+      {
+        projectId: bypassedDecisionProject._id,
+        step_id: "B-1",
+        run_id: "r-dec",
+        by: bypassedByDecisionAuthor.id,
+        status: "interrupted",
+        stage: "ask",
+        started_at: t0,
+        last_event_at: t0,
+        locked_until: t0,
+        error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit" }
+      },
+      {
+        projectId: activePhaseProject._id,
+        step_id: "B-1",
+        run_id: "r-b1-old",
+        by: bypassedByRunAuthor.id,
+        status: "interrupted",
+        stage: "ask",
+        started_at: t0,
+        last_event_at: t0,
+        locked_until: t0,
+        error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit" }
+      },
+      {
+        projectId: activePhaseProject._id,
+        step_id: "B-1.1",
+        run_id: "r-b1-sub",
+        by: bypassedByRunAuthor.id,
+        status: "done",
+        stage: "gate",
+        started_at: t1,
+        last_event_at: t1,
+        locked_until: t1
+      },
+      {
+        projectId: activePhaseProject._id,
+        step_id: "B-2",
+        run_id: "r-b2-real",
+        by: activePhaseAuthor.id,
+        status: "interrupted",
+        stage: "ask",
+        started_at: t0,
+        last_event_at: t0,
+        locked_until: t0,
+        error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit" }
+      }
+    ])
+
+    expect(await fulfillTopupRequests(seeded.orgId, 100, { kind: "payment", userId: seeded.userId })).toBe(1)
+    await notificationsOf(activePhaseAuthor.id, "credit_topped_up", 1)
+    expect(
+      await Notification.countDocuments({
+        userId: { $in: [archivedAuthor.id, acceptedAuthor.id, bypassedByRunAuthor.id, bypassedByDecisionAuthor.id, convertedAuthor.id] },
+        type: "credit_topped_up"
+      })
+    ).toBe(0)
   })
 })
