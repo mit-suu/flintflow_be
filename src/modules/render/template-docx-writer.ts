@@ -222,9 +222,10 @@ export async function writeTemplateDocx(
     const printedImages = slot.sections.reduce((n, s) => n + s.blocks.filter((b) => b.type === "image").length, 0)
     // Dự án có sẵn: đoạn có field / bookmark / công thức (chú thích hình "Figure {SEQ}", tham chiếu chéo…) giữ nguyên tại chỗ
     const preserved = new Set<Element>(sourceMode ? (pictures.length > printedImages ? opaque : opaque.filter((n) => !isPictureOnly(n))) : [])
-    // FLF-413: hình dưới heading khung của mẫu (`3.2.1 <<Function Name 1>>`) là hình mẫu ("Manage Products") — bỏ khi lấp khung
-    const samplePictures = sourceOptions.stripTemplateText && frameSlots.includes(slot)
-    if (!sourceMode && (opaque.length > pictures.length || (!samplePictures && pictures.length > printedImages))) unavailable(`Source objects or fields cannot be safely replaced below ${slot.block_id}`)
+    // FLF-419: file là khung mẫu (dự án mới) ⇒ ảnh / OLE nhúng dưới heading là hình mẫu (ERD mẫu của Report3 là OLE) — bỏ khi mục có
+    // nội dung thật; field / sdt / công thức / bookmark lạ vẫn không xoá
+    const templateSamples = sourceOptions.stripTemplateText && !sourceMode
+    if (templateSamples ? opaque.some((n) => !isSampleObject(n)) : !sourceMode && (opaque.length > pictures.length || pictures.length > printedImages)) unavailable(`Source objects or fields cannot be safely replaced below ${slot.block_id}`)
     const replaceable = slot.nodes.map((node, index) => isW(node, "tbl") || (isW(node, "p") && !isLayoutParagraph(node)) ? index : -1).filter((index) => index >= 0)
     if (slot.nodes.some((node, index) => isW(node, "p") && isLayoutParagraph(node) && index > replaceable[0] && index < replaceable[replaceable.length - 1])) {
       if (sourceMode) { skipSlot(slot, "nội dung vắt qua ngắt section"); continue }
@@ -509,6 +510,13 @@ const isLayoutParagraph = (p: Element): boolean => wAll(p, "sectPr").length > 0 
 const isPictureOnly = (p: Element): boolean =>
   (wAll(p, "drawing").length > 0 || wAll(p, "pict").length > 0)
   && !["object", "fldSimple", "fldChar", "instrText", "sdt"].some((name) => wAll(p, name).length > 0)
+  && p.getElementsByTagNameNS("http://schemas.openxmlformats.org/officeDocument/2006/math", "oMath").length === 0
+  && !wAll(p, "bookmarkStart").some((b) => !/^_ff(?:t)?_B\d+$/.test(wAttr(b, "name") ?? ""))
+
+/** FLF-419: đoạn chỉ chứa ảnh / đối tượng nhúng (OLE) — không field, sdt, công thức, bookmark lạ. */
+const isSampleObject = (p: Element): boolean =>
+  ["drawing", "pict", "object"].some((name) => wAll(p, name).length > 0)
+  && !["fldSimple", "fldChar", "instrText", "sdt"].some((name) => wAll(p, name).length > 0)
   && p.getElementsByTagNameNS("http://schemas.openxmlformats.org/officeDocument/2006/math", "oMath").length === 0
   && !wAll(p, "bookmarkStart").some((b) => !/^_ff(?:t)?_B\d+$/.test(wAttr(b, "name") ?? ""))
 
