@@ -58,6 +58,7 @@ import type { ScreenMockupState } from "../../shared/diagram/screen-theme.js"
 import { bindFixedTemplateSlots, isContentSlot, slotParents } from "../import/content-slots.js"
 import { isInstructionText, isRealText, splitInstruction, tableBodyHasRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
 import { templateWrapperIds } from "../import/template-wrappers.js"
+import { useCaseDisplayIds } from "./usecase-display-ids.js"
 
 /** Một mục layout (cùng hình `LayoutEntry` của `import/template-profile.model.ts`). */
 export interface TemplateLayoutEntry {
@@ -141,6 +142,11 @@ export interface TemplateLayout {
    * xuống cuối tài liệu (cùng mục con / phần nối của nó). Không có ⇒ giữ đúng thứ tự file.
    */
   moveToEnd?: readonly string[]
+  /**
+   * FLF-420: mã use case do FlintFlow cấp (file nền là khung mẫu, chế độ 3) ⇒ in mã liên tục theo thứ tự. File khách đã viết (mã
+   * của khách) hoặc không rõ loại ⇒ không đặt, in nguyên id.
+   */
+  relabelUseCases?: boolean
 }
 
 export interface SectionSliceView {
@@ -801,6 +807,7 @@ export const buildLayoutSections = (
     sl.items.forEach((k) => set.add(k))
     claimed.set(sl.section_id, set)
   }
+  const useCaseIds = template.relabelUseCases ? useCaseDisplayIds(spine) : undefined
   const contextFor = (sectionId: string, number: string): SectionRenderContext => {
     const state = stateById.get(sectionId)
     return {
@@ -808,6 +815,7 @@ export const buildLayoutSections = (
       diagramPng: opts.diagramPng,
       numberOf: (id) => numbers.get(id),
       language: template.language,
+      ...(useCaseIds ? { useCaseIds } : {}),
       ...(distributionSlot ? { distributionSlot: true } : {}),
       ...(template.fixedTemplate ? { fixedTemplate: true, representedSlots: new Set(template.layout.filter((e) => isContentSlot(e.section_id)).map((e) => e.section_id)) } : {}),
       ...(nonScreen ? { nonScreenFunctionIds: nonScreen } : {}),

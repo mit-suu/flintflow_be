@@ -14,6 +14,7 @@
  * từ `changes[]`, gộp theo ngày + giai đoạn quy trình (S-8.3).
  */
 
+import { displayUseCaseId } from "./usecase-display-ids.js"
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import { svgTitleOf } from "../diagram/renderers/common.js"
 import { diagramLabelsFor } from "../diagram/renderers/labels.js"
@@ -168,6 +169,11 @@ const localizeBlocks = (blocks: Block[], language: string | undefined, fpt = fal
 // ─── context tiêm từ assemble.service ────────────────────────────
 
 export interface SectionRenderContext {
+  /**
+   * FLF-420: mã use case hiển thị liên tục (`useCaseDisplayIds`) — id Spine có lỗ sau khi xoá. Không đặt ⇒ in id (mã của file
+   * khách / hồ sơ cũ không rõ loại).
+   */
+  useCaseIds?: ReadonlyMap<string, string>
   /** FLF-390: tài liệu có mục "Phân tán" (`slot:distribution`, mẫu IEEE) ⇒ sơ đồ triển khai in ở đó, không ở §4.1. */
   distributionSlot?: boolean
   /** Preserve the fixed source outline; child slots own their data instead of the aggregate parent. */
@@ -337,7 +343,7 @@ const svgCaption = (d: Spine["diagrams"][number]): string | null => (d.format ==
 const useCaseDiagram = (spine: Spine, ctx: SectionRenderContext): Block[] =>
   diagramImages(spine, "usecase", undefined, ctx, "Use Case Diagram", svgCaption, (d) => d.section !== ACTOR_HIERARCHY_SECTION)
 
-const useCaseTable = (spine: Spine): Block[] => {
+const useCaseTable = (spine: Spine, ctx: SectionRenderContext): Block[] => {
   if (spine.use_cases.length === 0) return []
   // Id không phân giải được thì in id: bảng không ném lỗi khi Spine có id chết, đó là việc của
   // cờ đỏ `dead_reference`.
@@ -349,7 +355,7 @@ const useCaseTable = (spine: Spine): Block[] => {
     tableBlock(
       ["ID", "Use Case", "Actors", "Use Case Description", "Includes", "Extends"],
       spine.use_cases.map((uc) => [
-        uc.id,
+        displayUseCaseId(ctx.useCaseIds, uc.id),
         uc.name,
         uc.actor_ids.map(actorName).join(", "),
         uc.description,
@@ -849,7 +855,7 @@ const blocksFor = (spine: Spine, sectionId: string, ctx: SectionRenderContext): 
     case "fixed:2.2.1":
       return useCaseDiagram(spine, ctx)
     case "fixed:2.2.2":
-      return [...useCaseTable(spine), ...useCaseActivities(spine, "fixed:2.2.2", ctx)]
+      return [...useCaseTable(spine, ctx), ...useCaseActivities(spine, "fixed:2.2.2", ctx)]
     case "fixed:3.1.1":
       return screensFlow(spine, ctx)
     case "fixed:3.1.2":
