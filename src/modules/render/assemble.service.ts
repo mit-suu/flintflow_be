@@ -29,6 +29,7 @@
  * (`RenderedDocumentCache`, không phải collection `spines`).
  */
 
+import { useCaseDisplayIds } from "./usecase-display-ids.js"
 import mongoose from "mongoose"
 import { z } from "zod"
 import * as spineRepository from "../spine/spine.repository.js"
@@ -563,6 +564,7 @@ const buildSections = (spine: Spine, numbers: Map<string, string>, states: Secti
   // Mọi sơ đồ render_status=ok đều vào section dưới dạng tham chiếu; PNG thật/placeholder gắn lúc trả về
   const diagramPng = (id: string): string | undefined => imageRef(id)
   const content = opts.localized ? renderView(opts.localized) : spine
+  const useCaseIds = useCaseDisplayIds(spine)
 
   const out: RenderedSection[] = []
   const seenGroups = new Set<string>()
@@ -594,6 +596,8 @@ const buildSections = (spine: Spine, numbers: Map<string, string>, states: Secti
       numberOf: numberOfCtx,
       // Tài liệu theo mẫu FPT: §3.x.y dùng khung mục FPT (mode 1 đi `layout-sections.ts`, giữ khung cũ)
       functionLayout: "fpt",
+      // FLF-420: bản in FPT — mã use case do FlintFlow cấp ⇒ in liên tục theo thứ tự
+      useCaseIds,
       ...(opts.language !== undefined ? { language: opts.language } : {}),
       ...(opts.localized ? { canonical: spine } : {}),
       ...(state?.status !== undefined ? { status: state.status } : {}),
@@ -658,7 +662,7 @@ export type DocumentTranslationMeta = z.infer<typeof documentTranslationMetaSche
 export const loadTemplateLayout: TemplateLoader = async (projectId) => {
   const profile = (await TemplateProfile.findOne(
     { projectId },
-    { layout: 1, language: 1, template_family: 1, legacy_record_of_changes: 1, non_screen_table: 1, function_originals: 1, section_slices: 1, section_segments: 1, target_structure: 1, flow2_entry_at: 1 },
+    { layout: 1, language: 1, template_family: 1, legacy_record_of_changes: 1, non_screen_table: 1, function_originals: 1, section_slices: 1, section_segments: 1, target_structure: 1, flow2_entry_at: 1, "structure_preview.summary.kind": 1 },
     { lean: true }
   )) as
     | {
@@ -670,7 +674,7 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
         function_originals?: TemplateLayout["functionOriginals"]
         section_slices?: TemplateLayout["sectionSlices"]
         section_segments?: TemplateLayout["sectionSegments"]
-        target_structure?: { sections?: { section_id: string; status: string }[] } | null
+        target_structure?: { sections?: { section_id: string; status: string }[]; resolved_mode?: number | null } | null
         flow2_entry_at?: Date | null
       }
     | null
@@ -683,6 +687,10 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
   return {
     ...(rearrange?.moveToEnd.length ? { moveToEnd: rearrange.moveToEnd } : {}),
     ...(project?.template_intent === "fixed" ? { fixedTemplate: true } : {}),
+    // FLF-420: file nền là khung mẫu (chế độ 3) ⇒ mã use case do FlintFlow cấp, in liên tục
+    ...((profile as { structure_preview?: { summary?: { kind?: string } } | null }).structure_preview?.summary?.kind === "template" || profile.target_structure?.resolved_mode === 3
+      ? { relabelUseCases: true }
+      : {}),
     layout: profile.layout,
     language: profile.language ?? "en",
     ...(profile.template_family ? { family: profile.template_family } : {}),
