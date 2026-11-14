@@ -1,20 +1,21 @@
 /**
- * UC-80 (FLF-309): sang kỳ mới cho gói đã hết `currentPeriodEnd`.
+ * UC-80 (FLF-309 / FLF-417): sang kỳ mới cho gói đã hết `currentPeriodEnd`.
  *   - Gói trả phí (Pro) hết kỳ ⇒ về Free: chưa có gia hạn tự động, muốn giữ Pro thì mua lại qua checkout `plan:pro`.
  *   - Gói Free hết kỳ ⇒ mở kỳ mới.
- * Đầu kỳ mới nạp ví lên tới `monthlyCreditsAllotment` của gói (`monthly_reset`). Ví đang nhiều hơn thì giữ nguyên —
- * "reset" là nạp lại hạn mức, không cộng dồn mỗi tháng và không xoá credit đã mua.
+ * Đầu kỳ mới cộng dồn đủ `monthlyCredits` của gói hiện tại (`monthly_reset`, BR-01) bất kể số dư hiện có
+ * để không xoá hoặc triệt tiêu credit đã mua trước đó, và gửi thông báo tới toàn bộ Lead hiện tại của tổ chức.
  *
  * Chạy lại an toàn: đổi kỳ là `findOneAndUpdate` khớp đúng `currentPeriodEnd` cũ, nên hai lượt chạy song song (hai
  * instance API ở driver inline) chỉ một lượt thắng và cộng credit. Đổi kỳ + nạp ví nằm trong cùng transaction.
  */
 
-import type { ClientSession } from "mongoose"
+import mongoose, { type ClientSession } from "mongoose"
 import { getOrCreateWallet } from "../../shared/ai/credit-reservation.service.js"
 import { CreditWallet } from "../credits/credit-wallet.model.js"
 import { CreditTransaction } from "../credits/credit-transaction.model.js"
 import { ISubscription, Subscription } from "../credits/subscription.model.js"
-import { notify } from "../notification/notification.service.js"
+import { Membership } from "../organization/membership.model.js"
+import { notify, type NotificationPayload } from "../notification/notification.service.js"
 import { sessionOptions, withOptionalTransaction } from "./billing.service.js"
 import { getPlan, planConfig, PlanId } from "./plan.config.js"
 
@@ -29,6 +30,8 @@ export interface RenewalResult {
   creditsGranted: number
 }
 
+export type RenewalRunResult = RenewalResult
+
 interface RenewedPeriod {
   subscription: ISubscription
   previousPlan: PlanId
@@ -42,20 +45,20 @@ interface RenewedPeriod {
 export const nextPeriodStart = (previousEnd: Date, now: Date): Date =>
   now.getTime() - previousEnd.getTime() < planConfig.periodDays * DAY_MS ? previousEnd : now
 
-/** Nạp ví tới hạn mức của gói; trả số credit đã cộng (0 nếu ví đã đủ). */
-const topUpToAllotment = async (sub: ISubscription, allotment: number, session?: ClientSession): Promise<number> => {
+/** Cộng đủ hạn mức của kỳ mới vào ví org và ghi giao dịch `monthly_reset`. */
+const grantCycleCredits = async (
+  organizationId: mongoose.Types.ObjectId,
+  fallbackUserId: mongoose.Types.ObjectId,
+  allotment: number,
+  session?: ClientSession
+): Promise<number> => {
+  if (allotment <= 0) return 0
   const options = sessionOptions(session)
-  const userId = String(sub.userId)
-  const orgId = sub.organizationId ? String(sub.organizationId) : null
-  // FLF-310: credit chỉ nằm ở ví tổ chức — subscription cũ không gắn org thì không có ví để nạp
-  if (!orgId) return 0
-  const wallet = await getOrCreateWallet(userId, session, orgId)
-  const granted = Math.max(0, allotment - wallet.balance)
-  if (granted === 0) return 0
+  const wallet = await getOrCreateWallet(String(fallbackUserId), session, String(organizationId))
 
   const updated = await CreditWallet.findOneAndUpdate(
     { _id: wallet._id },
-    { $inc: { balance: granted } },
+    { $inc: { balance: allotment } },
     { ...options, returnDocument: "after" }
   )
   if (!updated) return 0
@@ -63,18 +66,18 @@ const topUpToAllotment = async (sub: ISubscription, allotment: number, session?:
   await CreditTransaction.create(
     [
       {
-        userId: sub.userId,
-        organizationId: sub.organizationId,
+        userId: fallbackUserId,
+        organizationId,
         projectId: null,
         actionType: "monthly_reset",
-        amount: granted,
+        amount: allotment,
         type: "monthly_reset",
         balanceAfter: updated.balance - updated.reserved
       }
     ],
     options
   )
-  return granted
+  return allotment
 }
 
 const renewOne = async (sub: ISubscription, now: Date): Promise<RenewedPeriod | null> =>
@@ -100,37 +103,52 @@ const renewOne = async (sub: ISubscription, now: Date): Promise<RenewedPeriod | 
     // Lượt khác đã sang kỳ cho gói này.
     if (!claimed) return null
 
-    const granted = await topUpToAllotment(claimed, definition.monthlyCredits, session)
+    // FLF-310: credit chỉ nằm ở ví tổ chức — subscription cũ không gắn org thì không có ví để nạp
+    const granted = claimed.organizationId
+      ? await grantCycleCredits(claimed.organizationId, claimed.userId, definition.monthlyCredits, session)
+      : 0
     return { subscription: claimed, previousPlan, plan, granted }
   })
 
+const resolveRenewalRecipients = async (subscription: ISubscription): Promise<string[]> => {
+  if (!subscription.organizationId) return [String(subscription.userId)]
+  const leads = await Membership.find({ organizationId: subscription.organizationId, role: "lead" })
+    .select("userId")
+    .lean()
+  const leadIds = [...new Set(leads.map((m) => m.userId).filter(Boolean).map(String))]
+  return leadIds.length > 0 ? leadIds : [String(subscription.userId)]
+}
+
 const notifyRenewal = async ({ subscription, previousPlan, plan, granted }: RenewedPeriod): Promise<void> => {
-  const userId = String(subscription.userId)
+  const downgraded = plan !== previousPlan
+  if (!downgraded && granted <= 0) return
+
   const organizationId = subscription.organizationId ? String(subscription.organizationId) : undefined
   const periodEnd = subscription.currentPeriodEnd
+  const recipients = await resolveRenewalRecipients(subscription)
 
-  if (plan !== previousPlan) {
-    await notify(userId, {
-      organizationId,
-      type: "plan_expired",
-      title: `Gói ${getPlan(previousPlan).label} đã hết hạn`,
-      body: `Tổ chức đã chuyển về gói ${getPlan(plan).label}. Mua lại gói ${getPlan(previousPlan).label} để tiếp tục dùng giới hạn cao hơn.`,
-      link: "/home/billing",
-      meta: { plan, previousPlan, periodEnd, credits: granted }
-    })
-    return
-  }
+  const payload: NotificationPayload = downgraded
+    ? {
+        organizationId,
+        type: "plan_expired",
+        title: `Gói ${getPlan(previousPlan).label} đã hết hạn`,
+        body:
+          granted > 0
+            ? `Tổ chức đã chuyển về gói ${getPlan(plan).label} và được cộng +${granted} credit cho kỳ mới đến ${periodEnd.toLocaleDateString("vi-VN")}. Mua lại gói ${getPlan(previousPlan).label} để tiếp tục dùng giới hạn cao hơn.`
+            : `Tổ chức đã chuyển về gói ${getPlan(plan).label}. Mua lại gói ${getPlan(previousPlan).label} để tiếp tục dùng giới hạn cao hơn.`,
+        link: "/home/billing",
+        meta: { plan, previousPlan, periodEnd, credits: granted }
+      }
+    : {
+        organizationId,
+        type: "credits_renewed",
+        title: "Đã cấp credit kỳ mới",
+        body: `Ví tổ chức đã được cộng +${granted} credit cho kỳ mới đến ${periodEnd.toLocaleDateString("vi-VN")}.`,
+        link: "/home/billing",
+        meta: { plan, periodEnd, credits: granted }
+      }
 
-  if (granted > 0) {
-    await notify(userId, {
-      organizationId,
-      type: "monthly_credits",
-      title: "Đã cấp credit kỳ mới",
-      body: `Đã nạp ${granted} credit vào ví tổ chức cho kỳ đến ${periodEnd.toLocaleDateString("vi-VN")}.`,
-      link: "/home/billing",
-      meta: { plan, periodEnd, credits: granted }
-    })
-  }
+  await Promise.all(recipients.map((userId) => notify(userId, payload)))
 }
 
 /** Quét gói `active` đã quá `currentPeriodEnd` và sang kỳ mới cho từng gói. */
