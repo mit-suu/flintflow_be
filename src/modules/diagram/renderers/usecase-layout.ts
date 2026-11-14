@@ -428,10 +428,13 @@ const HIERARCHY_ROW_PITCH = 170
 const HIERARCHY_COLUMN_GAP = 90
 /** Đầu mũi tên và gốc đường cách hình que này để không chạm chữ / đầu. */
 const HIERARCHY_PAD = 8
+/** Chiều dài tam giác rỗng (`arrowHeadShape("triangle")`) — thân dọc dưới actor cha ít nhất bằng chừng này. */
+const HIERARCHY_ARROW = 14
 
 /**
- * Scene phân cấp actor (UML generalization): mỗi actor một hình que, actor con nằm dưới actor cha, đường liền một đoạn
- * thẳng từ trên đầu actor con tới dưới tên actor cha, đầu tam giác rỗng ở phía cha. Actor cha nằm giữa các con.
+ * Scene phân cấp actor (UML generalization): mỗi actor một hình que, actor con nằm dưới actor cha, nối kiểu cây — mỗi con
+ * một đoạn dọc từ trên đầu lên thanh ngang chung, một thân dọc với MỘT tam giác rỗng chạm dưới tên actor cha. Actor cha
+ * nằm giữa các con.
  * `parents`: actor con → actor cha, chỉ cạnh hợp lệ giữa các actor trong `actors`.
  */
 export const layoutActorHierarchy = (actors: readonly HierarchyActor[], parents: ReadonlyMap<string, string>): Scene => {
@@ -472,15 +475,35 @@ export const layoutActorHierarchy = (actors: readonly HierarchyActor[], parents:
   for (const root of roots) cursor = place(root, cursor, 0, seen) + HIERARCHY_COLUMN_GAP
 
   const top = (id: string): number => depth.get(id)! * HIERARCHY_ROW_PITCH
+  // Kiểu "shared target" như generalization trên sơ đồ use case (FLF-421): mỗi con một đoạn dọc từ trên đầu lên thanh ngang
+  // chung, thanh gom các con, rồi MỘT thân dọc mang MỘT tam giác rỗng chạm dưới tên actor cha — không còn các đường xiên
+  // chụm vào một điểm làm tam giác chồng nhau. Một con duy nhất (cùng trục với cha) ⇒ một đoạn dọc thẳng.
   for (const [parent, kids] of children) {
-    for (const kid of kids) {
-      if (!centre.has(kid) || !centre.has(parent)) continue
-      const id = `gen:${kid}>${parent}`
-      const from: [number, number] = [centre.get(kid)!, top(kid) - HIERARCHY_PAD]
-      const to: [number, number] = [centre.get(parent)!, top(parent) + metrics.get(parent)!.height + HIERARCHY_PAD]
-      scene.line(id, from, to, { name: `${known.get(kid)!.name} → ${known.get(parent)!.name}` })
+    const placed = kids.filter((kid) => centre.has(kid) && centre.has(parent))
+    if (placed.length === 0) continue
+    const px = centre.get(parent)!
+    const trunkTop = top(parent) + metrics.get(parent)!.height + HIERARCHY_PAD
+    const stubBottom = Math.min(...placed.map((kid) => top(kid))) - HIERARCHY_PAD
+    const parentName = known.get(parent)!.name
+    if (placed.length === 1 && Math.abs(centre.get(placed[0])! - px) < 0.5) {
+      const id = `gen:${placed[0]}>${parent}`
+      scene.line(id, [px, stubBottom], [px, trunkTop], { name: `${known.get(placed[0])!.name} → ${parentName}` })
       scene.arrow(id, "triangle")
+      continue
     }
+    // thân đủ dài cho tam giác (14) rồi chia đều phần còn lại giữa thân và các đoạn dọc của con
+    const barY = (trunkTop + HIERARCHY_ARROW + stubBottom) / 2
+    const xs = [px]
+    for (const kid of placed) {
+      const kx = centre.get(kid)!
+      xs.push(kx)
+      scene.line(`gen:${kid}>${parent}`, [kx, top(kid) - HIERARCHY_PAD], [kx, barY], { name: `${known.get(kid)!.name} → ${parentName}` })
+    }
+    const [minX, maxX] = [Math.min(...xs), Math.max(...xs)]
+    if (maxX - minX > 0.5) scene.line(`gen:bus>${parent}`, [minX, barY], [maxX, barY], { name: `→ ${parentName} (thanh gom)` })
+    const trunk = `gen:*>${parent}`
+    scene.line(trunk, [px, barY], [px, trunkTop], { name: `→ ${parentName}` })
+    scene.arrow(trunk, "triangle")
   }
   for (const a of actors) {
     if (centre.has(a.id)) drawActor(scene, `actor:${a.id}`, a.name, centre.get(a.id)!, top(a.id), metrics.get(a.id)!.lines, a.abstract)
