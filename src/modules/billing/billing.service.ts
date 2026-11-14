@@ -6,7 +6,6 @@ import { CreditWallet } from "../credits/credit-wallet.model.js"
 import { CreditTransaction } from "../credits/credit-transaction.model.js"
 import { Subscription } from "../credits/subscription.model.js"
 import { notify } from "../notification/notification.service.js"
-import { scheduleResumeAfterTopUp } from "../import/credit-flow.service.js"
 import { fulfillTopupRequests } from "./topup-request.service.js"
 import { PaymentIntent, IPaymentIntent } from "./payment-intent.model.js"
 import { User } from "../user/user.model.js"
@@ -349,8 +348,9 @@ const settleIntent = async (
 
   const { intent, balance, planChange } = processed
   const userId = intent.userId.toString()
+  const intentOrgId = intent.organizationId ? String(intent.organizationId) : null
 
-  if (planChange?.changed) await notifyPlanChanged(userId, planChange)
+  if (planChange?.changed) await notifyPlanChanged(userId, planChange, intentOrgId)
 
   if (outcome === "succeeded") {
     await notify(userId, {
@@ -358,22 +358,18 @@ const settleIntent = async (
       title: "Thanh toán thành công",
       body: `Đã cộng ${intent.credits} credit vào tài khoản của bạn.`,
       link: "/home/billing",
+      ...(intentOrgId ? { organizationId: intentOrgId } : {}),
       meta: { intentId, credits: intent.credits, amount: intent.amount }
     })
-    // BPMN 4.5 ⇒ 4.1 (mode 1 v3): nạp xong ⇒ bước AI mode 1 đang dừng vì hết credit chạy tiếp (job nền, không chặn webhook)
-    // task-26: nạp vào ví tổ chức ⇒ chạy tiếp trong mọi dự án của tổ chức, không chỉ dự án người nạp tạo
-    const paidOrgId = intent.organizationId ? String(intent.organizationId) : null
-    await scheduleResumeAfterTopUp(userId, paidOrgId, intentId).catch((err) =>
-      console.warn("[billing] không đưa được lượt chạy tiếp mode 1 sau khi nạp vào hàng đợi:", err)
-    )
-    // FLF-332 (BR-08): Analyst đã bấm "Báo Lead nạp" ⇒ báo lại cho họ; step không tự chạy
-    if (paidOrgId) await fulfillTopupRequests(paidOrgId, intent.credits, { kind: "payment", userId })
+    // FLF-332 / FLF-417 (BR-01, BR-08): nạp xong KHÔNG tự chạy lại bước AI — chỉ đóng yêu cầu nạp và báo mọi thành viên có bước đang dừng
+    if (intentOrgId) await fulfillTopupRequests(intentOrgId, intent.credits, { kind: "payment", userId })
   } else {
     await notify(userId, {
       type: "payment_failed",
       title: "Thanh toán thất bại",
       body: "Giao dịch nạp credit không thành công.",
       link: "/home/billing",
+      ...(intentOrgId ? { organizationId: intentOrgId } : {}),
       meta: { intentId, amount: intent.amount }
     })
   }
@@ -558,7 +554,7 @@ const activatePlan = async (
   return { subscription, periodEnd, plan, previousPlan, changed: true }
 }
 
-const notifyPlanChanged = async (userId: string, change: PlanChange) => {
+const notifyPlanChanged = async (userId: string, change: PlanChange, organizationId?: string | null) => {
   const definition = getPlan(change.plan)
   const periodEnd = change.periodEnd
   await notify(userId, {
@@ -568,6 +564,7 @@ const notifyPlanChanged = async (userId: string, change: PlanChange) => {
       ? `Gói ${definition.label} có hiệu lực đến ${new Date(periodEnd).toLocaleDateString("vi-VN")}.`
       : `Gói ${definition.label} đã được kích hoạt.`,
     link: "/home/billing",
+    ...(organizationId ? { organizationId } : {}),
     meta: { plan: change.plan, previousPlan: change.previousPlan }
   })
 }
@@ -599,6 +596,6 @@ export const upgradePlan = async (orgId: string, userId: string, plan: PlanId) =
   }
 
   const change = await activatePlan(orgId, userId, plan)
-  if (change.changed) await notifyPlanChanged(userId, change)
+  if (change.changed) await notifyPlanChanged(userId, change, orgId)
   return change.subscription
 }
