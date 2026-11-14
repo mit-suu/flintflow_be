@@ -187,4 +187,53 @@ describe("POST /billing/topup-request", () => {
     const res = await request(app).post("/api/v1/billing/topup-request").set(bearer(viewer.token)).send({})
     expect(res.status).toBe(403)
   })
+
+  it("Analyst mở yêu cầu / có bước paused nhưng bị hạ xuống viewer hoặc xoá Membership trước khi nạp ⇒ đóng yêu cầu mở nhưng KHÔNG gửi credit_topped_up", async () => {
+    const seeded = await seedFixture("minimal")
+    const demoted = await joinOrg(seeded.orgId, "analyst")
+    const removed = await joinOrg(seeded.orgId, "analyst")
+
+    expect((await request(app).post("/api/v1/billing/topup-request").set(bearer(demoted.token)).send({ projectId: seeded.projectId, step: "I-4:fixed:1" })).status).toBe(201)
+    expect((await request(app).post("/api/v1/billing/topup-request").set(bearer(removed.token)).send({ projectId: seeded.projectId, step: "I-1.11" })).status).toBe(201)
+
+    await ImportedDocument.create([
+      {
+        projectId: seeded.projectId,
+        sha256: "hash-demoted",
+        original_name: "demoted.docx",
+        size: 100,
+        preflight: { status: "accepted", issues: [] },
+        status: "extracting",
+        paused: { reason: "credits", at: new Date() },
+        extract_cursor: "fixed:1",
+        created_by: new mongoose.Types.ObjectId(demoted.id)
+      },
+      {
+        projectId: seeded.projectId,
+        sha256: "hash-removed",
+        original_name: "removed.docx",
+        size: 100,
+        preflight: { status: "accepted", issues: [] },
+        status: "checking",
+        paused: { reason: "credits", at: new Date() },
+        extract_cursor: null,
+        created_by: new mongoose.Types.ObjectId(removed.id)
+      }
+    ])
+
+    await Membership.updateOne({ userId: demoted.id, organizationId: seeded.orgId }, { $set: { role: "viewer" } })
+    await Membership.deleteOne({ userId: removed.id, organizationId: seeded.orgId })
+
+    expect(await fulfillTopupRequests(seeded.orgId, 120, { kind: "payment", userId: seeded.userId })).toBe(0)
+    expect(await CreditTopupRequest.countDocuments({ organizationId: seeded.orgId, status: "open" })).toBe(0)
+    expect(await CreditTopupRequest.countDocuments({ organizationId: seeded.orgId, status: "fulfilled" })).toBe(2)
+    expect(await Notification.countDocuments({ userId: { $in: [demoted.id, removed.id] }, type: "credit_topped_up" })).toBe(0)
+
+    // Thành viên còn quyền Analyst mở yêu cầu mới sau đó vẫn nhận credit_topped_up bình thường; người đã hạ quyền giữ nguyên 0 thông báo
+    const activeAnalyst = await joinOrg(seeded.orgId, "analyst")
+    expect((await request(app).post("/api/v1/billing/topup-request").set(bearer(activeAnalyst.token)).send({ projectId: seeded.projectId })).status).toBe(201)
+    expect(await fulfillTopupRequests(seeded.orgId, 60, { kind: "payment", userId: seeded.userId })).toBe(1)
+    await notificationsOf(activeAnalyst.id, "credit_topped_up", 1)
+    expect(await Notification.countDocuments({ userId: { $in: [demoted.id, removed.id] }, type: "credit_topped_up" })).toBe(0)
+  })
 })

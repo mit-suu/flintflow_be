@@ -40,6 +40,10 @@ vi.mock("../user/user.model.js", async (importOriginal) => {
   const { fakeDb } = await import("./__tests__/fake-mongo.js")
   return { ...(await importOriginal<object>()), User: fakeDb.model("User") }
 })
+vi.mock("../organization/membership.model.js", async () => {
+  const { fakeDb } = await import("./__tests__/fake-mongo.js")
+  return { Membership: fakeDb.model("Membership") }
+})
 vi.mock("../project/project.model.js", async (importOriginal) => {
   const { fakeDb } = await import("./__tests__/fake-mongo.js")
   return { ...(await importOriginal<object>()), Project: fakeDb.model("Project") }
@@ -329,6 +333,46 @@ describe("billing.service", () => {
       expect(fakeDb.model("Subscription").docs).toHaveLength(1)
       expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "plan_changed", organizationId: ORG }))
       expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "payment_success", organizationId: ORG }))
+    })
+
+    it("checkout plan:pro gửi plan_changed tới toàn bộ Lead đã khử trùng (không gửi Analyst/Viewer), kèm label và periodEnd", async () => {
+      const LEAD_2 = "64b000000000000000000004"
+      const ANALYST = "64b000000000000000000005"
+      const VIEWER = "64b000000000000000000006"
+      const OTHER_ORG = "64b0000000000000000000e9"
+      const OTHER_ORG_LEAD = "64b000000000000000000007"
+      const oid = (id: string) => new mongoose.Types.ObjectId(id)
+
+      await fakeDb.model("Membership").create([
+        { organizationId: oid(ORG), userId: oid(USER), role: "lead" },
+        { organizationId: oid(ORG), userId: oid(LEAD_2), role: "lead" },
+        { organizationId: oid(ORG), userId: oid(LEAD_2), role: "lead" },
+        { organizationId: oid(ORG), userId: oid(ANALYST), role: "analyst" },
+        { organizationId: oid(ORG), userId: oid(VIEWER), role: "viewer" },
+        { organizationId: oid(OTHER_ORG), userId: oid(OTHER_ORG_LEAD), role: "lead" }
+      ])
+
+      await billingService.createCheckout(ORG, USER, "plan:pro")
+      vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1", { amount: planConfig.pro.priceVnd }))
+      await billingService.handlePaymentCallback({ order_id: "order-1", status: "paid", client_id: CLIENT_ID })
+
+      const planCalls = vi.mocked(notify).mock.calls.filter(([, payload]) => payload.type === "plan_changed")
+      expect(planCalls).toHaveLength(2)
+      expect(planCalls.map(([uid]) => uid).sort()).toEqual([USER, LEAD_2].sort())
+      for (const [, payload] of planCalls) {
+        expect(payload).toMatchObject({
+          type: "plan_changed",
+          organizationId: ORG,
+          meta: {
+            plan: "pro",
+            previousPlan: null,
+            label: "Pro",
+            periodEnd: expect.any(String)
+          }
+        })
+        expect(new Date(String(payload.meta?.periodEnd)).toISOString()).toBe(payload.meta?.periodEnd)
+      }
+      expect(planCalls.some(([uid]) => [ANALYST, VIEWER, OTHER_ORG_LEAD].includes(uid))).toBe(false)
     })
 
     describe("FLF-347: không hạ gói khi gói trả phí còn hạn", () => {

@@ -221,4 +221,24 @@ describe("renewDueSubscriptions", () => {
       expect(payload.body).toContain("+300 credit")
     }
   })
+
+  it("lỗi notify sau khi đã chốt kỳ mới chỉ console.warn, vẫn tính đã gia hạn và không log console.error", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const { organizationId, subId } = await seedSubAndWallet({
+      plan: "free",
+      periodEnd: new Date(NOW.getTime() - DAY),
+      balance: 100
+    })
+    vi.mocked(notify).mockRejectedValueOnce(new Error("notify down"))
+
+    const result = await renewDueSubscriptions(NOW)
+
+    expect(result).toEqual({ renewed: 1, downgraded: 0, creditsGranted: 300 })
+    expect(walletOf(organizationId)?.balance).toBe(400)
+    expect(console.error).not.toHaveBeenCalled()
+    expect(warnSpy).toHaveBeenCalledWith(
+      `[Billing] Không gửi được thông báo gia hạn cho subscription ${String(subId)}:`,
+      expect.any(Error)
+    )
+  })
 })

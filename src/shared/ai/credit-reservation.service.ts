@@ -314,6 +314,8 @@ const maybeNotifyLowCredit = async (
   }
 }
 
+const normalizeTokenCount = (n: number): number => (Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0)
+
 /**
  * Trừ credit thực tế cho một reservation sau khi AI chạy VÀ parse thành công, hoàn phần hold dư về ví khả dụng.
  * Idempotent: gọi lại trên reservation đã deducted trả về số credit đã quyết toán trước đó.
@@ -328,12 +330,18 @@ export const deductCredit = async (
   const options = sessionOptions(session)
   const key = walletKey(organizationId)
   const actualCost = calculateActualCreditCost(cost, tokens)
+  const normalizedTokens = tokens
+    ? { tokensIn: normalizeTokenCount(tokens.tokensIn), tokensOut: normalizeTokenCount(tokens.tokensOut) }
+    : undefined
 
   // Claim reservation trước (chặn trừ hai lần). Cron có thể đã expire trước khi AI kịp
   // trả lời: vẫn tính phí, claim expired → deducted.
   let previousState: "reserved" | "expired" = "reserved"
   // UC-60: token cũng ghi lên dòng reserve — lịch sử hiện dòng này kèm trạng thái `deducted`
-  const claimSet = { state: "deducted", ...(tokens ? { tokensIn: tokens.tokensIn, tokensOut: tokens.tokensOut } : {}) }
+  const claimSet = {
+    state: "deducted",
+    ...(normalizedTokens ? { tokensIn: normalizedTokens.tokensIn, tokensOut: normalizedTokens.tokensOut } : {})
+  }
   let claimed = await CreditTransaction.findOneAndUpdate(
     { _id: reservationId, type: "reserve", state: "reserved" },
     { $set: claimSet },
@@ -407,8 +415,8 @@ export const deductCredit = async (
         // Cùng quy ước "khả dụng sau" với reserve/release/purchase
         balanceAfter: wallet.balance - wallet.reserved,
         stepId: stepId ?? null,
-        tokensIn: tokens?.tokensIn ?? null,
-        tokensOut: tokens?.tokensOut ?? null
+        tokensIn: normalizedTokens?.tokensIn ?? null,
+        tokensOut: normalizedTokens?.tokensOut ?? null
       }
     ],
     options

@@ -9,6 +9,7 @@ import { notify } from "../notification/notification.service.js"
 import { fulfillTopupRequests } from "./topup-request.service.js"
 import { PaymentIntent, IPaymentIntent } from "./payment-intent.model.js"
 import { User } from "../user/user.model.js"
+import { Membership } from "../organization/membership.model.js"
 import { Project, WITH_DELETED } from "../project/project.model.js"
 import { planConfig, findPackage, getPlan, planFromPackageId, planPackageId, PlanId } from "./plan.config.js"
 import {
@@ -674,19 +675,33 @@ const activatePlan = async (
   return { subscription, periodEnd, plan, previousPlan, changed: true }
 }
 
+const resolvePlanChangeRecipients = async (userId: string, organizationId?: string | null): Promise<string[]> => {
+  if (!organizationId || !mongoose.isValidObjectId(organizationId)) return [userId]
+  const leads = await Membership.find({ organizationId, role: "lead" }, { userId: 1 })
+  const leadIds = [...new Set(leads.map((m) => m.userId).filter(Boolean).map(String))]
+  return leadIds.length > 0 ? leadIds : [userId]
+}
+
 const notifyPlanChanged = async (userId: string, change: PlanChange, organizationId?: string | null) => {
   const definition = getPlan(change.plan)
   const periodEnd = change.periodEnd
-  await notify(userId, {
-    type: "plan_changed",
+  const recipients = await resolvePlanChangeRecipients(userId, organizationId)
+  const payload = {
+    type: "plan_changed" as const,
     title: `Đã chuyển sang gói ${definition.label}`,
     body: periodEnd
       ? `Gói ${definition.label} có hiệu lực đến ${new Date(periodEnd).toLocaleDateString("vi-VN")}.`
       : `Gói ${definition.label} đã được kích hoạt.`,
     link: "/home/billing",
     ...(organizationId ? { organizationId } : {}),
-    meta: { plan: change.plan, previousPlan: change.previousPlan }
-  })
+    meta: {
+      plan: change.plan,
+      previousPlan: change.previousPlan,
+      label: definition.label,
+      periodEnd: periodEnd ? new Date(periodEnd).toISOString() : null
+    }
+  }
+  await Promise.all(recipients.map((recipientId) => notify(recipientId, payload)))
 }
 
 /**

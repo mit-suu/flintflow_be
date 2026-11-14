@@ -192,6 +192,22 @@ describe("credit-reservation.service", () => {
       expect(deductRow).toMatchObject({ stepId: "S-2.1", tokensIn: 900, tokensOut: 150 })
       expect(releaseRow).toMatchObject({ stepId: "S-2.2" })
     })
+
+    it("chuẩn hoá token âm / số thập phân / NaN về số nguyên >= 0 khi lưu sổ", async () => {
+      const ok = await reserveCredit(USER, ActionType.DRAFT, undefined, undefined, ORG, "S-2.3")
+      await deductCredit(ok, undefined, { tokensIn: -50.8, tokensOut: 120.9 })
+      const reserveRow = ledger().docs.find((d) => String(d._id) === ok.reservationId)!
+      const deductRow = ledger().docs.find((d) => d.type === "deduct" && d.stepId === "S-2.3")!
+      expect(reserveRow).toMatchObject({ tokensIn: 0, tokensOut: 120 })
+      expect(deductRow).toMatchObject({ tokensIn: 0, tokensOut: 120 })
+
+      const nanCase = await reserveCredit(USER, ActionType.DRAFT, undefined, undefined, ORG, "S-2.4")
+      await deductCredit(nanCase, undefined, { tokensIn: Number.NaN, tokensOut: Number.POSITIVE_INFINITY })
+      const nanReserve = ledger().docs.find((d) => String(d._id) === nanCase.reservationId)!
+      const nanDeduct = ledger().docs.find((d) => d.type === "deduct" && d.stepId === "S-2.4")!
+      expect(nanReserve).toMatchObject({ tokensIn: 0, tokensOut: 0 })
+      expect(nanDeduct).toMatchObject({ tokensIn: 0, tokensOut: 0 })
+    })
   })
 
   describe("expireStaleReservations", () => {

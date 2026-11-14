@@ -7,7 +7,6 @@ export const loadJobDefinitions = async (): Promise<void> => {
     import("./modules/import/extract-jobs.js"),
     import("./modules/import/finalize-jobs.js"),
     import("./modules/import/reread-jobs.js"),
-    import("./modules/import/credit-flow.service.js"),
     import("./modules/change-request/embedding/embedding-sync.service.js"),
     import("./shared/email/email.service.js"),
     import("./shared/ai/credit-reservation.jobs.js"),

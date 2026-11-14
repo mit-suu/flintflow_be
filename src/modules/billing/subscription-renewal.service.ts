@@ -166,7 +166,11 @@ export const renewDueSubscriptions = async (now: Date = new Date()): Promise<Ren
       if (renewed.plan !== renewed.previousPlan) result.downgraded += 1
       else result.renewed += 1
       result.creditsGranted += renewed.granted
-      await notifyRenewal(renewed)
+      try {
+        await notifyRenewal(renewed)
+      } catch (notifyErr) {
+        console.warn(`[Billing] Không gửi được thông báo gia hạn cho subscription ${String(sub._id)}:`, notifyErr)
+      }
     } catch (err) {
       // Một gói lỗi không chặn các gói còn lại; lượt sau thử lại vì gói vẫn quá hạn.
       console.error(`[Billing] Sang kỳ mới cho subscription ${String(sub._id)} lỗi:`, err)

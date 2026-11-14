@@ -64,7 +64,9 @@ export const notifyTopUpNeeded = async (projectId: string, stepId: string): Prom
       : project.userId
         ? [String(project.userId)]
         : []
-    const step = describeStep(stepId, await headingLookup(projectId))
+    const lookupHeading = await headingLookup(projectId)
+    const sectionHeading = stepId.startsWith("I-4:") ? lookupHeading(stepId.slice("I-4:".length)) : null
+    const step = describeStep(stepId, lookupHeading)
     for (const recipient of recipients) {
       await notify(recipient, {
         type: TOPUP_NEEDED,
@@ -72,7 +74,12 @@ export const notifyTopUpNeeded = async (projectId: string, stepId: string): Prom
         body: `Dự án "${project.name ?? projectId}" dừng ở ${step} vì không đủ credit. Nạp thêm để chạy tiếp - sau khi nạp thêm credit, thành viên thực hiện mở lại dự án và bấm tiếp tục.`,
         link: "/home/billing",
         ...(organizationId ? { organizationId } : {}),
-        meta: { project_id: projectId, step_id: stepId }
+        meta: {
+          project_id: projectId,
+          project_name: project.name ?? projectId,
+          step_id: stepId,
+          ...(sectionHeading ? { section_heading: sectionHeading } : {})
+        }
       })
     }
   } catch (err) {

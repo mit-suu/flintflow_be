@@ -94,7 +94,7 @@ describe("mode 1 - trích field (I-4) + xác nhận", () => {
   })
 
   it("hết credit giữa I-4 ⇒ paused, nạp xong resume không trích lại section đã xong", async () => {
-    const { c, id, seeded } = await startImport(5)
+    const { c, id, seeded } = await startImport(3)
     const first = extractResponseSchema.parse((await c.extractAndWait(id)).run)
     expect(first.import.status).toBe("extracting")
     expect(first.import.paused?.reason).toBe("credits")
@@ -215,8 +215,8 @@ describe("mode 1 - finalize, check, gap report", () => {
   })
 
   it("AI check hết credit ⇒ paused ở checking (baseline 0.1 đã có); resume ⇒ gap_review", async () => {
-    // đủ đúng 6 lượt I-4 (2 credit / lượt) ⇒ hết credit ở bước kiểm tra chạy nối tiếp
-    const { c, id, seeded } = await startImport(12)
+    // 6 lượt I-4 ngắn (quyết toán 1 credit / lượt; lượt 6 cần giữ 2) ⇒ còn 2 credit, hụt ở bước kiểm tra (cần giữ 3)
+    const { c, id, seeded } = await startImport(8)
     const fin = await c.extractAndWait(id)
     expect(fin.run?.import).toMatchObject({ status: "checking", paused: { reason: "credits" } })
     await CreditWallet.updateOne({ userId: seeded.userId }, { $set: { balance: 100 } })
