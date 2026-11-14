@@ -82,7 +82,9 @@ const captureBinding = async (projectId: string): Promise<TemplateSourceBinding 
 export const templateLayoutFromBinding = (binding: TemplateSourceBinding): TemplateLayout => ({
   fixedTemplate: true, layout: binding.layout, language: binding.language,
   legacyRecord: binding.legacy_record_of_changes, nonScreenTable: binding.non_screen_table,
-  functionOriginals: binding.function_originals, sectionSlices: binding.section_slices
+  functionOriginals: binding.function_originals, sectionSlices: binding.section_slices,
+  // FLF-420: version ghi trên khung mẫu ⇒ mã use case do FlintFlow cấp, in liên tục (chốt theo snapshot của version)
+  ...(binding.strip_template_text ? { relabelUseCases: true } : {})
 })
 
 /** Resolve only through the selected immutable baseline and its version, never the current profile. */
