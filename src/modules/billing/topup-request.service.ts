@@ -205,7 +205,23 @@ export const fulfillTopupRequests = async (orgId: string, credits: number, by: {
     await collectPausedAuthorTargets(orgObjectId, addTarget)
     if (targetsByUserId.size === 0) return 0
 
-    const recipients = [...targetsByUserId.entries()].filter(
+    const candidateObjectIds = [...targetsByUserId.keys()]
+      .filter((id) => mongoose.isValidObjectId(id))
+      .map((id) => new mongoose.Types.ObjectId(id))
+    if (candidateObjectIds.length === 0) return 0
+
+    const activeMemberships = await Membership.find({
+      organizationId: orgObjectId,
+      userId: { $in: candidateObjectIds },
+      role: { $in: ["lead", "analyst"] }
+    })
+      .select("userId")
+      .lean()
+    const eligibleUserIds = new Set(activeMemberships.map((m) => String(m.userId)))
+    const eligibleTargets = [...targetsByUserId.entries()].filter(([targetUserId]) => eligibleUserIds.has(targetUserId))
+    if (eligibleTargets.length === 0) return 0
+
+    const recipients = eligibleTargets.filter(
       ([targetUserId]) => !(by.kind === "payment" && targetUserId === (by.userId ?? ""))
     )
     if (recipients.length > 0) {
@@ -223,7 +239,7 @@ export const fulfillTopupRequests = async (orgId: string, credits: number, by: {
         )
       )
     }
-    return targetsByUserId.size
+    return eligibleTargets.length
   } catch (err) {
     console.warn("[billing] không đóng được yêu cầu nạp credit sau khi nạp:", err)
     return 0

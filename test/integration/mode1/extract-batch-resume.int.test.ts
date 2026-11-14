@@ -131,7 +131,7 @@ describe("I-4 - ước tính credit", () => {
     }
   }
 
-  it("ước tính = số lượt AI + credit thật của lượt chạy (lô chữ + ảnh đọc được)", async () => {
+  it("ước tính = số lượt AI + trần giữ credit (quyết toán token thực tế ≤ ước tính)", async () => {
     const ctx = await importAtExtracting(IMAGES)
     const estimate = await estimateExtraction(ctx.projectId, { _id: ctx.importId } as never)
     const before = (await wallet(ctx.userId))!.balance
@@ -141,9 +141,12 @@ describe("I-4 - ước tính credit", () => {
       text_batches: calls.filter((c) => !c.image).length,
       diagram_images: calls.filter((c) => c.image).length,
       ai_calls: calls.length,
-      credits: charged
+      credits: 18
     })
-    expect(estimate).toMatchObject({ text_batches: 8, diagram_images: 1 })
+    expect(estimate).toMatchObject({ text_batches: 8, diagram_images: 1, ai_calls: 9, credits: 18 })
+    // estimate.credits là cận trên mức giữ (18 = 9 lượt × 2), còn thực trừ quyết toán theo token nên <= 18
+    expect(charged).toBeGreaterThanOrEqual(calls.length)
+    expect(charged).toBeLessThanOrEqual(estimate!.credits)
     expect(await Usage.countDocuments({ projectId: ctx.projectId, state: "deducted" })).toBe(calls.length)
     // xong hết ⇒ không còn gì phải chạy
     expect(await estimateExtraction(ctx.projectId, { _id: ctx.importId } as never)).toMatchObject({ ai_calls: 0, credits: 0 })

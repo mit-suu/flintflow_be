@@ -477,7 +477,9 @@ describe("AI cho lựa chọn của BA (R11)", () => {
     const before = await balanceOf(lead.orgId)
     const applied = await request(app).post(url(projectId, id, "/apply")).set(H(lead.token))
     expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
-    expect(before - (await balanceOf(lead.orgId))).toBe(ready.body.data.credit_estimate.structural_moves.credits)
+    const charged = before - (await balanceOf(lead.orgId))
+    expect(charged).toBeGreaterThanOrEqual(1)
+    expect(charged).toBeLessThanOrEqual(ready.body.data.credit_estimate.structural_moves.credits)
     const m = (await TemplateMigration.findById(id).lean())!
     expect(m.resolved_items).toHaveLength(1)
     spineRepository.clearReadCache()

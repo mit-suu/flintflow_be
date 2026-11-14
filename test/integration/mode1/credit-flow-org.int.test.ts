@@ -15,7 +15,7 @@ import { Membership } from "../../../src/modules/organization/membership.model.j
 import { Project } from "../../../src/modules/project/project.model.js"
 import { CreditWallet } from "../../../src/modules/credits/credit-wallet.model.js"
 import { Notification } from "../../../src/modules/notification/notification.model.js"
-import { TOPUP_NEEDED } from "../../../src/modules/import/credit-flow.service.js"
+import { TOPUP_NEEDED, notifyTopUpNeeded } from "../../../src/modules/import/credit-flow.service.js"
 import { fulfillTopupRequests } from "../../../src/modules/billing/topup-request.service.js"
 
 beforeEach(() => resetCrMock())
@@ -50,7 +50,11 @@ describe("Flow 4 mode 1 theo tổ chức", () => {
     expect(detail(await c.post(`${cr}/propose`)).change_request.paused?.reason).toBe("credits")
 
     const [notice] = await waitForNotices(seeded.userId)
-    expect(notice).toMatchObject({ link: "/home/billing", meta: { project_id: projectId } })
+    expect(notice).toMatchObject({
+      link: "/home/billing",
+      meta: { project_id: projectId, project_name: "Lumen import" }
+    })
+    expect(notice.meta).not.toHaveProperty("section_heading")
     expect(notice.body).not.toContain("tự chạy lại")
     expect(notice.body).toContain("mở lại dự án và bấm tiếp tục")
     expect(String(notice?.organizationId)).toBe(seeded.orgId)
@@ -86,5 +90,19 @@ describe("Flow 4 mode 1 theo tổ chức", () => {
     expect(resumed.change_request.paused).toBeNull()
     expect(resumed.change_request.status).toBe("proposing")
     expect(resumed.locations.every((l) => l.conclusion !== null)).toBe(true)
+  })
+
+  it("4.2 ở I-4:<section_id>: meta của credit_topup_needed kèm project_name và section_heading từ TemplateProfile", async () => {
+    const { seeded, projectId } = await importedProject()
+    await notifyTopUpNeeded(projectId, "I-4:fixed:1")
+
+    const [notice] = await waitForNotices(seeded.userId)
+    expect(notice.meta).toMatchObject({
+      project_id: projectId,
+      project_name: "Lumen import",
+      step_id: "I-4:fixed:1",
+      section_heading: expect.any(String)
+    })
+    expect(String((notice.meta as { section_heading?: string }).section_heading).length).toBeGreaterThan(0)
   })
 })

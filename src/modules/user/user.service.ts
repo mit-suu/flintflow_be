@@ -62,7 +62,7 @@ const activeOrgCredit = async (userId: string, orgId: string | null | undefined)
   if (!orgId || !mongoose.isValidObjectId(orgId)) return none
   // UC-56: Viewer không được xem ví / thông tin thanh toán của org
   const membership = await Membership.findOne({ userId, organizationId: orgId }).select("role").lean()
-  if (!membership || membership.role === "viewer") return none
+  if (!membership || (membership.role !== "lead" && membership.role !== "analyst")) return none
   const [org, wallet] = await Promise.all([
     Organization.findById(orgId, { name: 1 }).lean(),
     CreditWallet.findOne({ organizationId: orgId }, { balance: 1, reserved: 1 }).lean()
