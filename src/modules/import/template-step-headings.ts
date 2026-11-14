@@ -18,6 +18,7 @@ import { loadStepRegistry } from "../pipeline/step-registry.js"
 import { bindFixedTemplateHeadings, contentSlot, isContentSlot } from "./content-slots.js"
 import type { LayoutEntry } from "./template-profile.model.js"
 import { templateWrapperIds } from "./template-wrappers.js"
+import { isPlaceholderText } from "./template-markers.js"
 
 /** Giai đoạn phân tích / Brief không soạn mục nào của tài liệu. */
 const isDocumentPhase = (phase: string): boolean => phase.startsWith("S-") && phase !== "S-1"
@@ -70,6 +71,21 @@ export const templateSectionOwnerSteps = (sectionId: string, spine?: Spine): str
 
 const isTemplateSection = (id: string): boolean => id !== "unmapped" && !id.startsWith("group:")
 
+const PLACEHOLDER_IN_HEADING = /<<[^<>]*>>/
+
+/**
+ * FLF-413: heading khung của mẫu (`3.3 <<Feature Name 2>>`) — tính năng / chức năng thật đã lấp ⇒ tên thật (giữ số mục); khung đã
+ * bỏ khỏi Spine ⇒ `null` (không còn mục để soạn). Heading thường giữ nguyên.
+ */
+const frameTitle = (sectionId: string, title: string, spine?: Spine): string | null => {
+  const placeholder = PLACEHOLDER_IN_HEADING.exec(title)?.[0]
+  const m = /^(feature|function):(.+)$/.exec(sectionId)
+  if (!placeholder || !m || !spine) return title
+  const el = m[1] === "feature" ? spine.features.find((f) => f.id === m[2]) : spine.functions.find((f) => f.id === m[2])
+  if (!el) return null
+  return isPlaceholderText(el.name) ? title : title.replace(placeholder, el.name)
+}
+
 /**
  * Heading của mẫu theo bước. Khoá là id bước như `stepsOf` trả: bước thường (`S-2.1`), bước vòng S-5 theo màn
  * (`S-5.2@S01`) khi mục là function của một màn, hoặc id mẫu (`S-5.2`) khi áp cho mọi vòng — tra bằng `headingsOfStep`.
@@ -83,7 +99,8 @@ export const templateSectionsByStep = (layout: readonly LayoutEntry[], spine?: S
   for (const entry of bound) {
     // Heading bao của mẫu (chỉ chứa mục con) không phải mục cần soạn
     if (!isTemplateSection(entry.section_id) || wrappers.has(entry.section_id)) continue
-    const title = entry.heading_text.trim()
+    const title = frameTitle(entry.section_id, entry.heading_text.trim(), spine)
+    if (title === null) continue
     for (const step of templateSectionOwnerSteps(entry.section_id, spine)) {
       const key = `${step}\u0000${title}`
       if (seen.has(key)) continue

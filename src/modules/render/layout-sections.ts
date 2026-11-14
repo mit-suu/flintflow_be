@@ -58,6 +58,7 @@ import type { ScreenMockupState } from "../../shared/diagram/screen-theme.js"
 import { bindFixedTemplateSlots, isContentSlot, slotParents } from "../import/content-slots.js"
 import { isInstructionText, isRealText, splitInstruction, tableBodyHasRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
 import { templateWrapperIds } from "../import/template-wrappers.js"
+import { isPlaceholderText } from "../import/template-markers.js"
 import { useCaseDisplayIds } from "./usecase-display-ids.js"
 
 /** Một mục layout (cùng hình `LayoutEntry` của `import/template-profile.model.ts`). */
@@ -444,7 +445,8 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
       placed.push({
         section_id: id,
         kind: "fpt",
-        title: title || defaultSectionTitle(spine, id, template.language),
+        // FLF-413: heading khung `<<Feature Name 1>>` đã có tính năng thật lấp ⇒ tên Spine (số mục gõ tay giữ nguyên)
+        title: title && !isPlaceholderText(title) ? title : defaultSectionTitle(spine, id, template.language),
         level,
         fromLayout: true,
         typed,
@@ -738,7 +740,11 @@ export const buildLayoutSections = (
   // FLF-252: mục chức năng chưa bị sửa từ lúc nhập ⇒ in nguyên văn file (nhãn, gạch đầu dòng, ảnh đúng thứ tự)
   const originals = new Map((template.functionOriginals ?? []).filter((o) => o.blocks.length).map((o) => [o.section_id, o]))
   /** Khối in của mục chức năng từ nguyên văn file: chưa sửa ⇒ y nguyên văn; CR sửa ⇒ chỉ khối của trường đã đổi dựng lại. */
+  // FLF-413: mục có heading là chỗ điền của mẫu (`3.2.1 <<Function Name 1>>`) — "nguyên văn" của nó là hướng dẫn + hình mẫu, không
+  // phải nội dung: tính năng / chức năng thật lấp vào thì dựng từ Spine
+  const frameSections = new Set(template.layout.filter((e) => isPlaceholderText(fileNumber(e.heading_text, e.number_label).title)).map((e) => e.section_id))
   const originalOf = (sectionId: string): FunctionOriginalBlock[] | null => {
+    if (frameSections.has(sectionId)) return null
     const o = originals.get(sectionId)
     const fn = o ? spine.functions.find((f) => `function:${f.id}` === sectionId) : undefined
     if (!o || !fn) return null

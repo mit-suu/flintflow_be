@@ -18,6 +18,7 @@
 import type { Addendum, Assumption, Spine } from "../spine/spine.types.js"
 import * as repository from "../spine/spine.repository.js"
 import { isBriefPhase } from "../spine/brief-core.js"
+import { isTemplateFrame } from "../spine/template-frames.js"
 import { listSections, sectionsOfPath, stepsOf } from "../spine/section-registry.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
@@ -127,12 +128,15 @@ const resolveFilterValue = (spine: Spine, value: string, loop: string | null): s
   return value
 }
 
+const FRAME_COLLECTIONS = new Set(["features", "functions"])
+
 const selectValue = (spine: Spine, selector: Selector, loop: string | null): unknown => {
   let node: unknown = spine
   for (const key of selector.path) node = isRecord(node) ? node[key] : undefined
 
   if (Array.isArray(node)) {
-    let items = node
+    // FLF-413: khung `<<Feature Name 1>>` của mẫu không phải dữ liệu — model không thấy, không sửa (lấp khi accept S-4.1)
+    let items = selector.path.length === 1 && FRAME_COLLECTIONS.has(selector.path[0]) ? node.filter((el) => !(isRecord(el) && isTemplateFrame(el))) : node
     if (selector.filter) {
       const { key, negate, value } = selector.filter
       const expected = resolveFilterValue(spine, value, loop)

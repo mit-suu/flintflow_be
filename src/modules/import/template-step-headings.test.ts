@@ -63,3 +63,16 @@ describe("templateSectionsByStep - mẫu FU-IT-SRS-01", () => {
     expect(headingsOfStep(templateSectionsByStep(layout), "S-9.1")).toEqual([])
   })
 })
+
+describe("templateSectionsByStep - FLF-413 khung của mẫu", () => {
+  const layout: LayoutEntry[] = [
+    { order: 0, heading_text: "3.2 <<Feature Name 1>>", level: 2, section_id: "feature:F-3.2" },
+    { order: 1, heading_text: "3.3 <<Feature Name 2>>", level: 2, section_id: "feature:F-3.3" }
+  ]
+  it("khung đã lấp ⇒ tên thật giữ số mục; khung đã bỏ ⇒ không liệt kê", () => {
+    const spine = { features: [{ id: "F-3.2", name: "Booking and Deposit", order: 0 }], functions: [] } as unknown as Parameters<typeof templateSectionsByStep>[1]
+    const titles = [...templateSectionsByStep(layout, spine).values()].flat()
+    expect(titles).toContain("3.2 Booking and Deposit")
+    expect(titles.some((t) => t.includes("<<"))).toBe(false)
+  })
+})
