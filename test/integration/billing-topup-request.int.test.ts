@@ -3,14 +3,19 @@
  * (webhook / admin) ⇒ người yêu cầu được báo, yêu cầu đóng. Không có lượt gọi AI nào.
  */
 import { describe, expect, it, vi } from "vitest"
+import mongoose from "mongoose"
 import request from "supertest"
 import app from "../../src/app.js"
 import { authAs, seedFixture, type SeededFixture } from "../setup.js"
 import { User } from "../../src/modules/user/user.model.js"
 import { Membership } from "../../src/modules/organization/membership.model.js"
+import { Project } from "../../src/modules/project/project.model.js"
 import { Notification } from "../../src/modules/notification/notification.model.js"
 import { CreditTopupRequest } from "../../src/modules/billing/credit-topup-request.model.js"
 import { fulfillTopupRequests } from "../../src/modules/billing/topup-request.service.js"
+import { ChangeRequest } from "../../src/modules/change-request/change-request.model.js"
+import { ImportedDocument } from "../../src/modules/import/imported-document.model.js"
+import { StepRun } from "../../src/modules/pipeline/run-state.model.js"
 
 const joinOrg = async (orgId: string, role: "lead" | "analyst") => {
   const email = `${role}-${Date.now()}-${Math.random().toString(16).slice(2)}@flintflow.test`
@@ -64,6 +69,115 @@ describe("POST /billing/topup-request", () => {
     expect(await Notification.countDocuments({ userId: seeded.userId, type: "credit_topped_up" })).toBe(0)
     // Không còn yêu cầu mở ⇒ nạp lần nữa không báo ai
     expect(await fulfillTopupRequests(seeded.orgId, 50, { kind: "admin", userId: null })).toBe(0)
+  })
+
+  it("không bấm Báo Lead nạp: phát hiện CR paused credits + StepRun INSUFFICIENT_CREDIT, gộp 1 thông báo mỗi thành viên, payment không báo Lead nạp, admin báo cả Lead", async () => {
+    const seeded = await seedFixture("minimal")
+    const analyst = await joinOrg(seeded.orgId, "analyst")
+    const analystObjectId = new mongoose.Types.ObjectId(analyst.id)
+
+    await ChangeRequest.create({
+      projectId: seeded.projectId,
+      cr_id: "CR-001",
+      title: "Sửa rule mật khẩu",
+      description: "Tăng độ dài tối thiểu lên 10 ký tự",
+      source: { kind: "stakeholder_email", ref: null, note: null },
+      requester: "PM Lan",
+      status: "proposing",
+      paused: { reason: "credits", at: new Date() },
+      base_doc_version: "0.0",
+      created_by: analystObjectId
+    })
+
+    const now = new Date()
+    await StepRun.create([
+      {
+        projectId: seeded.projectId,
+        step_id: "S-3.1",
+        run_id: "run-analyst-1",
+        by: analyst.id,
+        status: "interrupted",
+        stage: "draft",
+        started_at: now,
+        last_event_at: now,
+        locked_until: now,
+        error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit" }
+      },
+      {
+        projectId: seeded.projectId,
+        step_id: "S-3.2",
+        run_id: "run-lead-1",
+        by: seeded.userId,
+        status: "interrupted",
+        stage: "draft",
+        started_at: now,
+        last_event_at: now,
+        locked_until: now,
+        error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit" }
+      }
+    ])
+
+    // Payment từ Lead: gửi đúng 1 credit_topped_up cho Analyst (gộp CR + StepRun), 0 cho Lead đang thanh toán
+    expect(await fulfillTopupRequests(seeded.orgId, 100, { kind: "payment", userId: seeded.userId })).toBe(2)
+    const [analystNotice] = await notificationsOf(analyst.id, "credit_topped_up", 1)
+    expect(String(analystNotice.organizationId)).toBe(seeded.orgId)
+    expect(analystNotice.body).toContain("bấm tiếp tục")
+    expect(analystNotice.link).toBe(`/projects/${seeded.projectId}`)
+    expect(await Notification.countDocuments({ userId: seeded.userId, type: "credit_topped_up" })).toBe(0)
+
+    const crAfter = await ChangeRequest.findOne({ projectId: seeded.projectId, cr_id: "CR-001" }).lean()
+    expect(crAfter?.paused?.reason).toBe("credits")
+    expect(crAfter?.status).toBe("proposing")
+
+    // Admin cộng credit: không có Lead nào đang trả tiền ⇒ báo cả Analyst lẫn Lead
+    expect(await fulfillTopupRequests(seeded.orgId, 50, { kind: "admin", userId: null })).toBe(2)
+    await notificationsOf(analyst.id, "credit_topped_up", 2)
+    const [leadNotice] = await notificationsOf(seeded.userId, "credit_topped_up", 1)
+    expect(String(leadNotice.organizationId)).toBe(seeded.orgId)
+    expect(leadNotice.body).toContain("Quản trị viên đã nạp 50 credit")
+  })
+
+  it("phát hiện ImportedDocument đang paused credits của dự án chưa xoá mềm; bỏ qua dự án đã xoá mềm", async () => {
+    const seeded = await seedFixture("minimal")
+    const activeAnalyst = await joinOrg(seeded.orgId, "analyst")
+    const deletedAnalyst = await joinOrg(seeded.orgId, "analyst")
+
+    const deletedProject = await Project.create({
+      userId: deletedAnalyst.id,
+      organizationId: seeded.orgId,
+      name: "Deleted Project",
+      mode: "import",
+      deletedAt: new Date()
+    })
+
+    await ImportedDocument.create([
+      {
+        projectId: seeded.projectId,
+        sha256: "hash-active",
+        original_name: "active.docx",
+        size: 100,
+        preflight: { status: "accepted", issues: [] },
+        status: "extracting",
+        paused: { reason: "credits", at: new Date() },
+        extract_cursor: "fixed:1",
+        created_by: new mongoose.Types.ObjectId(activeAnalyst.id)
+      },
+      {
+        projectId: deletedProject._id,
+        sha256: "hash-deleted",
+        original_name: "deleted.docx",
+        size: 100,
+        preflight: { status: "accepted", issues: [] },
+        status: "checking",
+        paused: { reason: "credits", at: new Date() },
+        extract_cursor: null,
+        created_by: new mongoose.Types.ObjectId(deletedAnalyst.id)
+      }
+    ])
+
+    expect(await fulfillTopupRequests(seeded.orgId, 80, { kind: "payment", userId: seeded.userId })).toBe(1)
+    await notificationsOf(activeAnalyst.id, "credit_topped_up", 1)
+    expect(await Notification.countDocuments({ userId: deletedAnalyst.id, type: "credit_topped_up" })).toBe(0)
   })
 
   it("Viewer không báo được (403); không có org ⇒ 400/403", async () => {

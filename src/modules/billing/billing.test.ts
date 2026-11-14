@@ -51,6 +51,9 @@ vi.mock("../notification/notification.service.js", () => ({
   notify: vi.fn(async () => null),
   notifyAdmins: vi.fn(async () => 0)
 }))
+vi.mock("./topup-request.service.js", () => ({
+  fulfillTopupRequests: vi.fn(async () => 0)
+}))
 vi.mock("./payment-service.client.js", () => ({
   createPaymentOrder: vi.fn(),
   getPaymentOrder: vi.fn(),
@@ -60,6 +63,7 @@ vi.mock("./payment-service.client.js", () => ({
 
 import { fakeDb, TRANSACTION_UNSUPPORTED } from "./__tests__/fake-mongo.js"
 import { notify } from "../notification/notification.service.js"
+import { fulfillTopupRequests } from "./topup-request.service.js"
 import { errorHandler } from "../../shared/middlewares/error-handler.js"
 import { signAccessToken } from "../../shared/auth/jwt.util.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -187,7 +191,8 @@ describe("billing.service", () => {
       expect(result).toEqual({ success: true, status: "succeeded", alreadyProcessed: false, creditsAdded: 100 })
       expect(walletOf()!.balance).toBe(planConfig.free.initialCredits + 100)
       expect(purchases()).toHaveLength(1)
-      expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "payment_success" }))
+      expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "payment_success", organizationId: ORG }))
+      expect(fulfillTopupRequests).toHaveBeenCalledWith(ORG, 100, { kind: "payment", userId: USER })
     })
 
     it("callback gọi lại cùng order_id không cộng lần hai", async () => {
@@ -247,7 +252,7 @@ describe("billing.service", () => {
 
       expect(intentDoc(intentId).status).toBe("failed")
       expect(purchases()).toHaveLength(0)
-      expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "payment_failed" }))
+      expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "payment_failed", organizationId: ORG }))
     })
   })
 
@@ -316,7 +321,8 @@ describe("billing.service", () => {
       expect(balance).toMatchObject({ plan: "pro", planLabel: "Pro", reserved: 0 })
       expect(balance.balance).toBe(planConfig.free.initialCredits + planConfig.pro.monthlyCredits)
       expect(fakeDb.model("Subscription").docs).toHaveLength(1)
-      expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "plan_changed" }))
+      expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "plan_changed", organizationId: ORG }))
+      expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "payment_success", organizationId: ORG }))
     })
 
     describe("FLF-347: không hạ gói khi gói trả phí còn hạn", () => {
@@ -347,6 +353,7 @@ describe("billing.service", () => {
 
         await billingService.upgradePlan(ORG, USER, "free")
         expect(fakeDb.model("Subscription").docs[0].plan).toBe("free")
+        expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "plan_changed", organizationId: ORG }))
       })
     })
 
