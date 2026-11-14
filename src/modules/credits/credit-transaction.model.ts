@@ -38,6 +38,12 @@ export interface ICreditTransaction extends Document {
   /** UC-60: token của lượt gọi — chỉ dòng `deduct` (và dòng `reserve` đã deducted) mới có. */
   tokensIn?: number | null
   tokensOut?: number | null
+  /** UC-59: thông tin thanh toán trên dòng `purchase` (null với dòng usage / dòng cũ). */
+  intentId?: mongoose.Types.ObjectId | null
+  packageId?: string | null
+  price?: number | null
+  currency?: string | null
+  referenceCode?: string | null
   createdAt: Date
   updatedAt: Date
 }
@@ -109,6 +115,27 @@ const creditTransactionSchema = new Schema<ICreditTransaction>(
     },
     tokensOut: {
       type: Number,
+      default: null
+    },
+    intentId: {
+      type: Schema.Types.ObjectId,
+      ref: "PaymentIntent",
+      default: null
+    },
+    packageId: {
+      type: String,
+      default: null
+    },
+    price: {
+      type: Number,
+      default: null
+    },
+    currency: {
+      type: String,
+      default: null
+    },
+    referenceCode: {
+      type: String,
       default: null
     }
   },

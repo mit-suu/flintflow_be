@@ -174,8 +174,8 @@ describe("billing.service", () => {
   })
 
   describe("handlePaymentCallback", () => {
-    it("paid + xác minh remote paid: cộng credit, ghi purchase, notify", async () => {
-      await billingService.createCheckout(ORG, USER, "pack_100")
+    it("paid + xác minh remote paid: cộng credit, ghi purchase kèm metadata, notify", async () => {
+      const checkout = await billingService.createCheckout(ORG, USER, "pack_100")
       vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1"))
 
       const result = await billingService.handlePaymentCallback({
@@ -188,6 +188,15 @@ describe("billing.service", () => {
       expect(result).toEqual({ success: true, status: "succeeded", alreadyProcessed: false, creditsAdded: 100 })
       expect(walletOf()!.balance).toBe(planConfig.free.initialCredits + 100)
       expect(purchases()).toHaveLength(1)
+      expect(purchases()[0]).toMatchObject({
+        type: "purchase",
+        amount: 100,
+        packageId: "pack_100",
+        price: PACK_100_AMOUNT,
+        currency: "VND",
+        referenceCode: "REF0000001"
+      })
+      expect(String(purchases()[0].intentId)).toBe(checkout.intentId)
       expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "payment_success", organizationId: ORG }))
       expect(fulfillTopupRequests).toHaveBeenCalledWith(ORG, 100, { kind: "payment", userId: USER })
     })
@@ -380,12 +389,47 @@ describe("billing.service", () => {
 
       const balance = await billingService.getBalance(ORG, USER)
       expect(balance.plan).toBe("free")
+      expect(balance.planLimits).toEqual({
+        maxMembers: planConfig.free.maxMembers,
+        maxProjects: planConfig.free.maxProjects,
+        monthlyCredits: planConfig.free.monthlyCredits
+      })
       expect(balance.ledger).toHaveLength(20)
       expect(balance.ledger[0].amount).toBe(24)
 
-      const page2 = await billingService.listTransactions(ORG, 2, 20)
+      const page2 = await billingService.listTransactions(ORG, 2, 20, { includePayments: true })
       expect(page2.items).toHaveLength(5)
       expect(page2.meta).toMatchObject({ total: 25, totalPages: 2 })
+    })
+
+    it("getBalance với role=analyst chỉ trả USAGE_TYPES trong ledger và đủ planLimits theo gói", async () => {
+      await fakeDb.model("Subscription").create({
+        userId: new mongoose.Types.ObjectId(USER),
+        organizationId: new mongoose.Types.ObjectId(ORG),
+        plan: "pro",
+        status: "active",
+        monthlyCreditsAllotment: planConfig.pro.monthlyCredits,
+        currentPeriodStart: new Date(),
+        currentPeriodEnd: new Date(Date.now() + 86_400_000)
+      })
+      await fakeDb.model("CreditTransaction").create([
+        { userId: new mongoose.Types.ObjectId(USER), organizationId: new mongoose.Types.ObjectId(ORG), type: "purchase", actionType: "purchase", amount: 100, balanceAfter: 400 },
+        { userId: new mongoose.Types.ObjectId(USER), organizationId: new mongoose.Types.ObjectId(ORG), type: "admin_adjust", actionType: "admin_adjust", amount: 50, balanceAfter: 450 },
+        { userId: new mongoose.Types.ObjectId(USER), organizationId: new mongoose.Types.ObjectId(ORG), type: "monthly_reset", actionType: "monthly_reset", amount: 1000, balanceAfter: 1450 },
+        { userId: new mongoose.Types.ObjectId(USER), organizationId: new mongoose.Types.ObjectId(ORG), type: "reserve", actionType: "draft", amount: 4, balanceAfter: 1446 },
+        { userId: new mongoose.Types.ObjectId(USER), organizationId: new mongoose.Types.ObjectId(ORG), type: "deduct", actionType: "draft", amount: 2, balanceAfter: 1448 }
+      ])
+
+      const analystBal = await billingService.getBalance(ORG, USER, "analyst")
+      expect(analystBal.planLimits).toEqual({
+        maxMembers: planConfig.pro.maxMembers,
+        maxProjects: planConfig.pro.maxProjects,
+        monthlyCredits: planConfig.pro.monthlyCredits
+      })
+      expect(analystBal.ledger.map((r: { type: string }) => r.type).sort()).toEqual(["deduct", "reserve"])
+
+      const leadBal = await billingService.getBalance(ORG, USER, "lead")
+      expect(leadBal.ledger).toHaveLength(5)
     })
   })
 
@@ -481,6 +525,149 @@ describe("billing.service", () => {
 
       const { items } = await billingService.listTransactions(ORG, 1, 20, { includePayments: true })
       expect(items).toHaveLength(0)
+    })
+
+    it("Analyst (includePayments: false): chỉ thấy USAGE_TYPES, ẩn purchase/monthly_reset/admin_adjust; kind=payment trả rỗng", async () => {
+      await ledgerRow({ type: "purchase", actionType: "purchase", amount: 100 })
+      await ledgerRow({ type: "monthly_reset", actionType: "monthly_reset", amount: 300 })
+      await ledgerRow({ type: "admin_adjust", actionType: "admin_adjust", amount: 50 })
+      await ledgerRow({ type: "reserve", actionType: "draft", amount: 4 })
+      await ledgerRow({ type: "deduct", actionType: "draft", amount: 2 })
+      await ledgerRow({ type: "release", actionType: "draft", amount: 2 })
+      await ledgerRow({ type: "refund", actionType: "draft", amount: 1 })
+      await intent("pending")
+      await intent("failed")
+
+      const all = await billingService.listTransactions(ORG, 1, 20, { includePayments: false })
+      expect(all.items.map((r) => r.type).sort()).toEqual(["deduct", "refund", "release", "reserve"])
+      expect(all.meta.total).toBe(4)
+
+      const pay = await billingService.listTransactions(ORG, 1, 20, { kind: "payment", includePayments: false })
+      expect(pay.items).toEqual([])
+      expect(pay.meta).toEqual({ page: 1, limit: 20, total: 0, totalPages: 0 })
+    })
+
+    it("Lead kind=payment gồm cả dòng purchase succeeded (có metadata) và pending/failed có currency/referenceCode", async () => {
+      const i1 = await intent("succeeded", { referenceCode: "REF-OK", amount: PACK_100_AMOUNT })
+      await ledgerRow({
+        type: "purchase",
+        actionType: "purchase",
+        amount: 100,
+        intentId: i1._id,
+        packageId: "pack_100",
+        price: PACK_100_AMOUNT,
+        currency: "VND",
+        referenceCode: "REF-OK"
+      })
+      await intent("pending", { referenceCode: "REF-PEND" })
+      await ledgerRow({ type: "deduct" })
+
+      const res = await billingService.listTransactions(ORG, 1, 20, { kind: "payment", includePayments: true })
+      expect(res.meta.total).toBe(2)
+      expect(res.items.find((r) => r.type === "purchase")).toMatchObject({
+        type: "purchase",
+        paymentStatus: "succeeded",
+        intentId: String(i1._id),
+        packageId: "pack_100",
+        price: PACK_100_AMOUNT,
+        currency: "VND",
+        referenceCode: "REF-OK"
+      })
+      expect(res.items.find((r) => r.type === "payment")).toMatchObject({
+        type: "payment",
+        paymentStatus: "pending",
+        currency: "VND",
+        referenceCode: "REF-PEND"
+      })
+    })
+
+    it("backfill dòng purchase cũ (packageId null): ưu tiên khớp intentId, sau đó khớp timestamp gần nhất + credits", async () => {
+      const t1 = new Date("2026-01-01T10:00:00Z")
+      const t2 = new Date("2026-01-02T10:00:00Z")
+      const byIdIntent = await intent("succeeded", {
+        packageId: "pack_500",
+        credits: 500,
+        amount: 199_000,
+        currency: "VND",
+        referenceCode: "REF-BY-ID",
+        createdAt: new Date("2026-01-03T10:00:00Z"),
+        processedAt: new Date("2026-01-03T10:00:00Z")
+      })
+      const nearIntent = await intent("succeeded", {
+        packageId: "pack_100",
+        credits: 100,
+        amount: PACK_100_AMOUNT,
+        currency: "VND",
+        referenceCode: "REF-NEAR",
+        createdAt: t1,
+        processedAt: t1
+      })
+      await intent("succeeded", {
+        packageId: "plan:pro",
+        credits: 100,
+        amount: 199_000,
+        currency: "VND",
+        referenceCode: "REF-FAR",
+        createdAt: t2,
+        processedAt: t2
+      })
+
+      // Dòng có intentId nhưng chưa có packageId ⇒ khớp đúng intentId
+      await ledgerRow({
+        type: "purchase",
+        actionType: "purchase",
+        amount: 500,
+        intentId: byIdIntent._id,
+        packageId: null,
+        createdAt: t1
+      })
+      // Dòng không có intentId ⇒ khớp theo timestamp gần nhất (t1) + credits=100
+      await ledgerRow({
+        type: "purchase",
+        actionType: "purchase",
+        amount: 100,
+        intentId: null,
+        packageId: null,
+        createdAt: new Date(t1.getTime() + 500)
+      })
+      // Dòng purchase không có PaymentIntent khớp ⇒ fallback null & VND
+      await ledgerRow({
+        type: "purchase",
+        actionType: "purchase",
+        amount: 999,
+        intentId: null,
+        packageId: null,
+        createdAt: t2
+      })
+
+      const res = await billingService.listTransactions(ORG, 1, 20, { includePayments: true })
+      const row500 = res.items.find((r) => r.amount === 500)
+      expect(row500).toMatchObject({
+        paymentStatus: "succeeded",
+        intentId: String(byIdIntent._id),
+        packageId: "pack_500",
+        price: 199_000,
+        currency: "VND",
+        referenceCode: "REF-BY-ID"
+      })
+      const row100 = res.items.find((r) => r.amount === 100)
+      expect(row100).toMatchObject({
+        paymentStatus: "succeeded",
+        intentId: String(nearIntent._id),
+        packageId: "pack_100",
+        price: PACK_100_AMOUNT,
+        currency: "VND",
+        referenceCode: "REF-NEAR"
+      })
+      const row999 = res.items.find((r) => r.amount === 999)
+      expect(row999).toMatchObject({
+        paymentStatus: "succeeded",
+        intentId: null,
+        packageId: null,
+        price: null,
+        currency: "VND",
+        referenceCode: null
+      })
     })
   })
 })

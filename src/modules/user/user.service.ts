@@ -60,12 +60,14 @@ export const getUserById = async (id: string): Promise<UserDTO> => {
 const activeOrgCredit = async (userId: string, orgId: string | null | undefined): Promise<Pick<MeDTO, "balance" | "creditOrganization">> => {
   const none = { balance: 0, creditOrganization: null }
   if (!orgId || !mongoose.isValidObjectId(orgId)) return none
-  const [member, org, wallet] = await Promise.all([
-    Membership.exists({ organizationId: orgId, userId }),
+  // UC-56: Viewer không được xem ví / thông tin thanh toán của org
+  const membership = await Membership.findOne({ userId, organizationId: orgId }).select("role").lean()
+  if (!membership || membership.role === "viewer") return none
+  const [org, wallet] = await Promise.all([
     Organization.findById(orgId, { name: 1 }).lean(),
     CreditWallet.findOne({ organizationId: orgId }, { balance: 1, reserved: 1 }).lean()
   ])
-  if (!member || !org) return none
+  if (!org) return none
   return {
     balance: wallet ? wallet.balance - wallet.reserved : 0,
     creditOrganization: { id: String(org._id), name: org.name }
