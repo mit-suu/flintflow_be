@@ -13,6 +13,8 @@ import { Usage } from "../spine/usage.model.js"
 import { RenderedDocumentCache } from "../render/rendered-document.model.js"
 import { gridFsDiagramStore } from "../diagram/diagram-file.store.js"
 import mongoose from "mongoose"
+import { vietnameseSearchPattern } from "../../shared/utils/vi-search.js"
+import type { ListProjectsQuery, ProjectListSort } from "./project.validation.js"
 import { assertFolderOwned, folderStillExists } from "../folder/folder.service.js"
 import { ImportedDocument } from "../import/imported-document.model.js"
 import { DocBlock } from "../import/doc-block.model.js"
@@ -141,6 +143,35 @@ export const getProjects = async (orgId: string, status?: string): Promise<IProj
     filter.status = status
   }
   return await Project.find(filter).sort({ createdAt: -1 })
+}
+
+const PROJECT_LIST_ORDER: Record<ProjectListSort, Record<string, 1 | -1>> = {
+  created: { createdAt: -1, _id: -1 },
+  updated: { updatedAt: -1, _id: -1 },
+  // Mongo xếp null nhỏ nhất ⇒ giảm dần thì dự án chưa mở nằm cuối (khớp vùng "Chưa mở" của FE)
+  opened: { lastOpenedAt: -1, _id: -1 }
+}
+
+/**
+ * Một trang dự án của org (FLF-404): lọc trạng thái / cách làm / thư mục, tìm tên không dấu, sắp xếp — tất cả ở BE, vì lọc
+ * trên mấy trang đã tải ở FE sẽ ra kết quả sai. Document trả nguyên như `getProjects` (cùng hình JSON).
+ */
+export const listProjectsPage = async (orgId: string, query: ListProjectsQuery) => {
+  const { page, limit, status, mode, q, sort, folder } = query
+  const filter: Record<string, unknown> = { organizationId: orgId }
+  if (status) filter.status = status
+  if (mode) filter.mode = mode
+  if (q) filter.name = vietnameseSearchPattern(q)
+  if (folder) filter.folderId = folder === "none" ? null : new mongoose.Types.ObjectId(folder)
+
+  const [total, items] = await Promise.all([
+    Project.countDocuments(filter),
+    Project.find(filter)
+      .sort(PROJECT_LIST_ORDER[sort])
+      .skip((page - 1) * limit)
+      .limit(limit)
+  ])
+  return { items, meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } }
 }
 
 /**
