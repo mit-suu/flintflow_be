@@ -44,6 +44,7 @@ import { addendumForUnit, assumptionsForPrompt, buildStepContext, elicitProjecti
 import { buildConversationSummary } from "./conversation-summary.js"
 import { composeStepGateMessage, spokenAssumptionIds } from "./gate-message.js"
 import { askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
+import { DEFAULT_CHOICE, diagramChoiceFallbackNote, diagramChoiceFor, diagramChoiceKindOfTopic, diagramChoiceLabel, diagramChoiceLead, diagramChoiceQuestion, projectDiagramChoiceStore, resolveDiagramChoice, type DiagramChoiceStore } from "./diagram-choice.js"
 import { elicitPolicyFor, keepConflictsOnly, reconcileReply, trimTailQuestion } from "./fast-path.js"
 import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, currentBatch, followUpQuestions, followUpReply, indexOfQuestion, questionIdsFor, sameText, shapeQuestions, splitNumberedAnswer, stripRecommended, verifiedExcerpt } from "./question-shape.js"
 import { MAX_SCHEMA_RETRIES, draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
@@ -134,6 +135,8 @@ export interface StepRunnerDeps {
    * hỏi + câu trả lời vừa nhận. `run` là khoá `/answer` đã chiếm (xem `resumeWaitingStep`).
    */
   resumeAnswers?: ResumeAnswers
+  /** FLF-418: đọc / ghi lựa chọn sơ đồ của Project (ký pháp ERD, mức Sequence) cho thẻ hỏi tất định. Thiếu ⇒ Mongo. */
+  diagramChoices?: DiagramChoiceStore
   /**
    * `runPhase` quyết định bước có tự Accept (im) hay dừng chờ user NGAY khi gate_ready sẵn sàng, trước khi ghi run-state / phát
    * cổng: bước im không được lộ một thẻ cổng có chip trong lúc server đang tự Accept (bấm ⇒ 409, gãy luồng). `quiet` ⇒ phát
@@ -1747,6 +1750,56 @@ export const runStep = async (
       }
     }
 
+    /**
+     * FLF-418: hỏi lựa chọn sơ đồ của dự án bằng thẻ tất định (spec §5). Chữ trả lời khớp bằng `resolveDiagramChoice`;
+     * không khớp ⇒ hỏi lại một lần ⇒ dùng giá trị khuyến nghị. Kết quả ghi Project (trước Draft / Render của chính bước)
+     * và sổ quyết định. `resumed`: câu trả lời tới qua `/answer` sau khi kết nối đã đóng.
+     */
+    const askDiagramChoice = async (resumed?: ResumeAnswers): Promise<void> => {
+      const store = d.diagramChoices ?? projectDiagramChoiceStore
+      const need = diagramChoiceFor(stepDef.template_id, await store.load(projectId), spine)
+      if (!need) return
+      const { kind } = need
+      if (need.backfill !== null) {
+        await store.save(projectId, kind, need.backfill)
+        return
+      }
+      const question = diagramChoiceQuestion(kind, replyLanguage)
+      const asked: PendingAnswerState["asked"] = [question]
+      const [questionId] = questionIdsFor(asked)
+      const ask = async (retry: boolean): Promise<AnswerPayload> => {
+        const lead = diagramChoiceLead(kind, replyLanguage, retry)
+        emit({ type: "elicit", step_id: stepId, delta: lead })
+        await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(lead, asked))
+        return (await announceWaiting(asked)).answer
+      }
+      let payload: AnswerPayload = resumed ? { answers: resumed.answers, ...(resumed.message ? { message: resumed.message } : {}) } : await ask(false)
+      for (let attempt = 1; ; attempt++) {
+        const card = payload.answers.find((a) => a.question_id === questionId)
+        const message = payload.message?.trim()
+        const text = card ? answerText(card.answer) : (message ?? "")
+        await markReceived(card ? 1 : 0, "Đã nhận lựa chọn của bạn")
+        if (!card && message && !payload.messageRecorded) await pushTranscript(projectId, sessionId, stepId, "user", message)
+        const value = resolveDiagramChoice(kind, text)
+        if (value === null && attempt < 2) {
+          if (card) await pushTranscript(projectId, sessionId, stepId, "user", text)
+          payload = await ask(true)
+          continue
+        }
+        const picked = value ?? DEFAULT_CHOICE[kind]
+        userDecided = true
+        await store.save(projectId, kind, picked)
+        if (value === null) {
+          const note = diagramChoiceFallbackNote(kind, picked, replyLanguage)
+          emit({ type: "elicit", step_id: stepId, delta: note })
+          await pushTranscript(projectId, sessionId, stepId, "ai", note)
+        }
+        // Sổ quyết định + transcript như câu trả lời thẻ (nhãn của giá trị, không phải chữ gõ lạ)
+        await recordAnswers(asked, [{ question_id: questionId, answer: diagramChoiceLabel(kind, picked, replyLanguage) }], card && value !== null ? {} : { transcript: [] })
+        return
+      }
+    }
+
     // T19 — pha S-9: việc của từng step nằm ở `s9/run-s9-step.ts`, không đi qua STEP_SKILLS.
     // S-9.1/S-9.5 không gọi model và không Meter (hết credit vẫn quét và vẫn ký baseline được).
     if (stepDef.phase === S9_PHASE) {
@@ -1775,9 +1828,15 @@ export const runStep = async (
       const elicitPolicy = elicitPolicyFor({ phase: stepDef.phase, hasUserMessage: userMessage !== undefined })
       const shouldElicit = (missing.length > 0 || noIdeaYet) && elicitPolicy !== "skip"
 
-      if (d.resumeAnswers) {
+      // FLF-418: thẻ hỏi tất định (ký pháp ERD ở S-4.5, mức Sequence ở S-5.4 lần đầu) — trước Elicit / Draft, không gọi model.
+      // Lượt chạy tiếp qua `/answer` cho chính thẻ này được xử lý ở đây, không đi vào `settleLoop` của câu model.
+      const resumedChoice = d.resumeAnswers?.asked.some((q) => diagramChoiceKindOfTopic(q.topic_key) !== null) ? d.resumeAnswers : undefined
+      await askDiagramChoice(resumedChoice)
+      const resumeAnswers = resumedChoice ? undefined : d.resumeAnswers
+
+      if (resumeAnswers) {
         // Câu hỏi đã hỏi và đã tính lượt ở lượt trước — không gọi model hỏi lại. Có tin chat thì AI đọc nó (FLF-221).
-        const { asked, answers, message } = d.resumeAnswers
+        const { asked, answers, message } = resumeAnswers
         await settleLoop(asked, { answers, ...(message ? { message } : {}) })
         ;({ spine, spineVersion } = await refresh(projectId))
       } else if (shouldElicit) {
