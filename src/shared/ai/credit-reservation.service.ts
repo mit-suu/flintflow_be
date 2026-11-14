@@ -3,7 +3,6 @@ import { CreditWallet } from "../../modules/credits/credit-wallet.model.js"
 import { Project } from "../../modules/project/project.model.js"
 import { Membership } from "../../modules/organization/membership.model.js"
 import { CreditTransaction } from "../../modules/credits/credit-transaction.model.js"
-import { PricingConfig } from "../../modules/admin/pricing-config.model.js"
 import { planConfig } from "../../modules/billing/plan.config.js"
 import { notify, notifyAdmins } from "../../modules/notification/notification.service.js"
 import { User } from "../../modules/user/user.model.js"
@@ -144,18 +143,29 @@ const notifyAdminsNewUser = async (userId: string): Promise<void> => {
 const ledgerInconsistent = (message: string, details: Record<string, unknown>) =>
   new AiActionError(500, message, "CREDIT_LEDGER_INCONSISTENT", details)
 
-export const getActionCost = async (actionType: string): Promise<number> => {
-  try {
-    const activePricing = await PricingConfig.findOne({ isActive: true })
-    if (activePricing?.actionCosts && typeof activePricing.actionCosts[actionType] === "number") {
-      return activePricing.actionCosts[actionType]
-    }
-  } catch (error) {
-    console.warn(`[CreditReservation] Failed to query PricingConfig, using default cost for '${actionType}'`)
-  }
+export const TOKEN_CREDIT_WEIGHTS = {
+  inputPer1k: 0.25,
+  outputPer1k: 1.0
+} as const
 
-  return DEFAULT_ACTION_COSTS[actionType] ?? 2
+/**
+ * Quyết toán credit thực tế từ token của lượt gọi (BR-01):
+ * - Action miễn phí (`reservedCost <= 0`) ⇒ `0`.
+ * - Không có số đo token ⇒ giữ nguyên `reservedCost`.
+ * - Có token ⇒ `min(reservedCost, max(1, ceil(in/1000 * 0.25 + out/1000 * 1.0)))`.
+ */
+export const calculateActualCreditCost = (reservedCost: number, tokens?: CreditUsageTokens): number => {
+  if (!Number.isFinite(reservedCost) || reservedCost <= 0) return 0
+  if (tokens === undefined) return reservedCost
+  const tokensIn = Number.isFinite(tokens.tokensIn) ? Math.max(0, tokens.tokensIn) : 0
+  const tokensOut = Number.isFinite(tokens.tokensOut) ? Math.max(0, tokens.tokensOut) : 0
+  const weighted =
+    (tokensIn / 1000) * TOKEN_CREDIT_WEIGHTS.inputPer1k +
+    (tokensOut / 1000) * TOKEN_CREDIT_WEIGHTS.outputPer1k
+  return Math.min(reservedCost, Math.max(1, Math.ceil(weighted)))
 }
+
+export const getActionCost = async (actionType: string): Promise<number> => DEFAULT_ACTION_COSTS[actionType] ?? 2
 
 export const getOrCreateWallet = async (userId: string, session: ClientSession | undefined, organizationId: string) => {
   const options = sessionOptions(session)
@@ -273,33 +283,51 @@ export const reserveCredit = async (
   }
 }
 
-const maybeNotifyLowCredit = (userId: string, balanceBefore: number, balanceAfter: number) => {
+const maybeNotifyLowCredit = async (
+  organizationId: string,
+  fallbackUserId: string,
+  balance: number,
+  reserved: number,
+  actualCost: number
+): Promise<void> => {
   const threshold = planConfig.lowCreditThreshold
+  const availableAfter = balance - reserved
+  const availableBefore = balance + actualCost - reserved
   // Chỉ báo khi VỪA vượt ngưỡng, không báo lại mỗi lần trừ tiếp
-  if (balanceBefore >= threshold && balanceAfter < threshold) {
-    void notify(userId, {
-      type: "low_credit",
+  if (!(availableBefore >= threshold && availableAfter < threshold)) return
+
+  try {
+    const leads = await Membership.find({ organizationId, role: "lead" }).select("userId").lean()
+    const leadIds = [...new Set(leads.map((m) => m.userId).filter(Boolean).map(String))]
+    const recipients = leadIds.length > 0 ? leadIds : [fallbackUserId]
+    const payload = {
+      organizationId,
+      type: "low_credit" as const,
       title: "Credit sắp hết",
-      body: `Số dư của bạn còn ${balanceAfter} credit. Nạp thêm để tiếp tục sử dụng AI.`,
+      body: `Số dư khả dụng của tổ chức còn ${availableAfter} credit. Nạp thêm để tiếp tục sử dụng AI.`,
       link: "/home/billing",
-      meta: { balance: balanceAfter, threshold }
-    })
+      meta: { balance: availableAfter, available: availableAfter, reserved, threshold }
+    }
+    await Promise.all(recipients.map((leadId) => notify(leadId, payload)))
+  } catch (error) {
+    console.warn(`[CreditReservation] Không gửi được thông báo low_credit cho org ${organizationId}:`, error)
   }
 }
 
 /**
- * Trừ credit cho một reservation sau khi AI chạy VÀ parse thành công.
- * Idempotent: gọi lại trên reservation đã deducted là no-op.
+ * Trừ credit thực tế cho một reservation sau khi AI chạy VÀ parse thành công, hoàn phần hold dư về ví khả dụng.
+ * Idempotent: gọi lại trên reservation đã deducted trả về số credit đã quyết toán trước đó.
  */
 export const deductCredit = async (
   reservation: CreditReservation,
   session?: ClientSession,
   tokens?: CreditUsageTokens
-): Promise<void> => {
+): Promise<number> => {
   const { reservationId, userId, organizationId, actionType, cost, projectId, stepId } = reservation
-  if (cost === 0) return // FLF-333: lượt miễn phí không có reservation trong sổ
+  if (cost <= 0) return 0 // FLF-333: lượt miễn phí không có reservation trong sổ
   const options = sessionOptions(session)
   const key = walletKey(organizationId)
+  const actualCost = calculateActualCreditCost(cost, tokens)
 
   // Claim reservation trước (chặn trừ hai lần). Cron có thể đã expire trước khi AI kịp
   // trả lời: vẫn tính phí, claim expired → deducted.
@@ -322,22 +350,29 @@ export const deductCredit = async (
 
   if (!claimed) {
     const current = await CreditTransaction.findOne({ _id: reservationId }, null, options)
-    if (current?.state === "deducted") return
+    if (current?.state === "deducted") {
+      const existing = await CreditTransaction.findOne(
+        { reservationId: new mongoose.Types.ObjectId(reservationId), type: "deduct" },
+        null,
+        options
+      )
+      return existing?.amount ?? actualCost
+    }
     throw ledgerInconsistent("Không thể trừ credit cho reservation không hợp lệ", {
       reservationId,
       state: current?.state ?? null
     })
   }
 
-  // reserved: trừ cả balance lẫn phần đang giữ.
-  // expired: phần giữ đã trả về ví ⇒ chỉ trừ trên số KHẢ DỤNG (balance - reserved),
+  // reserved: trừ actualCost khỏi balance và nhả toàn bộ hold `cost` khỏi reserved (hoàn phần dư về available).
+  // expired: phần giữ đã trả về ví ⇒ chỉ trừ actualCost trên số KHẢ DỤNG (balance - reserved),
   // không được đẩy khả dụng xuống âm khi reservation khác đang giữ credit.
   const walletFilter =
     previousState === "reserved"
-      ? { ...key, balance: { $gte: cost }, reserved: { $gte: cost } }
-      : { ...key, $expr: { $gte: [{ $subtract: ["$balance", "$reserved"] }, cost] } }
+      ? { ...key, balance: { $gte: actualCost }, reserved: { $gte: cost } }
+      : { ...key, $expr: { $gte: [{ $subtract: ["$balance", "$reserved"] }, actualCost] } }
   const walletUpdate =
-    previousState === "reserved" ? { $inc: { balance: -cost, reserved: -cost } } : { $inc: { balance: -cost } }
+    previousState === "reserved" ? { $inc: { balance: -actualCost, reserved: -cost } } : { $inc: { balance: -actualCost } }
 
   const wallet = await CreditWallet.findOneAndUpdate(walletFilter, walletUpdate, {
     ...options,
@@ -354,6 +389,7 @@ export const deductCredit = async (
     throw ledgerInconsistent("Ví credit không khớp với reservation khi trừ credit", {
       reservationId,
       cost,
+      actualCost,
       previousState
     })
   }
@@ -365,7 +401,7 @@ export const deductCredit = async (
         organizationId: new mongoose.Types.ObjectId(organizationId),
         projectId: toObjectIdOrNull(projectId),
         actionType,
-        amount: cost,
+        amount: actualCost,
         type: "deduct",
         reservationId: new mongoose.Types.ObjectId(reservationId),
         // Cùng quy ước "khả dụng sau" với reserve/release/purchase
@@ -378,7 +414,8 @@ export const deductCredit = async (
     options
   )
 
-  maybeNotifyLowCredit(userId, wallet.balance + cost, wallet.balance)
+  await maybeNotifyLowCredit(organizationId, userId, wallet.balance, wallet.reserved, actualCost)
+  return actualCost
 }
 
 /**
