@@ -62,11 +62,11 @@ beforeEach(() => {
 const DATA_ROOTS = /^(project|actors|roles|use_cases|features|screens|permissions|entities|functions|nfrs|business_rules|common_requirements|messages|other_requirements|glossary)\b/
 
 describe("finalize - Spine", () => {
-  it("bug #12b (QLHS 11/11): file ghi \"ký hiệu chân chim\" ⇒ dự án vẽ ERD theo crow's foot; file không ghi ⇒ giữ mặc định", async () => {
+  it("bug #12b (QLHS 11/11): file ghi \"ký hiệu chân chim\" ⇒ dự án vẽ ERD theo crow's foot; file không ghi ⇒ không ghi field (chưa chọn, vẽ theo chen)", async () => {
     const stated = await importFinalized({ srs: { overviewParagraphs: ["H7 · ERD (ký hiệu chân chim): vạch ngang = phía 1, chân chim = phía nhiều."] } })
     expect((await Project.findById(stated.projectId).lean())?.erdNotation).toBe("crowsfoot")
     const silent = await importFinalized()
-    expect((await Project.findById(silent.projectId).lean())?.erdNotation).toBe("chen")
+    expect((await Project.findById(silent.projectId).lean())?.erdNotation).toBeUndefined()
   })
 
   it("mọi field đã xác nhận ghi trong MỘT transaction by import, lý do có tên file", async () => {

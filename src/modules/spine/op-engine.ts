@@ -119,7 +119,7 @@ const keepKnownEdges = (given: unknown[], normalized: unknown[], target: ReturnT
 }
 
 /** Mảng phần tử không có `id`, chọn phần tử bằng khoá riêng: cạnh `flow_to` theo `to`, `attributes` theo `name`. */
-const KEYED_ARRAYS: ReadonlySet<string> = new Set(["flow_to", "attributes", "transitions", "interactions", "activity_flows", "deployment_links"])
+const KEYED_ARRAYS: ReadonlySet<string> = new Set(["flow_to", "attributes", "transitions", "interactions", "component_interactions", "activity_flows", "deployment_links"])
 
 const elementKeyOf = (el: unknown): string | null => {
   if (!isRecord(el)) return null
@@ -251,7 +251,7 @@ const expandEntityArraySet = (state: WorkState, op: Op, current: unknown): boole
 /** Mảng tuỳ chọn của phần tử (entity, function, use case): Spine cũ / phần tử chưa điền thì vắng, `add` vào đó tạo mảng rỗng trước (ghi thành một change). */
 const OPTIONAL_ARRAYS: Readonly<Record<string, ReadonlySet<string>>> = {
   entities: new Set(["attributes", "feature_ids", "states", "transitions"]),
-  functions: new Set(["interactions"]),
+  functions: new Set(["interactions", "component_interactions"]),
   use_cases: new Set(["activity_nodes", "activity_flows"])
 }
 

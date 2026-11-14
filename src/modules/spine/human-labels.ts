@@ -58,6 +58,7 @@ export const FIELD_LABELS: Readonly<Record<string, string>> = {
   states: "Trạng thái",
   transitions: "Chuyển trạng thái",
   interactions: "Tương tác actor - hệ thống",
+  component_interactions: "Tương tác giữa các thành phần",
   activity_nodes: "Bước của luồng xử lý",
   activity_flows: "Luồng giữa các bước",
   artifacts: "Artifact triển khai",
