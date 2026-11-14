@@ -172,7 +172,8 @@ export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.fre
   // svg@2 (FLF-396): đầu mũi tên data flow đổi từ phi tiêu khía lõm sang tam giác tô đặc ⇒ hình context cũ stale, vẽ lại
   context: "svg@2",
   // svg@2 (FLF-369): bộ xếp thử nhiều phương án (thứ tự hàng, actor hai bên) ⇒ hình svg@1 cũ thành stale, vẽ lại một lượt
-  usecase: "svg@2",
+  // svg@3 (FLF-421): hình phân cấp actor nối kiểu cây (thanh ngang chung, một tam giác mỗi cha) ⇒ hình cũ stale, vẽ lại
+  usecase: "svg@3",
   screen_flow: "svg@3",
   erd: "svg@1",
   class: "svg@1",
