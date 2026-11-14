@@ -560,10 +560,11 @@ describe("billing.service", () => {
         referenceCode: "REF-OK"
       })
       await intent("pending", { referenceCode: "REF-PEND" })
+      await intent("failed", { referenceCode: "REF-FAIL" })
       await ledgerRow({ type: "deduct" })
 
       const res = await billingService.listTransactions(ORG, 1, 20, { kind: "payment", includePayments: true })
-      expect(res.meta.total).toBe(2)
+      expect(res.meta.total).toBe(3)
       expect(res.items.find((r) => r.type === "purchase")).toMatchObject({
         type: "purchase",
         paymentStatus: "succeeded",
@@ -573,11 +574,17 @@ describe("billing.service", () => {
         currency: "VND",
         referenceCode: "REF-OK"
       })
-      expect(res.items.find((r) => r.type === "payment")).toMatchObject({
+      expect(res.items.find((r) => r.type === "payment" && r.paymentStatus === "pending")).toMatchObject({
         type: "payment",
         paymentStatus: "pending",
         currency: "VND",
         referenceCode: "REF-PEND"
+      })
+      expect(res.items.find((r) => r.type === "payment" && r.paymentStatus === "failed")).toMatchObject({
+        type: "payment",
+        paymentStatus: "failed",
+        currency: "VND",
+        referenceCode: "REF-FAIL"
       })
     })
 
@@ -661,6 +668,64 @@ describe("billing.service", () => {
       })
       const row999 = res.items.find((r) => r.amount === 999)
       expect(row999).toMatchObject({
+        paymentStatus: "succeeded",
+        intentId: null,
+        packageId: null,
+        price: null,
+        currency: "VND",
+        referenceCode: null
+      })
+    })
+
+    it("dòng purchase mồ côi (packageId/intentId null) không chiếm PaymentIntent đã gắn cho purchase khác (cùng trang và khác trang)", async () => {
+      const tNew = new Date("2026-02-02T10:00:00Z")
+      const tOld = new Date("2026-02-01T10:00:00Z")
+      const claimedIntent = await intent("succeeded", {
+        packageId: "pack_100",
+        credits: 100,
+        amount: PACK_100_AMOUNT,
+        currency: "VND",
+        referenceCode: "REF-CLAIMED",
+        createdAt: tNew,
+        processedAt: tNew
+      })
+      // Dòng purchase mới hơn đã gắn intentId + packageId (nằm ở trang 1 khi limit=1)
+      await ledgerRow({
+        type: "purchase",
+        actionType: "purchase",
+        amount: 100,
+        intentId: claimedIntent._id,
+        packageId: "pack_100",
+        price: PACK_100_AMOUNT,
+        currency: "VND",
+        referenceCode: "REF-CLAIMED",
+        createdAt: tNew
+      })
+      // Dòng purchase mồ côi cũ hơn cùng amount=100 (nằm cùng trang khi limit=20, và ở trang 2 khi limit=1)
+      const orphan = await ledgerRow({
+        type: "purchase",
+        actionType: "purchase",
+        amount: 100,
+        intentId: null,
+        packageId: null,
+        createdAt: tOld
+      })
+
+      const samePage = await billingService.listTransactions(ORG, 1, 20, { kind: "payment", includePayments: true })
+      const orphanSamePage = samePage.items.find((r) => String(r._id) === String(orphan._id))
+      expect(orphanSamePage).toMatchObject({
+        paymentStatus: "succeeded",
+        intentId: null,
+        packageId: null,
+        price: null,
+        currency: "VND",
+        referenceCode: null
+      })
+
+      const page2 = await billingService.listTransactions(ORG, 2, 1, { kind: "payment", includePayments: true })
+      expect(page2.items).toHaveLength(1)
+      expect(String(page2.items[0]._id)).toBe(String(orphan._id))
+      expect(page2.items[0]).toMatchObject({
         paymentStatus: "succeeded",
         intentId: null,
         packageId: null,
