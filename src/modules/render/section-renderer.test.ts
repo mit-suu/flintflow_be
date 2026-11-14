@@ -366,6 +366,27 @@ describe("renderSection - fixed sections", () => {
     expect(failed).toEqual([{ type: "image", png: "diagram-error:D31", caption: expect.stringMatching(/ - diagram could not be drawn yet$/) }])
   })
 
+  it("FLF-418 function:<id> - sơ đồ đã vẽ mức thành phần: chú thích \"Sequence Diagram\" + mô tả màn / bộ điều khiển / entity", () => {
+    const base = spine()
+    base.actors.push({ id: "A77", name: "Reviewer", kind: "human" } as Spine["actors"][number])
+    const fn = base.functions.find((f) => f.id === "FN01")!
+    fn.component_interactions = [
+      { from: "A77", to: "control", message: "Submit review", kind: "request", flow: "normal" },
+      { from: "control", to: "A77", message: "Show error", kind: "response", flow: "abnormal", guard: "review is empty" }
+    ]
+    const source = ["@startuml", 'actor ":Reviewer" as A77', 'control ":ReviewController" as SD_CONTROL', "@enduml"].join("\n")
+    const entry = { id: "D30", kind: "sequence", section: "function:FN01", owner_kind: "function", owner_id: "FN01", format: "puml", source, render_status: "ok", source_hash: "h", rendered_at: "2026-09-01T00:00:00.000Z" } as Spine["diagrams"][number]
+    const withDiagram: Spine = { ...base, diagrams: [...base.diagrams, entry] }
+    const png = (id: string) => `png-${id}`
+    const blocks = renderSection(withDiagram, "function:FN01", ctx({ number: "3.2.1", diagramPng: png })).blocks
+    const at = blocks.findIndex((b) => b.type === "image" && b.png === "png-D30")
+    expect(blocks[at]).toEqual({ type: "image", png: "png-D30", caption: `Sequence Diagram - ${fn.name}` })
+    expect(JSON.stringify(blocks[at + 1])).toContain("The diagram shows 2 messages between Reviewer, the controller")
+    const vi = renderSection(withDiagram, "function:FN01", ctx({ number: "3.2.1", language: "vi", diagramPng: png })).blocks
+    expect(vi.some((b) => b.type === "image" && b.caption === `Sơ đồ tuần tự - ${fn.name}`)).toBe(true)
+    expect(JSON.stringify(vi[vi.length - 1])).toContain("bộ điều khiển")
+  })
+
   it("feature:<id> - class diagram của feature đứng đầu mục (cả mẫu FPT), chú thích lấy từ <title>", () => {
     const base = spine()
     const svg = '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><title>Class Diagram - Authentication</title></svg>'

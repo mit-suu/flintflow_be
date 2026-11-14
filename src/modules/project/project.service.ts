@@ -1,4 +1,5 @@
 import { erdNotationOf, type ErdNotation } from "../../shared/diagram/erd-notation.js"
+import { sequenceLevelOf, type SequenceLevel } from "../../shared/diagram/sequence-level.js"
 import { screenThemeOf, type ScreenTheme } from "../../shared/diagram/screen-theme.js"
 import { Project, IProject, WITH_DELETED, type ProjectMode, type ProjectStartKind, type TemplateIntent } from "./project.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -386,6 +387,22 @@ export const setErdNotation = async (projectId: string, orgId: string, erdNotati
 }
 
 /**
+ * Đổi mức Sequence Diagram (FLF-418), cùng cách làm với `setErdNotation`: chỉ ghi field của Project, Spine không đổi. Mức là
+ * một phần của hash hình `sequence` (`renderedExtras`) ⇒ đổi xong sơ đồ đã vẽ thành `diagram_stale`; vẽ lại ngay (cần
+ * PlantUML server). Vẽ lại lỗi chỉ ghi log: lựa chọn đã lưu, hình stale được vẽ lại ở lượt render kế tiếp.
+ */
+export const setSequenceLevel = async (projectId: string, orgId: string, sequenceLevel: SequenceLevel, userId: string): Promise<IProject> => {
+  const notFound = () => new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
+  if (!mongoose.isValidObjectId(projectId)) throw notFound()
+  const before = await Project.findOne({ _id: projectId, organizationId: orgId }).select("sequenceLevel").lean()
+  if (!before) throw notFound()
+  const project = await Project.findOneAndUpdate({ _id: projectId, organizationId: orgId }, { sequenceLevel }, { new: true })
+  if (!project) throw notFound()
+  if (sequenceLevelOf(before) !== sequenceLevel) await redrawSequences(projectId, userId)
+  return project
+}
+
+/**
  * Đổi theme mockup màn (FLF-410). Chỉ ghi field của Project — Spine không đổi. Theme đã resolve nằm trong hash hình
  * `screen_layout` ⇒ đổi xong mọi mockup đã vẽ thành stale; vẽ lại ngay bằng spec đã lưu trong SVG (0 lượt model, 0 credit).
  * Màn chưa có spec (bảng function, wireframe cũ) giữ nguyên đến lượt vẽ kế tiếp. Vẽ lại lỗi chỉ ghi log.
@@ -411,6 +428,17 @@ export const redrawScreenLayouts = async (projectId: string, userId: string): Pr
     await redrawScreenLayoutsFromSpec(projectId, { by: userId, step_id: null })
   } catch (err) {
     console.warn(`[project] vẽ lại mockup màn sau khi đổi theme lỗi (project ${projectId}): ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+const redrawSequences = async (projectId: string, userId: string): Promise<void> => {
+  try {
+    const spine = await spineRepository.get(projectId)
+    if (!spine?.diagrams.some((d) => d.kind === "sequence")) return
+    const { renderDiagram } = await import("../diagram/diagram.service.js")
+    await renderDiagram(projectId, "sequence", null, { by: userId, step_id: null })
+  } catch (err) {
+    console.warn(`[project] vẽ lại Sequence Diagram sau khi đổi mức lỗi (project ${projectId}): ${err instanceof Error ? err.message : String(err)}`)
   }
 }
 

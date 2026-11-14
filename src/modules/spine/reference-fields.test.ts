@@ -21,8 +21,8 @@ const FIXTURE = load("spine-fixture-19-screens.json")
 
 describe("REFERENCE_FIELDS", () => {
   it("đủ 24 field của srs-spine.md §4.1, không trùng", () => {
-    expect(REFERENCE_FIELDS).toHaveLength(37)
-    expect(new Set(REFERENCE_FIELDS.map((f) => f.path)).size).toBe(37)
+    expect(REFERENCE_FIELDS).toHaveLength(39)
+    expect(new Set(REFERENCE_FIELDS.map((f) => f.path)).size).toBe(39)
   })
 
   it("mọi field đều được iterate trên fixture đầy đủ (trừ flags rỗng)", () => {
@@ -31,6 +31,7 @@ describe("REFERENCE_FIELDS", () => {
     for (const p of expected) {
       if (p === "progress.screen_queue[]") continue // fixture ở S-9, queue rỗng
       if (p === "actors[].parent_id") continue // fixture không có generalization — test riêng bên dưới
+      if (p.startsWith("functions[].component_interactions")) continue // FLF-418: fixture mức system — `component-interactions.test.ts`
       expect(seen.has(p), p).toBe(true)
     }
   })

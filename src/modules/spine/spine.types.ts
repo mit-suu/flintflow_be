@@ -244,6 +244,12 @@ export interface FunctionInteraction {
 }
 
 /**
+ * FLF-418: message của sơ đồ tuần tự mức thành phần. `from` / `to` là id actor, id màn (boundary), id entity hoặc
+ * `control` (mỗi function một control, tên tính khi vẽ). Luật kind / flow / guard như `FunctionInteraction`.
+ */
+export type ComponentInteraction = FunctionInteraction
+
+/**
  * Loại nút của sơ đồ activity (UML 2.5): `initial` (chấm đặc), `final` (activity final), `action` (hộp bo góc),
  * `decision` / `merge` (hình thoi), `fork` / `join` (thanh đặc).
  */
@@ -283,6 +289,8 @@ export interface Function {
   priority: Priority | null
   /** Message actor ↔ system theo thứ tự thời gian (sơ đồ tuần tự). Thiếu ⇒ `[]`. */
   interactions?: FunctionInteraction[]
+  /** FLF-418: message actor / màn / control / entity theo thứ tự thời gian (sơ đồ tuần tự mức thành phần). Thiếu ⇒ không có. */
+  component_interactions?: ComponentInteraction[]
   /** FLF-365: bản phát hành của yêu cầu (phân bổ yêu cầu, "1.0"; "deferred" = hoãn). Thiếu = chưa phân bổ. */
   release?: string | null
 }

@@ -222,6 +222,20 @@ export const functionInteractionSchema = z.strictObject({
   guard: z.string().optional()
 })
 
+/**
+ * FLF-418: đầu `control` của sơ đồ tuần tự mức thành phần — mỗi function đúng một control. Tên không lưu: renderer tính
+ * theo tên feature (`<Feature>Controller`).
+ */
+export const CONTROL_LIFELINE = "control"
+
+/**
+ * FLF-418: một message của sơ đồ tuần tự mức thành phần (ký pháp Visual Paradigm: actor → boundary → control → entity).
+ * `from` / `to` là id actor, id màn (boundary), id entity (entity) hoặc `control`; loại lifeline suy từ collection chứa id.
+ * Cùng hình dạng với `functionInteractionSchema` nên dùng chung selector 5 khoá
+ * (`component_interactions[from=S01,to=control,message=…,kind=request,flow=normal]`).
+ */
+export const componentInteractionSchema = functionInteractionSchema
+
 export const functionSchema = z.strictObject({
   id,
   screen_id: id.nullable(),
@@ -237,6 +251,8 @@ export const functionSchema = z.strictObject({
   priority: priority.nullable(),
   // Message actor ↔ system (sơ đồ tuần tự mức hệ thống). Thiếu ⇒ `[]` (Spine cũ không migrate)
   interactions: z.array(functionInteractionSchema).optional(),
+  // FLF-418: message giữa actor / màn / control / entity (sơ đồ tuần tự mức thành phần). Chỉ có khi dự án chọn mức component
+  component_interactions: z.array(componentInteractionSchema).optional(),
   /** FLF-365: bản phát hành của yêu cầu (phân bổ yêu cầu, "1.0"; "deferred" = hoãn). Thiếu = chưa phân bổ. */
   release: z.string().nullable().optional()
 })

@@ -962,6 +962,52 @@
               "additionalProperties": false
             }
           },
+          "component_interactions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "to": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^,[\\]]+$"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "request",
+                    "response"
+                  ]
+                },
+                "flow": {
+                  "type": "string",
+                  "enum": [
+                    "normal",
+                    "abnormal"
+                  ]
+                },
+                "guard": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "from",
+                "to",
+                "message",
+                "kind",
+                "flow"
+              ],
+              "additionalProperties": false
+            }
+          },
           "release": {
             "anyOf": [
               {
