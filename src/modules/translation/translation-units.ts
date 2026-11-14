@@ -86,7 +86,7 @@ export const DIAGRAM_TEXT_FIELDS: Readonly<Partial<Record<SrsTextGroup, readonly
   actors: ["flows_in", "flows_out"],
   entities: ["relation_verbs", "attributes", "states", "transitions"],
   // message của sơ đồ tuần tự hệ thống (`functions[].interactions`): đơn vị mảng chữ theo thứ tự mảng, xem `ARRAY_TEXT_KEYS`
-  functions: ["interactions"],
+  functions: ["interactions", "component_interactions"],
   // FLF-390: chữ trong nút activity (`activity_nodes[].name`) và guard của control flow (`activity_flows[].guard`) của use case
   use_cases: ["activity_nodes", "activity_flows"],
   // nhãn trên cạnh luồng màn: `flow_to[].trigger` / `.guard` (đơn vị là mảng chữ theo thứ tự `to`, xem `flowTexts`)
@@ -105,7 +105,7 @@ const FLOW_FIELD = "flow_to"
  * Mảng phần tử entity có chữ hiển thị: một đơn vị mảng chữ theo thứ tự mảng, mỗi phần tử lần lượt các khoá chữ (cái nào có).
  * `attributes`: tên, mô tả · `states`: tên trạng thái · `transitions`: sự kiện, điều kiện, hành động.
  */
-const ARRAY_TEXT_KEYS: Readonly<Record<string, readonly string[]>> = { attributes: ["name", "description"], states: ["name"], transitions: ["event", "guard", "action"], interactions: ["message", "guard"], activity_nodes: ["name"], activity_flows: ["guard"] }
+const ARRAY_TEXT_KEYS: Readonly<Record<string, readonly string[]>> = { attributes: ["name", "description"], states: ["name"], transitions: ["event", "guard", "action"], interactions: ["message", "guard"], component_interactions: ["message", "guard"], activity_nodes: ["name"], activity_flows: ["guard"] }
 
 const byTarget = (edges: readonly Row[]): Row[] => [...edges].sort((a, b) => (String(a.to) < String(b.to) ? -1 : String(a.to) > String(b.to) ? 1 : 0))
 const textOf = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v : null)

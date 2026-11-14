@@ -400,6 +400,8 @@ const deadReferenceWhere = (spine: Spine, hit: ReferenceHit): Where => {
     case "entities[].transitions[].to":
     case "functions[].interactions[].from":
     case "functions[].interactions[].to":
+    case "functions[].component_interactions[].from":
+    case "functions[].component_interactions[].to":
       return { section: `function:${owner}`, step: owner ? functionStep(spine, owner) : "S-5.4" }
     case "entities[].transitions[].business_rule_ids[]":
       return { section: "fixed:3.1.5", step: "S-4.5" }
