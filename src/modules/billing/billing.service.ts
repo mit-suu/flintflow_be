@@ -175,9 +175,18 @@ const enrichPurchaseRows = async (orgId: string, rows: Record<string, any>[]): P
 
   const matchedByRowIdx = new Map<number, IPaymentIntent>()
   if (legacyIndices.length > 0) {
-    const succeededIntents = await PaymentIntent.find({ organizationId: orgId, status: "succeeded" })
+    const succeededIntents = await PaymentIntent.find(
+      { organizationId: orgId, status: "succeeded" },
+      { userId: 1, packageId: 1, credits: 1, amount: 1, currency: 1, referenceCode: 1, processedAt: 1, createdAt: 1 }
+    )
     const byId = new Map(succeededIntents.map((intent) => [String(intent._id), intent]))
+    // Đánh dấu trước mọi intentId đã gắn trên trang hiện tại (kể cả dòng purchase sau Task 4 đã có packageId)
     const usedIntentIds = new Set<string>()
+    for (const row of rows) {
+      if (row.intentId != null) {
+        usedIntentIds.add(String(row.intentId))
+      }
+    }
     const fallbackIndices: number[] = []
 
     for (const idx of legacyIndices) {
@@ -194,6 +203,17 @@ const enrichPurchaseRows = async (orgId: string, rows: Record<string, any>[]): P
     }
 
     if (fallbackIndices.length > 0) {
+      // Loại trừ mọi intent đã gắn cho dòng purchase ở các trang khác trong cùng org
+      const boundPurchases = await CreditTransaction.find(
+        { organizationId: orgId, type: "purchase", intentId: { $ne: null } },
+        { intentId: 1 }
+      )
+      for (const tx of boundPurchases) {
+        if (tx.intentId != null) {
+          usedIntentIds.add(String(tx.intentId))
+        }
+      }
+
       const candidates: Array<{ rowIdx: number; intent: IPaymentIntent; diffMs: number; sameUser: boolean }> = []
       for (const idx of fallbackIndices) {
         const row = rows[idx]

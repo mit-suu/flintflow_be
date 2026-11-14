@@ -318,6 +318,30 @@ describe("FLF-417 Task 4: planLimits, succeeded payment metadata & RBAC (UC-56, 
       currency: "VND",
       referenceCode: "REF-LEGACY-500"
     })
+
+    // Dòng purchase mồ côi cũ hơn (amount=100, không có intentId/packageId) không được chiếm PaymentIntent đã gắn cho giao dịch trang 1
+    const orphanTx = await CreditTransaction.create({
+      userId: seeded.userId,
+      organizationId: seeded.orgId,
+      actionType: "purchase",
+      type: "purchase",
+      amount: 100,
+      balanceAfter: 100,
+      createdAt: new Date(Date.now() - 120_000)
+    })
+    const orphanPage = await request(app).get("/api/v1/billing/transactions?kind=payment&page=3&limit=1").set(as(seeded))
+    expect(orphanPage.status).toBe(200)
+    expect(orphanPage.body.data).toHaveLength(1)
+    expect(String(orphanPage.body.data[0]._id)).toBe(String(orphanTx._id))
+    expect(orphanPage.body.data[0]).toMatchObject({
+      type: "purchase",
+      paymentStatus: "succeeded",
+      intentId: null,
+      packageId: null,
+      price: null,
+      currency: "VND",
+      referenceCode: null
+    })
   })
 
   it("RBAC: Analyst chỉ thấy USAGE_TYPES ở balance.ledger và transactions (kể cả ?kind=payment); Viewer bị 403 ở /billing/packages và ẩn ví ở /users/me", async () => {
