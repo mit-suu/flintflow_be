@@ -7,7 +7,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { templateCurrentOf, templateUpdateOf } from "../import/template-update.js"
 import type { CreateProjectDTO, DisableScreenMockupsDTO, MoveProjectDTO, RunScreenMockupsDTO, UpdateDocumentLanguageDTO, UpdateErdNotationDTO, UpdateScreenThemeDTO } from "./project.validation.js"
-import { ScreenMockupsQuerySchema } from "./project.validation.js"
+import { ListProjectsQuerySchema, ScreenMockupsQuerySchema } from "./project.validation.js"
 import { validationError } from "../../shared/utils/validation-message.js"
 import * as screenMockupService from "../diagram/screen-mockup.service.js"
 import * as screenMockupRuns from "../diagram/screen-mockup-runs.js"
@@ -28,6 +28,14 @@ export const getProjects = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
     throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
+  }
+
+  // FLF-404: có `page` ⇒ một trang + meta; không ⇒ mảng như cũ (client chưa phân trang)
+  if (req.query.page !== undefined) {
+    const parsed = ListProjectsQuerySchema.safeParse(req.query)
+    if (!parsed.success) throw validationError(parsed.error)
+    const result = await projectService.listProjectsPage(requireOrgId(req), parsed.data)
+    return sendSuccess(res, 200, result.items, result.meta)
   }
 
   const status = req.query.status as string | undefined
