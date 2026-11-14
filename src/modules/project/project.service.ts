@@ -1,6 +1,6 @@
 import { erdNotationOf, type ErdNotation } from "../../shared/diagram/erd-notation.js"
 import { screenThemeOf, type ScreenTheme } from "../../shared/diagram/screen-theme.js"
-import { Project, IProject, type ProjectMode, type ProjectStartKind, type TemplateIntent } from "./project.model.js"
+import { Project, IProject, WITH_DELETED, type ProjectMode, type ProjectStartKind, type TemplateIntent } from "./project.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ChatSession } from "./chat-session.model.js"
 import { ProjectDocument } from "./project-document.model.js"
@@ -13,6 +13,8 @@ import { Usage } from "../spine/usage.model.js"
 import { RenderedDocumentCache } from "../render/rendered-document.model.js"
 import { gridFsDiagramStore } from "../diagram/diagram-file.store.js"
 import mongoose from "mongoose"
+import { vietnameseSearchPattern } from "../../shared/utils/vi-search.js"
+import type { ListProjectsQuery, ProjectListSort } from "./project.validation.js"
 import { assertFolderOwned, folderStillExists } from "../folder/folder.service.js"
 import { ImportedDocument } from "../import/imported-document.model.js"
 import { DocBlock } from "../import/doc-block.model.js"
@@ -143,6 +145,35 @@ export const getProjects = async (orgId: string, status?: string): Promise<IProj
   return await Project.find(filter).sort({ createdAt: -1 })
 }
 
+const PROJECT_LIST_ORDER: Record<ProjectListSort, Record<string, 1 | -1>> = {
+  created: { createdAt: -1, _id: -1 },
+  updated: { updatedAt: -1, _id: -1 },
+  // Mongo xếp null nhỏ nhất ⇒ giảm dần thì dự án chưa mở nằm cuối (khớp vùng "Chưa mở" của FE)
+  opened: { lastOpenedAt: -1, _id: -1 }
+}
+
+/**
+ * Một trang dự án của org (FLF-404): lọc trạng thái / cách làm / thư mục, tìm tên không dấu, sắp xếp — tất cả ở BE, vì lọc
+ * trên mấy trang đã tải ở FE sẽ ra kết quả sai. Document trả nguyên như `getProjects` (cùng hình JSON).
+ */
+export const listProjectsPage = async (orgId: string, query: ListProjectsQuery) => {
+  const { page, limit, status, mode, q, sort, folder } = query
+  const filter: Record<string, unknown> = { organizationId: orgId }
+  if (status) filter.status = status
+  if (mode) filter.mode = mode
+  if (q) filter.name = vietnameseSearchPattern(q)
+  if (folder) filter.folderId = folder === "none" ? null : new mongoose.Types.ObjectId(folder)
+
+  const [total, items] = await Promise.all([
+    Project.countDocuments(filter),
+    Project.find(filter)
+      .sort(PROJECT_LIST_ORDER[sort])
+      .skip((page - 1) * limit)
+      .limit(limit)
+  ])
+  return { items, meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } }
+}
+
 /**
  * Điểm chốt quyền truy cập dự án cho CẢ HỆ THỐNG — 10 module gọi hàm này (spine, pipeline, render,
  * diagram, import, change-request…). Lọc theo org chứ không theo người: dự án thuộc về tổ chức, mọi
@@ -228,17 +259,28 @@ const purgeProjectData = async (projectId: string): Promise<void> => {
     .catch((err: unknown) => console.warn(`[Project] Không xoá được file .docx mode 1 của project ${projectId}:`, err))
 }
 
+/**
+ * `hard` = nút "Xoá vĩnh viễn" của FE. FLF-401: BE chỉ xoá mềm — đặt `deletedAt` / `deletedBy`, KHÔNG dọn dữ liệu (chat,
+ * tài liệu, Spine, file còn nguyên để khôi phục bằng tay); dự án biến khỏi mọi truy vấn nhờ middleware của `Project`.
+ * Response giữ hình dạng cũ `{ _id, status: "deleted" }`. Không `hard` = Lưu trữ (`status: "archived"`) như cũ.
+ */
 export const deleteProject = async (
   projectId: string,
   orgId: string,
-  hard: boolean = false
+  hard: boolean = false,
+  deletedBy: string | null = null
 ): Promise<IProject | { _id: string; status: "deleted" }> => {
   if (hard) {
-    const project = await Project.findOneAndDelete({ _id: projectId, organizationId: orgId })
+    const project = mongoose.isValidObjectId(projectId)
+      ? await Project.findOneAndUpdate(
+          { _id: projectId, organizationId: orgId },
+          { $set: { deletedAt: new Date(), deletedBy: deletedBy && mongoose.isValidObjectId(deletedBy) ? deletedBy : null } },
+          { new: true }
+        )
+      : null
     if (!project) {
       throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
     }
-    await purgeProjectData(projectId)
     return { _id: projectId, status: "deleted" }
   }
 
@@ -251,6 +293,17 @@ export const deleteProject = async (
     throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   }
   return project
+}
+
+/**
+ * FLF-401: xoá cứng + dọn toàn bộ dữ liệu — chỉ dùng khi xoá cả tổ chức (dự án đã xoá mềm cũng dọn). Không có trên API.
+ * Trả `false` khi không có dự án.
+ */
+export const purgeProject = async (projectId: string, orgId: string): Promise<boolean> => {
+  const project = await Project.findOneAndDelete({ _id: projectId, organizationId: orgId }).setOptions(WITH_DELETED)
+  if (!project) return false
+  await purgeProjectData(projectId)
+  return true
 }
 
 export const updateProjectName = async (

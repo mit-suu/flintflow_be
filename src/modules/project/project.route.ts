@@ -106,6 +106,49 @@ const upload = multer({
  *       401:
  *         description: Chưa xác thực
  */
+/**
+ * @swagger
+ * /api/v1/projects:
+ *   get:
+ *     summary: Dự án của tổ chức đang mở — không có `page` ⇒ mảng (mới tạo trước); có `page` ⇒ một trang (FLF-404)
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         description: Bật phân trang; bỏ trống ⇒ trả mọi dự án như cũ
+ *         schema: { type: integer, minimum: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, maximum: 100, default: 24 }
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [active, archived] }
+ *       - in: query
+ *         name: mode
+ *         description: Chỉ khi có page
+ *         schema: { type: string, enum: [import, fpt, customer_template] }
+ *       - in: query
+ *         name: q
+ *         description: Chỉ khi có page — tìm tên không phân biệt dấu
+ *         schema: { type: string, maxLength: 100 }
+ *       - in: query
+ *         name: sort
+ *         description: Chỉ khi có page — created (mới tạo trước) · updated (sửa gần nhất) · opened (mở gần nhất, chưa mở xếp cuối)
+ *         schema: { type: string, enum: [created, updated, opened], default: created }
+ *       - in: query
+ *         name: folder
+ *         description: Chỉ khi có page — id thư mục, hoặc none = dự án ngoài thư mục
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: "Project[]; có page thì meta gồm page, limit, total, totalPages"
+ *       400:
+ *         description: VALIDATION_ERROR — tham số phân trang / lọc không hợp lệ
+ *       401:
+ *         description: Chưa xác thực
+ */
 router.get("/", authMiddleware, projectController.getProjects)
 router.post("/", authMiddleware, validateRequest(CreateProjectSchema), projectController.createProject)
 
@@ -158,6 +201,8 @@ router.post("/precheck-docx", authMiddleware, requireRole("lead", "analyst"), re
  *         description: >
  *           Danh sách tài liệu đang dùng (FLF-398: bản đã bị thay không trả); mỗi bản kèm `replaces: [{ id, name, doc_code }]`
  *           — các bản cũ nó đã thay
+ *           FLF-405: `meta { tokens_used, tokens_limit, tokens_per_upload_limit }` — token phần chữ của tài liệu còn hiệu lực
+ *           (bản đã bị thay, parse lỗi không tính) / trần tổng dự án theo gói / trần mỗi lần tải
  *       401:
  *         description: Chưa xác thực
  *   post:
@@ -196,6 +241,13 @@ router.post("/precheck-docx", authMiddleware, requireRole("lead", "analyst"), re
  *         description: File không hợp lệ
  *       404:
  *         description: "`DOCUMENT_NOT_FOUND` — `replace_document_id` không thuộc dự án"
+ *       413:
+ *         description: >
+ *           FLF-405 (business-flow §3.6) — trần một lần tải kiểm ngay sau khi trích chữ; trần dự án kiểm sau bước kiểm trùng /
+ *           hỏi bản mới (để "Thay bản cũ" được trừ token); cả hai trước khi lưu / upload / tóm tắt (không tốn credit):
+ *           `DOCUMENT_TOO_LONG` (vượt trần một lần tải `REFERENCE_MAX_TOKENS_PER_UPLOAD`, `meta { file, token_count, limit }`);
+ *           `PROJECT_DOCUMENT_QUOTA_EXCEEDED` (tổng tài liệu còn hiệu lực + file mới vượt trần dự án theo gói,
+ *           `meta { file, token_count, used, limit }`; "Thay bản cũ" trừ token bản bị thay). Multer quá 10 MB vẫn là `FILE_TOO_LARGE`
  *       409:
  *         description: >
  *           FLF-398 — `DUPLICATE_DOCUMENT` (trùng hệt nội dung, `meta { document, superseded_by? }`, không lưu, không tóm tắt);
