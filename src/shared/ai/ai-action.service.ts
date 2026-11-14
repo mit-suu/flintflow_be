@@ -221,7 +221,6 @@ export const executeAiAction = async <T = any>(
 ): Promise<AiActionResult<T>> => {
   // Step 1: Reserve Credit
   const reservation = await reserveCreditWithTransaction(userId, actionType, projectId, options.activeOrgId, stepIdOf(input, options))
-  const cost = reservation.cost
 
   // Step 2: Build Prompt
   let finalPrompt: string
@@ -238,6 +237,7 @@ export const executeAiAction = async <T = any>(
   // Thứ tự bắt buộc: parse → deduct. `deducted` chặn trừ hai lần khi retry và
   // chặn release sau khi đã trừ (lỗi ghi log phía sau không được hoàn tiền).
   let deducted = false
+  let settledCost = reservation.cost
   let currentLogId: string = ""
   // Lượt parse lỗi mới là lượt cần đọc lại output gốc nhất, mà log thất bại được tạo ngoài vòng retry — giữ
   // chữ thô ở đây để nó không mất theo scope của lượt thử.
@@ -314,7 +314,7 @@ export const executeAiAction = async <T = any>(
 
         // Success: Deduct Credit (chỉ sau khi parse thành công)
         if (!deducted) {
-          await deductCredit(reservation, undefined, { tokensIn: tokensUsed.promptTokens, tokensOut: tokensUsed.completionTokens })
+          settledCost = await deductCredit(reservation, undefined, { tokensIn: tokensUsed.promptTokens, tokensOut: tokensUsed.completionTokens })
           deducted = true
         }
 
@@ -353,7 +353,7 @@ export const executeAiAction = async <T = any>(
           tokensUsed: { ...tokensUsed, totalTokens: tokensUsed.promptTokens + tokensUsed.completionTokens },
           latencyMs,
           logId: currentLogId,
-          cost
+          cost: settledCost
         }
       } catch (error: any) {
         console.error(`[executeAiAction] Attempt ${attempt + 1} failed for action '${actionType}':`, error.message)
@@ -411,7 +411,6 @@ export const executeAiActionStream = async <T = any>(
   options: ExecuteAiActionOptions = {}
 ): Promise<AiActionResult<T>> => {
   const reservation = await reserveCreditWithTransaction(userId, actionType, projectId, options.activeOrgId, stepIdOf(input, options))
-  const cost = reservation.cost
 
   let finalPrompt: string
   let providerConfig: AiProviderConfig
@@ -490,7 +489,7 @@ export const executeAiActionStream = async <T = any>(
     // Parse TRƯỚC, deduct SAU: output hỏng thì không tính phí (audit E2)
     const parsedData = parseResponse<T>(stripReasoning(fullRaw), actionType)
 
-    await deductCredit(reservation, undefined, { tokensIn: promptTokens, tokensOut: completionTokens })
+    const settledCost = await deductCredit(reservation, undefined, { tokensIn: promptTokens, tokensOut: completionTokens })
     deducted = true
 
     const logDoc = await AiActionLog.create({
@@ -541,7 +540,7 @@ export const executeAiActionStream = async <T = any>(
       },
       latencyMs,
       logId: (logDoc as any)._id.toString(),
-      cost
+      cost: settledCost
     }
 
     if (callbacks.onFinish) {

@@ -44,9 +44,6 @@ vi.mock("../project/project.model.js", async (importOriginal) => {
   const { fakeDb } = await import("./__tests__/fake-mongo.js")
   return { ...(await importOriginal<object>()), Project: fakeDb.model("Project") }
 })
-vi.mock("../admin/pricing-config.model.js", () => ({
-  PricingConfig: { findOne: async () => null }
-}))
 vi.mock("../notification/notification.service.js", () => ({
   notify: vi.fn(async () => null),
   notifyAdmins: vi.fn(async () => 0)

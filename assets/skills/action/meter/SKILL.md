@@ -27,9 +27,11 @@ Contract for `meter.service.ts` (T13) on top of the credit ledger (T04, `credit-
 ## Lifecycle of one call
 
 ```text
-reserve(call_kind)      → usage[] { state: reserved, expires_at: now + TTL }
+reserve(call_kind)      → hold DEFAULT_ACTION_COSTS[call_kind]; usage[] { state: reserved, expires_at: now + TTL }
 call model
-  success & parsed      → deduct   → state: deducted, tokens_in/out, cost
+  success & parsed      → deduct   → settle actualCost = calculateActualCreditCost(reservedCost, tokens);
+                                     charge actualCost to balance, release full reservedCost hold (or charge available if expired);
+                                     state: deducted, tokens_in/out, cost = actualCost
   failure / parse fail  → release  → state: refunded
   base_version conflict → release  → state: refunded   (does not consume regenerate cap)
 ```
@@ -45,17 +47,19 @@ usage[] { id, step_id, call_kind, attempt, tokens_in, tokens_out, cost,
 - `attempt` = 0 for the first try, 1–2 for schema retries of the same call.
 - `step_id` includes `@screen_id` for S-5.
 
-Price table: `references/credit-rules.md`.
+Price table & token settlement rules: `references/credit-rules.md`.
 
 ## Rules
 
-1. **Reserve before every call**; insufficient credit ⇒ do not call the model, return `INSUFFICIENT_CREDIT` (402). Ops already applied by accepted steps stay.
-2. **Expiry**: `reserved` rows past `expires_at` are released by a sweeper. Closing the tab mid-call must not leave credit hanging.
-3. **Deterministic steps** S-8.2, S-8.3, S-9.1, S-9.5 never Meter. Running out of credit must never block writing `baselines[]`.
-4. **Refunded rows** are excluded from reported cost (UC 10.3) but included in real provider cost.
-5. **Schema retries** of the same call are separate reservations with `attempt` 1–2 - the provider charged for them.
-6. `[P]` Party mode is the most expensive action; show the estimate and ask before running.
-7. The call counter of `gate-check` is derived from `usage[]` rows - keep `step_id` and `call_kind` accurate.
+1. **Server-configured ceilings**: `getActionCost` reads `DEFAULT_ACTION_COSTS` directly from server configuration (no DB pricing override).
+2. **Reserve before every call**; insufficient credit ⇒ do not call the model, return `INSUFFICIENT_CREDIT` (402). Ops already applied by accepted steps stay.
+3. **Actual-token settlement**: `deductCredit` computes `actualCost = calculateActualCreditCost(reservedCost, tokens)` (`0` for free actions, `1..reservedCost` for paid actions), deducts `actualCost` from `balance`, returns unused hold to `available`, and notifies org `Lead`s when `available < lowCreditThreshold`.
+4. **Expiry**: `reserved` rows past `expires_at` are released by a sweeper. Closing the tab mid-call must not leave credit hanging; late settlement after expiry deducts `actualCost` from `available` only.
+5. **Deterministic steps** S-8.2, S-8.3, S-9.1, S-9.5 never Meter. Running out of credit must never block writing `baselines[]`.
+6. **Refunded rows** are excluded from reported cost (UC 10.3) but included in real provider cost.
+7. **Schema retries** of the same call are separate reservations with `attempt` 1–2 - the provider charged for them.
+8. `[P]` Party mode is the most expensive action; show the estimate and ask before running.
+9. The call counter of `gate-check` is derived from `usage[]` rows - keep `step_id` and `call_kind` accurate.
 
 ## Refuse
 
