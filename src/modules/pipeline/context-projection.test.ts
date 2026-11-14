@@ -18,7 +18,7 @@ import type { Spine } from "../spine/spine.types.js"
 import { get } from "../spine/spine.repository.js"
 import { ChatSession } from "../project/chat-session.model.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
-import { ASSUMPTION_KEYS_READ, STEP_SKILLS, addendumForUnit, assumptionsForPrompt, openAssumptionsFor, buildStepContext, getStepSpec, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
+import { ASSUMPTION_KEYS_READ, STEP_SKILLS, addendumForUnit, assumptionsForPrompt, componentLevelProjection, openAssumptionsFor, buildStepContext, getStepSpec, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
 import { stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
 import { getStep, loadStepRegistry, orderedSteps } from "./step-registry.js"
 import { askableFields } from "./decisions.service.js"
@@ -323,5 +323,29 @@ describe("FLF-413 - khung của mẫu không vào projection", () => {
       expect(text, stepId).not.toContain("<<")
     }
     expect(JSON.stringify(projectStep(spine, "S-4.1").projection)).toContain(FIXTURE.features[0].name)
+  })
+})
+
+describe("componentLevelProjection (FLF-418)", () => {
+  const KEY = "entities[feature_ids~@loopFeatures]:id,name,feature_ids"
+
+  it("S-5.4 mức component: thêm sequence_level + entity của các feature trong vòng màn", () => {
+    const extra = componentLevelProjection(FIXTURE, "S-5.4@S01", "component")
+    expect(extra.sequence_level).toBe("component")
+    const features = new Set(FIXTURE.functions.filter((f) => f.screen_id === "S01").map((f) => f.feature_id))
+    const entities = extra[KEY] as { id: string; feature_ids: string[] }[]
+    expect(entities.map((e) => e.id)).toContain("E01")
+    expect(entities.every((e) => e.feature_ids.some((id) => features.has(id)))).toBe(true)
+  })
+
+  it("vòng @nonscreen: entity theo feature của các function không màn", () => {
+    const entities = componentLevelProjection(FIXTURE, "S-5.4@nonscreen", "component")[KEY] as { feature_ids: string[] }[]
+    const features = new Set(FIXTURE.functions.filter((f) => f.screen_id === null).map((f) => f.feature_id))
+    expect(entities.every((e) => e.feature_ids.some((id) => features.has(id)))).toBe(true)
+  })
+
+  it("mức system hoặc step khác S-5.4 ⇒ không thêm gì", () => {
+    expect(componentLevelProjection(FIXTURE, "S-5.4@S01", "system")).toEqual({})
+    expect(componentLevelProjection(FIXTURE, "S-5.2@S01", "component")).toEqual({})
   })
 })

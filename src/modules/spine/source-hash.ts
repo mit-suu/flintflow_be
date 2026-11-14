@@ -19,6 +19,7 @@ import { screenActorMap, screenActorSets, sharedScreenIds } from "./screen-actor
 import { systemName } from "./system-name.js"
 import { DEFAULT_ERD_NOTATION, type RenderContext } from "../../shared/diagram/erd-notation.js"
 import { resolveScreenTheme } from "../../shared/diagram/screen-theme.js"
+import { DEFAULT_SEQUENCE_LEVEL, type SequenceLevel } from "../../shared/diagram/sequence-level.js"
 
 /** Giá trị `source_hash` nghĩa là chưa từng tính (fixture T02 dùng "TBD") — bỏ qua `diagram_stale`. */
 export const UNHASHED_SOURCE_HASHES: ReadonlySet<string> = new Set(["", "TBD"])
@@ -172,12 +173,14 @@ export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.fre
   // svg@2 (FLF-396): đầu mũi tên data flow đổi từ phi tiêu khía lõm sang tam giác tô đặc ⇒ hình context cũ stale, vẽ lại
   context: "svg@2",
   // svg@2 (FLF-369): bộ xếp thử nhiều phương án (thứ tự hàng, actor hai bên) ⇒ hình svg@1 cũ thành stale, vẽ lại một lượt
-  usecase: "svg@2",
+  // svg@3 (FLF-421): hình phân cấp actor nối kiểu cây (thanh ngang chung, một tam giác mỗi cha) ⇒ hình cũ stale, vẽ lại
+  usecase: "svg@3",
   screen_flow: "svg@3",
   erd: "svg@1",
   class: "svg@1",
   state_machine: "svg@1",
-  sequence: DEFAULT_DIAGRAM_ENGINE,
+  // plantuml@2 (FLF-418): hash gồm mức vẽ của dự án (system / component) ⇒ đổi mức thì hình cũ stale; hình plantuml@1 vẽ lại một lượt
+  sequence: "plantuml@2",
   activity: "svg@1",
   deployment: DEFAULT_DIAGRAM_ENGINE,
   // svg@1 (FLF-410): mockup SVG theo theme dự án thay wireframe Salt ⇒ hình Salt cũ stale, vẽ lại (lượt đầu gọi model)
@@ -191,9 +194,11 @@ export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.fre
  * của màn, tập màn dùng chung (nền `#7ACFF5` — đổi khi actor của màn hay phân cấp actor đổi) và actor người của từng màn (hình
  * quá lớn tách mỗi actor một hình, tiêu đề là tên actor).
  */
-const renderedExtras = (spine: Spine, diagram: Pick<Diagram, "kind">, context: RenderContext): unknown => {
+const renderedExtras = (spine: Spine, diagram: Pick<Diagram, "kind" | "owner_id">, context: RenderContext): unknown => {
   // Ký pháp ERD nằm ở Project, không ở Spine: đổi ký pháp đổi hash ⇒ `diagram_stale` ⇒ vẽ lại
   if (diagram.kind === "erd") return { notation: context.erdNotation ?? DEFAULT_ERD_NOTATION }
+  // FLF-418: mức Sequence nằm ở Project. Mức thành phần đọc thêm `component_interactions` + tên màn / entity / feature (tên control)
+  if (diagram.kind === "sequence") return sequenceExtras(spine, diagram, context.sequenceLevel ?? DEFAULT_SEQUENCE_LEVEL)
   // FLF-410: theme mockup (màu, domain, nền tảng) nằm ở Project — đổi theme ⇒ stale ⇒ vẽ lại từ spec đã lưu. Tên hệ thống
   // in trên header web. Nội dung model đọc (trigger, validation…) KHÔNG ở đây mà ở `contentHash` lưu cùng spec
   if (diagram.kind === "screen_layout")
@@ -215,6 +220,22 @@ const renderedExtras = (spine: Spine, diagram: Pick<Diagram, "kind">, context: R
     function_ids: byId(spine.use_cases).map(({ id, function_ids }) => ({ id, function_ids })),
     functions: byId(spine.functions.filter((f) => referenced.has(f.id))).map(({ id, feature_id }) => ({ id, feature_id })),
     features
+  }
+}
+
+const sequenceExtras = (spine: Spine, diagram: Pick<Diagram, "owner_id">, level: SequenceLevel): unknown => {
+  if (level !== "component") return { level }
+  const fn = spine.functions.find((f) => f.id === diagram.owner_id)
+  const list = fn?.component_interactions ?? []
+  const ends = new Set(list.flatMap((i) => [i.from, i.to]))
+  const named = (items: readonly { id: string; name: string }[]) => byId(items.filter((x) => ends.has(x.id))).map(({ id, name }) => ({ id, name }))
+  return {
+    level,
+    component: list.map(({ from, to, message, kind, flow, guard }) => ({ from, to, message, kind, flow, guard: guard ?? "" })),
+    screens: named(spine.screens),
+    entities: named(spine.entities),
+    actors: byId(spine.actors.filter((a) => ends.has(a.id))).map(({ id, name, kind }) => ({ id, name, kind })),
+    feature: spine.features.find((f) => f.id === fn?.feature_id)?.name ?? null
   }
 }
 
