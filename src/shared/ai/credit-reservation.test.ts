@@ -8,16 +8,19 @@ vi.mock("../../modules/credits/credit-transaction.model.js", async () => {
   const { fakeDb } = await import("../../modules/billing/__tests__/fake-mongo.js")
   return { CreditTransaction: fakeDb.model("CreditTransaction") }
 })
-vi.mock("../../modules/admin/pricing-config.model.js", () => ({
-  PricingConfig: { findOne: async () => null }
-}))
 vi.mock("../../modules/user/user.model.js", () => ({
   User: { findById: () => ({ lean: async () => ({ name: "Lan", email: "lan@example.com" }) }) }
 }))
 // FLF-310: ví = org — lượt gọi không gắn project dùng org đang chọn nếu còn là thành viên; có project thì org của project
-const { membership, projectOrg } = vi.hoisted(() => ({ membership: { member: true }, projectOrg: { id: null as string | null } }))
+const { membership, projectOrg } = vi.hoisted(() => ({
+  membership: { member: true, leads: [] as Array<{ userId: string }> },
+  projectOrg: { id: null as string | null }
+}))
 vi.mock("../../modules/organization/membership.model.js", () => ({
-  Membership: { exists: () => ({ session: async () => (membership.member ? { _id: "m1" } : null) }) }
+  Membership: {
+    exists: () => ({ session: async () => (membership.member ? { _id: "m1" } : null) }),
+    find: vi.fn(() => ({ select: () => ({ lean: async () => membership.leads }) }))
+  }
 }))
 vi.mock("../../modules/project/project.model.js", () => ({
   Project: { findById: () => ({ lean: async () => (projectOrg.id === null ? { organizationId: null } : { organizationId: projectOrg.id }) }) }
@@ -31,6 +34,7 @@ import { fakeDb } from "../../modules/billing/__tests__/fake-mongo.js"
 import { notify, notifyAdmins } from "../../modules/notification/notification.service.js"
 import { planConfig } from "../../modules/billing/plan.config.js"
 import { env } from "../../config/env.js"
+import { Membership } from "../../modules/organization/membership.model.js"
 import {
   getOrCreateWallet,
   reserveCredit,
@@ -38,7 +42,9 @@ import {
   releaseCredit,
   refundDeductedCredit,
   expireStaleReservations,
-  getActionCost
+  getActionCost,
+  calculateActualCreditCost,
+  TOKEN_CREDIT_WEIGHTS
 } from "./credit-reservation.service.js"
 import { ActionType, AiActionError } from "./ai-action.types.js"
 
@@ -57,6 +63,7 @@ describe("credit-reservation.service", () => {
     fakeDb.reset()
     vi.clearAllMocks()
     membership.member = true
+    membership.leads = []
     projectOrg.id = null
   })
 
@@ -184,6 +191,22 @@ describe("credit-reservation.service", () => {
       expect(reserveRow).toMatchObject({ state: "deducted", stepId: "S-2.1", tokensIn: 900, tokensOut: 150 })
       expect(deductRow).toMatchObject({ stepId: "S-2.1", tokensIn: 900, tokensOut: 150 })
       expect(releaseRow).toMatchObject({ stepId: "S-2.2" })
+    })
+
+    it("chuẩn hoá token âm / số thập phân / NaN về số nguyên >= 0 khi lưu sổ", async () => {
+      const ok = await reserveCredit(USER, ActionType.DRAFT, undefined, undefined, ORG, "S-2.3")
+      await deductCredit(ok, undefined, { tokensIn: -50.8, tokensOut: 120.9 })
+      const reserveRow = ledger().docs.find((d) => String(d._id) === ok.reservationId)!
+      const deductRow = ledger().docs.find((d) => d.type === "deduct" && d.stepId === "S-2.3")!
+      expect(reserveRow).toMatchObject({ tokensIn: 0, tokensOut: 120 })
+      expect(deductRow).toMatchObject({ tokensIn: 0, tokensOut: 120 })
+
+      const nanCase = await reserveCredit(USER, ActionType.DRAFT, undefined, undefined, ORG, "S-2.4")
+      await deductCredit(nanCase, undefined, { tokensIn: Number.NaN, tokensOut: Number.POSITIVE_INFINITY })
+      const nanReserve = ledger().docs.find((d) => String(d._id) === nanCase.reservationId)!
+      const nanDeduct = ledger().docs.find((d) => d.type === "deduct" && d.stepId === "S-2.4")!
+      expect(nanReserve).toMatchObject({ tokensIn: 0, tokensOut: 0 })
+      expect(nanDeduct).toMatchObject({ tokensIn: 0, tokensOut: 0 })
     })
   })
 
@@ -331,6 +354,93 @@ describe("credit-reservation.service", () => {
 
       expect(walletOf().balance).toBe(balanceBefore - CHAT_COST)
       expect(ledger().docs.filter((d) => d.type === "deduct")).toHaveLength(1)
+    })
+  })
+
+  describe("quyết toán theo token thực tế & bảng giá server (FLF-417)", () => {
+    it("DRAFT giữ 4 credit, gọi tốn 900 in / 150 out ⇒ trừ 1 credit, hoàn 3 hold về available, trả actualCost = 1", async () => {
+      const initial = planConfig.free.initialCredits
+      const res = await reserveCredit(USER, ActionType.DRAFT, undefined, undefined, ORG, "S-2.1")
+      expect(res.cost).toBe(4)
+      expect(walletOf()).toMatchObject({ balance: initial, reserved: 4 })
+
+      const settled = await deductCredit(res, undefined, { tokensIn: 900, tokensOut: 150 })
+
+      expect(settled).toBe(1)
+      expect(walletOf()).toMatchObject({ balance: initial - 1, reserved: 0 })
+      const deductRow = ledger().docs.find((d) => d.type === "deduct")!
+      expect(deductRow).toMatchObject({ amount: 1, balanceAfter: initial - 1, tokensIn: 900, tokensOut: 150 })
+
+      // Idempotent re-call returns the already-settled actualCost without deducting again
+      expect(await deductCredit(res)).toBe(1)
+      expect(walletOf()).toMatchObject({ balance: initial - 1, reserved: 0 })
+      expect(ledger().docs.filter((d) => d.type === "deduct")).toHaveLength(1)
+    })
+
+    it("token cao vượt mức ước lượng (10k in / 8k out) ⇒ trần ở mức đã reserve (4 credit), không lẹm sang hold khác", async () => {
+      const initial = planConfig.free.initialCredits
+      const otherHold = await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
+      const res = await reserveCredit(USER, ActionType.DRAFT, undefined, undefined, ORG)
+      expect(walletOf()).toMatchObject({ balance: initial, reserved: otherHold.cost + 4 })
+
+      const settled = await deductCredit(res, undefined, { tokensIn: 10_000, tokensOut: 8_000 })
+      expect(settled).toBe(4)
+      expect(walletOf()).toMatchObject({ balance: initial - 4, reserved: otherHold.cost })
+    })
+
+    it("token = 0 / không truyền token / token âm: miễn phí trả 0, có phí tối thiểu 1 và giữ nguyên khi không truyền token", () => {
+      expect(TOKEN_CREDIT_WEIGHTS).toEqual({ inputPer1k: 0.25, outputPer1k: 1.0 })
+      expect(calculateActualCreditCost(0, { tokensIn: 0, tokensOut: 0 })).toBe(0)
+      expect(calculateActualCreditCost(4, { tokensIn: 0, tokensOut: 0 })).toBe(1)
+      expect(calculateActualCreditCost(4, { tokensIn: -100, tokensOut: -50 })).toBe(1)
+      expect(calculateActualCreditCost(4, undefined)).toBe(4)
+    })
+
+    it("reservation đã hết hạn TTL trước khi deduct hoàn tất ⇒ chỉ trừ actualCost khỏi balance, reserved giữ nguyên 0", async () => {
+      const initial = planConfig.free.initialCredits
+      const res = await reserveCredit(USER, ActionType.DRAFT, undefined, undefined, ORG)
+      await expireStaleReservations(afterTtl())
+      expect(walletOf()).toMatchObject({ balance: initial, reserved: 0 })
+
+      const settled = await deductCredit(res, undefined, { tokensIn: 400, tokensOut: 100 })
+      expect(settled).toBe(1)
+      expect(walletOf()).toMatchObject({ balance: initial - 1, reserved: 0 })
+      const deductRow = ledger().docs.find((d) => d.type === "deduct")!
+      expect(deductRow).toMatchObject({ amount: 1, balanceAfter: initial - 1, tokensIn: 400, tokensOut: 100 })
+    })
+
+    it("low_credit báo mọi Lead của org (loại trùng, gắn organizationId); không có Lead thì lùi về fallback user", async () => {
+      const LEAD_A = "64b0000000000000000000e1"
+      const LEAD_B = "64b0000000000000000000e2"
+      membership.leads = [{ userId: LEAD_A }, { userId: LEAD_B }, { userId: LEAD_A }]
+      await getOrCreateWallet(USER, undefined, ORG)
+      walletOf().balance = planConfig.lowCreditThreshold + 1
+      vi.clearAllMocks()
+
+      // Available drops from 11 -> 10 after returning unused hold (actualCost = 1 < reserved = 4): must NOT notify yet
+      const beforeThreshold = await reserveCredit(USER, ActionType.DRAFT, undefined, undefined, ORG)
+      await deductCredit(beforeThreshold, undefined, { tokensIn: 400, tokensOut: 100 })
+      expect(vi.mocked(notify).mock.calls.filter(([, p]) => p.type === "low_credit")).toHaveLength(0)
+
+      // Available drops from 10 -> 9: notifies deduplicated org Leads with organizationId
+      const crossesThreshold = await reserveCredit(USER, ActionType.DRAFT, undefined, undefined, ORG)
+      await deductCredit(crossesThreshold, undefined, { tokensIn: 400, tokensOut: 100 })
+
+      const leadCalls = vi.mocked(notify).mock.calls.filter(([, p]) => p.type === "low_credit")
+      expect(Membership.find).toHaveBeenCalledWith({ organizationId: ORG, role: "lead" })
+      expect(leadCalls.map(([uid]) => uid).sort()).toEqual([LEAD_A, LEAD_B].sort())
+      expect(leadCalls.every(([, p]) => p.organizationId === ORG)).toBe(true)
+
+      // Fallback when org has zero Lead memberships
+      membership.leads = []
+      walletOf().balance = planConfig.lowCreditThreshold
+      vi.clearAllMocks()
+      const fallbackCall = await reserveCredit(USER, ActionType.DRAFT, undefined, undefined, ORG)
+      await deductCredit(fallbackCall, undefined, { tokensIn: 400, tokensOut: 100 })
+      const fallbackCalls = vi.mocked(notify).mock.calls.filter(([, p]) => p.type === "low_credit")
+      expect(fallbackCalls).toHaveLength(1)
+      expect(fallbackCalls[0][0]).toBe(USER)
+      expect(fallbackCalls[0][1].organizationId).toBe(ORG)
     })
   })
 

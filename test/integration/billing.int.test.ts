@@ -242,3 +242,184 @@ describe("checkout và callback thanh toán", () => {
     expect(foreign.status).toBe(404)
   })
 })
+
+describe("FLF-417 Task 4: planLimits, succeeded payment metadata & RBAC (UC-56, UC-59, UC-60)", () => {
+  it("Lead thấy giao dịch nạp succeeded có đủ intentId, packageId, price VND, currency, referenceCode; getBalance trả planLimits; /packages trả đủ trường plan (UC-56, UC-59)", async () => {
+    const seeded = await seedFixture("minimal", { balance: 100 })
+    const { intentId, orderId } = await checkout(seeded)
+    vi.mocked(getPaymentOrder).mockResolvedValueOnce(remoteOrder(orderId, "paid"))
+    expect((await callback(orderId)).status).toBe(200)
+
+    const bal = await request(app).get("/api/v1/billing/balance").set(as(seeded))
+    expect(bal.status).toBe(200)
+    expect(bal.body.data.planLimits).toEqual({ maxMembers: 3, maxProjects: 3, monthlyCredits: 300 })
+
+    const pkgRes = await request(app).get("/api/v1/billing/packages").set(as(seeded))
+    expect(pkgRes.status).toBe(200)
+    for (const plan of pkgRes.body.data.plans as Array<Record<string, unknown>>) {
+      expect(plan).toEqual(
+        expect.objectContaining({
+          id: expect.any(String),
+          label: expect.any(String),
+          monthlyCredits: expect.any(Number),
+          priceVnd: expect.any(Number),
+          maxMembers: expect.any(Number),
+          maxProjects: expect.any(Number),
+          maxReferenceTokens: expect.any(Number)
+        })
+      )
+    }
+
+    const txRes = await request(app).get("/api/v1/billing/transactions?kind=payment").set(as(seeded))
+    expect(txRes.status).toBe(200)
+    const succeeded = txRes.body.data.find((r: { type: string }) => r.type === "purchase")
+    expect(succeeded).toMatchObject({
+      type: "purchase",
+      paymentStatus: "succeeded",
+      intentId,
+      packageId: "pack_100",
+      price: 40_000,
+      currency: "VND",
+      referenceCode: `REF-${orderId}`,
+      amount: 100
+    })
+
+    // Dòng purchase cũ chưa có metadata trên CreditTransaction vẫn backfill từ PaymentIntent succeeded
+    const legacyIntent = await PaymentIntent.create({
+      userId: seeded.userId,
+      organizationId: seeded.orgId,
+      packageId: "pack_500",
+      credits: 500,
+      amount: 199_000,
+      currency: "VND",
+      status: "succeeded",
+      referenceCode: "REF-LEGACY-500",
+      processedAt: new Date(Date.now() - 60_000)
+    })
+    await CreditTransaction.create({
+      userId: seeded.userId,
+      organizationId: seeded.orgId,
+      actionType: "purchase",
+      type: "purchase",
+      amount: 500,
+      balanceAfter: 700,
+      createdAt: new Date(Date.now() - 60_000)
+    })
+
+    const legacyRes = await request(app).get("/api/v1/billing/transactions?kind=payment").set(as(seeded))
+    expect(legacyRes.status).toBe(200)
+    const legacyRow = legacyRes.body.data.find((r: { amount: number }) => r.amount === 500)
+    expect(legacyRow).toMatchObject({
+      type: "purchase",
+      paymentStatus: "succeeded",
+      intentId: String(legacyIntent._id),
+      packageId: "pack_500",
+      price: 199_000,
+      currency: "VND",
+      referenceCode: "REF-LEGACY-500"
+    })
+
+    // Dòng purchase mồ côi cũ hơn (amount=100, không có intentId/packageId) không được chiếm PaymentIntent đã gắn cho giao dịch trang 1
+    const orphanTx = await CreditTransaction.create({
+      userId: seeded.userId,
+      organizationId: seeded.orgId,
+      actionType: "purchase",
+      type: "purchase",
+      amount: 100,
+      balanceAfter: 100,
+      createdAt: new Date(Date.now() - 120_000)
+    })
+    const orphanPage = await request(app).get("/api/v1/billing/transactions?kind=payment&page=3&limit=1").set(as(seeded))
+    expect(orphanPage.status).toBe(200)
+    expect(orphanPage.body.data).toHaveLength(1)
+    expect(String(orphanPage.body.data[0]._id)).toBe(String(orphanTx._id))
+    expect(orphanPage.body.data[0]).toMatchObject({
+      type: "purchase",
+      paymentStatus: "succeeded",
+      intentId: null,
+      packageId: null,
+      price: null,
+      currency: "VND",
+      referenceCode: null
+    })
+  })
+
+  it("RBAC: Analyst chỉ thấy USAGE_TYPES ở balance.ledger và transactions (kể cả ?kind=payment); Viewer bị 403 ở /billing/packages và ẩn ví ở /users/me", async () => {
+    const seeded = await seedFixture("minimal", { balance: 250 })
+    await CreditTransaction.create({
+      userId: seeded.userId,
+      organizationId: seeded.orgId,
+      type: "admin_adjust",
+      actionType: "admin_adjust",
+      amount: 50,
+      balanceAfter: 300
+    })
+    await CreditTransaction.create({
+      userId: seeded.userId,
+      organizationId: seeded.orgId,
+      type: "monthly_reset",
+      actionType: "monthly_reset",
+      amount: 300,
+      balanceAfter: 600
+    })
+    const { orderId } = await checkout(seeded)
+    vi.mocked(getPaymentOrder).mockResolvedValueOnce(remoteOrder(orderId, "paid"))
+    expect((await callback(orderId)).status).toBe(200)
+    // Tạo thêm 1 giao dịch pending để đảm bảo Analyst cũng không thấy dòng PaymentIntent
+    await checkout(seeded)
+
+    const analyst = await User.create({ email: "ba-rbac@flintflow.test", password: "test-password-123", emailVerified: true })
+    await Membership.create({ organizationId: seeded.orgId, userId: analyst._id, role: "analyst" })
+    const analystToken = await authAs({ _id: analyst._id, email: analyst.email, orgId: seeded.orgId })
+
+    expect((await request(app).get("/api/v1/billing/packages").set({ Authorization: `Bearer ${analystToken}` })).status).toBe(200)
+
+    const analystBal = await request(app).get("/api/v1/billing/balance").set({ Authorization: `Bearer ${analystToken}` })
+    expect(analystBal.status).toBe(200)
+    expect(analystBal.body.data.planLimits).toEqual({ maxMembers: 3, maxProjects: 3, monthlyCredits: 300 })
+    expect(analystBal.body.data.ledger).toEqual([])
+
+    const analystAll = await request(app).get("/api/v1/billing/transactions").set({ Authorization: `Bearer ${analystToken}` })
+    expect(analystAll.status).toBe(200)
+    expect(analystAll.body.data).toEqual([])
+
+    const analystPay = await request(app).get("/api/v1/billing/transactions?kind=payment").set({ Authorization: `Bearer ${analystToken}` })
+    expect(analystPay.status).toBe(200)
+    expect(analystPay.body.data).toEqual([])
+    expect(analystPay.body.meta).toMatchObject({ total: 0, totalPages: 0 })
+
+    // Khi có dòng USAGE_TYPES (reserve/deduct), Analyst chỉ nhận đúng các dòng USAGE_TYPES
+    await executeAiAction(ActionType.CHAT, { promptVariables: { step_id: "S-1.1" } }, seeded.projectId, analyst._id.toString(), { provider: "mock" })
+    const analystWithUsageBal = await request(app).get("/api/v1/billing/balance").set({ Authorization: `Bearer ${analystToken}` })
+    expect(analystWithUsageBal.body.data.ledger.length).toBeGreaterThan(0)
+    expect(
+      analystWithUsageBal.body.data.ledger.every((r: { type: string }) => ["reserve", "deduct", "release", "refund"].includes(r.type))
+    ).toBe(true)
+
+    const analystWithUsageTx = await request(app).get("/api/v1/billing/transactions").set({ Authorization: `Bearer ${analystToken}` })
+    expect(analystWithUsageTx.body.data.length).toBeGreaterThan(0)
+    expect(
+      analystWithUsageTx.body.data.every((r: { type: string }) => ["reserve", "deduct", "release", "refund"].includes(r.type))
+    ).toBe(true)
+    const analystStillNoPay = await request(app).get("/api/v1/billing/transactions?kind=payment").set({ Authorization: `Bearer ${analystToken}` })
+    expect(analystStillNoPay.body.data).toEqual([])
+
+    // Analyst vẫn xem được số dư org ở /users/me
+    const analystMe = await request(app).get("/api/v1/users/me").set({ Authorization: `Bearer ${analystToken}` })
+    expect(analystMe.status).toBe(200)
+    expect(analystMe.body.data.creditOrganization).toEqual({ id: seeded.orgId, name: "Fixture Org" })
+    expect(analystMe.body.data.balance).toBeGreaterThan(0)
+
+    const viewer = await User.create({ email: "viewer-rbac@flintflow.test", password: "test-password-123", emailVerified: true })
+    await Membership.create({ organizationId: seeded.orgId, userId: viewer._id, role: "viewer" })
+    const viewerToken = await authAs({ _id: viewer._id, email: viewer.email, orgId: seeded.orgId })
+
+    expect((await request(app).get("/api/v1/billing/packages").set({ Authorization: `Bearer ${viewerToken}` })).status).toBe(403)
+    expect((await request(app).get("/api/v1/billing/balance").set({ Authorization: `Bearer ${viewerToken}` })).status).toBe(403)
+    expect((await request(app).get("/api/v1/billing/transactions").set({ Authorization: `Bearer ${viewerToken}` })).status).toBe(403)
+
+    const viewerMe = await request(app).get("/api/v1/users/me").set({ Authorization: `Bearer ${viewerToken}` })
+    expect(viewerMe.status).toBe(200)
+    expect(viewerMe.body.data).toMatchObject({ balance: 0, creditOrganization: null })
+  })
+})

@@ -9,8 +9,8 @@
  * dự án 7 màn tốn khoảng 400 credit ở lượt test, mục tiêu còn khoảng 250 sau khi giảm điểm dừng, nên 100
  * credit/tháng không đủ để đi hết một dự án nhỏ dù chỉ một lần.
  *
- * Hết kỳ (`periodDays`): job `system/renew-subscriptions` hạ gói trả phí về Free và nạp ví lên tới
- * `monthlyCredits` của gói (CreditTransaction `monthly_reset`) — `subscription-renewal.service.ts` (UC-80).
+ * Hết kỳ (`periodDays`): job `system/renew-subscriptions` hạ gói trả phí về Free và cộng dồn +monthlyCredits
+ * của gói vào ví khả dụng (CreditTransaction `monthly_reset`) — `subscription-renewal.service.ts` (UC-80).
  */
 
 export type PlanId = "free" | "pro"

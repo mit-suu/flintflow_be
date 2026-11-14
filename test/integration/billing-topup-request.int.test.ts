@@ -3,14 +3,20 @@
  * (webhook / admin) ⇒ người yêu cầu được báo, yêu cầu đóng. Không có lượt gọi AI nào.
  */
 import { describe, expect, it, vi } from "vitest"
+import mongoose from "mongoose"
 import request from "supertest"
 import app from "../../src/app.js"
 import { authAs, seedFixture, type SeededFixture } from "../setup.js"
 import { User } from "../../src/modules/user/user.model.js"
 import { Membership } from "../../src/modules/organization/membership.model.js"
+import { Project } from "../../src/modules/project/project.model.js"
 import { Notification } from "../../src/modules/notification/notification.model.js"
 import { CreditTopupRequest } from "../../src/modules/billing/credit-topup-request.model.js"
 import { fulfillTopupRequests } from "../../src/modules/billing/topup-request.service.js"
+import { ChangeRequest } from "../../src/modules/change-request/change-request.model.js"
+import { ImportedDocument } from "../../src/modules/import/imported-document.model.js"
+import { StepRun } from "../../src/modules/pipeline/run-state.model.js"
+import { Spine } from "../../src/modules/spine/spine.model.js"
 
 const joinOrg = async (orgId: string, role: "lead" | "analyst") => {
   const email = `${role}-${Date.now()}-${Math.random().toString(16).slice(2)}@flintflow.test`
@@ -66,11 +72,349 @@ describe("POST /billing/topup-request", () => {
     expect(await fulfillTopupRequests(seeded.orgId, 50, { kind: "admin", userId: null })).toBe(0)
   })
 
+  it("không bấm Báo Lead nạp: phát hiện CR paused credits + StepRun INSUFFICIENT_CREDIT, gộp 1 thông báo mỗi thành viên, payment không báo Lead nạp, admin báo cả Lead", async () => {
+    const seeded = await seedFixture("minimal")
+    const analyst = await joinOrg(seeded.orgId, "analyst")
+    const analystObjectId = new mongoose.Types.ObjectId(analyst.id)
+
+    await ChangeRequest.create({
+      projectId: seeded.projectId,
+      cr_id: "CR-001",
+      title: "Sửa rule mật khẩu",
+      description: "Tăng độ dài tối thiểu lên 10 ký tự",
+      source: { kind: "stakeholder_email", ref: null, note: null },
+      requester: "PM Lan",
+      status: "proposing",
+      paused: { reason: "credits", at: new Date() },
+      base_doc_version: "0.0",
+      created_by: analystObjectId
+    })
+
+    const now = new Date()
+    await StepRun.create([
+      {
+        projectId: seeded.projectId,
+        step_id: "S-3.1",
+        run_id: "run-analyst-1",
+        by: analyst.id,
+        status: "interrupted",
+        stage: "draft",
+        started_at: now,
+        last_event_at: now,
+        locked_until: now,
+        error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit" }
+      },
+      {
+        projectId: seeded.projectId,
+        step_id: "S-3.2",
+        run_id: "run-lead-1",
+        by: seeded.userId,
+        status: "interrupted",
+        stage: "draft",
+        started_at: now,
+        last_event_at: now,
+        locked_until: now,
+        error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit" }
+      }
+    ])
+
+    // Payment từ Lead: gửi đúng 1 credit_topped_up cho Analyst (gộp CR + StepRun), 0 cho Lead đang thanh toán
+    expect(await fulfillTopupRequests(seeded.orgId, 100, { kind: "payment", userId: seeded.userId })).toBe(2)
+    const [analystNotice] = await notificationsOf(analyst.id, "credit_topped_up", 1)
+    expect(String(analystNotice.organizationId)).toBe(seeded.orgId)
+    expect(analystNotice.body).toContain("bấm tiếp tục")
+    expect(analystNotice.link).toBe(`/projects/${seeded.projectId}`)
+    expect(await Notification.countDocuments({ userId: seeded.userId, type: "credit_topped_up" })).toBe(0)
+
+    const crAfter = await ChangeRequest.findOne({ projectId: seeded.projectId, cr_id: "CR-001" }).lean()
+    expect(crAfter?.paused?.reason).toBe("credits")
+    expect(crAfter?.status).toBe("proposing")
+
+    // Admin cộng credit: không có Lead nào đang trả tiền ⇒ báo cả Analyst lẫn Lead
+    expect(await fulfillTopupRequests(seeded.orgId, 50, { kind: "admin", userId: null })).toBe(2)
+    await notificationsOf(analyst.id, "credit_topped_up", 2)
+    const [leadNotice] = await notificationsOf(seeded.userId, "credit_topped_up", 1)
+    expect(String(leadNotice.organizationId)).toBe(seeded.orgId)
+    expect(leadNotice.body).toContain("Quản trị viên đã nạp 50 credit")
+  })
+
+  it("phát hiện ImportedDocument đang paused credits của dự án chưa xoá mềm; bỏ qua dự án đã xoá mềm", async () => {
+    const seeded = await seedFixture("minimal")
+    const activeAnalyst = await joinOrg(seeded.orgId, "analyst")
+    const deletedAnalyst = await joinOrg(seeded.orgId, "analyst")
+
+    const deletedProject = await Project.create({
+      userId: deletedAnalyst.id,
+      organizationId: seeded.orgId,
+      name: "Deleted Project",
+      mode: "import",
+      deletedAt: new Date()
+    })
+
+    await ImportedDocument.create([
+      {
+        projectId: seeded.projectId,
+        sha256: "hash-active",
+        original_name: "active.docx",
+        size: 100,
+        preflight: { status: "accepted", issues: [] },
+        status: "extracting",
+        paused: { reason: "credits", at: new Date() },
+        extract_cursor: "fixed:1",
+        created_by: new mongoose.Types.ObjectId(activeAnalyst.id)
+      },
+      {
+        projectId: deletedProject._id,
+        sha256: "hash-deleted",
+        original_name: "deleted.docx",
+        size: 100,
+        preflight: { status: "accepted", issues: [] },
+        status: "checking",
+        paused: { reason: "credits", at: new Date() },
+        extract_cursor: null,
+        created_by: new mongoose.Types.ObjectId(deletedAnalyst.id)
+      }
+    ])
+
+    expect(await fulfillTopupRequests(seeded.orgId, 80, { kind: "payment", userId: seeded.userId })).toBe(1)
+    await notificationsOf(activeAnalyst.id, "credit_topped_up", 1)
+    expect(await Notification.countDocuments({ userId: deletedAnalyst.id, type: "credit_topped_up" })).toBe(0)
+  })
+
   it("Viewer không báo được (403); không có org ⇒ 400/403", async () => {
     const seeded = await seedFixture("minimal")
     const viewer = await joinOrg(seeded.orgId, "lead")
     await Membership.updateOne({ userId: viewer.id, organizationId: seeded.orgId }, { $set: { role: "viewer" } })
     const res = await request(app).post("/api/v1/billing/topup-request").set(bearer(viewer.token)).send({})
     expect(res.status).toBe(403)
+  })
+
+  it("Analyst mở yêu cầu / có bước paused nhưng bị hạ xuống viewer hoặc xoá Membership trước khi nạp ⇒ đóng yêu cầu mở nhưng KHÔNG gửi credit_topped_up", async () => {
+    const seeded = await seedFixture("minimal")
+    const demoted = await joinOrg(seeded.orgId, "analyst")
+    const removed = await joinOrg(seeded.orgId, "analyst")
+
+    expect((await request(app).post("/api/v1/billing/topup-request").set(bearer(demoted.token)).send({ projectId: seeded.projectId, step: "I-4:fixed:1" })).status).toBe(201)
+    expect((await request(app).post("/api/v1/billing/topup-request").set(bearer(removed.token)).send({ projectId: seeded.projectId, step: "I-1.11" })).status).toBe(201)
+
+    await ImportedDocument.create([
+      {
+        projectId: seeded.projectId,
+        sha256: "hash-demoted",
+        original_name: "demoted.docx",
+        size: 100,
+        preflight: { status: "accepted", issues: [] },
+        status: "extracting",
+        paused: { reason: "credits", at: new Date() },
+        extract_cursor: "fixed:1",
+        created_by: new mongoose.Types.ObjectId(demoted.id)
+      },
+      {
+        projectId: seeded.projectId,
+        sha256: "hash-removed",
+        original_name: "removed.docx",
+        size: 100,
+        preflight: { status: "accepted", issues: [] },
+        status: "checking",
+        paused: { reason: "credits", at: new Date() },
+        extract_cursor: null,
+        created_by: new mongoose.Types.ObjectId(removed.id)
+      }
+    ])
+
+    await Membership.updateOne({ userId: demoted.id, organizationId: seeded.orgId }, { $set: { role: "viewer" } })
+    await Membership.deleteOne({ userId: removed.id, organizationId: seeded.orgId })
+
+    expect(await fulfillTopupRequests(seeded.orgId, 120, { kind: "payment", userId: seeded.userId })).toBe(0)
+    expect(await CreditTopupRequest.countDocuments({ organizationId: seeded.orgId, status: "open" })).toBe(0)
+    expect(await CreditTopupRequest.countDocuments({ organizationId: seeded.orgId, status: "fulfilled" })).toBe(2)
+    expect(await Notification.countDocuments({ userId: { $in: [demoted.id, removed.id] }, type: "credit_topped_up" })).toBe(0)
+
+    // Thành viên còn quyền Analyst mở yêu cầu mới sau đó vẫn nhận credit_topped_up bình thường; người đã hạ quyền giữ nguyên 0 thông báo
+    const activeAnalyst = await joinOrg(seeded.orgId, "analyst")
+    expect((await request(app).post("/api/v1/billing/topup-request").set(bearer(activeAnalyst.token)).send({ projectId: seeded.projectId })).status).toBe(201)
+    expect(await fulfillTopupRequests(seeded.orgId, 60, { kind: "payment", userId: seeded.userId })).toBe(1)
+    await notificationsOf(activeAnalyst.id, "credit_topped_up", 1)
+    expect(await Notification.countDocuments({ userId: { $in: [demoted.id, removed.id] }, type: "credit_topped_up" })).toBe(0)
+  })
+
+  it("bỏ qua dự án archived và bỏ qua StepRun không còn tác dụng (đã accept/skip, placeholder loop, dự án convert FPT->import, phase interview đã vượt qua)", async () => {
+    const seeded = await seedFixture("minimal")
+    const archivedAuthor = await joinOrg(seeded.orgId, "analyst")
+    const acceptedAuthor = await joinOrg(seeded.orgId, "analyst")
+    const bypassedByRunAuthor = await joinOrg(seeded.orgId, "analyst")
+    const bypassedByDecisionAuthor = await joinOrg(seeded.orgId, "analyst")
+    const convertedAuthor = await joinOrg(seeded.orgId, "analyst")
+    const activePhaseAuthor = await joinOrg(seeded.orgId, "analyst")
+
+    const t0 = new Date("2026-11-14T10:00:00.000Z")
+    const t1 = new Date("2026-11-14T10:05:00.000Z")
+
+    // 1. Dự án archived có cả ChangeRequest + StepRun paused -> phải bị bỏ qua
+    const archivedProject = await Project.create({
+      userId: archivedAuthor.id,
+      organizationId: seeded.orgId,
+      name: "Archived Project",
+      mode: "fpt",
+      status: "archived"
+    })
+    await ChangeRequest.create({
+      projectId: archivedProject._id,
+      cr_id: "CR-002",
+      title: "Archived CR",
+      description: "Ignored",
+      source: { kind: "stakeholder_email", ref: null, note: null },
+      requester: "PM",
+      status: "proposing",
+      paused: { reason: "credits", at: t0 },
+      base_doc_version: "1.0",
+      created_by: new mongoose.Types.ObjectId(archivedAuthor.id)
+    })
+
+    // 2. Dự án đã convert từ mode 2 -> mode 1 còn sót StepRun mode 2 -> phải bị bỏ qua
+    const convertedProject = await Project.create({
+      userId: convertedAuthor.id,
+      organizationId: seeded.orgId,
+      name: "Converted Project",
+      mode: "import",
+      converted_from: "fpt",
+      status: "active"
+    })
+
+    // 3. Dự án active thứ 2 có Spine với B-1 decision đã chốt & S-3.1 accepted & SCR-PH placeholder
+    const bypassedDecisionProject = await Project.create({
+      userId: bypassedByDecisionAuthor.id,
+      organizationId: seeded.orgId,
+      name: "Decision Bypassed Project",
+      mode: "fpt",
+      status: "active"
+    })
+    await Spine.create({
+      projectId: bypassedDecisionProject._id,
+      screens: [{ id: "SCR-PH", feature_id: "F1", name: "Placeholder", detail_status: "placeholder" }],
+      steps: [
+        { id: "S-3.1", status: "accepted", first_seq: 1, last_seq: 1, accepted_at: t1 },
+        { id: "S-3.2", status: "skipped", first_seq: null, last_seq: null, accepted_at: null }
+      ],
+      decisions: [
+        { id: "D1", topic_key: "scope", question: "Q", answer: "A", step_id: "B-1", at: t1.toISOString(), superseded_by: null }
+      ]
+    })
+
+    // 4. Dự án active thứ 3 (dùng cho phase B-1 bị vượt qua bởi sub-step B-1.1 mới hơn, và B-2 vẫn đang dừng thật)
+    const activePhaseProject = await Project.create({
+      userId: activePhaseAuthor.id,
+      organizationId: seeded.orgId,
+      name: "Active Phase Project",
+      mode: "fpt",
+      status: "active"
+    })
+
+    await StepRun.create([
+      {
+        projectId: archivedProject._id,
+        step_id: "S-3.1",
+        run_id: "r-arch",
+        by: archivedAuthor.id,
+        status: "interrupted",
+        stage: "draft",
+        started_at: t0,
+        last_event_at: t0,
+        locked_until: t0,
+        error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit" }
+      },
+      {
+        projectId: convertedProject._id,
+        step_id: "S-3.1",
+        run_id: "r-conv",
+        by: convertedAuthor.id,
+        status: "interrupted",
+        stage: "draft",
+        started_at: t0,
+        last_event_at: t0,
+        locked_until: t0,
+        error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit" }
+      },
+      {
+        projectId: bypassedDecisionProject._id,
+        step_id: "S-3.1",
+        run_id: "r-acc",
+        by: acceptedAuthor.id,
+        status: "interrupted",
+        stage: "draft",
+        started_at: t0,
+        last_event_at: t0,
+        locked_until: t0,
+        error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit" }
+      },
+      {
+        projectId: bypassedDecisionProject._id,
+        step_id: "S-5.1@SCR-PH",
+        run_id: "r-ph",
+        by: acceptedAuthor.id,
+        status: "interrupted",
+        stage: "draft",
+        started_at: t0,
+        last_event_at: t0,
+        locked_until: t0,
+        error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit" }
+      },
+      {
+        projectId: bypassedDecisionProject._id,
+        step_id: "B-1",
+        run_id: "r-dec",
+        by: bypassedByDecisionAuthor.id,
+        status: "interrupted",
+        stage: "ask",
+        started_at: t0,
+        last_event_at: t0,
+        locked_until: t0,
+        error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit" }
+      },
+      {
+        projectId: activePhaseProject._id,
+        step_id: "B-1",
+        run_id: "r-b1-old",
+        by: bypassedByRunAuthor.id,
+        status: "interrupted",
+        stage: "ask",
+        started_at: t0,
+        last_event_at: t0,
+        locked_until: t0,
+        error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit" }
+      },
+      {
+        projectId: activePhaseProject._id,
+        step_id: "B-1.1",
+        run_id: "r-b1-sub",
+        by: bypassedByRunAuthor.id,
+        status: "done",
+        stage: "gate",
+        started_at: t1,
+        last_event_at: t1,
+        locked_until: t1
+      },
+      {
+        projectId: activePhaseProject._id,
+        step_id: "B-2",
+        run_id: "r-b2-real",
+        by: activePhaseAuthor.id,
+        status: "interrupted",
+        stage: "ask",
+        started_at: t0,
+        last_event_at: t0,
+        locked_until: t0,
+        error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit" }
+      }
+    ])
+
+    expect(await fulfillTopupRequests(seeded.orgId, 100, { kind: "payment", userId: seeded.userId })).toBe(1)
+    await notificationsOf(activePhaseAuthor.id, "credit_topped_up", 1)
+    expect(
+      await Notification.countDocuments({
+        userId: { $in: [archivedAuthor.id, acceptedAuthor.id, bypassedByRunAuthor.id, bypassedByDecisionAuthor.id, convertedAuthor.id] },
+        type: "credit_topped_up"
+      })
+    ).toBe(0)
   })
 })

@@ -1116,7 +1116,7 @@ const isFailure = (r: RawAiStep | MeteredFailure): r is MeteredFailure => "ok" i
  */
 export const runExtraction = async (projectId: string, userId: string, importId: string): Promise<ExtractionRun> => {
   const started = Date.now()
-  const stats = { calls: 0 }
+  const stats = { calls: 0, notifiedTopUp: false }
   try {
     for (let rechecks = 0; ; rechecks++) {
       const run = await extractSections(projectId, userId, importId, stats)
@@ -1132,7 +1132,7 @@ export const runExtraction = async (projectId: string, userId: string, importId:
   }
 }
 
-const extractSections = async (projectId: string, userId: string, importId: string, stats: { calls: number }): Promise<ExtractionRun> => {
+const extractSections = async (projectId: string, userId: string, importId: string, stats: { calls: number; notifiedTopUp: boolean }): Promise<ExtractionRun> => {
   const doc = await requireImport(projectId, importId)
   assertImportStatus(doc, ["extracting"], "extracting")
   const inputs = await loadExtractionInputs(projectId)
@@ -1249,7 +1249,10 @@ const extractSections = async (projectId: string, userId: string, importId: stri
     if (!pauseWritten) {
       pauseWritten = true
       const res = await ImportedDocument.updateOne({ _id: doc._id, paused: null }, { $set: { paused: { reason: failure.reason, at: new Date() } } })
-      if (res.modifiedCount && failure.reason === "credits") void notifyTopUpNeeded(projectId, `I-4:${sc.section_id}`)
+      if (res.modifiedCount && failure.reason === "credits" && !stats.notifiedTopUp) {
+        stats.notifiedTopUp = true
+        void notifyTopUpNeeded(projectId, `I-4:${sc.section_id}`)
+      }
     }
     // Nói rõ mục nào — theo tiêu đề trong file, không in khoá section. Câu cho user (FLF-247); text thô của provider đã log
     // ở metered-ai

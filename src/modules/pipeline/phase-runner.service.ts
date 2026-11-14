@@ -358,12 +358,21 @@ const runPhaseInterview = async (
   const run = await acquireRun(projectId, unit, { sessionId, by: userId, stage: "ask", detail_vi: userMessage ? "Đọc tin nhắn của bạn và tài liệu để trả lời" : "Xem giai đoạn này còn thiếu gì để hỏi bạn" })
   if (deps.abort) registerAbort(run.run_id, deps.abort)
   let outcome: InterviewOutcome | null = null
+  let caughtErr: unknown = null
   try {
     outcome = await askPhaseInterview(projectId, unit, sessionId, userId, emit, deps, spine, missing, run.run_id, replyLanguage, userMessage)
     return outcome
+  } catch (err) {
+    caughtErr = err
+    throw err
   } finally {
     if (outcome === "detached") await detachRun(projectId, unit, run.run_id)
-    else await finishRun(projectId, unit, run.run_id, outcome === null ? "interrupted" : "done", { questions: null })
+    else {
+      await finishRun(projectId, unit, run.run_id, outcome === null ? "interrupted" : "done", {
+        questions: null,
+        ...(outcome === null && caughtErr !== null ? { error: runErrorOf(caughtErr) } : {})
+      })
+    }
   }
 }
 

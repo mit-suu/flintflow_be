@@ -6,10 +6,10 @@ import { CreditWallet } from "../credits/credit-wallet.model.js"
 import { CreditTransaction } from "../credits/credit-transaction.model.js"
 import { Subscription } from "../credits/subscription.model.js"
 import { notify } from "../notification/notification.service.js"
-import { scheduleResumeAfterTopUp } from "../import/credit-flow.service.js"
 import { fulfillTopupRequests } from "./topup-request.service.js"
 import { PaymentIntent, IPaymentIntent } from "./payment-intent.model.js"
 import { User } from "../user/user.model.js"
+import { Membership } from "../organization/membership.model.js"
 import { Project, WITH_DELETED } from "../project/project.model.js"
 import { planConfig, findPackage, getPlan, planFromPackageId, planPackageId, PlanId } from "./plan.config.js"
 import {
@@ -59,25 +59,37 @@ export const withOptionalTransaction = async <T>(
 
 // ─── Số dư / gói ─────────────────────────────────────────────────────
 
+export const USAGE_TYPES = ["reserve", "deduct", "release", "refund"] as const
+
 /**
  * Số dư của TỔ CHỨC (business-flow.md §2: "một ví chung cho mỗi org"). Phải cùng ví mà lượt gọi AI trừ
  * (`credit-reservation.resolveWalletOrg`), nếu không màn hình báo một đằng còn tiền đi một nẻo.
  */
-export const getBalance = async (orgId: string, userId: string) => {
+export const getBalance = async (orgId: string, userId: string, role: "lead" | "analyst" = "lead") => {
   const wallet = await getOrCreateWallet(userId, undefined, orgId)
+  const ledgerFilter: Record<string, unknown> = { organizationId: orgId }
+  if (role !== "lead") {
+    ledgerFilter.type = { $in: [...USAGE_TYPES] }
+  }
   const [subscription, ledger] = await Promise.all([
     Subscription.findOne({ organizationId: orgId, status: "active" }),
-    CreditTransaction.find({ organizationId: orgId }, null, { sort: { createdAt: -1 }, limit: 20 })
+    CreditTransaction.find(ledgerFilter, null, { sort: { createdAt: -1 }, limit: 20 })
   ])
 
   const plan: PlanId = subscription?.plan ?? "free"
+  const planDef = getPlan(plan)
 
   return {
     balance: wallet.balance,
     reserved: wallet.reserved,
     available: wallet.balance - wallet.reserved,
     plan,
-    planLabel: getPlan(plan).label,
+    planLabel: planDef.label,
+    planLimits: {
+      maxMembers: planDef.maxMembers,
+      maxProjects: planDef.maxProjects,
+      monthlyCredits: planDef.monthlyCredits
+    },
     lowCreditThreshold: planConfig.lowCreditThreshold,
     subscription: subscription
       ? {
@@ -104,11 +116,9 @@ export interface TransactionFilters {
   kind?: TransactionKind
   projectId?: string
   memberId?: string
-  /** Thanh toán chỉ Lead xem (UC-59) — Analyst chỉ thấy dòng ví, không thấy dòng thanh toán. */
+  /** Thanh toán chỉ Lead xem (UC-59) — Analyst chỉ thấy dòng ví (`USAGE_TYPES`), không thấy dòng thanh toán. */
   includePayments?: boolean
 }
-
-const USAGE_TYPES = ["reserve", "deduct", "release", "refund"]
 
 interface NamedRef {
   id: string
@@ -132,12 +142,108 @@ const toPaymentRow = (intent: IPaymentIntent) => ({
   intentId: intent._id.toString(),
   packageId: intent.packageId,
   price: intent.amount,
-  currency: intent.currency,
+  currency: intent.currency ?? "VND",
   referenceCode: intent.referenceCode ?? null,
   createdAt: intent.createdAt
 })
 
 const plain = (doc: any): Record<string, any> => (typeof doc?.toObject === "function" ? doc.toObject() : { ...doc })
+
+const intentTimestamp = (intent: Pick<IPaymentIntent, "processedAt" | "createdAt">) =>
+  new Date(intent.processedAt ?? intent.createdAt).getTime()
+
+const buildPurchaseRow = (row: Record<string, any>, matched?: IPaymentIntent | null) => {
+  const intentIdRaw = row.intentId ?? matched?._id ?? null
+  return {
+    ...row,
+    paymentStatus: "succeeded" as const,
+    intentId: intentIdRaw ? String(intentIdRaw) : null,
+    packageId: row.packageId ?? matched?.packageId ?? null,
+    price: row.price ?? matched?.amount ?? null,
+    currency: row.currency ?? matched?.currency ?? "VND",
+    referenceCode: row.referenceCode ?? matched?.referenceCode ?? null
+  }
+}
+
+/** Gắn metadata thanh toán cho dòng `purchase`, backfill từ PaymentIntent succeeded với dữ liệu cũ thiếu `packageId`. */
+const enrichPurchaseRows = async (orgId: string, rows: Record<string, any>[]): Promise<Record<string, any>[]> => {
+  const legacyIndices: number[] = []
+  for (let i = 0; i < rows.length; i += 1) {
+    if (rows[i].type === "purchase" && rows[i].packageId == null) {
+      legacyIndices.push(i)
+    }
+  }
+
+  const matchedByRowIdx = new Map<number, IPaymentIntent>()
+  if (legacyIndices.length > 0) {
+    const succeededIntents = await PaymentIntent.find(
+      { organizationId: orgId, status: "succeeded" },
+      { userId: 1, packageId: 1, credits: 1, amount: 1, currency: 1, referenceCode: 1, processedAt: 1, createdAt: 1 }
+    )
+    const byId = new Map(succeededIntents.map((intent) => [String(intent._id), intent]))
+    // Đánh dấu trước mọi intentId đã gắn trên trang hiện tại (kể cả dòng purchase sau Task 4 đã có packageId)
+    const usedIntentIds = new Set<string>()
+    for (const row of rows) {
+      if (row.intentId != null) {
+        usedIntentIds.add(String(row.intentId))
+      }
+    }
+    const fallbackIndices: number[] = []
+
+    for (const idx of legacyIndices) {
+      const row = rows[idx]
+      if (row.intentId) {
+        const direct = byId.get(String(row.intentId))
+        if (direct) {
+          matchedByRowIdx.set(idx, direct)
+          usedIntentIds.add(String(direct._id))
+        }
+      } else {
+        fallbackIndices.push(idx)
+      }
+    }
+
+    if (fallbackIndices.length > 0) {
+      // Loại trừ mọi intent đã gắn cho dòng purchase ở các trang khác trong cùng org
+      const boundPurchases = await CreditTransaction.find(
+        { organizationId: orgId, type: "purchase", intentId: { $ne: null } },
+        { intentId: 1 }
+      )
+      for (const tx of boundPurchases) {
+        if (tx.intentId != null) {
+          usedIntentIds.add(String(tx.intentId))
+        }
+      }
+
+      const candidates: Array<{ rowIdx: number; intent: IPaymentIntent; diffMs: number; sameUser: boolean }> = []
+      for (const idx of fallbackIndices) {
+        const row = rows[idx]
+        const txTime = new Date(row.createdAt).getTime()
+        for (const intent of succeededIntents) {
+          const id = String(intent._id)
+          if (usedIntentIds.has(id) || intent.credits !== row.amount) continue
+          candidates.push({
+            rowIdx: idx,
+            intent,
+            diffMs: Math.abs(intentTimestamp(intent) - txTime),
+            sameUser: String(intent.userId) === String(row.userId)
+          })
+        }
+      }
+      candidates.sort((a, b) => a.diffMs - b.diffMs || Number(b.sameUser) - Number(a.sameUser))
+      for (const c of candidates) {
+        const id = String(c.intent._id)
+        if (matchedByRowIdx.has(c.rowIdx) || usedIntentIds.has(id)) continue
+        matchedByRowIdx.set(c.rowIdx, c.intent)
+        usedIntentIds.add(id)
+      }
+    }
+  }
+
+  return rows.map((row, idx) =>
+    row.type === "purchase" ? buildPurchaseRow(row, matchedByRowIdx.get(idx)) : row
+  )
+}
 
 /** Tên thành viên / dự án theo lô cho một trang — một truy vấn mỗi loại, không truy vấn từng dòng. */
 const namesById = async (model: "user" | "project", ids: string[]): Promise<Map<string, string>> => {
@@ -163,9 +269,19 @@ const refOf = (id: unknown, names: Map<string, string>): NamedRef | null => {
  */
 export const listTransactions = async (orgId: string, page = 1, limit = 20, filters: TransactionFilters = {}) => {
   const { kind, projectId, memberId, includePayments = false } = filters
+  if (!includePayments && kind === "payment") {
+    return {
+      items: [] as CreditHistoryItem[],
+      meta: { page, limit, total: 0, totalPages: 0 }
+    }
+  }
+
   const txFilter: Record<string, unknown> = { organizationId: orgId }
-  if (kind === "usage") txFilter.type = { $in: USAGE_TYPES }
-  if (kind === "payment") txFilter.type = "purchase"
+  if (!includePayments || kind === "usage") {
+    txFilter.type = { $in: [...USAGE_TYPES] }
+  } else if (kind === "payment") {
+    txFilter.type = "purchase"
+  }
   if (projectId) txFilter.projectId = projectId
   if (memberId) txFilter.userId = memberId
 
@@ -184,15 +300,14 @@ export const listTransactions = async (orgId: string, page = 1, limit = 20, filt
   ])
 
   // Hai nguồn khác shape (dòng sổ ví / dòng thanh toán) — FE phân biệt bằng `type`
-  const rows: Record<string, any>[] = [
-    ...txs.map((tx) => {
-      const row = plain(tx)
-      return row.type === "purchase" ? { ...row, paymentStatus: "succeeded" } : row
-    }),
+  const pagedRows: Record<string, any>[] = [
+    ...txs.map((tx) => plain(tx)),
     ...intents.map((intent) => toPaymentRow(intent))
   ]
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice((page - 1) * limit, window)
+
+  const rows = includePayments ? await enrichPurchaseRows(orgId, pagedRows) : pagedRows
 
   const unique = (values: unknown[]) => [...new Set(values.filter(Boolean).map(String))]
   const [members, projects] = await Promise.all([
@@ -332,7 +447,12 @@ const settleIntent = async (
           actionType: "purchase",
           amount: intent.credits,
           type: "purchase",
-          balanceAfter: wallet.balance - wallet.reserved
+          balanceAfter: wallet.balance - wallet.reserved,
+          intentId: intent._id,
+          packageId: intent.packageId,
+          price: intent.amount,
+          currency: intent.currency,
+          referenceCode: intent.referenceCode ?? null
         }
       ],
       options
@@ -349,8 +469,9 @@ const settleIntent = async (
 
   const { intent, balance, planChange } = processed
   const userId = intent.userId.toString()
+  const intentOrgId = intent.organizationId ? String(intent.organizationId) : null
 
-  if (planChange?.changed) await notifyPlanChanged(userId, planChange)
+  if (planChange?.changed) await notifyPlanChanged(userId, planChange, intentOrgId)
 
   if (outcome === "succeeded") {
     await notify(userId, {
@@ -358,22 +479,18 @@ const settleIntent = async (
       title: "Thanh toán thành công",
       body: `Đã cộng ${intent.credits} credit vào tài khoản của bạn.`,
       link: "/home/billing",
+      ...(intentOrgId ? { organizationId: intentOrgId } : {}),
       meta: { intentId, credits: intent.credits, amount: intent.amount }
     })
-    // BPMN 4.5 ⇒ 4.1 (mode 1 v3): nạp xong ⇒ bước AI mode 1 đang dừng vì hết credit chạy tiếp (job nền, không chặn webhook)
-    // task-26: nạp vào ví tổ chức ⇒ chạy tiếp trong mọi dự án của tổ chức, không chỉ dự án người nạp tạo
-    const paidOrgId = intent.organizationId ? String(intent.organizationId) : null
-    await scheduleResumeAfterTopUp(userId, paidOrgId, intentId).catch((err) =>
-      console.warn("[billing] không đưa được lượt chạy tiếp mode 1 sau khi nạp vào hàng đợi:", err)
-    )
-    // FLF-332 (BR-08): Analyst đã bấm "Báo Lead nạp" ⇒ báo lại cho họ; step không tự chạy
-    if (paidOrgId) await fulfillTopupRequests(paidOrgId, intent.credits, { kind: "payment", userId })
+    // FLF-332 / FLF-417 (BR-01, BR-08): nạp xong KHÔNG tự chạy lại bước AI — chỉ đóng yêu cầu nạp và báo mọi thành viên có bước đang dừng
+    if (intentOrgId) await fulfillTopupRequests(intentOrgId, intent.credits, { kind: "payment", userId })
   } else {
     await notify(userId, {
       type: "payment_failed",
       title: "Thanh toán thất bại",
       body: "Giao dịch nạp credit không thành công.",
       link: "/home/billing",
+      ...(intentOrgId ? { organizationId: intentOrgId } : {}),
       meta: { intentId, amount: intent.amount }
     })
   }
@@ -558,18 +675,33 @@ const activatePlan = async (
   return { subscription, periodEnd, plan, previousPlan, changed: true }
 }
 
-const notifyPlanChanged = async (userId: string, change: PlanChange) => {
+const resolvePlanChangeRecipients = async (userId: string, organizationId?: string | null): Promise<string[]> => {
+  if (!organizationId || !mongoose.isValidObjectId(organizationId)) return [userId]
+  const leads = await Membership.find({ organizationId, role: "lead" }, { userId: 1 })
+  const leadIds = [...new Set(leads.map((m) => m.userId).filter(Boolean).map(String))]
+  return leadIds.length > 0 ? leadIds : [userId]
+}
+
+const notifyPlanChanged = async (userId: string, change: PlanChange, organizationId?: string | null) => {
   const definition = getPlan(change.plan)
   const periodEnd = change.periodEnd
-  await notify(userId, {
-    type: "plan_changed",
+  const recipients = await resolvePlanChangeRecipients(userId, organizationId)
+  const payload = {
+    type: "plan_changed" as const,
     title: `Đã chuyển sang gói ${definition.label}`,
     body: periodEnd
       ? `Gói ${definition.label} có hiệu lực đến ${new Date(periodEnd).toLocaleDateString("vi-VN")}.`
       : `Gói ${definition.label} đã được kích hoạt.`,
     link: "/home/billing",
-    meta: { plan: change.plan, previousPlan: change.previousPlan }
-  })
+    ...(organizationId ? { organizationId } : {}),
+    meta: {
+      plan: change.plan,
+      previousPlan: change.previousPlan,
+      label: definition.label,
+      periodEnd: periodEnd ? new Date(periodEnd).toISOString() : null
+    }
+  }
+  await Promise.all(recipients.map((recipientId) => notify(recipientId, payload)))
 }
 
 /**
@@ -599,6 +731,6 @@ export const upgradePlan = async (orgId: string, userId: string, plan: PlanId) =
   }
 
   const change = await activatePlan(orgId, userId, plan)
-  if (change.changed) await notifyPlanChanged(userId, change)
+  if (change.changed) await notifyPlanChanged(userId, change, orgId)
   return change.subscription
 }
