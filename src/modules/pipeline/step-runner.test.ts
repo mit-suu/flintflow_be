@@ -2501,3 +2501,146 @@ describe("FLF-358: prompt elicit-loop đã render không còn {{assumptions}} �
     }
   })
 })
+
+describe("step-runner: FLF-418 thẻ hỏi tất định (ký pháp ERD ở S-4.5)", () => {
+  const seedUpTo = (stepId: string) => {
+    seedSpine()
+    const spine = db.spines[0] as unknown as SpineT
+    const all = orderedSteps(spine)
+    spine.steps = all
+      .slice(0, all.findIndex((s) => s.id === stepId))
+      .map((s) => ({ id: s.id, status: "accepted" as const, first_seq: 1, last_seq: 1, accepted_at: "2026-01-01T00:00:00.000Z" }))
+    spine.progress.current_phase = "S-4"
+    spine.progress.current_step = "S-4.4"
+  }
+  const store = (initial: { erdNotation?: string; sequenceLevel?: string } = {}) => {
+    const state = { ...initial }
+    return {
+      state,
+      load: vi.fn(async () => state),
+      save: vi.fn(async (_p: string, kind: string, value: string) => {
+        if (kind === "erd") state.erdNotation = value
+        else state.sequenceLevel = value
+      })
+    }
+  }
+  const waitAsk = async (events: StepEvent[], n = 1) => {
+    for (let i = 0; i < 200 && events.filter((e) => e.type === "answer_needed").length < n; i++) await new Promise((r) => setTimeout(r, 0))
+    const asked = events.filter((e) => e.type === "answer_needed")
+    return asked[asked.length - 1] as Extract<StepEvent, { type: "answer_needed" }>
+  }
+  const optionLabel = (o: string | { label: string }) => (typeof o === "string" ? o : o.label)
+
+  it("chưa chọn ⇒ thẻ Q_erd_notation trước mọi lượt gọi model; chọn Crow's Foot ⇒ ghi Project + sổ quyết định rồi soạn tiếp", async () => {
+    seedUpTo("S-4.5")
+    seedSession(true)
+    const choices = store()
+    const elicitExecutor = vi.fn(async () => elicitReply("ok"))
+    const draftExecutor = vi.fn(async () => draftReply([]))
+    const { events, emit } = collectEvents()
+    const run = runStep(PROJECT, "S-4.5", SESSION, USER, emit, { elicitExecutor, draftExecutor, renderDeps: renderStub(), diagramChoices: choices, replyLanguage: "vi" })
+
+    const asked = await waitAsk(events)
+    expect(asked.questions).toHaveLength(1)
+    expect(asked.questions[0]).toMatchObject({ id: "Q_erd_notation", header: "Ký pháp ERD" })
+    expect(asked.questions[0].options?.map(optionLabel)).toEqual(["Chen (Khuyến nghị)", "Crow's Foot", "IDEF1X"])
+    expect(elicitExecutor).not.toHaveBeenCalled()
+    expect(draftExecutor).not.toHaveBeenCalled()
+
+    expect(submitAnswer(PROJECT, "S-4.5", SESSION, { answers: [{ question_id: "Q_erd_notation", answer: "Crow's Foot" }] })).toBe(true)
+    await run
+    expect(choices.save).toHaveBeenCalledWith(PROJECT, "erd", "crowsfoot")
+    expect(events.some((e) => e.type === "gate_ready")).toBe(true)
+    const record = await repo.get(PROJECT)
+    expect(record!.decisions.find((d) => d.topic_key === "erd_notation")).toMatchObject({ answer: "Crow's Foot", step_id: "S-4.5" })
+  })
+
+  it("đã chọn (cài đặt dự án / import) ⇒ không hỏi", async () => {
+    seedUpTo("S-4.5")
+    seedSession(true)
+    const choices = store({ erdNotation: "idef1x" })
+    const { events, emit } = collectEvents()
+    await runStep(PROJECT, "S-4.5", SESSION, USER, emit, { elicitExecutor: async () => elicitReply("ok"), draftExecutor: async () => draftReply([]), renderDeps: renderStub(), diagramChoices: choices })
+    expect(events.some((e) => e.type === "answer_needed")).toBe(false)
+    expect(choices.save).not.toHaveBeenCalled()
+  })
+
+  it("chữ gõ trong chat khớp tất định (chân chim) ⇒ crowsfoot, không có lượt model đọc tin của thẻ", async () => {
+    seedUpTo("S-4.5")
+    seedSession(true)
+    const choices = store()
+    const elicitExecutor = vi.fn(async () => elicitReply("ok"))
+    const { events, emit } = collectEvents()
+    const run = runStep(PROJECT, "S-4.5", SESSION, USER, emit, { elicitExecutor, draftExecutor: async () => draftReply([]), renderDeps: renderStub(), diagramChoices: choices, replyLanguage: "vi" })
+    await waitAsk(events)
+    submitAnswer(PROJECT, "S-4.5", SESSION, { answers: [], message: "vẽ kiểu chân chim giúp mình" })
+    await run
+    expect(choices.save).toHaveBeenCalledWith(PROJECT, "erd", "crowsfoot")
+    const userMessages = elicitExecutor.mock.calls.map((call) => String((call as unknown[])[0] && ((call as unknown[])[0] as { promptVariables?: { user_message?: string } }).promptVariables?.user_message))
+    expect(userMessages.some((m) => m.includes("chân chim"))).toBe(false)
+  })
+
+  it("trả lời không khớp hai lần ⇒ hỏi lại một lần rồi dùng Chen, báo trong chat", async () => {
+    seedUpTo("S-4.5")
+    seedSession(true)
+    const choices = store()
+    const { events, emit } = collectEvents()
+    const run = runStep(PROJECT, "S-4.5", SESSION, USER, emit, { elicitExecutor: async () => elicitReply("ok"), draftExecutor: async () => draftReply([]), renderDeps: renderStub(), diagramChoices: choices, replyLanguage: "vi" })
+    await waitAsk(events, 1)
+    submitAnswer(PROJECT, "S-4.5", SESSION, { answers: [{ question_id: "Q_erd_notation", answer: "kiểu nào cũng được" }] })
+    await waitAsk(events, 2)
+    const leads = events.filter((e) => e.type === "elicit").map((e) => (e as { delta: string }).delta)
+    expect(leads).toContain("Mình chưa hiểu lựa chọn này - bạn chọn một trong các phương án bên dưới nhé.")
+    submitAnswer(PROJECT, "S-4.5", SESSION, { answers: [{ question_id: "Q_erd_notation", answer: "tuỳ bạn" }] })
+    await run
+    expect(choices.save).toHaveBeenCalledWith(PROJECT, "erd", "chen")
+    const session = db.sessions.find((s) => s._id === SESSION)!
+    expect((session.messages as { content: string }[]).some((m) => m.content.includes("Mình dùng Chen"))).toBe(true)
+  })
+
+  it("sổ đã có quyết định mà Project chưa ghi ⇒ ghi bù, không hỏi", async () => {
+    seedUpTo("S-4.5")
+    const spine = db.spines[0] as unknown as SpineT
+    spine.decisions = [{ id: "DC1", topic_key: "erd_notation", question: "q", answer: "IDEF1X", step_id: "S-4.5", at: "2026-11-14T00:00:00.000Z", superseded_by: null }]
+    seedSession(true)
+    const choices = store()
+    const { events, emit } = collectEvents()
+    await runStep(PROJECT, "S-4.5", SESSION, USER, emit, { elicitExecutor: async () => elicitReply("ok"), draftExecutor: async () => draftReply([]), renderDeps: renderStub(), diagramChoices: choices })
+    expect(events.some((e) => e.type === "answer_needed")).toBe(false)
+    expect(choices.save).toHaveBeenCalledWith(PROJECT, "erd", "idef1x")
+  })
+})
+
+describe("step-runner: FLF-418 thẻ ký pháp ERD - trả lời sau khi rời trang (/answer chạy tiếp)", () => {
+  it("BE restart giữa lúc chờ thẻ ⇒ /answer ghi lựa chọn, không đi vào vòng câu model, tới gate", async () => {
+    seedSpine()
+    const spine = db.spines[0] as unknown as SpineT
+    const all = orderedSteps(spine)
+    spine.steps = all
+      .slice(0, all.findIndex((s) => s.id === "S-4.5"))
+      .map((s) => ({ id: s.id, status: "accepted" as const, first_seq: 1, last_seq: 1, accepted_at: "2026-01-01T00:00:00.000Z" }))
+    spine.progress.current_phase = "S-4"
+    spine.progress.current_step = "S-4.4"
+    seedSession(true)
+    const state: { erdNotation?: string } = {}
+    const diagramChoices = {
+      load: vi.fn(async () => state),
+      save: vi.fn(async (_p: string, _kind: string, value: string) => void (state.erdNotation = value))
+    }
+    const elicitExecutor = vi.fn(async () => elicitReply("ok"))
+    const draftExecutor = vi.fn(async () => draftReply([]))
+    const { events, emit } = collectEvents()
+    void runStep(PROJECT, "S-4.5", SESSION, USER, emit, { elicitExecutor, draftExecutor, renderDeps: renderStub(), diagramChoices, replyLanguage: "vi" })
+    for (let i = 0; i < 200 && !events.some((e) => e.type === "answer_needed"); i++) await new Promise((r) => setTimeout(r, 0))
+    dropPendingAnswers()
+
+    const answers = [{ question_id: "Q_erd_notation", answer: "IDEF1X" }]
+    const pending = await pendingAnswerFor(PROJECT, "S-4.5", SESSION, { answers })
+    const { done } = await resumeWaitingStep(PROJECT, "S-4.5", USER, pending, { answers }, { elicitExecutor, draftExecutor, renderDeps: renderStub(), diagramChoices, replyLanguage: "vi" })
+    await done
+    expect(diagramChoices.save).toHaveBeenCalledWith(PROJECT, "erd", "idef1x")
+    expect((await getRunState(PROJECT, "S-4.5"))?.status).toBe("gate")
+    const record = await repo.get(PROJECT)
+    expect(record!.decisions.find((d) => d.topic_key === "erd_notation")?.answer).toBe("IDEF1X")
+  })
+})
