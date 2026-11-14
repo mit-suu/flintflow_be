@@ -40,6 +40,10 @@ export interface DiagramLabels {
   stateMachineTitle: (entity: string) => string
   /** Tiêu đề (chú thích ảnh) sơ đồ tuần tự hệ thống của một function. */
   sequenceTitle: (fn: string) => string
+  /** FLF-418: tiêu đề (chú thích ảnh) sơ đồ tuần tự mức thành phần của một function. */
+  componentSequenceTitle: (fn: string) => string
+  /** FLF-418: hậu tố tên control (`<Feature>Controller`) — tên lớp kỹ thuật, không dịch. */
+  controllerSuffix: string
   /** Tiêu đề (chú thích ảnh) sơ đồ activity — luồng xử lý của một use case (FLF-390). */
   activityTitle: (useCase: string) => string
   /** Tiêu đề (chú thích ảnh) sơ đồ triển khai của hệ thống (FLF-390). */
@@ -69,6 +73,8 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     classTitle: (feature) => `Class Diagram - ${feature}`,
     stateMachineTitle: (entity) => `State Machine Diagram - ${entity}`,
     sequenceTitle: (fn) => `System Sequence Diagram - ${fn}`,
+    componentSequenceTitle: (fn) => `Sequence Diagram - ${fn}`,
+    controllerSuffix: "Controller",
     activityTitle: (useCase) => `Activity Diagram - ${useCase}`,
     deploymentTitle: "Deployment Diagram",
     errorGuard: "error",
@@ -92,6 +98,8 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     classTitle: (feature) => `Sơ đồ lớp - ${feature}`,
     stateMachineTitle: (entity) => `Sơ đồ trạng thái - ${entity}`,
     sequenceTitle: (fn) => `Sơ đồ tuần tự hệ thống - ${fn}`,
+    componentSequenceTitle: (fn) => `Sơ đồ tuần tự - ${fn}`,
+    controllerSuffix: "Controller",
     activityTitle: (useCase) => `Sơ đồ hoạt động - ${useCase}`,
     deploymentTitle: "Sơ đồ triển khai",
     errorGuard: "có lỗi",

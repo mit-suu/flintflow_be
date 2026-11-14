@@ -24,7 +24,7 @@ stub: false
 > The renderer is deterministic code: `src/modules/diagram/renderers/sequence.renderer.ts` (data → `.puml`). The path is `puml` (PlantUML server, compile-check; `render_fix` may repair syntax only). This skill documents the output.
 
 - Step: S-5.4 · Section: `function:<id>` (§3.x.y, after the function details) · `owner_kind = function`, `owner_id` = function id · Output: `puml`
-- IEEE 830 Annex A.4 (stimulus / response sequence), optional. This is the **system** level (black box): actor ↔ `:System`. The design-level sequence (Controller → Service → Repository) of Report 4 is a different artifact and never drawn here.
+- IEEE 830 Annex A.4 (stimulus / response sequence), optional. Two levels, chosen per project (`Project.sequenceLevel`, FLF-418, outside the Spine, part of the diagram hash): **system** (default, black box: actor ↔ `:System`) and **component** (Visual Paradigm robustness lifelines, below). The design-level sequence (Controller → Service → Repository, class / method names) of Report 4 is a different artifact and never drawn here.
 - Which functions get a diagram (deterministic, from data): at least 2 `interactions` AND (a non-human actor takes part, OR some message is `abnormal` or has a `guard`, OR the function has no screen). A plain two-arrow screen function has no diagram: its normal / abnormal flows already say everything.
 
 ## Data → diagram
@@ -35,7 +35,13 @@ stub: false
 - `abnormal` messages (each with a `guard`) form an `alt`: consecutive ones with the same guard are one operand, a different guard is the next `else`; the normal flow that follows is the last operand `else`. A `normal` message with a `guard` ⇒ `opt` (consecutive ones with the same guard share it). The Spine has no loop data yet, so no `loop` is drawn.
 - Activation bars of the receiver of a request that opened before an `alt` stay through every operand and close after the frame (PlantUML cannot reopen a bar in the next operand).
 
+## Component level (FLF-418)
+
+- Drawn when the project level is `component` and the function has at least 2 `component_interactions`; otherwise the system-level diagram above (yellow flag `sequence_component_missing`).
+- Lifelines left → right: actors (`actor`; the stimulus sender stays left even if external), the function's screen (`boundary ":<screen>"`; none for a non-screen function), one `control ":<Feature>Controller"` (name from the feature, accents removed, not stored), entities of the feature (`entity ":<entity>"`, by id), other external actors (`participant`, right).
+- Same arrows, activation, `alt` / `opt` and numbering; only a request from an actor opens a new number, calls from boundary / control are `n.m`. The control may call itself; nothing else does.
+
 ## Rules
 
 - Colours: fill `#7ACFF5`, black border and text, Arial, no shadow - the theme is written into the source (no `!include`). Labels are English; the localized document redraws from the translated Spine (`:Hệ thống`, `ngược lại`).
-- Caption: `System Sequence Diagram - <function name>` and one description paragraph under the figure. Samples: `docs/diagram_guideline/sequence/`, `docs/diagram_image_test/sequence/`.
+- Caption: `System Sequence Diagram - <function name>` (component level: `Sequence Diagram - <function name>`) and one description paragraph under the figure. Samples: `docs/diagram_guideline/sequence/`, `docs/diagram_image_test/sequence/`.

@@ -6,7 +6,7 @@ import { spineSchema } from "../../spine/spine.schema.js"
 import type { FunctionInteraction, Spine } from "../../spine/spine.types.js"
 import { renderKind } from "./index.js"
 import { DIAGRAM_LABELS } from "./labels.js"
-import { needsSequence, renderSequence, sequenceSource } from "./sequence.renderer.js"
+import { controllerName, hasComponentSequence, isComponentSequenceSource, needsSequence, renderSequence, sequenceSource } from "./sequence.renderer.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../../fixtures/spine-fixture-19-screens.json"), "utf8")))
@@ -185,5 +185,78 @@ describe("sequenceSource - ký pháp", () => {
     expect(vi).toContain('participant ":Hệ thống" as SSD_SYSTEM')
     expect(vi).toContain("else ngược lại")
     expect(DIAGRAM_LABELS.vi.sequenceTitle("Đăng nhập")).toBe("Sơ đồ tuần tự hệ thống - Đăng nhập")
+  })
+})
+
+describe("FLF-418 - mức thành phần (boundary / control / entity)", () => {
+  /** FN001 "Submit Credentials": màn S01 Login, feature F1 "Authentication & Onboarding", entity E01 User. */
+  const LOGIN: FunctionInteraction[] = [
+    m("A01", "S01", "Submit email and password", "request"),
+    m("S01", "control", "Authenticate credentials", "request"),
+    m("control", "control", "Validate input", "request"),
+    m("control", "E01", "Find user by email", "request"),
+    m("E01", "control", "User record", "response"),
+    m("control", "S01", "Credentials rejected", "response", "abnormal", "credentials do not match"),
+    m("control", "S01", "Session created", "response"),
+    m("S01", "A01", "Open project dashboard", "response")
+  ]
+  const withComponent = (list: FunctionInteraction[] = LOGIN): Spine => {
+    const spine = structuredClone(FIXTURE)
+    spine.functions.find((f) => f.id === "FN001")!.component_interactions = list
+    return spine
+  }
+  const partOf = (spine: Spine, level?: "system" | "component", labels = DIAGRAM_LABELS.en) =>
+    renderSequence(spine, null, labels, level ? { sequenceLevel: level } : {}).find((p) => p.owner_id === "FN001")!.source
+
+  it("lifeline trái → phải: actor, boundary (màn), control (<Feature>Controller), entity", () => {
+    const decl = body(partOf(withComponent(), "component")).filter((l) => / as /.test(l) && !l.includes("->"))
+    expect(decl).toEqual([
+      'actor ":Founder" as A01',
+      'boundary ":Login" as S01',
+      'control ":AuthenticationOnboardingController" as SD_CONTROL',
+      'entity ":User" as E01'
+    ])
+  })
+
+  it("đánh số: chỉ request từ actor mở số mới; control tự gọi; alt với else; mũi tên đồng bộ / phản hồi", () => {
+    const lines = body(partOf(withComponent(), "component"))
+    expect(lines).toContain("A01 -> S01 : 1: Submit email and password")
+    expect(lines).toContain("S01 -> SD_CONTROL : 1.1: Authenticate credentials")
+    expect(lines).toContain("SD_CONTROL ->> SD_CONTROL : 1.2: Validate input")
+    expect(lines).toContain("SD_CONTROL -> E01 : 1.3: Find user by email")
+    expect(lines).toContain("E01 -->> SD_CONTROL : 1.4: User record")
+    expect(lines).toContain("alt credentials do not match")
+    expect(lines).toContain("else else")
+    expect(lines.filter((l) => l === "end")).toHaveLength(1)
+  })
+
+  it("mức system, hoặc function chưa có dữ liệu thành phần ⇒ vẽ hộp đen như cũ", () => {
+    const spine = withComponent()
+    expect(partOf(spine, "system")).toBe(partOf(spine))
+    expect(partOf(spine)).toContain('participant ":System" as SSD_SYSTEM')
+    expect(partOf(FIXTURE, "component")).toContain('participant ":System" as SSD_SYSTEM')
+    expect(partOf(withComponent([LOGIN[0]]), "component")).toContain("SSD_SYSTEM")
+  })
+
+  it("function không màn: actor ngoài gửi thẳng tới control, không có boundary", () => {
+    const spine = structuredClone(FIXTURE)
+    const fn = spine.functions.find((f) => f.id === "FN084")!
+    fn.component_interactions = [m("A09", "control", "Trigger monthly quota reset", "request"), m("control", "A08", "Send quota renewal notice", "request")]
+    const source = renderSequence(spine, null, DIAGRAM_LABELS.en, { sequenceLevel: "component" }).find((p) => p.owner_id === "FN084")!.source
+    expect(source).not.toMatch(/^boundary /m)
+    expect(source).toMatch(/^participant ":.*" as A09$/m)
+    expect(source.indexOf("as A09")).toBeLessThan(source.indexOf("as SD_CONTROL"))
+    expect(source.indexOf("as SD_CONTROL")).toBeLessThan(source.indexOf("as A08"))
+  })
+
+  it("nhận diện hình mức thành phần qua nguồn; nhãn vi; tên controller bỏ dấu", () => {
+    const spine = withComponent()
+    expect(isComponentSequenceSource(partOf(spine, "component"))).toBe(true)
+    expect(isComponentSequenceSource(partOf(spine))).toBe(false)
+    expect(DIAGRAM_LABELS.vi.componentSequenceTitle("Đăng nhập")).toBe("Sơ đồ tuần tự - Đăng nhập")
+    const vi = structuredClone(spine)
+    vi.features.find((f) => f.id === "F1")!.name = "Xác thực & Đăng ký"
+    expect(controllerName(vi, vi.functions.find((f) => f.id === "FN001")!)).toBe("XacThucDangKyController")
+    expect(hasComponentSequence(spine.functions.find((f) => f.id === "FN001")!)).toBe(true)
   })
 })

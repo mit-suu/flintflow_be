@@ -20,6 +20,7 @@ import { diagramLabelsFor } from "../diagram/renderers/labels.js"
 import { SYSTEM_LIFELINE } from "../spine/spine.schema.js"
 import { ACTOR_HIERARCHY_SECTION } from "../diagram/renderers/usecase.renderer.js"
 import { activitySectionOf } from "../diagram/renderers/activity.renderer.js"
+import { isComponentSequenceSource } from "../diagram/renderers/sequence.renderer.js"
 import { DEFAULT_RELATION_VERB, relationVerb } from "../diagram/renderers/erd.renderer.js"
 import { describeInterface } from "./interface-description.js"
 import { crRecordDescription } from "./cr-record.js"
@@ -707,13 +708,30 @@ const sequenceDescription = (spine: Spine, fn: Spine["functions"][number], vi: b
     : `The diagram shows ${list.length} messages between ${parties} and the system in "${fn.name}"; a solid arrow is a synchronous request, an open arrow an asynchronous signal and a dashed arrow a response${branches > 0 ? `; ${branches} messages of the error branches sit in an alt frame with the condition in square brackets` : ""}.`
 }
 
-/** Sơ đồ tuần tự hệ thống của function (nếu đã vẽ), kèm đoạn mô tả; chú thích theo ngôn ngữ tài liệu. */
+/** FLF-418: đoạn mô tả dưới sơ đồ tuần tự mức thành phần — số message, nhánh lỗi, màn / bộ điều khiển / entity tham gia. */
+const componentSequenceDescription = (spine: Spine, fn: Spine["functions"][number], vi: boolean): string => {
+  const list = fn.component_interactions ?? []
+  const ends = new Set(list.flatMap((i) => [i.from, i.to]))
+  const actors = spine.actors.filter((a) => ends.has(a.id)).map((a) => a.name)
+  const screen = spine.screens.find((s) => ends.has(s.id))?.name
+  const entities = spine.entities.filter((e) => ends.has(e.id)).map((e) => e.name)
+  const branches = list.filter((i) => i.flow === "abnormal").length
+  const join = (names: string[]) => (names.length > 0 ? names.join(", ") : "-")
+  return vi
+    ? `Sơ đồ mô tả ${list.length} message giữa ${join(actors)}${screen ? `, màn "${screen}"` : ""}, bộ điều khiển và ${entities.length > 0 ? `entity ${join(entities)}` : "các thành phần dữ liệu"} trong chức năng "${fn.name}"; mũi tên đặc là yêu cầu đồng bộ, mũi tên hở là tín hiệu bất đồng bộ, nét đứt là phản hồi${branches > 0 ? `; ${branches} message thuộc nhánh lỗi nằm trong khung alt với điều kiện ở dấu ngoặc vuông` : ""}.`
+    : `The diagram shows ${list.length} messages between ${join(actors)}${screen ? `, the "${screen}" screen` : ""}, the controller and ${entities.length > 0 ? `the ${join(entities)} entities` : "the data components"} in "${fn.name}"; a solid arrow is a synchronous request, an open arrow an asynchronous signal and a dashed arrow a response${branches > 0 ? `; ${branches} messages of the error branches sit in an alt frame with the condition in square brackets` : ""}.`
+}
+
+/** Sơ đồ tuần tự của function (nếu đã vẽ), kèm đoạn mô tả; chú thích theo ngôn ngữ tài liệu và theo mức của hình đã vẽ (FLF-418). */
 const sequenceBlocks = (spine: Spine, functionId: string, ctx: SectionRenderContext): Block[] => {
   const fn = spine.functions.find((f) => f.id === functionId)
   if (!fn) return []
   const labels = diagramLabelsFor(ctx.language)
-  const images = diagramImages(spine, "sequence", functionId, ctx, labels.sequenceTitle(fn.name))
-  return images.length === 0 ? [] : [...images, p(sequenceDescription(spine, fn, isVietnamese(ctx.language)))]
+  const drawn = spine.diagrams.find((d) => d.kind === "sequence" && d.owner_id === functionId)
+  const component = drawn !== undefined && isComponentSequenceSource(drawn.source)
+  const vi = isVietnamese(ctx.language)
+  const images = diagramImages(spine, "sequence", functionId, ctx, component ? labels.componentSequenceTitle(fn.name) : labels.sequenceTitle(fn.name))
+  return images.length === 0 ? [] : [...images, p(component ? componentSequenceDescription(spine, fn, vi) : sequenceDescription(spine, fn, vi))]
 }
 
 /** FLF-390: đoạn mô tả dưới sơ đồ activity — số bước, số điểm rẽ nhánh / song song, các làn (không nhắc lại từng bước). */
