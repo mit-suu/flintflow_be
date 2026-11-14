@@ -6,7 +6,7 @@ import * as projectDocumentController from "./project-document.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
 import { requireRole } from "../../shared/auth/require-role.middleware.js"
 import { receiveDocx } from "../import/import.controller.js"
-import { CreateProjectSchema, MoveProjectSchema, UpdateDocumentLanguageSchema, UpdateErdNotationSchema, UpdateScreenThemeSchema, RunScreenMockupsSchema, DisableScreenMockupsSchema, validateRequest } from "./project.validation.js"
+import { CreateProjectSchema, MoveProjectSchema, UpdateDocumentLanguageSchema, UpdateErdNotationSchema, UpdateSequenceLevelSchema, UpdateScreenThemeSchema, RunScreenMockupsSchema, DisableScreenMockupsSchema, validateRequest } from "./project.validation.js"
 
 const router = Router()
 const upload = multer({
@@ -532,6 +532,50 @@ router.patch(
   requireRole("lead", "analyst"),
   validateRequest(UpdateErdNotationSchema),
   projectController.setErdNotation
+)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/sequence-level:
+ *   patch:
+ *     summary: Đổi mức Sequence Diagram (FLF-418) của dự án — system (hộp đen) hoặc component (boundary / control / entity); không đổi Spine, sơ đồ đã vẽ được vẽ lại
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [sequenceLevel]
+ *             additionalProperties: false
+ *             properties:
+ *               sequenceLevel:
+ *                 type: string
+ *                 enum: [system, component]
+ *     responses:
+ *       200:
+ *         description: Dự án sau khi đổi (kèm sequenceLevel)
+ *       400:
+ *         description: VALIDATION_ERROR — giá trị ngoài system/component hoặc có key lạ
+ *       403:
+ *         description: ORG_ROLE_FORBIDDEN (Viewer không đổi được)
+ *       404:
+ *         description: PROJECT_NOT_FOUND (không thuộc tổ chức)
+ */
+router.patch(
+  "/:projectId/sequence-level",
+  authMiddleware,
+  requireRole("lead", "analyst"),
+  validateRequest(UpdateSequenceLevelSchema),
+  projectController.setSequenceLevel
 )
 
 /**
