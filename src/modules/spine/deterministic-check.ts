@@ -20,6 +20,7 @@ import { hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
 import { actorParents, ancestorsOf, generalizationProblems, type GeneralizationProblem } from "./actor-generalization.js"
 import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "./source-hash.js"
 import type { ErdNotation, RenderContext } from "../../shared/diagram/erd-notation.js"
+import { hasComponentSequence, needsSequence } from "../diagram/renderers/sequence.renderer.js"
 import { ORIGINAL_DIAGRAM_LABELS, diagramKey, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds, originalSectionOf } from "./original-diagram.js"
 import { isVerbatim, type SectionSegments } from "./segment-hash.js"
 import { NFR_CATEGORY_LABELS, capitalize, diagramLabel, pathLabel, quotedSectionLabel } from "./human-labels.js"
@@ -83,7 +84,9 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   // Sau đổi mẫu: mục của mẫu mới mà tài liệu cũ không có — để trống, chặn phát hành tới khi BA viết (không waive được)
   rule("template_section_migration_missing", "red", false),
   // Sau đổi mẫu: nội dung còn nhắc "mục x.y" theo đánh số cũ — BA kiểm lại tham chiếu
-  rule("section_reference_after_migration", "yellow", true)
+  rule("section_reference_after_migration", "yellow", true),
+  // FLF-418: dự án vẽ Sequence mức thành phần nhưng function đã có sơ đồ còn thiếu `component_interactions` (đang vẽ mức hệ thống)
+  rule("sequence_component_missing", "yellow", true)
 ])
 
 /**
@@ -481,6 +484,24 @@ const onePerTarget = (diagrams: Spine["diagrams"]): Spine["diagrams"] => {
     if (!kept || (/-\d+$/.test(kept.id) && !/-\d+$/.test(d.id))) first.set(key, d)
   }
   return diagrams.filter((d) => first.get(`${d.kind}|${d.owner_id ?? ""}`) === d)
+}
+
+/**
+ * FLF-418: dự án chọn mức thành phần mà function có sơ đồ tuần tự chưa có `component_interactions` ⇒ hình đó tạm vẽ mức
+ * hệ thống. Cờ vàng (không chặn ký) mở lại S-5.4 của màn để sinh bổ sung.
+ */
+const sequenceComponentMissing = (spine: Spine, context: RenderContext = {}): FlagCandidate[] => {
+  if (context.sequenceLevel !== "component") return []
+  return spine.functions
+    .filter((fn) => needsSequence(fn, spine.actors) && !hasComponentSequence(fn))
+    .map((fn) => ({
+      level: "yellow" as const,
+      rule_id: "sequence_component_missing",
+      section_id: `function:${fn.id}`,
+      target_id: fn.id,
+      message: `Chức năng "${fn.name}" chưa có tương tác giữa các thành phần - sơ đồ tuần tự đang vẽ ở mức hệ thống, sinh lại chi tiết chức năng để vẽ mức thành phần`,
+      remediation_step: functionStep(spine, fn.id)
+    }))
 }
 
 const diagramStale = (spine: Spine, context: RenderContext = {}): FlagCandidate[] =>
@@ -1624,6 +1645,7 @@ export const runDeterministicCheck = (
     ...deadReference(spine),
     ...renderError(spine),
     ...diagramStale(spine, options.renderContext ?? { erdNotation: options.erdNotation }),
+    ...sequenceComponentMissing(spine, options.renderContext),
     ...originalDiagramStale(spine),
     ...nfrMissingNumber(spine, gate),
     ...useCaseRelations(spine),
