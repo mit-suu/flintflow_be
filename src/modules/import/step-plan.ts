@@ -37,6 +37,7 @@ import { withSlotParents } from "./content-slots.js"
 import type { LayoutEntry, StepPlanItem } from "./template-profile.model.js"
 import type { FunctionOriginalBlock } from "../render/function-original.js"
 import { templateMarks } from "./template-markers.js"
+import { isTemplateFrame } from "../spine/template-frames.js"
 
 export const CUSTOM_SECTION_PREFIX = "custom:"
 export const customSectionKey = (id: string): string => `${CUSTOM_SECTION_PREFIX}${id}`
@@ -584,7 +585,7 @@ export const seedStepOps = (spine: Spine, plan: StepPlanItem[], opts: SeedOption
     const status = initialStatus(item)
     return status === "accepted" ? accepted(item.step_id) : { id: item.step_id, status, first_seq: null, last_seq: null, accepted_at: null }
   })
-  const withFunctions = new Set(spine.functions.map((f) => f.screen_id ?? "nonscreen"))
+  const withFunctions = new Set(spine.functions.filter((f) => !isTemplateFrame(f)).map((f) => f.screen_id ?? "nonscreen"))
   const loopTemplates = loadStepRegistry().filter((s) => s.kind === "loop")
   for (const key of loopKeys(spine)) {
     if (!withFunctions.has(key)) continue

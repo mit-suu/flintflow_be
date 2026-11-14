@@ -369,6 +369,17 @@ describe("runDeterministicCheck", () => {
     ])
   })
 
+  it("FLF-413: khung <<Feature Name>> / <<Function Name>> của mẫu không bắn empty_feature / function_without_uc", () => {
+    const flags = runDeterministicCheck(
+      variant((s) => {
+        s.features.push({ id: "F-3.2", name: "<<Feature Name 1>>", order: s.features.length })
+        s.functions.push({ ...s.functions[0], id: "FR-3.2.1", feature_id: "F-3.2", screen_id: null, order: 0, name: "<<Function Name 1>>", validations: [] })
+        s.features.push({ id: "F-3.3", name: "<<Feature Name 2>>", order: s.features.length })
+      })
+    )
+    expect(flags.filter((f) => f.target_id === "F-3.3" || f.target_id === "FR-3.2.1")).toEqual([])
+  })
+
   it("luật vàng cardinality + non_english_content (bỏ qua addendum)", () => {
     const flags = runDeterministicCheck(
       variant((s) => {

@@ -14,6 +14,7 @@ import type { Actor, Change, Diagram, Flag, FlagLevel, Spine } from "./spine.typ
 import { buildIdIndex, findDeadReferences, sectionKeyExists, type ReferenceHit } from "./reference-fields.js"
 import { tryResolve } from "./path-resolver.js"
 import { isContentSlot, slotHasData } from "../import/content-slots.js"
+import { isTemplateFrame } from "./template-frames.js"
 import { loopKeyOfFunction, ownerStepOf, stepsOf, REQUIRED_FIXED_SECTION_IDS, DERIVED_SECTION_IDS, sectionsOfPath } from "./section-registry.js"
 import { computeSectionStates } from "./section-status.js"
 import { hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
@@ -763,7 +764,7 @@ const functionWithoutUseCase = (spine: Spine, gate: StepGate): FlagCandidate[] =
   if (!gate.done(GATE_STEP.function_without_uc)) return []
   const used = new Set(spine.use_cases.flatMap((u) => u.function_ids))
   return spine.functions
-    .filter((f) => f.screen_id === null && !used.has(f.id))
+    .filter((f) => f.screen_id === null && !used.has(f.id) && !isTemplateFrame(f))
     .map((f) => ({
       level: "yellow" as const,
       rule_id: "function_without_uc",
@@ -1046,7 +1047,8 @@ const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
         yellow("orphan_screen", "fixed:3.1.1", screen.id, `Màn hình "${screen.name}" không nằm trong luồng nào: ${why}`, "S-4.2"))),
     ...when("empty_feature", () =>
       spine.features
-        .filter((f) => !spine.screens.some((s) => s.feature_id === f.id) && !spine.functions.some((fn) => fn.feature_id === f.id))
+        // FLF-413: khung của mẫu chưa lấp không phải tính năng thiếu nội dung
+        .filter((f) => !isTemplateFrame(f) && !spine.screens.some((s) => s.feature_id === f.id) && !spine.functions.some((fn) => fn.feature_id === f.id))
         .map((f) => yellow("empty_feature", `feature:${f.id}`, f.id, `Tính năng "${f.name}" chưa có màn hình hay chức năng nào`, "S-4.1"))),
     ...when("role_no_actor", () =>
       spine.roles
