@@ -1,6 +1,6 @@
 /**
- * Ký pháp ERD là thuộc tính dự án: `PATCH /projects/:id/erd-notation` chỉ Lead/Analyst, GET trả `erdNotation` (dự án cũ
- * không có field đọc là `chen`), đổi ký pháp thì ERD đã vẽ được vẽ lại bằng ký pháp mới. Qua HTTP trên Mongo thật.
+ * Ký pháp ERD là thuộc tính dự án: `PATCH /projects/:id/erd-notation` chỉ Lead/Analyst, GET trả `erdNotation` (FLF-418: dự án
+ * chưa chọn không có field — FE và renderer đọc là `chen`, S-4.5 hỏi trong khung chat), đổi ký pháp thì ERD đã vẽ được vẽ lại bằng ký pháp mới. Qua HTTP trên Mongo thật.
  */
 import { describe, it, expect, beforeEach } from "vitest"
 import request from "supertest"
@@ -31,17 +31,17 @@ const patch = (projectId: string, token: string, body: unknown) =>
   request(app).patch(`/api/v1/projects/${projectId}/erd-notation`).set(bearer(token)).send(body as object)
 
 describe("erdNotation trên Project", () => {
-  it("dự án mới có chen; dự án cũ thiếu field cũng đọc ra chen", async () => {
+  it("FLF-418: dự án mới chưa chọn ký pháp (không có field); dự án thiếu field GET cũng không có field", async () => {
     const created = await request(app).post("/api/v1/projects").set(bearer(seeded.token)).send({ name: "Lumen" })
-    expect(created.body.data.erdNotation).toBe("chen")
+    expect(created.body.data.erdNotation).toBeUndefined()
 
     await Project.collection.updateOne({ _id: (await Project.findById(seeded.projectId))!._id }, { $unset: { erdNotation: "" } })
     const raw = await Project.collection.findOne({ _id: (await Project.findById(seeded.projectId))!._id })
     expect(raw).not.toHaveProperty("erdNotation")
     const one = await request(app).get(`/api/v1/projects/${seeded.projectId}`).set(bearer(seeded.token))
-    expect(one.body.data.erdNotation).toBe("chen")
+    expect(one.body.data.erdNotation).toBeUndefined()
     const list = await request(app).get("/api/v1/projects").set(bearer(seeded.token))
-    expect(list.body.data.find((p: { _id: string }) => p._id === seeded.projectId).erdNotation).toBe("chen")
+    expect(list.body.data.find((p: { _id: string }) => p._id === seeded.projectId).erdNotation).toBeUndefined()
   })
 })
 
@@ -63,7 +63,7 @@ describe("PATCH /projects/:id/erd-notation", () => {
     const res = await patch(seeded.projectId, viewer, { erdNotation: "idef1x" })
     expect(res.status).toBe(403)
     expect(res.body.error.code).toBe("ORG_ROLE_FORBIDDEN")
-    expect((await Project.findById(seeded.projectId).lean())?.erdNotation).toBe("chen")
+    expect((await Project.findById(seeded.projectId).lean())?.erdNotation).toBeUndefined()
   })
 
   it("giá trị lạ, thiếu field hoặc key lạ ⇒ 400 VALIDATION_ERROR", async () => {
@@ -72,7 +72,7 @@ describe("PATCH /projects/:id/erd-notation", () => {
       expect(res.status, JSON.stringify(body)).toBe(400)
       expect(res.body.error.code).toBe("VALIDATION_ERROR")
     }
-    expect((await Project.findById(seeded.projectId).lean())?.erdNotation).toBe("chen")
+    expect((await Project.findById(seeded.projectId).lean())?.erdNotation).toBeUndefined()
   })
 
   it("dự án của org khác ⇒ 404 PROJECT_NOT_FOUND; id sai định dạng ⇒ 404", async () => {
@@ -80,7 +80,7 @@ describe("PATCH /projects/:id/erd-notation", () => {
     const foreign = await patch(other.projectId, seeded.token, { erdNotation: "idef1x" })
     expect(foreign.status).toBe(404)
     expect(foreign.body.error.code).toBe("PROJECT_NOT_FOUND")
-    expect((await Project.findById(other.projectId).lean())?.erdNotation).toBe("chen")
+    expect((await Project.findById(other.projectId).lean())?.erdNotation).toBeUndefined()
     expect((await patch("khong-phai-id", seeded.token, { erdNotation: "idef1x" })).status).toBe(404)
   })
 

@@ -6,11 +6,17 @@
 import mongoose from "mongoose"
 import { erdNotationOf, type RenderContext } from "../../shared/diagram/erd-notation.js"
 import { screenMockupsOf, screenThemeOf } from "../../shared/diagram/screen-theme.js"
+import { sequenceLevelOf } from "../../shared/diagram/sequence-level.js"
 import { Project } from "../project/project.model.js"
 
 export const loadRenderContext = async (projectId: string): Promise<RenderContext> => {
   // Test đơn vị không nối Mongo: không chờ buffer của mongoose
   if (mongoose.connection.readyState !== 1 || !mongoose.isValidObjectId(projectId)) return {}
-  const project = await Project.findById(projectId).select("erdNotation screenTheme screenMockups").lean()
-  return { erdNotation: erdNotationOf(project), screenTheme: screenThemeOf(project), screenMockups: screenMockupsOf(project) }
+  const project = await Project.findById(projectId).select("erdNotation sequenceLevel screenTheme screenMockups").lean()
+  return {
+    erdNotation: erdNotationOf(project),
+    sequenceLevel: sequenceLevelOf(project),
+    screenTheme: screenThemeOf(project),
+    screenMockups: screenMockupsOf(project)
+  }
 }

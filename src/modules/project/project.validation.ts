@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from "express"
 import { validationError } from "../../shared/utils/validation-message.js"
 import { USER_LOCALES } from "../../shared/i18n/locale.js"
 import { ERD_NOTATIONS } from "../../shared/diagram/erd-notation.js"
+import { SEQUENCE_LEVELS } from "../../shared/diagram/sequence-level.js"
 import { HEX_COLOR, MAX_DOMAIN_LENGTH, normalizeDomain, SCREEN_MOCKUP_MODES, SCREEN_PLATFORMS } from "../../shared/diagram/screen-theme.js"
 import { PROJECT_MODES, PROJECT_START_KINDS } from "./project.model.js"
 
@@ -43,6 +44,11 @@ export const UpdateDocumentLanguageSchema = z.strictObject({
 /** PATCH /projects/:id/erd-notation (Lead/Analyst): ký pháp ERD của dự án. */
 export const UpdateErdNotationSchema = z.strictObject({
   erdNotation: z.enum(ERD_NOTATIONS)
+})
+
+/** PATCH /projects/:id/sequence-level (Lead/Analyst, FLF-418): mức Sequence Diagram của dự án. */
+export const UpdateSequenceLevelSchema = z.strictObject({
+  sequenceLevel: z.enum(SEQUENCE_LEVELS)
 })
 
 /**
@@ -146,6 +152,7 @@ export type MoveProjectDTO = z.infer<typeof MoveProjectSchema>
 export type CreateProjectDTO = z.infer<typeof CreateProjectSchema>
 export type RenameProjectDTO = z.infer<typeof RenameProjectSchema>
 export type UpdateErdNotationDTO = z.infer<typeof UpdateErdNotationSchema>
+export type UpdateSequenceLevelDTO = z.infer<typeof UpdateSequenceLevelSchema>
 export type UpdateScreenThemeDTO = z.infer<typeof UpdateScreenThemeSchema>
 export type RunScreenMockupsDTO = z.infer<typeof RunScreenMockupsSchema>
 export type DisableScreenMockupsDTO = z.infer<typeof DisableScreenMockupsSchema>
