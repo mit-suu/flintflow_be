@@ -15,6 +15,7 @@ export const isTransientError = (error: any): boolean => {
   if (error instanceof AiActionError) {
     if (
       error.code === "INSUFFICIENT_CREDIT" ||
+      error.code === "CREDIT_LEDGER_INCONSISTENT" ||
       // `callGLM` đã tự gọi lại một lần với ngân sách gấp đôi trước khi ném lỗi này; lặp y hệt prompt chỉ tốn lượt gọi
       error.code === "GLM_EMPTY_OUTPUT" ||
       error.statusCode === 402 ||

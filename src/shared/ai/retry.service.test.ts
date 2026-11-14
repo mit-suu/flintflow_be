@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { AiActionError } from "./ai-action.types.js"
-import { MAX_OVERLOAD_WAIT_MS, isOverloadError, isTransientError, providerRetryDelayMs, retryWaitMs } from "./retry.service.js"
+import { MAX_OVERLOAD_WAIT_MS, executeWithInRequestRetry, isOverloadError, isTransientError, providerRetryDelayMs, retryWaitMs } from "./retry.service.js"
 
 const overloaded = (retryDelay?: string) =>
   new AiActionError(503, "high demand", "GEMINI_OVERLOADED", retryDelay ? { error: { details: [{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay }] } } : undefined)
@@ -35,5 +35,14 @@ describe("retry — BR-09 (FLF-393)", () => {
 
   it("lỗi 422 khác vẫn không thử lại", () => {
     expect(isTransientError(new AiActionError(422, "bad", "SOMETHING_ELSE"))).toBe(false)
+  })
+
+  it("CREDIT_LEDGER_INCONSISTENT (500) không phải lỗi tạm thời và không thử lại", async () => {
+    const ledgerErr = new AiActionError(500, "Sổ cái lệch", "CREDIT_LEDGER_INCONSISTENT")
+    expect(isTransientError(ledgerErr)).toBe(false)
+
+    const fn = vi.fn().mockRejectedValue(ledgerErr)
+    await expect(executeWithInRequestRetry(fn, 2, [0, 0])).rejects.toBe(ledgerErr)
+    expect(fn).toHaveBeenCalledTimes(1)
   })
 })
