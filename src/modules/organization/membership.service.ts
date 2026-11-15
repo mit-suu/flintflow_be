@@ -133,6 +133,9 @@ export const removeMember = async (orgId: string, targetUserId: string): Promise
     if (!deleted) throw notFound()
   })
 
+  // Dọn tổ chức mặc định nếu bị xoá khỏi tổ chức đang ghi nhớ
+  await User.updateOne({ _id: targetUserId, preferredOrganizationId: orgId }, { $set: { preferredOrganizationId: null } })
+
   void notify(targetUserId, {
     type: "org_member_removed",
     title: "Bạn đã bị xoá khỏi tổ chức",
@@ -154,6 +157,9 @@ export const leaveOrganization = async (orgId: string, userId: string): Promise<
     )
     if (!deleted) throw notFound()
   })
+
+  // Dọn tổ chức mặc định nếu tự rời tổ chức đang ghi nhớ
+  await User.updateOne({ _id: userId, preferredOrganizationId: orgId }, { $set: { preferredOrganizationId: null } })
 
   // Flow SD-3.3-5: Lead cần biết đội hình đổi.
   const [leads, name, user] = await Promise.all([
