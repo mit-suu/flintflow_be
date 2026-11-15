@@ -436,6 +436,7 @@ describe("billing.service", () => {
       expect(balance.planLimits).toEqual({
         maxMembers: planConfig.free.maxMembers,
         maxProjects: planConfig.free.maxProjects,
+        maxReferenceTokens: planConfig.free.maxReferenceTokens,
         monthlyCredits: planConfig.free.monthlyCredits
       })
       expect(balance.ledger).toHaveLength(20)
@@ -468,11 +469,13 @@ describe("billing.service", () => {
       expect(analystBal.planLimits).toEqual({
         maxMembers: planConfig.pro.maxMembers,
         maxProjects: planConfig.pro.maxProjects,
+        maxReferenceTokens: planConfig.pro.maxReferenceTokens,
         monthlyCredits: planConfig.pro.monthlyCredits
       })
       expect(analystBal.ledger.map((r: { type: string }) => r.type).sort()).toEqual(["deduct", "reserve"])
 
       const leadBal = await billingService.getBalance(ORG, USER, "lead")
+      expect(leadBal.planLimits).toEqual(analystBal.planLimits)
       expect(leadBal.ledger).toHaveLength(5)
     })
   })

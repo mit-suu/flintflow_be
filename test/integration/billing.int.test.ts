@@ -252,7 +252,12 @@ describe("FLF-417 Task 4: planLimits, succeeded payment metadata & RBAC (UC-56, 
 
     const bal = await request(app).get("/api/v1/billing/balance").set(as(seeded))
     expect(bal.status).toBe(200)
-    expect(bal.body.data.planLimits).toEqual({ maxMembers: 3, maxProjects: 3, monthlyCredits: 300 })
+    expect(bal.body.data.planLimits).toEqual({
+      maxMembers: 3,
+      maxProjects: 3,
+      maxReferenceTokens: 200_000,
+      monthlyCredits: 300
+    })
 
     const pkgRes = await request(app).get("/api/v1/billing/packages").set(as(seeded))
     expect(pkgRes.status).toBe(200)
@@ -376,7 +381,12 @@ describe("FLF-417 Task 4: planLimits, succeeded payment metadata & RBAC (UC-56, 
 
     const analystBal = await request(app).get("/api/v1/billing/balance").set({ Authorization: `Bearer ${analystToken}` })
     expect(analystBal.status).toBe(200)
-    expect(analystBal.body.data.planLimits).toEqual({ maxMembers: 3, maxProjects: 3, monthlyCredits: 300 })
+    expect(analystBal.body.data.planLimits).toEqual({
+      maxMembers: 3,
+      maxProjects: 3,
+      maxReferenceTokens: 200_000,
+      monthlyCredits: 300
+    })
     expect(analystBal.body.data.ledger).toEqual([])
 
     const analystAll = await request(app).get("/api/v1/billing/transactions").set({ Authorization: `Bearer ${analystToken}` })
@@ -421,5 +431,35 @@ describe("FLF-417 Task 4: planLimits, succeeded payment metadata & RBAC (UC-56, 
     const viewerMe = await request(app).get("/api/v1/users/me").set({ Authorization: `Bearer ${viewerToken}` })
     expect(viewerMe.status).toBe(200)
     expect(viewerMe.body.data).toMatchObject({ balance: 0, creditOrganization: null })
+  })
+
+  it("Pro active ⇒ GET /billing/balance trả planLimits gói Pro (gồm maxReferenceTokens: 1_000_000) cho Lead và Analyst", async () => {
+    const seeded = await seedFixture("minimal", { balance: 500 })
+    await Subscription.create({
+      userId: seeded.userId,
+      organizationId: seeded.orgId,
+      plan: "pro",
+      status: "active",
+      monthlyCreditsAllotment: 1000,
+      currentPeriodStart: new Date(),
+      currentPeriodEnd: new Date(Date.now() + 7 * 86_400_000)
+    })
+    const analyst = await User.create({ email: "pro-ba@flintflow.test", password: "test-password-123", emailVerified: true })
+    await Membership.create({ organizationId: seeded.orgId, userId: analyst._id, role: "analyst" })
+    const analystToken = await authAs({ _id: analyst._id, email: analyst.email, orgId: seeded.orgId })
+
+    const expectedProLimits = {
+      maxMembers: 5,
+      maxProjects: 50,
+      maxReferenceTokens: 1_000_000,
+      monthlyCredits: 1000
+    }
+    const leadBal = await request(app).get("/api/v1/billing/balance").set(as(seeded))
+    expect(leadBal.status).toBe(200)
+    expect(leadBal.body.data.planLimits).toEqual(expectedProLimits)
+
+    const analystBal = await request(app).get("/api/v1/billing/balance").set({ Authorization: `Bearer ${analystToken}` })
+    expect(analystBal.status).toBe(200)
+    expect(analystBal.body.data.planLimits).toEqual(expectedProLimits)
   })
 })
