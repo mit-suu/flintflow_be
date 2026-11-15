@@ -88,6 +88,7 @@ export const getBalance = async (orgId: string, userId: string, role: "lead" | "
     planLimits: {
       maxMembers: planDef.maxMembers,
       maxProjects: planDef.maxProjects,
+      maxReferenceTokens: planDef.maxReferenceTokens,
       monthlyCredits: planDef.monthlyCredits
     },
     lowCreditThreshold: planConfig.lowCreditThreshold,
