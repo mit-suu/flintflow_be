@@ -16,6 +16,7 @@ import { Notification } from "../notification/notification.model.js"
 import { PaymentIntent } from "../billing/payment-intent.model.js"
 import { Session } from "../../shared/auth/session.model.js"
 import { signAccessToken } from "../../shared/auth/jwt.util.js"
+import { User } from "../user/user.model.js"
 
 /** Org kèm vai trò của người đang hỏi — đủ cho màn chọn org (Flow 7.13, 9.3). */
 export interface OrganizationSummary {
@@ -23,6 +24,7 @@ export interface OrganizationSummary {
   name: string
   role: OrgRole
   joinedAt: Date
+  isDefault?: boolean
 }
 
 const notFound = () => new ApiError(404, "Không tìm thấy tổ chức", "ORG_NOT_FOUND")
@@ -31,11 +33,17 @@ const assertObjectId = (id: string) => {
   if (!mongoose.isValidObjectId(id)) throw notFound()
 }
 
-const toSummary = (org: Pick<IOrganization, "_id" | "name">, role: OrgRole, joinedAt: Date): OrganizationSummary => ({
+const toSummary = (
+  org: Pick<IOrganization, "_id" | "name">,
+  role: OrgRole,
+  joinedAt: Date,
+  isDefault?: boolean
+): OrganizationSummary => ({
   id: String(org._id),
   name: org.name,
   role,
-  joinedAt
+  joinedAt,
+  ...(isDefault !== undefined ? { isDefault } : {})
 })
 
 /**
@@ -107,20 +115,40 @@ export const createOrganization = async (userId: string, name: string): Promise<
 
 /** Danh sách org của một người kèm vai trò từng org (UC-10). */
 export const listMyOrganizations = async (userId: string): Promise<OrganizationSummary[]> => {
-  const memberships = await Membership.find({ userId }).sort({ joinedAt: 1 }).lean()
-  if (memberships.length === 0) return []
+  const [memberships, userDoc] = await Promise.all([
+    Membership.find({ userId }).sort({ joinedAt: 1 }).lean(),
+    User.findById(userId).select("preferredOrganizationId").lean()
+  ])
+  if (memberships.length === 0) {
+    if (userDoc?.preferredOrganizationId) {
+      await User.updateOne({ _id: userId }, { $set: { preferredOrganizationId: null } })
+    }
+    return []
+  }
 
   const orgs = await Organization.find({ _id: { $in: memberships.map((m) => m.organizationId) } })
     .select("_id name")
     .lean()
   const byId = new Map(orgs.map((o) => [String(o._id), o]))
 
-  return memberships
+  const preferredId = userDoc?.preferredOrganizationId ? String(userDoc.preferredOrganizationId) : null
+  let preferredFound = false
+
+  const results = memberships
     .map((m) => {
       const org = byId.get(String(m.organizationId))
-      return org ? toSummary(org, m.role, m.joinedAt) : null
+      if (!org) return null
+      const isDefault = preferredId !== null && String(org._id) === preferredId
+      if (isDefault) preferredFound = true
+      return toSummary(org, m.role, m.joinedAt, isDefault)
     })
     .filter((item): item is OrganizationSummary => item !== null)
+
+  if (preferredId !== null && !preferredFound) {
+    await User.updateOne({ _id: userId }, { $set: { preferredOrganizationId: null } })
+  }
+
+  return results
 }
 
 /** Một org cụ thể — người gọi phải là thành viên (guard ở route đã bảo đảm). */
@@ -163,7 +191,9 @@ export const switchOrganization = async (
   email: string,
   platformRole: string | undefined,
   orgId: string,
-  refreshToken?: string
+  refreshToken?: string,
+  currentSessionId?: string,
+  rememberAsDefault?: boolean
 ): Promise<SwitchResult> => {
   assertObjectId(orgId)
   const membership = await Membership.findOne({ organizationId: orgId, userId }).lean()
@@ -172,16 +202,25 @@ export const switchOrganization = async (
   const org = await Organization.findById(orgId).select("_id name").lean()
   if (!org) throw notFound()
 
-  if (refreshToken) await sessionService.setActiveOrg(refreshToken, orgId)
+  const sessionSid = refreshToken ? await sessionService.setActiveOrg(refreshToken, orgId) : null
+  const resolvedSid = sessionSid ?? currentSessionId
+
+  if (rememberAsDefault === true) {
+    await User.updateOne({ _id: userId }, { $set: { preferredOrganizationId: orgId } })
+  }
+
+  const user = await User.findById(userId).select("preferredOrganizationId").lean()
+  const isDefault = rememberAsDefault === true || String(user?.preferredOrganizationId) === orgId
 
   return {
     accessToken: signAccessToken({
       userId,
       email,
       ...(platformRole ? { role: platformRole } : {}),
-      orgId
+      orgId,
+      ...(resolvedSid ? { sid: resolvedSid } : {})
     }),
-    organization: toSummary(org, membership.role, membership.joinedAt)
+    organization: toSummary(org, membership.role, membership.joinedAt, isDefault)
   }
 }
 
@@ -247,7 +286,9 @@ export const deleteOrganization = async (
     Subscription.deleteMany({ organizationId: orgId }),
     Notification.deleteMany({ organizationId: orgId }),
     // Phiên đang mở org này: bỏ org đang mở để lượt refresh sau không cấp lại token trỏ vào org đã xoá.
-    Session.updateMany({ activeOrgId: orgId }, { $set: { activeOrgId: null } })
+    Session.updateMany({ activeOrgId: orgId }, { $set: { activeOrgId: null } }),
+    // Dọn ghi nhớ tổ chức mặc định nếu org bị xoá
+    User.updateMany({ preferredOrganizationId: orgId }, { $set: { preferredOrganizationId: null } })
   ])
   await Membership.deleteMany({ organizationId: orgId })
   await Organization.deleteOne({ _id: orgId })

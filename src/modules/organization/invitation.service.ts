@@ -9,6 +9,7 @@ import { User } from "../user/user.model.js"
 import { notify } from "../notification/notification.service.js"
 import { sendOrgInvitationEmail } from "../../shared/email/email.service.js"
 import { signAccessToken } from "../../shared/auth/jwt.util.js"
+import * as sessionService from "../../shared/auth/session.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { runInTransaction, TRANSACTION_UNAVAILABLE, sessionOptions } from "../../shared/db/transaction.js"
 import { env } from "../../config/env.js"
@@ -407,7 +408,9 @@ export const acceptInvitation = async (
   code: string,
   userId: string,
   email: string,
-  platformRole?: string
+  platformRole?: string,
+  refreshToken?: string,
+  currentSessionId?: string
 ): Promise<AcceptResult> => {
   const codeHash = hashCode(code)
   const invitation = await Invitation.findOne({ codeHash }).lean()
@@ -455,13 +458,17 @@ export const acceptInvitation = async (
     })
   }
 
+  const sessionSid = refreshToken ? await sessionService.setActiveOrg(refreshToken, orgId) : null
+  const resolvedSid = sessionSid ?? currentSessionId
+
   return {
     organization: { id: orgId, name: org.name, role: invitation.role },
     accessToken: signAccessToken({
       userId,
       email,
       ...(platformRole ? { role: platformRole } : {}),
-      orgId
+      orgId,
+      ...(resolvedSid ? { sid: resolvedSid } : {})
     })
   }
 }
