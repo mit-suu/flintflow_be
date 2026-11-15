@@ -106,12 +106,13 @@ export const changeMemberRole = async (
     if (!updated) throw notFound()
   })
 
+  const name = await orgName(orgId)
   void notify(targetUserId, {
     type: "org_role_changed",
     title: "Vai trò của bạn đã thay đổi",
-    body: `Bạn giờ là ${ORG_ROLE_LABELS[nextRole]} trong ${await orgName(orgId)}.`,
+    body: `Bạn giờ là ${ORG_ROLE_LABELS[nextRole]} trong ${name}.`,
     organizationId: orgId,
-    meta: { organizationId: orgId, role: nextRole }
+    meta: { organizationId: orgId, organizationName: name, role: nextRole }
   })
 
   const members = await listMembers(orgId)
@@ -136,12 +137,13 @@ export const removeMember = async (orgId: string, targetUserId: string): Promise
   // Dọn tổ chức mặc định nếu bị xoá khỏi tổ chức đang ghi nhớ
   await User.updateOne({ _id: targetUserId, preferredOrganizationId: orgId }, { $set: { preferredOrganizationId: null } })
 
+  const name = await orgName(orgId)
   void notify(targetUserId, {
     type: "org_member_removed",
     title: "Bạn đã bị xoá khỏi tổ chức",
-    body: `Bạn không còn là thành viên của ${await orgName(orgId)}.`,
+    body: `Bạn không còn là thành viên của ${name}.`,
     organizationId: orgId,
-    meta: { organizationId: orgId }
+    meta: { organizationId: orgId, organizationName: name }
   })
 
   return { removed: true }
@@ -174,7 +176,7 @@ export const leaveOrganization = async (orgId: string, userId: string): Promise<
       title: "Một thành viên đã rời tổ chức",
       body: `${who} đã rời ${name}.`,
       organizationId: orgId,
-      meta: { organizationId: orgId, userId }
+      meta: { organizationId: orgId, organizationName: name, userId, memberName: who }
     })
   }
 
