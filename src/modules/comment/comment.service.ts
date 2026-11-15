@@ -158,7 +158,14 @@ const notifyHandlers = async (actor: CommentActor, comment: IComment): Promise<v
         body: `${comment.comment_id} trên "${comment.anchor.label}" (${comment.version.label}): ${comment.text.slice(0, 200)}`,
         link: `/projects/${actor.projectId}/view?comment=${comment.comment_id}`,
         organizationId: actor.orgId,
-        meta: { projectId: actor.projectId, comment_id: comment.comment_id }
+        meta: {
+          projectId: actor.projectId,
+          projectName: actor.projectName,
+          comment_id: comment.comment_id,
+          anchor_label: comment.anchor.label,
+          version_label: comment.version.label,
+          preview: comment.text.slice(0, 200)
+        }
       })
     )
   )
@@ -220,7 +227,13 @@ export const replyComment = async (actor: CommentActor, commentId: string, text:
         body: `Trên "${comment.anchor.label}" (${actor.projectName}): ${text.slice(0, 200)}`,
         link: `/projects/${actor.projectId}/view?comment=${comment.comment_id}`,
         organizationId: actor.orgId,
-        meta: { projectId: actor.projectId, comment_id: comment.comment_id }
+        meta: {
+          projectId: actor.projectId,
+          projectName: actor.projectName,
+          comment_id: comment.comment_id,
+          anchor_label: comment.anchor.label,
+          preview: text.slice(0, 200)
+        }
       })
     )
   )
@@ -292,7 +305,12 @@ export const resolveComment = async (
       body: `Góp ý của bạn trên "${updated.anchor.label}" (${actor.projectName}) đã được đánh dấu đã xử lý.`,
       link: `/projects/${actor.projectId}/view?comment=${updated.comment_id}`,
       organizationId: actor.orgId,
-      meta: { projectId: actor.projectId, comment_id: updated.comment_id }
+      meta: {
+        projectId: actor.projectId,
+        projectName: actor.projectName,
+        comment_id: updated.comment_id,
+        anchor_label: updated.anchor.label
+      }
     })
   }
   const [dto] = await toDtos([updated])
@@ -333,7 +351,7 @@ export const markConverted = async (
       body: `Góp ý của bạn trên "${updated.anchor.label}" đã được ghi nhận thành change request ${crId}.`,
       link: `/projects/${projectId}/view?comment=${updated.comment_id}`,
       organizationId: orgId,
-      meta: { projectId, comment_id: updated.comment_id, cr_id: crId }
+      meta: { projectId, comment_id: updated.comment_id, anchor_label: updated.anchor.label, cr_id: crId }
     })
   }
   return true

@@ -454,7 +454,7 @@ export const acceptInvitation = async (
       title: "Thành viên mới tham gia tổ chức",
       body: `${who} đã tham gia ${org.name} với vai trò ${ROLE_LABELS[invitation.role]}.`,
       organizationId: orgId,
-      meta: { organizationId: orgId, userId, role: invitation.role }
+      meta: { organizationId: orgId, organizationName: org.name, userId, memberName: who, role: invitation.role }
     })
   }
 
