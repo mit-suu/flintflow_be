@@ -88,58 +88,39 @@ export const leaveOrganization = catchAsync(async (req: Request, res: Response) 
 })
 
 export const createInvitation = catchAsync(async (req: Request, res: Response) => {
-  const { orgId, role: myRole } = requireOrg(req)
+  const { orgId } = requireOrg(req)
   const { role, email } = req.body as CreateInvitationDTO
-  const invitation = await invitationService.createInvitation(orgId, requireUserId(req), myRole, role, email)
+  const invitation = await invitationService.createInvitation(orgId, requireUserId(req), role, email)
   return sendSuccess(res, 201, invitation)
 })
 
 export const listInvitations = catchAsync(async (req: Request, res: Response) => {
-  const { orgId, role } = requireOrg(req)
-  return sendSuccess(res, 200, await invitationService.listInvitations(orgId, requireUserId(req), role))
+  const { orgId } = requireOrg(req)
+  return sendSuccess(res, 200, await invitationService.listInvitations(orgId))
 })
 
 export const revokeInvitation = catchAsync(async (req: Request, res: Response) => {
-  const { orgId, role } = requireOrg(req)
-  const invitation = await invitationService.revokeInvitation(
-    orgId,
-    req.params.invitationId as string,
-    requireUserId(req),
-    role
-  )
-  return sendSuccess(res, 200, invitation)
-})
-
-export const approveInvitation = catchAsync(async (req: Request, res: Response) => {
   const { orgId } = requireOrg(req)
-  const invitation = await invitationService.approveInvitation(
-    orgId,
-    req.params.invitationId as string,
-    requireUserId(req)
-  )
-  return sendSuccess(res, 200, invitation)
-})
-
-export const rejectInvitation = catchAsync(async (req: Request, res: Response) => {
-  const { orgId } = requireOrg(req)
-  const invitation = await invitationService.rejectInvitation(
-    orgId,
-    req.params.invitationId as string,
-    requireUserId(req)
-  )
+  const invitation = await invitationService.revokeInvitation(orgId, req.params.invitationId as string)
   return sendSuccess(res, 200, invitation)
 })
 
 export const previewInvitation = catchAsync(async (req: Request, res: Response) => {
-  return sendSuccess(res, 200, await invitationService.previewInvitation(req.params.code as string))
+  requireUserId(req)
+  return sendSuccess(
+    res,
+    200,
+    await invitationService.previewInvitation(req.params.code as string, req.account?.email ?? req.user?.email ?? "")
+  )
 })
 
 export const acceptInvitation = catchAsync(async (req: Request, res: Response) => {
   const result = await invitationService.acceptInvitation(
     req.params.code as string,
     requireUserId(req),
-    req.user?.email ?? "",
-    req.user?.role
+    req.account?.email ?? req.user?.email ?? "",
+    req.user?.role,
+    req.cookies?.refreshToken
   )
   return sendSuccess(res, 200, result)
 })

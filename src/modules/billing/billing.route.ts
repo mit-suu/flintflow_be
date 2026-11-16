@@ -45,8 +45,10 @@ router.get("/balance", authMiddleware, requireActiveAccount, orgContext, require
  *         description: "{ packages[], plans[] }"
  *       401:
  *         description: Chưa xác thực
+ *       403:
+ *         description: Viewer không được xem gói / bảng giá (UC-56)
  */
-router.get("/packages", authMiddleware, requireActiveAccount, billingController.getPackages)
+router.get("/packages", authMiddleware, requireActiveAccount, orgContext, requireRole("lead", "analyst"), billingController.getPackages)
 
 /**
  * @swagger
