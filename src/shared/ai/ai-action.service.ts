@@ -221,7 +221,6 @@ export const executeAiAction = async <T = any>(
 ): Promise<AiActionResult<T>> => {
   // Step 1: Reserve Credit
   const reservation = await reserveCreditWithTransaction(userId, actionType, projectId, options.activeOrgId, stepIdOf(input, options))
-  const cost = reservation.cost
 
   // Step 2: Build Prompt
   let finalPrompt: string
@@ -238,6 +237,7 @@ export const executeAiAction = async <T = any>(
   // Thứ tự bắt buộc: parse → deduct. `deducted` chặn trừ hai lần khi retry và
   // chặn release sau khi đã trừ (lỗi ghi log phía sau không được hoàn tiền).
   let deducted = false
+  let settledCost = reservation.cost
   let currentLogId: string = ""
   // Lượt parse lỗi mới là lượt cần đọc lại output gốc nhất, mà log thất bại được tạo ngoài vòng retry — giữ
   // chữ thô ở đây để nó không mất theo scope của lượt thử.
@@ -246,7 +246,7 @@ export const executeAiAction = async <T = any>(
   let widenOutput = false
 
   try {
-    const result = await executeWithInRequestRetry(async (attempt) => {
+    const { llmRes, parsedData, tokensUsed, latencyMs } = await executeWithInRequestRetry(async (attempt) => {
       const startTime = Date.now()
 
       try {
@@ -311,57 +311,55 @@ export const executeAiAction = async <T = any>(
           completionTokens: llmRes.completionTokens + discardedTokens.completionTokens
         }
         const latencyMs = Date.now() - startTime
-
-        // Success: Deduct Credit (chỉ sau khi parse thành công)
-        if (!deducted) {
-          await deductCredit(reservation, undefined, { tokensIn: tokensUsed.promptTokens, tokensOut: tokensUsed.completionTokens })
-          deducted = true
-        }
-
-        // Create success log
-        const logDoc = await AiActionLog.create({
-          projectId: projectId ? new mongoose.Types.ObjectId(projectId) : null,
-          userId: new mongoose.Types.ObjectId(userId),
-          actionType,
-          provider: providerConfig.provider,
-          // Model thật sự trả lời — khác model của skill khi Gemini đã chuyển sang model dự phòng
-          aiModel: llmRes.model ?? providerConfig.model,
-          status: "success",
-          promptTokens: llmRes.promptTokens,
-          completionTokens: llmRes.completionTokens,
-          latencyMs,
-          retryOfLogId: options.parentLogId ? new mongoose.Types.ObjectId(options.parentLogId) : null
-        })
-
-        currentLogId = logDoc._id.toString()
-        await capturePayload({
-          logId: currentLogId,
-          projectId,
-          userId,
-          actionType: String(actionType),
-          prompt: finalPrompt,
-          response: llmRes.text
-        })
-
-        return {
-          success: true,
-          data: parsedData,
-          rawText: llmRes.text,
-          actionType: actionType as ActionType,
-          provider: providerConfig.provider,
-          aiModel: llmRes.model ?? providerConfig.model,
-          tokensUsed: { ...tokensUsed, totalTokens: tokensUsed.promptTokens + tokensUsed.completionTokens },
-          latencyMs,
-          logId: currentLogId,
-          cost
-        }
+        return { llmRes, parsedData, tokensUsed, latencyMs }
       } catch (error: any) {
         console.error(`[executeAiAction] Attempt ${attempt + 1} failed for action '${actionType}':`, error.message)
         throw error
       }
     })
 
-    return result
+    // Success: Deduct Credit & ghi log NGOÀI vòng retry (lỗi sổ cái / ghi log không bao giờ gọi lại LLM)
+    if (!deducted) {
+      settledCost = await deductCredit(reservation, undefined, { tokensIn: tokensUsed.promptTokens, tokensOut: tokensUsed.completionTokens })
+      deducted = true
+    }
+
+    const logDoc = await AiActionLog.create({
+      projectId: projectId ? new mongoose.Types.ObjectId(projectId) : null,
+      userId: new mongoose.Types.ObjectId(userId),
+      actionType,
+      provider: providerConfig.provider,
+      // Model thật sự trả lời — khác model của skill khi Gemini đã chuyển sang model dự phòng
+      aiModel: llmRes.model ?? providerConfig.model,
+      status: "success",
+      promptTokens: llmRes.promptTokens,
+      completionTokens: llmRes.completionTokens,
+      latencyMs,
+      retryOfLogId: options.parentLogId ? new mongoose.Types.ObjectId(options.parentLogId) : null
+    })
+
+    currentLogId = logDoc._id.toString()
+    await capturePayload({
+      logId: currentLogId,
+      projectId,
+      userId,
+      actionType: String(actionType),
+      prompt: finalPrompt,
+      response: llmRes.text
+    })
+
+    return {
+      success: true,
+      data: parsedData,
+      rawText: llmRes.text,
+      actionType: actionType as ActionType,
+      provider: providerConfig.provider,
+      aiModel: llmRes.model ?? providerConfig.model,
+      tokensUsed: { ...tokensUsed, totalTokens: tokensUsed.promptTokens + tokensUsed.completionTokens },
+      latencyMs,
+      logId: currentLogId,
+      cost: settledCost
+    }
   } catch (finalError: any) {
     // Step 4: On Error -> Release Credit (chỉ khi chưa trừ) & Record Failed Log
     if (!deducted) {
@@ -411,7 +409,6 @@ export const executeAiActionStream = async <T = any>(
   options: ExecuteAiActionOptions = {}
 ): Promise<AiActionResult<T>> => {
   const reservation = await reserveCreditWithTransaction(userId, actionType, projectId, options.activeOrgId, stepIdOf(input, options))
-  const cost = reservation.cost
 
   let finalPrompt: string
   let providerConfig: AiProviderConfig
@@ -490,7 +487,7 @@ export const executeAiActionStream = async <T = any>(
     // Parse TRƯỚC, deduct SAU: output hỏng thì không tính phí (audit E2)
     const parsedData = parseResponse<T>(stripReasoning(fullRaw), actionType)
 
-    await deductCredit(reservation, undefined, { tokensIn: promptTokens, tokensOut: completionTokens })
+    const settledCost = await deductCredit(reservation, undefined, { tokensIn: promptTokens, tokensOut: completionTokens })
     deducted = true
 
     const logDoc = await AiActionLog.create({
@@ -541,7 +538,7 @@ export const executeAiActionStream = async <T = any>(
       },
       latencyMs,
       logId: (logDoc as any)._id.toString(),
-      cost
+      cost: settledCost
     }
 
     if (callbacks.onFinish) {

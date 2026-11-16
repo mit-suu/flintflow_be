@@ -36,6 +36,10 @@ const mocks = vi.hoisted(() => {
     SpineTranslation: { deleteMany: deleteMany() },
     TranslationGlossary: { deleteMany: deleteMany() },
     TranslationRunLock: { deleteMany: deleteMany() },
+    // Comment + đổi mẫu (FLF-422)
+    Comment: { deleteMany: deleteMany() },
+    CommentCounter: { deleteMany: deleteMany() },
+    TemplateMigration: { deleteMany: deleteMany() },
     destroyDocumentAsset: vi.fn(async () => true),
     // FLF-265: ngôn ngữ tài khoản — null = chưa chọn
     accountLocaleOf: vi.fn(async (_userId: string): Promise<"vi" | "en" | null> => null)
@@ -67,6 +71,8 @@ vi.mock("../change-request/change-group.model.js", () => ({ ChangeGroup: mocks.C
 vi.mock("../translation/spine-translation.model.js", () => ({ SpineTranslation: mocks.SpineTranslation }))
 vi.mock("../translation/translation-glossary.model.js", () => ({ TranslationGlossary: mocks.TranslationGlossary }))
 vi.mock("../translation/translation-run-lock.model.js", () => ({ TranslationRunLock: mocks.TranslationRunLock }))
+vi.mock("../comment/comment.model.js", () => ({ Comment: mocks.Comment, CommentCounter: mocks.CommentCounter }))
+vi.mock("../template-migration/template-migration.model.js", () => ({ TemplateMigration: mocks.TemplateMigration }))
 vi.mock("../credits/subscription.model.js", () => ({ Subscription: { findOne: () => ({ select: () => ({ lean: mocks.subscriptionPlan }) }) } }))
 vi.mock("../user/account-locale.js", () => ({ accountLocaleOf: mocks.accountLocaleOf }))
 
@@ -96,7 +102,7 @@ describe("deleteProject", () => {
       { new: true }
     )
     expect(mocks.Project.findOneAndDelete).not.toHaveBeenCalled()
-    for (const model of [mocks.ChatSession, mocks.ProjectDocument, mocks.Spine, mocks.Change, mocks.DocVersion, mocks.SpineTranslation]) {
+    for (const model of [mocks.ChatSession, mocks.ProjectDocument, mocks.Spine, mocks.Change, mocks.DocVersion, mocks.SpineTranslation, mocks.Comment, mocks.CommentCounter, mocks.TemplateMigration]) {
       expect(model.deleteMany).not.toHaveBeenCalled()
     }
     expect(mocks.removeDocFiles).not.toHaveBeenCalled()
@@ -118,6 +124,10 @@ describe("deleteProject", () => {
     }
     // FLF-265: bản dịch + glossary dịch + khoá lượt dịch
     for (const model of [mocks.SpineTranslation, mocks.TranslationGlossary, mocks.TranslationRunLock]) {
+      expect(model.deleteMany).toHaveBeenCalledWith({ projectId: PROJECT })
+    }
+    // Comment + đổi mẫu (FLF-422)
+    for (const model of [mocks.Comment, mocks.CommentCounter, mocks.TemplateMigration]) {
       expect(model.deleteMany).toHaveBeenCalledWith({ projectId: PROJECT })
     }
     expect(mocks.removeDocFiles).toHaveBeenCalledWith(PROJECT)

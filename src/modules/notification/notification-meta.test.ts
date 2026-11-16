@@ -79,6 +79,16 @@ vi.mock("../user/user.model.js", () => ({
   User: orgMocks.User
 }))
 
+// FLF-422: rời / bị xoá khỏi org gỡ `activeOrgId` khỏi các phiên đang mở org đó (`Session.updateMany`)
+vi.mock("../../shared/auth/session.model.js", () => ({
+  Session: {
+    updateMany: vi.fn().mockResolvedValue({ acknowledged: true, modifiedCount: 0 }),
+    findOne: vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue(null) }) }),
+    findOneAndUpdate: vi.fn().mockResolvedValue(null),
+    exists: vi.fn().mockResolvedValue(null)
+  }
+}))
+
 // Mock Pipeline / Spine / Review Package / Comment dependencies
 const spineMocks = vi.hoisted(() => ({
   spineRepository: {
