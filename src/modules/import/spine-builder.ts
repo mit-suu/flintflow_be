@@ -138,8 +138,12 @@ const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T)
 /** Khoá lỏng của tên: bỏ phần trong ngoặc và chữ chỉ loại ở cuối ("Screen", "Page", "màn hình"…). */
 const looseKey = (name: string): string =>
   nameKey(name.replace(/\([^)]*\)/g, " "))
-    .replace(/\s*\b(screen|page|form|dialog|popup|modal|man hinh|trang)$/, "")
+    // "pop-up" qua `nameKey` thành "pop up" (FLF-428: "Cancel Order pop-up" phải ra màn "Cancel Order")
+    .replace(/\s*\b(screen|page|form|dialog|pop ?up|modal|man hinh|trang)$/, "")
     .trim()
+
+/** Mã use case ghi trong tên / heading chức năng: "Register Account (UC-01)", "UC 3", "UC-12a" (FLF-428). */
+const USE_CASE_REF = /\bUC[-_ ]?\d+[a-z]?\b/gi
 
 /** Câu mô tả actor nói nó kế thừa actor khác (tiếng Anh / tiếng Việt), tới hết câu. */
 const INHERITS = /\b(inherits?|inheriting|specialization of|is a kind of)\b|kế thừa|thừa hưởng/i
@@ -631,13 +635,23 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
       ...functionDiagramData(f.id!, f.value)
     })
   }
-  // Tài liệu không ghi chức năng hiện thực use case ⇒ chức năng trùng hẳn tên (SRS FPT đặt tên use case và chức năng như
-  // nhau, không có cột liên kết — FLF-252); hai chức năng cùng tên ⇒ không đoán
-  const functionByName = uniqueIndex(pool("functions", spine.functions), (p) => (p.name ? nameKey(p.name) : ""))
+  // Tài liệu không ghi chức năng hiện thực use case ⇒ (1) chức năng ghi mã use case trong tên / heading — "Register Account
+  // (UC-01)" (FLF-428); (2) chức năng trùng tên sau khi bỏ phần trong ngoặc (SRS FPT đặt tên use case và chức năng như nhau,
+  // không có cột liên kết — FLF-252); hai chức năng cùng tên ⇒ không đoán
+  const functionPool = pool("functions", spine.functions)
+  const functionByName = uniqueIndex(functionPool, (p) => (p.name ? looseKey(p.name) : ""))
+  const functionsByUseCase = new Map<string, string[]>()
+  for (const p of functionPool) {
+    for (const ref of p.name?.match(USE_CASE_REF) ?? []) {
+      const ucId = resolveUseCase(ref)
+      if (ucId) functionsByUseCase.set(ucId, [...(functionsByUseCase.get(ucId) ?? []), p.id])
+    }
+  }
   for (const u of of("use_cases").filter(skip(spine.use_cases))) {
     const name = str(u.value.name) || u.id!
     const functionIds = [...new Set(strList(u.value.function_ids).map(resolveFunction).filter((x): x is string => !!x))]
-    const sameName = functionIds.length ? null : functionByName.get(nameKey(name))
+    if (!functionIds.length) functionIds.push(...new Set(functionsByUseCase.get(u.id!) ?? []))
+    const sameName = functionIds.length ? null : functionByName.get(looseKey(name))
     if (sameName) functionIds.push(sameName)
     add("use_cases", {
       id: u.id,
