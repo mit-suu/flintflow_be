@@ -19,6 +19,7 @@ import dotenv from "dotenv"
 import { fileURLToPath } from "url"
 import path from "path"
 import { z } from "zod"
+import { isValidSecretBoxKey } from "../shared/crypto/secret-box.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: path.resolve(__dirname, "../../.env") })
@@ -71,6 +72,14 @@ const envSchema = z.object({
   EMAIL_FROM: z.string().default("FlintFlow <no-reply@flintflow.io.vn>"),
 
   GOOGLE_CLIENT_ID: z.string().default(""),
+  // Kết nối Google Drive/Docs (luồng auth-code, khác luồng đăng nhập). Một trong hai rỗng ⇒ tắt tính năng,
+  // mọi endpoint `/integrations/google` trả 503 GOOGLE_INTEGRATION_DISABLED (`modules/google/google-auth.service.ts`).
+  GOOGLE_CLIENT_SECRET: z.string().default(""),
+  /** Khoá AES-256-GCM mã hoá refresh token Google: 32 byte base64 (`openssl rand -base64 32`). Đổi khoá ⇒ mọi người nối lại. */
+  GOOGLE_TOKEN_ENC_KEY: z
+    .string()
+    .default("")
+    .refine((v) => v === "" || isValidSecretBoxKey(v), { message: "phải là 32 byte mã hoá base64 (openssl rand -base64 32)" }),
 
   CLOUDINARY_CLOUD_NAME: z.string().default(""),
   CLOUDINARY_API_KEY: z.string().default(""),
