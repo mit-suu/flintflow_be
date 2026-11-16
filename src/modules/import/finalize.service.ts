@@ -582,11 +582,16 @@ export const needsReviewFindings = (
 /** Số phần tử tối đa nêu tên trong một cờ ảnh; còn lại ghi "và N phần tử khác". */
 const VISION_NAMES_SHOWN = 6
 
-/** Phần tử Spine theo mã (so theo `idKey`: UC-01 / UC01 cùng một phần tử). */
-const spineElement = (spine: Spine, entity: string, id: string | null): Record<string, unknown> | null =>
-  ((spine as unknown as Record<string, unknown>)[entity] as Record<string, unknown>[] | undefined)?.find(
-    (x) => typeof x.id === "string" && idKey(x.id) === idKey(id ?? "")
-  ) ?? null
+/**
+ * Phần tử Spine theo mã (so theo `idKey`: UC-01 / UC01 cùng một phần tử). Chỉ tìm trong mảng phần tử — `project` (object)
+ * hay khoá lạ ⇒ `null`. FLF-429: field `project.*` độ tin thấp từng gọi `.find` trên `spine.project` ⇒ TypeError, finalize
+ * lỗi lặp lại ở mọi lần "Tiếp tục".
+ */
+const spineElement = (spine: Spine, entity: string, id: string | null): Record<string, unknown> | null => {
+  const list = (spine as unknown as Record<string, unknown>)[entity]
+  if (!Array.isArray(list)) return null
+  return (list as Record<string, unknown>[]).find((x) => typeof x?.id === "string" && idKey(x.id) === idKey(id ?? "")) ?? null
+}
 
 /** Tên phần tử cho người đọc: `tác nhân "Customer"`, `Tên hệ thống` — không mã nội bộ (A02), không khoá thô (flows_in). */
 const visionElementName = (spine: Spine, f: Pick<ReviewField, "path" | "entity_name">): string | null => {
