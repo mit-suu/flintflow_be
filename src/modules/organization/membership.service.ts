@@ -6,6 +6,7 @@ import { User } from "../user/user.model.js"
 import { getPlan } from "../billing/plan.config.js"
 import { Subscription } from "../credits/subscription.model.js"
 import { notify } from "../notification/notification.service.js"
+import { Session } from "../../shared/auth/session.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { runInTransaction, TRANSACTION_UNAVAILABLE, sessionOptions } from "../../shared/db/transaction.js"
 
@@ -120,18 +121,31 @@ export const changeMemberRole = async (
   return member
 }
 
+/**
+ * Xoá tư cách thành viên (giữ BR-02) và gỡ `activeOrgId` khỏi các phiên đang mở org này
+ * trong cùng transaction để không còn phiên giữ orgId mồ côi sau khi rời / bị xoá.
+ */
+const deleteMembershipAndClearSessions = async (orgId: string, userId: string): Promise<void> => {
+  await runMembershipChange(orgId, async (session) => {
+    await assertLeadRemains(orgId, userId, null, session)
+    const deleted = await Membership.findOneAndDelete(
+      { organizationId: orgId, userId },
+      sessionOptions(session)
+    )
+    if (!deleted) throw notFound()
+    await Session.updateMany(
+      { userId, activeOrgId: orgId },
+      { $set: { activeOrgId: null } },
+      sessionOptions(session)
+    )
+  })
+}
+
 /** UC-74 / Flow 9.6: Lead xoá một thành viên khỏi org. */
 export const removeMember = async (orgId: string, targetUserId: string): Promise<{ removed: true }> => {
   assertObjectId(targetUserId)
 
-  await runMembershipChange(orgId, async (session) => {
-    await assertLeadRemains(orgId, targetUserId, null, session)
-    const deleted = await Membership.findOneAndDelete(
-      { organizationId: orgId, userId: targetUserId },
-      sessionOptions(session)
-    )
-    if (!deleted) throw notFound()
-  })
+  await deleteMembershipAndClearSessions(orgId, targetUserId)
 
   void notify(targetUserId, {
     type: "org_member_removed",
@@ -146,14 +160,7 @@ export const removeMember = async (orgId: string, targetUserId: string): Promise
 
 /** UC-72 / Flow 9.7: tự rời org. Dự án ở lại với org. */
 export const leaveOrganization = async (orgId: string, userId: string): Promise<{ left: true }> => {
-  await runMembershipChange(orgId, async (session) => {
-    await assertLeadRemains(orgId, userId, null, session)
-    const deleted = await Membership.findOneAndDelete(
-      { organizationId: orgId, userId },
-      sessionOptions(session)
-    )
-    if (!deleted) throw notFound()
-  })
+  await deleteMembershipAndClearSessions(orgId, userId)
 
   // Flow SD-3.3-5: Lead cần biết đội hình đổi.
   const [leads, name, user] = await Promise.all([

@@ -21,6 +21,7 @@ import type { LocalizedEntry, OpTransaction, SourceEntry } from "../../shared/ai
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { documentLanguageInput, type TurnDocumentLanguage } from "../translation/turn-language.js"
 import type { StepContext } from "./context-projection.js"
+import { withFrameRenumber } from "../spine/template-frames.js"
 import { actorGeneralizationErrors, briefExtractionErrors, dropRedundantScalarAdds, requiredArrayErrors, sanitizeModelOps, useCaseNamingErrors, useCaseWiringErrors, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
 
 export const NEEDS_USER_INPUT = "NEEDS_USER_INPUT"
@@ -227,7 +228,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       const sanitized = sanitizeModelOps(spine, result.data.ops, stepId, new Date(), { revision: callKind === "revision", userDecided: options.userDecided === true, ...(statusIds ? { statusAssumptionIds: statusIds } : {}) })
       // Gắn lại liên kết đã có (S-4.1 không thấy function_ids) là vô hại — bỏ trước khi kiểm, không để chết cả lô.
       // Chỉ lọc khi sanitize không báo lỗi: lỗi của nó trỏ op_index theo lô gốc.
-      ops = sanitized.errors.length > 0 ? sanitized.ops : dropRedundantScalarAdds(spine, sanitized.ops as Op[])
+      // FLF-413: model không thấy khung của mẫu ⇒ `order` tính năng mới trùng khung — nối renumber (op cuối, không lệch op_index)
+      ops = sanitized.errors.length > 0 ? sanitized.ops : withFrameRenumber(spine, dropRedundantScalarAdds(spine, sanitized.ops as Op[]))
       errors = sanitized.errors.length > 0 ? sanitized.errors : validateOps(spine, ops, { writable: ctx.writable, stepId, visibleIds, ...(extraPaths ? { extraPaths } : {}) })
       // S-1.1 phải dựng vision/goals tiếng Anh từ addendum lõi — kể cả lô rỗng, nên kiểm sau validateOps
       if (errors.length === 0) errors = briefExtractionErrors(spine, ops as Op[], stepId, callKind)

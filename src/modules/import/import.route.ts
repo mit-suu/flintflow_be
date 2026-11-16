@@ -234,6 +234,32 @@ router.post("/:id/import/extract", authMiddleware, importController.extract)
 
 /**
  * @swagger
+ * /api/v1/projects/{id}/import/drop-text:
+ *   patch:
+ *     summary: (FLF-412) Màn đọc khung — chọn Bỏ chữ theo vùng heading trước khi bấm Bắt đầu; vùng bỏ chữ chỉ còn khung
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [import_id, keys]
+ *             properties:
+ *               import_id: { type: string }
+ *               keys: { type: array, items: { type: string, example: B0012 }, description: "Cả tập khoá vùng (`text_sections[].key` của GET /import) chọn Bỏ chữ; khoá lạ bị bỏ qua" }
+ *     responses:
+ *       200: { description: "`{ import }` — đọc lại GET /import để có `structure_preview`, `text_sections`, `credit_estimate` mới" }
+ *       409: { description: IMPORT_INVALID_STATE (đã bấm Bắt đầu) }
+ */
+router.patch("/:id/import/drop-text", authMiddleware, importController.dropText)
+
+/**
+ * @swagger
  * /api/v1/projects/{id}/import/fields:
  *   patch:
  *     summary: (Bản ghi cũ ở fields_review) xác nhận / sửa / bỏ field độ tin thấp (UC-22, nút 1.9)
@@ -302,9 +328,11 @@ router.post("/:id/import/finalize", authMiddleware, importController.finalize)
  * @swagger
  * /api/v1/projects/{id}/import/continue:
  *   post:
- *     summary: Chế độ 3 (dự án mới theo mẫu bắt buộc) — soạn các mục của mẫu với FlintFlow (Luồng 2) thay vì Hoàn thiện
+ *     summary: Chế độ 3 / 4 — soạn phần còn thiếu với FlintFlow (Luồng 2) thay vì Hoàn thiện
  *     description: |
- *       Chỉ từ `incomplete` khi `target_structure.resolved_mode = 3`. Mở lại bước Brief (B-1…S-1), đặt bước sở hữu **mọi mục
+ *       Chỉ từ `incomplete` khi giữ khung + `target_structure.resolved_mode = 3`, hoặc tick bổ sung theo mẫu chuẩn + `resolved_mode = 4`
+ *       (FLF-416; chế độ 4 chỉ mở bước của mục FPT còn thiếu, bản in sắp lại bố cục: mục FPT soạn thêm chèn đúng vị trí, mục Ngoài
+ *       phạm vi xuống cuối). Thường finalize đã tự chuyển; endpoint này cho bản ghi cũ. Mở lại bước Brief (B-1…S-1), đặt bước sở hữu **mọi mục
  *       của mẫu** về `pending` (FLF-378 — chữ trong mẫu là ví dụ, không phải nội dung đã chốt), chuyển dự án sang luồng tạo mới (`mode = fpt`, `import_state = drafting`). Bản in vẫn theo mẫu; ký
  *       baseline 1.0 ⇒ dự án về mode 1 (FLF-318).
  *     tags: [Import (mode 1)]
@@ -326,6 +354,10 @@ router.post("/:id/import/continue", authMiddleware, importController.continueFlo
 // FLF-278 trên FLF-335/336 — mẫu / thư viện nội dung của tổ chức, đi qua dự án (contract §FLF-278)
 router.post("/:id/import/from-org", authMiddleware, orgLibrary.importFromOrg)
 router.post("/:id/import/save-to-org", authMiddleware, orgLibrary.saveToOrg)
+// FLF-395 (D13): duyệt mục BA tự đặt trước khi vào mẫu khung tự lưu của tổ chức
+router.get("/:id/template-skeleton", authMiddleware, orgLibrary.getSkeletonPending)
+router.post("/:id/template-skeleton/decisions", authMiddleware, orgLibrary.decideSkeletonPending)
+router.post("/:id/template-skeleton/suggest", authMiddleware, orgLibrary.suggestSkeletonNames)
 
 /**
  * @swagger

@@ -73,6 +73,7 @@ Engine `puml` (PlantUML server): UML 2.5 Sequence from `sequence.renderer.ts`, V
 - Message: request with a response back to the sender ⇒ synchronous solid arrow with a filled triangle head (`->` + `skinparam style strictuml`) + activation bar; request without ⇒ asynchronous open arrow (`->>`); response ⇒ dashed open arrow (`-->>`). Labels numbered `1:`, `1.1:`, `1.2:`, `2:` (stimulus = request from an actor).
 - `abnormal` ⇒ `alt <guard>` / `else <guard>`, the normal flow after it is the last `else`; `normal` with `guard` ⇒ `opt <guard>`; no `loop` (no data yet).
 - Messages carry data in plain words (`Submit email and password`), not method calls; the Spine writes them (S-5.4 `function-detail`). Samples: `docs/diagram_guideline/sequence/`; full rules: `renderer/sequence/SKILL.md`.
+- Component level (FLF-418, `Project.sequenceLevel = component`): `functions[].component_interactions` drawn as actor → `boundary` (screen) → `control` (`<Feature>Controller`) → `entity` (entities of the feature); function without that data stays system level.
 
 ## `activity` - §3.x (Functions: feature of the use case)
 

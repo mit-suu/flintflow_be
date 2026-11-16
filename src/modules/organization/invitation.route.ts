@@ -29,6 +29,7 @@ const signedIn = [authMiddleware, requireActiveAccount] as const
  *     security: [{ BearerAuth: [] }]
  *     responses:
  *       200: { description: Thông tin lời mời }
+ *       403: { description: INVITE_EMAIL_MISMATCH — mã mời cấp riêng cho địa chỉ email khác }
  *       410: { description: INVITE_INVALID — hết hạn, đã dùng hoặc đã thu hồi }
  */
 router.get("/:code", ...signedIn, organizationController.previewInvitation)
@@ -42,6 +43,7 @@ router.get("/:code", ...signedIn, organizationController.previewInvitation)
  *     security: [{ BearerAuth: [] }]
  *     responses:
  *       200: { description: "Đã tham gia — kèm access token mới mang orgId" }
+ *       403: { description: INVITE_EMAIL_MISMATCH — mã mời cấp riêng cho địa chỉ email khác }
  *       409: { description: ALREADY_MEMBER }
  *       410: { description: INVITE_INVALID }
  *       402: { description: PLAN_LIMIT_MEMBERS }

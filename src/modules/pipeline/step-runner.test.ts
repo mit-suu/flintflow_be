@@ -133,7 +133,7 @@ vi.mock("../spine/op-engine.js", async (importOriginal) => {
 })
 vi.mock("../../shared/ai/document-context.service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../shared/ai/document-context.service.js")>()
-  return { ...actual, buildDocumentContext: vi.fn(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false })) }
+  return { ...actual, buildDocumentContext: vi.fn(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false, mode: "none" as const, chunksUsed: 0, fullTokens: 0 })) }
 })
 vi.mock("../notification/notification.service.js", () => ({ notify: vi.fn(async () => null), notifyAdmins: vi.fn(async () => 0) }))
 vi.mock("../../shared/ai/credit-reservation.service.js", () => ({ refundDeductedCredit: vi.fn(async () => undefined) }))
@@ -156,7 +156,8 @@ import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { orderedSteps } from "./step-registry.js"
 import { AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction, ElicitOutput } from "../../shared/ai/response-parser.js"
-import { runStep, runDraftPhase, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, settleFromChat, settleRepeatedAnswer, settleWithoutModel, askTranscript, nextPendingAfterChat, isSubstantiveAnswer, isBareAgreement, noChangeReason, replyLanguageAfterMessage, CALL_LIMIT, CHAT_BUDGET_REPLY, CHAT_BUDGET_REPLY_EN, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
+import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
+import { runStep, runDraftPhase, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, settleFromChat, settleRepeatedAnswer, settleWithoutModel, askTranscript, recordUserMessage, recordAiMessage, nextPendingAfterChat, isSubstantiveAnswer, isBareAgreement, noChangeReason, replyLanguageAfterMessage, CALL_LIMIT, CHAT_BUDGET_REPLY, CHAT_BUDGET_REPLY_EN, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
 import { cancelRun, getRunState, resetMemoryRuns } from "./run-state.service.js"
 import { gate } from "./gate.service.js"
 import { resumePhaseInterview, runPhase } from "./phase-runner.service.js"
@@ -168,9 +169,9 @@ import { fakeRepository, resetStore, store as translationStore } from "../transl
 import { hashSource } from "../translation/translation-units.js"
 import { documentLanguageForTurn } from "../translation/turn-language.js"
 import { buildStepContext } from "./context-projection.js"
+import { resetUserMessageClaims } from "../project/user-message-dedupe.js"
 import { getPromptTemplate, interpolatePrompt } from "../../shared/ai/prompt-registry.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
-import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURES = path.resolve(__dirname, "../../../fixtures")
@@ -246,6 +247,7 @@ const collectEvents = () => {
 let actualApplyTransaction: typeof applyTransaction
 
 beforeEach(async () => {
+  resetUserMessageClaims()
   resetMemoryRuns()
   db.reset()
   const actual = await vi.importActual<typeof import("../spine/op-engine.js")>("../spine/op-engine.js")
@@ -1366,10 +1368,10 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
     seedSession(true)
     // Chỉ lượt chat (có `since`) mới thấy tài liệu mới; lượt hỏi đầu không có tài liệu
     vi.mocked(buildDocumentContext).mockClear()
-    vi.mocked(buildDocumentContext).mockImplementation(async (_p, _a, _s, _c, _m, _o, filter) =>
-      filter?.since
-        ? { contextText: "[D3-P01] Quy trình khám ngoại trú: bệnh nhân lấy số từ 5 giờ sáng.", tokenCount: 20, documentsUsed: 1, usedSummary: false }
-        : { contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false }
+    vi.mocked(buildDocumentContext).mockImplementation(async (request) =>
+      request.since
+        ? { contextText: "[D3-P01] Quy trình khám ngoại trú: bệnh nhân lấy số từ 5 giờ sáng.", tokenCount: 20, documentsUsed: 1, usedSummary: false, mode: "none" as const, chunksUsed: 0, fullTokens: 0 }
+        : { contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false, mode: "none" as const, chunksUsed: 0, fullTokens: 0 }
     )
     const ASK = [{ question: "Hiện quy trình đang làm thế nào?", options: [], multiple: false, topic_key: "current_process" }] as never as ElicitOutput["questions"]
     const elicitExecutor = vi.fn(async (input: { promptVariables?: Record<string, unknown> }) =>
@@ -1389,14 +1391,14 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
 
     const chat = elicitExecutor.mock.calls.map(([input]) => (input as { promptVariables: Record<string, unknown> }).promptVariables).find((v) => v.chat_turn)
     expect(chat?.documents).toContain("bệnh nhân lấy số từ 5 giờ sáng")
-    const sinceCall = vi.mocked(buildDocumentContext).mock.calls.find((c) => c[6]?.since)
-    expect(sinceCall?.[2]).toBe("B-0.1")
-    expect(sinceCall![6]!.since!.getTime()).toBeGreaterThanOrEqual(before)
+    const sinceCall = vi.mocked(buildDocumentContext).mock.calls.find((c) => c[0].since)
+    expect(sinceCall?.[0].stepId).toBe("B-0.1")
+    expect(sinceCall![0].since!.getTime()).toBeGreaterThanOrEqual(before)
 
     const again = events.filter((e) => e.type === "answer_needed")[1] as Extract<StepEvent, { type: "answer_needed" }>
     submitAnswer(PROJECT, "B-0.1", SESSION, { answers: again.questions.map((q) => ({ question_id: q.id, answer: "ok" })) })
     await run
-    vi.mocked(buildDocumentContext).mockImplementation(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false }))
+    vi.mocked(buildDocumentContext).mockImplementation(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false, mode: "none" as const, chunksUsed: 0, fullTokens: 0 }))
   })
 
   it("AI viết lại câu còn chờ theo tin nhắn ⇒ hỏi bản mới, không hỏi lại nguyên văn", async () => {
@@ -1774,6 +1776,20 @@ describe("nextPendingAfterChat: dùng sổ quyết định sau khi ghi đáp án
 
   it("AI chỉ viết lại câu đã chốt ⇒ hỏi lại nguyên văn câu còn chờ, không kết thúc im lặng", () => {
     expect(nextPendingAfterChat(decided, [his], [server] as never, "")).toEqual([his])
+  })
+
+  it("FLF-393: AI hỏi thêm câu mới mà không viết lại câu đang chờ ⇒ câu đang chờ (kèm lựa chọn) vẫn còn, sau câu mới", () => {
+    const stakes = { topic_key: "stakes", question: "Yếu tố tuân thủ, pháp lý thế nào?", options: [{ label: "Có quy định pháp luật" }, { label: "Chỉ quy định nội bộ" }] }
+    const credit = { topic_key: "credit_topup", question: "Người dùng nạp credit bằng cách nào?", options: [], inline: true }
+    const next = nextPendingAfterChat({ decisions: [] } as never, [stakes] as never, [credit] as never, "Tài liệu có nói cổng thanh toán nào không?")
+    expect(next.map((q) => q.topic_key)).toEqual(["credit_topup", "stakes"])
+    expect(next[1]).toMatchObject({ options: stakes.options })
+  })
+
+  it("AI viết lại chính câu đang chờ (cùng topic_key) ⇒ không bị lặp", () => {
+    const stakes = { topic_key: "stakes", question: "Tuân thủ?", options: [{ label: "A" }, { label: "B" }] }
+    const rewritten = { topic_key: "stakes", question: "Dự án có chịu quy định pháp luật nào không?", options: [{ label: "A" }, { label: "B" }] }
+    expect(nextPendingAfterChat({ decisions: [] } as never, [stakes] as never, [rewritten] as never, "")).toHaveLength(1)
   })
 })
 
@@ -2350,10 +2366,10 @@ describe("FLF-260: runPhase - ngôn ngữ đi qua phỏng vấn đầu giai đo�
   it("FLF-398: đính kèm tệp khi trả lời lượt hỏi gộp B-1 ⇒ lượt chat nhận tài liệu tải sau lúc hỏi", async () => {
     seedB1()
     vi.mocked(buildDocumentContext).mockClear()
-    vi.mocked(buildDocumentContext).mockImplementation(async (_p, _a, _s, _c, _m, _o, filter) =>
-      filter?.since
-        ? { contextText: "[D3-P01] Bệnh nhân đặt lịch qua Zalo của phòng khám.", tokenCount: 15, documentsUsed: 1, usedSummary: false }
-        : { contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false }
+    vi.mocked(buildDocumentContext).mockImplementation(async (request) =>
+      request.since
+        ? { contextText: "[D3-P01] Bệnh nhân đặt lịch qua Zalo của phòng khám.", tokenCount: 15, documentsUsed: 1, usedSummary: false, mode: "none" as const, chunksUsed: 0, fullTokens: 0 }
+        : { contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false, mode: "none" as const, chunksUsed: 0, fullTokens: 0 }
     )
     const question = [{ question: "Bệnh nhân đặt lịch thế nào?", options: [], topic_key: "current_booking" }] as never as ElicitOutput["questions"]
     const t = tracked({ reply: "Mình hỏi nhanh một câu.", questions: question }, "Đã đọc tài liệu.")
@@ -2371,9 +2387,9 @@ describe("FLF-260: runPhase - ngôn ngữ đi qua phỏng vấn đầu giai đo�
 
     const chat = seen.find((v) => v.chat_turn)
     expect(chat?.documents).toContain("Bệnh nhân đặt lịch qua Zalo")
-    const since = vi.mocked(buildDocumentContext).mock.calls.map((c) => c[6]?.since).find(Boolean)
+    const since = vi.mocked(buildDocumentContext).mock.calls.map((c) => c[0].since).find(Boolean)
     expect(since!.getTime()).toBeGreaterThanOrEqual(before)
-    vi.mocked(buildDocumentContext).mockImplementation(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false }))
+    vi.mocked(buildDocumentContext).mockImplementation(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false, mode: "none" as const, chunksUsed: 0, fullTokens: 0 }))
   })
 
   it("/answer chạy tiếp lượt hỏi gộp đã tách kèm tin tiếng Anh ⇒ lượt chat nhận en", async () => {
@@ -2391,6 +2407,21 @@ describe("FLF-260: runPhase - ngôn ngữ đi qua phỏng vấn đầu giai đo�
     }
     await resumePhaseInterview(PROJECT, "S-6", USER, pending, { answers: [], message: "We expect about 500 users at the same time" }, { elicitExecutor: elicitExecutor as never })
     expect(languages).toEqual(["en"])
+  })
+
+  it("phỏng vấn đầu giai đoạn lỗi INSUFFICIENT_CREDIT ⇒ run-state ghi error.code = INSUFFICIENT_CREDIT", async () => {
+    seedB1()
+    const { emit } = collectEvents()
+    const elicitExecutor = async () => {
+      throw new AiActionError(402, "Hết credit", "INSUFFICIENT_CREDIT")
+    }
+    await expect(
+      runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: elicitExecutor as never, draftExecutor: async () => draftReply([]) })
+    ).rejects.toMatchObject({ code: "INSUFFICIENT_CREDIT" })
+
+    const runState = await getRunState(PROJECT, "B-1")
+    expect(runState?.status).toBe("interrupted")
+    expect(runState?.error?.code).toBe("INSUFFICIENT_CREDIT")
   })
 })
 
@@ -2453,5 +2484,199 @@ describe("FLF-358: prompt elicit-loop đã render không còn {{assumptions}} �
       }
     }
     expect(r.prompts.every((p) => !p.prompt.includes("{{assumptions}}"))).toBe(true)
+  })
+
+  it("FLF-393: lượt chat khi còn câu chờ nhận đoạn tài liệu khớp tin nhắn (trước đây: không có tài liệu ⇒ \"không thấy\")", async () => {
+    vi.mocked(buildDocumentContext).mockImplementation(async (request) =>
+      request.actionType === "chat"
+        ? { contextText: "--- TÀI LIỆU --- [D1-P391] VietQR / SePay checkout processes credit pack purchases", tokenCount: 30, documentsUsed: 1, usedSummary: false, mode: "retrieved", chunksUsed: 1, fullTokens: 999 }
+        : { contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false, mode: "none", chunksUsed: 0, fullTokens: 0 }
+    )
+    try {
+      const spine = repo.createEmptySpine({ name: "Clinic", domain: null })
+      spine.project.review_mode = "fast"
+      spine.steps = ["B-0.1", "B-0.2", "B-0.3"].map((id) => ({ id, status: "accepted" as const, first_seq: null, last_seq: null, accepted_at: "2026-09-28T00:00:00.000Z" }))
+      db.spines[0] = { _id: crypto.randomUUID(), projectId: PROJECT, ...spine }
+      seedSession(true)
+      const question = [{ question: "Bệnh nhân đặt lịch thế nào?", options: [], topic_key: "current_booking" }] as never as ElicitOutput["questions"]
+      const r = rendering((kind) => (kind === "chat" ? chatTurnReply("Rõ.") : kind === "interview" ? elicitReply("Mình hỏi nhanh một câu.", question) : elicitReply("", [])))
+      const { events, emit } = collectEvents()
+      const run = runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: r.elicitExecutor, draftExecutor: async () => draftReply([]) })
+      await waitForCount(events, "answer_needed", 1)
+      expect(submitAnswer(PROJECT, "B-1", SESSION, { answers: [], message: "Tài liệu có nói cổng thanh toán nào không?" })).toBe(true)
+      await run
+
+      // Câu hỏi tìm đoạn = tin user (tiêu điểm) + câu đang chờ — model nhắc lại câu chờ cũng phải thấy đoạn về nó
+      expect(buildDocumentContext).toHaveBeenCalledWith(
+        expect.objectContaining({ actionType: "chat", focus: "Tài liệu có nói cổng thanh toán nào không?", query: "Tài liệu có nói cổng thanh toán nào không?\nBệnh nhân đặt lịch thế nào?" })
+      )
+      const chat = r.prompts.filter((p) => p.kind === "chat")
+      expect(chat.length).toBeGreaterThan(0)
+      expect(chat[0]!.prompt).toContain("VietQR / SePay checkout")
+    } finally {
+      vi.mocked(buildDocumentContext).mockImplementation(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false, mode: "none", chunksUsed: 0, fullTokens: 0 }))
+    }
+  })
+})
+
+describe("step-runner: FLF-418 thẻ hỏi tất định (ký pháp ERD ở S-4.5)", () => {
+  const seedUpTo = (stepId: string) => {
+    seedSpine()
+    const spine = db.spines[0] as unknown as SpineT
+    const all = orderedSteps(spine)
+    spine.steps = all
+      .slice(0, all.findIndex((s) => s.id === stepId))
+      .map((s) => ({ id: s.id, status: "accepted" as const, first_seq: 1, last_seq: 1, accepted_at: "2026-01-01T00:00:00.000Z" }))
+    spine.progress.current_phase = "S-4"
+    spine.progress.current_step = "S-4.4"
+  }
+  const store = (initial: { erdNotation?: string; sequenceLevel?: string } = {}) => {
+    const state = { ...initial }
+    return {
+      state,
+      load: vi.fn(async () => state),
+      save: vi.fn(async (_p: string, kind: string, value: string) => {
+        if (kind === "erd") state.erdNotation = value
+        else state.sequenceLevel = value
+      })
+    }
+  }
+  const waitAsk = async (events: StepEvent[], n = 1) => {
+    for (let i = 0; i < 200 && events.filter((e) => e.type === "answer_needed").length < n; i++) await new Promise((r) => setTimeout(r, 0))
+    const asked = events.filter((e) => e.type === "answer_needed")
+    return asked[asked.length - 1] as Extract<StepEvent, { type: "answer_needed" }>
+  }
+  const optionLabel = (o: string | { label: string }) => (typeof o === "string" ? o : o.label)
+
+  it("chưa chọn ⇒ thẻ Q_erd_notation trước mọi lượt gọi model; chọn Crow's Foot ⇒ ghi Project + sổ quyết định rồi soạn tiếp", async () => {
+    seedUpTo("S-4.5")
+    seedSession(true)
+    const choices = store()
+    const elicitExecutor = vi.fn(async () => elicitReply("ok"))
+    const draftExecutor = vi.fn(async () => draftReply([]))
+    const { events, emit } = collectEvents()
+    const run = runStep(PROJECT, "S-4.5", SESSION, USER, emit, { elicitExecutor, draftExecutor, renderDeps: renderStub(), diagramChoices: choices, replyLanguage: "vi" })
+
+    const asked = await waitAsk(events)
+    expect(asked.questions).toHaveLength(1)
+    expect(asked.questions[0]).toMatchObject({ id: "Q_erd_notation", header: "Ký pháp ERD" })
+    expect(asked.questions[0].options?.map(optionLabel)).toEqual(["Chen (Khuyến nghị)", "Crow's Foot", "IDEF1X"])
+    expect(elicitExecutor).not.toHaveBeenCalled()
+    expect(draftExecutor).not.toHaveBeenCalled()
+
+    expect(submitAnswer(PROJECT, "S-4.5", SESSION, { answers: [{ question_id: "Q_erd_notation", answer: "Crow's Foot" }] })).toBe(true)
+    await run
+    expect(choices.save).toHaveBeenCalledWith(PROJECT, "erd", "crowsfoot")
+    expect(events.some((e) => e.type === "gate_ready")).toBe(true)
+    const record = await repo.get(PROJECT)
+    expect(record!.decisions.find((d) => d.topic_key === "erd_notation")).toMatchObject({ answer: "Crow's Foot", step_id: "S-4.5" })
+  })
+
+  it("đã chọn (cài đặt dự án / import) ⇒ không hỏi", async () => {
+    seedUpTo("S-4.5")
+    seedSession(true)
+    const choices = store({ erdNotation: "idef1x" })
+    const { events, emit } = collectEvents()
+    await runStep(PROJECT, "S-4.5", SESSION, USER, emit, { elicitExecutor: async () => elicitReply("ok"), draftExecutor: async () => draftReply([]), renderDeps: renderStub(), diagramChoices: choices })
+    expect(events.some((e) => e.type === "answer_needed")).toBe(false)
+    expect(choices.save).not.toHaveBeenCalled()
+  })
+
+  it("chữ gõ trong chat khớp tất định (chân chim) ⇒ crowsfoot, không có lượt model đọc tin của thẻ", async () => {
+    seedUpTo("S-4.5")
+    seedSession(true)
+    const choices = store()
+    const elicitExecutor = vi.fn(async () => elicitReply("ok"))
+    const { events, emit } = collectEvents()
+    const run = runStep(PROJECT, "S-4.5", SESSION, USER, emit, { elicitExecutor, draftExecutor: async () => draftReply([]), renderDeps: renderStub(), diagramChoices: choices, replyLanguage: "vi" })
+    await waitAsk(events)
+    submitAnswer(PROJECT, "S-4.5", SESSION, { answers: [], message: "vẽ kiểu chân chim giúp mình" })
+    await run
+    expect(choices.save).toHaveBeenCalledWith(PROJECT, "erd", "crowsfoot")
+    const userMessages = elicitExecutor.mock.calls.map((call) => String((call as unknown[])[0] && ((call as unknown[])[0] as { promptVariables?: { user_message?: string } }).promptVariables?.user_message))
+    expect(userMessages.some((m) => m.includes("chân chim"))).toBe(false)
+  })
+
+  it("trả lời không khớp hai lần ⇒ hỏi lại một lần rồi dùng Chen, báo trong chat", async () => {
+    seedUpTo("S-4.5")
+    seedSession(true)
+    const choices = store()
+    const { events, emit } = collectEvents()
+    const run = runStep(PROJECT, "S-4.5", SESSION, USER, emit, { elicitExecutor: async () => elicitReply("ok"), draftExecutor: async () => draftReply([]), renderDeps: renderStub(), diagramChoices: choices, replyLanguage: "vi" })
+    await waitAsk(events, 1)
+    submitAnswer(PROJECT, "S-4.5", SESSION, { answers: [{ question_id: "Q_erd_notation", answer: "kiểu nào cũng được" }] })
+    await waitAsk(events, 2)
+    const leads = events.filter((e) => e.type === "elicit").map((e) => (e as { delta: string }).delta)
+    expect(leads).toContain("Mình chưa hiểu lựa chọn này - bạn chọn một trong các phương án bên dưới nhé.")
+    submitAnswer(PROJECT, "S-4.5", SESSION, { answers: [{ question_id: "Q_erd_notation", answer: "tuỳ bạn" }] })
+    await run
+    expect(choices.save).toHaveBeenCalledWith(PROJECT, "erd", "chen")
+    const session = db.sessions.find((s) => s._id === SESSION)!
+    expect((session.messages as { content: string }[]).some((m) => m.content.includes("Mình dùng Chen"))).toBe(true)
+  })
+
+  it("sổ đã có quyết định mà Project chưa ghi ⇒ ghi bù, không hỏi", async () => {
+    seedUpTo("S-4.5")
+    const spine = db.spines[0] as unknown as SpineT
+    spine.decisions = [{ id: "DC1", topic_key: "erd_notation", question: "q", answer: "IDEF1X", step_id: "S-4.5", at: "2026-11-14T00:00:00.000Z", superseded_by: null }]
+    seedSession(true)
+    const choices = store()
+    const { events, emit } = collectEvents()
+    await runStep(PROJECT, "S-4.5", SESSION, USER, emit, { elicitExecutor: async () => elicitReply("ok"), draftExecutor: async () => draftReply([]), renderDeps: renderStub(), diagramChoices: choices })
+    expect(events.some((e) => e.type === "answer_needed")).toBe(false)
+    expect(choices.save).toHaveBeenCalledWith(PROJECT, "erd", "idef1x")
+  })
+})
+
+describe("step-runner: FLF-418 thẻ ký pháp ERD - trả lời sau khi rời trang (/answer chạy tiếp)", () => {
+  it("BE restart giữa lúc chờ thẻ ⇒ /answer ghi lựa chọn, không đi vào vòng câu model, tới gate", async () => {
+    seedSpine()
+    const spine = db.spines[0] as unknown as SpineT
+    const all = orderedSteps(spine)
+    spine.steps = all
+      .slice(0, all.findIndex((s) => s.id === "S-4.5"))
+      .map((s) => ({ id: s.id, status: "accepted" as const, first_seq: 1, last_seq: 1, accepted_at: "2026-01-01T00:00:00.000Z" }))
+    spine.progress.current_phase = "S-4"
+    spine.progress.current_step = "S-4.4"
+    seedSession(true)
+    const state: { erdNotation?: string } = {}
+    const diagramChoices = {
+      load: vi.fn(async () => state),
+      save: vi.fn(async (_p: string, _kind: string, value: string) => void (state.erdNotation = value))
+    }
+    const elicitExecutor = vi.fn(async () => elicitReply("ok"))
+    const draftExecutor = vi.fn(async () => draftReply([]))
+    const { events, emit } = collectEvents()
+    void runStep(PROJECT, "S-4.5", SESSION, USER, emit, { elicitExecutor, draftExecutor, renderDeps: renderStub(), diagramChoices, replyLanguage: "vi" })
+    for (let i = 0; i < 200 && !events.some((e) => e.type === "answer_needed"); i++) await new Promise((r) => setTimeout(r, 0))
+    dropPendingAnswers()
+
+    const answers = [{ question_id: "Q_erd_notation", answer: "IDEF1X" }]
+    const pending = await pendingAnswerFor(PROJECT, "S-4.5", SESSION, { answers })
+    const { done } = await resumeWaitingStep(PROJECT, "S-4.5", USER, pending, { answers }, { elicitExecutor, draftExecutor, renderDeps: renderStub(), diagramChoices, replyLanguage: "vi" })
+    await done
+    expect(diagramChoices.save).toHaveBeenCalledWith(PROJECT, "erd", "idef1x")
+    expect((await getRunState(PROJECT, "S-4.5"))?.status).toBe("gate")
+    const record = await repo.get(PROJECT)
+    expect(record!.decisions.find((d) => d.topic_key === "erd_notation")?.answer).toBe("IDEF1X")
+  })
+})
+
+describe("step-runner: tin user ghi lặp vào transcript (FLF-400)", () => {
+  it("cùng tin cho cùng bước ghi 2 lần liền (2 request chạy giai đoạn) ⇒ transcript 1 tin; bước khác / tin AI vẫn ghi", async () => {
+    seedSession(true)
+    await Promise.all([recordUserMessage(PROJECT, SESSION, "B-1.5", "Bắt đầu nhé"), recordUserMessage(PROJECT, SESSION, "B-1.5", "Bắt đầu nhé")])
+    await recordUserMessage(PROJECT, SESSION, "B-1.5", "Bắt đầu nhé")
+    await recordUserMessage(PROJECT, SESSION, "B-1.6", "Bắt đầu nhé")
+    await recordAiMessage(PROJECT, SESSION, "B-1.5", "Ổn chưa?")
+    await recordAiMessage(PROJECT, SESSION, "B-1.5", "Ổn chưa?")
+
+    const messages = db.sessions.find((s) => s._id === SESSION)!.messages as Array<{ role: string; step: string; content: string }>
+    expect(messages.map((m) => [m.role, m.step, m.content])).toEqual([
+      ["user", "B-1.5", "Bắt đầu nhé"],
+      ["user", "B-1.6", "Bắt đầu nhé"],
+      ["ai", "B-1.5", "Ổn chưa?"],
+      ["ai", "B-1.5", "Ổn chưa?"]
+    ])
   })
 })

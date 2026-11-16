@@ -9,11 +9,16 @@ import { Subscription } from "../credits/subscription.model.js"
 import { planConfig } from "../billing/plan.config.js"
 import { markOnboarded } from "./onboarding.js"
 import { Invitation } from "./invitation.model.js"
-import { Project } from "../project/project.model.js"
-import { deleteProject } from "../project/project.service.js"
+import { Project, WITH_DELETED } from "../project/project.model.js"
+import { purgeProject } from "../project/project.service.js"
 import { Folder } from "../folder/folder.model.js"
 import { Notification } from "../notification/notification.model.js"
 import { PaymentIntent } from "../billing/payment-intent.model.js"
+import { CreditTopupRequest } from "../billing/credit-topup-request.model.js"
+import { OrgTemplate, OrgTemplateVersion } from "../import/org-library.model.js"
+import { TemplateMigration } from "../template-migration/template-migration.model.js"
+import { Comment, CommentCounter } from "../comment/comment.model.js"
+import { docFileStore } from "../doc-version/doc-file.store.js"
 import { Session } from "../../shared/auth/session.model.js"
 import { signAccessToken } from "../../shared/auth/jwt.util.js"
 
@@ -190,13 +195,50 @@ export interface DeleteOrganizationResult {
   projectsDeleted: number
 }
 
+/** Thu thập toàn bộ file ref cấp tổ chức / migration và danh sách projectId trước khi xoá bản ghi DB. */
+const collectOrgCleanupTargets = async (orgId: string) => {
+  const [orgTemplates, orgTemplateVersions, templateMigrations, commentDocs, projects] = await Promise.all([
+    OrgTemplate.find({ orgId }).select("file_ref").lean(),
+    OrgTemplateVersion.find({ orgId }).select("file_ref skeleton_source_ref").lean(),
+    TemplateMigration.find({ orgId }).select("new_base_file_ref spine_plan.ops_file_ref").lean(),
+    Comment.find({ organizationId: orgId }).select("projectId").lean(),
+    Project.find({ organizationId: orgId }).setOptions(WITH_DELETED).select("_id").lean()
+  ])
+
+  const fileRefs = new Set<string>()
+  for (const t of orgTemplates) if (t.file_ref) fileRefs.add(t.file_ref)
+  for (const v of orgTemplateVersions) {
+    if (v.file_ref) fileRefs.add(v.file_ref)
+    if (v.skeleton_source_ref) fileRefs.add(v.skeleton_source_ref)
+  }
+  for (const m of templateMigrations) {
+    if (m.new_base_file_ref) fileRefs.add(m.new_base_file_ref)
+    if (m.spine_plan?.ops_file_ref) fileRefs.add(m.spine_plan.ops_file_ref)
+  }
+
+  const counterProjectIds = [...new Set([...projects.map((p) => String(p._id)), ...commentDocs.map((c) => String(c.projectId))])]
+  return { fileRefs, counterProjectIds, projects }
+}
+
+/** Dọn file mẫu tổ chức và artifact đổi mẫu trên GridFS theo cơ chế best-effort sau khi đã xoá DB. */
+const purgeOrgFiles = async (orgId: string, fileRefs: Iterable<string>): Promise<void> => {
+  for (const fileRef of fileRefs) {
+    await docFileStore()
+      .remove(fileRef)
+      .catch((err: unknown) => console.warn(`[Organization] Không xoá được file ${fileRef} của tổ chức ${orgId}:`, err))
+  }
+  await docFileStore()
+    .removeProject(`org-${orgId}`)
+    .catch((err: unknown) => console.warn(`[Organization] Không xoá được file mẫu của tổ chức ${orgId}:`, err))
+}
+
 /**
  * Xoá tổ chức — chỉ khi Lead là thành viên DUY NHẤT (không cướp dữ liệu của người khác, và BR-02 không
  * còn ý nghĩa khi org biến mất). Không có trong actors-and-use-cases.md; thêm theo yêu cầu 2026-09-26.
  *
- * Xoá sạch dự án (kể cả đã lưu trữ, qua `deleteProject(..., hard)` — cùng đường dọn Spine, tài liệu, sơ đồ
- * như xoá một dự án), thư mục, ví, gói, mã mời, thông báo. GIỮ LẠI sổ giao dịch credit và PaymentIntent:
- * đó là hồ sơ tài chính, admin còn cần đối soát.
+ * Xoá sạch dự án (kể cả đã lưu trữ / đã xoá mềm, qua `purgeProject` — cùng đường dọn Spine, tài liệu, sơ đồ
+ * như xoá một dự án), thư mục, ví, gói, mã mời, thông báo, mẫu tổ chức (+ file), migration, comment và yêu cầu
+ * nạp credit. GIỮ LẠI sổ giao dịch credit và PaymentIntent: đó là hồ sơ tài chính, admin còn cần đối soát.
  *
  * Người gọi phải gõ lại đúng tên org — thao tác không khôi phục được.
  */
@@ -212,9 +254,6 @@ export const deleteOrganization = async (
   if (confirmName.trim() !== org.name) {
     throw new ApiError(400, "Tên xác nhận không khớp với tên tổ chức", "ORG_NAME_MISMATCH")
   }
-
-  // Chặn mã mời TRƯỚC khi đếm thành viên: không ai vào thêm được giữa lúc đang xoá.
-  await Invitation.deleteMany({ organizationId: orgId })
 
   const members = await Membership.find({ organizationId: orgId }).select("userId role").lean()
   const onlyMe = members.length === 1 && String(members[0]?.userId) === userId && members[0]?.role === "lead"
@@ -235,9 +274,14 @@ export const deleteOrganization = async (
     throw new ApiError(409, "Tổ chức đang có thanh toán chờ xử lý - thử lại khi thanh toán kết thúc", "ORG_PAYMENT_PENDING")
   }
 
-  const projects = await Project.find({ organizationId: orgId }).select("_id").lean()
+  // Qua đủ điều kiện chặn mới thu hồi mã mời — trước lúc xoá dự án để không ai nhập mã song song.
+  await Invitation.deleteMany({ organizationId: orgId })
+
+  const { fileRefs, counterProjectIds, projects } = await collectOrgCleanupTargets(orgId)
+
+  // FLF-401: xoá tổ chức dọn hẳn mọi dự án — kể cả dự án đã xoá mềm (deleteProject chỉ còn xoá mềm)
   for (const project of projects) {
-    await deleteProject(String(project._id), orgId, true)
+    await purgeProject(String(project._id), orgId)
   }
 
   await Promise.all([
@@ -245,11 +289,19 @@ export const deleteOrganization = async (
     CreditWallet.deleteMany({ organizationId: orgId }),
     Subscription.deleteMany({ organizationId: orgId }),
     Notification.deleteMany({ organizationId: orgId }),
+    OrgTemplateVersion.deleteMany({ orgId }),
+    OrgTemplate.deleteMany({ orgId }),
+    TemplateMigration.deleteMany({ orgId }),
+    Comment.deleteMany({ organizationId: orgId }),
+    ...(counterProjectIds.length > 0 ? [CommentCounter.deleteMany({ projectId: { $in: counterProjectIds } })] : []),
+    CreditTopupRequest.deleteMany({ organizationId: orgId }),
     // Phiên đang mở org này: bỏ org đang mở để lượt refresh sau không cấp lại token trỏ vào org đã xoá.
     Session.updateMany({ activeOrgId: orgId }, { $set: { activeOrgId: null } })
   ])
   await Membership.deleteMany({ organizationId: orgId })
   await Organization.deleteOne({ _id: orgId })
+
+  await purgeOrgFiles(orgId, fileRefs)
 
   return { deleted: true, projectsDeleted: projects.length }
 }

@@ -1,0 +1,18 @@
+[
+  { "q": "What does UC-05 do?", "expect": ["Student registers for open course sections"], "kind": "code" },
+  { "q": "uc12", "expect": ["sets the start, end and drop deadline"], "kind": "code" },
+  { "q": "UC-14 confirm payment", "expect": ["Accountant checks invoices"], "kind": "code" },
+  { "q": "Who performs UC-09?", "expect": ["Lecturer marks each student present or absent"], "kind": "code" },
+  { "q": "What is FN-03?", "expect": ["FN-03 Attendance Warning"], "kind": "code" },
+  { "q": "Show message MSG-03", "expect": ["Section full"], "kind": "code" },
+  { "q": "What happens on SCR-08 Tuition screen?", "expect": ["Tuition invoice of the term, payment status"], "kind": "screen" },
+  { "q": "Registration Result screen", "expect": ["Registered sections, total credits and Drop buttons"], "kind": "screen" },
+  { "q": "class attendance screen for lecturer", "expect": ["SCR-09 Class Attendance"], "kind": "screen" },
+  { "q": "Can a student register for two sections whose slots overlap?", "expect": ["whose class slots overlap"], "kind": "rule" },
+  { "q": "maximum credits per term", "expect": ["must not exceed 20", "more than 20 credits"], "kind": "rule" },
+  { "q": "how is tuition calculated", "expect": ["multiplied by the credit fee"], "kind": "rule" },
+  { "q": "drop deadline definition", "expect": ["The last moment a student can drop"], "kind": "glossary" },
+  { "q": "availability target of the portal", "expect": ["99.5% of the time per month"], "kind": "nfr" },
+  { "q": "concurrent students during registration", "expect": ["8,000 concurrent students"], "kind": "nfr" },
+  { "q": "payment gateway interface", "expect": ["Payment Gateway"], "kind": "interface" }
+]
