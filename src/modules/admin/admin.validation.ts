@@ -32,6 +32,13 @@ export const orgsQuerySchema = z.object({
   q: z.string().trim().max(100, "Từ khoá tối đa 100 ký tự").optional()
 })
 
+/** Góp ý cho admin (FLF-404): phân trang ở BE; `q` tìm không dấu trong nội dung, email hoặc tên người gửi. */
+export const feedbackQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  q: z.string().trim().max(100, "Từ khoá tối đa 100 ký tự").optional()
+})
+
 export const userIdParamSchema = z.object({
   id: z.string().regex(/^[a-f\d]{24}$/i, "Mã người dùng không hợp lệ.")
 })
@@ -46,11 +53,15 @@ const dateInput = z
 export const aiCostQuerySchema = z.object({
   from: dateInput.optional(),
   to: dateInput.optional(),
-  groupBy: z.enum(AI_COST_GROUP_BY, { message: "Cách nhóm dữ liệu không hợp lệ." }).default("day")
+  groupBy: z.enum(AI_COST_GROUP_BY, { message: "Cách nhóm dữ liệu không hợp lệ." }).default("day"),
+  // FLF-404: phân trang `rows`; không truyền `limit` ⇒ trả hết như trước. `totals` luôn tính trên toàn bộ.
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).optional()
 })
 
 export type UsersQuery = z.infer<typeof usersQuerySchema>
 export type OrgsQuery = z.infer<typeof orgsQuerySchema>
+export type FeedbackQuery = z.infer<typeof feedbackQuerySchema>
 export type AiCostQuery = z.infer<typeof aiCostQuerySchema>
 
 export const logIdParamSchema = z.object({

@@ -196,7 +196,7 @@ describe("sơ đồ phân cấp actor", () => {
       for (const a of s.actors) if (["A02", "A03"].includes(a.id)) a.parent_id = "A10"
     })
 
-  it("có parent_id hợp lệ ⇒ thêm đúng một hình ở cuối, section §2.1, mọi actor người có mặt, mỗi cạnh một đầu tam giác rỗng", () => {
+  it("có parent_id hợp lệ ⇒ thêm đúng một hình ở cuối, section §2.1, mọi actor người có mặt, mỗi actor cha một đầu tam giác rỗng", () => {
     const parts = renderKind(general(), "usecase")
     const hierarchy = parts.filter((p) => p.section === ACTOR_HIERARCHY_SECTION)
     expect(hierarchy).toHaveLength(1)
@@ -206,7 +206,8 @@ describe("sơ đồ phân cấp actor", () => {
     expect(svgTitleOf(hierarchy[0].source)).toBe("Actor Hierarchy")
     for (const name of ["User", "Business Analyst", "Administrator", "Founder", "Guest"]) expect(hierarchy[0].source).toContain(`>${name}</text>`)
     expect(hierarchy[0].source).not.toContain("Email Service")
-    expect(hierarchy[0].source.match(/<polygon /g)!.length).toBe(2) // hai đầu tam giác rỗng
+    // FLF-421: hai con chung một cha ⇒ nối kiểu cây, MỘT đầu tam giác rỗng (không còn hai tam giác chồng nhau)
+    expect(hierarchy[0].source.match(/<polygon /g)!.length).toBe(1)
     expect(hierarchy[0].source.match(/<circle /g)!.length).toBe(5) // mỗi actor người một đầu
   })
 

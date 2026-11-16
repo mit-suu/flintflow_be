@@ -36,13 +36,17 @@ const mocks = vi.hoisted(() => {
     SpineTranslation: { deleteMany: deleteMany() },
     TranslationGlossary: { deleteMany: deleteMany() },
     TranslationRunLock: { deleteMany: deleteMany() },
+    // Comment + đổi mẫu (FLF-422)
+    Comment: { deleteMany: deleteMany() },
+    CommentCounter: { deleteMany: deleteMany() },
+    TemplateMigration: { deleteMany: deleteMany() },
     destroyDocumentAsset: vi.fn(async () => true),
     // FLF-265: ngôn ngữ tài khoản — null = chưa chọn
     accountLocaleOf: vi.fn(async (_userId: string): Promise<"vi" | "en" | null> => null)
   }
 })
 
-vi.mock("./project.model.js", () => ({ Project: mocks.Project }))
+vi.mock("./project.model.js", () => ({ Project: mocks.Project, WITH_DELETED: { withDeleted: true } }))
 vi.mock("./chat-session.model.js", () => ({ ChatSession: mocks.ChatSession }))
 vi.mock("./project-document.model.js", () => ({ ProjectDocument: mocks.ProjectDocument }))
 vi.mock("./project-document.storage.js", () => ({ destroyDocumentAsset: mocks.destroyDocumentAsset }))
@@ -67,6 +71,8 @@ vi.mock("../change-request/change-group.model.js", () => ({ ChangeGroup: mocks.C
 vi.mock("../translation/spine-translation.model.js", () => ({ SpineTranslation: mocks.SpineTranslation }))
 vi.mock("../translation/translation-glossary.model.js", () => ({ TranslationGlossary: mocks.TranslationGlossary }))
 vi.mock("../translation/translation-run-lock.model.js", () => ({ TranslationRunLock: mocks.TranslationRunLock }))
+vi.mock("../comment/comment.model.js", () => ({ Comment: mocks.Comment, CommentCounter: mocks.CommentCounter }))
+vi.mock("../template-migration/template-migration.model.js", () => ({ TemplateMigration: mocks.TemplateMigration }))
 vi.mock("../credits/subscription.model.js", () => ({ Subscription: { findOne: () => ({ select: () => ({ lean: mocks.subscriptionPlan }) }) } }))
 vi.mock("../user/account-locale.js", () => ({ accountLocaleOf: mocks.accountLocaleOf }))
 
@@ -83,10 +89,31 @@ describe("deleteProject", () => {
     mocks.getSpine.mockResolvedValue({ diagrams: [{ id: "D01" }, { id: "D02" }] })
   })
 
-  it("hard: xoá mọi collection theo project, file sơ đồ và asset Cloudinary", async () => {
-    mocks.Project.findOneAndDelete.mockResolvedValue({ _id: PROJECT })
+  /** `purgeProject` gọi `findOneAndDelete(...).setOptions(WITH_DELETED)` (FLF-401: thấy cả dự án đã xoá mềm). */
+  const purgeFinds = (project: unknown) => mocks.Project.findOneAndDelete.mockReturnValue({ setOptions: vi.fn(async () => project) })
 
-    await expect(projectService.deleteProject(PROJECT, ORG, true)).resolves.toEqual({ _id: PROJECT, status: "deleted" })
+  it("FLF-401 hard (nút Xoá vĩnh viễn): chỉ xoá mềm — đặt deletedAt + deletedBy, không dọn collection / file nào", async () => {
+    mocks.Project.findOneAndUpdate.mockResolvedValue({ _id: PROJECT })
+
+    await expect(projectService.deleteProject(PROJECT, ORG, true, USER)).resolves.toEqual({ _id: PROJECT, status: "deleted" })
+    expect(mocks.Project.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: PROJECT, organizationId: ORG },
+      { $set: { deletedAt: expect.any(Date), deletedBy: USER } },
+      { new: true }
+    )
+    expect(mocks.Project.findOneAndDelete).not.toHaveBeenCalled()
+    for (const model of [mocks.ChatSession, mocks.ProjectDocument, mocks.Spine, mocks.Change, mocks.DocVersion, mocks.SpineTranslation, mocks.Comment, mocks.CommentCounter, mocks.TemplateMigration]) {
+      expect(model.deleteMany).not.toHaveBeenCalled()
+    }
+    expect(mocks.removeDocFiles).not.toHaveBeenCalled()
+    expect(mocks.removeDiagram).not.toHaveBeenCalled()
+    expect(mocks.destroyDocumentAsset).not.toHaveBeenCalled()
+  })
+
+  it("purgeProject (xoá tổ chức): xoá mọi collection theo project, file sơ đồ và asset Cloudinary", async () => {
+    purgeFinds({ _id: PROJECT })
+
+    await expect(projectService.purgeProject(PROJECT, ORG)).resolves.toBe(true)
 
     for (const model of [mocks.ChatSession, mocks.ProjectDocument, mocks.Spine, mocks.Change, mocks.Baseline, mocks.Usage, mocks.RenderedDocumentCache]) {
       expect(model.deleteMany).toHaveBeenCalledWith({ projectId: PROJECT })
@@ -99,26 +126,37 @@ describe("deleteProject", () => {
     for (const model of [mocks.SpineTranslation, mocks.TranslationGlossary, mocks.TranslationRunLock]) {
       expect(model.deleteMany).toHaveBeenCalledWith({ projectId: PROJECT })
     }
+    // Comment + đổi mẫu (FLF-422)
+    for (const model of [mocks.Comment, mocks.CommentCounter, mocks.TemplateMigration]) {
+      expect(model.deleteMany).toHaveBeenCalledWith({ projectId: PROJECT })
+    }
     expect(mocks.removeDocFiles).toHaveBeenCalledWith(PROJECT)
     expect(mocks.removeDiagram.mock.calls).toEqual([[PROJECT, "D01"], [PROJECT, "D02"]])
     expect(mocks.destroyDocumentAsset.mock.calls).toEqual([["flintflow/brief"], ["flintflow/notes"]])
   })
 
-  it("hard: lỗi xoá file sơ đồ không làm hỏng việc xoá project", async () => {
-    mocks.Project.findOneAndDelete.mockResolvedValue({ _id: PROJECT })
+  it("purgeProject: lỗi xoá file sơ đồ không làm hỏng việc xoá project", async () => {
+    purgeFinds({ _id: PROJECT })
     mocks.removeDiagram.mockRejectedValueOnce(new Error("gridfs down"))
     vi.spyOn(console, "warn").mockImplementation(() => {})
 
-    await expect(projectService.deleteProject(PROJECT, ORG, true)).resolves.toMatchObject({ status: "deleted" })
+    await expect(projectService.purgeProject(PROJECT, ORG)).resolves.toBe(true)
     expect(mocks.removeDiagram).toHaveBeenCalledTimes(2)
   })
 
-  it("hard: project không thuộc user ⇒ 404, không xoá gì", async () => {
-    mocks.Project.findOneAndDelete.mockResolvedValue(null)
+  it("purgeProject: không có dự án ⇒ false, không xoá gì", async () => {
+    purgeFinds(null)
+
+    await expect(projectService.purgeProject(PROJECT, ORG)).resolves.toBe(false)
+    expect(mocks.Spine.deleteMany).not.toHaveBeenCalled()
+    expect(mocks.destroyDocumentAsset).not.toHaveBeenCalled()
+  })
+
+  it("hard: project không thuộc org ⇒ 404, không đánh dấu gì", async () => {
+    mocks.Project.findOneAndUpdate.mockResolvedValue(null)
 
     await expect(projectService.deleteProject(PROJECT, ORG, true)).rejects.toMatchObject({ statusCode: 404, code: "PROJECT_NOT_FOUND" })
     expect(mocks.Spine.deleteMany).not.toHaveBeenCalled()
-    expect(mocks.destroyDocumentAsset).not.toHaveBeenCalled()
   })
 
   it("mặc định chỉ archive, không đụng dữ liệu", async () => {

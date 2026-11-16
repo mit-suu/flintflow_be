@@ -11,7 +11,7 @@ vi.mock("./admin.service.js", async (importOriginal) => {
     getUserDetail: vi.fn(async (id: string) => ({ _id: id, recentTransactions: [] })),
     getMetrics: vi.fn(async () => ({ usersTotal: 3, baselinesTotal: 0 })),
     getAiCost: vi.fn(async () => ({ rows: [], totals: {} })),
-    listFeedback: vi.fn(async () => []),
+    listFeedback: vi.fn(async () => ({ items: [], meta: { page: 1, limit: 20, total: 0, totalPages: 1 } })),
     listOrgs: vi.fn(async () => ({ items: [], meta: { page: 1, limit: 20, total: 0, totalPages: 1 } }))
   }
 })
@@ -30,7 +30,7 @@ import { errorHandler } from "../../shared/middlewares/error-handler.js"
 import { signAccessToken } from "../../shared/auth/jwt.util.js"
 import adminRoutes from "./admin.route.js"
 import * as adminService from "./admin.service.js"
-import { estimateUsd, mergeCostRows, UNATTRIBUTED_KEY } from "./admin.service.js"
+import { estimateUsd, mergeCostRows, paginateRows, UNATTRIBUTED_KEY } from "./admin.service.js"
 import { parseDateInput, resolveDateRange } from "./admin.validation.js"
 
 const ADMIN = "64b000000000000000000001"
@@ -119,6 +119,27 @@ describe("admin routes (HTTP)", () => {
       { from: new Date("2026-08-31T17:00:00.000Z"), to: new Date("2026-09-14T17:00:00.000Z") },
       "provider"
     )
+
+    await fetch(`${baseUrl}/feedback?page=2&limit=10&q=%20dark%20`, { headers: adminAuth })
+    expect(adminService.listFeedback).toHaveBeenLastCalledWith({ page: 2, limit: 10, q: "dark" })
+    await fetch(`${baseUrl}/feedback`, { headers: adminAuth })
+    expect(adminService.listFeedback).toHaveBeenLastCalledWith({ page: 1, limit: 20 })
+  })
+
+  it("ai-cost có limit ⇒ rows theo trang + meta, totals vẫn là của toàn bộ (FLF-404)", async () => {
+    const rows = Array.from({ length: 5 }, (_, i) => ({ key: `k${i}` }))
+    const totals = { calls: 99 }
+    vi.mocked(adminService.getAiCost).mockResolvedValue({ rows, totals } as never)
+
+    const paged = await (await fetch(`${baseUrl}/ai-cost?page=2&limit=2`, { headers: adminAuth })).json()
+    expect(paged.data.rows).toEqual([{ key: "k2" }, { key: "k3" }])
+    expect(paged.data.totals).toEqual(totals)
+    expect(paged.meta).toEqual({ page: 2, limit: 2, total: 5, totalPages: 3 })
+
+    // Không truyền limit ⇒ trả hết như trước
+    const all = await (await fetch(`${baseUrl}/ai-cost`, { headers: adminAuth })).json()
+    expect(all.data.rows).toHaveLength(5)
+    expect(all.meta).toEqual({ page: 1, limit: 5, total: 5, totalPages: 1 })
   })
 
   it("tham số sai trả 400", async () => {
@@ -130,7 +151,12 @@ describe("admin routes (HTTP)", () => {
       "/orgs?limit=0",
       "/ai-cost?groupBy=model",
       "/ai-cost?from=hello",
-      "/ai-cost?from=2026-09-10&to=2026-09-01"
+      "/ai-cost?from=2026-09-10&to=2026-09-01",
+      "/ai-cost?limit=101",
+      "/ai-cost?page=0",
+      "/feedback?limit=0",
+      "/feedback?page=-1",
+      `/feedback?q=${"x".repeat(101)}`
     ]
     for (const path of bad) {
       expect((await fetch(`${baseUrl}${path}`, { headers: adminAuth })).status, path).toBe(400)
@@ -151,6 +177,16 @@ describe("admin.validation date range", () => {
     expect(now.getTime() - range.from.getTime()).toBe(30 * 24 * 60 * 60 * 1000)
 
     expect(() => resolveDateRange({ from: "2024-01-01", to: "2026-01-01" })).toThrow(/366/)
+  })
+})
+
+describe("paginateRows", () => {
+  it("cắt đúng trang, trang vượt quá ⇒ rỗng; không limit ⇒ một trang chứa hết; rỗng ⇒ 1 trang", () => {
+    const all = [1, 2, 3, 4, 5]
+    expect(paginateRows(all, 3, 2)).toEqual({ rows: [5], meta: { page: 3, limit: 2, total: 5, totalPages: 3 } })
+    expect(paginateRows(all, 4, 2).rows).toEqual([])
+    expect(paginateRows(all, 1)).toEqual({ rows: all, meta: { page: 1, limit: 5, total: 5, totalPages: 1 } })
+    expect(paginateRows([], 1)).toEqual({ rows: [], meta: { page: 1, limit: 1, total: 0, totalPages: 1 } })
   })
 })
 

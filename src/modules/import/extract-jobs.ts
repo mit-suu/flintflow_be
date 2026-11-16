@@ -14,7 +14,7 @@
 
 import { defineJob, isJobActive, startJob, waitForJob } from "../../shared/queue/job-runner.js"
 import { ImportedDocument, type IImportedDocument } from "./imported-document.model.js"
-import { acceptLatest, assertImportStatus, autoConfirmPendingMapping, requireImport } from "./import.service.js"
+import { acceptLatest, applyDropText, assertImportStatus, autoConfirmPendingMapping, requireImport } from "./import.service.js"
 import { runExtraction } from "./extract.service.js"
 import { startAutoFinalize } from "./finalize-jobs.js"
 import { Mode1Error } from "./mode1.errors.js"
@@ -75,6 +75,8 @@ export const startExtraction = async (projectId: string, userId: string, importI
   await acceptLatest(doc, confirmLatest)
   await autoConfirmPendingMapping(doc)
   assertImportStatus(doc, ["extracting"], "extracting")
+  // FLF-412: vùng Bỏ chữ ⇒ viết lại file + tách lại trước lượt đọc đầu tiên
+  if (!(await isExtractionRunning(importId))) await applyDropText(doc)
   // Bỏ `paused` trước khi trả lời để lần poll đầu không thấy trạng thái dừng cũ.
   const started = await startJob(
     extractJob,

@@ -24,6 +24,7 @@ import * as translationRepository from "../../src/modules/translation/translatio
 import { hashSource } from "../../src/modules/translation/translation-units.js"
 import { translationRunResponseSchema, translationStatusResponseSchema } from "../../src/modules/pipeline/pipeline.dto.js"
 import { authAs, readFixtureJson, seedFixture, type SeededFixture } from "../setup.js"
+import { purgeProject } from "../../src/modules/project/project.service.js"
 import { gridFsDiagramStore } from "../../src/modules/diagram/diagram-file.store.js"
 import { mockCalls, mockOverrides, resetMockLlm } from "../helpers/mock-llm.js"
 
@@ -214,18 +215,18 @@ describe("POST /projects/:id/translations/run", () => {
     expect(await wallet(seeded.orgId)).toMatchObject({ balance: 1, reserved: 0 })
   })
 
-  it("model trả items rỗng ⇒ trừ 2 credit của lô đó rồi dừng, không gọi lô sau", async () => {
+  it("model trả items rỗng ⇒ trừ 1 credit (quyết toán theo token) của lô đó rồi dừng, không gọi lô sau", async () => {
     await useVietnamese()
     mockOverrides.next = (prompt) => (prompt.includes(BATCH_PROMPT) ? JSON.stringify({ items: [] }) : undefined)
 
     const res = await run(seeded.projectId, seeded.token, { max_batches: 5 })
 
     expect(res.status, JSON.stringify(res.body.error)).toBe(200)
-    expect(res.body.data).toMatchObject({ translated: 0, credits_used: 2 })
+    expect(res.body.data).toMatchObject({ translated: 0, credits_used: 1 })
     expect(res.body.data.remaining).toBeGreaterThan(0)
     expect(mockCalls).toHaveLength(1)
     expect(await SpineTranslation.countDocuments()).toBe(0)
-    expect(await wallet(seeded.orgId)).toMatchObject({ balance: 998, reserved: 0 })
+    expect(await wallet(seeded.orgId)).toMatchObject({ balance: 999, reserved: 0 })
   })
 
   it("lượt khác đang giữ khoá ⇒ 409 TRANSLATION_RUNNING, không gọi model; khoá quá hạn ⇒ chiếm lại được", async () => {
@@ -305,12 +306,15 @@ describe("translation.repository trên Mongo thật", () => {
     ])
   })
 
-  it("xoá cứng dự án ⇒ xoá cả bản dịch và glossary dịch", async () => {
+  it("FLF-401: Xoá vĩnh viễn (xoá mềm) giữ bản dịch; dọn hẳn dự án (purgeProject — xoá tổ chức) ⇒ xoá cả bản dịch và glossary dịch", async () => {
     await translationRepository.saveTranslations(seeded.projectId, "vi", "en", [{ sourceHash: hashSource("x"), text: "y" }], "machine")
     await translationRepository.upsertGlossary(seeded.projectId, "vi", [{ term: "Order", translation: "Đơn hàng" }], "seed")
     await translationRepository.acquireRunLock(seeded.projectId, "vi")
     const res = await request(app).delete(`/api/v1/projects/${seeded.projectId}?hard=true`).set(bearer(seeded.token))
     expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+    expect(await SpineTranslation.countDocuments({ projectId: seeded.projectId })).toBe(1)
+
+    expect(await purgeProject(seeded.projectId, seeded.orgId)).toBe(true)
     expect(await SpineTranslation.countDocuments({ projectId: seeded.projectId })).toBe(0)
     expect(await TranslationGlossary.countDocuments({ projectId: seeded.projectId })).toBe(0)
     expect(await TranslationRunLock.countDocuments({ projectId: seeded.projectId })).toBe(0)

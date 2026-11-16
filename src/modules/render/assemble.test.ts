@@ -132,6 +132,13 @@ vi.mock("./rendered-document.model.js", () => ({
 vi.mock("../spine/baseline.model.js", () => ({ Baseline: { findOne: baselineDb.findOne } }))
 vi.mock("../spine/change.model.js", () => ({ Change: { find: changeDb.find, findOne: changeDb.findOne } }))
 vi.mock("../user/user.model.js", () => ({ User: { find: userDb.find } }))
+// FLF-411 (U2-6): "In charge" của dòng CR = người tạo CR
+const crDb = vi.hoisted(() => ({ rows: [] as Record<string, unknown>[] }))
+vi.mock("../change-request/change-request.model.js", () => ({
+  ChangeRequest: {
+    find: (filter: { cr_id?: { $in: string[] } }) => ({ lean: async () => crDb.rows.filter((r) => (filter.cr_id?.$in ?? []).includes(String(r.cr_id))) })
+  }
+}))
 // Project mode 2: chưa có layout file upload ⇒ thứ tự mẫu FPT (FLF-184)
 vi.mock("../import/template-profile.model.js", () => ({ TemplateProfile: { findOne: async () => null } }))
 vi.mock("../spine/spine.repository.js", () => {
@@ -163,7 +170,7 @@ vi.mock("./consistency-pass.js", async (importOriginal) => {
 vi.mock("../translation/translation.repository.js", () => ({ findByHashes: vi.fn(), translationRevision: vi.fn(async () => null) }))
 
 import * as spineRepository from "../spine/spine.repository.js"
-import { _internal, assemble, getDocument, getDocumentWithMeta, getDraftMeta, NoWorkingDraftError, type TranslationResolver } from "./assemble.service.js"
+import { _internal, assemble, isExistingSrs, getDocument, getDocumentWithMeta, getDraftMeta, NoWorkingDraftError, type TranslationResolver } from "./assemble.service.js"
 import { clearDocumentMemo } from "./rendered-document-memo.js"
 import { clearChangeLogs } from "../spine/change-log.js"
 import { runConsistencyPass } from "./consistency-pass.js"
@@ -430,6 +437,19 @@ describe("assemble()", () => {
       expect(doc.recordOfChanges[0].in_charge).toBe("Alice")
       expect(doc.recordOfChanges[1].in_charge).toBe("System")
       expect(doc.recordOfChanges[2].in_charge).toBe("65000000…")
+    })
+
+    it("FLF-411 (U2-6): lô của CR (by = mã CR) ⇒ tên người tạo CR, không in mã CR", async () => {
+      changeDb.setRows([
+        { projectId: PROJECT, txn: "t1", at: new Date("2026-09-01T00:00:00.000Z"), by: "CR-001", reason: "CR-001: Faster response", op: "set", path: "nfrs[id=NFR-01].threshold", step_id: null, seq: 1 }
+      ])
+      userDb.setRows([{ _id: "650000000000000000000010", name: "Alice", email: "alice@example.com" }])
+      crDb.rows = [{ cr_id: "CR-001", requester: "Customer", created_by: "650000000000000000000010" }]
+      vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 22 }))
+      await assemble(PROJECT, "Demo", 22)
+      const doc = await getDocument(PROJECT, "Demo", { source: "draft" })
+      crDb.rows = []
+      expect(doc.recordOfChanges[0]).toMatchObject({ in_charge: "Alice", description: "CR-001: Faster response" })
     })
   })
 
@@ -1238,5 +1258,18 @@ describe("FLF-265 - tài liệu theo ngôn ngữ dự án (bản xem đã dịch
       code: "BASELINE_NOT_FOUND"
     })
     expect(resolveTranslations).not.toHaveBeenCalled()
+  })
+})
+
+describe("FLF-373 — isExistingSrs: dự án upload SRS có sẵn", () => {
+  it("theo start_kind; dự án import cũ chưa có start_kind là SRS có sẵn, trừ mẫu bắt buộc", () => {
+    expect(isExistingSrs({ mode: "import", start_kind: "existing", template_intent: "free" })).toBe(true)
+    expect(isExistingSrs({ mode: "import", start_kind: "existing", template_intent: "fixed" })).toBe(true)
+    expect(isExistingSrs({ mode: "import", start_kind: "new", template_intent: "fixed" })).toBe(false)
+    expect(isExistingSrs({ mode: "fpt", start_kind: "new", template_intent: null })).toBe(false)
+    expect(isExistingSrs({ mode: "import" })).toBe(true)
+    expect(isExistingSrs({ mode: "import", template_intent: "fixed" })).toBe(false)
+    expect(isExistingSrs({ mode: "fpt" })).toBe(false)
+    expect(isExistingSrs(null)).toBe(false)
   })
 })

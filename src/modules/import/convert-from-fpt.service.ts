@@ -15,6 +15,7 @@
  *   `template_context`); DocVersion 1.0 mang `template_source` + `record_snapshot` để mọi bản in sau 1.0 theo đúng mẫu.
  */
 
+import { assertNoMigrationRunning } from "../template-migration/migration-guard.js"
 import { createHash } from "node:crypto"
 import { scheduleEmbeddingSync } from "../change-request/embedding/embedding-sync.service.js"
 import { docFileStore } from "../doc-version/doc-file.store.js"
@@ -33,6 +34,7 @@ import { projectLanguages } from "../translation/translation.service.js"
 import { ImportedDocument } from "./imported-document.model.js"
 import { buildStepPlan } from "./step-plan.js"
 import { TemplateProfile } from "./template-profile.model.js"
+import { autoSaveSkeleton } from "./template-skeleton.service.js"
 
 /** Version gốc của dự án chuyển đổi — bản Lead đã ký. */
 export const CONVERTED_DOC_VERSION = "1.0"
@@ -73,6 +75,7 @@ const running = new Set<string>()
  * ở lượt khác ⇒ `null`, không làm gì. Lỗi ⇒ gỡ phần đã tạo rồi ném lại (dự án vẫn `fpt` đã ký).
  */
 export const convertFromFpt = async (projectId: string, userId: string, opts: ConvertOptions = {}): Promise<ConvertResult | null> => {
+  await assertNoMigrationRunning(projectId)
   if (running.has(projectId)) return null
   running.add(projectId)
   try {
@@ -165,6 +168,8 @@ const convert = async (projectId: string, userId: string, opts: ConvertOptions):
   await ImportedDocument.updateMany({ projectId, status: "drafting" }, { $set: { status: "delivered" } })
 
   const result = { doc_version: CONVERTED_DOC_VERSION, baseline_id: entry.id }
+  // FLF-395 (D12): dự án chế độ 3 (file mẫu của khách) ký 1.0 ⇒ tự lưu khung; mode 2 không file nền ⇒ bỏ qua bên trong
+  await autoSaveSkeleton(projectId, userId, fileRef)
   if (opts.quiet) return result
   scheduleEmbeddingSync(projectId)
   void notify(userId, {

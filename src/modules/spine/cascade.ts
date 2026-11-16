@@ -25,6 +25,7 @@ import { isRecord, parsePath } from "./path-resolver.js"
 import {
   buildIdIndex,
   iterateReferences,
+  LIFELINE_COLLECTIONS,
   referenceAlive,
   type IdCollection,
   type ReferenceHit
@@ -65,6 +66,9 @@ export const CASCADE_POLICY: Readonly<Record<string, CascadePolicy>> = Object.fr
   "entities[].transitions[].business_rule_ids[]": "pull",
   "functions[].interactions[].from": "remove_owner",
   "functions[].interactions[].to": "remove_owner",
+  // FLF-418: xoá actor / màn / entity ⇒ xoá message mức thành phần trỏ tới nó
+  "functions[].component_interactions[].from": "remove_owner",
+  "functions[].component_interactions[].to": "remove_owner",
   "use_cases[].activity_nodes[].lane": "null",
   "use_cases[].activity_flows[].from": "remove_owner",
   "use_cases[].activity_flows[].to": "remove_owner",
@@ -126,6 +130,8 @@ const deadByRemoval = (hit: ReferenceHit, removed: RemovedIds): boolean => {
       }
     case "diagram_owner":
       return false
+    case "lifeline":
+      return LIFELINE_COLLECTIONS.some((c) => removed.has(c, hit.targetId))
     default:
       return removed.has(hit.target satisfies IdCollection, hit.targetId)
   }
