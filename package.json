@@ -60,6 +60,7 @@
     "@ai-sdk/openai": "^3.0.112",
     "@bull-board/api": "^9.10.4",
     "@bull-board/express": "^9.10.4",
+    "@googleapis/drive": "^27.0.0",
     "@resvg/resvg-js": "^2.6.2",
     "@xmldom/xmldom": "^0.8.15",
     "ai": "^6.0.280",

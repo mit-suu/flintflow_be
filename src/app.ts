@@ -35,6 +35,8 @@ import changeRequestRoutes from "./modules/change-request/change-request.route.j
 import docVersionRoutes from "./modules/doc-version/doc-version.route.js"
 import translationRoutes from "./modules/translation/translation.route.js"
 import commentRoutes from "./modules/comment/comment.route.js"
+import googleRoutes from "./modules/google/google.route.js"
+import googleProjectRoutes from "./modules/google/google-project.route.js"
 import { sendSuccess } from "./shared/types/api-response.js"
 import { buildHealthReport } from "./config/health.js"
 import { authMiddleware } from "./shared/auth/auth.middleware.js"
@@ -166,6 +168,8 @@ app.use(
   ...orgGuard,
   viewerReadOnly([
     new RegExp("^/[^/]+/assemble$"),
+    // Xuất Google Docs không sửa nội dung; như /export/word, Viewer chỉ xuất được bản baseline (kiểm ở controller)
+    new RegExp("^/[^/]+/export/google-docs$"),
     new RegExp("^/[^/]+/comments$"),
     new RegExp("^/[^/]+/comments/[^/]+/replies$")
   ]),
@@ -188,6 +192,7 @@ app.use("/api/v1/notifications", ...accountGuard)
 app.use("/api/v1/feedback", ...accountGuard)
 app.use("/api/v1/ai-actions", ...accountGuard)
 app.use("/api/v1/export", ...accountGuard)
+app.use("/api/v1/integrations", ...accountGuard)
 
 // API Routes
 app.use("/api/v1/auth", authRoutes)
@@ -211,6 +216,7 @@ app.use("/api/v1/projects", changeRequestRoutes)
 app.use("/api/v1/projects", docVersionRoutes)
 app.use("/api/v1/projects", translationRoutes)
 app.use("/api/v1/projects", commentRoutes)
+app.use("/api/v1/projects", googleProjectRoutes)
 app.use("/api/v1/notifications", notificationRoutes)
 app.use("/api/v1/billing", billingRoutes)
 app.use("/api/v1/feedback", feedbackRoutes)
@@ -219,6 +225,7 @@ app.use("/api/v1/orgs", organizationRoutes)
 app.use("/api/v1/orgs", orgLibraryRoutes)
 app.use("/api/v1/invitations", invitationRoutes)
 app.use("/api/v1/export", exportRoutes)
+app.use("/api/v1/integrations/google", googleRoutes)
 
 // Không route nào khớp ⇒ 404 JSON (envelope chung), không phải trang HTML của Express
 app.use(notFoundHandler)
