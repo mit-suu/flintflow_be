@@ -1,7 +1,9 @@
-import mongoose, { Schema, Document } from "mongoose"
+import mongoose, { Schema, Document, type MongooseQueryMiddleware, type Query } from "mongoose"
 import { IMPORT_STATUSES, type ImportStatus } from "../import/import.state.js"
 import { USER_LOCALES, type UserLocale } from "../../shared/i18n/locale.js"
-import { DEFAULT_ERD_NOTATION, ERD_NOTATIONS, type ErdNotation } from "../../shared/diagram/erd-notation.js"
+import { ERD_NOTATIONS, type ErdNotation } from "../../shared/diagram/erd-notation.js"
+import { SEQUENCE_LEVELS, type SequenceLevel } from "../../shared/diagram/sequence-level.js"
+import { SCREEN_MOCKUP_MODES, SCREEN_PLATFORMS, type ScreenMockupState, type ScreenTheme } from "../../shared/diagram/screen-theme.js"
 
 export type ProjectStatus = "active" | "archived"
 
@@ -36,6 +38,11 @@ export interface IProject extends Document {
   has_required_template: boolean | null
   /** FLF-335: `fixed` ngay lúc tạo với dự án mới có mẫu bắt buộc; dự án có sẵn ghi lúc upload (#2 `intent`); cũ `null`. */
   template_intent: TemplateIntent | null
+  /**
+   * FLF-395: mẫu tổ chức + bản (version) dự án đang theo. `null` = chưa gắn mẫu (mẫu tự do / FPT). Ghi khi import từ mẫu
+   * org, lưu vào thư viện, đổi mẫu xong, tự lưu khung. Bản org mới hơn ⇒ `template_update` ở chi tiết project.
+   */
+  template_ref: { template_id: mongoose.Types.ObjectId; version: number } | null
   /** Mode 1: bản sao rút gọn `ImportedDocument.status` để hiện danh sách (UC-14, UC-19); mode khác luôn `null`. */
   import_state: ImportStatus | null
   /**
@@ -49,12 +56,30 @@ export interface IProject extends Document {
    * ⇒ đọc qua `documentLanguageOf` (`document-language.ts`), đừng đọc thẳng.
    */
   documentLanguage?: UserLocale
-  /** Ký pháp ERD của cả tài liệu (§3.1.5): `chen` | `crowsfoot` | `idef1x`. Không nằm trong Spine; dự án cũ chưa có field đọc là `chen` (mặc định schema). */
-  erdNotation: ErdNotation
+  /**
+   * Ký pháp ERD của cả tài liệu (§3.1.5): `chen` | `crowsfoot` | `idef1x`. Không nằm trong Spine. FLF-418: không default — thiếu
+   * field = chưa chọn (S-4.5 hỏi trong khung chat); khi vẽ đọc qua `erdNotationOf` (thiếu ⇒ `chen`), đừng đọc thẳng.
+   */
+  erdNotation?: ErdNotation
+  /** FLF-418: mức Sequence Diagram `system` | `component`. Không default (thiếu = chưa chọn, S-5.4 lần đầu hỏi); đọc qua `sequenceLevelOf`. */
+  sequenceLevel?: SequenceLevel
+  /**
+   * Theme mockup §3.x.y Screen Layout (FLF-410): màu chính, domain, nền tảng. Không nằm trong Spine; đọc qua `screenThemeOf`
+   * (`shared/diagram/screen-theme.ts`). Field null = chưa chọn ⇒ mặc định / suy từ `form_factor`.
+   */
+  screenTheme?: ScreenTheme
+  /** FLF-410: màn import đã vẽ lại ảnh gốc bằng mockup (kiểu, bật / tắt, ảnh bị thay). Đọc qua `screenMockupsOf`. */
+  screenMockups?: ScreenMockupState[]
   /** Thư mục chứa dự án (`modules/folder`); null = ngoài thư mục. */
   folderId: mongoose.Types.ObjectId | null
   /** Lần gần nhất user mở dự án (GET /projects/:id) — sắp xếp "Mới mở" trên dashboard. */
   lastOpenedAt: Date | null
+  /**
+   * FLF-401: "Xoá vĩnh viễn" ở FE chỉ xoá mềm — đánh dấu thời điểm + người xoá, dữ liệu giữ nguyên. Mọi truy vấn `Project`
+   * tự bỏ dự án có `deletedAt` (middleware bên dưới); cần thấy cả dự án đã xoá ⇒ `.setOptions(WITH_DELETED)`.
+   */
+  deletedAt?: Date | null
+  deletedBy?: mongoose.Types.ObjectId | null
   // Nội dung, tiến độ, baseline đều nằm ở Spine (modules/spine) — Project chỉ giữ metadata danh sách.
   createdAt: Date
   updatedAt: Date
@@ -112,6 +137,16 @@ const projectSchema = new Schema<IProject>(
       enum: [...TEMPLATE_INTENTS, null],
       default: null
     },
+    template_ref: {
+      type: new Schema(
+        {
+          template_id: { type: Schema.Types.ObjectId, ref: "OrgTemplate", required: true },
+          version: { type: Number, required: true, min: 1 }
+        },
+        { _id: false }
+      ),
+      default: null
+    },
     import_state: {
       type: String,
       enum: [...IMPORT_STATUSES, null],
@@ -131,10 +166,39 @@ const projectSchema = new Schema<IProject>(
       type: String,
       enum: [...USER_LOCALES]
     },
+    // FLF-418: KHÔNG default — thiếu field = người dùng chưa chọn; giá trị khi vẽ suy ra ở `erdNotationOf`
     erdNotation: {
       type: String,
-      enum: [...ERD_NOTATIONS],
-      default: DEFAULT_ERD_NOTATION
+      enum: [...ERD_NOTATIONS]
+    },
+    sequenceLevel: {
+      type: String,
+      enum: [...SEQUENCE_LEVELS]
+    },
+    screenTheme: {
+      type: new Schema(
+        {
+          primaryColor: { type: String, default: null },
+          domain: { type: String, default: null },
+          platforms: { type: [{ type: String, enum: [...SCREEN_PLATFORMS] }], default: null }
+        },
+        { _id: false }
+      ),
+      default: () => ({ primaryColor: null, domain: null, platforms: null })
+    },
+    screenMockups: {
+      type: [
+        new Schema(
+          {
+            screen_id: { type: String, required: true },
+            mode: { type: String, enum: [...SCREEN_MOCKUP_MODES], required: true },
+            enabled: { type: Boolean, default: true },
+            image_indexes: { type: [Number], default: [] }
+          },
+          { _id: false }
+        )
+      ],
+      default: []
     },
     folderId: {
       type: Schema.Types.ObjectId,
@@ -144,14 +208,55 @@ const projectSchema = new Schema<IProject>(
     lastOpenedAt: {
       type: Date,
       default: null
+    },
+    deletedAt: {
+      type: Date,
+      default: null
+    },
+    deletedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null
     }
   },
   { timestamps: true }
 )
 
+/** FLF-401: option truy vấn để thấy cả dự án đã xoá mềm (xoá tổ chức dọn dữ liệu, tên dự án trong lịch sử thanh toán). */
+export const WITH_DELETED = Object.freeze({ withDeleted: true })
+
+/**
+ * FLF-401: dự án đã xoá mềm không đọc / sửa / đếm được ở bất cứ đâu — mọi lối truy cập (`getProjectById`, danh sách, thư mục,
+ * quota, thống kê, đọc theo id bên trong luồng) đi qua đây. Bộ lọc tự đặt `deletedAt` thì giữ nguyên.
+ */
+const QUERY_OPS = [
+  "find",
+  "findOne",
+  "countDocuments",
+  "updateOne",
+  "updateMany",
+  "findOneAndUpdate",
+  "findOneAndDelete",
+  "findOneAndReplace",
+  "replaceOne",
+  "deleteOne",
+  "deleteMany",
+  "distinct"
+] as const satisfies readonly MongooseQueryMiddleware[]
+// `deleteOne` có cả middleware document lẫn query — chỉ gắn vào query
+projectSchema.pre([...QUERY_OPS], { document: false, query: true }, function (this: Query<unknown, unknown>) {
+  if ((this.getOptions() as { withDeleted?: boolean }).withDeleted) return
+  if (!Object.prototype.hasOwnProperty.call(this.getFilter(), "deletedAt")) this.where({ deletedAt: null })
+})
+projectSchema.pre("aggregate", function () {
+  if ((this.options as { withDeleted?: boolean }).withDeleted) return
+  this.pipeline().unshift({ $match: { deletedAt: null } })
+})
+
 // Compound Index for dashboard list queries (UC06)
 projectSchema.index({ userId: 1, status: 1 })
 // Cùng truy vấn danh sách nhưng theo org (task-26 Pha 4 sẽ thay index theo userId ở trên)
 projectSchema.index({ organizationId: 1, status: 1 })
+projectSchema.index({ "template_ref.template_id": 1 }, { sparse: true })
 
 export const Project = mongoose.model<IProject>("Project", projectSchema)

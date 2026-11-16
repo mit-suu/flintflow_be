@@ -9,6 +9,25 @@ import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { parseFileContent } from "../../shared/utils/file-text.js"
 import { assignDocCodes } from "./document-code.service.js"
 import { contentHashOf, findDuplicate, findVersionCandidates, type ExistingDocument } from "./document-dedupe.js"
+import { splitParagraphs } from "../../shared/ai/document-paragraphs.js"
+import { alignOutline, extractDocxHeadings, isDocx } from "../../shared/ai/document-retrieval/docx-outline.js"
+import { deleteDocumentChunks, saveDocumentChunks } from "../../shared/ai/document-retrieval/chunk-index.service.js"
+import type { OutlineEntry } from "../../shared/ai/document-retrieval/chunker.js"
+import { assertReferenceProjectQuota, assertReferenceUploadLimit, type ReferenceTokenLimits } from "./document-token-limit.js"
+
+/**
+ * FLF-393: heading thật của file .docx, khớp về chỉ số đoạn - chữ phẳng mất style heading nên chỉ lấy được lúc còn buffer.
+ * File khác hoặc đọc lỗi ⇒ `[]` (chunker dò heading trên chữ).
+ */
+const outlineOf = async (file: Express.Multer.File, extension: string, text: string): Promise<OutlineEntry[]> => {
+  if (!isDocx(file.mimetype, extension)) return []
+  try {
+    return alignOutline(splitParagraphs(text), await extractDocxHeadings(file.buffer))
+  } catch (err) {
+    console.warn(`[DocumentChunks] Không đọc được heading của "${file.originalname}": ${err instanceof Error ? err.message : String(err)}`)
+    return []
+  }
+}
 
 /**
  * FLF-398: lựa chọn của người dùng sau khi BE báo "có thể là bản mới" (`409 POSSIBLE_NEW_VERSION`). Không gửi ⇒ BE so tên /
@@ -76,6 +95,13 @@ export const uploadProjectDocument = async (
     console.warn(`[DocumentParser] Failed to parse "${originalName}" (parseStatus=failed): ${parseErr?.message}`)
   }
 
+  // FLF-405: trần token mỗi lần tải — ngay sau khi trích chữ, chưa lưu / chưa tốn credit. Parse lỗi (không có chữ để đếm)
+  // ⇒ giữ hành vi cũ: lưu `failed`, không tính vào tổng.
+  let tokenLimits: ReferenceTokenLimits | null = null
+  if (parsed) {
+    tokenLimits = await assertReferenceUploadLimit({ orgId: project.organizationId ?? orgId, file: originalName, tokenCount: parsed.tokenCount })
+  }
+
   // Step 2 (FLF-398): trùng hệt ⇒ chặn; có thể là bản mới ⇒ hỏi (trừ khi người dùng đã chọn). Chưa ghi gì, chưa tốn credit.
   const contentHash = contentHashOf(file.buffer)
   const existing = await existingDocuments(project._id)
@@ -101,10 +127,25 @@ export const uploadProjectDocument = async (
     }
   }
 
+  // FLF-405: trần tổng dự án theo gói — sau bước hỏi bản mới để "Thay bản cũ" được trừ token bản bị thay; vẫn trước
+  // Cloudinary / ghi DB.
+  if (parsed && tokenLimits) {
+    await assertReferenceProjectQuota({
+      limits: tokenLimits,
+      projectId: project._id,
+      file: originalName,
+      tokenCount: parsed.tokenCount,
+      replaceDocumentId: replaced?.id ?? null
+    })
+  }
+
   // Step 3: Upload lên Cloudinary
   const uploadResult = await uploadFileToCloudinary(file, {
     folder: `flintflow/projects/${project._id}`
   })
+
+  // FLF-393: heading thật của .docx (chỉ đọc được lúc còn buffer) - cây section để cắt chunk
+  const outline = parsed ? await outlineOf(file, extension, parsed.text) : []
 
   // Step 4: Lưu document record kèm kết quả parse
   const document = await ProjectDocument.create({
@@ -122,6 +163,7 @@ export const uploadProjectDocument = async (
     tokenCount: parsed?.tokenCount ?? null,
     parseStatus: parsed ? "success" : "failed",
     parseError,
+    ...(outline.length ? { outline } : {}),
     summaryStatus: "pending"
   })
   // FLF-292: số tài liệu cho mã đoạn `D<n>-P<m>` — gán ngay để lượt chat kế tiếp đã có mã ổn định
@@ -135,6 +177,8 @@ export const uploadProjectDocument = async (
       { $set: { supersededBy: document._id, supersededAt: new Date() } }
     )
   }
+  // FLF-393: cắt sẵn thành chunk theo cây section - lượt chat / Draft chỉ nạp đoạn liên quan khi tài liệu vượt trần
+  if (parsed) await saveDocumentChunks(project._id, document._id, parsed.text, outline)
 
   // Step 5: Summarize document bằng AI (Task 2b)
   // Chỉ chạy nếu parse thành công VÀ chưa từng summarize (summaryStatus !== "success")
@@ -207,5 +251,7 @@ export const deleteProjectDocument = async (
   await ProjectDocument.deleteOne({ _id: documentId, projectId })
   // FLF-398: xoá bản mới ⇒ bản cũ nó đã thay được dùng lại (không để bản cũ ẩn mãi)
   await ProjectDocument.updateMany({ projectId, supersededBy: document._id }, { $set: { supersededBy: null, supersededAt: null } })
+  // FLF-393: chunk của tài liệu đã xoá không còn dùng
+  await deleteDocumentChunks(documentId)
   await destroyDocumentAsset(document.cloudinaryPublicId)
 }

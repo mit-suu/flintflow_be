@@ -10,7 +10,10 @@
  *    được lưu làm mốc để bản in vẫn giữ nguyên văn file gốc cho mục chưa đổi (`render/source-fidelity.ts`).
  *  - `Project.mode = fpt` (luồng tạo mới) ⇒ chạy step, ký baseline như dự án tạo mới; bản in điền vào chính file của khách
  *    (`fixedTemplate`, 2.10). Ký baseline 1.0 ⇒ FLF-318 (`convert-from-fpt`) đưa dự án về mode 1, sửa qua change request.
- * Chế độ 4 (bổ sung theo mẫu chuẩn, cần xem trước bố cục 2.9a) chưa hỗ trợ — dừng ở `incomplete` (gap report + DRAFT).
+ * FLF-416 — **chế độ 4** (tick "Bổ sung các mục còn thiếu theo mẫu chuẩn FlintFlow", `template_intent = free`, file thiếu mục so
+ * với mẫu chuẩn) đi **cùng luồng** (business-flow §1: "chế độ 3 và 4 là một luồng, chỉ khác cấu trúc đích"): bước sở hữu mục
+ * FPT còn thiếu `pending`, bước sở hữu mục khách đã viết giữ `accepted`, lưu Spine mốc. Bản in vẫn lấy file của khách làm nền,
+ * mục FPT soạn thêm chèn đúng vị trí mẫu chuẩn, mục **Ngoài phạm vi** chuyển xuống cuối (`render/source-fidelity.ts`).
  */
 
 import { SLOT_FALLBACK_OWNER } from "./template-step-headings.js"
@@ -99,6 +102,13 @@ export const flow2Owners = (sections: readonly TargetSection[], templateFile: bo
   }
 }
 
+/**
+ * Hàm thuần: file còn thiếu so với cấu trúc đích ⇒ sang Luồng 2 soạn phần thiếu. Giữ khung (`fixed`) ⇒ chế độ 3; tick bổ sung
+ * theo mẫu chuẩn (`free`) ⇒ chế độ 4 (FLF-416). Ý định khác / chế độ 1 (đủ) ⇒ không.
+ */
+export const entersFlow2 = (intent: string | null | undefined, resolvedMode: number | null | undefined): boolean =>
+  (intent === "fixed" && resolvedMode === 3) || (intent === "free" && resolvedMode === 4)
+
 export interface Flow2Body {
   import_id: string
   base_version: number
@@ -112,7 +122,7 @@ export interface Flow2Result {
 }
 
 /**
- * Lõi chuyển chế độ 3 sang Luồng 2 — finalize gọi ngay sau I-5 (không chờ bấm), `POST /import/continue` gọi cho bản ghi cũ đang
+ * Lõi chuyển chế độ 3 / 4 sang Luồng 2 — finalize gọi ngay sau I-5 (không chờ bấm), `POST /import/continue` gọi cho bản ghi cũ đang
  * `incomplete`. SRS đã viết: lưu **Spine mốc** lúc vào Luồng 2 — bản in giữ nguyên văn file gốc cho mục chưa đổi so với mốc (chế
  * độ 3 không có bản gốc 0.1 để so).
  */
@@ -121,10 +131,10 @@ export const enterFlow2 = async (doc: IImportedDocument, by: string, baseVersion
   const projectId = String(doc.projectId)
   const [project, profile] = await Promise.all([Project.findById(projectId).lean(), TemplateProfile.findOne({ projectId })])
   const mode = profile?.target_structure?.resolved_mode
-  if (project?.template_intent !== "fixed" || mode !== 3 || !profile?.target_structure) {
+  if (!project || !profile?.target_structure || !entersFlow2(project.template_intent, mode)) {
     throw new Mode1Error(
       "IMPORT_INVALID_STATE",
-      "Chỉ file giữ khung còn thiếu mục mới viết tiếp được bằng FlintFlow; file bổ sung theo mẫu chuẩn FlintFlow hiện chỉ tải được bản DRAFT và báo cáo thiếu sót",
+      "Chỉ file còn thiếu mục so với cấu trúc đích mới soạn tiếp phần thiếu bằng FlintFlow",
       { status: doc.status, resolved_mode: mode ?? null }
     )
   }
@@ -158,6 +168,6 @@ export const enterFlow2 = async (doc: IImportedDocument, by: string, baseVersion
   return { project_mode: "fpt", import_state: "drafting", current_step: applied.spine.progress.current_step ?? null, spine_version: applied.spine.spine_version }
 }
 
-/** `POST /import/continue` — bản ghi cũ chế độ 3 còn dừng ở `incomplete` (trước khi finalize tự chuyển Luồng 2). */
+/** `POST /import/continue` — bản ghi cũ chế độ 3 / 4 còn dừng ở `incomplete` (trước khi finalize tự chuyển Luồng 2). */
 export const continueInFlow2 = async (projectId: string, userId: string, body: Flow2Body): Promise<Flow2Result> =>
   enterFlow2(await requireImport(projectId, body.import_id), userId, body.base_version)

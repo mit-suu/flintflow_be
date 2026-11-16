@@ -737,3 +737,60 @@ describe("FLF-343 - độ tin I-4 = điểm AI kết hợp tín hiệu code", ()
     expect(deterministicTableItems(blocks[0], grid, profileOf(cols))![0].confidence).toBe(0.95)
   })
 })
+
+describe("FLF-411 - chữ của mẫu ở SRS viết dở (BF §3.1.1)", () => {
+  const tableBlock = (id: string, rows: string[][], section: string) => ({ ...block(id, "table", "", `body/tbl[${id}]`, section), rows })
+  const map = (id: string, entries: [number, string | null][]) =>
+    ({ table_map: entries.map(([column_index, field_path]) => ({ block_id: id, column_index, header: `c${column_index}`, field_path, confidence: 0.95, confirmed: true })) }) as unknown as ITemplateProfile
+
+  it("bảng màn: dòng chỗ điền `3 | .. |` không thành màn (không còn SCR-03); ô `<<Screen Brief description>>` là trống", () => {
+    const rows = [["#", "Feature", "Screen", "Description"], ["1", "Order Meals", "Create Order", " <<Screen Brief description>>"], ["2", "Order Meals", "Change Order", ""], ["3", "..", "", ""]]
+    const t = tableBlock("B0101", rows, "fixed:3.1.2")
+    const items = deterministicTableItems(t, rows, map("B0101", [[1, "screens[].feature_id"], [2, "screens[].name"], [3, "screens[].description"]]))!
+    expect(items.map((i) => i.value)).toEqual([{ feature_id: "Order Meals", name: "Create Order" }, { feature_id: "Order Meals", name: "Change Order" }])
+  })
+
+  it("ma trận phân quyền của mẫu: cột Role-Name / … và màn <<Screen Name1>> (kèm thao tác con) không thành vai trò / quyền ⇒ bảng giữ nguyên văn", () => {
+    const rows = [
+      ["Screen", "Role-Name1", "Role-Name2", "Role-Name3", "…"],
+      ["<<Screen Name1>>", "X", "", "X", "X"],
+      ["    <<Screen Activity>>", "", "", "X", "X"],
+      ["<<Screen Name2>>", "X", "", "X", ""],
+      ["    Query All Data", "X", "", "", ""]
+    ]
+    const t = tableBlock("B0102", rows, "fixed:3.1.3")
+    const profile = map("B0102", [[0, "permissions[].screen_id"], [1, "permissions[].role_id"], [2, "permissions[].role_id"], [3, "permissions[].role_id"], [4, "permissions[].role_id"]])
+    expect(deterministicTableItems(t, rows, profile)).toEqual([])
+    const out = settleSection("fixed:3.1.3", [t], profile, new Map())
+    expect(out.verbatim.has("B0102")).toBe(true)
+    // Vai trò thật vẫn đọc: cột "Admin" là vai trò, màn thật là quyền
+    const real = [["Screen", "Admin", "Role-Name2"], ["Dashboard", "X", "X"]]
+    const items = deterministicTableItems(tableBlock("B0103", real, "fixed:3.1.3"), real, map("B0103", [[0, "permissions[].screen_id"], [1, "permissions[].role_id"], [2, "permissions[].role_id"]]))!
+    expect(items.map((i) => [i.entity, i.value.name ?? i.value.role_id])).toEqual([["roles", "Admin"], ["permissions", "Admin"]])
+  })
+
+  it("bảng thông báo có cột ngoài Spine (Message Type, Context) ⇒ giữ nguyên văn, Spine vẫn nhận mã + nội dung", () => {
+    const rows = [["#", "Message code", "Message Type", "Context", "Content"], ["1", "MSG01", "In line", "There is not any search result", "No search results."]]
+    const t = tableBlock("B0104", rows, "fixed:5.3")
+    const out = settleSection("fixed:5.3", [t], map("B0104", [[1, "messages[].code"], [4, "messages[].text"]]), new Map())
+    expect(out.items.map((i) => i.value)).toEqual([{ code: "MSG01", text: "No search results." }])
+    expect(out.verbatim.has("B0104")).toBe(true)
+    // Bảng chỉ có cột Spine ⇒ không giữ nguyên văn
+    const plain = [["Code", "Content"], ["MSG01", "No search results."]]
+    expect(settleSection("fixed:5.3", [tableBlock("B0105", plain, "fixed:5.3")], map("B0105", [[0, "messages[].code"], [1, "messages[].text"]]), new Map()).verbatim.has("B0105")).toBe(false)
+  })
+
+  it("khoảng <<Sample: … >> (kèm hình) và hướng dẫn [ … ] nhiều đoạn không gửi AI / vision; chữ khách viết vẫn gửi", () => {
+    const blocks: Lite[] = [
+      block("B0201", "heading", "1. Product Overview", "body/p[0]", "fixed:1"),
+      block("B0202", "paragraph", "[Gives the overall description about the product. The context diagram presents", "body/p[1]", "fixed:1"),
+      block("B0203", "paragraph", "the boundary and connections.]", "body/p[2]", "fixed:1"),
+      block("B0204", "paragraph", "<<Sample: The Cafeteria Ordering System is a new software system", "body/p[3]", "fixed:1"),
+      { ...block("B0205", "image", "", "body/p[4]", "fixed:1"), image_ref: "word/media/ctx.png" },
+      block("B0206", "paragraph", ">>", "body/p[5]", "fixed:1"),
+      block("B0207", "paragraph", "ShuttleBook lets players book badminton courts online across five venues.", "body/p[6]", "fixed:1")
+    ]
+    const steps = sectionAiSteps("fixed:1", blocks, { items: [], handled: new Set(), consumed: new Set(), verbatim: new Set() })
+    expect(steps.map((s) => (s.kind === "image" ? `img:${s.block.block_id}` : s.batch.map((b) => b.block_id).join("+")))).toEqual(["B0207"])
+  })
+})

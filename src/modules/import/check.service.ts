@@ -23,7 +23,7 @@ import type { Flag, Spine, SpineRecord } from "../spine/spine.types.js"
 import { Usage } from "../spine/usage.model.js"
 import { IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { DocBlock } from "./doc-block.model.js"
-import { chunkBlocks } from "./extract.service.js"
+import { chunkBlocks, isTemplateOnlyProject } from "./extract.service.js"
 import { idKey } from "./extracted-entities.js"
 import { FieldAnchor } from "./field-anchor.model.js"
 import type { MentionEntity } from "./import.constants.js"
@@ -289,7 +289,7 @@ type CheckFailure = Extract<MeteredResult<FindingsOutput>, { ok: false }>
  * 1.11 map + reduce. Trả lượt lỗi (để đặt `paused`) hoặc `null` khi đã xong hết. Lượt đã trừ credit ở lần chạy trước
  * (`done`) không gọi lại; lô xong trước lô lỗi vẫn được ghi cờ.
  */
-const runSemanticCheck = async (projectId: string, userId: string, done: ReadonlySet<string>): Promise<CheckFailure | null> => {
+const runSemanticCheck = async (projectId: string, userId: string, done: ReadonlySet<string>, guard: CheckGuard): Promise<CheckFailure | null> => {
   const spine = await loadSpine(projectId)
   const [blocks, anchors, sectioned] = await Promise.all([
     DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS }, kind: { $in: ["paragraph", "list_item", "table_cell"] } })
@@ -304,15 +304,16 @@ const runSemanticCheck = async (projectId: string, userId: string, done: Readonl
 
   // map: các lô chưa xong, tối đa PARALLEL_BATCHES lượt cùng lúc
   const pending = semanticBatches(blocks).filter((b) => !done.has(b.step_id))
-  const results = await runLimited(pending, PARALLEL_BATCHES, (batch) =>
-    withMeteredAi<FindingsOutput>({ projectId, userId, stepId: batch.step_id }, ActionType.IMPORT_SEMANTIC_CHECK, {
+  const results = await runLimited(pending, PARALLEL_BATCHES, async (batch) => {
+    await guard()
+    return withMeteredAi<FindingsOutput>({ projectId, userId, stepId: batch.step_id }, ActionType.IMPORT_SEMANTIC_CHECK, {
       section_ids: batch.section_ids.join(", "),
       // Không có anchor (dữ liệu trước FLF-171) ⇒ không biết phần tử thuộc lô nào: gửi đủ như trước, vẫn có trần ký tự
       projection: semanticProjection(spine, anchors.length ? scope.scopeOf(batch) : undefined),
       blocks: batch.lines,
       glossary
     })
-  )
+  })
   // reduce: ghi theo thứ tự lô ⇒ id cờ ổn định; hết credit được ưu tiên báo (nạp xong tự chạy tiếp — credit-flow)
   let failure: CheckFailure | null = null
   for (const r of results) {
@@ -328,6 +329,7 @@ const runSemanticCheck = async (projectId: string, userId: string, done: Readonl
   // kiểm chéo giữa các section: chỉ khi mọi lô đã xong, đọc cờ lô vừa ghi để không lặp lại
   const hasContent = spine.use_cases.length + spine.functions.length + spine.nfrs.length + spine.business_rules.length > 0
   if (done.has(CROSS_CHECK_STEP) || !hasContent) return null
+  await guard()
   const now = await loadSpine(projectId)
   const cross = await withMeteredAi<FindingsOutput>({ projectId, userId, stepId: CROSS_CHECK_STEP }, ActionType.IMPORT_CROSS_CHECK, {
     projection: crossProjection(now, scope.sectionOf),
@@ -339,10 +341,14 @@ const runSemanticCheck = async (projectId: string, userId: string, done: Readonl
   return null
 }
 
+/** Gọi trước mỗi lượt AI và trước khi chuyển trạng thái: lần chạy nền đã hết giờ / bị thay ⇒ ném lỗi để dừng (FLF-391). */
+type CheckGuard = () => Promise<void>
+const noGuard: CheckGuard = async () => undefined
+
 /**
  * Chạy 1.11 (phần chưa xong) rồi 1.12, chuyển `gap_review`. Trả `false` khi phải dừng (paused).
  */
-export const runImportCheck = async (doc: IImportedDocument, userId: string): Promise<boolean> => {
+export const runImportCheck = async (doc: IImportedDocument, userId: string, guard: CheckGuard = noGuard): Promise<boolean> => {
   const projectId = String(doc.projectId)
   doc.paused = null
   await doc.save()
@@ -350,8 +356,9 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string): Pr
   const done = new Set<string>(
     await Usage.find({ projectId, step_id: { $regex: /^I-1\.11(:|$)/ }, state: "deducted" }).distinct("step_id")
   )
-  if (!done.has(SEMANTIC_CHECK_STEP)) {
-    const failure = await runSemanticCheck(projectId, userId, done)
+  // FLF-411 (U1-8): khung mẫu (chữ là hướng dẫn / ví dụ, Spine không nhận nội dung) ⇒ không có gì để AI đối chiếu, không trừ credit
+  if (!done.has(SEMANTIC_CHECK_STEP) && !(await isTemplateOnlyProject(projectId))) {
+    const failure = await runSemanticCheck(projectId, userId, done, guard)
     if (failure) {
       doc.paused = { reason: failure.reason, at: new Date() }
       await doc.save()
@@ -360,6 +367,7 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string): Pr
   }
 
   // BPMN 1.12: S-9.1 + S-9.2 bằng luật code trên baseline v0 ⇒ bật luật S-9 (`atBaseline`: giả định chưa xác nhận)
+  await guard()
   await flagsService.recompute(projectId, { by: "import", ruleProfile: await mode1RuleProfileFor(projectId), atBaseline: true })
   await transitionImport(doc, "gap_review")
   return true
@@ -371,6 +379,8 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string): Pr
  * (`function:@B0012`) đổi sang id thật ngắn hơn nên số lô không tăng; tài liệu không có phần tử nào thì lượt kiểm chéo không chạy.
  */
 export const estimateCheckCalls = async (projectId: string): Promise<{ batches: number; calls: number; credits: number }> => {
+  // FLF-411 (U1-8): khung mẫu không chạy 1.11 (`runImportCheck`) ⇒ màn đọc khung không báo "Dự kiến ~6 credit"
+  if (await isTemplateOnlyProject(projectId)) return { batches: 0, calls: 0, credits: 0 }
   const blocks = await DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS }, kind: { $in: ["paragraph", "list_item", "table_cell"] } })
     .sort({ "anchor.ordinal": 1 })
     .select("block_id text section_id")

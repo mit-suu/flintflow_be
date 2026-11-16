@@ -286,7 +286,6 @@ export const ASSEMBLE_TEXT = {
     systemInCharge: "System",
     removedSection: "(removed section)",
     imagePending: (diagramId: string) => `image pending: diagram ${diagramId} has not been rendered yet`,
-    mediaNotEmbedded: "original image could not be embedded (unsupported format)",
     diagramNotDrawn: "diagram could not be drawn yet"
   },
   vi: {
@@ -294,7 +293,6 @@ export const ASSEMBLE_TEXT = {
     systemInCharge: "Hệ thống",
     removedSection: "(mục đã xoá)",
     imagePending: (diagramId: string) => `ảnh đang chờ: sơ đồ ${diagramId} chưa được render`,
-    mediaNotEmbedded: "không nhúng được ảnh gốc (định dạng không hỗ trợ)",
     diagramNotDrawn: "sơ đồ chưa vẽ được"
   }
 } as const
@@ -443,18 +441,21 @@ export const FLAG_TEXT = {
 
 /**
  * FLF-265 §3.1 — tuỳ chọn `writeDocx` theo dự án, MỘT chỗ cho export và file version.
- * - Mode 1 (`import`): đúng tuỳ chọn trước FLF-265 — bìa / mục lục / §I mặc định, phụ lục cờ `vi` vì thông điệp cờ
- *   mode 1 là tiếng Việt (no-ky-thuat N6). Không theo `documentLanguage` để file mode 1 không đổi byte nào.
+ * - Mode 1 (`import`): đúng tuỳ chọn trước FLF-265 — bìa / mục lục / §I mặc định. Phụ lục cờ theo ngôn ngữ tài liệu khi
+ *   bên gọi biết nó (export — FLF-411 U3-5: tài liệu tiếng Anh không có khối "Tình trạng bản làm việc" tiếng Việt, nguyên tắc
+ *   7); không truyền (file version mode 1) ⇒ `vi` như trước để file version không đổi byte nào.
  * - Mode 2: chữ của writer + phụ lục cờ theo ngôn ngữ tài liệu (`en` = mặc định của writer, y như trước).
  * - Dự án chuyển từ mode 2 (FLF-318, `convertedFrom = "fpt"`): như mode 2 — file version phải giống bản Lead đã ký.
  * Trả object thường (khớp `WriteDocxOptions` theo cấu trúc) — bảng nhãn không import docx-writer.
  */
 export const writerOptionsFor = (
   mode: string | null | undefined,
-  documentLanguage: DocumentLanguage = "en",
+  documentLanguage?: DocumentLanguage,
   convertedFrom?: string | null
 ): { language?: DocumentLanguage; flagLanguage: DocumentLanguage } =>
-  mode === "import" && convertedFrom !== "fpt" ? { flagLanguage: "vi" } : { language: documentLanguage, flagLanguage: documentLanguage }
+  mode === "import" && convertedFrom !== "fpt"
+    ? { flagLanguage: documentLanguage ?? "vi" }
+    : { language: documentLanguage ?? "en", flagLanguage: documentLanguage ?? "en" }
 
 // ─── FLF-278 bước 09: phần nhỏ (slot) của mẫu khách ────────────────
 
