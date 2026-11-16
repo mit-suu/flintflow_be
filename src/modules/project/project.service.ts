@@ -31,6 +31,8 @@ import { ChangeGroup } from "../change-request/change-group.model.js"
 import { SpineTranslation } from "../translation/spine-translation.model.js"
 import { TranslationGlossary } from "../translation/translation-glossary.model.js"
 import { TranslationRunLock } from "../translation/translation-run-lock.model.js"
+import { Comment, CommentCounter } from "../comment/comment.model.js"
+import { TemplateMigration } from "../template-migration/template-migration.model.js"
 import { Subscription } from "../credits/subscription.model.js"
 import { getPlan } from "../billing/plan.config.js"
 import { accountLocaleOf } from "../user/account-locale.js"
@@ -245,7 +247,11 @@ const purgeProjectData = async (projectId: string): Promise<void> => {
     // FLF-265: lớp bản dịch + glossary dịch + khoá lượt dịch
     SpineTranslation.deleteMany({ projectId }),
     TranslationGlossary.deleteMany({ projectId }),
-    TranslationRunLock.deleteMany({ projectId })
+    TranslationRunLock.deleteMany({ projectId }),
+    // Comment + đổi mẫu (FLF-422)
+    Comment.deleteMany({ projectId }),
+    CommentCounter.deleteMany({ projectId }),
+    TemplateMigration.deleteMany({ projectId })
   ])
 
   // File ngoài collection: lỗi ở đây không được làm hỏng việc xoá đã xong ở trên
