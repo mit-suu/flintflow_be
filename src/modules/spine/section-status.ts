@@ -28,7 +28,32 @@ export interface SectionStateView {
   derived: boolean
 }
 
-type ChangeLike = Pick<Change, "seq" | "path" | "before" | "value" | "step_id">
+type ChangeLike = Pick<Change, "seq" | "path" | "before" | "value" | "step_id"> & { reason?: string | null }
+
+/** `Revert seq 42` — reason mà op-engine ghi cho change nghịch đảo (undo). */
+const REVERT_OF = /^Revert seq (\d+)$/
+
+/** Cặp hoàn tác: seq của change nghịch đảo → seq change gốc nó đảo (chỉ khi change gốc còn trong danh sách). */
+export const revertPairs = (changes: readonly ChangeLike[]): Map<number, number> => {
+  const present = new Set(changes.map((c) => c.seq))
+  const out = new Map<number, number>()
+  for (const change of changes) {
+    const source = REVERT_OF.exec(change.reason ?? "")?.[1]
+    if (source !== undefined && present.has(Number(source))) out.set(change.seq, Number(source))
+  }
+  return out
+}
+
+/**
+ * FLF-431 (FAP #22): change sau mốc duyệt mà đã triệt tiêu với lượt hoàn tác của nó — cặp (gốc sau mốc, nghịch đảo) không
+ * làm section cũ: nội dung đã về đúng bản đã duyệt. Change gốc TRƯỚC mốc mà bị hoàn tác sau mốc thì nội dung đã khác bản duyệt
+ * ⇒ vẫn cũ. Hàm tính, không lưu gì.
+ */
+export const isCancelledAfter = (seq: number, threshold: number, pairs: ReadonlyMap<number, number>, revertedBy: ReadonlySet<number>): boolean => {
+  const source = pairs.get(seq)
+  if (source !== undefined) return source > threshold
+  return revertedBy.has(seq)
+}
 
 const sourceHashOf = (value: unknown): unknown =>
   value !== null && typeof value === "object" ? (value as { source_hash?: unknown }).source_hash : undefined
@@ -42,8 +67,16 @@ const sourceHashOf = (value: unknown): unknown =>
 export const isRerenderOnly = (change: Pick<ChangeLike, "path" | "before" | "value">): boolean => {
   if (!/^diagrams\[id=[^\]]+\]$/.test(change.path)) return false
   const before = sourceHashOf(change.before)
-  return typeof before === "string" && before === sourceHashOf(change.value)
+  if (typeof before !== "string") return false
+  if (before === sourceHashOf(change.value)) return true
+  // FLF-431: vẽ lại theo dữ liệu nguồn mới (hash đổi) — hình là hàm thuần của dữ liệu, và chính change của trường nguồn
+  // đã làm section stale (hoặc đã được duyệt lại). Tính thêm change của hình thì mỗi lần "Vẽ lại tất cả" / vẽ lại tự động
+  // ở S-9 lại đẻ cờ "Viết lại cho khớp" mới, sửa cờ này sinh cờ kia (E2E BarberGo, luồng C #12). Trừ bố cục màn: ScreenSpec
+  // do AI soạn, không suy ra được từ dữ liệu ⇒ vẫn là nội dung người dùng duyệt.
+  return kindOf(change.before) !== "screen_layout" && kindOf(change.value) !== "screen_layout"
 }
+
+const kindOf = (value: unknown): unknown => (value !== null && typeof value === "object" ? (value as { kind?: unknown }).kind : undefined)
 
 /** Seq lớn nhất của change nuôi từng section, tách theo step ghi. */
 const feedingChanges = (spine: Spine, changes: ChangeLike[]): Map<string, ChangeLike[]> => {
@@ -87,7 +120,7 @@ const downgradePartialFeatures = (spine: Spine, states: SectionStateView[]): Sec
  * y hệt) chốt với `last_seq = null`, và khi đó ngưỡng 0 làm mọi change nuôi section thành "mới hơn" —
  * section cũ vĩnh viễn, chạy lại bao nhiêu lần cũng không sạch cờ.
  */
-const acceptSeqByStep = (changes: ChangeLike[]): Map<string, number> => {
+export const acceptSeqByStep = (changes: readonly ChangeLike[]): Map<string, number> => {
   const out = new Map<string, number>()
   for (const change of changes) {
     const match = /^steps\[id=([^\]]+)\]\.accepted_at$/.exec(change.path)
@@ -102,6 +135,8 @@ export const computeSectionStates = (spine: Spine, changes: ChangeLike[]): Secti
   const steps = new Map(spine.steps.map((s) => [s.id, s]))
   const feeding = feedingChanges(spine, changes)
   const acceptedAtSeq = acceptSeqByStep(changes)
+  const pairs = revertPairs(changes)
+  const revertedBy = new Set(pairs.values())
 
   const states = listSections(spine).map((def) => {
     const base = { id: def.id, required: def.required, derived: def.derived }
@@ -117,7 +152,9 @@ export const computeSectionStates = (spine: Spine, changes: ChangeLike[]): Secti
       accepted.length > 0 ? Math.max(...accepted.map((s) => Math.max(s?.last_seq ?? 0, acceptedAtSeq.get(s?.id ?? "") ?? 0))) : null
     const stale =
       threshold !== null &&
-      (feeding.get(def.id) ?? []).some((c) => c.seq > threshold && !(c.step_id !== null && ownSet.has(c.step_id)))
+      (feeding.get(def.id) ?? []).some(
+        (c) => c.seq > threshold && !(c.step_id !== null && ownSet.has(c.step_id)) && !isCancelledAfter(c.seq, threshold, pairs, revertedBy)
+      )
 
     const status: SectionStatus = stale
       ? "stale"
