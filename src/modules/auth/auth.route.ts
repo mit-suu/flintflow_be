@@ -12,6 +12,7 @@ import {
   googleAuthSchema
 } from "./auth.validation.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
+import { requireActiveAccount } from "../../shared/auth/account-guard.middleware.js"
 import { otpResendRateLimiter, otpVerifyRateLimiter, passwordResetOtpRateLimiter } from "../../shared/middlewares/rate-limit.js"
 
 const router = Router()
@@ -291,6 +292,6 @@ router.post("/logout", authController.logout)
  *       401:
  *         description: Unauthorized
  */
-router.post("/logout-all", authMiddleware, authController.logoutAll)
+router.post("/logout-all", authMiddleware, requireActiveAccount, authController.logoutAll)
 
 export default router

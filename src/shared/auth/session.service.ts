@@ -9,7 +9,8 @@ export const createSession = async (
   expiresAt: Date,
   userAgent?: string,
   ip?: string,
-  rememberMe: boolean | null = null
+  rememberMe: boolean | null = null,
+  activeOrgId?: string | null
 ): Promise<ISession> => {
   const tokenHash = hashToken(refreshToken)
   return await Session.create({
@@ -19,7 +20,8 @@ export const createSession = async (
     isRevoked: false,
     rememberMe,
     userAgent,
-    ip
+    ip,
+    activeOrgId: activeOrgId && mongoose.isValidObjectId(activeOrgId) ? new mongoose.Types.ObjectId(activeOrgId) : null
   })
 }
 
@@ -35,8 +37,9 @@ export const rotateSession = async (
   newExpiresAt: Date,
   userAgent?: string,
   ip?: string,
-  rememberMe: boolean | null = null
-): Promise<{ userId: string; email: string }> => {
+  rememberMe: boolean | null = null,
+  activeOrgId?: string | null
+): Promise<{ userId: string; email: string; sessionId: string }> => {
   // 1. Verify old token signature & expiration
   let decoded: { userId: string; email: string }
   try {
@@ -79,11 +82,12 @@ export const rotateSession = async (
   }
 
   // 4. Create new session for rotated token
-  await createSession(decoded.userId, newRefreshToken, newExpiresAt, userAgent, ip, rememberMe)
+  const newSession = await createSession(decoded.userId, newRefreshToken, newExpiresAt, userAgent, ip, rememberMe, activeOrgId)
 
   return {
     userId: decoded.userId,
-    email: decoded.email
+    email: decoded.email,
+    sessionId: String(newSession._id)
   }
 }
 
@@ -97,12 +101,14 @@ export const findSessionActiveOrg = async (refreshToken: string): Promise<string
   return session?.activeOrgId ? String(session.activeOrgId) : null
 }
 
-export const setActiveOrg = async (refreshToken: string, organizationId: string): Promise<void> => {
+export const setActiveOrg = async (refreshToken: string, organizationId: string): Promise<string | null> => {
   const tokenHash = hashToken(refreshToken)
-  await Session.findOneAndUpdate(
+  const updated = await Session.findOneAndUpdate(
     { tokenHash, isRevoked: false },
-    { activeOrgId: new mongoose.Types.ObjectId(organizationId) }
+    { activeOrgId: new mongoose.Types.ObjectId(organizationId) },
+    { new: true }
   )
+  return updated ? String(updated._id) : null
 }
 
 export const revokeSession = async (refreshToken: string): Promise<void> => {
@@ -110,16 +116,24 @@ export const revokeSession = async (refreshToken: string): Promise<void> => {
   await Session.findOneAndUpdate({ tokenHash }, { isRevoked: true })
 }
 
-/** Thu hồi mọi phiên của user trừ phiên đang dùng (`keepRefreshToken`), vd. sau khi đổi mật khẩu. */
-export const revokeOtherUserSessions = async (userId: string, keepRefreshToken?: string): Promise<void> => {
-  await Session.updateMany(
-    {
-      userId: new mongoose.Types.ObjectId(userId),
-      isRevoked: false,
-      ...(keepRefreshToken ? { tokenHash: { $ne: hashToken(keepRefreshToken) } } : {})
-    },
-    { isRevoked: true }
-  )
+/** Thu hồi mọi phiên của user trừ phiên đang dùng (`keepRefreshToken` hoặc `keepSessionId`), vd. sau khi đổi mật khẩu. */
+export const revokeOtherUserSessions = async (
+  userId: string,
+  keepRefreshToken?: string,
+  keepSessionId?: string
+): Promise<void> => {
+  let filter: Record<string, unknown> = {
+    userId: new mongoose.Types.ObjectId(userId),
+    isRevoked: false
+  }
+
+  if (keepRefreshToken) {
+    filter = { ...filter, tokenHash: { $ne: hashToken(keepRefreshToken) } }
+  } else if (keepSessionId && mongoose.isValidObjectId(keepSessionId)) {
+    filter = { ...filter, _id: { $ne: new mongoose.Types.ObjectId(keepSessionId) } }
+  }
+
+  await Session.updateMany(filter, { isRevoked: true })
 }
 
 export const revokeAllUserSessions = async (userId: string): Promise<void> => {
@@ -127,4 +141,20 @@ export const revokeAllUserSessions = async (userId: string): Promise<void> => {
     { userId: new mongoose.Types.ObjectId(userId), isRevoked: false },
     { isRevoked: true }
   )
+}
+
+export const assertActiveSession = async (sid: string | undefined, userId: string): Promise<void> => {
+  if (!sid) return
+  if (!mongoose.isValidObjectId(sid)) {
+    throw new ApiError(401, "Phiên đăng nhập đã kết thúc. Vui lòng đăng nhập lại.", "SESSION_REVOKED")
+  }
+  const active = await Session.exists({
+    _id: sid,
+    userId: new mongoose.Types.ObjectId(userId),
+    isRevoked: false,
+    expiresAt: { $gt: new Date() }
+  })
+  if (!active) {
+    throw new ApiError(401, "Phiên đăng nhập đã kết thúc. Vui lòng đăng nhập lại.", "SESSION_REVOKED")
+  }
 }

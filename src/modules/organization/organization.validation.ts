@@ -28,6 +28,14 @@ export type CreateOrganizationDTO = z.infer<typeof CreateOrganizationSchema>
 export type RenameOrganizationDTO = z.infer<typeof RenameOrganizationSchema>
 export type ChangeRoleDTO = z.infer<typeof ChangeRoleSchema>
 
+export const SwitchOrganizationSchema = z
+  .object({
+    rememberAsDefault: z.boolean().optional()
+  })
+  .default({})
+
+export type SwitchOrganizationDTO = z.infer<typeof SwitchOrganizationSchema>
+
 /**
  * UC-08: mã mời chỉ gắn được Analyst hoặc Viewer — Lead phải nâng qua UC-73.
  * Email BẮT BUỘC (góp ý mentor 2026-10-02: "mời mà không cần email là trái lẽ thường"): UC-08 nói Email Service

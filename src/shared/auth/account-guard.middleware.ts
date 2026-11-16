@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express"
 import { User } from "../../modules/user/user.model.js"
 import { ApiError } from "../utils/api-error.js"
 import { accountSuspendedError } from "./account-suspended.js"
+import { assertActiveSession } from "./session.service.js"
 
 /**
  * BPMN Flow 10.4 — "Read the account from the database; the role carried in the token is never trusted",
@@ -33,6 +34,8 @@ export const requireActiveAccount = async (
     if (user.isActive === false) {
       throw accountSuspendedError(user)
     }
+
+    await assertActiveSession(req.user?.sid, String(user._id))
 
     req.account = {
       userId: String(user._id),

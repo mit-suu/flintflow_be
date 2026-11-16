@@ -10,7 +10,8 @@ import {
   CreateInvitationSchema,
   CreateOrganizationSchema,
   DeleteOrganizationSchema,
-  RenameOrganizationSchema
+  RenameOrganizationSchema,
+  SwitchOrganizationSchema
 } from "./organization.validation.js"
 
 const router = Router()
@@ -127,7 +128,12 @@ router.delete(
  *       200: { description: accessToken mới + tổ chức đang mở }
  *       404: { description: ORG_NOT_FOUND }
  */
-router.post("/:orgId/switch", ...inOrg, organizationController.switchOrganization)
+router.post(
+  "/:orgId/switch",
+  ...inOrg,
+  validateRequest(SwitchOrganizationSchema),
+  organizationController.switchOrganization
+)
 
 /**
  * @swagger
