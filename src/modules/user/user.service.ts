@@ -28,12 +28,15 @@ export interface MeDTO extends UserDTO {
   balance: number
   /** FLF-310: tổ chức sở hữu `balance` — FE ghi rõ tên; `null` khi chưa chọn tổ chức. */
   creditOrganization: { id: string; name: string } | null
+  /** UC-10 / FLF-427: tổ chức mặc định được ghi nhớ; `null` khi chưa ghi nhớ. */
+  preferredOrganizationId: string | null
 }
 
 export interface UpdateMeInput {
   name?: string
   onboardedAt?: Date | null
   locale?: UserLocale
+  preferredOrganizationId?: string | null
 }
 
 export const getUserById = async (id: string): Promise<UserDTO> => {
@@ -86,12 +89,23 @@ export const getMe = async (id: string, activeOrgId?: string | null): Promise<Me
     emailVerified: user.emailVerified,
     hasPassword: Boolean(user.passwordHash),
     locale: toUserLocale(user.locale),
+    preferredOrganizationId: user.preferredOrganizationId ? String(user.preferredOrganizationId) : null,
     ...credit
   }
 }
 
-/** UC 1.12 onboarding + FLF-259: cập nhật tên hiển thị, mốc onboarding và/hoặc ngôn ngữ giao diện của chính user. */
+/** UC 1.12 onboarding + FLF-259 + FLF-427: cập nhật tên hiển thị, mốc onboarding, ngôn ngữ giao diện hoặc tổ chức mặc định. */
 export const updateMe = async (id: string, input: UpdateMeInput, activeOrgId?: string | null): Promise<MeDTO> => {
+  if (input.preferredOrganizationId !== undefined && input.preferredOrganizationId !== null) {
+    if (!mongoose.isValidObjectId(input.preferredOrganizationId)) {
+      throw new ApiError(404, "Không tìm thấy tổ chức", "ORG_NOT_FOUND")
+    }
+    const member = await Membership.exists({ userId: id, organizationId: input.preferredOrganizationId })
+    if (!member) {
+      throw new ApiError(404, "Không tìm thấy tổ chức hoặc bạn không phải thành viên", "ORG_NOT_FOUND")
+    }
+  }
+
   const user = await User.findByIdAndUpdate(id, { $set: input }, { new: true })
   if (!user) {
     throw new ApiError(404, "Không tìm thấy người dùng.", "USER_NOT_FOUND")
@@ -101,14 +115,15 @@ export const updateMe = async (id: string, input: UpdateMeInput, activeOrgId?: s
 
 /**
  * Đổi mật khẩu khi đang đăng nhập: phải nhập đúng mật khẩu hiện tại. Thành công thì thu hồi mọi phiên
- * khác, giữ phiên đang dùng (`currentRefreshToken`) để user không bị đăng xuất trên thiết bị này.
+ * khác, giữ phiên đang dùng (`currentRefreshToken` hoặc `keepSessionId`) để user không bị đăng xuất trên thiết bị này.
  * Sai mật khẩu trả 400 (không phải 401) để FE không hiểu nhầm là hết phiên rồi đi refresh/đăng xuất.
  */
 export const changePassword = async (
   id: string,
   currentPassword: string,
   newPassword: string,
-  currentRefreshToken?: string
+  currentRefreshToken?: string,
+  keepSessionId?: string
 ): Promise<void> => {
   const user = await User.findById(id).select("+passwordHash")
   if (!user) {
@@ -131,7 +146,7 @@ export const changePassword = async (
   user.password = newPassword
   await user.save()
 
-  await sessionService.revokeOtherUserSessions(id, currentRefreshToken)
+  await sessionService.revokeOtherUserSessions(id, currentRefreshToken, keepSessionId)
 }
 
 export const getUserByEmail = async (email: string): Promise<IUser | null> => {

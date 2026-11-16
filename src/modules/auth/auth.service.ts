@@ -1,5 +1,6 @@
 import crypto from "crypto"
 import axios from "axios"
+import mongoose from "mongoose"
 import { OAuth2Client } from "google-auth-library"
 import { User, IUser } from "../user/user.model.js"
 import { AuthToken, TokenType } from "./auth-token.model.js"
@@ -60,16 +61,45 @@ export interface OrgLoginContext {
 }
 
 /**
- * Org của người vừa đăng nhập (BPMN Flow 7.12–7.14). Đúng một org thì chọn luôn; nhiều org thì để người
- * dùng chọn ở màn 7.13; không org nào thì FE đẩy sang onboarding (Flow 8).
+ * Org của người vừa đăng nhập (BPMN Flow 7.12–7.14, UC-10, FLF-427).
+ * - Đúng một org ⇒ chọn luôn, bỏ qua màn chọn.
+ * - Có preferredOrganizationId hợp lệ trong các org ⇒ chọn org đó.
+ * - Nhiều org không có preferred/stale preferred ⇒ để người dùng chọn ở màn 7.13 (activeOrgId: null);
+ *   dọn preferredOrganizationId nếu stale.
+ * - Không org nào ⇒ FE đẩy sang onboarding (Flow 8, needsOnboarding: true); dọn preferredOrganizationId nếu có.
  */
-const resolveOrgContext = async (userId: string): Promise<OrgLoginContext> => {
+export const resolveOrgContext = async (
+  userId: string,
+  preferredOrganizationId?: mongoose.Types.ObjectId | string | null
+): Promise<OrgLoginContext> => {
   const organizations = await listMyOrganizations(userId)
-  return {
-    organizations,
-    activeOrgId: organizations.length === 1 ? (organizations[0]?.id ?? null) : null,
-    needsOnboarding: organizations.length === 0
+  if (organizations.length === 0) {
+    if (preferredOrganizationId) {
+      await User.updateOne({ _id: userId }, { $set: { preferredOrganizationId: null } })
+    }
+    return { organizations: [], activeOrgId: null, needsOnboarding: true }
   }
+
+  if (organizations.length === 1) {
+    if (preferredOrganizationId && String(preferredOrganizationId) !== organizations[0].id) {
+      await User.updateOne({ _id: userId }, { $set: { preferredOrganizationId: null } })
+    }
+    return {
+      organizations,
+      activeOrgId: organizations[0]?.id ?? null,
+      needsOnboarding: false
+    }
+  }
+
+  const preferredId = preferredOrganizationId ? String(preferredOrganizationId) : null
+  const matched = preferredId ? organizations.some((o) => o.id === preferredId) : false
+  if (matched) {
+    return { organizations, activeOrgId: preferredId, needsOnboarding: false }
+  }
+  if (preferredId) {
+    await User.updateOne({ _id: userId }, { $set: { preferredOrganizationId: null } })
+  }
+  return { organizations, activeOrgId: null, needsOnboarding: false }
 }
 
 /** Refresh token + hạn phiên theo chế độ ghi nhớ: tick ⇒ 30 ngày, còn lại ⇒ `REFRESH_TOKEN_EXPIRES`. */
@@ -234,22 +264,26 @@ export const login = async (
     role: user.role
   }
 
-  // Flow 7.12–7.14: biết org trước khi ký token, để access token mang luôn orgId khi chỉ có một org.
-  const org = await resolveOrgContext(tokenPayload.userId)
+  // Flow 7.12–7.14: biết org trước khi ký token, để access token mang luôn orgId khi chỉ có một org hoặc có org mặc định.
+  const org = await resolveOrgContext(tokenPayload.userId, user.preferredOrganizationId)
   if (org.activeOrgId) tokenPayload.orgId = org.activeOrgId
 
-  const accessToken = signAccessToken(tokenPayload)
   const { refreshToken, expiresAt } = issueRefreshToken(tokenPayload, rememberMe)
 
-  await sessionService.createSession(
+  const session = await sessionService.createSession(
     user._id.toString(),
     refreshToken,
     expiresAt,
     userAgent,
     ip,
-    rememberMe
+    rememberMe,
+    org.activeOrgId
   )
-  if (org.activeOrgId) await sessionService.setActiveOrg(refreshToken, org.activeOrgId)
+
+  const accessToken = signAccessToken({
+    ...tokenPayload,
+    sid: String(session._id)
+  })
 
   return {
     accessToken,
@@ -296,22 +330,26 @@ export const confirmEmailVerification = async (
     role: user.role
   }
 
-  // Flow 7.12–7.14: biết org trước khi ký token, để access token mang luôn orgId khi chỉ có một org.
-  const org = await resolveOrgContext(tokenPayload.userId)
+  // Flow 7.12–7.14: biết org trước khi ký token, để access token mang luôn orgId khi chỉ có một org hoặc có org mặc định.
+  const org = await resolveOrgContext(tokenPayload.userId, user.preferredOrganizationId)
   if (org.activeOrgId) tokenPayload.orgId = org.activeOrgId
 
-  const accessToken = signAccessToken(tokenPayload)
   const { refreshToken, expiresAt } = issueRefreshToken(tokenPayload, null)
 
-  await sessionService.createSession(
+  const session = await sessionService.createSession(
     user._id.toString(),
     refreshToken,
     expiresAt,
     userAgent,
     ip,
-    null
+    null,
+    org.activeOrgId
   )
-  if (org.activeOrgId) await sessionService.setActiveOrg(refreshToken, org.activeOrgId)
+
+  const accessToken = signAccessToken({
+    ...tokenPayload,
+    sid: String(session._id)
+  })
 
   return {
     accessToken,
@@ -508,22 +546,26 @@ export const googleAuth = async (
     role: user.role
   }
 
-  // Flow 7.12–7.14: biết org trước khi ký token, để access token mang luôn orgId khi chỉ có một org.
-  const org = await resolveOrgContext(tokenPayload.userId)
+  // Flow 7.12–7.14: biết org trước khi ký token, để access token mang luôn orgId khi chỉ có một org hoặc có org mặc định.
+  const org = await resolveOrgContext(tokenPayload.userId, user.preferredOrganizationId)
   if (org.activeOrgId) tokenPayload.orgId = org.activeOrgId
 
-  const accessToken = signAccessToken(tokenPayload)
   const { refreshToken, expiresAt } = issueRefreshToken(tokenPayload, rememberMe)
 
-  await sessionService.createSession(
+  const session = await sessionService.createSession(
     user._id.toString(),
     refreshToken,
     expiresAt,
     userAgent,
     ip,
-    rememberMe
+    rememberMe,
+    org.activeOrgId
   )
-  if (org.activeOrgId) await sessionService.setActiveOrg(refreshToken, org.activeOrgId)
+
+  const accessToken = signAccessToken({
+    ...tokenPayload,
+    sid: String(session._id)
+  })
 
   return {
     accessToken,
@@ -577,18 +619,22 @@ export const refresh = async (
       ? sessionOrgId
       : null
   if (activeOrgId) newPayload.orgId = activeOrgId
-  const newAccessToken = signAccessToken(newPayload)
   const { refreshToken: newRefreshToken, expiresAt } = issueRefreshToken(newPayload, rememberMe)
 
-  await sessionService.rotateSession(
+  const rotated = await sessionService.rotateSession(
     oldRefreshToken,
     newRefreshToken,
     expiresAt,
     userAgent,
     ip,
-    rememberMe
+    rememberMe,
+    activeOrgId
   )
-  if (activeOrgId) await sessionService.setActiveOrg(newRefreshToken, activeOrgId)
+
+  const newAccessToken = signAccessToken({
+    ...newPayload,
+    sid: rotated.sessionId
+  })
 
   return {
     accessToken: newAccessToken,
