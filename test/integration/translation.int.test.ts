@@ -215,18 +215,18 @@ describe("POST /projects/:id/translations/run", () => {
     expect(await wallet(seeded.orgId)).toMatchObject({ balance: 1, reserved: 0 })
   })
 
-  it("model trả items rỗng ⇒ trừ 2 credit của lô đó rồi dừng, không gọi lô sau", async () => {
+  it("model trả items rỗng ⇒ trừ 1 credit (quyết toán theo token) của lô đó rồi dừng, không gọi lô sau", async () => {
     await useVietnamese()
     mockOverrides.next = (prompt) => (prompt.includes(BATCH_PROMPT) ? JSON.stringify({ items: [] }) : undefined)
 
     const res = await run(seeded.projectId, seeded.token, { max_batches: 5 })
 
     expect(res.status, JSON.stringify(res.body.error)).toBe(200)
-    expect(res.body.data).toMatchObject({ translated: 0, credits_used: 2 })
+    expect(res.body.data).toMatchObject({ translated: 0, credits_used: 1 })
     expect(res.body.data.remaining).toBeGreaterThan(0)
     expect(mockCalls).toHaveLength(1)
     expect(await SpineTranslation.countDocuments()).toBe(0)
-    expect(await wallet(seeded.orgId)).toMatchObject({ balance: 998, reserved: 0 })
+    expect(await wallet(seeded.orgId)).toMatchObject({ balance: 999, reserved: 0 })
   })
 
   it("lượt khác đang giữ khoá ⇒ 409 TRANSLATION_RUNNING, không gọi model; khoá quá hạn ⇒ chiếm lại được", async () => {
