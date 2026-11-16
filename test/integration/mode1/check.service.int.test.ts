@@ -81,8 +81,8 @@ describe("check - AI semantic (1.11)", () => {
       [semanticBatchStep(1), "deducted", "import_semantic_check"],
       [CROSS_CHECK_STEP, "deducted", "import_cross_check"]
     ])
-    // 6 lượt I-4 × 2 + 1 lô check × 3 + 1 lượt kiểm chéo × 3
-    expect(await CreditWallet.findOne({ userId }).lean()).toMatchObject({ balance: 982, reserved: 0 })
+    // 6 lượt I-4 + 1 lô check + 1 lượt kiểm chéo (mẫu ngắn ⇒ mỗi lượt quyết toán 1 credit theo token)
+    expect(await CreditWallet.findOne({ userId }).lean()).toMatchObject({ balance: 992, reserved: 0 })
   })
 
   it("cờ AI không bị recompute tất định đóng ở lượt sau", async () => {

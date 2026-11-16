@@ -25,7 +25,8 @@ const requireUserId = (req: Request): string => {
 
 export const getBalance = catchAsync(async (req: Request, res: Response) => {
   const userId = requireUserId(req)
-  const balance = await billingService.getBalance(requireOrgId(req), userId)
+  const role = req.orgContext?.role === "lead" ? "lead" : "analyst"
+  const balance = await billingService.getBalance(requireOrgId(req), userId, role)
   return sendSuccess(res, 200, balance)
 })
 
