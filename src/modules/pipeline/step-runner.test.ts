@@ -157,7 +157,7 @@ import { orderedSteps } from "./step-registry.js"
 import { AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction, ElicitOutput } from "../../shared/ai/response-parser.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
-import { runStep, runDraftPhase, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, settleFromChat, settleRepeatedAnswer, settleWithoutModel, askTranscript, nextPendingAfterChat, isSubstantiveAnswer, isBareAgreement, noChangeReason, replyLanguageAfterMessage, CALL_LIMIT, CHAT_BUDGET_REPLY, CHAT_BUDGET_REPLY_EN, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
+import { runStep, runDraftPhase, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, settleFromChat, settleRepeatedAnswer, settleWithoutModel, askTranscript, recordUserMessage, recordAiMessage, nextPendingAfterChat, isSubstantiveAnswer, isBareAgreement, noChangeReason, replyLanguageAfterMessage, CALL_LIMIT, CHAT_BUDGET_REPLY, CHAT_BUDGET_REPLY_EN, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
 import { cancelRun, getRunState, resetMemoryRuns } from "./run-state.service.js"
 import { gate } from "./gate.service.js"
 import { resumePhaseInterview, runPhase } from "./phase-runner.service.js"
@@ -169,6 +169,7 @@ import { fakeRepository, resetStore, store as translationStore } from "../transl
 import { hashSource } from "../translation/translation-units.js"
 import { documentLanguageForTurn } from "../translation/turn-language.js"
 import { buildStepContext } from "./context-projection.js"
+import { resetUserMessageClaims } from "../project/user-message-dedupe.js"
 import { getPromptTemplate, interpolatePrompt } from "../../shared/ai/prompt-registry.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 
@@ -246,6 +247,7 @@ const collectEvents = () => {
 let actualApplyTransaction: typeof applyTransaction
 
 beforeEach(async () => {
+  resetUserMessageClaims()
   resetMemoryRuns()
   db.reset()
   const actual = await vi.importActual<typeof import("../spine/op-engine.js")>("../spine/op-engine.js")
@@ -2657,5 +2659,24 @@ describe("step-runner: FLF-418 thẻ ký pháp ERD - trả lời sau khi rời t
     expect((await getRunState(PROJECT, "S-4.5"))?.status).toBe("gate")
     const record = await repo.get(PROJECT)
     expect(record!.decisions.find((d) => d.topic_key === "erd_notation")?.answer).toBe("IDEF1X")
+  })
+})
+
+describe("step-runner: tin user ghi lặp vào transcript (FLF-400)", () => {
+  it("cùng tin cho cùng bước ghi 2 lần liền (2 request chạy giai đoạn) ⇒ transcript 1 tin; bước khác / tin AI vẫn ghi", async () => {
+    seedSession(true)
+    await Promise.all([recordUserMessage(PROJECT, SESSION, "B-1.5", "Bắt đầu nhé"), recordUserMessage(PROJECT, SESSION, "B-1.5", "Bắt đầu nhé")])
+    await recordUserMessage(PROJECT, SESSION, "B-1.5", "Bắt đầu nhé")
+    await recordUserMessage(PROJECT, SESSION, "B-1.6", "Bắt đầu nhé")
+    await recordAiMessage(PROJECT, SESSION, "B-1.5", "Ổn chưa?")
+    await recordAiMessage(PROJECT, SESSION, "B-1.5", "Ổn chưa?")
+
+    const messages = db.sessions.find((s) => s._id === SESSION)!.messages as Array<{ role: string; step: string; content: string }>
+    expect(messages.map((m) => [m.role, m.step, m.content])).toEqual([
+      ["user", "B-1.5", "Bắt đầu nhé"],
+      ["user", "B-1.6", "Bắt đầu nhé"],
+      ["ai", "B-1.5", "Ổn chưa?"],
+      ["ai", "B-1.5", "Ổn chưa?"]
+    ])
   })
 })
