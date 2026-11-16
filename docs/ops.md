@@ -131,6 +131,7 @@ tiếp. `.env.example` là danh sách đầy đủ kèm giải thích; dưới �
 | `AI_PAYLOAD_MAX_CHARS` | không | default 40000 ký tự mỗi bên. Quá trần thì cắt giữa, giữ đầu (luật của skill) và cuối (projection + câu trả lời của user); `promptChars`/`responseChars` vẫn là độ dài thật |
 | `FLINTFLOW_ASSETS_DIR` | không | ghi đè thư mục `assets/`; image production đã có `/app/assets` |
 | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (FE) | không | thiếu ⇒ **không có nút đăng nhập Google**, phần còn lại chạy bình thường (`lib/google-auth.ts`). Nhúng lúc build ⇒ đổi phải build lại image FE |
+| `GOOGLE_CLIENT_SECRET` `GOOGLE_TOKEN_ENC_KEY` | khi bật tích hợp Google Docs | thiếu một trong hai (hoặc thiếu `GOOGLE_CLIENT_ID`) ⇒ `/api/v1/integrations/google` trả `503 GOOGLE_INTEGRATION_DISABLED`, FE ẩn thẻ "Tích hợp". Secret của **cùng** OAuth client với đăng nhập; OAuth consent screen phải có scope `drive.file`. Khoá là 32 byte base64 (`openssl rand -base64 32`), sai độ dài ⇒ BE không khởi động. Ở chế độ `Testing` của Google, refresh token hết hạn sau 7 ngày ⇒ user thấy "Cần kết nối lại" |
 
 Vài quyết định hay bị hỏi lại:
 
@@ -499,6 +500,9 @@ Thứ tự đúng để không làm rơi request nào:
    (`INVALID_CLIENT_ID`), nên đổi cả hai phía trong cùng một cửa sổ.
 4. **Google client id**: giá trị public theo thiết kế, nhưng vẫn phải đổi ở cả `GOOGLE_CLIENT_ID` (BE)
    và `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (FE, cần **build lại** image FE).
+5. **`GOOGLE_TOKEN_ENC_KEY`**: đổi khoá thì mọi refresh token Google đã lưu không giải mã được nữa — lượt dùng kế
+   tiếp tự đánh dấu "Cần kết nối lại", user bấm Kết nối lại là xong. Quyền cũ phía Google không bị thu hồi;
+   nghi lộ khoá thì xoá luôn collection `googleconnections` sau khi đổi.
 
 Sau mỗi lần xoay: `curl /health` và một lượt đăng nhập thật.
 
