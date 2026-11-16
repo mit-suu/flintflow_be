@@ -1195,7 +1195,16 @@ export interface RenderReviewOptions {
    * lỗi của step vô can.
    */
   rerenderStale?: boolean
+  /**
+   * FLF-431 (luồng C #11): vẽ lại các hình đang `render_error` (vẽ hỏng lúc server vẽ sơ đồ tắt). Chỉ bật ở S-9.1 — lượt
+   * quét đầu của Kiểm & chốt — để cờ đỏ `render_error` của lỗi môi trường đã qua không chặn ký mà người dùng phải tự đi tìm
+   * nút vẽ lại. Vẽ vẫn hỏng thì cờ ở lại như cũ (lỗi thật lộ ra).
+   */
+  retryRenderErrors?: boolean
 }
+
+/** FLF-431: trần số hình đang lỗi vẽ lại ở S-9.1 (mỗi hình một lượt vẽ, không gọi model trừ bố cục màn). */
+export const MAX_ERROR_RERENDER = 30
 
 export interface RenderReviewResult {
   spineVersion: number
@@ -1246,6 +1255,24 @@ export const runRenderReviewPhase = async (
         render_status: diagram?.render_status ?? "error",
         ...(diagram?.error ? { error: DIAGRAM_RENDER_ERROR_MESSAGE } : {})
       })
+    }
+  }
+
+  // FLF-431 (luồng C #11): hình đang `render_error` (vẽ hỏng lúc server vẽ tắt) ⇒ thử vẽ lại một lượt ở S-9.1
+  if (options.retryRenderErrors) {
+    const { spine: current } = await refresh(projectId)
+    const errored: RenderTarget[] = []
+    for (const diagram of current.diagrams.filter((d) => d.render_status === "error")) {
+      const target = targetOfDiagram(diagram)
+      if (!errored.some((t) => t.kind === target.kind && (t.owner_id ?? "") === (target.owner_id ?? ""))) errored.push(target)
+    }
+    if (errored.length > 0) {
+      const result = await renderDiagrams(projectId, errored.slice(0, MAX_ERROR_RERENDER), { by: userId, step_id: stepId, deps: layoutRenderDeps(deps.renderDeps) })
+      spineVersion = result.spine_version
+      for (const id of result.rendered) {
+        const diagram = result.diagrams.find((d) => d.id === id)
+        emit({ type: "render", step_id: stepId, diagram_id: id, render_status: diagram?.render_status ?? "error", ...(diagram?.error ? { error: DIAGRAM_RENDER_ERROR_MESSAGE } : {}) })
+      }
     }
   }
 
@@ -1986,7 +2013,8 @@ export const runStep = async (
       runRenderReviewPhase(projectId, stepId, stepDef.renders, parseStepId(stepId).loop, userId, emit, d, {
         flagsBefore,
         knownAssumptionIds,
-        rerenderStale: stepSummary.length > 0
+        rerenderStale: stepSummary.length > 0,
+        retryRenderErrors: stepId === "S-9.1"
       })
     )
     spineVersion = review.spineVersion
