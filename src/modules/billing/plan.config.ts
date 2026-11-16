@@ -28,6 +28,11 @@ export interface PlanDefinition {
   maxMembers: number
   /** Trần số project đang hoạt động của một org (task-26). */
   maxProjects: number
+  /**
+   * FLF-405: trần tổng token phần chữ của tài liệu tham khảo còn hiệu lực trong **một dự án** (business-flow §3.6).
+   * Trần mỗi lần tải nằm ở env `REFERENCE_MAX_TOKENS_PER_UPLOAD` (theo sức đọc của model, không theo gói).
+   */
+  maxReferenceTokens: number
 }
 
 export interface CreditPackage {
@@ -46,7 +51,8 @@ export const planConfig = {
     monthlyCredits: 300,
     priceVnd: 0,
     maxMembers: 3,
-    maxProjects: 3
+    maxProjects: 3,
+    maxReferenceTokens: 200_000
   } satisfies PlanDefinition,
   pro: {
     id: "pro",
@@ -55,7 +61,8 @@ export const planConfig = {
     monthlyCredits: 1000,
     priceVnd: 199_000,
     maxMembers: 5,
-    maxProjects: 50
+    maxProjects: 50,
+    maxReferenceTokens: 1_000_000
   } satisfies PlanDefinition,
   /** Số dư (balance) rơi xuống dưới ngưỡng này thì gửi notification một lần. */
   lowCreditThreshold: 10,

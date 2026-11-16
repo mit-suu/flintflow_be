@@ -8,9 +8,12 @@ vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await imp
 
 import { mockCalls, mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeMode1 } from "../../helpers/mode1.js"
-import { importAtExtracting } from "../../helpers/mode1-import-p4.js"
+import { importAtExtracting, useExtractConcurrency } from "../../helpers/mode1-import-p4.js"
 import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { ExtractionDraft } from "../../../src/modules/import/extraction-draft.model.js"
+
+// Khẳng định thứ tự lượt gọi / số dư ví của bản tuần tự (FLF-392: song song ở extract-parallel.int.test.ts)
+useExtractConcurrency(1)
 
 /** Prompt I-4 (chữ) theo section, theo thứ tự gọi. */
 let prompts: { section: string; prompt: string }[] = []

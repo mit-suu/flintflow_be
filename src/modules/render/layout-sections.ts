@@ -51,9 +51,15 @@ import { mediaId } from "./import-media.js"
 import { appendToFileTables, conformBlocksToFileTable } from "./file-table.js"
 import { elementOfKey, isLabelLine, refreshTailBlock } from "./element-tail.js"
 import { functionFieldValues, patchFunctionOriginal, type FunctionFieldValues, type FunctionOriginalBlock } from "./function-original.js"
-import { defaultSectionTitle, functionDiagramBlocks, generatedDiagramBlocks, renderContentSlot, renderSection, type SectionRenderContext } from "./section-renderer.js"
+import { defaultSectionTitle, functionDiagramBlocks, generatedDiagramBlocks, renderContentSlot, renderSection, screenLayoutImages, type SectionRenderContext } from "./section-renderer.js"
+import { sentencesFor } from "./labels.js"
+import { originalSectionOfScreen } from "../diagram/screen-originals.js"
+import type { ScreenMockupState } from "../../shared/diagram/screen-theme.js"
 import { bindFixedTemplateSlots, isContentSlot, slotParents } from "../import/content-slots.js"
 import { isInstructionText, isRealText, splitInstruction, tableBodyHasRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
+import { templateWrapperIds } from "../import/template-wrappers.js"
+import { isPlaceholderText } from "../import/template-markers.js"
+import { useCaseDisplayIds } from "./usecase-display-ids.js"
 
 /** Một mục layout (cùng hình `LayoutEntry` của `import/template-profile.model.ts`). */
 export interface TemplateLayoutEntry {
@@ -117,6 +123,8 @@ export interface TemplateLayout {
    * (chưa change request nào sửa chức năng đó) ⇒ mục in nguyên văn file; lệch ⇒ in từ Spine như cũ.
    */
   functionOriginals?: readonly FunctionOriginal[]
+  /** FLF-410: màn đã bật "Vẽ lại bằng mockup" (`Project.screenMockups`) — mockup thay ảnh màn hình trong mục nguyên văn. */
+  screenMockups?: readonly ScreenMockupState[]
   /**
    * Mẫu IEEE: heading lặp lại một section FPT (`custom_id`, vd Availability dưới 4.2.2) + phần tử trích từ nó
    * (`nfrs:NFR-03`). Phần tử in dưới heading đó, lần đầu của section chỉ in phần còn lại (kể cả phần tử thêm sau).
@@ -130,6 +138,16 @@ export interface TemplateLayout {
   fixedTemplate?: boolean
   /** FLF-366: đoạn nguyên văn của từng mục FPT `fixed:*` (`TemplateProfile.section_segments`). Không có ⇒ in như cũ. */
   sectionSegments?: readonly SectionSegments[]
+  /**
+   * FLF-416 chế độ 4 (business-flow §3.1.2 bước 2.10): mục **Ngoài phạm vi** của file (`custom:*`) giữ nguyên nội dung, chuyển
+   * xuống cuối tài liệu (cùng mục con / phần nối của nó). Không có ⇒ giữ đúng thứ tự file.
+   */
+  moveToEnd?: readonly string[]
+  /**
+   * FLF-420: mã use case do FlintFlow cấp (file nền là khung mẫu, chế độ 3) ⇒ in mã liên tục theo thứ tự. File khách đã viết (mã
+   * của khách) hoặc không rõ loại ⇒ không đặt, in nguyên id.
+   */
+  relabelUseCases?: boolean
 }
 
 export interface SectionSliceView {
@@ -403,6 +421,8 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
     } else if (id.startsWith(CUSTOM_PREFIX)) {
       const custom = customById.get(id.slice(CUSTOM_PREFIX.length))
       if (!custom && !template.fixedTemplate) continue
+      // Phần nối (heading rỗng) mà mục riêng đã không còn: không có gì để in — không dựng mục trống tên "—"
+      if (!custom && !entry.heading_text.trim()) continue
       if (!custom) {
         placed.push({ section_id: id, kind: "custom", title, level, fromLayout: true, typed, label })
         used.add(id)
@@ -425,7 +445,8 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
       placed.push({
         section_id: id,
         kind: "fpt",
-        title: title || defaultSectionTitle(spine, id, template.language),
+        // FLF-413: heading khung `<<Feature Name 1>>` đã có tính năng thật lấp ⇒ tên Spine (số mục gõ tay giữ nguyên)
+        title: title && !isPlaceholderText(title) ? title : defaultSectionTitle(spine, id, template.language),
         level,
         fromLayout: true,
         typed,
@@ -455,7 +476,26 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
   insertDistribution(placed, used, spine, template)
 
   insertMissing(defs)
-  return placed
+  return template.moveToEnd?.length ? moveSectionsToEnd(placed, new Set(template.moveToEnd)) : placed
+}
+
+/**
+ * FLF-416: chuyển các mục trong `ids` (kèm mục con / phần nối đứng ngay sau, cấp sâu hơn) xuống cuối, giữ thứ tự tương đối. Mục
+ * con nằm trong vùng của mục đã chuyển đi cùng mục cha. Hàm thuần.
+ */
+export const moveSectionsToEnd = <T extends { section_id: string; level: number; kind?: string }>(placed: readonly T[], ids: ReadonlySet<string>): T[] => {
+  const kept: T[] = []
+  const moved: T[] = []
+  for (let i = 0; i < placed.length; i++) {
+    const head = placed[i]
+    if (!ids.has(head.section_id)) {
+      kept.push(head)
+      continue
+    }
+    moved.push(head)
+    while (i + 1 < placed.length && (placed[i + 1].level > head.level || placed[i + 1].kind === "continuation")) moved.push(placed[++i])
+  }
+  return [...kept, ...moved]
 }
 
 /** Mục lặp của mẫu (feature, chức năng) — CR thêm được dù mẫu cố định. */
@@ -700,12 +740,25 @@ export const buildLayoutSections = (
   // FLF-252: mục chức năng chưa bị sửa từ lúc nhập ⇒ in nguyên văn file (nhãn, gạch đầu dòng, ảnh đúng thứ tự)
   const originals = new Map((template.functionOriginals ?? []).filter((o) => o.blocks.length).map((o) => [o.section_id, o]))
   /** Khối in của mục chức năng từ nguyên văn file: chưa sửa ⇒ y nguyên văn; CR sửa ⇒ chỉ khối của trường đã đổi dựng lại. */
+  // FLF-413: mục có heading là chỗ điền của mẫu (`3.2.1 <<Function Name 1>>`) — "nguyên văn" của nó là hướng dẫn + hình mẫu, không
+  // phải nội dung: tính năng / chức năng thật lấp vào thì dựng từ Spine
+  const frameSections = new Set(template.layout.filter((e) => isPlaceholderText(fileNumber(e.heading_text, e.number_label).title)).map((e) => e.section_id))
   const originalOf = (sectionId: string): FunctionOriginalBlock[] | null => {
+    if (frameSections.has(sectionId)) return null
     const o = originals.get(sectionId)
     const fn = o ? spine.functions.find((f) => `function:${f.id}` === sectionId) : undefined
     if (!o || !fn) return null
     if (functionSourceHash(fn) === o.source_hash) return [...o.blocks]
     return o.field_values ? patchFunctionOriginal(o.blocks, o.field_values, functionFieldValues(spine, fn)) : null
+  }
+  /** FLF-410: mục nguyên văn ⇒ màn đã bật mockup (có hình mockup đã vẽ) + index ảnh bị thay. */
+  const mockupBySection = new Map<string, { screenId: string; indexes: readonly number[]; caption: string }>()
+  for (const state of template.screenMockups ?? []) {
+    if (!state.enabled) continue
+    const drawn = spine.diagrams.some((d) => d.kind === "screen_layout" && d.owner_id === state.screen_id && d.format === "svg" && d.render_status === "ok")
+    const section = drawn ? originalSectionOfScreen(spine, template.functionOriginals ?? [], state.screen_id) : null
+    const screen = spine.screens.find((s) => s.id === state.screen_id)
+    if (section && screen) mockupBySection.set(section.section_id, { screenId: screen.id, indexes: state.image_indexes, caption: sentencesFor(template.language).screenLayoutCaption(screen.name) })
   }
   /**
    * Heading con của mục chức năng: cấp tương đối heading mục ⇒ dời theo cấp in của mục. FLF-390: ảnh sơ đồ gốc gắn phần
@@ -718,7 +771,22 @@ export const buildLayoutSections = (
       if (run.length) out.push(...customBlocks(guidanceWhileEmpty(run), (ref) => opts.diagramPng(mediaId(ref)), slotFor(sectionId, number)))
       run = []
     }
+    // FLF-410: màn của mục đã bật mockup ⇒ mockup thay các ảnh màn hình, đặt ở chỗ ảnh đầu tiên bị bỏ (mục không ảnh ⇒ đầu mục)
+    const mockup = mockupBySection.get(sectionId)
+    const mockupBlocks = () => (mockup ? screenLayoutImages(spine, mockup.screenId, contextFor(sectionId, number), mockup.caption) : [])
+    let placed = false
+    let imageOrdinal = -1
+    if (mockup && mockup.indexes.length === 0) {
+      out.push(...mockupBlocks())
+      placed = true
+    }
     for (const b of blocks) {
+      if (mockup && b.kind === "image" && b.image_ref && mockup.indexes.includes(++imageOrdinal)) {
+        flush()
+        if (!placed) out.push(...mockupBlocks())
+        placed = true
+        continue
+      }
       const d = b.kind === "image" ? b.diagram : undefined
       if (d && OWNER_DIAGRAM_KINDS.has(d.kind) && d.owner_id && isOriginalStale(spine, d)) {
         flush()
@@ -745,6 +813,7 @@ export const buildLayoutSections = (
     sl.items.forEach((k) => set.add(k))
     claimed.set(sl.section_id, set)
   }
+  const useCaseIds = template.relabelUseCases ? useCaseDisplayIds(spine) : undefined
   const contextFor = (sectionId: string, number: string): SectionRenderContext => {
     const state = stateById.get(sectionId)
     return {
@@ -752,6 +821,7 @@ export const buildLayoutSections = (
       diagramPng: opts.diagramPng,
       numberOf: (id) => numbers.get(id),
       language: template.language,
+      ...(useCaseIds ? { useCaseIds } : {}),
       ...(distributionSlot ? { distributionSlot: true } : {}),
       ...(template.fixedTemplate ? { fixedTemplate: true, representedSlots: new Set(template.layout.filter((e) => isContentSlot(e.section_id)).map((e) => e.section_id)) } : {}),
       ...(nonScreen ? { nonScreenFunctionIds: nonScreen } : {}),
@@ -882,6 +952,7 @@ export const buildLayoutSections = (
     out.push(section)
     levels.push(level)
   }
+  const wrapperIds = templateWrapperIds(template.layout)
   for (const n of numbered) {
     const base = { id: n.section_id, number: n.number, heading: n.title, level: n.renderLevel }
     if (n.kind === "group") {
@@ -895,6 +966,12 @@ export const buildLayoutSections = (
         ? sourceBlocks.filter((b) => !isInstructionText(b.text) && (b.kind !== "table" || tableBodyHasRealText(b.rows)))
         : guidanceWhileEmpty(sourceBlocks)
       const blocks = [...sliceBlocks(n), ...customBlocks(kept, (ref) => opts.diagramPng(mediaId(ref)), slotFor(n.section_id, n.number))]
+      // FLF-411 (U2-2): heading bao chỉ chứa mục con, không có chữ — dòng chia phần của mẫu ("II. Software Requirement
+      // Specification" tách Record of Changes với thân SRS) ⇒ heading nhóm, không phải mục "còn trống"
+      if (n.kind === "custom" && wrapperIds.has(n.section_id) && blocks.length === 0) {
+        push({ ...base, id: `${GROUP_PREFIX}${n.section_id}`, blocks: [] }, n.level)
+        continue
+      }
       if (n.kind === "continuation") {
         // Chủ = section gần nhất phía trước có cấp nhỏ hơn (phần nối có cấp = cấp chủ + 1, xem import/step-plan.ts)
         let owner = levels.length - 1

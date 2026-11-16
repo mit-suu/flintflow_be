@@ -166,6 +166,8 @@ export const OUTPUT_SCHEMA_NAMES = [
   "knowledgeAnswer",
   // FLF-338 rút yêu cầu từ tài liệu thô
   "extractRequirements",
+  "skeletonGenericNames",
+  "templateMigrationResolve",
   "puml",
   "none"
 ] as const

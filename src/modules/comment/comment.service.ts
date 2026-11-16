@@ -1,3 +1,4 @@
+import { assertNoMigrationRunning } from "../template-migration/migration-guard.js"
 import mongoose from "mongoose"
 import { Comment, CommentCounter, formatCommentId, type CommentResolution, type CommentStatus, type IComment } from "./comment.model.js"
 import { resolveAnchor } from "./comment.anchor.js"
@@ -302,6 +303,7 @@ export const resolveComment = async (
 
 /** Gọi TRƯỚC khi tạo CR: comment phải còn mở — comment đã xử lý / đã chuyển không chuyển lại được. */
 export const assertConvertible = async (projectId: string, commentId: string): Promise<IComment> => {
+  await assertNoMigrationRunning(projectId)
   const comment = await requireComment(projectId, commentId)
   if (comment.status !== "open") throw notOpen(comment)
   return comment

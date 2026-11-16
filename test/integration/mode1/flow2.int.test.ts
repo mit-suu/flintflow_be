@@ -2,8 +2,8 @@
  * Chế độ 3 (file giữ khung còn thiếu mục) đi thẳng Luồng 2, Mongo thật: file thiếu cấu trúc đích không có bản gốc 0.1 — finalize
  * tự đưa dự án sang pipeline tạo mới (`mode = fpt`, `import_state = drafting`), Brief mở lại từ B-1.1, bước mục thiếu chờ chạy,
  * bước mục khách đã viết giữ chốt; bản in vẫn theo file (không thêm mục ngoài mẫu, mục khách viết in nguyên văn). "Hoàn thiện"
- * từ `incomplete` bị chặn. Bổ sung theo mẫu chuẩn (chế độ 4) ⇒ dừng `incomplete`. Bản ghi cũ còn `incomplete` ⇒
- * `POST /import/continue`.
+ * từ `incomplete` bị chặn. FLF-416: bổ sung theo mẫu chuẩn (chế độ 4) còn thiếu đi cùng luồng (Luồng 2). Bản ghi cũ còn
+ * `incomplete` ⇒ `POST /import/continue`.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
@@ -50,8 +50,8 @@ const toFinalized = async (intent: "fixed" | "free", startKind: "new" | "existin
     .updateOne({ _id: new mongoose.Types.ObjectId(ctx.projectId) }, { $set: { template_intent: intent, start_kind: startKind } })
   await startFinalize(ctx.projectId, ctx.userId, { import_id: ctx.importId, base_version: await version(ctx.projectId) })
   await waitForFinalize(ctx.importId)
-  // Giữ khung còn thiếu ⇒ tự sang Luồng 2; bổ sung theo mẫu chuẩn ⇒ dừng ở kết quả đọc
-  expect((await ImportedDocument.findById(ctx.importId))!.status).toBe(intent === "fixed" ? "drafting" : "incomplete")
+  // Giữ khung còn thiếu (chế độ 3) lẫn bổ sung theo mẫu chuẩn còn thiếu (chế độ 4, FLF-416) ⇒ tự sang Luồng 2
+  expect((await ImportedDocument.findById(ctx.importId))!.status).toBe("drafting")
   const user = (await User.findById(ctx.userId).lean())!
   const project = (await Project.findById(ctx.projectId).lean())!
   const token = await authAs({ _id: user._id, email: user.email, orgId: String(project.organizationId) })
@@ -150,9 +150,10 @@ describe("Luồng 2 cho phần thiếu - chế độ 3", () => {
       .set({ Authorization: `Bearer ${token}` })
       .send({ import_id: importId, base_version: await version(projectId), complete: true })
     expect(res.status).toBe(409)
-    expect(res.body.error.code).toBe("IMPORT_INVALID_STATE")
-    expect((await ImportedDocument.findById(importId))!.status).toBe("incomplete")
-    expect((await Project.findById(projectId).lean())!.mode).toBe("import")
+    // FLF-416: chế độ 4 đã sang Luồng 2 (dự án `fpt`) — vẫn không có bản gốc 0.1
+    expect(res.body.error.code).toBe("PROJECT_MODE_MISMATCH")
+    expect((await ImportedDocument.findById(importId))!.status).toBe("drafting")
+    expect((await Project.findById(projectId).lean())!.mode).toBe("fpt")
     expect(await DocVersion.countDocuments({ projectId })).toBe(0)
   })
 
@@ -234,9 +235,17 @@ describe("Luồng 2 cho phần thiếu - chế độ 3", () => {
     for (const line of original.filter((t) => !t.startsWith("[") && t.length > 30)) expect(after, line).toContain(line)
   })
 
+  /** Dữ liệu do bản trước tạo: I-5 ra chế độ 3 / 4 nhưng chưa tự chuyển — dự án còn `import`, lần import dừng `incomplete`. */
+  const asLegacyIncomplete = async (projectId: string, importId: string) => {
+    await Project.updateOne({ _id: projectId }, { $set: { mode: "import", import_state: "incomplete" } })
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { status: "incomplete" } })
+    await TemplateProfile.updateOne({ projectId }, { $set: { flow2_entry_at: null, flow2_entry_spine: null } })
+  }
+
   it("bản ghi cũ chế độ 3 còn dừng ở incomplete ⇒ POST /import/continue sang Luồng 2", async () => {
     const { projectId, importId, token } = await toFinalized("free")
-    // Dữ liệu do bản trước tạo: giữ khung, I-5 cũ ra chế độ 3 nhưng chưa tự chuyển
+    await asLegacyIncomplete(projectId, importId)
+    // Giữ khung, I-5 cũ ra chế độ 3
     await Project.updateOne({ _id: projectId }, { $set: { template_intent: "fixed" } })
     await TemplateProfile.updateOne({ projectId }, { $set: { "target_structure.resolved_mode": 3, "target_structure.intent": "fixed", structure_preview: null } })
     const res = await request(app)
@@ -248,15 +257,41 @@ describe("Luồng 2 cho phần thiếu - chế độ 3", () => {
     expect((await ImportedDocument.findById(importId))!.status).toBe("drafting")
   })
 
-  it("ý định tự do (chế độ 4) ⇒ 409 IMPORT_INVALID_STATE, dự án giữ nguyên", async () => {
+  it("FLF-416 bản ghi cũ chế độ 4 còn dừng ở incomplete ⇒ POST /import/continue sang Luồng 2 (trước đây 409)", async () => {
     const { projectId, importId, token } = await toFinalized("free")
+    await asLegacyIncomplete(projectId, importId)
+    const res = await request(app)
+      .post(`/api/v1/projects/${projectId}/import/continue`)
+      .set({ Authorization: `Bearer ${token}` })
+      .send({ import_id: importId, base_version: await version(projectId) })
+    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+    expect(res.body.data).toMatchObject({ project_mode: "fpt", import_state: "drafting", current_step: "B-1.1" })
+    expect((await TemplateProfile.findOne({ projectId }).lean())!.flow2_entry_at).toBeTruthy()
+  })
+
+  it("FLF-416 tick bổ sung theo mẫu chuẩn (chế độ 4) còn thiếu ⇒ finalize tự sang Luồng 2 như chế độ 3: mode fpt + drafting, Brief từ B-1.1, bước mục thiếu chờ soạn, bước mục đã viết giữ chốt, có Spine mốc", async () => {
+    const { projectId, importId, token } = await toFinalized("free")
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    const structure = profile.target_structure!
+    expect(structure.resolved_mode).toBe(4)
+    expect(profile.flow2_entry_at).toBeTruthy()
+    expect(await DocVersion.countDocuments({ projectId })).toBe(0)
+    expect((await Project.findById(projectId).lean())!).toMatchObject({ mode: "fpt", import_state: "drafting", template_intent: "free" })
+    const spine = (await spineRepository.get(projectId))!
+    expect(spine.progress.current_step).toBe("B-1.1")
+    const statusOf = (id: string) => spine.steps.filter((st) => st.id === id || st.id.startsWith(`${id}@`)).map((st) => st.status)
+    const keep = new Set(structure.sections.filter((sec) => sec.status === "present").flatMap((sec) => sec.owner_steps))
+    for (const owner of keep) expect(statusOf(owner).includes("pending"), owner).toBe(false)
+    const draft = [...new Set(structure.sections.filter((sec) => sec.status === "missing").flatMap((sec) => sec.owner_steps))].filter((o) => !keep.has(o))
+    expect(draft.length).toBeGreaterThan(0)
+    for (const owner of draft) expect(statusOf(owner), owner).toContain("pending")
+    // Đã ở Luồng 2 (dự án `fpt`) ⇒ gọi tiếp lần nữa bị chặn (không mở lại lần hai)
     const res = await request(app)
       .post(`/api/v1/projects/${projectId}/import/continue`)
       .set({ Authorization: `Bearer ${token}` })
       .send({ import_id: importId, base_version: await version(projectId) })
     expect(res.status).toBe(409)
-    expect(res.body.error.code).toBe("IMPORT_INVALID_STATE")
-    expect((await Project.findById(projectId).lean())!.mode).toBe("import")
+    expect(res.body.error.code).toBe("PROJECT_MODE_MISMATCH")
   })
   it("exports source Purpose and Scope after repairing legacy layout and bypassing incorrect cached headings", async () => {
     const source = await makeDocx({

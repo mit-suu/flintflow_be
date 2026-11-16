@@ -36,6 +36,8 @@ import { isInstructionText, isRealText, tableBodyHasRealText } from "../../share
 import { withSlotParents } from "./content-slots.js"
 import type { LayoutEntry, StepPlanItem } from "./template-profile.model.js"
 import type { FunctionOriginalBlock } from "../render/function-original.js"
+import { templateMarks } from "./template-markers.js"
+import { isTemplateFrame } from "../spine/template-frames.js"
 
 export const CUSTOM_SECTION_PREFIX = "custom:"
 export const customSectionKey = (id: string): string => `${CUSTOM_SECTION_PREFIX}${id}`
@@ -155,6 +157,10 @@ export const buildLayout = (
 ): LayoutResult => {
   const segmentOn = options.segment ?? true
   const templateOnly = options.templateOnly === true
+  // FLF-411: chữ của mẫu mà luật trọn đoạn không thấy (khoảng `[ … ]` nhiều đoạn, `<<Sample … >>`, chỗ điền — BF §3.1.1)
+  const marks = templateMarks(blocks)
+  const isGuidanceText = (id: string, block: { kind: string; text?: string }) =>
+    (block.kind === "paragraph" || block.kind === "list_item") && (isInstructionText(block.text ?? "") || marks.has(id))
   const contextBlocks: LayoutResult["contextBlocks"] = []
   const layout: LayoutEntry[] = []
   const customSections: CustomSection[] = []
@@ -265,17 +271,19 @@ export const buildLayout = (
       const sectionId = current ? customSectionKey(current.id) : owner?.section_id
       if (sectionId) contextBlocks.push({ section_id: sectionId, block })
       // Hướng dẫn trọn đoạn dưới mục FPT vẫn ghi ở layout entry (FLF-364); còn lại không thành nguyên văn của mục
-      if (!current && owner && !owner.section_id.startsWith("group:") && (block.kind === "paragraph" || block.kind === "list_item") && isInstructionText(block.text)) {
+      if (!current && owner && !owner.section_id.startsWith("group:") && isGuidanceText(b.block_id, block)) {
         owner.template_guidance = [...(owner.template_guidance ?? []), block.text]
       }
       continue
     }
     // FLF-364 (câu 10): chữ hướng dẫn trọn đoạn dưới mục FPT / phần nhỏ ⇒ giữ nguyên văn ở layout entry (in khi mục trống),
     // không thành phần nối (in cả khi mục đã có dữ liệu)
-    if (!current && owner && !owner.section_id.startsWith("group:") && (block.kind === "paragraph" || block.kind === "list_item") && isInstructionText(block.text)) {
+    if (!current && owner && !owner.section_id.startsWith("group:") && isGuidanceText(b.block_id, block)) {
       owner.template_guidance = [...(owner.template_guidance ?? []), block.text]
       continue
     }
+    // FLF-411: hình / bảng nằm trong khoảng ví dụ / hướng dẫn của mẫu (`<<Sample: … [hình] … >>`) không phải nội dung khách viết
+    if (!current && owner && !owner.section_id.startsWith("group:") && marks.has(b.block_id)) continue
     const segment = owner && !current ? segmentOf.get(owner) : undefined
     if (current) {
       if (!currentRepeats || unmappedBlockIds.has(b.block_id)) current.blocks.push(block)
@@ -577,7 +585,7 @@ export const seedStepOps = (spine: Spine, plan: StepPlanItem[], opts: SeedOption
     const status = initialStatus(item)
     return status === "accepted" ? accepted(item.step_id) : { id: item.step_id, status, first_seq: null, last_seq: null, accepted_at: null }
   })
-  const withFunctions = new Set(spine.functions.map((f) => f.screen_id ?? "nonscreen"))
+  const withFunctions = new Set(spine.functions.filter((f) => !isTemplateFrame(f)).map((f) => f.screen_id ?? "nonscreen"))
   const loopTemplates = loadStepRegistry().filter((s) => s.kind === "loop")
   for (const key of loopKeys(spine)) {
     if (!withFunctions.has(key)) continue

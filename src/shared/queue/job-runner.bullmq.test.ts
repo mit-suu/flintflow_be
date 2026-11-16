@@ -11,7 +11,7 @@ vi.hoisted(() => {
   process.env.REDIS_URL = process.env.TEST_REDIS_URL
 })
 
-const { defineJob, enqueueJob, getQueue, isJobActive, startJob, waitForJob, closeQueues } = await import("./job-runner.js")
+const { defineJob, enqueueJob, getQueue, isJobActive, jobState, releaseJobKey, startJob, waitForJob, closeQueues } = await import("./job-runner.js")
 const { startWorkers, stopWorkers } = await import("./workers.js")
 const { closeRedis, getRedis } = await import("./connection.js")
 
@@ -59,6 +59,25 @@ describe.skipIf(!process.env.TEST_REDIS_URL)("job-runner - driver bullmq (Redis 
     // Xong rồi ⇒ chạy lại được
     expect(await startJob(job, { n: 3 }, { key: `ex-${run}` })).toBe(true)
     await waitForJob(job, `ex-${run}`)
+  })
+
+  it("FLF-391 releaseJobKey: job kẹt active vẫn giữ key ⇒ gỡ khoá, startJob cùng key chạy lần mới", async () => {
+    const stuck = deferred()
+    const process = vi.fn().mockImplementationOnce(() => stuck.promise).mockImplementation(async () => undefined)
+    const job = defineJob<{ n: number }>({ queue: "system", name: `release-${run}`, process })
+    const key = `rl-${run}`
+
+    expect(await startJob(job, { n: 1 }, { key })).toBe(true)
+    await until(() => process.mock.calls.length === 1)
+    expect(await jobState(job, key)).toBe("active")
+    expect(await startJob(job, { n: 2 }, { key })).toBe(false)
+
+    await releaseJobKey(job, key)
+    expect(await jobState(job, key)).toBeNull()
+    expect(await startJob(job, { n: 3 }, { key })).toBe(true)
+    await until(() => process.mock.calls.length === 2)
+    stuck.resolve()
+    await waitForJob(job, key)
   })
 
   it("lỗi tạm thời ⇒ retry; lần sau thành công thì không gọi onFinalFailure", async () => {

@@ -17,6 +17,7 @@ import { AiActionPayload } from "./ai-action-payload.model.js"
 import * as feedbackService from "../feedback/feedback.service.js"
 import {
   AiCostGroupBy,
+  FeedbackQuery,
   OrgsQuery,
   parseDateInput,
   REPORT_TIMEZONE,
@@ -386,6 +387,18 @@ export const mergeCostRows = (
   return { rows: list, totals }
 }
 
+/**
+ * Cắt một trang từ danh sách đã gom đủ (FLF-404). Không có `limit` ⇒ một trang chứa hết, giữ hành vi cũ cho ai gọi
+ * không phân trang. Trang vượt quá thì `rows` rỗng — không tự lùi về trang cuối.
+ */
+export const paginateRows = <T>(all: readonly T[], page: number, limit?: number) => {
+  const size = limit ?? Math.max(1, all.length)
+  return {
+    rows: all.slice((page - 1) * size, page * size),
+    meta: { page, limit: size, total: all.length, totalPages: Math.max(1, Math.ceil(all.length / size)) }
+  }
+}
+
 export const getAiCost = async (range: { from: Date; to: Date }, groupBy: AiCostGroupBy) => {
   const createdAt = { $gte: range.from, $lt: range.to }
 
@@ -479,7 +492,7 @@ export const getAiActionPayload = async (logId: string) => {
 // ─── Feedback ─────────────────────────────────────────────────────
 
 // Dữ liệu và shape nằm ở module feedback; admin chỉ mở route đọc
-export const listFeedback = () => feedbackService.listFeedback()
+export const listFeedback = (query: FeedbackQuery) => feedbackService.listFeedback(query)
 
 // ─── UC-90 Danh sách tổ chức ─────────────────────────────────────
 

@@ -179,3 +179,50 @@ describe("isTemplateFile", () => {
     expect(isTemplateFile(null, preview("template"))).toBe(false)
   })
 })
+
+describe("FLF-411 - màn đọc khung trên file thật (parse + khớp mẫu, không AI)", () => {
+  const previewOfFixture = async (name: string, intent: "fixed" | "free" = "fixed") => {
+    const { readFile } = await import("node:fs/promises")
+    const { parseDocument } = await import("./parse.service.js")
+    const { assignBlockSections, matchProfile } = await import("./profile-match.service.js")
+    const { blocks } = await parseDocument(await readFile(new URL(`../../../fixtures/${name}.docx`, import.meta.url)))
+    const profile = matchProfile(blocks, { fixedTemplate: intent === "fixed" })
+    const sections = assignBlockSections(blocks, profile.heading_map)
+    const layoutBlocks: LayoutBlock[] = blocks.map((b) => ({
+      block_id: b.block_id,
+      kind: b.kind,
+      level: b.level ?? null,
+      text: b.text,
+      section_id: sections.get(b.block_id) ?? null,
+      rows: b.kind === "table" ? (b.rows ?? null) : null,
+      image_ref: b.image_ref ?? null
+    }))
+    return previewStructure(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), createEmptySpine({}), intent, AT)
+  }
+
+  it("template FPT Capstone Report3 trống (hướng dẫn [ ] nhiều đoạn, <<Sample … >>, bảng / hình mẫu) ⇒ khung mẫu, 0 mục có nội dung", async () => {
+    const preview = await previewOfFixture("fpt-report3-blank-template")
+    expect(preview.summary).toMatchObject({ kind: "template", present: 0 })
+    expect(preview.summary.missing).toBeGreaterThanOrEqual(20)
+    expect(preview.resolved_mode).toBe(3)
+  }, 30000)
+
+  it("SRS đã viết (FPT, mẫu công ty còn sót `]` cuối câu) vẫn là SRS đã viết, đủ mục; mẫu FU-IT trống vẫn là khung mẫu", async () => {
+    expect((await previewOfFixture("existing-srs-fu-student-portal")).summary).toMatchObject({ kind: "written", present: 24, missing: 0 })
+    expect((await previewOfFixture("company-template-srs-filled")).summary).toMatchObject({ kind: "written", present: 20, missing: 0 })
+    expect((await previewOfFixture("fixed-template-fu-it-srs-01")).summary).toMatchObject({ kind: "template", present: 0 })
+  }, 30000)
+
+  it("U3-2…U3-4: SRS có sẵn + tick Bổ sung (tự do) ⇒ tính năng / chức năng của file là mục có / thiếu (không gộp thành một mục riêng); không phần nối không tiêu đề, không heading bao chương", async () => {
+    const preview = await previewOfFixture("techmart-srs-fpt", "free")
+    const functions = preview.sections.filter((s) => s.section_id.startsWith("function:"))
+    // UC-01…UC-20 — mỗi chức năng một mục
+    expect(functions).toHaveLength(20)
+    expect(functions.every((s) => s.status === "present")).toBe(true)
+    expect(preview.sections.some((s) => s.section_id.startsWith("custom:") && /^custom:/.test(s.title))).toBe(false)
+    expect(preview.sections.map((s) => s.title)).not.toContain("II. Software Requirement Specification")
+    expect(preview.sections.find((s) => /Security/.test(s.title))?.status).toBe("present")
+    // Giữ khung (không tick): như cũ, đủ khung
+    expect((await previewOfFixture("techmart-srs-fpt", "fixed")).summary).toMatchObject({ kind: "written", missing: 0 })
+  }, 30000)
+})

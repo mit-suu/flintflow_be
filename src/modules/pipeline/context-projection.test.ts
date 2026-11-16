@@ -18,7 +18,7 @@ import type { Spine } from "../spine/spine.types.js"
 import { get } from "../spine/spine.repository.js"
 import { ChatSession } from "../project/chat-session.model.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
-import { ASSUMPTION_KEYS_READ, STEP_SKILLS, addendumForUnit, assumptionsForPrompt, openAssumptionsFor, buildStepContext, getStepSpec, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
+import { ASSUMPTION_KEYS_READ, STEP_SKILLS, addendumForUnit, assumptionsForPrompt, componentLevelProjection, openAssumptionsFor, buildStepContext, getStepSpec, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
 import { stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
 import { getStep, loadStepRegistry, orderedSteps } from "./step-registry.js"
 import { askableFields } from "./decisions.service.js"
@@ -196,7 +196,7 @@ describe("projectStep", () => {
 describe("buildStepContext", () => {
   beforeEach(() => {
     vi.mocked(get).mockResolvedValue({ projectId: "p", ...structuredClone(FIXTURE) })
-    vi.mocked(buildDocumentContext).mockResolvedValue({ contextText: "DOC", tokenCount: 7, documentsUsed: 1, usedSummary: false })
+    vi.mocked(buildDocumentContext).mockResolvedValue({ contextText: "DOC", tokenCount: 7, documentsUsed: 1, usedSummary: false, mode: "full", chunksUsed: 0, fullTokens: 7 })
     vi.mocked(ChatSession.findById).mockReturnValue({
       lean: async () => ({
         messages: [
@@ -214,7 +214,16 @@ describe("buildStepContext", () => {
     expect(ctx.transcriptTail).not.toContain("Other phase")
     expect(ctx.documents).toBe("DOC")
     expect(ctx.contextTokens).toBeGreaterThan(7)
-    expect(buildDocumentContext).toHaveBeenCalledWith("p", "draft", "S-3.1", expect.any(Number), undefined, undefined)
+    // FLF-393: step gửi kèm câu hỏi tìm đoạn (nhãn step + câu trả lời của user) và tiêu đề section nó nuôi (S-3.1 ⇒ Actors)
+    expect(buildDocumentContext).toHaveBeenCalledWith({
+      projectId: "p",
+      actionType: "draft",
+      stepId: "S-3.1",
+      query: expect.stringContaining("Students and teachers"),
+      sectionTitles: expect.arrayContaining(["Actors", "Tác nhân"]),
+      broad: false,
+      focus: "Students and teachers"
+    })
   })
 
   it("transcriptTail kèm lượt phỏng vấn đầu giai đoạn (câu trả lời mở không vào sổ quyết định)", async () => {
@@ -301,5 +310,42 @@ describe("openAssumptionsFor - biến {{assumptions}} của elicit-loop (FLF-358
   it("assumptionsForPrompt: không có ⇒ (none)", () => {
     expect(assumptionsForPrompt(FIXTURE, "S-6.3")).toBe("(none)")
     expect(assumptionsForPrompt(withStatus({ AS01: "unconfirmed" }), "S-6.3")).toHaveLength(1)
+  })
+})
+
+describe("FLF-413 - khung của mẫu không vào projection", () => {
+  it("S-4.1 / S-4.4 không thấy tính năng / chức năng tên chỗ điền", () => {
+    const spine: Spine = structuredClone(FIXTURE)
+    spine.features = [...spine.features, { id: "F-3.2", name: "<<Feature Name 1>>", order: spine.features.length }]
+    spine.functions = [...spine.functions, { ...spine.functions[0], id: "FR-3.2.1", feature_id: "F-3.2", screen_id: null, order: 0, name: "<<Function Name 1>>", validations: [] }]
+    for (const stepId of ["S-4.1", "S-4.4"]) {
+      const text = JSON.stringify(projectStep(spine, stepId).projection)
+      expect(text, stepId).not.toContain("<<")
+    }
+    expect(JSON.stringify(projectStep(spine, "S-4.1").projection)).toContain(FIXTURE.features[0].name)
+  })
+})
+
+describe("componentLevelProjection (FLF-418)", () => {
+  const KEY = "entities[feature_ids~@loopFeatures]:id,name,feature_ids"
+
+  it("S-5.4 mức component: thêm sequence_level + entity của các feature trong vòng màn", () => {
+    const extra = componentLevelProjection(FIXTURE, "S-5.4@S01", "component")
+    expect(extra.sequence_level).toBe("component")
+    const features = new Set(FIXTURE.functions.filter((f) => f.screen_id === "S01").map((f) => f.feature_id))
+    const entities = extra[KEY] as { id: string; feature_ids: string[] }[]
+    expect(entities.map((e) => e.id)).toContain("E01")
+    expect(entities.every((e) => e.feature_ids.some((id) => features.has(id)))).toBe(true)
+  })
+
+  it("vòng @nonscreen: entity theo feature của các function không màn", () => {
+    const entities = componentLevelProjection(FIXTURE, "S-5.4@nonscreen", "component")[KEY] as { feature_ids: string[] }[]
+    const features = new Set(FIXTURE.functions.filter((f) => f.screen_id === null).map((f) => f.feature_id))
+    expect(entities.every((e) => e.feature_ids.some((id) => features.has(id)))).toBe(true)
+  })
+
+  it("mức system hoặc step khác S-5.4 ⇒ không thêm gì", () => {
+    expect(componentLevelProjection(FIXTURE, "S-5.4@S01", "system")).toEqual({})
+    expect(componentLevelProjection(FIXTURE, "S-5.2@S01", "component")).toEqual({})
   })
 })
