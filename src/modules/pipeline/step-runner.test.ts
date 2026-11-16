@@ -2406,6 +2406,21 @@ describe("FLF-260: runPhase - ngôn ngữ đi qua phỏng vấn đầu giai đo�
     await resumePhaseInterview(PROJECT, "S-6", USER, pending, { answers: [], message: "We expect about 500 users at the same time" }, { elicitExecutor: elicitExecutor as never })
     expect(languages).toEqual(["en"])
   })
+
+  it("phỏng vấn đầu giai đoạn lỗi INSUFFICIENT_CREDIT ⇒ run-state ghi error.code = INSUFFICIENT_CREDIT", async () => {
+    seedB1()
+    const { emit } = collectEvents()
+    const elicitExecutor = async () => {
+      throw new AiActionError(402, "Hết credit", "INSUFFICIENT_CREDIT")
+    }
+    await expect(
+      runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: elicitExecutor as never, draftExecutor: async () => draftReply([]) })
+    ).rejects.toMatchObject({ code: "INSUFFICIENT_CREDIT" })
+
+    const runState = await getRunState(PROJECT, "B-1")
+    expect(runState?.status).toBe("interrupted")
+    expect(runState?.error?.code).toBe("INSUFFICIENT_CREDIT")
+  })
 })
 
 describe("FLF-358: prompt elicit-loop đã render không còn {{assumptions}} ở cả 3 lượt gọi", () => {

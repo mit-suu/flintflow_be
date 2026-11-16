@@ -644,6 +644,7 @@ export const adjustOrgCredits = async (
     projectId: null,
     actionType: "admin_adjust",
     amount: Math.abs(amount),
+    direction: amount >= 0 ? "credit" : "debit",
     type: "admin_adjust",
     balanceAfter: wallet.balance - wallet.reserved,
     reason
@@ -661,7 +662,7 @@ export const adjustOrgCredits = async (
       body: `${amount >= 0 ? "+" : ""}${amount} credit cho ${org.name}. Lý do: ${reason}`,
       organizationId: orgId,
       link: "/home/billing",
-      meta: { organizationId: orgId, amount, reason }
+      meta: { organizationId: orgId, organizationName: org.name, amount, reason }
     })
   }
 

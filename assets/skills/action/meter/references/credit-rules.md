@@ -1,4 +1,15 @@
-# Credit price per call - T03 defaults (`DEFAULT_ACTION_COSTS`, overridable by active `PricingConfig`)
+# Credit price per call - server-configured reserve ceilings (`DEFAULT_ACTION_COSTS`)
+
+Reserve amounts are configured solely on the server via `DEFAULT_ACTION_COSTS` (`credit-reservation.service.ts`) and act as per-call ceilings. After a successful parse, `deductCredit` settles actual token consumption via `calculateActualCreditCost` and releases any unused hold back to `available`.
+
+## Actual-token settlement (`calculateActualCreditCost`)
+
+- `TOKEN_CREDIT_WEIGHTS = { inputPer1k: 0.25, outputPer1k: 1.0 }`
+- `reservedCost <= 0` (free actions such as `knowledge_answer`): settles `0`.
+- `tokens === undefined`: settles `reservedCost`.
+- Otherwise: `Math.min(reservedCost, Math.max(1, Math.ceil((Math.max(0, tokensIn) / 1000) * 0.25 + (Math.max(0, tokensOut) / 1000) * 1.0)))`.
+- When `previousState === "reserved"`, `balance` decreases by `actualCost` and `reserved` decreases by full `reservedCost`.
+- When `previousState === "expired"`, the hold was already released so `deductCredit` decreases `balance` by `actualCost` on `available` without decrementing `reserved`.
 
 | `call_kind` (ActionType) | Credits | Typical use |
 | --- | ---: | --- |

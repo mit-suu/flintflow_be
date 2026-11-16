@@ -17,16 +17,22 @@ vi.mock("./providers/llm.router.js", () => ({ callLLM: vi.fn() }))
 vi.mock("./providers/ai-sdk.provider.js", () => ({ getAiSdkModel: vi.fn(() => ({})) }))
 vi.mock("ai", () => ({ streamText: vi.fn() }))
 vi.mock("./response-parser.js", () => ({ parseResponse: vi.fn() }))
+const retryState = vi.hoisted(() => ({ active: false }))
 // Chạy đúng một lần: test hành vi credit, không test backoff của retry — trừ lượt bị cắt (`RESPONSE_TRUNCATED`): BR-09 thử
 // lại 2 lần, mô phỏng ở đây không chờ (FLF-393)
 vi.mock("./retry.service.js", () => ({
   executeWithInRequestRetry: async (fn: (attempt: number) => Promise<unknown>) => {
-    for (let attempt = 0; ; attempt++) {
-      try {
-        return await fn(attempt)
-      } catch (error) {
-        if (attempt >= 2 || (error as { code?: string }).code !== "RESPONSE_TRUNCATED") throw error
+    retryState.active = true
+    try {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await fn(attempt)
+        } catch (error) {
+          if (attempt >= 2 || (error as { code?: string }).code !== "RESPONSE_TRUNCATED") throw error
+        }
       }
+    } finally {
+      retryState.active = false
     }
   }
 }))
@@ -79,7 +85,7 @@ describe("executeAiAction - thứ tự parse → deduct", () => {
       new Error("Transaction numbers are only allowed on a replica set member or mongos")
     )
     vi.mocked(reserveCredit).mockResolvedValue(reservation)
-    vi.mocked(deductCredit).mockResolvedValue(undefined)
+    vi.mocked(deductCredit).mockResolvedValue(2)
     vi.mocked(releaseCredit).mockResolvedValue(true)
     vi.mocked(callLLM).mockResolvedValue({ text: "{}", promptTokens: 1, completionTokens: 1 } as any)
     vi.mocked(AiActionLog.create).mockResolvedValue({ _id: "log-1" } as any)
@@ -105,7 +111,7 @@ describe("executeAiAction - thứ tự parse → deduct", () => {
     const result = await executeAiAction(ActionType.DRAFT, {}, undefined, USER)
 
     expect(result.data).toEqual({ ok: true })
-    expect(result.cost).toBe(5)
+    expect(result.cost).toBe(2)
     expect(deductCredit).toHaveBeenCalledTimes(1)
     // UC-60: token của lượt gọi đi kèm để ghi lên dòng deduct
     expect(deductCredit).toHaveBeenCalledWith(reservation, undefined, { tokensIn: expect.any(Number), tokensOut: expect.any(Number) })
@@ -132,6 +138,45 @@ describe("executeAiAction - thứ tự parse → deduct", () => {
     expect(deductCredit).not.toHaveBeenCalled()
     expect(releaseCredit).toHaveBeenCalledTimes(1)
   })
+
+  it("deductCredit ném CREDIT_LEDGER_INCONSISTENT: quyết toán nằm ngoài vòng retry, gọi LLM đúng 1 lần và releaseCredit", async () => {
+    vi.mocked(parseResponse).mockReturnValue({ ok: true })
+    let deductInsideRetry: boolean | null = null
+    vi.mocked(deductCredit).mockImplementation(async () => {
+      deductInsideRetry = retryState.active
+      throw new AiActionError(500, "Sổ cái lệch", "CREDIT_LEDGER_INCONSISTENT")
+    })
+
+    await expect(executeAiAction(ActionType.DRAFT, {}, undefined, USER)).rejects.toMatchObject({
+      code: "CREDIT_LEDGER_INCONSISTENT"
+    })
+
+    expect(deductInsideRetry).toBe(false)
+    expect(callLLM).toHaveBeenCalledTimes(1)
+    expect(deductCredit).toHaveBeenCalledTimes(1)
+    expect(releaseCredit).toHaveBeenCalledTimes(1)
+    expect(logDocs().some((doc) => doc.status === "failed")).toBe(true)
+  })
+
+  it("deduct thành công rồi ghi log lỗi 500: chạy ngoài vòng retry, không gọi lại LLM và không release", async () => {
+    vi.mocked(parseResponse).mockReturnValue({ ok: true })
+    let logInsideRetry: boolean | null = null
+    vi.mocked(AiActionLog.create)
+      .mockImplementationOnce(async () => {
+        logInsideRetry = retryState.active
+        throw new AiActionError(500, "Mongo error", "LOG_WRITE_FAILED")
+      })
+      .mockResolvedValue({ _id: "log-failed" } as any)
+
+    await expect(executeAiAction(ActionType.DRAFT, {}, undefined, USER)).rejects.toMatchObject({
+      code: "LOG_WRITE_FAILED"
+    })
+
+    expect(logInsideRetry).toBe(false)
+    expect(callLLM).toHaveBeenCalledTimes(1)
+    expect(deductCredit).toHaveBeenCalledTimes(1)
+    expect(releaseCredit).not.toHaveBeenCalled()
+  })
 })
 
 describe("executeAiAction - đầu ra bị cắt ở max_tokens (FLF-393)", () => {
@@ -143,7 +188,7 @@ describe("executeAiAction - đầu ra bị cắt ở max_tokens (FLF-393)", () =
     vi.spyOn(console, "warn").mockImplementation(() => {})
     vi.spyOn(mongoose, "startSession").mockRejectedValue(new Error("Transaction numbers are only allowed on a replica set member or mongos"))
     vi.mocked(reserveCredit).mockResolvedValue(reservation)
-    vi.mocked(deductCredit).mockResolvedValue(undefined)
+    vi.mocked(deductCredit).mockResolvedValue(2)
     vi.mocked(releaseCredit).mockResolvedValue(true)
     vi.mocked(AiActionLog.create).mockResolvedValue({ _id: "log-1" } as any)
     vi.mocked(parseResponse).mockReturnValue({ ok: true })
@@ -189,7 +234,7 @@ describe("executeAiAction - ngôn ngữ trả lời (FLF-260)", () => {
       new Error("Transaction numbers are only allowed on a replica set member or mongos")
     )
     vi.mocked(reserveCredit).mockResolvedValue(reservation)
-    vi.mocked(deductCredit).mockResolvedValue(undefined)
+    vi.mocked(deductCredit).mockResolvedValue(2)
     vi.mocked(callLLM).mockResolvedValue({ text: "{}", promptTokens: 1, completionTokens: 1 } as any)
     vi.mocked(AiActionLog.create).mockResolvedValue({ _id: "log-1" } as any)
     vi.mocked(parseResponse).mockReturnValue({ ok: true })
@@ -223,7 +268,7 @@ describe("executeAiAction - ngôn ngữ tài liệu (FLF-265 D16)", () => {
       new Error("Transaction numbers are only allowed on a replica set member or mongos")
     )
     vi.mocked(reserveCredit).mockResolvedValue(reservation)
-    vi.mocked(deductCredit).mockResolvedValue(undefined)
+    vi.mocked(deductCredit).mockResolvedValue(2)
     vi.mocked(releaseCredit).mockResolvedValue(true)
     vi.mocked(callLLM).mockResolvedValue({ text: "{}", promptTokens: 1, completionTokens: 1 } as any)
     vi.mocked(AiActionLog.create).mockResolvedValue({ _id: "log-1" } as any)
@@ -380,7 +425,7 @@ describe("executeAiActionStream - thứ tự parse → deduct", () => {
       new Error("Transaction numbers are only allowed on a replica set member or mongos")
     )
     vi.mocked(reserveCredit).mockResolvedValue(reservation)
-    vi.mocked(deductCredit).mockResolvedValue(undefined)
+    vi.mocked(deductCredit).mockResolvedValue(2)
     vi.mocked(releaseCredit).mockResolvedValue(true)
     vi.mocked(AiActionLog.create).mockResolvedValue({ _id: "log-1" } as any)
     vi.mocked(streamText).mockImplementation(() => fakeStream(['{"reply":', '"xin chào"}']))
@@ -414,12 +459,14 @@ describe("executeAiActionStream - thứ tự parse → deduct", () => {
     expect(releaseCredit).not.toHaveBeenCalled()
   })
 
-  it("parse ok: trả kết quả kèm cost", async () => {
+  it("parse ok: trả kết quả kèm cost quyết toán từ deductCredit", async () => {
     vi.mocked(parseResponse).mockReturnValue({ reply: "xin chào" })
+    const onFinish = vi.fn()
 
-    const result = await executeAiActionStream(ActionType.CHAT, {}, undefined, USER)
+    const result = await executeAiActionStream(ActionType.CHAT, {}, undefined, USER, { onFinish })
 
-    expect(result.cost).toBe(5)
+    expect(result.cost).toBe(2)
+    expect(onFinish).toHaveBeenCalledWith(expect.objectContaining({ cost: 2 }))
     expect(deductCredit).toHaveBeenCalledTimes(1)
     expect(releaseCredit).not.toHaveBeenCalled()
   })
@@ -433,7 +480,7 @@ describe("executeAiActionStream - AI_PROVIDER_OVERRIDE (FLF-244)", () => {
       new Error("Transaction numbers are only allowed on a replica set member or mongos")
     )
     vi.mocked(reserveCredit).mockResolvedValue(reservation)
-    vi.mocked(deductCredit).mockResolvedValue(undefined)
+    vi.mocked(deductCredit).mockResolvedValue(2)
     vi.mocked(releaseCredit).mockResolvedValue(true)
     vi.mocked(AiActionLog.create).mockResolvedValue({ _id: "log-1" } as any)
     vi.mocked(streamText).mockImplementation(() => fakeStream(['{"reply":', '"từ provider thật"}']))
