@@ -4,6 +4,7 @@
  * `test/integration/mode1/clarify.int.test.ts`.
  */
 import { describe, expect, it } from "vitest"
+import { sourceRefSections } from "./clarify.service.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { IChangeRequest } from "./change-request.model.js"
@@ -132,5 +133,18 @@ describe("C-2 ngữ cảnh gửi model", () => {
   it("truncate cắt và đánh dấu khi quá dài", () => {
     expect(truncate("abc", 5)).toBe("abc")
     expect(truncate("abcdefgh", 5)).toBe("abcde\n…(truncated)")
+  })
+})
+
+describe("sourceRefSections — nút Viết của mục thiếu", () => {
+  const headings = [{ text: "8 Data Retention", section_id: "fixed:5.4" }, { text: "2 User Requirements", section_id: "group:2" }]
+  it("ref là section_id của một heading hiện tại ⇒ là đích ghi", () => {
+    expect(sourceRefSections("fixed:5.4", headings)).toEqual(["fixed:5.4"])
+  })
+  it("ref là chữ tự do, section lạ hoặc heading nhóm ⇒ bỏ qua", () => {
+    expect(sourceRefSections("8 Data Retention", headings)).toEqual([])
+    expect(sourceRefSections("fixed:9.9", headings)).toEqual([])
+    expect(sourceRefSections("group:2", headings)).toEqual([])
+    expect(sourceRefSections(null, headings)).toEqual([])
   })
 })

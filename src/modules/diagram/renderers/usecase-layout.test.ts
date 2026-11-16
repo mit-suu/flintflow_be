@@ -272,25 +272,69 @@ describe("packBlocks", () => {
 describe("layoutActorHierarchy", () => {
   const actor = (id: string, abstract = false) => ({ id, name: `Role ${id}`, abstract })
 
-  it("cây nhiều tầng: con dưới cha, mỗi cạnh một đoạn thẳng đầu tam giác rỗng ở phía cha, không lỗi bố cục", () => {
+  /** Mọi đoạn nối chỉ ngang hoặc dọc; mỗi cha đúng MỘT tam giác rỗng, nằm ở đầu trên của thân dọc, ngay dưới tên cha. */
+  const expectTree = (scene: Scene, parents: Map<string, string>): void => {
+    expect(checkScene(scene, { allowBends: false })).toEqual([])
+    const ids = scene.elements.map((e) => e.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    for (const edge of paths(scene, "gen:")) {
+      expect(edge.points).toHaveLength(2)
+      expect(edge.dashed).toBe(false)
+      const [[x1, y1], [x2, y2]] = edge.points
+      expect(Math.abs(x1 - x2) < 1e-6 || Math.abs(y1 - y2) < 1e-6).toBe(true)
+    }
+    const heads = scene.elements.filter((e): e is Path => e.type === "path" && e.id.startsWith("gen:") && e.id.endsWith("#end"))
+    const parentIds = [...new Set(parents.values())]
+    expect(heads).toHaveLength(parentIds.length)
+    for (const parent of parentIds) {
+      const mine = heads.filter((h) => h.id.endsWith(`>${parent}#end`))
+      expect(mine).toHaveLength(1)
+      expect(mine[0].closed).toBe(true)
+      expect(mine[0].fill).toBe("#fff") // tam giác rỗng
+      const stem = scene.find(mine[0].id.replace(/#end$/, "")) as Path
+      const head = scene.find(`actor:${parent}#head`) as Ellipse
+      expect(stem.points[1][0]).toBeCloseTo(head.cx, 6) // thân dọc chạm thẳng dưới actor cha
+      expect(stem.points[1][1]).toBeLessThan(stem.points[0][1]) // đầu mũi tên ở phía cha (trên)
+    }
+  }
+
+  it("cây nhiều tầng: con dưới cha, mỗi cha một thân + một tam giác rỗng, đoạn nối chỉ ngang/dọc, không lỗi bố cục", () => {
     const actors = [actor("G"), actor("R", true), actor("M", true), actor("Ad"), actor("Au", true), actor("V"), actor("An"), actor("L")]
     const parents = new Map([["M", "R"], ["Ad", "R"], ["Au", "M"], ["V", "M"], ["An", "Au"], ["L", "Au"]])
     const scene = layoutActorHierarchy(actors, parents)
-    expect(checkScene(scene, { allowBends: false })).toEqual([])
-    const edges = paths(scene, "gen:")
-    expect(edges).toHaveLength(parents.size)
-    for (const edge of edges) {
-      expect(edge.points).toHaveLength(2)
-      expect(edge.dashed).toBe(false)
-      const head = arrowOf(scene, edge.id)
-      expect(head.closed).toBe(true)
-      expect(head.fill).toBe("#fff") // tam giác rỗng
-      // đầu mũi tên ở phía cha, phía trên đầu actor con
-      expect(edge.points[1][1]).toBeLessThan(edge.points[0][1])
-    }
+    expectTree(scene, parents)
     const headY = (id: string) => (scene.find(`actor:${id}#head`) as Ellipse).cy
     for (const [child, parent] of parents) expect(headY(child)).toBeGreaterThan(headY(parent))
     expect(scene.toSvg()).toMatch(/font-style="italic"[^>]*>Role R</)
+  })
+
+  it("FLF-421: 1 cha + 4 con ⇒ một thanh ngang chung, mỗi con một đoạn dọc trên đầu, đúng MỘT tam giác chạm cha", () => {
+    const kids = ["A1", "A2", "A3", "A4"]
+    const parents = new Map(kids.map((k): [string, string] => [k, "U"]))
+    const scene = layoutActorHierarchy([actor("U", true), ...kids.map((k) => actor(k))], parents)
+    expectTree(scene, parents)
+    const bus = scene.find("gen:bus>U") as Path
+    expect(bus.points[0][1]).toBeCloseTo(bus.points[1][1], 6)
+    for (const kid of kids) {
+      const stub = scene.find(`gen:${kid}>U`) as Path
+      const head = scene.find(`actor:${kid}#head`) as Ellipse
+      expect(stub.points[0][0]).toBeCloseTo(head.cx, 6)
+      expect(stub.points[0][1]).toBeLessThan(head.cy - head.ry) // bắt đầu trên đỉnh đầu, chừa khoảng
+      expect(stub.points[1][1]).toBeCloseTo(bus.points[0][1], 6) // chạm thanh ngang
+      expect(scene.find(`gen:${kid}>U#end`)).toBeUndefined()
+    }
+  })
+
+  it("1 cha + 3 con (con giữa cùng trục với thân) vẫn sạch", () => {
+    const parents = new Map(["A1", "A2", "A3"].map((k): [string, string] => [k, "U"]))
+    expectTree(layoutActorHierarchy([actor("U"), actor("A1"), actor("A2"), actor("A3")], parents), parents)
+  })
+
+  it("1 cha + 1 con ⇒ một đoạn dọc thẳng từ đầu con lên cha, một tam giác", () => {
+    const parents = new Map([["A1", "U"]])
+    const scene = layoutActorHierarchy([actor("U"), actor("A1")], parents)
+    expectTree(scene, parents)
+    expect(paths(scene, "gen:").map((p) => p.id)).toEqual(["gen:A1>U"])
   })
 
   it("không có cạnh nào: chỉ các hình que, không đường", () => {
@@ -302,7 +346,7 @@ describe("layoutActorHierarchy", () => {
   it("nhiều gốc và cây rộng không chồng nhau", () => {
     const actors = [actor("P1"), actor("P2"), ...Array.from({ length: 8 }, (_, i) => actor(`C${i}`))]
     const parents = new Map(actors.slice(2).map((c, i): [string, string] => [c.id, i < 5 ? "P1" : "P2"]))
-    expect(checkScene(layoutActorHierarchy(actors, parents), { allowBends: false })).toEqual([])
+    expectTree(layoutActorHierarchy(actors, parents), parents)
   })
 })
 

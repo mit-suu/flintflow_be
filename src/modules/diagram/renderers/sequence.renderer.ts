@@ -17,15 +17,22 @@
  *   có dữ liệu `loop` nên không sinh `loop`.
  * - Số message: stimulus (request từ actor, hoặc message đầu tiên) là `1`, `2`…; mọi message sau đó cho tới stimulus kế
  *   tiếp (kể cả response) là `n.1`, `n.2`… liên tục qua các operand.
+ *
+ * FLF-418 — MỨC THÀNH PHẦN (`RenderContext.sequenceLevel = component`, ký pháp Visual Paradigm): function có
+ * `component_interactions` (≥ 2 message) vẽ actor → `boundary` (màn) → `control` (`<Feature>Controller`, tên tính khi vẽ)
+ * → `entity`; actor ngoài còn lại bên phải. Cùng luật mũi tên / activation / `alt` / `opt` / đánh số (request từ boundary hay
+ * control không mở số mới). Function chưa có dữ liệu mức thành phần vẽ mức hệ thống.
  */
 
 import type { Actor, FunctionInteraction, Spine, SpineFunction } from "../../spine/spine.types.js"
-import { SYSTEM_LIFELINE } from "../../spine/spine.schema.js"
+import { CONTROL_LIFELINE, SYSTEM_LIFELINE } from "../../spine/spine.schema.js"
+import { DEFAULT_SEQUENCE_LEVEL } from "../../../shared/diagram/sequence-level.js"
 import type { RenderedPart, Renderer } from "./common.js"
 import { alias, byId, label, puml } from "./common.js"
 import { DIAGRAM_LABELS, type DiagramLabels } from "./labels.js"
 
 const SYSTEM_ALIAS = "SSD_SYSTEM"
+const CONTROL_ALIAS = "SD_CONTROL"
 
 /**
  * Theme Visual Paradigm viết thẳng vào nguồn (`!include` bị cấm: PlantUML server không đọc được file).
@@ -45,6 +52,13 @@ const THEME: readonly string[] = [
   "skinparam ActorBorderColor #000000",
   "skinparam ParticipantBackgroundColor #7ACFF5",
   "skinparam ParticipantBorderColor #000000",
+  // FLF-418: lifeline mức thành phần cùng màu VP
+  "skinparam BoundaryBackgroundColor #7ACFF5",
+  "skinparam BoundaryBorderColor #000000",
+  "skinparam ControlBackgroundColor #7ACFF5",
+  "skinparam ControlBorderColor #000000",
+  "skinparam EntityBackgroundColor #7ACFF5",
+  "skinparam EntityBorderColor #000000",
   "skinparam SequenceLifeLineBorderColor #000000",
   "skinparam SequenceLifeLineBackgroundColor #7ACFF5",
   "skinparam SequenceLifeLineBorderThickness 1",
@@ -90,7 +104,16 @@ interface Built {
   sub: number
 }
 
-const buildBody = (list: readonly FunctionInteraction[], aliasOf: (id: string) => string, labels: DiagramLabels): string[] => {
+/**
+ * `isStimulus`: request mở số mới (`1`, `2`…). Mức hệ thống: request không xuất phát từ `system`; mức thành phần: request từ
+ * actor (boundary / control gọi tiếp là `n.m`).
+ */
+const buildBody = (
+  list: readonly FunctionInteraction[],
+  aliasOf: (id: string) => string,
+  labels: DiagramLabels,
+  isStimulus: (i: FunctionInteraction) => boolean = (i) => i.kind === "request" && i.from !== SYSTEM_LIFELINE
+): string[] => {
   const state: Built = { lines: [], open: [], stimulus: 0, sub: 0 }
   const guardOf = (i: FunctionInteraction): string => text(i.guard) || (i.flow === "abnormal" ? labels.errorGuard : "")
   const emit = (depth: number, line: string): void => void state.lines.push(`${"  ".repeat(depth)}${line}`)
@@ -98,7 +121,7 @@ const buildBody = (list: readonly FunctionInteraction[], aliasOf: (id: string) =
   /** `floor`: activation ở vị trí nhỏ hơn không được đóng ở đây (message trong `opt` không đóng activation bên ngoài). */
   const message = (i: FunctionInteraction, depth: number, floor: number): void => {
     const asked = list.indexOf(i)
-    const starts = (i.kind === "request" && i.from !== SYSTEM_LIFELINE) || state.stimulus === 0
+    const starts = isStimulus(i) || state.stimulus === 0
     if (starts) {
       state.stimulus += 1
       state.sub = 0
@@ -202,8 +225,56 @@ export const sequenceSource = (spine: Spine, fn: SpineFunction, labels: DiagramL
   return puml("@startuml", [...THEME, ...declarations, ...buildBody(list, aliasOf, labels)], "@enduml")
 }
 
-export const renderSequence: Renderer = (spine, _ownerId, labels = DIAGRAM_LABELS.en): RenderedPart[] =>
-  byId(spine.functions)
+/** FLF-418: nguồn `.puml` đã vẽ là mức thành phần (có lifeline control). Chú thích ảnh đọc từ hình thật, không đoán lại mức. */
+export const isComponentSequenceSource = (source: string): boolean => new RegExp(`^control .* as ${CONTROL_ALIAS}$`, "m").test(source)
+
+/** FLF-418: function đủ dữ liệu để vẽ mức thành phần. */
+export const hasComponentSequence = (fn: SpineFunction): boolean => (fn.component_interactions ?? []).length >= 2
+
+/** Bỏ dấu tiếng Việt, giữ chữ + số, viết hoa đầu mỗi từ: "Authentication & Onboarding" ⇒ "AuthenticationOnboarding". */
+const pascal = (value: string): string =>
+  value
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[đĐ]/g, (c) => (c === "đ" ? "d" : "D"))
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((w) => w[0].toUpperCase() + w.slice(1))
+    .join("")
+
+/** Tên control của function: một controller theo feature (FLF-418 03 #5), không lưu trong Spine. */
+export const controllerName = (spine: Spine, fn: SpineFunction, labels: DiagramLabels = DIAGRAM_LABELS.en): string =>
+  `${pascal(text(spine.features.find((f) => f.id === fn.feature_id)?.name)) || "Function"}${labels.controllerSuffix}`
+
+/** Nguồn `.puml` mức thành phần của một function (`component_interactions`). */
+export const componentSequenceSource = (spine: Spine, fn: SpineFunction, labels: DiagramLabels = DIAGRAM_LABELS.en): string => {
+  const list = fn.component_interactions ?? []
+  const actors = new Map(spine.actors.map((a) => [a.id, a]))
+  const screens = new Map(spine.screens.map((s) => [s.id, s]))
+  const entities = new Map(spine.entities.map((e) => [e.id, e]))
+  const ends = new Set(list.flatMap((i) => [i.from, i.to]))
+  const stimulus = list[0]?.from
+  const actorIds = byId([...ends].filter((id) => actors.has(id)).map((id) => ({ id })))
+  const left = actorIds.filter(({ id }) => !isExternal(actors.get(id)) || id === stimulus)
+  const right = actorIds.filter(({ id }) => isExternal(actors.get(id)) && id !== stimulus)
+  const boundaries = byId([...ends].filter((id) => screens.has(id)).map((id) => ({ id })))
+  const entityIds = byId([...ends].filter((id) => entities.has(id)).map((id) => ({ id })))
+  const nameOf = (id: string): string => label(text(actors.get(id)?.name ?? screens.get(id)?.name ?? entities.get(id)?.name) || id)
+  const aliasOf = (id: string): string => (id === CONTROL_LIFELINE ? CONTROL_ALIAS : alias(id))
+  const declarations = [
+    ...left.map(({ id }) => `${isExternal(actors.get(id)) ? "participant" : "actor"} ":${nameOf(id)}" as ${aliasOf(id)}`),
+    ...boundaries.map(({ id }) => `boundary ":${nameOf(id)}" as ${aliasOf(id)}`),
+    ...(ends.has(CONTROL_LIFELINE) ? [`control ":${label(controllerName(spine, fn, labels))}" as ${CONTROL_ALIAS}`] : []),
+    ...entityIds.map(({ id }) => `entity ":${nameOf(id)}" as ${aliasOf(id)}`),
+    ...right.map(({ id }) => `participant ":${nameOf(id)}" as ${aliasOf(id)}`)
+  ]
+  const isStimulus = (i: FunctionInteraction): boolean => i.kind === "request" && actors.has(i.from)
+  return puml("@startuml", [...THEME, ...declarations, ...buildBody(list, aliasOf, labels, isStimulus)], "@enduml")
+}
+
+export const renderSequence: Renderer = (spine, _ownerId, labels = DIAGRAM_LABELS.en, context = {}): RenderedPart[] => {
+  const component = (context.sequenceLevel ?? DEFAULT_SEQUENCE_LEVEL) === "component"
+  return byId(spine.functions)
     .filter((fn) => needsSequence(fn, spine.actors))
     .map((fn) => ({
       kind: "sequence" as const,
@@ -211,5 +282,6 @@ export const renderSequence: Renderer = (spine, _ownerId, labels = DIAGRAM_LABEL
       owner_kind: "function",
       owner_id: fn.id,
       format: "puml" as const,
-      source: sequenceSource(spine, fn, labels)
+      source: component && hasComponentSequence(fn) ? componentSequenceSource(spine, fn, labels) : sequenceSource(spine, fn, labels)
     }))
+}

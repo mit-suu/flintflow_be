@@ -49,6 +49,17 @@ describe("withDrawnUser", () => {
     expect(drawn.use_cases.every((u) => u.actor_ids.filter((id) => humanIds.has(id)).length <= 1)).toBe(true)
   })
 
+  it("ShuttleBook 13/11: actor đã kế thừa chính User trong file ⇒ không thêm cạnh trùng, sơ đồ vẽ được", () => {
+    const s = qlhs()
+    s.use_cases = []
+    s.actors = [human("A05", "User") as never, human("A06", "Customer", "A05") as never, human("A07", "Front Desk Staff") as never]
+    s.use_cases.push(uc("UC-01", "Log In", ["A06", "A07"]) as never)
+    const drawn = withDrawnUser(s)
+    expect(drawnGeneralizations(drawn)).toEqual([])
+    expect(drawn.actors.find((a) => a.id === "A07")?.parent_id).toBe("A05")
+    expect(() => renderUseCase(s)).not.toThrow()
+  })
+
   it("TechMart 11/11: actor kế thừa actor khác cùng use case không tính là actor thứ hai ⇒ use case giữ cha (Guest), không thành User", () => {
     const s = qlhs()
     s.use_cases = s.use_cases.filter((u) => u.actor_ids.length < 2)

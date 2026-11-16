@@ -8,7 +8,7 @@ vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await imp
 
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { createMode1Project, fakeMode1, mode1Api } from "../../helpers/mode1.js"
-import { importAtExtracting } from "../../helpers/mode1-import-p4.js"
+import { importAtExtracting, useExtractConcurrency } from "../../helpers/mode1-import-p4.js"
 import { seedFixture } from "../../setup.js"
 import { AI_BLOCK_CHARS, estimateExtraction, runExtraction } from "../../../src/modules/import/extract.service.js"
 import { ExtractionDraft } from "../../../src/modules/import/extraction-draft.model.js"
@@ -19,6 +19,9 @@ import { buildPlaceholderPng } from "../../../src/modules/render/diagram-placeho
 import { CreditWallet } from "../../../src/modules/credits/credit-wallet.model.js"
 import { Membership } from "../../../src/modules/organization/membership.model.js"
 import { Usage } from "../../../src/modules/spine/usage.model.js"
+
+// Khẳng định thứ tự lượt gọi / số dư ví của bản tuần tự (FLF-392: song song ở extract-parallel.int.test.ts)
+useExtractConcurrency(1)
 
 /** Lượt gọi provider (kể cả retry): section + đoạn đánh dấu lô (`P01`…) có trong prompt. */
 let calls: { section: string; marks: string[]; image: boolean }[] = []
@@ -75,7 +78,7 @@ describe("I-4 - chạy tiếp theo từng lô", () => {
     expect(await deducted(ctx.projectId, "I-4:fixed:1")).toBe(1)
     const paused = (await ExtractionDraft.findOne({ import_id: ctx.importId, section_id: "fixed:1" }).lean())!
     expect(paused).toMatchObject({ status: "failed", partial: { steps_done: 1 } })
-    expect(paused.partial!.items.length).toBeGreaterThan(0)
+    expect(paused.partial!.raw_steps).toHaveLength(1)
     expect(await wallet(ctx.userId)).toMatchObject({ balance: 998, reserved: 0 })
 
     // ước tính lúc dừng = phần còn lại (2 lô của mục 1 + 5 mục chữ khác)
@@ -128,7 +131,7 @@ describe("I-4 - ước tính credit", () => {
     }
   }
 
-  it("ước tính = số lượt AI + credit thật của lượt chạy (lô chữ + ảnh đọc được)", async () => {
+  it("ước tính = số lượt AI + trần giữ credit (quyết toán token thực tế ≤ ước tính)", async () => {
     const ctx = await importAtExtracting(IMAGES)
     const estimate = await estimateExtraction(ctx.projectId, { _id: ctx.importId } as never)
     const before = (await wallet(ctx.userId))!.balance
@@ -138,9 +141,12 @@ describe("I-4 - ước tính credit", () => {
       text_batches: calls.filter((c) => !c.image).length,
       diagram_images: calls.filter((c) => c.image).length,
       ai_calls: calls.length,
-      credits: charged
+      credits: 18
     })
-    expect(estimate).toMatchObject({ text_batches: 8, diagram_images: 1 })
+    expect(estimate).toMatchObject({ text_batches: 8, diagram_images: 1, ai_calls: 9, credits: 18 })
+    // estimate.credits là cận trên mức giữ (18 = 9 lượt × 2), còn thực trừ quyết toán theo token nên <= 18
+    expect(charged).toBeGreaterThanOrEqual(calls.length)
+    expect(charged).toBeLessThanOrEqual(estimate!.credits)
     expect(await Usage.countDocuments({ projectId: ctx.projectId, state: "deducted" })).toBe(calls.length)
     // xong hết ⇒ không còn gì phải chạy
     expect(await estimateExtraction(ctx.projectId, { _id: ctx.importId } as never)).toMatchObject({ ai_calls: 0, credits: 0 })

@@ -73,6 +73,19 @@ describe("finalize - field ⇒ thực thể ⇒ op", () => {
     expect([...collectEntities(fields).values()].map((e) => e.id)).toEqual(["UC-01", "UC-02", "UC-03", "E15"])
   })
 
+  it("FLF-411 (#7): use case chỉ có trên sơ đồ (mục trước bảng) đứng SAU các dòng bảng, giữa chúng theo thứ tự ảnh", () => {
+    const fields = [
+      // 2.2.1: sơ đồ use case có UC-01…UC-04, chỉ UC-01, UC-02 có dòng trong bảng 2.2.2
+      field("use_cases[id=UC-03].name", "Pay", 0.7, false, { origin: "vision" }),
+      field("use_cases[id=UC-01].name", "View Menu", 0.7, false, { origin: "vision" }),
+      field("use_cases[id=UC-04].name", "Rate", 0.7, false, { origin: "vision" }),
+      field("use_cases[id=UC-02].name", "Order a Meal", 0.7, false, { origin: "vision" }),
+      field("use_cases[id=UC-01].description", "Patron views the menu", 1, false, { origin: "deterministic" }),
+      field("use_cases[id=UC-02].description", "Patron orders", 1, false, { origin: "deterministic" })
+    ]
+    expect([...collectEntities(fields).values()].map((e) => e.id)).toEqual(["UC-01", "UC-02", "UC-03", "UC-04"])
+  })
+
   it("mọi thực thể thành một lô op duy nhất, chạy khô hợp lệ trên Spine rỗng với by import", () => {
     const fields = [
       field("project.vision", "Lumen is an online learning platform."),
@@ -142,11 +155,85 @@ describe("FLF-343 needsReviewFindings - chỗ độ tin thấp vào baseline kè
       ["fixed:2.1", "B0001"],
       ["fixed:I", "B0002"],
       ["fixed:2.1", "B0010"],
-      ["fixed:2.1", "actors[id=A01].kind"],
-      ["fixed:2.1", "actors[id=A02].kind"]
+      // FLF-411 (U2-5): field đọc bằng chữ gộp theo phần tử, target = đường dẫn phần tử
+      ["fixed:2.1", "actors[id=A01]"],
+      // FLF-411 (U2-1): field đọc từ ảnh gộp theo ảnh, target = block ảnh
+      ["fixed:2.1", "B0005"]
     ])
     expect(out.every((f) => f.message.startsWith("Cần xem:"))).toBe(true)
     expect(out[4].message).toContain("đọc từ ảnh")
+  })
+})
+
+describe("FLF-411 (U2-1) needsReviewFindings - đọc từ ảnh sơ đồ: một cờ mỗi ảnh, nêu tên phần tử", () => {
+  it("nhiều field của nhiều actor trên một ảnh ⇒ một cờ; hai ảnh cùng mục ⇒ hai cờ đánh số; không mã nội bộ, không khoá thô", async () => {
+    const { needsReviewFindings } = await import("./finalize.service.js")
+    const vision = (path: string, value: unknown, block: string) => field(path, value, 0.7, false, { origin: "vision", source_block_ids: [block] })
+    const drafts = [
+      {
+        section_id: "fixed:1",
+        fields: [
+          vision("project.system_name", "ShuttleBook", "B0100"),
+          vision("actors[id=A02].name", "Customer", "B0100"),
+          vision("actors[id=A02].kind", "human", "B0100"),
+          vision("actors[id=A02].flows_in", ["Booking info"], "B0100"),
+          vision("actors[id=A02].flows_out", ["Booking request"], "B0100"),
+          vision("actors[id=A07].kind", "system", "B0100"),
+          vision("actors[id=A07].flows_in", ["Payment result"], "B0101")
+        ]
+      }
+    ]
+    const spine = {
+      ...createEmptySpine(),
+      actors: [
+        { id: "A02", name: "Customer", flows_in: ["Booking info"], flows_out: ["Booking request"] },
+        { id: "A07", name: "Payment Gateway", flows_in: ["Payment result"], flows_out: [] }
+      ]
+    } as unknown as Parameters<typeof needsReviewFindings>[0]
+    const layout = [{ order: 0, heading_text: "Context Diagram", level: 2, section_id: "fixed:1" }]
+    const out = needsReviewFindings(spine, drafts, { heading_map: [], table_map: [] }, layout, new Map(), () => null)
+    expect(out.map((f) => f.target_id)).toEqual(["B0100", "B0101"])
+    expect(out[0].message).toBe(
+      'Cần xem: dữ liệu đọc từ ảnh sơ đồ thứ 1 trong mục "Context Diagram" (Tên hệ thống, tác nhân "Customer", tác nhân "Payment Gateway"); đã đưa vào bản 0.1, sai thì sửa bằng change request'
+    )
+    expect(out[1].message).toContain('ảnh sơ đồ thứ 2 trong mục "Context Diagram" (tác nhân "Payment Gateway")')
+    for (const f of out) expect(f.message).not.toMatch(/A0\d|flows_|\[id=/)
+  })
+})
+
+describe("FLF-411 (U2-5) needsReviewFindings - đọc bằng chữ: một cờ mỗi phần tử, nêu tên và các trường", () => {
+  it("nhiều field độ tin thấp của một phần tử ⇒ một cờ; không tên ⇒ trích câu; không mã nội bộ / khoá thô", async () => {
+    const { needsReviewFindings } = await import("./finalize.service.js")
+    const drafts = [
+      {
+        section_id: "fixed:5.4",
+        fields: [
+          field("other_requirements[id=OR-02].category", "legal", 0.69),
+          field("other_requirements[id=OR-02].statement", "The system shall keep invoices for 10 years", 0.65)
+        ]
+      },
+      {
+        section_id: "fixed:3.1.4",
+        fields: [
+          field("functions[id=FR-3.2.1].name", "Login", 0.95),
+          field("functions[id=FR-3.2.1].trigger", "User clicks Log in", 0.61),
+          field("functions[id=FR-3.2.1].description", "Logs the user in", 0.66)
+        ]
+      }
+    ]
+    const spine = {
+      ...createEmptySpine(),
+      other_requirements: [{ id: "OR-02", statement: "The system shall keep invoices for 10 years" }],
+      functions: [{ id: "FR-3.2.1", name: "Login" }]
+    } as unknown as Parameters<typeof needsReviewFindings>[0]
+    const out = needsReviewFindings(spine, drafts, { heading_map: [], table_map: [] }, [], new Map(), () => null)
+    expect(out.map((f) => [f.section_id, f.target_id])).toEqual([
+      ["fixed:5.4", "other_requirements[id=OR-02]"],
+      ["fixed:3.1.4", "functions[id=FR-3.2.1]"]
+    ])
+    expect(out[0].message).toMatch(/^Cần xem: Yêu cầu khác "The system shall keep invoices for 10 years" - .+, .+ \(độ tin 65%\)/)
+    expect(out[1].message).toMatch(/^Cần xem: Chức năng "Login" - .+, .+ \(độ tin 61%\)/)
+    for (const f of out) expect(f.message).not.toMatch(/OR-02|FR-3|\[id=|category|trigger/)
   })
 })
 
@@ -167,7 +254,9 @@ describe("FLF-361 needsReviewFindings - không hỏi lại chỗ không vào Spi
       business_rules: [{ id: "BR-01", tier: "detail" }]
     } as unknown as Parameters<typeof needsReviewFindings>[0]
     const out = needsReviewFindings(spine, drafts, { heading_map: [], table_map: [] }, [], new Map(), () => null)
-    expect(out.map((f) => f.target_id)).toEqual(["use_cases[id=UC-11].actor_ids"])
+    // FLF-411 (U2-1): cờ đọc từ ảnh theo ảnh (block B0005), chỉ còn chỗ đã vào Spine
+    expect(out.map((f) => f.target_id)).toEqual(["B0005"])
+    expect(out[0].message).toContain("(use case UC-11)")
   })
 })
 
@@ -207,6 +296,6 @@ describe("FLF-343 needsReviewFindings - trùng đường dẫn, phần tử bị
     ]
     const spine = { ...createEmptySpine(), actors: [{ id: "A01" }] } as unknown as Parameters<typeof needsReviewFindings>[0]
     const out = needsReviewFindings(spine, drafts, { heading_map: [], table_map: [] }, [], new Map(), () => null)
-    expect(out.map((f) => f.target_id)).toEqual(["actors[id=A01].kind"])
+    expect(out.map((f) => f.target_id)).toEqual(["actors[id=A01]"])
   })
 })

@@ -330,6 +330,12 @@ const styleChain = (styles: Map<string, StyleInfo>, id: string | null): StyleInf
 }
 
 const HEADING_NAME = /^heading ([1-9])$/i
+/**
+ * Style tiêu đề trang bìa của Word (`Title`, `Subtitle`) — không bao giờ là heading của tài liệu, kể cả khi style mang `outlineLvl`
+ * (file xuất từ Google Docs khai báo style trùng id, bản sau có `outlineLvl` 0 ⇒ "for", "<Project>" thành heading cấp 1).
+ */
+const COVER_TITLE_NAME = /^(title|subtitle)$/i
+const isCoverTitle = (chain: StyleInfo[]): boolean => COVER_TITLE_NAME.test(chain[0]?.name ?? "")
 const TOC_NAME = /^(toc [1-9]|table of figures|toc heading)$/i
 const TOC_LEVEL = /^toc ([1-9])$/i
 /** Style danh sách (`List Paragraph`, `List Bullet`…) — đoạn đánh số của nó là mục danh sách, không phải heading. */
@@ -417,7 +423,7 @@ const paragraphFormat = (p: Element, chain: StyleInfo[], fallbackSize: number): 
  * sách / chú thích — "Team Title 1" của nhóm không đặt tên `heading N` cũng không có `outlineLvl`.
  */
 const isTitleStyle = (chain: StyleInfo[]): boolean =>
-  chain.length > 0 && !chain[0].isDefault && chain.some((s) => s.bold === true) && !chain.some((s) => LIST_STYLE.test(s.name) || CAPTION_NAME.test(s.name))
+  chain.length > 0 && !chain[0].isDefault && !isCoverTitle(chain) && chain.some((s) => s.bold === true) && !chain.some((s) => LIST_STYLE.test(s.name) || CAPTION_NAME.test(s.name))
 
 /** Đánh số tự động của đoạn (`numPr`, theo đoạn rồi style): `numId` + cấp `ilvl`; không đánh số / `numId = 0` ⇒ `null`. */
 const numberingOf = (pPr: Element | undefined, chain: StyleInfo[]): { numId: string | null; ilvl: number } | null => {
@@ -551,11 +557,18 @@ interface PreScan {
   bodyColor: string | null
   sizeLevels: Map<number, number>
   numbering: NumberingInfo
+  /**
+   * Đoạn mở đầu phần thân (mục lục / heading có style đầu tiên); `null` = không nhận ra. Heading theo định dạng chỉ nhận từ đoạn này trở
+   * đi — dòng chữ to / đậm trên trang bìa ("Version 1.0 approved", "Prepared by …") không phải heading.
+   */
+  bodyStart: Element | null
+  /** Tiêu đề "Table of Contents" / "Mục lục" đứng ngay trước mục lục thật (field / style `toc N` / content control) — không phải mục. */
+  tocTitles: Set<Element>
 }
 
 /** Style heading thật (tên `heading N` hoặc có `outlineLvl`) — không tính vào cỡ chữ thân bài. */
 const isHeadingStyled = (pPr: Element | undefined, chain: StyleInfo[]): boolean =>
-  (!!pPr && wAttr(wKid(pPr, "outlineLvl"), "val") !== null) || chain.some((s) => HEADING_NAME.test(s.name) || s.outlineLvl !== null)
+  !isCoverTitle(chain) && ((!!pPr && wAttr(wKid(pPr, "outlineLvl"), "val") !== null) || chain.some((s) => HEADING_NAME.test(s.name) || s.outlineLvl !== null))
 
 const inTocSdt = (p: Element, stop: Element): boolean => {
   for (let x = p.parentNode; x && x !== stop; x = x.parentNode) if (isW(x, "sdt") && isTocSdt(x)) return true
@@ -592,6 +605,9 @@ const preScan = (body: Element, styles: Map<string, StyleInfo>, stylesDoc: Docum
   let run: { p: Element; text: string }[] = []
   let runAfterTitle = false
   let lastWasTitle = false
+  /** Đoạn "Table of Contents" vừa gặp, chờ xem đoạn có chữ kế tiếp có phải mục lục thật không. */
+  let pendingTocTitle: { p: Element; idx: number } | null = null
+  const tocTitles = new Set<Element>()
   let bodyStart: number | null = null
   const flush = (idx: number) => {
     if (run.length) runs.push({ lines: run, afterTitle: runAfterTitle, end: idx })
@@ -602,6 +618,12 @@ const preScan = (body: Element, styles: Map<string, StyleInfo>, stylesDoc: Docum
     const chain = styleChain(styles, pPr ? wAttr(wKid(pPr, "pStyle"), "val") : null)
     const text = paragraphText(p)
     if (tocParagraph(p, chain, tracker, pPr, body)) {
+      // Tiêu đề mục lục thuộc phần thân (định dạng của nó cùng kiểu heading thật — tính vào cỡ chữ heading), trang bìa đứng trước nó
+      if (pendingTocTitle) {
+        tocTitles.add(pendingTocTitle.p)
+        bodyStart = Math.min(bodyStart ?? pendingTocTitle.idx, pendingTocTitle.idx)
+      }
+      pendingTocTitle = null
       const tocStyle = chain.find((s) => TOC_NAME.test(s.name))
       const m = tocStyle ? TOC_LEVEL.exec(tocStyle.name) : null
       const e = parseTocLine(text, m ? Number(m[1]) : null)
@@ -618,6 +640,7 @@ const preScan = (body: Element, styles: Map<string, StyleInfo>, stylesDoc: Docum
     flush(idx)
     laterKeys.push({ idx, key: tocKey(text) })
     lastWasTitle = TOC_TITLE.test(text.trim())
+    pendingTocTitle = lastWasTitle ? { p, idx } : null
     if (isHeadingStyled(pPr, chain)) {
       bodyStart ??= idx
       return
@@ -648,7 +671,17 @@ const preScan = (body: Element, styles: Map<string, StyleInfo>, stylesDoc: Docum
     if (c.size >= bodySize + LARGE_DELTA || (c.titleStyle && c.size >= bodySize)) counts.set(c.size, (counts.get(c.size) ?? 0) + 1)
   }
   const large = [...counts].filter(([, n]) => n >= 2).map(([size]) => size).sort((a, b) => b - a)
-  return { toc: new TocIndex(entries), handToc, defaultSize, bodySize, bodyColor, sizeLevels: new Map(large.map((size, i) => [size, Math.min(9, i + 1)])), numbering }
+  return {
+    toc: new TocIndex(entries),
+    handToc,
+    defaultSize,
+    bodySize,
+    bodyColor,
+    sizeLevels: new Map(large.map((size, i) => [size, Math.min(9, i + 1)])),
+    numbering,
+    bodyStart: bodyStart === null ? null : paras[bodyStart] ?? null,
+    tocTitles
+  }
 }
 
 export const parseBlocks = (
@@ -665,6 +698,8 @@ export const parseBlocks = (
   const tocTracker = new TocFieldTracker()
   /** Đã qua mục lục — chỉ sau đó đoạn không số mới được nhận là heading nhờ trùng mục lục. */
   let pastToc = false
+  /** Đã tới phần thân (`pre.bodyStart`) — heading theo định dạng chỉ nhận từ đây, trang bìa không tính. */
+  let reachedBody = pre.bodyStart === null
   /** Số mục theo thứ tự heading có đánh số (gõ tay hoặc `numPr`) — suy số Word tự sinh (`auto_number`). */
   let outline: number[] = []
   const noteHeading = (level: number, text: string, autoNumbered: boolean): string | null => {
@@ -707,12 +742,15 @@ export const parseBlocks = (
     const styleId = pPr ? wAttr(wKid(pPr, "pStyle"), "val") : null
     const chain = styleChain(styles, styleId)
     const styleName = chain[0]?.name || null
+    if (p === pre.bodyStart) reachedBody = true
     // Mục lục (style, field nhiều đoạn, gõ tay) không bao giờ thành nội dung — FLF-343 dùng nó làm tín hiệu heading (`pre.toc`)
     if (tocParagraph(p, chain, tocTracker, pPr, body) || pre.handToc.has(p)) {
       pastToc = true
       return
     }
     const text = paragraphText(p)
+    // Tiêu đề của mục lục thật ("Table of Contents" ngay trên field TOC) — kể cả khi đặt style heading — không phải mục của tài liệu
+    if (!cell && pre.tocTitles.has(p)) return
     const embedded = hasEmbeddedObject(p)
     const base = {
       para_id: p.getAttributeNS(NS.w14, "paraId") || null,
@@ -738,7 +776,13 @@ export const parseBlocks = (
     let numbering: { numId: string | null; ilvl: number } | null = null
     if (chain.some((s) => CAPTION_NAME.test(s.name))) kind = "caption"
     else if (!cell && CAPTION_TEXT.test(text.trim())) kind = "caption"
-    else if (!cell) {
+    else if (!cell && !isCoverTitle(chain)) {
+      // Đánh số tự động của đoạn — tính trước: đoạn gạch đầu dòng gõ số ("1.1 Document Purpose" trong mục lục dạng danh sách)
+      // không phải heading theo mẫu số
+      numbering = numberingOf(pPr, chain)
+      const listStyle = chain.some((s) => LIST_STYLE.test(s.name))
+      const numLevelInfo = numbering?.numId ? pre.numbering.get(numbering.numId) : undefined
+      const numFmt = numLevelInfo?.levels.get(numbering?.ilvl ?? 0)?.numFmt ?? null
       const direct = pPr ? wAttr(wKid(pPr, "outlineLvl"), "val") : null
       if (direct !== null && Number(direct) < 9) {
         level = Number(direct) + 1
@@ -760,7 +804,7 @@ export const parseBlocks = (
           }
         }
       }
-      if (level === null) {
+      if (level === null && numFmt !== "bullet") {
         const numbered = numberingPatternLevel(text)
         if (numbered !== null) {
           level = numbered
@@ -770,13 +814,9 @@ export const parseBlocks = (
       // FLF-343: heading không style — trùng một dòng mục lục, đánh số tự động in đậm / chữ to, hoặc chữ to hơn thân bài
       const fmt = paragraphFormat(p, chain, pre.defaultSize)
       const large = fmt.size >= pre.bodySize + LARGE_DELTA
-      numbering = numberingOf(pPr, chain)
       // Đoạn không gõ số chỉ khớp mục lục khi đứng sau mục lục và có thêm tín hiệu định dạng (đậm / to / đánh số tự động)
       const tocHit =
         pre.toc.size && headingLike(text) ? pre.toc.find(text, { unnumbered: pastToc && (fmt.bold || large || numbering !== null) }) : null
-      const listStyle = chain.some((s) => LIST_STYLE.test(s.name))
-      const numLevelInfo = numbering?.numId ? pre.numbering.get(numbering.numId) : undefined
-      const numFmt = numLevelInfo?.levels.get(numbering?.ilvl ?? 0)?.numFmt ?? null
       // Đánh số tự động là heading khi: không phải gạch đầu dòng, không phải style danh sách, chữ dạng tiêu đề, in đậm / to; và
       // danh sách là dàn mục (`%1.%2`) hoặc có thêm tín hiệu khác (chữ to / trùng mục lục)
       const outlineList = !!numLevelInfo?.outline
@@ -796,7 +836,7 @@ export const parseBlocks = (
         level = Math.min(9, numbering.ilvl + 1)
         detector = "numbering"
       }
-      if (level === null && (large || (isTitleStyle(chain) && fmt.size >= pre.bodySize)) && headingLike(text) && pre.sizeLevels.has(fmt.size)) {
+      if (level === null && reachedBody && (large || (isTitleStyle(chain) && fmt.size >= pre.bodySize)) && headingLike(text) && pre.sizeLevels.has(fmt.size)) {
         level = pre.sizeLevels.get(fmt.size)!
         detector = "format"
       }

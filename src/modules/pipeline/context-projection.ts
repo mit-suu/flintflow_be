@@ -18,14 +18,19 @@
 import type { Addendum, Assumption, Spine } from "../spine/spine.types.js"
 import * as repository from "../spine/spine.repository.js"
 import { isBriefPhase } from "../spine/brief-core.js"
+import { isTemplateFrame } from "../spine/template-frames.js"
 import { listSections, sectionsOfPath, stepsOf } from "../spine/section-registry.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
-import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
+import { buildDocumentContext, stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
+import { stepDocumentQuery } from "./step-document-query.js"
 import { ChatSession } from "../project/chat-session.model.js"
 import { DOCUMENTS_READ, getStep, orderedSteps } from "./step-registry.js"
 import { buildTemplateStepContext, loadTemplateContext } from "./template-guidance.js"
 import { buildConversationSummary, formatRecentTurns, type TranscriptMessage } from "./conversation-summary.js"
+import { Project } from "../project/project.model.js"
+import { sequenceLevelOf, type SequenceLevel } from "../../shared/diagram/sequence-level.js"
+import mongoose from "mongoose"
 
 export { STEP_NOT_FOUND } from "./step-registry.js"
 
@@ -123,12 +128,15 @@ const resolveFilterValue = (spine: Spine, value: string, loop: string | null): s
   return value
 }
 
+const FRAME_COLLECTIONS = new Set(["features", "functions"])
+
 const selectValue = (spine: Spine, selector: Selector, loop: string | null): unknown => {
   let node: unknown = spine
   for (const key of selector.path) node = isRecord(node) ? node[key] : undefined
 
   if (Array.isArray(node)) {
-    let items = node
+    // FLF-413: khung `<<Feature Name 1>>` của mẫu không phải dữ liệu — model không thấy, không sửa (lấp khi accept S-4.1)
+    let items = selector.path.length === 1 && FRAME_COLLECTIONS.has(selector.path[0]) ? node.filter((el) => !(isRecord(el) && isTemplateFrame(el))) : node
     if (selector.filter) {
       const { key, negate, value } = selector.filter
       const expected = resolveFilterValue(spine, value, loop)
@@ -315,6 +323,30 @@ export const projectStep = (spine: Spine, stepId: string): StepProjection => {
   }
 }
 
+/**
+ * FLF-418: S-5.4 của dự án vẽ Sequence mức thành phần cần thêm `sequence_level` và entity của các feature trong vòng (lifeline
+ * `entity` của `component_interactions`). Mức nằm ở Project (ngoài Spine) nên chèn ở đây — không đổi `reads` của registry.
+ * Mức system ⇒ không thêm gì (model không viết `component_interactions`).
+ */
+export const componentLevelProjection = (spine: Spine, stepId: string, level: SequenceLevel): Record<string, unknown> => {
+  if (level !== "component" || getStep(stepId).template_id !== "S-5.4") return {}
+  const { loop } = parseStepId(stepId)
+  const screenId = loop === null || loop === "nonscreen" ? null : loop
+  const features = new Set(spine.functions.filter((f) => f.screen_id === screenId).map((f) => f.feature_id))
+  return {
+    sequence_level: "component",
+    "entities[feature_ids~@loopFeatures]:id,name,feature_ids": spine.entities
+      .filter((e) => (e.feature_ids ?? []).some((id) => features.has(id)))
+      .map(({ id, name, feature_ids }) => ({ id, name, feature_ids: feature_ids ?? [] }))
+  }
+}
+
+/** Mức Sequence của dự án — chỉ đọc khi step là S-5.4; chưa nối DB / id lạ ⇒ mặc định. */
+const loadSequenceLevel = async (projectId: string, stepId: string): Promise<SequenceLevel> => {
+  if (getStep(stepId).template_id !== "S-5.4" || mongoose.connection.readyState !== 1 || !mongoose.isValidObjectId(projectId)) return sequenceLevelOf(null)
+  return sequenceLevelOf(await Project.findById(projectId).select("sequenceLevel").lean())
+}
+
 // ─── có DB ───────────────────────────────────────────────────────
 
 /** Projection dành riêng cho vòng hỏi: projection của step + các gốc đã chốt (BUG-19). */
@@ -415,9 +447,13 @@ export const buildStepContext = async (projectId: string, stepId: string, option
     projected.projection = { ...projected.projection, ...template.slotProjection }
     projected.writable = [...new Set([...projected.writable, ...template.slotWrites])]
   }
+  const componentLevel = componentLevelProjection(spine, stepId, await loadSequenceLevel(projectId, stepId))
+  if (Object.keys(componentLevel).length) projected.projection = { ...projected.projection, ...componentLevel }
   const transcriptTail = await loadTranscriptTail(options.sessionId, stepId)
   const base = JSON.stringify(projected.projection) + JSON.stringify(projected.addendum) + transcriptTail
-  const docs = await buildDocumentContext(projectId, ActionType.DRAFT, stepId, estimateTokens(base), options.modelName, options.maxOutputTokens)
+  // FLF-393: tài liệu vượt trần ⇒ chỉ đoạn của section step nuôi + đoạn BM25 theo nhãn step và câu trả lời của user
+  const retrieval = stepNeedsSourceDocuments(stepId) ? stepDocumentQuery(spine, stepId, sectionsFedBy(spine, stepId), transcriptTail) : null
+  const docs = await buildDocumentContext({ projectId, actionType: ActionType.DRAFT, stepId, ...(retrieval ?? {}) })
 
   return {
     ...projected,

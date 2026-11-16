@@ -475,3 +475,29 @@ describe("FLF-361 textMentions - mã trong chữ khớp id Spine giữ dạng t�
     expect(textMentions("See UC-01 and UC-09.", spine, [])).toEqual([{ path: "use_cases[id=UC01]", array: "use_cases", id: "UC01", name: null }])
   })
 })
+
+describe("FLF-411 buildLayout - chữ của mẫu ở SRS viết dở", () => {
+  it("khoảng hướng dẫn [ … ] nhiều đoạn ⇒ hướng dẫn của mục (in khi mục trống, BF §3.1.1); hình trong <<Sample … >> không thành phần nối", () => {
+    const blocks: LayoutBlock[] = [
+      h("B0001", "2.1 Actors", 2, "fixed:2.1"),
+      p("B0002", "[An actor is a person that interacts with the system. Questions to ask:", "fixed:2.1"),
+      { block_id: "B0003", kind: "list_item", level: null, text: "Who (or what) is notified?", section_id: "fixed:2.1" },
+      p("B0004", "This part gives the description of system actors, as below]", "fixed:2.1"),
+      h("B0005", "1. Product Overview", 1, "fixed:1"),
+      p("B0006", "<<Sample: The Cafeteria Ordering System is a new system", "fixed:1"),
+      { block_id: "B0007", kind: "image", level: null, text: "", section_id: "fixed:1", image_ref: "word/media/ctx.png" },
+      p("B0008", ">>", "fixed:1")
+    ]
+    // Không khối nào được AI trích ⇒ trước FLF-411 các đoạn / hình này thành phần nối in nguyên văn
+    const unmapped = new Set(blocks.filter((b) => b.kind !== "heading").map((b) => b.block_id))
+    const { layout, customSections } = buildLayout(blocks, new Map([["B0001", "fixed:2.1"], ["B0005", "fixed:1"]]), unmapped)
+    const actors = layout.find((l) => l.section_id === "fixed:2.1")!
+    expect(actors.template_guidance).toEqual([
+      "[An actor is a person that interacts with the system. Questions to ask:",
+      "Who (or what) is notified?",
+      "This part gives the description of system actors, as below]"
+    ])
+    expect(customSections.flatMap((c) => c.blocks).filter((b) => b.kind === "image")).toEqual([])
+    expect(customSections.flatMap((c) => c.blocks).map((b) => ("text" in b ? b.text : ""))).not.toContain(">>")
+  })
+})

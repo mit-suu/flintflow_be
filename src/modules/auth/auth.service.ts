@@ -11,6 +11,7 @@ import { sendVerificationOtpEmail, sendPasswordResetOtpEmail } from "../../share
 import { env } from "../../config/env.js"
 import { REMEMBER_ME_MAX_AGE_MS, REMEMBER_ME_TTL } from "../../shared/auth/auth-cookie.js"
 import { listMyOrganizations, type OrganizationSummary } from "../organization/organization.service.js"
+import { Membership } from "../organization/membership.model.js"
 import { toUserLocale, type UserLocale } from "../../shared/i18n/locale.js"
 
 export interface AuthResult {
@@ -567,8 +568,14 @@ export const refresh = async (
   // Giữ nguyên chế độ "ghi nhớ" của phiên cũ qua mỗi lần xoay vòng
   const rememberMe = await sessionService.findSessionRememberMe(oldRefreshToken)
   // Giữ luôn org đang mở: token mới phải mang đúng orgId, nếu không người dùng bị đẩy về màn chọn org
-  // sau mỗi lần refresh. Quyền vẫn do orgContext kiểm lại từ Membership ở mỗi request (Flow 10.6).
-  const activeOrgId = await sessionService.findSessionActiveOrg(oldRefreshToken)
+  // sau mỗi lần refresh. Xác minh lại Membership (phòng race condition khi vừa rời / bị xoá khỏi org):
+  // mất tư cách thành viên thì bỏ orgId khỏi cả JWT mới lẫn phiên xoay vòng mới. Quyền vẫn do orgContext
+  // kiểm lại từ Membership ở mỗi request (Flow 10.6).
+  const sessionOrgId = await sessionService.findSessionActiveOrg(oldRefreshToken)
+  const activeOrgId =
+    sessionOrgId && (await Membership.exists({ organizationId: sessionOrgId, userId: decoded.userId }))
+      ? sessionOrgId
+      : null
   if (activeOrgId) newPayload.orgId = activeOrgId
   const newAccessToken = signAccessToken(newPayload)
   const { refreshToken: newRefreshToken, expiresAt } = issueRefreshToken(newPayload, rememberMe)

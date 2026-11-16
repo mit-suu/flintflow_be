@@ -56,11 +56,8 @@ describe("fixed version downloads", () => {
     expect(m.loadBaseline).not.toHaveBeenCalled()
   })
 
-  it.each([
-    { ...base },
-    { ...base, kind: "cr_revision", baseline_ref: null, template_source: binding }
-  ])("fails explicitly when historical source or snapshot is unavailable", async (version) => {
-    m.requireVersion.mockResolvedValue(version)
+  it("fails explicitly when the historical snapshot of a bound version is unavailable", async () => {
+    m.requireVersion.mockResolvedValue({ ...base, kind: "cr_revision", baseline_ref: null, template_source: binding })
     await expect(downloadVersion("project", "Demo", "0.1", "auto")).rejects.toMatchObject({ code: "TEMPLATE_LAYOUT_UNAVAILABLE" })
     expect(m.render).not.toHaveBeenCalled()
     expect(m.profile).not.toHaveBeenCalled()
@@ -94,6 +91,26 @@ describe("fixed version downloads", () => {
 })
 
 
+describe("đường in theo từng version", () => {
+  it("version không có binding (dự án tự do / FPT phát hành trước khi đổi mẫu) tải đúng file đã lưu dù dự án giờ là mẫu bắt buộc", async () => {
+    m.requireVersion.mockResolvedValue({ ...base, kind: "release", version: "1.0", file_ref: "stored-1.0", clean_file_ref: "clean-1.0", template_source: null })
+    m.list.mockResolvedValue([{ ...base, kind: "release", version: "1.0" }])
+    m.load.mockImplementation(async (ref: string) => Buffer.from(ref))
+    const out = await downloadVersion("project", "Demo", "1.0", "auto")
+    expect(out.data.toString()).toBe("clean-1.0")
+    expect(m.render).not.toHaveBeenCalled()
+    expect(m.profile).not.toHaveBeenCalled()
+  })
+
+  it("version có binding in lại bằng mốc của chính nó, không đọc profile hiện tại", async () => {
+    const anchored = { ...binding, fidelity_anchor: { source_based: true, by_id: false, spine: null } }
+    m.requireVersion.mockResolvedValue({ ...base, template_source: anchored })
+    await downloadVersion("project", "Demo", "0.1", "auto")
+    expect(m.render).toHaveBeenCalledWith("project", "Demo", { historical: true }, expect.objectContaining({ templateSource: anchored }))
+    expect(m.profile).not.toHaveBeenCalled()
+  })
+})
+
 describe("captureTemplateSourceBinding", () => {
   it("captures a detached verified current binding when a legacy profile lacks its source reference", async () => {
     m.profile.mockReturnValue({ lean: async () => ({ heading_map: [{ block_id: "B1" }], layout: [{ section_id: "old" }] }) })
@@ -101,7 +118,8 @@ describe("captureTemplateSourceBinding", () => {
     m.resolveCurrent.mockResolvedValue({ binding: recovered })
     const captured = await captureTemplateSourceBinding("project")
     expect(m.resolveCurrent).toHaveBeenCalledWith("project")
-    expect(captured).toEqual(recovered)
+    expect(captured).toMatchObject(recovered)
+    expect(captured?.fidelity_anchor).toBeTruthy()
     recovered.layout[0].section_id = "changed after capture"
     expect(captured?.layout[0].section_id).toBe("repaired")
     expect(captured?.source_file_ref).toBe("original-upload")

@@ -40,8 +40,8 @@ export interface GapInput {
 const filled = (c: Pick<CustomSection, "blocks"> | undefined) =>
   !!c && c.blocks.some((b) => b.image_ref || isRealText(b.text) || (b.rows ?? []).some((r) => r.some((cell) => isRealText(cell))))
 
-/** Gộp theo tiêu đề chuẩn hoá; xếp theo số dự án còn trống rồi số dự án gặp. */
-export const aggregateTemplateGaps = (inputs: readonly GapInput[], limit: number): TemplateGapRow[] => {
+/** Gộp theo tiêu đề chuẩn hoá; xếp theo số dự án còn trống rồi số dự án gặp. Bỏ `limit` ⇒ trả hết (để phân trang). */
+export const aggregateTemplateGaps = (inputs: readonly GapInput[], limit = Infinity): TemplateGapRow[] => {
   const rows = new Map<string, TemplateGapRow>()
   for (const { sections, spineSections } of inputs) {
     const byId = new Map(spineSections.map((c) => [c.id, c]))
@@ -59,8 +59,17 @@ export const aggregateTemplateGaps = (inputs: readonly GapInput[], limit: number
   return [...rows.values()].sort((a, b) => b.empty - a.empty || b.projects - a.projects || a.key.localeCompare(b.key)).slice(0, limit)
 }
 
-/** Dự án mẫu bắt buộc (`template_intent = fixed`, trần 2.000 gần nhất) + mục riêng trong layout và Spine của chúng. */
-export const templateGaps = async (limit: number): Promise<{ projects: number; rows: TemplateGapRow[] }> => {
+export interface TemplateGapsPage {
+  projects: number
+  rows: TemplateGapRow[]
+  meta: { page: number; limit: number; total: number; totalPages: number }
+}
+
+/**
+ * Dự án mẫu bắt buộc (`template_intent = fixed`, trần 2.000 gần nhất) + mục riêng trong layout và Spine của chúng.
+ * Gom xong mới cắt trang (FLF-404): thứ tự xếp phụ thuộc toàn bộ dữ liệu nên không đẩy phân trang xuống Mongo được.
+ */
+export const templateGaps = async (page: number, limit: number): Promise<TemplateGapsPage> => {
   const projects = await Project.find({ template_intent: "fixed" }, { _id: 1 }).sort({ updatedAt: -1 }).limit(2000).lean()
   const ids = projects.map((p) => p._id)
   const [profiles, spines] = await Promise.all([
@@ -77,14 +86,25 @@ export const templateGaps = async (limit: number): Promise<{ projects: number; r
       spineSections: sectionsOf.get(String(p.projectId)) ?? []
     }
   })
-  return { projects: profiles.length, rows: aggregateTemplateGaps(inputs, limit) }
+  const all = aggregateTemplateGaps(inputs)
+  return {
+    projects: profiles.length,
+    rows: all.slice((page - 1) * limit, page * limit),
+    meta: { page, limit, total: all.length, totalPages: Math.max(1, Math.ceil(all.length / limit)) }
+  }
 }
 
-const querySchema = z.object({ limit: z.coerce.number().int().min(1).max(500).default(50) }).strict()
+const querySchema = z
+  .object({
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce.number().int().min(1).max(500).default(50)
+  })
+  .strict()
 
 /** `GET /api/v1/admin/template-gaps` (admin, đã qua `authMiddleware` + `adminMiddleware` ở router admin). */
 export const getTemplateGaps = catchAsync(async (req: Request, res: Response) => {
   const parsed = querySchema.safeParse(req.query)
   if (!parsed.success) throw validationError(parsed.error)
-  return sendSuccess(res, 200, await templateGaps(parsed.data.limit))
+  const { meta, ...data } = await templateGaps(parsed.data.page, parsed.data.limit)
+  return sendSuccess(res, 200, data, meta)
 })
