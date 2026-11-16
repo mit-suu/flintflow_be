@@ -235,6 +235,21 @@ describe("FLF-411 (U2-5) needsReviewFindings - đọc bằng chữ: một cờ m
     expect(out[1].message).toMatch(/^Cần xem: Chức năng "Login" - .+, .+ \(độ tin 61%\)/)
     for (const f of out) expect(f.message).not.toMatch(/OR-02|FR-3|\[id=|category|trigger/)
   })
+
+  it("FLF-429: field thông tin dự án (`project.*`) độ tin thấp ⇒ một cờ, không ném lỗi (spine.project là object)", async () => {
+    const { needsReviewFindings } = await import("./finalize.service.js")
+    const drafts = [
+      {
+        section_id: "fixed:1.1",
+        fields: [field("project.system_name", "FAP", 0.6), field("project.goals", "Manage academic records", 0.62), field("project.release_scope", "Phase 1", 0.7)]
+      }
+    ]
+    const spine = { ...createEmptySpine(), project: { system_name: "FAP" } } as unknown as Parameters<typeof needsReviewFindings>[0]
+    const out = needsReviewFindings(spine, drafts, { heading_map: [], table_map: [] }, [], new Map(), () => null)
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ section_id: "fixed:1.1", target_id: "project.system_name" })
+    expect(out[0].message).toMatch(/^Cần xem: Thông tin dự án - .+ \(độ tin 60%\)/)
+  })
 })
 
 describe("FLF-361 needsReviewFindings - không hỏi lại chỗ không vào Spine / không còn là đoán", () => {
