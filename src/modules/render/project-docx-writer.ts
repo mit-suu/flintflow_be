@@ -15,7 +15,7 @@ import { repairFixedTemplateLayout, type TemplateLayout } from "./layout-section
 import { templateLayoutFromBinding, type TemplateSourceBinding } from "../doc-version/template-source-binding.js"
 import { DocxPackage, addDraftWatermark } from "../docx-ooxml/index.js"
 import type { SourceFidelity } from "./source-fidelity.js"
-import { isTemplateFile } from "../import/structure-preview.js"
+import { stripTemplateTextLegacy, stripTemplateTextNow } from "./strip-template-text.js"
 
 const unavailable = () => new ApiError(
   409,
@@ -83,21 +83,21 @@ export const writeProjectDocx = async (
   }
 
   const context = isTemplateContext(source) ? source : await loadFixedTemplateContext(doc.projectId, source)
-  // FLF-378 (luồng C): file upload là khung mẫu (`isTemplateFile`) — chữ hướng dẫn / ví dụ của mẫu không vào bản in
-  const [project, profile] = await Promise.all([
-    Project.findById(doc.projectId, { start_kind: 1, template_intent: 1 }).lean(),
-    TemplateProfile.findOne({ projectId: doc.projectId }, { structure_preview: 1 }).lean()
-  ])
+  // FLF-378 (luồng C): file upload là khung mẫu (`isTemplateFile`) — chữ hướng dẫn / ví dụ của mẫu không vào bản in.
+  // Version đã ghi mang cờ này trong binding (chốt lúc ghi) nên đổi mẫu về sau không đổi bản in của nó
+  const strip = context.binding.strip_template_text ?? (await stripTemplateTextLegacy(doc.projectId))
   const filled = await writeTemplateDocx(doc, context.template, context.headingMap, context.binding.table_map, {
     ...(fidelity ? sourceWriteOptions(fidelity, context.binding) : {}),
-    stripTemplateText: isTemplateFile(project, profile)
+    stripTemplateText: strip
   })
   return withDraftWatermark(doc, filled)
 }
 
 const sourceWriteOptions = (fidelity: SourceFidelity, binding: Pick<TemplateSourceBinding, "legacy_record_of_changes">) => ({
   keepSource: fidelity.keepSource,
-  legacyRecordCount: binding.legacy_record_of_changes?.length ?? 0
+  legacyRecordCount: binding.legacy_record_of_changes?.length ?? 0,
+  // FLF-416 chế độ 4: chèn mục FPT soạn thêm thành heading mới, mục Ngoài phạm vi xuống cuối
+  ...(fidelity.rearrange ? { rearrange: fidelity.rearrange } : {})
 })
 
 export interface FixedTemplateContext {
@@ -164,7 +164,9 @@ export const loadFixedTemplateContext = async (
   const rebind = opts.rebind ?? true
   const bound = rebind ? bindFixedTemplateHeadings(entries) : entries
   const repaired = rebind ? repairFixedTemplateLayout(profile.layout, bound) : profile.layout
-  const binding = { ...profile, source_file_ref: ref, source_sha256: sha, layout: repaired } as TemplateSourceBinding
+  // Bản in hiện tại (không truyền binding đã lưu): chốt cờ theo trạng thái hiện tại; binding đã lưu mà thiếu cờ ⇒ đường snapshot (`stripTemplateTextLegacy`)
+  const strip_template_text = sourceBinding ? undefined : await stripTemplateTextNow(projectId)
+  const binding = { ...profile, source_file_ref: ref, source_sha256: sha, layout: repaired, ...(strip_template_text === undefined ? {} : { strip_template_text }) } as TemplateSourceBinding
   return {
     template, binding, layout: templateLayoutFromBinding(binding),
     headingMap: templateHeadingMap(bound, repaired)

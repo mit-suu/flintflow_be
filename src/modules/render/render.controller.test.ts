@@ -359,7 +359,7 @@ describe("FLF-265 §3.1 - ngôn ngữ tài liệu theo project", () => {
       expect(outcome.headers?.["x-document-language"]).toBe("en")
     })
 
-    it("mode 1 ⇒ tuỳ chọn writer y như trước ({ flagLanguage: vi }) + mục lục ghi sẵn (FLF-344), header = ngôn ngữ file", async () => {
+    it("mode 1 ⇒ phụ lục cờ theo ngôn ngữ file (FLF-411 U3-5) + mục lục ghi sẵn (FLF-344), header = ngôn ngữ file", async () => {
       asProject({ name: "Demo", mode: "import" })
       for (const language of ["vi", "en"] as const) {
         vi.mocked(writeDocx).mockClear()
@@ -367,7 +367,7 @@ describe("FLF-265 §3.1 - ngôn ngữ tài liệu theo project", () => {
         vi.mocked(getDocumentWithMeta).mockResolvedValue({ doc: sample })
 
         const outcome = await invoke(exportWord, OWNER, PROJECT, { source: "baseline" })
-        expect(writeDocx).toHaveBeenCalledWith(expect.anything(), { flagLanguage: "vi", tocEntries: true })
+        expect(writeDocx).toHaveBeenCalledWith(expect.anything(), { flagLanguage: language, tocEntries: true })
         expect(outcome.headers?.["x-document-language"]).toBe(language)
       }
     })

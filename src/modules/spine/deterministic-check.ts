@@ -13,12 +13,15 @@
 import type { Actor, Change, Diagram, Flag, FlagLevel, Spine } from "./spine.types.js"
 import { buildIdIndex, findDeadReferences, sectionKeyExists, type ReferenceHit } from "./reference-fields.js"
 import { tryResolve } from "./path-resolver.js"
+import { isContentSlot, slotHasData } from "../import/content-slots.js"
+import { isTemplateFrame } from "./template-frames.js"
 import { loopKeyOfFunction, ownerStepOf, stepsOf, REQUIRED_FIXED_SECTION_IDS, DERIVED_SECTION_IDS, sectionsOfPath } from "./section-registry.js"
 import { computeSectionStates } from "./section-status.js"
 import { hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
 import { actorParents, ancestorsOf, generalizationProblems, type GeneralizationProblem } from "./actor-generalization.js"
 import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "./source-hash.js"
 import type { ErdNotation, RenderContext } from "../../shared/diagram/erd-notation.js"
+import { hasComponentSequence, needsSequence } from "../diagram/renderers/sequence.renderer.js"
 import { ORIGINAL_DIAGRAM_LABELS, diagramKey, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds, originalSectionOf } from "./original-diagram.js"
 import { isVerbatim, type SectionSegments } from "./segment-hash.js"
 import { NFR_CATEGORY_LABELS, capitalize, diagramLabel, pathLabel, quotedSectionLabel } from "./human-labels.js"
@@ -78,7 +81,13 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("unresolved_many_to_many", "yellow", true),
   // FLF-278 trên FLF-335/336 — chế độ 3 (mẫu bắt buộc): chỉ chạy khi hồ sơ luật mang layout của mẫu
   rule("template_section_absent", "yellow", true),
-  rule("template_section_empty", "yellow", true)
+  rule("template_section_empty", "yellow", true),
+  // Sau đổi mẫu: mục của mẫu mới mà tài liệu cũ không có — để trống, chặn phát hành tới khi BA viết (không waive được)
+  rule("template_section_migration_missing", "red", false),
+  // Sau đổi mẫu: nội dung còn nhắc "mục x.y" theo đánh số cũ — BA kiểm lại tham chiếu
+  rule("section_reference_after_migration", "yellow", true),
+  // FLF-418: dự án vẽ Sequence mức thành phần nhưng function đã có sơ đồ còn thiếu `component_interactions` (đang vẽ mức hệ thống)
+  rule("sequence_component_missing", "yellow", true)
 ])
 
 /**
@@ -151,6 +160,23 @@ export interface RuleProfile {
    */
   templateFilled?: ReadonlySet<string>
   /**
+   * Sau đổi mẫu (`TemplateProfile.migration_missing_sections`): mục của mẫu đích bị để trống. Mỗi mục còn trống ⇒ cờ đỏ
+   * `template_section_migration_missing` (suy từ danh sách này nên recompute không tự đóng khi mục chưa viết); chính các mục
+   * này không bắn `template_section_empty`.
+   */
+  templateMissing?: ReadonlySet<string>
+  /** `section_id` ⇒ heading của mục trong mẫu hiện tại (`TemplateProfile.layout`; mục FPT kèm số Word, FLF-411 #19) — tên mục trong câu cờ lấy từ đây. */
+  templateHeadings?: ReadonlyMap<string, string>
+  /** Mục giữ thành mục riêng (`keep_custom`) ở lần đổi mẫu gần nhất: dữ liệu vẫn in (mục riêng) ⇒ không bắn `template_section_absent`. */
+  templateKept?: ReadonlySet<string>
+  /** Dự án đã đổi mẫu ⇒ bật `section_reference_after_migration`. */
+  checkSectionReferences?: boolean
+  /**
+   * Mục riêng ⇒ các "mục x.y" mà nội dung nó đã nhắc **lúc đổi mẫu** (từ `migrated_base_spine`). Có ⇒ chỉ cờ các tham chiếu đó: chữ BA viết
+   * sau đổi mẫu theo đánh số mới không phải việc của luật này. Không đặt ⇒ cờ mọi tham chiếu trong mục riêng.
+   */
+  referenceBaseline?: ReadonlyMap<string, readonly string[]>
+  /**
    * FLF-366: đoạn nguyên văn của file import (`TemplateProfile.section_segments`). Có ⇒ bật `original_text_mentions_changed`
    * (đoạn in nguyên văn nhắc tới tên / mã phần tử đã đổi tên hay bị xoá so với lúc import). Không đặt ⇒ luật không chạy.
    */
@@ -160,6 +186,8 @@ export interface RuleProfile {
 export interface CheckOptions {
   /** Ký pháp ERD của dự án (ngoài Spine) — vào hash hình ERD của cờ `diagram_stale`. */
   erdNotation?: ErdNotation
+  /** Toàn bộ dữ liệu ngoài Spine của hình (ký pháp ERD, theme mockup màn…) — có ⇒ thay `erdNotation`. */
+  renderContext?: RenderContext
   atBaseline?: boolean
   ruleProfile?: RuleProfile
 }
@@ -272,7 +300,20 @@ export const SECTION_HAS_DATA: Readonly<Record<string, (s: Spine) => boolean>> =
 /** Mục đã có dữ liệu trong Spine chưa — luật `section_empty` soi đúng chỗ này; mục ngoài bảng ⇒ `null` (không soi được). */
 export const sectionHasData = (spine: Spine, sectionId: string): boolean | null => SECTION_HAS_DATA[sectionId]?.(spine) ?? null
 
-const sectionEmpty = (spine: Spine, gate: StepGate): FlagCandidate[] =>
+/** Tên mục cho câu cờ: heading của mẫu khi có (FLF-411 #19), không thì nhãn chung theo Spine (`human-labels`). */
+const sectionNameOf = (id: string, spine: Spine, headings?: ReadonlyMap<string, string>): string => {
+  const heading = headings?.get(id)?.trim()
+  return heading ? `"${heading}"` : quotedSectionLabel(id, spine)
+}
+
+/**
+ * Mục khung ngoài bảng `SECTION_HAS_DATA` mà CR vẫn viết được vào mảng riêng (soi ngược `SECTION_FILL_ARRAYS` của đường soạn mục trống). Sau đổi mẫu mục
+ * như vậy để trống phải chặn phát hành; "đã viết" = mảng có thêm phần tử so với lúc đổi mẫu (`templateFilled`, tính ở `mode1-guard`). Mục không có mảng
+ * nào ở đây không đo được và không có cách xoá cờ ⇒ không bắn.
+ */
+export const UNMEASURED_FILL_ARRAYS: Readonly<Record<string, readonly (keyof Spine)[]>> = { "fixed:4.2.4": ["nfrs"], "fixed:5.5": ["glossary"] }
+
+const sectionEmpty = (spine: Spine, gate: StepGate, headings?: ReadonlyMap<string, string>): FlagCandidate[] =>
   REQUIRED_FIXED_SECTION_IDS.filter((id) => !DERIVED_SECTION_IDS.has(id))
     .filter((id) => !(SECTION_HAS_DATA[id]?.(spine) ?? true))
     // Mọi step sở hữu phải chốt: §1 do S-2.1…S-2.5 nuôi, chốt mỗi S-2.1 chưa nói lên mục đã xong
@@ -282,7 +323,7 @@ const sectionEmpty = (spine: Spine, gate: StepGate): FlagCandidate[] =>
       rule_id: "section_empty",
       section_id: id,
       target_id: null,
-      message: `Mục bắt buộc ${quotedSectionLabel(id)} chưa có dữ liệu`,
+      message: `Mục bắt buộc ${sectionNameOf(id, spine, headings)} chưa có dữ liệu`,
       remediation_step: ownerStepOf(id)
     }))
 
@@ -363,6 +404,8 @@ const deadReferenceWhere = (spine: Spine, hit: ReferenceHit): Where => {
     case "entities[].transitions[].to":
     case "functions[].interactions[].from":
     case "functions[].interactions[].to":
+    case "functions[].component_interactions[].from":
+    case "functions[].component_interactions[].to":
       return { section: `function:${owner}`, step: owner ? functionStep(spine, owner) : "S-5.4" }
     case "entities[].transitions[].business_rule_ids[]":
       return { section: "fixed:3.1.5", step: "S-4.5" }
@@ -442,6 +485,24 @@ const onePerTarget = (diagrams: Spine["diagrams"]): Spine["diagrams"] => {
     if (!kept || (/-\d+$/.test(kept.id) && !/-\d+$/.test(d.id))) first.set(key, d)
   }
   return diagrams.filter((d) => first.get(`${d.kind}|${d.owner_id ?? ""}`) === d)
+}
+
+/**
+ * FLF-418: dự án chọn mức thành phần mà function có sơ đồ tuần tự chưa có `component_interactions` ⇒ hình đó tạm vẽ mức
+ * hệ thống. Cờ vàng (không chặn ký) mở lại S-5.4 của màn để sinh bổ sung.
+ */
+const sequenceComponentMissing = (spine: Spine, context: RenderContext = {}): FlagCandidate[] => {
+  if (context.sequenceLevel !== "component") return []
+  return spine.functions
+    .filter((fn) => needsSequence(fn, spine.actors) && !hasComponentSequence(fn))
+    .map((fn) => ({
+      level: "yellow" as const,
+      rule_id: "sequence_component_missing",
+      section_id: `function:${fn.id}`,
+      target_id: fn.id,
+      message: `Chức năng "${fn.name}" chưa có tương tác giữa các thành phần - sơ đồ tuần tự đang vẽ ở mức hệ thống, sinh lại chi tiết chức năng để vẽ mức thành phần`,
+      remediation_step: functionStep(spine, fn.id)
+    }))
 }
 
 const diagramStale = (spine: Spine, context: RenderContext = {}): FlagCandidate[] =>
@@ -703,7 +764,7 @@ const functionWithoutUseCase = (spine: Spine, gate: StepGate): FlagCandidate[] =
   if (!gate.done(GATE_STEP.function_without_uc)) return []
   const used = new Set(spine.use_cases.flatMap((u) => u.function_ids))
   return spine.functions
-    .filter((f) => f.screen_id === null && !used.has(f.id))
+    .filter((f) => f.screen_id === null && !used.has(f.id) && !isTemplateFrame(f))
     .map((f) => ({
       level: "yellow" as const,
       rule_id: "function_without_uc",
@@ -835,8 +896,19 @@ const outsideTemplate = (c: FlagCandidate, layout: ReadonlySet<string> | undefin
   ((SECTION_SCOPED_RULES.has(c.rule_id) && c.section_id.startsWith("fixed:")) ||
     (DIAGRAM_RULES.has(c.rule_id) && /^(fixed|function|feature):/.test(c.section_id)))
 
-const fixedTemplateGaps = (spine: Spine, layout: ReadonlySet<string>, wrappers: ReadonlySet<string> = new Set(), filled: ReadonlySet<string> = new Set()): FlagCandidate[] => [
-  ...REQUIRED_FIXED_SECTION_IDS.filter((id) => !layout.has(id) && !DERIVED_SECTION_IDS.has(id) && sectionHasData(spine, id) === true).map(
+/** Mục riêng có chữ thật (không chỉ hướng dẫn / ô trống) hoặc có phần tử Spine qua slice. */
+const customSectionHasContent = (c: Spine["custom_sections"][number], filled: ReadonlySet<string>): boolean =>
+  filled.has(`custom:${c.id}`) || c.blocks.some((b) => b.image_ref || (b.kind === "table" ? tableBodyHasRealText(b.rows) : isRealText(b.text)))
+
+const fixedTemplateGaps = (
+  spine: Spine,
+  layout: ReadonlySet<string>,
+  wrappers: ReadonlySet<string> = new Set(),
+  filled: ReadonlySet<string> = new Set(),
+  missing: ReadonlySet<string> = new Set(),
+  kept: ReadonlySet<string> = new Set()
+): FlagCandidate[] => [
+  ...REQUIRED_FIXED_SECTION_IDS.filter((id) => !layout.has(id) && !kept.has(id) && !DERIVED_SECTION_IDS.has(id) && sectionHasData(spine, id) === true).map(
     (id): FlagCandidate => ({
       level: "yellow",
       rule_id: "template_section_absent",
@@ -850,6 +922,7 @@ const fixedTemplateGaps = (spine: Spine, layout: ReadonlySet<string>, wrappers: 
     .filter(
       (c) =>
         layout.has(`custom:${c.id}`) &&
+        !missing.has(`custom:${c.id}`) &&
         !wrappers.has(`custom:${c.id}`) &&
         !filled.has(`custom:${c.id}`) &&
         c.heading.trim() &&
@@ -867,6 +940,62 @@ const fixedTemplateGaps = (spine: Spine, layout: ReadonlySet<string>, wrappers: 
       })
     )
 ]
+
+/**
+ * Mục của mẫu đích mà lần đổi mẫu để trống (D7): đỏ tới khi có chữ thật. Mục riêng đo như `template_section_empty`; mục khung đo
+ * bằng `SECTION_HAS_DATA` (mục ngoài bảng không soi được ⇒ không cờ — không có cách nào xoá cờ).
+ */
+/**
+ * Mục của mẫu đích mà lần đổi mẫu để trống đã có chữ thật chưa. Mục riêng đã bị xoá (không còn trong Spine) tính là không cần viết.
+ * Mục khung ngoài bảng `SECTION_HAS_DATA`: phần nhỏ của mẫu (`slot:*`) đo bằng dữ liệu của slot; còn lại không đo được ⇒ coi là đã viết.
+ */
+export const migrationSectionWritten = (spine: Spine, id: string, filled: ReadonlySet<string> = new Set()): boolean => {
+  const isCustom = id.startsWith("custom:")
+  const custom = isCustom ? spine.custom_sections.find((c) => `custom:${c.id}` === id) : undefined
+  if (isCustom && !custom) return true
+  const measured = sectionHasData(spine, id) ?? (isContentSlot(id) ? slotHasData(spine, id) : null)
+  return custom ? customSectionHasContent(custom, filled) : measured !== null ? measured : id in UNMEASURED_FILL_ARRAYS ? filled.has(id) : true
+}
+
+/** Tên mục trong câu cờ: heading của mẫu hiện tại nếu biết (đúng chữ người dùng thấy trong tài liệu), không thì nhãn theo mã mục. */
+const migrationSectionName = (id: string, spine: Spine, headings: ReadonlyMap<string, string> | undefined): string => {
+  const heading = headings?.get(id)?.trim()
+  if (heading) return `Mục "${heading}"`
+  const label = quotedSectionLabel(id, spine)
+  return id.startsWith("fixed:") ? `Mục ${label}` : capitalize(label)
+}
+
+const migrationMissing = (spine: Spine, missing: ReadonlySet<string>, filled: ReadonlySet<string> = new Set(), headings?: ReadonlyMap<string, string>): FlagCandidate[] =>
+  [...missing].flatMap((id): FlagCandidate[] => {
+    if (migrationSectionWritten(spine, id, filled)) return []
+    return [{
+      level: "red",
+      rule_id: "template_section_migration_missing",
+      section_id: id,
+      target_id: null,
+      message: `${migrationSectionName(id, spine, headings)} có trong mẫu mới nhưng tài liệu cũ không có — chưa chốt bản được tới khi viết nội dung`,
+      remediation_step: ownerStepOf(id, spine)
+    }]
+  })
+
+const SECTION_REFERENCE_RE = /(?:\bmục|\bsection)\s+(\d+(?:\.\d+)+)/gi
+
+/** Nội dung của mục riêng còn nhắc "mục x.y" / "section x.y" — số đã theo mẫu cũ, sau đổi mẫu có thể trỏ sai mục. */
+export const sectionReferencesOf = (blocks: Spine["custom_sections"][number]["blocks"]): string[] => [...new Set([...partText(blocks).matchAll(SECTION_REFERENCE_RE)].map((m) => m[1]))]
+
+const sectionReferencesAfterMigration = (spine: Spine, baseline?: ReadonlyMap<string, readonly string[]>): FlagCandidate[] =>
+  spine.custom_sections.flatMap((c) => {
+    const before = baseline?.get(c.id)
+    const refs = sectionReferencesOf(c.blocks).filter((r) => !baseline || (before?.includes(r) ?? false))
+    return refs.map((ref): FlagCandidate => ({
+      level: "yellow",
+      rule_id: "section_reference_after_migration",
+      section_id: `custom:${c.id}`,
+      target_id: ref,
+      message: `Nội dung ở "${c.heading.trim()}" nhắc tới mục ${ref} theo đánh số cũ — mẫu mới đã đổi đánh số, kiểm lại tham chiếu`,
+      remediation_step: ownerStepOf(`custom:${c.id}`, spine)
+    }))
+  })
 
 const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
   const yellow = (rule_id: string, section_id: string, target_id: string, message: string, remediation_step: string): FlagCandidate => ({
@@ -918,7 +1047,8 @@ const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
         yellow("orphan_screen", "fixed:3.1.1", screen.id, `Màn hình "${screen.name}" không nằm trong luồng nào: ${why}`, "S-4.2"))),
     ...when("empty_feature", () =>
       spine.features
-        .filter((f) => !spine.screens.some((s) => s.feature_id === f.id) && !spine.functions.some((fn) => fn.feature_id === f.id))
+        // FLF-413: khung của mẫu chưa lấp không phải tính năng thiếu nội dung
+        .filter((f) => !isTemplateFrame(f) && !spine.screens.some((s) => s.feature_id === f.id) && !spine.functions.some((fn) => fn.feature_id === f.id))
         .map((f) => yellow("empty_feature", `feature:${f.id}`, f.id, `Tính năng "${f.name}" chưa có màn hình hay chức năng nào`, "S-4.1"))),
     ...when("role_no_actor", () =>
       spine.roles
@@ -1512,11 +1642,12 @@ export const runDeterministicCheck = (
   const atBaseline = options.atBaseline ?? false
   const gate = stepGate(spine, atBaseline || (options.ruleProfile?.skipOwnerStepGate ?? false))
   const candidates: FlagCandidate[] = applyRuleProfile([
-    ...sectionEmpty(spine, gate),
+    ...sectionEmpty(spine, gate, options.ruleProfile?.templateHeadings),
     ...arrayEmpty(spine, gate),
     ...deadReference(spine),
     ...renderError(spine),
-    ...diagramStale(spine, { erdNotation: options.erdNotation }),
+    ...diagramStale(spine, options.renderContext ?? { erdNotation: options.erdNotation }),
+    ...sequenceComponentMissing(spine, options.renderContext),
     ...originalDiagramStale(spine),
     ...nfrMissingNumber(spine, gate),
     ...useCaseRelations(spine),
@@ -1534,7 +1665,11 @@ export const runDeterministicCheck = (
     ...systemNameMissing(spine),
     ...nonEnglishContent(spine, gate),
     ...(options.ruleProfile?.sectionSegments?.length ? originalTextMentionsChanged(spine, options.ruleProfile.sectionSegments) : []),
-    ...(options.ruleProfile?.templateLayout ? fixedTemplateGaps(spine, options.ruleProfile.templateLayout, options.ruleProfile.templateWrappers, options.ruleProfile.templateFilled) : [])
+    ...(options.ruleProfile?.templateLayout
+      ? fixedTemplateGaps(spine, options.ruleProfile.templateLayout, options.ruleProfile.templateWrappers, options.ruleProfile.templateFilled, options.ruleProfile.templateMissing, options.ruleProfile.templateKept)
+      : []),
+    ...(options.ruleProfile?.templateMissing?.size ? migrationMissing(spine, options.ruleProfile.templateMissing, options.ruleProfile.templateFilled, options.ruleProfile.templateHeadings) : []),
+    ...(options.ruleProfile?.checkSectionReferences ? sectionReferencesAfterMigration(spine, options.ruleProfile.referenceBaseline) : [])
   ].filter((c) => !outsideTemplate(c, options.ruleProfile?.templateLayout)), options.ruleProfile)
 
   const index = buildIdIndex(spine)

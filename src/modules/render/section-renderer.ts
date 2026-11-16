@@ -14,14 +14,17 @@
  * từ `changes[]`, gộp theo ngày + giai đoạn quy trình (S-8.3).
  */
 
+import { displayUseCaseId } from "./usecase-display-ids.js"
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import { svgTitleOf } from "../diagram/renderers/common.js"
 import { diagramLabelsFor } from "../diagram/renderers/labels.js"
 import { SYSTEM_LIFELINE } from "../spine/spine.schema.js"
 import { ACTOR_HIERARCHY_SECTION } from "../diagram/renderers/usecase.renderer.js"
 import { activitySectionOf } from "../diagram/renderers/activity.renderer.js"
+import { isComponentSequenceSource } from "../diagram/renderers/sequence.renderer.js"
 import { DEFAULT_RELATION_VERB, relationVerb } from "../diagram/renderers/erd.renderer.js"
 import { describeInterface } from "./interface-description.js"
+import { crRecordDescription } from "./cr-record.js"
 import { diagramErrorMarker } from "./diagram-placeholder.js"
 import { matchTableHeader } from "../import/table-header-dictionary.js"
 import { loadStepRegistry } from "../pipeline/step-registry.js"
@@ -41,6 +44,8 @@ import {
   slotTextFor
 } from "./labels.js"
 import type { Change, DiagramKind, Nfr, NfrCategory, OriginalDiagramKind, Spine } from "../spine/spine.types.js"
+import { screenSpecOf } from "../diagram/renderers/screen-mockup.js"
+import { isPlaceholderText } from "../import/template-markers.js"
 
 /**
  * T15 review T5: `fixed:I` không cần `before`/`value` (chỉ mô tả A/M/D + ngày/người/lý do) — caller
@@ -165,6 +170,11 @@ const localizeBlocks = (blocks: Block[], language: string | undefined, fpt = fal
 // ─── context tiêm từ assemble.service ────────────────────────────
 
 export interface SectionRenderContext {
+  /**
+   * FLF-420: mã use case hiển thị liên tục (`useCaseDisplayIds`) — id Spine có lỗ sau khi xoá. Không đặt ⇒ in id (mã của file
+   * khách / hồ sơ cũ không rõ loại).
+   */
+  useCaseIds?: ReadonlyMap<string, string>
   /** FLF-390: tài liệu có mục "Phân tán" (`slot:distribution`, mẫu IEEE) ⇒ sơ đồ triển khai in ở đó, không ở §4.1. */
   distributionSlot?: boolean
   /** Preserve the fixed source outline; child slots own their data instead of the aggregate parent. */
@@ -272,6 +282,18 @@ const diagramImages = (
   return out
 }
 
+/**
+ * Chú thích mockup màn (FLF-410): màn có hình cho cả web và mobile ⇒ `<base> (Web)` / `<base> (Mobile)` thay `(1/2)`; một
+ * hình ⇒ không hậu tố. Wireframe salt cũ / bảng function ⇒ chú thích mặc định.
+ */
+export const screenLayoutImages = (spine: Spine, screenId: string, ctx: SectionRenderContext, captionBase: string): ImageBlock[] => {
+  const parts = spine.diagrams.filter((d) => d.kind === "screen_layout" && d.owner_id === screenId)
+  return diagramImages(spine, "screen_layout", screenId, ctx, captionBase, (d) => {
+    const platform = parts.length > 1 && d.format === "svg" ? screenSpecOf(d.source)?.platform : undefined
+    return platform ? `${captionBase} (${platform === "mobile" ? "Mobile" : "Web"})` : null
+  })
+}
+
 // ─── fixed:1 Product Overview ─────────────────────────────────────
 
 const productOverview = (spine: Spine, ctx: SectionRenderContext): Block[] => {
@@ -322,7 +344,7 @@ const svgCaption = (d: Spine["diagrams"][number]): string | null => (d.format ==
 const useCaseDiagram = (spine: Spine, ctx: SectionRenderContext): Block[] =>
   diagramImages(spine, "usecase", undefined, ctx, "Use Case Diagram", svgCaption, (d) => d.section !== ACTOR_HIERARCHY_SECTION)
 
-const useCaseTable = (spine: Spine): Block[] => {
+const useCaseTable = (spine: Spine, ctx: SectionRenderContext): Block[] => {
   if (spine.use_cases.length === 0) return []
   // Id không phân giải được thì in id: bảng không ném lỗi khi Spine có id chết, đó là việc của
   // cờ đỏ `dead_reference`.
@@ -334,7 +356,7 @@ const useCaseTable = (spine: Spine): Block[] => {
     tableBlock(
       ["ID", "Use Case", "Actors", "Use Case Description", "Includes", "Extends"],
       spine.use_cases.map((uc) => [
-        uc.id,
+        displayUseCaseId(ctx.useCaseIds, uc.id),
         uc.name,
         uc.actor_ids.map(actorName).join(", "),
         uc.description,
@@ -402,6 +424,9 @@ const screenAuthorization = (spine: Spine, ctx: SectionRenderContext): Block[] =
   return [matrix]
 }
 
+/** FLF-411: tính năng / chức năng khung của mẫu (`<<Feature Name 1>>`, `<<Function Name 1>>`) — không in thành dữ liệu. */
+const isTemplateSlotName = (name: string | null | undefined): boolean => isPlaceholderText(name)
+
 /** Cột của bảng 3.1.4 khi không biết cột của file (project nhập trước FLF-366): như mẫu FPT, như trước. */
 const FPT_NON_SCREEN_HEADER = ["#", "Feature", "System Function", "Description"]
 
@@ -410,9 +435,13 @@ const nonScreenFunctions = (spine: Spine, ctx: SectionRenderContext): Block[] =>
   if (listed) {
     // FLF-252: tài liệu nhập — đúng các dòng bảng 3.1.4 của file. FLF-361: cột theo tiêu đề cột của bảng trong file
     // (FAP: Name · Trigger · Description — trước đây luôn in cột mẫu FPT nên mất cột Trigger khi bảng dựng lại)
-    const fns = spine.functions.filter((f) => listed.has(f.id))
+    // FLF-411: chức năng khung của mẫu (`<<Function Name 1>>`, tạo từ heading chỗ điền) không phải dữ liệu — FLF-413 lấp khung
+    const fns = spine.functions.filter((f) => listed.has(f.id) && !isTemplateSlotName(f.name))
     if (fns.length === 0) return []
-    const featureName = (id: string) => spine.features.find((f) => f.id === id)?.name ?? id
+    const featureName = (id: string) => {
+      const name = spine.features.find((f) => f.id === id)?.name ?? id
+      return isTemplateSlotName(name) ? "" : name
+    }
     const header = ctx.nonScreenHeader?.length ? [...ctx.nonScreenHeader] : FPT_NON_SCREEN_HEADER
     const fields = matchTableHeader(header, "fixed:3.1.4").columns.map((c) => c.field_path?.replace(/^functions\[\]\./, "") ?? null)
     const cell = (f: Spine["functions"][number], i: number, field: string | null, title: string): string => {
@@ -435,7 +464,7 @@ const nonScreenFunctions = (spine: Spine, ctx: SectionRenderContext): Block[] =>
     }
     return [tableBlock(header, fns.map((f, i) => header.map((title, c) => cell(f, i, fields[c] ?? null, title))))]
   }
-  const fns = spine.functions.filter((f) => f.screen_id === null)
+  const fns = spine.functions.filter((f) => f.screen_id === null && !isTemplateSlotName(f.name))
   if (fns.length === 0) return []
   return [tableBlock(["Name", "Trigger", "Description"], fns.map((f) => [f.name, f.trigger, f.description]))]
 }
@@ -621,7 +650,7 @@ const fptFunctionDetail = (spine: Spine, functionId: string, ctx: SectionRenderC
   const rules = unique(ruleStatements(spine, fn), ruleStatements(canonical ?? spine, source))
   const layout =
     screen && screen.primary_function_id === fn.id
-      ? diagramImages(spine, "screen_layout", screen.id, ctx, sentencesFor(lang).screenLayoutCaption(screen.name))
+      ? screenLayoutImages(spine, screen.id, ctx, sentencesFor(lang).screenLayoutCaption(screen.name))
       : []
 
   // Nhãn heading / mục con giữ tiếng Anh ở đây — `localizeBlocks` dịch sau (bảng `VI_FPT_LABELS`)
@@ -668,7 +697,7 @@ const legacyFunctionDetail = (spine: Spine, functionId: string, ctx: SectionRend
 
   const owningScreen = fn.screen_id ? spine.screens.find((s) => s.id === fn.screen_id) : undefined
   if (owningScreen && owningScreen.primary_function_id === fn.id) {
-    blocks.push(...diagramImages(spine, "screen_layout", owningScreen.id, ctx, `Screen Layout - ${owningScreen.name}`))
+    blocks.push(...screenLayoutImages(spine, owningScreen.id, ctx, `Screen Layout - ${owningScreen.name}`))
   }
   return blocks
 }
@@ -685,13 +714,30 @@ const sequenceDescription = (spine: Spine, fn: Spine["functions"][number], vi: b
     : `The diagram shows ${list.length} messages between ${parties} and the system in "${fn.name}"; a solid arrow is a synchronous request, an open arrow an asynchronous signal and a dashed arrow a response${branches > 0 ? `; ${branches} messages of the error branches sit in an alt frame with the condition in square brackets` : ""}.`
 }
 
-/** Sơ đồ tuần tự hệ thống của function (nếu đã vẽ), kèm đoạn mô tả; chú thích theo ngôn ngữ tài liệu. */
+/** FLF-418: đoạn mô tả dưới sơ đồ tuần tự mức thành phần — số message, nhánh lỗi, màn / bộ điều khiển / entity tham gia. */
+const componentSequenceDescription = (spine: Spine, fn: Spine["functions"][number], vi: boolean): string => {
+  const list = fn.component_interactions ?? []
+  const ends = new Set(list.flatMap((i) => [i.from, i.to]))
+  const actors = spine.actors.filter((a) => ends.has(a.id)).map((a) => a.name)
+  const screen = spine.screens.find((s) => ends.has(s.id))?.name
+  const entities = spine.entities.filter((e) => ends.has(e.id)).map((e) => e.name)
+  const branches = list.filter((i) => i.flow === "abnormal").length
+  const join = (names: string[]) => (names.length > 0 ? names.join(", ") : "-")
+  return vi
+    ? `Sơ đồ mô tả ${list.length} message giữa ${join(actors)}${screen ? `, màn "${screen}"` : ""}, bộ điều khiển và ${entities.length > 0 ? `entity ${join(entities)}` : "các thành phần dữ liệu"} trong chức năng "${fn.name}"; mũi tên đặc là yêu cầu đồng bộ, mũi tên hở là tín hiệu bất đồng bộ, nét đứt là phản hồi${branches > 0 ? `; ${branches} message thuộc nhánh lỗi nằm trong khung alt với điều kiện ở dấu ngoặc vuông` : ""}.`
+    : `The diagram shows ${list.length} messages between ${join(actors)}${screen ? `, the "${screen}" screen` : ""}, the controller and ${entities.length > 0 ? `the ${join(entities)} entities` : "the data components"} in "${fn.name}"; a solid arrow is a synchronous request, an open arrow an asynchronous signal and a dashed arrow a response${branches > 0 ? `; ${branches} messages of the error branches sit in an alt frame with the condition in square brackets` : ""}.`
+}
+
+/** Sơ đồ tuần tự của function (nếu đã vẽ), kèm đoạn mô tả; chú thích theo ngôn ngữ tài liệu và theo mức của hình đã vẽ (FLF-418). */
 const sequenceBlocks = (spine: Spine, functionId: string, ctx: SectionRenderContext): Block[] => {
   const fn = spine.functions.find((f) => f.id === functionId)
   if (!fn) return []
   const labels = diagramLabelsFor(ctx.language)
-  const images = diagramImages(spine, "sequence", functionId, ctx, labels.sequenceTitle(fn.name))
-  return images.length === 0 ? [] : [...images, p(sequenceDescription(spine, fn, isVietnamese(ctx.language)))]
+  const drawn = spine.diagrams.find((d) => d.kind === "sequence" && d.owner_id === functionId)
+  const component = drawn !== undefined && isComponentSequenceSource(drawn.source)
+  const vi = isVietnamese(ctx.language)
+  const images = diagramImages(spine, "sequence", functionId, ctx, component ? labels.componentSequenceTitle(fn.name) : labels.sequenceTitle(fn.name))
+  return images.length === 0 ? [] : [...images, p(component ? componentSequenceDescription(spine, fn, vi) : sequenceDescription(spine, fn, vi))]
 }
 
 /** FLF-390: đoạn mô tả dưới sơ đồ activity — số bước, số điểm rẽ nhánh / song song, các làn (không nhắc lại từng bước). */
@@ -827,7 +873,7 @@ const blocksFor = (spine: Spine, sectionId: string, ctx: SectionRenderContext): 
     case "fixed:2.2.1":
       return useCaseDiagram(spine, ctx)
     case "fixed:2.2.2":
-      return [...useCaseTable(spine), ...useCaseActivities(spine, "fixed:2.2.2", ctx)]
+      return [...useCaseTable(spine, ctx), ...useCaseActivities(spine, "fixed:2.2.2", ctx)]
     case "fixed:3.1.1":
       return screensFlow(spine, ctx)
     case "fixed:3.1.2":
@@ -989,11 +1035,13 @@ const MACHINE_REASON = /^Cascade:/
  * không cần DB). Nhiều người sửa trong ngày ⇒ liệt kê tên không trùng.
  *
  * `language` (FLF-265, nội bộ): câu máy sinh + nhãn phase theo ngôn ngữ tài liệu; không truyền ⇒ tiếng Anh như trước.
+ * `spine` (FLF-411 U2-6): tra tên phần tử cho mô tả dòng CR dựng từ thay đổi (`cr-record.ts`); không truyền ⇒ chỉ loại phần tử.
  */
 export function buildRecordOfChanges(
   changes: ChangeRecordRow[],
   resolveInCharge: (by: string) => string = (by) => by,
-  language?: string
+  language?: string,
+  spine?: Spine
 ): RocRow[] {
   const text = recordTextFor(language)
   const order: string[] = []
@@ -1028,8 +1076,11 @@ export function buildRecordOfChanges(
   let crs = 0
   let baselines = 0
   const seenPhases = new Set<string>()
-  const describe = (row: (typeof rows)[number], reasons: readonly string[]): string => {
+  const describe = (row: (typeof rows)[number], reasons: readonly string[], raw: readonly string[]): string => {
     if (row.baseline) return reasons.length > 0 ? describeRow(reasons, language) : text.baselineSigned
+    // FLF-411 (U2-6): dòng CR theo ngôn ngữ tài liệu — tiêu đề CR khác ngôn ngữ (câu chat tiếng Việt) ⇒ mô tả từ thay đổi
+    const crId = row.cr ? row.changes.find((c) => CR_ACTOR.test(c.by))?.by : undefined
+    if (crId) return crRecordDescription(crId, raw, row.changes, language, spine)
     // Dòng của quy trình: mô tả bằng giai đoạn, kiểu FPT "Create/Update <mục>" — reason từng op là của model
     const label = phaseLabelOf(row.phase, language)
     if (label) {
@@ -1072,7 +1123,7 @@ export function buildRecordOfChanges(
       version,
       change_type: changeTypeOf(new Set(row.changes.map((c) => c.op))),
       in_charge: [...new Set(row.changes.map((c) => resolveInCharge(c.by)))].join(", "),
-      description: describe(row, reasons)
+      description: describe(row, reasons, raw)
     })
   }
   return out
@@ -1131,15 +1182,19 @@ const slotBlocks = (spine: Spine, slotId: string, ctx: SectionRenderContext): Bl
     case "slot:context":
       return [...externalSystems(spine, ctx), ...diagramImages(spine, "context", undefined, ctx, "Figure - System Context Diagram")]
     case "slot:features": {
-      if (spine.features.length === 0) return []
+      const features = spine.features.filter((f) => !isTemplateSlotName(f.name))
+      if (features.length === 0) return []
       const say = sentencesFor(fptLanguage(ctx))
-      const rows = [...spine.features]
+      const rows = [...features]
         .sort((a, b) => a.order - b.order)
-        .map((f) => [say.featureLabel(ctx.numberOf(`feature:${f.id}`), f.name), spine.functions.filter((fn) => fn.feature_id === f.id).map((fn) => fn.name).join(", ")])
+        .map((f) => [
+          say.featureLabel(ctx.numberOf(`feature:${f.id}`), f.name),
+          spine.functions.filter((fn) => fn.feature_id === f.id && !isTemplateSlotName(fn.name)).map((fn) => fn.name).join(", ")
+        ])
       return [tableBlock([text.feature, text.functions], rows)]
     }
     case "slot:functional_requirements": {
-      const rows = [...spine.functions].sort((a, b) => a.order - b.order).map((fn) => [
+      const rows = [...spine.functions].filter((fn) => !isTemplateSlotName(fn.name)).sort((a, b) => a.order - b.order).map((fn) => [
         fn.id,
         [fn.name, fn.description, fn.trigger, ...fn.normal, ...fn.abnormal, ...fn.validations.map((v) => v.statement)].filter(Boolean).join("\n"),
         fn.priority ?? ""

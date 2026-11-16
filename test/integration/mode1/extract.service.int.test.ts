@@ -8,12 +8,15 @@ vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await imp
 
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeMode1 } from "../../helpers/mode1.js"
-import { importAtExtracting } from "../../helpers/mode1-import-p4.js"
+import { importAtExtracting, useExtractConcurrency } from "../../helpers/mode1-import-p4.js"
 import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { ExtractionDraft } from "../../../src/modules/import/extraction-draft.model.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { CreditWallet } from "../../../src/modules/credits/credit-wallet.model.js"
 import { Usage } from "../../../src/modules/spine/usage.model.js"
+
+// Khẳng định thứ tự lượt gọi / số dư ví của bản tuần tự (FLF-392: song song ở extract-parallel.int.test.ts)
+useExtractConcurrency(1)
 
 /** Section trong prompt I-4 của mỗi lượt gọi provider (kể cả lượt retry). */
 let calls: string[] = []
@@ -59,8 +62,8 @@ describe("I-4 - bảng khớp đủ cột", () => {
       ])
     )
     expect(await Usage.countDocuments({ projectId: ctx.projectId, step_id: { $in: TABLE_SECTIONS.map((s) => `I-4:${s}`) } })).toBe(0)
-    // 6 lượt × 2 credit
-    expect(await wallet(ctx.userId)).toMatchObject({ balance: 988, reserved: 0 })
+    // 6 lượt mẫu ngắn × 1 credit (quyết toán theo token)
+    expect(await wallet(ctx.userId)).toMatchObject({ balance: 994, reserved: 0 })
   })
 })
 
@@ -80,7 +83,7 @@ describe("I-4 - output sai schema", () => {
     expect(calls.filter((s) => s === "fixed:1")).toHaveLength(3)
     expect(calls).toHaveLength(8)
     expect(await Usage.find({ projectId: ctx.projectId, step_id: "I-4:fixed:1" }).distinct("state")).toEqual(["deducted"])
-    expect(await wallet(ctx.userId)).toMatchObject({ balance: 988, reserved: 0 })
+    expect(await wallet(ctx.userId)).toMatchObject({ balance: 994, reserved: 0 })
     const d = (await draftsOf(ctx.importId)).find((x) => x.section_id === "fixed:1")!
     expect(d.status).toBe("done")
   }, 20_000)
@@ -141,8 +144,8 @@ describe("I-4 - độ tin", () => {
 
 describe("I-4 - hết credit, resume", () => {
   it("hết credit ⇒ paused credits, giữ cursor ở section đang dở; nạp rồi resume không trích lại section done", async () => {
-    // 5 credit: đủ 2 lượt (fixed:1, fixed:2.2.1), lượt thứ 3 (fixed:3.1.2) thiếu
-    const ctx = await importAtExtracting({ balance: 5 })
+    // 3 credit: đủ 2 lượt ngắn (1 credit / lượt), lượt thứ 3 (fixed:3.1.2) thiếu khi giữ 2 credit
+    const ctx = await importAtExtracting({ balance: 3 })
     const first = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
     expect(first.doc.status).toBe("extracting")
     expect(first.doc.paused?.reason).toBe("credits")
@@ -191,8 +194,8 @@ describe("I-4 - lỗi AI", () => {
     expect(run.doc.paused?.reason).toBe("resume_later")
     expect(run.doc.extract_cursor).toBe(AI_ORDER[2])
     expect(run.sections.find((s) => s.section_id === AI_ORDER[2])).toMatchObject({ status: "failed", error: expect.stringContaining("Dịch vụ AI đang gặp sự cố") })
-    // 2 lượt thành công đã trừ, lượt lỗi được hoàn: không còn credit treo
-    expect(await wallet(ctx.userId)).toMatchObject({ balance: 996, reserved: 0 })
+    // 2 lượt thành công đã trừ (1 credit / lượt), lượt lỗi được hoàn: không còn credit treo
+    expect(await wallet(ctx.userId)).toMatchObject({ balance: 998, reserved: 0 })
     expect(await Usage.find({ projectId: ctx.projectId, step_id: `I-4:${AI_ORDER[2]}` }).distinct("state")).toEqual(["refunded"])
     expect(await Usage.countDocuments({ projectId: ctx.projectId, state: "reserved" })).toBe(0)
 

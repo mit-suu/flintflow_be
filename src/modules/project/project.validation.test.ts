@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from "vitest"
 import type { Request, Response } from "express"
-import { CreateProjectSchema, UpdateDocumentLanguageSchema, UpdateErdNotationSchema, parseKnowledgeFlag, projectModeSchema, validateRequest } from "./project.validation.js"
+import { CreateProjectSchema, UpdateDocumentLanguageSchema, UpdateErdNotationSchema, UpdateScreenThemeSchema, UpdateSequenceLevelSchema, parseKnowledgeFlag, projectModeSchema, validateRequest } from "./project.validation.js"
 import { Project, PROJECT_MODES } from "./project.model.js"
+import { erdNotationChosen, erdNotationOf } from "../../shared/diagram/erd-notation.js"
+import { sequenceLevelChosen, sequenceLevelOf } from "../../shared/diagram/sequence-level.js"
 
 describe("documentLanguage (FLF-265)", () => {
   it("tạo dự án: tuỳ chọn, chỉ nhận vi | en", () => {
@@ -104,9 +106,45 @@ describe("erdNotation", () => {
     expect(UpdateErdNotationSchema.safeParse({ erdNotation: "chen", name: "x" }).success).toBe(false)
   })
 
-  it("schema Project: mặc định chen, từ chối giá trị lạ", () => {
-    expect(new Project({ name: "x" }).erdNotation).toBe("chen")
+  it("schema Project: không default (FLF-418: thiếu = chưa chọn, vẽ vẫn là chen), từ chối giá trị lạ", () => {
+    expect(new Project({ name: "x" }).erdNotation).toBeUndefined()
+    expect(erdNotationOf(new Project({ name: "x" }))).toBe("chen")
+    expect(erdNotationChosen(new Project({ name: "x" }))).toBe(false)
+    expect(erdNotationChosen(new Project({ name: "x", erdNotation: "chen" }))).toBe(true)
     expect(new Project({ name: "x", erdNotation: "idef1x" }).erdNotation).toBe("idef1x")
     expect(new Project({ name: "x", erdNotation: "uml" }).validateSync()?.errors.erdNotation).toBeDefined()
+  })
+})
+
+describe("sequenceLevel (FLF-418)", () => {
+  it("đổi mức: bắt buộc, chỉ nhận system | component, không nhận key lạ", () => {
+    for (const sequenceLevel of ["system", "component"]) expect(UpdateSequenceLevelSchema.safeParse({ sequenceLevel }).success).toBe(true)
+    expect(UpdateSequenceLevelSchema.safeParse({}).success).toBe(false)
+    expect(UpdateSequenceLevelSchema.safeParse({ sequenceLevel: "design" }).success).toBe(false)
+    expect(UpdateSequenceLevelSchema.safeParse({ sequenceLevel: "system", name: "x" }).success).toBe(false)
+  })
+
+  it("schema Project: không default (thiếu = chưa chọn, vẽ là system), từ chối giá trị lạ", () => {
+    expect(new Project({ name: "x" }).sequenceLevel).toBeUndefined()
+    expect(sequenceLevelOf(new Project({ name: "x" }))).toBe("system")
+    expect(sequenceLevelChosen(new Project({ name: "x" }))).toBe(false)
+    expect(new Project({ name: "x", sequenceLevel: "component" }).sequenceLevel).toBe("component")
+    expect(sequenceLevelChosen(new Project({ name: "x", sequenceLevel: "component" }))).toBe(true)
+    expect(new Project({ name: "x", sequenceLevel: "uml" }).validateSync()?.errors.sequenceLevel).toBeDefined()
+  })
+})
+
+describe("UpdateScreenThemeSchema (FLF-410)", () => {
+  it("nhận từng field, chuẩn hoá màu + domain; null = về mặc định", () => {
+    expect(UpdateScreenThemeSchema.parse({ primaryColor: "#e4572e" })).toEqual({ primaryColor: "#E4572E" })
+    expect(UpdateScreenThemeSchema.parse({ domain: "https://Shop.Example.com/cart" })).toEqual({ domain: "shop.example.com" })
+    expect(UpdateScreenThemeSchema.parse({ domain: "" })).toEqual({ domain: null })
+    expect(UpdateScreenThemeSchema.parse({ primaryColor: null, domain: null, platforms: null })).toEqual({ primaryColor: null, domain: null, platforms: null })
+    expect(UpdateScreenThemeSchema.parse({ platforms: ["web", "mobile"] })).toEqual({ platforms: ["web", "mobile"] })
+  })
+
+  it("sai ⇒ không qua", () => {
+    for (const body of [{}, { primaryColor: "red" }, { primaryColor: "#FFF" }, { domain: "not a host" }, { platforms: [] }, { platforms: ["web", "web"] }, { platforms: ["tv"] }, { primaryColor: "#FFFFFF", extra: 1 }])
+      expect(UpdateScreenThemeSchema.safeParse(body).success, JSON.stringify(body)).toBe(false)
   })
 })

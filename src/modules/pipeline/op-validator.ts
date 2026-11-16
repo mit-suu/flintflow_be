@@ -23,7 +23,8 @@ import { userOpSchema, type Op } from "../spine/op.types.js"
 import { parsePath, PathError, tryResolve } from "../spine/path-resolver.js"
 import { isPlaceholderId } from "../spine/id-allocator.js"
 import type { Spine } from "../spine/spine.types.js"
-import { SYSTEM_LIFELINE } from "../spine/spine.schema.js"
+import { CONTROL_LIFELINE, SYSTEM_LIFELINE } from "../spine/spine.schema.js"
+import { entitiesOfFeature } from "../spine/entity-features.js"
 import { restatesAssumption } from "./text-overlap.js"
 import { normalizeFormFactorAt } from "../spine/form-factor.js"
 import { USE_CASE_NAME_FIX, emptyProtectedArraysOf, orphanEntities, sharedAccessGroups, sharedAccessMessage, useCaseNameIssues, type SharedAccessGroup } from "../spine/deterministic-check.js"
@@ -877,6 +878,16 @@ const interactionOwners = (ops: readonly Op[]): string[] => [
   )
 ]
 
+/** FLF-418: id function mà lô op đụng tới `component_interactions` (hoặc ghi cả function). */
+const componentInteractionOwners = (ops: readonly Op[]): string[] => [
+  ...new Set(
+    ops.flatMap((op) => {
+      const m = /^functions\[id=([^\],]+)\](\..*)?$/.exec(op.path)
+      return m && (m[2] === undefined || m[2].startsWith(".component_interactions")) ? [m[1]] : []
+    })
+  )
+]
+
 /** FLF-390: lô op đụng tới sơ đồ triển khai. */
 const touchesDeployment = (ops: readonly Op[]): boolean => ops.some((op) => op.path.startsWith("deployment_nodes") || op.path.startsWith("deployment_links"))
 
@@ -1054,6 +1065,67 @@ export const interactionErrors = (after: Spine, ids: readonly string[]): Validat
     const first = list[0]
     if (first.kind !== "request" || first.from === SYSTEM_LIFELINE || first.flow !== "normal") {
       errors.push({ rule: "interaction_stimulus_missing", path: `${at}[0]`, message: `"${fn.name}": message đầu tiên phải là request thuộc luồng chính từ actor tới system (stimulus)` })
+    }
+  }
+  return errors
+}
+
+/**
+ * FLF-418: message của sơ đồ tuần tự mức thành phần (Visual Paradigm: actor → boundary → control → entity). Đầu là actor,
+ * màn của chính function (boundary; function không màn thì không có), entity của feature của function, hoặc `control`
+ * (mỗi function một control). Actor không nói thẳng với entity, không tự gọi chính mình; message đầu là request thuộc
+ * luồng chính từ actor; nhánh lỗi có guard; actor người là actor của use case gắn function; không trùng khoá.
+ */
+export const componentInteractionErrors = (after: Spine, ids: readonly string[]): ValidationError[] => {
+  const errors: ValidationError[] = []
+  for (const fn of after.functions.filter((f) => ids.includes(f.id))) {
+    const list = fn.component_interactions ?? []
+    if (list.length === 0) continue
+    const at = `functions[id=${fn.id}].component_interactions`
+    const actors = new Map(after.actors.map((a) => [a.id, a]))
+    const featureEntities = entitiesOfFeature(after, fn.feature_id)
+    const entityIds = new Set(featureEntities.map((e) => e.id))
+    const screenIds = new Set(after.screens.map((s) => s.id))
+    const modelled = new Set(after.use_cases.filter((uc) => uc.function_ids.includes(fn.id)).flatMap((uc) => uc.actor_ids))
+    const humans = after.actors.filter((a) => a.kind === "human")
+    const hasModelledHuman = humans.some((a) => modelled.has(a.id))
+    const kindOf = (end: string): "actor" | "boundary" | "control" | "entity" | null =>
+      end === CONTROL_LIFELINE ? "control" : actors.has(end) ? "actor" : screenIds.has(end) ? "boundary" : after.entities.some((e) => e.id === end) ? "entity" : null
+    const keys = new Set<string>()
+    list.forEach((i, k) => {
+      const where = `${at}[${k}]`
+      const ends = [i.from, i.to].map((end) => ({ end, kind: kindOf(end) }))
+      for (const { end, kind } of ends) {
+        if (kind === null || end === SYSTEM_LIFELINE) {
+          errors.push({ rule: "component_endpoint_invalid", path: where, message: `"${fn.name}": đầu "${end}" của message "${i.message}" phải là id actor, id màn, id entity hoặc "control"` })
+        } else if (kind === "boundary" && end !== fn.screen_id) {
+          errors.push({ rule: "component_boundary_foreign", path: where, message: fn.screen_id === null ? `"${fn.name}": function không thuộc màn nào nên không có boundary - actor gửi thẳng tới "control"` : `"${fn.name}": boundary phải là màn của function (${fn.screen_id}), không dùng màn "${end}"` })
+        } else if (kind === "entity" && !entityIds.has(end)) {
+          errors.push({ rule: "component_entity_foreign", path: where, message: `"${fn.name}": entity "${end}" không thuộc feature của function - dùng entity của feature: ${featureEntities.map((e) => `${e.id} ${e.name}`).join(", ") || "(feature chưa có entity)"}` })
+        } else if (kind === "actor") {
+          const actor = actors.get(end)!
+          if (actor.kind === "human" && hasModelledHuman && !modelled.has(actor.id)) {
+            errors.push({ rule: "component_actor_not_modelled", path: where, message: `"${fn.name}": actor "${actor.name}" không phải actor của use case gắn function - dùng: ${humans.filter((a) => modelled.has(a.id)).map((a) => `${a.id} ${a.name}`).join(", ")}` })
+          }
+        }
+      }
+      const [from, to] = ends.map((e) => e.kind)
+      if ((from === "actor" && to === "entity") || (from === "entity" && to === "actor")) {
+        errors.push({ rule: "component_endpoint_invalid", path: where, message: `"${fn.name}": message "${i.message}" nối thẳng actor với entity - đi qua boundary / control` })
+      }
+      if (i.from === i.to && from !== "control") {
+        errors.push({ rule: "component_endpoint_invalid", path: where, message: `"${fn.name}": message "${i.message}" tự gọi chính mình - chỉ "control" được tự gọi` })
+      }
+      if (i.flow === "abnormal" && (i.guard ?? "").trim() === "") {
+        errors.push({ rule: "component_guard_missing", path: where, message: `"${fn.name}": message lỗi "${i.message}" cần guard (điều kiện của nhánh lỗi)` })
+      }
+      const key = `${i.from}|${i.to}|${i.message}|${i.kind}|${i.flow}`
+      if (keys.has(key)) errors.push({ rule: "component_duplicate", path: where, message: `"${fn.name}": message "${i.message}" trùng khoá - đổi chữ message của nhánh sau` })
+      keys.add(key)
+    })
+    const first = list[0]
+    if (first.kind !== "request" || first.flow !== "normal" || kindOf(first.from) !== "actor") {
+      errors.push({ rule: "component_stimulus_missing", path: `${at}[0]`, message: `"${fn.name}": message đầu tiên phải là request thuộc luồng chính từ actor (stimulus)` })
     }
   }
   return errors
@@ -1290,7 +1362,7 @@ export const validateOps = (spine: Spine, ops: unknown, options: ValidateOptions
 
   try {
     const plan = planTransaction(spine, { base_version: spine.spine_version, ops: parsed, by: "op-validator", step_id: options.stepId ?? null }, { startSeq: 1 })
-    return [...(touchesErd(spine, parsed) ? erdShapeErrors(plan.spine) : []), ...interactionErrors(plan.spine, interactionOwners(parsed)), ...activityErrors(plan.spine, activityOwners(parsed)), ...(touchesDeployment(parsed) ? deploymentErrors(plan.spine) : [])]
+    return [...(touchesErd(spine, parsed) ? erdShapeErrors(plan.spine) : []), ...interactionErrors(plan.spine, interactionOwners(parsed)), ...componentInteractionErrors(plan.spine, componentInteractionOwners(parsed)), ...activityErrors(plan.spine, activityOwners(parsed)), ...(touchesDeployment(parsed) ? deploymentErrors(plan.spine) : [])]
   } catch (err) {
     if (err instanceof TransactionRejectedError) {
       return err.violations.map((v) => ({

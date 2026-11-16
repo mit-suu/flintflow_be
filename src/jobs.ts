@@ -7,10 +7,11 @@ export const loadJobDefinitions = async (): Promise<void> => {
     import("./modules/import/extract-jobs.js"),
     import("./modules/import/finalize-jobs.js"),
     import("./modules/import/reread-jobs.js"),
-    import("./modules/import/credit-flow.service.js"),
     import("./modules/change-request/embedding/embedding-sync.service.js"),
     import("./shared/email/email.service.js"),
     import("./shared/ai/credit-reservation.jobs.js"),
-    import("./modules/billing/subscription-renewal.jobs.js")
+    import("./modules/billing/subscription-renewal.jobs.js"),
+    import("./modules/template-migration/recover-applying.jobs.js"),
+    import("./modules/diagram/screen-mockup-runs.js")
   ])
 }

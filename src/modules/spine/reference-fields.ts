@@ -18,7 +18,7 @@
 
 import type { Spine } from "./spine.types.js"
 import { tryResolve } from "./path-resolver.js"
-import { SYSTEM_LIFELINE } from "./spine.schema.js"
+import { CONTROL_LIFELINE, SYSTEM_LIFELINE } from "./spine.schema.js"
 import { FIXED_SECTION_ID_LIST } from "./section-registry.js"
 import { isContentSlot } from "../import/content-slots.js"
 
@@ -39,6 +39,8 @@ export type TargetCollection =
   | "section_key"
   | "path"
   | "diagram_owner"
+  /** FLF-418: đầu message của sơ đồ tuần tự mức thành phần — id actor, màn (boundary) hoặc entity. */
+  | "lifeline"
 
 export interface ReferenceField {
   /** Tên field theo §4.1, ví dụ `use_cases[].actor_ids[]`. */
@@ -84,7 +86,9 @@ export const REFERENCE_FIELDS: readonly ReferenceField[] = Object.freeze([
   { path: "use_cases[].activity_flows[].to", targetCollection: "activity_nodes", cardinality: "one" },
   { path: "deployment_nodes[].parent_id", targetCollection: "deployment_nodes", cardinality: "one" },
   { path: "deployment_links[].from", targetCollection: "deployment_nodes", cardinality: "one" },
-  { path: "deployment_links[].to", targetCollection: "deployment_nodes", cardinality: "one" }
+  { path: "deployment_links[].to", targetCollection: "deployment_nodes", cardinality: "one" },
+  { path: "functions[].component_interactions[].from", targetCollection: "lifeline", cardinality: "one" },
+  { path: "functions[].component_interactions[].to", targetCollection: "lifeline", cardinality: "one" }
 ] as const satisfies readonly ReferenceField[])
 
 /** Section cố định của template FPT — từ section registry (T09). */
@@ -93,7 +97,7 @@ export const FIXED_SECTION_IDS: readonly string[] = FIXED_SECTION_ID_LIST
 const FIXED_SECTION_SET = new Set(FIXED_SECTION_IDS)
 
 /** `owner_kind` của diagram → collection đích. */
-export const DIAGRAM_OWNER_COLLECTIONS: Readonly<Record<string, Exclude<TargetCollection, "section_key" | "path" | "diagram_owner">>> =
+export const DIAGRAM_OWNER_COLLECTIONS: Readonly<Record<string, Exclude<TargetCollection, "section_key" | "path" | "diagram_owner" | "lifeline">>> =
   Object.freeze({
     screen: "screens",
     feature: "features",
@@ -104,7 +108,10 @@ export const DIAGRAM_OWNER_COLLECTIONS: Readonly<Record<string, Exclude<TargetCo
 
 // ─── id index ────────────────────────────────────────────────────
 
-export type IdCollection = Exclude<TargetCollection, "section_key" | "path" | "diagram_owner">
+export type IdCollection = Exclude<TargetCollection, "section_key" | "path" | "diagram_owner" | "lifeline">
+
+/** FLF-418: collection mà một đầu `lifeline` có thể trỏ tới. */
+export const LIFELINE_COLLECTIONS = ["actors", "screens", "entities"] as const satisfies readonly IdCollection[]
 
 export type IdIndex = Record<IdCollection, Set<string>>
 
@@ -188,7 +195,9 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
     activityTo,
     deploymentParent,
     deploymentFrom,
-    deploymentTo
+    deploymentTo,
+    componentFrom,
+    componentTo
   ] = REFERENCE_FIELDS
 
   // BUG-04: phần tử thiếu mảng tham chiếu (model bỏ trống `includes`…) không được làm sập cả lô
@@ -249,6 +258,12 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
       const at = `${owner}.interactions[from=${i.from},to=${i.to},message=${i.message},kind=${i.kind},flow=${i.flow}]`
       if (i.from !== SYSTEM_LIFELINE) yield { field: interactionFrom, ownerPath: at, refPath: `${at}.from`, targetId: i.from, target: "actors" }
       if (i.to !== SYSTEM_LIFELINE) yield { field: interactionTo, ownerPath: at, refPath: `${at}.to`, targetId: i.to, target: "actors" }
+    }
+    // FLF-418: mức thành phần — đầu `control` không phải phần tử Spine; đầu khác là actor / màn / entity
+    for (const i of f.component_interactions ?? []) {
+      const at = `${owner}.component_interactions[from=${i.from},to=${i.to},message=${i.message},kind=${i.kind},flow=${i.flow}]`
+      if (i.from !== CONTROL_LIFELINE) yield { field: componentFrom, ownerPath: at, refPath: `${at}.from`, targetId: i.from, target: "lifeline" }
+      if (i.to !== CONTROL_LIFELINE) yield { field: componentTo, ownerPath: at, refPath: `${at}.to`, targetId: i.to, target: "lifeline" }
     }
 
   }
@@ -314,6 +329,8 @@ export const referenceAlive = (spine: Spine, index: IdIndex, hit: ReferenceHit):
       return tryResolve(spine, hit.targetId) !== null
     case "diagram_owner":
       return true
+    case "lifeline":
+      return LIFELINE_COLLECTIONS.some((c) => index[c].has(hit.targetId))
     default:
       return index[hit.target].has(hit.targetId)
   }

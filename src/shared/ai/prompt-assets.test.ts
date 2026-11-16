@@ -71,7 +71,7 @@ describe("prompt phẳng trên đĩa (assets/prompts)", () => {
 describe("skill trên đĩa (assets/skills)", () => {
   // Phases §8.2 đếm 29 (12 content); task-03 thêm content/product-brief cho B-0…B-2 (T20)
   // ⇒ 30. Ghi ở docs/spec-gaps.md.
-  it("đủ 48 skill: 20 action · 18 content · 8 renderer · 2 output", () => {
+  it("đủ 50 skill: 22 action · 18 content · 8 renderer · 2 output", () => {
     const byKind = (k: string) => listSkillAssets().filter((s) => s.kind === k).length
 
     // +2 so với 30 ban đầu: content/prioritization (S-9.4, T19) thay UC34/UC35 cũ,
@@ -82,14 +82,16 @@ describe("skill trên đĩa (assets/skills)", () => {
     // +1 action 1.11 map-reduce: import-cross-check (kiểm chéo giữa các section).
     // +1 action FLF-267: knowledge-answer (trả lời câu hỏi tri thức chỉ từ chunk truy hồi, có trích dẫn).
     // +1 action FLF-338: extract-requirements (rút yêu cầu từ tài liệu thô, §3.6.1).
+    // +1 action FLF-395: skeleton-generic-names (dạng chung cho mục BA tự đặt trước khi vào khung mẫu org).
+    // +1 action FLF-395: template-migration-resolve (D8: chuyển mục riêng vào mục có cấu trúc / giải quyết conflict khi đổi mẫu).
     // +1 renderer FLF-325: renderer/class (class diagram domain, mỗi feature một hình).
     // +1 renderer: renderer/state-machine (state machine diagram, mỗi entity có vòng đời một hình).
     // +1 renderer: renderer/sequence (System Sequence Diagram, mỗi function cần sơ đồ một hình).
     // +3 content FLF-365: references-list, requirement-apportioning, verification-matrix (mục IEEE 29148, Mode 1).
     // +1 renderer FLF-390: renderer/activity (activity diagram, luồng xử lý mỗi function một hình).
     // +1 renderer FLF-390: renderer/deployment (deployment diagram của hệ thống, §4.1).
-    expect(listSkillAssets()).toHaveLength(50)
-    expect(byKind("action")).toBe(20)
+    expect(listSkillAssets()).toHaveLength(52)
+    expect(byKind("action")).toBe(22)
     expect(byKind("content")).toBe(18)
     expect(byKind("renderer")).toBe(10)
     expect(byKind("output")).toBe(2)
@@ -152,7 +154,8 @@ describe("skill trên đĩa (assets/skills)", () => {
   // Skill cần quy trình suy luận dài hơn mức chung (quyết định chiều/bản số từng quan hệ ERD; FLF-311: lô thêm use case kéo
   // theo chức năng / màn / luồng / phân quyền — hai khối theo giai đoạn, model chỉ nhận một khối; entities-erd thêm Pass 8
   // vòng đời entity (states / transitions) cùng hai nhóm luật validator của nó nên nâng 250 → 260)
-  const LINE_LIMIT_OVERRIDE: Readonly<Record<string, number>> = { "content/entities-erd": 260, "action/apply-change-op": 250 }
+  // FLF-418: function-detail thêm mục component_interactions (mức thành phần của sơ đồ tuần tự)
+  const LINE_LIMIT_OVERRIDE: Readonly<Record<string, number>> = { "content/entities-erd": 260, "action/apply-change-op": 250, "content/function-detail": 165 }
 
   it("skill action + skill đã viết (T10, T14) có nội dung thật, SKILL.md ≤ 150 dòng (trừ LINE_LIMIT_OVERRIDE); skill còn lại là stub", () => {
     for (const s of listSkillAssets()) {
@@ -289,6 +292,12 @@ describe("Brief giữ tầm nhìn/mục tiêu ở addendum, S-1.1 dựng bản t
 
   it("apply-change-op: có luật brief_core cho lệnh sửa ở pha Brief", () => {
     expect(skill("action/apply-change-op")).toContain("brief_core")
+  })
+
+  it("FLF-411 (#18): apply-change-op - \"tên hệ thống\" ghi project.system_name, project.name chỉ khi nói tên dự án", () => {
+    const text = skill("action/apply-change-op")
+    expect(text).toContain("`set project.system_name`")
+    expect(text).toContain("tên dự án")
   })
 
   it("FLF-278: apply-change-op dạy ghi mục riêng của mẫu khách và soạn nháp không bịa, hỏi tối đa 3 câu", () => {
