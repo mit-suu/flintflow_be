@@ -31,6 +31,11 @@ export interface ErdEntityInput {
   attributes?: readonly ErdAttribute[]
   /** IDEF1X: thực thể phụ thuộc (định danh qua quan hệ định danh) — góc bo tròn. */
   dependent?: boolean
+  /**
+   * P10: thực thể của hình KHÁC, chỉ vẽ để giữ quan hệ vắt qua chỗ cắt — hộp nét đứt, nền trắng, không thuộc tính, dòng
+   * ghi chú nghiêng (vd "xem hình 2/2") dưới tên.
+   */
+  elsewhere?: string
 }
 
 export interface ErdRelationInput {
@@ -73,6 +78,8 @@ const clean = (text: string): string => text.replace(/\s+/g, " ").trim()
 interface EntityBox {
   input: ErdEntityInput
   nameLines: string[]
+  /** Dòng ghi chú của thực thể ở hình khác (`elsewhere`). */
+  noteLines: string[]
   headerH: number
   rows: { text: string; pk: boolean; gapBefore: boolean }[]
   boxW: number
@@ -94,26 +101,28 @@ const attributeRows = (notation: ErdNotation, attrs: readonly ErdAttribute[]): E
 
 const entityBox = (e: ErdEntityInput, notation: ErdNotation, degree: number, selfLoops: number, o = DEFAULT_ROUTE_OPTIONS): EntityBox => {
   const nameLines = wrapLines(clean(e.name) || e.id, NAME_SIZE, MAX_NAME_WIDTH, 2)
-  const nameW = Math.max(...nameLines.map((l) => textWidth(l, NAME_SIZE, true)))
-  const rows = attributeRows(notation, e.attributes ?? [])
-  const headerH = Math.max(38, nameLines.length * NAME_LINE + 16)
+  const noteLines = e.elsewhere ? wrapLines(clean(e.elsewhere), ATTR_SIZE, MAX_NAME_WIDTH, 2) : []
+  const nameW = Math.max(...nameLines.map((l) => textWidth(l, NAME_SIZE, true)), ...noteLines.map((l) => textWidth(l, ATTR_SIZE)))
+  const rows = e.elsewhere ? [] : attributeRows(notation, e.attributes ?? [])
+  const headerH = Math.max(38, nameLines.length * NAME_LINE + noteLines.length * ATTR_LINE + 16)
   const attrH = rows.length > 0 ? 12 + rows.length * ATTR_LINE + rows.filter((r) => r.gapBefore).length * 8 : 0
   const attrW = Math.max(0, ...rows.map((r) => textWidth(r.text, ATTR_SIZE, r.pk)))
   // đủ chỗ cho các cổng: tối đa nửa số đầu mút dồn vào một cạnh. FLF-375: Chen có dải ô-van bên dưới nên chỉ ba cạnh có
   // cổng (L / R / T) ⇒ chia cho 3 cạnh thay vì 4 — trước đây thực thể bậc cao (Order: 10 quan hệ) hết chỗ cổng, router bỏ
   // cuộc và hình bị cắt làm 5
-  const usableSides = notation === "chen" && (e.attributes ?? []).some((a) => a.fk !== true) ? 3 : 4
+  const ownAttributes = e.elsewhere ? [] : (e.attributes ?? [])
+  const usableSides = notation === "chen" && ownAttributes.some((a) => a.fk !== true) ? 3 : 4
   const slots = Math.max(1, Math.ceil((degree - 2 * selfLoops) / (usableSides / 2)) + 2 * selfLoops)
   const portSpan = 2 * o.portMargin + (slots - 1) * o.portPitch
   const boxW = Math.max(110, Math.ceil(nameW + 28), Math.ceil(attrW + 24), portSpan)
   const boxH = Math.max(headerH + attrH, portSpan)
   // Chen: quan hệ đã là hình thoi, khoá ngoại là chi tiết cài đặt của nó ⇒ không vẽ thêm thành ô-van thuộc tính
-  const ovals = notation === "chen" ? (e.attributes ?? []).filter((a) => a.fk !== true).map((a) => ({ name: clean(a.name), pk: a.pk === true, rx: Math.ceil(textWidth(clean(a.name), ATTR_SIZE, a.pk === true) / 2) + 12, ry: 13 })) : []
+  const ovals = notation === "chen" ? ownAttributes.filter((a) => a.fk !== true).map((a) => ({ name: clean(a.name), pk: a.pk === true, rx: Math.ceil(textWidth(clean(a.name), ATTR_SIZE, a.pk === true) / 2) + 12, ry: 13 })) : []
   const stripW = ovals.reduce((sum, v) => sum + 2 * v.rx, 0) + Math.max(0, ovals.length - 1) * 10
   const w = Math.max(boxW, stripW)
   const h = ovals.length > 0 ? boxH + 24 + 26 + 4 : boxH
   const node: GridNode = { id: e.id, w, h, body: { x: (w - boxW) / 2, y: 0, w: boxW, h: boxH }, ...(ovals.length > 0 ? { sides: ["L", "R", "T"] as const } : {}) }
-  return { input: e, nameLines, headerH, rows, boxW, boxH, node, ovals }
+  return { input: e, nameLines, noteLines, headerH, rows, boxW, boxH, node, ovals }
 }
 
 interface DiamondBox {
@@ -347,8 +356,14 @@ const drawEntity = (scene: Scene, e: EntityBox, placed: PlacedNode, notation: Er
   const { id, name } = e.input
   const { x, y, w, h } = placed.body
   const rounded = notation === "idef1x" && e.input.dependent === true
-  scene.rect(id, x, y, w, h, { name, ...(rounded ? { radius: 10 } : {}) })
-  e.nameLines.forEach((line, i) => scene.text(`${id}#name-${i}`, x + w / 2, y + e.headerH / 2 + (i - (e.nameLines.length - 1) / 2) * NAME_LINE, line, { size: NAME_SIZE, bold: true, baseline: "central", owner: id }))
+  scene.rect(id, x, y, w, h, { name, ...(rounded ? { radius: 10 } : {}), ...(e.input.elsewhere ? { dashed: true, fill: PAPER } : {}) })
+  // tên (và dòng ghi chú của thực thể ở hình khác) canh giữa phần đầu hộp
+  const textH = e.nameLines.length * NAME_LINE + e.noteLines.length * ATTR_LINE
+  const top = y + (e.headerH - textH) / 2
+  e.nameLines.forEach((line, i) => scene.text(`${id}#name-${i}`, x + w / 2, top + (i + 0.5) * NAME_LINE, line, { size: NAME_SIZE, bold: true, baseline: "central", owner: id }))
+  e.noteLines.forEach((line, i) =>
+    scene.text(`${id}#note-${i}`, x + w / 2, top + e.nameLines.length * NAME_LINE + (i + 0.5) * ATTR_LINE, line, { size: ATTR_SIZE, italic: true, baseline: "central", owner: id })
+  )
   if (e.rows.length > 0) {
     scene.decoration(`${id}#rule-0`, id, [[x, y + e.headerH], [x + w, y + e.headerH]])
     let cursor = y + e.headerH + 6

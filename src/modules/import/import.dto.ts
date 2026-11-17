@@ -336,7 +336,8 @@ export const structurePreviewSchema = z.object({
     out_of_scope: z.number().int().min(0),
     kind: z.enum(["written", "template"])
   }),
-  sections: z.array(z.object({ section_id: z.string().min(1), title: z.string(), status: z.enum(["present", "missing", "out_of_scope"]), order: z.number().int().min(0) })),
+  // P09 (#15): `excerpt` — trích đoạn chữ khách viết dưới mục (≤ 200 ký tự); mục không có chữ / bản sơ bộ cũ ⇒ không có
+  sections: z.array(z.object({ section_id: z.string().min(1), title: z.string(), status: z.enum(["present", "missing", "out_of_scope"]), order: z.number().int().min(0), excerpt: z.string().max(200).optional() })),
   resolved_mode: z.union([z.literal(1), z.literal(3), z.literal(4)]),
   intent: z.enum(["fixed", "free"]),
   computed_at: isoDateTime
