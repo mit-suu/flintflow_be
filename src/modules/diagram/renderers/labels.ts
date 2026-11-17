@@ -32,6 +32,8 @@ export interface DiagramLabels {
   noEntities: string
   /** Tiêu đề hình ERD (kèm `(i/n)` khi tách) — `<title>` của SVG, `section-renderer` dùng làm chú thích ảnh. */
   erdTitle: string
+  /** P10: ghi chú dưới tên thực thể vẽ thêm để giữ quan hệ vắt qua chỗ cắt — `parts` là các `i/n` của hình chứa nó. */
+  erdElsewhere: (parts: string) => string
   /** Động từ trong hình thoi ERD khi quan hệ chưa có `relation_verbs`. */
   relationVerb: string
   /** Tiêu đề hình class diagram (domain) của một feature (kèm `(i/n)` khi tách) — `<title>` của SVG, chú thích ảnh. */
@@ -69,6 +71,7 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     elseGuard: "else",
     noEntities: "No entities yet",
     erdTitle: "Entity Relationship Diagram",
+    erdElsewhere: (parts) => `(see diagram ${parts})`,
     relationVerb: "has",
     classTitle: (feature) => `Class Diagram - ${feature}`,
     stateMachineTitle: (entity) => `State Machine Diagram - ${entity}`,
@@ -94,6 +97,7 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     elseGuard: "ngược lại",
     noEntities: "Chưa có thực thể",
     erdTitle: "Sơ đồ quan hệ thực thể",
+    erdElsewhere: (parts) => `(xem hình ${parts})`,
     relationVerb: "có",
     classTitle: (feature) => `Sơ đồ lớp - ${feature}`,
     stateMachineTitle: (entity) => `Sơ đồ trạng thái - ${entity}`,
