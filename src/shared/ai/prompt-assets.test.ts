@@ -63,8 +63,11 @@ describe("prompt phẳng trên đĩa (assets/prompts)", () => {
   })
 
   // T21: prompt phẳng chỉ còn cho action ngoài pipeline — prompt section-based cũ đã xoá
-  it("chỉ còn prompt của CHAT, SUMMARIZE_DOCUMENT, TRANSLATE, TRANSLATE_DOCUMENT", () => {
-    expect(listPromptAssets().map((a) => a.actionType).sort()).toEqual([ActionType.CHAT, ActionType.SUMMARIZE_DOCUMENT, ActionType.TRANSLATE, ActionType.TRANSLATE_DOCUMENT])
+  // + GOOGLE_DOCS_AGENT: system prompt của trợ lý Google Docs, cũng ngoài pipeline
+  it("chỉ còn prompt của CHAT, SUMMARIZE_DOCUMENT, TRANSLATE, TRANSLATE_DOCUMENT, GOOGLE_DOCS_AGENT", () => {
+    expect(listPromptAssets().map((a) => a.actionType).sort()).toEqual(
+      [ActionType.CHAT, ActionType.GOOGLE_DOCS_AGENT, ActionType.SUMMARIZE_DOCUMENT, ActionType.TRANSLATE, ActionType.TRANSLATE_DOCUMENT].sort()
+    )
   })
 })
 

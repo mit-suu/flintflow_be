@@ -48,7 +48,9 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   // FLF-395: một lượt ngắn cho cả danh sách heading chờ duyệt
   [ActionType.SKELETON_GENERIC_NAMES]: 1,
   // D8: một lượt mỗi mục BA chọn "chuyển vào mục có cấu trúc" / "AI giải quyết" khi đổi mẫu (đã báo credit trước ở `credit_estimate`)
-  [ActionType.TEMPLATE_MIGRATION_RESOLVE]: 3
+  [ActionType.TEMPLATE_MIGRATION_RESOLVE]: 3,
+  // Trợ lý Google Docs: giá cố định theo TIN NHẮN (không theo số bước gọi tool); Áp dụng / Bỏ qua đề xuất không tốn credit
+  [ActionType.GOOGLE_DOCS_AGENT]: 2
 }
 
 /** Một lần giữ credit. Truyền nguyên object này cho deduct/release. */

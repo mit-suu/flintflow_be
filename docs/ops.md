@@ -138,6 +138,11 @@ tiếp. `.env.example` là danh sách đầy đủ kèm giải thích; dưới �
 *Streamable HTTP*, URL `http://localhost:5000/api/v1/mcp/google-docs`, header `Authorization: Bearer <access token FlintFlow>`
 (tài khoản đã nối Google ở trang Hồ sơ). Tool ghi chỉ ghi khi `dryRun: false` + `expectedRevisionId` lấy từ `get_outline`.
 
+**Trợ lý Google Docs** (panel trong workspace): provider / model lấy từ frontmatter `assets/prompts/google_docs_agent.md`
+(mặc định `anthropic` ⇒ cần `ANTHROPIC_API_KEY`); provider phải gọi tool ổn định — GLM qua Modal không nên dùng ở đây.
+2 credit mỗi tin nhắn (`google_docs_agent`), Áp dụng / Bỏ qua đề xuất miễn phí. Agent nối MCP server trong bộ nhớ, không gọi
+HTTP vòng về BE. `AI_PROVIDER_OVERRIDE=mock` ⇒ trợ lý trả một câu cố định, không gọi tool.
+
 Vài quyết định hay bị hỏi lại:
 
 - **Không có `PAYMENT_WEBHOOK_SECRET`.** `handlePaymentCallback` kiểm `client_id` rồi **đọc lại đơn

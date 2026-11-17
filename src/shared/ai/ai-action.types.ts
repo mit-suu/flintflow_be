@@ -58,7 +58,11 @@ export enum ActionType {
   /** D13: gợi ý dạng chung (bỏ tên khách / hệ thống) cho mục BA tự đặt trước khi vào khung mẫu của org — một lượt cho cả danh sách. */
   SKELETON_GENERIC_NAMES = "skeleton_generic_names",
   /** D8: lựa chọn của BA khi đổi mẫu cần AI — chuyển mục riêng chữ tự do vào mục có cấu trúc (sinh op) hoặc giải quyết conflict (chọn cách ghép). Một lượt mỗi mục. */
-  TEMPLATE_MIGRATION_RESOLVE = "template_migration_resolve"
+  TEMPLATE_MIGRATION_RESOLVE = "template_migration_resolve",
+
+  // ─── Tích hợp Google Docs ───
+  /** Trợ lý Google Docs: agent gọi tool MCP đọc tài liệu, tool ghi chỉ thành đề xuất chờ người dùng duyệt. Một lượt = một tin nhắn. */
+  GOOGLE_DOCS_AGENT = "google_docs_agent"
 }
 
 /**
