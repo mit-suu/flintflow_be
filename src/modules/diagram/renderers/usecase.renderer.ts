@@ -37,7 +37,12 @@ import { drawnGeneralizations, isUploadedDocument, withDrawnUser } from "./drawn
 import { layoutActorHierarchy, layoutUseCaseDiagram, type Association, type DiagramActor, type Relation, type UseCaseDiagram } from "./usecase-layout.js"
 
 export const MAX_USE_CASES_PER_DIAGRAM = 20
-/** Nhóm "hình tổng quát" của tài liệu upload — thay đúng một hình gốc. */
+/**
+ * P10 (user chốt 17/11, câu 5): trần use case mỗi hình của tài liệu upload. Hình tổng quát quá trần ⇒ tách theo nhóm chức năng
+ * (feature của use case, gói các nhóm liền nhau tới trần); một nhóm vẫn quá trần ⇒ chia đều trong nhóm.
+ */
+export const MAX_UPLOAD_USE_CASES_PER_DIAGRAM = 30
+/** Nhóm "hình tổng quát" của tài liệu upload — thay đúng một hình gốc (khi tách theo nhóm: gói đầu tiên). */
 const UPLOAD_OVERVIEW_KEY = "~all"
 /** Nhóm "hình của một actor cha" của tài liệu upload: `~parent:<actor id>`. */
 const PARENT_GROUP_PREFIX = "~parent:"
@@ -186,11 +191,38 @@ const clusterKey = (cluster: readonly UseCase[], kinds: ActorKinds): string => {
   return ids.find((id) => isHuman(kinds, id)) ?? [...new Set(ids)].sort(compareIds)[0] ?? "~"
 }
 
+/**
+ * P10: hình tổng quát của tài liệu upload quá `MAX_UPLOAD_USE_CASES_PER_DIAGRAM` ⇒ nhóm theo feature (thứ tự `order`, use case
+ * chưa có feature đứng cuối), gói các nhóm liền nhau tới trần. Tên hình: hệ thống - tên các nhóm trong gói.
+ */
+const uploadFeaturePacks = (useCases: readonly UseCase[], spine: Spine, system: string, labels: DiagramLabels): UseCaseGroup[] => {
+  const byFeature = new Map<string, UseCase[]>()
+  for (const uc of useCases) {
+    const key = featureOfUseCase(uc, spine) ?? "~"
+    byFeature.set(key, [...(byFeature.get(key) ?? []), uc])
+  }
+  const named: { name: string; useCases: UseCase[] }[] = [...spine.features]
+    .sort((a, b) => a.order - b.order || compareIds(a.id, b.id))
+    .filter((f) => byFeature.has(f.id))
+    .map((f) => ({ name: clean(f.name) || f.id, useCases: byFeature.get(f.id)! }))
+  if (byFeature.has("~")) named.push({ name: labels.otherGroup, useCases: byFeature.get("~")! })
+  // Không use case nào có feature ⇒ một nhóm; `partsOfGroup` chia đều theo trần
+  if (named.length === 1) return [{ key: UPLOAD_OVERVIEW_KEY, name: system, useCases: [...useCases] }]
+  const packs: { names: string[]; useCases: UseCase[] }[] = []
+  for (const group of named) {
+    const last = packs[packs.length - 1]
+    if (last && last.useCases.length + group.useCases.length <= MAX_UPLOAD_USE_CASES_PER_DIAGRAM) {
+      last.names.push(group.name)
+      last.useCases.push(...group.useCases)
+    } else packs.push({ names: [group.name], useCases: [...group.useCases] })
+  }
+  return packs.map((pack, i) => ({ key: i === 0 ? UPLOAD_OVERVIEW_KEY : `${UPLOAD_OVERVIEW_KEY}:${i + 1}`, name: `${system} - ${pack.names.join(", ")}`, useCases: byId(pack.useCases) }))
+}
+
 const groupUseCases = (spine: Spine, kinds: ActorKinds, labels: DiagramLabels): UseCaseGroup[] => {
   // FLF-375: tài liệu upload vẽ một sơ đồ use case TỔNG QUÁT (thay đúng hình gốc của file, vd H2 "10 use case") — không
-  // tách theo tính năng thành nhiều hình nhỏ một use case; quá trần một hình thì vẫn tách như thường ở bước sau
-  // TechMart 11/11: không còn trần 20 cho tài liệu upload — file có một hình thì vẽ lại một hình (use case thứ 21 mất khỏi
-  // hình, phần còn lại tách thành 8 hình con)
+  // tách theo tính năng thành nhiều hình nhỏ một use case. P10: trần riêng 30 use case mỗi hình (trần 20 của dự án tự soạn
+  // từng cắt TechMart 21–22 use case làm hai); quá trần ⇒ tách theo nhóm chức năng (`uploadFeaturePacks`)
   if (isUploadedDocument(spine) && spine.use_cases.length > 0) {
     // TechMart 11/11 (user chốt "mỗi actor cha một hình"): use case của actor cha (User, Guest…) tách ra hình riêng của cha
     // đó — trên hình cha có các actor con kế thừa nó; hình chính chỉ còn use case riêng của từng vai, không đường kế thừa
@@ -203,7 +235,8 @@ const groupUseCases = (spine: Spine, kinds: ActorKinds, labels: DiagramLabels): 
       return ucs.length ? [{ key: `${PARENT_GROUP_PREFIX}${p.id}`, name: `${system} - ${clean(p.name)}`, useCases: ucs }] : []
     })
     const rest = byId(spine.use_cases).filter((u) => !taken.has(u.id))
-    return [...(rest.length ? [{ key: UPLOAD_OVERVIEW_KEY, name: system, useCases: rest }] : []), ...parentGroups]
+    const overview = rest.length > MAX_UPLOAD_USE_CASES_PER_DIAGRAM ? uploadFeaturePacks(rest, spine, system, labels) : rest.length ? [{ key: UPLOAD_OVERVIEW_KEY, name: system, useCases: rest }] : []
+    return [...overview, ...parentGroups]
   }
   const byFeature = new Map<string, UseCase[]>()
   const unassigned: UseCase[] = []
@@ -275,7 +308,7 @@ type Fits = (part: UseCasePart) => boolean
 
 const partsOfGroup = (group: UseCaseGroup, kinds: ActorKinds, fits: Fits, parents: ReadonlyMap<string, string> = new Map()): UseCasePart[] => {
   const known = new Map(group.useCases.map((u) => [u.id, u]))
-  const chains = relationChains(group.useCases).flatMap((c) => splitChain(c, MAX_USE_CASES_PER_DIAGRAM))
+  const chains = relationChains(group.useCases).flatMap((c) => splitChain(c, group.key.startsWith("~") ? MAX_UPLOAD_USE_CASES_PER_DIAGRAM : MAX_USE_CASES_PER_DIAGRAM))
   // Mỗi lớp là một hình: các chuỗi trong lớp không chung use case (use case xuất hiện một lần trên một hình)
   const layers: RelationChain[][] = []
   for (const chain of chains) {
@@ -303,9 +336,10 @@ const partsOfGroup = (group: UseCaseGroup, kinds: ActorKinds, fits: Fits, parent
   for (const layer of layers) {
     const blocks = ordered(layer)
     const total = blocks.reduce((n, c) => n + c.nodes.length, 0)
-    // Quá trần ⇒ chia đều, không cắt giữa chuỗi quan hệ. Hình tổng quát của tài liệu upload (một hình gốc) không theo
-    // trần — chỉ tách khi bố cục thật sự không vừa (`refine`) (TechMart 11/11: 21 use case bị cắt làm hai)
-    const target = group.key.startsWith("~") ? Math.max(1, total) : Math.ceil(total / Math.ceil(total / MAX_USE_CASES_PER_DIAGRAM))
+    // Quá trần ⇒ chia đều, không cắt giữa chuỗi quan hệ. Hình của tài liệu upload theo trần riêng (P10: 30, TechMart 11/11:
+    // 21 use case từng bị cắt làm hai theo trần 20); vẫn tách thêm khi bố cục thật sự không vừa (`refine`)
+    const cap = group.key.startsWith("~") ? MAX_UPLOAD_USE_CASES_PER_DIAGRAM : MAX_USE_CASES_PER_DIAGRAM
+    const target = Math.ceil(total / Math.ceil(Math.max(1, total) / cap))
     let current: RelationChain[] = []
     let size = 0
     for (const block of blocks) {
