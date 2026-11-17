@@ -1,5 +1,5 @@
 import mongoose from "mongoose"
-import { streamText } from "ai"
+import { stepCountIs, streamText, type ModelMessage, type ToolSet } from "ai"
 import { env } from "../../config/env.js"
 import {
   ActionType,
@@ -12,7 +12,7 @@ import { getPromptTemplate, interpolatePrompt } from "./prompt-registry.service.
 import { isUserLocale } from "../i18n/locale.js"
 import { replyLanguageDirective } from "../i18n/reply-language.js"
 import { MAX_DIRECTIVE_TERMS, documentLanguageDirective, shouldLocalize, termsInText, type DocumentGlossaryEntry } from "../i18n/document-language.js"
-import { callLLM } from "./providers/llm.router.js"
+import { PUNCTUATION_RULE, callLLM } from "./providers/llm.router.js"
 import type { LLMResponse, LlmImage } from "./providers/provider.types.js"
 import { getAiSdkModel } from "./providers/ai-sdk.provider.js"
 import { ANTHROPIC_EFFORT, ANTHROPIC_THINKING_HEADROOM_TOKENS, anthropicMaxTokens } from "./providers/anthropic.provider.js"
@@ -586,5 +586,126 @@ export const executeAiActionStream = async <T = any>(
       "AI_STREAM_EXECUTION_FAILED",
       { logId: failedLog._id.toString() }
     )
+  }
+}
+
+// ─── Agent có tool (trợ lý Google Docs) ──────────────────────────────
+
+export interface AgentStreamInput {
+  /** Biến nội suy vào template của `actionType` (prompt phẳng `assets/prompts/<actionType>.md`) — thành system prompt. */
+  promptVariables: Record<string, unknown>
+  messages: ModelMessage[]
+  tools: ToolSet
+  /** Trần số bước (mỗi bước = một lượt model, có thể kèm gọi tool). */
+  maxSteps: number
+}
+
+export interface AgentStreamCallbacks {
+  onTextDelta?: (delta: string) => void | Promise<void>
+  onToolCall?: (call: { toolName: string; input: unknown }) => void | Promise<void>
+}
+
+export interface AgentStreamResult {
+  text: string
+  tokensUsed: { promptTokens: number; completionTokens: number; totalTokens: number }
+  cost: number
+  logId: string
+}
+
+/**
+ * Một lượt agent: `streamText` có tool, dừng sau `maxSteps` bước. Credit giữ / trừ / hoàn như `executeAiActionStream`, nhưng
+ * tính **theo lượt** — giá cố định của `actionType`, không theo token hay số bước gọi tool. Huỷ (client ngắt) hoặc lỗi ⇒ hoàn.
+ *
+ * `AI_PROVIDER_OVERRIDE=mock` (CI / smoke): không gọi model, trả một câu cố định và không gọi tool.
+ */
+export const executeAgentStream = async (
+  actionType: ActionType | string,
+  input: AgentStreamInput,
+  projectId: string,
+  userId: string,
+  callbacks: AgentStreamCallbacks = {},
+  options: Pick<ExecuteAiActionOptions, "signal" | "activeOrgId"> = {}
+): Promise<AgentStreamResult> => {
+  const reservation = await reserveCreditWithTransaction(userId, actionType, projectId, options.activeOrgId)
+
+  let system = ""
+  let providerConfig: AiProviderConfig = { provider: "", model: "" }
+  let text = ""
+  let deducted = false
+  const startTime = Date.now()
+  try {
+    const template = await getPromptTemplate(actionType)
+    system = `${interpolatePrompt(template.template, input.promptVariables)}\n\n${PUNCTUATION_RULE}`
+    providerConfig = template.providerConfig
+    const override = env.AI_PROVIDER_OVERRIDE.trim().toLowerCase()
+    if (override) providerConfig = { ...providerConfig, provider: override }
+
+    let promptTokens = 0
+    let completionTokens = 0
+    if (providerConfig.provider?.toLowerCase() === "mock") {
+      text = "(mock) Trợ lý chưa gọi model thật trong môi trường này."
+      if (callbacks.onTextDelta) await callbacks.onTextDelta(text)
+    } else {
+      const isAnthropic = providerConfig.provider?.toLowerCase() === "anthropic"
+      const result = streamText({
+        model: getAiSdkModel(providerConfig),
+        system,
+        messages: input.messages,
+        tools: input.tools,
+        stopWhen: stepCountIs(input.maxSteps),
+        ...(isAnthropic
+          ? { maxOutputTokens: anthropicMaxTokens(providerConfig), providerOptions: { anthropic: { effort: ANTHROPIC_EFFORT } } }
+          : { temperature: providerConfig.temperature ?? 0.3, maxOutputTokens: providerConfig.maxTokens ?? 4096 }),
+        ...(options.signal ? { abortSignal: options.signal } : {})
+      })
+      for await (const part of result.fullStream) {
+        if (options.signal?.aborted) throw new AiActionError(499, "Lượt chạy đã bị huỷ", "RUN_CANCELLED")
+        if (part.type === "text-delta") {
+          text += part.text
+          if (callbacks.onTextDelta) await callbacks.onTextDelta(part.text)
+        } else if (part.type === "tool-call") {
+          if (callbacks.onToolCall) await callbacks.onToolCall({ toolName: part.toolName, input: part.input })
+        } else if (part.type === "error") {
+          throw part.error
+        }
+      }
+      const usage = await result.totalUsage
+      promptTokens = usage.inputTokens ?? 0
+      completionTokens = usage.outputTokens ?? 0
+    }
+
+    // Không truyền token ⇒ trừ đúng giá cố định của lượt (`calculateActualCreditCost`)
+    const cost = await deductCredit(reservation)
+    deducted = true
+    const logDoc = await AiActionLog.create({
+      projectId: new mongoose.Types.ObjectId(projectId),
+      userId: new mongoose.Types.ObjectId(userId),
+      actionType,
+      provider: providerConfig.provider,
+      aiModel: providerConfig.model,
+      status: "success",
+      promptTokens,
+      completionTokens,
+      latencyMs: Date.now() - startTime
+    })
+    const logId = String(logDoc._id)
+    await capturePayload({ logId, projectId, userId, actionType: String(actionType), prompt: `${system}\n\n${JSON.stringify(input.messages)}`, response: text })
+    return { text, tokensUsed: { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens }, cost, logId }
+  } catch (error: any) {
+    if (!deducted) await releaseQuietly(reservation)
+    const failedLog = await AiActionLog.create({
+      projectId: new mongoose.Types.ObjectId(projectId),
+      userId: new mongoose.Types.ObjectId(userId),
+      actionType,
+      provider: providerConfig.provider,
+      aiModel: providerConfig.model,
+      status: "failed",
+      errorMessage: error?.message || "Agent stream execution failed"
+    })
+    if (error instanceof AiActionError) {
+      error.details = { ...error.details, logId: String(failedLog._id) }
+      throw error
+    }
+    throw new AiActionError(500, error?.message || "Thực thi trợ lý thất bại", "AI_STREAM_EXECUTION_FAILED", { logId: String(failedLog._id) })
   }
 }
