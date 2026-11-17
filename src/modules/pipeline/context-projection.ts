@@ -180,9 +180,17 @@ const addendumFor = (spine: Spine, stepId: string): Addendum[] => {
   const { phase } = parseStepId(stepId)
   // Brief và S-1 đọc toàn bộ addendum (Phases §6.1 "Input từ Brief")
   if (phase.startsWith("B-") || phase === "S-1") return spine.addendum
+  // P13 (E2E P05 #3): S-2.2 ghi phạm vi bản 1.0 nên phải thấy giới hạn quy mô user đặt ("bản đầu gọn, khoảng 5-8 use case")
+  // dù B-2.2 gán ghi chú đó sang mục khác (3.1.2) — trước đây S-2.2 không thấy, `release_scope` mất con số.
+  if (phase === "S-2") return spine.addendum.filter((a) => sectionsFedBy(spine, stepId).includes(a.target_section) || isScaleNote(a))
+
   const sections = new Set(sectionsFedBy(spine, stepId))
   return spine.addendum.filter((a) => sections.has(a.target_section))
 }
+
+/** Ghi chú Brief nêu quy mô bằng con số: "khoảng 5-8 use case", "tối đa 10 màn hình", "~20 chức năng", "8 screens". */
+const SCALE_NOTE = /\d+\s*(?:(?:-|–|~|đến|tới|to)\s*\d+\s*)?(?:use[\s-]?cases?\b|uc\b|màn(?:\s*hình)?\b|screens?\b|chức\s*năng\b|functions?\b)/iu
+export const isScaleNote = (a: Pick<Addendum, "content" | "content_en">): boolean => SCALE_NOTE.test(a.content) || SCALE_NOTE.test(a.content_en ?? "")
 
 /**
  * Addendum cho lượt hỏi không có `StepContext` (phỏng vấn đầu giai đoạn, chat tự do) — `unit` là step (`B-1.3`) hoặc
