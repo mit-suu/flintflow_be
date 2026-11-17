@@ -151,12 +151,21 @@ export const applyChanges = catchAsync(async (req: Request, res: Response) => {
       { ...body, chat_history: chatHistory, reply_language: replyLanguage, ...clarificationRoundsOf(session) },
       auth.init
     )
+    // FLF-428: lệnh nhắm một cờ mà ghi xong cờ vẫn mở ⇒ nói rõ, không để "Đã áp dụng" đọc như đã sửa xong
+    const unresolved = result.unresolved_flags ?? []
+    const stillOpen =
+      unresolved.length > 0
+        ? byLanguage(replyLanguage, {
+            vi: ` Nhưng vấn đề ${unresolved.map((f) => `"${f.message}"`).join(", ")} vẫn còn - bạn nhắn rõ giá trị cần điền (ví dụ chỉ số đo và ngưỡng) để tôi sửa tiếp.`,
+            en: ` But the issue ${unresolved.map((f) => `"${f.message}"`).join(", ")} is still open - tell me the exact values (e.g. the metric and threshold) and I will fix it.`
+          })
+        : ""
     if (session) {
       const count = result.changes.length
       await changeTranscript.recordChangeTurn(session, userText, {
         kind: "change_applied",
         reply:
-          count > 0 && result.cr_id
+          (count > 0 && result.cr_id
             ? byLanguage(replyLanguage, {
                 vi: `Đã ghi ${result.cr_id} vào tài liệu (${count} thay đổi).`,
                 en: `Recorded ${result.cr_id} in the document (${count} change${count === 1 ? "" : "s"}).`
@@ -166,7 +175,7 @@ export const applyChanges = catchAsync(async (req: Request, res: Response) => {
                 vi: `Đã áp dụng ${count} thay đổi vào tài liệu.`,
                 en: `Applied ${count} change${count === 1 ? "" : "s"} to the document.`
               })
-            : byLanguage(replyLanguage, { vi: "Đã xác nhận: nội dung không đổi.", en: "Confirmed: the content is unchanged." }),
+            : byLanguage(replyLanguage, { vi: "Đã xác nhận: nội dung không đổi.", en: "Confirmed: the content is unchanged." })) + stillOpen,
         count,
         spine_version: result.spine_version,
         ...(result.cr_id ? { cr_id: result.cr_id } : {})
@@ -178,7 +187,12 @@ export const applyChanges = catchAsync(async (req: Request, res: Response) => {
       res,
       200,
       { txn: result.txn, spine_version: result.spine_version, changes: result.changes, spine: result.spine },
-      { branch: result.branch, impact: result.impact, ...(result.cr_id ? { cr_id: result.cr_id } : {}), ...(resolvedCommentId ? { resolved_comment_id: resolvedCommentId } : {}) }
+      {
+        branch: result.branch,
+        impact: result.impact,
+        ...(result.cr_id ? { cr_id: result.cr_id } : {}),
+        ...(resolvedCommentId ? { resolved_comment_id: resolvedCommentId } : {})
+      }
     )
   } catch (err) {
     return sendDomainError(res, err)

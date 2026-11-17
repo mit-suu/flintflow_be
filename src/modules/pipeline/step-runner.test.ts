@@ -157,6 +157,7 @@ import { orderedSteps } from "./step-registry.js"
 import { AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction, ElicitOutput } from "../../shared/ai/response-parser.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
+import { runRenderReviewPhase, defaultStepRunnerDeps } from "./step-runner.service.js"
 import { runStep, runDraftPhase, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, settleFromChat, settleRepeatedAnswer, settleWithoutModel, askTranscript, recordUserMessage, recordAiMessage, nextPendingAfterChat, isSubstantiveAnswer, isBareAgreement, noChangeReason, replyLanguageAfterMessage, CALL_LIMIT, CHAT_BUDGET_REPLY, CHAT_BUDGET_REPLY_EN, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
 import { cancelRun, getRunState, resetMemoryRuns } from "./run-state.service.js"
 import { gate } from "./gate.service.js"
@@ -1736,6 +1737,31 @@ describe("settleFromChat: ghép câu trả lời đúng câu hỏi", () => {
   })
 })
 
+describe("settleFromChat: câu có lựa chọn trả lời bằng lời riêng (P05)", () => {
+  const goals = { topic_key: "project_goals", question: "Bản đầu cần đạt được điều gì?", multiple: true, options: [{ label: "Khách tự đặt lịch (Khuyến nghị)" }, { label: "Ít bỏ sót đơn" }] }
+  const card = { topic_key: "platform", question: "Nền tảng?", options: [{ label: "Web (Khuyến nghị)" }, { label: "Ứng dụng di động" }] }
+  const message = "Cả ba đều đúng. Đặt số luôn: sau 3 tháng ít nhất 60% đơn là khách tự đặt trên web"
+
+  it("model chốt bằng trích đoạn nguyên văn ⇒ ghi trích đoạn", () => {
+    expect(settleFromChat([goals], [{ topic_key: "project_goals", answer: "sau 3 tháng ít nhất 60% đơn là khách tự đặt trên web" }], message)).toEqual([
+      { question_id: "Q_project_goals", answer: "sau 3 tháng ít nhất 60% đơn là khách tự đặt trên web" }
+    ])
+  })
+
+  it("model diễn lại, đây là câu duy nhất đang chờ ⇒ ghi cả tin; còn câu khác chờ ⇒ không đoán", () => {
+    const paraphrase = [{ topic_key: "project_goals", answer: "60% đơn tự đặt sau 3 tháng" }]
+    expect(settleFromChat([goals], paraphrase, message)).toEqual([{ question_id: "Q_project_goals", answer: message }])
+    expect(settleFromChat([goals, card], paraphrase, message)).toEqual([])
+    expect(settleFromChat([goals], paraphrase, "oke")).toEqual([])
+  })
+
+  it("nhãn đúng vẫn chốt bằng nhãn như cũ", () => {
+    expect(settleFromChat([goals], [{ topic_key: "project_goals", answer: "Ít bỏ sót đơn" }], "ít bỏ sót đơn")).toEqual([
+      { question_id: "Q_project_goals", answer: ["Ít bỏ sót đơn"] }
+    ])
+  })
+})
+
 describe("settleRepeatedAnswer: không hỏi lại điều user đã trả lời", () => {
   const goal = { topic_key: "success_goal", question: "Mục tiêu nào quan trọng nhất để coi dự án thành công?", options: [] }
   const card = { topic_key: "platform", question: "Nền tảng?", options: [{ label: "Web (Khuyến nghị)" }, { label: "Ứng dụng di động" }] }
@@ -1769,6 +1795,14 @@ describe("settleRepeatedAnswer: không hỏi lại điều user đã trả lời
   it("model báo câu đó còn chờ (still_open) ⇒ tin lạc đề, không chốt; không báo ⇒ chốt như cũ", () => {
     expect(settleRepeatedAnswer([{ ...goal, replied: 1 }, card], [], idea, ["success_goal"])).toEqual([])
     expect(settleRepeatedAnswer([{ ...goal, replied: 1 }, card], [], idea, ["platform"])).toEqual([{ question_id: "Q_success_goal", answer: idea }])
+  })
+
+  it("P05: câu có lựa chọn là câu duy nhất đang chờ, trả lời bằng lời riêng lần hai ⇒ chốt nguyên văn", () => {
+    const goals = { topic_key: "project_goals", question: "Bản đầu cần đạt được điều gì?", multiple: true, options: [{ label: "Khách tự đặt lịch (Khuyến nghị)" }, { label: "Ít bỏ sót đơn" }] }
+    const text = "Cả ba đều đúng, sau 3 tháng ít nhất 60% đơn là khách tự đặt trên web"
+    expect(settleRepeatedAnswer([{ ...goals, replied: 1 }], [], text)).toEqual([{ question_id: "Q_project_goals", answer: text }])
+    expect(settleRepeatedAnswer([goals], [], text)).toEqual([])
+    expect(settleRepeatedAnswer([{ ...goals, replied: 1 }], [], "ít bỏ sót đơn thôi")).toEqual([])
   })
 
   it("nextPendingAfterChat chỉ đếm tin trả lời thật", () => {
@@ -2693,5 +2727,54 @@ describe("step-runner: tin user ghi lặp vào transcript (FLF-400)", () => {
       ["ai", "B-1.5", "Ổn chưa?"],
       ["ai", "B-1.5", "Ổn chưa?"]
     ])
+  })
+})
+
+describe("FLF-431 - S-9.1 vẽ lại hình đang render_error (luồng C #11)", () => {
+  const seedErrored = () => {
+    seedSpine()
+    const spine = db.spines[0] as unknown as SpineT
+    spine.use_cases = [{ id: "UC01", name: "Submit Request", actor_ids: ["A01"], function_ids: [], description: "", includes: [], extends: [] }] as never
+    spine.diagrams = [
+      { id: "D01", kind: "usecase", format: "puml", source: "", section: "fixed:2.2.1", owner_kind: null, owner_id: null, render_status: "error", error: "PlantUML server không phản hồi: fetch failed", source_hash: "old", rendered_at: null }
+    ] as never
+  }
+  const run = (retry: boolean) => {
+    const { emit } = collectEvents()
+    return runRenderReviewPhase(PROJECT, "S-9.1", [], null, USER, emit, { ...defaultStepRunnerDeps(), renderDeps: renderStub() }, { retryRenderErrors: retry })
+  }
+
+  it("retryRenderErrors ⇒ hình lỗi được vẽ lại, hết render_error", async () => {
+    seedErrored()
+    await run(true)
+    const spine = db.spines[0] as unknown as SpineT
+    expect(spine.diagrams.filter((d) => d.kind === "usecase").every((d) => d.render_status === "ok")).toBe(true)
+  })
+
+  it("không bật ⇒ giữ nguyên hình lỗi (bước khác không tự đi vẽ lại)", async () => {
+    seedErrored()
+    await run(false)
+    const spine = db.spines[0] as unknown as SpineT
+    expect(spine.diagrams.find((d) => d.id === "D01")?.render_status).toBe("error")
+  })
+})
+
+describe("FLF-432 - runPhase với giai đoạn đã qua (luồng C #2)", () => {
+  it("client gửi giai đoạn trước giai đoạn của bước tới lượt ⇒ chạy đơn vị tới lượt, không trả 'Đã xong giai đoạn này' rỗng", async () => {
+    seedSpine()
+    seedSession(true)
+    const { emit } = collectEvents()
+    // Bước tới lượt thuộc S-3 (mọi bước trước S-3 đã accepted) mà client còn gửi "S-2"
+    const result = await runPhase(PROJECT, "S-2", SESSION, USER, emit, { elicitExecutor: async () => elicitReply(), draftExecutor: async () => draftReply([]), renderDeps: renderStub() })
+    expect(result.phase).toBe("S-3")
+    expect(result.steps.length).toBeGreaterThan(0)
+  })
+
+  it("giai đoạn chưa tới vẫn về ngay, không chạy", async () => {
+    seedSpine()
+    seedSession(true)
+    const { emit } = collectEvents()
+    const result = await runPhase(PROJECT, "S-6", SESSION, USER, emit, { elicitExecutor: async () => elicitReply(), draftExecutor: async () => draftReply([]), renderDeps: renderStub() })
+    expect(result.steps).toEqual([])
   })
 })

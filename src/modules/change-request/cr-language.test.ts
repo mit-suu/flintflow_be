@@ -7,7 +7,15 @@ import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { IChangeLocation } from "./change-location.model.js"
 import type { IChangeRequest } from "./change-request.model.js"
-import { documentLanguageText, foreignTexts, guessSpineLanguage, isForeignText, wrongLanguageMessage } from "./cr-language.js"
+import {
+  clarifyLanguageText,
+  crReplyLanguage,
+  documentLanguageText,
+  foreignTexts,
+  guessSpineLanguage,
+  isForeignText,
+  wrongLanguageMessage
+} from "./cr-language.js"
 import { previewAfter } from "./propose.service.js"
 import { elementValue, valueText } from "./spine-location.js"
 import { checkLocation } from "./verify.service.js"
@@ -113,5 +121,27 @@ describe("C-5 checkLocation - wrong_language", () => {
     expect(vs[0].message).toContain("After GVCN saves attendance")
     expect(checkLocation(cr, loc(VI_STEP), spine(), locks, "vi")).toEqual([])
     expect(checkLocation(cr, loc(EN_STEP), spine(), locks)).toEqual([])
+  })
+})
+describe("FLF-438: ngôn ngữ câu hỏi làm rõ (C-2)", () => {
+  it("ngôn ngữ trả lời theo chữ người yêu cầu viết; mơ hồ ⇒ ngôn ngữ tài khoản ⇒ tiếng Việt", () => {
+    expect(crReplyLanguage("Thêm chức năng học sinh gửi phúc khảo điểm", "en")).toBe("vi")
+    expect(crReplyLanguage("Add a screen for parents to view attendance", "vi")).toBe("en")
+    expect(crReplyLanguage("UC-07", "en")).toBe("en")
+    expect(crReplyLanguage("UC-07", null)).toBe("vi")
+  })
+
+  it("khác ngôn ngữ ⇒ dặn giữ bản gốc trước, bản dịch trong ngoặc (luật 13)", () => {
+    const text = clarifyLanguageText("vi", "en")
+    expect(text).toContain("Reply language: Vietnamese (tiếng Việt). Document language: English.")
+    expect(text).toContain("keeps its original English form first, followed by its Vietnamese (tiếng Việt) translation in parentheses (rule 13)")
+    expect(clarifyLanguageText("en", "vi")).toContain("original Vietnamese (tiếng Việt) form first, followed by its English translation")
+  })
+
+  it("cùng ngôn ngữ ⇒ trích nguyên văn, không dịch", () => {
+    const text = clarifyLanguageText("vi", "vi")
+    expect(text).toContain("Same language")
+    expect(text).toContain("no translation")
+    expect(text).not.toContain("parentheses")
   })
 })

@@ -134,10 +134,9 @@ export const getSteps = catchAsync(async (req: Request, res: Response) => {
   })
 
   // Cùng luật "step tới lượt" với `GET /progress` (pipeline-progress.ts). Trả thẳng con trỏ Spine thì hai
-  // endpoint nói hai chuyện khác nhau ngay sau khi accept: con trỏ còn nằm ở step vừa chốt.
-  // Cùng luật "step tới lượt" với `GET /progress` (pipeline-progress.ts). Trả thẳng con trỏ Spine thì hai
-  // endpoint nói hai chuyện khác nhau ngay sau khi accept: con trỏ còn nằm ở step vừa chốt.
-  return sendSuccess(res, 200, { current_phase: spine.progress.current_phase, current_step: nextStep(spine)?.id ?? null, steps })
+  // endpoint nói hai chuyện khác nhau ngay sau khi accept: con trỏ còn nằm ở step vừa chốt. FLF-432: cả `current_phase`.
+  const next = nextStep(spine)
+  return sendSuccess(res, 200, { current_phase: next?.phase ?? spine.progress.current_phase, current_step: next?.id ?? null, steps })
 })
 
 // ─── POST /steps/:stepId/run (SSE) ─────────────────────────────────

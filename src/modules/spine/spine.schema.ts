@@ -282,11 +282,18 @@ export const commonRequirementSchema = z.strictObject({
   statement: z.string()
 })
 
+/** P07: loại thông báo (cột "Type" của bảng 5.3 / bảng mẫu). */
+export const MESSAGE_TYPES = ["error", "warning", "info", "success", "confirm"] as const
+
 export const messageSchema = z.strictObject({
   id,
   code: z.string(),
   text: z.string(),
-  function_ids: z.array(id)
+  function_ids: z.array(id),
+  /** P07: loại thông báo. Spine cũ không có ⇒ vắng / `null`, bảng in ô trống. */
+  type: z.enum(MESSAGE_TYPES).nullish(),
+  /** P07: lúc nào thông báo hiện (cột "Context"), tiếng Anh như `text`. Spine cũ không có. */
+  context: z.string().nullish()
 })
 
 export const otherRequirementSchema = z.strictObject({

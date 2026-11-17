@@ -40,6 +40,17 @@ describe("C-2 mơ hồ ⇒ câu hỏi; trả lời ⇒ gọi lại", () => {
     // projection nạp chi tiết phần tử CR nhắc tới; outline gồm heading của version mới nhất
     expect(prompt).toContain("use_cases[id=UC-02] =")
     expect(prompt).toContain("4.2.3 Performance (fixed:4.2.3)")
+    // FLF-438: CR tiếng Anh cho tài liệu tiếng Anh ⇒ cùng ngôn ngữ, không dịch
+    expect(prompt).toContain("- Languages: Reply language: English. Document language: English. Same language")
+  })
+
+  it("FLF-438: CR tiếng Việt cho tài liệu tiếng Anh ⇒ prompt dặn kèm bản dịch trong ngoặc", async () => {
+    const { c } = await importedProject()
+    const crId = await newCr(c, "Thêm chức năng học sinh gửi phúc khảo điểm", "AMBIGUOUS-CR: học sinh gửi yêu cầu phúc khảo, chưa rõ ai xử lý.")
+    await c.post(`/change-requests/${crId}/clarify`)
+    const [prompt] = promptsOf("# CR Clarify")
+    expect(prompt).toContain("Reply language: Vietnamese (tiếng Việt). Document language: English. They differ")
+    expect(prompt).toContain("translation in parentheses (rule 13)")
   })
 
   it("trả lời ⇒ chạy lại C-2 với câu trả lời trong prompt (vòng 2) ⇒ rõ ⇒ impact_review, lưu đích", async () => {

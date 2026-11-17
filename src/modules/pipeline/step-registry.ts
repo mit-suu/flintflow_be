@@ -150,11 +150,22 @@ export const phaseOf = (stepId: string): PhaseId => getStep(stepId).phase
 
 // ─── vòng S-5 ────────────────────────────────────────────────────
 
-/** Khoá vòng S-5 theo thứ tự queue: màn (queue_order rồi id) + `nonscreen` nếu có non-screen function. */
+/** So mã màn theo số: `SCR-02` < `SCR-03` < `SCR-10`, `S2` < `S10`. */
+export const compareScreenIds = (a: string, b: string): number => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
+
+/** Màn đã vào vòng (xong / đang làm) đứng trước màn còn chờ — đổi thứ tự không làm vòng đang dở nhảy sang màn khác. */
+const LOOP_RANK: Readonly<Record<string, number>> = { signed_off: 0, in_progress: 1 }
+
+/**
+ * Thứ tự vòng S-5 (P06, đã chốt 17/11: theo số màn). Trước đây theo `queue_order` model đặt ở S-4.1 ⇒ thanh tiến độ
+ * S02 → S07 → S03, người dùng thấy lộn xộn. Màn đã xong / đang làm giữ phía trước (theo số), màn còn chờ theo số màn.
+ */
+export const screenLoopOrder = <T extends { id: string; detail_status?: string }>(screens: readonly T[]): T[] =>
+  [...screens].sort((a, b) => (LOOP_RANK[a.detail_status ?? ""] ?? 2) - (LOOP_RANK[b.detail_status ?? ""] ?? 2) || compareScreenIds(a.id, b.id))
+
+/** Khoá vòng S-5: màn theo `screenLoopOrder` + `nonscreen` nếu có non-screen function. */
 export const loopKeys = (spine: Pick<Spine, "screens" | "functions">): string[] => {
-  const screens = [...spine.screens]
-    .sort((a, b) => (a.queue_order ?? Number.MAX_SAFE_INTEGER) - (b.queue_order ?? Number.MAX_SAFE_INTEGER) || (a.id < b.id ? -1 : 1))
-    .map((s) => s.id)
+  const screens = screenLoopOrder(spine.screens).map((s) => s.id)
   // FLF-413: khung `<<Function Name>>` của mẫu không mở vòng không màn
   return spine.functions.some((f) => f.screen_id === null && !isTemplateFrame(f)) ? [...screens, NONSCREEN_LOOP] : screens
 }

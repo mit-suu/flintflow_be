@@ -33,13 +33,28 @@ describe("buildPipelineProgressReport - current_step là step tới lượt, kh�
     expect(buildPipelineProgressReport(spine, []).progress.current_step).toBe(expected)
   })
 
-  it("giữ nguyên mọi phần khác của report (readiness, sections, done/total/show_percent, current_phase)", () => {
+  it("giữ nguyên mọi phần khác của report (readiness, sections, done/total/show_percent); current_phase theo step tới lượt (FLF-432)", () => {
     const spine = spineAfterAccepting(2)
     const base = buildProgressReport(spine, [])
     const report = buildPipelineProgressReport(spine, [])
     expect(report.readiness).toEqual(base.readiness)
     expect(report.sections).toEqual(base.sections)
-    expect(report.progress).toEqual({ ...base.progress, current_step: orderedSteps(spine)[2].id })
+    const next = orderedSteps(spine)[2]
+    expect(report.progress).toEqual({ ...base.progress, current_phase: next.phase, current_step: next.id })
+  })
+
+  it("FLF-432 (luồng C #2): các bước còn lại của giai đoạn đều skipped ⇒ current_phase là giai đoạn của bước tới lượt, không đứng ở giai đoạn cũ", () => {
+    const spine = createEmptySpine({ name: "Demo" })
+    const all = orderedSteps(spine)
+    const firstS5 = all.findIndex((s) => s.phase === "S-5")
+    const before = all.slice(0, firstS5 >= 0 ? firstS5 : all.findIndex((s) => s.phase === "S-6"))
+    spine.steps = before.map((s) => (s.phase === "S-4" && s.id !== "S-4.1" ? { ...accepted(s.id), status: "skipped" as const } : accepted(s.id)))
+    spine.progress.current_phase = "S-4"
+    spine.progress.current_step = "S-4.1"
+    const report = buildPipelineProgressReport(spine, [])
+    expect(report.progress.current_step).not.toBeNull()
+    expect(report.progress.current_phase).not.toBe("S-4")
+    expect(report.progress.current_phase).toBe(orderedSteps(spine).find((s) => s.id === report.progress.current_step)?.phase)
   })
 
   it("vòng S-5 của màn placeholder bị bỏ qua: step pending của màn placeholder không phải step tới lượt", () => {

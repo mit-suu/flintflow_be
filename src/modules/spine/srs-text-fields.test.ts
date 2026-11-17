@@ -8,7 +8,7 @@ describe("srs-text-fields", () => {
     for (const banned of ["id", "kind", "priority", "category", "tier", "code", "relation_verbs", "term_native"]) {
       expect(all, banned).not.toContain(banned)
     }
-    expect(SRS_TEXT_FIELDS.messages).toEqual(["text"])
+    expect(SRS_TEXT_FIELDS.messages).toEqual(["text", "context"])
     expect(SRS_TEXT_FIELDS.functions).toEqual(["name", "trigger", "description", "normal", "abnormal"])
   })
 
