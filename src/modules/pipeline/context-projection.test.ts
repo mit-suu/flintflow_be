@@ -29,6 +29,17 @@ const load = (file: string): Spine =>
   spineSchema.parse(JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../fixtures", file), "utf8")))
 const FIXTURE = load("spine-fixture-19-screens.json")
 
+describe("STEP_EXTRA_READS (P07)", () => {
+  it("S-7.3 thấy phạm vi bản phát hành (không đổi reads của registry, không tính là field thiếu)", () => {
+    const p = projectStep(FIXTURE, "S-7.3")
+    expect(p.projection["project.release_scope"]).toEqual(FIXTURE.project.release_scope)
+    expect(getStepSpec("S-7.3").reads).not.toContain("project.release_scope")
+    const empty = projectStep({ ...FIXTURE, project: { ...FIXTURE.project, release_scope: { in: [], out: [] } } }, "S-7.3")
+    expect(empty.emptyFields.some((f) => f.includes("release_scope"))).toBe(false)
+    expect(projectStep(FIXTURE, "S-7.1").projection).not.toHaveProperty("project.release_scope")
+  })
+})
+
 describe("getStepSpec (step registry T12 + STEP_SKILLS)", () => {
   it("khoá STEP_SKILLS đều là step trong registry; step có skill đều ghi được assumptions", () => {
     const registry = new Map(loadStepRegistry().map((s) => [s.id, s]))

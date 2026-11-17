@@ -283,6 +283,15 @@ const withoutRetiredFields = (selector: Selector, value: unknown): unknown => {
 /** Pha Brief không còn sở hữu `project.vision/goals` (nằm ở addendum lõi, S-1.1 dựng): không bao giờ là field "thiếu" của step B-*. */
 const BRIEF_UNOWNED_FIELDS: ReadonlySet<string> = new Set(["project.vision", "project.goals"])
 
+/**
+ * P07: gốc đọc thêm theo step mà không đổi `reads` của registry (hợp đồng đóng băng), không tính vào `emptyFields`.
+ * S-7.3 cần phạm vi bản phát hành để câu thông báo không nhắc kênh / tính năng chưa có ở bản 1.0 (e2e flf-413 #12:
+ * "đã gửi qua email và Zalo OA" khi Zalo nằm ngoài phạm vi).
+ */
+export const STEP_EXTRA_READS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  "S-7.3": ["project.release_scope"]
+})
+
 /** Phần thuần của `buildStepContext` — không DB. */
 export const projectStep = (spine: Spine, stepId: string): StepProjection => {
   const stepSpec = getStepSpec(stepId)
@@ -295,6 +304,10 @@ export const projectStep = (spine: Spine, stepId: string): StepProjection => {
     const value = withoutRetiredFields(selector, selectValue(spine, selector, loop))
     projection[raw] = value
     emptyFields.push(...emptyPaths(selector, value))
+  }
+  for (const raw of STEP_EXTRA_READS[getStep(stepId).template_id] ?? []) {
+    if (raw in projection) continue
+    projection[raw] = selectValue(spine, parseSelector(raw), loop)
   }
   if (isBriefPhase(stepId)) {
     const kept = emptyFields.filter((field) => !BRIEF_UNOWNED_FIELDS.has(field))
