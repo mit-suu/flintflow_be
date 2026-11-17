@@ -5,7 +5,8 @@
  * (`erd-layout.ts`). Thuộc tính vẽ theo `entities[].attributes`.
  *
  * Cả hệ thống một hình; quá `MAX_ENTITIES_PER_DIAGRAM` entity thì tách theo thành phần liên thông (xếp các thành phần nhỏ
- * vào chung một hình), thành phần quá lớn cắt theo thứ tự duyệt rộng; quan hệ băng qua chỗ cắt không vẽ. Hình không qua
+ * vào chung một hình), thành phần quá lớn cắt theo thứ tự duyệt rộng; quan hệ băng qua chỗ cắt vẽ ở cả hai hình, đầu ở hình kia là
+ * hộp nét đứt ghi "xem hình i/n" (P10 — trước đây bị bỏ). Hình không qua
  * `checkScene` tách đôi tiếp. Phần đầu giữ id gốc của hình (`diagram.service.ts#assignIds`).
  * QLHS 11/11 bug #12: tài liệu upload (ký pháp Crow's foot / IDEF1X) cho phép đường vòng khi đường thường bị hộp cao chắn
  * ⇒ giữ một hình như hình gốc thay vì cắt; dự án FlintFlow tự soạn (mode 2) không đổi.
@@ -176,11 +177,44 @@ const partitionErdWith = (spine: Spine, notation: ErdNotation, labels: DiagramLa
 
   if (entities.length === 0) return [{ title: labels.erdTitle, scene: layoutErd(diagramOf([])), diagram: diagramOf([]) }]
   const grouped = groupEntities(traversalOrder(entities.map((e) => e.id), relations), relations, MAX_ENTITIES_PER_DIAGRAM).flatMap(refine)
-  return grouped.map((ids, i) => ({
-    title: grouped.length > 1 ? `${labels.erdTitle} (${i + 1}/${grouped.length})` : labels.erdTitle,
-    scene: layoutErd(diagramOf(ids), { detours }),
-    diagram: diagramOf(ids)
-  }))
+  if (grouped.length === 1) return [{ title: labels.erdTitle, scene: layoutErd(diagramOf(grouped[0]), { detours }), diagram: diagramOf(grouped[0]) }]
+
+  // P10 (fpt TechMart: mất 8/26 quan hệ ở chỗ cắt): quan hệ vắt qua chỗ cắt vẽ ở MỌI hình chứa một đầu của nó — đầu kia là
+  // hộp nét đứt "xem hình i/n". Hộp thêm làm hình không vừa ⇒ chỉ giữ những hộp còn vừa (thêm lần lượt theo id quan hệ)
+  const partOf = new Map(grouped.flatMap((ids, i) => ids.map((id): [string, number] => [id, i])))
+  const nameOf = new Map(entities.map((e) => [e.id, e.name]))
+  const withBridges = (ids: readonly string[]): { scene: Scene | null; diagram: ErdDiagram } => {
+    const own = diagramOf(ids)
+    const inside = new Set(ids)
+    const bridges = relations.filter((r) => inside.has(r.from) !== inside.has(r.to))
+    let best = { scene: layoutErd(own, { detours }), diagram: own }
+    if (bridges.length === 0 || best.scene === null) return best
+    const extend = (base: ErdDiagram, chosen: readonly ErdRelationInput[]): ErdDiagram => {
+      const outside = [...new Set(chosen.map((r) => (inside.has(r.from) ? r.to : r.from)))].sort(compareIds)
+      return {
+        ...base,
+        entities: [...base.entities, ...outside.map((id) => ({ id, name: nameOf.get(id) ?? id, elsewhere: labels.erdElsewhere(`${partOf.get(id)! + 1}/${grouped.length}`) }))],
+        relations: [...base.relations, ...chosen]
+      }
+    }
+    const tryDiagram = (d: ErdDiagram): Scene | null => {
+      const scene = layoutErd(d, { detours })
+      return scene !== null && checkScene(scene, { allowBends: true }).length === 0 ? scene : null
+    }
+    const all = extend(own, bridges)
+    const full = tryDiagram(all)
+    if (full) return { scene: full, diagram: all }
+    const kept: ErdRelationInput[] = []
+    for (const bridge of bridges) {
+      const candidate = extend(own, [...kept, bridge])
+      const scene = tryDiagram(candidate)
+      if (!scene) continue
+      kept.push(bridge)
+      best = { scene, diagram: candidate }
+    }
+    return best
+  }
+  return grouped.map((ids, i) => ({ title: `${labels.erdTitle} (${i + 1}/${grouped.length})`, ...withBridges(ids) }))
 }
 
 const meta = (): Pick<RenderedPart, "kind" | "section" | "owner_kind" | "owner_id"> => ({ kind: "erd", section: ERD_SECTION, owner_kind: null, owner_id: null })

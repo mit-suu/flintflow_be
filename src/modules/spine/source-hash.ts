@@ -174,9 +174,11 @@ export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.fre
   context: "svg@2",
   // svg@2 (FLF-369): bộ xếp thử nhiều phương án (thứ tự hàng, actor hai bên) ⇒ hình svg@1 cũ thành stale, vẽ lại một lượt
   // svg@3 (FLF-421): hình phân cấp actor nối kiểu cây (thanh ngang chung, một tam giác mỗi cha) ⇒ hình cũ stale, vẽ lại
-  usecase: "svg@3",
+  // svg@4 (P10): tài liệu upload theo trần 30 use case mỗi hình, quá trần tách theo nhóm chức năng ⇒ hình cũ stale, vẽ lại
+  usecase: "svg@4",
   screen_flow: "svg@3",
-  erd: "svg@1",
+  // svg@2 (P10): ERD tách nhiều hình vẽ quan hệ vắt qua chỗ cắt ở cả hai hình (hộp nét đứt "xem hình i/n") ⇒ hình cũ stale
+  erd: "svg@2",
   class: "svg@1",
   state_machine: "svg@1",
   // plantuml@2 (FLF-418): hash gồm mức vẽ của dự án (system / component) ⇒ đổi mức thì hình cũ stale; hình plantuml@1 vẽ lại một lượt
@@ -184,7 +186,8 @@ export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.fre
   activity: "svg@1",
   deployment: DEFAULT_DIAGRAM_ENGINE,
   // svg@1 (FLF-410): mockup SVG theo theme dự án thay wireframe Salt ⇒ hình Salt cũ stale, vẽ lại (lượt đầu gọi model)
-  screen_layout: "svg@1"
+  // svg@2 (P10): hash gồm nội dung màn model đọc (validation, trigger…) ⇒ hình cũ stale một lượt, vẽ lại từ spec đã lưu
+  screen_layout: "svg@2"
 })
 
 /**
@@ -200,9 +203,11 @@ const renderedExtras = (spine: Spine, diagram: Pick<Diagram, "kind" | "owner_id"
   // FLF-418: mức Sequence nằm ở Project. Mức thành phần đọc thêm `component_interactions` + tên màn / entity / feature (tên control)
   if (diagram.kind === "sequence") return sequenceExtras(spine, diagram, context.sequenceLevel ?? DEFAULT_SEQUENCE_LEVEL)
   // FLF-410: theme mockup (màu, domain, nền tảng) nằm ở Project — đổi theme ⇒ stale ⇒ vẽ lại từ spec đã lưu. Tên hệ thống
-  // in trên header web. Nội dung model đọc (trigger, validation…) KHÔNG ở đây mà ở `contentHash` lưu cùng spec
+  // in trên header web. P10 (BarberGo #18: mockup vẫn ghi "đặt trước 14 ngày" sau khi chốt quy tắc 30 phút): nội dung model
+  // đọc (mô tả màn, trigger, validation, pop-up/tab, màn đích — `screen-layout.ai.ts#layoutContext`) cũng vào hash ⇒ đổi
+  // quy tắc thì hình `diagram_stale`, vẽ lại thì `contentHash` của spec đã lưu lệch ⇒ gọi model lại
   if (diagram.kind === "screen_layout")
-    return { theme: resolveScreenTheme(context.screenTheme, spine.project.form_factor), system_name: systemName(spine.project) }
+    return { theme: resolveScreenTheme(context.screenTheme, spine.project.form_factor), system_name: systemName(spine.project), content: screenLayoutContent(spine, diagram.owner_id) }
   const features = byId(spine.features).map(({ id, name, order }) => ({ id, name, order }))
   if (diagram.kind === "screen_flow")
     return {
@@ -220,6 +225,25 @@ const renderedExtras = (spine: Spine, diagram: Pick<Diagram, "kind" | "owner_id"
     function_ids: byId(spine.use_cases).map(({ id, function_ids }) => ({ id, function_ids })),
     functions: byId(spine.functions.filter((f) => referenced.has(f.id))).map(({ id, feature_id }) => ({ id, feature_id })),
     features
+  }
+}
+
+/** Chữ của màn mà model đọc khi vẽ mockup, ngoài `sourceProjection` (tên màn, tên + mô tả function đã có ở đó). */
+const screenLayoutContent = (spine: Spine, screenId: string | null): unknown => {
+  const screen = spine.screens.find((s) => s.id === screenId)
+  if (!screen) return null
+  const names = new Map(spine.screens.map((s) => [s.id, s.name]))
+  return {
+    description: screen.description,
+    is_popup: screen.is_popup,
+    tabs: screen.tabs,
+    navigates_to: screen.flow_to.map((e) => names.get(e.to) ?? null),
+    functions: byId(spine.functions.filter((f) => f.screen_id === screenId)).map(({ id, order, trigger, validations }) => ({
+      id,
+      order,
+      trigger,
+      validations: (validations ?? []).map((v) => v.statement)
+    }))
   }
 }
 

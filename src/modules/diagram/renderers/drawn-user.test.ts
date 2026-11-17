@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import { createEmptySpine } from "../../spine/spine.repository.js"
 import type { Spine } from "../../spine/spine.types.js"
 import { DRAWN_USER_ID, drawnGeneralizations, withDrawnUser } from "./drawn-user.js"
-import { renderUseCase } from "./usecase.renderer.js"
+import { MAX_UPLOAD_USE_CASES_PER_DIAGRAM, partitionUseCases, renderUseCase } from "./usecase.renderer.js"
 
 const triangles = (svg: string) => svg.match(/<polygon [^>]*fill="#fff"/g) ?? []
 
@@ -179,5 +179,48 @@ describe("FLF-375: sơ đồ use case tổng quát cho tài liệu upload", () =
     expect(triangles(String(main.source))).toHaveLength(0)
     expect(new Set([guest, user, main]).size).toBe(3)
     for (const p of parts) expect(p.issues).toEqual([])
+  })
+})
+
+describe("P10: trần 30 use case mỗi hình cho tài liệu upload (user chốt 17/11)", () => {
+  /** Tài liệu upload `n` use case, mỗi actor một use case (không ai thành User); use case thứ i thuộc feature `feature(i)`. */
+  const upload = (n: number, feature?: (i: number) => number): Spine => {
+    const s = createEmptySpine({ name: "Shop" })
+    s.custom_sections.push({ id: "CS01", heading: "", level: 2, source: "import", blocks: [] } as never)
+    s.actors.push(human("A01", "Customer") as never, human("A02", "Staff") as never)
+    for (let i = 1; i <= n; i++) {
+      const id = `UC-${String(i).padStart(2, "0")}`
+      s.use_cases.push({ ...uc(id, `Use case ${i}`, [i % 2 ? "A01" : "A02"]), function_ids: feature ? [`FR-${i}`] : [] } as never)
+      if (feature) s.functions.push({ id: `FR-${i}`, feature_id: `F${feature(i)}` } as never)
+    }
+    if (feature) for (let f = 1; f <= 4; f++) s.features.push({ id: `F${f}`, name: `Nhóm ${f}`, order: f } as never)
+    return s
+  }
+  const useCaseParts = (s: Spine) => partitionUseCases(withDrawnUser(s))
+
+  it("trần là 30", () => expect(MAX_UPLOAD_USE_CASES_PER_DIAGRAM).toBe(30))
+
+  it("fpt TechMart 22 use case (và đúng 30) ⇒ một hình tổng quát, không chia nhóm", () => {
+    for (const n of [22, 30]) {
+      const parts = useCaseParts(upload(n, (i) => 1 + (i % 4)))
+      expect(parts, String(n)).toHaveLength(1)
+      expect(parts[0].useCases).toHaveLength(n)
+    }
+  })
+
+  it("> 30 ⇒ tách theo nhóm chức năng: gói các nhóm liền nhau ≤ 30, tên hình ghi tên nhóm, đủ use case không trùng", () => {
+    // 40 use case: nhóm 1 (10), nhóm 2 (10), nhóm 3 (10), nhóm 4 (10) ⇒ gói [1,2,3] = 30, [4] = 10
+    const parts = useCaseParts(upload(40, (i) => 1 + Math.floor((i - 1) / 10)))
+    expect(parts.map((p) => p.useCases.length)).toEqual([30, 10])
+    expect(parts.map((p) => p.name)).toEqual(["Shop - Nhóm 1, Nhóm 2, Nhóm 3", "Shop - Nhóm 4"])
+    const ids = parts.flatMap((p) => p.useCases.map((u) => u.id))
+    expect(new Set(ids).size).toBe(40)
+    for (const p of renderUseCase(upload(40, (i) => 1 + Math.floor((i - 1) / 10)), null)) expect(p.issues).toEqual([])
+  })
+
+  it("> 30 mà chưa có nhóm chức năng ⇒ chia đều theo trần, tiêu đề (i/n)", () => {
+    const parts = useCaseParts(upload(45))
+    expect(parts.map((p) => p.useCases.length)).toEqual([23, 22])
+    expect(parts.map((p) => p.name)).toEqual(["Shop (1/2)", "Shop (2/2)"])
   })
 })

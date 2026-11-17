@@ -344,3 +344,11 @@ describe("FLF-260: skill chat viết theo ngôn ngữ trả lời nối ở cu�
     expect(skill("action/elicit-loop")).toContain("never paraphrased, translated or shortened")
   })
 })
+
+describe("skill entities-erd", () => {
+  it("P10 (BarberGo #15): khoá chính là mã / số định danh, không phải tên (shop name, service name, display name)", () => {
+    const { template } = getSkill("entities-erd")
+    expect(template).toMatch(/`key` = the code or number identifying one instance/)
+    expect(template).toMatch(/else `<entity> id` \(`shop id`\), never a name or title \(`shop name`, `display name`\)/)
+  })
+})
