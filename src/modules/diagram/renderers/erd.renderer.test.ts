@@ -256,7 +256,8 @@ describe("erd.renderer - đồ thị ngẫu nhiên (có seed): checkScene luôn 
     // P10: trước đây quan hệ ở chỗ cắt bị bỏ (25 seed: chen 86, crowsfoot 42, idef1x 51). Nay vẽ ở cả hai hình; Chen còn một
     // trường hợp cả hai hình đều không chen thêm được hộp nét đứt (hình thoi + hộp bậc cao) ⇒ cho phép tối đa 1
     expect(lost, `${notation}: quan hệ mất ở chỗ cắt`).toBeLessThanOrEqual(notation === "chen" ? 1 : 0)
-  })
+    // P10: mỗi hình tách thử thêm hộp nét đứt (bố cục lại) ⇒ Chen ~10 s khi chạy riêng, chậm hơn nhiều khi cả bộ test chạy song song
+  }, 120_000)
 })
 
 describe("P10: quan hệ vắt qua chỗ cắt vẽ ở cả hai hình", () => {
