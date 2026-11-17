@@ -53,12 +53,22 @@ const loadCr = async (req: Request): Promise<{ auth: Mode1Auth; cr: IChangeReque
   return { auth, cr: await crService.requireCr(auth.projectId, crId) }
 }
 
+/**
+ * BF §3.2 / spec UC-45 A6: các bước áp dụng CR (C-1…C-6: tài liệu bổ sung, gộp lệnh, làm rõ, tìm vị trí, đề xuất, sửa vị trí,
+ * kiểm, xác nhận, chạy tiếp) chỉ người tạo CR làm. Người khác ⇒ 403 `CR_NOT_REQUESTER` "đang treo ở <ai>".
+ */
+const loadOwnCr = async (req: Request): Promise<{ auth: Mode1Auth; cr: IChangeRequest }> => {
+  const loaded = await loadCr(req)
+  await crService.assertRequester(loaded.cr, loaded.auth.userId)
+  return loaded
+}
+
 const detail = async (res: Response, cr: IChangeRequest, status = 200) => sendSuccess(res, status, await crService.toDetail(cr))
 
 /** Hành động không có body: kiểm body rỗng, chạy, trả chi tiết. */
-const action = (run: (cr: IChangeRequest, auth: Mode1Auth) => Promise<void>) =>
+const action = (run: (cr: IChangeRequest, auth: Mode1Auth) => Promise<void>, opts: { ownerOnly?: boolean } = {}) =>
   mode1Handler(async (req, res) => {
-    const { auth, cr } = await loadCr(req)
+    const { auth, cr } = await (opts.ownerOnly === false ? loadCr(req) : loadOwnCr(req))
     parseInput(emptyRequestSchema, req.body)
     await run(cr, auth)
     return detail(res, cr)
@@ -152,7 +162,7 @@ export const receiveMaterial = (req: Request, res: Response, next: NextFunction)
 }
 
 export const addCrMaterial = mode1Handler(async (req, res) => {
-  const { auth, cr } = await loadCr(req)
+  const { auth, cr } = await loadOwnCr(req)
   if (req.file) {
     // multer đọc tên file theo latin1 — đổi lại UTF-8 để giữ tên tiếng Việt
     const originalname = Buffer.from(req.file.originalname, "latin1").toString("utf8")
@@ -167,13 +177,14 @@ export const deleteCrMaterial = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const { crId, mid } = parseInput(materialParamsSchema, req.params)
   const cr = await crService.requireCr(auth.projectId, crId)
+  await crService.assertRequester(cr, auth.userId)
   await removeMaterial(cr, mid)
   return detail(res, cr)
 })
 
 /** Phase 8 (chat): gộp thêm một lệnh sửa vào CR chưa nộp. */
 export const amend = mode1Handler(async (req, res) => {
-  const { auth, cr } = await loadCr(req)
+  const { auth, cr } = await loadOwnCr(req)
   const body = parseInput(amendRequestSchema, req.body)
   await amendCr(cr, auth.userId, body.instruction)
   return detail(res, cr)
@@ -181,7 +192,7 @@ export const amend = mode1Handler(async (req, res) => {
 
 /** FLF-375: tin nhắn trong lúc CR mở — lệnh sửa gộp vào CR, câu hỏi được trả lời (không thành yêu cầu bổ sung). */
 export const message = mode1Handler(async (req, res) => {
-  const { auth, cr } = await loadCr(req)
+  const { auth, cr } = await loadOwnCr(req)
   const body = parseInput(crMessageRequestSchema, req.body)
   const outcome = await handleCrMessage(cr, auth.userId, body.text, body.language)
   return sendSuccess(res, 200, { ...(await crService.toDetail(cr)), message: outcome })
@@ -201,7 +212,7 @@ export const getCr = mode1Handler(async (req, res) => {
 export const clarify = action((cr, auth) => runClarify(cr, auth.userId))
 
 export const answers = mode1Handler(async (req, res) => {
-  const { auth, cr } = await loadCr(req)
+  const { auth, cr } = await loadOwnCr(req)
   const body = parseInput(answersRequestSchema, req.body)
   await answerClarification(cr, auth.userId, body.answers)
   return detail(res, cr)
@@ -237,10 +248,10 @@ export const listPendingSections = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   return sendSuccess(res, 200, await crService.listPendingSections(auth.projectId))
 })
-export const revise = action((cr) => crService.reviseCr(cr))
+export const revise = action((cr) => crService.reviseCr(cr), { ownerOnly: false })
 
 export const updateLocation = mode1Handler(async (req, res) => {
-  const { cr } = await loadCr(req)
+  const { cr } = await loadOwnCr(req)
   const locId = parseInput(locationIdSchema, req.params.locId)
   const body = parseInput(patchLocationRequestSchema, req.body)
   await patchLocation(cr, locId, body)
@@ -249,7 +260,7 @@ export const updateLocation = mode1Handler(async (req, res) => {
 
 /** BPMN 3.9 (mode 1 v3): sửa đề xuất một vị trí bằng skill của step sở hữu, theo hướng của BA — chỉ ghi đề xuất. */
 export const ownerStepDraft = mode1Handler(async (req, res) => {
-  const { auth, cr } = await loadCr(req)
+  const { auth, cr } = await loadOwnCr(req)
   const locId = parseInput(locationIdSchema, req.params.locId)
   const body = parseInput(ownerStepDraftRequestSchema, req.body)
   await draftInOwnerStep(cr, auth.userId, locId, body.instruction)
@@ -272,9 +283,9 @@ export const close = mode1Handler(async (req, res) => {
 })
 
 export const cancel = mode1Handler(async (req, res) => {
-  const { cr } = await loadCr(req)
+  const { auth, cr } = await loadCr(req)
   const body = parseInput(closeRequestSchema, req.body)
-  await crService.cancelCr(cr, body.reason)
+  await crService.cancelCr(cr, body.reason, { userId: auth.userId, role: req.orgContext?.role })
   return detail(res, cr)
 })
 
