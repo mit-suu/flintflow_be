@@ -595,7 +595,13 @@ export const runStateResponseSchema = z.object({
    * FLF-332: `ai_error` ⇒ lượt gãy vì AI lỗi (đã tự thử lại, credit đã hoàn), bước **tạm dừng**: `/run-state/active` vẫn trả
    * lượt này sau khi mở lại trang để FE dựng banner "Thử lại ngay / Để sau" tại bước đó. Thiếu/null ⇒ gián đoạn thường.
    */
-  paused_reason: z.enum(["ai_error"]).nullable().optional()
+  paused_reason: z.enum(["ai_error"]).nullable().optional(),
+  /**
+   * BF §3.2 (hai người sửa cùng lúc): người khởi động lượt (`userId`) + tên hiển thị. Câu hỏi đang chờ (`waiting_answer`)
+   * **treo ở người đó** — người khác thấy "<by_name> đang trả lời câu hỏi…", không thấy thẻ câu hỏi; `/answer` của họ ⇒ 403.
+   */
+  by: z.string().nullable().optional(),
+  by_name: z.string().nullable().optional()
 })
 
 // ─── run-estimate (FLF-332) ───────────────────────────────────────
