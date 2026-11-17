@@ -38,7 +38,7 @@ import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { accountLocaleOf } from "../user/account-locale.js"
 import { applyTransaction } from "./op-engine.js"
 import * as repository from "./spine.repository.js"
-import { computeSectionStates, isRerenderOnly } from "./section-status.js"
+import { acceptSeqByStep, computeSectionStates, isCancelledAfter, isRerenderOnly, revertPairs } from "./section-status.js"
 import { sectionsOfPath, stepsOf } from "./section-registry.js"
 import {
   apply as applyChange,
@@ -52,8 +52,12 @@ import type { Op } from "./op.types.js"
 import type { Change, Spine, SpineRecord } from "./spine.types.js"
 import { stampAddendum } from "./addendum-stamp.js"
 
-/** Trần số section hoà giải trong một lượt — mỗi section là một lượt gọi model. */
-export const MAX_RECONCILE_SECTIONS = 12
+/**
+ * Trần an toàn số section hoà giải trong một lượt — mỗi section là một lượt gọi model. FLF-431 (UC-36 AC-36.1, S05-08): một
+ * lượt bấm phải ra **một** bản xem trước gộp cho mọi section stale; trần cũ 12 bắt bấm "Viết lại" 3 lần (28 → 13 → 1). Trần
+ * này chỉ chặn trường hợp bất thường (dự án rất lớn), không phải số lô.
+ */
+export const MAX_RECONCILE_SECTIONS = 60
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
 
@@ -91,10 +95,15 @@ export const changesMakingStale = (spine: Spine, changes: readonly Change[], sec
   const steps = new Map(spine.steps.map((s) => [s.id, s]))
   const accepted = [...own].map((id) => steps.get(id)).filter((s) => s?.status === "accepted")
   if (accepted.length === 0) return []
-  const threshold = Math.max(...accepted.map((s) => s?.last_seq ?? 0))
+  // Cùng mốc với `computeSectionStates`: `last_seq` hoặc lượt ghi `accepted_at` gần nhất (FLF-431 — trước chỉ `last_seq`,
+  // brief hoà giải kê cả change đã duyệt lại)
+  const acceptedAt = acceptSeqByStep(changes)
+  const threshold = Math.max(...accepted.map((s) => Math.max(s?.last_seq ?? 0, acceptedAt.get(s?.id ?? "") ?? 0)))
 
+  const pairs = revertPairs(changes)
+  const revertedBy = new Set(pairs.values())
   return changes.filter((change) => {
-    if (change.seq <= threshold) return false
+    if (change.seq <= threshold || isCancelledAfter(change.seq, threshold, pairs, revertedBy)) return false
     if (change.step_id !== null && own.has(change.step_id)) return false
     if (isRerenderOnly(change)) return false
     const impact = sectionsOfPath(spine, change.path, change)

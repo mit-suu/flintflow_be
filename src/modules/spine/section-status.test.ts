@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { describe, it, expect } from "vitest"
 import { spineSchema } from "./spine.schema.js"
 import type { Change, Spine } from "./spine.types.js"
-import { buildProgressReport, computeSectionStates, computeStatus, progressByStep, readiness } from "./section-status.js"
+import { buildProgressReport, computeSectionStates, computeStatus, isRerenderOnly, progressByStep, readiness } from "./section-status.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const load = (file: string): Spine =>
@@ -73,7 +73,7 @@ describe("computeSectionStates", () => {
     expect(own.find((s) => s.id === "fixed:2.2.2")?.status).toBe("stale")
   })
 
-  it("vẽ lại sơ đồ mà nguồn không đổi (source_hash như cũ) không làm section stale; nguồn đổi thì có", () => {
+  it("vẽ lại sơ đồ (hash như cũ hay hash mới) không làm section stale — FLF-431; đổi dữ liệu nguồn thì có; bố cục màn vẽ lại vẫn stale", () => {
     const diagram = FIXTURE.diagrams.find((d) => d.kind === "usecase")!
     const redraw = (hashAfter: string): Change => ({
       ...change(LAST_SEQ + 1, `diagrams[id=${diagram.id}]`),
@@ -81,7 +81,22 @@ describe("computeSectionStates", () => {
       value: { ...diagram, source_hash: hashAfter, rendered_at: "2026-10-13T00:00:00.000Z" }
     })
     expect(computeStatus(FIXTURE, [redraw("h1")], "fixed:2.2.1"), "chỉ compile lại").toBe("accepted")
-    expect(computeStatus(FIXTURE, [redraw("h2")], "fixed:2.2.1"), "nguồn đổi").toBe("stale")
+    // FLF-431: hình vẽ lại theo nguồn mới không tự làm section cũ — change của trường nguồn mới là thứ làm cũ
+    expect(computeStatus(FIXTURE, [redraw("h2")], "fixed:2.2.1"), "vẽ lại theo nguồn mới").toBe("accepted")
+    const actor = FIXTURE.actors[0]
+    expect(computeStatus(FIXTURE, [redraw("h2"), change(LAST_SEQ + 2, `actors[id=${actor.id}].name`, "S-4.1")], "fixed:2.2.1"), "nguồn đổi").toBe("stale")
+    expect(isRerenderOnly({ path: "diagrams[id=D9]", before: { kind: "screen_layout", source_hash: "a" }, value: { kind: "screen_layout", source_hash: "b" } }), "bố cục màn").toBe(false)
+  })
+
+  it("FLF-431 (FAP #22): sửa sau mốc duyệt rồi hoàn tác ⇒ hết cũ; sửa TRƯỚC mốc rồi hoàn tác sau mốc ⇒ vẫn cũ", () => {
+    const edit = change(LAST_SEQ + 1, "actors[id=A01].name")
+    const undo = { ...change(LAST_SEQ + 2, "actors[id=A01].name"), op: "revert" as const, reason: `Revert seq ${LAST_SEQ + 1}` }
+    expect(computeStatus(FIXTURE, [edit], "fixed:2.1")).toBe("stale")
+    expect(computeStatus(FIXTURE, [edit, undo], "fixed:2.1")).toBe("accepted")
+    // Change gốc nằm dưới mốc duyệt (seq 1) ⇒ lượt hoàn tác làm nội dung khác bản đã duyệt
+    const old = change(1, "actors[id=A01].name")
+    const undoOld = { ...change(LAST_SEQ + 3, "actors[id=A01].name"), op: "revert" as const, reason: "Revert seq 1" }
+    expect(computeStatus(FIXTURE, [old, undoOld], "fixed:2.1")).toBe("stale")
   })
 
   it("FLF-198: step chốt mà không ghi gì (last_seq null) van co moc 'da xem toi day'", () => {

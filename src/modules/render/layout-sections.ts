@@ -277,6 +277,24 @@ interface Placed {
 
 const runs = (text: string): InlineRun[] => [{ text }]
 
+const cellText = (cell: TableCell): string => cell.map((r) => r.text).join("").trim()
+
+/**
+ * FLF-428: gộp các bảng **liền kề** cùng tiêu đề mà đều thuộc `mergeable` (bảng do Spine dựng lại) thành một bảng, tại chỗ.
+ * Khối khác (đoạn nguyên văn, heading) xen giữa ⇒ giữ tách, thứ tự của file không đổi.
+ */
+export const mergeAdjacentTables = (blocks: Block[], mergeable: WeakSet<Block>): void => {
+  for (let i = blocks.length - 1; i > 0; i--) {
+    const a = blocks[i - 1]
+    const b = blocks[i]
+    if (a.type !== "table" || b.type !== "table" || !mergeable.has(a) || !mergeable.has(b)) continue
+    if (a.header.map(cellText).join("|") !== b.header.map(cellText).join("|")) continue
+    const merged: Block = { ...a, rows: [...a.rows, ...b.rows] }
+    mergeable.add(merged)
+    blocks.splice(i - 1, 2, merged)
+  }
+}
+
 const customTable = (rows: string[][]): Block | null => {
   const nonEmpty = rows.filter((r) => r.some((c) => c.trim()))
   if (!nonEmpty.length) return null
@@ -866,6 +884,15 @@ export const buildLayoutSections = (
       return header ? rendered : conformBlocksToFileTable(rendered, fileTableRows(blocks), sectionId)
     }
     const out: Block[] = []
+    // FLF-428: mỗi đoạn nguồn dựng lại riêng ⇒ mỗi đoạn một bảng (§4.2.x: 3–4 bảng NFR lặp tiêu đề). Đánh dấu bảng do `rebuild`
+    // sinh **từ đoạn văn / danh sách** để gộp các bảng liền kề cùng tiêu đề sau vòng lặp. Đoạn gốc vốn là bảng thì file có bao
+    // nhiêu bảng in bấy nhiêu (FLF-366), bảng nguyên văn không gộp
+    const rebuiltTables = new WeakSet<Block>()
+    const rebuildMarked = (items: readonly string[], blocks: readonly CustomBlock[]): Block[] => {
+      const blocksOut = rebuild(items, blocks)
+      if (!blocks.some((b) => b.kind === "table")) for (const b of blocksOut) if (b.type === "table") rebuiltTables.add(b)
+      return blocksOut
+    }
     const parts = record.parts
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i]
@@ -895,7 +922,7 @@ export const buildLayoutSections = (
           i = end - 1
           continue
         }
-        out.push(...(isVerbatim(spine, part) ? customBlocks(part.blocks, originalPng, slotFor(n.section_id, n.number)) : rebuild(part.items, part.blocks)))
+        out.push(...(isVerbatim(spine, part) ? customBlocks(part.blocks, originalPng, slotFor(n.section_id, n.number)) : rebuildMarked(part.items, part.blocks)))
         continue
       }
       const blocks = customById.get(`${CUSTOM_PREFIX}${part.custom_id}`)?.blocks ?? []
@@ -921,6 +948,7 @@ export const buildLayoutSections = (
         out.push(...shifted(renderSection(segmentSpine(spine, target, new Set(), diagrams), target, contextFor(target, n.number))))
       }
     }
+    mergeAdjacentTables(out, rebuiltTables)
     // Phần tử mới / đã đổi từ lúc import mà không đoạn nào in (CR thêm) ⇒ cuối mục
     const known = new Map(record.known.map((k) => [k.key, k.hash]))
     const taken = claimed.get(sectionId)
