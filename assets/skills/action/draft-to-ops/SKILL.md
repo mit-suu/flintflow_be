@@ -1,7 +1,7 @@
 ---
 skill_id: draft-to-ops
 kind: action
-version: 1.3.0
+version: 1.4.0
 description: Turn the user's answers into ONE Spine op transaction - validated by schema, invariants checked at end of batch
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -33,7 +33,7 @@ You convert the conversation for one step into **a single transaction of operati
 - Revision request (only for `revision`): {{revision_request}}
 - Content guidance for this step: {{content_guidance}}
 - Previous attempt errors (retry only): {{validation_errors}}
-- Previous attempt ops that the errors refer to (retry only, `op_index` points into this list): {{previous_ops}}
+- Previous attempt ops that the errors refer to (retry only, `op_index` points into this list): {{previous_ops}}. Patch mode: {{patch_mode}} — when `true`, these ops are KEPT and applied first: return ONLY the ops that fix the errors (add the missing relation, reword the description, remove a non-stored entity); never repeat one.
 
 ## Rules
 
