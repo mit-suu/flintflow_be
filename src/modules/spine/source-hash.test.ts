@@ -142,6 +142,27 @@ describe("renderedDiagramHash - hash của hình đã vẽ theo engine (FLF-339)
     expect(renderedDiagramHash(FIXTURE, layout, undefined, { erdNotation: "idef1x" })).toBe(base)
   })
 
+  it("P10 (BarberGo #18): đổi validation / trigger / mô tả màn ⇒ hash mockup đổi (diagram_stale); dữ liệu ảnh gốc không đổi", () => {
+    const layout = targets[4]
+    const screenId = layout.owner_id!
+    const fnIndex = FIXTURE.functions.findIndex((f) => f.screen_id === screenId)
+    expect(fnIndex).toBeGreaterThanOrEqual(0)
+    const base = renderedDiagramHash(FIXTURE, layout)
+    const changes: ((s: Spine) => void)[] = [
+      (s) => (s.functions[fnIndex].validations = [...s.functions[fnIndex].validations, { id: "V-P10", statement: "Booking closes 30 minutes before the slot" } as never]),
+      (s) => (s.functions[fnIndex].trigger = "taps Book now"),
+      (s) => (s.screens.find((x) => x.id === screenId)!.description = "Pick a slot up to 30 minutes ahead")
+    ]
+    for (const change of changes) {
+      const changed = mutate(change)
+      expect(renderedDiagramHash(changed, layout)).not.toBe(base)
+      expect(computeSourceHash(changed, layout)).toBe(computeSourceHash(FIXTURE, layout))
+    }
+    // đổi function của màn KHÁC không làm mockup này cũ
+    const other = FIXTURE.functions.findIndex((f) => f.screen_id !== screenId)
+    expect(renderedDiagramHash(mutate((s) => (s.functions[other].trigger = "x")), layout)).toBe(base)
+  })
+
   it("ERD: ký pháp của dự án (ngoài Spine) nằm trong hash hình - đổi ký pháp ⇒ hình cũ, thiếu ký pháp = chen", () => {
     const erd = targets[3]
     const chen = renderedDiagramHash(FIXTURE, erd, undefined, { erdNotation: "chen" })
@@ -172,8 +193,16 @@ describe("renderedDiagramHash - usecase", () => {
   it("bộ xếp thử nhiều phương án (svg@2) làm hình use case svg@1 cũ thành stale", () => {
     const usecase = { kind: "usecase" as const, owner_id: null }
     expect(DIAGRAM_ENGINES.context).toBe("svg@2")
-    expect(DIAGRAM_ENGINES.usecase).toBe("svg@3")
+    expect(DIAGRAM_ENGINES.usecase).toBe("svg@4")
     expect(renderedDiagramHash(FIXTURE, usecase)).not.toBe(renderedDiagramHash(FIXTURE, usecase, { ...DIAGRAM_ENGINES, usecase: "svg@1" }))
+  })
+
+  it("P10: trần 30 use case cho tài liệu upload (svg@4) làm hình use case svg@3 cũ thành stale; ERD svg@2 làm ERD svg@1 cũ", () => {
+    const usecase = { kind: "usecase" as const, owner_id: null }
+    const erd = { kind: "erd" as const, owner_id: null }
+    expect(renderedDiagramHash(FIXTURE, usecase)).not.toBe(renderedDiagramHash(FIXTURE, usecase, { ...DIAGRAM_ENGINES, usecase: "svg@3" }))
+    expect(DIAGRAM_ENGINES.erd).toBe("svg@2")
+    expect(renderedDiagramHash(FIXTURE, erd)).not.toBe(renderedDiagramHash(FIXTURE, erd, { ...DIAGRAM_ENGINES, erd: "svg@1" }))
   })
 
   it("FLF-421: phân cấp actor nối kiểu cây (svg@3) làm hình use case svg@2 cũ thành stale", () => {

@@ -180,7 +180,8 @@ The per-feature class diagram is drawn only from this data; code adds no class a
    feature that uses it. At least one id per entity; never an id that is not in `features[]`.
 2. `attributes`: `{name, kind, required, description?}`, the 3–8 facts a business user would name on a form, taken from
    function and validation text. `name`: lowercase words, unique in the entity, no data type, no technical field
-   (`createdAt`, `_id`) or method. `kind`: `key` = what identifies one instance in business terms (at most one), `reference` =
+   (`createdAt`, `_id`) or method. `kind`: `key` = the code or number identifying one instance (at most one): a business code
+   (`booking code`, account `email`) else `<entity> id` (`shop id`), never a name or title (`shop name`, `display name`). `reference` =
    points at another entity of this ERD (also a relation in Pass 3), `plain` = the rest. `required: false` when it may stay empty.
 3. No evidence for an attribute ⇒ leave it out (`attributes: []` is allowed).
 
