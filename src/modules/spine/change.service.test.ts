@@ -523,9 +523,11 @@ describe("preview - diff + impact, không ghi", () => {
     expect(deps.renderAfterChange).not.toHaveBeenCalled()
   })
 
-  it("base_version lệch ⇒ 409 SPINE_VERSION_CONFLICT", async () => {
+  it("P12: xem trước với base_version cũ ⇒ dựng trên Spine hiện tại, không 409; áp thẳng (không xem trước) vẫn 409", async () => {
     await seed()
-    await expect(preview(PROJECT, USER, { base_version: 99, ops: [{ op: "set", path: "project.vision", value: "x" }] }, {}, deps)).rejects.toMatchObject({
+    const shown = await preview(PROJECT, USER, { base_version: 99, ops: [{ op: "set", path: "project.vision", value: "x" }] }, {}, deps)
+    expect(shown).toMatchObject({ ok: true, base_version: 1 })
+    await expect(apply(PROJECT, USER, { base_version: 99, ops: [{ op: "set", path: "project.vision", value: "x" }] }, {}, deps)).rejects.toMatchObject({
       statusCode: 409,
       code: "SPINE_VERSION_CONFLICT"
     })
@@ -1357,5 +1359,95 @@ describe("FLF-428 - sửa trong chat từ cờ nfr_missing_number (AC-38.2)", ()
     })
     const fixed = await apply(PROJECT, USER, { base_version: 1, instruction: instruction() }, {}, deps)
     expect(fixed.unresolved_flags).toBeUndefined()
+  })
+})
+
+// ─── P12: hai người sửa cùng lúc — kiểm theo nội dung (BF §3.2, chốt câu 8) ──────
+
+describe("P12 - xác nhận sau người khác: kiểm từng chỗ trên nội dung hiện tại", () => {
+  const OTHER = "650000000000000000000011"
+  const lastEditor = vi.fn(async () => ({ name: "Bình", at: new Date("2026-11-17T09:05:00.000Z") }))
+  const withEditor = (): ChangeDeps => ({ ...deps, lastEditor })
+  /** Người kia ghi thẳng (đã xác nhận trước). */
+  const otherWrites = async (ops: { op: "set"; path: string; value: unknown }[]) => {
+    const version = (await repo.get(PROJECT))!.spine_version
+    return apply(PROJECT, OTHER, { base_version: version, ops }, {}, deps)
+  }
+  const myPreview = async (ops: { op: "set"; path: string; value: unknown }[]) => preview(PROJECT, USER, { base_version: 1, ops }, {}, deps)
+
+  it("người kia sửa mục khác ⇒ áp được, không 409 (TA-06 c, mục khác)", async () => {
+    await seed()
+    const shown = await myPreview([{ op: "set", path: "glossary[id=G01].definition", value: "Software Requirements Specification document." }])
+    await otherWrites([{ op: "set", path: "actors[id=A01].name", value: "Product Owner" }])
+    const applied = await apply(PROJECT, USER, { base_version: 1, preview_id: shown.preview_id }, {}, withEditor())
+    expect(applied.txn).not.toBeNull()
+    expect(applied.spine.glossary.find((g) => g.id === "G01")?.definition).toBe("Software Requirements Specification document.")
+    expect(applied.spine.actors.find((a) => a.id === "A01")?.name).toBe("Product Owner")
+  })
+
+  it("người kia sửa phần khác trong cùng chỗ ⇒ ghép rồi ghi (mục tiêu 1 vs mục tiêu 2)", async () => {
+    await seed()
+    const goals = [...FIXTURE.project.goals]
+    const mine = [...goals]
+    mine[0] = "Produce a baseline-quality SRS within half a working day"
+    const theirs = [...goals]
+    theirs[1] = "Keep every statement traceable to the Spine"
+    const shown = await myPreview([{ op: "set", path: "project.goals", value: mine }])
+    await otherWrites([{ op: "set", path: "project.goals", value: theirs }])
+    const applied = await apply(PROJECT, USER, { base_version: 1, preview_id: shown.preview_id }, {}, withEditor())
+    expect(applied.spine.project.goals.slice(0, 2)).toEqual([mine[0], theirs[1]])
+    expect(applied.changes.map((c) => c.path)).toEqual(["project.goals"])
+  })
+
+  it("người kia sửa giống đề xuất ⇒ không ghi lại, báo đã được Bình sửa giống", async () => {
+    await seed()
+    const value = "Software Requirements Specification document."
+    const shown = await myPreview([{ op: "set", path: "glossary[id=G01].definition", value }])
+    await otherWrites([{ op: "set", path: "glossary[id=G01].definition", value }])
+    const before = await writtenChanges()
+    const applied = await apply(PROJECT, USER, { base_version: 1, preview_id: shown.preview_id }, {}, withEditor())
+    expect(applied.txn).toBeNull()
+    expect(await writtenChanges()).toBe(before)
+    expect(applied.already_applied).toEqual([expect.objectContaining({ path: "glossary[id=G01]", changed_by: "Bình", label: "SRS" })])
+  })
+
+  it("người kia sửa đúng chữ đề xuất định đổi ⇒ 409 kèm ①②③, không ghi; bản xem trước còn để Bỏ yêu cầu", async () => {
+    await seed()
+    const shown = await myPreview([{ op: "set", path: "glossary[id=G01].definition", value: "Bản đặc tả yêu cầu phần mềm." }])
+    await otherWrites([{ op: "set", path: "glossary[id=G01].definition", value: "Tài liệu đặc tả yêu cầu." }])
+    const before = await writtenChanges()
+    const err = await apply(PROJECT, USER, { base_version: 1, preview_id: shown.preview_id }, {}, withEditor()).catch((e: unknown) => e)
+    expect(err).toMatchObject({ statusCode: 409, code: "SPINE_VERSION_CONFLICT" })
+    const meta = (err as { meta: { conflicts: Record<string, unknown>[]; preview_id: string } }).meta
+    expect(meta.preview_id).toBe(shown.preview_id)
+    expect(meta.conflicts).toEqual([
+      expect.objectContaining({
+        path: "glossary[id=G01]",
+        section_id: "fixed:5.5",
+        label: "SRS",
+        at_proposal: FIXTURE.glossary[0].definition,
+        current: "Tài liệu đặc tả yêu cầu.",
+        proposal: "Bản đặc tả yêu cầu phần mềm.",
+        changed_by: "Bình",
+        changed_at: "2026-11-17T09:05:00.000Z"
+      })
+    ])
+    expect(String((err as Error).message)).toContain("Bình vừa sửa đúng chỗ bạn định đổi")
+    expect(await writtenChanges()).toBe(before)
+    // Không có nút ghi đè: bấm lại vẫn đụng; bản xem trước vẫn còn (Bỏ yêu cầu xoá được)
+    await expect(apply(PROJECT, USER, { base_version: 1, preview_id: shown.preview_id }, {}, withEditor())).rejects.toMatchObject({ statusCode: 409 })
+  })
+
+  it("chỗ khác làm gãy tham chiếu ⇒ từ chối trước khi ghi (cờ đỏ, BF dòng 4)", async () => {
+    await seed()
+    const roleOfA01 = FIXTURE.roles.find((r) => r.actor_id === "A01")
+    expect(roleOfA01).toBeDefined()
+    const shown = await myPreview([{ op: "set", path: `roles[id=${roleOfA01!.id}].actor_id`, value: "A02" }])
+    // Người kia xoá actor A02 (và mọi thứ trỏ tới nó)
+    const version = (await repo.get(PROJECT))!.spine_version
+    await apply(PROJECT, OTHER, { base_version: version, ops: [{ op: "remove", path: "actors[id=A02]" }] }, {}, deps).catch(() => undefined)
+    const after = await repo.get(PROJECT)
+    expect(after!.actors.some((a) => a.id === "A02")).toBe(false)
+    await expect(apply(PROJECT, USER, { base_version: 1, preview_id: shown.preview_id }, {}, withEditor())).rejects.toBeInstanceOf(TransactionRejectedError)
   })
 })
