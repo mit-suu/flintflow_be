@@ -100,4 +100,10 @@ describe("P06 - không lộ tên field / mã nội bộ", () => {
     const rows = summarizeChanges([{ op: "set", path: `screens[id=${screen.id}].flow_to`, before: [], value: [{ to: "S07" }] }] as never, spine)
     expect(rows[0].title_vi).toBe(`${screen.name} · Chuyển tới màn`)
   })
+  it("sửa mục đích của ghi chú Brief ⇒ không in 'target_section'", () => {
+    const note = { id: "AD1", topic: "scope", content: "Bản đầu gọn, khoảng 5-8 use case", content_en: "", target_section: "fixed:1.3", captured_at: "2026-11-17T00:00:00Z" }
+    const rows = summarizeChanges([{ op: "set", path: "addendum[id=AD1].target_section", before: "fixed:1.2", value: "fixed:1.3" }] as never, { ...spine, addendum: [note] } as Spine)
+    expect(rows[0].title_vi).toBe(`${note.content} · Mục trong tài liệu`)
+    expect(JSON.stringify(rows)).not.toContain("target_section")
+  })
 })
