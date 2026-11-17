@@ -108,6 +108,8 @@ export interface LayoutResult {
   segments: LayoutSegment[]
   /** FLF-378 (`templateOnly`): mọi khối dưới heading của mẫu, theo mục (`section_id` của layout) — nguồn của `template_context`. */
   contextBlocks: { section_id: string; block: CustomBlock }[]
+  /** P09: khối nội dung (không phải hướng dẫn / mẫu) ⇒ mục của layout chứa nó, theo thứ tự file — nguồn trích đoạn của màn đọc khung. */
+  sectionBlocks: { section_id: string; block_id: string; block: CustomBlock }[]
 }
 
 const toCustomBlock = (b: LayoutBlock): CustomBlock | null => {
@@ -162,6 +164,7 @@ export const buildLayout = (
   const isGuidanceText = (id: string, block: { kind: string; text?: string }) =>
     (block.kind === "paragraph" || block.kind === "list_item") && (isInstructionText(block.text ?? "") || marks.has(id))
   const contextBlocks: LayoutResult["contextBlocks"] = []
+  const sectionBlocks: LayoutResult["sectionBlocks"] = []
   const layout: LayoutEntry[] = []
   const customSections: CustomSection[] = []
   const slices: LayoutSlice[] = []
@@ -285,6 +288,8 @@ export const buildLayout = (
     // FLF-411: hình / bảng nằm trong khoảng ví dụ / hướng dẫn của mẫu (`<<Sample: … [hình] … >>`) không phải nội dung khách viết
     if (!current && owner && !owner.section_id.startsWith("group:") && marks.has(b.block_id)) continue
     const segment = owner && !current ? segmentOf.get(owner) : undefined
+    const at = current ? customSectionKey(current.id) : owner && owner.section_id.startsWith("group:") ? customSectionKey(continuationOf(owner).id) : owner?.section_id
+    if (at) sectionBlocks.push({ section_id: at, block_id: b.block_id, block })
     if (current) {
       if (!currentRepeats || unmappedBlockIds.has(b.block_id)) current.blocks.push(block)
     } else if (owner && segment) {
@@ -292,7 +297,7 @@ export const buildLayout = (
       else segment.parts.push({ kind: "spine", block_ids: [b.block_id], blocks: [block] })
     } else if (owner && (owner.section_id.startsWith("group:") || unmappedBlockIds.has(b.block_id))) continuationOf(owner).blocks.push(block)
   }
-  return { layout, customSections, slices, segments, contextBlocks }
+  return { layout, customSections, slices, segments, contextBlocks, sectionBlocks }
 }
 
 /** Phần tử Spine đã trích (finalize): khoá `entity` + `id` + khối nguồn. */
