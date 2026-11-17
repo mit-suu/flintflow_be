@@ -326,11 +326,17 @@ export interface CommonRequirement {
   statement: string
 }
 
+export type MessageType = "error" | "warning" | "info" | "success" | "confirm"
+
 export interface Message {
   id: string
   code: string
   text: string
   function_ids: string[]
+  /** P07: loại thông báo; Spine cũ không có. */
+  type?: MessageType | null
+  /** P07: lúc nào thông báo hiện; Spine cũ không có. */
+  context?: string | null
 }
 
 export type OtherRequirementKind = "risk" | "assumption" | "open_question" | "technical_risk"

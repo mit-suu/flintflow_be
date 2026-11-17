@@ -268,6 +268,22 @@ describe("other_requirements[].statement_vi (FLF-237)", () => {
   })
 })
 
+describe("messages[].type / context (P07)", () => {
+  it("Spine cũ không có type / context vẫn hợp lệ; có thì giữ; loại lạ bị từ chối", () => {
+    const spine = createEmptySpine({ name: "MSG" })
+    spine.messages = [
+      { id: "M01", code: "AUTH-001", text: "The code is incorrect.", function_ids: [] },
+      { id: "M02", code: "BOOK-001", text: "Your booking is confirmed.", function_ids: [], type: "success", context: "After a booking is saved" }
+    ]
+    const parsed = spineSchema.parse(JSON.parse(JSON.stringify(spine)))
+    expect(parsed.messages[0].type).toBeUndefined()
+    expect(parsed.messages[1]).toMatchObject({ type: "success", context: "After a booking is saved" })
+    const bad = JSON.parse(JSON.stringify(spine))
+    bad.messages[0].type = "toast"
+    expect(spineSchema.safeParse(bad).success).toBe(false)
+  })
+})
+
 describe("assumptions[].statement_vi (FLF-221)", () => {
   const assumption = {
     id: "AS1",

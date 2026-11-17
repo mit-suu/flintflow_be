@@ -327,6 +327,32 @@ describe("buildImportOps", () => {
     ])
   })
 
+  it("FLF-428: heading chức năng ghi mã use case '(UC-01)' ⇒ nối vào use case đó; màn ghi 'Cancel Order pop-up' ⇒ màn Cancel Order", () => {
+    const spine = createEmptySpine({ name: "TechMart" })
+    const ops = buildImportOps(spine, [
+      { entity: "screens", id: "SCR-01", value: { name: "Sign Up" } },
+      { entity: "screens", id: "SCR-12", value: { name: "Cancel Order", is_popup: true } },
+      { entity: "screens", id: "SCR-06", value: { name: "Write Review", is_popup: true } },
+      { entity: "functions", id: "FR-3.2.1", value: { name: "Register Account (UC-01)", screen_id: "Sign Up screen" } },
+      { entity: "functions", id: "FR-3.5.2", value: { name: "Cancel Order (UC-09)", screen_id: "Cancel Order pop-up" } },
+      { entity: "functions", id: "FR-3.3.3", value: { name: "Write Product Review (UC-11)", screen_id: "Write Review pop-up" } },
+      // Không có mã use case, khác tên ⇒ không đoán
+      { entity: "functions", id: "FR-01", value: { name: "Sync Shipment Status" } },
+      { entity: "use_cases", id: "UC-01", value: { name: "Register Account" } },
+      { entity: "use_cases", id: "UC-09", value: { name: "Cancel Order" } },
+      { entity: "use_cases", id: "UC-11", value: { name: "Write Product Review" } },
+      { entity: "use_cases", id: "UC-12", value: { name: "Process Orders" } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.use_cases.map((u) => [u.id, u.function_ids])).toEqual([
+      ["UC-01", ["FR-3.2.1"]],
+      ["UC-09", ["FR-3.5.2"]],
+      ["UC-11", ["FR-3.3.3"]],
+      ["UC-12", []]
+    ])
+    expect(Object.fromEntries(plan.spine.functions.map((f) => [f.id, f.screen_id]))).toMatchObject({ "FR-3.2.1": "SCR-01", "FR-3.5.2": "SCR-12", "FR-3.3.3": "SCR-06", "FR-01": null })
+  })
+
   it("FLF-251: tham chiếu theo tên chuẩn hoá (cột Feature có số mục), thông báo nối chức năng, thuật ngữ tiếng Việt", () => {
     const spine = createEmptySpine({ name: "Exam" })
     const ops = buildImportOps(spine, [
@@ -346,6 +372,18 @@ describe("buildImportOps", () => {
     expect(plan.spine.use_cases[0]).toMatchObject({ actor_ids: ["A01"], function_ids: ["FR-3.2.1"] })
     expect(plan.spine.messages[0].function_ids).toEqual(["FR-3.2.1"])
     expect(plan.spine.glossary.map((g) => g.term_native)).toEqual(["Vắng thi", undefined])
+  })
+
+  it("P07: cột Message Type / Context của bảng thông báo ⇒ type (chuẩn hoá) + context; loại lạ không ghi", () => {
+    const spine = createEmptySpine({ name: "Msg" })
+    const ops = buildImportOps(spine, [
+      { entity: "messages", id: "MSG-01", value: { code: "MSG01", text: "Wrong password", type: "Lỗi", context: "Khi đăng nhập sai" } },
+      { entity: "messages", id: "MSG-02", value: { code: "MSG02", text: "Saved", type: "Toast" } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.messages[0]).toMatchObject({ type: "error", context: "Khi đăng nhập sai" })
+    expect(plan.spine.messages[1].type).toBeUndefined()
+    expect(plan.spine.messages[1].context).toBeUndefined()
   })
 
   it("FLF-252: tên hệ thống + phạm vi release tài liệu ghi vào project", () => {

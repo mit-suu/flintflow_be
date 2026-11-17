@@ -124,7 +124,10 @@ export const TABLE_ENTITIES: readonly TableEntityDef[] = [
     columns: [
       { field: "code", headers: ["message code", "msg code", "code", "mã thông báo", "mã"] },
       { field: "text", headers: ["message", "message content", "content", "text", "nội dung", "thông báo"] },
-      { field: "function_ids", headers: ["functions", "function", "used in", "chức năng", "dùng ở"] }
+      { field: "function_ids", headers: ["functions", "function", "used in", "chức năng", "dùng ở"] },
+      // P07: cột "Message Type" / "Context" của bảng thông báo (mẫu Report3, luồng C) có field trong Spine
+      { field: "type", headers: ["message type", "msg type", "type", "loại", "loại thông báo"] },
+      { field: "context", headers: ["context", "ngữ cảnh", "bối cảnh", "when shown", "khi nào hiện"] }
     ],
     required: ["code", "text"]
   },

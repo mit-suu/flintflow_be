@@ -40,7 +40,7 @@ import { layoutRenderDeps, renderDiagrams, sameDiagramSubject, staleRenderedDiag
 import { loadRenderContext } from "../diagram/render-context.js"
 import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "../spine/source-hash.js"
 import { targetOfDiagram, type RenderTarget } from "../diagram/renderers/index.js"
-import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf } from "./step-registry.js"
+import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf, screenLoopOrder } from "./step-registry.js"
 import { addendumForUnit, assumptionsForPrompt, buildStepContext, elicitProjection, getStepSpec, loadConversationVariables, loadLastAiReply, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
 import { buildConversationSummary } from "./conversation-summary.js"
 import { composeStepGateMessage, spokenAssumptionIds } from "./gate-message.js"
@@ -548,7 +548,19 @@ export const settleFromChat = (
     const labelOf = (part: string): string | undefined => question.options.find((o) => norm(o.label) === norm(part))?.label
     const parts = question.multiple ? item.answer.split(",").map((p) => p.trim()).filter(Boolean) : [item.answer]
     const labels = parts.map(labelOf)
-    if (labels.length === 0 || labels.some((l) => l === undefined)) continue
+    if (labels.length === 0 || labels.some((l) => l === undefined)) {
+      // P05 (E2E 17/11): câu có lựa chọn được trả lời bằng lời riêng như ô "Khác…" ("Cả ba đều đúng, đặt số luôn: …") — model
+      // chốt câu này nhưng không trùng nhãn ⇒ trước đây bị bỏ, sổ quyết định không ghi và AI hỏi lại đúng câu đó. Chỉ khi đây là
+      // câu DUY NHẤT đang chờ (còn câu khác thì chữ tự do có thể là câu trả lời của câu kia — giữ luật khớp nhãn): chốt bằng
+      // trích đoạn nguyên văn của tin, model diễn lại thì bằng cả tin.
+      if (asked.length !== 1 || !isSubstantiveAnswer(message)) continue
+      const custom = verifiedExcerpt(item.answer, message) ?? message.trim()
+      if (!custom || openTexts.some((t) => sameText(t, custom))) continue
+      out.push({ question_id: ids[index], answer: custom })
+      openTexts.push(custom)
+      done.add(index)
+      continue
+    }
     const clean = (labels as string[]).map(stripRecommended)
     // Câu có lựa chọn chốt kèm đoạn tài liệu tra được ⇒ giữ nguồn (lựa chọn không phải trích đoạn nên chỉ kiểm mã đoạn)
     out.push({ question_id: ids[index], answer: question.multiple ? clean : clean[0], ...(docParas.length ? { source_paras: docParas } : {}) })
@@ -649,7 +661,9 @@ export const settleRepeatedAnswer = (
   stillOpen: readonly string[] = []
 ): AnswerInput[] => {
   if (settled.length > 0 || !isSubstantiveAnswer(message)) return settled
-  const open = asked.flatMap((q, i) => (q.options.length === 0 ? [i] : []))
+  // P05: câu có lựa chọn là câu DUY NHẤT đang chờ cũng vào luật này — user trả lời bằng lời riêng hai lần (không nhắc nhãn
+  // nào) thì lần sau chốt bằng nguyên văn, không hỏi lại lần ba
+  const open = asked.length === 1 ? [0] : asked.flatMap((q, i) => (q.options.length === 0 ? [i] : []))
   if (open.length !== 1 || (asked[open[0]].replied ?? 0) < 1) return settled
   const topic = asked[open[0]].topic_key
   if (topic !== undefined && stillOpen.includes(topic)) return settled
@@ -943,6 +957,16 @@ export const FUNCTION_BATCH_SIZE = 6
 
 /** Step S-5.2 / S-5.4 viết chi tiết từng function ⇒ chia lô; S-5.1/S-5.3/S-5.5 thì không. */
 const BATCHED_TEMPLATES: ReadonlySet<string> = new Set(["S-5.2", "S-5.4"])
+/**
+ * FLF-433 (FLF-413 #7): step cố định đọc MỌI function rồi sinh một dòng cho từng luồng bất thường — S-7.3 Thông báo ứng dụng.
+ * ~30 function nhiều luồng bất thường (kèm bản dịch) vượt trần đầu ra cả 3 lượt, kể cả khi lượt thử lại gấp đôi trần ⇒ chia lô
+ * theo function như vòng S-5. Lô sau đọc lại `messages` mới nhất để dùng lại mã đã có, không sinh trùng.
+ */
+const FIXED_BATCHED_TEMPLATES: ReadonlySet<string> = new Set(["S-7.3"])
+/** Cỡ lô của step cố định chia lô: mỗi function vài dòng ngắn nên lô lớn hơn vòng S-5. */
+export const FIXED_FUNCTION_BATCH_SIZE = 10
+/** Step cố định chia lô theo function: lô sau phải đọc lại projection (dữ liệu lô trước vừa ghi). */
+export const isFixedBatchedStep = (stepId: string): boolean => FIXED_BATCHED_TEMPLATES.has(getStep(stepId).template_id)
 
 const isLoopBookkeeping = (stepId: string): boolean => LOOP_BOOKKEEPING_TEMPLATES.has(getStep(stepId).template_id)
 
@@ -995,8 +1019,9 @@ export const isReopenableStaleStep = (spine: Spine, stepId: string, changes: Par
 
 /** Màn `pending` đầu tiên của hàng đợi; hết ⇒ null (runner chuyển sang vòng `@nonscreen`). */
 export const nextPendingScreen = (spine: Spine): string | null => {
-  const byId = new Map(spine.screens.map((s) => [s.id, s]))
-  return spine.progress.screen_queue.find((id) => byId.get(id)?.detail_status === "pending") ?? null
+  // P06: màn trong hàng đợi, lấy theo số màn (cùng thứ tự với `loopKeys` / thanh tiến độ), không theo thứ tự model ghi
+  const queued = new Set(spine.progress.screen_queue)
+  return screenLoopOrder(spine.screens).find((s) => queued.has(s.id) && s.detail_status === "pending")?.id ?? null
 }
 
 /** Function thuộc vòng hiện tại: theo màn, hoặc `screen_id === null` với vòng `@nonscreen`. */
@@ -1012,12 +1037,14 @@ const functionsOfLoop = (spine: Spine, loop: string): string[] =>
  */
 export const functionBatches = (spine: Spine, stepId: string): string[][] => {
   const step = getStep(stepId)
-  if (!BATCHED_TEMPLATES.has(step.template_id) || step.loop === null) return [[]]
-  const ids = functionsOfLoop(spine, step.loop)
-  if (ids.length <= FUNCTION_BATCH_SIZE) return [[]]
+  const fixed = FIXED_BATCHED_TEMPLATES.has(step.template_id)
+  if (!fixed && (!BATCHED_TEMPLATES.has(step.template_id) || step.loop === null)) return [[]]
+  const ids = fixed ? [...spine.functions].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map((f) => f.id) : functionsOfLoop(spine, step.loop as string)
+  const size = fixed ? FIXED_FUNCTION_BATCH_SIZE : FUNCTION_BATCH_SIZE
+  if (ids.length <= size) return [[]]
 
   const batches: string[][] = []
-  for (let i = 0; i < ids.length; i += FUNCTION_BATCH_SIZE) batches.push(ids.slice(i, i + FUNCTION_BATCH_SIZE))
+  for (let i = 0; i < ids.length; i += size) batches.push(ids.slice(i, i + size))
   return batches
 }
 
@@ -1195,7 +1222,16 @@ export interface RenderReviewOptions {
    * lỗi của step vô can.
    */
   rerenderStale?: boolean
+  /**
+   * FLF-431 (luồng C #11): vẽ lại các hình đang `render_error` (vẽ hỏng lúc server vẽ sơ đồ tắt). Chỉ bật ở S-9.1 — lượt
+   * quét đầu của Kiểm & chốt — để cờ đỏ `render_error` của lỗi môi trường đã qua không chặn ký mà người dùng phải tự đi tìm
+   * nút vẽ lại. Vẽ vẫn hỏng thì cờ ở lại như cũ (lỗi thật lộ ra).
+   */
+  retryRenderErrors?: boolean
 }
+
+/** FLF-431: trần số hình đang lỗi vẽ lại ở S-9.1 (mỗi hình một lượt vẽ, không gọi model trừ bố cục màn). */
+export const MAX_ERROR_RERENDER = 30
 
 export interface RenderReviewResult {
   spineVersion: number
@@ -1246,6 +1282,24 @@ export const runRenderReviewPhase = async (
         render_status: diagram?.render_status ?? "error",
         ...(diagram?.error ? { error: DIAGRAM_RENDER_ERROR_MESSAGE } : {})
       })
+    }
+  }
+
+  // FLF-431 (luồng C #11): hình đang `render_error` (vẽ hỏng lúc server vẽ tắt) ⇒ thử vẽ lại một lượt ở S-9.1
+  if (options.retryRenderErrors) {
+    const { spine: current } = await refresh(projectId)
+    const errored: RenderTarget[] = []
+    for (const diagram of current.diagrams.filter((d) => d.render_status === "error")) {
+      const target = targetOfDiagram(diagram)
+      if (!errored.some((t) => t.kind === target.kind && (t.owner_id ?? "") === (target.owner_id ?? ""))) errored.push(target)
+    }
+    if (errored.length > 0) {
+      const result = await renderDiagrams(projectId, errored.slice(0, MAX_ERROR_RERENDER), { by: userId, step_id: stepId, deps: layoutRenderDeps(deps.renderDeps) })
+      spineVersion = result.spine_version
+      for (const id of result.rendered) {
+        const diagram = result.diagrams.find((d) => d.id === id)
+        emit({ type: "render", step_id: stepId, diagram_id: id, render_status: diagram?.render_status ?? "error", ...(diagram?.error ? { error: DIAGRAM_RENDER_ERROR_MESSAGE } : {}) })
+      }
     }
   }
 
@@ -1970,8 +2024,10 @@ export const runStep = async (
         // Mở lại bước đã chốt kèm lời nhắn = sửa đúng chỗ được nhắn (như "Tôi muốn sửa" ở cổng). Gọi `draft` thì skill
         // dựng lại từ đầu: S-4.1 mở lại để gắn use case thêm lại feature/màn đã có ⇒ trùng mã cả 3 lượt, NEEDS_USER_INPUT.
         const revise = reopenedAccepted && userMessage !== undefined
+        // FLF-433: S-7.3 lô sau đọc lại projection — `messages` lô trước vừa ghi, để dùng lại mã thay vì sinh trùng
+        const baseCtx = index > 0 && isFixedBatchedStep(stepId) ? await buildStepContext(projectId, stepId, { sessionId }) : ctx
         const draftPhase = await tracker.beat("draft", () =>
-          runDraftPhase(projectId, stepId, batchContext(ctx, batch), spine, userId, revise ? "revision" : "draft", emit, d, {
+          runDraftPhase(projectId, stepId, batchContext(baseCtx, batch), spine, userId, revise ? "revision" : "draft", emit, d, {
             answers: answersText,
             userDecided,
             replyLanguage,
@@ -1991,7 +2047,8 @@ export const runStep = async (
       runRenderReviewPhase(projectId, stepId, stepDef.renders, parseStepId(stepId).loop, userId, emit, d, {
         flagsBefore,
         knownAssumptionIds,
-        rerenderStale: stepSummary.length > 0
+        rerenderStale: stepSummary.length > 0,
+        retryRenderErrors: stepId === "S-9.1"
       })
     )
     spineVersion = review.spineVersion

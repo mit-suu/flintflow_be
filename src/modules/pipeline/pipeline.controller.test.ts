@@ -330,7 +330,8 @@ describe("GET /projects/:projectId/steps", () => {
     expect(outcome.error).toBeUndefined()
     // `current_step` là step TỚI LƯỢT (cùng luật với GET /progress), không phải con trỏ trong Spine:
     // spine rỗng ⇒ bước đầu quy trình.
-    expect(outcome.body).toMatchObject({ data: { current_phase: null, current_step: "B-0.1" } })
+    // FLF-432: `current_phase` cũng theo step tới lượt (con trỏ lưu trong Spine chỉ ghi lúc step bắt đầu)
+    expect(outcome.body).toMatchObject({ data: { current_phase: "B-0", current_step: "B-0.1" } })
   })
 })
 

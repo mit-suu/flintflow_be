@@ -4443,6 +4443,8 @@
     {
       "id": "MSG01",
       "code": "E-AUTH-001",
+      "type": "error",
+      "context": "When the sign-in details do not match an account",
       "text": "Invalid email or password.",
       "function_ids": [
         "FN001"
@@ -4451,6 +4453,8 @@
     {
       "id": "MSG02",
       "code": "E-AUTH-002",
+      "type": "error",
+      "context": "When a visitor registers with an email that already has an account",
       "text": "This email address is already registered.",
       "function_ids": [
         "FN006"

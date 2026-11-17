@@ -46,3 +46,19 @@ describe("projectPreviewTables (FLF-379 - xem trước mẫu cố định đúng
     expect(projectPreviewTables(refs, blocks, headingMap, [])).toBe(refs)
   })
 })
+
+describe("projectPreviewTables - bảng Messages của mẫu (P07)", () => {
+  it("cột Message Type / Context chưa gán field lúc import ⇒ nhận theo tên cột, có dữ liệu loại / ngữ cảnh", () => {
+    const blocks: SourceBlock[] = [
+      { block_id: "H", kind: "heading" },
+      { block_id: "T", kind: "table", rows: [["#", "Message Code", "Message Type", "Context", "Content"]] }
+    ]
+    // Bản ghi import trước P07: hai cột này không có field_path
+    const tableMap = map("T", ["#", "Message Code", "Message Type", "Context", "Content"], [null, "messages[].code", null, null, "messages[].text"])
+    tableMap[0] = { ...tableMap[0], role: "row_no" } as TableMapEntry
+    const input = doc([section("fixed:5.3", 2, ["Code", "Type", "Context", "Text", "Functions"], [["AUTH-001", "Error", "When the OTP does not match", "The code is incorrect.", "Log In"]])])
+    const out = projectPreviewTables(input, blocks, [{ block_id: "H", section_id: "fixed:5.3" }], tableMap)
+    expect(headers(out)).toEqual(["#", "Message Code", "Message Type", "Context", "Content"])
+    expect(rows(out)).toEqual([["1", "AUTH-001", "Error", "When the OTP does not match", "The code is incorrect."]])
+  })
+})

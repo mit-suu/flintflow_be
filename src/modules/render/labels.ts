@@ -110,6 +110,8 @@ export const VI_FPT_LABELS: Readonly<Record<string, string>> = {
   Actor: "Tác nhân",
   "#": "STT",
   "N/A": "Không có",
+  // P07: cột ngữ cảnh của bảng 5.3
+  Context: "Ngữ cảnh",
   // Khung §3.x.y mẫu FPT
   "Function trigger": "Kích hoạt chức năng",
   "Function description": "Mô tả chức năng",

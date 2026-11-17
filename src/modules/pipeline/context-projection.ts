@@ -17,7 +17,7 @@
 
 import type { Addendum, Assumption, Spine } from "../spine/spine.types.js"
 import * as repository from "../spine/spine.repository.js"
-import { isBriefPhase } from "../spine/brief-core.js"
+import { briefCoreEntries, isBriefPhase } from "../spine/brief-core.js"
 import { isTemplateFrame } from "../spine/template-frames.js"
 import { listSections, sectionsOfPath, stepsOf } from "../spine/section-registry.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -181,8 +181,23 @@ const addendumFor = (spine: Spine, stepId: string): Addendum[] => {
   // Brief và S-1 đọc toàn bộ addendum (Phases §6.1 "Input từ Brief")
   if (phase.startsWith("B-") || phase === "S-1") return spine.addendum
   const sections = new Set(sectionsFedBy(spine, stepId))
-  return spine.addendum.filter((a) => sections.has(a.target_section))
+  const fed = spine.addendum.filter((a) => sections.has(a.target_section))
+  // P05 (BarberGo #3, #11): S-3 / S-4 dựng use case, màn, chức năng — phải thấy ý tưởng gốc bằng chính lời user (tầm nhìn + mục tiêu
+  // lõi), nơi user nêu quy mô ("bản đầu gọn, khoảng 5–8 use case"). Trước đây chỉ thấy addendum của section bước nuôi ⇒ sinh 16 use case.
+  if (phase !== "S-3" && phase !== "S-4") return fed
+  const core = briefCoreEntries(spine)
+  // E2E P05 17/11: ghi chú quy mô ("Bản đầu gọn, khoảng 5-8 use case") bị B-2 "Sắp xếp ghi chú" gán sang 3.1.2 và S-2 bỏ con số
+  // khỏi release_scope ⇒ S-3.2 không thấy trần, sinh 16 use case. Ghi chú nêu quy mô bằng số luôn đi kèm, gán mục nào cũng vậy.
+  const scale = spine.addendum.filter(isScaleNote)
+  const extra = [core.vision, ...core.goals, ...scale].filter(
+    (a, i, all): a is Addendum => a !== null && !fed.some((f) => f.id === a.id) && all.findIndex((b) => b?.id === a.id) === i
+  )
+  return [...extra, ...fed]
 }
+
+/** Ghi chú Brief nêu quy mô bằng con số: "khoảng 5-8 use case", "tối đa 10 màn hình", "~20 chức năng", "8 screens". */
+const SCALE_NOTE = /\d+\s*(?:(?:-|–|~|đến|tới|to)\s*\d+\s*)?(?:use[\s-]?cases?\b|uc\b|màn(?:\s*hình)?\b|screens?\b|chức\s*năng\b|functions?\b)/iu
+export const isScaleNote = (a: Pick<Addendum, "content" | "content_en">): boolean => SCALE_NOTE.test(a.content) || SCALE_NOTE.test(a.content_en ?? "")
 
 /**
  * Addendum cho lượt hỏi không có `StepContext` (phỏng vấn đầu giai đoạn, chat tự do) — `unit` là step (`B-1.3`) hoặc
@@ -283,6 +298,15 @@ const withoutRetiredFields = (selector: Selector, value: unknown): unknown => {
 /** Pha Brief không còn sở hữu `project.vision/goals` (nằm ở addendum lõi, S-1.1 dựng): không bao giờ là field "thiếu" của step B-*. */
 const BRIEF_UNOWNED_FIELDS: ReadonlySet<string> = new Set(["project.vision", "project.goals"])
 
+/**
+ * P07: gốc đọc thêm theo step mà không đổi `reads` của registry (hợp đồng đóng băng), không tính vào `emptyFields`.
+ * S-7.3 cần phạm vi bản phát hành để câu thông báo không nhắc kênh / tính năng chưa có ở bản 1.0 (e2e flf-413 #12:
+ * "đã gửi qua email và Zalo OA" khi Zalo nằm ngoài phạm vi).
+ */
+export const STEP_EXTRA_READS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  "S-7.3": ["project.release_scope"]
+})
+
 /** Phần thuần của `buildStepContext` — không DB. */
 export const projectStep = (spine: Spine, stepId: string): StepProjection => {
   const stepSpec = getStepSpec(stepId)
@@ -295,6 +319,10 @@ export const projectStep = (spine: Spine, stepId: string): StepProjection => {
     const value = withoutRetiredFields(selector, selectValue(spine, selector, loop))
     projection[raw] = value
     emptyFields.push(...emptyPaths(selector, value))
+  }
+  for (const raw of STEP_EXTRA_READS[getStep(stepId).template_id] ?? []) {
+    if (raw in projection) continue
+    projection[raw] = selectValue(spine, parseSelector(raw), loop)
   }
   if (isBriefPhase(stepId)) {
     const kept = emptyFields.filter((field) => !BRIEF_UNOWNED_FIELDS.has(field))

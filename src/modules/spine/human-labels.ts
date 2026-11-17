@@ -98,7 +98,12 @@ export const FIELD_LABELS: Readonly<Record<string, string>> = {
   vision: "Tầm nhìn",
   goals: "Mục tiêu",
   domain: "Lĩnh vực",
-  release_scope: "Phạm vi phát hành"
+  release_scope: "Phạm vi phát hành",
+  // Ghi chú Brief (P06: chat từng in "Cập nhật ghi chú: … · target_section")
+  target_section: "Mục trong tài liệu",
+  content_en: "Nội dung tiếng Anh",
+  statement_vi: "Nội dung tiếng Việt",
+  captured_at: "Thời điểm ghi"
 }
 
 export const fieldLabel = (field: string): string => FIELD_LABELS[field] ?? field
@@ -260,8 +265,9 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   section_stale_at_baseline: "Mục cần xem lại",
   section_awaiting_reaccept: "Mục chờ chấp nhận lại",
   screen_pending_at_baseline: "Màn hình chưa mô tả xong",
-  orphan_screen_at_baseline: "Màn hình không nằm trong luồng nào",
+  orphan_screen_at_baseline: "Màn hình mồ côi (không ai dùng hoặc không nằm trong luồng)",
   orphan_screen: "Màn hình không nằm trong luồng nào",
+  screen_no_actor: "Màn hình chưa có tác nhân nào dùng",
   orphan_actor: "Tác nhân chưa gắn use case",
   usecase_no_function: "Use case chưa gắn chức năng",
   screen_no_function: "Màn hình chưa có chức năng",
