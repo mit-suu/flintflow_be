@@ -26,7 +26,46 @@ beforeEach(() => {
 const REPORT3_TEMPLATE = new URL("../../../fixtures/fpt-report3-blank-template.docx", import.meta.url)
 const H = (s: SeededFixture) => ({ Authorization: `Bearer ${s.token}` })
 
+const importReport3 = async (s: SeededFixture, name: string): Promise<string> => {
+  const created = await request(app).post("/api/v1/projects").set(H(s)).send({ name, has_srs_file: true, complete_to_standard: false })
+  expect(created.status, JSON.stringify(created.body.error)).toBe(201)
+  const projectId = String(created.body.data._id)
+  const uploaded = await request(app).post(`/api/v1/projects/${projectId}/import`).set(H(s)).attach("file", await readFile(REPORT3_TEMPLATE), "SRS.docx")
+  expect(uploaded.status, JSON.stringify(uploaded.body.error)).toBe(201)
+  const importId = String(uploaded.body.data.import.id)
+  await acceptLatest((await ImportedDocument.findById(importId))!, true)
+  await runExtraction(projectId, s.userId, importId)
+  await startFinalize(projectId, s.userId, { import_id: importId, base_version: (await spineRepository.get(projectId))!.spine_version })
+  await waitForFinalize(importId)
+  return projectId
+}
+
+const exportDraftXml = async (s: SeededFixture, projectId: string): Promise<string> => {
+  const res = await request(app)
+    .get(`/api/v1/projects/${projectId}/export/word?source=draft`)
+    .set(H(s))
+    .buffer(true)
+    .parse((r, callback) => {
+      const chunks: Buffer[] = []
+      r.on("data", (chunk: Buffer) => chunks.push(chunk))
+      r.on("end", () => callback(null, Buffer.concat(chunks)))
+    })
+  expect(res.status, String(res.body)).toBe(200)
+  return readZipText(res.body as Buffer, "word/document.xml")
+}
+
 describe("FLF-419 - hình mẫu OLE của khung mẫu", () => {
+  it("P09 (#25): Report3 chưa soạn gì (bảng thực thể rỗng) ⇒ bản nháp không in hình mẫu nào (ngữ cảnh, UC, luồng màn, ERD, mockup)", async () => {
+    const seeded = await seedFixture("minimal", { balance: 5000 })
+    const projectId = await importReport3(seeded, "Report3 trống")
+    const xml = await exportDraftXml(seeded, projectId)
+    // Thân tài liệu từ "Product Overview" (bỏ bìa / mục lục): mẫu có 5 hình ví dụ, Spine chưa có sơ đồ nào ⇒ không còn hình
+    const body = xml.slice(xml.lastIndexOf("Product Overview"))
+    expect(body).toContain("Entity Relationship Diagram")
+    expect(body).not.toContain("<w:object")
+    expect(body).not.toContain("<w:drawing")
+  }, 180000)
+
   it("Report3 có thực thể ở 3.1.5 ⇒ xuất Word được, hình ERD mẫu (OLE) bị bỏ, bảng thực thể in", async () => {
     const seeded = await seedFixture("minimal", { balance: 5000 })
     const created = await request(app).post("/api/v1/projects").set(H(seeded)).send({ name: "Report3 OLE", has_srs_file: true, complete_to_standard: false })
