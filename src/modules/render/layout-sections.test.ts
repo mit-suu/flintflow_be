@@ -567,7 +567,11 @@ describe("phần nhỏ slot:* của mẫu khách (FLF-278 trên FLF-335/336)", (
       { id: "BR-H", tier: "high", statement: "Only enrolled students may join", source_validation_ids: [] },
       { id: "BR-D", tier: "detail", statement: "An application needs approval", source_validation_ids: [] }
     ]
-    s.messages = [{ id: "M1", code: "APPROVED", text: "Your application was approved", function_ids: [] }]
+    s.messages = [
+      { id: "M1", code: "APPROVED", text: "Your application was approved", function_ids: [], type: "success", context: "After a club approves the application" },
+      // Spine cũ không có loại / ngữ cảnh ⇒ ô trống
+      { id: "M2", code: "PENDING", text: "Your application is waiting for review", function_ids: [] }
+    ]
     const layout = [entry(0, "1 Introduction", 1, "fixed:1"), entry(1, "1.2 Scope", 2, "custom:OLD-SCOPE"),
       entry(2, "5.1 Business Rules", 2, "custom:OLD-RULES"), entry(3, "5.2 Messages", 2, "fixed:5.2")]
     const { sections } = buildLayoutSections(s, { language: "en", fixedTemplate: true, layout }, [], { diagramPng: () => undefined })
@@ -578,8 +582,10 @@ describe("phần nhỏ slot:* của mẫu khách (FLF-278 trên FLF-335/336)", (
       [[{ text: "BR-H" }], [{ text: "Only enrolled students may join" }]],
       [[{ text: "BR-D" }], [{ text: "An application needs approval" }]]
     ] }])
-    expect(sections[3].blocks).toEqual([{ type: "table", header: [[{ text: "Code" }], [{ text: "Type" }], [{ text: "Content" }]], rows: [
-      [[{ text: "APPROVED" }], [{ text: "" }], [{ text: "Your application was approved" }]]
+    // P07: cột Type / Context lấy từ Spine
+    expect(sections[3].blocks).toEqual([{ type: "table", header: [[{ text: "Code" }], [{ text: "Type" }], [{ text: "Context" }], [{ text: "Content" }]], rows: [
+      [[{ text: "APPROVED" }], [{ text: "Success" }], [{ text: "After a club approves the application" }], [{ text: "Your application was approved" }]],
+      [[{ text: "PENDING" }], [{ text: "" }], [{ text: "" }], [{ text: "Your application is waiting for review" }]]
     ] }])
     const withSeparateGoals = buildLayoutSections(s, { language: "en", fixedTemplate: true, layout: [...layout, entry(4, "Goals", 2, "slot:goals")] }, [], { diagramPng: () => undefined })
     expect(JSON.stringify(withSeparateGoals.sections.find((x) => x.id === "slot:scope")!.blocks)).not.toContain("Increase club participation")
