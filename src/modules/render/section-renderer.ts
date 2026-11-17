@@ -43,7 +43,8 @@ import {
   sentencesFor,
   slotTextFor
 } from "./labels.js"
-import type { Change, DiagramKind, Nfr, NfrCategory, OriginalDiagramKind, Spine } from "../spine/spine.types.js"
+import type { Change, DiagramKind, Message, Nfr, NfrCategory, OriginalDiagramKind, Spine } from "../spine/spine.types.js"
+import { messageTypeLabel } from "../spine/message-type.js"
 import { screenSpecOf } from "../diagram/renderers/screen-mockup.js"
 import { isPlaceholderText } from "../import/template-markers.js"
 
@@ -848,10 +849,20 @@ const commonRequirements = (spine: Spine, ctx: SectionRenderContext): Block[] =>
     ? []
     : [tableBlock(["Category", "Statement"], spine.common_requirements.map((c) => [enumLabel(fptLanguage(ctx), "common_category", c.category), c.statement]))]
 
-const messagesList = (spine: Spine): Block[] => {
+/** P07: nhãn cột "Type" theo ngôn ngữ tài liệu; Spine cũ không có loại ⇒ ô trống. */
+const messageTypeCell = (type: Message["type"], ctx?: SectionRenderContext): string =>
+  messageTypeLabel(type, isVietnamese(ctx?.language) ? "vi" : "en")
+
+const messagesList = (spine: Spine, ctx?: SectionRenderContext): Block[] => {
   if (spine.messages.length === 0) return []
   const fnName = (id: string) => spine.functions.find((f) => f.id === id)?.name ?? id
-  return [tableBlock(["Code", "Text", "Functions"], spine.messages.map((m) => [m.code, m.text, m.function_ids.map(fnName).join(", ")]))]
+  // P07: bảng 5.3 đủ cột mã · loại · ngữ cảnh · nội dung (spec S-7.3)
+  return [
+    tableBlock(
+      ["Code", "Type", "Context", "Text", "Functions"],
+      spine.messages.map((m) => [m.code, messageTypeCell(m.type, ctx), m.context ?? "", m.text, m.function_ids.map(fnName).join(", ")])
+    )
+  ]
 }
 
 const otherRequirements = (spine: Spine, ctx: SectionRenderContext): Block[] =>
@@ -901,7 +912,7 @@ const blocksFor = (spine: Spine, sectionId: string, ctx: SectionRenderContext): 
         !(ctx.representedSlots?.has("slot:security") && ["security", "session", "audit"].includes(c.category)) &&
         !(ctx.representedSlots?.has("slot:localization") && ["localization", "date_format"].includes(c.category))) } : spine, ctx)
     case "fixed:5.3":
-      return ctx.fixedTemplate && ctx.representedSlots?.has("slot:messages") ? [] : messagesList(spine)
+      return ctx.fixedTemplate && ctx.representedSlots?.has("slot:messages") ? [] : messagesList(spine, ctx)
     case "fixed:5.4":
       return otherRequirements(ctx.fixedTemplate ? { ...spine, other_requirements: spine.other_requirements.filter((o) =>
         !(ctx.representedSlots?.has("slot:assumptions") && o.kind === "assumption") &&
@@ -1173,8 +1184,10 @@ const slotBlocks = (spine: Spine, slotId: string, ctx: SectionRenderContext): Bl
     case "slot:business_rules":
       return spine.business_rules.length ? [tableBlock(["ID", "Rule"], spine.business_rules.map((r) => [r.id, r.statement]))] : []
     case "slot:messages":
-      // Spine has no message type field; keep that source column blank rather than infer a type.
-      return spine.messages.length ? [tableBlock(["Code", "Type", "Content"], spine.messages.map((m) => [m.code, "", m.text]))] : []
+      // P07: loại / ngữ cảnh lấy từ Spine; Spine cũ không có ⇒ ô trống (không đoán loại)
+      return spine.messages.length
+        ? [tableBlock(["Code", "Type", "Context", "Content"], spine.messages.map((m) => [m.code, messageTypeCell(m.type, ctx), m.context ?? "", m.text]))]
+        : []
     case "slot:high_rules": {
       const rules = spine.business_rules.filter((r) => r.tier === "high")
       return rules.length ? [bulletList(rules.map((r) => r.statement))] : []
