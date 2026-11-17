@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express"
 import { ApiError } from "../utils/api-error.js"
 import { User } from "../../modules/user/user.model.js"
+import { assertActiveSession } from "./session.service.js"
 
 /**
  * Quyền admin đọc từ DB mỗi request, không tin `role` trong JWT: admin bị hạ quyền
@@ -12,7 +13,7 @@ export const adminMiddleware = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const userPayload = req.user as { id?: string; userId?: string } | undefined
+    const userPayload = req.user as { id?: string; userId?: string; sid?: string } | undefined
 
     if (!userPayload) {
       throw new ApiError(401, "Chưa xác thực người dùng", "UNAUTHORIZED")
@@ -28,6 +29,8 @@ export const adminMiddleware = async (
     if (userDoc.role !== "admin") {
       throw new ApiError(403, "Chỉ Admin mới có quyền thực hiện thao tác này", "FORBIDDEN")
     }
+
+    await assertActiveSession(userPayload.sid, String(userDoc._id))
 
     next()
   } catch (error) {

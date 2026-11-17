@@ -305,7 +305,7 @@ export const submitCr = async (cr: IChangeRequest, userId: string): Promise<void
     type: "change_request_written",
     title: `${cr.cr_id} đã ghi vào bản nháp`,
     body: `Thay đổi "${cr.title}" đã ghi vào bản nháp chung (bản ${written}). Gửi Lead duyệt cả gói khi muốn phát hành.`,
-    meta: { cr_id: cr.cr_id, result_doc_version: written }
+    meta: { cr_id: cr.cr_id, cr_title: cr.title, result_doc_version: written }
   })
 }
 

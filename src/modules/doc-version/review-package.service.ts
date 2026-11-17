@@ -107,7 +107,7 @@ const notifyLeads = async (actor: PackageActor, crIds: string[], submission: Bas
         body: `Gói ${crIds.join(", ")} đã qua kiểm tra, không còn cờ đỏ. Duyệt cả gói để phát hành bản mới, hoặc yêu cầu sửa.`,
         link: `/projects/${actor.projectId}`,
         organizationId: actor.orgId,
-        meta: { projectId: actor.projectId, cr_ids: crIds, spine_version: submission.spine_version }
+        meta: { projectId: actor.projectId, projectName: actor.projectName, cr_ids: crIds, spine_version: submission.spine_version }
       })
     )
   )
@@ -189,7 +189,7 @@ export const requestChanges = async (actor: PackageActor, input: { base_version:
       body: input.reason.slice(0, 300),
       link: `/projects/${actor.projectId}`,
       organizationId: actor.orgId,
-      meta: { projectId: actor.projectId }
+      meta: { projectId: actor.projectId, projectName: actor.projectName, reason: input.reason.slice(0, 300) }
     })
   }
   return getPackage(actor.projectId)
@@ -215,7 +215,7 @@ export const settleAfterRelease = async (actor: PackageActor, released: { versio
       body: `Gói ${released.cr_ids.join(", ")} đã vào bản ${released.version}. Tải bản sạch và bản có đánh dấu ở mục Version.`,
       link: `/projects/${actor.projectId}`,
       organizationId: actor.orgId,
-      meta: { projectId: actor.projectId, version: released.version, cr_ids: released.cr_ids }
+      meta: { projectId: actor.projectId, projectName: actor.projectName, version: released.version, cr_ids: released.cr_ids }
     })
   }
   return applied.spine_version

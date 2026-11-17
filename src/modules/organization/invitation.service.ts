@@ -241,7 +241,8 @@ export const acceptInvitation = async (
   userId: string,
   email: string,
   platformRole?: string,
-  refreshToken?: string
+  refreshToken?: string,
+  currentSessionId?: string
 ): Promise<AcceptResult> => {
   const codeHash = hashCode(code)
   const invitation = await Invitation.findOne({ codeHash }).lean()
@@ -273,7 +274,9 @@ export const acceptInvitation = async (
   const result = await runInTransaction(join)
   if (result === TRANSACTION_UNAVAILABLE) await join()
   await markOnboarded(userId)
-  if (refreshToken) await sessionService.setActiveOrg(refreshToken, orgId)
+  // Ghi org đang mở vào phiên (FLF-422) và lấy `sid` của phiên đó để ký access token (FLF-427)
+  const sessionSid = refreshToken ? await sessionService.setActiveOrg(refreshToken, orgId) : null
+  const resolvedSid = sessionSid ?? currentSessionId
 
   // Flow SD-3.3-5: Lead cần biết có người mới vào.
   const [leads, joiner] = await Promise.all([
@@ -287,7 +290,7 @@ export const acceptInvitation = async (
       title: "Thành viên mới tham gia tổ chức",
       body: `${who} đã tham gia ${org.name} với vai trò ${ROLE_LABELS[invitation.role]}.`,
       organizationId: orgId,
-      meta: { organizationId: orgId, userId, role: invitation.role }
+      meta: { organizationId: orgId, organizationName: org.name, userId, memberName: who, role: invitation.role }
     })
   }
 
@@ -297,7 +300,8 @@ export const acceptInvitation = async (
       userId,
       email,
       ...(platformRole ? { role: platformRole } : {}),
-      orgId
+      orgId,
+      ...(resolvedSid ? { sid: resolvedSid } : {})
     })
   }
 }
