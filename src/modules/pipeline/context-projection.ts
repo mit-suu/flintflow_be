@@ -17,7 +17,7 @@
 
 import type { Addendum, Assumption, Spine } from "../spine/spine.types.js"
 import * as repository from "../spine/spine.repository.js"
-import { isBriefPhase } from "../spine/brief-core.js"
+import { briefCoreEntries, isBriefPhase } from "../spine/brief-core.js"
 import { isTemplateFrame } from "../spine/template-frames.js"
 import { listSections, sectionsOfPath, stepsOf } from "../spine/section-registry.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -181,7 +181,13 @@ const addendumFor = (spine: Spine, stepId: string): Addendum[] => {
   // Brief và S-1 đọc toàn bộ addendum (Phases §6.1 "Input từ Brief")
   if (phase.startsWith("B-") || phase === "S-1") return spine.addendum
   const sections = new Set(sectionsFedBy(spine, stepId))
-  return spine.addendum.filter((a) => sections.has(a.target_section))
+  const fed = spine.addendum.filter((a) => sections.has(a.target_section))
+  // P05 (BarberGo #3, #11): S-3 / S-4 dựng use case, màn, chức năng — phải thấy ý tưởng gốc bằng chính lời user (tầm nhìn + mục tiêu
+  // lõi), nơi user nêu quy mô ("bản đầu gọn, khoảng 5–8 use case"). Trước đây chỉ thấy addendum của section bước nuôi ⇒ sinh 16 use case.
+  if (phase !== "S-3" && phase !== "S-4") return fed
+  const core = briefCoreEntries(spine)
+  const extra = [core.vision, ...core.goals].filter((a): a is Addendum => a !== null && !fed.some((f) => f.id === a.id))
+  return [...extra, ...fed]
 }
 
 /**
