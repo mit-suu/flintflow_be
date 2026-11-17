@@ -176,3 +176,15 @@ describe("S-1.1 luôn dừng để user soát bản tiếng Anh của tầm nhì
     expect(isQuietStep(input({ templateId: "S-1.2", reviewMode: "fast" })).quiet).toBe(true)
   })
 })
+
+describe("FLF-432 (FLF-413 #8): bước soạn mà mục của nó còn trống không tự qua", () => {
+  it("S-7.3 chỉ trao đổi, mục Messages trống ⇒ dừng ở cổng, kể cả mức Chỉ ở mốc chốt", () => {
+    const empty = [{ section_id: "fixed:5.3" }]
+    expect(isQuietStep(input({ templateId: "S-7.3", emptySections: empty })).quiet).toBe(false)
+    expect(isQuietStep(input({ templateId: "S-7.3", emptySections: empty, reviewMode: "milestones" })).quiet).toBe(false)
+    expect(isQuietStep(input({ templateId: "S-7.3", emptySections: empty })).reason_vi).toContain("chưa ghi được nội dung")
+  })
+  it("mục đã có nội dung ⇒ như cũ", () => {
+    expect(isQuietStep(input({ templateId: "S-7.3", emptySections: [] })).quiet).toBe(true)
+  })
+})

@@ -66,6 +66,11 @@ export interface QuietInput {
   contentRemoved?: boolean
   /** FLF-337: section bước này chạm (`summary[].section_id`) — so với `project.skip_confirm_sections`. */
   touchedSections?: readonly string[]
+  /**
+   * FLF-432 (FLF-413 #8): mục bước này nuôi mà chạy xong vẫn trống (`gate_ready.empty_sections`, cùng hàm với luật
+   * `section_empty`). Bước soạn chưa ghi được gì cho mục của nó (lượt chỉ trao đổi) thì không được tự qua sang bước sau.
+   */
+  emptySections?: readonly { section_id: string }[]
   spine: Spine
 }
 
@@ -120,6 +125,8 @@ export const isQuietStep = (input: QuietInput): QuietVerdict => {
   if (conflicting.length > 0) {
     return { quiet: false, reason_vi: `${conflicting.length} giả định trái với điều bạn đã chốt` }
   }
+  // FLF-432 (FLF-413 #8): S-7.3 chỉ trao đổi mà `messages` vẫn rỗng ⇒ dừng ở cổng, không tự nhảy sang S-7.4
+  if ((input.emptySections ?? []).length > 0) return { quiet: false, reason_vi: "Bước chưa ghi được nội dung cho mục nó phụ trách" }
   // FLF-337 "Chấp nhận, không hỏi lại phần này": bước chỉ chạm các section đã tắt hỏi ⇒ tự qua ở mọi mức (kể cả Mọi bước)
   const touched = input.touchedSections ?? []
   const skip = new Set(input.spine.project?.skip_confirm_sections ?? [])
