@@ -47,6 +47,28 @@ describe("run-state qua HTTP (BUG-05, BUG-07)", () => {
     expect(active.step_id).toBe("S-3.1")
   })
 
+  it("BF §3.2: câu hỏi đang chờ treo ở người khởi động lượt — run-state trả by/by_name; người khác /answer ⇒ 403 STEP_NOT_REQUESTER", async () => {
+    const seeded = await seedFixture("minimal")
+    const run = await acquireRun(seeded.projectId, "S-3.1", { sessionId: seeded.sessionId, by: seeded.userId })
+    await touchRun(seeded.projectId, "S-3.1", run.run_id, { status: "waiting_answer", stage: "ask", questions: [{ id: "Q1", text: "Actor chính là ai?" }], release: true })
+
+    const state = (await api(seeded).get("/steps/S-3.1/run-state")).body.data
+    expect(state).toMatchObject({ by: seeded.userId, by_name: expect.any(String) })
+
+    const { User } = await import("../../src/modules/user/user.model.js")
+    const { Membership } = await import("../../src/modules/organization/membership.model.js")
+    const { authAs } = await import("../setup.js")
+    const email = `analyst-${Date.now()}@flintflow.test`
+    const other = await User.create({ email, name: "Bình", password: "test-password-123", emailVerified: true })
+    await Membership.create({ organizationId: seeded.orgId, userId: other._id, role: "analyst" })
+    const token = await authAs({ _id: other._id, email, orgId: seeded.orgId })
+
+    const res = await api({ ...seeded, token }).post("/steps/S-3.1/answer", { session_id: seeded.sessionId, answers: [{ question_id: "Q1", answer: "Khách đặt sân" }] })
+    expect(res.status, JSON.stringify(res.body)).toBe(403)
+    expect(res.body.error.code).toBe("STEP_NOT_REQUESTER")
+    expect(res.body.error.message).toContain("treo ở")
+  })
+
   it("FLF-222: lượt chờ lưu pending_answer ở DB nhưng GET /run-state không trả field nội bộ đó", async () => {
     const seeded = await seedFixture("minimal")
     const run = await acquireRun(seeded.projectId, "S-3.1", { sessionId: seeded.sessionId, by: seeded.userId })
