@@ -17,6 +17,7 @@ export const VIEWER_READ_ALLOW: readonly RegExp[] = [
   /^\/[^/]+\/document\/image$/, // FLF-369: ảnh của tài liệu theo tham chiếu
   /^\/[^/]+\/version$/, // FLF-369: revision tài liệu để tự bám bản mới
   /^\/[^/]+\/export\/(word|pdf)$/, // FLF-316: PDF cùng luật với Word (chỉ baseline, kiểm ở controller)
+  /^\/[^/]+\/google-docs\/links$/, // Google Doc chính Viewer đã xuất (bản baseline)
   /^\/[^/]+\/diagrams(\/[^/]+)?$/,
   /^\/[^/]+\/baselines$/,
   /^\/[^/]+\/versions$/,
