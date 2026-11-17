@@ -116,3 +116,10 @@ describe("elementLabel (FLF-411 U2-5)", () => {
     expect(elementLabel("project", null)).toBe("Thông tin dự án")
   })
 })
+
+describe("P06 - nameElementIds với mã màn kiểu SCR-05 (câu hỏi C-2 của CR)", () => {
+  it("SCR-05 ⇒ tên màn; mã UC giữ nguyên", () => {
+    const spine = { screens: [{ id: "SCR-05", name: "Product Detail" }], actors: [], roles: [], features: [], functions: [{ id: "FN009", name: "Add to Cart" }], entities: [] } as unknown as Parameters<typeof nameElementIds>[1]
+    expect(nameElementIds("Màn SCR-05 có nút FN009 không? (UC-03)", spine)).toBe("Màn 'Product Detail' có nút 'Add to Cart' không? (UC-03)")
+  })
+})
