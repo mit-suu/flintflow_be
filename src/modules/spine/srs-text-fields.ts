@@ -20,7 +20,7 @@ export const SRS_TEXT_FIELDS = {
   nfrs: ["statement", "metric", "threshold"],
   business_rules: ["statement"],
   common_requirements: ["statement"],
-  messages: ["text"],
+  messages: ["text", "context"],
   other_requirements: ["statement"],
   glossary: ["term", "definition"]
 } as const
