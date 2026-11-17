@@ -29,14 +29,15 @@ const withSystemNameStep = (s: Spine, status: StepStatus): void => {
 }
 
 describe("RULES", () => {
-  it("14 luật đỏ + 28 luật vàng (FLF-418: sequence_component_missing; FLF-278: template_section_absent / _empty; FLF-365: verification_orphan; FLF-366: original_text_mentions_changed; FLF-370: actor_generalization_missing); mọi luật đỏ không waive được (FLF-329)", () => {
+  it("14 luật đỏ + 29 luật vàng (FLF-428: screen_no_actor; FLF-418: sequence_component_missing; FLF-278: template_section_absent / _empty; FLF-365: verification_orphan; FLF-366: original_text_mentions_changed; FLF-370: actor_generalization_missing); mọi luật đỏ không waive được (FLF-329)", () => {
     expect(RULES.filter((r) => r.level === "red")).toHaveLength(14)
     // FLF-177: thêm screen_placeholder (BUG-03), function_without_uc (BUG-12),
     // derived_from_changed_assumption (BUG-14); mode 1 §4.13: original_diagram_stale;
     // FLF-225: orphan_entity, unresolved_many_to_many (ERD); actor_generalization_invalid, actor_generalization_children_unlisted; screen_actor_ambiguous đã bỏ cùng làn của luồng màn;
     // FLF-370: actor_generalization_missing; FLF-365: verification_orphan; FLF-366: original_text_mentions_changed; đổi mẫu: template_section_migration_missing (đỏ) + section_reference_after_migration (vàng)
     // FLF-418: sequence_component_missing
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(28)
+    // FLF-428: screen_no_actor
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(29)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(RULES.filter((r) => r.level === "red").map((r) => r.rule_id).sort())
     expect(RULES.filter((r) => r.level === "yellow").every((r) => r.waivable)).toBe(true)
   })
@@ -225,22 +226,37 @@ describe("runDeterministicCheck", () => {
     expect(byRule(runDeterministicCheck(FIXTURE, [], { atBaseline: true }), "unresolved_many_to_many")).toEqual([])
   })
 
-  it("orphan_screen: màn không actor người nào dùng, màn đứng riêng trong luồng, popup không ai mở", () => {
-    const flags = byRule(
-      runDeterministicCheck(
+  it("orphan_screen: màn đứng riêng trong luồng, popup không ai mở; màn không actor người nào dùng ⇒ screen_no_actor (FLF-428)", () => {
+    const all = runDeterministicCheck(
         variant((s) => {
           const tpl = s.screens.find((x) => x.id === "S13")!
-          s.screens.push({ ...tpl, id: "S20", name: "No Actor", flow_to: [] })
+          s.screens.push({ ...tpl, id: "S20", name: "No Actor", flow_to: [], primary_function_id: null })
           s.permissions.push({ id: "P999", screen_id: "S21", role_id: s.roles[0].id, action: "view" })
           s.screens.push({ ...tpl, id: "S21", name: "Isolated", flow_to: [] })
           s.permissions.push({ id: "P998", screen_id: "S22", role_id: s.roles[0].id, action: "view" })
           s.screens.push({ ...tpl, id: "S22", name: "Lonely Popup", flow_to: [], is_popup: true })
         })
-      ),
-      "orphan_screen"
-    )
+      )
+    const flags = byRule(all, "orphan_screen")
     expect(flags.map((f) => f.target_id)).toEqual(["S20", "S21", "S22"])
     expect(flags.every((f) => f.level === "yellow" && f.section_id === "fixed:3.1.1" && f.remediation_step === "S-4.2")).toBe(true)
+    const noActor = byRule(all, "screen_no_actor")
+    expect(noActor).toMatchObject([{ target_id: "S20", level: "yellow", section_id: "fixed:3.1.3", remediation_step: "S-4.3" }])
+    expect(noActor[0].message).toBe('Màn hình "No Actor" chưa có tác nhân nào dùng: màn không có trong bảng phân quyền và không có chức năng nào của use case trên màn')
+  })
+
+  it("FLF-428: màn có trong luồng mà không ai dùng ⇒ chỉ screen_no_actor, câu cờ không nói 'không nằm trong luồng'", () => {
+    const s = variant((x) => {
+      x.screens.push({ ...x.screens.find((y) => y.id === "S13")!, id: "S20", name: "Home", flow_to: [{ to: "S01" }], primary_function_id: null })
+      x.screens.find((y) => y.id === "S01")!.flow_to.push({ to: "S20" })
+    })
+    const flags = runDeterministicCheck(s)
+    expect(byRule(flags, "orphan_screen").map((f) => f.target_id)).not.toContain("S20")
+    expect(byRule(flags, "screen_no_actor").map((f) => f.target_id)).toEqual(["S20"])
+    const atBaseline = byRule(runDeterministicCheck(s, [], { atBaseline: true }), "orphan_screen_at_baseline").find((f) => f.target_id === "S20")
+    expect(atBaseline).toMatchObject({ level: "red", section_id: "fixed:3.1.3", remediation_step: "S-4.3" })
+    expect(atBaseline!.message).toContain("chưa có tác nhân nào dùng")
+    expect(atBaseline!.message).not.toContain("không nằm trong luồng")
   })
 
   it("orphan_screen: màn thuộc actor qua use case (kể cả Guest) không mồ côi; chỉ role không gắn actor thì không đủ", () => {
@@ -253,7 +269,7 @@ describe("runDeterministicCheck", () => {
         s.screens.find((x) => x.id === "S01")!.flow_to.push({ to: "S20" })
         link(s)
       })
-    const flagged = (s: Spine) => byRule(runDeterministicCheck(s, [], { atBaseline: true }), "orphan_screen").map((f) => f.target_id)
+    const flagged = (s: Spine) => byRule(runDeterministicCheck(s, [], { atBaseline: true }), "screen_no_actor").map((f) => f.target_id)
 
     expect(flagged(withScreen(() => undefined))).toContain("S20")
     const linked = withScreen((s) => {
@@ -287,6 +303,31 @@ describe("runDeterministicCheck", () => {
     const flags = runDeterministicCheck(variant((s) => (s.common_requirements = [])))
     expect(byRule(flags, "array_empty")).toMatchObject([{ section_id: "fixed:5.2", target_id: "common_requirements", remediation_step: "S-7.2" }])
     expect(byRule(flags, "section_empty")).toMatchObject([{ section_id: "fixed:5.2" }])
+  })
+
+  it("FLF-428 (AC-38.8): ảnh sơ đồ gốc của khách được giữ ⇒ mục sơ đồ có dữ liệu, không section_empty", () => {
+    const originalImage = (kind: "usecase" | "screen_flow" | "erd") => ({
+      id: `CS-${kind}`,
+      heading: "",
+      level: 5,
+      blocks: [{ kind: "image" as const, text: "", rows: null, image_ref: `word/media/${kind}.png`, diagram: { kind, source_hash: "x" } }],
+      source: "import" as const
+    })
+    const noDiagrams = (s: Spine) => {
+      s.diagrams = s.diagrams.filter((d) => !["usecase", "screen_flow", "erd"].includes(d.kind))
+      s.screens.forEach((x) => Object.assign(x, { flow_to: [], is_popup: false, tabs: [] }))
+      s.entities = []
+    }
+    const without = byRule(runDeterministicCheck(variant(noDiagrams)), "section_empty").map((f) => f.section_id)
+    expect(without).toEqual(expect.arrayContaining(["fixed:2.2.1", "fixed:3.1.1", "fixed:3.1.5"]))
+    const kept = variant((s) => {
+      noDiagrams(s)
+      s.custom_sections = [originalImage("usecase"), originalImage("screen_flow"), originalImage("erd")]
+    })
+    const after = byRule(runDeterministicCheck(kept), "section_empty").map((f) => f.section_id)
+    expect(after).not.toContain("fixed:2.2.1")
+    expect(after).not.toContain("fixed:3.1.1")
+    expect(after).not.toContain("fixed:3.1.5")
   })
 
   it("NFR reliability thiếu metric ⇒ nfr_missing_number", () => {

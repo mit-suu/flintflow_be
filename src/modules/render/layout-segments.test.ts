@@ -254,3 +254,61 @@ describe("FLF-361 - bảng 3.1.4 và mục tính năng khi dựng lại từ Spi
     expect(JSON.stringify(section(render(spine, template), "feature:F-01").blocks)).not.toContain("Screens:")
   })
 })
+
+describe("FLF-428 - NFR §4.2.x viết bằng đoạn văn: dựng lại thành một bảng mỗi mục", () => {
+  const BLOCKS_422: LayoutBlock[] = [
+    h("N01", "4.2.2 Reliability", 3, "fixed:4.2.2"),
+    { block_id: "N02", kind: "list_item", level: null, text: "Availability 99.9% per month for the store front; 99.5% for staff screens", section_id: "fixed:4.2.2" },
+    { block_id: "N03", kind: "list_item", level: null, text: "No overselling: stock is reserved in the order transaction", section_id: "fixed:4.2.2" },
+    { block_id: "N04", kind: "list_item", level: null, text: "Daily backup kept 30 days, RPO 1 hour", section_id: "fixed:4.2.2" }
+  ]
+  const nfr = (id: string, statement: string, metric: string | null, threshold: string | null) =>
+    ({ id, category: "reliability", kind: metric ? "quantitative" : "descriptive", statement, metric, threshold, priority: "must" }) as Spine["nfrs"][number]
+  const setup = () => {
+    const spine: Spine = {
+      ...createEmptySpine({ name: "TechMart" }),
+      nfrs: [
+        nfr("NFR-10", "Availability 99.9% per month for the store front", "Availability (store front)", "99.9% per month"),
+        nfr("NFR-11", "Availability 99.5% per month for staff screens", "Availability (staff screens)", "99.5% per month"),
+        nfr("NFR-12", "No overselling: stock is reserved in the order transaction", null, null),
+        nfr("NFR-14", "Daily database backup kept 30 days", "Backup retention", "30 days"),
+        nfr("NFR-15", "RPO 1 hour", "RPO", "1 hour")
+      ]
+    }
+    const { layout, customSections, segments } = buildLayout(BLOCKS_422, new Map([["N01", "fixed:4.2.2"]]), new Set())
+    const entities = [
+      { entity: "nfrs", id: "NFR-10", source_block_ids: ["N02"] },
+      { entity: "nfrs", id: "NFR-11", source_block_ids: ["N02"] },
+      { entity: "nfrs", id: "NFR-12", source_block_ids: ["N03"] },
+      { entity: "nfrs", id: "NFR-14", source_block_ids: ["N04"] },
+      { entity: "nfrs", id: "NFR-15", source_block_ids: ["N04"] }
+    ]
+    const records = sectionSegments(segments, customSections, entities, spine, [])
+    const template: TemplateLayout = { layout, language: "en", sectionSegments: records }
+    return { spine: { ...spine, custom_sections: customSections }, template }
+  }
+
+  it("mọi NFR đã đổi (bổ sung metric / priority) ⇒ đúng một bảng Statement · Metric · Threshold · Priority, đủ dòng theo thứ tự file", () => {
+    const { spine, template } = setup()
+    const edited: Spine = { ...spine, nfrs: spine.nfrs.map((n) => (n.id === "NFR-12" ? { ...n, metric: "Oversold orders", threshold: "0" } : { ...n, priority: "should" as const })) }
+    const blocks = section(render(edited, template), "fixed:4.2.2").blocks
+    const tables = blocks.filter((b) => b.type === "table")
+    expect(tables).toHaveLength(1)
+    expect(textOf(tables[0]).split(" / ").map((r) => r.split(",")[0])).toEqual([
+      "Statement",
+      "Availability 99.9% per month for the store front",
+      "Availability 99.5% per month for staff screens",
+      "No overselling: stock is reserved in the order transaction",
+      "Daily database backup kept 30 days",
+      "RPO 1 hour"
+    ])
+  })
+
+  it("chỉ một đoạn đổi ⇒ đoạn còn lại in nguyên văn, bảng không nuốt chữ của file", () => {
+    const { spine, template } = setup()
+    const edited: Spine = { ...spine, nfrs: spine.nfrs.map((n) => (n.id === "NFR-12" ? { ...n, metric: "Oversold orders", threshold: "0" } : n)) }
+    const out = texts(section(render(edited, template), "fixed:4.2.2"))
+    expect(out.filter((t) => t.startsWith("Statement,"))).toHaveLength(1)
+    expect(out.join(" | ")).toContain("Availability 99.9% per month for the store front; 99.5% for staff screens")
+  })
+})
