@@ -107,12 +107,13 @@ export const changeMemberRole = async (
     if (!updated) throw notFound()
   })
 
+  const name = await orgName(orgId)
   void notify(targetUserId, {
     type: "org_role_changed",
     title: "Vai trò của bạn đã thay đổi",
-    body: `Bạn giờ là ${ORG_ROLE_LABELS[nextRole]} trong ${await orgName(orgId)}.`,
+    body: `Bạn giờ là ${ORG_ROLE_LABELS[nextRole]} trong ${name}.`,
     organizationId: orgId,
-    meta: { organizationId: orgId, role: nextRole }
+    meta: { organizationId: orgId, organizationName: name, role: nextRole }
   })
 
   const members = await listMembers(orgId)
@@ -147,12 +148,16 @@ export const removeMember = async (orgId: string, targetUserId: string): Promise
 
   await deleteMembershipAndClearSessions(orgId, targetUserId)
 
+  // Dọn tổ chức mặc định nếu bị xoá khỏi tổ chức đang ghi nhớ
+  await User.updateOne({ _id: targetUserId, preferredOrganizationId: orgId }, { $set: { preferredOrganizationId: null } })
+
+  const name = await orgName(orgId)
   void notify(targetUserId, {
     type: "org_member_removed",
     title: "Bạn đã bị xoá khỏi tổ chức",
-    body: `Bạn không còn là thành viên của ${await orgName(orgId)}.`,
+    body: `Bạn không còn là thành viên của ${name}.`,
     organizationId: orgId,
-    meta: { organizationId: orgId }
+    meta: { organizationId: orgId, organizationName: name }
   })
 
   return { removed: true }
@@ -161,6 +166,9 @@ export const removeMember = async (orgId: string, targetUserId: string): Promise
 /** UC-72 / Flow 9.7: tự rời org. Dự án ở lại với org. */
 export const leaveOrganization = async (orgId: string, userId: string): Promise<{ left: true }> => {
   await deleteMembershipAndClearSessions(orgId, userId)
+
+  // Dọn tổ chức mặc định nếu tự rời tổ chức đang ghi nhớ
+  await User.updateOne({ _id: userId, preferredOrganizationId: orgId }, { $set: { preferredOrganizationId: null } })
 
   // Flow SD-3.3-5: Lead cần biết đội hình đổi.
   const [leads, name, user] = await Promise.all([
@@ -175,7 +183,7 @@ export const leaveOrganization = async (orgId: string, userId: string): Promise<
       title: "Một thành viên đã rời tổ chức",
       body: `${who} đã rời ${name}.`,
       organizationId: orgId,
-      meta: { organizationId: orgId, userId }
+      meta: { organizationId: orgId, organizationName: name, userId, memberName: who }
     })
   }
 

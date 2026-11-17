@@ -659,6 +659,16 @@ export type TranslationResolver = (
 export type DocumentTranslationMeta = z.infer<typeof documentTranslationMetaSchema>
 
 /** Layout người dùng của project mode 1 (sau finalize import). Project mode 2 / import cũ chưa có layout ⇒ `null`. */
+/**
+ * FLF-373: dự án upload SRS có sẵn — chữ của mục là của tác giả file. Dự án import trước khi có `start_kind` (FLF-388) là luồng
+ * nhập SRS có sẵn (`project.service` cũ: `source = existing` ⇒ `mode = import`), trừ mẫu bắt buộc (`template_intent = fixed`).
+ */
+export const isExistingSrs = (project: { mode?: string | null; start_kind?: string | null; template_intent?: string | null } | null): boolean => {
+  if (!project) return false
+  if (project.start_kind) return project.start_kind === "existing"
+  return project.mode === "import" && project.template_intent !== "fixed"
+}
+
 export const loadTemplateLayout: TemplateLoader = async (projectId) => {
   const profile = (await TemplateProfile.findOne(
     { projectId },
@@ -680,13 +690,19 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
     | null
   if (!profile?.layout?.length) return null
   // Chế độ 3 (mẫu bắt buộc, FLF-335): in đúng các mục của mẫu, không chèn mục FlintFlow ngoài mẫu (business-flow 2.10)
-  const project = (await Project.findById(projectId, { template_intent: 1, screenMockups: 1 }, { lean: true })) as { template_intent?: string | null; screenMockups?: unknown } | null
+  const project = (await Project.findById(projectId, { mode: 1, start_kind: 1, template_intent: 1, screenMockups: 1 }, { lean: true })) as {
+    mode?: string | null
+    start_kind?: string | null
+    template_intent?: string | null
+    screenMockups?: unknown
+  } | null
   // FLF-416 chế độ 4 đã vào Luồng 2: mục Ngoài phạm vi của file xuống cuối tài liệu (bố cục sắp lại theo mẫu chuẩn)
   const rearrange = project?.template_intent === "free" ? rearrangeOf(project, profile) : null
   const mockups = screenMockupsOf(project).filter((m) => m.enabled)
   return {
     ...(rearrange?.moveToEnd.length ? { moveToEnd: rearrange.moveToEnd } : {}),
     ...(project?.template_intent === "fixed" ? { fixedTemplate: true } : {}),
+    ...(isExistingSrs(project) ? { existingSrs: true } : {}),
     // FLF-420: file nền là khung mẫu (chế độ 3) ⇒ mã use case do FlintFlow cấp, in liên tục
     ...((profile as { structure_preview?: { summary?: { kind?: string } } | null }).structure_preview?.summary?.kind === "template" || profile.target_structure?.resolved_mode === 3
       ? { relabelUseCases: true }

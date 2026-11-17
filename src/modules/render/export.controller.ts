@@ -10,7 +10,10 @@ import { getDocumentWithMeta, getDraftMeta, NoWorkingDraftError, renderSpineDocu
 import { sourceFidelityFor } from "./source-fidelity.js"
 import { assertTranslationComplete, documentLanguageUnavailable } from "../translation/translation.service.js"
 import { writerOptionsFor } from "./labels.js"
-import { sendError } from "../../shared/types/api-response.js"
+import { sendError, sendSuccess } from "../../shared/types/api-response.js"
+import { getAuthClient } from "../google/google-auth.service.js"
+import { exportToGoogleDocs } from "../google/google-export.service.js"
+import { GoogleExportSchema } from "../google/google.validation.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { validationError, validationIssues } from "../../shared/utils/validation-message.js"
@@ -58,6 +61,8 @@ interface ExportedDocx {
   documentLanguage: string
   /** `source=draft` — độ mới của bản đang xuất (baseline bất biến, không có). */
   draftMeta: DraftMeta | null
+  source: "draft" | "baseline"
+  baselineId: string | null
 }
 
 /**
@@ -115,7 +120,14 @@ const buildExportDocx = async (req: Request, res: Response): Promise<ExportedDoc
   // review C2: source=draft — đính kèm độ mới của bản đang xuất (baseline bất biến, không cần).
   // FLF-265: bản dịch không ghi cache ⇒ độ mới của chính bản vừa dựng.
   const draftMeta = query.source === "draft" ? (result.draftMeta ?? (await getDraftMeta(projectId)) ?? null) : null
-  return { buffer, fileName: buildDocxFileName(parsed.data, otherLanguage ? locale : undefined), documentLanguage: locale, draftMeta }
+  return {
+    buffer,
+    fileName: buildDocxFileName(parsed.data, otherLanguage ? locale : undefined),
+    documentLanguage: locale,
+    draftMeta,
+    source: query.source,
+    baselineId: query.baseline_id ?? null
+  }
 }
 
 const sendExport = (res: Response, exported: ExportedDocx, file: Buffer, mime: string, fileName: string) => {
@@ -142,6 +154,35 @@ export const exportWord = catchAsync(async (req: Request, res: Response) => {
   const exported = await buildExportDocx(req, res)
   if (!exported) return
   return sendExport(res, exported, exported.buffer, DOCX_MIME, exported.fileName)
+})
+
+/**
+ * `POST /projects/:projectId/export/google-docs?source=&baseline_id=&lang=` body `{ mode }` — contract #44. Cùng query,
+ * quyền và file `.docx` với #18; file được upload lên Drive của user và chuyển sang Google Docs. Kiểm quyền + dựng file
+ * TRƯỚC khi lấy client Google để lỗi quyền giống hệt #18 (Viewer xuất bản nháp ⇒ 403, không phải "cần kết nối Google").
+ */
+export const exportGoogleDocs = catchAsync(async (req: Request, res: Response) => {
+  const userId = req.user?.userId
+  if (!userId) throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
+  const body = GoogleExportSchema.safeParse(req.body ?? {})
+  if (!body.success) throw validationError(body.error)
+
+  const exported = await buildExportDocx(req, res)
+  if (!exported) return
+  const auth = await getAuthClient(userId)
+
+  const result = await exportToGoogleDocs({
+    auth,
+    projectId: req.params.projectId as string,
+    userId,
+    docx: exported.buffer,
+    fileName: exported.fileName,
+    source: exported.source,
+    baselineId: exported.baselineId,
+    lang: exported.documentLanguage,
+    mode: body.data.mode
+  })
+  return sendSuccess(res, 200, result)
 })
 
 export const PDF_MIME = "application/pdf"

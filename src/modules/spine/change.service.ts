@@ -86,6 +86,7 @@ import type { ChangeRequestInfo } from "../pipeline/pipeline.dto.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { splitInstruction } from "../../shared/utils/instruction-text.js"
 import { DEFAULT_REPLY_LANGUAGE, byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
+import { isWithdrawal } from "../../shared/i18n/withdrawal.js"
 
 export const NEEDS_CLARIFICATION = "NEEDS_CLARIFICATION"
 /**
@@ -702,10 +703,8 @@ const AI_OUTPUT_ERRORS = new Set(["SCHEMA_MISMATCH", "PARSE_FAILED"])
  * Câu lệnh tự nhiên → lô op, hoặc một câu hỏi làm rõ (UC 6.11). Một lượt gọi model; lô có lỗi (áp thử bị từ chối, tên
  * use case sai luật — FLF-243) thì gọi lại đúng MỘT lần kèm lỗi — lần hai vẫn sai thì giữ lô để preview báo lỗi / cờ vàng bắt.
  */
-/** Câu rút lại yêu cầu đang dở ("thôi không cần thêm nữa", "bỏ qua", "never mind") — chỉ xét khi đang trả lời câu hỏi. */
-// Hết từ = không còn chữ cái theo sau (`\b` của JS coi "ỷ" là ký tự ngoài từ ⇒ "huỷ" không khớp)
-const WITHDRAWAL = /^\s*(thôi|thoi|bỏ qua|bo qua|không cần|khong can|huỷ|hủy|huy|dừng|dung lai|cancel|never ?mind|skip it|forget it|no need)(?!\p{L})/iu
-export const isWithdrawal = (text: string): boolean => WITHDRAWAL.test(text)
+/** Câu rút lại yêu cầu đang dở — chỉ xét khi đang trả lời câu hỏi. Luật ở `shared/i18n/withdrawal.ts` (FLF-439). */
+export { isWithdrawal }
 const WITHDRAWN = {
   vi: "Đã bỏ yêu cầu này - tài liệu không đổi gì. Khi cần, bạn cứ nhắn yêu cầu mới.",
   en: "Dropped this request - nothing in the document changed. Send a new request whenever you need."

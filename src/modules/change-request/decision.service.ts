@@ -57,6 +57,6 @@ export const decideGroup = async (cr: IChangeRequest, userId: string, groupId: s
     body: written
       ? `Thay đổi "${cr.title}" đã ghi vào tài liệu, bản ${written}.`
       : `Nhóm thay đổi “${group.title}” của "${cr.title}" ${body.decision === "approved" ? "được duyệt" : `bị từ chối${body.reason ? `: ${body.reason}` : ""}`}.`,
-    meta: { cr_id: cr.cr_id, group_id: groupId, decision: body.decision, result_doc_version: written }
+    meta: { cr_id: cr.cr_id, cr_title: cr.title, group_id: groupId, group_title: group.title, decision: body.decision, reason: body.reason ?? null, result_doc_version: written ?? null }
   })
 }
