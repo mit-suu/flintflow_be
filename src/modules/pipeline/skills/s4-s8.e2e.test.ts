@@ -312,8 +312,10 @@ const draftExecutor: StepRunnerDeps["draftExecutor"] = async (actionType, input)
   const perFunction = template === "S-5.2" || template === "S-5.4"
 
   const batch = perFunction ? batchFunctionIds(vars) : []
+  // FLF-433: S-7.3 chia lô theo function — lô sau đọc lại `messages` đã ghi, như model thật không thêm lại mã đã có
+  const laterFixedBatch = template === "S-7.3" && draftCalls.some((c) => c.step_id === stepId)
   draftCalls.push({ step_id: stepId, function_ids: batch })
-  const ops = perFunction ? batch.flatMap((id) => expandTemplate(opCase.ops, id)) : opCase.ops
+  const ops = perFunction ? batch.flatMap((id) => expandTemplate(opCase.ops, id)) : laterFixedBatch ? [] : opCase.ops
 
   const tokensIn = estimateTokens(JSON.stringify(vars))
   const tokensOut = estimateTokens(JSON.stringify({ ops, notes: opCase.notes }))
