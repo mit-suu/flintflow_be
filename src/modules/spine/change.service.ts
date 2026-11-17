@@ -81,6 +81,7 @@ import { documentLanguageForTurn, documentLanguageInput, languagePairOf, type Tu
 import { captureForTurn } from "../translation/capture.service.js"
 import { assertDraftUnlocked } from "./draft-lock.js"
 import { expandIndexSelectors } from "./index-selector-fix.js"
+import { stillOpenIn, targetFlagsOf, unresolvedAfter, unresolvedProblemText, type TargetFlag } from "./flag-target.js"
 import type { ChangeRequestInfo } from "../pipeline/pipeline.dto.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { splitInstruction } from "../../shared/utils/instruction-text.js"
@@ -381,6 +382,20 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
   }
   if (Object.keys(emptyCollections).length > 0) projection.empty_collections = emptyCollections
 
+  // FLF-428: lệnh "Sửa trong chat" từ một cờ ⇒ model thấy cờ + gợi ý sửa theo luật, và field tuỳ chọn còn trống của phần tử
+  // (NFR thiếu `metric` / `threshold` không có hai khoá đó trong object ⇒ model không biết chúng tồn tại)
+  const targetFlags = targetFlagsOf(spine, instruction)
+  if (targetFlags.length > 0) {
+    projection.target_flags = targetFlags
+    for (const t of targetFlags.filter((x) => x.rule_id === "nfr_missing_number")) {
+      const nfr = spine.nfrs.find((n) => n.id === t.target_id)
+      if (!nfr) continue
+      const rest = ((projection.nfrs as Record<string, unknown>[] | undefined) ?? []).filter((n) => n.id !== nfr.id)
+      projection.nfrs = [{ ...nfr, metric: nfr.metric ?? null, threshold: nfr.threshold ?? null }, ...rest]
+      matched += 1
+    }
+  }
+
   const permissions = permissionRows(spine, haystack, projection)
   if (permissions.length > 0) {
     projection.permissions = permissions
@@ -655,7 +670,9 @@ const batchProblems = (
   const screens = [...ui.screen.map(useCaseScreenProblemText), ...ui.plan.map(uiPlanProblemText)]
   const leftovers = removesUseCase ? removalLeftovers(spine, plan.spine).map(removalProblemText) : []
   const edits = editsUseCase ? editIssues(spine, plan.spine).map(editProblemText) : []
-  return [...(naming.length > 0 ? [...naming, USE_CASE_NAME_FIX] : []), ...screens, ...leftovers, ...edits]
+  // FLF-428: lệnh nhắm một cờ mà lô không đóng được cờ đó ⇒ một lượt thử lại kèm gợi ý sửa đúng field
+  const flagsLeft = unresolvedAfter(targetFlagsOf(spine, instruction), plan.spine).map(unresolvedProblemText)
+  return [...(naming.length > 0 ? [...naming, USE_CASE_NAME_FIX] : []), ...screens, ...leftovers, ...edits, ...flagsLeft]
 }
 
 /** FLF-318: phần lô sửa use case còn bỏ sót (lô không áp thử được ⇒ để lỗi bất biến lo). */
@@ -996,6 +1013,8 @@ export interface ChangeApplyResult extends ApplyResult {
   impact: Impact
   /** FLF-294: mã change request của lượt áp sau baseline; trước baseline / hoà giải ⇒ `null`. */
   cr_id?: string | null
+  /** FLF-428: cờ mà câu lệnh nhắm tới vẫn còn mở sau khi ghi (rỗng / thiếu ⇒ đã đóng hoặc lệnh không nhắm cờ nào). */
+  unresolved_flags?: TargetFlag[]
 }
 
 /**
@@ -1053,6 +1072,8 @@ export const apply = async (
   const crInfo = spine.baselines.length > 0 && !body.cr_exempt ? assertCrInfo(body.change_request) : null
 
   const stored = body.preview_id === undefined ? null : takePreview(projectId, body.preview_id)
+  // FLF-428: cờ câu lệnh nhắm tới — tính trên Spine TRƯỚC khi ghi (sau khi ghi cờ có thể đã đóng)
+  const targetFlags = targetFlagsOf(spine, stored?.instruction ?? body.instruction ?? null)
   const resolved: ResolvedOps = stored
     ? { ops: stored.ops, clarification: null, notes: null, ...(stored.localized ? { localized: stored.localized, language: languagePairOf(stored.language) } : {}) }
     : await resolveOps(projectId, userId, spine, body, d)
@@ -1102,12 +1123,14 @@ export const apply = async (
   // Cờ tính lại sau khi ghi: thay đổi của user có thể mở cờ đỏ mới (chặn baseline kế tiếp).
   if (applied.txn !== null) await d.recomputeFlags(projectId, userId)
   const after = await repository.get(projectId)
+  const unresolved = after && applied.txn !== null ? stillOpenIn(targetFlags, after) : []
 
   return {
     ...applied,
     ...(after ? { spine: after, spine_version: after.spine_version } : {}),
     branch,
     impact,
-    cr_id: crId
+    cr_id: crId,
+    ...(unresolved.length > 0 ? { unresolved_flags: unresolved } : {})
   }
 }

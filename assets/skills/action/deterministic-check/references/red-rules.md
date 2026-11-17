@@ -13,7 +13,7 @@
 | `section_awaiting_reaccept` | `awaiting_reaccept = true` for a mandatory `s` | owner step's gate | ✔ |
 | `screen_pending_at_baseline` | `screens[].detail_status = pending` | S-5 for that screen | ✔ |
 | `usecase_relation_invalid` | A use case includes/extends itself, sits in an include or extend cycle, or the same pair carries both an include and an extend | S-3.4 | ✔ |
-| `orphan_screen_at_baseline` | Same condition as yellow `orphan_screen`, checked at S-9: a screen no human actor uses, or isolated in the flow, or a pop-up nothing opens | S-4.2 | ✔ |
+| `orphan_screen_at_baseline` | Same condition as yellow `orphan_screen` + `screen_no_actor`, checked at S-9: a screen no human actor uses (§3.1.3, S-4.3), or isolated in the flow, or a pop-up nothing opens (§3.1.1, S-4.2); one flag per screen | S-4.2 / S-4.3 | ✔ |
 | `orphan_entity_at_baseline` | Same condition as yellow `orphan_entity`, checked at S-9: the ERD is not one connected graph | S-4.5 | ✔ |
 
 That is 13 rules. Mode 1 (import) excludes `orphan_screen_at_baseline` and `orphan_entity_at_baseline`. `placeholder` screens do **not** trigger `screen_pending_at_baseline`.
