@@ -58,6 +58,9 @@ for the reviewer. Silence is a valid answer.
 5. `message` in the document's language, quoting both sides of the problem and naming where each side is (section
    heading or document code) - for a `contradiction` it is shown to the requester as the question. At most 5 findings.
 6. `message`: User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`, `feature:@B0012`), element paths (`actors[id=A02].name`), block ids (`B0012`) or location ids (`L001`). Name a section by its heading and an element by its name or document code (`UC-01` is fine).
+7. The CR description is the requester's wording when the CR was opened; another CR may have changed the draft since. The
+   proposal is written on the current draft (`before` is today's value). A gap between the description and the current
+   `before` value (the description quotes an old number or name) is **not** a contradiction - compare `after` with the scope.
 
 ## Output
 

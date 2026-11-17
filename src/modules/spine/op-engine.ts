@@ -397,6 +397,43 @@ const schemaViolations = (spine: Spine): Violation[] => {
   }))
 }
 
+/**
+ * P08 (FAP #23): cấp id thật trước cho mọi op `add` cấp gốc mang id tạm (hoặc thiếu id) của lô, theo đúng thứ tự op.
+ * Trước đây id tạm chỉ được thay ở op PHÍA SAU op add ⇒ "thêm chức năng mới + gắn vào UC có sẵn" mà model viết op gắn
+ * trước bị `$new1` không trỏ tới phần tử. Chỉ chạy khi lô có id tạm; lô thay gốc (clone / migrate) giữ cách cũ.
+ */
+const preallocateIds = (spine: Spine, ops: readonly Op[], placeholders: Map<string, string>): Map<number, string> => {
+  const out = new Map<number, string>()
+  if (ops.some((op) => op.op === "clone" || op.op === "migrate")) return out
+  if (!ops.some((op) => op.op === "add" && isRecord(op.value) && isPlaceholderId(op.value.id))) return out
+  const reserved: Record<string, { id: string }[]> = {}
+  ops.forEach((op, i) => {
+    if (op.op !== "add" || !isRecord(op.value)) return
+    let segments: ReturnType<typeof parsePath>
+    try {
+      segments = parsePath(op.path)
+    } catch {
+      return
+    }
+    if (segments.length !== 1 || segments[0].selector?.kind !== "append") return
+    const collection = segments[0].key
+    const current = op.value.id
+    const missing = current === undefined || current === null || current === ""
+    if (!missing && !isPlaceholderId(current)) return
+    // cùng một id tạm cho hai phần tử là lỗi của model ⇒ để op engine báo như cũ
+    if (isPlaceholderId(current) && placeholders.has(current)) return
+    if (!allocatesIds(collection)) return
+    const list = (spine as unknown as Record<string, unknown>)[collection]
+    const view = { ...spine, [collection]: [...(Array.isArray(list) ? list : []), ...(reserved[collection] ?? [])] } as Spine
+    const id = allocateId(view, collection)
+    if (id === null) return
+    ;(reserved[collection] ??= []).push({ id })
+    out.set(i, id)
+    if (isPlaceholderId(current)) placeholders.set(current, id)
+  })
+  return out
+}
+
 export interface PlanOptions {
   /** Seq của change đầu tiên (repository.nextSeq). */
   startSeq: number
@@ -412,8 +449,13 @@ export const planTransaction = (spine: Spine, txn: Transaction, options: PlanOpt
   const before = clone(spine)
   const state: WorkState = { spine: clone(spine), removed: new RemovedIds(), ops: [], drafts: [], baseline: null, placeholders: new Map() }
 
-  const run = (raw: Op, index?: number) => {
-    // Id tạm đã cấp ở op trước trong lô ⇒ thay bằng id thật trong path và value
+  // P08: id tạm cấp trước cho cả lô ⇒ op đứng TRƯỚC op add của `$new1` (vd gắn chức năng mới vào UC có sẵn) cũng được thay
+  const preassigned = preallocateIds(state.spine, txn.ops, state.placeholders)
+
+  const run = (input: Op, index?: number) => {
+    const id = index === undefined ? undefined : preassigned.get(index)
+    const raw: Op = id !== undefined && isRecord(input.value) ? { ...input, value: { ...input.value, id } } : input
+    // Id tạm đã cấp (ở op trước hoặc ở lượt cấp trước của lô) ⇒ thay bằng id thật trong path và value
     const op: Op =
       state.placeholders.size === 0
         ? raw

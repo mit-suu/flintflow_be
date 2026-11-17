@@ -87,6 +87,27 @@ export const clarificationRounds = (messages: readonly IChatMessage[]): number =
   return rounds
 }
 
+/**
+ * P08 (T7): yêu cầu gốc đang được hỏi lại — câu lệnh của user đứng trước chuỗi câu hỏi làm rõ cuối phiên, kèm câu hỏi
+ * gần nhất. Lượt trả lời ("Đúng, thêm mốc 3 tháng") mang theo hai câu này để model không coi câu trả lời là một lệnh mới
+ * đứng một mình. Không có câu hỏi đang chờ ⇒ `null`.
+ */
+export const pendingChangeRequest = (messages: readonly IChatMessage[]): { request: string; question: string } | null => {
+  let question: string | null = null
+  let request: string | null = null
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (msg.role === "user") {
+      request = msg.content
+      continue
+    }
+    if (messageKind(msg) !== "change_clarification") break
+    question ??= messageText(msg)
+    request = null
+  }
+  return question && request?.trim() ? { request: request.trim(), question } : null
+}
+
 /** Phiên chat của đúng project này — sai project hay không tồn tại đều 404 (không lộ chatId của project khác). */
 export const loadProjectSession = async (projectId: string, sessionId: string): Promise<IChatSession> => {
   const session = mongoose.isValidObjectId(sessionId) ? await ChatSession.findById(sessionId) : null

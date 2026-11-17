@@ -498,3 +498,44 @@ export const emptySectionTargets = (spine: Spine, targets: readonly string[]): s
 
 /** Phần tử mà op chạm tới (để đòi khoá): `actors[id=A01].name` ⇒ `actors[id=A01]`; `actors[]` (thêm mới) ⇒ null. */
 export const opElement = (opPath: string): string | null => elementPathOf(opPath)
+
+/**
+ * P08 (upload U2-7): CR "đổi tên hệ thống thành X" / "rename the system to X" — nhận dạng tất định trên câu của người yêu
+ * cầu. Trả tên mới; không phải lệnh đổi tên hệ thống ⇒ `null`. Chỉ một câu lệnh đổi tên đứng riêng (không kèm yêu cầu khác
+ * sau dấu chấm / "và") mới tính, để CR nhiều việc vẫn tìm vị trí như thường.
+ */
+const SYSTEM_RENAME = [
+  /(?:đổi|thay|sửa)\s+tên\s+(?:của\s+)?(?:hệ\s+thống|ứng\s+dụng|app|sản\s+phẩm|phần\s+mềm)(?:\s+[^\s,.;:]+)?\s+(?:thành|sang|là)\s+["“'‘]?([^"”'’\n]+?)["”'’]?\s*[.!]?\s*$/iu,
+  /rename\s+(?:the\s+)?(?:system|app|application|product)(?:\s+[^\s,.;:]+)?\s+(?:to|as)\s+["“'‘]?([^"”'’\n]+?)["”'’]?\s*[.!]?\s*$/iu
+]
+
+export const systemRenameTarget = (text: string): string | null => {
+  for (const line of text.split(/\n/).map((l) => l.trim()).filter(Boolean)) {
+    for (const re of SYSTEM_RENAME) {
+      const name = re.exec(line)?.[1]?.trim()
+      if (name && name.length >= 2 && !/\s(?:và|and)\s/iu.test(name)) return name
+    }
+  }
+  return null
+}
+
+/**
+ * Vị trí của CR đổi tên hệ thống: phần tử `project` (field `system_name`) + phần tử có nhắc nguyên tên hệ thống hiện tại.
+ * Không dò theo từ khoá / nghĩa — tên hệ thống không dính "Product Catalog", "MSG-17"… (trước đây 19 phần liên quan).
+ */
+export const systemRenameLocations = (spine: Spine, currentName: string): FoundLocation[] => {
+  const name = currentName.trim()
+  const re = name.length >= 2 ? wordPattern(name) : null
+  return listElements(spine)
+    .filter((e) => e.path === PROJECT_PATH || (re !== null && re.test(textOf(e.value))))
+    .map((e) => {
+      const section_id = sectionOfElement(spine, e.path)
+      return {
+        path: e.path,
+        section_id,
+        found_by: [e.path === PROJECT_PATH ? ("spine_link" as const) : ("mention" as const)],
+        entity_paths: [PROJECT_PATH],
+        owner_step: section_id === "misc" || section_id.startsWith("custom:") ? null : ownerStepOf(section_id, spine)
+      }
+    })
+}
