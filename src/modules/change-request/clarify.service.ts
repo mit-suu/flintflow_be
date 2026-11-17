@@ -19,11 +19,13 @@ import { withMeteredAi } from "../import/metered-ai.js"
 import { listSections } from "../spine/section-registry.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
+import { accountLocaleOf } from "../user/account-locale.js"
 import { approvedBatch } from "./add-use-case.service.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus, transitionCr } from "./change-request.service.js"
 import { AMENDABLE_CR_STATUSES, MAX_CLARIFY_ROUNDS, canAskMore } from "./change-request.state.js"
 import { answersText, crHeader, crProjection, crQuery, relevantMaterialsText, truncate } from "./cr-context.js"
+import { clarifyLanguageText, crDocumentLanguage, crReplyLanguage } from "./cr-language.js"
 import { mentionedSections, mergeHeadings, type HeadingRef } from "./section-mention.js"
 
 /**
@@ -106,6 +108,11 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
   const headings = await docHeadings(cr, spine)
   // Mục người yêu cầu gọi tên ("phần 3.1.3 Screen Authorization") luôn là đích — code nhận, không trông vào model.
   const named = [...new Set([...mentionedSections(requesterText(cr), headings), ...sourceRefSections(cr.source?.ref, headings)])]
+  // FLF-438: hỏi theo ngôn ngữ người yêu cầu; khác ngôn ngữ tài liệu ⇒ tên / đoạn trích kèm bản dịch trong ngoặc
+  const language = clarifyLanguageText(
+    crReplyLanguage(requesterText(cr), await accountLocaleOf(userId)),
+    await crDocumentLanguage(String(cr.projectId), spine)
+  )
   const result = await withMeteredAi<CrClarifyOutput>({ projectId: String(cr.projectId), userId, stepId: `C-2:${cr.cr_id}` }, ActionType.CR_CLARIFY, {
     ...crHeader(cr),
     round: Math.min(asked + 1, MAX_CLARIFY_ROUNDS),
@@ -115,7 +122,8 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
     projection: crProjection(spine, `${cr.title}\n${crHeader(cr).description}\n${answersText(cr)}\n${(cr.materials ?? []).map((m) => m.text).join("\n")}`, {
       sections: named
     }),
-    outline: outlineText(headings)
+    outline: outlineText(headings),
+    language
   })
   if (!result.ok) {
     cr.paused = { reason: result.reason, at: new Date() }
