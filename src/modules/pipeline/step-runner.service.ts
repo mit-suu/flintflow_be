@@ -40,7 +40,7 @@ import { layoutRenderDeps, renderDiagrams, sameDiagramSubject, staleRenderedDiag
 import { loadRenderContext } from "../diagram/render-context.js"
 import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "../spine/source-hash.js"
 import { targetOfDiagram, type RenderTarget } from "../diagram/renderers/index.js"
-import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf } from "./step-registry.js"
+import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf, screenLoopOrder } from "./step-registry.js"
 import { addendumForUnit, assumptionsForPrompt, buildStepContext, elicitProjection, getStepSpec, loadConversationVariables, loadLastAiReply, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
 import { buildConversationSummary } from "./conversation-summary.js"
 import { composeStepGateMessage, spokenAssumptionIds } from "./gate-message.js"
@@ -995,8 +995,9 @@ export const isReopenableStaleStep = (spine: Spine, stepId: string, changes: Par
 
 /** Màn `pending` đầu tiên của hàng đợi; hết ⇒ null (runner chuyển sang vòng `@nonscreen`). */
 export const nextPendingScreen = (spine: Spine): string | null => {
-  const byId = new Map(spine.screens.map((s) => [s.id, s]))
-  return spine.progress.screen_queue.find((id) => byId.get(id)?.detail_status === "pending") ?? null
+  // P06: màn trong hàng đợi, lấy theo số màn (cùng thứ tự với `loopKeys` / thanh tiến độ), không theo thứ tự model ghi
+  const queued = new Set(spine.progress.screen_queue)
+  return screenLoopOrder(spine.screens).find((s) => queued.has(s.id) && s.detail_status === "pending")?.id ?? null
 }
 
 /** Function thuộc vòng hiện tại: theo màn, hoặc `screen_id === null` với vòng `@nonscreen`. */
