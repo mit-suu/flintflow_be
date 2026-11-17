@@ -46,7 +46,8 @@ import {
   preview as previewChange,
   type ChangeApplyResult,
   type ChangeDeps,
-  type ChangePreviewResult
+  type ChangePreviewResult,
+  type PlaceConflict
 } from "./change.service.js"
 import type { Op } from "./op.types.js"
 import type { Change, Spine, SpineRecord } from "./spine.types.js"
@@ -211,9 +212,26 @@ export interface ReconcileBody {
   preview_id?: string
 }
 
-export type ReconcileResult = ChangePreviewResult | ChangeApplyResult
+/** Lượt áp hoà giải: mục bị người khác sửa đúng chữ giữa hai lượt — chưa ghi, bên gọi cho AI soạn lại (chốt câu 9). */
+export type ReconcileApplied = ChangeApplyResult & { redraft_sections?: string[] }
 
-export const isReconcileApplied = (result: ReconcileResult): result is ChangeApplyResult => "spine_version" in result
+export type ReconcileResult = ChangePreviewResult | ReconcileApplied
+
+/** Mục sở hữu các chỗ bị bỏ qua — không đặt chờ chấp nhận lại, vẫn `stale` để lượt "Viết lại" kế tiếp soạn lại. */
+const skippedSections = (spine: Spine, skipped: readonly PlaceConflict[]): string[] => {
+  const out = new Set<string>()
+  for (const place of skipped) {
+    if (place.section_id) out.add(place.section_id)
+    try {
+      for (const id of sectionsOfPath(spine, place.path).owner) out.add(id)
+    } catch {
+      // path lạ: chỉ giữ section_id đã tính
+    }
+  }
+  return [...out]
+}
+
+export const isReconcileApplied = (result: ReconcileResult): result is ReconcileApplied => "spine_version" in result
 
 /**
  * Lượt 1 (không `preview_id`): trả preview diff gộp.
@@ -238,7 +256,16 @@ export const reconcile = async (
     const sections = reconciledSections.get(body.preview_id) ?? []
     reconciledSections.delete(body.preview_id)
     // FLF-294: hoà giải kéo theo một CR đã ghi — không đòi người yêu cầu / nguồn lần nữa
-    const applied = await applyChange(projectId, userId, { base_version: body.base_version, preview_id: body.preview_id, cr_exempt: true }, init, d)
+    // P12 (chốt câu 9): người khác / bước khác vừa ghi ⇒ ghi các mục không bị đổi, bỏ chỗ bị sửa đúng chữ để AI soạn lại
+    const applied = await applyChange(
+      projectId,
+      userId,
+      { base_version: body.base_version, preview_id: body.preview_id, cr_exempt: true, on_conflict: "skip" },
+      init,
+      d
+    )
+    const redraft = skippedSections(stripRecord(applied.spine), applied.skipped ?? [])
+    if (redraft.length > 0) sections.splice(0, sections.length, ...sections.filter((id) => !redraft.includes(id)))
     const afterRender = await rerenderStale(projectId, userId, applied.spine, d)
     // Sau baseline (BR-03): bản xem trước hoà giải user vừa duyệt CHÍNH LÀ lượt duyệt — ghi thẳng vào bản nháp như
     // một CR, không mở lại bước soạn (trước đây đòi chạy lại + duyệt lại 13 bước mới gỡ được cờ đỏ để chốt baseline).
@@ -249,7 +276,11 @@ export const reconcile = async (
         : await markAwaitingReaccept(projectId, userId, afterRender, sections)
     if (applied.spine.baselines.length > 0) await d.recomputeFlags(projectId, userId)
     const record = await repository.get(projectId)
-    return { ...applied, ...(record ? { spine: record, spine_version: record.spine_version } : { spine_version: version }) }
+    return {
+      ...applied,
+      ...(record ? { spine: record, spine_version: record.spine_version } : { spine_version: version }),
+      ...(redraft.length > 0 ? { redraft_sections: redraft } : {})
+    }
   }
 
   const record = await repository.get(projectId)
