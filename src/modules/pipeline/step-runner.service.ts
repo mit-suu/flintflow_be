@@ -548,7 +548,19 @@ export const settleFromChat = (
     const labelOf = (part: string): string | undefined => question.options.find((o) => norm(o.label) === norm(part))?.label
     const parts = question.multiple ? item.answer.split(",").map((p) => p.trim()).filter(Boolean) : [item.answer]
     const labels = parts.map(labelOf)
-    if (labels.length === 0 || labels.some((l) => l === undefined)) continue
+    if (labels.length === 0 || labels.some((l) => l === undefined)) {
+      // P05 (E2E 17/11): câu có lựa chọn được trả lời bằng lời riêng như ô "Khác…" ("Cả ba đều đúng, đặt số luôn: …") — model
+      // chốt câu này nhưng không trùng nhãn ⇒ trước đây bị bỏ, sổ quyết định không ghi và AI hỏi lại đúng câu đó. Chỉ khi đây là
+      // câu DUY NHẤT đang chờ (còn câu khác thì chữ tự do có thể là câu trả lời của câu kia — giữ luật khớp nhãn): chốt bằng
+      // trích đoạn nguyên văn của tin, model diễn lại thì bằng cả tin.
+      if (asked.length !== 1 || !isSubstantiveAnswer(message)) continue
+      const custom = verifiedExcerpt(item.answer, message) ?? message.trim()
+      if (!custom || openTexts.some((t) => sameText(t, custom))) continue
+      out.push({ question_id: ids[index], answer: custom })
+      openTexts.push(custom)
+      done.add(index)
+      continue
+    }
     const clean = (labels as string[]).map(stripRecommended)
     // Câu có lựa chọn chốt kèm đoạn tài liệu tra được ⇒ giữ nguồn (lựa chọn không phải trích đoạn nên chỉ kiểm mã đoạn)
     out.push({ question_id: ids[index], answer: question.multiple ? clean : clean[0], ...(docParas.length ? { source_paras: docParas } : {}) })
@@ -649,7 +661,9 @@ export const settleRepeatedAnswer = (
   stillOpen: readonly string[] = []
 ): AnswerInput[] => {
   if (settled.length > 0 || !isSubstantiveAnswer(message)) return settled
-  const open = asked.flatMap((q, i) => (q.options.length === 0 ? [i] : []))
+  // P05: câu có lựa chọn là câu DUY NHẤT đang chờ cũng vào luật này — user trả lời bằng lời riêng hai lần (không nhắc nhãn
+  // nào) thì lần sau chốt bằng nguyên văn, không hỏi lại lần ba
+  const open = asked.length === 1 ? [0] : asked.flatMap((q, i) => (q.options.length === 0 ? [i] : []))
   if (open.length !== 1 || (asked[open[0]].replied ?? 0) < 1) return settled
   const topic = asked[open[0]].topic_key
   if (topic !== undefined && stillOpen.includes(topic)) return settled

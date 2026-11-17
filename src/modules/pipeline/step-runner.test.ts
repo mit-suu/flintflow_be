@@ -1722,6 +1722,31 @@ describe("settleFromChat: ghép câu trả lời đúng câu hỏi", () => {
   })
 })
 
+describe("settleFromChat: câu có lựa chọn trả lời bằng lời riêng (P05)", () => {
+  const goals = { topic_key: "project_goals", question: "Bản đầu cần đạt được điều gì?", multiple: true, options: [{ label: "Khách tự đặt lịch (Khuyến nghị)" }, { label: "Ít bỏ sót đơn" }] }
+  const card = { topic_key: "platform", question: "Nền tảng?", options: [{ label: "Web (Khuyến nghị)" }, { label: "Ứng dụng di động" }] }
+  const message = "Cả ba đều đúng. Đặt số luôn: sau 3 tháng ít nhất 60% đơn là khách tự đặt trên web"
+
+  it("model chốt bằng trích đoạn nguyên văn ⇒ ghi trích đoạn", () => {
+    expect(settleFromChat([goals], [{ topic_key: "project_goals", answer: "sau 3 tháng ít nhất 60% đơn là khách tự đặt trên web" }], message)).toEqual([
+      { question_id: "Q_project_goals", answer: "sau 3 tháng ít nhất 60% đơn là khách tự đặt trên web" }
+    ])
+  })
+
+  it("model diễn lại, đây là câu duy nhất đang chờ ⇒ ghi cả tin; còn câu khác chờ ⇒ không đoán", () => {
+    const paraphrase = [{ topic_key: "project_goals", answer: "60% đơn tự đặt sau 3 tháng" }]
+    expect(settleFromChat([goals], paraphrase, message)).toEqual([{ question_id: "Q_project_goals", answer: message }])
+    expect(settleFromChat([goals, card], paraphrase, message)).toEqual([])
+    expect(settleFromChat([goals], paraphrase, "oke")).toEqual([])
+  })
+
+  it("nhãn đúng vẫn chốt bằng nhãn như cũ", () => {
+    expect(settleFromChat([goals], [{ topic_key: "project_goals", answer: "Ít bỏ sót đơn" }], "ít bỏ sót đơn")).toEqual([
+      { question_id: "Q_project_goals", answer: ["Ít bỏ sót đơn"] }
+    ])
+  })
+})
+
 describe("settleRepeatedAnswer: không hỏi lại điều user đã trả lời", () => {
   const goal = { topic_key: "success_goal", question: "Mục tiêu nào quan trọng nhất để coi dự án thành công?", options: [] }
   const card = { topic_key: "platform", question: "Nền tảng?", options: [{ label: "Web (Khuyến nghị)" }, { label: "Ứng dụng di động" }] }
@@ -1755,6 +1780,14 @@ describe("settleRepeatedAnswer: không hỏi lại điều user đã trả lời
   it("model báo câu đó còn chờ (still_open) ⇒ tin lạc đề, không chốt; không báo ⇒ chốt như cũ", () => {
     expect(settleRepeatedAnswer([{ ...goal, replied: 1 }, card], [], idea, ["success_goal"])).toEqual([])
     expect(settleRepeatedAnswer([{ ...goal, replied: 1 }, card], [], idea, ["platform"])).toEqual([{ question_id: "Q_success_goal", answer: idea }])
+  })
+
+  it("P05: câu có lựa chọn là câu duy nhất đang chờ, trả lời bằng lời riêng lần hai ⇒ chốt nguyên văn", () => {
+    const goals = { topic_key: "project_goals", question: "Bản đầu cần đạt được điều gì?", multiple: true, options: [{ label: "Khách tự đặt lịch (Khuyến nghị)" }, { label: "Ít bỏ sót đơn" }] }
+    const text = "Cả ba đều đúng, sau 3 tháng ít nhất 60% đơn là khách tự đặt trên web"
+    expect(settleRepeatedAnswer([{ ...goals, replied: 1 }], [], text)).toEqual([{ question_id: "Q_project_goals", answer: text }])
+    expect(settleRepeatedAnswer([goals], [], text)).toEqual([])
+    expect(settleRepeatedAnswer([{ ...goals, replied: 1 }], [], "ít bỏ sót đơn thôi")).toEqual([])
   })
 
   it("nextPendingAfterChat chỉ đếm tin trả lời thật", () => {
