@@ -1,14 +1,13 @@
 import { AiActionError } from "./ai-action.types.js"
+import { AI_PROVIDER_QUOTA, isProviderBillingMessage } from "./providers/provider-error.js"
 
 export const isTransientError = (error: any): boolean => {
   // Người gọi đã bỏ đi (client đóng kết nối) ⇒ gọi lại chỉ tốn tiền và giữ khoá step lâu thêm
   if (error?.name === "AbortError" || error?.name === "APIUserAbortError" || error?.code === "AI_CALL_ABORTED" || error?.code === "ERR_CANCELED") {
     return false
   }
-  const errMsg = (error?.message || error?.details?.error?.message || "").toLowerCase()
   // Hết tiền / chưa gắn thanh toán / vượt hạn mức chi: gọi lại chỉ tốn thời gian, trạng thái không tự đổi
-  const BILLING = ["insufficient_quota", "exceeded your current quota", "payment method", "spend limit", "credits cannot be applied", "billing"]
-  if (BILLING.some((phrase) => errMsg.includes(phrase))) {
+  if (error?.code === AI_PROVIDER_QUOTA || isProviderBillingMessage(error?.message || error?.details?.error?.message)) {
     return false
   }
 

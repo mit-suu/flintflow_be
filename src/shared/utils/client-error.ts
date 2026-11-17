@@ -25,6 +25,8 @@ export const GENERIC_SERVER_MESSAGE = "Hệ thống gặp lỗi khi xử lý yê
 export const GENERIC_BAD_REQUEST_MESSAGE = "Yêu cầu không hợp lệ."
 export const AI_UNAVAILABLE_MESSAGE = "Dịch vụ AI đang gặp sự cố. Vui lòng thử lại sau ít phút."
 export const AI_OVERLOADED_MESSAGE = "Dịch vụ AI đang quá tải. Vui lòng thử lại sau ít phút."
+/** FLF-433 (FAP #17): nhà cung cấp AI hết hạn mức / billing — thử lại không có tác dụng. */
+export const AI_PROVIDER_QUOTA_MESSAGE = "Dịch vụ AI của hệ thống tạm hết hạn mức. Thử lại lúc này sẽ không được - vui lòng báo quản trị viên."
 export const AI_BAD_OUTPUT_MESSAGE = "AI trả kết quả không đúng dạng. Thử lại, hoặc nói rõ hơn yêu cầu."
 export const AI_NOT_CONFIGURED_MESSAGE = "Dịch vụ AI chưa được cấu hình. Vui lòng liên hệ quản trị viên."
 export const RUN_CANCELLED_MESSAGE = "Lượt chạy đã bị huỷ."
@@ -51,6 +53,7 @@ export const aiErrorMessage = (code: string, message: string): string => {
   if (code === "INSUFFICIENT_CREDIT") return message
   if (code === "RUN_CANCELLED" || code === "AI_CALL_ABORTED") return RUN_CANCELLED_MESSAGE
   if (code === "CREDIT_LEDGER_INCONSISTENT") return GENERIC_SERVER_MESSAGE
+  if (code === "AI_PROVIDER_QUOTA") return AI_PROVIDER_QUOTA_MESSAGE
   if (AI_OVERLOADED.test(code)) return AI_OVERLOADED_MESSAGE
   if (AI_BAD_OUTPUT.has(code)) return AI_BAD_OUTPUT_MESSAGE
   if (AI_NOT_CONFIGURED.test(code)) return AI_NOT_CONFIGURED_MESSAGE

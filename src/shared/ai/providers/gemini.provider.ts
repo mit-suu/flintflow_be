@@ -1,4 +1,5 @@
 import axios from "axios"
+import { providerErrorCode } from "./provider-error.js"
 import { env } from "../../../config/env.js"
 import { AiProviderConfig, AiActionError } from "../ai-action.types.js"
 import { LLMResponse, LlmCallOptions } from "./provider.types.js"
@@ -114,7 +115,7 @@ const callGeminiModel = async (
     }
     const status = error.response?.status || 500
     const message = error.response?.data?.error?.message || error.message || "Gemini API call failed"
-    const code = status === 429 ? "RATE_LIMIT_EXCEEDED" : status === 503 ? "GEMINI_OVERLOADED" : "GEMINI_ERROR"
+    const code = providerErrorCode(status, message, "GEMINI_ERROR", "GEMINI_OVERLOADED")
     throw new AiActionError(status, message, code, error.response?.data)
   }
 }
