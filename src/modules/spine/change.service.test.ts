@@ -1275,3 +1275,87 @@ describe("FLF-278 - mục riêng của mẫu khách qua chat (soạn nháp từ 
     expect(applied.spine.custom_sections.map((c) => c.blocks.map((b) => b.text))).toEqual([["Glossary terms are in bold."], ["The app reads the phone's fingerprint sensor."]])
   })
 })
+
+describe("FLF-428 - sửa trong chat từ cờ nfr_missing_number (AC-38.2)", () => {
+  const nfrId = () => FIXTURE.nfrs.find((n) => n.category === "reliability")!.id
+  const flagged = (): Spine => {
+    const s = structuredClone(FIXTURE)
+    const n = s.nfrs.find((x) => x.id === nfrId())!
+    delete n.metric
+    delete n.threshold
+    n.kind = "descriptive"
+    s.flags = [
+      {
+        id: "FL900",
+        level: "red",
+        rule_id: "nfr_missing_number",
+        section_id: "fixed:4.2.2",
+        target_id: n.id,
+        message: `Yêu cầu độ tin cậy ${n.id} thiếu chỉ số đo / ngưỡng`,
+        remediation_step: "S-6.3",
+        opened_at_version: 1,
+        resolved_at: null,
+        waived_by_user: false,
+        waive_reason: null,
+        waived_at_version: null,
+        kept_reason: null,
+        kept_by: null
+      } as Spine["flags"][number]
+    ]
+    return s
+  }
+  const instruction = () => `Trong §4.2.2 Reliability: sửa vấn đề "Yêu cầu độ tin cậy ${nfrId()} thiếu chỉ số đo / ngưỡng"`
+
+  it("projection có target_flags + gợi ý, và NFR đích hiện metric / threshold = null", () => {
+    const projection = buildChangeProjection(flagged(), instruction())
+    expect(projection.target_flags).toMatchObject([{ rule_id: "nfr_missing_number", target_id: nfrId() }])
+    expect((projection.target_flags as { fix_hint: string }[])[0].fix_hint).toContain(`nfrs[id=${nfrId()}].metric`)
+    const nfr = (projection.nfrs as Record<string, unknown>[]).find((n) => n.id === nfrId())!
+    expect(nfr).toHaveProperty("metric", null)
+    expect(nfr).toHaveProperty("threshold", null)
+    // Lệnh không nhắm cờ ⇒ không có target_flags
+    expect(buildChangeProjection(flagged(), "Đổi tên A01 thành Product Owner").target_flags).toBeUndefined()
+  })
+
+  it("lô chỉ viết thêm vào statement ⇒ gọi lại MỘT lần kèm lỗi 'không đóng cờ', preview dùng lô ghi metric + threshold", async () => {
+    await seed(flagged())
+    const id = nfrId()
+    deps.changeExecutor = vi
+      .fn()
+      .mockResolvedValueOnce(aiResult({ ops: [{ op: "set", path: `nfrs[id=${id}].statement`, value: "No overselling. Measure: oversold orders must be 0." }] }))
+      .mockResolvedValueOnce(
+        aiResult({
+          ops: [
+            { op: "set", path: `nfrs[id=${id}].kind`, value: "quantitative" },
+            { op: "set", path: `nfrs[id=${id}].metric`, value: "Oversold orders" },
+            { op: "set", path: `nfrs[id=${id}].threshold`, value: "0" }
+          ]
+        })
+      )
+    const result = await preview(PROJECT, USER, { base_version: 1, instruction: instruction() }, {}, deps)
+    expect(deps.changeExecutor).toHaveBeenCalledTimes(2)
+    const second = vi.mocked(deps.changeExecutor).mock.calls[1][1].promptVariables as Record<string, unknown>
+    expect(second.previous_problems).toContain("nfr_missing_number")
+    expect(result.changes.map((c) => c.path)).toEqual(expect.arrayContaining([`nfrs[id=${id}].metric`, `nfrs[id=${id}].threshold`]))
+  })
+
+  it("ghi xong mà cờ vẫn mở ⇒ apply trả unresolved_flags; cờ đã đóng ⇒ không có", async () => {
+    await seed(flagged())
+    const id = nfrId()
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [{ op: "set", path: `nfrs[id=${id}].statement`, value: "No overselling. Measure: 0." }] }))
+    const stillOpen = await apply(PROJECT, USER, { base_version: 1, instruction: instruction() }, {}, deps)
+    expect(stillOpen.unresolved_flags).toMatchObject([{ rule_id: "nfr_missing_number", target_id: id }])
+
+    await seed(flagged())
+    deps.changeExecutor = vi.fn(async () =>
+      aiResult({ ops: [{ op: "set", path: `nfrs[id=${id}].metric`, value: "Oversold orders" }, { op: "set", path: `nfrs[id=${id}].threshold`, value: "0" }] })
+    )
+    // recomputeFlags giả: đóng cờ như flags.service thật làm khi luật không còn bắn
+    deps.recomputeFlags = vi.fn(async () => {
+      const cur = db.spines[0] as unknown as Spine & { _id: string }
+      db.spines[0] = { ...cur, _id: crypto.randomUUID(), flags: cur.flags.map((f: Spine["flags"][number]) => ({ ...f, resolved_at: new Date().toISOString() })) }
+    })
+    const fixed = await apply(PROJECT, USER, { base_version: 1, instruction: instruction() }, {}, deps)
+    expect(fixed.unresolved_flags).toBeUndefined()
+  })
+})

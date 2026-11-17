@@ -327,6 +327,32 @@ describe("buildImportOps", () => {
     ])
   })
 
+  it("FLF-428: heading chức năng ghi mã use case '(UC-01)' ⇒ nối vào use case đó; màn ghi 'Cancel Order pop-up' ⇒ màn Cancel Order", () => {
+    const spine = createEmptySpine({ name: "TechMart" })
+    const ops = buildImportOps(spine, [
+      { entity: "screens", id: "SCR-01", value: { name: "Sign Up" } },
+      { entity: "screens", id: "SCR-12", value: { name: "Cancel Order", is_popup: true } },
+      { entity: "screens", id: "SCR-06", value: { name: "Write Review", is_popup: true } },
+      { entity: "functions", id: "FR-3.2.1", value: { name: "Register Account (UC-01)", screen_id: "Sign Up screen" } },
+      { entity: "functions", id: "FR-3.5.2", value: { name: "Cancel Order (UC-09)", screen_id: "Cancel Order pop-up" } },
+      { entity: "functions", id: "FR-3.3.3", value: { name: "Write Product Review (UC-11)", screen_id: "Write Review pop-up" } },
+      // Không có mã use case, khác tên ⇒ không đoán
+      { entity: "functions", id: "FR-01", value: { name: "Sync Shipment Status" } },
+      { entity: "use_cases", id: "UC-01", value: { name: "Register Account" } },
+      { entity: "use_cases", id: "UC-09", value: { name: "Cancel Order" } },
+      { entity: "use_cases", id: "UC-11", value: { name: "Write Product Review" } },
+      { entity: "use_cases", id: "UC-12", value: { name: "Process Orders" } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.use_cases.map((u) => [u.id, u.function_ids])).toEqual([
+      ["UC-01", ["FR-3.2.1"]],
+      ["UC-09", ["FR-3.5.2"]],
+      ["UC-11", ["FR-3.3.3"]],
+      ["UC-12", []]
+    ])
+    expect(Object.fromEntries(plan.spine.functions.map((f) => [f.id, f.screen_id]))).toMatchObject({ "FR-3.2.1": "SCR-01", "FR-3.5.2": "SCR-12", "FR-3.3.3": "SCR-06", "FR-01": null })
+  })
+
   it("FLF-251: tham chiếu theo tên chuẩn hoá (cột Feature có số mục), thông báo nối chức năng, thuật ngữ tiếng Việt", () => {
     const spine = createEmptySpine({ name: "Exam" })
     const ops = buildImportOps(spine, [
