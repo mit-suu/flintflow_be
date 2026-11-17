@@ -112,7 +112,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 {{#if messages_ready}}
 3f. **Application messages** (§ Messages) for the new function: each user-visible `abnormal[]` case needs a message -
    same meaning as one in `use_case_context.messages` ⇒ `set messages[id=…].function_ids` to its old list plus
-   `$newFn`; otherwise `add messages[]` `{ "code": "<AREA>-001", "text": …, "function_ids": ["$newFn"] }` - area
+   `$newFn`; otherwise `add messages[]` `{ "code": "<AREA>-001", "type": …, "context": …, "text": …, "function_ids": ["$newFn"] }` - area
    that fits (an existing one from the context), code fixes the number; text: one sentence saying what to do next.
 {{/if}}
 3c. **Removing** one element is `remove` with the element path: `remove use_cases[id=UC07]`,
@@ -160,6 +160,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 4. **Cascade** deletes in the same batch (`draft-to-ops/references/invariants.md`). If the change necessarily breaks an invariant (e.g. deleting the last screen), return `clarification_needed` explaining what blocks it.
 5. **Proper names** with a key (actor, entity, screen, glossary term) change in one place - do not also edit prose that mentions them; S-8.4 Consistency Pass catches prose.
 6. **English** values for SRS content; `reason` in the reply language - it becomes the §I Record of Changes line.
+   `messages[].type` is exactly one of `error` | `warning` | `info` | `success` | `confirm`; `messages[].context` (when it shows) is English.
 7. **Never emit** ops on `flags[]`, `baselines[]`, `usage[]`, `steps[]`, `progress` or `sessions[]`.
 8. **Only touch what the request names** (only exceptions: supporting use cases of rule 3e, listed in `proposed_use_cases`; the parts of a removed use case, rule 3g; the parts of an edited use case, rule 3h). An element the user did not mention must come out of this batch
    unchanged - renaming a neighbour "while we are here" is how two functions of another screen got
