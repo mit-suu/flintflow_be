@@ -1,7 +1,7 @@
 ---
 skill_id: non-screen-functions
 kind: content
-version: 0.3.0
+version: 0.4.0
 description: "S-4.4 functions with no screen - cron jobs, webhooks, background engines"
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -38,7 +38,7 @@ apply:
 
 1. **Scheduled work (`time` actors).** Every `actors[kind=time]` row from S-3.1 must be the initiator of
    at least one function here: expiring reservations, resetting quotas, retrying a failed queue, sending
-   a digest, cleaning up stale drafts. If a `time` actor exists with no function, one of the two is wrong.
+   a digest, cleaning up stale drafts. If a `time` actor exists with no function, one of the two is wrong - but a job whose use case the user merged or removed stays inside the use case it was merged into (or say why in `notes`).
 2. **Inbound calls (`system` actors).** Every `actors[kind=system]` that can call *us* - a payment
    gateway webhook, a mail-delivery callback, an OAuth provider redirect handler. Outbound calls we make
    during a screen action belong to that screen's function, not here.
@@ -67,7 +67,7 @@ validations: [], business_rule_ids: [], priority: null}`.
 A non-screen function usually realises a use case a `system` or `time` actor initiates. When the matching
 use case already exists, append the new function id to its `function_ids`:
 `{ "op": "set", "path": "use_cases[id=UC31].function_ids", "value": ["FN090"] }` - send the **full array**
-including ids already there, since `set` replaces it. When no use case covers it, add one
+including ids already there, since `set` replaces it. When no use case covers it, add one - never re-add a use case the user merged or removed (ledger / chat: "chỉ là xử lý ngầm, không tách use case"); append to the use case it went into
 (`{id, name, actor_ids: [<the system/time actor>], function_ids: [<this function>], description,
 includes: [], extends: []}`) rather than leaving the function unreachable from §2.
 

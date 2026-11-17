@@ -349,3 +349,22 @@ describe("componentLevelProjection (FLF-418)", () => {
     expect(componentLevelProjection(FIXTURE, "S-5.2@S01", "component")).toEqual({})
   })
 })
+
+describe("P05 - S-3 / S-4 thấy ý tưởng gốc của Brief (quy mô user nêu)", () => {
+  const withCore = (): Spine => {
+    const s = structuredClone(FIXTURE)
+    const base = s.addendum[0] ?? ({ id: "AD0", topic: "x", target_section: "fixed:1", content: "", content_en: "" } as never)
+    s.addendum = [
+      ...s.addendum,
+      { ...base, id: "AD900", topic: "vision", target_section: "fixed:1", content: "Bản đầu gọn, khoảng 5–8 use case", content_en: "A lean first release, about 5-8 use cases" },
+      { ...base, id: "AD901", topic: "goals", target_section: "fixed:1", content: "Giảm 60% lịch đặt qua điện thoại", content_en: "Cut phone bookings by 60%" }
+    ]
+    return s
+  }
+  it("S-3.2 nạp vision + goals lõi dù không thuộc section bước nuôi; S-5 không", () => {
+    const ids = projectStep(withCore(), "S-3.2").addendum.map((a) => a.id)
+    expect(ids).toEqual(expect.arrayContaining(["AD900", "AD901"]))
+    const loopStep = projectStep(withCore(), "S-5.2@S01").addendum.map((a) => a.id)
+    expect(loopStep).not.toContain("AD900")
+  })
+})
