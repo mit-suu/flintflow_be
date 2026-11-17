@@ -132,6 +132,11 @@ tiếp. `.env.example` là danh sách đầy đủ kèm giải thích; dưới �
 | `FLINTFLOW_ASSETS_DIR` | không | ghi đè thư mục `assets/`; image production đã có `/app/assets` |
 | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (FE) | không | thiếu ⇒ **không có nút đăng nhập Google**, phần còn lại chạy bình thường (`lib/google-auth.ts`). Nhúng lúc build ⇒ đổi phải build lại image FE |
 | `GOOGLE_CLIENT_SECRET` `GOOGLE_TOKEN_ENC_KEY` | khi bật tích hợp Google Docs | thiếu một trong hai (hoặc thiếu `GOOGLE_CLIENT_ID`) ⇒ `/api/v1/integrations/google` trả `503 GOOGLE_INTEGRATION_DISABLED`, FE ẩn thẻ "Tích hợp". Secret của **cùng** OAuth client với đăng nhập; OAuth consent screen phải có scope `drive.file`. Khoá là 32 byte base64 (`openssl rand -base64 32`), sai độ dài ⇒ BE không khởi động. Ở chế độ `Testing` của Google, refresh token hết hạn sau 7 ngày ⇒ user thấy "Cần kết nối lại" |
+| `NEXT_PUBLIC_GOOGLE_API_KEY` `NEXT_PUBLIC_GOOGLE_APP_ID` (FE) | khi cho chọn Google Doc để import | thiếu một trong hai ⇒ không có nút "Chọn từ Google Drive" ở bước tải SRS. API key giới hạn API = Google Picker API, referrer = domain FE; App ID là **project number** (không phải project id) — thiếu thì Picker chọn được file nhưng BE không đọc được (`403 GOOGLE_FILE_FORBIDDEN`). Nhúng lúc build |
+
+**Thử MCP server Google Docs** (`POST /api/v1/mcp/google-docs`): `npx @modelcontextprotocol/inspector`, transport
+*Streamable HTTP*, URL `http://localhost:5000/api/v1/mcp/google-docs`, header `Authorization: Bearer <access token FlintFlow>`
+(tài khoản đã nối Google ở trang Hồ sơ). Tool ghi chỉ ghi khi `dryRun: false` + `expectedRevisionId` lấy từ `get_outline`.
 
 Vài quyết định hay bị hỏi lại:
 
