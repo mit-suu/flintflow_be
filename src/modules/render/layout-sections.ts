@@ -49,7 +49,7 @@ import type { CustomBlock, CustomSection, OriginalDiagram, Spine } from "../spin
 import type { Block, InlineRun, RenderedSection, RocRow, TableCell } from "./rendered-document.types.js"
 import { mediaId } from "./import-media.js"
 import { appendToFileTables, conformBlocksToFileTable } from "./file-table.js"
-import { elementOfKey, isLabelLine, refreshTailBlock } from "./element-tail.js"
+import { deletedElementIds, dropDeletedElementLines, elementOfKey, isLabelLine, refreshTailBlock } from "./element-tail.js"
 import { functionFieldValues, patchFunctionOriginal, type FunctionFieldValues, type FunctionOriginalBlock } from "./function-original.js"
 import { defaultSectionTitle, functionDiagramBlocks, generatedDiagramBlocks, renderContentSlot, renderSection, screenLayoutImages, type SectionRenderContext } from "./section-renderer.js"
 import { sentencesFor } from "./labels.js"
@@ -865,6 +865,8 @@ export const buildLayoutSections = (
   // FLF-366: đoạn nguyên văn của mục FPT
   const segmentsOf = new Map(records.map((r) => [r.section_id, r]))
   const homed = homedItems(records)
+  // P08 (CR #5): phần tử đã có lúc import mà CR đã xoá — dòng danh sách mang mã của nó trong đoạn nguyên văn bỏ theo
+  const deletedIds = deletedElementIds(spine, records.flatMap((r) => r.known.map((k) => k.key)))
   /** Phần nối in tại chỗ trong đoạn của mục — không gộp lên đầu mục nữa. */
   const consumed = new Set(records.flatMap((r) => r.parts.flatMap((p) => (p.kind === "original" ? [`${CUSTOM_PREFIX}${p.custom_id}`] : []))))
   const redrawn = new Set<string>()
@@ -922,7 +924,8 @@ export const buildLayoutSections = (
           i = end - 1
           continue
         }
-        out.push(...(isVerbatim(spine, part) ? customBlocks(part.blocks, originalPng, slotFor(n.section_id, n.number)) : rebuildMarked(part.items, part.blocks)))
+        const verbatim = part.items.length === 0 ? dropDeletedElementLines(part.blocks, deletedIds) : part.blocks
+        out.push(...(isVerbatim(spine, part) ? customBlocks(verbatim, originalPng, slotFor(n.section_id, n.number)) : rebuildMarked(part.items, part.blocks)))
         continue
       }
       const blocks = customById.get(`${CUSTOM_PREFIX}${part.custom_id}`)?.blocks ?? []

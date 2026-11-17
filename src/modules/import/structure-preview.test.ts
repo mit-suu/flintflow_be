@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { LayoutBlock } from "./step-plan.js"
 import type { LayoutEntry } from "./template-profile.model.js"
-import { fileKindOf, isTemplateFile, previewStructure, structureChanges, toPreview, type StructurePreview } from "./structure-preview.js"
+import { EXCERPT_MAX, excerptOf, fileKindOf, isTemplateFile, previewStructure, structureChanges, toPreview, type StructurePreview } from "./structure-preview.js"
 import type { TargetStructure } from "./target-structure.js"
 
 const entry = (order: number, section_id: string, heading_text: string, level = 1): LayoutEntry => ({ order, section_id, heading_text, level })
@@ -56,6 +56,33 @@ describe("previewStructure - màn đọc khung lúc upload", () => {
       ["fixed:2.2", "present"]
     ])
     expect(preview.computed_at).toBe(AT)
+  })
+
+  it("P09 (#15): mỗi mục có chữ khách viết mang trích đoạn; mục chỉ có heading / hướng dẫn không có", () => {
+    const blocks = [
+      heading("h1", "1 Overview", "fixed:1"),
+      para("g1", "[Gives the overall description about the product]", "fixed:1"),
+      para("p1", "Lumen is a course management SaaS for small training centres.", "fixed:1"),
+      heading("h2", "2.2 Use cases", "fixed:2.2", 2),
+      { block_id: "t1", kind: "table", level: null, text: "", section_id: "fixed:2.2", rows: [["ID", "Use case"], ["UC-01", "Enrol in a course"]] } as LayoutBlock,
+      heading("h3", "2.3 Business rules", "fixed:2.3", 2),
+      para("g3", "[List the business rules]", "fixed:2.3")
+    ]
+    const preview = previewStructure(blocks, new Map([["h1", "fixed:1"], ["h2", "fixed:2.2"], ["h3", "fixed:2.3"]]), spine, "fixed", AT)
+    const excerpt = Object.fromEntries(preview.sections.map((s) => [s.section_id, s.excerpt]))
+    expect(excerpt).toEqual({
+      "fixed:1": "Lumen is a course management SaaS for small training centres.",
+      "fixed:2.2": "ID · Use case; UC-01 · Enrol in a course",
+      "fixed:2.3": undefined
+    })
+  })
+
+  it("P09: trích đoạn gộp khoảng trắng, cắt ở EXCERPT_MAX ký tự kèm dấu …", () => {
+    expect(excerptOf(["  a\n b ", "", "c"])).toBe("a b c")
+    expect(excerptOf(["", " "])).toBeUndefined()
+    const long = excerptOf(["x".repeat(500)])!
+    expect(long).toHaveLength(EXCERPT_MAX)
+    expect(long.endsWith("…")).toBe(true)
   })
 
   it("FLF-382: mẫu mà mục nào cũng có câu ví dụ / chỗ điền vẫn là khung mẫu (câu ví dụ không tính là nội dung khách viết)", () => {
@@ -205,10 +232,17 @@ describe("FLF-411 - màn đọc khung trên file thật (parse + khớp mẫu, k
     expect(preview.summary).toMatchObject({ kind: "template", present: 0 })
     expect(preview.summary.missing).toBeGreaterThanOrEqual(20)
     expect(preview.resolved_mode).toBe(3)
+    // P09 (#15): khung mẫu trống ⇒ không mục nào có trích đoạn (chữ hướng dẫn / ví dụ / bảng mẫu không phải nội dung)
+    expect(preview.sections.filter((s) => s.excerpt).map((s) => [s.section_id, s.status, s.excerpt])).toEqual([])
   }, 30000)
 
   it("SRS đã viết (FPT, mẫu công ty còn sót `]` cuối câu) vẫn là SRS đã viết, đủ mục; mẫu FU-IT trống vẫn là khung mẫu", async () => {
-    expect((await previewOfFixture("existing-srs-fu-student-portal")).summary).toMatchObject({ kind: "written", present: 24, missing: 0 })
+    const written = await previewOfFixture("existing-srs-fu-student-portal")
+    expect(written.summary).toMatchObject({ kind: "written", present: 24, missing: 0 })
+    // P09 (#15): SRS đã viết ⇒ mục có nội dung đều có trích đoạn ≤ 200 ký tự
+    const present = written.sections.filter((s) => s.status === "present")
+    expect(present.filter((s) => !s.excerpt).map((s) => s.title)).toEqual([])
+    expect(present.every((s) => s.excerpt!.length <= 200)).toBe(true)
     expect((await previewOfFixture("company-template-srs-filled")).summary).toMatchObject({ kind: "written", present: 20, missing: 0 })
     expect((await previewOfFixture("fixed-template-fu-it-srs-01")).summary).toMatchObject({ kind: "template", present: 0 })
   }, 30000)

@@ -82,7 +82,7 @@ never write a section the product does not need. B-1 never writes `project.visio
 | B-1.1 Vision, problem, opportunity | addendum `vision` (ONE entry: who, what changes, why it matters) + addendum `goals` (ONE entry PER goal, 3–6, outcome-shaped - **exactly the goals the user approved**: the goals list in the decisions ledger / the answers, or the list the user agreed to in the recent turns; same count, same wording - never a goal you thought of while drafting; restate that list in `notes`) + problem/why-now; `content` in the user's language, `content_en` English | `fixed:1` |
 | B-1.2 Target users & jobs-to-be-done | addendum per persona/stakeholder, with the job each one needs done | `fixed:2.1` |
 | B-1.3 Value proposition & differentiation | addendum: what makes this worth using over the current way, per user group, drawn from vision/goals/B-1.2 - never invent a moat; no competitor questions or competitor assumptions for internal or public-sector projects | `fixed:1` |
-| B-1.4 MVP scope & feature hypotheses | addendum per capability, and the explicit not-now list | `fixed:1`, `fixed:3.1.2` |
+| B-1.4 MVP scope & feature hypotheses | addendum per capability, and the explicit not-now list. **A limit the user set on the first release** (how many use cases / screens / functions, "bản đầu gọn", which platform first, "chưa làm X") is scope ⇒ always `fixed:1` (S-2.2 turns it into Release 1.0 scope), never `fixed:3.1.2` | capability `fixed:1` or `fixed:3.1.2` (Screen Descriptions); limit / not-now `fixed:1` |
 | B-1.5 Success metrics & learning goals | addendum per metric, with a number where the user gave one | `fixed:4.2.2`, `fixed:4.2.3` |
 | B-1.6 Risks, assumptions, open questions | `other_requirements[]` (`kind` = `risk` / `assumption` / `open_question`; `statement` English + `statement_vi` in the user's language, same meaning) **and** `assumptions[]` for anything you filled in yourself. `notes` = the closing brief summary, 2–4 sentences: problem & goals (read from the vision/goals addendum), main users, first-release scope, how success is measured, the biggest risk. Do NOT list assumptions in `notes` - the server says them | `fixed:5.4` |
 
@@ -98,7 +98,7 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
   wrong place), **park** (true but not this release - retarget it to `fixed:5.4` so S-7.4 picks it up as
   an Other Requirement), or **drop** (only when the content is *wrong*, never when it is merely deferred).
   May write `addendum[]` and `assumptions[]` only - parking is a retarget, not a move into
-  `other_requirements[]`. `vision`/`goals` entries are always **keep** at `fixed:1`. Last cheap moment to fix a `target_section`.
+  `other_requirements[]`. `vision`/`goals` entries are always **keep** at `fixed:1`; so is a first-release limit (size in use cases / screens / functions, "chưa làm X") - one aimed at `fixed:3.1.2` is wrong ⇒ `set` its `target_section` to `fixed:1`. Last cheap moment to fix a `target_section`.
 - **B-2.3 Three-Lens Review.** Read the brief back through three lenses, one short paragraph each:
   **Skeptic** (what would make this fail, what is asserted without evidence), **Opportunity** (what the
   brief is under-claiming, what adjacent value is one step away), **Contextual** (what the domain,

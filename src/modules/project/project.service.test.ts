@@ -3,7 +3,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 const mocks = vi.hoisted(() => {
   const deleteMany = () => vi.fn(async (_filter: unknown) => ({ deletedCount: 1 }))
   return {
-    Project: { findOneAndDelete: vi.fn(), findOneAndUpdate: vi.fn(), create: vi.fn(), find: vi.fn(), findOne: vi.fn(), countDocuments: vi.fn(async () => 0) },
+    Project: { findOneAndDelete: vi.fn(), findOneAndUpdate: vi.fn(), exists: vi.fn(), deleteOne: vi.fn(), create: vi.fn(), find: vi.fn(), findOne: vi.fn(), countDocuments: vi.fn(async () => 0) },
+    /** Thứ tự gọi trong `purgeProject`: dọn dữ liệu xong mới xoá bản ghi dự án (QLHS #1). */
+    order: [] as string[],
     // UC-16: gói active của org — null ⇒ Free
     subscriptionPlan: vi.fn(async (): Promise<{ plan: string } | null> => null),
     ChatSession: { deleteMany: deleteMany() },
@@ -11,7 +13,9 @@ const mocks = vi.hoisted(() => {
       deleteMany: deleteMany(),
       find: vi.fn(() => ({ select: () => ({ lean: async () => [{ cloudinaryPublicId: "flintflow/brief" }, { cloudinaryPublicId: "flintflow/notes" }] }) }))
     },
-    Spine: { deleteMany: deleteMany() },
+    // QLHS #1: purge đọc Spine thô (`findOne().select().lean()`), không qua zod
+    spineRaw: vi.fn(async (): Promise<unknown> => ({ diagrams: [{ id: "D01" }, { id: "D02" }] })),
+    Spine: { deleteMany: deleteMany(), findOne: vi.fn() },
     Change: { deleteMany: deleteMany() },
     Baseline: { deleteMany: deleteMany() },
     Usage: { deleteMany: deleteMany() },
@@ -40,6 +44,16 @@ const mocks = vi.hoisted(() => {
     Comment: { deleteMany: deleteMany() },
     CommentCounter: { deleteMany: deleteMany() },
     TemplateMigration: { deleteMany: deleteMany() },
+    // QLHS #2 + collection theo dự án còn sót
+    StepRun: { deleteMany: deleteMany() },
+    AutoPass: { deleteMany: deleteMany() },
+    SpineLock: { deleteMany: deleteMany() },
+    SpineEmbedding: { deleteMany: deleteMany() },
+    RequirementExtraction: { deleteMany: deleteMany() },
+    ScreenMockupRun: { deleteMany: deleteMany() },
+    ProjectDocumentChunk: { deleteMany: deleteMany() },
+    RequirementSource: { deleteMany: deleteMany() },
+    GoogleDocLink: { deleteMany: deleteMany() },
     destroyDocumentAsset: vi.fn(async () => true),
     // FLF-265: ngôn ngữ tài khoản — null = chưa chọn
     accountLocaleOf: vi.fn(async (_userId: string): Promise<"vi" | "en" | null> => null)
@@ -73,6 +87,15 @@ vi.mock("../translation/translation-glossary.model.js", () => ({ TranslationGlos
 vi.mock("../translation/translation-run-lock.model.js", () => ({ TranslationRunLock: mocks.TranslationRunLock }))
 vi.mock("../comment/comment.model.js", () => ({ Comment: mocks.Comment, CommentCounter: mocks.CommentCounter }))
 vi.mock("../template-migration/template-migration.model.js", () => ({ TemplateMigration: mocks.TemplateMigration }))
+vi.mock("../pipeline/run-state.model.js", () => ({ StepRun: mocks.StepRun }))
+vi.mock("../pipeline/auto-pass.model.js", () => ({ AutoPass: mocks.AutoPass }))
+vi.mock("../change-request/spine-lock.model.js", () => ({ SpineLock: mocks.SpineLock }))
+vi.mock("../change-request/embedding/spine-embedding.model.js", () => ({ SpineEmbedding: mocks.SpineEmbedding }))
+vi.mock("../change-request/requirement-extraction.model.js", () => ({ RequirementExtraction: mocks.RequirementExtraction }))
+vi.mock("../diagram/screen-mockup-run.model.js", () => ({ ScreenMockupRun: mocks.ScreenMockupRun }))
+vi.mock("./project-document-chunk.model.js", () => ({ ProjectDocumentChunk: mocks.ProjectDocumentChunk }))
+vi.mock("./requirement-source.model.js", () => ({ RequirementSource: mocks.RequirementSource }))
+vi.mock("../google/google-doc-link.model.js", () => ({ GoogleDocLink: mocks.GoogleDocLink }))
 vi.mock("../credits/subscription.model.js", () => ({ Subscription: { findOne: () => ({ select: () => ({ lean: mocks.subscriptionPlan }) }) } }))
 vi.mock("../user/account-locale.js", () => ({ accountLocaleOf: mocks.accountLocaleOf }))
 
@@ -86,11 +109,23 @@ const ORG = "64b00000000000000000000f"
 describe("deleteProject", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.getSpine.mockResolvedValue({ diagrams: [{ id: "D01" }, { id: "D02" }] })
+    mocks.order.length = 0
+    mocks.spineRaw.mockResolvedValue({ diagrams: [{ id: "D01" }, { id: "D02" }] })
+    mocks.Spine.findOne.mockImplementation(() => ({ select: () => ({ lean: mocks.spineRaw }) }))
+    mocks.Spine.deleteMany.mockImplementation(async () => {
+      mocks.order.push("purge")
+      return { deletedCount: 1 }
+    })
+    mocks.Project.deleteOne.mockImplementation(() => ({
+      setOptions: vi.fn(async () => {
+        mocks.order.push("deleteProject")
+        return { deletedCount: 1 }
+      })
+    }))
   })
 
-  /** `purgeProject` gọi `findOneAndDelete(...).setOptions(WITH_DELETED)` (FLF-401: thấy cả dự án đã xoá mềm). */
-  const purgeFinds = (project: unknown) => mocks.Project.findOneAndDelete.mockReturnValue({ setOptions: vi.fn(async () => project) })
+  /** `purgeProject` tìm dự án bằng `exists(...).setOptions(WITH_DELETED)` (FLF-401: thấy cả dự án đã xoá mềm). */
+  const purgeFinds = (project: unknown) => mocks.Project.exists.mockReturnValue({ setOptions: vi.fn(async () => project) })
 
   it("FLF-401 hard (nút Xoá vĩnh viễn): chỉ xoá mềm — đặt deletedAt + deletedBy, không dọn collection / file nào", async () => {
     mocks.Project.findOneAndUpdate.mockResolvedValue({ _id: PROJECT })
@@ -130,9 +165,36 @@ describe("deleteProject", () => {
     for (const model of [mocks.Comment, mocks.CommentCounter, mocks.TemplateMigration]) {
       expect(model.deleteMany).toHaveBeenCalledWith({ projectId: PROJECT })
     }
+    // QLHS #2: lượt chạy bước, khoá CR, vector… và các collection theo dự án khác
+    for (const model of [mocks.StepRun, mocks.AutoPass, mocks.SpineLock, mocks.SpineEmbedding, mocks.RequirementExtraction, mocks.ScreenMockupRun, mocks.ProjectDocumentChunk, mocks.RequirementSource, mocks.GoogleDocLink]) {
+      expect(model.deleteMany).toHaveBeenCalledWith({ projectId: PROJECT })
+    }
     expect(mocks.removeDocFiles).toHaveBeenCalledWith(PROJECT)
     expect(mocks.removeDiagram.mock.calls).toEqual([[PROJECT, "D01"], [PROJECT, "D02"]])
     expect(mocks.destroyDocumentAsset.mock.calls).toEqual([["flintflow/brief"], ["flintflow/notes"]])
+    // QLHS #1: dọn dữ liệu trước, xoá bản ghi dự án sau
+    expect(mocks.order).toEqual(["purge", "deleteProject"])
+    expect(mocks.Project.deleteOne).toHaveBeenCalledWith({ _id: PROJECT, organizationId: ORG })
+    expect(mocks.Project.findOneAndDelete).not.toHaveBeenCalled()
+  })
+
+  it("purgeProject QLHS #1: đọc Spine thô (không qua zod) — Spine cũ sai schema vẫn xoá được, file sơ đồ vẫn dọn", async () => {
+    purgeFinds({ _id: PROJECT })
+    mocks.spineRaw.mockResolvedValue({ assumptions: [{ statement_vi: "x".repeat(400) }], diagrams: [{ id: "D09" }, { id: 5 }] })
+
+    await expect(projectService.purgeProject(PROJECT, ORG)).resolves.toBe(true)
+
+    expect(mocks.getSpine).not.toHaveBeenCalled()
+    expect(mocks.removeDiagram.mock.calls).toEqual([[PROJECT, "D09"]])
+    expect(mocks.order).toEqual(["purge", "deleteProject"])
+  })
+
+  it("purgeProject QLHS #1: dọn lỗi giữa chừng ⇒ KHÔNG xoá bản ghi dự án (còn xoá lại được, không mồ côi)", async () => {
+    purgeFinds({ _id: PROJECT })
+    mocks.Change.deleteMany.mockRejectedValueOnce(new Error("mongo down"))
+
+    await expect(projectService.purgeProject(PROJECT, ORG)).rejects.toThrow("mongo down")
+    expect(mocks.Project.deleteOne).not.toHaveBeenCalled()
   })
 
   it("purgeProject: lỗi xoá file sơ đồ không làm hỏng việc xoá project", async () => {

@@ -137,4 +137,18 @@ describe("Upload SRS có sẵn - tải về giống file upload", () => {
     expect(after.filter((t) => t.includes("CR-001 Update registration closing time"))).toHaveLength(1)
     expect(after.join("\n")).not.toContain("Import SRS")
   })
+
+  it("P09 (#25): quy tắc bị xoá qua CR ⇒ bản nháp không in lại nguyên văn file gốc", async () => {
+    const { seeded, projectId, version } = await importExisting(FPT_SRS, "free")
+    const rule = (await spineRepository.get(projectId))!.business_rules[0]
+    expect(rule).toBeTruthy()
+    expect((await textsOf(await exportDraft(seeded, projectId))).join("\n")).toContain(rule.statement)
+    await applyTransaction(projectId, {
+      base_version: await version(), by: seeded.userId, reason: "CR-002 Remove rule", step_id: null,
+      ops: [{ op: "remove", path: `business_rules[id=${rule.id}]` }]
+    })
+    const after = (await textsOf(await exportDraft(seeded, projectId))).join("\n")
+    expect(after).not.toContain(rule.statement)
+    expect(after).toContain("CR-002 Remove rule")
+  })
 })

@@ -507,6 +507,39 @@ describe("preview - diff + impact, không ghi", () => {
     expect(await writtenChanges()).toBe(0)
   })
 
+  it("P08 T7: trả lời 'Đúng, …' ở câu hỏi xác nhận ⇒ model nhận cả yêu cầu gốc + câu đã hỏi, lô có thay đổi", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [{ op: "set", path: "actors[id=A01].name", value: "Product Owner" }] }))
+    const pending = { request: "Đổi tên Founder cho rõ vai trò sở hữu sản phẩm", question: "Bạn muốn đổi thành Product Owner đúng không?" }
+    const shown = await preview(PROJECT, USER, { base_version: 1, instruction: "Đúng, đổi thành Product Owner", clarification_rounds: 1, pending_request: pending }, {}, deps)
+    const vars = vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as Record<string, unknown>
+    expect(vars.user_message).toContain(pending.request)
+    expect(vars.user_message).toContain(pending.question)
+    expect(vars.user_message).toContain("Đúng, đổi thành Product Owner")
+    expect(shown.ok).toBe(true)
+    expect(shown.changes.length).toBeGreaterThan(0)
+    expect(shown.clarification).toBeUndefined()
+  })
+
+  it("P08 T7: lượt không phải trả lời câu hỏi ⇒ user_message giữ nguyên câu lệnh", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [{ op: "set", path: "actors[id=A01].name", value: "Product Owner" }] }))
+    await preview(PROJECT, USER, { base_version: 1, instruction: "Đổi tên Founder thành Product Owner", pending_request: { request: "x", question: "y" } }, {}, deps)
+    const vars = vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as Record<string, unknown>
+    expect(vars.user_message).toBe("Đổi tên Founder thành Product Owner")
+  })
+
+  it("FLF-439: trả lời câu hỏi làm rõ bằng 'không đổi nữa' ⇒ bỏ yêu cầu, không gọi model; 'không đổi' (trả lời có / không) vẫn gửi model", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ clarification_needed: "Màn nào?" }))
+    const dropped = await preview(PROJECT, USER, { base_version: 1, instruction: "không đổi nữa", clarification_rounds: 1 }, {}, deps)
+    expect(dropped).toMatchObject({ ok: true, changes: [], notes: expect.stringContaining("Đã bỏ yêu cầu") })
+    expect(deps.changeExecutor).not.toHaveBeenCalled()
+
+    await preview(PROJECT, USER, { base_version: 1, instruction: "không đổi", clarification_rounds: 1 }, {}, deps)
+    expect(deps.changeExecutor).toHaveBeenCalledTimes(1)
+  })
+
   it("isWithdrawal: chỉ câu mở đầu bằng lời rút lại; câu sửa bình thường không tính", () => {
     for (const t of ["thôi không cần thêm nữa", "Bỏ qua", "huỷ yêu cầu", "never mind", "Không cần nữa"]) expect(isWithdrawal(t), t).toBe(true)
     for (const t of ["Thêm use case X", "đổi tên A01 thành Product Owner", "chỉ thao tác xóa"]) expect(isWithdrawal(t), t).toBe(false)
@@ -761,6 +794,19 @@ describe("buildChangeProjection - brief_core ở pha Brief", () => {
 
   it("phase ngoài Brief: không có brief_core", () => {
     expect(buildChangeProjection(at("S-3"), "làm cho tài liệu hay hơn").brief_core).toBeUndefined()
+  })
+
+  it("P08 T6/T7: ngoài Brief, lệnh nhắc §1 / mục tiêu ⇒ project kèm vision + goals; lệnh khác thì không", () => {
+    const spine = { ...at("S-9"), project: { ...FIXTURE.project, goals: ["Cut phone bookings by 60%.", "Keep no-show under 10%."] } }
+    const p1 = buildChangeProjection(spine, "Trong §1, mục tiêu thứ hai ghi rõ 3 tháng đầu").project as Record<string, unknown>
+    expect(p1.goals).toEqual(["Cut phone bookings by 60%.", "Keep no-show under 10%."])
+    expect(buildChangeProjection(spine, "Đổi tên actor A01 thành Product Owner").project).not.toHaveProperty("goals")
+  })
+
+  it("P08 (E2E P07 #1): 'bổ sung loại cho toàn bộ thông báo' ⇒ projection có đủ mọi thông báo, không chỉ vài cái khớp chữ", () => {
+    const projection = buildChangeProjection(FIXTURE, "Bổ sung loại và ngữ cảnh cho toàn bộ thông báo")
+    expect((projection.messages as unknown[]).length).toBe(Math.min(FIXTURE.messages.length, 80))
+    expect(FIXTURE.messages.length).toBeGreaterThan(2)
   })
 })
 
@@ -1033,7 +1079,11 @@ describe("isChangeInstruction - nhận lệnh sửa trong chat thường", () =>
     "Thêm một use case cho admin",
     "Cập nhật mô tả của FN001",
     "Rename the Admin actor to Administrator",
-    "remove screen S07"
+    "remove screen S07",
+    // P08: chỗ cần sửa đứng trước động từ
+    "Trong §1 Tổng quan sản phẩm, mục tiêu đầu tiên đổi thành: Khách nhận hàng trong 2 ngày",
+    "Ở mục 5.3, thêm thông báo khi lịch hẹn bị huỷ",
+    "Mục tiêu thứ hai sửa lại thành có thời hạn 3 tháng"
   ])("nhận: %s", (message) => {
     expect(isChangeInstruction(message)).toBe(true)
   })

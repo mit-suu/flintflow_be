@@ -45,3 +45,27 @@ describe("expandIndexSelectors - op chỉ số trên mảng chuỗi (e2e FAP 21/
     expect(expandIndexSelectors(FIXTURE, ops)).toEqual(ops)
   })
 })
+
+describe("P08 T6: mảng chuỗi project.goals", () => {
+  const spine: Spine = { ...FIXTURE, project: { ...FIXTURE.project, goals: ["Book in one minute.", "Cut no-shows by half.", "Grow repeat visits."] } }
+
+  it("set project.goals[0] ⇒ set cả mảng, đổi đúng mục tiêu đầu", () => {
+    const out = expandIndexSelectors(spine, [{ op: "set", path: "project.goals[0]", value: "Book in thirty seconds." }])
+    expect(out).toEqual([{ op: "set", path: "project.goals", value: ["Book in thirty seconds.", "Cut no-shows by half.", "Grow repeat visits."] }])
+  })
+
+  it("set project.goals[=<chữ cũ>] ⇒ set cả mảng (op engine không set được phần tử vô hướng)", () => {
+    const out = expandIndexSelectors(spine, [{ op: "set", path: "project.goals[=Cut no-shows by half.]", value: "Cut no-shows by half within the first 3 months." }])
+    expect(out[0]).toEqual({ op: "set", path: "project.goals", value: ["Book in one minute.", "Cut no-shows by half within the first 3 months.", "Grow repeat visits."] })
+  })
+
+  it("add project.goals[1] ⇒ chèn vào vị trí", () => {
+    const out = expandIndexSelectors(spine, [{ op: "add", path: "project.goals[1]", value: "Keep barbers' calendars full." }])
+    expect(out[0].value).toEqual(["Book in one minute.", "Keep barbers' calendars full.", "Cut no-shows by half.", "Grow repeat visits."])
+  })
+
+  it("mảng có id vẫn giữ nguyên op chỉ số (op engine từ chối, chọn bằng khoá)", () => {
+    const ops: Op[] = [{ op: "set", path: "actors[1]", value: { id: "A02" } }, { op: "set", path: "project.goals[=không có]", value: "x" }]
+    expect(expandIndexSelectors(spine, ops)).toEqual(ops)
+  })
+})
