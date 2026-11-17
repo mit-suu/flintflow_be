@@ -594,9 +594,16 @@ export function projectTableColumns(block: Extract<Block, { type: "table" }>, he
   const definition = byDictionary ?? TABLE_ENTITIES.find((entry) => entry.entity === entity)
   if (!definition) unavailable("Source table entity has no renderer")
   const generated = block.header.map((cell) => fieldOf(definition!, cell.map((r) => r.text).join("")))
+  const claimed = new Set(mappings.flatMap((m) => (m.field_path ? [m.field_path.split("[].")[1]] : [])))
   const indexes = headers.map((header, column) => {
     const mapping = mappings.find((m) => m.column_index === column)
-    const field = byDictionary ? fieldOf(byDictionary, header) : mapping?.field_path?.split("[].")[1]
+    // P07: cột của mẫu mà bản ghi import chưa gán field (từ điển lúc đó chưa có "Message Type" / "Context") ⇒ nhận theo tên
+    // cột của từ điển cùng thực thể, để dữ liệu mới của Spine vào đúng cột thay vì ô trống
+    const unmapped = () => {
+      const guess = fieldOf(definition!, header)
+      return guess && !claimed.has(guess) ? guess : undefined
+    }
+    const field = byDictionary ? fieldOf(byDictionary, header) : (mapping?.field_path?.split("[].")[1] ?? unmapped())
     if (mapping?.role === "row_no") return -2
     // FLF-372: cột của mẫu mà FlintFlow không có dữ liệu ("Thuộc tính chính", "Yêu cầu liên quan") ⇒ để trống, giữ bố cục mẫu
     return field ? generated.indexOf(field) : -1

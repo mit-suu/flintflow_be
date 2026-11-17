@@ -80,7 +80,8 @@ describe("matchTableHeader", () => {
 
   it("FLF-251: gán cột theo điểm cao nhất cả bảng - khớp đúng tên thắng khớp gần; cột ký hiệu # không khớp", () => {
     // trước đây "Message Type" (khớp gần "message") giành mất nội dung, cột "Content" thật bị bỏ
-    expect(fields(["#", "Message Code", "Message Type", "Context", "Content"], "fixed:5.3")).toEqual([null, "messages[].code", null, null, "messages[].text"])
+    // P07: "Message Type" / "Context" nay có field riêng trong Spine
+    expect(fields(["#", "Message Code", "Message Type", "Context", "Content"], "fixed:5.3")).toEqual([null, "messages[].code", "messages[].type", "messages[].context", "messages[].text"])
   })
 
   it("FLF-251: đủ các cột FlintFlow xuất ra ⇒ file xuất ra import lại không mất dữ liệu bảng", () => {

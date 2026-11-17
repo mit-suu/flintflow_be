@@ -85,7 +85,7 @@ export const SCHEMA_EXCERPT: Readonly<Record<string, string>> = {
     'deployment_nodes[]: { name, kind: "device" | "execution_environment" | "node", parent: <name / key of the node that contains it, or null>, description?: <the small text under the node name, one string as written - NOT components>, artifacts: string[], components: string[] (only shapes drawn as UML artifact / component or a list labelled so), links: [{ to: <node name / key>, protocol? }] } (only from a deployment diagram)',
   business_rules: 'business_rules[]: { statement, tier: "high" | "detail" }',
   common_requirements: "common_requirements[]: { category, statement }",
-  messages: "messages[]: { code, text, function_ids: <function ids / names that show it> }",
+  messages: "messages[]: { code, text, function_ids: <function ids / names that show it>, type?: error | warning | info | success | confirm, context?: <when it is shown> }",
   other_requirements: 'other_requirements[]: { kind: "risk" | "assumption" | "open_question" | "technical_risk", statement }',
   glossary: "glossary[]: { term, term_native: <term in the other language if given>, definition }",
   references:

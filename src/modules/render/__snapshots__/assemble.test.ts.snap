@@ -19209,6 +19209,16 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             ],
             [
               {
+                "text": "Type",
+              },
+            ],
+            [
+              {
+                "text": "Context",
+              },
+            ],
+            [
+              {
                 "text": "Text",
               },
             ],
@@ -19223,6 +19233,16 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
               [
                 {
                   "text": "E-AUTH-001",
+                },
+              ],
+              [
+                {
+                  "text": "Error",
+                },
+              ],
+              [
+                {
+                  "text": "When the sign-in details do not match an account",
                 },
               ],
               [
@@ -19244,6 +19264,16 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
               ],
               [
                 {
+                  "text": "Error",
+                },
+              ],
+              [
+                {
+                  "text": "When a visitor registers with an email that already has an account",
+                },
+              ],
+              [
+                {
                   "text": "This email address is already registered.",
                 },
               ],
@@ -19257,6 +19287,16 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
               [
                 {
                   "text": "E-AUTH-003",
+                },
+              ],
+              [
+                {
+                  "text": "",
+                },
+              ],
+              [
+                {
+                  "text": "",
                 },
               ],
               [
@@ -19278,6 +19318,16 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
               ],
               [
                 {
+                  "text": "",
+                },
+              ],
+              [
+                {
+                  "text": "",
+                },
+              ],
+              [
+                {
                   "text": "You do not have enough credits for this action.",
                 },
               ],
@@ -19291,6 +19341,16 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
               [
                 {
                   "text": "E-PIPE-001",
+                },
+              ],
+              [
+                {
+                  "text": "",
+                },
+              ],
+              [
+                {
+                  "text": "",
                 },
               ],
               [
@@ -19312,6 +19372,16 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
               ],
               [
                 {
+                  "text": "",
+                },
+              ],
+              [
+                {
+                  "text": "",
+                },
+              ],
+              [
+                {
                   "text": "This change was rejected because it would break document consistency.",
                 },
               ],
@@ -19329,6 +19399,16 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
               ],
               [
                 {
+                  "text": "",
+                },
+              ],
+              [
+                {
+                  "text": "",
+                },
+              ],
+              [
+                {
                   "text": "The document has not been assembled yet. Run Document Assembly first.",
                 },
               ],
@@ -19342,6 +19422,16 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
               [
                 {
                   "text": "E-PAY-001",
+                },
+              ],
+              [
+                {
+                  "text": "",
+                },
+              ],
+              [
+                {
+                  "text": "",
                 },
               ],
               [
