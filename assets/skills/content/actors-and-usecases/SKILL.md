@@ -1,7 +1,7 @@
 ---
 skill_id: actors-and-usecases
 kind: content
-version: 0.12.0
+version: 0.13.0
 description: "S-3.1–S-3.5 actors, roles, actor–goal list, missing use case sweep, relationships, descriptions"
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -69,7 +69,7 @@ sits on the use case it starts. **Account use cases follow S-3.1 access**: `self
 One use case = one goal reachable in one sitting, independent of UI screens; "Click Accept Button" is too fine.
 Naming - code re-checks every name and flags each miss, so get it right here. **U1** Title Case, no trailing period. **U2** one goal: no "and", "/" or comma - two goals are two use cases. **U3** a concrete verb, never Manage, Handle, Process, Maintain, Administer, Support, Control, Operate, Use, Do, Perform, Work, Deal or Take: "Manage Students" is split by real goal ("Enroll Student", "Update Student Profile", "Deactivate Student"). **U4** the actor is never the subject ("Teacher Enters Grades" ⇒ "Enter Grades", no "… by Teacher"); an actor type that is also the data being handled is fine ("Create Student Record").
 **U5** no UI or tech term (Button, Screen, Page, Form, Popup, Tab, Modal, API, Database). **U6** at most 5 words. **U7** the object uses the business term from the Brief/Glossary, the same term throughout. **U8** no two use cases share a name. **U9** the name shows the value the actor gets ("Update Record" ⇒ "Approve Purchase Order").
-Cover every goal in `project.goals[]` and every `release_scope.in` bullet; every human actor needs at least one use case, and a S-3.2 batch with no new `use_cases[]` is almost always wrong.
+Cover every goal in `project.goals[]` and every `release_scope.in` bullet; every human actor needs at least one use case, and a S-3.2 batch with no new `use_cases[]` is almost always wrong. **A size the user set** (vision, scope, ledger, their words: "bản đầu gọn, khoảng 5–8 use case") **is a hard cap** that overrides this coverage rule and the S-3.3 sweep: merge goals into fewer use cases, or move the extra theme to `release_scope.out` / an assumption. List already over the cap (at S-3.3, or the user asks to trim) ⇒ merge NOW: `remove` the extra `use_cases[id=…]` and fold each one's scope into the surviving use case's `name`/`description` (`set`); the sweep adds nothing then. Never write in `reply` that you merged unless the ops do it.
 
 ## S-3.3 - Missing Use Case Sweep
 
