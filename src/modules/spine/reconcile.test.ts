@@ -88,6 +88,7 @@ import {
   staleSections,
   type ReconcileDeps
 } from "./reconcile.service.js"
+import { stepsOf } from "./section-registry.js"
 import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
 import { resetStore, store } from "../translation/__tests__/translation-store.js"
@@ -191,6 +192,19 @@ describe("changesMakingStale / staleSections", () => {
     const changes = [change({ seq: 10 }), change({ seq: SEED_SEQ + 1 })]
     const causing = changesMakingStale(FIXTURE, changes, "fixed:2.2.2")
     expect(causing.map((c) => c.seq)).toEqual([SEED_SEQ + 1])
+  })
+
+  it("FLF-431: change trước lượt chốt lại (accepted_at) của step sở hữu không còn gây stale — cùng mốc với section-status", () => {
+    const owner = stepsOf("fixed:2.2.2", FIXTURE)[0]
+    const reaccept = change({ seq: SEED_SEQ + 5, path: `steps[id=${owner}].accepted_at`, before: null, value: "2026-11-16T00:00:00.000Z" })
+    const changes = [change({ seq: SEED_SEQ + 1 }), reaccept, change({ seq: SEED_SEQ + 9 })]
+    expect(changesMakingStale(FIXTURE, changes, "fixed:2.2.2").map((c) => c.seq)).toEqual([SEED_SEQ + 9])
+  })
+
+  it("FLF-431: sơ đồ vẽ lại theo nguồn mới (hash đổi) không tự gây stale", () => {
+    const d = FIXTURE.diagrams.find((x) => x.kind === "usecase")!
+    const redraw = change({ path: `diagrams[id=${d.id}]`, before: { ...d, source_hash: "a" }, value: { ...d, source_hash: "b" } })
+    expect(changesMakingStale(FIXTURE, [redraw], "fixed:2.2.1")).toEqual([])
   })
 
   it("change do chính step sở hữu ghi không làm stale", () => {
