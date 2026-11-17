@@ -33,6 +33,9 @@ import * as importService from "./import.service.js"
 import * as reuploadService from "./reupload.service.js"
 import * as stepPlanService from "./step-plan.service.js"
 import { authorizeMode1, mode1Handler, parseInput } from "./mode1.http.js"
+import { getAuthClient } from "../google/google-auth.service.js"
+import { fetchDocxFromDrive } from "../google/google-import.service.js"
+import { ImportGoogleDocSchema } from "../google/google.validation.js"
 import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
 
 /**
@@ -66,6 +69,18 @@ export const uploadImport = mode1Handler(async (req, res) => {
   // Client cũ gửi kèm `intent`: vẫn kiểm định dạng nhưng bỏ qua — ý định lấy từ Project (hộp Tạo dự án)
   parseInput(uploadImportBodySchema, req.body)
   const doc = await importService.uploadImport(auth.projectId, auth.userId, requireFile(req))
+  return sendSuccess(res, 201, { import: importService.toImportDto(doc) })
+})
+
+/**
+ * `POST /projects/:id/import/google-docs` `{ fileId }` (contract #46) — như `POST /:id/import` nhưng file lấy từ Google
+ * Drive (Google Doc xuất sang .docx, hoặc .docx có sẵn). Từ `uploadImport` trở đi là đúng luồng upload cũ.
+ */
+export const importFromGoogleDocs = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const { fileId } = parseInput(ImportGoogleDocSchema, req.body)
+  const file = await fetchDocxFromDrive(await getAuthClient(auth.userId), fileId)
+  const doc = await importService.uploadImport(auth.projectId, auth.userId, file)
   return sendSuccess(res, 201, { import: importService.toImportDto(doc) })
 })
 
