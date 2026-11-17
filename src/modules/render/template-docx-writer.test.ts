@@ -251,6 +251,28 @@ describe("writeTemplateDocx", () => {
     expect(between.find((b) => b.kind === "table")!.rows).toEqual([["A", "B"]])
   })
 
+  it("P09 (#25): mục của mẫu chưa có dữ liệu (bảng thực thể rỗng) ⇒ bỏ hình mẫu (ảnh / OLE), giữ field và ngắt trang", async () => {
+    const picture = `<w:p><w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><wp:docPr id="1" name="Sample ERD"/></wp:inline></w:drawing></w:r></w:p>`
+    const ole = `<w:p><w:r><w:object><v:shape xmlns:v="urn:schemas-microsoft-com:vml" id="ole1"/></w:object></w:r></w:p>`
+    const field = `<w:p><w:fldSimple w:instr=" TOC "><w:r><w:t>toc</w:t></w:r></w:fldSimple></w:p>`
+    const zip = await JSZip.loadAsync(await template())
+    zip.file("word/document.xml", (await zip.file("word/document.xml")!.async("string")).replace(`${heading("Requirements")}${body}`, `${heading("Requirements")}${body}${picture}${ole}${field}`))
+    const input = await zip.generateAsync({ type: "nodebuffer" }), parsed = await parseDocument(input)
+    const map = [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:1" }]
+    const region = async (opts: { stripTemplateText?: boolean }) => {
+      const xml = (await DocxPackage.load(await writeTemplateDocx(document(), input, map, [], opts))).requireXml("word/document.xml")
+      const text = serializeXml(await xml)
+      return text.slice(text.indexOf(">Requirements<"), text.indexOf(">Repeated<"))
+    }
+    const stripped = await region({ stripTemplateText: true })
+    expect(stripped).not.toContain("<w:drawing")
+    expect(stripped).not.toContain("<w:object")
+    expect(stripped).toContain('w:instr=" TOC "')
+    expect(stripped).toContain('w:type="page"')
+    // Dự án có sẵn (không phải khung mẫu): ảnh của file là nội dung — giữ
+    expect(await region({})).toContain("<w:drawing")
+  })
+
   it("FLF-378: mục đã soạn - bảng mẫu không được điền vẫn bỏ dòng mẫu khi stripTemplateText", async () => {
     const input = await template(), parsed = await parseDocument(input), doc = document()
     doc.sections = [{ id: "fixed:1", heading: "Requirements", number: "1", level: 1, blocks: [{ type: "paragraph", runs: runs("Drafted requirement") }] }]

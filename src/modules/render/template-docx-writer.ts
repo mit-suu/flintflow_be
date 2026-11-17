@@ -395,13 +395,15 @@ const stripSampleRows = (tbl: Element): void => {
 
 /**
  * FLF-378: mục của mẫu chưa có nội dung soạn — bỏ đoạn thân (hướng dẫn, ví dụ, ngữ cảnh) và dòng mẫu của bảng. Ngắt trang /
- * section, field (mục lục), ảnh, đối tượng lạ giữ nguyên.
+ * section, field (mục lục), đối tượng lạ giữ nguyên.
+ * P09 (#25): hình mẫu (ảnh / OLE: sơ đồ ngữ cảnh, UC, luồng màn, ERD, mockup của mẫu) cũng bỏ — mục chưa có dữ liệu (vd bảng
+ * thực thể rỗng) không in hình ví dụ của mẫu; màn Xem không có hình đó.
  */
 const stripTemplateBody = (nodes: readonly Element[]): void => {
   for (const node of nodes) {
     const parent = node.parentNode
     if (isW(node, "tbl")) stripSampleRows(node)
-    else if (isW(node, "p") && !isLayoutParagraph(node) && !hasOpaqueContent(node)) parent?.removeChild(node)
+    else if (isW(node, "p") && !isLayoutParagraph(node) && (!hasOpaqueContent(node) || isSampleObject(node))) parent?.removeChild(node)
   }
 }
 
