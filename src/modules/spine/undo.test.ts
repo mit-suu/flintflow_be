@@ -178,6 +178,23 @@ describe("undoLast - khôi phục Spine", () => {
     expect(undone.changes.every((c) => c.op === "revert")).toBe(true)
   })
 
+  it("FLF-431 (FAP #22): lô trộn mốc duyệt + dữ liệu ⇒ chỉ đảo dữ liệu, mốc duyệt của step giữ nguyên", async () => {
+    await seed()
+    const step = FIXTURE.steps.find((x) => x.status === "accepted")!
+    const applied = await applyTransaction(PROJECT, {
+      base_version: 1,
+      by: USER,
+      ops: [
+        { op: "set", path: "actors[id=A01].name", value: "Product Owner" },
+        { op: "set", path: `steps[id=${step.id}].accepted_at`, value: "2026-11-16T05:00:00.000Z" }
+      ]
+    })
+    const undone = await undoLast(PROJECT, USER, { base_version: applied.spine_version })
+    expect(undone.spine.actors.find((a) => a.id === "A01")?.name).toBe(FIXTURE.actors.find((a) => a.id === "A01")?.name)
+    expect(undone.spine.steps.find((x) => x.id === step.id)?.accepted_at).toBe("2026-11-16T05:00:00.000Z")
+    expect(undone.changes.map((c) => c.path)).toEqual(["actors[id=A01].name"])
+  })
+
   it("undo hai lần liên tiếp đi lùi đúng thứ tự", async () => {
     await seed()
     const before = comparable(structuredClone(FIXTURE))
