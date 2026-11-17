@@ -498,3 +498,52 @@ describe("reconcile ở dự án có ngôn ngữ tài liệu khác ngôn ngữ g
     expect(store.translations.get(`${PROJECT}|vi|${hashSource(description)}`)).toMatchObject({ text: "Chủ sản phẩm tạo dự án.", origin: "author" })
   })
 })
+
+// ─── P12 (T10, chốt câu 9): người khác / bước khác ghi giữa hai lượt "Viết lại" ──────
+
+describe("P12 - reconcile lượt 2 khi Spine vừa đổi ở nơi khác", () => {
+  const OTHER = "650000000000000000000011"
+  const firstPass = async () => {
+    await seed()
+    await renameActor()
+    const version = (await repo.get(PROJECT))!.spine_version
+    deps.lastEditor = vi.fn(async () => ({ name: "Bình", at: new Date("2026-11-17T09:05:00.000Z") }))
+    deps.reconcileExecutor = vi.fn(async (_type, input) => {
+      const stepId = (input.promptVariables as { step_id: string }).step_id
+      if (stepId === "S-3.2") return opsResult([{ op: "set", path: "use_cases[id=UC02].description", value: "The Product Owner creates a project." }])
+      if (stepId === "S-4.3") return opsResult([{ op: "set", path: "roles[id=R1].name", value: "Product Owner" }])
+      return opsResult([])
+    })
+    const previewed = await reconcile(PROJECT, USER, { base_version: version }, {}, deps)
+    if (isReconcileApplied(previewed)) throw new Error("lượt 1 lẽ ra trả preview")
+    return { previewed, version }
+  }
+  const otherWrites = async (path: string, value: unknown) => {
+    const current = (await repo.get(PROJECT))!.spine_version
+    await applyTransaction(PROJECT, { base_version: current, by: OTHER, ops: [{ op: "set", path, value }], reason: "người khác sửa" })
+  }
+
+  it("người khác ghi chỗ khác ⇒ vẫn ghi cả lô, không 'Tài liệu vừa thay đổi'", async () => {
+    const { previewed, version } = await firstPass()
+    await otherWrites("glossary[id=G01].definition", "Tài liệu đặc tả yêu cầu.")
+    const result = await reconcile(PROJECT, USER, { base_version: version, preview_id: previewed.preview_id }, {}, deps)
+    if (!isReconcileApplied(result)) throw new Error("lượt 2 lẽ ra đã áp")
+    expect(result.spine.use_cases.find((u) => u.id === "UC02")?.description).toBe("The Product Owner creates a project.")
+    expect(result.spine.roles.find((r) => r.id === "R1")?.name).toBe("Product Owner")
+    expect(result.redraft_sections).toBeUndefined()
+  })
+
+  it("người khác sửa đúng chữ một mục ⇒ ghi các mục khác, mục đó chưa ghi và vẫn stale để AI soạn lại", async () => {
+    const { previewed, version } = await firstPass()
+    await otherWrites("use_cases[id=UC02].description", "Bình viết lại mô tả UC02.")
+    const result = await reconcile(PROJECT, USER, { base_version: version, preview_id: previewed.preview_id }, {}, deps)
+    if (!isReconcileApplied(result)) throw new Error("lượt 2 lẽ ra đã áp")
+    expect(result.spine.use_cases.find((u) => u.id === "UC02")?.description).toBe("Bình viết lại mô tả UC02.")
+    expect(result.spine.roles.find((r) => r.id === "R1")?.name).toBe("Product Owner")
+    expect(result.redraft_sections).toContain("fixed:2.2.2")
+    expect(result.skipped).toEqual([expect.objectContaining({ path: "use_cases[id=UC02]", changed_by: "Bình", current: "Bình viết lại mô tả UC02." })])
+    const { projectId: _p, ...spine } = (await repo.get(PROJECT))!
+    expect(awaitingReaccept(spine, "fixed:3.1.3")).toBe(true)
+    expect(computeStatus(spine, (await repo.listChanges(PROJECT)) as SpineChange[], "fixed:2.2.2")).toBe("stale")
+  })
+})

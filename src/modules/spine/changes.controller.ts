@@ -176,6 +176,11 @@ export const applyChanges = catchAsync(async (req: Request, res: Response) => {
                 vi: `Đã áp dụng ${count} thay đổi vào tài liệu.`,
                 en: `Applied ${count} change${count === 1 ? "" : "s"} to the document.`
               })
+            : result.already_applied?.length
+            ? byLanguage(replyLanguage, {
+                vi: `Đã được ${[...new Set(result.already_applied.map((p) => p.changed_by))].join(", ")} sửa giống đề xuất của bạn - không ghi lại.`,
+                en: `${[...new Set(result.already_applied.map((p) => p.changed_by))].join(", ")} already made the same edit - nothing written again.`
+              })
             : byLanguage(replyLanguage, { vi: "Đã xác nhận: nội dung không đổi.", en: "Confirmed: the content is unchanged." })) + stillOpen,
         count,
         spine_version: result.spine_version,
@@ -192,10 +197,16 @@ export const applyChanges = catchAsync(async (req: Request, res: Response) => {
         branch: result.branch,
         impact: result.impact,
         ...(result.cr_id ? { cr_id: result.cr_id } : {}),
-        ...(resolvedCommentId ? { resolved_comment_id: resolvedCommentId } : {})
+        ...(resolvedCommentId ? { resolved_comment_id: resolvedCommentId } : {}),
+        // P12 (BF §3.2): người khác đã sửa giống đề xuất ⇒ không ghi lại
+        ...(result.already_applied?.length ? { already_applied: result.already_applied } : {})
       }
     )
   } catch (err) {
+    // P12: đụng chỗ người khác vừa sửa ⇒ lượt này nằm lại trong phiên (màn so sánh hiện ở FE, câu báo ở transcript)
+    if (session && err instanceof ApiError && Array.isArray(err.meta?.conflicts)) {
+      await changeTranscript.recordChangeTurn(session, null, { kind: "change_error", reply: err.message })
+    }
     return sendDomainError(res, err)
   }
 })
@@ -254,7 +265,12 @@ export const reconcileChanges = catchAsync(async (req: Request, res: Response) =
       res,
       200,
       { txn: result.txn, spine_version: result.spine_version, changes: result.changes, spine: result.spine },
-      { branch: result.branch, impact: result.impact }
+      {
+        branch: result.branch,
+        impact: result.impact,
+        // P12 (chốt câu 9): mục bị người khác sửa đúng chữ giữa hai lượt — chưa ghi, FE gọi "Viết lại" lần nữa để AI soạn lại
+        ...(result.redraft_sections?.length ? { redraft_sections: result.redraft_sections, skipped: result.skipped ?? [] } : {})
+      }
     )
   } catch (err) {
     return sendDomainError(res, err)
@@ -322,6 +338,13 @@ export const listPendingPreviewSections = catchAsync(async (req: Request, res: R
 export const discardPreview = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
   const discarded = changeService.discardPreview(auth.projectId, String(req.params.previewId), auth.userId)
+  // P12 (BF §3.2 "Bỏ yêu cầu"): bỏ vì mục đã được người khác sửa ⇒ ghi lý do vào phiên chat (không gọi model, không tốn credit)
+  const sessionId = typeof req.query.session_id === "string" ? req.query.session_id : null
+  const note = typeof req.query.note === "string" ? req.query.note.trim().slice(0, 300) : ""
+  if (discarded && sessionId && note) {
+    const session = await changeTranscript.loadProjectSession(auth.projectId, sessionId)
+    await changeTranscript.recordChangeTurn(session, null, { kind: "change_applied", reply: note, count: 0 })
+  }
   return sendSuccess(res, 200, { discarded })
 })
 

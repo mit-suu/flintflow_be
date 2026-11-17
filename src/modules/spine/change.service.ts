@@ -27,7 +27,8 @@ import { nameElementIds } from "./human-labels.js"
 import { BRIEF_PROJECT_WRITE_MESSAGE, briefCoreEntries, isInBriefPhase, writesProjectVisionOrGoals } from "./brief-core.js"
 import { PathError, parsePath } from "./path-resolver.js"
 import { USE_CASE_NAME_FIX, useCaseNameIssues } from "./deterministic-check.js"
-import { FIELD_SECTION_MAP, FIXED_SECTIONS } from "./section-registry.js"
+import { FIELD_SECTION_MAP, FIXED_SECTIONS, sectionsOfPath } from "./section-registry.js"
+import { classifyPlace, conflictFields, placeLabel, placeOfPath, placeValue, readableValue, rebaseOps, type PlaceOutcome } from "./concurrent-merge.js"
 import { elementFieldsOf } from "./element-defaults.js"
 import { newUseCaseGapNote, newUseCaseGaps } from "./new-usecase-gaps.js"
 import { assertCrInfo, crReason, nextCrId } from "./post-baseline-cr.js"
@@ -169,7 +170,20 @@ interface StoredPreview {
   language?: TurnLanguagePair | null
   /** FLF-318: ý của cả vòng hỏi đáp (thêm / xoá / sửa use case) — lượt áp chỉ còn câu trả lời cuối, không đoán lại được. */
   use_case_intent?: UseCaseIntent | null
+  /**
+   * P12 (BF §3.2): giá trị lúc xem trước (`before`) và đề xuất (`after`) của từng chỗ lô chạm — lượt áp sau khi người khác
+   * ghi kiểm lại theo nội dung từng chỗ thay vì 409 theo `spine_version` cả tài liệu.
+   */
+  places?: StoredPlace[]
+  /** Lúc xem trước (ms) — giờ "① lúc AI soạn" của màn so sánh. */
+  created_at?: number
   expires_at: number
+}
+
+interface StoredPlace {
+  path: string
+  before: unknown
+  after: unknown
 }
 
 /** Preview chỉ sống đủ lâu để user đọc diff rồi bấm xác nhận. */
@@ -237,6 +251,122 @@ const takePreview = (projectId: string, previewId: string): StoredPreview => {
   }
   previewStore.delete(previewId)
   return stored
+}
+
+/** Lượt áp đụng chỗ người khác vừa sửa ⇒ trả bản xem trước về kho: "Bỏ yêu cầu" xoá được, người khác vẫn thấy dòng chờ. */
+const restorePreview = (previewId: string, stored: StoredPreview): void => {
+  previewStore.set(previewId, { ...stored, expires_at: Math.max(stored.expires_at, Date.now() + PREVIEW_TTL_MS) })
+}
+
+const cloneValue = (value: unknown): unknown => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
+
+/** Chỗ (phần tử Spine) lô op chạm, kèm giá trị lúc xem trước và đề xuất. */
+const placesOf = (before: Spine, after: Spine, ops: readonly Op[]): StoredPlace[] => {
+  const paths = [...new Set(ops.map((o) => placeOfPath(o.path)).filter((p): p is string => p !== null))]
+  return paths.map((path) => ({ path, before: cloneValue(placeValue(before, path)), after: cloneValue(placeValue(after, path)) }))
+}
+
+// ─── P12: kiểm lại theo nội dung lúc xác nhận (BF §3.2, chốt câu 8) ──────
+
+/** Một chỗ đụng phần người khác vừa sửa — ① lúc AI soạn · ② hiện tại (ai, lúc nào) · ③ đề xuất. */
+export interface PlaceConflict {
+  path: string
+  section_id: string | null
+  /** Tên phần tử (không mã nội bộ); "" ⇒ FE chỉ hiện tên mục. */
+  label: string
+  at_proposal: string
+  current: string
+  proposal: string
+  changed_by: string
+  changed_at: string | null
+  proposed_at: string | null
+}
+
+/** Chỗ người khác đã sửa giống đề xuất ⇒ không ghi lại. */
+export interface PlaceSame {
+  path: string
+  section_id: string | null
+  label: string
+  changed_by: string
+}
+
+export type LastEditor = (projectId: string, path: string) => Promise<{ name: string; at: Date | null } | null>
+
+/** Người sửa gần nhất của một chỗ — đọc `changes` (CR ⇒ "Bình (CR-003)"). Nạp muộn để `spine/` không kéo module CR lúc load. */
+const defaultLastEditor: LastEditor = async (projectId, path) => {
+  const { actorName, lastEditOf } = await import("../change-request/concurrent-edit.js")
+  const edit = await lastEditOf(projectId, path)
+  return edit ? { name: await actorName(projectId, edit.by), at: edit.at } : null
+}
+
+const sectionOfPlace = (spine: Spine, path: string, field?: string): string | null => {
+  try {
+    const impact = sectionsOfPath(spine, field ? `${path}.${field}` : path)
+    return impact.owner[0] ?? null
+  } catch {
+    return null
+  }
+}
+
+const isPlainRow = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v)
+
+/** Chữ của đúng các field đụng nhau (không cả phần tử dạng JSON). */
+const focusText = (value: unknown, fields: readonly string[]): string => {
+  if (value === undefined) return ""
+  if (!isPlainRow(value) || fields.length === 0) return readableValue(value)
+  return fields.map((f) => readableValue(value[f])).filter(Boolean).join("\n\n")
+}
+
+interface Recheck {
+  ops: Op[]
+  same: PlaceSame[]
+  conflicts: PlaceConflict[]
+}
+
+const recheckPlaces = async (projectId: string, current: Spine, stored: StoredPreview, lastEditor: LastEditor): Promise<Recheck> => {
+  const outcomes = new Map<string, PlaceOutcome>()
+  const same: PlaceSame[] = []
+  const conflicts: PlaceConflict[] = []
+  for (const place of stored.places ?? []) {
+    const now = cloneValue(placeValue(current, place.path))
+    const outcome = classifyPlace(place.before, place.after, now)
+    outcomes.set(place.path, outcome)
+    if (outcome.kind === "unchanged" || outcome.kind === "rebased") continue
+    const editor = await lastEditor(projectId, place.path)
+    const who = editor?.name ?? "người khác"
+    const label = placeLabel(now ?? place.before)
+    if (outcome.kind === "same") {
+      same.push({ path: place.path, section_id: sectionOfPlace(current, place.path), label, changed_by: who })
+      continue
+    }
+    const fields = conflictFields(outcome.at)
+    conflicts.push({
+      path: place.path,
+      section_id: sectionOfPlace(current, place.path, fields[0]),
+      label,
+      at_proposal: focusText(place.before, fields),
+      current: focusText(now, fields),
+      proposal: focusText(place.after, fields),
+      changed_by: who,
+      changed_at: editor?.at ? editor.at.toISOString() : null,
+      proposed_at: stored.created_at ? new Date(stored.created_at).toISOString() : null
+    })
+  }
+  const conflicted = new Set(conflicts.map((c) => c.path))
+  // Chỗ đụng nhau mà bên gọi cho bỏ qua (hoà giải) ⇒ bỏ op của chỗ đó, các chỗ khác vẫn ghi
+  const ops = rebaseOps(stored.ops, current, outcomes).filter((op) => {
+    const place = placeOfPath(op.path)
+    return place === null || !conflicted.has(place)
+  })
+  return { ops, same, conflicts }
+}
+
+const conflictMessage = (conflicts: readonly PlaceConflict[], language: ReplyLanguage | undefined): string => {
+  const who = [...new Set(conflicts.map((c) => c.changed_by))].join(", ")
+  return byLanguage(language ?? DEFAULT_REPLY_LANGUAGE, {
+    vi: `${who} vừa sửa đúng chỗ bạn định đổi - chưa ghi gì. Xem so sánh rồi chọn "AI soạn lại trên nội dung hiện tại" hoặc "Bỏ yêu cầu".`,
+    en: `${who} just edited the exact text you meant to change - nothing was written. Compare, then pick "Redraft on the current content" or "Drop the request".`
+  })
 }
 
 // ─── projection quanh thực thể được nhắc ─────────────────────────
@@ -608,6 +738,8 @@ export interface ChangeDeps {
    * `diagram_stale` / `render_error` ghi nhận); thiếu ⇒ `renderChangedIfAvailable`.
    */
   renderAfterChange?: (projectId: string, userId: string, newScreenIds: string[]) => Promise<unknown>
+  /** P12: người sửa gần nhất của một chỗ (màn so sánh, câu "đã được … sửa giống"); thiếu ⇒ đọc `changes`. */
+  lastEditor?: LastEditor
 }
 
 /** Path của phần use case (use case, màn, chức năng, quyền, thông báo) — lô sửa chạm tới thì vẽ lại sơ đồ. */
@@ -661,6 +793,11 @@ export interface ChangeBody {
    */
   localized?: LocalizedEntry[]
   document_language?: TurnLanguagePair | null
+  /**
+   * Nội bộ (DTO không nhận) — P12: lượt áp bản xem trước mà có chỗ người khác vừa sửa đúng chữ. `reject` (mặc định, sửa qua
+   * chat) ⇒ 409 kèm màn so sánh, không ghi gì; `skip` (hoà giải, chốt câu 9) ⇒ bỏ chỗ đó, ghi các chỗ khác.
+   */
+  on_conflict?: "reject" | "skip"
 }
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
@@ -1052,7 +1189,9 @@ export const preview = async (
 ): Promise<ChangePreviewResult> => {
   const d: ChangeDeps = { ...defaultChangeDeps(), ...deps }
   const record = await loadSpine(projectId, init)
-  assertVersion(record, body.base_version)
+  // P12 (BF §3.2): xem trước chỉ đọc và luôn dựng trên Spine hiện tại ⇒ người khác vừa ghi không làm hỏng lượt xem trước;
+  // lượt áp kiểm lại theo nội dung từng chỗ (`places`), không theo version cả tài liệu.
+  if (record.spine_version !== body.base_version) body = { ...body, base_version: record.spine_version }
   assertDraftUnlocked(record)
   const spine = stripRecord(record)
 
@@ -1106,6 +1245,8 @@ export const preview = async (
     branch,
     ...(resolved.localized?.length ? { localized: resolved.localized, language: languagePairOf(resolved.language) } : {}),
     use_case_intent: resolved.intent ?? null,
+    places: placesOf(spine, plan.spine, resolved.ops),
+    created_at: Date.now(),
     expires_at: Date.now() + PREVIEW_TTL_MS
   })
 
@@ -1131,6 +1272,10 @@ export interface ChangeApplyResult extends ApplyResult {
   cr_id?: string | null
   /** FLF-428: cờ mà câu lệnh nhắm tới vẫn còn mở sau khi ghi (rỗng / thiếu ⇒ đã đóng hoặc lệnh không nhắm cờ nào). */
   unresolved_flags?: TargetFlag[]
+  /** P12: chỗ người khác đã sửa giống đề xuất — không ghi lại. */
+  already_applied?: PlaceSame[]
+  /** P12 (`on_conflict: "skip"`): chỗ người khác vừa sửa đúng chữ — không ghi, bên gọi cho AI soạn lại. */
+  skipped?: PlaceConflict[]
 }
 
 /**
@@ -1180,7 +1325,8 @@ export const apply = async (
   const d: ChangeDeps = { ...defaultChangeDeps(), ...deps }
   await assertNoMigrationRunning(projectId)
   const record = await loadSpine(projectId, init)
-  assertVersion(record, body.base_version)
+  // P12: có bản xem trước ⇒ kiểm lại theo nội dung từng chỗ (dưới); áp thẳng (không xem trước) vẫn khoá theo version
+  if (body.preview_id === undefined) assertVersion(record, body.base_version)
   assertDraftUnlocked(record)
   const spine = stripRecord(record)
   // FLF-294 (BR-03): sau baseline lượt áp là một change request — kiểm TRƯỚC khi lấy bản xem trước (`takePreview` xoá
@@ -1193,6 +1339,40 @@ export const apply = async (
   const resolved: ResolvedOps = stored
     ? { ops: stored.ops, clarification: null, notes: null, ...(stored.localized ? { localized: stored.localized, language: languagePairOf(stored.language) } : {}) }
     : await resolveOps(projectId, userId, spine, body, d)
+
+  // P12 (BF §3.2, chốt câu 8): người khác đã ghi từ lúc xem trước ⇒ kiểm từng chỗ trên nội dung hiện tại
+  let drift: Recheck | null = null
+  if (stored) {
+    body = { ...body, base_version: record.spine_version }
+    if (stored.base_version !== record.spine_version) {
+      drift = await recheckPlaces(projectId, spine, stored, d.lastEditor ?? defaultLastEditor)
+      if (drift.conflicts.length > 0 && body.on_conflict !== "skip") {
+        restorePreview(body.preview_id!, stored)
+        throw new ApiError(409, conflictMessage(drift.conflicts, body.reply_language), repository.SPINE_VERSION_CONFLICT, {
+          spine_version: record.spine_version,
+          conflicts: drift.conflicts,
+          already_applied: drift.same,
+          preview_id: body.preview_id,
+          instruction: stored.instruction
+        })
+      }
+      resolved.ops = drift.ops
+      if (resolved.ops.length === 0) {
+        // Mọi chỗ đã được người khác sửa giống đề xuất (hoặc hoà giải bỏ qua) ⇒ không ghi gì
+        return {
+          spine: record,
+          changes: [],
+          txn: null,
+          spine_version: record.spine_version,
+          branch: stored.branch,
+          impact: stored.impact,
+          cr_id: null,
+          ...(drift.same.length ? { already_applied: drift.same } : {}),
+          ...(drift.conflicts.length ? { skipped: drift.conflicts } : {})
+        }
+      }
+    }
+  }
 
   if (resolved.clarification !== null) {
     throw new NeedsClarificationError(resolved.clarification)
@@ -1207,7 +1387,8 @@ export const apply = async (
   const plan = planTransaction(spine, toTransaction(userId, { ...body, ...(reason === undefined ? {} : { reason }) }, resolved.ops), {
     startSeq: 1
   })
-  const impact = stored?.impact ?? impactOfChanges(spine, plan.changes, plan.spine)
+  // Lô đã ghép lại trên Spine mới ⇒ tính lại phạm vi; bất biến vỡ (chỗ khác làm gãy tham chiếu) đã bị `planTransaction` từ chối
+  const impact = stored && !drift ? stored.impact : impactOfChanges(spine, plan.changes, plan.spine)
   const branch = stored?.branch ?? branchOf(spine, impact)
 
   if (branch === "post_baseline" && (reason === undefined || reason.trim() === "")) {
@@ -1247,6 +1428,8 @@ export const apply = async (
     branch,
     impact,
     cr_id: crId,
-    ...(unresolved.length > 0 ? { unresolved_flags: unresolved } : {})
+    ...(unresolved.length > 0 ? { unresolved_flags: unresolved } : {}),
+    ...(drift?.same.length ? { already_applied: drift.same } : {}),
+    ...(drift?.conflicts.length ? { skipped: drift.conflicts } : {})
   }
 }
