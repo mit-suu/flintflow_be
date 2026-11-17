@@ -34,7 +34,15 @@ export interface PreviewSection {
   status: TargetSectionStatus
   /** Thứ tự heading trong file; mục của mẫu chuẩn mà file không có xếp sau cùng. */
   order: number
+  /**
+   * P09 (#15): trích đoạn chữ khách viết dưới mục (≤ `EXCERPT_MAX` ký tự, bỏ hướng dẫn / ví dụ / bảng hình mẫu) — màn đọc khung cho xem
+   * FlintFlow đọc được gì ở mỗi mục. Mục không có chữ / còn trống ⇒ không có.
+   */
+  excerpt?: string
 }
+
+/** Độ dài tối đa của trích đoạn một mục (kể cả dấu "…"). */
+export const EXCERPT_MAX = 200
 
 export interface StructurePreview {
   summary: { present: number; missing: number; out_of_scope: number; kind: FileKind }
@@ -91,14 +99,35 @@ export const fileKindOf = (layout: readonly LayoutEntry[], withContent: Readonly
   return filled / headings.length < TEMPLATE_CONTENT_RATIO ? "template" : "written"
 }
 
-/** Hàm thuần: bản đồ mục theo thứ tự file + đếm. */
-export const toPreview = (structure: TargetStructure, layout: readonly LayoutEntry[], kind: FileKind, at: string): StructurePreview => {
+/** Chữ của một khối cho trích đoạn: bảng ⇒ các dòng (bỏ ô trống) nối bằng " · "; ảnh ⇒ không có chữ. */
+const blockText = (b: { kind: string; text: string; rows: string[][] | null }): string =>
+  b.kind === "table" ? (b.rows ?? []).map((r) => r.map((c) => c.trim()).filter(Boolean).join(" · ")).filter(Boolean).join("; ") : b.kind === "image" ? "" : b.text
+
+/** Hàm thuần: gộp chữ các khối thành trích đoạn ≤ `EXCERPT_MAX` ký tự (cắt thì thêm "…"). Rỗng ⇒ `undefined`. */
+export const excerptOf = (texts: readonly string[]): string | undefined => {
+  const text = texts.map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean).join(" ")
+  if (!text) return undefined
+  return text.length <= EXCERPT_MAX ? text : `${text.slice(0, EXCERPT_MAX - 1).trimEnd()}…`
+}
+
+/** Hàm thuần: bản đồ mục theo thứ tự file + đếm. `excerpts`: trích đoạn theo mục (P09). */
+export const toPreview = (
+  structure: TargetStructure,
+  layout: readonly LayoutEntry[],
+  kind: FileKind,
+  at: string,
+  excerpts: ReadonlyMap<string, string> = new Map()
+): StructurePreview => {
   const orderOf = new Map<string, number>()
   for (const l of layout) if (!orderOf.has(l.section_id)) orderOf.set(l.section_id, l.order)
   const sections = structure.sections
     .map((s, i) => ({ s, i, order: orderOf.get(s.section_id) ?? Number.MAX_SAFE_INTEGER }))
     .sort((a, b) => a.order - b.order || a.i - b.i)
-    .map(({ s, order }, i) => ({ section_id: s.section_id, title: s.title, status: s.status, order: order === Number.MAX_SAFE_INTEGER ? layout.length + i : order }))
+    .map(({ s, order }, i) => {
+      // Mục "Còn trống" không có trích đoạn: chữ dưới nó (nếu có) là hướng dẫn / ví dụ của mẫu, không phải nội dung
+      const excerpt = s.status === "missing" ? undefined : excerpts.get(s.section_id)
+      return { section_id: s.section_id, title: s.title, status: s.status, order: order === Number.MAX_SAFE_INTEGER ? layout.length + i : order, ...(excerpt ? { excerpt } : {}) }
+    })
   const count = (status: TargetSectionStatus) => sections.filter((s) => s.status === status).length
   return {
     summary: { present: count("present"), missing: count("missing"), out_of_scope: count("out_of_scope"), kind },
@@ -120,14 +149,36 @@ export const previewStructure = (
   intent: TemplateIntent,
   at: string = new Date().toISOString()
 ): StructurePreview => {
-  const { layout } = buildLayout(blocks, headingSections)
+  const { layout, sectionBlocks } = buildLayout(blocks, headingSections)
   // FLF-411: mục chỉ có chữ của mẫu (hướng dẫn nhiều đoạn, `<<Sample … >>`, chỗ điền) là "Còn trống" — như I-5
   const stripped = stripTemplateMarks(blocks)
   const { customSections, slices } = buildLayout(stripped, headingSections)
   const withContent = contentSections(stripped, customSections, slices)
   const kind = fileKindOf(layout, authoredSections(blocks, headingSections))
   const structure = compareTargetStructure(layout, withContent, spine, intent, at, { draftAll: intent === "fixed" && kind === "template" })
-  return toPreview(structure, layout, kind, at)
+  return toPreview(structure, layout, kind, at, excerptsOf(blocks, sectionBlocks))
+}
+
+/**
+ * P09 (#15): trích đoạn theo mục — chỉ chữ khách viết: bỏ chữ của mẫu (`stripTemplateMarks`), bảng / hình mẫu (`sampleBlockIds`),
+ * câu ví dụ (`looksLikeExample`). Mục id theo đúng layout của bản sơ bộ.
+ */
+const excerptsOf = (blocks: readonly LayoutBlock[], sectionBlocks: ReturnType<typeof buildLayout>["sectionBlocks"]): Map<string, string> => {
+  const samples = sampleBlockIds(blocks)
+  const real = new Map(stripTemplateMarks(blocks).filter((b) => !isExampleText(b) && !samples.has(b.block_id)).map((b) => [b.block_id, b]))
+  const texts = new Map<string, string[]>()
+  for (const { section_id, block_id } of sectionBlocks) {
+    const b = real.get(block_id)
+    if (!b) continue
+    const text = blockText({ kind: b.kind, text: b.text, rows: b.rows ?? null })
+    if (text.trim()) texts.set(section_id, [...(texts.get(section_id) ?? []), text])
+  }
+  const out = new Map<string, string>()
+  for (const [id, list] of texts) {
+    const excerpt = excerptOf(list)
+    if (excerpt) out.set(id, excerpt)
+  }
+  return out
 }
 
 /**
