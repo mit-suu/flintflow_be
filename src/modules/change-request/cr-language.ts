@@ -8,7 +8,7 @@
  */
 
 import type { UserLocale } from "../../shared/i18n/locale.js"
-import { detectMessageLanguage, hasVietnameseMarks, wordLanguageCounts } from "../../shared/i18n/reply-language.js"
+import { detectMessageLanguage, hasVietnameseMarks, resolveReplyLanguage, wordLanguageCounts } from "../../shared/i18n/reply-language.js"
 import { TemplateProfile } from "../import/template-profile.model.js"
 import { sourceLanguageOf } from "../project/document-language.js"
 import { Project } from "../project/project.model.js"
@@ -36,6 +36,29 @@ const LANGUAGE_NAME: Readonly<Record<UserLocale, string>> = { vi: "Vietnamese (t
 /** Dòng ngữ cảnh C-4: ngôn ngữ mọi chữ mới / sửa trong `spine_ops` phải theo. */
 export const documentLanguageText = (language: UserLocale): string =>
   `${LANGUAGE_NAME[language]}. Every new or changed text value in spine_ops (steps, descriptions, statements, names, labels such as flows_in / flows_out, table cells) and every reason, comment_text and assumption is written in ${LANGUAGE_NAME[language]}, with the wording and terms the existing elements and the glossary already use - even when the change request, the answers or the material are in another language. Names quoted from the document or the change request (screen names, statuses, codes, product names) keep their original form.`
+
+// ─── C-2: ngôn ngữ câu hỏi làm rõ (FLF-438) ─────────────────────
+
+/**
+ * Ngôn ngữ người yêu cầu đang dùng: đoán từ chữ họ viết (tiêu đề, mô tả, lệnh gộp, câu trả lời); không đủ tín hiệu ⇒ ngôn ngữ
+ * giao diện tài khoản ⇒ tiếng Việt.
+ */
+export const crReplyLanguage = (requesterText: string, accountLocale: UserLocale | null | undefined): UserLocale =>
+  resolveReplyLanguage(detectMessageLanguage(requesterText), accountLocale)
+
+/**
+ * Dòng "Languages" của prompt C-2. Khác ngôn ngữ ⇒ tên / tiêu đề / đoạn trích từ tài liệu giữ nguyên bản gốc, kèm bản dịch
+ * trong ngoặc — bản gốc đứng trước để câu trả lời (gợi ý được chọn) vẫn khớp đúng phần tử ở C-4. Cùng ngôn ngữ ⇒ không dịch.
+ */
+export const clarifyLanguageText = (reply: UserLocale, document: UserLocale): string => {
+  const base = `Reply language: ${LANGUAGE_NAME[reply]}. Document language: ${LANGUAGE_NAME[document]}.`
+  if (reply === document) return `${base} Same language - quote names, headings and passages from the document exactly as written, with no translation.`
+  return (
+    `${base} They differ - every name, heading or passage you quote from the document (actor, role, use case, screen, ` +
+    `entity, section heading, a sentence of a rule or passage) keeps its original ${LANGUAGE_NAME[document]} form first, ` +
+    `followed by its ${LANGUAGE_NAME[reply]} translation in parentheses (rule 13).`
+  )
+}
 
 // ─── C-5: chữ mới khác ngôn ngữ tài liệu ─────────────────────────
 
