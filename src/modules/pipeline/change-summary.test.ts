@@ -31,7 +31,7 @@ describe("summarizeChanges", () => {
     )
     expect(rows).toHaveLength(1)
     expect(rows[0].kind).toBe("update")
-    expect(rows[0].title_vi).toContain("name, description")
+    expect(rows[0].title_vi).toContain("Tên, Mô tả")
   })
 
   it("xoá phần tử lấy tên từ `before`", () => {
@@ -66,5 +66,44 @@ describe("summarizeChanges", () => {
   it("titleOf lùi dần name → statement → id", () => {
     expect(titleOf({ statement: "Uptime >= 99%" }, "N08")).toBe("Uptime >= 99%")
     expect(titleOf({}, "N08")).toBe("N08")
+  })
+})
+
+describe("P06 - không lộ tên field / mã nội bộ", () => {
+  const spine = FIXTURE
+  const uc = FIXTURE.use_cases[0]
+  const role = FIXTURE.roles[0]
+  const screen = FIXTURE.screens[0]
+  it("gắn chức năng vào use case ⇒ dòng của use case, không phải collection function_ids", () => {
+    const rows = summarizeChanges(
+      [
+        { op: "add", path: `use_cases[id=${uc.id}].function_ids[=FN009]`, before: ABSENT, value: "FN009" },
+        { op: "add", path: `use_cases[id=${uc.id}].function_ids[=FN010]`, before: ABSENT, value: "FN010" }
+      ] as never,
+      spine
+    )
+    expect(rows).toHaveLength(1)
+    expect(rows[0].collection).toBe("use_cases")
+    expect(rows[0].kind).toBe("update")
+    expect(rows[0].title_vi).toContain(uc.name)
+    expect(JSON.stringify(rows)).not.toContain("function_ids")
+  })
+  it("phân quyền ⇒ '<vai> trên màn <màn>', không in mã", () => {
+    const rows = summarizeChanges([{ op: "add", path: "permissions[]", before: ABSENT, value: { id: "P904", role_id: role.id, screen_id: screen.id, action: "view" } }] as never, spine)
+    expect(rows[0].title_vi).toBe(`${role.name} trên màn ${screen.name}`)
+  })
+  it("quyền trỏ màn đã xoá ⇒ không in mã", () => {
+    const rows = summarizeChanges([{ op: "add", path: "permissions[id=P905]", before: ABSENT, value: { id: "P905", role_id: role.id, screen_id: "S999", action: "view" } }] as never, spine)
+    expect(rows[0].title_vi).toBe(`${role.name} trên một màn đã xoá`)
+  })
+  it("sửa luồng màn ⇒ field 'Chuyển tới màn'", () => {
+    const rows = summarizeChanges([{ op: "set", path: `screens[id=${screen.id}].flow_to`, before: [], value: [{ to: "S07" }] }] as never, spine)
+    expect(rows[0].title_vi).toBe(`${screen.name} · Chuyển tới màn`)
+  })
+  it("sửa mục đích của ghi chú Brief ⇒ không in 'target_section'", () => {
+    const note = { id: "AD1", topic: "scope", content: "Bản đầu gọn, khoảng 5-8 use case", content_en: "", target_section: "fixed:1.3", captured_at: "2026-11-17T00:00:00Z" }
+    const rows = summarizeChanges([{ op: "set", path: "addendum[id=AD1].target_section", before: "fixed:1.2", value: "fixed:1.3" }] as never, { ...spine, addendum: [note] } as Spine)
+    expect(rows[0].title_vi).toBe(`${note.content} · Mục trong tài liệu`)
+    expect(JSON.stringify(rows)).not.toContain("target_section")
   })
 })
