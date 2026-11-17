@@ -1,4 +1,5 @@
 import OpenAI from "openai"
+import { providerErrorCode } from "./provider-error.js"
 import { env } from "../../../config/env.js"
 import { AiProviderConfig, AiActionError } from "../ai-action.types.js"
 import { LLMResponse, LlmCallOptions } from "./provider.types.js"
@@ -83,7 +84,7 @@ export const callGLM = async (
 
     const status = error.status || error.response?.status || 500
     const message = error.message || error.response?.data?.error?.message || "GLM API call failed"
-    const code = status === 429 ? "RATE_LIMIT_EXCEEDED" : "GLM_ERROR"
+    const code = providerErrorCode(status, message, "GLM_ERROR")
     throw new AiActionError(status, message, code, error.response?.data || error)
   }
 }
