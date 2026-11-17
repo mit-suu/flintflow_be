@@ -18,6 +18,12 @@ const entity = (id: string, name: string, rel: Record<string, { verb?: string; c
   relation_optional: Object.entries(rel).filter(([, r]) => r.optional).map(([t]) => t)
 })
 
+/** Id mọi quan hệ hợp lệ (`E01>E02`) như renderer dựng. */
+const relationIds = (entities: readonly Entity[]): string[] => {
+  const known = new Set(entities.map((e) => e.id))
+  return entities.flatMap((e) => [...new Set(e.relations)].filter((t) => known.has(t)).map((t) => `${e.id}>${t}`))
+}
+
 const spineOf = (entities: Entity[]): Spine => ({ ...createEmptySpine({ name: "T" }), entities })
 
 const rel = (id: string, from: string, to: string, extra: Partial<ErdRelationInput> = {}): ErdRelationInput => ({ id, from, to, verb: "has", cardinality: "N", optional: false, ...extra })
@@ -159,7 +165,8 @@ describe("erd.renderer - ba ký pháp trên một bộ xếp + đi đường", (
       const parts = partitionErd(spineOf(entities), notation)
       expect(parts.length, notation).toBeGreaterThanOrEqual(2)
       expect(parts.map((p) => p.title)).toEqual(parts.map((_, i) => `Entity Relationship Diagram (${i + 1}/${parts.length})`))
-      const seen = parts.flatMap((p) => p.diagram.entities.map((e) => e.id))
+      // P10: hộp nét đứt (thực thể của hình khác) không tính — mỗi entity là "của mình" ở đúng một hình
+      const seen = parts.flatMap((p) => p.diagram.entities.filter((e) => !e.elsewhere).map((e) => e.id))
       expect(seen.slice().sort()).toEqual(entities.map((e) => e.id).sort())
       expect(renderErd(spineOf(entities), null, undefined, { erdNotation: notation }).map((p) => p.issues)).toEqual(parts.map(() => []))
     }
@@ -229,6 +236,7 @@ const random = (seed: number) => () => {
 
 describe("erd.renderer - đồ thị ngẫu nhiên (có seed): checkScene luôn rỗng, không mất entity", () => {
   it.each(ERD_NOTATIONS)("%s", (notation) => {
+    let lost = 0
     for (let seed = 1; seed <= 25; seed++) {
       const rnd = random(seed * 7919)
       const n = 2 + Math.floor(rnd() * 11)
@@ -240,8 +248,53 @@ describe("erd.renderer - đồ thị ngẫu nhiên (có seed): checkScene luôn 
       })
       const parts = renderErd(spineOf(entities), null, undefined, { erdNotation: notation })
       for (const part of parts) expect(part.issues, `${notation} seed ${seed}`).toEqual([])
-      const drawn = partitionErd(spineOf(entities), notation).flatMap((p) => p.diagram.entities.map((e) => e.id))
+      const split = partitionErd(spineOf(entities), notation)
+      const drawn = split.flatMap((p) => p.diagram.entities.filter((e) => !e.elsewhere).map((e) => e.id))
       expect(drawn.sort(), `${notation} seed ${seed}`).toEqual(entities.map((e) => e.id))
+      lost += relationIds(entities).filter((id) => !split.some((p) => p.diagram.relations.some((r) => r.id === id))).length
     }
+    // P10: trước đây quan hệ ở chỗ cắt bị bỏ (25 seed: chen 86, crowsfoot 42, idef1x 51). Nay vẽ ở cả hai hình; Chen còn một
+    // trường hợp cả hai hình đều không chen thêm được hộp nét đứt (hình thoi + hộp bậc cao) ⇒ cho phép tối đa 1
+    expect(lost, `${notation}: quan hệ mất ở chỗ cắt`).toBeLessThanOrEqual(notation === "chen" ? 1 : 0)
+  })
+})
+
+describe("P10: quan hệ vắt qua chỗ cắt vẽ ở cả hai hình", () => {
+  // Như fpt TechMart sau CR-002: Order bậc 10, Variant bậc 8, 26 quan hệ — Chen (dự án tự soạn) không vừa một hình
+  const name = ["Customer", "Order", "Variant", "Product", "Category", "Brand", "Cart", "Cart Item", "Order Item", "Payment", "Shipment", "Voucher", "Review", "Address", "Warehouse", "Stock", "Return Request", "Refund", "Wishlist", "Notification"]
+  const idOf = (i: number) => `E${String(i + 1).padStart(2, "0")}`
+  const edges: [number, number][] = [
+    [0, 1], [1, 8], [1, 9], [1, 10], [1, 11], [1, 13], [1, 16], [1, 19], [1, 17], [1, 6],
+    [2, 8], [2, 7], [2, 15], [2, 12], [2, 18], [3, 2], [4, 3], [5, 3],
+    [0, 6], [6, 7], [0, 12], [0, 13], [14, 15], [16, 17], [2, 11], [2, 14]
+  ]
+  const techmart = name.map((n, i) =>
+    entity(idOf(i), n, Object.fromEntries(edges.filter(([from]) => from === i).map(([, to], k) => [idOf(to), { verb: ["has", "contains", "uses"][k % 3], card: k % 2 ? "1" : "N" }])))
+  )
+
+  it("fixture đúng như TechMart: 26 quan hệ, Order bậc 10, Variant bậc 8", () => {
+    const degree = (i: number) => edges.filter(([a, b]) => a === i || b === i).length
+    expect(edges).toHaveLength(26)
+    expect([degree(1), degree(2)]).toEqual([10, 8])
+  })
+
+  it.each(ERD_NOTATIONS)("%s: tách hình thì mọi quan hệ vẫn có mặt; đầu ở hình kia là hộp nét đứt ghi số hình", (notation) => {
+    const parts = partitionErd(spineOf(techmart), notation, DIAGRAM_LABELS.vi)
+    const drawn = new Set(parts.flatMap((p) => p.diagram.relations.map((r) => r.id)))
+    expect(relationIds(techmart).filter((id) => !drawn.has(id))).toEqual([])
+    expect(parts.flatMap((p) => p.diagram.entities.filter((e) => !e.elsewhere).map((e) => e.id)).sort()).toEqual(techmart.map((e) => e.id))
+    for (const part of parts) expect(part.scene && checkScene(part.scene, { allowBends: true }), notation).toEqual([])
+    if (parts.length > 1) {
+      const ghosts = parts.flatMap((p) => p.diagram.entities.filter((e) => e.elsewhere))
+      expect(ghosts.length).toBeGreaterThan(0)
+      expect(ghosts.every((g) => /^\(xem hình \d+\/\d+\)$/.test(g.elsewhere!))).toBe(true)
+      const svg = renderErd(spineOf(techmart), null, DIAGRAM_LABELS.vi, { erdNotation: notation })
+      expect(svg.map((p) => p.issues)).toEqual(parts.map(() => []))
+      expect(svg.some((p) => p.source.includes("stroke-dasharray") && p.source.includes("xem hình"))).toBe(true)
+    }
+  })
+
+  it("một hình (không cắt) ⇒ không có hộp nét đứt", () => {
+    expect(partitionErd(SHOP, "chen")[0].diagram.entities.some((e) => e.elsewhere)).toBe(false)
   })
 })
