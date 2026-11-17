@@ -212,6 +212,13 @@ const functionStep = (spine: Spine, functionId: string, template = "S-5.4"): str
   return key ? `${template}@${key}` : template
 }
 
+/**
+ * P12 (N2): bước sửa của một hình trong Spine — sơ đồ tuần tự thuộc một chức năng ⇒ bước S-5.4 của vòng màn chứa chức năng
+ * đó (`S-5.4@S04`), như cờ của chính chức năng; không thì thẻ "Cập nhật lại bước này" không khớp bước đang xem.
+ */
+const diagramStepIn = (spine: Spine, d: Pick<Diagram, "kind" | "owner_id">): string =>
+  d.kind === "sequence" && d.owner_id ? functionStep(spine, d.owner_id) : renderStepOf(d)
+
 const NFR_SECTION: Readonly<Record<string, { section: string; step: string }>> = {
   interface: { section: "fixed:4.1", step: "S-6.1" },
   usability: { section: "fixed:4.2.1", step: "S-6.2" },
@@ -426,7 +433,7 @@ const deadReferenceWhere = (spine: Spine, hit: ReferenceHit): Where => {
       return { section: "fixed:5.3", step: "S-7.3" }
     case "diagrams[].owner_id": {
       const d = spine.diagrams.find((x) => x.id === owner)
-      return d ? { section: d.section, step: renderStepOf(d) } : { section: "fixed:I", step: "S-8.2" }
+      return d ? { section: d.section, step: diagramStepIn(spine, d) } : { section: "fixed:I", step: "S-8.2" }
     }
     case "addendum[].target_section":
       return { section: "fixed:5.4", step: "B-2.2" }
@@ -477,7 +484,7 @@ const renderError = (spine: Spine): FlagCandidate[] =>
       section_id: d.section,
       target_id: d.id,
       message: `${capitalize(diagramLabel(d, spine))} vẽ lỗi${d.error ? `: ${d.error}` : ""}`,
-      remediation_step: renderStepOf(d)
+      remediation_step: diagramStepIn(spine, d)
     }))
 
 /**
@@ -524,7 +531,7 @@ const diagramStale = (spine: Spine, context: RenderContext = {}): FlagCandidate[
       section_id: d.section,
       target_id: d.id,
       message: `${capitalize(diagramLabel(d, spine))} không còn khớp dữ liệu, cần vẽ lại`,
-      remediation_step: renderStepOf(d)
+      remediation_step: diagramStepIn(spine, d)
     }))
 
 /**
@@ -1631,7 +1638,7 @@ const ownedTexts = (spine: Spine, gate: StepGate): ScanItem[] => {
     ...spine.messages.map((m) => ({ path: `messages[id=${m.id}]`, target_id: m.id, section: "fixed:5.3", step: "S-7.3", fields: pickTextFields(m, SRS_TEXT_FIELDS.messages) })),
     ...spine.other_requirements.map((o) => ({ path: `other_requirements[id=${o.id}]`, target_id: o.id, section: "fixed:5.4", step: "S-7.4", fields: pickTextFields(o, SRS_TEXT_FIELDS.other_requirements) })),
     ...spine.glossary.map((g) => ({ path: `glossary[id=${g.id}]`, target_id: g.id, section: "fixed:5.5", step: "S-8.1", fields: pickTextFields(g, SRS_TEXT_FIELDS.glossary) })),
-    ...spine.diagrams.map((d) => ({ path: `diagrams[id=${d.id}]`, target_id: d.id, section: d.section, step: renderStepOf(d), fields: d.format === "puml" ? { source: d.source } : {} }))
+    ...spine.diagrams.map((d) => ({ path: `diagrams[id=${d.id}]`, target_id: d.id, section: d.section, step: diagramStepIn(spine, d), fields: d.format === "puml" ? { source: d.source } : {} }))
   ]
 }
 

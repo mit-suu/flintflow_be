@@ -363,6 +363,15 @@ describe("runDeterministicCheck", () => {
     expect(byRule(runDeterministicCheck(filled, [], component), "sequence_component_missing").map((f) => f.target_id)).not.toContain("FN001")
   })
 
+  it("P12 (N2): sơ đồ tuần tự của chức năng lệch / lỗi ⇒ remediation_step là S-5.4 của vòng màn chứa chức năng (S-5.4@S01)", () => {
+    const uc = FIXTURE.diagrams.find((x) => x.kind === "usecase")!
+    const seq = { ...uc, id: "D90", kind: "sequence" as const, owner_id: "FN001", section: "function:FN001", format: "puml" as const, source_hash: "0".repeat(64) }
+    const stale = runDeterministicCheck(variant((s) => s.diagrams.push(structuredClone(seq) as never)))
+    expect(byRule(stale, "diagram_stale")).toMatchObject([{ target_id: "D90", remediation_step: "S-5.4@S01" }])
+    const errored = runDeterministicCheck(variant((s) => s.diagrams.push({ ...structuredClone(seq), render_status: "error", error: "syntax" } as never)))
+    expect(byRule(errored, "render_error")).toMatchObject([{ target_id: "D90", remediation_step: "S-5.4@S01" }])
+  })
+
   it("hình tách phần (D02, D02-2, D02-3) cùng lệch ⇒ một cờ diagram_stale, gắn phần đầu (FLF-296)", () => {
     const d = FIXTURE.diagrams.find((x) => x.kind === "usecase")!
     const split = variant((s) => {
