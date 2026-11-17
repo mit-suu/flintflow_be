@@ -9,7 +9,9 @@
  * đúng luật `nextStep()` (step đầu tiên chưa accepted, bỏ vòng S-5 của màn `placeholder`); hết step ⇒ `null`.
  *
  * Tính ở tầng pipeline để `modules/spine/section-status.ts` không phụ thuộc `step-registry`. Shape response
- * (`progressResponseSchema`) không đổi; `current_phase` vẫn là giá trị lưu trong Spine.
+ * (`progressResponseSchema`) không đổi. FLF-432 (luồng C #2): `current_phase` cũng theo step tới lượt — giá trị lưu
+ * trong Spine chỉ ghi lúc một step bắt đầu, nên khi các bước còn lại của giai đoạn đều `skipped` nó đứng ở giai đoạn cũ
+ * (`S-4` cạnh `current_step = S-5.1@S02`) và client gọi `/phases/S-4/run` nhận 200 rỗng.
  */
 
 import { buildProgressReport } from "../spine/section-status.js"
@@ -22,5 +24,6 @@ export type PipelineProgressReport = ReturnType<typeof buildProgressReport>
 
 export const buildPipelineProgressReport = (spine: Spine, changes: ProgressChanges): PipelineProgressReport => {
   const report = buildProgressReport(spine, changes)
-  return { ...report, progress: { ...report.progress, current_step: nextStep(spine)?.id ?? null } }
+  const next = nextStep(spine)
+  return { ...report, progress: { ...report.progress, current_phase: next?.phase ?? report.progress.current_phase, current_step: next?.id ?? null } }
 }
