@@ -18,7 +18,7 @@ import type { Spine } from "../spine/spine.types.js"
 import { get } from "../spine/spine.repository.js"
 import { ChatSession } from "../project/chat-session.model.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
-import { ASSUMPTION_KEYS_READ, STEP_SKILLS, addendumForUnit, assumptionsForPrompt, componentLevelProjection, openAssumptionsFor, buildStepContext, getStepSpec, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
+import { ASSUMPTION_KEYS_READ, STEP_SKILLS, addendumForUnit, assumptionsForPrompt, componentLevelProjection, openAssumptionsFor, buildStepContext, getStepSpec, isScaleNote, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
 import { stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
 import { getStep, loadStepRegistry, orderedSteps } from "./step-registry.js"
 import { askableFields } from "./decisions.service.js"
@@ -366,5 +366,28 @@ describe("P05 - S-3 / S-4 thấy ý tưởng gốc của Brief (quy mô user nê
     expect(ids).toEqual(expect.arrayContaining(["AD900", "AD901"]))
     const loopStep = projectStep(withCore(), "S-5.2@S01").addendum.map((a) => a.id)
     expect(loopStep).not.toContain("AD900")
+  })
+
+  it("E2E 17/11: ghi chú quy mô bị gán sang mục khác (3.1.2) vẫn tới S-3.2; ghi chú không nêu số thì không", () => {
+    const s = withCore()
+    const base = s.addendum[s.addendum.length - 1]
+    s.addendum = [
+      ...s.addendum,
+      { ...base, id: "AD902", topic: "Phạm vi bản đầu", target_section: "fixed:3.1.2", content: "Bản đầu gọn, khoảng 5-8 use case; chưa làm app mobile", content_en: "" },
+      { ...base, id: "AD903", topic: "Giá trị", target_section: "fixed:3.1.2", content: "Nhân viên không phải chép đơn từ Zalo", content_en: "" }
+    ]
+    const ids = projectStep(s, "S-3.2").addendum.map((a) => a.id)
+    expect(ids).toContain("AD902")
+    expect(ids).not.toContain("AD903")
+    expect(ids.filter((id) => id === "AD900")).toHaveLength(1)
+  })
+
+  it("isScaleNote nhận các cách nêu quy mô", () => {
+    for (const content of ["khoảng 5-8 use case", "tối đa 10 màn hình", "5 đến 8 chức năng", "about 8 screens", "12 UC"]) {
+      expect(isScaleNote({ content, content_en: "" })).toBe(true)
+    }
+    for (const content of ["giao trong bán kính 5km", "60% đơn tự đặt", "dùng chức năng tìm kiếm"]) {
+      expect(isScaleNote({ content, content_en: "" })).toBe(false)
+    }
   })
 })
