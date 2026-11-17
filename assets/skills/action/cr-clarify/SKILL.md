@@ -64,7 +64,7 @@ You never write edits.
 5. `targets.keywords`: words or phrases the **document** uses for the affected concept - names, synonyms, old and
    new wording (e.g. `"log out"`, `"sign out"`, `"session"`). They find prose that is not linked to any element.
    3–10 keywords, each at least 3 characters.
-6. Questions: User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`, `feature:@B0012`), element paths (`actors[id=A02].name`), block ids (`B0012`) or location ids (`L001`). Name a section by its heading and an element by its name or document code (`UC-01` is fine).
+6. Questions: User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`, `feature:@B0012`), element paths (`actors[id=A02].name`), block ids (`B0012`) or location ids (`L001`). Screen, function, actor, role, feature and entity ids (`S01`, `SCR-05`, `FN009`, `A02`) are internal too. Name a section by its heading and an element by its name or document code (`UC-01` is fine).
    The same holds for `missing_info`.
 7. Facts a writer needs, by kind of content: a non-functional requirement needs the measurable threshold and its
    condition (`≤ 2 s for 95 % of requests`); a business rule needs the condition and the outcome; a use case needs
