@@ -383,7 +383,8 @@ export const isPlaceholderRole = (header: string): boolean => isPlaceholderText(
 const hasUnmappedMessageColumn = (table: BlockLite, rows: readonly (readonly string[])[], profile: ITemplateProfile): boolean => {
   const cols = profile.table_map.filter((t) => t.block_id === table.block_id)
   if (!cols.some((c) => c.field_path?.startsWith("messages["))) return false
-  const mapped = new Set(cols.filter((c) => c.field_path).map((c) => c.column_index))
+  // P07: "Message Type" / "Context" nay có field trong Spine nhưng loại chỉ nhận enum ⇒ bảng vẫn in nguyên văn chữ của file
+  const mapped = new Set(cols.filter((c) => c.field_path && !/^messages\[\]\.(type|context)$/.test(c.field_path)).map((c) => c.column_index))
   return (rows[0] ?? []).some((h, i) => h.trim() && !mapped.has(i) && !/^(#|no\.?|stt|số tt)$/i.test(h.trim()))
 }
 

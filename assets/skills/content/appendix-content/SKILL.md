@@ -1,7 +1,7 @@
 ---
 skill_id: appendix-content
 kind: content
-version: 0.3.0
+version: 0.4.0
 description: "S-7 appendix - detail business rules, common requirements, messages, other requirements (mostly derived)"
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -67,13 +67,20 @@ One rule per row, checkable by a reviewer.
 ## S-7.3 - Application messages (`fixed:5.3`)
 
 Source: **`functions[].abnormal[]`** (plus the success confirmations `normal[]` implies for destructive or
-money-moving actions). Each becomes `{id, code, text, function_ids: [...]}`.
+money-moving actions). Each becomes `{id, code, type, context, text, function_ids: [...]}`.
 
 - `code`: `<AREA>-<NNN>`, uppercase, area from the feature ("AUTH-001", "BILL-004", "PROJ-012"). Unique
   across the project; number within the area from 001.
 - `text`: what the user actually reads - one sentence, second person, no error-class names, no stack
   vocabulary, and it must say what to do next when there is something to do. "Your credit balance is too
   low to run this step. Add credits to continue."
+- `type` (always set): `error` (the action failed or input was rejected), `warning` (allowed but risky / about to
+  expire), `info` (neutral status), `success` (an action completed), `confirm` (asks the user to confirm before a
+  destructive or money-moving action).
+- `context`: when the message appears, one short clause - "When the entered OTP does not match", "After a booking
+  is cancelled". Not the function name alone; not a copy of `text`.
+- Channels and features in `text` must be in release 1.0: check `project.release_scope` - never name a channel or
+  integration listed in `out` or missing from `in` (no "sent by email and Zalo OA" when Zalo is out of scope).
 - **Merge by message, not by function.** The same sentence raised by six functions is ONE row with six
   ids in `function_ids`; that array is the back-reference to §3.
 - Every id in `function_ids` must exist after this batch.
@@ -103,7 +110,7 @@ already sweeps `assumptions[]`. Keep this section to things a stakeholder must d
 {
   "ops": [
     { "op": "add", "path": "business_rules[]", "value": { "id": "BR12", "tier": "detail", "statement": "A project can be archived or deleted only by its owner.", "source_validation_ids": ["FN031-V2", "FN034-V1"] }, "reason": "S-7.1 merged from two function validations" },
-    { "op": "add", "path": "messages[]", "value": { "id": "M07", "code": "BILL-004", "text": "Your credit balance is too low to run this step. Add credits to continue.", "function_ids": ["FN020", "FN021", "FN044"] }, "reason": "S-7.3 merged from three abnormal flows" }
+    { "op": "add", "path": "messages[]", "value": { "id": "M07", "code": "BILL-004", "type": "error", "context": "When a step is run with too few credits", "text": "Your credit balance is too low to run this step. Add credits to continue.", "function_ids": ["FN020", "FN021", "FN044"] }, "reason": "S-7.3 merged from three abnormal flows" }
   ],
   "notes": "No open regulatory question; stakes is production, not regulated."
 }
@@ -115,5 +122,6 @@ already sweeps `assumptions[]`. Keep this section to things a stakeholder must d
 - [ ] Duplicate policies merged into one row; `tier: "high"` rows from S-2.4 untouched.
 - [ ] Every `abnormal[]` entry of the projection is represented by a message, or explained in `notes`.
 - [ ] Message codes are `<AREA>-<NNN>`, unique, and every `function_ids` entry exists.
+- [ ] Every message has `type` and `context`; no channel outside `project.release_scope`.
 - [ ] Message `text` is user-facing and says what to do next where an action exists.
 - [ ] §5.2 covers navigation, feedback, forms, data display, session, responsiveness, notifications.

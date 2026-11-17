@@ -9,6 +9,7 @@ import type { Op } from "../spine/op.types.js"
 import type { ActivityFlow, ActivityNode, ActivityNodeKind, EntityAttribute, EntityState, EntityTransition, FlowEdge, FunctionInteraction, Spine } from "../spine/spine.types.js"
 import { IdAllocator, compactKey, idKey, nameKey } from "./extracted-entities.js"
 import { foldText } from "./text-similarity.js"
+import { messageTypeOf } from "../spine/message-type.js"
 
 export interface BuiltEntity {
   entity: string
@@ -708,7 +709,17 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
   }
   for (const m of of("messages").filter(skip(spine.messages))) {
     const functionIds = [...new Set(strList(m.value.function_ids).map(resolveFunction).filter((x): x is string => !!x))]
-    add("messages", { id: m.id, code: str(m.value.code) || m.id!, text: str(m.value.text ?? m.value.message), function_ids: functionIds })
+    // P07: loại / ngữ cảnh của bảng thông báo (cột "Message Type", "Context") — loại lạ ⇒ không ghi, không đoán
+    const type = messageTypeOf(m.value.type)
+    const context = str(m.value.context)
+    add("messages", {
+      id: m.id,
+      code: str(m.value.code) || m.id!,
+      text: str(m.value.text ?? m.value.message),
+      function_ids: functionIds,
+      ...(type ? { type } : {}),
+      ...(context ? { context } : {})
+    })
   }
   for (const o of of("other_requirements").filter(skip(spine.other_requirements))) {
     add("other_requirements", {
