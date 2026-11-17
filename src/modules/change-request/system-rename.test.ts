@@ -34,3 +34,13 @@ describe("systemRenameLocations", () => {
     expect(found.length).toBeLessThanOrEqual(2)
   })
 })
+
+describe("systemRenameLocations + sơ đồ gốc", () => {
+  it("file có sơ đồ ngữ cảnh gốc ở §1 ⇒ thêm vị trí vẽ lại hình", async () => {
+    const { withOriginalDiagrams } = await import("./spine-location.js")
+    const s = spine()
+    s.custom_sections.push({ id: "CS01", heading: "Context diagram", level: 2, source: "import", blocks: [{ kind: "image", text: null, rows: null, image_ref: "word/media/image1.png", diagram: { kind: "context", source_hash: "x" } } as never] })
+    const found = withOriginalDiagrams(s, ["fixed:1", "fixed:2.2.1"], systemRenameLocations(s, "TechMart"))
+    expect(found.map((f) => f.path)).toEqual(expect.arrayContaining(["project", "custom_sections[id=CS01]"]))
+  })
+})
