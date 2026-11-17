@@ -46,6 +46,12 @@ Write `project.release_scope.in` and `.out` as flat string lists - each entry on
 `in` must trace to a goal from S-2.1; `out` records deliberate exclusions the Brief or addendum names
 (B-1.4). Use `set` on the whole `release_scope` object (it has no id, it is a singleton).
 
+**Keep every limit the user put on the first release.** A size cap the Brief or addendum states ("bản đầu gọn,
+khoảng 5-8 use case", "tối đa 10 màn hình") is its own `in` entry with the number verbatim - "Release 1.0 is
+limited to about 5-8 use cases" - read wherever that note is aimed (`fixed:1`, `fixed:3.1.2`…); it is the ceiling
+S-3/S-4 build against, so never drop it or fold it into a capability line (it need not trace to a goal). A
+"chưa làm X" / "not yet X" in the same note goes to `out`. On a revision, keep the limit line unless the user changed it.
+
 ## S-2.3 - External Systems
 
 Add one `actors[]` entry per external system the product integrates with (payment gateway, render
@@ -93,7 +99,7 @@ entry rather than an invented confirmed requirement.
 ## Self-check
 
 - [ ] Only fields for the current sub-step touched (S-2.1 project text, S-2.2 release_scope, S-2.3 actors).
-- [ ] `release_scope.in` entries each trace to a stated goal.
+- [ ] `release_scope.in` entries each trace to a stated goal - except the size-limit line, which is there whenever the user gave one (number verbatim).
 - [ ] Every new actor has `kind: "system"` and a project-specific description.
 - [ ] S-2.3 system actors each have ≥1 `flows_in`/`flows_out` data noun phrase, one exchange per item; all actors together have both directions; one-way actors fine, no invented replies.
 - [ ] No diacritics, no Vietnamese in any value that renders to SRS.
