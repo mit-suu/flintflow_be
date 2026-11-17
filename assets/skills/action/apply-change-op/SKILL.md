@@ -1,7 +1,7 @@
 ---
 skill_id: apply-change-op
 kind: action
-version: 1.7.0
+version: 1.8.0
 description: Chat change request → ops (or a clarification); impact query → 3 branches → stale; one-pass reconcile
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -192,6 +192,9 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 15. **Drafting a custom section** ("Soạn nháp mục …"): every project fact comes from `draft_context`, `guidance`, the glossary
    or the chat - never invent a standard, version, vendor, device, law, number or date. A fact the section needs is missing
    ⇒ no ops, `clarification_needed` with up to **3** numbered questions (overrides rule 2); draft once the user answers.
+16. **`target_flags`** = the user asked to fix those flags: the batch must close each one - follow its `fix_hint` (write the
+   field the rule reads, e.g. a reliability/performance NFR needs `kind: "quantitative"` + `metric` + `threshold`; never
+   append the number to `statement`). The value is not in the request, chat or projection ⇒ `clarification_needed` asking for it.
 
 ## Reconcile (`reconcile`)
 
