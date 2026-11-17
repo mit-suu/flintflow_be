@@ -2680,3 +2680,23 @@ describe("step-runner: tin user ghi lặp vào transcript (FLF-400)", () => {
     ])
   })
 })
+
+describe("FLF-432 - runPhase với giai đoạn đã qua (luồng C #2)", () => {
+  it("client gửi giai đoạn trước giai đoạn của bước tới lượt ⇒ chạy đơn vị tới lượt, không trả 'Đã xong giai đoạn này' rỗng", async () => {
+    seedSpine()
+    seedSession(true)
+    const { emit } = collectEvents()
+    // Bước tới lượt thuộc S-3 (mọi bước trước S-3 đã accepted) mà client còn gửi "S-2"
+    const result = await runPhase(PROJECT, "S-2", SESSION, USER, emit, { elicitExecutor: async () => elicitReply(), draftExecutor: async () => draftReply([]), renderDeps: renderStub() })
+    expect(result.phase).toBe("S-3")
+    expect(result.steps.length).toBeGreaterThan(0)
+  })
+
+  it("giai đoạn chưa tới vẫn về ngay, không chạy", async () => {
+    seedSpine()
+    seedSession(true)
+    const { emit } = collectEvents()
+    const result = await runPhase(PROJECT, "S-6", SESSION, USER, emit, { elicitExecutor: async () => elicitReply(), draftExecutor: async () => draftReply([]), renderDeps: renderStub() })
+    expect(result.steps).toEqual([])
+  })
+})

@@ -28,7 +28,7 @@ import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import * as meter from "./meter.service.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import { gate, phaseGateAssumptions } from "./gate.service.js"
-import { getStep, nextStep as nextStepOf, orderedSteps, type ExpandedStep } from "./step-registry.js"
+import { PHASES, getStep, nextStep as nextStepOf, orderedSteps, type ExpandedStep } from "./step-registry.js"
 import { isQuietStep, type QuietVerdict, type QuietInput } from "./quiet-step.js"
 import { composePhaseGateMessage, spokenAssumptionIds, stripModelCountSentences } from "./gate-message.js"
 import * as spineRepository from "./../spine/spine.repository.js"
@@ -605,6 +605,7 @@ export const standaloneGate = (
         renderFailed: watched.signals.renderFailed,
         phaseTerminal: isPhaseTerminal(spine, step),
         ...summarySignals(gateEvent.summary),
+        emptySections: gateEvent.empty_sections ?? [],
         spine
       })
       if (verdict.quiet) quietReason = verdict.reason_vi
@@ -657,6 +658,7 @@ const decideStep = async ({ projectId, next, unit, gateEvent, signals, phaseSumm
     // B-0.2/B-0.3 bỏ qua vì B-0.1 đã chốt field: không gọi model, không ghi gì ⇒ không có gì để duyệt
     settledEarlier: B0_FIELD_STEPS[templateId] !== undefined && !signals.asked && gateEvent.calls_used === 0 && gateEvent.wrote_ops === false,
     ...summarySignals(gateEvent.summary),
+    emptySections: gateEvent.empty_sections ?? [],
     spine: afterSpine
   })
   if (verdict.quiet) return { verdict, afterSpine, phaseGate: null }
@@ -709,7 +711,10 @@ export const runPhase = async (
   const first = nextStepOf(startSpine)
   if (!first) return { phase, stopped_at: null, reason_vi: "Đã đi hết quy trình", steps: [] }
 
-  const unit = phase.includes("@") || phase === first.phase ? phaseUnitOf(first) : phase
+  // FLF-432 (luồng C #2): client gửi giai đoạn ĐÃ QUA (con trỏ cũ: các bước còn lại của S-4 đều `skipped`, bước tới lượt là
+  // S-5.1@S02) ⇒ chạy đúng đơn vị tới lượt thay vì trả "Đã xong giai đoạn này" rỗng. Giai đoạn chưa tới vẫn về như cũ.
+  const passed = (PHASES as readonly string[]).indexOf(phase) >= 0 && (PHASES as readonly string[]).indexOf(phase) < (PHASES as readonly string[]).indexOf(first.phase)
+  const unit = phase.includes("@") || phase === first.phase || passed ? phaseUnitOf(first) : phase
   // Giai đoạn không còn bước nào tới lượt (FE gọi lại sau khi duyệt bước cuối): về ngay, đừng phỏng vấn
   // đầu giai đoạn — một lượt gọi model tốn credit cho một giai đoạn đã đóng.
   if (phaseUnitOf(first) !== unit) return { phase: unit, stopped_at: null, reason_vi: "Đã xong giai đoạn này", steps: [] }
