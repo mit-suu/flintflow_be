@@ -23,6 +23,7 @@ import { documentLanguageInput, type TurnDocumentLanguage } from "../translation
 import type { StepContext } from "./context-projection.js"
 import { withFrameRenumber } from "../spine/template-frames.js"
 import { actorGeneralizationErrors, briefExtractionErrors, dropRedundantScalarAdds, requiredArrayErrors, sanitizeModelOps, useCaseNamingErrors, useCaseWiringErrors, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
+import { ESCALATION_MODEL, isErdOnly, normalizeEntityNames } from "./erd-retry.js"
 
 export const NEEDS_USER_INPUT = "NEEDS_USER_INPUT"
 /** Phases §4.1: gửi lại model kèm lỗi tối đa 2 lần, rồi hỏi user. */
@@ -187,6 +188,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
   let errors: ValidationError[] = []
   // Lượt retry cần thấy chính lô op đã sai, không chỉ danh sách lỗi (op_index trỏ vào lô này)
   let previousOps: unknown[] | null = null
+  // FLF-433: lô trước chỉ vướng luật ERD ⇒ giữ lô đó, lượt sau chỉ trả bản vá (erd-retry.ts)
+  let patchBase: unknown[] | null = null
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
     options.onAttempt?.({ attempt, max: maxRetries + 1, previousErrors: errors })
@@ -203,7 +206,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       // FLF-292: có tài liệu upload ⇒ skill bật luật khai `sources` (khối `{{#if has_documents}}`)
       has_documents: ctx.documents ? true : false,
       validation_errors: errors.length > 0 ? errors : "(none)",
-      previous_ops: previousOps ?? "(none)"
+      previous_ops: previousOps ?? "(none)",
+      patch_mode: patchBase !== null
     }
 
     let ops: unknown[] = []
@@ -212,7 +216,10 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
     let sources: SourceEntry[] | undefined
     try {
       const minMaxTokens = contentMaxTokens(ctx)
-      const result = await executor(ACTION_BY_CALL_KIND[callKind], { promptVariables, ...language }, projectId, options.userId, minMaxTokens ? { minMaxTokens } : undefined)
+      // FLF-433: lượt thử cuối mà lô vẫn chỉ vướng luật ERD ⇒ model mạnh hơn, chỉ đúng lượt này
+      const escalate = attempt === maxRetries + 1 && attempt > 1 && isErdOnly(errors)
+      const callOptions = { ...(minMaxTokens ? { minMaxTokens } : {}), ...(escalate ? { model: ESCALATION_MODEL } : {}) }
+      const result = await executor(ACTION_BY_CALL_KIND[callKind], { promptVariables, ...language }, projectId, options.userId, Object.keys(callOptions).length > 0 ? callOptions : undefined)
       usage.push({
         attempt,
         call_kind: callKind,
@@ -230,6 +237,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       // Chỉ lọc khi sanitize không báo lỗi: lỗi của nó trỏ op_index theo lô gốc.
       // FLF-413: model không thấy khung của mẫu ⇒ `order` tính năng mới trùng khung — nối renumber (op cuối, không lệch op_index)
       ops = sanitized.errors.length > 0 ? sanitized.ops : withFrameRenumber(spine, dropRedundantScalarAdds(spine, sanitized.ops as Op[]))
+      // FLF-433: bản vá ghép sau lô đã giữ; đuôi tên entity kiểu "Exam List" code tự bỏ (không tốn lượt thử)
+      if (sanitized.errors.length === 0) ops = normalizeEntityNames(patchBase ? [...patchBase, ...ops] : ops)
       errors = sanitized.errors.length > 0 ? sanitized.errors : validateOps(spine, ops, { writable: ctx.writable, stepId, visibleIds, ...(extraPaths ? { extraPaths } : {}) })
       // S-1.1 phải dựng vision/goals tiếng Anh từ addendum lõi — kể cả lô rỗng, nên kiểm sau validateOps
       if (errors.length === 0) errors = briefExtractionErrors(spine, ops as Op[], stepId, callKind)
@@ -261,6 +270,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
     }
     attempts.push({ attempt, ops, errors })
     previousOps = ops
+    patchBase = isErdOnly(errors) ? ops : null
   }
 
   throw new DraftRejectedError(attempts)
