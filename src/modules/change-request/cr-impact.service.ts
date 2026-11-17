@@ -13,7 +13,8 @@ import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus } from "./change-request.service.js"
 import { ChangeLocation } from "./change-location.model.js"
 import { unlockPaths } from "./lock.service.js"
-import { emptySectionTargets, findSpineLocations, withOriginalDiagrams, type FoundLocation } from "./spine-location.js"
+import { emptySectionTargets, findSpineLocations, systemRenameLocations, systemRenameTarget, withOriginalDiagrams, type FoundLocation } from "./spine-location.js"
+import { systemName } from "../spine/system-name.js"
 import { approvedBatch, approvedBatchLocations } from "./add-use-case.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { loadLayout, titleOfSection } from "../import/gap-report.service.js"
@@ -35,9 +36,14 @@ export const runImpact = async (cr: IChangeRequest): Promise<void> => {
   const seedTargets = new Set(cr.seed?.targets ?? [])
   // FLF-318: lô thêm / xoá / sửa use case đã duyệt trong chat ⇒ vị trí là đúng phần tử lô chạm tới, như trước baseline
   const approved = approvedBatch(spine, cr)
+  // P08 (upload U2-7): CR chỉ đổi tên hệ thống ⇒ chỉ phần tử tên hệ thống + nơi nhắc tên, không dò từ khoá / nghĩa
+  const renamesSystem = !approved && !cr.amendments?.length && systemRenameTarget(`${cr.title}
+${cr.description}`) !== null
   const found: FoundLocation[] = approved
     ? withOriginalDiagrams(spine, cr.targets.entity_paths, approvedBatchLocations(spine, approved))
-    :findSpineLocations(spine, cr.targets.entity_paths, cr.targets.keywords, await vectorCandidates(String(cr.projectId), crQueryText(cr))).map((f) =>
+    : renamesSystem
+    ? systemRenameLocations(spine, systemName(spine.project))
+    : findSpineLocations(spine, cr.targets.entity_paths, cr.targets.keywords, await vectorCandidates(String(cr.projectId), crQueryText(cr))).map((f) =>
         seedTargets.has(f.path) && !f.found_by.includes("preview") ? { ...f, found_by: [...f.found_by, "preview" as const] } : f
       )
   // Phase 8: CR gộp thêm lệnh sau khi đã có đề xuất ⇒ vị trí đã có (đề xuất / kết luận / khoá) giữ nguyên, chỉ thêm

@@ -24,3 +24,18 @@ describe("element-tail", () => {
     expect(elementOfKey(s, "nfrs:REQ-INT-005")).toBeUndefined()
   })
 })
+
+describe("P08 CR #5: dòng danh sách của phần tử đã xoá", () => {
+  const block = (text: string, kind: "list_item" | "paragraph" = "list_item") => ({ kind, text, rows: null, image_ref: null }) as never
+  it("mã có lúc import mà không còn trong Spine ⇒ bỏ dòng mở đầu bằng mã đó, giữ dòng khác và văn xuôi nhắc giữa câu", async () => {
+    const { deletedElementIds, dropDeletedElementLines } = await import("./element-tail.js")
+    const spine = { use_cases: [{ id: "UC-01" }, { id: "UC-02" }] } as never
+    const ids = deletedElementIds(spine, ["use_cases:UC-01", "use_cases:UC-09", "use_cases:UC-02"])
+    expect(ids).toEqual(["UC-09"])
+    const kept = dropDeletedElementLines(
+      [block("UC-01 Đăng nhập"), block("UC-09 Nhập/xuất dữ liệu Excel"), block("• UC-09: Nhập Excel"), block("Hệ thống hỗ trợ UC-09 khi giáo viên cần.", "paragraph"), block("UC-090 khác")],
+      ids
+    )
+    expect(kept.map((b: { text: string }) => b.text)).toEqual(["UC-01 Đăng nhập", "Hệ thống hỗ trợ UC-09 khi giáo viên cần.", "UC-090 khác"])
+  })
+})
