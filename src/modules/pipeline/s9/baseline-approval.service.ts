@@ -74,7 +74,7 @@ const notifyLeads = async (actor: ApprovalActor, submission: BaselineSubmission)
         body: `Tài liệu đã qua kiểm tra, không còn cờ đỏ. Xem và duyệt để khoá baseline.`,
         link: `/projects/${actor.projectId}`,
         organizationId: actor.orgId,
-        meta: { projectId: actor.projectId, spine_version: submission.spine_version }
+        meta: { projectId: actor.projectId, projectName: actor.projectName, spine_version: submission.spine_version }
       })
     )
   )
@@ -170,7 +170,7 @@ export const rejectSubmission = async (actor: ApprovalActor, input: RejectInput)
       body: input.reason.slice(0, 300),
       link: `/projects/${actor.projectId}`,
       organizationId: actor.orgId,
-      meta: { projectId: actor.projectId, comment_ids: input.comment_ids }
+      meta: { projectId: actor.projectId, projectName: actor.projectName, reason: input.reason.slice(0, 300), comment_ids: input.comment_ids }
     })
   }
 

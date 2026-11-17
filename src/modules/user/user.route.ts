@@ -26,7 +26,7 @@ router.get("/me", authMiddleware, userController.getMe)
  * @swagger
  * /api/v1/users/me:
  *   patch:
- *     summary: Cập nhật tên hiển thị / mốc onboarding (UC 1.12) / ngôn ngữ giao diện (FLF-259) của user hiện tại
+ *     summary: Cập nhật tên hiển thị / mốc onboarding (UC 1.12) / ngôn ngữ giao diện (FLF-259) / tổ chức mặc định (FLF-427) của user hiện tại
  *     tags:
  *       - Users
  *     security:
@@ -47,6 +47,9 @@ router.get("/me", authMiddleware, userController.getMe)
  *               locale:
  *                 type: string
  *                 enum: [vi, en]
+ *               preferredOrganizationId:
+ *                 type: string
+ *                 nullable: true
  *     responses:
  *       200:
  *         description: User profile sau khi cập nhật
@@ -54,6 +57,8 @@ router.get("/me", authMiddleware, userController.getMe)
  *         description: VALIDATION_ERROR
  *       401:
  *         description: Unauthorized
+ *       404:
+ *         description: ORG_NOT_FOUND
  */
 router.patch("/me", authMiddleware, userController.updateMe)
 

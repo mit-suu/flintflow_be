@@ -77,7 +77,10 @@ export const login = catchAsync(async (req: Request, res: Response) => {
   setAuthCookies(res, result)
   return sendSuccess(res, 200, {
     accessToken: result.accessToken,
-    user: result.user
+    user: result.user,
+    activeOrgId: result.activeOrgId,
+    organizations: result.organizations,
+    needsOnboarding: result.needsOnboarding
   })
 })
 
@@ -92,6 +95,9 @@ export const confirmEmailVerification = catchAsync(async (req: Request, res: Res
   return sendSuccess(res, 200, {
     accessToken: result.accessToken,
     user: result.user,
+    activeOrgId: result.activeOrgId,
+    organizations: result.organizations,
+    needsOnboarding: result.needsOnboarding,
     message: "Xác thực email thành công!"
   })
 })
@@ -149,25 +155,35 @@ export const googleAuth = catchAsync(async (req: Request, res: Response) => {
   setAuthCookies(res, result)
   return sendSuccess(res, 200, {
     accessToken: result.accessToken,
-    user: result.user
+    user: result.user,
+    activeOrgId: result.activeOrgId,
+    organizations: result.organizations,
+    needsOnboarding: result.needsOnboarding
   })
 })
 
 export const refresh = catchAsync(async (req: Request, res: Response) => {
   const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken
   if (!refreshToken) {
+    clearAuthCookies(res)
     throw new ApiError(401, "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.", "MISSING_REFRESH_TOKEN")
   }
 
   const userAgent = req.headers["user-agent"]
   const ip = req.ip
 
-  const result = await authService.refresh(refreshToken, userAgent, ip)
-
-  setAuthCookies(res, result)
-  return sendSuccess(res, 200, {
-    accessToken: result.accessToken
-  })
+  try {
+    const result = await authService.refresh(refreshToken, userAgent, ip)
+    setAuthCookies(res, result)
+    return sendSuccess(res, 200, {
+      accessToken: result.accessToken
+    })
+  } catch (err) {
+    if (err instanceof ApiError && (err.statusCode === 401 || err.statusCode === 403)) {
+      clearAuthCookies(res)
+    }
+    throw err
+  }
 })
 
 export const logout = catchAsync(async (req: Request, res: Response) => {

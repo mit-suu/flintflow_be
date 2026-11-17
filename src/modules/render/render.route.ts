@@ -181,4 +181,57 @@ router.get("/:projectId/export/word", authMiddleware, exportController.exportWor
  */
 router.get("/:projectId/export/pdf", authMiddleware, exportController.exportPdf)
 
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/export/google-docs:
+ *   post:
+ *     summary: Xuất sang Google Docs — chính file của export/word, upload lên Drive của user (cần đã kết nối Google)
+ *     tags: [Render]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: source
+ *         schema:
+ *           type: string
+ *           enum: [draft, baseline]
+ *           default: draft
+ *       - in: query
+ *         name: baseline_id
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: lang
+ *         schema:
+ *           type: string
+ *           enum: [vi, en]
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               mode:
+ *                 type: string
+ *                 enum: [new, update]
+ *                 default: update
+ *     responses:
+ *       200:
+ *         description: "{ fileId, webViewLink, title, mode, recreated }"
+ *       401:
+ *         description: GOOGLE_RECONNECT_REQUIRED — chưa nối Google hoặc quyền đã bị thu hồi
+ *       403:
+ *         description: ORG_ROLE_FORBIDDEN (Viewer xuất bản nháp) · GOOGLE_FILE_FORBIDDEN
+ *       409:
+ *         description: Như export/word (NO_WORKING_DRAFT, TRANSLATION_INCOMPLETE, DOCUMENT_LANGUAGE_UNAVAILABLE)
+ *       503:
+ *         description: GOOGLE_INTEGRATION_DISABLED · GOOGLE_DRIVE_QUOTA_EXCEEDED
+ */
+router.post("/:projectId/export/google-docs", authMiddleware, exportController.exportGoogleDocs)
+
 export default router

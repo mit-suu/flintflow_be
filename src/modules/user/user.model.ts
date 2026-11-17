@@ -26,6 +26,8 @@ export interface IUser extends Document {
   onboardedAt?: Date | null
   /** FLF-259: ngôn ngữ giao diện đã lưu; không có = tài khoản chưa chọn. */
   locale?: UserLocale
+  /** Tổ chức mặc định được ghi nhớ để tự chọn khi đăng nhập (UC-10, FLF-427). */
+  preferredOrganizationId?: mongoose.Types.ObjectId | null
   createdAt: Date
   updatedAt: Date
   comparePassword(password: string): Promise<boolean>
@@ -101,6 +103,11 @@ const userSchema = new Schema<IUser>(
     locale: {
       type: String,
       enum: [...USER_LOCALES]
+    },
+    preferredOrganizationId: {
+      type: Schema.Types.ObjectId,
+      ref: "Organization",
+      default: null
     }
   },
   { timestamps: true }
