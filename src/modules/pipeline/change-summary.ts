@@ -101,10 +101,10 @@ const parseTarget = (path: string): ParsedTarget | null => {
 /** Phân quyền không có tên: "<vai> trên màn <màn>" (FLF P06: trước đây in mã "P04"). */
 const permissionTitleOf = (permission: unknown, spine: Spine): string | null => {
   if (!isRecord(permission)) return null
-  const role = spine.roles.find((r) => r.id === permission.role_id)?.name ?? (typeof permission.role_id === "string" ? permission.role_id : null)
+  const role = spine.roles.find((r) => r.id === permission.role_id)?.name ?? null
   const screen = spine.screens.find((sc) => sc.id === permission.screen_id)?.name ?? null
-  if (!role || !screen) return null
-  return `${role} trên màn ${screen}`
+  // Vai / màn đã bị xoá sau đó (gộp use case) ⇒ vẫn không in mã
+  return `${role ?? "Một vai trò"} trên ${screen ? `màn ${screen}` : "một màn đã xoá"}`
 }
 
 const kindOf = (change: ChangeLike): ChangeSummary["kind"] => {
@@ -133,7 +133,9 @@ export const summarizeChanges = (changes: readonly ChangeLike[], spineAfter?: Sp
     if (!target || BOOKKEEPING_ROOTS.has(parsePath(change.path)[0].key)) continue
 
     const key = `${target.collection}|${target.id ?? target.field ?? change.path}`
-    const kind = kindOf(change)
+    // P06: thêm / bỏ một giá trị trong field của phần tử ĐÃ CÓ (`use_cases[id=UC12].function_ids[=FN034]`) là SỬA phần tử đó,
+    // không phải "thêm use case" (trước đây chat ghi "Thêm use case: Manage Shop Setup" khi chỉ gắn chức năng)
+    const kind = target.id !== null && target.field !== null ? "update" : kindOf(change)
     const element = kind === "remove" ? change.before : change.value
     const existing = byKey.get(key)
 

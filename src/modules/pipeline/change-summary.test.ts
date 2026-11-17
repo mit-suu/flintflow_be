@@ -84,12 +84,17 @@ describe("P06 - không lộ tên field / mã nội bộ", () => {
     )
     expect(rows).toHaveLength(1)
     expect(rows[0].collection).toBe("use_cases")
+    expect(rows[0].kind).toBe("update")
     expect(rows[0].title_vi).toContain(uc.name)
     expect(JSON.stringify(rows)).not.toContain("function_ids")
   })
   it("phân quyền ⇒ '<vai> trên màn <màn>', không in mã", () => {
     const rows = summarizeChanges([{ op: "add", path: "permissions[]", before: ABSENT, value: { id: "P904", role_id: role.id, screen_id: screen.id, action: "view" } }] as never, spine)
     expect(rows[0].title_vi).toBe(`${role.name} trên màn ${screen.name}`)
+  })
+  it("quyền trỏ màn đã xoá ⇒ không in mã", () => {
+    const rows = summarizeChanges([{ op: "add", path: "permissions[id=P905]", before: ABSENT, value: { id: "P905", role_id: role.id, screen_id: "S999", action: "view" } }] as never, spine)
+    expect(rows[0].title_vi).toBe(`${role.name} trên một màn đã xoá`)
   })
   it("sửa luồng màn ⇒ field 'Chuyển tới màn'", () => {
     const rows = summarizeChanges([{ op: "set", path: `screens[id=${screen.id}].flow_to`, before: [], value: [{ to: "S07" }] }] as never, spine)
