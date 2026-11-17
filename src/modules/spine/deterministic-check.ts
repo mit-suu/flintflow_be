@@ -22,7 +22,7 @@ import { actorParents, ancestorsOf, generalizationProblems, type GeneralizationP
 import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "./source-hash.js"
 import type { ErdNotation, RenderContext } from "../../shared/diagram/erd-notation.js"
 import { hasComponentSequence, needsSequence } from "../diagram/renderers/sequence.renderer.js"
-import { ORIGINAL_DIAGRAM_LABELS, diagramKey, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds, originalSectionOf } from "./original-diagram.js"
+import { ORIGINAL_DIAGRAM_LABELS, diagramKey, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds, originalKey, originalSectionOf } from "./original-diagram.js"
 import { isVerbatim, type SectionSegments } from "./segment-hash.js"
 import { NFR_CATEGORY_LABELS, capitalize, diagramLabel, pathLabel, quotedSectionLabel } from "./human-labels.js"
 import { PROJECT_TEXT_FIELDS, SRS_TEXT_FIELDS, VALIDATION_TEXT_FIELDS, pickTextFields } from "./srs-text-fields.js"
@@ -57,6 +57,8 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("usecase_no_function", "yellow", true),
   rule("screen_no_function", "yellow", true),
   rule("orphan_screen", "yellow", true),
+  // FLF-428: màn có trong luồng nhưng không actor người nào dùng — tách khỏi `orphan_screen` để câu cờ nói đúng lý do
+  rule("screen_no_actor", "yellow", true),
   rule("empty_feature", "yellow", true),
   rule("role_no_actor", "yellow", true),
   rule("non_english_content", "yellow", true),
@@ -245,6 +247,7 @@ const GATE_STEP = {
   usecase_no_function: "S-4.4",
   screen_no_function: "S-4.1",
   orphan_screen: "S-4.2",
+  screen_no_actor: "S-4.2",
   empty_feature: "S-4.1",
   role_no_actor: "S-3.1",
   usecase_floating: "S-3.4",
@@ -266,7 +269,11 @@ export const stepGate = (spine: Spine, open: boolean): StepGate => {
 
 // ─── red: section_empty ──────────────────────────────────────────
 
-const hasKind = (s: Spine, kind: Diagram["kind"]) => s.diagrams.some((d) => d.kind === kind)
+/**
+ * Mục sơ đồ có dữ liệu khi có hình FlintFlow vẽ **hoặc** hình gốc của khách còn giữ trong tài liệu (R38.3 / AC-38.8, S06-01 —
+ * FLF-428): ảnh sơ đồ trong file chế độ 3/4 là nội dung của mục, không bắt vẽ lại mới qua cổng.
+ */
+const hasKind = (s: Spine, kind: Diagram["kind"]) => s.diagrams.some((d) => d.kind === kind) || keptOriginalKinds({ custom_sections: s.custom_sections ?? [] }).has(originalKey(kind, null))
 const nfrCount = (s: Spine, category: string) => s.nfrs.filter((n) => n.category === category).length
 
 /** "Không field nào có dữ liệu" theo cột Sở hữu bảng §4. */
@@ -842,24 +849,34 @@ export const orphanEntities = (spine: Spine): { entity: Spine["entities"][number
     }))
 }
 
-/** Màn mồ côi chặn ký baseline: cùng điều kiện `orphan_screen` (vàng lúc soạn), lên đỏ ở S-9. */
+/**
+ * Màn mồ côi chặn ký baseline: cùng điều kiện `orphan_screen` + `screen_no_actor` (vàng lúc soạn), lên đỏ ở S-9. Câu cờ theo
+ * đúng lý do (FLF-428): màn không ai dùng mà vẫn có trong luồng thì không nói "không nằm trong luồng".
+ */
 const orphanScreenAtBaseline = (spine: Spine): FlagCandidate[] =>
-  orphanScreens(spine).map(({ screen, why }) => ({
+  // Một cờ đỏ mỗi màn (target_id là khoá cờ); màn dính cả hai lý do ⇒ lấy lý do luồng (mục kê trước)
+  orphanScreens(spine)
+    .filter((o, i, all) => all.findIndex((x) => x.screen.id === o.screen.id) === i)
+    .map(({ screen, why, cause }) => ({
     level: "red",
     rule_id: "orphan_screen_at_baseline",
-    section_id: "fixed:3.1.1",
+    section_id: cause === "no_actor" ? "fixed:3.1.3" : "fixed:3.1.1",
     target_id: screen.id,
-    message: `Màn hình "${screen.name}" không nằm trong luồng nào, chưa chốt bản được: ${why}`,
-    remediation_step: "S-4.2"
+    message:
+      cause === "no_actor"
+        ? `Màn hình "${screen.name}" chưa có tác nhân nào dùng, chưa chốt bản được: ${why}`
+        : `Màn hình "${screen.name}" không nằm trong luồng nào, chưa chốt bản được: ${why}`,
+    remediation_step: cause === "no_actor" ? "S-4.3" : "S-4.2"
   }))
 
 // ─── yellow ──────────────────────────────────────────────────────
 
 /**
- * Màn mồ côi (§3.1.1): không actor người nào dùng (khi đã có liên kết màn ↔ actor), hoặc đứng riêng trong luồng
- * (khi đã có cạnh `flow_to`) — không cạnh vào lẫn ra, hay popup không có màn nào mở.
+ * Màn mồ côi: không actor người nào dùng (khi đã có liên kết màn ↔ actor — `cause: "no_actor"`, sửa ở phân quyền §3.1.3), hoặc
+ * đứng riêng trong luồng (khi đã có cạnh `flow_to` — `cause: "flow"`, §3.1.1): không cạnh vào lẫn ra, hay popup không có màn nào mở.
  */
-export const orphanScreens = (spine: Spine): { screen: Spine["screens"][number]; why: string }[] => {
+export type OrphanScreenCause = "no_actor" | "flow"
+export const orphanScreens = (spine: Spine): { screen: Spine["screens"][number]; why: string; cause: OrphanScreenCause }[] => {
   const actorsOf = screenActorMap(spine)
   const linked = hasScreenActorLinks(actorsOf)
   const ids = new Set(spine.screens.map((s) => s.id))
@@ -868,14 +885,17 @@ export const orphanScreens = (spine: Spine): { screen: Spine["screens"][number];
   const incoming = new Set(edges.map(([, to]) => to))
   const outgoing = new Set(edges.map(([from]) => from))
 
+  // Một màn có thể dính cả hai lý do (đứng riêng trong luồng **và** không ai dùng) ⇒ hai mục, mỗi mục một câu đúng lý do
   return spine.screens.flatMap((screen) => {
-    if (linked && (actorsOf.get(screen.id) ?? []).length === 0) {
-      return [{ screen, why: "không tác nhân nào dùng màn này (chưa có phân quyền hay use case nào gắn chức năng trên màn)" }]
+    const out: { screen: Spine["screens"][number]; why: string; cause: OrphanScreenCause }[] = []
+    if (hasFlow && !incoming.has(screen.id)) {
+      if (screen.is_popup) out.push({ screen, why: "popup không có màn nào mở tới", cause: "flow" })
+      else if (!outgoing.has(screen.id)) out.push({ screen, why: "không có màn nào chuyển tới và màn không chuyển đi đâu", cause: "flow" })
     }
-    if (!hasFlow || incoming.has(screen.id)) return []
-    if (screen.is_popup) return [{ screen, why: "popup không có màn nào mở tới" }]
-    if (!outgoing.has(screen.id)) return [{ screen, why: "không có màn nào chuyển tới và màn không chuyển đi đâu" }]
-    return []
+    if (linked && (actorsOf.get(screen.id) ?? []).length === 0) {
+      out.push({ screen, why: "màn không có trong bảng phân quyền và không có chức năng nào của use case trên màn", cause: "no_actor" })
+    }
+    return out
   })
 }
 
@@ -1043,8 +1063,13 @@ const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
         .filter((s) => !fnScreens.has(s.id))
         .map((s) => yellow("screen_no_function", "fixed:3.1.2", s.id, `Màn hình "${s.name}" chưa có chức năng nào`, "S-4.1"))),
     ...when("orphan_screen", () =>
-      orphanScreens(spine).map(({ screen, why }) =>
-        yellow("orphan_screen", "fixed:3.1.1", screen.id, `Màn hình "${screen.name}" không nằm trong luồng nào: ${why}`, "S-4.2"))),
+      orphanScreens(spine)
+        .filter((o) => o.cause === "flow")
+        .map(({ screen, why }) => yellow("orphan_screen", "fixed:3.1.1", screen.id, `Màn hình "${screen.name}" không nằm trong luồng nào: ${why}`, "S-4.2"))),
+    ...when("screen_no_actor", () =>
+      orphanScreens(spine)
+        .filter((o) => o.cause === "no_actor")
+        .map(({ screen, why }) => yellow("screen_no_actor", "fixed:3.1.3", screen.id, `Màn hình "${screen.name}" chưa có tác nhân nào dùng: ${why}`, "S-4.3"))),
     ...when("empty_feature", () =>
       spine.features
         // FLF-413: khung của mẫu chưa lấp không phải tính năng thiếu nội dung
