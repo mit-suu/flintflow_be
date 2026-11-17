@@ -157,6 +157,7 @@ import { orderedSteps } from "./step-registry.js"
 import { AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction, ElicitOutput } from "../../shared/ai/response-parser.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
+import { runRenderReviewPhase, defaultStepRunnerDeps } from "./step-runner.service.js"
 import { runStep, runDraftPhase, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, settleFromChat, settleRepeatedAnswer, settleWithoutModel, askTranscript, recordUserMessage, recordAiMessage, nextPendingAfterChat, isSubstantiveAnswer, isBareAgreement, noChangeReason, replyLanguageAfterMessage, CALL_LIMIT, CHAT_BUDGET_REPLY, CHAT_BUDGET_REPLY_EN, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
 import { cancelRun, getRunState, resetMemoryRuns } from "./run-state.service.js"
 import { gate } from "./gate.service.js"
@@ -2678,5 +2679,34 @@ describe("step-runner: tin user ghi lặp vào transcript (FLF-400)", () => {
       ["ai", "B-1.5", "Ổn chưa?"],
       ["ai", "B-1.5", "Ổn chưa?"]
     ])
+  })
+})
+
+describe("FLF-431 - S-9.1 vẽ lại hình đang render_error (luồng C #11)", () => {
+  const seedErrored = () => {
+    seedSpine()
+    const spine = db.spines[0] as unknown as SpineT
+    spine.use_cases = [{ id: "UC01", name: "Submit Request", actor_ids: ["A01"], function_ids: [], description: "", includes: [], extends: [] }] as never
+    spine.diagrams = [
+      { id: "D01", kind: "usecase", format: "puml", source: "", section: "fixed:2.2.1", owner_kind: null, owner_id: null, render_status: "error", error: "PlantUML server không phản hồi: fetch failed", source_hash: "old", rendered_at: null }
+    ] as never
+  }
+  const run = (retry: boolean) => {
+    const { emit } = collectEvents()
+    return runRenderReviewPhase(PROJECT, "S-9.1", [], null, USER, emit, { ...defaultStepRunnerDeps(), renderDeps: renderStub() }, { retryRenderErrors: retry })
+  }
+
+  it("retryRenderErrors ⇒ hình lỗi được vẽ lại, hết render_error", async () => {
+    seedErrored()
+    await run(true)
+    const spine = db.spines[0] as unknown as SpineT
+    expect(spine.diagrams.filter((d) => d.kind === "usecase").every((d) => d.render_status === "ok")).toBe(true)
+  })
+
+  it("không bật ⇒ giữ nguyên hình lỗi (bước khác không tự đi vẽ lại)", async () => {
+    seedErrored()
+    await run(false)
+    const spine = db.spines[0] as unknown as SpineT
+    expect(spine.diagrams.find((d) => d.id === "D01")?.render_status).toBe("error")
   })
 })
