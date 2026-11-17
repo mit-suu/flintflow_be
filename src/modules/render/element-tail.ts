@@ -50,3 +50,22 @@ export const refreshTailBlock = (b: CustomBlock, element: Record<string, unknown
   if (typeof value !== "string" || !value.trim()) return b
   return { ...b, text: `${m[1]}: ${value}` }
 }
+
+/**
+ * P08 (CR #5): mã phần tử đã có lúc import (`known` của đoạn: `use_cases:UC-09`) mà nay không còn trong Spine — phần tử CR đã xoá.
+ */
+export const deletedElementIds = (spine: Spine, knownKeys: Iterable<string>): string[] =>
+  [...new Set([...knownKeys].filter((k) => k.includes(":") && !k.startsWith("project:") && !elementOfKey(spine, k)).map((k) => k.slice(k.indexOf(":") + 1)))].filter((id) => id.length >= 2)
+
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+/**
+ * Dòng nguyên văn không gắn phần tử (mục danh sách / đoạn ngắn) mở đầu bằng mã một phần tử đã xoá — "UC-09 Nhập/xuất dữ liệu
+ * Excel" trong danh sách use case của §2.2 — là dòng của chính phần tử đó ⇒ bỏ theo phần tử, như tiêu đề + đuôi (B15).
+ * Văn xuôi chỉ nhắc tới phần tử giữa câu thì giữ (C-3 tìm và đề xuất sửa).
+ */
+export const dropDeletedElementLines = (blocks: readonly CustomBlock[], deletedIds: readonly string[]): CustomBlock[] => {
+  if (!deletedIds.length) return [...blocks]
+  const lead = new RegExp(`^[\\s\\-•*–]*(?:${deletedIds.map(escapeRe).join("|")})(?![\\p{L}\\p{N}])`, "iu")
+  return blocks.filter((b) => !((b.kind === "list_item" || (b.kind === "paragraph" && (b.text ?? "").length <= 200)) && lead.test(b.text ?? "")))
+}

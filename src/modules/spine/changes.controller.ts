@@ -127,9 +127,12 @@ const turnReplyLanguage = async (session: IChatSession | null, typed: string | n
 }
 
 /** FLF-299: số câu hỏi làm rõ đã hỏi cho yêu cầu đang dở — chỉ truyền khi có, lượt thường giữ nguyên tham số. */
-const clarificationRoundsOf = (session: IChatSession | null): { clarification_rounds?: number } => {
+const clarificationRoundsOf = (session: IChatSession | null): { clarification_rounds?: number; pending_request?: { request: string; question: string } } => {
   const rounds = session ? changeTranscript.clarificationRounds(session.messages) : 0
-  return rounds > 0 ? { clarification_rounds: rounds } : {}
+  if (!session || rounds === 0) return {}
+  // P08 (T7): câu trả lời đi kèm yêu cầu gốc + câu đã hỏi
+  const pending = changeTranscript.pendingChangeRequest(session.messages)
+  return { clarification_rounds: rounds, ...(pending ? { pending_request: pending } : {}) }
 }
 
 export const applyChanges = catchAsync(async (req: Request, res: Response) => {

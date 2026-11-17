@@ -334,6 +334,24 @@ const referencedCustomSections = (spine: Spine, haystack: string) =>
       return { ...c, ...(guidance ? { guidance } : {}) }
     })
 
+/** Lệnh áp cho cả một loại phần tử: "toàn bộ thông báo", "tất cả quy tắc", "mọi NFR", "all messages". */
+const WHOLE_COLLECTION_HINT = /toàn bộ|tất cả|mọi |từng |cả \d+|\ball\b|\bevery\b|\beach\b/i
+
+/** Tên gọi của loại phần tử trong câu lệnh ⇒ collection. */
+const COLLECTION_NAME_HINTS: readonly [(typeof TARGET_COLLECTIONS)[number], RegExp][] = [
+  ["messages", /thông báo|\bmessages?\b|\bmsg\b/i],
+  ["business_rules", /quy tắc nghiệp vụ|business rules?/i],
+  ["nfrs", /phi chức năng|\bnfrs?\b|non-functional/i],
+  ["common_requirements", /yêu cầu chung|common requirements?/i],
+  ["other_requirements", /yêu cầu khác|other requirements?/i],
+  ["glossary", /thuật ngữ|glossary/i],
+  ["actors", /\bactors?\b|tác nhân/i],
+  ["use_cases", /use cases?|ca sử dụng/i]
+]
+
+/** Lệnh nói về mục tiêu / tầm nhìn / phạm vi phát hành của §1 Tổng quan sản phẩm. */
+const PROJECT_OVERVIEW_HINT = /mục tiêu|muc tieu|tầm nhìn|tam nhin|phạm vi phát hành|trong phạm vi|ngoài phạm vi|tổng quan sản phẩm|product overview|\bgoals?\b|\bvision\b|release scope|in scope|out of scope/i
+
 export const buildChangeProjection = (spine: Spine, instruction: string): Record<string, unknown> => {
   const haystack = instruction.toLowerCase()
   const projection: Record<string, unknown> = {}
@@ -396,6 +414,18 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
     }
   }
 
+  // P08 (E2E P07 #1): "bổ sung loại và ngữ cảnh cho toàn bộ 46 thông báo" — lệnh cho CẢ một loại phần tử mà không nhắc số mục
+  // ⇒ trước đây model chỉ thấy vài thông báo khớp chữ (2/46) và hỏi lại. Gọi tên loại + "toàn bộ / tất cả / mọi" ⇒ đưa cả loại
+  if (WHOLE_COLLECTION_HINT.test(haystack)) {
+    for (const [collection, re] of COLLECTION_NAME_HINTS) {
+      if (!re.test(haystack)) continue
+      const list = spine[collection] as unknown as Record<string, unknown>[]
+      if (!Array.isArray(list) || list.length === 0) continue
+      projection[collection] = list.slice(0, SECTION_ELEMENT_LIMIT)
+      matched += Math.min(list.length, SECTION_ELEMENT_LIMIT)
+    }
+  }
+
   const permissions = permissionRows(spine, haystack, projection)
   if (permissions.length > 0) {
     projection.permissions = permissions
@@ -423,7 +453,14 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
 
   // FLF-411 (#18): "đổi tên hệ thống thành …" — thiếu `project` model đoán `project.name` (tên dự án). Luôn kèm hai tên
   // (gọn, không cả `project`) để model thấy `system_name` là field đang hiện ở tiêu đề / tên file.
-  const project = { name: spine.project.name, system_name: spine.project.system_name ?? null }
+  // P08 (T6/T7): lệnh sửa §1 / mục tiêu / tầm nhìn ngoài pha Brief — model phải thấy `project.goals` (mảng chuỗi, sửa cả mảng),
+  // nếu không nó đoán chữ từ bản dịch tiếng Việt trong chat, trỏ `[1]` / `[=<chữ dịch>]` chết hoặc hỏi lại "chưa thấy mục tiêu"
+  const aboutOverview = !projection.brief_core && (referencedSections(haystack).includes("fixed:1") || PROJECT_OVERVIEW_HINT.test(haystack))
+  const project = {
+    name: spine.project.name,
+    system_name: spine.project.system_name ?? null,
+    ...(aboutOverview ? { vision: spine.project.vision, goals: spine.project.goals, release_scope: spine.project.release_scope } : {})
+  }
 
   if (matched > 0) return { project, ...projection, existing_ids: existingIds }
 
@@ -499,8 +536,24 @@ export const isChangeInstruction = (message: string): boolean => {
   const words = text.split(/\s+/).map((word) => word.replace(/[^\p{L}]/gu, ""))
   const lead = words[0] === "please" ? words[1] : words[0]
   if (lead !== undefined && LEADING_CHANGE_VERBS.includes(lead)) return true
-  return words.slice(0, CHANGE_VERB_WINDOW).some((word) => CHANGE_VERBS.includes(word))
+  if (words.slice(0, CHANGE_VERB_WINDOW).some((word) => CHANGE_VERBS.includes(word))) return true
+  // P08: "Trong §1 Tổng quan sản phẩm, mục tiêu đầu tiên đổi thành: …" — câu mở bằng chỗ cần sửa rồi mới tới động từ ⇒ xét
+  // cửa sổ sau dấu phẩy đầu tiên; "X đổi thành Y" / "thay bằng" ở bất cứ đâu cũng là lệnh sửa (trước đây rơi vào CHAT thường,
+  // AI chỉ dặn "gõ câu lệnh sửa" và lệnh bị bỏ)
+  if (RESULTATIVE_EDIT.test(text)) return true
+  const comma = text.indexOf(",")
+  if (LOCATOR_LEAD.test(text) && comma > 0) {
+    const rest = text.slice(comma + 1).trim().split(/\s+/).map((word) => word.replace(/[^\p{L}]/gu, ""))
+    return rest.slice(0, CHANGE_VERB_WINDOW + 2).some((word) => CHANGE_VERBS.includes(word))
+  }
+  return false
 }
+
+/** "… đổi thành …", "… sửa lại thành …", "… thay bằng …", "… change it to …". */
+const RESULTATIVE_EDIT = /(?<!\p{L})(?:đổi|sửa|thay|chỉnh|chuyển)(?:\s+lại)?\s+(?:thành|sang|bằng)(?!\p{L})|\b(?:change|rename)\b[^.?!]{0,60}\bto\b/u
+
+/** Câu mở bằng chỗ cần sửa: "Trong §1 …,", "Ở mục 5.3,", "Tại màn Login,". */
+const LOCATOR_LEAD = /^(?:trong|ở|tại|với|in|on|for)\s/u
 
 // ─── dependency injection (mock provider trong test) ─────────────
 
@@ -569,6 +622,11 @@ export interface ChangeBody {
    * phiên). Có ⇒ model không hỏi lại điều đã được trả lời; đủ `MAX_CLARIFICATION_ROUNDS` ⇒ ép soạn bản xem trước.
    */
   clarification_rounds?: number
+  /**
+   * Nội bộ (DTO không nhận) — P08 (T7): yêu cầu gốc + câu hỏi làm rõ gần nhất khi lượt này là câu trả lời
+   * (`pendingChangeRequest` của phiên). Model đọc lượt như "yêu cầu gốc, đã hỏi, user trả lời" thay vì một lệnh đứng một mình.
+   */
+  pending_request?: { request: string; question: string } | null
   /**
    * Nội bộ (DTO `strictObject` không nhận — client không gửi được bản dịch, D7): lô `ops` do server gom (hoà giải) kèm chữ
    * theo ngôn ngữ tài liệu model trả cùng lô, và ngôn ngữ của lượt đó. Đi theo preview tới lượt áp.
@@ -710,6 +768,23 @@ const WITHDRAWN = {
   en: "Dropped this request - nothing in the document changed. Send a new request whenever you need."
 }
 
+/**
+ * P08 (T7): câu trả lời cho câu hỏi làm rõ ("Đúng, thêm mốc 3 tháng") không phải lệnh đứng một mình — ghép yêu cầu gốc và
+ * câu đã hỏi vào `user_message`. Trước đây chỉ câu trả lời tới model (yêu cầu gốc nằm lẫn trong lịch sử) ⇒ model không ra
+ * lô nào ⇒ "Mình chưa xác định được cần đổi gì".
+ */
+export const answeredMessage = (answer: string, pending: { request: string; question: string } | null): string =>
+  pending && pending.request !== answer.trim()
+    ? [
+        `Original request: ${pending.request}`,
+        `You asked: ${pending.question}`,
+        `User's answer: ${answer}`,
+        // E2E P08: câu hỏi thường trích chữ tài liệu ĐÃ DỊCH sang tiếng Việt ⇒ model đi tìm đúng chữ đó trong projection tiếng
+        // Anh, không thấy ⇒ hỏi lại / trỏ selector chết
+        "Apply the answer to the original request now and return the batch. Your question may quote document text in the user's language - match it to the projection element by meaning, never by that quoted wording."
+      ].join("\n")
+    : answer
+
 /** FLF-299: sau số câu hỏi làm rõ này cho cùng một yêu cầu, model phải soạn bản xem trước thay vì hỏi tiếp. */
 export const MAX_CLARIFICATION_ROUNDS = 2
 
@@ -723,7 +798,9 @@ const opsFromInstruction = async (
   deps: ChangeDeps,
   clarificationRounds = 0,
   /** FLF-318: `false` = soạn cho change request — không có người để hỏi, không hỏi giao diện / use case đề xuất thêm. */
-  interactive = true
+  interactive = true,
+  /** P08 (T7): lượt trả lời câu hỏi làm rõ — yêu cầu gốc + câu đã hỏi đi cùng câu trả lời trong `user_message`. */
+  pending: { request: string; question: string } | null = null
 ): Promise<ResolvedOps> => {
   const history = chatHistory?.trim() ?? ""
   // Người dùng rút lại yêu cầu đang dở (đang trả lời câu hỏi làm rõ) ⇒ dừng, không gọi model (model không có cách trả
@@ -757,7 +834,7 @@ const opsFromInstruction = async (
       {
         promptVariables: {
           call_kind: "change_instruction",
-          user_message: instruction,
+          user_message: answeredMessage(instruction, clarificationRounds > 0 ? pending : null),
           chat_history: history || "(none)",
           is_pipeline: false,
           has_baseline: spine.baselines.length > 0,
@@ -886,7 +963,18 @@ const resolveOps = async (
     return { ops: body.ops, clarification: null, notes: null, ...(body.localized?.length ? { localized: body.localized, language: languagePairOf(body.document_language) } : {}) }
   }
   if (body.instruction === undefined) throw new ApiError(400, "Vui lòng nhập nội dung cần sửa.", "VALIDATION_ERROR")
-  return await opsFromInstruction(projectId, userId, spine, body.instruction, body.chat_history, body.reply_language, deps, body.clarification_rounds)
+  return await opsFromInstruction(
+    projectId,
+    userId,
+    spine,
+    body.instruction,
+    body.chat_history,
+    body.reply_language,
+    deps,
+    body.clarification_rounds,
+    true,
+    body.pending_request ?? null
+  )
 }
 
 const toTransaction = (userId: string, body: ChangeBody, ops: Op[], txn?: string): Transaction => ({
