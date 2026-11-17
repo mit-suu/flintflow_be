@@ -16,6 +16,7 @@ import { stripRecord } from "../import/check.service.js"
 import { DocBlock } from "../import/doc-block.model.js"
 import { loadLayout } from "../import/gap-report.service.js"
 import { withMeteredAi } from "../import/metered-ai.js"
+import { nameElementIds } from "../spine/human-labels.js"
 import { listSections } from "../spine/section-registry.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
@@ -130,18 +131,20 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
     // Gợi ý song song câu hỏi — model trả thiếu / thừa thì cắt, bù `[]`; bỏ gợi ý trùng
     const ambiguous = askAmbiguous ? out.questions : []
     const suggestions = ambiguous.map((_, i) => [...new Set((out.suggestions[i] ?? []).map((s) => s.trim()).filter(Boolean))])
+    // P06 (CR #3): câu hỏi / gợi ý cho người dùng không lộ mã nội bộ ("SCR-05", "FN009") — thay bằng tên phần tử
+    const withNames = (text: string) => nameElementIds(text, spine)
     cr.clarifications.push({
       round,
-      questions: [...contradictions.map((c) => c.question), ...ambiguous],
+      questions: [...contradictions.map((c) => c.question), ...ambiguous].map(withNames),
       answers: [],
-      suggestions: [...contradictions.map((c) => c.suggestions), ...suggestions]
+      suggestions: [...contradictions.map((c) => c.suggestions), ...suggestions].map((list) => list.map(withNames))
     })
     await transitionCr(cr, "awaiting_answers")
     return
   }
   // Phase 7: đi tiếp mà còn thiếu dữ kiện (thường là hết vòng hỏi) ⇒ C-4 viết kèm giả định. Model vẫn thấy "mơ hồ" ở
   // vòng cuối mà không liệt kê ⇒ câu hỏi chưa được trả lời chính là dữ kiện thiếu.
-  cr.missing_info = out.missing_info.length ? out.missing_info : out.ambiguous ? out.questions : []
+  cr.missing_info = (out.missing_info.length ? out.missing_info : out.ambiguous ? out.questions : []).map((text) => nameElementIds(text, spine))
   cr.markModified("missing_info")
   // Đã chỉ đích danh mục thì bỏ từ khoá của model: từ khoá kiểu "SCR-01", "Hộ gia đình" kéo cả tài liệu vào CR.
   const keywords = named.length ? [] : out.targets.keywords.length || out.targets.entity_paths.length ? out.targets.keywords : fallbackKeywords(cr)
