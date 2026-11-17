@@ -3,36 +3,18 @@ import { sequenceLevelOf, type SequenceLevel } from "../../shared/diagram/sequen
 import { screenThemeOf, type ScreenTheme } from "../../shared/diagram/screen-theme.js"
 import { Project, IProject, WITH_DELETED, type ProjectMode, type ProjectStartKind, type TemplateIntent } from "./project.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { ChatSession } from "./chat-session.model.js"
 import { ProjectDocument } from "./project-document.model.js"
 import { destroyDocumentAsset } from "./project-document.storage.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { Spine } from "../spine/spine.model.js"
-import { Change } from "../spine/change.model.js"
-import { Baseline } from "../spine/baseline.model.js"
-import { Usage } from "../spine/usage.model.js"
-import { RenderedDocumentCache } from "../render/rendered-document.model.js"
 import { gridFsDiagramStore } from "../diagram/diagram-file.store.js"
+import { projectScopedModels } from "./project-scoped-models.js"
 import mongoose from "mongoose"
 import { vietnameseSearchPattern } from "../../shared/utils/vi-search.js"
 import type { ListProjectsQuery, ProjectListSort } from "./project.validation.js"
 import { assertFolderOwned, folderStillExists } from "../folder/folder.service.js"
-import { ImportedDocument } from "../import/imported-document.model.js"
-import { DocBlock } from "../import/doc-block.model.js"
 import { TemplateProfile } from "../import/template-profile.model.js"
-import { ExtractionDraft } from "../import/extraction-draft.model.js"
-import { FieldAnchor } from "../import/field-anchor.model.js"
-import { ReuploadDiff } from "../import/reupload-diff.model.js"
-import { DocVersion } from "../doc-version/doc-version.model.js"
 import { docFileStore } from "../doc-version/doc-file.store.js"
-import { ChangeRequest, CrCounter } from "../change-request/change-request.model.js"
-import { ChangeLocation } from "../change-request/change-location.model.js"
-import { ChangeGroup } from "../change-request/change-group.model.js"
-import { SpineTranslation } from "../translation/spine-translation.model.js"
-import { TranslationGlossary } from "../translation/translation-glossary.model.js"
-import { TranslationRunLock } from "../translation/translation-run-lock.model.js"
-import { Comment, CommentCounter } from "../comment/comment.model.js"
-import { TemplateMigration } from "../template-migration/template-migration.model.js"
 import { Subscription } from "../credits/subscription.model.js"
 import { getPlan } from "../billing/plan.config.js"
 import { accountLocaleOf } from "../user/account-locale.js"
@@ -211,53 +193,28 @@ export const openProject = async (projectId: string, orgId: string): Promise<IPr
 }
 
 /**
- * Dọn mọi dữ liệu thuộc project khi xoá cứng: Spine và các collection tách riêng của nó (changes,
- * baselines chứa snapshot lớn, usages), bản render đã cache, file sơ đồ trong GridFS, tài liệu upload
- * cùng file gốc trên Cloudinary.
+ * Dọn mọi dữ liệu thuộc project khi xoá cứng: mọi collection trong `projectScopedModels()` (Spine, changes, baselines,
+ * usages, lượt chạy bước, khoá CR, vector, bản dịch…), file sơ đồ trong GridFS, tài liệu upload cùng file gốc trên Cloudinary.
+ *
+ * Spine đọc THÔ (`lean`, không qua zod): Spine cũ có thể không còn khớp schema hiện tại (QLHS #1 — `statement_vi` > 200 ký
+ * tự) — parse lỗi ở đây từng làm dở việc xoá, để lại dữ liệu mồ côi. Chỉ cần id sơ đồ để xoá file.
  *
  * Notification và PaymentIntent KHÔNG xoá: chúng thuộc user (không có `projectId`) — lịch sử thanh toán
  * và credit không được mất theo project.
  */
 const purgeProjectData = async (projectId: string): Promise<void> => {
   const [spine, documents] = await Promise.all([
-    spineRepository.get(projectId),
+    Spine.findOne({ projectId }).select("diagrams.id").lean<{ diagrams?: Array<{ id?: unknown }> }>(),
     ProjectDocument.find({ projectId }).select("cloudinaryPublicId").lean()
   ])
 
-  await Promise.all([
-    ChatSession.deleteMany({ projectId }),
-    ProjectDocument.deleteMany({ projectId }),
-    Spine.deleteMany({ projectId }),
-    Change.deleteMany({ projectId }),
-    Baseline.deleteMany({ projectId }),
-    Usage.deleteMany({ projectId }),
-    RenderedDocumentCache.deleteMany({ projectId }),
-    // Mode 1 (FLF-171): import, block, version, change request
-    ImportedDocument.deleteMany({ projectId }),
-    DocBlock.deleteMany({ projectId }),
-    TemplateProfile.deleteMany({ projectId }),
-    ExtractionDraft.deleteMany({ projectId }),
-    FieldAnchor.deleteMany({ projectId }),
-    ReuploadDiff.deleteMany({ projectId }),
-    DocVersion.deleteMany({ projectId }),
-    ChangeRequest.deleteMany({ projectId }),
-    CrCounter.deleteMany({ projectId }),
-    ChangeLocation.deleteMany({ projectId }),
-    ChangeGroup.deleteMany({ projectId }),
-    // FLF-265: lớp bản dịch + glossary dịch + khoá lượt dịch
-    SpineTranslation.deleteMany({ projectId }),
-    TranslationGlossary.deleteMany({ projectId }),
-    TranslationRunLock.deleteMany({ projectId }),
-    // Comment + đổi mẫu (FLF-422)
-    Comment.deleteMany({ projectId }),
-    CommentCounter.deleteMany({ projectId }),
-    TemplateMigration.deleteMany({ projectId })
-  ])
+  await Promise.all(projectScopedModels().map((model) => model.deleteMany({ projectId })))
 
   // File ngoài collection: lỗi ở đây không được làm hỏng việc xoá đã xong ở trên
   for (const diagram of spine?.diagrams ?? []) {
+    if (typeof diagram?.id !== "string") continue
     await gridFsDiagramStore.remove(projectId, diagram.id).catch((err: unknown) => {
-      console.warn(`[Project] Không xoá được file sơ đồ ${diagram.id} của project ${projectId}:`, err)
+      console.warn(`[Project] Không xoá được file sơ đồ ${String(diagram.id)} của project ${projectId}:`, err)
     })
   }
   for (const doc of documents) await destroyDocumentAsset(doc.cloudinaryPublicId)
@@ -307,9 +264,11 @@ export const deleteProject = async (
  * Trả `false` khi không có dự án.
  */
 export const purgeProject = async (projectId: string, orgId: string): Promise<boolean> => {
-  const project = await Project.findOneAndDelete({ _id: projectId, organizationId: orgId }).setOptions(WITH_DELETED)
+  const project = await Project.exists({ _id: projectId, organizationId: orgId }).setOptions(WITH_DELETED)
   if (!project) return false
+  // Dọn dữ liệu TRƯỚC, xoá bản ghi dự án SAU (QLHS #1): dọn lỗi giữa chừng thì dự án vẫn còn ⇒ xoá lại được, không mồ côi
   await purgeProjectData(projectId)
+  await Project.deleteOne({ _id: projectId, organizationId: orgId }).setOptions(WITH_DELETED)
   return true
 }
 

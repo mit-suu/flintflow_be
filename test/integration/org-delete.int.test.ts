@@ -22,6 +22,7 @@ import { TemplateMigration } from "../../src/modules/template-migration/template
 import { Comment, CommentCounter } from "../../src/modules/comment/comment.model.js"
 import { DocFileNotFoundError, docFileStore } from "../../src/modules/doc-version/doc-file.store.js"
 import { Session } from "../../src/shared/auth/session.model.js"
+import { projectScopedModels } from "../../src/modules/project/project-scoped-models.js"
 import { authAs } from "../setup.js"
 
 const bearer = (token: string) => ({ Authorization: "Bearer " + token })
@@ -71,6 +72,28 @@ describe("xoá tổ chức", () => {
 
     expect((await del()).status).toBe(200)
     expect(await CreditTransaction.countDocuments({ organizationId: orgId })).toBe(1)
+  })
+
+  it("QLHS #1-#2: dự án có Spine cũ sai schema + lượt chạy bước, khoá CR, vector ⇒ xoá org thành công, không còn bản ghi nào theo projectId", async () => {
+    const created = await request(app).post("/api/v1/projects").set(bearer(lead.token)).send({ name: "Dự án Spine cũ" })
+    expect(created.status).toBe(201)
+    const projectId = new mongoose.Types.ObjectId(created.body.data._id as string)
+    const db = mongoose.connection
+    // Spine cũ: giả định có `statement_vi` > 200 ký tự (schema hiện tại từ chối) — ghi thẳng collection, không qua repository
+    await db.collection("spines").updateOne(
+      { projectId },
+      { $set: { assumptions: [{ id: "AS01", statement_vi: "x".repeat(400) }], diagrams: [{ id: "D01" }] } }
+    )
+    await db.collection("stepruns").insertOne({ projectId, step_id: "B-0", status: "done" })
+    await db.collection("spinelocks").insertOne({ projectId, path: "actors[id=A01]", cr_id: "CR-1" })
+    await db.collection("spineembeddings").insertOne({ projectId, kind: "actor", ref: "A01", embedding: [] })
+
+    const res = await del()
+    expect(res.status).toBe(200)
+    expect(await Project.countDocuments({ _id: projectId }).setOptions({ withDeleted: true })).toBe(0)
+    for (const model of projectScopedModels()) {
+      expect({ model: model.modelName, left: await model.countDocuments({ projectId }) }).toEqual({ model: model.modelName, left: 0 })
+    }
   })
 
   it("gõ sai tên thì không xoá gì", async () => {
