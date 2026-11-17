@@ -507,6 +507,17 @@ describe("preview - diff + impact, không ghi", () => {
     expect(await writtenChanges()).toBe(0)
   })
 
+  it("FLF-439: trả lời câu hỏi làm rõ bằng 'không đổi nữa' ⇒ bỏ yêu cầu, không gọi model; 'không đổi' (trả lời có / không) vẫn gửi model", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ clarification_needed: "Màn nào?" }))
+    const dropped = await preview(PROJECT, USER, { base_version: 1, instruction: "không đổi nữa", clarification_rounds: 1 }, {}, deps)
+    expect(dropped).toMatchObject({ ok: true, changes: [], notes: expect.stringContaining("Đã bỏ yêu cầu") })
+    expect(deps.changeExecutor).not.toHaveBeenCalled()
+
+    await preview(PROJECT, USER, { base_version: 1, instruction: "không đổi", clarification_rounds: 1 }, {}, deps)
+    expect(deps.changeExecutor).toHaveBeenCalledTimes(1)
+  })
+
   it("isWithdrawal: chỉ câu mở đầu bằng lời rút lại; câu sửa bình thường không tính", () => {
     for (const t of ["thôi không cần thêm nữa", "Bỏ qua", "huỷ yêu cầu", "never mind", "Không cần nữa"]) expect(isWithdrawal(t), t).toBe(true)
     for (const t of ["Thêm use case X", "đổi tên A01 thành Product Owner", "chỉ thao tác xóa"]) expect(isWithdrawal(t), t).toBe(false)
