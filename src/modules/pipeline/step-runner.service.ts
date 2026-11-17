@@ -943,6 +943,16 @@ export const FUNCTION_BATCH_SIZE = 6
 
 /** Step S-5.2 / S-5.4 viết chi tiết từng function ⇒ chia lô; S-5.1/S-5.3/S-5.5 thì không. */
 const BATCHED_TEMPLATES: ReadonlySet<string> = new Set(["S-5.2", "S-5.4"])
+/**
+ * FLF-433 (FLF-413 #7): step cố định đọc MỌI function rồi sinh một dòng cho từng luồng bất thường — S-7.3 Thông báo ứng dụng.
+ * ~30 function nhiều luồng bất thường (kèm bản dịch) vượt trần đầu ra cả 3 lượt, kể cả khi lượt thử lại gấp đôi trần ⇒ chia lô
+ * theo function như vòng S-5. Lô sau đọc lại `messages` mới nhất để dùng lại mã đã có, không sinh trùng.
+ */
+const FIXED_BATCHED_TEMPLATES: ReadonlySet<string> = new Set(["S-7.3"])
+/** Cỡ lô của step cố định chia lô: mỗi function vài dòng ngắn nên lô lớn hơn vòng S-5. */
+export const FIXED_FUNCTION_BATCH_SIZE = 10
+/** Step cố định chia lô theo function: lô sau phải đọc lại projection (dữ liệu lô trước vừa ghi). */
+export const isFixedBatchedStep = (stepId: string): boolean => FIXED_BATCHED_TEMPLATES.has(getStep(stepId).template_id)
 
 const isLoopBookkeeping = (stepId: string): boolean => LOOP_BOOKKEEPING_TEMPLATES.has(getStep(stepId).template_id)
 
@@ -1012,12 +1022,14 @@ const functionsOfLoop = (spine: Spine, loop: string): string[] =>
  */
 export const functionBatches = (spine: Spine, stepId: string): string[][] => {
   const step = getStep(stepId)
-  if (!BATCHED_TEMPLATES.has(step.template_id) || step.loop === null) return [[]]
-  const ids = functionsOfLoop(spine, step.loop)
-  if (ids.length <= FUNCTION_BATCH_SIZE) return [[]]
+  const fixed = FIXED_BATCHED_TEMPLATES.has(step.template_id)
+  if (!fixed && (!BATCHED_TEMPLATES.has(step.template_id) || step.loop === null)) return [[]]
+  const ids = fixed ? [...spine.functions].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map((f) => f.id) : functionsOfLoop(spine, step.loop as string)
+  const size = fixed ? FIXED_FUNCTION_BATCH_SIZE : FUNCTION_BATCH_SIZE
+  if (ids.length <= size) return [[]]
 
   const batches: string[][] = []
-  for (let i = 0; i < ids.length; i += FUNCTION_BATCH_SIZE) batches.push(ids.slice(i, i + FUNCTION_BATCH_SIZE))
+  for (let i = 0; i < ids.length; i += size) batches.push(ids.slice(i, i + size))
   return batches
 }
 
@@ -1965,8 +1977,10 @@ export const runStep = async (
         // Mở lại bước đã chốt kèm lời nhắn = sửa đúng chỗ được nhắn (như "Tôi muốn sửa" ở cổng). Gọi `draft` thì skill
         // dựng lại từ đầu: S-4.1 mở lại để gắn use case thêm lại feature/màn đã có ⇒ trùng mã cả 3 lượt, NEEDS_USER_INPUT.
         const revise = reopenedAccepted && userMessage !== undefined
+        // FLF-433: S-7.3 lô sau đọc lại projection — `messages` lô trước vừa ghi, để dùng lại mã thay vì sinh trùng
+        const baseCtx = index > 0 && isFixedBatchedStep(stepId) ? await buildStepContext(projectId, stepId, { sessionId }) : ctx
         const draftPhase = await tracker.beat("draft", () =>
-          runDraftPhase(projectId, stepId, batchContext(ctx, batch), spine, userId, revise ? "revision" : "draft", emit, d, {
+          runDraftPhase(projectId, stepId, batchContext(baseCtx, batch), spine, userId, revise ? "revision" : "draft", emit, d, {
             answers: answersText,
             userDecided,
             replyLanguage,
