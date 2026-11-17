@@ -42,7 +42,8 @@ ${cr.description}`) !== null
   const found: FoundLocation[] = approved
     ? withOriginalDiagrams(spine, cr.targets.entity_paths, approvedBatchLocations(spine, approved))
     : renamesSystem
-    ? systemRenameLocations(spine, systemName(spine.project))
+    ? // sơ đồ ngữ cảnh / use case gốc của file in tên hệ thống (ô trung tâm, khung hệ thống) ⇒ vẽ lại theo tên mới
+      withOriginalDiagrams(spine, ["fixed:1", "fixed:2.2.1"], systemRenameLocations(spine, systemName(spine.project)))
     : findSpineLocations(spine, cr.targets.entity_paths, cr.targets.keywords, await vectorCandidates(String(cr.projectId), crQueryText(cr))).map((f) =>
         seedTargets.has(f.path) && !f.found_by.includes("preview") ? { ...f, found_by: [...f.found_by, "preview" as const] } : f
       )
