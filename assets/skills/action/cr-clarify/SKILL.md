@@ -1,7 +1,7 @@
 ---
 skill_id: cr-clarify
 kind: action
-version: 1.7.0
+version: 1.8.0
 description: Mode 1 C-2 - decide whether a change request is clear, has the facts it needs and does not contradict the document; ask questions or return targets for impact search
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -43,6 +43,7 @@ You never write edits.
 {{projection}}
 - Document outline (headings with section ids):
 {{outline}}
+- Languages: {{language}}
 
 ## Rules
 
@@ -50,7 +51,7 @@ You never write edits.
    names something that does not exist in the index, **or** when new content is requested and facts it cannot be
    written without are missing (rule 7). Do not ask for detail the author of the edit can decide later (wording,
    formatting, numbering).
-2. When ambiguous, ask at most 5 short questions in the CR's language, each answerable in one sentence or by
+2. When ambiguous, ask at most 5 short questions in the reply language (Languages above), each answerable in one sentence or by
    attaching a document. Never repeat a question already answered. Never ask for something the material, the
    answers or the current document already state.
 3. On round 3 you must answer `ambiguous: false` with your best targets, and list in `missing_info` every fact that
@@ -72,7 +73,7 @@ You never write edits.
    tối đa bao nhiêu giây?`). `missing_info` uses the same wording, one short line per fact; `[]` when nothing is
    missing.
 8. `suggestions`: for each question, in the same order, 2–4 short candidate answers the user can pick with one click,
-   in the CR's language. Take them from the material, the current document (existing values, similar elements) and
+   in the reply language. Take them from the material, the current document (existing values, similar elements) and
    common practice for this kind of system - the most likely first. Each is a complete answer on its own (`"≤ 2 giây
    cho 95% request"`, not `"2"`). No "other" / "I don't know" option - the user can always type or leave it empty.
    `[]` for a question where no sensible candidate exists (a person's name, an internal decision).
@@ -102,11 +103,19 @@ You never write edits.
    failed attempts"; "password ≥ 6 characters" vs a rule "at least 8 characters") and the CR does not say to change
    that place too ⇒ add one entry to `contradictions`: `question` quotes **both sides** (what the CR asks, what the
    document says and where - section heading or document code) and asks which applies; `suggestions` =
-   `"Đổi theo CR và sửa cả chỗ cũ"`, `"Giữ như cũ, không áp dụng phần này của CR"` (in the CR's language). A
+   `"Đổi theo CR và sửa cả chỗ cũ"`, `"Giữ như cũ, không áp dụng phần này của CR"` (in the reply language). A
    contradiction is asked **in every round, also on round 3**, independent of `ambiguous`, and only once: never raise
    again one already answered above. When the answer is "follow the CR", put the old element (or its
    `custom_sections[id=…]`) in `targets.entity_paths` too. A CR that only adds or edits without conflicting is not a
    contradiction.
+13. **Reply language ≠ document language** (Languages above) ⇒ every name, heading or passage you quote from the document,
+   in `questions`, `suggestions`, `contradictions` and `missing_info`, keeps its **original form first** and its translation
+   into the reply language **in parentheses** right after - the original lets the writer find the element. Document EN,
+   reply VI: `"Ai xử lý yêu cầu: Lecturer (Giảng viên) hay Academic Management Office (Phòng Quản lý đào tạo)?"`,
+   suggestion `"Lecturer (Giảng viên)"`; a quoted sentence: `mục Security (Bảo mật) đang ghi "The account is locked after 5
+   failed attempts" (Tài khoản bị khoá sau 5 lần đăng nhập sai)`. Document VI, reply EN: `"Phụ huynh (Parent)"`. Never
+   translate codes (`UC-07`, `BR01`), product / proper names, or words spelled the same in both (`Email`, `Admin`, `OTP`).
+   Same language ⇒ quote as written, no parentheses.
 
 ## Output
 
