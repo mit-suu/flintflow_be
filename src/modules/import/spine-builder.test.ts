@@ -374,6 +374,18 @@ describe("buildImportOps", () => {
     expect(plan.spine.glossary.map((g) => g.term_native)).toEqual(["Vắng thi", undefined])
   })
 
+  it("P07: cột Message Type / Context của bảng thông báo ⇒ type (chuẩn hoá) + context; loại lạ không ghi", () => {
+    const spine = createEmptySpine({ name: "Msg" })
+    const ops = buildImportOps(spine, [
+      { entity: "messages", id: "MSG-01", value: { code: "MSG01", text: "Wrong password", type: "Lỗi", context: "Khi đăng nhập sai" } },
+      { entity: "messages", id: "MSG-02", value: { code: "MSG02", text: "Saved", type: "Toast" } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.messages[0]).toMatchObject({ type: "error", context: "Khi đăng nhập sai" })
+    expect(plan.spine.messages[1].type).toBeUndefined()
+    expect(plan.spine.messages[1].context).toBeUndefined()
+  })
+
   it("FLF-252: tên hệ thống + phạm vi release tài liệu ghi vào project", () => {
     const spine = createEmptySpine({ name: "Lumen" })
     const ops = buildImportOps(spine, [

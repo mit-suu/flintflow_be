@@ -309,7 +309,10 @@ const messageSchema = new Schema(
     id: { type: String, required: true },
     code: { type: String, default: "" },
     text: { type: String, default: "" },
-    function_ids: { type: [String], default: [] }
+    function_ids: { type: [String], default: [] },
+    // P07: loại / ngữ cảnh thông báo — tuỳ chọn, Spine cũ không có
+    type: { type: String, enum: ["error", "warning", "info", "success", "confirm", null], default: undefined },
+    context: { type: String, default: undefined }
   },
   opts
 )
