@@ -111,6 +111,36 @@ router.get("/:id/import", authMiddleware, importController.getImport)
 
 /**
  * @swagger
+ * /api/v1/projects/{id}/import/google-docs:
+ *   post:
+ *     summary: Như POST /import nhưng file lấy từ Google Drive (Google Doc ⇒ .docx, hoặc .docx có sẵn) — cần đã kết nối Google
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [fileId]
+ *             properties:
+ *               fileId: { type: string, description: "ID file người dùng chọn trong Google Picker" }
+ *     responses:
+ *       201: { description: "`{ import }` ở `uploaded` — như POST /import" }
+ *       400: { description: VALIDATION_ERROR, GOOGLE_FILE_UNSUPPORTED (không phải Google Doc / .docx) }
+ *       401: { description: GOOGLE_RECONNECT_REQUIRED }
+ *       403: { description: GOOGLE_FILE_FORBIDDEN }
+ *       404: { description: GOOGLE_FILE_NOT_FOUND }
+ *       413: { description: GOOGLE_EXPORT_TOO_LARGE (Google Doc quá lớn để xuất), FILE_TOO_LARGE }
+ *       422: { description: IMPORT_FILE_REJECTED, IMPORT_STAMP_FOREIGN_PROJECT — như POST /import }
+ */
+router.post("/:id/import/google-docs", authMiddleware, importController.importFromGoogleDocs)
+
+/**
+ * @swagger
  * /api/v1/projects/{id}/import/confirm-latest:
  *   post:
  *     summary: (Bản ghi cũ) xác nhận file không có stamp là bản mới nhất (nút 1.3) rồi tách block + khớp profile
