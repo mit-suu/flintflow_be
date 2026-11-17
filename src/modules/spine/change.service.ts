@@ -189,6 +189,34 @@ const prunePreviews = (now: number): void => {
 export const clearPreviewStore = (): void => previewStore.clear()
 
 /**
+ * BF §3.2 "Hai người sửa cùng lúc" (trước baseline): bản xem trước sửa qua chat **chưa áp** của người khác treo ở người đó;
+ * người khác mở chỗ đó thấy "<ai> có bản sửa chưa xác nhận ở mục này". Trả mục **sở hữu** (`owner`) bị đụng ⇒ userId đang
+ * giữ, bỏ bản của chính `exceptUserId`. Kho preview sống trong tiến trình (như lượt áp `preview_id`).
+ */
+export const pendingPreviewSections = (projectId: string, exceptUserId: string): { section_id: string; user_ids: string[] }[] => {
+  prunePreviews(Date.now())
+  const bySection = new Map<string, Set<string>>()
+  for (const stored of previewStore.values()) {
+    if (stored.projectId !== projectId || stored.userId === exceptUserId) continue
+    for (const section of stored.impact.sections) {
+      if (section.relation !== "owner") continue
+      const holders = bySection.get(section.id) ?? new Set<string>()
+      holders.add(stored.userId)
+      bySection.set(section.id, holders)
+    }
+  }
+  return [...bySection].map(([section_id, users]) => ({ section_id, user_ids: [...users] }))
+}
+
+/** Người xem trước bấm Huỷ ⇒ bỏ bản xem trước ngay (không chờ hết hạn), để dòng "có bản sửa chưa xác nhận" tắt. */
+export const discardPreview = (projectId: string, previewId: string, userId: string): boolean => {
+  const stored = previewStore.get(previewId)
+  if (!stored || stored.projectId !== projectId || stored.userId !== userId) return false
+  previewStore.delete(previewId)
+  return true
+}
+
+/**
  * Mode 1 v3 (BPMN 3.1): bản xem trước đính kèm vào CR làm **gợi ý** cho 3.2/3.4/3.6 — chỉ đọc, không xoá (mode 1 không
  * áp bản xem trước). Hết hạn / của người khác / project khác ⇒ `null` (CR vẫn tạo, không kèm gợi ý).
  */

@@ -146,12 +146,48 @@ describe("AI soạn lại trên nội dung hiện tại (BF §3.2)", () => {
 })
 
 describe("đề xuất chưa xác nhận treo ở người yêu cầu (BF §3.2)", () => {
-  const joinOrg = async (orgId: string) => {
-    const email = `analyst-${Date.now()}@flintflow.test`
+  const joinOrg = async (orgId: string, role: "analyst" | "lead" = "analyst") => {
+    const email = `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@flintflow.test`
     const user = await User.create({ email, name: "Huy", password: "test-password-123", emailVerified: true })
-    await Membership.create({ organizationId: orgId, userId: user._id, role: "analyst" })
+    await Membership.create({ organizationId: orgId, userId: user._id, role })
     return authAs({ _id: user._id, email, orgId })
   }
+
+  it("người khác không làm thay các bước của CR (gộp lệnh, kiểm, chạy tiếp) — 403 treo ở ai; trạng thái CR không đổi (UC-45 A6)", async () => {
+    const { seeded, c, projectId } = await importedProject()
+    const { cr } = await crToReady(c)
+    const other = mode1Api({ ...seeded, token: await joinOrg(seeded.orgId) }, projectId)
+    const before = detail(await c.get(cr)).change_request.status
+
+    for (const [path, body] of [
+      ["verify", undefined],
+      ["resume", undefined],
+      ["messages", { text: "Đổi thành 60%" }],
+      ["amend", { instruction: "Đổi thành 60%" }]
+    ] as const) {
+      const res = await other.post(`${cr}/${path}`, body)
+      expect(res.status, path).toBe(403)
+      expect(res.body.error.code, path).toBe("CR_NOT_REQUESTER")
+      expect(res.body.error.message, path).toContain("treo ở")
+    }
+    expect(detail(await c.get(cr)).change_request.status).toBe(before)
+    // Người khác vẫn xem được CR
+    expect((await other.get(cr)).status).toBe(200)
+  })
+
+  it("huỷ CR: Analyst khác bị từ chối (AC-48.2), Lead huỷ được", async () => {
+    const { seeded, c, projectId } = await importedProject()
+    const { cr } = await crToReady(c)
+    const analyst = mode1Api({ ...seeded, token: await joinOrg(seeded.orgId) }, projectId)
+    const denied = await analyst.post(`${cr}/cancel`, { reason: "Không cần nữa" })
+    expect(denied.status).toBe(403)
+    expect(denied.body.error.code).toBe("CR_NOT_REQUESTER")
+
+    const lead = mode1Api({ ...seeded, token: await joinOrg(seeded.orgId, "lead") }, projectId)
+    const ok = await lead.post(`${cr}/cancel`, { reason: "Lead huỷ CR tạm dừng" })
+    expect(ok.status, JSON.stringify(ok.body.error)).toBe(200)
+    expect(detail(ok).change_request.status).toBe("cancelled")
+  })
 
   it("người khác không xác nhận được CR của người này (403, nói rõ treo ở ai); tài liệu cho mọi người thấy mục nào đang có bản sửa chưa xác nhận", async () => {
     const { seeded, c, projectId } = await importedProject()
