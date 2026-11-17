@@ -19,6 +19,7 @@ import { ChangeLocation } from "./change-location.model.js"
 import { ChangeRequest } from "./change-request.model.js"
 import type { CrStatus } from "./change-request.state.js"
 import { elementValue, isArrayPath, sha256, unchangedSince, valueText } from "./spine-location.js"
+import { merge3 } from "../spine/concurrent-merge.js"
 
 type Row = Record<string, unknown>
 const isRow = (v: unknown): v is Row => typeof v === "object" && v !== null && !Array.isArray(v)
@@ -73,16 +74,10 @@ export const classifyAtConfirm = (current: Spine, path: string, proposal: Locati
   if (isDeepStrictEqual(now, wanted)) return { kind: "same" }
   if (!isRow(before) || !isRow(now) || !isRow(wanted) || !onlyTouches(path, ops)) return { kind: "conflict" }
 
-  const keys = new Set([...Object.keys(before), ...Object.keys(now), ...Object.keys(wanted)])
-  const mine = [...keys].filter((k) => !isDeepStrictEqual(before[k], wanted[k]))
-  const theirs = [...keys].filter((k) => !isDeepStrictEqual(before[k], now[k]))
-  if (mine.some((k) => theirs.includes(k))) return { kind: "conflict" }
-
-  const merged: Row = { ...now }
-  for (const k of mine) {
-    if (wanted[k] === undefined) delete merged[k]
-    else merged[k] = wanted[k]
-  }
+  // P12: ghép ba chiều dùng chung với sửa qua chat trước baseline — field khác / dòng khác của cùng mảng đều ghép được
+  const result = merge3(before, wanted, now)
+  if (!result.ok || !isRow(result.value)) return { kind: "conflict" }
+  const merged: Row = result.value
   const reason = ops.find((o) => typeof o.reason === "string")?.reason
   return {
     kind: "rebased",
