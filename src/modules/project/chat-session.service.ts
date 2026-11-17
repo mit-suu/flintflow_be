@@ -9,7 +9,7 @@ import { clientErrorMessage } from "../../shared/utils/client-error.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
 import { chatDocumentQuery } from "../../shared/ai/document-retrieval/query.js"
 import * as changeService from "../spine/change.service.js"
-import { changeErrorReply, clarificationRounds, formatChatContext, previewPayload } from "../spine/change-transcript.js"
+import { changeErrorReply, clarificationRounds, formatChatContext, pendingChangeRequest, previewPayload } from "../spine/change-transcript.js"
 import { submitAnswer } from "../pipeline/step-runner.service.js"
 import { currentBatch, followUpReply, shapeChatQuestions } from "../pipeline/question-shape.js"
 import * as spineRepository from "../spine/spine.repository.js"
@@ -156,7 +156,9 @@ const tryChangeFlow = async (
       chat_history: chatHistory,
       reply_language: replyLanguage,
       // FLF-299: chỉ truyền khi đã hỏi — lượt thường giữ nguyên tham số
-      ...(rounds > 0 ? { clarification_rounds: rounds } : {})
+      ...(rounds > 0 ? { clarification_rounds: rounds } : {}),
+      // P08 (T7): trả lời câu hỏi làm rõ ⇒ kèm yêu cầu gốc + câu đã hỏi
+      ...(rounds > 0 ? { pending_request: pendingChangeRequest(session.messages.slice(0, -1)) } : {})
     })
     payload = previewPayload(preview, replyLanguage)
     if (preview.ok && preview.preview_id && preview.changes.length > 0) shown = preview
