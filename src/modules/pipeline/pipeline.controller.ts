@@ -17,6 +17,7 @@
 import { gateActionText, gateMessageOfRun } from "./gate-message.js"
 import { Request, Response } from "express"
 import mongoose from "mongoose"
+import { User } from "../user/user.model.js"
 import { z } from "zod"
 import * as spineRepository from "../spine/spine.repository.js"
 import * as meter from "./meter.service.js"
@@ -313,6 +314,12 @@ export const answerStep = catchAsync(async (req: Request, res: Response) => {
 
   // FLF-221: `message` = chat tự do khi đang chờ — AI đọc rồi chỉ chốt câu được trả lời đúng ý (tính credit bằng `userId`)
   const payload = { answers: body.answers, ...(body.message === undefined ? {} : { message: body.message }) }
+  // BF §3.2: câu hỏi AI đang chờ **treo ở người khởi động lượt** — người khác không trả lời hộ (họ không có bối cảnh)
+  const waiting = await getRunState(projectId, stepId)
+  if (waiting?.status === "waiting_answer" && waiting.by && waiting.by !== userId) {
+    const who = (await runnerName(waiting.by)) ?? "người khác"
+    throw new ApiError(403, `Câu hỏi này đang treo ở ${who} - chỉ người đó trả lời được.`, "STEP_NOT_REQUESTER")
+  }
   if (submitAnswer(projectId, stepId, body.session_id, payload)) return sendSuccess(res, 200, { accepted: true })
 
   const pending = await pendingAnswerFor(projectId, stepId, body.session_id, payload)
@@ -387,7 +394,16 @@ const isAlive = (doc: RunStateDoc): boolean => {
   if (doc.status === "waiting_answer") return doc.pending_answer != null || new Date(doc.locked_until).getTime() > Date.now()
   return true
 }
-const toRunStateResponse = (doc: RunStateDoc): Record<string, unknown> => ({
+/** Tên hiển thị của người khởi động lượt — "<ai> đang trả lời câu hỏi" (BF §3.2). */
+const runnerName = async (userId: string | null): Promise<string | null> => {
+  if (!userId || !mongoose.isValidObjectId(userId)) return null
+  const user = await User.findById(userId).select("name email").lean()
+  return user?.name || user?.email || null
+}
+
+const toRunStateResponse = async (doc: RunStateDoc): Promise<Record<string, unknown>> => ({
+  by: doc.by,
+  by_name: await runnerName(doc.by),
   step_id: doc.step_id,
   run_id: doc.run_id,
   status: doc.status,
@@ -469,13 +485,13 @@ export const markAutoPassedSeenController = catchAsync(async (req: Request, res:
 export const getStepRunState = catchAsync(async (req: Request, res: Response) => {
   const { projectId } = await authorize(req)
   const doc = await getRunState(projectId, req.params.stepId as string)
-  return sendSuccess(res, 200, doc ? toRunStateResponse(doc) : null)
+  return sendSuccess(res, 200, doc ? await toRunStateResponse(doc) : null)
 })
 
 export const getActiveRunState = catchAsync(async (req: Request, res: Response) => {
   const { projectId } = await authorize(req)
   const doc = await getActiveRun(projectId)
-  return sendSuccess(res, 200, doc ? toRunStateResponse(doc) : null)
+  return sendSuccess(res, 200, doc ? await toRunStateResponse(doc) : null)
 })
 
 export const cancelStepRun = catchAsync(async (req: Request, res: Response) => {

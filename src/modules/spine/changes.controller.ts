@@ -16,6 +16,7 @@
 
 import { Request, Response } from "express"
 import mongoose from "mongoose"
+import { User } from "../user/user.model.js"
 import { z } from "zod"
 import * as changeService from "./change.service.js"
 import * as changeTranscript from "./change-transcript.js"
@@ -281,6 +282,30 @@ export const listChanges = catchAsync(async (req: Request, res: Response) => {
     ...(query.to === undefined ? {} : { toSeq: query.to })
   })
   return sendSuccess(res, 200, changes)
+})
+
+/**
+ * BF §3.2 (trước baseline): mục đang có bản xem trước sửa qua chat **chưa áp** của người khác ⇒ `[{ section_id, items:
+ * [{ who }] }]`. FE in dưới tiêu đề mục: "<ai> có bản sửa chưa xác nhận ở mục này".
+ */
+export const listPendingPreviewSections = catchAsync(async (req: Request, res: Response) => {
+  const auth = await authorize(req)
+  const rows = changeService.pendingPreviewSections(auth.projectId, auth.userId)
+  const ids = [...new Set(rows.flatMap((r) => r.user_ids))].filter((id) => mongoose.isValidObjectId(id))
+  const users = ids.length ? await User.find({ _id: { $in: ids } }).select("name email").lean() : []
+  const nameOf = new Map(users.map((u) => [String(u._id), u.name || u.email || null]))
+  return sendSuccess(
+    res,
+    200,
+    rows.map((r) => ({ section_id: r.section_id, items: r.user_ids.map((id) => ({ who: nameOf.get(id) ?? "Người khác" })) }))
+  )
+})
+
+/** Người xem trước bấm Huỷ ⇒ bỏ bản xem trước (của chính mình; của người khác / hết hạn ⇒ không làm gì). */
+export const discardPreview = catchAsync(async (req: Request, res: Response) => {
+  const auth = await authorize(req)
+  const discarded = changeService.discardPreview(auth.projectId, String(req.params.previewId), auth.userId)
+  return sendSuccess(res, 200, { discarded })
 })
 
 export const getTraceability = catchAsync(async (req: Request, res: Response) => {

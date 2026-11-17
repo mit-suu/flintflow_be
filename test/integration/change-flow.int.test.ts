@@ -317,3 +317,33 @@ describe("FLF-311 - thêm use case kéo theo chức năng, màn, luồng, phân 
     expect(sections).toBeGreaterThanOrEqual(staleBefore)
   })
 })
+
+describe("hai người sửa cùng lúc trước baseline (BF §3.2)", () => {
+  it("bản xem trước chưa áp của A ⇒ B thấy 'A có bản sửa chưa xác nhận' ở mục bị sửa; A không thấy của chính mình; A huỷ ⇒ hết", async () => {
+    const seeded = await seedFixture("full")
+    const a = client(seeded)
+    const preview = await a.post("/changes/preview", { base_version: seeded.spineVersion, ops: [renameA01] })
+    const planned = changesPreviewResponseSchema.parse(preview.body.data)
+    const owned = planned.impact!.sections.filter((s) => s.relation === "owner").map((s) => s.id)
+    expect(owned.length).toBeGreaterThan(0)
+
+    const { User } = await import("../../src/modules/user/user.model.js")
+    const { Membership } = await import("../../src/modules/organization/membership.model.js")
+    const { authAs } = await import("../setup.js")
+    const email = `analyst-${Date.now()}@flintflow.test`
+    const other = await User.create({ email, name: "Bình", password: "test-password-123", emailVerified: true })
+    await Membership.create({ organizationId: seeded.orgId, userId: other._id, role: "analyst" })
+    const b = client({ ...seeded, token: await authAs({ _id: other._id, email, orgId: seeded.orgId }) })
+
+    const seenByB = (await b.get("/changes/pending-sections")).body.data as { section_id: string; items: { who: string }[] }[]
+    expect(seenByB.map((s) => s.section_id).sort()).toEqual([...owned].sort())
+    expect(seenByB[0].items).toEqual([{ who: expect.any(String) }])
+    expect((await a.get("/changes/pending-sections")).body.data).toEqual([])
+
+    // B không huỷ được bản của A
+    expect((await request(app).delete(`/api/v1/projects/${seeded.projectId}/changes/preview/${planned.preview_id}`).set({ Authorization: `Bearer ${(await authAs({ _id: other._id, email, orgId: seeded.orgId }))}` })).body.data).toEqual({ discarded: false })
+    const discarded = await request(app).delete(`/api/v1/projects/${seeded.projectId}/changes/preview/${planned.preview_id}`).set({ Authorization: `Bearer ${seeded.token}` })
+    expect(discarded.body.data).toEqual({ discarded: true })
+    expect((await b.get("/changes/pending-sections")).body.data).toEqual([])
+  })
+})

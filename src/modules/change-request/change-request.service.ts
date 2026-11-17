@@ -248,18 +248,24 @@ export const createCr = async (projectId: string, userId: string, body: CreateCh
 // ─── 3.11 nộp, 3.12–3.13 sửa lại / đóng, 3.10 huỷ ───────────────
 
 /**
+ * BF §3.2 / spec UC-45 A6: đề xuất chưa xác nhận **treo ở người yêu cầu** — người khác không làm rõ, không cho AI soạn, không
+ * kiểm, không xác nhận hộ (họ không có bối cảnh, và người xác nhận là người đứng tên thay đổi). Người khác chỉ thấy
+ * "<ai> có bản sửa chưa xác nhận ở mục này" (`listPendingSections`).
+ */
+export const assertRequester = async (cr: IChangeRequest, userId: string): Promise<void> => {
+  if (String(cr.created_by) === String(userId)) return
+  const who = (await userName(String(cr.created_by))) ?? cr.requester
+  throw new ApiError(403, `Đề xuất này đang treo ở ${who} - chỉ người đó xác nhận được (người xác nhận đứng tên thay đổi).`, "CR_NOT_REQUESTER")
+}
+
+/**
  * C-6 (FLF-330, business-flow §3.2): BA **xác nhận** ⇒ Code kiểm lại trên nội dung hiện tại rồi ghi Track Changes vào bản
  * nháp chung **ngay** (tác giả = mã CR) — không chờ Lead, không tạo baseline. Mọi group của CR được ghi nhận "đã duyệt"
  * bởi chính người xác nhận; vị trí `not_related` (BA bỏ riêng) không ghi. Lead duyệt **cả gói** ở C-7 (`review-package`).
  */
 export const submitCr = async (cr: IChangeRequest, userId: string): Promise<void> => {
   assertCrStatus(cr, ["ready_to_submit"], "written")
-  // BF §3.2: đề xuất chưa xác nhận **treo ở người yêu cầu** — không đưa cho người khác xác nhận (họ không có bối cảnh,
-  // và người xác nhận là người đứng tên thay đổi)
-  if (String(cr.created_by) !== String(userId)) {
-    const who = (await userName(String(cr.created_by))) ?? cr.requester
-    throw new ApiError(403, `Đề xuất này đang treo ở ${who} - chỉ người đó xác nhận được (người xác nhận đứng tên thay đổi).`, "CR_NOT_REQUESTER")
-  }
+  await assertRequester(cr, userId)
   const unconcluded = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id, conclusion: null }).distinct("location_id")
   if (unconcluded.length) {
     throw new Mode1Error("CR_LOCATION_UNCONCLUDED", `Còn ${unconcluded.length} vị trí chưa có kết luận`, { location_ids: unconcluded })
@@ -333,7 +339,12 @@ export const closeCr = async (cr: IChangeRequest, userId: string, reason: string
   await unlockPaths(cr.projectId, cr.cr_id)
 }
 
-export const cancelCr = async (cr: IChangeRequest, reason: string): Promise<void> => {
+/** UC-48 (AC-48.2): chỉ người tạo CR hoặc Lead huỷ được; Analyst huỷ CR của người khác ⇒ từ chối. */
+export const cancelCr = async (cr: IChangeRequest, reason: string, actor: { userId: string; role?: string }): Promise<void> => {
+  if (String(cr.created_by) !== String(actor.userId) && actor.role !== "lead") {
+    const who = (await userName(String(cr.created_by))) ?? cr.requester
+    throw new ApiError(403, `Chỉ ${who} (người tạo) hoặc Lead huỷ được ${cr.cr_id}.`, "CR_NOT_REQUESTER")
+  }
   if (isTerminal(cr.status)) assertTransition(cr.status, "cancelled")
   cr.closed_reason = reason
   cr.paused = null
