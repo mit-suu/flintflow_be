@@ -23,6 +23,7 @@ import { Comment, CommentCounter } from "../../src/modules/comment/comment.model
 import { DocFileNotFoundError, docFileStore } from "../../src/modules/doc-version/doc-file.store.js"
 import { Session } from "../../src/shared/auth/session.model.js"
 import { projectScopedModels } from "../../src/modules/project/project-scoped-models.js"
+import { SPINE_EMBEDDING_COLLECTION } from "../../src/modules/change-request/embedding/spine-embedding.model.js"
 import { authAs } from "../setup.js"
 
 const bearer = (token: string) => ({ Authorization: "Bearer " + token })
@@ -86,11 +87,15 @@ describe("xoá tổ chức", () => {
     )
     await db.collection("stepruns").insertOne({ projectId, step_id: "B-0", status: "done" })
     await db.collection("spinelocks").insertOne({ projectId, path: "actors[id=A01]", cr_id: "CR-1" })
-    await db.collection("spineembeddings").insertOne({ projectId, kind: "actor", ref: "A01", embedding: [] })
+    await db.collection(SPINE_EMBEDDING_COLLECTION).insertOne({ projectId, kind: "actor", ref: "A01", embedding: [] })
 
     const res = await del()
     expect(res.status).toBe(200)
     expect(await Project.countDocuments({ _id: projectId }).setOptions({ withDeleted: true })).toBe(0)
+    // QLHS #2: ba collection purge cũ bỏ sót — kiểm thẳng collection, không phụ thuộc danh sách model
+    for (const name of ["stepruns", "spinelocks", SPINE_EMBEDDING_COLLECTION]) {
+      expect({ name, left: await db.collection(name).countDocuments({ projectId }) }).toEqual({ name, left: 0 })
+    }
     for (const model of projectScopedModels()) {
       expect({ model: model.modelName, left: await model.countDocuments({ projectId }) }).toEqual({ model: model.modelName, left: 0 })
     }
