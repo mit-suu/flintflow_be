@@ -62,6 +62,8 @@ export interface RunStateDoc {
   step_id: string
   run_id: string
   session_id: string | null
+  /** userId người khởi động lượt (BF §3.2: câu hỏi đang chờ treo ở người này). */
+  by: string | null
   status: RunStatus
   stage: RunStage
   detail_vi: string | null
@@ -85,6 +87,7 @@ const toDoc = (raw: Record<string, unknown>): RunStateDoc => ({
   step_id: String(raw.step_id),
   run_id: String(raw.run_id),
   session_id: raw.session_id === null || raw.session_id === undefined ? null : String(raw.session_id),
+  by: raw.by === null || raw.by === undefined ? null : String(raw.by),
   status: raw.status as RunStatus,
   stage: raw.stage as RunStage,
   detail_vi: (raw.detail_vi as string | null) ?? null,

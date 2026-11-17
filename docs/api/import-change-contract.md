@@ -946,6 +946,11 @@ ready → applying → applied | cancelled | failed`.
   luật Spine gãy trên nội dung hiện tại (`TransactionRejectedError`) ⇒ không còn 422 thô: CR chạy lại kiểm (C-5), chỗ gãy mang
   cờ đỏ (`verify.violations`), trạng thái theo luật kiểm (`proposing` / `manual_fix`); người khác ghi đúng lúc (lệch
   `spine_version`) ⇒ BE tự kiểm lại trên bản mới một lần rồi ghi ("ai xác nhận trước thì ghi trước").
+- (17/11, BF §3.2 / spec UC-45 A6, UC-48) **403 `CR_NOT_REQUESTER`** mở rộng sang mọi bước áp dụng CR, không chỉ `/submit`:
+  `/amend`, `/messages`, `/materials` (thêm / xoá), `/clarify`, `/answers`, `/impact`, `/propose`, `PATCH …/locations/{locId}`,
+  `…/owner-step-draft`, `/verify`, `/resume` — người không tạo CR chỉ xem (`GET`) và thấy "<ai> có bản sửa chưa xác nhận".
+  `/cancel`: người tạo **hoặc Lead**; Analyst khác ⇒ 403 `CR_NOT_REQUESTER`. `/revise`, `/groups/{gid}/decision`, `/close`
+  (giai đoạn `in_review`) giữ nguyên.
 - Endpoint mới `GET …/change-requests/pending-sections` ⇒ `PendingSection[] { section_id, title, items[{ cr_id, who }] }`:
   mục đang có đề xuất (`edit` / `comment`) của CR chưa đóng, `who` = tên BA tạo CR (fallback `requester`). FE in dưới tiêu đề
   mục trong tài liệu: "<ai> (CR-003) có bản sửa chưa xác nhận ở mục này" (BF §3.2). `others_pending[].requester` trong chi
