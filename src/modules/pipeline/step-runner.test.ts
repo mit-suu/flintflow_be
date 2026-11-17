@@ -459,6 +459,21 @@ describe("step-runner: CALL_LIMIT", () => {
     expect(draftExecutor).not.toHaveBeenCalled()
     expect(elicitExecutor).not.toHaveBeenCalled()
   })
+
+  it("P08 (BarberGo #9): hết lượt mà user nhắn kèm ⇒ vẫn 409 CALL_LIMIT nhưng tin nằm trong transcript, không bị nuốt", async () => {
+    seedSpine()
+    seedSession(true)
+    db.spines[0].steps = [...(db.spines[0].steps as unknown[]), { id: "S-3.1", status: "in_progress", first_seq: 2, last_seq: 2, accepted_at: null }]
+    db.changes.push({ projectId: PROJECT, seq: 1, txn: "t0", op: "set", path: "steps[id=S-3.1].status", before: "pending", value: "in_progress", reason: null, at: "2026-01-01T00:00:00.000Z", by: "system", step_id: "S-3.1" })
+    for (let i = 1; i <= 8; i++) {
+      db.usages.push({ _id: `pre${i}`, projectId: PROJECT, userId: USER, step_id: "S-3.1", call_kind: "draft", attempt: 1, tokens_in: 1, tokens_out: 1, cost: 1, state: "deducted", expires_at: "2099-01-01T00:00:00.000Z", logId: null, createdAt: "2026-01-01T00:01:00.000Z" })
+    }
+    const { emit } = collectEvents()
+    const err = await runStep(PROJECT, "S-3.1", SESSION, USER, emit, { draftExecutor: vi.fn(), elicitExecutor: vi.fn(), message: "Gộp hai actor thợ cắt và thợ phụ thành Barber" }).catch((e: unknown) => e)
+    expect((err as ApiError).code).toBe(CALL_LIMIT)
+    const messages = db.sessions.find((s) => s._id === SESSION)!.messages as Array<{ role: string; content: string }>
+    expect(messages.some((m) => m.role === "user" && m.content === "Gộp hai actor thợ cắt và thợ phụ thành Barber")).toBe(true)
+  })
 })
 
 describe("step-runner: 2 tab - SPINE_VERSION_CONFLICT hoàn usage, không tiêu trần", () => {

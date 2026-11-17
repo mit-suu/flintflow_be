@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest"
 
 vi.mock("../project/chat-session.model.js", () => ({ ChatSession: { findById: vi.fn() } }))
 
-import { clarificationRounds, formatChatContext, formatChatHistory, previewPayload, recordChangeTurn } from "./change-transcript.js"
+import { clarificationRounds, formatChatContext, pendingChangeRequest, formatChatHistory, previewPayload, recordChangeTurn } from "./change-transcript.js"
 import type { IChatMessage, IChatSession } from "../project/chat-session.model.js"
 import type { ChangePreviewResult } from "./change.service.js"
 
@@ -158,5 +158,17 @@ describe("previewPayload - không có thay đổi mà có ghi chú", () => {
   it("rút lại yêu cầu ⇒ câu trả lời là ghi chú, không ghép câu 'Không tìm thấy chỗ nào cần đổi'", () => {
     const payload = previewPayload({ ok: true, txn: "t", base_version: 1, ops: [], changes: [], violations: [], referrers: [], notes: "Đã bỏ yêu cầu này - tài liệu không đổi gì." })
     expect(payload).toMatchObject({ kind: "change_preview", reply: "Đã bỏ yêu cầu này - tài liệu không đổi gì.", change_count: 0 })
+  })
+})
+
+describe("pendingChangeRequest - P08 T7", () => {
+  const ask = (reply: string) => msg("ai", JSON.stringify({ kind: "change_clarification", reply }))
+  it("lấy câu lệnh đứng trước chuỗi câu hỏi và câu hỏi gần nhất", () => {
+    const out = pendingChangeRequest([msg("user", "mục tiêu thứ hai ghi rõ 3 tháng đầu"), ask("Thêm mốc 3 tháng vào mục tiêu 2?"), msg("user", "ừ"), ask("Giữ nguyên câu cũ phía trước?")])
+    expect(out).toEqual({ request: "mục tiêu thứ hai ghi rõ 3 tháng đầu", question: "Giữ nguyên câu cũ phía trước?" })
+  })
+  it("không có câu hỏi đang chờ ⇒ null", () => {
+    expect(pendingChangeRequest([msg("user", "đổi tên A01")])).toBeNull()
+    expect(pendingChangeRequest([])).toBeNull()
   })
 })

@@ -1483,7 +1483,12 @@ export const runStep = async (
 
     if (needsDraft) {
       const { calls_used } = await usageCounts(projectId, stepId, existingStep?.first_seq ?? null)
-      if (calls_used >= CALLS_LIMIT) throw new ApiError(409, `Bước này đã dùng hết ${CALLS_LIMIT} lượt gọi AI.`, CALL_LIMIT)
+      if (calls_used >= CALLS_LIMIT) {
+        // P08 (BarberGo #9): tin user mở lượt vẫn vào transcript — không bị nuốt; FE chuyển nó sang "Sửa tài liệu"
+        const limited = d.message?.trim()
+        if (limited && !d.messageRecorded) await pushTranscript(projectId, sessionId, stepId, "user", limited)
+        throw new ApiError(409, `Bước này đã dùng hết ${CALLS_LIMIT} lượt gọi AI.`, CALL_LIMIT)
+      }
     }
 
     // FLF-221: tin chat khởi động lượt chạy — ghi sau khi session đã được kiểm và step chạy được, trước Intake để
