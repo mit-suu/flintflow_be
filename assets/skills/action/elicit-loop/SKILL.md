@@ -1,11 +1,11 @@
 ---
 skill_id: elicit-loop
 kind: action
-version: 1.7.0
+version: 1.7.1
 description: Talk like a senior BA - reply first, ask at most two questions, as cards with suggested answers whenever you can propose them
 provider: anthropic
 aiModel: claude-haiku-5-5
-maxTokens: 2048
+maxTokens: 6144
 temperature: 0.5
 reads:
   - addendum[]
