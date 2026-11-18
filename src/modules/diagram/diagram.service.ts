@@ -39,6 +39,7 @@ import { loadScreenOriginal } from "./screen-originals.js"
 import type { ScreenEnvelope } from "./screen-spec.js"
 import type { RenderContext } from "../../shared/diagram/erd-notation.js"
 import { loadRenderContext } from "./render-context.js"
+import { excludedDiagramKind } from "../../shared/diagram/diagram-inclusion.js"
 
 export const DIAGRAM_NOT_FOUND = "DIAGRAM_NOT_FOUND"
 /** Phases §4.1: compile-check → sửa → thử lại, tối đa 2 lần. */
@@ -316,8 +317,10 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
   for (const target of targets) {
     options.onProgress?.()
     const existing = spine.diagrams.filter((d) => sameTarget(d, target)).sort((a, b) => (a.id < b.id ? -1 : 1))
-    const parts =
-      target.kind === "screen_layout" && target.owner_id
+    // FLF-441: loại sơ đồ dự án không cần ⇒ không vẽ; hình cũ (nếu có) bị gỡ như khi chia hình đổi
+    const parts = excludedDiagramKind(context, target.kind)
+      ? []
+      : target.kind === "screen_layout" && target.owner_id
         ? await screenLayoutParts({
             projectId,
             userId: options.userId ?? options.by,

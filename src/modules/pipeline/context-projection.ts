@@ -30,6 +30,7 @@ import { buildTemplateStepContext, loadTemplateContext } from "./template-guidan
 import { buildConversationSummary, formatRecentTurns, type TranscriptMessage } from "./conversation-summary.js"
 import { Project } from "../project/project.model.js"
 import { sequenceLevelOf, type SequenceLevel } from "../../shared/diagram/sequence-level.js"
+import { diagramIncluded } from "../../shared/diagram/diagram-inclusion.js"
 import mongoose from "mongoose"
 
 export { STEP_NOT_FOUND } from "./step-registry.js"
@@ -373,11 +374,16 @@ export const componentLevelProjection = (spine: Spine, stepId: string, level: Se
   }
 }
 
-/** Mức Sequence của dự án — chỉ đọc khi step là S-5.4; chưa nối DB / id lạ ⇒ mặc định. */
-const loadSequenceLevel = async (projectId: string, stepId: string): Promise<SequenceLevel> => {
+/** Mức Sequence của dự án — chỉ đọc khi step là S-5.4; chưa nối DB / id lạ ⇒ mặc định. FLF-441: dự án tắt Sequence ⇒ `none`. */
+const loadSequenceLevel = async (projectId: string, stepId: string): Promise<SequenceLevel | "none"> => {
   if (getStep(stepId).template_id !== "S-5.4" || mongoose.connection.readyState !== 1 || !mongoose.isValidObjectId(projectId)) return sequenceLevelOf(null)
-  return sequenceLevelOf(await Project.findById(projectId).select("sequenceLevel").lean())
+  const project = await Project.findById(projectId).select("sequenceLevel sequenceDiagram").lean()
+  return diagramIncluded(project, "sequence") ? sequenceLevelOf(project) : "none"
 }
+
+/** FLF-441: S-5.4 của dự án không cần Sequence Diagram ⇒ model không viết `interactions` / `component_interactions`. */
+export const sequenceProjection = (spine: Spine, stepId: string, level: SequenceLevel | "none"): Record<string, unknown> =>
+  level === "none" ? (getStep(stepId).template_id === "S-5.4" ? { sequence_diagram: "none" } : {}) : componentLevelProjection(spine, stepId, level)
 
 // ─── có DB ───────────────────────────────────────────────────────
 
@@ -479,7 +485,7 @@ export const buildStepContext = async (projectId: string, stepId: string, option
     projected.projection = { ...projected.projection, ...template.slotProjection }
     projected.writable = [...new Set([...projected.writable, ...template.slotWrites])]
   }
-  const componentLevel = componentLevelProjection(spine, stepId, await loadSequenceLevel(projectId, stepId))
+  const componentLevel = sequenceProjection(spine, stepId, await loadSequenceLevel(projectId, stepId))
   if (Object.keys(componentLevel).length) projected.projection = { ...projected.projection, ...componentLevel }
   const transcriptTail = await loadTranscriptTail(options.sessionId, stepId)
   const base = JSON.stringify(projected.projection) + JSON.stringify(projected.addendum) + transcriptTail

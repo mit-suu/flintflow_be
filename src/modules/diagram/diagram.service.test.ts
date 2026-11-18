@@ -325,6 +325,31 @@ describe("renderAll / renderDiagram qua op engine", () => {
     expect(after).toEqual({ F1: before.F1, F2: before.F2, F3: before.F3, F5: before.F5, F6: before.F6 })
   })
 
+  it("FLF-441: dự án không cần Class / Sequence Diagram, mẫu không phải IEEE (State Machine) ⇒ không vẽ, hình đã có bị gỡ; loại khác giữ nguyên", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    const first = await renderAll(PROJECT, { by: USER, deps })
+    const classIds = first.diagrams.filter((d) => d.kind === "class").map((d) => d.id)
+    const sequenceIds = first.diagrams.filter((d) => d.kind === "sequence").map((d) => d.id)
+    const stateIds = first.diagrams.filter((d) => d.kind === "state_machine").map((d) => d.id)
+    expect(classIds.length).toBeGreaterThan(0)
+    expect(stateIds.length).toBeGreaterThan(0)
+
+    // State Machine chỉ thuộc mẫu IEEE — dự án mẫu FPT ⇒ stateMachine: false
+    const offContext = { classDiagram: false, sequenceDiagram: false, stateMachine: false }
+    const before = (await repo.get(PROJECT))!
+    // Hình loại đã tắt bị coi là cũ (cờ diagram_stale, nút vẽ lại gỡ được)
+    expect(staleRenderedDiagrams(before, offContext).map((d) => d.id).sort()).toEqual([...classIds, ...sequenceIds, ...stateIds].sort())
+    const off = { ...deps, renderContext: async () => offContext }
+    const second = await renderAll(PROJECT, { by: USER, deps: off })
+    const gone = (d: { kind: string }) => d.kind === "class" || d.kind === "sequence" || d.kind === "state_machine"
+    expect(second.diagrams.some(gone)).toBe(false)
+    expect(second.removed.sort()).toEqual([...classIds, ...sequenceIds, ...stateIds].sort())
+    const stored = (await repo.get(PROJECT))!.diagrams
+    expect(stored.some(gone)).toBe(false)
+    expect(stored.some((d) => d.kind === "erd")).toBe(true)
+  })
+
   it("force compile lại hình không đổi; nội dung trùng ⇒ không tăng version", async () => {
     await seed()
     const { deps } = makeDeps()

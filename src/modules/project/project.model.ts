@@ -63,6 +63,9 @@ export interface IProject extends Document {
   erdNotation?: ErdNotation
   /** FLF-418: mức Sequence Diagram `system` | `component`. Không default (thiếu = chưa chọn, S-5.4 lần đầu hỏi); đọc qua `sequenceLevelOf`. */
   sequenceLevel?: SequenceLevel
+  /** FLF-441: có cần Class Diagram / Sequence Diagram. Không default (thiếu = chưa hỏi ⇒ vẫn vẽ); đọc qua `diagramIncluded`. */
+  classDiagram?: boolean
+  sequenceDiagram?: boolean
   /**
    * Theme mockup §3.x.y Screen Layout (FLF-410): màu chính, domain, nền tảng. Không nằm trong Spine; đọc qua `screenThemeOf`
    * (`shared/diagram/screen-theme.ts`). Field null = chưa chọn ⇒ mặc định / suy từ `form_factor`.
@@ -175,6 +178,9 @@ const projectSchema = new Schema<IProject>(
       type: String,
       enum: [...SEQUENCE_LEVELS]
     },
+    // FLF-441: KHÔNG default — thiếu = chưa hỏi (S-4.5 / S-5.4 hỏi trong khung chat)
+    classDiagram: { type: Boolean },
+    sequenceDiagram: { type: Boolean },
     screenTheme: {
       type: new Schema(
         {
