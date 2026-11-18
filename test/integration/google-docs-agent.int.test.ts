@@ -97,6 +97,7 @@ beforeEach(() => {
   env.GOOGLE_CLIENT_ID = "test-client.apps.googleusercontent.com"
   env.GOOGLE_CLIENT_SECRET = "test-client-secret"
   env.GOOGLE_TOKEN_ENC_KEY = crypto.randomBytes(32).toString("base64")
+  env.GOOGLE_DOCS_AGENT_ENABLED = true
   h.getAccessToken.mockResolvedValue({ token: "access" })
   h.documents.get.mockResolvedValue({ data: loadSampleDoc() })
 })
@@ -184,6 +185,16 @@ describe("trợ lý Google Docs", () => {
     const viewerToken = await authAs({ _id: viewer._id, email: "viewer-gda@flintflow.test", orgId: seeded.orgId })
     const res = await send(seeded, { message: "x" }, viewerToken)
     expect(res.status).toBe(403)
+  })
+
+  it("cờ GOOGLE_DOCS_AGENT_ENABLED tắt ⇒ 503 GOOGLE_DOCS_AGENT_DISABLED, không trừ credit", async () => {
+    const seeded = await seedFixture("minimal")
+    const before = await balance(seeded)
+    env.GOOGLE_DOCS_AGENT_ENABLED = false
+    const res = await send(seeded, { message: "Đọc mục 2" })
+    expect(res.status).toBe(503)
+    expect(JSON.parse(res.body as string).error.code).toBe("GOOGLE_DOCS_AGENT_DISABLED")
+    expect(await balance(seeded)).toBe(before)
   })
 
   it("chưa nối Google ⇒ 401 JSON trước khi mở luồng, không trừ credit", async () => {
