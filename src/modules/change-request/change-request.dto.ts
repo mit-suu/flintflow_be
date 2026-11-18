@@ -15,6 +15,7 @@ import {
   LOCATION_ID_PATTERN,
   CR_MATERIAL_KINDS,
   CR_MATERIAL_MAX_CHARS,
+  CR_MAX_FLAG_IDS,
   MATERIAL_ID_PATTERN,
   NEW_CR_SOURCE_KINDS
 } from "./change-request.constants.js"
@@ -69,6 +70,8 @@ export const changeRequestDtoSchema = z.object({
   submitted_at: isoDateTime.nullable(),
   decided_by: id.nullable(),
   closed_reason: z.string().nullable(),
+  /** FLF-445: cờ CR này sửa (tạo từ hàng việc chờ quyết); CR khác ⇒ `[]`. */
+  flag_ids: z.array(z.string()).default([]),
   /** Mode 1 v3: bản xem trước đính kèm lúc tạo (gợi ý cho C-2/C-3/C-4), không có ⇒ `null`. */
   seed: z.object({ instruction: z.string().nullable(), ops: z.array(z.record(z.string(), z.unknown())), targets: z.array(z.string()) }).nullable(),
   /** Mode 1 v3 phase 7: tài liệu bổ sung (chữ đã tách) — ngữ cảnh cho C-2, C-4, 3.9. */
@@ -188,7 +191,9 @@ export const createChangeRequestSchema = z.strictObject({
   /** UC-49 "Create CR from comment": comment còn mở được chuyển thành CR này (status `converted`). Cần `source.kind = viewer_comment`. */
   comment_id: z.string().regex(COMMENT_ID_PATTERN, "Mã comment không hợp lệ.").optional(),
   /** Mode 1 v3 phase 7: đoạn văn bản nguồn dán ở 3.1 (email, biên bản…) — file thì upload sau qua `/materials`. */
-  materials: z.array(z.strictObject({ name: text(200), text: text(CR_MATERIAL_MAX_CHARS * 2) })).max(5).optional()
+  materials: z.array(z.strictObject({ name: text(200), text: text(CR_MATERIAL_MAX_CHARS * 2) })).max(5).optional(),
+  /** FLF-445: nhóm cờ CR này sửa (cờ mở, cùng project). Phần tử / mục của các cờ thành đích C-3. */
+  flag_ids: z.array(z.string().trim().min(1).max(100)).min(1).max(CR_MAX_FLAG_IDS).optional()
 })
 
 /** `GET /projects/:id/change-requests?status=` */

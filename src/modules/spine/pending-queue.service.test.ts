@@ -133,6 +133,20 @@ describe("buildPendingQueue - cờ", () => {
     expect(q.items[0]).toMatchObject({ key: "flag_red:F1", kind: "flag_red", blocking: true, owner_step: "S-4.1", entity_path: "functions[id=FN3]", refs: { flag_ids: ["F1"] } })
   })
 
+  it("FLF-445: cờ đang thuộc change request mở bị bỏ khỏi hàng; nhóm vàng chỉ còn cờ chưa thuộc CR", () => {
+    const spine = spineAt("S-9")
+    spine.flags = [flag("F1", { level: "red" }), flag("F2"), flag("F3")]
+    const q = buildPendingQueue(spine, { flagsInCr: new Set(["F1", "F2"]) })
+    expect(q.items.map((i) => [i.kind, i.refs.flag_ids])).toEqual([["flag_yellow_group", ["F3"]]])
+    expect(buildPendingQueue(spine, { flagsInCr: new Set(["F1", "F2", "F3"]) }).total).toBe(0)
+  })
+
+  it("FLF-445: cờ vàng đã giữ nguyên + lý do rời hàng như cờ đã bỏ qua", () => {
+    const spine = spineAt("S-9")
+    spine.flags = [flag("F1", { kept_reason: "giữ vì lý do dài hơn hai mươi ký tự" }), flag("F2", { waived_by_user: true }), flag("F3")]
+    expect(buildPendingQueue(spine).items.map((i) => i.refs.flag_ids)).toEqual([["F3"]])
+  })
+
   it("S-9: unconfirmed_assumption / screen_pending_at_baseline đổi thành assumption / screen, bỏ trùng", () => {
     const spine = spineAt("S-9")
     spine.assumptions = [assumption("AS1")]
@@ -147,6 +161,10 @@ describe("buildPendingQueue - cờ", () => {
       ["assumption:AS1", "assumption", "B-1.2"],
       ["screen:S4", "screen", "S-5.1@S4"]
     ])
+    // FLF-445: dự án import (chế độ 1) sửa qua change request ⇒ giữ là cờ, không đổi thành việc giả định / màn
+    const flagsOnly = buildPendingQueue({ ...spine, progress: { ...spine.progress, current_phase: "S-1" } }, { flagsOnly: true })
+    expect(flagsOnly.items.map((i) => i.key).sort()).toEqual(["flag_red:F1", "flag_red:F2", "flag_red:F3"])
+    expect(flagsOnly.items.every((i) => i.kind === "flag_red")).toBe(true)
   })
 
   it("cờ unconfirmed_assumption trỏ giả định không còn ⇒ giữ là flag_red", () => {
