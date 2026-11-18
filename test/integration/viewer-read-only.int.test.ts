@@ -81,7 +81,7 @@ describe("Viewer vẫn đọc được", () => {
   })
 
   it("không đọc được dữ liệu làm việc (Spine, cờ, change, nguồn, chat, step) - UC-47", async () => {
-    for (const suffix of ["/spine", "/flags", "/changes", "/sources", "/documents", "/chats", "/steps", "/change-requests"]) {
+    for (const suffix of ["/spine", "/flags", "/changes", "/sources", "/documents", "/chats", "/steps", "/change-requests", "/pending-queue", "/documents/650000000000000000000001/text", "/documents/650000000000000000000001/download"]) {
       const path = "/api/v1/projects/" + seeded.projectId + suffix
       const res = await request(app).get(path).set(bearer(viewer))
       expect(res.status, path).toBe(403)

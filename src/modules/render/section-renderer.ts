@@ -47,6 +47,7 @@ import type { Change, DiagramKind, Message, Nfr, NfrCategory, OriginalDiagramKin
 import { messageTypeLabel } from "../spine/message-type.js"
 import { screenSpecOf } from "../diagram/renderers/screen-mockup.js"
 import { isPlaceholderText } from "../import/template-markers.js"
+import type { SOURCE_COLLECTIONS } from "../project/requirement-source.service.js"
 
 /**
  * T15 review T5: `fixed:I` không cần `before`/`value` (chỉ mô tả A/M/D + ngày/người/lý do) — caller
@@ -75,19 +76,32 @@ const FIXED_LEVELS = new Map(FIXED_SECTIONS.map((s) => [s.id, s.level]))
 
 // ─── block builders ──────────────────────────────────────────────
 
-const p = (text: string): ParagraphBlock => ({ type: "paragraph", runs: [{ text }] })
+const p = (text: string, entityPath?: string): ParagraphBlock => ({ type: "paragraph", runs: [{ text }], ...(entityPath ? { entity_path: entityPath } : {}) })
+
+/**
+ * FLF-443: path phần tử Spine cùng dạng `entity_path` của `GET /sources` (`functions[id=FN3]`) — để FE đặt chip "Nguồn" lên
+ * dòng / mục / đoạn thể hiện phần tử đó. Mảng song song với `rows` / `items`; toàn `null` hoặc không có ⇒ không ghi field.
+ */
+type SourceCollection = (typeof SOURCE_COLLECTIONS)[number]
+const pathsOf = (collection: SourceCollection, items: readonly { id: string }[]): string[] => items.map((x) => `${collection}[id=${x.id}]`)
+const hasPaths = (paths: readonly (string | null)[] | undefined): paths is (string | null)[] => paths?.some((x) => x !== null) === true
 const labeled = (label: string, text: string): ParagraphBlock => ({
   type: "paragraph",
   runs: [{ text: `${label}: `, bold: true }, { text }]
 })
 const heading = (text: string, level: number): HeadingBlock => ({ type: "heading", level, text })
-const bulletList = (items: string[]): BulletListBlock => ({ type: "bullet_list", items: items.map((text) => [{ text }]) })
+const bulletList = (items: string[], paths?: readonly (string | null)[]): BulletListBlock => ({
+  type: "bullet_list",
+  items: items.map((text) => [{ text }]),
+  ...(hasPaths(paths) ? { item_entity_paths: [...paths] } : {})
+})
 const numberedList = (items: string[]): NumberedListBlock => ({ type: "numbered_list", items: items.map((text) => [{ text }]) })
 const cell = (text: string): TableCell => [{ text }]
-const tableBlock = (header: string[], rows: string[][]): TableBlock => ({
+const tableBlock = (header: string[], rows: string[][], paths?: readonly (string | null)[]): TableBlock => ({
   type: "table",
   header: header.map(cell),
-  rows: rows.map((row) => row.map(cell))
+  rows: rows.map((row) => row.map(cell)),
+  ...(hasPaths(paths) ? { row_entity_paths: [...paths] } : {})
 })
 const image = (png: string, caption: string): ImageBlock => ({ type: "image", png, caption })
 
@@ -313,12 +327,12 @@ const productOverview = (spine: Spine, ctx: SectionRenderContext): Block[] => {
     if (project.release_scope.out.length > 0) blocks.push(heading("Out of Scope", 3), bulletList(project.release_scope.out))
   }
   const highRules = represented?.has("slot:high_rules") || represented?.has("slot:business_rules") ? [] : spine.business_rules.filter((r) => r.tier === "high")
-  if (highRules.length > 0) blocks.push(heading("High-Level Business Rules", 2), bulletList(highRules.map((r) => r.statement)))
+  if (highRules.length > 0) blocks.push(heading("High-Level Business Rules", 2), bulletList(highRules.map((r) => r.statement), pathsOf("business_rules", highRules)))
   const nonHuman = represented?.has("slot:context") ? [] : spine.actors.filter((a) => a.kind !== "human")
   if (nonHuman.length > 0) {
     const lang = fptLanguage(ctx)
     const say = sentencesFor(lang)
-    blocks.push(heading("External Systems", 2), bulletList(nonHuman.map((a) => say.externalSystem(a.name, enumLabel(lang, "actor_kind", a.kind), a.description))))
+    blocks.push(heading("External Systems", 2), bulletList(nonHuman.map((a) => say.externalSystem(a.name, enumLabel(lang, "actor_kind", a.kind), a.description)), pathsOf("actors", nonHuman)))
   }
   if (!represented?.has("slot:context")) blocks.push(...diagramImages(spine, "context", undefined, ctx, "Figure - System Context Diagram"))
   return blocks
@@ -332,7 +346,8 @@ const actorsTable = (spine: Spine, ctx: SectionRenderContext): Block[] => [
     : [
         tableBlock(
           ["ID", "Name", "Kind", "Description"],
-          spine.actors.map((a) => [a.id, a.name, enumLabel(fptLanguage(ctx), "actor_kind", a.kind), a.description])
+          spine.actors.map((a) => [a.id, a.name, enumLabel(fptLanguage(ctx), "actor_kind", a.kind), a.description]),
+          pathsOf("actors", spine.actors)
         )
       ]),
   // Hình phân cấp actor (generalization) nằm ngay dưới bảng actor; chú thích = `<title>` của SVG (đã theo ngôn ngữ tài liệu)
@@ -363,7 +378,8 @@ const useCaseTable = (spine: Spine, ctx: SectionRenderContext): Block[] => {
         uc.description,
         uc.includes.map(useCaseName).join(", "),
         uc.extends.map(useCaseName).join(", ")
-      ])
+      ]),
+      pathsOf("use_cases", spine.use_cases)
     )
   ]
 }
@@ -394,7 +410,8 @@ const screenDescriptions = (spine: Spine, ctx: SectionRenderContext): Block[] =>
         const number = ctx.numberOf(`feature:${s.feature_id}`)
         const featureLabel = feature ? sentencesFor(fptLanguage(ctx)).featureLabel(number, feature.name) : s.feature_id
         return [featureLabel, s.name, s.description]
-      })
+      }),
+      pathsOf("screens", spine.screens)
     )
   ]
 }
@@ -410,7 +427,7 @@ const screenAuthorization = (spine: Spine, ctx: SectionRenderContext): Block[] =
   if (spine.permissions.length === 0) {
     if (spine.roles.length === 0) return []
     const actorName = (id: string | null) => spine.actors.find((a) => a.id === id)?.name ?? "-"
-    return [tableBlock(["Role", "Actor"], spine.roles.map((r) => [r.name, actorName(r.actor_id)]))]
+    return [tableBlock(["Role", "Actor"], spine.roles.map((r) => [r.name, actorName(r.actor_id)]), pathsOf("roles", spine.roles))]
   }
   const actionsOf = (screenId: string, roleId: string): string =>
     spine.permissions
@@ -419,7 +436,8 @@ const screenAuthorization = (spine: Spine, ctx: SectionRenderContext): Block[] =
       .join(", ") || "-"
   const matrix = tableBlock(
     [fptLabelFor(fptLanguage(ctx), "Screen"), ...spine.roles.map((r) => r.name)],
-    spine.screens.map((s) => [s.name, ...spine.roles.map((r) => actionsOf(s.id, r.id))])
+    spine.screens.map((s) => [s.name, ...spine.roles.map((r) => actionsOf(s.id, r.id))]),
+    pathsOf("screens", spine.screens)
   )
   SPINE_HEADER_TABLES.add(matrix)
   return [matrix]
@@ -463,11 +481,11 @@ const nonScreenFunctions = (spine: Spine, ctx: SectionRenderContext): Block[] =>
           return /^(#|no\.?|stt|tt)$/i.test(title.trim()) ? String(i + 1) : ""
       }
     }
-    return [tableBlock(header, fns.map((f, i) => header.map((title, c) => cell(f, i, fields[c] ?? null, title))))]
+    return [tableBlock(header, fns.map((f, i) => header.map((title, c) => cell(f, i, fields[c] ?? null, title))), pathsOf("functions", fns))]
   }
   const fns = spine.functions.filter((f) => f.screen_id === null && !isTemplateSlotName(f.name))
   if (fns.length === 0) return []
-  return [tableBlock(["Name", "Trigger", "Description"], fns.map((f) => [f.name, f.trigger, f.description]))]
+  return [tableBlock(["Name", "Trigger", "Description"], fns.map((f) => [f.name, f.trigger, f.description]), pathsOf("functions", fns))]
 }
 
 /** Đoạn mô tả dưới hình state machine của một entity: điểm bắt đầu, điểm kết thúc, số trạng thái / chuyển trạng thái. */
@@ -494,7 +512,7 @@ const erd = (spine: Spine, ctx: SectionRenderContext): Block[] => {
     }
     const relations = (e: Spine["entities"][number]) =>
       e.relations.map((id) => sentencesFor(lang).relation(verbOf(e, id), entityName(id), e.relation_optional?.includes(id) ?? false)).join(", ")
-    blocks.push(tableBlock(["Entity", "Description", "Relations"], spine.entities.map((e) => [e.name, e.description, relations(e)])))
+    blocks.push(tableBlock(["Entity", "Description", "Relations"], spine.entities.map((e) => [e.name, e.description, relations(e)]), pathsOf("entities", spine.entities)))
   }
   // Vòng đời (state machine) của entity có trạng thái: mỗi entity một hình kèm mô tả, sau bảng entity
   for (const e of [...spine.entities].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
@@ -827,13 +845,13 @@ const nfrStatement = (n: Nfr, language?: string): string =>
 
 const nfrList = (spine: Spine, category: NfrCategory, ctx: SectionRenderContext): Block[] => {
   const items = spine.nfrs.filter((n) => n.category === category)
-  return items.length === 0 ? [] : [bulletList(items.map((n) => nfrStatement(n, fptLanguage(ctx))))]
+  return items.length === 0 ? [] : [bulletList(items.map((n) => nfrStatement(n, fptLanguage(ctx))), pathsOf("nfrs", items))]
 }
 
 const nfrTable = (spine: Spine, category: NfrCategory, ctx: SectionRenderContext): Block[] => {
   const items = spine.nfrs.filter((n) => n.category === category)
   if (items.length === 0) return []
-  return [tableBlock(["Statement", "Metric", "Threshold", "Priority"], items.map((n) => [n.statement, n.metric ?? "", n.threshold ?? "", n.priority ? enumLabel(fptLanguage(ctx), "priority", n.priority) : ""]))]
+  return [tableBlock(["Statement", "Metric", "Threshold", "Priority"], items.map((n) => [n.statement, n.metric ?? "", n.threshold ?? "", n.priority ? enumLabel(fptLanguage(ctx), "priority", n.priority) : ""]), pathsOf("nfrs", items))]
 }
 
 // ─── §5 Requirement Appendix ────────────────────────────────────────
@@ -841,13 +859,13 @@ const nfrTable = (spine: Spine, category: NfrCategory, ctx: SectionRenderContext
 const businessRulesDetail = (spine: Spine, ctx?: SectionRenderContext): Block[] => {
   const items = spine.business_rules.filter((r) => r.tier === "detail")
   if (items.length === 0) return []
-  return ctx?.preferTable ? [tableBlock(["ID", "Rule"], items.map((r) => [r.id, r.statement]))] : [bulletList(items.map((r) => r.statement))]
+  return ctx?.preferTable ? [tableBlock(["ID", "Rule"], items.map((r) => [r.id, r.statement]), pathsOf("business_rules", items))] : [bulletList(items.map((r) => r.statement), pathsOf("business_rules", items))]
 }
 
 const commonRequirements = (spine: Spine, ctx: SectionRenderContext): Block[] =>
   spine.common_requirements.length === 0
     ? []
-    : [tableBlock(["Category", "Statement"], spine.common_requirements.map((c) => [enumLabel(fptLanguage(ctx), "common_category", c.category), c.statement]))]
+    : [tableBlock(["Category", "Statement"], spine.common_requirements.map((c) => [enumLabel(fptLanguage(ctx), "common_category", c.category), c.statement]), pathsOf("common_requirements", spine.common_requirements))]
 
 /** P07: nhãn cột "Type" theo ngôn ngữ tài liệu; Spine cũ không có loại ⇒ ô trống. */
 const messageTypeCell = (type: Message["type"], ctx?: SectionRenderContext): string =>
@@ -860,7 +878,8 @@ const messagesList = (spine: Spine, ctx?: SectionRenderContext): Block[] => {
   return [
     tableBlock(
       ["Code", "Type", "Context", "Text", "Functions"],
-      spine.messages.map((m) => [m.code, messageTypeCell(m.type, ctx), m.context ?? "", m.text, m.function_ids.map(fnName).join(", ")])
+      spine.messages.map((m) => [m.code, messageTypeCell(m.type, ctx), m.context ?? "", m.text, m.function_ids.map(fnName).join(", ")]),
+      pathsOf("messages", spine.messages)
     )
   ]
 }
@@ -868,10 +887,10 @@ const messagesList = (spine: Spine, ctx?: SectionRenderContext): Block[] => {
 const otherRequirements = (spine: Spine, ctx: SectionRenderContext): Block[] =>
   spine.other_requirements.length === 0
     ? []
-    : [tableBlock(["Kind", "Statement"], spine.other_requirements.map((o) => [enumLabel(fptLanguage(ctx), "other_kind", o.kind), o.statement]))]
+    : [tableBlock(["Kind", "Statement"], spine.other_requirements.map((o) => [enumLabel(fptLanguage(ctx), "other_kind", o.kind), o.statement]), pathsOf("other_requirements", spine.other_requirements))]
 
 const glossaryTable = (spine: Spine): Block[] =>
-  spine.glossary.length === 0 ? [] : [tableBlock(["Term", "Native", "Definition"], spine.glossary.map((g) => [g.term, g.term_native ?? "", g.definition]))]
+  spine.glossary.length === 0 ? [] : [tableBlock(["Term", "Native", "Definition"], spine.glossary.map((g) => [g.term, g.term_native ?? "", g.definition]), pathsOf("glossary", spine.glossary))]
 
 // ─── dispatch ────────────────────────────────────────────────────
 

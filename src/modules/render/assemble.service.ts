@@ -383,6 +383,17 @@ const rehydrateImages = async (doc: RenderedDocument, projectId: string, load: D
 
 // ─── cache: ghi an toàn (review T10) + dọn bản cũ (review T6) ─────
 
+/**
+ * Phiên bản định dạng của document cache. Đổi hình dạng `RenderedDocument` (thêm field mới mà bản cũ không có) ⇒ tăng số
+ * này: hàng cache ghi bằng bản cũ (không có `format_version`, kể cả baseline bất biến) bị coi là chưa có và dựng lại đè
+ * lên, thay vì trả document thiếu field. Khoá ghi vẫn là `(projectId, spine_version | baseline_id | view+locale)` nên hàng cũ
+ * được ghi đè, không đụng unique index.
+ *   2: `entity_path` / `row_entity_paths` / `item_entity_paths` trên block (FLF-443).
+ */
+export const RENDER_FORMAT_VERSION = 2
+
+const isCurrentFormat = (row: { format_version?: unknown } | null | undefined): boolean => row?.format_version === RENDER_FORMAT_VERSION
+
 const isDuplicateKeyError = (err: unknown): boolean =>
   typeof err === "object" && err !== null && "code" in err && (err as { code?: unknown }).code === 11000
 
@@ -392,7 +403,7 @@ const isDuplicateKeyError = (err: unknown): boolean =>
  */
 const upsertCache = async (filter: Record<string, unknown>, setDoc: Record<string, unknown>) => {
   try {
-    return await RenderedDocumentCache.findOneAndUpdate(filter, { $set: setDoc }, { upsert: true, lean: true })
+    return await RenderedDocumentCache.findOneAndUpdate(filter, { $set: { ...setDoc, format_version: RENDER_FORMAT_VERSION } }, { upsert: true, lean: true })
   } catch (err) {
     if (!isDuplicateKeyError(err)) throw err
     const existing = await RenderedDocumentCache.findOne(filter, null, { lean: true })
@@ -945,7 +956,9 @@ export async function assemble(
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", spineRepository.SPINE_VERSION_CONFLICT)
   }
 
-  const cached = await RenderedDocumentCache.findOne({ projectId, spine_version: record.spine_version }, null, { lean: true })
+  const found = await RenderedDocumentCache.findOne({ projectId, spine_version: record.spine_version }, null, { lean: true })
+  // Hàng cache ghi bằng định dạng cũ ⇒ coi như chưa có, dựng lại đè lên
+  const cached = isCurrentFormat(found) ? found : null
   // T15 review T2: cache hỏng (dữ liệu cũ, lỗi ghi thủ công…) không được làm 500 lộ chi tiết ra ngoài. FLF-264: cũng
   // không còn là lỗi 422 trả cho người dùng — dựng lại đè lên là việc của code, không phải việc họ phải xử lý.
   const parsedCache = cached ? renderedDocumentSchema.safeParse(cached.doc) : null
@@ -1106,12 +1119,13 @@ const readCachedDocument = async (
   filter: Record<string, unknown>,
   sort?: Record<string, 1 | -1>
 ): Promise<{ doc: RenderedDocument; assembledAtVersion: number | undefined } | "invalid" | null> => {
-  const head = (await RenderedDocumentCache.findOne(filter, { _id: 1, updatedAt: 1, assembled_at_version: 1 }, { lean: true, ...(sort ? { sort } : {}) })) as {
+  const head = (await RenderedDocumentCache.findOne(filter, { _id: 1, updatedAt: 1, assembled_at_version: 1, format_version: 1 }, { lean: true, ...(sort ? { sort } : {}) })) as {
     _id: unknown
     updatedAt?: unknown
     assembled_at_version?: number
+    format_version?: number
   } | null
-  if (!head) return null
+  if (!head || !isCurrentFormat(head)) return null
   const key = cacheMemoKey(head)
   const assembledAtVersion = typeof head.assembled_at_version === "number" ? head.assembled_at_version : undefined
   const memoized = documentMemo.get(key)
@@ -1336,7 +1350,7 @@ const storedTranslatedSchema = z.object({
 /** Một truy vấn theo đủ khoá: hàng khác khoá (bản cũ) ⇒ `null`. */
 const loadStoredTranslated = async (projectId: string, key: TranslatedKey): Promise<TranslatedEntry | null> => {
   const row = await RenderedDocumentCache.findOne(
-    { projectId, view: key.view, locale: key.locale, content_key: key.contentKey, translation_revision: key.revision },
+    { projectId, view: key.view, locale: key.locale, content_key: key.contentKey, translation_revision: key.revision, format_version: RENDER_FORMAT_VERSION },
     { doc: 1, translation: 1, localized_refs: 1, image_language: 1 },
     { lean: true }
   )
