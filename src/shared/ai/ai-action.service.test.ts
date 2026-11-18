@@ -219,7 +219,7 @@ describe("executeAiAction - đầu ra bị cắt ở max_tokens (FLF-393)", () =
   })
 
   it("widenedOutputConfig: Anthropic gấp đôi TỔNG ngân sách gửi đi (gồm phần dành cho suy nghĩ), provider khác gấp đôi maxTokens", () => {
-    // elicit: 2048 + 4096 = 6144 ⇒ 12288 = 8192 + 4096
+    // maxTokens 2048: 2048 + 4096 = 6144 ⇒ 12288 = 8192 + 4096
     expect(widenedOutputConfig({ provider: "anthropic", maxTokens: 2048 } as any).maxTokens).toBe(8192)
     expect(widenedOutputConfig({ provider: "gemini", maxTokens: 3000 } as any).maxTokens).toBe(6000)
     expect(widenedOutputConfig({ provider: "gemini" } as any).maxTokens).toBe(4096)
