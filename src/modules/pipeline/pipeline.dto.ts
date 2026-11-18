@@ -839,3 +839,43 @@ export const baselineRejectRequestSchema = z.strictObject({
 })
 
 export const baselineSubmissionResponseSchema = baselineSubmissionSchema
+
+// ─── Hàng việc chờ quyết + tài liệu tham khảo (FLF-443, endpoint 51–55) ──
+
+/**
+ * GET /projects/:id/pending-queue (51) — hàng việc chờ người quyết, Code xếp: loại việc → bước soạn sở hữu → section →
+ * phần tử. Chỉ thứ tự và danh tính: FE dựng câu hỏi / câu trích từ Spine đã tải. Chỉ đọc, không gọi model.
+ */
+export const pendingKindSchema = z.enum(["assumption", "brief_note", "screen", "flag_red", "flag_yellow_group"])
+export const pendingItemSchema = z.object({
+  /** `<kind>:<id>`; nhóm cờ vàng: `flag_yellow_group:<entity_path | rule_id@section_id>`. */
+  key: z.string().min(1),
+  kind: pendingKindSchema,
+  /** `false` chỉ với `flag_yellow_group` (không chặn, lượt chính khi hết việc chặn). */
+  blocking: z.boolean(),
+  owner_step: z.string().min(1),
+  section_id: z.string().nullable(),
+  /** Phần tử Spine đã chuẩn hoá `<collection>[id=X]`; không chuẩn hoá được ⇒ `null`. */
+  entity_path: z.string().nullable(),
+  /** Số việc khác cùng `entity_path` thuộc bước soạn sau; 0 ⇒ FE không hiện lý do xếp trước. */
+  dependents: z.number().int().min(0),
+  refs: z.object({
+    assumption_id: z.string().optional(),
+    addendum_id: z.string().optional(),
+    screen_id: z.string().optional(),
+    flag_ids: z.array(z.string()).optional()
+  })
+})
+export const pendingQueueResponseSchema = z.object({ total: z.number().int().min(0), items: z.array(pendingItemSchema) })
+
+/** GET /projects/:id/documents/:docId/text (52) — chữ tài liệu tham khảo, chia đoạn đúng mã `D<n>-P<mm>` của `GET /sources`. */
+export const referenceDocumentTextSchema = z.object({
+  id: z.string().min(1),
+  name: z.string(),
+  paragraphs: z.array(z.object({ para_id: z.string().min(1), text: z.string() }))
+})
+
+export type PendingKind = z.infer<typeof pendingKindSchema>
+export type PendingItem = z.infer<typeof pendingItemSchema>
+export type PendingQueue = z.infer<typeof pendingQueueResponseSchema>
+export type ReferenceDocumentText = z.infer<typeof referenceDocumentTextSchema>
