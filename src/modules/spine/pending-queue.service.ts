@@ -6,7 +6,8 @@
  *   - assumption: `unconfirmed` khi Brief; brief_note: mọi `addendum[]` khi Brief; screen: `pending` khi S-5;
  *   - flag_red: cờ đỏ mở, chưa "giữ nguyên"; riêng `unconfirmed_assumption` / `screen_pending_at_baseline` (S-9) đổi
  *     thành việc assumption / screen theo `target_id` để thẻ đưa đúng thao tác miễn phí;
- *   - flag_yellow_group: cờ vàng mở chưa waive, gom theo phần tử đã chuẩn hoá, không có thì `rule_id@section_id`.
+ *   - flag_yellow_group: cờ vàng mở chưa waive, chưa giữ nguyên, gom theo phần tử đã chuẩn hoá, không có thì `rule_id@section_id`.
+ *   - cờ đang thuộc change request chưa kết thúc (FLF-445) không vào hàng.
  */
 
 import type { PendingItem, PendingKind, PendingQueue } from "../pipeline/pipeline.dto.js"
@@ -33,7 +34,7 @@ const BARE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
 const compareIds = (a: string, b: string): number => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
 
 /** Bảng id → collection; id trùng giữa các collection thì collection đứng trước trong `SOURCE_COLLECTIONS` thắng. */
-const buildIdIndex = (spine: Spine): Map<string, string> => {
+export const buildIdIndex = (spine: Spine): Map<string, string> => {
   const index = new Map<string, string>()
   for (const collection of SOURCE_COLLECTIONS) {
     const list = (spine as unknown as Record<string, Array<{ id?: unknown }> | undefined>)[collection]
@@ -44,7 +45,7 @@ const buildIdIndex = (spine: Spine): Map<string, string> => {
 }
 
 /** `target_id` của cờ (id trần, nhãn, ref path, path thô) → `<collection>[id=X]`; không chuẩn hoá được ⇒ null. */
-const normalizeTarget = (target: string | null | undefined, idIndex: ReadonlyMap<string, string>): string | null => {
+export const normalizeTarget = (target: string | null | undefined, idIndex: ReadonlyMap<string, string>): string | null => {
   const raw = target?.trim()
   if (!raw) return null
   const viaPath = entityPathOf(raw)
@@ -60,10 +61,25 @@ interface Draft {
   elementId: string
 }
 
-export const buildPendingQueue = (spine: Spine): PendingQueue => {
+export interface PendingQueueOptions {
+  /**
+   * Id cờ đang thuộc change request chưa kết thúc (FLF-445) — đã có người xử lý, không đưa vào hàng.
+   * CR kết thúc mà cờ còn mở ⇒ cờ quay lại hàng như thường.
+   */
+  flagsInCr?: ReadonlySet<string>
+  /**
+   * Dự án chế độ 1 (import, FLF-445): mọi sửa đi qua change request (`POST /changes` bị chặn) ⇒ hàng chỉ có cờ; cờ đỏ
+   * giả định / màn giữ là cờ (sửa qua CR) thay vì đổi thành việc giả định / màn.
+   */
+  flagsOnly?: boolean
+}
+
+export const buildPendingQueue = (spine: Spine, options: PendingQueueOptions = {}): PendingQueue => {
+  const flagsInCr = options.flagsInCr ?? new Set<string>()
+  const flagsOnly = options.flagsOnly ?? false
   const phase = spine.progress?.current_phase ?? null
-  const inBrief = phase !== null && (phase.startsWith("B-") || phase === "S-1")
-  const inScreenLoop = phase === "S-5"
+  const inBrief = !flagsOnly && phase !== null && (phase.startsWith("B-") || phase === "S-1")
+  const inScreenLoop = !flagsOnly && phase === "S-5"
 
   const stepIndex = new Map(orderedSteps(spine).map((s, i) => [s.id, i]))
   const stepRank = (stepId: string): number => stepIndex.get(stepId) ?? Number.POSITIVE_INFINITY
@@ -145,10 +161,10 @@ export const buildPendingQueue = (spine: Spine): PendingQueue => {
 
   const yellow = new Map<string, Flag[]>()
   for (const flag of spine.flags) {
-    if (flag.resolved_at !== null) continue
+    if (flag.resolved_at !== null || flagsInCr.has(flag.id)) continue
     if (flag.level === "red") {
       if (flag.kept_reason !== null) continue
-      const target = flag.target_id ?? null
+      const target = flagsOnly ? null : (flag.target_id ?? null)
       const converted =
         target !== null && flag.rule_id === ASSUMPTION_FLAG_RULE
           ? assumptionDraft(target, flag.section_id)
@@ -173,7 +189,8 @@ export const buildPendingQueue = (spine: Spine): PendingQueue => {
       })
       continue
     }
-    if (flag.waived_by_user) continue
+    // Đã bỏ qua, hoặc đã "giữ nguyên + lý do" (chế độ 1 không bỏ qua được, FLF-445) ⇒ người dùng đã quyết
+    if (flag.waived_by_user || flag.kept_reason !== null) continue
     const groupKey = normalizeTarget(flag.target_id, idIndex) ?? `${flag.rule_id}@${flag.section_id}`
     const bucket = yellow.get(groupKey)
     if (bucket) bucket.push(flag)

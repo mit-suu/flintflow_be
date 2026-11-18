@@ -15,7 +15,8 @@ import { toIso } from "../import/mode1.http.js"
 import { clipMaterialText, formatCrId, formatMaterialId } from "./change-request.constants.js"
 import type { ChangeRequestDetail, CreateChangeRequest, PendingSection } from "./change-request.dto.js"
 import { ChangeRequest, CrCounter, type CrSeed, type IChangeRequest } from "./change-request.model.js"
-import { CR_STATUS_LABELS, assertTransition, isTerminal, type CrStatus } from "./change-request.state.js"
+import { CR_STATUSES, CR_STATUS_LABELS, assertTransition, isTerminal, type CrStatus } from "./change-request.state.js"
+import { seedFromFlags } from "./flag-seed.js"
 import { ChangeGroup } from "./change-group.model.js"
 import { ChangeLocation, type LocationProposal } from "./change-location.model.js"
 import { regroup } from "./group.service.js"
@@ -74,6 +75,7 @@ const toCrDto = (cr: IChangeRequest): ChangeRequestDetail["change_request"] => (
   submitted_at: toIso(cr.submitted_at),
   decided_by: cr.decided_by ? String(cr.decided_by) : null,
   closed_reason: cr.closed_reason ?? null,
+  flag_ids: [...(cr.flag_ids ?? [])],
   seed: cr.seed ? { instruction: cr.seed.instruction ?? null, ops: [...cr.seed.ops], targets: [...cr.seed.targets] } : null,
   materials: (cr.materials ?? []).map((m) => ({
     material_id: m.material_id,
@@ -215,14 +217,29 @@ export const seedFromPreview = (projectId: string, userId: string, previewId: st
   return { instruction: preview.instruction, ops: preview.ops.map((op) => ({ ...op }) as Record<string, unknown>), targets }
 }
 
+/** Gợi ý của CR: bản xem trước và / hoặc nhóm cờ (đích gộp, bỏ trùng). Không có cả hai ⇒ `null`. */
+const mergeSeeds = (preview: CrSeed | null, flags: CrSeed | null): CrSeed | null =>
+  preview && flags ? { ...preview, targets: [...new Set([...preview.targets, ...flags.targets])] } : (preview ?? flags)
+
+/** Id cờ đang thuộc CR chưa kết thúc của project — hàng việc chờ quyết bỏ các cờ này (FLF-445). */
+export const flagIdsInOpenCrs = async (projectId: string): Promise<Set<string>> => {
+  const terminal = CR_STATUSES.filter(isTerminal)
+  const ids: string[] = await ChangeRequest.distinct("flag_ids", { projectId, status: { $nin: terminal }, "flag_ids.0": { $exists: true } })
+  return new Set(ids)
+}
+
 export const createCr = async (projectId: string, userId: string, body: CreateChangeRequest): Promise<IChangeRequest> => {
+  const record = await spineRepository.get(projectId)
   // FLF-330 C-7: gói đang chờ Lead ⇒ bản nháp khoá, không mở CR mới
-  assertPackageNotPending((await spineRepository.get(projectId))?.baseline_submission)
+  assertPackageNotPending(record?.baseline_submission)
   const imported = await latestImport(projectId)
   const version = await latestDocVersion(projectId)
   if (!imported || !hasBaseline(imported.status) || !version) {
     throw new Mode1Error("CR_REQUIRES_BASELINE", "Chưa có bản gốc của tài liệu - hoàn tất nhập tài liệu trước khi tạo change request")
   }
+  // FLF-445: kiểm nhóm cờ trước khi lấy số CR (lỗi thì không tốn mã CR)
+  if (body.flag_ids?.length && !record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
+  const fromFlags = body.flag_ids?.length && record ? seedFromFlags(stripRecord(record), body.flag_ids) : null
   const counter = await CrCounter.findOneAndUpdate({ projectId }, { $inc: { seq: 1 } }, { upsert: true, returnDocument: "after" })
   const cr = await ChangeRequest.create({
     projectId,
@@ -231,7 +248,8 @@ export const createCr = async (projectId: string, userId: string, body: CreateCh
     description: body.description,
     source: body.source,
     requester: body.requester,
-    seed: body.preview_id ? seedFromPreview(projectId, userId, body.preview_id) : null,
+    seed: mergeSeeds(body.preview_id ? seedFromPreview(projectId, userId, body.preview_id) : null, fromFlags?.seed ?? null),
+    flag_ids: fromFlags?.flagIds ?? [],
     materials: (body.materials ?? []).map((m, i) => ({ ...clipMaterialText(m.text), material_id: formatMaterialId(i + 1), kind: "text", name: m.name, round: 0, added_at: new Date() })),
     status: "draft",
     base_doc_version: version.version,
