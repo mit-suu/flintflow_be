@@ -12,7 +12,14 @@ export const ImportGoogleDocSchema = z.object({
   fileId: z.string().trim().min(1).max(200).regex(/^[\w-]+$/)
 })
 
-/** `update` (mặc định): ghi đè Google Doc đã xuất gần nhất cùng nguồn + ngôn ngữ; chưa có thì tạo mới. */
+/** Google Doc chọn trong Picker để liên kết vào dự án — cùng dạng id với nhập. */
+export const LinkGoogleDocSchema = ImportGoogleDocSchema
+
+/**
+ * `update` (mặc định): ghi đè Google Doc đã xuất gần nhất cùng nguồn + ngôn ngữ; chưa có thì tạo mới.
+ * `force`: ghi đè dù Doc đã bị sửa trong Google Docs sau lần xuất trước (sau khi người dùng xác nhận `GOOGLE_DOC_MODIFIED`).
+ */
 export const GoogleExportSchema = z.object({
-  mode: z.enum(["new", "update"]).default("update")
+  mode: z.enum(["new", "update"]).default("update"),
+  force: z.boolean().default(false)
 })

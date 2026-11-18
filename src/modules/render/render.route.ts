@@ -220,15 +220,19 @@ router.get("/:projectId/export/pdf", authMiddleware, exportController.exportPdf)
  *                 type: string
  *                 enum: [new, update]
  *                 default: update
+ *               force:
+ *                 type: boolean
+ *                 default: false
+ *                 description: Ghi đè dù Doc đã bị sửa trong Google Docs sau lần xuất trước
  *     responses:
  *       200:
- *         description: "{ fileId, webViewLink, title, mode, recreated }"
+ *         description: "{ fileId, webViewLink, title, mode, recreated, folder { id, path, url } | null } — file nằm trong thư mục FlintFlow / <dự án>"
  *       401:
  *         description: GOOGLE_RECONNECT_REQUIRED — chưa nối Google hoặc quyền đã bị thu hồi
  *       403:
  *         description: ORG_ROLE_FORBIDDEN (Viewer xuất bản nháp) · GOOGLE_FILE_FORBIDDEN
  *       409:
- *         description: Như export/word (NO_WORKING_DRAFT, TRANSLATION_INCOMPLETE, DOCUMENT_LANGUAGE_UNAVAILABLE)
+ *         description: Như export/word (NO_WORKING_DRAFT, TRANSLATION_INCOMPLETE, DOCUMENT_LANGUAGE_UNAVAILABLE) · GOOGLE_DOC_MODIFIED (Doc đã bị sửa sau lần xuất trước, gửi lại với force)
  *       503:
  *         description: GOOGLE_INTEGRATION_DISABLED · GOOGLE_DRIVE_QUOTA_EXCEEDED
  */

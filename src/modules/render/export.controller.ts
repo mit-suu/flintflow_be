@@ -58,6 +58,7 @@ export const previewWord = catchAsync(async (req: Request, res: Response) => {
 interface ExportedDocx {
   buffer: Buffer
   fileName: string
+  projectName: string
   documentLanguage: string
   /** `source=draft` — độ mới của bản đang xuất (baseline bất biến, không có). */
   draftMeta: DraftMeta | null
@@ -123,6 +124,7 @@ const buildExportDocx = async (req: Request, res: Response): Promise<ExportedDoc
   return {
     buffer,
     fileName: buildDocxFileName(parsed.data, otherLanguage ? locale : undefined),
+    projectName,
     documentLanguage: locale,
     draftMeta,
     source: query.source,
@@ -157,9 +159,11 @@ export const exportWord = catchAsync(async (req: Request, res: Response) => {
 })
 
 /**
- * `POST /projects/:projectId/export/google-docs?source=&baseline_id=&lang=` body `{ mode }` — contract #44. Cùng query,
- * quyền và file `.docx` với #18; file được upload lên Drive của user và chuyển sang Google Docs. Kiểm quyền + dựng file
- * TRƯỚC khi lấy client Google để lỗi quyền giống hệt #18 (Viewer xuất bản nháp ⇒ 403, không phải "cần kết nối Google").
+ * `POST /projects/:projectId/export/google-docs?source=&baseline_id=&lang=` body `{ mode, force? }` — contract #44. Cùng
+ * query, quyền và file `.docx` với #18; file được upload vào thư mục `FlintFlow / <dự án>` trên Drive của user và chuyển
+ * sang Google Docs. Kiểm quyền + dựng file TRƯỚC khi lấy client Google để lỗi quyền giống hệt #18 (Viewer xuất bản nháp
+ * ⇒ 403, không phải "cần kết nối Google"). Doc đã bị sửa trong Google Docs sau lần xuất trước ⇒ 409 GOOGLE_DOC_MODIFIED
+ * trừ khi `force`.
  */
 export const exportGoogleDocs = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
@@ -174,13 +178,16 @@ export const exportGoogleDocs = catchAsync(async (req: Request, res: Response) =
   const result = await exportToGoogleDocs({
     auth,
     projectId: req.params.projectId as string,
+    projectName: exported.projectName,
     userId,
     docx: exported.buffer,
     fileName: exported.fileName,
     source: exported.source,
     baselineId: exported.baselineId,
     lang: exported.documentLanguage,
-    mode: body.data.mode
+    spineVersion: exported.draftMeta?.assembled_at_version ?? null,
+    mode: body.data.mode,
+    force: body.data.force
   })
   return sendSuccess(res, 200, result)
 })
