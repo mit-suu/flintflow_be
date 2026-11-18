@@ -105,7 +105,7 @@ export const LOCALIZED_MAX_TOKENS_FACTOR = 2
 /** Đầu ra hỏng / bị cắt — khi khối "Document language" đang bật thì thử lại một lần không kèm khối. */
 /**
  * FLF-393: cấu hình cho lượt gọi lại khi đầu ra bị cắt — **gấp đôi tổng ngân sách đầu ra** thật gửi provider. Anthropic cộng
- * sẵn `ANTHROPIC_THINKING_HEADROOM_TOKENS` vào `maxTokens` (`anthropicMaxTokens`) nên tính trên tổng đó: elicit 2048 + 4096 =
+ * sẵn `ANTHROPIC_THINKING_HEADROOM_TOKENS` vào `maxTokens` (`anthropicMaxTokens`) nên tính trên tổng đó: maxTokens 2048 + 4096 =
  * 6144 ⇒ 12288. Provider khác: gấp đôi `maxTokens`.
  */
 export const widenedOutputConfig = (config: AiProviderConfig): AiProviderConfig => ({
