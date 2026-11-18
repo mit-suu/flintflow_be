@@ -15,6 +15,8 @@ export interface TokenPayload {
    * Chỉ cho biết người dùng ĐANG làm việc ở org nào — quyền vẫn do Membership trong DB quyết định.
    */
   orgId?: string
+  /** `Session._id` của phiên phát hành token; vắng mặt ở các helper test không tạo bản ghi `Session`. */
+  sid?: string
 }
 
 export const signAccessToken = (payload: TokenPayload): string => {

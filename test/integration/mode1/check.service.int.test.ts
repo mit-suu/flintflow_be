@@ -43,7 +43,7 @@ beforeEach(() => {
 
 const EXCLUDED = [...MODE1_RULE_PROFILE.exclude]
 
-describe("check — hồ sơ luật mode 1", () => {
+describe("check - hồ sơ luật mode 1", () => {
   it("luật loại trừ không bắn cờ dù Spine import có điều kiện kích hoạt; luật hạ mức chỉ ra vàng", async () => {
     const { projectId } = await importFinalized()
     const spine = (await spineRepository.get(projectId))!
@@ -63,7 +63,7 @@ describe("check — hồ sơ luật mode 1", () => {
   })
 })
 
-describe("check — AI semantic (1.11)", () => {
+describe("check - AI semantic (1.11)", () => {
   it("finding của AI chỉ ra cờ vàng rule import_semantic, section bịa ⇒ fixed:I; trừ credit một lô map + một lượt kiểm chéo", async () => {
     const { projectId, userId, result } = await importFinalized()
     expect(semanticCalls).toBe(1)
@@ -73,16 +73,16 @@ describe("check — AI semantic (1.11)", () => {
     expect(ai.every((f) => f.level === "yellow" && f.resolved_at === null && f.remediation_step === "C-1")).toBe(true)
     expect(ai.map((f) => f.section_id).sort()).toEqual(["fixed:4.2.3", "fixed:I"])
     // AI chỉ đặt cờ vàng; đầu mục FPT thiếu không còn là cờ đỏ
-    expect(result.flags.red).toBe(0)
-    expect(result.flags.yellow).toBe(spine.flags.filter((f) => f.resolved_at === null && f.level === "yellow").length)
+    expect(result.flags!.red).toBe(0)
+    expect(result.flags!.yellow).toBe(spine.flags.filter((f) => f.resolved_at === null && f.level === "yellow").length)
     // tài liệu mẫu ngắn ⇒ một lô map; thêm một lượt kiểm chéo
     const usage = await Usage.find({ projectId, step_id: /^I-1\.11/ }).sort({ step_id: 1 }).lean()
     expect(usage.map((u) => [u.step_id, u.state, u.call_kind])).toEqual([
       [semanticBatchStep(1), "deducted", "import_semantic_check"],
       [CROSS_CHECK_STEP, "deducted", "import_cross_check"]
     ])
-    // 6 lượt I-4 × 2 + 1 lô check × 3 + 1 lượt kiểm chéo × 3
-    expect(await CreditWallet.findOne({ userId }).lean()).toMatchObject({ balance: 982, reserved: 0 })
+    // 6 lượt I-4 + 1 lô check + 1 lượt kiểm chéo (mẫu ngắn ⇒ mỗi lượt quyết toán 1 credit theo token)
+    expect(await CreditWallet.findOne({ userId }).lean()).toMatchObject({ balance: 992, reserved: 0 })
   })
 
   it("cờ AI không bị recompute tất định đóng ở lượt sau", async () => {
@@ -101,7 +101,8 @@ describe("check — AI semantic (1.11)", () => {
     expect(fin.doc.status).toBe("checking")
     expect(fin.doc.paused?.reason).toBe("credits")
     expect(semanticCalls).toBe(0)
-    expect((await spineRepository.get(projectId))!.flags).toEqual([])
+    // chưa recompute / chưa cờ AI — chỉ có cờ "Cần xem" finalize đặt cho chỗ độ tin thấp (FLF-343)
+    expect((await spineRepository.get(projectId))!.flags.filter((f) => f.rule_id !== "import_needs_review")).toEqual([])
 
     await CreditWallet.updateOne({ userId }, { $set: { balance: 10 } })
     const doc = (await ImportedDocument.findById(importId))!

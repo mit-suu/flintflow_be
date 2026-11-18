@@ -29,16 +29,22 @@ import folderRoutes from "./modules/folder/folder.route.js"
 import organizationRoutes from "./modules/organization/organization.route.js"
 import invitationRoutes from "./modules/organization/invitation.route.js"
 import importRoutes from "./modules/import/import.route.js"
+import orgLibraryRoutes from "./modules/import/org-library.route.js"
+import templateMigrationRoutes from "./modules/template-migration/template-migration.route.js"
 import changeRequestRoutes from "./modules/change-request/change-request.route.js"
 import docVersionRoutes from "./modules/doc-version/doc-version.route.js"
 import translationRoutes from "./modules/translation/translation.route.js"
 import commentRoutes from "./modules/comment/comment.route.js"
+import googleRoutes from "./modules/google/google.route.js"
+import googleProjectRoutes from "./modules/google/google-project.route.js"
+import docsMcpRoutes from "./modules/google/docs-mcp/docs-mcp.route.js"
 import { sendSuccess } from "./shared/types/api-response.js"
 import { buildHealthReport } from "./config/health.js"
 import { authMiddleware } from "./shared/auth/auth.middleware.js"
 import { requireActiveAccount } from "./shared/auth/account-guard.middleware.js"
 import { orgContext } from "./shared/auth/org-context.middleware.js"
 import { viewerReadOnly } from "./shared/auth/viewer-read-only.middleware.js"
+import { viewerReadScope } from "./shared/auth/viewer-read-scope.middleware.js"
 
 // Câu lỗi mặc định của Zod sang tiếng Việt, đánh dấu issue không có câu do schema tự viết (FLF-247)
 installZodLocale()
@@ -126,7 +132,8 @@ app.get("/", (req, res) => {
 
 /**
  * `mongo: "error"` ⇒ 503 để load balancer rút instance ra khỏi vòng phục vụ.
- * `plantuml: "error"` chỉ là `degraded` ⇒ vẫn 200: diagram hỏng nhưng phần còn lại phục vụ được.
+ * `plantuml: "error"` / `gotenberg: "error"` chỉ là `degraded` ⇒ vẫn 200: diagram / xuất PDF hỏng nhưng phần
+ * còn lại phục vụ được.
  */
 app.get("/health", async (_req, res) => {
   const report = await buildHealthReport()
@@ -162,9 +169,13 @@ app.use(
   ...orgGuard,
   viewerReadOnly([
     new RegExp("^/[^/]+/assemble$"),
+    // Xuất Google Docs không sửa nội dung; như /export/word, Viewer chỉ xuất được bản baseline (kiểm ở controller)
+    new RegExp("^/[^/]+/export/google-docs$"),
     new RegExp("^/[^/]+/comments$"),
     new RegExp("^/[^/]+/comments/[^/]+/replies$")
-  ])
+  ]),
+  // Viewer chỉ đọc bản dành cho người xem (UC-47/50/51) — mọi GET khác 403
+  viewerReadScope()
 )
 app.use("/api/v1/folders", ...orgGuard, viewerReadOnly())
 
@@ -182,6 +193,8 @@ app.use("/api/v1/notifications", ...accountGuard)
 app.use("/api/v1/feedback", ...accountGuard)
 app.use("/api/v1/ai-actions", ...accountGuard)
 app.use("/api/v1/export", ...accountGuard)
+app.use("/api/v1/integrations", ...accountGuard)
+app.use("/api/v1/mcp", ...accountGuard)
 
 // API Routes
 app.use("/api/v1/auth", authRoutes)
@@ -200,17 +213,22 @@ app.use("/api/v1/projects", baselineRoutes)
 // POST /projects/word/preview và GET /projects/:projectId/export/word/export/word).
 app.use("/api/v1/projects", renderRoutes)
 app.use("/api/v1/projects", importRoutes)
+app.use("/api/v1/projects", templateMigrationRoutes)
 app.use("/api/v1/projects", changeRequestRoutes)
 app.use("/api/v1/projects", docVersionRoutes)
 app.use("/api/v1/projects", translationRoutes)
 app.use("/api/v1/projects", commentRoutes)
+app.use("/api/v1/projects", googleProjectRoutes)
+app.use("/api/v1/mcp/google-docs", docsMcpRoutes)
 app.use("/api/v1/notifications", notificationRoutes)
 app.use("/api/v1/billing", billingRoutes)
 app.use("/api/v1/feedback", feedbackRoutes)
 app.use("/api/v1/folders", folderRoutes)
 app.use("/api/v1/orgs", organizationRoutes)
+app.use("/api/v1/orgs", orgLibraryRoutes)
 app.use("/api/v1/invitations", invitationRoutes)
 app.use("/api/v1/export", exportRoutes)
+app.use("/api/v1/integrations/google", googleRoutes)
 
 // Không route nào khớp ⇒ 404 JSON (envelope chung), không phải trang HTML của Express
 app.use(notFoundHandler)

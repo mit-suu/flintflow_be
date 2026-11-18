@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest"
 import {
   confirmLatestRequestSchema,
   docBlockDtoSchema,
+  extractRequestSchema,
+  headingMapEntrySchema,
+  tableMapEntrySchema,
   fieldsPatchRequestSchema,
   finalizeRequestSchema,
   finalizeResponseSchema,
@@ -37,7 +40,7 @@ const sampleImport = () => ({
   updated_at: AT
 })
 
-describe("import.dto — request", () => {
+describe("import.dto - request", () => {
   it("confirm-latest cần import_id, không nhận field lạ", () => {
     expect(confirmLatestRequestSchema.safeParse({ import_id: IMPORT_ID }).success).toBe(true)
     expect(confirmLatestRequestSchema.safeParse({}).success).toBe(false)
@@ -81,7 +84,7 @@ describe("import.dto — request", () => {
   })
 })
 
-describe("import.dto — response", () => {
+describe("import.dto - response", () => {
   it("ImportedDocument hợp lệ; sha256 phải 64 ký tự; status phải thuộc máy trạng thái", () => {
     expect(importedDocumentDtoSchema.safeParse(sampleImport()).success).toBe(true)
     expect(importedDocumentDtoSchema.safeParse({ ...sampleImport(), sha256: "abc" }).success).toBe(false)
@@ -136,36 +139,34 @@ describe("import.dto — response", () => {
     expect(docBlockDtoSchema.safeParse({ ...block, kind: "textbox" }).success).toBe(false)
   })
 
-  it("finalize trả baseline type imported, doc_version 0.0", () => {
+  it("finalize trả baseline type imported, doc_version 0.1", () => {
     const res = {
       import: { ...sampleImport(), status: "checking" },
-      doc_version: "0.0",
-      baseline: { id: "BL001", version: "0.0", type: "imported", doc_version: "0.0", at: AT, snapshot_ref: "66f000000000000000000009", checked_at_version: 4, waived_count: 0 },
+      doc_version: "0.1",
+      baseline: { id: "BL001", version: "0.1", type: "imported", doc_version: "0.1", at: AT, snapshot_ref: "66f000000000000000000009", checked_at_version: 4, waived_count: 0 },
       spine_version: 4,
       flags: { red: 2, yellow: 7 }
     }
     const parsed = finalizeResponseSchema.parse(res)
     expect(parsed.baseline?.type).toBe("imported")
-    expect(finalizeResponseSchema.safeParse({ ...res, doc_version: "0.1" }).success).toBe(false)
+    expect(finalizeResponseSchema.safeParse({ ...res, doc_version: "0.0" }).success).toBe(true) // project cũ ở 0.0 vẫn hợp lệ
+    expect(finalizeResponseSchema.safeParse({ ...res, doc_version: "v0.1" }).success).toBe(false)
   })
 
   it("finalize chạy nền: trả ngay import baselining, baseline + flags null", () => {
-    const res = { import: { ...sampleImport(), status: "baselining" }, doc_version: "0.0", baseline: null, spine_version: 3, flags: null }
+    const res = { import: { ...sampleImport(), status: "baselining" }, doc_version: "0.1", baseline: null, spine_version: 3, flags: null }
     expect(finalizeResponseSchema.parse(res)).toMatchObject({ baseline: null, flags: null, import: { status: "baselining" } })
   })
 
   it("gap report và re-upload diff", () => {
     const report = {
       project_id: PROJECT_ID,
-      doc_version: "0.0",
+      doc_version: "0.1",
       generated_at: AT,
-      totals: { red: 0, yellow: 1, missing_sections: 1, unmapped_headings: 1, low_confidence_fields: 0, missing_fpt_sections: 1, unrendered_diagrams: 0 },
-      missing_fpt_sections: [{ section_id: "fixed:5.1", title: "Business Rules", step_id: "S-7.1", in_layout: false }],
-      layout: [{ order: 0, section_id: "custom:CS01", heading: "Phụ lục B — Biên bản họp", level: 1, kind: "custom", red: 0, yellow: 0 }],
+      totals: { red: 0, yellow: 1, low_confidence_fields: 0, unrendered_diagrams: 0 },
+      layout: [{ order: 0, section_id: "custom:CS01", heading: "Phụ lục B - Biên bản họp", level: 1, kind: "custom", red: 0, yellow: 0 }],
       sections: [],
       unrendered_diagrams: [],
-      missing_sections: [{ section_id: "fixed:5.3", title: "Application Messages List" }],
-      unmapped_headings: [{ block_id: "B0100", text: "Phụ lục B — Biên bản họp" }],
       low_confidence_fields: []
     }
     expect(gapReportSchema.safeParse(report).success).toBe(true)
@@ -181,8 +182,8 @@ describe("import.dto — response", () => {
   })
 })
 
-describe("mode 1 v2 — layout + step-plan (FLF-182, contract-change)", () => {
-  const profile = { doc_version: "0.0", heading_map: [], table_map: [], required_sections: [], language: "en" }
+describe("mode 1 v2 - layout + step-plan (FLF-182, contract-change)", () => {
+  const profile = { doc_version: "0.1", heading_map: [], table_map: [], language: "en" }
 
   it("profile cũ không có layout ⇒ []; layout mang section FPT hoặc custom:<id>", () => {
     expect(templateProfileDtoSchema.parse(profile).layout).toEqual([])
@@ -194,10 +195,10 @@ describe("mode 1 v2 — layout + step-plan (FLF-182, contract-change)", () => {
     expect(templateProfileDtoSchema.safeParse({ ...profile, layout: [{ ...layout[0], level: 0 }] }).success).toBe(false)
   })
 
-  it("step-plan: state applied | hidden | enabled, missing đánh dấu đầu mục FPT bị thiếu", () => {
+  it("step-plan: state applied | hidden | enabled", () => {
     const steps = [
-      { step_id: "S-7.1", state: "applied", missing: true, section_ids: ["fixed:5.1"], reason: "Đầu mục mẫu FPT — file không có" },
-      { step_id: "B-0.1", state: "hidden", missing: false, section_ids: [], reason: "Không sinh đầu mục" }
+      { step_id: "S-7.1", state: "hidden", section_ids: ["fixed:5.1"], reason: "File không có đầu mục này - bật nếu muốn AI soạn thêm" },
+      { step_id: "B-0.1", state: "hidden", section_ids: [], reason: "Không sinh đầu mục" }
     ]
     expect(stepPlanResponseSchema.parse({ steps }).steps).toHaveLength(2)
     expect(stepPlanResponseSchema.safeParse({ steps: [{ ...steps[0], state: "suggested" }] }).success).toBe(false)
@@ -221,5 +222,23 @@ describe("mode1.errors", () => {
     expect(MODE1_ERROR_STATUS.CR_SOURCE_REQUIRED).toBe(400)
     expect(MODE1_ERROR_STATUS.RELEASE_RED_FLAGS_OPEN).toBe(422)
     expect(mode1ErrorCodeSchema.options).toHaveLength(Object.keys(MODE1_ERROR_STATUS).length)
+  })
+})
+
+describe("FLF-343 - import một mạch", () => {
+  it("POST /import/extract nhận confirm_latest (tuỳ chọn); khoá lạ ⇒ lỗi", () => {
+    expect(extractRequestSchema.parse({ import_id: "i1" })).toEqual({ import_id: "i1" })
+    expect(extractRequestSchema.parse({ import_id: "i1", confirm_latest: true })).toEqual({ import_id: "i1", confirm_latest: true })
+    expect(extractRequestSchema.safeParse({ import_id: "i1", confirm: true }).success).toBe(false)
+  })
+
+  it("credit_estimate có check_calls; heading_map / table_map có auto_confirmed; detector mới (toc, numbering, format)", () => {
+    const empty = { import: null, profile: null, extraction: { sections: [], review_fields: [] }, blocks_count: 0 }
+    const estimate = { text_batches: 8, diagram_images: 1, check_calls: 3, ai_calls: 12, credits: 27, available_credits: 300 }
+    expect(getImportResponseSchema.safeParse({ ...empty, credit_estimate: estimate }).success).toBe(true)
+    for (const detected_by of ["toc", "numbering", "format"]) {
+      expect(headingMapEntrySchema.safeParse({ block_id: "B0001", heading_text: "Actors", section_id: "fixed:2.1", confidence: 0.75, detected_by, confirmed: true, auto_confirmed: true }).success, detected_by).toBe(true)
+    }
+    expect(tableMapEntrySchema.safeParse({ block_id: "B0001", column_index: 0, header: "ID", field_path: "use_cases[].id", confidence: 0.6, confirmed: true, auto_confirmed: true }).success).toBe(true)
   })
 })

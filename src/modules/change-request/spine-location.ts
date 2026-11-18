@@ -9,12 +9,15 @@
  *   sửa ở chỗ khác kể từ lúc đề xuất (thay "old text khớp block" của bản theo block).
  */
 
+import { createHash } from "node:crypto"
+import { Bm25, reciprocalRankFusion } from "../../shared/search/bm25.js"
 import { sectionHasData } from "../spine/deterministic-check.js"
-import { ORIGINAL_DIAGRAM_DATA, ORIGINAL_DIAGRAM_SECTION, originalDiagramOf } from "../spine/original-diagram.js"
+import { ORIGINAL_DIAGRAM_DATA, OWNER_COLLECTION, OWNER_DIAGRAM_KINDS, originalDiagramOf, originalSectionOf } from "../spine/original-diagram.js"
 import { impactOf } from "../spine/impact.service.js"
 import { ownerStepOf, sectionsOfPath } from "../spine/section-registry.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { LocationFoundBy } from "./change-request.constants.js"
+import { contentSlot } from "../import/content-slots.js"
 
 /** Trần số vị trí một CR — CR chạm quá nhiều chỗ nên tách nhỏ. */
 export const MAX_LOCATIONS = 80
@@ -39,7 +42,10 @@ export const LOCATION_ARRAYS = [
   "glossary",
   /** Mode 1 v3: cờ đỏ `unconfirmed_assumption` chỉ đóng được bằng CR (không còn S-9.2) ⇒ giả định phải làm được vị trí. */
   "assumptions",
-  "custom_sections"
+  "custom_sections",
+  // FLF-365: mục IEEE 29148 (Mode 1)
+  "references",
+  "verifications"
 ] as const
 
 const ELEMENT = /^(\w+)\[id=([^\]]+)\]/
@@ -100,6 +106,22 @@ export const SECTION_FIELD_ARRAYS: Readonly<Record<string, string>> = {
   "fixed:3.1.1": "screens"
 }
 
+/**
+ * Đích là **phần nhỏ của mẫu** (`slot:business_rules`, FLF-278 — mẫu cố định đặt tên mục khác mẫu FPT): không phải mục Spine
+ * ⇒ đổi sang mục FPT cha (`fixed:5.1`) hoặc, phần nhỏ không có cha, sang mảng dữ liệu của nó (`functions[]`, `project`).
+ * Trước đây đích `slot:*` bị bỏ im lặng ⇒ CR nhắm mục mẫu trống ra 0 vị trí.
+ */
+export const expandSlotTargets = (targets: readonly string[]): string[] => [
+  ...new Set(
+    targets.flatMap((t) => {
+      const slot = t.startsWith("slot:") ? contentSlot(t) : undefined
+      if (!slot) return [t]
+      if (slot.parents.length) return [...slot.parents]
+      return slot.targets.map((target) => (target === PROJECT_PATH ? PROJECT_PATH : `${target}[]`))
+    })
+  )
+]
+
 /** Path thêm mới cho một section đang trống (`fixed:5.1` ⇒ `business_rules[]`); section không đổ được ⇒ []. */
 export const fillPathsOfSection = (sectionId: string): string[] => (SECTION_FILL_ARRAYS[sectionId] ?? []).map((arr) => `${arr}[]`)
 
@@ -135,6 +157,36 @@ const sortKeys = (value: unknown): unknown => {
 /** Chuỗi ổn định (khoá sắp xếp) của giá trị — hiển thị cho người duyệt và so ở C-5. Phần tử không còn ⇒ "". */
 export const valueText = (value: unknown): string => (value === undefined ? "" : JSON.stringify(sortKeys(value), null, 2))
 
+/** sha256 hex — `base_hash` của vị trí "thêm mới". */
+export const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex")
+
+/**
+ * Chụp giá trị lúc đề xuất (FLF-308). Vị trí phần tử: `old_text` = giá trị phần tử. Vị trí "thêm mới" (`arr[]`): chép cả
+ * mảng làm request CR nặng hàng trăm KB (`functions[]` 111 KB) mà người duyệt chỉ cần phần tử thêm ⇒ `old_text = "[]"`,
+ * còn mảng lúc đề xuất giữ bằng `base_hash` để C-5/C-7 vẫn biết có ai sửa mảng ở chỗ khác không.
+ */
+export const snapshotOf = (spine: Spine, path: string): { old_text: string; base_hash: string | null } =>
+  isArrayPath(path) ? { old_text: "[]", base_hash: sha256(valueText(elementValue(spine, path))) } : { old_text: valueText(elementValue(spine, path)), base_hash: null }
+
+/** Giá trị tại `path` chưa đổi kể từ lúc chụp (`snapshotOf`); bản ghi cũ (không có `base_hash`) so `old_text`. */
+export const unchangedSince = (spine: Spine, path: string, proposal: { old_text: string; base_hash?: string | null }): boolean => {
+  const current = valueText(elementValue(spine, path))
+  return proposal.base_hash ? sha256(current) === proposal.base_hash : current === proposal.old_text
+}
+
+/** Giá trị hiện tại gửi FE (`current_text`): vị trí "thêm mới" ⇒ `"[]"` — phần tử có sẵn là các vị trí riêng. */
+export const currentText = (spine: Spine, path: string): string => (isArrayPath(path) ? "[]" : valueText(elementValue(spine, path)))
+
+/** Phần tử của `after` không có trong `before` (khớp theo `id`, phần tử không id thì theo giá trị) — vị trí `arr[]` sau op. */
+export const addedElements = (before: unknown, after: unknown): unknown[] => {
+  const prev = Array.isArray(before) ? before : []
+  const ids = new Set(prev.flatMap((el) => (el && typeof el === "object" && "id" in el ? [String((el as Row).id)] : [])))
+  const texts = new Set(prev.map(valueText))
+  return (Array.isArray(after) ? after : []).filter((el) =>
+    el && typeof el === "object" && "id" in el ? !ids.has(String((el as Row).id)) : !texts.has(valueText(el))
+  )
+}
+
 /** Mọi chuỗi trong giá trị, nối lại — để tìm từ khoá / mã / tên. */
 const textOf = (value: unknown): string => {
   if (typeof value === "string") return value
@@ -145,6 +197,35 @@ const textOf = (value: unknown): string => {
 
 const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 const wordPattern = (s: string): RegExp => new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegex(s)}(?![\\p{L}\\p{N}])`, "iu")
+
+/** Tỉ lệ điểm BM25 tối thiểu so với phần tử khớp nhất, và số phần tử tối đa lấy theo từ khoá (FLF-375). */
+export const KEYWORD_MIN_RATIO = 0.35
+export const KEYWORD_MAX_HITS = 15
+
+/**
+ * FLF-375: phần tử Spine xếp theo BM25 của từ khoá C-2 (`shared/search/bm25.ts` — tách âm tiết Việt, bỏ dấu, giữ mã).
+ * Mỗi từ khoá là một ý riêng ⇒ chấm **theo từng từ khoá**: giữ phần tử có điểm ≥ `KEYWORD_MIN_RATIO` × điểm cao nhất của
+ * chính từ khoá đó (phần tử chỉ khớp một ý không bị ý khác lấn át), hợp lại theo điểm chuẩn hoá, tối đa `KEYWORD_MAX_HITS`.
+ */
+export const rankByKeywords = (elements: readonly { path: string; value: unknown }[], keywords: readonly string[]): { path: string; score: number }[] => {
+  const terms = [...new Set(keywords.map((k) => k.trim()).filter((k) => k.length >= 2))]
+  if (!terms.length) return []
+  const index = new Bm25(elements, (e) => textOf(e.value))
+  const best = new Map<string, number>()
+  for (const term of terms) {
+    const hits = index.search(term)
+    const top = hits[0]?.score ?? 0
+    for (const h of hits) {
+      if (h.score < top * KEYWORD_MIN_RATIO) continue
+      const norm = top ? h.score / top : 0
+      best.set(h.item.path, Math.max(best.get(h.item.path) ?? 0, norm))
+    }
+  }
+  return [...best.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, KEYWORD_MAX_HITS)
+    .map(([path, score]) => ({ path, score }))
+}
 
 /** Section chứa phần tử (ưu tiên section sở hữu). Không ra section ⇒ `misc`. */
 export const sectionOfElement = (spine: Spine, path: string): string => {
@@ -173,6 +254,10 @@ export interface FoundLocation {
   owner_step: string | null
   /** Chỉ có khi `found_by` chứa `vector`: điểm gần nghĩa (0..1). */
   vector_score?: number
+  /** FLF-375: chỉ có khi `found_by` chứa `keyword` — điểm BM25 của phần tử theo từ khoá. */
+  keyword_score?: number
+  /** FLF-375: điểm trộn RRF (BM25 + vector) của vị trí tìm theo từ khoá / nghĩa — thứ tự giữ lại khi phải cắt. */
+  recall_score?: number
 }
 
 /** Ứng viên từ Atlas Vector Search: path phần tử + điểm. Path không còn trong Spine bị bỏ. */
@@ -189,11 +274,11 @@ const isRecallOnly = (f: Pick<FoundLocation, "found_by">): boolean => f.found_by
  * Có ⇒ ưu tiên vị trí đồ thị (không bị ứng viên vector đẩy ra), chỗ còn lại cho ứng viên vector điểm cao nhất.
  */
 export const capLocations = (found: readonly FoundLocation[], room: number): FoundLocation[] => {
-  if (!found.some((f) => f.found_by.includes("vector"))) return found.slice(0, room)
+  if (!found.some((f) => f.found_by.includes("vector") || f.recall_score !== undefined)) return found.slice(0, room)
   const graph = found.filter((f) => !isRecallOnly(f))
   const recall = found
     .filter(isRecallOnly)
-    .sort((a, b) => (b.vector_score ?? 0) - (a.vector_score ?? 0))
+    .sort((a, b) => (b.recall_score ?? b.vector_score ?? 0) - (a.recall_score ?? a.vector_score ?? 0))
     .slice(0, Math.max(0, room - graph.length))
   const keep = new Set([...graph.slice(0, room), ...recall].map((f) => f.path))
   return found.filter((f) => keep.has(f.path))
@@ -209,6 +294,7 @@ export const findSpineLocations = (
   keywords: readonly string[],
   vector: readonly VectorCandidate[] = []
 ): FoundLocation[] => {
+  targets = expandSlotTargets(targets)
   const elements = listElements(spine)
   const exists = new Set(elements.map((e) => e.path))
   const hits = new Map<string, { found_by: Set<LocationFoundBy>; entity_paths: Set<string> }>()
@@ -256,20 +342,21 @@ export const findSpineLocations = (
     }
   }
 
-  const patterns = keywords
-    .map((k) => k.trim())
-    .filter((k) => k.length >= 3)
-    .map(wordPattern)
+  // FLF-375: từ khoá xếp hạng bằng BM25 (thay regex có / không) — chỉ giữ phần tử điểm đủ cao so với phần tử khớp nhất,
+  // bớt chỗ "không liên quan" AI phải đọc; có vector thì KHÔNG bỏ từ khoá nữa mà trộn hai nguồn bằng RRF
+  const keywordRanked = rankByKeywords(elements, keywords)
+  const keywordScores = new Map(keywordRanked.map((r) => [r.path, r.score]))
+  for (const r of keywordRanked) hit(r.path, "keyword")
   const scores = new Map<string, number>()
-  if (vector.length) {
-    for (const v of vector) {
-      if (!exists.has(v.ref)) continue
-      hit(v.ref, "vector")
-      scores.set(v.ref, Math.max(scores.get(v.ref) ?? 0, v.score))
-    }
-  } else {
-    for (const e of elements) if (patterns.some((re) => re.test(textOf(e.value)))) hit(e.path, "keyword")
+  for (const v of vector) {
+    if (!exists.has(v.ref)) continue
+    hit(v.ref, "vector")
+    scores.set(v.ref, Math.max(scores.get(v.ref) ?? 0, v.score))
   }
+  const fused = reciprocalRankFusion([
+    keywordRanked.map((r) => r.path),
+    [...scores.entries()].sort((a, b) => b[1] - a[1]).map(([path]) => path)
+  ])
 
   const found: FoundLocation[] = elements
     .filter((e) => hits.has(e.path))
@@ -282,7 +369,9 @@ export const findSpineLocations = (
         found_by: [...h.found_by],
         entity_paths: [...h.entity_paths],
         owner_step: section_id === "misc" || section_id.startsWith("custom:") ? null : ownerStepOf(section_id, spine),
-        ...(scores.has(e.path) ? { vector_score: scores.get(e.path)! } : {})
+        ...(scores.has(e.path) ? { vector_score: scores.get(e.path)! } : {}),
+        ...(keywordScores.has(e.path) ? { keyword_score: keywordScores.get(e.path)! } : {}),
+        ...(fused.has(e.path) ? { recall_score: fused.get(e.path)! } : {})
       }
     })
 
@@ -348,18 +437,35 @@ export const originalDiagramLocations = (spine: Spine, targets: readonly string[
   const touched = new Set(found.map((f) => arrayKeyOf(f.path)).filter((k): k is string => !!k))
   const out: FoundLocation[] = []
   for (const c of spine.custom_sections) {
-    const kinds = [...new Set(c.blocks.map(originalDiagramOf).flatMap((d) => (d ? [d.kind] : [])))]
-    if (!kinds.length) continue
+    const diagrams = c.blocks.map(originalDiagramOf).flatMap((d) => (d ? [d] : []))
+    if (!diagrams.length) continue
     const path = `custom_sections[id=${c.id}]`
-    const hit = kinds.filter(
-      (k) =>
-        ORIGINAL_DIAGRAM_DATA[k].some((a) => touched.has(a)) ||
-        targets.includes(ORIGINAL_DIAGRAM_SECTION[k]) ||
-        targets.includes(`custom:${c.id}`) ||
-        targets.some((t) => elementPathOf(t) === path)
+    // FLF-390: sơ đồ gắn phần tử ⇒ dữ liệu của hình là chính chủ đó (function / use case) và actor, không phải cả mảng
+    const touches = (d: (typeof diagrams)[number]) =>
+      OWNER_DIAGRAM_KINDS.has(d.kind)
+        ? found.some((f) => f.path.startsWith(`${OWNER_COLLECTION[d.kind]}[id=${d.owner_id}]`)) || touched.has("actors")
+        : ORIGINAL_DIAGRAM_DATA[d.kind].some((a) => touched.has(a))
+    const hit = diagrams.filter(
+      (d) => touches(d) || targets.includes(originalSectionOf(d)) || targets.includes(`custom:${c.id}`) || targets.some((t) => elementPathOf(t) === path)
     )
     if (!hit.length) continue
-    out.push({ path, section_id: sectionOfElement(spine, path), found_by: ["diagram"], entity_paths: hit.map((k) => ORIGINAL_DIAGRAM_SECTION[k]), owner_step: null })
+    out.push({ path, section_id: sectionOfElement(spine, path), found_by: ["diagram"], entity_paths: [...new Set(hit.map(originalSectionOf))], owner_step: null })
+  }
+  return out
+}
+
+/**
+ * FLF-375: vị trí của lô thêm / xoá use case đã duyệt trong chat (FLF-318) cũng phải kèm sơ đồ gốc mà lô làm lệch —
+ * trước đây nhánh này bỏ qua ⇒ thêm use case xong, sơ đồ use case / luồng màn của file vẫn là hình cũ.
+ */
+export const withOriginalDiagrams = (spine: Spine, targets: readonly string[], found: FoundLocation[]): FoundLocation[] => {
+  const out = found.map((f) => ({ ...f }))
+  for (const d of originalDiagramLocations(spine, targets, found)) {
+    const same = out.find((f) => f.path === d.path)
+    if (same) {
+      same.found_by = [...new Set([...same.found_by, ...d.found_by])]
+      same.entity_paths = [...new Set([...same.entity_paths, ...d.entity_paths])]
+    } else out.push(d)
   }
   return out
 }
@@ -388,7 +494,48 @@ const emptySections = (spine: Spine, targets: readonly string[]): string[] => {
  * `project`, `fixed:3.1.1` là field của màn có sẵn). Đây mới là ca phải chạy step soạn nội dung thay vì mở CR.
  */
 export const emptySectionTargets = (spine: Spine, targets: readonly string[]): string[] =>
-  emptySections(spine, targets).filter((s) => fillPathsOfSection(s).length === 0)
+  emptySections(spine, expandSlotTargets(targets)).filter((s) => fillPathsOfSection(s).length === 0)
 
 /** Phần tử mà op chạm tới (để đòi khoá): `actors[id=A01].name` ⇒ `actors[id=A01]`; `actors[]` (thêm mới) ⇒ null. */
 export const opElement = (opPath: string): string | null => elementPathOf(opPath)
+
+/**
+ * P08 (upload U2-7): CR "đổi tên hệ thống thành X" / "rename the system to X" — nhận dạng tất định trên câu của người yêu
+ * cầu. Trả tên mới; không phải lệnh đổi tên hệ thống ⇒ `null`. Chỉ một câu lệnh đổi tên đứng riêng (không kèm yêu cầu khác
+ * sau dấu chấm / "và") mới tính, để CR nhiều việc vẫn tìm vị trí như thường.
+ */
+const SYSTEM_RENAME = [
+  /(?:đổi|thay|sửa)\s+tên\s+(?:của\s+)?(?:hệ\s+thống|ứng\s+dụng|app|sản\s+phẩm|phần\s+mềm)(?:\s+[^\s,.;:]+)?\s+(?:thành|sang|là)\s+["“'‘]?([^"”'’\n]+?)["”'’]?\s*[.!]?\s*$/iu,
+  /rename\s+(?:the\s+)?(?:system|app|application|product)(?:\s+[^\s,.;:]+)?\s+(?:to|as)\s+["“'‘]?([^"”'’\n]+?)["”'’]?\s*[.!]?\s*$/iu
+]
+
+export const systemRenameTarget = (text: string): string | null => {
+  for (const line of text.split(/\n/).map((l) => l.trim()).filter(Boolean)) {
+    for (const re of SYSTEM_RENAME) {
+      const name = re.exec(line)?.[1]?.trim()
+      if (name && name.length >= 2 && !/\s(?:và|and)\s/iu.test(name)) return name
+    }
+  }
+  return null
+}
+
+/**
+ * Vị trí của CR đổi tên hệ thống: phần tử `project` (field `system_name`) + phần tử có nhắc nguyên tên hệ thống hiện tại.
+ * Không dò theo từ khoá / nghĩa — tên hệ thống không dính "Product Catalog", "MSG-17"… (trước đây 19 phần liên quan).
+ */
+export const systemRenameLocations = (spine: Spine, currentName: string): FoundLocation[] => {
+  const name = currentName.trim()
+  const re = name.length >= 2 ? wordPattern(name) : null
+  return listElements(spine)
+    .filter((e) => e.path === PROJECT_PATH || (re !== null && re.test(textOf(e.value))))
+    .map((e) => {
+      const section_id = sectionOfElement(spine, e.path)
+      return {
+        path: e.path,
+        section_id,
+        found_by: [e.path === PROJECT_PATH ? ("spine_link" as const) : ("mention" as const)],
+        entity_paths: [PROJECT_PATH],
+        owner_step: section_id === "misc" || section_id.startsWith("custom:") ? null : ownerStepOf(section_id, spine)
+      }
+    })
+}

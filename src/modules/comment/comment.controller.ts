@@ -2,7 +2,7 @@ import { Request, Response } from "express"
 import mongoose from "mongoose"
 import { z } from "zod"
 import * as commentService from "./comment.service.js"
-import { commentParamsSchema, createCommentSchema, listCommentsQuerySchema, replyCommentSchema } from "../pipeline/pipeline.dto.js"
+import { commentParamsSchema, createCommentSchema, listCommentsQuerySchema, replyCommentSchema, resolveCommentSchema } from "../pipeline/pipeline.dto.js"
 import { getProjectById } from "../project/project.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
@@ -51,5 +51,6 @@ export const replyComment = catchAsync(async (req: Request, res: Response) => {
 export const resolveComment = catchAsync(async (req: Request, res: Response) => {
   const actor = await authorize(req)
   const { commentId } = parse(commentParamsSchema, req.params)
-  return sendSuccess(res, 200, await commentService.resolveComment(actor, commentId))
+  const resolution = parse(resolveCommentSchema, req.body)
+  return sendSuccess(res, 200, await commentService.resolveComment(actor, commentId, resolution))
 })

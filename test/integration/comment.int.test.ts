@@ -49,11 +49,35 @@ const firstSection = async (c: ReturnType<typeof api>, query = "") => {
   return section!
 }
 
-describe("UC-49 — comment trên bản nháp (mode 2)", () => {
+describe("UC-49 - comment trên bản nháp (mode 2)", () => {
   let seeded: SeededFixture
   let lead: ReturnType<typeof api>
   let analyst: { userId: string; c: ReturnType<typeof api> }
   let viewer: ReturnType<typeof api>
+
+  it("FLF-271 (UC-40): comment mang step_ids của bước sở hữu; sửa qua /changes kèm comment_id ⇒ comment tự fixed, meta.resolved_comment_id; comment đã đóng ⇒ lượt áp vẫn chạy, không đóng lại", async () => {
+    // Dự án đủ dữ liệu (có actor A01) để lượt sửa thật sự đổi nội dung
+    const full = await seedFixture("full")
+    const c = api(full.projectId, full.token)
+    const section = await firstSection(c)
+    const created = await c.post("/comments", { version: { source: "draft" }, anchor: { section_id: section.id }, text: "Tên actor chưa đúng vai trò" })
+    expect(created.status, JSON.stringify(created.body.error)).toBe(201)
+    expect(Array.isArray(created.body.data.step_ids)).toBe(true)
+    const commentId = created.body.data.comment_id as string
+
+    const version = (await c.get("/spine")).body.data.spine_version as number
+    const applied = await c.post("/changes", { base_version: version, ops: [{ op: "set", path: "actors[id=A01].name", value: "Product Owner", reason: "sửa theo góp ý" }], comment_id: commentId })
+    expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
+    expect(applied.body.meta.resolved_comment_id).toBe(commentId)
+    const after = (await c.get("/comments?status=all")).body.data.find((c: { comment_id: string }) => c.comment_id === commentId)
+    expect(after).toMatchObject({ status: "resolved", resolution: { kind: "fixed", reason: null } })
+
+    // Đóng comment mở lại bước sở hữu (op riêng) ⇒ đọc lại version
+    const again = await c.post("/changes", { base_version: (await c.get("/spine")).body.data.spine_version, ops: [{ op: "set", path: "actors[id=A01].name", value: "Owner", reason: "sửa tiếp" }], comment_id: commentId })
+    expect(again.status).toBe(200)
+    expect(again.body.meta.resolved_comment_id).toBeUndefined()
+    expect((await c.post("/changes", { base_version: again.body.data.spine_version, ops: [{ op: "set", path: "actors[id=A01].name", value: "X", reason: "r" }], comment_id: "bad" })).status).toBe(400)
+  })
 
   beforeEach(async () => {
     seeded = await seedFixture("minimal")
@@ -130,21 +154,32 @@ describe("UC-49 — comment trên bản nháp (mode 2)", () => {
     expect(reply.status, JSON.stringify(reply.body.error)).toBe(201)
     expect(reply.body.data.replies).toMatchObject([{ author_role: "viewer", text: "Tôi cũng thắc mắc", author: { name: "viewer" } }])
 
-    const viewerResolve = await viewer.post("/comments/CM-001/resolve")
+    const viewerResolve = await viewer.post("/comments/CM-001/resolve", { kind: "fixed" })
     expect(viewerResolve.status).toBe(403)
     expect(viewerResolve.body.error.code).toBe("ORG_ROLE_FORBIDDEN")
 
-    const resolved = await analyst.c.post("/comments/CM-001/resolve")
+    // §3.5: giữ nguyên thì PHẢI nêu lý do — Lead duyệt lại đọc lý do đó, nên không nhận chuỗi rỗng
+    for (const body of [{ kind: "kept" }, { kind: "kept", reason: "ok" }]) {
+      const bad = await analyst.c.post("/comments/CM-001/resolve", body)
+      expect(bad.status, JSON.stringify(body)).toBe(400)
+      expect(bad.body.error.code).toBe("VALIDATION_ERROR")
+    }
+
+    const resolved = await analyst.c.post("/comments/CM-001/resolve", { kind: "fixed" })
     expect(resolved.status).toBe(200)
     expect(commentSchema.safeParse(resolved.body.data).error).toBeUndefined()
-    expect(resolved.body.data).toMatchObject({ status: "resolved", handled_by: { name: "analyst" } })
+    expect(resolved.body.data).toMatchObject({
+      status: "resolved",
+      handled_by: { name: "analyst" },
+      resolution: { kind: "fixed", reason: null }
+    })
 
     expect((await viewer.get("/comments")).body.data).toEqual([])
     const all = await viewer.get("/comments?status=all")
     expect(commentsResponseSchema.safeParse(all.body.data).error).toBeUndefined()
     expect(all.body.data.map((c: { comment_id: string }) => c.comment_id)).toEqual(["CM-001"])
 
-    const again = await lead.post("/comments/CM-001/resolve")
+    const again = await lead.post("/comments/CM-001/resolve", { kind: "fixed" })
     expect(again.status).toBe(409)
     expect(again.body.error.code).toBe("COMMENT_NOT_OPEN")
 
@@ -176,13 +211,18 @@ describe("UC-49 — comment trên bản nháp (mode 2)", () => {
     expect(String(note?.organizationId)).toBe(seeded.orgId)
 
     // Analyst Resolve comment của Lead ⇒ báo Lead
-    await analyst.c.post("/comments/CM-001/resolve")
+    await analyst.c.post("/comments/CM-001/resolve", { kind: "fixed" })
     expect(await recipients("comment_resolved")).toEqual([seeded.userId])
 
     // Lead tự Resolve comment của mình ⇒ không báo ai
     await lead.post("/comments", { version: { source: "draft" }, anchor: { section_id: section.id }, text: "Tự ghi chú" })
     await Notification.deleteMany({})
-    expect((await lead.post("/comments/CM-002/resolve")).status).toBe(200)
+    const kept = await lead.post("/comments/CM-002/resolve", {
+      kind: "kept",
+      reason: "Khách xác nhận giữ nguyên cách gọi này trong hợp đồng."
+    })
+    expect(kept.status, JSON.stringify(kept.body.error)).toBe(200)
+    expect(kept.body.data.resolution).toMatchObject({ kind: "kept", reason: expect.stringContaining("Khách xác nhận") })
     expect(await recipients("comment_resolved")).toEqual([])
   })
 
@@ -193,17 +233,15 @@ describe("UC-49 — comment trên bản nháp (mode 2)", () => {
   })
 })
 
-describe("UC-49 — Viewer comment trên baseline, Analyst chuyển thành change request (mode 1)", () => {
+describe("UC-49 - Viewer comment trên baseline, Analyst chuyển thành change request (mode 1)", () => {
   it("Viewer ghim trên 0.0 ⇒ Analyst tạo CR từ comment ⇒ comment converted + báo tác giả; chuyển lần hai ⇒ 409", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)
     const c = mode1Api(seeded, projectId)
     const id = (await c.upload(await makeSrsDocx())).body.data.import.id as string
-    await c.post("/import/confirm-latest", { import_id: id })
-    await c.extractAndWait(id)
-    await c.patch("/import/fields", { import_id: id, confirm_all: true })
-    const fin = await c.finalizeAndWait(id)
+    const fin = await c.extractAndWait(id)
     expect(fin.res.status, JSON.stringify(fin.res.body.error)).toBe(200)
+    expect(fin.run?.import.status).toBe("gap_review")
 
     const viewerUser = await join(seeded, "viewer@flintflow.test", "viewer")
     const viewer = api(projectId, viewerUser.token)

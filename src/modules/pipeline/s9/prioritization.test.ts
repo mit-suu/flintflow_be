@@ -34,7 +34,7 @@ const db = vi.hoisted(() => {
         return copy(doc)
       }
       if (!options.upsert) return null
-      const created = { _id: "spine", ...filter, ...copy(update.$setOnInsert ?? {}) }
+      const created = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, ...filter, ...copy(update.$setOnInsert ?? {}) }
       spines.push(created)
       return copy(created)
     }
@@ -121,7 +121,7 @@ const seed = async (mutate: (spine: Spine) => void = () => {}): Promise<Spine> =
   const spine = structuredClone(FIXTURE)
   mutate(spine)
   await repo.getOrCreate(PROJECT)
-  db.spines[0] = { _id: "spine", projectId: PROJECT, ...spine }
+  db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...spine }
   return spine
 }
 
@@ -146,7 +146,7 @@ const executorFor = (ops: OpTransaction["ops"], seen: { prompt?: Record<string, 
 
 beforeEach(() => db.reset())
 
-describe("scopeWarnings — Won't-have không tự đổi release_scope", () => {
+describe("scopeWarnings - Won't-have không tự đổi release_scope", () => {
   it("Won't-have mà release_scope.out không nhắc tới ⇒ cảnh báo", () => {
     const spine = structuredClone(FIXTURE)
     spine.project.release_scope = { in: [], out: [] }
@@ -201,7 +201,7 @@ describe("skill prioritization", () => {
   })
 })
 
-describe("prioritize — ghi priority bằng op", () => {
+describe("prioritize - ghi priority bằng op", () => {
   it("nội dung skill đi vào prompt; ops được áp; đếm đúng số đã xếp hạng", async () => {
     const spine = await seed((s) => {
       for (const f of s.functions) f.priority = null
@@ -240,7 +240,7 @@ describe("prioritize — ghi priority bằng op", () => {
     expect(inputs[1]).not.toHaveProperty("replyLanguage")
   })
 
-  it("op đụng release_scope bị op-validator chặn — S-9.4 không được đổi phạm vi", async () => {
+  it("op đụng release_scope bị op-validator chặn - S-9.4 không được đổi phạm vi", async () => {
     await seed()
     const ops = [{ op: "set" as const, path: "project.release_scope", value: { in: [], out: ["mọi thứ"] } }]
 

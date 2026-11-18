@@ -13,18 +13,31 @@
 - Mọi endpoint ở đây chỉ dùng cho project `mode = "import"`. Gọi trên project mode khác trả `409 PROJECT_MODE_MISMATCH` `{ mode, expected: "import" }`.
 - **Nguồn sự thật là file .docx + bảng block** (G2). Spine chỉ là chỉ mục: request nào ghi Spine (finalize, quyết định group cuối, release) thì mang `base_version` như pipeline.
 - **Neo block** (G3): mỗi block có `block_id` ổn định (`B0001`…), neo bằng bookmark ẩn `_ff_<block_id>` trong file lưu, neo phụ `w14:paraId`, dự phòng `text_hash` + `heading_path`.
-- **Version tài liệu** (G4): import `0.0`; mỗi CR ghi xong lên minor (`0.1`, `0.2`…); release lên major (`1.0`, `2.0`…). Khác `v1.N` của mode 2.
+- **Version tài liệu** (G4): import `0.1` (project cũ: `0.0`); mỗi CR ghi xong lên minor (`0.2`, `0.3`…); release lên major (`1.0`, `2.0`…). Khác `v1.N` của mode 2.
 - **BR-03:** khi đã có baseline v0 thì mọi sửa phải qua CR. Ở project mode 1, chat ra lệnh sửa, `POST /changes`, `POST /reconcile` và `POST /undo` đều trả `409 CHANGE_REQUIRES_CR` (G9). Mode 1 v3 (§4.8): không tự tạo CR, không chạy step, không ký baseline v1, không waive cờ.
-- **Gọi AI** (Flow 4/5): giữ credit trước, quyết toán sau. Lỗi AI thì tự retry 2 lần; vẫn lỗi thì hoàn credit và đặt `paused: { reason: "resume_later" }`. Hết credit thì đặt `paused: { reason: "credits" }`. Resume qua endpoint `…/resume`. `step_id` trong usage (UC-79): `I-4:<section_id>`, `I-1.11:<n>` (lô thứ n của 1.11) và `I-1.11:cross` (lượt kiểm chéo giữa các section) — bản ghi cũ `I-1.11` là lượt đơn trước map-reduce, `C-2:<cr_id>`, `C-4:<cr_id>`, `C-5:<cr_id>`.
+- **Gọi AI** (Flow 4/5): giữ credit trước, quyết toán sau. Lỗi AI thì tự retry 2 lần; vẫn lỗi thì hoàn credit và đặt `paused: { reason: "resume_later" }`. Hết credit thì đặt `paused: { reason: "credits" }`. Người dùng bấm Dừng lúc đang đọc nội dung (#10b) ⇒ `paused: { reason: "user" }`. Resume qua endpoint `…/resume`. `step_id` trong usage (UC-79): `I-4:<section_id>`, `I-1.11:<n>` (lô thứ n của 1.11) và `I-1.11:cross` (lượt kiểm chéo giữa các section) — bản ghi cũ `I-1.11` là lượt đơn trước map-reduce, `C-2:<cr_id>`, `C-4:<cr_id>`, `C-5:<cr_id>`.
 
 ### 0.1 Máy trạng thái import (`import.state.ts`)
 
 ```
 uploaded ─┬─ preflight_rejected
-          ├─ awaiting_latest_confirm ─► parsing
-          └─ parsing ─► mapping_review? ─► extracting ─► fields_review? ─► baselining ─► checking ─► gap_review ─► delivered | change_requested
+          └─ parsing ─► extracting ─► baselining ─┬─► checking ─► gap_review ─► delivered | change_requested
+                                                  └─► incomplete            (FLF-336: chế độ 3/4, thiếu mục)
 delivered ─► change_requested
+incomplete ─► baselining | drafting ─► delivered      (FLF-278: chế độ 3 sang Luồng 2 — dự án chạy pipeline tạo mới; ký baseline 1.0 ⇒ delivered)
 ```
+
+**FLF-343 — chế độ 1 chạy một mạch.** Upload (#2) ⇒ preflight ⇒ tách file + khớp mẫu ngay (tất định, không AI) ⇒ import ở
+`extracting` **chưa chạy** = điểm dừng duy nhất: màn báo credit một lần (#4 `credit_estimate` gồm I-4 + kiểm tra AI) kèm câu hỏi
+"đây là bản mới nhất" (file không stamp, không phải mẫu tổ chức — `confirmed_latest_at = null`). Nút Bắt đầu = #6 với
+`confirm_latest: true` ⇒ I-4 ⇒ (job nối tiếp) finalize với `base_version` do server tính + Record of Changes đọc từ file ⇒ baseline
+0.1 ⇒ 1.11–1.12 ⇒ `gap_review` — FE vào thẳng trang tạo CR (`?panel=cr`), gap report vẫn mở từ popup. Không dừng ở
+`awaiting_latest_confirm` / `mapping_review` / `fields_review` / nút tạo baseline: mapping độ tin < 0.8 tự nhận (`auto_confirmed`,
+giữ độ tin), field độ tin < 0.7 / đọc từ ảnh vào baseline — mỗi chỗ một cờ vàng **Cần xem** (`rule_id = import_needs_review`,
+`target_id` = đường dẫn field `actors[id=A01].kind` hoặc block heading / bảng), đóng bằng CR như cờ vàng khác. Chế độ 3/4 vẫn dừng
+ở `incomplete`. Re-upload file stamp của chính dự án sau baseline vẫn đi #11 (diff). Các trạng thái `awaiting_latest_confirm`,
+`mapping_review`, `fields_review` chỉ còn ở bản ghi cũ: #6 đưa `awaiting_latest_confirm` (kèm `confirm_latest`) và `mapping_review`
+(tự nhận) về luồng một mạch; #10 đưa `fields_review` và `baselining` chưa có mốc sang finalize một mạch.
 
 `paused` chỉ đặt được ở `extracting` và `checking`, và ở `baselining` khi job finalize chạy nền lỗi / mất (chỉ `resume_later`, §4.16). Chuyển trạng thái sai trả `409 IMPORT_INVALID_STATE` `{ status, to, allowed }`.
 
@@ -67,29 +80,36 @@ mọi trạng thái chưa kết thúc ─► cancelled
 
 Mã chung vẫn dùng như pipeline: `400 VALIDATION_ERROR`, `401 UNAUTHORIZED`, `402 INSUFFICIENT_CREDIT` (`{ required, balance }`), `404 PROJECT_NOT_FOUND`, `409 SPINE_VERSION_CONFLICT`, `501 NOT_IMPLEMENTED`.
 
-`issues[]` của preflight là `{ code, message, location? }`, với `code` ∈ `NOT_DOCX`, `CORRUPT_ZIP`, `LEGACY_DOC`, `FILE_ENCRYPTED`, `FILE_TOO_LARGE`, `EMPTY_DOCUMENT`, `FOREIGN_TRACK_CHANGE`, `FOREIGN_COMMENT`. Loại file nhận theo magic bytes, không theo đuôi (spike P0 §4.6). Track Changes/comment có author khớp `^CR-\d{3,}$` (do FlintFlow ghi) được chấp nhận.
+`issues[]` của preflight là `{ code, message, location? }`, với `code` ∈ `NOT_DOCX`, `CORRUPT_ZIP`, `LEGACY_DOC`, `FILE_ENCRYPTED`, `FILE_TOO_LARGE`, `EMPTY_DOCUMENT`, `FOREIGN_TRACK_CHANGE`, `FOREIGN_COMMENT`, **`NOT_SRS`** (FLF-331: Code không thấy dấu hiệu SRS / mẫu SRS — CV, hoá đơn, test plan, biên bản họp…; `message` nêu lý do ngắn; 0 credit). `preflight.document_kind` (`{ kind: srs | srs_template | not_srs | unknown, confidence 0–1, signals[], reasons[] }`, `null` với bản ghi cũ hoặc file mang dấu version FlintFlow): `unknown` ⇒ vẫn nhận, FE cảnh báo ở bước xác nhận 1.5; mẫu SRS trống (chỉ heading + chữ hướng dẫn) là `srs_template`, vẫn nhận. Loại file nhận theo magic bytes, không theo đuôi (spike P0 §4.6). Track Changes/comment có author khớp `^CR-\d{3,}$` (do FlintFlow ghi) được chấp nhận.
 
 ## 1. Endpoint
 
 | # | Method + path | UC / nút | Request | Response `data` | Lỗi riêng |
 | --- | --- | --- | --- | --- | --- |
-| 1 | `POST /projects` | UC-13 | `{ name, domain?, mode?, documentLanguage? }` — `mode` ∈ `import \| fpt \| customer_template`, mặc định `fpt`; `documentLanguage` ∈ `vi \| en` (FLF-265): thiếu ⇒ `User.locale` ⇒ `en`; mode `import` bỏ qua (ngôn ngữ theo file upload) | `Project` (thêm `mode`, `import_state`, `documentLanguage?`) | `VALIDATION_ERROR`, `501 NOT_IMPLEMENTED` (`customer_template`) |
+| 1 | `POST /projects` | UC-13, UC-16 | `{ name, domain?, has_srs_file?, complete_to_standard?, source?, has_required_template?, mode?, folderId?, documentLanguage? }` — **Hộp Tạo dự án hai ô (FLF-388)**: client gửi `has_srs_file` (+ `complete_to_standard` khi có file — ô "Bổ sung các mục còn thiếu theo mẫu chuẩn FlintFlow"); có `has_srs_file` thì `source` / `has_required_template` / `mode` bị bỏ qua: không SRS ⇒ `fpt` (`start_kind = new`); có SRS ⇒ `import` + `start_kind = existing` + `template_intent = fixed` (giữ khung file), tick ⇒ `free` (đích = mẫu chuẩn FlintFlow). **FLF-335** (client trước FLF-388) (business-flow §1): client gửi `source` ∈ `new \| existing` (+ `has_required_template` khi `new`), **không gửi `mode`** — Code suy ra: mới · không mẫu ⇒ `fpt`; mới · có mẫu bắt buộc ⇒ `import` + `template_intent = fixed`; có sẵn ⇒ `import` (ý định hỏi ở #2). Client cũ gửi `mode` (mặc định `fpt`) vẫn chạy: `customer_template` quy về mới · có mẫu bắt buộc (không còn 501). `documentLanguage` ∈ `vi \| en` (FLF-265): thiếu ⇒ `User.locale` ⇒ `en`; dự án tải file lên bỏ qua (ngôn ngữ theo file) | `Project` (thêm `mode`, `start_kind`, `has_required_template`, `template_intent`, `import_state`, `documentLanguage?`; dự án cũ `start_kind: null`) | `VALIDATION_ERROR` |
 | 1a | `PATCH /projects/:id/document-language` | UC-13 | `UpdateDocumentLanguageSchema` `{ documentLanguage: vi \| en }` (strict) — chỉ Lead/Analyst; không đổi Spine, nội dung đã có dịch qua `pipeline-contract.md` #26–#27 (FLF-265) | `Project` | `VALIDATION_ERROR`, `403 ORG_ROLE_FORBIDDEN` (Viewer), `409 DOCUMENT_LANGUAGE_LOCKED` (mode `import`: ngôn ngữ theo file) |
-| 2 | `POST /projects/:id/import` | UC-20, 1.1–1.2 | multipart, field `file` (.docx ≤ 40MB; quá cỡ ⇒ preflight `FILE_TOO_LARGE`, quá gấp đôi ⇒ `413 FILE_TOO_LARGE` `meta: { max_mb }`) | `importStateResponseSchema` | `IMPORT_FILE_REJECTED`, `IMPORT_STAMP_FOREIGN_PROJECT`, `IMPORT_INVALID_STATE` (đã có baseline ⇒ dùng `/reupload`) |
-| 3 | `POST /projects/:id/import/confirm-latest` | 1.3 | `confirmLatestRequestSchema` | `importStateResponseSchema` | `IMPORT_INVALID_STATE` |
-| 4 | `GET /projects/:id/import` | UC-19 | — | `getImportResponseSchema` | — |
-| 5 | `PATCH /projects/:id/import/mapping` | UC-21, 1.7 | `mappingPatchRequestSchema` | `importStateResponseSchema` | `IMPORT_INVALID_STATE`, `IMPORT_NEEDS_LATEST_CONFIRM` |
-| 6 | `POST /projects/:id/import/extract` | 1.8 | `extractRequestSchema` | `extractResponseSchema` — **trả ngay** (`status = extracting`, `paused = null`), I-4 chạy nền; FE poll #4 tới khi rời `extracting` hoặc có `paused` | `IMPORT_INVALID_STATE` |
-| 7 | `PATCH /projects/:id/import/fields` | UC-22, 1.9 | `fieldsPatchRequestSchema` | `importStateResponseSchema` | `IMPORT_INVALID_STATE` |
-| 8 | `POST /projects/:id/import/finalize` | 1.10–1.12 | `finalizeRequestSchema` | `finalizeResponseSchema` — **trả ngay** (`status = baselining`, `baseline: null`, `flags: null`), finalize + 1.11–1.12 chạy nền; FE poll #4 tới `gap_review` hoặc có `paused` (§4.16) | `IMPORT_INVALID_STATE`, `SPINE_VERSION_CONFLICT` |
-| 9 | `GET /projects/:id/gap-report?format=json\|docx` | UC-23, 1.13 | `gapReportQuerySchema` | `gapReportSchema`; `docx` trả file, không bọc envelope | `IMPORT_INVALID_STATE` (chưa tới `gap_review`) |
-| 10 | `POST /projects/:id/import/resume` | UC-61, UC-75 | `importResumeRequestSchema` | `extractResponseSchema` — **trả ngay**, chạy nền: `extracting` như #6; `baselining` (đã từng finalize, job lỗi / mất) ⇒ chạy lại finalize; `checking` ⇒ 1.11–1.12 (§4.16) | `IMPORT_INVALID_STATE` |
+| 1b | `PATCH /projects/:id/erd-notation` | UC-13 | `UpdateErdNotationSchema` `{ erdNotation: chen \| crowsfoot \| idef1x }` (strict) — chỉ Lead/Analyst (cả dự án mode import); không đổi Spine. Đổi sang ký pháp khác ⇒ ERD đã vẽ (§3.1.5) được vẽ lại ngay bằng ký pháp mới (cùng `diagrams[]` id, `source_hash` mới); chọn lại ký pháp đang dùng ⇒ không vẽ lại. Vẽ lại lỗi chỉ ghi log, ký pháp vẫn được lưu — hình stale vẽ lại ở lượt render kế tiếp | `Project` (có `erdNotation`) | `VALIDATION_ERROR`, `403 ORG_ROLE_FORBIDDEN` (Viewer), `404 PROJECT_NOT_FOUND` |
+| 1b2 | `PATCH /projects/:id/sequence-level` | UC-13 | `UpdateSequenceLevelSchema` `{ sequenceLevel: system \| component }` (strict) — chỉ Lead/Analyst; không đổi Spine (FLF-418, cùng cách làm với #1b). Đổi sang mức khác ⇒ Sequence Diagram đã vẽ (§3.x.y) được vẽ lại ngay (cần PlantUML server); chọn lại mức đang dùng ⇒ không vẽ lại. Vẽ lại lỗi chỉ ghi log, mức vẫn được lưu | `Project` (có `sequenceLevel`) | `VALIDATION_ERROR`, `403 ORG_ROLE_FORBIDDEN` (Viewer), `404 PROJECT_NOT_FOUND` |
+| 1c | `PATCH /projects/:id/screen-theme` | UC-13 | `UpdateScreenThemeSchema` `{ primaryColor?: #RRGGBB \| null, domain?: string \| null, platforms?: (web \| mobile)[] \| null }` (strict, ít nhất một field) - chỉ Lead/Analyst (cả dự án mode import); không đổi Spine. `domain` nhận hostname hoặc URL (chuẩn hoá thành hostname), rỗng ⇒ `null`; `platforms` ≥ 1, không trùng; `null` = về mặc định (màu `#3F5591`, thanh địa chỉ chỉ hiện đường dẫn, nền tảng suy từ `spine.project.form_factor`). Theme nằm trong hash hình Screen Layout ⇒ mockup đã vẽ được vẽ lại từ spec đã lưu trong `<metadata>` của SVG: **không gọi AI, không trừ credit** | `Project` (có `screenTheme`) | `VALIDATION_ERROR`, `403 ORG_ROLE_FORBIDDEN` (Viewer), `404 PROJECT_NOT_FOUND` |
+| 1d | `GET /projects/:id/screen-mockups` · `POST` · `DELETE` · `GET …/run` · `POST …/run/cancel` · `GET …/:screenId/original` | §3.x.y Screen Layout (dự án import có ảnh gốc) | GET không `mode` ⇒ tóm tắt; GET `?mode=system\|original&scope=screen\|all&screen_id?` ⇒ ước tính (không gọi model). POST `RunScreenMockupsSchema` `{ mode, scope, screen_id? \| screen_ids? }` (strict; `scope = screen` cần một trong hai) - Lead/Analyst, kiểm credit **trước** khi chạy, chạy nền (một lượt mỗi dự án), màn đã đúng kiểu bỏ qua, màn đã vẽ đúng kiểu nhưng đang tắt ⇒ bật lại 0 credit. DELETE `DisableScreenMockupsSchema` `{ scope, screen_id? }` - dùng lại ảnh gốc, giữ hình đã vẽ. `…/run/cancel`: màn đang vẽ vẽ nốt, màn còn lại không vẽ, không trừ credit. `…/original`: ảnh PNG / JPEG của file import | Tóm tắt `{ with_original, using_mockup, screens[{ screen_id, mode, enabled, image_indexes }], originals[{ screen_id, section_id, name }] }`; ước tính `{ screens, ai_calls, credits, reenable, groups: { draw[], reenable[], skip[] } }`; POST `202` + tiến độ = GET `…/run` `{ run_id, status: running \| done \| cancelled \| interrupted, stopping, total, completed, done[], failed[{ screen_id, reason }], fell_back_to_system[], pending[], suggested_color }` (`null` khi chưa từng chạy); DELETE `{ disabled[] }` | `VALIDATION_ERROR`, `400 SCREEN_HAS_NO_ORIGINAL`, `402 INSUFFICIENT_CREDITS` (`meta: { required, available }`, không màn nào được vẽ), `409 SCREEN_MOCKUP_RUNNING`, `503 SCREEN_MOCKUP_QUEUE_UNAVAILABLE` (hàng đợi nền không phản hồi, lượt bị huỷ, không màn nào đổi), `403 ORG_ROLE_FORBIDDEN` (Viewer, các lệnh ghi), `404 PROJECT_NOT_FOUND` \| `SCREEN_NOT_FOUND`; `…/original` không có ảnh / ảnh EMF ⇒ `404 SCREEN_HAS_NO_ORIGINAL` |
+| 2 | `POST /projects/:id/import` | UC-20, 1.1–1.2 | multipart, field `file` (.docx ≤ 40MB; quá cỡ ⇒ preflight `FILE_TOO_LARGE`, quá gấp đôi ⇒ `413 FILE_TOO_LARGE` `meta: { max_mb }`) — **FLF-388:** ý định luôn lấy từ `Project.template_intent` (chốt ở hộp Tạo dự án), ghi vào `import.intent`; field text `intent` của client cũ vẫn parse được nhưng **bị bỏ qua**. Dự án không có ý định (tạo trước FLF-335) ⇒ `free`, Project giữ trống ⇒ không qua bước so cấu trúc đích | `importStateResponseSchema` (`import.intent`) | `IMPORT_FILE_REJECTED`, `IMPORT_STAMP_FOREIGN_PROJECT`, `IMPORT_INVALID_STATE` (đã có baseline ⇒ dùng `/reupload`) |
+| 2p | `POST /projects/precheck-docx` | §3.6 (D6) | multipart, field `file` (giới hạn như #2); Lead / Analyst; không cần dự án, **không lưu file**, không gọi AI | `{ looks_like_srs, srs_suggestion, stamp: { project_id } | null }` - **FLF-409:** `srs_suggestion` `strong` | `possible` | `none` (spec `uc-reference-misdetected-as-srs.md` §3.2: `strong` cần dấu version, tiêu đề SRS hoặc đủ hình thức SRS - chương lớn, heading nhiều cấp, lịch sử thay đổi, mục lục; có dấu hiệu loại tài liệu khác ⇒ `none`), `looks_like_srs` = `strong`. **FLF-388:** file ở ô Tài liệu tham khảo của hộp Tạo dự án có trông như SRS không (dấu version FlintFlow, hoặc `document_kind` của preflight I-1 là `srs` / `srs_template`); không phải .docx ⇒ `looks_like_srs: false`. Chỉ để FE gợi ý, không chặn. `POST /projects/:id/documents` trả thêm `precheck` cùng khuôn + `heading_overlap` (0–1, tỉ lệ heading của file trùng heading SRS đã tải của dự án - chỉ khi dự án đã có SRS; `null` nếu kiểm lỗi) | `FILE_REQUIRED`, `413 FILE_TOO_LARGE` |
+| 3 | `POST /projects/:id/import/confirm-latest` | 1.3 | `confirmLatestRequestSchema` — **FLF-343: chỉ bản ghi cũ** ở `awaiting_latest_confirm`; file mới trả lời câu hỏi cùng #6 (`confirm_latest`) | `importStateResponseSchema` | `IMPORT_INVALID_STATE` |
+| 4 | `GET /projects/:id/import` | UC-19 | — | `getImportResponseSchema` (FLF-336: `target_structure` — bản đồ mục ⇒ cấu trúc đích + `resolved_mode`). **FLF-388 — màn đọc khung:** `structure_preview` `{ summary: { present, missing, out_of_scope, kind: written | template }, sections[{ section_id, title, status, order }], resolved_mode, intent, computed_at }` — cấu trúc đích sơ bộ tính bằng Code ngay lúc upload (không gọi AI, không giữ credit), `sections` theo thứ tự heading trong file (mục của mẫu chuẩn mà file không có xếp cuối). `kind = template` khi dưới 20% mục của file có nội dung (khung mẫu): với `fixed` mọi mục của mẫu là `missing`, luôn chế độ 3, không trích nội dung (thay điều kiện "dự án mới + mẫu bắt buộc" của FLF-378). `import.structure_changes` `[{ section_id, title, from, to }]` (đọc được cả khi dự án đã sang Luồng 2 — `mode = fpt`, `import_state = drafting`; mode khác vẫn `PROJECT_MODE_MISMATCH`) — mục mà I-5 cuối khác bản sơ bộ (`absent` = không có ở một bên); rỗng ⇒ khớp, `null` ⇒ chưa finalize / import trước FLF-388 | — |
+| 5 | `PATCH /projects/:id/import/mapping` | UC-21, 1.7 | `mappingPatchRequestSchema` — **FLF-343: chỉ bản ghi cũ** ở `mapping_review` | `importStateResponseSchema` | `IMPORT_INVALID_STATE`, `IMPORT_NEEDS_LATEST_CONFIRM` |
+| 5b | `PATCH /projects/:id/import/drop-text` | 1.4 | `dropTextRequestSchema` `{ import_id, keys: string[] }` (FLF-412) — cả tập vùng heading (`text_sections[].key` của #4) chọn **Bỏ chữ** trước Bắt đầu; khoá lạ bị bỏ qua. Chỉ ghi lựa chọn + tính lại `structure_preview`, không đổi file. Bấm Bắt đầu (#6) ⇒ file được viết lại (vùng bỏ chữ chỉ còn heading, chữ hướng dẫn, hàng tiêu đề bảng + một hàng trống; heading phần tử bên trong bị bỏ; mục BA tự đặt ở dự án `free` bỏ cả heading) rồi tách lại. Dự án tạo từ mẫu tổ chức (#8c) mặc định bỏ chữ mọi vùng | `{ import }`; `409 IMPORT_INVALID_STATE` khi đã Bắt đầu |
+| 6 | `POST /projects/:id/import/extract` | 1.8 | `extractRequestSchema` `{ import_id, confirm_latest? }` — FLF-343: nút Bắt đầu; `confirm_latest: true` bắt buộc khi file chưa xác nhận bản mới nhất | `extractResponseSchema` — **trả ngay** (`status = extracting`, `paused = null`), chạy nền một mạch I-4 ⇒ finalize ⇒ 1.11–1.12; FE poll #4 tới `gap_review` / `incomplete` hoặc có `paused` | `IMPORT_INVALID_STATE`, `IMPORT_NEEDS_LATEST_CONFIRM` (bỏ tick "bản mới nhất" — import không chạy) |
+| 7 | `PATCH /projects/:id/import/fields` | UC-22, 1.9 | `fieldsPatchRequestSchema` — **FLF-343: chỉ bản ghi cũ** ở `fields_review` | `importStateResponseSchema` | `IMPORT_INVALID_STATE` |
+| 8 | `POST /projects/:id/import/finalize` | 1.10–1.12 | `finalizeRequestSchema` (+ `complete?: boolean` — FLF-336). **FLF-343:** chế độ 1 không gọi #8 — job finalize nối tiếp I-4 tự lấy `base_version` = Spine hiện tại trên server (không có 409), Record of Changes đọc từ file; #8 chỉ còn cho `incomplete` ⇒ "Hoàn thiện" (`complete: true`) và bản ghi cũ ở `baselining`, khi đó `base_version` của client vẫn được kiểm | `finalizeResponseSchema` — **trả ngay** (`status = baselining`, `baseline: null`, `flags: null`), finalize + 1.11–1.12 chạy nền; FE poll #4 tới `gap_review` hoặc có `paused` (§4.16). **FLF-336 I-5**: trước khi chụp v0, Code so bố cục file với cấu trúc đích (`Project.template_intent` `free` ⇒ mẫu chuẩn FlintFlow tối thiểu, `fixed` ⇒ chính heading của mẫu); còn mục thiếu ⇒ dừng ở `incomplete` (**không có v0**), #4 trả `target_structure` (`resolved_mode` 3 / 4). Từ `incomplete` gọi lại #8 với `complete: true` ⇒ chạy lại từ mốc và tạo v0 như cũ (lát 1 — vòng rà soát + Luồng 2 cho phần thiếu là lát sau); thiếu `complete` ⇒ `IMPORT_INVALID_STATE` | `IMPORT_INVALID_STATE`; `SPINE_VERSION_CONFLICT` chỉ khi gọi tay (#8) với `base_version` cũ | **FLF-388 (D4):** từ `incomplete` **không còn "Hoàn thiện"** — mọi lần gọi #8 ở `incomplete` (kể cả `complete: true`) ⇒ `IMPORT_INVALID_STATE`; file thiếu cấu trúc đích không bao giờ thành bản gốc 0.1. Giữ khung (`fixed`) còn thiếu ⇒ finalize **tự** sang Luồng 2 (`incomplete → drafting`, `Project.mode = fpt`) ngay sau I-5: khung mẫu ⇒ mọi mục của mẫu chờ soạn; SRS đã viết ⇒ chỉ bước sở hữu mục thiếu chờ soạn, bước sở hữu mục khách đã viết giữ chốt (kể cả bước lúc import chưa trích được dữ liệu ⇒ chốt luôn), Spine lúc vào Luồng 2 lưu làm mốc để bản in giữ nguyên văn file gốc cho mục chưa đổi. Bổ sung theo mẫu chuẩn (`free`, chế độ 4) còn thiếu ⇒ dừng `incomplete` (gap report + DRAFT tải được).
+| 9 | `GET /projects/:id/gap-report?format=json\|docx` | UC-23, 1.13 | `gapReportQuerySchema` | `gapReportSchema` (FLF-336: thêm `target_structure`); `docx` trả file, không bọc envelope. Có từ `incomplete` (FE tải ở workspace). **FLF-388:** ở `mapping_review` / `extracting` mà hồ sơ có `structure_preview` ⇒ báo cáo **sơ bộ** (`preliminary: true`, chưa có cờ, bản đồ mục từ màn đọc khung; `docx` có dòng "Báo cáo sơ bộ"); tải không đổi trạng thái import | `IMPORT_INVALID_STATE` (chưa tới `incomplete` / `gap_review` và không có bản sơ bộ) |
+| 10 | `POST /projects/:id/import/resume` | UC-61, UC-75 | `importResumeRequestSchema` | `extractResponseSchema` — **trả ngay**, chạy nền: `extracting` như #6 (rồi nối tiếp tới `gap_review`); `baselining` (đã từng finalize, job lỗi / mất) ⇒ chạy lại finalize; `baselining` chưa có mốc / bản ghi cũ `fields_review` ⇒ finalize một mạch (FLF-343); `checking` ⇒ 1.11–1.12 (§4.16) | `IMPORT_INVALID_STATE`, `IMPORT_NEEDS_LATEST_CONFIRM` |
+| 10b | `POST /projects/:id/import/pause` | FLF-388 | `importResumeRequestSchema` `{ import_id }` | `extractResponseSchema` — chỉ ở `extracting` đã bấm Bắt đầu (có `extract_cursor` hoặc job đang chạy): đặt `paused: { reason: "user" }`. Job I-4 dừng trước lượt AI kế tiếp (lượt đang gọi dở chạy xong, đã giữ credit) — không sang mục mới, không gọi thêm lượt; mục nhiều lượt giữ `partial` như dừng vì lỗi. Đã dừng (bất kỳ lý do) ⇒ trả nguyên trạng. Tiếp tục qua #10 (đi tiếp từ `extract_cursor`) | `IMPORT_INVALID_STATE` (không ở `extracting` / chưa bắt đầu) |
 | 11 | `POST /projects/:id/reupload` | UC-24, 1.4 | multipart như #2 | `reuploadDiffDtoSchema` — **không** tạo version | `IMPORT_FILE_REJECTED`, `IMPORT_STAMP_FOREIGN_PROJECT`, `IMPORT_INVALID_STATE` (chưa có baseline) |
 | 12 | `GET /projects/:id/versions` | UC-54 | — | `DocVersion[]`, mới nhất trước | — |
 | 13 | `GET /projects/:id/versions/:v/blocks` | UC-54 | — | `DocBlock[]` theo thứ tự tài liệu; bản draft có `revisions[]` | `DOC_VERSION_NOT_FOUND` |
-| 14 | `GET /projects/:id/versions/:v/download?variant=auto\|tracked` | UC-57 | `downloadQuerySchema` | file `.docx`: release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT, tên `…_v0.2_DRAFT.docx` | `DOC_VERSION_NOT_FOUND` |
+| 14 | `GET /projects/:id/versions/:v/download?variant=auto\|tracked&format=docx\|pdf&lang=vi\|en` | UC-57 | `downloadQuerySchema` | file `.docx`: release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT. Tên file + stamp theo FLF-334 (§ cuối): `<tên>_v2.0.docx`, `<tên>_v1.0+CR-014_DRAFT.docx`, `<tên>_v0.1_DRAFT.docx`, `…_tracked_DRAFT.docx`, `…_original.docx`. `format=pdf` (FLF-316): chính file đó chuyển qua Gotenberg, đuôi `.pdf`; `variant=original` chỉ có `.docx`. `lang` (FLF-334 B, § cuối) | `DOC_VERSION_NOT_FOUND`, `503 PDF_EXPORT_UNAVAILABLE` (format=pdf, Gotenberg không sẵn sàng), `409 TRANSLATION_INCOMPLETE`, `409 DOCUMENT_LANGUAGE_UNAVAILABLE`, `400 VALIDATION_ERROR` (`variant` tracked/original + `lang` khác) |
 | 15 | `GET /projects/:id/versions/compare?from=&to=` | UC-55 | `compareQuerySchema` | `compareResponseSchema` | `DOC_VERSION_NOT_FOUND`, `VALIDATION_ERROR` |
-| 16 | `POST /projects/:id/change-requests` | UC-48, 3.1 | `createChangeRequestSchema` (UC-49: `comment_id?` `CM-nnn` — tạo CR từ comment còn mở, cần `source.kind = viewer_comment`; tạo xong comment thành `converted` + `cr_id`, báo tác giả comment) | `changeRequestDetailSchema` (`status = draft`) | `CR_SOURCE_REQUIRED`, `CR_REQUIRES_BASELINE`; với `comment_id`: `400 VALIDATION_ERROR` (nguồn khác `viewer_comment`), `404 COMMENT_NOT_FOUND`, `409 COMMENT_NOT_OPEN` |
+| 16 | `POST /projects/:id/change-requests` | UC-48, 3.1 | (FLF-338: `source.kind` thêm `reference_document`) `createChangeRequestSchema` (UC-49: `comment_id?` `CM-nnn` — tạo CR từ comment còn mở, cần `source.kind = viewer_comment`; tạo xong comment thành `converted` + `cr_id`, báo tác giả comment) | `changeRequestDetailSchema` (`status = draft`) | `CR_SOURCE_REQUIRED`, `CR_REQUIRES_BASELINE`; với `comment_id`: `400 VALIDATION_ERROR` (nguồn khác `viewer_comment`), `404 COMMENT_NOT_FOUND`, `409 COMMENT_NOT_OPEN` |
 | 17 | `GET /projects/:id/change-requests?status=` | UC-48 | `listChangeRequestsQuerySchema` | `ChangeRequest[]`, mới nhất trước | — |
 | 18 | `GET /projects/:id/change-requests/:crId` | UC-48 | — | `changeRequestDetailSchema` | `CR_NOT_FOUND` |
 | 19 | `POST …/:crId/clarify` | UC-49, 3.2 | `{}` | `changeRequestDetailSchema` (`awaiting_answers` kèm `pending_questions`, hoặc `impact_review`) | `CR_INVALID_TRANSITION`, `INSUFFICIENT_CREDIT` |
@@ -97,7 +117,7 @@ Mã chung vẫn dùng như pipeline: `400 VALIDATION_ERROR`, `401 UNAUTHORIZED`,
 | 21 | `POST …/:crId/impact` | UC-50, 3.4–3.5 | `{}` | `changeRequestDetailSchema` (`locations[]`, phần tử đã khoá) | `PATH_LOCKED`, `CR_INVALID_TRANSITION` |
 | 22 | `POST …/:crId/propose` | UC-81, 3.6 | `{}` | `changeRequestDetailSchema` (`groups[]`) | `CR_INVALID_TRANSITION`, `INSUFFICIENT_CREDIT` |
 | 23 | `PATCH …/:crId/locations/:locId` | UC-81, 3.9 | `patchLocationRequestSchema` | `changeRequestDetailSchema` (vị trí `manual = true`) | `CR_LOCATION_NOT_FOUND`, `CR_INVALID_TRANSITION` |
-| 24 | `POST …/:crId/verify` | UC-82, 3.7–3.8 | `{}` | `changeRequestDetailSchema` (`ready_to_submit`, `proposing` hoặc `manual_fix`) | `CR_INVALID_TRANSITION`, `CR_VALUE_CHANGED`, `INSUFFICIENT_CREDIT` |
+| 24 | `POST …/:crId/verify` | UC-82, 3.7–3.8 | `{}` | `changeRequestDetailSchema` (`ready_to_submit`, `proposing` hoặc `manual_fix`). **FLF-337**: dự án ở mức duyệt `milestones` ("Chỉ ở mốc chốt") và kiểm đạt không kèm nhận xét AI ⇒ CR **tự xác nhận** như #25 ⇒ trả `written`, ghi sổ tự qua (`GET /auto-passed`, `C-6:<cr_id>`); Lead duyệt gói (C-7) vẫn là cổng cứng | `CR_INVALID_TRANSITION`, `CR_VALUE_CHANGED`, `INSUFFICIENT_CREDIT` |
 | 25 | `POST …/:crId/submit` | UC-51, 3.11 | `{}` | `changeRequestDetailSchema` (`in_review`) | `CR_LOCATION_UNCONCLUDED`, `CR_INVALID_TRANSITION` |
 | 26 | `POST …/:crId/groups/:gid/decision` | UC-52, 3.12–3.14 | `groupDecisionRequestSchema` | `changeRequestDetailSchema`; khi group cuối được quyết mà có group duyệt ⇒ `written` kèm `result_doc_version` | `CR_GROUP_NOT_FOUND`, `CR_INVALID_TRANSITION`, `CR_VALUE_CHANGED`, `SPINE_VERSION_CONFLICT` |
 | 27 | `POST …/:crId/revise` | UC-52 | `{}` | `changeRequestDetailSchema` (khoá lại phần tử, về `proposing`) | `PATH_LOCKED`, `CR_INVALID_TRANSITION` |
@@ -175,7 +195,7 @@ Request `{ "import_id": "66f0…01", "base_version": 3 }` → trả ngay (job n�
 {
   "data": {
     "import": { "status": "baselining", "paused": null, … },
-    "doc_version": "0.0",
+    "doc_version": "0.1",
     "baseline": null,
     "spine_version": 3,
     "flags": null
@@ -231,8 +251,11 @@ Plan: `claude_plan/plan-mode1-v2-workspace.md` §1, §4. PR nhãn `contract-chan
 ### 4.3 Endpoint mới
 | # | Method + path | Request | Response `data` | Lỗi riêng |
 | --- | --- | --- | --- | --- |
-| 32 | `GET /projects/:id/step-plan` | — | `stepPlanResponseSchema` — mỗi step: `state` (`applied` | `hidden` | `enabled`), `missing` (đầu mục mẫu FPT mà file không có ⇒ "Thiếu"; từ 2026-10-06 không còn cờ `section_empty` ở mode 1 — mục thiếu không bắt buộc, chỉ liệt kê ở gap report), `section_ids`, `reason` | `IMPORT_INVALID_STATE` (chưa finalize) |
-| 33 | `PATCH /projects/:id/step-plan` | `stepPlanPatchRequestSchema` `{ step_id, enabled }` | `stepPlanResponseSchema` | `STEP_NOT_IN_PLAN` (404), `CORE_STEP_REQUIRED` (409 — tắt step của đầu mục FPT hoặc step đã có dữ liệu) |
+| 31a | `POST /projects/:id/documents/:documentId/extract` | FLF-338, §3.6.1 | — (Lead, Analyst; dự án mode 1) | `extractionSchema` `{ document_id, document_name, doc_code, status, items[{ id, text, label, para_id, quote, group, entity_paths[], question, suggested_answers[], include, drop_reason, answer, cr_id }], credits, approved_at }` — một lượt `extract_requirements` (3 credit, FE báo trước bằng `POST /ai-actions/estimate-cost`); mỗi mục trỏ về mã đoạn `D<n>-P<nn>` + trích dẫn, nhãn gợi ý `new \| modification \| duplicate \| contradiction \| ambiguous`, `group` = nhóm đề xuất gộp, `question` + `suggested_answers` với mục mâu thuẫn / mơ hồ. Code kiểm lại mã đoạn / trích dẫn / `entity_paths`. Rút lại thay bản chưa duyệt | `DOCUMENT_NOT_FOUND`, `EXTRACTION_DOCUMENT_UNREADABLE`, `EXTRACTION_ALREADY_APPROVED`, `EXTRACTION_INSUFFICIENT_CREDIT`, `EXTRACTION_FAILED` |
+| 31b | `GET /projects/:id/documents/:documentId/extract` | FLF-338 | — | `extractionSchema` hoặc `null` | `DOCUMENT_NOT_FOUND` |
+| 31c | `POST /projects/:id/documents/:documentId/extract/approve` | FLF-338, §3.6.1 bước 5 | `approveExtractionSchema` `{ requester, decisions[{ id, include, drop_reason?, answer?, group? }] }` — mọi mục phải có quyết định; bỏ ⇒ cần `drop_reason`; mục `contradiction` / `ambiguous` đưa vào ⇒ cần `answer`; `group` để tách / gộp | `extractionSchema` (`approved`): mỗi nhóm được tick ⇒ **một CR** `draft` (#16) nguồn `reference_document`, `ref` = tên tài liệu + mã đoạn, mô tả liệt kê nhãn + nguồn + câu trả lời, trích dẫn là vật liệu; mục `duplicate` ⇒ không tạo CR, phần tử trong `entity_paths` thêm nguồn (`/sources`); `items[].cr_id` | `EXTRACTION_NOT_FOUND`, `EXTRACTION_DECISION_INVALID` (`meta.item_ids`), `EXTRACTION_ALREADY_APPROVED`, `CR_REQUIRES_BASELINE`, `PACKAGE_PENDING` |
+| 32 | `GET /projects/:id/step-plan` | — | `stepPlanResponseSchema` — mỗi step: `state` (`applied` có nội dung / bước luôn chạy · `hidden` file không có đầu mục hoặc Brief · `enabled` có đầu mục mà trống, hoặc người dùng bật), `section_ids`, `reason` — mẫu FPT không bắt buộc (FLF-312), không còn `missing` | `IMPORT_INVALID_STATE` (chưa finalize) |
+| 33 | `PATCH /projects/:id/step-plan` | `stepPlanPatchRequestSchema` `{ step_id, enabled }` | `stepPlanResponseSchema` | `STEP_NOT_IN_PLAN` (404), `CORE_STEP_REQUIRED` (409 — tắt bước luôn chạy hoặc step đã có dữ liệu) |
 
 ### 4.4 Thay đổi khác
 - `templateProfileDtoSchema` thêm `layout[]` `{ order, heading_text, level, section_id }` — thứ tự + tiêu đề mục của file upload (`section_id` = section FPT hoặc `custom:<id>`). Import cũ ⇒ `[]`.
@@ -242,10 +265,10 @@ Plan: `claude_plan/plan-mode1-v2-workspace.md` §1, §4. PR nhãn `contract-chan
 
 ### 4.5 V2 — render theo template người dùng (FLF-184, chỉ thêm field)
 - `RenderedDocument` của project có layout (mode 1 sau finalize): `sections[]` theo **thứ tự + tiêu đề file upload** (bỏ số gõ tay, `number` đánh lại theo cấp; heading không gõ số trong file gõ số tay ⇒ `number: ""`). Section FPT file không có ⇒ chèn cạnh mục cùng nhóm, tiêu đề mẫu FPT theo `TemplateProfile.language`. `group:<id>` lấy theo `section_id` của layout (vd `group:4`), không còn là số hiệu. Văn xuôi không trích được nằm ở đầu `blocks` của section chủ. Hình `RenderedSection` không đổi. Project mode 2 không đổi.
-- #14 `download?variant=` thêm `original` — file người dùng upload (chỉ bản `0.0`; version khác ⇒ `DOC_VERSION_NOT_FOUND`), tên `…_v0.0_original.docx`. Bản `0.0` mặc định giờ là **bản render từ Spine** (+ stamp, + DRAFT khi tải).
+- #14 `download?variant=` thêm `original` — file người dùng upload (chỉ bản `0.1` (project cũ: `0.0`); version khác ⇒ `DOC_VERSION_NOT_FOUND`), tên `…_v0.1_original.docx`. Bản gốc import mặc định giờ là **bản render từ Spine** (+ stamp, + DRAFT khi tải).
 - `DocVersionDto` thêm `has_original_file: boolean`.
 - `gapReportSchema` thêm `totals.missing_fpt_sections`, `missing_fpt_sections[]` `{ section_id, title, step_id, in_layout }` (đầu mục FPT thiếu — D6, đứng đầu báo cáo; `feature:*` = chức năng chương 3), `layout[]` `{ order, section_id, heading, level, kind: fpt|group|custom, red, yellow }`; `sections[]` xếp theo layout.
-- **Tạm tới V4:** #13 blocks, re-upload diff và CR ghi file vẫn chạy trên **file gốc** (`original_ref`) của `0.0`.
+- **Tạm tới V4:** #13 blocks, re-upload diff và CR ghi file vẫn chạy trên **file gốc** (`original_ref`) của bản gốc import (`0.1`, project cũ `0.0`).
 
 ### 4.6 V4 — CR trên Spine, điều khiển bằng chat (FLF-186, contract-change — chờ 4/4)
 - **Vị trí CR = phần tử Spine** (`project`, `actors[id=A01]`, `custom_sections[id=CS02]`…) thay block docx. `changeLocationDtoSchema`: bỏ `block_id`, `block`; thêm `path`, `section_id`, `section_title`, `current_text` (giá trị hiện tại — JSON khoá sắp xếp). `proposal.old_text` / `new_text` = giá trị phần tử trước / sau khi chạy khô op của vị trí; `edit` ⇒ `spine_ops` bắt buộc (output C-4 `crProposeSchema`).
@@ -297,15 +320,15 @@ Plan: `claude_plan/mode1-v3/phase-2-be-flow3.md`.
 - **3.9 endpoint mới**: `POST /projects/:id/change-requests/:crId/locations/:locId/owner-step-draft` `{ instruction }` — chỉ khi CR `manual_fix`. Chạy skill của **step sở hữu** vị trí (như C-4, một vị trí, kèm hướng của BA); kết quả chỉ ghi vào đề xuất (`manual: true`, `verify: null`), không ghi Spine; CR giữ `manual_fix`, kiểm lại bằng #22 `/verify`. Lỗi: `CR_INVALID_TRANSITION` (không ở `manual_fix`), `CR_NO_OWNER_STEP` (409, mục riêng — dùng #28 PATCH), `CR_LOCATION_NOT_FOUND`, `PATH_LOCKED`, `402 INSUFFICIENT_CREDIT`, `502 AI_PROVIDER_ERROR` (`manual_fix` không pause được).
 - **3.12 (#26)**: `reason` **bắt buộc cả khi duyệt** (≥ 10 ký tự) — BPMN "quyết định từng group, kèm lý do".
 - **3.5 khi Revise (#25)**: giữ nguyên — revise đã khoá lại đúng các phần tử (3.5) rồi về `proposing` (3.6); giá trị gốc chụp lại khi đề xuất mới. Không đổi máy trạng thái.
-- **3.14 bản có đánh dấu (T6/T7)**: CR ghi xong, version minor có thêm file **Track Changes** so với version trước (so theo đoạn; `w:ins`/`w:del` tác giả = CR id) + comment Word của vị trí `comment` ở tiêu đề mục. `DocVersionDto` thêm `has_tracked_file`. #14 `download?variant=tracked` trả file đó (bản nháp vẫn kèm DRAFT); version không có (`0.0`, release, dựng lỗi) ⇒ bản render như cũ. Accept-all bản có đánh dấu ra đúng bản sạch. Release (6.2) vẫn chỉ bản sạch.
+- **3.14 bản có đánh dấu (T6/T7)**: CR ghi xong, version minor có thêm file **Track Changes** so với version trước (so theo đoạn; `w:ins`/`w:del` tác giả = CR id) + comment Word của vị trí `comment` ở tiêu đề mục. `DocVersionDto` thêm `has_tracked_file`. #14 `download?variant=tracked` trả file đó (bản nháp vẫn kèm DRAFT); version không có (bản gốc import, release, dựng lỗi) ⇒ bản render như cũ. Accept-all bản có đánh dấu ra đúng bản sạch. Release (6.2) vẫn chỉ bản sạch.
 
 ### 4.10 Mode 1 v3 — đọc ảnh diagram + giữ ảnh gốc (phase 5, FLF-187 — contract-change, chờ 4/4)
 
 Plan: `claude_plan/mode1-v3/phase-5-vision.md`.
 
 - **Ảnh gốc (T3)**: block ảnh của file upload giữ `image_ref` (part `word/media/*`). Ảnh dưới mục FPT không được thay bằng diagram ⇒ phần nối nguyên văn của mục (`custom_sections[].blocks[].image_ref`); bản render (0.0, bản làm việc, version CR) nhúng lại **đúng ảnh gốc** (PNG/JPEG). EMF/WMF / file gốc không còn ⇒ chỗ giữ ảnh + chú thích `original image could not be embedded (<part>)`.
-- **I-4 phần ảnh (1.8)**: `call_kind` mới **`import_extract_diagram`** (2 credit/ảnh, Gemini) — chỉ cho ảnh ở mục diagram (`fixed:1`, `2.1`, `2.2.1`, `2.2.2`, `3.1.1`, `3.1.5`), sau bảng tất định, trước lô chữ; `step_id` usage vẫn `I-4:<section>`. Hết credit ⇒ `paused` như lô chữ. Lỗi AI khác sau mọi lượt thử (2026-09-24: Gemini quá tải cả model dự phòng) ⇒ **không dừng** I-4: ảnh ghi `kind: unavailable`, giữ ảnh gốc + cờ vàng `import_image_unread` ("AI đọc ảnh đang quá tải").
-  Môi trường không có vision (`GEMINI_KEY_MISSING`, `AI_PROVIDER_NO_VISION`) ⇒ không dừng: ảnh coi như định dạng không hỗ trợ (giữ ảnh + cờ vàng).
+- **I-4 phần ảnh (1.8)**: `call_kind` **`import_extract_diagram`** (2 credit/ảnh, Anthropic `claude-haiku-5-5`) — chỉ cho ảnh ở mục diagram (`fixed:1`, `2.1`, `2.2.1`, `2.2.2`, `3.1.1`, `3.1.5`), sau bảng tất định, trước lô chữ; `step_id` usage vẫn `I-4:<section>`. Hết credit ⇒ `paused` như lô chữ. Lỗi AI khác sau mọi lượt thử ⇒ **không dừng** I-4: giữ ảnh gốc + cờ vàng `import_image_unread` ("AI đọc ảnh đang quá tải"). FLF-360: lỗi tạm thời ⇒ `kind: unavailable`, đọc lại sau khi chạy hết các mục (tối đa `IMPORT_AI_RETRY_BACKOFF_MS` lượt, giãn dần; #4 `reread`); vẫn chưa được ⇒ job nền đọc lại sau bản 0.1. Lỗi không tự khỏi ⇒ `kind: failed` (không đọc lại). Lô chữ lỗi tạm thời đọc lại cùng số lượt rồi mới `paused: resume_later`. Hai action đọc ảnh không dự phòng sang Gemini; embedding giữ nguyên cấu hình riêng.
+  Môi trường không có vision (`ANTHROPIC_KEY_MISSING`, `GEMINI_KEY_MISSING`, `AI_PROVIDER_NO_VISION`) ⇒ không dừng: ảnh coi như định dạng không hỗ trợ (giữ ảnh + cờ vàng).
 - **Field từ ảnh**: `ReviewField.origin` thêm **`vision`**. Độ tin ≤ 0.7 và **luôn** vào `review_fields` (1.9) kể cả bằng ngưỡng — chưa xác nhận thì finalize bỏ. Danh sách tham chiếu (`actor_ids`, `includes`, `extends`, `relations`, `flow_to`) từ nhiều nguồn gộp hợp. `screens.flow_to` được trích.
 - **Finalize (1.10)** — **đổi ở §4.13** (giữ ảnh gốc): ảnh đọc được (use case / ERD / luồng màn / ngữ cảnh) ⇒ bỏ ảnh gốc, diagram PlantUML vẽ từ Spine thay; ảnh ở mục diagram không đọc được (`other` / định dạng không hỗ trợ) ⇒ giữ ảnh gốc + **cờ vàng `rule_id: import_image_unread`** (model-owned, recompute không đóng).
 
@@ -315,7 +338,7 @@ Plan: `claude_plan/mode1-v3/phase-7-cr-thieu-thong-tin.md`. Không thêm cạnh 
 
 - **Tài liệu bổ sung** (`ChangeRequestDto.materials[]`): `{ material_id: "M01", kind: text | file | image, name, text, truncated, round, added_at }`. Chỉ lưu chữ (≤ 20 000 ký tự, dài hơn thì cắt + `truncated`); `round` 0 = đính kèm lúc tạo, `n` = khi trả lời vòng `n`. Tối đa 10/CR. Chữ đi vào prompt 3.2, 3.6, 3.9 (tổng ≤ 12 000 ký tự/prompt).
   - `POST /change-requests` thêm `materials?: [{ name, text }]` (≤ 5 đoạn dán).
-  - **Mới** `POST /change-requests/:crId/materials` — JSON `{ name, text }` hoặc multipart `file` (.docx/.pdf/.txt/.md tách chữ tại chỗ; PNG/JPEG ⇒ `call_kind` mới **`cr_material_image`**, 1 credit, Gemini, usage `step_id: C-1:<cr_id>`; hết credit ⇒ 402, lỗi AI ⇒ 502, không lưu). Chỉ ở `draft` / `awaiting_answers`, khác ⇒ 409 `CR_INVALID_TRANSITION`. Trả 201 + chi tiết CR. Lỗi mới: 409 `CR_MATERIAL_LIMIT`, 422 `CR_MATERIAL_UNSUPPORTED`, 422 `CR_MATERIAL_EMPTY`.
+  - **Mới** `POST /change-requests/:crId/materials` — JSON `{ name, text }` hoặc multipart `file` (.docx/.pdf/.txt/.md tách chữ tại chỗ; PNG/JPEG ⇒ `call_kind` mới **`cr_material_image`**, 1 credit, Anthropic `claude-haiku-5-5`, usage `step_id: C-1:<cr_id>`; hết credit ⇒ 402, lỗi AI ⇒ 502, không lưu). Chỉ ở `draft` / `awaiting_answers`, khác ⇒ 409 `CR_INVALID_TRANSITION`. Trả 201 + chi tiết CR. Lỗi mới: 409 `CR_MATERIAL_LIMIT`, 422 `CR_MATERIAL_UNSUPPORTED`, 422 `CR_MATERIAL_EMPTY`.
   - **Mới** `DELETE /change-requests/:crId/materials/:mid` — cùng điều kiện trạng thái; không có ⇒ 404 `CR_MATERIAL_NOT_FOUND`.
 - **3.3**: `answers[]` nhận chuỗi **rỗng** (= "chưa biết"); vẫn phải đủ số câu, đúng thứ tự.
 - **Đáp án gợi ý**: `ChangeRequestDto.clarifications[].suggestions: string[][]` — song song `questions`, 0–4 đáp án AI gợi ý mỗi câu (`[]` nếu không có; CR cũ ⇒ `[]`). Chỉ để FE điền nhanh; BE nhận câu trả lời là chữ như cũ.
@@ -360,7 +383,7 @@ Thay hành vi finalize của §4.10. Nguyên tắc mode 1: file của người d
   phiên bản / loại thay đổi) trước mục nội dung đầu tiên.
 - **#8 `finalizeRequestSchema.record_of_changes?`** (tối đa 500 dòng): dòng người dùng đã xem/sửa ở wizard, thay cho dòng đọc
   từ file khi in lên đầu bảng §I. Không gửi ⇒ như cũ (đọc lại từ file).
-- **Mẫu IEEE**: `templateProfileDtoSchema.template_family` (`fpt` · `ieee830` · `ieee_features`, mặc định `fpt`) và
+- **Mẫu IEEE** (FLF-363 thay danh mục riêng bằng ngân hàng phần chung — xem §FLF-363 cuối file): `templateProfileDtoSchema.template_family` (`fpt` · `ieee830` · `ieee_features`, mặc định `fpt`) và
   `headingMapEntrySchema.template_section?` (mã nội bộ của mục mẫu IEEE khớp được — `section_id = unmapped` kèm field này là
   mục chỉ có ở IEEE, giữ nguyên văn). Heading IEEE khớp theo danh mục IEEE (`template-catalog.ts`) rồi trích vào section FPT;
   nhiều heading có thể cùng `section_id` (Reliability + Availability ⇒ `fixed:4.2.2`). Request #5 không đổi hình.
@@ -372,6 +395,12 @@ Thay hành vi finalize của §4.10. Nguyên tắc mode 1: file của người d
   path không có khoá, hoặc không tra được tên. FE ghép vào nhãn: "Tác nhân A01 (Learner) — Loại".
 
 ### 4.15 Ước tính credit I-4 trước khi trích (chỉ thêm field)
+
+> **FLF-343:** ước tính của cả lượt một mạch, báo **một lần** ngay sau upload: thêm `check_calls` (lô 1.11 theo cách chia lô của
+> lượt chạy + một lượt kiểm chéo, giá `import_semantic_check` / `import_cross_check`), đã gộp vào `ai_calls` và `credits`. Credit
+> thực trừ ≤ con số đã báo (cận trên: sau finalize section tạm đổi sang id thật ngắn hơn nên số lô kiểm tra không tăng); thiếu
+> giữa chừng ⇒ `paused: credits` như cũ, nạp rồi #10 chạy tiếp tới `gap_review`. FE khoá nút Bắt đầu khi `available_credits`
+> (hoặc số dư header) nhỏ hơn `credits`.
 
 - **#4 `getImportResponseSchema.credit_estimate?`** (`nullable`): `{ text_batches, diagram_images, ai_calls, credits,
   available_credits }`. Chỉ tính khi import ở `mapping_review`, hoặc `extracting` mà job nền chưa chạy / đang `paused`; trạng
@@ -421,8 +450,44 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 
 ## 3. Lịch sử thay đổi contract
 
+- **FLF-388 (2026-11-08) — dừng lượt đọc nội dung, chỉ thêm endpoint / giá trị enum:** #10b `POST /import/pause`; `paused.reason` thêm `user` (người dùng bấm Dừng ở `extracting`). Tiếp tục vẫn qua #10. Nạp credit không tự chạy lại bước dừng vì `user` (chỉ `credits`).
+
+- **FLF-343 (2026-10-30) — chế độ 1 một mạch, chỉ thêm field / giá trị enum:** #6 `confirm_latest?`; #4 `credit_estimate.check_calls?`
+  (ước tính gồm kiểm tra AI); `heading_map[] / table_map[].auto_confirmed?`; `detected_by` thêm `toc` · `numbering` · `format`
+  (I-3 dùng mục lục, đánh số tự động `numPr`, in đậm / cỡ chữ làm tín hiệu — mục lục không bao giờ thành block nội dung, kể cả
+  mục lục gõ tay); cờ vàng mới `import_needs_review` ("Cần xem"). Không còn điểm dừng `awaiting_latest_confirm` / `mapping_review` /
+  `fields_review` / nút tạo baseline cho file mới — #3, #5, #7 chỉ phục vụ bản ghi cũ; #8 còn cho `incomplete` (Hoàn thiện). Độ
+  tin item AI ở I-4 = điểm AI × 0.6 + trung bình tín hiệu code × 0.4 (nguồn block hợp lệ, khoá / giá trị khớp chữ nguồn, độ tin
+  khớp mục). §0.1, bảng #3–#10, §4.15.
+
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-11-12 | FLF-404 (danh sách dài tải theo trang) | Additive, client cũ không đổi: `GET /projects` có `?page` ⇒ một trang + `meta { page, limit, total, totalPages }`, nhận thêm `limit` (≤ 100, mặc định 24), `status`, `mode`, `q` (tên, không dấu), `sort` (`created` · `updated` · `opened`, chưa mở xếp cuối), `folder` (id hoặc `none`); không có `page` ⇒ mảng như cũ. `GET /admin/feedback` nhận `page`, `limit` (≤ 100, mặc định 20), `q` (nội dung / email / tên người gửi, không dấu), `meta` thêm `page`, `limit`, `totalPages`. `GET /admin/template-gaps` nhận `page` (mặc định 1; `limit` giữ ≤ 500, mặc định 50), `rows` là một trang sau khi gom, `meta` đếm toàn bộ. `GET /admin/ai-cost` nhận `page`, `limit` (≤ 100); không `limit` ⇒ trả mọi dòng như cũ; `totals` luôn trên toàn bộ nhóm |
+| 2026-11-12 | FLF-405 (giới hạn token tài liệu tham khảo) | Additive. `POST /projects/:id/documents` thêm hai mã `413`, chưa lưu, chưa upload, không tốn credit — trần một lần tải kiểm ngay sau khi Code trích chữ; trần dự án kiểm **sau** bước kiểm trùng / hỏi bản mới (FLF-398), nên file sát trần vẫn được hỏi "Thay bản cũ" trước: `DOCUMENT_TOO_LONG` (`meta { file, token_count, limit }`, trần mỗi lần tải = env `REFERENCE_MAX_TOKENS_PER_UPLOAD`, mặc định 100 000) và `PROJECT_DOCUMENT_QUOTA_EXCEEDED` (`meta { file, token_count, used, limit }`, trần tổng dự án = `plan.config` `maxReferenceTokens` theo gói của org: Free 200 000, Pro 1 000 000). `used` = tổng `tokenCount` tài liệu còn hiệu lực (bỏ bản `supersededBy`, bỏ bản parse lỗi); `replace_document_id` ⇒ trừ token bản bị thay. Parse lỗi vẫn lưu `failed`. Tài liệu đã có không bị chặn / xoá. `GET /projects/:id/documents` trả thêm `meta { tokens_used, tokens_limit, tokens_per_upload_limit }`. Token ước lượng ký tự / 4. Không áp cho tài liệu bổ sung của CR |
+| 2026-11-12 | FLF-412 (mẫu còn chữ cũ: Bỏ chữ theo vùng) | Additive: endpoint mới #5b `PATCH /import/drop-text`; #4 thêm `text_sections: { key, title, level, dropped }[] | null` (chỉ trước Bắt đầu). #8d lưu **khung** (luật mẫu khung tự lưu) thay vì nguyên file. `OrgTemplateHeading.has_text?` (file mẫu còn chữ thật dưới heading) ở chi tiết bản mẫu. Đổi mẫu: mục thiếu chỉ in chữ hướng dẫn + hàng tiêu đề bảng của mẫu đích |
+| 2026-11-12 | contract-change FLF-410 (Screen Layout = mockup SVG theo theme dự án) | Additive. `Project` thêm `screenTheme` (`{ primaryColor, domain, platforms }`, mọi field mặc định `null`; trả ở mọi response `Project`) và `screenMockups[]` (nội bộ, đọc qua #1d). Endpoint mới #1c `PATCH /projects/:id/screen-theme` và nhóm #1d `screen-mockups` (tóm tắt / ước tính / chạy nền 202 / dừng / dùng ảnh gốc / ảnh gốc). Dự án import: ảnh gốc màn giữ nguyên tới khi người dùng chọn vẽ lại; mục có nhiều ảnh màn hình ⇒ thay hết. Không đổi `spine.schema.ts`, `renderFixSchema`, `ActionType` |
+| 2026-11-12 | FLF-403 (thư viện mẫu tải dần) | Additive: `GET /orgs/:orgId/templates` nhận `?page`, `limit` (≤ 50, mặc định 20), `q`, `sort` (`uses` · `recent` · `name`); có `page` ⇒ trả một trang + `meta { page, limit, total, totalPages }`, `q` tìm không phân biệt dấu theo tên mẫu / tên file. Không có `page` ⇒ y như cũ (mảng, tối đa 100) cho ô chọn mẫu lúc tạo dự án |
+| 2026-11-12 | contract-change FLF-403 (gỡ thư viện nội dung tổ chức) | **Breaking, bỏ endpoint**: `/orgs/:orgId/content-library` (GET/POST/PATCH/DELETE), #8e `GET /projects/:id/library-matches`, #8f `POST /projects/:id/library`; mã lỗi `ORG_CONTENT_DUPLICATE`, `ORG_CONTENT_NOT_FOUND`, `CUSTOM_SECTION_EMPTY`, `CUSTOM_SECTION_NOT_FOUND` không còn. Lý do: nội dung mục riêng (References, Document Conventions…) thuộc từng dự án, khớp theo tiêu đề giữa các dự án là sai giả định; phần dùng lại được là khung mẫu (`OrgTemplate`). Collection `org_content_entries` không còn được đọc / ghi |
+| 2026-11-11 | FLF-395 (đổi mẫu, lát 5c: sửa sau review) | Additive: `PATCH …/mapping`, `POST …/restore`; `MigrationDto` thêm `broken_links`, `revertable`, `revert_blocked_reason`, `previous_template`, `language.switches_document_language`; trạng thái `reverting`, `apply_failed`; lựa chọn `drop_from_print` cho mục khung (đổi: `delete` chỉ còn cho mục riêng chữ tự do); `call_kind` mới `template_migration_resolve` (3 credit / lượt); rào `409 TEMPLATE_MIGRATION_APPLYING` cho ghi bản nháp khi đang đổi mẫu; dự án mode 2 / từ FPT chỉ đổi ngôn ngữ tài liệu. Xem §FLF-395 "lát 5c" |
+| 2026-11-11 | FLF-395 (đổi mẫu, lát 5b: áp dụng) | Additive: endpoint mới `POST /projects/:id/template-migrations/:migrationId/apply` và `…/revert`; trạng thái migration mới `reverted`; CR nguồn `template_migration` (ngoài nguồn nhận khi tạo CR); job `system/recover-template-migrations`; mã lỗi mới `TEMPLATE_MIGRATION_{SPINE_REJECTED,LINKS_BROKEN,REVERT_BLOCKED,TARGET_UNAVAILABLE,BUILD_FAILED,TRANSLATION_FAILED,NO_SNAPSHOT}`; binding version thêm `strip_template_text`. Xem §FLF-395 "Đổi mẫu — áp dụng, hoàn tác" |
+| 2026-11-10 | FLF-395 (đổi mẫu, lát 4: dựng file nền) | Additive: `TemplateVersionSummary.published_by` (`{ id, name | null }`, người tạo / đăng bản) và `OrgTemplateSummary.skeleton_source_project_id` (dự án nguồn của mẫu khung tự lưu) trong `GET /orgs/:orgId/templates`; không endpoint mới. Dựng file nền là nội bộ, chưa có API (áp dụng ở lát sau); mã lỗi mới `TEMPLATE_MIGRATION_FILE_TOO_LARGE` (422) |
+| 2026-11-10 | FLF-395 (đổi mẫu, lát 3: chuẩn bị) | Additive: endpoint mới `POST/GET /projects/:id/template-migrations`, `GET …/:migrationId`, `PATCH …/:migrationId/pairs`, `POST …/:migrationId/confirm-mapping`, `PATCH …/:migrationId/decisions`, `POST …/:migrationId/ready`, `POST …/:migrationId/cancel`; collection `template_migrations`; xoá bản / họ mẫu bị chặn khi có lần đổi mẫu chưa kết thúc trỏ tới (`409 ORG_TEMPLATE_IN_USE_BY_MIGRATION`). Chưa dựng file nền / áp dụng / hoàn tác / dịch. Xem §FLF-395 "Đổi mẫu" |
+| 2026-11-10 | FLF-395 (tự lưu khung mẫu, lát 2) | Additive: tự lưu khung mẫu tổ chức sau baseline cho dự án mẫu tự do; endpoint mới `GET /projects/:id/template-skeleton`, `POST …/template-skeleton/decisions`, `POST …/template-skeleton/suggest`; `call_kind` mới `skeleton_generic_names` (1 credit); thông báo `skeleton_headings_pending`; `OrgTemplateSummary.skeleton` + `pending_count`. Xem §FLF-395 "Tự lưu khung mẫu" |
+| 2026-11-10 | FLF-395 (version mẫu tổ chức, lát 1) | Additive + siết quyền: `OrgTemplate` thành họ mẫu, mỗi bản một `OrgTemplateVersion`; endpoint mới `POST /orgs/:orgId/templates`, `POST …/:templateId/versions`, `GET …/versions/:version`, `POST …/versions/:version/publish`, `DELETE …/versions/:version`; #8c nhận `version?`; #8d nhận `template_id?` và **chỉ Lead** (Analyst ⇒ `403 ORG_ROLE_FORBIDDEN`); xoá mẫu / bản chỉ Lead; `OrgTemplateSummary` thêm `latest_version`, `project_count`, `versions[]`; `GET /projects/:id` thêm `template_update`; `Project.template_ref`; `ImportedDocument.org_template_version`; thông báo `template_version_published`; .docx bị chặn theo byte giải nén thật + số mục. Xem §FLF-395 cuối file |
+| 2026-11-06 | FLF-360 (AI quá tải lúc import: tự đọc lại) | Additive: #4 trả thêm `reread: { kind: "images" \| "text", done, total, section_id } \| null` (đang đọc lại — FE hiện "Đang đọc lại ảnh N/M"). Hành vi §4.10: lô chữ lỗi tạm thời (quá tải, 503, 429 không phải hết tiền, timeout, mạng) đọc lại tối đa 3 lượt giãn dần rồi mới `paused: resume_later`; ảnh `unavailable` đọc lại sau khi chạy hết các mục; lỗi AI không tự khỏi ghi `diagram_images.kind = failed` (không đọc lại). Ảnh vẫn chưa đọc được sau bản 0.1 ⇒ job nền `import/reread-images` đọc lại theo lịch, ghi lô `by: import` (không version mới), đóng cờ `import_image_unread`. `credit_estimate` tính cả ảnh chờ đọc lại |
+| 2026-11-06 | FLF-278 (dự án "Upload SRS có sẵn": tải về giống file upload) | Hành vi, không đổi shape: export / version của dự án có sẵn (mẫu công ty hoặc cấu trúc FlintFlow đủ mục) dùng file upload làm nền, mục chưa đổi in nguyên văn, bảng lịch sử không thêm dòng import; SRS có field không còn 422. Xem §FLF-278 "Dự án Upload SRS có sẵn" |
+| 2026-11-05 | FLF-278 (kết quả đọc theo loại dự án; bảng mẫu trống) | Hành vi, không đổi shape: #8b chỉ cho dự án mới theo mẫu bắt buộc (dự án có sẵn ⇒ `409 IMPORT_INVALID_STATE`); #8 `complete: true` ở `incomplete` bị chặn với dự án mới theo mẫu bắt buộc (`409`, `meta.allowed = ["drafting"]`). Bảng mẫu chỉ có tiêu đề + hàng chỗ trống tính là trống ở I-5 / cờ `template_section_empty`, không sinh item ở I-4. Xem §FLF-278 "Luồng 2 cho phần thiếu" |
+| 2026-11-04 | contract-change FLF-364 (chữ hướng dẫn `[ ]` / `{ }`) | Luật hướng dẫn chỉ `[ ]` / `{ }`; `guidance` nguyên văn ≤ 4 000 + `guidance_by?` + `guidance_blocks?`; `table_map[].guidance?`; prompt C-4 kèm hướng dẫn mẫu — xem §FLF-364 cuối file |
+| 2026-11-04 | contract-change FLF-363 (ngân hàng phần chung FPT + IEEE 29148) | `template_family` enum mới `fpt` · `ieee29148` · `mixed` (nhãn báo cáo; giá trị cũ đọc ra `ieee29148`, script `migrate:template-family`); `template_section?` = id phần của ngân hàng; heading thêm `content_mismatch?` — xem §FLF-363 cuối file |
+| 2026-10-29 | contract-change FLF-278 (mẫu bắt buộc: Luồng 2 cho phần thiếu, phần nhỏ `slot:*`, thư viện tổ chức) | Additive — xem §FLF-278 cuối file. Trạng thái import mới `drafting` (`incomplete → drafting → delivered`); endpoint mới #8b `POST /import/continue`, #8c `POST /import/from-org`, #8d `POST /import/save-to-org`, #8e `GET /library-matches`, #8f `POST /library`, `/orgs/:orgId/templates`, `/orgs/:orgId/content-library`, admin `GET /admin/template-gaps`; `heading_map[].guidance?`; `section_id` nhận thêm `slot:*`; cờ vàng `template_section_absent` / `template_section_empty` |
+| 2026-10-27 | contract-change FLF-336 (I-5 so cấu trúc đích, lát 1) | Additive. Trạng thái import mới `incomplete` (`baselining → incomplete → baselining`), không có v0 ở trạng thái này; `TemplateProfile.target_structure` (`present / missing / out_of_scope`, `resolved_mode` 1 / 3 / 4) trả ở #4 và #9; #8 nhận `complete: true` để đi tiếp từ `incomplete`; #9 mở từ `incomplete`. Chưa làm: vòng rà soát phần có sẵn, Luồng 2 chỉ cho phần thiếu, xem trước bố cục, ghi vào file khách |
+| 2026-10-27 | contract-change FLF-338 (rút yêu cầu từ tài liệu thô, lát 1 sau baseline) | Additive. Endpoint mới #31a–#31c (`/documents/:documentId/extract`, `/extract/approve`); `CR_SOURCE_KINDS` / `NEW_CR_SOURCE_KINDS` thêm `reference_document`; `call_kind` mới `extract_requirements` (3 credit); mã lỗi `EXTRACTION_*`. Collection mới `requirementextractions`. Chưa làm: trần token theo file / dự án, nhánh trước baseline, đi tiếp từ C-3 với vị trí có sẵn (CR tạo ở `draft`, đi C-2 như thường) |
+| 2026-10-27 | contract-change FLF-337 (mức duyệt sau baseline) | Hành vi: #24 `verify` ở `review_mode = milestones` tự gọi #25 khi đạt ⇒ `written` (pipeline-contract 4f đổi mức duyệt dùng được ở mode 1) |
+| 2026-10-27 | contract-change FLF-335 (chọn dự án mới / có sẵn, Code suy ra chế độ) | Additive + bỏ lỗi: #1 nhận `source` + `has_required_template`, BE suy ra `mode`; `customer_template` không còn `501` (quy về `import` + mẫu bắt buộc); `Project` thêm `start_kind`, `has_required_template`, `template_intent`. #2 nhận field text `intent` ∈ `fixed \| free`; `ImportedDocument` thêm `intent`. Chế độ thật 1 / 3 / 4 quyết định ở bước so cấu trúc đích (FLF-336) |
+| 2026-10-23 | contract-change (quyền Lead/Viewer) | `POST /release` nay đòi **Lead** (403 `ORG_ROLE_FORBIDDEN`). Viewer: `GET /versions/:v/download` chỉ cho bản release (`x.0`) và v0, `variant=tracked` ⇒ 403; `GET /import`, `/gap-report`, `/step-plan`, `/change-requests*` ⇒ 403. |
+| 2026-10-20 | FLF-312 — bỏ bắt buộc mẫu FPT | Gap report bỏ `missing_fpt_sections[]`, `missing_sections[]`, `unmapped_headings[]` và các `totals` tương ứng; `TemplateProfile` bỏ `required_sections`; #32 bỏ `missing` — đầu mục FPT file không có ⇒ `hidden`, có heading mà trống ⇒ `enabled`; #33 `CORE_STEP_REQUIRED` chỉ còn cho bước luôn chạy / step đã có dữ liệu — breaking (FE cập nhật cùng đợt) |
+| 2026-10-31 | contract-change FLF-324 (ký pháp ERD theo dự án) | Additive. `Project` thêm `erdNotation` (`chen` \| `crowsfoot` \| `idef1x`, mặc định `chen`; dự án cũ thiếu field đọc là `chen`; trả ở `GET /projects`, `GET /projects/:id` và mọi response trả `Project`). Endpoint mới #1b `PATCH /projects/:id/erd-notation`. Ký pháp **không** nằm trong Spine; vào hash hình ERD (`renderedDiagramHash`) nên đổi ký pháp làm hình ERD cũ (`diagram_stale`). `POST /projects` không nhận `erdNotation` (luôn `chen`, đổi bằng #1b) |
+| 2026-11-14 | contract-change FLF-418 (mức Sequence Diagram, ký pháp ERD chưa chọn) | Additive. `Project` thêm `sequenceLevel?` (`system` \| `component`, không default). `erdNotation` **bỏ default** `chen`: dự án chưa chọn không có field (`GET` không trả field; FE và renderer đọc là `chen`), bước S-4.5 hỏi ký pháp trong khung chat; S-5.4 lần đầu hỏi mức Sequence. Endpoint mới #1b2 `PATCH /projects/:id/sequence-level`. Dự án cũ: `npm run migrate:erd-notation-unset` gỡ `chen` ở dự án chưa có ERD và chưa trả lời câu hỏi ký pháp |
 | 2026-10-08 | contract-change FLF-265 | #1 `POST /projects` thêm `documentLanguage?` (`vi \| en`); endpoint mới #1a `PATCH /projects/:id/document-language`, mã `409 DOCUMENT_LANGUAGE_LOCKED`. `Project` thêm `documentLanguage?` (dự án cũ không có field: mode 2 đọc `en`, mode 1 đọc theo `TemplateProfile.language`). Phần dịch / render ở `pipeline-contract.md` §3 cùng ngày |
 | 2026-10-08 | ước tính credit I-4 | §4.15: #4 thêm `credit_estimate?` (số lượt AI + credit còn phải chạy + credit khả dụng của ví org); #10 chạy tiếp từ lô AI bị dừng, không gọi lại lô đã xong — chỉ thêm field |
 | 2026-10-08 | upload lớn + finalize nền | §4.16: file #2/#11 tối đa 40 MB (`413` có `meta.max_mb`); #8 và #10 (`checking`/`baselining`) trả ngay, chạy nền, FE poll #4; `finalizeResponseSchema.baseline`/`flags` nullable (luôn `null`); `paused: resume_later` đặt được ở `baselining` (job finalize lỗi / mất ⇒ hoàn về trước finalize) — contract-change, chờ 4/4 |
@@ -444,3 +509,463 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 | 2026-09-19 | FLF-182 (mode 1 v2, V0) | §4: `steps[].status = skipped`, `custom_sections[]`, section `custom:<id>`, `layout[]`, #32–#33 step-plan, CR nguồn `chat`, `CORE_STEP_REQUIRED`, `STEP_NOT_IN_PLAN`, `CHANGE_REQUIRES_CR` chỉ sau baseline v1 — chờ 4/4 |
 | 2026-09-19 | FLF-171 (việc A sau P2) | #6, #10: I-4 chạy nền, trả ngay `extracting`; FE poll #4. Hình request/response không đổi, chỉ đổi thời điểm trả — cần nhóm duyệt như contract-change |
 | 2026-09-18 | FLF-171 (P1) | Bản đầu tiên, nhóm chốt và đóng băng cùng ngày. Đi kèm contract-change `Baseline.type` + `doc_version` trong `pipeline-contract.md` §3 (nhóm duyệt 4/4) |
+
+- **FLF-331 (2026-10-26) — I-1 nhận diện SRS bằng Code**: preflight thêm mã `NOT_SRS` (từ chối CV / hoá đơn / test plan / biên bản họp / hợp đồng trước khi tốn credit, `IMPORT_FILE_REJECTED` như các mã khác) và `preflight.document_kind` (loại + độ tin + lý do, additive, bản ghi cũ `null`). File có dấu version FlintFlow không phân loại lại. Ngưỡng / danh sách tín hiệu ở `src/modules/import/srs-detect.ts` `SRS_DETECT_CONFIG`.
+
+## FLF-330 (2026-10-26) — CR kiểu GitHub: xác nhận là ghi ngay, Lead duyệt cả gói một lần
+
+Business-flow §3.2 (C-6, C-7), §2 "Bản nháp / Gói duyệt / Baseline". **Đổi luật + additive** ⇒ PR nhãn `contract-change`.
+
+- **#25 `POST …/change-requests/:crId/submit`** nay là **C-6 BA xác nhận**: `ready_to_submit` ⇒ Code kiểm lại trên nội dung hiện tại (`CR_VALUE_CHANGED` nếu lệch) ⇒ ghi Track Changes vào bản nháp **ngay** ⇒ `written` (có `result_doc_version`), mọi group ghi nhận `approved` bởi chính người xác nhận. Không còn `in_review` cho CR mới; vị trí BA muốn bỏ thì đặt kết luận `not_related` trước khi xác nhận (#27). `in_review` + #26 `groups/:gid/decision` + `revise` / `close` chỉ còn cho CR tạo trước FLF-330 (script `npm run migrate:cr-package` đưa chúng về `ready_to_submit` để BA xác nhận lại).
+- **Gói duyệt (C-7)** — không có model riêng: gói = mọi CR `written` kể từ lần phát hành trước (suy từ `DocVersion.cr_revision`), trạng thái chờ nằm ở `Spine.baseline_submission` (cùng field với nộp baseline mode 2 ⇒ `DRAFT_LOCKED` / `PACKAGE_PENDING` khoá mọi đường sửa):
+  - `GET /projects/:id/review-package` → `reviewPackageSchema` `{ status: drafting | pending | changes_requested, base_version ("v0" / "1.0"), latest_version, next_version, draft_label ("1.0 · 3 thay đổi chưa duyệt"), change_requests[], red_open, submission, spine_version }`. Mọi vai trò trong org.
+  - `POST /projects/:id/review-package/submit` `{ base_version }` (Lead, Analyst): quét lại cờ (hồ sơ mode 1, `at_baseline`), cờ đỏ > 0 ⇒ `422 RELEASE_RED_FLAGS_OPEN` (`meta.flags[]`); chưa có CR ⇒ `409 PACKAGE_EMPTY`; đã gửi ⇒ `409 PACKAGE_ALREADY_SUBMITTED`. Đặt `baseline_submission = pending`, báo in-app `review_package_submitted` cho mọi Lead khác.
+  - `POST /projects/:id/review-package/request-changes` `{ base_version, reason ≥ 10 }` (Lead): `baseline_submission = rejected` + lý do, mở khoá, báo người gửi `review_package_changes_requested`; không có gói chờ ⇒ `422 NO_PENDING_SUBMISSION`.
+  - **Lead duyệt cả gói = `POST /projects/:id/release`** (#31, không đổi body): phát hành số chính như cũ, rồi xoá `baseline_submission` và báo người gửi `review_package_released`. Lead tự làm thì gọi thẳng, không qua bước gửi.
+- **Khoá bản nháp khi gói chờ duyệt**: `POST /change-requests` (#16) và `#25 submit` trả `409 PACKAGE_PENDING`; `/changes`, `/reconcile`, `/undo` trả `409 DRAFT_LOCKED` như FLF-293.
+- **Đánh số**: bản nháp sau mỗi CR vẫn là một `DocVersion` minor (`0.2`, `1.1`…) để giữ file Track Changes theo từng CR cho Lead xem diff — nhưng người dùng thấy `draft_label` (chỉ số chính); tên file bản nháp theo FLF-334.
+- Thông báo mới: `change_request_written`, `review_package_submitted`, `review_package_changes_requested`, `review_package_released`.
+
+## FLF-278 (2026-10-29) — dự án mới có mẫu bắt buộc: Luồng 2 cho phần thiếu, phần nhỏ, thư viện tổ chức
+
+Bám business-flow (`docs/FlintFlow-Business-Workflow-Overview.png`): dự án mới có mẫu bắt buộc đi **Luồng 1 → Luồng 2 tại 2.4**,
+mẫu bắt buộc = "chỉ mẫu đó, không thêm phần, không đổi thứ tự", người dùng không gõ tay nội dung.
+
+### Sửa I-5 (lát 1, không đổi shape)
+- Mục riêng (heading không map, `custom:*`) có chữ thật ⇒ `present` (trước đây luôn `missing`).
+- Chữ hướng dẫn của mẫu (`[…]`, "This section describes…", ô `[Name]`) không tính là nội dung (`shared/utils/instruction-text.ts`).
+- Bản in dự án `template_intent = fixed`: `TemplateLayout.fixedTemplate` ⇒ không chèn mục FlintFlow ngoài mẫu (feature / function
+  mới vẫn chèn dưới mục chức năng của mẫu).
+- Cờ vàng mới (waive được, chỉ khi hồ sơ luật có layout mẫu): `template_section_absent` (mục FlintFlow có dữ liệu mà mẫu không có
+  ⇒ không in), `template_section_empty` (mục riêng của mẫu chưa có chữ thật). Luật mục trống / cũ chỉ áp lên mục của mẫu.
+- Heading bao của mẫu (mục riêng chỉ chứa mục con, vd "2 Overall Description" — `import/template-wrappers.ts`) mà không có chữ thật:
+  không xếp `missing` ở I-5, không cờ `template_section_empty`, không vào `GET /admin/template-gaps`, FE không hiện "Nhờ AI soạn".
+  Phần nối (mục riêng tiêu đề rỗng, FLF-184) không phải heading của mẫu ⇒ không thành dòng ở I-5.
+
+### Luồng 2 cho phần thiếu (lát 3)
+| # | Method + path | Body | Kết quả / lỗi |
+|---|---|---|---|
+| 8b | `POST /projects/:id/import/continue` | `{ import_id, base_version }` | `{ project_mode: "fpt", import_state: "drafting", current_step, spine_version }`. **FLF-388:** chỉ còn cho **bản ghi cũ** dừng ở `incomplete` (finalize mới tự sang Luồng 2). Điều kiện: `template_intent = fixed` và `target_structure.resolved_mode = 3` — áp dụng cả dự án có sẵn (bỏ điều kiện `start_kind = new`); chế độ 4 (cần 2.9a — chưa hỗ trợ) ⇒ `409 IMPORT_INVALID_STATE` (`meta.resolved_mode`). Cùng lõi với lần tự chuyển: khung mẫu ⇒ soạn đủ mục mẫu; SRS đã viết ⇒ chỉ soạn mục thiếu, mục đã viết giữ chốt + Spine mốc cho bản in nguyên văn |
+
+Ràng buộc theo loại dự án (2026-11-05): ở `incomplete`, dự án **mới** theo mẫu bắt buộc chỉ đi #8b — #8 với `complete: true` trả
+`409 IMPORT_INVALID_STATE` (`meta.allowed = ["drafting"]`), vì khoá mẫu còn trống thành bản gốc là vô nghĩa; FE chỉ hiện nút "Viết với
+FlintFlow". Dự án **có sẵn** (người dùng upload để sửa tiếp SRS, 2026-11-06): một nút "Tiếp tục sửa với FlintFlow" = #8
+`complete: true` (bản gốc 0.1 từ chính file rồi vào workspace); gap report (#9) tải ở workspace, không còn nút ở màn này. Heading
+tính năng (`feature:*`) chỉ chứa chức năng con là heading bao (`template-wrappers.ts`), không thành mục "còn trống" ở I-5. Không đổi
+shape.
+
+I-5 / I-4 với bảng mẫu (2026-11-05, không đổi shape): bảng chỉ có hàng tiêu đề + hàng chỗ trống (`[FR-xxx]`, `[dd/mm/yyyy]`) là
+**trống** (`missing`, cờ `template_section_empty`); bảng một hàng xét như nhãn | giá trị. Hàng chỗ trống không thành item tất định
+ở I-4 (`deterministicTableItems`).
+
+Hành vi: mở lại bước Brief B-1…S-1 (2.4–2.7; B-0 = 2.1–2.3 giữ bỏ qua), bước sở hữu mục thiếu giữ `pending`, `Project.mode = fpt` (luồng
+tạo mới: chạy step, ký baseline), `import_state = drafting`, `documentLanguage` = ngôn ngữ file mẫu. Bản in theo layout mẫu. Ký
+baseline 1.0 ⇒ FLF-318 đưa dự án về mode 1, lần import mẫu `drafting → delivered`; sửa sau đó qua CR (Luồng 3).
+
+### Phần nhỏ `slot:*` + hướng dẫn soạn ở 1.5 (lát 2)
+- `heading_map[].section_id` nhận thêm 13 phần nhỏ (`import/content-slots.ts`: `slot:vision`, `slot:scope`, `slot:assumptions`…). I-4
+  trích chữ dưới heading vào collection của phần đó; bản in chỉ in phần đó dưới heading (`section-renderer#renderContentSlot`);
+  mục FPT cha không chèn lại. Slot + mục FPT cha cùng có heading ⇒ #5 `409 IMPORT_INVALID_STATE` (`meta.overlaps`).
+- Matcher gợi ý slot cho heading chưa khớp theo từ khoá (độ tin 0.7 ⇒ luôn qua 1.5).
+- `heading_map[].guidance?: string` — chữ hướng dẫn của mẫu dưới heading (≤ 400 ký tự), chỉ để BA xem.
+
+### Mẫu và thư viện cấp tổ chức (lát 5)
+| Method + path | Quyền | Body | Kết quả |
+|---|---|---|---|
+| `POST /projects/:id/import/save-to-org` | lead (FLF-395) | `{ name, template_id? }` | 201 `OrgTemplateSummary` (lưu bản sao file mẫu + mapping đã xác nhận; `template_id` ⇒ bản mới của mẫu đó, xem §FLF-395); `409 IMPORT_INVALID_STATE` khi chưa qua 1.5 |
+| `POST /projects/:id/import/from-org` | lead, analyst | `{ org_template_id, version?, intent? }` | 201 `{ import }` — import từ file đã lưu, không hỏi "bản mới nhất", mapping áp sẵn; `404 ORG_TEMPLATE_NOT_FOUND` (kể cả tổ chức khác) |
+| `GET /orgs/:orgId/templates` · `DELETE …/:templateId` | thành viên · lead (FLF-395) | query `page?`, `limit?`, `q?`, `sort?` (FLF-403) | `OrgTemplateSummary[]` (+ `meta` khi có `page`) · `{ deleted, project_count }` |
+| `GET /admin/template-gaps?limit=` | admin | — | `{ projects, rows[{ key, samples, projects, empty, suggested_destination }] }` |
+
+Thư viện nội dung tổ chức (`content-library`, `library-matches`, `POST /library`) đã gỡ ở FLF-403 — xem nhật ký đầu file.
+
+### Dự án "Upload SRS có sẵn": tải về giống file upload (2026-11-06, không đổi shape)
+
+Dự án có sẵn (`start_kind ≠ new`, không chuyển từ mode 2) theo **mẫu cố định của công ty** hoặc **cấu trúc FlintFlow đủ mục**
+(chế độ 1): `/export/word|pdf`, file version (#14) dùng **chính file upload** làm nền.
+
+- **Mục chưa đổi** so với bản gốc 0.1 in nguyên văn: đoạn, bảng, ảnh, field, chú thích, bìa. Chưa có CR ⇒ bản tải về có chữ y
+  hệt file upload, chỉ thêm stamp + watermark DRAFT.
+- **Mục bị CR sửa** mới dựng lại từ Spine; bảng gốc dựng lại vẫn là bảng.
+- **Bảng lịch sử** của file giữ nguyên. Không thêm dòng "Import SRS …" / "Baseline 0.1 signed"; mỗi CR thêm một dòng cuối bảng.
+- **SRS có field** (chú thích hình SEQ, bookmark `_Ref`) không còn làm finalize lỗi `422 TEMPLATE_LAYOUT_UNAVAILABLE`.
+- **Dự án có sẵn + mẫu cố định** vẫn chia đoạn nguyên văn (FLF-366). Chỉ mẫu bắt buộc của dự án mới không chia.
+- **Mẫu công ty đã điền:**
+  - tên chức năng / tính năng không bị gán phần nhỏ theo từ khoá;
+  - "Functional Requirements" chứa heading từng chức năng là heading bao;
+  - heading lặp có nội dung trích vào Spine không bị coi là trống (I-5, `template_section_empty`);
+  - cờ sơ đồ của mục mẫu không có không chặn release;
+  - CR nhắm được mục `slot:*`;
+  - gap report gọi "Mục của mẫu", không đòi sơ đồ mẫu không có, `.docx` liệt kê mục còn trống.
+- **Chế độ 4** (thiếu mục FlintFlow) vẫn in theo mẫu FPT.
+
+### Bản xuất theo đúng file mẫu (2026-11-05, mở rộng D1)
+Dự án `template_intent = fixed`: `GET /projects/:id/export/word|pdf` và file version điền nội dung vào **chính file mẫu đã
+upload** (`render/template-docx-writer.ts`). Bìa, lề, styles, numbering, header/footer và heading của mẫu giữ nguyên;
+FlintFlow không thêm bìa, mục lục, header/footer hay phụ lục cờ. Shape response không đổi (file `.docx` / `.pdf`).
+
+Watermark DRAFT (2026-11-05): bản làm việc (`source=draft`) và tải version chưa phát hành (#14) **có** watermark chữ mờ "DRAFT"
+như mẫu FPT — chỉ thêm shape vào header (mẫu không có header ⇒ một header chỉ chứa watermark, không chữ nào khác). Bản
+`source=baseline`, file version lưu và bản release không có watermark.
+
+Mapping lúc tách file (`matchProfile(…, { fixedTemplate: true })`) và lúc xuất dùng chung `bindFixedTemplateHeadings`:
+- phần nhỏ theo tiêu đề;
+- heading cha mà con cùng mục ⇒ heading bao.
+
+Lỗi mới — cùng mã, hai nghĩa:
+
+| HTTP | `code` | Khi nào |
+|---|---|---|
+| 409 | `TEMPLATE_LAYOUT_UNAVAILABLE` | Thiếu file mẫu / mapping / snapshot nguồn của version (không chứng minh được nguồn duy nhất) |
+| 422 | `TEMPLATE_LAYOUT_UNAVAILABLE` | Có nguồn nhưng không điền an toàn được (`meta.reason`: chữ cùng đoạn với section break, field / object, cột bảng mơ hồ, ô gộp dọc…) |
+
+Cả hai đều không tự chuyển sang mẫu chuẩn FlintFlow.
+
+## FLF-334 (2026-10-29) — tên file tải về + stamp mang nhãn version
+
+**Đổi tên file + additive stamp** ⇒ PR nhãn `contract-change`. Một quy tắc tên chung cho #14 (mode 1) và `export/word` / `export/pdf` (mode 2, `pipeline-contract.md` #18/#34), Word lẫn PDF (`versionFileName`, `doc-version/versioning.ts`). **Không còn mã dự án trong tên** — máy nhận dự án qua stamp (`flintflow_project_id`).
+
+- `<tên>` = tên dự án, bỏ ký tự Windows cấm (`\ / : * ? " < > |` ⇒ `_`), giữ chữ Unicode; rỗng ⇒ `SRS`. Header luôn `Content-Disposition: attachment; filename*=UTF-8''<tên mã hoá>` (mode 2 trước đây là `filename="<slug ASCII>"`). `.pdf` = cùng tên, đổi đuôi.
+- Release (`x.0`, x ≥ 1; mode 2: baseline): `<tên>_v2.0.docx`. Baseline `0.x` (bản import) không phải release nhưng bản xuất `source=baseline` không có watermark DRAFT ⇒ tên `<tên>_v0.1.docx` (FLF-356: giữ đúng số bản import, `_DRAFT` theo nội dung file), stamp vẫn `kind: draft`. Tải version `0.1` ở endpoint 14 có watermark ⇒ vẫn `<tên>_v0.1_DRAFT.docx`.
+- Bản nháp mode 1: `<tên>_v<gốc>+<CR mới nhất>_DRAFT.docx` — gốc = version release (`x.0`) gần nhất trước nó (theo số, kể cả bản `1.0` chuyển đổi FLF-318), số bản import (`0.1`, dự án cũ `0.0`) khi chưa release (FLF-356); CR = mã CR cuối của version gần nhất (tính cả chính nó, sau gốc) có CR — bản nháp cũ trong lịch sử mang CR của chính nó. Không có CR (bản import `0.1`/`0.0`) ⇒ `<tên>_v0.1_DRAFT.docx`.
+- Bản nháp mode 2: có baseline ⇒ `<tên>_v<baseline cuối>_DRAFT.docx`; chưa có ⇒ `<tên>_DRAFT.docx`.
+- `variant=tracked` thêm `_tracked` trước `_DRAFT`; `variant=original` dùng `_original` thay `_DRAFT`.
+- **Stamp** (`docProps/custom.xml`) thêm 3 property, chỉ ghi lên **file tải về / xuất ra** (file lưu trong GridFS không đổi; `variant=original` trả nguyên byte file upload):
+  - `flintflow_base_version` — gốc như trên (`2.0`, `1.0`, `0`); mode 2 chưa baseline ⇒ không ghi.
+  - `flintflow_latest_cr` — CR mới nhất của bản nháp mode 1; release / mode 2 ⇒ không ghi.
+  - `flintflow_kind` — `release` | `draft`.
+  - `flintflow_version` giữ nghĩa cũ (version nội bộ `1.2`, nhãn mode 2). File thiếu property mới (stamp cũ) ⇒ đọc ra `null`; preflight, import, re-upload chấp nhận y như trước.
+- `ImportedDocumentDto.stamp` / `meta.stamp` của `IMPORT_STAMP_FOREIGN_PROJECT` (`docStampSchema`) thêm `base_version`, `latest_cr`, `kind` — đều `string | null`, mặc định `null`.
+
+## FLF-334 B (2026-10-29) — tải version theo ngôn ngữ còn lại
+
+**Additive** ⇒ PR nhãn `contract-change` (cùng `pipeline-contract.md` #18/#34/#26/#27).
+
+- #14 nhận `lang=vi|en` (`downloadQuerySchema`). Không truyền / = ngôn ngữ tài liệu ⇒ y như trước.
+- `lang` khác chỉ cho version **có snapshot baseline** (`baseline_ref`: release, bản `1.0` chuyển đổi) của dự án **chuyển từ mode 2** (`converted_from = "fpt"`): dựng lại từ `Baseline.snapshot` theo mẫu FPT bằng `lang` (qua lớp bản dịch khi `lang` ≠ `en`), rồi stamp / watermark / tên như phần A + hậu tố `_EN` / `_VI` (`<tên>_v2.0_VI.docx`). File dựng mỗi lần, **không** ghi GridFS; file lưu của version giữ ngôn ngữ tài liệu.
+- Còn đơn vị chưa dịch ⇒ `409 TRANSLATION_INCOMPLETE` `meta { locale, missing, total }` (đếm trên snapshot của version). Dịch nốt qua `pipeline-contract.md` #26 `?locale=&version=` / #27 `{ locale, version }` — đếm / dịch đúng snapshot baseline của version đó.
+- Bản nháp CR (không có baseline), dự án import thật (đường layout) ⇒ `409 DOCUMENT_LANGUAGE_UNAVAILABLE`; `variant=tracked|original` + `lang` khác ⇒ `400 VALIDATION_ERROR`.
+- `DocVersionDto` thêm `other_language_available: boolean` (#12, response release) — `false` ⇒ FE ẩn lựa chọn ngôn ngữ.
+
+## FLF-362 (2026-11-04) — luồng upload giữ đúng số mục của file (chỉ thêm field)
+
+- `headingMapEntrySchema.number_label?` và `layoutEntrySchema.number_label?` (string): nhãn số **Word tự đánh** của heading
+  (`numPr`, không nằm trong chữ) đúng như Word hiển thị — "2.1.", "II.", "A)". `heading_text` giữ nguyên chữ như trước
+  (mapping mẫu tổ chức, so sánh tải lại dựa vào nó); hiển thị = nhãn + tiêu đề. Heading gõ số tay / không đánh số ⇒ không có.
+- `target_structure.sections[].title` (bước 3) và `GapReport.layout[].heading` nay **đã ghép** nhãn số Word ("1. Tổng quan").
+- Bản xem / xuất Mode 1 (`RenderedSection.number`): số lấy theo **file** — file không đánh số ⇒ `number` rỗng (trước đây tự
+  đánh 1, 1.1…); file đánh số đều ⇒ đúng số file, mục FlintFlow chèn thêm nhận số theo thứ tự và anh em đứng sau dịch số;
+  file đánh số không đều (nhảy số, chữ cái, La Mã làm số chương) ⇒ giữ nguyên số của file. `number` luôn bỏ dấu kết ("1",
+  không "1."). Mode 2 (dự án tạo mới theo mẫu FlintFlow) không đổi.
+
+## FLF-363 (2026-11-04) — ngân hàng phần chung FPT + IEEE 29148, khớp theo tên + nội dung, không dùng số mục
+
+**Đổi enum + chỉ thêm field** ⇒ PR nhãn `contract-change`.
+
+- `templateProfileDtoSchema.template_family`: enum mới `fpt` · `ieee29148` · `mixed` (mặc định `fpt`) — **nhãn báo cáo** tính
+  sau khi khớp (đếm heading khớp tên chỉ có ở FPT / chỉ có ở IEEE), không còn quyết định cách khớp. Bản ghi cũ `ieee830` /
+  `ieee_features` đọc ra `ieee29148` (cả `OrgTemplateSummary.template_family`); script `npm run migrate:template-family` đổi
+  dữ liệu trong DB (chạy lại an toàn).
+- Khớp heading (#3/#4): mọi heading so với **một ngân hàng phần** gộp mục FPT, mẫu IEEE 29148 (jam01), IEEE 830, Wiegers,
+  ReqView — theo tên (bỏ số gõ tay; số Word không tính) + mục cha (tên trùng ở hai chỗ: "Overview" trong Introduction là tổng
+  quan tài liệu). File trộn FPT + IEEE khớp từng heading theo cả ngân hàng. `section_id` không có giá trị mới.
+- `headingMapEntrySchema.template_section?`: nay là id phần của ngân hàng (`part:fixed:2.1`, `part:ieee:references`) cho mọi
+  heading khớp theo tên (trước chỉ mẫu IEEE, `ieee830:1.4`). Vẫn là mã nội bộ, FE không hiện; `section_id = unmapped` kèm field
+  này = phần chỉ có ở IEEE, giữ nguyên văn.
+- `headingMapEntrySchema.content_mismatch?` `{ by_title, by_content }` (section id): nội dung ngay dưới heading (loại bảng có
+  chỗ riêng — tác nhân, ERD, thuật ngữ, quy tắc, thông báo…; hoặc đa số đoạn mở đầu bằng mã BR / MSG) chỉ rõ mục khác mục theo
+  tên, mà mục đó chưa có heading nào ⇒ heading đã đổi sang `by_content`, độ tin ≤ 0.75 (cờ "Cần xem"). Heading không khớp tên
+  mà nội dung rõ ⇒ đổi như trên nhưng không có field này. Request #5 không đổi hình.
+- Cờ vàng mới `import_title_content_mismatch` ("Tiêu đề và nội dung khác nhau", chỉ import đặt, recompute không đóng): mỗi
+  heading có `content_mismatch` một cờ, `target_id` = block heading, câu nêu tên hai mục theo mẫu; heading đó không có thêm cờ
+  `import_needs_review`.
+- Mục ưu tiên phần nhỏ (plan §2.5): Purpose ⇒ `slot:vision`, Scope ⇒ `slot:scope`, Product Perspective ⇒ `slot:context`,
+  Operating Environment ⇒ `slot:platforms`, Assumptions ⇒ `slot:assumptions`, TBD list ⇒ `slot:open_questions` — chỉ khi file
+  không có heading nào khác nhận mục FPT cha (không thì về mục cha, như trước). C-4 (`cr-propose`): vị trí trong mục giữ nguyên
+  văn (`custom:*`) có heading khớp ngân hàng ⇒ `owner_skill` là skill của phần đó (trước: "(none)").
+
+## FLF-364 (2026-11-04) — chữ hướng dẫn của mẫu chỉ trong `[ ]` / `{ }` (chỉ thêm field + đổi luật)
+
+**Additive** ⇒ PR nhãn `contract-change`.
+
+- Luật chữ hướng dẫn (`isInstructionText`, BE + FE): chỉ đoạn / ô nằm trọn trong `[ ]` hoặc `{ }`; đoạn ngoặc trong câu có chữ
+  thật cũng là hướng dẫn (`[…]` từ 3 từ, `{…}` luôn). `( )`, `< >`, câu "This section describes…" / "Mục này mô tả…" nay là nội
+  dung (đo trên 2 mẫu jam01 + 7 SRS thật: chỉ đổi một giá trị NFR "<= 24 h (<= 6 h …)" vốn bị bỏ nhầm). Màu / nghiêng / tô
+  nền chỉ là tín hiệu phụ.
+- `headingMapEntrySchema.guidance?` giữ nguyên văn (trần 4 000 ký tự, trước 400), gồm cả đoạn ngoặc trong câu và ô bảng; thêm
+  `guidance_by?` (`brackets` · `brackets+format`) và `guidance_blocks?` (block id).
+- `tableMapEntrySchema.guidance?`: chữ hướng dẫn trong các ô của cột (`[Tên tác nhân]`), bỏ ngoặc.
+- I-3: heading không khớp tên phần nào mà hướng dẫn nhắc đúng một phần ⇒ nhận phần đó (độ tin 0.7, `template_section` = phần).
+- C-4 (`cr-propose`): `target_sections` kèm "Template guidance" của mục (ghép hướng dẫn heading cha) + "Expected content (ISO
+  29148)"; vị trí trong mục giữ nguyên văn có heading không khớp ⇒ `owner_skill` theo phần mà hướng dẫn nhắc. Mode 2 không đổi.
+- Bản xem / xuất Mode 1 (câu 10, chốt 2026-11-05): mục **chưa có dữ liệu** in nguyên văn chữ hướng dẫn của mẫu (giữ ngoặc) —
+  mục FPT / phần nhỏ lấy từ `layout[].template_guidance` (mới, nội bộ: đoạn hướng dẫn trọn ngoặc dưới heading, lưu lúc
+  finalize, không thành phần nối), mục riêng lấy từ khối của chính nó. Mục **có dữ liệu** (kể cả thêm qua CR) ⇒ không in
+  hướng dẫn, đoạn ngoặc hướng dẫn trong câu bỏ, ô bảng chỉ có hướng dẫn để trống. Hướng dẫn vẫn giữ trong dữ liệu (ngữ cảnh
+  khi soạn) — xoá hết dữ liệu thì in lại. Hướng dẫn không làm mục "có nội dung" (như trước). Dự án import trước thay đổi này:
+  mục FPT không có `template_guidance` ⇒ không in hướng dẫn; mục riêng theo luật mới. Mode 2 không đổi.
+
+## FLF-395 (2026-11-10) — version của mẫu tổ chức (lát 1: version, gắn mẫu vào project, thông báo)
+
+`OrgTemplate` là **họ mẫu** (`orgId`, `name`, `latest_version`, `uses`). Mỗi bản là `OrgTemplateVersion` (`org_template_versions`):
+`{ template_id, orgId, version, status: draft | published, visibility: org | project, project_id, source_file, file_ref,
+template_family, language, headings[{ heading_text, section_id, auto_confirmed?, guidance? }], table_map[{ block_id, column_index,
+header, field_path }], published_at }`, unique `(template_id, version)`. Bản cũ giữ tới khi người dùng xoá; xoá không ảnh hưởng dự
+án (file nền của dự án là bản sao riêng). Bản `org` chỉ ra đời qua `publishVersion` — **chỉ Lead**.
+
+| Method + path | Quyền | Body | Kết quả |
+|---|---|---|---|
+| `POST /orgs/:orgId/templates` | lead | multipart `file` + `name` | 201 `TemplateVersionDetail` — họ mới + bản 1 **nháp**, mapping tự nhận (`matchProfile` mẫu bắt buộc + tự nhận độ tin thấp, `auto_confirmed`); file lỗi ⇒ `422 IMPORT_FILE_REJECTED` `meta.issues` |
+| `POST /orgs/:orgId/templates/:templateId/versions` | lead | multipart `file` | 201 `TemplateVersionDetail` — bản nháp kế tiếp |
+| `GET /orgs/:orgId/templates/:templateId/versions/:version` | thành viên (nháp: lead) | — | `TemplateVersionDetail` |
+| `POST /orgs/:orgId/templates/:templateId/versions/:version/publish` | lead | `{ headings?: [{ index, section_id }] }` | 200 `TemplateVersionDetail` — Lead rà mapping (sửa theo vị trí heading) rồi đăng; đã đăng ⇒ `409 ORG_TEMPLATE_VERSION_PUBLISHED`; `section_id` lạ ⇒ `400` |
+| `DELETE /orgs/:orgId/templates/:templateId/versions/:version` | lead | — | `{ deleted, project_count, template_deleted }` — hết bản ⇒ xoá họ |
+
+`TemplateVersionDetail` = `{ template_id, name, version, status, source_file_name, heading_count, custom_count, language,
+template_family, project_count, created_at, headings[{ index, heading_text, section_id, auto_confirmed?, guidance? }] }`.
+`OrgTemplateSummary` giữ field cũ (theo bản đã đăng mới nhất) + `latest_version` (0 = chưa đăng bản nào), `project_count`,
+`versions[]` (mới nhất trước; bản nháp chỉ trả cho Lead). Mẫu / bản của org khác ⇒ `404 ORG_TEMPLATE_NOT_FOUND` /
+`ORG_TEMPLATE_VERSION_NOT_FOUND`. Hai người tạo bản cùng lúc ⇒ thử lại số kế tiếp; quá 5 lần ⇒ `409 ORG_TEMPLATE_VERSION_CONFLICT`.
+
+- **Gắn mẫu vào project**: `Project.template_ref = { template_id, version } | null` — ghi khi import từ mẫu org (#8c, mặc định
+  bản đã đăng mới nhất, `version` chọn bản cụ thể) và khi lưu vào thư viện (#8d). `ImportedDocument.org_template_version` nhớ
+  bản lúc import; mapping áp ở tách file đọc theo đúng bản đó (đăng bản mới giữa chừng không đổi).
+- **Thông báo** `template_version_published`: đăng bản mới mà org còn dự án theo bản cũ hơn ⇒ báo mọi Lead + Analyst của org
+  (trừ người đăng, không Viewer); `link` = dự án (1 dự án) hoặc `/home`; `meta = { template_id, version, project_ids }`.
+- `GET /projects/:id` thêm `template_update: { template_id, name, current_version, latest_version } | null` — chỉ Lead /
+  Analyst, chỉ khi bản org mới hơn bản dự án đang theo.
+- `GET /projects/:id` thêm `template_current: { template_id, name, version, kind: "org" | "skeleton" | "project" } | null` (sửa sau test
+  tay 11/11) — mẫu dự án đang theo cho thẻ "Mẫu tài liệu", mọi thành viên; `null` khi dự án theo file mẫu của chính nó.
+- **Dữ liệu cũ**: họ mẫu trước FLF-395 (file + mapping trên họ) đọc như bản 1; lần đầu dùng / `npm run migrate:org-template-versions`
+  (backup DB trước) tạo bản 1 thật (đọc lại file để có `table_map`, `language`), gắn `org_template_version = 1` cho import cũ và
+  `template_ref` cho project theo lần import gần nhất.
+- **.docx**: `DocxPackage` đếm byte giải nén thật khi đọc từng part (kích thước khai báo trong zip có thể bị ghi nhỏ) và chặn gói
+  quá 5 000 mục ⇒ `FILE_TOO_LARGE` như trước.
+
+
+### Tự lưu khung mẫu sau baseline (FLF-395 lát 2, D12–D13)
+
+Dự án mẫu tự do (không phải `template_intent = fixed`) thuộc org, có file nền (`TemplateProfile.source_file_ref`), không theo mẫu do Lead đăng ⇒ ở mọi nơi tạo baseline (cuối
+finalize 0.1, chuyển từ mode 2 — chỉ dự án chế độ 3 có file mẫu, phát hành) FlintFlow dựng **khung** từ **file của chính bản vừa
+tạo** (khớp mẫu tất định, không AI), lưu thành mẫu tổ chức (`OrgTemplate.skeleton_of` = dự án, tên VI `<tên dự án> — khung` / EN
+`<tên dự án> — template` theo ngôn ngữ tài liệu) và gắn `template_ref`. Lỗi không chặn baseline / phát hành; lưu dở thì dọn họ / bản nháp.
+
+- **Khung** (allow-list): heading thuộc mẫu chuẩn (`fixed:*`, `group:*`, `slot:*`, hoặc khớp phần của ngân hàng) theo thứ tự + cấp;
+  hàng tiêu đề của bảng Code nhận ra cột (theo mapping cột) và bảng Record of Changes (không bao giờ có dòng dữ liệu); chữ hướng dẫn
+  chỉ khi mẫu đánh dấu bằng ngoặc **và** kiểu chữ hướng dẫn (`guidance_by = brackets+format`); styles / numbering / settings (bỏ mẫu
+  gắn kèm, biến tài liệu, rsid, mã định danh tài liệu…) / theme / bảng font, khổ giấy + lề. Bỏ: trang bìa, header / footer, docProps,
+  comment, customXml, ảnh, footnote, alt text của bảng, bảng khoá–giá trị, heading phần tử (`feature:*`, `function:*`) cùng nhánh.
+  Tên dự án trong chữ giữ lại ⇒ `{Tên khách hàng}` / `{Customer name}`.
+- **Heading chờ duyệt** (`pending_headings[{ key, heading_text, level, kind, standard_title, suggestion, suggestion_reason, decision:
+  pending | keep | generic | drop, generic_text }]`):
+  - `kind = custom` — mục BA tự đặt (`unmapped` / `custom:*`, kể cả lồng trong mục riêng khác): chưa duyệt thì không vào khung; được
+    giữ thì **chỉ heading** (không kéo bảng / chữ bên dưới).
+  - `kind = wording` — heading mẫu chuẩn nhưng chữ khác tên chuẩn ("1 Introduction to ACME"): chưa duyệt thì ghi tên chuẩn gần nhất
+    (`standard_title`, giữ số mục); giữ / dạng chung ⇒ chữ đã duyệt; bỏ ⇒ bỏ cả mục.
+  - Gợi ý không AI: tên dự án ⇒ chỗ trống. Có mục chờ ⇒ thông báo `skeleton_headings_pending` cho Lead + Analyst. Quyết định của bản
+    trước mang sang bản sau theo heading chuẩn hoá.
+- **Dấu khung** `skeleton_hash` = heading (cấp + chữ chuẩn hoá) + tiêu đề cột + heading còn chờ. Khung rỗng (không heading nào) ⇒
+  không lưu. Trùng một bản đã đăng trong org ⇒ không lưu, gắn dự án vào bản đó. Dự án đang theo khung (của mình hay dùng chung) mà
+  khung đổi ⇒ bản mới trong họ khung **của chính dự án** (chưa có thì tạo). Bản mới của khung tự lưu chỉ thuộc dự án nguồn: dự án khác
+  dùng chung khung không nhận `template_version_published`, không có `template_update`.
+
+| Method + path | Quyền | Body | Kết quả |
+|---|---|---|---|
+| `GET /projects/:id/template-skeleton` | thành viên | — | `{ template_id, name, version, pending_count, headings[], suggest_credit_cost } \| null` (null = dự án không có khung tự lưu của chính nó) |
+| `POST /projects/:id/template-skeleton/decisions` | lead, analyst | `{ decisions: [{ key, decision: keep \| generic \| drop, generic_text? }] }` | dựng lại khung từ đúng file nguồn của bản (`skeleton_source_ref`), cập nhật bản đang dùng (không đổi số); mục lồng mới lộ ra được thêm vào danh sách chờ; `generic` thiếu chữ và không có gợi ý ⇒ `400`; hai người duyệt cùng lúc ⇒ `409 SKELETON_CONFLICT`; không có khung ⇒ `404 SKELETON_NOT_FOUND` |
+| `POST /projects/:id/template-skeleton/suggest` | lead, analyst | — | nút "Gợi ý tên chung": **một** lượt AI cho mọi mục còn chờ (`call_kind` mới `skeleton_generic_names`, giá theo bảng giá — mặc định 1 credit, giữ credit trước), chỉ ghi gợi ý cho mục vẫn còn chờ lúc ghi; hết credit ⇒ `402 INSUFFICIENT_CREDIT`; AI lỗi ⇒ `502 SKELETON_SUGGEST_FAILED` |
+
+`OrgTemplateSummary` thêm `skeleton` (mẫu khung tự lưu) + `pending_count`; `TemplateVersionSummary` thêm `pending_count`.
+
+Thư viện mẫu (`GET /orgs/:orgId/templates`, org-scoped) thêm hai field để FE mở màn duyệt heading chờ từ thư viện: `OrgTemplateSummary.skeleton_source_project_id` (id dự án nguồn của mẫu khung tự lưu, `null` với mẫu thường; mở `GET /projects/:id/template-skeleton` của dự án đó) và `TemplateVersionSummary.published_by = { id, name } | null` (người tạo / đăng bản; `name` chỉ có khi người đó còn là thành viên của chính org, ngược lại `null` — không lộ tên người ngoài org). `TemplateVersionDetail` mang cùng `published_by`.
+
+
+### Đổi mẫu (FLF-395 lát 3, D5 / D8 / D9 / D14 / D15) — chuẩn bị
+
+Dự án **đã có baseline** đổi sang mẫu khác (xuôi hoặc ngược). Lát này chỉ **chuẩn bị**: chọn mẫu đích → mapping → ghép mục → phân nhóm →
+quyết định của BA → `ready`. Chưa đụng bản nháp, Spine, file nền, chưa dịch (dựng file nền / áp dụng / hoàn tác / dịch là bước sau). Phân nhóm
+**không gọi AI**, không trừ credit. Collection `template_migrations`; mỗi dự án tối đa một lần đổi mẫu mở (index duy nhất từng phần).
+
+| Method + path | Quyền | Body | Kết quả |
+|---|---|---|---|
+| `POST /projects/:id/template-migrations` | lead, analyst | JSON `{ template_id, version }` (mẫu org, **bất kỳ bản nào**, kể cả cũ hơn bản đang theo) **hoặc** multipart `file` (+ `publish_to_org?: "true"`, `name?`, `template_id?`) | 201 `MigrationDto` ở `mapping_review` |
+| `GET /projects/:id/template-migrations` | lead, analyst | — | `MigrationSummary[]` (20 lần gần nhất) |
+| `GET /projects/:id/template-migrations/:migrationId` | lead, analyst | — | `MigrationDto` |
+| `PATCH …/:migrationId/pairs` | lead, analyst | `{ pairs: [{ old_key, new_key \| null }] }` | sửa cặp (chỉ `mapping_review` / `decisions`; về `mapping_review`), phân nhóm lại, giữ quyết định còn hợp lệ |
+| `POST …/:migrationId/confirm-mapping` | lead, analyst | — | `mapping_review → decisions` |
+| `PATCH …/:migrationId/decisions` | lead, analyst | `{ decisions?: [{ id, choice }], batch?: "keep_all" \| "discard_all" }` (≥ 1) | chỉ ở `decisions`; `batch` chỉ khi đổi ngược |
+| `POST …/:migrationId/ready` | lead, analyst | — | `decisions → ready`, ghim `prepared_spine_version` + `prepared_source_sha256` |
+| `POST …/:migrationId/cancel` | lead, analyst | — | huỷ ở `mapping_review` / `decisions` / `ready`; `applying` ⇒ `409 TEMPLATE_MIGRATION_APPLYING` |
+
+**Điều kiện bắt đầu** (theo thứ tự): dự án thuộc org của người gọi (`404 PROJECT_NOT_FOUND`); có baseline (`409 TEMPLATE_MIGRATION_NO_BASELINE`);
+bản nháp không chờ Lead duyệt (`409 DRAFT_LOCKED`); không có lần đổi mẫu mở (`409 TEMPLATE_MIGRATION_OPEN`, `meta.migration_id`); mẫu thuộc
+org của dự án (`404 ORG_TEMPLATE_NOT_FOUND` / `ORG_TEMPLATE_VERSION_NOT_FOUND` — chỉ bản đã đăng, hoặc bản riêng của chính dự án);
+mẫu đích khác mẫu đang theo (`409 TEMPLATE_MIGRATION_SAME_TEMPLATE`). Viewer ⇒ `403 ORG_ROLE_FORBIDDEN`.
+
+**File tải lên**: Analyst ⇒ bản riêng của dự án (`OrgTemplateVersion.visibility = project`, không hiện thư viện, không thông báo, không tính
+`latest_version`; họ mẫu ẩn dùng lại cho các lần tải sau). Lead thêm `publish_to_org = "true"` ⇒ đi qua `publishVersion` (họ mới cần `name`,
+hoặc `template_id` ⇒ bản mới của họ có sẵn); Analyst gửi `publish_to_org` ⇒ `403 ORG_ROLE_FORBIDDEN` trước khi lưu file. File hỏng ⇒ `422
+IMPORT_FILE_REJECTED`. Mapping của file mới = `matchProfile` + tự nhận độ tin thấp (cặp hiện `needs_review`).
+
+Dựng file nền (bước áp dụng, lát sau): gói vượt giới hạn dung lượng giải nén / số phần ⇒ `422 TEMPLATE_MIGRATION_FILE_TOO_LARGE` (không phải 500).
+
+**`MigrationDto`** = `{ id, project_id, state, direction: forward | reverse, reverse_of, from { template_ref, language, template_family, headings[] },
+to { template_id, version, name, visibility, language, template_family, headings[] }, pairing { pairs[], followers[], ignored_new[], split[] },
+groups, decisions[{ id, choice }], undecided[], language { source, target, needs_translation }, credit_estimate, warnings[],
+prepared_spine_version, prepared_source_sha256, applied_at, created_by, created_at, updated_at }`. Trạng thái: `mapping_review → decisions →
+ready → applying → applied | cancelled | failed`.
+
+- **Ghép mục** (`pairing.pairs`, mỗi heading cũ không phải phần tử một dòng): mục khung theo `section_id` (`by = section_id`); mục FPT ↔ phần nhỏ
+  `slot:*` chồng lấn (`overlap`); mục riêng theo `titleSimilarity` ≥ 0.6 (`title`, dưới 0.85 hoặc mẫu tự nhận ⇒ `needs_review`); dưới ngưỡng ⇒
+  `new_key = null`; BA sửa tay (`manual`). Mẫu đích nhiều heading cùng `section_id` ⇒ ghép heading đầu, `split[]` ghi cả nhóm. Heading phần tử
+  (`feature:*`, `function:*`, UC / màn / chức năng nhận qua tên hoặc mã trong Spine, mục riêng lồng dưới 2.2.2 / 3.1.2 / 3.1.4) và phần nối
+  (heading rỗng) **đi theo mục khung cha** (`pairing.followers`) — không bao giờ vào 4 nhóm; heading phần tử của mẫu đích bỏ qua (`ignored_new`).
+- **`groups`**: `matched` (khớp, chép nguyên khối) · `missing` (thêm trống + `guidance`; `needs_content`) · `extra` (`choices`: `keep_custom`,
+  `delete`, `move_to:<new_key>` vào mục thiếu; `ai_choices` = `move_to` vào mục trích được vào Spine) · `conflict` (`kind`: `table_columns`,
+  `split_section` — `to:<new_key>`, `record_of_changes` — bảng khác cột hoặc mẫu đích không có; `choices` + `ai_resolve`) · `edited_since` (chỉ
+  đổi ngược) · `structure_only_dropped` (heading nhóm không có gì đi theo) · `restored_from_snapshot`. Bảng so theo bộ cột (đổi thứ tự cột
+  không tính là đổi; cột Record of Changes theo cột lịch sử chuẩn). Mục có cặp nằm đúng một trong `matched` / `conflict`; mục đã sửa còn nằm thêm
+  ở `edited_since`. Mục thừa + conflict **bắt buộc** có quyết định trước `ready` (`409 TEMPLATE_MIGRATION_UNDECIDED`, `meta.undecided`).
+  Sửa sau test tay 11/11 (additive): heading nhóm của mẫu đích (heading ngay sau sâu hơn) ⇒ `missing[].needs_content = false`, không là đích
+  `move_to`, không vào `migration_missing_sections` / cờ đỏ (profile cũ đã ghi cũng được lọc khi tính cờ); mục thiếu là đích của một
+  `move_to` đã quyết ⇒ DTO trả `needs_content = false` + `moved_in: [id mục thừa]` (bước áp dụng tính theo quyết định đã giải). Bộ đọc
+  heading của file mẫu bỏ đoạn style `Title`/`Subtitle`, tiêu đề ngay trên field mục lục, chữ to trên trang bìa và dòng gạch đầu dòng có số
+  gõ tay — bản mẫu đã đăng từ file có các dòng này cần đăng lại (số heading đọc lại sẽ khác mapping đã lưu ⇒ `422 TEMPLATE_MIGRATION_BUILD_FAILED`).
+- **Đổi ngược (D15)**: đích = mẫu trước (`from`) của lần đổi `applied` gần nhất (cùng bản mẫu hoặc cùng sha256 file) ⇒ `direction = reverse`,
+  `edited_since` = mục có Change ghi sau `applied_at` (theo `section_id`; Change của phần tử tính cho mục cha; Change có `txn` bắt đầu
+  bằng `template-migration:` không tính), `choices = [keep, discard]`, mặc định `keep`. Mục chưa sửa tự lấy lại từ snapshot, chỉ báo
+  `restored_from_snapshot`. `ready` bị chặn (`409 TEMPLATE_MIGRATION_STALE`) nếu tài liệu có Change mới kể từ lúc chuẩn bị.
+- **PATCH validate theo dữ liệu đã lưu**: `old_key` / `new_key` phải thuộc `pairing` / mẫu đích của chính lần này, một mục mới chỉ ghép một mục cũ;
+  `decisions[].id` phải là mục nhận quyết định (`extra` / `conflict` / `edited_since`), `choice` phải thuộc `choices` của đúng mục đó — sai ⇒
+  `400 VALIDATION_ERROR` (`meta.ids`), không ghi gì. Hai người sửa cùng lúc ⇒ `409 TEMPLATE_MIGRATION_CONFLICT`. Sai trạng thái ⇒ `409
+  TEMPLATE_MIGRATION_INVALID_STATE` (`meta.state`, `meta.allowed`).
+- **Ngôn ngữ (D9)**: `language.needs_translation` khi ngôn ngữ mẫu đích ≠ ngôn ngữ gốc của chữ trong Spine; chưa dịch gì ở lát này.
+- **`credit_estimate`** (không trừ, không giữ credit): `translation` (đổi xuôi: mọi đơn vị dịch của Spine; đổi ngược: chỉ mục `keep` đã sửa; chia lô
+  `BATCH_MAX_CHARS`, giá `translate_document`/lô) + `structural_moves` + `ai_resolve` (mỗi mục một lượt, giá `cr_propose` — số ước tính, chốt khi áp dụng).
+- **Dữ liệu đổi giữa chừng**: `ready` kiểm lại baseline + khoá bản nháp + mẫu / file nền của dự án không đổi so với `from` (`409 TEMPLATE_MIGRATION_STALE`);
+  `warnings[]` báo phần mẫu đích đọc được một phần (vd không đối chiếu được bảng). Xoá bản / họ mẫu là đích của lần đổi mẫu chưa kết thúc ⇒
+  `409 ORG_TEMPLATE_IN_USE_BY_MIGRATION`.
+
+### Đổi mẫu (FLF-395 lát 5b) — áp dụng, hoàn tác, đổi ngược, dịch
+
+| Method path | Vai trò | Body | Phản hồi |
+|---|---|---|---|
+| `POST /projects/:id/template-migrations/:migrationId/apply` | lead, analyst | — | 200 `MigrationDto` ở `applied` (hoặc 409 / 422 / 402, xem dưới) |
+| `POST /projects/:id/template-migrations/:migrationId/revert` | lead, analyst | — | 200 `MigrationDto` ở `reverted` |
+
+- **Áp dụng** chỉ từ `ready`. Thứ tự: kiểm lại → chiếm `applying` → [dịch] → chạy khô Spine → snapshot → dựng + lưu file nền mới → ghi Spine →
+  ghi `TemplateProfile` + `Project` → `applied`. Không có giao dịch Mongo cho Spine, nên bước ghi Spine là điểm không quay lại: lỗi **trước** nó
+  ⇒ migration về `ready`, bản nháp còn nguyên (file nền mới / bản riêng vừa đăng ký bị xoá); lỗi **sau** nó ⇒ chạy tiếp tới `applied`. Tiến trình
+  chết giữa chừng ⇒ job `system/recover-template-migrations` (5 phút / lần, chỉ động tới lần áp dụng im lặng quá 10 phút) làm đúng như trên.
+- **Kiểm lại** (409 `TEMPLATE_MIGRATION_STALE`, migration quay về `decisions`): `spine_version` ≠ giá trị ghim lúc `ready`, file nền / mẫu của dự án
+  đổi, đổi ngược mà có Change mới, hoặc có CR đang mở chạm vào mục sắp bị xoá / chuyển. Bản nháp khoá ⇒ `409 DRAFT_LOCKED`. Đang áp dụng ⇒
+  `409 TEMPLATE_MIGRATION_APPLYING`; sai trạng thái ⇒ `409 TEMPLATE_MIGRATION_INVALID_STATE`.
+- **Ghi Spine**: CR nguồn `template_migration` (mới trong `CR_SOURCE_KINDS`, **không** trong nguồn nhận khi tạo CR — client gửi nguồn này ⇒ 400). CR này
+  `written` ngay, không có vị trí / nhóm; `changes[].by = cr_id`, mọi lô có `txn` bắt đầu `template-migration:<migrationId>` (`:revert` = lô đảo của đổi
+  ngược, `:undo` = lô hoàn tác). Op: xoá mục riêng (`custom:*`) BA chọn `delete`, thêm mục riêng trống cho heading riêng của mẫu chưa có cặp, chữ đã dịch.
+  Dữ liệu có cấu trúc của mục khung (use case, bảng…) chỉ bị bỏ khỏi file nền, không xoá khỏi Spine. Op sai / phá bất biến ⇒ `409
+  TEMPLATE_MIGRATION_SPINE_REJECTED` (`meta.violations[]`), chưa lưu gì.
+- **Profile mới**: `source_file_ref` / `source_sha256` (file nền mới), `heading_map`, `table_map`, `layout`, `language`, `section_*` / `function_originals`
+  (có dịch ⇒ để trống, bản in dùng Spine), `template_context` của các mục thiếu, `migration_missing_sections` (mục của mẫu có nội dung mà dự án chưa có gì —
+  cờ đỏ chặn phát hành tới khi BA viết xong), `migrated_base_at` + `migrated_base_spine`. `Project.template_ref` = bản đích, `template_intent = fixed`,
+  `documentLanguage` theo mẫu. `TemplateMigration` thêm `translated`, `applied_at`, `snapshot`, `missing_sections`.
+- **Dịch (D9)**: khi `language.needs_translation` — dịch chữ Spine **đè vào Spine** (tên phần tử trước, thân sau), mỗi lô một lượt `translate_document` (giữ /
+  trừ credit theo lô như dịch thường; hết credit ⇒ `402`, chưa ghi gì, `ready` giữ nguyên). Bản dịch lưu trên migration: áp dụng lại sau lỗi không dịch (không
+  trừ credit) lần hai. `language` / `documentLanguage` chỉ đổi sau khi chữ dịch đã nằm trong Spine. Lô dịch không ra kết quả hợp lệ ⇒ `502
+  TEMPLATE_MIGRATION_TRANSLATION_FAILED`. Nhãn wireframe trong `diagrams[].source` không dịch ở đây. Version đã phát hành không đổi (snapshot + binding).
+- **Hoàn tác** (D14): chỉ `applied`, và chỉ khi **chưa có Change nào ghi sau lần đổi mẫu** ngoài của chính nó (cờ / tiến độ tính lại không tính). Có Change sau ⇒
+  `409 TEMPLATE_MIGRATION_REVERT_BLOCKED` (`meta.use = "reverse_migration"`, `meta.changes_after`) — dùng đổi mẫu ngược. Hoàn tác đảo các Change của lần đổi
+  mẫu (một lô `…:undo`), khôi phục profile + file nền + `template_ref` + `template_intent` + `documentLanguage` từ snapshot, xoá file nền mới → `reverted`.
+  Chạy lại sau lỗi tiếp được từ bước dở. Không đảo được ⇒ `409 TEMPLATE_MIGRATION_REVERT_BLOCKED` (`meta.violations[]`).
+- **Đổi ngược** (D15) là một migration `direction = reverse`: đích là **bản chụp file nền** của lần đổi mẫu trước (dự án từng theo mẫu tự do được đăng ký một bản riêng
+  của dự án cho file nền cũ để có đích chọn). Áp dụng đảo Change do lần đổi mẫu trước ghi (trả chữ gốc của mục chưa sửa, khôi phục mục đã xoá) + Change của người
+  dùng ở mục `discard` (lịch sử CR giữ nguyên, việc đảo là lô mới `…:revert`); mục `keep` không đụng, cần dịch lại nếu khác ngôn ngữ. Op engine kiểm bất biến /
+  liên kết trên toàn bản nháp: gãy ⇒ `409 TEMPLATE_MIGRATION_LINKS_BROKEN` (`meta.violations[]`), chưa lưu gì.
+- **Lỗi khác**: file mẫu đích không còn trên kho ⇒ `409 TEMPLATE_MIGRATION_TARGET_UNAVAILABLE`; file nền mới dựng ra không qua kiểm cấu trúc ⇒ `422
+  TEMPLATE_MIGRATION_BUILD_FAILED`; gói quá lớn ⇒ `422 TEMPLATE_MIGRATION_FILE_TOO_LARGE`.
+- **Bản đánh dấu (Track Changes)**: lần ghi CR đầu tiên sau đổi mẫu chỉ so nội dung (bỏ heading + chữ hướng dẫn); đổi mẫu có dịch ⇒ không tạo bản đánh dấu.
+  Cờ "bỏ chữ của khung mẫu" khi in lại một version đã phát hành được chốt trong binding của version (`strip_template_text`).
+
+### Đổi mẫu (FLF-395 lát 5c) — sửa sau review: độ bền, AI, báo trước
+
+**Endpoint mới**
+| Method path | Vai trò | Body | Phản hồi |
+|---|---|---|---|
+| `PATCH /projects/:id/template-migrations/:migrationId/mapping` | lead, analyst | `{ edits: [{ key: "n<i>", section_id }] }` | 200 `MigrationDto` đã ghép + phân nhóm lại. Chỉ `mapping_review`, chỉ lần đổi mẫu theo **file mẫu tải lên** (bản riêng của dự án); mẫu org ⇒ `409 TEMPLATE_MIGRATION_MAPPING_LOCKED`; `key` lạ / `section_id` ngoài danh mục (hoặc `unmapped`) ⇒ `400 VALIDATION_ERROR` (`meta.ids`). Mapping đã sửa được ghi lại cả vào bản riêng của dự án |
+| `POST /projects/:id/template-migrations/:migrationId/restore` | lead, analyst | — | 200 `MigrationDto` ở `failed`. Chỉ từ `apply_failed` |
+
+**`MigrationDto` / `MigrationSummary` thêm field**
+- `broken_links: { rule, path, message }[]` — đổi ngược: liên kết sẽ gãy nếu áp dụng ngay (chạy khô đúng bước áp dụng); hiện ở `GET` khi `mapping_review | decisions | ready`. Rỗng = ổn. Bước áp dụng vẫn kiểm lại (`409 TEMPLATE_MIGRATION_LINKS_BROKEN`).
+- `revertable: boolean | null`, `revert_blocked_reason: "not_latest" | "migration_open" | "running" | "has_later_changes" | null` — lần đổi mẫu đã áp dụng có hoàn tác được không (cùng luật với `revert`); `null` khi chưa áp dụng. Ở danh sách chỉ có giá trị cho lần đã áp dụng **mới nhất**.
+- `previous_template: { template_id, version, name, visibility: "org" | "project" } | null` — mẫu trước của lần đổi mẫu đã áp dụng, để "Quay về mẫu trước": mẫu org dự án từng theo, hoặc bản **riêng của dự án** được đăng ký cho file nền cũ khi dự án từng theo mẫu tự do / FPT. `POST …/template-migrations` nhận nó như mọi mẫu (`{ template_id, version }`) ⇒ `direction = reverse`.
+- `language.switches_document_language: boolean` — xem "Dịch" bên dưới.
+
+**Trạng thái mới**: `reverting` (hoàn tác đang chạy; chiếm chỗ của dự án), `apply_failed` (áp dụng kẹt quá `5` lần phục hồi — giữ snapshot, báo người tạo bằng thông báo `template_migration_failed`, chờ `restore`). Cả hai là trạng thái mở. Hoàn tác (`applied → reverting → reverted`) yêu cầu không có lần đổi mẫu khác đang mở (`409 TEMPLATE_MIGRATION_OPEN`).
+
+**Rào ghi**: khi một lần đổi mẫu ở `applying` / `reverting`, mọi lần ghi bản nháp của người dùng (xác nhận CR, phát hành, áp lệnh sửa trong chat) bị `409 TEMPLATE_MIGRATION_APPLYING` — tránh chụp version từ profile cũ + Spine mới.
+
+**Quyết định cho mục thừa (D8)**
+- Mục **riêng chữ tự do** (`custom:*`): `keep_custom | delete | move_to:<mục>` (+ `ai_resolve` không áp dụng). `delete` xoá thật khỏi Spine.
+- Mục **khung** (có dữ liệu có cấu trúc: use case, bảng, yêu cầu…): `keep_custom | drop_from_print | move_to:<mục>`. **`drop_from_print`** (hằng số FE `DROP_FROM_PRINT_CHOICE`, nhãn "Bỏ khỏi bản in") chỉ bỏ mục khỏi bản in: dữ liệu + liên kết trong Spine giữ nguyên, không bắn cờ vàng `template_section_absent`, hoàn tác / đổi ngược đưa mục về. Gửi `delete` cho mục khung ⇒ `400 VALIDATION_ERROR`. Conflict Record of Changes: `keep_custom | drop_from_print | ai_resolve`.
+
+**AI cho lựa chọn của BA (D8)** — chỉ chạy khi BA đã chọn và đã được báo credit (`credit_estimate`), một lượt `template_migration_resolve` (3 credit) mỗi mục; kết quả lưu trên migration nên áp dụng lại không trừ lần hai:
+- `move_to:<mục có cấu trúc>` của mục riêng chữ tự do: AI đề xuất op `add` vào mảng Spine của mục đích; op hợp lệ (chạy khô qua op engine) ghi qua CR `template_migration` kèm xoá mục riêng cũ; AI không chuyển được / op sai ⇒ giữ thành mục riêng (cảnh báo trong `warnings`, không mất chữ). Mục khung chuyển chỗ in không gọi AI.
+- `ai_resolve` của conflict: AI chọn một cách ghép cụ thể trong các lựa chọn hợp lệ; không chọn được ⇒ cách giữ nguyên chữ / bảng cũ.
+
+**Dịch (D9) theo loại dự án**: chỉ dự án có file của khách (mode 1 / 3 / 4, import thật) mới dịch đè Spine. Dự án tạo SRS (mode 2) hoặc chuyển từ FPT (Spine luôn tiếng Anh) mà mẫu khác ngôn ngữ ⇒ `language.needs_translation = false`, `switches_document_language = true`: chỉ đổi `documentLanguage` (lớp bản dịch hiện có lo phần in), không dịch Spine, không credit, không đặt file nền mới làm nền nguyên văn.
+
+**Độ bền**: lượt áp dụng giữ `apply_token`, mọi bước ghi kiểm token (lượt chậm bị phục hồi thay thế sẽ dừng); lô op ghi tiếp sau lỗi vẫn có khoá lạc quan (`SPINE_VERSION_CONFLICT` ⇒ phục hồi về `ready`); snapshot không chứa bản sao Spine (mốc nguyên vẹn nằm ở `TemplateMigration.anchor_spine`, binding version tham chiếu `{ kind: "migration", id }`); kế hoạch op lớn lưu ra file. Waiver / "giữ nguyên" cờ của BA là thay đổi của người dùng (chặn hoàn tác, không bị đảo); chỉ cờ / tiến độ do tính lại là suy diễn.
+
+## FLF-375 (2026-11-11) — change request mode 1 đi đúng business flow (đổi body PATCH location, thêm endpoint + field)
+
+**Breaking** ở `PATCH …/change-requests/{crId}/locations/{locId}` ⇒ PR nhãn `contract-change`. Spec: `spec/FLF-375-change-request/`
+(workspace).
+
+- `PATCH …/locations/{locId}`: body chỉ còn `{ conclusion?, reason? }` — **bỏ** `new_value`, `spine_ops`, `comment_text`
+  (BF nguyên tắc 6: người dùng không sửa tay nội dung; muốn khác thì gõ hướng sửa cho AI qua `owner-step-draft`). Gửi field cũ
+  ⇒ 400 `VALIDATION_ERROR`. Chấp nhận `edit` / `comment` khi AI chưa soạn ⇒ 409 `CR_NO_PROPOSAL` (mã mới). `not_related` vẫn
+  bắt buộc `reason`. `manual` giờ nghĩa là "người dùng đã tự quyết chỗ này" (giữ nguyên / bỏ / gõ hướng sửa), AI không đè.
+- **Bỏ khoá chỗ đang sửa** (BF §3.2 "Hai người sửa cùng lúc"): không còn 409 `PATH_LOCKED` ở impact / PATCH / owner-step-draft /
+  revise; C-5 không còn luật `path_not_locked`; giá trị đổi trước khi xác nhận ⇒ vi phạm thường `value_changed` (AI soạn lại
+  trên nội dung hiện tại) thay vì 409 `CR_VALUE_CHANGED` ở `/verify`. Lúc **xác nhận** (`/submit`) Code kiểm lại từng chỗ trên
+  nội dung hiện tại: giống đề xuất ⇒ chỗ đó `not_related` (lý do "Đã được <ai> sửa giống đề xuất của bạn"), mọi chỗ như vậy ⇒
+  CR `cancelled`; sửa phần khác cùng chỗ ⇒ ghép rồi ghi; đụng đúng phần đề xuất đổi ⇒ **không ghi**, CR về `manual_fix` và vị
+  trí mang `conflict` (dưới). Chuyển trạng thái mới `ready_to_submit → manual_fix`.
+- `CrLocation` thêm (tuỳ chọn, client cũ bỏ qua):
+  - `display { kind, label, change: edit|add|remove|comment|none, before, after }` — tên chỗ + nội dung trước / sau dạng câu,
+    không mã nội bộ (`kind` = tên mảng Spine hoặc `paragraph` · `table` · `image`). FE hiện cái này thay vì ghép path / id.
+    `after = null` ở `edit` = đề xuất chưa chạy thử được (không phải xoá).
+  - `conflict { at_proposal, current, proposal, changed_by, changed_at, proposed_at, question } | null` — so sánh 3 cột khi xác
+    nhận bị người khác sửa. `proposed_at` = lúc AI soạn ① (FE in "① Lúc AI soạn (9:00)" / "② Hiện tại (BA2, 9:15)" và tô màu
+    ① so ② / ① so ③ như Track Changes). `question { text, suggestions } | null`: gọi `owner-step-draft` ("AI soạn lại trên nội
+    dung hiện tại") mà yêu cầu gốc **đụng thẳng** phần người kia vừa sửa ⇒ BE **không gọi model**, đặt câu hỏi + 2 gợi ý
+    (BF §3.2 "AI hỏi lại trong chat, không tự chọn"); client gọi lại `owner-step-draft` với `instruction` = câu trả lời ⇒ AI soạn,
+    `conflict` về `null`. `LocationProposal.proposed_at` ghi ở mọi chỗ AI soạn đề xuất.
+- (11/11 chiều, BF §3.2) `ChangeRequest.created_by_name` (tuỳ chọn) — tên BA giữ đề xuất. `POST …/submit` của người **không
+  phải** người tạo CR ⇒ **403 `CR_NOT_REQUESTER`** ("Đề xuất này đang treo ở <ai> — chỉ người đó xác nhận được"). Lúc ghi mà
+  luật Spine gãy trên nội dung hiện tại (`TransactionRejectedError`) ⇒ không còn 422 thô: CR chạy lại kiểm (C-5), chỗ gãy mang
+  cờ đỏ (`verify.violations`), trạng thái theo luật kiểm (`proposing` / `manual_fix`); người khác ghi đúng lúc (lệch
+  `spine_version`) ⇒ BE tự kiểm lại trên bản mới một lần rồi ghi ("ai xác nhận trước thì ghi trước").
+- (17/11, BF §3.2 / spec UC-45 A6, UC-48) **403 `CR_NOT_REQUESTER`** mở rộng sang mọi bước áp dụng CR, không chỉ `/submit`:
+  `/amend`, `/messages`, `/materials` (thêm / xoá), `/clarify`, `/answers`, `/impact`, `/propose`, `PATCH …/locations/{locId}`,
+  `…/owner-step-draft`, `/verify`, `/resume` — người không tạo CR chỉ xem (`GET`) và thấy "<ai> có bản sửa chưa xác nhận".
+  `/cancel`: người tạo **hoặc Lead**; Analyst khác ⇒ 403 `CR_NOT_REQUESTER`. `/revise`, `/groups/{gid}/decision`, `/close`
+  (giai đoạn `in_review`) giữ nguyên.
+- Endpoint mới `GET …/change-requests/pending-sections` ⇒ `PendingSection[] { section_id, title, items[{ cr_id, who }] }`:
+  mục đang có đề xuất (`edit` / `comment`) của CR chưa đóng, `who` = tên BA tạo CR (fallback `requester`). FE in dưới tiêu đề
+  mục trong tài liệu: "<ai> (CR-003) có bản sửa chưa xác nhận ở mục này" (BF §3.2). `others_pending[].requester` trong chi
+  tiết CR nay cũng là tên BA tạo CR.
+  - `others_pending [{ cr_id, requester }]` — CR khác chưa đóng có đề xuất ở cùng phần tử.
+  - `keyword_score?`, `recall_score?` (`FoundLocation` nội bộ) — C-3 xếp hạng từ khoá bằng BM25, trộn với vector bằng RRF;
+    `found_by: keyword` nay giữ cả khi có vector.
+- Endpoint mới `POST …/change-requests/{crId}/messages` `{ text, language? }` ⇒ `CrDetail & { message }`: lệnh sửa ⇒ gộp vào
+  CR như `/amend` (`{ kind: "amended" }`); câu hỏi ⇒ AI trả lời từ SRS + trạng thái CR (`{ kind: "answer", reply }`), không thành
+  `amendments` (BF nguyên tắc 9). Phân loại bằng cùng luật với chat thường.
+- `CR_STATUS_LABELS.manual_fix` = "Cần bạn quyết" (trước "Cần sửa tay"). C-4 với CR lô use case (FLF-318) không còn tự gán
+  `not_related` "Không thuộc lô thay đổi use case" cho chỗ ngoài lô — AI xem và đề xuất như mọi CR.
+- Render tài liệu upload (không đổi shape): phần tử thêm / sửa qua CR in **trong** bảng của file (cột theo tiêu đề cột của file,
+  không thêm cột); đuôi "Nhãn: giá trị" của phần tử cập nhật tại chỗ; vẽ lại sơ đồ gốc bỏ cả chú thích ngay dưới ảnh; sơ đồ use
+  case của tài liệu upload là một hình tổng quát, use case ≥ 2 actor nối actor `User` (chỉ trên hình); sơ đồ ngữ cảnh mỗi actor
+  đủ hai chiều. Import **không** tự thêm actor `User` vào Spine nữa (FLF-390 đã thêm, nay bỏ — bản 0.1 giữ nguyên trạng file).
+- Script `npm run cleanup:manual-crs [--apply] [--project <id>]`: xoá CR còn vị trí `manual = true` từ trước (CR đã ghi ⇒ hoàn
+  tác thay đổi Spine + xoá bản nháp của nó).

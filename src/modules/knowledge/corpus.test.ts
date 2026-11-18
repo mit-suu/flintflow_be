@@ -4,12 +4,14 @@ import path from "node:path"
 import { afterEach, describe, it, expect } from "vitest"
 import { loadCorpus, stepsBySkill } from "./corpus.js"
 
-describe("loadCorpus — skill (assets/skills)", () => {
+describe("loadCorpus - skill (assets/skills)", () => {
   const docs = loadCorpus("assets/skills", { corpus: "skills" })
   const bySource = new Map(docs.map((d) => [d.source, d]))
 
   it("đọc mọi SKILL.md trừ skill đánh dấu `knowledge_index: false` (knowledge-answer)", () => {
-    expect(docs).toHaveLength(40)
+    // 51 = 52 skill (thêm renderer/sequence; FLF-365: 3 skill mục IEEE 29148; FLF-395: skeleton-generic-names, template-migration-resolve;
+    // FLF-390: renderer/activity, renderer/deployment) trừ knowledge-answer
+    expect(docs).toHaveLength(51)
     expect(bySource.has("knowledge-answer")).toBe(false)
     expect(docs.every((d) => d.source_kind === "internal_skill" && d.status === "verified" && d.corpus === "skills")).toBe(true)
     expect(docs.every((d) => d.doc_id === d.source)).toBe(true)
@@ -31,7 +33,7 @@ describe("loadCorpus — skill (assets/skills)", () => {
   })
 })
 
-describe("loadCorpus — corpus khác (chuẩn ngoài, phase 2)", () => {
+describe("loadCorpus - corpus khác (chuẩn ngoài, phase 2)", () => {
   let dir: string
   afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
 

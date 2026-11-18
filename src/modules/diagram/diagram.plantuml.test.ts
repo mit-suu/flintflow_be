@@ -14,19 +14,21 @@ const FIXTURE = spineSchema.parse(
 )
 
 const reachable = await isPlantUmlReachable()
-if (!reachable) console.warn("\n[diagram] PlantUML không reachable — test render thật bị SKIP (docker compose up -d plantuml).\n")
+if (!reachable) console.warn("\n[diagram] PlantUML không reachable - test render thật bị SKIP (docker compose up -d plantuml).\n")
 
 describe.skipIf(!reachable)("renderer × PlantUML server thật (DoD T10)", () => {
-  for (const target of allTargets(FIXTURE)) {
+  // Chỉ kind vẽ bằng PlantUML (`puml`: sequence, wireframe salt). Kind `svg` (FLF-339) dựng SVG trong code — gửi SVG cho
+  // PlantUML compile luôn lỗi; bố cục của chúng do `checkScene` kiểm ở test renderer
+  for (const target of allTargets(FIXTURE).filter((t) => renderKind(FIXTURE, t.kind, t.owner_id).some((p) => p.format === "puml"))) {
     it(`${target.kind}${target.owner_id ? `@${target.owner_id}` : ""} compile ok`, async () => {
-      for (const part of renderKind(FIXTURE, target.kind, target.owner_id)) {
-        const result = await checkPlantUml(part.puml)
-        expect(result.ok, result.ok ? "" : `${result.error}\n${part.puml}`).toBe(true)
+      for (const part of renderKind(FIXTURE, target.kind, target.owner_id).filter((p) => p.format === "puml")) {
+        const result = await checkPlantUml(part.source)
+        expect(result.ok, result.ok ? "" : `${result.error}\n${part.source}`).toBe(true)
       }
     })
   }
 
-  it(".puml hỏng không sửa được ⇒ ok=false kèm lỗi, không ném (DoD T10)", async () => {
+  it(".source hỏng không sửa được ⇒ ok=false kèm lỗi, không ném (DoD T10)", async () => {
     const broken = "@startuml\nentity \"User\" as E01\nE01 ||--o{{{ E02 :::\n@enduml\n"
     const result = await compileWithFix("erd", broken, { ...defaultDeps(), fix: async () => null })
     expect(result.ok).toBe(false)

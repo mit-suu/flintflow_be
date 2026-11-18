@@ -4,7 +4,7 @@
  * - Loại: luật gắn với quy trình sinh của mode 2 hoặc bắn hàng loạt vô nghĩa.
  * - Hạ đỏ ⇒ vàng: thiếu số đo là "gap" để báo, không phải lỗi kỹ thuật chặn release.
  * - Mode 1 v2 (D6, FLF-183) từng giữ `section_empty` đỏ (mọi đầu mục mẫu FPT là cốt lõi). Từ 2026-10-06 bản xuất theo
- *   template người dùng upload nên mục FPT không bắt buộc ⇒ bỏ `section_empty`; mục thiếu chỉ liệt kê ở gap report.
+ *   template người dùng upload nên mục FPT không bắt buộc ⇒ bỏ `section_empty` (FLF-312: gap report cũng không liệt kê mục FPT thiếu).
  * Giữ nguyên: `dead_reference`, `render_error`, `diagram_stale`, `unconfirmed_assumption` (đỏ) và các luật
  * cardinality vàng còn lại.
  */
@@ -15,7 +15,7 @@ export const MODE1_RULE_PROFILE: RuleProfile = Object.freeze({
   exclude: new Set([
     // mảng rỗng đưa vào gap report dạng "section thiếu", không chặn baseline v0 / release
     "array_empty",
-    // mục FPT không bắt buộc ở mode 1 (bản xuất theo template upload) — mục thiếu chỉ là gợi ý trong gap report
+    // mục FPT không bắt buộc ở mode 1 (bản xuất theo template upload)
     "section_empty",
     "section_stale_at_baseline",
     "section_awaiting_reaccept",
@@ -49,4 +49,14 @@ export const IMPORT_SEMANTIC_RULE = "import_semantic"
 export const IMPORT_IMAGE_RULE = "import_image_unread"
 /** FLF-252: quyền của ma trận phân quyền không khớp màn / vai trò nào ⇒ không vào Spine, cờ vàng báo phần bị bỏ. */
 export const IMPORT_UNRESOLVED_RULE = "import_unresolved_ref"
+/**
+ * FLF-343: chỗ độ tin thấp được tự nhận vào baseline 0.1 (mode 1 một mạch) — field I-4 độ tin < 0.7 / đọc từ ảnh, heading /
+ * cột bảng I-3 độ tin < 0.8. Cờ vàng "Cần xem" mang đường dẫn phần tử (`target_id`), hiện ở trang tạo CR; sai thì sửa bằng CR.
+ */
+export const IMPORT_NEEDS_REVIEW_RULE = "import_needs_review"
+/**
+ * FLF-363 (D2): tên heading giống một mục mà nội dung dưới nó là của mục khác — heading đã xếp theo nội dung (độ tin ≤ 0.75).
+ * Cờ vàng "Tiêu đề và nội dung khác nhau" nêu cả hai mục; sai thì sửa bằng CR. Thay cờ "Cần xem" của heading đó.
+ */
+export const IMPORT_TITLE_CONTENT_RULE = "import_title_content_mismatch"
 export const CR_CONSISTENCY_RULE = "cr_consistency"

@@ -1,5 +1,6 @@
 import {
   AlignmentType,
+  Bookmark,
   BorderStyle,
   Document,
   Footer,
@@ -22,7 +23,10 @@ import {
 } from "docx"
 import { imageSize } from "image-size"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { versionFileName } from "../doc-version/versioning.js"
+import { STAMP_PROPERTY } from "../import/import.constants.js"
 import { ruleLabel } from "../spine/human-labels.js"
+import { DIAGRAM_PLACEHOLDER_PNG, diagramErrorId } from "./diagram-placeholder.js"
 import { FLAG_TEXT, WRITER_TEXT, type DocumentLanguage, type WriterText } from "./labels.js"
 import type {
   Block,
@@ -84,7 +88,27 @@ type BodyChild = Paragraph | Table | TableOfContents
 interface WriteContext {
   /** Mỗi numbered list một instance để đánh số lại từ 1. */
   nextNumberingInstance: number
+  /** FLF-344: có ⇒ heading cấp 1–3 mang bookmark và được ghi sẵn thành dòng mục lục (theo thứ tự tài liệu). */
+  toc: TocEntry[] | null
 }
+
+/** Một dòng mục lục ghi sẵn (cùng hình `ToCEntry` của thư viện docx). */
+interface TocEntry {
+  title: string
+  level: number
+  href: string
+}
+
+const TOC_STYLES = [1, 2, 3].map((level) => ({
+  id: `TOC${level}`,
+  name: `toc ${level}`,
+  basedOn: "Normal",
+  next: "Normal",
+  paragraph: { indent: { left: (level - 1) * 240 }, spacing: { after: 100 } }
+}))
+
+/** Cấp heading cuối cùng vào mục lục — khớp `TOC \o "1-3"`. */
+const TOC_MAX_LEVEL = 3
 
 export type FlagLanguage = "en" | "vi"
 
@@ -96,27 +120,47 @@ export interface WriteDocxOptions {
    * Độc lập với `flagLanguage` (chỉ phụ lục cờ) để file version mode 1 (`flagLanguage: "vi"`) giữ nguyên.
    */
   language?: DocumentLanguage
+  /**
+   * FLF-344 — ghi sẵn nội dung mục lục (dòng theo heading cấp 1–3, bấm được tới mục qua bookmark) thay vì field TOC rỗng.
+   * Field rỗng chỉ có chữ khi Word cập nhật field — file tải về mở ở Protected View, trình xem trên web hay bản in không
+   * cập nhật ⇒ mục lục trống. Word / LibreOffice vẫn dựng lại field (kèm số trang) khi cập nhật. Bật cho file version mode 1
+   * (`render-version.ts`); export mode 2 giữ nguyên.
+   */
+  tocEntries?: boolean
+}
+
+/** FLF-334: stamp mang release gốc + loại bản (mode 2 không có CR ⇒ không ghi `flintflow_latest_cr`). */
+function stampLineage(doc: RenderedDocument): { name: string; value: string }[] {
+  const { release, base } = exportLineage(doc)
+  return [
+    ...(base ? [{ name: STAMP_PROPERTY.base_version, value: base }] : []),
+    { name: STAMP_PROPERTY.kind, value: release ? "release" : "draft" }
+  ]
 }
 
 export async function writeDocx(doc: RenderedDocument, options: WriteDocxOptions = {}): Promise<Buffer> {
-  const ctx: WriteContext = { nextNumberingInstance: 1 }
+  const ctx: WriteContext = { nextNumberingInstance: 1, toc: options.tocEntries ? [] : null }
   const isDraft = doc.source === "draft" || doc.watermark === "DRAFT"
   const t = WRITER_TEXT[options.language ?? "en"]
+
+  // Thân tài liệu dựng trước mục lục: dòng mục lục ghi sẵn (FLF-344) lấy từ chính các heading đã dựng
+  const body: BodyChild[] = [
+    ...recordOfChanges(doc, t, ctx),
+    ...flagsAppendix(doc, isDraft, options.flagLanguage ?? "en", ctx),
+    new Paragraph({ children: [new PageBreak()] })
+  ]
+  for (const section of doc.sections) {
+    body.push(...renderSection(section, ctx, t))
+  }
 
   const children: BodyChild[] = [
     ...coverPage(doc, isDraft, t),
     new Paragraph({ children: [new PageBreak()] }),
     new Paragraph({ text: t.toc, heading: HeadingLevel.TITLE }),
-    new TableOfContents(t.toc, { hyperlink: true, headingStyleRange: "1-3" }),
+    new TableOfContents(t.toc, { hyperlink: true, headingStyleRange: "1-3", ...(ctx.toc?.length ? { cachedEntries: ctx.toc } : {}) }),
     new Paragraph({ children: [new PageBreak()] }),
-    ...recordOfChanges(doc, t),
-    ...flagsAppendix(doc, isDraft, options.flagLanguage ?? "en"),
-    new Paragraph({ children: [new PageBreak()] })
+    ...body
   ]
-
-  for (const section of doc.sections) {
-    children.push(...renderSection(section, ctx, t))
-  }
 
   const document = new Document({
     title: t.title(doc.projectName),
@@ -127,15 +171,18 @@ export async function writeDocx(doc: RenderedDocument, options: WriteDocxOptions
     customProperties: [
       { name: "flintflow_project_id", value: doc.projectId },
       { name: "flintflow_version", value: doc.version },
-      { name: "flintflow_source", value: doc.source }
+      { name: "flintflow_source", value: doc.source },
+      ...stampLineage(doc)
     ],
     features: { updateFields: true },
     styles: {
       default: {
         document: { run: { font: FONT, size: 24 } },
-        heading1: { run: { font: FONT, size: 32, bold: true } },
-        heading2: { run: { font: FONT, size: 28, bold: true } },
-        heading3: { run: { font: FONT, size: 26, bold: true } },
+        // `outlineLevel` (FLF-316): Word dựng mục lục `TOC \o "1-3"` theo tên style, còn LibreOffice (bản PDF qua
+        // Gotenberg) theo cấp outline — thiếu nó thì mục lục của PDF trống trơn
+        heading1: { run: { font: FONT, size: 32, bold: true }, paragraph: { outlineLevel: 0 } },
+        heading2: { run: { font: FONT, size: 28, bold: true }, paragraph: { outlineLevel: 1 } },
+        heading3: { run: { font: FONT, size: 26, bold: true }, paragraph: { outlineLevel: 2 } },
         // Mẫu FPT: heading con (Function trigger… của §3.x.y) nhỏ hơn Heading 3; mode 1 giữ style như cũ
         ...(doc.format === "fpt"
           ? {
@@ -144,7 +191,10 @@ export async function writeDocx(doc: RenderedDocument, options: WriteDocxOptions
               heading6: { run: { font: FONT, size: 24, italics: true } }
             }
           : {})
-      }
+      },
+      // FLF-344: dòng mục lục ghi sẵn dùng style `TOC1..3` — khai tên chuẩn `toc N` để Word nhận là style mục lục (và
+      // parser import bỏ chúng khi upload lại), thụt lề theo cấp như mục lục Word tự dựng
+      ...(options.tocEntries ? { paragraphStyles: TOC_STYLES } : {})
     },
     numbering: {
       config: [
@@ -180,22 +230,30 @@ export async function writeDocx(doc: RenderedDocument, options: WriteDocxOptions
   return Packer.toBuffer(document)
 }
 
-/** `<project>-<version>[-draft].docx`, chỉ ASCII an toàn cho mọi hệ điều hành. */
-export function buildDocxFileName(doc: Pick<RenderedDocument, "projectName" | "version" | "source">): string {
-  const project = toSlug(doc.projectName) || "srs"
-  const version = doc.version.trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "v0"
-  const suffix = doc.source === "draft" && !version.toLowerCase().endsWith("-draft") ? "-draft" : ""
-  return `${project}-${version}${suffix}.docx`
+/**
+ * Release gốc của bản xuất mode 2 (FLF-334), suy từ nhãn version (`draftVersionLabel`): baseline ⇒ chính nó (`v1.0` ⇒
+ * `1.0`); bản nháp `v0` ⇒ chưa có baseline (`null`); `v1.0 + 3 changes` ⇒ `1.0`. Gốc `0.x` (bản import của dự án mode 1)
+ * ⇒ `0` và luôn là bản nháp (kể cả baseline), như quy tắc mode 1.
+ */
+export function exportLineage(doc: Pick<RenderedDocument, "version" | "source">): { release: boolean; base: string | null } {
+  const label = doc.version.trim()
+  if (doc.source === "draft" && /^v?0$/i.test(label)) return { release: false, base: null }
+  const base = label.split("+")[0].trim().replace(/^v/i, "") || null
+  // Gốc `0.x` (bản import của dự án mode 1) không bao giờ là release — kể cả khi xuất `source=baseline`. FLF-356: giữ
+  // đúng số bản import (`0.1`), không gộp về `0`
+  if (base && /^0(\.\d+)?$/.test(base)) return { release: false, base }
+  return { release: doc.source !== "draft", base }
 }
 
-function toSlug(value: string): string {
-  return value
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[đĐ]/g, "d")
-    .replace(/[^A-Za-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .toLowerCase()
+/**
+ * Tên file theo quy tắc chung `versionFileName` (FLF-334): `Lumen_v1.0.docx`, `Lumen_v1.0_DRAFT.docx`, `Lumen_DRAFT.docx`.
+ * `language` (FLF-334 B) chỉ truyền khi khác ngôn ngữ tài liệu ⇒ `Lumen_v1.0_EN.docx`.
+ * FLF-356: `_DRAFT` theo nội dung file — xuất `source=baseline` không có watermark DRAFT ⇒ tên cũng không có, kể cả
+ * baseline `0.x` của dự án import (`FAP_v0.1.docx`); stamp `kind` vẫn theo `exportLineage` (0.x chưa phát hành).
+ */
+export function buildDocxFileName(doc: Pick<RenderedDocument, "projectName" | "version" | "source">, language?: string): string {
+  const lineage = exportLineage(doc)
+  return versionFileName({ name: doc.projectName, ...lineage, release: lineage.release || doc.source === "baseline", ...(language ? { language } : {}) })
 }
 
 function coverPage(doc: RenderedDocument, isDraft: boolean, t: WriterText): Paragraph[] {
@@ -267,10 +325,10 @@ function watermarkParagraph(text: string): Paragraph {
   return imported.root[0] as Paragraph
 }
 
-function recordOfChanges(doc: RenderedDocument, t: WriterText): BodyChild[] {
+function recordOfChanges(doc: RenderedDocument, t: WriterText, ctx: WriteContext): BodyChild[] {
   const plain = (text: string): CellRuns => [{ text }]
   return [
-    new Paragraph({ text: t.rocTitle, heading: HeadingLevel.HEADING_1 }),
+    headingParagraph(ctx, t.rocTitle, 1),
     new Paragraph({
       ...beforeTable,
       children: [new TextRun({ text: t.rocLegend, italics: true, size: 20 })]
@@ -288,7 +346,7 @@ function recordOfChanges(doc: RenderedDocument, t: WriterText): BodyChild[] {
 
 // Chữ của phụ lục cờ (`FLAG_TEXT`) và chữ cố định của writer (`WRITER_TEXT`) nằm ở `labels.ts` (FLF-265).
 
-function flagsAppendix(doc: RenderedDocument, isDraft: boolean, language: FlagLanguage): BodyChild[] {
+function flagsAppendix(doc: RenderedDocument, isDraft: boolean, language: FlagLanguage, ctx: WriteContext): BodyChild[] {
   const appendix = doc.flagsAppendix
   if (!appendix) return []
 
@@ -310,7 +368,7 @@ function flagsAppendix(doc: RenderedDocument, isDraft: boolean, language: FlagLa
   const out: BodyChild[] = []
   if (isDraft) {
     out.push(
-      new Paragraph({ text: t.status, heading: HeadingLevel.HEADING_2 }),
+      headingParagraph(ctx, t.status, 2),
       new Paragraph({
         children: [
           new TextRun({ text: `${t.open}: ${appendix.redOpen.length}`, bold: true }),
@@ -320,12 +378,12 @@ function flagsAppendix(doc: RenderedDocument, isDraft: boolean, language: FlagLa
       })
     )
     if (appendix.redOpen.length > 0) {
-      out.push(new Paragraph({ text: t.openHeading, heading: HeadingLevel.HEADING_3, ...beforeTable }), tableGap(undefined), flagTable(appendix.redOpen, false))
+      out.push(headingParagraph(ctx, t.openHeading, 3, beforeTable), tableGap(undefined), flagTable(appendix.redOpen, false))
     }
   }
   // srs-spine §6: mọi export, kể cả bản sạch, in danh sách waive
   if (appendix.waived.length > 0) {
-    out.push(new Paragraph({ text: t.waivedHeading, heading: HeadingLevel.HEADING_3, ...beforeTable }), tableGap(undefined), flagTable(appendix.waived, true))
+    out.push(headingParagraph(ctx, t.waivedHeading, 3, beforeTable), tableGap(undefined), flagTable(appendix.waived, true))
   }
   return out
 }
@@ -336,7 +394,7 @@ function renderSection(section: RenderedSection, ctx: WriteContext, t: WriterTex
   const title = section.number ? `${section.number} ${section.heading}` : section.heading
 
   const tableFirst = !needsReview && section.blocks[0]?.type === "table"
-  const out: BodyChild[] = [new Paragraph({ text: title, heading: headingLevel(section.level), ...(tableFirst ? beforeTable : {}) })]
+  const out: BodyChild[] = [headingParagraph(ctx, title, section.level, tableFirst ? beforeTable : {})]
 
   if (needsReview) {
     const note = section.status === "stale" ? t.staleNote : t.awaitingNote
@@ -360,9 +418,7 @@ function renderBlock(block: Block, shading: Shading, ctx: WriteContext, next?: B
     case "paragraph":
       return [new Paragraph({ shading, children: runs(block.runs) })]
     case "heading":
-      return [
-        new Paragraph({ shading, heading: headingLevel(block.level), text: block.text, ...(next?.type === "table" ? beforeTable : {}) })
-      ]
+      return [headingParagraph(ctx, block.text, block.level, { shading, ...(next?.type === "table" ? beforeTable : {}) })]
     case "bullet_list":
       return block.items.map((item) => new Paragraph({ shading, bullet: { level: 0 }, children: runs(item) }))
     case "numbered_list": {
@@ -486,10 +542,30 @@ function image(png: Buffer | string, caption: string | undefined, shading: Shadi
 
 function toPngBuffer(png: Buffer | string): Buffer {
   if (Buffer.isBuffer(png)) return png
+  // Sơ đồ vẽ lỗi: nhúng ảnh placeholder, chú thích (assemble đã ghi "chưa vẽ được") nói lý do
+  if (diagramErrorId(png) !== null) return Buffer.from(DIAGRAM_PLACEHOLDER_PNG, "base64")
   const base64 = png.replace(/^data:image\/png;base64,/, "").replace(/\s+/g, "")
   return Buffer.from(base64, "base64")
 }
 
 function headingLevel(level: number) {
   return HEADING_LEVELS[Math.min(6, Math.max(1, Math.trunc(level))) - 1]
+}
+
+/**
+ * Đoạn heading. Bật mục lục ghi sẵn (FLF-344) mà heading vào mục lục (cấp 1–3, có chữ) ⇒ chữ heading bọc trong bookmark
+ * `_Toc…` (tiền tố Word dùng cho bookmark ẩn của mục lục) và thêm một dòng mục lục trỏ tới đó.
+ */
+function headingParagraph(
+  ctx: WriteContext,
+  text: string,
+  level: number,
+  extra: { shading?: Shading; spacing?: { after: number } } = {}
+): Paragraph {
+  const heading = headingLevel(level)
+  const tocLevel = HEADING_LEVELS.indexOf(heading) + 1
+  if (!ctx.toc || tocLevel > TOC_MAX_LEVEL || !text.trim()) return new Paragraph({ ...extra, heading, text })
+  const href = `_Toc${String(ctx.toc.length + 1).padStart(6, "0")}`
+  ctx.toc.push({ title: text, level: tocLevel, href })
+  return new Paragraph({ ...extra, heading, children: [new Bookmark({ id: href, children: [new TextRun(text)] })] })
 }

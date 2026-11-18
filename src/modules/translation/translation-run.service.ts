@@ -27,13 +27,12 @@ import { ActionType, type AiActionInput, type AiActionResult } from "../../share
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import type { TranslateDocumentOutput } from "../../shared/ai/response-parser.js"
-import * as spineRepository from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { DocumentLanguageProject } from "../project/document-language.js"
 import * as repository from "./translation.repository.js"
 import { formatGlossary, glossaryFor, learnGlossary, seedGlossary } from "./glossary.service.js"
 import { copiedSource, fitTranslation, hashSource, translationUnits, type LocalizedUnit } from "./translation-units.js"
-import { projectLanguages, resolveTranslations, splitBatches, uniqueBatchItems, type BatchItem } from "./translation.service.js"
+import { resolveScopeLanguages, resolveTranslations, splitBatches, uniqueBatchItems, type BatchItem, type TranslationScope } from "./translation.service.js"
 
 export type TranslateDocumentExecutor = (
   input: AiActionInput,
@@ -86,17 +85,19 @@ export const runTranslation = async (
   projectId: string,
   userId: string,
   project: DocumentLanguageProject,
-  options: { max_batches?: number } = {},
+  options: { max_batches?: number } & TranslationScope = {},
   executor: TranslateDocumentExecutor = defaultTranslateDocumentExecutor
 ): Promise<TranslationRunResult> => {
   const none: TranslationRunResult = { translated: 0, remaining: 0, credits_used: 0 }
-  const { locale, source } = await projectLanguages(projectId, project)
+  // FLF-334 B: `options.locale` + đích snapshot (`loadSpine`) cho tải file theo ngôn ngữ khác — không truyền ⇒ ngôn ngữ
+  // tài liệu trên Spine hiện tại như trước
+  const { locale, source, loadSpine } = await resolveScopeLanguages(projectId, project, options)
   if (locale === source) return none
-  const spine = await spineRepository.get(projectId)
+  const spine = await loadSpine()
   if (!spine) return none
 
   const token = await repository.acquireRunLock(projectId, locale)
-  if (!token) throw new ApiError(409, "Tài liệu đang được dịch ở một lượt khác — đợi lượt đó xong rồi chạy lại.", TRANSLATION_RUNNING)
+  if (!token) throw new ApiError(409, "Tài liệu đang được dịch ở một lượt khác - đợi lượt đó xong rồi chạy lại.", TRANSLATION_RUNNING)
   try {
     return await runBatches(projectId, userId, locale, source, spine, options, executor)
   } finally {
@@ -174,7 +175,7 @@ const runBatches = async (
     }
     if (accepted.length === 0) {
       // Trả credit mà không tiến ⇒ dừng, không đốt thêm lô nào
-      console.warn(`[Translation] Một lô của project ${projectId} không có bản dịch hợp lệ nào — dừng`)
+      console.warn(`[Translation] Một lô của project ${projectId} không có bản dịch hợp lệ nào - dừng`)
       break
     }
   }

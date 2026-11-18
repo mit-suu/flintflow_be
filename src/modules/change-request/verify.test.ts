@@ -10,7 +10,7 @@ import type { IChangeRequest } from "./change-request.model.js"
 import { MAX_REDO_PER_LOCATION, nextAfterVerifyFail } from "./change-request.state.js"
 import { previewAfter } from "./propose.service.js"
 import { elementValue, valueText } from "./spine-location.js"
-import { checkLocation, checkSpineOps } from "./verify.service.js"
+import { checkLocation, checkSpineOps, previousFindingsText, previousFlags } from "./verify.service.js"
 
 const cr = { cr_id: "CR-001" } as IChangeRequest
 const PATH = "actors[id=A01]"
@@ -31,7 +31,7 @@ const proposal = (over: Partial<NonNullable<IChangeLocation["proposal"]>> = {}) 
 const loc = (over: Partial<IChangeLocation> = {}): IChangeLocation => ({ location_id: "L001", path: PATH, conclusion: "edit", proposal: proposal(), ...over }) as IChangeLocation
 const mine = new Map([[PATH, "CR-001"]])
 
-describe("C-5 checkLocation — code (đỏ)", () => {
+describe("C-5 checkLocation - code (đỏ)", () => {
   it("đạt; chưa kết luận; not_related bỏ qua; phần tử đã xoá ⇒ element_missing", () => {
     expect(checkLocation(cr, loc(), spine(), mine)).toEqual([])
     expect(checkLocation(cr, loc({ conclusion: null }), spine(), mine).map((v) => v.rule)).toEqual(["unconcluded"])
@@ -39,12 +39,12 @@ describe("C-5 checkLocation — code (đỏ)", () => {
     expect(checkLocation(cr, loc({ path: "actors[id=A99]" }), spine(), mine).map((v) => v.rule)).toEqual(["element_missing"])
   })
 
-  it("mất khoá ⇒ path_not_locked; thiếu đề xuất ⇒ no_proposal", () => {
-    expect(checkLocation(cr, loc(), spine(), new Map([[PATH, "CR-002"]])).map((v) => v.rule)).toEqual(["path_not_locked"])
+  it("FLF-375: không còn khoá - CR khác cùng chạm phần tử không làm trượt; thiếu đề xuất ⇒ no_proposal", () => {
+    expect(checkLocation(cr, loc(), spine(), new Map([[PATH, "CR-002"]])).map((v) => v.rule)).not.toContain("path_not_locked")
     expect(checkLocation(cr, loc({ proposal: null }), spine(), mine).map((v) => v.rule)).toEqual(["no_proposal"])
   })
 
-  it("edit không op ⇒ edit_without_ops; op không đổi gì ⇒ edit_no_change; op chạm phần tử không khoá ⇒ op_path_not_locked; thêm phần tử mới từ vị trí phần tử ⇒ add_outside_slot (chỉ thêm từ ô thêm mới — 2026-09-24)", () => {
+  it("edit không op ⇒ edit_without_ops; op không đổi gì ⇒ edit_no_change; op chạm phần tử không khoá ⇒ op_path_not_locked; thêm phần tử mới từ vị trí phần tử ⇒ add_outside_slot (chỉ thêm từ ô thêm mới - 2026-09-24)", () => {
     expect(checkLocation(cr, loc({ proposal: proposal({ spine_ops: [], new_text: OLD }) }), spine(), mine).map((v) => v.rule)).toEqual(["edit_without_ops"])
     const same = [{ op: "set", path: `${PATH}.name`, value: "Learner" }]
     expect(checkLocation(cr, loc({ proposal: proposal({ spine_ops: same, new_text: previewAfter(spine(), PATH, same) }) }), spine(), mine).map((v) => v.rule)).toEqual([
@@ -62,14 +62,14 @@ describe("C-5 checkLocation — code (đỏ)", () => {
     expect(checkLocation(cr, comment("Xem lại"), spine(), mine)).toEqual([])
   })
 
-  it("giá trị tại path đã đổi kể từ lúc đề xuất ⇒ ném CR_VALUE_CHANGED kèm vị trí", () => {
+  it("giá trị tại path đã đổi kể từ lúc đề xuất (trước khi xác nhận) ⇒ vi phạm value_changed để AI soạn lại (FLF-375)", () => {
     const changed = spine()
     ;(changed.actors[0] as { description: string }).description = "Edited elsewhere"
-    expect(() => checkLocation(cr, loc(), changed, mine)).toThrow(expect.objectContaining({ code: "CR_VALUE_CHANGED", meta: { location_id: "L001", path: PATH } }))
+    expect(checkLocation(cr, loc(), changed, mine)).toEqual([expect.objectContaining({ rule: "value_changed", path: PATH })])
   })
 })
 
-describe("C-5 checkSpineOps — op Spine chạy khô", () => {
+describe("C-5 checkSpineOps - op Spine chạy khô", () => {
   it("op hợp lệ ⇒ không vi phạm; chỉ op của vị trí edit được chạy khô", () => {
     expect(checkSpineOps(spine(), cr, [loc()]).size).toBe(0)
     expect(checkSpineOps(spine(), cr, [loc({ conclusion: "comment", proposal: proposal({ spine_ops: [{ op: "set", path: "actors[id=A99].name", value: "X" }] }) })]).size).toBe(0)
@@ -94,5 +94,21 @@ describe("C-5 checkSpineOps — op Spine chạy khô", () => {
 describe("C-5 redo ≤ 2 rồi sửa tay", () => {
   it(`trượt lần 1, 2 ⇒ AI làm lại; từ lần ${MAX_REDO_PER_LOCATION + 1} ⇒ manual_fix`, () => {
     expect([0, 1, 2, 3].map(nextAfterVerifyFail)).toEqual(["proposing", "proposing", "manual_fix", "manual_fix"])
+  })
+})
+
+describe("C-5 nhận xét AI lần trước (FLF-307)", () => {
+  const flagged = (location_id: string, ai_flags: { rule: string; message: string }[] | null) =>
+    ({ location_id, verify: ai_flags ? { code_ok: true, violations: [], ai_flags, at: new Date() } : null }) as Pick<IChangeLocation, "location_id" | "verify">
+
+  it("giữ nhận xét theo vị trí; vị trí vừa đề xuất lại (verify null) không còn nhận xét", () => {
+    const prev = previousFlags([flagged("L004", [{ rule: "contradiction", message: "A" }]), flagged("L005", []), flagged("L074", null)])
+    expect([...prev.keys()]).toEqual(["L004"])
+  })
+
+  it("liệt kê nhận xét cũ không lặp cho prompt; không có ⇒ (none)", () => {
+    const same = [{ rule: "contradiction", message: "A" }]
+    expect(previousFindingsText(new Map([["L004", same], ["L005", same]]))).toBe("- (contradiction) A")
+    expect(previousFindingsText(new Map())).toBe("(none)")
   })
 })

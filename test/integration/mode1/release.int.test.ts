@@ -38,7 +38,7 @@ import {
 import { releaseResponseSchema, versionsResponseSchema } from "../../../src/modules/doc-version/doc-version.dto.js"
 import { release } from "../../../src/modules/doc-version/release.service.js"
 import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.js"
-import { DocFileNotFoundError, docFileStore, gridFsDocFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
+import { DocFileNotFoundError, clearDocFileCache, docFileStore, gridFsDocFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
 import { DocxPackage, readBlocks, readStamp } from "../../../src/modules/docx-ooxml/index.js"
 import { lockedPaths } from "../../helpers/mode1-cr-p4.js"
 import { applyTransaction } from "../../../src/modules/spine/op-engine.js"
@@ -56,7 +56,7 @@ beforeEach(() => {
 const projectWithRevision = async () => {
   const ctx = await importedProject()
   const first = await writeCr(ctx.c, "Faster", "1 second instead of 2 seconds")
-  expect(first).toEqual({ crId: "CR-001", version: "0.1" })
+  expect(first).toEqual({ crId: "CR-001", version: "0.2" })
   return ctx
 }
 
@@ -69,7 +69,7 @@ const addRedFlag = async (projectId: string) => {
       {
         op: "add",
         path: "diagrams[]",
-        value: { id: "D01", kind: "erd", puml: "@startuml\n@enduml", section: "fixed:3.1.5", owner_kind: null, owner_id: null, render_status: "error", error: "boom", source_hash: "x", rendered_at: null }
+        value: { id: "D01", kind: "erd", format: "puml", source: "@startuml\n@enduml", section: "fixed:3.1.5", owner_kind: null, owner_id: null, render_status: "error", error: "boom", source_hash: "x", rendered_at: null }
       }
     ]
   })
@@ -81,7 +81,7 @@ const released = async (c: Mode1Api) => {
   return releaseResponseSchema.parse(res.body.data)
 }
 
-describe("release — chặn", () => {
+describe("release - chặn", () => {
   it("đỏ > 0 ⇒ 422 RELEASE_RED_FLAGS_OPEN kèm cờ; không tạo version, không lưu file, Spine không có baseline release", async () => {
     const { c, projectId } = await projectWithRevision()
     await addRedFlag(projectId)
@@ -119,12 +119,12 @@ describe("release — chặn", () => {
   })
 })
 
-describe("release — bản sạch + baseline", () => {
+describe("release - bản sạch + baseline", () => {
   it("1.0 = render snapshot Spine (FLF-186): stamp release, nội dung sau CR, không Track Changes; baseline type release snapshot Spine", async () => {
     const { c, projectId } = await projectWithRevision()
     const spineBefore = (await spineRepository.get(projectId))!
     const rel = await released(c)
-    expect(rel.version).toMatchObject({ version: "1.0", kind: "release", based_on: "0.1", has_clean_file: true })
+    expect(rel.version).toMatchObject({ version: "1.0", kind: "release", based_on: "0.2", has_clean_file: true })
     expect(rel.cr_ids).toEqual(["CR-001"])
     expect(rel.baseline).toMatchObject({ type: "release", version: "1.0", doc_version: "1.0" })
     expect(rel.spine_version).toBeGreaterThan(spineBefore.spine_version)
@@ -138,7 +138,7 @@ describe("release — bản sạch + baseline", () => {
     // bản sạch = bản render (file_ref và clean_file_ref cùng một file)
     expect(v10!.clean_file_ref).toBe(v10!.file_ref)
     const clean = await DocxPackage.load(await docFileStore().load(v10!.clean_file_ref!))
-    expect(await readStamp(clean)).toEqual({ project_id: projectId, version: "1.0", source: "release" })
+    expect(await readStamp(clean)).toEqual({ project_id: projectId, version: "1.0", source: "release", base_version: null, latest_cr: null, kind: null })
     const cleanXml = await documentXml(await docFileStore().load(v10!.clean_file_ref!))
     expect(cleanXml).not.toMatch(/<w:ins\b|<w:del\b|<w:delText\b|commentReference|commentRangeStart/)
     const cleanBlocks = await readBlocks(clean)
@@ -147,12 +147,19 @@ describe("release — bản sạch + baseline", () => {
 
     // tải về 1.0 ⇒ bản sạch không _DRAFT
     const dl = await binary(c.get("/versions/1.0/download"))
-    expect(decodeURIComponent(String(dl.headers["content-disposition"]))).toContain(`Lumen LMS_${projectId}_v1.0.docx`)
+    expect(decodeURIComponent(String(dl.headers["content-disposition"]))).toContain("Lumen LMS_v1.0.docx")
+    expect(await readStamp(await DocxPackage.load(dl.body as Buffer))).toEqual({ project_id: projectId, version: "1.0", source: "release", base_version: "1.0", latest_cr: null, kind: "release" })
     expect(await documentXml(dl.body as Buffer)).not.toMatch(/<w:ins\b|<w:del\b/)
+
+    // FLF-316: format=pdf đi qua Gotenberg — test trỏ cổng đóng ⇒ 503 có mã riêng, bản .docx vẫn tải được
+    const pdf = await c.get("/versions/1.0/download?format=pdf")
+    expect(pdf.status).toBe(503)
+    expect(pdf.body.error.code).toBe("PDF_EXPORT_UNAVAILABLE")
+    expect((await c.get("/versions/1.0/download?variant=original&format=pdf")).status).toBe(400)
   })
 })
 
-describe("release — gom CR", () => {
+describe("release - gom CR", () => {
   it("2.0 chỉ gom CR written sau 1.0, theo thứ tự ghi; CR huỷ không được gom; baseline release thứ hai", async () => {
     const { c, projectId } = await projectWithRevision()
     expect((await released(c)).cr_ids).toEqual(["CR-001"])
@@ -174,7 +181,7 @@ describe("release — gom CR", () => {
     const spine = (await spineRepository.get(projectId))!
     expect(spine.baselines.filter((b) => b.type === "release").map((b) => b.version)).toEqual(["1.0", "2.0"])
     const versions = versionsResponseSchema.parse((await c.get("/versions")).body.data)
-    expect(versions.map((v) => v.version)).toEqual(["2.0", "1.2", "1.1", "1.0", "0.1", "0.0"])
+    expect(versions.map((v) => v.version)).toEqual(["2.0", "1.2", "1.1", "1.0", "0.2", "0.1"])
 
     const v20 = await DocVersion.findOne({ projectId, version: "2.0" }).lean()
     const clean = await DocxPackage.load(await docFileStore().load(v20!.clean_file_ref!))
@@ -182,25 +189,25 @@ describe("release — gom CR", () => {
     expect(await documentXml(await docFileStore().load(v20!.clean_file_ref!))).not.toMatch(/<w:ins\b|<w:del\b/)
   })
 
-  it("CR đang dở không chặn release: khoá phần tử (theo path) giữ nguyên qua release, CR không bị gom", async () => {
+  it("CR đang dở không chặn release (đề xuất chưa xác nhận không nằm trong bản nháp), CR không bị gom", async () => {
     const { c, projectId } = await projectWithRevision()
     routeReplaceCr("1 second", "500 ms")
     const pending = await createCr(c, "Đang dở", "500 ms")
     crDetail(await c.post(`/change-requests/${pending}/clarify`))
     const impact = crDetail(await c.post(`/change-requests/${pending}/impact`))
     expect(impact.locations.length).toBeGreaterThan(0)
-    const held = await lockedPaths(projectId, pending)
-    expect(held.length).toBeGreaterThan(0)
+    // FLF-375 (§3.2): không khoá chỗ đang sửa
+    expect(await lockedPaths(projectId, pending)).toEqual([])
 
     const rel = await released(c)
     expect(rel.cr_ids).toEqual(["CR-001"])
-    expect(await lockedPaths(projectId, pending)).toEqual(held)
+    expect(await lockedPaths(projectId, pending)).toEqual([])
     const detail = crDetail(await c.get(`/change-requests/${pending}`))
     expect(detail.change_request.status).toBe("impact_review")
   })
 })
 
-describe("release — lỗi giữa chừng", () => {
+describe("release - lỗi giữa chừng", () => {
   it("snapshot baseline lỗi ⇒ xoá file vừa lưu (không mồ côi), không tạo version; chạy lại được", async () => {
     const { c, projectId } = await projectWithRevision()
     const filesBefore = await gridFsFileCount(projectId)
@@ -217,7 +224,7 @@ describe("release — lỗi giữa chừng", () => {
   })
 })
 
-describe("doc-file.store — GridFS", () => {
+describe("doc-file.store - GridFS", () => {
   it("save/load giữ nguyên byte + metadata; ref hợp lệ nhưng không có / ref sai ⇒ DocFileNotFoundError", async () => {
     const data = Buffer.from([0, 1, 2, 250, 255])
     const ref = await gridFsDocFileStore.save(data, { projectId: "P1", kind: "upload", name: "SRS.docx" })
@@ -230,18 +237,35 @@ describe("doc-file.store — GridFS", () => {
     await expect(gridFsDocFileStore.load("khong-phai-id")).rejects.toBeInstanceOf(DocFileNotFoundError)
   })
 
+  it("FLF-377: đọc lần hai lấy từ cache (không tải lại GridFS), trả bản sao; xoá file ⇒ bỏ cache", async () => {
+    clearDocFileCache()
+    const data = Buffer.from("mẫu bắt buộc")
+    const ref = await gridFsDocFileStore.save(data, { projectId: "P3", kind: "upload", name: "Mau.docx" })
+    const first = await gridFsDocFileStore.load(ref)
+    // Xoá thẳng trong GridFS (không qua store) ⇒ lần đọc sau chỉ có thể đến từ cache
+    await mongoose.connection.db!.collection("source-docs.chunks").deleteMany({ files_id: new mongoose.Types.ObjectId(ref) })
+    const second = await gridFsDocFileStore.load(ref)
+    expect(Buffer.compare(second, data)).toBe(0)
+    // Bên gọi sửa buffer không làm hỏng cache
+    first.fill(0)
+    second.fill(0)
+    expect(Buffer.compare(await gridFsDocFileStore.load(ref), data)).toBe(0)
+    await gridFsDocFileStore.remove(ref)
+    await expect(gridFsDocFileStore.load(ref)).rejects.toBeInstanceOf(DocFileNotFoundError)
+  })
+
   it("file lớn nhiều chunk đọc lại đủ", async () => {
     const big = Buffer.alloc(600 * 1024, 7)
-    const ref = await gridFsDocFileStore.save(big, { projectId: "P2", kind: "version", name: "0.0" })
+    const ref = await gridFsDocFileStore.save(big, { projectId: "P2", kind: "version", name: "0.1" })
     const back = await gridFsDocFileStore.load(ref)
     expect(back.length).toBe(big.length)
     expect(Buffer.compare(back, big)).toBe(0)
   })
 
   it("remove: xoá được; ref không có / ref sai ⇒ im lặng; removeProject chỉ xoá file của project đó", async () => {
-    const a = await gridFsDocFileStore.save(Buffer.from("a"), { projectId: "A", kind: "version", name: "0.0" })
+    const a = await gridFsDocFileStore.save(Buffer.from("a"), { projectId: "A", kind: "version", name: "0.1" })
     await gridFsDocFileStore.save(Buffer.from("a2"), { projectId: "A", kind: "clean", name: "1.0" })
-    const b = await gridFsDocFileStore.save(Buffer.from("b"), { projectId: "B", kind: "version", name: "0.0" })
+    const b = await gridFsDocFileStore.save(Buffer.from("b"), { projectId: "B", kind: "version", name: "0.1" })
     await gridFsDocFileStore.remove(a)
     await expect(gridFsDocFileStore.load(a)).rejects.toBeInstanceOf(DocFileNotFoundError)
     await expect(gridFsDocFileStore.remove(a)).resolves.toBeUndefined()

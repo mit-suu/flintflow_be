@@ -17,6 +17,7 @@ import {
   stepAnswerRequestSchema,
   stepEventSchema,
   translationRunRequestSchema,
+  translationStatusQuerySchema,
   translationStatusResponseSchema,
   waiveRequestSchema
 } from "./pipeline.dto.js"
@@ -25,7 +26,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const CONTRACT = fs.readFileSync(path.resolve(__dirname, "../../../docs/api/pipeline-contract.md"), "utf8")
 
 describe("pipeline.dto", () => {
-  it("UC-49: comment — text 1–2000 ký tự sau trim, block_index mặc định null, status mặc định open, mã CM-nnn", () => {
+  it("UC-49: comment - text 1–2000 ký tự sau trim, block_index mặc định null, status mặc định open, mã CM-nnn", () => {
     const body = { version: { source: "draft" }, anchor: { section_id: "fixed:1" }, text: "  Góp ý  " }
     const parsed = createCommentSchema.parse(body)
     expect(parsed.text).toBe("Góp ý")
@@ -44,12 +45,25 @@ describe("pipeline.dto", () => {
     expect(CONTRACT).toContain("/comments/:commentId/resolve")
   })
 
-  it("FLF-265: dịch tài liệu — run chỉ nhận max_batches 1–10, status đủ số đếm + ước tính credit", () => {
+  it("FLF-265: dịch tài liệu - run chỉ nhận max_batches 1–10, status đủ số đếm + ước tính credit", () => {
     expect(translationRunRequestSchema.safeParse({}).success).toBe(true)
     expect(translationRunRequestSchema.safeParse({ max_batches: 5 }).success).toBe(true)
     expect(translationRunRequestSchema.safeParse({ max_batches: 0 }).success).toBe(false)
     expect(translationRunRequestSchema.safeParse({ max_batches: 11 }).success).toBe(false)
-    expect(translationRunRequestSchema.safeParse({ locale: "vi" }).success).toBe(false)
+    // FLF-334 B: `locale` tuỳ chọn (vi | en), chỉ thêm — key lạ khác vẫn bị từ chối
+    expect(translationRunRequestSchema.safeParse({ locale: "vi" }).success).toBe(true)
+    expect(translationRunRequestSchema.safeParse({ locale: "fr" }).success).toBe(false)
+    expect(translationRunRequestSchema.safeParse({ lang: "vi" }).success).toBe(false)
+    // Đích snapshot (FLF-334 B vòng 1): baseline_id HOẶC version, không cả hai
+    expect(translationRunRequestSchema.safeParse({ locale: "vi", baseline_id: "BL001" }).success).toBe(true)
+    expect(translationRunRequestSchema.safeParse({ locale: "vi", version: "1.0" }).success).toBe(true)
+    expect(translationRunRequestSchema.safeParse({ version: "v1" }).success).toBe(false)
+    expect(translationRunRequestSchema.safeParse({ baseline_id: "BL001", version: "1.0" }).success).toBe(false)
+    expect(translationStatusQuerySchema.safeParse({ locale: "vi", version: "2.0" }).success).toBe(true)
+    expect(translationStatusQuerySchema.safeParse({ baseline_id: "BL001", version: "1.0" }).success).toBe(false)
+    // strict như run: key lạ (vd `lang`) ⇒ từ chối, không lặng lẽ đếm ngôn ngữ tài liệu
+    expect(translationStatusQuerySchema.safeParse({ lang: "vi" }).success).toBe(false)
+    expect(translationStatusQuerySchema.safeParse({ version: "01.0" }).success).toBe(false)
     const status = { locale: "vi", source_locale: "en", total: 800, missing: 120, batches: 3, estimated_credits: 6 }
     expect(translationStatusResponseSchema.safeParse(status).success).toBe(true)
     expect(translationStatusResponseSchema.safeParse({ ...status, locale: "fr" }).success).toBe(false)

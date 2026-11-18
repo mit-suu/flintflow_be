@@ -152,7 +152,7 @@ describe("POST /projects/:projectId/changes", () => {
   })
 
   it("409 NEEDS_CLARIFICATION: câu hỏi làm rõ đi trong meta", async () => {
-    vi.mocked(changeService.apply).mockRejectedValue(new changeService.NeedsClarificationError("Actor nào — A01 hay A03?"))
+    vi.mocked(changeService.apply).mockRejectedValue(new changeService.NeedsClarificationError("Actor nào - A01 hay A03?"))
 
     const outcome = await invoke(applyChanges, OWNER, PROJECT, { base_version: 1, instruction: "Đổi tên admin" })
 
@@ -160,7 +160,7 @@ describe("POST /projects/:projectId/changes", () => {
     expect(outcome.body).toMatchObject({
       data: null,
       error: { code: "NEEDS_CLARIFICATION" },
-      meta: { clarification: "Actor nào — A01 hay A03?" }
+      meta: { clarification: "Actor nào - A01 hay A03?" }
     })
   })
 
@@ -191,7 +191,7 @@ describe("POST /projects/:projectId/changes", () => {
     expect(outcome.error).toMatchObject({ statusCode: 409, code: "SPINE_VERSION_CONFLICT" })
   })
 
-  it("400 body sai; 404 không sở hữu; 401 thiếu user — service không được gọi", async () => {
+  it("400 body sai; 404 không sở hữu; 401 thiếu user - service không được gọi", async () => {
     expect((await invoke(applyChanges, OWNER, PROJECT, { ops: [OP] })).error).toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
     expect((await invoke(applyChanges, OWNER, PROJECT, { base_version: 1 })).error).toMatchObject({ statusCode: 400 })
     expect((await invoke(applyChanges, OWNER, PROJECT, { base_version: 1, ops: [OP], instruction: "cả hai" })).error).toMatchObject({
@@ -233,7 +233,7 @@ describe("POST /projects/:projectId/changes/preview", () => {
   })
 })
 
-describe("FLF-260 — ngôn ngữ trả lời của lượt sửa", () => {
+describe("FLF-260 - ngôn ngữ trả lời của lượt sửa", () => {
   const SESSION = "650000000000000000000003"
   const CHANGE = { op: "set", path: "actors[id=A01].name", before: "Founder", value: "Student", reason: null }
   const APPLIED = { ...CHANGE, projectId: PROJECT, seq: 5, txn: "t3", at: "2026-10-07T00:00:00.000Z", by: OWNER, step_id: null }
@@ -279,7 +279,7 @@ describe("FLF-260 — ngôn ngữ trả lời của lượt sửa", () => {
     expect(session.messages[0]).toMatchObject({ role: "user", content: instruction })
     expect(replyOf(session.messages[1])).toMatchObject({
       kind: "change_preview",
-      reply: 'Built a preview of 2 changes — review it, then press "Áp dụng" (Apply) to save.'
+      reply: 'Built a preview of 2 changes - review it, then press "Áp dụng" (Apply) to save.'
     })
   })
 
@@ -304,7 +304,7 @@ describe("FLF-260 — ngôn ngữ trả lời của lượt sửa", () => {
     expect(replyOf(session.messages[1])).toEqual({ kind: "change_applied", reply: "Confirmed: the content is unchanged.", count: 0, spine_version: 2 })
   })
 
-  it("bấm Áp dụng bản xem trước: câu lệnh FE gửi lại không được đoán lại — giữ ngôn ngữ phiên", async () => {
+  it("bấm Áp dụng bản xem trước: câu lệnh FE gửi lại không được đoán lại - giữ ngôn ngữ phiên", async () => {
     // Xem trước bằng tiếng Việt rồi user chuyển sang viết tiếng Anh (phiên en) trước khi bấm Áp dụng
     const session = fakeSession("en")
     vi.mocked(changeService.apply).mockResolvedValue({
@@ -326,7 +326,7 @@ describe("FLF-260 — ngôn ngữ trả lời của lượt sửa", () => {
     expect(vi.mocked(changeService.apply).mock.calls[0][2]).toMatchObject({ reply_language: "en" })
     expect(session.persisted).toBe("en")
     expect(session.messages).toHaveLength(1)
-    expect(replyOf(session.messages[0])).toMatchObject({ kind: "change_applied", reply: "Applied 1 change to the document (v3)." })
+    expect(replyOf(session.messages[0])).toMatchObject({ kind: "change_applied", reply: "Applied 1 change to the document." })
   })
 
   it("phiên chưa có ngôn ngữ, câu lệnh tiếng Việt ⇒ bong bóng giữ nguyên tiếng Việt", async () => {
@@ -343,7 +343,7 @@ describe("FLF-260 — ngôn ngữ trả lời của lượt sửa", () => {
     await invoke(applyChanges, OWNER, PROJECT, { base_version: 2, instruction: "Đổi tên actor A01 thành Student", session_id: SESSION })
 
     expect(session.persisted).toBe("vi")
-    expect(replyOf(session.messages[1]).reply).toBe("Đã áp dụng 1 thay đổi vào tài liệu (v3).")
+    expect(replyOf(session.messages[1]).reply).toBe("Đã áp dụng 1 thay đổi vào tài liệu.")
   })
 
   it("không có phiên: câu lệnh rõ ngôn ngữ thắng; lô op sẵn không có chữ để đoán ⇒ ngôn ngữ tài khoản ⇒ tiếng Việt", async () => {

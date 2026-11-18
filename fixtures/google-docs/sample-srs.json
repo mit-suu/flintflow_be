@@ -1,0 +1,346 @@
+{
+  "documentId": "doc-srs-1",
+  "title": "SRS Ticket Booking",
+  "revisionId": "rev-1",
+  "body": {
+    "content": [
+      {
+        "endIndex": 1,
+        "sectionBreak": {
+          "sectionStyle": {}
+        }
+      },
+      {
+        "startIndex": 1,
+        "endIndex": 17,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 1,
+              "endIndex": 17,
+              "textRun": {
+                "content": "1. Introduction\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "HEADING_1"
+          }
+        }
+      },
+      {
+        "startIndex": 17,
+        "endIndex": 68,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 17,
+              "endIndex": 68,
+              "textRun": {
+                "content": "This document describes the ticket booking system.\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "NORMAL_TEXT"
+          }
+        }
+      },
+      {
+        "startIndex": 68,
+        "endIndex": 80,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 68,
+              "endIndex": 80,
+              "textRun": {
+                "content": "1.1 Purpose\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "HEADING_2"
+          }
+        }
+      },
+      {
+        "startIndex": 80,
+        "endIndex": 116,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 80,
+              "endIndex": 116,
+              "textRun": {
+                "content": "Đặc tả yêu cầu cho hệ thống bán vé.\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "NORMAL_TEXT"
+          }
+        }
+      },
+      {
+        "startIndex": 116,
+        "endIndex": 139,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 116,
+              "endIndex": 139,
+              "textRun": {
+                "content": "2. Overall Description\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "HEADING_1"
+          }
+        }
+      },
+      {
+        "startIndex": 139,
+        "endIndex": 153,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 139,
+              "endIndex": 153,
+              "textRun": {
+                "content": "2.1 Use cases\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "HEADING_2"
+          }
+        }
+      },
+      {
+        "startIndex": 153,
+        "endIndex": 204,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 153,
+              "endIndex": 204,
+              "textRun": {
+                "content": "UC01 Đặt vé: khách hàng chọn chuyến và thanh toán.\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "NORMAL_TEXT"
+          }
+        }
+      },
+      {
+        "startIndex": 204,
+        "endIndex": 232,
+        "table": {
+          "rows": 2,
+          "columns": 2,
+          "tableRows": [
+            {
+              "startIndex": 205,
+              "endIndex": 216,
+              "tableCells": [
+                {
+                  "startIndex": 206,
+                  "endIndex": 210,
+                  "content": [
+                    {
+                      "startIndex": 207,
+                      "endIndex": 210,
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "startIndex": 207,
+                            "endIndex": 210,
+                            "textRun": {
+                              "content": "ID\n",
+                              "textStyle": {}
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "startIndex": 210,
+                  "endIndex": 216,
+                  "content": [
+                    {
+                      "startIndex": 211,
+                      "endIndex": 216,
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "startIndex": 211,
+                            "endIndex": 216,
+                            "textRun": {
+                              "content": "Name\n",
+                              "textStyle": {}
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "startIndex": 216,
+              "endIndex": 231,
+              "tableCells": [
+                {
+                  "startIndex": 217,
+                  "endIndex": 223,
+                  "content": [
+                    {
+                      "startIndex": 218,
+                      "endIndex": 223,
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "startIndex": 218,
+                            "endIndex": 223,
+                            "textRun": {
+                              "content": "UC01\n",
+                              "textStyle": {}
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "startIndex": 223,
+                  "endIndex": 231,
+                  "content": [
+                    {
+                      "startIndex": 224,
+                      "endIndex": 231,
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "startIndex": 224,
+                            "endIndex": 231,
+                            "textRun": {
+                              "content": "Đặt vé\n",
+                              "textStyle": {}
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "startIndex": 232,
+        "endIndex": 251,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 232,
+              "endIndex": 251,
+              "textRun": {
+                "content": "2.2 Business Rules\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "HEADING_2"
+          }
+        }
+      },
+      {
+        "startIndex": 251,
+        "endIndex": 284,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 251,
+              "endIndex": 284,
+              "textRun": {
+                "content": "BR01: Mỗi khách đặt tối đa 5 vé.\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "NORMAL_TEXT"
+          }
+        }
+      },
+      {
+        "startIndex": 284,
+        "endIndex": 296,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 284,
+              "endIndex": 296,
+              "textRun": {
+                "content": "3. Appendix\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "HEADING_1"
+          }
+        }
+      },
+      {
+        "startIndex": 296,
+        "endIndex": 319,
+        "paragraph": {
+          "elements": [
+            {
+              "startIndex": 296,
+              "endIndex": 319,
+              "textRun": {
+                "content": "Contact: support team.\n",
+                "textStyle": {}
+              }
+            }
+          ],
+          "paragraphStyle": {
+            "namedStyleType": "NORMAL_TEXT"
+          }
+        }
+      }
+    ]
+  }
+}

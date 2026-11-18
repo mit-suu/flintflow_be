@@ -32,7 +32,7 @@ const db = vi.hoisted(() => {
         return copy(doc)
       }
       if (!options.upsert) return null
-      const created = { _id: "spine", ...filter, ...copy(update.$setOnInsert ?? {}) }
+      const created = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, ...filter, ...copy(update.$setOnInsert ?? {}) }
       spines.push(created)
       return copy(created)
     }
@@ -62,8 +62,15 @@ const db = vi.hoisted(() => {
   return { Spine, Change, spines, changes, reset }
 })
 
+// Rào đổi mẫu đọc Mongo; bản test thuần không có DB
+vi.mock("../template-migration/migration-guard.js", () => ({ assertNoMigrationRunning: async () => undefined }))
 vi.mock("./spine.model.js", () => ({ Spine: db.Spine }))
 vi.mock("./change.model.js", () => ({ Change: db.Change }))
+// FLF-294: bộ đếm mã CR trong bộ nhớ (project `unit` không nối Mongo)
+const crCounter = vi.hoisted(() => ({ seq: 0 }))
+vi.mock("../change-request/change-request.model.js", () => ({
+  CrCounter: { findOneAndUpdate: async () => ({ seq: ++crCounter.seq }) }
+}))
 // FLF-265: kho bản dịch trong bộ nhớ (project `unit` không nối Mongo)
 vi.mock("../translation/translation.repository.js", async () => (await import("../translation/__tests__/translation-store.js")).fakeRepository)
 
@@ -79,6 +86,7 @@ import {
   buildChangeProjection,
   clearPreviewStore,
   isChangeInstruction,
+  isWithdrawal,
   preview,
   referencedSections,
   sectionCollections,
@@ -104,7 +112,7 @@ const USER = "650000000000000000000010"
  */
 const seed = async (spine: Spine = FIXTURE): Promise<void> => {
   await repo.getOrCreate(PROJECT)
-  db.spines[0] = { _id: "spine", projectId: PROJECT, ...structuredClone(spine) }
+  db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...structuredClone(spine) }
 
   const lastSeq = Math.max(0, ...spine.steps.map((s) => s.last_seq ?? 0))
   if (lastSeq === 0) return
@@ -154,7 +162,7 @@ beforeEach(() => {
 
 // ─── nhánh ───────────────────────────────────────────────────────
 
-describe("branchOf — ba nhánh", () => {
+describe("branchOf - ba nhánh", () => {
   const empty = { fields: [], sections: [], diagrams: [], referrers: [] }
 
   it("không phụ thuộc gì ⇒ silent", () => {
@@ -179,7 +187,7 @@ describe("branchOf — ba nhánh", () => {
 
 // ─── preview ─────────────────────────────────────────────────────
 
-describe("preview — diff + impact, không ghi", () => {
+describe("preview - diff + impact, không ghi", () => {
   it("lô ops thuần: diff đầy đủ, branch dependent, preview_id để xác nhận", async () => {
     await seed()
     const result = await preview(PROJECT, USER, { base_version: 1, ops: [{ op: "set", path: "actors[id=A01].name", value: "Product Owner" }] }, {}, deps)
@@ -273,18 +281,317 @@ describe("preview — diff + impact, không ghi", () => {
     expect((await preview(PROJECT, USER, { base_version: 1, ops: changed }, {}, deps)).violations.map((v) => v.rule)).toEqual(["path_not_writable"])
   })
 
-  it("base_version lệch ⇒ 409 SPINE_VERSION_CONFLICT", async () => {
+  it("FLF-298: thêm use case không gắn chức năng ⇒ notes báo thiếu màn hình / phân quyền, không chặn bản xem trước", async () => {
     await seed()
-    await expect(preview(PROJECT, USER, { base_version: 99, ops: [{ op: "set", path: "project.vision", value: "x" }] }, {}, deps)).rejects.toMatchObject({
+    const value = { name: "Send Absence Warning", actor_ids: ["A01"], function_ids: [], description: "Warn students.", includes: [], extends: [] }
+    const result = await preview(PROJECT, USER, { base_version: 1, ops: [{ op: "add", path: "use_cases[]", value }] }, {}, deps)
+
+    expect(result.ok).toBe(true)
+    expect(result.notes).toMatch(/"Send Absence Warning" chưa gắn chức năng nào/)
+  })
+
+  it("FLF-311: thêm use case (đã qua S-5) ⇒ model nhận chế độ full + ngữ cảnh; lô đủ UC + chức năng + màn + luồng + phân quyền qua bất biến, vẽ lại sơ đồ sau khi áp", async () => {
+    await seed()
+    const fullBatch = [
+      { op: "add", path: "use_cases[]", value: { name: "Send Absence Warning", actor_ids: ["A02"], function_ids: ["$newFn"], description: "The analyst warns students over the absence limit." } },
+      { op: "add", path: "screens[]", value: { id: "$newScreen", name: "Absence Warning", description: "Lists students over the absence limit.", feature_id: "F3", flow_to: ["S07"], tabs: [] } },
+      {
+        op: "add",
+        path: "functions[]",
+        value: {
+          id: "$newFn",
+          name: "Send Absence Warning",
+          screen_id: "$newScreen",
+          feature_id: "F3",
+          trigger: "Analyst clicks Send warning.",
+          description: "Sends a warning to each student whose absence rate is above 20%.",
+          normal: ["Analyst selects the students.", "System sends the warning and shows a confirmation."],
+          abnormal: ["No student selected: system shows an error."],
+          validations: [{ kind: "required", statement: "At least one student must be selected." }],
+          business_rule_ids: []
+        }
+      },
+      { op: "set", path: "screens[id=S07].flow_to", value: ["S08", "S09", "S10", "$newScreen"] },
+      { op: "add", path: "permissions[]", value: { screen_id: "$newScreen", role_id: "R2", action: "view" } },
+      { op: "add", path: "permissions[]", value: { screen_id: "$newScreen", role_id: "R2", action: "create" } },
+      // Thông báo cho luồng bất thường: một mới (code cấp số), một dùng lại thông báo có sẵn
+      { op: "add", path: "messages[]", value: { code: "E-WARN-001", text: "Select at least one student, then send the warning again.", function_ids: ["$newFn"] } },
+      { op: "set", path: "messages[id=MSG04].function_ids", value: ["FN028", "$newFn"] }
+    ]
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: fullBatch as ChangeInstructionOutput["ops"], notes: "Thêm chức năng, màn Absence Warning, luồng và phân quyền." }))
+    deps.renderAfterChange = vi.fn(async () => undefined)
+    const instruction = 'Thêm use case mới "Send Absence Warning": Analyst gửi cảnh báo vắng mặt, làm màn hình riêng'
+
+    const shown = await preview(PROJECT, USER, { base_version: 1, instruction }, {}, deps)
+    expect(shown.ok, JSON.stringify(shown.violations)).toBe(true)
+    const vars = vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as Record<string, unknown>
+    expect(vars.use_case_mode).toBe("full")
+    // S-7.3 đã chạy ⇒ lô phải tự thêm thông báo (luật 3f)
+    expect(vars.messages_ready).toBe(true)
+    expect((vars.projection as Record<string, unknown>).use_case_context).toMatchObject({ mode: "full", messages_ready: true })
+    // Đủ phần liên quan ⇒ không còn cảnh báo thiếu màn / chức năng (FLF-298)
+    expect(shown.notes ?? "").not.toMatch(/chưa gắn chức năng/)
+
+    const applied = await apply(PROJECT, USER, { base_version: 1, instruction, preview_id: shown.preview_id }, {}, deps)
+    const spine = applied.spine as Spine
+    const uc = spine.use_cases.find((u) => u.name === "Send Absence Warning")!
+    const fn = spine.functions.find((f) => f.id === uc.function_ids[0])!
+    const screen = spine.screens.find((s) => s.id === fn.screen_id)!
+    expect(fn).toMatchObject({ feature_id: "F3", normal: expect.arrayContaining(["Analyst selects the students."]) })
+    expect(fn.validations[0].id).toMatch(new RegExp(`^${fn.id}-V\\d+$`))
+    expect(screen).toMatchObject({ name: "Absence Warning", detail_status: "signed_off", primary_function_id: fn.id })
+    expect(spine.screens.find((s) => s.id === "S07")?.flow_to.map((e) => e.to)).toContain(screen.id)
+    expect(spine.permissions.filter((p) => p.screen_id === screen.id).map((p) => p.action).sort()).toEqual(["create", "view"])
+    expect(spine.messages.find((m) => m.code === "E-WARN-001")?.function_ids).toEqual([fn.id])
+    expect(spine.messages.find((m) => m.id === "MSG04")?.function_ids).toEqual(["FN028", fn.id])
+    expect(deps.renderAfterChange).toHaveBeenCalledWith(PROJECT, USER, [screen.id])
+  })
+
+  it("FLF-311: lô thêm use case phá bất biến (vai trò không tồn tại) ⇒ preview ok=false kèm vi phạm, apply từ chối, không ghi, không vẽ lại", async () => {
+    await seed()
+    const broken = [
+      { op: "add", path: "use_cases[]", value: { name: "Send Absence Warning", actor_ids: ["A02"], function_ids: ["$newFn"], description: "…" } },
+      { op: "add", path: "screens[]", value: { id: "$newScreen", name: "Absence Warning", description: "…", feature_id: "F3", flow_to: [], tabs: [] } },
+      { op: "add", path: "functions[]", value: { id: "$newFn", name: "Send Absence Warning", screen_id: "$newScreen", feature_id: "F3", trigger: "…", description: "…", normal: [], abnormal: [], validations: [], business_rule_ids: [] } },
+      { op: "set", path: "screens[id=S07].flow_to", value: ["S08", "S09", "S10", "$newScreen"] },
+      { op: "add", path: "permissions[]", value: { screen_id: "$newScreen", role_id: "R9", action: "view" } }
+    ]
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: broken as ChangeInstructionOutput["ops"] }))
+    deps.renderAfterChange = vi.fn(async () => undefined)
+    const instruction = "Thêm use case Send Absence Warning cho Analyst, màn hình riêng"
+
+    const shown = await preview(PROJECT, USER, { base_version: 1, instruction }, {}, deps)
+    expect(shown.ok).toBe(false)
+    expect(shown.violations).toContainEqual(expect.objectContaining({ rule: "invariant_3_dead_reference", path: expect.stringContaining("role_id") }))
+
+    await expect(apply(PROJECT, USER, { base_version: 1, instruction }, {}, deps)).rejects.toBeInstanceOf(TransactionRejectedError)
+    expect(await writtenChanges()).toBe(0)
+    expect(deps.renderAfterChange).not.toHaveBeenCalled()
+  })
+
+  it("FLF-311: đang ở S-5 ⇒ màn mới pending và tự vào hàng đợi S-5 (bất biến 8), vòng S-5 mô tả tiếp", async () => {
+    await seed({ ...FIXTURE, progress: { ...FIXTURE.progress, current_phase: "S-5", screen_queue: [] } })
+    const batch = [
+      { op: "add", path: "use_cases[]", value: { name: "Send Absence Warning", actor_ids: ["A02"], function_ids: ["$newFn"], description: "Warn students." } },
+      { op: "add", path: "screens[]", value: { id: "$newScreen", name: "Absence Warning", description: "…", feature_id: "F3", flow_to: ["S07"], tabs: [] } },
+      { op: "add", path: "functions[]", value: { id: "$newFn", name: "Send Absence Warning", screen_id: "$newScreen", feature_id: "F3", trigger: "Analyst clicks Send.", description: "Sends a warning.", normal: [], abnormal: [], validations: [], business_rule_ids: [] } },
+      { op: "set", path: "screens[id=S07].flow_to", value: ["S08", "S09", "S10", "$newScreen"] },
+      { op: "add", path: "permissions[]", value: { screen_id: "$newScreen", role_id: "R2", action: "view" } }
+    ]
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: batch as ChangeInstructionOutput["ops"] }))
+    deps.renderAfterChange = vi.fn(async () => undefined)
+
+    const applied = await apply(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Send Absence Warning cho Analyst, màn hình riêng" }, {}, deps)
+    const spine = applied.spine as Spine
+    const screen = spine.screens.find((s) => s.name === "Absence Warning")!
+    expect(vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables).toMatchObject({ use_case_mode: "screen_pending" })
+    expect(screen.detail_status).toBe("pending")
+    expect(spine.progress.screen_queue).toContain(screen.id)
+  })
+
+  it("FLF-311: use case mới chồng mục tiêu với use case có sẵn cùng actor ⇒ bản xem trước cảnh báo; model nhận use_case_ui + danh sách use case", async () => {
+    await seed()
+    const batch = [{ op: "add", path: "use_cases[]", value: { name: "Deactivate Project", actor_ids: ["A01"], function_ids: ["FN020"], description: "Founder hides a project." } }]
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: batch as ChangeInstructionOutput["ops"] }))
+
+    const shown = await preview(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Deactivate Project cho Founder" }, {}, deps)
+
+    expect(shown.ok).toBe(true)
+    expect(shown.notes).toMatch(/UC24 "Archive Project"/)
+    const vars = vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as Record<string, unknown>
+    expect(vars.use_case_ui).toBe(true)
+    expect(((vars.projection as Record<string, unknown>).use_case_context as { use_cases: { id: string }[] }).use_cases.map((u) => u.id)).toContain("UC24")
+  })
+
+  describe("FLF-311: người dùng chọn màn hình riêng hay popup", () => {
+    const uiBatch = () => [
+      { op: "add", path: "use_cases[]", value: { name: "Send Absence Warning", actor_ids: ["A02"], function_ids: ["$newFn"], description: "Warn students." } },
+      { op: "add", path: "screens[]", value: { id: "$newScreen", name: "Absence Warning", description: "…", feature_id: "F3", flow_to: [], tabs: [] } },
+      { op: "add", path: "functions[]", value: { id: "$newFn", name: "Send Absence Warning", screen_id: "$newScreen", feature_id: "F3", trigger: "Analyst clicks Send.", description: "Sends a warning.", normal: ["a"], abnormal: ["b"], validations: [], business_rule_ids: [] } },
+      { op: "set", path: "screens[id=S07].flow_to", value: ["S08", "S09", "S10", "$newScreen"] },
+      { op: "add", path: "permissions[]", value: { screen_id: "$newScreen", role_id: "R2", action: "view" } }
+    ]
+    beforeEach(() => {
+      deps.changeExecutor = vi.fn(async () => aiResult({ ops: uiBatch() as ChangeInstructionOutput["ops"] }))
+      deps.renderAfterChange = vi.fn(async () => undefined)
+    })
+
+    it("chưa chọn, chưa hỏi lượt nào ⇒ bản xem trước là câu hỏi kèm hai lựa chọn (màn mở ra lấy từ cạnh luồng), không ghi", async () => {
+      await seed()
+      const shown = await preview(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Send Absence Warning cho Analyst" }, {}, deps)
+
+      expect(shown.ok).toBe(false)
+      expect(shown.clarification).toMatch(/"Absence Warning" cần giao diện: làm một màn hình riêng, hay một popup mở từ "Project Workspace"/)
+      expect(shown.clarification_choices).toEqual(["Màn hình riêng", "Popup mở từ Project Workspace"])
+      expect(await writtenChanges()).toBe(0)
+    })
+
+    it("model đề xuất thêm use case ⇒ hỏi giữ / bỏ (tách nhóm AI đề xuất); trả lời 'bỏ 2' ⇒ use case đó và phần chỉ của nó ra khỏi lô", async () => {
+      const withProposal = () => [
+        ...uiBatch(),
+        { op: "add", path: "use_cases[]", value: { name: "Review Absence Warnings", actor_ids: ["A01"], function_ids: ["$newFn2"], description: "Founder reviews warnings." } },
+        { op: "add", path: "screens[]", value: { id: "$newScreen2", name: "Warning Review", description: "…", feature_id: "F3", flow_to: [], tabs: [] } },
+        { op: "add", path: "functions[]", value: { id: "$newFn2", name: "Review Absence Warnings", screen_id: "$newScreen2", feature_id: "F3", trigger: "Founder opens it.", description: "Lists warnings.", normal: ["a"], abnormal: ["b"], validations: [], business_rule_ids: [] } },
+        { op: "set", path: "screens[id=S01].flow_to", value: [...FIXTURE.screens[0].flow_to, "$newScreen2"] },
+        { op: "add", path: "permissions[]", value: { screen_id: "$newScreen2", role_id: "R1", action: "view" } }
+      ]
+      deps.changeExecutor = vi.fn(async () => aiResult({ ops: withProposal() as ChangeInstructionOutput["ops"], proposed_use_cases: ["Review Absence Warnings"] }))
+      await seed()
+      const asked = await preview(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Send Absence Warning cho Analyst, màn hình riêng" }, {}, deps)
+      expect(asked.ok).toBe(false)
+      expect(asked.clarification).toContain('AI đề xuất thêm để khớp dự án (giữ hay bỏ):\n2. "Review Absence Warnings" (Founder) - màn mới: "Warning Review"')
+      expect(asked.clarification_choices).toContain("Bỏ các use case AI đề xuất")
+
+      const history = `User: Thêm use case Send Absence Warning cho Analyst, màn hình riêng\nAI: ${asked.clarification}`
+      const shown = await preview(PROJECT, USER, { base_version: 1, instruction: "1 màn riêng, bỏ 2", clarification_rounds: 1, chat_history: history }, {}, deps)
+      expect(shown.ok).toBe(true)
+      const added = shown.changes.filter((c) => c.op === "add" && /^(use_cases|screens)\[/.test(c.path)).map((c) => (c.value as { name: string }).name)
+      expect(added).toEqual(expect.arrayContaining(["Send Absence Warning", "Absence Warning"]))
+      expect(added).not.toContain("Review Absence Warnings")
+      expect(added).not.toContain("Warning Review")
+      const calls = vi.mocked(deps.changeExecutor).mock.calls
+      const vars = calls[calls.length - 1][1].promptVariables as { projection: { use_case_context: { ui_plan: unknown } } }
+      expect(vars.projection.use_case_context.ui_plan).toContainEqual({ use_case: "Review Absence Warnings", ui: "DROPPED by the user: do not add this use case or any of its parts" })
+    })
+
+    it("FLF-318 (luật 3e): không rõ ai xử lý yêu cầu ⇒ model hỏi kèm lựa chọn actor; bản xem trước trả câu hỏi đó, không lô nào", async () => {
+      const question = "Ai xử lý yêu cầu phúc khảo điểm: Founder, Analyst, hay cả hai theo thứ tự đó?"
+      deps.changeExecutor = vi.fn(async () => aiResult({ clarification_needed: question, choices: ["Founder", "Analyst", "Founder rồi Analyst duyệt"] }))
+      await seed()
+      const asked = await preview(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Request Grade Review cho Analyst" }, {}, deps)
+      expect(asked.ok).toBe(false)
+      expect(asked.clarification).toBe(question)
+      expect(asked.clarification_choices).toEqual(["Founder", "Analyst", "Founder rồi Analyst duyệt"])
+      expect(asked.changes ?? []).toEqual([])
+      const vars = vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as { projection: { use_case_context: { actors: { id: string }[] } } }
+      expect(vars.projection.use_case_context.actors.map((a) => a.id)).toEqual(FIXTURE.actors.map((a) => a.id))
+    })
+
+    it("chọn popup ⇒ màn mới is_popup = true (code giữ lời người dùng dù model đặt khác)", async () => {
+      await seed()
+      const body = { base_version: 1, instruction: "Popup mở từ Project Workspace", clarification_rounds: 1, chat_history: "User: Thêm use case Send Absence Warning cho Analyst\nAI: …" }
+      const applied = await apply(PROJECT, USER, body, {}, deps)
+      expect((applied.spine as Spine).screens.find((s) => s.name === "Absence Warning")?.is_popup).toBe(true)
+    })
+
+    it("chọn màn hình riêng ⇒ is_popup = false; đã hỏi mà câu trả lời không nói ⇒ không hỏi lại, đi tiếp", async () => {
+      await seed()
+      const applied = await apply(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Send Absence Warning, màn hình riêng" }, {}, deps)
+      expect((applied.spine as Spine).screens.find((s) => s.name === "Absence Warning")?.is_popup).toBe(false)
+
+      await seed()
+      const history = "User: Thêm use case Send Absence Warning cho Analyst\nAI: Màn hình riêng hay popup?"
+      const again = await preview(PROJECT, USER, { base_version: 1, instruction: "người nhận là sinh viên", clarification_rounds: 1, chat_history: history }, {}, deps)
+      expect(again.ok).toBe(true)
+      expect(again.clarification).toBeUndefined()
+    })
+
+    it("model tự hỏi kèm choices ⇒ lựa chọn đi theo bản xem trước (cho thẻ chọn nhanh trong chat)", async () => {
+      await seed()
+      deps.changeExecutor = vi.fn(async () =>
+        aiResult({ clarification_needed: "Màn hình riêng hay popup? Sinh viên nhận cảnh báo qua đâu?", choices: ["Màn hình riêng", "Popup mở từ Project Workspace"] })
+      )
+      const shown = await preview(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Send Absence Warning" }, {}, deps)
+      expect(shown.clarification_choices).toEqual(["Màn hình riêng", "Popup mở từ Project Workspace"])
+    })
+  })
+
+  it("đang trả lời câu hỏi làm rõ mà rút lại yêu cầu ('thôi không cần thêm nữa') ⇒ bỏ yêu cầu, không gọi model, không ghi", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [] }))
+    const shown = await preview(PROJECT, USER, { base_version: 1, instruction: "thôi không cần thêm nữa", clarification_rounds: 1 }, {}, deps)
+
+    expect(shown).toMatchObject({ ok: true, changes: [], notes: expect.stringContaining("Đã bỏ yêu cầu") })
+    expect(shown.preview_id).toBeUndefined()
+    expect(deps.changeExecutor).not.toHaveBeenCalled()
+    expect(await writtenChanges()).toBe(0)
+  })
+
+  it("P08 T7: trả lời 'Đúng, …' ở câu hỏi xác nhận ⇒ model nhận cả yêu cầu gốc + câu đã hỏi, lô có thay đổi", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [{ op: "set", path: "actors[id=A01].name", value: "Product Owner" }] }))
+    const pending = { request: "Đổi tên Founder cho rõ vai trò sở hữu sản phẩm", question: "Bạn muốn đổi thành Product Owner đúng không?" }
+    const shown = await preview(PROJECT, USER, { base_version: 1, instruction: "Đúng, đổi thành Product Owner", clarification_rounds: 1, pending_request: pending }, {}, deps)
+    const vars = vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as Record<string, unknown>
+    expect(vars.user_message).toContain(pending.request)
+    expect(vars.user_message).toContain(pending.question)
+    expect(vars.user_message).toContain("Đúng, đổi thành Product Owner")
+    expect(shown.ok).toBe(true)
+    expect(shown.changes.length).toBeGreaterThan(0)
+    expect(shown.clarification).toBeUndefined()
+  })
+
+  it("P08 T7: lượt không phải trả lời câu hỏi ⇒ user_message giữ nguyên câu lệnh", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [{ op: "set", path: "actors[id=A01].name", value: "Product Owner" }] }))
+    await preview(PROJECT, USER, { base_version: 1, instruction: "Đổi tên Founder thành Product Owner", pending_request: { request: "x", question: "y" } }, {}, deps)
+    const vars = vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as Record<string, unknown>
+    expect(vars.user_message).toBe("Đổi tên Founder thành Product Owner")
+  })
+
+  it("FLF-439: trả lời câu hỏi làm rõ bằng 'không đổi nữa' ⇒ bỏ yêu cầu, không gọi model; 'không đổi' (trả lời có / không) vẫn gửi model", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ clarification_needed: "Màn nào?" }))
+    const dropped = await preview(PROJECT, USER, { base_version: 1, instruction: "không đổi nữa", clarification_rounds: 1 }, {}, deps)
+    expect(dropped).toMatchObject({ ok: true, changes: [], notes: expect.stringContaining("Đã bỏ yêu cầu") })
+    expect(deps.changeExecutor).not.toHaveBeenCalled()
+
+    await preview(PROJECT, USER, { base_version: 1, instruction: "không đổi", clarification_rounds: 1 }, {}, deps)
+    expect(deps.changeExecutor).toHaveBeenCalledTimes(1)
+  })
+
+  it("isWithdrawal: chỉ câu mở đầu bằng lời rút lại; câu sửa bình thường không tính", () => {
+    for (const t of ["thôi không cần thêm nữa", "Bỏ qua", "huỷ yêu cầu", "never mind", "Không cần nữa"]) expect(isWithdrawal(t), t).toBe(true)
+    for (const t of ["Thêm use case X", "đổi tên A01 thành Product Owner", "chỉ thao tác xóa"]) expect(isWithdrawal(t), t).toBe(false)
+  })
+
+  it("FLF-311: lệnh sửa thường ⇒ chế độ none, không nạp ngữ cảnh use case, không vẽ lại", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [{ op: "set", path: "actors[id=A01].name", value: "Product Owner" }] }))
+    deps.renderAfterChange = vi.fn(async () => undefined)
+    await apply(PROJECT, USER, { base_version: 1, instruction: "Đổi tên Founder thành Product Owner" }, {}, deps)
+    const vars = vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as Record<string, unknown>
+    expect(vars.use_case_mode).toBe("none")
+    expect(vars.projection).not.toHaveProperty("use_case_context")
+    expect(deps.renderAfterChange).not.toHaveBeenCalled()
+  })
+
+  it("P12: xem trước với base_version cũ ⇒ dựng trên Spine hiện tại, không 409; áp thẳng (không xem trước) vẫn 409", async () => {
+    await seed()
+    const shown = await preview(PROJECT, USER, { base_version: 99, ops: [{ op: "set", path: "project.vision", value: "x" }] }, {}, deps)
+    expect(shown).toMatchObject({ ok: true, base_version: 1 })
+    await expect(apply(PROJECT, USER, { base_version: 99, ops: [{ op: "set", path: "project.vision", value: "x" }] }, {}, deps)).rejects.toMatchObject({
       statusCode: 409,
       code: "SPINE_VERSION_CONFLICT"
     })
+  })
+
+  it("FLF-293: đang chờ Lead duyệt ⇒ preview và apply đều 409 DRAFT_LOCKED, không gọi model, không ghi", async () => {
+    await seed({
+      ...FIXTURE,
+      baseline_submission: {
+        status: "pending",
+        submitted_by: USER,
+        submitted_at: "2026-10-17T10:08:00.000Z",
+        spine_version: 1,
+        decided_by: null,
+        decided_at: null,
+        reason: null,
+        rejection_comment_ids: []
+      }
+    })
+    const body = { base_version: 1, instruction: "Thêm use case mới Send Absence Warning" }
+    await expect(preview(PROJECT, USER, body, {}, deps)).rejects.toMatchObject({ statusCode: 409, code: "DRAFT_LOCKED" })
+    await expect(apply(PROJECT, USER, body, {}, deps)).rejects.toMatchObject({ statusCode: 409, code: "DRAFT_LOCKED" })
+    expect(deps.changeExecutor).not.toHaveBeenCalled()
+    expect((await repo.get(PROJECT))?.spine_version).toBe(1)
+    expect(await writtenChanges()).toBe(0)
   })
 })
 
 // ─── nhánh instruction ───────────────────────────────────────────
 
-describe("instruction — câu lệnh tự nhiên qua skill apply-change-op", () => {
+describe("instruction - câu lệnh tự nhiên qua skill apply-change-op", () => {
   it("model trả ops ⇒ preview như lô thường", async () => {
     await seed()
     deps.changeExecutor = vi.fn(async () =>
@@ -300,15 +607,44 @@ describe("instruction — câu lệnh tự nhiên qua skill apply-change-op", ()
 
   it("lệnh mơ hồ ⇒ preview trả clarification (200), apply ném 409 NEEDS_CLARIFICATION", async () => {
     await seed()
-    deps.changeExecutor = vi.fn(async () => aiResult({ clarification_needed: "Bạn muốn đổi actor nào — A01 hay A03?" }))
+    deps.changeExecutor = vi.fn(async () => aiResult({ clarification_needed: "Bạn muốn đổi actor nào - A01 hay A03?" }))
 
     const result = await preview(PROJECT, USER, { base_version: 1, instruction: "đổi tên admin" }, {}, deps)
     expect(result.ok).toBe(false)
     // Mã actor model còn chép được đổi sang tên trước khi tới user
-    expect(result.clarification).toBe("Bạn muốn đổi actor nào — 'Founder' hay 'Administrator'?")
+    expect(result.clarification).toBe("Bạn muốn đổi actor nào - 'Founder' hay 'Administrator'?")
     expect(result.changes).toHaveLength(0)
 
     await expect(apply(PROJECT, USER, { base_version: 1, instruction: "đổi tên admin" }, {}, deps)).rejects.toBeInstanceOf(NeedsClarificationError)
+  })
+
+  it("FLF-299: số câu đã hỏi vào prompt; đã hỏi đủ mà model vẫn hỏi ⇒ gọi lại MỘT lần, dùng lô soạn được", async () => {
+    await seed()
+    const ops = [{ op: "set" as const, path: "actors[id=A01].name", value: "Product Owner" }]
+    deps.changeExecutor = vi
+      .fn()
+      .mockResolvedValueOnce(aiResult({ clarification_needed: "Áp dụng cho màn nào?" }))
+      .mockResolvedValueOnce(aiResult({ ops }))
+    const body = { base_version: 1, instruction: "chỉ thao tác xóa", clarification_rounds: 2 }
+
+    const result = await preview(PROJECT, USER, body, {}, deps)
+
+    expect(result.ok).toBe(true)
+    expect(result.changes).toHaveLength(1)
+    const calls = vi.mocked(deps.changeExecutor).mock.calls
+    expect(calls).toHaveLength(2)
+    expect(calls[0][1].promptVariables).toMatchObject({ clarification_rounds: 2 })
+    expect(String(calls[1][1].promptVariables?.previous_problems)).toMatch(/Do not ask again/)
+  })
+
+  it("FLF-299: mới hỏi lần đầu ⇒ câu hỏi làm rõ đi thẳng tới user, không gọi lại", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ clarification_needed: "Thao tác nào cần xác nhận?" }))
+
+    const result = await preview(PROJECT, USER, { base_version: 1, instruction: "thêm popup xác nhận", clarification_rounds: 0 }, {}, deps)
+
+    expect(result.clarification).toBe("Thao tác nào cần xác nhận?")
+    expect(deps.changeExecutor).toHaveBeenCalledTimes(1)
   })
 
   it("trả lời câu hỏi làm rõ ⇒ model đọc đoạn hội thoại trước, projection dò cả yêu cầu gốc", async () => {
@@ -321,7 +657,7 @@ describe("instruction — câu lệnh tự nhiên qua skill apply-change-op", ()
       {
         base_version: 1,
         instruction: "cái thứ nhất",
-        chat_history: "User: đổi tên A01 thành Product Owner\nAI: Bạn muốn đổi actor nào — A01 hay A03?"
+        chat_history: "User: đổi tên A01 thành Product Owner\nAI: Bạn muốn đổi actor nào - A01 hay A03?"
       },
       {},
       deps
@@ -439,7 +775,7 @@ describe("instruction — câu lệnh tự nhiên qua skill apply-change-op", ()
   })
 })
 
-describe("buildChangeProjection — brief_core ở pha Brief", () => {
+describe("buildChangeProjection - brief_core ở pha Brief", () => {
   const entry = (id: string, topic: string) => ({ id, topic, content: "Nội dung", content_en: "Content", target_section: "fixed:1", captured_at: "2026-09-30T00:00:00.000Z" })
   const at = (phase: string): Spine => ({
     ...structuredClone(FIXTURE),
@@ -458,6 +794,19 @@ describe("buildChangeProjection — brief_core ở pha Brief", () => {
 
   it("phase ngoài Brief: không có brief_core", () => {
     expect(buildChangeProjection(at("S-3"), "làm cho tài liệu hay hơn").brief_core).toBeUndefined()
+  })
+
+  it("P08 T6/T7: ngoài Brief, lệnh nhắc §1 / mục tiêu ⇒ project kèm vision + goals; lệnh khác thì không", () => {
+    const spine = { ...at("S-9"), project: { ...FIXTURE.project, goals: ["Cut phone bookings by 60%.", "Keep no-show under 10%."] } }
+    const p1 = buildChangeProjection(spine, "Trong §1, mục tiêu thứ hai ghi rõ 3 tháng đầu").project as Record<string, unknown>
+    expect(p1.goals).toEqual(["Cut phone bookings by 60%.", "Keep no-show under 10%."])
+    expect(buildChangeProjection(spine, "Đổi tên actor A01 thành Product Owner").project).not.toHaveProperty("goals")
+  })
+
+  it("P08 (E2E P07 #1): 'bổ sung loại cho toàn bộ thông báo' ⇒ projection có đủ mọi thông báo, không chỉ vài cái khớp chữ", () => {
+    const projection = buildChangeProjection(FIXTURE, "Bổ sung loại và ngữ cảnh cho toàn bộ thông báo")
+    expect((projection.messages as unknown[]).length).toBe(Math.min(FIXTURE.messages.length, 80))
+    expect(FIXTURE.messages.length).toBeGreaterThan(2)
   })
 })
 
@@ -548,7 +897,7 @@ describe("sửa phân quyền màn hình (§3.1.3) và output sai khuôn", () =>
   })
 })
 
-describe("buildChangeProjection — chỉ thực thể được nhắc", () => {
+describe("buildChangeProjection - chỉ thực thể được nhắc", () => {
   it("nhắc id ⇒ chỉ phần tử đó, không nạp cả Spine", () => {
     const projection = buildChangeProjection(FIXTURE, "Đổi tên actor A01 thành Product Owner")
     expect(projection.actors).toHaveLength(1)
@@ -579,9 +928,39 @@ describe("buildChangeProjection — chỉ thực thể được nhắc", () => {
   })
 })
 
+describe("FLF-411 (#18): đổi tên hệ thống ⇒ project.system_name, không phải tên dự án", () => {
+  it("projection luôn kèm project gọn { name, system_name } - cả khi khớp phần tử lẫn khi rơi về chỉ mục", () => {
+    const spine: Spine = { ...FIXTURE, project: { ...FIXTURE.project, name: "Dự án thử", system_name: "Old System" } }
+    const focused = buildChangeProjection(spine, "Đổi tên actor A01 thành Product Owner")
+    expect(focused.project).toEqual({ name: "Dự án thử", system_name: "Old System" })
+    const broad = buildChangeProjection(spine, "đổi tên hệ thống thành ShuttleBook")
+    expect(broad.project).toEqual({ name: "Dự án thử", system_name: "Old System" })
+    // Gọn: không mang vision / goals / release_scope
+    expect(Object.keys(broad.project as object)).toEqual(["name", "system_name"])
+  })
+
+  it("preview + apply op set project.system_name (mock model): qua kiểm path, ghi vào Spine, tên dự án giữ nguyên", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () =>
+      aiResult({ ops: [{ op: "set", path: "project.system_name", value: "ShuttleBook", reason: "đổi tên hệ thống theo yêu cầu" }] })
+    )
+
+    const result = await preview(PROJECT, USER, { base_version: 1, instruction: "đổi tên hệ thống thành ShuttleBook" }, {}, deps)
+    expect(result.ok).toBe(true)
+    expect(result.changes[0]).toMatchObject({ path: "project.system_name", value: "ShuttleBook" })
+    const variables = vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as Record<string, unknown>
+    expect((variables.projection as { project?: unknown }).project).toEqual({ name: FIXTURE.project.name, system_name: FIXTURE.project.system_name ?? null })
+
+    await apply(PROJECT, USER, { base_version: 1, instruction: "đổi tên hệ thống thành ShuttleBook", preview_id: result.preview_id }, {}, deps)
+    const record = await repo.get(PROJECT)
+    expect(record!.project.system_name).toBe("ShuttleBook")
+    expect(record!.project.name).toBe(FIXTURE.project.name)
+  })
+})
+
 // ─── apply ───────────────────────────────────────────────────────
 
-describe("apply — ghi Spine, section phụ thuộc thành stale", () => {
+describe("apply - ghi Spine, section phụ thuộc thành stale", () => {
   it("đổi tên actor: ghi changes[], recompute cờ, fixed:2.2.2 thành stale", async () => {
     await seed()
     const applied = await apply(PROJECT, USER, { base_version: 1, ops: [{ op: "set", path: "actors[id=A01].name", value: "Product Owner" }] }, {}, deps)
@@ -622,7 +1001,12 @@ describe("apply — ghi Spine, section phụ thuộc thành stale", () => {
   })
 })
 
-describe("apply sau baseline — reason bắt buộc, impact luôn có", () => {
+describe("apply sau baseline - change request (FLF-294): người yêu cầu + nguồn + reason bắt buộc, impact luôn có", () => {
+  const cr = { requester: "Ms. Lan", source: { kind: "meeting_minutes" as const, ref: "Biên bản 15/10" } }
+  beforeEach(() => {
+    crCounter.seq = 0
+  })
+
   const withBaseline = (): Spine => {
     const spine = structuredClone(FIXTURE)
     spine.baselines = [
@@ -631,27 +1015,53 @@ describe("apply sau baseline — reason bắt buộc, impact luôn có", () => {
     return spine
   }
 
-  it("thiếu reason ⇒ 400, không ghi gì", async () => {
+  it("thiếu người yêu cầu / nguồn ⇒ 400 CR_FIELDS_REQUIRED, không ghi; bản xem trước còn nguyên để điền rồi áp lại", async () => {
     await seed(withBaseline())
-    await expect(
-      apply(PROJECT, USER, { base_version: 1, ops: [{ op: "set", path: "project.vision", value: "Tầm nhìn mới" }] }, {}, deps)
-    ).rejects.toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
+    const ops = [{ op: "set" as const, path: "project.vision", value: "Tầm nhìn mới" }]
+    await expect(apply(PROJECT, USER, { base_version: 1, ops, reason: "Khách hàng đổi mục tiêu" }, {}, deps)).rejects.toMatchObject({
+      statusCode: 400,
+      code: "CR_FIELDS_REQUIRED"
+    })
     expect(await writtenChanges()).toBe(0)
+
+    const shown = await preview(PROJECT, USER, { base_version: 1, ops }, {}, deps)
+    await expect(apply(PROJECT, USER, { base_version: 1, ops, preview_id: shown.preview_id, reason: "x" }, {}, deps)).rejects.toMatchObject({
+      code: "CR_FIELDS_REQUIRED"
+    })
+    const applied = await apply(PROJECT, USER, { base_version: 1, ops, preview_id: shown.preview_id, reason: "x", change_request: cr }, {}, deps)
+    expect(applied.cr_id).toBe("CR-001")
   })
 
-  it("có reason ⇒ áp được, branch post_baseline, impact trong kết quả, reason vào changes[]", async () => {
+  it("có CR nhưng thiếu reason ⇒ 400 VALIDATION_ERROR, không ghi, không phí mã CR", async () => {
+    await seed(withBaseline())
+    await expect(
+      apply(PROJECT, USER, { base_version: 1, ops: [{ op: "set", path: "project.vision", value: "Tầm nhìn mới" }], change_request: cr }, {}, deps)
+    ).rejects.toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
+    expect(await writtenChanges()).toBe(0)
+    expect(crCounter.seq).toBe(0)
+  })
+
+  it("đủ CR ⇒ áp được, cr_id, branch post_baseline, mã + người yêu cầu + nguồn vào reason (Record of Changes)", async () => {
     await seed(withBaseline())
     const applied = await apply(
       PROJECT,
       USER,
-      { base_version: 1, ops: [{ op: "set", path: "project.vision", value: "Tầm nhìn mới" }], reason: "Khách hàng đổi mục tiêu" },
+      { base_version: 1, ops: [{ op: "set", path: "project.vision", value: "Tầm nhìn mới" }], reason: "Khách hàng đổi mục tiêu", change_request: cr },
       {},
       deps
     )
 
+    expect(applied.cr_id).toBe("CR-001")
     expect(applied.branch).toBe("post_baseline")
     expect(applied.impact.sections.map((s) => s.id)).toContain("fixed:1")
-    expect(applied.changes[0].reason).toBe("Khách hàng đổi mục tiêu")
+    expect(applied.changes[0].reason).toBe("CR-001 · Ms. Lan · meeting minutes: Biên bản 15/10 - Khách hàng đổi mục tiêu")
+  })
+
+  it("trước baseline ⇒ không đòi CR, cr_id null", async () => {
+    await seed()
+    const applied = await apply(PROJECT, USER, { base_version: 1, ops: [{ op: "set", path: "actors[id=A01].name", value: "Product Owner" }] }, {}, deps)
+    expect(applied.cr_id).toBeNull()
+    expect(crCounter.seq).toBe(0)
   })
 
   it("preview sau baseline cũng báo nhánh post_baseline", async () => {
@@ -662,14 +1072,18 @@ describe("apply sau baseline — reason bắt buộc, impact luôn có", () => {
   })
 })
 
-describe("isChangeInstruction — nhận lệnh sửa trong chat thường", () => {
+describe("isChangeInstruction - nhận lệnh sửa trong chat thường", () => {
   it.each([
     "Đổi tên actor A01 thành Product Owner",
     "Xoá màn hình S07",
     "Thêm một use case cho admin",
     "Cập nhật mô tả của FN001",
     "Rename the Admin actor to Administrator",
-    "remove screen S07"
+    "remove screen S07",
+    // P08: chỗ cần sửa đứng trước động từ
+    "Trong §1 Tổng quan sản phẩm, mục tiêu đầu tiên đổi thành: Khách nhận hàng trong 2 ngày",
+    "Ở mục 5.3, thêm thông báo khi lịch hẹn bị huỷ",
+    "Mục tiêu thứ hai sửa lại thành có thời hạn 3 tháng"
   ])("nhận: %s", (message) => {
     expect(isChangeInstruction(message)).toBe(true)
   })
@@ -689,7 +1103,7 @@ describe("isChangeInstruction — nhận lệnh sửa trong chat thường", () 
     expect(isChangeInstruction("Theo tôi thì phần này có lẽ nên đổi tên lại cho gọn")).toBe(false)
   })
 
-  it("FLF-260: từ hỏi tiếng Anh khớp nguyên từ — \"how\" trong \"showing\" không chặn lệnh; câu hỏi thật vẫn chặn", () => {
+  it("FLF-260: từ hỏi tiếng Anh khớp nguyên từ - \"how\" trong \"showing\" không chặn lệnh; câu hỏi thật vẫn chặn", () => {
     expect(isChangeInstruction("Add a field showing the order status")).toBe(true)
     expect(isChangeInstruction("Update the dashboard so it shows overdue tasks")).toBe(true)
     expect(isChangeInstruction("How does this work?")).toBe(false)
@@ -785,5 +1199,305 @@ describe("instruction ở dự án có ngôn ngữ tài liệu khác ngôn ngữ
     expect(applied.txn).not.toBeNull()
     expect(applied.spine.actors.find((a) => a.id === "A01")?.name).toBe("Product Owner")
     expect(store.translations.size).toBe(0)
+  })
+})
+
+describe("FLF-318: xoá use case kéo theo phần chỉ thuộc nó (luật 3g), use case cùng luồng hỏi trước", () => {
+  const uc = FIXTURE.use_cases.find((u) => u.function_ids.some((id) => !FIXTURE.use_cases.some((o) => o.id !== u.id && o.function_ids.includes(id))))!
+  const exclusive = uc.function_ids.filter((id) => !FIXTURE.use_cases.some((o) => o.id !== uc.id && o.function_ids.includes(id)))
+
+  it("lệnh xoá ⇒ prompt bật luật 3g kèm use_case_context; lô chỉ xoá use case ⇒ gọi lại kèm phần còn sót; lô đủ ⇒ bản xem trước ok", async () => {
+    const executor = vi
+      .fn()
+      .mockResolvedValueOnce(aiResult({ ops: [{ op: "remove", path: `use_cases[id=${uc.id}]` }] as ChangeInstructionOutput["ops"] }))
+      .mockResolvedValueOnce(
+        aiResult({ ops: [{ op: "remove", path: `use_cases[id=${uc.id}]` }, ...exclusive.map((id) => ({ op: "remove", path: `functions[id=${id}]` }))] as ChangeInstructionOutput["ops"] })
+      )
+    deps.changeExecutor = executor
+    await seed()
+    const shown = await preview(PROJECT, USER, { base_version: 1, instruction: `xoá use case ${uc.name}` }, {}, deps)
+    expect(executor).toHaveBeenCalledTimes(2)
+    const first = executor.mock.calls[0][1].promptVariables as { use_case_removal: boolean; projection: { use_case_context?: { use_cases: unknown[] } } }
+    expect(first.use_case_removal).toBe(true)
+    expect(first.projection.use_case_context?.use_cases.length).toBe(FIXTURE.use_cases.length)
+    const retry = executor.mock.calls[1][1].promptVariables as { previous_problems: string }
+    for (const id of exclusive) expect(retry.previous_problems).toContain(`remove functions[id=${id}]`)
+    expect(shown.ok, JSON.stringify(shown.violations)).toBe(true)
+    expect(shown.ops.filter((o) => o.op === "remove").map((o) => o.path)).toEqual(expect.arrayContaining(exclusive.map((id) => `functions[id=${id}]`)))
+  })
+
+  it("model hỏi về use case cùng luồng ⇒ bản xem trước trả câu hỏi + lựa chọn; câu trả lời (không nhắc 'use case') vẫn là lệnh xoá", async () => {
+    const question = `Xoá "${uc.name}" sẽ làm các use case cùng luồng không còn yêu cầu nào để xử lý: …`
+    const choices = ["Xoá cả luồng", `Chỉ xoá ${uc.name}`, "Chọn từng cái"]
+    deps.changeExecutor = vi.fn(async () => aiResult({ clarification_needed: question, choices }))
+    await seed()
+    const asked = await preview(PROJECT, USER, { base_version: 1, instruction: `xoá UC ${uc.name}` }, {}, deps)
+    expect(asked.ok).toBe(false)
+    expect(asked.clarification).toBe(question)
+    expect(asked.clarification_choices).toEqual(choices)
+
+    const history = `User: xoá UC ${uc.name}
+AI: ${question}`
+    await preview(PROJECT, USER, { base_version: 1, instruction: "Xoá cả luồng", clarification_rounds: 1, chat_history: history }, {}, deps)
+    const calls = vi.mocked(deps.changeExecutor).mock.calls
+    expect((calls[calls.length - 1][1].promptVariables as { use_case_removal: boolean }).use_case_removal).toBe(true)
+  })
+
+  it("lệnh thêm use case không bật luật 3g", async () => {
+    await seed()
+    await preview(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Send Absence Warning cho Analyst" }, {}, deps)
+    expect((vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as { use_case_removal: boolean }).use_case_removal).toBe(false)
+  })
+})
+
+describe("FLF-318: sửa use case kéo theo phần của nó (luật 3h)", () => {
+  const uc = FIXTURE.use_cases.find((u) => u.id === "UC01")!
+  const newActors = uc.actor_ids.map((a) => (a === "A04" ? "A03" : a))
+  const screens = [...new Set(FIXTURE.functions.filter((f) => uc.function_ids.includes(f.id) && f.screen_id).map((f) => f.screen_id as string))]
+
+  it("lệnh sửa ⇒ prompt bật luật 3h kèm edit_targets của use case được nhắc; đổi actor mà quên quyền ⇒ gọi lại kèm lỗi", async () => {
+    const executor = vi
+      .fn()
+      .mockResolvedValueOnce(aiResult({ ops: [{ op: "set", path: "use_cases[id=UC01].actor_ids", value: newActors }] as ChangeInstructionOutput["ops"] }))
+      .mockResolvedValueOnce(
+        aiResult({
+          ops: [
+            { op: "set", path: "use_cases[id=UC01].actor_ids", value: newActors },
+            ...screens.map((screen) => ({ op: "add", path: "permissions[]", value: { screen_id: screen, role_id: "R3", action: "view" } }))
+          ] as ChangeInstructionOutput["ops"]
+        })
+      )
+    deps.changeExecutor = executor
+    await seed()
+    const shown = await preview(PROJECT, USER, { base_version: 1, instruction: "đổi actor của use case UC01 từ Guest sang Administrator" }, {}, deps)
+    expect(executor).toHaveBeenCalledTimes(2)
+    const first = executor.mock.calls[0][1].promptVariables as { use_case_edit: boolean; projection: { use_case_context: { edit_targets: { use_case: { id: string } }[] } } }
+    expect(first.use_case_edit).toBe(true)
+    expect(first.projection.use_case_context.edit_targets.map((t) => t.use_case.id)).toEqual(["UC01"])
+    expect((executor.mock.calls[1][1].promptVariables as { previous_problems: string }).previous_problems).toContain("rule 3h")
+    expect(shown.ok, JSON.stringify(shown.violations)).toBe(true)
+  })
+
+  it("không rõ sửa use case nào ⇒ model hỏi kèm lựa chọn tên use case; câu trả lời (không nhắc 'use case') vẫn là lệnh sửa", async () => {
+    const question = "Bạn muốn sửa use case nào?"
+    deps.changeExecutor = vi.fn(async () => aiResult({ clarification_needed: question, choices: [uc.name, FIXTURE.use_cases[1].name] }))
+    await seed()
+    const asked = await preview(PROJECT, USER, { base_version: 1, instruction: "sửa UC đăng ký: thêm bước xác thực email" }, {}, deps)
+    expect(asked.clarification).toBe(question)
+    const history = `User: sửa UC đăng ký: thêm bước xác thực email\nAI: ${question}`
+    await preview(PROJECT, USER, { base_version: 1, instruction: uc.name, clarification_rounds: 1, chat_history: history }, {}, deps)
+    const calls = vi.mocked(deps.changeExecutor).mock.calls
+    const last = calls[calls.length - 1][1].promptVariables as { use_case_edit: boolean; projection: { use_case_context: { edit_targets: { use_case: { id: string } }[] } } }
+    expect(last.use_case_edit).toBe(true)
+    // Câu trả lời là đúng tên use case ⇒ lượt sau có đủ chi tiết để sửa
+    expect(last.projection.use_case_context.edit_targets.map((t) => t.use_case.id)).toEqual(["UC01"])
+  })
+})
+
+describe("FLF-278 - mục riêng của mẫu khách qua chat (soạn nháp từ hướng dẫn + dữ liệu dự án)", () => {
+  const block = (text: string) => ({ kind: "paragraph" as const, text, rows: null, image_ref: null })
+  const conventions = { id: "CS07", heading: "Document Conventions", level: 2, blocks: [block("[Describe the typographical conventions used in this SRS.]")], source: "import" as const }
+  const hardware = { id: "CS08", heading: "Hardware Interfaces", level: 2, blocks: [], source: "import" as const }
+  const WITH_CUSTOM: Spine = { ...FIXTURE, custom_sections: [conventions, hardware] }
+
+  it("nhắc tiêu đề ⇒ projection có mục + hướng dẫn rút từ chữ `[…]` của mẫu + dữ kiện dự án gọn; không nhắc ⇒ chỉ mục gọn", () => {
+    const projection = buildChangeProjection(WITH_CUSTOM, "Soạn nháp mục §1.2 Document Conventions theo hướng dẫn của mẫu")
+    expect(projection.custom_sections).toEqual([{ ...conventions, guidance: "Describe the typographical conventions used in this SRS." }])
+    const context = projection.draft_context as { project: Record<string, unknown>; features: string[] }
+    expect(context.features).toEqual(FIXTURE.features.slice(0, 30).map((f) => f.name))
+    expect(JSON.stringify(context)).not.toMatch(/"id"/)
+    expect((projection.existing_ids as Record<string, string[]>).custom_sections).toEqual(["CS07", "CS08"])
+    expect(buildChangeProjection(WITH_CUSTOM, "làm cho tài liệu hay hơn").custom_sections).toEqual([
+      { id: "CS07", label: "Document Conventions" },
+      { id: "CS08", label: "Hardware Interfaces" }
+    ])
+  })
+
+  it("model ghi cả phần tử (bỏ chữ hướng dẫn) hoặc thêm block ⇒ áp được", async () => {
+    await seed(WITH_CUSTOM)
+    deps.changeExecutor = vi.fn(async () =>
+      aiResult({
+        ops: [
+          { op: "set", path: "custom_sections[id=CS07]", value: { ...conventions, blocks: [block("Glossary terms are in bold.")] } },
+          { op: "add", path: "custom_sections[id=CS08].blocks[]", value: block("The app reads the phone's fingerprint sensor.") }
+        ]
+      })
+    )
+    const applied = await apply(PROJECT, USER, { base_version: 1, instruction: "Viết mục Document Conventions và Hardware Interfaces" }, {}, deps)
+    expect(applied.spine.custom_sections.map((c) => c.blocks.map((b) => b.text))).toEqual([["Glossary terms are in bold."], ["The app reads the phone's fingerprint sensor."]])
+  })
+})
+
+describe("FLF-428 - sửa trong chat từ cờ nfr_missing_number (AC-38.2)", () => {
+  const nfrId = () => FIXTURE.nfrs.find((n) => n.category === "reliability")!.id
+  const flagged = (): Spine => {
+    const s = structuredClone(FIXTURE)
+    const n = s.nfrs.find((x) => x.id === nfrId())!
+    delete n.metric
+    delete n.threshold
+    n.kind = "descriptive"
+    s.flags = [
+      {
+        id: "FL900",
+        level: "red",
+        rule_id: "nfr_missing_number",
+        section_id: "fixed:4.2.2",
+        target_id: n.id,
+        message: `Yêu cầu độ tin cậy ${n.id} thiếu chỉ số đo / ngưỡng`,
+        remediation_step: "S-6.3",
+        opened_at_version: 1,
+        resolved_at: null,
+        waived_by_user: false,
+        waive_reason: null,
+        waived_at_version: null,
+        kept_reason: null,
+        kept_by: null
+      } as Spine["flags"][number]
+    ]
+    return s
+  }
+  const instruction = () => `Trong §4.2.2 Reliability: sửa vấn đề "Yêu cầu độ tin cậy ${nfrId()} thiếu chỉ số đo / ngưỡng"`
+
+  it("projection có target_flags + gợi ý, và NFR đích hiện metric / threshold = null", () => {
+    const projection = buildChangeProjection(flagged(), instruction())
+    expect(projection.target_flags).toMatchObject([{ rule_id: "nfr_missing_number", target_id: nfrId() }])
+    expect((projection.target_flags as { fix_hint: string }[])[0].fix_hint).toContain(`nfrs[id=${nfrId()}].metric`)
+    const nfr = (projection.nfrs as Record<string, unknown>[]).find((n) => n.id === nfrId())!
+    expect(nfr).toHaveProperty("metric", null)
+    expect(nfr).toHaveProperty("threshold", null)
+    // Lệnh không nhắm cờ ⇒ không có target_flags
+    expect(buildChangeProjection(flagged(), "Đổi tên A01 thành Product Owner").target_flags).toBeUndefined()
+  })
+
+  it("lô chỉ viết thêm vào statement ⇒ gọi lại MỘT lần kèm lỗi 'không đóng cờ', preview dùng lô ghi metric + threshold", async () => {
+    await seed(flagged())
+    const id = nfrId()
+    deps.changeExecutor = vi
+      .fn()
+      .mockResolvedValueOnce(aiResult({ ops: [{ op: "set", path: `nfrs[id=${id}].statement`, value: "No overselling. Measure: oversold orders must be 0." }] }))
+      .mockResolvedValueOnce(
+        aiResult({
+          ops: [
+            { op: "set", path: `nfrs[id=${id}].kind`, value: "quantitative" },
+            { op: "set", path: `nfrs[id=${id}].metric`, value: "Oversold orders" },
+            { op: "set", path: `nfrs[id=${id}].threshold`, value: "0" }
+          ]
+        })
+      )
+    const result = await preview(PROJECT, USER, { base_version: 1, instruction: instruction() }, {}, deps)
+    expect(deps.changeExecutor).toHaveBeenCalledTimes(2)
+    const second = vi.mocked(deps.changeExecutor).mock.calls[1][1].promptVariables as Record<string, unknown>
+    expect(second.previous_problems).toContain("nfr_missing_number")
+    expect(result.changes.map((c) => c.path)).toEqual(expect.arrayContaining([`nfrs[id=${id}].metric`, `nfrs[id=${id}].threshold`]))
+  })
+
+  it("ghi xong mà cờ vẫn mở ⇒ apply trả unresolved_flags; cờ đã đóng ⇒ không có", async () => {
+    await seed(flagged())
+    const id = nfrId()
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [{ op: "set", path: `nfrs[id=${id}].statement`, value: "No overselling. Measure: 0." }] }))
+    const stillOpen = await apply(PROJECT, USER, { base_version: 1, instruction: instruction() }, {}, deps)
+    expect(stillOpen.unresolved_flags).toMatchObject([{ rule_id: "nfr_missing_number", target_id: id }])
+
+    await seed(flagged())
+    deps.changeExecutor = vi.fn(async () =>
+      aiResult({ ops: [{ op: "set", path: `nfrs[id=${id}].metric`, value: "Oversold orders" }, { op: "set", path: `nfrs[id=${id}].threshold`, value: "0" }] })
+    )
+    // recomputeFlags giả: đóng cờ như flags.service thật làm khi luật không còn bắn
+    deps.recomputeFlags = vi.fn(async () => {
+      const cur = db.spines[0] as unknown as Spine & { _id: string }
+      db.spines[0] = { ...cur, _id: crypto.randomUUID(), flags: cur.flags.map((f: Spine["flags"][number]) => ({ ...f, resolved_at: new Date().toISOString() })) }
+    })
+    const fixed = await apply(PROJECT, USER, { base_version: 1, instruction: instruction() }, {}, deps)
+    expect(fixed.unresolved_flags).toBeUndefined()
+  })
+})
+
+// ─── P12: hai người sửa cùng lúc — kiểm theo nội dung (BF §3.2, chốt câu 8) ──────
+
+describe("P12 - xác nhận sau người khác: kiểm từng chỗ trên nội dung hiện tại", () => {
+  const OTHER = "650000000000000000000011"
+  const lastEditor = vi.fn(async () => ({ name: "Bình", at: new Date("2026-11-17T09:05:00.000Z") }))
+  const withEditor = (): ChangeDeps => ({ ...deps, lastEditor })
+  /** Người kia ghi thẳng (đã xác nhận trước). */
+  const otherWrites = async (ops: { op: "set"; path: string; value: unknown }[]) => {
+    const version = (await repo.get(PROJECT))!.spine_version
+    return apply(PROJECT, OTHER, { base_version: version, ops }, {}, deps)
+  }
+  const myPreview = async (ops: { op: "set"; path: string; value: unknown }[]) => preview(PROJECT, USER, { base_version: 1, ops }, {}, deps)
+
+  it("người kia sửa mục khác ⇒ áp được, không 409 (TA-06 c, mục khác)", async () => {
+    await seed()
+    const shown = await myPreview([{ op: "set", path: "glossary[id=G01].definition", value: "Software Requirements Specification document." }])
+    await otherWrites([{ op: "set", path: "actors[id=A01].name", value: "Product Owner" }])
+    const applied = await apply(PROJECT, USER, { base_version: 1, preview_id: shown.preview_id }, {}, withEditor())
+    expect(applied.txn).not.toBeNull()
+    expect(applied.spine.glossary.find((g) => g.id === "G01")?.definition).toBe("Software Requirements Specification document.")
+    expect(applied.spine.actors.find((a) => a.id === "A01")?.name).toBe("Product Owner")
+  })
+
+  it("người kia sửa phần khác trong cùng chỗ ⇒ ghép rồi ghi (mục tiêu 1 vs mục tiêu 2)", async () => {
+    await seed()
+    const goals = [...FIXTURE.project.goals]
+    const mine = [...goals]
+    mine[0] = "Produce a baseline-quality SRS within half a working day"
+    const theirs = [...goals]
+    theirs[1] = "Keep every statement traceable to the Spine"
+    const shown = await myPreview([{ op: "set", path: "project.goals", value: mine }])
+    await otherWrites([{ op: "set", path: "project.goals", value: theirs }])
+    const applied = await apply(PROJECT, USER, { base_version: 1, preview_id: shown.preview_id }, {}, withEditor())
+    expect(applied.spine.project.goals.slice(0, 2)).toEqual([mine[0], theirs[1]])
+    expect(applied.changes.map((c) => c.path)).toEqual(["project.goals"])
+  })
+
+  it("người kia sửa giống đề xuất ⇒ không ghi lại, báo đã được Bình sửa giống", async () => {
+    await seed()
+    const value = "Software Requirements Specification document."
+    const shown = await myPreview([{ op: "set", path: "glossary[id=G01].definition", value }])
+    await otherWrites([{ op: "set", path: "glossary[id=G01].definition", value }])
+    const before = await writtenChanges()
+    const applied = await apply(PROJECT, USER, { base_version: 1, preview_id: shown.preview_id }, {}, withEditor())
+    expect(applied.txn).toBeNull()
+    expect(await writtenChanges()).toBe(before)
+    expect(applied.already_applied).toEqual([expect.objectContaining({ path: "glossary[id=G01]", changed_by: "Bình", label: "SRS" })])
+  })
+
+  it("người kia sửa đúng chữ đề xuất định đổi ⇒ 409 kèm ①②③, không ghi; bản xem trước còn để Bỏ yêu cầu", async () => {
+    await seed()
+    const shown = await myPreview([{ op: "set", path: "glossary[id=G01].definition", value: "Bản đặc tả yêu cầu phần mềm." }])
+    await otherWrites([{ op: "set", path: "glossary[id=G01].definition", value: "Tài liệu đặc tả yêu cầu." }])
+    const before = await writtenChanges()
+    const err = await apply(PROJECT, USER, { base_version: 1, preview_id: shown.preview_id }, {}, withEditor()).catch((e: unknown) => e)
+    expect(err).toMatchObject({ statusCode: 409, code: "SPINE_VERSION_CONFLICT" })
+    const meta = (err as { meta: { conflicts: Record<string, unknown>[]; preview_id: string } }).meta
+    expect(meta.preview_id).toBe(shown.preview_id)
+    expect(meta.conflicts).toEqual([
+      expect.objectContaining({
+        path: "glossary[id=G01]",
+        section_id: "fixed:5.5",
+        label: "SRS",
+        at_proposal: FIXTURE.glossary[0].definition,
+        current: "Tài liệu đặc tả yêu cầu.",
+        proposal: "Bản đặc tả yêu cầu phần mềm.",
+        changed_by: "Bình",
+        changed_at: "2026-11-17T09:05:00.000Z"
+      })
+    ])
+    expect(String((err as Error).message)).toContain("Bình vừa sửa đúng chỗ bạn định đổi")
+    expect(await writtenChanges()).toBe(before)
+    // Không có nút ghi đè: bấm lại vẫn đụng; bản xem trước vẫn còn (Bỏ yêu cầu xoá được)
+    await expect(apply(PROJECT, USER, { base_version: 1, preview_id: shown.preview_id }, {}, withEditor())).rejects.toMatchObject({ statusCode: 409 })
+  })
+
+  it("chỗ khác làm gãy tham chiếu ⇒ từ chối trước khi ghi (cờ đỏ, BF dòng 4)", async () => {
+    await seed()
+    const roleOfA01 = FIXTURE.roles.find((r) => r.actor_id === "A01")
+    expect(roleOfA01).toBeDefined()
+    const shown = await myPreview([{ op: "set", path: `roles[id=${roleOfA01!.id}].actor_id`, value: "A02" }])
+    // Người kia xoá actor A02 (và mọi thứ trỏ tới nó)
+    const version = (await repo.get(PROJECT))!.spine_version
+    await apply(PROJECT, OTHER, { base_version: version, ops: [{ op: "remove", path: "actors[id=A02]" }] }, {}, deps).catch(() => undefined)
+    const after = await repo.get(PROJECT)
+    expect(after!.actors.some((a) => a.id === "A02")).toBe(false)
+    await expect(apply(PROJECT, USER, { base_version: 1, preview_id: shown.preview_id }, {}, withEditor())).rejects.toBeInstanceOf(TransactionRejectedError)
   })
 })

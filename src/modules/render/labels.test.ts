@@ -143,9 +143,10 @@ const ENGLISH_LABELS = new Set<string>([
   ...loadStepRegistry().map((s) => s.phase_label_en)
 ])
 
-describe("labels — bảng nhãn", () => {
-  it("VI_LABELS / VI_SECTION_TITLES của mode 1 giữ nguyên 40 nhãn / 19 mục (thêm key là đổi bản in mode 1)", () => {
-    expect(Object.keys(VI_LABELS)).toHaveLength(40)
+describe("labels - bảng nhãn", () => {
+  it("VI_LABELS / VI_SECTION_TITLES của mode 1 giữ nguyên 42 nhãn / 19 mục (thêm key là đổi bản in mode 1)", () => {
+    // 42 = 40 + chú thích hình `Class Diagram` và `State Machine Diagram` (chỉ hai kind mới dùng, không đổi bản in đã có)
+    expect(Object.keys(VI_LABELS)).toHaveLength(42)
     expect(Object.keys(VI_SECTION_TITLES)).toHaveLength(19)
     expect(labelFor("vi", "Use Case")).toBe("Use Case")
     expect(fptLabelFor("vi", "Use Case")).toBe("Use case")
@@ -174,7 +175,7 @@ describe("labels — bảng nhãn", () => {
   })
 })
 
-describe("labels — fixture 19 màn qua đường mode 2 (mẫu FPT)", () => {
+describe("labels - fixture 19 màn qua đường mode 2 (mẫu FPT)", () => {
   it("language vi ⇒ không còn nhãn / tiêu đề / câu máy tiếng Anh nào ở chỗ chỉ chứa chữ máy", async () => {
     const vi = await build(spineForLabels(), { language: "vi" })
     const en = await build(spineForLabels())
@@ -258,8 +259,8 @@ describe("labels — fixture 19 màn qua đường mode 2 (mẫu FPT)", () => {
       const b = doc.sections[0].blocks[0]
       return b.type === "image" ? b.caption : undefined
     }
-    expect(await caption()).toBe(`Screens Flow — ${ASSEMBLE_TEXT.en.imagePending("D-FLOW")}`)
-    expect(await caption("vi")).toBe(`Screens Flow — ${ASSEMBLE_TEXT.vi.imagePending("D-FLOW")}`)
+    expect(await caption()).toBe(`Screens Flow - ${ASSEMBLE_TEXT.en.imagePending("D-FLOW")}`)
+    expect(await caption("vi")).toBe(`Screens Flow - ${ASSEMBLE_TEXT.vi.imagePending("D-FLOW")}`)
     expect(await caption("vi")).not.toContain("image pending")
   })
 
@@ -276,7 +277,10 @@ describe("labels — fixture 19 màn qua đường mode 2 (mẫu FPT)", () => {
       resolved_at: null,
       waived_by_user: false,
       waive_reason: null,
-      waived_at_version: null
+      waived_at_version: null,
+      kept_reason: null,
+      kept_by: null,
+      kept_at: null
     })
     spine.flags = [flag("FL1", "fixed:5.5"), flag("FL2", "custom:GONE")]
     const sections = async (language?: "vi") => (await build(spine, language ? { language } : {})).flagsAppendix?.redOpen.map((r) => r.section)
@@ -289,7 +293,7 @@ describe("labels — fixture 19 màn qua đường mode 2 (mẫu FPT)", () => {
     expect(await build(spine, { language: "en" })).toEqual(await build(spine))
   })
 
-  it("mode 1 (có layout file người dùng): language bị bỏ qua — tài liệu y hệt", async () => {
+  it("mode 1 (có layout file người dùng): language bị bỏ qua - tài liệu y hệt", async () => {
     const entry = (order: number, heading_text: string, level: number, section_id: string) => ({ order, heading_text, level, section_id })
     const template: TemplateLayout = {
       language: "vi",
@@ -305,11 +309,15 @@ describe("labels — fixture 19 màn qua đường mode 2 (mẫu FPT)", () => {
   })
 })
 
-describe("labels — writerOptionsFor (FLF-265 §3.1)", () => {
+describe("labels - writerOptionsFor (FLF-265 §3.1)", () => {
   const sample = JSON.parse(readFileSync(new URL("../../../fixtures/rendered-document-sample.json", import.meta.url), "utf8")) as RenderedDocument
 
-  it("mode 1 ⇒ đúng tuỳ chọn trước FLF-265, bỏ qua ngôn ngữ tài liệu", () => {
-    for (const language of ["vi", "en", undefined] as const) expect(writerOptionsFor("import", language)).toEqual({ flagLanguage: "vi" })
+  it("mode 1 ⇒ writer như trước FLF-265; phụ lục cờ theo ngôn ngữ tài liệu (FLF-411 U3-5), không truyền ⇒ vi như cũ", () => {
+    expect(writerOptionsFor("import", "vi")).toEqual({ flagLanguage: "vi" })
+    expect(writerOptionsFor("import", "en")).toEqual({ flagLanguage: "en" })
+    expect(writerOptionsFor("import")).toEqual({ flagLanguage: "vi" })
+    // FLF-318: dự án chuyển từ mode 2 theo ngôn ngữ tài liệu như mode 2
+    expect(writerOptionsFor("import", "en", "fpt")).toEqual({ language: "en", flagLanguage: "en" })
   })
 
   it("mode 2 ⇒ writer + phụ lục cờ theo ngôn ngữ tài liệu; mặc định en", () => {
@@ -328,8 +336,11 @@ describe("labels — writerOptionsFor (FLF-265 §3.1)", () => {
     expect(vi).not.toContain(WRITER_TEXT.en.toc)
   })
 
-  it("mode 1 ra document.xml y hệt { flagLanguage: vi } cũ", async () => {
+  it("mode 1 ra document.xml y hệt { flagLanguage } cũ theo ngôn ngữ tài liệu; không truyền ⇒ vi", async () => {
     const before = readZipText(await writeDocx(sample, { flagLanguage: "vi" }), "word/document.xml")
-    expect(readZipText(await writeDocx(sample, writerOptionsFor("import", "en")), "word/document.xml")).toBe(before)
+    expect(readZipText(await writeDocx(sample, writerOptionsFor("import")), "word/document.xml")).toBe(before)
+    expect(readZipText(await writeDocx(sample, writerOptionsFor("import", "vi")), "word/document.xml")).toBe(before)
+    const en = readZipText(await writeDocx(sample, { flagLanguage: "en" }), "word/document.xml")
+    expect(readZipText(await writeDocx(sample, writerOptionsFor("import", "en")), "word/document.xml")).toBe(en)
   })
 })

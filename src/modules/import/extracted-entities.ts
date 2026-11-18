@@ -7,6 +7,7 @@
  */
 
 import type { ExtractedField } from "./extraction-draft.model.js"
+import { formatFor, nextIdIn } from "../spine/id-allocator.js"
 import type { FieldOrigin } from "./import.constants.js"
 import { PROVISIONAL_SECTION } from "./section-catalog.js"
 import type { HeadingMapEntry } from "./template-profile.model.js"
@@ -39,10 +40,17 @@ export const ID_PREFIX: Readonly<Record<string, { prefix: string; pad: number }>
   common_requirements: { prefix: "COM-", pad: 2 },
   messages: { prefix: "MSG-", pad: 2 },
   other_requirements: { prefix: "OR-", pad: 2 },
-  glossary: { prefix: "G", pad: 2 }
+  glossary: { prefix: "G", pad: 2 },
+  deployment_nodes: { prefix: "DN", pad: 2 }
 }
 
-/** `UC01`, `uc_01`, `UC 01` ⇒ `UC-01`; khoá khác giữ nguyên (bỏ khoảng trắng thừa). */
+/**
+ * FLF-361: mã phần tử ghi vào Spine **đúng như tài liệu** (chỉ bỏ khoảng trắng hai đầu / thừa) — `UC01` giữ `UC01`, `A01`
+ * giữ `A01`. So khớp / chống trùng dùng `idKey` (bỏ qua `-`, `_`, khoảng trắng, số 0 đầu).
+ */
+export const keepKey = (key: string): string => key.trim().replace(/\s+/g, " ")
+
+/** `UC01`, `uc_01`, `UC 01` ⇒ `UC-01`; khoá khác giữ nguyên (bỏ khoảng trắng thừa). Không dùng cho id Spine nữa (FLF-361). */
 export const normalizeKey = (key: string): string => {
   const k = key.trim()
   const m = /^([A-Za-z]{1,5})[-_ ]?(\d+(?:\.\d+)*)$/.exec(k)
@@ -125,7 +133,7 @@ export const findKnownKey = (known: readonly EntityItem[], entity: string, key: 
  * - khoá chỉ là tên chép lại ("LimCallLog") ⇒ coi như không có khoá;
  * - ảnh hiếm khi ghi mã ⇒ tên trùng phần tử đã biết thắng khoá lạ (model tự đặt); chữ thì mã tài liệu thắng. Tên so cả
  *   khác quy ước đặt tên khi chỉ một phần tử khớp ("SubscriptionPlan" của ERD = "subscription_plans" của bảng);
- * - không khớp gì ⇒ khoá chuẩn hoá; không có khoá ⇒ `null` (cấp mới).
+ * - không khớp gì ⇒ khoá như tài liệu (FLF-361, không đổi `UC01` thành `UC-01`); không có khoá ⇒ `null` (cấp mới).
  */
 export const aiItemId = (known: readonly EntityItem[], entity: string, key: string | null, name: unknown, fromImage = false): string | null => {
   const code = key?.trim() && !(typeof name === "string" && nameKey(key) === nameKey(name)) ? key.trim() : null
@@ -133,13 +141,22 @@ export const aiItemId = (known: readonly EntityItem[], entity: string, key: stri
   if (sameKey) return sameKey
   const sameName = findKnownId(known, entity, name) ?? findKnownCompact(known, entity, name)
   if (sameName && (fromImage || !code)) return sameName
-  return code ? normalizeKey(code) : null
+  return code ? keepKey(code) : null
 }
 
-/** Cấp id mới không trùng id đã có của từng mảng — so theo `idKey`: đã có "A-01" thì không cấp "A01". */
+/**
+ * Nguồn id cho `itemsFromAi`: `IdAllocator` thật lúc ghép section, hoặc nguồn nháp không cấp mã (FLF-392 — dựng known_keys
+ * lúc đọc song song; phần tử AI mới không có id nên không vào prompt).
+ */
+export type IdSource = Pick<IdAllocator, "next" | "reserve">
+
+/**
+ * Cấp id mới không trùng id đã có của từng mảng — so theo `idKey`: đã có "A-01" thì không cấp "A01". FLF-361: khuôn theo
+ * id đang có (`formatFor`, như CR — FLF-307): tài liệu đánh `UC01` ⇒ id mới `UC03`, không `UC-03` lạc khuôn.
+ */
 export class IdAllocator {
   private readonly used = new Map<string, Set<string>>()
-  private readonly counters = new Map<string, number>()
+  private readonly raw = new Map<string, string[]>()
 
   constructor(existing: Record<string, Iterable<string>> = {}) {
     for (const [entity, ids] of Object.entries(existing)) for (const id of ids) this.reserve(entity, id)
@@ -149,6 +166,7 @@ export class IdAllocator {
     const set = this.used.get(entity) ?? new Set<string>()
     set.add(idKey(id))
     this.used.set(entity, set)
+    this.raw.set(entity, [...(this.raw.get(entity) ?? []), id])
   }
 
   has(entity: string, id: string): boolean {
@@ -157,11 +175,14 @@ export class IdAllocator {
 
   next(entity: string): string {
     const def = ID_PREFIX[entity] ?? { prefix: `${entity.slice(0, 3).toUpperCase()}-`, pad: 2 }
-    let n = this.counters.get(entity) ?? 0
-    let id: string
-    do id = `${def.prefix}${String(++n).padStart(def.pad, "0")}`
-    while (this.has(entity, id))
-    this.counters.set(entity, n)
+    // Chỉ suy khuôn từ mã dạng `<chữ><số>` (`UC01`, `UC-01`) — id theo số mục (`FR-3.2.2`) không phải khuôn đánh số
+    const existing = (this.raw.get(entity) ?? []).filter((id) => /^[A-Za-z]{1,5}[-_]?\d+$/.test(id))
+    const format = formatFor(existing, { prefix: def.prefix, width: def.pad })
+    let id = nextIdIn(existing, format)
+    while (this.has(entity, id)) {
+      existing.push(id)
+      id = nextIdIn(existing, format)
+    }
     this.reserve(entity, id)
     return id
   }
@@ -244,12 +265,25 @@ export const flattenItem = (item: EntityItem): ExtractedField[] =>
 export const REF_LIST_FIELDS: ReadonlySet<string> = new Set(["actor_ids", "includes", "extends", "relations", "flow_to"])
 
 /** Giá trị mới của field khi đã có giá trị cũ: danh sách tham chiếu ⇒ hợp (giữ thứ tự), còn lại ⇒ giá trị mới. */
-export const mergeFieldValue = (field: string, prev: unknown, next: unknown): unknown =>
-  REF_LIST_FIELDS.has(field) && Array.isArray(prev) && Array.isArray(next) ? [...new Set([...prev, ...next])] : next
+export const mergeFieldValue = (field: string, prev: unknown, next: unknown): unknown => {
+  if (!REF_LIST_FIELDS.has(field) || !Array.isArray(prev) || !Array.isArray(next)) return next
+  if (field !== "flow_to") return [...new Set([...prev, ...next])]
+  // `flow_to`: phần tử là chuỗi hoặc { to, trigger?, guard? } — cùng màn đích thì gộp, giữ cạnh có nhãn
+  const byTo = new Map<string, unknown>()
+  for (const x of [...prev, ...next]) {
+    const key = String(refTarget(x))
+    const had = byTo.get(key)
+    byTo.set(key, had === undefined || typeof had === "string" ? x : typeof x === "string" ? had : { ...x, ...had })
+  }
+  return [...byTo.values()]
+}
+
+/** Đích của một phần tử trong danh sách tham chiếu: chuỗi, hoặc `to` của object (`flow_to`). */
+export const refTarget = (ref: unknown): unknown => (typeof ref === "object" && ref !== null && "to" in ref ? (ref as { to: unknown }).to : ref)
 
 /**
- * Thứ tự phần tử theo nơi chữ / bảng định nghĩa nó (field không đọc từ ảnh đầu tiên), không có thì nơi ảnh nhắc đầu tiên
- * (FLF-252): quan hệ đọc từ sơ đồ use case ở 2.2.1 không còn kéo vài use case lên trước cả bảng 2.2.2 khi in.
+ * Thứ tự phần tử theo nơi chữ / bảng định nghĩa nó (field không đọc từ ảnh đầu tiên); phần tử chỉ có trong ảnh xếp sau
+ * hết, theo nơi ảnh nhắc đầu tiên (FLF-252, FLF-411 #7): quan hệ đọc từ sơ đồ use case ở 2.2.1 không còn kéo vài use case lên trước cả bảng 2.2.2 khi in.
  */
 export const collectEntities = (
   fields: (ExtractedField & { section_id?: string })[]
@@ -270,6 +304,52 @@ export const collectEntities = (
     if (f.section_id) cur.sections.add(f.section_id)
     out.set(key, cur)
   })
-  const at = (key: string): number => rank.get(key)!.main ?? rank.get(key)!.any
+  // FLF-411 (#7): phần tử chỉ đọc từ ảnh đứng SAU mọi phần tử chữ / bảng định nghĩa (giữa chúng giữ thứ tự ảnh nhắc tới) —
+  // trước đây xếp theo chỗ ảnh nhắc đầu tiên ⇒ UC-03…UC-16 của sơ đồ 2.2.1 đứng trước UC-01, UC-02 của bảng 2.2.2
+  const at = (key: string): number => rank.get(key)!.main ?? fields.length + rank.get(key)!.any
   return new Map([...out].sort(([a], [b]) => at(a) - at(b)))
+}
+
+/** Tên actor chung chung — sơ đồ hay vẽ làm actor cha (tổng quát hoá) của các actor thật. */
+const GENERIC_ACTOR = /^(the\s+)?(users?|end[\s-]?users?|actors?|system users?|người dùng|người sử dụng|tác nhân)$/i
+
+/**
+ * FLF-361: actor chỉ đọc từ ảnh sơ đồ (`vision`), tên chung chung ("User" — actor cha vẽ trên sơ đồ ngữ cảnh / use case),
+ * khi file đã liệt kê actor bằng chữ / bảng ⇒ không thêm vào Spine (FAP: `A08 | User | human` không có trong bảng 2.1).
+ * Người dùng đã sửa field ở wizard ⇒ giữ. Trả khoá phần tử (`actors|A08`) cần bỏ; tham chiếu tới nó bị bỏ khi dựng op.
+ */
+export const imageOnlyGenericActors = (fields: readonly Pick<ExtractedField, "path" | "value" | "origin" | "edited_value">[]): Set<string> => {
+  const byActor = new Map<string, Pick<ExtractedField, "path" | "value" | "origin" | "edited_value">[]>()
+  for (const f of fields) {
+    const p = parseFieldPath(f.path)
+    if (p?.entity !== "actors") continue
+    const key = `actors|${p.id ?? ""}`
+    byActor.set(key, [...(byActor.get(key) ?? []), f])
+  }
+  const listed = [...byActor.values()].some((fs) => fs.some((f) => f.origin !== "vision"))
+  if (!listed) return new Set()
+  const out = new Set<string>()
+  for (const [key, fs] of byActor) {
+    if (fs.some((f) => f.origin !== "vision" || f.edited_value !== undefined)) continue
+    const name = fs.find((f) => parseFieldPath(f.path)?.field === "name")?.value
+    if (typeof name === "string" && GENERIC_ACTOR.test(name.trim())) out.add(key)
+  }
+  return out
+}
+
+/**
+ * FLF-361: một phần tử, một cách viết mã — field của cùng phần tử trích từ nhiều nguồn ghi mã khác dạng (`UC01` ở bảng,
+ * `UC-01` ở mục đặc tả) ⇒ dùng cách viết gặp đầu tiên cho mọi path (so theo `idKey`). Trước đây `normalizeKey` đổi mọi mã
+ * sang `UC-01` nên không trùng, nhưng mất dạng mã của tài liệu.
+ */
+export const canonicalFieldIds = <F extends { path: string }>(fields: readonly F[]): F[] => {
+  const first = new Map<string, string>()
+  return fields.map((f) => {
+    const p = parseFieldPath(f.path)
+    if (!p?.id) return f
+    const key = `${p.entity}|${idKey(p.id)}`
+    const id = first.get(key) ?? p.id
+    first.set(key, id)
+    return id === p.id ? f : { ...f, path: f.path.replace(`${p.entity}[id=${p.id}]`, `${p.entity}[id=${id}]`) }
+  })
 }

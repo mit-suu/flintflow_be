@@ -17,7 +17,8 @@
 
 import { randomUUID } from "node:crypto"
 import mongoose from "mongoose"
-import { StepRun, type RunStage, type RunStatus } from "./run-state.model.js"
+import { StepRun, type RunPauseReason, type RunStage, type RunStatus } from "./run-state.model.js"
+import { isAiErrorCode } from "./pipeline-error-code.js"
 
 export type { RunStage, RunStatus }
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -49,6 +50,11 @@ export interface PendingAnswerState {
   base_answers_text: string
   /** Lời AI của lượt phỏng vấn giai đoạn — chỉ ghi vào transcript sau khi có câu trả lời nên phải giữ lại. */
   reply?: string
+  /**
+   * Lúc đặt các câu đang chờ (ISO). Lượt chat trả lời nạp tài liệu tải lên SAU lúc này (đính kèm cùng câu trả lời) — tài liệu
+   * cũ hơn đã có ở lượt hỏi. Trạng thái lưu trước khi có trường này ⇒ nạp mọi tài liệu của bước.
+   */
+  asked_at?: string
 }
 
 export interface RunStateDoc {
@@ -56,6 +62,8 @@ export interface RunStateDoc {
   step_id: string
   run_id: string
   session_id: string | null
+  /** userId người khởi động lượt (BF §3.2: câu hỏi đang chờ treo ở người này). */
+  by: string | null
   status: RunStatus
   stage: RunStage
   detail_vi: string | null
@@ -69,6 +77,8 @@ export interface RunStateDoc {
   phase_gate: unknown | null
   events: unknown[]
   error: { code: string; message: string } | null
+  /** FLF-332: `ai_error` ⇒ lượt gãy vì AI lỗi, bước tạm dừng chờ "Thử lại ngay / Để sau". */
+  paused_reason: RunPauseReason | null
   pending_answer: PendingAnswerState | null
 }
 
@@ -77,6 +87,7 @@ const toDoc = (raw: Record<string, unknown>): RunStateDoc => ({
   step_id: String(raw.step_id),
   run_id: String(raw.run_id),
   session_id: raw.session_id === null || raw.session_id === undefined ? null : String(raw.session_id),
+  by: raw.by === null || raw.by === undefined ? null : String(raw.by),
   status: raw.status as RunStatus,
   stage: raw.stage as RunStage,
   detail_vi: (raw.detail_vi as string | null) ?? null,
@@ -89,6 +100,7 @@ const toDoc = (raw: Record<string, unknown>): RunStateDoc => ({
   phase_gate: raw.phase_gate ?? null,
   events: (raw.events as unknown[] | null) ?? [],
   error: (raw.error as { code: string; message: string } | null) ?? null,
+  paused_reason: (raw.paused_reason as RunPauseReason | null | undefined) ?? null,
   pending_answer: (raw.pending_answer as PendingAnswerState | null | undefined) ?? null
 })
 
@@ -137,7 +149,7 @@ export interface AcquireOptions {
 
 const lockedMessage = (doc: RunStateDoc): string => {
   const since = new Date(doc.started_at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })
-  return `Bước ${doc.step_id} đang chạy ở lượt trước (bắt đầu ${since}) — huỷ lượt đó rồi chạy lại`
+  return `Bước ${doc.step_id} đang chạy ở lượt trước (bắt đầu ${since}) - huỷ lượt đó rồi chạy lại`
 }
 
 /**
@@ -163,6 +175,7 @@ export const acquireRun = async (projectId: string, stepId: string, options: Acq
     phase_gate: null,
     events: [],
     error: null,
+    paused_reason: null,
     pending_answer: null
   }
 
@@ -261,6 +274,8 @@ export const finishRun = async (projectId: string, stepId: string, runId: string
   for (const key of ["stage", "detail_vi", "questions", "gate_payload", "phase_gate", "error"] as const) {
     if (patch[key] !== undefined) set[key] = patch[key]
   }
+  // FLF-332: gãy vì AI lỗi ⇒ bước tạm dừng "để sau" (mở lại trang vẫn thấy banner); lý do khác ⇒ không phải tạm dừng
+  set.paused_reason = status === "interrupted" && isAiErrorCode(patch.error?.code) ? "ai_error" : null
   if (useMemory()) {
     const doc = memory.get(memoryKey(projectId, stepId))
     if (doc && doc.run_id === runId) Object.assign(doc, set)
@@ -303,20 +318,21 @@ export const getRunState = async (projectId: string, stepId: string): Promise<Ru
  * mở lại trang không thấy câu nào — câu vẫn nằm trong run-state, chỉ không ai lấy ra được.
  */
 export const getActiveRun = async (projectId: string): Promise<RunStateDoc | null> => {
+  // FLF-332: lượt gãy vì AI lỗi vẫn "sống" với người dùng — bước tạm dừng chờ Thử lại ngay / Để sau, mở lại trang phải thấy
+  const liveOrPaused = (d: Record<string, unknown>): boolean => !STALE_STATUSES.includes(d.status as RunStatus) || d.paused_reason === "ai_error"
   const docs = useMemory()
     ? [...memory.values()]
-        .filter((d) => String(d.projectId) === projectId && !STALE_STATUSES.includes(d.status as RunStatus))
+        .filter((d) => String(d.projectId) === projectId && liveOrPaused(d))
         .sort((a, b) => new Date(b.last_event_at as Date).getTime() - new Date(a.last_event_at as Date).getTime())
         .slice(0, 5)
-    : ((await StepRun.find({ projectId: asObjectId(projectId), status: { $nin: [...STALE_STATUSES] } } as never)
+    : ((await StepRun.find({ projectId: asObjectId(projectId), $or: [{ status: { $nin: [...STALE_STATUSES] } }, { status: "interrupted", paused_reason: "ai_error" }] } as never)
         .sort({ last_event_at: -1 })
         .limit(5)
         .lean()) as Record<string, unknown>[])
-  const alive = docs
-    .map(toDoc)
-    .filter((d) => isRegisteredStep(d.step_id) || isPhaseUnit(d.step_id))
-    .find((d) => d.status !== "running" || new Date(d.locked_until).getTime() > Date.now())
-  return alive ?? null
+  const candidates = docs.map(toDoc).filter((d) => isRegisteredStep(d.step_id) || isPhaseUnit(d.step_id))
+  const alive = candidates.find((d) => d.status !== "interrupted" && (d.status !== "running" || new Date(d.locked_until).getTime() > Date.now()))
+  // Lượt tạm dừng vì AI lỗi chỉ được trả khi không còn lượt nào đang sống (FLF-332)
+  return alive ?? candidates.find((d) => d.status === "interrupted" && d.paused_reason === "ai_error") ?? null
 }
 
 /** Step đang thật sự chạy (khoá còn hiệu lực) — resume không được revert nội dung đang được ghi. */

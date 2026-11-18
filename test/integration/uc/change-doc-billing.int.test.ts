@@ -68,7 +68,7 @@ const addRedFlag = async (projectId: string) => {
       {
         op: "add",
         path: "diagrams[]",
-        value: { id: "D01", kind: "erd", puml: "@startuml\n@enduml", section: "fixed:3.1.5", owner_kind: null, owner_id: null, render_status: "error", error: "boom", source_hash: "x", rendered_at: null }
+        value: { id: "D01", kind: "erd", format: "puml", source: "@startuml\n@enduml", section: "fixed:3.1.5", owner_kind: null, owner_id: null, render_status: "error", error: "boom", source_hash: "x", rendered_at: null }
       }
     ]
   })
@@ -84,21 +84,21 @@ beforeEach(() => {
 
 // ─── UC-44 ──────────────────────────────────────────────────────────
 
-describe("UC-44 — gửi gói thay đổi cho Lead duyệt", () => {
+describe("UC-44 - gửi gói thay đổi cho Lead duyệt", () => {
   it("gói gồm đúng mọi CR Analyst đã ghi từ baseline trước, theo thứ tự ghi", async () => {
     const { seeded, projectId, c } = await importedProject()
     const analyst = await joinOrg(seeded.orgId, "analyst")
     const a = apiAs(seeded, analyst.token, projectId)
 
-    expect(await writeCr(a, "Nhanh hơn", "1 second instead of 2 seconds")).toEqual({ crId: "CR-001", version: "0.1" })
+    expect(await writeCr(a, "Nhanh hơn", "1 second instead of 2 seconds")).toEqual({ crId: "CR-001", version: "0.2" })
     routeReplaceCr("1 second", "500 ms")
-    expect(await writeCr(a, "Nhanh nữa", "500 ms instead of 1 second")).toEqual({ crId: "CR-002", version: "0.2" })
+    expect(await writeCr(a, "Nhanh nữa", "500 ms instead of 1 second")).toEqual({ crId: "CR-002", version: "0.3" })
 
     const res = await releaseNow(c)
     expect(res.status, JSON.stringify(res.body.error)).toBe(201)
     const rel = releaseResponseSchema.parse(res.body.data)
     expect(rel.cr_ids).toEqual(["CR-001", "CR-002"])
-    expect(rel.version).toMatchObject({ version: "1.0", based_on: "0.2" })
+    expect(rel.version).toMatchObject({ version: "1.0", based_on: "0.3" })
   })
 
   it("còn cờ đỏ ⇒ gói không qua được: 422 RELEASE_RED_FLAGS_OPEN, không sinh version mới", async () => {
@@ -130,7 +130,7 @@ describe("UC-44 — gửi gói thay đổi cho Lead duyệt", () => {
   // BUG(UC-44): đặc tả — Analyst gửi gói cho Lead, chỉ Lead phát hành (UC-45, "A Lead's own work is released without
   // UC-44") vs code — POST /release không kiểm vai trò (doc-version.route.ts:87, release.service.ts:33), Analyst
   // phát hành thẳng 1.0 được (201); cũng không có endpoint gửi gói / khoá bản nháp khi gói chờ duyệt.
-  it.skip("Analyst không phát hành thẳng được — phải gửi gói cho Lead (403)", async () => {
+  it.skip("Analyst không phát hành thẳng được - phải gửi gói cho Lead (403)", async () => {
     const { seeded, projectId } = await importedProject()
     const analyst = await joinOrg(seeded.orgId, "analyst")
     const a = apiAs(seeded, analyst.token, projectId)
@@ -144,26 +144,27 @@ describe("UC-44 — gửi gói thay đổi cho Lead duyệt", () => {
 
 // ─── UC-48 ──────────────────────────────────────────────────────────
 
-describe("UC-48 — so sánh hai phiên bản SRS", () => {
-  it("Lead so sánh 0.0 → 0.1: khác biệt theo block, block sửa có before/after", async () => {
+describe("UC-48 - so sánh hai phiên bản SRS", () => {
+  it("Lead so sánh 0.1 → 0.2: khác biệt theo block, block sửa có before/after", async () => {
     const { c } = await importedProject()
     await writeCr(c, "Nhanh hơn", "1 second instead of 2 seconds")
 
-    const res = await c.get("/versions/compare?from=0.0&to=0.1")
+    const res = await c.get("/versions/compare?from=0.1&to=0.2")
     expect(res.status, JSON.stringify(res.body.error)).toBe(200)
     const diff = compareResponseSchema.parse(res.body.data)
-    expect(diff).toMatchObject({ from: "0.0", to: "0.1" })
-    expect(diff.summary.modified).toBeGreaterThan(0)
-    const changed = diff.blocks.find((b) => b.change === "modified" && b.before?.includes("2 seconds"))
-    expect(changed?.after).toContain("1 second")
+    expect(diff).toMatchObject({ from: "0.1", to: "0.2" })
+    // FLF-366: 0.1 in nguyên văn đoạn NFR của file; sau CR đoạn đó dựng lại từ Spine (khác dạng khối) ⇒ bỏ đoạn cũ + thêm đoạn mới
+    expect(diff.summary.removed).toBeGreaterThan(0)
+    expect(diff.blocks.some((b) => b.change === "removed" && b.before?.includes("2 seconds"))).toBe(true)
+    expect(diff.blocks.some((b) => b.change !== "removed" && b.after?.includes("1 second"))).toBe(true)
   })
 
   it("phiên bản không tồn tại ⇒ 404 DOC_VERSION_NOT_FOUND; from trùng to ⇒ 400", async () => {
     const { c } = await importedProject()
-    const missing = await c.get("/versions/compare?from=0.0&to=9.0")
+    const missing = await c.get("/versions/compare?from=0.1&to=9.0")
     expect(missing.status).toBe(404)
     expect(missing.body.error.code).toBe("DOC_VERSION_NOT_FOUND")
-    expect((await c.get("/versions/compare?from=0.0&to=0.0")).status).toBe(400)
+    expect((await c.get("/versions/compare?from=0.1&to=0.1")).status).toBe(400)
   })
 
   it("Viewer xem được so sánh, cùng các block khác biệt như Lead", async () => {
@@ -171,8 +172,8 @@ describe("UC-48 — so sánh hai phiên bản SRS", () => {
     await writeCr(c, "Nhanh hơn", "1 second instead of 2 seconds")
     const viewer = await joinOrg(seeded.orgId, "viewer")
 
-    const lead = compareResponseSchema.parse((await c.get("/versions/compare?from=0.0&to=0.1")).body.data)
-    const res = await apiAs(seeded, viewer.token, projectId).get("/versions/compare?from=0.0&to=0.1")
+    const lead = compareResponseSchema.parse((await c.get("/versions/compare?from=0.1&to=0.2")).body.data)
+    const res = await apiAs(seeded, viewer.token, projectId).get("/versions/compare?from=0.1&to=0.2")
     expect(res.status, JSON.stringify(res.body.error)).toBe(200)
     const seen = compareResponseSchema.parse(res.body.data)
     expect(seen.blocks.filter((b) => b.change === "modified")).toEqual(lead.blocks.filter((b) => b.change === "modified"))
@@ -183,7 +184,7 @@ describe("UC-48 — so sánh hai phiên bản SRS", () => {
     await writeCr(c, "Nhanh hơn", "1 second instead of 2 seconds")
     const viewer = await joinOrg(seeded.orgId, "viewer")
 
-    const res = await apiAs(seeded, viewer.token, projectId).get("/versions/compare?from=0.0&to=0.1")
+    const res = await apiAs(seeded, viewer.token, projectId).get("/versions/compare?from=0.1&to=0.2")
     expect(res.status).toBe(200)
     const text = JSON.stringify(res.body.data)
     expect(text).not.toContain("Fixture User")
@@ -240,7 +241,7 @@ const onFreePlan = async (seeded: SeededFixture) => {
   })
 }
 
-describe("UC-54 — nâng gói đăng ký", () => {
+describe("UC-54 - nâng gói đăng ký", () => {
   it("Lead thanh toán gói Pro thành công ⇒ cộng ngay credit kỳ của Pro, kỳ mới bắt đầu hôm nay", async () => {
     const seeded = await seedFixture("minimal", { balance: 50 })
     await onFreePlan(seeded)
@@ -327,7 +328,7 @@ interface LedgerRow {
   [key: string]: unknown
 }
 
-describe("UC-56 — xem lịch sử tiêu credit", () => {
+describe("UC-56 - xem lịch sử tiêu credit", () => {
   it("Lead xem từng lượt gọi AI: project, thành viên, bước, credit và trạng thái", async () => {
     const seeded = await seedFixture("minimal", { balance: 500 })
     const analyst = await joinOrg(seeded.orgId, "analyst")

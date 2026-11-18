@@ -120,11 +120,33 @@ const localizedField = z
   )
   .optional()
 
+/**
+ * FLF-292: một mục `sources` — phần tử Spine `path` được viết từ các đoạn tài liệu `paras` (`D1-P03`). Cạnh `ops`, KHÔNG
+ * trong op (`opSchema` đóng băng), như `localized`.
+ */
+export const sourceEntrySchema = z.object({ path: z.string().min(1), paras: z.array(z.string().min(1)).min(1) })
+
+export type SourceEntry = z.infer<typeof sourceEntrySchema>
+
+/** Như `localized`: tuỳ chọn, mục sai khuôn bị bỏ, không bao giờ làm hỏng lượt ghi Spine. Tra mã đoạn là việc của `captureSources`. */
+const sourcesField = z
+  .unknown()
+  .transform((value): SourceEntry[] | undefined =>
+    Array.isArray(value)
+      ? value.flatMap((entry) => {
+          const parsed = sourceEntrySchema.safeParse(entry)
+          return parsed.success ? [parsed.data] : []
+        })
+      : undefined
+  )
+  .optional()
+
 export const opTransactionSchema = z.object({
   txn: z.string().optional(),
   ops: z.array(opSchema),
   notes: z.string().optional(),
-  localized: localizedField
+  localized: localizedField,
+  sources: sourcesField
 })
 
 /**
@@ -154,7 +176,11 @@ const elicitBaseSchema = z.object({
  * đúng ý — server kiểm lại từng dòng (`topic_key` phải là câu đang chờ, câu có lựa chọn phải khớp nhãn), không tin mù.
  */
 export const elicitSchema = elicitBaseSchema.extend({
-  settled: z.array(z.object({ topic_key: z.string().min(1), answer: z.string() })).optional(),
+  /**
+   * FLF-393 (business-flow §3.6): câu chờ mà tài liệu tham khảo đã trả lời ⇒ chốt kèm `source_paras` (mã đoạn `D1-P391`).
+   * Server tra mã ra chữ thật và đòi câu trả lời là trích đoạn nguyên văn của đoạn đó, rồi ghi nguồn cho quyết định.
+   */
+  settled: z.array(z.object({ topic_key: z.string().min(1), answer: z.string(), source_paras: z.array(z.string()).max(5).optional() })).optional(),
   /** `topic_key` của câu đang chờ mà tin này KHÔNG trả lời — server không tự chốt câu đó bằng luật trả-lời-lặp. */
   still_open: z.array(z.string()).optional()
 })
@@ -180,6 +206,10 @@ export const reviewSchema = z.object({
 export const changeInstructionSchema = z
   .object({
     clarification_needed: z.string().optional(),
+    /** FLF-311: lựa chọn ngắn cho câu hỏi làm rõ (vd màn riêng / popup) — FE hiện thẻ chọn nhanh. */
+    choices: z.array(z.string().trim().min(1).max(80)).max(6).optional(),
+    /** FLF-311: tên use case model TỰ đề xuất thêm (ngoài yêu cầu) để khớp dự án — người dùng giữ hay bỏ. */
+    proposed_use_cases: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
     txn: z.string().optional(),
     ops: z.array(opSchema).optional(),
     notes: z.string().optional(),
@@ -213,7 +243,13 @@ export const IMPORT_EXTRACT_ENTITIES = [
   "common_requirements",
   "messages",
   "other_requirements",
-  "glossary"
+  "glossary",
+  // FLF-365: mẫu IEEE 29148
+  "references",
+  "verifications",
+  // FLF-390: nút triển khai đọc từ sơ đồ triển khai (skill `import-extract-diagram` đã mô tả; thiếu ở đây ⇒ mọi lần đọc
+  // ảnh deployment trượt schema, QLHS 11/11 bug #11)
+  "deployment_nodes"
 ] as const
 
 const blockIdRef = z.string().regex(/^B\d{4,}$/)
@@ -241,8 +277,8 @@ export const importExtractSchema = z.object({
   unmapped_block_ids: z.array(blockIdRef).default([])
 })
 
-/** Loại diagram mà I-4 đọc được từ ảnh (mode 1 v3 phase 5); `other` ⇒ không đọc, giữ ảnh gốc. */
-export const DIAGRAM_IMAGE_KINDS = ["usecase", "erd", "screen_flow", "context", "other"] as const
+/** Loại diagram mà I-4 đọc được từ ảnh (mode 1 v3 phase 5; FLF-390 thêm sequence, activity); `other` ⇒ không đọc, giữ ảnh gốc. */
+export const DIAGRAM_IMAGE_KINDS = ["usecase", "erd", "screen_flow", "context", "sequence", "activity", "deployment", "other"] as const
 export type DiagramImageKind = (typeof DIAGRAM_IMAGE_KINDS)[number]
 
 /** I-4 phần ảnh: cùng hình item với `importExtract` + loại diagram. `other` thì `items` rỗng. */
@@ -250,10 +286,49 @@ export const importExtractDiagramSchema = importExtractSchema.extend({
   diagram_kind: z.enum(DIAGRAM_IMAGE_KINDS)
 })
 
+/** FLF-395 (SKELETON_GENERIC_NAMES, D13): dạng chung gợi ý cho từng mục BA tự đặt; `generic: null` = không dùng lại được. */
+export const skeletonGenericNamesSchema = z.object({
+  suggestions: z.array(z.object({ key: z.string().min(1), generic: z.string().trim().min(1).max(300).nullable(), reason: z.string().nullable().default(null) })).max(200)
+})
+export type SkeletonGenericNamesOutput = z.infer<typeof skeletonGenericNamesSchema>
+
+/**
+ * D8 (TEMPLATE_MIGRATION_RESOLVE): `ops` thêm phần tử có cấu trúc từ chữ của một mục riêng (chỉ `add` vào mảng đích), `choice` chọn cách ghép cho
+ * conflict (một trong các lựa chọn cụ thể được đưa vào prompt). Một trong hai theo loại mục; mục không chuyển / chọn được ⇒ cả hai rỗng.
+ */
+export const templateMigrationResolveSchema = z.object({
+  ops: z.array(z.object({ op: z.literal("add"), path: z.string().min(1), value: z.unknown() })).max(100).default([]),
+  choice: z.string().trim().min(1).nullable().default(null),
+  notes: z.string().nullable().default(null)
+})
+export type TemplateMigrationResolveOutput = z.infer<typeof templateMigrationResolveSchema>
+
 /** Mode 1 v3 phase 7 (CR_MATERIAL_IMAGE): chữ đọc được trong ảnh + mô tả ngắn cấu trúc. */
 export const crMaterialImageSchema = z.object({ text: z.string().trim().min(1) })
 
 /** Nút 1.11 (IMPORT_SEMANTIC_CHECK, IMPORT_CROSS_CHECK) và 3.8 (CR_CONSISTENCY): chỉ cờ vàng — không có trường level. */
+/**
+ * FLF-338 (EXTRACT_REQUIREMENTS, §3.6.1): danh sách yêu cầu rút từ tài liệu thô. Code hậu kiểm mã đoạn / trích dẫn / đường dẫn
+ * phần tử (`extraction.service.normalizeItems`) — schema chỉ giữ hình.
+ */
+export const extractRequirementsSchema = z.object({
+  requirements: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        text: z.string().min(1),
+        source: z.object({ para_id: z.string().min(1), quote: z.string().default("") }),
+        label: z.enum(["new", "modification", "duplicate", "contradiction", "ambiguous"]),
+        entity_paths: z.array(z.string().min(1)).default([]),
+        group: z.string().nullable().default(null),
+        question: z.string().nullable().default(null),
+        suggested_answers: z.array(z.string().min(1)).default([])
+      })
+    )
+    .max(40)
+    .default([])
+})
+
 export const findingsSchema = z.object({
   findings: z
     .array(
@@ -276,6 +351,14 @@ export const crClarifySchema = z
     missing_info: z.array(z.string().min(1)).max(10).default([]),
     /** Đáp án gợi ý cho từng câu hỏi (song song `questions`, 0–4 mỗi câu) — người dùng bấm chọn thay vì tự gõ. */
     suggestions: z.array(z.array(z.string().min(1)).max(4)).max(5).default([]),
+    /**
+     * FLF-367: CR mâu thuẫn với nội dung đang có (Spine mọi section, đoạn văn giữ nguyên) ⇒ câu hỏi trích cả hai phía +
+     * lựa chọn (đổi theo CR và sửa chỗ cũ / giữ như cũ). Không tính vào `ambiguous`, không bị giới hạn số vòng.
+     */
+    contradictions: z
+      .array(z.object({ question: z.string().trim().min(1), suggestions: z.array(z.string().min(1)).max(4).default([]) }))
+      .max(5)
+      .default([]),
     targets: z.object({
       entity_paths: z.array(z.string().min(1)).default([]),
       keywords: z.array(z.string().min(1)).default([])
@@ -330,6 +413,7 @@ export const knowledgeAnswerSchema = z.object({
 export type ImportExtractOutput = z.infer<typeof importExtractSchema>
 export type ImportExtractDiagramOutput = z.infer<typeof importExtractDiagramSchema>
 export type FindingsOutput = z.infer<typeof findingsSchema>
+export type ExtractRequirementsOutput = z.infer<typeof extractRequirementsSchema>
 export type CrClarifyOutput = z.infer<typeof crClarifySchema>
 export type CrProposeOutput = z.infer<typeof crProposeSchema>
 export type CrMaterialImageOutput = z.infer<typeof crMaterialImageSchema>
@@ -365,7 +449,10 @@ export const OUTPUT_SCHEMA_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, s
   [ActionType.CR_PROPOSE]: "crPropose",
   [ActionType.CR_CONSISTENCY]: "findings",
   [ActionType.CR_MATERIAL_IMAGE]: "crMaterialImage",
-  [ActionType.KNOWLEDGE_ANSWER]: "knowledgeAnswer"
+  [ActionType.KNOWLEDGE_ANSWER]: "knowledgeAnswer",
+  [ActionType.EXTRACT_REQUIREMENTS]: "extractRequirements",
+  [ActionType.SKELETON_GENERIC_NAMES]: "skeletonGenericNames",
+  [ActionType.TEMPLATE_MIGRATION_RESOLVE]: "templateMigrationResolve"
 }
 
 const SCHEMAS: Record<string, z.ZodSchema> = {
@@ -392,7 +479,10 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.CR_PROPOSE]: crProposeSchema,
   [ActionType.CR_CONSISTENCY]: findingsSchema,
   [ActionType.CR_MATERIAL_IMAGE]: crMaterialImageSchema,
-  [ActionType.KNOWLEDGE_ANSWER]: knowledgeAnswerSchema
+  [ActionType.KNOWLEDGE_ANSWER]: knowledgeAnswerSchema,
+  [ActionType.EXTRACT_REQUIREMENTS]: extractRequirementsSchema,
+  [ActionType.SKELETON_GENERIC_NAMES]: skeletonGenericNamesSchema,
+  [ActionType.TEMPLATE_MIGRATION_RESOLVE]: templateMigrationResolveSchema
 }
 
 export const extractJsonFromText = (

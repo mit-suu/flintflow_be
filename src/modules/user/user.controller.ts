@@ -9,18 +9,26 @@ import { newPasswordField } from "../../shared/utils/password-field.js"
 import { USER_LOCALES } from "../../shared/i18n/locale.js"
 
 /**
- * `PATCH /users/me` — hai field onboarding (UC 1.12) và ngôn ngữ giao diện (FLF-259); không cho đổi
+ * `PATCH /users/me` — onboarding (UC 1.12), ngôn ngữ giao diện (FLF-259) và tổ chức mặc định (FLF-427); không cho đổi
  * email/role/isActive.
  */
 export const updateMeSchema = z
   .strictObject({
     name: z.string().trim().min(1).max(100).optional(),
     onboardedAt: z.iso.datetime().nullable().optional(),
-    locale: z.enum(USER_LOCALES).optional()
+    locale: z.enum(USER_LOCALES).optional(),
+    preferredOrganizationId: z.string().nullable().optional()
   })
-  .refine((v) => v.name !== undefined || v.onboardedAt !== undefined || v.locale !== undefined, {
-    message: "Chưa có thông tin nào để cập nhật."
-  })
+  .refine(
+    (v) =>
+      v.name !== undefined ||
+      v.onboardedAt !== undefined ||
+      v.locale !== undefined ||
+      v.preferredOrganizationId !== undefined,
+    {
+      message: "Chưa có thông tin nào để cập nhật."
+    }
+  )
 
 export const changePasswordSchema = z.strictObject({
   currentPassword: z.string().min(1, "Vui lòng nhập mật khẩu hiện tại"),
@@ -33,7 +41,7 @@ export const getMe = catchAsync(async (req: Request, res: Response) => {
     throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
 
-  const user = await userService.getMe(userId)
+  const user = await userService.getMe(userId, req.user?.orgId)
   return sendSuccess(res, 200, user)
 })
 
@@ -49,7 +57,13 @@ export const changePassword = catchAsync(async (req: Request, res: Response) => 
   }
 
   const { currentPassword, newPassword } = parsed.data
-  await userService.changePassword(userId, currentPassword, newPassword, req.cookies?.refreshToken)
+  await userService.changePassword(
+    userId,
+    currentPassword,
+    newPassword,
+    req.cookies?.refreshToken,
+    req.user?.sid
+  )
   return sendSuccess(res, 200, {
     message: "Đổi mật khẩu thành công. Các thiết bị khác đã được đăng xuất."
   })
@@ -64,12 +78,17 @@ export const updateMe = catchAsync(async (req: Request, res: Response) => {
   const parsed = updateMeSchema.safeParse(req.body)
   if (!parsed.success) throw validationError(parsed.error)
 
-  const { name, onboardedAt, locale } = parsed.data
-  const user = await userService.updateMe(userId, {
-    ...(name === undefined ? {} : { name }),
-    ...(onboardedAt === undefined ? {} : { onboardedAt: onboardedAt === null ? null : new Date(onboardedAt) }),
-    ...(locale === undefined ? {} : { locale })
-  })
+  const { name, onboardedAt, locale, preferredOrganizationId } = parsed.data
+  const user = await userService.updateMe(
+    userId,
+    {
+      ...(name === undefined ? {} : { name }),
+      ...(onboardedAt === undefined ? {} : { onboardedAt: onboardedAt === null ? null : new Date(onboardedAt) }),
+      ...(locale === undefined ? {} : { locale }),
+      ...(preferredOrganizationId === undefined ? {} : { preferredOrganizationId })
+    },
+    req.user?.orgId
+  )
   return sendSuccess(res, 200, user)
 })
 

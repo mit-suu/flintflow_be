@@ -10,6 +10,7 @@
  */
 
 import { ActionType } from "../../shared/ai/ai-action.types.js"
+import { getActionCost } from "../../shared/ai/credit-reservation.service.js"
 import type { FindingsOutput } from "../../shared/ai/response-parser.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import type { Op } from "../spine/op.types.js"
@@ -20,16 +21,18 @@ import * as spineRepository from "../spine/spine.repository.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import type { Flag, Spine, SpineRecord } from "../spine/spine.types.js"
 import { Usage } from "../spine/usage.model.js"
-import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
+import { IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { DocBlock } from "./doc-block.model.js"
-import { chunkBlocks } from "./extract.service.js"
+import { chunkBlocks, isTemplateOnlyProject } from "./extract.service.js"
 import { idKey } from "./extracted-entities.js"
 import { FieldAnchor } from "./field-anchor.model.js"
 import type { MentionEntity } from "./import.constants.js"
 import { transitionImport } from "./import.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
 import { withMeteredAi, type MeteredResult } from "./metered-ai.js"
-import { IMPORT_SEMANTIC_RULE, MODE1_RULE_PROFILE } from "./mode1-rule-profile.js"
+import { IMPORT_SEMANTIC_RULE } from "./mode1-rule-profile.js"
+import { contentSlot, isContentSlot, slotParents } from "./content-slots.js"
+import { mode1RuleProfileFor } from "./mode1-guard.js"
 
 /** Tiền tố step của 1.11. Usage đúng `I-1.11` (không hậu tố) là lượt đơn của bản cũ — đã xong thì coi như xong cả 1.11. */
 export const SEMANTIC_CHECK_STEP = "I-1.11"
@@ -181,14 +184,32 @@ const flagIdGenerator = (flags: Flag[]): (() => string) => {
   return () => `FL${String(++n).padStart(3, "0")}`
 }
 
-/** Đổi finding của model thành op thêm cờ vàng; section không phân giải được ⇒ `fixed:I`. */
-export const findingOps = (spine: Spine, findings: FindingsOutput["findings"], rule: string): Op[] => {
+/**
+ * Phần nhỏ không có mục FPT cha (tổng quan chức năng, yêu cầu chức năng, nền tảng…) ⇒ mục FPT giữ đúng loại dữ liệu của
+ * nó (chức năng ⇒ chức năng đầu tiên / 3.1.4, dự án ⇒ 1), không dồn về Record of Changes (`fixed:I`).
+ */
+const slotHome = (slotId: string, sections: ReadonlySet<string>): string | undefined => {
+  const targets = contentSlot(slotId)?.targets ?? []
+  if (targets.includes("functions")) return [...sections].find((id) => id.startsWith("function:")) ?? (sections.has("fixed:3.1.4") ? "fixed:3.1.4" : undefined)
+  if (targets.includes("project")) return sections.has("fixed:1") ? "fixed:1" : undefined
+  return undefined
+}
+
+/** Một phát hiện thành cờ vàng; `target_id` (FLF-343) = đường dẫn phần tử / block được nói tới — thiếu ⇒ block đầu. */
+export type Finding = FindingsOutput["findings"][number] & { target_id?: string | null }
+
+/**
+ * Đổi finding của model thành op thêm cờ vàng; section không phân giải được ⇒ `fixed:I`. Phần nhỏ `slot:*` của mẫu bắt buộc
+ * (FLF-278) không phải mục Spine (bất biến 3 chặn `flags[].section_id` trỏ tới nó) ⇒ trỏ về mục FPT cha của phần nhỏ.
+ */
+export const findingOps = (spine: Spine, findings: readonly Finding[], rule: string): Op[] => {
   const sections = new Set(listSections(spine).map((s) => s.id))
   const nextId = flagIdGenerator(spine.flags)
   const open = new Set(spine.flags.filter((f) => f.resolved_at === null && f.rule_id === rule).map((f) => `${f.section_id}|${f.message}`))
   const ops: Op[] = []
   for (const f of findings) {
-    const section = sections.has(f.section_id) ? f.section_id : "fixed:I"
+    const parent = isContentSlot(f.section_id) ? (slotParents(f.section_id).find((p) => sections.has(p)) ?? slotHome(f.section_id, sections)) : undefined
+    const section = sections.has(f.section_id) ? f.section_id : (parent ?? "fixed:I")
     // Không in mã luật thô (`[ambiguity]`) cho người đọc — luật AI biết tên thì thành nhãn tiếng Việt đứng đầu
     const label = aiFindingLabel(f.rule)
     const text = humanizeText(f.message)
@@ -200,14 +221,17 @@ export const findingOps = (spine: Spine, findings: FindingsOutput["findings"], r
       level: "yellow",
       rule_id: rule,
       section_id: section,
-      target_id: f.block_ids[0] ?? null,
+      target_id: f.target_id ?? f.block_ids[0] ?? null,
       message,
       remediation_step: "C-1",
       opened_at_version: spine.spine_version + 1,
       resolved_at: null,
       waived_by_user: false,
       waive_reason: null,
-      waived_at_version: null
+      waived_at_version: null,
+      kept_reason: null,
+      kept_by: null,
+      kept_at: null
     }
     // Lý do của máy — `section-renderer` INTERNAL_REASON lọc khỏi Record of Changes
     ops.push({ op: "add", path: "flags[]", value: flag, reason: `AI check: ${f.rule}` })
@@ -218,9 +242,9 @@ export const findingOps = (spine: Spine, findings: FindingsOutput["findings"], r
 /**
  * Nhiều nhóm phát hiện (mỗi nhóm một luật) ghi cờ trong CÙNG một lô (FLF-252): id cờ cấp nối tiếp qua các nhóm. Gọi
  * `findingOps` riêng từng nhóm trên cùng Spine thì mỗi lần đếm lại từ cờ có sẵn ⇒ hai cờ trùng id, cả lô bị từ chối
- * ("Mục này đã tồn tại trong tài liệu" lúc tạo bản 0.0 khi vừa có ảnh không đọc được vừa có quyền không khớp màn).
+ * ("Mục này đã tồn tại trong tài liệu" lúc tạo bản 0.1 khi vừa có ảnh không đọc được vừa có quyền không khớp màn).
  */
-export const findingOpsInOrder = (spine: Spine, groups: readonly { findings: FindingsOutput["findings"]; rule: string }[]): Op[] => {
+export const findingOpsInOrder = (spine: Spine, groups: readonly { findings: readonly Finding[]; rule: string }[]): Op[] => {
   const ops: Op[] = []
   let flags = spine.flags
   for (const g of groups) {
@@ -265,30 +289,31 @@ type CheckFailure = Extract<MeteredResult<FindingsOutput>, { ok: false }>
  * 1.11 map + reduce. Trả lượt lỗi (để đặt `paused`) hoặc `null` khi đã xong hết. Lượt đã trừ credit ở lần chạy trước
  * (`done`) không gọi lại; lô xong trước lô lỗi vẫn được ghi cờ.
  */
-const runSemanticCheck = async (projectId: string, userId: string, done: ReadonlySet<string>): Promise<CheckFailure | null> => {
+const runSemanticCheck = async (projectId: string, userId: string, done: ReadonlySet<string>, guard: CheckGuard): Promise<CheckFailure | null> => {
   const spine = await loadSpine(projectId)
   const [blocks, anchors, sectioned] = await Promise.all([
-    DocBlock.find({ projectId, doc_version: IMPORTED_DOC_VERSION, kind: { $in: ["paragraph", "list_item", "table_cell"] } })
+    DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS }, kind: { $in: ["paragraph", "list_item", "table_cell"] } })
       .sort({ "anchor.ordinal": 1 })
       .select("block_id text section_id mentions")
       .lean<CheckBlock[]>(),
     FieldAnchor.find({ projectId }).select("entity_path block_ids").lean(),
-    DocBlock.find({ projectId, doc_version: IMPORTED_DOC_VERSION }).select("block_id section_id").lean()
+    DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }).select("block_id section_id").lean()
   ])
   const scope = elementSections(anchors, new Map(sectioned.map((b) => [b.block_id, b.section_id ?? null])))
   const glossary = glossaryText(spine)
 
   // map: các lô chưa xong, tối đa PARALLEL_BATCHES lượt cùng lúc
   const pending = semanticBatches(blocks).filter((b) => !done.has(b.step_id))
-  const results = await runLimited(pending, PARALLEL_BATCHES, (batch) =>
-    withMeteredAi<FindingsOutput>({ projectId, userId, stepId: batch.step_id }, ActionType.IMPORT_SEMANTIC_CHECK, {
+  const results = await runLimited(pending, PARALLEL_BATCHES, async (batch) => {
+    await guard()
+    return withMeteredAi<FindingsOutput>({ projectId, userId, stepId: batch.step_id }, ActionType.IMPORT_SEMANTIC_CHECK, {
       section_ids: batch.section_ids.join(", "),
       // Không có anchor (dữ liệu trước FLF-171) ⇒ không biết phần tử thuộc lô nào: gửi đủ như trước, vẫn có trần ký tự
       projection: semanticProjection(spine, anchors.length ? scope.scopeOf(batch) : undefined),
       blocks: batch.lines,
       glossary
     })
-  )
+  })
   // reduce: ghi theo thứ tự lô ⇒ id cờ ổn định; hết credit được ưu tiên báo (nạp xong tự chạy tiếp — credit-flow)
   let failure: CheckFailure | null = null
   for (const r of results) {
@@ -304,6 +329,7 @@ const runSemanticCheck = async (projectId: string, userId: string, done: Readonl
   // kiểm chéo giữa các section: chỉ khi mọi lô đã xong, đọc cờ lô vừa ghi để không lặp lại
   const hasContent = spine.use_cases.length + spine.functions.length + spine.nfrs.length + spine.business_rules.length > 0
   if (done.has(CROSS_CHECK_STEP) || !hasContent) return null
+  await guard()
   const now = await loadSpine(projectId)
   const cross = await withMeteredAi<FindingsOutput>({ projectId, userId, stepId: CROSS_CHECK_STEP }, ActionType.IMPORT_CROSS_CHECK, {
     projection: crossProjection(now, scope.sectionOf),
@@ -315,10 +341,14 @@ const runSemanticCheck = async (projectId: string, userId: string, done: Readonl
   return null
 }
 
+/** Gọi trước mỗi lượt AI và trước khi chuyển trạng thái: lần chạy nền đã hết giờ / bị thay ⇒ ném lỗi để dừng (FLF-391). */
+type CheckGuard = () => Promise<void>
+const noGuard: CheckGuard = async () => undefined
+
 /**
  * Chạy 1.11 (phần chưa xong) rồi 1.12, chuyển `gap_review`. Trả `false` khi phải dừng (paused).
  */
-export const runImportCheck = async (doc: IImportedDocument, userId: string): Promise<boolean> => {
+export const runImportCheck = async (doc: IImportedDocument, userId: string, guard: CheckGuard = noGuard): Promise<boolean> => {
   const projectId = String(doc.projectId)
   doc.paused = null
   await doc.save()
@@ -326,8 +356,9 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string): Pr
   const done = new Set<string>(
     await Usage.find({ projectId, step_id: { $regex: /^I-1\.11(:|$)/ }, state: "deducted" }).distinct("step_id")
   )
-  if (!done.has(SEMANTIC_CHECK_STEP)) {
-    const failure = await runSemanticCheck(projectId, userId, done)
+  // FLF-411 (U1-8): khung mẫu (chữ là hướng dẫn / ví dụ, Spine không nhận nội dung) ⇒ không có gì để AI đối chiếu, không trừ credit
+  if (!done.has(SEMANTIC_CHECK_STEP) && !(await isTemplateOnlyProject(projectId))) {
+    const failure = await runSemanticCheck(projectId, userId, done, guard)
     if (failure) {
       doc.paused = { reason: failure.reason, at: new Date() }
       await doc.save()
@@ -336,9 +367,27 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string): Pr
   }
 
   // BPMN 1.12: S-9.1 + S-9.2 bằng luật code trên baseline v0 ⇒ bật luật S-9 (`atBaseline`: giả định chưa xác nhận)
-  await flagsService.recompute(projectId, { by: "import", ruleProfile: MODE1_RULE_PROFILE, atBaseline: true })
+  await guard()
+  await flagsService.recompute(projectId, { by: "import", ruleProfile: await mode1RuleProfileFor(projectId), atBaseline: true })
   await transitionImport(doc, "gap_review")
   return true
+}
+
+/**
+ * FLF-343: ước tính lượt AI của bước kiểm tra (1.11) cho màn báo credit một lần sau upload — cùng cách chia lô của lượt chạy
+ * (`semanticBatches` trên block chữ, section hiện tại) + một lượt kiểm chéo. Là cận trên: sau finalize section tạm
+ * (`function:@B0012`) đổi sang id thật ngắn hơn nên số lô không tăng; tài liệu không có phần tử nào thì lượt kiểm chéo không chạy.
+ */
+export const estimateCheckCalls = async (projectId: string): Promise<{ batches: number; calls: number; credits: number }> => {
+  // FLF-411 (U1-8): khung mẫu không chạy 1.11 (`runImportCheck`) ⇒ màn đọc khung không báo "Dự kiến ~6 credit"
+  if (await isTemplateOnlyProject(projectId)) return { batches: 0, calls: 0, credits: 0 }
+  const blocks = await DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS }, kind: { $in: ["paragraph", "list_item", "table_cell"] } })
+    .sort({ "anchor.ordinal": 1 })
+    .select("block_id text section_id")
+    .lean<CheckBlock[]>()
+  const batches = semanticBatches(blocks).length
+  const [batchCost, crossCost] = await Promise.all([getActionCost(ActionType.IMPORT_SEMANTIC_CHECK), getActionCost(ActionType.IMPORT_CROSS_CHECK)])
+  return { batches, calls: batches + 1, credits: batches * batchCost + crossCost }
 }
 
 export const countOpenFlags = (flags: Flag[]): { red: number; yellow: number } => {

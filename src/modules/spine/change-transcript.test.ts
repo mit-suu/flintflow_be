@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest"
 
 vi.mock("../project/chat-session.model.js", () => ({ ChatSession: { findById: vi.fn() } }))
 
-import { formatChatContext, formatChatHistory, previewPayload, recordChangeTurn } from "./change-transcript.js"
+import { clarificationRounds, formatChatContext, pendingChangeRequest, formatChatHistory, previewPayload, recordChangeTurn } from "./change-transcript.js"
 import type { IChatMessage, IChatSession } from "../project/chat-session.model.js"
 import type { ChangePreviewResult } from "./change.service.js"
 
@@ -25,6 +25,22 @@ describe("formatChatHistory", () => {
   })
 })
 
+describe("clarificationRounds - FLF-299", () => {
+  const ask = (q: string) => msg("ai", JSON.stringify({ kind: "change_clarification", reply: q }))
+
+  it("đếm câu hỏi làm rõ liên tiếp ở cuối phiên, bỏ qua tin user", () => {
+    expect(clarificationRounds([msg("user", "thêm popup xác nhận"), ask("Thao tác nào?"), msg("user", "chỉ thao tác xóa"), ask("Màn nào?")])).toBe(2)
+    expect(clarificationRounds([msg("user", "thêm popup"), ask("Thao tác nào?"), msg("user", "chỉ xóa")])).toBe(1)
+  })
+
+  it("dừng ở tin AI khác (yêu cầu trước đã khép); phiên rỗng ⇒ 0", () => {
+    const applied = msg("ai", JSON.stringify({ kind: "change_applied", reply: "Đã áp dụng" }))
+    expect(clarificationRounds([ask("Cũ?"), applied, msg("user", "đổi tên admin")])).toBe(0)
+    expect(clarificationRounds([msg("ai", "Xin chào"), msg("user", "x")])).toBe(0)
+    expect(clarificationRounds([])).toBe(0)
+  })
+})
+
 describe("previewPayload", () => {
   const base: ChangePreviewResult = { ok: true, txn: "t", base_version: 1, ops: [], changes: [], violations: [], referrers: [] }
 
@@ -40,6 +56,32 @@ describe("previewPayload", () => {
     })
     expect(payload).toMatchObject({ kind: "change_preview", preview_id: "pv", change_count: 1 })
     expect(payload.reply).toContain("1 thay đổi")
+  })
+
+  it("FLF-318: dự án sau baseline (requiresCr) ⇒ câu nói bấm “Tạo change request”, không phải Áp dụng", () => {
+    const preview = { ...base, changes: [{ op: "set" as const, path: "actors[id=A01].name", before: "A", value: "B", reason: null }], preview_id: "pv" }
+    expect(previewPayload(preview, "vi", { requiresCr: true }).reply).toContain("Tạo change request")
+    expect(previewPayload(preview, "vi", { requiresCr: true }).reply).not.toContain("Áp dụng")
+    expect(previewPayload(preview, "vi").reply).toContain("Áp dụng")
+  })
+
+  it("FLF-311: câu hỏi kèm lựa chọn ⇒ payload có questions[].options để FE hiện thẻ chọn nhanh", () => {
+    const payload = previewPayload({ ...base, ok: false, clarification: "Màn hình riêng hay popup?", clarification_choices: ["Màn hình riêng", "Popup mở từ My Grades"] })
+    expect(payload).toEqual({
+      kind: "change_clarification",
+      reply: "Màn hình riêng hay popup?",
+      questions: [{ question: "Chọn giao diện", options: [{ label: "Màn hình riêng" }, { label: "Popup mở từ My Grades" }] }]
+    })
+  })
+
+  it("FLF-298: notes (vd use case mới chưa có màn hình) nối vào câu trả lời", () => {
+    const payload = previewPayload({
+      ...base,
+      changes: [{ op: "add", path: "use_cases[]", before: null, value: {}, reason: null }],
+      preview_id: "pv",
+      notes: 'Use case mới "Send Absence Warning" chưa gắn chức năng nào'
+    })
+    expect(String(payload.reply).split("\n")).toEqual([expect.stringContaining("1 thay đổi"), 'Use case mới "Send Absence Warning" chưa gắn chức năng nào'])
   })
 
   it("FLF-244: không lưu mảng changes/impact/violations vào transcript", () => {
@@ -59,10 +101,10 @@ describe("previewPayload", () => {
     const one: ChangePreviewResult = { ...base, changes: [change], preview_id: "pv", branch: "dependent" }
     const two: ChangePreviewResult = { ...one, changes: [change, change] }
 
-    expect(previewPayload(one, "en").reply).toBe('Built a preview of 1 change — review it, then press "Áp dụng" (Apply) to save.')
-    expect(previewPayload(two, "en").reply).toBe('Built a preview of 2 changes — review it, then press "Áp dụng" (Apply) to save.')
+    expect(previewPayload(one, "en").reply).toBe('Built a preview of 1 change - review it, then press "Áp dụng" (Apply) to save.')
+    expect(previewPayload(two, "en").reply).toBe('Built a preview of 2 changes - review it, then press "Áp dụng" (Apply) to save.')
     expect(previewPayload(base, "en").reply).toBe("Nothing in the document needs to change for this request.")
-    expect(previewPayload(two).reply).toBe("Đã dựng bản xem trước 2 thay đổi — xem rồi bấm Áp dụng để ghi.")
+    expect(previewPayload(two).reply).toBe("Đã dựng bản xem trước 2 thay đổi - xem rồi bấm Áp dụng để ghi.")
     expect(previewPayload(two, "vi").reply).toBe(previewPayload(two).reply)
     expect(previewPayload(base).reply).toBe("Không tìm thấy chỗ nào cần đổi theo lệnh này.")
     // Chỉ câu đổi theo ngôn ngữ — các field FE đọc (kind, preview_id, branch, change_count) giữ nguyên
@@ -109,5 +151,24 @@ describe("recordChangeTurn", () => {
     expect(session.messages[1]).toMatchObject({ role: "user", content: "đổi tên A01", step: "S-3.1" })
     expect(JSON.parse(session.messages[2].content)).toMatchObject({ kind: "change_applied" })
     expect(save).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("previewPayload - không có thay đổi mà có ghi chú", () => {
+  it("rút lại yêu cầu ⇒ câu trả lời là ghi chú, không ghép câu 'Không tìm thấy chỗ nào cần đổi'", () => {
+    const payload = previewPayload({ ok: true, txn: "t", base_version: 1, ops: [], changes: [], violations: [], referrers: [], notes: "Đã bỏ yêu cầu này - tài liệu không đổi gì." })
+    expect(payload).toMatchObject({ kind: "change_preview", reply: "Đã bỏ yêu cầu này - tài liệu không đổi gì.", change_count: 0 })
+  })
+})
+
+describe("pendingChangeRequest - P08 T7", () => {
+  const ask = (reply: string) => msg("ai", JSON.stringify({ kind: "change_clarification", reply }))
+  it("lấy câu lệnh đứng trước chuỗi câu hỏi và câu hỏi gần nhất", () => {
+    const out = pendingChangeRequest([msg("user", "mục tiêu thứ hai ghi rõ 3 tháng đầu"), ask("Thêm mốc 3 tháng vào mục tiêu 2?"), msg("user", "ừ"), ask("Giữ nguyên câu cũ phía trước?")])
+    expect(out).toEqual({ request: "mục tiêu thứ hai ghi rõ 3 tháng đầu", question: "Giữ nguyên câu cũ phía trước?" })
+  })
+  it("không có câu hỏi đang chờ ⇒ null", () => {
+    expect(pendingChangeRequest([msg("user", "đổi tên A01")])).toBeNull()
+    expect(pendingChangeRequest([])).toBeNull()
   })
 })

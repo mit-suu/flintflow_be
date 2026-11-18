@@ -1,12 +1,23 @@
+import { spineSchema } from "../spine/spine.schema.js"
+import { DocVersion } from "./doc-version.model.js"
+import { FIXED_TEMPLATE_RENDERER_REVISION, templateLayoutUnavailable } from "./template-source-binding.js"
 /**
  * Đọc version tài liệu mode 1 qua API (UC-54 xem theo block, UC-55 so sánh, UC-57 tải về). FLF-171, plan §6 2F.
  * Mode 1 v2 (FLF-186): version là bản render từ Spine — block (#13) và so sánh (#15) đọc từ file của version, khớp theo
  * text (file render không mang bookmark neo); không còn Track Changes theo block.
  * Tải bản draft ⇒ file có Track Changes + watermark DRAFT (G8, chỉ bản tải về, không sửa file lưu),
- * tên `…_v0.2_DRAFT.docx`; bản release ⇒ bản sạch (accept-all) trừ khi xin `variant=tracked`.
+ * tên theo `versionFileName` (FLF-334, `…_v1.0+CR-002_DRAFT.docx`) + stamp có release gốc / CR mới nhất; bản release ⇒ bản sạch (accept-all) trừ khi xin `variant=tracked`.
  */
 
-import { DocxPackage, addDraftWatermark, type OoxmlBlock } from "../docx-ooxml/index.js"
+import { DocxPackage, addDraftWatermark, readStamp, writeStamp, type OoxmlBlock } from "../docx-ooxml/index.js"
+import { ApiError } from "../../shared/utils/api-error.js"
+import type { UserLocale } from "../../shared/i18n/locale.js"
+import { CONVERT_STAMP_SOURCE } from "../import/convert-from-fpt.service.js"
+import type { DocumentLanguageProject } from "../project/document-language.js"
+import type { TemplateIntent } from "../project/project.model.js"
+import { loadBaselineSpine } from "../render/assemble.service.js"
+import { assertTranslationComplete, documentLanguageUnavailable, projectLanguages } from "../translation/translation.service.js"
+import { renderVersionFile } from "./render-version.js"
 import type { DocBlockDto } from "../import/import.dto.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { toIso } from "../import/mode1.http.js"
@@ -15,9 +26,14 @@ import { docFileStore } from "./doc-file.store.js"
 import type { CompareResponse, DocVersionDto } from "./doc-version.dto.js"
 import type { IDocVersion } from "./doc-version.model.js"
 import { fileBlocksOfVersion, listDocVersions, requireDocVersion } from "./doc-version.service.js"
-import { downloadFileName, isReleaseVersion } from "./versioning.js"
+import { versionFileName, versionLineage, type VersionLineage } from "./versioning.js"
 
-export const toVersionDto = (v: IDocVersion): DocVersionDto => ({
+/** FLF-334 B: version tải được theo ngôn ngữ còn lại — có snapshot baseline và dự án chuyển từ mode 2. */
+const otherLanguageAvailable = (v: Pick<IDocVersion, "baseline_ref">, project: DocumentLanguageProject): boolean =>
+  !!v.baseline_ref && project.converted_from === "fpt"
+
+/** `project` bắt buộc: thiếu thì `other_language_available` lặng lẽ sai thành `false`. */
+export const toVersionDto = (v: IDocVersion, project: DocumentLanguageProject): DocVersionDto => ({
   version: v.version,
   kind: v.kind,
   based_on: v.based_on ?? null,
@@ -26,11 +42,13 @@ export const toVersionDto = (v: IDocVersion): DocVersionDto => ({
   has_clean_file: !!v.clean_file_ref,
   has_tracked_file: !!v.tracked_file_ref,
   has_original_file: !!v.original_ref,
+  other_language_available: otherLanguageAvailable(v, project),
   created_by: String(v.created_by),
   created_at: toIso(v.createdAt)!
 })
 
-export const listVersions = async (projectId: string): Promise<DocVersionDto[]> => (await listDocVersions(projectId)).map(toVersionDto)
+export const listVersions = async (projectId: string, project: DocumentLanguageProject): Promise<DocVersionDto[]> =>
+  (await listDocVersions(projectId)).map((v) => toVersionDto(v, project))
 
 const blockId = (i: number): string => `B${String(i + 1).padStart(4, "0")}`
 
@@ -56,25 +74,119 @@ export interface DownloadFile {
   data: Buffer
 }
 
-export const downloadVersion = async (projectId: string, projectName: string, version: string, variant: "auto" | "tracked" | "original"): Promise<DownloadFile> => {
+/**
+ * Stamp của bản tải về (FLF-334): stamp gốc trong file (project/version/source) + release gốc, CR mới nhất, loại bản.
+ * Chỉ ghi lên buffer tải về — file lưu không đổi; file không có stamp (bản cũ hỏng) ⇒ ghi stamp mới từ version.
+ */
+const stampDownload = async (pkg: DocxPackage, projectId: string, v: IDocVersion, lineage: VersionLineage): Promise<void> => {
+  const current = await readStamp(pkg)
+  await writeStamp(pkg, {
+    project_id: current?.project_id ?? projectId,
+    version: current?.version ?? v.version,
+    source: current?.source ?? v.kind,
+    base_version: lineage.base,
+    latest_cr: lineage.latestCr,
+    kind: lineage.release ? "release" : "draft"
+  })
+}
+
+/**
+ * FLF-334 B: `lang` = ngôn ngữ của file (không truyền / trùng ngôn ngữ tài liệu ⇒ như trước). Có `lang` thì BẮT BUỘC có
+ * `project` (đọc ngôn ngữ tài liệu) — kiểu chặn lúc biên dịch, không để `lang` bị bỏ qua lặng lẽ.
+ */
+type DownloadProject = DocumentLanguageProject & { template_intent?: TemplateIntent | null }
+export type DownloadLanguageOptions = { project?: DownloadProject; lang?: undefined } | { project: DownloadProject; lang: UserLocale }
+
+export const downloadVersion = async (
+  projectId: string,
+  projectName: string,
+  version: string,
+  variant: "auto" | "tracked" | "original",
+  options: DownloadLanguageOptions = {}
+): Promise<DownloadFile> => {
   const v = await requireDocVersion(projectId, version)
+  // Đường in chọn theo từng version (binding mẫu đã ghi cùng version), không theo `template_intent` hiện tại của dự án:
+  // dự án đổi mẫu về sau không làm version cũ đổi đường in hay báo thiếu nguồn mẫu.
+  const fixed = !!v.template_source
+  const languages = options.lang && options.project ? await projectLanguages(projectId, options.project) : null
+  const otherLanguage = !!languages && options.lang !== languages.locale
+  if (otherLanguage && variant !== "auto") {
+    throw new ApiError(400, "Bản có đánh dấu và file gốc chỉ tải được theo ngôn ngữ tài liệu của dự án.", "VALIDATION_ERROR")
+  }
+  const lineage = versionLineage(await listDocVersions(projectId), v.version)
+  const name = (opts: { tracked?: boolean; original?: boolean; language?: string } = {}) =>
+    versionFileName({ name: projectName, release: lineage.release, base: lineage.base, latestCr: lineage.latestCr, ...opts })
+  if (otherLanguage) {
+    // Chỉ version có snapshot baseline của dự án chuyển từ mode 2 — import thật (đường layout) / bản nháp CR chưa hỗ trợ
+    if (!options.project || !otherLanguageAvailable(v, options.project)) throw documentLanguageUnavailable()
+    const locale = options.lang!
+    const spine = await loadBaselineSpine(projectId, v.baseline_ref!)
+    if (locale !== languages!.source) await assertTranslationComplete(projectId, locale, spine)
+    // Dựng mỗi lần, không ghi GridFS: file lưu của version giữ ngôn ngữ tài liệu
+    const rendered = await renderVersionFile(projectId, projectName, spine, {
+      version: v.version,
+      stampSource: v.kind === "release" ? "release" : CONVERT_STAMP_SOURCE,
+      languages: { locale, source: languages!.source },
+      templateSource: v.template_source ?? null,
+      versionCreatedAt: v.createdAt,
+      ...(fixed ? { recordChanges: v.record_snapshot ?? [] } : {})
+    })
+    const pkg = await DocxPackage.load(rendered)
+    await stampDownload(pkg, projectId, v, lineage)
+    if (!lineage.release) await addDraftWatermark(pkg)
+    return { filename: name({ language: locale }), data: await pkg.toBuffer() }
+  }
   if (variant === "original") {
-    // Bản gốc người dùng upload (có stamp) — không watermark, tên theo version + hậu tố _original
+    // Bản gốc người dùng upload (có stamp) — không watermark, không đổi byte (preflight/re-upload đọc lại y như lúc upload)
     if (!v.original_ref) throw new Mode1Error("DOC_VERSION_NOT_FOUND", "Phiên bản này không có file gốc để tải về.")
-    return { filename: downloadFileName(projectName, v.version, { projectId }).replace(/(_DRAFT)?.docx$/, "_original.docx"), data: await docFileStore().load(v.original_ref) }
+    return { filename: name({ original: true }), data: await docFileStore().load(v.original_ref) }
   }
-  const release = isReleaseVersion(v.version)
-  if (release && variant === "auto" && v.clean_file_ref) {
-    return { filename: downloadFileName(projectName, v.version, { projectId }), data: await docFileStore().load(v.clean_file_ref) }
+  if (fixed && variant === "auto") {
+    const pkg = await DocxPackage.load(await fixedVersionFile(projectId, projectName, v))
+    await stampDownload(pkg, projectId, v, lineage)
+    // File lưu / cache dựng ở `source = baseline` (không watermark) ⇒ bản chưa phát hành gắn DRAFT lúc tải như mẫu FPT
+    if (!lineage.release) await addDraftWatermark(pkg)
+    return { filename: name(), data: await pkg.toBuffer() }
   }
+  const release = lineage.release
   // BPMN 3.14 (mode 1 v3): bản có đánh dấu của CR là file riêng; version không có (0.0, dựng lỗi) ⇒ bản render như cũ
+  const clean = release && variant === "auto" && !!v.clean_file_ref
   const tracked = variant === "tracked" && !!v.tracked_file_ref
-  const data = await docFileStore().load(tracked ? v.tracked_file_ref! : v.file_ref)
-  const filename = downloadFileName(projectName, v.version, { projectId, tracked })
-  if (release) return { filename, data }
-  const pkg = await DocxPackage.load(data)
-  await addDraftWatermark(pkg)
-  return { filename, data: await pkg.toBuffer() }
+  const ref = clean ? v.clean_file_ref! : tracked ? v.tracked_file_ref! : v.file_ref
+  const pkg = await DocxPackage.load(await docFileStore().load(ref))
+  await stampDownload(pkg, projectId, v, lineage)
+  // Mẫu bắt buộc cũng gắn watermark: chỉ thêm shape DRAFT vào header, nội dung / bố cục của mẫu giữ nguyên
+  if (!release) await addDraftWatermark(pkg)
+  return { filename: name({ tracked }), data: await pkg.toBuffer() }
+}
+
+/** Cache regenerated output separately; the original version file and snapshot stay intact. */
+const fixedVersionFile = async (projectId: string, projectName: string, v: IDocVersion): Promise<Buffer> => {
+  if (!v.template_source) throw templateLayoutUnavailable()
+  if (v.fixed_render_cache?.revision === FIXED_TEMPLATE_RENDERER_REVISION) {
+    try { return await docFileStore().load(v.fixed_render_cache.file_ref) } catch { /* Rebuild a missing cache only. */ }
+  }
+  let snapshot: unknown
+  try {
+    snapshot = v.spine_snapshot ?? (v.baseline_ref ? await loadBaselineSpine(projectId, v.baseline_ref) : null)
+  } catch { throw templateLayoutUnavailable() }
+  const parsed = spineSchema.safeParse(snapshot)
+  if (!parsed.success) throw templateLayoutUnavailable()
+  const rendered = await renderVersionFile(projectId, projectName, parsed.data, {
+    version: v.version, stampSource: v.kind, templateSource: v.template_source, recordChanges: v.record_snapshot ?? [], versionCreatedAt: v.createdAt
+  })
+  const ref = await docFileStore().save(rendered, {
+    projectId, kind: "version", name: `${v.version}_${FIXED_TEMPLATE_RENDERER_REVISION}`
+  })
+  try {
+    await DocVersion.updateOne({ _id: v._id }, { $set: {
+      fixed_render_cache: { revision: FIXED_TEMPLATE_RENDERER_REVISION, file_ref: ref }
+    } })
+  } catch (err) {
+    await docFileStore().remove(ref)
+    throw err
+  }
+  return rendered
 }
 
 export const compareVersions = async (projectId: string, from: string, to: string): Promise<CompareResponse> => {
@@ -82,5 +194,29 @@ export const compareVersions = async (projectId: string, from: string, to: strin
   const [a, b] = await Promise.all([fileBlocksOfVersion(va), fileBlocksOfVersion(vb)])
   const lite = (x: OoxmlBlock[]) => x.map((blk) => ({ block_id: null, para_id: blk.para_id, text: blk.text, text_hash: blk.text_hash }))
   const { blocks, summary } = diffBlockLists(lite(a), lite(b))
-  return { from, to, summary, blocks }
+  return compareWithoutAuthors({ from, to, summary, blocks })
 }
+
+/** Tiêu đề cột người thực hiện của bảng Record of Changes (en / vi, `render/labels.ts`). */
+const IN_CHARGE_HEADER = /^(in charge|người thực hiện)$/i
+
+/** Hàm thuần: chữ của một bảng (dòng `\n`, ô ` | `) mà dòng đầu có cột "In charge" ⇒ ô cột đó ở các dòng thân thành trống. */
+export const blankInChargeColumn = (text: string): string => {
+  const [head, ...rows] = text.split("\n")
+  const col = head.split(" | ").findIndex((c) => IN_CHARGE_HEADER.test(c.trim()))
+  if (col < 0 || !rows.length) return text
+  return [head, ...rows.map((r) => r.split(" | ").map((c, i) => (i === col ? "" : c)).join(" | "))].join("\n")
+}
+
+/**
+ * UC-47 / UC-48: bản so sánh không nói ai thực hiện thay đổi, và Viewer thấy đúng các block như Lead — FLF-411 (U2-6) in tên người
+ * tạo CR vào cột "In charge" của Record of Changes, nên bản so sánh che cột đó cho mọi vai trò (tên vẫn ở trang Xem / file Word).
+ */
+export const compareWithoutAuthors = (res: CompareResponse): CompareResponse => ({
+  ...res,
+  blocks: res.blocks.map((b) => ({
+    ...b,
+    ...(typeof b.before === "string" ? { before: blankInChargeColumn(b.before) } : {}),
+    ...(typeof b.after === "string" ? { after: blankInChargeColumn(b.after) } : {})
+  }))
+})

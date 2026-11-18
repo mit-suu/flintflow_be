@@ -21,8 +21,8 @@ const FIXTURE = load("spine-fixture-19-screens.json")
 
 describe("REFERENCE_FIELDS", () => {
   it("đủ 24 field của srs-spine.md §4.1, không trùng", () => {
-    expect(REFERENCE_FIELDS).toHaveLength(25)
-    expect(new Set(REFERENCE_FIELDS.map((f) => f.path)).size).toBe(25)
+    expect(REFERENCE_FIELDS).toHaveLength(39)
+    expect(new Set(REFERENCE_FIELDS.map((f) => f.path)).size).toBe(39)
   })
 
   it("mọi field đều được iterate trên fixture đầy đủ (trừ flags rỗng)", () => {
@@ -31,6 +31,7 @@ describe("REFERENCE_FIELDS", () => {
     for (const p of expected) {
       if (p === "progress.screen_queue[]") continue // fixture ở S-9, queue rỗng
       if (p === "actors[].parent_id") continue // fixture không có generalization — test riêng bên dưới
+      if (p.startsWith("functions[].component_interactions")) continue // FLF-418: fixture mức system — `component-interactions.test.ts`
       expect(seen.has(p), p).toBe(true)
     }
   })
@@ -51,10 +52,12 @@ describe("iterateReferences / findDeadReferences", () => {
     expect(paths.some((p) => /^steps\[id=S-5\.\d@S07\]$/.test(p))).toBe(true)
   })
 
-  it("xoá actor A08 thẳng tay (không qua engine) ⇒ khoá chết ở UC01, UC03", () => {
+  it("xoá actor A08 thẳng tay (không qua engine) ⇒ khoá chết ở UC01, UC03 và message của FN010, FN084", () => {
     const broken = structuredClone(FIXTURE)
     broken.actors = broken.actors.filter((a) => a.id !== "A08")
     expect(findDeadReferences(broken).map((h) => h.refPath).sort()).toEqual([
+      "functions[id=FN010].interactions[from=system,to=A08,message=Send password reset link,kind=request,flow=normal].to",
+      "functions[id=FN084].interactions[from=system,to=A08,message=Send quota renewal notice,kind=request,flow=normal].to",
       "use_cases[id=UC01].actor_ids[=A08]",
       "use_cases[id=UC03].actor_ids[=A08]"
     ])

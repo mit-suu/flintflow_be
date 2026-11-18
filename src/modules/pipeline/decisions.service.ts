@@ -114,6 +114,32 @@ export interface FilteredQuestions {
  * Bỏ câu hỏi thuộc chủ đề đã chốt. Đây là **luật của server**, không phải lời nhắc trong prompt: model
  * quên đọc sổ thì user vẫn không bị hỏi lại.
  */
+/** Từ có nghĩa của câu hỏi (bỏ dấu, chữ thường, ≥ 3 ký tự) — so câu hỏi lại cùng một ý dù model đặt `topic_key` khác. */
+const questionWords = (text: string): Set<string> =>
+  new Set(
+    text
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/đ/gi, "d")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length >= 3)
+  )
+
+/** Ngưỡng trùng từ (Jaccard) để coi hai câu hỏi là một (P05: "Trường khoảng bao nhiêu học sinh…" hỏi lặp 4 lần với key khác nhau). */
+export const SAME_QUESTION_OVERLAP = 0.7
+
+export const similarQuestion = (a: string | null | undefined, b: string | null | undefined): boolean => {
+  // Quyết định cũ / dữ liệu thiếu câu hỏi ⇒ không so được
+  if (!a || !b) return false
+  const wa = questionWords(a)
+  const wb = questionWords(b)
+  if (wa.size === 0 || wb.size === 0) return false
+  let shared = 0
+  for (const w of wa) if (wb.has(w)) shared++
+  return shared / (wa.size + wb.size - shared) >= SAME_QUESTION_OVERLAP
+}
+
 export const filterAskedQuestions = (spine: Pick<Spine, "decisions">, questions: readonly AskedQuestion[]): FilteredQuestions => {
   const decided = activeDecisions(spine)
   const out: FilteredQuestions = { questions: [], dropped: [] }
@@ -121,7 +147,8 @@ export const filterAskedQuestions = (spine: Pick<Spine, "decisions">, questions:
 
   for (const question of questions) {
     const topic = normalizeTopicKey(question.topic_key, question.question)
-    const previous = decided.get(topic)
+    // P05: model đặt key mới cho cùng một câu đã chốt ⇒ so nội dung câu hỏi với câu của quyết định
+    const previous = decided.get(topic) ?? [...decided.values()].find((d) => similarQuestion(question.question, d.question))
     if (previous && !question.conflict) {
       out.dropped.push({ topic_key: topic, question: question.question, answer: previous.answer })
       continue

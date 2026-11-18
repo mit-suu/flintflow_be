@@ -1,5 +1,5 @@
 import mongoose from "mongoose"
-import { streamText } from "ai"
+import { stepCountIs, streamText, type ModelMessage, type ToolSet } from "ai"
 import { env } from "../../config/env.js"
 import {
   ActionType,
@@ -12,9 +12,10 @@ import { getPromptTemplate, interpolatePrompt } from "./prompt-registry.service.
 import { isUserLocale } from "../i18n/locale.js"
 import { replyLanguageDirective } from "../i18n/reply-language.js"
 import { MAX_DIRECTIVE_TERMS, documentLanguageDirective, shouldLocalize, termsInText, type DocumentGlossaryEntry } from "../i18n/document-language.js"
-import { callLLM } from "./providers/llm.router.js"
+import { PUNCTUATION_RULE, callLLM } from "./providers/llm.router.js"
 import type { LLMResponse, LlmImage } from "./providers/provider.types.js"
 import { getAiSdkModel } from "./providers/ai-sdk.provider.js"
+import { ANTHROPIC_EFFORT, ANTHROPIC_THINKING_HEADROOM_TOKENS, anthropicMaxTokens } from "./providers/anthropic.provider.js"
 import { stripReasoning } from "./providers/glm.provider.js"
 import { JsonStreamExtractor } from "./utils/json-stream-extractor.js"
 import { parseResponse } from "./response-parser.js"
@@ -42,6 +43,16 @@ export interface ExecuteAiActionOptions {
   signal?: AbortSignal
   /** Ảnh gửi kèm prompt (mode 1 v3 phase 5, `IMPORT_EXTRACT_DIAGRAM`) — provider phải có vision (Gemini). */
   images?: LlmImage[]
+  /** FLF-310: org đang chọn của người gọi — ví bị trừ khi lượt gọi không gắn project. */
+  activeOrgId?: string | null
+  /**
+   * Ngân sách trả lời tối thiểu (token), chỉ phía server: `draftOps` truyền `maxTokens` của skill nội dung của step — skill
+   * action `draft-to-ops` dùng chung cho mọi step nên ngân sách của nó không đủ cho step sinh nhiều op (S-3.1, S-4.1).
+   * Chỉ nâng, không hạ `maxTokens` của template.
+   */
+  minMaxTokens?: number
+  /** UC-60: step ghi vào sổ credit. Thiếu ⇒ lấy `promptVariables.step_id` (mọi lượt gọi của pipeline đều có). */
+  stepId?: string
 }
 
 export interface ExecuteAiActionStreamCallbacks<T = any> {
@@ -58,10 +69,19 @@ export interface ExecuteAiActionStreamCallbacks<T = any> {
 const reserveCreditWithTransaction = async (
   userId: string,
   actionType: string,
-  projectId: string | undefined
+  projectId: string | undefined,
+  activeOrgId?: string | null,
+  stepId?: string
 ): Promise<CreditReservation> => {
-  const reservation = await runInTransaction((session) => reserveCredit(userId, actionType, projectId, session))
-  return reservation === TRANSACTION_UNAVAILABLE ? reserveCredit(userId, actionType, projectId) : reservation
+  const reservation = await runInTransaction((session) => reserveCredit(userId, actionType, projectId, session, activeOrgId, stepId))
+  return reservation === TRANSACTION_UNAVAILABLE ? reserveCredit(userId, actionType, projectId, undefined, activeOrgId, stepId) : reservation
+}
+
+/** UC-60: step của lượt gọi cho sổ credit — `options.stepId`, không có thì `promptVariables.step_id`. */
+const stepIdOf = (input: AiActionInput, options: ExecuteAiActionOptions): string | undefined => {
+  if (options.stepId) return options.stepId
+  const fromPrompt = input.promptVariables?.step_id
+  return typeof fromPrompt === "string" && fromPrompt ? fromPrompt : undefined
 }
 
 /** Release không được che lỗi gốc của action: lỗi release chỉ log. */
@@ -83,6 +103,16 @@ const releaseQuietly = async (reservation: CreditReservation): Promise<void> => 
 export const LOCALIZED_MAX_TOKENS_FACTOR = 2
 
 /** Đầu ra hỏng / bị cắt — khi khối "Document language" đang bật thì thử lại một lần không kèm khối. */
+/**
+ * FLF-393: cấu hình cho lượt gọi lại khi đầu ra bị cắt — **gấp đôi tổng ngân sách đầu ra** thật gửi provider. Anthropic cộng
+ * sẵn `ANTHROPIC_THINKING_HEADROOM_TOKENS` vào `maxTokens` (`anthropicMaxTokens`) nên tính trên tổng đó: maxTokens 2048 + 4096 =
+ * 6144 ⇒ 12288. Provider khác: gấp đôi `maxTokens`.
+ */
+export const widenedOutputConfig = (config: AiProviderConfig): AiProviderConfig => ({
+  ...config,
+  maxTokens: config.provider === "anthropic" ? 2 * anthropicMaxTokens(config) - ANTHROPIC_THINKING_HEADROOM_TOKENS : 2 * (config.maxTokens || 2048)
+})
+
 const OUTPUT_FAILURE_CODES = new Set(["PARSE_FAILED", "SCHEMA_MISMATCH", "RESPONSE_TRUNCATED", "GLM_EMPTY_OUTPUT"])
 
 const isOutputFailure = (error: unknown): error is AiActionError => error instanceof AiActionError && OUTPUT_FAILURE_CODES.has(error.code)
@@ -166,6 +196,7 @@ const buildPrompt = async (
     ...loadedTemplate.providerConfig,
     ...(options.provider ? { provider: options.provider } : {}),
     ...(options.model ? { model: options.model } : {}),
+    ...(options.minMaxTokens && options.minMaxTokens > (loadedTemplate.providerConfig.maxTokens ?? 0) ? { maxTokens: options.minMaxTokens } : {}),
     // Provider mock cần biết đang được hỏi gì để trả output đúng schema của ActionType đó (T24).
     actionType: String(actionType)
   }
@@ -189,8 +220,7 @@ export const executeAiAction = async <T = any>(
   options: ExecuteAiActionOptions = {}
 ): Promise<AiActionResult<T>> => {
   // Step 1: Reserve Credit
-  const reservation = await reserveCreditWithTransaction(userId, actionType, projectId)
-  const cost = reservation.cost
+  const reservation = await reserveCreditWithTransaction(userId, actionType, projectId, options.activeOrgId, stepIdOf(input, options))
 
   // Step 2: Build Prompt
   let finalPrompt: string
@@ -207,13 +237,16 @@ export const executeAiAction = async <T = any>(
   // Thứ tự bắt buộc: parse → deduct. `deducted` chặn trừ hai lần khi retry và
   // chặn release sau khi đã trừ (lỗi ghi log phía sau không được hoàn tiền).
   let deducted = false
+  let settledCost = reservation.cost
   let currentLogId: string = ""
   // Lượt parse lỗi mới là lượt cần đọc lại output gốc nhất, mà log thất bại được tạo ngoài vòng retry — giữ
   // chữ thô ở đây để nó không mất theo scope của lượt thử.
   let lastRawText: string | null = null
+  // FLF-393: có lượt bị cắt ở `max_tokens` ⇒ các lần thử lại (BR-09) gọi với ngân sách đầu ra gấp đôi
+  let widenOutput = false
 
   try {
-    const result = await executeWithInRequestRetry(async (attempt) => {
+    const { llmRes, parsedData, tokensUsed, latencyMs } = await executeWithInRequestRetry(async (attempt) => {
       const startTime = Date.now()
 
       try {
@@ -222,10 +255,22 @@ export const executeAiAction = async <T = any>(
         const callAndParse = async () => {
           callResponse = null
           if (options.signal?.aborted) throw new AiActionError(499, "Lượt chạy đã bị huỷ", "RUN_CANCELLED")
-          const response = await callLLM(finalPrompt, providerConfig, {
+          const callOptions = {
             ...(options.signal ? { signal: options.signal } : {}),
             ...(options.images?.length ? { images: options.images } : {})
-          })
+          }
+          // FLF-393: lượt trước bị cắt vì hết `max_tokens` (Claude 5.x suy nghĩ ăn vào cùng ngân sách, prompt dài ⇒ suy nghĩ
+          // dài) ⇒ lần thử lại của BR-09 (`retry.service`: 2 lần, chờ lâu dần) dùng ngân sách đầu ra gấp đôi. Không thêm lượt gọi
+          // nào ngoài 2 lần thử lại đó.
+          const config = widenOutput ? widenedOutputConfig(providerConfig) : providerConfig
+          if (widenOutput) console.warn(`[executeAiAction] '${String(actionType)}' thử lại sau khi bị cắt — maxTokens ${providerConfig.maxTokens ?? "mặc định"} → ${config.maxTokens}`)
+          let response: LLMResponse
+          try {
+            response = await callLLM(finalPrompt, config, callOptions)
+          } catch (error) {
+            if ((error as { code?: string } | null)?.code === "RESPONSE_TRUNCATED") widenOutput = true
+            throw error
+          }
           callResponse = response
           lastRawText = response.text
           return { llmRes: response, parsedData: parseResponse<T>(response.text, actionType) }
@@ -240,7 +285,7 @@ export const executeAiAction = async <T = any>(
           // FLF-265 D16: đầu ra kèm `localized` dài hơn ⇒ dễ bị cắt / hỏng JSON. Lượt ghi Spine quan trọng hơn bản dịch:
           // thử lại NGAY một lần không kèm khối (câu đó thành "thiếu", dịch theo lô sau); các lượt retry sau cũng không kèm.
           if (!withoutLocalized || !isOutputFailure(error)) throw error
-          console.warn(`[executeAiAction] '${actionType}': đầu ra kèm localized lỗi (${error.code}) — thử lại một lần không kèm khối Document language`)
+          console.warn(`[executeAiAction] '${actionType}': đầu ra kèm localized lỗi (${error.code}) - thử lại một lần không kèm khối Document language`)
           const failedResponse = callResponse as LLMResponse | null
           discardedTokens = { promptTokens: failedResponse?.promptTokens ?? 0, completionTokens: failedResponse?.completionTokens ?? 0 }
           // Lượt kèm khối có log riêng (prompt + chữ thô + token) — dữ liệu để chỉnh `LOCALIZED_MAX_TOKENS_FACTOR`
@@ -266,57 +311,55 @@ export const executeAiAction = async <T = any>(
           completionTokens: llmRes.completionTokens + discardedTokens.completionTokens
         }
         const latencyMs = Date.now() - startTime
-
-        // Success: Deduct Credit (chỉ sau khi parse thành công)
-        if (!deducted) {
-          await deductCredit(reservation)
-          deducted = true
-        }
-
-        // Create success log
-        const logDoc = await AiActionLog.create({
-          projectId: projectId ? new mongoose.Types.ObjectId(projectId) : null,
-          userId: new mongoose.Types.ObjectId(userId),
-          actionType,
-          provider: providerConfig.provider,
-          // Model thật sự trả lời — khác model của skill khi Gemini đã chuyển sang model dự phòng
-          aiModel: llmRes.model ?? providerConfig.model,
-          status: "success",
-          promptTokens: llmRes.promptTokens,
-          completionTokens: llmRes.completionTokens,
-          latencyMs,
-          retryOfLogId: options.parentLogId ? new mongoose.Types.ObjectId(options.parentLogId) : null
-        })
-
-        currentLogId = logDoc._id.toString()
-        await capturePayload({
-          logId: currentLogId,
-          projectId,
-          userId,
-          actionType: String(actionType),
-          prompt: finalPrompt,
-          response: llmRes.text
-        })
-
-        return {
-          success: true,
-          data: parsedData,
-          rawText: llmRes.text,
-          actionType: actionType as ActionType,
-          provider: providerConfig.provider,
-          aiModel: llmRes.model ?? providerConfig.model,
-          tokensUsed: { ...tokensUsed, totalTokens: tokensUsed.promptTokens + tokensUsed.completionTokens },
-          latencyMs,
-          logId: currentLogId,
-          cost
-        }
+        return { llmRes, parsedData, tokensUsed, latencyMs }
       } catch (error: any) {
         console.error(`[executeAiAction] Attempt ${attempt + 1} failed for action '${actionType}':`, error.message)
         throw error
       }
     })
 
-    return result
+    // Success: Deduct Credit & ghi log NGOÀI vòng retry (lỗi sổ cái / ghi log không bao giờ gọi lại LLM)
+    if (!deducted) {
+      settledCost = await deductCredit(reservation, undefined, { tokensIn: tokensUsed.promptTokens, tokensOut: tokensUsed.completionTokens })
+      deducted = true
+    }
+
+    const logDoc = await AiActionLog.create({
+      projectId: projectId ? new mongoose.Types.ObjectId(projectId) : null,
+      userId: new mongoose.Types.ObjectId(userId),
+      actionType,
+      provider: providerConfig.provider,
+      // Model thật sự trả lời — khác model của skill khi Gemini đã chuyển sang model dự phòng
+      aiModel: llmRes.model ?? providerConfig.model,
+      status: "success",
+      promptTokens: llmRes.promptTokens,
+      completionTokens: llmRes.completionTokens,
+      latencyMs,
+      retryOfLogId: options.parentLogId ? new mongoose.Types.ObjectId(options.parentLogId) : null
+    })
+
+    currentLogId = logDoc._id.toString()
+    await capturePayload({
+      logId: currentLogId,
+      projectId,
+      userId,
+      actionType: String(actionType),
+      prompt: finalPrompt,
+      response: llmRes.text
+    })
+
+    return {
+      success: true,
+      data: parsedData,
+      rawText: llmRes.text,
+      actionType: actionType as ActionType,
+      provider: providerConfig.provider,
+      aiModel: llmRes.model ?? providerConfig.model,
+      tokensUsed: { ...tokensUsed, totalTokens: tokensUsed.promptTokens + tokensUsed.completionTokens },
+      latencyMs,
+      logId: currentLogId,
+      cost: settledCost
+    }
   } catch (finalError: any) {
     // Step 4: On Error -> Release Credit (chỉ khi chưa trừ) & Record Failed Log
     if (!deducted) {
@@ -365,8 +408,7 @@ export const executeAiActionStream = async <T = any>(
   callbacks: ExecuteAiActionStreamCallbacks<T> = {},
   options: ExecuteAiActionOptions = {}
 ): Promise<AiActionResult<T>> => {
-  const reservation = await reserveCreditWithTransaction(userId, actionType, projectId)
-  const cost = reservation.cost
+  const reservation = await reserveCreditWithTransaction(userId, actionType, projectId, options.activeOrgId, stepIdOf(input, options))
 
   let finalPrompt: string
   let providerConfig: AiProviderConfig
@@ -391,16 +433,27 @@ export const executeAiActionStream = async <T = any>(
     let usagePromise: PromiseLike<unknown> | null = null
     if (providerConfig.provider?.toLowerCase() === "mock") {
       // AI SDK không có provider mock: lấy trọn câu trả lời của mock rồi phát như một lượt stream duy nhất
-      const mockRes = await callLLM(finalPrompt, providerConfig)
+      const mockRes = await callLLM(finalPrompt, providerConfig, options.signal ? { signal: options.signal } : undefined)
       textStream = (async function* () {
         yield mockRes.text
       })()
     } else {
+      // Anthropic: suy nghĩ ăn vào max_tokens và Haiku 5.5 không nhận temperature — cùng tham số với `callAnthropic`
+      const isAnthropic = providerConfig.provider?.toLowerCase() === "anthropic"
       const streamResult = streamText({
         model: getAiSdkModel(providerConfig),
         prompt: finalPrompt,
-        temperature: providerConfig.temperature ?? 0.7,
-        maxOutputTokens: providerConfig.maxTokens ?? 2048
+        ...(isAnthropic
+          ? {
+              maxOutputTokens: anthropicMaxTokens(providerConfig),
+              providerOptions: { anthropic: { effort: ANTHROPIC_EFFORT } }
+            }
+          : {
+              temperature: providerConfig.temperature ?? 0.7,
+              maxOutputTokens: providerConfig.maxTokens ?? 2048
+            }),
+        // User bấm dừng / đóng tab ⇒ ngắt luồng của nhà cung cấp, không sinh tiếp
+        ...(options.signal ? { abortSignal: options.signal } : {})
       })
       textStream = streamResult.textStream
       usagePromise = streamResult.usage
@@ -409,6 +462,8 @@ export const executeAiActionStream = async <T = any>(
     const extractor = new JsonStreamExtractor()
 
     for await (const chunk of textStream) {
+      // Huỷ trước parse ⇒ chưa deduct, `catch` dưới nhả reservation (dừng = không tốn credit)
+      if (options.signal?.aborted) throw new AiActionError(499, "Lượt chạy đã bị huỷ", "RUN_CANCELLED")
       const delta = extractor.push(chunk)
       if (delta && callbacks.onTextDelta) {
         await callbacks.onTextDelta(delta)
@@ -432,7 +487,7 @@ export const executeAiActionStream = async <T = any>(
     // Parse TRƯỚC, deduct SAU: output hỏng thì không tính phí (audit E2)
     const parsedData = parseResponse<T>(stripReasoning(fullRaw), actionType)
 
-    await deductCredit(reservation)
+    const settledCost = await deductCredit(reservation, undefined, { tokensIn: promptTokens, tokensOut: completionTokens })
     deducted = true
 
     const logDoc = await AiActionLog.create({
@@ -483,7 +538,7 @@ export const executeAiActionStream = async <T = any>(
       },
       latencyMs,
       logId: (logDoc as any)._id.toString(),
-      cost
+      cost: settledCost
     }
 
     if (callbacks.onFinish) {
@@ -531,5 +586,126 @@ export const executeAiActionStream = async <T = any>(
       "AI_STREAM_EXECUTION_FAILED",
       { logId: failedLog._id.toString() }
     )
+  }
+}
+
+// ─── Agent có tool (trợ lý Google Docs) ──────────────────────────────
+
+export interface AgentStreamInput {
+  /** Biến nội suy vào template của `actionType` (prompt phẳng `assets/prompts/<actionType>.md`) — thành system prompt. */
+  promptVariables: Record<string, unknown>
+  messages: ModelMessage[]
+  tools: ToolSet
+  /** Trần số bước (mỗi bước = một lượt model, có thể kèm gọi tool). */
+  maxSteps: number
+}
+
+export interface AgentStreamCallbacks {
+  onTextDelta?: (delta: string) => void | Promise<void>
+  onToolCall?: (call: { toolName: string; input: unknown }) => void | Promise<void>
+}
+
+export interface AgentStreamResult {
+  text: string
+  tokensUsed: { promptTokens: number; completionTokens: number; totalTokens: number }
+  cost: number
+  logId: string
+}
+
+/**
+ * Một lượt agent: `streamText` có tool, dừng sau `maxSteps` bước. Credit giữ / trừ / hoàn như `executeAiActionStream`, nhưng
+ * tính **theo lượt** — giá cố định của `actionType`, không theo token hay số bước gọi tool. Huỷ (client ngắt) hoặc lỗi ⇒ hoàn.
+ *
+ * `AI_PROVIDER_OVERRIDE=mock` (CI / smoke): không gọi model, trả một câu cố định và không gọi tool.
+ */
+export const executeAgentStream = async (
+  actionType: ActionType | string,
+  input: AgentStreamInput,
+  projectId: string,
+  userId: string,
+  callbacks: AgentStreamCallbacks = {},
+  options: Pick<ExecuteAiActionOptions, "signal" | "activeOrgId"> = {}
+): Promise<AgentStreamResult> => {
+  const reservation = await reserveCreditWithTransaction(userId, actionType, projectId, options.activeOrgId)
+
+  let system = ""
+  let providerConfig: AiProviderConfig = { provider: "", model: "" }
+  let text = ""
+  let deducted = false
+  const startTime = Date.now()
+  try {
+    const template = await getPromptTemplate(actionType)
+    system = `${interpolatePrompt(template.template, input.promptVariables)}\n\n${PUNCTUATION_RULE}`
+    providerConfig = template.providerConfig
+    const override = env.AI_PROVIDER_OVERRIDE.trim().toLowerCase()
+    if (override) providerConfig = { ...providerConfig, provider: override }
+
+    let promptTokens = 0
+    let completionTokens = 0
+    if (providerConfig.provider?.toLowerCase() === "mock") {
+      text = "(mock) Trợ lý chưa gọi model thật trong môi trường này."
+      if (callbacks.onTextDelta) await callbacks.onTextDelta(text)
+    } else {
+      const isAnthropic = providerConfig.provider?.toLowerCase() === "anthropic"
+      const result = streamText({
+        model: getAiSdkModel(providerConfig),
+        system,
+        messages: input.messages,
+        tools: input.tools,
+        stopWhen: stepCountIs(input.maxSteps),
+        ...(isAnthropic
+          ? { maxOutputTokens: anthropicMaxTokens(providerConfig), providerOptions: { anthropic: { effort: ANTHROPIC_EFFORT } } }
+          : { temperature: providerConfig.temperature ?? 0.3, maxOutputTokens: providerConfig.maxTokens ?? 4096 }),
+        ...(options.signal ? { abortSignal: options.signal } : {})
+      })
+      for await (const part of result.fullStream) {
+        if (options.signal?.aborted) throw new AiActionError(499, "Lượt chạy đã bị huỷ", "RUN_CANCELLED")
+        if (part.type === "text-delta") {
+          text += part.text
+          if (callbacks.onTextDelta) await callbacks.onTextDelta(part.text)
+        } else if (part.type === "tool-call") {
+          if (callbacks.onToolCall) await callbacks.onToolCall({ toolName: part.toolName, input: part.input })
+        } else if (part.type === "error") {
+          throw part.error
+        }
+      }
+      const usage = await result.totalUsage
+      promptTokens = usage.inputTokens ?? 0
+      completionTokens = usage.outputTokens ?? 0
+    }
+
+    // Không truyền token ⇒ trừ đúng giá cố định của lượt (`calculateActualCreditCost`)
+    const cost = await deductCredit(reservation)
+    deducted = true
+    const logDoc = await AiActionLog.create({
+      projectId: new mongoose.Types.ObjectId(projectId),
+      userId: new mongoose.Types.ObjectId(userId),
+      actionType,
+      provider: providerConfig.provider,
+      aiModel: providerConfig.model,
+      status: "success",
+      promptTokens,
+      completionTokens,
+      latencyMs: Date.now() - startTime
+    })
+    const logId = String(logDoc._id)
+    await capturePayload({ logId, projectId, userId, actionType: String(actionType), prompt: `${system}\n\n${JSON.stringify(input.messages)}`, response: text })
+    return { text, tokensUsed: { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens }, cost, logId }
+  } catch (error: any) {
+    if (!deducted) await releaseQuietly(reservation)
+    const failedLog = await AiActionLog.create({
+      projectId: new mongoose.Types.ObjectId(projectId),
+      userId: new mongoose.Types.ObjectId(userId),
+      actionType,
+      provider: providerConfig.provider,
+      aiModel: providerConfig.model,
+      status: "failed",
+      errorMessage: error?.message || "Agent stream execution failed"
+    })
+    if (error instanceof AiActionError) {
+      error.details = { ...error.details, logId: String(failedLog._id) }
+      throw error
+    }
+    throw new AiActionError(500, error?.message || "Thực thi trợ lý thất bại", "AI_STREAM_EXECUTION_FAILED", { logId: String(failedLog._id) })
   }
 }

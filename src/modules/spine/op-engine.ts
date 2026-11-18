@@ -44,6 +44,8 @@ import { planBriefReextract } from "./brief-core.js"
 import { allocateId, allocatesIds, isPlaceholderId, substituteDeep, substitutePlaceholders } from "./id-allocator.js"
 import { withElementDefaults } from "./element-defaults.js"
 import { normalizeFormFactorAt } from "./form-factor.js"
+import { normalizeDiagramAt } from "./legacy-diagram.js"
+import { normalizeFlowAt } from "./legacy-flow.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
 export const CHANGE_RANGE_INVALID = "CHANGE_RANGE_INVALID"
@@ -97,14 +99,57 @@ const lastKey = (path: string): string => {
   return segments[segments.length - 1].key
 }
 
-/** Mảng object có id (actors, functions, validations…) chỉ được sửa bằng add/remove từng phần tử. */
-const isEntityArray = (value: unknown): boolean => Array.isArray(value) && value.some(isRecord)
+/**
+ * Mảng object có id (actors, functions, validations…) chỉ được sửa bằng add/remove từng phần tử. Mảng object không có
+ * `id` (khối văn bản `custom_sections[].blocks`, …) là giá trị thường — `set` cả mảng (FLF-375: trước đây bị chặn nhầm ⇒
+ * CR không sửa được đoạn văn nguyên văn của file và kết luận vẽ lại sơ đồ bị sai theo).
+ */
+const isEntityArray = (value: unknown): boolean => Array.isArray(value) && value.some((el) => isRecord(el) && typeof el.id === "string")
+
+/** Dạng cũ còn trong op / change log: form_factor chuỗi, diagram có `puml`, `flow_to` là mảng id màn ⇒ dạng hiện hành. */
+const normalizeLegacyAt = (path: string, value: unknown): unknown => normalizeFlowAt(path, normalizeDiagramAt(path, normalizeFormFactorAt(path, value)))
+
+/**
+ * Model viết lại `flow_to` bằng danh sách id (dạng cũ): id đã có cạnh thì giữ cạnh đó (kèm trigger / guard), không ghi đè
+ * thành cạnh trơn.
+ */
+const keepKnownEdges = (given: unknown[], normalized: unknown[], target: ReturnType<typeof resolve>): unknown[] => {
+  const current = target.kind === "field" && Array.isArray(target.value) ? target.value.filter(isRecord) : []
+  return normalized.map((edge, i) => (typeof given[i] === "string" ? (current.find((c) => c.to === given[i]) ?? edge) : edge))
+}
+
+/** Mảng phần tử không có `id`, chọn phần tử bằng khoá riêng: cạnh `flow_to` theo `to`, `attributes` theo `name`. */
+const KEYED_ARRAYS: ReadonlySet<string> = new Set(["flow_to", "attributes", "transitions", "interactions", "component_interactions", "activity_flows", "deployment_links"])
+
+const elementKeyOf = (el: unknown): string | null => {
+  if (!isRecord(el)) return null
+  if (typeof el.from === "string" && typeof el.to === "string" && typeof el.message === "string") return `from=${el.from},to=${el.to},message=${el.message},kind=${String(el.kind)},flow=${String(el.flow)}`
+  if (typeof el.from === "string" && typeof el.to === "string" && typeof el.event === "string") return `from=${el.from},to=${el.to},event=${el.event}`
+  // Control flow của sơ đồ activity `functions[].activity_flows[]`: khoá là from + to
+  if (typeof el.from === "string" && typeof el.to === "string") return `from=${el.from},to=${el.to}`
+  return typeof el.to === "string" ? `to=${el.to}` : typeof el.name === "string" ? `name=${el.name}` : null
+}
+
+/** Hai phần tử cùng khoá (cạnh cùng màn đích, thuộc tính cùng tên) ⇒ giữ phần tử đầu. */
+const dedupeFlowEdges = (edges: unknown[]): unknown[] => {
+  const seen = new Set<string>()
+  return edges.filter((e) => {
+    const key = elementKeyOf(e)
+    if (key === null) return true
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
 
 const applySet = (state: WorkState, op: Op): void => {
   if (op.value === undefined) throw opError("op_value_missing", op.path, `Op set thiếu value: "${op.path}"`)
   // Mọi đường ghi (model, /changes, import) đều chuẩn hoá form_factor thành mảng — change log không bao giờ giữ chuỗi
-  const value = normalizeFormFactorAt(op.path, op.value)
+  const normalized = normalizeLegacyAt(op.path, op.value)
+  // `flow_to` / `attributes` là mảng phần tử không có id: set được cả mảng (khác mảng thực thể có id), mỗi khoá một phần tử
+  const wholeFlow = KEYED_ARRAYS.has(lastKey(op.path)) && Array.isArray(normalized)
   const target = resolve(state.spine, op.path)
+  const value = wholeFlow ? dedupeFlowEdges(keepKnownEdges(op.value as unknown[], normalized as unknown[], target)) : normalized
 
   if (target.kind === "append") throw opError("op_not_allowed", op.path, `Op set không nhận path kết thúc bằng []: "${op.path}"`)
 
@@ -112,7 +157,7 @@ const applySet = (state: WorkState, op: Op): void => {
     if (target.lockedKeys.includes(target.key)) {
       throw opError("key_change_forbidden", op.path, `Không được đổi khoá "${target.key}" của phần tử: "${op.path}"`)
     }
-    if (isEntityArray(target.value) || isEntityArray(value)) {
+    if (!wholeFlow && (isEntityArray(target.value) || isEntityArray(value))) {
       if (expandEntityArraySet(state, op, target.value)) return
       throw opError("op_not_allowed", op.path, `Mảng phần tử có id phải sửa bằng add/remove từng phần tử: "${op.path}"`)
     }
@@ -125,10 +170,10 @@ const applySet = (state: WorkState, op: Op): void => {
 
   // thay nguyên phần tử: giữ nguyên khoá định danh
   const element = target.value
-  if (!isRecord(element) || !isRecord(op.value)) {
-    throw opError("op_not_allowed", op.path, `Op set trên phần tử vô hướng không được hỗ trợ — dùng remove + add: "${op.path}"`)
+  if (!isRecord(element) || !isRecord(value)) {
+    throw opError("op_not_allowed", op.path, `Op set trên phần tử vô hướng không được hỗ trợ - dùng remove + add: "${op.path}"`)
   }
-  const next = withElementDefaults(lastKey(op.path), op.value) as Record<string, unknown>
+  const next = withElementDefaults(lastKey(op.path), value) as Record<string, unknown>
   for (const key of target.lockedKeys) {
     if (String(next[key]) !== String(element[key])) {
       throw opError("key_change_forbidden", op.path, `Không được đổi khoá "${key}" của phần tử: "${op.path}"`)
@@ -154,7 +199,7 @@ const withAllocatedId = (state: WorkState, path: string, value: unknown): unknow
   if (!isRecord(value)) return value
   const segments = parsePath(path)
   const collection = segments[segments.length - 1].key
-  const nested = segments.length === 2 && collection === "validations"
+  const nested = segments.length === 2 && (collection === "validations" || collection === "states" || collection === "activity_nodes")
   if (!allocatesIds(collection) || (segments.length !== 1 && !nested)) return value
 
   const current = value.id
@@ -177,6 +222,11 @@ const withAllocatedId = (state: WorkState, path: string, value: unknown): unknow
  */
 const expandEntityArraySet = (state: WorkState, op: Op, current: unknown): boolean => {
   const segments = parsePath(op.path)
+  // FLF-390: mảng tuỳ chọn còn vắng (use case chưa có `activity_nodes`) ⇒ tạo mảng rỗng rồi tách như mảng đã có
+  if (segments.length === 2 && current === undefined && Array.isArray(op.value) && OPTIONAL_ARRAYS[segments[0].key]?.has(segments[1].key) && !segments[1].selector) {
+    applySet(state, { op: "set", path: op.path, value: [] })
+    current = []
+  }
   if (segments.length < 2 || !Array.isArray(current) || !Array.isArray(op.value)) return false
   if (!current.every((el) => isRecord(el) && typeof el.id === "string")) return false
   if (!op.value.every(isRecord)) return false
@@ -198,22 +248,45 @@ const expandEntityArraySet = (state: WorkState, op: Op, current: unknown): boole
   return true
 }
 
+/** Mảng tuỳ chọn của phần tử (entity, function, use case): Spine cũ / phần tử chưa điền thì vắng, `add` vào đó tạo mảng rỗng trước (ghi thành một change). */
+const OPTIONAL_ARRAYS: Readonly<Record<string, ReadonlySet<string>>> = {
+  entities: new Set(["attributes", "feature_ids", "states", "transitions"]),
+  functions: new Set(["interactions", "component_interactions"]),
+  use_cases: new Set(["activity_nodes", "activity_flows"])
+}
+
+const ensureOptionalArray = (state: WorkState, path: string): void => {
+  const segments = parsePath(path)
+  const last = segments[segments.length - 1]
+  if (segments.length !== 2 || last.selector?.kind !== "append" || !OPTIONAL_ARRAYS[segments[0].key]?.has(last.key)) return
+  const arrayPath = formatPath([segments[0], { key: last.key }])
+  const target = resolve(state.spine, arrayPath)
+  if (target.kind === "field" && !target.exists) applySet(state, { op: "set", path: arrayPath, value: [] })
+}
+
 const applyAdd = (state: WorkState, op: Op): void => {
   if (op.value === undefined) throw opError("op_value_missing", op.path, `Op add thiếu value: "${op.path}"`)
+  ensureOptionalArray(state, op.path)
   const target = resolve(state.spine, op.path)
   if (target.kind !== "append") {
     throw opError("op_not_allowed", op.path, `Op add phải nhắm mảng dạng "arr[]": "${op.path}"`)
   }
 
-  const value = withAllocatedId(state, op.path, isRecord(op.value) ? withElementDefaults(lastKey(op.path), op.value) : op.value)
+  const raw = normalizeLegacyAt(op.path, op.value)
+  const value = withAllocatedId(state, op.path, isRecord(raw) ? withElementDefaults(lastKey(op.path), raw) : raw)
   const selector = selectorFor(value)
   if (isRecord(value)) {
     if (typeof value.id === "string" && target.parent.some((el) => isRecord(el) && el.id === value.id)) {
       throw opError(
         "duplicate_id",
         op.path,
-        `Phần tử id "${value.id}" đã tồn tại trong "${op.path}" — muốn thêm phần tử MỚI thì bỏ trường "id" (hoặc dùng id tạm "$new1") để server cấp id; muốn sửa phần tử đó thì dùng set`
+        `Phần tử id "${value.id}" đã tồn tại trong "${op.path}" - muốn thêm phần tử MỚI thì bỏ trường "id" (hoặc dùng id tạm "$new1") để server cấp id; muốn sửa phần tử đó thì dùng set`
       )
+    }
+    // Phần tử không có id: một khoá chỉ một phần tử (path chọn phần tử theo `to` / `name`)
+    const key = KEYED_ARRAYS.has(lastKey(op.path)) ? elementKeyOf(value) : null
+    if (key !== null && target.parent.some((el) => elementKeyOf(el) === key)) {
+      throw opError("duplicate_id", op.path, `Phần tử "${key}" đã có trong "${op.path}" - sửa field của nó bằng set trên path có selector (${lastKey(op.path)}[${key}])`)
     }
   } else if (target.parent.some((el) => !isRecord(el) && isDeepStrictEqual(el, value))) {
     throw opError("duplicate_id", op.path, `Giá trị "${String(value)}" đã có trong "${op.path}"`)
@@ -324,6 +397,43 @@ const schemaViolations = (spine: Spine): Violation[] => {
   }))
 }
 
+/**
+ * P08 (FAP #23): cấp id thật trước cho mọi op `add` cấp gốc mang id tạm (hoặc thiếu id) của lô, theo đúng thứ tự op.
+ * Trước đây id tạm chỉ được thay ở op PHÍA SAU op add ⇒ "thêm chức năng mới + gắn vào UC có sẵn" mà model viết op gắn
+ * trước bị `$new1` không trỏ tới phần tử. Chỉ chạy khi lô có id tạm; lô thay gốc (clone / migrate) giữ cách cũ.
+ */
+const preallocateIds = (spine: Spine, ops: readonly Op[], placeholders: Map<string, string>): Map<number, string> => {
+  const out = new Map<number, string>()
+  if (ops.some((op) => op.op === "clone" || op.op === "migrate")) return out
+  if (!ops.some((op) => op.op === "add" && isRecord(op.value) && isPlaceholderId(op.value.id))) return out
+  const reserved: Record<string, { id: string }[]> = {}
+  ops.forEach((op, i) => {
+    if (op.op !== "add" || !isRecord(op.value)) return
+    let segments: ReturnType<typeof parsePath>
+    try {
+      segments = parsePath(op.path)
+    } catch {
+      return
+    }
+    if (segments.length !== 1 || segments[0].selector?.kind !== "append") return
+    const collection = segments[0].key
+    const current = op.value.id
+    const missing = current === undefined || current === null || current === ""
+    if (!missing && !isPlaceholderId(current)) return
+    // cùng một id tạm cho hai phần tử là lỗi của model ⇒ để op engine báo như cũ
+    if (isPlaceholderId(current) && placeholders.has(current)) return
+    if (!allocatesIds(collection)) return
+    const list = (spine as unknown as Record<string, unknown>)[collection]
+    const view = { ...spine, [collection]: [...(Array.isArray(list) ? list : []), ...(reserved[collection] ?? [])] } as Spine
+    const id = allocateId(view, collection)
+    if (id === null) return
+    ;(reserved[collection] ??= []).push({ id })
+    out.set(i, id)
+    if (isPlaceholderId(current)) placeholders.set(current, id)
+  })
+  return out
+}
+
 export interface PlanOptions {
   /** Seq của change đầu tiên (repository.nextSeq). */
   startSeq: number
@@ -339,8 +449,13 @@ export const planTransaction = (spine: Spine, txn: Transaction, options: PlanOpt
   const before = clone(spine)
   const state: WorkState = { spine: clone(spine), removed: new RemovedIds(), ops: [], drafts: [], baseline: null, placeholders: new Map() }
 
-  const run = (raw: Op, index?: number) => {
-    // Id tạm đã cấp ở op trước trong lô ⇒ thay bằng id thật trong path và value
+  // P08: id tạm cấp trước cho cả lô ⇒ op đứng TRƯỚC op add của `$new1` (vd gắn chức năng mới vào UC có sẵn) cũng được thay
+  const preassigned = preallocateIds(state.spine, txn.ops, state.placeholders)
+
+  const run = (input: Op, index?: number) => {
+    const id = index === undefined ? undefined : preassigned.get(index)
+    const raw: Op = id !== undefined && isRecord(input.value) ? { ...input, value: { ...input.value, id } } : input
+    // Id tạm đã cấp (ở op trước hoặc ở lượt cấp trước của lô) ⇒ thay bằng id thật trong path và value
     const op: Op =
       state.placeholders.size === 0
         ? raw
@@ -419,7 +534,7 @@ export const planTransaction = (spine: Spine, txn: Transaction, options: PlanOpt
  * revert đụng cùng chỗ; đặt lại `before` sẽ ghi đè im lặng thay đổi đó.
  */
 const revertConflict = (change: Change, detail: string): PathError =>
-  opError("revert_conflict", change.path, `"${change.path}" đã bị thay đổi sau đó (${detail}) — cần revert các thay đổi sau trước`)
+  opError("revert_conflict", change.path, `"${change.path}" đã bị thay đổi sau đó (${detail}) - cần revert các thay đổi sau trước`)
 
 /** Áp nghịch đảo một change lên `state`, ghi draft `op: "revert"`. */
 const invertChange = (state: WorkState, change: Change): void => {
@@ -430,7 +545,7 @@ const invertChange = (state: WorkState, change: Change): void => {
     if (!parsed.success) throw opError("schema_invalid", ROOT_PATH, `before của seq ${change.seq} không phải Spine hợp lệ`)
     const { spine_version: currentVersion, ...current } = state.spine
     // Change cũ có thể còn giữ form_factor dạng chuỗi — so sau khi chuẩn hoá
-    if (!isDeepStrictEqual(current, normalizeFormFactorAt(ROOT_PATH, change.value))) throw revertConflict(change, "nội dung Spine khác bản clone/migrate")
+    if (!isDeepStrictEqual(current, normalizeLegacyAt(ROOT_PATH, change.value))) throw revertConflict(change, "nội dung Spine khác bản clone/migrate")
     state.spine = { ...clone(parsed.data), spine_version: currentVersion }
     state.baseline = clone(state.spine)
     state.drafts.push({ op: "revert", path: ROOT_PATH, before: current, value: clone(parsed.data), reason })
@@ -446,8 +561,9 @@ const invertChange = (state: WorkState, change: Change): void => {
       const target = resolve(state.spine, arrayPath)
       if (target.kind !== "append") throw opError("path_not_resolved", change.path, `Không khôi phục được "${change.path}"`)
       const index = Math.min(change.value.index ?? target.parent.length, target.parent.length)
-      target.parent.splice(index, 0, clone(change.before))
-      state.drafts.push({ op: "revert", path: change.path, before: ABSENT, value: clone(change.before), reason })
+      const restored = normalizeLegacyAt(change.path, change.before)
+      target.parent.splice(index, 0, clone(restored))
+      state.drafts.push({ op: "revert", path: change.path, before: ABSENT, value: clone(restored), reason })
       return
     }
     const target = resolve(state.spine, change.path)
@@ -460,8 +576,8 @@ const invertChange = (state: WorkState, change: Change): void => {
 
   const target = resolve(state.spine, change.path)
   // Change cũ ghi project.form_factor / project còn giữ chuỗi ⇒ so và khôi phục theo dạng mảng
-  const changeValue = isAbsent(change.value) ? change.value : normalizeFormFactorAt(change.path, change.value)
-  const changeBefore = isAbsent(change.before) ? change.before : normalizeFormFactorAt(change.path, change.before)
+  const changeValue = isAbsent(change.value) ? change.value : normalizeLegacyAt(change.path, change.value)
+  const changeBefore = isAbsent(change.before) ? change.before : normalizeLegacyAt(change.path, change.before)
 
   // change đã tạo mới ⇒ xoá đi
   if (isAbsent(change.before)) {
@@ -623,6 +739,8 @@ export interface RevertRangeOptions {
   /** Nếu có: kiểm khoá lạc quan như transaction thường. */
   base_version?: number
   step_id?: string | null
+  /** Id lô của lần revert (mặc định UUID) — đường ghi riêng của đổi mẫu đặt tiền tố để nhận ra Change của nó. */
+  txn?: string
 }
 
 /**
@@ -658,7 +776,7 @@ export const revertChanges = async (projectId: string, changes: Change[], option
 
 const saveRevert = async (projectId: string, record: SpineRecord, changes: Change[], options: RevertRangeOptions): Promise<ApplyResult> => {
   const startSeq = await repository.nextSeq(projectId)
-  const plan = planRevert(stripRecord(record), changes, { by: options.by, startSeq, step_id: options.step_id ?? null })
+  const plan = planRevert(stripRecord(record), changes, { by: options.by, startSeq, step_id: options.step_id ?? null, ...(options.txn ? { txn: options.txn } : {}) })
   const saved = await repository.applyAndSave(projectId, {
     spine: { ...plan.spine, projectId },
     baseVersion: record.spine_version,

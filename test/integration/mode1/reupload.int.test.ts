@@ -15,7 +15,8 @@ import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.js"
 import { docFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
-import { DocxPackage, writeStamp } from "../../../src/modules/docx-ooxml/index.js"
+import { DocxPackage, readStamp, writeStamp } from "../../../src/modules/docx-ooxml/index.js"
+import { downloadVersion } from "../../../src/modules/doc-version/versions.service.js"
 import { makeDocx, p } from "../../../src/modules/docx-ooxml/testing/make-docx.js"
 import { SRS_FIXTURE_TEXT, makeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
@@ -50,16 +51,22 @@ const newPara = (doc: Document, text: string) => {
   return el
 }
 
-/** Tải file version 0.0 (bản render từ Spine + stamp — FLF-186), sửa như người dùng sửa trong Word. */
+/** Tải file version 0.1 (bản render từ Spine + stamp — FLF-186), sửa như người dùng sửa trong Word. */
 const editVersion = async (projectId: string, fn: (doc: Document) => void) => {
-  const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
+  const v = (await DocVersion.findOne({ projectId, version: "0.1" }).lean())!
   const pkg = await DocxPackage.load(await docFileStore().load(v.file_ref))
   fn(await pkg.requireXml("word/document.xml"))
   return { pkg, buffer: await pkg.toBuffer() }
 }
 
+/** Đoạn nằm trong content control mục lục (FLF-344: file version ghi sẵn dòng mục lục trùng chữ heading). */
+const inToc = (p: Element): boolean => {
+  for (let n = p.parentNode; n; n = n.parentNode) if ((n as Element).localName === "sdt") return true
+  return false
+}
+
 const paraEndingWith = (doc: Document, suffix: string): Element => {
-  const hit = Array.from(doc.getElementsByTagNameNS(W, "p")).find((x) => paraText(x).endsWith(suffix))
+  const hit = Array.from(doc.getElementsByTagNameNS(W, "p")).find((x) => !inToc(x) && paraText(x).endsWith(suffix))
   if (!hit) throw new Error(`Không thấy đoạn kết thúc bằng "${suffix}"`)
   return hit
 }
@@ -70,8 +77,8 @@ const snapshotCounts = async (projectId: string) => ({
   spine: (await spineRepository.get(projectId))!.spine_version
 })
 
-describe("re-upload — diff theo block", () => {
-  it("so với bản render 0.0 (FLF-186): thêm + xoá + sửa + di chuyển ⇒ đúng từng loại (khớp theo text); không tạo version, không đổi Spine/block", async () => {
+describe("re-upload - diff theo block", () => {
+  it("so với bản render 0.1 (FLF-186): thêm + xoá + sửa + di chuyển ⇒ đúng từng loại (khớp theo text); không tạo version, không đổi Spine/block", async () => {
     const { projectId, userId, importId } = await importFinalized()
     const before = await snapshotCounts(projectId)
     const EDITED = "Lumen is an online learning platform for large training centers."
@@ -91,7 +98,7 @@ describe("re-upload — diff theo block", () => {
     })
     const diff = await reupload(projectId, userId, fileOf(buffer, "SRS_Lumen_v2.docx"))
     const dto = toReuploadDto(diff)
-    expect(dto).toMatchObject({ original_name: "SRS_Lumen_v2.docx", against_version: "0.0", summary: { added: 1, removed: 1, modified: 1, moved: 1 } })
+    expect(dto).toMatchObject({ original_name: "SRS_Lumen_v2.docx", against_version: "0.1", summary: { added: 1, removed: 1, modified: 1, moved: 1 } })
     expect(dto.blocks).toEqual(
       expect.arrayContaining([
         { block_id: null, change: "modified", before: SRS_FIXTURE_TEXT.purpose, after: EDITED },
@@ -118,13 +125,24 @@ describe("re-upload — diff theo block", () => {
     expect(await DocVersion.countDocuments({ projectId })).toBe(1)
   })
 
+  it("FLF-334: bản nháp vừa tải về (stamp mới + DRAFT) sửa trong Word rồi upload lại ⇒ nhận ra, có diff", async () => {
+    const { projectId, userId } = await importFinalized()
+    const dl = await downloadVersion(projectId, "Lumen", "0.1", "auto")
+    expect(dl.filename).toBe("Lumen_v0.1_DRAFT.docx")
+    const pkg = await DocxPackage.load(dl.data)
+    expect(await readStamp(pkg)).toMatchObject({ project_id: projectId, version: "0.1", base_version: "0.1", kind: "draft" })
+    setText(para(await pkg.requireXml("word/document.xml"), SRS_FIXTURE_TEXT.purpose), `${SRS_FIXTURE_TEXT.purpose} Edited in Word.`)
+    const dto = toReuploadDto(await reupload(projectId, userId, fileOf(await pkg.toBuffer(), dl.filename)))
+    expect(dto).toMatchObject({ against_version: "0.1", summary: { added: 0, removed: 0, modified: 1, moved: 0 } })
+  })
+
 })
 
-describe("re-upload — từ chối", () => {
+describe("re-upload - từ chối", () => {
   it("stamp của project khác ⇒ IMPORT_STAMP_FOREIGN_PROJECT, không lưu diff/file", async () => {
     const { projectId, userId } = await importFinalized()
     const { pkg } = await editVersion(projectId, () => undefined)
-    await writeStamp(pkg, { project_id: "66f0000000000000000000ff", version: "0.3", source: "cr_revision" })
+    await writeStamp(pkg, { project_id: "66f0000000000000000000ff", version: "0.4", source: "cr_revision" })
     await expect(reupload(projectId, userId, fileOf(await pkg.toBuffer()))).rejects.toMatchObject({
       code: "IMPORT_STAMP_FOREIGN_PROJECT",
       meta: { stamp: { project_id: "66f0000000000000000000ff" } }

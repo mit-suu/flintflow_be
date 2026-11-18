@@ -10,7 +10,8 @@ import {
   CreateInvitationSchema,
   CreateOrganizationSchema,
   DeleteOrganizationSchema,
-  RenameOrganizationSchema
+  RenameOrganizationSchema,
+  SwitchOrganizationSchema
 } from "./organization.validation.js"
 
 const router = Router()
@@ -127,7 +128,12 @@ router.delete(
  *       200: { description: accessToken mới + tổ chức đang mở }
  *       404: { description: ORG_NOT_FOUND }
  */
-router.post("/:orgId/switch", ...inOrg, organizationController.switchOrganization)
+router.post(
+  "/:orgId/switch",
+  ...inOrg,
+  validateRequest(SwitchOrganizationSchema),
+  organizationController.switchOrganization
+)
 
 /**
  * @swagger
@@ -200,13 +206,14 @@ router.patch(
  * @swagger
  * /api/v1/orgs/{orgId}/invitations:
  *   get:
- *     summary: Mã mời của tổ chức, mới nhất trước — không bao giờ trả mã thô (UC-08)
+ *     summary: Lời mời của tổ chức, mới nhất trước — không bao giờ trả mã thô (UC-08, chỉ Lead)
  *     tags: [Organizations]
  *     security: [{ BearerAuth: [] }]
  *     responses:
  *       200: { description: Danh sách lời mời }
+ *       403: { description: ORG_ROLE_FORBIDDEN }
  *   post:
- *     summary: Sinh mã mời có hạn kèm vai trò và gửi email (UC-08, chỉ Lead)
+ *     summary: Lead sinh mã mời có hạn kèm vai trò và gửi email (UC-08, chỉ Lead)
  *     tags: [Organizations]
  *     security: [{ BearerAuth: [] }]
  *     requestBody:
@@ -215,13 +222,14 @@ router.patch(
  *         application/json:
  *           schema:
  *             type: object
- *             required: [role]
+ *             required: [role, email]
  *             properties:
  *               role: { type: string, enum: [analyst, viewer] }
  *               email: { type: string, format: email }
  *     responses:
- *       201: { description: "Đã tạo — mã thô chỉ trả ở lượt này" }
+ *       201: { description: "Đã tạo — Lead nhận mã thô chỉ ở lượt này" }
  *       402: { description: PLAN_LIMIT_MEMBERS }
+ *       403: { description: ORG_ROLE_FORBIDDEN }
  */
 router.get("/:orgId/invitations", ...inOrg, requireRole("lead"), organizationController.listInvitations)
 router.post(
@@ -241,6 +249,7 @@ router.post(
  *     security: [{ BearerAuth: [] }]
  *     responses:
  *       200: { description: Đã thu hồi }
+ *       403: { description: ORG_ROLE_FORBIDDEN }
  *       409: { description: INVITE_ALREADY_USED — mã đã dùng, hãy xoá thành viên thay vì thu hồi }
  */
 router.delete(

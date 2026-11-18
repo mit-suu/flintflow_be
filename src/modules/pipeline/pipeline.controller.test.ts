@@ -143,7 +143,7 @@ describe("POST /projects/:projectId/steps/:stepId/run", () => {
     await expect(deps.resolveGate?.({ type: "gate_ready", step_id: "S-8.2", flags: { red_delta: 0 }, new_assumptions: [] })).resolves.toMatchObject({ quiet: true })
   })
 
-  it("E2E FAP #19: bước im khi chạy lẻ được server Accept thật và phát auto_accepted — không kẹt in_progress", async () => {
+  it("E2E FAP #19: bước im khi chạy lẻ được server Accept thật và phát auto_accepted - không kẹt in_progress", async () => {
     vi.mocked(getSpine).mockResolvedValue({ spine_version: 7, project: { review_mode: "balanced" }, screens: [], functions: [], steps: [], decisions: [] } as never)
     vi.mocked(gate).mockResolvedValue({} as never)
     vi.mocked(runStep).mockImplementation(async (_p, stepId, _s, _u, emit, deps) => {
@@ -267,7 +267,7 @@ describe("POST /projects/:projectId/steps/:stepId/run", () => {
       emit({ type: "intake", step_id: stepId, phase: "S-3", empty_fields: [] })
       // Client đóng NGAY sau sự kiện đầu — mô phỏng đóng tab giữa chừng.
       closeListeners.forEach((cb) => cb())
-      emit({ type: "elicit", step_id: stepId, delta: "sau khi đóng — KHÔNG được ghi ra res" })
+      emit({ type: "elicit", step_id: stepId, delta: "sau khi đóng - KHÔNG được ghi ra res" })
     })
 
     runStepController(req, res, next)
@@ -299,7 +299,7 @@ describe("GET /projects/:projectId/steps", () => {
       handler(req, res, next)
     })
 
-  it("F17: getOrCreate nhận {name, domain} của project (như spine.controller.ts) — không tạo Spine rỗng thiếu tên", async () => {
+  it("F17: getOrCreate nhận {name, domain} của project (như spine.controller.ts) - không tạo Spine rỗng thiếu tên", async () => {
     vi.mocked(getOrCreate).mockResolvedValue({
       projectId: PROJECT,
       spine_version: 1,
@@ -330,14 +330,21 @@ describe("GET /projects/:projectId/steps", () => {
     expect(outcome.error).toBeUndefined()
     // `current_step` là step TỚI LƯỢT (cùng luật với GET /progress), không phải con trỏ trong Spine:
     // spine rỗng ⇒ bước đầu quy trình.
-    expect(outcome.body).toMatchObject({ data: { current_phase: null, current_step: "B-0.1" } })
+    // FLF-432: `current_phase` cũng theo step tới lượt (con trỏ lưu trong Spine chỉ ghi lúc step bắt đầu)
+    expect(outcome.body).toMatchObject({ data: { current_phase: "B-0", current_step: "B-0.1" } })
   })
 })
 
 /** Handler JSON thường (không SSE): resolve khi `res.json` hoặc `next(err)`. */
-const invokeJsonHandler = (handler: RequestHandler, userId: string, params: Record<string, string>, body: unknown = {}) =>
+const invokeJsonHandler = (
+  handler: RequestHandler,
+  userId: string,
+  params: Record<string, string>,
+  body: unknown = {},
+  role: "lead" | "analyst" | "viewer" = "lead"
+) =>
   new Promise<{ status: number; body: unknown; error?: unknown }>((resolve) => {
-    const req = { orgContext: orgCtxFor(userId), user: { userId }, params, body } as unknown as Request
+    const req = { orgContext: { ...orgCtxFor(userId), role }, user: { userId }, params, body } as unknown as Request
     const res = {
       status(code: number) {
         ;(res as unknown as { _status: number })._status = code
@@ -351,7 +358,7 @@ const invokeJsonHandler = (handler: RequestHandler, userId: string, params: Reco
     handler(req, res, (err?: unknown) => resolve({ status: 0, body: null, error: err }))
   })
 
-describe("POST /projects/:projectId/steps/:stepId/gate — session_id (contract-change 2026-09-15)", () => {
+describe("POST /projects/:projectId/steps/:stepId/gate - session_id (contract-change 2026-09-15)", () => {
   beforeEach(() => {
     vi.mocked(requirePipelineSession).mockReset()
     vi.mocked(gate).mockReset()
@@ -380,7 +387,39 @@ describe("POST /projects/:projectId/steps/:stepId/gate — session_id (contract-
   })
 })
 
-describe("FLF-221: message/intent — chat là nút chạy", () => {
+describe("POST /projects/:projectId/steps/:stepId/gate - chỉ Lead ký baseline ở S-9.5 (UC-38/39)", () => {
+  beforeEach(() => {
+    vi.mocked(requirePipelineSession).mockReset()
+    vi.mocked(requirePipelineSession).mockResolvedValue(undefined)
+    vi.mocked(gate).mockReset()
+    vi.mocked(gate).mockResolvedValue({ step: { id: "S-9.5" }, next_step: null, spine_version: 2 } as never)
+  })
+
+  it.each(["accept", "accept_as_is"])("Analyst %s ở S-9.5 ⇒ 403, không gọi gate", async (action) => {
+    const body = { session_id: "s1", action, base_version: 1, ...(action === "accept_as_is" ? { note: "ok" } : {}) }
+    const outcome = await invokeJsonHandler(gateStep, OWNER, { projectId: PROJECT, stepId: "S-9.5" }, body, "analyst")
+    expect(outcome.error).toMatchObject({ statusCode: 403, code: "ORG_ROLE_FORBIDDEN" })
+    expect(gate).not.toHaveBeenCalled()
+  })
+
+  it("Lead accept ở S-9.5 ⇒ gọi gate (ký baseline)", async () => {
+    const outcome = await invokeJsonHandler(gateStep, OWNER, { projectId: PROJECT, stepId: "S-9.5" }, { session_id: "s1", action: "accept", base_version: 1 })
+    expect(outcome.status).toBe(200)
+    expect(gate).toHaveBeenCalled()
+  })
+
+  it("Analyst accept ở bước khác vẫn được", async () => {
+    const outcome = await invokeJsonHandler(gateStep, OWNER, { projectId: PROJECT, stepId: "S-9.4" }, { session_id: "s1", action: "accept", base_version: 1 }, "analyst")
+    expect(outcome.status).toBe(200)
+  })
+
+  it("Analyst yêu cầu sửa ở S-9.5 vẫn được", async () => {
+    const outcome = await invokeJsonHandler(gateStep, OWNER, { projectId: PROJECT, stepId: "S-9.5" }, { session_id: "s1", action: "revision", base_version: 1, note: "sửa" }, "analyst")
+    expect(outcome.status).toBe(200)
+  })
+})
+
+describe("FLF-221: message/intent - chat là nút chạy", () => {
   it("/run nhận message + intent và truyền xuống runStep", async () => {
     vi.mocked(runStep).mockImplementation(async () => {})
     const outcome = await invokeSse(runStepController, OWNER, PROJECT, "B-0.1", { session_id: "s1", base_version: 1, message: "Ứng dụng đặt lịch cắt tóc", intent: "no_idea" })
@@ -417,7 +456,7 @@ describe("FLF-221: message/intent — chat là nút chạy", () => {
   })
 })
 
-describe("POST /projects/:projectId/steps/:stepId/answer — giới hạn độ dài", () => {
+describe("POST /projects/:projectId/steps/:stepId/answer - giới hạn độ dài", () => {
   it(`answer dài hơn ${ANSWER_MAX_CHARS} ký tự ⇒ 400 VALIDATION_ERROR`, async () => {
     const body = { session_id: "s1", answers: [{ question_id: "Q1", answer: "x".repeat(ANSWER_MAX_CHARS + 1) }] }
     const outcome = await invokeJsonHandler(answerStep, OWNER, { projectId: PROJECT, stepId: "S-3.1" }, body)
@@ -425,7 +464,7 @@ describe("POST /projects/:projectId/steps/:stepId/answer — giới hạn độ 
   })
 })
 
-describe("POST /projects/:projectId/steps/:stepId/answer — không có lượt chờ khớp (FLF-222)", () => {
+describe("POST /projects/:projectId/steps/:stepId/answer - không có lượt chờ khớp (FLF-222)", () => {
   beforeEach(() => resetMemoryRuns())
 
   it("không lượt nghe, không lượt chờ ở run-state ⇒ 409 STEP_NOT_RUNNABLE như cũ", async () => {

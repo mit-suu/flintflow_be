@@ -1,7 +1,7 @@
 ---
 actionType: summarize_document
-provider: openai
-aiModel: gpt-4o-mini
+provider: anthropic
+aiModel: claude-haiku-5-5
 maxTokens: 2048
 temperature: 0.3
 isActive: true

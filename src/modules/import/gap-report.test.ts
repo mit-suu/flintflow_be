@@ -23,18 +23,17 @@ const flag = (id: string, level: "red" | "yellow", rule_id: string, section_id: 
   resolved_at: null,
   waived_by_user: false,
   waive_reason: null,
-  waived_at_version: null
+  waived_at_version: null,
+  kept_reason: null,
+  kept_by: null,
+  kept_at: null
 })
 
 const REPORT: GapReport = gapReportSchema.parse({
   project_id: "66f000000000000000000001",
-  doc_version: "0.0",
+  doc_version: "0.1",
   generated_at: "2026-09-19T00:00:00.000Z",
-  totals: { red: 1, yellow: 2, missing_sections: 1, unmapped_headings: 1, low_confidence_fields: 1, missing_fpt_sections: 2, unrendered_diagrams: 1 },
-  missing_fpt_sections: [
-    { section_id: "fixed:5.1", title: "Business Rules", step_id: "S-7.1", in_layout: false },
-    { section_id: "fixed:4.2.4", title: "Domain-Specific Attributes", step_id: "S-6.5", in_layout: true }
-  ],
+  totals: { red: 1, yellow: 2, low_confidence_fields: 1, unrendered_diagrams: 1 },
   layout: [
     { order: 0, section_id: "fixed:1", heading: "1 Giới thiệu", level: 1, kind: "fpt", red: 0, yellow: 0 },
     { order: 1, section_id: "fixed:4.2.3", heading: "5.2 Hiệu năng", level: 2, kind: "fpt", red: 1, yellow: 1 },
@@ -45,8 +44,6 @@ const REPORT: GapReport = gapReportSchema.parse({
     { section_id: "feature:F-3.2", title: "Authentication", flags: [flag("FL003", "yellow", "empty_feature", "feature:F-3.2", "Feature rỗng")] }
   ],
   unrendered_diagrams: [{ diagram_id: "D-UC-01", kind: "usecase", section_id: "fixed:2.2.2", title: "Use Cases", reason: "not_rendered" }],
-  missing_sections: [{ section_id: "fixed:3.1.1", title: "Screen Flow" }],
-  unmapped_headings: [{ block_id: "B0045", text: "5.9 Team Notes" }],
   low_confidence_fields: [
     { section_id: "function:@B0031", path: "functions[id=FR-3.2.1].trigger", value: "Learner submits", confidence: 0.5, source_block_ids: ["B0032"], origin: "ai", confirmed: false }
   ]
@@ -56,15 +53,16 @@ const NL = String.fromCharCode(10)
 
 const texts = async (buf: Buffer) => (await readBlocks(await DocxPackage.load(buf))).map((b) => ({ kind: b.kind, text: b.text }))
 
-describe("renderGapReportDocx — xuất .docx mở được", () => {
-  it("đọc lại bằng docx-ooxml: tiêu đề, bảng tổng quan, cờ theo mục (đỏ trước), mục thiếu, tiêu đề lạ, dữ liệu độ tin thấp", async () => {
+describe("renderGapReportDocx - xuất .docx mở được", () => {
+  it("đọc lại bằng docx-ooxml: tiêu đề, bảng tổng quan, cờ theo mục (đỏ trước), bố cục, dữ liệu độ tin thấp; không còn mục FPT thiếu (FLF-312)", async () => {
     const buf = await renderGapReportDocx(REPORT, "Lumen")
     expect(buf.subarray(0, 4).toString("hex")).toBe("504b0304")
     const blocks = await texts(buf)
     const all = blocks.map((b) => b.text)
-    expect(all[0]).toBe("Báo cáo thiếu sót — Lumen")
-    expect(all[1]).toBe("Phiên bản tài liệu 0.0 · tạo lúc 19/09/2026 07:00")
-    for (const h of ["Tổng quan", "Cờ theo mục", "Mục mẫu FPT không có tiêu đề trong file", "Tiêu đề không khớp mẫu", "Dữ liệu trích có độ tin thấp"]) expect(all).toContain(h)
+    expect(all[0]).toBe("Báo cáo thiếu sót - Lumen")
+    expect(all[1]).toBe("Phiên bản tài liệu 0.1 · tạo lúc 19/09/2026 07:00")
+    for (const h of ["Tổng quan", "Cờ theo mục", "Dữ liệu trích có độ tin thấp"]) expect(all).toContain(h)
+    for (const h of ["Thiếu mục theo mẫu FPT", "Mục mẫu FPT không có tiêu đề trong file", "Tiêu đề không khớp mẫu"]) expect(all).not.toContain(h)
     // tiêu đề mục không kèm khoá máy
     expect(all).toContain("Performance")
     expect(all).toContain("Authentication")
@@ -76,13 +74,9 @@ describe("renderGapReportDocx — xuất .docx mở được", () => {
       "Đỏ | Tham chiếu tới phần không tồn tại | NFR trỏ UC-99",
       "Vàng | AI phát hiện vấn đề nội dung | 95% cần tải"
     ])
-    expect(tables.some((t) => t.includes("Screen Flow"))).toBe(true)
-    expect(tables.some((t) => t.includes("5.9 Team Notes"))).toBe(true)
-    expect(all.indexOf("Thiếu mục theo mẫu FPT")).toBeLessThan(all.indexOf("Cờ theo mục"))
-    expect(tables.some((t) => t.includes("Business Rules | File không có | Bổ sung qua change request"))).toBe(true)
-    expect(tables.some((t) => t.includes("Domain-Specific Attributes | Có tiêu đề, chưa có nội dung | Bổ sung qua change request"))).toBe(true)
+    expect(tables[0]).not.toContain("mẫu FPT")
     expect(tables.some((t) => t.includes("Phụ lục A Biên bản họp | Mục riêng (ngoài FPT) | 0 | 0"))).toBe(true)
-    expect(tables.some((t) => t.includes("Chức năng FR-3.2.1 — Điều kiện kích hoạt | Learner submits | 50%"))).toBe(true)
+    expect(tables.some((t) => t.includes("Chức năng FR-3.2.1 - Điều kiện kích hoạt | Learner submits | 50%"))).toBe(true)
   })
 
   it("không in mã máy: khoá section, block id, path Spine, mã luật, mã step, JSON", async () => {
@@ -95,18 +89,15 @@ describe("renderGapReportDocx — xuất .docx mở được", () => {
   it("báo cáo rỗng ⇒ câu 'không có' thay cho bảng, file vẫn hợp lệ", async () => {
     const empty = gapReportSchema.parse({
       ...REPORT,
-      totals: { red: 0, yellow: 0, missing_sections: 0, unmapped_headings: 0, low_confidence_fields: 0, missing_fpt_sections: 0, unrendered_diagrams: 0 },
-      missing_fpt_sections: [],
+      totals: { red: 0, yellow: 0, low_confidence_fields: 0, unrendered_diagrams: 0 },
       layout: [],
       sections: [],
       unrendered_diagrams: [],
-      missing_sections: [],
-      unmapped_headings: [],
       low_confidence_fields: []
     })
     const all = (await texts(await renderGapReportDocx(empty, "Rỗng"))).map((b) => b.text)
     expect(all).toEqual(
-      expect.arrayContaining(["Không có cờ nào đang mở.", "File có đủ tiêu đề các mục mẫu FPT.", "Mọi tiêu đề đều khớp.", "Không có.", "Đủ mọi đầu mục mẫu FPT.", "Mọi hình đã có bản vẽ."])
+      expect.arrayContaining(["Không có cờ nào đang mở.", "Không có.", "Mọi hình đã có bản vẽ."])
     )
   })
 
@@ -127,6 +118,25 @@ describe("renderGapReportDocx — xuất .docx mở được", () => {
     expect(last).not.toContain('["a","b"]')
     expect(last).toContain("Tên: Learner")
     expect(last).not.toContain("{")
+  })
+
+  it("mẫu cố định (mẫu công ty / mẫu bắt buộc): mục là 'Mục của mẫu', không 'Mẫu FPT' / 'ngoài FPT'; liệt kê mục còn trống", async () => {
+    const r = gapReportSchema.parse({
+      ...REPORT,
+      target_structure: {
+        target: "template", intent: "fixed", resolved_mode: 3, compared_at: "2026-11-06T00:00:00.000Z", missing: ["custom:CS05"],
+        sections: [
+          { section_id: "fixed:1", title: "1.1 Purpose", status: "present", owner_steps: [] },
+          { section_id: "custom:CS05", title: "3.5.2 Availability", status: "missing", owner_steps: [] }
+        ]
+      }
+    })
+    const all = (await texts(await renderGapReportDocx(r, "Lumen"))).map((b) => b.text).join(NL)
+    expect(all).toContain("Mục của mẫu")
+    expect(all).not.toContain("Mẫu FPT")
+    expect(all).not.toContain("ngoài FPT")
+    expect(all).toContain("Mục còn trống")
+    expect(all).toContain("3.5.2 Availability")
   })
 })
 
@@ -151,6 +161,8 @@ describe("titleOfSection", () => {
     expect(titleOfSection(spine, "function:FR-9")).toBe("Chức năng")
     expect(titleOfSection(spine, "feature:@B0012")).toBe("Tính năng")
     expect(titleOfSection(spine, "fixed:9.9")).toBe("Mục khác")
+    // Phần nhỏ của mẫu bắt buộc (FLF-278): tên dễ đọc, không rơi về "Mục khác"
+    expect(titleOfSection(spine, "slot:features")).toBe("Tổng quan chức năng sản phẩm")
     expect(titleOfSection({ ...(spine as object), custom_sections: [{ id: "CS01", heading: "Phụ lục A" }] } as never, "custom:CS01")).toBe("Phụ lục A")
   })
 
@@ -172,7 +184,7 @@ describe("titleOfSection", () => {
   })
 })
 
-describe("toReviewFields — tên phần tử cho nhãn field cần xác nhận", () => {
+describe("toReviewFields - tên phần tử cho nhãn field cần xác nhận", () => {
   const ef = (path: string, value: unknown, over: Partial<ExtractedField> = {}): ExtractedField => ({
     path,
     value,

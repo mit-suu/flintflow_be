@@ -131,6 +131,13 @@ export const sendMessageStream = catchAsync(async (req: Request, res: Response) 
   res.setHeader("X-Accel-Buffering", "no")
   res.flushHeaders?.()
 
+  // Nút dừng ở FE = huỷ fetch ⇒ luồng đóng trước khi server `end()`: ngắt lượt gọi model (như `sseStream` của `/run`).
+  // Nghe `res` chứ không phải `req`: `req` có thể phát `close` ngay khi đọc xong body.
+  const stop = new AbortController()
+  res.on("close", () => {
+    if (!res.writableEnded) stop.abort()
+  })
+
   await chatSessionService.sendMessageStream(
     projectId,
     chatId,
@@ -139,7 +146,7 @@ export const sendMessageStream = catchAsync(async (req: Request, res: Response) 
     userId,
     res,
     discoveryStep ? Number(discoveryStep) : undefined,
-    { knowledge }
+    { knowledge, signal: stop.signal }
   )
 })
 

@@ -1,20 +1,20 @@
 import { AiActionError } from "./ai-action.types.js"
+import { AI_PROVIDER_QUOTA, isProviderBillingMessage } from "./providers/provider-error.js"
 
 export const isTransientError = (error: any): boolean => {
   // Người gọi đã bỏ đi (client đóng kết nối) ⇒ gọi lại chỉ tốn tiền và giữ khoá step lâu thêm
   if (error?.name === "AbortError" || error?.name === "APIUserAbortError" || error?.code === "AI_CALL_ABORTED" || error?.code === "ERR_CANCELED") {
     return false
   }
-  const errMsg = (error?.message || error?.details?.error?.message || "").toLowerCase()
   // Hết tiền / chưa gắn thanh toán / vượt hạn mức chi: gọi lại chỉ tốn thời gian, trạng thái không tự đổi
-  const BILLING = ["insufficient_quota", "exceeded your current quota", "payment method", "spend limit", "credits cannot be applied", "billing"]
-  if (BILLING.some((phrase) => errMsg.includes(phrase))) {
+  if (error?.code === AI_PROVIDER_QUOTA || isProviderBillingMessage(error?.message || error?.details?.error?.message)) {
     return false
   }
 
   if (error instanceof AiActionError) {
     if (
       error.code === "INSUFFICIENT_CREDIT" ||
+      error.code === "CREDIT_LEDGER_INCONSISTENT" ||
       // `callGLM` đã tự gọi lại một lần với ngân sách gấp đôi trước khi ném lỗi này; lặp y hệt prompt chỉ tốn lượt gọi
       error.code === "GLM_EMPTY_OUTPUT" ||
       error.statusCode === 402 ||
@@ -27,6 +27,8 @@ export const isTransientError = (error: any): boolean => {
       error.code === "RATE_LIMIT_EXCEEDED" ||
       error.code === "PARSE_FAILED" ||
       error.code === "SCHEMA_MISMATCH" ||
+      // BR-09: bị cắt ở `max_tokens` cũng là lượt gọi lỗi ⇒ thử lại 2 lần như mọi lỗi khác (FLF-393: lần thử lại gấp đôi ngân sách)
+      error.code === "RESPONSE_TRUNCATED" ||
       error.statusCode === 429 ||
       error.statusCode >= 500
     ) {

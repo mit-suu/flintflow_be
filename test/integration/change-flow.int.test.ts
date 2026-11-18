@@ -18,6 +18,7 @@ import {
   traceabilityResponseSchema
 } from "../../src/modules/pipeline/pipeline.dto.js"
 import { CreditWallet } from "../../src/modules/credits/credit-wallet.model.js"
+import { Change } from "../../src/modules/spine/change.model.js"
 
 const client = (seeded: SeededFixture) => {
   const auth = { Authorization: `Bearer ${seeded.token}` }
@@ -99,20 +100,25 @@ describe("nhánh và baseline", () => {
     expect(planned.impact?.referrers.length).toBeGreaterThan(0)
   })
 
-  it("sau baseline: thiếu reason ⇒ 400; có reason ⇒ 200 nhánh post_baseline", async () => {
+  it("sau baseline: dự án sang mode 1 (FLF-318) ⇒ mọi lượt sửa thẳng bị từ chối kèm nội dung điền sẵn cho CR; không hoàn tác", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
     const baseline = await api.post("/baseline", { base_version: seeded.spineVersion })
     expect(baseline.status, JSON.stringify(baseline.body.error)).toBe(201)
 
     const ops = [{ op: "set", path: "actors[id=A02].name", value: "Lead Analyst", reason: "rename" }]
-    const noReason = await api.post("/changes", { base_version: await api.version(), ops })
-    expect(noReason.status).toBe(400)
-    expect(noReason.body.error.code).toBe("VALIDATION_ERROR")
+    const changeRequest = { requester: "Ms. Lan", source: { kind: "meeting_minutes", ref: "Minutes 15/10" } }
+    for (const body of [{ reason: "Customer renamed the role" }, { change_request: changeRequest }, { reason: "Customer renamed the role", change_request: changeRequest }]) {
+      const res = await api.post("/changes", { base_version: await api.version(), ops, ...body })
+      expect(res.status).toBe(409)
+      expect(res.body.error.code).toBe("CHANGE_REQUIRES_CR")
+      expect(res.body.meta.prefill).toBeTruthy()
+    }
+    expect((await api.get("/spine")).body.data.actors.find((a: { id: string }) => a.id === "A02").name).not.toBe("Lead Analyst")
 
-    const withReason = await api.post("/changes", { base_version: await api.version(), reason: "Customer renamed the role", ops })
-    expect(withReason.status, JSON.stringify(withReason.body.error)).toBe(200)
-    expect(withReason.body.meta.branch).toBe("post_baseline")
+    // BR-03: sau baseline không hoàn tác — gỡ thay đổi là một CR mới
+    const undo = await api.post("/undo", { base_version: await api.version() })
+    expect(undo.status).toBe(409)
   })
 
   it("không có section stale ⇒ reconcile trả preview silent rỗng, không ghi gì", async () => {
@@ -143,5 +149,201 @@ describe("GET /traceability", () => {
     const bad = await api.get("/traceability?entity=bogus&id=A01")
     expect(bad.status).toBe(400)
     expect(bad.body.error.code).toBe("VALIDATION_ERROR")
+  })
+})
+
+/** Fixture có `last_seq` lớn hơn seq của change mới trong DB test ⇒ bỏ đi để section stale được tính như dự án thật. */
+const freshSteps = (spine: Record<string, unknown>) => {
+  for (const step of spine.steps as Array<Record<string, unknown>>) {
+    step.first_seq = null
+    step.last_seq = null
+  }
+}
+
+describe("FLF-311 - thêm use case kéo theo chức năng, màn, luồng, phân quyền", () => {
+  /** Lô model soạn cho "Thêm use case Send Absence Warning cho Business Analyst" (fixture đã qua S-5). */
+  const fullBatch = [
+    { op: "add", path: "use_cases[]", value: { name: "Send Absence Warning", actor_ids: ["A02"], function_ids: ["$newFn"], description: "The analyst warns students over the absence limit." } },
+    { op: "add", path: "screens[]", value: { id: "$newScreen", name: "Absence Warning", description: "Lists students over the absence limit.", feature_id: "F3", flow_to: ["S07"], tabs: [] } },
+    {
+      op: "add",
+      path: "functions[]",
+      value: {
+        id: "$newFn",
+        name: "Send Absence Warning",
+        screen_id: "$newScreen",
+        feature_id: "F3",
+        trigger: "Analyst clicks Send warning.",
+        description: "Sends a warning to each student whose absence rate is above 20%.",
+        normal: ["Analyst selects the students.", "System sends the warning."],
+        abnormal: ["No student selected: system shows an error."],
+        validations: [{ kind: "required", statement: "At least one student must be selected." }],
+        business_rule_ids: []
+      }
+    },
+    { op: "set", path: "screens[id=S07].flow_to", value: ["S08", "S09", "S10", "$newScreen"] },
+    { op: "add", path: "permissions[]", value: { screen_id: "$newScreen", role_id: "R2", action: "view" } },
+    { op: "add", path: "messages[]", value: { code: "E-WARN-001", text: "Select at least one student, then send the warning again.", function_ids: ["$newFn"] } }
+  ]
+  const instruction = "Thêm use case Send Absence Warning cho Business Analyst, làm màn hình riêng"
+
+  const addUseCaseDirect = async (api: ReturnType<typeof client>, extra: object = {}) => {
+    mockOverrides.next = () => JSON.stringify({ ops: fullBatch, notes: "Thêm chức năng, màn, luồng và phân quyền." })
+    return api.post("/changes", { base_version: await api.version(), instruction, ...extra })
+  }
+
+  const addUseCase = async (api: ReturnType<typeof client>, extra: object = {}) => {
+    mockOverrides.next = () => JSON.stringify({ ops: fullBatch, notes: "Thêm chức năng, màn, luồng và phân quyền." })
+    const preview = await api.post("/changes/preview", { base_version: await api.version(), instruction })
+    expect(preview.status, JSON.stringify(preview.body.error)).toBe(200)
+    const planned = changesPreviewResponseSchema.parse(preview.body.data)
+    expect(planned.ok, JSON.stringify(planned.violations)).toBe(true)
+    return api.post("/changes", { base_version: await api.version(), instruction, preview_id: planned.preview_id, ...extra })
+  }
+
+  it("một bản xem trước, áp một lần ⇒ UC + chức năng đủ chi tiết + màn trong screen flow + phân quyền, bất biến giữ", async () => {
+    const seeded = await seedFixture("full")
+    const api = client(seeded)
+
+    const applied = await addUseCase(api)
+    expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
+    const spine = applyResultResponseSchema.parse(applied.body.data).spine
+    const uc = spine.use_cases.find((u) => u.name === "Send Absence Warning")!
+    const fn = spine.functions.find((f) => f.id === uc.function_ids[0])!
+    const screen = spine.screens.find((s) => s.id === fn.screen_id)!
+    expect(fn.abnormal).toHaveLength(1)
+    expect(fn.validations[0].id).toBe(`${fn.id}-V1`)
+    expect(screen).toMatchObject({ detail_status: "signed_off", primary_function_id: fn.id, feature_id: "F3" })
+    expect(spine.screens.find((s) => s.id === "S07")?.flow_to.map((e) => e.to)).toContain(screen.id)
+    expect(spine.permissions.some((p) => p.screen_id === screen.id && p.role_id === "R2")).toBe(true)
+    expect(spine.messages.find((m) => m.code === "E-WARN-001")?.function_ids).toEqual([fn.id])
+  })
+
+  it("sau baseline (FLF-318): lệnh thêm use case không áp thẳng - từ chối kèm nội dung điền sẵn cho CR (CR soạn lại đủ phần)", async () => {
+    const seeded = await seedFixture("full")
+    const api = client(seeded)
+    expect((await api.post("/baseline", { base_version: seeded.spineVersion })).status).toBe(201)
+
+    const applied = await addUseCaseDirect(api, {
+      reason: "Phòng đào tạo cần cảnh báo vắng",
+      change_request: { requester: "Ms. Lan", source: { kind: "meeting_minutes", ref: "Minutes 15/10" } }
+    })
+    expect(applied.status).toBe(409)
+    expect(applied.body.error.code).toBe("CHANGE_REQUIRES_CR")
+    expect(applied.body.meta.prefill.description).toContain("Send Absence Warning")
+  })
+
+  it("FLF-318: ở S-9 thêm use case qua bản xem trước ⇒ không bắt duyệt lại (không section stale mới), ký baseline được ngay", async () => {
+    const seeded = await seedFixture("full", { mutate: freshSteps })
+    const api = client(seeded)
+    const staleBefore = (await api.get("/progress")).body.data.readiness.stale as number
+
+    const applied = await addUseCase(api)
+    expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
+    expect((await api.get("/progress")).body.data.readiness.stale).toBe(staleBefore)
+    // Lượt ghi lại accepted_at là sổ sách nội bộ — không thêm dòng vào Record of Changes
+    const reaccept = await Change.find({ projectId: seeded.projectId, path: /^steps\[id=.+\]\.accepted_at$/, reason: /^gate: đã duyệt qua bản xem trước/ }).lean()
+    expect(reaccept.length).toBeGreaterThan(0)
+
+    const signed = await api.post("/baseline", { base_version: await api.version() })
+    expect(signed.status, JSON.stringify(signed.body.error ?? signed.body.meta)).toBe(201)
+  })
+
+  it("FLF-318 (luật 3g): xoá use case vừa thêm cùng chức năng, màn, thông báo của nó qua bản xem trước ⇒ không section stale mới, ký baseline được", async () => {
+    const seeded = await seedFixture("full", { mutate: freshSteps })
+    const api = client(seeded)
+    const staleBefore = (await api.get("/progress")).body.data.readiness.stale as number
+    expect((await addUseCase(api)).status).toBe(200)
+
+    const spine = (await api.get("/spine")).body.data
+    const uc = spine.use_cases.find((u: { name: string }) => u.name === "Send Absence Warning")
+    const fn = spine.functions.find((f: { id: string }) => f.id === uc.function_ids[0])
+    const msg = spine.messages.find((m: { code: string }) => m.code === "E-WARN-001")
+    const removal = [
+      { op: "remove", path: `use_cases[id=${uc.id}]` },
+      { op: "remove", path: `functions[id=${fn.id}]` },
+      { op: "remove", path: `screens[id=${fn.screen_id}]` },
+      { op: "remove", path: `messages[id=${msg.id}]` }
+    ]
+    mockOverrides.next = () => JSON.stringify({ ops: removal, notes: "Xoá use case, chức năng, màn và thông báo của nó." })
+    const removeInstruction = "Xoá cả luồng: xoá use case Send Absence Warning"
+    const preview = await api.post("/changes/preview", { base_version: await api.version(), instruction: removeInstruction })
+    expect(preview.status, JSON.stringify(preview.body.error)).toBe(200)
+    const planned = changesPreviewResponseSchema.parse(preview.body.data)
+    expect(planned.ok, JSON.stringify(planned.violations)).toBe(true)
+    const applied = await api.post("/changes", { base_version: await api.version(), instruction: removeInstruction, preview_id: planned.preview_id })
+    expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
+
+    const after = (await api.get("/spine")).body.data
+    expect(after.screens.some((s: { id: string }) => s.id === fn.screen_id)).toBe(false)
+    expect(after.permissions.some((p: { screen_id: string }) => p.screen_id === fn.screen_id)).toBe(false)
+    expect(after.screens.find((s: { id: string }) => s.id === "S07").flow_to.map((e: { to: string }) => e.to)).not.toContain(fn.screen_id)
+    expect((await api.get("/progress")).body.data.readiness.stale).toBe(staleBefore)
+    const signed = await api.post("/baseline", { base_version: await api.version() })
+    expect(signed.status, JSON.stringify(signed.body.error ?? signed.body.meta)).toBe(201)
+  })
+
+  it("FLF-318: lô có sửa văn xuôi của use case có sẵn ⇒ vẫn để section phụ thuộc stale (No auto-propagation)", async () => {
+    const seeded = await seedFixture("full", { mutate: freshSteps })
+    const api = client(seeded)
+    const staleBefore = (await api.get("/progress")).body.data.readiness.stale as number
+    const edited = [...fullBatch, { op: "set", path: "use_cases[id=UC01].description", value: "Edited description of an existing use case." }]
+    mockOverrides.next = () => JSON.stringify({ ops: edited, notes: "Thêm UC và sửa mô tả UC01." })
+    const preview = await api.post("/changes/preview", { base_version: await api.version(), instruction })
+    expect(preview.status, JSON.stringify(preview.body.error)).toBe(200)
+    const planned = changesPreviewResponseSchema.parse(preview.body.data)
+    const applied = await api.post("/changes", { base_version: await api.version(), instruction, preview_id: planned.preview_id })
+    expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
+    expect((await api.get("/progress")).body.data.readiness.stale).toBeGreaterThan(staleBefore)
+  })
+
+  it("FLF-318 (luật 3h): sửa use case qua bản xem trước ⇒ section sở hữu phần đã sửa không stale; section chỉ đọc vẫn chờ hoà giải", async () => {
+    const seeded = await seedFixture("full", { mutate: freshSteps })
+    const api = client(seeded)
+    const staleBefore = (await api.get("/progress")).body.data.readiness.stale as number
+    const editInstruction = "sửa use case UC01: đổi tên thành Manage Projects v2"
+    mockOverrides.next = () => JSON.stringify({ ops: [{ op: "set", path: "use_cases[id=UC01].name", value: "Manage Projects v2" }], notes: "Đổi tên UC01." })
+    const preview = await api.post("/changes/preview", { base_version: await api.version(), instruction: editInstruction })
+    expect(preview.status, JSON.stringify(preview.body.error)).toBe(200)
+    const planned = changesPreviewResponseSchema.parse(preview.body.data)
+    expect(planned.ok, JSON.stringify(planned.violations)).toBe(true)
+    const applied = await api.post("/changes", { base_version: await api.version(), instruction: editInstruction, preview_id: planned.preview_id })
+    expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
+
+    const reaccept = await Change.find({ projectId: seeded.projectId, path: /^steps\[id=.+\]\.accepted_at$/, reason: /^gate: đã duyệt qua bản xem trước/ }).lean()
+    expect(reaccept.length).toBeGreaterThan(0)
+    const sections = (await api.get("/progress")).body.data.readiness.stale as number
+    // Section chỉ đọc use case (sơ đồ, ma trận…) vẫn stale — không tự lan truyền
+    expect(sections).toBeGreaterThanOrEqual(staleBefore)
+  })
+})
+
+describe("hai người sửa cùng lúc trước baseline (BF §3.2)", () => {
+  it("bản xem trước chưa áp của A ⇒ B thấy 'A có bản sửa chưa xác nhận' ở mục bị sửa; A không thấy của chính mình; A huỷ ⇒ hết", async () => {
+    const seeded = await seedFixture("full")
+    const a = client(seeded)
+    const preview = await a.post("/changes/preview", { base_version: seeded.spineVersion, ops: [renameA01] })
+    const planned = changesPreviewResponseSchema.parse(preview.body.data)
+    const owned = planned.impact!.sections.filter((s) => s.relation === "owner").map((s) => s.id)
+    expect(owned.length).toBeGreaterThan(0)
+
+    const { User } = await import("../../src/modules/user/user.model.js")
+    const { Membership } = await import("../../src/modules/organization/membership.model.js")
+    const { authAs } = await import("../setup.js")
+    const email = `analyst-${Date.now()}@flintflow.test`
+    const other = await User.create({ email, name: "Bình", password: "test-password-123", emailVerified: true })
+    await Membership.create({ organizationId: seeded.orgId, userId: other._id, role: "analyst" })
+    const b = client({ ...seeded, token: await authAs({ _id: other._id, email, orgId: seeded.orgId }) })
+
+    const seenByB = (await b.get("/changes/pending-sections")).body.data as { section_id: string; items: { who: string }[] }[]
+    expect(seenByB.map((s) => s.section_id).sort()).toEqual([...owned].sort())
+    expect(seenByB[0].items).toEqual([{ who: expect.any(String) }])
+    expect((await a.get("/changes/pending-sections")).body.data).toEqual([])
+
+    // B không huỷ được bản của A
+    expect((await request(app).delete(`/api/v1/projects/${seeded.projectId}/changes/preview/${planned.preview_id}`).set({ Authorization: `Bearer ${(await authAs({ _id: other._id, email, orgId: seeded.orgId }))}` })).body.data).toEqual({ discarded: false })
+    const discarded = await request(app).delete(`/api/v1/projects/${seeded.projectId}/changes/preview/${planned.preview_id}`).set({ Authorization: `Bearer ${seeded.token}` })
+    expect(discarded.body.data).toEqual({ discarded: true })
+    expect((await b.get("/changes/pending-sections")).body.data).toEqual([])
   })
 })

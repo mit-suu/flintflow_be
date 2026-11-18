@@ -13,7 +13,8 @@ import { defineConfig } from "vitest/config"
 const shared = {
   environment: "node",
   // Job nền chạy inline (không Redis) dù `.env` máy dev đặt JOB_DRIVER=bullmq — dotenv không ghi đè biến đã có
-  env: { JOB_DRIVER: "inline" },
+  // FLF-360: đọc lại khi AI quá tải không chờ thật; job đọc lại nền sau 0.1 tắt (test gọi thẳng processor)
+  env: { JOB_DRIVER: "inline", IMPORT_AI_RETRY_BACKOFF_MS: "0,0,0", IMPORT_REREAD_JOB_DELAYS_MS: "" },
   // Mongo in-memory và PlantUML probe cần thời gian khởi động
   testTimeout: 30_000,
   hookTimeout: 60_000

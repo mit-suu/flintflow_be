@@ -12,6 +12,7 @@ import { Mode1Error } from "../import/mode1.errors.js"
 import {
   addMaterialRequestSchema,
   amendRequestSchema,
+  crMessageRequestSchema,
   answersRequestSchema,
   closeRequestSchema,
   createChangeRequestSchema,
@@ -23,11 +24,17 @@ import {
   locationIdSchema,
   materialParamsSchema,
   ownerStepDraftRequestSchema,
-  patchLocationRequestSchema
+  patchLocationRequestSchema,
+  approveExtractionSchema,
+  extractionParamsSchema,
+  type ExtractionDto
 } from "./change-request.dto.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import * as crService from "./change-request.service.js"
+import * as extractionService from "./extraction.service.js"
+import type { IRequirementExtraction } from "./requirement-extraction.model.js"
 import { amendCr, answerClarification, runClarify } from "./clarify.service.js"
+import { handleCrMessage } from "./cr-message.service.js"
 import { runImpact } from "./cr-impact.service.js"
 import { decideGroup } from "./decision.service.js"
 import { patchLocation } from "./location.service.js"
@@ -37,6 +44,8 @@ import { runVerify } from "./verify.service.js"
 import { assertConvertible, markConverted } from "../comment/comment.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { TransactionRejectedError } from "../spine/op-engine.js"
+import * as spineRepository from "../spine/spine.repository.js"
 
 const loadCr = async (req: Request): Promise<{ auth: Mode1Auth; cr: IChangeRequest }> => {
   const auth = await authorizeMode1(req)
@@ -44,16 +53,76 @@ const loadCr = async (req: Request): Promise<{ auth: Mode1Auth; cr: IChangeReque
   return { auth, cr: await crService.requireCr(auth.projectId, crId) }
 }
 
+/**
+ * BF §3.2 / spec UC-45 A6: các bước áp dụng CR (C-1…C-6: tài liệu bổ sung, gộp lệnh, làm rõ, tìm vị trí, đề xuất, sửa vị trí,
+ * kiểm, xác nhận, chạy tiếp) chỉ người tạo CR làm. Người khác ⇒ 403 `CR_NOT_REQUESTER` "đang treo ở <ai>".
+ */
+const loadOwnCr = async (req: Request): Promise<{ auth: Mode1Auth; cr: IChangeRequest }> => {
+  const loaded = await loadCr(req)
+  await crService.assertRequester(loaded.cr, loaded.auth.userId)
+  return loaded
+}
+
 const detail = async (res: Response, cr: IChangeRequest, status = 200) => sendSuccess(res, status, await crService.toDetail(cr))
 
 /** Hành động không có body: kiểm body rỗng, chạy, trả chi tiết. */
-const action = (run: (cr: IChangeRequest, auth: Mode1Auth) => Promise<void>) =>
+const action = (run: (cr: IChangeRequest, auth: Mode1Auth) => Promise<void>, opts: { ownerOnly?: boolean } = {}) =>
   mode1Handler(async (req, res) => {
-    const { auth, cr } = await loadCr(req)
+    const { auth, cr } = await (opts.ownerOnly === false ? loadCr(req) : loadOwnCr(req))
     parseInput(emptyRequestSchema, req.body)
     await run(cr, auth)
     return detail(res, cr)
   })
+
+// ─── FLF-338 §3.6.1: rút yêu cầu từ tài liệu thô ────────────────
+
+const toExtractionDto = (e: IRequirementExtraction): ExtractionDto => ({
+  document_id: String(e.documentId),
+  document_name: e.document_name,
+  doc_code: e.doc_code,
+  status: e.status,
+  items: e.items.map((i) => ({
+    id: i.id,
+    text: i.text,
+    label: i.label,
+    para_id: i.para_id ?? null,
+    quote: i.quote,
+    group: i.group,
+    entity_paths: [...i.entity_paths],
+    question: i.question ?? null,
+    suggested_answers: [...i.suggested_answers],
+    include: i.include ?? null,
+    drop_reason: i.drop_reason ?? null,
+    answer: i.answer ?? null,
+    cr_id: i.cr_id ?? null
+  })),
+  credits: e.credits,
+  approved_at: e.approved_at ? e.approved_at.toISOString() : null,
+  created_at: e.createdAt.toISOString(),
+  updated_at: e.updatedAt.toISOString()
+})
+
+export const extractRequirements = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const { documentId } = parseInput(extractionParamsSchema, req.params)
+  const extraction = await extractionService.extractRequirements(auth.projectId, auth.userId, documentId)
+  return sendSuccess(res, 201, toExtractionDto(extraction))
+})
+
+export const getExtraction = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const { documentId } = parseInput(extractionParamsSchema, req.params)
+  const extraction = await extractionService.getExtraction(auth.projectId, documentId)
+  return sendSuccess(res, 200, extraction ? toExtractionDto(extraction) : null)
+})
+
+export const approveExtraction = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const { documentId } = parseInput(extractionParamsSchema, req.params)
+  const body = parseInput(approveExtractionSchema, req.body)
+  const extraction = await extractionService.approveExtraction(auth.projectId, auth.userId, documentId, body)
+  return sendSuccess(res, 200, toExtractionDto(extraction))
+})
 
 export const createCr = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
@@ -93,7 +162,7 @@ export const receiveMaterial = (req: Request, res: Response, next: NextFunction)
 }
 
 export const addCrMaterial = mode1Handler(async (req, res) => {
-  const { auth, cr } = await loadCr(req)
+  const { auth, cr } = await loadOwnCr(req)
   if (req.file) {
     // multer đọc tên file theo latin1 — đổi lại UTF-8 để giữ tên tiếng Việt
     const originalname = Buffer.from(req.file.originalname, "latin1").toString("utf8")
@@ -108,16 +177,25 @@ export const deleteCrMaterial = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const { crId, mid } = parseInput(materialParamsSchema, req.params)
   const cr = await crService.requireCr(auth.projectId, crId)
+  await crService.assertRequester(cr, auth.userId)
   await removeMaterial(cr, mid)
   return detail(res, cr)
 })
 
 /** Phase 8 (chat): gộp thêm một lệnh sửa vào CR chưa nộp. */
 export const amend = mode1Handler(async (req, res) => {
-  const { auth, cr } = await loadCr(req)
+  const { auth, cr } = await loadOwnCr(req)
   const body = parseInput(amendRequestSchema, req.body)
   await amendCr(cr, auth.userId, body.instruction)
   return detail(res, cr)
+})
+
+/** FLF-375: tin nhắn trong lúc CR mở — lệnh sửa gộp vào CR, câu hỏi được trả lời (không thành yêu cầu bổ sung). */
+export const message = mode1Handler(async (req, res) => {
+  const { auth, cr } = await loadOwnCr(req)
+  const body = parseInput(crMessageRequestSchema, req.body)
+  const outcome = await handleCrMessage(cr, auth.userId, body.text, body.language)
+  return sendSuccess(res, 200, { ...(await crService.toDetail(cr)), message: outcome })
 })
 
 export const listCrs = mode1Handler(async (req, res) => {
@@ -134,7 +212,7 @@ export const getCr = mode1Handler(async (req, res) => {
 export const clarify = action((cr, auth) => runClarify(cr, auth.userId))
 
 export const answers = mode1Handler(async (req, res) => {
-  const { auth, cr } = await loadCr(req)
+  const { auth, cr } = await loadOwnCr(req)
   const body = parseInput(answersRequestSchema, req.body)
   await answerClarification(cr, auth.userId, body.answers)
   return detail(res, cr)
@@ -143,11 +221,37 @@ export const answers = mode1Handler(async (req, res) => {
 export const impact = action((cr) => runImpact(cr))
 export const propose = action((cr, auth) => runPropose(cr, auth.userId))
 export const verify = action((cr, auth) => runVerify(cr, auth.userId))
-export const submit = action((cr) => crService.submitCr(cr))
-export const revise = action((cr) => crService.reviseCr(cr))
+/**
+ * C-6 xác nhận & ghi (BF §3.2): luật Spine gãy trên nội dung hiện tại ⇒ **cờ đỏ trước khi ghi** (chạy lại kiểm, không ném
+ * lỗi thô); người khác ghi đúng lúc này (lệch spine_version) ⇒ "ai xác nhận trước thì ghi trước" — kiểm lại trên bản mới
+ * một lần nữa rồi ghi.
+ */
+export const submit = action(async (cr, auth) => {
+  try {
+    await crService.submitCr(cr, auth.userId)
+  } catch (err) {
+    if (err instanceof TransactionRejectedError) {
+      cr.submitted_at = null
+      await runVerify(cr, auth.userId)
+      return
+    }
+    if (err instanceof ApiError && err.code === spineRepository.SPINE_VERSION_CONFLICT) {
+      await crService.submitCr(cr, auth.userId)
+      return
+    }
+    throw err
+  }
+})
+
+/** BF §3.2: mục đang có bản sửa chưa xác nhận của CR chưa đóng — hiện trong tài liệu cho mọi người. */
+export const listPendingSections = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  return sendSuccess(res, 200, await crService.listPendingSections(auth.projectId))
+})
+export const revise = action((cr) => crService.reviseCr(cr), { ownerOnly: false })
 
 export const updateLocation = mode1Handler(async (req, res) => {
-  const { cr } = await loadCr(req)
+  const { cr } = await loadOwnCr(req)
   const locId = parseInput(locationIdSchema, req.params.locId)
   const body = parseInput(patchLocationRequestSchema, req.body)
   await patchLocation(cr, locId, body)
@@ -156,7 +260,7 @@ export const updateLocation = mode1Handler(async (req, res) => {
 
 /** BPMN 3.9 (mode 1 v3): sửa đề xuất một vị trí bằng skill của step sở hữu, theo hướng của BA — chỉ ghi đề xuất. */
 export const ownerStepDraft = mode1Handler(async (req, res) => {
-  const { auth, cr } = await loadCr(req)
+  const { auth, cr } = await loadOwnCr(req)
   const locId = parseInput(locationIdSchema, req.params.locId)
   const body = parseInput(ownerStepDraftRequestSchema, req.body)
   await draftInOwnerStep(cr, auth.userId, locId, body.instruction)
@@ -179,9 +283,9 @@ export const close = mode1Handler(async (req, res) => {
 })
 
 export const cancel = mode1Handler(async (req, res) => {
-  const { cr } = await loadCr(req)
+  const { auth, cr } = await loadCr(req)
   const body = parseInput(closeRequestSchema, req.body)
-  await crService.cancelCr(cr, body.reason)
+  await crService.cancelCr(cr, body.reason, { userId: auth.userId, role: req.orgContext?.role })
   return detail(res, cr)
 })
 

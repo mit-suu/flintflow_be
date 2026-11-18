@@ -61,11 +61,13 @@ export const VI_LABELS: Readonly<Record<string, string>> = {
   Validations: "Kiểm tra dữ liệu",
   "Business Rules": "Quy tắc nghiệp vụ",
   Screens: "Màn hình",
-  "Figure — System Context Diagram": "Hình — Sơ đồ ngữ cảnh hệ thống",
+  "Figure - System Context Diagram": "Hình - Sơ đồ ngữ cảnh hệ thống",
   "Use Case Diagram": "Sơ đồ use case",
   "Screens Flow Diagram": "Sơ đồ luồng màn hình",
-  "Screens flow for": "Luồng màn hình của",
+  "Screens flow -": "Luồng màn hình -",
   "Entity Relationship Diagram": "Sơ đồ quan hệ thực thể",
+  "Class Diagram": "Sơ đồ lớp",
+  "State Machine Diagram": "Sơ đồ trạng thái",
   "Screen Layout": "Bố cục màn hình"
 }
 
@@ -108,6 +110,8 @@ export const VI_FPT_LABELS: Readonly<Record<string, string>> = {
   Actor: "Tác nhân",
   "#": "STT",
   "N/A": "Không có",
+  // P07: cột ngữ cảnh của bảng 5.3
+  Context: "Ngữ cảnh",
   // Khung §3.x.y mẫu FPT
   "Function trigger": "Kích hoạt chức năng",
   "Function description": "Mô tả chức năng",
@@ -209,17 +213,17 @@ export interface RenderSentences {
 
 export const SENTENCES: Readonly<Record<DocumentLanguage, RenderSentences>> = {
   en: {
-    externalSystem: (name, kind, description) => `${name} (${kind}) — ${description}`,
+    externalSystem: (name, kind, description) => `${name} (${kind}) - ${description}`,
     featureLabel: (number, name) => (number ? `${number} ${name}` : name),
     relation: (verb, target, optional) => `${verb} ${target}${optional ? " (optional)" : ""}`,
-    screenLayoutCaption: (screenName) => `Screen Layout — ${screenName}`,
+    screenLayoutCaption: (screenName) => `Screen Layout - ${screenName}`,
     nfrStatement: (statement, metric, threshold) => `${statement} (${metric}: ${threshold})`
   },
   vi: {
-    externalSystem: (name, kind, description) => `${name} (${kind}) — ${description}`,
+    externalSystem: (name, kind, description) => `${name} (${kind}) - ${description}`,
     featureLabel: (number, name) => (number ? `${number} ${name}` : name),
     relation: (verb, target, optional) => `${verb} ${target}${optional ? ` ${VI_FPT_LABELS["(optional)"]}` : ""}`,
-    screenLayoutCaption: (screenName) => `${VI_LABELS["Screen Layout"]} — ${screenName}`,
+    screenLayoutCaption: (screenName) => `${VI_LABELS["Screen Layout"]} - ${screenName}`,
     nfrStatement: (statement, metric, threshold) => `${statement} (${metric}: ${threshold})`
   }
 }
@@ -284,14 +288,14 @@ export const ASSEMBLE_TEXT = {
     systemInCharge: "System",
     removedSection: "(removed section)",
     imagePending: (diagramId: string) => `image pending: diagram ${diagramId} has not been rendered yet`,
-    mediaNotEmbedded: "original image could not be embedded (unsupported format)"
+    diagramNotDrawn: "diagram could not be drawn yet"
   },
   vi: {
     unassignedFunctions: "Chức năng chưa thuộc tính năng nào",
     systemInCharge: "Hệ thống",
     removedSection: "(mục đã xoá)",
     imagePending: (diagramId: string) => `ảnh đang chờ: sơ đồ ${diagramId} chưa được render`,
-    mediaNotEmbedded: "không nhúng được ảnh gốc (định dạng không hỗ trợ)"
+    diagramNotDrawn: "sơ đồ chưa vẽ được"
   }
 } as const
 
@@ -439,13 +443,89 @@ export const FLAG_TEXT = {
 
 /**
  * FLF-265 §3.1 — tuỳ chọn `writeDocx` theo dự án, MỘT chỗ cho export và file version.
- * - Mode 1 (`import`): đúng tuỳ chọn trước FLF-265 — bìa / mục lục / §I mặc định, phụ lục cờ `vi` vì thông điệp cờ
- *   mode 1 là tiếng Việt (no-ky-thuat N6). Không theo `documentLanguage` để file mode 1 không đổi byte nào.
+ * - Mode 1 (`import`): đúng tuỳ chọn trước FLF-265 — bìa / mục lục / §I mặc định. Phụ lục cờ theo ngôn ngữ tài liệu khi
+ *   bên gọi biết nó (export — FLF-411 U3-5: tài liệu tiếng Anh không có khối "Tình trạng bản làm việc" tiếng Việt, nguyên tắc
+ *   7); không truyền (file version mode 1) ⇒ `vi` như trước để file version không đổi byte nào.
  * - Mode 2: chữ của writer + phụ lục cờ theo ngôn ngữ tài liệu (`en` = mặc định của writer, y như trước).
+ * - Dự án chuyển từ mode 2 (FLF-318, `convertedFrom = "fpt"`): như mode 2 — file version phải giống bản Lead đã ký.
  * Trả object thường (khớp `WriteDocxOptions` theo cấu trúc) — bảng nhãn không import docx-writer.
  */
 export const writerOptionsFor = (
   mode: string | null | undefined,
-  documentLanguage: DocumentLanguage = "en"
+  documentLanguage?: DocumentLanguage,
+  convertedFrom?: string | null
 ): { language?: DocumentLanguage; flagLanguage: DocumentLanguage } =>
-  mode === "import" ? { flagLanguage: "vi" } : { language: documentLanguage, flagLanguage: documentLanguage }
+  mode === "import" && convertedFrom !== "fpt"
+    ? { flagLanguage: documentLanguage ?? "vi" }
+    : { language: documentLanguage ?? "en", flagLanguage: documentLanguage ?? "en" }
+
+// ─── FLF-278 bước 09: phần nhỏ (slot) của mẫu khách ────────────────
+
+/** Nhãn hệ thống trong phần nhỏ (`customer-template` slot) theo ngôn ngữ tài liệu; dữ liệu Spine in nguyên. */
+export const SLOT_TEXT = {
+  en: {
+    goals: "Goals",
+    inScope: "In Scope",
+    outOfScope: "Out of Scope",
+    primary: "primary",
+    assumption: "Assumption",
+    status: "Status",
+    assumptionStatus: { confirmed: "Confirmed", unconfirmed: "Unconfirmed", rejected: "Rejected", recorded: "Recorded" },
+    kind: "Kind",
+    statement: "Statement",
+    category: "Category",
+    feature: "Feature",
+    functions: "Functions",
+    // FLF-365: tham khảo, phân bổ, kiểm chứng (mẫu IEEE 29148)
+    reference: { id: "ID", title: "Title", owner: "Owner", version: "Version", date: "Date", location: "Location", kind: "Kind" },
+    referenceKind: { normative: "Normative", informative: "Informative" } as Readonly<Record<string, string>>,
+    requirement: "Requirement",
+    release: "Release",
+    deferred: "Deferred",
+    verification: { method: "Method", artifact: "Artifact", status: "Status", evidence: "Evidence" },
+    verificationMethod: { test: "Test", analysis: "Analysis", inspection: "Inspection", demonstration: "Demonstration", other: "Other" } as Readonly<
+      Record<string, string>
+    >,
+    formFactor: {
+      web_app: "Web application",
+      mobile_app: "Mobile application",
+      desktop_app: "Desktop application",
+      api_service: "API / back-end service",
+      cli: "Command-line tool",
+      embedded: "Embedded system"
+    } as Readonly<Record<string, string>>
+  },
+  vi: {
+    goals: "Mục tiêu",
+    inScope: "Trong phạm vi",
+    outOfScope: "Ngoài phạm vi",
+    primary: "chính",
+    assumption: "Giả định",
+    status: "Trạng thái",
+    assumptionStatus: { confirmed: "Đã xác nhận", unconfirmed: "Chưa xác nhận", rejected: "Đã loại", recorded: "Đã ghi nhận" },
+    kind: "Loại",
+    statement: "Nội dung",
+    category: "Nhóm",
+    feature: "Tính năng",
+    functions: "Chức năng",
+    reference: { id: "Mã", title: "Tên tài liệu", owner: "Đơn vị", version: "Phiên bản", date: "Ngày", location: "Nơi lưu", kind: "Loại" },
+    referenceKind: { normative: "Bắt buộc", informative: "Tham khảo" } as Readonly<Record<string, string>>,
+    requirement: "Yêu cầu",
+    release: "Bản phát hành",
+    deferred: "Hoãn",
+    verification: { method: "Phương pháp", artifact: "Tài liệu kiểm", status: "Trạng thái", evidence: "Bằng chứng" },
+    verificationMethod: { test: "Kiểm thử", analysis: "Phân tích", inspection: "Rà soát", demonstration: "Trình diễn", other: "Khác" } as Readonly<
+      Record<string, string>
+    >,
+    formFactor: {
+      web_app: "Ứng dụng web",
+      mobile_app: "Ứng dụng di động",
+      desktop_app: "Ứng dụng máy tính",
+      api_service: "Dịch vụ API / back-end",
+      cli: "Công cụ dòng lệnh",
+      embedded: "Hệ thống nhúng"
+    } as Readonly<Record<string, string>>
+  }
+} as const
+
+export const slotTextFor = (language: string | undefined) => SLOT_TEXT[isVietnamese(language) ? "vi" : "en"]

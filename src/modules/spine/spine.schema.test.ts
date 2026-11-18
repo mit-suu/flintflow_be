@@ -104,7 +104,7 @@ const sampleSpine = (): Spine => {
     {
       id: "D1",
       kind: "usecase",
-      puml: "@startuml\n@enduml",
+      format: "puml", source: "@startuml\n@enduml",
       section: "fixed:2.2.1",
       owner_kind: null,
       owner_id: null,
@@ -137,7 +137,10 @@ const sampleSpine = (): Spine => {
       resolved_at: null,
       waived_by_user: true,
       waive_reason: "Out of scope for the first release",
-      waived_at_version: 1
+      waived_at_version: 1,
+      kept_reason: null,
+      kept_by: null,
+      kept_at: null
     }
   ]
   s.sections = [{ id: "fixed:1", asset_version: "1.0.0" }]
@@ -152,7 +155,7 @@ describe.each([
   ["thiếu cả hai chiều", undefined, undefined],
   ["chỉ chiều vào", ["payment result"], undefined],
   ["cả hai chiều", ["payment result"], ["payment request"]]
-])("actorSchema — flows: %s", (_label, flowsIn, flowsOut) => {
+])("actorSchema - flows: %s", (_label, flowsIn, flowsOut) => {
   it("parse được, giữ nguyên giá trị", () => {
     const actor = {
       id: "A01",
@@ -187,7 +190,7 @@ describe("spineSchema", () => {
     ["flags[].level", (s) => (s.flags[0].level = "orange" as never)],
     ["nfrs[].category", (s) => (s.nfrs[0].category = "security" as never)],
     ["functions[].priority", (s) => (s.functions[0].priority = "high" as never)],
-    ["diagrams[].kind", (s) => (s.diagrams[0].kind = "sequence" as never)],
+    ["diagrams[].kind", (s) => (s.diagrams[0].kind = "timing" as never)],
     ["assumptions[].status", (s) => (s.assumptions[0].status = "maybe" as never)]
   ])("từ chối enum sai: %s", (_label, mutate) => {
     const s = sampleSpine()
@@ -195,7 +198,7 @@ describe("spineSchema", () => {
     expect(spineSchema.safeParse(s).success).toBe(false)
   })
 
-  it("từ chối status lưu trong sections[] (A7 — status là hàm tính)", () => {
+  it("từ chối status lưu trong sections[] (A7 - status là hàm tính)", () => {
     const s = sampleSpine()
     Object.assign(s.sections[0], { status: "accepted" })
     expect(spineSchema.safeParse(s).success).toBe(false)
@@ -265,6 +268,22 @@ describe("other_requirements[].statement_vi (FLF-237)", () => {
   })
 })
 
+describe("messages[].type / context (P07)", () => {
+  it("Spine cũ không có type / context vẫn hợp lệ; có thì giữ; loại lạ bị từ chối", () => {
+    const spine = createEmptySpine({ name: "MSG" })
+    spine.messages = [
+      { id: "M01", code: "AUTH-001", text: "The code is incorrect.", function_ids: [] },
+      { id: "M02", code: "BOOK-001", text: "Your booking is confirmed.", function_ids: [], type: "success", context: "After a booking is saved" }
+    ]
+    const parsed = spineSchema.parse(JSON.parse(JSON.stringify(spine)))
+    expect(parsed.messages[0].type).toBeUndefined()
+    expect(parsed.messages[1]).toMatchObject({ type: "success", context: "After a booking is saved" })
+    const bad = JSON.parse(JSON.stringify(spine))
+    bad.messages[0].type = "toast"
+    expect(spineSchema.safeParse(bad).success).toBe(false)
+  })
+})
+
 describe("assumptions[].statement_vi (FLF-221)", () => {
   const assumption = {
     id: "AS1",
@@ -311,7 +330,7 @@ describe("assumptions[].statement_vi (FLF-221)", () => {
   })
 })
 
-describe("baselineSchema — type / doc_version (FLF-171, contract-change mode 1)", () => {
+describe("baselineSchema - type / doc_version (FLF-171, contract-change mode 1)", () => {
   const legacy = { id: "B1", version: "v1.0", at: AT, snapshot_ref: "650000000000000000000009", checked_at_version: 4, waived_count: 0 }
 
   it("baseline cũ (trước FLF-171) không có type/doc_version ⇒ đọc ra generated / null", () => {
@@ -348,10 +367,10 @@ describe("baselineSchema — type / doc_version (FLF-171, contract-change mode 1
   })
 })
 
-describe("mode 1 v2 — steps skipped + custom_sections (FLF-182, contract-change)", () => {
+describe("mode 1 v2 - steps skipped + custom_sections (FLF-182, contract-change)", () => {
   const custom = {
     id: "CS01",
-    heading: "Phụ lục A — Biên bản họp",
+    heading: "Phụ lục A - Biên bản họp",
     level: 1,
     source: "import" as const,
     blocks: [
@@ -463,5 +482,23 @@ describe("JSON Schema", () => {
     expect(fs.existsSync(file), `Thiếu ${file}`).toBe(true)
     const onDisk = fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n")
     expect(onDisk).toBe(serializeJsonSchema())
+  })
+})
+
+describe("FLF-365 - Spine thêm references / verifications / release (chỉ thêm)", () => {
+  it("Spine cũ không có field mới ⇒ parse được, mảng mới = []; giá trị mới hợp lệ được nhận", () => {
+    const old = createEmptySpine({ name: "Lumen", domain: "E-learning" }) as Partial<Spine>
+    delete old.references
+    delete old.verifications
+    const parsed = spineSchema.parse(old)
+    expect(parsed.references).toEqual([])
+    expect(parsed.verifications).toEqual([])
+    const withNew = spineSchema.parse({
+      ...createEmptySpine({ name: "Lumen", domain: "E-learning" }),
+      references: [{ id: "REF-01", title: "ISO/IEC/IEEE 29148:2018", kind: "normative" }],
+      verifications: [{ id: "VER-01", requirement_id: "NFR-01", method: "test", artifact: "TC-NFR-01", status: "not run" }]
+    })
+    expect(withNew.references[0].kind).toBe("normative")
+    expect(() => spineSchema.parse({ ...createEmptySpine({ name: "x", domain: "y" }), verifications: [{ id: "VER-01", requirement_id: "F-01", method: "guess" }] })).toThrow()
   })
 })

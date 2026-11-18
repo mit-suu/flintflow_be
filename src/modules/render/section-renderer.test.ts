@@ -6,7 +6,7 @@ import { listSections } from "../spine/section-registry.js"
 import { translationUnits, type UnitValue } from "../translation/translation-units.js"
 import { localizeSpine, renderView } from "./localized-spine.js"
 import type { Block } from "./rendered-document.types.js"
-import { buildRecordOfChanges, renderSection, sectionHeadingOf, type SectionRenderContext } from "./section-renderer.js"
+import { buildRecordOfChanges, renderContentSlot, renderSection, sectionHeadingOf, type SectionRenderContext } from "./section-renderer.js"
 
 const emptySpine = (): Spine => ({
   project: {
@@ -20,7 +20,7 @@ const emptySpine = (): Spine => ({
     form_factor: [],
     stakes: null,
     working_mode: null,
-    review_mode: "balanced" as const,
+    review_mode: "balanced", skip_confirm_sections: [] as const,
     release_scope: { in: [], out: [] }
   },
   progress: { current_phase: null, current_step: null, screen_cursor: null, screen_queue: [], elicit_turns_this_phase: 0 },
@@ -41,12 +41,17 @@ const emptySpine = (): Spine => ({
   glossary: [],
   addendum: [],
   custom_sections: [],
+  references: [],
+  verifications: [],
+  deployment_nodes: [],
+  deployment_links: [],
   diagrams: [],
   assumptions: [],
   decisions: [],
   flags: [],
   sections: [],
   baselines: [],
+  baseline_submission: null,
   spine_version: 1
 })
 
@@ -77,7 +82,7 @@ const spine = (): Spine => ({
       feature_id: "F1",
       name: "Login",
       description: "Entry screen.",
-      flow_to: ["S02"],
+      flow_to: [{ to: "S02", trigger: "Submit credentials" }],
       is_popup: false,
       tabs: [],
       primary_function_id: "FN01",
@@ -143,11 +148,11 @@ const spine = (): Spine => ({
   other_requirements: [{ id: "OR01", kind: "risk", statement: "Provider pricing may change." }],
   glossary: [{ id: "G01", term: "SRS", definition: "Software Requirement Specification." }],
   diagrams: [
-    { id: "D01", kind: "context", section: "fixed:1", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok", source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" },
-    { id: "D02", kind: "usecase", section: "fixed:2.2.1", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok", source_hash: "h2", rendered_at: "2026-09-01T00:00:00.000Z" },
-    { id: "D03", kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok", source_hash: "h3", rendered_at: "2026-09-01T00:00:00.000Z" },
-    { id: "D04", kind: "erd", section: "fixed:3.1.5", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok", source_hash: "h4", rendered_at: "2026-09-01T00:00:00.000Z" },
-    { id: "D05", kind: "screen_layout", section: "function:FN01", owner_kind: "screen", owner_id: "S01", puml: "@startuml\n@enduml", render_status: "ok", source_hash: "h5", rendered_at: "2026-09-01T00:00:00.000Z" }
+    { id: "D01", kind: "context", section: "fixed:1", owner_kind: null, owner_id: null, format: "puml", source: "@startuml\n@enduml", render_status: "ok", source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" },
+    { id: "D02", kind: "usecase", section: "fixed:2.2.1", owner_kind: null, owner_id: null, format: "puml", source: "@startuml\n@enduml", render_status: "ok", source_hash: "h2", rendered_at: "2026-09-01T00:00:00.000Z" },
+    { id: "D03", kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null, format: "puml", source: "@startuml\n@enduml", render_status: "ok", source_hash: "h3", rendered_at: "2026-09-01T00:00:00.000Z" },
+    { id: "D04", kind: "erd", section: "fixed:3.1.5", owner_kind: null, owner_id: null, format: "puml", source: "@startuml\n@enduml", render_status: "ok", source_hash: "h4", rendered_at: "2026-09-01T00:00:00.000Z" },
+    { id: "D05", kind: "screen_layout", section: "function:FN01", owner_kind: "screen", owner_id: "S01", format: "puml", source: "@startuml\n@enduml", render_status: "ok", source_hash: "h5", rendered_at: "2026-09-01T00:00:00.000Z" }
   ]
 })
 
@@ -160,8 +165,8 @@ const ctx = (overrides: Partial<SectionRenderContext> = {}): SectionRenderContex
   ...overrides
 })
 
-describe("renderSection — fixed sections", () => {
-  it("fixed:1 — vision, goals, release scope, high business rules, external systems, context diagram", () => {
+describe("renderSection - fixed sections", () => {
+  it("fixed:1 - vision, goals, release scope, high business rules, external systems, context diagram", () => {
     const section = renderSection(spine(), "fixed:1", ctx({ number: "1" }))
     expect(section).toMatchSnapshot()
     expect(section.heading).toBe("Product Overview")
@@ -175,36 +180,66 @@ describe("renderSection — fixed sections", () => {
     expect(text).toContain("Payment Gateway")
   })
 
-  it("fixed:2.1 — actors table (mọi actor, mọi kind)", () => {
+  it("fixed:2.1 - actors table (mọi actor, mọi kind)", () => {
     const section = renderSection(spine(), "fixed:2.1", ctx({ number: "2.1" }))
     const table = section.blocks[0]
     expect(table).toMatchObject({ type: "table", header: [[{ text: "ID" }], [{ text: "Name" }], [{ text: "Kind" }], [{ text: "Description" }]] })
     expect(table.type === "table" && table.rows).toHaveLength(2)
   })
 
-  it("fixed:2.2.1 — use case diagram image only", () => {
+  it("fixed:2.2.1 - use case diagram image only", () => {
     const section = renderSection(spine(), "fixed:2.2.1", ctx({ number: "2.2.1" }))
     expect(section.blocks).toEqual([{ type: "image", png: "png-d02", caption: "Use Case Diagram" }])
   })
 
-  it("fixed:3.1.1 — chỉ ảnh sơ đồ, chú thích 'Screens flow for <actor>' lấy từ title của từng hình", () => {
+  it("fixed:2.2.1 / fixed:2.1 - hình use case theo feature lấy chú thích từ <title> của SVG; hình phân cấp actor nằm ở §2.1 sau bảng actor", () => {
     const s = spine()
-    const base = s.diagrams.find((d) => d.id === "D03")!
+    const base = s.diagrams.find((d) => d.id === "D02")!
+    const svg = (title: string) => `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><title>${title}</title></svg>\n`
     s.diagrams = [
-      ...s.diagrams.filter((d) => d.id !== "D03"),
-      { ...base, id: "D03-1", puml: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Founder";\n}\n@enddot' },
-      { ...base, id: "D03-2", puml: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Guest";\n}\n@enddot' }
+      ...s.diagrams.filter((d) => d.id !== "D02"),
+      { ...base, id: "D02", format: "svg", source: svg("Use Cases - Account &amp; Access") },
+      { ...base, id: "D02-2", format: "svg", source: svg("Use Cases - Billing (2/2)") },
+      { ...base, id: "D02-3", format: "svg", section: "fixed:2.1", source: svg("Actor Hierarchy") }
     ]
-    const section = renderSection(s, "fixed:3.1.1", ctx({ number: "3.1.1", diagramPng: (id) => `png-${id}` }))
-    expect(section.blocks).toEqual([
-      { type: "image", png: "png-D03-1", caption: "Screens flow for Founder" },
-      { type: "image", png: "png-D03-2", caption: "Screens flow for Guest" }
+    const withPng = ctx({ diagramPng: (id) => `png-${id}` })
+    expect(renderSection(s, "fixed:2.2.1", withPng).blocks).toEqual([
+      { type: "image", png: "png-D02", caption: "Use Cases - Account & Access" },
+      { type: "image", png: "png-D02-2", caption: "Use Cases - Billing (2/2)" }
     ])
-    // Hình không có title (sơ đồ chung trước khi tách actor) giữ chú thích cũ
-    expect(renderSection(spine(), "fixed:3.1.1", ctx()).blocks).toEqual([{ type: "image", png: "png-d03", caption: "Screens Flow Diagram" }])
+    const actors = renderSection(s, "fixed:2.1", withPng).blocks
+    expect(actors[0].type).toBe("table")
+    expect(actors[1]).toEqual({ type: "image", png: "png-D02-3", caption: "Actor Hierarchy" })
+    // Không có hình phân cấp ⇒ §2.1 chỉ có bảng
+    expect(renderSection(spine(), "fixed:2.1", ctx()).blocks).toHaveLength(1)
   })
 
-  it("fixed:2.2.2 — bảng 6 cột, in tên actor và tên use case", () => {
+  it("fixed:3.1.1 - mỗi hình luồng màn có chú thích lấy từ <title> của SVG và một đoạn chú giải ký pháp", () => {
+    const s = spine()
+    const base = s.diagrams.find((d) => d.id === "D03")!
+    const svg = (title: string) => `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><title>${title}</title></svg>
+`
+    s.diagrams = [
+      ...s.diagrams.filter((d) => d.id !== "D03"),
+      { ...base, id: "D03", format: "svg", source: svg("Screens flow (1/2)") },
+      { ...base, id: "D03-2", format: "svg", source: svg("Screens flow (2/2)") }
+    ]
+    const section = renderSection(s, "fixed:3.1.1", ctx({ number: "3.1.1", diagramPng: (id) => `png-${id}` }))
+    const note = { type: "paragraph", runs: [{ text: "Rectangles are screens, ovals are pop-ups and a framed box lists the tabs of a screen; arrows show navigation. Blue screens are used by every kind of user." }] }
+    expect(section.blocks).toEqual([
+      { type: "image", png: "png-D03", caption: "Screens flow (1/2)" },
+      note,
+      { type: "image", png: "png-D03-2", caption: "Screens flow (2/2)" },
+      note
+    ])
+    const vi = renderSection(s, "fixed:3.1.1", ctx({ number: "3.1.1", language: "vi", diagramPng: (id) => `png-${id}` })).blocks[1]
+    expect(vi).toMatchObject({ type: "paragraph", runs: [{ text: expect.stringContaining("hình ô-van là pop-up") }] })
+    // Hình không có title giữ chú thích mặc định
+    expect(renderSection(spine(), "fixed:3.1.1", ctx()).blocks[0]).toEqual({ type: "image", png: "png-d03", caption: "Screens Flow Diagram" })
+  })
+
+  it("fixed:2.2.2 - bảng 6 cột, in tên actor và tên use case", () => {
     const section = renderSection(spine(), "fixed:2.2.2", ctx({ number: "2.2.2" }))
     const table = section.blocks[0]
     expect(table).toMatchObject({ type: "table" })
@@ -215,14 +250,14 @@ describe("renderSection — fixed sections", () => {
     expect(table.type === "table" && table.rows[1][5]).toEqual([{ text: "" }])
   })
 
-  it("fixed:3.1.2 — bảng Feature | Screen dùng số hiệu feature tính lúc assemble (numberOf)", () => {
+  it("fixed:3.1.2 - bảng Feature | Screen dùng số hiệu feature tính lúc assemble (numberOf)", () => {
     const section = renderSection(spine(), "fixed:3.1.2", ctx({ number: "3.1.2" }))
     const table = section.blocks[0]
     expect(table.type === "table" && table.rows[0][0]).toEqual([{ text: "3.2 Authentication" }])
     expect(table.type === "table" && table.rows[1][0]).toEqual([{ text: "3.3 Dashboard" }])
   })
 
-  it("fixed:3.1.3 — ma trận màn × vai trò (T15 review T9: cột = role, hàng = screen, ô = action gộp)", () => {
+  it("fixed:3.1.3 - ma trận màn × vai trò (T15 review T9: cột = role, hàng = screen, ô = action gộp)", () => {
     const section = renderSection(spine(), "fixed:3.1.3", ctx({ number: "3.1.3" }))
     expect(section.blocks).toEqual([
       {
@@ -230,13 +265,13 @@ describe("renderSection — fixed sections", () => {
         header: [[{ text: "Screen" }], [{ text: "Registered User" }]],
         rows: [
           [[{ text: "Login" }], [{ text: "view" }]],
-          [[{ text: "Dashboard" }], [{ text: "—" }]]
+          [[{ text: "Dashboard" }], [{ text: "-" }]]
         ]
       }
     ])
   })
 
-  it("fixed:3.1.3 — có vai trò mà chưa phân quyền ⇒ bảng vai trò (kèm tác nhân), không để mục trống; chưa có gì ⇒ không khối", () => {
+  it("fixed:3.1.3 - có vai trò mà chưa phân quyền ⇒ bảng vai trò (kèm tác nhân), không để mục trống; chưa có gì ⇒ không khối", () => {
     const base = spine()
     const rolesOnly = { ...base, permissions: [] }
     const section = renderSection(rolesOnly, "fixed:3.1.3", ctx({ number: "3.1.3" }))
@@ -246,20 +281,141 @@ describe("renderSection — fixed sections", () => {
     expect(renderSection({ ...base, permissions: [], roles: [] }, "fixed:3.1.3", ctx({ number: "3.1.3" })).blocks).toEqual([])
   })
 
-  it("fixed:3.1.4 — chỉ function non-screen", () => {
+  it("fixed:3.1.4 - chỉ function non-screen", () => {
     const section = renderSection(spine(), "fixed:3.1.4", ctx({ number: "3.1.4" }))
     const table = section.blocks[0]
     expect(table.type === "table" && table.rows).toHaveLength(1)
     expect(table.type === "table" && table.rows[0][0]).toEqual([{ text: "Nightly Aggregate" }])
   })
 
-  it("fixed:3.1.5 — erd image + bảng entity", () => {
+  it("FLF-411: chức năng khung của mẫu (<<Function Name 1>>) không in ở bảng 3.1.4", () => {
+    const s = spine()
+    const slot = { ...s.functions.find((f) => f.screen_id === null)!, id: "FR-3.2.1", name: "<<Function Name 1>>" }
+    const section = renderSection({ ...s, functions: [...s.functions, slot] }, "fixed:3.1.4", ctx({ number: "3.1.4" }))
+    const table = section.blocks[0]
+    expect(table.type === "table" && table.rows.map((r) => r[0][0])).toEqual([{ text: "Nightly Aggregate" }])
+  })
+
+  it("fixed:3.1.5 - erd image + bảng entity", () => {
     const section = renderSection(spine(), "fixed:3.1.5", ctx({ number: "3.1.5" }))
     expect(section.blocks[0]).toEqual({ type: "image", png: "png-d04", caption: "Entity Relationship Diagram" })
     expect(section.blocks[1]).toMatchObject({ type: "table" })
   })
 
-  it("fixed:4.2.2 — bảng nfr có metric/threshold", () => {
+  it("fixed:3.1.5 - state machine của entity có vòng đời đứng sau bảng entity: hình + chú thích từ <title> + đoạn mô tả (EN / VI)", () => {
+    const base = spine()
+    const svg = (entity: string) => `<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><title>State Machine Diagram - ${entity}</title></svg>`
+    const first = base.entities[0]
+    first.states = [
+      { id: "ST1", name: "Pending", initial: true },
+      { id: "ST2", name: "Approved" },
+      { id: "ST3", name: "Closed", final: true }
+    ]
+    first.transitions = [
+      { from: "ST1", to: "ST2", event: "approve" },
+      { from: "ST2", to: "ST3", event: "close" },
+      { from: "ST2", to: "ST2", event: "touch" }
+    ]
+    const withMachine: Spine = {
+      ...base,
+      diagrams: [
+        ...base.diagrams,
+        { id: "D20", kind: "state_machine", section: "fixed:3.1.5", owner_kind: "entity", owner_id: first.id, format: "svg", source: svg(first.name), render_status: "ok", source_hash: "h20", rendered_at: "2026-09-01T00:00:00.000Z" },
+        { id: "D21", kind: "state_machine", section: "fixed:3.1.5", owner_kind: "entity", owner_id: base.entities[1].id, format: "svg", source: svg("Broken"), render_status: "error", source_hash: "h21", rendered_at: "2026-09-01T00:00:00.000Z" }
+      ]
+    }
+    const png = (id: string) => `png-${id}`
+    const blocks = renderSection(withMachine, "fixed:3.1.5", ctx({ number: "3.1.5", diagramPng: png })).blocks
+    expect(blocks[0]).toMatchObject({ type: "image", caption: "Entity Relationship Diagram" })
+    expect(blocks[1]).toMatchObject({ type: "table" })
+    expect(blocks[2]).toEqual({ type: "image", png: "png-D20", caption: `State Machine Diagram - ${first.name}` })
+    expect(blocks[3]).toMatchObject({ type: "paragraph" })
+    expect(JSON.stringify(blocks[3])).toContain(`starts in \\"Pending\\" and ends in \\"Closed\\"; it has 3 states and 3 transitions`)
+    // hình lỗi giữ chỗ bằng marker `diagram-error:<id>`, chú thích nói chưa vẽ được
+    expect(blocks[4]).toEqual({ type: "image", png: "diagram-error:D21", caption: "State Machine Diagram - Broken - diagram could not be drawn yet" })
+    expect(blocks).toHaveLength(6)
+    const vi = renderSection(withMachine, "fixed:3.1.5", ctx({ number: "3.1.5", language: "vi", diagramPng: png })).blocks
+    expect(JSON.stringify(vi[3])).toContain("bắt đầu ở trạng thái")
+  })
+
+  it("function:<id> - sơ đồ tuần tự của function đứng cuối mục: hình + chú thích theo ngôn ngữ + đoạn mô tả; hình lỗi giữ chỗ", () => {
+    const base = spine()
+    base.actors.push({ id: "A77", name: "Reviewer", kind: "human" } as Spine["actors"][number])
+    const fn = base.functions.find((f) => f.id === "FN01")!
+    fn.interactions = [
+      { from: "A77", to: "system", message: "Submit review", kind: "request", flow: "normal" },
+      { from: "system", to: "A77", message: "Show error", kind: "response", flow: "abnormal", guard: "review is empty" },
+      { from: "system", to: "A77", message: "Show saved", kind: "response", flow: "normal" }
+    ]
+    const entry = (id: string, owner: string, status: "ok" | "error") =>
+      ({ id, kind: "sequence", section: `function:${owner}`, owner_kind: "function", owner_id: owner, format: "puml", source: "@startuml\n@enduml", render_status: status, source_hash: "h", rendered_at: "2026-09-01T00:00:00.000Z" }) as Spine["diagrams"][number]
+    const withDiagram: Spine = { ...base, diagrams: [...base.diagrams, entry("D30", "FN01", "ok"), entry("D31", "FN02", "error")] }
+    const png = (id: string) => `png-${id}`
+    for (const layout of [undefined, "fpt" as const]) {
+      const blocks = renderSection(withDiagram, "function:FN01", ctx({ number: "3.2.1", functionLayout: layout, diagramPng: png })).blocks
+      const at = blocks.findIndex((b) => b.type === "image" && b.png === "png-D30")
+      expect(blocks[at]).toEqual({ type: "image", png: "png-D30", caption: `System Sequence Diagram - ${fn.name}` })
+      expect(JSON.stringify(blocks[at + 1])).toContain("The diagram shows 3 messages between Reviewer and the system")
+      expect(JSON.stringify(blocks[at + 1])).toContain("1 messages of the error branches")
+      expect(at + 2).toBe(blocks.length)
+    }
+    const vi = renderSection(withDiagram, "function:FN01", ctx({ number: "3.2.1", language: "vi", diagramPng: png })).blocks
+    expect(vi.some((b) => b.type === "image" && b.caption === `Sơ đồ tuần tự hệ thống - ${fn.name}`)).toBe(true)
+    expect(JSON.stringify(vi[vi.length - 1])).toContain("Sơ đồ mô tả 3 message giữa Reviewer và hệ thống")
+    const failed = renderSection(withDiagram, "function:FN02", ctx({ number: "3.3.1", diagramPng: png })).blocks.filter((b) => b.type === "image")
+    expect(failed).toEqual([{ type: "image", png: "diagram-error:D31", caption: expect.stringMatching(/ - diagram could not be drawn yet$/) }])
+  })
+
+  it("FLF-418 function:<id> - sơ đồ đã vẽ mức thành phần: chú thích \"Sequence Diagram\" + mô tả màn / bộ điều khiển / entity", () => {
+    const base = spine()
+    base.actors.push({ id: "A77", name: "Reviewer", kind: "human" } as Spine["actors"][number])
+    const fn = base.functions.find((f) => f.id === "FN01")!
+    fn.component_interactions = [
+      { from: "A77", to: "control", message: "Submit review", kind: "request", flow: "normal" },
+      { from: "control", to: "A77", message: "Show error", kind: "response", flow: "abnormal", guard: "review is empty" }
+    ]
+    const source = ["@startuml", 'actor ":Reviewer" as A77', 'control ":ReviewController" as SD_CONTROL', "@enduml"].join("\n")
+    const entry = { id: "D30", kind: "sequence", section: "function:FN01", owner_kind: "function", owner_id: "FN01", format: "puml", source, render_status: "ok", source_hash: "h", rendered_at: "2026-09-01T00:00:00.000Z" } as Spine["diagrams"][number]
+    const withDiagram: Spine = { ...base, diagrams: [...base.diagrams, entry] }
+    const png = (id: string) => `png-${id}`
+    const blocks = renderSection(withDiagram, "function:FN01", ctx({ number: "3.2.1", diagramPng: png })).blocks
+    const at = blocks.findIndex((b) => b.type === "image" && b.png === "png-D30")
+    expect(blocks[at]).toEqual({ type: "image", png: "png-D30", caption: `Sequence Diagram - ${fn.name}` })
+    expect(JSON.stringify(blocks[at + 1])).toContain("The diagram shows 2 messages between Reviewer, the controller")
+    const vi = renderSection(withDiagram, "function:FN01", ctx({ number: "3.2.1", language: "vi", diagramPng: png })).blocks
+    expect(vi.some((b) => b.type === "image" && b.caption === `Sơ đồ tuần tự - ${fn.name}`)).toBe(true)
+    expect(JSON.stringify(vi[vi.length - 1])).toContain("bộ điều khiển")
+  })
+
+  it("feature:<id> - class diagram của feature đứng đầu mục (cả mẫu FPT), chú thích lấy từ <title>", () => {
+    const base = spine()
+    const svg = '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><title>Class Diagram - Authentication</title></svg>'
+    const withClass: Spine = {
+      ...base,
+      diagrams: [
+        ...base.diagrams,
+        { id: "D06", kind: "class", section: "feature:F1", owner_kind: "feature", owner_id: "F1", format: "svg", source: svg, render_status: "ok", source_hash: "h6", rendered_at: "2026-09-01T00:00:00.000Z" },
+        { id: "D07", kind: "class", section: "feature:F2", owner_kind: "feature", owner_id: "F2", format: "svg", source: svg, render_status: "error", source_hash: "h7", rendered_at: "2026-09-01T00:00:00.000Z" }
+      ]
+    }
+    const png = (id: string) => `png-${id}`
+    const fpt = renderSection(withClass, "feature:F1", ctx({ number: "3.2", functionLayout: "fpt", diagramPng: png }))
+    expect(fpt.blocks).toEqual([{ type: "image", png: "png-D06", caption: "Class Diagram - Authentication" }])
+    const mode1 = renderSection(withClass, "feature:F1", ctx({ number: "3.2", diagramPng: png }))
+    expect(mode1.blocks[0]).toMatchObject({ type: "image", png: "png-D06" })
+    expect(mode1.blocks.length).toBeGreaterThan(1)
+    // hình lỗi giữ chỗ (không tải PNG cũ theo id); feature khác không lấy hình của feature này
+    expect(renderSection(withClass, "feature:F2", ctx({ number: "3.3", functionLayout: "fpt", diagramPng: png })).blocks).toEqual([
+      { type: "image", png: "diagram-error:D07", caption: "Class Diagram - Authentication - diagram could not be drawn yet" }
+    ])
+    expect(renderSection(withClass, "feature:F2", ctx({ number: "3.3", functionLayout: "fpt", language: "vi", diagramPng: png })).blocks).toEqual([
+      { type: "image", png: "diagram-error:D07", caption: "Sơ đồ lớp - Authentication - sơ đồ chưa vẽ được" }
+    ])
+    const vi = renderSection(withClass, "feature:F1", ctx({ number: "3.2", functionLayout: "fpt", language: "vi", diagramPng: png }))
+    expect(vi.blocks[0]).toMatchObject({ caption: "Sơ đồ lớp - Authentication" })
+  })
+
+  it("fixed:4.2.2 - bảng nfr có metric/threshold", () => {
     const section = renderSection(spine(), "fixed:4.2.2", ctx({ number: "4.2.2" }))
     expect(section.blocks).toEqual([
       {
@@ -270,12 +426,12 @@ describe("renderSection — fixed sections", () => {
     ])
   })
 
-  it("fixed:5.1 — chỉ business_rules tier=detail", () => {
+  it("fixed:5.1 - chỉ business_rules tier=detail", () => {
     const section = renderSection(spine(), "fixed:5.1", ctx({ number: "5.1" }))
     expect(section.blocks).toEqual([{ type: "bullet_list", items: [[{ text: "Password must be hashed." }]] }])
   })
 
-  it("fixed:5.5 — glossary luôn render (derived)", () => {
+  it("fixed:5.5 - glossary luôn render (derived)", () => {
     const section = renderSection(spine(), "fixed:5.5", ctx({ number: "5.5", status: "derived" }))
     expect(section.status).toBe("derived")
     expect(section.blocks[0]).toMatchObject({ type: "table" })
@@ -287,15 +443,15 @@ describe("renderSection — fixed sections", () => {
   })
 })
 
-describe("renderSection — feature/function", () => {
-  it("feature:<id> — liệt kê screens của feature, heading = tên feature", () => {
+describe("renderSection - feature/function", () => {
+  it("feature:<id> - liệt kê screens của feature, heading = tên feature", () => {
     const section = renderSection(spine(), "feature:F1", ctx({ number: "3.2" }))
     expect(section.heading).toBe("Authentication")
     expect(section.level).toBe(2)
     expect(section.blocks).toEqual([{ type: "paragraph", runs: [{ text: "Screens: Login" }] }])
   })
 
-  it("function:<id> — trigger/description/normal/abnormal/validations/business rules + ảnh screen_layout khi là primary_function_id", () => {
+  it("function:<id> - trigger/description/normal/abnormal/validations/business rules + ảnh screen_layout khi là primary_function_id", () => {
     const section = renderSection(spine(), "function:FN01", ctx({ number: "3.2.1" }))
     expect(section.heading).toBe("Submit Credentials")
     expect(section.level).toBe(3)
@@ -314,7 +470,7 @@ describe("renderSection — feature/function", () => {
     expect(JSON.stringify(blocks)).not.toContain("Function trigger")
   })
 
-  it("function:<id> — mẫu FPT: 4 nhóm heading 4, mục con là danh sách gạch đầu dòng, mục trống ghi N/A", () => {
+  it("function:<id> - mẫu FPT: 4 nhóm heading 4, mục con là danh sách gạch đầu dòng, mục trống ghi N/A", () => {
     const item = (label: string, text?: string) => (text === undefined ? [{ text: `${label}: `, bold: true }] : [{ text: `${label}: `, bold: true }, { text }])
     const bullets = (...items: ReturnType<typeof item>[]) => ({ type: "bullet_list", items })
     const h = (text: string) => ({ type: "heading", level: 4, text })
@@ -331,7 +487,7 @@ describe("renderSection — feature/function", () => {
         item("Data processing", "System verifies.")
       ),
       h("Screen layout"),
-      { type: "image", png: "png-d05", caption: "Screen Layout — Login" },
+      { type: "image", png: "png-d05", caption: "Screen Layout - Login" },
       h("Function details"),
       bullets(
         item("Data", "User"),
@@ -351,25 +507,25 @@ describe("renderSection — feature/function", () => {
     expect(nonScreen[nonScreen.findIndex((b) => b.type === "heading" && b.text === "Screen layout") + 1]).toEqual({ type: "paragraph", runs: [{ text: "N/A" }] })
   })
 
-  it("feature:<id> — mẫu FPT chỉ có tiêu đề, không nội dung; mode 1 giữ dòng liệt kê màn", () => {
+  it("feature:<id> - mẫu FPT chỉ có tiêu đề, không nội dung; mode 1 giữ dòng liệt kê màn", () => {
     expect(renderSection(spine(), "feature:F1", ctx({ number: "3.2", functionLayout: "fpt" })).blocks).toEqual([])
     expect(renderSection(spine(), "feature:F1", ctx({ number: "3.2" })).blocks).not.toEqual([])
   })
 
-  it("function:<id> — mẫu FPT: Navigation path theo Screens Flow, Actors chỉ actor người, Interface đọc từ wireframe", () => {
+  it("function:<id> - mẫu FPT: Navigation path theo Screens Flow, Actors chỉ actor người, Interface đọc từ wireframe", () => {
     const s = spine()
     s.actors.push({ id: "A02", name: "Buyer", kind: "human", description: "" })
     s.roles.push({ id: "R2", name: "Buyer role", actor_id: "A02" }, { id: "R3", name: "Gateway role", actor_id: "A05" })
     s.permissions.push({ id: "P2", screen_id: "S03", role_id: "R2", action: "view" }, { id: "P3", screen_id: "S03", role_id: "R3", action: "view" })
     s.screens.push({ id: "S03", feature_id: "F2", name: "Settings", description: "", flow_to: [], is_popup: true, tabs: [], primary_function_id: "FN03", queue_order: 3, detail_status: "signed_off" })
-    s.screens[1].flow_to = ["S03"]
+    s.screens[1].flow_to = [{ to: "S03" }]
     s.diagrams.push({
       id: "D06",
       kind: "screen_layout",
       section: "function:FN03",
       owner_kind: "screen",
       owner_id: "S03",
-      puml: ["@startsalt", "{^\"Settings\"", "  Project name", "  \"Sunrise Villa        \"", "  [ ] Archived", "  { [ Cancel ] | [   Save   ] }", "}", "@endsalt", ""].join("\n"),
+      format: "puml", source: ["@startsalt", "{^\"Settings\"", "  Project name", "  \"Sunrise Villa        \"", "  [ ] Archived", "  { [ Cancel ] | [   Save   ] }", "}", "@endsalt", ""].join("\n"),
       render_status: "ok",
       source_hash: "h6",
       rendered_at: "2026-09-01T00:00:00.000Z"
@@ -399,7 +555,7 @@ describe("renderSection — feature/function", () => {
     expect(value("Business rules")).toBe("Password must be hashed.")
   })
 
-  it("function:<id> không phải primary_function_id của màn — không nhúng ảnh screen_layout", () => {
+  it("function:<id> không phải primary_function_id của màn - không nhúng ảnh screen_layout", () => {
     const withSecondFn: Spine = { ...spine(), functions: [...spine().functions, { id: "FN03", screen_id: "S01", feature_id: "F1", order: 1, name: "Toggle", trigger: "t", description: "d", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null }] }
     const section = renderSection(withSecondFn, "function:FN03", ctx({ number: "3.2.2" }))
     expect(section.blocks.some((b) => b.type === "image")).toBe(false)
@@ -490,6 +646,65 @@ describe("buildRecordOfChanges", () => {
     ])
   })
 
+  it("FLF-318: mỗi CR một dòng; FLF-361: mang số bản tài liệu của CR (sau v1.0 là v1.1, v1.2), release in đúng v2.0", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", op: "add", path: "baselines[]", step_id: "S-9.5", reason: "Ký baseline v1.0" }),
+      change({ txn: "t2", step_id: null, by: "CR-001", reason: "CR-001: Thêm use case gửi cảnh báo" }),
+      change({ txn: "t3", step_id: null, by: "CR-002", reason: "CR-002: Sửa tên màn" }),
+      change({ txn: "t4", op: "add", path: "baselines[]", step_id: null, reason: "Baseline 2.0", at: "2026-09-02T09:00:00.000Z" }),
+      change({ txn: "t5", step_id: null, by: "CR-003", reason: "CR-003: Bổ sung NFR", at: "2026-09-03T09:00:00.000Z" })
+    ], undefined, "vi")
+    expect(rows.map((r) => [r.version, r.description])).toEqual([
+      ["v1.0", "Ký baseline v1.0"],
+      ["v1.1", "CR-001: Thêm use case gửi cảnh báo"],
+      ["v1.2", "CR-002: Sửa tên màn"],
+      ["v2.0", "Ký baseline 2.0"],
+      ["v2.1", "CR-003: Bổ sung NFR"]
+    ])
+  })
+
+  it("FLF-318: baseline import 0.1 in v0.1 (trước đây rơi về v1.0); FLF-361: CR sau đó là bản 0.2", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", op: "add", path: "baselines[]", step_id: null, by: "import", reason: "Baseline 0.1" }),
+      change({ txn: "t2", step_id: null, by: "CR-001", reason: "CR-001: Sửa mô tả" })
+    ])
+    expect(rows.map((r) => r.version)).toEqual(["v0.1", "v0.2"])
+  })
+
+  it("FLF-361: sau CR đầu tiên chỉ thêm một dòng cho CR (v0.2) - baseline import cùng bản với dòng import v0.1, không in dòng riêng", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", step_id: null, by: "import", reason: "Import SRS FAP_SRS_v1.0_fixed.docx" }),
+      change({ txn: "t2", step_id: null, by: "import", reason: "Import: kế hoạch step theo template" }),
+      change({ txn: "t2b", step_id: null, by: "import", reason: "render" }),
+      change({ txn: "t3", op: "add", path: "baselines[]", step_id: null, by: "import", reason: "Baseline 0.1" }),
+      change({ txn: "t4", step_id: null, by: "import", reason: "AI check: term_drift" }),
+      change({ txn: "t5", step_id: null, by: "CR-001", reason: "CR-001: Khoá tài khoản sau 3 lần đăng nhập sai liên tiếp." })
+    ], undefined, "vi")
+    expect(rows.map((r) => [r.version, r.description])).toEqual([
+      ["v0.1", "Import SRS FAP_SRS_v1.0_fixed.docx"],
+      ["v0.2", "CR-001: Khoá tài khoản sau 3 lần đăng nhập sai liên tiếp."]
+    ])
+  })
+
+  it("FLF-411 (U2-6): tài liệu tiếng Anh, tiêu đề CR là câu chat tiếng Việt ⇒ mô tả dựng từ thay đổi; In charge do resolver trả", () => {
+    const spine = { use_cases: [{ id: "UC-05", name: "Checkout" }] } as unknown as Spine
+    const rows = buildRecordOfChanges(
+      [
+        change({ txn: "t1", op: "add", path: "baselines[]", step_id: null, by: "import", reason: "Baseline 0.1" }),
+        change({ txn: "t2", step_id: null, by: "CR-001", path: "project.system_name", reason: "CR-001: Đổi tên hệ thống thành TechMart Store nhé" }),
+        change({ txn: "t2", step_id: null, by: "CR-001", op: "add", path: "use_cases[id=UC-05]", reason: "CR-001: Đổi tên hệ thống thành TechMart Store nhé" }),
+        change({ txn: "t3", step_id: null, by: "CR-002", path: "nfrs[id=NFR-01].threshold", reason: "CR-002: Faster response time" })
+      ],
+      (by) => (by === "CR-001" ? "Tuan Anh" : by),
+      "en",
+      spine
+    )
+    expect(rows.slice(1).map((r) => [r.version, r.in_charge, r.description])).toEqual([
+      ["v0.2", "Tuan Anh", 'CR-001: Update system name; Add use case "Checkout"'],
+      ["v0.3", "CR-002", "CR-002: Faster response time"]
+    ])
+  })
+
   it("FLF-204 (BUG-15): sổ sách của runner không vào §I", () => {
     const rows = buildRecordOfChanges([
       change({ txn: "t1", reason: "step-runner: elicit turn" }),
@@ -542,7 +757,7 @@ describe("buildRecordOfChanges", () => {
 
 // ─── FLF-265: nhãn tiếng Việt của mẫu FPT (mode 2) ─────────────────
 
-describe("renderSection — mẫu FPT tiếng Việt (FLF-265)", () => {
+describe("renderSection - mẫu FPT tiếng Việt (FLF-265)", () => {
   const vi = (overrides: Partial<SectionRenderContext> = {}) => ctx({ functionLayout: "fpt", language: "vi", ...overrides })
   const bulletItems = (blocks: ReturnType<typeof renderSection>["blocks"]) => blocks.flatMap((b) => (b.type === "bullet_list" ? b.items : []))
   const tableOf = (blocks: ReturnType<typeof renderSection>["blocks"]) => {
@@ -579,7 +794,7 @@ describe("renderSection — mẫu FPT tiếng Việt (FLF-265)", () => {
     expect(value("Giao diện")).toBe("Màn hình Login: Entry screen.")
     // "System verifies." vẫn được chọn vào Xử lý dữ liệu (lọc trên chữ Anh của Spine)
     expect(value("Xử lý dữ liệu")).toBe("System verifies.")
-    expect(blocks).toContainEqual({ type: "image", png: "png-d05", caption: "Bố cục màn hình — Login" })
+    expect(blocks).toContainEqual({ type: "image", png: "png-d05", caption: "Bố cục màn hình - Login" })
 
     const nonScreen = renderSection(spine(), "function:FN02", vi({ number: "3.3.1" })).blocks
     const nsValue = (label: string) => bulletItems(nonScreen).find((i) => i[0].text === `${label}: `)?.[1]?.text
@@ -598,7 +813,7 @@ describe("renderSection — mẫu FPT tiếng Việt (FLF-265)", () => {
   it("nhãn enum trong ô bảng: actor kind, quyền, ưu tiên, nhóm yêu cầu chung, loại yêu cầu khác; giá trị lạ giữ nguyên", () => {
     const rows = (id: string, s: Spine = spine()) => (tableOf(renderSection(s, id, vi()).blocks)?.rows ?? []).map(texts)
     expect(rows("fixed:2.1").map((r) => r[2])).toEqual(["người dùng", "hệ thống"])
-    expect(rows("fixed:3.1.3")).toEqual([["Login", "xem"], ["Dashboard", "—"]])
+    expect(rows("fixed:3.1.3")).toEqual([["Login", "xem"], ["Dashboard", "-"]])
     expect(rows("fixed:4.2.2")[0][3]).toBe("Phải có")
     expect(rows("fixed:5.2")).toEqual([["Phân trang", "Lists paginate at 20."]])
     expect(rows("fixed:5.4")).toEqual([["Rủi ro", "Provider pricing may change."]])
@@ -617,7 +832,7 @@ describe("renderSection — mẫu FPT tiếng Việt (FLF-265)", () => {
       "Mở rộng"
     ])
     expect(texts(tableOf(renderSection({ ...spine(), permissions: [] }, "fixed:3.1.3", vi()).blocks)?.header ?? [])).toEqual(["Vai trò", "Tác nhân"])
-    expect(JSON.stringify(renderSection(spine(), "fixed:1", vi({ number: "1" })).blocks)).toContain("Payment Gateway (hệ thống) — Processes payments.")
+    expect(JSON.stringify(renderSection(spine(), "fixed:1", vi({ number: "1" })).blocks)).toContain("Payment Gateway (hệ thống) - Processes payments.")
 
     const s = spine()
     s.entities[0].relation_optional = ["E02"]
@@ -647,7 +862,7 @@ describe("renderSection — mẫu FPT tiếng Việt (FLF-265)", () => {
   })
 })
 
-describe("buildRecordOfChanges — tiếng Việt (FLF-265)", () => {
+describe("buildRecordOfChanges - tiếng Việt (FLF-265)", () => {
   const change = (over: Partial<Parameters<typeof buildRecordOfChanges>[0][number]>) => ({
     txn: "t1",
     op: "set",
@@ -697,7 +912,7 @@ describe("buildRecordOfChanges — tiếng Việt (FLF-265)", () => {
 
 // ─── FLF-265 D11: bản xem đã dịch — logic dựa chữ Anh quyết trên Spine gốc (`ctx.canonical`) ─────
 
-describe("renderSection — bản xem đã dịch + ctx.canonical (FLF-265 D11)", () => {
+describe("renderSection - bản xem đã dịch + ctx.canonical (FLF-265 D11)", () => {
   const fixture = (): Spine =>
     spineSchema.parse(JSON.parse(readFileSync(new URL("../../../fixtures/spine-fixture-19-screens.json", import.meta.url), "utf8")))
 
@@ -708,8 +923,7 @@ describe("renderSection — bản xem đã dịch + ctx.canonical (FLF-265 D11)"
     s.use_cases[0].actor_ids = ["A01", "A03"]
     s.functions[0].validations.push({ id: "FN01-V2", kind: "business", statement: "Passwords are stored hashed." })
     s.diagrams = s.diagrams.map((d) => {
-      if (d.id === "D03") return { ...d, puml: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Founder";\n}\n@enddot' }
-      if (d.id === "D05") return { ...d, puml: ["@startsalt", "{", "  Login", "  Email", '  "john@example.com"', "  [ Log in ]", "}", "@endsalt", ""].join("\n") }
+      if (d.id === "D05") return { ...d, format: "puml", source: ["@startsalt", "{", "  Login", "  Email", '  "john@example.com"', "  [ Log in ]", "}", "@endsalt", ""].join("\n") }
       return d
     })
     return s
@@ -776,19 +990,7 @@ describe("renderSection — bản xem đã dịch + ctx.canonical (FLF-265 D11)"
     expect(blind["Giao diện"]).toContain('chữ "Login"')
   })
 
-  it("chú thích sơ đồ luồng màn: tên actor trong hình (tiếng Anh) đổi sang tên actor đã dịch cùng id", () => {
-    const captions = (s: Spine, overrides: Partial<SectionRenderContext> = {}) =>
-      renderSection(s, "fixed:3.1.1", ctx({ number: "3.1.1", functionLayout: "fpt", ...overrides })).blocks.map((b) => (b.type === "image" ? b.caption : null))
-    const s = canonical()
-    expect(captions(s)).toEqual(["Screens flow for Founder"])
-    expect(captions(translatedView(s), { language: "vi", canonical: s })).toEqual(["Luồng màn hình của Nhà sáng lập"])
-    // Hình vẽ trước khi đổi tên actor (không khớp actor gốc nào) ⇒ giữ tên trong hình, chỉ dịch phần đầu
-    const renamed = canonical()
-    renamed.actors[0].name = "Owner"
-    expect(captions(translatedView(renamed), { language: "vi", canonical: renamed })).toEqual(["Luồng màn hình của Founder"])
-  })
-
-  it("fixture 19 màn: mọi function — Xử lý dữ liệu / Dữ liệu / Tác nhân cùng dòng như bản tiếng Anh", () => {
+  it("fixture 19 màn: mọi function - Xử lý dữ liệu / Dữ liệu / Tác nhân cùng dòng như bản tiếng Anh", () => {
     const f = fixture()
     const view = translatedView(f)
     const asVi = (value: string | string[] | undefined, split = false): string | string[] | undefined => {
@@ -818,5 +1020,35 @@ describe("renderSection — bản xem đã dịch + ctx.canonical (FLF-265 D11)"
         }
       }
     }
+  })
+})
+
+describe("FLF-365 - phần nhỏ tham khảo / phân bổ / kiểm chứng (Mode 1)", () => {
+  const tableOf = (blocks: Block[]) => blocks.find((b): b is Extract<Block, { type: "table" }> => b.type === "table")!
+  const cells = (row: Extract<Block, { type: "table" }>["header"]) => row.map((c) => c.map((r) => r.text).join(""))
+
+  it("bảng tài liệu tham khảo, bảng yêu cầu × bản phát hành (cột Hoãn riêng), ma trận kiểm chứng; rỗng ⇒ không in", () => {
+    const spine: Spine = {
+      ...emptySpine(),
+      references: [{ id: "REF-01", title: "ISO/IEC/IEEE 29148:2018", version: "2018", kind: "normative" }],
+      functions: [
+        { id: "FN001", screen_id: null, feature_id: "F1", order: 0, name: "Đăng ký", trigger: "", description: "", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: "must", release: "1.0" },
+        { id: "FN002", screen_id: null, feature_id: "F1", order: 1, name: "Xuất báo cáo", trigger: "", description: "", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: "could", release: "deferred" }
+      ],
+      verifications: [{ id: "VER-01", requirement_id: "FN001", method: "test", artifact: "TC-FN001", status: "not run" }]
+    }
+    const refs = tableOf(renderContentSlot(spine, "slot:references", ctx({ language: "vi" })))
+    expect(cells(refs.header)).toEqual(["Mã", "Tên tài liệu", "Đơn vị", "Phiên bản", "Ngày", "Nơi lưu", "Loại"])
+    expect(cells(refs.rows[0])).toEqual(["REF-01", "ISO/IEC/IEEE 29148:2018", "", "2018", "", "", "Bắt buộc"])
+    const app = tableOf(renderContentSlot(spine, "slot:apportioning", ctx({ language: "en" })))
+    expect(cells(app.header)).toEqual(["Requirement", "1.0", "Deferred"])
+    expect(app.rows.map(cells)).toEqual([
+      ["FN001 Đăng ký", "✓", ""],
+      ["FN002 Xuất báo cáo", "", "✓"]
+    ])
+    const ver = tableOf(renderContentSlot(spine, "slot:verification", ctx({ language: "en" })))
+    expect(cells(ver.rows[0])).toEqual(["FN001", "Test", "TC-FN001", "not run", ""])
+    expect(renderContentSlot(emptySpine(), "slot:references", ctx())).toEqual([])
+    expect(renderContentSlot(emptySpine(), "slot:apportioning", ctx())).toEqual([])
   })
 })

@@ -18,7 +18,9 @@
 
 import type { Spine } from "./spine.types.js"
 import { tryResolve } from "./path-resolver.js"
+import { CONTROL_LIFELINE, SYSTEM_LIFELINE } from "./spine.schema.js"
 import { FIXED_SECTION_ID_LIST } from "./section-registry.js"
+import { isContentSlot } from "../import/content-slots.js"
 
 export type TargetCollection =
   | "actors"
@@ -30,10 +32,15 @@ export type TargetCollection =
   | "business_rules"
   | "entities"
   | "validations"
+  | "states"
+  | "activity_nodes"
+  | "deployment_nodes"
   | "custom_sections"
   | "section_key"
   | "path"
   | "diagram_owner"
+  /** FLF-418: đầu message của sơ đồ tuần tự mức thành phần — id actor, màn (boundary) hoặc entity. */
+  | "lifeline"
 
 export interface ReferenceField {
   /** Tên field theo §4.1, ví dụ `use_cases[].actor_ids[]`. */
@@ -67,7 +74,21 @@ export const REFERENCE_FIELDS: readonly ReferenceField[] = Object.freeze([
   { path: "sections[].id", targetCollection: "section_key", cardinality: "one" },
   { path: "progress.screen_cursor", targetCollection: "screens", cardinality: "one" },
   { path: "progress.screen_queue[]", targetCollection: "screens", cardinality: "many" },
-  { path: "steps[].id", targetCollection: "screens", cardinality: "one" }
+  { path: "steps[].id", targetCollection: "screens", cardinality: "one" },
+  { path: "entities[].feature_ids[]", targetCollection: "features", cardinality: "many" },
+  { path: "entities[].transitions[].from", targetCollection: "states", cardinality: "one" },
+  { path: "entities[].transitions[].to", targetCollection: "states", cardinality: "one" },
+  { path: "entities[].transitions[].business_rule_ids[]", targetCollection: "business_rules", cardinality: "many" },
+  { path: "functions[].interactions[].from", targetCollection: "actors", cardinality: "one" },
+  { path: "functions[].interactions[].to", targetCollection: "actors", cardinality: "one" },
+  { path: "use_cases[].activity_nodes[].lane", targetCollection: "actors", cardinality: "one" },
+  { path: "use_cases[].activity_flows[].from", targetCollection: "activity_nodes", cardinality: "one" },
+  { path: "use_cases[].activity_flows[].to", targetCollection: "activity_nodes", cardinality: "one" },
+  { path: "deployment_nodes[].parent_id", targetCollection: "deployment_nodes", cardinality: "one" },
+  { path: "deployment_links[].from", targetCollection: "deployment_nodes", cardinality: "one" },
+  { path: "deployment_links[].to", targetCollection: "deployment_nodes", cardinality: "one" },
+  { path: "functions[].component_interactions[].from", targetCollection: "lifeline", cardinality: "one" },
+  { path: "functions[].component_interactions[].to", targetCollection: "lifeline", cardinality: "one" }
 ] as const satisfies readonly ReferenceField[])
 
 /** Section cố định của template FPT — từ section registry (T09). */
@@ -76,7 +97,7 @@ export const FIXED_SECTION_IDS: readonly string[] = FIXED_SECTION_ID_LIST
 const FIXED_SECTION_SET = new Set(FIXED_SECTION_IDS)
 
 /** `owner_kind` của diagram → collection đích. */
-export const DIAGRAM_OWNER_COLLECTIONS: Readonly<Record<string, Exclude<TargetCollection, "section_key" | "path" | "diagram_owner">>> =
+export const DIAGRAM_OWNER_COLLECTIONS: Readonly<Record<string, Exclude<TargetCollection, "section_key" | "path" | "diagram_owner" | "lifeline">>> =
   Object.freeze({
     screen: "screens",
     feature: "features",
@@ -87,7 +108,10 @@ export const DIAGRAM_OWNER_COLLECTIONS: Readonly<Record<string, Exclude<TargetCo
 
 // ─── id index ────────────────────────────────────────────────────
 
-export type IdCollection = Exclude<TargetCollection, "section_key" | "path" | "diagram_owner">
+export type IdCollection = Exclude<TargetCollection, "section_key" | "path" | "diagram_owner" | "lifeline">
+
+/** FLF-418: collection mà một đầu `lifeline` có thể trỏ tới. */
+export const LIFELINE_COLLECTIONS = ["actors", "screens", "entities"] as const satisfies readonly IdCollection[]
 
 export type IdIndex = Record<IdCollection, Set<string>>
 
@@ -103,6 +127,9 @@ export const buildIdIndex = (spine: Spine): IdIndex => ({
   business_rules: ids(spine.business_rules),
   entities: ids(spine.entities),
   validations: new Set(spine.functions.flatMap((f) => f.validations.map((v) => v.id))),
+  states: new Set(spine.entities.flatMap((e) => (e.states ?? []).map((s) => s.id))),
+  activity_nodes: new Set(spine.use_cases.flatMap((u) => (u.activity_nodes ?? []).map((n) => n.id))),
+  deployment_nodes: ids(spine.deployment_nodes ?? []),
   custom_sections: ids(spine.custom_sections)
 })
 
@@ -112,7 +139,8 @@ export const sectionKeyExists = (index: IdIndex, sectionId: string): boolean => 
   if (sectionId.startsWith("feature:")) return index.features.has(sectionId.slice("feature:".length))
   if (sectionId.startsWith("function:")) return index.functions.has(sectionId.slice("function:".length))
   if (sectionId.startsWith("custom:")) return index.custom_sections.has(sectionId.slice("custom:".length))
-  return false
+  // Phần nhỏ của mẫu upload (FLF-278; FLF-365 `slot:verification`…) là mục thật của bản in Mode 1
+  return isContentSlot(sectionId)
 }
 
 // ─── iterate ─────────────────────────────────────────────────────
@@ -155,7 +183,21 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
     sectionId,
     cursor,
     queue,
-    stepId
+    stepId,
+    entityFeatures,
+    transitionFrom,
+    transitionTo,
+    transitionRules,
+    interactionFrom,
+    interactionTo,
+    activityLane,
+    activityFrom,
+    activityTo,
+    deploymentParent,
+    deploymentFrom,
+    deploymentTo,
+    componentFrom,
+    componentTo
   ] = REFERENCE_FIELDS
 
   // BUG-04: phần tử thiếu mảng tham chiếu (model bỏ trống `includes`…) không được làm sập cả lô
@@ -172,6 +214,15 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
 
   for (const uc of spine.use_cases) {
     const owner = `use_cases[id=${uc.id}]`
+    // FLF-390: làn của nút activity là actor (trừ `system`); control flow không có id — khoá from + to, đầu chết ⇒ gỡ flow
+    for (const n of uc.activity_nodes ?? []) {
+      if (typeof n.lane === "string" && n.lane !== SYSTEM_LIFELINE) yield one(activityLane, `${owner}.activity_nodes[id=${n.id}]`, "lane", n.lane)
+    }
+    for (const fl of uc.activity_flows ?? []) {
+      const at = `${owner}.activity_flows[from=${fl.from},to=${fl.to}]`
+      yield { field: activityFrom, ownerPath: at, refPath: `${at}.from`, targetId: fl.from, target: "activity_nodes" }
+      yield { field: activityTo, ownerPath: at, refPath: `${at}.to`, targetId: fl.to, target: "activity_nodes" }
+    }
     yield* many(ucActors, owner, "actor_ids", uc.actor_ids)
     yield* many(ucFunctions, owner, "function_ids", uc.function_ids)
     yield* many(ucIncludes, owner, "includes", uc.includes)
@@ -180,7 +231,10 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
   for (const s of spine.screens) {
     const owner = `screens[id=${s.id}]`
     yield one(screenFeature, owner, "feature_id", s.feature_id)
-    yield* many(screenFlow, owner, "flow_to", s.flow_to)
+    // Cạnh luồng: khoá là `to` của phần tử object (`flow_to[to=S08]`), không phải chuỗi
+    for (const e of s.flow_to ?? []) {
+      yield { field: screenFlow, ownerPath: owner, refPath: `${owner}.flow_to[to=${e.to}]`, targetId: e.to, target: screenFlow.targetCollection }
+    }
     if (s.primary_function_id !== null) yield one(screenPrimary, owner, "primary_function_id", s.primary_function_id)
   }
   for (const p of spine.permissions) {
@@ -199,8 +253,40 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
     if (f.screen_id !== null) yield one(fnScreen, owner, "screen_id", f.screen_id)
     yield one(fnFeature, owner, "feature_id", f.feature_id)
     yield* many(fnRules, owner, "business_rule_ids", f.business_rule_ids)
+    // Message không có id: khoá là from + to + message + kind + flow; đầu `system` là hộp đen, không phải actor
+    for (const i of f.interactions ?? []) {
+      const at = `${owner}.interactions[from=${i.from},to=${i.to},message=${i.message},kind=${i.kind},flow=${i.flow}]`
+      if (i.from !== SYSTEM_LIFELINE) yield { field: interactionFrom, ownerPath: at, refPath: `${at}.from`, targetId: i.from, target: "actors" }
+      if (i.to !== SYSTEM_LIFELINE) yield { field: interactionTo, ownerPath: at, refPath: `${at}.to`, targetId: i.to, target: "actors" }
+    }
+    // FLF-418: mức thành phần — đầu `control` không phải phần tử Spine; đầu khác là actor / màn / entity
+    for (const i of f.component_interactions ?? []) {
+      const at = `${owner}.component_interactions[from=${i.from},to=${i.to},message=${i.message},kind=${i.kind},flow=${i.flow}]`
+      if (i.from !== CONTROL_LIFELINE) yield { field: componentFrom, ownerPath: at, refPath: `${at}.from`, targetId: i.from, target: "lifeline" }
+      if (i.to !== CONTROL_LIFELINE) yield { field: componentTo, ownerPath: at, refPath: `${at}.to`, targetId: i.to, target: "lifeline" }
+    }
+
   }
-  for (const e of spine.entities) yield* many(entityRelations, `entities[id=${e.id}]`, "relations", e.relations)
+  // FLF-390: nút triển khai lồng nhau; đường truyền thông không có id — khoá from + to, đầu chết ⇒ gỡ đường
+  for (const n of spine.deployment_nodes ?? []) {
+    if (n.parent_id !== null) yield one(deploymentParent, `deployment_nodes[id=${n.id}]`, "parent_id", n.parent_id)
+  }
+  for (const l of spine.deployment_links ?? []) {
+    const at = `deployment_links[from=${l.from},to=${l.to}]`
+    yield { field: deploymentFrom, ownerPath: at, refPath: `${at}.from`, targetId: l.from, target: "deployment_nodes" }
+    yield { field: deploymentTo, ownerPath: at, refPath: `${at}.to`, targetId: l.to, target: "deployment_nodes" }
+  }
+  for (const e of spine.entities) {
+    yield* many(entityRelations, `entities[id=${e.id}]`, "relations", e.relations)
+    yield* many(entityFeatures, `entities[id=${e.id}]`, "feature_ids", e.feature_ids)
+    // Chuyển trạng thái không có id: khoá là `from` + `to` + `event`; `from` / `to` chết ⇒ gỡ cả transition
+    for (const t of e.transitions ?? []) {
+      const owner = `entities[id=${e.id}].transitions[from=${t.from},to=${t.to},event=${t.event}]`
+      yield { field: transitionFrom, ownerPath: owner, refPath: `${owner}.from`, targetId: t.from, target: "states" }
+      yield { field: transitionTo, ownerPath: owner, refPath: `${owner}.to`, targetId: t.to, target: "states" }
+      yield* many(transitionRules, owner, "business_rule_ids", t.business_rule_ids)
+    }
+  }
   for (const br of spine.business_rules) {
     yield* many(ruleValidations, `business_rules[id=${br.id}]`, "source_validation_ids", br.source_validation_ids)
   }
@@ -243,6 +329,8 @@ export const referenceAlive = (spine: Spine, index: IdIndex, hit: ReferenceHit):
       return tryResolve(spine, hit.targetId) !== null
     case "diagram_owner":
       return true
+    case "lifeline":
+      return LIFELINE_COLLECTIONS.some((c) => index[c].has(hit.targetId))
     default:
       return index[hit.target].has(hit.targetId)
   }

@@ -10,7 +10,8 @@ import type {
   CreateInvitationDTO,
   CreateOrganizationDTO,
   DeleteOrganizationDTO,
-  RenameOrganizationDTO
+  RenameOrganizationDTO,
+  SwitchOrganizationDTO
 } from "./organization.validation.js"
 
 const requireUserId = (req: Request): string => {
@@ -60,7 +61,9 @@ export const switchOrganization = catchAsync(async (req: Request, res: Response)
     req.user?.email ?? "",
     req.user?.role,
     orgId,
-    req.cookies?.refreshToken
+    req.cookies?.refreshToken,
+    req.user?.sid,
+    (req.body as SwitchOrganizationDTO | undefined)?.rememberAsDefault
   )
   return sendSuccess(res, 200, result)
 })
@@ -106,15 +109,22 @@ export const revokeInvitation = catchAsync(async (req: Request, res: Response) =
 })
 
 export const previewInvitation = catchAsync(async (req: Request, res: Response) => {
-  return sendSuccess(res, 200, await invitationService.previewInvitation(req.params.code as string))
+  requireUserId(req)
+  return sendSuccess(
+    res,
+    200,
+    await invitationService.previewInvitation(req.params.code as string, req.account?.email ?? req.user?.email ?? "")
+  )
 })
 
 export const acceptInvitation = catchAsync(async (req: Request, res: Response) => {
   const result = await invitationService.acceptInvitation(
     req.params.code as string,
     requireUserId(req),
-    req.user?.email ?? "",
-    req.user?.role
+    req.account?.email ?? req.user?.email ?? "",
+    req.user?.role,
+    req.cookies?.refreshToken,
+    req.user?.sid
   )
   return sendSuccess(res, 200, result)
 })

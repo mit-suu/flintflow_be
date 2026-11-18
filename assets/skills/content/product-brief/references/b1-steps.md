@@ -1,6 +1,6 @@
-# B-1 — sáu bước của Product Brief
+# B-1 - sáu bước của Product Brief
 
-> Tài liệu cho người. **Không nạp lúc chạy** — bảng thực thi nằm trong `../SKILL.md`.
+> Tài liệu cho người. **Không nạp lúc chạy** - bảng thực thi nằm trong `../SKILL.md`.
 
 Nội dung sáu bước kế thừa từ prompt `assets/prompts/chat_discovery.md` (bản cũ), nhưng khác ở chỗ quan
 trọng nhất: **bản cũ để mọi thứ trong JSON tin nhắn và để LLM tự đánh giá đã đủ hay chưa**; bản này ghi
@@ -19,12 +19,12 @@ thẳng vào Spine và để **user** chốt ở gate.
 
 Sai: "có nút export", "dùng AI". Đúng: "rút thời gian ra bản SRS đạt chuẩn từ vài tuần xuống một ngày".
 Phép thử: nếu câu đó vẫn đúng khi đổi hoàn toàn cách làm, đó là goal; nếu nó chết theo một tính năng cụ
-thể, đó là feature — cho vào addendum `fixed:3.1.2`.
+thể, đó là feature - cho vào addendum `fixed:3.1.2`.
 
 ## `content` và `content_en`
 
 `content` giữ nguyên chữ của user (thường tiếng Việt) để B-2.2 triage đúng ý họ; `content_en` là bản
-tiếng Anh sẽ được render vào tài liệu. Dịch lúc ghi, không để dành — đọc lại sau một tuần thì không giữ
+tiếng Anh sẽ được render vào tài liệu. Dịch lúc ghi, không để dành - đọc lại sau một tuần thì không giữ
 được đúng sắc thái nữa.
 
 ## B-1.5 có số hay không

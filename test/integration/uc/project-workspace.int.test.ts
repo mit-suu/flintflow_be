@@ -21,7 +21,7 @@ vi.mock("../../../src/shared/utils/cloudinary.js", () => ({
 import app from "../../../src/app.js"
 import { User } from "../../../src/modules/user/user.model.js"
 import { Membership, type OrgRole } from "../../../src/modules/organization/membership.model.js"
-import { Project } from "../../../src/modules/project/project.model.js"
+import { Project, WITH_DELETED } from "../../../src/modules/project/project.model.js"
 import { ChatSession } from "../../../src/modules/project/chat-session.model.js"
 import { ProjectDocument } from "../../../src/modules/project/project-document.model.js"
 import { Spine } from "../../../src/modules/spine/spine.model.js"
@@ -51,15 +51,15 @@ beforeEach(async () => {
 
 // ─── UC-18 ──────────────────────────────────────────────────────────
 
-describe("UC-18 — đổi tên dự án", () => {
+describe("UC-18 - đổi tên dự án", () => {
   const rename = (token: string, name: unknown, projectId = seeded.projectId) =>
     request(app).patch(projectUrl(projectId, "/name")).set(bearer(token)).send({ name })
 
   it("Lead đổi tên ⇒ 200, tên mới được lưu", async () => {
-    const res = await rename(lead, "Lumen — bản đổi tên")
+    const res = await rename(lead, "Lumen - bản đổi tên")
     expect(res.status).toBe(200)
-    expect(res.body.data.name).toBe("Lumen — bản đổi tên")
-    expect((await Project.findById(seeded.projectId))?.name).toBe("Lumen — bản đổi tên")
+    expect(res.body.data.name).toBe("Lumen - bản đổi tên")
+    expect((await Project.findById(seeded.projectId))?.name).toBe("Lumen - bản đổi tên")
   })
 
   it("Analyst (Author) cũng đổi tên được", async () => {
@@ -108,20 +108,25 @@ describe("UC-18 — đổi tên dự án", () => {
 
 // ─── UC-19 ──────────────────────────────────────────────────────────
 
-describe("UC-19 — xoá dự án", () => {
+describe("UC-19 - xoá dự án", () => {
   const remove = (token: string, projectId = seeded.projectId, hard = true) =>
     request(app)
       .delete(projectUrl(projectId) + (hard ? "?hard=true" : ""))
       .set(bearer(token))
 
-  it("Lead xoá vĩnh viễn ⇒ 200, dự án và dữ liệu đi kèm (Spine, phiên chat) biến mất", async () => {
+  it("Lead xoá vĩnh viễn ⇒ 200, dự án biến khỏi app; FLF-401: BE chỉ xoá mềm — bản ghi, Spine, phiên chat còn nguyên", async () => {
+    const chatsBefore = await ChatSession.countDocuments({ projectId: seeded.projectId })
     const res = await remove(lead)
     expect(res.status).toBe(200)
     expect(res.body.data).toMatchObject({ _id: seeded.projectId, status: "deleted" })
 
+    // Truy vấn thường không thấy dự án đã xoá; bật WITH_DELETED mới thấy, kèm dấu xoá
     expect(await Project.countDocuments({ _id: seeded.projectId })).toBe(0)
-    expect(await Spine.countDocuments({ projectId: seeded.projectId })).toBe(0)
-    expect(await ChatSession.countDocuments({ projectId: seeded.projectId })).toBe(0)
+    const kept = await Project.findById(seeded.projectId).setOptions(WITH_DELETED).lean()
+    expect(kept?.deletedAt).toBeInstanceOf(Date)
+    expect(String(kept?.deletedBy)).toBe(String(seeded.userId))
+    expect(await Spine.countDocuments({ projectId: seeded.projectId })).toBe(1)
+    expect(await ChatSession.countDocuments({ projectId: seeded.projectId })).toBe(chatsBefore)
 
     const open = await request(app).get(projectUrl(seeded.projectId)).set(bearer(lead))
     expect(open.status).toBe(404)
@@ -162,7 +167,7 @@ describe("UC-19 — xoá dự án", () => {
 
 // ─── UC-20 ──────────────────────────────────────────────────────────
 
-describe("UC-20 — xem tiến độ SRS", () => {
+describe("UC-20 - xem tiến độ SRS", () => {
   /** Fixture minimal ở lượt ký bản ⇒ mở cờ đỏ (xem flags.int.test.ts). */
   const openRedFlags = async (): Promise<number> => {
     const res = await request(app)
@@ -229,7 +234,7 @@ describe("UC-20 — xem tiến độ SRS", () => {
 
 // ─── UC-21 ──────────────────────────────────────────────────────────
 
-describe("UC-21 — đính kèm tài liệu tham khảo", () => {
+describe("UC-21 - đính kèm tài liệu tham khảo", () => {
   const upload = (token: string, buffer: Buffer, filename: string, contentType?: string) =>
     request(app)
       .post(projectUrl(seeded.projectId, "/documents"))

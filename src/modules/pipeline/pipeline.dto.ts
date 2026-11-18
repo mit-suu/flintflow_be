@@ -12,16 +12,19 @@
  */
 
 import { z } from "zod"
+import { docVersionString } from "../doc-version/doc-version.dto.js"
 import {
   baselineSchema,
+  baselineSubmissionSchema,
   changeSchema,
   flagSchema,
   spineRecordSchema,
   WAIVE_REASON_MIN_LENGTH
 } from "../spine/spine.schema.js"
 import { opSchema, userOpSchema } from "../spine/op.types.js"
-import { COMMENT_ID_PATTERN, COMMENT_STATUSES, COMMENT_TEXT_MAX } from "../comment/comment.model.js"
+import { COMMENT_ID_PATTERN, COMMENT_RESOLUTIONS, COMMENT_STATUSES, COMMENT_TEXT_MAX, KEEP_REASON_MIN_LENGTH } from "../comment/comment.model.js"
 import { ORG_ROLES } from "../organization/membership.model.js"
+import { NEW_CR_SOURCE_KINDS } from "../change-request/change-request.constants.js"
 
 // ─── mã lỗi ──────────────────────────────────────────────────────
 
@@ -97,6 +100,17 @@ const isoDateTime = z.iso.datetime({ offset: true })
 /** GET /projects/:id/spine */
 export const getSpineResponseSchema = spineRecordSchema
 
+/** FLF-294: người yêu cầu + nguồn của change request sau baseline — cùng 6 nguồn của C-1 mode 1. */
+export const changeRequestInfoSchema = z.strictObject({
+  requester: z.string().trim().min(1).max(120),
+  source: z.strictObject({
+    kind: z.enum(NEW_CR_SOURCE_KINDS),
+    ref: z.string().trim().max(300).nullable().optional()
+  })
+})
+
+export type ChangeRequestInfo = z.infer<typeof changeRequestInfoSchema>
+
 /** POST /projects/:id/changes và /changes/preview — `ops` thuần (T08) hoặc `instruction` (T17). */
 export const changesRequestSchema = z
   .strictObject({
@@ -111,7 +125,17 @@ export const changesRequestSchema = z
      * Phiên chat nơi user gõ lệnh (chip "Sửa tài liệu"): model đọc đuôi hội thoại của phiên, và lượt này
      * (lệnh + bản xem trước / câu hỏi làm rõ / đã áp) được ghi vào phiên. Không gửi ⇒ như cũ, không ghi transcript.
      */
-    session_id: z.string().min(1).optional()
+    session_id: z.string().min(1).optional(),
+    /**
+     * FLF-294 (BR-03, UC-48): sau baseline, lượt áp là một change request — bắt buộc người yêu cầu + nguồn ở `/changes`
+     * (thiếu ⇒ 400 `CR_FIELDS_REQUIRED`). Trước baseline bỏ qua. `/changes/preview` không cần.
+     */
+    change_request: changeRequestInfoSchema.optional(),
+    /**
+     * FLF-271 (UC-40): lượt sửa này là để xử lý góp ý `CM-nnn` Lead ghim khi từ chối baseline — áp xong (≥ 1 thay đổi) thì
+     * comment tự thành `resolved / fixed` (bước sở hữu mục mở lại như #31). Comment không còn mở ⇒ bỏ qua, không lỗi.
+     */
+    comment_id: z.string().regex(COMMENT_ID_PATTERN, "Mã comment không hợp lệ.").optional()
   })
   .refine((v) => (v.ops === undefined) !== (v.instruction === undefined), {
     message: "Cần đúng một trong hai: ops hoặc instruction"
@@ -208,7 +232,12 @@ export const stepSummarySchema = z.object({
   regenerate_limit: z.literal(3),
   accepted_at: isoDateTime.nullable(),
   /** Step đang chạy dở ở một request khác (cùng tiến trình BE) — FE khoá nút chạy thay vì để người dùng bấm rồi nhận 409. */
-  running: z.boolean()
+  running: z.boolean(),
+  /**
+   * FLF-278 (additive): chỉ có ở dự án theo mẫu bắt buộc (`template_intent = fixed`) — heading của mẫu (nguyên văn, thứ tự
+   * mẫu) mà bước soạn; `[]` = bước không soạn mục nào của mẫu (phân tích, kiểm tra). Dự án khác: không có field.
+   */
+  template_sections: z.array(z.string()).optional()
 })
 
 /** GET /projects/:id/steps */
@@ -517,6 +546,31 @@ export const resumeResponseSchema = z.object({
   progress: progressResponseSchema
 })
 
+// ─── mức duyệt / không hỏi lại / thay đổi tự qua (FLF-337) ─────────
+
+/** PATCH /projects/:id/review-mode */
+export const reviewModeRequestSchema = z.strictObject({ review_mode: z.enum(["strict", "balanced", "fast", "milestones"]) })
+export const reviewModeResponseSchema = z.object({ review_mode: z.enum(["strict", "balanced", "fast", "milestones"]), spine_version: z.number().int().min(0) })
+
+/** PATCH /projects/:id/skip-confirm-sections — thêm / gỡ section khỏi danh sách "không hỏi lại". */
+export const skipConfirmSectionsRequestSchema = z
+  .strictObject({ add: z.array(z.string().min(1)).max(50).optional(), remove: z.array(z.string().min(1)).max(50).optional() })
+  .refine((b) => (b.add?.length ?? 0) + (b.remove?.length ?? 0) > 0, { message: "Cần ít nhất một section để thêm hoặc gỡ." })
+export const skipConfirmSectionsResponseSchema = z.object({ skip_confirm_sections: z.array(z.string()), spine_version: z.number().int().min(0) })
+
+/** GET /projects/:id/auto-passed · POST /projects/:id/auto-passed/seen */
+export const autoPassedItemSchema = z.object({
+  id: z.string().min(1),
+  step_id: z.string().min(1),
+  label_vi: z.string(),
+  reason_vi: z.string(),
+  at: isoDateTime,
+  seen: z.boolean()
+})
+export const autoPassedResponseSchema = z.object({ total: z.number().int().min(0), unseen: z.number().int().min(0), items: z.array(autoPassedItemSchema) })
+export const autoPassedSeenRequestSchema = z.strictObject({ ids: z.array(z.string().min(1)).max(500).optional() })
+export const autoPassedSeenResponseSchema = z.object({ unseen: z.number().int().min(0) })
+
 // ─── run-state (WP-4 / 03-live-status-flow §5) ───────────────────
 
 /** GET /projects/:id/steps/:stepId/run-state · GET /projects/:id/run-state/active */
@@ -536,7 +590,47 @@ export const runStateResponseSchema = z.object({
   /** FLF-234: sự kiện `phase_gate` của bước cuối giai đoạn đang chờ duyệt (đủ tin nhắn + giả định cả giai đoạn); thiếu/null ⇒ bước lẻ. */
   phase_gate: z.unknown().nullable().optional(),
   events: z.array(z.unknown()),
-  error: z.object({ code: z.string(), message: z.string() }).nullable()
+  error: z.object({ code: z.string(), message: z.string() }).nullable(),
+  /**
+   * FLF-332: `ai_error` ⇒ lượt gãy vì AI lỗi (đã tự thử lại, credit đã hoàn), bước **tạm dừng**: `/run-state/active` vẫn trả
+   * lượt này sau khi mở lại trang để FE dựng banner "Thử lại ngay / Để sau" tại bước đó. Thiếu/null ⇒ gián đoạn thường.
+   */
+  paused_reason: z.enum(["ai_error"]).nullable().optional(),
+  /**
+   * BF §3.2 (hai người sửa cùng lúc): người khởi động lượt (`userId`) + tên hiển thị. Câu hỏi đang chờ (`waiting_answer`)
+   * **treo ở người đó** — người khác thấy "<by_name> đang trả lời câu hỏi…", không thấy thẻ câu hỏi; `/answer` của họ ⇒ 403.
+   */
+  by: z.string().nullable().optional(),
+  by_name: z.string().nullable().optional()
+})
+
+// ─── run-estimate (FLF-332) ───────────────────────────────────────
+
+/** GET /projects/:id/run-estimate?scope=unit|all&from= */
+export const runEstimateQuerySchema = z.object({
+  /** `unit`: chỉ đơn vị giai đoạn của bước đầu; `all`: tới hết pipeline (sau Approve Brief). */
+  scope: z.enum(["unit", "all"]).default("all"),
+  /** Id bước hoặc đơn vị giai đoạn (`S-4`, `S-5@S03`) để bắt đầu đếm; thiếu ⇒ bước tới lượt. */
+  from: z.string().min(1).optional()
+})
+
+export const runEstimateUnitSchema = z.object({
+  unit: z.string().min(1),
+  steps: z.number().int().min(0),
+  ai_steps: z.number().int().min(0),
+  interview_credits: z.number().min(0),
+  credits: z.number().min(0)
+})
+
+export const runEstimateResponseSchema = z.object({
+  scope: z.enum(["unit", "all"]),
+  from_step: z.string().nullable(),
+  units: z.array(runEstimateUnitSchema),
+  steps_total: z.number().int().min(0),
+  ai_steps_total: z.number().int().min(0),
+  credits_total: z.number().min(0),
+  /** `balance − reserved` của ví org sở hữu project; null khi không xác định được ví. */
+  available_credits: z.number().nullable()
 })
 
 /** POST /projects/:id/steps/:stepId/cancel */
@@ -553,6 +647,10 @@ export const flagsResponseSchema = z.array(flagSchema)
 /** POST /projects/:id/flags/:flagId/waive */
 export const waiveRequestSchema = z.strictObject({ reason: z.string().trim().min(WAIVE_REASON_MIN_LENGTH) })
 export const waiveResponseSchema = flagSchema
+
+/** POST /projects/:id/flags/:flagId/keep (FLF-329): giữ nguyên + lý do, cờ vẫn mở */
+export const keepRequestSchema = z.strictObject({ reason: z.string().trim().min(WAIVE_REASON_MIN_LENGTH) })
+export const keepResponseSchema = flagSchema
 
 /** POST /projects/:id/flags/recompute */
 export const recomputeFlagsRequestSchema = z.strictObject({ at_baseline: z.boolean().optional() })
@@ -578,14 +676,19 @@ export const documentQuerySchema = z.object({
 export const assembleRequestSchema = z.strictObject({ base_version: baseVersion })
 export const assembleResponseSchema = z.object({ spine_version: baseVersion, sections: z.number().int().min(0), generated_at: isoDateTime })
 
-/** GET /projects/:id/export/word?source= — body là file .docx */
-export const exportWordQuerySchema = documentQuerySchema
+/** Ngôn ngữ tài liệu (FLF-265): `vi` | `en`. */
+const documentLocale = z.enum(["vi", "en"])
+
+/**
+ * GET /projects/:id/export/word|pdf?source=&baseline_id=&lang= — body là file .docx / .pdf. `lang` (FLF-334 B): không
+ * truyền ⇒ ngôn ngữ tài liệu của dự án (như trước); khác ⇒ dựng từ lớp bản dịch, thiếu bản dịch ⇒ 409
+ * `TRANSLATION_INCOMPLETE`. GET /document (16) không nhận `lang` — luôn theo ngôn ngữ dự án.
+ */
+export const exportWordQuerySchema = documentQuerySchema.extend({ lang: documentLocale.optional() })
 
 // ─── Ngôn ngữ tài liệu (FLF-265) ──────────────────────────────────
-// Ngôn ngữ đọc từ `Project.documentLanguage`, không có query param. Spine mode 2 vẫn tiếng Anh; chữ ngôn ngữ khác lấy
-// từ lớp bản dịch (khoá theo hash chữ gốc). GET không bao giờ gọi model.
-
-const documentLocale = z.enum(["vi", "en"])
+// Ngôn ngữ đọc từ `Project.documentLanguage`; tải file (18, 34, mode 1 #14) nhận thêm `?lang=` (FLF-334 B). Spine mode 2
+// vẫn tiếng Anh; chữ ngôn ngữ khác lấy từ lớp bản dịch (khoá theo hash chữ gốc). GET không bao giờ gọi model.
 
 /** `meta.translation` của GET /document (16) khi ngôn ngữ tài liệu ≠ ngôn ngữ gốc. `missing` = đơn vị đang in chữ gốc. */
 export const documentTranslationMetaSchema = z.object({
@@ -593,6 +696,22 @@ export const documentTranslationMetaSchema = z.object({
   source_locale: documentLocale,
   missing: z.number().int().min(0)
 })
+
+/**
+ * FLF-334 B — phạm vi của #26 / #27: `locale` (mặc định ngôn ngữ tài liệu) + đích snapshot tuỳ chọn, cùng giá trị lượt tải
+ * dùng: `baseline_id` (mode 2, như #18 — `_id` hoặc `BLnnn`) hoặc `version` (mode 1, DocVersion có snapshot baseline). Có
+ * đích ⇒ đếm / dịch đơn vị của snapshot đó thay vì Spine hiện tại. Không truyền cả hai cùng lúc.
+ */
+const translationScopeFields = {
+  locale: documentLocale.optional(),
+  baseline_id: z.string().min(1).optional(),
+  version: docVersionString.optional()
+}
+const oneSnapshotTarget = (v: { baseline_id?: string; version?: string }) => !(v.baseline_id !== undefined && v.version !== undefined)
+const oneSnapshotTargetMessage = { message: "Chỉ chọn một trong baseline_id hoặc version.", path: ["version"] }
+
+/** GET /projects/:id/translations/status?locale=&baseline_id=|version= (FLF-334 B). Strict: key lạ (vd `lang`) ⇒ 400, không lặng lẽ đếm ngôn ngữ tài liệu. */
+export const translationStatusQuerySchema = z.strictObject(translationScopeFields).refine(oneSnapshotTarget, oneSnapshotTargetMessage)
 
 /** GET /projects/:id/translations/status — ước tính trước khi dịch (BR-01). Ngôn ngữ = gốc ⇒ `total: 0`. */
 export const translationStatusResponseSchema = z.object({
@@ -606,8 +725,10 @@ export const translationStatusResponseSchema = z.object({
 
 /** POST /projects/:id/translations/run — dịch tối đa `max_batches` lô phần còn thiếu; FE gọi lại tới `remaining = 0`. */
 export const translationRunRequestSchema = z.strictObject({
-  max_batches: z.number().int().min(1).max(10).optional()
-})
+  max_batches: z.number().int().min(1).max(10).optional(),
+  /** FLF-334 B: ngôn ngữ đích (mặc định ngôn ngữ tài liệu) + đích snapshot `baseline_id` / `version` như #26. */
+  ...translationScopeFields
+}).refine(oneSnapshotTarget, oneSnapshotTargetMessage)
 export const translationRunResponseSchema = z.object({
   translated: z.number().int().min(0),
   remaining: z.number().int().min(0),
@@ -647,10 +768,26 @@ export const createCommentSchema = z.strictObject({
 /** POST /projects/:id/comments/:commentId/replies (30) */
 export const replyCommentSchema = z.strictObject({ text: commentText })
 
-/** `:commentId` của 30, 31 (POST …/resolve, không body). */
+/** `:commentId` của 30, 31. */
 export const commentParamsSchema = z.object({
   commentId: z.string().regex(COMMENT_ID_PATTERN, "Mã comment không hợp lệ.")
 })
+
+/**
+ * POST /projects/:id/comments/:commentId/resolve (31) — hai nhánh kết luận của `business-flow.md §3.5`:
+ * `fixed` (đã sửa qua chat) hoặc `kept` (giữ nguyên, **bắt buộc lý do**). Lý do là thứ Lead đọc khi
+ * duyệt lại, nên không cho để trống hay viết cho có.
+ */
+export const resolveCommentSchema = z
+  .strictObject({
+    kind: z.enum(COMMENT_RESOLUTIONS),
+    reason: z.string().trim().max(COMMENT_TEXT_MAX).nullish()
+  })
+  .refine((v) => v.kind !== "kept" || (v.reason?.length ?? 0) >= KEEP_REASON_MIN_LENGTH, {
+    path: ["reason"],
+    message: `Giữ nguyên thì phải nêu lý do (ít nhất ${KEEP_REASON_MIN_LENGTH} ký tự).`
+  })
+  .transform((v) => ({ kind: v.kind, reason: v.kind === "kept" ? (v.reason as string) : null }))
 
 const commentPersonSchema = z.object({ _id: z.string().min(1), name: z.string().nullable(), email: z.string().nullable() })
 const orgRole = z.enum(ORG_ROLES)
@@ -669,6 +806,9 @@ export const commentSchema = z.object({
   author_role: orgRole,
   text: z.string().min(1).max(COMMENT_TEXT_MAX),
   status: z.enum(COMMENT_STATUSES),
+  resolution: z.object({ kind: z.enum(COMMENT_RESOLUTIONS), reason: z.string().nullable() }).nullable().default(null),
+  /** FLF-271: bước sở hữu mục được ghim (`stepsOf(section_id)`) — FE hiện "thuộc bước …"; mục nhóm / ngoài mẫu ⇒ `[]`. */
+  step_ids: z.array(z.string()).default([]),
   cr_id: z.string().nullable(),
   handled_by: commentPersonSchema.nullable(),
   handled_at: isoDateTime.nullable(),
@@ -679,7 +819,23 @@ export const commentsResponseSchema = z.array(commentSchema)
 
 export type CreateCommentDTO = z.infer<typeof createCommentSchema>
 
-/** POST /projects/:id/baseline (T19) — 422 BASELINE_BLOCKED nếu còn cờ đỏ chưa waive. */
+/** POST /projects/:id/baseline (T19) — Lead duyệt; 422 BASELINE_BLOCKED nếu còn cờ đỏ. */
 export const baselineRequestSchema = z.strictObject({ base_version: baseVersion })
 export const baselineResponseSchema = baselineSchema
 export const baselinesResponseSchema = z.array(baselineSchema)
+
+/** POST /projects/:id/baseline/submit (32) — Analyst gửi Lead duyệt (UC-45). */
+export const baselineSubmitRequestSchema = z.strictObject({ base_version: baseVersion })
+
+/**
+ * POST /projects/:id/baseline/reject (33) — Lead từ chối kèm lý do và comment đã ghim (UC-46).
+ * `business-flow.md §3.5`: "bắt buộc lý do **+ comment ghim**" — từ chối bằng mỗi câu lý do thì Analyst
+ * không biết sửa chỗ nào và không step nào được mở lại, nên `comment_ids` phải có ít nhất một mã.
+ */
+export const baselineRejectRequestSchema = z.strictObject({
+  base_version: baseVersion,
+  reason: z.string().trim().min(1).max(2000),
+  comment_ids: z.array(z.string().trim().regex(COMMENT_ID_PATTERN)).min(1).max(100)
+})
+
+export const baselineSubmissionResponseSchema = baselineSubmissionSchema

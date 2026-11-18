@@ -1,5 +1,6 @@
 import { Request, Response } from "express"
 import * as billingService from "./billing.service.js"
+import * as topupRequestService from "./topup-request.service.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -8,6 +9,7 @@ import {
   parseQuery,
   transactionsQuerySchema,
   CheckoutDTO,
+  TopupRequestDTO,
   PaymentCallbackDTO,
   UpgradeDTO
 } from "./billing.validation.js"
@@ -23,8 +25,17 @@ const requireUserId = (req: Request): string => {
 
 export const getBalance = catchAsync(async (req: Request, res: Response) => {
   const userId = requireUserId(req)
-  const balance = await billingService.getBalance(requireOrgId(req), userId)
+  const role = req.orgContext?.role === "lead" ? "lead" : "analyst"
+  const balance = await billingService.getBalance(requireOrgId(req), userId, role)
   return sendSuccess(res, 200, balance)
+})
+
+/** FLF-332: Analyst (hoặc Lead) báo Lead nạp credit cho ví org đang chọn. */
+export const requestTopup = catchAsync(async (req: Request, res: Response) => {
+  const userId = requireUserId(req)
+  const body = req.body as TopupRequestDTO
+  const result = await topupRequestService.requestTopup(requireOrgId(req), userId, { projectId: body.projectId ?? null, step: body.step ?? null, needed: body.needed ?? null })
+  return sendSuccess(res, 201, result)
 })
 
 export const getPackages = catchAsync(async (_req: Request, res: Response) => {
@@ -58,8 +69,10 @@ export const upgradePlan = catchAsync(async (req: Request, res: Response) => {
 })
 
 export const getTransactions = catchAsync(async (req: Request, res: Response) => {
-  const userId = requireUserId(req)
-  const { page, limit } = parseQuery(transactionsQuerySchema, req.query)
-  const result = await billingService.listTransactions(requireOrgId(req), page, limit)
+  requireUserId(req)
+  const { page, limit, kind, projectId, memberId } = parseQuery(transactionsQuerySchema, req.query)
+  // UC-59: dòng thanh toán (đang chờ / lỗi) chỉ Lead thấy
+  const includePayments = req.orgContext?.role === "lead"
+  const result = await billingService.listTransactions(requireOrgId(req), page, limit, { kind, projectId, memberId, includePayments })
   return sendSuccess(res, 200, result.items, result.meta)
 })

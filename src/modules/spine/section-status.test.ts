@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { describe, it, expect } from "vitest"
 import { spineSchema } from "./spine.schema.js"
 import type { Change, Spine } from "./spine.types.js"
-import { buildProgressReport, computeSectionStates, computeStatus, progressByStep, readiness } from "./section-status.js"
+import { buildProgressReport, computeSectionStates, computeStatus, isRerenderOnly, progressByStep, readiness } from "./section-status.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const load = (file: string): Spine =>
@@ -26,7 +26,7 @@ const change = (seq: number, p: string, step_id: string | null = null): Change =
   step_id
 })
 
-describe("FLF-204 (BUG-26) — feature chỉ accepted khi function con cũng xong", () => {
+describe("FLF-204 (BUG-26) - feature chỉ accepted khi function con cũng xong", () => {
   it("một function con còn draft ⇒ feature xuống draft", () => {
     const spine = structuredClone(FIXTURE)
     // Mở lại vòng của màn S01 (đang signed_off) ⇒ function của nó chưa chốt lại
@@ -73,7 +73,7 @@ describe("computeSectionStates", () => {
     expect(own.find((s) => s.id === "fixed:2.2.2")?.status).toBe("stale")
   })
 
-  it("vẽ lại sơ đồ mà nguồn không đổi (source_hash như cũ) không làm section stale; nguồn đổi thì có", () => {
+  it("vẽ lại sơ đồ (hash như cũ hay hash mới) không làm section stale — FLF-431; đổi dữ liệu nguồn thì có; bố cục màn vẽ lại vẫn stale", () => {
     const diagram = FIXTURE.diagrams.find((d) => d.kind === "usecase")!
     const redraw = (hashAfter: string): Change => ({
       ...change(LAST_SEQ + 1, `diagrams[id=${diagram.id}]`),
@@ -81,7 +81,22 @@ describe("computeSectionStates", () => {
       value: { ...diagram, source_hash: hashAfter, rendered_at: "2026-10-13T00:00:00.000Z" }
     })
     expect(computeStatus(FIXTURE, [redraw("h1")], "fixed:2.2.1"), "chỉ compile lại").toBe("accepted")
-    expect(computeStatus(FIXTURE, [redraw("h2")], "fixed:2.2.1"), "nguồn đổi").toBe("stale")
+    // FLF-431: hình vẽ lại theo nguồn mới không tự làm section cũ — change của trường nguồn mới là thứ làm cũ
+    expect(computeStatus(FIXTURE, [redraw("h2")], "fixed:2.2.1"), "vẽ lại theo nguồn mới").toBe("accepted")
+    const actor = FIXTURE.actors[0]
+    expect(computeStatus(FIXTURE, [redraw("h2"), change(LAST_SEQ + 2, `actors[id=${actor.id}].name`, "S-4.1")], "fixed:2.2.1"), "nguồn đổi").toBe("stale")
+    expect(isRerenderOnly({ path: "diagrams[id=D9]", before: { kind: "screen_layout", source_hash: "a" }, value: { kind: "screen_layout", source_hash: "b" } }), "bố cục màn").toBe(false)
+  })
+
+  it("FLF-431 (FAP #22): sửa sau mốc duyệt rồi hoàn tác ⇒ hết cũ; sửa TRƯỚC mốc rồi hoàn tác sau mốc ⇒ vẫn cũ", () => {
+    const edit = change(LAST_SEQ + 1, "actors[id=A01].name")
+    const undo = { ...change(LAST_SEQ + 2, "actors[id=A01].name"), op: "revert" as const, reason: `Revert seq ${LAST_SEQ + 1}` }
+    expect(computeStatus(FIXTURE, [edit], "fixed:2.1")).toBe("stale")
+    expect(computeStatus(FIXTURE, [edit, undo], "fixed:2.1")).toBe("accepted")
+    // Change gốc nằm dưới mốc duyệt (seq 1) ⇒ lượt hoàn tác làm nội dung khác bản đã duyệt
+    const old = change(1, "actors[id=A01].name")
+    const undoOld = { ...change(LAST_SEQ + 3, "actors[id=A01].name"), op: "revert" as const, reason: "Revert seq 1" }
+    expect(computeStatus(FIXTURE, [old, undoOld], "fixed:2.1")).toBe("stale")
   })
 
   it("FLF-198: step chốt mà không ghi gì (last_seq null) van co moc 'da xem toi day'", () => {
@@ -109,9 +124,9 @@ describe("computeSectionStates", () => {
 })
 
 describe("readiness / progressByStep", () => {
-  it("điểm sẵn sàng không tính derived và section tuỳ chọn; red_open bỏ cờ đã waive/đóng", () => {
+  it("điểm sẵn sàng không tính derived và section tuỳ chọn; red_open bỏ cờ đã đóng nhưng KHÔNG bỏ cờ đỏ đã waive (BR-04, FLF-329)", () => {
     const spine = structuredClone(FIXTURE)
-    const flag = { level: "red" as const, section_id: "fixed:1", message: "", remediation_step: "S-2.1", opened_at_version: 1, target_id: null, waive_reason: null, waived_at_version: null }
+    const flag = { level: "red" as const, section_id: "fixed:1", message: "", remediation_step: "S-2.1", opened_at_version: 1, target_id: null, waive_reason: null, waived_at_version: null, kept_reason: null, kept_by: null, kept_at: null }
     spine.flags = [
       { ...flag, id: "FL001", rule_id: "section_empty", resolved_at: null, waived_by_user: false },
       { ...flag, id: "FL002", rule_id: "diagram_stale", resolved_at: null, waived_by_user: true },
@@ -120,13 +135,13 @@ describe("readiness / progressByStep", () => {
     const states = computeSectionStates(spine, [])
     const scored = states.filter((s) => s.required && !s.derived)
     const r = readiness(spine, [])
-    expect(r.red_open).toBe(1)
+    expect(r.red_open).toBe(2)
     expect(r.stale).toBe(0)
     expect(r.accepted_pct).toBe(Math.round((scored.filter((s) => s.status === "accepted").length * 100) / scored.length))
     expect(r.accepted_pct).toBeLessThan(100) // function của màn placeholder còn draft
   })
 
-  it("fixture: 68 step done / 50 + 5×6 = 80 — màn để lại (placeholder) không vào mẫu số", () => {
+  it("fixture: 68 step done / 50 + 5×6 = 80 - màn để lại (placeholder) không vào mẫu số", () => {
     // 19 màn: 5 signed_off + 14 placeholder. Đếm cả 14 màn để lại thì mẫu số là 150 và thanh tiến độ không bao giờ
     // chạm 100% được, trong khi `nextStep` vốn đã bỏ qua vòng của màn placeholder.
     expect(progressByStep(FIXTURE)).toEqual({ done: 68, total: 80, current_phase: "S-9", current_step: "S-9.5", show_percent: true })

@@ -4,7 +4,7 @@ import type { RenderedSection } from "./rendered-document.types.js"
 import { CONSISTENCY_LLM_ENABLED, runConsistencyPass } from "./consistency-pass.js"
 
 const emptySpine = (): Spine => ({
-  project: { name: "Demo", system_name: null, vision: null, goals: [], type: null, domain: null, complexity: null, form_factor: [], stakes: null, working_mode: null, review_mode: "balanced" as const, release_scope: { in: [], out: [] } },
+  project: { name: "Demo", system_name: null, vision: null, goals: [], type: null, domain: null, complexity: null, form_factor: [], stakes: null, working_mode: null, review_mode: "balanced", skip_confirm_sections: [] as const, release_scope: { in: [], out: [] } },
   progress: { current_phase: null, current_step: null, screen_cursor: null, screen_queue: [], elicit_turns_this_phase: 0 },
   steps: [],
   features: [],
@@ -23,12 +23,17 @@ const emptySpine = (): Spine => ({
   glossary: [],
   addendum: [],
   custom_sections: [],
+  references: [],
+  verifications: [],
+  deployment_nodes: [],
+  deployment_links: [],
   diagrams: [],
   assumptions: [],
   decisions: [],
   flags: [],
   sections: [],
   baselines: [],
+  baseline_submission: null,
   spine_version: 1
 })
 
@@ -41,7 +46,7 @@ const section = (over: Partial<RenderedSection>): RenderedSection => ({
   ...over
 })
 
-describe("runConsistencyPass — tất định", () => {
+describe("runConsistencyPass - tất định", () => {
   it("phát hiện tham chiếu chết (dead_reference) qua reference-fields", async () => {
     const spine: Spine = { ...emptySpine(), screens: [{ id: "S1", feature_id: "MISSING", name: "S", description: "", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: null, detail_status: "pending" }] }
     const findings = await runConsistencyPass(spine, [])

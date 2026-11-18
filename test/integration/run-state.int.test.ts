@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest"
 import request from "supertest"
 import app from "../../src/app.js"
 import { seedFixture, type SeededFixture } from "../setup.js"
-import { acquireRun, LOCK_TTL_MS, touchRun } from "../../src/modules/pipeline/run-state.service.js"
+import { acquireRun, finishRun, LOCK_TTL_MS, touchRun } from "../../src/modules/pipeline/run-state.service.js"
 import { StepRun } from "../../src/modules/pipeline/run-state.model.js"
 
 const api = (seeded: SeededFixture) => {
@@ -47,6 +47,28 @@ describe("run-state qua HTTP (BUG-05, BUG-07)", () => {
     expect(active.step_id).toBe("S-3.1")
   })
 
+  it("BF §3.2: câu hỏi đang chờ treo ở người khởi động lượt — run-state trả by/by_name; người khác /answer ⇒ 403 STEP_NOT_REQUESTER", async () => {
+    const seeded = await seedFixture("minimal")
+    const run = await acquireRun(seeded.projectId, "S-3.1", { sessionId: seeded.sessionId, by: seeded.userId })
+    await touchRun(seeded.projectId, "S-3.1", run.run_id, { status: "waiting_answer", stage: "ask", questions: [{ id: "Q1", text: "Actor chính là ai?" }], release: true })
+
+    const state = (await api(seeded).get("/steps/S-3.1/run-state")).body.data
+    expect(state).toMatchObject({ by: seeded.userId, by_name: expect.any(String) })
+
+    const { User } = await import("../../src/modules/user/user.model.js")
+    const { Membership } = await import("../../src/modules/organization/membership.model.js")
+    const { authAs } = await import("../setup.js")
+    const email = `analyst-${Date.now()}@flintflow.test`
+    const other = await User.create({ email, name: "Bình", password: "test-password-123", emailVerified: true })
+    await Membership.create({ organizationId: seeded.orgId, userId: other._id, role: "analyst" })
+    const token = await authAs({ _id: other._id, email, orgId: seeded.orgId })
+
+    const res = await api({ ...seeded, token }).post("/steps/S-3.1/answer", { session_id: seeded.sessionId, answers: [{ question_id: "Q1", answer: "Khách đặt sân" }] })
+    expect(res.status, JSON.stringify(res.body)).toBe(403)
+    expect(res.body.error.code).toBe("STEP_NOT_REQUESTER")
+    expect(res.body.error.message).toContain("treo ở")
+  })
+
   it("FLF-222: lượt chờ lưu pending_answer ở DB nhưng GET /run-state không trả field nội bộ đó", async () => {
     const seeded = await seedFixture("minimal")
     const run = await acquireRun(seeded.projectId, "S-3.1", { sessionId: seeded.sessionId, by: seeded.userId })
@@ -72,6 +94,44 @@ describe("run-state qua HTTP (BUG-05, BUG-07)", () => {
     // Lượt chờ nhả khoá nhưng vẫn trả lời được (còn pending_answer) ⇒ còn sống — FE không được báo "bị gián đoạn"
     expect(state).toMatchObject({ status: "waiting_answer", alive: true })
     expect(state).not.toHaveProperty("pending_answer")
+  })
+
+  it("FLF-332: lượt gãy vì AI lỗi ⇒ run-state paused_reason ai_error và /run-state/active vẫn trả lượt đó sau khi mở lại", async () => {
+    const seeded = await seedFixture("minimal")
+    const client = api(seeded)
+    const run = await acquireRun(seeded.projectId, "S-3.1", { sessionId: seeded.sessionId, by: seeded.userId })
+    await finishRun(seeded.projectId, "S-3.1", run.run_id, "interrupted", { error: { code: "AI_PROVIDER_ERROR", message: "Dịch vụ AI đang gặp sự cố." } })
+
+    const state = (await client.get("/steps/S-3.1/run-state")).body.data
+    expect(state).toMatchObject({ status: "interrupted", paused_reason: "ai_error", error: { code: "AI_PROVIDER_ERROR" } })
+    expect((await client.get("/run-state/active")).body.data).toMatchObject({ step_id: "S-3.1", paused_reason: "ai_error" })
+
+    // Gián đoạn vì lý do khác thì không phải tạm dừng
+    const other = await acquireRun(seeded.projectId, "S-3.1", { sessionId: seeded.sessionId, by: seeded.userId })
+    await finishRun(seeded.projectId, "S-3.1", other.run_id, "interrupted", { error: { code: "SPINE_VERSION_CONFLICT", message: "Tài liệu vừa đổi." } })
+    expect((await client.get("/steps/S-3.1/run-state")).body.data.paused_reason).toBeNull()
+    expect((await client.get("/run-state/active")).body.data).toBeNull()
+  })
+
+  it("FLF-332: GET /run-estimate ước tính credit lượt chạy liền kèm credit khả dụng; `from` lạ ⇒ 404", async () => {
+    const seeded = await seedFixture("minimal")
+    const client = api(seeded)
+    const res = await client.get("/run-estimate?scope=unit")
+    expect(res.status).toBe(200)
+    const est = res.body.data
+    expect(est.scope).toBe("unit")
+    expect(est.units).toHaveLength(1)
+    expect(est.units[0]).toMatchObject({ unit: est.from_step.replace(/\.\d+$/, "") })
+    expect(est.credits_total).toBeGreaterThan(0)
+    expect(est.steps_total).toBe(est.units[0].steps)
+    expect(typeof est.available_credits).toBe("number")
+
+    const all = (await client.get("/run-estimate")).body.data
+    expect(all.scope).toBe("all")
+    expect(all.credits_total).toBeGreaterThanOrEqual(est.credits_total)
+    expect(all.units.length).toBeGreaterThan(est.units.length)
+
+    expect((await client.get("/run-estimate?from=S-5@S99")).status).toBe(404)
   })
 
   it("huỷ lượt nhả khoá ngay: lượt mới chiếm được, và run-state báo cancelled", async () => {
@@ -115,7 +175,7 @@ describe("run-state qua HTTP (BUG-05, BUG-07)", () => {
     expect(res.text).toBe("")
   })
 
-  it("FLF-264: đọc tài liệu lần đầu đã có nội dung — BE tự dựng, không trả not_assembled", async () => {
+  it("FLF-264: đọc tài liệu lần đầu đã có nội dung - BE tự dựng, không trả not_assembled", async () => {
     const seeded = await seedFixture("minimal")
     const doc = await api(seeded).get("/document?source=draft")
     expect(doc.status).toBe(200)

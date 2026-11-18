@@ -1,7 +1,7 @@
 /**
  * Sơ đồ gốc của người dùng (mode 1 v3 §4.13) trên Mongo + GridFS thật, AI giả:
- * upload SRS có hình use case vẽ sẵn ⇒ 0.0 giữ y hình ⇒ CR đổi tên use case ⇒ C-3 thêm vị trí "vẽ lại hình" (code, không
- * AI) ⇒ duyệt ⇒ 0.1 bỏ ảnh gốc (in sơ đồ FlintFlow); từ chối ⇒ giữ ảnh gốc + cờ vàng `original_diagram_stale`.
+ * upload SRS có hình use case vẽ sẵn ⇒ 0.1 giữ y hình ⇒ CR đổi tên use case ⇒ C-3 thêm vị trí "vẽ lại hình" (code, không
+ * AI) ⇒ duyệt ⇒ 0.2 bỏ ảnh gốc (in sơ đồ FlintFlow); từ chối ⇒ giữ ảnh gốc + cờ vàng `original_diagram_stale`.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
@@ -45,12 +45,10 @@ const importWithDiagram = async () => {
   const projectId = await createMode1Project(seeded)
   const c = mode1Api(seeded, projectId)
   const id = (await c.upload(await makeSrsDocx({ images: [{ name: "image1.png", data: PNG, caption: "Figure 1 USECASE-IMG" }] }))).body.data.import.id as string
-  await c.post("/import/confirm-latest", { import_id: id })
-  await c.extractAndWait(id)
-  await c.patch("/import/fields", { import_id: id, confirm_all: true })
-  const fin = await c.finalizeAndWait(id)
+  // FLF-343: một lần Bắt đầu ⇒ I-4 ⇒ baseline 0.1 ⇒ kiểm tra
+  const fin = await c.extractAndWait(id)
   expect(fin.res.status, JSON.stringify(fin.res.body.error)).toBe(200)
-  expect(fin.view?.import?.status).toBe("gap_review")
+  expect(fin.run?.import.status).toBe("gap_review")
   return { projectId, c }
 }
 
@@ -61,10 +59,13 @@ const mediaOf = async (projectId: string, version: string): Promise<Buffer[]> =>
 }
 
 const keptImages = async (projectId: string) =>
-  (await spineRepository.get(projectId))!.custom_sections.flatMap((c) => c.blocks).filter((b) => b.kind === "image" && b.diagram)
+  (await spineRepository.get(projectId))!.custom_sections.flatMap((c) => c.blocks).filter((b) => b.kind === "image" && b.image_ref && b.diagram)
+/** Bug #16: chỗ đặt hình vẽ lại (ảnh gốc đã bỏ, giữ vị trí) */
+const redrawSlots = async (projectId: string) =>
+  (await spineRepository.get(projectId))!.custom_sections.flatMap((c) => c.blocks).filter((b) => b.kind === "image" && !b.image_ref && b.diagram)
 
-/** CR đổi tên UC-02 tới `in_review`; trả vị trí sơ đồ gốc + group của nó. */
-const renameToReview = async (c: ReturnType<typeof mode1Api>) => {
+/** CR đổi tên UC-02 tới khi BA xác nhận (FLF-330: xác nhận = ghi); `keepOriginal` ⇒ BA bỏ riêng vị trí sơ đồ gốc trước. */
+const renameToReview = async (c: ReturnType<typeof mode1Api>, opts: { keepOriginal?: boolean } = {}) => {
   const res = await c.post("/change-requests", { title: "Rename login", description: `Rename use case UC-02 to "${NEW_NAME}".`, ...CR_BODY })
   expect(res.status, JSON.stringify(res.body.error)).toBe(201)
   const cr = `/change-requests/${res.body.data.change_request.cr_id as string}`
@@ -79,50 +80,52 @@ const renameToReview = async (c: ReturnType<typeof mode1Api>) => {
   expect(promptsOf("# CR Propose").flatMap(promptLocations).map((l) => l.path)).not.toContain(diagram!.path)
   const redraw = proposed.locations.find((l) => l.location_id === diagram!.location_id)!
   expect(redraw.conclusion).toBe("edit")
-  expect(redraw.proposal?.spine_ops).toEqual([expect.objectContaining({ op: "remove", path: `${diagram!.path}.blocks[image_ref=word/media/image1.png]` })])
+  // FLF-375 (B12): set cả mảng khối — bỏ ảnh gốc (và chú thích ngay sau nó nếu có), giữ văn xuôi khác
+  expect(redraw.proposal?.spine_ops).toEqual([expect.objectContaining({ op: "set", path: `${diagram!.path}.blocks` })])
+  const kept = (redraw.proposal!.spine_ops[0] as { value: { image_ref: string | null }[] }).value
+  expect(kept.some((b) => b.image_ref === "word/media/image1.png")).toBe(false)
 
   // C-5: đổi tên use case + bỏ ảnh gốc không bị coi là phát sinh lỗi đỏ (hình vẽ lại ở 3.14)
   expect(detail(await c.post(`${cr}/verify`)).change_request.status).toBe("ready_to_submit")
+  if (opts.keepOriginal) {
+    detail(await c.patch(`${cr}/locations/${diagram!.location_id}`, { conclusion: "not_related", reason: "Giữ hình vẽ tay của khách" }))
+    expect(detail(await c.post(`${cr}/verify`)).change_request.status).toBe("ready_to_submit")
+  }
   const submitted = detail(await c.post(`${cr}/submit`))
-  const group = submitted.groups.find((g) => g.location_ids.includes(diagram!.location_id))!
-  return { cr, submitted, diagramGroup: group }
+  expect(submitted.change_request.status).toBe("written")
+  return { cr, submitted }
 }
 
 describe("§4.13 sơ đồ gốc của người dùng", () => {
-  it("0.0 giữ y hình use case của người dùng", async () => {
+  it("0.1 giữ y hình use case của người dùng", async () => {
     const { projectId } = await importWithDiagram()
     expect(await keptImages(projectId)).toHaveLength(1)
-    expect((await mediaOf(projectId, "0.0")).some((m) => m.equals(PNG))).toBe(true)
+    expect((await mediaOf(projectId, "0.1")).some((m) => m.equals(PNG))).toBe(true)
   })
 
-  it("CR đổi tên use case ⇒ đề xuất vẽ lại; duyệt ⇒ 0.1 bỏ ảnh gốc, không cờ hình lệch", async () => {
+  it("CR đổi tên use case ⇒ đề xuất vẽ lại; BA xác nhận ⇒ 0.2 bỏ ảnh gốc, không cờ hình lệch", async () => {
     const { projectId, c } = await importWithDiagram()
-    const { cr, submitted } = await renameToReview(c)
-    let last = submitted
-    for (const g of submitted.groups) last = detail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
-    expect(last.change_request).toMatchObject({ status: "written", result_doc_version: "0.1" })
+    const { submitted } = await renameToReview(c)
+    expect(submitted.change_request).toMatchObject({ status: "written", result_doc_version: "0.2" })
 
     const spine = (await spineRepository.get(projectId))!
     expect(spine.use_cases.find((u) => u.id === "UC-02")?.name).toBe(NEW_NAME)
     expect(await keptImages(projectId)).toEqual([])
+    expect((await redrawSlots(projectId)).map((b) => b.diagram?.kind)).toEqual(["usecase"])
     expect(spine.flags.filter((f) => f.rule_id === "original_diagram_stale" && !f.resolved_at)).toEqual([])
-    expect((await mediaOf(projectId, "0.1")).some((m) => m.equals(PNG))).toBe(false)
+    expect((await mediaOf(projectId, "0.2")).some((m) => m.equals(PNG))).toBe(false)
   })
 
-  it("từ chối group vẽ lại ⇒ 0.1 giữ ảnh gốc, cờ vàng hình gốc lệch dữ liệu", async () => {
+  it("BA bỏ riêng vị trí vẽ lại (not_related) ⇒ 0.2 giữ ảnh gốc, cờ vàng hình gốc lệch dữ liệu", async () => {
     const { projectId, c } = await importWithDiagram()
-    const { cr, submitted, diagramGroup } = await renameToReview(c)
-    const others = submitted.groups.filter((g) => g.group_id !== diagramGroup.group_id)
-    await c.post(`${cr}/groups/${diagramGroup.group_id}/decision`, { decision: "rejected", reason: "Giữ hình vẽ tay của khách", base_version: await c.spineVersion() })
-    let last = submitted
-    for (const g of others) last = detail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
-    expect(last.change_request.status).toBe("written")
+    const { submitted } = await renameToReview(c, { keepOriginal: true })
+    expect(submitted.change_request.status).toBe("written")
 
     expect(await keptImages(projectId)).toHaveLength(1)
     const spine = (await spineRepository.get(projectId))!
     expect(spine.flags.filter((f) => f.rule_id === "original_diagram_stale" && !f.resolved_at)).toEqual([
       expect.objectContaining({ level: "yellow", section_id: "fixed:2.2.1" })
     ])
-    expect((await mediaOf(projectId, "0.1")).some((m) => m.equals(PNG))).toBe(true)
+    expect((await mediaOf(projectId, "0.2")).some((m) => m.equals(PNG))).toBe(true)
   })
 })

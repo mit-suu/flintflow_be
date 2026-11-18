@@ -43,6 +43,22 @@ describe("trạng thái mã mời là giá trị suy diễn", () => {
     expect(invitationState({ expiresAt: at(60_000), acceptedAt: new Date() })).toBe("accepted")
   })
 
+  it("dữ liệu cũ chưa duyệt (requestedByUserId không có approvedAt) ⇒ revoked; đã duyệt còn hạn ⇒ pending", () => {
+    const requested = { expiresAt: at(60_000), requestedByUserId: "analyst-1" }
+    expect(invitationState(requested)).toBe("revoked")
+    expect(invitationState({ expiresAt: at(-1), requestedByUserId: "analyst-1" })).toBe("revoked")
+    expect(invitationState({ ...requested, approvedAt: new Date() })).toBe("pending")
+  })
+
+  it("dữ liệu cũ bị từ chối (rejectedAt) ⇒ revoked; đã duyệt nhưng quá hạn ⇒ expired", () => {
+    expect(
+      invitationState({ expiresAt: at(60_000), requestedByUserId: "analyst-1", rejectedAt: new Date() })
+    ).toBe("revoked")
+    expect(invitationState({ expiresAt: at(-1), requestedByUserId: "analyst-1", approvedAt: new Date() })).toBe(
+      "expired"
+    )
+  })
+
   it("thu hồi thắng mọi trạng thái khác", () => {
     expect(
       invitationState({ expiresAt: at(60_000), acceptedAt: new Date(), revokedAt: new Date() })

@@ -4,8 +4,9 @@ import type { NextFunction, Request, Response } from "express"
 
 vi.mock("../../shared/auth/auth.middleware.js", () => ({ authMiddleware: vi.fn() }))
 
-import { DOCX_MIME, previewWord } from "./export.controller.js"
+import { DOCX_MIME, attachmentDisposition, exportPdf, previewWord, toPdfFileName } from "./export.controller.js"
 import exportRoutes from "./export.route.js"
+import renderRoutes from "./render.route.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
 import { readZipText } from "./zip.test-helper.js"
 
@@ -46,6 +47,14 @@ const invoke = (userId: string | undefined, body: unknown) =>
     previewWord(req, res, next)
   })
 
+describe("attachmentDisposition (FLF-334)", () => {
+  it("RFC 5987: mã hoá cả '()* mà encodeURIComponent chừa lại; giải mã ra đúng tên", () => {
+    const header = attachmentDisposition("Dự án O'Neil (v2)*_v1.0.docx")
+    expect(header).toBe("attachment; filename*=UTF-8''D%E1%BB%B1%20%C3%A1n%20O%27Neil%20%28v2%29%2A_v1.0.docx")
+    expect(decodeURIComponent(header.split("''")[1])).toBe("Dự án O'Neil (v2)*_v1.0.docx")
+  })
+})
+
 describe("POST /export/word/preview", () => {
   it("200 trả file docx, MIME và tên file đúng định dạng", async () => {
     const outcome = await invoke("650000000000000000000010", sample)
@@ -53,7 +62,7 @@ describe("POST /export/word/preview", () => {
     expect(outcome.error).toBeUndefined()
     expect(outcome.status).toBe(200)
     expect(outcome.headers["content-type"]).toBe(DOCX_MIME)
-    expect(outcome.headers["content-disposition"]).toBe('attachment; filename="lumen-hoc-truc-tuyen-v0.3-draft.docx"')
+    expect(outcome.headers["content-disposition"]).toBe(`attachment; filename*=UTF-8''${encodeURIComponent("Lumen Học Trực Tuyến_v0.3_DRAFT.docx")}`)
     expect(outcome.headers["content-length"]).toBe(String(outcome.body?.length))
 
     const documentXml = readZipText(outcome.body as Buffer, "word/document.xml")
@@ -82,5 +91,22 @@ describe("POST /export/word/preview", () => {
     const route = layer?.route as unknown as { methods: Record<string, boolean>; stack: { handle: unknown }[] }
     expect(route.methods.post).toBe(true)
     expect(route.stack[0].handle).toBe(authMiddleware)
+  })
+})
+
+describe("GET /projects/:projectId/export/pdf (FLF-316)", () => {
+  it("tên file PDF = tên file Word đổi đuôi", () => {
+    expect(toPdfFileName("lumen-hoc-truc-tuyen-v0.3-draft.docx")).toBe("lumen-hoc-truc-tuyen-v0.3-draft.pdf")
+    expect(toPdfFileName("srs-v1.0.DOCX")).toBe("srs-v1.0.pdf")
+  })
+
+  it("route GET kèm authMiddleware, handler exportPdf", () => {
+    const layer = renderRoutes.stack.find((l) => l.route?.path === "/:projectId/export/pdf")
+    expect(layer, "thiếu route /:projectId/export/pdf").toBeDefined()
+
+    const route = layer?.route as unknown as { methods: Record<string, boolean>; stack: { handle: unknown }[] }
+    expect(route.methods.get).toBe(true)
+    expect(route.stack[0].handle).toBe(authMiddleware)
+    expect(route.stack[route.stack.length - 1].handle).toBe(exportPdf)
   })
 })

@@ -9,9 +9,8 @@
  * dự án 7 màn tốn khoảng 400 credit ở lượt test, mục tiêu còn khoảng 250 sau khi giảm điểm dừng, nên 100
  * credit/tháng không đủ để đi hết một dự án nhỏ dù chỉ một lần.
  *
- * TODO(monthly_reset): cron reset quota hằng tháng theo
- * `Subscription.monthlyCreditsAllotment` (ghi CreditTransaction type
- * `monthly_reset`) để ngoài vòng một — xem task-04 "Ghi chú / rủi ro".
+ * Hết kỳ (`periodDays`): job `system/renew-subscriptions` hạ gói trả phí về Free và cộng dồn +monthlyCredits
+ * của gói vào ví khả dụng (CreditTransaction `monthly_reset`) — `subscription-renewal.service.ts` (UC-80).
  */
 
 export type PlanId = "free" | "pro"
@@ -29,6 +28,11 @@ export interface PlanDefinition {
   maxMembers: number
   /** Trần số project đang hoạt động của một org (task-26). */
   maxProjects: number
+  /**
+   * FLF-405: trần tổng token phần chữ của tài liệu tham khảo còn hiệu lực trong **một dự án** (business-flow §3.6).
+   * Trần mỗi lần tải nằm ở env `REFERENCE_MAX_TOKENS_PER_UPLOAD` (theo sức đọc của model, không theo gói).
+   */
+  maxReferenceTokens: number
 }
 
 export interface CreditPackage {
@@ -47,7 +51,8 @@ export const planConfig = {
     monthlyCredits: 300,
     priceVnd: 0,
     maxMembers: 3,
-    maxProjects: 3
+    maxProjects: 3,
+    maxReferenceTokens: 200_000
   } satisfies PlanDefinition,
   pro: {
     id: "pro",
@@ -55,8 +60,9 @@ export const planConfig = {
     initialCredits: 0,
     monthlyCredits: 1000,
     priceVnd: 199_000,
-    maxMembers: 20,
-    maxProjects: 50
+    maxMembers: 5,
+    maxProjects: 50,
+    maxReferenceTokens: 1_000_000
   } satisfies PlanDefinition,
   /** Số dư (balance) rơi xuống dưới ngưỡng này thì gửi notification một lần. */
   lowCreditThreshold: 10,

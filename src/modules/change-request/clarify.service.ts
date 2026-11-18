@@ -4,6 +4,8 @@
  * và chuyển `impact_review`. AI lỗi / hết credit ⇒ `paused` ở `clarifying`.
  * Mode 1 v3 phase 7: "mơ hồ" gồm cả thiếu dữ kiện để viết nội dung mới — prompt kèm tài liệu bổ sung; câu trả lời
  * trống = chưa biết; đi tiếp mà còn thiếu ⇒ `missing_info` cho C-4 ghi giả định.
+ * FLF-367: CR mâu thuẫn với tài liệu (Spine mọi section, đoạn văn giữ nguyên) ⇒ câu hỏi mâu thuẫn trích cả hai phía,
+ * hỏi cả khi đã hết `MAX_CLARIFY_ROUNDS`; câu đã hỏi không hỏi lại.
  */
 
 import { ActionType } from "../../shared/ai/ai-action.types.js"
@@ -12,31 +14,72 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { latestDocVersion } from "../doc-version/doc-version.service.js"
 import { stripRecord } from "../import/check.service.js"
 import { DocBlock } from "../import/doc-block.model.js"
+import { loadLayout } from "../import/gap-report.service.js"
 import { withMeteredAi } from "../import/metered-ai.js"
+import { nameElementIds } from "../spine/human-labels.js"
+import { listSections } from "../spine/section-registry.js"
 import * as spineRepository from "../spine/spine.repository.js"
+import type { Spine } from "../spine/spine.types.js"
+import { accountLocaleOf } from "../user/account-locale.js"
+import { approvedBatch } from "./add-use-case.service.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus, transitionCr } from "./change-request.service.js"
 import { AMENDABLE_CR_STATUSES, MAX_CLARIFY_ROUNDS, canAskMore } from "./change-request.state.js"
-import { answersText, crHeader, crProjection, materialsText, truncate } from "./cr-context.js"
-import { mentionedSections, type HeadingRef } from "./section-mention.js"
+import { answersText, crHeader, crProjection, crQuery, relevantMaterialsText, truncate } from "./cr-context.js"
+import { clarifyLanguageText, crDocumentLanguage, crReplyLanguage } from "./cr-language.js"
+import { mentionedSections, mergeHeadings, type HeadingRef } from "./section-mention.js"
 
-/** Tiêu đề mục của bản tài liệu mới nhất, theo thứ tự (kèm mã section đã khớp). */
-const docHeadings = async (cr: IChangeRequest): Promise<HeadingRef[]> => {
+/**
+ * Tiêu đề mục của bản tài liệu mới nhất, theo thứ tự (kèm mã section đã khớp). Dự án chuyển từ mode 2 (FLF-318) không
+ * có file upload nên không có `DocBlock` ⇒ mục lục theo mẫu FPT từ Spine.
+ */
+const docHeadings = async (cr: IChangeRequest, spine: Spine): Promise<HeadingRef[]> => {
   const version = await latestDocVersion(cr.projectId)
   if (!version) return []
   const headings = await DocBlock.find({ projectId: cr.projectId, doc_version: version.version, kind: "heading" })
     .sort({ "anchor.ordinal": 1 })
     .select("text section_id")
     .lean()
-  return headings.map((h) => ({ text: h.text, section_id: h.section_id ?? null }))
+  const layout = await loadLayout(String(cr.projectId))
+  if (!headings.length && !layout) return listSections(spine).map((sec) => ({ text: sec.title_en, section_id: sec.id }))
+  return mergeHeadings(layout, headings.map((h) => ({ text: h.text, section_id: h.section_id ?? null })))
 }
 
 const outlineText = (headings: readonly HeadingRef[]): string =>
   truncate(headings.map((h) => `${h.text}${h.section_id ? ` (${h.section_id})` : ""}`).join("\n"), 3000)
 
 /** Chữ người yêu cầu viết: tiêu đề, mô tả, lệnh gộp thêm, câu trả lời (không lấy câu hỏi của AI). */
+/**
+ * CR tạo từ nút "Viết" của mục thiếu sau đổi mẫu mang `source.ref` = `section_id` của mục — đích ghi nội dung. Chỉ nhận khi đúng là
+ * mục có heading trong tài liệu hiện tại (ref là chữ tự do của form thì bỏ qua).
+ */
+export const sourceRefSections = (ref: string | null | undefined, headings: readonly HeadingRef[]): string[] =>
+  ref && headings.some((h) => h.section_id === ref) && !/^(group:|unmapped$)/.test(ref) ? [ref] : []
+
 const requesterText = (cr: IChangeRequest): string =>
   [cr.title, cr.description, ...(cr.amendments ?? []).map((a) => a.text), ...cr.clarifications.flatMap((c) => c.answers)].join("\n")
+
+/** Lựa chọn mặc định cho câu hỏi mâu thuẫn (FLF-367) khi model không gợi ý; người dùng vẫn tự gõ được ("khác"). */
+export const CONTRADICTION_CHOICES = ["Đổi theo CR và sửa cả chỗ cũ", "Giữ như cũ, không áp dụng phần này của CR"] as const
+
+const questionKey = (q: string): string => q.replace(/\s+/g, " ").trim().toLowerCase()
+
+/** Câu hỏi mâu thuẫn chưa từng hỏi (so mọi vòng trước) kèm gợi ý; model không gợi ý ⇒ lựa chọn mặc định. */
+export const newContradictions = (
+  cr: Pick<IChangeRequest, "clarifications">,
+  found: readonly { question: string; suggestions: readonly string[] }[]
+): { question: string; suggestions: string[] }[] => {
+  const seen = new Set(cr.clarifications.flatMap((c) => c.questions.map(questionKey)))
+  const out: { question: string; suggestions: string[] }[] = []
+  for (const c of found) {
+    const key = questionKey(c.question)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    const suggestions = [...new Set(c.suggestions.map((s) => s.trim()).filter(Boolean))]
+    out.push({ question: c.question.trim(), suggestions: suggestions.length ? suggestions : [...CONTRADICTION_CHOICES] })
+  }
+  return out
+}
 
 /** Từ khoá dự phòng khi hết vòng mà model vẫn thấy mơ hồ: từ dài trong tiêu đề CR. */
 const fallbackKeywords = (cr: IChangeRequest): string[] => cr.title.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 5).slice(0, 5)
@@ -53,14 +96,35 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
   const asked = cr.clarifications.length - (lastAmendment?.after_round ?? 0)
 
   cr.paused = null
-  const headings = await docHeadings(cr)
+  // FLF-318: CR tạo từ bản xem trước đã duyệt (thêm / xoá / sửa use case) ⇒ câu hỏi đã hỏi trong chat như trước
+  // baseline, lô đã chốt ⇒ không hỏi thêm, không gọi model; C-3 lấy vị trí theo đúng lô
+  if (approvedBatch(spine, cr)) {
+    cr.missing_info = []
+    cr.markModified("missing_info")
+    cr.targets = { entity_paths: [...new Set(cr.seed?.targets ?? [])], keywords: [] }
+    cr.markModified("targets")
+    await transitionCr(cr, "impact_review")
+    return
+  }
+  const headings = await docHeadings(cr, spine)
+  // Mục người yêu cầu gọi tên ("phần 3.1.3 Screen Authorization") luôn là đích — code nhận, không trông vào model.
+  const named = [...new Set([...mentionedSections(requesterText(cr), headings), ...sourceRefSections(cr.source?.ref, headings)])]
+  // FLF-438: hỏi theo ngôn ngữ người yêu cầu; khác ngôn ngữ tài liệu ⇒ tên / đoạn trích kèm bản dịch trong ngoặc
+  const language = clarifyLanguageText(
+    crReplyLanguage(requesterText(cr), await accountLocaleOf(userId)),
+    await crDocumentLanguage(String(cr.projectId), spine)
+  )
   const result = await withMeteredAi<CrClarifyOutput>({ projectId: String(cr.projectId), userId, stepId: `C-2:${cr.cr_id}` }, ActionType.CR_CLARIFY, {
     ...crHeader(cr),
     round: Math.min(asked + 1, MAX_CLARIFY_ROUNDS),
     clarifications: answersText(cr),
-    materials: materialsText(cr),
-    projection: crProjection(spine, `${cr.title}\n${cr.description}\n${answersText(cr)}\n${(cr.materials ?? []).map((m) => m.text).join("\n")}`),
-    outline: outlineText(headings)
+    materials: await relevantMaterialsText(cr, crQuery(cr)),
+    // FLF-367: kèm BR / NFR và đoạn văn giữ nguyên liên quan (theo cụm từ của CR hoặc mục được gọi tên) để thấy mâu thuẫn
+    projection: crProjection(spine, `${cr.title}\n${crHeader(cr).description}\n${answersText(cr)}\n${(cr.materials ?? []).map((m) => m.text).join("\n")}`, {
+      sections: named
+    }),
+    outline: outlineText(headings),
+    language
   })
   if (!result.ok) {
     cr.paused = { reason: result.reason, at: new Date() }
@@ -68,20 +132,29 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
     return
   }
   const out = result.data
-  if (out.ambiguous && canAskMore(asked)) {
+  // FLF-367: mâu thuẫn hỏi cả khi đã hết vòng làm rõ (không qua `canAskMore`), đứng trước câu hỏi mơ hồ
+  const contradictions = newContradictions(cr, out.contradictions)
+  const askAmbiguous = out.ambiguous && canAskMore(asked)
+  if (askAmbiguous || contradictions.length) {
     // Gợi ý song song câu hỏi — model trả thiếu / thừa thì cắt, bù `[]`; bỏ gợi ý trùng
-    const suggestions = out.questions.map((_, i) => [...new Set((out.suggestions[i] ?? []).map((s) => s.trim()).filter(Boolean))])
-    cr.clarifications.push({ round, questions: out.questions, answers: [], suggestions })
+    const ambiguous = askAmbiguous ? out.questions : []
+    const suggestions = ambiguous.map((_, i) => [...new Set((out.suggestions[i] ?? []).map((s) => s.trim()).filter(Boolean))])
+    // P06 (CR #3): câu hỏi / gợi ý cho người dùng không lộ mã nội bộ ("SCR-05", "FN009") — thay bằng tên phần tử
+    const withNames = (text: string) => nameElementIds(text, spine)
+    cr.clarifications.push({
+      round,
+      questions: [...contradictions.map((c) => c.question), ...ambiguous].map(withNames),
+      answers: [],
+      suggestions: [...contradictions.map((c) => c.suggestions), ...suggestions].map((list) => list.map(withNames))
+    })
     await transitionCr(cr, "awaiting_answers")
     return
   }
   // Phase 7: đi tiếp mà còn thiếu dữ kiện (thường là hết vòng hỏi) ⇒ C-4 viết kèm giả định. Model vẫn thấy "mơ hồ" ở
   // vòng cuối mà không liệt kê ⇒ câu hỏi chưa được trả lời chính là dữ kiện thiếu.
-  cr.missing_info = out.missing_info.length ? out.missing_info : out.ambiguous ? out.questions : []
+  cr.missing_info = (out.missing_info.length ? out.missing_info : out.ambiguous ? out.questions : []).map((text) => nameElementIds(text, spine))
   cr.markModified("missing_info")
-  // Mục người yêu cầu gọi tên ("phần 3.1.3 Screen Authorization") luôn là đích — code nhận, không trông vào model.
   // Đã chỉ đích danh mục thì bỏ từ khoá của model: từ khoá kiểu "SCR-01", "Hộ gia đình" kéo cả tài liệu vào CR.
-  const named = mentionedSections(requesterText(cr), headings)
   const keywords = named.length ? [] : out.targets.keywords.length || out.targets.entity_paths.length ? out.targets.keywords : fallbackKeywords(cr)
   // Phần tử bản xem trước đã chạm (mode 1 v3) luôn là đích — 3.4 vẫn tìm thêm vị trí liên quan như thường
   cr.targets = { entity_paths: [...new Set([...named, ...out.targets.entity_paths, ...(cr.seed?.targets ?? [])])], keywords }

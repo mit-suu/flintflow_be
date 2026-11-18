@@ -14,6 +14,7 @@ import { fakeCrClarify, fakeCrPropose, fakeCrProposeNoChange, promptLocations } 
 import { ChangeLocation } from "../../../src/modules/change-request/change-location.model.js"
 import { SpineLock } from "../../../src/modules/change-request/spine-lock.model.js"
 import { runVerify } from "../../../src/modules/change-request/verify.service.js"
+import { CONTRADICTION_CHOICES } from "../../../src/modules/change-request/clarify.service.js"
 import { Spine } from "../../../src/modules/spine/spine.model.js"
 
 const NFR = "nfrs[id=NFR-01]"
@@ -38,14 +39,12 @@ const toProposed = async () => {
 }
 
 describe("C-5 kiểm code (đỏ)", () => {
-  it("giá trị tại path đổi sau khi đề xuất ⇒ 409 CR_VALUE_CHANGED, không lưu kết quả verify, không gọi AI", async () => {
+  it("FLF-375: giá trị tại path đổi sau khi đề xuất (chưa xác nhận) ⇒ value_changed ở đúng vị trí, AI soạn lại trên nội dung hiện tại", async () => {
     const { c, projectId, cr } = await toProposed()
-    await Spine.updateOne({ projectId, "nfrs.id": "NFR-01" }, { $set: { "nfrs.$.threshold": "3 s" } })
-    const res = await c.post(`${cr}/verify`)
-    expect(res.status).toBe(409)
-    expect(res.body.error.code).toBe("CR_VALUE_CHANGED")
-    expect(res.body.meta).toMatchObject({ location_id: "L001", path: NFR })
-    expect(await ChangeLocation.countDocuments({ projectId, verify: { $ne: null } })).toBe(0)
+    await Spine.updateOne({ projectId, "nfrs.id": "NFR-01" }, { $set: { "nfrs.$.threshold": "3 s" }, $inc: { spine_version: 1 } })
+    const d = detail(await c.post(`${cr}/verify`))
+    expect(d.change_request.status).toBe("proposing")
+    expect(d.locations.find((l) => l.path === NFR)!.verify!.violations.map((v) => v.rule)).toEqual(["value_changed"])
     expect(promptsOf("# CR Consistency")).toHaveLength(0)
   })
 
@@ -59,29 +58,27 @@ describe("C-5 kiểm code (đỏ)", () => {
     expect(nfr.verify!.violations.length).toBeGreaterThan(0) // đổi category làm hỏng bất biến / schema
     expect(nfr.redo_count).toBe(1)
     expect(d.locations.find((l) => l.path === BR)).toMatchObject({ verify: { code_ok: true, violations: [] }, redo_count: 0 })
-    // AI consistency chỉ nhận vị trí đã qua kiểm code (BR comment)
-    const [consistency] = promptsOf("# CR Consistency")
-    expect(consistency).toContain(`[L002][${BR}] (comment) Check ${BR}`)
-    expect(consistency).not.toContain(`[L001][${NFR}]`)
+    // FLF-307: CR còn vị trí trượt kiểm code ⇒ AI làm lại, chưa chạy AI consistency
+    expect(promptsOf("# CR Consistency")).toHaveLength(0)
   })
 
-  it("phần tử mất khoá ⇒ path_not_locked (đỏ)", async () => {
+  it("FLF-375: CR khác cùng chạm phần tử (kể cả dòng khoá cũ) không làm trượt kiểm", async () => {
     const { c, projectId, cr } = await toProposed()
-    await SpineLock.deleteOne({ projectId, path: BR })
+    await SpineLock.deleteMany({ projectId, path: BR })
+    await SpineLock.create({ projectId, path: BR, cr_id: "CR-777" })
     const d = detail(await c.post(`${cr}/verify`))
-    expect(d.locations.find((l) => l.path === BR)!.verify!.violations.map((v) => v.rule)).toEqual(["path_not_locked"])
-    expect(d.change_request.status).toBe("proposing")
+    expect(d.locations.find((l) => l.path === BR)!.verify!.violations).toEqual([])
   })
 })
 
-describe("C-5 AI consistency chỉ vàng", () => {
+describe("C-5 AI consistency: nhận xét khác mâu thuẫn chỉ vàng", () => {
   it("nhận xét AI gắn vào vị trí sửa cùng section (không khớp section ⇒ vị trí đầu), không chặn ⇒ ready_to_submit", async () => {
     routeCr((p) => {
       if (clarifyPerf(p)) return clarifyPerf(p)
       if (p.includes("# CR Consistency"))
         return JSON.stringify({
           findings: [
-            { rule: "contradiction", section_id: "fixed:4.2.3", message: "1 second contradicts the SLA table", block_ids: [] },
+            { rule: "incomplete_edit", section_id: "fixed:4.2.3", message: "1 second is not applied to the SLA table", block_ids: [] },
             { rule: "dangling_reference", section_id: "fixed:5.1", message: "Rule still assumes 2 seconds", block_ids: [] },
             { rule: "term_drift", section_id: "fixed:9.9", message: "Somewhere else", block_ids: [] }
           ]
@@ -93,13 +90,19 @@ describe("C-5 AI consistency chỉ vàng", () => {
     expect(d.change_request.status).toBe("ready_to_submit")
     expect(d.locations.every((l) => l.verify?.code_ok)).toBe(true)
     const by = (path: string) => d.locations.find((l) => l.path === path)!.verify!.ai_flags.map((f) => f.rule)
-    expect(by(NFR)).toEqual(["contradiction", "term_drift"])
+    expect(by(NFR)).toEqual(["incomplete_edit", "term_drift"])
     expect(by(BR)).toEqual(["dangling_reference"])
     // prompt: giá trị trước/sau của phần tử sửa, section
     const [prompt] = promptsOf("# CR Consistency")
     expect(prompt).toContain(`[L001][${NFR}] (fixed:4.2.3 Performance)`)
     expect(prompt).toMatch(/before: [\s\S]*"threshold": "2 s"/)
     expect(prompt).toMatch(/after: [\s\S]*"threshold": "1 s"/)
+    expect(prompt).toContain("Notes already shown to the reviewer on an earlier check of this CR:\n(none)")
+
+    // FLF-307: kiểm lại mà không vị trí nào đổi đề xuất ⇒ không gọi AI lần nữa, giữ nguyên nhận xét
+    const again = detail(await c.post(`${cr}/verify`))
+    expect(promptsOf("# CR Consistency")).toHaveLength(1)
+    expect(again.locations.find((l) => l.path === NFR)!.verify!.ai_flags.map((f) => f.rule)).toEqual(["incomplete_edit", "term_drift"])
   })
 
   it("mọi vị trí not_related ⇒ không gọi AI consistency, đạt", async () => {
@@ -129,6 +132,55 @@ describe("C-5 AI consistency chỉ vàng", () => {
   })
 })
 
+describe("QLHS 11/11 bug #17: chữ mới phải cùng ngôn ngữ tài liệu", () => {
+  const VI_STATEMENT = "Hệ thống phải phản hồi trong vòng 1 giây cho 95% yêu cầu."
+  /** C-4 chuẩn nhưng viết lại câu NFR bằng tiếng Việt (lượt làm lại sau khi C-5 báo sai ngôn ngữ). */
+  const proposeVietnamese = (p: string) => {
+    if (!p.includes("# CR Propose")) return undefined
+    const out = JSON.parse(fakeCrPropose(p)!)
+    for (const l of out.locations)
+      if (l.conclusion === "edit") l.spine_ops = l.spine_ops.map((o: { path: string }) => (o.path.endsWith(".statement") ? { ...o, value: VI_STATEMENT } : o))
+    return JSON.stringify(out)
+  }
+
+  it("tài liệu tiếng Việt: C-4 nêu ngôn ngữ; câu mới tiếng Anh ⇒ wrong_language (câu tiếng Việt cho người dùng), AI làm lại bằng tiếng Việt ⇒ đạt", async () => {
+    const { TemplateProfile } = await import("../../../src/modules/import/template-profile.model.js")
+    const ctx = await importedProject()
+    await TemplateProfile.updateOne({ projectId: ctx.projectId }, { $set: { language: "vi" } })
+    await Spine.updateOne(
+      { projectId: ctx.projectId, "nfrs.id": "NFR-01" },
+      { $set: { "nfrs.$.statement": "Hệ thống phải phản hồi trong vòng 2 seconds cho 95% yêu cầu.", "nfrs.$.metric": "thời gian phản hồi" }, $inc: { spine_version: 1 } }
+    )
+    const { cr } = await crToImpact(ctx.c)
+    detail(await ctx.c.post(`${cr}/propose`))
+    expect(promptsOf("# CR Propose")[0]).toContain("- Document language: Vietnamese (tiếng Việt).")
+
+    // fakeCrPropose viết câu NFR mới bằng tiếng Anh
+    const failed = detail(await ctx.c.post(`${cr}/verify`))
+    expect(failed.change_request.status).toBe("proposing")
+    const nfr = failed.locations.find((l) => l.path === NFR)!
+    expect(nfr.verify!.violations.map((v) => v.rule)).toEqual(["wrong_language"])
+    expect(nfr.verify!.violations[0].message).toMatch(/^Nội dung mới ở .+ viết bằng tiếng Anh trong khi tài liệu viết bằng tiếng Việt: “The system shall respond/)
+    expect(nfr.verify!.violations[0].message).not.toContain("nfrs[")
+    expect(nfr.redo_count).toBe(1)
+
+    // Lượt làm lại: C-4 thấy lỗi kiểm, viết bằng tiếng Việt ⇒ đạt
+    routeCr((p) => clarifyPerf(p) ?? proposeVietnamese(p))
+    detail(await ctx.c.post(`${cr}/propose`))
+    expect(promptsOf("# CR Propose").at(-1)).toContain("Previous proposal failed checks: Nội dung mới ở")
+    const ok = detail(await ctx.c.post(`${cr}/verify`))
+    expect(ok.change_request.status).toBe("ready_to_submit")
+    expect(ok.locations.find((l) => l.path === NFR)!.verify).toMatchObject({ code_ok: true, violations: [] })
+  })
+
+  it("tài liệu tiếng Anh: câu mới tiếng Anh ⇒ không vi phạm ngôn ngữ", async () => {
+    const { c, cr } = await toProposed()
+    expect(promptsOf("# CR Propose")[0]).toContain("- Document language: English.")
+    const d = detail(await c.post(`${cr}/verify`))
+    expect(d.locations.flatMap((l) => l.verify!.violations.map((v) => v.rule))).not.toContain("wrong_language")
+  })
+})
+
 describe("C-5 redo ≤ 2 rồi manual_fix", () => {
   it("AI đề xuất trượt 3 lần ⇒ proposing, proposing, manual_fix; redo_count dừng ở 2", async () => {
     routeCr((p) => clarifyPerf(p) ?? fakeCrProposeNoChange(p))
@@ -147,19 +199,17 @@ describe("C-5 redo ≤ 2 rồi manual_fix", () => {
     expect((await c.post(`${cr}/propose`)).body.error.code).toBe("CR_INVALID_TRANSITION")
   })
 
-  it("vị trí sửa tay trượt ⇒ manual_fix ngay, không tăng redo_count; sửa tay đúng ⇒ đạt", async () => {
+  it("FLF-375 (nguyên tắc 6): không sửa tay - PATCH kèm nội dung ⇒ 400; giữ nguyên + lý do ⇒ chỗ đó không ghi, AI không đè", async () => {
     const { c, cr } = await toProposed()
     const nfr = detail(await c.get(cr)).locations.find((l) => l.path === NFR)!
     const same = JSON.parse(nfr.current_text)
-    detail(await c.patch(`${cr}/locations/${nfr.location_id}`, { conclusion: "edit", new_value: same }))
-    const d = detail(await c.post(`${cr}/verify`))
-    expect(d.change_request.status).toBe("manual_fix")
-    expect(d.locations.find((l) => l.location_id === nfr.location_id)).toMatchObject({ manual: true, redo_count: 0, verify: { code_ok: false } })
-    detail(await c.patch(`${cr}/locations/${nfr.location_id}`, { new_value: { ...same, threshold: "1 s" } }))
-    expect(detail(await c.post(`${cr}/verify`)).change_request.status).toBe("ready_to_submit")
+    expect((await c.patch(`${cr}/locations/${nfr.location_id}`, { conclusion: "edit", new_value: same })).status).toBe(400)
+    expect((await c.patch(`${cr}/locations/${nfr.location_id}`, { conclusion: "comment", comment_text: "tự gõ" })).status).toBe(400)
+    const kept = detail(await c.patch(`${cr}/locations/${nfr.location_id}`, { conclusion: "not_related", reason: "Khách giữ ngưỡng cũ" }))
+    expect(kept.locations.find((l) => l.location_id === nfr.location_id)).toMatchObject({ conclusion: "not_related", reason: "Khách giữ ngưỡng cũ", manual: true })
   })
 
-  it("BPMN 3.9 (mode 1 v3): manual_fix ⇒ sửa trong step sở hữu — skill step + hướng của BA, chỉ ghi đề xuất; kiểm lại (3.7) ⇒ đạt", async () => {
+  it("BPMN 3.9 (mode 1 v3): manual_fix ⇒ sửa trong step sở hữu - skill step + hướng của BA, chỉ ghi đề xuất; kiểm lại (3.7) ⇒ đạt", async () => {
     routeCr((p) => clarifyPerf(p) ?? fakeCrProposeNoChange(p))
     const { c, cr, projectId } = await toProposed()
     const nfr = detail(await c.get(cr)).locations.find((l) => l.path === NFR)!
@@ -192,11 +242,11 @@ describe("C-5 redo ≤ 2 rồi manual_fix", () => {
       detail(await c.post(`${cr}/verify`))
     }
     expect(detail(await c.get(cr)).change_request.status).toBe("manual_fix")
-    expect(await SpineLock.countDocuments({ projectId, cr_id: crId })).toBeGreaterThan(0)
+    expect(await SpineLock.countDocuments({ projectId, cr_id: crId }), "FLF-375: không khoá").toBe(0)
     const before = (await Spine.findOne({ projectId }).lean())!.spine_version
     const cancelled = detail(await c.post(`${cr}/cancel`, { reason: "BA không sửa được, khách rút yêu cầu" }))
     expect(cancelled.change_request).toMatchObject({ status: "cancelled", closed_reason: "BA không sửa được, khách rút yêu cầu" })
-    expect(await SpineLock.countDocuments({ projectId, cr_id: crId }), "3.10 mở khoá").toBe(0)
+    expect(await SpineLock.countDocuments({ projectId, cr_id: crId })).toBe(0)
     expect((await Spine.findOne({ projectId }).lean())!.spine_version).toBe(before)
   })
 
@@ -207,5 +257,74 @@ describe("C-5 redo ≤ 2 rồi manual_fix", () => {
     detail(await c.post(`${cr}/propose`))
     await Spine.deleteOne({ projectId })
     await expect(runVerify(await crDoc(projectId, crId), "000000000000000000000000")).rejects.toThrow(/Không tìm thấy dữ liệu tài liệu/)
+  })
+})
+
+describe("FLF-367 C-5 thấy mâu thuẫn ⇒ hỏi người yêu cầu", () => {
+  const CONFLICT = "CR đặt thời gian phản hồi 1 giây, nhưng quy tắc mật khẩu ở mục Business Rules vẫn giả định 2 giây"
+
+  it("contradiction ⇒ awaiting_answers (không tới ready_to_submit), khoá giữ nguyên; trả lời ⇒ đề xuất lại, mâu thuẫn đã hỏi chỉ còn vàng", async () => {
+    routeCr((p) => {
+      if (clarifyPerf(p)) return clarifyPerf(p)
+      if (p.includes("# CR Consistency"))
+        return JSON.stringify({
+          findings: [
+            { rule: "contradiction", section_id: "fixed:5.1", message: CONFLICT, block_ids: [] },
+            { rule: "dangling_reference", section_id: "fixed:5.1", message: "Rule still assumes 2 seconds", block_ids: [] }
+          ]
+        })
+      return fakeCrPropose(p)
+    })
+    const { c, cr, projectId, crId } = await toProposed()
+    // FLF-375: không khoá chỗ đang sửa — vị trí của CR giữ nguyên qua vòng hỏi
+    const pathsBefore = (await ChangeLocation.find({ projectId, cr_id: crId }).distinct("path")) as string[]
+    expect(pathsBefore.length).toBeGreaterThan(0)
+
+    const asked = detail(await c.post(`${cr}/verify`))
+    expect(asked.change_request.status).toBe("awaiting_answers")
+    expect(asked.pending_questions).toEqual([CONFLICT])
+    expect(asked.change_request.clarifications.at(-1)!.suggestions).toEqual([[...CONTRADICTION_CHOICES]])
+    // vị trí bỏ kết luận để C-4 đề xuất lại theo câu trả lời; vị trí giữ như luồng gộp lệnh
+    expect(asked.locations.every((l) => l.conclusion === null && l.proposal === null && l.verify === null)).toBe(true)
+    expect(((await ChangeLocation.find({ projectId, cr_id: crId }).distinct("path")) as string[]).sort()).toEqual([...pathsBefore].sort())
+
+    // trả lời "đổi theo CR" ⇒ C-2 chạy lại với câu trả lời ⇒ C-3 / C-4 / C-5
+    const answered = detail(await c.post(`${cr}/answers`, { answers: [CONTRADICTION_CHOICES[0]] }))
+    expect(answered.change_request.status).toBe("impact_review")
+    expect(promptsOf("# CR Clarify").at(-1)).toContain(`Q1.1: ${CONFLICT}\nA: ${CONTRADICTION_CHOICES[0]}`)
+    detail(await c.post(`${cr}/impact`))
+    detail(await c.post(`${cr}/propose`))
+    expect(promptsOf("# CR Propose").at(-1)).toContain(CONTRADICTION_CHOICES[0])
+    // model nêu lại đúng mâu thuẫn đã hỏi ⇒ không hỏi lần nữa, chỉ ghi chú vàng
+    const done = detail(await c.post(`${cr}/verify`))
+    expect(done.change_request.status).toBe("ready_to_submit")
+    expect(done.change_request.clarifications).toHaveLength(1)
+    expect(done.locations.flatMap((l) => l.verify?.ai_flags.map((f) => f.rule) ?? [])).toContain("contradiction")
+    expect(promptsOf("# CR Consistency")).toHaveLength(2)
+  })
+
+  it("prompt C-5 có phần tử liên quan ở section khác và đoạn văn giữ nguyên liên quan", async () => {
+    const { c, cr, projectId } = await toProposed()
+    await Spine.updateOne(
+      { projectId },
+      {
+        $push: {
+          custom_sections: {
+            id: "CS90",
+            heading: "Service levels",
+            level: 1,
+            source: "import",
+            blocks: [{ kind: "paragraph", text: "Every response time of the platform is measured monthly against 2 seconds.", rows: null, image_ref: null }]
+          }
+        },
+        $inc: { spine_version: 1 }
+      }
+    )
+    detail(await c.post(`${cr}/verify`))
+    const [prompt] = promptsOf("# CR Consistency")
+    // tài liệu vừa ngân sách ⇒ mọi đoạn văn giữ nguyên đều có, đoạn CS90 không nhất thiết đứng đầu
+    expect(prompt).toContain("Passages kept verbatim:\n")
+    expect(prompt).toContain('custom_sections[id=CS90] "Service levels" (custom:CS90):')
+    expect(prompt).toContain("measured monthly against 2 seconds")
   })
 })

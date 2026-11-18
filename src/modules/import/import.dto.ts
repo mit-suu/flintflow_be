@@ -8,6 +8,7 @@
 import { z } from "zod"
 import { baselineSchema, flagSchema } from "../spine/spine.schema.js"
 import { IMPORT_PAUSE_REASONS, IMPORT_STATUSES } from "./import.state.js"
+import { DOC_VERSION_PATTERN } from "../doc-version/versioning.js"
 import {
   BLOCK_ID_PATTERN,
   DOC_BLOCK_KINDS,
@@ -16,8 +17,11 @@ import {
   HEADING_DETECTORS,
   MENTION_ENTITIES,
   PREFLIGHT_ISSUE_CODES,
-  REUPLOAD_CHANGES
+  REUPLOAD_CHANGES,
+  STAMP_KINDS
 } from "./import.constants.js"
+import { TEMPLATE_INTENTS } from "../project/project.model.js"
+import { TEMPLATE_FAMILIES } from "./part-bank.js"
 
 const id = z.string().min(1)
 const isoDateTime = z.iso.datetime({ offset: true })
@@ -35,13 +39,31 @@ export const preflightIssueSchema = z.object({
   location: z.object({ block_ord: z.number().int().min(0), text: z.string() }).nullable().optional()
 })
 
+/** FLF-331: loại tài liệu Code nhận ra ở I-1; bản ghi cũ ⇒ null. `unknown` ⇒ FE cảnh báo ở bước xác nhận. */
+export const documentKindSchema = z.object({
+  kind: z.enum(["srs", "srs_template", "not_srs", "unknown"]),
+  confidence: z.number().min(0).max(1),
+  signals: z.array(z.string()),
+  reasons: z.array(z.string())
+})
+
 export const docStampSchema = z.object({
   project_id: id,
   version: z.string().nullable(),
-  source: z.string().nullable()
+  source: z.string().nullable(),
+  /** FLF-334: stamp cũ không có ⇒ `null`. */
+  base_version: z.string().nullable().default(null),
+  latest_cr: z.string().nullable().default(null),
+  kind: z.enum(STAMP_KINDS).nullable().default(null)
 })
 
 export const importPausedSchema = z.object({ reason: z.enum(IMPORT_PAUSE_REASONS), at: isoDateTime })
+
+/** FLF-335: ý định lúc upload (bước 1.2). */
+export const templateIntentSchema = z.enum(TEMPLATE_INTENTS)
+/** Field text đi cùng multipart #2 `POST /:id/import` — client cũ còn gửi `intent`; parse được nhưng bỏ qua (ý định lấy từ Project). */
+export const uploadImportBodySchema = z.object({ intent: templateIntentSchema.optional() })
+export type UploadImportBody = z.infer<typeof uploadImportBodySchema>
 
 export const importedDocumentDtoSchema = z.object({
   id,
@@ -50,11 +72,20 @@ export const importedDocumentDtoSchema = z.object({
   size: z.number().int().min(0),
   sha256: z.string().length(64),
   status: importStatusSchema,
-  preflight: z.object({ status: z.enum(["accepted", "rejected"]), issues: z.array(preflightIssueSchema) }),
+  preflight: z.object({ status: z.enum(["accepted", "rejected"]), issues: z.array(preflightIssueSchema), document_kind: documentKindSchema.nullable().optional() }),
   stamp: docStampSchema.nullable(),
   confirmed_latest_at: isoDateTime.nullable(),
   paused: importPausedSchema.nullable(),
   extract_cursor: z.string().nullable(),
+  /** FLF-360: đang đọc lại vì AI quá tải — ảnh (`done`/`total` ảnh) hoặc một lô chữ (`done`/`total` lượt); `null` = không. */
+  reread: z.object({ kind: z.enum(["images", "text"]), done: z.number().int(), total: z.number().int(), section_id: z.string() }).nullable().optional(),
+  /** FLF-335: `fixed` / `free`; bản ghi cũ `null`. */
+  intent: templateIntentSchema.nullable().optional(),
+  /**
+   * Màn đọc khung: mục mà kết quả đọc cuối (I-5) khác bản sơ bộ lúc upload — workspace báo một lần. Rỗng ⇒ khớp; `null` ⇒ chưa
+   * finalize / import trước màn đọc khung.
+   */
+  structure_changes: z.array(z.object({ section_id: z.string(), title: z.string(), from: z.enum(["present", "missing", "out_of_scope", "absent"]), to: z.enum(["present", "missing", "out_of_scope", "absent"]) })).nullable().optional(),
   created_at: isoDateTime,
   updated_at: isoDateTime
 })
@@ -83,15 +114,26 @@ export const headingMapEntrySchema = z.object({
   confidence,
   detected_by: z.enum(HEADING_DETECTORS),
   confirmed: z.boolean(),
+  /** FLF-343: độ tin thấp, được tự nhận lúc tách file (không qua bước xác nhận) — có cờ vàng "Cần xem" sau baseline. */
+  auto_confirmed: z.boolean().optional(),
   /**
-   * FLF-252: heading khớp một mục của mẫu không phải FPT (IEEE) — `section_id = unmapped` mà có field này nghĩa là mục
-   * chỉ có ở mẫu đó, giữ nguyên văn (khác heading lạ không khớp gì). Mã nội bộ, FE không hiện.
+   * FLF-363: phần của ngân hàng phần khớp theo tên — `section_id = unmapped` mà có field này nghĩa là phần chỉ có ở mẫu
+   * IEEE, giữ nguyên văn (khác heading lạ không khớp gì). Mã nội bộ, FE không hiện.
    */
-  template_section: z.string().nullable().optional()
+  template_section: z.string().nullable().optional(),
+  /** FLF-363 (D2): mục theo tên (`by_title`) khác mục theo nội dung (`by_content`) — heading đã đổi theo nội dung. */
+  content_mismatch: z.object({ by_title: z.string(), by_content: z.string() }).optional(),
+  /** FLF-278 trên FLF-336: chữ hướng dẫn của mẫu dưới heading (business-flow 1.5) — chỉ để BA xem, không phải nội dung. */
+  guidance: z.string().optional(),
+  /** FLF-364: nguồn của `guidance` (chữ trong ngoặc, có / không kèm kiểu chữ hướng dẫn) và block chứa nó. */
+  guidance_by: z.enum(["brackets", "brackets+format"]).optional(),
+  guidance_blocks: z.array(z.string()).optional(),
+  /** FLF-362: nhãn số Word tự đánh của heading ("2.1", "II.") — không nằm trong `heading_text`; hiển thị = nhãn + tiêu đề. */
+  number_label: z.string().optional()
 })
 
-/** Họ mẫu của tài liệu upload (FLF-252). */
-export const TEMPLATE_FAMILIES = ["fpt", "ieee830", "ieee_features"] as const
+/** Nhãn họ mẫu của tài liệu upload (FLF-363: `fpt` · `ieee29148` · `mixed`, tính sau khi khớp — chỉ để báo cáo). */
+export { TEMPLATE_FAMILIES }
 
 export const tableMapEntrySchema = z.object({
   block_id: blockId,
@@ -100,10 +142,14 @@ export const tableMapEntrySchema = z.object({
   field_path: z.string().nullable(),
   confidence,
   confirmed: z.boolean(),
+  /** FLF-343: như `headingMapEntrySchema.auto_confirmed`. */
+  auto_confirmed: z.boolean().optional(),
   /** FLF-252: vai trò cột theo dữ liệu (`row_no` số thứ tự, `code` mã, `mark` ô đánh dấu…) — không có khi chỉ khớp tiêu đề. */
   role: z.string().optional(),
   /** FLF-252: tối đa 3 giá trị đầu của cột. */
-  samples: z.array(z.string()).optional()
+  samples: z.array(z.string()).optional(),
+  /** FLF-364: chữ hướng dẫn trong các ô của cột (`[Tên tác nhân]`), bỏ ngoặc — chỉ để xem, không phải nội dung. */
+  guidance: z.string().optional()
 })
 
 /**
@@ -114,7 +160,9 @@ export const layoutEntrySchema = z.object({
   order: z.number().int().min(0),
   heading_text: z.string(),
   level: z.number().int().min(1).max(9),
-  section_id: z.string().min(1)
+  section_id: z.string().min(1),
+  /** FLF-362: như `headingMapEntrySchema.number_label`. */
+  number_label: z.string().optional()
 })
 
 /** Một dòng Record of Changes của file gốc (FLF-252) — cùng hình dòng §I của `RenderedDocument.recordOfChanges`. */
@@ -130,7 +178,6 @@ export const templateProfileDtoSchema = z.object({
   doc_version: z.string().min(1),
   heading_map: z.array(headingMapEntrySchema),
   table_map: z.array(tableMapEntrySchema),
-  required_sections: z.array(z.string()),
   language: z.string(),
   /** FLF-182 — rỗng với import trước mode 1 v2. */
   layout: z.array(layoutEntrySchema).default([]),
@@ -143,16 +190,16 @@ export const templateProfileDtoSchema = z.object({
 // ─── kế hoạch step theo template (mode 1 v2, FLF-182) ─────────────────
 
 /**
- * `applied` — step chạy trong workspace (đầu mục có trong template, đầu mục FPT bị thiếu, hoặc step phải chạy);
- * `hidden` — ẩn (không sinh đầu mục, vd Brief), bật được; `enabled` — người dùng đã bật step từng ẩn.
+ * `applied` — step chạy trong workspace (đầu mục có nội dung trong file, hoặc bước ghép / kiểm tra luôn chạy);
+ * `hidden` — ẩn (file không có đầu mục đó, hoặc không sinh đầu mục như Brief), bật được; `enabled` — step đang bật
+ * nhưng chưa có dữ liệu (người dùng bật, hoặc đầu mục có trong file mà chưa trích được gì) — tắt được.
+ * Mẫu FPT không bắt buộc (FLF-312): bản xuất theo template người dùng upload, đầu mục FPT file không có không phải "thiếu".
  */
 export const STEP_PLAN_STATES = ["applied", "hidden", "enabled"] as const
 
 export const stepPlanEntrySchema = z.object({
   step_id: z.string().min(1),
   state: z.enum(STEP_PLAN_STATES),
-  /** Đầu mục mẫu FPT mà file không có (hoặc chỉ có heading) ⇒ "Thiếu" + cờ đỏ `section_empty` (hồ sơ luật mode 1 giữ đỏ — FLF-183). */
-  missing: z.boolean(),
   /** Section do step sở hữu (FPT). */
   section_ids: z.array(z.string()),
   /** Lý do chọn/ẩn, hiển thị cho người dùng. */
@@ -211,8 +258,14 @@ export const mappingPatchRequestSchema = z
     message: "Cần chọn ít nhất một mục, hoặc xác nhận tất cả."
   })
 
-/** `POST /projects/:id/import/extract` (nút 1.8) — chạy hoặc chạy tiếp I-4 từ `extract_cursor`. */
-export const extractRequestSchema = z.strictObject({ import_id: id })
+/**
+ * `POST /projects/:id/import/extract` (nút 1.8) — nút "Bắt đầu" của màn báo credit (FLF-343): chạy một mạch I-4 ⇒ baseline
+ * 0.1 ⇒ kiểm tra. `confirm_latest`: câu "đây là bản mới nhất" (bắt buộc `true` khi file không stamp và chưa xác nhận).
+ */
+export const extractRequestSchema = z.strictObject({ import_id: id, confirm_latest: z.boolean().optional() })
+
+/** FLF-412 `PATCH /projects/:id/import/drop-text`: cả tập vùng (khoá `block_id` của heading) người dùng chọn Bỏ chữ. */
+export const dropTextRequestSchema = z.strictObject({ import_id: id, keys: z.array(z.string().min(1).max(32)).max(500) })
 
 /** `PATCH /projects/:id/import/fields` (UC-22, nút 1.9). */
 export const fieldsPatchRequestSchema = z
@@ -239,7 +292,57 @@ export const fieldsPatchRequestSchema = z
  * `record_of_changes` (FLF-252, tuỳ chọn): các dòng Record of Changes người dùng đã xem/sửa ở wizard — thay cho dòng đọc
  * được từ file. Không gửi ⇒ đọc lại từ file như trước.
  */
-export const finalizeRequestSchema = z.strictObject({ import_id: id, base_version: baseVersion, record_of_changes: z.array(recordRowSchema).max(500).optional() })
+export const finalizeRequestSchema = z.strictObject({
+  import_id: id,
+  base_version: baseVersion,
+  record_of_changes: z.array(recordRowSchema).max(500).optional(),
+  /** FLF-336: từ màn "Kết quả đọc file" (`incomplete`) bấm "Hoàn thiện" ⇒ đi tiếp dù còn mục thiếu. */
+  complete: z.boolean().optional()
+})
+
+/** FLF-278 trên FLF-336: từ `incomplete` (chế độ 3) sang Luồng 2 — viết phần còn thiếu bằng pipeline (#8b). */
+export const continueFlow2RequestSchema = z.strictObject({
+  import_id: id,
+  base_version: baseVersion
+})
+
+/** FLF-336 I-5 — kết quả so cấu trúc đích (`TemplateProfile.target_structure`). */
+export const targetSectionSchema = z.object({
+  section_id: z.string().min(1),
+  title: z.string(),
+  status: z.enum(["present", "missing", "out_of_scope"]),
+  owner_steps: z.array(z.string())
+})
+export const targetStructureSchema = z.object({
+  target: z.enum(["fpt", "template"]),
+  intent: z.enum(["fixed", "free"]),
+  /** Chế độ thật: 1 đủ cấu trúc đích · 3 mẫu cố định còn thiếu · 4 tự do còn thiếu. */
+  resolved_mode: z.union([z.literal(1), z.literal(3), z.literal(4)]),
+  sections: z.array(targetSectionSchema),
+  missing: z.array(z.string()),
+  compared_at: isoDateTime
+})
+export type TargetStructureDto = z.infer<typeof targetStructureSchema>
+
+/**
+ * Màn đọc khung (business-flow §3.1.2) — cấu trúc đích sơ bộ tính bằng Code lúc upload, trước Bắt đầu
+ * (`TemplateProfile.structure_preview`). `sections` theo thứ tự heading trong file; `kind = template` khi phần lớn mục chưa có
+ * nội dung (khung mẫu).
+ */
+export const structurePreviewSchema = z.object({
+  summary: z.object({
+    present: z.number().int().min(0),
+    missing: z.number().int().min(0),
+    out_of_scope: z.number().int().min(0),
+    kind: z.enum(["written", "template"])
+  }),
+  // P09 (#15): `excerpt` — trích đoạn chữ khách viết dưới mục (≤ 200 ký tự); mục không có chữ / bản sơ bộ cũ ⇒ không có
+  sections: z.array(z.object({ section_id: z.string().min(1), title: z.string(), status: z.enum(["present", "missing", "out_of_scope"]), order: z.number().int().min(0), excerpt: z.string().max(200).optional() })),
+  resolved_mode: z.union([z.literal(1), z.literal(3), z.literal(4)]),
+  intent: z.enum(["fixed", "free"]),
+  computed_at: isoDateTime
+})
+export type StructurePreviewDto = z.infer<typeof structurePreviewSchema>
 
 /** `POST /projects/:id/import/resume` (UC-61, UC-75). */
 export const importResumeRequestSchema = z.strictObject({ import_id: id })
@@ -262,8 +365,14 @@ export const getImportResponseSchema = z.object({
     review_fields: z.array(reviewFieldSchema)
   }),
   blocks_count: z.number().int().min(0),
+  /** FLF-336: có sau lần finalize đầu (kể cả khi dừng ở `incomplete`); null khi chưa so. */
+  target_structure: targetStructureSchema.nullable().optional(),
+  /** Màn đọc khung: cấu trúc đích sơ bộ lúc upload (trước Bắt đầu); null khi chưa upload / import trước màn đọc khung. */
+  structure_preview: structurePreviewSchema.nullable().optional(),
+  /** FLF-412: vùng heading có chữ + lựa chọn Bỏ chữ — chỉ có trước Bắt đầu (`extracting` chưa đọc lượt nào); khác ⇒ null. */
+  text_sections: z.array(z.object({ key: z.string(), title: z.string(), level: z.number().int(), dropped: z.boolean() })).nullable().optional(),
   /**
-   * Ước tính I-4 còn phải chạy — chỉ có khi import ở `mapping_review` hoặc `extracting` mà job chưa chạy / đang dừng; trạng
+   * FLF-343: ước tính cả lượt một mạch (I-4 còn phải chạy + kiểm tra AI 1.11) — chỉ có khi import ở `mapping_review` hoặc `extracting` mà job chưa chạy / đang dừng; trạng
    * thái khác hoặc đang chạy ⇒ `null` / không có. Tính bằng chính kế hoạch lượt của lượt chạy (lô chữ sau phần đọc tất định +
    * ảnh diagram đọc được, trừ phần đã xong) × bảng giá hiện hành. `available_credits` = số credit khả dụng (balance − reserved)
    * của ví org sở hữu project; `null` với Viewer (không xem được số dư — như `/billing/balance`).
@@ -272,6 +381,8 @@ export const getImportResponseSchema = z.object({
     .object({
       text_batches: z.number().int().min(0),
       diagram_images: z.number().int().min(0),
+      /** FLF-343: lượt AI của bước kiểm tra (1.11) chạy nối tiếp — đã gộp vào `ai_calls` / `credits`. */
+      check_calls: z.number().int().min(0).optional(),
       ai_calls: z.number().int().min(0),
       credits: z.number().min(0),
       available_credits: z.number().nullable()
@@ -293,33 +404,28 @@ export const extractResponseSchema = z.object({
  */
 export const finalizeResponseSchema = z.object({
   import: importedDocumentDtoSchema,
-  doc_version: z.literal("0.0"),
+  doc_version: z.string().regex(DOC_VERSION_PATTERN),
   baseline: baselineSchema.nullable(),
   spine_version: z.number().int().min(1),
   flags: z.object({ red: z.number().int().min(0), yellow: z.number().int().min(0) }).nullable()
 })
 
 export const gapReportSchema = z.object({
+  /** Màn đọc khung: báo cáo sơ bộ trước Bắt đầu (chưa đọc nội dung, chưa có cờ) — kết quả cuối có thể khác. */
+  preliminary: z.boolean().optional(),
+  /** FLF-336: bản đồ mục ⇒ cấu trúc đích (có từ trạng thái `incomplete`). */
+  target_structure: targetStructureSchema.nullable().optional(),
   project_id: id,
   doc_version: z.string().min(1),
   generated_at: isoDateTime,
   totals: z.object({
     red: z.number().int().min(0),
     yellow: z.number().int().min(0),
-    missing_sections: z.number().int().min(0),
-    unmapped_headings: z.number().int().min(0),
     low_confidence_fields: z.number().int().min(0),
-    /** Mode 1 v2 (FLF-184): số đầu mục mẫu FPT còn thiếu. */
-    missing_fpt_sections: z.number().int().min(0),
     /** Mode 1 v2 (nợ T4): số hình chưa vẽ được (PlantUML vắng mặt lúc import / render lỗi). */
     unrendered_diagrams: z.number().int().min(0)
   }),
-  /**
-   * Mode 1 v2 (FLF-184, D6): đầu mục mẫu FPT file không có hoặc chỉ có heading — cờ đỏ `section_empty`, chặn sign-off
-   * v1 tới khi chạy `step_id` (AI soạn) hoặc viết tay. Đứng đầu báo cáo. `feature:*` = chức năng chương 3.
-   */
-  missing_fpt_sections: z.array(z.object({ section_id: z.string(), title: z.string(), step_id: z.string(), in_layout: z.boolean() })),
-  /** Mode 1 v2 (FLF-184): mục theo thứ tự file upload — `fpt` khớp mẫu FPT, `group` heading nhóm, `custom` mục riêng ngoài FPT (không cờ thiếu). */
+  /** Mode 1 v2 (FLF-184): mục theo thứ tự file upload — `fpt` khớp mẫu FPT, `group` heading nhóm, `custom` mục riêng ngoài FPT. */
   layout: z.array(
     z.object({
       order: z.number().int().min(0),
@@ -338,8 +444,6 @@ export const gapReportSchema = z.object({
    * render lỗi. Không chặn baseline: người dùng bấm vẽ lại ở workspace. Tính trực tiếp từ Spine mỗi lần đọc báo cáo.
    */
   unrendered_diagrams: z.array(z.object({ diagram_id: z.string(), kind: z.string(), section_id: z.string(), title: z.string(), reason: z.enum(["not_rendered", "error"]) })),
-  missing_sections: z.array(z.object({ section_id: z.string(), title: z.string() })),
-  unmapped_headings: z.array(z.object({ block_id: blockId, text: z.string() })),
   low_confidence_fields: z.array(reviewFieldSchema)
 })
 

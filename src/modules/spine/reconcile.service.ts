@@ -24,6 +24,7 @@
 
 import { randomUUID } from "node:crypto"
 import { layoutRenderDeps, renderDiagrams, staleDiagrams } from "../diagram/diagram.service.js"
+import { loadRenderContext } from "../diagram/render-context.js"
 import type { RenderTarget } from "../diagram/renderers/index.js"
 import { projectStep } from "../pipeline/context-projection.js"
 import { ActionType, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
@@ -31,11 +32,13 @@ import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import type { LocalizedEntry, OpTransaction } from "../../shared/ai/response-parser.js"
 import { documentLanguageForTurn, documentLanguageInput, languagePairOf, type TurnDocumentLanguage } from "../translation/turn-language.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { assertDraftUnlocked } from "./draft-lock.js"
+import { expandIndexSelectors } from "./index-selector-fix.js"
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { accountLocaleOf } from "../user/account-locale.js"
 import { applyTransaction } from "./op-engine.js"
 import * as repository from "./spine.repository.js"
-import { computeSectionStates, isRerenderOnly } from "./section-status.js"
+import { acceptSeqByStep, computeSectionStates, isCancelledAfter, isRerenderOnly, revertPairs } from "./section-status.js"
 import { sectionsOfPath, stepsOf } from "./section-registry.js"
 import {
   apply as applyChange,
@@ -43,14 +46,19 @@ import {
   preview as previewChange,
   type ChangeApplyResult,
   type ChangeDeps,
-  type ChangePreviewResult
+  type ChangePreviewResult,
+  type PlaceConflict
 } from "./change.service.js"
 import type { Op } from "./op.types.js"
 import type { Change, Spine, SpineRecord } from "./spine.types.js"
 import { stampAddendum } from "./addendum-stamp.js"
 
-/** Trần số section hoà giải trong một lượt — mỗi section là một lượt gọi model. */
-export const MAX_RECONCILE_SECTIONS = 12
+/**
+ * Trần an toàn số section hoà giải trong một lượt — mỗi section là một lượt gọi model. FLF-431 (UC-36 AC-36.1, S05-08): một
+ * lượt bấm phải ra **một** bản xem trước gộp cho mọi section stale; trần cũ 12 bắt bấm "Viết lại" 3 lần (28 → 13 → 1). Trần
+ * này chỉ chặn trường hợp bất thường (dự án rất lớn), không phải số lô.
+ */
+export const MAX_RECONCILE_SECTIONS = 60
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
 
@@ -88,10 +96,15 @@ export const changesMakingStale = (spine: Spine, changes: readonly Change[], sec
   const steps = new Map(spine.steps.map((s) => [s.id, s]))
   const accepted = [...own].map((id) => steps.get(id)).filter((s) => s?.status === "accepted")
   if (accepted.length === 0) return []
-  const threshold = Math.max(...accepted.map((s) => s?.last_seq ?? 0))
+  // Cùng mốc với `computeSectionStates`: `last_seq` hoặc lượt ghi `accepted_at` gần nhất (FLF-431 — trước chỉ `last_seq`,
+  // brief hoà giải kê cả change đã duyệt lại)
+  const acceptedAt = acceptSeqByStep(changes)
+  const threshold = Math.max(...accepted.map((s) => Math.max(s?.last_seq ?? 0, acceptedAt.get(s?.id ?? "") ?? 0)))
 
+  const pairs = revertPairs(changes)
+  const revertedBy = new Set(pairs.values())
   return changes.filter((change) => {
-    if (change.seq <= threshold) return false
+    if (change.seq <= threshold || isCancelledAfter(change.seq, threshold, pairs, revertedBy)) return false
     if (change.step_id !== null && own.has(change.step_id)) return false
     if (isRerenderOnly(change)) return false
     const impact = sectionsOfPath(spine, change.path, change)
@@ -187,7 +200,9 @@ const proposeOps = async (
     if (result.data.localized?.length) localized.push(...result.data.localized)
   }
 
-  return { ops, sections, localized, language: language ?? null }
+  // Model sửa một dòng mảng chuỗi bằng chỉ số (`normal[2]`) ⇒ viết lại thành set cả mảng; không thì một op như vậy
+  // làm chết cả bản xem trước gộp của mọi section
+  return { ops: expandIndexSelectors(spine, ops), sections, localized, language: language ?? null }
 }
 
 // ─── điểm vào ────────────────────────────────────────────────────
@@ -197,9 +212,26 @@ export interface ReconcileBody {
   preview_id?: string
 }
 
-export type ReconcileResult = ChangePreviewResult | ChangeApplyResult
+/** Lượt áp hoà giải: mục bị người khác sửa đúng chữ giữa hai lượt — chưa ghi, bên gọi cho AI soạn lại (chốt câu 9). */
+export type ReconcileApplied = ChangeApplyResult & { redraft_sections?: string[] }
 
-export const isReconcileApplied = (result: ReconcileResult): result is ChangeApplyResult => "spine_version" in result
+export type ReconcileResult = ChangePreviewResult | ReconcileApplied
+
+/** Mục sở hữu các chỗ bị bỏ qua — không đặt chờ chấp nhận lại, vẫn `stale` để lượt "Viết lại" kế tiếp soạn lại. */
+const skippedSections = (spine: Spine, skipped: readonly PlaceConflict[]): string[] => {
+  const out = new Set<string>()
+  for (const place of skipped) {
+    if (place.section_id) out.add(place.section_id)
+    try {
+      for (const id of sectionsOfPath(spine, place.path).owner) out.add(id)
+    } catch {
+      // path lạ: chỉ giữ section_id đã tính
+    }
+  }
+  return [...out]
+}
+
+export const isReconcileApplied = (result: ReconcileResult): result is ReconcileApplied => "spine_version" in result
 
 /**
  * Lượt 1 (không `preview_id`): trả preview diff gộp.
@@ -223,11 +255,32 @@ export const reconcile = async (
   if (body.preview_id !== undefined) {
     const sections = reconciledSections.get(body.preview_id) ?? []
     reconciledSections.delete(body.preview_id)
-    const applied = await applyChange(projectId, userId, { base_version: body.base_version, preview_id: body.preview_id }, init, d)
+    // FLF-294: hoà giải kéo theo một CR đã ghi — không đòi người yêu cầu / nguồn lần nữa
+    // P12 (chốt câu 9): người khác / bước khác vừa ghi ⇒ ghi các mục không bị đổi, bỏ chỗ bị sửa đúng chữ để AI soạn lại
+    const applied = await applyChange(
+      projectId,
+      userId,
+      { base_version: body.base_version, preview_id: body.preview_id, cr_exempt: true, on_conflict: "skip" },
+      init,
+      d
+    )
+    const redraft = skippedSections(stripRecord(applied.spine), applied.skipped ?? [])
+    if (redraft.length > 0) sections.splice(0, sections.length, ...sections.filter((id) => !redraft.includes(id)))
     const afterRender = await rerenderStale(projectId, userId, applied.spine, d)
-    const version = await markAwaitingReaccept(projectId, userId, afterRender, sections)
+    // Sau baseline (BR-03): bản xem trước hoà giải user vừa duyệt CHÍNH LÀ lượt duyệt — ghi thẳng vào bản nháp như
+    // một CR, không mở lại bước soạn (trước đây đòi chạy lại + duyệt lại 13 bước mới gỡ được cờ đỏ để chốt baseline).
+    // Trước baseline giữ luồng cũ: section chờ user chấp nhận lại ở pipeline.
+    const version =
+      applied.spine.baselines.length > 0
+        ? await acceptSections(projectId, userId, afterRender, sections, "Hoà giải sau baseline: user đã duyệt nội dung cập nhật")
+        : await markAwaitingReaccept(projectId, userId, afterRender, sections)
+    if (applied.spine.baselines.length > 0) await d.recomputeFlags(projectId, userId)
     const record = await repository.get(projectId)
-    return { ...applied, ...(record ? { spine: record, spine_version: record.spine_version } : { spine_version: version }) }
+    return {
+      ...applied,
+      ...(record ? { spine: record, spine_version: record.spine_version } : { spine_version: version }),
+      ...(redraft.length > 0 ? { redraft_sections: redraft } : {})
+    }
   }
 
   const record = await repository.get(projectId)
@@ -235,6 +288,7 @@ export const reconcile = async (
   if (record.spine_version !== body.base_version) {
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", repository.SPINE_VERSION_CONFLICT)
   }
+  assertDraftUnlocked(record)
 
   const spine = stripRecord(record)
   const changes = await repository.listChanges(projectId)
@@ -261,7 +315,7 @@ export const reconcile = async (
       notes:
         briefs.length === 0
           ? "Không có section nào đang stale."
-          : `${briefs.length} section vẫn đúng nội dung — xác nhận không đổi để gỡ cờ, hoặc sửa tay qua chat.`
+          : `${briefs.length} section vẫn đúng nội dung - xác nhận không đổi để gỡ cờ, hoặc sửa tay qua chat.`
     }
   }
 
@@ -292,6 +346,33 @@ export const reconcile = async (
  * cờ `section_stale_at_baseline` đóng ở lượt quét kế tiếp. Không ghi nội dung nào — đây là một quyết định
  * của người, và nó được ghi lại như mọi quyết định khác trong `changes[]`.
  */
+/** Mốc chấp nhận của step sở hữu các section dời tới change mới nhất ⇒ section hết `stale` mà step không mở lại. */
+const acceptOps = async (projectId: string, spine: Spine, sectionIds: readonly string[]): Promise<Op[]> => {
+  const latestSeq = (await repository.nextSeq(projectId)) - 1
+  const at = new Date().toISOString()
+  const ops: Op[] = []
+  const seen = new Set<string>()
+  for (const sectionId of sectionIds) {
+    for (const stepId of stepsOf(sectionId, spine)) {
+      const step = spine.steps.find((s) => s.id === stepId)
+      if (!step || step.status !== "accepted" || seen.has(stepId)) continue
+      seen.add(stepId)
+      if (step.last_seq !== latestSeq) ops.push({ op: "set", path: `steps[id=${stepId}].last_seq`, value: latestSeq })
+      ops.push({ op: "set", path: `steps[id=${stepId}].accepted_at`, value: at })
+    }
+  }
+  return ops
+}
+
+/** Sau baseline: user đã duyệt bản xem trước hoà giải ⇒ chấp nhận luôn các section đó (không mở lại step). */
+const acceptSections = async (projectId: string, userId: string, baseVersion: number, sectionIds: readonly string[], reason: string): Promise<number> => {
+  const record = await repository.get(projectId)
+  if (!record) return baseVersion
+  const ops = await acceptOps(projectId, stripRecord(record), sectionIds)
+  if (ops.length === 0) return record.spine_version
+  return (await applyTransaction(projectId, { base_version: record.spine_version, ops, by: userId, step_id: null, reason })).spine_version
+}
+
 const confirmNoChange = async (
   projectId: string,
   userId: string,
@@ -304,22 +385,7 @@ const confirmNoChange = async (
   if (record.spine_version !== baseVersion) {
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", repository.SPINE_VERSION_CONFLICT)
   }
-  const spine = stripRecord(record)
-  const latestSeq = (await repository.nextSeq(projectId)) - 1
-  const at = new Date().toISOString()
-
-  const ops: Op[] = []
-  const seen = new Set<string>()
-  for (const sectionId of sectionIds) {
-    for (const stepId of stepsOf(sectionId, spine)) {
-      const step = spine.steps.find((s) => s.id === stepId)
-      if (!step || step.status !== "accepted" || seen.has(stepId)) continue
-      seen.add(stepId)
-      if (step.last_seq !== latestSeq) ops.push({ op: "set", path: `steps[id=${stepId}].last_seq`, value: latestSeq })
-      ops.push({ op: "set", path: `steps[id=${stepId}].accepted_at`, value: at })
-    }
-  }
-
+  const ops = await acceptOps(projectId, stripRecord(record), sectionIds)
   const applied =
     ops.length > 0
       ? await applyTransaction(projectId, { base_version: record.spine_version, ops, by: userId, step_id: null, reason: "Hoà giải: user xác nhận nội dung không đổi" })
@@ -341,7 +407,7 @@ const confirmNoChange = async (
 
 /** Vẽ lại đúng những hình `source_hash` lệch sau khi áp lô hoà giải. */
 const rerenderStale = async (projectId: string, userId: string, spine: SpineRecord, deps: ReconcileDeps): Promise<number> => {
-  const targets = staleDiagrams(stripRecord(spine)).map((d) => ({ kind: d.kind, owner_id: d.owner_id }))
+  const targets = staleDiagrams(stripRecord(spine), await loadRenderContext(projectId)).map((d) => ({ kind: d.kind, owner_id: d.owner_id }))
   if (targets.length === 0) return spine.spine_version
   await deps.rerender(projectId, targets, userId)
   return (await repository.get(projectId))?.spine_version ?? spine.spine_version

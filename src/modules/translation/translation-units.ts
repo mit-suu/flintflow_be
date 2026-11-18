@@ -18,10 +18,12 @@ import { stableStringify } from "../spine/source-hash.js"
 import { parsePath, type Segment } from "../spine/path-resolver.js"
 import { PROJECT_TEXT_FIELDS, SRS_TEXT_FIELDS, SRS_TEXT_GROUPS, VALIDATION_TEXT_FIELDS, type SrsTextGroup } from "../spine/srs-text-fields.js"
 import { wireframeLabels } from "../diagram/salt-text.js"
+import { screenSpecOf } from "../diagram/renderers/screen-mockup.js"
+import { specLabels } from "../diagram/screen-spec.js"
 
 export type UnitValue = string | string[]
 
-/** `diagrams` (N1): nhãn của wireframe model vẽ — chữ chỉ có trong `diagrams[].puml`, không ở field Spine nào. */
+/** `diagrams` (N1): nhãn của wireframe model vẽ — chữ chỉ có trong `diagrams[].source` (`format = puml`), không ở field Spine nào. */
 export type TranslationGroup = SrsTextGroup | "project" | "diagrams"
 
 /** Vị trí của đơn vị trong Spine — phase 3 dùng để dựng bản xem đã dịch. */
@@ -82,7 +84,13 @@ const elementPath = (group: Exclude<TranslationGroup, "project">, id: string): s
  */
 export const DIAGRAM_TEXT_FIELDS: Readonly<Partial<Record<SrsTextGroup, readonly string[]>>> = {
   actors: ["flows_in", "flows_out"],
-  entities: ["relation_verbs"]
+  entities: ["relation_verbs", "attributes", "states", "transitions"],
+  // message của sơ đồ tuần tự hệ thống (`functions[].interactions`): đơn vị mảng chữ theo thứ tự mảng, xem `ARRAY_TEXT_KEYS`
+  functions: ["interactions", "component_interactions"],
+  // FLF-390: chữ trong nút activity (`activity_nodes[].name`) và guard của control flow (`activity_flows[].guard`) của use case
+  use_cases: ["activity_nodes", "activity_flows"],
+  // nhãn trên cạnh luồng màn: `flow_to[].trigger` / `.guard` (đơn vị là mảng chữ theo thứ tự `to`, xem `flowTexts`)
+  screens: ["flow_to"]
 }
 
 /** Field chữ của một nhóm cho lớp bản dịch: danh sách dùng chung rồi field chỉ có trên sơ đồ. */
@@ -91,14 +99,77 @@ const unitFields = (group: SrsTextGroup): readonly string[] => [...SRS_TEXT_FIEL
 /** Field dạng bảng `id đích → chữ` — một đơn vị là MẢNG chữ theo khoá đã sắp. */
 const RECORD_FIELDS: ReadonlySet<string> = new Set(["relation_verbs"])
 
+const FLOW_FIELD = "flow_to"
+
+/**
+ * Mảng phần tử entity có chữ hiển thị: một đơn vị mảng chữ theo thứ tự mảng, mỗi phần tử lần lượt các khoá chữ (cái nào có).
+ * `attributes`: tên, mô tả · `states`: tên trạng thái · `transitions`: sự kiện, điều kiện, hành động.
+ */
+const ARRAY_TEXT_KEYS: Readonly<Record<string, readonly string[]>> = { attributes: ["name", "description"], states: ["name"], transitions: ["event", "guard", "action"], interactions: ["message", "guard"], component_interactions: ["message", "guard"], activity_nodes: ["name"], activity_flows: ["guard"] }
+
+const byTarget = (edges: readonly Row[]): Row[] => [...edges].sort((a, b) => (String(a.to) < String(b.to) ? -1 : String(a.to) > String(b.to) ? 1 : 0))
+const textOf = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v : null)
+
+/** Chữ hiển thị của các cạnh `flow_to`: theo thứ tự `to`, mỗi cạnh trigger rồi guard (cái nào có). */
+const flowTexts = (edges: readonly unknown[]): string[] =>
+  byTarget(edges.filter(isRow)).flatMap((e) => [textOf(e.trigger), textOf(e.guard)].filter((t): t is string => t !== null))
+
+/** Chữ hiển thị của các phần tử của mảng `field` (xem `ARRAY_TEXT_KEYS`), theo thứ tự mảng. */
+const arrayTexts = (field: string, items: readonly unknown[]): string[] =>
+  items.filter(isRow).flatMap((item) => ARRAY_TEXT_KEYS[field].map((key) => textOf(item[key])).filter((t): t is string => t !== null))
+
+/** Ghi lại chữ dịch (theo thứ tự `arrayTexts` của `current`) vào đúng khoá chữ; giữ mọi field khác và thứ tự. */
+const writeArrayTexts = (field: string, current: readonly unknown[], text: readonly string[]): unknown[] => {
+  let i = 0
+  return current.map((item) => {
+    if (!isRow(item)) return item
+    const patch: Row = {}
+    for (const key of ARRAY_TEXT_KEYS[field]) if (textOf(item[key]) !== null) patch[key] = text[i++]
+    return { ...item, ...patch }
+  })
+}
+
+/** Ghi lại chữ dịch (theo thứ tự `flowTexts` của `current`) vào đúng trigger / guard; giữ thứ tự và `to` của cạnh. */
+const writeFlowTexts = (current: readonly unknown[], text: readonly string[]): unknown[] => {
+  const next = new Map<string, Row>()
+  let i = 0
+  for (const e of byTarget(current.filter(isRow))) {
+    const patch: Row = {}
+    if (textOf(e.trigger) !== null) patch.trigger = text[i++]
+    if (textOf(e.guard) !== null) patch.guard = text[i++]
+    next.set(String(e.to), patch)
+  }
+  return current.map((e) => (isRow(e) ? { ...e, ...(next.get(String(e.to)) ?? {}) } : e))
+}
+
 const sortedKeys = (record: Row): string[] => Object.keys(record).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
 
 /** Giá trị đơn vị của field: bảng ⇒ mảng chữ theo khoá đã sắp; còn lại giữ nguyên. */
-const unitFieldValue = (field: string, raw: unknown): unknown =>
-  RECORD_FIELDS.has(field) && isRow(raw) ? sortedKeys(raw).map((key) => raw[key]) : raw
+const unitFieldValue = (field: string, raw: unknown): unknown => {
+  if (field === FLOW_FIELD && Array.isArray(raw)) return flowTexts(raw)
+  if (field in ARRAY_TEXT_KEYS && Array.isArray(raw)) return arrayTexts(field, raw)
+  return RECORD_FIELDS.has(field) && isRow(raw) ? sortedKeys(raw).map((key) => raw[key]) : raw
+}
 
 /** Chữ dịch của field bảng, xếp theo khoá của bản GỐC — đúng vị trí `unitFieldValue(field, gốc)`. */
 const localizedFieldValue = (field: string, enRaw: unknown, locRaw: unknown): unknown => {
+  if (field === FLOW_FIELD && Array.isArray(enRaw)) {
+    // Bản dịch giữ cạnh theo `to`: lấy trigger / guard của cạnh cùng `to`, theo đúng thứ tự chữ của bản gốc
+    if (!Array.isArray(locRaw)) return undefined
+    const loc = new Map(locRaw.filter(isRow).map((e) => [String(e.to), e]))
+    return byTarget(enRaw.filter(isRow)).flatMap((e) => {
+      const l = loc.get(String(e.to))
+      return [textOf(e.trigger) !== null ? (l?.trigger ?? "") : null, textOf(e.guard) !== null ? (l?.guard ?? "") : null].filter((t): t is string => t !== null)
+    })
+  }
+  if (field in ARRAY_TEXT_KEYS && Array.isArray(enRaw)) {
+    // Bản dịch giữ phần tử theo thứ tự: lấy chữ cùng vị trí, theo đúng thứ tự chữ của bản gốc
+    if (!Array.isArray(locRaw) || locRaw.length !== enRaw.length) return undefined
+    return enRaw.flatMap((item, i) => {
+      const l = isRow(locRaw[i]) ? locRaw[i] : {}
+      return isRow(item) ? ARRAY_TEXT_KEYS[field].flatMap((key) => (textOf(item[key]) !== null ? [l[key] ?? ""] : [])) : []
+    })
+  }
   if (!RECORD_FIELDS.has(field) || !isRow(enRaw)) return locRaw
   return isRow(locRaw) ? sortedKeys(enRaw).map((key) => locRaw[key]) : undefined
 }
@@ -109,6 +180,14 @@ export const readUnitField = (owner: Row, field: string): UnitValue | null => tr
 /** Ghi chữ dịch vào `owner[field]`; field bảng giữ nguyên khoá, thay chữ theo thứ tự khoá đã sắp. */
 export const writeUnitField = (owner: Row, field: string, text: UnitValue): void => {
   const current = owner[field]
+  if (field === FLOW_FIELD && Array.isArray(current) && Array.isArray(text)) {
+    owner[field] = writeFlowTexts(current, text)
+    return
+  }
+  if (field in ARRAY_TEXT_KEYS && Array.isArray(current) && Array.isArray(text)) {
+    owner[field] = writeArrayTexts(field, current, text)
+    return
+  }
   owner[field] = RECORD_FIELDS.has(field) && isRow(current) && Array.isArray(text)
     ? Object.fromEntries(sortedKeys(current).map((key, i) => [key, text[i]]))
     : text
@@ -170,7 +249,14 @@ const diagramUnits = (spine: Partial<Pick<Spine, "project" | "screens" | "diagra
   (spine.diagrams ?? []).flatMap((d) => {
     if (d.kind !== "screen_layout" || d.render_status !== "ok" || !d.owner_id) return []
     const screen = spine.screens?.find((s) => s.id === d.owner_id)
-    const labels = wireframeLabels(d.puml, [screen?.name, spine.project?.system_name, spine.project?.name])
+    // Mockup màn (FLF-410): chữ của ScreenSpec do model viết ⇒ một đơn vị mỗi màn, gắn vào phần đầu (id không hậu tố) — mọi
+    // nền tảng cùng một spec. svg khác (FLF-339): chữ trên hình đều lấy từ field Spine đã có đơn vị dịch
+    if (d.format === "svg") {
+      const stored = /-[0-9]+$/.test(d.id) ? null : screenSpecOf(d.source)
+      return stored ? unitOf({ group: "diagrams", id: d.id, field: "labels" }, specLabels(stored.spec)) : []
+    }
+    if (d.format !== "puml") return []
+    const labels = wireframeLabels(d.source, [screen?.name, spine.project?.system_name, spine.project?.name])
     return unitOf({ group: "diagrams", id: d.id, field: "labels" }, labels)
   })
 

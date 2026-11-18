@@ -95,11 +95,44 @@ describe("khôi phục trạng thái (BUG-07)", () => {
     expect(active?.questions).toHaveLength(1)
   })
 
-  it("lượt của bước đã rời registry vẫn bị bỏ — B-0.4 không phải đơn vị giai đoạn", async () => {
+  it("lượt của bước đã rời registry vẫn bị bỏ - B-0.4 không phải đơn vị giai đoạn", async () => {
     const run = await acquireRun(PROJECT, "B-0.4")
     await touchRun(PROJECT, "B-0.4", run.run_id, { status: "waiting_answer", questions: [{ id: "Q1", text: "?" }] })
 
     expect(await getActiveRun(PROJECT)).toBeNull()
+  })
+})
+
+describe("FLF-332: lượt gãy vì AI lỗi = bước tạm dừng (Thử lại ngay / Để sau)", () => {
+  it("interrupted với mã AI ⇒ paused_reason ai_error, vẫn là lượt active để mở lại trang thấy banner tại bước đó", async () => {
+    const run = await acquireRun(PROJECT, "S-3.1")
+    await finishRun(PROJECT, "S-3.1", run.run_id, "interrupted", { error: { code: "AI_PROVIDER_ERROR", message: "Dịch vụ AI đang gặp sự cố." } })
+    const doc = await getRunState(PROJECT, "S-3.1")
+    expect(doc?.paused_reason).toBe("ai_error")
+    expect(await isStepRunning(PROJECT, "S-3.1")).toBe(false)
+    const active = await getActiveRun(PROJECT)
+    expect(active?.step_id).toBe("S-3.1")
+    expect(active?.status).toBe("interrupted")
+    // "Thử lại ngay" = lượt mới chiếm lại bước ⇒ hết tạm dừng
+    const again = await acquireRun(PROJECT, "S-3.1")
+    expect(again.paused_reason).toBeNull()
+  })
+
+  it("interrupted vì lý do khác (mất kết nối, lệch version, hết credit) ⇒ không tạm dừng, active bỏ qua như cũ", async () => {
+    const run = await acquireRun(PROJECT, "S-3.1")
+    await finishRun(PROJECT, "S-3.1", run.run_id, "interrupted", { error: { code: "SPINE_VERSION_CONFLICT", message: "Tài liệu vừa đổi." } })
+    expect((await getRunState(PROJECT, "S-3.1"))?.paused_reason).toBeNull()
+    expect(await getActiveRun(PROJECT)).toBeNull()
+    const credit = await acquireRun(PROJECT, "S-3.2")
+    await finishRun(PROJECT, "S-3.2", credit.run_id, "interrupted", { error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit." } })
+    expect(await getActiveRun(PROJECT)).toBeNull()
+  })
+
+  it("lượt đang chạy thật được ưu tiên hơn lượt tạm dừng cũ", async () => {
+    const paused = await acquireRun(PROJECT, "S-3.1")
+    await finishRun(PROJECT, "S-3.1", paused.run_id, "interrupted", { error: { code: "RATE_LIMIT_EXCEEDED", message: "Quá nhanh." } })
+    await acquireRun(PROJECT, "S-3.2")
+    expect((await getActiveRun(PROJECT))?.step_id).toBe("S-3.2")
   })
 })
 

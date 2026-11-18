@@ -67,7 +67,7 @@ describe("sentences", () => {
   })
 })
 
-describe("useCaseSpecValue — bảng dọc đặc tả use case", () => {
+describe("useCaseSpecValue - bảng dọc đặc tả use case", () => {
   it("bảng 2 cột nhãn | giá trị ⇒ use case có mã, tên, tác nhân chính + phụ, mô tả, include", () => {
     const rows = [
       ["Use Case ID", "UC-07"],

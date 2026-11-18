@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest"
 import {
   capitalize,
   diagramLabel,
+  elementLabel,
   humanizeText,
   nameElementIds,
   pathLabel,
@@ -16,16 +17,16 @@ import {
 
 describe("pathLabel", () => {
   it("path theo khoá ⇒ tên thực thể + mã + tên field (khớp FE)", () => {
-    expect(pathLabel("use_cases[id=UC-01].description")).toBe("Use case UC-01 — Mô tả")
+    expect(pathLabel("use_cases[id=UC-01].description")).toBe("Use case UC-01 - Mô tả")
     expect(pathLabel("actors[]")).toBe("Tác nhân (thêm mới)")
-    expect(pathLabel("project.system_name")).toBe("Thông tin dự án — Tên hệ thống")
+    expect(pathLabel("project.system_name")).toBe("Thông tin dự án - Tên hệ thống")
     expect(pathLabel("use_cases[id=UC-01].actor_ids[=A09]")).toBe("Use case UC-01 › Tác nhân A09")
     expect(pathLabel("functions[id=FR-1].normal[0]")).toBe("Chức năng FR-1 › Luồng chính #1")
   })
 
   it("có tên phần tử ⇒ ghép sau mã (khớp FE); path không có khoá thì bỏ qua tên", () => {
-    expect(pathLabel("actors[id=A01].kind", "Learner")).toBe("Tác nhân A01 (Learner) — Loại")
-    expect(pathLabel("project.code", "X")).toBe("Thông tin dự án — Mã")
+    expect(pathLabel("actors[id=A01].kind", "Learner")).toBe("Tác nhân A01 (Learner) - Loại")
+    expect(pathLabel("project.code", "X")).toBe("Thông tin dự án - Mã")
   })
 
   it("path không đọc được ⇒ nhãn chung, không trả nguyên path", () => {
@@ -34,7 +35,7 @@ describe("pathLabel", () => {
   })
 
   it("humanizeText đổi path nằm giữa câu", () => {
-    expect(humanizeText("use_cases[id=UC-01] không còn, xem actors[id=A1].name")).toBe("Use case UC-01 không còn, xem Tác nhân A1 — Tên")
+    expect(humanizeText("use_cases[id=UC-01] không còn, xem actors[id=A1].name")).toBe("Use case UC-01 không còn, xem Tác nhân A1 - Tên")
   })
 })
 
@@ -89,16 +90,36 @@ describe("nameElementIds", () => {
   it("mã màn trong câu hỏi làm rõ ⇒ tên; mã trong ngoặc ngay sau chính tên của nó ⇒ bỏ", () => {
     expect(
       nameElementIds(
-        "Màn hình 'Login' (S01) hiện có luồng đi ra tới S02, S03, S11 nhưng không có màn hình nào đi tới nó — bạn muốn xử lý thế nào?",
+        "Màn hình 'Login' (S01) hiện có luồng đi ra tới S02, S03, S11 nhưng không có màn hình nào đi tới nó - bạn muốn xử lý thế nào?",
         spine
       )
     ).toBe(
-      "Màn hình 'Login' hiện có luồng đi ra tới 'Reset Password', 'Schedule Composer', 'Class Schedule' nhưng không có màn hình nào đi tới nó — bạn muốn xử lý thế nào?"
+      "Màn hình 'Login' hiện có luồng đi ra tới 'Reset Password', 'Schedule Composer', 'Class Schedule' nhưng không có màn hình nào đi tới nó - bạn muốn xử lý thế nào?"
     )
   })
 
   it("mã trong ngoặc không đi sau tên ⇒ thay bằng tên; mã đã có nháy không bị nháy kép; mã lạ và mã use case giữ nguyên", () => {
     expect(nameElementIds("Đổi màn (S02) cho actor 'A03' ở FN010?", spine)).toBe("Đổi màn 'Reset Password' cho actor 'Teacher' ở 'Take Attendance'?")
     expect(nameElementIds("UC-01 và S99 không đổi; S011 và S01x cũng vậy", spine)).toBe("UC-01 và S99 không đổi; S011 và S01x cũng vậy")
+  })
+})
+
+describe("elementLabel (FLF-411 U2-5)", () => {
+  it("tên phần tử thay mã nội bộ; không tên ⇒ trích câu chính; mã use case giữ", () => {
+    expect(elementLabel("actors", "A02", { id: "A02", name: "Customer" })).toBe('tác nhân "Customer"')
+    expect(elementLabel("glossary", "G1", { term: "SKU" })).toBe('thuật ngữ "SKU"')
+    expect(elementLabel("other_requirements", "OR-02", { statement: "  The system   shall export reports" })).toBe('yêu cầu khác "The system shall export reports"')
+    expect(elementLabel("business_rules", "BR-1", { statement: "x".repeat(80) })).toBe(`quy tắc nghiệp vụ "${"x".repeat(60)}…"`)
+    expect(elementLabel("use_cases", "UC-01", null)).toBe("use case UC-01")
+    expect(elementLabel("functions", "FR-3.2.1", null, "Login")).toBe('chức năng "Login"')
+    expect(elementLabel("messages", "MSG-1", null)).toBe("thông báo hệ thống")
+    expect(elementLabel("project", null)).toBe("Thông tin dự án")
+  })
+})
+
+describe("P06 - nameElementIds với mã màn kiểu SCR-05 (câu hỏi C-2 của CR)", () => {
+  it("SCR-05 ⇒ tên màn; mã UC giữ nguyên", () => {
+    const spine = { screens: [{ id: "SCR-05", name: "Product Detail" }], actors: [], roles: [], features: [], functions: [{ id: "FN009", name: "Add to Cart" }], entities: [] } as unknown as Parameters<typeof nameElementIds>[1]
+    expect(nameElementIds("Màn SCR-05 có nút FN009 không? (UC-03)", spine)).toBe("Màn 'Product Detail' có nút 'Add to Cart' không? (UC-03)")
   })
 })

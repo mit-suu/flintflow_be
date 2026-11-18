@@ -5,10 +5,15 @@
  * theo mẫu số mục khi file không dùng style heading (spike P0 §4.2) — cách nhận ghi ở `detected_by`.
  */
 
+import type { TemplateContextEntry } from "./template-context.js"
 import mongoose, { Schema, Document } from "mongoose"
 import type { RocRow } from "../render/rendered-document.types.js"
-import type { CustomBlock } from "../spine/spine.types.js"
+import type { CustomBlock, Spine } from "../spine/spine.types.js"
+import type { SectionSegments } from "../spine/segment-hash.js"
+import type { FunctionFieldValues, FunctionOriginalBlock } from "../render/function-original.js"
 import { HEADING_DETECTORS, type HeadingDetector } from "./import.constants.js"
+import type { TargetStructure } from "./target-structure.js"
+import type { StructurePreview } from "./structure-preview.js"
 
 export interface HeadingMapEntry {
   block_id: string
@@ -18,8 +23,31 @@ export interface HeadingMapEntry {
   confidence: number
   detected_by: HeadingDetector
   confirmed: boolean
-  /** FLF-252: mục danh mục mẫu khớp được (`ieee830:3.5.2`) — chỉ với mẫu không phải FPT; nội bộ, không hiện cho người dùng. */
+  /**
+   * FLF-343: mục độ tin thấp được tự nhận lúc tách file (mode 1 chạy một mạch, không dừng ở bước xác nhận mapping) — giữ
+   * nguyên độ tin; finalize gắn cờ vàng "Cần xem" (`import_needs_review`). Người dùng xác nhận tay ⇒ không có.
+   */
+  auto_confirmed?: boolean
+  /** FLF-363: phần của ngân hàng phần khớp theo tên (`part:ieee:references`) — nội bộ, không hiện cho người dùng. */
   template_section?: string | null
+  /** FLF-363 (D2): mục theo tên khác mục theo nội dung — heading đã đổi theo nội dung; finalize bật cờ vàng. */
+  content_mismatch?: ContentMismatch
+  /**
+   * FLF-278 trên FLF-336 (business-flow 1.3 / 1.5): chữ hướng dẫn của mẫu ngay dưới heading (`[Describe …]`, bỏ ngoặc,
+   * ≤ 400 ký tự) — BA xem lúc xác nhận mapping; không phải nội dung. Thiếu = mẫu không ghi.
+   */
+  guidance?: string
+  /** FLF-364: nguồn của `guidance` — chữ trong ngoặc, có / không kèm kiểu chữ hướng dẫn (màu / nghiêng / tô nền). */
+  guidance_by?: "brackets" | "brackets+format"
+  /** FLF-364: block chứa chữ hướng dẫn. */
+  guidance_blocks?: string[]
+  /** FLF-362: nhãn số Word tự đánh của heading ("2.1", "II.") — không nằm trong `heading_text`. */
+  number_label?: string
+}
+
+export interface ContentMismatch {
+  by_title: string
+  by_content: string
 }
 
 export interface TableMapEntry {
@@ -30,9 +58,13 @@ export interface TableMapEntry {
   field_path: string | null
   confidence: number
   confirmed: boolean
+  /** FLF-343: như `HeadingMapEntry.auto_confirmed` — dữ liệu đọc theo cột này giữ độ tin của cột (không coi là 1). */
+  auto_confirmed?: boolean
   /** FLF-252: vai trò cột theo dữ liệu (`row_no`, `code`, `mark`…) và tối đa 3 giá trị đầu — người dùng nhìn dữ liệu khi xác nhận. */
   role?: string
   samples?: string[]
+  /** FLF-364: chữ hướng dẫn trong các ô của cột (`[Tên tác nhân]`), bỏ ngoặc. */
+  guidance?: string
 }
 
 /** Mục của layout tài liệu người dùng (FLF-182) — xem `layoutEntrySchema`. */
@@ -42,13 +74,19 @@ export interface LayoutEntry {
   level: number
   /** Section FPT khớp được, hoặc `custom:<id>` (mục ngoài mẫu FPT). */
   section_id: string
+  /** FLF-362: nhãn số Word tự đánh của heading gốc ("2.1") — không nằm trong `heading_text`. */
+  number_label?: string
+  /**
+   * FLF-364 (câu 10): nguyên văn chữ hướng dẫn của mẫu (`[…]` / `{…}`, giữ ngoặc) dưới heading mục FPT / phần nhỏ — bản in
+   * Mode 1 in nó khi mục chưa có dữ liệu, có dữ liệu thì không in. Mục riêng giữ hướng dẫn trong khối của chính nó.
+   */
+  template_guidance?: string[]
 }
 
 /** Kế hoạch step theo template (FLF-182) — xem `stepPlanEntrySchema`. */
 export interface StepPlanItem {
   step_id: string
   state: "applied" | "hidden" | "enabled"
-  missing: boolean
   section_ids: string[]
   reason: string
 }
@@ -57,17 +95,18 @@ export interface ITemplateProfile extends Document {
   projectId: mongoose.Types.ObjectId
   source: "imported"
   doc_version: string
+  /** File upload tạo ra mapping này; dùng trực tiếp khi xuất theo mẫu bắt buộc. */
+  source_sha256?: string | null
+  source_file_ref?: string | null
   heading_map: HeadingMapEntry[]
   table_map: TableMapEntry[]
-  /** Section bắt buộc (registry `required`) không tìm thấy heading — đưa vào gap report. */
-  required_sections: string[]
   /** Ngôn ngữ chính của tài liệu (`en`, `vi`…). */
   language: string
-  /** FLF-252: họ mẫu nhận được — `fpt`, `ieee830`, `ieee_features`. */
+  /** FLF-363: nhãn họ mẫu — `fpt`, `ieee29148`, `mixed` (bản ghi cũ `ieee830` / `ieee_features` đọc ra `ieee29148`). */
   template_family: string
   /** FLF-182: thứ tự + tiêu đề mục của file upload, render lại từ Spine theo đây. */
   layout: LayoutEntry[]
-  /** FLF-182: step nào chạy / ẩn / thiếu theo template. */
+  /** FLF-182: step nào chạy / ẩn theo template. */
   step_plan: StepPlanItem[]
   /** Mode 1 v3 (T15): dòng Record of Changes của file gốc — render in lên đầu bảng, lịch sử FlintFlow nối tiếp. */
   legacy_record_of_changes: RocRow[]
@@ -80,12 +119,47 @@ export interface ITemplateProfile extends Document {
    * FLF-252 — in theo file gốc: nguyên văn từng mục chức năng của file + dấu nội dung chức năng lúc nhập. Bản in dùng
    * nguyên văn khi chức năng chưa bị change request sửa (dấu còn khớp).
    */
-  function_originals: { section_id: string; source_hash: string; blocks: CustomBlock[] }[]
+  function_originals: { section_id: string; source_hash: string; blocks: FunctionOriginalBlock[]; field_values?: FunctionFieldValues }[]
   /**
    * Heading lặp lại một section FPT (mẫu IEEE: Reliability + Availability ⇒ 4.2.2) + phần tử Spine trích từ nó
    * (`nfrs:NFR-03`) — bản in đặt phần tử dưới đúng heading của file thay vì dồn hết lên lần đầu của section.
    */
   section_slices: { custom_id: string; section_id: string; items: string[] }[]
+  /**
+   * FLF-366: đoạn của từng mục FPT `fixed:*` theo thứ tự file (`spine/segment-hash.ts`) — đoạn còn khớp dấu in nguyên văn
+   * file, lệch thì chỉ phần tử của đoạn dựng lại từ Spine. Project import trước FLF-366 không có ⇒ bản in như cũ.
+   */
+  section_segments: SectionSegments[]
+  /** FLF-336 I-5: kết quả so cấu trúc đích lần finalize gần nhất (present / missing / out_of_scope + chế độ thật); null khi chưa so. */
+  target_structure: TargetStructure | null
+  /** FLF-378 (luồng C): hướng dẫn / ví dụ / ngữ cảnh của mẫu theo mục — chỉ dự án mới theo mẫu bắt buộc. */
+  template_context?: TemplateContextEntry[] | null
+  /**
+   * Màn đọc khung: cấu trúc đích sơ bộ tính lúc upload (tất định, trước Bắt đầu) + loại file (`written` / `template`). Dự án
+   * import trước màn đọc khung không có ⇒ null.
+   */
+  structure_preview?: StructurePreview | null
+  /** FLF-412: khoá vùng heading (`block_id`) người dùng chọn Bỏ chữ ở màn đọc khung — áp vào file lúc bấm Bắt đầu rồi xoá. */
+  drop_text?: string[] | null
+  /**
+   * Chế độ 3 từ SRS đã viết: Spine lúc vào Luồng 2 — mốc so "nguyên vẹn" của bản in (mục chưa đổi so với mốc in nguyên văn
+   * file gốc). Không có bản gốc 0.1 nên không dùng Spine lúc import. Khung mẫu / dự án khác ⇒ null.
+   */
+  flow2_entry_spine?: Spine | null
+  flow2_entry_at?: Date | null
+  /**
+   * Sau khi đổi mẫu: `source_file_ref` là file nền mới do FlintFlow dựng (kể cả dự án chưa từng có file nền). Mốc áp dụng + Spine
+   * lúc áp dụng — mốc so "nguyên vẹn" của bản in thay cho Spine lúc import. Chưa đổi mẫu ⇒ null.
+   */
+  migrated_base_at?: Date | null
+  migrated_base_spine?: Spine | null
+  /** Lần đổi mẫu mà `TemplateMigration.anchor_spine` là mốc nguyên vẹn hiện tại (không chép Spine vào profile — trần 16MB). `migrated_base_spine` chỉ còn cho dữ liệu cũ. */
+  migrated_base_migration_id?: mongoose.Types.ObjectId | null
+  /**
+   * Sau khi đổi mẫu: `section_id` của các mục mẫu đích có nội dung mà dự án chưa có gì để đặt (mục thiếu — trống + hướng dẫn của mẫu).
+   * Cờ đỏ chặn phát hành suy từ danh sách này cho tới khi BA viết xong; chỉ `template-migration` ghi.
+   */
+  migration_missing_sections?: string[]
   createdAt: Date
   updatedAt: Date
 }
@@ -98,6 +172,8 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
     projectId: { type: Schema.Types.ObjectId, ref: "Project", required: true },
     source: { type: String, enum: ["imported"], default: "imported" },
     doc_version: { type: String, required: true },
+    source_file_ref: { type: String, default: null },
+    source_sha256: { type: String, default: null },
     heading_map: {
       type: [
         new Schema(
@@ -108,7 +184,13 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             confidence,
             detected_by: { type: String, enum: HEADING_DETECTORS, required: true },
             confirmed: { type: Boolean, default: false },
-            template_section: { type: String, default: null }
+            auto_confirmed: { type: Boolean, default: undefined },
+            template_section: { type: String, default: null },
+            content_mismatch: { type: new Schema({ by_title: String, by_content: String }, { _id: false }), default: undefined },
+            guidance: { type: String, default: undefined },
+            guidance_by: { type: String, enum: ["brackets", "brackets+format"], default: undefined },
+            guidance_blocks: { type: [String], default: undefined },
+            number_label: { type: String, default: undefined }
           },
           opts
         )
@@ -126,15 +208,16 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             field_path: { type: String, default: null },
             confidence,
             confirmed: { type: Boolean, default: false },
+            auto_confirmed: { type: Boolean, default: undefined },
             role: { type: String, default: undefined },
-            samples: { type: [String], default: undefined }
+            samples: { type: [String], default: undefined },
+            guidance: { type: String, default: undefined }
           },
           opts
         )
       ],
       default: []
     },
-    required_sections: { type: [String], default: [] },
     non_screen_table: { type: [String], default: [] },
     function_originals: {
       type: [
@@ -142,14 +225,28 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
           {
             section_id: { type: String, required: true },
             source_hash: { type: String, required: true },
-            // khối nguyên văn (CustomBlock của Spine: paragraph / list_item / table / image) — chỉ để in lại
-            blocks: { type: [Schema.Types.Mixed], default: [] }
+            // khối nguyên văn (CustomBlock của Spine: paragraph / list_item / table / image; FLF-361: heading con + `tags`)
+            blocks: { type: [Schema.Types.Mixed], default: [] },
+            // FLF-361: chữ từng trường chức năng lúc import — CR chỉ sửa khối chứa phần tử đã đổi
+            field_values: { type: Schema.Types.Mixed, default: undefined }
           },
           opts
         )
       ],
       default: []
     },
+    target_structure: { type: Schema.Types.Mixed, default: null },
+    template_context: { type: Schema.Types.Mixed, default: null },
+    structure_preview: { type: Schema.Types.Mixed, default: null },
+    drop_text: { type: [String], default: null },
+    flow2_entry_spine: { type: Schema.Types.Mixed, default: null },
+    flow2_entry_at: { type: Date, default: null },
+    migrated_base_at: { type: Date, default: null },
+    migrated_base_spine: { type: Schema.Types.Mixed, default: null },
+    migrated_base_migration_id: { type: Schema.Types.ObjectId, ref: "TemplateMigration", default: null },
+    migration_missing_sections: { type: [String], default: [] },
+    // FLF-366: đoạn nguyên văn theo mục (`SectionSegments` — khối gốc, phần tử, dấu) — chỉ để in lại
+    section_segments: { type: Schema.Types.Mixed, default: [] },
     section_slices: {
       type: [
         new Schema(
@@ -185,7 +282,9 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             order: { type: Number, required: true, min: 0 },
             heading_text: { type: String, default: "" },
             level: { type: Number, required: true, min: 1, max: 9 },
-            section_id: { type: String, required: true }
+            section_id: { type: String, required: true },
+            number_label: { type: String, default: undefined },
+            template_guidance: { type: [String], default: undefined }
           },
           opts
         )
@@ -198,7 +297,6 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
           {
             step_id: { type: String, required: true },
             state: { type: String, enum: ["applied", "hidden", "enabled"], required: true },
-            missing: { type: Boolean, default: false },
             section_ids: { type: [String], default: [] },
             reason: { type: String, default: "" }
           },

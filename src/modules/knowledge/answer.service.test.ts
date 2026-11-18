@@ -3,6 +3,9 @@ import { beforeEach, describe, it, expect, vi } from "vitest"
 const { executeAiAction, retrieveKnowledge } = vi.hoisted(() => ({ executeAiAction: vi.fn(), retrieveKnowledge: vi.fn() }))
 vi.mock("../../shared/ai/ai-action.service.js", () => ({ executeAiAction }))
 vi.mock("./retrieve.js", () => ({ retrieveKnowledge }))
+// FLF-333: hạn mức ngày đếm AiActionLog — unit test không có Mongo
+const countDocuments = vi.hoisted(() => vi.fn(async () => 0))
+vi.mock("../admin/ai-action-log.model.js", () => ({ AiActionLog: { countDocuments } }))
 
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import {
@@ -134,8 +137,28 @@ describe("answerKnowledgeQuestion", () => {
     })
     const out = await answerKnowledgeQuestion("How many calls?", { projectId: "p1", userId: "u1", language: "en" })
     expect(retrieveKnowledge).toHaveBeenCalledWith("How many calls?", { corpus: "skills" })
-    expect(executeAiAction).toHaveBeenCalledWith(ActionType.KNOWLEDGE_ANSWER, expect.objectContaining({ replyLanguage: "en" }), "p1", "u1")
+    expect(executeAiAction).toHaveBeenCalledWith(ActionType.KNOWLEDGE_ANSWER, expect.objectContaining({ replyLanguage: "en" }), "p1", "u1", {})
     expect(out).toMatchObject({ grounded: true, cost: 2, tokensUsed: { totalTokens: 15 } })
     expect(out.citations).toEqual([{ ref: "K1", chunk_id: "gate-check#caps", source: "gate-check", section: "Rules", source_kind: "internal_skill" }])
+  })
+
+  it("user dừng lượt chat ⇒ signal đi tới executeAiAction để ngắt lượt gọi model", async () => {
+    retrieveKnowledge.mockResolvedValue(retrieval([chunk("gate-check#caps")]))
+    executeAiAction.mockResolvedValue({ data: { grounded: true, answer: "x [K1]", claims: [{ text: "x", refs: ["K1"] }] }, cost: 2 })
+    const signal = new AbortController().signal
+    await answerKnowledgeQuestion("How many calls?", { projectId: "p1", userId: "u1", language: "en", signal })
+    expect(executeAiAction).toHaveBeenCalledWith(ActionType.KNOWLEDGE_ANSWER, expect.anything(), "p1", "u1", { signal })
+  })
+})
+
+describe("FLF-333 - hạn mức câu hỏi tri thức mỗi ngày (không tốn credit)", () => {
+  it("đã hỏi đủ hạn mức ⇒ 429 KNOWLEDGE_DAILY_LIMIT, không truy hồi, không gọi model", async () => {
+    const { env } = await import("../../config/env.js")
+    countDocuments.mockResolvedValueOnce(env.KNOWLEDGE_DAILY_LIMIT)
+    retrieveKnowledge.mockClear()
+    executeAiAction.mockClear()
+    await expect(answerKnowledgeQuestion("How many model calls per step?", { projectId: "p1", userId: "u1", language: "en" })).rejects.toMatchObject({ statusCode: 429, code: "KNOWLEDGE_DAILY_LIMIT", meta: { limit: env.KNOWLEDGE_DAILY_LIMIT } })
+    expect(retrieveKnowledge).not.toHaveBeenCalled()
+    expect(executeAiAction).not.toHaveBeenCalled()
   })
 })

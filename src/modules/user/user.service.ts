@@ -1,7 +1,10 @@
 import { User, IUser, AuthProvider } from "./user.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import * as sessionService from "../../shared/auth/session.service.js"
-import { getOrCreateWallet } from "../../shared/ai/credit-reservation.service.js"
+import mongoose from "mongoose"
+import { CreditWallet } from "../credits/credit-wallet.model.js"
+import { Membership } from "../organization/membership.model.js"
+import { Organization } from "../organization/organization.model.js"
 import { toUserLocale, type UserLocale } from "../../shared/i18n/locale.js"
 
 export interface UserDTO {
@@ -9,7 +12,6 @@ export interface UserDTO {
   email: string
   name?: string
   onboardedAt: Date | null
-  balance?: number
   createdAt?: Date
   updatedAt?: Date
 }
@@ -22,12 +24,19 @@ export interface MeDTO extends UserDTO {
   hasPassword: boolean
   /** FLF-259: ngôn ngữ giao diện đã lưu; `null` = chưa chọn ⇒ FE lưu ngôn ngữ đang hiển thị. */
   locale: UserLocale | null
+  /** FLF-310: credit khả dụng của tổ chức đang chọn (không còn ví cá nhân); chưa chọn tổ chức ⇒ 0. */
+  balance: number
+  /** FLF-310: tổ chức sở hữu `balance` — FE ghi rõ tên; `null` khi chưa chọn tổ chức. */
+  creditOrganization: { id: string; name: string } | null
+  /** UC-10 / FLF-427: tổ chức mặc định được ghi nhớ; `null` khi chưa ghi nhớ. */
+  preferredOrganizationId: string | null
 }
 
 export interface UpdateMeInput {
   name?: string
   onboardedAt?: Date | null
   locale?: UserLocale
+  preferredOrganizationId?: string | null
 }
 
 export const getUserById = async (id: string): Promise<UserDTO> => {
@@ -35,28 +44,42 @@ export const getUserById = async (id: string): Promise<UserDTO> => {
   if (!user) {
     throw new ApiError(404, "Không tìm thấy người dùng.", "USER_NOT_FOUND")
   }
-  
-  let balance = 0
-  try {
-    const wallet = await getOrCreateWallet(user._id.toString())
-    balance = wallet.balance
-  } catch (error) {
-    console.error("Failed to get/create credit wallet for user", user._id, error)
-  }
 
   return {
     id: user._id.toString(),
     email: user.email,
     ...(user.name ? { name: user.name } : {}),
     onboardedAt: user.onboardedAt ?? null,
-    balance,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt
   }
 }
 
-export const getMe = async (id: string): Promise<MeDTO> => {
-  const [dto, user] = await Promise.all([getUserById(id), User.findById(id).select("+passwordHash")])
+/**
+ * FLF-310: credit chỉ nằm ở ví tổ chức — "Credit hiện có" là số dư khả dụng của **tổ chức đang chọn** (cùng ví mà lượt
+ * gọi AI trừ, cùng số với trang Thanh toán). Chỉ đọc, không tạo ví: trước đây mở hồ sơ là đẻ thêm một ví cá nhân kèm
+ * credit miễn phí. Chưa chọn org / không còn là thành viên ⇒ `null`.
+ */
+const activeOrgCredit = async (userId: string, orgId: string | null | undefined): Promise<Pick<MeDTO, "balance" | "creditOrganization">> => {
+  const none = { balance: 0, creditOrganization: null }
+  if (!orgId || !mongoose.isValidObjectId(orgId)) return none
+  // UC-56: Viewer không được xem ví / thông tin thanh toán của org
+  const membership = await Membership.findOne({ userId, organizationId: orgId }).select("role").lean()
+  if (!membership || (membership.role !== "lead" && membership.role !== "analyst")) return none
+  const [org, wallet] = await Promise.all([
+    Organization.findById(orgId, { name: 1 }).lean(),
+    CreditWallet.findOne({ organizationId: orgId }, { balance: 1, reserved: 1 }).lean()
+  ])
+  if (!org) return none
+  return {
+    balance: wallet ? wallet.balance - wallet.reserved : 0,
+    creditOrganization: { id: String(org._id), name: org.name }
+  }
+}
+
+/** `activeOrgId`: org đang chọn trong token (`req.user.orgId`). */
+export const getMe = async (id: string, activeOrgId?: string | null): Promise<MeDTO> => {
+  const [dto, user, credit] = await Promise.all([getUserById(id), User.findById(id).select("+passwordHash"), activeOrgCredit(id, activeOrgId)])
   if (!user) {
     throw new ApiError(404, "Không tìm thấy người dùng.", "USER_NOT_FOUND")
   }
@@ -65,29 +88,42 @@ export const getMe = async (id: string): Promise<MeDTO> => {
     authProvider: user.authProvider,
     emailVerified: user.emailVerified,
     hasPassword: Boolean(user.passwordHash),
-    locale: toUserLocale(user.locale)
+    locale: toUserLocale(user.locale),
+    preferredOrganizationId: user.preferredOrganizationId ? String(user.preferredOrganizationId) : null,
+    ...credit
   }
 }
 
-/** UC 1.12 onboarding + FLF-259: cập nhật tên hiển thị, mốc onboarding và/hoặc ngôn ngữ giao diện của chính user. */
-export const updateMe = async (id: string, input: UpdateMeInput): Promise<MeDTO> => {
+/** UC 1.12 onboarding + FLF-259 + FLF-427: cập nhật tên hiển thị, mốc onboarding, ngôn ngữ giao diện hoặc tổ chức mặc định. */
+export const updateMe = async (id: string, input: UpdateMeInput, activeOrgId?: string | null): Promise<MeDTO> => {
+  if (input.preferredOrganizationId !== undefined && input.preferredOrganizationId !== null) {
+    if (!mongoose.isValidObjectId(input.preferredOrganizationId)) {
+      throw new ApiError(404, "Không tìm thấy tổ chức", "ORG_NOT_FOUND")
+    }
+    const member = await Membership.exists({ userId: id, organizationId: input.preferredOrganizationId })
+    if (!member) {
+      throw new ApiError(404, "Không tìm thấy tổ chức hoặc bạn không phải thành viên", "ORG_NOT_FOUND")
+    }
+  }
+
   const user = await User.findByIdAndUpdate(id, { $set: input }, { new: true })
   if (!user) {
     throw new ApiError(404, "Không tìm thấy người dùng.", "USER_NOT_FOUND")
   }
-  return getMe(id)
+  return getMe(id, activeOrgId)
 }
 
 /**
  * Đổi mật khẩu khi đang đăng nhập: phải nhập đúng mật khẩu hiện tại. Thành công thì thu hồi mọi phiên
- * khác, giữ phiên đang dùng (`currentRefreshToken`) để user không bị đăng xuất trên thiết bị này.
+ * khác, giữ phiên đang dùng (`currentRefreshToken` hoặc `keepSessionId`) để user không bị đăng xuất trên thiết bị này.
  * Sai mật khẩu trả 400 (không phải 401) để FE không hiểu nhầm là hết phiên rồi đi refresh/đăng xuất.
  */
 export const changePassword = async (
   id: string,
   currentPassword: string,
   newPassword: string,
-  currentRefreshToken?: string
+  currentRefreshToken?: string,
+  keepSessionId?: string
 ): Promise<void> => {
   const user = await User.findById(id).select("+passwordHash")
   if (!user) {
@@ -110,7 +146,7 @@ export const changePassword = async (
   user.password = newPassword
   await user.save()
 
-  await sessionService.revokeOtherUserSessions(id, currentRefreshToken)
+  await sessionService.revokeOtherUserSessions(id, currentRefreshToken, keepSessionId)
 }
 
 export const getUserByEmail = async (email: string): Promise<IUser | null> => {

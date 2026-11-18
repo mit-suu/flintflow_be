@@ -7,9 +7,11 @@
 
 import mongoose, { Schema, Document } from "mongoose"
 import { IMPORT_PAUSE_REASONS, IMPORT_STATUSES, type ImportPauseReason, type ImportStatus } from "./import.state.js"
-import { PREFLIGHT_ISSUE_CODES, type PreflightIssueCode } from "./import.constants.js"
+import { PREFLIGHT_ISSUE_CODES, STAMP_KINDS, type PreflightIssueCode, type StampKind } from "./import.constants.js"
 import type { FinalizeRequest } from "./import.dto.js"
 import type { Spine } from "../spine/spine.types.js"
+import type { StructureChange } from "./structure-preview.js"
+import { TEMPLATE_INTENTS, type TemplateIntent } from "../project/project.model.js"
 
 export interface PreflightIssue {
   code: PreflightIssueCode
@@ -18,10 +20,22 @@ export interface PreflightIssue {
   location?: { block_ord: number; text: string } | null
 }
 
+/** FLF-331: kết quả nhận diện loại tài liệu ở I-1 (bản lưu của `DocumentKindResult`). */
+export interface DocumentKindInfo {
+  kind: "srs" | "srs_template" | "not_srs" | "unknown"
+  confidence: number
+  signals: string[]
+  reasons: string[]
+}
+
 export interface DocStamp {
   project_id: string
   version: string | null
   source: string | null
+  /** FLF-334 — bản ghi / file cũ không có ⇒ `null`. */
+  base_version?: string | null
+  latest_cr?: string | null
+  kind?: StampKind | null
 }
 
 export interface FinalizeCheckpoint {
@@ -37,22 +51,46 @@ export interface FinalizeCheckpoint {
 export interface IImportedDocument extends Document {
   projectId: mongoose.Types.ObjectId
   file_ref: string | null
+  /** FLF-412: đang viết lại file theo lựa chọn Bỏ chữ (lúc bấm Bắt đầu) — khoá để hai lần Bắt đầu / chọn lại không chen vào. */
+  drop_applying?: boolean
   sha256: string
   original_name: string
   size: number
-  preflight: { status: "accepted" | "rejected"; issues: PreflightIssue[] }
+  preflight: { status: "accepted" | "rejected"; issues: PreflightIssue[]; document_kind?: DocumentKindInfo | null }
   stamp: DocStamp | null
   confirmed_latest_at: Date | null
   status: ImportStatus
   paused: { reason: ImportPauseReason; at: Date } | null
+  /** FLF-335: ý định lúc upload (#2 `intent`) — theo mẫu cố định hay cấu trúc tự do; bản ghi cũ `null` (đọc như `free`). */
+  intent: TemplateIntent | null
+  /** FLF-278: lần import tạo từ mẫu đã lưu của tổ chức (`OrgTemplate`) — mapping heading áp sẵn, không phải xác nhận lại. */
+  org_template_id?: mongoose.Types.ObjectId | null
+  /** FLF-395: bản của mẫu tổ chức lúc import — đọc mapping theo đúng bản này, đăng bản mới giữa chừng không đổi. */
+  org_template_version?: number | null
   /** Section đang/sắp trích ở I-4; resume chạy tiếp từ đây, không trích lại section `done`. */
   extract_cursor: string | null
+  /**
+   * FLF-360: đang đọc lại vì AI quá tải (I-4) — `images`: ảnh sơ đồ chưa đọc được (`done`/`total` ảnh), `text`: một lô chữ
+   * (`done`/`total` lượt). `null` = không đọc lại. Chỉ để FE hiện "Đang đọc lại ảnh N/M" (`GET /import`), không phải Spine.
+   */
+  reread?: { kind: "images" | "text"; done: number; total: number; section_id: string } | null
   /**
    * Mốc ngay trước lần finalize đang/đã chạy nền (`finalize-jobs.ts`): nội dung Spine, `seq` change kế tiếp và
    * section của từng heading (finalize đổi section tạm `feature:@B…` sang id thật). Lần chạy dở (lỗi / máy chủ khởi
    * động lại giữa `baselining`) được hoàn về mốc này trước khi chạy lại. `null` = chưa finalize lần nào.
    */
   finalize_checkpoint: FinalizeCheckpoint | null
+  /**
+   * Mã lần chạy finalize / kiểm tra hiện hành (`finalize-jobs.ts`). Mỗi lần bật job sinh mã mới; lần chạy cũ (bị thay sau khi
+   * treo) thấy mã lệch thì dừng, không ghi đè. `null` = chưa chạy lần nào kể từ khi có cơ chế này.
+   */
+  finalize_run_id: string | null
+  /** Nhịp tim của lần chạy hiện hành — quá `FINALIZE_STALE_MS` không đập ⇒ coi là job mất dù queue còn giữ job. */
+  finalize_heartbeat_at: Date | null
+  /** FLF-336: người dùng bấm "Hoàn thiện" ở màn Kết quả đọc file ⇒ lần finalize kế không dừng ở `incomplete` nữa. */
+  complete_requested: boolean
+  /** Màn đọc khung: mục mà I-5 cuối khác bản sơ bộ lúc upload (rỗng ⇒ khớp; null ⇒ chưa finalize / import trước màn đọc khung). */
+  structure_changes: StructureChange[] | null
   created_by: mongoose.Types.ObjectId
   createdAt: Date
   updatedAt: Date
@@ -73,6 +111,7 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
   {
     projectId: { type: Schema.Types.ObjectId, ref: "Project", required: true },
     file_ref: { type: String, default: null },
+    drop_applying: { type: Boolean, default: false },
     sha256: { type: String, required: true },
     original_name: { type: String, required: true },
     size: { type: Number, required: true, min: 0 },
@@ -80,14 +119,37 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
       type: new Schema(
         {
           status: { type: String, enum: ["accepted", "rejected"], required: true },
-          issues: { type: [preflightIssueSchema], default: [] }
+          issues: { type: [preflightIssueSchema], default: [] },
+          // FLF-331: bản ghi cũ không có ⇒ null
+          document_kind: {
+            type: new Schema(
+              {
+                kind: { type: String, enum: ["srs", "srs_template", "not_srs", "unknown"], required: true },
+                confidence: { type: Number, required: true },
+                signals: { type: [String], default: [] },
+                reasons: { type: [String], default: [] }
+              },
+              opts
+            ),
+            default: null
+          }
         },
         opts
       ),
       required: true
     },
     stamp: {
-      type: new Schema({ project_id: { type: String, required: true }, version: String, source: String }, opts),
+      type: new Schema(
+        {
+          project_id: { type: String, required: true },
+          version: String,
+          source: String,
+          base_version: { type: String, default: null },
+          latest_cr: { type: String, default: null },
+          kind: { type: String, enum: STAMP_KINDS, default: null }
+        },
+        opts
+      ),
       default: null
     },
     confirmed_latest_at: { type: Date, default: null },
@@ -97,6 +159,18 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
       default: null
     },
     extract_cursor: { type: String, default: null },
+    reread: {
+      type: new Schema(
+        { kind: { type: String, enum: ["images", "text"], required: true }, done: { type: Number, required: true }, total: { type: Number, required: true }, section_id: { type: String, required: true } },
+        opts
+      ),
+      default: null
+    },
+    complete_requested: { type: Boolean, default: false },
+    structure_changes: { type: Schema.Types.Mixed, default: null },
+    intent: { type: String, enum: [...TEMPLATE_INTENTS, null], default: null },
+    org_template_id: { type: Schema.Types.ObjectId, ref: "OrgTemplate", default: null },
+    org_template_version: { type: Number, default: null, min: 1 },
     finalize_checkpoint: {
       type: new Schema(
         {
@@ -110,6 +184,8 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
       ),
       default: null
     },
+    finalize_run_id: { type: String, default: null },
+    finalize_heartbeat_at: { type: Date, default: null },
     created_by: { type: Schema.Types.ObjectId, ref: "User", required: true }
   },
   { timestamps: true }

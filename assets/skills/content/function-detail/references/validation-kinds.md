@@ -1,6 +1,6 @@
 # Choosing `validations[].kind`
 
-> Human-facing reference. **Not loaded at runtime** — the operative table is in `../SKILL.md`.
+> Human-facing reference. **Not loaded at runtime** - the operative table is in `../SKILL.md`.
 
 Three kinds only (`spine.types.ts` `ValidationKind`): `required`, `format`, `business`.
 
@@ -38,5 +38,5 @@ The last row is the useful test: **if the threshold depends on who the user is o
 
 ## Ids
 
-`<function id>-V<n>`, numbered from 1 within the function, never reused for a different statement — the
+`<function id>-V<n>`, numbered from 1 within the function, never reused for a different statement - the
 id is what `business_rules[].source_validation_ids` points at, so renumbering breaks §5.1's references.

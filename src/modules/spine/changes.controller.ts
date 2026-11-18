@@ -16,6 +16,7 @@
 
 import { Request, Response } from "express"
 import mongoose from "mongoose"
+import { User } from "../user/user.model.js"
 import { z } from "zod"
 import * as changeService from "./change.service.js"
 import * as changeTranscript from "./change-transcript.js"
@@ -46,6 +47,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { validationError } from "../../shared/utils/validation-message.js"
 import { byLanguage, detectMessageLanguage, resolveReplyLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { changeRequiresCr, changesRequireCr, prefillFrom } from "../import/mode1-guard.js"
+import * as commentService from "../comment/comment.service.js"
 
 export { SYSTEM_MANAGED_ROOTS, notWritableViolations } from "./change.service.js"
 
@@ -125,6 +127,15 @@ const turnReplyLanguage = async (session: IChatSession | null, typed: string | n
   return language
 }
 
+/** FLF-299: số câu hỏi làm rõ đã hỏi cho yêu cầu đang dở — chỉ truyền khi có, lượt thường giữ nguyên tham số. */
+const clarificationRoundsOf = (session: IChatSession | null): { clarification_rounds?: number; pending_request?: { request: string; question: string } } => {
+  const rounds = session ? changeTranscript.clarificationRounds(session.messages) : 0
+  if (!session || rounds === 0) return {}
+  // P08 (T7): câu trả lời đi kèm yêu cầu gốc + câu đã hỏi
+  const pending = changeTranscript.pendingChangeRequest(session.messages)
+  return { clarification_rounds: rounds, ...(pending ? { pending_request: pending } : {}) }
+}
+
 export const applyChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
   await guardMode1(auth, rawInstruction(req), "Sửa tài liệu")
@@ -138,34 +149,81 @@ export const applyChanges = catchAsync(async (req: Request, res: Response) => {
     const result = await changeService.apply(
       auth.projectId,
       auth.userId,
-      { ...body, chat_history: chatHistory, reply_language: replyLanguage },
+      { ...body, chat_history: chatHistory, reply_language: replyLanguage, ...clarificationRoundsOf(session) },
       auth.init
     )
+    // FLF-428: lệnh nhắm một cờ mà ghi xong cờ vẫn mở ⇒ nói rõ, không để "Đã áp dụng" đọc như đã sửa xong
+    const unresolved = result.unresolved_flags ?? []
+    const stillOpen =
+      unresolved.length > 0
+        ? byLanguage(replyLanguage, {
+            vi: ` Nhưng vấn đề ${unresolved.map((f) => `"${f.message}"`).join(", ")} vẫn còn - bạn nhắn rõ giá trị cần điền (ví dụ chỉ số đo và ngưỡng) để tôi sửa tiếp.`,
+            en: ` But the issue ${unresolved.map((f) => `"${f.message}"`).join(", ")} is still open - tell me the exact values (e.g. the metric and threshold) and I will fix it.`
+          })
+        : ""
     if (session) {
       const count = result.changes.length
       await changeTranscript.recordChangeTurn(session, userText, {
         kind: "change_applied",
         reply:
-          count > 0
+          (count > 0 && result.cr_id
             ? byLanguage(replyLanguage, {
-                vi: `Đã áp dụng ${count} thay đổi vào tài liệu (v${result.spine_version}).`,
-                en: `Applied ${count} change${count === 1 ? "" : "s"} to the document (v${result.spine_version}).`
+                vi: `Đã ghi ${result.cr_id} vào tài liệu (${count} thay đổi).`,
+                en: `Recorded ${result.cr_id} in the document (${count} change${count === 1 ? "" : "s"}).`
               })
-            : byLanguage(replyLanguage, { vi: "Đã xác nhận: nội dung không đổi.", en: "Confirmed: the content is unchanged." }),
+            : count > 0
+            ? byLanguage(replyLanguage, {
+                vi: `Đã áp dụng ${count} thay đổi vào tài liệu.`,
+                en: `Applied ${count} change${count === 1 ? "" : "s"} to the document.`
+              })
+            : result.already_applied?.length
+            ? byLanguage(replyLanguage, {
+                vi: `Đã được ${[...new Set(result.already_applied.map((p) => p.changed_by))].join(", ")} sửa giống đề xuất của bạn - không ghi lại.`,
+                en: `${[...new Set(result.already_applied.map((p) => p.changed_by))].join(", ")} already made the same edit - nothing written again.`
+              })
+            : byLanguage(replyLanguage, { vi: "Đã xác nhận: nội dung không đổi.", en: "Confirmed: the content is unchanged." })) + stillOpen,
         count,
-        spine_version: result.spine_version
+        spine_version: result.spine_version,
+        ...(result.cr_id ? { cr_id: result.cr_id } : {})
       })
     }
+    // FLF-271 (UC-40): sửa theo góp ý Lead ghim ⇒ góp ý tự đóng `fixed` khi có thay đổi thật; lỗi đóng không làm hỏng lượt áp
+    const resolvedCommentId = body.comment_id && result.changes.length > 0 ? await resolveFixedComment(req, auth, body.comment_id) : null
     return sendSuccess(
       res,
       200,
       { txn: result.txn, spine_version: result.spine_version, changes: result.changes, spine: result.spine },
-      { branch: result.branch, impact: result.impact }
+      {
+        branch: result.branch,
+        impact: result.impact,
+        ...(result.cr_id ? { cr_id: result.cr_id } : {}),
+        ...(resolvedCommentId ? { resolved_comment_id: resolvedCommentId } : {}),
+        // P12 (BF §3.2): người khác đã sửa giống đề xuất ⇒ không ghi lại
+        ...(result.already_applied?.length ? { already_applied: result.already_applied } : {})
+      }
     )
   } catch (err) {
+    // P12: đụng chỗ người khác vừa sửa ⇒ lượt này nằm lại trong phiên (màn so sánh hiện ở FE, câu báo ở transcript)
+    if (session && err instanceof ApiError && Array.isArray(err.meta?.conflicts)) {
+      await changeTranscript.recordChangeTurn(session, null, { kind: "change_error", reply: err.message })
+    }
     return sendDomainError(res, err)
   }
 })
+
+/** Đóng comment `fixed` sau lượt áp (FLF-271). Comment đã xử lý / đã chuyển CR ⇒ bỏ qua; lỗi khác chỉ log. */
+const resolveFixedComment = async (req: Request, auth: Authorized, commentId: string): Promise<string | null> => {
+  const role = req.orgContext?.role
+  if (!role) return null
+  try {
+    await commentService.resolveComment({ projectId: auth.projectId, projectName: auth.init.name ?? "", orgId: requireOrgId(req), userId: auth.userId, role }, commentId, { kind: "fixed", reason: null })
+    return commentId
+  } catch (err) {
+    if (err instanceof ApiError && err.code === "COMMENT_NOT_OPEN") return null
+    console.warn("[changes] không đóng được comment sau lượt sửa:", err)
+    return null
+  }
+}
 
 export const previewChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
@@ -182,7 +240,7 @@ export const previewChanges = catchAsync(async (req: Request, res: Response) => 
     result = await changeService.preview(
       auth.projectId,
       auth.userId,
-      { ...body, chat_history: chatHistory, reply_language: replyLanguage },
+      { ...body, chat_history: chatHistory, reply_language: replyLanguage, ...clarificationRoundsOf(session) },
       auth.init
     )
   } catch (err) {
@@ -190,8 +248,10 @@ export const previewChanges = catchAsync(async (req: Request, res: Response) => 
     if (session && userText && payload) await changeTranscript.recordChangeTurn(session, userText, payload)
     return sendDomainError(res, err)
   }
-  if (session && userText) await changeTranscript.recordChangeTurn(session, userText, changeTranscript.previewPayload(result, replyLanguage))
-  return requiresCr ? sendSuccess(res, 200, result, { requires_cr: true }) : sendSuccess(res, 200, result)
+  if (session && userText) await changeTranscript.recordChangeTurn(session, userText, changeTranscript.previewPayload(result, replyLanguage, { requiresCr }))
+  // FLF-311: lựa chọn chỉ cho transcript (thẻ chọn trong chat) — hình response giữ đúng hợp đồng
+  const { clarification_choices: _choices, ...data } = result
+  return requiresCr ? sendSuccess(res, 200, data, { requires_cr: true }) : sendSuccess(res, 200, data)
 })
 
 export const reconcileChanges = catchAsync(async (req: Request, res: Response) => {
@@ -205,7 +265,12 @@ export const reconcileChanges = catchAsync(async (req: Request, res: Response) =
       res,
       200,
       { txn: result.txn, spine_version: result.spine_version, changes: result.changes, spine: result.spine },
-      { branch: result.branch, impact: result.impact }
+      {
+        branch: result.branch,
+        impact: result.impact,
+        // P12 (chốt câu 9): mục bị người khác sửa đúng chữ giữa hai lượt — chưa ghi, FE gọi "Viết lại" lần nữa để AI soạn lại
+        ...(result.redraft_sections?.length ? { redraft_sections: result.redraft_sections, skipped: result.skipped ?? [] } : {})
+      }
     )
   } catch (err) {
     return sendDomainError(res, err)
@@ -250,6 +315,37 @@ export const listChanges = catchAsync(async (req: Request, res: Response) => {
     ...(query.to === undefined ? {} : { toSeq: query.to })
   })
   return sendSuccess(res, 200, changes)
+})
+
+/**
+ * BF §3.2 (trước baseline): mục đang có bản xem trước sửa qua chat **chưa áp** của người khác ⇒ `[{ section_id, items:
+ * [{ who }] }]`. FE in dưới tiêu đề mục: "<ai> có bản sửa chưa xác nhận ở mục này".
+ */
+export const listPendingPreviewSections = catchAsync(async (req: Request, res: Response) => {
+  const auth = await authorize(req)
+  const rows = changeService.pendingPreviewSections(auth.projectId, auth.userId)
+  const ids = [...new Set(rows.flatMap((r) => r.user_ids))].filter((id) => mongoose.isValidObjectId(id))
+  const users = ids.length ? await User.find({ _id: { $in: ids } }).select("name email").lean() : []
+  const nameOf = new Map(users.map((u) => [String(u._id), u.name || u.email || null]))
+  return sendSuccess(
+    res,
+    200,
+    rows.map((r) => ({ section_id: r.section_id, items: r.user_ids.map((id) => ({ who: nameOf.get(id) ?? "Người khác" })) }))
+  )
+})
+
+/** Người xem trước bấm Huỷ ⇒ bỏ bản xem trước (của chính mình; của người khác / hết hạn ⇒ không làm gì). */
+export const discardPreview = catchAsync(async (req: Request, res: Response) => {
+  const auth = await authorize(req)
+  const discarded = changeService.discardPreview(auth.projectId, String(req.params.previewId), auth.userId)
+  // P12 (BF §3.2 "Bỏ yêu cầu"): bỏ vì mục đã được người khác sửa ⇒ ghi lý do vào phiên chat (không gọi model, không tốn credit)
+  const sessionId = typeof req.query.session_id === "string" ? req.query.session_id : null
+  const note = typeof req.query.note === "string" ? req.query.note.trim().slice(0, 300) : ""
+  if (discarded && sessionId && note) {
+    const session = await changeTranscript.loadProjectSession(auth.projectId, sessionId)
+    await changeTranscript.recordChangeTurn(session, null, { kind: "change_applied", reply: note, count: 0 })
+  }
+  return sendSuccess(res, 200, { discarded })
 })
 
 export const getTraceability = catchAsync(async (req: Request, res: Response) => {

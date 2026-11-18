@@ -61,7 +61,7 @@ const db = vi.hoisted(() => {
         return copy(doc)
       }
       if (!options.upsert) return null
-      const created = { _id: "spine", ...filter, ...copy(update.$setOnInsert ?? {}) }
+      const created = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, ...filter, ...copy(update.$setOnInsert ?? {}) }
       spines.push(created)
       return copy(created)
     }
@@ -234,7 +234,7 @@ const seedSpine = (opts: { fast?: boolean } = {}): void => {
     spine.project.working_mode = "fast"
     spine.progress.elicit_turns_this_phase = 2
   }
-  db.spines[0] = { _id: "spine", projectId: PROJECT, ...spine }
+  db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...spine }
 }
 
 const seedSession = (): void => {
@@ -312,8 +312,10 @@ const draftExecutor: StepRunnerDeps["draftExecutor"] = async (actionType, input)
   const perFunction = template === "S-5.2" || template === "S-5.4"
 
   const batch = perFunction ? batchFunctionIds(vars) : []
+  // FLF-433: S-7.3 chia lô theo function — lô sau đọc lại `messages` đã ghi, như model thật không thêm lại mã đã có
+  const laterFixedBatch = template === "S-7.3" && draftCalls.some((c) => c.step_id === stepId)
   draftCalls.push({ step_id: stepId, function_ids: batch })
-  const ops = perFunction ? batch.flatMap((id) => expandTemplate(opCase.ops, id)) : opCase.ops
+  const ops = perFunction ? batch.flatMap((id) => expandTemplate(opCase.ops, id)) : laterFixedBatch ? [] : opCase.ops
 
   const tokensIn = estimateTokens(JSON.stringify(vars))
   const tokensOut = estimateTokens(JSON.stringify({ ops, notes: opCase.notes }))
@@ -451,11 +453,11 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
     const blocking = final.flags.filter((f) => f.level === "red" && f.resolved_at === null && NON_WAIVABLE.has(f.rule_id))
     expect(blocking, `unwaivable red flags: ${JSON.stringify(blocking)}`).toEqual([])
 
-    console.log("[T18 measured usage — mock, char/4 estimate]", JSON.stringify(measuredUsage))
+    console.log("[T18 measured usage - mock, char/4 estimate]", JSON.stringify(measuredUsage))
     console.log("[T18 draft calls per step]", JSON.stringify(draftCalls.map((c) => ({ step: c.step_id, n: c.function_ids.length }))))
   })
 
-  it("FLF-208 R2: chạy liền cả phase — bước yên lặng tự Accept, dừng ở bước luôn cần người và ở cổng chốt cuối", async () => {
+  it("FLF-208 R2: chạy liền cả phase - bước yên lặng tự Accept, dừng ở bước luôn cần người và ở cổng chốt cuối", async () => {
     seedSpine()
     seedSession()
     const deps: Partial<StepRunnerDeps> = { draftExecutor, elicitExecutor, renderDeps: renderStub() }
@@ -491,7 +493,7 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
     expect(after.steps.find((s) => s.id === second.stopped_at)?.status, "bước đang chờ user chưa accepted").not.toBe("accepted")
   })
 
-  it.each(["balanced", "strict"] as const)("FLF-208 R3 + FLF-220: hỏi gộp đầu giai đoạn ở mọi chế độ duyệt (%s) — chủ đề đã trả lời không bị hỏi lại", async (reviewMode) => {
+  it.each(["balanced", "strict"] as const)("FLF-208 R3 + FLF-220: hỏi gộp đầu giai đoạn ở mọi chế độ duyệt (%s) - chủ đề đã trả lời không bị hỏi lại", async (reviewMode) => {
     seedSpine()
     ;(db.spines[0].project as { review_mode: string }).review_mode = reviewMode
     seedSession()
@@ -650,7 +652,7 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
     expect(nextStep({ screens: reopened.screens, functions: reopened.functions, steps: reopened.steps })?.id).toBe("S-5.1@S91")
   })
 
-  it("every content SKILL.md of this task is <= 150 lines (entities-erd <= 250) and its writes[] stay inside the registry writes of its steps", () => {
+  it("every content SKILL.md of this task is <= 150 lines (entities-erd <= 260, function-detail <= 165 - FLF-418) and its writes[] stay inside the registry writes of its steps", () => {
     const skillIds = [
       "screens-and-flow",
       "authorization-matrix",
@@ -672,7 +674,7 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
     for (const skillId of skillIds) {
       const md = fs.readFileSync(path.join(SKILLS_DIR, skillId, "SKILL.md"), "utf8")
       const lineCount = md.split("\n").filter((_, i, arr) => !(i === arr.length - 1 && arr[i] === "")).length
-      const limit = skillId === "entities-erd" ? 250 : 150
+      const limit = skillId === "entities-erd" ? 260 : skillId === "function-detail" ? 165 : 150
       expect(lineCount, `${skillId}/SKILL.md must be <= ${limit} lines, has ${lineCount}`).toBeLessThanOrEqual(limit)
 
       const mappedSteps = Object.entries(STEP_SKILLS)

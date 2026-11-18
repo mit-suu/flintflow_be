@@ -12,16 +12,20 @@ import {
   IMPORT_FILE_FIELD,
   confirmLatestRequestSchema,
   extractRequestSchema,
+  dropTextRequestSchema,
   fieldsPatchRequestSchema,
   finalizeRequestSchema,
+  continueFlow2RequestSchema,
   gapReportQuerySchema,
   importResumeRequestSchema,
   mappingPatchRequestSchema,
-  stepPlanPatchRequestSchema
+  stepPlanPatchRequestSchema,
+  uploadImportBodySchema
 } from "./import.dto.js"
 import * as extractService from "./extract.service.js"
 import * as extractJobs from "./extract-jobs.js"
 import * as finalizeJobs from "./finalize-jobs.js"
+import { continueInFlow2 } from "./flow2.service.js"
 import * as gapReportService from "./gap-report.service.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { assertNotMode1 } from "./mode1-guard.js"
@@ -29,6 +33,10 @@ import * as importService from "./import.service.js"
 import * as reuploadService from "./reupload.service.js"
 import * as stepPlanService from "./step-plan.service.js"
 import { authorizeMode1, mode1Handler, parseInput } from "./mode1.http.js"
+import { getAuthClient } from "../google/google-auth.service.js"
+import { fetchDocxFromDrive } from "../google/google-import.service.js"
+import { ImportGoogleDocSchema } from "../google/google.validation.js"
+import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
 
 /**
  * Multer giữ file trong bộ nhớ. Giới hạn cứng gấp đôi giới hạn nghiệp vụ: file hơi quá cỡ vẫn tới preflight để
@@ -58,7 +66,21 @@ export const requireFile = (req: Request): importService.UploadedFile => {
 
 export const uploadImport = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
+  // Client cũ gửi kèm `intent`: vẫn kiểm định dạng nhưng bỏ qua — ý định lấy từ Project (hộp Tạo dự án)
+  parseInput(uploadImportBodySchema, req.body)
   const doc = await importService.uploadImport(auth.projectId, auth.userId, requireFile(req))
+  return sendSuccess(res, 201, { import: importService.toImportDto(doc) })
+})
+
+/**
+ * `POST /projects/:id/import/google-docs` `{ fileId }` (contract #46) — như `POST /:id/import` nhưng file lấy từ Google
+ * Drive (Google Doc xuất sang .docx, hoặc .docx có sẵn). Từ `uploadImport` trở đi là đúng luồng upload cũ.
+ */
+export const importFromGoogleDocs = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const { fileId } = parseInput(ImportGoogleDocSchema, req.body)
+  const file = await fetchDocxFromDrive(await getAuthClient(auth.userId), fileId)
+  const doc = await importService.uploadImport(auth.projectId, auth.userId, file)
   return sendSuccess(res, 201, { import: importService.toImportDto(doc) })
 })
 
@@ -70,14 +92,14 @@ export const confirmLatest = mode1Handler(async (req, res) => {
 })
 
 export const getImport = mode1Handler(async (req, res) => {
-  const auth = await authorizeMode1(req)
+  const auth = await authorizeMode1(req, { allowDrafting: true })
   const current = await importService.latestImport(auth.projectId)
   if (current) {
     await extractJobs.markOrphanedExtraction(current)
     await finalizeJobs.markOrphanedFinalize(current)
   }
   const view = await importService.getImportView(auth.projectId)
-  // Ước tính credit trước khi trích (bước mapping / bắt đầu / chạy tiếp) — job đang chạy thì FE đang xem tiến độ, không tính
+  // Ước tính credit một lần trước khi chạy (màn Bắt đầu / chạy tiếp, FLF-343) — job đang chạy thì FE đang xem tiến độ, không tính
   if (current && !(await extractJobs.isExtractionRunning(String(current._id)))) {
     const role = req.orgContext?.role
     view.credit_estimate = await extractService.creditEstimateFor(auth.projectId, auth.userId, current, { withBalance: role === "lead" || role === "analyst" })
@@ -101,15 +123,26 @@ export const reupload = mode1Handler(async (req, res) => {
 export const extract = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const body = parseInput(extractRequestSchema, req.body)
-  return sendSuccess(res, 200, await startExtractionResponse(auth.projectId, auth.userId, body.import_id))
+  return sendSuccess(res, 200, await startExtractionResponse(auth.projectId, auth.userId, body.import_id, body.confirm_latest))
 })
 
-/** I-4 chạy nền: trả ngay trạng thái hiện tại (`extracting`), FE poll `GET /import` (xem `extract-jobs.ts`). */
-const startExtractionResponse = async (projectId: string, userId: string, importId: string) => {
-  const doc = await extractJobs.startExtraction(projectId, userId, importId)
+/**
+ * Nút "Bắt đầu" (FLF-343): I-4 ⇒ baseline 0.1 ⇒ kiểm tra chạy nền một mạch; trả ngay trạng thái hiện tại (`extracting`), FE
+ * poll `GET /import` tới `gap_review` (xem `extract-jobs.ts`).
+ */
+const startExtractionResponse = async (projectId: string, userId: string, importId: string, confirmLatest?: boolean) => {
+  const doc = await extractJobs.startExtraction(projectId, userId, importId, confirmLatest)
   const summary = await importService.extractionSummary(String(doc._id))
   return { import: importService.toImportDto(doc), sections: summary.sections }
 }
+
+/** FLF-412: lưu lựa chọn Bỏ chữ theo vùng (trước Bắt đầu) + tính lại bản sơ bộ; FE đọc lại `GET /import` để có bản sơ bộ + credit mới. */
+export const dropText = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(dropTextRequestSchema, req.body)
+  const doc = await importService.setDropText(auth.projectId, body)
+  return sendSuccess(res, 200, { import: importService.toImportDto(doc) })
+})
 
 export const patchFields = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
@@ -127,7 +160,14 @@ export const finalize = mode1Handler(async (req, res) => {
   const body = parseInput(finalizeRequestSchema, req.body)
   const doc = await finalizeJobs.startFinalize(auth.projectId, auth.userId, body)
   const spineVersion = doc.finalize_checkpoint?.spine_version ?? body.base_version
-  return sendSuccess(res, 200, { import: importService.toImportDto(doc), doc_version: "0.0", baseline: null, spine_version: spineVersion, flags: null })
+  return sendSuccess(res, 200, { import: importService.toImportDto(doc), doc_version: IMPORTED_DOC_VERSION, baseline: null, spine_version: spineVersion, flags: null })
+})
+
+/** FLF-278 trên FLF-336: chế độ 3 ở `incomplete` ⇒ Luồng 2 (dự án sang pipeline tạo mới, viết phần còn thiếu). */
+export const continueFlow2 = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(continueFlow2RequestSchema, req.body)
+  return sendSuccess(res, 200, await continueInFlow2(auth.projectId, auth.userId, body))
 })
 
 /**
@@ -141,7 +181,7 @@ export const resume = mode1Handler(async (req, res) => {
   if (doc.status === "extracting") {
     return sendSuccess(res, 200, await startExtractionResponse(auth.projectId, auth.userId, body.import_id))
   }
-  if (doc.status === "baselining" || doc.status === "checking") {
+  if (doc.status === "baselining" || doc.status === "checking" || doc.status === "fields_review") {
     const current = await finalizeJobs.startResume(auth.projectId, auth.userId, body.import_id)
     const summary = await importService.extractionSummary(String(current._id))
     return sendSuccess(res, 200, { import: importService.toImportDto(current), sections: summary.sections })
@@ -149,8 +189,17 @@ export const resume = mode1Handler(async (req, res) => {
   throw new Mode1Error("IMPORT_INVALID_STATE", "Không có bước nào đang dừng để tiếp tục", {
     status: doc.status,
     to: doc.status,
-    allowed: ["extracting", "baselining", "checking"]
+    allowed: ["extracting", "fields_review", "baselining", "checking"]
   })
+})
+
+/** Người dùng bấm Dừng lúc đang đọc nội dung (I-4): đặt `paused: user`, job dừng trước lượt AI kế tiếp. Tiếp tục qua `resume`. */
+export const pause = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(importResumeRequestSchema, req.body)
+  const current = await extractJobs.requestStop(auth.projectId, body.import_id)
+  const summary = await importService.extractionSummary(String(current._id))
+  return sendSuccess(res, 200, { import: importService.toImportDto(current), sections: summary.sections })
 })
 
 export const gapReport = mode1Handler(async (req, res) => {

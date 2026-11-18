@@ -44,7 +44,7 @@ const login = () => {
     .then((res) => ({ agent, res }))
 }
 
-describe("UC-66 — khoá tài khoản", () => {
+describe("UC-66 - khoá tài khoản", () => {
   it("lưu lý do, thu hồi mọi phiên; token còn hạn bị chặn, refresh và đăng nhập lại đều bị từ chối", async () => {
     const { agent, res: loggedIn } = await login()
     expect(loggedIn.status).toBe(200)
@@ -70,12 +70,31 @@ describe("UC-66 — khoá tài khoản", () => {
     expect(again.res.body.error.code).toBe("ACCOUNT_SUSPENDED")
   })
 
+  it("FLF-345: mọi đường bị chặn đều trả lý do và thời điểm khoá trong meta (UC-03)", async () => {
+    const { agent, res: loggedIn } = await login()
+    const accessToken = loggedIn.body.data.accessToken as string
+
+    const res = await setStatus(memberId, { isActive: false, reason: "Vi phạm điều khoản sử dụng" })
+    const suspendedAt = res.body.data.suspendedAt as string
+    const expected = { reason: "Vi phạm điều khoản sử dụng", suspended_at: new Date(suspendedAt).toISOString() }
+
+    const me = await request(app).get("/api/v1/users/me").set(bearer(accessToken))
+    expect(me.body.meta).toEqual(expected)
+
+    const refreshed = await agent.post("/api/v1/auth/refresh")
+    expect(refreshed.body.meta).toEqual(expected)
+
+    const again = await login()
+    expect(again.res.body.meta).toEqual(expected)
+  })
+
   it("sai mật khẩu thì vẫn báo sai thông tin, không lộ việc tài khoản bị khoá", async () => {
     await setStatus(memberId, { isActive: false, reason: "Vi phạm điều khoản" })
 
     const res = await request(app).post("/api/v1/auth/login").send({ email: EMAIL, password: "wrong-password" })
     expect(res.status).toBe(401)
     expect(res.body.error.code).toBe("INVALID_CREDENTIALS")
+    expect(res.body.meta?.reason).toBeUndefined()
   })
 
   it("thiếu lý do ⇒ 400, tài khoản vẫn hoạt động", async () => {
@@ -124,7 +143,7 @@ describe("UC-66 — khoá tài khoản", () => {
   })
 })
 
-describe("UC-67 — mở khoá tài khoản", () => {
+describe("UC-67 - mở khoá tài khoản", () => {
   it("xoá lý do khoá, ghi lý do mở khoá và cho đăng nhập lại", async () => {
     await setStatus(memberId, { isActive: false, reason: "Nghi bị chiếm tài khoản" })
 

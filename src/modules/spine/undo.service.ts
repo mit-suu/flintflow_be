@@ -17,12 +17,13 @@
  * `revert_conflict` (422 OP_INVALID) — không ghi đè im lặng thay đổi đến sau.
  */
 
-import { revertRange } from "./op-engine.js"
+import { revertChanges } from "./op-engine.js"
 import * as repository from "./spine.repository.js"
 import type { ApplyResult } from "./op.types.js"
 import type { Change } from "./spine.types.js"
 import { parsePath, PathError } from "./path-resolver.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { assertDraftUnlocked } from "./draft-lock.js"
 
 export const NOTHING_TO_UNDO = "NOTHING_TO_UNDO"
 
@@ -110,13 +111,29 @@ export interface UndoOptions {
   base_version: number
 }
 
+/** FLF-294 (BR-03, UC-37): sau baseline không hoàn tác — lô đã ghi là một change request, gỡ nó là một CR mới. */
+export const UNDO_AFTER_BASELINE = "UNDO_AFTER_BASELINE"
+
 /** Undo lô gần nhất của project. Ném 422 `NOTHING_TO_UNDO` nếu không còn lô nào undo được. */
 export const undoLast = async (projectId: string, userId: string, options: UndoOptions): Promise<ApplyResult> => {
+  const record = await repository.get(projectId)
+  assertDraftUnlocked(record)
+  if ((record?.baselines.length ?? 0) > 0) {
+    throw new ApiError(409, "Dự án đã có baseline - không hoàn tác được. Muốn gỡ thay đổi, hãy gõ lệnh sửa trong chat để tạo change request mới.", UNDO_AFTER_BASELINE)
+  }
   const changes = await repository.listChanges(projectId)
   const target = findUndoTarget(changes)
   if (!target) throw new ApiError(422, "Không còn thao tác nào để hoàn tác", NOTHING_TO_UNDO)
 
-  return await revertRange(projectId, target.first_seq, target.last_seq, {
+  // FLF-431 (FAP #22): chỉ đảo phần dữ liệu người dùng của lô. Lô Chấp nhận ở cổng trộn mốc duyệt (`steps[…].status /
+  // accepted_at`) với dữ liệu (`screens[…].detail_status`…) — đảo cả lô thì mốc duyệt bị trả về giá trị cũ dù người dùng chỉ
+  // muốn gỡ nội dung. Mốc hệ thống là bản ghi một quyết định, không phải nội dung để hoàn tác.
+  const group = changes.filter((c) => c.txn === target.txn && c.seq >= target.first_seq && c.seq <= target.last_seq)
+  const userData = group.filter((c) => {
+    const root = rootOf(c.path)
+    return root !== null && !SYSTEM_ONLY_ROOTS.has(root)
+  })
+  return await revertChanges(projectId, userData, {
     by: userId,
     base_version: options.base_version,
     step_id: null

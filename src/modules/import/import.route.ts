@@ -1,5 +1,6 @@
 import { Router } from "express"
 import * as importController from "./import.controller.js"
+import * as orgLibrary from "./org-library.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
 
 const router = Router()
@@ -25,7 +26,8 @@ const router = Router()
  *         sha256: { type: string }
  *         status:
  *           type: string
- *           enum: [uploaded, preflight_rejected, awaiting_latest_confirm, parsing, mapping_review, extracting, fields_review, baselining, checking, gap_review, delivered, change_requested]
+ *           enum: [uploaded, preflight_rejected, awaiting_latest_confirm, parsing, mapping_review, extracting, fields_review, baselining, incomplete, drafting, checking, gap_review, delivered, change_requested]
+ *           description: "FLF-343: file mới đi uploaded → parsing → extracting (chờ Bắt đầu) → baselining → checking → gap_review; awaiting_latest_confirm / mapping_review / fields_review chỉ còn ở bản ghi cũ"
  *         preflight:
  *           type: object
  *           properties:
@@ -55,9 +57,13 @@ const router = Router()
  *           type: object
  *           nullable: true
  *           properties:
- *             reason: { type: string, enum: [credits, resume_later] }
+ *             reason: { type: string, enum: [credits, resume_later, user] }
  *             at: { type: string, format: date-time }
  *         extract_cursor: { type: string, nullable: true }
+ *         reread:
+ *           type: object
+ *           nullable: true
+ *           description: "FLF-360: đang đọc lại vì AI quá tải — kind images (done/total ảnh) | text (done/total lượt)"
  *         created_at: { type: string, format: date-time }
  *         updated_at: { type: string, format: date-time }
  *
@@ -65,8 +71,9 @@ const router = Router()
  *   post:
  *     summary: Upload SRS .docx và chạy preflight (UC-20, nút 1.1–1.2)
  *     description: |
- *       Nhận loại file theo magic bytes. File không có stamp ⇒ `awaiting_latest_confirm` (gọi confirm-latest);
- *       stamp đúng project ⇒ tách block + khớp profile ngay (`mapping_review` hoặc `extracting`).
+ *       Nhận loại file theo magic bytes. FLF-343: tách block + khớp profile ngay (mapping độ tin thấp tự nhận) ⇒ `extracting`
+ *       chưa chạy — màn báo credit một lần (`GET /import` → `credit_estimate`). File không stamp ⇒ `confirmed_latest_at = null`,
+ *       câu hỏi "bản mới nhất" trả lời cùng `POST /import/extract` (`confirm_latest`).
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -81,9 +88,10 @@ const router = Router()
  *             required: [file]
  *             properties:
  *               file: { type: string, format: binary }
+ *               intent: { type: string, enum: [fixed, free], deprecated: true, description: "Client cũ — bỏ qua. Ý định lấy từ Project.template_intent (chốt ở hộp Tạo dự án); dự án không có ý định ⇒ free" }
  *     responses:
  *       201:
- *         description: "`{ import: ImportedDocument }`"
+ *         description: "`{ import: ImportedDocument }` — `import.intent` là ý định đã ghi"
  *       400: { description: Thiếu file / VALIDATION_ERROR }
  *       409: { description: PROJECT_MODE_MISMATCH, IMPORT_INVALID_STATE (đã có baseline ⇒ dùng /reupload) }
  *       422: { description: "IMPORT_FILE_REJECTED (`meta: { import_id, issues }`), IMPORT_STAMP_FOREIGN_PROJECT (`meta: { stamp }`)" }
@@ -103,9 +111,40 @@ router.get("/:id/import", authMiddleware, importController.getImport)
 
 /**
  * @swagger
+ * /api/v1/projects/{id}/import/google-docs:
+ *   post:
+ *     summary: Như POST /import nhưng file lấy từ Google Drive (Google Doc ⇒ .docx, hoặc .docx có sẵn) — cần đã kết nối Google
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [fileId]
+ *             properties:
+ *               fileId: { type: string, description: "ID file người dùng chọn trong Google Picker" }
+ *     responses:
+ *       201: { description: "`{ import }` ở `uploaded` — như POST /import" }
+ *       400: { description: VALIDATION_ERROR, GOOGLE_FILE_UNSUPPORTED (không phải Google Doc / .docx) }
+ *       401: { description: GOOGLE_RECONNECT_REQUIRED }
+ *       403: { description: GOOGLE_FILE_FORBIDDEN }
+ *       404: { description: GOOGLE_FILE_NOT_FOUND }
+ *       413: { description: GOOGLE_EXPORT_TOO_LARGE (Google Doc quá lớn để xuất), FILE_TOO_LARGE }
+ *       422: { description: IMPORT_FILE_REJECTED, IMPORT_STAMP_FOREIGN_PROJECT — như POST /import }
+ */
+router.post("/:id/import/google-docs", authMiddleware, importController.importFromGoogleDocs)
+
+/**
+ * @swagger
  * /api/v1/projects/{id}/import/confirm-latest:
  *   post:
- *     summary: Xác nhận file không có stamp là bản mới nhất (nút 1.3) rồi tách block + khớp profile
+ *     summary: (Bản ghi cũ) xác nhận file không có stamp là bản mới nhất (nút 1.3) rồi tách block + khớp profile
+ *     description: FLF-343 — file mới không dừng ở awaiting_latest_confirm; dùng `confirm_latest` của `POST /import/extract`.
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -131,7 +170,7 @@ router.post("/:id/import/confirm-latest", authMiddleware, importController.confi
  * @swagger
  * /api/v1/projects/{id}/import/mapping:
  *   patch:
- *     summary: Xác nhận/sửa mapping heading → section và cột bảng → field (UC-21, nút 1.7)
+ *     summary: (Bản ghi cũ ở mapping_review) xác nhận/sửa mapping heading → section và cột bảng → field (UC-21, nút 1.7)
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -199,9 +238,12 @@ router.post("/:id/reupload", authMiddleware, importController.receiveDocx, impor
  * @swagger
  * /api/v1/projects/{id}/import/extract:
  *   post:
- *     summary: Trích field Spine từ tài liệu (I-4, nút 1.8) — chạy hoặc chạy tiếp từ extract_cursor
+ *     summary: Nút Bắt đầu (FLF-343) — chạy một mạch I-4 ⇒ baseline 0.1 ⇒ kiểm tra (nút 1.8–1.12)
  *     description: |
- *       Chạy nền: trả ngay `{ import (extracting, paused null), sections }`; FE poll `GET /import` tới khi rời `extracting` hoặc có `paused`.
+ *       Chạy nền: trả ngay `{ import (extracting, paused null), sections }`; I-4 xong thì job finalize nối tiếp (base_version do
+ *       server tính, Record of Changes đọc từ file) rồi 1.11–1.12; FE poll `GET /import` tới `gap_review` / `incomplete` hoặc có `paused`.
+ *       `confirm_latest: true` bắt buộc khi file chưa xác nhận là bản mới nhất (thiếu ⇒ 409 IMPORT_NEEDS_LATEST_CONFIRM, không chạy).
+ *       Mapping / field độ tin thấp vào baseline kèm cờ vàng `import_needs_review` ("Cần xem").
  *       Bảng khớp đủ cột trích tất định (không tốn credit); phần chữ còn lại gọi AI theo section (step_id `I-4:<section>`).
  *       Hết credit ⇒ `paused: { reason: credits }`; AI lỗi sau 2 lần retry ⇒ `paused: { reason: resume_later }`.
  *     tags: [Import (mode 1)]
@@ -213,18 +255,44 @@ router.post("/:id/reupload", authMiddleware, importController.receiveDocx, impor
  *       required: true
  *       content:
  *         application/json:
- *           schema: { type: object, required: [import_id], properties: { import_id: { type: string } } }
+ *           schema: { type: object, required: [import_id], properties: { import_id: { type: string }, confirm_latest: { type: boolean } } }
  *     responses:
  *       200: { description: "`{ import, sections: [{ section_id, status, fields_total, fields_needing_review, error }] }` — trả ngay, import ở extracting" }
- *       409: { description: IMPORT_INVALID_STATE }
+ *       409: { description: "IMPORT_INVALID_STATE, IMPORT_NEEDS_LATEST_CONFIRM" }
  */
 router.post("/:id/import/extract", authMiddleware, importController.extract)
 
 /**
  * @swagger
+ * /api/v1/projects/{id}/import/drop-text:
+ *   patch:
+ *     summary: (FLF-412) Màn đọc khung — chọn Bỏ chữ theo vùng heading trước khi bấm Bắt đầu; vùng bỏ chữ chỉ còn khung
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [import_id, keys]
+ *             properties:
+ *               import_id: { type: string }
+ *               keys: { type: array, items: { type: string, example: B0012 }, description: "Cả tập khoá vùng (`text_sections[].key` của GET /import) chọn Bỏ chữ; khoá lạ bị bỏ qua" }
+ *     responses:
+ *       200: { description: "`{ import }` — đọc lại GET /import để có `structure_preview`, `text_sections`, `credit_estimate` mới" }
+ *       409: { description: IMPORT_INVALID_STATE (đã bấm Bắt đầu) }
+ */
+router.patch("/:id/import/drop-text", authMiddleware, importController.dropText)
+
+/**
+ * @swagger
  * /api/v1/projects/{id}/import/fields:
  *   patch:
- *     summary: Xác nhận / sửa / bỏ field độ tin thấp (UC-22, nút 1.9)
+ *     summary: (Bản ghi cũ ở fields_review) xác nhận / sửa / bỏ field độ tin thấp (UC-22, nút 1.9)
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -259,7 +327,7 @@ router.patch("/:id/import/fields", authMiddleware, importController.patchFields)
  * @swagger
  * /api/v1/projects/{id}/import/finalize:
  *   post:
- *     summary: Ghi Spine + tạo version 0.0 + baseline imported, rồi AI check + code rule (nút 1.10–1.12)
+ *     summary: Ghi Spine + tạo version 0.1 + baseline imported, rồi AI check + code rule (nút 1.10–1.12) — FLF-343 chạy tự động sau I-4; gọi tay cho `incomplete` (Hoàn thiện)
  *     description: |
  *       Chạy nền (SRS lớn mất vài phút — không giữ request qua reverse proxy): kiểm trạng thái + `base_version` ngay
  *       (409 như cũ), rồi trả ngay `{ import (baselining, paused null), baseline: null, flags: null }`; FE poll `GET /import`
@@ -281,10 +349,45 @@ router.patch("/:id/import/fields", authMiddleware, importController.patchFields)
  *               import_id: { type: string }
  *               base_version: { type: integer }
  *     responses:
- *       200: { description: "`{ import, doc_version: \"0.0\", baseline: null, spine_version, flags: null }` — trả ngay, import ở baselining (job nền)" }
+ *       200: { description: "`{ import, doc_version: \"0.1\", baseline: null, spine_version, flags: null }` — trả ngay, import ở baselining (job nền)" }
  *       409: { description: IMPORT_INVALID_STATE, SPINE_VERSION_CONFLICT }
  */
 router.post("/:id/import/finalize", authMiddleware, importController.finalize)
+
+/**
+ * @swagger
+ * /api/v1/projects/{id}/import/continue:
+ *   post:
+ *     summary: Chế độ 3 / 4 — soạn phần còn thiếu với FlintFlow (Luồng 2) thay vì Hoàn thiện
+ *     description: |
+ *       Chỉ từ `incomplete` khi giữ khung + `target_structure.resolved_mode = 3`, hoặc tick bổ sung theo mẫu chuẩn + `resolved_mode = 4`
+ *       (FLF-416; chế độ 4 chỉ mở bước của mục FPT còn thiếu, bản in sắp lại bố cục: mục FPT soạn thêm chèn đúng vị trí, mục Ngoài
+ *       phạm vi xuống cuối). Thường finalize đã tự chuyển; endpoint này cho bản ghi cũ. Mở lại bước Brief (B-1…S-1), đặt bước sở hữu **mọi mục
+ *       của mẫu** về `pending` (FLF-378 — chữ trong mẫu là ví dụ, không phải nội dung đã chốt), chuyển dự án sang luồng tạo mới (`mode = fpt`, `import_state = drafting`). Bản in vẫn theo mẫu; ký
+ *       baseline 1.0 ⇒ dự án về mode 1 (FLF-318).
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [import_id, base_version], properties: { import_id: { type: string }, base_version: { type: integer } } }
+ *     responses:
+ *       200: { description: "`{ project_mode: \"fpt\", import_state: \"drafting\", current_step, spine_version }`" }
+ *       409: { description: IMPORT_INVALID_STATE (không phải chế độ 3 / không ở incomplete), SPINE_VERSION_CONFLICT }
+ */
+router.post("/:id/import/continue", authMiddleware, importController.continueFlow2)
+
+// FLF-278 trên FLF-335/336 — mẫu / thư viện nội dung của tổ chức, đi qua dự án (contract §FLF-278)
+router.post("/:id/import/from-org", authMiddleware, orgLibrary.importFromOrg)
+router.post("/:id/import/save-to-org", authMiddleware, orgLibrary.saveToOrg)
+// FLF-395 (D13): duyệt mục BA tự đặt trước khi vào mẫu khung tự lưu của tổ chức
+router.get("/:id/template-skeleton", authMiddleware, orgLibrary.getSkeletonPending)
+router.post("/:id/template-skeleton/decisions", authMiddleware, orgLibrary.decideSkeletonPending)
+router.post("/:id/template-skeleton/suggest", authMiddleware, orgLibrary.suggestSkeletonNames)
 
 /**
  * @swagger
@@ -312,6 +415,30 @@ router.post("/:id/import/resume", authMiddleware, importController.resume)
 
 /**
  * @swagger
+ * /api/v1/projects/{id}/import/pause:
+ *   post:
+ *     summary: Dừng lượt đọc nội dung đang chạy (FLF-388)
+ *     description: |
+ *       Chỉ ở `extracting` đã bấm Bắt đầu: đặt `paused: { reason: user }`. Job nền dừng trước lượt AI kế tiếp (lượt đang gọi
+ *       dở chạy xong), không gọi thêm ⇒ không trừ thêm credit. Đã dừng ⇒ trả nguyên trạng. Tiếp tục qua `/import/resume`.
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [import_id], properties: { import_id: { type: string } } }
+ *     responses:
+ *       200: { description: "`{ import, sections }` — `import.paused.reason = user`" }
+ *       409: { description: IMPORT_INVALID_STATE (không ở `extracting` / chưa bắt đầu) }
+ */
+router.post("/:id/import/pause", authMiddleware, importController.pause)
+
+/**
+ * @swagger
  * /api/v1/projects/{id}/gap-report:
  *   get:
  *     summary: Gap report (UC-23, nút 1.13) — JSON hoặc file .docx
@@ -322,7 +449,7 @@ router.post("/:id/import/resume", authMiddleware, importController.resume)
  *       - { in: path, name: id, required: true, schema: { type: string } }
  *       - { in: query, name: format, schema: { type: string, enum: [json, docx], default: json } }
  *     responses:
- *       200: { description: "JSON: `{ project_id, doc_version, generated_at, totals, sections, missing_sections, unmapped_headings, low_confidence_fields }`; docx: file (tải lần đầu khi đang gap_review ⇒ delivered)" }
+ *       200: { description: "JSON: `{ project_id, doc_version, generated_at, totals, layout, sections, unrendered_diagrams, low_confidence_fields }`; docx: file (tải lần đầu khi đang gap_review ⇒ delivered)" }
  *       409: { description: IMPORT_INVALID_STATE (chưa tới gap_review) }
  */
 router.get("/:id/gap-report", authMiddleware, importController.gapReport)
@@ -338,7 +465,7 @@ router.get("/:id/gap-report", authMiddleware, importController.gapReport)
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: string } }
  *     responses:
- *       200: { description: "`{ steps: [{ step_id, state: applied|hidden|enabled, missing, section_ids, reason }] }`" }
+ *       200: { description: "`{ steps: [{ step_id, state: applied|hidden|enabled, section_ids, reason }] }`" }
  *       409: { description: IMPORT_INVALID_STATE (chưa finalize) }
  *   patch:
  *     summary: Bật step ẩn / tắt step đã bật chưa có dữ liệu (#33)
@@ -355,7 +482,7 @@ router.get("/:id/gap-report", authMiddleware, importController.gapReport)
  *     responses:
  *       200: { description: "`{ steps }` sau khi đổi" }
  *       404: { description: STEP_NOT_IN_PLAN }
- *       409: { description: "CORE_STEP_REQUIRED (tắt đầu mục FPT / bước luôn chạy / step đã có dữ liệu), IMPORT_INVALID_STATE" }
+ *       409: { description: "CORE_STEP_REQUIRED (tắt bước luôn chạy / step đã có dữ liệu), IMPORT_INVALID_STATE" }
  */
 router.get("/:id/step-plan", authMiddleware, importController.getStepPlan)
 router.patch("/:id/step-plan", authMiddleware, importController.patchStepPlan)

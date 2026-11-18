@@ -35,7 +35,8 @@ const projectSchema = new Schema(
     form_factor: { type: [String], default: [] },
     stakes: nullableString,
     working_mode: { type: String, enum: ["fast", "coaching", null], default: null },
-    review_mode: { type: String, enum: ["strict", "balanced", "fast"], default: "balanced" },
+    review_mode: { type: String, enum: ["strict", "balanced", "fast", "milestones"], default: "balanced" },
+    skip_confirm_sections: { type: [String], default: [] },
     release_scope: { type: releaseScopeSchema, default: () => ({}) }
   },
   opts
@@ -98,6 +99,25 @@ const roleSchema = new Schema(
   opts
 )
 
+const activityNodeSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    kind: { type: String, enum: ["initial", "final", "action", "decision", "merge", "fork", "join"], required: true },
+    name: { type: String },
+    lane: { type: String }
+  },
+  opts
+)
+
+const activityFlowSchema = new Schema(
+  {
+    from: { type: String, required: true },
+    to: { type: String, required: true },
+    guard: { type: String }
+  },
+  opts
+)
+
 const useCaseSchema = new Schema(
   {
     id: { type: String, required: true },
@@ -106,7 +126,19 @@ const useCaseSchema = new Schema(
     function_ids: { type: [String], default: [] },
     description: { type: String, default: "" },
     includes: { type: [String], default: [] },
-    extends: { type: [String], default: [] }
+    extends: { type: [String], default: [] },
+    activity_nodes: { type: [activityNodeSchema], default: undefined },
+    activity_flows: { type: [activityFlowSchema], default: undefined }
+  },
+  opts
+)
+
+const flowEdgeSchema = new Schema(
+  {
+    to: { type: String, required: true },
+    // Không default: thiếu = không có trigger / guard (dữ liệu cũ chỉ là chuỗi id màn đích — `legacy-flow.ts`)
+    trigger: { type: String },
+    guard: { type: String }
   },
   opts
 )
@@ -117,7 +149,7 @@ const screenSchema = new Schema(
     feature_id: { type: String, required: true },
     name: { type: String, default: "" },
     description: { type: String, default: "" },
-    flow_to: { type: [String], default: [] },
+    flow_to: { type: [flowEdgeSchema], default: [] },
     is_popup: { type: Boolean, default: false },
     tabs: { type: [String], default: [] },
     primary_function_id: nullableString,
@@ -141,6 +173,38 @@ const permissionSchema = new Schema(
   opts
 )
 
+const entityAttributeSchema = new Schema(
+  {
+    name: { type: String, required: true },
+    kind: { type: String, enum: ["key", "reference", "plain"], required: true },
+    required: { type: Boolean, required: true },
+    description: { type: String }
+  },
+  opts
+)
+
+const entityStateSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    name: { type: String, required: true },
+    initial: { type: Boolean, default: undefined },
+    final: { type: Boolean, default: undefined }
+  },
+  opts
+)
+
+const entityTransitionSchema = new Schema(
+  {
+    from: { type: String, required: true },
+    to: { type: String, required: true },
+    event: { type: String, required: true },
+    guard: { type: String },
+    action: { type: String },
+    business_rule_ids: { type: [String], default: undefined }
+  },
+  opts
+)
+
 const entitySchema = new Schema(
   {
     id: { type: String, required: true },
@@ -150,7 +214,11 @@ const entitySchema = new Schema(
     relation_verbs: { type: Schema.Types.Mixed, default: undefined },
     relation_cardinality: { type: Schema.Types.Mixed, default: undefined },
     relation_optional: { type: [String], default: undefined },
-    root: { type: Boolean, default: undefined }
+    root: { type: Boolean, default: undefined },
+    attributes: { type: [entityAttributeSchema], default: undefined },
+    feature_ids: { type: [String], default: undefined },
+    states: { type: [entityStateSchema], default: undefined },
+    transitions: { type: [entityTransitionSchema], default: undefined }
   },
   opts
 )
@@ -160,6 +228,18 @@ const validationSchema = new Schema(
     id: { type: String, required: true },
     kind: { type: String, enum: ["business", "format", "required"], required: true },
     statement: { type: String, default: "" }
+  },
+  opts
+)
+
+const functionInteractionSchema = new Schema(
+  {
+    from: { type: String, required: true },
+    to: { type: String, required: true },
+    message: { type: String, required: true },
+    kind: { type: String, enum: ["request", "response"], required: true },
+    flow: { type: String, enum: ["normal", "abnormal"], required: true },
+    guard: { type: String }
   },
   opts
 )
@@ -177,7 +257,12 @@ const functionSchema = new Schema(
     abnormal: { type: [String], default: [] },
     validations: { type: [validationSchema], default: [] },
     business_rule_ids: { type: [String], default: [] },
-    priority
+    priority,
+    interactions: { type: [functionInteractionSchema], default: undefined },
+    // FLF-418: sơ đồ tuần tự mức thành phần — cùng hình dạng message
+    component_interactions: { type: [functionInteractionSchema], default: undefined },
+    // FLF-365: bản phát hành (phân bổ yêu cầu) — thiếu = chưa phân bổ
+    release: { type: String, default: undefined }
   },
   opts
 )
@@ -194,7 +279,8 @@ const nfrSchema = new Schema(
     kind: { type: String, enum: ["quantitative", "descriptive"], required: true },
     metric: { type: String },
     threshold: { type: String },
-    priority
+    priority,
+    release: { type: String, default: undefined }
   },
   opts
 )
@@ -223,7 +309,10 @@ const messageSchema = new Schema(
     id: { type: String, required: true },
     code: { type: String, default: "" },
     text: { type: String, default: "" },
-    function_ids: { type: [String], default: [] }
+    function_ids: { type: [String], default: [] },
+    // P07: loại / ngữ cảnh thông báo — tuỳ chọn, Spine cũ không có
+    type: { type: String, enum: ["error", "warning", "info", "success", "confirm", null], default: undefined },
+    context: { type: String, default: undefined }
   },
   opts
 )
@@ -252,6 +341,54 @@ const glossaryTermSchema = new Schema(
   opts
 )
 
+// FLF-365: mẫu IEEE 29148 — tài liệu tham khảo, ma trận kiểm chứng (chỉ Mode 1 render)
+const referenceSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    title: { type: String, default: "" },
+    owner: { type: String },
+    version: { type: String },
+    date: { type: String },
+    location: { type: String },
+    kind: { type: String, enum: ["normative", "informative"], default: "informative" }
+  },
+  opts
+)
+
+const deploymentNodeSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    name: { type: String, required: true },
+    kind: { type: String, enum: ["device", "execution_environment", "node"], required: true },
+    parent_id: nullableString,
+    artifacts: { type: [String], default: [] },
+    components: { type: [String], default: [] },
+    description: { type: String }
+  },
+  opts
+)
+
+const deploymentLinkSchema = new Schema(
+  {
+    from: { type: String, required: true },
+    to: { type: String, required: true },
+    protocol: { type: String }
+  },
+  opts
+)
+
+const verificationSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    requirement_id: { type: String, required: true },
+    method: { type: String, enum: ["test", "analysis", "inspection", "demonstration", "other"], default: "test" },
+    artifact: { type: String },
+    status: { type: String },
+    evidence: { type: String }
+  },
+  opts
+)
+
 const addendumSchema = new Schema(
   {
     id: { type: String, required: true },
@@ -272,7 +409,7 @@ const customBlockSchema = new Schema(
     image_ref: { type: String, default: null },
     // Sơ đồ gốc của người dùng (mode 1 v3 §4.13); ảnh thường không có field này
     diagram: {
-      type: new Schema({ kind: { type: String, enum: ["context", "usecase", "screen_flow", "erd"], required: true }, source_hash: { type: String, required: true } }, opts),
+      type: new Schema({ kind: { type: String, enum: ["context", "usecase", "screen_flow", "erd", "sequence", "activity", "deployment"], required: true }, owner_id: { type: String, default: undefined }, source_hash: { type: String, required: true } }, opts),
       default: undefined
     }
   },
@@ -295,10 +432,13 @@ const diagramSchema = new Schema(
     id: { type: String, required: true },
     kind: {
       type: String,
-      enum: ["context", "usecase", "screen_flow", "erd", "screen_layout"],
+      enum: ["context", "usecase", "screen_flow", "erd", "class", "state_machine", "sequence", "activity", "deployment", "screen_layout"],
       required: true
     },
-    puml: { type: String, default: "" },
+    format: { type: String, enum: ["puml", "svg"], default: "puml" },
+    source: { type: String, default: "" },
+    // legacy, chỉ để đọc doc chưa migrate (migrate-diagram-source). KHÔNG default: default sẽ ghi lại key `puml`.
+    puml: { type: String },
     section: { type: String, required: true },
     owner_kind: nullableString,
     owner_id: nullableString,
@@ -342,7 +482,11 @@ const flagSchema = new Schema(
     resolved_at: nullableDate,
     waived_by_user: { type: Boolean, default: false },
     waive_reason: { ...nullableString, minlength: 20 },
-    waived_at_version: nullableNumber
+    waived_at_version: nullableNumber,
+    // FLF-329: giữ nguyên + lý do (cờ vẫn mở)
+    kept_reason: { ...nullableString, minlength: 20 },
+    kept_by: nullableString,
+    kept_at: nullableDate
   },
   opts
 )
@@ -383,6 +527,21 @@ const baselineEntrySchema = new Schema(
   opts
 )
 
+/** Lượt nộp baseline chờ Lead quyết / vừa bị từ chối (FLF-275). Một object hoặc `null`. */
+const baselineSubmissionSchema = new Schema(
+  {
+    status: { type: String, enum: ["pending", "rejected"], required: true },
+    submitted_by: { type: String, required: true },
+    submitted_at: { type: Date, required: true },
+    spine_version: { type: Number, required: true, min: 1 },
+    decided_by: { type: String, default: null },
+    decided_at: { type: Date, default: null },
+    reason: { type: String, default: null },
+    rejection_comment_ids: { type: [String], default: [] }
+  },
+  opts
+)
+
 const spineSchema = new Schema(
   {
     projectId: { type: Schema.Types.ObjectId, ref: "Project", required: true },
@@ -405,6 +564,10 @@ const spineSchema = new Schema(
     messages: { type: [messageSchema], default: [] },
     other_requirements: { type: [otherRequirementSchema], default: [] },
     glossary: { type: [glossaryTermSchema], default: [] },
+    references: { type: [referenceSchema], default: [] },
+    verifications: { type: [verificationSchema], default: [] },
+    deployment_nodes: { type: [deploymentNodeSchema], default: [] },
+    deployment_links: { type: [deploymentLinkSchema], default: [] },
     addendum: { type: [addendumSchema], default: [] },
     custom_sections: { type: [customSectionSchema], default: [] },
 
@@ -414,6 +577,7 @@ const spineSchema = new Schema(
     flags: { type: [flagSchema], default: [] },
     sections: { type: [sectionStateSchema], default: [] },
     baselines: { type: [baselineEntrySchema], default: [] },
+    baseline_submission: { type: baselineSubmissionSchema, default: null },
 
     spine_version: { type: Number, default: 1, min: 1 }
   },

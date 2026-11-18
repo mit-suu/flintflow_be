@@ -17,10 +17,11 @@
 import { gateActionText, gateMessageOfRun } from "./gate-message.js"
 import { Request, Response } from "express"
 import mongoose from "mongoose"
+import { User } from "../user/user.model.js"
 import { z } from "zod"
 import * as spineRepository from "../spine/spine.repository.js"
 import * as meter from "./meter.service.js"
-import { nextStep, orderedSteps } from "./step-registry.js"
+import { getStep, nextStep, orderedSteps } from "./step-registry.js"
 import type { Spine, SpineRecord } from "../spine/spine.types.js"
 import {
   runStep,
@@ -30,27 +31,32 @@ import {
   requirePipelineSession,
   recordUserMessage,
   recordAiMessage,
-  isPipelineErrorCode,
   CALLS_LIMIT,
   REGENERATE_LIMIT_COUNT,
   type Emit
 } from "./step-runner.service.js"
 import { gate, GateLimitError, type GateInput } from "./gate.service.js"
-import { BaselineBlockedError } from "./s9/baseline.service.js"
+import { BaselineBlockedError, SIGN_OFF_STEP } from "./s9/baseline.service.js"
 import { resumeProject } from "./resume.service.js"
 import { getProjectById } from "../project/project.service.js"
+import { TemplateProfile } from "../import/template-profile.model.js"
+import { headingsOfStep, templateSectionsByStep } from "../import/template-step-headings.js"
 import { replyLanguageForSessionId } from "../project/reply-language.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
-import { runStepRequestSchema, runPhaseRequestSchema, stepAnswerRequestSchema, gateRequestSchema, cancelRunRequestSchema, type PipelineErrorCode } from "./pipeline.dto.js"
+import { runStepRequestSchema, runPhaseRequestSchema, stepAnswerRequestSchema, gateRequestSchema, cancelRunRequestSchema, runEstimateQuerySchema, reviewModeRequestSchema, skipConfirmSectionsRequestSchema, autoPassedSeenRequestSchema } from "./pipeline.dto.js"
 import { runPhase, resumePhaseInterview, standaloneGate } from "./phase-runner.service.js"
 import { cancelRun, getActiveRun, getRunState, type RunStateDoc } from "./run-state.service.js"
+import { toPipelineErrorCode } from "./pipeline-error-code.js"
+import { runEstimate } from "./run-estimate.js"
+import { listAutoPassed, markAutoPassedSeen } from "./auto-pass.service.js"
+import { applyTransaction } from "../spine/op-engine.js"
+import { parseInput } from "../import/mode1.http.js"
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { clientErrorMessage } from "../../shared/utils/client-error.js"
 import { validationError } from "../../shared/utils/validation-message.js"
 import { assertNotMode1 } from "../import/mode1-guard.js"
-import { AiActionError } from "../../shared/ai/ai-action.types.js"
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
 
@@ -65,6 +71,8 @@ interface Context {
   userId: string
   project: { name: string; domain: string | null }
   mode: string
+  /** FLF-278: `fixed` ⇒ dự án theo mẫu bắt buộc (rail gắn heading của mẫu vào từng bước). */
+  templateIntent: string | null
 }
 
 /** Kiểm quyền sở hữu project trước khi đọc body — người ngoài không dò được DTO qua lỗi 400. */
@@ -75,13 +83,13 @@ const authorize = async (req: Request): Promise<Context> => {
   const projectId = req.params.projectId as string
   if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   const project = await getProjectById(projectId, requireOrgId(req))
-  return { projectId, userId, project: { name: project.name, domain: project.domain ?? null }, mode: project.mode ?? "fpt" }
+  return { projectId, userId, project: { name: project.name, domain: project.domain ?? null }, mode: project.mode ?? "fpt", templateIntent: project.template_intent ?? null }
 }
 
 // ─── GET /steps ──────────────────────────────────────────────────
 
 export const getSteps = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, project } = await authorize(req)
+  const { projectId, project, templateIntent } = await authorize(req)
   // F17: project tạo trước T01 chưa có Spine — tạo rỗng lần đầu đọc, giữ đúng name/domain (như spine.controller.ts).
   const record = await spineRepository.getOrCreate(projectId, { name: project.name, domain: project.domain })
   const spine = stripRecord(record)
@@ -101,6 +109,10 @@ export const getSteps = catchAsync(async (req: Request, res: Response) => {
   // Khoá lượt chạy nằm ở `step_runs` (FLF-177): mỗi dự án nhiều nhất một lượt sống ⇒ một truy vấn cho cả danh sách.
   const activeRun = await getActiveRun(projectId)
 
+  // FLF-278: dự án theo mẫu bắt buộc ⇒ mỗi bước kèm heading của mẫu mà bước đó soạn (rail vẫn theo quy trình FlintFlow)
+  const layout = templateIntent === "fixed" ? ((await TemplateProfile.findOne({ projectId }, { layout: 1 }).lean())?.layout ?? []) : []
+  const headingsByStep = layout.length ? templateSectionsByStep(layout, spine) : null
+
   const steps = defs.map((def) => {
     const state = spine.steps.find((s) => s.id === def.id)
     const stepCounts = counts.get(def.id) ?? { calls_used: 0, regenerate_used: 0 }
@@ -117,36 +129,18 @@ export const getSteps = catchAsync(async (req: Request, res: Response) => {
       regenerate_used: stepCounts.regenerate_used,
       regenerate_limit: REGENERATE_LIMIT_COUNT,
       accepted_at: state?.accepted_at ?? null,
-      running: activeRun?.step_id === def.id
+      running: activeRun?.step_id === def.id,
+      ...(headingsByStep ? { template_sections: headingsOfStep(headingsByStep, def.id) } : {})
     }
   })
 
   // Cùng luật "step tới lượt" với `GET /progress` (pipeline-progress.ts). Trả thẳng con trỏ Spine thì hai
-  // endpoint nói hai chuyện khác nhau ngay sau khi accept: con trỏ còn nằm ở step vừa chốt.
-  // Cùng luật "step tới lượt" với `GET /progress` (pipeline-progress.ts). Trả thẳng con trỏ Spine thì hai
-  // endpoint nói hai chuyện khác nhau ngay sau khi accept: con trỏ còn nằm ở step vừa chốt.
-  return sendSuccess(res, 200, { current_phase: spine.progress.current_phase, current_step: nextStep(spine)?.id ?? null, steps })
+  // endpoint nói hai chuyện khác nhau ngay sau khi accept: con trỏ còn nằm ở step vừa chốt. FLF-432: cả `current_phase`.
+  const next = nextStep(spine)
+  return sendSuccess(res, 200, { current_phase: next?.phase ?? spine.progress.current_phase, current_step: next?.id ?? null, steps })
 })
 
 // ─── POST /steps/:stepId/run (SSE) ─────────────────────────────────
-
-/** F7: lỗi không thuộc bảng mã pipeline vẫn phải đóng luồng bằng một sự kiện `error` (không được im lặng
- *  đóng) — quy về `VALIDATION_ERROR` nếu là lỗi 400 (đầu vào), còn lại quy về `NOT_IMPLEMENTED` (501, đúng
- *  ngữ nghĩa "nhánh chưa hiện thực"/lỗi không rõ trong bảng contract §0.3). */
-const toPipelineErrorCode = (err: unknown): PipelineErrorCode => {
-  // AiActionError (reserve credit, provider) không kế thừa ApiError nhưng cùng dạng {statusCode, code} — vd
-  // INSUFFICIENT_CREDIT giữa chừng trước đây bị quy thành NOT_IMPLEMENTED (M3 2026-09-15).
-  if (err instanceof ApiError || err instanceof AiActionError) {
-    if (isPipelineErrorCode(err.code)) return err.code
-    if (err.statusCode === 400) return "VALIDATION_ERROR"
-    // Lỗi của nhà cung cấp AI có mã riêng (GLM_ERROR, GEMINI_ERROR, GLM_EMPTY_OUTPUT…) không nằm trong bảng
-    // pipeline. Trước đây quy hết về NOT_IMPLEMENTED (501) nên người dùng đọc "chưa hiện thực" trong khi thật ra
-    // endpoint AI hết hạn mức / chưa gắn thanh toán (gặp thật 2026-09-20).
-    if (err.statusCode === 429) return "RATE_LIMIT_EXCEEDED"
-    if (err instanceof AiActionError && err.statusCode >= 500) return "AI_PROVIDER_ERROR"
-  }
-  return "NOT_IMPLEMENTED"
-}
 
 /** Câu cho user của sự kiện SSE `error` — không text thô của provider/thư viện; chi tiết đã `console.error` (FLF-247). */
 const errorMessageOf = (err: unknown): string => clientErrorMessage(err)
@@ -319,6 +313,12 @@ export const answerStep = catchAsync(async (req: Request, res: Response) => {
 
   // FLF-221: `message` = chat tự do khi đang chờ — AI đọc rồi chỉ chốt câu được trả lời đúng ý (tính credit bằng `userId`)
   const payload = { answers: body.answers, ...(body.message === undefined ? {} : { message: body.message }) }
+  // BF §3.2: câu hỏi AI đang chờ **treo ở người khởi động lượt** — người khác không trả lời hộ (họ không có bối cảnh)
+  const waiting = await getRunState(projectId, stepId)
+  if (waiting?.status === "waiting_answer" && waiting.by && waiting.by !== userId) {
+    const who = (await runnerName(waiting.by)) ?? "người khác"
+    throw new ApiError(403, `Câu hỏi này đang treo ở ${who} - chỉ người đó trả lời được.`, "STEP_NOT_REQUESTER")
+  }
   if (submitAnswer(projectId, stepId, body.session_id, payload)) return sendSuccess(res, 200, { accepted: true })
 
   const pending = await pendingAnswerFor(projectId, stepId, body.session_id, payload)
@@ -334,6 +334,11 @@ export const gateStep = catchAsync(async (req: Request, res: Response) => {
   assertNotMode1(mode, "steps") // mode 1 v3: Flow 1 không có step (BPMN)
   const stepId = req.params.stepId as string
   const body = parse(gateRequestSchema, req.body)
+  // Accept ở S-9.5 là ký baseline 1.0 (UC-39) — chỉ Lead; Analyst nộp cho Lead duyệt (UC-38, `POST /baseline/submit`)
+  const signsBaseline = (body.action === "accept" || body.action === "accept_as_is") && getStep(stepId).template_id === SIGN_OFF_STEP
+  if (signsBaseline && req.orgContext?.role !== "lead") {
+    throw new ApiError(403, "Chỉ Lead ký được baseline. Hãy nộp baseline để Lead duyệt.", "ORG_ROLE_FORBIDDEN")
+  }
   await requirePipelineSession(projectId, body.session_id)
 
   const input: GateInput = {
@@ -388,7 +393,16 @@ const isAlive = (doc: RunStateDoc): boolean => {
   if (doc.status === "waiting_answer") return doc.pending_answer != null || new Date(doc.locked_until).getTime() > Date.now()
   return true
 }
-const toRunStateResponse = (doc: RunStateDoc): Record<string, unknown> => ({
+/** Tên hiển thị của người khởi động lượt — "<ai> đang trả lời câu hỏi" (BF §3.2). */
+const runnerName = async (userId: string | null): Promise<string | null> => {
+  if (!userId || !mongoose.isValidObjectId(userId)) return null
+  const user = await User.findById(userId).select("name email").lean()
+  return user?.name || user?.email || null
+}
+
+const toRunStateResponse = async (doc: RunStateDoc): Promise<Record<string, unknown>> => ({
+  by: doc.by,
+  by_name: await runnerName(doc.by),
   step_id: doc.step_id,
   run_id: doc.run_id,
   status: doc.status,
@@ -402,19 +416,81 @@ const toRunStateResponse = (doc: RunStateDoc): Record<string, unknown> => ({
   gate_payload: doc.gate_payload,
   phase_gate: doc.phase_gate,
   events: doc.events,
-  error: doc.error
+  error: doc.error,
+  paused_reason: doc.paused_reason
+})
+
+/**
+ * GET /run-estimate?scope=unit|all&from= — FLF-332: số credit ước tính cho lượt chạy liền sắp tới (thẻ xác nhận credit,
+ * cổng cứng business-flow §1.2) kèm credit khả dụng của ví org.
+ */
+export const getRunEstimate = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, userId, mode } = await authorize(req)
+  assertNotMode1(mode, "steps")
+  const query = runEstimateQuerySchema.parse(req.query)
+  return sendSuccess(res, 200, await runEstimate(projectId, userId, { scope: query.scope, from: query.from ?? null }))
+})
+
+// ─── FLF-337: mức duyệt / không hỏi lại / thay đổi tự qua ─────────
+
+const projectOp = async (projectId: string, userId: string, path: string, value: unknown, reason: string): Promise<number> => {
+  const record = await spineRepository.get(projectId)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
+  const applied = await applyTransaction(projectId, { base_version: record.spine_version, ops: [{ op: "set", path, value }], by: userId, step_id: null, reason })
+  return applied.spine_version
+}
+
+/** PATCH /review-mode — đổi mức duyệt ở mọi mode (mode 1 sau baseline `/changes` bị chặn CHANGE_REQUIRES_CR); áp từ bước / CR kế. */
+export const setReviewMode = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, userId } = await authorize(req)
+  const body = parseInput(reviewModeRequestSchema, req.body)
+  const spine_version = await projectOp(projectId, userId, "project.review_mode", body.review_mode, "[C] đổi mức duyệt")
+  return sendSuccess(res, 200, { review_mode: body.review_mode, spine_version })
+})
+
+/** PATCH /skip-confirm-sections — "Chấp nhận, không hỏi lại phần này" / bật lại. */
+export const patchSkipConfirmSections = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, userId } = await authorize(req)
+  const body = parseInput(skipConfirmSectionsRequestSchema, req.body)
+  const record = await spineRepository.get(projectId)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
+  const next = new Set(record.project.skip_confirm_sections ?? [])
+  for (const id of body.add ?? []) next.add(id)
+  for (const id of body.remove ?? []) next.delete(id)
+  const skip_confirm_sections = [...next]
+  const applied = await applyTransaction(projectId, {
+    base_version: record.spine_version,
+    ops: [{ op: "set", path: "project.skip_confirm_sections", value: skip_confirm_sections }],
+    by: userId,
+    step_id: null,
+    reason: body.add?.length ? "[C] chấp nhận, không hỏi lại phần này" : "[C] hỏi lại phần đã tắt"
+  })
+  return sendSuccess(res, 200, { skip_confirm_sections, spine_version: applied.spine_version })
+})
+
+/** GET /auto-passed — thay đổi AI tự qua kèm "chưa xem" theo người gọi (không chặn gì). */
+export const getAutoPassed = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, userId } = await authorize(req)
+  return sendSuccess(res, 200, await listAutoPassed(projectId, userId))
+})
+
+/** POST /auto-passed/seen — đánh dấu đã xem (`ids` rỗng ⇒ tất cả). */
+export const markAutoPassedSeenController = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, userId } = await authorize(req)
+  const body = parseInput(autoPassedSeenRequestSchema, req.body ?? {})
+  return sendSuccess(res, 200, { unseen: await markAutoPassedSeen(projectId, userId, body.ids ?? []) })
 })
 
 export const getStepRunState = catchAsync(async (req: Request, res: Response) => {
   const { projectId } = await authorize(req)
   const doc = await getRunState(projectId, req.params.stepId as string)
-  return sendSuccess(res, 200, doc ? toRunStateResponse(doc) : null)
+  return sendSuccess(res, 200, doc ? await toRunStateResponse(doc) : null)
 })
 
 export const getActiveRunState = catchAsync(async (req: Request, res: Response) => {
   const { projectId } = await authorize(req)
   const doc = await getActiveRun(projectId)
-  return sendSuccess(res, 200, doc ? toRunStateResponse(doc) : null)
+  return sendSuccess(res, 200, doc ? await toRunStateResponse(doc) : null)
 })
 
 export const cancelStepRun = catchAsync(async (req: Request, res: Response) => {

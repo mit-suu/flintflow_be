@@ -53,6 +53,18 @@ export const FIELD_LABELS: Readonly<Record<string, string>> = {
   role_id: "Vai trò",
   action: "Thao tác",
   flow_to: "Chuyển tới màn",
+  attributes: "Thuộc tính",
+  feature_ids: "Tính năng dùng",
+  states: "Trạng thái",
+  transitions: "Chuyển trạng thái",
+  interactions: "Tương tác actor - hệ thống",
+  component_interactions: "Tương tác giữa các thành phần",
+  activity_nodes: "Bước của luồng xử lý",
+  activity_flows: "Luồng giữa các bước",
+  artifacts: "Artifact triển khai",
+  components: "Component chạy trên nút",
+  protocol: "Giao thức",
+  guard: "Điều kiện rẽ nhánh",
   is_popup: "Là popup",
   tabs: "Tab",
   primary_function_id: "Chức năng chính",
@@ -86,7 +98,12 @@ export const FIELD_LABELS: Readonly<Record<string, string>> = {
   vision: "Tầm nhìn",
   goals: "Mục tiêu",
   domain: "Lĩnh vực",
-  release_scope: "Phạm vi phát hành"
+  release_scope: "Phạm vi phát hành",
+  // Ghi chú Brief (P06: chat từng in "Cập nhật ghi chú: … · target_section")
+  target_section: "Mục trong tài liệu",
+  content_en: "Nội dung tiếng Anh",
+  statement_vi: "Nội dung tiếng Việt",
+  captured_at: "Thời điểm ghi"
 }
 
 export const fieldLabel = (field: string): string => FIELD_LABELS[field] ?? field
@@ -120,7 +137,7 @@ const parsePathLabel = (path: string, entityName?: string): string | null => {
     field = null
   }
   if (entityName && parts[0].selector) out[0] += ` (${entityName})`
-  return field ? `${out.join(" › ")} — ${fieldLabel(field)}` : out.join(" › ")
+  return field ? `${out.join(" › ")} - ${fieldLabel(field)}` : out.join(" › ")
 }
 
 /**
@@ -160,6 +177,33 @@ export const nameElementIds = (text: string, spine: NamedElementSource): string 
     text.slice(Math.max(0, offset - 80), offset).toLowerCase().includes(names.get(id)!.toLowerCase()) ? "" : ` ${quoted(id)}`
   )
   return withoutEcho.replace(new RegExp(`['"‘“]?(?<![\\w.-])(${alt})(?![\\w-]|\\.\\d)['"’”]?`, "g"), (_m, id: string) => quoted(id))
+}
+
+/** Field tên của phần tử, theo thứ tự ưu tiên; phần tử không có tên (quy tắc, thông báo…) thì trích câu chính. */
+const ELEMENT_NAME_FIELDS = ["name", "term", "title"] as const
+const ELEMENT_TEXT_FIELDS = ["statement", "text", "description", "content"] as const
+/** Số ký tự tối đa của câu trích khi phần tử không có tên. */
+const ELEMENT_QUOTE_MAX = 60
+
+const shortQuote = (text: string): string => {
+  const t = text.replace(/\s+/g, " ").trim()
+  return t.length > ELEMENT_QUOTE_MAX ? `${t.slice(0, ELEMENT_QUOTE_MAX).trimEnd()}…` : t
+}
+
+/**
+ * FLF-411 (U2-5): tên phần tử cho câu chữ, không mã nội bộ: `tác nhân "Customer"`, `yêu cầu khác "The system shall…"`,
+ * `use case UC-01` (mã use case là mã tài liệu). `el` = phần tử trong Spine (có thể thiếu); `name` = tên đọc được từ bản
+ * trích (thắng tên trong Spine). Không tên, không câu ⇒ chỉ loại phần tử. Chữ thường ở đầu để đặt giữa câu.
+ */
+export const elementLabel = (entity: string, id: string | null, el?: Record<string, unknown> | null, name?: string | null): string => {
+  if (entity === "project") return ENTITY_LABELS.project
+  const label = (ENTITY_LABELS[entity] ?? "Phần tử").toLowerCase()
+  const text = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null)
+  const own = text(name) ?? ELEMENT_NAME_FIELDS.map((f) => text(el?.[f])).find((x) => x !== null) ?? null
+  if (own) return `${label} "${own}"`
+  if (entity === "use_cases" && id) return `${label} ${id}`
+  const quote = ELEMENT_TEXT_FIELDS.map((f) => text(el?.[f])).find((x) => x !== null)
+  return quote ? `${label} "${shortQuote(quote)}"` : label
 }
 
 // ─── section ─────────────────────────────────────────────────────
@@ -214,14 +258,16 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   render_error: "Lỗi vẽ sơ đồ",
   diagram_stale: "Sơ đồ chưa cập nhật",
   original_diagram_stale: "Hình gốc lệch dữ liệu",
+  original_text_mentions_changed: "Đoạn văn gốc nhắc tới phần đã đổi",
   nfr_missing_number: "Yêu cầu phi chức năng thiếu số đo",
   usecase_relation_invalid: "Quan hệ include/extend không hợp lệ",
   unconfirmed_assumption: "Giả định chưa xác nhận",
   section_stale_at_baseline: "Mục cần xem lại",
   section_awaiting_reaccept: "Mục chờ chấp nhận lại",
   screen_pending_at_baseline: "Màn hình chưa mô tả xong",
-  orphan_screen_at_baseline: "Màn hình không nằm trong luồng nào",
+  orphan_screen_at_baseline: "Màn hình mồ côi (không ai dùng hoặc không nằm trong luồng)",
   orphan_screen: "Màn hình không nằm trong luồng nào",
+  screen_no_actor: "Màn hình chưa có tác nhân nào dùng",
   orphan_actor: "Tác nhân chưa gắn use case",
   usecase_no_function: "Use case chưa gắn chức năng",
   screen_no_function: "Màn hình chưa có chức năng",
@@ -234,16 +280,23 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   usecase_name_style: "Tên use case chưa đúng dạng",
   actor_name_shape: "Tên tác nhân chưa đúng dạng",
   actor_generalization_invalid: "Kế thừa tác nhân không hợp lệ",
+  actor_generalization_children_unlisted: "Mô tả tác nhân tổng quát chưa nêu tác nhân con",
+  actor_generalization_missing: "Thiếu tác nhân tổng quát cho use case dùng chung",
   system_name_missing: "Thiếu tên hệ thống",
   screen_placeholder: "Màn hình còn để trống",
   derived_from_changed_assumption: "Dựa trên giả định đã đổi",
   function_without_uc: "Chức năng chưa thuộc use case nào",
   orphan_entity: "Thực thể tách khỏi ERD",
+  verification_orphan: "Kiểm chứng trỏ yêu cầu không có",
   orphan_entity_at_baseline: "ERD chưa liên kết thành một khối",
   unresolved_many_to_many: "Quan hệ nhiều–nhiều chưa tách thực thể trung gian",
+  template_section_absent: "Mẫu bắt buộc không có mục này",
+  template_section_empty: "Mục của mẫu chưa có nội dung",
   import_semantic: "AI phát hiện vấn đề nội dung",
   import_image_unread: "Ảnh chưa đọc được",
   import_unresolved_ref: "Quyền chưa khớp màn / vai trò",
+  import_needs_review: "Cần xem",
+  import_title_content_mismatch: "Tiêu đề và nội dung khác nhau",
   accepted_as_is: "Chấp nhận nguyên trạng",
   goal_not_covered: "Mục tiêu chưa được đáp ứng",
   cr_consistency: "Chưa nhất quán sau khi sửa",
@@ -258,7 +311,8 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   op_outside_section: "Sửa ngoài phạm vi của vị trí",
   comment_empty: "Comment còn trống",
   op_invalid: "Nội dung sửa sai định dạng",
-  new_red_flag: "Làm phát sinh lỗi đỏ mới"
+  new_red_flag: "Làm phát sinh lỗi đỏ mới",
+  wrong_language: "Viết khác ngôn ngữ tài liệu"
 }
 
 /** Mã lạ ⇒ chuỗi rỗng: câu thông điệp đã đủ nghĩa (như FE). */
@@ -285,6 +339,11 @@ export const DIAGRAM_KIND_LABELS: Readonly<Record<DiagramKind, string>> = {
   usecase: "sơ đồ use case",
   screen_flow: "sơ đồ luồng màn hình",
   erd: "sơ đồ ERD",
+  class: "sơ đồ lớp",
+  state_machine: "sơ đồ trạng thái",
+  sequence: "sơ đồ tuần tự",
+  activity: "sơ đồ hoạt động",
+  deployment: "sơ đồ triển khai",
   screen_layout: "bố cục màn hình"
 }
 

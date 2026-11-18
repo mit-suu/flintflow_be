@@ -12,6 +12,17 @@ describe("relsPathOf", () => {
 })
 
 describe("DocxPackage", () => {
+  it("lưu lại cùng package sau khi hoàn tác DOM không giữ nhầm XML của lần lưu trước", async () => {
+    const pkg = await DocxPackage.load(await makeDocx({ body: p("Original") }))
+    const doc = await pkg.requireXml("word/document.xml")
+    doc.documentElement.setAttribute("data-test", "temporary")
+    const once = await JSZip.loadAsync(await pkg.toBuffer())
+    expect(await once.file("word/document.xml")!.async("string")).toContain('data-test="temporary"')
+    doc.documentElement.removeAttribute("data-test")
+    const reverted = await JSZip.loadAsync(await pkg.toBuffer())
+    expect(await reverted.file("word/document.xml")!.async("string")).not.toContain("data-test")
+  })
+
   it("mở/lưu giữ nguyên part không đụng", async () => {
     const buf = await makeDocx({ body: p("Xin chào"), extraParts: { "word/media/x.bin": "RAW-BYTES" } })
     const pkg = await DocxPackage.load(buf)
@@ -31,6 +42,18 @@ describe("DocxPackage", () => {
     const out = await JSZip.loadAsync(await pkg.toBuffer())
     expect(await out.file("[Content_Types].xml")!.async("string")).toContain(`PartName="/word/extra.xml"`)
     expect(await out.file("word/_rels/document.xml.rels")!.async("string")).toContain(`Target="extra.xml"`)
+  })
+
+  it("giữ TargetMode khi đọc và ghi quan hệ ngoài gói", async () => {
+    const pkg = await DocxPackage.load(await makeDocx({ body: p("a") }))
+    const id = await pkg.addRelationship("word/document.xml", "urn:link", "https://example.com/a", { targetMode: "External" })
+    await pkg.addRelationship("word/document.xml", "urn:t", "x.xml")
+    const reloaded = await DocxPackage.load(await pkg.toBuffer())
+    const rels = await reloaded.relationships("word/document.xml")
+    expect(rels.find((r) => r.id === id)).toMatchObject({ target: "https://example.com/a", targetMode: "External" })
+    expect(rels.find((r) => r.target === "x.xml")).not.toHaveProperty("targetMode")
+    const xml = await (await JSZip.loadAsync(await pkg.toBuffer())).file("word/_rels/document.xml.rels")!.async("string")
+    expect(xml).toContain('TargetMode="External"')
   })
 
   it("addXmlPart trên part đã có trả part cũ", async () => {
@@ -58,6 +81,41 @@ describe("DocxPackage", () => {
     zip.file("big.txt", "a".repeat(10_000))
     const buf = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" })
     await expect(DocxPackage.load(buf, { maxUncompressedBytes: 1000 })).rejects.toMatchObject({ code: "PACKAGE_TOO_LARGE" })
+  })
+
+  it("kích thước giải nén khai man (ghi nhỏ) ⇒ vẫn chặn theo byte thật lúc đọc part", async () => {
+    const zip = new JSZip()
+    zip.file("word/document.xml", `<a>${"a".repeat(50_000)}</a>`)
+    const buf = Buffer.from(await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }))
+    // Ghi đè uncompressed size (offset 24 central directory, 22 local header) thành 10 byte
+    for (const [sig, off] of [[[0x50, 0x4b, 0x01, 0x02], 24], [[0x50, 0x4b, 0x03, 0x04], 22]] as const) {
+      for (let i = buf.indexOf(Buffer.from(sig)); i >= 0; i = buf.indexOf(Buffer.from(sig), i + 4)) buf.writeUInt32LE(10, i + off)
+    }
+    const pkg = await DocxPackage.load(buf, { maxUncompressedBytes: 1000 })
+    await expect(pkg.xml("word/document.xml")).rejects.toMatchObject({ code: "PACKAGE_TOO_LARGE" })
+    await expect(pkg.binary("word/document.xml")).rejects.toMatchObject({ code: "PACKAGE_TOO_LARGE" })
+  })
+
+  it("quá nhiều mục trong gói ⇒ PACKAGE_TOO_LARGE", async () => {
+    const zip = new JSZip()
+    for (let i = 0; i < 6; i++) zip.file(`f${i}.txt`, "x")
+    const buf = await zip.generateAsync({ type: "nodebuffer" })
+    await expect(DocxPackage.load(buf, { maxEntries: 5 })).rejects.toMatchObject({ code: "PACKAGE_TOO_LARGE" })
+  })
+
+  it("part XML có BOM UTF-8 vẫn đọc được", async () => {
+    const zip = new JSZip()
+    zip.file("word/x.xml", Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("<a>b</a>")]))
+    const pkg = await DocxPackage.load(await zip.generateAsync({ type: "nodebuffer" }))
+    expect((await pkg.xml("word/x.xml"))?.documentElement.textContent).toBe("b")
+  })
+
+  it("đọc lại cùng part không cộng dồn byte giải nén", async () => {
+    const zip = new JSZip()
+    zip.file("word/media/a.bin", "b".repeat(600))
+    const pkg = await DocxPackage.load(await zip.generateAsync({ type: "nodebuffer" }), { maxUncompressedBytes: 1000 })
+    expect((await pkg.binary("word/media/a.bin"))?.length).toBe(600)
+    expect((await pkg.binary("word/media/a.bin"))?.length).toBe(600)
   })
 
   it("không phải zip ⇒ lỗi", async () => {

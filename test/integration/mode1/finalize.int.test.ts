@@ -1,11 +1,29 @@
 /**
  * Finalize import (nút 1.9–1.10) ở tầng service trên Mongo thật + provider AI giả — plan §8.2 `finalize.test.ts`.
- * FLF-172 P4: một txn `by: import`; steps / luật "step chưa accept" không bắn cờ; `FieldAnchor`; `DocVersion 0.0`;
+ * FLF-172 P4: một txn `by: import`; steps / luật "step chưa accept" không bắn cờ; `FieldAnchor`; `DocVersion 0.1`;
  * baseline `type: imported`; lỗi giữa chừng không để file mồ côi.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
+// FLF-360: ảnh quá tải giờ được đọc lại thêm vài lượt — giữ đúng logic thử lại trong một lượt gọi (cùng số lần, cùng điều
+// kiện) nhưng không chờ thật 2 s / 6 s, không thì các ca "Gemini quá tải" vượt 30 s
+vi.mock("../../../src/shared/ai/retry.service.js", async (orig) => {
+  const real = await orig<typeof import("../../../src/shared/ai/retry.service.js")>()
+  return {
+    ...real,
+    delay: async () => undefined,
+    executeWithInRequestRetry: async <T>(fn: (attempt: number) => Promise<T>, maxRetries = 2): Promise<T> => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await fn(attempt)
+        } catch (err) {
+          if (attempt >= maxRetries || !real.isTransientError(err)) throw err
+        }
+      }
+    }
+  }
+})
 
 import mongoose from "mongoose"
 import { mockImages, mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
@@ -13,7 +31,7 @@ import { fakeMode1 } from "../../helpers/mode1.js"
 import { importAtBaselining, importAtExtracting, importFinalized } from "../../helpers/mode1-import-p4.js"
 import { finalizeImport } from "../../../src/modules/import/finalize.service.js"
 import { AiActionError } from "../../../src/shared/ai/ai-action.types.js"
-import { patchFields, runExtraction } from "../../../src/modules/import/extract.service.js"
+import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { ExtractionDraft } from "../../../src/modules/import/extraction-draft.model.js"
 import { extractionSummary } from "../../../src/modules/import/import.service.js"
 import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
@@ -32,8 +50,9 @@ import { originalDiagramHash } from "../../../src/modules/spine/original-diagram
 import { assemble, getDocument } from "../../../src/modules/render/assemble.service.js"
 import { downloadVersion, toVersionDto } from "../../../src/modules/doc-version/versions.service.js"
 import { SRS_FIXTURE_TEXT } from "../../../src/modules/import/testing/srs-fixture.js"
-import { buildPlaceholderPng } from "../../../src/modules/render/diagram-placeholder.js"
+import { DIAGRAM_PLACEHOLDER_PNG, buildPlaceholderPng } from "../../../src/modules/render/diagram-placeholder.js"
 import { clearImportMediaCache } from "../../../src/modules/render/import-media.js"
+import { readZipText } from "../../../src/modules/render/zip.test-helper.js"
 
 beforeEach(() => {
   resetMockLlm()
@@ -42,7 +61,14 @@ beforeEach(() => {
 
 const DATA_ROOTS = /^(project|actors|roles|use_cases|features|screens|permissions|entities|functions|nfrs|business_rules|common_requirements|messages|other_requirements|glossary)\b/
 
-describe("finalize — Spine", () => {
+describe("finalize - Spine", () => {
+  it("bug #12b (QLHS 11/11): file ghi \"ký hiệu chân chim\" ⇒ dự án vẽ ERD theo crow's foot; file không ghi ⇒ không ghi field (chưa chọn, vẽ theo chen)", async () => {
+    const stated = await importFinalized({ srs: { overviewParagraphs: ["H7 · ERD (ký hiệu chân chim): vạch ngang = phía 1, chân chim = phía nhiều."] } })
+    expect((await Project.findById(stated.projectId).lean())?.erdNotation).toBe("crowsfoot")
+    const silent = await importFinalized()
+    expect((await Project.findById(silent.projectId).lean())?.erdNotation).toBeUndefined()
+  })
+
   it("mọi field đã xác nhận ghi trong MỘT transaction by import, lý do có tên file", async () => {
     const { projectId, result, baseVersionBefore } = await importFinalized()
     const changes = await spineRepository.listChanges(projectId)
@@ -57,42 +83,50 @@ describe("finalize — Spine", () => {
     expect(result.spine_version).toBeGreaterThan(baseVersionBefore)
   })
 
-  it("kế hoạch step (FLF-183): steps[] seed theo template; không cờ stale/awaiting — step accepted có last_seq của lô import", async () => {
+  it("kế hoạch step (FLF-183): steps[] seed theo template; không cờ stale/awaiting - step accepted có last_seq của lô import", async () => {
     const { projectId } = await importFinalized()
     const spine = (await spineRepository.get(projectId))!
-    // Mode 1 v2: step sở hữu section có nội dung ⇒ accepted; đầu mục FPT thiếu ⇒ pending; Brief ⇒ skipped
+    // Step sở hữu section có nội dung ⇒ accepted; đầu mục FPT file không có ⇒ skipped như Brief (FLF-312 — mẫu FPT không bắt buộc)
     const status = (id: string) => spine.steps.find((s) => s.id === id)?.status
     expect(status("B-0.1")).toBe("skipped")
     expect(status("S-1.1")).toBe("skipped")
     expect(status("S-3.1")).toBe("accepted")
     const plan = (await TemplateProfile.findOne({ projectId }).lean())!.step_plan
-    const missing = plan.filter((p) => p.state === "applied" && p.missing)
-    expect(missing.length).toBeGreaterThan(0)
-    for (const p of missing) expect(status(p.step_id), p.step_id).toBe("pending")
-    for (const p of plan.filter((x) => x.state === "applied" && !x.missing && x.section_ids.length)) expect(status(p.step_id), p.step_id).toBe("accepted")
+    // file mẫu không có Screens Flow (3.1.1) ⇒ step sở hữu nó ẩn, không "thiếu"
+    expect(plan.find((p) => p.section_ids.includes("fixed:3.1.1"))?.state).toBe("hidden")
+    expect(plan.every((p) => !("missing" in p))).toBe(true)
+    for (const p of plan.filter((x) => x.state === "enabled")) expect(status(p.step_id), p.step_id).toBe("pending")
+    for (const p of plan.filter((x) => x.state === "applied" && x.section_ids.length)) expect(status(p.step_id), p.step_id).toBe("accepted")
     for (const p of plan.filter((x) => x.state === "hidden")) expect(status(p.step_id), p.step_id).toBe("skipped")
-    expect(spine.progress.current_step).not.toBeNull()
-    expect(status(spine.progress.current_step!)).toBe("pending")
+    if (spine.progress.current_step) expect(status(spine.progress.current_step)).toBe("pending")
     const stepRules = ["section_stale_at_baseline", "section_awaiting_reaccept", "screen_pending_at_baseline"]
     expect(spine.flags.filter((f) => stepRules.includes(f.rule_id))).toEqual([])
     // màn trích từ tài liệu không ở trạng thái chờ mô tả chi tiết của mode 2
     expect(spine.screens.every((s) => s.detail_status !== "pending")).toBe(true)
   })
 
-  it("chỉ field đã xác nhận / độ tin ≥ 0.7 vào Spine: field bị bỏ ở bước 1.9 không có mặt", async () => {
-    const { projectId, importId, userId } = await importAtBaselining()
-    // import helper đã confirm_all; tạo lại tình huống: xoá trigger đã xác nhận của FR-3.2.1 khỏi draft
-    await ExtractionDraft.updateMany({ import_id: importId }, { $pull: { fields: { path: "functions[id=FR-3.2.1].trigger" } } })
+  it("FLF-343: field độ tin thấp chưa xác nhận KHÔNG bị bỏ - vào Spine kèm đúng một cờ vàng Cần xem / phần tử (FLF-411 U2-5, mang đường dẫn phần tử); mapping tự nhận cũng có cờ", async () => {
+    const { projectId, importId, userId } = await importAtBaselining({ srs: { numberedOnly: true } })
     const before = (await spineRepository.get(projectId))!
     await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
     const spine = (await spineRepository.get(projectId))!
-    expect(spine.functions.find((f) => f.id === "FR-3.2.1")?.trigger ?? "").toBe("")
-    expect(spine.functions.find((f) => f.id === "FR-3.2.2")?.trigger).toBe("Learner submits the form")
+    expect(spine.functions.map((f) => f.trigger)).toEqual(["Learner submits the form", "Learner submits the form"])
+    const review = spine.flags.filter((f) => f.rule_id === "import_needs_review" && f.resolved_at === null)
+    const fieldFlags = review.filter((f) => f.target_id?.startsWith("functions["))
+    expect(fieldFlags.map((f) => f.target_id).sort()).toEqual(["functions[id=FR-3.2.1]", "functions[id=FR-3.2.2]"])
+    expect(fieldFlags.every((f) => f.level === "yellow" && f.message.startsWith("Cần xem:") && f.section_id.startsWith("function:FR-3.2."))).toBe(true)
+    // heading không style (độ tin 0.75) ⇒ mỗi heading tự nhận một cờ, target = block heading
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    const auto = profile.heading_map.filter((h) => h.auto_confirmed)
+    expect(auto.length).toBeGreaterThan(0)
+    for (const h of auto) expect(review.filter((f) => f.target_id === h.block_id), h.heading_text).toHaveLength(1)
+    // recompute tất định không đóng cờ do import đặt
+    expect(review.length).toBe(fieldFlags.length + auto.length + profile.table_map.filter((t) => t.auto_confirmed && t.field_path).length)
   })
 })
 
-describe("finalize — FieldAnchor, block, profile", () => {
-  it("mỗi thực thể (trừ project) có FieldAnchor trỏ vào block có thật của version 0.0", async () => {
+describe("finalize - FieldAnchor, block, profile", () => {
+  it("mỗi thực thể (trừ project) có FieldAnchor trỏ vào block có thật của version 0.1", async () => {
     const { projectId } = await importFinalized()
     const spine = (await spineRepository.get(projectId))!
     const anchors = await FieldAnchor.find({ projectId }).lean()
@@ -110,7 +144,7 @@ describe("finalize — FieldAnchor, block, profile", () => {
     for (const p of expected) expect(paths.has(p), p).toBe(true)
     expect([...paths].some((p) => p.startsWith("project"))).toBe(false)
 
-    const blockIds = new Set((await DocBlock.find({ projectId, doc_version: "0.0" }).select("block_id").lean()).map((b) => b.block_id))
+    const blockIds = new Set((await DocBlock.find({ projectId, doc_version: "0.1" }).select("block_id").lean()).map((b) => b.block_id))
     for (const a of anchors) {
       expect(a.block_ids.length, a.entity_path).toBeGreaterThan(0)
       for (const b of a.block_ids) expect(blockIds.has(b), `${a.entity_path} → ${b}`).toBe(true)
@@ -132,26 +166,26 @@ describe("finalize — FieldAnchor, block, profile", () => {
   })
 })
 
-describe("finalize — DocVersion 0.0 + baseline imported", () => {
-  it("DocVersion 0.0 kind imported: original_ref = bản gốc + stamp + bookmark; file_ref = bản render từ Spine + stamp (FLF-184); trỏ baseline imported", async () => {
+describe("finalize - DocVersion 0.1 + baseline imported", () => {
+  it("DocVersion 0.1 kind imported: original_ref = bản gốc + stamp + bookmark; file_ref = bản render từ Spine + stamp (FLF-184); trỏ baseline imported", async () => {
     const { projectId, result, userId } = await importFinalized()
     const versions = await DocVersion.find({ projectId }).lean()
     expect(versions).toHaveLength(1)
     const v = versions[0]
-    expect(v).toMatchObject({ version: "0.0", kind: "imported", based_on: null, cr_ids: [], baseline_ref: result.baseline.id })
+    expect(v).toMatchObject({ version: "0.1", kind: "imported", based_on: null, cr_ids: [], baseline_ref: result.baseline!.id })
     expect(String(v.created_by)).toBe(userId)
     expect(v.original_ref).toBeTruthy()
     expect(v.original_ref).not.toBe(v.file_ref)
 
     const original = await DocxPackage.load(await docFileStore().load(v.original_ref!))
-    expect(await readStamp(original)).toEqual({ project_id: projectId, version: "0.0", source: "import" })
+    expect(await readStamp(original)).toEqual({ project_id: projectId, version: "0.1", source: "import", base_version: null, latest_cr: null, kind: null })
     const fileBlocks = await readBlocks(original)
-    const stored = await DocBlock.find({ projectId, doc_version: "0.0" }).sort({ "anchor.ordinal": 1 }).lean()
+    const stored = await DocBlock.find({ projectId, doc_version: "0.1" }).sort({ "anchor.ordinal": 1 }).lean()
     expect(fileBlocks.map((b) => b.text)).toEqual(stored.map((b) => b.text))
     for (const b of fileBlocks.filter((x) => x.bookmark)) expect(stored.some((s) => s.block_id === blockIdOfBookmark(b.bookmark))).toBe(true)
 
     const rendered = await DocxPackage.load(await docFileStore().load(v.file_ref))
-    expect(await readStamp(rendered)).toEqual({ project_id: projectId, version: "0.0", source: "import" })
+    expect(await readStamp(rendered)).toEqual({ project_id: projectId, version: "0.1", source: "import", base_version: null, latest_cr: null, kind: null })
     const texts = (await readBlocks(rendered)).map((b) => b.text)
     // Bản render mang nội dung Spine (không phải bản sao file gốc), tiêu đề theo file người dùng
     expect(texts).toContain("1 Product Overview")
@@ -159,21 +193,38 @@ describe("finalize — DocVersion 0.0 + baseline imported", () => {
     expect(texts.some((t) => t.endsWith("Team Notes"))).toBe(true)
   })
 
-  it("tải 0.0: mặc định bản render + DRAFT; variant=original ⇒ file gốc (tên _original); version không có file gốc ⇒ 404", async () => {
+  it("tải 0.1: mặc định bản render + DRAFT; variant=original ⇒ file gốc (tên _original); version không có file gốc ⇒ 404", async () => {
     const { projectId } = await importFinalized()
-    const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
-    const rendered = await downloadVersion(projectId, "Lumen", "0.0", "auto")
-    expect(rendered.filename).toBe(`Lumen_${projectId}_v0.0_DRAFT.docx`) // 6.3: tên file có mã project
+    const v = (await DocVersion.findOne({ projectId, version: "0.1" }).lean())!
+    const rendered = await downloadVersion(projectId, "Lumen", "0.1", "auto")
+    expect(rendered.filename).toBe("Lumen_v0.1_DRAFT.docx") // FLF-334: không mã project (máy đọc stamp); FLF-356: chưa release ⇒ số bản import
+    expect(await readStamp(await DocxPackage.load(rendered.data))).toEqual({ project_id: projectId, version: "0.1", source: "import", base_version: "0.1", latest_cr: null, kind: "draft" })
     expect((await readBlocks(await DocxPackage.load(rendered.data))).some((b) => b.text === "1 Product Overview")).toBe(true)
-    const original = await downloadVersion(projectId, "Lumen", "0.0", "original")
-    expect(original.filename).toBe(`Lumen_${projectId}_v0.0_original.docx`)
+    const original = await downloadVersion(projectId, "Lumen", "0.1", "original")
+    expect(original.filename).toBe("Lumen_v0.1_original.docx")
     expect(original.data.equals(await docFileStore().load(v.original_ref!))).toBe(true)
-    expect(toVersionDto(v as never)).toMatchObject({ version: "0.0", has_original_file: true })
+    expect(toVersionDto(v as never, { mode: "import" })).toMatchObject({ version: "0.1", has_original_file: true })
     await DocVersion.updateOne({ _id: v._id }, { $set: { original_ref: null } })
-    await expect(downloadVersion(projectId, "Lumen", "0.0", "original")).rejects.toMatchObject({ code: "DOC_VERSION_NOT_FOUND" })
+    await expect(downloadVersion(projectId, "Lumen", "0.1", "original")).rejects.toMatchObject({ code: "DOC_VERSION_NOT_FOUND" })
   })
 
-  it("DoD V2: bản làm việc ghép sẵn theo layout — thứ tự + tiêu đề như file gốc, mục FPT thiếu chèn cạnh nhóm, mục ngoài FPT giữ nguyên văn", async () => {
+  it("FLF-344: tải 0.1 ⇒ mục lục ghi sẵn đủ mọi heading cấp 1–3 theo thứ tự, mỗi dòng trỏ tới bookmark của heading đó", async () => {
+    const { projectId } = await importFinalized()
+    const rendered = await downloadVersion(projectId, "Lumen", "0.1", "auto")
+    const pkg = await DocxPackage.load(rendered.data)
+    const xml = readZipText(rendered.data, "word/document.xml")
+    const toc = /<w:sdt>[\s\S]*?<\/w:sdt>/.exec(xml)?.[0] ?? ""
+    expect(toc).toMatch(/TOC [^<]*\\o (&quot;|")1-3(&quot;|")/)
+    const lines = [...toc.matchAll(/<w:hyperlink [^>]*w:anchor="([^"]+)"[\s\S]*?<w:t[^>]*>([^<]*)<\/w:t>/g)].map((m) => ({ anchor: m[1], title: m[2] }))
+    // Dòng mục lục không thành nội dung khi đọc lại; heading cấp 1–3 của file = đúng các dòng mục lục, cùng thứ tự
+    const headings = (await readBlocks(pkg)).filter((b) => b.kind === "heading" && (b.level ?? 9) <= 3).map((b) => b.text)
+    expect(lines.length).toBeGreaterThan(5)
+    expect(lines.map((l) => l.title)).toEqual(headings)
+    expect(lines.map((l) => l.title)).toContain("1 Product Overview")
+    for (const { anchor } of lines) expect(xml).toMatch(new RegExp(`<w:bookmarkStart [^>]*w:name="${anchor}"`))
+  })
+
+  it("DoD V2: bản làm việc ghép sẵn theo layout - thứ tự + tiêu đề như file gốc, mục FPT thiếu chèn cạnh nhóm, mục ngoài FPT giữ nguyên văn", async () => {
     const { projectId } = await importFinalized()
     const doc = await getDocument(projectId, "Lumen", { source: "draft" })
     const layout = (await TemplateProfile.findOne({ projectId }).lean())!.layout.filter((l) => l.heading_text)
@@ -250,14 +301,17 @@ describe("finalize — DocVersion 0.0 + baseline imported", () => {
     expect(table.rows.map((r) => r.map((c) => c.map((x) => x.text).join(""))[2])).toEqual(["Nightly Sync Job"])
   })
 
-  it("FLF-252: mục chức năng in theo file gốc — chưa sửa ⇒ đúng nguyên văn file; change request sửa chức năng ⇒ in từ Spine", async () => {
+  it("FLF-252: mục chức năng in theo file gốc - chưa sửa ⇒ đúng nguyên văn file; change request sửa chức năng ⇒ in từ Spine", async () => {
     const { projectId } = await importFinalized()
     const profile = (await TemplateProfile.findOne({ projectId }).lean())!
     const login = profile.function_originals.find((o) => o.section_id === "function:FR-3.2.2")!
+    // FLF-361: chữ từng trường lúc import; khối chỉ gắn phần tử khi chữ khớp — model giả trả "Wrong password", khác chữ file
+    // ("Show an error when the password is wrong.") ⇒ không gắn ⇒ CR sửa chức năng thì dựng lại cả mục (không giữ chữ cũ)
     expect(login.blocks).toEqual([
       { kind: "paragraph", text: SRS_FIXTURE_TEXT.loginNormal, rows: null, image_ref: null },
       { kind: "list_item", text: "Show an error when the password is wrong.", rows: null, image_ref: null }
     ])
+    expect(login.field_values).toEqual(expect.objectContaining({ trigger: ["Learner submits the form"], abnormal: ["Wrong password"] }))
     const sectionOf = async () => (await getDocument(projectId, "Lumen", { source: "draft" })).sections.find((s) => s.id === "function:FR-3.2.2")!
     expect((await sectionOf()).blocks).toEqual([
       { type: "paragraph", runs: [{ text: SRS_FIXTURE_TEXT.loginNormal }] },
@@ -278,6 +332,34 @@ describe("finalize — DocVersion 0.0 + baseline imported", () => {
     expect(JSON.stringify((await sectionOf()).blocks)).toContain("Learner clicks Sign in")
   })
 
+  it("FLF-366: mục FPT in theo đoạn của file - chưa sửa ⇒ nguyên văn (bảng BR đúng tiêu đề cột của file); CR sửa BR ⇒ chỉ đoạn đó in từ Spine", async () => {
+    const { projectId } = await importFinalized({ srs: { extraRules: [["BR-02", "Accounts lock after 5 failed logins."]] } })
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    const rules = profile.section_segments.find((r) => r.section_id === "fixed:5.1")!
+    expect(rules.parts.some((p) => p.kind === "spine" && p.items.includes("business_rules:BR-01"))).toBe(true)
+    const draft = async () => new Map((await getDocument(projectId, "Lumen", { source: "draft" })).sections.map((s) => [s.id, s]))
+    const before = await draft()
+    const header = (b: unknown) => ((b as { header?: { text: string }[][] }).header ?? []).map((c) => c.map((r) => r.text).join(""))
+    expect(before.get("fixed:5.1")!.blocks.map((b) => b.type)).toEqual(["table"])
+    expect(header(before.get("fixed:5.1")!.blocks[0])).toEqual(["BR ID", "Business Rule"])
+    expect(before.get("fixed:1")!.blocks[0]).toEqual({ type: "paragraph", runs: [{ text: SRS_FIXTURE_TEXT.purpose }] })
+
+    const spine = (await spineRepository.get(projectId))!
+    const applied = await applyTransaction(projectId, {
+      base_version: spine.spine_version,
+      ops: [{ op: "set", path: "business_rules[id=BR-01].statement", value: "Passwords must have at least 10 characters." }],
+      by: "CR-001",
+      reason: "test",
+      step_id: null
+    })
+    await assemble(projectId, "Lumen", applied.spine_version)
+    const after = await draft()
+    expect(JSON.stringify(after.get("fixed:5.1")!.blocks)).toContain("at least 10 characters")
+    // FLF-375: bảng dựng lại từ Spine vẫn mang đúng tiêu đề cột của bảng trong file (không đổi sang cột FlintFlow)
+    expect(header(after.get("fixed:5.1")!.blocks[0])).toEqual(["BR ID", "Business Rule"])
+    for (const id of ["fixed:1", "fixed:2.1", "fixed:2.2.2", "fixed:4.2.3"]) expect(after.get(id)?.blocks).toEqual(before.get(id)?.blocks)
+  })
+
   it("FLF-184: văn xuôi I-4 báo không trích được ⇒ giữ nguyên văn ở đầu section chủ khi render từ Spine", async () => {
     mockOverrides.next = (prompt: string) => {
       const out = fakeMode1(prompt)
@@ -291,21 +373,21 @@ describe("finalize — DocVersion 0.0 + baseline imported", () => {
     expect(diagram.blocks[0]).toEqual({ type: "paragraph", runs: [{ text: "The diagram shows UC-01 and UC-02." }] })
   })
 
-  it("baseline type imported, doc_version 0.0, có snapshot Spine; import sang gap_review", async () => {
+  it("baseline type imported, doc_version 0.1, có snapshot Spine; import sang gap_review", async () => {
     const { projectId, result, importId } = await importFinalized()
-    expect(result.baseline).toMatchObject({ version: "0.0", type: "imported", doc_version: "0.0" })
+    expect(result.baseline).toMatchObject({ version: "0.1", type: "imported", doc_version: "0.1" })
     const spine = (await spineRepository.get(projectId))!
     expect(spine.baselines).toHaveLength(1)
-    expect(spine.baselines[0]).toMatchObject({ id: result.baseline.id, type: "imported", doc_version: "0.0" })
+    expect(spine.baselines[0]).toMatchObject({ id: result.baseline!.id, type: "imported", doc_version: "0.1" })
     const snap = await Baseline.findById(spine.baselines[0].snapshot_ref).lean()
-    expect(snap).toMatchObject({ type: "imported", doc_version: "0.0" })
+    expect(snap).toMatchObject({ type: "imported", doc_version: "0.1" })
     expect((snap as unknown as { snapshot: { actors: unknown[] } }).snapshot.actors).toHaveLength(2)
     expect((await ImportedDocument.findById(importId).lean())?.status).toBe("gap_review")
     expect((await Project.findById(projectId).lean())?.import_state).toBe("gap_review")
   })
 })
 
-describe("finalize — lỗi", () => {
+describe("finalize - lỗi", () => {
   it("base_version lệch ⇒ 409 SPINE_VERSION_CONFLICT, không tạo gì", async () => {
     const { projectId, userId, importId } = await importAtBaselining()
     await expect(finalizeImport(projectId, userId, { import_id: importId, base_version: 999 })).rejects.toMatchObject({ statusCode: 409 })
@@ -320,7 +402,7 @@ describe("finalize — lỗi", () => {
     await expect(finalizeImport(projectId, userId, { import_id: importId, base_version: v })).rejects.toMatchObject({ code: "IMPORT_INVALID_STATE" })
   })
 
-  it("Spine đổi giữa lúc ghi file và áp lô ⇒ lô bị từ chối, file 0.0 đã lưu bị xoá (không mồ côi), chạy lại được", async () => {
+  it("Spine đổi giữa lúc ghi file và áp lô ⇒ lô bị từ chối, file 0.1 đã lưu bị xoá (không mồ côi), chạy lại được", async () => {
     const { projectId, userId, importId } = await importAtBaselining()
     const memory = createMemoryDocFileStore()
     const real = docFileStore()
@@ -351,34 +433,35 @@ describe("finalize — lỗi", () => {
     // chạy lại với version mới ⇒ thành công
     const v2 = (await spineRepository.get(projectId))!.spine_version
     const again = await finalizeImport(projectId, userId, { import_id: importId, base_version: v2 })
-    expect(again.baseline.type).toBe("imported")
+    expect(again.baseline!.type).toBe("imported")
   })
 })
 
-describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 phase 5)", () => {
+describe("ảnh - giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 phase 5)", () => {
   const PNG = buildPlaceholderPng(12, 7, 0x40)
   const EMF = Buffer.from([0x01, 0x00, 0x00, 0x00, 0x6c, 0x00, 0x00, 0x00, 0, 0, 0, 0])
   const srs = { images: [{ name: "image1.png", data: PNG }, { name: "image2.emf", data: EMF }] }
 
   beforeEach(() => clearImportMediaCache())
 
-  it("ảnh dưới mục FPT ⇒ block image_ref ⇒ phần nối nguyên văn của mục; bản render 0.0 nhúng lại đúng bytes PNG, EMF ⇒ chỗ giữ ảnh có lý do", async () => {
+  it("ảnh dưới mục FPT ⇒ block image_ref ⇒ phần nối nguyên văn của mục; bản render 0.1 nhúng lại đúng bytes PNG, EMF ⇒ chỗ giữ ảnh trống", async () => {
     const { projectId } = await importFinalized({ srs })
-    const blocks = await DocBlock.find({ projectId, doc_version: "0.0", kind: "image" }).lean()
+    const blocks = await DocBlock.find({ projectId, doc_version: "0.1", kind: "image" }).lean()
     expect(blocks.map((b) => b.image_ref).sort()).toEqual(["word/media/image1.png", "word/media/image2.emf"])
 
     const spine = (await spineRepository.get(projectId))!
     const refs = spine.custom_sections.flatMap((c) => c.blocks.filter((b) => b.kind === "image").map((b) => b.image_ref))
     expect(refs.sort()).toEqual(["word/media/image1.png", "word/media/image2.emf"])
 
-    const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
+    const v = (await DocVersion.findOne({ projectId, version: "0.1" }).lean())!
     const rendered = await DocxPackage.load(await docFileStore().load(v.file_ref))
     const media = await Promise.all(
       rendered.partNames().filter((n) => n.startsWith("word/media/")).map(async (n) => (await rendered.binary(n))!)
     )
     expect(media.some((m) => m.equals(PNG))).toBe(true)
     const texts = (await readBlocks(rendered)).map((b) => b.text)
-    expect(texts.some((t) => t.includes("original image could not be embedded (unsupported format)"))).toBe(true)
+    // FLF-411 U1-7: EMF ⇒ chỗ giữ ảnh trống, không in câu kỹ thuật vào tài liệu
+    expect(texts.some((t) => t.includes("could not be embedded") || t.includes("không nhúng được"))).toBe(false)
     // không in đường dẫn file ảnh trong tài liệu
     expect(texts.some((t) => t.includes("word/media/"))).toBe(false)
 
@@ -396,7 +479,7 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     expect(imageText).not.toMatch(/word\/media|\[image\]|B\d{4}/)
   })
 
-  it("I-4 đọc ảnh use case: origin vision, độ tin ≤ 0.7 ⇒ luôn qua 1.9; lượt gọi có ảnh + chú thích", async () => {
+  it("I-4 đọc ảnh use case: origin vision, độ tin ≤ 0.7 ⇒ luôn đếm là cần xem (FLF-343: không dừng); lượt gọi có ảnh + chú thích", async () => {
     const { projectId, userId, importId } = await importAtExtracting({ srs: { images: [{ name: "image1.png", data: PNG, caption: "Figure 1 USECASE-IMG" }] } })
     const prompts: string[] = []
     mockOverrides.next = (prompt) => {
@@ -404,7 +487,7 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
       return fakeMode1(prompt)
     }
     const run = await runExtraction(projectId, userId, importId)
-    expect(run.doc.status).toBe("fields_review")
+    expect(run.doc.status).toBe("baselining")
     const draft = (await ExtractionDraft.findOne({ import_id: importId, section_id: "fixed:2.2.1" }).lean())!
     expect(draft.diagram_images).toEqual([{ block_id: expect.stringMatching(/^B\d+$/), kind: "usecase" }])
     const guest = draft.fields.filter((f) => f.origin === "vision")
@@ -485,7 +568,6 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     )
     expect(fields.filter((f) => f.origin === "vision").every((f) => f.confidence <= 0.7)).toBe(true)
 
-    await patchFields(projectId, { import_id: importId, fields: [], confirm_all: true })
     const before = (await spineRepository.get(projectId))!
     await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
     const spine = (await spineRepository.get(projectId))!
@@ -506,7 +588,7 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     const images = spine.custom_sections.flatMap((c) => c.blocks).filter((b) => b.kind === "image")
     expect(images).toEqual([expect.objectContaining({ image_ref: "word/media/image1.png", diagram: { kind: "usecase", source_hash: originalDiagramHash(spine, "usecase") } })])
     expect(spine.flags.filter((f) => f.rule_id === "import_image_unread" || f.rule_id === "original_diagram_stale")).toEqual([])
-    const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
+    const v = (await DocVersion.findOne({ projectId, version: "0.1" }).lean())!
     const rendered = await DocxPackage.load(await docFileStore().load(v.file_ref))
     const media = await Promise.all(rendered.partNames().filter((n) => n.startsWith("word/media/")).map(async (n) => (await rendered.binary(n))!))
     expect(media.some((m) => m.equals(PNG))).toBe(true)
@@ -537,7 +619,7 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     fail = false
     const again = await runExtraction(projectId, userId, importId)
     expect(again.doc.paused).toBeNull()
-    expect(again.doc.status).toBe("fields_review")
+    expect(again.doc.status).toBe("baselining")
   })
 
   it("đọc ảnh lỗi sau mọi lượt thử (Gemini quá tải cả model dự phòng) ⇒ I-4 không dừng: giữ ảnh gốc + cờ vàng nói rõ lý do", async () => {
@@ -546,12 +628,28 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
       prompt.includes("# Read Diagram Image") ? new AiActionError(503, "high demand (đã thử gemini-3.5-flash, gemini-3.6-flash, gemini-3.5-flash-lite)", "GEMINI_OVERLOADED") : fakeMode1(prompt)
     const run = await runExtraction(projectId, userId, importId)
     expect(run.doc.paused).toBeNull()
-    expect(run.doc.status).toBe("fields_review")
+    expect(run.doc.status).toBe("baselining")
     const draft = (await ExtractionDraft.findOne({ import_id: importId, section_id: "fixed:2.2.1" }).lean())!
     expect(draft.diagram_images.map((i) => i.kind)).toEqual(["unavailable"])
   })
 
-  it("FLF-252: ảnh không đọc được + quyền không khớp màn trong cùng lần nhập ⇒ hai cờ vàng khác id, tạo được bản 0.0 (trước đây trùng id ⇒ cả lô bị từ chối)", async () => {
+  it("FLF-361: ảnh sơ đồ ở 2.2.1 chưa đọc được (AI quá tải) ⇒ vẫn đánh dấu sơ đồ gốc use case: đoạn 2.2.1 ghi loại sơ đồ, không in PlantUML use case; cờ vàng ảnh vẫn còn", async () => {
+    const { projectId, userId, importId } = await importAtExtracting({ srs: { images: [{ name: "image1.png", data: PNG, caption: "Use Cases - Learner USECASE-IMG" }] } })
+    mockOverrides.next = (prompt) => (prompt.includes("# Read Diagram Image") ? new AiActionError(503, "high demand", "GEMINI_OVERLOADED") : fakeMode1(prompt))
+    await runExtraction(projectId, userId, importId)
+    mockOverrides.next = fakeMode1
+    const before = (await spineRepository.get(projectId))!
+    await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
+    const spine = (await spineRepository.get(projectId))!
+    const images = spine.custom_sections.flatMap((c) => c.blocks).filter((b) => b.kind === "image")
+    expect(images).toEqual([expect.objectContaining({ image_ref: "word/media/image1.png", diagram: expect.objectContaining({ kind: "usecase" }) })])
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    const seg = profile.section_segments.find((r) => r.section_id === "fixed:2.2.1")!
+    expect(seg.parts.flatMap((p) => (p.kind === "original" ? p.diagrams.map((d) => d.kind) : []))).toEqual(["usecase"])
+    expect(spine.flags.filter((f) => f.rule_id === "import_image_unread")).toHaveLength(1)
+  })
+
+  it("FLF-252: ảnh không đọc được + quyền không khớp màn trong cùng lần nhập ⇒ hai cờ vàng khác id, tạo được bản 0.1 (trước đây trùng id ⇒ cả lô bị từ chối)", async () => {
     const { projectId, userId, importId } = await importAtExtracting({ srs: { images: [{ name: "image1.png", data: PNG, caption: "USECASE-IMG" }] } })
     mockOverrides.next = (prompt) => (prompt.includes("# Read Diagram Image") ? new AiActionError(503, "high demand", "GEMINI_OVERLOADED") : fakeMode1(prompt))
     const run = await runExtraction(projectId, userId, importId)
@@ -572,7 +670,7 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
         }
       }
     )
-    if (run.doc.status === "fields_review") await patchFields(projectId, { import_id: importId, fields: [], confirm_all: true })
+    expect(run.doc.status).toBe("baselining")
     const before = (await spineRepository.get(projectId))!
     await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
 
@@ -581,7 +679,7 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     expect(flags.map((f) => f.rule_id).sort()).toEqual(["import_image_unread", "import_unresolved_ref"])
     expect(new Set(flags.map((f) => f.id)).size).toBe(2)
     expect(flags.find((f) => f.rule_id === "import_unresolved_ref")!.message).toContain('"Sell Statistics"')
-    expect(await DocVersion.countDocuments({ projectId, version: "0.0" })).toBe(1)
+    expect(await DocVersion.countDocuments({ projectId, version: "0.1" })).toBe(1)
   })
 
   it("file gốc không còn ⇒ render vẫn chạy, ảnh thành chỗ giữ ảnh", async () => {
@@ -589,6 +687,31 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     await ImportedDocument.updateMany({ projectId }, { $set: { file_ref: null } })
     clearImportMediaCache()
     const doc = await getDocument(projectId, "Lumen", { source: "draft" })
-    expect(JSON.stringify(doc)).toContain("original image could not be embedded (unsupported format)")
+    expect(JSON.stringify(doc)).toContain(DIAGRAM_PLACEHOLDER_PNG)
+    expect(JSON.stringify(doc)).not.toContain("could not be embedded")
+  })
+})
+
+describe("finalize - tương thích bản gốc cũ 0.0 (FLF-284)", () => {
+  it("import đang dở có block gắn 0.0 ⇒ finalize vẫn thấy block, tạo bản gốc mới 0.1", async () => {
+    const ctx = await importAtBaselining()
+    await DocBlock.updateMany({ projectId: ctx.projectId }, { $set: { doc_version: "0.0" } })
+    const before = (await spineRepository.get(ctx.projectId))!
+    const result = await finalizeImport(ctx.projectId, ctx.userId, { import_id: ctx.importId, base_version: before.spine_version })
+    expect(result.baseline).toMatchObject({ version: "0.1", type: "imported" })
+    expect(await DocVersion.countDocuments({ projectId: ctx.projectId, version: "0.1" })).toBe(1)
+    expect(await DocBlock.countDocuments({ projectId: ctx.projectId })).toBeGreaterThan(0)
+  })
+
+  it("project cũ đã có bản gốc 0.0 ⇒ vẫn đọc DTO và tải về bình thường", async () => {
+    const { projectId } = await importFinalized()
+    await DocVersion.updateMany({ projectId }, { $set: { version: "0.0" } })
+    await Baseline.updateMany({ projectId }, { $set: { version: "0.0", doc_version: "0.0" } })
+    const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
+    expect(toVersionDto(v as never, { mode: "import" })).toMatchObject({ version: "0.0", kind: "imported", has_original_file: true })
+    const rendered = await downloadVersion(projectId, "Lumen", "0.0", "auto")
+    expect(rendered.filename).toBe("Lumen_v0.0_DRAFT.docx")
+    const original = await downloadVersion(projectId, "Lumen", "0.0", "original")
+    expect(original.filename).toBe("Lumen_v0.0_original.docx")
   })
 })

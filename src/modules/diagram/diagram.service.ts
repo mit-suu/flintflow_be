@@ -3,6 +3,12 @@
  * ─────────────────────────────────────────────────────────────────
  * renderer → compile-check → (sửa tự động ≤ 2 lần) → PlantUML SVG/PNG → GridFS → `diagrams[]`.
  *
+ * Hai engine theo `part.format` (FLF-339):
+ * - `puml`: đường trên — PlantUML server compile-check, vẽ SVG + PNG.
+ * - `svg`: renderer trả markup SVG dựng qua `Scene` + `issues` của bộ kiểm hình học. Không compile-check, không `fix`;
+ *   có issue hoặc resvg không ra PNG ⇒ `render_status = error` (message nêu tên phần tử) và GIỮ file cũ — step-runner
+ *   khôi phục bản `ok` trước đó vẫn có ảnh. Lỗi y hệt lần trước (cùng hash, cùng message) ⇒ không ghi lại.
+ *
  * - `.puml` lỗi sau 2 lần sửa ⇒ lưu text, `render_status = error` + `error` ⇒ cờ đỏ `render_error` (T09).
  *   KHÔNG ném ra API: lỗi render là dữ liệu, không phải ngoại lệ.
  * - Ghi `diagrams[]` qua op engine (T08), một transaction cho cả lô, `reason: "render"`. File SVG/PNG
@@ -10,21 +16,29 @@
  *   chuyển sang lỗi thì xoá file cũ.
  * - Hình không đổi (`source_hash` giống, đang `ok`) thì không compile lại, không ghi — trừ khi `force`
  *   (vd renderer đổi template mà dữ liệu nguồn không đổi).
- * - `screen_layout`: có `deps.drawLayout` (FLF-214) thì model vẽ wireframe salt theo skill `screen-layout`;
- *   model không vẽ được hoặc salt không compile ⇒ bảng function của renderer code như trước.
+ * - `screen_layout` (FLF-410, `screen-layout-parts.ts`): mockup SVG theo theme dự án, mỗi nền tảng một hình. Spec màn
+ *   do model (`deps.drawLayout`, skill `screen-layout`) lưu kèm SVG; ngữ cảnh model không đổi ⇒ dùng lại spec, không gọi
+ *   model (đổi theme vẽ lại 0 token). Model không vẽ được / spec sai ⇒ bảng function của renderer code như trước.
  */
 
 import * as repository from "../spine/spine.repository.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import type { Op } from "../spine/op.types.js"
 import type { Diagram, Spine, SpineRecord } from "../spine/spine.types.js"
-import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "../spine/source-hash.js"
+import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "../spine/source-hash.js"
 import { checkPlantUml, type CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { isPlantUmlReachable, renderPlantUml } from "../../shared/diagram/plantuml.client.js"
+import { svgToPng } from "../../shared/diagram/svg-to-png.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { CONTENT_TYPES, gridFsDiagramStore, type DiagramFileFormat, type DiagramFileStore, type StoredDiagramFile } from "./diagram-file.store.js"
-import { allTargets, renderKind, type DiagramKind, type RenderTarget, type RenderedDiagramPart } from "./renderers/index.js"
+import { allTargets, renderKind, targetOfDiagram, type DiagramKind, type RenderTarget, type RenderedDiagramPart } from "./renderers/index.js"
+import { svgTitleOf } from "./renderers/common.js"
 import { aiScreenLayout, noAiLayout, type DrawLayout } from "./screen-layout.ai.js"
+import { screenLayoutParts, type LoadOriginal } from "./screen-layout-parts.js"
+import { loadScreenOriginal } from "./screen-originals.js"
+import type { ScreenEnvelope } from "./screen-spec.js"
+import type { RenderContext } from "../../shared/diagram/erd-notation.js"
+import { loadRenderContext } from "./render-context.js"
 
 export const DIAGRAM_NOT_FOUND = "DIAGRAM_NOT_FOUND"
 /** Phases §4.1: compile-check → sửa → thử lại, tối đa 2 lần. */
@@ -44,10 +58,16 @@ export type FixPuml = (input: FixInput) => Promise<string | null>
 export interface DiagramServiceDeps {
   check: (source: string) => Promise<CompileCheckResult>
   renderPng: (source: string) => Promise<Buffer>
+  /** PNG của hình `format = svg` (resvg, không qua PlantUML). */
+  renderSvgPng: (svg: string) => Promise<Buffer>
   store: DiagramFileStore
   fix: FixPuml
-  /** Wireframe màn bằng model; mặc định không gọi model (bảng function). Nơi gọi thật cắm `aiScreenLayout`. */
+  /** Spec mockup màn bằng model; mặc định không gọi model (bảng function). Nơi gọi thật cắm `aiScreenLayout`. */
   drawLayout: DrawLayout
+  /** Ảnh gốc của màn import đã bật mockup (kiểu vẽ + ảnh); thiếu ⇒ không màn nào có ảnh gốc. */
+  loadOriginal?: LoadOriginal
+  /** Dữ liệu ngoài Spine cho hình (ký pháp ERD của dự án). */
+  renderContext: (projectId: string) => Promise<RenderContext>
   now: () => Date
 }
 
@@ -67,13 +87,17 @@ export const layoutRenderDeps = (injected?: Partial<DiagramServiceDeps>): Partia
 export const defaultDeps = (): DiagramServiceDeps => ({
   check: checkPlantUml,
   renderPng: async (source) => (await renderPlantUml(source, "png")).data,
+  renderSvgPng: svgToPng,
   store: gridFsDiagramStore,
   fix: noAutoFix,
   drawLayout: noAiLayout,
+  loadOriginal: loadScreenOriginal(),
+  renderContext: loadRenderContext,
   now: () => new Date()
 })
 
-type Compiled = { ok: true; puml: string; svg: Buffer } | { ok: false; puml: string; error: string }
+/** `png` có sẵn ⇒ hình svg đã dựng PNG lúc compile; thiếu ⇒ PNG vẽ qua PlantUML lúc lưu file. */
+type Compiled = { ok: true; source: string; svg: Buffer; png?: Buffer } | { ok: false; source: string; error: string }
 
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
@@ -84,7 +108,7 @@ export const compileWithFix = async (kind: DiagramKind, source: string, deps: Di
   try {
     result = await deps.check(current)
   } catch (err) {
-    return { ok: false, puml: source, error: `PlantUML server không phản hồi: ${message(err)}` }
+    return { ok: false, source, error: `PlantUML server không phản hồi: ${message(err)}` }
   }
 
   for (let attempt = 1; attempt <= MAX_FIX_ATTEMPTS && !result.ok; attempt++) {
@@ -95,12 +119,33 @@ export const compileWithFix = async (kind: DiagramKind, source: string, deps: Di
       current = fixed
       result = next
     } catch (err) {
-      return { ok: false, puml: source, error: `PlantUML server không phản hồi: ${message(err)}` }
+      return { ok: false, source, error: `PlantUML server không phản hồi: ${message(err)}` }
     }
   }
 
-  if (result.ok) return { ok: true, puml: current, svg: result.render.data }
-  return { ok: false, puml: source, error: result.line ? `${result.error} (line ${result.line})` : result.error }
+  if (result.ok) return { ok: true, source: current, svg: result.render.data }
+  return { ok: false, source, error: result.line ? `${result.error} (line ${result.line})` : result.error }
+}
+
+/** Số lỗi bố cục in vào `error` — còn lại gộp thành "… và N lỗi khác" để message đọc được. */
+const MAX_LAYOUT_ISSUES_SHOWN = 5
+
+/**
+ * Hình `format = svg`: issue của bộ kiểm hình học ⇒ lỗi (dữ liệu gây ra, vẽ lại không tự hết); không ⇒ PNG bằng resvg ngay
+ * (SVG không parse được / quá lớn ⇒ lỗi). Không gọi PlantUML, không `fix`. Không bao giờ ném.
+ */
+export const compileSvg = async (part: Pick<RenderedDiagramPart, "source" | "issues">, deps: DiagramServiceDeps): Promise<Compiled> => {
+  const issues = part.issues ?? []
+  if (issues.length > 0) {
+    const shown = issues.slice(0, MAX_LAYOUT_ISSUES_SHOWN).map((i) => i.message)
+    const more = issues.length > shown.length ? `; … và ${issues.length - shown.length} lỗi khác` : ""
+    return { ok: false, source: part.source, error: `Sơ đồ vi phạm bố cục: ${shown.join("; ")}${more}` }
+  }
+  try {
+    return { ok: true, source: part.source, svg: Buffer.from(part.source, "utf8"), png: await deps.renderSvgPng(part.source) }
+  } catch (err) {
+    return { ok: false, source: part.source, error: `svg: ${message(err)}` }
+  }
 }
 
 // ─── id ──────────────────────────────────────────────────────────
@@ -112,7 +157,11 @@ const nextIdFactory = (diagrams: Diagram[]): (() => string) => {
   return () => `D${String(++n).padStart(2, "0")}`
 }
 
-const sameTarget = (d: Diagram, t: RenderTarget): boolean => d.kind === t.kind && (d.owner_id ?? null) === (t.owner_id ?? null)
+/** Kind có nhiều chủ trong một target: `class` (feature), `state_machine` (entity), `sequence` (function). */
+const MULTI_OWNER_KINDS: ReadonlySet<DiagramKind> = new Set<DiagramKind>(["class", "state_machine", "sequence", "activity"])
+
+/** Hình của kind nhiều chủ đều thuộc target của kind đó. */
+const sameTarget = (d: Diagram, t: RenderTarget): boolean => d.kind === t.kind && (MULTI_OWNER_KINDS.has(t.kind) || (d.owner_id ?? null) === (t.owner_id ?? null))
 
 /**
  * Id cho các phần của một target. Phần đầu **giữ nguyên id đang có**, dù id đó có hậu tố hay không;
@@ -132,14 +181,41 @@ const assignIds = (existing: Diagram[], count: number, nextId: () => string): st
   return [first, ...Array.from({ length: count - 1 }, (_, i) => `${stem}-${i + 2}`)]
 }
 
+/**
+ * Id cho các phần của một target. `class` / `state_machine` / `sequence` có nhiều chủ (mỗi feature / entity / function một hình, class có thể tách phần): mỗi chủ một nhóm id riêng,
+ * để thêm / xoá feature không đổi id hình của feature khác (baseline đã ký giữ ảnh theo id).
+ */
+const assignPartIds = (kind: DiagramKind, existing: Diagram[], parts: readonly { owner_id: string | null }[], nextId: () => string): string[] => {
+  if (!MULTI_OWNER_KINDS.has(kind)) return assignIds(existing, parts.length, nextId)
+  const ids: string[] = new Array<string>(parts.length)
+  for (const owner of new Set(parts.map((p) => p.owner_id))) {
+    const at = parts.flatMap((p, i) => (p.owner_id === owner ? [i] : []))
+    const given = assignIds(existing.filter((d) => (d.owner_id ?? null) === owner), at.length, nextId)
+    at.forEach((partIndex, k) => (ids[partIndex] = given[k]))
+  }
+  return ids
+}
+
 // ─── render ──────────────────────────────────────────────────────
 
 export interface RenderOptions {
+  /** Nhãn `changes[].by` của lô render (user id, hoặc mã CR khi ghi CR). */
   by: string
+  /**
+   * FLF-387: người gọi model khi `drawLayout` vẽ wireframe (giữ / trừ credit, log AI) — phải là user id thật. Thiếu ⇒ `by`
+   * (đường gọi mà `by` đã là user id). Ghi CR có `by` = mã CR nên phải truyền trường này.
+   */
+  userId?: string
   step_id?: string | null
   /** Compile lại cả hình có `source_hash` không đổi. */
   force?: boolean
+  /** `screen_layout`: chỉ vẽ lại từ spec đã lưu — màn chưa có spec giữ nguyên hình, không gọi model (đổi theme). */
+  specOnly?: boolean
+  /** Kết quả lượt model vẽ mockup của từng màn (ảnh màn hình, màu ảnh gốc). */
+  onLayoutDrawn?: (screenId: string, envelope: ScreenEnvelope | null) => void
   deps?: Partial<DiagramServiceDeps>
+  /** Gọi sau mỗi hình vẽ xong — lượt chạy dài (finalize import) báo còn tiến triển, không bị coi là treo (FLF-391). */
+  onProgress?: () => void
 }
 
 export interface RenderResult {
@@ -159,18 +235,42 @@ const loadSpine = async (projectId: string): Promise<SpineRecord> => {
 }
 
 /**
- * So theo `source_hash`, không theo `puml`: `puml` lưu có thể là bản đã qua `deps.fix`, khác text renderer
- * sinh ra, nên so `puml` làm hình sửa được bị render lại (và tăng version) ở mọi lần gọi.
+ * So theo `source_hash`, không theo `source`: `source` lưu có thể là bản đã qua `deps.fix`, khác text renderer
+ * sinh ra, nên so `source` làm hình sửa được bị render lại (và tăng version) ở mọi lần gọi.
  */
 const unchanged = (previous: Diagram | undefined, part: RenderedDiagramPart, force: boolean): previous is Diagram =>
   !force && previous !== undefined && previous.render_status === "ok" && previous.source_hash === part.source_hash
 
+/** Tiêu đề hình: `<title>` của SVG hoặc dòng `title` của `.puml`; không có ⇒ null. */
+const diagramTitle = (d: Diagram): string | null =>
+  d.format === "svg" ? svgTitleOf(d.source) : (/^title\s+(.+)$/m.exec(d.source)?.[1]?.trim() ?? null)
+
+/**
+ * Hai bản ghi có phải CÙNG một hình không — cùng loại, mục, chủ và tiêu đề. Id không đủ: kind tách nhiều phần (use case
+ * theo nhóm, class / ERD / luồng màn `(i/n)`) gán lại id theo thứ tự phần, nên khi cách chia đổi, cùng id đã là phần khác.
+ * Tiêu đề mang tên nhóm kèm `(i/n)` nên phân biệt được phần.
+ */
+export const sameDiagramSubject = (a: Diagram, b: Diagram): boolean =>
+  a.kind === b.kind &&
+  a.section === b.section &&
+  (a.owner_kind ?? null) === (b.owner_kind ?? null) &&
+  (a.owner_id ?? null) === (b.owner_id ?? null) &&
+  diagramTitle(a) === diagramTitle(b)
+
 type OkCompiled = Extract<Compiled, { ok: true }>
+
+/** Lần trước đã ghi đúng lỗi này cho đúng dữ liệu này ⇒ ghi lại chỉ làm rác lịch sử `changes`. */
+const sameError = (previous: Diagram | undefined, part: RenderedDiagramPart, error: string): previous is Diagram =>
+  previous !== undefined &&
+  previous.render_status === "error" &&
+  previous.format === part.format &&
+  previous.source_hash === part.source_hash &&
+  previous.error === error
 
 const storeFiles = async (projectId: string, id: string, compiled: OkCompiled, deps: DiagramServiceDeps) => {
   await deps.store.save(projectId, id, "svg", { data: compiled.svg, contentType: CONTENT_TYPES.svg })
   try {
-    await deps.store.save(projectId, id, "png", { data: await deps.renderPng(compiled.puml), contentType: CONTENT_TYPES.png })
+    await deps.store.save(projectId, id, "png", { data: compiled.png ?? (await deps.renderPng(compiled.source)), contentType: CONTENT_TYPES.png })
   } catch (err) {
     // PNG chỉ phục vụ export; SVG đã có thì hình vẫn hợp lệ
     console.warn(`[diagram] Không render được PNG cho ${id}: ${message(err)}`)
@@ -201,6 +301,7 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
   const deps: DiagramServiceDeps = { ...defaultDeps(), ...options.deps }
   const record = await loadSpine(projectId)
   const spine = stripRecord(record)
+  const context = await deps.renderContext(projectId)
   const nextId = nextIdFactory(spine.diagrams)
   const byExistingId = new Map(spine.diagrams.map((d) => [d.id, d]))
 
@@ -213,9 +314,29 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
   const errored: string[] = []
 
   for (const target of targets) {
+    options.onProgress?.()
     const existing = spine.diagrams.filter((d) => sameTarget(d, target)).sort((a, b) => (a.id < b.id ? -1 : 1))
-    const parts = renderKind(spine, target.kind, target.owner_id)
-    const ids = assignIds(existing, parts.length, nextId)
+    const parts =
+      target.kind === "screen_layout" && target.owner_id
+        ? await screenLayoutParts({
+            projectId,
+            userId: options.userId ?? options.by,
+            spine,
+            screenId: target.owner_id,
+            context,
+            existing,
+            force: options.force ?? false,
+            specOnly: options.specOnly ?? false,
+            drawLayout: deps.drawLayout,
+            loadOriginal: deps.loadOriginal,
+            onDrawn: options.onLayoutDrawn
+          })
+        : renderKind(spine, target.kind, target.owner_id, context)
+    if (parts === null) {
+      produced.push(...existing)
+      continue
+    }
+    const ids = assignPartIds(target.kind, existing, parts, nextId)
 
     for (const [i, part] of parts.entries()) {
       const id = ids[i]
@@ -225,17 +346,19 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
         continue
       }
 
-      const drawn =
-        part.kind === "screen_layout" && part.owner_id
-          ? await deps.drawLayout({ projectId, userId: options.by, spine, screenId: part.owner_id }).catch(() => null)
-          : null
-      let compiled = await compileWithFix(part.kind, drawn ?? part.puml, deps)
-      // Salt của model không compile ⇒ vẽ bảng function thay vì để hình lỗi
-      if (drawn !== null && !compiled.ok) compiled = await compileWithFix(part.kind, part.puml, deps)
+      let compiled: Compiled
+      if (part.format === "svg") {
+        compiled = await compileSvg(part, deps)
+        if (!compiled.ok && sameError(previous, part, compiled.error)) {
+          produced.push(previous)
+          continue
+        }
+      } else compiled = await compileWithFix(part.kind, part.source, deps)
       const diagram: Diagram = {
         id,
         kind: part.kind,
-        puml: compiled.puml,
+        format: part.format,
+        source: compiled.source,
         section: part.section,
         owner_kind: part.owner_kind,
         owner_id: part.owner_id,
@@ -245,7 +368,8 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
         rendered_at: deps.now().toISOString()
       }
       if (compiled.ok) toStore.push({ id, compiled })
-      else if (previous) errored.push(id)
+      // svg lỗi giữ file cũ: lỗi do dữ liệu, bản `ok` trước đó (step-runner khôi phục) vẫn cần ảnh
+      else if (previous && part.format === "puml") errored.push(id)
 
       ops.push(previous ? { op: "set", path: `diagrams[id=${id}]`, value: diagram, reason: "render" } : { op: "add", path: "diagrams[]", value: diagram, reason: "render" })
       produced.push(diagram)
@@ -272,6 +396,21 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
   return { spine_version: result.spine_version, diagrams: produced, rendered, removed }
 }
 
+/**
+ * Đổi theme mockup (FLF-410): vẽ lại mọi `screen_layout` đang có từ spec đã lưu — không gọi model, không credit. Màn chưa
+ * có spec (bảng function, wireframe Salt cũ) giữ nguyên tới lượt vẽ kế tiếp.
+ */
+export const redrawScreenLayoutsFromSpec = async (projectId: string, options: Omit<RenderOptions, "specOnly" | "force">): Promise<RenderResult> => {
+  const spine = stripRecord(await loadSpine(projectId))
+  const owners = [...new Set(spine.diagrams.filter((d) => d.kind === "screen_layout" && d.owner_id).map((d) => d.owner_id as string))]
+  return renderDiagrams(
+    projectId,
+    owners.map((id) => ({ kind: "screen_layout" as const, owner_id: id })),
+    // force: vẽ lại cả hình chưa stale (renderer đổi khung / lề) — specOnly bảo đảm không gọi model
+    { ...options, specOnly: true, force: true, deps: { ...options.deps, drawLayout: noAiLayout } }
+  )
+}
+
 export const renderDiagram = (projectId: string, kind: DiagramKind, ownerId: string | null, options: RenderOptions) =>
   renderDiagrams(projectId, [{ kind, owner_id: ownerId }], options)
 
@@ -295,17 +434,45 @@ export const renderAllIfAvailable = async (projectId: string, options: RenderOpt
   }
 }
 
+/**
+ * FLF-311: sau lô sửa thêm use case / màn — vẽ lại các hình đã vẽ mà dữ liệu nguồn vừa đổi (use case, screen flow…, đúng
+ * tập cờ `diagram_stale` bắt) cùng bố cục các màn mới. Không có PlantUML hoặc lỗi ⇒ `null`, lượt sửa vẫn thành công
+ * (cờ `diagram_stale` còn đó, nút "Vẽ lại sơ đồ" như trước).
+ */
+export const renderChangedIfAvailable = async (projectId: string, newScreenIds: readonly string[], options: RenderOptions): Promise<RenderResult | null> => {
+  try {
+    if (!(await isPlantUmlReachable())) return null
+    const spine = stripRecord(await loadSpine(projectId))
+    const context = await loadRenderContext(projectId)
+    const seen = new Set<string>()
+    const targets: RenderTarget[] = [
+      ...staleRenderedDiagrams(spine, context).map(targetOfDiagram),
+      ...newScreenIds.map((id) => ({ kind: "screen_layout" as const, owner_id: id }))
+    ].filter((t) => {
+      const key = `${t.kind}|${t.owner_id ?? ""}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    if (targets.length === 0) return null
+    return await renderDiagrams(projectId, targets, options)
+  } catch (err) {
+    console.warn(`[diagram] vẽ lại sau lô sửa lỗi (project ${projectId}, by ${options.by}): ${err instanceof Error ? err.message : String(err)}`)
+    return null
+  }
+}
+
 /** Hình cần vẽ lại: hash chưa tính hoặc lệch `source_fields` hiện tại. */
-export const staleDiagrams = (spine: Spine): Diagram[] =>
-  spine.diagrams.filter((d) => UNHASHED_SOURCE_HASHES.has(d.source_hash) || d.source_hash !== computeSourceHash(spine, d))
+export const staleDiagrams = (spine: Spine, context: RenderContext = {}): Diagram[] =>
+  spine.diagrams.filter((d) => UNHASHED_SOURCE_HASHES.has(d.source_hash) || d.source_hash !== renderedDiagramHash(spine, d, undefined, context))
 
 /**
  * Hình ĐÃ vẽ thành công nhưng dữ liệu nguồn đã đổi sau đó — đúng tập hợp mà luật cờ `diagram_stale` bắt.
  * Khác `staleDiagrams` ở chỗ bỏ qua hình chưa từng vẽ (hash rỗng/legacy): vẽ lại chúng tự động là đi làm
  * việc của step render, không phải sửa hậu quả của step vừa chạy (FLF-177 BUG-17).
  */
-export const staleRenderedDiagrams = (spine: Spine): Diagram[] =>
-  spine.diagrams.filter((d) => d.render_status === "ok" && !UNHASHED_SOURCE_HASHES.has(d.source_hash) && d.source_hash !== computeSourceHash(spine, d))
+export const staleRenderedDiagrams = (spine: Spine, context: RenderContext = {}): Diagram[] =>
+  spine.diagrams.filter((d) => d.render_status === "ok" && !UNHASHED_SOURCE_HASHES.has(d.source_hash) && d.source_hash !== renderedDiagramHash(spine, d, undefined, context))
 
 export const loadDiagramFile = async (
   projectId: string,

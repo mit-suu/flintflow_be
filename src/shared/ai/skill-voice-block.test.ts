@@ -31,7 +31,7 @@ describe("block văn phong dùng chung của elicit-loop và draft-to-ops", () =
     expect(draft).toBe(elicit)
   })
 
-  it("không rỗng — xoá nội dung giữa hai mốc không làm test xanh", () => {
+  it("không rỗng - xoá nội dung giữa hai mốc không làm test xanh", () => {
     for (const skill of SKILLS) {
       const block = sharedBlockOf(skill)
       expect(block.length, skill).toBeGreaterThan(200)

@@ -1,3 +1,6 @@
+import { assertNoMigrationRunning } from "../template-migration/migration-guard.js"
+import { listChangesForRecord } from "../render/assemble.service.js"
+import { captureTemplateSourceBinding } from "./template-source-binding.js"
 /**
  * Release (Flow 6 nút 6.1–6.2): Lead chủ động, không gắn với một CR. FLF-171, plan §6 2F.
  * - Quét lại cờ (hồ sơ luật mode 1); còn cờ đỏ mở ⇒ `422 RELEASE_RED_FLAGS_OPEN` (BR-04, mode 1 không waive).
@@ -11,7 +14,7 @@
 import { ApiError } from "../../shared/utils/api-error.js"
 import { stripRecord } from "../import/check.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
-import { MODE1_RULE_PROFILE } from "../import/mode1-rule-profile.js"
+import { mode1RuleProfileFor } from "../import/mode1-guard.js"
 import { snapshotBaseline } from "../pipeline/s9/baseline.service.js"
 import { Project } from "../project/project.model.js"
 import * as flagsService from "../spine/flags.service.js"
@@ -22,6 +25,7 @@ import { DocVersion, type IDocVersion } from "./doc-version.model.js"
 import { listDocVersions } from "./doc-version.service.js"
 import { renderVersionFile } from "./render-version.js"
 import { nextMajor } from "./versioning.js"
+import { autoSaveSkeleton } from "../import/template-skeleton.service.js"
 
 export interface ReleaseResult {
   version: IDocVersion
@@ -31,6 +35,7 @@ export interface ReleaseResult {
 }
 
 export const release = async (projectId: string, userId: string, baseVersion: number): Promise<ReleaseResult> => {
+  await assertNoMigrationRunning(projectId)
   const before = await spineRepository.get(projectId)
   if (!before) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   if (before.spine_version !== baseVersion) {
@@ -41,9 +46,9 @@ export const release = async (projectId: string, userId: string, baseVersion: nu
   if (!latest) throw new Mode1Error("DOC_VERSION_NOT_FOUND", "Chưa có version tài liệu nào để release")
 
   // 6.1 "cờ đỏ = 0" gồm cả luật S-9 (giả định chưa xác nhận) — như ký baseline của mode 2
-  const checked = await flagsService.recompute(projectId, { by: userId, ruleProfile: MODE1_RULE_PROFILE, atBaseline: true })
+  const checked = await flagsService.recompute(projectId, { by: userId, ruleProfile: await mode1RuleProfileFor(projectId), atBaseline: true })
   const red = checked.flags.filter((f) => f.level === "red" && f.resolved_at === null)
-  if (red.length) throw new Mode1Error("RELEASE_RED_FLAGS_OPEN", `Còn ${red.length} cờ đỏ — xử lý qua change request rồi release`, { flags: red })
+  if (red.length) throw new Mode1Error("RELEASE_RED_FLAGS_OPEN", `Còn ${red.length} cờ đỏ - xử lý qua change request rồi release`, { flags: red })
 
   const lastRelease = versions.find((v) => v.kind === "release")
   const crIds = [
@@ -58,7 +63,11 @@ export const release = async (projectId: string, userId: string, baseVersion: nu
 
   const record = (await spineRepository.get(projectId))!
   const projectName = (await Project.findById(projectId, { name: 1 }).lean())?.name ?? "SRS"
-  const buffer = await renderVersionFile(projectId, projectName, stripRecord(record), { version: next, stampSource: "release" })
+  // §I của chính file release phải có dòng của nó (Record of Changes khớp số version) — lô baseline ghi sau khi render
+  const releaseRow = { txn: `release:${next}`, at: new Date().toISOString(), by: userId, reason: `Baseline ${next}`, op: "add", path: "baselines[]", step_id: null }
+  const templateSource = await captureTemplateSourceBinding(projectId)
+  const recordSnapshot = templateSource ? await listChangesForRecord(projectId) : null
+  const buffer = await renderVersionFile(projectId, projectName, stripRecord(record), { version: next, stampSource: "release", pendingRecord: [releaseRow], templateSource, ...(recordSnapshot ? { recordChanges: recordSnapshot } : {}) })
   const fileRef = await docFileStore().save(buffer, { projectId, kind: "version", name: next })
 
   let baseline: BaselineEntry
@@ -88,7 +97,11 @@ export const release = async (projectId: string, userId: string, baseVersion: nu
     based_on: latest.version,
     cr_ids: crIds,
     baseline_ref: baseline.id,
+    template_source: templateSource,
+    record_snapshot: recordSnapshot ? [...recordSnapshot, releaseRow] : null,
     created_by: userId
   })
+  // FLF-395 (D12): khung đổi ở lần phát hành này ⇒ bản mới của mẫu khung tự lưu (lỗi không chặn phát hành)
+  await autoSaveSkeleton(projectId, userId, fileRef)
   return { version, baseline, cr_ids: crIds, spine_version: spineVersion }
 }

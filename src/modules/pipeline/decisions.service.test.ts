@@ -16,7 +16,7 @@ const decision = (over: Partial<Decision> = {}): Decision => ({
 const spineWith = (decisions: Decision[]): Spine => ({ decisions } as unknown as Spine)
 
 describe("normalizeTopicKey", () => {
-  it("gom từ đồng nghĩa về một khoá — uptime và availability không được thành hai chủ đề", () => {
+  it("gom từ đồng nghĩa về một khoá - uptime và availability không được thành hai chủ đề", () => {
     expect(normalizeTopicKey("availability", "")).toBe("uptime")
     expect(normalizeTopicKey("SLA", "")).toBe("uptime")
     expect(normalizeTopicKey("slot_hold", "")).toBe("slot_hold_minutes")
@@ -84,7 +84,7 @@ describe("decisionOps", () => {
     expect(decisionOps(spineWith([]), "S-6.1", [{ topic_key: "uptime", question: "Uptime?", answer: "  " }])).toEqual([])
   })
 
-  it("bỏ đuôi (Khuyến nghị)/(Recommended) — nhãn của thẻ hỏi, không phải giá trị đã chốt", () => {
+  it("bỏ đuôi (Khuyến nghị)/(Recommended) - nhãn của thẻ hỏi, không phải giá trị đã chốt", () => {
     expect(decisionOps(spineWith([decision()]), "S-6.1", [{ topic_key: "uptime", question: "Uptime?", answer: "99% (Khuyến nghị)" }])).toEqual([])
     const ops = decisionOps(spineWith([]), "S-6.1", [{ topic_key: "uptime", question: "Uptime?", answer: "99.9% (Recommended)" }])
     expect(ops[0].value).toMatchObject({ answer: "99.9%" })
@@ -117,5 +117,17 @@ describe("askableFields (FLF-232)", () => {
     expect(askableFields("B-1.1", fields)).toEqual(["project.vision", "project.form_factor"])
     expect(askableFields("S-2.2", fields)).toEqual(["project.vision", "project.form_factor"])
     expect(askableFields("B-2.3", fields)).toEqual(fields)
+  })
+})
+
+describe("P05 - câu đã chốt mà model đặt topic_key khác vẫn bị bỏ", () => {
+  it("cùng nội dung (trùng từ ≥ 70%) ⇒ bỏ, kèm câu trả lời đã chốt; câu khác ý ⇒ giữ", () => {
+    const spine = spineWith([decision({ topic_key: "school_size", question: "Trường khoảng bao nhiêu học sinh, bao nhiêu lớp?", answer: "800 học sinh, 30 lớp" })])
+    const out = filterAskedQuestions(spine, [
+      { topic_key: "student_count", question: "Trường khoảng bao nhiêu học sinh và bao nhiêu lớp?" },
+      { topic_key: "grade_scale", question: "Điểm ghi theo thang 10 hay thang 4?" }
+    ] as never)
+    expect(out.dropped).toMatchObject([{ answer: "800 học sinh, 30 lớp" }])
+    expect(out.questions.map((q) => q.topic_key)).toEqual(["grade_scale"])
   })
 })

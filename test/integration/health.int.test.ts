@@ -16,13 +16,13 @@ describe("GET /health", () => {
 
     expect(res.status).toBe(200)
     expect(res.body.error).toBeNull()
-    expect(res.body.data).toMatchObject({ status: "degraded", mongo: "ok", plantuml: "error" })
+    expect(res.body.data).toMatchObject({ status: "degraded", mongo: "ok", plantuml: "error", gotenberg: "error" })
     expect(res.body.data.version).toBeTruthy()
     expect(res.body.data.assets.skills).toBeGreaterThan(0)
     expect(res.body.data.assets.steps).toBeGreaterThan(0)
   })
 
-  it("không cần đăng nhập — health check của orchestrator không mang token", async () => {
+  it("không cần đăng nhập - health check của orchestrator không mang token", async () => {
     const res = await request(app).get("/health")
     expect(res.status).not.toBe(401)
   })

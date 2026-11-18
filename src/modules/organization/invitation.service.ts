@@ -9,6 +9,7 @@ import { User } from "../user/user.model.js"
 import { notify } from "../notification/notification.service.js"
 import { sendOrgInvitationEmail } from "../../shared/email/email.service.js"
 import { signAccessToken } from "../../shared/auth/jwt.util.js"
+import * as sessionService from "../../shared/auth/session.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { runInTransaction, TRANSACTION_UNAVAILABLE, sessionOptions } from "../../shared/db/transaction.js"
 import { env } from "../../config/env.js"
@@ -40,12 +41,24 @@ export const generateCode = (length: number = env.INVITE_CODE_LENGTH): string =>
 
 export type InvitationState = "pending" | "accepted" | "revoked" | "expired"
 
-/** Trạng thái là giá trị SUY DIỄN từ ba mốc thời gian — model cố tình không có field status. */
+/**
+ * Trạng thái là giá trị SUY DIỄN từ các mốc thời gian — model cố tình không có field status.
+ * Bản ghi cũ của FLF-303 (chưa duyệt hoặc đã từ chối) đều quy về "revoked".
+ */
 export const invitationState = (
-  invitation: { acceptedAt?: Date | null; revokedAt?: Date | null; expiresAt: Date },
+  invitation: {
+    acceptedAt?: Date | null
+    revokedAt?: Date | null
+    rejectedAt?: Date | null
+    requestedByUserId?: unknown
+    approvedAt?: Date | null
+    expiresAt: Date
+  },
   now: Date = new Date()
 ): InvitationState => {
-  if (invitation.revokedAt) return "revoked"
+  if (invitation.revokedAt || invitation.rejectedAt || (invitation.requestedByUserId && !invitation.approvedAt)) {
+    return "revoked"
+  }
   if (invitation.acceptedAt) return "accepted"
   if (invitation.expiresAt.getTime() <= now.getTime()) return "expired"
   return "pending"
@@ -60,15 +73,20 @@ export interface InvitationItem {
   createdAt: Date
 }
 
-const toItem = (invitation: {
+interface InvitationRecord {
   _id: unknown
   email: string | null
   role: InvitableRole
+  requestedByUserId?: unknown
+  approvedAt?: Date | null
+  rejectedAt?: Date | null
   acceptedAt?: Date | null
   revokedAt?: Date | null
   expiresAt: Date
   createdAt: Date
-}): InvitationItem => ({
+}
+
+const toItem = (invitation: InvitationRecord): InvitationItem => ({
   id: String(invitation._id),
   email: invitation.email,
   role: invitation.role,
@@ -77,16 +95,48 @@ const toItem = (invitation: {
   createdAt: invitation.createdAt
 })
 
+const displayName = (user: { name?: string | null; email?: string | null } | null | undefined, fallback: string) =>
+  user?.name || user?.email || fallback
+
 const invalidCode = () =>
   new ApiError(410, "Mã mời không dùng được: đã hết hạn, đã dùng hoặc đã bị thu hồi", "INVITE_INVALID")
 
+const notFound = () => new ApiError(404, "Không tìm thấy lời mời", "INVITE_NOT_FOUND")
+
+const assertEmailMatches = (invitedEmail: string | null | undefined, userEmail: string): void => {
+  if (invitedEmail && userEmail.trim().toLowerCase() !== invitedEmail.trim().toLowerCase()) {
+    throw new ApiError(403, "Mã mời này được cấp riêng cho một địa chỉ email khác", "INVITE_EMAIL_MISMATCH")
+  }
+}
+
 export interface CreatedInvitation extends InvitationItem {
-  /** Mã thô — CHỈ trả đúng lượt tạo này. DB chỉ giữ hash, nên mất là phải thu hồi và mời lại. */
+  /** Mã thô — CHỈ trả đúng lượt sinh mã này. DB chỉ giữ hash, nên mất là phải thu hồi và mời lại. */
   code: string
 }
 
+/** Hạn mã tính từ lúc mã được Lead tạo. */
+const freshExpiry = () => new Date(Date.now() + env.INVITE_TTL_DAYS * 86_400_000)
+
 /**
- * UC-08 / BPMN Flow 9.1–9.2: Lead sinh mã mời có hạn kèm vai trò, Email Service gửi cho người được mời.
+ * Email Service gửi mã cho người được mời. Là side effect qua hàng đợi email (tự retry): hỏng SMTP — kể cả không
+ * đưa được vào Redis — không được làm hỏng việc sinh mã (Lead vẫn đọc được mã ở response).
+ */
+const sendCode = async (orgId: string, inviterUserId: string, email: string, role: InvitableRole, code: string) => {
+  const [org, inviter] = await Promise.all([
+    Organization.findById(orgId).select("name").lean(),
+    User.findById(inviterUserId).select("name email").lean()
+  ])
+  await sendOrgInvitationEmail(email, {
+    code,
+    organizationName: org?.name ?? "FlintFlow",
+    roleLabel: ROLE_LABELS[role],
+    inviterName: displayName(inviter, "Một thành viên"),
+    expiresInDays: env.INVITE_TTL_DAYS
+  }).catch((err: unknown) => console.error(`[invitation] Không đưa được email mời ${email} vào hàng đợi:`, err))
+}
+
+/**
+ * UC-08 / BPMN Flow 9.1–9.2: chỉ Lead sinh mã mời có hạn kèm vai trò, Email Service gửi cho người được mời.
  *
  * Vai trò chỉ nhận Analyst / Viewer: muốn thêm Lead thì mời trước rồi nâng bằng UC-73, để việc tạo Lead
  * luôn là hành động có chủ đích của một Lead đang có chứ không phải hệ quả của mã phát đi từ lâu.
@@ -100,59 +150,53 @@ export const createInvitation = async (
   if (!INVITABLE_ROLES.includes(role)) {
     throw new ApiError(400, "Chỉ mời được với vai trò Analyst hoặc Viewer", "VALIDATION_ERROR")
   }
+
   await assertMemberQuota(orgId)
 
   const code = generateCode()
-  const expiresAt = new Date(Date.now() + env.INVITE_TTL_DAYS * 86_400_000)
   const invitation = await Invitation.create({
     organizationId: orgId,
     email,
     role,
     codeHash: hashCode(code),
-    expiresAt,
+    expiresAt: freshExpiry(),
     invitedByUserId: inviterUserId
   })
-
-  const [org, inviter] = await Promise.all([
-    Organization.findById(orgId).select("name").lean(),
-    User.findById(inviterUserId).select("name email").lean()
-  ])
-  // Gửi mail là side effect qua hàng đợi email (tự retry): hỏng SMTP — kể cả không đưa được vào Redis — không được
-  // làm hỏng việc tạo mã (Lead vẫn đọc được mã ở response).
-  await sendOrgInvitationEmail(email, {
-    code,
-    organizationName: org?.name ?? "FlintFlow",
-    roleLabel: ROLE_LABELS[role],
-    inviterName: inviter?.name || inviter?.email || "Một thành viên",
-    expiresInDays: env.INVITE_TTL_DAYS
-  }).catch((err: unknown) => console.error(`[invitation] Không đưa được email mời ${email} vào hàng đợi:`, err))
+  await sendCode(orgId, inviterUserId, email, role, code)
 
   return { ...toItem(invitation), code }
 }
 
-/** UC-08 (phần xem): mã đang treo của org, mới nhất trước. Không bao giờ trả mã thô. */
+const findInOrg = async (orgId: string, invitationId: string) => {
+  if (!mongoose.isValidObjectId(invitationId)) throw notFound()
+  const invitation = await Invitation.findOne({ _id: invitationId, organizationId: orgId })
+  if (!invitation) throw notFound()
+  return invitation
+}
+
+/**
+ * UC-08 (phần xem): toàn bộ lời mời của org cho Lead, mới nhất trước. Không bao giờ trả mã thô.
+ */
 export const listInvitations = async (orgId: string): Promise<InvitationItem[]> => {
   const invitations = await Invitation.find({ organizationId: orgId }).sort({ createdAt: -1 }).lean()
   return invitations.map(toItem)
 }
 
-/** UC-08: Lead thu hồi một mã CHƯA dùng. Mã đã dùng thì không thu hồi được — người kia đã vào org rồi. */
+/**
+ * UC-08: Lead thu hồi một mã CHƯA dùng. Mã đã dùng thì không thu hồi được — người kia đã vào org rồi.
+ */
 export const revokeInvitation = async (orgId: string, invitationId: string): Promise<InvitationItem> => {
-  if (!mongoose.isValidObjectId(invitationId)) {
-    throw new ApiError(404, "Không tìm thấy lời mời", "INVITE_NOT_FOUND")
-  }
-  const invitation = await Invitation.findOne({ _id: invitationId, organizationId: orgId })
-  if (!invitation) throw new ApiError(404, "Không tìm thấy lời mời", "INVITE_NOT_FOUND")
-
+  const invitation = await findInOrg(orgId, invitationId)
   const state = invitationState(invitation)
+
   if (state === "accepted") {
-    throw new ApiError(409, "Mã đã được dùng — hãy xoá thành viên nếu muốn thu hồi quyền", "INVITE_ALREADY_USED")
+    throw new ApiError(409, "Mã đã được dùng - hãy xoá thành viên nếu muốn thu hồi quyền", "INVITE_ALREADY_USED")
   }
   if (state !== "revoked") {
     invitation.revokedAt = new Date()
     await invitation.save()
   }
-  return toItem(invitation)
+  return toItem(invitation.toObject())
 }
 
 export interface InvitationPreview {
@@ -162,10 +206,11 @@ export interface InvitationPreview {
   expiresAt: Date
 }
 
-/** Xem trước trước khi bấm tham gia (Flow 8.3). Mã hỏng thì 410 luôn, không lộ gì thêm. */
-export const previewInvitation = async (code: string): Promise<InvitationPreview> => {
+/** Xem trước trước khi bấm tham gia (Flow 8.3). Mã hỏng thì 410 luôn, sai email người nhận thì 403. */
+export const previewInvitation = async (code: string, email: string): Promise<InvitationPreview> => {
   const invitation = await Invitation.findOne({ codeHash: hashCode(code) }).lean()
   if (!invitation || invitationState(invitation) !== "pending") throw invalidCode()
+  assertEmailMatches(invitation.email, email)
 
   const org = await Organization.findById(invitation.organizationId).select("name").lean()
   if (!org) throw invalidCode()
@@ -195,11 +240,14 @@ export const acceptInvitation = async (
   code: string,
   userId: string,
   email: string,
-  platformRole?: string
+  platformRole?: string,
+  refreshToken?: string,
+  currentSessionId?: string
 ): Promise<AcceptResult> => {
   const codeHash = hashCode(code)
   const invitation = await Invitation.findOne({ codeHash }).lean()
   if (!invitation || invitationState(invitation) !== "pending") throw invalidCode()
+  assertEmailMatches(invitation.email, email)
 
   const orgId = String(invitation.organizationId)
   const org = await Organization.findById(orgId).select("name").lean()
@@ -226,20 +274,23 @@ export const acceptInvitation = async (
   const result = await runInTransaction(join)
   if (result === TRANSACTION_UNAVAILABLE) await join()
   await markOnboarded(userId)
+  // Ghi org đang mở vào phiên (FLF-422) và lấy `sid` của phiên đó để ký access token (FLF-427)
+  const sessionSid = refreshToken ? await sessionService.setActiveOrg(refreshToken, orgId) : null
+  const resolvedSid = sessionSid ?? currentSessionId
 
   // Flow SD-3.3-5: Lead cần biết có người mới vào.
   const [leads, joiner] = await Promise.all([
     Membership.find({ organizationId: orgId, role: "lead" }).select("userId").lean(),
     User.findById(userId).select("name email").lean()
   ])
-  const who = joiner?.name || joiner?.email || "Một người"
+  const who = displayName(joiner, "Một người")
   for (const lead of leads) {
     void notify(String(lead.userId), {
       type: "org_member_joined",
       title: "Thành viên mới tham gia tổ chức",
       body: `${who} đã tham gia ${org.name} với vai trò ${ROLE_LABELS[invitation.role]}.`,
       organizationId: orgId,
-      meta: { organizationId: orgId, userId, role: invitation.role }
+      meta: { organizationId: orgId, organizationName: org.name, userId, memberName: who, role: invitation.role }
     })
   }
 
@@ -249,7 +300,8 @@ export const acceptInvitation = async (
       userId,
       email,
       ...(platformRole ? { role: platformRole } : {}),
-      orgId
+      orgId,
+      ...(resolvedSid ? { sid: resolvedSid } : {})
     })
   }
 }

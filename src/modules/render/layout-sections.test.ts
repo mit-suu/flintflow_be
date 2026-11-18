@@ -2,9 +2,13 @@
  * Mode 1 v2 — render theo layout file người dùng (FLF-184, plan v2 §6). Hàm thuần: không DB.
  */
 import { describe, expect, it } from "vitest"
+import { readFile } from "node:fs/promises"
+import { parseDocument } from "../import/parse.service.js"
+import { assignBlockSections, matchProfile } from "../import/profile-match.service.js"
+import { buildLayout } from "../import/step-plan.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
-import { buildLayoutSections, customBlocks, functionSourceHash, numberSections, placeSections, romanValue, type TemplateLayout, type TemplateLayoutEntry } from "./layout-sections.js"
+import { buildLayoutSections, customBlocks, functionSourceHash, moveSectionsToEnd, numberSections, placeSections, repairFixedTemplateLayout, romanValue, type TemplateLayout, type TemplateLayoutEntry } from "./layout-sections.js"
 
 const entry = (order: number, heading_text: string, level: number, section_id: string): TemplateLayoutEntry => ({ order, heading_text, level, section_id })
 
@@ -62,7 +66,7 @@ const LAYOUT: TemplateLayout = {
   ]
 }
 
-describe("placeSections — thứ tự theo file, chèn đầu mục FPT thiếu", () => {
+describe("placeSections - thứ tự theo file, chèn đầu mục FPT thiếu", () => {
   it("mục layout giữ thứ tự + tiêu đề gốc (bỏ số gõ tay); mục đã xoá khỏi Spine bị bỏ; mục FPT thiếu chèn sau section FPT gần nhất đứng trước", () => {
     const placed = placeSections(spine(), LAYOUT)
     const ids = placed.map((p) => p.section_id)
@@ -82,6 +86,22 @@ describe("placeSections — thứ tự theo file, chèn đầu mục FPT thiếu
     expect(placed.find((p) => p.section_id === "fixed:1")?.title).toBe("Giới thiệu")
     expect(placed.find((p) => p.section_id === "fixed:5.1")?.title).toBe("Quy tắc nghiệp vụ")
     expect(placed.find((p) => p.section_id === "custom:CS01")?.kind).toBe("continuation")
+  })
+
+  it("mẫu bắt buộc (chế độ 3): không chèn heading ngoài mẫu - trừ chức năng mới dưới feature của nó (TechMart 11/11, user chốt)", () => {
+    const s = spine()
+    s.functions.push({ ...s.functions[0], id: "FN02", order: 1, name: "Quên mật khẩu" })
+    const ids = placeSections(s, { ...LAYOUT, fixedTemplate: true }).map((p) => p.section_id)
+    const fileOrder = ["fixed:1", "custom:CS01", "fixed:2.1", "feature:F-4", "function:FN01", "function:FN02", "group:4", "fixed:4.2.3", "custom:CS02"]
+    expect(ids).toEqual(fileOrder)
+  })
+
+  it("mẫu bắt buộc: phần nối (heading rỗng) mà mục riêng không còn ⇒ bỏ, không dựng mục trống \"—\" (test tay 11/11)", () => {
+    const s = spine()
+    const layout = [entry(0, "1 Introduction", 1, "fixed:1"), entry(1, "", 2, "custom:CSGONE"), entry(2, "Phạm vi", 2, "custom:CSNEW")]
+    const { sections } = buildLayoutSections(s, { language: "en", fixedTemplate: true, layout }, [], { diagramPng: () => undefined })
+    expect(sections.map((x) => x.id)).not.toContain("custom:CSGONE")
+    expect(sections.some((x) => x.heading === "—")).toBe(false)
   })
 
   it("function mới của feature (chưa có trong layout) ⇒ mục con của feature, sau function cũ", () => {
@@ -148,18 +168,55 @@ describe("numberSections", () => {
     expect(numberOf("custom:B")).toBe("")
   })
 
-  it("file đánh số tự động (không gõ số): mọi heading đều có số; cấp nhảy quá 1 kéo về cấp kế tiếp", () => {
+  it("FLF-362: file không đánh số (không gõ số, không số Word) ⇒ không mục nào có số, kể cả mục FlintFlow chèn thêm; cấp giữ như file", () => {
     const layout: TemplateLayout = { language: "en", layout: [entry(0, "Intro", 1, "fixed:1"), entry(1, "Deep", 3, "custom:A")] }
     const s: Spine = { ...createEmptySpine({ name: "x" }), custom_sections: [{ id: "A", heading: "Deep", level: 3, source: "import", blocks: [] }] }
     const numbered = numberSections(placeSections(s, layout))
     expect(numbered.slice(0, 2).map((n) => [n.section_id, n.number, n.renderLevel])).toEqual([
-      ["fixed:1", "1", 1],
-      ["custom:A", "1.1", 2]
+      ["fixed:1", "", 1],
+      ["custom:A", "", 3]
     ])
+    expect(numbered.every((n) => n.number === "")).toBe(true)
+  })
+
+  it("FLF-362: số Word tự đánh (`number_label`) in đúng số của file (bỏ dấu kết: `1.` ⇒ `1`); chữ heading không bị cắt", () => {
+    const layout: TemplateLayout = {
+      language: "en",
+      layout: [{ ...entry(0, "Intro", 1, "fixed:1"), number_label: "1." }, { ...entry(1, "Scope", 2, "custom:A"), number_label: "1.1." }]
+    }
+    const s: Spine = { ...createEmptySpine({ name: "x" }), custom_sections: [{ id: "A", heading: "Scope", level: 2, source: "import", blocks: [] }] }
+    const numbered = numberSections(placeSections(s, layout))
+    expect(numbered.slice(0, 2).map((n) => [n.section_id, n.number, n.title])).toEqual([
+      ["fixed:1", "1", "Intro"],
+      ["custom:A", "1.1", "Scope"]
+    ])
+  })
+
+  it("FLF-362: file đánh số đều + mục FlintFlow chèn thêm ⇒ mục chèn nhận số theo thứ tự, anh em đứng sau cùng nhánh dịch số (kể cả mục con)", () => {
+    const placed = [
+      { section_id: "fixed:1", kind: "fpt" as const, title: "Intro", level: 1, fromLayout: true, typed: true, label: "1" },
+      { section_id: "fixed:2.1", kind: "fpt" as const, title: "Actors", level: 2, fromLayout: true, typed: true, label: "1.1" },
+      { section_id: "fixed:2.2.1", kind: "fpt" as const, title: "Use Case Diagram", level: 2, fromLayout: false, typed: false },
+      { section_id: "custom:B", kind: "custom" as const, title: "Notes", level: 2, fromLayout: true, typed: true, label: "1.2" },
+      { section_id: "custom:C", kind: "custom" as const, title: "Detail", level: 3, fromLayout: true, typed: true, label: "1.2.1" },
+      { section_id: "custom:D", kind: "custom" as const, title: "Next chapter", level: 1, fromLayout: true, typed: true, label: "2" }
+    ]
+    expect(numberSections(placed).map((n) => n.number)).toEqual(["1", "1.1", "1.2", "1.3", "1.3.1", "2"])
+  })
+
+  it("FLF-362: file đánh số không đều (nhảy số, chữ cái) ⇒ giữ nguyên văn số của file; mục chèn thêm lấy số kế tiếp của anh em đứng trước", () => {
+    const placed = [
+      { section_id: "fixed:1", kind: "fpt" as const, title: "Intro", level: 1, fromLayout: true, typed: true, label: "1" },
+      { section_id: "custom:A", kind: "custom" as const, title: "Scope", level: 2, fromLayout: true, typed: true, label: "1.3" },
+      { section_id: "fixed:2.2.1", kind: "fpt" as const, title: "Use Case Diagram", level: 2, fromLayout: false, typed: false },
+      { section_id: "custom:B", kind: "custom" as const, title: "Annex", level: 1, fromLayout: true, typed: true, label: "A." },
+      { section_id: "fixed:5.5", kind: "fpt" as const, title: "Glossary", level: 2, fromLayout: false, typed: false }
+    ]
+    expect(numberSections(placed).map((n) => n.number)).toEqual(["1", "1.3", "1.4", "A", ""])
   })
 })
 
-describe("numberSections — phần đánh số La Mã (nợ T14)", () => {
+describe("numberSections - phần đánh số La Mã (nợ T14)", () => {
   const placed = (rows: [string, string, number, string][]) =>
     rows.map(([section_id, title, level, label]) => ({ section_id, kind: "fpt" as const, title, level, fromLayout: true, typed: label !== "", label }))
 
@@ -190,7 +247,7 @@ describe("numberSections — phần đánh số La Mã (nợ T14)", () => {
     ])
   })
 
-  it("La Mã làm chính số chương (`I.` › `1.1`) ⇒ không phải phần, đánh số như cũ", () => {
+  it("La Mã làm chính số chương (`I.` › `1.1`) ⇒ không phải phần; FLF-362: số in đúng như file (`I`, `II`), không đổi sang 1, 2", () => {
     const numbered = numberSections(
       placed([
         ["fixed:1", "Introduction", 1, "I"],
@@ -199,7 +256,7 @@ describe("numberSections — phần đánh số La Mã (nợ T14)", () => {
         ["fixed:2.1", "Actors", 2, "2.1"]
       ])
     )
-    expect(numbered.map((n) => n.number)).toEqual(["1", "1.1", "2", "2.1"])
+    expect(numbered.map((n) => n.number)).toEqual(["I", "1.1", "II", "2.1"])
   })
 
   it("romanValue", () => {
@@ -210,13 +267,26 @@ describe("numberSections — phần đánh số La Mã (nợ T14)", () => {
 describe("buildLayoutSections", () => {
   const build = (s: Spine = spine()) => buildLayoutSections(s, LAYOUT, [], { diagramPng: (id) => `ref:${id}` })
 
+  it("FLF-362 (B6): file không đánh số ⇒ không mục nào có số, dẫn chiếu tính năng trong bảng mô tả màn hình ghi theo tên", () => {
+    const plain: TemplateLayout = { ...LAYOUT, layout: LAYOUT.layout.map((l) => ({ ...l, heading_text: l.heading_text.replace(/^[\d.]+\s+/, "") })) }
+    const s = spine()
+    s.screens = [{ id: "S01", feature_id: "F-4", name: "Đăng ký", description: "Form đăng ký", flow_to: [], is_popup: false } as never]
+    const { sections, numbers } = buildLayoutSections(s, plain, [], { diagramPng: (id) => `ref:${id}` })
+    expect(sections.every((x) => !x.number)).toBe(true)
+    expect(numbers.size).toBe(0)
+    const screensTable = sections.find((x) => x.id === "fixed:3.1.2")?.blocks.find((b) => b.type === "table")
+    expect(JSON.stringify(screensTable)).toContain('"text":"Chức năng"')
+  })
+
   it("section FPT: nội dung từ Spine, tiêu đề + cấp theo file, heading con dời cấp theo; nhãn cố định tiếng Việt", () => {
     const { sections } = build()
     const fn = sections.find((s) => s.id === "function:FN01")!
     expect(fn).toMatchObject({ heading: "Đăng ký", level: 2 })
-    expect(fn.blocks[0]).toEqual({ type: "paragraph", runs: [{ text: "Kích hoạt: ", bold: true }, { text: "Học viên bấm Đăng ký." }] })
-    // heading "Normal Flow" level 4 ở mẫu FPT (function level 3) ⇒ level 3 khi function ở cấp 2
-    expect(fn.blocks).toContainEqual({ type: "heading", level: 3, text: "Luồng chính" })
+    // FLF-361: mục chức năng dựng từ Spine theo khung FPT (4 tiêu đề con), heading con dời cấp theo mục (function cấp 2 ⇒ 3)
+    expect(fn.blocks.filter((b) => b.type === "heading")).toEqual(
+      ["Kích hoạt chức năng", "Mô tả chức năng", "Bố cục màn hình", "Chi tiết chức năng"].map((text) => ({ type: "heading", level: 3, text }))
+    )
+    expect(fn.blocks[1]).toMatchObject({ type: "bullet_list", items: [expect.anything(), [{ text: "Thời điểm / tần suất: ", bold: true }, { text: "Học viên bấm Đăng ký." }]] })
     const perf = sections.find((s) => s.id === "fixed:4.2.3")!
     expect(perf.heading).toBe("Hiệu năng")
     expect(perf.blocks[0]).toMatchObject({ type: "table", header: [[{ text: "Yêu cầu" }], [{ text: "Chỉ số" }], [{ text: "Ngưỡng" }], [{ text: "Ưu tiên" }]] })
@@ -242,7 +312,7 @@ describe("buildLayoutSections", () => {
     expect(titles.get("custom:CS02")).toBe("Phụ lục A Biên bản họp")
   })
 
-  it("section rỗng vẫn có mặt (FE hiện 'chưa có nội dung — chạy step'); partial bỏ section FPT rỗng", () => {
+  it("section rỗng vẫn có mặt (FE hiện 'chưa có nội dung - chạy step'); partial bỏ section FPT rỗng", () => {
     expect(build().sections.find((s) => s.id === "fixed:5.1")).toMatchObject({ heading: "Quy tắc nghiệp vụ", blocks: [] })
     const partial = buildLayoutSections(spine(), LAYOUT, [], { partial: true, diagramPng: () => undefined })
     expect(partial.sections.map((s) => s.id)).not.toContain("fixed:5.1")
@@ -251,11 +321,13 @@ describe("buildLayoutSections", () => {
   it("ngôn ngữ en ⇒ nhãn tiếng Anh như mode 2", () => {
     const { sections } = buildLayoutSections(spine(), { ...LAYOUT, language: "en" }, [], { diagramPng: () => undefined })
     expect(sections.find((s) => s.id === "fixed:5.1")?.heading).toBe("Business Rules")
-    expect(sections.find((s) => s.id === "function:FN01")?.blocks[0]).toMatchObject({ runs: [{ text: "Trigger: " }, { text: "Học viên bấm Đăng ký." }] })
+    const fn = sections.find((s) => s.id === "function:FN01")!
+    expect(fn.blocks[0]).toEqual({ type: "heading", level: 3, text: "Function trigger" })
+    expect(JSON.stringify(fn.blocks)).toContain('"text":"Timing frequency: "')
   })
 })
 
-describe("FLF-252 — bảng Non-Screen Functions + chức năng chỉ có ở bảng (SRS WDP301)", () => {
+describe("FLF-252 - bảng Non-Screen Functions + chức năng chỉ có ở bảng (SRS WDP301)", () => {
   const fn = (id: string, name: string, feature_id: string, screen_id: string | null, order: number, detailed: boolean): Spine["functions"][number] => ({
     id,
     screen_id,
@@ -350,7 +422,7 @@ describe("FLF-252 — bảng Non-Screen Functions + chức năng chỉ có ở b
   })
 })
 
-describe("FLF-252 — mục chức năng in theo file gốc", () => {
+describe("FLF-252 - mục chức năng in theo file gốc", () => {
   const original = (s: Spine) => ({
     section_id: "function:FN01",
     source_hash: functionSourceHash(s.functions[0]),
@@ -401,9 +473,25 @@ describe("FLF-252 — mục chức năng in theo file gốc", () => {
     expect(text(fn.blocks)).not.toContain("Function Trigger")
     expect(fn.blocks[0]).toEqual({ type: "paragraph", runs: [{ text: "Screen layout:" }] })
   })
+
+  it("FLF-373: SRS có sẵn ⇒ câu có ký hiệu wireframe `{ … }` / `[ … ]` của file giữ nguyên; đoạn trọn trong ngoặc vẫn bỏ", () => {
+    const s = withContinuation(spine())
+    const INTERFACE = 'Interface: Student List screen: "{ Search" text, ""Search by name or email " | [ Search ] }" text, "{ Status filter" text, "^All statuses ^ }" text, Show inactive students checkbox'
+    const base = original(s)
+    const withInterface = { ...base, blocks: [...base.blocks, { kind: "list_item" as const, text: INTERFACE, rows: null, image_ref: null }, { kind: "paragraph" as const, text: "[Describe the alternative flows of the function.]", rows: null, image_ref: null }] }
+    const tpl: TemplateLayout = { ...template(s), functionOriginals: [withInterface] }
+
+    const kept = text(buildLayoutSections(s, { ...tpl, existingSrs: true }, [], { diagramPng: (id) => `ref:${id}` }).sections.find((x) => x.id === "function:FN01")!.blocks)
+    expect(kept).toContain(JSON.stringify(INTERFACE).slice(1, -1))
+    expect(kept).not.toContain("Describe the alternative flows")
+
+    // dự án theo mẫu (không phải SRS có sẵn) ⇒ luật FLF-364 như cũ: đoạn ngoặc trong câu là hướng dẫn
+    const stripped = text(buildLayoutSections(s, tpl, [], { diagramPng: (id) => `ref:${id}` }).sections.find((x) => x.id === "function:FN01")!.blocks)
+    expect(stripped).not.toContain("[ Search ]")
+  })
 })
 
-describe("mẫu IEEE — nhiều heading cùng một section FPT (Reliability + Availability ⇒ 4.2.2)", () => {
+describe("mẫu IEEE - nhiều heading cùng một section FPT (Reliability + Availability ⇒ 4.2.2)", () => {
   const nfr = (id: string, statement: string): Spine["nfrs"][number] => ({ id, category: "reliability", kind: "descriptive", statement, priority: null })
   const ieee = (): Spine => ({
     ...createEmptySpine({ name: "Lumen" }),
@@ -467,5 +555,332 @@ describe("customBlocks", () => {
       { type: "paragraph", runs: [{ text: "[Image]", italic: true }] },
       { type: "image", png: "QUJD" }
     ])
+  })
+})
+
+describe("phần nhỏ slot:* của mẫu khách (FLF-278 trên FLF-335/336)", () => {
+  it("fixed source Scope owns goals, Business Rules owns all tiers, and Messages retains its source columns", () => {
+    const s = spine()
+    s.project.goals = ["Increase club participation"]
+    s.project.release_scope.in = ["Club registration"]
+    s.business_rules = [
+      { id: "BR-H", tier: "high", statement: "Only enrolled students may join", source_validation_ids: [] },
+      { id: "BR-D", tier: "detail", statement: "An application needs approval", source_validation_ids: [] }
+    ]
+    s.messages = [
+      { id: "M1", code: "APPROVED", text: "Your application was approved", function_ids: [], type: "success", context: "After a club approves the application" },
+      // Spine cũ không có loại / ngữ cảnh ⇒ ô trống
+      { id: "M2", code: "PENDING", text: "Your application is waiting for review", function_ids: [] }
+    ]
+    const layout = [entry(0, "1 Introduction", 1, "fixed:1"), entry(1, "1.2 Scope", 2, "custom:OLD-SCOPE"),
+      entry(2, "5.1 Business Rules", 2, "custom:OLD-RULES"), entry(3, "5.2 Messages", 2, "fixed:5.2")]
+    const { sections } = buildLayoutSections(s, { language: "en", fixedTemplate: true, layout }, [], { diagramPng: () => undefined })
+    expect(JSON.stringify(sections[0].blocks)).not.toContain("Increase club participation")
+    expect(JSON.stringify(sections[0].blocks)).not.toContain("Only enrolled students")
+    expect(JSON.stringify(sections[1].blocks)).toContain("Increase club participation")
+    expect(sections[2].blocks).toEqual([{ type: "table", header: [[{ text: "ID" }], [{ text: "Rule" }]], rows: [
+      [[{ text: "BR-H" }], [{ text: "Only enrolled students may join" }]],
+      [[{ text: "BR-D" }], [{ text: "An application needs approval" }]]
+    ] }])
+    // P07: cột Type / Context lấy từ Spine
+    expect(sections[3].blocks).toEqual([{ type: "table", header: [[{ text: "Code" }], [{ text: "Type" }], [{ text: "Context" }], [{ text: "Content" }]], rows: [
+      [[{ text: "APPROVED" }], [{ text: "Success" }], [{ text: "After a club approves the application" }], [{ text: "Your application was approved" }]],
+      [[{ text: "PENDING" }], [{ text: "" }], [{ text: "" }], [{ text: "Your application is waiting for review" }]]
+    ] }])
+    const withSeparateGoals = buildLayoutSections(s, { language: "en", fixedTemplate: true, layout: [...layout, entry(4, "Goals", 2, "slot:goals")] }, [], { diagramPng: () => undefined })
+    expect(JSON.stringify(withSeparateGoals.sections.find((x) => x.id === "slot:scope")!.blocks)).not.toContain("Increase club participation")
+    s.messages = []
+    const empty = buildLayoutSections(s, { language: "en", fixedTemplate: true, layout }, [], { diagramPng: () => undefined })
+    expect(empty.sections.find((x) => x.id === "slot:messages")!.blocks).toEqual([])
+  })
+
+  it("real FU template projects populated data into source Purpose, Scope and FR table", async () => {
+    const { blocks } = await parseDocument(await readFile(new URL("../../../fixtures/fixed-template-fu-it-srs-01.docx", import.meta.url)))
+    const profile = matchProfile(blocks)
+    const sectionMap = assignBlockSections(blocks, profile.heading_map)
+    const built = buildLayout(blocks.map((b) => ({ ...b, section_id: sectionMap.get(b.block_id) ?? null })), new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
+    const s = spine()
+    s.project.release_scope = { in: ["Manage clubs"], out: ["Process payments"] }
+    s.custom_sections = built.customSections
+    const repaired = repairFixedTemplateLayout(built.layout, profile.heading_map.map((h) => ({ ...h, level: blocks.find((b) => b.block_id === h.block_id)!.level! })))
+    expect(repaired.filter((e) => e.heading_text.trim()).map((e) => e.heading_text)).toEqual(profile.heading_map.map((h) => h.heading_text))
+    const { sections } = buildLayoutSections(s, { layout: repaired, language: "en", fixedTemplate: true }, [], { diagramPng: () => undefined })
+    const purpose = sections.find((x) => /\bPurpose\b/.test(x.heading))!
+    const scope = sections.find((x) => /\bScope\b/.test(x.heading))!
+    expect(JSON.stringify(purpose.blocks)).toContain(s.project.vision)
+    expect(JSON.stringify(scope.blocks)).toContain("Manage clubs")
+    expect(JSON.stringify(scope.blocks)).toContain("Process payments")
+    const intro = sections.find((x) => /Introduction/.test(x.heading))!
+    expect(JSON.stringify(intro.blocks)).not.toContain(s.project.vision)
+    expect(JSON.stringify(intro.blocks)).not.toContain("Manage clubs")
+    const functional = sections.find((x) => /Functional Requirements/.test(x.heading))!
+    expect(functional.blocks[0]).toMatchObject({ type: "table", header: [[{ text: "ID" }], [{ text: "Requirement" }], [{ text: "Priority" }]] })
+    expect(JSON.stringify(functional.blocks)).toContain(s.functions[0].name)
+    expect(sections.flatMap((x) => x.blocks).some((b) => b.type === "heading")).toBe(false)
+    expect(sections.some((x) => x.id === "function:FN01")).toBe(false)
+    expect(JSON.stringify(purpose.blocks)).not.toContain("[Describe")
+  })
+
+  it("retains dependency prose when a cached custom assumptions heading is rebound", () => {
+    const s = spine()
+    s.assumptions = [{ id: "A01", statement: "Staff have accounts", status: "confirmed" } as Spine["assumptions"][number]]
+    s.custom_sections = [{ id: "DEP", heading: "2.5 Assumptions and Dependencies", level: 2, source: "import", blocks: [
+      { kind: "paragraph", text: "Depends on university identity service", rows: null, image_ref: null },
+      { kind: "paragraph", text: "[Describe assumptions and dependencies]", rows: null, image_ref: null }
+    ] }]
+    const repaired = repairFixedTemplateLayout([entry(0, "2.5 Assumptions and Dependencies", 2, "custom:DEP")], [
+      { block_id: "B1", heading_text: "2.5 Assumptions and Dependencies", level: 2, section_id: "fixed:5.4" }
+    ])
+    const { sections } = buildLayoutSections(s, { language: "en", fixedTemplate: true, layout: repaired }, [], { diagramPng: () => undefined })
+    expect(JSON.stringify(sections[0].blocks)).toContain("Staff have accounts")
+    expect(JSON.stringify(sections[0].blocks)).toContain("Depends on university identity service")
+    expect(JSON.stringify(sections[0].blocks)).not.toContain("[Describe")
+  })
+
+  it("source repair preserves repeated headings and attaches continuations to the original owner", () => {
+    const repaired = repairFixedTemplateLayout([
+      entry(0, "1 Introduction", 1, "fixed:1"), entry(1, "", 2, "custom:BODY"), entry(2, "2 Introduction", 1, "fixed:1")
+    ], [
+      { block_id: "B1", heading_text: "1 Introduction", level: 1, section_id: "fixed:1" },
+      { block_id: "B2", heading_text: "1.1 Purpose", level: 2, section_id: "fixed:1" },
+      { block_id: "B3", heading_text: "2 Introduction", level: 1, section_id: "fixed:1" }
+    ])
+    expect(repaired.map((x) => [x.heading_text, x.section_id, x.level])).toEqual([
+      ["1 Introduction", "fixed:1", 1], ["", "custom:BODY", 2], ["1.1 Purpose", "slot:vision", 2], ["2 Introduction", "group:source:B3", 1]
+    ])
+  })
+
+  const slotLayout: TemplateLayout = {
+    language: "en",
+    fixedTemplate: true,
+    layout: [entry(0, "1 Introduction", 1, "group:intro"), entry(1, "1.1 Purpose", 2, "slot:vision"), entry(2, "1.2 Product Scope", 2, "slot:scope"), entry(3, "2 Actors", 1, "fixed:2.1")]
+  }
+  const withScope = (): Spine => {
+    const s = spine()
+    s.project.release_scope = { in: ["Online courses"], out: ["Payments"] }
+    return s
+  }
+
+  it("heading nhận đúng một phần dữ liệu; mục FPT cha không bị chèn lại", () => {
+    const ids = placeSections(withScope(), { ...slotLayout, fixedTemplate: false }).map((p) => p.section_id)
+    expect(ids).toContain("slot:vision")
+    expect(ids).not.toContain("fixed:1")
+    const { sections } = buildLayoutSections(withScope(), slotLayout, [], { diagramPng: () => undefined })
+    const purpose = sections.find((s) => s.id === "slot:vision")!
+    expect(purpose.heading).toBe("Purpose")
+    expect(JSON.stringify(purpose.blocks)).toContain("Lumen là nền tảng học trực tuyến.")
+    const scope = sections.find((s) => s.id === "slot:scope")!
+    const text = JSON.stringify(scope.blocks)
+    expect(text).toContain("Online courses")
+    expect(text).toContain("Payments")
+    expect(scope.blocks.some((b) => b.type === "heading")).toBe(false)
+    // Mẫu bắt buộc: nhãn là dòng thường, không phải đoạn đậm giống heading
+    expect(scope.blocks).toContainEqual({ type: "paragraph", runs: [{ text: "In Scope:" }] })
+  })
+
+  it("repairs cached child bindings, preserves repeated and empty source headings, and reports absent data", () => {
+    const s = withScope()
+    s.project.goals = ["Increase access"]
+    s.custom_sections.push({ id: "NEW", heading: "New appendix", level: 1, source: "import", blocks: [] })
+    const template: TemplateLayout = { language: "en", fixedTemplate: true, layout: [
+      entry(0, "1 Introduction", 1, "fixed:1"),
+      entry(1, "1.1 Purpose", 2, "custom:OLD"),
+      entry(2, "1.2 Scope", 2, "fixed:1"),
+      entry(3, "2 Actors", 1, "fixed:2.1"),
+      entry(4, "3 Additional Actors", 1, "fixed:2.1"),
+      entry(5, "4 Notes", 1, "custom:MISSING")
+    ] }
+    const { sections, omittedSectionIds } = buildLayoutSections(s, template, [], { partial: true, diagramPng: () => undefined })
+    expect(sections.map((x) => x.heading)).toEqual(["Introduction", "Purpose", "Scope", "Actors", "Additional Actors", "Notes"])
+    expect(JSON.stringify(sections[0].blocks)).not.toContain(s.project.vision)
+    expect(JSON.stringify(sections[0].blocks)).not.toContain("Online courses")
+    expect(JSON.stringify(sections[1].blocks)).toContain(s.project.vision)
+    expect(JSON.stringify(sections[2].blocks)).toContain("Online courses")
+    expect(sections.flatMap((x) => x.blocks).some((b) => b.type === "heading")).toBe(false)
+    expect(sections[4].blocks).toEqual([])
+    expect(omittedSectionIds).toContain("function:FN01")
+    expect(omittedSectionIds).toContain("custom:NEW")
+  })
+})
+
+describe("FLF-364 (câu 10) - chữ hướng dẫn của mẫu in khi mục trống, có dữ liệu thì bỏ", () => {
+  // Mẫu thường (không bắt buộc); mẫu bắt buộc (FLF-371) xuất vào chính file mẫu nên luôn bỏ hướng dẫn
+  const guideLayout: TemplateLayout = {
+    language: "vi",
+    fixedTemplate: false,
+    layout: [
+      { ...entry(0, "1 Mục đích", 1, "slot:vision"), template_guidance: ["[Mô tả mục đích của tài liệu]"] },
+      { ...entry(1, "2 Tác nhân", 1, "fixed:2.1"), template_guidance: ["[Liệt kê các tác nhân và vai trò]"] },
+      entry(2, "3 Ghi chú nhóm", 1, "custom:CS01")
+    ]
+  }
+  const empty = (custom: Spine["custom_sections"][number]["blocks"]): Spine => ({
+    ...createEmptySpine({ name: "Lumen", domain: "E-learning" }),
+    custom_sections: [{ id: "CS01", heading: "3 Ghi chú nhóm", level: 1, blocks: custom, source: "import" }]
+  })
+  const textOf = (sections: { id: string; blocks: unknown[] }[], id: string) => JSON.stringify(sections.find((s) => s.id === id)?.blocks ?? [])
+  const para = (text: string) => ({ kind: "paragraph" as const, text, rows: null, image_ref: null })
+
+  it("mục FPT / phần nhỏ / mục riêng chưa có dữ liệu ⇒ in nguyên văn hướng dẫn (giữ ngoặc)", () => {
+    const { sections } = buildLayoutSections(empty([para("[Ghi lịch họp, người tham gia]")]), guideLayout, [], { diagramPng: () => undefined })
+    expect(textOf(sections, "slot:vision")).toContain("[Mô tả mục đích của tài liệu]")
+    expect(textOf(sections, "fixed:2.1")).toContain("[Liệt kê các tác nhân và vai trò]")
+    expect(textOf(sections, "custom:CS01")).toContain("[Ghi lịch họp, người tham gia]")
+  })
+
+  it("mẫu bắt buộc (FLF-371) ⇒ không in hướng dẫn ở mục riêng / phần nhỏ", () => {
+    const { sections } = buildLayoutSections(empty([para("[Ghi lịch họp, người tham gia]")]), { ...guideLayout, fixedTemplate: true }, [], { diagramPng: () => undefined })
+    expect(textOf(sections, "custom:CS01")).not.toContain("[Ghi lịch họp")
+    expect(textOf(sections, "slot:vision")).not.toContain("[Mô tả mục đích")
+  })
+
+  it("có dữ liệu (kể cả thêm qua CR) ⇒ không in hướng dẫn; đoạn ngoặc hướng dẫn trong câu cũng bỏ", () => {
+    const s = empty([para("[Ghi lịch họp, người tham gia]"), para("Họp thứ Hai hằng tuần {ghi rõ giờ họp nếu có}.")])
+    s.project.vision = "Lumen là nền tảng học trực tuyến."
+    s.actors = [{ id: "A01", name: "Học viên", kind: "human", description: "Người học" } as never]
+    const { sections } = buildLayoutSections(s, guideLayout, [], { diagramPng: () => undefined })
+    expect(textOf(sections, "slot:vision")).not.toContain("[Mô tả mục đích")
+    expect(textOf(sections, "fixed:2.1")).not.toContain("[Liệt kê")
+    const custom = textOf(sections, "custom:CS01")
+    expect(custom).toContain("Họp thứ Hai hằng tuần.")
+    expect(custom).not.toContain("[Ghi lịch họp")
+    expect(custom).not.toContain("ghi rõ giờ họp")
+  })
+
+  it("FLF-373: SRS có sẵn ⇒ mục riêng có dữ liệu chỉ bỏ đoạn trọn trong ngoặc, đoạn ngoặc trong câu là chữ của file", () => {
+    const s = empty([para("[Ghi lịch họp, người tham gia]"), para("Họp thứ Hai hằng tuần {ghi rõ giờ họp nếu có}."), para('Màn tìm kiếm: "{ Search" text | [ Search ] }"')])
+    const custom = textOf(buildLayoutSections(s, { ...guideLayout, existingSrs: true }, [], { diagramPng: () => undefined }).sections, "custom:CS01")
+    expect(custom).not.toContain("[Ghi lịch họp")
+    expect(custom).toContain("Họp thứ Hai hằng tuần {ghi rõ giờ họp nếu có}.")
+    expect(custom).toContain("[ Search ] }")
+  })
+})
+
+describe("FLF-390 - sơ đồ triển khai ở mục Phân tán (mẫu IEEE), activity của use case ở phần chức năng", () => {
+  const withDeployment = (): Spine => ({
+    ...spine(),
+    use_cases: [
+      {
+        id: "UC01",
+        name: "Đăng ký",
+        actor_ids: ["A01"],
+        function_ids: ["FN01"],
+        description: "",
+        includes: [],
+        extends: [],
+        activity_nodes: [
+          { id: "UC01-AN1", kind: "initial" },
+          { id: "UC01-AN2", kind: "action", name: "Nhập email", lane: "A01" },
+          { id: "UC01-AN3", kind: "final" }
+        ],
+        activity_flows: [
+          { from: "UC01-AN1", to: "UC01-AN2" },
+          { from: "UC01-AN2", to: "UC01-AN3" }
+        ]
+      }
+    ],
+    deployment_nodes: [{ id: "DN01", name: "Máy chủ web", kind: "device", parent_id: null, artifacts: [], components: ["Web App"] }],
+    deployment_links: []
+  })
+  const DESIGN: TemplateLayout = { ...LAYOUT, family: "ieee29148", layout: [...LAYOUT.layout.slice(0, 8), entry(8, "6 Thiết kế và triển khai", 1, "fixed:5.4"), entry(9, "Phụ lục A Biên bản họp", 1, "custom:CS02")] }
+
+  it("mẫu IEEE có 'Thiết kế và triển khai' mà chưa có 'Phân tán' ⇒ chèn mục Phân tán cuối nhóm đó, cấp con", () => {
+    const placed = placeSections(withDeployment(), DESIGN)
+    const at = placed.findIndex((p) => p.section_id === "slot:distribution")
+    const design = placed.findIndex((p) => p.title === "Thiết kế và triển khai")
+    expect(at).toBe(design + 1)
+    expect(placed[at]).toMatchObject({ kind: "slot", title: "Phân tán", level: placed[design].level + 1, fromLayout: false })
+  })
+
+  it("mẫu IEEE chưa có cả nhóm ⇒ chèn nhóm 'Thiết kế và triển khai' + 'Phân tán' trước Phụ lục", () => {
+    const placed = placeSections(withDeployment(), { ...LAYOUT, family: "ieee29148" })
+    const ids = placed.map((p) => p.section_id)
+    const group = ids.indexOf("group:design_implementation")
+    expect(group).toBeGreaterThan(-1)
+    expect(ids[group + 1]).toBe("slot:distribution")
+    expect(ids.indexOf("custom:CS02")).toBe(group + 2)
+  })
+
+  it("mẫu IEEE đã có heading Phân tán ⇒ không chèn thêm; không có dữ liệu triển khai ⇒ không chèn", () => {
+    const own: TemplateLayout = { ...DESIGN, layout: [...DESIGN.layout.slice(0, 9), entry(9, "6.1 Phân tán", 2, "slot:distribution"), entry(10, "Phụ lục A Biên bản họp", 1, "custom:CS02")] }
+    expect(placeSections(withDeployment(), own).filter((p) => p.section_id === "slot:distribution")).toHaveLength(1)
+    expect(placeSections({ ...withDeployment(), deployment_nodes: [] }, DESIGN).some((p) => p.section_id === "slot:distribution")).toBe(false)
+  })
+
+  it("mẫu FPT không chèn mục Phân tán (sơ đồ triển khai ở §4.1 khi người dùng yêu cầu)", () => {
+    expect(placeSections(withDeployment(), { ...LAYOUT, family: "fpt" }).some((p) => p.section_id === "slot:distribution")).toBe(false)
+    expect(placeSections(withDeployment(), LAYOUT).some((p) => p.section_id === "slot:distribution")).toBe(false)
+  })
+
+  it("bản in: sơ đồ triển khai dưới Phân tán, không lặp ở §4.1; activity của use case trong mục tính năng chứa nó", () => {
+    const s = withDeployment()
+    s.diagrams = [
+      { id: "D01", kind: "deployment", format: "puml", source: "@startuml\n@enduml\n", section: "fixed:4.1", owner_kind: null, owner_id: null, render_status: "ok", source_hash: "h", rendered_at: "2026-11-10T00:00:00.000Z" },
+      { id: "D02", kind: "activity", format: "svg", source: "<svg><title>Activity Diagram - Đăng ký</title></svg>", section: "feature:F-4", owner_kind: "use_case", owner_id: "UC01", render_status: "ok", source_hash: "h", rendered_at: "2026-11-10T00:00:00.000Z" }
+    ]
+    const { sections } = buildLayoutSections(s, DESIGN, [], { diagramPng: (id: string) => `PNG:${id}` })
+    const pngsOf = (id: string) => sections.filter((x) => x.id === id).flatMap((x) => x.blocks.flatMap((b) => (b.type === "image" ? [String(b.png)] : [])))
+    expect(pngsOf("slot:distribution")).toEqual(["PNG:D01"])
+    expect(pngsOf("fixed:4.1")).toEqual([])
+    expect(pngsOf("feature:F-4")).toEqual(["PNG:D02"])
+  })
+})
+
+
+describe("TechMart 11/11 - chức năng mới trong mẫu cố định", () => {
+  it("đứng sau mọi chức năng của file trong feature (không đổi số mục của file) và ghi mã use case như file", () => {
+    const s = spine()
+    s.functions.push({ ...s.functions[0], id: "FN09", order: 0, name: "So sánh" })
+    s.use_cases.push({ id: "UC-21", name: "So sánh", actor_ids: [], function_ids: ["FN09"], description: "", includes: [], extends: [] } as never)
+    const layout = { ...LAYOUT, fixedTemplate: true, layout: LAYOUT.layout.map((e) => (e.section_id === "function:FN01" ? { ...e, heading_text: "4.1 Đăng nhập (UC-01)" } : e)) }
+    const placed = placeSections(s, layout)
+    const ids = placed.map((p) => p.section_id)
+    expect(ids.indexOf("function:FN09")).toBe(ids.indexOf("function:FN01") + 1)
+    expect(placed.find((p) => p.section_id === "function:FN09")?.title).toBe("So sánh (UC-21)")
+  })
+})
+
+describe("FLF-411 (U2-2) - dòng chia phần của mẫu", () => {
+  it("'II. Software Requirement Specification' (heading bao, không chữ) ⇒ heading nhóm, không phải mục còn trống; heading bao có chữ vẫn là mục", () => {
+    const layout: TemplateLayout = {
+      language: "en",
+      layout: [entry(0, "I. Record of Changes", 1, "fixed:I"), entry(1, "II. Software Requirement Specification", 1, "custom:A"), entry(2, "1. Product Overview", 2, "fixed:1")]
+    }
+    const s: Spine = { ...createEmptySpine({ name: "x" }), custom_sections: [{ id: "A", heading: "II. Software Requirement Specification", level: 1, source: "import", blocks: [] }] }
+    const { sections } = buildLayoutSections(s, layout, [], { diagramPng: () => undefined })
+    const divider = sections.find((x) => x.heading.includes("Software Requirement Specification"))!
+    expect(divider.id).toBe("group:custom:A")
+    expect(divider.blocks).toEqual([])
+    const withText: Spine = {
+      ...s,
+      custom_sections: [{ id: "A", heading: "II. Software Requirement Specification", level: 1, source: "import", blocks: [{ kind: "paragraph", text: "This part specifies the system.", rows: null, image_ref: null }] }]
+    }
+    expect(buildLayoutSections(withText, layout, [], { diagramPng: () => undefined }).sections.find((x) => x.heading.includes("Software Requirement"))!.id).toBe("custom:A")
+  })
+})
+
+describe("FLF-416 chế độ 4: mục Ngoài phạm vi xuống cuối (moveToEnd)", () => {
+  it("moveSectionsToEnd: mục + mục con / phần nối đi cùng, thứ tự tương đối giữ nguyên", () => {
+    const list = [
+      { section_id: "fixed:1", level: 1 },
+      { section_id: "custom:A", level: 1 },
+      { section_id: "custom:A1", level: 2 },
+      { section_id: "custom:N", level: 1, kind: "continuation" },
+      { section_id: "fixed:2", level: 1 },
+      { section_id: "custom:B", level: 2 },
+      { section_id: "fixed:3", level: 2 }
+    ]
+    expect(moveSectionsToEnd(list, new Set(["custom:A", "custom:B"])).map((p) => p.section_id)).toEqual(
+      ["fixed:1", "fixed:2", "fixed:3", "custom:A", "custom:A1", "custom:N", "custom:B"]
+    )
+  })
+
+  it("placeSections: mục Ngoài phạm vi giữa file chuyển xuống cuối, mục FPT chèn thêm vẫn đúng chỗ", () => {
+    const layout: TemplateLayout = { ...LAYOUT, layout: [entry(0, "1 Giới thiệu", 1, "fixed:1"), entry(1, "Phụ lục A Biên bản họp", 1, "custom:CS02"), entry(2, "2 Actors", 1, "fixed:2.1")] }
+    const before = placeSections(spine(), layout).map((p) => p.section_id)
+    const after = placeSections(spine(), { ...layout, moveToEnd: ["custom:CS02"] }).map((p) => p.section_id)
+    expect(before.indexOf("custom:CS02")).toBeLessThan(before.indexOf("fixed:2.1"))
+    expect(after[after.length - 1]).toBe("custom:CS02")
+    expect(after.filter((id) => id !== "custom:CS02")).toEqual(before.filter((id) => id !== "custom:CS02"))
   })
 })

@@ -1,8 +1,8 @@
 import mongoose, { ClientSession } from "mongoose"
 import { CreditWallet } from "../../modules/credits/credit-wallet.model.js"
 import { Project } from "../../modules/project/project.model.js"
+import { Membership } from "../../modules/organization/membership.model.js"
 import { CreditTransaction } from "../../modules/credits/credit-transaction.model.js"
-import { PricingConfig } from "../../modules/admin/pricing-config.model.js"
 import { planConfig } from "../../modules/billing/plan.config.js"
 import { notify, notifyAdmins } from "../../modules/notification/notification.service.js"
 import { User } from "../../modules/user/user.model.js"
@@ -40,8 +40,17 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   [ActionType.CR_CONSISTENCY]: 2,
   // Một ảnh / lượt, output ngắn (chép chữ + mô tả) — rẻ hơn ảnh diagram của I-4
   [ActionType.CR_MATERIAL_IMAGE]: 1,
-  // FLF-267: một câu hỏi tri thức ≈ một lượt CHAT (prompt ~5 chunk). Từ chối vì không đủ căn cứ thì không gọi model, không tính
-  [ActionType.KNOWLEDGE_ANSWER]: 2
+  // FLF-333 (business-flow nguyên tắc 9, UC-79): hỏi tri thức về SRS / 29148 KHÔNG tốn credit — chống lạm dụng bằng
+  // giới hạn số câu mỗi ngày (`KNOWLEDGE_DAILY_LIMIT`), không chuyển sang trừ credit. Vẫn ghi `AiActionLog` cho admin.
+  [ActionType.KNOWLEDGE_ANSWER]: 0,
+  // FLF-338: đọc cả tài liệu thô một lượt + gán nhãn so với SRS
+  [ActionType.EXTRACT_REQUIREMENTS]: 3,
+  // FLF-395: một lượt ngắn cho cả danh sách heading chờ duyệt
+  [ActionType.SKELETON_GENERIC_NAMES]: 1,
+  // D8: một lượt mỗi mục BA chọn "chuyển vào mục có cấu trúc" / "AI giải quyết" khi đổi mẫu (đã báo credit trước ở `credit_estimate`)
+  [ActionType.TEMPLATE_MIGRATION_RESOLVE]: 3,
+  // Trợ lý Google Docs: giá cố định theo TIN NHẮN (không theo số bước gọi tool); Áp dụng / Bỏ qua đề xuất không tốn credit
+  [ActionType.GOOGLE_DOCS_AGENT]: 2
 }
 
 /** Một lần giữ credit. Truyền nguyên object này cho deduct/release. */
@@ -51,13 +60,21 @@ export interface CreditReservation {
   userId: string
   /**
    * Ví bị trừ. Là org SỞ HỮU PROJECT (business-flow.md §2: "Gọi AI trừ vào ví của org sở hữu project"),
-   * suy ra từ projectId. null = lượt gọi không gắn project ⇒ lùi về ví cá nhân như trước task-26.
+   * suy ra từ projectId; lượt gọi không gắn project ⇒ org đang chọn. Không còn ví cá nhân (FLF-310).
    */
-  organizationId: string | null
+  organizationId: string
   actionType: string
   cost: number
   projectId?: string
+  /** UC-60: step pipeline của lượt gọi — ghi lên mọi dòng sổ của reservation này. */
+  stepId?: string
   expiresAt: Date
+}
+
+/** UC-60: token của lượt gọi đã trả lời, ghi lên dòng `deduct`. */
+export interface CreditUsageTokens {
+  tokensIn: number
+  tokensOut: number
 }
 
 export interface ExpireStaleReservationsResult {
@@ -69,9 +86,8 @@ const sessionOptions = (session?: ClientSession) => (session ? { session } : {})
 
 const toObjectIdOrNull = (id?: string) => (id ? new mongoose.Types.ObjectId(id) : null)
 
-/** Khoá ví: org khi biết org, còn lại là ví cá nhân (dữ liệu chưa migrate, hoặc lượt gọi không có project). */
-const walletKey = (userId: string, organizationId: string | null) =>
-  organizationId ? { organizationId } : { userId }
+/** Khoá ví: mỗi org đúng một ví — credit chỉ nằm ở ví tổ chức (FLF-310 bỏ ví cá nhân). */
+const walletKey = (organizationId: string) => ({ organizationId })
 
 /**
  * Ví nào bị trừ cho lượt gọi này. Lấy theo ORG SỞ HỮU PROJECT chứ không theo người gọi — đúng
@@ -81,6 +97,29 @@ export const resolveWalletOrg = async (projectId?: string, session?: ClientSessi
   if (!projectId || !mongoose.isValidObjectId(projectId)) return null
   const project = await Project.findById(projectId, { organizationId: 1 }, sessionOptions(session)).lean()
   return project?.organizationId ? String(project.organizationId) : null
+}
+
+/**
+ * Ví của lượt gọi (FLF-310): có project ⇒ org sở hữu project; không có project ⇒ org đang chọn (`req.user.orgId`), chỉ
+ * khi người gọi còn là thành viên — token có thể còn mang org họ vừa bị xoá khỏi. Không xác định được org ⇒ 409, không
+ * còn lùi về ví cá nhân.
+ */
+export const walletOrgFor = async (
+  userId: string,
+  projectId: string | undefined,
+  activeOrgId: string | null | undefined,
+  session?: ClientSession
+): Promise<string> => {
+  if (projectId) {
+    const orgId = await resolveWalletOrg(projectId, session)
+    if (orgId) return orgId
+    throw new AiActionError(409, "Dự án chưa thuộc tổ chức nào nên không có ví credit để trừ.", "NO_WALLET_ORG", { projectId })
+  }
+  if (activeOrgId && mongoose.isValidObjectId(activeOrgId)) {
+    const member = await Membership.exists({ organizationId: activeOrgId, userId }).session(session ?? null)
+    if (member) return activeOrgId
+  }
+  throw new AiActionError(409, "Chưa chọn tổ chức để làm việc", "NO_ACTIVE_ORG")
 }
 
 /**
@@ -106,26 +145,33 @@ const notifyAdminsNewUser = async (userId: string): Promise<void> => {
 const ledgerInconsistent = (message: string, details: Record<string, unknown>) =>
   new AiActionError(500, message, "CREDIT_LEDGER_INCONSISTENT", details)
 
-export const getActionCost = async (actionType: string): Promise<number> => {
-  try {
-    const activePricing = await PricingConfig.findOne({ isActive: true })
-    if (activePricing?.actionCosts && typeof activePricing.actionCosts[actionType] === "number") {
-      return activePricing.actionCosts[actionType]
-    }
-  } catch (error) {
-    console.warn(`[CreditReservation] Failed to query PricingConfig, using default cost for '${actionType}'`)
-  }
+export const TOKEN_CREDIT_WEIGHTS = {
+  inputPer1k: 0.25,
+  outputPer1k: 1.0
+} as const
 
-  return DEFAULT_ACTION_COSTS[actionType] ?? 2
+/**
+ * Quyết toán credit thực tế từ token của lượt gọi (BR-01):
+ * - Action miễn phí (`reservedCost <= 0`) ⇒ `0`.
+ * - Không có số đo token ⇒ giữ nguyên `reservedCost`.
+ * - Có token ⇒ `min(reservedCost, max(1, ceil(in/1000 * 0.25 + out/1000 * 1.0)))`.
+ */
+export const calculateActualCreditCost = (reservedCost: number, tokens?: CreditUsageTokens): number => {
+  if (!Number.isFinite(reservedCost) || reservedCost <= 0) return 0
+  if (tokens === undefined) return reservedCost
+  const tokensIn = Number.isFinite(tokens.tokensIn) ? Math.max(0, tokens.tokensIn) : 0
+  const tokensOut = Number.isFinite(tokens.tokensOut) ? Math.max(0, tokens.tokensOut) : 0
+  const weighted =
+    (tokensIn / 1000) * TOKEN_CREDIT_WEIGHTS.inputPer1k +
+    (tokensOut / 1000) * TOKEN_CREDIT_WEIGHTS.outputPer1k
+  return Math.min(reservedCost, Math.max(1, Math.ceil(weighted)))
 }
 
-export const getOrCreateWallet = async (
-  userId: string,
-  session?: ClientSession,
-  organizationId: string | null = null
-) => {
+export const getActionCost = async (actionType: string): Promise<number> => DEFAULT_ACTION_COSTS[actionType] ?? 2
+
+export const getOrCreateWallet = async (userId: string, session: ClientSession | undefined, organizationId: string) => {
   const options = sessionOptions(session)
-  const filter = walletKey(userId, organizationId)
+  const filter = walletKey(organizationId)
   const wallet = await CreditWallet.findOne(filter, null, options)
   if (wallet) return wallet
 
@@ -135,7 +181,7 @@ export const getOrCreateWallet = async (
       [
         {
           userId: new mongoose.Types.ObjectId(userId),
-          organizationId: organizationId ? new mongoose.Types.ObjectId(organizationId) : null,
+          organizationId: new mongoose.Types.ObjectId(organizationId),
           balance: initialCredits,
           reserved: 0
         }
@@ -164,16 +210,23 @@ export const getOrCreateWallet = async (
   }
 }
 
+/** `activeOrgId`: org đang chọn của người gọi — ví dùng khi lượt gọi không gắn project (FLF-310). */
 export const reserveCredit = async (
   userId: string,
   actionType: string,
   projectId?: string,
-  session?: ClientSession
+  session?: ClientSession,
+  activeOrgId?: string | null,
+  stepId?: string
 ): Promise<CreditReservation> => {
   const cost = await getActionCost(actionType)
   const options = sessionOptions(session)
-  const organizationId = await resolveWalletOrg(projectId, session)
-  const filter = walletKey(userId, organizationId)
+  const organizationId = await walletOrgFor(userId, projectId, activeOrgId, session)
+  // FLF-333: lượt 0 credit (hỏi tri thức) không đụng ví, không ghi sổ giữ / trừ — deduct / release là no-op
+  if (cost === 0) {
+    return { reservationId: new mongoose.Types.ObjectId().toString(), userId, organizationId, actionType, cost: 0, projectId, stepId, expiresAt: new Date(Date.now() + env.CREDIT_RESERVE_TTL_MS) }
+  }
+  const filter = walletKey(organizationId)
   await getOrCreateWallet(userId, session, organizationId)
 
   // Kiểm tra khả dụng và giữ credit trong MỘT lệnh atomic — tránh hai request
@@ -206,14 +259,15 @@ export const reserveCredit = async (
     [
       {
         userId: new mongoose.Types.ObjectId(userId),
-        organizationId: toObjectIdOrNull(organizationId ?? undefined),
+        organizationId: new mongoose.Types.ObjectId(organizationId),
         projectId: toObjectIdOrNull(projectId),
         actionType,
         amount: cost,
         type: "reserve",
         state: "reserved",
         expires_at: expiresAt,
-        balanceAfter: wallet.balance - wallet.reserved
+        balanceAfter: wallet.balance - wallet.reserved,
+        stepId: stepId ?? null
       }
     ],
     options
@@ -226,71 +280,109 @@ export const reserveCredit = async (
     actionType,
     cost,
     projectId,
+    stepId,
     expiresAt
   }
 }
 
-const maybeNotifyLowCredit = (userId: string, balanceBefore: number, balanceAfter: number) => {
+const maybeNotifyLowCredit = async (
+  organizationId: string,
+  fallbackUserId: string,
+  balance: number,
+  reserved: number,
+  actualCost: number
+): Promise<void> => {
   const threshold = planConfig.lowCreditThreshold
+  const availableAfter = balance - reserved
+  const availableBefore = balance + actualCost - reserved
   // Chỉ báo khi VỪA vượt ngưỡng, không báo lại mỗi lần trừ tiếp
-  if (balanceBefore >= threshold && balanceAfter < threshold) {
-    void notify(userId, {
-      type: "low_credit",
+  if (!(availableBefore >= threshold && availableAfter < threshold)) return
+
+  try {
+    const leads = await Membership.find({ organizationId, role: "lead" }).select("userId").lean()
+    const leadIds = [...new Set(leads.map((m) => m.userId).filter(Boolean).map(String))]
+    const recipients = leadIds.length > 0 ? leadIds : [fallbackUserId]
+    const payload = {
+      organizationId,
+      type: "low_credit" as const,
       title: "Credit sắp hết",
-      body: `Số dư của bạn còn ${balanceAfter} credit. Nạp thêm để tiếp tục sử dụng AI.`,
+      body: `Số dư khả dụng của tổ chức còn ${availableAfter} credit. Nạp thêm để tiếp tục sử dụng AI.`,
       link: "/home/billing",
-      meta: { balance: balanceAfter, threshold }
-    })
+      meta: { balance: availableAfter, available: availableAfter, reserved, threshold }
+    }
+    await Promise.all(recipients.map((leadId) => notify(leadId, payload)))
+  } catch (error) {
+    console.warn(`[CreditReservation] Không gửi được thông báo low_credit cho org ${organizationId}:`, error)
   }
 }
 
+const normalizeTokenCount = (n: number): number => (Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0)
+
 /**
- * Trừ credit cho một reservation sau khi AI chạy VÀ parse thành công.
- * Idempotent: gọi lại trên reservation đã deducted là no-op.
+ * Trừ credit thực tế cho một reservation sau khi AI chạy VÀ parse thành công, hoàn phần hold dư về ví khả dụng.
+ * Idempotent: gọi lại trên reservation đã deducted trả về số credit đã quyết toán trước đó.
  */
 export const deductCredit = async (
   reservation: CreditReservation,
-  session?: ClientSession
-): Promise<void> => {
-  const { reservationId, userId, organizationId, actionType, cost, projectId } = reservation
+  session?: ClientSession,
+  tokens?: CreditUsageTokens
+): Promise<number> => {
+  const { reservationId, userId, organizationId, actionType, cost, projectId, stepId } = reservation
+  if (cost <= 0) return 0 // FLF-333: lượt miễn phí không có reservation trong sổ
   const options = sessionOptions(session)
-  const key = walletKey(userId, organizationId)
+  const key = walletKey(organizationId)
+  const actualCost = calculateActualCreditCost(cost, tokens)
+  const normalizedTokens = tokens
+    ? { tokensIn: normalizeTokenCount(tokens.tokensIn), tokensOut: normalizeTokenCount(tokens.tokensOut) }
+    : undefined
 
   // Claim reservation trước (chặn trừ hai lần). Cron có thể đã expire trước khi AI kịp
   // trả lời: vẫn tính phí, claim expired → deducted.
   let previousState: "reserved" | "expired" = "reserved"
+  // UC-60: token cũng ghi lên dòng reserve — lịch sử hiện dòng này kèm trạng thái `deducted`
+  const claimSet = {
+    state: "deducted",
+    ...(normalizedTokens ? { tokensIn: normalizedTokens.tokensIn, tokensOut: normalizedTokens.tokensOut } : {})
+  }
   let claimed = await CreditTransaction.findOneAndUpdate(
     { _id: reservationId, type: "reserve", state: "reserved" },
-    { $set: { state: "deducted" } },
+    { $set: claimSet },
     { ...options, returnDocument: "after" }
   )
   if (!claimed) {
     previousState = "expired"
     claimed = await CreditTransaction.findOneAndUpdate(
       { _id: reservationId, type: "reserve", state: "expired" },
-      { $set: { state: "deducted" } },
+      { $set: claimSet },
       { ...options, returnDocument: "after" }
     )
   }
 
   if (!claimed) {
     const current = await CreditTransaction.findOne({ _id: reservationId }, null, options)
-    if (current?.state === "deducted") return
+    if (current?.state === "deducted") {
+      const existing = await CreditTransaction.findOne(
+        { reservationId: new mongoose.Types.ObjectId(reservationId), type: "deduct" },
+        null,
+        options
+      )
+      return existing?.amount ?? actualCost
+    }
     throw ledgerInconsistent("Không thể trừ credit cho reservation không hợp lệ", {
       reservationId,
       state: current?.state ?? null
     })
   }
 
-  // reserved: trừ cả balance lẫn phần đang giữ.
-  // expired: phần giữ đã trả về ví ⇒ chỉ trừ trên số KHẢ DỤNG (balance - reserved),
+  // reserved: trừ actualCost khỏi balance và nhả toàn bộ hold `cost` khỏi reserved (hoàn phần dư về available).
+  // expired: phần giữ đã trả về ví ⇒ chỉ trừ actualCost trên số KHẢ DỤNG (balance - reserved),
   // không được đẩy khả dụng xuống âm khi reservation khác đang giữ credit.
   const walletFilter =
     previousState === "reserved"
-      ? { ...key, balance: { $gte: cost }, reserved: { $gte: cost } }
-      : { ...key, $expr: { $gte: [{ $subtract: ["$balance", "$reserved"] }, cost] } }
+      ? { ...key, balance: { $gte: actualCost }, reserved: { $gte: cost } }
+      : { ...key, $expr: { $gte: [{ $subtract: ["$balance", "$reserved"] }, actualCost] } }
   const walletUpdate =
-    previousState === "reserved" ? { $inc: { balance: -cost, reserved: -cost } } : { $inc: { balance: -cost } }
+    previousState === "reserved" ? { $inc: { balance: -actualCost, reserved: -cost } } : { $inc: { balance: -actualCost } }
 
   const wallet = await CreditWallet.findOneAndUpdate(walletFilter, walletUpdate, {
     ...options,
@@ -307,6 +399,7 @@ export const deductCredit = async (
     throw ledgerInconsistent("Ví credit không khớp với reservation khi trừ credit", {
       reservationId,
       cost,
+      actualCost,
       previousState
     })
   }
@@ -315,20 +408,24 @@ export const deductCredit = async (
     [
       {
         userId: new mongoose.Types.ObjectId(userId),
-        organizationId: toObjectIdOrNull(organizationId ?? undefined),
+        organizationId: new mongoose.Types.ObjectId(organizationId),
         projectId: toObjectIdOrNull(projectId),
         actionType,
-        amount: cost,
+        amount: actualCost,
         type: "deduct",
         reservationId: new mongoose.Types.ObjectId(reservationId),
         // Cùng quy ước "khả dụng sau" với reserve/release/purchase
-        balanceAfter: wallet.balance - wallet.reserved
+        balanceAfter: wallet.balance - wallet.reserved,
+        stepId: stepId ?? null,
+        tokensIn: normalizedTokens?.tokensIn ?? null,
+        tokensOut: normalizedTokens?.tokensOut ?? null
       }
     ],
     options
   )
 
-  maybeNotifyLowCredit(userId, wallet.balance + cost, wallet.balance)
+  await maybeNotifyLowCredit(organizationId, userId, wallet.balance, wallet.reserved, actualCost)
+  return actualCost
 }
 
 /**
@@ -340,7 +437,8 @@ export const releaseCredit = async (
   reservation: CreditReservation,
   session?: ClientSession
 ): Promise<boolean> => {
-  const { reservationId, userId, organizationId, actionType, cost, projectId } = reservation
+  const { reservationId, userId, organizationId, actionType, cost, projectId, stepId } = reservation
+  if (cost === 0) return true // FLF-333: lượt miễn phí — không có gì để hoàn
   const options = sessionOptions(session)
 
   const claimed = await CreditTransaction.findOneAndUpdate(
@@ -351,7 +449,7 @@ export const releaseCredit = async (
   if (!claimed) return false
 
   const wallet = await CreditWallet.findOneAndUpdate(
-    { ...walletKey(userId, organizationId), reserved: { $gte: cost } },
+    { ...walletKey(organizationId), reserved: { $gte: cost } },
     { $inc: { reserved: -cost } },
     { ...options, returnDocument: "after" }
   )
@@ -367,13 +465,14 @@ export const releaseCredit = async (
     [
       {
         userId: new mongoose.Types.ObjectId(userId),
-        organizationId: toObjectIdOrNull(organizationId ?? undefined),
+        organizationId: new mongoose.Types.ObjectId(organizationId),
         projectId: toObjectIdOrNull(projectId),
         actionType,
         amount: cost,
         type: "release",
         reservationId: new mongoose.Types.ObjectId(reservationId),
-        balanceAfter: wallet.balance - wallet.reserved
+        balanceAfter: wallet.balance - wallet.reserved,
+        stepId: stepId ?? null
       }
     ],
     options
@@ -384,7 +483,7 @@ export const releaseCredit = async (
 
 export interface DeductedRefund {
   userId: string
-  /** Ví bị hoàn — cùng quy ước với CreditReservation. Bỏ trống ⇒ ví cá nhân. */
+  /** Ví bị hoàn — cùng quy ước với CreditReservation. Bỏ trống ⇒ org sở hữu `projectId`. */
   organizationId?: string | null
   actionType: string
   amount: number
@@ -397,12 +496,15 @@ export interface DeductedRefund {
  * Không idempotent: bên gọi phải tự chặn hoàn hai lần (meter claim dòng `usage` `deducted → refunded` trước).
  */
 export const refundDeductedCredit = async (refund: DeductedRefund, session?: ClientSession): Promise<void> => {
-  const { userId, organizationId = null, actionType, amount, projectId } = refund
+  const { userId, actionType, amount, projectId } = refund
   if (amount <= 0) return
   const options = sessionOptions(session)
+  // Trước FLF-310 bỏ trống org ⇒ hoàn nhầm về ví cá nhân dù lượt gọi đã trừ ví org của project
+  const organizationId = refund.organizationId ?? (await resolveWalletOrg(projectId, session))
+  if (!organizationId) throw ledgerInconsistent("Không xác định được ví tổ chức để hoàn khoản đã trừ", { userId, amount, projectId: projectId ?? null })
 
   const wallet = await CreditWallet.findOneAndUpdate(
-    walletKey(userId, organizationId),
+    walletKey(organizationId),
     { $inc: { balance: amount } },
     { ...options, returnDocument: "after" }
   )
@@ -412,7 +514,7 @@ export const refundDeductedCredit = async (refund: DeductedRefund, session?: Cli
     [
       {
         userId: new mongoose.Types.ObjectId(userId),
-        organizationId: toObjectIdOrNull(organizationId ?? undefined),
+        organizationId: new mongoose.Types.ObjectId(organizationId),
         projectId: toObjectIdOrNull(projectId),
         actionType,
         amount,
@@ -450,15 +552,14 @@ export const expireStaleReservations = async (
     if (!claimed) continue
 
     // Nhả về ĐÚNG ví đã giữ: reservation ghi sẵn organizationId lúc reserve. Dùng userId ở đây sẽ nhả
-    // trượt ví org và để credit treo vĩnh viễn.
+    // trượt ví org và để credit treo vĩnh viễn. Reservation ví cá nhân cũ (trước FLF-310) không còn ví để nhả.
+    if (!reservation.organizationId) {
+      console.error(`[CreditReservation] Reservation ${reservation._id} giữ trên ví cá nhân đã bỏ (FLF-310) - chỉ đánh dấu expired`)
+      result.expiredCount += 1
+      continue
+    }
     const wallet = await CreditWallet.findOneAndUpdate(
-      {
-        ...walletKey(
-          String(reservation.userId),
-          reservation.organizationId ? String(reservation.organizationId) : null
-        ),
-        reserved: { $gte: reservation.amount }
-      },
+      { ...walletKey(String(reservation.organizationId)), reserved: { $gte: reservation.amount } },
       { $inc: { reserved: -reservation.amount } },
       { returnDocument: "after" }
     )
@@ -472,12 +573,14 @@ export const expireStaleReservations = async (
 
     await CreditTransaction.create({
       userId: reservation.userId,
+      organizationId: reservation.organizationId,
       projectId: reservation.projectId ?? null,
       actionType: reservation.actionType,
       amount: reservation.amount,
       type: "release",
       reservationId: reservation._id,
-      balanceAfter: wallet.balance - wallet.reserved
+      balanceAfter: wallet.balance - wallet.reserved,
+      stepId: reservation.stepId ?? null
     })
 
     result.expiredCount += 1

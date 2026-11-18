@@ -3,7 +3,8 @@
  * ─────────────────────────────────────────────────────────────────
  * GET  /projects/:projectId/flags                   danh sách cờ (lọc level/open)
  * POST /projects/:projectId/flags/recompute         chạy lại deterministic check
- * POST /projects/:projectId/flags/:flagId/waive     waive cờ (lý do ≥ 20 ký tự)
+ * POST /projects/:projectId/flags/:flagId/waive     waive cờ vàng (lý do ≥ 20 ký tự) — cờ đỏ ⇒ FLAG_NOT_WAIVABLE (FLF-329)
+ * POST /projects/:projectId/flags/:flagId/keep      giữ nguyên + lý do (FLF-329): ghi lý do, cờ vẫn mở
  * GET  /projects/:projectId/progress                readiness + tiến độ step + status từng section
  * Hợp đồng: docs/api/pipeline-contract.md.
  */
@@ -17,7 +18,7 @@ import type { SpineRecord } from "./spine.types.js"
 // `current_step` trong `progress` là step tới lượt theo step-registry (tính ở tầng pipeline, không phải con trỏ Spine)
 import { buildPipelineProgressReport } from "../pipeline/pipeline-progress.js"
 import { nextStep } from "../pipeline/step-registry.js"
-import { flagsQuerySchema, recomputeFlagsRequestSchema, waiveRequestSchema } from "../pipeline/pipeline.dto.js"
+import { flagsQuerySchema, keepRequestSchema, recomputeFlagsRequestSchema, waiveRequestSchema } from "../pipeline/pipeline.dto.js"
 import { getProjectById } from "../project/project.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
@@ -25,6 +26,8 @@ import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { validationError } from "../../shared/utils/validation-message.js"
 import { assertNotMode1 } from "../import/mode1-guard.js"
+import { isViewer } from "../../shared/auth/viewer-read-scope.middleware.js"
+import { viewerProgress } from "../render/viewer-projection.js"
 
 interface Context {
   projectId: string
@@ -89,8 +92,18 @@ export const waiveFlag = catchAsync(async (req: Request, res: Response) => {
   return sendSuccess(res, 200, flag)
 })
 
+/** FLF-329: "Giữ nguyên + lý do" — ghi lý do, cờ vẫn mở. Mọi chế độ, mọi mức cờ. */
+export const keepFlag = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, userId } = await context(req)
+  const body = parse(keepRequestSchema, req.body)
+  const flag = await flagsService.keep(projectId, req.params.flagId as string, body.reason, userId)
+  return sendSuccess(res, 200, flag)
+})
+
 export const getProgress = catchAsync(async (req: Request, res: Response) => {
   const { projectId, spine } = await context(req)
   const changes = await spineRepository.listChanges(projectId)
-  return sendSuccess(res, 200, buildPipelineProgressReport(spine, changes))
+  const report = buildPipelineProgressReport(spine, changes)
+  // UC-20: Viewer không thấy cờ đỏ
+  return sendSuccess(res, 200, isViewer(req) ? viewerProgress(report) : report)
 })

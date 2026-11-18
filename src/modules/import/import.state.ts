@@ -1,15 +1,18 @@
 /**
  * Máy trạng thái import (mode 1, Flow 1 nút 1.1–1.13) — hàm thuần, không đụng DB. FLF-171, plan §5.2.
  *
+ * FLF-343 — chế độ 1 chạy một mạch: một điểm dừng duy nhất là `extracting` chưa chạy (màn báo credit + câu hỏi "bản mới
+ * nhất"), rồi I-4 ⇒ baseline 0.1 ⇒ kiểm tra ⇒ `gap_review` (FE vào thẳng trang tạo CR) không chờ người dùng:
  * uploaded ─┬─ preflight_rejected                        (1.2 bị từ chối — user upload file khác = bản ghi mới)
- *           ├─ awaiting_latest_confirm ─► parsing       (1.3 file không có stamp)
- *           └─ parsing                                  (đã xác nhận)
- * parsing ─► mapping_review | extracting                (1.6 độ tin thấp ⇒ 1.7)
- * mapping_review ─► extracting
- * extracting ─► fields_review | baselining              (1.8 độ tin thấp ⇒ 1.9)
- * fields_review ─► baselining ─► checking ─► gap_review (1.10 → 1.11/1.12 → 1.13)
+ *           └─ parsing ─► extracting                    (tách file + khớp mẫu; mục độ tin thấp tự nhận + cờ "Cần xem")
+ * extracting ─► baselining                              (job I-4 xong ⇒ job finalize nối tiếp, base_version do server tính)
+ * baselining ─► checking ─► gap_review                  (1.10 → 1.11/1.12)
+ * Bản ghi cũ (trước FLF-343) còn đi được nhánh: uploaded ─► awaiting_latest_confirm ─► parsing ─► mapping_review ─►
+ * extracting ─► fields_review ─► baselining — `POST /import/extract` / `/import/resume` đưa chúng về luồng một mạch.
  * gap_review ─► delivered | change_requested
  * delivered ─► change_requested                         (giao gap report xong, sau đó mới quyết định sửa)
+ * incomplete ─► drafting                                (FLF-278 trên FLF-336: chế độ 3 sang Luồng 2 — dự án chạy pipeline
+ *                                                        tạo mới cho phần thiếu; ký baseline 1.0 ⇒ FLF-318 đưa về mode 1)
  *
  * `paused` là field riêng (`{ reason, at }`), chỉ đặt được khi đang `extracting` hoặc `checking`
  * (hai bước gọi AI, Flow 4/5), hoặc `baselining` khi job finalize nền lỗi / mất giữa chừng (chỉ `resume_later`).
@@ -27,6 +30,10 @@ export const IMPORT_STATUSES = [
   "extracting",
   "fields_review",
   "baselining",
+  /** FLF-336 I-5: file thiếu mục của cấu trúc đích ⇒ không có v0 dở dang, dừng ở "Kết quả đọc file" (Dừng / Hoàn thiện). */
+  "incomplete",
+  /** FLF-278: chế độ 3 (mẫu bắt buộc) đi tiếp Luồng 2 — soạn phần thiếu bằng pipeline, không tạo v0 từ mẫu. */
+  "drafting",
   "checking",
   "gap_review",
   "delivered",
@@ -45,24 +52,30 @@ export const IMPORT_STATUS_LABELS: Readonly<Record<ImportStatus, string>> = {
   extracting: "Đang trích dữ liệu",
   fields_review: "Duyệt dữ liệu trích",
   baselining: "Đang chốt bản gốc",
+  incomplete: "Chưa hoàn thiện - chờ bạn quyết",
+  drafting: "Đang soạn phần còn thiếu",
   checking: "Đang kiểm tra",
   gap_review: "Xem báo cáo thiếu sót",
   delivered: "Đã giao báo cáo",
   change_requested: "Đang sửa qua change request"
 }
 
-export const IMPORT_PAUSE_REASONS = ["credits", "resume_later"] as const
+/** `user`: người dùng bấm Dừng lúc đang đọc nội dung (I-4) — vòng đọc dừng sau lượt AI đang chạy, không gọi thêm. */
+export const IMPORT_PAUSE_REASONS = ["credits", "resume_later", "user"] as const
 export type ImportPauseReason = (typeof IMPORT_PAUSE_REASONS)[number]
 
 export const IMPORT_TRANSITIONS: Readonly<Record<ImportStatus, readonly ImportStatus[]>> = {
   uploaded: ["preflight_rejected", "awaiting_latest_confirm", "parsing"],
   preflight_rejected: [],
   awaiting_latest_confirm: ["parsing"],
-  parsing: ["mapping_review", "extracting"],
+  // FLF-343: tách file lỗi ⇒ preflight_rejected (issue PARSE_FAILED), người dùng tải file khác
+  parsing: ["mapping_review", "extracting", "preflight_rejected"],
   mapping_review: ["extracting"],
   extracting: ["fields_review", "baselining"],
   fields_review: ["baselining"],
-  baselining: ["checking"],
+  baselining: ["checking", "incomplete"],
+  incomplete: ["baselining", "drafting"],
+  drafting: ["delivered"],
   checking: ["gap_review"],
   gap_review: ["delivered", "change_requested"],
   delivered: ["change_requested"],

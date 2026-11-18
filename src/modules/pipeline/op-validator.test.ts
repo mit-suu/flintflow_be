@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { describe, it, expect } from "vitest"
 import { spineSchema } from "../spine/spine.schema.js"
 import type { Spine } from "../spine/spine.types.js"
-import { briefExtractionErrors, dropRedundantScalarAdds, isWritablePath, normalizeSelectorPath, regulatedFromStakesAnswer, sanitizeModelOps, useCaseWiringErrors, validateOps } from "./op-validator.js"
+import { actorGeneralizationErrors, briefExtractionErrors, dropRedundantScalarAdds, interactionErrors, lifecycleErrors, isWritablePath, normalizeSelectorPath, regulatedFromStakesAnswer, sanitizeModelOps, useCaseWiringErrors, validateOps } from "./op-validator.js"
 import { getStep } from "./step-registry.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -44,7 +44,7 @@ describe("validateOps", () => {
     expect(isWritablePath("progress.screen_queue[]", ["progress"])).toBe(true)
   })
 
-  it("FLF-221: writes dạng dot-path — B-0.2 ghi được project.form_factor, không ghi được project.complexity", () => {
+  it("FLF-221: writes dạng dot-path - B-0.2 ghi được project.form_factor, không ghi được project.complexity", () => {
     const writable = getStep("B-0.2").writes
     expect(validateOps(FIXTURE, [{ op: "set", path: "project.form_factor", value: "mobile_app" }], { writable, stepId: "B-0.2" })).toEqual([])
     const errors = validateOps(FIXTURE, [{ op: "set", path: "project.complexity", value: "high" }], { writable, stepId: "B-0.2" })
@@ -61,12 +61,12 @@ describe("validateOps", () => {
   })
 })
 
-describe("validateOps — luật ERD lúc sinh (S-4.5)", () => {
+describe("validateOps - luật ERD lúc sinh (S-4.5)", () => {
   const ERD: Spine = { ...structuredClone(FIXTURE), entities: [] }
   const entity = (id: string, name: string, relations: string[] = [], relation_verbs?: Record<string, string>) => ({
     op: "add",
     path: "entities[]",
-    value: { id, name, description: `${name}.`, relations, ...(relation_verbs ? { relation_verbs } : {}) }
+    value: { id, name, description: `${name}.`, relations, feature_ids: ["F1"], ...(relation_verbs ? { relation_verbs } : {}) }
   })
   /** Entity không là con của ai trong lô ⇒ đánh dấu root, để test luật khác không vướng `erd_dependent_without_parent`. */
   const withRoots = (ops: unknown[]): unknown[] => {
@@ -148,7 +148,7 @@ describe("validateOps — luật ERD lúc sinh (S-4.5)", () => {
     expect(rules([room, slot, seat, describe("E04", "User", "One account.", ["E01"], { E01: "manages" })])).toEqual([])
   })
 
-  it("mô tả nhắc tổ tiên (qua chuỗi cha → con) ⇒ qua — không đòi cạnh tắt trái luật no-shortcut", () => {
+  it("mô tả nhắc tổ tiên (qua chuỗi cha → con) ⇒ qua - không đòi cạnh tắt trái luật no-shortcut", () => {
     const describe = (id: string, name: string, description: string, relations: string[] = [], relation_verbs?: Record<string, string>) => {
       const op = entity(id, name, relations, relation_verbs)
       ;(op.value as Record<string, unknown>).description = description
@@ -191,6 +191,19 @@ describe("validateOps — luật ERD lúc sinh (S-4.5)", () => {
     const marked = entity("E01", "Project", ["E02"], { E02: "contains" })
     ;(marked.value as Record<string, unknown>).relation_cardinality = { E02: "1" }
     expect(rules([marked, entity("E02", "Version"), assumption])).toEqual([])
+  })
+
+  it("entity không có feature_ids khi Spine đã có feature ⇒ erd_feature_missing; thuộc tính trùng tên ⇒ erd_attribute_duplicate", () => {
+    const bare = entity("E01", "Project")
+    delete (bare.value as { feature_ids?: string[] }).feature_ids
+    expect(rules([bare])).toEqual(["erd_feature_missing"])
+    expect(validateOps({ ...ERD, features: [] }, withRoots([bare]), { writable: ["entities"], stepId: "S-4.5" })).toEqual([])
+    const dup = entity("E01", "Project")
+    ;(dup.value as Record<string, unknown>).attributes = [
+      { name: "Code", kind: "key", required: true },
+      { name: "code", kind: "plain", required: false }
+    ]
+    expect(rules([dup])).toEqual(["erd_attribute_duplicate"])
   })
 
   it("ví dụ trong skill entities-erd qua đủ luật ERD (ví dụ không được vi phạm chính skill)", () => {
@@ -256,8 +269,8 @@ describe("validateOps — luật ERD lúc sinh (S-4.5)", () => {
     const spine: Spine = {
       ...ERD,
       entities: [
-        { id: "E01", name: "Exam Registration", description: "One registration.", root: true, relations: ["E02"], relation_verbs: { E02: "produces" }, relation_cardinality: { E02: "1" } },
-        { id: "E02", name: "Exam Attempt", description: "One attempt.", relations: [] }
+        { id: "E01", name: "Exam Registration", description: "One registration.", root: true, relations: ["E02"], relation_verbs: { E02: "produces" }, relation_cardinality: { E02: "1" }, feature_ids: ["F1"] },
+        { id: "E02", name: "Exam Attempt", description: "One attempt.", relations: [], feature_ids: ["F1"] }
       ],
       assumptions: [{ id: "AS01", path: "entities[id=E01].relation_cardinality", statement: "One exam registration leads to one exam attempt.", rationale: "FN009.", origin_step_id: "S-4.5", status: "unconfirmed", confirmed_at: null }]
     }
@@ -269,7 +282,7 @@ describe("validateOps — luật ERD lúc sinh (S-4.5)", () => {
   })
 })
 
-describe("sanitizeModelOps — path của giả định", () => {
+describe("sanitizeModelOps - path của giả định", () => {
   it("selector thiếu tên khoá được chuẩn hoá thay vì làm hỏng cả lô", () => {
     expect(normalizeSelectorPath("addendum[AD8]")).toBe("addendum[id=AD8]")
     expect(normalizeSelectorPath("nfrs[N03].threshold")).toBe("nfrs[id=N03].threshold")
@@ -373,7 +386,7 @@ describe("sanitizeModelOps — path của giả định", () => {
   })
 })
 
-describe("sanitizeModelOps — giá trị form_factor / stakes", () => {
+describe("sanitizeModelOps - giá trị form_factor / stakes", () => {
   it("chuỗi ghép nhiều nền tảng hoặc giá trị lạ ⇒ lỗi kèm tập giá trị hợp lệ; giá trị đúng thì qua", () => {
     const bad = sanitizeModelOps(FIXTURE, [
       { op: "set", path: "project.form_factor", value: "web_app,mobile_app" },
@@ -412,13 +425,13 @@ describe("regulatedFromStakesAnswer", () => {
     expect(regulatedFromStakesAnswer("Tuan thu quy dinh noi bo va phap luat")).toBe(true)
   })
 
-  it("vế nội bộ trả false — nó không quyết hết giá trị", () => {
+  it("vế nội bộ trả false - nó không quyết hết giá trị", () => {
     expect(regulatedFromStakesAnswer("Tuân thủ quy định nội bộ")).toBe(false)
     expect(regulatedFromStakesAnswer("Tuân thủ quy định nội bộ (Khuyến nghị)")).toBe(false)
     expect(regulatedFromStakesAnswer("")).toBe(false)
   })
 
-  it("FLF-260: nhãn tiếng Anh — vế pháp luật là law / legal / legislation, kể cả kèm đuôi (Recommended)", () => {
+  it("FLF-260: nhãn tiếng Anh - vế pháp luật là law / legal / legislation, kể cả kèm đuôi (Recommended)", () => {
     expect(regulatedFromStakesAnswer("Internal rules and the law")).toBe(true)
     expect(regulatedFromStakesAnswer("Internal rules and the law (Recommended)")).toBe(true)
     expect(regulatedFromStakesAnswer("  internal rules and the LAWS  ")).toBe(true)
@@ -434,7 +447,7 @@ describe("regulatedFromStakesAnswer", () => {
     expect(regulatedFromStakesAnswer("We must follow the law, no exceptions")).toBe(true)
   })
 
-  it("FLF-260: vế nội bộ tiếng Anh trả false — 'regulations' nội bộ không phải pháp luật", () => {
+  it("FLF-260: vế nội bộ tiếng Anh trả false - 'regulations' nội bộ không phải pháp luật", () => {
     expect(regulatedFromStakesAnswer("Internal rules only")).toBe(false)
     expect(regulatedFromStakesAnswer("Internal rules only (Recommended)")).toBe(false)
     expect(regulatedFromStakesAnswer("Comply with internal regulations")).toBe(false)
@@ -442,7 +455,7 @@ describe("regulatedFromStakesAnswer", () => {
   })
 })
 
-describe("sanitizeModelOps — stakes phải khớp vế user đã chốt", () => {
+describe("sanitizeModelOps - stakes phải khớp vế user đã chốt", () => {
   /** Spine có một quyết định đã chốt cho chủ đề `stakes`. */
   const withStakesDecision = (answer: string): Spine => ({
     ...FIXTURE,
@@ -486,7 +499,7 @@ describe("sanitizeModelOps — stakes phải khớp vế user đã chốt", () =
     expect(sanitizeModelOps(FIXTURE, [{ op: "set", path: "project.stakes", value: "internal" }], "B-0.1").errors).toEqual([])
   })
 
-  it("FLF-260: phiên tiếng Anh — user bấm 'Internal rules and the law' thì chặn y như vế pháp luật tiếng Việt", () => {
+  it("FLF-260: phiên tiếng Anh - user bấm 'Internal rules and the law' thì chặn y như vế pháp luật tiếng Việt", () => {
     const legalEn = withStakesDecision("Internal rules and the law")
     expect(sanitizeModelOps(legalEn, [{ op: "set", path: "project.stakes", value: "production" }], "B-0.1").errors).toMatchObject([
       { rule: "op_not_allowed", op_index: 0, path: "project.stakes" }
@@ -496,7 +509,7 @@ describe("sanitizeModelOps — stakes phải khớp vế user đã chốt", () =
   })
 })
 
-describe("sanitizeModelOps — addendum", () => {
+describe("sanitizeModelOps - addendum", () => {
   it("add addendum[] ⇒ captured_at là giờ server, không phải ngày model viết", () => {
     const now = new Date("2026-09-30T01:40:00.000Z")
     const raw = [{ op: "add", path: "addendum[]", value: { topic: "scale", content: "50 người", content_en: "50 users", target_section: "fixed:4.2.3", captured_at: "2024-01-01T00:00:00.000Z" } }]
@@ -505,7 +518,7 @@ describe("sanitizeModelOps — addendum", () => {
   })
 })
 
-describe("sanitizeModelOps — revision sửa giả định (FLF-232)", () => {
+describe("sanitizeModelOps - revision sửa giả định (FLF-232)", () => {
   const assumption = {
     id: "AS90",
     path: "project.form_factor",
@@ -523,7 +536,7 @@ describe("sanitizeModelOps — revision sửa giả định (FLF-232)", () => {
   ]
   const revision = { revision: true, statusAssumptionIds: new Set(["AS90"]) }
 
-  it("status của giả định chỉ đổi được ở bước rà giả định — revision ở gate thì được, server đặt confirmed_at", () => {
+  it("status của giả định chỉ đổi được ở bước rà giả định - revision ở gate thì được, server đặt confirmed_at", () => {
     const status = [{ op: "set", path: "assumptions[id=AS90].status", value: "confirmed" }]
     // Lượt thường: không lỗi (không làm hỏng cả lô) nhưng status giữ nguyên
     const plain = sanitizeModelOps(spine, status, "B-0.3")
@@ -581,7 +594,7 @@ describe("sanitizeModelOps — revision sửa giả định (FLF-232)", () => {
     expect(sanitizeModelOps(legacy, ops, "B-0.3", new Date(), revision).errors).toEqual([])
   })
 
-  it("revision chỉ đổi status của giả định cổng vừa nói — giả định khác (kể cả đã xác nhận) giữ nguyên status", () => {
+  it("revision chỉ đổi status của giả định cổng vừa nói - giả định khác (kể cả đã xác nhận) giữ nguyên status", () => {
     const other = { ...assumption, id: "AS91", path: "project.stakes", origin_step_id: "B-0.3", status: "confirmed" as const, confirmed_at: "2026-09-29T00:00:00.000Z" }
     const both: Spine = { ...FIXTURE, assumptions: [assumption, other] }
     const flip = [{ op: "set", path: "assumptions[id=AS91].status", value: "rejected" }]
@@ -600,12 +613,12 @@ describe("sanitizeModelOps — revision sửa giả định (FLF-232)", () => {
     expect(ops).toEqual([{ op: "set", path: "assumptions[id=AS90].status", value: "unconfirmed" }])
   })
 
-  it("luật path chỉ áp cho revision — lượt draft thường không bị ảnh hưởng", () => {
+  it("luật path chỉ áp cho revision - lượt draft thường không bị ảnh hưởng", () => {
     expect(sanitizeModelOps(spine, restate, "B-2.1").errors).toEqual([])
   })
 })
 
-describe("validateOps — extraPaths cho revision ở cổng (giả định của bước khác)", () => {
+describe("validateOps - extraPaths cho revision ở cổng (giả định của bước khác)", () => {
   const writes = ["addendum", "assumptions"]
   const op = { op: "set", path: "project.form_factor", value: "mobile_app" }
 
@@ -626,7 +639,7 @@ describe("validateOps — extraPaths cho revision ở cổng (giả định củ
   })
 })
 
-describe("validateOps — Brief không ghi project.vision/goals", () => {
+describe("validateOps - Brief không ghi project.vision/goals", () => {
   const set = (path: string, value: unknown) => ({ op: "set", path, value })
 
   it("mọi step B-* bị từ chối set project.vision / project.goals, thông báo chỉ sang addendum", () => {
@@ -655,7 +668,7 @@ describe("validateOps — Brief không ghi project.vision/goals", () => {
   })
 })
 
-describe("validateOps / briefExtractionErrors — S-1.1", () => {
+describe("validateOps / briefExtractionErrors - S-1.1", () => {
   const core = (id: string, topic: string): Spine["addendum"][number] => ({
     id,
     topic,
@@ -713,7 +726,7 @@ describe("validateOps / briefExtractionErrors — S-1.1", () => {
   })
 })
 
-describe("validateOps — Brief chặn chỉ khi giá trị đổi, message ưu tiên", () => {
+describe("validateOps - Brief chặn chỉ khi giá trị đổi, message ưu tiên", () => {
   const empty: Spine = { ...structuredClone(FIXTURE), project: { ...FIXTURE.project, vision: null, goals: [] } }
 
   it("set nguyên object project giữ nguyên vision/goals (null, []) qua validateOps ở B-0.1/B-0.3/B-1.6/B-2.3", () => {
@@ -741,7 +754,7 @@ describe("validateOps — Brief chặn chỉ khi giá trị đổi, message ưu 
   })
 })
 
-describe("briefExtractionErrors — vision/goals chỉ đòi khi addendum có nguồn, goals 1:1 mọi lô", () => {
+describe("briefExtractionErrors - vision/goals chỉ đòi khi addendum có nguồn, goals 1:1 mọi lô", () => {
   const core = (id: string, topic: string): Spine["addendum"][number] => ({
     id,
     topic,
@@ -779,7 +792,7 @@ describe("briefExtractionErrors — vision/goals chỉ đòi khi addendum có ng
   })
 })
 
-describe("sanitizeModelOps — giả định path project.vision|goals ở Brief", () => {
+describe("sanitizeModelOps - giả định path project.vision|goals ở Brief", () => {
   const core = (id: string, topic: string): Spine["addendum"][number] => ({
     id,
     topic,
@@ -822,7 +835,7 @@ describe("sanitizeModelOps — giả định path project.vision|goals ở Brief
   })
 })
 
-describe("sanitizeModelOps — B-2.1 chỉ đổi status khi user đã quyết trong lượt", () => {
+describe("sanitizeModelOps - B-2.1 chỉ đổi status khi user đã quyết trong lượt", () => {
   const assumption = {
     id: "AS90",
     path: "project.form_factor",
@@ -856,7 +869,7 @@ describe("sanitizeModelOps — B-2.1 chỉ đổi status khi user đã quyết t
   })
 })
 
-describe("useCaseWiringErrors — S-4.1 gắn chức năng màn hình vào use case ngay khi tạo", () => {
+describe("useCaseWiringErrors - S-4.1 gắn chức năng màn hình vào use case ngay khi tạo", () => {
   const unwired = (): Spine => {
     const spine = structuredClone(FIXTURE)
     spine.use_cases = spine.use_cases.map((u) => (u.id === "UC01" ? { ...u, function_ids: [] } : u))
@@ -884,7 +897,7 @@ describe("useCaseWiringErrors — S-4.1 gắn chức năng màn hình vào use c
   })
 })
 
-describe("dropRedundantScalarAdds — gắn lại liên kết đã có không giết cả lô", () => {
+describe("dropRedundantScalarAdds - gắn lại liên kết đã có không giết cả lô", () => {
   it("bỏ add giá trị đã có và cặp lặp trong lô; giữ add mới và mọi op khác", () => {
     const existing = FIXTURE.use_cases[0].function_ids[0]
     const ops = [
@@ -894,5 +907,132 @@ describe("dropRedundantScalarAdds — gắn lại liên kết đã có không gi
       { op: "set" as const, path: "actors[id=A01].name", value: "Owner" }
     ]
     expect(dropRedundantScalarAdds(FIXTURE, ops)).toEqual([ops[1], ops[3]])
+  })
+})
+
+describe("interactionErrors - message sơ đồ tuần tự hệ thống", () => {
+  const fn = (s: Spine) => s.functions.find((f) => f.id === "FN001")!
+  const rulesOf = (edit: (s: Spine) => void, ids = ["FN001"]): string[] => {
+    const spine = structuredClone(FIXTURE)
+    edit(spine)
+    return interactionErrors(spine, ids).map((e) => e.rule)
+  }
+
+  it("fixture hợp lệ; function không có interactions hoặc không có trong lô không bị soi", () => {
+    expect(interactionErrors(FIXTURE, FIXTURE.functions.map((f) => f.id))).toEqual([])
+    expect(rulesOf((s) => (fn(s).interactions![0].to = "A01"), [])).toEqual([])
+    expect(rulesOf((s) => delete fn(s).interactions)).toEqual([])
+  })
+
+  it("mỗi message có đúng một đầu là system ⇒ interaction_endpoint_invalid", () => {
+    expect(rulesOf((s) => (fn(s).interactions![0].to = "A01"))).toContain("interaction_endpoint_invalid")
+    expect(rulesOf((s) => Object.assign(fn(s).interactions![1], { from: "system", to: "system" }))).toContain("interaction_endpoint_invalid")
+  })
+
+  it("message lỗi thiếu guard ⇒ interaction_guard_missing", () => {
+    expect(rulesOf((s) => delete fn(s).interactions![1].guard)).toEqual(["interaction_guard_missing"])
+    expect(rulesOf((s) => (fn(s).interactions![1].guard = "  "))).toEqual(["interaction_guard_missing"])
+  })
+
+  it("trùng khoá ⇒ interaction_duplicate", () => {
+    expect(rulesOf((s) => fn(s).interactions!.push({ ...fn(s).interactions![0] }))).toEqual(["interaction_duplicate"])
+  })
+
+  it("actor người không thuộc use case gắn function ⇒ interaction_actor_not_modelled (nêu actor được phép); actor ngoài tự do", () => {
+    const spine = structuredClone(FIXTURE)
+    // UC06 (Create Project) chỉ có actor A01
+    spine.functions.find((f) => f.id === "FN024")!.interactions![0].from = "A03"
+    const errors = interactionErrors(spine, ["FN024"])
+    expect(errors.map((e) => e.rule)).toEqual(["interaction_actor_not_modelled"])
+    expect(errors[0].message).toContain("A01 Founder")
+    expect(rulesOf((s) => (fn(s).interactions![0].to = "A05"))).not.toContain("interaction_actor_not_modelled")
+  })
+
+  it("message đầu phải là request luồng chính từ actor ⇒ interaction_stimulus_missing", () => {
+    expect(rulesOf((s) => fn(s).interactions!.reverse())).toContain("interaction_stimulus_missing")
+    expect(rulesOf((s) => (fn(s).interactions![0].flow = "abnormal"))).toContain("interaction_stimulus_missing")
+  })
+
+  it("validateOps soi function mà lô op đụng tới interactions; lô không đụng thì bỏ qua", () => {
+    const good = FIXTURE.functions.find((f) => f.id === "FN001")!.interactions!
+    const wrong = [{ ...good[0], to: "A01" }, good[1]]
+    expect(validateOps(FIXTURE, [{ op: "set", path: "functions[id=FN001].interactions", value: wrong }], { writable: ["functions"] }).map((e) => e.rule)).toContain("interaction_endpoint_invalid")
+    expect(validateOps(FIXTURE, [{ op: "set", path: "functions[id=FN001].interactions", value: good }], { writable: ["functions"] })).toEqual([])
+    expect(validateOps(FIXTURE, [{ op: "set", path: "functions[id=FN001].trigger", value: "User clicks Log in." }], { writable: ["functions"] })).toEqual([])
+  })
+})
+
+describe("lifecycleErrors - vòng đời entity", () => {
+  const rulesOf = (fn: (s: Spine) => void): string[] => {
+    const spine = structuredClone(FIXTURE)
+    fn(spine)
+    return lifecycleErrors(spine).map((e) => e.rule)
+  }
+  const user = (s: Spine) => s.entities.find((e) => e.id === "E01")!
+
+  it("fixture (User, Baseline) hợp lệ; entity không có trạng thái không bị soi", () => {
+    expect(lifecycleErrors(FIXTURE)).toEqual([])
+  })
+
+  it("không đúng một initial ⇒ state_initial_invalid", () => {
+    expect(rulesOf((s) => delete user(s).states![0].initial)).toEqual(["state_initial_invalid"])
+    expect(rulesOf((s) => (user(s).states![1].initial = true))).toEqual(["state_initial_invalid"])
+  })
+
+  it("tên trạng thái trùng (không phân biệt hoa thường) ⇒ state_name_duplicate; id trùng entity khác ⇒ state_id_duplicate", () => {
+    expect(rulesOf((s) => (user(s).states![2].name = "active"))).toEqual(["state_name_duplicate"])
+    expect(rulesOf((s) => (s.entities.find((e) => e.id === "E08")!.states![0].id = "E01-ST1"))).toContain("state_id_duplicate")
+  })
+
+  it("transition nối state không thuộc entity ⇒ transition_state_unknown; có transition mà không có state cũng vậy", () => {
+    expect(rulesOf((s) => (user(s).transitions![0].to = "E08-ST1"))).toContain("transition_state_unknown")
+    expect(rulesOf((s) => {
+      const e = user(s)
+      e.states = []
+    })).toEqual(["transition_state_unknown"])
+  })
+
+  it("transition đi ra từ state final ⇒ transition_from_final", () => {
+    expect(rulesOf((s) => user(s).transitions!.push({ from: "E01-ST4", to: "E01-ST2", event: "restore" }))).toEqual(["transition_from_final"])
+  })
+
+  it("state không tới được từ initial ⇒ state_unreachable", () => {
+    expect(rulesOf((s) => user(s).states!.push({ id: "E01-ST5", name: "Archived" }))).toEqual(["state_unreachable"])
+    // tới được qua chuỗi transition
+    expect(
+      rulesOf((s) => {
+        user(s).states!.push({ id: "E01-ST5", name: "Archived" })
+        user(s).transitions!.push({ from: "E01-ST3", to: "E01-ST5", event: "archive" })
+      })
+    ).toEqual([])
+  })
+})
+
+describe("actorGeneralizationErrors - FLF-370 use case tài khoản dùng chung phải gắn actor tổng quát", () => {
+  // Fixture có sẵn Log In (UC02) gắn thẳng A01–A04: nhóm cũ, lô không đụng tới thì không bị chặn
+  const shareReset = [{ op: "set" as const, path: "use_cases[id=UC03].actor_ids", value: ["A01", "A02", "A08"] }]
+
+  it("lô S-3.2 tạo nhóm mới (Reset Password gắn 2 actor người) ⇒ lỗi trỏ use case, kèm cách sửa", () => {
+    const errors = actorGeneralizationErrors(FIXTURE, shareReset, "S-3.2")
+    expect(errors).toMatchObject([{ rule: "actor_generalization_missing", path: "use_cases[id=UC03].actor_ids" }])
+    expect(errors[0].message).toContain("Founder, Business Analyst")
+    expect(errors[0].message).toContain("parent_id")
+  })
+
+  it("chỉ chặn ở S-3.2/S-3.3; lô không đụng nhóm có sẵn ⇒ không lỗi", () => {
+    expect(actorGeneralizationErrors(FIXTURE, shareReset, "S-3.3")).toHaveLength(1)
+    expect(actorGeneralizationErrors(FIXTURE, shareReset, "S-3.4")).toEqual([])
+    expect(actorGeneralizationErrors(FIXTURE, [{ op: "set", path: "actors[id=A01].description", value: "Runs the startup." }], "S-3.2")).toEqual([])
+  })
+
+  it("lô sửa đúng (thêm User, parent_id, use case tài khoản chỉ gắn User) qua validateOps ở S-3.2 và không còn lỗi", () => {
+    const fix = [
+      { op: "add" as const, path: "actors[]", value: { id: "A10", name: "User", kind: "human", description: "Any signed-in Founder, Business Analyst or Administrator.", flows_in: ["Login Credentials"], flows_out: ["Session Token"] } },
+      ...["A01", "A02", "A03"].map((id) => ({ op: "set" as const, path: `actors[id=${id}].parent_id`, value: "A10" })),
+      { op: "set" as const, path: "use_cases[id=UC02].actor_ids", value: ["A10"] },
+      { op: "set" as const, path: "use_cases[id=UC03].actor_ids", value: ["A10", "A08"] }
+    ]
+    expect(validateOps(FIXTURE, fix, { writable: getStep("S-3.2").writes, stepId: "S-3.2" })).toEqual([])
+    expect(actorGeneralizationErrors(FIXTURE, fix, "S-3.2")).toEqual([])
   })
 })

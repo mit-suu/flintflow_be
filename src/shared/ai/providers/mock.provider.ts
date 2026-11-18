@@ -15,6 +15,8 @@
  * | `elicit` `discovery_step` | `{ reply, questions: [] }` |
  * | `review` `consistency_pass` | `{ flags: [] }` |
  * | `render_fix` | `{ puml }` |
+ * | `import_extract_fields` `import_extract_diagram` | `{ section_id, items: [] }` (+ `diagram_kind: "other"`) — mode 1 chạy được I-4 |
+ * | `import_semantic_check` `import_cross_check` | `{ findings: [] }` |
  * | `translate` | `{ statement }` |
  * | `translate_document` | `{ items }` — mỗi item của lô trong prompt, chữ thêm tiền tố `[vi] ` |
  * | `knowledge_answer` | `{ grounded, answer, claims }` — trích chunk `K1` nếu prompt có chunk, không có ⇒ `grounded: false` |
@@ -32,6 +34,8 @@ import { LLMResponse, LlmCallOptions } from "./provider.types.js"
 const OP_TRANSACTION_ACTIONS = new Set(["draft", "regenerate", "revision", "glossary_scan", "reconcile"])
 const ELICIT_ACTIONS = new Set(["elicit", "discovery_step"])
 const REVIEW_ACTIONS = new Set(["review", "consistency_pass"])
+const IMPORT_EXTRACT_ACTIONS = new Set(["import_extract_fields", "import_extract_diagram"])
+const FINDINGS_ACTIONS = new Set(["import_semantic_check", "import_cross_check"])
 
 const MOCK_PUML = "@startuml\ntitle Mock diagram\nactor User\n@enduml"
 
@@ -88,6 +92,9 @@ export const mockOutputFor = (actionType: string | undefined, prompt: string): s
   if (actionType === "translate") {
     return fenced({ statement: "[MOCK AI] Translated assumption." })
   }
+  if (actionType === "template_migration_resolve") {
+    return fenced({ ops: [], choice: null, notes: "[MOCK AI] Không giải quyết được." })
+  }
   if (actionType === "translate_document") {
     return fenced({ items: mockTranslateItems(prompt) })
   }
@@ -109,6 +116,13 @@ export const mockOutputFor = (actionType: string | undefined, prompt: string): s
   if (actionType === "render_fix") {
     return fenced({ puml: MOCK_PUML, notes: `[MOCK AI] ${prompt.slice(0, 40).replace(/\s+/g, " ")}` })
   }
+  if (IMPORT_EXTRACT_ACTIONS.has(actionType)) {
+    // Không trích gì: văn xuôi giữ nguyên văn ở finalize. Code dùng `section_id` của chính nó, không đọc lại từ đây.
+    return fenced({ section_id: "mock", items: [], unmapped_block_ids: [], ...(actionType === "import_extract_diagram" ? { diagram_kind: "other" } : {}) })
+  }
+  if (FINDINGS_ACTIONS.has(actionType)) {
+    return fenced({ findings: [] })
+  }
   return null
 }
 
@@ -118,7 +132,7 @@ const freeText = (prompt: string): string => {
       summary: "[MOCK AI] Bản tóm tắt mẫu hệ thống FlintFlow. Phân tích yêu cầu và quy trình thực thi ngắn gọn.",
       keyPoints: [
         "Khởi tạo hệ thống quản lý Prompt Template (UC83)",
-        "Hỗ trợ Multi-provider: OpenAI, Gemini, Anthropic & Mock AI",
+        "Hỗ trợ Multi-provider: GLM, Gemini, Anthropic & Mock AI",
         "Kiểm tra và thử nghiệm biến template real-time"
       ]
     })

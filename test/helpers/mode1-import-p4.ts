@@ -3,14 +3,30 @@
  * (không qua HTTP) để test I-4 / finalize / check / gap report / re-upload ở tầng service.
  * Provider AI giả: file test tự `vi.mock` `llm.router` bằng `mock-llm.ts` và đặt `mockOverrides.next`.
  */
-import { expect } from "vitest"
+import { afterEach, beforeEach, expect } from "vitest"
+import { env } from "../../src/config/env.js"
 import { seedFixture } from "../setup.js"
 import { createMode1Project } from "./mode1.js"
 import { makeSrsDocx, type SrsFixtureOptions } from "../../src/modules/import/testing/srs-fixture.js"
-import { confirmLatest, uploadImport } from "../../src/modules/import/import.service.js"
-import { patchFields, runExtraction } from "../../src/modules/import/extract.service.js"
+import { acceptLatest, uploadImport } from "../../src/modules/import/import.service.js"
+import { runExtraction } from "../../src/modules/import/extract.service.js"
 import { finalizeImport } from "../../src/modules/import/finalize.service.js"
 import * as spineRepository from "../../src/modules/spine/spine.repository.js"
+
+/**
+ * Đặt `IMPORT_EXTRACT_CONCURRENCY` cho mọi test của file (FLF-392). Test khẳng định thứ tự lượt gọi / số dư ví theo bản
+ * tuần tự đặt 1; kịch bản song song nằm ở `extract-parallel.int.test.ts`.
+ */
+export const useExtractConcurrency = (n: number): void => {
+  let prev = env.IMPORT_EXTRACT_CONCURRENCY
+  beforeEach(() => {
+    prev = env.IMPORT_EXTRACT_CONCURRENCY
+    env.IMPORT_EXTRACT_CONCURRENCY = n
+  })
+  afterEach(() => {
+    env.IMPORT_EXTRACT_CONCURRENCY = prev
+  })
+}
 
 export const fileOf = (buffer: Buffer, originalname = "SRS_Lumen.docx") => ({ buffer, originalname, size: buffer.length })
 
@@ -20,22 +36,22 @@ export interface Mode1Ctx {
   importId: string
 }
 
-/** Project mode import + upload SRS mẫu + xác nhận bản mới nhất ⇒ import ở `extracting`. */
+/** Project mode import + upload SRS mẫu (FLF-343: tách file ngay ⇒ `extracting` chưa chạy) + xác nhận bản mới nhất. */
 export const importAtExtracting = async (opts: { balance?: number; srs?: SrsFixtureOptions; buffer?: Buffer } = {}): Promise<Mode1Ctx> => {
   const seeded = await seedFixture("minimal", { balance: opts.balance ?? 1000 })
   const projectId = await createMode1Project(seeded)
   const doc = await uploadImport(projectId, seeded.userId, fileOf(opts.buffer ?? (await makeSrsDocx(opts.srs))))
-  expect(doc.status).toBe("awaiting_latest_confirm")
-  const confirmed = await confirmLatest(projectId, String(doc._id))
-  expect(confirmed.status).toBe("extracting")
+  expect(doc.status).toBe("extracting")
+  expect(doc.confirmed_latest_at).toBeNull()
+  await acceptLatest(doc, true)
   return { projectId, userId: seeded.userId, importId: String(doc._id) }
 }
 
-/** Chạy I-4 + xác nhận mọi field ⇒ `baselining`. */
+/** Chạy I-4 ⇒ `baselining` (FLF-343: không còn dừng ở `fields_review`). */
 export const importAtBaselining = async (opts: { balance?: number; srs?: SrsFixtureOptions } = {}): Promise<Mode1Ctx> => {
   const ctx = await importAtExtracting(opts)
   const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
-  if (run.doc.status === "fields_review") await patchFields(ctx.projectId, { import_id: ctx.importId, fields: [], confirm_all: true })
+  expect(run.doc.status).toBe("baselining")
   return ctx
 }
 

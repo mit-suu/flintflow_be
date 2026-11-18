@@ -1,15 +1,18 @@
 import crypto from "crypto"
 import axios from "axios"
+import mongoose from "mongoose"
 import { OAuth2Client } from "google-auth-library"
 import { User, IUser } from "../user/user.model.js"
 import { AuthToken, TokenType } from "./auth-token.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { accountSuspendedError } from "../../shared/auth/account-suspended.js"
 import { signAccessToken, signRefreshToken, hashToken, TokenPayload } from "../../shared/auth/jwt.util.js"
 import * as sessionService from "../../shared/auth/session.service.js"
 import { sendVerificationOtpEmail, sendPasswordResetOtpEmail } from "../../shared/email/email.service.js"
 import { env } from "../../config/env.js"
 import { REMEMBER_ME_MAX_AGE_MS, REMEMBER_ME_TTL } from "../../shared/auth/auth-cookie.js"
 import { listMyOrganizations, type OrganizationSummary } from "../organization/organization.service.js"
+import { Membership } from "../organization/membership.model.js"
 import { toUserLocale, type UserLocale } from "../../shared/i18n/locale.js"
 
 export interface AuthResult {
@@ -58,16 +61,45 @@ export interface OrgLoginContext {
 }
 
 /**
- * Org của người vừa đăng nhập (BPMN Flow 7.12–7.14). Đúng một org thì chọn luôn; nhiều org thì để người
- * dùng chọn ở màn 7.13; không org nào thì FE đẩy sang onboarding (Flow 8).
+ * Org của người vừa đăng nhập (BPMN Flow 7.12–7.14, UC-10, FLF-427).
+ * - Đúng một org ⇒ chọn luôn, bỏ qua màn chọn.
+ * - Có preferredOrganizationId hợp lệ trong các org ⇒ chọn org đó.
+ * - Nhiều org không có preferred/stale preferred ⇒ để người dùng chọn ở màn 7.13 (activeOrgId: null);
+ *   dọn preferredOrganizationId nếu stale.
+ * - Không org nào ⇒ FE đẩy sang onboarding (Flow 8, needsOnboarding: true); dọn preferredOrganizationId nếu có.
  */
-const resolveOrgContext = async (userId: string): Promise<OrgLoginContext> => {
+export const resolveOrgContext = async (
+  userId: string,
+  preferredOrganizationId?: mongoose.Types.ObjectId | string | null
+): Promise<OrgLoginContext> => {
   const organizations = await listMyOrganizations(userId)
-  return {
-    organizations,
-    activeOrgId: organizations.length === 1 ? (organizations[0]?.id ?? null) : null,
-    needsOnboarding: organizations.length === 0
+  if (organizations.length === 0) {
+    if (preferredOrganizationId) {
+      await User.updateOne({ _id: userId }, { $set: { preferredOrganizationId: null } })
+    }
+    return { organizations: [], activeOrgId: null, needsOnboarding: true }
   }
+
+  if (organizations.length === 1) {
+    if (preferredOrganizationId && String(preferredOrganizationId) !== organizations[0].id) {
+      await User.updateOne({ _id: userId }, { $set: { preferredOrganizationId: null } })
+    }
+    return {
+      organizations,
+      activeOrgId: organizations[0]?.id ?? null,
+      needsOnboarding: false
+    }
+  }
+
+  const preferredId = preferredOrganizationId ? String(preferredOrganizationId) : null
+  const matched = preferredId ? organizations.some((o) => o.id === preferredId) : false
+  if (matched) {
+    return { organizations, activeOrgId: preferredId, needsOnboarding: false }
+  }
+  if (preferredId) {
+    await User.updateOne({ _id: userId }, { $set: { preferredOrganizationId: null } })
+  }
+  return { organizations, activeOrgId: null, needsOnboarding: false }
 }
 
 /** Refresh token + hạn phiên theo chế độ ghi nhớ: tick ⇒ 30 ngày, còn lại ⇒ `REFRESH_TOKEN_EXPIRES`. */
@@ -191,9 +223,13 @@ export const register = async (
 }
 
 /** UC-03 / UC-66: tài khoản bị Administrator khoá thì không đăng nhập và không gia hạn phiên được. */
-const assertAccountActive = (user: { isActive?: boolean }): void => {
+const assertAccountActive = (user: {
+  isActive?: boolean
+  suspendReason?: string | null
+  suspendedAt?: Date | null
+}): void => {
   if (user.isActive === false) {
-    throw new ApiError(403, "Tài khoản đã bị khoá", "ACCOUNT_SUSPENDED")
+    throw accountSuspendedError(user)
   }
 }
 
@@ -228,22 +264,26 @@ export const login = async (
     role: user.role
   }
 
-  // Flow 7.12–7.14: biết org trước khi ký token, để access token mang luôn orgId khi chỉ có một org.
-  const org = await resolveOrgContext(tokenPayload.userId)
+  // Flow 7.12–7.14: biết org trước khi ký token, để access token mang luôn orgId khi chỉ có một org hoặc có org mặc định.
+  const org = await resolveOrgContext(tokenPayload.userId, user.preferredOrganizationId)
   if (org.activeOrgId) tokenPayload.orgId = org.activeOrgId
 
-  const accessToken = signAccessToken(tokenPayload)
   const { refreshToken, expiresAt } = issueRefreshToken(tokenPayload, rememberMe)
 
-  await sessionService.createSession(
+  const session = await sessionService.createSession(
     user._id.toString(),
     refreshToken,
     expiresAt,
     userAgent,
     ip,
-    rememberMe
+    rememberMe,
+    org.activeOrgId
   )
-  if (org.activeOrgId) await sessionService.setActiveOrg(refreshToken, org.activeOrgId)
+
+  const accessToken = signAccessToken({
+    ...tokenPayload,
+    sid: String(session._id)
+  })
 
   return {
     accessToken,
@@ -290,22 +330,26 @@ export const confirmEmailVerification = async (
     role: user.role
   }
 
-  // Flow 7.12–7.14: biết org trước khi ký token, để access token mang luôn orgId khi chỉ có một org.
-  const org = await resolveOrgContext(tokenPayload.userId)
+  // Flow 7.12–7.14: biết org trước khi ký token, để access token mang luôn orgId khi chỉ có một org hoặc có org mặc định.
+  const org = await resolveOrgContext(tokenPayload.userId, user.preferredOrganizationId)
   if (org.activeOrgId) tokenPayload.orgId = org.activeOrgId
 
-  const accessToken = signAccessToken(tokenPayload)
   const { refreshToken, expiresAt } = issueRefreshToken(tokenPayload, null)
 
-  await sessionService.createSession(
+  const session = await sessionService.createSession(
     user._id.toString(),
     refreshToken,
     expiresAt,
     userAgent,
     ip,
-    null
+    null,
+    org.activeOrgId
   )
-  if (org.activeOrgId) await sessionService.setActiveOrg(refreshToken, org.activeOrgId)
+
+  const accessToken = signAccessToken({
+    ...tokenPayload,
+    sid: String(session._id)
+  })
 
   return {
     accessToken,
@@ -502,22 +546,26 @@ export const googleAuth = async (
     role: user.role
   }
 
-  // Flow 7.12–7.14: biết org trước khi ký token, để access token mang luôn orgId khi chỉ có một org.
-  const org = await resolveOrgContext(tokenPayload.userId)
+  // Flow 7.12–7.14: biết org trước khi ký token, để access token mang luôn orgId khi chỉ có một org hoặc có org mặc định.
+  const org = await resolveOrgContext(tokenPayload.userId, user.preferredOrganizationId)
   if (org.activeOrgId) tokenPayload.orgId = org.activeOrgId
 
-  const accessToken = signAccessToken(tokenPayload)
   const { refreshToken, expiresAt } = issueRefreshToken(tokenPayload, rememberMe)
 
-  await sessionService.createSession(
+  const session = await sessionService.createSession(
     user._id.toString(),
     refreshToken,
     expiresAt,
     userAgent,
     ip,
-    rememberMe
+    rememberMe,
+    org.activeOrgId
   )
-  if (org.activeOrgId) await sessionService.setActiveOrg(refreshToken, org.activeOrgId)
+
+  const accessToken = signAccessToken({
+    ...tokenPayload,
+    sid: String(session._id)
+  })
 
   return {
     accessToken,
@@ -549,7 +597,7 @@ export const refresh = async (
   }
 
   // Luôn đọc DB: token cũ có thể thiếu role, và tài khoản có thể đã bị khoá sau khi token được cấp.
-  const user = await User.findById(decoded.userId).select("role isActive")
+  const user = await User.findById(decoded.userId).select("role isActive suspendReason suspendedAt")
   if (user) assertAccountActive(user)
   const role = decoded.role ?? user?.role
 
@@ -562,21 +610,31 @@ export const refresh = async (
   // Giữ nguyên chế độ "ghi nhớ" của phiên cũ qua mỗi lần xoay vòng
   const rememberMe = await sessionService.findSessionRememberMe(oldRefreshToken)
   // Giữ luôn org đang mở: token mới phải mang đúng orgId, nếu không người dùng bị đẩy về màn chọn org
-  // sau mỗi lần refresh. Quyền vẫn do orgContext kiểm lại từ Membership ở mỗi request (Flow 10.6).
-  const activeOrgId = await sessionService.findSessionActiveOrg(oldRefreshToken)
+  // sau mỗi lần refresh. Xác minh lại Membership (phòng race condition khi vừa rời / bị xoá khỏi org):
+  // mất tư cách thành viên thì bỏ orgId khỏi cả JWT mới lẫn phiên xoay vòng mới. Quyền vẫn do orgContext
+  // kiểm lại từ Membership ở mỗi request (Flow 10.6).
+  const sessionOrgId = await sessionService.findSessionActiveOrg(oldRefreshToken)
+  const activeOrgId =
+    sessionOrgId && (await Membership.exists({ organizationId: sessionOrgId, userId: decoded.userId }))
+      ? sessionOrgId
+      : null
   if (activeOrgId) newPayload.orgId = activeOrgId
-  const newAccessToken = signAccessToken(newPayload)
   const { refreshToken: newRefreshToken, expiresAt } = issueRefreshToken(newPayload, rememberMe)
 
-  await sessionService.rotateSession(
+  const rotated = await sessionService.rotateSession(
     oldRefreshToken,
     newRefreshToken,
     expiresAt,
     userAgent,
     ip,
-    rememberMe
+    rememberMe,
+    activeOrgId
   )
-  if (activeOrgId) await sessionService.setActiveOrg(newRefreshToken, activeOrgId)
+
+  const newAccessToken = signAccessToken({
+    ...newPayload,
+    sid: rotated.sessionId
+  })
 
   return {
     accessToken: newAccessToken,

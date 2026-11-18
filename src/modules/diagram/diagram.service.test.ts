@@ -32,7 +32,7 @@ const db = vi.hoisted(() => {
         return copy(doc)
       }
       if (!options.upsert) return null
-      const created = { _id: "spine", ...filter, ...copy(update.$setOnInsert ?? {}) }
+      const created = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, ...filter, ...copy(update.$setOnInsert ?? {}) }
       spines.push(created)
       return copy(created)
     }
@@ -58,15 +58,40 @@ const db = vi.hoisted(() => {
 
 vi.mock("../spine/spine.model.js", () => ({ Spine: db.Spine }))
 vi.mock("../spine/change.model.js", () => ({ Change: db.Change }))
+// FLF-311: renderChangedIfAvailable hỏi PlantUML có chạy không — test bật / tắt
+const plantuml = vi.hoisted(() => ({ reachable: true }))
+vi.mock("../../shared/diagram/plantuml.client.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../shared/diagram/plantuml.client.js")>()),
+  isPlantUmlReachable: async () => plantuml.reachable
+}))
+
+// FLF-339: thay renderer của một kind bằng part svg dựng sẵn (chưa kind nào dùng svg thật)
+const svgOverride = vi.hoisted(() => ({ parts: null as null | ((kind: string) => unknown[] | null) }))
+vi.mock("./renderers/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./renderers/index.js")>()
+  return {
+    ...actual,
+    renderKind: (...args: Parameters<typeof actual.renderKind>) => (svgOverride.parts?.(args[1]) as ReturnType<typeof actual.renderKind> | null) ?? actual.renderKind(...args)
+  }
+})
 
 import { spineSchema } from "../spine/spine.schema.js"
+import { Scene } from "../../shared/diagram/svg-scene.js"
+import { svgPart } from "./renderers/common.js"
+import { DIAGRAM_ENGINES, renderedDiagramHash } from "../spine/source-hash.js"
 import type { Spine } from "../spine/spine.types.js"
 import * as repo from "../spine/spine.repository.js"
 import { runDeterministicCheck } from "../spine/deterministic-check.js"
 import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { createMemoryDiagramStore } from "./diagram-file.store.js"
 import { renderKind } from "./renderers/index.js"
-import { compileWithFix, defaultDeps, loadDiagramFile, noAutoFix, renderAll, renderDiagram, staleDiagrams, type DiagramServiceDeps } from "./diagram.service.js"
+import { compileWithFix, defaultDeps, loadDiagramFile, noAutoFix, redrawScreenLayoutsFromSpec, renderAll, renderChangedIfAvailable, renderDiagram, renderDiagrams, sameDiagramSubject, staleDiagrams, staleRenderedDiagrams, type DiagramServiceDeps } from "./diagram.service.js"
+import type { RenderContext } from "../../shared/diagram/erd-notation.js"
+import { svgTitleOf } from "./renderers/common.js"
+import { screenSpecOf } from "./renderers/screen-mockup.js"
+import type { ScreenEnvelope, ScreenSpec } from "./screen-spec.js"
+import { SIGNUP_SPEC } from "./screen-spec.samples.js"
+import { applyTransaction } from "../spine/op-engine.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(
@@ -97,7 +122,7 @@ const makeDeps = (check: DiagramServiceDeps["check"] = async () => render(true))
 
 const seed = async (spine: Spine = FIXTURE) => {
   await repo.getOrCreate(PROJECT)
-  db.spines[0] = { _id: "spine", projectId: PROJECT, ...structuredClone(spine) }
+  db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...structuredClone(spine) }
 }
 
 describe("compileWithFix", () => {
@@ -105,14 +130,14 @@ describe("compileWithFix", () => {
     const check = vi.fn(async (source: string) => (source.includes("BAD") ? render(false, { line: "2" } as Partial<CompileCheckResult>) : render(true)))
     const fix = vi.fn(async ({ puml }: { puml: string }) => puml.replace("BAD LINE\n", ""))
     const result = await compileWithFix("erd", "@startuml\nBAD LINE\nentity A\n@enduml\n", { ...makeDeps(check).deps, check, fix } as DiagramServiceDeps)
-    expect(result).toMatchObject({ ok: true, puml: "@startuml\nentity A\n@enduml\n" })
+    expect(result).toMatchObject({ ok: true, source: "@startuml\nentity A\n@enduml\n" })
     expect(check).toHaveBeenCalledTimes(2)
   })
 
   it("hết 2 lần sửa vẫn lỗi ⇒ trả error, giữ text gốc; server chết ⇒ error, không ném", async () => {
     const fix = vi.fn(async ({ puml }: { puml: string }) => `${puml}%`)
     const failing = await compileWithFix("erd", "@startuml\n@enduml\n", { ...makeDeps(async () => render(false)).deps, fix } as DiagramServiceDeps)
-    expect(failing).toMatchObject({ ok: false, puml: "@startuml\n@enduml\n", error: "Syntax Error?" })
+    expect(failing).toMatchObject({ ok: false, source: "@startuml\n@enduml\n", error: "Syntax Error?" })
     expect(fix).toHaveBeenCalledTimes(2)
 
     const down = await compileWithFix("erd", "x", { ...makeDeps(async () => { throw new Error("ECONNREFUSED") }).deps, fix } as DiagramServiceDeps)
@@ -124,32 +149,45 @@ describe("compileWithFix", () => {
 describe("renderAll / renderDiagram qua op engine", () => {
   beforeEach(() => db.reset())
 
-  it("render cả bộ fixture: 16 hình ok (usecase mỗi actor một hình — 5 phần, screen_flow tách 4 actor), giữ id D01–D05, một transaction, file SVG+PNG trong store", async () => {
+  it("render cả bộ fixture: 30 hình ok (usecase và class mỗi feature một hình - 6 phần; screen_flow một hình cho cả hệ thống; state_machine mỗi entity có vòng đời một hình; sequence mỗi function đủ tiêu chí một hình; activity mỗi use case có nút một hình; deployment một hình cho hệ thống), giữ id D01–D05, một transaction, file SVG+PNG trong store", async () => {
     await seed()
     const { deps, store } = makeDeps()
     const result = await renderAll(PROJECT, { by: USER, deps })
 
     expect(result.spine_version).toBe(2)
-    expect(result.diagrams).toHaveLength(16)
+    expect(result.diagrams).toHaveLength(30)
     expect(result.diagrams.every((d) => d.render_status === "ok" && d.source_hash.length === 64)).toBe(true)
     const byKind = Object.fromEntries(
-      result.diagrams.filter((d) => !["screen_layout", "screen_flow", "usecase"].includes(d.kind)).map((d) => [d.kind, d.id])
+      result.diagrams.filter((d) => !["screen_layout", "screen_flow", "usecase", "class", "state_machine", "sequence", "activity", "deployment"].includes(d.kind)).map((d) => [d.kind, d.id])
     )
     expect(byKind).toEqual({ context: "D01", erd: "D04" })
-    // Sơ đồ use case mỗi actor một hình (Founder, Business Analyst, Administrator, Guest, Scheduler); phần
-    // đầu GIỮ id cũ để baseline đã ký không mất ảnh §2.2.1
-    expect(result.diagrams.filter((d) => d.kind === "usecase").map((d) => d.id)).toEqual(["D02", "D02-2", "D02-3", "D02-4", "D02-5"])
-    // Một sơ đồ luồng màn cho mỗi actor người (Founder, Business Analyst, Administrator, Guest); phần đầu giữ id cũ
-    expect(result.diagrams.filter((d) => d.kind === "screen_flow").map((d) => d.id)).toEqual(["D03", "D03-2", "D03-3", "D03-4"])
+    // Sơ đồ use case mỗi feature một hình (6 feature của fixture); phần đầu GIỮ id cũ để baseline đã ký không mất ảnh §2.2.1
+    expect(result.diagrams.filter((d) => d.kind === "usecase").map((d) => d.id)).toEqual(["D02", "D02-2", "D02-3", "D02-4", "D02-5", "D02-6"])
+    // Một sơ đồ luồng màn cho cả hệ thống, giữ id cũ
+    expect(result.diagrams.filter((d) => d.kind === "screen_flow").map((d) => d.id)).toEqual(["D03"])
+    // Class diagram mỗi feature một hình, chủ là feature; mỗi feature một nhóm id riêng
+    expect(result.diagrams.filter((d) => d.kind === "class").map((d) => [d.owner_kind, d.owner_id, d.section])).toEqual(["F1", "F2", "F3", "F4", "F5", "F6"].map((f) => ["feature", f, `feature:${f}`]))
+    expect(result.diagrams.filter((d) => d.kind === "class").map((d) => d.id)).toEqual(["D06", "D07", "D08", "D09", "D10", "D11"])
+    // State machine mỗi entity có vòng đời một hình (User, Baseline), chủ là entity, đặt ở §3.1.5
+    expect(result.diagrams.filter((d) => d.kind === "state_machine").map((d) => [d.id, d.owner_kind, d.owner_id, d.section])).toEqual([
+      ["D12", "entity", "E01", "fixed:3.1.5"],
+      ["D13", "entity", "E08", "fixed:3.1.5"]
+    ])
+    // Sequence mỗi function đủ tiêu chí một hình (puml), chủ là function, đặt ở mục của function; mỗi function một nhóm id riêng
+    expect(result.diagrams.filter((d) => d.kind === "sequence").map((d) => [d.format, d.owner_kind, d.owner_id, d.section])).toEqual(
+      ["FN001", "FN010", "FN024", "FN028", "FN084", "FN086"].map((f) => ["puml", "function", f, `function:${f}`])
+    )
+    // Activity mỗi use case có nút một hình (svg), chủ là use case, đặt ở tính năng chứa use case — phần chức năng (FLF-390)
+    expect(result.diagrams.filter((d) => d.kind === "activity").map((d) => [d.format, d.owner_kind, d.owner_id, d.section.startsWith("feature:")])).toEqual([["svg", "use_case", "UC02", true]])
     expect(result.diagrams.find((d) => d.owner_id === "S07")?.id).toBe("D05")
-    expect(result.diagrams.filter((d) => d.kind === "screen_layout").map((d) => d.id).sort()).toEqual(["D05", "D06", "D07", "D08", "D09"])
+    expect(result.diagrams.filter((d) => d.kind === "screen_layout").map((d) => d.id).sort()).toEqual(["D05", "D20", "D21", "D22", "D23"])
 
     const spine = (await repo.get(PROJECT))!
-    expect(spine.diagrams).toHaveLength(16)
+    expect(spine.diagrams).toHaveLength(30)
     expect(staleDiagrams(spine)).toEqual([])
     expect(runDeterministicCheck(spine).filter((f) => f.level === "red")).toEqual([])
-    expect(store.files.size).toBe(32)
-    expect((await loadDiagramFile(PROJECT, "D01", "svg", store)).contentType).toBe("image/svg+xml")
+    expect(store.files.size).toBe(60)
+    expect((await loadDiagramFile(PROJECT, "D05", "svg", store)).contentType).toBe("image/svg+xml")
 
     // lần hai: không đổi gì ⇒ không compile, không ghi
     const again = await renderAll(PROJECT, { by: USER, deps })
@@ -159,16 +197,16 @@ describe("renderAll / renderDiagram qua op engine", () => {
   it(".puml không compile ⇒ render_status=error, không ném, cờ đỏ render_error", async () => {
     await seed()
     const { deps, store } = makeDeps(async () => render(false))
-    const result = await renderDiagram(PROJECT, "erd", null, { by: USER, deps })
-    expect(result.diagrams[0]).toMatchObject({ id: "D04", render_status: "error", error: "Syntax Error?" })
+    const result = await renderDiagram(PROJECT, "screen_layout", "S07", { by: USER, deps })
+    expect(result.diagrams[0]).toMatchObject({ id: "D05", render_status: "error", error: "Syntax Error?" })
     expect(store.files.size).toBe(0)
-    await expect(loadDiagramFile(PROJECT, "D04", "svg", store)).rejects.toMatchObject({ statusCode: 404, code: "DIAGRAM_NOT_FOUND" })
+    await expect(loadDiagramFile(PROJECT, "D05", "svg", store)).rejects.toMatchObject({ statusCode: 404, code: "DIAGRAM_NOT_FOUND" })
 
     const flags = runDeterministicCheck((await repo.get(PROJECT))!)
-    expect(flags.filter((f) => f.rule_id === "render_error")).toMatchObject([{ target_id: "D04", remediation_step: "S-4.5" }])
+    expect(flags.filter((f) => f.rule_id === "render_error")).toMatchObject([{ target_id: "D05", remediation_step: "S-5.3@S07" }])
   })
 
-  it("đổi tên actor ⇒ hình context, usecase + luồng màn (tiêu đề theo actor) stale ⇒ render lại chỉ các hình đó", async () => {
+  it("đổi tên actor ⇒ hình context, usecase, luồng màn (actor của màn nằm trong dữ liệu nguồn), sơ đồ tuần tự và sơ đồ activity có actor đó stale ⇒ render lại chỉ các hình đó", async () => {
     await seed()
     const { deps } = makeDeps()
     await renderAll(PROJECT, { by: USER, deps })
@@ -179,12 +217,34 @@ describe("renderAll / renderDiagram qua op engine", () => {
     await applyTransaction(PROJECT, { base_version: spine.spine_version, ops: [{ op: "set", path: `actors[id=${actor.id}].name`, value: "Renamed" }], by: USER })
 
     const stale = staleDiagrams((await repo.get(PROJECT))!).map((d) => d.kind)
-    expect([...new Set(stale)].sort()).toEqual(["context", "screen_flow", "usecase"])
+    expect([...new Set(stale)].sort()).toEqual(["activity", "context", "screen_flow", "sequence", "usecase"])
     const result = await renderAll(PROJECT, { by: USER, deps })
-    expect([...result.rendered].sort()).toEqual(["D01", "D02", "D02-2", "D02-3", "D02-4", "D02-5", "D03", "D03-2", "D03-3", "D03-4"])
+    const activityId = result.diagrams.find((d) => d.kind === "activity")!.id
+    expect([...result.rendered].sort()).toEqual(["D01", "D02", "D02-2", "D02-3", "D02-4", "D02-5", "D02-6", "D03", "D14", "D15", "D16", "D17", activityId].sort())
   })
 
-  it("40 use case của 4 actor ⇒ mỗi actor một hình D02, D02-2…, phần đầu giữ id cũ", async () => {
+  it("hình use case vẽ theo engine cũ (svg@1) ⇒ stale; render không ép vẽ lại mọi phần, không mất use case nào", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    await renderAll(PROJECT, { by: USER, deps })
+    const current = (await repo.get(PROJECT))!
+    const oldEngine = { ...DIAGRAM_ENGINES, usecase: "svg@1" }
+    // giả lập dữ liệu đã vẽ trước khi tăng engine: source_hash tính theo svg@1
+    const legacy = structuredClone(current)
+    for (const d of legacy.diagrams.filter((x) => x.kind === "usecase")) d.source_hash = renderedDiagramHash(legacy, d, oldEngine)
+    await seed(legacy)
+
+    const ucIds = legacy.diagrams.filter((d) => d.kind === "usecase").map((d) => d.id)
+    expect(staleDiagrams((await repo.get(PROJECT))!).filter((d) => d.kind === "usecase").map((d) => d.id).sort()).toEqual([...ucIds].sort())
+    const result = await renderAll(PROJECT, { by: USER, deps })
+    expect(result.rendered.filter((id) => ucIds.includes(id)).sort()).toEqual([...ucIds].sort())
+    const after = (await repo.get(PROJECT))!
+    expect(staleDiagrams(after)).toEqual([])
+    const drawn = after.diagrams.filter((d) => d.kind === "usecase" && d.section === "fixed:2.2.1").map((d) => d.source).join("\n")
+    for (const u of after.use_cases) expect(drawn, u.id).toContain(u.name.split(" ")[0])
+  })
+
+  it("40 use case chưa có feature của 4 actor ⇒ nhóm theo actor chính, mỗi nhóm một hình D02, D02-2…, phần đầu giữ id cũ", async () => {
     const spine = structuredClone(FIXTURE)
     const human = spine.actors.filter((a) => a.kind === "human").map((a) => a.id)
     spine.use_cases = Array.from({ length: 40 }, (_, i) => ({
@@ -217,7 +277,7 @@ describe("renderAll / renderDiagram qua op engine", () => {
       extends: []
     }))
     // Hình đã vẽ bằng bản cũ: id `-1`/`-2`, `source_hash` đúng với `actors[]` + `use_cases[]` hiện tại
-    const stale = { puml: "@startuml\nA01 --> UC001\n@enduml\n", source_hash: renderKind(spine, "usecase")[0].source_hash }
+    const stale = { format: "puml" as const, source: "@startuml\nA01 --> UC001\n@enduml\n", source_hash: renderKind(spine, "usecase")[0].source_hash }
     const base = { kind: "usecase" as const, section: "fixed:2.2.1", owner_kind: null, owner_id: null, render_status: "ok" as const, rendered_at: "2026-09-01T09:10:00.000Z" }
     spine.diagrams = [
       { id: "D02-1", ...base, ...stale },
@@ -235,12 +295,12 @@ describe("renderAll / renderDiagram qua op engine", () => {
     // giữ nguyên cả hai bản cũ: không có tín hiệu tự động nào báo `.puml` đã sai chuẩn
     // Hai phần mới (mỗi actor một hình) được vẽ; hai phần cũ cùng hash nên giữ nguyên bản cũ
     expect(result.rendered).toEqual(["D02-3", "D02-4"])
-    for (const d of result.diagrams.slice(0, 2)) expect(d.puml).toBe(stale.puml)
+    for (const d of result.diagrams.slice(0, 2)) expect(d.source).toBe(stale.source)
 
     // `force: true` (`npm run rerender:usecase`) là đường duy nhất làm cả hai phần đúng chuẩn mới
     const forced = await renderDiagram(PROJECT, "usecase", null, { by: USER, deps, force: true })
     expect(forced.rendered).toEqual(["D02-1", "D02-2", "D02-3", "D02-4"])
-    for (const d of forced.diagrams) expect(d.puml).not.toMatch(/^A\d+ -->/m)
+    for (const d of forced.diagrams) expect(d.source).not.toMatch(/^A\d+ -->/m)
   })
 
   it("mặc định không tự sửa: bỏ dòng lỗi làm mất phần tử hình mà vẫn báo ok", async () => {
@@ -248,24 +308,71 @@ describe("renderAll / renderDiagram qua op engine", () => {
     expect(await noAutoFix({ kind: "erd", puml: "@startuml\nBAD\n@enduml", error: "x", line: "2", attempt: 1 })).toBeNull()
   })
 
+  it("class: mỗi feature một nhóm id riêng - bỏ entity của một feature chỉ xoá hình feature đó, id các feature khác giữ nguyên", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    const first = await renderAll(PROJECT, { by: USER, deps })
+    const before = Object.fromEntries(first.diagrams.filter((d) => d.kind === "class").map((d) => [d.owner_id, d.id]))
+    expect(Object.keys(before)).toEqual(["F1", "F2", "F3", "F4", "F5", "F6"])
+
+    // F4 hết entity: gỡ F4 khỏi feature_ids của mọi entity
+    const record = (await repo.get(PROJECT))!
+    const ops = record.entities.flatMap((e) => ((e.feature_ids ?? []).includes("F4") ? [{ op: "remove" as const, path: `entities[id=${e.id}].feature_ids[=F4]`, reason: "test" }] : []))
+    await applyTransaction(PROJECT, { base_version: record.spine_version, ops, by: USER, reason: "test" })
+    const second = await renderDiagram(PROJECT, "class", null, { by: USER, deps })
+    const after = Object.fromEntries(second.diagrams.filter((d) => d.kind === "class").map((d) => [d.owner_id, d.id]))
+    expect(second.removed).toEqual([before.F4])
+    expect(after).toEqual({ F1: before.F1, F2: before.F2, F3: before.F3, F5: before.F5, F6: before.F6 })
+  })
+
   it("force compile lại hình không đổi; nội dung trùng ⇒ không tăng version", async () => {
     await seed()
     const { deps } = makeDeps()
     await renderAll(PROJECT, { by: USER, deps })
     const forced = await renderAll(PROJECT, { by: USER, deps, force: true })
-    expect(forced.rendered).toHaveLength(16)
+    expect(forced.rendered).toHaveLength(30)
     expect(forced.spine_version).toBe(2)
+  })
+
+  it("ký pháp ERD của dự án (ngoài Spine): đổi ký pháp ⇒ hình ERD stale ⇒ vẽ lại ra hình mới, hash khớp, các hình khác giữ nguyên", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    let notation: "chen" | "crowsfoot" | "idef1x" = "chen"
+    const withNotation = { ...deps, renderContext: async () => ({ erdNotation: notation }) }
+    await renderAll(PROJECT, { by: USER, deps: withNotation })
+    const first = (await repo.get(PROJECT))!.diagrams.find((d) => d.kind === "erd")!
+    expect(first.source).toContain("<polygon") // hình thoi Chen
+
+    notation = "crowsfoot"
+    const spine = (await repo.get(PROJECT))!
+    expect(staleDiagrams(spine, { erdNotation: "crowsfoot" }).map((d) => d.kind)).toEqual(["erd"])
+    expect(staleRenderedDiagrams(spine, { erdNotation: "crowsfoot" }).map((d) => d.kind)).toEqual(["erd"])
+    expect(staleDiagrams(spine, { erdNotation: "chen" })).toEqual([])
+    // cờ đỏ diagram_stale theo ký pháp hiện tại của dự án
+    expect(runDeterministicCheck(spine, [], { erdNotation: "crowsfoot" }).filter((f) => f.rule_id === "diagram_stale").map((f) => f.target_id)).toEqual([first.id])
+    expect(runDeterministicCheck(spine).filter((f) => f.rule_id === "diagram_stale")).toEqual([])
+
+    const again = await renderDiagram(PROJECT, "erd", null, { by: USER, deps: withNotation })
+    expect(again.rendered).toEqual([first.id])
+    const redrawn = (await repo.get(PROJECT))!.diagrams.find((d) => d.kind === "erd")!
+    expect(redrawn.id).toBe(first.id)
+    expect(redrawn.source).not.toContain("<polygon")
+    expect(redrawn.source_hash).toBe(renderedDiagramHash(FIXTURE, { kind: "erd", owner_id: null }, undefined, { erdNotation: "crowsfoot" }))
+    expect(staleDiagrams((await repo.get(PROJECT))!, { erdNotation: "crowsfoot" })).toEqual([])
+
+    // không đổi ký pháp ⇒ lần vẽ kế tiếp không làm gì
+    expect((await renderDiagram(PROJECT, "erd", null, { by: USER, deps: withNotation })).rendered).toEqual([])
   })
 
   it("hình chuyển sang lỗi ⇒ xoá file cũ; 409 khi ghi ⇒ không lưu file của lô thua", async () => {
     await seed()
     const { deps, store } = makeDeps()
-    await renderDiagram(PROJECT, "erd", null, { by: USER, deps })
+    await renderDiagram(PROJECT, "screen_layout", "S07", { by: USER, deps })
     expect(store.files.size).toBe(2)
 
     const spine = (await repo.get(PROJECT))!
     const failing = { ...deps, check: vi.fn(async () => render(false)) }
-    await renderDiagram(PROJECT, "erd", null, { by: USER, deps: failing, force: true })
+    await renderDiagram(PROJECT, "screen_layout", "S07", { by: USER, deps: failing, force: true })
     expect(store.files.size).toBe(0)
 
     // lô thua khoá lạc quan: dữ liệu nguồn đổi giữa lúc đọc và lúc ghi
@@ -274,37 +381,263 @@ describe("renderAll / renderDiagram qua op engine", () => {
       current.spine_version = spine.spine_version + 10
       return render(true)
     })
-    await expect(renderDiagram(PROJECT, "context", null, { by: USER, deps: loser.deps })).rejects.toMatchObject({ statusCode: 409 })
+    await expect(renderDiagram(PROJECT, "screen_layout", "S07", { by: USER, deps: loser.deps, force: true })).rejects.toMatchObject({ statusCode: 409 })
     expect(loser.store.files.size).toBe(0)
   })
 })
 
-describe("screen_layout do model vẽ (FLF-214)", () => {
-  const SALT = ["@startsalt", "{", "  {+", "    Email", "    \"john@example.com  \"", "    [ Log in ]", "  }", "}", "@endsalt", ""].join("\n")
-
-  it("drawLayout trả salt ⇒ lưu salt đó; mặc định không gọi model ⇒ bảng function", async () => {
-    await seed()
-    const { deps } = makeDeps()
-    const drawLayout = vi.fn(async () => SALT)
-    const drawn = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...deps, drawLayout } })
-    expect(drawLayout).toHaveBeenCalledWith(expect.objectContaining({ projectId: PROJECT, userId: USER, screenId: "S01" }))
-    expect(drawn.diagrams[0]).toMatchObject({ owner_id: "S01", render_status: "ok", puml: SALT })
-
-    // Không cắm drawLayout (test, script) ⇒ bảng function của renderer code
-    const plain = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps, force: true })
-    expect(plain.diagrams[0].puml).toBe(renderKind(FIXTURE, "screen_layout", "S01")[0].puml)
-    // Hình khác không gọi model
-    await renderDiagram(PROJECT, "erd", null, { by: USER, deps: { ...deps, drawLayout } })
-    expect(drawLayout).toHaveBeenCalledTimes(1)
+describe("screen_layout: mockup SVG theo theme dự án (FLF-410)", () => {
+  const BOTH: RenderContext = { screenTheme: { primaryColor: "#3F5591", domain: "flintflow.io", platforms: ["web", "mobile"] } }
+  const envelope = (spec: ScreenSpec = { ...SIGNUP_SPEC, platforms: ["web", "mobile"] }): ScreenEnvelope => ({ spec, screenImages: null, primaryColor: null })
+  const withContext = (deps: Partial<DiagramServiceDeps>, context: RenderContext): Partial<DiagramServiceDeps> => ({
+    ...deps,
+    renderContext: async () => context,
+    renderSvgPng: async () => Buffer.from("png")
   })
 
-  it("salt của model không compile, model trả null hoặc ném ⇒ bảng function, vẫn ok", async () => {
+  it("model trả spec ⇒ một hình mỗi nền tảng (Web / Mobile), cùng mục; spec lưu trong SVG", async () => {
     await seed()
-    const table = renderKind(FIXTURE, "screen_layout", "S01")[0].puml
-    const { deps } = makeDeps(async (source) => render(source !== SALT))
-    for (const drawLayout of [async () => SALT, async () => null, async () => Promise.reject(new Error("no credit"))]) {
-      const result = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...deps, drawLayout }, force: true })
-      expect(result.diagrams[0]).toMatchObject({ render_status: "ok", puml: table })
+    const { deps } = makeDeps()
+    const drawLayout = vi.fn(async () => envelope())
+    const drawn = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...withContext(deps, BOTH), drawLayout } })
+    expect(drawLayout).toHaveBeenCalledTimes(1)
+    expect(drawLayout).toHaveBeenCalledWith(expect.objectContaining({ projectId: PROJECT, userId: USER, screenId: "S01", platforms: ["web", "mobile"] }))
+    expect(drawn.diagrams).toHaveLength(2)
+    const [web, mobile] = drawn.diagrams
+    expect(mobile.id).toBe(`${web.id}-2`)
+    expect(web).toMatchObject({ format: "svg", render_status: "ok", section: mobile.section, owner_id: "S01" })
+    expect(svgTitleOf(web.source)).toBe("Screen Layout - Login (Web)")
+    expect(svgTitleOf(mobile.source)).toBe("Screen Layout - Login (Mobile)")
+    expect(web.source).toContain("https://flintflow.io/signup")
+    expect(screenSpecOf(web.source)?.spec.title).toBe(SIGNUP_SPEC.title)
+  })
+
+  it("màn chỉ web (spec thu hẹp) ⇒ một hình, chú thích không hậu tố", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    const drawn = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...withContext(deps, BOTH), drawLayout: async () => envelope({ ...SIGNUP_SPEC, platforms: ["web"] }) } })
+    expect(drawn.diagrams).toHaveLength(1)
+    expect(svgTitleOf(drawn.diagrams[0].source)).toBe("Screen Layout - Login")
+  })
+
+  it("đổi màu / domain / nền tảng ⇒ hình stale, vẽ lại từ spec đã lưu, 0 lượt model", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    const drawLayout = vi.fn(async () => envelope())
+    await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...withContext(deps, BOTH), drawLayout } })
+    // vẽ lại cùng theme, force ⇒ vẫn không gọi model (contentHash khớp)
+    await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, force: true, deps: { ...withContext(deps, BOTH), drawLayout } })
+    const orange: RenderContext = { screenTheme: { primaryColor: "#E4572E", domain: null, platforms: ["web"] } }
+    const record = await repo.get(PROJECT)
+    expect(staleDiagrams(record!, orange).map((d) => d.owner_id)).toContain("S01")
+    const redrawn = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...withContext(deps, orange), drawLayout } })
+    expect(drawLayout).toHaveBeenCalledTimes(1)
+    expect(redrawn.diagrams).toHaveLength(1)
+    expect(redrawn.removed).toHaveLength(1)
+    expect(redrawn.diagrams[0].source).toContain("#E4572E")
+    expect(redrawn.diagrams[0].source).not.toContain("https://")
+  })
+
+  it("sửa validation của một function ⇒ chỉ màn đó gọi model lại", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    const drawLayout = vi.fn(async () => envelope())
+    const targets = [
+      { kind: "screen_layout" as const, owner_id: "S01" },
+      { kind: "screen_layout" as const, owner_id: "S05" }
+    ]
+    const first = await renderDiagrams(PROJECT, targets, { by: USER, deps: { ...withContext(deps, BOTH), drawLayout } })
+    expect(drawLayout).toHaveBeenCalledTimes(2)
+    const fn = FIXTURE.functions.find((f) => f.screen_id === "S01" && f.validations.length > 0)!
+    await applyTransaction(PROJECT, {
+      base_version: first.spine_version,
+      ops: [{ op: "set", path: `functions[id=${fn.id}].validations[id=${fn.validations[0].id}].statement`, value: "Email must be at most 120 characters." }],
+      by: USER,
+      reason: "test"
+    })
+    await renderDiagrams(PROJECT, targets, { by: USER, force: true, deps: { ...withContext(deps, BOTH), drawLayout } })
+    expect(drawLayout).toHaveBeenCalledTimes(3)
+    expect(drawLayout).toHaveBeenLastCalledWith(expect.objectContaining({ screenId: "S01" }))
+  })
+
+  it("redrawScreenLayoutsFromSpec: màn chưa có spec giữ nguyên hình, không gọi model", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    // S01 có spec, S05 rơi về bảng function
+    await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...withContext(deps, BOTH), drawLayout: async () => envelope() } })
+    await renderDiagram(PROJECT, "screen_layout", "S05", { by: USER, deps: { ...withContext(deps, BOTH), drawLayout: async () => null } })
+    const before = (await repo.get(PROJECT))!.diagrams.find((d) => d.owner_id === "S05")!
+    const drawLayout = vi.fn(async () => envelope())
+    const red: RenderContext = { screenTheme: { primaryColor: "#B00020", domain: null, platforms: ["web", "mobile"] } }
+    const result = await redrawScreenLayoutsFromSpec(PROJECT, { by: USER, deps: { ...withContext(deps, red), drawLayout } })
+    expect(drawLayout).not.toHaveBeenCalled()
+    expect(result.diagrams.filter((d) => d.owner_id === "S01").every((d) => d.source.includes("#B00020"))).toBe(true)
+    expect(result.diagrams.find((d) => d.owner_id === "S05")).toEqual(before)
+  })
+
+  it("FLF-387: `by` là mã CR, có `userId` ⇒ model gọi bằng userId, change vẫn ghi mã CR", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    const drawLayout = vi.fn(async () => envelope())
+    await renderDiagram(PROJECT, "screen_layout", "S01", { by: "CR-002", userId: USER, deps: { ...withContext(deps, BOTH), drawLayout } })
+    expect(drawLayout).toHaveBeenCalledWith(expect.objectContaining({ userId: USER, screenId: "S01" }))
+    const changes = await db.Change.find({})
+    expect(changes[changes.length - 1]).toMatchObject({ by: "CR-002" })
+  })
+
+  it("model trả null / ném; không cắm model ⇒ bảng function (puml), vẫn ok, không render_error", async () => {
+    await seed()
+    const table = renderKind(FIXTURE, "screen_layout", "S01")[0].source
+    const { deps } = makeDeps()
+    for (const drawLayout of [async () => null, async () => Promise.reject(new Error("no credit"))]) {
+      const result = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...withContext(deps, BOTH), drawLayout }, force: true })
+      expect(result.diagrams).toHaveLength(1)
+      expect(result.diagrams[0]).toMatchObject({ render_status: "ok", format: "puml", source: table })
     }
+    const plain = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: withContext(deps, BOTH), force: true })
+    expect(plain.diagrams[0].source).toBe(table)
+    // Hình khác không gọi model
+    const drawLayout = vi.fn(async () => envelope())
+    await renderDiagram(PROJECT, "erd", null, { by: USER, deps: { ...withContext(deps, BOTH), drawLayout } })
+    expect(drawLayout).not.toHaveBeenCalled()
+  })
+})
+
+describe("renderChangedIfAvailable - FLF-311 vẽ lại sau lô thêm use case / màn", () => {
+  beforeEach(() => {
+    db.reset()
+    plantuml.reachable = true
+  })
+
+  const renderedThenRenamed = async (deps: Partial<DiagramServiceDeps>) => {
+    await seed()
+    const rendered = await renderAll(PROJECT, { by: USER, deps })
+    // Đổi tên actor ⇒ các hình đã vẽ của actor đó cũ đi (đúng tập cờ diagram_stale)
+    await applyTransaction(PROJECT, { base_version: rendered.spine_version, by: USER, ops: [{ op: "set", path: "actors[id=A02].name", value: "Lead Analyst" }] })
+    const spine = (await repo.get(PROJECT))!
+    expect(staleRenderedDiagrams(spine).length).toBeGreaterThan(0)
+    return spine
+  }
+
+  it("vẽ lại hình đã cũ + bố cục màn mới trong một lượt; không còn hình cũ", async () => {
+    const { deps } = makeDeps()
+    const before = await renderedThenRenamed(deps)
+    const newScreen = before.screens.find((s) => !before.diagrams.some((d) => d.kind === "screen_layout" && d.owner_id === s.id))!.id
+
+    const result = await renderChangedIfAvailable(PROJECT, [newScreen], { by: USER, deps })
+
+    expect(result).not.toBeNull()
+    const after = (await repo.get(PROJECT))!
+    expect(staleRenderedDiagrams(after)).toEqual([])
+    expect(after.diagrams.some((d) => d.kind === "screen_layout" && d.owner_id === newScreen && d.render_status === "ok")).toBe(true)
+  })
+
+  it("PlantUML không chạy ⇒ null, không ghi gì, không ném", async () => {
+    const { deps } = makeDeps()
+    const before = await renderedThenRenamed(deps)
+    plantuml.reachable = false
+
+    await expect(renderChangedIfAvailable(PROJECT, ["S02"], { by: USER, deps })).resolves.toBeNull()
+    expect((await repo.get(PROJECT))?.spine_version).toBe(before.spine_version)
+  })
+})
+
+describe("đường vẽ svg (FLF-339)", () => {
+  const contextScene = (overlap: boolean): Scene => {
+    const scene = new Scene()
+    scene.rect("A", 0, 0, 150, 54, { name: "Analyst" })
+    scene.text("A.name", 75, 32, "Analyst", { owner: "A", bold: true })
+    scene.circle("P", 400, 27, 60, { name: "FlintFlow" })
+    scene.line("F", [150, 27], [340, 27], { name: "Requirement List" })
+    scene.arrow("F", "classic")
+    scene.label("F", "Requirement List")
+    if (overlap) scene.text("X", 245, 30, "Overlapping text")
+    return scene
+  }
+  const svgParts = (overlap: boolean) => () => {
+    const part = svgPart(contextScene(overlap), { allowBends: false }, { kind: "context", section: "fixed:1", owner_kind: null, owner_id: null })
+    return [{ ...part, source_hash: renderedDiagramHash(FIXTURE, { kind: "context", owner_id: null }) }]
+  }
+
+  beforeEach(() => {
+    db.reset()
+    repo.clearReadCache()
+    svgOverride.parts = null
+  })
+
+  it("svg sạch ⇒ ok, format svg, không gọi check / fix, lưu svg = source và png của resvg", async () => {
+    await seed()
+    const { deps, store } = makeDeps()
+    const fix = vi.fn(async () => null)
+    const renderSvgPng = vi.fn(async () => Buffer.from("svg-png"))
+    svgOverride.parts = (kind) => (kind === "context" ? svgParts(false)() : null)
+    const result = await renderDiagram(PROJECT, "context", null, { by: USER, deps: { ...deps, fix, renderSvgPng } })
+    const d = result.diagrams[0]
+    expect(d).toMatchObject({ format: "svg", render_status: "ok" })
+    expect(d.source).toMatch(/^<\?xml[\s\S]*<svg /)
+    expect(deps.check).not.toHaveBeenCalled()
+    expect(fix).not.toHaveBeenCalled()
+    expect((await store.load(PROJECT, d.id, "svg"))?.data.toString("utf8")).toBe(d.source)
+    expect((await store.load(PROJECT, d.id, "png"))?.data.toString()).toBe("svg-png")
+  })
+
+  it("svg vi phạm bố cục ⇒ error nêu tên phần tử, không lưu file, file cũ còn nguyên; lỗi lặp y hệt ⇒ không ghi", async () => {
+    await seed()
+    const { deps, store } = makeDeps()
+    const first = await renderDiagram(PROJECT, "context", null, { by: USER, deps })
+    const id = first.diagrams[0].id
+    const oldSvg = (await store.load(PROJECT, id, "svg"))?.data.toString()
+    expect(oldSvg).toBeDefined()
+
+    const renderSvgPng = vi.fn(async () => Buffer.from("never"))
+    svgOverride.parts = (kind) => (kind === "context" ? svgParts(true)() : null)
+    // cùng hash dữ liệu với hình puml đang `ok` ⇒ phải `force` (thật ra đổi engine làm đổi hash — xem source-hash.test)
+    const broken = await renderDiagram(PROJECT, "context", null, { by: USER, deps: { ...deps, renderSvgPng }, force: true })
+    expect(broken.diagrams[0]).toMatchObject({ format: "svg", render_status: "error" })
+    expect(broken.diagrams[0].error).toMatch(/^Sơ đồ vi phạm bố cục: .*"Overlapping text"/)
+    expect(renderSvgPng).not.toHaveBeenCalled()
+    expect((await store.load(PROJECT, id, "svg"))?.data.toString()).toBe(oldSvg)
+
+    const again = await renderDiagram(PROJECT, "context", null, { by: USER, deps: { ...deps, renderSvgPng }, force: true })
+    expect(again.rendered).toEqual([])
+    expect(again.spine_version).toBe(broken.spine_version)
+  })
+
+  it("resvg ném ⇒ error `svg: …`, không lưu file", async () => {
+    await seed()
+    const { deps, store } = makeDeps()
+    svgOverride.parts = (kind) => (kind === "context" ? svgParts(false)() : null)
+    const renderSvgPng = vi.fn(async () => Promise.reject(new Error("svg too large")))
+    const result = await renderDiagram(PROJECT, "context", null, { by: USER, deps: { ...deps, renderSvgPng } })
+    expect(result.diagrams[0]).toMatchObject({ render_status: "error", error: "svg: svg too large" })
+    expect(await store.load(PROJECT, result.diagrams[0].id, "svg")).toBeNull()
+  })
+})
+
+describe("sameDiagramSubject - hình cũ có còn là cùng hình để trả về khi vẽ lại lỗi", () => {
+  type D = Spine["diagrams"][number]
+  const svg = (title: string) => `<svg xmlns="http://www.w3.org/2000/svg"><title>${title}</title></svg>`
+  const base: D = { id: "D02-2", kind: "usecase", format: "svg", source: svg("Use Cases - Authentication (2/3)"), section: "fixed:2.2.1", owner_kind: null, owner_id: null, render_status: "ok", source_hash: "h1", rendered_at: "2026-10-31T00:00:00.000Z" }
+
+  it("cùng phần (cùng tiêu đề), dữ liệu đổi ⇒ cùng hình", () => {
+    expect(sameDiagramSubject(base, { ...base, source_hash: "h2", render_status: "error", error: "lỗi bố cục" })).toBe(true)
+  })
+
+  it("cùng id nhưng cách chia đổi (theo actor → theo feature) ⇒ khác hình", () => {
+    expect(sameDiagramSubject({ ...base, source: svg("Use Cases - Patient (2/4)") }, base)).toBe(false)
+  })
+
+  it("khác chủ, khác loại hoặc khác mục ⇒ khác hình", () => {
+    expect(sameDiagramSubject({ ...base, owner_kind: "feature", owner_id: "F1" }, { ...base, owner_kind: "feature", owner_id: "F2" })).toBe(false)
+    expect(sameDiagramSubject(base, { ...base, kind: "class" })).toBe(false)
+    expect(sameDiagramSubject(base, { ...base, section: "fixed:2.1" })).toBe(false)
+  })
+
+  it(".puml: so dòng title; không có title (wireframe) ⇒ so theo chủ", () => {
+    const layout: D = { ...base, kind: "screen_layout", format: "puml", source: "@startsalt\n{ Login }\n@endsalt\n", section: "screen:S01", owner_kind: "screen", owner_id: "S01" }
+    expect(sameDiagramSubject(layout, { ...layout, source: "@startsalt\n{ Login form }\n@endsalt\n" })).toBe(true)
+    const seq = (title: string): D => ({ ...base, kind: "sequence", format: "puml", source: `@startuml\ntitle ${title}\n@enduml\n`, owner_kind: "function", owner_id: "FN001" })
+    expect(sameDiagramSubject(seq("Log In"), seq("Log In"))).toBe(true)
+    expect(sameDiagramSubject(seq("Log In"), seq("Sign In"))).toBe(false)
   })
 })

@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { RULES, applyRuleProfile, runDeterministicCheck, type FlagCandidate } from "../spine/deterministic-check.js"
 import { spineSchema } from "../spine/spine.schema.js"
+import { listSections } from "../spine/section-registry.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Flag, Spine } from "../spine/spine.types.js"
 import {
@@ -59,11 +60,11 @@ describe("hồ sơ luật mode 1", () => {
       else if (DOWNGRADED.includes(r.rule_id)) expect(hit?.level, r.rule_id).toBe("yellow")
       else expect(hit?.level, r.rule_id).toBe(r.level)
     }
-    // giữ đỏ: dead_reference, render_error, diagram_stale, unconfirmed_assumption
-    expect(out.filter((c) => c.level === "red").map((c) => c.rule_id).sort()).toEqual(["dead_reference", "diagram_stale", "render_error", "unconfirmed_assumption"])
+    // giữ đỏ: dead_reference, render_error, diagram_stale, unconfirmed_assumption, template_section_migration_missing (chỉ sinh khi hồ sơ mang danh sách mục thiếu sau đổi mẫu)
+    expect(out.filter((c) => c.level === "red").map((c) => c.rule_id).sort()).toEqual(["dead_reference", "diagram_stale", "render_error", "template_section_migration_missing", "unconfirmed_assumption"])
   })
 
-  it("Spine rỗng (import chưa trích được gì): mode 1 không có cờ đỏ — mục FPT thiếu không bắt buộc, chỉ vào gap report", () => {
+  it("Spine rỗng (import chưa trích được gì): mode 1 không có cờ đỏ - mục FPT thiếu không bắt buộc, chỉ vào gap report", () => {
     const empty = createEmptySpine({ name: "Lumen" })
     const mode2 = runDeterministicCheck(empty, [], { atBaseline: true })
     expect(mode2.some((f) => f.rule_id === "array_empty" && f.level === "red")).toBe(true)
@@ -95,7 +96,7 @@ describe("hồ sơ luật mode 1", () => {
   })
 })
 
-describe("findingOps — AI semantic check chỉ ra vàng", () => {
+describe("findingOps - AI semantic check chỉ ra vàng", () => {
   const spine = (flags: Flag[] = []): Spine => ({ ...structuredClone(FULL), flags, spine_version: 7 })
 
   it("mọi finding ⇒ op thêm cờ vàng rule import_semantic, remediation C-1, id tiếp theo id lớn nhất", () => {
@@ -111,7 +112,10 @@ describe("findingOps — AI semantic check chỉ ra vàng", () => {
       resolved_at: null,
       waived_by_user: false,
       waive_reason: null,
-      waived_at_version: null
+      waived_at_version: null,
+      kept_reason: null,
+      kept_by: null,
+      kept_at: null
     }
     // finding lạc thêm `level: "red"` (model tự bịa) cũng không làm cờ đỏ
     const findings = [
@@ -146,6 +150,21 @@ describe("findingOps — AI semantic check chỉ ra vàng", () => {
     expect(ops.map((o) => (o as { value: Flag }).value.section_id)).toEqual(["fixed:I"])
   })
 
+  it("phần nhỏ slot:* của mẫu (FLF-278) không phải mục Spine ⇒ cờ trỏ về mục FPT cha; không có cha ⇒ mục giữ loại dữ liệu đó, không có ⇒ fixed:I", () => {
+    const ops = findingOps(
+      spine(),
+      [
+        { rule: "r", section_id: "slot:vision", message: "xem tầm nhìn", block_ids: ["B0003"] },
+        { rule: "r", section_id: "slot:features", message: "xem chức năng", block_ids: ["B0004"] },
+        { rule: "r", section_id: "slot:platforms", message: "xem nền tảng", block_ids: ["B0005"] },
+        { rule: "r", section_id: "slot:references", message: "xem tham khảo", block_ids: ["B0006"] }
+      ],
+      IMPORT_SEMANTIC_RULE
+    )
+    const firstFunction = listSections(spine()).find((sec) => sec.id.startsWith("function:"))!.id
+    expect(ops.map((o) => (o as { value: Flag }).value.section_id)).toEqual(["fixed:1", firstFunction, "fixed:1", "fixed:I"])
+  })
+
   it("không finding ⇒ không op", () => {
     expect(findingOps(spine(), [], IMPORT_SEMANTIC_RULE)).toEqual([])
   })
@@ -174,7 +193,7 @@ describe("tiện ích check", () => {
   })
 })
 
-describe("1.11 map-reduce — chia lô, phạm vi, kiểm chéo", () => {
+describe("1.11 map-reduce - chia lô, phạm vi, kiểm chéo", () => {
   const block = (n: number, section: string | null, text: string, mentions: CheckBlock["mentions"] = []): CheckBlock => ({
     block_id: `B${String(n).padStart(4, "0")}`,
     section_id: section,

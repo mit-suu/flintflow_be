@@ -5,7 +5,7 @@ import { authMiddleware } from "../../shared/auth/auth.middleware.js"
 import { requireActiveAccount } from "../../shared/auth/account-guard.middleware.js"
 import { orgContext } from "../../shared/auth/org-context.middleware.js"
 import { requireRole } from "../../shared/auth/require-role.middleware.js"
-import { checkoutSchema, paymentCallbackSchema, upgradeSchema, validateBody } from "./billing.validation.js"
+import { checkoutSchema, topupRequestSchema, paymentCallbackSchema, upgradeSchema, validateBody } from "./billing.validation.js"
 
 const router = Router()
 
@@ -45,8 +45,33 @@ router.get("/balance", authMiddleware, requireActiveAccount, orgContext, require
  *         description: "{ packages[], plans[] }"
  *       401:
  *         description: Chưa xác thực
+ *       403:
+ *         description: Viewer không được xem gói / bảng giá (UC-56)
  */
-router.get("/packages", authMiddleware, requireActiveAccount, billingController.getPackages)
+router.get("/packages", authMiddleware, requireActiveAccount, orgContext, requireRole("lead", "analyst"), billingController.getPackages)
+
+/**
+ * @swagger
+ * /api/v1/billing/topup-request:
+ *   post:
+ *     summary: Báo Lead nạp credit (FLF-332, BR-08) — tạo yêu cầu mở của người gọi trong org đang chọn, báo in-app mọi Lead
+ *     tags: [Billing]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               projectId: { type: string }
+ *               step: { type: string }
+ *               needed: { type: integer }
+ *     responses:
+ *       201:
+ *         description: "{ id, status: open, notified_leads, available, … } — bấm lại chỉ cập nhật yêu cầu đang mở, không báo trùng"
+ */
+router.post("/topup-request", authMiddleware, requireActiveAccount, orgContext, requireRole("lead", "analyst"), validateBody(topupRequestSchema), billingController.requestTopup)
 
 /**
  * @swagger
@@ -195,9 +220,26 @@ router.post("/upgrade", authMiddleware, requireActiveAccount, orgContext, requir
  *           type: integer
  *           minimum: 1
  *           maximum: 100
+ *       - in: query
+ *         name: kind
+ *         description: usage = lượt gọi AI (UC-60); payment = nạp credit kể cả đang chờ / lỗi (UC-59)
+ *         schema:
+ *           type: string
+ *           enum: [usage, payment]
+ *       - in: query
+ *         name: projectId
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: memberId
+ *         schema:
+ *           type: string
  *     responses:
  *       200:
- *         description: Danh sách CreditTransaction; meta gồm page, limit, total, totalPages
+ *         description: >
+ *           Sổ credit của org gộp thanh toán đang chờ / lỗi (type `payment`, chỉ Lead thấy), mới nhất trước. Mỗi dòng kèm
+ *           `member {id, name}`, `project {id, name}`, `stepId`, `tokensIn`, `tokensOut`; dòng nạp có `paymentStatus`.
+ *           meta gồm page, limit, total, totalPages
  *       401:
  *         description: Chưa xác thực
  */

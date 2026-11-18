@@ -8,12 +8,15 @@ vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await imp
 
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeMode1 } from "../../helpers/mode1.js"
-import { importAtExtracting } from "../../helpers/mode1-import-p4.js"
+import { importAtExtracting, useExtractConcurrency } from "../../helpers/mode1-import-p4.js"
 import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { ExtractionDraft } from "../../../src/modules/import/extraction-draft.model.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { CreditWallet } from "../../../src/modules/credits/credit-wallet.model.js"
 import { Usage } from "../../../src/modules/spine/usage.model.js"
+
+// Khẳng định thứ tự lượt gọi / số dư ví của bản tuần tự (FLF-392: song song ở extract-parallel.int.test.ts)
+useExtractConcurrency(1)
 
 /** Section trong prompt I-4 của mỗi lượt gọi provider (kể cả lượt retry). */
 let calls: string[] = []
@@ -36,11 +39,11 @@ const AI_ORDER = ["fixed:1", "fixed:2.2.1", "fixed:3.1.2"]
 const wallet = async (userId: string) => CreditWallet.findOne({ userId }).lean()
 const draftsOf = async (importId: string) => ExtractionDraft.find({ import_id: importId }).lean()
 
-describe("I-4 — bảng khớp đủ cột", () => {
+describe("I-4 - bảng khớp đủ cột", () => {
   it("bảng actor/UC/BR trích tất định, không gọi AI, không usage, không trừ credit", async () => {
     const ctx = await importAtExtracting()
     const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
-    expect(run.doc.status).toBe("fields_review")
+    expect(run.doc.status).toBe("baselining")
 
     for (const s of TABLE_SECTIONS) expect(calls, s).not.toContain(s)
     expect(calls).toHaveLength(6)
@@ -59,12 +62,12 @@ describe("I-4 — bảng khớp đủ cột", () => {
       ])
     )
     expect(await Usage.countDocuments({ projectId: ctx.projectId, step_id: { $in: TABLE_SECTIONS.map((s) => `I-4:${s}`) } })).toBe(0)
-    // 6 lượt × 2 credit
-    expect(await wallet(ctx.userId)).toMatchObject({ balance: 988, reserved: 0 })
+    // 6 lượt mẫu ngắn × 1 credit (quyết toán theo token)
+    expect(await wallet(ctx.userId)).toMatchObject({ balance: 994, reserved: 0 })
   })
 })
 
-describe("I-4 — output sai schema", () => {
+describe("I-4 - output sai schema", () => {
   it("sai schema 2 lần rồi đúng ⇒ retry trong cùng lượt (3 lần gọi), trừ credit một lần", async () => {
     let bad = 0
     mockOverrides.next = record((prompt) => {
@@ -80,7 +83,7 @@ describe("I-4 — output sai schema", () => {
     expect(calls.filter((s) => s === "fixed:1")).toHaveLength(3)
     expect(calls).toHaveLength(8)
     expect(await Usage.find({ projectId: ctx.projectId, step_id: "I-4:fixed:1" }).distinct("state")).toEqual(["deducted"])
-    expect(await wallet(ctx.userId)).toMatchObject({ balance: 988, reserved: 0 })
+    expect(await wallet(ctx.userId)).toMatchObject({ balance: 994, reserved: 0 })
     const d = (await draftsOf(ctx.importId)).find((x) => x.section_id === "fixed:1")!
     expect(d.status).toBe("done")
   }, 20_000)
@@ -100,11 +103,11 @@ describe("I-4 — output sai schema", () => {
   }, 20_000)
 })
 
-describe("I-4 — độ tin", () => {
-  it("field độ tin < 0.7 ⇒ fields_review, chỉ field đó cần xác nhận", async () => {
+describe("I-4 - độ tin", () => {
+  it("FLF-343: field độ tin < 0.7 ⇒ vẫn sang baselining (không dừng ở fields_review), chỉ field đó đếm là cần xem", async () => {
     const ctx = await importAtExtracting()
     const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
-    expect(run.doc.status).toBe("fields_review")
+    expect(run.doc.status).toBe("baselining")
     const needing = run.sections.filter((s) => s.fields_needing_review > 0)
     expect(needing.map((s) => s.fields_needing_review)).toEqual([1, 1])
     expect(needing.every((s) => s.section_id.startsWith("function:@B"))).toBe(true)
@@ -123,12 +126,12 @@ describe("I-4 — độ tin", () => {
     expect(run.doc.status).toBe("baselining")
   })
 
-  it("độ tin cả item 0.69 ⇒ mọi field của item cần xác nhận", async () => {
+  it("độ tin AI cả item thấp (0.3) ⇒ dù tín hiệu code khớp (FLF-343: 0.3 × 0.6 + 1 × 0.4 < 0.7) mọi field của item cần xem", async () => {
     mockOverrides.next = record((prompt) => {
       const out = fakeMode1(prompt)
       if (!out || sectionOf(prompt) !== "fixed:3.1.2") return out
       const json = JSON.parse(out) as { items: { confidence: number }[] }
-      for (const i of json.items) i.confidence = 0.69
+      for (const i of json.items) i.confidence = 0.3
       return JSON.stringify(json)
     })
     const ctx = await importAtExtracting()
@@ -139,10 +142,10 @@ describe("I-4 — độ tin", () => {
   })
 })
 
-describe("I-4 — hết credit, resume", () => {
+describe("I-4 - hết credit, resume", () => {
   it("hết credit ⇒ paused credits, giữ cursor ở section đang dở; nạp rồi resume không trích lại section done", async () => {
-    // 5 credit: đủ 2 lượt (fixed:1, fixed:2.2.1), lượt thứ 3 (fixed:3.1.2) thiếu
-    const ctx = await importAtExtracting({ balance: 5 })
+    // 3 credit: đủ 2 lượt ngắn (1 credit / lượt), lượt thứ 3 (fixed:3.1.2) thiếu khi giữ 2 credit
+    const ctx = await importAtExtracting({ balance: 3 })
     const first = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
     expect(first.doc.status).toBe("extracting")
     expect(first.doc.paused?.reason).toBe("credits")
@@ -162,7 +165,7 @@ describe("I-4 — hết credit, resume", () => {
     const resumed = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
     expect(resumed.doc.paused).toBeNull()
     expect(resumed.doc.extract_cursor).toBeNull()
-    expect(resumed.doc.status).toBe("fields_review")
+    expect(resumed.doc.status).toBe("baselining")
     for (const s of done) expect(calls, s).not.toContain(s)
     expect(calls[0]).toBe(AI_ORDER[2])
     expect(calls).toHaveLength(4)
@@ -179,11 +182,11 @@ describe("I-4 — hết credit, resume", () => {
     calls = []
     const again = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
     expect(calls).toEqual([])
-    expect(again.doc.status).toBe("fields_review")
+    expect(again.doc.status).toBe("baselining")
   })
 })
 
-describe("I-4 — lỗi AI", () => {
+describe("I-4 - lỗi AI", () => {
   it("provider lỗi giữa chừng ⇒ release hold: ví hoàn phần giữ, usage refunded; resume trích lại section failed", async () => {
     mockOverrides.next = record((prompt) => (prompt.includes("# Import Extract") && sectionOf(prompt) === AI_ORDER[2] ? new Error("provider down") : fakeMode1(prompt)))
     const ctx = await importAtExtracting()
@@ -191,8 +194,8 @@ describe("I-4 — lỗi AI", () => {
     expect(run.doc.paused?.reason).toBe("resume_later")
     expect(run.doc.extract_cursor).toBe(AI_ORDER[2])
     expect(run.sections.find((s) => s.section_id === AI_ORDER[2])).toMatchObject({ status: "failed", error: expect.stringContaining("Dịch vụ AI đang gặp sự cố") })
-    // 2 lượt thành công đã trừ, lượt lỗi được hoàn: không còn credit treo
-    expect(await wallet(ctx.userId)).toMatchObject({ balance: 996, reserved: 0 })
+    // 2 lượt thành công đã trừ (1 credit / lượt), lượt lỗi được hoàn: không còn credit treo
+    expect(await wallet(ctx.userId)).toMatchObject({ balance: 998, reserved: 0 })
     expect(await Usage.find({ projectId: ctx.projectId, step_id: `I-4:${AI_ORDER[2]}` }).distinct("state")).toEqual(["refunded"])
     expect(await Usage.countDocuments({ projectId: ctx.projectId, state: "reserved" })).toBe(0)
 
@@ -201,7 +204,7 @@ describe("I-4 — lỗi AI", () => {
     const resumed = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
     expect(calls[0]).toBe(AI_ORDER[2])
     expect(resumed.sections.every((s) => s.status === "done")).toBe(true)
-    expect(resumed.doc.status).toBe("fields_review")
+    expect(resumed.doc.status).toBe("baselining")
   })
 
   it("import không ở extracting ⇒ IMPORT_INVALID_STATE, không gọi AI", async () => {

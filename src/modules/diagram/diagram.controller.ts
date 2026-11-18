@@ -16,6 +16,7 @@ import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { validationError } from "../../shared/utils/validation-message.js"
 import * as diagramService from "./diagram.service.js"
+import { loadRenderContext } from "./render-context.js"
 import { DIAGRAM_KINDS } from "./renderers/index.js"
 
 const context = async (req: Request): Promise<{ projectId: string; userId: string; spine: SpineRecord }> => {
@@ -32,7 +33,7 @@ const FILE_RE = /^(.+)\.(svg|png)$/
 
 export const listDiagrams = catchAsync(async (req: Request, res: Response) => {
   const { projectId, spine } = await context(req)
-  const stale = new Set(diagramService.staleDiagrams(spine).map((d) => d.id))
+  const stale = new Set(diagramService.staleDiagrams(spine, await loadRenderContext(projectId)).map((d) => d.id))
   const base = `/api/v1/projects/${projectId}/diagrams`
   return sendSuccess(
     res,
@@ -45,6 +46,8 @@ export const listDiagrams = catchAsync(async (req: Request, res: Response) => {
   )
 })
 
+export const DIAGRAM_FILE_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+
 export const getDiagramFile = catchAsync(async (req: Request, res: Response) => {
   const { projectId, spine } = await context(req)
   const match = FILE_RE.exec(String(req.params.file))
@@ -56,6 +59,9 @@ export const getDiagramFile = catchAsync(async (req: Request, res: Response) => 
   const file = await diagramService.loadDiagramFile(projectId, diagramId, format === "svg" ? "svg" : "png")
   res.setHeader("Content-Type", file.contentType)
   res.setHeader("Cache-Control", "private, no-cache")
+  // SVG tự dựng chứa chữ user (FLF-339): mở thẳng file cũng không chạy được script / tải tài nguyên ngoài
+  res.setHeader("Content-Security-Policy", DIAGRAM_FILE_CSP)
+  res.setHeader("X-Content-Type-Options", "nosniff")
   return res.status(200).send(file.data)
 })
 

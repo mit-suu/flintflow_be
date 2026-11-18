@@ -17,18 +17,41 @@ export interface DiagramLabels {
   defaultIn: Readonly<Record<ActorKind, string>>
   /** Như `defaultIn`, chiều từ hệ thống ra actor. */
   defaultOut: Readonly<Record<ActorKind, string>>
-  /** Tiêu đề một phần sơ đồ use case khi phải tách nhiều hình — `groups` là tên actor chính của phần. */
+  /** Tiêu đề một hình use case — `groups` là tên feature (hoặc actor chính khi chưa có feature) kèm `(i/n)` khi nhóm tách nhiều hình. */
   useCasesTitle: (groups: string) => string
+  /** Tiêu đề hình phân cấp actor (generalization) ở §2.1. */
+  actorHierarchyTitle: string
   /** Nhóm use case không có actor nào. */
   otherGroup: string
-  /** Tiêu đề sơ đồ luồng màn của một actor — `section-renderer` dùng lại làm chú thích ảnh. */
-  screensFlowTitle: (actorName: string) => string
-  /** Dòng phụ dưới tên màn pop-up có tab. */
-  popup: string
-  noScreens: string
+  /** Tiêu đề hình luồng màn của cả hệ thống (`part` = `i/n` khi tách nhiều hình) — `<title>` của SVG, `section-renderer` dùng làm chú thích ảnh. */
+  screensFlowTitle: (part?: string) => string
+  /** Nhóm màn chưa nối actor nào khi Screens flow tách theo actor. */
+  otherScreens: string
+  /** Guard của nhánh còn lại (`else`) trong khối `alt` của sơ đồ tuần tự. */
+  elseGuard: string
   noEntities: string
+  /** Tiêu đề hình ERD (kèm `(i/n)` khi tách) — `<title>` của SVG, `section-renderer` dùng làm chú thích ảnh. */
+  erdTitle: string
+  /** P10: ghi chú dưới tên thực thể vẽ thêm để giữ quan hệ vắt qua chỗ cắt — `parts` là các `i/n` của hình chứa nó. */
+  erdElsewhere: (parts: string) => string
   /** Động từ trong hình thoi ERD khi quan hệ chưa có `relation_verbs`. */
   relationVerb: string
+  /** Tiêu đề hình class diagram (domain) của một feature (kèm `(i/n)` khi tách) — `<title>` của SVG, chú thích ảnh. */
+  classTitle: (feature: string) => string
+  /** Tiêu đề hình state machine (vòng đời) của một entity — `<title>` của SVG, chú thích ảnh. */
+  stateMachineTitle: (entity: string) => string
+  /** Tiêu đề (chú thích ảnh) sơ đồ tuần tự hệ thống của một function. */
+  sequenceTitle: (fn: string) => string
+  /** FLF-418: tiêu đề (chú thích ảnh) sơ đồ tuần tự mức thành phần của một function. */
+  componentSequenceTitle: (fn: string) => string
+  /** FLF-418: hậu tố tên control (`<Feature>Controller`) — tên lớp kỹ thuật, không dịch. */
+  controllerSuffix: string
+  /** Tiêu đề (chú thích ảnh) sơ đồ activity — luồng xử lý của một use case (FLF-390). */
+  activityTitle: (useCase: string) => string
+  /** Tiêu đề (chú thích ảnh) sơ đồ triển khai của hệ thống (FLF-390). */
+  deploymentTitle: string
+  /** Guard của nhánh lỗi khi message lỗi chưa ghi guard. */
+  errorGuard: string
   /** Bảng function — hình bố cục màn khi chưa có wireframe. */
   functionColumn: string
   descriptionColumn: string
@@ -38,15 +61,26 @@ export interface DiagramLabels {
 export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
   en: {
     system: "System",
-    defaultIn: { human: "user input", system: "service response", time: "scheduled trigger" },
-    defaultOut: { human: "processing result", system: "service request", time: "job status" },
-    useCasesTitle: (groups) => `Use Cases — ${groups}`,
+    defaultIn: { human: "User Input", system: "Service Response", time: "Scheduled Trigger" },
+    defaultOut: { human: "Processing Result", system: "Service Request", time: "Job Status" },
+    useCasesTitle: (groups) => `Use Cases - ${groups}`,
+    actorHierarchyTitle: "Actor Hierarchy",
     otherGroup: "Other",
-    screensFlowTitle: (actorName) => `Screens flow for ${actorName}`,
-    popup: "(pop-up)",
-    noScreens: "No screens yet",
+    screensFlowTitle: (part) => (part ? `Screens flow (${part})` : "Screens flow"),
+    otherScreens: "Other screens",
+    elseGuard: "else",
     noEntities: "No entities yet",
+    erdTitle: "Entity Relationship Diagram",
+    erdElsewhere: (parts) => `(see diagram ${parts})`,
     relationVerb: "has",
+    classTitle: (feature) => `Class Diagram - ${feature}`,
+    stateMachineTitle: (entity) => `State Machine Diagram - ${entity}`,
+    sequenceTitle: (fn) => `System Sequence Diagram - ${fn}`,
+    componentSequenceTitle: (fn) => `Sequence Diagram - ${fn}`,
+    controllerSuffix: "Controller",
+    activityTitle: (useCase) => `Activity Diagram - ${useCase}`,
+    deploymentTitle: "Deployment Diagram",
+    errorGuard: "error",
     functionColumn: "Function",
     descriptionColumn: "Description",
     noFunctions: "No functions yet"
@@ -55,13 +89,24 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     system: "Hệ thống",
     defaultIn: { human: "dữ liệu người dùng nhập", system: "phản hồi dịch vụ", time: "kích hoạt theo lịch" },
     defaultOut: { human: "kết quả xử lý", system: "yêu cầu dịch vụ", time: "trạng thái tác vụ" },
-    useCasesTitle: (groups) => `Sơ đồ use case — ${groups}`,
+    useCasesTitle: (groups) => `Sơ đồ use case - ${groups}`,
+    actorHierarchyTitle: "Phân cấp tác nhân",
     otherGroup: "Khác",
-    screensFlowTitle: (actorName) => `Luồng màn hình của ${actorName}`,
-    popup: "(pop-up)",
-    noScreens: "Chưa có màn hình",
+    screensFlowTitle: (part) => (part ? `Luồng màn hình (${part})` : "Luồng màn hình"),
+    otherScreens: "Màn khác",
+    elseGuard: "ngược lại",
     noEntities: "Chưa có thực thể",
+    erdTitle: "Sơ đồ quan hệ thực thể",
+    erdElsewhere: (parts) => `(xem hình ${parts})`,
     relationVerb: "có",
+    classTitle: (feature) => `Sơ đồ lớp - ${feature}`,
+    stateMachineTitle: (entity) => `Sơ đồ trạng thái - ${entity}`,
+    sequenceTitle: (fn) => `Sơ đồ tuần tự hệ thống - ${fn}`,
+    componentSequenceTitle: (fn) => `Sơ đồ tuần tự - ${fn}`,
+    controllerSuffix: "Controller",
+    activityTitle: (useCase) => `Sơ đồ hoạt động - ${useCase}`,
+    deploymentTitle: "Sơ đồ triển khai",
+    errorGuard: "có lỗi",
     functionColumn: "Chức năng",
     descriptionColumn: "Mô tả",
     noFunctions: "Chưa có chức năng"

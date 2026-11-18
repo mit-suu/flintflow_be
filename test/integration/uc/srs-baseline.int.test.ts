@@ -17,6 +17,8 @@ import { baselineResponseSchema, baselinesResponseSchema, flagsResponseSchema } 
 import { User } from "../../../src/modules/user/user.model.js"
 import { Membership, type OrgRole } from "../../../src/modules/organization/membership.model.js"
 import { Baseline } from "../../../src/modules/spine/baseline.model.js"
+import { stepsOf } from "../../../src/modules/spine/section-registry.js"
+import type { Spine } from "../../../src/modules/spine/spine.types.js"
 import { PREVIEW_EXPIRED } from "../../../src/modules/spine/change.service.js"
 import { orderedSteps } from "../../../src/modules/pipeline/step-registry.js"
 
@@ -36,7 +38,9 @@ const client = (seeded: SeededFixture, token = seeded.token) => {
     flagsAtBaseline: async () =>
       flagsResponseSchema.parse((await api.post("/flags/recompute", { at_baseline: true })).body.data).filter((f) => f.resolved_at === null),
     staleFlags: async () => (await api.flagsAtBaseline()).filter((f) => f.rule_id === "section_stale_at_baseline"),
-    baselines: async () => baselinesResponseSchema.parse((await api.get("/baselines")).body.data)
+    baselines: async () => baselinesResponseSchema.parse((await api.get("/baselines")).body.data),
+    /** Trạng thái nộp baseline đọc từ chính Spine — không có endpoint riêng. */
+    submission: async (): Promise<Body | null> => ((await api.spine()).baseline_submission as Body | null) ?? null
   }
   return api
 }
@@ -60,6 +64,8 @@ const freshSteps = (spine: Record<string, unknown>) => {
 }
 
 const renameA01 = (name = "Product Owner") => [{ op: "set", path: "actors[id=A01].name", value: name, reason: "rename" }]
+/** FLF-294: người yêu cầu + nguồn của change request sau baseline. */
+const CR = { requester: "Ms. Lan", source: { kind: "meeting_minutes", ref: "Minutes 15/10" } }
 
 beforeEach(() => {
   resetMockLlm()
@@ -67,7 +73,7 @@ beforeEach(() => {
 
 // ─── UC-33 ──────────────────────────────────────────────────────────
 
-describe("UC-33 — hoàn tác thay đổi gần nhất", () => {
+describe("UC-33 - hoàn tác thay đổi gần nhất", () => {
   it("hoàn tác ⇒ Spine về giá trị trước lô, lịch sử giữ nguyên và thêm lô revert", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
@@ -131,24 +137,25 @@ describe("UC-33 — hoàn tác thay đổi gần nhất", () => {
     expect((await api.spine()).actors.find((a: Body) => a.id === "A01").name).toBe("Product Owner")
   })
 
-  // BUG(UC-33): spec BR-03 "Undo is available only before the first baseline; after it, undoing a written change is a new
-  // change request" vs code `undo.service.ts` (undoLast) không kiểm `baselines[]` — sau baseline vẫn revert thẳng lô cuối.
-  it.skip("sau baseline ⇒ không hoàn tác được, Spine giữ nguyên (BR-03)", async () => {
+  // BR-03: "Undo is available only before the first baseline; after it, undoing a written change is a new change request".
+  // FLF-318: ký baseline ⇒ dự án sang mode 1, sửa thẳng bị chặn (CHANGE_REQUIRES_CR) nên cũng không có gì để hoàn tác
+  it("sau baseline ⇒ không sửa thẳng, không hoàn tác được, Spine giữ nguyên (BR-03)", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
     expect((await api.post("/baseline", { base_version: seeded.spineVersion })).status).toBe(201)
-    const changed = await api.change(renameA01(), { reason: "Customer renamed the role" })
-    expect(changed.status, JSON.stringify(changed.body.error)).toBe(200)
+    const changed = await api.change(renameA01(), { reason: "Customer renamed the role", change_request: CR })
+    expect(changed.status).toBe(409)
+    expect(changed.body.error.code).toBe("CHANGE_REQUIRES_CR")
 
     const undo = await api.post("/undo", { base_version: await api.version() })
     expect(undo.status).toBeGreaterThanOrEqual(400)
-    expect((await api.spine()).actors.find((a: Body) => a.id === "A01").name).toBe("Product Owner")
+    expect((await api.spine()).actors.find((a: Body) => a.id === "A01").name).toBe("Founder")
   })
 })
 
 // ─── UC-34 ──────────────────────────────────────────────────────────
 
-describe("UC-34 — hoà giải section stale", () => {
+describe("UC-34 - hoà giải section stale", () => {
   it("không có section stale ⇒ preview rỗng, không gọi AI, không ghi", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
@@ -264,7 +271,7 @@ describe("UC-34 — hoà giải section stale", () => {
 
 // ─── UC-35 ──────────────────────────────────────────────────────────
 
-describe("UC-35 — định nghĩa glossary của SRS", () => {
+describe("UC-35 - định nghĩa glossary của SRS", () => {
   it("trước baseline: thêm thuật ngữ chuẩn ⇒ ghi vào glossary", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
@@ -284,32 +291,24 @@ describe("UC-35 — định nghĩa glossary của SRS", () => {
     expect(res.body.data.spine.glossary.find((g: Body) => g.id === "G01").term).toBe("Software Requirements Specification")
   })
 
-  it("sau baseline: đổi tên không kèm lý do ⇒ 400, glossary không đổi", async () => {
+  // UC-35 / BR-03 (FLF-318): sau baseline đổi tên là một change request — sửa thẳng bị từ chối kèm nội dung điền sẵn cho form CR
+  it("sau baseline: đổi tên thuật ngữ phải qua change request, không sửa thẳng", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
     expect((await api.post("/baseline", { base_version: seeded.spineVersion })).status).toBe(201)
-    const res = await api.change([{ op: "set", path: "glossary[id=G01].term", value: "Spec" }])
-    expect(res.status).toBe(400)
-    expect(res.body.error.code).toBe("VALIDATION_ERROR")
-    expect((await api.spine()).glossary.find((g: Body) => g.id === "G01").term).toBe("SRS")
-  })
-
-  // BUG(UC-35): spec "After a baseline, renames go through a change request (BR-03)" vs code `change.service.ts:688-694`
-  // — project mode 2/3/4 sau baseline chỉ đòi `reason` rồi `applyTransaction` thẳng vào Spine (nhánh post_baseline);
-  // change request chỉ có cho mode 1 (`change-request.service.ts:160-163` đòi import).
-  it.skip("sau baseline: đổi tên thuật ngữ phải qua change request, không sửa thẳng", async () => {
-    const seeded = await seedFixture("full")
-    const api = client(seeded)
-    expect((await api.post("/baseline", { base_version: seeded.spineVersion })).status).toBe(201)
-    const res = await api.change([{ op: "set", path: "glossary[id=G01].term", value: "Spec" }], { reason: "Customer renamed the term" })
-    expect(res.status).toBeGreaterThanOrEqual(400)
+    for (const body of [{ reason: "Customer renamed the term" }, { reason: "Customer renamed the term", change_request: CR }, { change_request: CR }]) {
+      const res = await api.change([{ op: "set", path: "glossary[id=G01].term", value: "Spec" }], body)
+      expect(res.status).toBe(409)
+      expect(res.body.error.code).toBe("CHANGE_REQUIRES_CR")
+      expect(res.body.meta.prefill.title).toBeTruthy()
+    }
     expect((await api.spine()).glossary.find((g: Body) => g.id === "G01").term).toBe("SRS")
   })
 })
 
 // ─── UC-37 ──────────────────────────────────────────────────────────
 
-describe("UC-37 — xếp mức ưu tiên requirement", () => {
+describe("UC-37 - xếp mức ưu tiên requirement", () => {
   it("tác giả gán Must/Should/Could/Won't cho function và NFR", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
@@ -364,11 +363,11 @@ describe("UC-37 — xếp mức ưu tiên requirement", () => {
 
 // ─── UC-38 ──────────────────────────────────────────────────────────
 
-describe("UC-38 — Analyst nộp baseline SRS để duyệt", () => {
+describe("UC-38 - Analyst nộp baseline SRS để duyệt", () => {
   it("còn cờ đỏ ⇒ 422 BASELINE_BLOCKED, không có baseline (BR-04)", async () => {
     const seeded = await seedFixture("minimal")
     const analyst = client(seeded, await join(seeded, "analyst"))
-    const res = await analyst.post("/baseline", { base_version: seeded.spineVersion })
+    const res = await analyst.post("/baseline/submit", { base_version: seeded.spineVersion })
     expect(res.status).toBe(422)
     expect(res.body.error.code).toBe("BASELINE_BLOCKED")
     expect((res.body.meta.flags as unknown[]).length).toBeGreaterThan(0)
@@ -378,26 +377,44 @@ describe("UC-38 — Analyst nộp baseline SRS để duyệt", () => {
   it("Viewer không nộp được ⇒ 403 ORG_ROLE_FORBIDDEN", async () => {
     const seeded = await seedFixture("full")
     const viewer = client(seeded, await join(seeded, "viewer"))
-    const res = await viewer.post("/baseline", { base_version: seeded.spineVersion })
+    const res = await viewer.post("/baseline/submit", { base_version: seeded.spineVersion })
     expect(res.status).toBe(403)
     expect(res.body.error.code).toBe("ORG_ROLE_FORBIDDEN")
     expect(await client(seeded).baselines()).toEqual([])
   })
 
-  // BUG(UC-38): spec "Analyst submits the SRS to the Lead for approval" (baseline chỉ khoá khi Lead duyệt, UC-39) vs code
-  // `baseline.route.ts:49` không `requireRole("lead")` và không có bước nộp/chờ duyệt — Analyst gọi POST /baseline là ký luôn v1.0.
-  it.skip("Analyst nộp khi 0 cờ đỏ ⇒ chờ Lead duyệt, chưa khoá baseline", async () => {
+  it("Analyst nộp khi 0 cờ đỏ ⇒ chờ Lead duyệt, chưa khoá baseline", async () => {
+    const seeded = await seedFixture("full")
+    const analyst = client(seeded, await join(seeded, "analyst"))
+    const res = await analyst.post("/baseline/submit", { base_version: seeded.spineVersion })
+    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+    expect(res.body.data.status).toBe("pending")
+    expect(await analyst.baselines()).toEqual([])
+    expect((await analyst.submission())?.status).toBe("pending")
+  })
+
+  it("Analyst ký thẳng ⇒ 403, baseline chỉ Lead mới khoá được", async () => {
     const seeded = await seedFixture("full")
     const analyst = client(seeded, await join(seeded, "analyst"))
     const res = await analyst.post("/baseline", { base_version: seeded.spineVersion })
-    expect(res.status).toBeLessThan(300)
-    expect(await analyst.baselines()).toEqual([])
+    expect(res.status).toBe(403)
+    expect(res.body.error.code).toBe("ORG_ROLE_FORBIDDEN")
+    expect(await client(seeded).baselines()).toEqual([])
+  })
+
+  it("nộp hai lần ⇒ 409 BASELINE_ALREADY_SUBMITTED", async () => {
+    const seeded = await seedFixture("full")
+    const analyst = client(seeded, await join(seeded, "analyst"))
+    expect((await analyst.post("/baseline/submit", { base_version: seeded.spineVersion })).status).toBe(200)
+    const again = await analyst.post("/baseline/submit", { base_version: await analyst.version() })
+    expect(again.status).toBe(409)
+    expect(again.body.error.code).toBe("BASELINE_ALREADY_SUBMITTED")
   })
 })
 
 // ─── UC-39 ──────────────────────────────────────────────────────────
 
-describe("UC-39 — Lead duyệt baseline SRS", () => {
+describe("UC-39 - Lead duyệt baseline SRS", () => {
   it("Lead tự duyệt khi 0 cờ đỏ ⇒ baseline 1.0 được khoá", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
@@ -408,13 +425,94 @@ describe("UC-39 — Lead duyệt baseline SRS", () => {
     expect((await api.baselines()).map((b) => b.id)).toEqual([baseline.id])
   })
 
+  it("Lead duyệt bản Analyst đã nộp ⇒ v1.0 khoá, trạng thái chờ duyệt được xoá", async () => {
+    const seeded = await seedFixture("full")
+    const lead = client(seeded)
+    const analyst = client(seeded, await join(seeded, "analyst"))
+    expect((await analyst.post("/baseline/submit", { base_version: seeded.spineVersion })).status).toBe(200)
+
+    const res = await lead.post("/baseline", { base_version: await lead.version() })
+    expect(res.status, JSON.stringify(res.body.error)).toBe(201)
+    expect(baselineResponseSchema.parse(res.body.data).version).toBe("v1.0")
+    expect(await lead.submission()).toBeNull()
+  })
+
+  /** Ghim một comment vào section đầu tiên có nội dung — mọi lượt từ chối đều cần (business-flow §3.5). */
+  const pinComment = async (api: ReturnType<typeof client>, text = "Chỗ này cần nói rõ hơn."): Promise<string> => {
+    const doc = await api.get("/document")
+    expect(doc.status, JSON.stringify(doc.body.error)).toBe(200)
+    const sections = doc.body.data.sections as Array<{ id: string; blocks: unknown[] }>
+    const section = sections.find((s) => !s.id.startsWith("group:") && s.blocks.length > 0)!
+    const res = await api.post("/comments", { version: { source: "draft" }, anchor: { section_id: section.id }, text })
+    expect(res.status, JSON.stringify(res.body.error)).toBe(201)
+    return res.body.data.comment_id as string
+  }
+
+  it("Lead từ chối kèm lý do và comment ghim ⇒ không ghi baseline, trạng thái rejected giữ lý do", async () => {
+    const seeded = await seedFixture("full")
+    const lead = client(seeded)
+    const analyst = client(seeded, await join(seeded, "analyst"))
+    expect((await analyst.post("/baseline/submit", { base_version: seeded.spineVersion })).status).toBe(200)
+    const commentId = await pinComment(lead, "Mục này còn thiếu luồng huỷ đặt chỗ.")
+
+    const res = await lead.post("/baseline/reject", {
+      base_version: await lead.version(),
+      reason: "Mục 3.2 còn thiếu luồng huỷ đặt chỗ.",
+      comment_ids: [commentId]
+    })
+    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+    expect(res.body.data.status).toBe("rejected")
+    expect(res.body.data.reason).toContain("3.2")
+    expect(res.body.data.rejection_comment_ids).toEqual([commentId])
+    expect(await lead.baselines()).toEqual([])
+  })
+
+  it("từ chối mà không ghim comment nào ⇒ 400 VALIDATION_ERROR (business-flow §3.5)", async () => {
+    const seeded = await seedFixture("full")
+    const lead = client(seeded)
+    const analyst = client(seeded, await join(seeded, "analyst"))
+    expect((await analyst.post("/baseline/submit", { base_version: seeded.spineVersion })).status).toBe(200)
+
+    for (const body of [{ reason: "Chưa đạt" }, { reason: "Chưa đạt", comment_ids: [] }]) {
+      const res = await lead.post("/baseline/reject", { base_version: await lead.version(), ...body })
+      expect(res.status, JSON.stringify(body)).toBe(400)
+      expect(res.body.error.code).toBe("VALIDATION_ERROR")
+    }
+    expect((await lead.submission())?.status).toBe("pending")
+  })
+
+  it("từ chối khi không có bản nào chờ duyệt ⇒ 422 NO_PENDING_SUBMISSION", async () => {
+    const seeded = await seedFixture("full")
+    const lead = client(seeded)
+    const commentId = await pinComment(lead)
+    const res = await lead.post("/baseline/reject", { base_version: await lead.version(), reason: "Chưa đạt", comment_ids: [commentId] })
+    expect(res.status).toBe(422)
+    expect(res.body.error.code).toBe("NO_PENDING_SUBMISSION")
+  })
+
+  it("Analyst không từ chối được ⇒ 403 ORG_ROLE_FORBIDDEN", async () => {
+    const seeded = await seedFixture("full")
+    const lead = client(seeded)
+    const analyst = client(seeded, await join(seeded, "analyst"))
+    expect((await analyst.post("/baseline/submit", { base_version: seeded.spineVersion })).status).toBe(200)
+    const commentId = await pinComment(lead)
+    const res = await analyst.post("/baseline/reject", {
+      base_version: await analyst.version(),
+      reason: "Tự từ chối",
+      comment_ids: [commentId]
+    })
+    expect(res.status).toBe(403)
+    expect(res.body.error.code).toBe("ORG_ROLE_FORBIDDEN")
+  })
+
   it("baseline bất biến: sửa sau baseline không đổi snapshot đã khoá", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
     const created = await api.post("/baseline", { base_version: seeded.spineVersion })
     expect(created.status).toBe(201)
-    const changed = await api.change(renameA01(), { reason: "Customer renamed the role" })
-    expect(changed.status, JSON.stringify(changed.body.error)).toBe(200)
+    // FLF-318: sau baseline sửa đi qua change request — sửa thẳng bị chặn
+    const changed = await api.change(renameA01(), { reason: "Customer renamed the role", change_request: CR })
+    expect(changed.status).toBe(409)
 
     const snapshot = await Baseline.findById(created.body.data.snapshot_ref).lean()
     const actors = (snapshot?.snapshot as { actors: Body[] }).actors
@@ -430,23 +528,152 @@ describe("UC-39 — Lead duyệt baseline SRS", () => {
     expect(await api.baselines()).toEqual([])
   })
 
-  // BUG(UC-39): spec BR-04 "A red flag cannot be waived: choosing Keep as-is with a reason leaves it blocking" vs code
-  // `baseline.service.ts` blockingFlags (`!f.waived_by_user`) + `deterministic-check.ts:33-45` (đa số luật đỏ waivable)
-  // — cờ đỏ đã waive không chặn, baseline ký được ở mức `-conditional`.
-  it.skip("cờ đỏ giữ nguyên kèm lý do vẫn chặn baseline (BR-04)", async () => {
+  it("cờ đỏ giữ nguyên kèm lý do vẫn chặn baseline (BR-04)", async () => {
     const seeded = await seedFixture("full", { mutate: freshSteps })
     const api = client(seeded)
     expect((await api.change(renameA01())).status).toBe(200)
     const red = (await api.flagsAtBaseline()).filter((f) => f.level === "red")
     expect(red.length).toBeGreaterThan(0)
     for (const flag of red) {
+      // FLF-329: cờ đỏ không waive được — chỉ "giữ nguyên + lý do", và cờ vẫn chặn
       const waived = await api.post(`/flags/${flag.id}/waive`, { reason: "Keep as-is: the customer accepted this content." })
-      expect(waived.status, JSON.stringify(waived.body.error)).toBe(200)
+      expect(waived.status).toBe(400)
+      expect(waived.body.error.code).toBe("FLAG_NOT_WAIVABLE")
+      const kept = await api.post(`/flags/${flag.id}/keep`, { reason: "Keep as-is: the customer accepted this content." })
+      expect(kept.status, JSON.stringify(kept.body.error)).toBe(200)
+      expect(kept.body.data).toMatchObject({ kept_reason: "Keep as-is: the customer accepted this content.", resolved_at: null })
     }
 
     const res = await api.post("/baseline", { base_version: await api.version() })
     expect(res.status).toBe(422)
     expect(res.body.error.code).toBe("BASELINE_BLOCKED")
     expect(await api.baselines()).toEqual([])
+  })
+})
+
+// ─── UC-47 ──────────────────────────────────────────────────────────
+
+describe("UC-47 - Analyst sửa SRS theo comment từ chối baseline", () => {
+  /** Section đầu tiên có nội dung của bản nháp — chỗ ghim comment. */
+  const firstSection = async (api: ReturnType<typeof client>): Promise<{ id: string }> => {
+    const res = await api.get("/document")
+    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+    const sections = res.body.data.sections as Array<{ id: string; blocks: unknown[] }>
+    const section = sections.find((s) => !s.id.startsWith("group:") && s.blocks.length > 0)
+    expect(section).toBeDefined()
+    return section!
+  }
+
+  /** Analyst nộp, Lead ghim `count` comment rồi từ chối kèm chúng. Trả mã comment đã ghim. */
+  const rejectWithComments = async (
+    lead: ReturnType<typeof client>,
+    analyst: ReturnType<typeof client>,
+    sectionId: string,
+    count: number
+  ): Promise<string[]> => {
+    expect((await analyst.post("/baseline/submit", { base_version: await analyst.version() })).status).toBe(200)
+    const ids: string[] = []
+    for (let i = 0; i < count; i++) {
+      const res = await lead.post("/comments", {
+        version: { source: "draft" },
+        anchor: { section_id: sectionId },
+        text: `Chỗ này cần nói rõ hơn (${i + 1}).`
+      })
+      expect(res.status, JSON.stringify(res.body.error)).toBe(201)
+      ids.push(res.body.data.comment_id as string)
+    }
+    const rejected = await lead.post("/baseline/reject", {
+      base_version: await lead.version(),
+      reason: "Còn chỗ chưa rõ, xem comment đã ghim.",
+      comment_ids: ids
+    })
+    expect(rejected.status, JSON.stringify(rejected.body.error)).toBe(200)
+    return ids
+  }
+
+  it("comment từ chối còn mở ⇒ gửi lại trả 422 REJECTION_COMMENTS_OPEN liệt kê đúng mã", async () => {
+    const seeded = await seedFixture("full")
+    const lead = client(seeded)
+    const analyst = client(seeded, await join(seeded, "analyst"))
+    const section = await firstSection(lead)
+    const ids = await rejectWithComments(lead, analyst, section.id, 2)
+
+    const res = await analyst.post("/baseline/submit", { base_version: await analyst.version() })
+    expect(res.status).toBe(422)
+    expect(res.body.error.code).toBe("REJECTION_COMMENTS_OPEN")
+    expect((res.body.meta.comment_ids as string[]).sort()).toEqual([...ids].sort())
+    expect(await analyst.baselines()).toEqual([])
+  })
+
+  it("kết luận hết comment ⇒ hết chặn vì comment; bước vừa mở lại thành cờ đỏ chặn tiếp (BR-04)", async () => {
+    const seeded = await seedFixture("full")
+    const lead = client(seeded)
+    const analyst = client(seeded, await join(seeded, "analyst"))
+    const section = await firstSection(lead)
+    const ids = await rejectWithComments(lead, analyst, section.id, 2)
+
+    for (const id of ids) {
+      const resolved = await analyst.post(`/comments/${id}/resolve`, { kind: "fixed" })
+      expect(resolved.status, JSON.stringify(resolved.body.error)).toBe(200)
+    }
+
+    // Comment đã kết luận hết nên cổng REJECTION_COMMENTS_OPEN im; nhưng resolve đã mở lại bước sở hữu
+    // section đó, nên lượt quét ở mức ký mở cờ đỏ "chờ duyệt lại" — phải chạy và accept lại bước mới nộp được.
+    const res = await analyst.post("/baseline/submit", { base_version: await analyst.version() })
+    expect(res.status).toBe(422)
+    expect(res.body.error.code).toBe("BASELINE_BLOCKED")
+    expect((res.body.meta.flags as Body[]).map((f) => f.rule_id)).toContain("section_awaiting_reaccept")
+  })
+
+  it("comment ghim ở section không có bước nào đang accepted ⇒ kết luận xong là gửi lại được", async () => {
+    const seeded = await seedFixture("full")
+    const lead = client(seeded)
+    const analyst = client(seeded, await join(seeded, "analyst"))
+
+    const doc = await lead.get("/document")
+    const spine = (await lead.spine()) as unknown as Spine
+    const accepted = new Set(spine.steps.filter((s) => s.status === "accepted").map((s) => s.id))
+    const sections = doc.body.data.sections as Array<{ id: string; blocks: unknown[] }>
+    const free = sections.find((s) => !s.id.startsWith("group:") && s.blocks.length > 0 && !stepsOf(s.id, spine).some((id) => accepted.has(id)))
+    expect(free, "fixture phải có section không do bước đã accepted nào sở hữu").toBeDefined()
+
+    const ids = await rejectWithComments(lead, analyst, free!.id, 2)
+    for (const id of ids) {
+      expect((await analyst.post(`/comments/${id}/resolve`, { kind: "fixed" })).status).toBe(200)
+    }
+
+    const res = await analyst.post("/baseline/submit", { base_version: await analyst.version() })
+    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+    expect(res.body.data.status).toBe("pending")
+    expect(res.body.data.rejection_comment_ids).toEqual([])
+  })
+
+  it("kết luận comment trên nội dung có step sở hữu đã accepted ⇒ step đó mở lại", async () => {
+    const seeded = await seedFixture("full")
+    const lead = client(seeded)
+
+    // Chọn section có nội dung mà step sở hữu nó đang accepted — chỉ ca đó mới có gì để mở lại
+    const doc = await lead.get("/document")
+    expect(doc.status, JSON.stringify(doc.body.error)).toBe(200)
+    const spine = (await lead.spine()) as unknown as Spine
+    const accepted = new Set(spine.steps.filter((s) => s.status === "accepted").map((s) => s.id))
+    const sections = doc.body.data.sections as Array<{ id: string; blocks: unknown[] }>
+    const target = sections.find((s) => !s.id.startsWith("group:") && s.blocks.length > 0 && stepsOf(s.id, spine).some((id) => accepted.has(id)))
+    expect(target, "fixture phải có ít nhất một section do step đã accepted sở hữu").toBeDefined()
+    const owners = stepsOf(target!.id, spine).filter((id) => accepted.has(id))
+
+    const created = await lead.post("/comments", {
+      version: { source: "draft" },
+      anchor: { section_id: target!.id },
+      text: "Mục này cần viết lại."
+    })
+    expect(created.status, JSON.stringify(created.body.error)).toBe(201)
+    const resolved = await lead.post(`/comments/${created.body.data.comment_id}/resolve`, { kind: "fixed" })
+    expect(resolved.status, JSON.stringify(resolved.body.error)).toBe(200)
+
+    const after = ((await lead.spine()) as unknown as Spine).steps
+    for (const stepId of owners) {
+      expect(after.find((s) => s.id === stepId)?.status, stepId).toBe("revision_requested")
+    }
   })
 })

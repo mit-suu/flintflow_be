@@ -586,3 +586,243 @@ Chi tiết + bảng ablation: `docs/knowledge-rag.md` §5. Tóm tắt:
 - Trả lời (GLM-5.3-Flash, judge cùng model): đúng 85,5% vs 16,4% no-RAG; trung thực 100%; ảo giác ngoài corpus 0% vs
   ≥ 50% no-RAG; nhãn trích dẫn hợp lệ 100%.
 - Chi phí một lượt đo đủ: ~950 text embed Gemini (free tier 1 000/ngày/project — dùng `--cache`) + 160 lượt LLM.
+
+## Thêm use case kéo theo phần liên quan (FLF-311) — provider thật (2026-10-21)
+
+- Cách đo: `npm run test:e2e-ai -- test/e2e-ai/add-use-case.e2e.test.ts`, fixture 19 màn (đã qua S-5 và S-7.3 ⇒ chế độ
+  `full` + `messages_ready`), lệnh "Thêm use case mới Share Read-Only Link: Business Analyst tạo link chỉ-đọc…",
+  `apply-change-op` 1.4.0 trên GLM-5.3-Flash. Chấm 12 tiêu chí: UC + chức năng đủ FR (trigger, mô tả, normal, abnormal,
+  validation có id), màn (mới hoặc có sẵn) trong Screens Flow, quyền cho vai trò của actor, thông báo cho luồng bất thường,
+  không còn cảnh báo FLF-298, vẽ bố cục màn mới.
+- Lần đầu: bản xem trước bị từ chối — model **dùng** id tạm (`$newFn1`, `$newScreen`) mà không khai báo làm `id` của phần
+  tử ⇒ 11 vi phạm tham chiếu chết. Sửa: `declareTempIds` (code gán id tạm cho phần tử chưa có id cùng loại) + skill nói rõ.
+- Sau sửa, 5 lượt: 4 lượt tạo màn mới, 12/12; 1 lượt gắn chức năng vào màn Export có sẵn (đúng theo ticket mục 7), đạt khi
+  tiêu chí chấp nhận cả hai cách. Mỗi lượt **1 lượt gọi model**, ~19,5 nghìn token, 15–43 s; bản xem trước 10 thay đổi
+  (UC, 1–2 chức năng, màn, cạnh luồng, 3–4 dòng quyền, 1 thông báo).
+- **Bổ sung 21/10 (sau khi thử trên FAP):** người dùng thêm "Suspend Student Account" ⇒ model gắn chức năng vào màn có
+  sẵn (Screens Flow không đổi) và không nhắc UC20 "Deactivate Student Record" cùng mục tiêu. Sửa: luật 3e kiểm trùng với
+  use case cùng actor (`use_case_context.use_cases`) + `useCaseOverlaps` cảnh báo trong bản xem trước; thao tác đổi dữ
+  liệu luôn có ít nhất một popup nối vào luồng. Đo trên Spine FAP thật (`E2E_FAP_SPINE`, dữ liệu dev không commit):
+  ca Suspend — trước khi siết luật màn: 3/3 có cảnh báo trùng UC20, 1/3 có popup; sau: 3/3 popup mới từ "User Account
+  Management" + cạnh luồng + quyền + thông báo, cảnh báo trùng vẫn hiện. Ca "Request Grade Review" (sinh viên): popup
+  mới từ "My Grades", nằm trong luồng. Fixture 19 màn chạy lại: 12/12.
+- **Vẽ thật (21/10):** `E2E_REAL_RENDER=1` (PlantUML trong `.env` + model vẽ wireframe) trên ca "Request Grade Review":
+  popup mới S18 có bố cục D22 `ok` (salt: môn, điểm, ô lý do, Cancel / Submit Request); Screens Flow D03-2, D03-3 vẽ lại
+  có màn mới. Không đặt biến này thì test giữ PlantUML giả của `test/setup.ts` (cổng chết) và bước vẽ được thay bằng hàm giả.
+- **Hỏi màn riêng hay popup (21/10):** UC cần giao diện mà người dùng chưa chọn ⇒ hỏi trước (một tin, kèm `choices` cho
+  thẻ chọn nhanh, kèm chi tiết còn thiếu), code chặn lô có màn mới khi chưa chọn và chưa hỏi lượt nào, và áp đúng lựa
+  chọn (`is_popup`) khi người dùng đã chọn. FAP thật: ca C lượt 1 model hỏi "Màn hình riêng / Popup mở từ My Grades" + "ai
+  xử lý yêu cầu"; lượt 2 trả lời popup ⇒ lô popup "Grade Review Request" mở từ My Grades, 3 validation, quyền, thông báo.
+  Ca A (Suspend) lượt 1 hỏi màn riêng hay popup mở từ User Account Management; cảnh báo trùng UC20 hiện ở bản xem trước
+  sau khi chọn. Fixture (câu lệnh có "màn hình riêng"): 12/12.
+
+## GET /document — ảnh tải riêng + cache renderer bản dịch (FLF-369, 2026-11-05)
+
+Dự án dev "Outpatient Clinic E2E 31-10" (`6ab9e6fe…`, tài liệu `vi`, Spine gốc `en`): 64 block ảnh (62 PNG thật + 2 placeholder),
+34 use case / 11 hình use case, 539 đơn vị dịch. Mongo Atlas (dev), đo in-process qua `getDocumentWithMeta` đúng như
+controller (`source=draft`), 5 lượt liền nhau mỗi cấu hình — lượt 1 lạnh, 2–5 nóng. Kích thước = `JSON.stringify` của
+`{ data, meta }`. Trước = nhánh đã có bộ xếp use case mới (phase 1), chưa đổi đường ảnh.
+
+| Cấu hình | Lượt lạnh | Nóng (trung vị 2–5) | Kích thước phản hồi | Ảnh base64 |
+| --- | --- | --- | --- | --- |
+| Gốc `en` — trước (nhúng base64) | 12 501 ms | 4 553 ms | 5 353 694 B | 62 |
+| Gốc `en` — ảnh tham chiếu, stat từng file | 2 961 ms | 1 576 ms | 128 838 B | 0 |
+| Gốc `en` — ảnh tham chiếu, một truy vấn metadata | 1 730 ms | 313 ms | 128 838 B | 0 |
+| Dịch `vi` — trước (nhúng base64) | 6 579 ms | 6 368 ms | 5 346 465 B | 62 |
+| Dịch `vi` — ảnh tham chiếu, một truy vấn metadata | 2 569 ms | 2 169 ms | 125 158 B | 0 |
+| Dịch `vi` — + cache renderer trong tiến trình | 2 851 ms | 1 272 ms | 125 158 B | 0 |
+
+Chặng bản dịch (nóng, trước cache renderer): đọc Spine 76 ms · tra bản dịch 160 ms · `localizeSpine` (renderer chạy hai
+lượt gốc + dịch) ~830 ms. Cache renderer khoá theo hash toàn bộ đầu vào (Spine + kind + chủ + bộ nhãn + RenderContext),
+LRU 64 mục.
+
+So nội dung: chữ giống hệt (bỏ `generatedAt`), 62/62 ảnh tham chiếu đọc qua `GET /document/image` ra đúng PNG đã nhúng,
+2 placeholder giữ nguyên — cả `en` lẫn `vi`. Export Word/PDF và comment vẫn nhúng (không đổi).
+
+Ghi chú cho tự bám bản mới (phase 4 FE): một lượt tải lại tài liệu dịch nóng ~1.3 s ⇒ giữ khoảng tối thiểu 10 s giữa hai
+lần tự áp như plan; `/version` chỉ 2–3 truy vấn nhỏ.
+
+## GET /document — mở tài liệu: hash ảnh media, bản dựng nhớ trong tiến trình, `changes` đọc tăng dần (FLF-381, 2026-11-06)
+
+Mongo Atlas (dev), đo in-process như `getDocumentController` (project + ngôn ngữ + `documentVersion` + `getDocumentWithMeta`
+với loader tham chiếu + `getDraftMeta` khi thiếu), 5 lượt liền mỗi cấu hình trong một tiến trình mới — lượt 1 lạnh
+(tiến trình vừa khởi động), 2–5 nóng (trung vị). Mạng local ~9,8 MB/s; Atlas trả ~100 KB/s nên số đo tỉ lệ với số byte kéo về.
+
+| Cấu hình (dự án dev) | Trước: lạnh / nóng | Sau: lạnh / nóng |
+| --- | --- | --- |
+| Import draft — FAP PLAN 2, 53 mục, 28 ảnh media | 11 228 / 2 674 ms | 4 240 / 346 ms |
+| Import baseline — cùng dự án | 10 038 / 4 348 ms | 1 876 / 354 ms |
+| fpt `en` draft — FAP, 27 sơ đồ | 5 094 / 2 333 ms | 4 551 / 345 ms |
+| fpt `vi` draft (Spine `en`) — Quản lý học sinh, 24 sơ đồ | 16 409 / 10 226 ms | 14 273 / 335 ms |
+| Import `vi` draft (Spine `en`) — fap, 38 sơ đồ, 1 718 change | 21 239 / 17 645 ms | 21 380 / 442 ms |
+
+Chặng đã bỏ (profile lệnh Mongo, lượt nóng trước khi sửa):
+- Hash ảnh media: tải + giải nén cả .docx gốc (~6,2 s, gói chỉ nhớ 60 s) + 28 truy vấn `importeddocuments` ⇒ hash theo
+  `(file_ref, part)`, một truy vấn `file_ref` mỗi lượt; nhúng được hay không theo đuôi part.
+- Thân `rendered_documents` (~100 KB, ~1,5 s) ⇒ chỉ hỏi `_id` + `updatedAt`, thân nhớ trong tiến trình.
+- Baseline: snapshot (179 KB, ~2 s) tải trước khi tra cache ⇒ chỉ lấy `_id`.
+- Bản dịch: dựng lại mỗi lượt, đọc cả `changes` hai lần (1,57 MB ≈ 15,6 s với dự án 1 718 change) ⇒ nhớ theo danh tính
+  Spine + ngôn ngữ + revision lớp bản dịch; chỉ nhớ khi mọi PNG theo ngôn ngữ đã vẽ xong trong trần chờ.
+
+Lượt nóng bản dịch còn 3 truy vấn nhỏ (219 ms): head Spine, revision bản dịch, metadata PNG.
+
+Lượt lạnh còn lại là lần đầu một tiến trình gặp dự án: tải Spine (~2,3 s) + cả lịch sử `changes` (dự án 1 718 change:
+12,5 s đủ field + 4,6 s projection §I). Từ lượt sau `changes` đọc tăng dần: **~0,18 s + 0,17 s** (chỉ change mới + một
+truy vấn mốc) — nên lượt mở đầu sau mỗi lần sửa không còn trả giá đọc cả lịch sử.
+
+So nội dung: body (bỏ `generatedAt`) của cả 5 cấu hình giống hệt trước khi sửa, trừ giá trị hash trong
+`image-ref:media:…@<hash>` (đổi cách tính, định dạng giữ nguyên); đủ 28/28, 38/38… chuỗi tham chiếu.
+
+## GET /document — lượt mở đầu: không tải Spine trước khi tra cache, bản dịch lưu trong `rendered_documents` (FLF-383, 2026-11-06)
+
+Cùng cách đo mục FLF-381 (5–7 lượt mỗi cấu hình trong tiến trình mới; lạnh = lượt 1, nóng = trung vị các lượt sau).
+Atlas dev đổi trạng thái giữa buổi đo: **~100 KB/s** (bị throttle) lúc đầu, rồi **~2–2,9 MB/s** (RTT ~58 ms không đổi) — nên
+có hai bảng, mỗi bảng so trong cùng một trạng thái mạng.
+
+Bảng A — Atlas ~2,5 MB/s, đo liền nhau commit FLF-381 và nhánh FLF-383 (bản dịch: đã có hàng lưu):
+
+| Cấu hình (dự án dev) | FLF-381: lạnh / nóng | FLF-383: lạnh / nóng |
+| --- | --- | --- |
+| Import draft — FAP PLAN 2, 28 ảnh media | 694 / 276 ms | 611 / 322 ms |
+| Import baseline — cùng dự án | 606 / 322 ms | 375 / 204 ms |
+| fpt `en` draft — FAP, 27 sơ đồ | 669 / 256 ms | 551 / 262 ms |
+| fpt `vi` draft (Spine `en`) | 3 232 / 189 ms | 277 / 122 ms |
+| Import `vi` draft (Spine `en`), 1 718 change | 2 225 / 273 ms | 438 / 297 ms |
+
+Bảng B — Atlas ~100 KB/s (cột "trước" = cột "sau" của mục FLF-381):
+
+| Cấu hình | Trước: lạnh / nóng | FLF-383: lạnh / nóng |
+| --- | --- | --- |
+| Import draft | 4 240 / 346 ms | 1 737 / 344 ms |
+| Import baseline | 1 876 / 354 ms | 1 713 / 249 ms |
+| fpt `en` draft | 4 551 / 345 ms | 1 833 / 260 ms |
+| fpt `vi` draft — đã có bản dịch lưu | 14 273 / 335 ms | 1 181 / 263 ms |
+| Import `vi` draft — đã có bản dịch lưu | 21 380 / 442 ms | 1 654 / 469 ms |
+
+Bản dịch, lượt đầu khi **chưa** có hàng lưu (dựng rồi ghi, response không chờ ghi): fpt `vi` 14 363 ms, import `vi`
+22 308 ms ở bảng B — như FLF-381: chặng tải Spine + cả lịch sử `changes` còn nguyên, chỉ trả một lần cho mỗi (nội dung,
+ngôn ngữ, revision bản dịch).
+
+Lượt nóng dao động mạnh theo mạng: cùng code, hai lượt đo liền nhau import draft cho 354 và 235 ms ⇒ chênh lệch vài chục
+ms giữa hai cột là nhiễu. Sàn lượt nóng ~4 round-trip nối tiếp (authorize: project + `TemplateProfile`; `documentVersion`;
+head cache) × RTT ~58 ms.
+
+Chặng đã bỏ:
+- Draft gốc: cả Spine chỉ để lấy `spine_version` ⇒ controller truyền đầu Spine vừa đọc (`documentVersion`: version + danh
+  tính Spine + revision bản dịch), không hỏi lại; metadata PNG + `file_ref` nạp song song với lượt đọc cache.
+- Bản dịch: chỉ nhớ trong RAM ⇒ hàng riêng trong `rendered_documents` (`locale` có mặt, một hàng mỗi
+  `(project, view, locale)`, khoá danh tính Spine / `spine_version` + revision lớp bản dịch). Chỉ `GET /document` đọc / ghi
+  (`reuseTranslated`); export / comment luôn dựng mới.
+
+So nội dung: body (bỏ `generatedAt`) của cả 5 cấu hình deep-equal với mốc FLF-381, kể cả lượt đọc từ bản dịch đã lưu
+(khác duy nhất là thứ tự key `watermark` / `format`, do đi qua `renderedDocumentSchema` như hàng draft gốc).
+
+## I-4 đọc song song nhiều section (FLF-392) — provider thật (2026-11-11)
+
+- Cách đo: `test/e2e-ai/mode1-import-measure.e2e.test.ts` (luồng HTTP thật upload → Bắt đầu → I-4 → finalize, Mongo
+  in-memory, `JOB_DRIVER=inline`), cùng file FlintFlow SRS (Report3, 3 775 block, 93 lô chữ + 18 ảnh), chạy liền nhau trên
+  cùng máy. "Trước" = `develop` `a1a3a14` (tuần tự); "sau" = nhánh FLF-392, `IMPORT_EXTRACT_CONCURRENCY=4` (mặc định).
+- Thời gian I-4 = từ lượt I-4 đầu tiên được ghi tới lượt cuối được trừ credit (`timings_s.i4_span` của harness; `one_pass`
+  gộp cả finalize).
+- Điều kiện: lô chữ gọi `anthropic`; ảnh gọi `gemini` nhưng key **hết quota trong ngày** (log các lượt chạy cùng đêm báo
+  "exceeded your current quota") ⇒ 18 ảnh không đọc được ở **cả hai** lượt: 93 lượt I-4 trừ credit = đúng 93 lô chữ (ảnh
+  lỗi giữ ảnh gốc, không trừ credit). Số dưới đây là phần chữ; ảnh (nối đuôi trong section, ví dụ 2.2.1 có 13 ảnh) chưa
+  đo lại được.
+
+| Bản | I-4 | Lượt I-4 | tokens_in | tokens_out | Credit I-4 | Một mạch tới `gap_review` |
+|---|---:|---:|---:|---:|---:|---:|
+| trước (tuần tự) | 685,7 s | 93 | 202 637 | 153 244 | 186 | 821,6 s |
+| FLF-392, N = 4 | **172,6 s** | 93 | 200 078 | 152 228 | 186 | 294,8 s |
+
+- I-4 giảm **75%** (≈ 4×, đúng bằng N) — lô chữ gần như chỉ chờ mạng nên tăng gần tuyến tính theo N.
+- Số lượt và credit không đổi; ước tính trước khi chạy (`credit_estimate`) như nhau. Spine ra cùng cỡ (12 actor, 82 UC,
+  16 feature, 99 function, 27 màn, 43 entity, 35 BR); NFR 50 → 47 là dao động của model (prompt khác bản tuần tự ở chỗ
+  `known_keys` theo bản chụp lúc bắt đầu, xem `IMPORT_EXTRACT_CONCURRENCY` trong `.env.example`).
+- Kết quả trùng khít bản tuần tự được kiểm bằng AI giả tất định: golden `test/integration/mode1/__snapshots__/extract-parallel.golden.json`
+  chạy trên `develop` `a1a3a14` cho ra đúng file đó (khớp từng byte), và nhánh này cho cùng file ở N = 1, N = 4 và mọi
+  điểm dừng / chạy tiếp.
+- Lượt đo "trước" đầu tiên dừng ở finalize: một lô 1.11 (`I-1.11:4`) bị Anthropic cắt ở `max_tokens=7168` ⇒
+  `paused: resume_later`. Lỗi có sẵn trên `develop`, ngoài I-4; lượt chạy lại không gặp.
+
+## Tài liệu upload trong prompt — trích đoạn thay toàn văn (FLF-393)
+
+Nguồn: `npm run eval:doc-retrieval` (không DB, không gọi model), file `fixtures/existing-srs-fu-student-portal.docx`
+(347 đoạn, 36 heading đọc từ style Word ⇒ 17 chunk, trung bình 325 token), bộ câu hỏi
+`fixtures/doc-retrieval/questions-fu-student-portal.json` (16 câu: mã UC/FN/MSG, tên màn hình, luật, NFR, thuật ngữ, giao
+diện), top-k 10. Token ước lượng ký tự / 3 (thước của ngân sách tài liệu). Đo 2026-11-11.
+
+| Trần tài liệu | Recall | Token tài liệu / câu hỏi (TB · lớn nhất) | So với toàn văn ~5.251 |
+| ---: | ---: | --- | ---: |
+| 12.000 (mặc định chat) | 16/16 | 2.885 · 4.269 | −45% |
+| 2.000 | 16/16 | 1.630 · 1.981 | −69% |
+| 1.200 | 16/16 | 994 · 1.194 | −81% |
+
+File mẫu chỉ ~5k token nên **khi chạy thật nó vẫn được gửi nguyên văn** (dưới trần 12k); ba dòng trên mô phỏng đường trích
+đoạn để đo chất lượng tìm. Với tài liệu vượt trần, token tài liệu mỗi lượt không bao giờ vượt `DOC_CONTEXT_CHAT_TOKENS`
+(chat) / `DOC_CONTEXT_DRAFT_TOKENS` (step) — trước FLF-393 là cả tài liệu tới 1M token với model Claude 5.5. Unit test
+`document-context.service.test.ts` dựng SRS giả ~40k token (150 use case): lượt chat ≤ 12k, đúng đoạn UC-37 kể cả hỏi
+không dấu. Chưa đo bằng provider thật (`promptTokens` thật của tiếng Việt cao hơn ước lượng ký tự / 4).
+
+### Demo trên UI với SRS thật cỡ lớn (FLF-393, 2026-11-12)
+
+FE `develop` + BE nhánh FLF-393, tài liệu tham khảo `Report3_Software_Requirement_Specification.docx` (bản bỏ ảnh để lọt
+giới hạn upload 10MB: 436.400 ký tự, 3.870 đoạn, 243 heading từ style Word ⇒ 427 chunk). Bước B-0.1, câu hỏi "UC-05 là use
+case gì và quy tắc BR-02 nói gì". Log `[DocumentContext]`: `mode=retrieved chunks=10/427 tokens=4927/16000 full=145467`
+⇒ phần tài liệu mỗi lượt giảm ~97%; model trả lời đúng UC-05 (Change Password) và BR-02 (Lead succession).
+
+Demo lộ hai lỗi, đã sửa cùng nhánh: (1) lượt phỏng vấn đầu giai đoạn không đưa tin user vào câu hỏi tìm đoạn ⇒ BM25 chỉ có
+nhãn bước, rơi về đầu tài liệu (model chỉ thấy bìa + mục lục); (2) câu hỏi tự nhiên dài làm loãng mã — đoạn đúng của
+UC-05 / BR-02 ở hạng 16 / 31. Nhân trọng số token mã ×4 (`document-retrieval/rank.ts`): câu demo trúng cả hai, bộ 16 câu
+của SRS mẫu giữ 16/16. Giới hạn còn lại: hỏi tiếng Việt trên tài liệu tiếng Anh ("đổi mật khẩu" ↔ "Change Password")
+BM25 không khớp — cần vector / hybrid (ngoài phạm vi ticket).
+
+Lượt demo thứ hai lộ lỗi thứ ba: AI vẫn hỏi lại nền tảng / tuân thủ dù tài liệu đã nói (P3180 "responsive web-based
+interface", P3230 "NFR-35 … Privacy") — câu hỏi tìm đoạn của bước Brief chỉ có nhãn bước + câu của user, không biết bước cần
+hỏi field nào, và top-k 10 chỉ dùng ~4.6k / 16k token. Sửa: câu hỏi thêm từ khoá EN/VI theo field step đọc
+(`FIELD_SEARCH_TERMS`, `step-document-query.ts`), Brief/S-1 ghim mục Product Overview và kèm summary, lượt của step lấy tới
+`DOC_CONTEXT_DRAFT_TOP_K = 30`. Cùng lượt đó: 32 chunk ~14.5k token, có đủ Overview (P347), nền tảng (P3180), NFR-35
+(P3230), UC-05, BR-02 (trước: 10 chunk, chỉ UC-05 + BR-02).
+
+## FLF-410 — Screen Layout: Salt vs ScreenSpec mockup, provider thật (2026-11-12)
+
+Dự án import TechMart (`6af462bbcfb03275b8d3684e`), 10 màn đầu có ảnh gốc (SCR-01, 02, 04, 05, 07, 08, 09, 11, 13, 14;
+mỗi mục 1 ảnh). Model `claude-haiku-5-5` (frontmatter skill `screen-layout`), `maxTokens 4096`, `temperature 0.2`. Gọi
+thẳng `callLLM` với đúng prompt `aiScreenLayout` dựng (không trừ credit, không ghi `AiActionLog`), mỗi màn 3 lượt:
+
+- `salt`: skill 2.1.0 + `layoutContext` của develop (`cf53710`).
+- `system`: skill 3.0.0 + reference `blocks`, `allowed_platforms = [web]`, `original_images` chỉ chú thích.
+- `original`: như `system` + ảnh gốc (PNG / JPEG của file import).
+
+Hợp lệ = `extractSalt` (Salt) / `parseScreenEnvelope` (spec). `screen_images` đúng = khớp index ảnh mà regex chú thích
+`SCREEN_CAPTION` chọn (mỗi mục chỉ 1 ảnh nên chỉ đo được lượt model có trả trường này hay không chọn sai).
+
+| Kiểu | Token vào TB | Token ra TB | Thời gian TB | Hợp lệ | `screen_images` đúng |
+|---|---|---|---|---|---|
+| `salt` (develop) | 2 507 | 1 071 | 5,3 s | 10/10 | - |
+| `system` | 3 947 (+57%) | 1 613 (+51%) | 7,3 s | 10/10 | 9/10 (SCR-11 chọn sai, rơi về regex vẫn đúng ảnh) |
+| `original` | 5 154 (+106%) | 1 642 (+53%) | 7,4 s | 9/10 (SCR-13 sai schema ⇒ bảng Function) | 9/9 |
+
+- (Lượt 1) Ngưỡng plan "kiểu `system` ≤ Salt + 20%" **không đạt**: tổng token / màn 5 560 so với 3 578 (+55%). Vào tăng
+  ~1 440 token cố định: thân skill 6,3k ký tự + reference `blocks` 3,0k (Salt 5,9k), và hai mục `Mode original` /
+  `Which pictures are screens` vẫn nằm trong prompt của màn không có ảnh gốc. Ra tăng vì JSON dài hơn Salt.
+- Credit người dùng không đổi: `RENDER_FIX` tính giá cố định theo lượt, không theo token.
+- Kiểu `original` so với `system`: vào +31% (1 ảnh ~1 200 token), ra gần bằng. Câu "tốn token gấp khoảng 2-3 lần" của plan
+  là quá cao với ảnh 1 màn; FE hiện ghi "AI xem cả ảnh nên vẽ lâu hơn", không nêu hệ số.
+
+### Lượt 2: luật ảnh gốc chỉ nối khi màn có ảnh gốc (skill 3.1.0, cùng ngày)
+
+Hai mục `Mode original` / `Which pictures are screens` chuyển sang reference `originals`, `layoutReferences` chỉ nối khi
+input có ảnh gốc. Cùng 10 màn, thêm kiểu `new` = màn không có ảnh gốc (như màn của dự án tạo mới).
+
+| Kiểu | Token vào TB | Token ra TB | Tổng so Salt | Thời gian TB | Hợp lệ |
+|---|---|---|---|---|---|
+| `salt` (develop) | 2 507 | 1 193 | - | 6,2 s | 10/10 |
+| `new` (không ảnh gốc) | 3 467 | 1 293 | **+29%** | 5,8 s | 9/10 |
+| `system` (màn import) | 4 013 | 1 568 | +51% | 7,0 s | 10/10 |
+| `original` | 5 220 | 1 667 | +86% | 7,5 s | 8/10 |
+
+- Màn không có ảnh gốc giảm từ +55% xuống **+29%** tổng token so với Salt. Ngưỡng plan đổi thành: màn không có ảnh gốc
+  ≤ Salt + 30% tổng token (mốc đo này); màn import có ảnh gốc ghi số, không đặt ngưỡng.
+- Đầu ra Salt dao động giữa hai lượt (1 071 / 1 193, ~10%): so sánh dưới 10% coi là nhiễu.
+- Màn lỗi rơi về bảng Function: `new` SCR-05, `original` SCR-07 và SCR-13 (SCR-13 lỗi ở cả hai lượt). `screen_images` của
+  `system` 6/8: lượt sai trả rỗng ⇒ code dùng regex chú thích, vẫn đúng ảnh (mỗi mục 1 ảnh).

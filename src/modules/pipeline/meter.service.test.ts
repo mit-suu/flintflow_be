@@ -82,7 +82,7 @@ describe("meter.service", () => {
     expect(db.rows.every((r) => r.state === "deducted")).toBe(true)
   })
 
-  it("refundUsage đánh dấu refunded — loại khỏi countCalls (không tiêu trần)", async () => {
+  it("refundUsage đánh dấu refunded - loại khỏi countCalls (không tiêu trần)", async () => {
     const ids = await recordUsage(PROJECT, USER, STEP, [entry("draft")])
     expect(await countCalls(PROJECT, STEP)).toBe(1)
     await refundUsage(ids)
@@ -108,7 +108,7 @@ describe("meter.service", () => {
     expect(await countCalls(PROJECT, STEP)).toBe(1)
   })
 
-  it("reserveCall ghi state=reserved (tính vào countCalls ngay dù model chưa trả lời — F2/F11)", async () => {
+  it("reserveCall ghi state=reserved (tính vào countCalls ngay dù model chưa trả lời - F2/F11)", async () => {
     const usageId = await reserveCall(PROJECT, USER, STEP, "draft")
     expect(db.rows).toHaveLength(1)
     expect(db.rows[0]).toMatchObject({ state: "reserved", tokens_in: 0, tokens_out: 0, cost: 0 })
@@ -122,7 +122,7 @@ describe("meter.service", () => {
     expect(db.rows[0]).toMatchObject({ state: "deducted", tokens_in: 100, tokens_out: 50, cost: 4, logId: "log-1" })
   })
 
-  it("releaseCall chuyển refunded — không tiêu trần", async () => {
+  it("releaseCall chuyển refunded - không tiêu trần", async () => {
     const usageId = await reserveCall(PROJECT, USER, STEP, "draft")
     await releaseCall(usageId)
     expect(db.rows[0].state).toBe("refunded")
@@ -135,7 +135,7 @@ describe("meter.service", () => {
     expect(listChanges).toHaveBeenCalledWith(PROJECT, {})
   })
 
-  it("roundStartedAt đọc `at` của change GẦN NHẤT đặt steps[id=X].status=in_progress TRƯỚC firstSeq — không phải first_seq (F1)", async () => {
+  it("roundStartedAt đọc `at` của change GẦN NHẤT đặt steps[id=X].status=in_progress TRƯỚC firstSeq - không phải first_seq (F1)", async () => {
     vi.mocked(listChanges).mockResolvedValue([{ path: `steps[id=${STEP}].status`, value: "in_progress", at: "2026-09-14T09:00:00.000Z", seq: 5 }] as never)
     const at = await roundStartedAt(PROJECT, STEP, 10)
     expect(at).toEqual(new Date("2026-09-14T09:00:00.000Z"))
@@ -143,7 +143,7 @@ describe("meter.service", () => {
     expect(listChanges).toHaveBeenCalledWith(PROJECT, { toSeq: 9 })
   })
 
-  it("roundStartedAt KHÔNG nhận transition SAU firstSeq làm mốc — tránh nhầm toggle revision_requested→in_progress nội bộ của gate (F1)", async () => {
+  it("roundStartedAt KHÔNG nhận transition SAU firstSeq làm mốc - tránh nhầm toggle revision_requested→in_progress nội bộ của gate (F1)", async () => {
     // gate.service đặt lại status=in_progress SAU khi revision hoàn tất (seq=20, sau firstSeq=10) — không
     // phải mốc vòng mới, chỉ là toggle hiển thị; roundStartedAt phải bỏ qua transition này.
     vi.mocked(listChanges).mockResolvedValue([
@@ -169,14 +169,14 @@ describe("meter.service", () => {
     expect(counts).toEqual({ calls_used: 2, regenerate_used: 1 })
   })
 
-  describe("roundCountsForSteps (F10 — GET /steps không N+1)", () => {
+  describe("roundCountsForSteps (F10 - GET /steps không N+1)", () => {
     it("trả 0/0 cho danh sách step rỗng, không gọi DB", async () => {
       const result = await roundCountsForSteps(PROJECT, [])
       expect(result.size).toBe(0)
       expect(listChanges).not.toHaveBeenCalled()
     })
 
-    it("đếm đúng nhiều step trong MỘT lần gọi, tôn trọng mốc vòng riêng từng step — kể cả usage ghi GIỮA mốc thật và toggle nội bộ sau firstSeq", async () => {
+    it("đếm đúng nhiều step trong MỘT lần gọi, tôn trọng mốc vòng riêng từng step - kể cả usage ghi GIỮA mốc thật và toggle nội bộ sau firstSeq", async () => {
       await recordUsage(PROJECT, USER, "S-3.2", [entry("draft")])
       // usage của S-3.1 nhưng thuộc vòng TRƯỚC (trước mốc in_progress hiện tại) — không được đếm
       const stale = await recordUsage(PROJECT, USER, "S-3.1", [entry("draft")])

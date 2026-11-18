@@ -19,7 +19,7 @@ import { changeRequestDetailSchema } from "../../src/modules/change-request/chan
 import { compareResponseSchema, releaseResponseSchema, versionBlocksResponseSchema, versionsResponseSchema } from "../../src/modules/doc-version/doc-version.dto.js"
 import { changeRequiresCrMetaSchema } from "../../src/modules/change-request/change-request.dto.js"
 import { applyTransaction } from "../../src/modules/spine/op-engine.js"
-import { DocxPackage, readBlocks } from "../../src/modules/docx-ooxml/index.js"
+import { DocxPackage, readBlocks, readStamp } from "../../src/modules/docx-ooxml/index.js"
 import * as spineRepository from "../../src/modules/spine/spine.repository.js"
 
 const TARGETS = { entity_paths: ["nfrs[id=NFR-01]"], keywords: ["2 seconds"] }
@@ -46,52 +46,48 @@ const projectWithRevision = async () => {
   const projectId = await createMode1Project(seeded, "Lumen LMS")
   const c = mode1Api(seeded, projectId)
   const id = (await c.upload(await makeSrsDocx())).body.data.import.id as string
-  await c.post("/import/confirm-latest", { import_id: id })
-  await c.extractAndWait(id)
-  await c.patch("/import/fields", { import_id: id, confirm_all: true })
-  expect((await c.finalizeAndWait(id)).view?.import?.status).toBe("gap_review")
+  // FLF-343: một lần Bắt đầu ⇒ I-4 ⇒ baseline 0.1 ⇒ kiểm tra
+  expect((await c.extractAndWait(id)).run?.import.status).toBe("gap_review")
   // D6 (FLF-183): điền các đầu mục FPT còn trống như đã chạy step, để release chỉ còn chặn bởi cờ test đặt
   await fillCoreSections(projectId)
 
   const created = await c.post("/change-requests", { title: "Faster", description: "1 second instead of 2 seconds", source: { kind: "verbal" }, requester: "PM" })
   const cr = `/change-requests/${created.body.data.change_request.cr_id}`
+  // FLF-330: BA xác nhận (`submit`) là ghi ngay vào bản nháp
   for (const step of ["clarify", "impact", "propose", "verify", "submit"]) expect((await c.post(`${cr}/${step}`)).status).toBe(200)
-  const groups = changeRequestDetailSchema.parse((await c.get(cr)).body.data).groups
-  for (const g of groups) {
-    const res = await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() })
-    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
-  }
+  expect(changeRequestDetailSchema.parse((await c.get(cr)).body.data).change_request.status).toBe("written")
   return { seeded, projectId, c }
 }
 
 const releaseNow = async (c: Api) => c.post("/release", { base_version: await c.spineVersion() })
 
-describe("mode 1 — version + tải về", () => {
-  it("danh sách version, block đọc từ file render, so sánh 0.0 → 0.1, tải bản draft có watermark DRAFT", async () => {
+describe("mode 1 - version + tải về", () => {
+  it("danh sách version, block đọc từ file render, so sánh 0.1 → 0.2, tải bản draft có watermark DRAFT", async () => {
     const { c, projectId } = await projectWithRevision()
     const versions = versionsResponseSchema.parse((await c.get("/versions")).body.data)
     expect(versions.map((v) => [v.version, v.kind])).toEqual([
-      ["0.1", "cr_revision"],
-      ["0.0", "imported"]
+      ["0.2", "cr_revision"],
+      ["0.1", "imported"]
     ])
 
-    const blocks = versionBlocksResponseSchema.parse((await c.get("/versions/0.1/blocks")).body.data)
-    // FLF-186: 0.1 là bản render từ Spine sau CR — NFR hiện trong bảng Performance, không còn Track Changes theo block
+    const blocks = versionBlocksResponseSchema.parse((await c.get("/versions/0.2/blocks")).body.data)
+    // FLF-186: 0.2 là bản render từ Spine sau CR — NFR hiện trong bảng Performance, không còn Track Changes theo block
     const perf = blocks.find((b) => b.text.includes("The system shall respond"))!
     expect(perf.text).toContain("1 s")
     expect(perf.revisions).toBeUndefined()
     expect((await c.get("/versions/9.9/blocks")).body.error.code).toBe("DOC_VERSION_NOT_FOUND")
 
-    const diff = compareResponseSchema.parse((await c.get("/versions/compare?from=0.0&to=0.1")).body.data)
-    // bảng Performance: khớp theo text (file render không có neo) ⇒ modified 2 s → 1 s
-    expect(diff.blocks).toContainEqual(
-      expect.objectContaining({ block_id: null, change: "modified", before: expect.stringContaining("| 2 s |"), after: expect.stringContaining("| 1 s |") })
-    )
-    expect((await c.get("/versions/compare?from=0.1&to=0.1")).status).toBe(400)
+    const diff = compareResponseSchema.parse((await c.get("/versions/compare?from=0.1&to=0.2")).body.data)
+    // FLF-366: 0.1 in nguyên văn đoạn Performance của file; CR sửa NFR ⇒ đoạn đó dựng lại từ Spine (bảng của renderer) —
+    // khác dạng khối nên diff là bỏ đoạn cũ (2 seconds) + thêm bảng mới (1 s), không ghép thành "modified"
+    expect(diff.blocks).toContainEqual(expect.objectContaining({ block_id: null, change: "removed", before: expect.stringContaining("within 2 seconds") }))
+    expect(diff.blocks).toContainEqual(expect.objectContaining({ block_id: null, change: "added", after: expect.stringContaining("| 1 s |") }))
+    expect((await c.get("/versions/compare?from=0.2&to=0.2")).status).toBe(400)
 
-    const draft = await binary(c.get("/versions/0.1/download"))
+    const draft = await binary(c.get("/versions/0.2/download"))
     expect(draft.status).toBe(200)
-    expect(decodeURIComponent(String(draft.headers["content-disposition"]))).toContain(`Lumen LMS_${projectId}_v0.1_DRAFT.docx`)
+    expect(decodeURIComponent(String(draft.headers["content-disposition"]))).toContain("Lumen LMS_v0.1+CR-001_DRAFT.docx")
+    expect(await readStamp(await DocxPackage.load(draft.body as Buffer))).toMatchObject({ version: "0.2", base_version: "0.1", latest_cr: "CR-001", kind: "draft" })
     const zip = await JSZip.loadAsync(draft.body as Buffer)
     const headers = Object.keys(zip.files).filter((n) => /^word\/header\d+\.xml$/.test(n))
     expect(headers.length).toBeGreaterThan(0)
@@ -101,7 +97,7 @@ describe("mode 1 — version + tải về", () => {
   })
 })
 
-describe("mode 1 — release (Flow 6)", () => {
+describe("mode 1 - release (Flow 6)", () => {
   it("còn cờ đỏ ⇒ 422 RELEASE_RED_FLAGS_OPEN; hết đỏ ⇒ 1.0 sạch, baseline release, gom CR", async () => {
     const { c, projectId } = await projectWithRevision()
     // Sơ đồ render lỗi ⇒ cờ đỏ render_error (mode 1 không waive)
@@ -113,7 +109,7 @@ describe("mode 1 — release (Flow 6)", () => {
         {
           op: "add",
           path: "diagrams[]",
-          value: { id: "D01", kind: "erd", puml: "@startuml\n@enduml", section: "fixed:3.1.5", owner_kind: null, owner_id: null, render_status: "error", error: "boom", source_hash: "x", rendered_at: null }
+          value: { id: "D01", kind: "erd", format: "puml", source: "@startuml\n@enduml", section: "fixed:3.1.5", owner_kind: null, owner_id: null, render_status: "error", error: "boom", source_hash: "x", rendered_at: null }
         }
       ]
     })
@@ -127,12 +123,12 @@ describe("mode 1 — release (Flow 6)", () => {
     const res = await releaseNow(c)
     expect(res.status, JSON.stringify(res.body.error)).toBe(201)
     const rel = releaseResponseSchema.parse(res.body.data)
-    expect(rel.version).toMatchObject({ version: "1.0", kind: "release", based_on: "0.1", has_clean_file: true })
+    expect(rel.version).toMatchObject({ version: "1.0", kind: "release", based_on: "0.2", has_clean_file: true })
     expect(rel.cr_ids).toEqual(["CR-001"])
     expect(rel.baseline).toMatchObject({ type: "release", version: "1.0", doc_version: "1.0" })
 
     const clean = await binary(c.get("/versions/1.0/download"))
-    expect(decodeURIComponent(String(clean.headers["content-disposition"]))).toContain(`Lumen LMS_${projectId}_v1.0.docx`)
+    expect(decodeURIComponent(String(clean.headers["content-disposition"]))).toContain("Lumen LMS_v1.0.docx")
     const xml = await documentXml(clean.body as Buffer)
     expect(xml).not.toMatch(/<w:ins\b|<w:del\b|commentReference/)
     const cleanBlocks = await readBlocks(await DocxPackage.load(clean.body as Buffer))
@@ -145,10 +141,10 @@ describe("mode 1 — release (Flow 6)", () => {
     routeReplaceCr("1 second", "500 ms")
     const created = await c.post("/change-requests", { title: "Even faster", description: "500 ms", source: { kind: "verbal" }, requester: "PM" })
     const cr = `/change-requests/${created.body.data.change_request.cr_id}`
-    for (const step of ["clarify", "impact", "propose", "verify", "submit"]) expect((await c.post(`${cr}/${step}`)).status).toBe(200)
     let done = null as Awaited<ReturnType<typeof c.post>> | null
-    for (const g of changeRequestDetailSchema.parse((await c.get(cr)).body.data).groups) {
-      done = await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() })
+    for (const step of ["clarify", "impact", "propose", "verify", "submit"]) {
+      done = await c.post(`${cr}/${step}`)
+      expect(done.status, JSON.stringify(done.body.error)).toBe(200)
     }
     expect(done!.body.data.change_request.result_doc_version).toBe("1.1")
     const v11 = await documentXml((await binary(c.get("/versions/1.1/download"))).body as Buffer)
@@ -157,7 +153,7 @@ describe("mode 1 — release (Flow 6)", () => {
   })
 })
 
-describe("mode 1 — chặn sửa ngoài change request (G9, BR-03)", () => {
+describe("mode 1 - chặn sửa ngoài change request (G9, BR-03)", () => {
   it("/changes, /undo, /reconcile và chat ra lệnh sửa ⇒ 409 CHANGE_REQUIRES_CR kèm prefill; preview chỉ đọc vẫn chạy", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)

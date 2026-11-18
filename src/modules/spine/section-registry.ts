@@ -127,20 +127,21 @@ export const FIELD_SECTION_MAP: readonly FieldSectionRow[] = Object.freeze([
   row("project_class", "project.type, .domain, .complexity, .stakes", [], [], ["fixed:4.2.1", "fixed:4.2.2", "fixed:4.2.3", "fixed:4.2.4"]),
   row("br_high", "business_rules[tier=high]", ["fixed:1"]),
   row("actors_nonhuman", "actors[kind≠human]", ["fixed:1"], ["fixed:2.1"], ["diagram:context"]),
-  row("actors", "actors[]", ["fixed:2.1"], ["fixed:2.2.2", "fixed:3.1.3"], ["diagram:usecase", "fixed:5.5"]),
+  row("actors", "actors[]", ["fixed:2.1"], ["fixed:2.2.2", "fixed:3.1.3"], ["diagram:usecase", "diagram:sequence", "diagram:activity", "fixed:5.5"]),
   row("roles_permissions", "roles[], permissions[]", ["fixed:3.1.3"]),
   row("use_cases", "use_cases[]", ["fixed:2.2.2"], [], ["diagram:usecase"]),
-  row("features", "features[]", ["feature:<id>"], ["fixed:3.1.2"], [], "số mục §3.x (assemble)"),
+  row("features", "features[]", ["feature:<id>"], ["fixed:3.1.2"], ["diagram:usecase", "diagram:class"], "số mục §3.x (assemble)"),
   row("screens_desc", "screens[].name/.description/.feature_id", ["fixed:3.1.2"], ["fixed:3.1.1", "fixed:3.1.3", "function:<screen>"], ["diagram:screen_flow", "fixed:5.5"]),
   row("screens_flow", "screens[].flow_to[]/.is_popup/.tabs[]", ["fixed:3.1.1"], [], ["diagram:screen_flow"]),
   row("screens_primary", "screens[].primary_function_id", [], [], ["diagram:screen_layout"]),
-  row("functions_screen", "functions[screen_id≠null]", ["function:<id>"], ["fixed:3.1.2", "fixed:2.2.2"]),
-  row("functions_nonscreen", "functions[screen_id=null]", ["function:<id>"], ["fixed:3.1.4", "fixed:2.2.2"]),
+  row("functions_screen", "functions[screen_id≠null]", ["function:<id>"], ["fixed:3.1.2", "fixed:2.2.2"], ["diagram:sequence", "diagram:activity"]),
+  row("functions_nonscreen", "functions[screen_id=null]", ["function:<id>"], ["fixed:3.1.4", "fixed:2.2.2"], ["diagram:sequence", "diagram:activity"]),
   row("functions_order", "functions[].order", [], [], [], "số mục §3.x.y (assemble)"),
   row("functions_validations", "functions[].validations[]", ["function:<id>"], [], ["fixed:5.1"]),
   row("functions_abnormal", "functions[].abnormal[]", ["function:<id>"], [], ["fixed:5.3"]),
-  row("entities", "entities[]", ["fixed:3.1.5"], [], ["diagram:erd", "fixed:5.5"]),
+  row("entities", "entities[]", ["fixed:3.1.5"], [], ["diagram:erd", "diagram:class", "diagram:state_machine", "fixed:5.5"]),
   row("nfr_interface", "nfrs[category=interface]", ["fixed:4.1"]),
+  row("deployment", "deployment_nodes[], deployment_links[]", ["fixed:4.1"], [], ["diagram:deployment"]),
   row("nfr_usability", "nfrs[category=usability]", ["fixed:4.2.1"]),
   row("nfr_reliability", "nfrs[category=reliability]", ["fixed:4.2.2"]),
   row("nfr_performance", "nfrs[category=performance]", ["fixed:4.2.3"]),
@@ -150,11 +151,20 @@ export const FIELD_SECTION_MAP: readonly FieldSectionRow[] = Object.freeze([
   row("messages", "messages[]", ["fixed:5.3"]),
   row("other_requirements", "other_requirements[]", ["fixed:5.4"]),
   row("glossary", "glossary[]", ["fixed:5.5"]),
+  // FLF-365: mục chỉ có ở mẫu IEEE 29148 (Mode 1, phần nhỏ không mục FPT cha)
+  row("references", "references[]", ["slot:references"]),
+  row("verifications", "verifications[]", ["slot:verification"], [], [], "đọc id yêu cầu"),
+  row("release_apportioning", "functions[].release, nfrs[].release", ["slot:apportioning"]),
   row("changes", "changes[]", ["fixed:I"]),
   row("diagram_context", "diagrams[kind=context]", ["fixed:1"]),
   row("diagram_usecase", "diagrams[kind=usecase]", ["fixed:2.2.1"]),
   row("diagram_screen_flow", "diagrams[kind=screen_flow]", ["fixed:3.1.1"]),
   row("diagram_erd", "diagrams[kind=erd]", ["fixed:3.1.5"]),
+  row("diagram_state_machine", "diagrams[kind=state_machine]", ["fixed:3.1.5"]),
+  row("diagram_sequence", "diagrams[kind=sequence]", ["<diagram.section>"]),
+  row("diagram_activity", "diagrams[kind=activity]", ["<diagram.section>"]),
+  row("diagram_deployment", "diagrams[kind=deployment]", ["fixed:4.1"]),
+  row("diagram_class", "diagrams[kind=class]", ["<diagram.section>"]),
   row("diagram_screen_layout", "diagrams[kind=screen_layout]", ["<diagram.section>"])
 ])
 
@@ -216,6 +226,8 @@ const matchRows = (t: Target): FieldSectionRow[] => {
       // `section_stale_at_baseline` chặn chính cái baseline ngay sau đó (đo được: 62 cờ đỏ trên fixture
       // 19 màn). Xem docs/spec-gaps.md, dòng T19.
       if (t.sub === "priority") return []
+      // FLF-365: bản phát hành chỉ in ở bảng phân bổ — như priority, không làm mục chức năng `stale`
+      if (t.sub === "release") return rowsOf(["release_apportioning"])
       if (t.sub === "validations") return rowsOf(["functions_validations"])
       if (t.sub === "abnormal") return rowsOf(["functions_abnormal"])
       return rowsOf([base])
@@ -224,6 +236,7 @@ const matchRows = (t: Target): FieldSectionRow[] => {
       return rowsOf(["entities"])
     case "nfrs": {
       if (t.sub === "priority") return [] // như functions[].priority — cột MoSCoW, không đổi nội dung
+      if (t.sub === "release") return rowsOf(["release_apportioning"])
       const key = typeof el?.category === "string" ? NFR_ROW[el.category] : undefined
       return key ? rowsOf([key]) : rowsOf(Object.values(NFR_ROW))
     }
@@ -235,6 +248,10 @@ const matchRows = (t: Target): FieldSectionRow[] => {
       return rowsOf(["other_requirements"])
     case "glossary":
       return rowsOf(["glossary"])
+    case "references":
+      return rowsOf(["references"])
+    case "verifications":
+      return rowsOf(["verifications"])
     case "diagrams": {
       const kind = typeof el?.kind === "string" ? el.kind : null
       return kind && ROW[`diagram_${kind}`] ? rowsOf([`diagram_${kind}`]) : []

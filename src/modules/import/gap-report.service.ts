@@ -1,7 +1,7 @@
 /**
- * Gap report (nút 1.13, UC-23): cờ đỏ/vàng gộp theo section, mục mẫu FPT thiếu (không bắt buộc), heading không map,
- * field độ tin thấp. Mode 1 v2 (FLF-184): "Thiếu mục FPT" đứng đầu (không bắt buộc, không cờ — 2026-10-06); cờ và mục xếp theo layout file upload;
- * mục riêng ngoài FPT liệt kê riêng, không cờ. Xuất JSON và `.docx` (báo cáo mới, dùng thư viện `docx` như mode 2 — không phải bản SRS).
+ * Gap report (nút 1.13, UC-23): cờ đỏ/vàng gộp theo section, hình chưa vẽ, field độ tin thấp. Cờ và mục xếp theo layout
+ * file upload; mục riêng ngoài FPT liệt kê trong bố cục, không cờ. Mẫu FPT không bắt buộc (FLF-312): không còn liệt kê
+ * đầu mục FPT thiếu / tiêu đề không khớp mẫu. Xuất JSON và `.docx` (báo cáo mới, dùng thư viện `docx` như mode 2 — không phải bản SRS).
  * FLF-171, plan §6 2C. Tải bản `.docx` khi đang `gap_review` ⇒ `delivered` (giao báo cáo, nhánh "không cần sửa").
  */
 
@@ -12,16 +12,21 @@ import { capitalize, fieldLabel, humanizeText, pathLabel, ruleLabel, sectionLabe
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import { ExtractionDraft } from "./extraction-draft.model.js"
-import { UNMAPPED_SECTION, needsConfirm } from "./import.constants.js"
+import { needsConfirm } from "./import.constants.js"
 import type { GapReport } from "./import.dto.js"
 import type { ImportStatus } from "./import.state.js"
 import { latestImport, toReviewFields, transitionImport } from "./import.service.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { sectionTitle } from "./section-catalog.js"
+import { contentSlot, withSlotParents } from "./content-slots.js"
+import { displayHeading } from "./heading-label.js"
 import { FEATURE_SECTIONS, continuationOwnerSection } from "./step-plan.js"
-import { TemplateProfile, type LayoutEntry, type StepPlanItem } from "./template-profile.model.js"
+import type { StructurePreview } from "./structure-preview.js"
+import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
+import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
 
-const REPORT_STATUSES: readonly ImportStatus[] = ["gap_review", "delivered", "change_requested"]
+// FLF-336: dừng ở "Kết quả đọc file" cũng tải được gap report (kèm bản đồ mục ⇒ cấu trúc đích)
+const REPORT_STATUSES: readonly ImportStatus[] = ["incomplete", "gap_review", "delivered", "change_requested"]
 
 /**
  * Tiêu đề hiển thị của section. Truyền `layout` (template của project) thì **phần nối** — mục riêng tiêu đề rỗng, văn
@@ -50,6 +55,9 @@ export const titleOfSection = (
   }
   if (kind === "feature") return spine.features.find((f) => f.id === key)?.name ?? "Tính năng"
   if (kind === "function") return spine.functions.find((f) => f.id === key)?.name ?? "Chức năng"
+  // Phần nhỏ của mẫu bắt buộc (FLF-278) — cùng nhãn FE hiện ở mapping / khung tài liệu
+  const slot = contentSlot(id)
+  if (slot) return slot.label_vi
   const title = sectionTitle(id)
   return title === id ? "Mục khác" : title
 }
@@ -60,8 +68,50 @@ export const loadLayout = async (projectId: string): Promise<LayoutEntry[] | und
   return profile?.layout?.length ? (profile.layout as LayoutEntry[]) : undefined
 }
 
+/** Trạng thái chờ Bắt đầu / đang đọc: chỉ có báo cáo sơ bộ từ màn đọc khung. */
+const PRELIMINARY_STATUSES: readonly ImportStatus[] = ["mapping_review", "extracting"]
+
+/**
+ * Hàm thuần: báo cáo thiếu sót **sơ bộ** từ màn đọc khung (business-flow §3.1.2) — trước Bắt đầu, chưa trích gì nên chưa có cờ,
+ * chỉ có bản đồ mục theo thứ tự file và mục còn thiếu. Kết quả cuối có thể khác (`structure_changes`).
+ */
+export const preliminaryGapReport = (projectId: string, preview: StructurePreview): GapReport => {
+  const missing = preview.sections.filter((s) => s.status === "missing").map((s) => s.section_id)
+  return {
+    preliminary: true,
+    target_structure: {
+      target: preview.intent === "fixed" ? "template" : "fpt",
+      intent: preview.intent,
+      resolved_mode: preview.resolved_mode,
+      sections: preview.sections.map((s) => ({ section_id: s.section_id, title: s.title, status: s.status, owner_steps: [] })),
+      missing,
+      compared_at: preview.computed_at
+    },
+    project_id: projectId,
+    doc_version: IMPORTED_DOC_VERSION,
+    generated_at: new Date().toISOString(),
+    totals: { red: 0, yellow: 0, low_confidence_fields: 0, unrendered_diagrams: 0 },
+    layout: preview.sections.map((s, i) => ({
+      order: i,
+      section_id: s.section_id,
+      heading: s.title,
+      level: 1,
+      kind: s.section_id.startsWith("custom:") ? ("custom" as const) : ("fpt" as const),
+      red: 0,
+      yellow: 0
+    })),
+    sections: [],
+    unrendered_diagrams: [],
+    low_confidence_fields: []
+  }
+}
+
 export const buildGapReport = async (projectId: string): Promise<GapReport> => {
   const doc = await latestImport(projectId)
+  if (doc && PRELIMINARY_STATUSES.includes(doc.status)) {
+    const preview = (await TemplateProfile.findOne({ projectId }, { structure_preview: 1 }).lean())?.structure_preview
+    if (preview) return preliminaryGapReport(projectId, preview)
+  }
   if (!doc || !REPORT_STATUSES.includes(doc.status)) {
     throw new Mode1Error("IMPORT_INVALID_STATE", "Báo cáo phần còn thiếu chỉ có sau khi nhập tài liệu xong bước kiểm tra.", {
       status: doc?.status ?? "uploaded",
@@ -89,42 +139,34 @@ export const buildGapReport = async (projectId: string): Promise<GapReport> => {
       flags: [...flags].sort((a, b) => (a.level === b.level ? 0 : a.level === "red" ? -1 : 1))
     }))
     .sort((a, b) => (orderOf.get(a.section_id) ?? Infinity) - (orderOf.get(b.section_id) ?? Infinity))
-  const unrenderedDiagrams = unrendered(spine)
-  const missingFpt = missingFptSections(profile?.step_plan ?? [], new Set(layout.map((l) => l.section_id)), spine, profile?.layout)
-
-  const missing = (profile?.required_sections ?? []).map((section_id) => ({ section_id, title: titleOfSection(spine, section_id, profile?.layout) }))
-  const unmapped = (profile?.heading_map ?? []).filter((h) => h.section_id === UNMAPPED_SECTION).map((h) => ({ block_id: h.block_id, text: h.heading_text }))
+  const fixedTemplate = profile?.target_structure?.target === "template"
+  const unrenderedDiagrams = unrendered(spine, fixedTemplate ? withSlotParents((profile?.layout ?? []).map((l) => l.section_id)) : undefined)
   const low = toReviewFields(drafts, needsConfirm)
 
   return {
+    target_structure: profile?.target_structure ?? null,
     project_id: projectId,
-    doc_version: version?.version ?? "0.0",
+    doc_version: version?.version ?? IMPORTED_DOC_VERSION,
     generated_at: new Date().toISOString(),
     totals: {
       red: open.filter((f) => f.level === "red").length,
       yellow: open.filter((f) => f.level === "yellow").length,
-      missing_sections: missing.length,
-      unmapped_headings: unmapped.length,
       low_confidence_fields: low.length,
-      missing_fpt_sections: missingFpt.length,
       unrendered_diagrams: unrenderedDiagrams.length
     },
-    missing_fpt_sections: missingFpt,
     layout,
     sections,
     unrendered_diagrams: unrenderedDiagrams,
-    missing_sections: missing,
-    unmapped_headings: unmapped,
     low_confidence_fields: low
   }
 }
 
 /** Hình dựng được từ Spine mode 1 — chỉ liệt kê loại có dữ liệu (không có entity thì không đòi ERD). */
 const DIAGRAM_TARGETS = [
-  { kind: "context", title: "Sơ đồ ngữ cảnh", has: (s: Spine) => s.actors.length > 0 },
-  { kind: "usecase", title: "Sơ đồ use case", has: (s: Spine) => s.use_cases.length > 0 },
-  { kind: "screen_flow", title: "Luồng màn hình", has: (s: Spine) => s.screens.length > 0 },
-  { kind: "erd", title: "Sơ đồ thực thể (ERD)", has: (s: Spine) => s.entities.length > 0 }
+  { kind: "context", title: "Sơ đồ ngữ cảnh", section: "fixed:1", has: (s: Spine) => s.actors.length > 0 },
+  { kind: "usecase", title: "Sơ đồ use case", section: "fixed:2.2.1", has: (s: Spine) => s.use_cases.length > 0 },
+  { kind: "screen_flow", title: "Luồng màn hình", section: "fixed:3.1.1", has: (s: Spine) => s.screens.length > 0 },
+  { kind: "erd", title: "Sơ đồ thực thể (ERD)", section: "fixed:3.1.5", has: (s: Spine) => s.entities.length > 0 }
 ] as const
 
 /**
@@ -132,8 +174,9 @@ const DIAGRAM_TARGETS = [
  * hình nào cho loại đó — đúng trường hợp lúc import PlantUML không sẵn sàng (finalize bỏ qua bước vẽ, không cờ).
  * Không chặn baseline: người dùng bấm vẽ lại ở workspace khi có PlantUML.
  */
-const unrendered = (spine: Spine): GapReport["unrendered_diagrams"] =>
-  DIAGRAM_TARGETS.filter((t) => t.has(spine)).flatMap((t): GapReport["unrendered_diagrams"] => {
+const unrendered = (spine: Spine, templateSections?: ReadonlySet<string>): GapReport["unrendered_diagrams"] =>
+  // Mẫu cố định: chỉ đòi hình mẫu có chỗ in (mẫu công ty không có Use Case Diagram / ERD ⇒ không đòi vẽ)
+  DIAGRAM_TARGETS.filter((t) => t.has(spine) && (!templateSections || templateSections.has(t.section))).flatMap((t): GapReport["unrendered_diagrams"] => {
     const drawn = spine.diagrams.filter((d) => d.kind === t.kind)
     if (!drawn.length) return [{ diagram_id: "", kind: t.kind, section_id: "", title: t.title, reason: "not_rendered" }]
     return drawn
@@ -153,28 +196,13 @@ const layoutRows = (layout: readonly LayoutEntry[], spine: Spine, bySection: Fla
       return {
         order: l.order,
         section_id: l.section_id,
-        heading: l.heading_text,
+        heading: displayHeading(l.heading_text, l.number_label),
         level: l.level,
         kind,
         red: flags.filter((f) => f.level === "red").length,
         yellow: flags.filter((f) => f.level === "yellow").length
       } as const
     })
-
-/** Đầu mục FPT thiếu theo kế hoạch step (D6) — mỗi section một dòng, step đầu tiên sở hữu nó. */
-const missingFptSections = (plan: readonly StepPlanItem[], inLayout: ReadonlySet<string>, spine: Spine, layout?: readonly LayoutEntry[]): GapReport["missing_fpt_sections"] => {
-  const out: GapReport["missing_fpt_sections"] = []
-  const seen = new Set<string>()
-  for (const item of plan) {
-    if (!item.missing || item.state === "hidden") continue
-    for (const section_id of item.section_ids) {
-      if (seen.has(section_id)) continue
-      seen.add(section_id)
-      out.push({ section_id, title: titleOfSection(spine, section_id, layout), step_id: item.step_id, in_layout: inLayout.has(section_id) })
-    }
-  }
-  return out
-}
 
 // ─── docx ────────────────────────────────────────────────────────
 // Báo cáo giao cho người dùng: không in mã máy (`fixed:2.2.1`, `B0012`, `functions[id=…]`, `section_empty`, mã step).
@@ -231,47 +259,49 @@ export const renderGapReportDocx = async (report: GapReport, projectName: string
   const t = report.totals
   // Tên mục theo chính báo cáo (tiêu đề trong file người dùng); không có ⇒ nhãn chung, không in khoá
   const titles = new Map<string, string>([
-    ...report.missing_sections.map((m) => [m.section_id, m.title] as const),
-    ...report.missing_fpt_sections.map((m) => [m.section_id, m.title] as const),
     ...report.sections.map((s) => [s.section_id, s.title] as const),
     ...report.layout.map((l) => [l.section_id, l.heading] as const)
   ])
   const sectionName = (id: string): string => titles.get(id) ?? capitalize(sectionLabel(id))
+  const template = report.target_structure?.target === "template"
+  // I-5: mục của cấu trúc đích còn trống (mẫu cố định: heading của mẫu chưa có nội dung) — bổ sung qua change request
+  const missing = (report.target_structure?.sections ?? []).filter((s) => s.status === "missing")
+  const emptySections: (Paragraph | Table)[] = report.target_structure
+    ? [
+        new Paragraph({ text: "Mục còn trống", heading: HeadingLevel.HEADING_1 }),
+        missing.length ? table(["Mục"], missing.map((s) => [s.title])) : new Paragraph("Không có mục nào còn trống.")
+      ]
+    : []
   const children: (Paragraph | Table)[] = [
-    new Paragraph({ text: `Báo cáo thiếu sót — ${projectName}`, heading: HeadingLevel.TITLE }),
+    new Paragraph({ text: `Báo cáo thiếu sót - ${projectName}`, heading: HeadingLevel.TITLE }),
     new Paragraph({ children: [new TextRun({ text: `Phiên bản tài liệu ${report.doc_version} · tạo lúc ${formatReportTime(report.generated_at)}`, italics: true })] }),
+    ...(report.preliminary
+      ? [new Paragraph({ children: [new TextRun({ text: "Báo cáo sơ bộ: FlintFlow mới đọc khung tài liệu, chưa đọc nội dung. Kết quả sau khi đọc chi tiết có thể khác.", italics: true })] })]
+      : []),
     new Paragraph({ text: "Tổng quan", heading: HeadingLevel.HEADING_1 }),
     table(
       ["Hạng mục", "Số lượng"],
       [
-        ["Thiếu mục theo mẫu FPT (không bắt buộc)", String(t.missing_fpt_sections)],
         ["Cờ đỏ", String(t.red)],
         ["Cờ vàng", String(t.yellow)],
-        ["Mục mẫu FPT không có tiêu đề trong file", String(t.missing_sections)],
-        ["Tiêu đề không khớp mẫu", String(t.unmapped_headings)],
         ["Dữ liệu trích có độ tin thấp", String(t.low_confidence_fields)],
         ["Hình chưa vẽ được", String(t.unrendered_diagrams)]
       ]
     ),
-    new Paragraph({ text: "Thiếu mục theo mẫu FPT", heading: HeadingLevel.HEADING_1 }),
-    report.missing_fpt_sections.length
-      ? table(
-          ["Mục", "Tình trạng", "Cách bổ sung"],
-          report.missing_fpt_sections.map((m) => [m.title, m.in_layout ? "Có tiêu đề, chưa có nội dung" : "File không có", "Bổ sung qua change request nếu cần"])
-        )
-      : new Paragraph("Đủ mọi đầu mục mẫu FPT."),
     new Paragraph({ text: "Mục theo tài liệu", heading: HeadingLevel.HEADING_1 }),
     report.layout.length
       ? table(
           ["Mục", "Loại", "Cờ đỏ", "Cờ vàng"],
           report.layout.map((l) => [
             `${"  ".repeat(Math.max(0, l.level - 1))}${l.heading}`,
-            l.kind === "custom" ? "Mục riêng (ngoài FPT)" : l.kind === "group" ? "Nhóm" : "Mẫu FPT",
+            // Mẫu cố định (mẫu bắt buộc / mẫu công ty): mọi heading là mục của mẫu, không phải "Mẫu FPT" / "ngoài FPT"
+            l.kind === "group" ? "Nhóm" : template ? "Mục của mẫu" : l.kind === "custom" ? "Mục riêng (ngoài FPT)" : "Mẫu FPT",
             String(l.red),
             String(l.yellow)
           ])
         )
       : new Paragraph("Không có bố cục tài liệu (bản nhập trước khi có tính năng này)."),
+    ...emptySections,
     new Paragraph({ text: "Cờ theo mục", heading: HeadingLevel.HEADING_1 })
   ]
   if (!report.sections.length) children.push(new Paragraph("Không có cờ nào đang mở."))
@@ -288,10 +318,6 @@ export const renderGapReportDocx = async (report: GapReport, projectName: string
         )
       : new Paragraph("Mọi hình đã có bản vẽ.")
   )
-  children.push(new Paragraph({ text: "Mục mẫu FPT không có tiêu đề trong file", heading: HeadingLevel.HEADING_1 }))
-  children.push(report.missing_sections.length ? table(["Mục"], report.missing_sections.map((m) => [m.title])) : new Paragraph("File có đủ tiêu đề các mục mẫu FPT."))
-  children.push(new Paragraph({ text: "Tiêu đề không khớp mẫu", heading: HeadingLevel.HEADING_1 }))
-  children.push(report.unmapped_headings.length ? table(["Tiêu đề trong tài liệu"], report.unmapped_headings.map((u) => [u.text])) : new Paragraph("Mọi tiêu đề đều khớp."))
   children.push(new Paragraph({ text: "Dữ liệu trích có độ tin thấp", heading: HeadingLevel.HEADING_1 }))
   children.push(
     report.low_confidence_fields.length

@@ -4,9 +4,17 @@ import { spineSchema } from "../spine/spine.schema.js"
 import type { Diagram, Spine } from "../spine/spine.types.js"
 import { allTargets, renderKind } from "../diagram/renderers/index.js"
 import { DIAGRAM_LABELS } from "../diagram/renderers/labels.js"
-import { screenFlowTitleOf } from "../diagram/renderers/screen-flow.renderer.js"
+import { titleCase } from "../diagram/renderers/context.renderer.js"
+import { svgTitleOf } from "../diagram/renderers/common.js"
 import { translationUnits, type TranslationUnit, type UnitValue } from "../translation/translation-units.js"
 import { localizeSpine, localizedDiagramSources, renderView } from "./localized-spine.js"
+import { _clearRenderCache, matchingPart } from "./localized-diagrams.js"
+import type { RenderedPart } from "../diagram/renderers/common.js"
+import { mockupParts } from "../diagram/screen-layout-parts.js"
+import { screenSpecOf } from "../diagram/renderers/screen-mockup.js"
+import { SIGNUP_SPEC } from "../diagram/screen-spec.samples.js"
+import { resolveScreenTheme } from "../../shared/diagram/screen-theme.js"
+import { describeInterface } from "./interface-description.js"
 
 const fixture = (): Spine =>
   spineSchema.parse(JSON.parse(readFileSync(new URL("../../../fixtures/spine-fixture-19-screens.json", import.meta.url), "utf8")))
@@ -44,7 +52,7 @@ const rendered = (): { spine: Spine; wireframeId: string } => {
       diagrams.push({
         id: `D${String(diagrams.length + 1).padStart(2, "0")}`,
         kind: part.kind,
-        puml: part.puml,
+        format: part.format, source: part.source,
         section: part.section,
         owner_kind: part.owner_kind,
         owner_id: part.owner_id,
@@ -56,7 +64,7 @@ const rendered = (): { spine: Spine; wireframeId: string } => {
   }
   const layout = diagrams.find((d) => d.kind === "screen_layout")!
   const screen = spine.screens.find((s) => s.id === layout.owner_id)!
-  layout.puml = wireframe(screen.name)
+  layout.source = wireframe(screen.name)
   spine.diagrams = diagrams
   return { spine, wireframeId: layout.id }
 }
@@ -67,7 +75,7 @@ const translate = (units: TranslationUnit[], pick: (u: TranslationUnit) => boole
   new Map(units.filter(pick).map((u) => [u.key, toVi(u.value)]))
 const byKind = (spine: Spine, kind: Diagram["kind"]) => spine.diagrams.filter((d) => d.kind === kind)
 
-describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong bản xem (FLF-265 N1)", () => {
+describe("localizeSpine + language - nguồn sơ đồ theo ngôn ngữ trong bản xem (FLF-265 N1)", () => {
   it("hình dựng từ Spine vẽ lại bằng chữ đã dịch + nhãn máy tiếng Việt; Spine gốc không đổi", () => {
     const { spine } = rendered()
     const before = structuredClone(spine)
@@ -76,19 +84,28 @@ describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong 
 
     expect(spine).toEqual(before)
     const human = spine.actors.find((a) => a.kind === "human")!
-    expect(byKind(view, "context")[0].puml).toContain(`vi: ${human.name}`)
-    expect(byKind(view, "context")[0].puml).toContain(`vi: ${human.flows_in![0]}`)
-    expect(byKind(view, "usecase").map((d) => d.puml).join("\n")).toContain(`usecase "vi: ${spine.use_cases[0].name}"`)
-    for (const d of byKind(view, "screen_flow")) expect(screenFlowTitleOf(d.puml)).toMatch(/^Luồng màn hình của vi: /)
-    const erd = byKind(view, "erd")[0].puml
-    expect(erd).toContain(`entity "vi: ${spine.entities[0].name}"`)
-    expect(erd).toContain(`relationship "${DIAGRAM_LABELS.vi.relationVerb}"`)
-    const table = byKind(view, "screen_layout").find((d) => d.puml.includes("{#"))!
-    expect(table.puml).toContain(`<b>${DIAGRAM_LABELS.vi.functionColumn} | <b>${DIAGRAM_LABELS.vi.descriptionColumn}`)
-    expect(table.puml).toMatch(/\| vi: /)
+    expect(byKind(view, "context")[0].source).toContain(`vi: ${human.name}`)
+    expect(byKind(view, "context")[0].source).toContain(`vi: ${human.flows_in![0]}`)
+    expect(byKind(view, "usecase").map((d) => d.source).join("\n")).toContain(`>vi: ${spine.use_cases[0].name}</text>`)
+    // Screen flow: tiêu đề là chữ máy (một hình cho cả hệ thống), tên màn đã dịch nằm trong hình
+    for (const d of byKind(view, "screen_flow")) expect(svgTitleOf(d.source)).toBe(DIAGRAM_LABELS.vi.screensFlowTitle())
+    expect(byKind(view, "screen_flow").map((d) => d.source).join("\n")).toContain(`>vi: ${spine.screens[0].name}`)
+    const erd = byKind(view, "erd")[0].source
+    expect(erd).toContain(`>vi: ${spine.entities[0].name}</text>`)
+    expect(erd).toContain(`>${DIAGRAM_LABELS.vi.relationVerb}</text>`)
+    // Sơ đồ tuần tự (puml): lifeline :Hệ thống, tên actor và message đã dịch, nhánh còn lại `ngược lại`
+    const sequence = byKind(view, "sequence").find((d) => d.owner_id === "FN001")!.source
+    expect(sequence).toContain(`participant ":${DIAGRAM_LABELS.vi.system}" as SSD_SYSTEM`)
+    expect(sequence).toContain(`actor ":vi: ${spine.actors.find((a) => a.id === "A01")!.name}" as A01`)
+    expect(sequence).toContain("1: vi: Submit email and password")
+    expect(sequence).toContain(`else ${DIAGRAM_LABELS.vi.elseGuard}`)
+    const table = byKind(view, "screen_layout").find((d) => d.source.includes("{#"))!
+    expect(table.source).toContain(`<b>${DIAGRAM_LABELS.vi.functionColumn} | <b>${DIAGRAM_LABELS.vi.descriptionColumn}`)
+    expect(table.source).toMatch(/\| vi: /)
     // Mọi hình dựng từ Spine đều có nguồn mới; cùng id, cùng thứ tự với bản gốc
     expect(view.diagrams.map((d) => d.id)).toEqual(spine.diagrams.map((d) => d.id))
-    expect([...localizedDiagramSources(spine, localizeSpine(spine, units, translate(units), "vi")).keys()]).toEqual(spine.diagrams.map((d) => d.id))
+    // FLF-390: sơ đồ triển khai không có chữ dịch ⇒ không có nguồn theo ngôn ngữ (dùng ảnh gốc)
+    expect([...localizedDiagramSources(spine, localizeSpine(spine, units, translate(units), "vi")).keys()]).toEqual(spine.diagrams.filter((d) => d.kind !== "deployment").map((d) => d.id))
   })
 
   it("wireframe: nhãn đã dịch thay đúng chỗ, dòng tên màn theo tên màn đã dịch; nhãn chưa dịch giữ chữ gốc", () => {
@@ -99,24 +116,24 @@ describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong 
     expect(units.find((u) => u.key === `diagrams[id=${wireframeId}].labels`)?.value).toEqual(["Email", "Log in"])
 
     const full = renderView(localizeSpine(spine, units, translate(units), "vi")).diagrams.find((d) => d.id === wireframeId)!
-    expect(full.puml).toContain(`        vi: ${screen.name}\n`)
-    expect(full.puml).toContain("      vi: Email\n")
-    expect(full.puml).toContain("      [ vi: Log in ]\n")
-    expect(full.puml).toContain("<b>FLINTFLOW")
-    expect(full.puml).toContain('"john@example.com      "')
+    expect(full.source).toContain(`        vi: ${screen.name}\n`)
+    expect(full.source).toContain("      vi: Email\n")
+    expect(full.source).toContain("      [ vi: Log in ]\n")
+    expect(full.source).toContain("<b>FLINTFLOW")
+    expect(full.source).toContain('"john@example.com      "')
 
     // Chỉ tên màn đã dịch (nhãn wireframe chưa bấm "Dịch tài liệu")
     const titleOnly = renderView(localizeSpine(spine, units, translate(units, (u) => u.ref.group === "screens"), "vi")).diagrams.find((d) => d.id === wireframeId)!
-    expect(titleOnly.puml).toBe(layout.puml.replace(`        ${screen.name}\n`, `        vi: ${screen.name}\n`))
+    expect(titleOnly.source).toBe(layout.source.replace(`        ${screen.name}\n`, `        vi: ${screen.name}\n`))
   })
 
   it("hình cũ (nguồn khác bản renderer sinh từ Spine hiện tại) ⇒ giữ nguồn gốc, không có trong danh sách cần ảnh riêng", () => {
     const { spine } = rendered()
     const erd = byKind(spine, "erd")[0]
-    erd.puml = erd.puml.replace("skinparam ranksep 20", "skinparam ranksep 30")
+    erd.source = erd.source.replace("<title>", "<title>cũ ")
     const units = translationUnits(spine)
     const localized = localizeSpine(spine, units, translate(units), "vi")
-    expect(byKind(renderView(localized), "erd")[0].puml).toBe(erd.puml)
+    expect(byKind(renderView(localized), "erd")[0].source).toBe(erd.source)
     expect(localizedDiagramSources(spine, localized).has(erd.id)).toBe(false)
   })
 
@@ -134,11 +151,91 @@ describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong 
     const units = translationUnits(spine)
     const localized = localizeSpine(spine, units, new Map(), "vi")
     const view = renderView(localized)
-    for (const d of byKind(view, "screen_flow")) expect(screenFlowTitleOf(d.puml)).toMatch(/^Luồng màn hình của /)
-    // Use case tách hai hình: tiêu đề phần là chữ máy ⇒ đổi
-    for (const d of byKind(view, "usecase")) expect(d.puml).toMatch(/^title Sơ đồ use case — /m)
-    // Sơ đồ ngữ cảnh: actor nào cũng có luồng, tên hệ thống đã đặt ⇒ không có chữ máy ⇒ y như bản gốc, dùng thẳng ảnh gốc
-    expect(byKind(view, "context")[0].puml).toBe(byKind(spine, "context")[0].puml)
-    expect(localizedDiagramSources(spine, localized).has(byKind(spine, "context")[0].id)).toBe(false)
+    for (const d of byKind(view, "screen_flow")) expect(svgTitleOf(d.source)).toBe(DIAGRAM_LABELS.vi.screensFlowTitle())
+    // Use case tách theo feature: tiêu đề phần (ghi ở <title> của SVG) là chữ máy ⇒ đổi
+    for (const d of byKind(view, "usecase")) expect(svgTitleOf(d.source)).toMatch(/^Sơ đồ use case - /)
+    // Sơ đồ ngữ cảnh: bản gốc Title Case nhãn tiếng Anh, bản tiếng Việt giữ nguyên chữ như viết ⇒ vẽ lại, nhãn chưa dịch không bị Title Case
+    const human = spine.actors.find((x) => x.kind === "human")!
+    expect(byKind(spine, "context")[0].source).toContain(`>${titleCase(human.flows_in![0])}<`)
+    expect(byKind(view, "context")[0].source).toContain(`>${human.flows_in![0]}<`)
+    expect(localizedDiagramSources(spine, localized).has(byKind(spine, "context")[0].id)).toBe(true)
+  })
+})
+
+describe("matchingPart - ghép phần bản dịch với phần gốc theo tập id use case", () => {
+  const part = (source: string, members?: string[], section = "fixed:2.2.1"): RenderedPart => ({
+    kind: "usecase", section, owner_kind: null, owner_id: null, format: "svg", source, ...(members ? { members } : {})
+  })
+  const hierarchy = (source: string) => part(source, undefined, "fixed:2.1")
+
+  it("chữ dịch dài làm bản dịch tách khác (cùng số phần, khác bộ use case) ⇒ phần lệch không ghép, dùng ảnh gốc", () => {
+    const before = [part("a", ["UC01", "UC02"]), part("b", ["UC03"]), hierarchy("h")]
+    const after = [part("a'", ["UC01"]), part("b'", ["UC02", "UC03"]), hierarchy("h'")]
+    expect(matchingPart(before, after, 0)).toBeUndefined()
+    expect(matchingPart(before, after, 1)).toBeUndefined()
+    expect(matchingPart(before, after, 2)?.source).toBe("h'")
+  })
+
+  it("tách khác số phần: phần cùng tập id vẫn ghép đúng dù khác chỉ số; hình không có members ghép theo thứ tự riêng", () => {
+    const before = [part("a", ["UC01", "UC02"]), part("b", ["UC03", "UC04"]), hierarchy("h")]
+    const after = [part("a1", ["UC01"]), part("a2", ["UC02"]), part("b'", ["UC03", "UC04"]), hierarchy("h'")]
+    expect(matchingPart(before, after, 0)).toBeUndefined()
+    expect(matchingPart(before, after, 1)?.source).toBe("b'")
+    expect(matchingPart(before, after, 2)?.source).toBe("h'")
+  })
+})
+
+describe("cache renderer trong tiến trình (FLF-369)", () => {
+  it("cùng đầu vào ⇒ cùng nguồn (lượt sau lấy từ cache); chữ dịch khác ⇒ vẽ lại, không trả nhầm kết quả cũ", () => {
+    _clearRenderCache()
+    const { spine } = rendered()
+    const units = translationUnits(spine)
+    const first = renderView(localizeSpine(spine, units, translate(units), "vi")).diagrams.map((d) => d.source)
+    const again = renderView(localizeSpine(spine, units, translate(units), "vi")).diagrams.map((d) => d.source)
+    expect(again).toEqual(first)
+    const other = new Map([...translate(units)].map(([k, v]) => [k, typeof v === "string" ? v.replace(/^vi: /, "vi2: ") : v]))
+    const changed = renderView(localizeSpine(spine, units, other, "vi"))
+    expect(changed.diagrams.filter((d) => d.kind === "usecase").map((d) => d.source).join("")).toContain(">vi2: ")
+  })
+
+  it("cùng Spine khác RenderContext (ký pháp ERD) ⇒ khoá khác, không lẫn kết quả", () => {
+    _clearRenderCache()
+    const { spine } = rendered()
+    const units = translationUnits(spine)
+    const chen = renderView(localizeSpine(spine, units, translate(units), "vi", { erdNotation: "chen" }))
+    const crow = renderView(localizeSpine(spine, units, translate(units), "vi", { erdNotation: "crowsfoot" }))
+    // fixture vẽ ERD theo chen ⇒ bản crowsfoot không khớp nguồn đang lưu ⇒ giữ nguồn gốc; bản chen được dịch
+    expect(chen.diagrams.find((d) => d.kind === "erd")!.source).not.toBe(crow.diagrams.find((d) => d.kind === "erd")!.source)
+  })
+})
+
+describe("mockup màn SVG (FLF-410) - nhãn dịch + vẽ lại bằng code", () => {
+  const withMockup = () => {
+    const { spine } = rendered()
+    const screen = spine.screens.find((s) => s.primary_function_id !== null && s.detail_status === "signed_off")!
+    const theme = resolveScreenTheme({ primaryColor: "#3F5591", domain: null, platforms: ["web", "mobile"] }, spine.project.form_factor)
+    const base = renderKind(spine, "screen_layout", screen.id)[0]
+    const parts = mockupParts(spine, base, SIGNUP_SPEC, theme, "hash", "system", ["web", "mobile"])!
+    const kept = spine.diagrams.filter((d) => !(d.kind === "screen_layout" && d.owner_id === screen.id))
+    const template = spine.diagrams.find((d) => d.kind === "screen_layout" && d.owner_id === screen.id)!
+    spine.diagrams = [...kept, ...parts.map((p, i): Diagram => ({ ...template, id: i === 0 ? "D90" : "D90-2", format: "svg", source: p.source }))]
+    return { spine, screen, context: { screenTheme: { primaryColor: "#3F5591", domain: null, platforms: ["web" as const, "mobile" as const] } } }
+  }
+
+  it("một đơn vị nhãn mỗi màn (phần đầu), cả hai nền tảng vẽ lại bằng chữ dịch; Interface đọc chữ dịch", () => {
+    const { spine, screen, context } = withMockup()
+    const units = translationUnits(spine)
+    expect(units.find((u) => u.key === "diagrams[id=D90].labels")?.value).toEqual(expect.arrayContaining(["Create account", "Full name"]))
+    expect(units.some((u) => u.key === "diagrams[id=D90-2].labels")).toBe(false)
+
+    const view = renderView(localizeSpine(spine, units, translate(units), "vi", context))
+    for (const id of ["D90", "D90-2"]) {
+      const d = view.diagrams.find((x) => x.id === id)!
+      expect(d.source).toContain(">vi: Create account<")
+      expect(screenSpecOf(d.source)?.platform).toBe(id === "D90" ? "web" : "mobile")
+    }
+    const viewScreen = view.screens.find((s) => s.id === screen.id)!
+    expect(describeInterface(view, viewScreen, "vi")).toContain("nút vi: Create account")
+    expect(describeInterface(spine, screen)).toContain("Create account button")
   })
 })

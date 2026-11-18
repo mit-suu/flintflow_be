@@ -17,29 +17,39 @@
 
 import { runStep, defaultStepRunnerDeps, recordUserMessage, B0_FIELD_STEPS, type Emit, type GateResolution, type StepRunnerDeps } from "./step-runner.service.js"
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
-import { addendumForUnit, loadConversationVariables, projectStep } from "./context-projection.js"
+import { addendumForUnit, assumptionsForPrompt, loadConversationVariables, projectStep, sectionsFedBy } from "./context-projection.js"
+import { mergeStepDocumentQueries, stepDocumentQuery } from "./step-document-query.js"
 import { SYSTEM_NAME_FIELD, askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
 import { FAST_PATH_PHASES, interviewBudget, interviewGuidance, interviewProjection, noQuestionAck, reconcileReply, trimTailQuestion, withoutQuestions } from "./fast-path.js"
-import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, shapeQuestions } from "./question-shape.js"
-import { askTranscript, chatBudgetLeft, chatBudgetReply, nextPendingAfterChat, replyLanguageAfterMessage, runChatTurn, settleWithoutModel, submitAnswerWait, type AnswerPayload } from "./step-runner.service.js"
+import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, currentBatch, followUpQuestions, followUpReply, indexOfQuestion, shapeQuestions } from "./question-shape.js"
+import { askTranscript, captureSettledSources, chatBudgetLeft, chatBudgetReply, nextPendingAfterChat, replyLanguageAfterMessage, runChatTurn, settleWithoutModel, listenForAnswer, type AnswerPayload } from "./step-runner.service.js"
 import { replyLanguageForSessionId } from "../project/reply-language.service.js"
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import * as meter from "./meter.service.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import { gate, phaseGateAssumptions } from "./gate.service.js"
-import { getStep, nextStep as nextStepOf, orderedSteps, type ExpandedStep } from "./step-registry.js"
-import { isQuietStep, type QuietVerdict } from "./quiet-step.js"
+import { PHASES, getStep, nextStep as nextStepOf, orderedSteps, type ExpandedStep } from "./step-registry.js"
+import { isQuietStep, type QuietVerdict, type QuietInput } from "./quiet-step.js"
 import { composePhaseGateMessage, spokenAssumptionIds, stripModelCountSentences } from "./gate-message.js"
 import * as spineRepository from "./../spine/spine.repository.js"
 import type { Spine, SpineRecord } from "../spine/spine.types.js"
 import type { ChangeSummary, StepEvent } from "./pipeline.dto.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { clientErrorMessage } from "../../shared/utils/client-error.js"
 import { AnswerDetached } from "./step-runner.errors.js"
 import { acquireRun, detachRun, finishRun, registerAbort, touchRun, type PendingAnswerState } from "./run-state.service.js"
 import type { AnswerInput } from "./step-runner.service.js"
+import { buildDocumentContext, stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
+import { ActionType } from "../../shared/ai/ai-action.types.js"
+import { recordAutoPass } from "./auto-pass.service.js"
+import { runErrorOf } from "./pipeline-error-code.js"
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
+
+/** FLF-337: tín hiệu từ tóm tắt lượt chạy cho bảng cổng cứng — có xoá nội dung không, chạm section nào. */
+const summarySignals = (summary: readonly { kind: string; section_id?: string | null }[] | undefined): Pick<QuietInput, "contentRemoved" | "touchedSections"> => ({
+  contentRemoved: (summary ?? []).some((c) => c.kind === "remove"),
+  touchedSections: Array.from(new Set((summary ?? []).map((c) => c.section_id).filter((id): id is string => typeof id === "string" && id.length > 0)))
+})
 
 /** Trần số bước chạy liền trong một lời gọi — chặn vòng lặp vô hạn nếu `nextStep` không tiến. */
 export const MAX_PHASE_STEPS = 30
@@ -55,6 +65,28 @@ export const isPhaseTerminal = (spine: Spine, step: ExpandedStep): boolean => {
   const unit = phaseUnitOf(step)
   const steps = orderedSteps(spine).filter((s) => phaseUnitOf(s) === unit)
   return steps.length > 0 && steps[steps.length - 1].id === step.id
+}
+
+/**
+ * FLF-292: tài liệu upload cho lượt hỏi gộp đầu giai đoạn — nạp khi có bước nào trong đơn vị đọc `documents` (cùng ngân
+ * sách token với lượt Draft của bước đó). Không bước nào đọc ⇒ `""`.
+ */
+export const unitDocuments = async (
+  projectId: string,
+  spine: Spine,
+  unit: string,
+  options: { userMessage?: string; since?: Date } = {}
+): Promise<string> => {
+  const steps = orderedSteps(spine).filter((s) => phaseUnitOf(s) === unit && stepNeedsSourceDocuments(s.id))
+  if (!steps.length) return ""
+  // FLF-393: lượt hỏi gộp hỏi thay cho mọi bước đọc tài liệu của đơn vị ⇒ tìm đoạn theo section của cả các bước đó
+  const merged = mergeStepDocumentQueries(steps.map((s) => stepDocumentQuery(spine, s.id, sectionsFedBy(spine, s.id))))
+  // Tin user vừa gõ để mở giai đoạn đứng đầu câu hỏi: thiếu nó thì BM25 chỉ có nhãn bước ("Brain Dump"), không khớp gì và
+  // rơi về đầu tài liệu (demo 2026-11-12: hỏi UC-05 / BR-02, model chỉ thấy bìa + mục lục)
+  const userMessage = options.userMessage?.trim()
+  const retrieval = userMessage ? { ...merged, query: [userMessage, merged.query].join("\n"), focus: userMessage } : merged
+  // FLF-398: `since` - chỉ tài liệu đính kèm sau lượt hỏi (cùng câu trả lời)
+  return (await buildDocumentContext({ projectId, actionType: ActionType.DRAFT, stepId: steps[0]!.id, ...retrieval, ...(options.since ? { since: options.since } : {}) })).contextText
 }
 
 /**
@@ -78,7 +110,7 @@ const recordInterviewAnswers = async (
     // chờ — `interviewChatTurn`), ghi lại ở đây thành hai tin AI cho cùng một lượt hỏi.
     const transcript: IChatMessage[] = (await hasInterviewAsk(sessionId, unit))
       ? []
-      : [{ role: "ai", content: askTranscript(reply, asked), step: unit, createdAt: new Date() }]
+      : [{ role: "ai", content: askTranscript(reply, currentBatch(asked).now), step: unit, createdAt: new Date() }]
     // Câu trả lời trên thẻ: một tin, mỗi đáp án một dòng — câu hỏi đã nằm ngay trên, không lặp lại trong bong bóng user
     const said = answers.map((a) => answerText(a.answer)).filter((text) => text !== "")
     if (said.length > 0) transcript.push({ role: "user", content: said.join("\n"), step: unit, createdAt: new Date() })
@@ -120,7 +152,9 @@ const interviewChatTurn = async (
   /** FLF-260: ngôn ngữ trả lời của lượt — nơi gọi đã đoán lại trên `message`. */
   language: ReplyLanguage,
   /** Lời AI lúc đặt các câu đang chờ — ghi vào lịch sử cùng câu hỏi nếu lịch sử chưa có lượt hỏi nào của giai đoạn. */
-  askedReply = ""
+  askedReply = "",
+  /** FLF-398: lúc đặt các câu đang chờ (`PendingAnswerState.asked_at`) — tài liệu tải lên sau lúc này vào lượt chat. */
+  askedAt?: string
 ): Promise<{ reply: string; remaining: PendingAnswerState["asked"] }> => {
   const cardAnswers = payload.answers.filter((a) => indexOfQuestion(asked, a.question_id) >= 0)
   // Lượt hỏi đầu giai đoạn chỉ vào lịch sử khi có câu trả lời trên thẻ — trả lời bằng chat thì câu hỏi biến mất khỏi
@@ -158,6 +192,9 @@ const interviewChatTurn = async (
     userId,
     unit,
     stepName: `Phỏng vấn đầu giai đoạn ${unit}`,
+    // FLF-398: tệp đính kèm cùng câu trả lời (tải sau lúc hỏi) — thiếu thì AI báo "tệp chưa mở được"; trạng thái cũ chưa có
+    // `asked_at` ⇒ mọi tài liệu của giai đoạn
+    documents: await unitDocuments(projectId, spine, unit, askedAt && !Number.isNaN(new Date(askedAt).getTime()) ? { since: new Date(askedAt) } : {}),
     asked,
     message,
     // Lời AI lúc đặt các câu đang chờ + tin user: thiếu lời AI thì model không biết user đang trả lời câu nào
@@ -175,6 +212,8 @@ const interviewChatTurn = async (
   await recordInterviewAnswers(projectId, unit, sessionId, userId, turn.reply, asked, [...cardAnswers, ...settled], {
     settledIds: new Set(settled.map((a) => a.question_id))
   })
+  // FLF-393: câu chốt bằng tài liệu tham khảo ⇒ ghi nguồn cho quyết định vừa vào sổ (business-flow §3.6)
+  if (settled.some((a) => a.source_paras?.length)) await captureSettledSources(projectId, unit, (await load(projectId)).spine, asked, settled)
   const answered = new Set([...cardAnswers, ...settled].map((a) => indexOfQuestion(asked, a.question_id)))
   if (closing) {
     const closingReply = withoutQuestions(turn.reply, language)
@@ -185,7 +224,7 @@ const interviewChatTurn = async (
   const remaining = nextPendingAfterChat(after, asked.filter((_, i) => !answered.has(i)), turn.questions, message)
   // Câu hỏi đuôi trong lời AI tính vào trần câu hỏi của lượt (FLF-235): đã hỏi lại đủ câu thì không còn "bạn thấy hợp lý chứ?"
   const reply = trimTailQuestion(turn.reply, remaining, PROMPT_QUESTIONS_PER_TURN, language)
-  await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: askTranscript(reply, remaining), step: unit, createdAt: new Date() }])
+  await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: askTranscript(reply, currentBatch(remaining).now), step: unit, createdAt: new Date() }])
   return { reply, remaining }
 }
 
@@ -211,7 +250,7 @@ export const resumePhaseInterview = async (
       const d: StepRunnerDeps = { ...defaultStepRunnerDeps(), ...deps }
       // FLF-260: tin chat là chữ user gõ ⇒ đoán ngôn ngữ trả lời; mơ hồ ⇒ ngôn ngữ phiên (lượt chạy tiếp không có ngôn ngữ đang dùng)
       const language = await replyLanguageAfterMessage({ projectId, sessionId: pending.session_id, userId, message }, d.replyLanguage)
-      const { reply, remaining } = await interviewChatTurn(projectId, unit, pending.session_id, userId, d, pending.asked, payload, message, language, pending.reply ?? "")
+      const { reply, remaining } = await interviewChatTurn(projectId, unit, pending.session_id, userId, d, pending.asked, payload, message, language, pending.reply ?? "", pending.asked_at)
       if (remaining.length > 0) {
         const { questions } = shapeQuestions(remaining)
         const elicit: StepEvent = { type: "elicit", step_id: unit, delta: reply }
@@ -228,11 +267,31 @@ export const resumePhaseInterview = async (
         return
       }
     } else {
+      // FLF-355: thẻ chỉ mang nhóm câu của lượt này; còn nhóm khác loại ⇒ lượt quay lại `waiting_answer` với nhóm đó
       await recordInterviewAnswers(projectId, unit, pending.session_id, userId, pending.reply ?? "", pending.asked, answers)
+      const later = followUpQuestions(pending.asked, answers)
+      if (later.length > 0) {
+        const language = deps.replyLanguage ?? (await replyLanguageForSessionId({ projectId, sessionId: pending.session_id, userId }))
+        const reply = followUpReply(language)
+        await pushInterviewMessages(projectId, pending.session_id, [{ role: "ai", content: askTranscript(reply, later), step: unit, createdAt: new Date() }])
+        const { questions } = shapeQuestions(later)
+        const elicit: StepEvent = { type: "elicit", step_id: unit, delta: reply }
+        await touchRun(projectId, unit, run.run_id, { appendEvent: { ...elicit, at: new Date().toISOString() } })
+        await touchRun(projectId, unit, run.run_id, {
+          status: "waiting_answer",
+          stage: "ask",
+          detail_vi: `Chờ bạn trả lời ${questions.length} câu`,
+          questions,
+          pending_answer: { ...pending, asked: later, reply },
+          release: true,
+          appendEvent: { type: "answer_needed", step_id: unit, questions, at: new Date().toISOString() }
+        })
+        return
+      }
     }
     await finishRun(projectId, unit, run.run_id, "done", { questions: null })
   } catch (err) {
-    await finishRun(projectId, unit, run.run_id, "interrupted", { error: { code: err instanceof ApiError ? err.code : "UNKNOWN", message: clientErrorMessage(err) } })
+    await finishRun(projectId, unit, run.run_id, "interrupted", { error: runErrorOf(err) })
     throw err
   }
 }
@@ -296,15 +355,24 @@ const runPhaseInterview = async (
   }))].filter((field) => field !== SYSTEM_NAME_FIELD)
   if (missing.length === 0) return "skipped"
 
-  const run = await acquireRun(projectId, unit, { sessionId, by: userId, stage: "ask", detail_vi: "Xem giai đoạn này còn thiếu gì để hỏi bạn" })
+  const run = await acquireRun(projectId, unit, { sessionId, by: userId, stage: "ask", detail_vi: userMessage ? "Đọc tin nhắn của bạn và tài liệu để trả lời" : "Xem giai đoạn này còn thiếu gì để hỏi bạn" })
   if (deps.abort) registerAbort(run.run_id, deps.abort)
   let outcome: InterviewOutcome | null = null
+  let caughtErr: unknown = null
   try {
     outcome = await askPhaseInterview(projectId, unit, sessionId, userId, emit, deps, spine, missing, run.run_id, replyLanguage, userMessage)
     return outcome
+  } catch (err) {
+    caughtErr = err
+    throw err
   } finally {
     if (outcome === "detached") await detachRun(projectId, unit, run.run_id)
-    else await finishRun(projectId, unit, run.run_id, outcome === null ? "interrupted" : "done", { questions: null })
+    else {
+      await finishRun(projectId, unit, run.run_id, outcome === null ? "interrupted" : "done", {
+        questions: null,
+        ...(outcome === null && caughtErr !== null ? { error: runErrorOf(caughtErr) } : {})
+      })
+    }
   }
 }
 
@@ -340,12 +408,16 @@ const askPhaseInterview = async (
           pending_questions: [],
           projection: fast ? interviewProjection(spine, unit) : {},
           addendum: addendumForUnit(spine, unit),
+          // FLF-358: giả định còn mở của giai đoạn
+          assumptions: assumptionsForPrompt(spine, unit),
           content_guidance: fast ? interviewGuidance(spine, unit) : "",
+          // FLF-292: lượt hỏi gộp thấy tài liệu upload ⇒ chỉ hỏi điều tài liệu chưa có
+          documents: (await unitDocuments(projectId, spine, unit, { userMessage })) || "(none)",
           decisions: ledgerForPrompt(spine),
           // FLF-221: user mở giai đoạn bằng một tin chat — lượt hỏi gộp phải thấy điều user vừa nói. FLF-232: kèm đuôi hội
           // thoại của các bước trước, để sang giai đoạn mới AI nối mạch thay vì chào lại.
           ...conversation,
-          user_message: userMessage ?? "(tự động — hỏi gộp đầu giai đoạn)"
+          user_message: userMessage ?? "(tự động - hỏi gộp đầu giai đoạn)"
         },
         replyLanguage
       },
@@ -387,18 +459,33 @@ const askPhaseInterview = async (
     return "asked_none"
   }
 
+  /** Phát `answer_needed` + lưu lượt chờ; lượt nghe đăng ký TRƯỚC để `/answer` tới ngay sau đó về đúng luồng này. */
+  /** FLF-398: lúc đặt các câu đang chờ — lượt chat trả lời nạp tài liệu tải lên sau lúc này. */
+  let askedAt: string | undefined
+  const announceWaiting = async (shown: typeof questions, pendingAnswer: PendingAnswerState): Promise<{ answer: Promise<AnswerPayload> }> => {
+    const listener = listenForAnswer(projectId, unit, sessionId, deps.signal)
+    askedAt = new Date().toISOString()
+    const answerNeeded: StepEvent = { type: "answer_needed", step_id: unit, questions: shown }
+    try {
+      emit(answerNeeded)
+      await touchRun(projectId, unit, runId, {
+        status: "waiting_answer",
+        stage: "ask",
+        detail_vi: `Chờ bạn trả lời ${shown.length} câu`,
+        questions: shown,
+        pending_answer: { ...pendingAnswer, asked_at: askedAt },
+        release: true,
+        appendEvent: { ...answerNeeded, at: new Date().toISOString() }
+      })
+    } catch (err) {
+      listener.cancel()
+      throw err
+    }
+    return { answer: listener.answer }
+  }
+
   emit({ type: "elicit", step_id: unit, delta: firstReply })
-  const answerNeeded: StepEvent = { type: "answer_needed", step_id: unit, questions }
-  emit(answerNeeded)
-  await touchRun(projectId, unit, runId, {
-    status: "waiting_answer",
-    stage: "ask",
-    detail_vi: `Chờ bạn trả lời ${questions.length} câu`,
-    questions,
-    pending_answer: { kind: "phase_interview", unit, session_id: sessionId, asked, base_answers_text: "", reply: firstReply },
-    release: true,
-    appendEvent: { ...answerNeeded, at: new Date().toISOString() }
-  })
+  let next = (await announceWaiting(questions, { kind: "phase_interview", unit, session_id: sessionId, asked, base_answers_text: "", reply: firstReply })).answer
 
   // Vòng chờ: thẻ ⇒ ghi ngay; chat tự do ⇒ AI đọc, chốt câu đúng ý, hỏi lại câu còn chờ (FLF-221)
   let pending = asked
@@ -407,7 +494,7 @@ const askPhaseInterview = async (
   for (;;) {
     let payload: AnswerPayload
     try {
-      payload = await submitAnswerWait(projectId, unit, sessionId, deps.signal)
+      payload = await next
     } catch (err) {
       if (err instanceof AnswerDetached) return "detached"
       throw err
@@ -416,28 +503,27 @@ const askPhaseInterview = async (
     const cardAnswers = payload.answers.filter((a) => indexOfQuestion(pending, a.question_id) >= 0)
     emit({ type: "answer_received", step_id: unit, count: cardAnswers.length })
     if (!message) {
+      // FLF-355: thẻ chỉ mang nhóm câu của lượt này; nhóm khác loại hỏi tiếp ngay sau, không gọi model
       await recordInterviewAnswers(projectId, unit, sessionId, userId, reply, pending, cardAnswers)
-      return "answered"
+      const later = followUpQuestions(pending, cardAnswers)
+      if (later.length === 0) return "answered"
+      reply = followUpReply(language)
+      emit({ type: "elicit", step_id: unit, delta: reply })
+      await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: askTranscript(reply, later), step: unit, createdAt: new Date() }])
+      pending = later
+      const { questions: rest } = shapeQuestions(pending)
+      next = (await announceWaiting(rest, { kind: "phase_interview", unit, session_id: sessionId, asked: pending, base_answers_text: "", reply })).answer
+      continue
     }
     // FLF-260: tin chat là chữ user gõ ⇒ đoán lại ngôn ngữ trả lời (rõ ⇒ đổi và ghi lên phiên; mơ hồ ⇒ giữ)
     language = await replyLanguageAfterMessage({ projectId, sessionId, userId, message }, language)
-    const turn = await interviewChatTurn(projectId, unit, sessionId, userId, deps, pending, payload, message, language, reply)
+    const turn = await interviewChatTurn(projectId, unit, sessionId, userId, deps, pending, payload, message, language, reply, askedAt)
     if (turn.reply) emit({ type: "elicit", step_id: unit, delta: turn.reply })
     if (turn.remaining.length === 0) return "answered"
     pending = turn.remaining
     reply = turn.reply
     const { questions: again } = shapeQuestions(pending)
-    const askAgain: StepEvent = { type: "answer_needed", step_id: unit, questions: again }
-    emit(askAgain)
-    await touchRun(projectId, unit, runId, {
-      status: "waiting_answer",
-      stage: "ask",
-      detail_vi: `Chờ bạn trả lời ${again.length} câu`,
-      questions: again,
-      pending_answer: { kind: "phase_interview", unit, session_id: sessionId, asked: pending, base_answers_text: "", reply },
-      release: true,
-      appendEvent: { ...askAgain, at: new Date().toISOString() }
-    })
+    next = (await announceWaiting(again, { kind: "phase_interview", unit, session_id: sessionId, asked: pending, base_answers_text: "", reply })).answer
   }
 }
 
@@ -504,6 +590,7 @@ export const standaloneGate = (
       if (quietReason === null || watched.signals.error) return
       await gate(projectId, stepId, userId, { action: "accept", base_version: (await load(projectId)).record.spine_version })
       emit({ type: "auto_accepted", step_id: stepId, reason_vi: quietReason })
+      await recordAutoPass(projectId, stepId, quietReason)
     },
     resolveGate: async (gateEvent) => {
       const { spine } = await load(projectId)
@@ -517,6 +604,8 @@ export const standaloneGate = (
         newAssumptions: gateEvent.new_assumptions ?? [],
         renderFailed: watched.signals.renderFailed,
         phaseTerminal: isPhaseTerminal(spine, step),
+        ...summarySignals(gateEvent.summary),
+        emptySections: gateEvent.empty_sections ?? [],
         spine
       })
       if (verdict.quiet) quietReason = verdict.reason_vi
@@ -568,6 +657,8 @@ const decideStep = async ({ projectId, next, unit, gateEvent, signals, phaseSumm
     phaseTerminal: isPhaseTerminal(afterSpine, next),
     // B-0.2/B-0.3 bỏ qua vì B-0.1 đã chốt field: không gọi model, không ghi gì ⇒ không có gì để duyệt
     settledEarlier: B0_FIELD_STEPS[templateId] !== undefined && !signals.asked && gateEvent.calls_used === 0 && gateEvent.wrote_ops === false,
+    ...summarySignals(gateEvent.summary),
+    emptySections: gateEvent.empty_sections ?? [],
     spine: afterSpine
   })
   if (verdict.quiet) return { verdict, afterSpine, phaseGate: null }
@@ -620,7 +711,10 @@ export const runPhase = async (
   const first = nextStepOf(startSpine)
   if (!first) return { phase, stopped_at: null, reason_vi: "Đã đi hết quy trình", steps: [] }
 
-  const unit = phase.includes("@") || phase === first.phase ? phaseUnitOf(first) : phase
+  // FLF-432 (luồng C #2): client gửi giai đoạn ĐÃ QUA (con trỏ cũ: các bước còn lại của S-4 đều `skipped`, bước tới lượt là
+  // S-5.1@S02) ⇒ chạy đúng đơn vị tới lượt thay vì trả "Đã xong giai đoạn này" rỗng. Giai đoạn chưa tới vẫn về như cũ.
+  const passed = (PHASES as readonly string[]).indexOf(phase) >= 0 && (PHASES as readonly string[]).indexOf(phase) < (PHASES as readonly string[]).indexOf(first.phase)
+  const unit = phase.includes("@") || phase === first.phase || passed ? phaseUnitOf(first) : phase
   // Giai đoạn không còn bước nào tới lượt (FE gọi lại sau khi duyệt bước cuối): về ngay, đừng phỏng vấn
   // đầu giai đoạn — một lượt gọi model tốn credit cho một giai đoạn đã đóng.
   if (phaseUnitOf(first) !== unit) return { phase: unit, stopped_at: null, reason_vi: "Đã xong giai đoạn này", steps: [] }
@@ -710,6 +804,8 @@ export const runPhase = async (
     void accepted
     void record
     emit({ type: "auto_accepted", step_id: next.id, reason_vi: verdict.reason_vi })
+    // FLF-337 "Chưa xem": ghi sổ để chip trước cổng đưa tài liệu ra ngoài đếm được
+    await recordAutoPass(projectId, next.id, verdict.reason_vi)
     terminalAutoAccepted = isPhaseTerminal(afterSpine, next)
     outcomes.push({
       step_id: next.id,
@@ -720,5 +816,5 @@ export const runPhase = async (
     })
   }
 
-  return { phase: unit, stopped_at: null, reason_vi: `Đã chạy ${MAX_PHASE_STEPS} bước liên tiếp — dừng lại để bạn xem`, steps: outcomes }
+  return { phase: unit, stopped_at: null, reason_vi: `Đã chạy ${MAX_PHASE_STEPS} bước liên tiếp - dừng lại để bạn xem`, steps: outcomes }
 }

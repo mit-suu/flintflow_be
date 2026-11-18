@@ -141,7 +141,7 @@ describe("localizeSalt", () => {
     expect(localizeSalt(ACCOUNTS, () => undefined)).toBe(ACCOUNTS)
   })
 
-  it("ký tự cú pháp trong chữ dịch bị lọc theo vị trí — không mở / đóng widget", () => {
+  it("ký tự cú pháp trong chữ dịch bị lọc theo vị trí - không mở / đóng widget", () => {
     const salt = '@startsalt\n{+\n  Name\n  "Your name   "\n  [ Save ]\n  ^All^\n}\n@endsalt\n'
     const out = localizeSalt(salt, (text) => ({ Name: "Tên | {x}", "Your name": 'Tên "bạn"', Save: "Lưu [nháp]", All: "Tất cả ^" })[text])
     expect(out).toBe(`@startsalt\n{+\n  Tên x\n  "Tên 'bạn'   "\n  [ Lưu nháp ]\n  ^Tất cả^\n}\n@endsalt\n`)

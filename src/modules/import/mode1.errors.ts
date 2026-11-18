@@ -32,12 +32,18 @@ export const MODE1_ERROR_STATUS = {
   CR_NOTHING_TO_APPROVE: 409,
   /** 3.9 sửa trong step sở hữu: vị trí thuộc mục riêng (`custom:*`), không có step sở hữu. */
   CR_NO_OWNER_STEP: 409,
+  /** FLF-375: chấp nhận một chỗ mà AI chưa soạn đề xuất / ghi chú — người dùng gõ hướng sửa, không gõ thay AI. */
+  CR_NO_PROPOSAL: 409,
   /** FLF-186: giá trị tại path đã đổi kể từ lúc đề xuất (thay `CR_OLD_TEXT_MISMATCH`). */
   CR_VALUE_CHANGED: 409,
   /** Mode 1 v3 phase 7: CR đã có đủ số tài liệu bổ sung tối đa (`CR_MAX_MATERIALS`). */
   CR_MATERIAL_LIMIT: 409,
   CHANGE_REQUIRES_CR: 409,
-  /** FLF-182: tắt step của đầu mục mẫu FPT (cốt lõi) hoặc step đã có dữ liệu. */
+  /** FLF-330 C-7: gói thay đổi đang chờ Lead duyệt ⇒ bản nháp khoá (tạo / xác nhận / gộp CR đều chặn). */
+  PACKAGE_PENDING: 409,
+  /** FLF-330: gửi duyệt khi chưa có CR nào ghi vào bản nháp kể từ lần phát hành trước. */
+  PACKAGE_EMPTY: 409,
+  /** FLF-182: tắt bước luôn chạy (ghép / kiểm tra tài liệu) hoặc step đã có dữ liệu. */
   CORE_STEP_REQUIRED: 409,
   /** Mode 1 v3 (BPMN Flow 1): không chạy step / gate / bật-tắt step, không ký baseline v1, không waive cờ. */
   MODE1_NO_STEPS: 409,
@@ -53,7 +59,17 @@ export const MODE1_ERROR_STATUS = {
   /** Mode 1 v3 phase 7: tài liệu bổ sung của CR không phải .docx/.pdf/.txt/.md/PNG/JPEG. */
   CR_MATERIAL_UNSUPPORTED: 422,
   /** Mode 1 v3 phase 7: tài liệu bổ sung không đọc ra chữ nào. */
-  CR_MATERIAL_EMPTY: 422
+  CR_MATERIAL_EMPTY: 422,
+  /** FLF-338 (§3.6.1): quyết định duyệt danh sách rút thiếu / sai (bỏ không lý do, câu hỏi chưa trả lời, id lạ) — `meta.item_ids`. */
+  EXTRACTION_DECISION_INVALID: 400,
+  /** FLF-338: tài liệu chưa đọc ra chữ (parse lỗi / rỗng). */
+  EXTRACTION_DOCUMENT_UNREADABLE: 422,
+  /** FLF-338: danh sách đã duyệt — không rút lại, không duyệt lại. */
+  EXTRACTION_ALREADY_APPROVED: 409,
+  /** FLF-338: hết credit lúc rút. */
+  EXTRACTION_INSUFFICIENT_CREDIT: 402,
+  /** FLF-338: AI lỗi sau khi thử lại — credit đã hoàn. */
+  EXTRACTION_FAILED: 502
 } as const
 
 export type Mode1ErrorCode = keyof typeof MODE1_ERROR_STATUS

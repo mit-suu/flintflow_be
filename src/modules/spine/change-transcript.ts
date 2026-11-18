@@ -62,6 +62,52 @@ export const formatChatContext = (
   return history ? `Tóm tắt hội thoại trước: ${summary}\n\n${history}` : `Tóm tắt hội thoại trước: ${summary}`
 }
 
+const messageKind = (msg: IChatMessage): string | null => {
+  if (msg.role !== "ai" || !msg.content.startsWith("{")) return null
+  try {
+    const kind = (JSON.parse(msg.content) as { kind?: unknown }).kind
+    return typeof kind === "string" ? kind : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * FLF-299: số câu hỏi làm rõ AI đã hỏi liên tiếp cho yêu cầu sửa đang dở — đếm từ cuối phiên lùi về, bỏ qua tin user,
+ * dừng ở tin AI đầu tiên không phải `change_clarification` (một lượt khác đã khép yêu cầu trước).
+ */
+export const clarificationRounds = (messages: readonly IChatMessage[]): number => {
+  let rounds = 0
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (msg.role === "user") continue
+    if (messageKind(msg) !== "change_clarification") break
+    rounds++
+  }
+  return rounds
+}
+
+/**
+ * P08 (T7): yêu cầu gốc đang được hỏi lại — câu lệnh của user đứng trước chuỗi câu hỏi làm rõ cuối phiên, kèm câu hỏi
+ * gần nhất. Lượt trả lời ("Đúng, thêm mốc 3 tháng") mang theo hai câu này để model không coi câu trả lời là một lệnh mới
+ * đứng một mình. Không có câu hỏi đang chờ ⇒ `null`.
+ */
+export const pendingChangeRequest = (messages: readonly IChatMessage[]): { request: string; question: string } | null => {
+  let question: string | null = null
+  let request: string | null = null
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (msg.role === "user") {
+      request = msg.content
+      continue
+    }
+    if (messageKind(msg) !== "change_clarification") break
+    question ??= messageText(msg)
+    request = null
+  }
+  return question && request?.trim() ? { request: request.trim(), question } : null
+}
+
 /** Phiên chat của đúng project này — sai project hay không tồn tại đều 404 (không lộ chatId của project khác). */
 export const loadProjectSession = async (projectId: string, sessionId: string): Promise<IChatSession> => {
   const session = mongoose.isValidObjectId(sessionId) ? await ChatSession.findById(sessionId) : null
@@ -77,18 +123,43 @@ export const loadProjectSession = async (projectId: string, sessionId: string): 
  * `previewStore` (`change.service.ts`) theo `preview_id` — không ai đọc lại các mảng đó từ transcript.
  * FLF-260: câu cố định theo `language` của lượt; câu hỏi làm rõ đã đúng ngôn ngữ từ change.service.
  */
-export const previewPayload = (preview: ChangePreviewResult, language: ReplyLanguage = "vi"): Record<string, unknown> =>
+export const previewPayload = (
+  preview: ChangePreviewResult,
+  language: ReplyLanguage = "vi",
+  /** FLF-318: dự án sau baseline (mode 1, `meta.requires_cr`) — bản xem trước để tạo change request, không áp thẳng. */
+  opts: { requiresCr?: boolean } = {}
+): Record<string, unknown> =>
   preview.clarification
-    ? { kind: "change_clarification", reply: preview.clarification }
+    ? {
+        kind: "change_clarification",
+        reply: preview.clarification,
+        // FLF-311: câu có lựa chọn (màn riêng / popup) ⇒ FE hiện thẻ chọn nhanh; chọn xong đi tiếp lệnh sửa
+        ...(preview.clarification_choices?.length
+          ? { questions: [{ question: byLanguage(language, { vi: "Chọn giao diện", en: "Choose the UI" }), options: preview.clarification_choices.map((label) => ({ label })) }] }
+          : {})
+      }
     : {
         kind: "change_preview",
         reply: preview.ok
           ? preview.changes.length > 0
-            ? byLanguage(language, {
-                vi: `Đã dựng bản xem trước ${preview.changes.length} thay đổi — xem rồi bấm Áp dụng để ghi.`,
-                en: `Built a preview of ${preview.changes.length} change${preview.changes.length === 1 ? "" : "s"} — review it, then press "Áp dụng" (Apply) to save.`
-              })
-            : byLanguage(language, {
+            ? [
+                opts.requiresCr
+                  ? byLanguage(language, {
+                      vi: `Đã dựng bản xem trước ${preview.changes.length} thay đổi - xem rồi bấm “Tạo change request” để gửi thay đổi này.`,
+                      en: `Built a preview of ${preview.changes.length} change${preview.changes.length === 1 ? "" : "s"} - review it, then press "Tạo change request" (Create change request) to send it.`
+                    })
+                  : byLanguage(language, {
+                      vi: `Đã dựng bản xem trước ${preview.changes.length} thay đổi - xem rồi bấm Áp dụng để ghi.`,
+                      en: `Built a preview of ${preview.changes.length} change${preview.changes.length === 1 ? "" : "s"} - review it, then press "Áp dụng" (Apply) to save.`
+                    }),
+                // FLF-298: phần còn thiếu (vd use case mới chưa có màn hình) phải hiện ngay trong chat, không chỉ trong thẻ
+                preview.notes
+              ]
+                .filter(Boolean)
+                .join("\n")
+            : // Không có thay đổi mà có ghi chú (vd người dùng rút lại yêu cầu) ⇒ nói đúng ghi chú đó
+              preview.notes ||
+              byLanguage(language, {
                 vi: "Không tìm thấy chỗ nào cần đổi theo lệnh này.",
                 en: "Nothing in the document needs to change for this request."
               })
@@ -97,6 +168,48 @@ export const previewPayload = (preview: ChangePreviewResult, language: ReplyLang
         branch: preview.branch ?? null,
         change_count: preview.changes.length
       }
+
+/**
+ * FLF-318: bản xem trước đã thành change request (`POST /change-requests` kèm `preview_id`) ⇒ tin bản xem trước trong phiên
+ * đổi thành `change_cr` (mã CR + số thay đổi) — không còn trông như một lần sửa đang chờ xác nhận. Không tìm thấy ⇒ không
+ * làm gì (bản xem trước dựng ngoài phiên chat).
+ */
+export const markPreviewAsCr = async (projectId: string, previewId: string, crId: string): Promise<number> => {
+  const needle = `"preview_id":"${previewId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`
+  const sessions = await ChatSession.find({ projectId, "messages.content": { $regex: needle } })
+  let marked = 0
+  for (const session of sessions) {
+    let changed = false
+    for (const message of session.messages) {
+      if (message.role !== "ai") continue
+      let data: { kind?: unknown; preview_id?: unknown; change_count?: unknown; reply?: unknown }
+      try {
+        data = JSON.parse(message.content) as typeof data
+      } catch {
+        continue
+      }
+      if (data.kind !== "change_preview" || data.preview_id !== previewId) continue
+      const count = typeof data.change_count === "number" ? data.change_count : 0
+      const english = typeof data.reply === "string" && data.reply.startsWith("Built")
+      message.content = JSON.stringify({
+        kind: "change_cr",
+        reply: english
+          ? `Created ${crId} from this preview (${count} change${count === 1 ? "" : "s"}) - follow and confirm it in the change request.`
+          : `Đã tạo ${crId} từ bản xem trước này (${count} thay đổi) - theo dõi và xác nhận trong change request.`,
+        cr_id: crId,
+        preview_id: previewId,
+        change_count: count
+      })
+      changed = true
+      marked += 1
+    }
+    if (changed) {
+      session.markModified("messages")
+      await session.save()
+    }
+  }
+  return marked
+}
 
 /**
  * Câu của tin `change_error` trong phiên (FLF-247): lỗi op/bất biến/schema thành câu thường theo luật vi phạm

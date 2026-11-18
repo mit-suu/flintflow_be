@@ -95,12 +95,13 @@ describe("spine-fixture-19-screens: yêu cầu đếm của task 02", () => {
     expect(spine.business_rules.some((b: any) => b.tier === "detail")).toBe(true)
   })
 
-  it("5 diagram đủ 5 kind, render_status ok, puml viết tay, source_hash TBD", () => {
+  it("5 diagram đủ 5 kind, render_status ok, nguồn PlantUML viết tay, source_hash TBD", () => {
     expect(spine.diagrams).toHaveLength(5)
     expect(new Set(spine.diagrams.map((d: any) => d.kind)).size).toBe(5)
     for (const d of spine.diagrams) {
       expect(d.render_status).toBe("ok")
-      expect(d.puml).toContain("@startuml")
+      expect(d.format).toBe("puml")
+      expect(d.source).toContain("@startuml")
       expect(d.source_hash).toBe("TBD")
     }
   })
@@ -158,7 +159,7 @@ describe("spine-fixture-19-screens: 8 bất biến srs-spine.md §6", () => {
     }
     for (const s of spine.screens) {
       expect(featuresById[s.feature_id], s.id).toBeTruthy()
-      for (const t of s.flow_to) expect(screensById[t], `${s.id}→${t}`).toBeTruthy()
+      for (const { to: t } of s.flow_to) expect(screensById[t], `${s.id}→${t}`).toBeTruthy()
       expect(fnsById[s.primary_function_id], s.id).toBeTruthy()
     }
     for (const p of spine.permissions) {

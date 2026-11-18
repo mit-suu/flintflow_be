@@ -164,6 +164,10 @@ export const OUTPUT_SCHEMA_NAMES = [
   "crMaterialImage",
   // Knowledge RAG (FLF-267)
   "knowledgeAnswer",
+  // FLF-338 rút yêu cầu từ tài liệu thô
+  "extractRequirements",
+  "skeletonGenericNames",
+  "templateMigrationResolve",
   "puml",
   "none"
 ] as const
@@ -195,6 +199,11 @@ export interface SkillAsset {
   template: string
   /** Tên file trong references/ (không đuôi .md), sắp xếp. Nội dung nạp theo yêu cầu. */
   referenceNames: string[]
+  /**
+   * Reference luôn nạp kèm thân skill khi skill là skill nội dung của một step (frontmatter `prompt_references`, tuỳ chọn).
+   * FLF-370: không khai thì references chỉ là tài liệu cho người đọc — model không bao giờ thấy.
+   */
+  promptReferences: string[]
   /** sha256 hex của SKILL.md + references, xuống dòng chuẩn hoá LF. */
   assetVersion: string
 }
@@ -298,6 +307,14 @@ const parseSkill = (skillsDir: string, kind: SkillKind, dirName: string): SkillA
   }
 
   const referenceNames = listReferenceNames(skillDir)
+  const promptReferences = data.prompt_references === undefined ? [] : toStringArray(data.prompt_references, "prompt_references", rel)
+  const unknownReferences = promptReferences.filter((name) => !referenceNames.includes(name))
+  if (unknownReferences.length > 0) {
+    throw new Error(
+      `[${rel}] prompt_references trỏ tới reference không có: ${unknownReferences.join(", ")} ` +
+        `(có: ${referenceNames.join(", ") || "không có"}).`
+    )
+  }
 
   return {
     skillId,
@@ -317,6 +334,7 @@ const parseSkill = (skillsDir: string, kind: SkillKind, dirName: string): SkillA
     dir: rel,
     template,
     referenceNames,
+    promptReferences,
     assetVersion: computeSkillAssetVersion(skillDir, referenceNames)
   }
 }

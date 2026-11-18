@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { NextFunction, Request, RequestHandler, Response } from "express"
 
-vi.mock("./user.service.js", () => ({ getUserById: vi.fn(), updateMe: vi.fn() }))
+vi.mock("./user.service.js", () => ({ getUserById: vi.fn(), updateMe: vi.fn(), changePassword: vi.fn() }))
 
-import { updateMe } from "./user.controller.js"
+import { updateMe, changePassword } from "./user.controller.js"
 import * as userService from "./user.service.js"
 
 const USER = "650000000000000000000010"
@@ -34,12 +34,12 @@ describe("PATCH /users/me", () => {
   it("cập nhật name + onboardedAt (ISO → Date)", async () => {
     const outcome = await invoke(updateMe, USER, { name: "Hiệp", onboardedAt: "2026-09-15T08:00:00.000Z" })
     expect(outcome.status).toBe(200)
-    expect(userService.updateMe).toHaveBeenCalledWith(USER, { name: "Hiệp", onboardedAt: new Date("2026-09-15T08:00:00.000Z") })
+    expect(userService.updateMe).toHaveBeenCalledWith(USER, { name: "Hiệp", onboardedAt: new Date("2026-09-15T08:00:00.000Z") }, undefined)
   })
 
   it("onboardedAt = null được phép (reset onboarding)", async () => {
     await invoke(updateMe, USER, { onboardedAt: null })
-    expect(userService.updateMe).toHaveBeenCalledWith(USER, { onboardedAt: null })
+    expect(userService.updateMe).toHaveBeenCalledWith(USER, { onboardedAt: null }, undefined)
   })
 
   it("body rỗng hoặc field lạ (role) ⇒ 400 VALIDATION_ERROR, không ghi", async () => {
@@ -53,7 +53,7 @@ describe("PATCH /users/me", () => {
   it("FLF-259: lưu ngôn ngữ giao diện", async () => {
     const outcome = await invoke(updateMe, USER, { locale: "en" })
     expect(outcome.status).toBe(200)
-    expect(userService.updateMe).toHaveBeenCalledWith(USER, { locale: "en" })
+    expect(userService.updateMe).toHaveBeenCalledWith(USER, { locale: "en" }, undefined)
   })
 
   it("FLF-259: locale ngoài vi/en, hoặc kèm field không cho đổi ⇒ 400 VALIDATION_ERROR, không ghi", async () => {
@@ -64,8 +64,51 @@ describe("PATCH /users/me", () => {
     expect(userService.updateMe).not.toHaveBeenCalled()
   })
 
+  it("chấp nhận preferredOrganizationId: null (xoá ghi nhớ org)", async () => {
+    const outcome = await invoke(updateMe, USER, { preferredOrganizationId: null })
+    expect(outcome.status).toBe(200)
+    expect(userService.updateMe).toHaveBeenCalledWith(USER, { preferredOrganizationId: null }, undefined)
+  })
+
+  it("chấp nhận preferredOrganizationId: string", async () => {
+    const outcome = await invoke(updateMe, USER, { preferredOrganizationId: "650000000000000000000099" })
+    expect(outcome.status).toBe(200)
+    expect(userService.updateMe).toHaveBeenCalledWith(
+      USER,
+      { preferredOrganizationId: "650000000000000000000099" },
+      undefined
+    )
+  })
+
   it("chưa đăng nhập ⇒ 401", async () => {
     const outcome = await invoke(updateMe, undefined, { name: "x" })
     expect(outcome.error).toMatchObject({ statusCode: 401, code: "UNAUTHORIZED" })
+  })
+})
+
+describe("POST /users/me/password", () => {
+  it("chuyển tiếp req.cookies.refreshToken và req.user.sid vào userService.changePassword", async () => {
+    const req = {
+      user: { userId: USER, sid: "session-sid-123" },
+      cookies: { refreshToken: "rt-cookie-val" },
+      body: { currentPassword: "OldPassword1!", newPassword: "NewPassword2!" }
+    } as unknown as Request
+    const res = {
+      status(code: number) {
+        ;(res as unknown as { _status: number })._status = code
+        return res
+      },
+      json: vi.fn()
+    } as unknown as Response
+    const next: NextFunction = vi.fn()
+
+    await changePassword(req, res, next)
+    expect(userService.changePassword).toHaveBeenCalledWith(
+      USER,
+      "OldPassword1!",
+      "NewPassword2!",
+      "rt-cookie-val",
+      "session-sid-123"
+    )
   })
 })

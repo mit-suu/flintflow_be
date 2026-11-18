@@ -17,12 +17,14 @@ import { AiActionPayload } from "./ai-action-payload.model.js"
 import * as feedbackService from "../feedback/feedback.service.js"
 import {
   AiCostGroupBy,
+  FeedbackQuery,
   OrgsQuery,
   parseDateInput,
   REPORT_TIMEZONE,
   SetUserStatusInput,
   UsersQuery
 } from "./admin.validation.js"
+import { fulfillTopupRequests } from "../billing/topup-request.service.js"
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -32,7 +34,8 @@ const DAY_MS = 24 * 60 * 60 * 1000
  */
 export const PROVIDER_USD_PER_1K: Record<string, { input: number; output: number }> = {
   openai: { input: 0.00015, output: 0.0006 },
-  anthropic: { input: 0.003, output: 0.015 },
+  // claude-haiku-5-5: $0.10 / $0.50 mỗi 1M token (prompt ≤ 100K token)
+  anthropic: { input: 0.0001, output: 0.0005 },
   gemini: { input: 0.0003, output: 0.0025 },
   mock: { input: 0, output: 0 }
 }
@@ -384,6 +387,18 @@ export const mergeCostRows = (
   return { rows: list, totals }
 }
 
+/**
+ * Cắt một trang từ danh sách đã gom đủ (FLF-404). Không có `limit` ⇒ một trang chứa hết, giữ hành vi cũ cho ai gọi
+ * không phân trang. Trang vượt quá thì `rows` rỗng — không tự lùi về trang cuối.
+ */
+export const paginateRows = <T>(all: readonly T[], page: number, limit?: number) => {
+  const size = limit ?? Math.max(1, all.length)
+  return {
+    rows: all.slice((page - 1) * size, page * size),
+    meta: { page, limit: size, total: all.length, totalPages: Math.max(1, Math.ceil(all.length / size)) }
+  }
+}
+
 export const getAiCost = async (range: { from: Date; to: Date }, groupBy: AiCostGroupBy) => {
   const createdAt = { $gte: range.from, $lt: range.to }
 
@@ -457,7 +472,7 @@ export const getAiActionPayload = async (logId: string) => {
   if (!payload) {
     throw new ApiError(
       404,
-      "Không còn prompt/response của lượt gọi này — lượt chạy trước khi bật việc lưu, hoặc đã quá hạn giữ.",
+      "Không còn prompt/response của lượt gọi này - lượt chạy trước khi bật việc lưu, hoặc đã quá hạn giữ.",
       "AI_PAYLOAD_NOT_FOUND"
     )
   }
@@ -477,7 +492,7 @@ export const getAiActionPayload = async (logId: string) => {
 // ─── Feedback ─────────────────────────────────────────────────────
 
 // Dữ liệu và shape nằm ở module feedback; admin chỉ mở route đọc
-export const listFeedback = () => feedbackService.listFeedback()
+export const listFeedback = (query: FeedbackQuery) => feedbackService.listFeedback(query)
 
 // ─── UC-90 Danh sách tổ chức ─────────────────────────────────────
 
@@ -629,10 +644,14 @@ export const adjustOrgCredits = async (
     projectId: null,
     actionType: "admin_adjust",
     amount: Math.abs(amount),
+    direction: amount >= 0 ? "credit" : "debit",
     type: "admin_adjust",
     balanceAfter: wallet.balance - wallet.reserved,
     reason
   })
+
+  // FLF-332: admin cộng credit cũng là "đã nạp" với người đang chờ (BR-08)
+  if (amount > 0) await fulfillTopupRequests(orgId, amount, { kind: "admin", userId: null })
 
   // Lead của org cần biết ví vừa bị ai đó ngoài tổ chức thay đổi.
   const leads = await Membership.find({ organizationId: orgId, role: "lead" }).select("userId").lean()
@@ -643,7 +662,7 @@ export const adjustOrgCredits = async (
       body: `${amount >= 0 ? "+" : ""}${amount} credit cho ${org.name}. Lý do: ${reason}`,
       organizationId: orgId,
       link: "/home/billing",
-      meta: { organizationId: orgId, amount, reason }
+      meta: { organizationId: orgId, organizationName: org.name, amount, reason }
     })
   }
 

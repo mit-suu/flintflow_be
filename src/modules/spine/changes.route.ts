@@ -142,6 +142,34 @@ router.post("/:projectId/changes/preview", authMiddleware, changesController.pre
 
 /**
  * @swagger
+ * /api/v1/projects/{projectId}/changes/pending-sections:
+ *   get:
+ *     summary: "BF §3.2 (trước baseline): mục đang có bản xem trước sửa qua chat chưa áp của người khác"
+ *     tags: [Spine]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: "[{ section_id, items: [{ who }] }]"
+ */
+router.get("/:projectId/changes/pending-sections", authMiddleware, changesController.listPendingPreviewSections)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/changes/preview/{previewId}:
+ *   delete:
+ *     summary: "Bỏ bản xem trước của chính mình (bấm Huỷ ở thẻ xem trước)"
+ *     tags: [Spine]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: "{ discarded: boolean }"
+ */
+router.delete("/:projectId/changes/preview/:previewId", authMiddleware, changesController.discardPreview)
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/reconcile:
  *   post:
  *     summary: Hoà giải một lượt các section đang stale

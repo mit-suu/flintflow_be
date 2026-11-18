@@ -9,13 +9,19 @@ import { Subscription } from "../credits/subscription.model.js"
 import { planConfig } from "../billing/plan.config.js"
 import { markOnboarded } from "./onboarding.js"
 import { Invitation } from "./invitation.model.js"
-import { Project } from "../project/project.model.js"
-import { deleteProject } from "../project/project.service.js"
+import { Project, WITH_DELETED } from "../project/project.model.js"
+import { purgeProject } from "../project/project.service.js"
 import { Folder } from "../folder/folder.model.js"
 import { Notification } from "../notification/notification.model.js"
 import { PaymentIntent } from "../billing/payment-intent.model.js"
+import { CreditTopupRequest } from "../billing/credit-topup-request.model.js"
+import { OrgTemplate, OrgTemplateVersion } from "../import/org-library.model.js"
+import { TemplateMigration } from "../template-migration/template-migration.model.js"
+import { Comment, CommentCounter } from "../comment/comment.model.js"
+import { docFileStore } from "../doc-version/doc-file.store.js"
 import { Session } from "../../shared/auth/session.model.js"
 import { signAccessToken } from "../../shared/auth/jwt.util.js"
+import { User } from "../user/user.model.js"
 
 /** Org kèm vai trò của người đang hỏi — đủ cho màn chọn org (Flow 7.13, 9.3). */
 export interface OrganizationSummary {
@@ -23,6 +29,7 @@ export interface OrganizationSummary {
   name: string
   role: OrgRole
   joinedAt: Date
+  isDefault?: boolean
 }
 
 const notFound = () => new ApiError(404, "Không tìm thấy tổ chức", "ORG_NOT_FOUND")
@@ -31,11 +38,17 @@ const assertObjectId = (id: string) => {
   if (!mongoose.isValidObjectId(id)) throw notFound()
 }
 
-const toSummary = (org: Pick<IOrganization, "_id" | "name">, role: OrgRole, joinedAt: Date): OrganizationSummary => ({
+const toSummary = (
+  org: Pick<IOrganization, "_id" | "name">,
+  role: OrgRole,
+  joinedAt: Date,
+  isDefault?: boolean
+): OrganizationSummary => ({
   id: String(org._id),
   name: org.name,
   role,
-  joinedAt
+  joinedAt,
+  ...(isDefault !== undefined ? { isDefault } : {})
 })
 
 /**
@@ -107,20 +120,40 @@ export const createOrganization = async (userId: string, name: string): Promise<
 
 /** Danh sách org của một người kèm vai trò từng org (UC-10). */
 export const listMyOrganizations = async (userId: string): Promise<OrganizationSummary[]> => {
-  const memberships = await Membership.find({ userId }).sort({ joinedAt: 1 }).lean()
-  if (memberships.length === 0) return []
+  const [memberships, userDoc] = await Promise.all([
+    Membership.find({ userId }).sort({ joinedAt: 1 }).lean(),
+    User.findById(userId).select("preferredOrganizationId").lean()
+  ])
+  if (memberships.length === 0) {
+    if (userDoc?.preferredOrganizationId) {
+      await User.updateOne({ _id: userId }, { $set: { preferredOrganizationId: null } })
+    }
+    return []
+  }
 
   const orgs = await Organization.find({ _id: { $in: memberships.map((m) => m.organizationId) } })
     .select("_id name")
     .lean()
   const byId = new Map(orgs.map((o) => [String(o._id), o]))
 
-  return memberships
+  const preferredId = userDoc?.preferredOrganizationId ? String(userDoc.preferredOrganizationId) : null
+  let preferredFound = false
+
+  const results = memberships
     .map((m) => {
       const org = byId.get(String(m.organizationId))
-      return org ? toSummary(org, m.role, m.joinedAt) : null
+      if (!org) return null
+      const isDefault = preferredId !== null && String(org._id) === preferredId
+      if (isDefault) preferredFound = true
+      return toSummary(org, m.role, m.joinedAt, isDefault)
     })
     .filter((item): item is OrganizationSummary => item !== null)
+
+  if (preferredId !== null && !preferredFound) {
+    await User.updateOne({ _id: userId }, { $set: { preferredOrganizationId: null } })
+  }
+
+  return results
 }
 
 /** Một org cụ thể — người gọi phải là thành viên (guard ở route đã bảo đảm). */
@@ -163,7 +196,9 @@ export const switchOrganization = async (
   email: string,
   platformRole: string | undefined,
   orgId: string,
-  refreshToken?: string
+  refreshToken?: string,
+  currentSessionId?: string,
+  rememberAsDefault?: boolean
 ): Promise<SwitchResult> => {
   assertObjectId(orgId)
   const membership = await Membership.findOne({ organizationId: orgId, userId }).lean()
@@ -172,16 +207,25 @@ export const switchOrganization = async (
   const org = await Organization.findById(orgId).select("_id name").lean()
   if (!org) throw notFound()
 
-  if (refreshToken) await sessionService.setActiveOrg(refreshToken, orgId)
+  const sessionSid = refreshToken ? await sessionService.setActiveOrg(refreshToken, orgId) : null
+  const resolvedSid = sessionSid ?? currentSessionId
+
+  if (rememberAsDefault === true) {
+    await User.updateOne({ _id: userId }, { $set: { preferredOrganizationId: orgId } })
+  }
+
+  const user = await User.findById(userId).select("preferredOrganizationId").lean()
+  const isDefault = rememberAsDefault === true || String(user?.preferredOrganizationId) === orgId
 
   return {
     accessToken: signAccessToken({
       userId,
       email,
       ...(platformRole ? { role: platformRole } : {}),
-      orgId
+      orgId,
+      ...(resolvedSid ? { sid: resolvedSid } : {})
     }),
-    organization: toSummary(org, membership.role, membership.joinedAt)
+    organization: toSummary(org, membership.role, membership.joinedAt, isDefault)
   }
 }
 
@@ -190,13 +234,50 @@ export interface DeleteOrganizationResult {
   projectsDeleted: number
 }
 
+/** Thu thập toàn bộ file ref cấp tổ chức / migration và danh sách projectId trước khi xoá bản ghi DB. */
+const collectOrgCleanupTargets = async (orgId: string) => {
+  const [orgTemplates, orgTemplateVersions, templateMigrations, commentDocs, projects] = await Promise.all([
+    OrgTemplate.find({ orgId }).select("file_ref").lean(),
+    OrgTemplateVersion.find({ orgId }).select("file_ref skeleton_source_ref").lean(),
+    TemplateMigration.find({ orgId }).select("new_base_file_ref spine_plan.ops_file_ref").lean(),
+    Comment.find({ organizationId: orgId }).select("projectId").lean(),
+    Project.find({ organizationId: orgId }).setOptions(WITH_DELETED).select("_id").lean()
+  ])
+
+  const fileRefs = new Set<string>()
+  for (const t of orgTemplates) if (t.file_ref) fileRefs.add(t.file_ref)
+  for (const v of orgTemplateVersions) {
+    if (v.file_ref) fileRefs.add(v.file_ref)
+    if (v.skeleton_source_ref) fileRefs.add(v.skeleton_source_ref)
+  }
+  for (const m of templateMigrations) {
+    if (m.new_base_file_ref) fileRefs.add(m.new_base_file_ref)
+    if (m.spine_plan?.ops_file_ref) fileRefs.add(m.spine_plan.ops_file_ref)
+  }
+
+  const counterProjectIds = [...new Set([...projects.map((p) => String(p._id)), ...commentDocs.map((c) => String(c.projectId))])]
+  return { fileRefs, counterProjectIds, projects }
+}
+
+/** Dọn file mẫu tổ chức và artifact đổi mẫu trên GridFS theo cơ chế best-effort sau khi đã xoá DB. */
+const purgeOrgFiles = async (orgId: string, fileRefs: Iterable<string>): Promise<void> => {
+  for (const fileRef of fileRefs) {
+    await docFileStore()
+      .remove(fileRef)
+      .catch((err: unknown) => console.warn(`[Organization] Không xoá được file ${fileRef} của tổ chức ${orgId}:`, err))
+  }
+  await docFileStore()
+    .removeProject(`org-${orgId}`)
+    .catch((err: unknown) => console.warn(`[Organization] Không xoá được file mẫu của tổ chức ${orgId}:`, err))
+}
+
 /**
  * Xoá tổ chức — chỉ khi Lead là thành viên DUY NHẤT (không cướp dữ liệu của người khác, và BR-02 không
  * còn ý nghĩa khi org biến mất). Không có trong actors-and-use-cases.md; thêm theo yêu cầu 2026-09-26.
  *
- * Xoá sạch dự án (kể cả đã lưu trữ, qua `deleteProject(..., hard)` — cùng đường dọn Spine, tài liệu, sơ đồ
- * như xoá một dự án), thư mục, ví, gói, mã mời, thông báo. GIỮ LẠI sổ giao dịch credit và PaymentIntent:
- * đó là hồ sơ tài chính, admin còn cần đối soát.
+ * Xoá sạch dự án (kể cả đã lưu trữ / đã xoá mềm, qua `purgeProject` — cùng đường dọn Spine, tài liệu, sơ đồ
+ * như xoá một dự án), thư mục, ví, gói, mã mời, thông báo, mẫu tổ chức (+ file), migration, comment và yêu cầu
+ * nạp credit. GIỮ LẠI sổ giao dịch credit và PaymentIntent: đó là hồ sơ tài chính, admin còn cần đối soát.
  *
  * Người gọi phải gõ lại đúng tên org — thao tác không khôi phục được.
  */
@@ -213,31 +294,33 @@ export const deleteOrganization = async (
     throw new ApiError(400, "Tên xác nhận không khớp với tên tổ chức", "ORG_NAME_MISMATCH")
   }
 
-  // Chặn mã mời TRƯỚC khi đếm thành viên: không ai vào thêm được giữa lúc đang xoá.
-  await Invitation.deleteMany({ organizationId: orgId })
-
   const members = await Membership.find({ organizationId: orgId }).select("userId role").lean()
   const onlyMe = members.length === 1 && String(members[0]?.userId) === userId && members[0]?.role === "lead"
   if (!onlyMe) {
     throw new ApiError(
       409,
-      "Chỉ xoá được tổ chức khi bạn là thành viên duy nhất — hãy xoá các thành viên khác trước",
+      "Chỉ xoá được tổ chức khi bạn là thành viên duy nhất - hãy xoá các thành viên khác trước",
       "ORG_HAS_OTHER_MEMBERS"
     )
   }
 
   const wallet = await CreditWallet.findOne({ organizationId: orgId }).select("reserved").lean()
   if (wallet && wallet.reserved > 0) {
-    throw new ApiError(409, "Tổ chức đang có lượt gọi AI chạy dở — thử lại sau ít phút", "ORG_BUSY")
+    throw new ApiError(409, "Tổ chức đang có lượt gọi AI chạy dở - thử lại sau ít phút", "ORG_BUSY")
   }
   if (await PaymentIntent.exists({ organizationId: orgId, status: "pending" })) {
     // Webhook về sau sẽ cộng credit vào ví của một org đã biến mất.
-    throw new ApiError(409, "Tổ chức đang có thanh toán chờ xử lý — thử lại khi thanh toán kết thúc", "ORG_PAYMENT_PENDING")
+    throw new ApiError(409, "Tổ chức đang có thanh toán chờ xử lý - thử lại khi thanh toán kết thúc", "ORG_PAYMENT_PENDING")
   }
 
-  const projects = await Project.find({ organizationId: orgId }).select("_id").lean()
+  // Qua đủ điều kiện chặn mới thu hồi mã mời — trước lúc xoá dự án để không ai nhập mã song song.
+  await Invitation.deleteMany({ organizationId: orgId })
+
+  const { fileRefs, counterProjectIds, projects } = await collectOrgCleanupTargets(orgId)
+
+  // FLF-401: xoá tổ chức dọn hẳn mọi dự án — kể cả dự án đã xoá mềm (deleteProject chỉ còn xoá mềm)
   for (const project of projects) {
-    await deleteProject(String(project._id), orgId, true)
+    await purgeProject(String(project._id), orgId)
   }
 
   await Promise.all([
@@ -245,11 +328,21 @@ export const deleteOrganization = async (
     CreditWallet.deleteMany({ organizationId: orgId }),
     Subscription.deleteMany({ organizationId: orgId }),
     Notification.deleteMany({ organizationId: orgId }),
+    OrgTemplateVersion.deleteMany({ orgId }),
+    OrgTemplate.deleteMany({ orgId }),
+    TemplateMigration.deleteMany({ orgId }),
+    Comment.deleteMany({ organizationId: orgId }),
+    ...(counterProjectIds.length > 0 ? [CommentCounter.deleteMany({ projectId: { $in: counterProjectIds } })] : []),
+    CreditTopupRequest.deleteMany({ organizationId: orgId }),
     // Phiên đang mở org này: bỏ org đang mở để lượt refresh sau không cấp lại token trỏ vào org đã xoá.
-    Session.updateMany({ activeOrgId: orgId }, { $set: { activeOrgId: null } })
+    Session.updateMany({ activeOrgId: orgId }, { $set: { activeOrgId: null } }),
+    // Dọn ghi nhớ tổ chức mặc định nếu org bị xoá
+    User.updateMany({ preferredOrganizationId: orgId }, { $set: { preferredOrganizationId: null } })
   ])
   await Membership.deleteMany({ organizationId: orgId })
   await Organization.deleteOne({ _id: orgId })
+
+  await purgeOrgFiles(orgId, fileRefs)
 
   return { deleted: true, projectsDeleted: projects.length }
 }

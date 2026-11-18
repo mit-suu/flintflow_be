@@ -34,7 +34,7 @@ const db = vi.hoisted(() => {
         return copy(doc)
       }
       if (!options.upsert) return null
-      const created = { _id: "spine", ...filter, ...copy(update.$setOnInsert ?? {}) }
+      const created = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, ...filter, ...copy(update.$setOnInsert ?? {}) }
       spines.push(created)
       return copy(created)
     }
@@ -83,6 +83,8 @@ const db = vi.hoisted(() => {
   return { Spine, Change, Baseline, spines, changes, baselines, reset }
 })
 
+// Rào đổi mẫu đọc Mongo; bản test thuần không có DB
+vi.mock("../../template-migration/migration-guard.js", () => ({ assertNoMigrationRunning: async () => undefined }))
 vi.mock("../../spine/spine.model.js", () => ({ Spine: db.Spine }))
 vi.mock("../../spine/change.model.js", () => ({ Change: db.Change }))
 vi.mock("../../spine/baseline.model.js", () => ({ Baseline: db.Baseline }))
@@ -126,7 +128,7 @@ const seed = async (mutate: (spine: Spine) => void = () => {}): Promise<void> =>
   const spine = structuredClone(FIXTURE)
   mutate(spine)
   await repo.getOrCreate(PROJECT)
-  db.spines[0] = { _id: "spine", projectId: PROJECT, ...spine }
+  db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...spine }
 }
 
 const version = async (): Promise<number> => (await repo.get(PROJECT))!.spine_version
@@ -137,15 +139,14 @@ beforeEach(() => {
 })
 
 describe("nextBaselineVersion", () => {
-  it("đánh số theo thứ tự ký, hậu tố -conditional khi có waive", () => {
-    expect(nextBaselineVersion([], 0)).toBe("v1.0")
-    expect(nextBaselineVersion([], 2)).toBe("v1.0-conditional")
-    expect(nextBaselineVersion([{ id: "BL001" } as never], 0)).toBe("v1.1")
-    expect(nextBaselineVersion([{ id: "BL001" } as never, { id: "BL002" } as never], 1)).toBe("v1.2-conditional")
+  it("đánh số theo thứ tự ký, không còn mức -conditional", () => {
+    expect(nextBaselineVersion([])).toBe("v1.0")
+    expect(nextBaselineVersion([{ id: "BL001" } as never])).toBe("v1.1")
+    expect(nextBaselineVersion([{ id: "BL001" } as never, { id: "BL002" } as never])).toBe("v1.2")
   })
 })
 
-describe("signOff — điều kiện ký là cờ đỏ = 0, không phải phần trăm", () => {
+describe("signOff - điều kiện ký là cờ đỏ = 0, không phải phần trăm", () => {
   it("fixture sạch cờ đỏ ⇒ v1.0, snapshot lưu, step S-9.5 accepted, có notify", async () => {
     await seed()
     const result = await signOff(PROJECT, USER, { base_version: await version() })
@@ -177,18 +178,19 @@ describe("signOff — điều kiện ký là cờ đỏ = 0, không phải phầ
     expect(db.baselines, "không để lại snapshot mồ côi").toHaveLength(0)
   })
 
-  it("waive cờ đó rồi ký ⇒ v1.0-conditional, waived_count = 1", async () => {
+  it("giữ nguyên + lý do cờ đỏ rồi ký lại ⇒ vẫn bị chặn, không có baseline (BR-04, FLF-329); waive cờ đỏ bị từ chối", async () => {
     await seed(withUnconfirmedAssumption)
 
-    // Lượt ký đầu bị chặn nhưng đã mở cờ — waive chính cờ vừa mở, rồi ký lại
+    // Lượt ký đầu bị chặn nhưng đã mở cờ — waive chính cờ vừa mở, rồi thử ký lại
     await expect(signOff(PROJECT, USER, { base_version: await version() })).rejects.toBeInstanceOf(BaselineBlockedError)
     const opened = (await repo.get(PROJECT))!.flags.find((f) => f.rule_id === "unconfirmed_assumption" && f.resolved_at === null)!
-    await flagsService.waive(PROJECT, opened.id, "Giả định này chốt ở bản sau, khách hàng đã đồng ý", USER)
+    await expect(flagsService.waive(PROJECT, opened.id, "Giả định này chốt ở bản sau, khách hàng đã đồng ý", USER)).rejects.toMatchObject({ code: "FLAG_NOT_WAIVABLE" })
+    await flagsService.keep(PROJECT, opened.id, "Giả định này chốt ở bản sau, khách hàng đã đồng ý", USER)
 
-    const result = await signOff(PROJECT, USER, { base_version: await version() })
-    expect(result.baseline.version).toBe("v1.0-conditional")
-    expect(result.baseline.waived_count).toBe(1)
-    expect(result.waived.map((f) => f.id)).toEqual([opened.id])
+    const err = await signOff(PROJECT, USER, { base_version: await version() }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(BaselineBlockedError)
+    expect((err as BaselineBlockedError).flags.map((f) => f.id)).toContain(opened.id)
+    expect((await repo.get(PROJECT))!.baselines).toHaveLength(0)
   })
 
   it("ký lần hai ra v1.1, cả hai snapshot cùng tồn tại", async () => {
@@ -244,7 +246,7 @@ describe("signOff — điều kiện ký là cờ đỏ = 0, không phải phầ
     expect(retried.baseline.version).toBe("v1.0")
   })
 
-  it("không gọi model và không ghi usage[] — hết credit vẫn ký được", async () => {
+  it("không gọi model và không ghi usage[] - hết credit vẫn ký được", async () => {
     await seed()
     // `signOff` không import ai-action/meter; kiểm bằng cách không mock chúng mà vẫn chạy trọn.
     const result = await signOff(PROJECT, USER, { base_version: await version() })

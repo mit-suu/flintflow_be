@@ -1,5 +1,6 @@
 import { Router } from "express"
 import * as adminController from "./admin.controller.js"
+import { getTemplateGaps } from "../import/template-gaps.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
 import { adminMiddleware } from "../../shared/auth/admin.middleware.js"
 import { env } from "../../config/env.js"
@@ -214,15 +215,46 @@ router.get("/metrics", adminController.getMetrics)
  *       - in: query
  *         name: groupBy
  *         schema: { type: string, enum: [day, actionType, provider, user], default: day }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, minimum: 1, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         description: Số dòng mỗi trang; bỏ trống ⇒ trả mọi dòng (một trang)
+ *         schema: { type: integer, minimum: 1, maximum: 100 }
  *     responses:
  *       200:
- *         description: "{ from, to, groupBy, currency, rows[{ key, label, calls, failedCalls, promptTokens, completionTokens, credits, estimatedUsd }], totals }"
+ *         description: "{ from, to, groupBy, currency, rows[{ key, label, calls, failedCalls, promptTokens, completionTokens, credits, estimatedUsd }], totals } — rows là một trang, totals trên toàn bộ; meta gồm page, limit, total, totalPages"
  *       400:
  *         description: Tham số không hợp lệ
  *       403:
  *         description: Không phải admin
  */
 router.get("/ai-cost", adminController.getAiCost)
+
+/**
+ * @swagger
+ * /api/v1/admin/template-gaps:
+ *   get:
+ *     summary: Heading của mẫu bắt buộc thành mục riêng (FlintFlow không có mục tương ứng) và số dự án còn để trống — FLF-278
+ *     tags: [Admin]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, minimum: 1, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         description: Số dòng mỗi trang
+ *         schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+ *     responses:
+ *       200:
+ *         description: "data { projects, rows[{ key, samples, projects, empty, suggested_destination }] } — rows là một trang; meta gồm page, limit, total, totalPages"
+ *       403:
+ *         description: Không phải admin
+ */
+router.get("/template-gaps", getTemplateGaps)
 
 /**
  * @swagger
@@ -252,13 +284,24 @@ router.get("/ai-logs/:logId/payload", adminController.getAiActionPayload)
  * @swagger
  * /api/v1/admin/feedback:
  *   get:
- *     summary: Góp ý người dùng (mới nhất trước, kèm email/tên người gửi)
+ *     summary: Góp ý người dùng (mới nhất trước, kèm email/tên người gửi, phân trang)
  *     tags: [Admin]
  *     security:
  *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, minimum: 1, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+ *       - in: query
+ *         name: q
+ *         description: Tìm không phân biệt dấu trong nội dung, email hoặc tên người gửi
+ *         schema: { type: string, maxLength: 100 }
  *     responses:
  *       200:
- *         description: Danh sách góp ý, meta.total là tổng số
+ *         description: "Một trang góp ý; meta gồm page, limit, total, totalPages"
  *       403:
  *         description: Không phải admin
  */

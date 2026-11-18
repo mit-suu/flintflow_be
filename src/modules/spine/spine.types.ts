@@ -24,8 +24,12 @@ export type IsoDateTime = string
 
 export type WorkingMode = "fast" | "coaching"
 
-/** Mức độ dừng lại hỏi ý user (02-reduce-stops-plan R5). */
-export type ReviewMode = "strict" | "balanced" | "fast"
+/**
+ * Mức duyệt (02-reduce-stops-plan R5; FLF-337 business-flow §1.2): `strict` mọi bước · `fast` cuối giai đoạn · `milestones`
+ * chỉ ở mốc chốt (cổng cứng — `quiet-step.ts` `HARD_GATE_STEPS`). `balanced` là giá trị cũ, đọc như `fast` (FLF-220).
+ * Không bao giờ do độ tự tin của AI quyết định.
+ */
+export type ReviewMode = "strict" | "balanced" | "fast" | "milestones"
 
 export interface ReleaseScope {
   in: string[]
@@ -48,8 +52,13 @@ export interface SpineProject {
   form_factor: string[]
   stakes: string | null
   working_mode: WorkingMode | null
-  /** Cách duyệt (R5): `strict` | `balanced` | `fast`. */
+  /** Cách duyệt (R5, FLF-337): `strict` | `balanced` | `fast` | `milestones`. */
   review_mode: ReviewMode
+  /**
+   * FLF-337 "Chấp nhận, không hỏi lại phần này": section id (`fixed:5`, `custom:…`). Bước / bản sửa chỉ chạm các section này
+   * tự qua ở mọi mức duyệt (vẫn dừng khi có cờ đỏ mới, xoá nội dung). Bật lại trong cài đặt dự án. Spine cũ ⇒ `[]`.
+   */
+  skip_confirm_sections: string[]
   release_scope: ReleaseScope
 }
 
@@ -113,16 +122,26 @@ export interface UseCase {
   description: string
   includes: string[]
   extends: string[]
+  /** FLF-390: luồng xử lý của use case (sơ đồ activity) — nút và control flow. Thiếu ⇒ `[]`, không có hình. */
+  activity_nodes?: ActivityNode[]
+  activity_flows?: ActivityFlow[]
 }
 
 export type ScreenDetailStatus = "pending" | "in_progress" | "signed_off" | "placeholder"
+
+/** Cạnh Screens Flow: `to` = màn đích; `trigger` = hành động người dùng làm; `guard` = điều kiện rẽ nhánh (khác nhau giữa các cạnh cùng màn nguồn). */
+export interface FlowEdge {
+  to: string
+  trigger?: string
+  guard?: string
+}
 
 export interface Screen {
   id: string
   feature_id: string
   name: string
   description: string
-  flow_to: string[]
+  flow_to: FlowEdge[]
   is_popup: boolean
   tabs: string[]
   primary_function_id: string | null
@@ -135,6 +154,42 @@ export interface Permission {
   screen_id: string
   role_id: string
   action: string
+}
+
+/** `key` = định danh (`{id}`), `reference` = tham chiếu tới entity khác (`{ref}`), `plain` = còn lại. Mức domain: không có kiểu dữ liệu. */
+export type EntityAttributeKind = "key" | "reference" | "plain"
+
+export interface EntityAttribute {
+  /** Khoá của phần tử trong `attributes[]` (path `attributes[name=…]`), duy nhất trong một entity. */
+  name: string
+  kind: EntityAttributeKind
+  /** Bắt buộc có giá trị; `false` ⇒ bản số `[0..1]` trên hình. */
+  required: boolean
+  description?: string
+}
+
+/** Một trạng thái trong vòng đời của entity. `id` duy nhất trên toàn Spine (như `validations`), `name` là tính từ / phân từ (Pending, Approved). */
+export interface EntityState {
+  id: string
+  name: string
+  /** Trạng thái đầu tiên của vòng đời — đúng một khi entity có trạng thái; hình có chấm đặc nối vào. */
+  initial?: boolean
+  /** Trạng thái kết thúc — hình có vòng tròn đồng tâm (bullseye) nối ra; không có transition đi ra. */
+  final?: boolean
+}
+
+/** Chuyển trạng thái `event [guard] / action`. Khoá phần tử = `from` + `to` + `event` (path `transitions[from=…,to=…,event=…]`). */
+export interface EntityTransition {
+  /** Id `states[]` của cùng entity. */
+  from: string
+  /** Id `states[]` của cùng entity; `to = from` ⇒ chuyển nội bộ (hiện trong state). */
+  to: string
+  /** Sự kiện kích hoạt; không chứa `,` `[` `]` (khoá selector). */
+  event: string
+  guard?: string
+  action?: string
+  /** Business rule quy định chuyển trạng thái này. */
+  business_rule_ids?: string[]
 }
 
 export interface Entity {
@@ -151,6 +206,13 @@ export interface Entity {
   relation_optional?: string[]
   /** Dữ liệu chủ tồn tại độc lập — được phép không có cha. */
   root?: boolean
+  /** Thuộc tính mức domain (không kiểu kỹ thuật). Thiếu ⇒ `[]`. */
+  attributes?: EntityAttribute[]
+  /** Feature dùng entity này — mỗi feature một class diagram. Khoá tới `features[].id`. Thiếu ⇒ `[]`. */
+  feature_ids?: string[]
+  /** Vòng đời của entity (state machine diagram). Entity không có vòng đời ⇒ `[]` và không có hình. Thiếu ⇒ `[]`. */
+  states?: EntityState[]
+  transitions?: EntityTransition[]
 }
 
 /** MoSCoW, gán ở S-9.4. `null` trước khi gán. */
@@ -168,6 +230,50 @@ export interface Validation {
  * Tên `Function` theo tài liệu. Khi import ở module khác nên dùng alias
  * `SpineFunction` để không che kiểu global `Function`.
  */
+/** Message của sơ đồ tuần tự hệ thống: `from` / `to` là id actor hoặc `system`, đúng một đầu là `system`. */
+export interface FunctionInteraction {
+  from: string
+  to: string
+  /** Không chứa `,` `[` `]` (khoá selector). */
+  message: string
+  /** `request`: lời gọi / tín hiệu; `response`: trả lời (nét đứt). */
+  kind: "request" | "response"
+  /** `abnormal` ⇒ nằm trong `alt` và bắt buộc có `guard`; `normal` có `guard` ⇒ `opt`. */
+  flow: "normal" | "abnormal"
+  guard?: string
+}
+
+/**
+ * FLF-418: message của sơ đồ tuần tự mức thành phần. `from` / `to` là id actor, id màn (boundary), id entity hoặc
+ * `control` (mỗi function một control, tên tính khi vẽ). Luật kind / flow / guard như `FunctionInteraction`.
+ */
+export type ComponentInteraction = FunctionInteraction
+
+/**
+ * Loại nút của sơ đồ activity (UML 2.5): `initial` (chấm đặc), `final` (activity final), `action` (hộp bo góc),
+ * `decision` / `merge` (hình thoi), `fork` / `join` (thanh đặc).
+ */
+export type ActivityNodeKind = "initial" | "final" | "action" | "decision" | "merge" | "fork" | "join"
+
+/** Một nút trong luồng xử lý (activity) của use case. `id` duy nhất trên toàn Spine (`<use case id>-AN<n>`). */
+export interface ActivityNode {
+  id: string
+  kind: ActivityNodeKind
+  /** Chữ trong nút: việc làm của `action` (cụm động từ), câu hỏi của `decision`. Nút khác bỏ trống. */
+  name?: string
+  /** Làn (swimlane): id actor hoặc `system`. Thiếu / null ⇒ không có làn. */
+  lane?: string | null
+}
+
+/** Control flow giữa hai nút của cùng use case. Khoá phần tử = `from` + `to` (path `activity_flows[from=…,to=…]`). */
+export interface ActivityFlow {
+  /** Id `activity_nodes[]` của cùng use case. */
+  from: string
+  to: string
+  /** Điều kiện của nhánh (ra từ `decision`), không có ngoặc vuông. */
+  guard?: string
+}
+
 export interface Function {
   id: string
   screen_id: string | null
@@ -181,6 +287,12 @@ export interface Function {
   validations: Validation[]
   business_rule_ids: string[]
   priority: Priority | null
+  /** Message actor ↔ system theo thứ tự thời gian (sơ đồ tuần tự). Thiếu ⇒ `[]`. */
+  interactions?: FunctionInteraction[]
+  /** FLF-418: message actor / màn / control / entity theo thứ tự thời gian (sơ đồ tuần tự mức thành phần). Thiếu ⇒ không có. */
+  component_interactions?: ComponentInteraction[]
+  /** FLF-365: bản phát hành của yêu cầu (phân bổ yêu cầu, "1.0"; "deferred" = hoãn). Thiếu = chưa phân bổ. */
+  release?: string | null
 }
 export type SpineFunction = Function
 
@@ -195,6 +307,8 @@ export interface Nfr {
   metric?: string
   threshold?: string
   priority: Priority | null
+  /** FLF-365: như `Function.release`. */
+  release?: string | null
 }
 
 export type BusinessRuleTier = "high" | "detail"
@@ -212,11 +326,17 @@ export interface CommonRequirement {
   statement: string
 }
 
+export type MessageType = "error" | "warning" | "info" | "success" | "confirm"
+
 export interface Message {
   id: string
   code: string
   text: string
   function_ids: string[]
+  /** P07: loại thông báo; Spine cũ không có. */
+  type?: MessageType | null
+  /** P07: lúc nào thông báo hiện; Spine cũ không có. */
+  context?: string | null
 }
 
 export type OtherRequirementKind = "risk" | "assumption" | "open_question" | "technical_risk"
@@ -236,6 +356,60 @@ export interface GlossaryTerm {
   definition: string
 }
 
+/** FLF-365: tài liệu tham khảo (IEEE 29148 §References) — chỉ Mode 1 render (`slot:references`). */
+export interface Reference {
+  /** `REF-01`… */
+  id: string
+  title: string
+  owner?: string
+  version?: string
+  date?: string
+  /** Mã / URL / nơi lưu. */
+  location?: string
+  kind: "normative" | "informative"
+}
+
+export type VerificationMethod = "test" | "analysis" | "inspection" | "demonstration" | "other"
+
+/**
+ * FLF-390: nút của sơ đồ triển khai (UML 2.5 Deployment, §4.1 External Interfaces): phần cứng / máy chủ (`device`),
+ * môi trường thực thi (`execution_environment`: hệ điều hành, runtime, container, DBMS) hoặc nút chung (`node`).
+ * `parent_id` = nút chứa nó (môi trường thực thi nằm trong thiết bị). Artifact (file / gói triển khai) và component
+ * (module phần mềm) chạy trên nút là chữ, không phải phần tử riêng.
+ */
+export interface DeploymentNode {
+  id: string
+  name: string
+  kind: "device" | "execution_environment" | "node"
+  parent_id: string | null
+  /** Artifact triển khai lên nút (`api.jar`, `web-bundle`). */
+  artifacts: string[]
+  /** Component phần mềm chạy trên nút (`Web Application`). */
+  components: string[]
+  description?: string
+}
+
+/** Đường truyền thông giữa hai nút (communication path). Khoá phần tử = `from` + `to`. */
+export interface DeploymentLink {
+  from: string
+  to: string
+  /** Giao thức / kênh ghi trên đường (`HTTPS`, `JDBC`). */
+  protocol?: string
+}
+
+/** FLF-365: cách kiểm chứng một yêu cầu (IEEE 29148 §Verification) — chỉ Mode 1 render (`slot:verification`). */
+export interface Verification {
+  /** `VER-01`… */
+  id: string
+  /** Id phần tử yêu cầu: function / NFR / business rule / use case. */
+  requirement_id: string
+  method: VerificationMethod
+  /** Ca kiểm thử / tài liệu kiểm (`TC-F-01`). */
+  artifact?: string
+  status?: string
+  evidence?: string
+}
+
 /** Khối nội dung nguyên văn của một mục riêng (FLF-182). Chỉ field hợp với `kind` mang giá trị, còn lại `null`. */
 export interface CustomBlock {
   kind: "paragraph" | "list_item" | "table" | "image"
@@ -253,10 +427,12 @@ export interface CustomBlock {
 }
 
 /** Loại sơ đồ gốc đọc được từ ảnh (I-4) — một hình mỗi loại trong tài liệu. */
-export type OriginalDiagramKind = "context" | "usecase" | "screen_flow" | "erd"
+export type OriginalDiagramKind = "context" | "usecase" | "screen_flow" | "erd" | "sequence" | "activity" | "deployment"
 
 export interface OriginalDiagram {
   kind: OriginalDiagramKind
+  /** FLF-390: chủ của sơ đồ gắn một phần tử — id function (`sequence`), id use case (`activity`); loại khác không có. */
+  owner_id?: string | null
   source_hash: string
 }
 
@@ -284,13 +460,17 @@ export interface Addendum {
 
 // ─── state nội bộ ────────────────────────────────────────────────
 
-export type DiagramKind = "context" | "usecase" | "screen_flow" | "erd" | "screen_layout"
+export type DiagramKind = "context" | "usecase" | "screen_flow" | "erd" | "class" | "state_machine" | "sequence" | "activity" | "deployment" | "screen_layout"
 export type RenderStatus = "ok" | "error"
+/** Engine vẽ (FLF-339): `puml` = text PlantUML qua server; `svg` = SVG tự dựng (`shared/diagram/svg-*`). */
+export type DiagramFormat = "puml" | "svg"
 
 export interface Diagram {
   id: string
   kind: DiagramKind
-  puml: string
+  format: DiagramFormat
+  /** Nguồn hình: text PlantUML (`format = puml`) hoặc markup SVG đầy đủ (`format = svg`). */
+  source: string
   section: string
   owner_kind: string | null
   owner_id: string | null
@@ -350,9 +530,16 @@ export interface Flag {
   opened_at_version: number
   resolved_at: IsoDateTime | null
   waived_by_user: boolean
-  /** Bắt buộc ≥ 20 ký tự khi waive (srs-spine.md §7). */
+  /** Bắt buộc ≥ 20 ký tự khi waive (srs-spine.md §7). Chỉ cờ vàng (FLF-329). */
   waive_reason: string | null
   waived_at_version: number | null
+  /**
+   * "Giữ nguyên + lý do" (FLF-329, BR-04): người dùng ghi vì sao không sửa — cờ **vẫn mở, vẫn chặn** baseline /
+   * gửi gói / phát hành. Dữ liệu trước FLF-329 không có ba field này ⇒ đọc ra `null`.
+   */
+  kept_reason: string | null
+  kept_by: string | null
+  kept_at: IsoDateTime | null
 }
 
 /** `status` KHÔNG lưu — là hàm tính (srs-spine.md §5, T09). */
@@ -371,7 +558,7 @@ export type BaselineType = "generated" | "imported" | "release"
 
 export interface Baseline {
   id: string
-  /** Mode 2: `v1.0` hoặc `v1.0-conditional` khi `waived_count > 0`. Mode 1: `0.0`, `1.0`, `2.0`… */
+  /** Mode 2: `v1.0`, `v1.1`… Mode 1: `0.0`, `1.0`, `2.0`… */
   version: string
   type: BaselineType
   /** Mode 1: version tài liệu (`DocVersion.version`) mà baseline chụp; mode 2 luôn `null`. */
@@ -381,6 +568,26 @@ export interface Baseline {
   snapshot_ref: string
   checked_at_version: number
   waived_count: number
+}
+
+export type BaselineSubmissionStatus = "pending" | "rejected"
+
+/**
+ * Lượt nộp baseline đang chờ Lead quyết, hoặc lượt vừa bị Lead từ chối. `null` = chưa ai nộp —
+ * Lead tự duyệt đi thẳng từ trạng thái này. Lịch sử nộp/từ chối suy được từ `changes[]`, không lưu thêm.
+ */
+export interface BaselineSubmission {
+  status: BaselineSubmissionStatus
+  submitted_by: string
+  submitted_at: IsoDateTime
+  /** `spine_version` lúc nộp — Lead biết tài liệu có đổi sau khi nộp hay không. */
+  spine_version: number
+  decided_by: string | null
+  decided_at: IsoDateTime | null
+  /** Lý do từ chối; `null` khi đang chờ duyệt. */
+  reason: string | null
+  /** `CM-nnn` Lead ghim kèm lần từ chối — phải kết luận hết mới nộp lại được. */
+  rejection_comment_ids: string[]
 }
 
 // ─── Spine document ──────────────────────────────────────────────
@@ -415,6 +622,12 @@ export interface Spine {
   glossary: GlossaryTerm[]
   addendum: Addendum[]
   custom_sections: CustomSection[]
+  /** FLF-365 — Spine cũ không có ⇒ `[]`. */
+  references: Reference[]
+  verifications: Verification[]
+  /** FLF-390 sơ đồ triển khai — Spine cũ không có ⇒ `[]`. */
+  deployment_nodes: DeploymentNode[]
+  deployment_links: DeploymentLink[]
 
   diagrams: Diagram[]
   assumptions: Assumption[]
@@ -423,6 +636,8 @@ export interface Spine {
   flags: Flag[]
   sections: SectionState[]
   baselines: Baseline[]
+  /** Lượt nộp baseline đang chờ Lead quyết hoặc vừa bị từ chối. Spine cũ không có ⇒ `null`. */
+  baseline_submission: BaselineSubmission | null
 
   /** Tăng đơn điệu, đúng một lần mỗi transaction. Bắt đầu từ 1. */
   spine_version: number

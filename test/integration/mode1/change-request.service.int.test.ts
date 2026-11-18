@@ -20,7 +20,7 @@ beforeEach(() => resetCrMock())
 
 const body = (over: Record<string, unknown> = {}) => ({ title: "Faster response time", description: "Response time must be 1 second.", ...CR_BODY, ...over })
 
-describe("C-1 tạo CR — kiểm đầu vào", () => {
+describe("C-1 tạo CR - kiểm đầu vào", () => {
   it("thiếu source / thiếu requester / requester rỗng ⇒ 400 CR_SOURCE_REQUIRED; nguồn lạ ⇒ 400 VALIDATION_ERROR; không tạo gì", async () => {
     const { c, projectId } = await importedProject()
     const { source: _s, ...noSource } = body()
@@ -50,7 +50,7 @@ describe("C-1 tạo CR — kiểm đầu vào", () => {
       status: "draft",
       source: { kind: "verbal", ref: null, note: null },
       requester: "PM Lan",
-      base_doc_version: "0.0",
+      base_doc_version: "0.1",
       paused: null,
       result_doc_version: null
     })
@@ -60,7 +60,7 @@ describe("C-1 tạo CR — kiểm đầu vào", () => {
   })
 })
 
-describe("C-1 BR-03 — phải có baseline", () => {
+describe("C-1 BR-03 - phải có baseline", () => {
   it("project chưa import ⇒ 409 CR_REQUIRES_BASELINE (HTTP + service)", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)
@@ -71,12 +71,12 @@ describe("C-1 BR-03 — phải có baseline", () => {
     expect(await CrCounter.countDocuments({ projectId })).toBe(0)
   })
 
-  it("import đang dở (đã upload + xác nhận, chưa finalize) ⇒ vẫn CR_REQUIRES_BASELINE", async () => {
+  it("import đang dở (đã upload, chưa bấm Bắt đầu) ⇒ vẫn CR_REQUIRES_BASELINE", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)
     const c = mode1Api(seeded, projectId)
     const id = (await c.upload(await makeSrsDocx())).body.data.import.id as string
-    await c.post("/import/confirm-latest", { import_id: id })
+    expect(id).toBeTruthy()
     const res = await c.post("/change-requests", body())
     expect(res.status).toBe(409)
     expect(res.body.error.code).toBe("CR_REQUIRES_BASELINE")
@@ -148,7 +148,8 @@ describe("đọc, lọc, chuyển trạng thái, huỷ", () => {
   it("huỷ CR đang giữ khoá ⇒ cancelled + lý do, mở khoá; huỷ lần hai (trạng thái cuối) ⇒ 409", async () => {
     const { c, projectId } = await importedProject()
     const { crId, cr } = await crToImpact(c)
-    expect((await lockedPaths(projectId, crId)).length).toBeGreaterThan(0)
+    // FLF-375 (§3.2): không khoá chỗ đang sửa
+    expect(await lockedPaths(projectId, crId)).toEqual([])
     const cancelled = detail(await c.post(`${cr}/cancel`, { reason: "Khách hàng rút yêu cầu" }))
     expect(cancelled.change_request).toMatchObject({ status: "cancelled", closed_reason: "Khách hàng rút yêu cầu", paused: null })
     expect(await lockedPaths(projectId, crId)).toEqual([])

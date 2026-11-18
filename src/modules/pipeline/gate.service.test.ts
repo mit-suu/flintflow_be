@@ -34,7 +34,7 @@ const db = vi.hoisted(() => {
         return copy(doc)
       }
       if (!options.upsert) return null
-      const created = { _id: "spine", ...filter, ...copy(update.$setOnInsert ?? {}) }
+      const created = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, ...filter, ...copy(update.$setOnInsert ?? {}) }
       spines.push(created)
       return copy(created)
     }
@@ -134,7 +134,7 @@ const seedSpine = () => {
   spine.progress.current_phase = "S-3"
   spine.progress.current_step = "S-3.1"
   spine.steps = stepsBeforeS3()
-  db.spines[0] = { _id: "spine", projectId: PROJECT, ...spine }
+  db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...spine }
 }
 
 /** Đặt step `in_progress` với một change nội dung THẬT (add actor `actorId`) để regenerate revert được. */
@@ -208,7 +208,7 @@ beforeEach(() => {
   vi.mocked(notify).mockClear()
 })
 
-describe("gate.service: regenerate — trần 3/step", () => {
+describe("gate.service: regenerate - trần 3/step", () => {
   it("lần 4 (regenerate_used=3) ⇒ GateLimitError REGENERATE_LIMIT, không revert/redraft", async () => {
     seedSpine()
     const version = await seedInProgressWithContent(STEP, "A90")
@@ -346,7 +346,7 @@ describe("gate.service: regenerate — trần 3/step", () => {
   })
 })
 
-describe("gate.service: B7 reopen — revision/regenerate trên step đã accepted (F6)", () => {
+describe("gate.service: B7 reopen - revision/regenerate trên step đã accepted (F6)", () => {
   it("accept rồi revision ⇒ reopen (revision_requested, reset accepted_at) rồi redraft, calls_used vòng MỚI không cộng dồn vòng cũ (F1)", async () => {
     seedSpine()
     const version = await seedInProgressWithContent(STEP, "A90")
@@ -391,7 +391,7 @@ describe("gate.service: B7 reopen — revision/regenerate trên step đã accept
     expect(spine!.actors.map((a) => a.id)).toContain("A94")
   })
 
-  it("accept rồi accept lại (action=accept) ⇒ vẫn STEP_NOT_RUNNABLE — chỉ revision/regenerate được reopen", async () => {
+  it("accept rồi accept lại (action=accept) ⇒ vẫn STEP_NOT_RUNNABLE - chỉ revision/regenerate được reopen", async () => {
     seedSpine()
     const version = await seedInProgressWithContent(STEP, "A90")
     const accepted = await gate(PROJECT, STEP, USER, { action: "accept", base_version: version })
@@ -401,8 +401,8 @@ describe("gate.service: B7 reopen — revision/regenerate trên step đã accept
   })
 })
 
-describe("gate.service: accept_as_is — id cờ mới (F14)", () => {
-  it("hậu tố số LỚN NHẤT hiện có + 1 — tránh trùng id khi mảng có khoảng trống (cờ giữa đã bị cascade xoá)", async () => {
+describe("gate.service: accept_as_is - id cờ mới (F14)", () => {
+  it("hậu tố số LỚN NHẤT hiện có + 1 - tránh trùng id khi mảng có khoảng trống (cờ giữa đã bị cascade xoá)", async () => {
     seedSpine()
     const flagBase = { level: "yellow" as const, rule_id: "x", section_id: "fixed:I", target_id: null, remediation_step: "S-3.1", opened_at_version: 1, resolved_at: null, waived_by_user: false, waive_reason: null, waived_at_version: null }
     db.spines[0].flags = [
@@ -421,7 +421,7 @@ describe("gate.service: accept_as_is — id cờ mới (F14)", () => {
   })
 })
 
-describe("gate.service: CALL_LIMIT — trần 8/step chặn regenerate/revision, không chặn accept", () => {
+describe("gate.service: CALL_LIMIT - trần 8/step chặn regenerate/revision, không chặn accept", () => {
   it("calls_used = 8 ⇒ regenerate/revision trả CALL_LIMIT", async () => {
     seedSpine()
     const version = await seedInProgressWithContent(STEP, "A90")
@@ -452,7 +452,7 @@ describe("gate.service: accept_as_is", () => {
     const version = await seedInProgressWithContent(STEP, "A90")
     seedUsage(STEP, "regenerate", 3)
 
-    const note = "Chấp nhận hiện trạng — actor phụ sẽ bổ sung ở vòng sau theo yêu cầu khách hàng"
+    const note = "Chấp nhận hiện trạng - actor phụ sẽ bổ sung ở vòng sau theo yêu cầu khách hàng"
     const result = await gate(PROJECT, STEP, USER, { action: "accept_as_is", note, base_version: version })
 
     expect(result.step.status).toBe("accepted")
@@ -477,7 +477,7 @@ describe("gate.service: accept", () => {
     spine.progress.current_phase = "S-2"
     spine.progress.current_step = "S-2.5"
     spine.steps = stepsBeforeS3().filter((s) => s.id !== "S-2.5")
-    db.spines[0] = { _id: "spine", projectId: PROJECT, ...spine }
+    db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...spine }
 
     const version = await seedInProgressWithContent("S-2.5", "A90")
     const result = await gate(PROJECT, "S-2.5", USER, { action: "accept", base_version: version })

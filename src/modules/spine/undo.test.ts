@@ -32,7 +32,7 @@ const db = vi.hoisted(() => {
         return copy(doc)
       }
       if (!options.upsert) return null
-      const created = { _id: "spine", ...filter, ...copy(update.$setOnInsert ?? {}) }
+      const created = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, ...filter, ...copy(update.$setOnInsert ?? {}) }
       spines.push(created)
       return copy(created)
     }
@@ -81,7 +81,7 @@ const USER = "650000000000000000000010"
 
 const seed = async (spine: Spine = FIXTURE): Promise<void> => {
   await repo.getOrCreate(PROJECT)
-  db.spines[0] = { _id: "spine", projectId: PROJECT, ...structuredClone(spine) }
+  db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...structuredClone(spine) }
 }
 
 /** Bỏ `spine_version` (mỗi txn tăng) và `projectId` (chỉ có ở bản đọc từ repository) để so deep-equal. */
@@ -103,7 +103,7 @@ const change = (over: Partial<SpineChange> & Pick<SpineChange, "seq" | "txn" | "
   ...over
 })
 
-describe("findUndoTarget — chọn lô nào để hoàn tác", () => {
+describe("findUndoTarget - chọn lô nào để hoàn tác", () => {
   it("lô người dùng gần nhất", () => {
     const target = findUndoTarget([
       change({ seq: 1, txn: "T1", path: "actors[id=A01].name" }),
@@ -155,7 +155,7 @@ describe("findUndoTarget — chọn lô nào để hoàn tác", () => {
   })
 })
 
-describe("undoLast — khôi phục Spine", () => {
+describe("undoLast - khôi phục Spine", () => {
   beforeEach(() => db.reset())
 
   it("khôi phục Spine deep-equal trạng thái trước lô", async () => {
@@ -176,6 +176,23 @@ describe("undoLast — khôi phục Spine", () => {
     expect(undone.spine_version).toBe(3)
     expect(comparable(undone.spine)).toEqual(before)
     expect(undone.changes.every((c) => c.op === "revert")).toBe(true)
+  })
+
+  it("FLF-431 (FAP #22): lô trộn mốc duyệt + dữ liệu ⇒ chỉ đảo dữ liệu, mốc duyệt của step giữ nguyên", async () => {
+    await seed()
+    const step = FIXTURE.steps.find((x) => x.status === "accepted")!
+    const applied = await applyTransaction(PROJECT, {
+      base_version: 1,
+      by: USER,
+      ops: [
+        { op: "set", path: "actors[id=A01].name", value: "Product Owner" },
+        { op: "set", path: `steps[id=${step.id}].accepted_at`, value: "2026-11-16T05:00:00.000Z" }
+      ]
+    })
+    const undone = await undoLast(PROJECT, USER, { base_version: applied.spine_version })
+    expect(undone.spine.actors.find((a) => a.id === "A01")?.name).toBe(FIXTURE.actors.find((a) => a.id === "A01")?.name)
+    expect(undone.spine.steps.find((x) => x.id === step.id)?.accepted_at).toBe("2026-11-16T05:00:00.000Z")
+    expect(undone.changes.map((c) => c.path)).toEqual(["actors[id=A01].name"])
   })
 
   it("undo hai lần liên tiếp đi lùi đúng thứ tự", async () => {
@@ -224,5 +241,17 @@ describe("undoLast — khôi phục Spine", () => {
   it("project chưa có thay đổi nào ⇒ 422 NOTHING_TO_UNDO", async () => {
     await seed()
     await expect(undoLast(PROJECT, USER, { base_version: 1 })).rejects.toMatchObject({ code: "NOTHING_TO_UNDO" })
+  })
+
+  it("FLF-294: đã có baseline ⇒ 409 UNDO_AFTER_BASELINE, không ghi gì (gỡ thay đổi là một CR mới)", async () => {
+    await seed({
+      ...FIXTURE,
+      baselines: [{ id: "B1", version: "v1.0", type: "generated", doc_version: null, at: "2026-09-10T00:00:00.000Z", snapshot_ref: "650000000000000000000099", checked_at_version: 1, waived_count: 0 }]
+    })
+    await applyTransaction(PROJECT, { base_version: 1, by: USER, ops: [{ op: "set", path: "actors[id=A01].name", value: "X" }] })
+    const seqBefore = await repo.nextSeq(PROJECT)
+
+    await expect(undoLast(PROJECT, USER, { base_version: 2 })).rejects.toMatchObject({ statusCode: 409, code: "UNDO_AFTER_BASELINE" })
+    expect(await repo.nextSeq(PROJECT)).toBe(seqBefore)
   })
 })

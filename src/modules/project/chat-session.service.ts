@@ -4,21 +4,27 @@ import { ChatSession, IChatSession, IChatMessage } from "./chat-session.model.js
 import { executeAiAction, executeAiActionStream } from "../../shared/ai/ai-action.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { AiActionError } from "../../shared/ai/ai-action.types.js"
 import { clientErrorMessage } from "../../shared/utils/client-error.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
-import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
+import { chatDocumentQuery } from "../../shared/ai/document-retrieval/query.js"
 import * as changeService from "../spine/change.service.js"
-import { changeErrorReply, formatChatContext, previewPayload } from "../spine/change-transcript.js"
+import { changeErrorReply, clarificationRounds, formatChatContext, pendingChangeRequest, previewPayload } from "../spine/change-transcript.js"
 import { submitAnswer } from "../pipeline/step-runner.service.js"
-import { shapeChatQuestions } from "../pipeline/question-shape.js"
+import { currentBatch, followUpReply, shapeChatQuestions } from "../pipeline/question-shape.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { replyLanguageForSession, typedPartOf } from "./reply-language.service.js"
-import { answerKnowledgeQuestion, type KnowledgeAnswer } from "../knowledge/answer.service.js"
+import { KNOWLEDGE_DAILY_LIMIT, answerKnowledgeQuestion, type KnowledgeAnswer } from "../knowledge/answer.service.js"
+import { buildChatSpineIndex } from "./chat-spine-index.js"
+
+/** Chưa có Spine ⇒ nói thẳng cho model, để nó không đoán số phần tử theo lịch sử chat. */
+const NO_SPINE_INDEX = "(tài liệu chưa có dữ liệu)"
 
 /** Nội dung tin AI gần nhất của phiên — để biết user đang trả lời thẻ nào (FLF-260). */
 const lastAiContentOf = (session: { messages: readonly IChatMessage[] }): string | undefined =>
   [...session.messages].reverse().find((m) => m.role === "ai")?.content
 import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
+import { claimUserMessage } from "./user-message-dedupe.js"
 
 /**
  * FLF-220: câu hỏi trong tin nhắn CHAT đi qua cùng luật hình dạng với pipeline (≤ 4 câu, 2–4 lựa chọn, bỏ
@@ -27,7 +33,34 @@ import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language
 const shapeChatReply = (data: unknown): unknown => {
   if (typeof data !== "object" || data === null || Array.isArray(data)) return data
   const reply = data as Record<string, unknown>
-  return { ...reply, questions: shapeChatQuestions(reply.questions) }
+  // FLF-355: một lượt một loại câu — nhóm khác loại lưu kèm tin, tin user kế tiếp nhận nó (`askDeferredQuestions`)
+  const { now, later } = currentBatch(shapeChatQuestions(reply.questions))
+  return { ...reply, questions: now, ...(later.length > 0 ? { deferred_questions: later } : {}) }
+}
+
+/**
+ * FLF-355: tin AI ngay trước tin user vừa gửi còn nhóm câu chờ (`deferred_questions`) ⇒ hỏi nhóm đó luôn, không gọi model.
+ * Câu trả lời của nhóm trước vẫn nằm trong lịch sử nên lượt chat sau đọc được. Trả payload đã ghi; không có ⇒ `null`.
+ */
+const askDeferredQuestions = async (
+  session: IChatSession,
+  step: string,
+  replyLanguage: ReplyLanguage,
+  discoveryStep?: number
+): Promise<Record<string, unknown> | null> => {
+  const previous = session.messages[session.messages.length - 2]
+  if (previous?.role !== "ai") return null
+  let deferred: unknown
+  try {
+    deferred = (JSON.parse(previous.content) as { deferred_questions?: unknown }).deferred_questions
+  } catch {
+    return null
+  }
+  if (!Array.isArray(deferred) || deferred.length === 0) return null
+  const payload = { reply: followUpReply(replyLanguage), questions: deferred }
+  session.messages.push({ role: "ai", content: JSON.stringify(payload), step, discoveryStep, createdAt: new Date() })
+  await session.save()
+  return payload
 }
 
 export const createChatSession = async (projectId: string): Promise<IChatSession> => {
@@ -116,11 +149,16 @@ const tryChangeFlow = async (
   try {
     // Tin user của lượt này đã nằm cuối phiên — lịch sử là phần trước nó
     const chatHistory = formatChatContext(session.messages.slice(0, -1), record)
+    const rounds = clarificationRounds(session.messages)
     const preview = await changeService.preview(projectId, userId, {
       instruction: content,
       base_version: record.spine_version,
       chat_history: chatHistory,
-      reply_language: replyLanguage
+      reply_language: replyLanguage,
+      // FLF-299: chỉ truyền khi đã hỏi — lượt thường giữ nguyên tham số
+      ...(rounds > 0 ? { clarification_rounds: rounds } : {}),
+      // P08 (T7): trả lời câu hỏi làm rõ ⇒ kèm yêu cầu gốc + câu đã hỏi
+      ...(rounds > 0 ? { pending_request: pendingChangeRequest(session.messages.slice(0, -1)) } : {})
     })
     payload = previewPayload(preview, replyLanguage)
     if (preview.ok && preview.preview_id && preview.changes.length > 0) shown = preview
@@ -158,7 +196,15 @@ const tryAnswerRunningStep = async (session: IChatSession, projectId: string, co
 export interface SendMessageOptions {
   /** FLF-267: câu hỏi tri thức — trả lời từ Knowledge RAG thay cho CHAT (controller đã kiểm `KNOWLEDGE_ENABLED`). */
   knowledge?: boolean
+  /**
+   * Đường stream: user bấm dừng (FE huỷ fetch) ⇒ controller abort khi luồng đóng giữa chừng. Lượt gọi model bị
+   * ngắt, credit chưa deduct được hoàn, tin AI dở không ghi vào phiên (tin user vẫn giữ — như Esc của Claude Code).
+   */
+  signal?: AbortSignal
 }
+
+/** Lượt chat đã bị user dừng — không ghi tin AI, không gửi gì thêm (luồng đã đóng). */
+const isStopped = (signal?: AbortSignal): boolean => signal?.aborted === true
 
 /** Câu xin lỗi khi lượt gọi model của chat lỗi (CHAT và câu hỏi tri thức dùng chung). */
 const aiUnavailableReply = (replyLanguage: ReplyLanguage): string =>
@@ -187,16 +233,46 @@ const answerKnowledgeTurn = async (
   step: string,
   userId: string,
   replyLanguage: ReplyLanguage,
-  discoveryStep?: number
-): Promise<{ payload: ReturnType<typeof knowledgeReplyPayload>; answer: KnowledgeAnswer }> => {
-  const answer = await answerKnowledgeQuestion(content, { projectId, userId, language: replyLanguage })
+  discoveryStep?: number,
+  signal?: AbortSignal
+): Promise<{ payload: ReturnType<typeof knowledgeReplyPayload>; answer: KnowledgeAnswer } | null> => {
+  const answer = await answerKnowledgeQuestion(content, { projectId, userId, language: replyLanguage, ...(signal ? { signal } : {}) })
   const payload = knowledgeReplyPayload(answer)
+  // Câu từ chối không gọi model nên không bị ngắt — user đã dừng thì cũng không ghi
+  if (isStopped(signal)) return null
   session.messages.push({ role: "ai", content: JSON.stringify(payload), step, discoveryStep, createdAt: new Date() })
   await session.save()
   return { payload, answer }
 }
 
+/**
+ * FLF-400: tin trùng (cùng phiên + bước + nội dung) tới khi lượt đầu CÒN ĐANG CHẠY ⇒ không ghi tin, không gọi AI, trả phiên
+ * như hiện có — giống lượt tin được nhận làm câu trả lời của step. Lượt đầu xong (kể cả lỗi / bị dừng) là nhả: gửi lại câu
+ * giống hệt sau khi AI đã trả lời ("ok" rồi "ok") là ý của user, và "Thử lại ngay" (FLF-332) phải đi được.
+ */
 export const sendMessageAndGetResponse = async (
+  projectId: string,
+  chatSessionId: string,
+  content: string,
+  step: string,
+  userId: string,
+  discoveryStep?: number,
+  options: SendMessageOptions = {}
+): Promise<IChatSession> => {
+  const claim = claimUserMessage(chatSessionId, step, content)
+  if (!claim) {
+    const session = await ChatSession.findById(chatSessionId)
+    if (!session) throw new ApiError(404, "Không tìm thấy phiên trò chuyện.", "CHAT_SESSION_NOT_FOUND")
+    return session
+  }
+  try {
+    return await chatTurn(projectId, chatSessionId, content, step, userId, discoveryStep, options)
+  } finally {
+    claim.release(false)
+  }
+}
+
+const chatTurn = async (
   projectId: string,
   chatSessionId: string,
   content: string,
@@ -232,8 +308,10 @@ export const sendMessageAndGetResponse = async (
     try {
       await answerKnowledgeTurn(session, projectId, content, step, userId, replyLanguage, discoveryStep)
     } catch (error) {
+      // FLF-333: hết hạn mức câu hỏi tri thức trong ngày là lỗi của người dùng, trả 429 rõ mã — không ghi tin xin lỗi
+      if (error instanceof ApiError && error.code === KNOWLEDGE_DAILY_LIMIT) throw error
       console.error("Knowledge answer failed in chat session service:", error)
-      // Như CHAT: lỗi (hết credit, provider) thành tin xin lỗi trong phiên — `grounded: false`, chữ khác câu "không đủ căn cứ"
+      // Như CHAT: lỗi (provider) thành tin xin lỗi trong phiên — `grounded: false`, chữ khác câu "không đủ căn cứ"
       const payload = { reply: aiUnavailableReply(replyLanguage), questions: [], grounded: false, citations: [] }
       session.messages.push({ role: "ai", content: JSON.stringify(payload), step, discoveryStep, createdAt: new Date() })
       await session.save()
@@ -247,8 +325,12 @@ export const sendMessageAndGetResponse = async (
   // 1c. T17: lệnh sửa từ session không pipeline đi vào change flow, không gọi CHAT
   if (await tryChangeFlow(session, projectId, content, step, userId, replyLanguage)) return session
 
-  // 2. Ngữ cảnh cho AI: tóm tắt + đuôi transcript TRƯỚC tin này (tin này đã đi qua `input_text`)
-  const historyText = formatChatContext(session.messages.slice(0, -1), await spineRepository.get(projectId))
+  // 1d. FLF-355: lượt hỏi trước còn nhóm câu khác loại ⇒ hỏi nó, không gọi CHAT
+  if (await askDeferredQuestions(session, step, replyLanguage, discoveryStep)) return session
+
+  // 2. Ngữ cảnh cho AI: tóm tắt + đuôi transcript TRƯỚC tin này (tin này đã đi qua `input_text`) + chỉ mục Spine gọn
+  const spine = await spineRepository.get(projectId)
+  const historyText = formatChatContext(session.messages.slice(0, -1), spine)
 
   // 3. Chỉ còn một loại chat
   const actionType = ActionType.CHAT
@@ -256,23 +338,20 @@ export const sendMessageAndGetResponse = async (
   // 4. Build step name and document context
   const stepName = step
 
-  const historyTokens = Math.ceil(historyText.length / 4)
-  const chatTemplate = await getPromptTemplate(actionType)
-  const docContext = await buildDocumentContext(
+  // FLF-393: tài liệu vượt trần ⇒ chỉ các đoạn khớp tin nhắn này (tin quá ngắn mượn thêm vài lượt trước)
+  const docContext = await buildDocumentContext({
     projectId,
-    ActionType.CHAT,       // Document context logic same for both chat types
-    undefined,
-    historyTokens,
-    chatTemplate.providerConfig.model,
-    chatTemplate.providerConfig.maxTokens
-  )
+    actionType: ActionType.CHAT,
+    query: chatDocumentQuery(content, session.messages.slice(0, -1))
+  })
 
   // 5. Build prompt variables
   const promptVariables: Record<string, any> = {
     step_name: stepName,
     chat_history: historyText || "Không có lịch sử trước đó.",
     input_text: content,
-    documentContext: docContext.contextText
+    documentContext: docContext.contextText,
+    spine_index: buildChatSpineIndex(spine) || NO_SPINE_INDEX
   }
 
   // 6. Execute AI Action
@@ -322,7 +401,40 @@ export const sendMessageAndGetResponse = async (
   return session
 }
 
+/** FLF-400: tin trùng ⇒ một sự kiện `finish` với phiên hiện có và `reply` rỗng (như tin vào hàng chờ trả lời của step). */
 export const sendMessageStream = async (
+  projectId: string,
+  chatSessionId: string,
+  content: string,
+  step: string,
+  userId: string,
+  res: Response,
+  discoveryStep?: number,
+  options: SendMessageOptions = {}
+): Promise<void> => {
+  const claim = claimUserMessage(chatSessionId, step, content)
+  if (!claim) {
+    const session = await ChatSession.findById(chatSessionId)
+    try {
+      if (!res.destroyed && !res.writableEnded) {
+        res.write(
+          session
+            ? `data: ${JSON.stringify({ type: "finish", session, data: { reply: "" }, tokensUsed: null, cost: 0 })}\n\n`
+            : `data: ${JSON.stringify({ type: "error", error: "Không tìm thấy phiên trò chuyện." })}\n\n`
+        )
+        res.end()
+      }
+    } catch (_) {}
+    return
+  }
+  try {
+    await streamChatTurn(projectId, chatSessionId, content, step, userId, res, discoveryStep, options)
+  } finally {
+    claim.release(false)
+  }
+}
+
+const streamChatTurn = async (
   projectId: string,
   chatSessionId: string,
   content: string,
@@ -356,12 +468,15 @@ export const sendMessageStream = async (
   // trích dẫn xong mới được hiện)
   if (options.knowledge) {
     try {
-      const { payload, answer } = await answerKnowledgeTurn(session, projectId, content, step, userId, replyLanguage, discoveryStep)
+      const turn = await answerKnowledgeTurn(session, projectId, content, step, userId, replyLanguage, discoveryStep, options.signal)
+      if (!turn) return
+      const { payload, answer } = turn
       if (!res.destroyed && !res.writableEnded) {
         res.write(`data: ${JSON.stringify({ type: "finish", session, data: payload, tokensUsed: answer.tokensUsed, cost: answer.cost })}\n\n`)
         res.end()
       }
     } catch (error) {
+      if (isStopped(options.signal)) return
       console.error("Knowledge answer failed in chat stream:", error)
       try {
         if (!res.destroyed && !res.writableEnded) {
@@ -401,31 +516,41 @@ export const sendMessageStream = async (
     return
   }
 
-  // 2. Ngữ cảnh cho AI: tóm tắt + đuôi transcript TRƯỚC tin này (tin này đã đi qua `input_text`)
-  const historyText = formatChatContext(session.messages.slice(0, -1), await spineRepository.get(projectId))
+  // 1d. FLF-355: lượt hỏi trước còn nhóm câu khác loại ⇒ hỏi nó, một sự kiện `finish`, không gọi CHAT
+  const deferredPayload = await askDeferredQuestions(session, step, replyLanguage, discoveryStep)
+  if (deferredPayload) {
+    try {
+      if (!res.destroyed && !res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ type: "finish", session, data: deferredPayload, tokensUsed: null, cost: 0 })}\n\n`)
+        res.end()
+      }
+    } catch (_) {}
+    return
+  }
+
+  // 2. Ngữ cảnh cho AI: tóm tắt + đuôi transcript TRƯỚC tin này (tin này đã đi qua `input_text`) + chỉ mục Spine gọn
+  const spine = await spineRepository.get(projectId)
+  const historyText = formatChatContext(session.messages.slice(0, -1), spine)
 
   // 3. T20: chỉ còn một loại chat — Discovery đi qua step runner
   const actionType = ActionType.CHAT
 
   // 4. Build step name and doc context
   const stepName = step
-  const historyTokens = Math.ceil(historyText.length / 4)
-  const chatTemplate = await getPromptTemplate(actionType)
-  const docContext = await buildDocumentContext(
+  // FLF-393: tài liệu vượt trần ⇒ chỉ các đoạn khớp tin nhắn này (tin quá ngắn mượn thêm vài lượt trước)
+  const docContext = await buildDocumentContext({
     projectId,
-    ActionType.CHAT,
-    undefined,
-    historyTokens,
-    chatTemplate.providerConfig.model,
-    chatTemplate.providerConfig.maxTokens
-  )
+    actionType: ActionType.CHAT,
+    query: chatDocumentQuery(content, session.messages.slice(0, -1))
+  })
 
   // 5. Build prompt variables
   const promptVariables: Record<string, any> = {
     step_name: stepName,
     chat_history: historyText || "Không có lịch sử trước đó.",
     input_text: content,
-    documentContext: docContext.contextText
+    documentContext: docContext.contextText,
+    spine_index: buildChatSpineIndex(spine) || NO_SPINE_INDEX
   }
 
   // 6. Execute stream with Vercel AI SDK
@@ -443,8 +568,12 @@ export const sendMessageStream = async (
             }
           } catch (_) {}
         }
-      }
+      },
+      options.signal ? { signal: options.signal } : {}
     )
+
+    // Dừng sát lúc model vừa xong: lượt đã tính phí nhưng user không còn chờ — không ghi tin dở vào phiên
+    if (isStopped(options.signal)) return
 
     // 7. Add AI response to MongoDB history
     const replyData = shapeChatReply(aiResult.data)
@@ -478,6 +607,7 @@ export const sendMessageStream = async (
       }
     } catch (_) {}
   } catch (error: any) {
+    if (isStopped(options.signal)) return
     console.error("AI stream failed in chat session service:", error)
     try {
       if (!res.destroyed && !res.writableEnded) {
@@ -485,13 +615,22 @@ export const sendMessageStream = async (
           `data: ${JSON.stringify({
             type: "error",
             // Không gửi text thô của nhà cung cấp AI / thư viện — đã log đủ ở trên (FLF-247)
-            error: clientErrorMessage(error)
+            error: clientErrorMessage(error),
+            // FLF-332: mã lỗi để FE phân biệt "AI lỗi, credit đã hoàn" (banner Thử lại ngay / Để sau) với lỗi khác
+            code: chatErrorCode(error)
           })}\n\n`
         )
         res.end()
       }
     } catch (_) {}
   }
+}
+
+/** Mã lỗi của sự kiện SSE `error` trong chat (FLF-332): cùng bảng với pipeline; lỗi không rõ ⇒ `AI_EXECUTION_FAILED`. */
+const chatErrorCode = (err: unknown): string => {
+  if (err instanceof ApiError) return err.code
+  if (err instanceof AiActionError) return err.statusCode === 429 ? "RATE_LIMIT_EXCEEDED" : err.statusCode >= 500 ? "AI_PROVIDER_ERROR" : err.code
+  return "AI_EXECUTION_FAILED"
 }
 
 /** Phiên pipeline không xoá được — xoá nó là mất transcript các step và lượt chờ trả lời đang trỏ vào nó. */
@@ -508,7 +647,7 @@ export const deleteChatSession = async (chatSessionId: string): Promise<void> =>
     throw new ApiError(404, "Không tìm thấy phiên trò chuyện.", "CHAT_SESSION_NOT_FOUND")
   }
   if (target.is_pipeline) {
-    throw new ApiError(409, "Không xoá được phiên chính của dự án — phiên này giữ tiến trình soạn tài liệu", PIPELINE_SESSION_LOCKED)
+    throw new ApiError(409, "Không xoá được phiên chính của dự án - phiên này giữ tiến trình soạn tài liệu", PIPELINE_SESSION_LOCKED)
   }
 
   const result = await ChatSession.deleteOne({ _id: chatSessionId, is_pipeline: false })

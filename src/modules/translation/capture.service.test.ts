@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 
 vi.mock("./translation.repository.js", async () => (await import("./__tests__/translation-store.js")).fakeRepository)
 
-import { captureForTurn, captureLocalized, localizedUnitsOf } from "./capture.service.js"
+import { captureForTurn, captureLocalized, indexedEntriesOf, localizedUnitsOf } from "./capture.service.js"
 import { fakeRepository, resetStore, store } from "./__tests__/translation-store.js"
 import { hashSource } from "./translation-units.js"
 import type { Op } from "../spine/op.types.js"
@@ -16,7 +16,7 @@ beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {})
 })
 
-describe("localizedUnitsOf — ghép localized với op cùng path (hàm thuần)", () => {
+describe("localizedUnitsOf - ghép localized với op cùng path (hàm thuần)", () => {
   it("add phần tử cả object + set một field mảng ⇒ đúng các cặp (hash câu Anh, câu dịch)", () => {
     const ops: Op[] = [
       { op: "add", path: "actors[]", value: { id: "A10", name: "Librarian", description: "Manages books.", kind: "human" } },
@@ -224,5 +224,35 @@ describe("captureLocalized", () => {
     const localized = [{ path: "actors[id=A01].name", value: "Chủ sở hữu" }]
     expect(await captureForTurn(P, null, ops, localized)).toBe(0)
     expect(await captureForTurn(P, { locale: "vi", source: "en" }, ops, localized)).toBe(1)
+  })
+})
+
+describe("P07 (T8, câu 10): sửa một dòng mảng chuỗi qua chat - op đã viết thành set cả mảng", () => {
+  const before = ["Reduce phone bookings by 60% in 6 months", "Fill 80% of slots"]
+  const after = ["Reduce phone bookings by 50% in the first year", "Fill 80% of slots"]
+  const ops: Op[] = [{ op: "set", path: "project.goals", value: after }]
+  const localized = [{ path: "project.goals[0]", value: "Giảm 50% lịch đặt qua điện thoại trong năm đầu" }]
+
+  it("indexedEntriesOf nhận mục nhắm đúng một dòng của op set cả mảng (hàm thuần)", () => {
+    expect(indexedEntriesOf(ops, localized)).toEqual([{ path: "project.goals", index: 0, value: after, text: "Giảm 50% lịch đặt qua điện thoại trong năm đầu" }])
+    // path trùng op / chỉ số vượt mảng / không có op set mảng ⇒ không nhận
+    expect(indexedEntriesOf(ops, [{ path: "project.goals", value: ["a", "b"] }])).toEqual([])
+    expect(indexedEntriesOf(ops, [{ path: "project.goals[5]", value: "x" }])).toEqual([])
+    expect(indexedEntriesOf([], localized)).toEqual([])
+  })
+
+  it("có bản dịch cũ của cả mảng ⇒ lưu bản author mảng mới (dòng vừa sửa theo câu người dùng), không thành 'chưa dịch'", async () => {
+    await fakeRepository.saveTranslations(P, "vi", "en", [{ sourceHash: hashSource(before), text: ["Giảm 60% trong 6 tháng", "Lấp đầy 80% khung giờ"] }], "machine")
+    const saved = await captureLocalized(P, "vi", "en", ops, localized, async (_p, path) => (path === "project.goals" ? before : undefined))
+    expect(saved).toBe(1)
+    expect(stored(after)).toMatchObject({ text: ["Giảm 50% lịch đặt qua điện thoại trong năm đầu", "Lấp đầy 80% khung giờ"], origin: "author" })
+  })
+
+  it("mảng một dòng không cần bản cũ; không có bản cũ (nhiều dòng) ⇒ không đoán, giữ 'thiếu'", async () => {
+    const single: Op[] = [{ op: "set", path: "project.goals", value: ["Only goal"] }]
+    expect(await captureLocalized(P, "vi", "en", single, [{ path: "project.goals[0]", value: "Mục tiêu duy nhất" }], async () => undefined)).toBe(1)
+    expect(stored(["Only goal"])).toMatchObject({ text: ["Mục tiêu duy nhất"], origin: "author" })
+    expect(await captureLocalized(P, "vi", "en", ops, localized, async () => undefined)).toBe(0)
+    expect(stored(after)).toBeUndefined()
   })
 })

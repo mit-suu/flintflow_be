@@ -103,7 +103,9 @@ export const TABLE_ENTITIES: readonly TableEntityDef[] = [
     columns: [
       { field: "name", headers: ["entity", "entity name", "table", "object", "thực thể", "tên thực thể"] },
       { field: "description", headers: ["description", "mô tả"] },
-      { field: "relations", headers: ["relations", "relationships", "related entities", "quan hệ", "liên kết"] }
+      { field: "relations", headers: ["relations", "relationships", "related entities", "quan hệ", "liên kết"] },
+      // QLHS 11/11 bug #12c: cột thuộc tính của bảng từ điển dữ liệu ⇒ `attributes` (ô "mã, họ tên, …" tách thành thuộc tính)
+      { field: "attributes", headers: ["attributes", "attribute", "key attributes", "main attributes", "fields", "thuộc tính", "thuộc tính chính", "các thuộc tính"] }
     ],
     required: ["name"]
   },
@@ -122,7 +124,10 @@ export const TABLE_ENTITIES: readonly TableEntityDef[] = [
     columns: [
       { field: "code", headers: ["message code", "msg code", "code", "mã thông báo", "mã"] },
       { field: "text", headers: ["message", "message content", "content", "text", "nội dung", "thông báo"] },
-      { field: "function_ids", headers: ["functions", "function", "used in", "chức năng", "dùng ở"] }
+      { field: "function_ids", headers: ["functions", "function", "used in", "chức năng", "dùng ở"] },
+      // P07: cột "Message Type" / "Context" của bảng thông báo (mẫu Report3, luồng C) có field trong Spine
+      { field: "type", headers: ["message type", "msg type", "type", "loại", "loại thông báo"] },
+      { field: "context", headers: ["context", "ngữ cảnh", "bối cảnh", "when shown", "khi nào hiện"] }
     ],
     required: ["code", "text"]
   },
@@ -166,6 +171,37 @@ export const TABLE_ENTITIES: readonly TableEntityDef[] = [
       { field: "statement", headers: ["requirement", "description", "statement", "yêu cầu", "mô tả", "nội dung"] }
     ],
     required: ["statement"]
+  },
+  // FLF-365 / FLF-372: mục IEEE 29148 — tên cột của mẫu (jam01) và của bảng FlintFlow in ra (`render/labels.ts`), để bản xuất
+  // theo mẫu bắt buộc điền đúng cột theo field và I-4 đọc bảng tất định
+  {
+    entity: "references",
+    sections: ["slot:references"],
+    columns: [
+      { field: "id", headers: ["id", "ref id", "mã", "mã tài liệu"] },
+      { field: "title", headers: ["title", "document", "document title", "tên tài liệu", "tài liệu", "tiêu đề"] },
+      { field: "owner", headers: ["owner", "publisher", "issuer", "đơn vị", "đơn vị ban hành", "nơi ban hành", "chủ quản", "cơ quan ban hành"] },
+      { field: "version", headers: ["version", "phiên bản"] },
+      { field: "date", headers: ["date", "issue date", "ngày", "ngày ban hành"] },
+      { field: "location", headers: ["location", "link", "url", "source", "nơi lưu", "đường dẫn", "nguồn"] },
+      { field: "kind", headers: ["kind", "type", "loại"] }
+    ],
+    required: ["title"]
+  },
+  {
+    entity: "verifications",
+    sections: ["slot:verification"],
+    columns: [
+      { field: "requirement_id", headers: ["requirement", "requirement id", "req id", "yêu cầu", "mã yêu cầu"] },
+      { field: "method", headers: ["method", "verification method", "phương pháp", "phương pháp kiểm chứng"] },
+      {
+        field: "artifact",
+        headers: ["artifact", "test case", "test case / artifact", "ca kiểm thử", "ca kiểm thử / tạo tác", "tạo tác", "tài liệu kiểm"]
+      },
+      { field: "status", headers: ["status", "trạng thái"] },
+      { field: "evidence", headers: ["evidence", "bằng chứng"] }
+    ],
+    required: ["requirement_id", "method"]
   }
 ]
 

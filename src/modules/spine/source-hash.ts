@@ -3,13 +3,23 @@
  * ─────────────────────────────────────────────────────────────────
  * Hash `source_fields` của diagram (srs-spine.md §7.1) cho cờ đỏ `diagram_stale`.
  * Chỉ gồm field THẬT SỰ vẽ lên hình, sắp xếp theo `id` — sửa mô tả không làm hình "cũ".
- * T10 ghi `diagrams[].source_hash` bằng chính hàm này khi render.
+ * T10 ghi `diagrams[].source_hash` bằng `renderedDiagramHash` khi render.
+ *
+ * Hai hash (FLF-339):
+ * - `computeSourceHash`: hash DỮ LIỆU vẽ lên hình — `originalDiagramHash` (ảnh gốc import), `impact.service` dùng.
+ * - `renderedDiagramHash`: hash của HÌNH đã vẽ = dữ liệu + engine/ký pháp của kind. Đổi renderer (vd PlantUML → SVG) chỉ
+ *   cần tăng engine trong `DIAGRAM_ENGINES` ⇒ hình cũ `diagram_stale` và được vẽ lại, còn ảnh gốc import không bị
+ *   `original_diagram_stale` giả. Engine mặc định trả đúng `computeSourceHash` ⇒ hình đang có không stale khi deploy.
  */
 
 import { createHash } from "node:crypto"
-import type { Diagram, Spine } from "./spine.types.js"
-import { guestOpenScreenIds, screenActorMap } from "./screen-actors.js"
+import type { Diagram, DiagramKind, Spine } from "./spine.types.js"
+import { entitiesOfFeature } from "./entity-features.js"
+import { screenActorMap, screenActorSets, sharedScreenIds } from "./screen-actors.js"
 import { systemName } from "./system-name.js"
+import { DEFAULT_ERD_NOTATION, type RenderContext } from "../../shared/diagram/erd-notation.js"
+import { resolveScreenTheme } from "../../shared/diagram/screen-theme.js"
+import { DEFAULT_SEQUENCE_LEVEL, type SequenceLevel } from "../../shared/diagram/sequence-level.js"
 
 /** Giá trị `source_hash` nghĩa là chưa từng tính (fixture T02 dùng "TBD") — bỏ qua `diagram_stale`. */
 export const UNHASHED_SOURCE_HASHES: ReadonlySet<string> = new Set(["", "TBD"])
@@ -21,12 +31,14 @@ export const sourceProjection = (spine: Spine, diagram: Pick<Diagram, "kind" | "
     case "context":
       return {
         project: { name: systemName(spine.project) },
-        actors: byId(spine.actors).map(({ id, name, kind, flows_in, flows_out }) => ({
+        // FLF-390: `parent_id` chỉ khi có — actor tổng quát không luồng riêng không vẽ; hash cũ của Spine không kế thừa giữ nguyên
+        actors: byId(spine.actors).map(({ id, name, kind, flows_in, flows_out, parent_id }) => ({
           id,
           name,
           kind,
           flows_in: flows_in ?? [],
-          flows_out: flows_out ?? []
+          flows_out: flows_out ?? [],
+          ...(parent_id ? { parent_id } : {})
         })),
         use_cases: byId(spine.use_cases).map(({ id, name, actor_ids }) => ({ id, name, actor_ids }))
       }
@@ -45,28 +57,82 @@ export const sourceProjection = (spine: Spine, diagram: Pick<Diagram, "kind" | "
           extends: ext
         }))
       }
-    case "screen_flow": {
-      // Sơ đồ tách theo actor người: đổi actor của màn (quyền, use case ↔ function) cũng làm hình cũ
-      const guestOpenIds = [...guestOpenScreenIds(spine)].sort()
+    case "screen_flow":
+      // Actor đại diện của màn (`screen-actors.ts`): màn mất / có actor thì vẽ / không vẽ màn đó
       return {
         screens: byId(spine.screens).map(({ id, name, flow_to, is_popup, tabs }) => ({ id, name, flow_to, is_popup, tabs })),
         actors: byId(spine.actors.filter((a) => a.kind === "human")).map(({ id, name }) => ({ id, name })),
-        screen_actors: [...screenActorMap(spine)].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
-        // Màn mở cho Guest quyết định cổng đăng nhập (Login là màn vào); rỗng ⇒ bỏ khỏi hash để hình cũ không stale hàng loạt
-        guest_open: guestOpenIds.length > 0 ? guestOpenIds : undefined
+        screen_actors: [...screenActorMap(spine)].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       }
-    }
     case "erd":
       return {
-        entities: byId(spine.entities).map(({ id, name, relations, relation_verbs, relation_cardinality, relation_optional }) => ({
+        entities: byId(spine.entities).map(({ id, name, relations, relation_verbs, relation_cardinality, relation_optional, attributes }) => ({
           id,
           name,
+          // ERD vẽ khoá (PK / FK) và tên thuộc tính; vắng / rỗng ⇒ undefined (bị bỏ khỏi chuỗi hash): hình cũ không stale
+          attributes: attributes?.length ? attributes.map((a) => ({ name: a.name, kind: a.kind })) : undefined,
           relations,
           relation_verbs: relation_verbs ?? {},
           relation_cardinality: relation_cardinality ?? {},
           relation_optional: relation_optional ?? []
         }))
       }
+    case "class": {
+      // Một hình = một feature (`owner_id`). Chỉ quan hệ giữa các entity cùng hình được vẽ
+      const members = entitiesOfFeature(spine, diagram.owner_id)
+      const ids = new Set(members.map((e) => e.id))
+      return {
+        feature: spine.features.find((f) => f.id === diagram.owner_id)?.name ?? null,
+        entities: members.map(({ id, name, attributes, relations, relation_verbs, relation_cardinality, relation_optional }) => ({
+          id,
+          name,
+          attributes: (attributes ?? []).map(({ name: n, kind, required }) => ({ name: n, kind, required })),
+          relations: relations.filter((r) => ids.has(r)),
+          relation_verbs: relation_verbs ?? {},
+          relation_cardinality: relation_cardinality ?? {},
+          relation_optional: relation_optional ?? []
+        }))
+      }
+    }
+    case "state_machine": {
+      // Một hình = một entity (`owner_id`): tên entity, trạng thái và chuyển trạng thái đều hiện trên hình
+      const entity = spine.entities.find((e) => e.id === diagram.owner_id)
+      return {
+        entity: entity?.name ?? null,
+        states: (entity?.states ?? []).map(({ id, name, initial, final }) => ({ id, name, initial: initial ?? false, final: final ?? false })),
+        transitions: (entity?.transitions ?? []).map(({ from, to, event, guard, action }) => ({ from, to, event, guard: guard ?? "", action: action ?? "" }))
+      }
+    }
+    case "sequence": {
+      // Một hình = một function (`owner_id`): tên function, message theo thứ tự, và tên + kind actor ở các đầu message
+      const fn = spine.functions.find((f) => f.id === diagram.owner_id)
+      const interactions = fn?.interactions ?? []
+      const ends = new Set(interactions.flatMap((i) => [i.from, i.to]))
+      return {
+        function: fn ? { name: fn.name, screen: fn.screen_id !== null } : null,
+        interactions: interactions.map(({ from, to, message, kind, flow, guard }) => ({ from, to, message, kind, flow, guard: guard ?? "" })),
+        actors: byId(spine.actors.filter((a) => ends.has(a.id))).map(({ id, name, kind }) => ({ id, name, kind }))
+      }
+    }
+    case "activity": {
+      // FLF-390: một hình = một use case (`owner_id`): tên use case, nút (loại, chữ, làn), control flow + guard, tên actor ở làn
+      const uc = spine.use_cases.find((u) => u.id === diagram.owner_id)
+      const nodes = uc?.activity_nodes ?? []
+      const lanes = new Set(nodes.flatMap((n) => (typeof n.lane === "string" ? [n.lane] : [])))
+      return {
+        use_case: uc?.name ?? null,
+        nodes: nodes.map(({ id, kind, name, lane }) => ({ id, kind, name: name ?? "", lane: lane ?? "" })),
+        flows: (uc?.activity_flows ?? []).map(({ from, to, guard }) => ({ from, to, guard: guard ?? "" })),
+        actors: byId(spine.actors.filter((a) => lanes.has(a.id))).map(({ id, name }) => ({ id, name }))
+      }
+    }
+    case "deployment": {
+      // FLF-390: một hình cho cả hệ thống: nút (tên, loại, nút cha, artifact, component) và đường truyền thông + giao thức
+      return {
+        nodes: byId(spine.deployment_nodes ?? []).map(({ id, name, kind, parent_id, artifacts, components }) => ({ id, name, kind, parent_id, artifacts, components })),
+        links: (spine.deployment_links ?? []).map(({ from, to, protocol }) => ({ from, to, protocol: protocol ?? "" }))
+      }
+    }
     case "screen_layout": {
       const screen = spine.screens.find((s) => s.id === diagram.owner_id)
       return {
@@ -95,3 +161,116 @@ export const stableStringify = (value: unknown): string => {
 
 export const computeSourceHash = (spine: Spine, diagram: Pick<Diagram, "kind" | "owner_id">): string =>
   createHash("sha256").update(stableStringify(sourceProjection(spine, diagram))).digest("hex")
+
+/** Engine của hình đã vẽ — hash bằng `computeSourceHash` để hình đang có giữ nguyên hash. */
+export const DEFAULT_DIAGRAM_ENGINE = "plantuml@1"
+
+/**
+ * Engine / phiên bản ký pháp từng kind. Kind chuyển sang SVG tự dựng (FLF-322…) hoặc đổi ký pháp thì đổi giá trị ở đây
+ * (vd `"svg@1"`) — mọi hình đã vẽ của kind đó thành `diagram_stale` và được vẽ lại bằng renderer mới.
+ */
+export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.freeze({
+  // svg@2 (FLF-396): đầu mũi tên data flow đổi từ phi tiêu khía lõm sang tam giác tô đặc ⇒ hình context cũ stale, vẽ lại
+  context: "svg@2",
+  // svg@2 (FLF-369): bộ xếp thử nhiều phương án (thứ tự hàng, actor hai bên) ⇒ hình svg@1 cũ thành stale, vẽ lại một lượt
+  // svg@3 (FLF-421): hình phân cấp actor nối kiểu cây (thanh ngang chung, một tam giác mỗi cha) ⇒ hình cũ stale, vẽ lại
+  // svg@4 (P10): tài liệu upload theo trần 30 use case mỗi hình, quá trần tách theo nhóm chức năng ⇒ hình cũ stale, vẽ lại
+  usecase: "svg@4",
+  screen_flow: "svg@3",
+  // svg@2 (P10): ERD tách nhiều hình vẽ quan hệ vắt qua chỗ cắt ở cả hai hình (hộp nét đứt "xem hình i/n") ⇒ hình cũ stale
+  erd: "svg@2",
+  class: "svg@1",
+  state_machine: "svg@1",
+  // plantuml@2 (FLF-418): hash gồm mức vẽ của dự án (system / component) ⇒ đổi mức thì hình cũ stale; hình plantuml@1 vẽ lại một lượt
+  sequence: "plantuml@2",
+  activity: "svg@1",
+  deployment: DEFAULT_DIAGRAM_ENGINE,
+  // svg@1 (FLF-410): mockup SVG theo theme dự án thay wireframe Salt ⇒ hình Salt cũ stale, vẽ lại (lượt đầu gọi model)
+  // svg@2 (P10): hash gồm nội dung màn model đọc (validation, trigger…) ⇒ hình cũ stale một lượt, vẽ lại từ spec đã lưu
+  screen_layout: "svg@2"
+})
+
+/**
+ * Dữ liệu chỉ renderer SVG đọc thêm, ngoài `sourceProjection` (không đưa vào đó vì `originalDiagramHash` dùng chung hàm ấy:
+ * ảnh gốc import đã lưu hash cũ sẽ báo `original_diagram_stale` giả). Use case chia hình theo feature: tên + thứ tự feature
+ * và feature của các function mà use case tham chiếu; luồng màn (tách theo feature khi vượt ngưỡng) đọc feature + queue_order
+ * của màn, tập màn dùng chung (nền `#7ACFF5` — đổi khi actor của màn hay phân cấp actor đổi) và actor người của từng màn (hình
+ * quá lớn tách mỗi actor một hình, tiêu đề là tên actor).
+ */
+const renderedExtras = (spine: Spine, diagram: Pick<Diagram, "kind" | "owner_id">, context: RenderContext): unknown => {
+  // Ký pháp ERD nằm ở Project, không ở Spine: đổi ký pháp đổi hash ⇒ `diagram_stale` ⇒ vẽ lại
+  if (diagram.kind === "erd") return { notation: context.erdNotation ?? DEFAULT_ERD_NOTATION }
+  // FLF-418: mức Sequence nằm ở Project. Mức thành phần đọc thêm `component_interactions` + tên màn / entity / feature (tên control)
+  if (diagram.kind === "sequence") return sequenceExtras(spine, diagram, context.sequenceLevel ?? DEFAULT_SEQUENCE_LEVEL)
+  // FLF-410: theme mockup (màu, domain, nền tảng) nằm ở Project — đổi theme ⇒ stale ⇒ vẽ lại từ spec đã lưu. Tên hệ thống
+  // in trên header web. P10 (BarberGo #18: mockup vẫn ghi "đặt trước 14 ngày" sau khi chốt quy tắc 30 phút): nội dung model
+  // đọc (mô tả màn, trigger, validation, pop-up/tab, màn đích — `screen-layout.ai.ts#layoutContext`) cũng vào hash ⇒ đổi
+  // quy tắc thì hình `diagram_stale`, vẽ lại thì `contentHash` của spec đã lưu lệch ⇒ gọi model lại
+  if (diagram.kind === "screen_layout")
+    return { theme: resolveScreenTheme(context.screenTheme, spine.project.form_factor), system_name: systemName(spine.project), content: screenLayoutContent(spine, diagram.owner_id) }
+  const features = byId(spine.features).map(({ id, name, order }) => ({ id, name, order }))
+  if (diagram.kind === "screen_flow")
+    return {
+      screens: byId(spine.screens).map(({ id, feature_id, queue_order }) => ({ id, feature_id, queue_order })),
+      // Tên feature không vẽ lên hình (chỉ thứ tự feature dùng khi tách) ⇒ đổi tên feature không làm hình cũ
+      features: features.map(({ id, order }) => ({ id, order })),
+      shared: [...sharedScreenIds(spine)].sort(),
+      // Hình quá lớn tách theo actor người: tập actor của từng màn, tên (tiêu đề hình), actor tổng quát và thứ tự actor
+      actor_sets: [...screenActorSets(spine)].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+      actors: spine.actors.filter((a) => a.kind === "human").map(({ id, name, parent_id }) => ({ id, name, parent_id: parent_id ?? null }))
+    }
+  if (diagram.kind !== "usecase") return undefined
+  const referenced = new Set(spine.use_cases.flatMap((u) => u.function_ids))
+  return {
+    function_ids: byId(spine.use_cases).map(({ id, function_ids }) => ({ id, function_ids })),
+    functions: byId(spine.functions.filter((f) => referenced.has(f.id))).map(({ id, feature_id }) => ({ id, feature_id })),
+    features
+  }
+}
+
+/** Chữ của màn mà model đọc khi vẽ mockup, ngoài `sourceProjection` (tên màn, tên + mô tả function đã có ở đó). */
+const screenLayoutContent = (spine: Spine, screenId: string | null): unknown => {
+  const screen = spine.screens.find((s) => s.id === screenId)
+  if (!screen) return null
+  const names = new Map(spine.screens.map((s) => [s.id, s.name]))
+  return {
+    description: screen.description,
+    is_popup: screen.is_popup,
+    tabs: screen.tabs,
+    navigates_to: screen.flow_to.map((e) => names.get(e.to) ?? null),
+    functions: byId(spine.functions.filter((f) => f.screen_id === screenId)).map(({ id, order, trigger, validations }) => ({
+      id,
+      order,
+      trigger,
+      validations: (validations ?? []).map((v) => v.statement)
+    }))
+  }
+}
+
+const sequenceExtras = (spine: Spine, diagram: Pick<Diagram, "owner_id">, level: SequenceLevel): unknown => {
+  if (level !== "component") return { level }
+  const fn = spine.functions.find((f) => f.id === diagram.owner_id)
+  const list = fn?.component_interactions ?? []
+  const ends = new Set(list.flatMap((i) => [i.from, i.to]))
+  const named = (items: readonly { id: string; name: string }[]) => byId(items.filter((x) => ends.has(x.id))).map(({ id, name }) => ({ id, name }))
+  return {
+    level,
+    component: list.map(({ from, to, message, kind, flow, guard }) => ({ from, to, message, kind, flow, guard: guard ?? "" })),
+    screens: named(spine.screens),
+    entities: named(spine.entities),
+    actors: byId(spine.actors.filter((a) => ends.has(a.id))).map(({ id, name, kind }) => ({ id, name, kind })),
+    feature: spine.features.find((f) => f.id === fn?.feature_id)?.name ?? null
+  }
+}
+
+/** Hash ghi vào `diagrams[].source_hash` và so ở cờ `diagram_stale` — xem đầu file. */
+export const renderedDiagramHash = (
+  spine: Spine,
+  diagram: Pick<Diagram, "kind" | "owner_id">,
+  engines: Readonly<Record<DiagramKind, string>> = DIAGRAM_ENGINES,
+  context: RenderContext = {}
+): string => {
+  const engine = engines[diagram.kind] ?? DEFAULT_DIAGRAM_ENGINE
+  if (engine === DEFAULT_DIAGRAM_ENGINE) return computeSourceHash(spine, diagram)
+  return createHash("sha256").update(stableStringify({ engine, projection: sourceProjection(spine, diagram), extras: renderedExtras(spine, diagram, context) })).digest("hex")
+}

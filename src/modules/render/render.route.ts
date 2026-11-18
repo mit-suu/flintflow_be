@@ -81,6 +81,12 @@ router.post("/:projectId/assemble", authMiddleware, renderController.assembleCon
  */
 router.get("/:projectId/document", authMiddleware, renderController.getDocumentController)
 
+// FLF-369: ảnh của GET /document theo tham chiếu (pipeline-contract #38)
+router.get("/:projectId/document/image", authMiddleware, renderController.getDocumentImageController)
+
+// FLF-369: revision tài liệu để tab đang mở tự bám bản mới (pipeline-contract #39)
+router.get("/:projectId/version", authMiddleware, renderController.getVersionController)
+
 /**
  * @swagger
  * /api/v1/projects/{projectId}/export/word:
@@ -106,15 +112,21 @@ router.get("/:projectId/document", authMiddleware, renderController.getDocumentC
  *         description: "`_id` Mongo (= `snapshot_ref`) hoặc mã `BLnnn` mà GET /baselines trả; bỏ trống ⇒ baseline mới nhất"
  *         schema:
  *           type: string
+ *       - in: query
+ *         name: lang
+ *         description: "FLF-334 B — ngôn ngữ của file (mặc định ngôn ngữ tài liệu); thiếu bản dịch ⇒ 409 TRANSLATION_INCOMPLETE"
+ *         schema:
+ *           type: string
+ *           enum: [vi, en]
  *     responses:
  *       200:
- *         description: File .docx, tên `<project>-<version>[-draft].docx`. `source=draft` kèm header `X-Assembled-At-Version`, `X-Spine-Version`.
+ *         description: "File .docx, tên `<tên>_v1.0[_EN|_VI].docx` (baseline) · `<tên>_v1.0_DRAFT[_EN|_VI].docx` / `<tên>_DRAFT[_EN|_VI].docx` (bản nháp) — hậu tố ngôn ngữ chỉ khi `lang` khác ngôn ngữ tài liệu (FLF-334 B). Header `X-Document-Language` = ngôn ngữ của file; `source=draft` kèm `X-Assembled-At-Version`, `X-Spine-Version`."
  *       401:
  *         description: Chưa xác thực
  *       404:
  *         description: PROJECT_NOT_FOUND, BASELINE_NOT_FOUND
  *       409:
- *         description: NO_WORKING_DRAFT (project chưa có Spine)
+ *         description: "NO_WORKING_DRAFT (project chưa có Spine) · TRANSLATION_INCOMPLETE (`lang` cần bản dịch mà còn thiếu — meta { locale, missing, total }) · DOCUMENT_LANGUAGE_UNAVAILABLE (dự án mode 1 + `lang` khác ngôn ngữ tài liệu)"
  *       422:
  *         description: RENDER_IMAGE_INVALID
  */
@@ -123,5 +135,103 @@ router.get("/:projectId/document", authMiddleware, renderController.getDocumentC
 // và GET /projects/:projectId/export/word/export/word. Handler vẫn ở export.controller.ts (T05 tạo
 // file), chỉ route Express chuyển sang đây — export.route.ts giờ chỉ còn /word/preview (dev, T05).
 router.get("/:projectId/export/word", authMiddleware, exportController.exportWord)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/export/pdf:
+ *   get:
+ *     summary: Xuất PDF — chính file Word của endpoint export/word, chuyển bằng Gotenberg (FLF-316)
+ *     tags: [Render]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: source
+ *         schema:
+ *           type: string
+ *           enum: [draft, baseline]
+ *           default: draft
+ *       - in: query
+ *         name: baseline_id
+ *         description: "`_id` Mongo (= `snapshot_ref`) hoặc mã `BLnnn` mà GET /baselines trả; bỏ trống ⇒ baseline mới nhất"
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: lang
+ *         description: "FLF-334 B — ngôn ngữ của file (mặc định ngôn ngữ tài liệu); thiếu bản dịch ⇒ 409 TRANSLATION_INCOMPLETE"
+ *         schema:
+ *           type: string
+ *           enum: [vi, en]
+ *     responses:
+ *       200:
+ *         description: File .pdf, tên như export/word đổi đuôi `.pdf`. Cùng header với export/word.
+ *       401:
+ *         description: Chưa xác thực
+ *       404:
+ *         description: PROJECT_NOT_FOUND, BASELINE_NOT_FOUND
+ *       409:
+ *         description: "NO_WORKING_DRAFT (project chưa có Spine) · TRANSLATION_INCOMPLETE (`lang` cần bản dịch mà còn thiếu — meta { locale, missing, total }) · DOCUMENT_LANGUAGE_UNAVAILABLE (dự án mode 1 + `lang` khác ngôn ngữ tài liệu)"
+ *       503:
+ *         description: PDF_EXPORT_UNAVAILABLE — Gotenberg không chạy / lỗi / quá hạn; export/word vẫn dùng được
+ */
+router.get("/:projectId/export/pdf", authMiddleware, exportController.exportPdf)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/export/google-docs:
+ *   post:
+ *     summary: Xuất sang Google Docs — chính file của export/word, upload lên Drive của user (cần đã kết nối Google)
+ *     tags: [Render]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: source
+ *         schema:
+ *           type: string
+ *           enum: [draft, baseline]
+ *           default: draft
+ *       - in: query
+ *         name: baseline_id
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: lang
+ *         schema:
+ *           type: string
+ *           enum: [vi, en]
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               mode:
+ *                 type: string
+ *                 enum: [new, update]
+ *                 default: update
+ *     responses:
+ *       200:
+ *         description: "{ fileId, webViewLink, title, mode, recreated }"
+ *       401:
+ *         description: GOOGLE_RECONNECT_REQUIRED — chưa nối Google hoặc quyền đã bị thu hồi
+ *       403:
+ *         description: ORG_ROLE_FORBIDDEN (Viewer xuất bản nháp) · GOOGLE_FILE_FORBIDDEN
+ *       409:
+ *         description: Như export/word (NO_WORKING_DRAFT, TRANSLATION_INCOMPLETE, DOCUMENT_LANGUAGE_UNAVAILABLE)
+ *       503:
+ *         description: GOOGLE_INTEGRATION_DISABLED · GOOGLE_DRIVE_QUOTA_EXCEEDED
+ */
+router.post("/:projectId/export/google-docs", authMiddleware, exportController.exportGoogleDocs)
 
 export default router

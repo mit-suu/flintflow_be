@@ -26,6 +26,8 @@ export interface ICreditTransaction extends Document {
   projectId?: mongoose.Types.ObjectId | null
   actionType: string
   amount: number
+  /** Chiều cộng/trừ tường minh cho `admin_adjust` (amount luôn lưu trị tuyệt đối). */
+  direction?: "credit" | "debit" | null
   type: CreditTransactionType
   balanceAfter: number
   state?: CreditReservationState
@@ -33,6 +35,17 @@ export interface ICreditTransaction extends Document {
   reservationId?: mongoose.Types.ObjectId | null
   /** Lý do điều chỉnh (UC-68). Chỉ dòng admin_adjust mới có. */
   reason?: string | null
+  /** UC-60: step pipeline của lượt gọi AI (lấy từ `promptVariables.step_id`). null = gọi ngoài pipeline / dòng cũ. */
+  stepId?: string | null
+  /** UC-60: token của lượt gọi — chỉ dòng `deduct` (và dòng `reserve` đã deducted) mới có. */
+  tokensIn?: number | null
+  tokensOut?: number | null
+  /** UC-59: thông tin thanh toán trên dòng `purchase` (null với dòng usage / dòng cũ). */
+  intentId?: mongoose.Types.ObjectId | null
+  packageId?: string | null
+  price?: number | null
+  currency?: string | null
+  referenceCode?: string | null
   createdAt: Date
   updatedAt: Date
 }
@@ -68,6 +81,11 @@ const creditTransactionSchema = new Schema<ICreditTransaction>(
       type: Number,
       required: true
     },
+    direction: {
+      type: String,
+      enum: ["credit", "debit"],
+      default: null
+    },
     type: {
       type: String,
       enum: ["reserve", "deduct", "release", "refund", "monthly_reset", "purchase", "admin_adjust"],
@@ -93,6 +111,39 @@ const creditTransactionSchema = new Schema<ICreditTransaction>(
       type: String,
       default: null,
       trim: true
+    },
+    stepId: {
+      type: String,
+      default: null
+    },
+    tokensIn: {
+      type: Number,
+      default: null
+    },
+    tokensOut: {
+      type: Number,
+      default: null
+    },
+    intentId: {
+      type: Schema.Types.ObjectId,
+      ref: "PaymentIntent",
+      default: null
+    },
+    packageId: {
+      type: String,
+      default: null
+    },
+    price: {
+      type: Number,
+      default: null
+    },
+    currency: {
+      type: String,
+      default: null
+    },
+    referenceCode: {
+      type: String,
+      default: null
     }
   },
   { timestamps: true }

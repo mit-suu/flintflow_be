@@ -18,15 +18,27 @@ import type { Spine } from "../spine/spine.types.js"
 import { get } from "../spine/spine.repository.js"
 import { ChatSession } from "../project/chat-session.model.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
-import { ASSUMPTION_KEYS_READ, STEP_SKILLS, addendumForUnit, buildStepContext, getStepSpec, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
+import { ASSUMPTION_KEYS_READ, STEP_SKILLS, addendumForUnit, assumptionsForPrompt, componentLevelProjection, openAssumptionsFor, buildStepContext, getStepSpec, isScaleNote, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
 import { stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
 import { getStep, loadStepRegistry, orderedSteps } from "./step-registry.js"
 import { askableFields } from "./decisions.service.js"
+import { sectionsOfPath } from "../spine/section-registry.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const load = (file: string): Spine =>
   spineSchema.parse(JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../fixtures", file), "utf8")))
 const FIXTURE = load("spine-fixture-19-screens.json")
+
+describe("STEP_EXTRA_READS (P07)", () => {
+  it("S-7.3 thấy phạm vi bản phát hành (không đổi reads của registry, không tính là field thiếu)", () => {
+    const p = projectStep(FIXTURE, "S-7.3")
+    expect(p.projection["project.release_scope"]).toEqual(FIXTURE.project.release_scope)
+    expect(getStepSpec("S-7.3").reads).not.toContain("project.release_scope")
+    const empty = projectStep({ ...FIXTURE, project: { ...FIXTURE.project, release_scope: { in: [], out: [] } } }, "S-7.3")
+    expect(empty.emptyFields.some((f) => f.includes("release_scope"))).toBe(false)
+    expect(projectStep(FIXTURE, "S-7.1").projection).not.toHaveProperty("project.release_scope")
+  })
+})
 
 describe("getStepSpec (step registry T12 + STEP_SKILLS)", () => {
   it("khoá STEP_SKILLS đều là step trong registry; step có skill đều ghi được assumptions", () => {
@@ -122,7 +134,7 @@ describe("projectStep", () => {
     expect(overview.emptyFields.every((f) => f.startsWith("project"))).toBe(true)
   })
 
-  it("FLF-220: project.working_mode đã nghỉ — không vào projection, không tính là field trống", () => {
+  it("FLF-220: project.working_mode đã nghỉ - không vào projection, không tính là field trống", () => {
     const spine = structuredClone(FIXTURE)
     spine.project = {
       ...spine.project,
@@ -138,6 +150,8 @@ describe("projectStep", () => {
     }
     const p = projectStep(spine, "S-1.2")
     expect(p.emptyFields).not.toContain("project.working_mode")
+    // FLF-337: cài đặt "không hỏi lại" rỗng cũng không phải field trống
+    expect(p.emptyFields).not.toContain("project.skip_confirm_sections")
     expect(p.projection.project).not.toHaveProperty("working_mode")
   })
 
@@ -193,7 +207,7 @@ describe("projectStep", () => {
 describe("buildStepContext", () => {
   beforeEach(() => {
     vi.mocked(get).mockResolvedValue({ projectId: "p", ...structuredClone(FIXTURE) })
-    vi.mocked(buildDocumentContext).mockResolvedValue({ contextText: "DOC", tokenCount: 7, documentsUsed: 1, usedSummary: false })
+    vi.mocked(buildDocumentContext).mockResolvedValue({ contextText: "DOC", tokenCount: 7, documentsUsed: 1, usedSummary: false, mode: "full", chunksUsed: 0, fullTokens: 7 })
     vi.mocked(ChatSession.findById).mockReturnValue({
       lean: async () => ({
         messages: [
@@ -211,7 +225,16 @@ describe("buildStepContext", () => {
     expect(ctx.transcriptTail).not.toContain("Other phase")
     expect(ctx.documents).toBe("DOC")
     expect(ctx.contextTokens).toBeGreaterThan(7)
-    expect(buildDocumentContext).toHaveBeenCalledWith("p", "draft", "S-3.1", expect.any(Number), undefined, undefined)
+    // FLF-393: step gửi kèm câu hỏi tìm đoạn (nhãn step + câu trả lời của user) và tiêu đề section nó nuôi (S-3.1 ⇒ Actors)
+    expect(buildDocumentContext).toHaveBeenCalledWith({
+      projectId: "p",
+      actionType: "draft",
+      stepId: "S-3.1",
+      query: expect.stringContaining("Students and teachers"),
+      sectionTitles: expect.arrayContaining(["Actors", "Tác nhân"]),
+      broad: false,
+      focus: "Students and teachers"
+    })
   })
 
   it("transcriptTail kèm lượt phỏng vấn đầu giai đoạn (câu trả lời mở không vào sổ quyết định)", async () => {
@@ -238,7 +261,7 @@ describe("buildStepContext", () => {
   })
 })
 
-describe("addendumForUnit — lượt hỏi gộp / chat thấy điều user đã kể", () => {
+describe("addendumForUnit - lượt hỏi gộp / chat thấy điều user đã kể", () => {
   it("Brief và S-1 (step hoặc đơn vị giai đoạn) ⇒ toàn bộ addendum, dạng gửi model", () => {
     expect(FIXTURE.addendum.length).toBeGreaterThan(0)
     for (const unit of ["B-1", "B-1.3", "S-1"]) {
@@ -251,5 +274,131 @@ describe("addendumForUnit — lượt hỏi gộp / chat thấy điều user đ�
   it("giai đoạn khác ⇒ không nạp (giữ như cũ)", () => {
     expect(addendumForUnit(FIXTURE, "S-4")).toEqual([])
     expect(addendumForUnit(FIXTURE, "S-5@S03")).toEqual([])
+  })
+})
+
+describe("openAssumptionsFor - biến {{assumptions}} của elicit-loop (FLF-358)", () => {
+  /** FIXTURE: AS01 nfrs[id=N05].threshold (S-6.3), AS02 actors[id=A05].name (S-2.3), AS03 screens[id=S07].tabs (S-4.2). */
+  const withStatus = (status: Record<string, "unconfirmed" | "confirmed" | "rejected">): Spine => {
+    const spine = structuredClone(FIXTURE)
+    spine.assumptions = spine.assumptions.map((a) => ({ ...a, status: status[a.id] ?? a.status }))
+    return spine
+  }
+  const ids = (spine: Spine, unit: string) => openAssumptionsFor(spine, unit).map((a) => a.id)
+
+  it("chỉ giả định còn unconfirmed; dạng gửi model gồm id, path, statement, origin_step_id", () => {
+    const spine = withStatus({ AS01: "unconfirmed", AS02: "rejected" })
+    const as01 = spine.assumptions.find((a) => a.id === "AS01")!
+    expect(openAssumptionsFor(spine, "S-6.3")).toEqual([{ id: "AS01", path: as01.path, statement: as01.statement, origin_step_id: "S-6.3" }])
+    expect(ids(spine, "B-1")).toEqual(["AS01"])
+  })
+
+  it("Brief và S-1 (step hoặc đơn vị giai đoạn) ⇒ mọi giả định còn mở", () => {
+    const spine = withStatus({ AS01: "unconfirmed", AS02: "unconfirmed", AS03: "unconfirmed" })
+    for (const unit of ["B-1", "B-2.3", "S-1", "S-1.1"]) expect(ids(spine, unit)).toEqual(["AS01", "AS02", "AS03"])
+  })
+
+  it("step khác ⇒ do chính step sinh ra, hoặc path thuộc section step nuôi", () => {
+    const spine = withStatus({ AS01: "unconfirmed", AS02: "unconfirmed", AS03: "unconfirmed" })
+    expect(ids(spine, "S-6.3")).toContain("AS01")
+    expect(ids(spine, "S-4.2")).toContain("AS03")
+    // AS02 (sinh ở S-2.3) xuất hiện ở mọi step nuôi section chứa actors[id=A05].name, và chỉ ở đó
+    const owner = new Set(sectionsOfPath(spine, "actors[id=A05].name").owner)
+    expect(owner.size).toBeGreaterThan(0)
+    for (const step of orderedSteps(spine).filter((s) => !/^(B-|S-1\.|S-2\.3$)/.test(s.id))) {
+      const touches = sectionsFedBy(spine, step.id).some((section) => owner.has(section))
+      expect(ids(spine, step.id).includes("AS02"), step.id).toBe(touches)
+    }
+  })
+
+  it("đơn vị giai đoạn ⇒ gộp theo mọi bước của giai đoạn", () => {
+    const spine = withStatus({ AS01: "unconfirmed", AS03: "unconfirmed" })
+    expect(ids(spine, "S-6")).toContain("AS01")
+    expect(ids(spine, "S-4")).toContain("AS03")
+    expect(ids(spine, "S-6")).not.toContain("AS03")
+  })
+
+  it("assumptionsForPrompt: không có ⇒ (none)", () => {
+    expect(assumptionsForPrompt(FIXTURE, "S-6.3")).toBe("(none)")
+    expect(assumptionsForPrompt(withStatus({ AS01: "unconfirmed" }), "S-6.3")).toHaveLength(1)
+  })
+})
+
+describe("FLF-413 - khung của mẫu không vào projection", () => {
+  it("S-4.1 / S-4.4 không thấy tính năng / chức năng tên chỗ điền", () => {
+    const spine: Spine = structuredClone(FIXTURE)
+    spine.features = [...spine.features, { id: "F-3.2", name: "<<Feature Name 1>>", order: spine.features.length }]
+    spine.functions = [...spine.functions, { ...spine.functions[0], id: "FR-3.2.1", feature_id: "F-3.2", screen_id: null, order: 0, name: "<<Function Name 1>>", validations: [] }]
+    for (const stepId of ["S-4.1", "S-4.4"]) {
+      const text = JSON.stringify(projectStep(spine, stepId).projection)
+      expect(text, stepId).not.toContain("<<")
+    }
+    expect(JSON.stringify(projectStep(spine, "S-4.1").projection)).toContain(FIXTURE.features[0].name)
+  })
+})
+
+describe("componentLevelProjection (FLF-418)", () => {
+  const KEY = "entities[feature_ids~@loopFeatures]:id,name,feature_ids"
+
+  it("S-5.4 mức component: thêm sequence_level + entity của các feature trong vòng màn", () => {
+    const extra = componentLevelProjection(FIXTURE, "S-5.4@S01", "component")
+    expect(extra.sequence_level).toBe("component")
+    const features = new Set(FIXTURE.functions.filter((f) => f.screen_id === "S01").map((f) => f.feature_id))
+    const entities = extra[KEY] as { id: string; feature_ids: string[] }[]
+    expect(entities.map((e) => e.id)).toContain("E01")
+    expect(entities.every((e) => e.feature_ids.some((id) => features.has(id)))).toBe(true)
+  })
+
+  it("vòng @nonscreen: entity theo feature của các function không màn", () => {
+    const entities = componentLevelProjection(FIXTURE, "S-5.4@nonscreen", "component")[KEY] as { feature_ids: string[] }[]
+    const features = new Set(FIXTURE.functions.filter((f) => f.screen_id === null).map((f) => f.feature_id))
+    expect(entities.every((e) => e.feature_ids.some((id) => features.has(id)))).toBe(true)
+  })
+
+  it("mức system hoặc step khác S-5.4 ⇒ không thêm gì", () => {
+    expect(componentLevelProjection(FIXTURE, "S-5.4@S01", "system")).toEqual({})
+    expect(componentLevelProjection(FIXTURE, "S-5.2@S01", "component")).toEqual({})
+  })
+})
+
+describe("P05 - S-3 / S-4 thấy ý tưởng gốc của Brief (quy mô user nêu)", () => {
+  const withCore = (): Spine => {
+    const s = structuredClone(FIXTURE)
+    const base = s.addendum[0] ?? ({ id: "AD0", topic: "x", target_section: "fixed:1", content: "", content_en: "" } as never)
+    s.addendum = [
+      ...s.addendum,
+      { ...base, id: "AD900", topic: "vision", target_section: "fixed:1", content: "Bản đầu gọn, khoảng 5–8 use case", content_en: "A lean first release, about 5-8 use cases" },
+      { ...base, id: "AD901", topic: "goals", target_section: "fixed:1", content: "Giảm 60% lịch đặt qua điện thoại", content_en: "Cut phone bookings by 60%" }
+    ]
+    return s
+  }
+  it("S-3.2 nạp vision + goals lõi dù không thuộc section bước nuôi; S-5 không", () => {
+    const ids = projectStep(withCore(), "S-3.2").addendum.map((a) => a.id)
+    expect(ids).toEqual(expect.arrayContaining(["AD900", "AD901"]))
+    const loopStep = projectStep(withCore(), "S-5.2@S01").addendum.map((a) => a.id)
+    expect(loopStep).not.toContain("AD900")
+  })
+
+  it("E2E 17/11: ghi chú quy mô bị gán sang mục khác (3.1.2) vẫn tới S-3.2; ghi chú không nêu số thì không", () => {
+    const s = withCore()
+    const base = s.addendum[s.addendum.length - 1]
+    s.addendum = [
+      ...s.addendum,
+      { ...base, id: "AD902", topic: "Phạm vi bản đầu", target_section: "fixed:3.1.2", content: "Bản đầu gọn, khoảng 5-8 use case; chưa làm app mobile", content_en: "" },
+      { ...base, id: "AD903", topic: "Giá trị", target_section: "fixed:3.1.2", content: "Nhân viên không phải chép đơn từ Zalo", content_en: "" }
+    ]
+    const ids = projectStep(s, "S-3.2").addendum.map((a) => a.id)
+    expect(ids).toContain("AD902")
+    expect(ids).not.toContain("AD903")
+    expect(ids.filter((id) => id === "AD900")).toHaveLength(1)
+  })
+
+  it("isScaleNote nhận các cách nêu quy mô", () => {
+    for (const content of ["khoảng 5-8 use case", "tối đa 10 màn hình", "5 đến 8 chức năng", "about 8 screens", "12 UC"]) {
+      expect(isScaleNote({ content, content_en: "" })).toBe(true)
+    }
+    for (const content of ["giao trong bán kính 5km", "60% đơn tự đặt", "dùng chức năng tìm kiếm"]) {
+      expect(isScaleNote({ content, content_en: "" })).toBe(false)
+    }
   })
 })

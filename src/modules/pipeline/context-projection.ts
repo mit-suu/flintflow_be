@@ -15,16 +15,22 @@
  *   `functions:id,name,screen_id`    chỉ lấy vài field của mỗi phần tử
  */
 
-import type { Addendum, Spine } from "../spine/spine.types.js"
+import type { Addendum, Assumption, Spine } from "../spine/spine.types.js"
 import * as repository from "../spine/spine.repository.js"
-import { isBriefPhase } from "../spine/brief-core.js"
-import { listSections, stepsOf } from "../spine/section-registry.js"
+import { briefCoreEntries, isBriefPhase } from "../spine/brief-core.js"
+import { isTemplateFrame } from "../spine/template-frames.js"
+import { listSections, sectionsOfPath, stepsOf } from "../spine/section-registry.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
-import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
+import { buildDocumentContext, stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
+import { stepDocumentQuery } from "./step-document-query.js"
 import { ChatSession } from "../project/chat-session.model.js"
-import { DOCUMENTS_READ, getStep } from "./step-registry.js"
+import { DOCUMENTS_READ, getStep, orderedSteps } from "./step-registry.js"
+import { buildTemplateStepContext, loadTemplateContext } from "./template-guidance.js"
 import { buildConversationSummary, formatRecentTurns, type TranscriptMessage } from "./conversation-summary.js"
+import { Project } from "../project/project.model.js"
+import { sequenceLevelOf, type SequenceLevel } from "../../shared/diagram/sequence-level.js"
+import mongoose from "mongoose"
 
 export { STEP_NOT_FOUND } from "./step-registry.js"
 
@@ -122,12 +128,15 @@ const resolveFilterValue = (spine: Spine, value: string, loop: string | null): s
   return value
 }
 
+const FRAME_COLLECTIONS = new Set(["features", "functions"])
+
 const selectValue = (spine: Spine, selector: Selector, loop: string | null): unknown => {
   let node: unknown = spine
   for (const key of selector.path) node = isRecord(node) ? node[key] : undefined
 
   if (Array.isArray(node)) {
-    let items = node
+    // FLF-413: khung `<<Feature Name 1>>` của mẫu không phải dữ liệu — model không thấy, không sửa (lấp khi accept S-4.1)
+    let items = selector.path.length === 1 && FRAME_COLLECTIONS.has(selector.path[0]) ? node.filter((el) => !(isRecord(el) && isTemplateFrame(el))) : node
     if (selector.filter) {
       const { key, negate, value } = selector.filter
       const expected = resolveFilterValue(spine, value, loop)
@@ -171,9 +180,28 @@ const addendumFor = (spine: Spine, stepId: string): Addendum[] => {
   const { phase } = parseStepId(stepId)
   // Brief và S-1 đọc toàn bộ addendum (Phases §6.1 "Input từ Brief")
   if (phase.startsWith("B-") || phase === "S-1") return spine.addendum
+  // P13 (E2E P05 #3): S-2.2 ghi phạm vi bản 1.0 nên phải thấy giới hạn quy mô user đặt ("bản đầu gọn, khoảng 5-8 use case")
+  // dù B-2.2 gán ghi chú đó sang mục khác (3.1.2) — trước đây S-2.2 không thấy, `release_scope` mất con số.
+  if (phase === "S-2") return spine.addendum.filter((a) => sectionsFedBy(spine, stepId).includes(a.target_section) || isScaleNote(a))
+
   const sections = new Set(sectionsFedBy(spine, stepId))
-  return spine.addendum.filter((a) => sections.has(a.target_section))
+  const fed = spine.addendum.filter((a) => sections.has(a.target_section))
+  // P05 (BarberGo #3, #11): S-3 / S-4 dựng use case, màn, chức năng — phải thấy ý tưởng gốc bằng chính lời user (tầm nhìn + mục tiêu
+  // lõi), nơi user nêu quy mô ("bản đầu gọn, khoảng 5–8 use case"). Trước đây chỉ thấy addendum của section bước nuôi ⇒ sinh 16 use case.
+  if (phase !== "S-3" && phase !== "S-4") return fed
+  const core = briefCoreEntries(spine)
+  // E2E P05 17/11: ghi chú quy mô ("Bản đầu gọn, khoảng 5-8 use case") bị B-2 "Sắp xếp ghi chú" gán sang 3.1.2 và S-2 bỏ con số
+  // khỏi release_scope ⇒ S-3.2 không thấy trần, sinh 16 use case. Ghi chú nêu quy mô bằng số luôn đi kèm, gán mục nào cũng vậy.
+  const scale = spine.addendum.filter(isScaleNote)
+  const extra = [core.vision, ...core.goals, ...scale].filter(
+    (a, i, all): a is Addendum => a !== null && !fed.some((f) => f.id === a.id) && all.findIndex((b) => b?.id === a.id) === i
+  )
+  return [...extra, ...fed]
 }
+
+/** Ghi chú Brief nêu quy mô bằng con số: "khoảng 5-8 use case", "tối đa 10 màn hình", "~20 chức năng", "8 screens". */
+const SCALE_NOTE = /\d+\s*(?:(?:-|–|~|đến|tới|to)\s*\d+\s*)?(?:use[\s-]?cases?\b|uc\b|màn(?:\s*hình)?\b|screens?\b|chức\s*năng\b|functions?\b)/iu
+export const isScaleNote = (a: Pick<Addendum, "content" | "content_en">): boolean => SCALE_NOTE.test(a.content) || SCALE_NOTE.test(a.content_en ?? "")
 
 /**
  * Addendum cho lượt hỏi không có `StepContext` (phỏng vấn đầu giai đoạn, chat tự do) — `unit` là step (`B-1.3`) hoặc
@@ -184,6 +212,47 @@ export const addendumForUnit = (spine: Spine, unit: string): AddendumForModel[] 
   const phase = unit.split("@")[0].replace(/\.\d+$/, "")
   if (!phase.startsWith("B-") && phase !== "S-1") return []
   return spine.addendum.map(({ id, topic, target_section, content_en }) => ({ id, topic, target_section, content_en }))
+}
+
+export interface AssumptionForModel {
+  id: string
+  path: string
+  statement: string
+  origin_step_id: string
+}
+
+/** `origin_step_id` có thể ghi kèm vòng (`S-5.2@S03`) hoặc không (`S-5.2`): không ghi vòng ⇒ coi như khớp mọi vòng. */
+const sameLoop = (origin: string | null, loop: string | null): boolean => origin === null || origin === loop
+
+/**
+ * FLF-358: giả định còn `unconfirmed` chạm tới `unit` — biến `{{assumptions}}` của `elicit-loop`. `unit` là step
+ * (`S-3.1`, `S-5.2@S03`) hoặc đơn vị giai đoạn (`B-1`, `S-5@S03`) như `addendumForUnit`.
+ *
+ * Liên quan = do chính step (giai đoạn) sinh ra, hoặc `path` của nó là field của section mà step (giai đoạn) nuôi. Brief
+ * và S-1 thấy toàn bộ, cùng lý lẽ với addendum. Đã xác nhận/bác bỏ thì không đưa: đó là điều đã chốt, nằm ở projection.
+ */
+export const openAssumptionsFor = (spine: Spine, unit: string): AssumptionForModel[] => {
+  const { base, phase, loop } = parseStepId(unit)
+  const open = spine.assumptions.filter((a) => a.status === "unconfirmed")
+  const pick = ({ id, path, statement, origin_step_id }: Assumption): AssumptionForModel => ({ id, path, statement, origin_step_id })
+  if (phase.startsWith("B-") || phase === "S-1") return open.map(pick)
+
+  const phaseUnit = base === phase
+  const steps = phaseUnit ? orderedSteps(spine).filter((s) => s.phase === phase && s.loop === loop).map((s) => s.id) : [unit]
+  const fed = new Set(steps.flatMap((id) => sectionsFedBy(spine, id)))
+  return open
+    .filter((a) => {
+      const origin = parseStepId(a.origin_step_id)
+      if ((phaseUnit ? origin.phase === phase : origin.base === base) && sameLoop(origin.loop, loop)) return true
+      return sectionsOfPath(spine, a.path).owner.some((section) => fed.has(section))
+    })
+    .map(pick)
+}
+
+/** Giá trị cho `promptVariables.assumptions`: rỗng ⇒ `(none)`, như `documents`. */
+export const assumptionsForPrompt = (spine: Spine, unit: string): AssumptionForModel[] | "(none)" => {
+  const open = openAssumptionsFor(spine, unit)
+  return open.length > 0 ? open : "(none)"
 }
 
 /**
@@ -219,7 +288,10 @@ const readsWholeAssumptions = (raw: string): boolean =>
  * AI tự quyết hỏi nhiều hay ít, nên field này luôn null — để trong projection thì mọi step đọc `project`
  * đều thấy một "field trống" và gọi elicit vô ích, còn model thì hỏi user cách làm việc.
  */
-const RETIRED_FIELDS: Readonly<Record<string, readonly string[]>> = { project: ["working_mode"] }
+const RETIRED_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  // FLF-337: `skip_confirm_sections` là cài đặt duyệt (mặc định `[]`), không phải nội dung — rỗng không phải "thiếu"
+  project: ["working_mode", "skip_confirm_sections"]
+}
 
 const withoutRetiredFields = (selector: Selector, value: unknown): unknown => {
   const retired = RETIRED_FIELDS[selector.path.join(".")]
@@ -229,6 +301,15 @@ const withoutRetiredFields = (selector: Selector, value: unknown): unknown => {
 
 /** Pha Brief không còn sở hữu `project.vision/goals` (nằm ở addendum lõi, S-1.1 dựng): không bao giờ là field "thiếu" của step B-*. */
 const BRIEF_UNOWNED_FIELDS: ReadonlySet<string> = new Set(["project.vision", "project.goals"])
+
+/**
+ * P07: gốc đọc thêm theo step mà không đổi `reads` của registry (hợp đồng đóng băng), không tính vào `emptyFields`.
+ * S-7.3 cần phạm vi bản phát hành để câu thông báo không nhắc kênh / tính năng chưa có ở bản 1.0 (e2e flf-413 #12:
+ * "đã gửi qua email và Zalo OA" khi Zalo nằm ngoài phạm vi).
+ */
+export const STEP_EXTRA_READS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  "S-7.3": ["project.release_scope"]
+})
 
 /** Phần thuần của `buildStepContext` — không DB. */
 export const projectStep = (spine: Spine, stepId: string): StepProjection => {
@@ -242,6 +323,10 @@ export const projectStep = (spine: Spine, stepId: string): StepProjection => {
     const value = withoutRetiredFields(selector, selectValue(spine, selector, loop))
     projection[raw] = value
     emptyFields.push(...emptyPaths(selector, value))
+  }
+  for (const raw of STEP_EXTRA_READS[getStep(stepId).template_id] ?? []) {
+    if (raw in projection) continue
+    projection[raw] = selectValue(spine, parseSelector(raw), loop)
   }
   if (isBriefPhase(stepId)) {
     const kept = emptyFields.filter((field) => !BRIEF_UNOWNED_FIELDS.has(field))
@@ -270,6 +355,30 @@ export const projectStep = (spine: Spine, stepId: string): StepProjection => {
   }
 }
 
+/**
+ * FLF-418: S-5.4 của dự án vẽ Sequence mức thành phần cần thêm `sequence_level` và entity của các feature trong vòng (lifeline
+ * `entity` của `component_interactions`). Mức nằm ở Project (ngoài Spine) nên chèn ở đây — không đổi `reads` của registry.
+ * Mức system ⇒ không thêm gì (model không viết `component_interactions`).
+ */
+export const componentLevelProjection = (spine: Spine, stepId: string, level: SequenceLevel): Record<string, unknown> => {
+  if (level !== "component" || getStep(stepId).template_id !== "S-5.4") return {}
+  const { loop } = parseStepId(stepId)
+  const screenId = loop === null || loop === "nonscreen" ? null : loop
+  const features = new Set(spine.functions.filter((f) => f.screen_id === screenId).map((f) => f.feature_id))
+  return {
+    sequence_level: "component",
+    "entities[feature_ids~@loopFeatures]:id,name,feature_ids": spine.entities
+      .filter((e) => (e.feature_ids ?? []).some((id) => features.has(id)))
+      .map(({ id, name, feature_ids }) => ({ id, name, feature_ids: feature_ids ?? [] }))
+  }
+}
+
+/** Mức Sequence của dự án — chỉ đọc khi step là S-5.4; chưa nối DB / id lạ ⇒ mặc định. */
+const loadSequenceLevel = async (projectId: string, stepId: string): Promise<SequenceLevel> => {
+  if (getStep(stepId).template_id !== "S-5.4" || mongoose.connection.readyState !== 1 || !mongoose.isValidObjectId(projectId)) return sequenceLevelOf(null)
+  return sequenceLevelOf(await Project.findById(projectId).select("sequenceLevel").lean())
+}
+
 // ─── có DB ───────────────────────────────────────────────────────
 
 /** Projection dành riêng cho vòng hỏi: projection của step + các gốc đã chốt (BUG-19). */
@@ -286,6 +395,11 @@ export const elicitProjection = (spine: Spine, stepId: string): Record<string, u
 
 export interface StepContext extends StepProjection {
   documents: string
+  /**
+   * FLF-378 (luồng C): hướng dẫn / ví dụ / ngữ cảnh của mẫu bắt buộc cho các mục bước này soạn — nối vào `content_guidance`.
+   * Không có (dự án khác) ⇒ vắng.
+   */
+  templateGuidance?: string
   documentTokens: number
   transcriptTail: string
   /** Ước lượng token input (ký tự / 4) — ghi vào usage cho T22 đo. */
@@ -355,12 +469,27 @@ export const buildStepContext = async (projectId: string, stepId: string, option
 
   const { projectId: _projectId, ...spine } = record
   const projected = projectStep(spine, stepId)
+  // FLF-378: mẫu bắt buộc của dự án mới — hướng dẫn / ví dụ / ngữ cảnh theo mục; mục riêng của mẫu ⇒ thấy + ghi được
+  const template = buildTemplateStepContext(await loadTemplateContext(projectId), stepId, spine)
+  if (template.customSections.length) {
+    projected.projection = { ...projected.projection, custom_sections: template.customSections }
+    projected.writable = [...projected.writable, ...template.customSections.map((c) => `custom_sections[id=${c.id}]`)]
+  }
+  if (template.slotWrites.length) {
+    projected.projection = { ...projected.projection, ...template.slotProjection }
+    projected.writable = [...new Set([...projected.writable, ...template.slotWrites])]
+  }
+  const componentLevel = componentLevelProjection(spine, stepId, await loadSequenceLevel(projectId, stepId))
+  if (Object.keys(componentLevel).length) projected.projection = { ...projected.projection, ...componentLevel }
   const transcriptTail = await loadTranscriptTail(options.sessionId, stepId)
   const base = JSON.stringify(projected.projection) + JSON.stringify(projected.addendum) + transcriptTail
-  const docs = await buildDocumentContext(projectId, ActionType.DRAFT, stepId, estimateTokens(base), options.modelName, options.maxOutputTokens)
+  // FLF-393: tài liệu vượt trần ⇒ chỉ đoạn của section step nuôi + đoạn BM25 theo nhãn step và câu trả lời của user
+  const retrieval = stepNeedsSourceDocuments(stepId) ? stepDocumentQuery(spine, stepId, sectionsFedBy(spine, stepId), transcriptTail) : null
+  const docs = await buildDocumentContext({ projectId, actionType: ActionType.DRAFT, stepId, ...(retrieval ?? {}) })
 
   return {
     ...projected,
+    ...(template.guidance ? { templateGuidance: template.guidance } : {}),
     documents: docs.contextText,
     documentTokens: docs.tokenCount,
     transcriptTail,

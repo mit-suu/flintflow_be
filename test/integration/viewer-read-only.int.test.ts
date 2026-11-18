@@ -35,6 +35,7 @@ describe("Viewer bị chặn ở mọi thao tác ghi", () => {
     ["post", "/api/v1/projects/" + projectId + "/release"],
     ["post", "/api/v1/projects/" + projectId + "/baseline"],
     ["post", "/api/v1/projects/" + projectId + "/flags/F-1/waive"],
+    ["post", "/api/v1/projects/" + projectId + "/flags/F-1/keep"],
     ["post", "/api/v1/projects/" + projectId + "/change-requests"],
     ["patch", "/api/v1/projects/" + projectId + "/name"],
     ["post", "/api/v1/projects/" + projectId + "/documents"],
@@ -50,20 +51,47 @@ describe("Viewer bị chặn ở mọi thao tác ghi", () => {
     }
   })
 
+  /** Việc chỉ Lead làm được: Analyst cũng 403, nhưng do `requireRole` của route chứ không do chốt Viewer. */
+  const leadOnly = (projectId: string): string[] => ["/api/v1/projects/" + projectId + "/baseline", "/api/v1/projects/" + projectId + "/release"]
+
   it("Analyst gọi đúng các endpoint đó thì không bị chốt này chặn", async () => {
+    const lead = new Set(leadOnly(seeded.projectId))
     for (const [method, path] of writes(seeded.projectId)) {
+      if (lead.has(path)) continue
       const res = await request(app)[method as "post" | "patch"](path).set(bearer(analyst)).send({})
       expect(res.body.error?.code, method.toUpperCase() + " " + path).not.toBe("ORG_ROLE_FORBIDDEN")
+    }
+  })
+
+  it("duyệt baseline là việc của Lead - Analyst cũng 403", async () => {
+    for (const path of leadOnly(seeded.projectId)) {
+      const res = await request(app).post(path).set(bearer(analyst)).send({})
+      expect(res.status, path).toBe(403)
+      expect(res.body.error.code, path).toBe("ORG_ROLE_FORBIDDEN")
     }
   })
 })
 
 describe("Viewer vẫn đọc được", () => {
-  it("xem danh sách dự án, Spine, tiến độ", async () => {
-    for (const path of ["/api/v1/projects", "/api/v1/projects/" + seeded.projectId + "/spine", "/api/v1/projects/" + seeded.projectId + "/steps"]) {
+  it("xem danh sách dự án, chi tiết dự án, tiến độ", async () => {
+    for (const path of ["/api/v1/projects", "/api/v1/projects/" + seeded.projectId, "/api/v1/projects/" + seeded.projectId + "/progress"]) {
       const res = await request(app).get(path).set(bearer(viewer))
       expect(res.status, path).toBe(200)
     }
+  })
+
+  it("không đọc được dữ liệu làm việc (Spine, cờ, change, nguồn, chat, step) - UC-47", async () => {
+    for (const suffix of ["/spine", "/flags", "/changes", "/sources", "/documents", "/chats", "/steps", "/change-requests"]) {
+      const path = "/api/v1/projects/" + seeded.projectId + suffix
+      const res = await request(app).get(path).set(bearer(viewer))
+      expect(res.status, path).toBe(403)
+      expect(res.body.error.code, path).toBe("ORG_ROLE_FORBIDDEN")
+    }
+  })
+
+  it("không tải được bản nháp (chỉ bản đã phát hành - UC-50)", async () => {
+    const res = await request(app).get("/api/v1/projects/" + seeded.projectId + "/export/word?source=draft").set(bearer(viewer))
+    expect(res.status).toBe(403)
   })
 
   it("ghép tài liệu (chỉ dựng bản đọc) không bị chốt chặn", async () => {

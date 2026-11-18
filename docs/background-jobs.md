@@ -28,18 +28,43 @@ quyết định *ai chạy và khi nào*. Vì vậy mọi processor phải chạ
 | Queue | Job | Chống trùng | Retry | Song song |
 |---|---|---|---|---|
 | `import` | `extract` (I-4), `finalize` (1.10–1.12 / resume `checking`) | `extract-<importId>`, `finalize-<importId>` | 2 lần, backoff 30 s | `JOB_IMPORT_CONCURRENCY` (2) |
+| `import` | `reread-images` (FLF-360: đọc lại ảnh sơ đồ sau bản 0.1) | `reread-<importId>-<lượt>` | không retry của queue — job tự hẹn lượt sau theo `IMPORT_REREAD_JOB_DELAYS_MS` | `JOB_IMPORT_CONCURRENCY` (2) |
 | `embedding` | `sync` | `embed-<projectId>`, gộp lượt khi đang chạy (`keepLastIfActive`) | 3 lần, backoff 10 s | 1 |
 | `email` | `otp`, `invitation` | không | OTP 3 lần / 5 s; mời 5 lần / 30 s | 5 |
-| `system` | `topup-resume` (chạy tiếp mode 1 sau khi nạp tiền), `expire-reservations` (mỗi phút) | `topup-<intentId>` | 3 lần | 4 |
+| `system` | `topup-resume` (chạy tiếp mode 1 sau khi nạp tiền), `expire-reservations` (mỗi phút), `renew-subscriptions` (mỗi giờ, UC-80: gói hết kỳ ⇒ Pro về Free, nạp ví tới hạn mức) | `topup-<intentId>` | 3 lần | 4 |
 
 Vì sao chạy lại được an toàn:
 - **I-4** đi tiếp từ `extract_cursor`, nên section đã trích không gọi AI lại.
 - **Finalize** khi retry làm đúng như người dùng bấm "Tiếp tục": hoàn về mốc (`finalize_checkpoint`) rồi chạy lại. Nếu
   đã sang `checking` thì chỉ chạy phần 1.11–1.12 còn thiếu.
 - **Embedding** chỉ embed phần tử có `text_hash` thay đổi.
+- **Đọc lại ảnh** (`reread-images`) chỉ đọc ảnh còn `diagram_images.kind = unavailable`; ảnh đã ghi vào Spine đổi sang loại
+  thật nên lượt chạy lại không ghi lần hai.
 - **Lỗi nghiệp vụ** (`ApiError` 4xx như sai trạng thái hay hết credit) **không retry**, vì chạy lại cũng không khá hơn.
 - **Hết lượt retry** thì `onFinalFailure` đưa nghiệp vụ về trạng thái nhất quán, ví dụ `paused: resume_later` cho
   import, hoặc in OTP ra console như trước.
+
+### Finalize không treo im lặng (FLF-391)
+
+Job còn trong queue chưa chắc là job còn chạy: treo ở một bước, hoặc tiến trình chết mà chưa có worker dọn job stalled,
+đều để job ở `active`. Trước đây `GET /import` chỉ hỏi "còn job không" nên import kẹt `baselining` vô hạn, FE không có nút
+"Tiếp tục". Job `finalize` (cả lượt kiểm tra 1.11–1.12) nay có:
+
+| Cơ chế | Env (mặc định) | Hành vi |
+|---|---|---|
+| Đứng im quá lâu (treo trong tiến trình sống) | `FINALIZE_IDLE_TIMEOUT_MS` (15 phút) | Đồng hồ đặt lại sau mỗi bước finalize, mỗi lượt AI kiểm tra, mỗi diagram; quá hạn ⇒ lỗi tạm thời ⇒ retry; hết lượt ⇒ `paused: resume_later` (ở `baselining` còn hoàn về mốc). Lần chạy chậm mà vẫn tiến không bị cắt |
+| Nhịp tim | `FINALIZE_HEARTBEAT_MS` (30 s) | Lần chạy ghi `finalize_heartbeat_at` lên import (không đổi `updatedAt`) |
+| Ngưỡng coi là mất (tiến trình chết) | `FINALIZE_STALE_MS` (5 phút) | Job `active` mà nhịp tim cũ hơn ngưỡng (bản ghi cũ: lần cập nhật cuối) ⇒ `GET /import` gắn `paused: resume_later`; job đang chờ / chờ retry không tính |
+| Mã lần chạy | — | Mỗi lần bật job sinh `finalize_run_id` (lần thử n > 1: `<mã>#n`, hết giờ ⇒ mã bị vô hiệu ngay). Resume gỡ khoá job kẹt (`releaseJobKey`, chỉ khi khoá còn trỏ đúng job đó) rồi bật lần mới; lần cũ thấy mã lệch thì dừng ở bước / lượt AI kế tiếp — không chạy chồng, không ghi bản 0.1 / baseline thứ hai, không dừng hộ lần mới |
+
+Mỗi bước finalize ghi một dòng log `[finalize] import <id>: <bước> xong sau <ms> (tổng <ms>)` để biết bước nào chậm.
+Số đo SRS ~200 trang (3.775 block, 40 màn, 99 function), không vẽ diagram: 1.10 ≈ 53 s, kiểm tra 1.11 ≈ 74 s. Vẽ diagram
+(PlantUML bật, wireframe từng màn có gọi AI) chạy tuần tự từng hình nên có thể tới hàng chục phút — mỗi hình xong đặt lại
+đồng hồ đứng im nên không bị cắt.
+
+Còn chấp nhận: lần chạy cũ có thể thắng lần mới ở khoảng hẹp giữa lượt kiểm mã cuối và lúc ghi DocVersion 0.1 — index duy
+nhất + khoá `spine_version` không cho có bản thứ hai, lần mới lỗi rồi retry (hoàn về mốc) tự sửa. Job tạo bởi bản code trước
+FLF-391 (không có nhịp tim) chạy quá 5 phút bị coi là mất khi deploy chồng — chỉ ảnh hưởng lượt deploy đầu.
 
 ## Hai driver (`JOB_DRIVER`)
 
@@ -52,6 +77,23 @@ Code nằm ở `src/shared/queue/`:
 - `job-runner.ts`: `defineJob`, `startJob`, `enqueueJob`, `isJobActive`, `waitForJob`
 - `workers.ts`: worker, graceful shutdown
 - `board.ts`: Bull Board
+
+### Đọc lại ảnh sơ đồ sau bản 0.1 (`import/reread-images`, FLF-360)
+
+AI quá tải lúc import thì I-4 tự đọc lại lô chữ và ảnh ngay trong lượt (giãn cách `IMPORT_AI_RETRY_BACKOFF_MS`). Ảnh vẫn
+chưa đọc được sau lượt đó thì finalize hẹn job này (`reread-jobs.ts`), chạy nền tự động, người dùng không bấm gì:
+
+- Lịch `IMPORT_REREAD_JOB_DELAYS_MS` (mặc định 2 phút, 10 phút, 30 phút, 1 giờ, 3 giờ). Mỗi lượt đọc mọi ảnh còn
+  `unavailable`. Còn ảnh lỗi tạm thời thì hẹn lượt kế. Hết lịch thì dừng, giữ ảnh gốc + cờ vàng `import_image_unread`.
+- Đọc được ⇒ một lô `by: import` có khoá lạc quan: dữ liệu ảnh vào Spine, khối ảnh gắn `diagram` (PlantUML cùng loại vẫn
+  ẩn), đóng cờ của ảnh đó, rồi `refreshSegmentHashes` (FLF-366) để đoạn chứa ảnh vẫn in nguyên văn. **Không tạo version mới.**
+- Spine vừa bị CR khác ghi (`SPINE_VERSION_CONFLICT`) ⇒ đọc lại Spine, dựng lại op, ghi thêm một lần; vẫn xung đột ⇒ để
+  lượt sau.
+- Hết credit ⇒ dừng job, giữ cờ, không chặn người dùng. Lượt lỗi được hoàn credit như mọi lượt gọi AI.
+- Driver `inline`: lịch chạy bằng `setTimeout` trong tiến trình API (`unref`, không giữ tiến trình sống). Máy chủ khởi động
+  lại thì lịch mất — ảnh giữ cờ vàng như trước FLF-360. Driver `bullmq`: job có `delay` trong Redis, worker khởi động lại
+  vẫn chạy.
+- Test đặt `IMPORT_REREAD_JOB_DELAYS_MS=""` (tắt) và gọi thẳng `runImageReread`.
 
 Danh sách module khai báo job nằm ở `src/jobs.ts`. **Thêm job mới thì phải thêm module của nó vào đây**, nếu không
 worker sẽ không biết processor.

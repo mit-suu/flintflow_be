@@ -93,15 +93,31 @@ router.post("/:projectId/comments/:commentId/replies", authMiddleware, commentCo
  * @swagger
  * /api/v1/projects/{projectId}/comments/{commentId}/resolve:
  *   post:
- *     summary: Đánh dấu comment đã xử lý, không đổi nội dung (Analyst, Lead)
+ *     summary: Kết luận một comment (Analyst, Lead) — đã sửa, hoặc giữ nguyên kèm lý do
+ *     description: |
+ *       Hai nhánh theo `business-flow.md §3.5`: `fixed` (đã nhờ AI sửa qua chat) hoặc `kept` (giữ nguyên,
+ *       **bắt buộc lý do**) — lý do là thứ Lead đọc khi duyệt lại, nên không nhận chuỗi rỗng.
+ *       Comment ghim vào mục có bước đã accepted ⇒ bước đó mở lại (`revision_requested`, UC-47).
+ *       Không đổi nội dung tài liệu (BR-05).
  *     tags: [Comments]
  *     security:
  *       - BearerAuth: []
  *     parameters:
  *       - { in: path, name: projectId, required: true, schema: { type: string } }
  *       - { in: path, name: commentId, required: true, schema: { type: string, example: CM-001 } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [kind]
+ *             properties:
+ *               kind: { type: string, enum: [fixed, kept] }
+ *               reason: { type: string, description: "Bắt buộc khi `kind = kept`, tối thiểu 10 ký tự" }
  *     responses:
- *       200: { description: "`Comment`" }
+ *       200: { description: "`Comment` kèm `resolution`" }
+ *       400: { description: VALIDATION_ERROR — giữ nguyên mà thiếu lý do }
  *       403: { description: ORG_ROLE_FORBIDDEN }
  *       404: { description: COMMENT_NOT_FOUND }
  *       409: { description: COMMENT_NOT_OPEN }

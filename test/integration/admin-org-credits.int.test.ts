@@ -44,7 +44,7 @@ beforeEach(async () => {
 const adjust = (amount: number, reason = "Bù cho sự cố hệ thống") =>
   request(app).patch("/api/v1/admin/orgs/" + orgId + "/credits").set(bearer(admin)).send({ amount, reason })
 
-describe("UC-68 — điều chỉnh credit tổ chức", () => {
+describe("UC-68 - điều chỉnh credit tổ chức", () => {
   it("cộng credit vào ví org và ghi lý do vào ledger", async () => {
     const before = await CreditWallet.findOne({ organizationId: orgId }).lean()
 
@@ -55,6 +55,16 @@ describe("UC-68 — điều chỉnh credit tổ chức", () => {
     const entry = await CreditTransaction.findOne({ organizationId: orgId, type: "admin_adjust" }).lean()
     expect(entry?.reason).toBe("Bù cho sự cố ngày 20/09")
     expect(entry?.amount).toBe(50)
+    expect(entry?.direction).toBe("credit")
+
+    const leadOrgToken = await authAs({ _id: lead.id, email: lead.email, orgId })
+    const txRes = await request(app).get("/api/v1/billing/transactions").set(bearer(leadOrgToken))
+    expect(txRes.status).toBe(200)
+    const adjustTx = (txRes.body.data as Array<{ type: string; direction?: string | null; amount: number }>).find(
+      (item) => item.type === "admin_adjust"
+    )
+    expect(adjustTx?.direction).toBe("credit")
+    expect(adjustTx?.amount).toBe(50)
   })
 
   it("trừ credit được, nhưng không cho số dư xuống âm", async () => {
@@ -62,6 +72,9 @@ describe("UC-68 — điều chỉnh credit tổ chức", () => {
     const balance = wallet?.balance ?? 0
 
     expect((await adjust(-10)).status).toBe(200)
+    const debitEntry = await CreditTransaction.findOne({ organizationId: orgId, type: "admin_adjust" }).sort({ createdAt: -1 }).lean()
+    expect(debitEntry?.amount).toBe(10)
+    expect(debitEntry?.direction).toBe("debit")
 
     const tooMuch = await adjust(-(balance * 10))
     expect(tooMuch.status).toBe(409)
@@ -94,6 +107,12 @@ describe("UC-68 — điều chỉnh credit tổ chức", () => {
     })
     expect(note?.body).toContain("Khuyến mãi tháng 9")
     expect(String(note?.organizationId)).toBe(orgId)
+    expect(note?.meta).toMatchObject({
+      organizationId: orgId,
+      organizationName: "Org A",
+      amount: 25,
+      reason: "Khuyến mãi tháng 9"
+    })
   })
 
   it("ledger và ví tạo tại chỗ (org cũ chưa có ví) ghi đúng người tạo org, không ghi id của org", async () => {
@@ -134,7 +153,7 @@ describe("UC-68 — điều chỉnh credit tổ chức", () => {
   })
 })
 
-describe("UC-65 — xem user thuộc org nào", () => {
+describe("UC-65 - xem user thuộc org nào", () => {
   it("chi tiết user liệt kê org, vai trò và ví của từng org", async () => {
     const res = await request(app).get("/api/v1/admin/users/" + lead.id).set(bearer(admin))
 

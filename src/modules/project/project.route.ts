@@ -5,7 +5,8 @@ import * as chatSessionController from "./chat-session.controller.js"
 import * as projectDocumentController from "./project-document.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
 import { requireRole } from "../../shared/auth/require-role.middleware.js"
-import { CreateProjectSchema, MoveProjectSchema, UpdateDocumentLanguageSchema, validateRequest } from "./project.validation.js"
+import { receiveDocx } from "../import/import.controller.js"
+import { CreateProjectSchema, MoveProjectSchema, UpdateDocumentLanguageSchema, UpdateErdNotationSchema, UpdateSequenceLevelSchema, UpdateScreenThemeSchema, RunScreenMockupsSchema, DisableScreenMockupsSchema, validateRequest } from "./project.validation.js"
 
 const router = Router()
 const upload = multer({
@@ -71,31 +72,115 @@ const upload = multer({
  *               folderId:
  *                 type: string
  *                 description: Tạo thẳng trong thư mục của user (404 FOLDER_NOT_FOUND nếu không thuộc user)
+ *               has_srs_file:
+ *                 type: boolean
+ *                 description: "Hộp Tạo dự án hai ô: có tải file SRS không. Có trường này thì source / has_required_template / mode bị bỏ qua (false ⇒ fpt; true ⇒ import, start_kind=existing)"
+ *               complete_to_standard:
+ *                 type: boolean
+ *                 description: "Chỉ khi has_srs_file=true: tick \"Bổ sung các mục còn thiếu theo mẫu chuẩn FlintFlow\" ⇒ template_intent=free; không gửi / false ⇒ fixed (giữ khung file)"
+ *               source:
+ *                 type: string
+ *                 enum: [new, existing]
+ *                 description: "FLF-335: dự án mới / dự án có sẵn — BE suy ra mode (mới không mẫu ⇒ fpt; mới có mẫu bắt buộc hoặc có sẵn ⇒ import)"
+ *               has_required_template:
+ *                 type: boolean
+ *                 description: "Chỉ với source=new: khách có bắt buộc theo một mẫu không (có ⇒ import, template_intent=fixed)"
  *               mode:
  *                 type: string
  *                 enum: [import, fpt, customer_template]
  *                 default: fpt
- *                 description: "Cách làm SRS: import = upload SRS có sẵn rồi sửa (mode 1), fpt = sinh theo template FPT (mode 2), customer_template = chưa hỗ trợ"
+ *                 description: "Client cũ: cách làm SRS gửi thẳng; có source thì bỏ qua. customer_template quy về import + mẫu bắt buộc"
  *               documentLanguage:
  *                 type: string
  *                 enum: [vi, en]
  *                 description: "Ngôn ngữ xem trước + .docx (FLF-265). Thiếu ⇒ ngôn ngữ tài khoản ⇒ en. Mode import bỏ qua — ngôn ngữ theo file upload"
  *     responses:
  *       201:
- *         description: Dự án đã được tạo thành công (kèm mode, import_state)
+ *         description: Dự án đã được tạo thành công (kèm mode, start_kind, has_required_template, template_intent, import_state)
  *       400:
  *         description: VALIDATION_ERROR — tên trống/quá dài hoặc mode không hợp lệ
  *       402:
  *         description: PLAN_LIMIT_PROJECTS — tổ chức đã đủ số dự án tối đa của gói (dự án đã xoá không tính)
  *       403:
  *         description: ORG_ROLE_FORBIDDEN — Viewer không tạo dự án
- *       501:
- *         description: mode customer_template chưa hỗ trợ (NOT_IMPLEMENTED)
+ *       401:
+ *         description: Chưa xác thực
+ */
+/**
+ * @swagger
+ * /api/v1/projects:
+ *   get:
+ *     summary: Dự án của tổ chức đang mở — không có `page` ⇒ mảng (mới tạo trước); có `page` ⇒ một trang (FLF-404)
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         description: Bật phân trang; bỏ trống ⇒ trả mọi dự án như cũ
+ *         schema: { type: integer, minimum: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, maximum: 100, default: 24 }
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [active, archived] }
+ *       - in: query
+ *         name: mode
+ *         description: Chỉ khi có page
+ *         schema: { type: string, enum: [import, fpt, customer_template] }
+ *       - in: query
+ *         name: q
+ *         description: Chỉ khi có page — tìm tên không phân biệt dấu
+ *         schema: { type: string, maxLength: 100 }
+ *       - in: query
+ *         name: sort
+ *         description: Chỉ khi có page — created (mới tạo trước) · updated (sửa gần nhất) · opened (mở gần nhất, chưa mở xếp cuối)
+ *         schema: { type: string, enum: [created, updated, opened], default: created }
+ *       - in: query
+ *         name: folder
+ *         description: Chỉ khi có page — id thư mục, hoặc none = dự án ngoài thư mục
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: "Project[]; có page thì meta gồm page, limit, total, totalPages"
+ *       400:
+ *         description: VALIDATION_ERROR — tham số phân trang / lọc không hợp lệ
  *       401:
  *         description: Chưa xác thực
  */
 router.get("/", authMiddleware, projectController.getProjects)
 router.post("/", authMiddleware, validateRequest(CreateProjectSchema), projectController.createProject)
+
+/**
+ * @swagger
+ * /api/v1/projects/precheck-docx:
+ *   post:
+ *     summary: "Kiểm file có trông như SRS không (business-flow §3.6) — hộp Tạo dự án, ô Tài liệu tham khảo"
+ *     description: >
+ *       Code nhận diện như preflight I-1 (dấu version FlintFlow + loại tài liệu), không gọi AI, không lưu file. Chỉ .docx;
+ *       định dạng khác ⇒ `looks_like_srs: false`, `srs_suggestion: "none"`. Giới hạn kích thước như upload SRS. FLF-409:
+ *       `srs_suggestion` `strong` (dấu version / tiêu đề SRS / đủ hình thức SRS) ⇒ hỏi chuyển sang ô SRS, `possible` ⇒ nhắc nhẹ,
+ *       `none` ⇒ không gợi ý; `looks_like_srs` = `strong`.
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required: [file]
+ *             properties:
+ *               file: { type: string, format: binary }
+ *     responses:
+ *       200:
+ *         description: "`{ looks_like_srs: boolean, srs_suggestion: strong | possible | none, stamp: { project_id } | null }`"
+ *       400: { description: FILE_REQUIRED }
+ *       413: { description: FILE_TOO_LARGE }
+ */
+router.post("/precheck-docx", authMiddleware, requireRole("lead", "analyst"), receiveDocx, projectDocumentController.precheckDocument)
 
 /**
  * @swagger
@@ -113,7 +198,11 @@ router.post("/", authMiddleware, validateRequest(CreateProjectSchema), projectCo
  *           type: string
  *     responses:
  *       200:
- *         description: Danh sách tài liệu
+ *         description: >
+ *           Danh sách tài liệu đang dùng (FLF-398: bản đã bị thay không trả); mỗi bản kèm `replaces: [{ id, name, doc_code }]`
+ *           — các bản cũ nó đã thay
+ *           FLF-405: `meta { tokens_used, tokens_limit, tokens_per_upload_limit }` — token phần chữ của tài liệu còn hiệu lực
+ *           (bản đã bị thay, parse lỗi không tính) / trần tổng dự án theo gói / trần mỗi lần tải
  *       401:
  *         description: Chưa xác thực
  *   post:
@@ -138,15 +227,62 @@ router.post("/", authMiddleware, validateRequest(CreateProjectSchema), projectCo
  *               file:
  *                 type: string
  *                 format: binary
+ *               replace_document_id:
+ *                 type: string
+ *                 description: "FLF-398 — \"Thay bản cũ\": id tài liệu đang dùng mà file này thay (bản cũ thành `supersededBy`)"
+ *               keep_both:
+ *                 type: string
+ *                 enum: ["true"]
+ *                 description: "FLF-398 — \"Giữ cả hai\": không hỏi bản mới nữa (trùng hệt vẫn chặn)"
  *     responses:
  *       201:
- *         description: Upload thành công
+ *         description: "Upload thành công - tài liệu kèm `precheck { looks_like_srs, srs_suggestion, stamp, heading_overlap? }` (business-flow §3.6; `null` nếu kiểm lỗi)"
  *       400:
  *         description: File không hợp lệ
+ *       404:
+ *         description: "`DOCUMENT_NOT_FOUND` — `replace_document_id` không thuộc dự án"
+ *       413:
+ *         description: >
+ *           FLF-405 (business-flow §3.6) — trần một lần tải kiểm ngay sau khi trích chữ; trần dự án kiểm sau bước kiểm trùng /
+ *           hỏi bản mới (để "Thay bản cũ" được trừ token); cả hai trước khi lưu / upload / tóm tắt (không tốn credit):
+ *           `DOCUMENT_TOO_LONG` (vượt trần một lần tải `REFERENCE_MAX_TOKENS_PER_UPLOAD`, `meta { file, token_count, limit }`);
+ *           `PROJECT_DOCUMENT_QUOTA_EXCEEDED` (tổng tài liệu còn hiệu lực + file mới vượt trần dự án theo gói,
+ *           `meta { file, token_count, used, limit }`; "Thay bản cũ" trừ token bản bị thay). Multer quá 10 MB vẫn là `FILE_TOO_LARGE`
+ *       409:
+ *         description: >
+ *           FLF-398 — `DUPLICATE_DOCUMENT` (trùng hệt nội dung, `meta { document, superseded_by? }`, không lưu, không tóm tắt);
+ *           `POSSIBLE_NEW_VERSION` (cùng tên gốc / nội dung giống ≥ 70%, `meta { candidates: [{ id, name, doc_code, reason, similarity }] }`
+ *           — gửi lại kèm `replace_document_id` hoặc `keep_both`); `DOCUMENT_ALREADY_SUPERSEDED`
  *       401:
  *         description: Chưa xác thực
  */
 router.get("/:projectId/documents", authMiddleware, projectDocumentController.getDocuments)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/sources:
+ *   get:
+ *     summary: Nguồn tài liệu của từng yêu cầu (FLF-292) — phần tử Spine nào được viết từ đoạn nào của tài liệu upload
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: >
+ *           `{ sources: [{ path, step_id, updated_at, refs: [{ para_id, document_id, document_name, quote }] }] }` —
+ *           `path` như `functions[id=FN12]`; `para_id` như `D1-P03`; tài liệu đã xoá ⇒ `document_name: null`, `quote` vẫn còn
+ *       401:
+ *         description: Chưa xác thực
+ *       404:
+ *         description: Không tìm thấy dự án
+ */
+router.get("/:projectId/sources", authMiddleware, projectDocumentController.getSources)
 router.post(
   "/:projectId/documents",
   authMiddleware,
@@ -353,6 +489,278 @@ router.patch(
   validateRequest(UpdateDocumentLanguageSchema),
   projectController.setDocumentLanguage
 )
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/erd-notation:
+ *   patch:
+ *     summary: Đổi ký pháp ERD (§3.1.5) của dự án — không đổi Spine; ERD đã vẽ được vẽ lại bằng ký pháp mới
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [erdNotation]
+ *             additionalProperties: false
+ *             properties:
+ *               erdNotation:
+ *                 type: string
+ *                 enum: [chen, crowsfoot, idef1x]
+ *     responses:
+ *       200:
+ *         description: Dự án sau khi đổi (kèm erdNotation)
+ *       400:
+ *         description: VALIDATION_ERROR — giá trị ngoài chen/crowsfoot/idef1x hoặc có key lạ
+ *       403:
+ *         description: ORG_ROLE_FORBIDDEN (Viewer không đổi được)
+ *       404:
+ *         description: PROJECT_NOT_FOUND (không thuộc tổ chức)
+ */
+router.patch(
+  "/:projectId/erd-notation",
+  authMiddleware,
+  requireRole("lead", "analyst"),
+  validateRequest(UpdateErdNotationSchema),
+  projectController.setErdNotation
+)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/sequence-level:
+ *   patch:
+ *     summary: Đổi mức Sequence Diagram (FLF-418) của dự án — system (hộp đen) hoặc component (boundary / control / entity); không đổi Spine, sơ đồ đã vẽ được vẽ lại
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [sequenceLevel]
+ *             additionalProperties: false
+ *             properties:
+ *               sequenceLevel:
+ *                 type: string
+ *                 enum: [system, component]
+ *     responses:
+ *       200:
+ *         description: Dự án sau khi đổi (kèm sequenceLevel)
+ *       400:
+ *         description: VALIDATION_ERROR — giá trị ngoài system/component hoặc có key lạ
+ *       403:
+ *         description: ORG_ROLE_FORBIDDEN (Viewer không đổi được)
+ *       404:
+ *         description: PROJECT_NOT_FOUND (không thuộc tổ chức)
+ */
+router.patch(
+  "/:projectId/sequence-level",
+  authMiddleware,
+  requireRole("lead", "analyst"),
+  validateRequest(UpdateSequenceLevelSchema),
+  projectController.setSequenceLevel
+)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/screen-theme:
+ *   patch:
+ *     summary: Đổi theme mockup màn §3.x.y (màu chính, domain, nền tảng) — không đổi Spine; mockup đã vẽ được vẽ lại bằng spec đã lưu, không gọi AI
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             additionalProperties: false
+ *             minProperties: 1
+ *             properties:
+ *               primaryColor:
+ *                 type: string
+ *                 nullable: true
+ *                 pattern: '^#[0-9A-Fa-f]{6}$'
+ *               domain:
+ *                 type: string
+ *                 nullable: true
+ *                 description: Hostname hoặc URL (được chuẩn hoá thành hostname); rỗng / null ⇒ thanh địa chỉ chỉ hiện đường dẫn
+ *               platforms:
+ *                 type: array
+ *                 nullable: true
+ *                 minItems: 1
+ *                 items:
+ *                   type: string
+ *                   enum: [web, mobile]
+ *     responses:
+ *       200:
+ *         description: Dự án sau khi đổi (kèm screenTheme)
+ *       400:
+ *         description: VALIDATION_ERROR — màu không phải #RRGGBB, domain sai, nền tảng rỗng / trùng, key lạ hoặc body rỗng
+ *       403:
+ *         description: ORG_ROLE_FORBIDDEN (Viewer không đổi được)
+ *       404:
+ *         description: PROJECT_NOT_FOUND (không thuộc tổ chức)
+ */
+router.patch(
+  "/:projectId/screen-theme",
+  authMiddleware,
+  requireRole("lead", "analyst"),
+  validateRequest(UpdateScreenThemeSchema),
+  projectController.setScreenTheme
+)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/screen-mockups:
+ *   get:
+ *     summary: Dự án import - tóm tắt màn có ảnh gốc / đang dùng mockup; có `mode` ⇒ ước tính credit vẽ lại (không gọi AI)
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *       - { in: query, name: mode, schema: { type: string, enum: [system, original] } }
+ *       - { in: query, name: scope, schema: { type: string, enum: [screen, all] } }
+ *       - { in: query, name: screen_id, schema: { type: string } }
+ *     responses:
+ *       200:
+ *         description: "Không mode: { with_original, using_mockup, screens[], originals[{ screen_id, section_id, name }] }. Có mode: { screens, ai_calls, credits, reenable, groups: { draw[], reenable[], skip[] } } (màn đã đúng kiểu, spec còn khớp ⇒ không tính)"
+ *       400:
+ *         description: VALIDATION_ERROR | SCREEN_HAS_NO_ORIGINAL
+ *       404:
+ *         description: PROJECT_NOT_FOUND | SCREEN_NOT_FOUND
+ *   post:
+ *     summary: Vẽ lại ảnh gốc màn bằng mockup (kiểu chuẩn / theo bố cục ảnh gốc) - một màn hoặc mọi màn có ảnh gốc; kiểm credit trước khi chạy
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             additionalProperties: false
+ *             required: [mode, scope]
+ *             properties:
+ *               mode: { type: string, enum: [system, original] }
+ *               scope: { type: string, enum: [screen, all] }
+ *               screen_id: { type: string, description: "Một màn (scope = screen)" }
+ *               screen_ids: { type: array, items: { type: string }, description: "Nhiều màn một lượt (scope = screen), vd thử lại các màn lỗi" }
+ *     responses:
+ *       202:
+ *         description: "Lượt vẽ chạy nền đã bắt đầu - tiến độ ban đầu như GET …/screen-mockups/run"
+ *       409:
+ *         description: SCREEN_MOCKUP_RUNNING - dự án đang có lượt chạy
+ *       400:
+ *         description: VALIDATION_ERROR | SCREEN_HAS_NO_ORIGINAL
+ *       402:
+ *         description: INSUFFICIENT_CREDITS - meta { required, available }, không màn nào được vẽ
+ *       403:
+ *         description: ORG_ROLE_FORBIDDEN (Viewer)
+ *       404:
+ *         description: PROJECT_NOT_FOUND | SCREEN_NOT_FOUND
+ *       503:
+ *         description: SCREEN_MOCKUP_QUEUE_UNAVAILABLE - hàng đợi nền không phản hồi, lượt bị huỷ, không màn nào đổi
+ *   delete:
+ *     summary: Dùng lại ảnh gốc cho một màn / mọi màn (giữ hình mockup đã vẽ để bật lại không tốn credit)
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             additionalProperties: false
+ *             required: [scope]
+ *             properties:
+ *               scope: { type: string, enum: [screen, all] }
+ *               screen_id: { type: string }
+ *     responses:
+ *       200:
+ *         description: "{ disabled[] }"
+ *       403:
+ *         description: ORG_ROLE_FORBIDDEN (Viewer)
+ */
+router.get("/:projectId/screen-mockups", authMiddleware, projectController.screenMockupsInfo)
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/screen-mockups/run:
+ *   get:
+ *     summary: Tiến độ lượt vẽ lại mockup gần nhất (chạy nền); chưa từng chạy ⇒ data null
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *     responses:
+ *       200:
+ *         description: "{ run_id, status: running|done|cancelled|interrupted, stopping, total, completed, done[], failed[], fell_back_to_system[], pending[], suggested_color }"
+ * /api/v1/projects/{projectId}/screen-mockups/run/cancel:
+ *   post:
+ *     summary: Dừng lượt đang chạy - màn đang vẽ vẽ nốt, các màn còn lại không vẽ, không trừ credit
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *     responses:
+ *       200:
+ *         description: Tiến độ sau khi yêu cầu dừng (stopping = true)
+ */
+router.get("/:projectId/screen-mockups/run", authMiddleware, projectController.screenMockupRun)
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/screen-mockups/{screenId}/original:
+ *   get:
+ *     summary: Ảnh gốc của màn (PNG / JPEG, file import) - hình minh hoạ cho kiểu "Theo bố cục ảnh gốc"
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *       - { in: path, name: screenId, required: true, schema: { type: string } }
+ *     responses:
+ *       200:
+ *         description: Ảnh (image/png | image/jpeg)
+ *       404:
+ *         description: SCREEN_HAS_NO_ORIGINAL - không có ảnh / ảnh không nhúng được (EMF)
+ */
+router.get("/:projectId/screen-mockups/:screenId/original", authMiddleware, projectController.screenOriginalImage)
+router.post("/:projectId/screen-mockups/run/cancel", authMiddleware, requireRole("lead", "analyst"), projectController.cancelScreenMockupRun)
+router.post("/:projectId/screen-mockups", authMiddleware, requireRole("lead", "analyst"), validateRequest(RunScreenMockupsSchema), projectController.runScreenMockups)
+router.delete("/:projectId/screen-mockups", authMiddleware, requireRole("lead", "analyst"), validateRequest(DisableScreenMockupsSchema), projectController.disableScreenMockups)
 
 /**
  * @swagger

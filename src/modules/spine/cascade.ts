@@ -9,7 +9,7 @@
  * Lô đã tự liệt kê op cascade (như fixture case-03) thì không sinh trùng.
  *
  * Chính sách theo field (§4.1):
- *   pull          gỡ phần tử khỏi mảng khoá            use_cases[].actor_ids[] …
+ *   pull          gỡ phần tử khỏi mảng khoá            use_cases[].actor_ids[], entities[].feature_ids[] …
  *   null          đặt khoá về null                     roles[].actor_id, actors[].parent_id, screens[].primary_function_id
  *   remove_owner  xoá luôn phần tử chứa khoá           permissions, functions[screen_id], diagrams, flags,
  *                                                      assumptions, sections[function:*|feature:*], steps[@X]
@@ -25,6 +25,7 @@ import { isRecord, parsePath } from "./path-resolver.js"
 import {
   buildIdIndex,
   iterateReferences,
+  LIFELINE_COLLECTIONS,
   referenceAlive,
   type IdCollection,
   type ReferenceHit
@@ -58,7 +59,22 @@ export const CASCADE_POLICY: Readonly<Record<string, CascadePolicy>> = Object.fr
   "sections[].id": "remove_owner",
   "progress.screen_cursor": "invariant",
   "progress.screen_queue[]": "pull",
-  "steps[].id": "remove_owner"
+  "steps[].id": "remove_owner",
+  "entities[].feature_ids[]": "pull",
+  "entities[].transitions[].from": "remove_owner",
+  "entities[].transitions[].to": "remove_owner",
+  "entities[].transitions[].business_rule_ids[]": "pull",
+  "functions[].interactions[].from": "remove_owner",
+  "functions[].interactions[].to": "remove_owner",
+  // FLF-418: xoá actor / màn / entity ⇒ xoá message mức thành phần trỏ tới nó
+  "functions[].component_interactions[].from": "remove_owner",
+  "functions[].component_interactions[].to": "remove_owner",
+  "use_cases[].activity_nodes[].lane": "null",
+  "use_cases[].activity_flows[].from": "remove_owner",
+  "use_cases[].activity_flows[].to": "remove_owner",
+  "deployment_nodes[].parent_id": "null",
+  "deployment_links[].from": "remove_owner",
+  "deployment_links[].to": "remove_owner"
 })
 
 // ─── removed ids ─────────────────────────────────────────────────
@@ -114,6 +130,8 @@ const deadByRemoval = (hit: ReferenceHit, removed: RemovedIds): boolean => {
       }
     case "diagram_owner":
       return false
+    case "lifeline":
+      return LIFELINE_COLLECTIONS.some((c) => removed.has(c, hit.targetId))
     default:
       return removed.has(hit.target satisfies IdCollection, hit.targetId)
   }

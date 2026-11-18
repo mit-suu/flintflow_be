@@ -2,8 +2,8 @@
  * mode1-import-measure.e2e — đo luồng import mode 1 trọn vẹn với PROVIDER THẬT. Chỉ chạy khi `E2E_AI=1`:
  *   MEASURE_SRS="<đường dẫn .docx>" MEASURE_LABEL=<nhãn> npm run test:e2e-ai -- test/e2e-ai/mode1-import-measure.e2e.test.ts
  *
- * Luồng HTTP thật: upload → confirm-latest → mapping (confirm_all) → I-4 (chạy nền, chờ job) → fields (confirm_all) →
- * finalize (baseline 0.0 + 1.11 + 1.12). Mongo in-memory — không đụng DB thật. PlantUML tắt trong test nên sơ đồ có
+ * Luồng HTTP thật (FLF-343, một mạch): upload (preflight + tách file + khớp mẫu) → Bắt đầu (`/import/extract` kèm
+ * `confirm_latest`) → I-4 → finalize nối tiếp (baseline 0.1 + 1.11 + 1.12), chờ job. Mongo in-memory — không đụng DB thật. PlantUML tắt trong test nên sơ đồ có
  * cờ render, không ảnh hưởng số đo AI.
  *
  * Ghi `test/e2e-ai/results/mode1-measure-<label>-<file>-<ISO>.{md,json}`: lượt gọi / token / credit theo bước, thời gian
@@ -34,7 +34,7 @@ interface StepRow {
   credits: number
 }
 
-describe.skipIf(!enabled || !SRS)("Đo import mode 1 — provider thật (E2E_AI=1, MEASURE_SRS)", () => {
+describe.skipIf(!enabled || !SRS)("Đo import mode 1 - provider thật (E2E_AI=1, MEASURE_SRS)", () => {
   it("upload → I-4 → finalize/1.11", { timeout: 90 * 60_000 }, async () => {
     const { Usage } = await import("../../src/modules/spine/usage.model.js")
     const { DocBlock } = await import("../../src/modules/import/doc-block.model.js")
@@ -59,24 +59,15 @@ describe.skipIf(!enabled || !SRS)("Đo import mode 1 — provider thật (E2E_AI
     expect(up.status, JSON.stringify(up.body.error)).toBe(201)
     const importId = up.body.data.import.id as string
     let view = (await c.get("/import")).body.data
-    if (view.import.status === "awaiting_latest_confirm") {
-      await timed("parse", () => c.post("/import/confirm-latest", { import_id: importId }))
-      view = (await c.get("/import")).body.data
-    }
-    if (view.import.status === "mapping_review") {
-      await c.patch("/import/mapping", { import_id: importId, headings: [], tables: [], confirm_all: true })
-      view = (await c.get("/import")).body.data
-    }
     expect(view.import.status).toBe("extracting")
+    const estimate = view.credit_estimate
 
-    const { run } = await timed("i4_extract", () => c.extractAndWait(importId, "/import/extract", 60 * 60_000))
-    expect(run?.import.paused ?? null, JSON.stringify(run?.sections.filter((s: { error: unknown }) => s.error))).toBeNull()
+    // một lần Bắt đầu: I-4 ⇒ baseline 0.1 ⇒ 1.11–1.12 (đo gộp)
+    const { run } = await timed("one_pass", () => c.extractAndWait(importId, "/import/extract", 60 * 60_000))
+    // I-4 phải xong (không section lỗi, đã qua `extracting`); finalize dừng (vd 1.11 lỗi) vẫn ghi số đo I-4, rồi mới đánh trượt
+    expect(run?.sections.filter((s: { error: unknown }) => s.error) ?? []).toEqual([])
     view = (await c.get("/import")).body.data
-    if (view.import.status === "fields_review") await c.patch("/import/fields", { import_id: importId, fields: [], confirm_all: true })
-
-    const fin = await timed("finalize_check", async () => c.post("/import/finalize", { import_id: importId, base_version: await c.spineVersion() }))
-    expect(fin.status, JSON.stringify(fin.body.error)).toBe(200)
-    view = (await c.get("/import")).body.data
+    expect(view.import.status).not.toBe("extracting")
 
     // ─── số đo ───────────────────────────────────────────────────
     const usage = await Usage.find({ projectId, state: "deducted" }).lean()
@@ -91,6 +82,17 @@ describe.skipIf(!enabled || !SRS)("Đo import mode 1 — provider thật (E2E_AI
       r.credits += u.cost ?? 0
       rows.set(g, r)
     }
+    // Thời gian riêng của I-4 (one_pass gộp cả finalize): từ lượt I-4 đầu tiên được ghi tới lượt cuối được trừ credit
+    const i4 = usage.filter((u) => u.step_id.startsWith("I-4:")) as Array<(typeof usage)[number] & { createdAt: Date; updatedAt: Date }>
+    if (i4.length) {
+      timings.i4_span = (Math.max(...i4.map((u) => +new Date(u.updatedAt))) - Math.min(...i4.map((u) => +new Date(u.createdAt)))) / 1000
+    }
+    // Số lượt I-4 theo section ⇒ biết đường găng (section nhiều lượt nhất) khi chạy song song
+    const i4BySection: Record<string, number> = {}
+    for (const u of i4) {
+      const section = u.step_id.slice("I-4:".length)
+      i4BySection[section] = (i4BySection[section] ?? 0) + 1
+    }
     const checkBlocks = await DocBlock.find({ projectId, doc_version: IMPORTED_DOC_VERSION, kind: { $in: ["paragraph", "list_item", "table_cell"] } })
       .select("block_id text section_id")
       .lean()
@@ -102,6 +104,7 @@ describe.skipIf(!enabled || !SRS)("Đo import mode 1 — provider thật (E2E_AI
     const openFlags = spine.flags.filter((f) => f.resolved_at === null)
     const result = {
       label: LABEL,
+      credit_estimate: estimate ?? null,
       srs: path.basename(SRS),
       file_bytes: buf.length,
       blocks_total: await DocBlock.countDocuments({ projectId, doc_version: IMPORTED_DOC_VERSION }),
@@ -111,6 +114,7 @@ describe.skipIf(!enabled || !SRS)("Đo import mode 1 — provider thật (E2E_AI
       status: view.import.status,
       paused: view.import.paused,
       timings_s: timings,
+      i4_calls_by_section: i4BySection,
       steps: [...rows.values()].sort((a, b) => a.group.localeCompare(b.group)),
       total: {
         calls: usage.length,
@@ -130,7 +134,7 @@ describe.skipIf(!enabled || !SRS)("Đo import mode 1 — provider thật (E2E_AI
     const stem = `mode1-measure-${LABEL}-${path.basename(SRS, ".docx").replace(/[^\w.-]+/g, "_")}-${new Date().toISOString().replace(/[:.]/g, "-")}`
     fs.writeFileSync(path.join(OUT_DIR, `${stem}.json`), JSON.stringify(result, null, 2))
     const md = [
-      `# Đo import mode 1 — ${result.label} — ${result.srs}`,
+      `# Đo import mode 1 - ${result.label} - ${result.srs}`,
       "",
       `- File ${result.file_bytes} byte, ${result.blocks_total} block; chữ cho 1.11: ${result.check_chars} ký tự`,
       `- 1.11: ${result.check_mode}, độ phủ ${(result.check_coverage * 100).toFixed(1)}%`,

@@ -7,11 +7,16 @@ import { describe, expect, it } from "vitest"
 import { parseDocument } from "./parse.service.js"
 import { matchProfile } from "./profile-match.service.js"
 import { makeSrsDocx } from "./testing/srs-fixture.js"
+import { matchTable } from "./table-header-dictionary.js"
 import {
   AI_BATCH_CHARS,
   AI_BLOCK_CHARS,
+  attributesFromCell,
   captionOf,
+  tablesToKeepVerbatim,
   chunkBlocks,
+  codeSignals,
+  combineAiConfidence,
   deterministicTableItems,
   dropMutualRelations,
   extractionPlan,
@@ -31,7 +36,7 @@ import {
 import { IdAllocator, flattenItem, idKey, type EntityItem } from "./extracted-entities.js"
 import type { ITemplateProfile, TableMapEntry } from "./template-profile.model.js"
 import { FIELD_CONFIDENCE_THRESHOLD } from "./import.constants.js"
-import { tableGrid } from "./table-rows.js"
+import { indentedCells, tableGrid } from "./table-rows.js"
 
 type Lite = Parameters<typeof deterministicTableItems>[0]
 
@@ -97,7 +102,7 @@ describe("extractionPlan", () => {
   })
 })
 
-describe("sectionAiSteps — kế hoạch lượt AI (chung cho lượt chạy và ước tính credit)", () => {
+describe("sectionAiSteps - kế hoạch lượt AI (chung cho lượt chạy và ước tính credit)", () => {
   const none = { items: [], handled: new Set<string>(), consumed: new Set<string>(), verbatim: new Set<string>() }
   const img = (block_id: string, caption: string): Lite[] => [
     { ...block(block_id, "image", "", `body/p[${block_id}]`, "fixed:2.2.1"), image_ref: `word/media/${block_id}.png` },
@@ -132,7 +137,7 @@ describe("sectionAiSteps — kế hoạch lượt AI (chung cho lượt chạy v
   })
 })
 
-describe("shortName — tên chức năng từ câu yêu cầu (FLF-252)", () => {
+describe("shortName - tên chức năng từ câu yêu cầu (FLF-252)", () => {
   it("bỏ 'The system shall', lấy câu đầu, cắt ở ranh giới từ", () => {
     expect(shortName("The system shall allow users to register with email. A confirmation is sent.")).toBe("Allow users to register with email")
     expect(shortName("Users must be able to export reports")).toBe("Users must be able to export reports")
@@ -142,7 +147,7 @@ describe("shortName — tên chức năng từ câu yêu cầu (FLF-252)", () =>
   })
 })
 
-describe("splitList — ô danh sách", () => {
+describe("splitList - ô danh sách", () => {
   it("FLF-251: cột tham chiếu tách cả tác nhân phụ trong ngoặc; danh sách thường giữ ngoặc", () => {
     expect(splitList("Guest (Email Service, Identity Provider); Admin", true)).toEqual(["Guest", "Email Service", "Identity Provider", "Admin"])
     expect(splitList("Learner, Admin\nGuest")).toEqual(["Learner", "Admin", "Guest"])
@@ -150,16 +155,16 @@ describe("splitList — ô danh sách", () => {
   })
 })
 
-describe("deterministicTableItems — bảng khớp đủ cột (G7)", () => {
+describe("deterministicTableItems - bảng khớp đủ cột (G7)", () => {
   const blocks = ucTable()
   const grid = tableGrid(blocks[0], blocks)
 
-  it("đủ cột bắt buộc ⇒ mỗi hàng dữ liệu một item tất định, id chuẩn hoá, cột danh sách tách phần tử", () => {
+  it("đủ cột bắt buộc ⇒ mỗi hàng dữ liệu một item tất định, id giữ đúng như bảng (FLF-361: UC01 không thành UC-01), cột danh sách tách phần tử", () => {
     const items = deterministicTableItems(blocks[0], grid, profileOf([col(0, "use_cases[].id"), col(1, "use_cases[].name"), col(2, "use_cases[].actor_ids", 0.9)]))
     expect(items).toEqual([
       {
         entity: "use_cases",
-        id: "UC-01",
+        id: "UC01",
         value: { name: "Register account", actor_ids: ["Learner", "Admin"] },
         confidence: 0.9,
         field_confidence: {},
@@ -193,6 +198,13 @@ describe("deterministicTableItems — bảng khớp đủ cột (G7)", () => {
     const items = deterministicTableItems(blocks[0], withEmpty, profileOf([col(0, "use_cases[].id", 0.4, true), col(1, "use_cases[].name", 0.6, true)]))!
     expect(items).toHaveLength(2)
     expect(items.every((i) => i.confidence === 1)).toBe(true)
+  })
+
+  it("FLF-278: hàng chỗ trống của bảng mẫu (`[FR-xxx]`, `[Describe…]`) không thành item", () => {
+    const withPlaceholder = [...grid, ["[UC-xx]", "[Use case name]", "[Actor]"]]
+    const items = deterministicTableItems(blocks[0], withPlaceholder, profileOf([col(0, "use_cases[].id"), col(1, "use_cases[].name"), col(2, "use_cases[].actor_ids")]))!
+    expect(items.map((i) => i.id)).toEqual(["UC01", "UC-02"])
+    expect(deterministicTableItems(blocks[0], [grid[0], ["[UC-xx]", "[Use case name]", "[Actor]"]], profileOf([col(0, "use_cases[].id"), col(1, "use_cases[].name")]))).toEqual([])
   })
 
   it("FLF-251: cột include/extend tách danh sách tham chiếu như cột tác nhân", () => {
@@ -254,6 +266,39 @@ describe("deterministicTableItems — bảng khớp đủ cột (G7)", () => {
     expect(items.every((i) => i.origin === "deterministic" && i.id === null)).toBe(true)
   })
 
+  it("ma trận FPT: dòng thụt lề / có dấu đầu dòng dưới màn ⇒ quyền kèm parent_screen", () => {
+    const rows = [
+      ["Screen", "Guest", "Admin"],
+      ["Order Queue", "", "X"],
+      ["Confirm / Reject Order", "", "X"],
+      ["- Query All Data", "", "X"],
+      ["Inventory", "X", ""]
+    ]
+    const items = deterministicTableItems(
+      blocks[0],
+      rows,
+      profileOf([col(0, "permissions[].screen_id"), col(1, "permissions[].role_id"), col(2, "permissions[].role_id")]),
+      new Set(["2:0"])
+    )!
+    expect(items.filter((i) => i.entity === "permissions").map((i) => i.value)).toEqual([
+      { screen_id: "Order Queue", role_id: "Admin", action: "access" },
+      { screen_id: "Confirm / Reject Order", role_id: "Admin", action: "access", parent_screen: "Order Queue" },
+      { screen_id: "Query All Data", role_id: "Admin", action: "access", parent_screen: "Order Queue" },
+      { screen_id: "Inventory", role_id: "Guest", action: "access" }
+    ])
+  })
+
+  it("indentedCells: ô mở bằng ≥ 2 dấu cách (đoạn đầu của ô) ⇒ thụt lề", () => {
+    const t = block("B0100", "table", "", "body/tbl[4]")
+    const cells = [
+      block("B0101", "table_cell", "Order Queue", "body/tbl[4]/tr[1]/tc[0]/p[0]"),
+      block("B0102", "table_cell", "    Confirm / Reject Order", "body/tbl[4]/tr[2]/tc[0]/p[0]"),
+      block("B0103", "table_cell", " X", "body/tbl[4]/tr[2]/tc[1]/p[0]"),
+      block("B0104", "table_cell", "    ghi chú", "body/tbl[4]/tr[1]/tc[0]/p[1]")
+    ]
+    expect([...indentedCells(t, cells)]).toEqual(["2:0"])
+  })
+
   it("FLF-252: bảng yêu cầu 'ID | Requirement | Priority' dưới tính năng ⇒ chức năng có mã, tên rút từ câu, mô tả đủ câu", () => {
     const rows = [
       ["ID", "Requirement", "Priority", "Acceptance Criteria"],
@@ -288,6 +333,62 @@ describe("deterministicTableItems — bảng khớp đủ cột (G7)", () => {
     expect(out.items.map((i) => i.value)).toEqual([{ statement: "GitHub: Provides PR events.", category: "interface" }])
   })
 
+  it("bug #10 (QLHS 11/11) settleSection: bảng từ điển dữ liệu đọc tất định tên + quan hệ, cột thuộc tính không vào Spine ⇒ bảng giữ nguyên văn", () => {
+    const t = {
+      ...block("B0875", "table", "", "body/tbl[9]", "fixed:3.1.5"),
+      rows: [["Thực thể", "Thuộc tính chính", "Quan hệ", "Yêu cầu liên quan"], ["Học sinh", "mã HS, họ tên, ngày sinh", "Lớp", "REQ-DATA-001"]]
+    }
+    const profile = {
+      table_map: [
+        { block_id: "B0875", column_index: 0, header: "Thực thể", field_path: "entities[].name", confidence: 0.95, confirmed: true },
+        { block_id: "B0875", column_index: 2, header: "Quan hệ", field_path: "entities[].relations", confidence: 0.9, confirmed: true }
+      ]
+    } as unknown as ITemplateProfile
+    const out = settleSection("fixed:3.1.5", [t], profile, new Map())
+    expect(out.items.map((i) => i.value.name)).toEqual(["Học sinh"])
+    expect(out.handled.has("B0875")).toBe(true)
+    expect(out.verbatim.has("B0875")).toBe(true)
+  })
+
+  it("bug #12c (QLHS 11/11): cột \"Thuộc tính chính\" ⇒ entities[].attributes; thuộc tính vào Spine, bảng vẫn giữ nguyên văn", () => {
+    const rows = [
+      ["Thực thể", "Thuộc tính chính", "Quan hệ", "Yêu cầu liên quan"],
+      ["Năm học", "mã, năm bắt đầu, năm kết thúc", "1–n Học kỳ, 1–n Lớp", "REQ-FUNC-043"],
+      ["Học sinh", "mã, họ tên, ngày sinh, giới tính, trạng thái, mã TK phụ huynh", "1–n Điểm, Điểm danh, Hạnh kiểm", "REQ-FUNC-010"]
+    ]
+    const m = matchTable(rows, "fixed:3.1.5")
+    expect(m.entity).toBe("entities")
+    expect(m.columns.map((c) => c.field_path)).toEqual(["entities[].name", "entities[].attributes", "entities[].relations", null])
+    const t = { ...block("B0875", "table", "", "body/tbl[9]", "fixed:3.1.5"), rows }
+    const profile = {
+      table_map: m.columns.map((c) => ({ block_id: "B0875", column_index: c.column_index, header: c.header, field_path: c.field_path, confidence: c.confidence, confirmed: true }))
+    } as unknown as ITemplateProfile
+    const out = settleSection("fixed:3.1.5", [t], profile, new Map())
+    expect(out.items.map((i) => i.value.name)).toEqual(["Năm học", "Học sinh"])
+    expect(out.items[0].value.attributes).toEqual([
+      { name: "mã", kind: "key", required: true },
+      { name: "năm bắt đầu", kind: "plain", required: false },
+      { name: "năm kết thúc", kind: "plain", required: false }
+    ])
+    expect(out.items[1].value.attributes).toContainEqual({ name: "mã TK phụ huynh", kind: "reference", required: false })
+    expect(out.items[1].value.relations).toEqual(["1–n Điểm", "Điểm danh", "Hạnh kiểm"])
+    // Bản in theo file upload: bảng từ điển dữ liệu vẫn in nguyên văn dù Spine đã nhận thuộc tính
+    expect(out.handled.has("B0875")).toBe(true)
+    expect(out.verbatim.has("B0875")).toBe(true)
+  })
+
+  it("bug #12c: attributesFromCell - mã của chính thực thể là khoá, mã thực thể khác là tham chiếu, còn lại thường", () => {
+    expect(attributesFromCell("mã HS, họ tên, mã lớp, trạng thái (đang học, nghỉ học)", "Học sinh")).toEqual([
+      { name: "mã HS", kind: "key", required: true },
+      { name: "họ tên", kind: "plain", required: false },
+      { name: "mã lớp", kind: "reference", required: false },
+      { name: "trạng thái (đang học, nghỉ học)", kind: "plain", required: false }
+    ])
+    expect(attributesFromCell("Mã lớp; tên lớp; sĩ số", "Lớp").map((a) => a.kind)).toEqual(["key", "plain", "plain"])
+    expect(attributesFromCell("id, order id, total, customer id", "Order").map((a) => a.kind)).toEqual(["key", "key", "plain", "reference"])
+    expect(attributesFromCell("mã, mã, ", "Khối")).toEqual([{ name: "mã", kind: "key", required: true }])
+  })
+
   it("độ tin cột thấp ⇒ field của bảng rơi vào danh sách cần xác nhận (< 0.7)", () => {
     const items = deterministicTableItems(blocks[0], grid, profileOf([col(0, "use_cases[].id", 0.6), col(1, "use_cases[].name", 0.95)]))!
     const fields = items.flatMap(flattenItem)
@@ -296,7 +397,7 @@ describe("deterministicTableItems — bảng khớp đủ cột (G7)", () => {
   })
 })
 
-describe("chunkBlocks — lô gửi AI", () => {
+describe("chunkBlocks - lô gửi AI", () => {
   const b = (id: string, len: number) => ({ block_id: id, text: "x".repeat(len) })
 
   it("gom block tới ngân sách, sang lô mới khi vượt", () => {
@@ -318,7 +419,7 @@ describe("chunkBlocks — lô gửi AI", () => {
   })
 })
 
-describe("itemsFromAi — output model ⇒ item", () => {
+describe("itemsFromAi - output model ⇒ item", () => {
   const ctx = (known: EntityItem[] = [], sectionId = "fixed:2.2.2") => ({
     sectionId,
     alloc: new IdAllocator({ use_cases: ["UC-01"] }),
@@ -328,7 +429,7 @@ describe("itemsFromAi — output model ⇒ item", () => {
   })
   const item = (over: Record<string, unknown>) => ({ entity: "use_cases", key: null, value: {}, confidence: 0.9, field_confidence: {}, source_block_ids: ["B0005"], ...over }) as never
 
-  it("khoá tài liệu được chuẩn hoá; không khoá ⇒ dùng lại id theo tên đã biết, còn không thì cấp id mới", () => {
+  it("khoá tài liệu giữ như model chép (FLF-361); không khoá ⇒ dùng lại id theo tên đã biết, còn không thì cấp id mới sau số lớn nhất", () => {
     const known: EntityItem[] = [{ entity: "use_cases", id: "UC-07", value: { name: "Log in" }, confidence: 1, field_confidence: {}, source_block_ids: [], origin: "deterministic" }]
     const out = itemsFromAi(
       {
@@ -338,7 +439,7 @@ describe("itemsFromAi — output model ⇒ item", () => {
       },
       ctx(known)
     )
-    expect(out.map((i) => i.id)).toEqual(["UC-09", "UC-07", "UC-02"])
+    expect(out.map((i) => i.id)).toEqual(["uc_09", "UC-07", "UC-08"])
     expect(out[0].value).toEqual({ name: "Pay" })
     expect(out.every((i) => i.origin === "ai")).toBe(true)
   })
@@ -369,7 +470,7 @@ describe("itemsFromAi — output model ⇒ item", () => {
     expect(out.map((i) => i.source_block_ids)).toEqual([["B0005"], ["B0005"]])
   })
 
-  it("NFR nhận category theo section khi model không ghi; project không có id; giữ field_confidence", () => {
+  it("NFR nhận category theo section khi model không ghi; project không có id; field_confidence kết hợp tín hiệu code (FLF-343)", () => {
     const out = itemsFromAi(
       {
         section_id: "fixed:4.2.3",
@@ -381,7 +482,8 @@ describe("itemsFromAi — output model ⇒ item", () => {
       },
       ctx([], "fixed:4.2.3")
     )
-    expect(out[0]).toMatchObject({ id: "NFR-01", value: { statement: "fast", category: "performance" }, field_confidence: { threshold: 0.4 } })
+    // AI 0.4 × 0.6 + nguồn hợp lệ (1) × 0.4 — điểm AI không còn là tín hiệu duy nhất
+    expect(out[0]).toMatchObject({ id: "NFR-01", value: { statement: "fast", category: "performance" }, field_confidence: { threshold: 0.64 } })
     expect(out[1].id).toBeNull()
   })
 
@@ -426,11 +528,31 @@ describe("ảnh diagram (mode 1 v3 phase 5)", () => {
     expect(captionOf(blk("B9", "image"), [blk("B9", "image"), blk("B10", "paragraph", "y")])).toBe("(none)")
   })
 
-  it("FLF-252 readsImage: chọn ảnh theo caption — ảnh màn hình / sequence không đọc; sơ đồ đọc được ở mục khác FPT vẫn đọc", () => {
+  it("bug #10 (QLHS 11/11): bảng từ điển dữ liệu có cột thuộc tính mà không item nào trích attributes từ nó ⇒ giữ nguyên văn", () => {
+    const table = { block_id: "B0875", kind: "table", rows: [["Thực thể", "Thuộc tính chính", "Quan hệ", "Yêu cầu liên quan"], ["Học sinh", "mã, họ tên", "Lớp", "REQ-DATA-001"]] } as never
+    const item = (value: Record<string, unknown>): EntityItem => ({ entity: "entities", id: "E01", value, confidence: 0.9, field_confidence: {}, source_block_ids: ["B0875"], origin: "ai" })
+    expect(tablesToKeepVerbatim([table], [item({ name: "Học sinh", relations: ["E02"] })])).toEqual(["B0875"])
+    expect(tablesToKeepVerbatim([table], [item({ name: "Học sinh", attributes: [{ name: "mã" }] })])).toEqual([])
+    const plain = { block_id: "B0900", kind: "table", rows: [["Tác nhân", "Mô tả"]] } as never
+    expect(tablesToKeepVerbatim([plain], [])).toEqual([])
+  })
+
+  it("captionOf: đoạn thường ngay dưới ảnh bắt đầu bằng 'H3 ·' / 'Hình 3' / 'Figure 3' cũng là chú thích (QLHS 11/11 - file không dùng kiểu Caption)", () => {
+    const blocks = [blk("B1", "list_item", "Kiểm chứng: Test"), blk("B2", "image"), blk("B3", "paragraph", "H3 · sơ đồ hoạt động UC-05 Điểm danh"), blk("B4", "paragraph", "REQ-FUNC-052 – Sửa điểm danh")]
+    expect(captionOf(blk("B2", "image"), blocks)).toBe("H3 · sơ đồ hoạt động UC-05 Điểm danh")
+    expect(readsImage("feature:@B0255", captionOf(blk("B2", "image"), blocks))).toBe(true)
+    // Đoạn văn dài / không bắt đầu bằng số hình thì không phải chú thích
+    expect(captionOf(blk("B2", "image"), [blk("B1", "paragraph", "Hệ thống phải lưu…"), blk("B2", "image"), blk("B3", "paragraph", "Mỗi yêu cầu dùng mã REQ")])).toBe("(none)")
+  })
+
+  it("FLF-252 readsImage: chọn ảnh theo caption - ảnh màn hình không đọc; sơ đồ đọc được ở mục khác FPT vẫn đọc (FLF-390: cả sequence / activity)", () => {
     expect(readsImage("fixed:2.2.1", "(none)")).toBe(true)
     expect(readsImage("fixed:2.2.1", "Figure 03. Use Case Diagram - Account")).toBe(true)
     expect(readsImage("fixed:3.1.1", "Figure 17 - Register account screen layout")).toBe(false)
-    expect(readsImage("fixed:2.2.2", "Figure 5 - Sequence diagram for Login")).toBe(false)
+    expect(readsImage("fixed:2.2.2", "Figure 5 - Sequence diagram for Login")).toBe(true)
+    expect(readsImage("function:@B0042", "Hình 4: Sơ đồ hoạt động đăng nhập")).toBe(true)
+    expect(readsImage("function:@B0042", "Figure 6 - Activity diagram: Place order")).toBe(true)
+    expect(readsImage("fixed:3.1.5", "Figure 8 - State machine of Order")).toBe(false)
     expect(readsImage("fixed:4.1", "Figure 9 - Entity Relationship Diagram")).toBe(true)
     expect(readsImage("function:@B0042", "Hình 3: Giao diện đăng nhập")).toBe(false)
     expect(readsImage("function:@B0042", "(none)")).toBe(false)
@@ -572,5 +694,103 @@ describe("ảnh diagram (mode 1 v3 phase 5)", () => {
   it("visionItems: origin vision, độ tin item + từng field ≤ 0.7", () => {
     const it0: EntityItem = { entity: "actors", id: "A09", value: { name: "Guest" }, confidence: 0.95, field_confidence: { kind: 0.9, name: 0.4 }, source_block_ids: ["B0002"], origin: "ai" }
     expect(visionItems([it0])).toEqual([{ ...it0, origin: "vision", confidence: 0.7, field_confidence: { kind: 0.7, name: 0.4 } }])
+  })
+})
+
+describe("FLF-343 - độ tin I-4 = điểm AI kết hợp tín hiệu code", () => {
+  it("combineAiConfidence: AI × 0.6 + trung bình tín hiệu × 0.4; không có tín hiệu ⇒ giữ điểm AI", () => {
+    expect(combineAiConfidence(0.9, [1, 1, 1])).toBe(0.94)
+    expect(combineAiConfidence(0.9, [0, 0])).toBe(0.54)
+    expect(combineAiConfidence(0.5, [])).toBe(0.5)
+    // AI 0.5 + code khớp hết = 0.70 ⇒ vẫn bị chặn dưới ngưỡng (AI < 0.6 luôn Cần xem)
+    expect(combineAiConfidence(0.5, [1, 1, 1])).toBe(0.69)
+    expect(combineAiConfidence(0.6, [1, 1, 1])).toBe(0.76)
+  })
+
+  it("codeSignals: nguồn hợp lệ, khoá / giá trị có trong chữ của block nguồn, độ tin khớp mục", () => {
+    const blockText = new Map([["B0001", "UC-01 Register account lets the learner sign up."]])
+    const valid = new Set(["B0001"])
+    expect(codeSignals({ key: "UC-01", value: { name: "Register account" }, source_block_ids: ["B0001"] }, { validBlocks: valid, blockText, sectionConfidence: 0.9 })).toEqual([1, 1, 0.9])
+    // model bịa block nguồn + giá trị không có trong chữ ⇒ hai tín hiệu 0
+    expect(codeSignals({ key: "UC-99", value: { name: "Delete galaxy" }, source_block_ids: ["B0999"] }, { validBlocks: valid, blockText })).toEqual([0, 0])
+    // bịa block nguồn mà giá trị có trong chữ của lô ⇒ vẫn 0 (không so với cả lô)
+    expect(codeSignals({ key: "UC-01", value: { name: "Register account" }, source_block_ids: ["B0999"] }, { validBlocks: valid, blockText })).toEqual([0, 0])
+    // khoá là phần tử đã biết ⇒ khớp dù chữ không ghi mã
+    expect(codeSignals({ key: "A01", value: { kind: "human" }, source_block_ids: ["B0001"] }, { validBlocks: valid, blockText, knownKey: true })).toEqual([1, 1])
+  })
+
+  it("itemsFromAi: AI tự chấm cao mà không khớp chữ nguồn ⇒ độ tin hạ dưới ngưỡng xác nhận", () => {
+    const out = itemsFromAi(
+      { section_id: "fixed:5.1", items: [{ entity: "business_rules", key: "BR-77", value: { statement: "Unrelated rule text" }, confidence: 0.95, field_confidence: {}, source_block_ids: ["B0777"] }], unmapped_block_ids: [] },
+      { sectionId: "fixed:5.1", alloc: new IdAllocator(), known: [], sectionFunction: null, validBlocks: new Set(["B0001"]), blockText: new Map([["B0001", "BR-01 Passwords must have 8 characters."]]), sectionConfidence: 0.6 }
+    )
+    expect(out[0].confidence).toBeLessThan(FIELD_CONFIDENCE_THRESHOLD)
+  })
+
+  it("deterministicTableItems: cột tự nhận (auto_confirmed) giữ độ tin của mapping, cột người dùng xác nhận ⇒ 1", () => {
+    const blocks = ucTable()
+    const grid = tableGrid(blocks[0], blocks)
+    const cols = [col(0, "use_cases[].id"), col(1, "use_cases[].name"), col(2, "use_cases[].actor_ids", 0.6)]
+    cols[2] = { ...cols[2], confirmed: true, auto_confirmed: true }
+    expect(deterministicTableItems(blocks[0], grid, profileOf(cols))![0].confidence).toBe(0.6)
+    cols[2] = { ...cols[2], auto_confirmed: undefined }
+    expect(deterministicTableItems(blocks[0], grid, profileOf(cols))![0].confidence).toBe(0.95)
+  })
+})
+
+describe("FLF-411 - chữ của mẫu ở SRS viết dở (BF §3.1.1)", () => {
+  const tableBlock = (id: string, rows: string[][], section: string) => ({ ...block(id, "table", "", `body/tbl[${id}]`, section), rows })
+  const map = (id: string, entries: [number, string | null][]) =>
+    ({ table_map: entries.map(([column_index, field_path]) => ({ block_id: id, column_index, header: `c${column_index}`, field_path, confidence: 0.95, confirmed: true })) }) as unknown as ITemplateProfile
+
+  it("bảng màn: dòng chỗ điền `3 | .. |` không thành màn (không còn SCR-03); ô `<<Screen Brief description>>` là trống", () => {
+    const rows = [["#", "Feature", "Screen", "Description"], ["1", "Order Meals", "Create Order", " <<Screen Brief description>>"], ["2", "Order Meals", "Change Order", ""], ["3", "..", "", ""]]
+    const t = tableBlock("B0101", rows, "fixed:3.1.2")
+    const items = deterministicTableItems(t, rows, map("B0101", [[1, "screens[].feature_id"], [2, "screens[].name"], [3, "screens[].description"]]))!
+    expect(items.map((i) => i.value)).toEqual([{ feature_id: "Order Meals", name: "Create Order" }, { feature_id: "Order Meals", name: "Change Order" }])
+  })
+
+  it("ma trận phân quyền của mẫu: cột Role-Name / … và màn <<Screen Name1>> (kèm thao tác con) không thành vai trò / quyền ⇒ bảng giữ nguyên văn", () => {
+    const rows = [
+      ["Screen", "Role-Name1", "Role-Name2", "Role-Name3", "…"],
+      ["<<Screen Name1>>", "X", "", "X", "X"],
+      ["    <<Screen Activity>>", "", "", "X", "X"],
+      ["<<Screen Name2>>", "X", "", "X", ""],
+      ["    Query All Data", "X", "", "", ""]
+    ]
+    const t = tableBlock("B0102", rows, "fixed:3.1.3")
+    const profile = map("B0102", [[0, "permissions[].screen_id"], [1, "permissions[].role_id"], [2, "permissions[].role_id"], [3, "permissions[].role_id"], [4, "permissions[].role_id"]])
+    expect(deterministicTableItems(t, rows, profile)).toEqual([])
+    const out = settleSection("fixed:3.1.3", [t], profile, new Map())
+    expect(out.verbatim.has("B0102")).toBe(true)
+    // Vai trò thật vẫn đọc: cột "Admin" là vai trò, màn thật là quyền
+    const real = [["Screen", "Admin", "Role-Name2"], ["Dashboard", "X", "X"]]
+    const items = deterministicTableItems(tableBlock("B0103", real, "fixed:3.1.3"), real, map("B0103", [[0, "permissions[].screen_id"], [1, "permissions[].role_id"], [2, "permissions[].role_id"]]))!
+    expect(items.map((i) => [i.entity, i.value.name ?? i.value.role_id])).toEqual([["roles", "Admin"], ["permissions", "Admin"]])
+  })
+
+  it("bảng thông báo có cột ngoài Spine (Message Type, Context) ⇒ giữ nguyên văn, Spine vẫn nhận mã + nội dung", () => {
+    const rows = [["#", "Message code", "Message Type", "Context", "Content"], ["1", "MSG01", "In line", "There is not any search result", "No search results."]]
+    const t = tableBlock("B0104", rows, "fixed:5.3")
+    const out = settleSection("fixed:5.3", [t], map("B0104", [[1, "messages[].code"], [4, "messages[].text"]]), new Map())
+    expect(out.items.map((i) => i.value)).toEqual([{ code: "MSG01", text: "No search results." }])
+    expect(out.verbatim.has("B0104")).toBe(true)
+    // Bảng chỉ có cột Spine ⇒ không giữ nguyên văn
+    const plain = [["Code", "Content"], ["MSG01", "No search results."]]
+    expect(settleSection("fixed:5.3", [tableBlock("B0105", plain, "fixed:5.3")], map("B0105", [[0, "messages[].code"], [1, "messages[].text"]]), new Map()).verbatim.has("B0105")).toBe(false)
+  })
+
+  it("khoảng <<Sample: … >> (kèm hình) và hướng dẫn [ … ] nhiều đoạn không gửi AI / vision; chữ khách viết vẫn gửi", () => {
+    const blocks: Lite[] = [
+      block("B0201", "heading", "1. Product Overview", "body/p[0]", "fixed:1"),
+      block("B0202", "paragraph", "[Gives the overall description about the product. The context diagram presents", "body/p[1]", "fixed:1"),
+      block("B0203", "paragraph", "the boundary and connections.]", "body/p[2]", "fixed:1"),
+      block("B0204", "paragraph", "<<Sample: The Cafeteria Ordering System is a new software system", "body/p[3]", "fixed:1"),
+      { ...block("B0205", "image", "", "body/p[4]", "fixed:1"), image_ref: "word/media/ctx.png" },
+      block("B0206", "paragraph", ">>", "body/p[5]", "fixed:1"),
+      block("B0207", "paragraph", "ShuttleBook lets players book badminton courts online across five venues.", "body/p[6]", "fixed:1")
+    ]
+    const steps = sectionAiSteps("fixed:1", blocks, { items: [], handled: new Set(), consumed: new Set(), verbatim: new Set() })
+    expect(steps.map((s) => (s.kind === "image" ? `img:${s.block.block_id}` : s.batch.map((b) => b.block_id).join("+")))).toEqual(["B0207"])
   })
 })

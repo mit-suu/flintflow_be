@@ -32,7 +32,7 @@ const db = vi.hoisted(() => {
         return copy(doc)
       }
       if (!options.upsert) return null
-      const created = { _id: "spine", ...filter, ...copy(update.$setOnInsert ?? {}) }
+      const created = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, ...filter, ...copy(update.$setOnInsert ?? {}) }
       spines.push(created)
       return copy(created)
     }
@@ -62,6 +62,8 @@ const db = vi.hoisted(() => {
   return { Spine, Change, spines, changes, reset }
 })
 
+// Rào đổi mẫu đọc Mongo; bản test thuần không có DB
+vi.mock("../template-migration/migration-guard.js", () => ({ assertNoMigrationRunning: async () => undefined }))
 vi.mock("./spine.model.js", () => ({ Spine: db.Spine }))
 vi.mock("./change.model.js", () => ({ Change: db.Change }))
 // FLF-265: kho bản dịch trong bộ nhớ (project `unit` không nối Mongo)
@@ -75,7 +77,7 @@ import type { Change as SpineChange, Spine } from "./spine.types.js"
 import * as repo from "./spine.repository.js"
 import { applyTransaction } from "./op-engine.js"
 import { awaitingReaccept, computeStatus } from "./section-status.js"
-import { computeSourceHash } from "./source-hash.js"
+import { renderedDiagramHash } from "./source-hash.js"
 import { clearPreviewStore } from "./change.service.js"
 import {
   changesMakingStale,
@@ -86,6 +88,7 @@ import {
   staleSections,
   type ReconcileDeps
 } from "./reconcile.service.js"
+import { stepsOf } from "./section-registry.js"
 import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
 import { resetStore, store } from "../translation/__tests__/translation-store.js"
@@ -106,14 +109,14 @@ const SEED_SEQ = Math.max(0, ...FIXTURE.steps.map((s) => s.last_seq ?? 0))
  */
 const withRealHashes = (spine: Spine): Spine => {
   const copy = structuredClone(spine)
-  for (const diagram of copy.diagrams) diagram.source_hash = computeSourceHash(copy, diagram)
+  for (const diagram of copy.diagrams) diagram.source_hash = renderedDiagramHash(copy, diagram)
   return copy
 }
 
 const seed = async (input: Spine = FIXTURE): Promise<void> => {
   const spine = withRealHashes(input)
   await repo.getOrCreate(PROJECT)
-  db.spines[0] = { _id: "spine", projectId: PROJECT, ...structuredClone(spine) }
+  db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...structuredClone(spine) }
   db.changes.push({
     projectId: PROJECT,
     seq: SEED_SEQ,
@@ -191,6 +194,19 @@ describe("changesMakingStale / staleSections", () => {
     expect(causing.map((c) => c.seq)).toEqual([SEED_SEQ + 1])
   })
 
+  it("FLF-431: change trước lượt chốt lại (accepted_at) của step sở hữu không còn gây stale — cùng mốc với section-status", () => {
+    const owner = stepsOf("fixed:2.2.2", FIXTURE)[0]
+    const reaccept = change({ seq: SEED_SEQ + 5, path: `steps[id=${owner}].accepted_at`, before: null, value: "2026-11-16T00:00:00.000Z" })
+    const changes = [change({ seq: SEED_SEQ + 1 }), reaccept, change({ seq: SEED_SEQ + 9 })]
+    expect(changesMakingStale(FIXTURE, changes, "fixed:2.2.2").map((c) => c.seq)).toEqual([SEED_SEQ + 9])
+  })
+
+  it("FLF-431: sơ đồ vẽ lại theo nguồn mới (hash đổi) không tự gây stale", () => {
+    const d = FIXTURE.diagrams.find((x) => x.kind === "usecase")!
+    const redraw = change({ path: `diagrams[id=${d.id}]`, before: { ...d, source_hash: "a" }, value: { ...d, source_hash: "b" } })
+    expect(changesMakingStale(FIXTURE, [redraw], "fixed:2.2.1")).toEqual([])
+  })
+
   it("change do chính step sở hữu ghi không làm stale", () => {
     const changes = [change({ seq: SEED_SEQ + 1, step_id: "S-3.2" })]
     expect(changesMakingStale(FIXTURE, changes, "fixed:2.2.2")).toEqual([])
@@ -217,7 +233,7 @@ describe("changesMakingStale / staleSections", () => {
 
 // ─── lượt 1: preview gộp ─────────────────────────────────────────
 
-describe("reconcile lượt 1 — preview diff gộp", () => {
+describe("reconcile lượt 1 - preview diff gộp", () => {
   it("gọi skill của step sở hữu từng section stale, gộp ops thành một preview", async () => {
     await seed()
     await renameActor()
@@ -242,6 +258,22 @@ describe("reconcile lượt 1 — preview diff gộp", () => {
     const steps = vi.mocked(deps.reconcileExecutor).mock.calls.map((call) => (call[1].promptVariables as { step_id: string }).step_id)
     expect(steps).toContain("S-3.2")
     expect(steps).toContain("S-4.3")
+  })
+
+  it("model sửa một dòng mảng chuỗi bằng chỉ số (actor_ids[0]) ⇒ vẫn ra bản xem trước ok (set cả mảng), không chết cả lô", async () => {
+    await seed()
+    await renameActor()
+    const version = (await repo.get(PROJECT))!.spine_version
+    const before = (await repo.get(PROJECT))!.use_cases.find((u) => u.id === "UC02")!.actor_ids
+    deps.reconcileExecutor = vi.fn(async (_type, input) =>
+      (input.promptVariables as { step_id: string }).step_id === "S-3.2" ? opsResult([{ op: "set", path: "use_cases[id=UC02].actor_ids[0]", value: "A02" }]) : opsResult([])
+    )
+
+    const result = await reconcile(PROJECT, USER, { base_version: version }, {}, deps)
+
+    if (isReconcileApplied(result)) throw new Error("preview mong đợi")
+    expect(result.ok, JSON.stringify(result.violations)).toBe(true)
+    expect(result.ops).toContainEqual(expect.objectContaining({ op: "set", path: "use_cases[id=UC02].actor_ids", value: ["A02", ...before.slice(1)] }))
   })
 
   it("FLF-260: tài khoản đã chọn en ⇒ mọi lượt gọi mang replyLanguage en; chưa chọn ⇒ không có field", async () => {
@@ -296,7 +328,7 @@ describe("reconcile lượt 1 — preview diff gộp", () => {
 
 // ─── lượt 2: áp ──────────────────────────────────────────────────
 
-describe("reconcile lượt 2 — áp, vẽ lại hình, awaiting_reaccept", () => {
+describe("reconcile lượt 2 - áp, vẽ lại hình, awaiting_reaccept", () => {
   const runFirstPass = async () => {
     await seed()
     await renameActor()
@@ -334,6 +366,33 @@ describe("reconcile lượt 2 — áp, vẽ lại hình, awaiting_reaccept", () 
     expect(awaitingReaccept(spine, "fixed:3.1.3")).toBe(true)
     // Section không hoà giải giữ nguyên trạng thái
     expect(awaitingReaccept(spine, "fixed:3.1.5")).toBe(false)
+  })
+
+  it("sau baseline: duyệt bản xem trước hoà giải là đủ - section hết stale, KHÔNG mở lại step (không chờ chấp nhận lại)", async () => {
+    const baseline = { id: "BL001", version: "v1.0", type: "generated" as const, doc_version: null, at: "2026-09-10T00:00:00.000Z", snapshot_ref: "650000000000000000000099", checked_at_version: 1, waived_count: 0 }
+    await seed({ ...FIXTURE, baselines: [baseline] })
+    await renameActor()
+    deps.reconcileExecutor = vi.fn(async (_type, input) =>
+      (input.promptVariables as { step_id: string }).step_id === "S-3.2"
+        ? opsResult([{ op: "set", path: "use_cases[id=UC02].description", value: "The Product Owner creates a project." }])
+        : opsResult([])
+    )
+    const version = (await repo.get(PROJECT))!.spine_version
+    const previewed = await reconcile(PROJECT, USER, { base_version: version }, {}, deps)
+    if (isReconcileApplied(previewed)) throw new Error("lượt 1 lẽ ra trả preview")
+
+    const result = await reconcile(PROJECT, USER, { base_version: version, preview_id: previewed.preview_id }, {}, deps)
+
+    expect(isReconcileApplied(result)).toBe(true)
+    const record = await repo.get(PROJECT)
+    const { projectId: _p, ...spine } = record!
+    const changes = await repo.listChanges(PROJECT)
+    for (const section of ["fixed:2.2.2", "fixed:3.1.3"]) {
+      expect(awaitingReaccept(spine, section), section).toBe(false)
+      expect(computeStatus(spine, changes, section), section).not.toBe("stale")
+    }
+    expect(spine.steps.filter((s) => s.status === "revision_requested")).toEqual([])
+    expect(deps.recomputeFlags).toHaveBeenCalled()
   })
 
   it("user từ chối diff (không gửi lượt 2) ⇒ section vẫn stale, không ghi gì thêm", async () => {
@@ -388,7 +447,7 @@ describe("reconcile lượt 2 — áp, vẽ lại hình, awaiting_reaccept", () 
     expect(computeStatus(spineAfter, await repo.listChanges(PROJECT), "fixed:2.2.2")).not.toBe("stale")
   })
 
-  it("dep mặc định đủ cả recomputeFlags — controller không truyền deps, nhánh xác nhận không đổi gọi thẳng hàm này", () => {
+  it("dep mặc định đủ cả recomputeFlags - controller không truyền deps, nhánh xác nhận không đổi gọi thẳng hàm này", () => {
     const defaults = defaultReconcileDeps()
     for (const key of ["changeExecutor", "recomputeFlags", "reconcileExecutor", "rerender"] as const) {
       expect(defaults[key], key).toBeTypeOf("function")
@@ -437,5 +496,54 @@ describe("reconcile ở dự án có ngôn ngữ tài liệu khác ngôn ngữ g
     if (!isReconcileApplied(applied)) throw new Error("lượt 2 lẽ ra áp")
     expect(applied.spine.use_cases.find((u) => u.id === "UC02")?.description).toBe(description)
     expect(store.translations.get(`${PROJECT}|vi|${hashSource(description)}`)).toMatchObject({ text: "Chủ sản phẩm tạo dự án.", origin: "author" })
+  })
+})
+
+// ─── P12 (T10, chốt câu 9): người khác / bước khác ghi giữa hai lượt "Viết lại" ──────
+
+describe("P12 - reconcile lượt 2 khi Spine vừa đổi ở nơi khác", () => {
+  const OTHER = "650000000000000000000011"
+  const firstPass = async () => {
+    await seed()
+    await renameActor()
+    const version = (await repo.get(PROJECT))!.spine_version
+    deps.lastEditor = vi.fn(async () => ({ name: "Bình", at: new Date("2026-11-17T09:05:00.000Z") }))
+    deps.reconcileExecutor = vi.fn(async (_type, input) => {
+      const stepId = (input.promptVariables as { step_id: string }).step_id
+      if (stepId === "S-3.2") return opsResult([{ op: "set", path: "use_cases[id=UC02].description", value: "The Product Owner creates a project." }])
+      if (stepId === "S-4.3") return opsResult([{ op: "set", path: "roles[id=R1].name", value: "Product Owner" }])
+      return opsResult([])
+    })
+    const previewed = await reconcile(PROJECT, USER, { base_version: version }, {}, deps)
+    if (isReconcileApplied(previewed)) throw new Error("lượt 1 lẽ ra trả preview")
+    return { previewed, version }
+  }
+  const otherWrites = async (path: string, value: unknown) => {
+    const current = (await repo.get(PROJECT))!.spine_version
+    await applyTransaction(PROJECT, { base_version: current, by: OTHER, ops: [{ op: "set", path, value }], reason: "người khác sửa" })
+  }
+
+  it("người khác ghi chỗ khác ⇒ vẫn ghi cả lô, không 'Tài liệu vừa thay đổi'", async () => {
+    const { previewed, version } = await firstPass()
+    await otherWrites("glossary[id=G01].definition", "Tài liệu đặc tả yêu cầu.")
+    const result = await reconcile(PROJECT, USER, { base_version: version, preview_id: previewed.preview_id }, {}, deps)
+    if (!isReconcileApplied(result)) throw new Error("lượt 2 lẽ ra đã áp")
+    expect(result.spine.use_cases.find((u) => u.id === "UC02")?.description).toBe("The Product Owner creates a project.")
+    expect(result.spine.roles.find((r) => r.id === "R1")?.name).toBe("Product Owner")
+    expect(result.redraft_sections).toBeUndefined()
+  })
+
+  it("người khác sửa đúng chữ một mục ⇒ ghi các mục khác, mục đó chưa ghi và vẫn stale để AI soạn lại", async () => {
+    const { previewed, version } = await firstPass()
+    await otherWrites("use_cases[id=UC02].description", "Bình viết lại mô tả UC02.")
+    const result = await reconcile(PROJECT, USER, { base_version: version, preview_id: previewed.preview_id }, {}, deps)
+    if (!isReconcileApplied(result)) throw new Error("lượt 2 lẽ ra đã áp")
+    expect(result.spine.use_cases.find((u) => u.id === "UC02")?.description).toBe("Bình viết lại mô tả UC02.")
+    expect(result.spine.roles.find((r) => r.id === "R1")?.name).toBe("Product Owner")
+    expect(result.redraft_sections).toContain("fixed:2.2.2")
+    expect(result.skipped).toEqual([expect.objectContaining({ path: "use_cases[id=UC02]", changed_by: "Bình", current: "Bình viết lại mô tả UC02." })])
+    const { projectId: _p, ...spine } = (await repo.get(PROJECT))!
+    expect(awaitingReaccept(spine, "fixed:3.1.3")).toBe(true)
+    expect(computeStatus(spine, (await repo.listChanges(PROJECT)) as SpineChange[], "fixed:2.2.2")).toBe("stale")
   })
 })

@@ -49,7 +49,7 @@ const db = vi.hoisted(() => {
         return copy(doc)
       }
       if (!options.upsert) return null
-      const created = { _id: "spine", ...filter, ...copy(update.$setOnInsert ?? {}) }
+      const created = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, ...filter, ...copy(update.$setOnInsert ?? {}) }
       spines.push(created)
       return copy(created)
     }
@@ -147,6 +147,7 @@ import { NO_QUESTION_ACK_VI } from "../fast-path.js"
 import { getRunState } from "../run-state.service.js"
 import { ApiError } from "../../../shared/utils/api-error.js"
 import { gate } from "../gate.service.js"
+import { resetUserMessageClaims } from "../../project/user-message-dedupe.js"
 import { stepEventSchema, type StepEvent } from "../pipeline.dto.js"
 import { briefCoreEntries } from "../../spine/brief-core.js"
 
@@ -174,7 +175,7 @@ const loadOpCase = (stepId: string): OpTransaction => {
 const seedEmpty = (mode: "coaching" | "fast" = "coaching"): void => {
   const spine = repo.createEmptySpine({ name: "Dự án mới", domain: null })
   if (mode === "fast") spine.project.working_mode = "fast"
-  db.spines[0] = { _id: "spine", projectId: PROJECT, ...spine }
+  db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...spine }
   db.sessions.push({ _id: SESSION, projectId: PROJECT, messages: [], isActive: true, is_pipeline: true })
 }
 
@@ -236,12 +237,13 @@ const runAndAccept = async (stepId: string, message?: string): Promise<StepEvent
 }
 
 beforeEach(() => {
+  resetUserMessageClaims()
   db.reset()
   elicitTurns = []
 })
 
 describe("T20: project rỗng đi trọn B-0.1 → B-2.3 → S-1.4 (mock provider)", () => {
-  it("ghi project{}, addendum[], assumptions[], other_requirements[] bằng op — không còn nằm trong tin nhắn", async () => {
+  it("ghi project{}, addendum[], assumptions[], other_requirements[] bằng op - không còn nằm trong tin nhắn", async () => {
     seedEmpty()
     for (const stepId of BRIEF_STEPS) await runAndAccept(stepId)
 
@@ -913,7 +915,7 @@ describe("fast path Brief: một lượt hỏi gộp, bước B-1.x viết trư�
     expect((last?.phase_gate as typeof phaseGate).message_vi).toContain("Còn 6 điều tôi tạm hiểu nữa")
   })
 
-  it("Mọi bước: bước dừng là cổng thật — không auto, run-state `gate`", async () => {
+  it("Mọi bước: bước dừng là cổng thật - không auto, run-state `gate`", async () => {
     seedB1({ reviewMode: "strict" })
     const { events, emit } = collect()
     await runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: trackedElicit().executor, draftExecutor: drafts(), message: "Đặt lịch khám" })

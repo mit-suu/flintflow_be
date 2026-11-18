@@ -39,7 +39,7 @@ const db = vi.hoisted(() => {
         return copy(doc)
       }
       if (!options.upsert) return null
-      const created = { _id: "spine", ...filter, ...copy(update.$setOnInsert ?? {}) }
+      const created = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, ...filter, ...copy(update.$setOnInsert ?? {}) }
       spines.push(created)
       return copy(created)
     }
@@ -137,7 +137,7 @@ const without = <T extends { spine_version: number }>({ spine_version: _v, ...re
 describe("10 ca op T02 (fixtures/op-cases)", () => {
   for (const { file, opCase } of CASES) {
     if (opCase.must_reject) {
-      it(`${file} — ${opCase.name}: từ chối ${opCase.must_reject}`, () => {
+      it(`${file} - ${opCase.name}: từ chối ${opCase.must_reject}`, () => {
         const base = baseOf(opCase)
         const err = rejection(() => planTransaction(base, txn(opCase.expected_ops), { startSeq: 1 }))
         expect(err.statusCode).toBe(422)
@@ -146,7 +146,7 @@ describe("10 ca op T02 (fixtures/op-cases)", () => {
       continue
     }
 
-    it(`${file} — ${opCase.name}: áp được, seq liên tục, revert về deep-equal`, () => {
+    it(`${file} - ${opCase.name}: áp được, seq liên tục, revert về deep-equal`, () => {
       const base = baseOf(opCase)
       const plan = planTransaction(base, txn(opCase.expected_ops, { step_id: opCase.step_id }), { startSeq: 7 })
 
@@ -307,6 +307,16 @@ describe("các loại op", () => {
     expect(rules).toEqual(["duplicate_id", "op_not_allowed", "index_selector_forbidden", "schema_invalid", "op_not_allowed", "op_value_missing"])
   })
 
+  it("FLF-375: set cả mảng khối văn bản (không có id) của mục riêng được, ghi before", () => {
+    const base = structuredClone(FIXTURE)
+    base.custom_sections.push({ id: "CS90", heading: "", level: 4, source: "import", blocks: [{ kind: "paragraph", text: "UC-05, UC-06, UC-09 có thêm sơ đồ hoạt động.", rows: null, image_ref: null }] } as never)
+    const value = [{ kind: "paragraph", text: "UC-05, UC-06 có thêm sơ đồ hoạt động.", rows: null, image_ref: null }]
+    const plan = planTransaction(base, txn([{ op: "set", path: "custom_sections[id=CS90].blocks", value } as Op]), { startSeq: 1 })
+    expect(plan.spine.custom_sections.find((c) => c.id === "CS90")?.blocks).toEqual(value)
+    expect(plan.changes[0]).toMatchObject({ op: "set", path: "custom_sections[id=CS90].blocks" })
+    expect((plan.changes[0].before as { text: string }[])[0].text).toContain("UC-09")
+  })
+
   it("không xoá được section bắt buộc và màn đang là screen_cursor", () => {
     const e1 = rejection(() => planTransaction(FIXTURE, txn([{ op: "remove", path: "sections[id=fixed:3.1.1]" }]), { startSeq: 1 }))
     expect(e1.violations.map((v) => v.rule)).toContain("invariant_1_required_section")
@@ -351,7 +361,7 @@ describe("các loại op", () => {
     const base = structuredClone(FIXTURE)
     const screen = base.screens.find((s) => s.flow_to.length > 0)!
     screen.flow_to = [screen.flow_to[0], ...screen.flow_to]
-    const plan = planTransaction(base, txn([{ op: "remove", path: `screens[id=${screen.id}].flow_to[=${screen.flow_to[0]}]` }]), { startSeq: 1 })
+    const plan = planTransaction(base, txn([{ op: "remove", path: `screens[id=${screen.id}].flow_to[to=${screen.flow_to[0].to}]` }]), { startSeq: 1 })
     expect(plan.spine.screens.find((s) => s.id === screen.id)?.flow_to).toEqual(screen.flow_to.slice(1))
   })
 
@@ -368,7 +378,7 @@ const PROJECT = "650000000000000000000001"
 
 const seed = async (spine: Spine = FIXTURE) => {
   await repo.getOrCreate(PROJECT)
-  db.spines[0] = { _id: "spine", projectId: PROJECT, ...structuredClone(spine) }
+  db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...structuredClone(spine) }
 }
 
 describe("applyTransaction / previewTransaction / revertRange", () => {
@@ -474,8 +484,15 @@ describe("applyTransaction / previewTransaction / revertRange", () => {
     await seed()
     const preview = await previewTransaction(PROJECT, txn(CASES[3].opCase.expected_ops.slice(0, 1)))
     expect(preview.ok).toBe(true)
-    expect(preview.ops).toHaveLength(3)
-    expect(preview.changes.map((c) => c.path)).toEqual(["actors[id=A08]", "use_cases[id=UC01].actor_ids[=A08]", "use_cases[id=UC03].actor_ids[=A08]"])
+    // Xoá actor gỡ luôn message sơ đồ tuần tự có actor đó ở một đầu (FN010, FN084)
+    expect(preview.ops).toHaveLength(5)
+    expect(preview.changes.map((c) => c.path)).toEqual([
+      "actors[id=A08]",
+      "use_cases[id=UC01].actor_ids[=A08]",
+      "use_cases[id=UC03].actor_ids[=A08]",
+      "functions[id=FN010].interactions[from=system,to=A08,message=Send password reset link,kind=request,flow=normal]",
+      "functions[id=FN084].interactions[from=system,to=A08,message=Send quota renewal notice,kind=request,flow=normal]"
+    ])
     expect((await repo.get(PROJECT))?.spine_version).toBe(1)
     expect(db.changes).toHaveLength(0)
 

@@ -1,7 +1,8 @@
 /**
  * flags.service.ts
  * ─────────────────────────────────────────────────────────────────
- * Đồng bộ `flags[]` với kết quả deterministic check (srs-spine.md §7), waiver có hạn.
+ * Đồng bộ `flags[]` với kết quả deterministic check (srs-spine.md §7), waiver có hạn (chỉ cờ vàng — FLF-329),
+ * "giữ nguyên + lý do" cho cờ đỏ (không đóng cờ).
  * Mọi ghi đi qua op engine (`applyTransaction`) — không ghi thẳng DB (coding-rules §3.3).
  *
  * Khoá flag `(level, rule_id, section_id, target_id, resolved_at IS NULL)`:
@@ -17,10 +18,12 @@
  * vì chính các lần ghi flag, lô đó đẩy `waived_at_version` của waiver còn hiệu lực lên version mới.
  */
 
+import { assertNoMigrationRunning } from "../template-migration/migration-guard.js"
 import type { Change, Flag, Spine, SpineRecord } from "./spine.types.js"
 import type { ApplyResult, Op } from "./op.types.js"
 import * as repository from "./spine.repository.js"
 import { applyTransaction } from "./op-engine.js"
+import { loadRenderContext } from "../diagram/render-context.js"
 import { MODEL_OWNED_RULES, NON_WAIVABLE_RULES, RULES, flagKey, runDeterministicCheck, type FlagCandidate, type RuleProfile } from "./deterministic-check.js"
 import { WAIVE_REASON_MIN_LENGTH } from "./spine.schema.js"
 import { sectionsOfPath } from "./section-registry.js"
@@ -28,6 +31,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 
 export const FLAG_NOT_FOUND = "FLAG_NOT_FOUND"
 export const FLAG_NOT_WAIVABLE = "FLAG_NOT_WAIVABLE"
+export const FLAG_NOT_KEEPABLE = "FLAG_NOT_KEEPABLE"
 
 export interface FlagPlan {
   ops: Op[]
@@ -150,7 +154,10 @@ export const planFlagOps = (
         resolved_at: null,
         waived_by_user: false,
         waive_reason: null,
-        waived_at_version: null
+        waived_at_version: null,
+        kept_reason: null,
+        kept_by: null,
+        kept_at: null
       }
       plan.ops.push({ op: "add", path: "flags[]", value, reason: `Mở cờ ${c.rule_id}` })
       plan.opened.push(id)
@@ -230,10 +237,11 @@ export const recompute = async (projectId: string, options: RecomputeOptions): P
   const spine = stripRecord(record)
   const atBaseline = options.atBaseline ?? false
   const ruleProfile = options.ruleProfile ?? (await ruleProfileResolver(projectId))
-  const candidates = runDeterministicCheck(spine, changes, { atBaseline, ruleProfile })
+  const renderContext = await loadRenderContext(projectId)
+  const candidates = runDeterministicCheck(spine, changes, { atBaseline, ruleProfile, renderContext })
   const baselineCandidates = atBaseline
     ? undefined
-    : runDeterministicCheck(spine, changes, { atBaseline: true, ruleProfile }).filter((c) => AT_BASELINE_RULES.has(c.rule_id))
+    : runDeterministicCheck(spine, changes, { atBaseline: true, ruleProfile, renderContext }).filter((c) => AT_BASELINE_RULES.has(c.rule_id))
   const plan = planFlagOps(spine, candidates, new Date(), { atBaseline, baselineCandidates, changes })
 
   if (plan.ops.length === 0) {
@@ -258,11 +266,20 @@ export const recompute = async (projectId: string, options: RecomputeOptions): P
 
 /** Waive một cờ: lý do user gõ ≥ 20 ký tự; cấm `array_empty`/`dead_reference`/`render_error`. */
 export const waive = async (projectId: string, flagId: string, reason: string, userId: string): Promise<Flag> => {
+  await assertNoMigrationRunning(projectId)
   const record = await load(projectId)
   const flag = record.flags.find((f) => f.id === flagId)
   if (!flag) throw new ApiError(404, "Không tìm thấy cờ này.", FLAG_NOT_FOUND)
-  if (NON_WAIVABLE_RULES.has(flag.rule_id)) {
-    throw new ApiError(400, "Cờ này không bỏ qua được — cần sửa dữ liệu.", FLAG_NOT_WAIVABLE, { rule_id: flag.rule_id })
+  if (flag.level === "red" || NON_WAIVABLE_RULES.has(flag.rule_id)) {
+    // FLF-329 (BR-04): cờ đỏ không waive được ở mọi chế độ — chỉ "Giữ nguyên + lý do" (`keep`), cờ vẫn chặn
+    throw new ApiError(
+      400,
+      flag.level === "red"
+        ? "Cờ đỏ không bỏ qua được - hãy sửa dữ liệu, hoặc chọn Giữ nguyên kèm lý do (cờ vẫn chặn chốt bản)."
+        : "Cờ này không bỏ qua được - cần sửa dữ liệu.",
+      FLAG_NOT_WAIVABLE,
+      { rule_id: flag.rule_id, level: flag.level }
+    )
   }
   if (flag.resolved_at !== null) throw new ApiError(400, "Cờ này đã đóng.", FLAG_NOT_WAIVABLE)
 
@@ -283,6 +300,41 @@ export const waive = async (projectId: string, flagId: string, reason: string, u
     ],
     by: userId,
     reason: `Waive ${flag.rule_id}`,
+    step_id: null
+  })
+
+  const updated = result.spine.flags.find((f) => f.id === flagId)
+  if (!updated) throw new ApiError(404, "Không tìm thấy cờ này.", FLAG_NOT_FOUND)
+  return updated
+}
+
+/**
+ * "Giữ nguyên + lý do" (FLF-329, business-flow §2 "Ba mức cờ"): ghi lý do, người và thời điểm lên cờ; cờ **không đóng**,
+ * `waived_by_user` không đổi — cờ đỏ vẫn chặn baseline / gửi gói / phát hành. Dùng được cho cả cờ vàng (ghi chú), mọi chế độ.
+ */
+export const keep = async (projectId: string, flagId: string, reason: string, userId: string): Promise<Flag> => {
+  await assertNoMigrationRunning(projectId)
+  const record = await load(projectId)
+  const flag = record.flags.find((f) => f.id === flagId)
+  if (!flag) throw new ApiError(404, "Không tìm thấy cờ này.", FLAG_NOT_FOUND)
+  if (flag.resolved_at !== null) throw new ApiError(400, "Cờ này đã đóng.", FLAG_NOT_KEEPABLE)
+
+  const text = reason.trim()
+  if (text.length < WAIVE_REASON_MIN_LENGTH) {
+    throw new ApiError(400, `Lý do giữ nguyên cần ít nhất ${WAIVE_REASON_MIN_LENGTH} ký tự.`, "VALIDATION_ERROR")
+  }
+
+  const spine = stripRecord(record)
+  const result = await applyTransaction(projectId, {
+    base_version: record.spine_version,
+    ops: [
+      { op: "set", path: flagPath(flagId, "kept_reason"), value: text },
+      { op: "set", path: flagPath(flagId, "kept_by"), value: userId },
+      { op: "set", path: flagPath(flagId, "kept_at"), value: new Date().toISOString() },
+      ...refreshWaiverOps(spine, new Set([flagId]))
+    ],
+    by: userId,
+    reason: `Giữ nguyên ${flag.rule_id} kèm lý do`,
     step_id: null
   })
 

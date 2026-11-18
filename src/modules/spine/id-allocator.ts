@@ -37,6 +37,11 @@ export const ID_FORMATS: Readonly<Record<string, IdFormat>> = Object.freeze({
   messages: { prefix: "MSG", width: 2 },
   other_requirements: { prefix: "OR", width: 2 },
   glossary: { prefix: "G", width: 2 },
+  // FLF-365: mẫu IEEE 29148
+  references: { prefix: "REF-", width: 2 },
+  verifications: { prefix: "VER-", width: 2 },
+  // FLF-390: sơ đồ triển khai
+  deployment_nodes: { prefix: "DN", width: 2 },
   addendum: { prefix: "AD", width: 2 },
   custom_sections: { prefix: "CS", width: 2 },
   diagrams: { prefix: "D", width: 2 },
@@ -71,11 +76,28 @@ export const nextIdIn = (existing: readonly string[], format: IdFormat): string 
   }
 }
 
+/**
+ * Khuôn id dùng cho `existing`: khuôn mặc định nếu tài liệu đang dùng nó (hoặc chưa có phần tử), ngược lại tiền tố
+ * phổ biến nhất của các id `<tiền tố><số>` đang có. FLF-307: tài liệu upload đánh `UC-125`, `SCR-84` ⇒ phần tử mới
+ * là `UC-126`, `SCR-85` thay vì `UC01`, `S01` lạc khuôn.
+ */
+export const formatFor = (existing: readonly string[], fallback: IdFormat): IdFormat => {
+  const own = new RegExp(`^${escapeRe(fallback.prefix)}\\d+$`)
+  if (existing.some((id) => own.test(id))) return fallback
+  const counts = new Map<string, number>()
+  for (const id of existing) {
+    const m = /^(.*\D)\d+$/.exec(id)
+    if (m) counts.set(m[1], (counts.get(m[1]) ?? 0) + 1)
+  }
+  const [prefix] = [...counts].sort((a, b) => b[1] - a[1])[0] ?? []
+  return prefix ? { prefix, width: 1 } : fallback
+}
+
 /** Collection này có được server cấp id không. */
-export const allocatesIds = (collection: string): boolean => collection === "validations" || collection in ID_FORMATS
+export const allocatesIds = (collection: string): boolean => collection === "validations" || collection === "states" || collection === "activity_nodes" || collection in ID_FORMATS
 
 /**
- * Id mới cho một phần tử thêm vào `collection`. `parentId` chỉ dùng cho `validations` (id function cha).
+ * Id mới cho một phần tử thêm vào `collection`. `parentId` chỉ dùng cho `validations` (id function cha), `activity_nodes` (id use case) và `states` (id entity).
  * `null` ⇒ collection không do allocator quản lý (vd `steps`, `sections` — khoá có nghĩa, không đánh số).
  */
 export const allocateId = (spine: Spine, collection: string, parentId: string | null = null): string | null => {
@@ -84,13 +106,23 @@ export const allocateId = (spine: Spine, collection: string, parentId: string | 
     const all = spine.functions.flatMap((f) => f.validations.map((v) => v.id))
     return nextIdIn(all, { prefix: `${parentId}-V`, width: 1 })
   }
+  if (collection === "states") {
+    // Trạng thái lồng trong entity: `<entity id>-ST<n>`, duy nhất trên toàn Spine (transition tham chiếu bằng id)
+    if (!parentId) return null
+    return nextIdIn(spine.entities.flatMap((e) => (e.states ?? []).map((s) => s.id)), { prefix: `${parentId}-ST`, width: 1 })
+  }
+  if (collection === "activity_nodes") {
+    // FLF-390: nút activity lồng trong use case: `<use case id>-AN<n>`, duy nhất trên toàn Spine (flow tham chiếu bằng id)
+    if (!parentId) return null
+    return nextIdIn(spine.use_cases.flatMap((u) => (u.activity_nodes ?? []).map((n) => n.id)), { prefix: `${parentId}-AN`, width: 1 })
+  }
   const format = ID_FORMATS[collection]
   if (!format) return null
   const list = (spine as unknown as Record<string, unknown>)[collection]
   const ids = Array.isArray(list)
     ? list.map((el) => (typeof el === "object" && el !== null ? (el as { id?: unknown }).id : undefined)).filter((id): id is string => typeof id === "string")
     : []
-  return nextIdIn(ids, format)
+  return nextIdIn(ids, formatFor(ids, format))
 }
 
 /** Thay id tạm đã được cấp trong chuỗi (path, hoặc giá trị như `assumptions[].path`). */
