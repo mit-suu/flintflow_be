@@ -94,7 +94,8 @@ Wire the function to rules that already exist by appending to `business_rule_ids
 - `set` replaces it); do not create `business_rules[]` here, that is S-7.1.
 
 **`interactions[]`** - the actor ↔ system messages the System Sequence Diagram is drawn from; one `set` of the whole
-array per function. Write it **only when the function needs the diagram** (otherwise leave it out): at least 2 messages
+array per function. When the projection has `sequence_diagram: "none"` the project has no sequence diagrams: write
+neither `interactions` nor `component_interactions`. Otherwise write it **only when the function needs the diagram** (otherwise leave it out): at least 2 messages
 AND (a `system`/`time` actor takes part, OR a message is abnormal or guarded, OR the function has no screen - an
 `@nonscreen` function). Element: `{from, to, message, kind, flow, guard?}`.
 

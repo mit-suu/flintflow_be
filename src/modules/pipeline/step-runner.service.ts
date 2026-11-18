@@ -1828,12 +1828,22 @@ export const runStep = async (
      */
     const askDiagramChoice = async (resumed?: ResumeAnswers): Promise<void> => {
       const store = d.diagramChoices ?? projectDiagramChoiceStore
+      // FLF-441: một bước có thể hỏi nhiều thẻ (S-4.5: Class Diagram rồi ký pháp ERD) — hỏi lần lượt tới khi đủ.
+      // Trần vòng chặn lặp vô hạn khi store không ghi được (test, lỗi DB).
+      for (let round = 0; round < 4; round++) {
+        const asked = await askOneDiagramChoice(store, round === 0 ? resumed : undefined)
+        if (!asked) return
+      }
+    }
+
+    /** Hỏi (hoặc ghi bù) thẻ đầu tiên còn thiếu của bước. Không còn gì ⇒ `false`. */
+    const askOneDiagramChoice = async (store: DiagramChoiceStore, resumed?: ResumeAnswers): Promise<boolean> => {
       const need = diagramChoiceFor(stepDef.template_id, await store.load(projectId), spine)
-      if (!need) return
+      if (!need) return false
       const { kind } = need
       if (need.backfill !== null) {
         await store.save(projectId, kind, need.backfill)
-        return
+        return true
       }
       const question = diagramChoiceQuestion(kind, replyLanguage)
       const asked: PendingAnswerState["asked"] = [question]
@@ -1867,7 +1877,7 @@ export const runStep = async (
         }
         // Sổ quyết định + transcript như câu trả lời thẻ (nhãn của giá trị, không phải chữ gõ lạ)
         await recordAnswers(asked, [{ question_id: questionId, answer: diagramChoiceLabel(kind, picked, replyLanguage) }], card && value !== null ? {} : { transcript: [] })
-        return
+        return true
       }
     }
 
