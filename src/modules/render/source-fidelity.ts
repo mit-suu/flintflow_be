@@ -147,7 +147,11 @@ const isTemplateSection = (id: string): boolean => /^(fixed|group|slot):/.test(i
  * `function:*`, `custom:*`) vẫn tính heading — đổi tên là sửa.
  */
 const sectionKey = (section: RenderedDocument["sections"][number], anchorById: boolean): string =>
-  JSON.stringify(anchorById && isTemplateSection(section.id) ? { blocks: section.blocks } : { heading: section.heading, blocks: section.blocks })
+  JSON.stringify(anchorById && isTemplateSection(section.id) ? { blocks: section.blocks } : { heading: section.heading, blocks: section.blocks }, ignoreEntityPaths)
+
+/** FLF-443: path phần tử chỉ để đặt chip Nguồn, không phải nội dung - bản in lúc import (chưa có path) vẫn khớp bản hiện tại. */
+const ENTITY_PATH_KEYS: ReadonlySet<string> = new Set(["entity_path", "row_entity_paths", "item_entity_paths"])
+const ignoreEntityPaths = (key: string, value: unknown): unknown => (ENTITY_PATH_KEYS.has(key) ? undefined : value)
 
 /** Hàm thuần: id mục mà bản in hiện tại trùng bản in lúc import (hoặc lúc đổi mẫu khi `anchorById`). */
 export const pristineSectionIds = (current: RenderedDocument, imported: RenderedDocument, opts: { anchorById?: boolean } = {}): Set<string> => {

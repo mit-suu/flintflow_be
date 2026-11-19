@@ -11,15 +11,19 @@ const inlineRunSchema = z.strictObject({
 const runsSchema = z.array(inlineRunSchema)
 const levelSchema = z.number().int().min(1).max(6)
 
+// FLF-443: đường dẫn phần tử Spine trên block (chip Nguồn); mảng song song `items` / `rows`
+const entityPaths = z.array(z.string().min(1).nullable()).optional()
+
 const blockSchema = z.discriminatedUnion("type", [
-  z.strictObject({ type: z.literal("paragraph"), runs: runsSchema }),
+  z.strictObject({ type: z.literal("paragraph"), runs: runsSchema, entity_path: z.string().min(1).optional() }),
   z.strictObject({ type: z.literal("heading"), level: levelSchema, text: z.string() }),
-  z.strictObject({ type: z.literal("bullet_list"), items: z.array(runsSchema) }),
-  z.strictObject({ type: z.literal("numbered_list"), items: z.array(runsSchema) }),
+  z.strictObject({ type: z.literal("bullet_list"), items: z.array(runsSchema), item_entity_paths: entityPaths }),
+  z.strictObject({ type: z.literal("numbered_list"), items: z.array(runsSchema), item_entity_paths: entityPaths }),
   z.strictObject({
     type: z.literal("table"),
     header: z.array(runsSchema).min(1),
-    rows: z.array(z.array(runsSchema))
+    rows: z.array(z.array(runsSchema)),
+    row_entity_paths: entityPaths
   }),
   z.strictObject({
     type: z.literal("image"),

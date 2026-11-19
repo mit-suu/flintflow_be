@@ -3,6 +3,7 @@ import * as googleController from "./google.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
 import { requireRole } from "../../shared/auth/require-role.middleware.js"
 import * as docsAgentController from "./docs-agent/docs-agent.controller.js"
+import { requireDocsAgentEnabled } from "./docs-agent/docs-agent.guard.js"
 
 /**
  * Route Google gắn theo dự án, mount ở `/api/v1/projects` (sau `orgGuard`): danh sách Google Doc đã xuất và trợ lý Google
@@ -98,7 +99,7 @@ router.delete("/:projectId/google-docs/links/:fileId", authMiddleware, linkRoles
  *       401: { description: GOOGLE_RECONNECT_REQUIRED }
  *       403: { description: ORG_ROLE_FORBIDDEN (Viewer), GOOGLE_FILE_FORBIDDEN }
  *       404: { description: PROJECT_NOT_FOUND, GOOGLE_FILE_NOT_FOUND, GOOGLE_DOC_NOT_IN_PROJECT (documentId không phải Google Doc của dự án) }
- *       503: { description: GOOGLE_INTEGRATION_DISABLED }
+ *       503: { description: "GOOGLE_INTEGRATION_DISABLED | GOOGLE_DOCS_AGENT_DISABLED" }
  * /api/v1/projects/{projectId}/google-docs/agent/actions/{actionId}/apply:
  *   post:
  *     summary: Áp dụng một đề xuất vào Google Doc (miễn phí)
@@ -120,8 +121,8 @@ router.delete("/:projectId/google-docs/links/:fileId", authMiddleware, linkRoles
  *       404: { description: PENDING_ACTION_NOT_FOUND }
  */
 const agentRoles = requireRole("lead", "analyst")
-router.post("/:projectId/google-docs/agent/messages/stream", authMiddleware, agentRoles, docsAgentController.streamMessage)
-router.post("/:projectId/google-docs/agent/actions/:actionId/apply", authMiddleware, agentRoles, docsAgentController.applyAction)
-router.post("/:projectId/google-docs/agent/actions/:actionId/dismiss", authMiddleware, agentRoles, docsAgentController.dismissAction)
+router.post("/:projectId/google-docs/agent/messages/stream", authMiddleware, requireDocsAgentEnabled, agentRoles, docsAgentController.streamMessage)
+router.post("/:projectId/google-docs/agent/actions/:actionId/apply", authMiddleware, requireDocsAgentEnabled, agentRoles, docsAgentController.applyAction)
+router.post("/:projectId/google-docs/agent/actions/:actionId/dismiss", authMiddleware, requireDocsAgentEnabled, agentRoles, docsAgentController.dismissAction)
 
 export default router

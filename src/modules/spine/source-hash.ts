@@ -20,6 +20,7 @@ import { systemName } from "./system-name.js"
 import { DEFAULT_ERD_NOTATION, type RenderContext } from "../../shared/diagram/erd-notation.js"
 import { resolveScreenTheme } from "../../shared/diagram/screen-theme.js"
 import { DEFAULT_SEQUENCE_LEVEL, type SequenceLevel } from "../../shared/diagram/sequence-level.js"
+import { excludedDiagramKind } from "../../shared/diagram/diagram-inclusion.js"
 
 /** Giá trị `source_hash` nghĩa là chưa từng tính (fixture T02 dùng "TBD") — bỏ qua `diagram_stale`. */
 export const UNHASHED_SOURCE_HASHES: ReadonlySet<string> = new Set(["", "TBD"])
@@ -264,12 +265,17 @@ const sequenceExtras = (spine: Spine, diagram: Pick<Diagram, "owner_id">, level:
 }
 
 /** Hash ghi vào `diagrams[].source_hash` và so ở cờ `diagram_stale` — xem đầu file. */
+/** Hash của loại sơ đồ dự án không vẽ — không bao giờ trùng hash thật. */
+export const EXCLUDED_DIAGRAM_HASH = "excluded"
+
 export const renderedDiagramHash = (
   spine: Spine,
   diagram: Pick<Diagram, "kind" | "owner_id">,
   engines: Readonly<Record<DiagramKind, string>> = DIAGRAM_ENGINES,
   context: RenderContext = {}
 ): string => {
+  // FLF-441: loại dự án đã tắt (Class / Sequence / State Machine ngoài mẫu IEEE) ⇒ hình còn lại là cũ ⇒ lượt vẽ lại gỡ nó
+  if (excludedDiagramKind(context, diagram.kind)) return EXCLUDED_DIAGRAM_HASH
   const engine = engines[diagram.kind] ?? DEFAULT_DIAGRAM_ENGINE
   if (engine === DEFAULT_DIAGRAM_ENGINE) return computeSourceHash(spine, diagram)
   return createHash("sha256").update(stableStringify({ engine, projection: sourceProjection(spine, diagram), extras: renderedExtras(spine, diagram, context) })).digest("hex")

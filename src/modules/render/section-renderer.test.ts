@@ -266,7 +266,8 @@ describe("renderSection - fixed sections", () => {
         rows: [
           [[{ text: "Login" }], [{ text: "view" }]],
           [[{ text: "Dashboard" }], [{ text: "-" }]]
-        ]
+        ],
+        row_entity_paths: ["screens[id=S01]", "screens[id=S02]"]
       }
     ])
   })
@@ -421,14 +422,15 @@ describe("renderSection - fixed sections", () => {
       {
         type: "table",
         header: [[{ text: "Statement" }], [{ text: "Metric" }], [{ text: "Threshold" }], [{ text: "Priority" }]],
-        rows: [[[{ text: "Uptime." }], [{ text: "availability" }], [{ text: ">= 99.5%" }], [{ text: "must" }]]]
+        rows: [[[{ text: "Uptime." }], [{ text: "availability" }], [{ text: ">= 99.5%" }], [{ text: "must" }]]],
+        row_entity_paths: ["nfrs[id=N03]"]
       }
     ])
   })
 
   it("fixed:5.1 - chỉ business_rules tier=detail", () => {
     const section = renderSection(spine(), "fixed:5.1", ctx({ number: "5.1" }))
-    expect(section.blocks).toEqual([{ type: "bullet_list", items: [[{ text: "Password must be hashed." }]] }])
+    expect(section.blocks).toEqual([{ type: "bullet_list", items: [[{ text: "Password must be hashed." }]], item_entity_paths: ["business_rules[id=BR02]"] }])
   })
 
   it("fixed:5.5 - glossary luôn render (derived)", () => {
@@ -1050,5 +1052,66 @@ describe("FLF-365 - phần nhỏ tham khảo / phân bổ / kiểm chứng (Mode
     expect(cells(ver.rows[0])).toEqual(["FN001", "Test", "TC-FN001", "not run", ""])
     expect(renderContentSlot(emptySpine(), "slot:references", ctx())).toEqual([])
     expect(renderContentSlot(emptySpine(), "slot:apportioning", ctx())).toEqual([])
+  })
+})
+
+describe("renderSection - đường dẫn phần tử cho chip Nguồn (FLF-443)", () => {
+  const tablePaths = (sectionId: string): unknown => {
+    const table = renderSection(spine(), sectionId, ctx({ number: "0" })).blocks.find((b) => b.type === "table")
+    return table?.type === "table" ? table.row_entity_paths : undefined
+  }
+  const listPaths = (sectionId: string, type: "bullet_list" | "numbered_list" = "bullet_list"): unknown => {
+    const list = renderSection(spine(), sectionId, ctx({ number: "0" })).blocks.find((b) => b.type === type)
+    return list && (list.type === "bullet_list" || list.type === "numbered_list") ? list.item_entity_paths : undefined
+  }
+
+  it("bảng: mỗi dòng mang path của đúng phần tử, cùng thứ tự với rows", () => {
+    expect(tablePaths("fixed:2.1")).toEqual(["actors[id=A01]", "actors[id=A05]"])
+    expect(tablePaths("fixed:2.2.2")).toEqual(["use_cases[id=UC01]", "use_cases[id=UC02]"])
+    expect(tablePaths("fixed:3.1.2")).toEqual(["screens[id=S01]", "screens[id=S02]"])
+    expect(tablePaths("fixed:3.1.4")).toEqual(["functions[id=FN02]"])
+    expect(tablePaths("fixed:3.1.5")).toEqual(["entities[id=E01]", "entities[id=E02]"])
+    expect(tablePaths("fixed:4.2.1")).toEqual(["nfrs[id=N02]"])
+    expect(tablePaths("fixed:5.2")).toEqual(["common_requirements[id=CR01]"])
+    expect(tablePaths("fixed:5.3")).toEqual(["messages[id=MSG01]"])
+    expect(tablePaths("fixed:5.4")).toEqual(["other_requirements[id=OR01]"])
+    expect(tablePaths("fixed:5.5")).toEqual(["glossary[id=G01]"])
+  })
+
+  it("bảng vai trò (chưa phân quyền) mang path roles[id=…]; bảng business rules khi dựng lại thành bảng mang path business_rules", () => {
+    const rolesOnly = renderSection({ ...spine(), permissions: [] }, "fixed:3.1.3", ctx())
+    expect(rolesOnly.blocks[0]).toMatchObject({ row_entity_paths: ["roles[id=R1]"] })
+    const asTable = renderSection(spine(), "fixed:5.1", ctx({ preferTable: true }))
+    expect(asTable.blocks[0]).toMatchObject({ type: "table", row_entity_paths: ["business_rules[id=BR02]"] })
+  })
+
+  it("danh sách: mục mang path (nfr giao diện, business rule mức cao, hệ thống ngoài ở fixed:1)", () => {
+    expect(listPaths("fixed:4.1")).toEqual(["nfrs[id=N01]"])
+    const overview = renderSection(spine(), "fixed:1", ctx()).blocks.filter((b) => b.type === "bullet_list")
+    const withPaths = overview.flatMap((b) => (b.type === "bullet_list" && b.item_entity_paths ? [b.item_entity_paths] : []))
+    expect(withPaths).toEqual([["business_rules[id=BR01]"], ["actors[id=A05]"]])
+  })
+
+  it("danh sách / bảng không có phần tử gắn được (mục goals, bước của function) ⇒ không ghi field", () => {
+    const blocks = [
+      ...renderSection(spine(), "fixed:1", ctx()).blocks,
+      ...renderSection(spine(), "function:FN01", ctx({ functionLayout: "fpt" })).blocks,
+      ...renderSection(spine(), "function:FN01", ctx()).blocks
+    ]
+    const goals = blocks.find((b) => b.type === "bullet_list" && JSON.stringify(b.items).includes("Ship a baseline"))
+    expect(goals).toBeDefined()
+    expect(goals).not.toHaveProperty("item_entity_paths")
+    expect(JSON.stringify(blocks.filter((b) => b.type === "numbered_list"))).not.toContain("entity_paths")
+  })
+
+  it("section function / feature dùng id của section, block bên trong không mang path", () => {
+    const section = renderSection(spine(), "function:FN01", ctx({ functionLayout: "fpt" }))
+    expect(section.id).toBe("function:FN01")
+    expect(JSON.stringify(section.blocks)).not.toContain("entity_path")
+  })
+
+  it("giữ path khi dịch nhãn sang tiếng Việt (localizeBlocks không làm rơi field)", () => {
+    const vi = renderSection(spine(), "fixed:2.1", ctx({ language: "vi" }))
+    expect(vi.blocks[0]).toMatchObject({ row_entity_paths: ["actors[id=A01]", "actors[id=A05]"] })
   })
 })

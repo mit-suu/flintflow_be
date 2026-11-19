@@ -45,6 +45,8 @@ export const formatCrId = (seq: number): string => `CR-${String(seq).padStart(3,
 export const CR_MATERIAL_KINDS = ["text", "file", "image"] as const
 export type CrMaterialKind = (typeof CR_MATERIAL_KINDS)[number]
 export const CR_MAX_MATERIALS = 10
+/** FLF-445: số cờ tối đa một CR tạo từ nhóm cờ; nhóm lớn hơn thì tách. */
+export const CR_MAX_FLAG_IDS = 50
 /** Chữ giữ lại mỗi tài liệu; dài hơn ⇒ cắt, `truncated = true`. */
 export const CR_MATERIAL_MAX_CHARS = 20_000
 export const MATERIAL_ID_PATTERN = /^M\d{2,}$/

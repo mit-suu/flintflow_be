@@ -29,6 +29,8 @@ const renderedDocumentCacheSchema = new Schema(
     /** Chỉ có ở bản draft. */
     assembled_at_version: { type: Number, min: 1 },
     generated_at: { type: Date, required: true },
+    /** `RENDER_FORMAT_VERSION` lúc ghi; hàng không có / khác số hiện tại bị dựng lại (xem `assemble.service.ts`). */
+    format_version: { type: Number },
     /** `RenderedDocument` (rendered-document.schema.ts) — ảnh là tham chiếu `diagram-ref:<id>`, không phải base64 thật. */
     doc: { type: Schema.Types.Mixed, required: true },
     /**

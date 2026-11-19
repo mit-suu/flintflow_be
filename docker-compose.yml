@@ -196,6 +196,8 @@ services:
         NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:5000/api/v1}
         # Tuỳ chọn. Bỏ trống thì không có nút đăng nhập Google, phần còn lại chạy bình thường.
         NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+        # Trợ lý Google Docs: cùng cờ với BE (GOOGLE_DOCS_AGENT_ENABLED), mặc định tắt.
+        NEXT_PUBLIC_GOOGLE_DOCS_AGENT_ENABLED: ${GOOGLE_DOCS_AGENT_ENABLED:-false}
     depends_on:
       backend:
         condition: service_healthy

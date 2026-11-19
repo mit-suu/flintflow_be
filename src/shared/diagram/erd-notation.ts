@@ -22,6 +22,12 @@ export interface RenderContext {
   screenTheme?: ScreenTheme
   /** Màn import đã chọn vẽ lại ảnh gốc bằng mockup (FLF-410) — thiếu ⇒ không màn nào. */
   screenMockups?: ScreenMockupState[]
+  /** FLF-441: `false` ⇒ dự án không cần Class Diagram — không vẽ. Thiếu ⇒ vẽ. */
+  classDiagram?: boolean
+  /** FLF-441: `false` ⇒ dự án không cần Sequence Diagram — không vẽ. Thiếu ⇒ vẽ. */
+  sequenceDiagram?: boolean
+  /** FLF-441: `false` ⇒ mẫu của dự án không phải IEEE ⇒ không vẽ State Machine Diagram. Thiếu ⇒ vẽ. */
+  stateMachine?: boolean
 }
 
 export const toErdNotation = (value: unknown): ErdNotation | null =>

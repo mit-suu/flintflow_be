@@ -15,22 +15,48 @@ const decision = (topic_key: string, answer: string, superseded_by: string | nul
 
 describe("diagramChoiceFor (FLF-418)", () => {
   it("S-4.5 hỏi ký pháp, S-5.4 hỏi mức — chỉ khi Project chưa có giá trị", () => {
-    expect(diagramChoiceFor("S-4.5", {}, { decisions: [] })).toEqual({ kind: "erd", backfill: null })
-    expect(diagramChoiceFor("S-5.4", {}, { decisions: [] })).toEqual({ kind: "sequence", backfill: null })
-    expect(diagramChoiceFor("S-4.5", { erdNotation: "chen" }, { decisions: [] })).toBeNull()
-    expect(diagramChoiceFor("S-5.4", { sequenceLevel: "component" }, { decisions: [] })).toBeNull()
+    expect(diagramChoiceFor("S-4.5", { classDiagram: true }, { decisions: [] })).toEqual({ kind: "erd", backfill: null })
+    expect(diagramChoiceFor("S-5.4", { sequenceDiagram: true }, { decisions: [] })).toEqual({ kind: "sequence", backfill: null })
+    expect(diagramChoiceFor("S-4.5", { erdNotation: "chen", classDiagram: false }, { decisions: [] })).toBeNull()
+    expect(diagramChoiceFor("S-5.4", { sequenceLevel: "component", sequenceDiagram: true }, { decisions: [] })).toBeNull()
     expect(diagramChoiceFor("S-5.2", {}, { decisions: [] })).toBeNull()
     expect(diagramChoiceFor("S-4.5", null, { decisions: [] })).toBeNull()
   })
 
   it("sổ quyết định có câu trả lời ⇒ ghi bù; quyết định đã bị thay ⇒ bỏ qua", () => {
-    expect(diagramChoiceFor("S-4.5", {}, { decisions: [decision("erd_notation", "IDEF1X")] })).toEqual({ kind: "erd", backfill: "idef1x" })
+    expect(diagramChoiceFor("S-4.5", { classDiagram: true }, { decisions: [decision("erd_notation", "IDEF1X")] })).toEqual({ kind: "erd", backfill: "idef1x" })
     expect(ledgerChoice({ decisions: [decision("sequence_level", "Thành phần")] }, "sequence")).toBe("component")
     expect(ledgerChoice({ decisions: [decision("erd_notation", "IDEF1X", "DC2")] }, "erd")).toBeNull()
   })
 })
 
+describe("diagramChoiceFor — có cần sơ đồ (FLF-441)", () => {
+  it("S-4.5 hỏi Class Diagram trước ký pháp; S-5.4 hỏi Sequence Diagram trước mức", () => {
+    expect(diagramChoiceFor("S-4.5", {}, { decisions: [] })).toEqual({ kind: "class_diagram", backfill: null })
+    expect(diagramChoiceFor("S-5.4", {}, { decisions: [] })).toEqual({ kind: "sequence_diagram", backfill: null })
+    expect(diagramChoiceFor("S-4.5", { classDiagram: false }, { decisions: [] })).toEqual({ kind: "erd", backfill: null })
+  })
+
+  it("không cần Sequence ⇒ không hỏi mức", () => {
+    expect(diagramChoiceFor("S-5.4", { sequenceDiagram: false }, { decisions: [] })).toBeNull()
+  })
+
+  it("Spine đã có hình (import / dự án cũ) hoặc sổ đã chốt ⇒ ghi bù", () => {
+    expect(diagramChoiceFor("S-4.5", {}, { decisions: [], diagrams: [{ kind: "class" }] })).toEqual({ kind: "class_diagram", backfill: "yes" })
+    expect(diagramChoiceFor("S-5.4", {}, { decisions: [decision("sequence_diagram", "Không")] })).toEqual({ kind: "sequence_diagram", backfill: "no" })
+  })
+})
+
 describe("resolveDiagramChoice", () => {
+  it("FLF-441 có / không — chữ phủ định thắng", () => {
+    expect(resolveDiagramChoice("class_diagram", "Có (Khuyến nghị)")).toBe("yes")
+    expect(resolveDiagramChoice("class_diagram", "Không")).toBe("no")
+    expect(resolveDiagramChoice("sequence_diagram", "không cần đâu")).toBe("no")
+    expect(resolveDiagramChoice("sequence_diagram", "cần nhé")).toBe("yes")
+    expect(resolveDiagramChoice("sequence_diagram", "No")).toBe("no")
+    expect(resolveDiagramChoice("class_diagram", "tuỳ bạn")).toBeNull()
+  })
+
   it("nhãn thẻ (kể cả Khuyến nghị / Recommended), tên vi / en, viết tắt", () => {
     expect(resolveDiagramChoice("erd", "Chen (Khuyến nghị)")).toBe("chen")
     expect(resolveDiagramChoice("erd", "Crow's Foot")).toBe("crowsfoot")
@@ -54,7 +80,7 @@ describe("resolveDiagramChoice", () => {
 describe("diagramChoiceQuestion", () => {
   it("đúng luật thẻ hỏi: header ≤ 12, 2–4 lựa chọn, có mô tả + preview, mặc định Khuyến nghị; id Q_<topic>", () => {
     for (const language of ["vi", "en"] as const) {
-      for (const kind of ["erd", "sequence"] as const) {
+      for (const kind of ["erd", "sequence", "class_diagram", "sequence_diagram"] as const) {
         const q = diagramChoiceQuestion(kind, language)
         expect(q.header!.length).toBeLessThanOrEqual(12)
         expect(diagramChoiceKindOfTopic(q.topic_key)).toBe(kind)
