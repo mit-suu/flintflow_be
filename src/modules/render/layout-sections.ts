@@ -290,10 +290,6 @@ export const mergeAdjacentTables = (blocks: Block[], mergeable: WeakSet<Block>):
     if (a.type !== "table" || b.type !== "table" || !mergeable.has(a) || !mergeable.has(b)) continue
     if (a.header.map(cellText).join("|") !== b.header.map(cellText).join("|")) continue
     const merged: Block = { ...a, rows: [...a.rows, ...b.rows] }
-    // FLF-443: path song song với dòng - ghép cùng lúc, dòng không có path điền `null`
-    if (a.row_entity_paths || b.row_entity_paths) {
-      merged.row_entity_paths = [...(a.row_entity_paths ?? a.rows.map(() => null)), ...(b.row_entity_paths ?? b.rows.map(() => null))]
-    }
     mergeable.add(merged)
     blocks.splice(i - 1, 2, merged)
   }

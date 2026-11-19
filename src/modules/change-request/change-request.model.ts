@@ -64,8 +64,6 @@ export interface IChangeRequest extends Document {
    * Chỉ là **gợi ý**: C-2 đọc lệnh, C-3 thêm `targets` vào đích, C-4 thấy op đề xuất của vị trí — mọi nút vẫn chạy.
    */
   seed: CrSeed | null
-  /** FLF-445: cờ mà CR này sửa (tạo từ một nhóm cờ ở hàng việc chờ quyết). CR mở giữ các cờ này khỏi hàng đợi. */
-  flag_ids: string[]
   materials: CrMaterial[]
   /**
    * Mode 1 v3 phase 7: dữ kiện C-2 báo vẫn thiếu khi buộc đi tiếp (hết vòng hỏi) ⇒ C-4 viết nhưng ghi giả định.
@@ -129,7 +127,6 @@ const changeRequestSchema = new Schema<IChangeRequest>(
       type: new Schema({ instruction: { type: String, default: null }, ops: { type: [Schema.Types.Mixed], default: [] }, targets: { type: [String], default: [] } }, opts),
       default: null
     },
-    flag_ids: { type: [String], default: [] },
     materials: {
       type: [
         new Schema(

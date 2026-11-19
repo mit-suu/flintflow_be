@@ -56,7 +56,6 @@ beforeEach(() => {
   env.GOOGLE_CLIENT_ID = "test-client.apps.googleusercontent.com"
   env.GOOGLE_CLIENT_SECRET = "test-client-secret"
   env.GOOGLE_TOKEN_ENC_KEY = crypto.randomBytes(32).toString("base64")
-  env.GOOGLE_DOCS_AGENT_ENABLED = true
   google.getAccessToken.mockResolvedValue({ token: "access" })
   google.documents.get.mockResolvedValue({ data: loadSampleDoc() })
 })
@@ -104,12 +103,6 @@ describe("POST /api/v1/mcp/google-docs", () => {
     const disabled = await rpc(seeded, "tools/list")
     expect(disabled.status).toBe(503)
     expect(disabled.body.error.code).toBe("GOOGLE_INTEGRATION_DISABLED")
-
-    env.GOOGLE_CLIENT_SECRET = "test-client-secret"
-    env.GOOGLE_DOCS_AGENT_ENABLED = false
-    const agentOff = await rpc(seeded, "tools/list")
-    expect(agentOff.status).toBe(503)
-    expect(agentOff.body.error.code).toBe("GOOGLE_DOCS_AGENT_DISABLED")
 
     const get = await request(app).get(MCP_URL).set("Authorization", `Bearer ${seeded.token}`)
     expect(get.status).toBe(405)

@@ -10,10 +10,6 @@ import { ApiError } from "../../shared/utils/api-error.js"
 
 export const MODE1_ERROR_STATUS = {
   CR_SOURCE_REQUIRED: 400,
-  /** FLF-445: `flag_ids` của CR có cờ đã đóng, đã "giữ nguyên" hoặc đã bỏ qua — `meta.flag_ids`. */
-  FLAG_NOT_OPEN: 400,
-  /** FLF-445: nhóm cờ chạm nhiều phần tử hơn trần vị trí một CR (`MAX_LOCATIONS`) — tách nhóm nhỏ hơn. */
-  CR_TOO_MANY_LOCATIONS: 400,
   IMPORT_NOT_FOUND: 404,
   DOC_VERSION_NOT_FOUND: 404,
   CR_NOT_FOUND: 404,

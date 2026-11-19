@@ -1,8 +1,6 @@
 import { Router } from "express"
 import * as flagsController from "./flags.controller.js"
-import * as pendingQueueController from "./pending-queue.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
-import { requireRole } from "../../shared/auth/require-role.middleware.js"
 
 const router = Router()
 
@@ -168,29 +166,5 @@ router.post("/:projectId/flags/:flagId/keep", authMiddleware, flagsController.ke
  *         description: "{ readiness, progress, sections[] }"
  */
 router.get("/:projectId/progress", authMiddleware, flagsController.getProgress)
-
-/**
- * @swagger
- * /api/v1/projects/{projectId}/pending-queue:
- *   get:
- *     summary: Hàng việc chờ người quyết (giả định, ghi chú Brief, màn, cờ đỏ, nhóm cờ vàng) đã xếp thứ tự
- *     tags: [Spine]
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: projectId
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: "{ total, items[] } - items[]: key, kind, blocking, owner_step, section_id, entity_path, dependents, refs"
- *       403:
- *         description: ORG_ROLE_FORBIDDEN (Viewer)
- *       404:
- *         description: PROJECT_NOT_FOUND
- */
-router.get("/:projectId/pending-queue", authMiddleware, requireRole("lead", "analyst"), pendingQueueController.getPendingQueue)
 
 export default router

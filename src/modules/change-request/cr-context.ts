@@ -229,8 +229,7 @@ export const crProjection = (spine: Spine, text: string, opts: RelatedOptions = 
  * Chỉ là gợi ý: model vẫn tự làm rõ, tự kết luận từng vị trí.
  */
 export const seedText = (cr: Pick<IChangeRequest, "seed">): string => {
-  // Gợi ý chỉ có đích (CR từ nhóm cờ, FLF-445) không phải bản xem trước ⇒ không có gì để nối
-  if (!cr.seed || (!cr.seed.instruction && !cr.seed.ops.length)) return ""
+  if (!cr.seed) return ""
   const instruction = cr.seed.instruction ? `Instruction: ${cr.seed.instruction}
 ` : ""
   return truncate(`

@@ -53,16 +53,9 @@ const router = Router()
  *                 maxItems: 5
  *                 description: "Mode 1 v3 phase 7 — đoạn văn bản nguồn dán ở 3.1; file upload sau qua /materials"
  *                 items: { type: object, required: [name, text], properties: { name: { type: string }, text: { type: string } } }
- *               flag_ids:
- *                 type: array
- *                 minItems: 1
- *                 maxItems: 50
- *                 description: "FLF-445 — nhóm cờ mở CR này sửa; phần tử / mục của cờ thành đích C-3"
- *                 items: { type: string }
  *     responses:
  *       201: { $ref: '#/components/responses/CrDetail' }
- *       400: { description: "CR_SOURCE_REQUIRED, VALIDATION_ERROR, FLAG_NOT_OPEN, CR_TOO_MANY_LOCATIONS" }
- *       404: { description: FLAG_NOT_FOUND }
+ *       400: { description: CR_SOURCE_REQUIRED, VALIDATION_ERROR }
  *       409: { description: CR_REQUIRES_BASELINE }
  *   get:
  *     summary: Danh sách change request, mới nhất trước

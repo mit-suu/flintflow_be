@@ -170,7 +170,7 @@ vi.mock("./consistency-pass.js", async (importOriginal) => {
 vi.mock("../translation/translation.repository.js", () => ({ findByHashes: vi.fn(), translationRevision: vi.fn(async () => null) }))
 
 import * as spineRepository from "../spine/spine.repository.js"
-import { RENDER_FORMAT_VERSION, _internal, assemble, isExistingSrs, getDocument, getDocumentWithMeta, getDraftMeta, NoWorkingDraftError, type TranslationResolver } from "./assemble.service.js"
+import { _internal, assemble, isExistingSrs, getDocument, getDocumentWithMeta, getDraftMeta, NoWorkingDraftError, type TranslationResolver } from "./assemble.service.js"
 import { clearDocumentMemo } from "./rendered-document-memo.js"
 import { clearChangeLogs } from "../spine/change-log.js"
 import { runConsistencyPass } from "./consistency-pass.js"
@@ -610,56 +610,6 @@ describe("getDocument() - source=draft", () => {
 
     expect((await getDraftMeta(PROJECT))?.assembled_at_version).toBe(1)
     expect(doc.version).toBe("v0")
-  })
-})
-
-describe("phiên bản định dạng của document cache (FLF-443)", () => {
-  it("hàng cache mới ghi mang format_version hiện tại", async () => {
-    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 1 }))
-    await getDocument(PROJECT, "Demo", { source: "draft" })
-    expect(cacheDb.docs.map((d) => d.format_version)).toEqual([RENDER_FORMAT_VERSION])
-  })
-
-  it("draft: hàng cache ghi bằng định dạng cũ (không có format_version) ⇒ dựng lại đè lên cùng hàng, không thêm hàng", async () => {
-    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 1 }))
-    await getDocument(PROJECT, "Demo", { source: "draft" })
-    const row = cacheDb.docs[0]
-    delete row.format_version
-    row.doc = { ...(row.doc as object), watermark: "OLD-CACHE" }
-    clearDocumentMemo()
-
-    const doc = await getDocument(PROJECT, "Demo", { source: "draft" })
-
-    expect(doc.watermark).not.toBe("OLD-CACHE")
-    expect(cacheDb.docs).toHaveLength(1)
-    expect(cacheDb.docs[0].format_version).toBe(RENDER_FORMAT_VERSION)
-  })
-
-  it("assemble(): cache định dạng cũ không được coi là trúng cache", async () => {
-    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 1 }))
-    vi.mocked(spineRepository.listChanges).mockResolvedValue([])
-    await assemble(PROJECT, "Demo", 1)
-    cacheDb.docs[0].format_version = RENDER_FORMAT_VERSION - 1
-    cacheDb.findOneAndUpdate.mockClear()
-
-    await assemble(PROJECT, "Demo", 1)
-
-    expect(cacheDb.findOneAndUpdate).toHaveBeenCalledTimes(1)
-    expect(cacheDb.docs[0].format_version).toBe(RENDER_FORMAT_VERSION)
-  })
-
-  it("baseline đã cache ở định dạng cũ cũng dựng lại từ snapshot", async () => {
-    baselineDb.findOne.mockResolvedValue({ _id: BASELINE_ID, projectId: PROJECT, version: "v1.0", at: new Date().toISOString(), checked_at_version: 9, waived_count: 0, snapshot: baseSpine() })
-    await getDocument(PROJECT, "Demo", { source: "baseline", baseline_id: BASELINE_ID })
-    expect(baselineDb.findOne).toHaveBeenCalledTimes(1)
-    delete cacheDb.docs.find((d) => d.baseline_id === BASELINE_ID)!.format_version
-    clearDocumentMemo()
-
-    await getDocument(PROJECT, "Demo", { source: "baseline", baseline_id: BASELINE_ID })
-
-    expect(baselineDb.findOne).toHaveBeenCalledTimes(2)
-    expect(cacheDb.docs.filter((d) => d.baseline_id === BASELINE_ID)).toHaveLength(1)
-    expect(cacheDb.docs.find((d) => d.baseline_id === BASELINE_ID)!.format_version).toBe(RENDER_FORMAT_VERSION)
   })
 })
 

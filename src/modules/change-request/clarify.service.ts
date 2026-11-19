@@ -155,8 +155,7 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
   cr.missing_info = (out.missing_info.length ? out.missing_info : out.ambiguous ? out.questions : []).map((text) => nameElementIds(text, spine))
   cr.markModified("missing_info")
   // Đã chỉ đích danh mục thì bỏ từ khoá của model: từ khoá kiểu "SCR-01", "Hộ gia đình" kéo cả tài liệu vào CR.
-  // FLF-445: CR tạo từ nhóm cờ đã có đích là chỗ bị cờ ⇒ cũng bỏ từ khoá, để C-3 bám đúng chỗ đó.
-  const keywords = named.length || cr.flag_ids?.length ? [] : out.targets.keywords.length || out.targets.entity_paths.length ? out.targets.keywords : fallbackKeywords(cr)
+  const keywords = named.length ? [] : out.targets.keywords.length || out.targets.entity_paths.length ? out.targets.keywords : fallbackKeywords(cr)
   // Phần tử bản xem trước đã chạm (mode 1 v3) luôn là đích — 3.4 vẫn tìm thêm vị trí liên quan như thường
   cr.targets = { entity_paths: [...new Set([...named, ...out.targets.entity_paths, ...(cr.seed?.targets ?? [])])], keywords }
   cr.markModified("targets")

@@ -2579,16 +2579,13 @@ describe("step-runner: FLF-418 thẻ hỏi tất định (ký pháp ERD ở S-4.
     spine.progress.current_phase = "S-4"
     spine.progress.current_step = "S-4.4"
   }
-  // FLF-441: S-4.5 hỏi Class Diagram trước ký pháp ERD — các test ký pháp coi như đã trả lời "Có"
-  const store = (initial: { erdNotation?: string; sequenceLevel?: string; classDiagram?: boolean; sequenceDiagram?: boolean } = { classDiagram: true }) => {
+  const store = (initial: { erdNotation?: string; sequenceLevel?: string } = {}) => {
     const state = { ...initial }
     return {
       state,
       load: vi.fn(async () => state),
       save: vi.fn(async (_p: string, kind: string, value: string) => {
         if (kind === "erd") state.erdNotation = value
-        else if (kind === "class_diagram") state.classDiagram = value === "yes"
-        else if (kind === "sequence_diagram") state.sequenceDiagram = value === "yes"
         else state.sequenceLevel = value
       })
     }
@@ -2627,7 +2624,7 @@ describe("step-runner: FLF-418 thẻ hỏi tất định (ký pháp ERD ở S-4.
   it("đã chọn (cài đặt dự án / import) ⇒ không hỏi", async () => {
     seedUpTo("S-4.5")
     seedSession(true)
-    const choices = store({ erdNotation: "idef1x", classDiagram: true })
+    const choices = store({ erdNotation: "idef1x" })
     const { events, emit } = collectEvents()
     await runStep(PROJECT, "S-4.5", SESSION, USER, emit, { elicitExecutor: async () => elicitReply("ok"), draftExecutor: async () => draftReply([]), renderDeps: renderStub(), diagramChoices: choices })
     expect(events.some((e) => e.type === "answer_needed")).toBe(false)
@@ -2667,30 +2664,6 @@ describe("step-runner: FLF-418 thẻ hỏi tất định (ký pháp ERD ở S-4.
     expect((session.messages as { content: string }[]).some((m) => m.content.includes("Mình dùng Chen"))).toBe(true)
   })
 
-  it("FLF-441: chưa trả lời ⇒ thẻ Q_class_diagram trước, chọn Không ⇒ ghi Project rồi mới hỏi ký pháp ERD", async () => {
-    seedUpTo("S-4.5")
-    seedSession(true)
-    const choices = store({})
-    const draftExecutor = vi.fn(async () => draftReply([]))
-    const { events, emit } = collectEvents()
-    const run = runStep(PROJECT, "S-4.5", SESSION, USER, emit, { elicitExecutor: async () => elicitReply("ok"), draftExecutor, renderDeps: renderStub(), diagramChoices: choices, replyLanguage: "vi" })
-
-    const first = await waitAsk(events, 1)
-    expect(first.questions[0]).toMatchObject({ id: "Q_class_diagram", header: "Sơ đồ lớp" })
-    expect(first.questions[0].options?.map(optionLabel)).toEqual(["Có (Khuyến nghị)", "Không"])
-    submitAnswer(PROJECT, "S-4.5", SESSION, { answers: [{ question_id: "Q_class_diagram", answer: "Không" }] })
-
-    const second = await waitAsk(events, 2)
-    expect(second.questions[0]).toMatchObject({ id: "Q_erd_notation" })
-    expect(draftExecutor).not.toHaveBeenCalled()
-    submitAnswer(PROJECT, "S-4.5", SESSION, { answers: [{ question_id: "Q_erd_notation", answer: "Chen (Khuyến nghị)" }] })
-    await run
-    expect(choices.save).toHaveBeenCalledWith(PROJECT, "class_diagram", "no")
-    expect(choices.state).toMatchObject({ classDiagram: false, erdNotation: "chen" })
-    const record = await repo.get(PROJECT)
-    expect(record!.decisions.find((d) => d.topic_key === "class_diagram")).toMatchObject({ answer: "Không", step_id: "S-4.5" })
-  })
-
   it("sổ đã có quyết định mà Project chưa ghi ⇒ ghi bù, không hỏi", async () => {
     seedUpTo("S-4.5")
     const spine = db.spines[0] as unknown as SpineT
@@ -2715,7 +2688,7 @@ describe("step-runner: FLF-418 thẻ ký pháp ERD - trả lời sau khi rời t
     spine.progress.current_phase = "S-4"
     spine.progress.current_step = "S-4.4"
     seedSession(true)
-    const state: { erdNotation?: string; classDiagram?: boolean } = { classDiagram: true }
+    const state: { erdNotation?: string } = {}
     const diagramChoices = {
       load: vi.fn(async () => state),
       save: vi.fn(async (_p: string, _kind: string, value: string) => void (state.erdNotation = value))

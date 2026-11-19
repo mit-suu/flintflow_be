@@ -106,17 +106,6 @@ describe("sourceBasedFrom - sau khi đổi mẫu file nền mới là nền ở 
   })
 })
 
-describe("pristineSectionIds - đường dẫn phần tử (FLF-443)", () => {
-  it("path chỉ để đặt chip Nguồn: bản in lúc import (chưa có path) vẫn khớp bản hiện tại (có path)", () => {
-    const table = (extra: object) => ({ type: "table" as const, header: [[{ text: "ID" }]], rows: [[[{ text: "A1" }]]], ...extra })
-    const imported = doc([{ id: "fixed:2.1", number: "2.1", heading: "Actors", level: 2, blocks: [para("Intro"), table({})] }])
-    const current = doc([
-      { id: "fixed:2.1", number: "2.1", heading: "Actors", level: 2, blocks: [{ ...para("Intro"), entity_path: "actors[id=A1]" }, table({ row_entity_paths: ["actors[id=A1]"] })] }
-    ])
-    expect(pristineSectionIds(current, imported)).toEqual(new Set(["fixed:2.1"]))
-  })
-})
-
 describe("pristineSectionIds - khoá mục", () => {
   const imported = doc([
     { id: "fixed:1", number: "1", heading: "Product Overview", level: 1, blocks: [para("Same body.")] },

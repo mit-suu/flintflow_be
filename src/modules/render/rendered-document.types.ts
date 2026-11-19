@@ -22,15 +22,9 @@ export interface InlineRun {
 /** Một ô bảng = một dãy run. */
 export type TableCell = InlineRun[]
 
-/**
- * FLF-443: `entity_path` / `item_entity_paths` / `row_entity_paths` = phần tử Spine (`functions[id=FN3]`, cùng dạng
- * `entity_path` của `GET /sources`) mà block / mục / dòng thể hiện, để FE đặt chip "Nguồn". Chỉ bản cho Lead / Analyst;
- * bản Viewer bỏ (`viewer-projection.ts`), writer Word bỏ qua.
- */
 export interface ParagraphBlock {
   type: "paragraph"
   runs: InlineRun[]
-  entity_path?: string
 }
 
 export interface HeadingBlock {
@@ -43,23 +37,17 @@ export interface HeadingBlock {
 export interface BulletListBlock {
   type: "bullet_list"
   items: InlineRun[][]
-  /** FLF-443: song song `items`; `null` = mục không gắn phần tử. */
-  item_entity_paths?: (string | null)[]
 }
 
 export interface NumberedListBlock {
   type: "numbered_list"
   items: InlineRun[][]
-  /** FLF-443: song song `items`; `null` = mục không gắn phần tử. */
-  item_entity_paths?: (string | null)[]
 }
 
 export interface TableBlock {
   type: "table"
   header: TableCell[]
   rows: TableCell[][]
-  /** FLF-443: song song `rows`; `null` = dòng không gắn phần tử. */
-  row_entity_paths?: (string | null)[]
 }
 
 export interface ImageBlock {

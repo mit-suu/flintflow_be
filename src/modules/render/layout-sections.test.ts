@@ -8,8 +8,7 @@ import { assignBlockSections, matchProfile } from "../import/profile-match.servi
 import { buildLayout } from "../import/step-plan.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
-import type { Block } from "./rendered-document.types.js"
-import { buildLayoutSections, customBlocks, mergeAdjacentTables, functionSourceHash, moveSectionsToEnd, numberSections, placeSections, repairFixedTemplateLayout, romanValue, type TemplateLayout, type TemplateLayoutEntry } from "./layout-sections.js"
+import { buildLayoutSections, customBlocks, functionSourceHash, moveSectionsToEnd, numberSections, placeSections, repairFixedTemplateLayout, romanValue, type TemplateLayout, type TemplateLayoutEntry } from "./layout-sections.js"
 
 const entry = (order: number, heading_text: string, level: number, section_id: string): TemplateLayoutEntry => ({ order, heading_text, level, section_id })
 
@@ -883,31 +882,5 @@ describe("FLF-416 chế độ 4: mục Ngoài phạm vi xuống cuối (moveToEn
     expect(before.indexOf("custom:CS02")).toBeLessThan(before.indexOf("fixed:2.1"))
     expect(after[after.length - 1]).toBe("custom:CS02")
     expect(after.filter((id) => id !== "custom:CS02")).toEqual(before.filter((id) => id !== "custom:CS02"))
-  })
-})
-
-describe("mergeAdjacentTables - đường dẫn phần tử (FLF-443)", () => {
-  const t = (rows: string[], paths?: (string | null)[]): Block => ({
-    type: "table",
-    header: [[{ text: "ID" }]],
-    rows: rows.map((r) => [[{ text: r }]]),
-    ...(paths ? { row_entity_paths: paths } : {})
-  })
-
-  it("ghép hai bảng liền kề: path ghép song song với dòng, bảng thiếu path điền null", () => {
-    const a = t(["A1"], ["actors[id=A1]"])
-    const b = t(["A2", "A3"])
-    const blocks: Block[] = [a, b]
-    mergeAdjacentTables(blocks, new WeakSet<Block>([a, b]))
-    expect(blocks).toHaveLength(1)
-    expect(blocks[0]).toMatchObject({ rows: [[[{ text: "A1" }]], [[{ text: "A2" }]], [[{ text: "A3" }]]], row_entity_paths: ["actors[id=A1]", null, null] })
-  })
-
-  it("không bảng nào có path ⇒ bảng ghép không có field", () => {
-    const a = t(["A1"])
-    const b = t(["A2"])
-    const blocks: Block[] = [a, b]
-    mergeAdjacentTables(blocks, new WeakSet<Block>([a, b]))
-    expect(blocks[0]).not.toHaveProperty("row_entity_paths")
   })
 })

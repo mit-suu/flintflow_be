@@ -81,14 +81,6 @@ const envSchema = z.object({
     .default("")
     .refine((v) => v === "" || isValidSecretBoxKey(v), { message: "phải là 32 byte mã hoá base64 (openssl rand -base64 32)" }),
 
-  // Trợ lý Google Docs (chat sửa thẳng file Google Docs) + endpoint MCP `/mcp/google-docs`. Mặc định tắt: chỗ sửa trên
-  // Google Docs không quay về FlintFlow (business-flow §4) nên tài liệu trong app lệch với file trên Drive. Tắt ⇒ 503
-  // GOOGLE_DOCS_AGENT_DISABLED (`modules/google/docs-agent/docs-agent.guard.ts`); nhập / xuất Google Docs không bị ảnh hưởng.
-  GOOGLE_DOCS_AGENT_ENABLED: z
-    .string()
-    .default("false")
-    .transform((v) => v === "true" || v === "1"),
-
   CLOUDINARY_CLOUD_NAME: z.string().default(""),
   CLOUDINARY_API_KEY: z.string().default(""),
   CLOUDINARY_API_SECRET: z.string().default(""),

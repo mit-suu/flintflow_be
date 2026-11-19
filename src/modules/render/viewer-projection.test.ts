@@ -28,39 +28,6 @@ describe("viewerDocument (UC-47)", () => {
   })
 })
 
-describe("viewerDocument - đường dẫn phần tử (FLF-443)", () => {
-  it("bỏ entity_path / row_entity_paths / item_entity_paths ở mọi block, giữ nguyên phần còn lại", () => {
-    const withPaths: RenderedDocument = {
-      ...doc,
-      sections: [
-        {
-          id: "s1",
-          number: "1",
-          heading: "Intro",
-          level: 1,
-          blocks: [
-            { type: "paragraph", runs: [{ text: "p" }], entity_path: "actors[id=A1]" },
-            { type: "bullet_list", items: [[{ text: "a" }], [{ text: "b" }]], item_entity_paths: ["nfrs[id=N1]", null] },
-            { type: "numbered_list", items: [[{ text: "a" }]], item_entity_paths: [null] },
-            { type: "table", header: [[{ text: "h" }]], rows: [[[{ text: "r" }]]], row_entity_paths: ["screens[id=S1]"] },
-            { type: "heading", level: 2, text: "H" }
-          ]
-        }
-      ]
-    }
-    const out = viewerDocument(withPaths)
-    expect(out.sections[0]?.blocks).toEqual([
-      { type: "paragraph", runs: [{ text: "p" }] },
-      { type: "bullet_list", items: [[{ text: "a" }], [{ text: "b" }]] },
-      { type: "numbered_list", items: [[{ text: "a" }]] },
-      { type: "table", header: [[{ text: "h" }]], rows: [[[{ text: "r" }]]] },
-      { type: "heading", level: 2, text: "H" }
-    ])
-    // bản gốc không bị sửa tại chỗ (Lead / Analyst vẫn thấy path)
-    expect(withPaths.sections[0]?.blocks[0]).toHaveProperty("entity_path", "actors[id=A1]")
-  })
-})
-
 describe("viewerProgress (UC-20)", () => {
   it("Viewer không thấy cờ đỏ / mục cũ", () => {
     const report = {

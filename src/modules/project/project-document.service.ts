@@ -1,4 +1,4 @@
-import mongoose from "mongoose"
+import type mongoose from "mongoose"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ProjectDocument } from "./project-document.model.js"
 import { getProjectById } from "./project.service.js"
@@ -9,7 +9,7 @@ import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { parseFileContent } from "../../shared/utils/file-text.js"
 import { assignDocCodes } from "./document-code.service.js"
 import { contentHashOf, findDuplicate, findVersionCandidates, type ExistingDocument } from "./document-dedupe.js"
-import { paragraphId, splitParagraphs } from "../../shared/ai/document-paragraphs.js"
+import { splitParagraphs } from "../../shared/ai/document-paragraphs.js"
 import { alignOutline, extractDocxHeadings, isDocx } from "../../shared/ai/document-retrieval/docx-outline.js"
 import { deleteDocumentChunks, saveDocumentChunks } from "../../shared/ai/document-retrieval/chunk-index.service.js"
 import type { OutlineEntry } from "../../shared/ai/document-retrieval/chunker.js"
@@ -225,8 +225,7 @@ export const getProjectDocuments = async (orgId: string, projectId: string): Pro
   await getProjectById(projectId, orgId)
 
   const [documents, superseded] = await Promise.all([
-    // FLF-443: không trả URL kho lưu / khoá kho / chữ đã trích (đọc chữ qua `getReferenceDocumentText`, tải file qua `/download`)
-    ProjectDocument.find({ projectId, supersededBy: null }).select("-url -cloudinaryPublicId -fileName -extractedText").sort({ createdAt: -1 }),
+    ProjectDocument.find({ projectId, supersededBy: null }).sort({ createdAt: -1 }),
     ProjectDocument.find({ projectId, supersededBy: { $ne: null } }).select("_id originalName docCode supersededBy").lean()
   ])
   return documents.map((d) => ({
@@ -255,26 +254,4 @@ export const deleteProjectDocument = async (
   // FLF-393: chunk của tài liệu đã xoá không còn dùng
   await deleteDocumentChunks(documentId)
   await destroyDocumentAsset(document.cloudinaryPublicId)
-}
-
-/**
- * FLF-443: tài liệu của đúng project (id sai định dạng / project khác / org khác ⇒ 404). Bản đã bị thay (`supersededBy`)
- * vẫn đọc được vì trích dẫn cũ còn trỏ tới nó.
- */
-export const findProjectDocument = async (orgId: string, projectId: string, documentId: string, fields: string) => {
-  await getProjectById(projectId, orgId)
-  const notFound = () => new ApiError(404, "Không tìm thấy tài liệu.", "DOCUMENT_NOT_FOUND")
-  if (!mongoose.isValidObjectId(documentId)) throw notFound()
-  const document = await ProjectDocument.findOne({ _id: documentId, projectId }).select(fields).lean()
-  if (!document) throw notFound()
-  return document
-}
-
-/** FLF-443: chữ đã trích chia đoạn bằng đúng hàm sinh mã `D<n>-P<mm>` của `GET /sources`. Parse lỗi / chưa có mã ⇒ không đoạn. */
-export const getReferenceDocumentText = async (orgId: string, projectId: string, documentId: string) => {
-  const doc = await findProjectDocument(orgId, projectId, documentId, "originalName docCode extractedText")
-  const docCode = doc.docCode ?? null
-  const paragraphs =
-    docCode && doc.extractedText ? splitParagraphs(doc.extractedText).map((text, i) => ({ para_id: paragraphId(docCode, i), text })) : []
-  return { id: String(doc._id), name: doc.originalName, paragraphs }
 }

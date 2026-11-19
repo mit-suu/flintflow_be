@@ -137,20 +137,7 @@ const projectDocumentSchema = new Schema<IProjectDocument>(
       default: null
     }
   },
-  {
-    timestamps: true,
-    toJSON: {
-      // FLF-443: response API (upload, danh sách) không lộ khoá / URL kho file và toàn bộ chữ đã trích — đọc chữ qua
-      // `GET /documents/:docId/text`, tải file qua `GET /documents/:docId/download`. `fileName` = public id của kho.
-      transform: (_doc, ret: Record<string, unknown>) => {
-        delete ret.url
-        delete ret.cloudinaryPublicId
-        delete ret.fileName
-        delete ret.extractedText
-        return ret
-      }
-    }
-  }
+  { timestamps: true }
 )
 
 projectDocumentSchema.index({ projectId: 1, createdAt: -1 })

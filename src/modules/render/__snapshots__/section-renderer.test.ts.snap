@@ -67,9 +67,6 @@ exports[`renderSection - fixed sections > fixed:1 - vision, goals, release scope
       "type": "heading",
     },
     {
-      "item_entity_paths": [
-        "business_rules[id=BR01]",
-      ],
       "items": [
         [
           {
@@ -85,9 +82,6 @@ exports[`renderSection - fixed sections > fixed:1 - vision, goals, release scope
       "type": "heading",
     },
     {
-      "item_entity_paths": [
-        "actors[id=A05]",
-      ],
       "items": [
         [
           {
