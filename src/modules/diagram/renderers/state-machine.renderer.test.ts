@@ -7,6 +7,7 @@ import type { Entity, Spine } from "../../spine/spine.types.js"
 import { svgTitleOf } from "./common.js"
 import { renderKind } from "./index.js"
 import { DIAGRAM_LABELS } from "./labels.js"
+import { layoutStateMachine } from "./state-machine-layout.js"
 import { renderStateMachine, stateMachineInput, transitionLabel } from "./state-machine.renderer.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -77,7 +78,8 @@ describe("renderStateMachine - mỗi entity có vòng đời một hình", () =>
     expect(a.map((p) => p.source_hash).every((h) => h.length === 64)).toBe(true)
     // mọi tên state trên hình đều nằm trong Spine
     const names = new Set(entityOf(FIXTURE, "E08").states!.map((s) => s.name))
-    const texts = [...a[1].source.matchAll(/font-weight="bold"[^>]*>([^<]*)</g)].map((m) => m[1])
+    const scene = layoutStateMachine(stateMachineInput(entityOf(FIXTURE, "E08")))!
+    const texts = scene.elements.flatMap((x) => (x.type === "text" && /#name-\d+$/.test(x.id) ? [x.text] : []))
     expect(texts.sort()).toEqual([...names].sort())
   })
 

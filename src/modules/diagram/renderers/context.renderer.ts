@@ -96,7 +96,7 @@ export const contextActors = (actors: readonly Actor[], labels: DiagramLabels = 
 const centredLines = (scene: Scene, id: string, owner: string, cx: number, cy: number, lines: string[]): void => {
   lines.forEach((line, i) => {
     const y = cy + (i - (lines.length - 1) / 2) * NAME_LINE_HEIGHT
-    scene.text(`${id}#name-${i}`, cx, y, line, { size: NAME_SIZE, bold: true, baseline: "central", owner })
+    scene.text(`${id}#name-${i}`, cx, y, line, { size: NAME_SIZE, baseline: "central", owner })
   })
 }
 

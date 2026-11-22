@@ -111,7 +111,7 @@ const prepare = (actor: ContextActor): Prepared => {
     ...actor.inbound.map((text, index): Flow => ({ dir: "in", index, text })),
     ...actor.outbound.map((text, index): Flow => ({ dir: "out", index, text }))
   ]
-  const nameW = Math.max(...lines.map((l) => textWidth(l, NAME_SIZE, true)))
+  const nameW = Math.max(...lines.map((l) => textWidth(l, NAME_SIZE)))
   return {
     actor,
     lines,
@@ -332,7 +332,7 @@ export const buildContextLayout = (actors: readonly ContextActor[], systemName =
   const { left, right } = splitSides(prepared)
 
   // Vòng tròn chứa trọn tên (nửa đường chéo khối chữ + lề), luồng dày nhất còn hợp lệ, và đủ chu vi cho các chùm
-  const nameW = Math.max(...systemLines.map((l) => textWidth(l, NAME_SIZE, true)))
+  const nameW = Math.max(...systemLines.map((l) => textWidth(l, NAME_SIZE)))
   const nameH = systemLines.length * NAME_LINE_HEIGHT
   const widest = Math.max(0, ...prepared.map(bundleWidth))
   const arcNeed = (group: Prepared[]): number => sum(clearances(group)) / (2 * SPAN_MAX)
