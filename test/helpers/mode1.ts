@@ -197,3 +197,12 @@ export const fakeCrProposeNoChange = (prompt: string): string | undefined => {
     })
   })
 }
+
+/**
+ * UC-85: sau baseline dự án chưa theo mẫu nào - tác giả (Lead) bấm "Save to library" để cấu trúc dự án thành mẫu khung và dự án
+ * theo bản đó. Test cần "mẫu trước" của dự án (đổi ngược) thì gọi bước này ngay sau baseline.
+ */
+export const saveTemplateProposal = async (token: string, projectId: string): Promise<void> => {
+  const res = await request(app).post(`/api/v1/projects/${projectId}/template-proposal/save`).set("Authorization", `Bearer ${token}`)
+  expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+}

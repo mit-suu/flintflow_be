@@ -468,6 +468,7 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 | 2026-11-12 | FLF-412 (mẫu còn chữ cũ: Bỏ chữ theo vùng) | Additive: endpoint mới #5b `PATCH /import/drop-text`; #4 thêm `text_sections: { key, title, level, dropped }[] | null` (chỉ trước Bắt đầu). #8d lưu **khung** (luật mẫu khung tự lưu) thay vì nguyên file. `OrgTemplateHeading.has_text?` (file mẫu còn chữ thật dưới heading) ở chi tiết bản mẫu. Đổi mẫu: mục thiếu chỉ in chữ hướng dẫn + hàng tiêu đề bảng của mẫu đích |
 | 2026-11-12 | contract-change FLF-410 (Screen Layout = mockup SVG theo theme dự án) | Additive. `Project` thêm `screenTheme` (`{ primaryColor, domain, platforms }`, mọi field mặc định `null`; trả ở mọi response `Project`) và `screenMockups[]` (nội bộ, đọc qua #1d). Endpoint mới #1c `PATCH /projects/:id/screen-theme` và nhóm #1d `screen-mockups` (tóm tắt / ước tính / chạy nền 202 / dừng / dùng ảnh gốc / ảnh gốc). Dự án import: ảnh gốc màn giữ nguyên tới khi người dùng chọn vẽ lại; mục có nhiều ảnh màn hình ⇒ thay hết. Không đổi `spine.schema.ts`, `renderFixSchema`, `ActionType` |
 | 2026-11-12 | FLF-403 (thư viện mẫu tải dần) | Additive: `GET /orgs/:orgId/templates` nhận `?page`, `limit` (≤ 50, mặc định 20), `q`, `sort` (`uses` · `recent` · `name`); có `page` ⇒ trả một trang + `meta { page, limit, total, totalPages }`, `q` tìm không phân biệt dấu theo tên mẫu / tên file. Không có `page` ⇒ y như cũ (mảng, tối đa 100) cho ô chọn mẫu lúc tạo dự án |
+| 2026-11-17 | FLF-437 (đề xuất mẫu từ dự án, UC-85 / UC-88) | **Breaking, bỏ endpoint**: `POST /projects/:id/import/save-to-org`, `GET /projects/:id/template-skeleton`, `POST …/template-skeleton/decisions`, `…/suggest`. **Hành vi**: sau baseline không còn tự đăng khung + gắn `template_ref`; tạo đề xuất (`template_proposals`) chờ tác giả / Lead. Additive: `GET/POST /projects/:id/template-proposal`, `POST …/send|save|decline`, `GET /orgs/:orgId/template-proposals[/:proposalId]`, `POST …/:proposalId/approve|reject`; `OrgTemplateSummary.skeleton_source_project_name`; thông báo `template_proposal_submitted|approved|rejected`. Xem §Đề xuất mẫu từ dự án |
 | 2026-11-12 | contract-change FLF-403 (gỡ thư viện nội dung tổ chức) | **Breaking, bỏ endpoint**: `/orgs/:orgId/content-library` (GET/POST/PATCH/DELETE), #8e `GET /projects/:id/library-matches`, #8f `POST /projects/:id/library`; mã lỗi `ORG_CONTENT_DUPLICATE`, `ORG_CONTENT_NOT_FOUND`, `CUSTOM_SECTION_EMPTY`, `CUSTOM_SECTION_NOT_FOUND` không còn. Lý do: nội dung mục riêng (References, Document Conventions…) thuộc từng dự án, khớp theo tiêu đề giữa các dự án là sai giả định; phần dùng lại được là khung mẫu (`OrgTemplate`). Collection `org_content_entries` không còn được đọc / ghi |
 | 2026-11-11 | FLF-395 (đổi mẫu, lát 5c: sửa sau review) | Additive: `PATCH …/mapping`, `POST …/restore`; `MigrationDto` thêm `broken_links`, `revertable`, `revert_blocked_reason`, `previous_template`, `language.switches_document_language`; trạng thái `reverting`, `apply_failed`; lựa chọn `drop_from_print` cho mục khung (đổi: `delete` chỉ còn cho mục riêng chữ tự do); `call_kind` mới `template_migration_resolve` (3 credit / lượt); rào `409 TEMPLATE_MIGRATION_APPLYING` cho ghi bản nháp khi đang đổi mẫu; dự án mode 2 / từ FPT chỉ đổi ngôn ngữ tài liệu. Xem §FLF-395 "lát 5c" |
 | 2026-11-11 | FLF-395 (đổi mẫu, lát 5b: áp dụng) | Additive: endpoint mới `POST /projects/:id/template-migrations/:migrationId/apply` và `…/revert`; trạng thái migration mới `reverted`; CR nguồn `template_migration` (ngoài nguồn nhận khi tạo CR); job `system/recover-template-migrations`; mã lỗi mới `TEMPLATE_MIGRATION_{SPINE_REJECTED,LINKS_BROKEN,REVERT_BLOCKED,TARGET_UNAVAILABLE,BUILD_FAILED,TRANSLATION_FAILED,NO_SNAPSHOT}`; binding version thêm `strip_template_text`. Xem §FLF-395 "Đổi mẫu — áp dụng, hoàn tác" |
@@ -573,7 +574,7 @@ baseline 1.0 ⇒ FLF-318 đưa dự án về mode 1, lần import mẫu `draftin
 ### Mẫu và thư viện cấp tổ chức (lát 5)
 | Method + path | Quyền | Body | Kết quả |
 |---|---|---|---|
-| `POST /projects/:id/import/save-to-org` | lead (FLF-395) | `{ name, template_id? }` | 201 `OrgTemplateSummary` (lưu bản sao file mẫu + mapping đã xác nhận; `template_id` ⇒ bản mới của mẫu đó, xem §FLF-395); `409 IMPORT_INVALID_STATE` khi chưa qua 1.5 |
+| ~~`POST /projects/:id/import/save-to-org`~~ | - | - | **Bỏ ở FLF-437**: lưu cấu trúc dự án thành mẫu đi qua đề xuất UC-85 (§Đề xuất mẫu từ dự án) |
 | `POST /projects/:id/import/from-org` | lead, analyst | `{ org_template_id, version?, intent? }` | 201 `{ import }` — import từ file đã lưu, không hỏi "bản mới nhất", mapping áp sẵn; `404 ORG_TEMPLATE_NOT_FOUND` (kể cả tổ chức khác) |
 | `GET /orgs/:orgId/templates` · `DELETE …/:templateId` | thành viên · lead (FLF-395) | query `page?`, `limit?`, `q?`, `sort?` (FLF-403) | `OrgTemplateSummary[]` (+ `meta` khi có `page`) · `{ deleted, project_count }` |
 | `GET /admin/template-gaps?limit=` | admin | — | `{ projects, rows[{ key, samples, projects, empty, suggested_destination }] }` |
@@ -746,6 +747,8 @@ template_family, project_count, created_at, headings[{ index, heading_text, sect
 
 ### Tự lưu khung mẫu sau baseline (FLF-395 lát 2, D12–D13)
 
+> **Thay bởi FLF-437 (17/11/2026)**: khung không còn tự đăng và tự gắn `template_ref`, không còn heading chờ duyệt / 3 endpoint `template-skeleton`. Cách dựng khung, dấu khung và luật trùng bên dưới vẫn dùng cho đề xuất - xem §Đề xuất mẫu từ dự án.
+
 Dự án mẫu tự do (không phải `template_intent = fixed`) thuộc org, có file nền (`TemplateProfile.source_file_ref`), không theo mẫu do Lead đăng ⇒ ở mọi nơi tạo baseline (cuối
 finalize 0.1, chuyển từ mode 2 — chỉ dự án chế độ 3 có file mẫu, phát hành) FlintFlow dựng **khung** từ **file của chính bản vừa
 tạo** (khớp mẫu tất định, không AI), lưu thành mẫu tổ chức (`OrgTemplate.skeleton_of` = dự án, tên VI `<tên dự án> — khung` / EN
@@ -780,6 +783,33 @@ tạo** (khớp mẫu tất định, không AI), lưu thành mẫu tổ chức (
 
 Thư viện mẫu (`GET /orgs/:orgId/templates`, org-scoped) thêm hai field để FE mở màn duyệt heading chờ từ thư viện: `OrgTemplateSummary.skeleton_source_project_id` (id dự án nguồn của mẫu khung tự lưu, `null` với mẫu thường; mở `GET /projects/:id/template-skeleton` của dự án đó) và `TemplateVersionSummary.published_by = { id, name } | null` (người tạo / đăng bản; `name` chỉ có khi người đó còn là thành viên của chính org, ngược lại `null` — không lộ tên người ngoài org). `TemplateVersionDetail` mang cùng `published_by`.
 
+
+### Đề xuất mẫu từ dự án (FLF-437, UC-85 / UC-88)
+
+Ở mọi nơi tạo baseline (finalize 0.1, chuyển từ mode 2, phát hành) của dự án thuộc org **có file nền** (`TemplateProfile.source_file_ref`,
+gồm cả dự án theo mẫu bắt buộc), `proposeTemplateFromBaseline` dựng khung như trên rồi tạo **đề xuất** (`template_proposals`), không đăng.
+
+- **Khoá cấu trúc** `structure_hash` = dấu khung gốc, trước mọi quyết định đổi tên. Không đề xuất khi: khung rỗng; trùng bản khung dự án
+  đang theo; dự án theo mẫu Lead đăng mà heading trùng; trùng bản khung đã đăng trong org (gắn dự án vào bản đó); cấu trúc từng bị
+  `declined` / `rejected`; thiếu credit hoặc AI lỗi (lần sau đề xuất lại). Đề xuất mới thay đề xuất mở cũ (`superseded`). Lỗi không chặn baseline.
+- **Đổi tên riêng**: một lượt AI `skeleton_generic_names` (skill v1.1, giữ credit trước, `step_id = TEMPLATE_PROPOSAL:<projectId>`) cho
+  heading BA tự đặt chưa có quyết định (quyết định của bản khung trước mang sang theo heading chuẩn hoá). `generic` khác chữ gốc ⇒ đổi,
+  `null` ⇒ bỏ mục khỏi mẫu; cả hai ghi vào `replaced_names`.
+- **Trạng thái**: `proposed` (chờ tác giả baseline) → `sent` (Analyst gửi) → `approved` (Lead lưu / duyệt: đăng bản kế tiếp trong họ khung
+  của dự án, tên `<tên dự án> - khung` / `- template`, dự án theo bản đó) hoặc `rejected`; `declined` khi tác giả không lưu.
+
+| Method + path | Quyền | Body | Kết quả |
+|---|---|---|---|
+| `GET /projects/:id/template-proposal` | thành viên | - | `ProposalView | null` - đề xuất mở mà người gọi là tác giả |
+| `POST /projects/:id/template-proposal` | lead | - | 201 `ProposalView` - Lead lưu cấu trúc bất cứ lúc nào (dựng từ `DocVersion` mới nhất); 409 `TEMPLATE_PROPOSAL_UNAVAILABLE` + `meta.reason` (`no_base_file`, `same_structure`, `declined_before`, `empty`, `ai_unavailable`, `pending`) |
+| `POST /projects/:id/template-proposal/send` | analyst (tác giả) | - | `ProposalView` (`sent`); báo Lead `template_proposal_submitted` |
+| `POST /projects/:id/template-proposal/save` | lead (tác giả) | - | `ProposalView` (`approved`, `template_id`, `version`) |
+| `POST /projects/:id/template-proposal/decline` | tác giả | - | `ProposalView` (`declined`) |
+| `GET /orgs/:orgId/template-proposals` · `GET …/:proposalId` | lead | - | `ProposalView[]` (`sent`) · `ProposalView` |
+| `POST /orgs/:orgId/template-proposals/:proposalId/approve` · `…/reject` | lead | - | `ProposalView`; báo người gửi `template_proposal_approved` / `_rejected`; đã xử lý ⇒ 409 `TEMPLATE_PROPOSAL_CONFLICT` |
+
+`ProposalView = { id, project_id, project_name, status, headings: string[], replaced_names: [{ key, original, generic, reason }], created_by: { id, name }, created_at, template_id, version }`.
+`OrgTemplateSummary` thêm `skeleton_source_project_name` (FE hiện "Lưu từ dự án <tên>").
 
 ### Đổi mẫu (FLF-395 lát 3, D5 / D8 / D9 / D14 / D15) — chuẩn bị
 

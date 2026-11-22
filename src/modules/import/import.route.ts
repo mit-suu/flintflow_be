@@ -383,11 +383,12 @@ router.post("/:id/import/continue", authMiddleware, importController.continueFlo
 
 // FLF-278 trên FLF-335/336 — mẫu / thư viện nội dung của tổ chức, đi qua dự án (contract §FLF-278)
 router.post("/:id/import/from-org", authMiddleware, orgLibrary.importFromOrg)
-router.post("/:id/import/save-to-org", authMiddleware, orgLibrary.saveToOrg)
-// FLF-395 (D13): duyệt mục BA tự đặt trước khi vào mẫu khung tự lưu của tổ chức
-router.get("/:id/template-skeleton", authMiddleware, orgLibrary.getSkeletonPending)
-router.post("/:id/template-skeleton/decisions", authMiddleware, orgLibrary.decideSkeletonPending)
-router.post("/:id/template-skeleton/suggest", authMiddleware, orgLibrary.suggestSkeletonNames)
+// UC-85: đề xuất lưu cấu trúc dự án thành mẫu tổ chức (thẻ của tác giả baseline; Lead lưu bất cứ lúc nào)
+router.get("/:id/template-proposal", authMiddleware, orgLibrary.getTemplateProposal)
+router.post("/:id/template-proposal", authMiddleware, orgLibrary.createTemplateProposal)
+router.post("/:id/template-proposal/send", authMiddleware, orgLibrary.sendTemplateProposal)
+router.post("/:id/template-proposal/save", authMiddleware, orgLibrary.saveTemplateProposal)
+router.post("/:id/template-proposal/decline", authMiddleware, orgLibrary.declineTemplateProposal)
 
 /**
  * @swagger
