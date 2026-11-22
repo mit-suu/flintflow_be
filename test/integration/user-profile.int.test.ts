@@ -71,6 +71,28 @@ describe("PATCH /users/me - ngôn ngữ giao diện (FLF-259)", () => {
   })
 })
 
+describe("PATCH /users/me - email việc duyệt (UC-89)", () => {
+  it("mặc định bật; tắt ⇒ lưu và /users/me trả false; bật lại ⇒ true; giá trị không phải boolean ⇒ 400", async () => {
+    await seedLocalUser()
+    const { agent, auth } = await loginAgent()
+
+    expect((await agent.get("/api/v1/users/me").set(auth)).body.data.approvalEmails).toBe(true)
+
+    const off = await agent.patch("/api/v1/users/me").set(auth).send({ approvalEmails: false })
+    expect(off.status).toBe(200)
+    expect(off.body.data.approvalEmails).toBe(false)
+    expect((await User.findOne({ email: EMAIL }).lean())?.approvalEmails).toBe(false)
+    expect((await agent.get("/api/v1/users/me").set(auth)).body.data.approvalEmails).toBe(false)
+
+    const on = await agent.patch("/api/v1/users/me").set(auth).send({ approvalEmails: true })
+    expect(on.body.data.approvalEmails).toBe(true)
+
+    const bad = await agent.patch("/api/v1/users/me").set(auth).send({ approvalEmails: "no" })
+    expect(bad.status).toBe(400)
+    expect(bad.body.error.code).toBe("VALIDATION_ERROR")
+  })
+})
+
 describe("POST /users/me/password", () => {
   it("đúng mật khẩu hiện tại ⇒ đổi được, phiên hiện tại giữ nguyên, phiên khác bị thu hồi", async () => {
     await seedLocalUser()
