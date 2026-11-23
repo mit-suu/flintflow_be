@@ -1,6 +1,11 @@
 /**
  * Ghép mục của tài liệu hiện tại (heading cũ) với mục của mẫu đích (heading mới) — hàm thuần, không AI, không DB.
  *
+ * - Heading cũ và heading mới trùng y hệt tên (đã bỏ số mục) ghép trước mọi luật khác: file mẫu có thể gán cùng `section_id` cho
+ *   hai heading anh em ("Quy tắc nghiệp vụ tổng quát" và "Hệ thống bên ngoài" cùng `fixed:1`), heading trùng tên không để mục
+ *   khung khác giành. Hai mục khung khác id vẫn không ghép theo chữ.
+ * - Heading mới cùng `section_id` với heading cha của nó (vd "Trong phạm vi" dưới "Phạm vi" cùng `slot:scope`) là heading con
+ *   của mục đó: không là lựa chọn của mục bị tách, không là mục thiếu (`children`).
  * - Mục khung (`fixed:*`, `group:*`, `slot:*`) ghép theo `section_id`. Mẫu đích có nhiều heading cùng `section_id` (IEEE tách
  *   Reliability / Availability cùng về 4.2.2) ⇒ ghép heading đầu, ghi vào `split` để BA chọn nơi đặt.
  *   Mục FPT và phần nhỏ `slot:*` chồng lấn (`overlapsOf`: 5.1 ↔ slot:business_rules) ghép với nhau như cùng một mục; một mục cũ
@@ -63,6 +68,8 @@ export interface PairingResult {
   ignored_new: string[]
   /** Mục cũ có nhiều heading cùng `section_id` ở mẫu đích (ghép heading đầu). */
   split: { old_key: string; new_keys: string[] }[]
+  /** Heading con của mẫu đích nằm cùng mục với heading cha — thuộc mục cha, không là mục thiếu. Bản ghi cũ không có field này. */
+  children?: string[]
 }
 
 export interface PairOptions {
@@ -145,6 +152,23 @@ const newElementKeys = (neu: readonly NewHeading[]): Set<string> => {
   return out
 }
 
+/** Heading mới mà heading cha gần nhất (theo cấp) mang cùng `section_id` khung — chỉ suy được khi biết cấp. */
+const childKeys = (neu: readonly NewHeading[]): Set<string> => {
+  const out = new Set<string>()
+  const stack: { level: number; sectionId: string }[] = []
+  for (const n of neu) {
+    if (n.level === undefined) continue
+    while (stack.length && stack[stack.length - 1].level >= n.level) stack.pop()
+    const parent = stack[stack.length - 1]
+    if (parent && isFrameworkId(n.section_id) && parent.sectionId === n.section_id) out.add(n.key)
+    stack.push({ level: n.level, sectionId: n.section_id })
+  }
+  return out
+}
+
+/** Tên heading để so trùng y hệt: bỏ số mục, gập dấu / hoa thường. */
+const exactTitle = (text: string): string => foldText(titleOf(text))
+
 /** Ghép tự động. Cùng đầu vào ⇒ cùng kết quả. */
 export const pairSections = (old: readonly OldHeading[], neu: readonly NewHeading[], options: PairOptions = {}): PairingResult => {
   const threshold = options.threshold ?? CUSTOM_PAIR_THRESHOLD
@@ -152,15 +176,34 @@ export const pairSections = (old: readonly OldHeading[], neu: readonly NewHeadin
   const ignored = newElementKeys(neu)
   const ignored_new = neu.filter((n) => ignored.has(n.key)).map((n) => n.key)
   const candidates = neu.filter((n) => !ignored.has(n.key))
+  const children = childKeys(candidates)
 
   const byId = new Map<string, NewHeading[]>()
-  for (const n of candidates) if (isFrameworkId(n.section_id)) byId.set(n.section_id, [...(byId.get(n.section_id) ?? []), n])
+  for (const n of candidates) if (isFrameworkId(n.section_id) && !children.has(n.key)) byId.set(n.section_id, [...(byId.get(n.section_id) ?? []), n])
 
   const claimed = new Set<string>()
   const pairOf = new Map<string, SectionPair>()
   const split: PairingResult["split"] = []
 
+  // Trùng y hệt tên ghép trước (không cho mục khung cùng id giành heading của mục khác)
   for (const o of main) {
+    const title = exactTitle(o.heading_text)
+    if (!title) continue
+    const n = candidates.find((c) => !claimed.has(c.key) && !children.has(c.key) && exactTitle(c.heading_text) === title && !(isFrameworkId(o.section_id) && isFrameworkId(c.section_id) && o.section_id !== c.section_id))
+    if (!n) continue
+    claimed.add(n.key)
+    pairOf.set(o.key, { old_key: o.key, new_key: n.key, by: o.section_id === n.section_id ? "section_id" : "title", score: 1, needs_review: !!n.auto_confirmed })
+  }
+
+  for (const o of main) {
+    const exact = pairOf.get(o.key)
+    if (exact) {
+      // Ghép theo tên trùng mà cùng id: heading cùng id còn lại của mẫu đích vẫn là phần tách của mục này
+      const rest = exact.by === "section_id" ? (byId.get(o.section_id) ?? []).filter((n) => !claimed.has(n.key)) : []
+      for (const n of rest) claimed.add(n.key)
+      if (rest.length) split.push({ old_key: o.key, new_keys: [exact.new_key!, ...rest.map((n) => n.key)] })
+      continue
+    }
     // Heading mới đã có chủ (hai heading cũ cùng section_id) không ghép lần nữa: heading cũ thứ hai để chưa ghép cho BA quyết
     const found = isFrameworkId(o.section_id) ? byId.get(o.section_id)?.filter((n) => !claimed.has(n.key)) : undefined
     if (!found?.length) continue
@@ -173,7 +216,7 @@ export const pairSections = (old: readonly OldHeading[], neu: readonly NewHeadin
   for (const o of main) {
     if (pairOf.has(o.key) || !isFrameworkId(o.section_id)) continue
     const overlap = new Set(overlapsOf(o.section_id))
-    const found = candidates.filter((n) => !claimed.has(n.key) && overlap.has(n.section_id))
+    const found = candidates.filter((n) => !claimed.has(n.key) && !children.has(n.key) && overlap.has(n.section_id))
     if (!found.length) continue
     pairOf.set(o.key, { old_key: o.key, new_key: found[0].key, by: "overlap", score: 1, needs_review: !!found[0].auto_confirmed })
     for (const n of found) claimed.add(n.key)
@@ -202,7 +245,8 @@ export const pairSections = (old: readonly OldHeading[], neu: readonly NewHeadin
     pairs: main.map((o) => pairOf.get(o.key) ?? { old_key: o.key, new_key: null, by: null, score: 0, needs_review: false }),
     followers,
     ignored_new,
-    split
+    split,
+    children: [...children].filter((k) => !claimed.has(k))
   }
 }
 

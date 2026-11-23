@@ -82,7 +82,7 @@ const migrationUrl = (projectId: string, id: string, suffix = "") => `${startUrl
 /** Chọn lựa chọn an toàn (không cần AI) cho mọi mục bắt buộc còn thiếu quyết định. */
 const decideAll = async (token: string, projectId: string, dto: MigrationDto) => {
   const items = [...dto.groups.extra, ...dto.groups.conflict]
-  const decisions = dto.undecided.map((id) => {
+  const decisions = [...dto.groups.extra, ...dto.groups.conflict].map((i) => i.id).map((id) => {
     const item = items.find((i) => i.id === id)!
     const choice = item.choices.find((c) => !item.ai_choices.includes(c) && !c.startsWith("move_to:")) ?? item.choices[0]
     return { id, choice }
@@ -166,10 +166,15 @@ describe("đổi mẫu — chuẩn bị", () => {
     // Sửa cặp: id ngoài dữ liệu đã lưu ⇒ 400, không đổi gì
     expect((await patch("/pairs", { pairs: [{ old_key: "custom:khong-co", new_key: null }] })).status).toBe(400)
     expect((await patch("/pairs", { pairs: [{ old_key: dto.pairing.pairs[0].old_key, new_key: "n999" }] })).status).toBe(400)
-    // Chưa qua bước rà mapping ⇒ chưa nhận quyết định
+    // Ghép cặp và quyết định chung một màn: quyết định nhận ngay ở bước rà ghép, không đổi trạng thái
     const early = await patch("/decisions", { decisions: [{ id: dto.groups.extra[0].id, choice: "delete" }] })
-    expect(early.status).toBe(409)
-    expect(early.body.error.code).toBe("TEMPLATE_MIGRATION_INVALID_STATE")
+    expect(early.status, JSON.stringify(early.body.error)).toBe(200)
+    expect(early.body.data).toMatchObject({ state: "mapping_review", decisions: [{ id: dto.groups.extra[0].id, choice: "delete" }] })
+    // Mọi mục thừa / conflict có lựa chọn chọn sẵn miễn phí, không bao giờ là AI
+    for (const item of [...dto.groups.extra, ...dto.groups.conflict]) {
+      expect(item.suggested, item.id).toBeTruthy()
+      expect(item.ai_choices).not.toContain(item.suggested)
+    }
 
     // Ghép tay: bỏ cặp của một mục khớp ⇒ mục đó thành thừa
     const victim = dto.groups.matched.find((m) => m.old_key === "fixed:1")!
@@ -178,6 +183,17 @@ describe("đổi mẫu — chuẩn bị", () => {
     expect((unpaired.body.data as MigrationDto).groups.extra.map((e) => e.old_key)).toContain(victim.old_key)
 
     expect((await request(app).post(url("/confirm-mapping")).set(H(lead.token))).body.data.state).toBe("decisions")
+    const suggestedOnly = (await request(app).get(url()).set(H(lead.token))).body.data as MigrationDto
+    // Chỉ dòng đoán (chuyển vào mục tên gần giống, cùng nhóm cha, đang trống) còn chờ xác nhận
+    const allItems = [...suggestedOnly.groups.extra, ...suggestedOnly.groups.conflict]
+    for (const id of suggestedOnly.undecided) expect(allItems.find((i) => i.id === id)?.confidence, id).toBe("guess")
+    // Lần đổi mẫu mở từ trước khi có gợi ý (mục không mang suggested) vẫn chạy theo luồng cũ: phải quyết từng mục mới ready
+    const stored = (await TemplateMigration.findById(dto.id))!
+    const strip = <T extends object>(i: T): T => Object.fromEntries(Object.entries(i).filter(([k]) => !["suggested", "suggested_reason", "confidence"].includes(k))) as T
+    stored.groups = { ...stored.groups, extra: stored.groups.extra.map(strip), conflict: stored.groups.conflict.map(strip) }
+    stored.decisions = []
+    stored.markModified("groups")
+    await stored.save()
     const current = (await request(app).get(url()).set(H(lead.token))).body.data as MigrationDto
     expect(current.undecided.length).toBeGreaterThan(0)
 

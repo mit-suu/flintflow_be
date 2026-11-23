@@ -94,10 +94,10 @@ type Choose = (id: string, choices: string[], aiChoices: string[]) => string | u
 const decide = async (token: string, projectId: string, id: string, choose?: Choose): Promise<MigrationDto> => {
   const dto = (await request(app).get(url(projectId, id)).set(H(token))).body.data as MigrationDto
   const items = [...dto.groups.extra, ...dto.groups.conflict]
-  const decisions = dto.undecided.map((d) => {
+  const decisions = [...dto.groups.extra, ...dto.groups.conflict].map((i) => i.id).map((d) => {
     const item = items.find((i) => i.id === d)!
     const safe = item.choices.filter((c) => !item.ai_choices.includes(c) && !c.startsWith("move_to:"))
-    return { id: d, choice: choose?.(d, item.choices, item.ai_choices) ?? safe.find((c) => c === "delete" || c === "drop_from_print") ?? safe[0] }
+    return { id: d, choice: choose?.(d, item.choices, item.ai_choices) ?? (safe.find((c) => c === "delete") ?? safe.find((c) => c === "drop_from_print")) ?? safe[0] }
   })
   if (decisions.length) expect((await request(app).patch(url(projectId, id, "/decisions")).set(H(token)).send({ decisions })).status).toBe(200)
   return (await request(app).get(url(projectId, id)).set(H(token))).body.data as MigrationDto
@@ -675,5 +675,69 @@ describe("review cuối (R14–R19)", () => {
     await applyTransaction(projectId, { base_version: head.spine_version, ops: [{ op: "add", path: "nfrs[]", value: { category: "other", kind: "descriptive", statement: "Data is encrypted at rest.", priority: "must" } }], by: "CR-941", reason: "CR-941", step_id: null })
     spineRepository.clearReadCache()
     expect(await filled()).toContain("fixed:4.2.4")
+  })
+})
+
+describe("chọn sẵn phương án miễn phí (Xem lại thay đổi)", () => {
+  it("mapping_review → ready không chạm dòng nào; sửa cặp giữ quyết định; áp dụng không tốn credit", async () => {
+    const lead = await seedFixture("minimal", { balance: 1000 })
+    const projectId = await baselinedProject(lead, await makeSrsDocx({ extraBody: LEGACY }))
+    const templateId = await publishTemplate(lead.token, lead.orgId, await makeSrsDocx({ extraBody: EXTRA }))
+    const started = await request(app).post(url(projectId)).set(H(lead.token)).send({ template_id: templateId, version: 1 })
+    expect(started.status, JSON.stringify(started.body.error)).toBe(201)
+    const dto = started.body.data as MigrationDto
+    const id = dto.id
+    expect(dto.state).toBe("mapping_review")
+    expect(dto.undecided).toEqual([])
+    const legacy = dto.groups.extra.find((e) => /Legacy/.test(e.heading_text))!
+    expect(legacy).toMatchObject({ suggested: "drop_from_print", confidence: "high", suggested_reason: "no_place" })
+    // Dàn tiêu đề: mục không in ra hiện đúng chỗ, mục cần viết vàng
+    expect(dto.outline.find((o) => /Legacy/.test(o.heading_text))).toMatchObject({ status: "dropped" })
+    expect(dto.outline.find((o) => /Operating Environment/.test(o.heading_text))).toMatchObject({ status: "needs_content" })
+
+    // Quyết định ở bước rà ghép, rồi sửa một cặp không liên quan ⇒ quyết định còn
+    expect((await request(app).patch(url(projectId, id, "/decisions")).set(H(lead.token)).send({ decisions: [{ id: legacy.id, choice: "keep_custom" }] })).status).toBe(200)
+    const matched = dto.groups.matched.find((m) => m.old_key === "fixed:2.1")!
+    const repaired = await request(app).patch(url(projectId, id, "/pairs")).set(H(lead.token)).send({ pairs: [{ old_key: matched.old_key, new_key: matched.new_key }] })
+    expect(repaired.status, JSON.stringify(repaired.body.error)).toBe(200)
+    expect((repaired.body.data as MigrationDto).decisions).toEqual([{ id: legacy.id, choice: "keep_custom" }])
+
+    const startBalance = await balanceOf(lead.orgId)
+    const ready = await request(app).post(url(projectId, id, "/ready")).set(H(lead.token))
+    expect(ready.status, JSON.stringify(ready.body.error)).toBe(200)
+    const readyDto = ready.body.data as MigrationDto
+    expect(readyDto.credit_estimate.total).toBe(0)
+    // Lựa chọn chọn sẵn của mục BA không chạm được ghi thành quyết định; quyết định của BA giữ nguyên
+    const items = [...readyDto.groups.extra, ...readyDto.groups.conflict]
+    expect(readyDto.decisions.map((d) => d.id).sort()).toEqual(items.map((i) => i.id).sort())
+    expect(readyDto.decisions.find((d) => d.id === legacy.id)?.choice).toBe("keep_custom")
+    expect(readyDto.decisions.every((d) => d.choice !== "ai_resolve")).toBe(true)
+
+    const applied = await request(app).post(url(projectId, id, "/apply")).set(H(lead.token))
+    expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
+    expect(await balanceOf(lead.orgId)).toBe(startBalance)
+  })
+
+  it("dòng đoán chặn ready tới khi xác nhận (gửi đúng suggested)", async () => {
+    const lead = await seedFixture("minimal", { balance: 1000 })
+    const projectId = await baselinedProject(lead, await makeSrsDocx({ extraBody: LEGACY }))
+    const templateId = await publishTemplate(lead.token, lead.orgId, await makeSrsDocx({ extraBody: EXTRA }))
+    const started = await request(app).post(url(projectId)).set(H(lead.token)).send({ template_id: templateId, version: 1 })
+    const dto = started.body.data as MigrationDto
+    // Biến mục thừa thành dòng đoán ngay trên bản ghi (fixture tự sinh không có cặp tên gần giống cùng nhóm cha)
+    const stored = (await TemplateMigration.findById(dto.id))!
+    const target = dto.groups.missing.find((m) => m.needs_content)!
+    stored.groups = { ...stored.groups, extra: stored.groups.extra.map((e) => (/Legacy/.test(e.heading_text) ? { ...e, suggested: `move_to:${target.new_key}`, suggested_reason: "close_name" as const, confidence: "guess" as const } : e)) }
+    stored.markModified("groups")
+    await stored.save()
+    const legacyId = dto.groups.extra.find((e) => /Legacy/.test(e.heading_text))!.id
+    const blocked = await request(app).post(url(projectId, dto.id, "/ready")).set(H(lead.token))
+    expect(blocked.status).toBe(409)
+    expect(blocked.body.error.code).toBe("TEMPLATE_MIGRATION_UNDECIDED")
+    expect(blocked.body.meta.undecided).toEqual([legacyId])
+    const confirmed = await request(app).patch(url(projectId, dto.id, "/decisions")).set(H(lead.token)).send({ decisions: [{ id: legacyId, choice: `move_to:${target.new_key}` }] })
+    expect(confirmed.status, JSON.stringify(confirmed.body.error)).toBe(200)
+    expect((confirmed.body.data as MigrationDto).undecided).toEqual([])
+    expect((await request(app).post(url(projectId, dto.id, "/ready")).set(H(lead.token))).status).toBe(200)
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { classify, columnIdentity, decidableItems, missingAfterMoves, sameColumns, settleDecisions, tableShapesBySection, type TableShape, type TableShapes } from "./classify.js"
+import { classify, columnIdentity, decidableItems, missingAfterMoves, sameColumns, settleDecisions, tableShapesBySection, withSuggestedDecisions, type TableShape, type TableShapes } from "./classify.js"
 import { pairSections, type NewHeading, type OldHeading } from "./pair-sections.js"
 import type { EditedSection } from "./edited-since.js"
 
@@ -42,7 +42,7 @@ describe("classify — 4 nhóm cho một lần đổi mẫu v1 → v2", () => {
 
   it("mục thừa: giữ / xoá / chuyển vào mục thiếu; chuyển vào mục có cấu trúc cần AI", () => {
     const { groups } = run(oldDoc, newDoc, { oldTables, newTables })
-    expect(groups.extra[0]).toMatchObject({ id: "e:custom:c2", choices: ["keep_custom", "delete", "move_to:n4", "move_to:n5"], ai_choices: ["move_to:n5"], decision_required: true })
+    expect(groups.extra[0]).toMatchObject({ id: "e:custom:c2", choices: ["keep_custom", "drop_from_print", "delete", "move_to:n4", "move_to:n5"], ai_choices: ["move_to:n5"], decision_required: true })
   })
 
   it("đổi cột bảng chỉ là đổi thứ tự ⇒ vẫn khớp", () => {
@@ -198,10 +198,18 @@ describe("quyết định", () => {
     expect(items.get("s:fixed:2.1")).toMatchObject({ group: "edited_since", required: false, default: "keep" })
   })
 
-  it("settleDecisions: thiếu quyết định bắt buộc ⇒ undecided; quyết định sai nhóm bị loại", () => {
-    const r = settleDecisions(groups, [{ id: "e:custom:c2", choice: "delete" }, { id: "c:table_columns:fixed:5.1", choice: "keep_custom" }, { id: "m:fixed:1", choice: "keep" }])
+  it("settleDecisions: bản ghi chưa có gợi ý thiếu quyết định bắt buộc ⇒ undecided; quyết định sai nhóm bị loại", () => {
+    // Lần đổi mẫu mở từ trước khi có gợi ý: mục không mang `suggested` ⇒ BA phải chọn như luồng cũ
+    const legacy = { ...groups, extra: groups.extra.map(({ suggested: _s, suggested_reason: _r, confidence: _c, ...e }) => e), conflict: groups.conflict.map(({ suggested: _s, suggested_reason: _r, confidence: _c, ...c }) => c) }
+    const r = settleDecisions(legacy, [{ id: "e:custom:c2", choice: "delete" }, { id: "c:table_columns:fixed:5.1", choice: "keep_custom" }, { id: "m:fixed:1", choice: "keep" }])
     expect(r.decisions).toEqual([{ id: "e:custom:c2", choice: "delete" }])
     expect(r.undecided).toEqual(["c:table_columns:fixed:5.1"])
+  })
+
+  it("mục có lựa chọn chọn sẵn chắc chắn không nằm trong undecided; withSuggestedDecisions điền lựa chọn đó", () => {
+    expect(settleDecisions(groups, []).undecided).toEqual([])
+    const filled = withSuggestedDecisions(groups, [{ id: "e:custom:c2", choice: "keep_custom" }], (id, choice) => ({ id, choice }))
+    expect(filled).toEqual([{ id: "e:custom:c2", choice: "keep_custom" }, { id: "c:table_columns:fixed:5.1", choice: "map_by_header" }])
   })
 })
 

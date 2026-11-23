@@ -702,6 +702,8 @@ export const parseBlocks = (
   let reachedBody = pre.bodyStart === null
   /** Số mục theo thứ tự heading có đánh số (gõ tay hoặc `numPr`) — suy số Word tự sinh (`auto_number`). */
   let outline: number[] = []
+  /** Heading gần nhất nhận theo style / outline level (mục đang đứng là heading style thật). */
+  let lastHeadingStyled = false
   const noteHeading = (level: number, text: string, autoNumbered: boolean): string | null => {
     const typed = typedNumber(text)
     if (typed) {
@@ -806,7 +808,12 @@ export const parseBlocks = (
       }
       if (level === null && numFmt !== "bullet") {
         const numbered = numberingPatternLevel(text)
-        if (numbered !== null) {
+        // Bước luồng / danh sách gõ số "1. Khách bấm …" nằm trong một mục đã đánh số nhiều cấp (dưới "3.3") không phải heading cấp 1:
+        // số một cấp chỉ là heading khi nối tiếp dàn số đang có (sau "3.7.4" là "4."); mục đang đứng là heading theo style thì heading kế
+        // cùng dàn cũng mang style ⇒ số một cấp gõ tay ngay dưới nó là danh sách
+        const typed = numbered === 1 ? typedNumber(text) : null
+        const outOfOutline = typed !== null && outline.length >= 2 && (lastHeadingStyled || !followsNumber(outline, typed))
+        if (numbered !== null && !outOfOutline) {
           level = numbered
           detector = "numbering_pattern"
         }
@@ -900,6 +907,7 @@ export const parseBlocks = (
     const formatExtra = kind !== "heading" && guidanceFormat(p, chain, pre.bodyColor) ? { guidance_format: true } : {}
     push({ ...base, kind, level, heading_detector: detector, bookmark, editable: !embedded && !hasField(p), ...headingExtra, ...formatExtra })
     if (kind === "heading" && level !== null) headingStack.push({ level, text: text.trim() })
+    if (kind === "heading") lastHeadingStyled = detector === "style" || detector === "outline_level"
   }
 
   const table = (tbl: Element, path: string, nested: boolean): void => {

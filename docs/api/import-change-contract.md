@@ -462,6 +462,7 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-11-23 | contract-change FLF-447 (đổi mẫu 3 bước + so sánh version kiểu GitHub) | Additive, client cũ đọc được. Đổi mẫu: `extra[]` / `conflict[]` thêm `suggested`, `suggested_reason`, `confidence`; `pairing.children[]`; `MigrationDto.outline[]`; mục thừa chữ tự do thêm lựa chọn `drop_from_print`; **nới trạng thái**: `PATCH …/decisions` và `POST …/ready` nhận cả `mapping_review` (ready ghi gợi ý thành quyết định); `undecided` chỉ còn dòng đoán + bản ghi cũ. So sánh: #15 `compareResponseSchema` và #11 `reuploadDiffDtoSchema` thêm `sections[]` (bắt buộc ở response mới); `blockDiffEntrySchema` thêm `section?`, `section_key?`, `kind?`, `table?` (diff theo hàng); khối bị xoá chen đúng chỗ thay vì dồn cuối. Xem §FLF-395 "Chọn sẵn" và §FLF-447 cuối file |
 | 2026-11-19 | contract-change FLF-445 (chế độ 1: nhóm cờ thành change request) | Additive. #16 `POST …/change-requests` nhận `flag_ids?` (1-50 id cờ mở); mã lỗi mới `400 FLAG_NOT_OPEN`, `400 CR_TOO_MANY_LOCATIONS`, dùng lại `404 FLAG_NOT_FOUND`. `ChangeRequest.flag_ids: string[]` ở #16, #17, #18 và mọi chi tiết CR (`[]` với CR cũ). Cờ thuộc CR chưa kết thúc không vào hàng việc chờ quyết (`pipeline-contract.md` #51) |
 | 2026-11-12 | FLF-404 (danh sách dài tải theo trang) | Additive, client cũ không đổi: `GET /projects` có `?page` ⇒ một trang + `meta { page, limit, total, totalPages }`, nhận thêm `limit` (≤ 100, mặc định 24), `status`, `mode`, `q` (tên, không dấu), `sort` (`created` · `updated` · `opened`, chưa mở xếp cuối), `folder` (id hoặc `none`); không có `page` ⇒ mảng như cũ. `GET /admin/feedback` nhận `page`, `limit` (≤ 100, mặc định 20), `q` (nội dung / email / tên người gửi, không dấu), `meta` thêm `page`, `limit`, `totalPages`. `GET /admin/template-gaps` nhận `page` (mặc định 1; `limit` giữ ≤ 500, mặc định 50), `rows` là một trang sau khi gom, `meta` đếm toàn bộ. `GET /admin/ai-cost` nhận `page`, `limit` (≤ 100); không `limit` ⇒ trả mọi dòng như cũ; `totals` luôn trên toàn bộ nhóm |
 | 2026-11-12 | FLF-405 (giới hạn token tài liệu tham khảo) | Additive. `POST /projects/:id/documents` thêm hai mã `413`, chưa lưu, chưa upload, không tốn credit — trần một lần tải kiểm ngay sau khi Code trích chữ; trần dự án kiểm **sau** bước kiểm trùng / hỏi bản mới (FLF-398), nên file sát trần vẫn được hỏi "Thay bản cũ" trước: `DOCUMENT_TOO_LONG` (`meta { file, token_count, limit }`, trần mỗi lần tải = env `REFERENCE_MAX_TOKENS_PER_UPLOAD`, mặc định 100 000) và `PROJECT_DOCUMENT_QUOTA_EXCEEDED` (`meta { file, token_count, used, limit }`, trần tổng dự án = `plan.config` `maxReferenceTokens` theo gói của org: Free 200 000, Pro 1 000 000). `used` = tổng `tokenCount` tài liệu còn hiệu lực (bỏ bản `supersededBy`, bỏ bản parse lỗi); `replace_document_id` ⇒ trừ token bản bị thay. Parse lỗi vẫn lưu `failed`. Tài liệu đã có không bị chặn / xoá. `GET /projects/:id/documents` trả thêm `meta { tokens_used, tokens_limit, tokens_per_upload_limit }`. Token ước lượng ký tự / 4. Không áp cho tài liệu bổ sung của CR |
@@ -794,8 +795,8 @@ quyết định của BA → `ready`. Chưa đụng bản nháp, Spine, file n�
 | `GET /projects/:id/template-migrations/:migrationId` | lead, analyst | — | `MigrationDto` |
 | `PATCH …/:migrationId/pairs` | lead, analyst | `{ pairs: [{ old_key, new_key \| null }] }` | sửa cặp (chỉ `mapping_review` / `decisions`; về `mapping_review`), phân nhóm lại, giữ quyết định còn hợp lệ |
 | `POST …/:migrationId/confirm-mapping` | lead, analyst | — | `mapping_review → decisions` |
-| `PATCH …/:migrationId/decisions` | lead, analyst | `{ decisions?: [{ id, choice }], batch?: "keep_all" \| "discard_all" }` (≥ 1) | chỉ ở `decisions`; `batch` chỉ khi đổi ngược |
-| `POST …/:migrationId/ready` | lead, analyst | — | `decisions → ready`, ghim `prepared_spine_version` + `prepared_source_sha256` |
+| `PATCH …/:migrationId/decisions` | lead, analyst | `{ decisions?: [{ id, choice }], batch?: "keep_all" \| "discard_all" }` (≥ 1) | ở `mapping_review` hoặc `decisions` (FLF-447, không đổi trạng thái); `batch` chỉ khi đổi ngược |
+| `POST …/:migrationId/ready` | lead, analyst | — | `mapping_review \| decisions → ready` (FLF-447: từ `mapping_review` coi như xác nhận ghép); ghi lựa chọn chọn sẵn của mục chưa chạm thành quyết định; ghim `prepared_spine_version` + `prepared_source_sha256` |
 | `POST …/:migrationId/cancel` | lead, analyst | — | huỷ ở `mapping_review` / `decisions` / `ready`; `applying` ⇒ `409 TEMPLATE_MIGRATION_APPLYING` |
 
 **Điều kiện bắt đầu** (theo thứ tự): dự án thuộc org của người gọi (`404 PROJECT_NOT_FOUND`); có baseline (`409 TEMPLATE_MIGRATION_NO_BASELINE`);
@@ -826,7 +827,8 @@ ready → applying → applied | cancelled | failed`.
   `split_section` — `to:<new_key>`, `record_of_changes` — bảng khác cột hoặc mẫu đích không có; `choices` + `ai_resolve`) · `edited_since` (chỉ
   đổi ngược) · `structure_only_dropped` (heading nhóm không có gì đi theo) · `restored_from_snapshot`. Bảng so theo bộ cột (đổi thứ tự cột
   không tính là đổi; cột Record of Changes theo cột lịch sử chuẩn). Mục có cặp nằm đúng một trong `matched` / `conflict`; mục đã sửa còn nằm thêm
-  ở `edited_since`. Mục thừa + conflict **bắt buộc** có quyết định trước `ready` (`409 TEMPLATE_MIGRATION_UNDECIDED`, `meta.undecided`).
+  ở `edited_since`. Mục thừa + conflict **bắt buộc** có quyết định trước `ready` (`409 TEMPLATE_MIGRATION_UNDECIDED`, `meta.undecided`);
+  từ FLF-447 lựa chọn chọn sẵn chắc chắn (`confidence = high`) tính là quyết định, xem "Chọn sẵn" bên dưới.
   Sửa sau test tay 11/11 (additive): heading nhóm của mẫu đích (heading ngay sau sâu hơn) ⇒ `missing[].needs_content = false`, không là đích
   `move_to`, không vào `migration_missing_sections` / cờ đỏ (profile cũ đã ghi cũng được lọc khi tính cờ); mục thiếu là đích của một
   `move_to` đã quyết ⇒ DTO trả `needs_content = false` + `moved_in: [id mục thừa]` (bước áp dụng tính theo quyết định đã giải). Bộ đọc
@@ -840,6 +842,23 @@ ready → applying → applied | cancelled | failed`.
   `decisions[].id` phải là mục nhận quyết định (`extra` / `conflict` / `edited_since`), `choice` phải thuộc `choices` của đúng mục đó — sai ⇒
   `400 VALIDATION_ERROR` (`meta.ids`), không ghi gì. Hai người sửa cùng lúc ⇒ `409 TEMPLATE_MIGRATION_CONFLICT`. Sai trạng thái ⇒ `409
   TEMPLATE_MIGRATION_INVALID_STATE` (`meta.state`, `meta.allowed`).
+- **Chọn sẵn (FLF-447, additive)**: mỗi `extra[]` / `conflict[]` mang `suggested` (một giá trị của `choices`, luôn miễn phí, **không bao giờ**
+  `ai_resolve` hay giá trị trong `ai_choices`), `suggested_reason` (`no_place` · `close_name` · `map_columns` · `no_table_in_new` ·
+  `keep_history` · `first_heading`) và `confidence` (`high` | `guess`). Luật: thừa không chỗ hợp ⇒ `drop_from_print`; bảng khác cột ⇒
+  `map_by_header`; mẫu đích không có bảng ⇒ `keep_old_table`; Record of Changes ⇒ `map_by_header` (mất ở mẫu đích ⇒ `drop_from_print`);
+  tách ⇒ `to:<heading đầu>`; `guess` chỉ cho `move_to:<new_key>` khi đủ cả ba: tên gần giống (`titleSimilarity` ≥ 0.6), cùng nhóm cha (heading
+  cha cũ ghép với heading cha mới, hoặc cùng id / chồng lấn), mục đích là mục thiếu cần viết; mỗi mục đích chỉ đoán một lần. `undecided[]` =
+  dòng `guess` chưa có quyết định (xác nhận = `PATCH …/decisions` gửi đúng `suggested`) + mục của bản ghi trước FLF-447 (không có `suggested`,
+  luồng cũ chạy tiếp như trước). `ready` ghi `suggested` của mục `high` chưa chạm vào `decisions[]`, nên bước áp dụng không đổi. Mục thừa chữ
+  tự do có thêm `drop_from_print` trong `choices` (đứng trước `delete`).
+- **Ghép mục (FLF-447)**: heading cũ và mới trùng y hệt tên (bỏ số mục, gập dấu) ghép trước mọi luật (`by = section_id` khi cùng id, không thì
+  `title`; hai mục khung khác id vẫn không ghép theo chữ); heading mới có heading cha gần nhất cùng `section_id` khung là heading con của mục đó
+  ⇒ `pairing.children[]` (không vào `split`, không là mục thiếu; bản ghi cũ không có field này). Bảng phân quyền màn hình (`fixed:3.1.3`) so bộ
+  cột bỏ cột vai trò (`permissions[].role_id`); cột thừa của mẫu đích là vai trò ví dụ.
+- **`outline[]` (FLF-447, additive)**: dàn tiêu đề của tài liệu sau khi đổi, theo thứ tự heading mẫu đích (bỏ heading phần tử ví dụ); mục cũ không
+  có chỗ chen sau mục mới mà heading cũ đứng trước nó đã ghép tới: `{ heading_text, level, status: kept | receives | needs_content | dropped,
+  from_heading?: string[], table_change?: map | keep | drop, dropped_items?: [{ id | null, text }] (tối đa 5), dropped_total? }`. Lựa chọn hiệu
+  lực = quyết định, không có thì `suggested`.
 - **Ngôn ngữ (D9)**: `language.needs_translation` khi ngôn ngữ mẫu đích ≠ ngôn ngữ gốc của chữ trong Spine; chưa dịch gì ở lát này.
 - **`credit_estimate`** (không trừ, không giữ credit): `translation` (đổi xuôi: mọi đơn vị dịch của Spine; đổi ngược: chỉ mục `keep` đã sửa; chia lô
   `BATCH_MAX_CHARS`, giá `translate_document`/lô) + `structural_moves` + `ai_resolve` (mỗi mục một lượt, giá `cr_propose` — số ước tính, chốt khi áp dụng).
@@ -970,3 +989,21 @@ ready → applying → applied | cancelled | failed`.
   đủ hai chiều. Import **không** tự thêm actor `User` vào Spine nữa (FLF-390 đã thêm, nay bỏ — bản 0.1 giữ nguyên trạng file).
 - Script `npm run cleanup:manual-crs [--apply] [--project <id>]`: xoá CR còn vị trí `manual = true` từ trước (CR đã ghi ⇒ hoàn
   tác thay đổi Spine + xoá bản nháp của nó).
+
+## FLF-447 (2026-11-23) — so sánh version theo mục, bảng theo hàng (#11, #15)
+
+Dùng chung cho `GET /projects/:id/versions/compare` (UC-50) và `POST /projects/:id/reupload` (UC-25). `summary` giữ nguyên nghĩa (một bảng
+có hàng đổi tính một `modified`).
+
+- **Entry** (`blockDiffEntrySchema`) thêm `section` (tiêu đề mục chứa block = phần tử cuối của `heading_path`, heading thì chính nó; `""` =
+  trước heading đầu), `section_key` (khoá mục = cả đường heading nối bằng `" > "`; hai mục trùng tên ở hai chỗ khác nhau có khoá khác) và `kind` (`paragraph` | `table` | `image` | `heading`). Bản ghi tải lại cũ không có hai field này ⇒ FE gom vào nhóm "Khác".
+- **Bảng**: hai bảng còn lẻ giữa cùng hai block đã khớp ghép theo vị trí (không cần đủ độ giống từ). Bảng khớp mà khác chữ ⇒ entry `modified`
+  có `table: { header, header_before?, rows[] }`. Ghép hàng 3 tầng: cột mã (cùng tiêu đề hai bảng, mọi ô thân dạng mã `UC-01` / `NFR-17`,
+  không trùng) ⇒ theo mã, đổi thứ tự **không** tính là thay đổi; còn lại LCS theo chữ cả hàng, hàng y hệt ngoài dãy ⇒ `moved`; hàng lẻ giữa hai
+  hàng đã ghép ⇒ độ giống từ ≥ 0.5 ⇒ `modified` + `cells_changed` (chỉ số ô). `rows[]` theo thứ tự bảng mới, hàng xoá chen đúng chỗ, hàng
+  không đổi liền nhau gộp `{ change: "unchanged", count, rows }`. Chỉ đổi thứ tự theo mã ⇒ không có entry.
+- **Thứ tự entry**: theo tài liệu mới; khối bị xoá chen ngay trước khối mới đầu tiên ghép với khối cũ đứng sau nó (trước đây dồn cuối danh sách).
+- **`sections[]`** = `[{ title, key, unchanged }]` (`key` = `section_key`) theo thứ tự tài liệu mới: số block không đổi của từng mục (không trả chữ). Bản ghi tải lại cũ ⇒ `[]`.
+- So sánh version che cột "In charge" / "Người thực hiện" của bảng Record of Changes cả trong `table.rows` (hàng chỉ đổi ở cột đó không còn
+  là thay đổi).
+- Diff chữ trong đoạn làm ở FE; BE trả `before` / `after` của đoạn sửa như cũ. Hình chỉ báo `kind: image`, chưa trả đường tải ảnh của version.
