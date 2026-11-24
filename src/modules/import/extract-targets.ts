@@ -52,15 +52,54 @@ export const NFR_CATEGORY_BY_SECTION: Readonly<Record<string, string>> = {
  */
 export const targetsOf = (sectionId: string): readonly string[] => {
   if (PROVISIONAL_SECTION.test(sectionId)) return ["functions"]
+  if (CONTENT_SECTION.test(sectionId)) return CONTENT_TARGETS
   // FLF-278: heading map vào một phần nhỏ ⇒ chỉ trích collection của phần đó
   const slot = contentSlot(sectionId)
   if (slot) return slot.targets
   return SECTION_TARGETS[sectionId] ?? []
 }
 
+/**
+ * FLF-444 (BF §3.1 I-4, bảng *File lệch format*): khối dưới heading tự đặt không khớp mục nào của mẫu (`unmapped`, "Những gì
+ * hệ thống làm được", "Phần 3") vẫn được đọc theo nội dung. Id trích tạm theo block heading: `content:@B0042`.
+ */
+export const CONTENT_SECTION = /^content:@(B\d{4,})$/
+
+export const contentSectionId = (headingBlockId: string): string => `content:@${headingBlockId}`
+
+/**
+ * FLF-444: mọi loại phần tử đọc được từ chữ: mục đọc theo nội dung nhận hết; mục đã khớp nhận thêm các loại ngoài mục
+ * (một section nhiều loại nội dung: FR lẫn NFR). Nút triển khai chỉ đọc từ sơ đồ nên không có ở đây.
+ */
+export const CONTENT_TARGETS: readonly string[] = [
+  "project",
+  "actors",
+  "roles",
+  "use_cases",
+  "features",
+  "screens",
+  "permissions",
+  "entities",
+  "functions",
+  "nfrs",
+  "business_rules",
+  "common_requirements",
+  "messages",
+  "other_requirements",
+  "glossary",
+  "references",
+  "verifications"
+]
+
+/** FLF-444: loại phần tử ngoài mục mà model vẫn được trả khi chữ rõ ràng là loại đó (mục đọc theo nội dung ⇒ rỗng). */
+export const otherTargetsOf = (sectionId: string): readonly string[] => {
+  const own = targetsOf(sectionId)
+  return own.length ? CONTENT_TARGETS.filter((t) => !own.includes(t)) : []
+}
+
 /** Section có trích (Record of Changes là dẫn xuất, không trích). */
 export const isExtractableSection = (sectionId: string): boolean =>
-  sectionId !== "fixed:I" && (PROVISIONAL_SECTION.test(sectionId) || sectionId in SECTION_TARGETS || (contentSlot(sectionId)?.targets.length ?? 0) > 0)
+  sectionId !== "fixed:I" && (PROVISIONAL_SECTION.test(sectionId) || CONTENT_SECTION.test(sectionId) || sectionId in SECTION_TARGETS || (contentSlot(sectionId)?.targets.length ?? 0) > 0)
 
 /**
  * FLF-252: đủ các field Spine mà tài liệu hay ghi — tên hệ thống, phạm vi release, feature của màn, màn + quy tắc của
@@ -80,7 +119,7 @@ export const SCHEMA_EXCERPT: Readonly<Record<string, string>> = {
   entities: "entities[]: { name, description, relations: <entity ids>, attributes?: [{ name, kind: \"key\" | \"reference\" | \"plain\", required: boolean }] (only when the document or diagram lists them), feature_ids?: <feature ids / names that use the entity>, states?: [{ name, initial?: boolean, final?: boolean }], transitions?: [{ from: <state name>, to: <state name>, event, guard?, action? }] (only when the document or a state diagram lists them) }",
   functions:
     'functions[]: { name, trigger, description, screen_id: <screen id / name or null>, normal: string[] (main flow steps), abnormal: string[] (alternative/exception flows), validations: [{ kind: "business" | "format" | "required", statement }], business_rule_ids: <business rule ids>, priority: "must" | "should" | "could" | "wont" | null, interactions?: [{ from: <actor id / name or "system">, to: <actor id / name or "system">, message, kind: "request" | "response", flow: "normal" | "abnormal", guard? }] (only from a sequence diagram) }',
-  nfrs: 'nfrs[]: { statement, kind: "quantitative" | "descriptive", metric?, threshold?, priority }',
+  nfrs: 'nfrs[]: { statement, kind: "quantitative" | "descriptive", metric?, threshold?, priority, category?: "interface" | "usability" | "reliability" | "performance" | "other" }',
   deployment_nodes:
     'deployment_nodes[]: { name, kind: "device" | "execution_environment" | "node", parent: <name / key of the node that contains it, or null>, description?: <the small text under the node name, one string as written - NOT components>, artifacts: string[], components: string[] (only shapes drawn as UML artifact / component or a list labelled so), links: [{ to: <node name / key>, protocol? }] } (only from a deployment diagram)',
   business_rules: 'business_rules[]: { statement, tier: "high" | "detail" }',

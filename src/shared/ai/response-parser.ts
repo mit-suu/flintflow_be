@@ -274,7 +274,16 @@ export const importExtractSchema = z.object({
     })
   ),
   /** Block trong section không trích được gì (văn xuôi giới thiệu, ghi chú) — đưa vào gap report nếu cần. */
-  unmapped_block_ids: z.array(blockIdRef).default([])
+  unmapped_block_ids: z.array(blockIdRef).default([]),
+  /**
+   * FLF-444: nội dung không phải loại heading gợi ý (mục "Use Case" mà bên trong là test case) - mô tả ngắn nội dung thật.
+   * Code tin nội dung và đánh dấu để người xác nhận ở bước 1.6.
+   */
+  content_mismatch: z.object({ content: z.string().min(1).max(300) }).nullable().optional(),
+  /** FLF-444: chỗ cho lớp 4 chữ hướng dẫn (BF §3.1.1, đoạn chỉ một dấu hiệu) - AI phân loại trong cùng lượt đọc. */
+  guidance_blocks: z.array(z.object({ block_id: blockIdRef, is_guidance: z.boolean(), confidence })).optional(),
+  /** FLF-444: chỗ cho loại nội dung ISO/IEC/IEEE 29148 theo block (thuộc / không thuộc phạm vi SRS). */
+  content_types: z.array(z.object({ block_id: blockIdRef, iso29148: z.string().min(1).max(80), in_scope: z.boolean(), confidence })).optional()
 })
 
 /** Loại diagram mà I-4 đọc được từ ảnh (mode 1 v3 phase 5; FLF-390 thêm sequence, activity); `other` ⇒ không đọc, giữ ảnh gốc. */
