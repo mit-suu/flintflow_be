@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
 const mocks = vi.hoisted(() => {
   const deleteMany = () => vi.fn(async (_filter: unknown) => ({ deletedCount: 1 }))
@@ -22,6 +22,9 @@ const mocks = vi.hoisted(() => {
     RenderedDocumentCache: { deleteMany: deleteMany() },
     getSpine: vi.fn(),
     getOrCreate: vi.fn(),
+    // FLF-477: redrawWithRetry gọi qua import động "../diagram/diagram.service.js"
+    renderDiagram: vi.fn(async () => {}),
+    redrawScreenLayoutsFromSpec: vi.fn(async () => {}),
     removeDiagram: vi.fn(async () => {}),
     removeDocFiles: vi.fn(async () => {}),
     // Mode 1 (FLF-171)
@@ -69,7 +72,8 @@ vi.mock("../spine/change.model.js", () => ({ Change: mocks.Change }))
 vi.mock("../spine/baseline.model.js", () => ({ Baseline: mocks.Baseline }))
 vi.mock("../spine/usage.model.js", () => ({ Usage: mocks.Usage }))
 vi.mock("../render/rendered-document.model.js", () => ({ RenderedDocumentCache: mocks.RenderedDocumentCache }))
-vi.mock("../spine/spine.repository.js", () => ({ get: mocks.getSpine, getOrCreate: mocks.getOrCreate }))
+vi.mock("../spine/spine.repository.js", () => ({ get: mocks.getSpine, getOrCreate: mocks.getOrCreate, SPINE_VERSION_CONFLICT: "SPINE_VERSION_CONFLICT" }))
+vi.mock("../diagram/diagram.service.js", () => ({ renderDiagram: mocks.renderDiagram, redrawScreenLayoutsFromSpec: mocks.redrawScreenLayoutsFromSpec }))
 vi.mock("../diagram/diagram-file.store.js", () => ({ gridFsDiagramStore: { remove: mocks.removeDiagram } }))
 vi.mock("../import/imported-document.model.js", () => ({ ImportedDocument: mocks.ImportedDocument }))
 vi.mock("../import/doc-block.model.js", () => ({ DocBlock: mocks.DocBlock }))
@@ -100,6 +104,7 @@ vi.mock("../credits/subscription.model.js", () => ({ Subscription: { findOne: ()
 vi.mock("../user/account-locale.js", () => ({ accountLocaleOf: mocks.accountLocaleOf }))
 
 import * as projectService from "./project.service.js"
+import { ApiError } from "../../shared/utils/api-error.js"
 
 const PROJECT = "64b000000000000000000001"
 const USER = "64b000000000000000000002"
@@ -383,5 +388,86 @@ describe("setDocumentLanguage (FLF-265)", () => {
       statusCode: 409,
       code: projectService.DOCUMENT_LANGUAGE_LOCKED
     })
+  })
+})
+
+/**
+ * FLF-477 phần A: `redrawWithRetry` (dùng chung cho ERD / Sequence / Screen Layout) qua `setErdNotation` — hàm trực
+ * tiếp của plan fix. `SPINE_VERSION_CONFLICT` (bước pipeline đang ghi Spine xen giữa) được thử lại tối đa 3 lần;
+ * lỗi khác không thử lại. Ký pháp luôn được lưu dù vẽ lại thế nào (plan: "lựa chọn ký pháp đã lưu").
+ */
+describe("setErdNotation — vẽ lại ERD tự thử lại khi xung đột version (FLF-477)", () => {
+  const conflict = () => new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", "SPINE_VERSION_CONFLICT")
+
+  const existingErd = (erdNotation: string | undefined) =>
+    mocks.Project.findOne.mockReturnValueOnce({ select: () => ({ lean: async () => ({ erdNotation }) }) })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.getSpine.mockResolvedValue({ diagrams: [{ kind: "erd" }] })
+    mocks.Project.findOneAndUpdate.mockResolvedValue({ _id: PROJECT, erdNotation: "crowsfoot" })
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("SPINE_VERSION_CONFLICT lần 1, thành công lần 2 ⇒ gọi lại renderDiagram, erdRedraw = done", async () => {
+    existingErd("chen")
+    mocks.renderDiagram.mockRejectedValueOnce(conflict()).mockResolvedValueOnce(undefined)
+
+    const promise = projectService.setErdNotation(PROJECT, ORG, "crowsfoot", USER)
+    await vi.advanceTimersByTimeAsync(2000)
+    const result = await promise
+
+    expect(result).toEqual({ project: { _id: PROJECT, erdNotation: "crowsfoot" }, erdRedraw: "done" })
+    expect(mocks.renderDiagram).toHaveBeenCalledTimes(2)
+    // ký pháp đã được ghi trước khi vẽ lại, không phụ thuộc kết quả vẽ
+    expect(mocks.Project.findOneAndUpdate).toHaveBeenCalledWith({ _id: PROJECT, organizationId: ORG }, { erdNotation: "crowsfoot" }, { new: true })
+  })
+
+  it("ném SPINE_VERSION_CONFLICT cả 3 lần ⇒ pending, không ném lỗi ra ngoài, erdNotation vẫn lưu", async () => {
+    existingErd("chen")
+    mocks.renderDiagram.mockRejectedValue(conflict())
+
+    const promise = projectService.setErdNotation(PROJECT, ORG, "crowsfoot", USER)
+    await vi.advanceTimersByTimeAsync(5000)
+    const result = await promise
+
+    expect(result.erdRedraw).toBe("pending")
+    expect(result.project).toMatchObject({ erdNotation: "crowsfoot" })
+    expect(mocks.renderDiagram).toHaveBeenCalledTimes(3)
+    expect(console.warn).toHaveBeenCalled()
+  })
+
+  it("lỗi khác (không phải SPINE_VERSION_CONFLICT) ⇒ không thử lại, trả pending ngay", async () => {
+    existingErd("chen")
+    mocks.renderDiagram.mockRejectedValueOnce(new Error("PlantUML server lỗi"))
+
+    const result = await projectService.setErdNotation(PROJECT, ORG, "crowsfoot", USER)
+
+    expect(result.erdRedraw).toBe("pending")
+    expect(mocks.renderDiagram).toHaveBeenCalledTimes(1)
+  })
+
+  it("chọn lại ký pháp đang dùng ⇒ không vẽ lại, erdRedraw = skipped", async () => {
+    existingErd("crowsfoot")
+
+    const result = await projectService.setErdNotation(PROJECT, ORG, "crowsfoot", USER)
+
+    expect(result.erdRedraw).toBe("skipped")
+    expect(mocks.renderDiagram).not.toHaveBeenCalled()
+  })
+
+  it("dự án chưa có hình ERD ⇒ bỏ qua renderDiagram, erdRedraw = skipped", async () => {
+    existingErd("chen")
+    mocks.getSpine.mockResolvedValue({ diagrams: [{ kind: "sequence" }] })
+
+    const result = await projectService.setErdNotation(PROJECT, ORG, "crowsfoot", USER)
+
+    expect(result.erdRedraw).toBe("skipped")
+    expect(mocks.renderDiagram).not.toHaveBeenCalled()
   })
 })
