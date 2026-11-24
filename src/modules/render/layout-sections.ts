@@ -62,6 +62,7 @@ import { bindFixedTemplateSlots, isContentSlot, slotParents } from "../import/co
 import { isInstructionText, isRealText, splitInstruction, tableBodyHasRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
 import { templateWrapperIds } from "../import/template-wrappers.js"
 import { isPlaceholderText } from "../import/template-markers.js"
+import { foldText } from "../import/text-similarity.js"
 import { useCaseDisplayIds } from "./usecase-display-ids.js"
 
 /** Một mục layout (cùng hình `LayoutEntry` của `import/template-profile.model.ts`). */
@@ -878,6 +879,20 @@ export const buildLayoutSections = (
   // FLF-413: mục có heading là chỗ điền của mẫu (`3.2.1 <<Function Name 1>>`) — "nguyên văn" của nó là hướng dẫn + hình mẫu, không
   // phải nội dung: tính năng / chức năng thật lấp vào thì dựng từ Spine
   const frameSections = new Set(template.layout.filter((e) => isPlaceholderText(fileNumber(e.heading_text, e.number_label).title)).map((e) => e.section_id))
+  /**
+   * FLF-468 (lát C): file dùng tiêu đề con khung FPT ("Function trigger" / "Function description" / "Screen layout" /
+   * "Function details", hoặc bản tiếng Việt "Kích hoạt chức năng"…) cho mục chức năng này — nhận theo heading con
+   * nguyên văn đã đọc lúc import (`functionOriginals`), không theo `template.fixedTemplate` (B2 3.4.1: EduCampus là
+   * mẫu cố định nhưng mục chức năng vẫn có 4 tiêu đề con kiểu FPT).
+   */
+  const FPT_FUNCTION_HEADINGS = new Set(
+    ["Function trigger", "Function description", "Screen layout", "Function details", "Kích hoạt chức năng", "Mô tả chức năng", "Bố cục màn hình", "Chi tiết chức năng"].map(foldText)
+  )
+  const fptFunctionHeadingSections = new Set(
+    (template.functionOriginals ?? [])
+      .filter((o) => o.blocks.some((b) => b.kind === "heading" && FPT_FUNCTION_HEADINGS.has(foldText(b.text))))
+      .map((o) => o.section_id)
+  )
   const originalOf = (sectionId: string): FunctionOriginalBlock[] | null => {
     if (frameSections.has(sectionId)) return null
     const o = originals.get(sectionId)
@@ -962,7 +977,9 @@ export const buildLayoutSections = (
       ...(nonScreen ? { nonScreenFunctionIds: nonScreen } : {}),
       // FLF-361: tài liệu nhập tự do — mục chức năng dựng từ Spine theo khung FPT (Function trigger / Function description /
       // Screen layout / Function details) thay vì khung cũ không có tiêu đề con; mục tính năng không thêm dòng "Screens: …"
-      ...(!template.fixedTemplate && /^(feature|function):/.test(sectionId) ? { functionLayout: "fpt" as const } : {}),
+      // FLF-468 (lát C): mẫu cố định mà CHÍNH mục chức năng này dùng tiêu đề con khung FPT trong file ⇒ vẫn dựng theo khung đó
+      // (không rơi về nhãn "Kích hoạt:/Mô tả:" khác file, không in thẻ loại validation thô "[business]")
+      ...(/^(feature|function):/.test(sectionId) && (!template.fixedTemplate || fptFunctionHeadingSections.has(sectionId)) ? { functionLayout: "fpt" as const } : {}),
       ...(state?.status !== undefined ? { status: state.status } : {}),
       ...(state?.awaiting_reaccept !== undefined ? { awaiting_reaccept: state.awaiting_reaccept } : {})
     }

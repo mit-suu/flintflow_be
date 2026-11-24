@@ -175,4 +175,23 @@ describe("FLF-361 mục chức năng sau CR - chỉ sửa đúng phần tử đ�
     expect(json).not.toContain("after five consecutive failed login attempts and unlocks")
     expect(edited.blocks.filter((b) => b.type === "heading")).toHaveLength(4)
   })
+
+  it("FLF-468 (lát C): mẫu cố định, mục chức năng dùng tiêu đề con FPT — CR đổi trigger không sửa tại chỗ được (dựng lại cả mục) vẫn giữ khung FPT, không rơi về nhãn 'Kích hoạt:' / thẻ loại validation thô \"[business]\"", () => {
+    const fn = fnOf({ trigger: "User opens the app" }) // số đoạn trigger khác lúc import ⇒ patchFunctionOriginal trả null
+    const s: Spine = { ...createEmptySpine({ name: "FAP" }), features: [{ id: "F-01", name: "Authentication", order: 0 }] as never, functions: [fn] }
+    const template: TemplateLayout = {
+      language: "en",
+      fixedTemplate: true,
+      layout: [
+        { order: 0, heading_text: "3.2 Authentication", level: 2, section_id: "feature:F-01" },
+        { order: 1, heading_text: "3.2.1 Log In", level: 3, section_id: "function:FR-3.2.1" }
+      ] as never,
+      functionOriginals: [{ section_id: "function:FR-3.2.1", source_hash: functionSourceHash(fnOf()), field_values: before, blocks: tagged }]
+    }
+    const rendered = buildLayoutSections(s, template, [], { diagramPng: (id) => `ref:${id}` }).sections.find((x) => x.id === "function:FR-3.2.1")!
+    const json = JSON.stringify(rendered.blocks)
+    expect(json).toContain("Function trigger")
+    expect(json).not.toContain("Kích hoạt")
+    expect(json).not.toMatch(/\[business\]/)
+  })
 })
