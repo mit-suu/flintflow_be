@@ -400,6 +400,53 @@ describe("writeTemplateDocx", () => {
     })
   })
 
+  describe("FLF-468 lát A: mục của phần tử đã xoá (importedSectionIds)", () => {
+    const toc = `<w:p><w:bookmarkStart w:id="700" w:name="_Toc700"/><w:fldSimple w:instr=" TOC \\o &quot;1-3&quot; \\h "><w:r><w:t>Requirements\t1</w:t></w:r></w:fldSimple><w:bookmarkEnd w:id="700"/></w:p>`
+    const withToc = async () => {
+      const zip = await JSZip.loadAsync(await template())
+      zip.file("word/document.xml", (await zip.file("word/document.xml")!.async("string")).replace(heading("Requirements"), `${toc}${heading("Requirements").replace("<w:p>", `<w:p><w:bookmarkStart w:id="701" w:name="_Toc701"/>`).replace("</w:p>", "<w:bookmarkEnd w:id=\"701\"/></w:p>")}`))
+      return zip.generateAsync({ type: "nodebuffer" })
+    }
+
+    it("mục chức năng (function:) đã xoá ⇒ bỏ cả heading lẫn thân, gỡ bookmark TOC của heading, giữ mục khác", async () => {
+      const input = await withToc(), parsed = await parseDocument(input), doc = document()
+      const headingBlock = parsed.blocks.find((b) => b.kind === "heading" && b.text === "Requirements")!
+      const map = [{ block_id: headingBlock.block_id, section_id: "function:FN1" }]
+      // Spine hiện tại không còn section function:FN1 ⇒ doc.sections rỗng; importedSectionIds báo nó có lúc import
+      const output = await writeTemplateDocx(doc, input, map, [], { keepSource: new Set(), importedSectionIds: new Set(["function:FN1"]) })
+      const result = await parseDocument(output)
+      const xml = await (await JSZip.loadAsync(output)).file("word/document.xml")!.async("string")
+      // Heading "Requirements" và chính thân của nó (table + đoạn ngay sau nó) biến mất — chỉ còn 3 đoạn "Replace this
+      // guidance." của các mục khác (Repeated × 2, Unmapped) không bị đụng tới
+      expect(result.blocks.some((b) => b.text === "Requirements")).toBe(false)
+      expect(result.blocks.filter((b) => b.text === "Replace this guidance.")).toHaveLength(3)
+      expect(result.blocks.some((b) => b.kind === "table")).toBe(false)
+      expect(xml).not.toContain("_Toc701")
+      // Mục anh em khác (Unmapped) vẫn còn
+      expect(result.blocks.some((b) => b.text === "Unmapped")).toBe(true)
+    })
+
+    it("mục cố định của mẫu đã mất dữ liệu từ lúc import ⇒ giữ heading, thân về trống (bảng chỉ còn hàng tiêu đề)", async () => {
+      const input = await template(), parsed = await parseDocument(input), doc = document()
+      const map = [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:1" }]
+      const output = await writeTemplateDocx(doc, input, map, [], { keepSource: new Set(), importedSectionIds: new Set(["fixed:1"]) })
+      const result = await parseDocument(output)
+      expect(result.blocks.some((b) => b.text === "Requirements")).toBe(true)
+      // Chỉ đoạn thân của "Requirements" bị bỏ; 3 đoạn "Replace this guidance." của mục khác vẫn còn
+      expect(result.blocks.filter((b) => b.text === "Replace this guidance.")).toHaveLength(3)
+      expect(result.blocks.find((b) => b.kind === "table")!.rows).toEqual([["A", "B"]])
+    })
+
+    it("mục chưa từng có lúc import (không trong importedSectionIds) ⇒ giữ nguyên như trước (đường cũ)", async () => {
+      const input = await template(), parsed = await parseDocument(input), doc = document()
+      const map = [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "function:FN1" }]
+      const output = await writeTemplateDocx(doc, input, map, [], { keepSource: new Set(), importedSectionIds: new Set() })
+      const result = await parseDocument(output)
+      expect(result.blocks.some((b) => b.text === "Requirements")).toBe(true)
+      expect(result.blocks.some((b) => b.text === "Replace this guidance.")).toBe(true)
+    })
+  })
+
   describe("FLF-416 chế độ 4: sắp lại bố cục file khách (rearrange)", () => {
     it("mục FPT soạn thêm ⇒ heading mới theo style heading cùng cấp, đúng vị trí bản in; mục Ngoài phạm vi (kèm mục con) xuống cuối", async () => {
       const input = await template(), parsed = await parseDocument(input), doc = document()

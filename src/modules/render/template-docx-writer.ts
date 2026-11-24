@@ -28,6 +28,12 @@ const GROUP_OF_CUSTOM = "group:custom:"
 
 export interface SourceWriteOptions {
   keepSource?: ReadonlySet<string>
+  /**
+   * FLF-468 (lát A): id mục có section lúc import / mốc nguyên vẹn. Slot không còn section nào trong bản in hiện tại mà
+   * id của nó nằm trong tập này ⇒ CR đã xoá hẳn phần tử — mục của phần tử (`function:` / `feature:` / `custom:`) bỏ cả
+   * heading lẫn thân; mục cố định của mẫu giữ heading, thân về chữ hướng dẫn.
+   */
+  importedSectionIds?: ReadonlySet<string>
   legacyRecordCount?: number
   /**
    * FLF-378 (luồng C, C2.5): file là **mẫu** của dự án mới — hướng dẫn, ví dụ, ngữ cảnh của mẫu không lọt vào bản in: mục
@@ -195,6 +201,18 @@ export async function writeTemplateDocx(
   const skipSlot = (slot: typeof slots[number], reason: string): void => {
     console.warn(`[template-docx] Giữ nguyên mục "${slot.heading.text}" của file nền: ${reason}`)
   }
+  // FLF-468 (lát A): mục của phần tử (chức năng / tính năng / mục riêng) ⇒ xoá cả heading lẫn thân khi CR đã xoá phần
+  // tử đó. Mục cố định của mẫu không bị xoá — chỉ trống dữ liệu, giữ heading + chữ hướng dẫn.
+  const DATA_DRIVEN_SECTION = /^(feature|function|custom):/
+  let sectionsRemoved = false
+  const removeDeletedSlot = (slot: typeof slots[number]): void => {
+    if (DATA_DRIVEN_SECTION.test(slot.section_id)) {
+      for (const node of [slot.heading.element, ...slot.nodes]) node.parentNode?.removeChild(node)
+      sectionsRemoved = true
+    } else {
+      clearToGuidance(xml, slot.heading.element, slot.nodes, [], bodyPatternFor(bodyPattern, bodyStyleId))
+    }
+  }
   for (const slot of slots) {
     if (handledSlots.has(slot)) continue
     // FLF-411 #25: dự án có sẵn — mục đã đổi so với lúc import (không nguyên trạng) mà bản in mới không còn dữ liệu (xoá qua CR) ⇒
@@ -206,6 +224,10 @@ export async function writeTemplateDocx(
       continue
     }
     if (!slot.sections.some((s) => s.blocks.length || s.id !== slot.section_id)) {
+      if (!slot.sections.length && slot.section_id !== "fixed:I" && sourceOptions.importedSectionIds?.has(slot.section_id)) {
+        removeDeletedSlot(slot)
+        continue
+      }
       if (sourceOptions.stripTemplateText && slot.section_id !== "fixed:I") stripTemplateBody(slot.nodes)
       continue
     }
@@ -352,6 +374,9 @@ export async function writeTemplateDocx(
   }
   if (rearrange) await rearrangeLayout()
   else if (frameMode && (await fillTemplateFrames())) await requestFieldUpdate(pkg)
+  // FLF-468 (lát A): heading bị xoá mang theo bookmark `_Toc` của nó — mục lục field phải tính lại khi mở để không còn
+  // dòng trỏ vào mục đã mất.
+  if (sectionsRemoved && !(rearrange || frameMode)) await requestFieldUpdate(pkg)
   // Mẫu để điền: thay chữ giữ chỗ của bìa. Dự án có sẵn: bìa là của file đã viết ⇒ giữ nguyên
   if (!sourceMode) replacePlaceholders(xml, { "[Project name]": doc.projectName, "[Version]": doc.version, "[Date]": doc.generatedAt.slice(0, 10) })
   // Import-only anchors are useful while resolving slots, but untouched source
