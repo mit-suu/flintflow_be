@@ -87,8 +87,14 @@ describe("previewPayload", () => {
     expect(payload).toEqual({
       kind: "change_clarification",
       reply: "Màn hình riêng hay popup?",
-      questions: [{ question: "Chọn giao diện", options: [{ label: "Màn hình riêng" }, { label: "Popup mở từ My Grades" }] }]
+      questions: [{ question: "Màn hình riêng hay popup?", options: [{ label: "Màn hình riêng" }, { label: "Popup mở từ My Grades" }] }]
     })
+  })
+
+  it("P08 #1 (FLF-480): question là chính câu clarification, không cố định 'Chọn giao diện' khi câu hỏi không về giao diện", () => {
+    const payload = previewPayload({ ...base, ok: false, clarification: "Áp dụng từ ngày nào?", clarification_choices: ["Ngay bây giờ", "Từ học kỳ sau"] })
+    expect(payload).toMatchObject({ questions: [{ question: "Áp dụng từ ngày nào?" }] })
+    expect(payload.questions).not.toEqual(expect.arrayContaining([expect.objectContaining({ question: "Chọn giao diện" })]))
   })
 
   it("FLF-298: notes (vd use case mới chưa có màn hình) nối vào câu trả lời", () => {

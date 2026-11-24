@@ -194,8 +194,10 @@ export const previewPayload = (
         ...(preview.ok && preview.preview_id ? { preview_id: preview.preview_id, branch: preview.branch ?? null, change_count: preview.changes.length } : {}),
         ...(opts.crPrefill ? { cr_prefill: opts.crPrefill } : {}),
         // FLF-311: câu có lựa chọn (màn riêng / popup) ⇒ FE hiện thẻ chọn nhanh; chọn xong đi tiếp lệnh sửa
+        // P08 #1 (FLF-480): trước đây `question` luôn cố định "Chọn giao diện" / "Choose the UI" dù câu hỏi không
+        // về giao diện — đổi thành chính câu `preview.clarification` (đã đúng ngôn ngữ từ change.service).
         ...(preview.clarification_choices?.length
-          ? { questions: [{ question: byLanguage(language, { vi: "Chọn giao diện", en: "Choose the UI" }), options: preview.clarification_choices.map((label) => ({ label })) }] }
+          ? { questions: [{ question: preview.clarification, options: preview.clarification_choices.map((label) => ({ label })) }] }
           : {})
       }
     : {
