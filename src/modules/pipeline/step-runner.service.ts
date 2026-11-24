@@ -965,12 +965,36 @@ const BATCHED_TEMPLATES: ReadonlySet<string> = new Set(["S-5.2", "S-5.4"])
  * FLF-433 (FLF-413 #7): step cố định đọc MỌI function rồi sinh một dòng cho từng luồng bất thường — S-7.3 Thông báo ứng dụng.
  * ~30 function nhiều luồng bất thường (kèm bản dịch) vượt trần đầu ra cả 3 lượt, kể cả khi lượt thử lại gấp đôi trần ⇒ chia lô
  * theo function như vòng S-5. Lô sau đọc lại `messages` mới nhất để dùng lại mã đã có, không sinh trùng.
+ *
+ * FLF-470 (FLF-413 #7, phần còn lại): FLF-433 chỉ chia lô S-7.3. S-7.1 Quy tắc nghiệp vụ đọc
+ * `functions:id,name,validations` của MỌI function — dự án ~55 function, nhiều validation kind=business,
+ * kèm bản dịch thì vượt cả trần thử lại gấp đôi (6144*2 bản dịch + 4096 suy nghĩ = 16384; thử lại không
+ * bản dịch gấp đôi = 20480). Đo thật trên log: dự án FLF-441 ~55 function ≈ 17k token đầu ra. Chia lô
+ * như S-7.3 nhưng chỉ đưa function CÓ NGUỒN cho bước vào lô (bớt lô, bớt token) — xem `fixedBatchSourceFn`.
  */
-const FIXED_BATCHED_TEMPLATES: ReadonlySet<string> = new Set(["S-7.3"])
-/** Cỡ lô của step cố định chia lô: mỗi function vài dòng ngắn nên lô lớn hơn vòng S-5. */
-export const FIXED_FUNCTION_BATCH_SIZE = 10
+const FIXED_BATCHED_TEMPLATES: ReadonlySet<string> = new Set(["S-7.1", "S-7.3"])
+/** Cỡ lô gốc của từng step cố định chia lô (trước khi co giãn theo `MAX_FIXED_BATCHES`): mỗi function
+ * vài dòng ngắn nên lô lớn hơn vòng S-5. */
+export const FIXED_FUNCTION_BATCH_SIZE: Readonly<Record<string, number>> = { "S-7.1": 10, "S-7.3": 10 }
+/**
+ * FLF-470 "Cần chốt" 1 (đề xuất mặc định đã chọn): trần 8 lượt gọi/step (`CALLS_LIMIT`) không đổi, mỗi lô
+ * vẫn giữ một lượt (`:1115-1116` cũ) — chừa 2 lượt cho thử lại/sửa ở cổng. Dự án rất lớn (nhiều function
+ * có nguồn) thì TĂNG cỡ lô để số lô không vượt `MAX_FIXED_BATCHES`, không bỏ luật trần. Lô to hơn lại dễ
+ * bị cắt hơn — quá khoảng 120 function có nguồn thì vẫn có thể cắt, đo lại khi gặp.
+ */
+export const MAX_FIXED_BATCHES = 6
 /** Step cố định chia lô theo function: lô sau phải đọc lại projection (dữ liệu lô trước vừa ghi). */
 export const isFixedBatchedStep = (stepId: string): boolean => FIXED_BATCHED_TEMPLATES.has(getStep(stepId).template_id)
+
+/**
+ * Function "có nguồn" cho step cố định chia lô: chỉ đưa vào lô những function thực sự sinh ra nội dung ở
+ * bước đó — bớt lô, bớt token so với đưa nguyên projection (FLF-470 Hướng sửa BE #2).
+ * S-7.1: có ít nhất một `validations[kind=business]`. S-7.3: có `abnormal[]` khác rỗng.
+ */
+const fixedBatchSourceFn: Readonly<Record<string, (f: Spine["functions"][number]) => boolean>> = {
+  "S-7.1": (f) => f.validations.some((v) => v.kind === "business"),
+  "S-7.3": (f) => f.abnormal.length > 0
+}
 
 const isLoopBookkeeping = (stepId: string): boolean => LOOP_BOOKKEEPING_TEMPLATES.has(getStep(stepId).template_id)
 
@@ -1036,15 +1060,26 @@ const functionsOfLoop = (spine: Spine, loop: string): string[] =>
     .map((f) => f.id)
 
 /**
- * Chia function của vòng thành các lô ≤ `FUNCTION_BATCH_SIZE`. Step không chia lô (hoặc ít function)
- * trả một lô duy nhất `[]` — nghĩa là "dùng nguyên projection của step, không lọc".
+ * Chia function của vòng (hoặc function có nguồn, với step cố định) thành các lô. Step không chia lô
+ * (hoặc ít function) trả một lô duy nhất `[]` — nghĩa là "dùng nguyên projection của step, không lọc".
+ *
+ * FLF-470 #1/#2/#3: step cố định (S-7.1/S-7.3) chỉ lấy function có nguồn cho đúng bước đó
+ * (`fixedBatchSourceFn`); cỡ lô co giãn theo số function để giữ số lô ≤ `MAX_FIXED_BATCHES` (trần 8
+ * lượt/step không đổi) — lô to hơn cỡ gốc khi dự án lớn, cỡ gốc khi dự án nhỏ.
  */
 export const functionBatches = (spine: Spine, stepId: string): string[][] => {
   const step = getStep(stepId)
   const fixed = FIXED_BATCHED_TEMPLATES.has(step.template_id)
   if (!fixed && (!BATCHED_TEMPLATES.has(step.template_id) || step.loop === null)) return [[]]
-  const ids = fixed ? [...spine.functions].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map((f) => f.id) : functionsOfLoop(spine, step.loop as string)
-  const size = fixed ? FIXED_FUNCTION_BATCH_SIZE : FUNCTION_BATCH_SIZE
+  const sourceFilter = fixed ? fixedBatchSourceFn[step.template_id] : undefined
+  const ids = fixed
+    ? [...spine.functions]
+        .filter((f) => !sourceFilter || sourceFilter(f))
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+        .map((f) => f.id)
+    : functionsOfLoop(spine, step.loop as string)
+  const baseSize = fixed ? FIXED_FUNCTION_BATCH_SIZE[step.template_id] ?? FUNCTION_BATCH_SIZE : FUNCTION_BATCH_SIZE
+  const size = fixed ? Math.max(baseSize, Math.ceil(ids.length / MAX_FIXED_BATCHES)) : baseSize
   if (ids.length <= size) return [[]]
 
   const batches: string[][] = []
@@ -1193,6 +1228,55 @@ export const runDraftPhase = async (
     }
     throw err
   }
+}
+
+/** Kết quả gộp của mọi lô — khớp phần dùng được từ `DraftPhaseResult` của từng lô. */
+export interface BatchedDraftResult {
+  spineVersion: number
+  /** Có lô nào ghi được op không (L11b: gate báo "AI không soạn được gì" khi không). */
+  wroteOps: boolean
+  summary: ChangeSummary[]
+  notes?: string
+}
+
+/**
+ * Chạy `functionBatches(spine, stepId)` lô theo lô qua `runOne` (gọi `runDraftPhase`), gộp kết quả.
+ * Dùng chung cho vòng lặp lô của `/run` (T18 — S-5.2/S-5.4, S-7.1, S-7.3) và `regenerate` ở cổng
+ * (FLF-470 #6: trước chỉ `/run` chia lô, `gate.service` gọi `runDraftPhase` một lượt nên S-7.1/S-7.3 của
+ * dự án lớn vẫn bị cắt token khi "Soạn lại"). Step không chia lô thì `functionBatches` trả `[[]]`, vòng
+ * chạy đúng một lần với `ctx`/`spine` ban đầu — hệt gọi `runDraftPhase` trực tiếp.
+ *
+ * Mỗi lô đọc lại Spine mới nhất trước khi chạy (lô trước vừa ghi); lô sau của step cố định
+ * (`isFixedBatchedStep`) còn dựng lại `ctx` từ Spine mới (đọc lại `messages`/`business_rules` lô trước
+ * ghi — `:2053` cũ). `runOne` nhận `ctx`/`spine` của đúng lô đó và tự quyết định cách gọi `runDraftPhase`
+ * (tracker, callKind, extra…) — hàm này chỉ lo phần chia lô và gộp kết quả.
+ */
+export const runBatchedDraft = async (
+  projectId: string,
+  stepId: string,
+  ctx: StepContext,
+  spine: Spine,
+  sessionId: string | null | undefined,
+  runOne: (batchCtx: StepContext, batchSpine: Spine, batchInfo?: { i: number; n: number }) => Promise<DraftPhaseResult>
+): Promise<BatchedDraftResult> => {
+  const batches = functionBatches(spine, stepId)
+  let spineVersion = spine.spine_version
+  let wroteOps = false
+  const summary: ChangeSummary[] = []
+  let notes: string | undefined
+  for (const [index, batch] of batches.entries()) {
+    const current = await refresh(projectId)
+    spine = current.spine
+    spineVersion = current.spineVersion
+    const batchInfo = batches.length > 1 ? { i: index + 1, n: batches.length } : undefined
+    const baseCtx = index > 0 && isFixedBatchedStep(stepId) ? await buildStepContext(projectId, stepId, { sessionId: sessionId ?? null }) : ctx
+    const draftPhase = await runOne(batchContext(baseCtx, batch), spine, batchInfo)
+    spineVersion = draftPhase.spineVersion
+    if (draftPhase.applied) wroteOps = true
+    summary.push(...(draftPhase.summary ?? []))
+    if (draftPhase.notes) notes = draftPhase.notes
+  }
+  return { spineVersion, wroteOps, summary, ...(notes ? { notes } : {}) }
 }
 
 /**
@@ -2032,38 +2116,32 @@ export const runStep = async (
         ;({ spine, spineVersion } = await refresh(projectId))
       }
 
-      // T18 — S-5.2/S-5.4: màn nhiều function chia thành nhiều lượt Draft ≤ 6 function. Mỗi lượt vẫn
-      // tự kiểm trần 8 lượt gọi/step trong `runDraftPhase`; màn quá lớn sẽ dừng ở CALL_LIMIT và user
-      // chốt phần đã có ở gate (không có ngoại lệ trần cho vòng lặp).
-      const batches = functionBatches(spine, stepId)
-      for (const [index, batch] of batches.entries()) {
-        const current = await refresh(projectId)
-        spine = current.spine
-        spineVersion = current.spineVersion
-        const batchInfo = batches.length > 1 ? { i: index + 1, n: batches.length } : undefined
+      // T18 — S-5.2/S-5.4/S-7.1/S-7.3: màn/step nhiều function chia thành nhiều lượt Draft. Mỗi lượt vẫn
+      // tự kiểm trần 8 lượt gọi/step trong `runDraftPhase`; quá lớn sẽ dừng ở CALL_LIMIT và user chốt
+      // phần đã có ở gate (không có ngoại lệ trần cho vòng lặp). FLF-470 #6: vòng lặp lô dùng chung với
+      // `regenerate` ở cổng qua `runBatchedDraft` (`gate.service.ts`).
+      // Mở lại bước đã chốt kèm lời nhắn = sửa đúng chỗ được nhắn (như "Tôi muốn sửa" ở cổng). Gọi `draft` thì skill
+      // dựng lại từ đầu: S-4.1 mở lại để gắn use case thêm lại feature/màn đã có ⇒ trùng mã cả 3 lượt, NEEDS_USER_INPUT.
+      const revise = reopenedAccepted && userMessage !== undefined
+      const batched = await runBatchedDraft(projectId, stepId, ctx, spine, sessionId, (batchCtx, batchSpine, batchInfo) => {
         tracker.stage("draft", {
           detail_vi: batchInfo ? `AI đang soạn nội dung · lô ${batchInfo.i}/${batchInfo.n}` : "AI đang soạn nội dung",
           ...(batchInfo ? { batch: batchInfo } : {}),
           section_ids: ownedSections()
         })
-        // Mở lại bước đã chốt kèm lời nhắn = sửa đúng chỗ được nhắn (như "Tôi muốn sửa" ở cổng). Gọi `draft` thì skill
-        // dựng lại từ đầu: S-4.1 mở lại để gắn use case thêm lại feature/màn đã có ⇒ trùng mã cả 3 lượt, NEEDS_USER_INPUT.
-        const revise = reopenedAccepted && userMessage !== undefined
-        // FLF-433: S-7.3 lô sau đọc lại projection — `messages` lô trước vừa ghi, để dùng lại mã thay vì sinh trùng
-        const baseCtx = index > 0 && isFixedBatchedStep(stepId) ? await buildStepContext(projectId, stepId, { sessionId }) : ctx
-        const draftPhase = await tracker.beat("draft", () =>
-          runDraftPhase(projectId, stepId, batchContext(baseCtx, batch), spine, userId, revise ? "revision" : "draft", emit, d, {
+        return tracker.beat("draft", () =>
+          runDraftPhase(projectId, stepId, batchCtx, batchSpine, userId, revise ? "revision" : "draft", emit, d, {
             answers: answersText,
             userDecided,
             replyLanguage,
             ...(revise ? { revisionRequest: userMessage } : {})
           })
         )
-        spineVersion = draftPhase.spineVersion
-        if (draftPhase.applied) wroteOps = true
-        stepSummary.push(...(draftPhase.summary ?? []))
-        if (draftPhase.notes) gateNotes = draftPhase.notes
-      }
+      })
+      spineVersion = batched.spineVersion
+      if (batched.wroteOps) wroteOps = true
+      stepSummary.push(...batched.summary)
+      if (batched.notes) gateNotes = batched.notes
     }
 
     const sectionsAtReview = ownedSections()
