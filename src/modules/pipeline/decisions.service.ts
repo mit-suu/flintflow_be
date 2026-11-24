@@ -20,6 +20,7 @@ import { allocateId } from "../spine/id-allocator.js"
 import type { Decision, Spine } from "../spine/spine.types.js"
 import type { Op } from "../spine/op.types.js"
 import type { QuestionOption } from "../../shared/ai/response-parser.js"
+import { RECOMMENDED_SUFFIX } from "../../shared/ai/option-analysis.js"
 
 /**
  * Khoá chủ đề chuẩn hoá. Model được dùng khoá tự do, nhưng mọi khoá quen thuộc phải rơi về đúng một tên —
@@ -101,6 +102,8 @@ export interface AskedQuestion {
   topic_key?: string
   /** Model khẳng định chủ đề này cần hỏi lại (dữ liệu mới mâu thuẫn) — kèm lý do trong `conflict`. */
   conflict?: string
+  /** FLF-449: lý do khuyến nghị — đi tiếp nguyên vẹn qua bộ lọc sổ quyết định. */
+  recommendation_reason?: string
 }
 
 export interface FilteredQuestions {
@@ -220,8 +223,11 @@ export const SYSTEM_NAME_STEP = "B-2.3"
 export const askableFields = (templateId: string, fields: readonly string[]): string[] =>
   templateId === SYSTEM_NAME_STEP ? [...fields] : fields.filter((field) => field !== SYSTEM_NAME_FIELD)
 
-/** Đuôi đánh dấu phương án khuyến nghị trên nhãn lựa chọn (FLF-220). */
-export const RECOMMENDED_SUFFIX = /\s*\((khuyến nghị|recommended)\)\s*$/i
+/**
+ * Đuôi đánh dấu phương án khuyến nghị trên nhãn lựa chọn (FLF-220). FLF-449: định nghĩa chuyển sang `option-analysis.ts`
+ * (kiểu phương án dùng chung); đuôi vẫn giữ song song với cờ `recommended` để đọc run-state cũ và các script đo.
+ */
+export { RECOMMENDED_SUFFIX }
 
 /** Đuôi rỗng nghĩa trong tên hệ thống — "Minh An Clinic Appointment System" chỉ dài thêm, không rõ thêm. */
 const FILLER_NAME_SUFFIX = /\s+(system|app|application|platform|software|solution|tool|portal)$/i

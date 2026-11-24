@@ -280,3 +280,64 @@ describe("elicitSchema - inline (FLF-232)", () => {
     expect(inlines).toEqual([true, undefined, undefined, undefined])
   })
 })
+
+describe("FLF-449: thẻ phương án qua shapeQuestions", () => {
+  const card = (extra: Partial<ModelQuestion> = {}) =>
+    q("Kênh nhắc lịch?", {
+      topic_key: "reminder_channel",
+      recommendation_reason: "Bạn nói bệnh nhân lớn tuổi ít dùng ứng dụng",
+      options: [
+        { label: "SMS (Khuyến nghị)", recommended: true, pros: ["Ai cũng nhận được"], cons: ["Tốn phí mỗi tin"], risks: ["Giả định số điện thoại đúng"] },
+        { label: "Zalo", pros: ["Miễn phí"] }
+      ],
+      ...extra
+    })
+
+  it("giữ ưu / nhược / rủi ro, cờ và lý do khuyến nghị tới hợp đồng gửi FE", () => {
+    const { questions, asked } = shapeQuestions([card()])
+    expect(questions[0].recommendation_reason).toBe("Bạn nói bệnh nhân lớn tuổi ít dùng ứng dụng")
+    expect(questions[0].options).toEqual(card().options)
+    // shape lại câu đang chờ (run-state) không làm rơi gì
+    expect(shapeQuestions(asked).questions).toEqual(questions)
+  })
+
+  it("phương án được khuyến nghị bị lọc ⇒ lý do không còn trỏ vào đâu, bỏ", () => {
+    const named = q("Tên hệ thống?", {
+      topic_key: "system_name",
+      recommendation_reason: "Gần với tên phòng khám",
+      options: [{ label: "Minh An System (Khuyến nghị)", recommended: true }, { label: "CarePoint" }, { label: "MediBook" }]
+    })
+    const { questions } = shapeQuestions([named])
+    expect(questions[0].options?.map((o) => o.label)).toEqual(["CarePoint", "MediBook"])
+    expect(questions[0].recommendation_reason).toBeUndefined()
+  })
+
+  it("noIdeaYet ⇒ bỏ cờ, đuôi và lý do; ghi log thay vì bỏ im", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {})
+    const { questions } = shapeQuestions([card()], { noIdeaYet: true })
+    expect(questions[0].options).toEqual([
+      { label: "SMS", pros: ["Ai cũng nhận được"], cons: ["Tốn phí mỗi tin"], risks: ["Giả định số điện thoại đúng"] },
+      { label: "Zalo", pros: ["Miễn phí"] }
+    ])
+    expect(questions[0].recommendation_reason).toBeUndefined()
+    expect(info).toHaveBeenCalledWith(expect.stringContaining("recommendation_dropped scope=no_idea_yet reason=no_idea_yet count=1 topics=reminder_channel"))
+    info.mockRestore()
+  })
+
+  it("run-state cũ: chỉ có đuôi, không cờ, không lý do ⇒ giữ nguyên như trước", () => {
+    const { questions } = shapeQuestions([q("Uptime?", { options: opts("99.9% (Khuyến nghị)", "99%") })])
+    expect(questions[0].options).toEqual(opts("99.9% (Khuyến nghị)", "99%"))
+    expect(questions[0].recommendation_reason).toBeUndefined()
+  })
+
+  it("chat Discovery giữ trường mới", () => {
+    const [chat] = shapeChatQuestions([{ question: "Nền tảng?", recommendation_reason: "r", options: [{ label: "Web (Khuyến nghị)", pros: ["Không cần cài"] }, "Mobile"] }])
+    expect(chat).toEqual({ question: "Nền tảng?", options: [{ label: "Web (Khuyến nghị)", pros: ["Không cần cài"], recommended: true }, { label: "Mobile" }], multiple: false, recommendation_reason: "r" })
+  })
+
+  it("elicitSchema → shapeQuestions: tin cũ chỉ có đuôi (Khuyến nghị) vẫn đọc được thành thẻ", () => {
+    const parsed = elicitSchema.parse({ reply: "Ok", questions: [{ question: "Uptime?", topic_key: "uptime", options: ["99.9% (Khuyến nghị)", "99%"] }] })
+    const { questions } = shapeQuestions(parsed.questions)
+    expect(questions[0].options?.map((o) => o.label)).toEqual(["99.9%", "99%"])
+  })
+})

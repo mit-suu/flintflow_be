@@ -1,24 +1,22 @@
 import { z } from "zod"
 import { ActionType, AiActionError } from "./ai-action.types.js"
+import { logRecommendationDropped, modelOptionAnalysisSchema, normalizeRecommendation, optionalModelText, type OptionAnalysis } from "./option-analysis.js"
 
 // Schemas per ActionType
-/** Lựa chọn của một câu hỏi, đã chuẩn hoá — cùng hình dạng `options` trong hợp đồng `Question`. */
-export interface QuestionOption {
-  label: string
-  description?: string
-  preview?: string
-}
+/**
+ * Lựa chọn của một câu hỏi, đã chuẩn hoá — cùng hình dạng `options` trong hợp đồng `Question`. FLF-449 N1: là
+ * `OptionAnalysis` dùng chung (thêm ưu / nhược / rủi ro và cờ khuyến nghị).
+ */
+export type QuestionOption = OptionAnalysis
 
 /** Chuỗi model bỏ trống hoặc để `null` coi như không có — một field thừa không được làm hỏng cả lượt hỏi. */
 const optionalText = z.string().nullish().transform((v) => (v == null || v.trim() === "" ? undefined : v))
 
-/** Model mới trả `{label, description?, preview?}`; prompt cũ (và tin nhắn cũ) trả chuỗi trơn. */
-const modelOptionSchema = z.union([
-  z.string().transform((label): QuestionOption => ({ label })),
-  z.object({ label: z.string(), description: optionalText, preview: optionalText }).transform(
-    ({ label, description, preview }): QuestionOption => ({ label, ...(description ? { description } : {}), ...(preview ? { preview } : {}) })
-  )
-])
+/**
+ * Model mới trả `{label, description?, preview?, pros?, cons?, risks?, recommended?}`; prompt cũ (và tin nhắn cũ) trả chuỗi
+ * trơn. Trước FLF-449 schema này bỏ mọi trường lạ, nên ưu / nhược / rủi ro phải khai ở đây mới tới được FE.
+ */
+const modelOptionSchema = modelOptionAnalysisSchema
 
 const questionFields = {
   question: z.string(),
@@ -26,20 +24,45 @@ const questionFields = {
   options: z.array(modelOptionSchema).optional(),
   /** Dạng cũ trước FLF-220 — vẫn nhận, map sang `options`. */
   suggestedAnswers: z.array(z.string()).optional(),
-  multiple: z.boolean().optional().default(false)
+  multiple: z.boolean().optional().default(false),
+  /** FLF-449 (03 #3): vì sao khuyến nghị phương án có cờ `recommended`, trỏ về điều cụ thể của dự án. */
+  recommendation_reason: optionalModelText
 }
 
 /** Gộp `suggestedAnswers` cũ vào `options`; `options` mới thắng khi có cả hai. */
-const toOptions = <T extends { options?: QuestionOption[]; suggestedAnswers?: string[] }>({ options, suggestedAnswers, ...rest }: T) => ({
+const toOptions = <T extends { options?: QuestionOption[]; suggestedAnswers?: string[]; recommendation_reason?: string }>({
+  options,
+  suggestedAnswers,
+  recommendation_reason,
+  ...rest
+}: T) => ({
   ...rest,
-  options: options ?? (suggestedAnswers ?? []).map((label): QuestionOption => ({ label }))
+  options: options ?? (suggestedAnswers ?? []).map((label): QuestionOption => ({ label })),
+  ...(recommendation_reason ? { recommendation_reason } : {})
 })
+
+/**
+ * FLF-449 (03 #3): luật khuyến nghị cho câu hỏi của vòng Elicit — prompt `elicit-loop` đòi lý do. Khuyến nghị thiếu
+ * `recommendation_reason` ⇒ bỏ cờ + đuôi, giữ thẻ, ghi log. Chat tự do (`chat.md`) chưa đòi lý do (lát 2) nên không áp.
+ */
+const enforceRecommendation = <T extends { question: string; topic_key?: string; options: QuestionOption[]; recommendation_reason?: string }>({
+  recommendation_reason,
+  ...question
+}: T) => {
+  const normalized = normalizeRecommendation(question.options, recommendation_reason, question.question)
+  if (normalized.dropped) logRecommendationDropped("elicit", normalized.dropped, [question.topic_key ?? "(không có chủ đề)"])
+  return {
+    ...question,
+    options: normalized.options,
+    ...(normalized.recommendation_reason ? { recommendation_reason: normalized.recommendation_reason } : {})
+  }
+}
 
 export const chatQuestionSchema = z.object(questionFields).transform(toOptions)
 
 export const chatQuestionItemSchema = z.union([
   chatQuestionSchema,
-  z.string().transform((q) => ({ question: q, header: undefined as string | undefined, options: [] as QuestionOption[], multiple: false }))
+  z.string().transform((q) => ({ question: q, header: undefined as string | undefined, options: [] as QuestionOption[], multiple: false}))
 ])
 
 export const chatSchema = z.object({
@@ -162,8 +185,9 @@ export const elicitQuestionSchema = z.union([
       /** FLF-232: câu mở đã hỏi ngay trong `reply` — FE không vẽ lại thành thẻ; server vẫn theo dõi qua `topic_key`. */
       inline: z.boolean().nullish().transform((v) => v ?? undefined)
     })
-    .transform(toOptions),
-  z.string().transform((q) => ({ question: q, header: undefined as string | undefined, options: [] as QuestionOption[], multiple: false }))
+    .transform(toOptions)
+    .transform(enforceRecommendation),
+  z.string().transform((q) => ({ question: q, header: undefined as string | undefined, options: [] as QuestionOption[], multiple: false}))
 ])
 
 const elicitBaseSchema = z.object({

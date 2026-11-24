@@ -27,15 +27,16 @@ what its three steps come out as; when a row and the ask test disagree, the ask 
 
 ## Option rules
 
-- **Recommend only when you are sure**: a clear basis in the uploaded documents, the Brief (projection,
-  addendum, the user's own words), the SRS content or a settled decision (or to keep a settled value).
-  A recommendation always says in `description` **why** and **what it rests on** ("vì bạn đã nói…",
-  "theo biên bản họp…"). Not sure ⇒ no recommendation, options side by side in neutral order - never a
+- **Recommend only when sure** - the projection, addendum, ledger, documents, the SRS content or the user's own
+  words clearly point to one option (or it keeps a settled value) - and say why in the question's
+  `recommendation_reason`, naming that project fact ("vì bạn đã nói…", "theo biên bản họp…"); without it the server
+  drops the recommendation. Not sure ⇒ no recommendation, options side by side in neutral order - never a
   recommendation from general practice alone. Fresh project with no idea told yet ⇒ no recommendation -
   "Đơn giản (Khuyến nghị)" for complexity before the user described anything is a guess that nudges the user.
 - Recommendation first, `label` ends with ` (Khuyến nghị)` (English project: ` (Recommended)`). The
   suffix is display-only: the server strips it before writing `decisions[]`.
-- `description`: one short clause on what the user gains or gives up.
+- `description`: one short clause on what the user gains or gives up; `pros` / `cons` / `risks`: 1–2 short
+  items each about this project, in the user's words.
 - `preview`: monospace ASCII, only to compare screen layouts or table structures.
 - Never add "Other"/"Khác"/"Tự nhập" - the UI always offers it.
 
