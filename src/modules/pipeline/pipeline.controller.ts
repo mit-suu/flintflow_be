@@ -20,6 +20,7 @@ import mongoose from "mongoose"
 import { User } from "../user/user.model.js"
 import { z } from "zod"
 import * as spineRepository from "../spine/spine.repository.js"
+import { assertDraftUnlocked, assertProjectUnlocked } from "../spine/draft-lock.js"
 import * as meter from "./meter.service.js"
 import { getStep, nextStep, orderedSteps } from "./step-registry.js"
 import type { Spine, SpineRecord } from "../spine/spine.types.js"
@@ -233,6 +234,8 @@ export const runStepController = catchAsync(async (req: Request, res: Response) 
 
   // base_version lệch ngay từ đầu ⇒ SPINE_VERSION_CONFLICT trước khi mở SSE (guard-clause).
   const record = await spineRepository.get(projectId)
+  // Chờ Lead duyệt baseline / gói ⇒ bản nháp khoá, không chạy step (business-flow §2, C-7)
+  assertDraftUnlocked(record)
   if (record && record.spine_version !== body.base_version) {
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", spineRepository.SPINE_VERSION_CONFLICT)
   }
@@ -275,6 +278,7 @@ export const runPhaseController = catchAsync(async (req: Request, res: Response)
   const stream = sseStream(res, req)
 
   const record = await spineRepository.get(projectId)
+  assertDraftUnlocked(record)
   if (record && record.spine_version !== body.base_version) {
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", spineRepository.SPINE_VERSION_CONFLICT)
   }
@@ -314,6 +318,7 @@ export const answerStep = catchAsync(async (req: Request, res: Response) => {
   // FLF-221: `message` = chat tự do khi đang chờ — AI đọc rồi chỉ chốt câu được trả lời đúng ý (tính credit bằng `userId`)
   const payload = { answers: body.answers, ...(body.message === undefined ? {} : { message: body.message }) }
   // BF §3.2: câu hỏi AI đang chờ **treo ở người khởi động lượt** — người khác không trả lời hộ (họ không có bối cảnh)
+  await assertProjectUnlocked(projectId)
   const waiting = await getRunState(projectId, stepId)
   if (waiting?.status === "waiting_answer" && waiting.by && waiting.by !== userId) {
     const who = (await runnerName(waiting.by)) ?? "người khác"
@@ -339,6 +344,8 @@ export const gateStep = catchAsync(async (req: Request, res: Response) => {
   if (signsBaseline && req.orgContext?.role !== "lead") {
     throw new ApiError(403, "Chỉ Lead ký được baseline. Hãy nộp baseline để Lead duyệt.", "ORG_ROLE_FORBIDDEN")
   }
+  // Lead ký baseline (S-9.5) là chính việc duyệt bản đang chờ ⇒ không khoá; mọi hành động cổng khác thì khoá
+  if (!signsBaseline) await assertProjectUnlocked(projectId)
   await requirePipelineSession(projectId, body.session_id)
 
   const input: GateInput = {
@@ -505,6 +512,7 @@ export const cancelStepRun = catchAsync(async (req: Request, res: Response) => {
 export const resumeProjectController = catchAsync(async (req: Request, res: Response) => {
   const { projectId, userId, mode } = await authorize(req)
   assertNotMode1(mode, "steps") // mode 1 v3: Flow 1 không có step (BPMN)
+  await assertProjectUnlocked(projectId)
   const result = await resumeProject(projectId, userId)
   return sendSuccess(res, 200, result)
 })

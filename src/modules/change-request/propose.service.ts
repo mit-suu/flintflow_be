@@ -38,6 +38,7 @@ import { proposeUseCaseBatch } from "./add-use-case.service.js"
 import { elementText } from "./location-display.js"
 import { directHit } from "./word-diff.js"
 import { crDocumentLanguage, documentLanguageText } from "./cr-language.js"
+import { loadOutOfScopeSections, outOfScopeKind, type OutOfScopeKind } from "./out-of-scope.js"
 
 /**
  * Số vị trí gửi trong một lượt C-4. Trước là 12: prompt kèm giá trị JSON của từng phần tử (tới 2500 ký tự) và câu
@@ -125,7 +126,15 @@ const existingIdsText = (spine: Spine, path: string): string => {
   return ids.length ? `\n  Ids already used (never reuse one): ${truncate(ids.join(", "), 1500)}` : ""
 }
 
-type PromptLocation = Pick<IChangeLocation, "location_id" | "path" | "section_id" | "found_by" | "entity_paths" | "verify">
+type PromptLocation = Pick<IChangeLocation, "location_id" | "path" | "section_id" | "found_by" | "entity_paths" | "verify"> & { kept_intent?: boolean }
+
+/** Ghi chú cho model về vị trí ngoài phạm vi (mục riêng của file mà FlintFlow không soạn): chỉ sửa chữ, hoặc chỉ ghi chú. */
+const outOfScopeNote = (kind: OutOfScopeKind | null): string =>
+  kind === "text"
+    ? "\n  OUT OF SCOPE section (kept from the uploaded file, no rules apply): only a text edit of the existing `blocks` is allowed - never add elements, never restructure."
+    : kind === "comment"
+      ? "\n  OUT OF SCOPE section and EMPTY: conclude `comment` only (what the reviewer should check) - never `edit`, never add content."
+      : ""
 
 /** Op của bản xem trước đính kèm CR chạm vào vị trí này (phần tử, hoặc thêm vào đúng mảng của vị trí "mục trống"). */
 export const seedOpsFor = (seedOps: readonly Record<string, unknown>[], path: string): Record<string, unknown>[] =>
@@ -135,7 +144,7 @@ export const seedOpsFor = (seedOps: readonly Record<string, unknown>[], path: st
   })
 
 /** Mô tả vị trí trong prompt C-4: `[L001] path (section; tìm thấy vì…)` rồi giá trị hiện tại (JSON, thụt lề). */
-export const locationPromptText = (spine: Spine, l: PromptLocation, seedOps: readonly Record<string, unknown>[] = []): string => {
+export const locationPromptText = (spine: Spine, l: PromptLocation, seedOps: readonly Record<string, unknown>[] = [], outOfScope: OutOfScopeKind | null = null): string => {
   const why = `found by ${l.found_by.join(", ")}${l.entity_paths.length ? `; about ${l.entity_paths.join(", ")}` : ""}`
   const failed = l.verify && !l.verify.code_ok ? `\n  Previous proposal failed checks: ${l.verify.violations.map((v) => v.message).join("; ")}` : ""
   const section = l.section_id === "misc" ? "-" : titleOfSection(spine, l.section_id)
@@ -151,7 +160,9 @@ export const locationPromptText = (spine: Spine, l: PromptLocation, seedOps: rea
   // Mode 1 v3: op người yêu cầu đã xem trước cho đúng vị trí này — gợi ý, AI vẫn tự kết luận
   const mine = seedOpsFor(seedOps, l.path)
   const suggested = mine.length ? `\n  Requester's previewed ops for this location (suggestion): ${JSON.stringify(mine)}` : ""
-  return `[${l.location_id}] ${l.path} (section: ${section}; ${why})\n  ${value}${how}${suggested}${failed}`
+  // C-4: BA đã chọn "Vẫn làm" sau cảnh báo ⇒ soạn theo yêu cầu, không cảnh báo lại
+  const proceed = l.kept_intent ? "\n  The requester read your warning for this location and chose to proceed: draft the edit as asked, never warn again here." : ""
+  return `[${l.location_id}] ${l.path} (section: ${section}; ${why})\n  ${value}${how}${suggested}${proceed}${outOfScopeNote(outOfScope)}${failed}`
 }
 
 /**
@@ -243,6 +254,65 @@ export const matchProposals = <L extends { location_id: string; path: string }>(
   return matched
 }
 
+/** Chữ hiện cho người dùng không có dấu gạch dài (quy ước chữ UI): model lỡ viết thì đổi thành gạch nối. Không đụng giá trị trong `spine_ops`. */
+const plain = (text: string): string => text.replace(/\s*—\s*/g, " - ")
+
+export const plainProposal = (out: ProposalOut): ProposalOut => ({
+  ...out,
+  reason: plain(out.reason),
+  ...(out.comment_text !== undefined ? { comment_text: plain(out.comment_text) } : {}),
+  assumptions: out.assumptions.map(plain),
+  ...(out.warning ? { warning: { text: plain(out.warning.text), reason: plain(out.warning.reason) } } : {})
+})
+
+/**
+ * Ghi kết quả C-4 của một vị trí. Có `warning` mà BA chưa chọn "Vẫn làm" ⇒ chỉ cảnh báo (kết luận `comment`, chưa soạn op)
+ * để BA quyết; đã `kept_intent` thì bỏ qua cảnh báo model trả. Đề xuất mới ⇒ "giữ theo ý mình" cũ hết hiệu lực (gắn với
+ * đúng đề xuất lúc giữ).
+ */
+export const applyProposal = (loc: IChangeLocation, spine: Spine, rawOut: ProposalOut): void => {
+  const out = plainProposal(rawOut)
+  const warned = !loc.kept_intent && !!out.warning && out.conclusion !== "not_related"
+  const conclusion = warned ? "comment" : out.conclusion
+  const ops = conclusion === "edit" ? out.spine_ops : []
+  loc.conclusion = conclusion
+  loc.reason = out.reason
+  loc.warning = warned ? out.warning! : loc.warning
+  loc.proposal = {
+    proposed_at: new Date(),
+    ...snapshotOf(spine, loc.path),
+    new_text: conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
+    comment_text: conclusion === "comment" ? (warned ? `${out.warning!.text} ${out.warning!.reason}`.trim() : (out.comment_text ?? null)) : null,
+    spine_ops: ops,
+    assumptions: conclusion === "not_related" ? [] : out.assumptions
+  }
+  loc.kept_violations = []
+  loc.verify = null
+  // Đề xuất mới chụp nội dung hiện tại ⇒ xung đột cũ (nếu có, từ lần xác nhận trước) không còn ý nghĩa
+  loc.conflict = null
+}
+
+/** Ngưỡng số vị trí từ đó CR báo trước chi phí C-4 (BF §3.2 C-3: liệt kê đủ, không cắt). */
+export const LARGE_CR_LOCATIONS = 80
+
+export interface ProposeEstimate {
+  locations: number
+  batches: number
+  credits: number
+}
+
+/** Ước chi phí C-4: số lô (vị trí chia theo skill sở hữu, ≤ `PROPOSE_BATCH` mỗi lô, bỏ sơ đồ gốc) × giá một lô. */
+export const proposeEstimate = (spine: Spine, locations: readonly IChangeLocation[], unitCost: number): ProposeEstimate => {
+  const byOwner = new Map<string, number>()
+  for (const l of locations) {
+    if (!needsProposal(l) || isDiagramLocation(l)) continue
+    const key = ownerKeyOf(spine, l)
+    byOwner.set(key, (byOwner.get(key) ?? 0) + 1)
+  }
+  const batches = [...byOwner.values()].reduce((n, c) => n + Math.ceil(c / PROPOSE_BATCH), 0)
+  return { locations: locations.length, batches, credits: batches * unitCost }
+}
+
 export const runPropose = async (cr: IChangeRequest, userId: string): Promise<void> => {
   assertCrStatus(cr, ["impact_review", "proposing"], "proposing")
   await transitionCr(cr, "proposing")
@@ -256,6 +326,8 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
   // QLHS 11/11 bug #17: nói rõ ngôn ngữ tài liệu — thiếu dòng này model viết bước mới bằng tiếng Anh vào tài liệu tiếng Việt
   const documentLanguage = documentLanguageText(await crDocumentLanguage(String(cr.projectId), spine))
   let locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
+  const outOfScope = await loadOutOfScopeSections(String(cr.projectId))
+  const promptOf = (l: IChangeLocation) => locationPromptText(spine, l, cr.seed?.ops ?? [], outOfScopeKind(spine, l, outOfScope))
 
   // FLF-318: CR thêm / xoá use case ⇒ soạn trọn lô một lượt như chat trước baseline (luật 3e / 3g), vị trí còn
   // lại đề xuất theo lô như dưới. Hết credit ⇒ dừng như C-4.
@@ -288,9 +360,9 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
           owner_skill: ownerSkillText(owner || null),
           target_sections: targetSectionsText(spine, cr, locations, guidance),
           // FLF-375: chỉ đoạn tài liệu đính kèm liên quan tới CR + các chỗ của lô (Tree-sitter + BM25)
-          materials: await relevantMaterialsText(cr, crQuery(cr, ...batch.map((l) => locationPromptText(spine, l, cr.seed?.ops ?? [])))),
+          materials: await relevantMaterialsText(cr, crQuery(cr, ...batch.map(promptOf))),
           missing_info: missingInfoText(cr),
-          locations: batch.map((l) => locationPromptText(spine, l, cr.seed?.ops ?? [])).join("\n"),
+          locations: batch.map(promptOf).join("\n"),
           glossary: glossaryText(spine),
           document_language: documentLanguage
         })
@@ -310,20 +382,7 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
         }
         const matched = matchProposals(batch, result.data.locations)
         for (const [loc, out] of matched) {
-          const ops = out.conclusion === "not_related" ? [] : out.spine_ops
-          loc.conclusion = out.conclusion
-          loc.reason = out.reason
-          loc.proposal = {
-            proposed_at: new Date(),
-            ...snapshotOf(spine, loc.path),
-            new_text: out.conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
-            comment_text: out.conclusion === "comment" ? (out.comment_text ?? null) : null,
-            spine_ops: ops,
-            assumptions: out.conclusion === "not_related" ? [] : out.assumptions
-          }
-          loc.verify = null
-          // Đề xuất mới chụp nội dung hiện tại ⇒ xung đột cũ (nếu có, từ lần xác nhận trước) không còn ý nghĩa
-          loc.conflict = null
+          applyProposal(loc, spine, out)
           await loc.save()
         }
         batch = batch.filter((l) => !matched.has(l))
@@ -386,6 +445,7 @@ export const draftInOwnerStep = async (cr: IChangeRequest, userId: string, locat
     cr.markModified("clarifications")
     await cr.save()
   }
+  const promptOne = locationPromptText(spine, loc, cr.seed?.ops ?? [], outOfScopeKind(spine, loc, await loadOutOfScopeSections(String(cr.projectId))))
   const result = await withMeteredAi<CrProposeOutput>({ projectId: String(cr.projectId), userId, stepId: `C-4:${cr.cr_id}` }, ActionType.CR_PROPOSE, {
     ...crHeader(cr),
     answers: `${answersText(cr)}
@@ -398,9 +458,9 @@ Analyst's instruction for ${loc.location_id} (${loc.owner_step ? `fix in owner s
       await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).select("path section_id").lean(),
       templateGuidanceBySection(await TemplateProfile.findOne({ projectId: cr.projectId }).select("heading_map layout").lean())
     ),
-    materials: await relevantMaterialsText(cr, crQuery(cr, instruction, locationPromptText(spine, loc, cr.seed?.ops ?? []))),
+    materials: await relevantMaterialsText(cr, crQuery(cr, instruction, promptOne)),
     missing_info: missingInfoText(cr),
-    locations: locationPromptText(spine, loc, cr.seed?.ops ?? []),
+    locations: promptOne,
     glossary: glossaryText(spine),
     document_language: documentLanguageText(await crDocumentLanguage(String(cr.projectId), spine))
   })
@@ -411,21 +471,9 @@ Analyst's instruction for ${loc.location_id} (${loc.owner_step ? `fix in owner s
   }
   const out = matchProposals([loc], result.data.locations).get(loc)
   if (!out) throw new ApiError(502, "AI chưa đưa ra đề xuất cho chỗ này - thử lại, hoặc gõ hướng sửa cụ thể hơn", "AI_PROVIDER_ERROR")
-  const ops = out.conclusion === "not_related" ? [] : out.spine_ops
-  loc.conclusion = out.conclusion
-  loc.reason = out.reason
-  loc.proposal = {
-    proposed_at: new Date(),
-    ...snapshotOf(spine, loc.path),
-    new_text: out.conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
-    comment_text: out.conclusion === "comment" ? (out.comment_text ?? null) : null,
-    spine_ops: ops,
-    assumptions: out.conclusion === "not_related" ? [] : out.assumptions
-  }
-  loc.manual = true
-  loc.verify = null
   // FLF-375: "AI soạn lại trên nội dung hiện tại" sau màn so sánh 3 cột ⇒ đề xuất mới chụp nội dung hiện tại, hết xung đột
-  loc.conflict = null
+  applyProposal(loc, spine, out)
+  loc.manual = true
   await loc.save()
   // Đã đạt kiểm mà soạn lại một vị trí ⇒ phải kiểm lại (như sửa tay)
   if (cr.status === "ready_to_submit") await transitionCr(cr, "verifying")

@@ -88,6 +88,11 @@ export const changeRequestDtoSchema = z.object({
   ),
   /** Mode 1 v3 phase 7: dữ kiện C-2 báo vẫn thiếu khi hết vòng hỏi — C-4 sẽ phải giả định. */
   missing_info: z.array(z.string()),
+  /**
+   * C-2 đọc câu trả lời vừa gửi và thấy người yêu cầu muốn rút lại yêu cầu (lời tự gõ mà luật rút lại của FE không bắt) ⇒
+   * FE hỏi "Huỷ change request?" trước khi đi tiếp. Chỉ là gợi ý: không ai tự huỷ CR.
+   */
+  withdraw_suggested: z.boolean(),
   /** Phase 8: lệnh sửa gộp thêm (chat) theo thứ tự. */
   amendments: z.array(z.object({ text: z.string(), at: isoDateTime })),
   created_at: isoDateTime,
@@ -134,6 +139,12 @@ export const changeLocationDtoSchema = z.object({
     })
     .nullable(),
   group_id: groupIdSchema.nullable(),
+  /** C-4: AI cảnh báo yêu cầu không hợp lý ở chỗ này (kèm lý do); chưa `kept_intent` ⇒ chặn xác nhận tới khi BA chọn "Vẫn làm" hoặc bỏ chỗ này. */
+  warning: z.object({ text: z.string(), reason: z.string() }).nullable().optional(),
+  /** BA đã chọn "Vẫn làm" sau cảnh báo (`PATCH` với `action: "proceed"`). */
+  kept_intent: z.boolean().optional(),
+  /** C-5 "giữ theo ý mình" (`PATCH` với `action: "keep"`): mã luật đã chấp nhận vi phạm; sau khi ghi, cờ đỏ thật hiện trên tài liệu. */
+  kept_violations: z.array(z.string()).optional(),
   /**
    * FLF-375: tên chỗ + nội dung trước / sau người đọc được (không mã nội bộ) — FE hiện cái này, không tự ghép path / id.
    * `kind`: tên mảng Spine hoặc `paragraph` · `table` · `image` (khối văn bản của file).
@@ -270,9 +281,15 @@ export const materialParamsSchema = z.object({ crId: crIdSchema, mid: materialId
 export const patchLocationRequestSchema = z
   .strictObject({
     conclusion: z.enum(LOCATION_CONCLUSIONS).optional(),
-    reason: text(2000).optional()
+    reason: text(2000).optional(),
+    /**
+     * `keep` (C-5 "giữ theo ý mình"): chỉ chỗ `manual_fix` mà mọi lỗi là lỗi luật; `proceed` (C-4 "Vẫn làm"): chỗ AI đã
+     * cảnh báo - ghi `kept_intent` rồi AI soạn theo yêu cầu. Đi một mình, không kèm field khác.
+     */
+    action: z.enum(["keep", "proceed"]).optional()
   })
   .refine((v) => Object.keys(v).length > 0, { message: "Cần ít nhất một field để sửa" })
+  .refine((v) => v.action === undefined || (v.conclusion === undefined && v.reason === undefined), { message: "action đi một mình", path: ["action"] })
   .refine((v) => v.conclusion !== "not_related" || v.reason !== undefined, { message: "Giữ nguyên / bỏ chỗ này cần có lý do.", path: ["reason"] })
 
 /**
@@ -287,6 +304,9 @@ export const groupDecisionRequestSchema = z.strictObject({
 
 /** `POST …/:crId/locations/:locId/owner-step-draft` (BPMN 3.9, mode 1 v3) — hướng sửa của BA cho skill step sở hữu. */
 export const ownerStepDraftRequestSchema = z.strictObject({ instruction: text(4000) })
+
+/** `POST …/:crId/revert`: hoàn tác một CR đã ghi bằng CR mới (nguồn `revert`) — cần người yêu cầu như mọi CR. */
+export const revertRequestSchema = z.strictObject({ requester: text(200) })
 
 /** `POST …/:crId/close` (3.13) và `POST …/:crId/cancel` (3.10, UC-53). */
 export const closeRequestSchema = z.strictObject({ reason: z.string().trim().min(DECISION_REASON_MIN_LENGTH).max(2000) })
@@ -305,7 +325,9 @@ export const changeRequestDetailSchema = z.object({
   locations: z.array(changeLocationDtoSchema),
   groups: z.array(changeGroupDtoSchema),
   /** Câu hỏi của vòng làm rõ đang chờ trả lời (`awaiting_answers`), rỗng nếu không chờ. */
-  pending_questions: z.array(z.string())
+  pending_questions: z.array(z.string()),
+  /** C-3 liệt kê đủ vị trí: CR còn ở xem phạm vi mà có hơn 80 vị trí ⇒ ước chi phí C-4 (số lô × giá một lô); còn lại `null`. Tuỳ chọn. */
+  propose_estimate: z.object({ locations: z.number().int(), batches: z.number().int(), credits: z.number() }).nullable().optional()
 })
 
 /** `meta` của 409 PATH_LOCKED (FLF-186) — phần tử Spine nào đang bị CR nào giữ. */

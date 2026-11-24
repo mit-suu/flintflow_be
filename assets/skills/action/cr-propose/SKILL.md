@@ -1,7 +1,7 @@
 ---
 skill_id: cr-propose
 kind: action
-version: 2.7.0
+version: 2.8.0
 description: Mode 1 C-4 - for every affected Spine element conclude edit | comment | not_related and propose the Spine ops
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -93,6 +93,20 @@ and keep every other field exactly as it is - each changed field is a revision t
     into the language of the change request or the material. Names quoted from the document or the CR keep their
     original form. A proposal with text in another language fails the checks and is redone.
 11. `reason`, `comment_text` and `assumptions`: User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`, `feature:@B0012`), element paths (`actors[id=A02].name`), block ids (`B0012`) or location ids (`L001`). Name a section by its heading and an element by its name or document code (`UC-01` is fine).
+12. **Unreasonable request - warn, do not draft.** When doing what the CR asks at this location would clearly harm
+    the document (it contradicts a rule the document keeps, breaks a law or constraint the document states, makes two
+    requirements impossible together, or removes something other parts depend on) and the location does **not** say
+    "requester chose to proceed": set `warning` = `{ "text": one sentence naming the problem, "reason": one sentence
+    why it is unreasonable }`, `conclusion` = `comment`, `comment_text` = the warning, **no** `spine_ops`. The
+    requester then decides to proceed or drop it. A location marked "chose to proceed" (or a clarification answer
+    "Vẫn làm" / "Proceed" to a warning about it) is **never** warned again: draft the edit as asked. Ordinary
+    requests, even unusual ones, are not warnings - warn only on a real conflict. `warning` is `null` otherwise.
+13. **Out of scope sections.** A location marked OUT OF SCOPE belongs to a section the file kept verbatim and FlintFlow
+    does not write. With existing content: only a text edit (set that element's `blocks` changing just the words the
+    CR names, same structure); no new elements, no rule reasoning. Empty: conclude `comment` only.
+14. **Text rules.** Text you write for people (`reason`, `comment_text`, `assumptions`, `warning`, new content)
+    never uses the long dash character (use a hyphen " - ") and never contains the letters "FPT" (say "FlintFlow
+    standard template").
 
 ## Output
 
@@ -102,5 +116,7 @@ JSON only:
 { "locations": [
   { "location_id": "L001", "conclusion": "edit", "reason": "The actor is renamed by the CR.",
     "spine_ops": [ { "op": "set", "path": "actors[id=A01].name", "value": "Student" } ], "assumptions": [] },
-  { "location_id": "L002", "conclusion": "not_related", "reason": "\"learner\" here is the course level, not the actor.", "spine_ops": [] } ] }
+  { "location_id": "L002", "conclusion": "not_related", "reason": "\"learner\" here is the course level, not the actor.", "spine_ops": [] },
+  { "location_id": "L003", "conclusion": "comment", "reason": "The CR conflicts with a kept rule.", "comment_text": "Removing the login step breaks BR-02.",
+    "spine_ops": [], "warning": { "text": "Removing the login step breaks BR-02.", "reason": "BR-02 requires every order to be placed by a signed-in user." } } ] }
 ```

@@ -1,7 +1,8 @@
 /**
  * Gap report (nút 1.13, UC-23): cờ đỏ/vàng gộp theo section, hình chưa vẽ, field độ tin thấp. Cờ và mục xếp theo layout
  * file upload; mục riêng ngoài FPT liệt kê trong bố cục, không cờ. Mẫu FPT không bắt buộc (FLF-312): không còn liệt kê
- * đầu mục FPT thiếu / tiêu đề không khớp mẫu. Xuất JSON và `.docx` (báo cáo mới, dùng thư viện `docx` như mode 2 — không phải bản SRS).
+ * tiêu đề không khớp mẫu. Dự án không chọn "Bổ sung các mục còn thiếu": mỗi mục mẫu chuẩn mà khung file không có là một cờ vàng
+ * `standard_section_missing` - cờ nằm trong `spine.flags` nên tự vào `sections` của báo cáo (JSON và .docx), không cần luật riêng. Xuất JSON và `.docx` (báo cáo mới, dùng thư viện `docx` như mode 2 — không phải bản SRS).
  * FLF-171, plan §6 2C. Tải bản `.docx` khi đang `gap_review` ⇒ `delivered` (giao báo cáo, nhánh "không cần sửa").
  */
 

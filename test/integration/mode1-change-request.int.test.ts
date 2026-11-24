@@ -13,7 +13,7 @@ import { createMode1Project, fakeCrClarify, fakeCrPropose, fakeCrProposeNoChange
 import { makeSrsDocx } from "../../src/modules/import/testing/srs-fixture.js"
 import { changeRequestDetailSchema, listChangeRequestsResponseSchema } from "../../src/modules/change-request/change-request.dto.js"
 import { DocxPackage, readBlocks, readStamp } from "../../src/modules/docx-ooxml/index.js"
-import { lockedPaths } from "../helpers/mode1-cr-p4.js"
+import { lockedPaths, secondAnalyst } from "../helpers/mode1-cr-p4.js"
 import { DocVersion } from "../../src/modules/doc-version/doc-version.model.js"
 import { docFileStore } from "../../src/modules/doc-version/doc-file.store.js"
 import { Notification } from "../../src/modules/notification/notification.model.js"
@@ -122,14 +122,16 @@ describe("mode 1 - change request", () => {
   })
 
   it("FLF-375 §3.2: hai CR cùng chạm một phần tử ⇒ cả hai tìm được vị trí (không khoá); CR-002 thấy CR-001 có bản sửa chưa xác nhận", async () => {
-    const { c, projectId } = await importedProject()
+    const { c, projectId, seeded } = await importedProject()
+    // Mỗi người một CR mở một lúc ⇒ CR thứ hai do Analyst khác tạo
+    const other = await secondAnalyst(seeded, projectId)
     const first = await newCr(c)
     detail(await c.post(`/change-requests/${first}/clarify`))
     const firstImpact = detail(await c.post(`/change-requests/${first}/impact`))
     detail(await c.post(`/change-requests/${first}/propose`))
-    const second = await newCr(c, "Tighter performance", "Also about the 2 seconds response time.")
-    detail(await c.post(`/change-requests/${second}/clarify`))
-    const secondImpact = detail(await c.post(`/change-requests/${second}/impact`))
+    const second = await newCr(other, "Tighter performance", "Also about the 2 seconds response time.")
+    detail(await other.post(`/change-requests/${second}/clarify`))
+    const secondImpact = detail(await other.post(`/change-requests/${second}/impact`))
     const shared = secondImpact.locations.find((l) => firstImpact.locations.some((f) => f.path === l.path))!
     expect(shared).toBeDefined()
     const again = detail(await c.get(`/change-requests/${second}`)).locations.find((l) => l.path === shared.path)!

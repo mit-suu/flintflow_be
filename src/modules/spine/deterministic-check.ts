@@ -1,7 +1,9 @@
 /**
  * deterministic-check.ts
  * ─────────────────────────────────────────────────────────────────
- * 12 luật cờ đỏ (srs-spine.md §7) + 12 luật vàng (cardinality §8.1, quan hệ và đặt tên use case, tên hệ thống).
+ * 17 luật cờ đỏ (srs-spine.md §7, tầng 3 theo luật: trùng tên, từ mơ hồ, thiếu nguồn; mục của mẫu bắt buộc còn trống; đoạn nguyên
+ * văn nhắc phần tử đã đổi) + 30 luật vàng (cardinality §8.1, quan hệ và đặt tên use case, tên hệ thống, loại nội dung theo 29148,
+ * mục mẫu chuẩn còn thiếu, "cần xem lại" sau khi Lead từ chối baseline) = 31. Số luật cụ thể: `RULES`.
  * Hàm thuần trên đồ thị khoá, KHÔNG gọi model. Chỉ cờ đỏ chặn `baselines[]`.
  *
  * Mọi cờ đỏ có `remediation_step` thi hành được. Mọi `section_id` là khoá section phân giải
@@ -15,7 +17,7 @@ import { buildIdIndex, findDeadReferences, sectionKeyExists, type ReferenceHit }
 import { tryResolve } from "./path-resolver.js"
 import { isContentSlot, slotHasData } from "../import/content-slots.js"
 import { isTemplateFrame } from "./template-frames.js"
-import { loopKeyOfFunction, ownerStepOf, stepsOf, REQUIRED_FIXED_SECTION_IDS, DERIVED_SECTION_IDS, sectionsOfPath } from "./section-registry.js"
+import { FIXED_SECTIONS, loopKeyOfFunction, ownerStepOf, stepsOf, REQUIRED_FIXED_SECTION_IDS, DERIVED_SECTION_IDS, sectionsOfPath } from "./section-registry.js"
 import { computeSectionStates } from "./section-status.js"
 import { hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
 import { actorParents, ancestorsOf, generalizationProblems, type GeneralizationProblem } from "./actor-generalization.js"
@@ -48,11 +50,16 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("nfr_missing_number", "red", false),
   rule("usecase_relation_invalid", "red", false),
   rule("unconfirmed_assumption", "red", false, true),
-  rule("section_stale_at_baseline", "red", false, true),
-  rule("section_awaiting_reaccept", "red", false, true),
+  // Lead từ chối baseline ⇒ mục "Cần xem lại" chỉ là lời nhắc (business-flow §2 "Ba mức cờ"), không chặn
+  rule("section_stale_at_baseline", "yellow", true, true),
+  rule("section_awaiting_reaccept", "yellow", true, true),
   rule("screen_pending_at_baseline", "red", false, true),
   rule("orphan_screen_at_baseline", "red", false, true),
   rule("orphan_entity_at_baseline", "red", false, true),
+  // Tầng 3 theo luật (business-flow §2 bảng "Ai kiểm"): Code bắt chắc chắn nên đỏ, không waive
+  rule("duplicate_name", "red", false),
+  rule("vague_wording", "red", false),
+  rule("source_missing", "red", false),
   rule("orphan_actor", "yellow", true),
   rule("usecase_no_function", "yellow", true),
   rule("screen_no_function", "yellow", true),
@@ -75,21 +82,27 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("derived_from_changed_assumption", "yellow", true),
   rule("function_without_uc", "yellow", true),
   rule("original_diagram_stale", "yellow", true),
-  // FLF-366: đoạn nguyên văn của file gốc nhắc tới tên / mã phần tử đã đổi tên hay bị xoá (chỉ khi hồ sơ luật mang đoạn)
-  rule("original_text_mentions_changed", "yellow", true),
+  // Đoạn nguyên văn của file gốc nhắc tới tên / mã phần tử đã đổi tên hay bị xoá (chỉ khi hồ sơ luật mang đoạn): tham chiếu gãy ⇒ đỏ.
+  // Lối sửa: change request đổi tên sửa luôn chữ trong đoạn nguyên văn
+  rule("original_text_mentions_changed", "red", false),
   rule("orphan_entity", "yellow", true),
   // FLF-365: ma trận kiểm chứng (mẫu IEEE 29148, Mode 1) trỏ yêu cầu không còn trong tài liệu
   rule("verification_orphan", "yellow", true),
   rule("unresolved_many_to_many", "yellow", true),
   // FLF-278 trên FLF-335/336 — chế độ 3 (mẫu bắt buộc): chỉ chạy khi hồ sơ luật mang layout của mẫu
   rule("template_section_absent", "yellow", true),
-  rule("template_section_empty", "yellow", true),
+  // Mục riêng của mẫu bắt buộc chưa có chữ thật ⇒ đỏ (thiếu mục bắt buộc). Tự gỡ khi mục có nội dung (soạn qua chat hoặc CR)
+  rule("template_section_empty", "red", false),
+  // Mục của mẫu chuẩn mà khung file không có (khi không chọn "Bổ sung các mục còn thiếu"): nhắc, không chặn
+  rule("standard_section_missing", "yellow", true),
   // Sau đổi mẫu: mục của mẫu mới mà tài liệu cũ không có — để trống, chặn phát hành tới khi BA viết (không waive được)
   rule("template_section_migration_missing", "red", false),
   // Sau đổi mẫu: nội dung còn nhắc "mục x.y" theo đánh số cũ — BA kiểm lại tham chiếu
   rule("section_reference_after_migration", "yellow", true),
   // FLF-418: dự án vẽ Sequence mức thành phần nhưng function đã có sơ đồ còn thiếu `component_interactions` (đang vẽ mức hệ thống)
-  rule("sequence_component_missing", "yellow", true)
+  rule("sequence_component_missing", "yellow", true),
+  // Tầng 2: thiếu loại nội dung theo ISO 29148 (chạy sau khi bước sở hữu chốt, `StepGate`)
+  rule("content_type_missing", "yellow", true)
 ])
 
 /**
@@ -194,12 +207,20 @@ export interface CheckOptions {
   ruleProfile?: RuleProfile
 }
 
+/**
+ * "Chưa có yêu cầu độ tin cậy / hiệu năng nào" là danh sách rỗng chứ không phải NFR thiếu số đo: hồ sơ loại `array_empty` (mode 1)
+ * coi mảng rỗng là chỗ thiếu để báo, không chặn - cùng lý do, cờ này hạ vàng ở đó. NFR đã có mà thiếu số đo vẫn đỏ.
+ */
+const isEmptyNfrList = (c: FlagCandidate): boolean => c.rule_id === "nfr_missing_number" && c.target_id === null
+
 /** Áp hồ sơ luật lên ứng viên cờ (loại trừ trước, rồi hạ đỏ ⇒ vàng). */
 export const applyRuleProfile = (candidates: FlagCandidate[], profile: RuleProfile | undefined): FlagCandidate[] =>
   profile
     ? candidates
         .filter((c) => !profile.exclude.has(c.rule_id))
-        .map((c) => (profile.downgrade.has(c.rule_id) && c.level === "red" ? { ...c, level: "yellow" as const } : c))
+        .map((c) =>
+          c.level === "red" && (profile.downgrade.has(c.rule_id) || (profile.exclude.has("array_empty") && isEmptyNfrList(c))) ? { ...c, level: "yellow" as const } : c
+        )
     : candidates
 
 const RENDER_STEP: Readonly<Record<string, string>> = { context: "S-2.5", usecase: "S-3.6", screen_flow: "S-4.2", erd: "S-4.5", class: "S-4.5", state_machine: "S-4.5", sequence: "S-5.4", activity: "S-3.5", deployment: "S-6.1" }
@@ -589,11 +610,11 @@ export const originalTextMentionsChanged = (spine: Spine, records: readonly Sect
         const token = m.name ?? m.id
         if (!(m.name !== null ? mentionsToken(text, token) : mentionsCode(text, m.id))) continue
         out.push({
-          level: "yellow",
+          level: "red",
           rule_id: "original_text_mentions_changed",
           section_id: r.section_id,
           target_id: m.path,
-          message: `Đoạn văn giữ nguyên từ file gốc ở ${quotedSectionLabel(r.section_id, spine)} nhắc tới "${token}" - ${el ? `phần tử này đã đổi tên thành "${el.name}"` : "phần tử này đã bị xoá"}; xem lại đoạn văn, cần thì sửa bằng change request`,
+          message: `Đoạn văn giữ nguyên từ file gốc ở ${quotedSectionLabel(r.section_id, spine)} nhắc tới "${token}" - ${el ? `phần tử này đã đổi tên thành "${el.name}"` : "phần tử này đã bị xoá"}; sửa đoạn văn bằng change request`,
           remediation_step: ownerStepOf(r.section_id, spine)
         })
       }
@@ -718,7 +739,7 @@ const sectionsAtBaseline = (spine: Spine, changes: Pick<Change, "seq" | "path" |
     ...states
       .filter((s) => s.status === "stale")
       .map((s) => ({
-        level: "red" as const,
+        level: "yellow" as const,
         rule_id: "section_stale_at_baseline",
         section_id: s.id,
         target_id: null,
@@ -728,7 +749,7 @@ const sectionsAtBaseline = (spine: Spine, changes: Pick<Change, "seq" | "path" |
     ...states
       .filter((s) => s.awaiting_reaccept)
       .map((s) => ({
-        level: "red" as const,
+        level: "yellow" as const,
         rule_id: "section_awaiting_reaccept",
         section_id: s.id,
         target_id: null,
@@ -912,7 +933,7 @@ export const orphanScreens = (spine: Spine): { screen: Spine["screens"][number];
  * mẫu (`custom:<id>` trong layout, có tiêu đề) chưa có chữ thật (chỉ chữ hướng dẫn `[…]` / trống) ⇒ cờ vàng.
  */
 /** Luật "mục bắt buộc còn trống / cũ" — với mẫu bắt buộc chỉ áp lên mục của mẫu (mục FPT ngoài mẫu không in, không đòi). */
-const SECTION_SCOPED_RULES: ReadonlySet<string> = new Set(["section_empty", "array_empty", "section_stale_at_baseline", "section_awaiting_reaccept"])
+const SECTION_SCOPED_RULES: ReadonlySet<string> = new Set(["section_empty", "array_empty", "section_stale_at_baseline", "section_awaiting_reaccept", "content_type_missing"])
 /**
  * Cờ sơ đồ (vẽ lỗi / cũ) của mục mẫu không có chỗ in (mẫu công ty không có Use Case Diagram, ERD…): sơ đồ không vào tài liệu
  * ⇒ không đòi vẽ lại, không chặn release — change request cũng không sửa được mục mẫu không có.
@@ -958,7 +979,7 @@ const fixedTemplateGaps = (
     )
     .map(
       (c): FlagCandidate => ({
-        level: "yellow",
+        level: "red",
         rule_id: "template_section_empty",
         section_id: `custom:${c.id}`,
         target_id: null,
@@ -967,6 +988,27 @@ const fixedTemplateGaps = (
       })
     )
 ]
+
+/** Mục cha chỉ chứa mục con (`fixed:3`, `fixed:4.2`…): thiếu cha không phải thiếu nội dung, mục con đã được xét riêng. */
+const CONTAINER_SECTION_IDS: ReadonlySet<string> = new Set(FIXED_SECTIONS.flatMap((s) => (s.parent ? [`fixed:${s.parent}`] : [])))
+
+/**
+ * Dự án chọn cấu trúc đích = khung của file (không tick "Bổ sung các mục còn thiếu theo mẫu chuẩn FlintFlow"): mục mẫu chuẩn mà
+ * khung file không có và chưa có dữ liệu ⇒ một cờ vàng mỗi mục. Mục đã có dữ liệu mà mẫu không in do `template_section_absent` báo.
+ */
+const standardSectionMissing = (spine: Spine, layout: ReadonlySet<string>, kept: ReadonlySet<string> = new Set()): FlagCandidate[] =>
+  REQUIRED_FIXED_SECTION_IDS.filter(
+    (id) => !layout.has(id) && !kept.has(id) && !DERIVED_SECTION_IDS.has(id) && !CONTAINER_SECTION_IDS.has(id) && sectionHasData(spine, id) !== true
+  ).map(
+    (id): FlagCandidate => ({
+      level: "yellow",
+      rule_id: "standard_section_missing",
+      section_id: id,
+      target_id: null,
+      message: `Mẫu chuẩn FlintFlow có mục ${quotedSectionLabel(id, spine)} nhưng tài liệu của bạn chưa có - bổ sung nếu muốn đủ theo mẫu chuẩn`,
+      remediation_step: ownerStepOf(id, spine)
+    })
+  )
 
 /**
  * Mục của mẫu đích mà lần đổi mẫu để trống (D7): đỏ tới khi có chữ thật. Mục riêng đo như `template_section_empty`; mục khung đo
@@ -1475,7 +1517,8 @@ const namingShape = (spine: Spine): FlagCandidate[] => {
 
   for (const u of spine.use_cases) {
     const { semantic, style } = checkUseCaseName(u.name, actorNames, useCaseNames)
-    for (const [rule_id, codes] of [["usecase_name_semantic", semantic], ["usecase_name_style", style]] as const) {
+    for (const [rule_id, codes] of [["usecase_name_semantic", semantic.filter((c) => c !== "U8")], ["usecase_name_style", style]] as const) {
+      // U8 (trùng tên) là cờ đỏ `duplicate_name`, không lặp ở đây
       if (codes.length === 0) continue
       out.push({
         level: "yellow",
@@ -1489,7 +1532,8 @@ const namingShape = (spine: Spine): FlagCandidate[] => {
   }
   const generalIds = new Set(actorParents(spine.actors).values())
   for (const a of spine.actors) {
-    const codes = checkActorName(a.name, actorNames, generalIds.has(a.id))
+    // A7 (trùng tên) là cờ đỏ `duplicate_name`, không lặp ở đây
+    const codes = checkActorName(a.name, actorNames, generalIds.has(a.id)).filter((c) => c !== "A7")
     if (codes.length === 0) continue
     out.push({
       level: "yellow",
@@ -1660,6 +1704,220 @@ const nonEnglishContent = (spine: Spine, gate: StepGate): FlagCandidate[] =>
     ]
   })
 
+// ─── red: duplicate_name ─────────────────────────────────────────
+
+/**
+ * Trùng tên / trùng mã trong cùng một danh sách. Luật tên use case (U8) và tên actor (A7) từng nằm trong cờ vàng
+ * `usecase_name_semantic` / `actor_name_shape`; trùng tên làm tài liệu mơ hồ (hai phần tử không phân biệt được) nên tách ra
+ * thành cờ đỏ riêng. Trùng mã thường bị op engine chặn từ lúc ghi, nhưng Spine nhập từ file vẫn có thể mang theo.
+ */
+const duplicateName = (spine: Spine): FlagCandidate[] => {
+  const groups: readonly { label: string; list: readonly { id: string; name: string }[]; section: (id: string) => string; step: string }[] = [
+    { label: "tác nhân", list: spine.actors, section: () => "fixed:2.1", step: "S-3.1" },
+    { label: "use case", list: spine.use_cases, section: () => "fixed:2.2.2", step: "S-3.2" },
+    { label: "màn hình", list: spine.screens, section: () => "fixed:3.1.2", step: "S-4.1" },
+    { label: "tính năng", list: spine.features, section: (id) => `feature:${id}`, step: "S-4.1" },
+    { label: "thực thể dữ liệu", list: spine.entities, section: () => "fixed:3.1.5", step: "S-4.5" }
+  ]
+  const out: FlagCandidate[] = []
+  for (const g of groups) {
+    const nameCount = new Map<string, number>()
+    const idCount = new Map<string, number>()
+    for (const e of g.list) {
+      const key = e.name.trim().toLowerCase()
+      if (key) nameCount.set(key, (nameCount.get(key) ?? 0) + 1)
+      idCount.set(e.id, (idCount.get(e.id) ?? 0) + 1)
+    }
+    for (const e of g.list) {
+      if ((nameCount.get(e.name.trim().toLowerCase()) ?? 0) > 1) {
+        out.push({ level: "red", rule_id: "duplicate_name", section_id: g.section(e.id), target_id: e.id, message: `Tên ${g.label} "${e.name.trim()}" bị trùng với ${g.label} khác - đổi tên để hai phần tử phân biệt được`, remediation_step: g.step })
+      }
+      if ((idCount.get(e.id) ?? 0) > 1) {
+        out.push({ level: "red", rule_id: "duplicate_name", section_id: g.section(e.id), target_id: e.id, message: `Mã "${e.id}" đang dùng cho nhiều ${g.label} - mỗi phần tử cần một mã riêng`, remediation_step: g.step })
+      }
+    }
+  }
+  return out
+}
+
+// ─── red: vague_wording, source_missing (luật tầng 3) ────────────
+
+/**
+ * Từ mơ hồ trong danh sách cố định (tầng 3 theo luật, ISO 29148: yêu cầu phải kiểm chứng được). Danh sách ngắn có chủ ý -
+ * cờ này đỏ và không waive được nên chỉ chứa từ gần như luôn là mơ hồ trong một câu yêu cầu. Khớp nguyên từ (`containsWord`).
+ */
+export const VAGUE_WORDS: readonly string[] = Object.freeze([
+  "nhanh", "nhanh chóng", "thân thiện", "dễ dùng", "dễ sử dụng", "hiệu quả", "khoảng", "v.v.", "vân vân", "tối ưu", "càng sớm càng tốt",
+  "fast", "quickly", "user-friendly", "easy to use", "easy", "efficient", "approximately", "etc.", "and so on", "as soon as possible", "asap"
+])
+
+const SENTENCE_END = /[.!?:;\n(\-•*]/
+
+/**
+ * Lần xuất hiện của từ có phải TÊN riêng (tên chế độ "Fast", giá trị đặt trong ngoặc kép) chứ không phải tính từ mô tả không:
+ * nằm trong cặp dấu nháy, hoặc viết hoa giữa câu. Tên không phải lời hứa mơ hồ nên không cờ.
+ */
+const isNameOccurrence = (text: string, index: number, length: number): boolean => {
+  const before = text[index - 1] ?? ""
+  const after = text[index + length] ?? ""
+  if (/["'“‘`]/.test(before) && /["'”’`]/.test(after)) return true
+  if (!/[A-Z]/.test(text[index])) return false
+  let i = index - 1
+  while (i >= 0 && /[ \t]/.test(text[i])) i--
+  return i >= 0 && !SENTENCE_END.test(text[i])
+}
+
+/** Từ mơ hồ có trong `text` (đã chuẩn hoá NFC để dấu tiếng Việt viết rời hay dựng sẵn đều khớp). */
+export const vagueWordsIn = (text: string): string[] => {
+  const normalized = text.normalize("NFC")
+  return VAGUE_WORDS.filter((w) => {
+    const word = w.normalize("NFC")
+    if (!containsWord(normalized, word)) return false
+    const re = new RegExp(`(?<![A-Za-z0-9])${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9])`, "gi")
+    return [...normalized.matchAll(re)].some((m) => !isNameOccurrence(normalized, m.index ?? 0, m[0].length))
+  })
+}
+
+interface RequirementItem {
+  id: string
+  /** Chữ gọi phần tử trong câu cờ. */
+  label: string
+  section: string
+  step: string
+  fields: Record<string, unknown>
+  /** "deferred" = hoãn ra ngoài phạm vi bản phát hành này ⇒ không soi chất lượng. */
+  deferred: boolean
+  sourceRef: string | null | undefined
+}
+
+/** Ba loại yêu cầu mà luật chất lượng và luật nguồn soi: chức năng (FR), phi chức năng (NFR), quy tắc nghiệp vụ (BR). */
+const requirementItems = (spine: Spine): RequirementItem[] => [
+  ...spine.functions.map((f): RequirementItem => ({
+    id: f.id,
+    label: `Yêu cầu chức năng "${f.name}"`,
+    section: `function:${f.id}`,
+    step: functionStep(spine, f.id, "S-5.2"),
+    fields: { ...pickTextFields(f, SRS_TEXT_FIELDS.functions), validations: f.validations.map((v) => pickTextFields(v, VALIDATION_TEXT_FIELDS)) },
+    deferred: f.release === "deferred",
+    sourceRef: f.source_ref
+  })),
+  ...spine.nfrs.map((n): RequirementItem => ({
+    id: n.id,
+    label: `Yêu cầu ${NFR_CATEGORY_LABELS[n.category]} ${n.id}`,
+    section: NFR_SECTION[n.category].section,
+    step: NFR_SECTION[n.category].step,
+    fields: pickTextFields(n, SRS_TEXT_FIELDS.nfrs),
+    deferred: n.release === "deferred",
+    sourceRef: n.source_ref
+  })),
+  ...spine.business_rules.map((b): RequirementItem => ({
+    id: b.id,
+    label: `Quy tắc nghiệp vụ ${b.id}`,
+    section: b.tier === "high" ? "fixed:1" : "fixed:5.1",
+    step: b.tier === "high" ? "S-2.4" : "S-7.1",
+    fields: pickTextFields(b, SRS_TEXT_FIELDS.business_rules),
+    deferred: false,
+    sourceRef: b.source_ref
+  }))
+]
+
+/** Không cổng bước: chữ đã nằm trong tài liệu thì từ mơ hồ là lỗi thật, kể cả ở chế độ 1. */
+const vagueWording = (spine: Spine): FlagCandidate[] =>
+  requirementItems(spine)
+    .filter((r) => !r.deferred)
+    .flatMap((r): FlagCandidate[] => {
+      const found = [...new Set(Object.values(r.fields).flatMap(textsOf).flatMap(vagueWordsIn))]
+      if (found.length === 0) return []
+      return [{
+        level: "red",
+        rule_id: "vague_wording",
+        section_id: r.section,
+        target_id: r.id,
+        message: `${r.label} dùng từ chưa rõ nghĩa (${found.map((w) => `"${w}"`).join(", ")}) - thay bằng số đo hoặc điều kiện kiểm chứng được`,
+        remediation_step: r.step
+      }]
+    })
+
+/**
+ * Yêu cầu do AI soạn phải ghi được nguồn (tài liệu, đoạn hoặc người yêu cầu) - `source_ref`. Chỉ áp cho phần AI soạn (chế độ 2-4);
+ * chế độ 1 trích từ file có sẵn nên hồ sơ luật loại cờ này. Cổng bước sở hữu: step chưa chốt thì chưa đòi nguồn.
+ */
+const sourceMissing = (spine: Spine, gate: StepGate): FlagCandidate[] =>
+  requirementItems(spine)
+    .filter((r) => !r.deferred && !r.sourceRef?.trim() && gate.done(r.step))
+    .map((r) => ({
+      level: "red" as const,
+      rule_id: "source_missing",
+      section_id: r.section,
+      target_id: r.id,
+      message: `${r.label} chưa ghi nguồn (tài liệu, đoạn hoặc người yêu cầu)`,
+      remediation_step: r.step
+    }))
+
+// ─── yellow: content_type_missing (tầng 2) ───────────────────────
+
+/**
+ * Loại nội dung ISO 29148 một SRS cần có ⇒ mảng Spine nuôi nó. Chỉ liệt kê loại KHÔNG có luật đỏ "chưa có X" riêng
+ * (`array_empty` đã đòi actor, chức năng, thực thể, độ tin cậy, hiệu năng) để một chỗ thiếu không ra hai cờ.
+ */
+const CONTENT_TYPES: readonly { name: string; section: string; present: (s: Spine) => boolean }[] = [
+  { name: "phạm vi sản phẩm (mục nằm trong phạm vi)", section: "fixed:1", present: (s) => s.project.release_scope.in.length > 0 },
+  { name: "ràng buộc và quy tắc nghiệp vụ cấp cao", section: "fixed:1", present: (s) => s.business_rules.some((b) => b.tier === "high") },
+  { name: "yêu cầu chất lượng khác (bảo mật, bảo trì...)", section: "fixed:4.2.4", present: (s) => nfrCount(s, "other") > 0 },
+  { name: "thuật ngữ", section: "fixed:5.5", present: (s) => s.glossary.length > 0 }
+]
+
+const contentTypeMissing = (spine: Spine, gate: StepGate): FlagCandidate[] =>
+  CONTENT_TYPES.filter((t) => !t.present(spine) && gate.done(...stepsOf(t.section, spine))).map((t) => ({
+    level: "yellow" as const,
+    rule_id: "content_type_missing",
+    section_id: t.section,
+    target_id: t.name,
+    message: `Tài liệu chưa có ${t.name} - một SRS theo ISO/IEC/IEEE 29148 cần loại nội dung này`,
+    remediation_step: ownerStepOf(t.section, spine)
+  }))
+
+// ─── cấu trúc bảng mẫu (soạn section qua chat) ───────────────────
+
+export interface TableStructureBlock {
+  kind: string
+  rows: string[][] | null
+}
+
+export interface TableStructureProblem {
+  /** Thứ tự bảng trong mục (từ 1). */
+  table: number
+  reason: "missing" | "columns" | "header"
+  expected: string[]
+  actual: string[] | null
+}
+
+const headerCell = (cell: string): string => cell.normalize("NFC").replace(/\s+/g, " ").trim().toLowerCase()
+
+/**
+ * So hàng tiêu đề của từng bảng trong mục do chat soạn với bảng của mẫu: bảng thứ k của bản soạn phải đủ cột và đúng tên cột,
+ * đúng thứ tự như bảng thứ k của mẫu. Bản soạn có thêm bảng ngoài mẫu thì bỏ qua. Trả `[]` khi đạt. Hàm thuần - đường soạn mục
+ * trống qua chat dùng làm cổng cứng trước khi ghi.
+ */
+export const checkTableStructure = (template: readonly TableStructureBlock[], draft: readonly TableStructureBlock[]): TableStructureProblem[] => {
+  const headerOf = (b: TableStructureBlock): string[] => (b.rows?.[0] ?? []).map((c) => c.trim())
+  const expectedTables = template.filter((b) => b.kind === "table" && (b.rows?.length ?? 0) > 0)
+  const draftTables = draft.filter((b) => b.kind === "table" && (b.rows?.length ?? 0) > 0)
+  const out: TableStructureProblem[] = []
+  expectedTables.forEach((t, i) => {
+    const expected = headerOf(t)
+    const got = draftTables[i]
+    if (!got) {
+      out.push({ table: i + 1, reason: "missing", expected, actual: null })
+      return
+    }
+    const actual = headerOf(got)
+    if (actual.length !== expected.length) out.push({ table: i + 1, reason: "columns", expected, actual })
+    else if (actual.some((c, j) => headerCell(c) !== headerCell(expected[j]))) out.push({ table: i + 1, reason: "header", expected, actual })
+  })
+  return out
+}
+
 // ─── entry ───────────────────────────────────────────────────────
 
 /**
@@ -1682,6 +1940,10 @@ export const runDeterministicCheck = (
     ...sequenceComponentMissing(spine, options.renderContext),
     ...originalDiagramStale(spine),
     ...nfrMissingNumber(spine, gate),
+    ...duplicateName(spine),
+    ...vagueWording(spine),
+    ...sourceMissing(spine, gate),
+    ...contentTypeMissing(spine, gate),
     ...useCaseRelations(spine),
     ...(atBaseline ? [...unconfirmedAssumption(spine), ...sectionsAtBaseline(spine, changes), ...screenPendingAtBaseline(spine), ...orphanScreenAtBaseline(spine), ...orphanEntityAtBaseline(spine)] : []),
     ...screenPlaceholder(spine, atBaseline),
@@ -1698,7 +1960,10 @@ export const runDeterministicCheck = (
     ...nonEnglishContent(spine, gate),
     ...(options.ruleProfile?.sectionSegments?.length ? originalTextMentionsChanged(spine, options.ruleProfile.sectionSegments) : []),
     ...(options.ruleProfile?.templateLayout
-      ? fixedTemplateGaps(spine, options.ruleProfile.templateLayout, options.ruleProfile.templateWrappers, options.ruleProfile.templateFilled, options.ruleProfile.templateMissing, options.ruleProfile.templateKept)
+      ? [
+          ...fixedTemplateGaps(spine, options.ruleProfile.templateLayout, options.ruleProfile.templateWrappers, options.ruleProfile.templateFilled, options.ruleProfile.templateMissing, options.ruleProfile.templateKept),
+          ...standardSectionMissing(spine, options.ruleProfile.templateLayout, options.ruleProfile.templateKept)
+        ]
       : []),
     ...(options.ruleProfile?.templateMissing?.size ? migrationMissing(spine, options.ruleProfile.templateMissing, options.ruleProfile.templateFilled, options.ruleProfile.templateHeadings) : []),
     ...(options.ruleProfile?.checkSectionReferences ? sectionReferencesAfterMigration(spine, options.ruleProfile.referenceBaseline) : [])

@@ -119,6 +119,8 @@ describe("C-3 tìm lại", () => {
     expect(late.status).toBe(409)
     expect(late.body.error.code).toBe("CR_INVALID_TRANSITION")
 
+    // Mỗi người một CR mở một lúc ⇒ huỷ CR vừa chạy trước khi tạo CR kế
+    detail(await c.post(`${cr}/cancel`, { reason: "Chỉ để thử CR kế tiếp" }))
     const other = await newCr(c)
     detail(await c.post(`/change-requests/${other}/clarify`))
     await Spine.deleteOne({ projectId })
