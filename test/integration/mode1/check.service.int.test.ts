@@ -85,9 +85,9 @@ describe("check - AI semantic (1.11)", () => {
       [semanticBatchStep(1), "deducted", "import_semantic_check"],
       [CROSS_CHECK_STEP, "deducted", "import_cross_check"]
     ])
-    // 6 lượt I-4 + 1 lô check + 1 lượt kiểm chéo (mẫu ngắn ⇒ mỗi lượt quyết toán 1 credit theo token), cộng lượt AI đổi tên
+    // 7 lượt I-4 (FLF-444: có mục riêng "5.9 Team Notes") + 1 lô check + 1 lượt kiểm chéo (mẫu ngắn ⇒ mỗi lượt quyết toán 1 credit theo token), cộng lượt AI đổi tên
     // của đề xuất mẫu sau baseline 0.1 (UC-85)
-    expect(await CreditWallet.findOne({ userId }).lean()).toMatchObject({ balance: 992 - (await proposalCost(projectId)), reserved: 0 })
+    expect(await CreditWallet.findOne({ userId }).lean()).toMatchObject({ balance: 991 - (await proposalCost(projectId)), reserved: 0 })
   })
 
   it("cờ AI không bị recompute tất định đóng ở lượt sau", async () => {

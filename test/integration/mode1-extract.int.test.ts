@@ -68,8 +68,8 @@ describe("mode 1 - trích field (I-4) + xác nhận", () => {
     expect(run.import.status).toBe("gap_review")
     expect(run.import.extract_cursor).toBeNull()
     expect(run.sections.every((s) => s.status === "done")).toBe(true)
-    // 6 section có chữ ⇒ 6 lượt AI; bảng actor/UC/BR không gọi AI
-    expect(extractCalls()).toBe(6)
+    // 6 section có chữ + mục riêng "5.9 Team Notes" (FLF-444: heading tự đặt cũng đọc theo nội dung) ⇒ 7 lượt AI; bảng actor/UC/BR không gọi AI
+    expect(extractCalls()).toBe(7)
     const steps = await Usage.find({ projectId, state: "deducted" }).distinct("step_id")
     expect(steps).toContain("I-4:fixed:1")
     expect(steps.some((s: string) => s.startsWith("I-4:function:@B"))).toBe(true)
@@ -109,7 +109,7 @@ describe("mode 1 - trích field (I-4) + xác nhận", () => {
     expect(resumed.import.paused).toBeNull()
     // chạy tiếp tới cùng đích của lượt một mạch
     expect(resumed.import.status).toBe("gap_review")
-    expect(extractCalls()).toBe(6)
+    expect(extractCalls()).toBe(7)
     for (const s of doneBefore) expect(resumed.sections.find((x) => x.section_id === s)?.status).toBe("done")
   })
 
@@ -133,7 +133,7 @@ describe("mode 1 - I-4 chạy nền", () => {
     const { waitForFinalize } = await import("../../src/modules/import/finalize-jobs.js")
     await waitForExtraction(id)
     await waitForFinalize(id)
-    expect(extractCalls()).toBe(6)
+    expect(extractCalls()).toBe(7)
 
     // Giả lập job mất giữa chừng: import vẫn extracting, có cursor, không có job
     const { ImportedDocument } = await import("../../src/modules/import/imported-document.model.js")
