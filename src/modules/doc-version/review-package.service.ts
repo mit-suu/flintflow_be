@@ -23,7 +23,7 @@ import * as flagsService from "../spine/flags.service.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { BaselineSubmission, Flag } from "../spine/spine.types.js"
-import type { ReviewPackageDto, ReviewPackageCrDto } from "./doc-version.dto.js"
+import type { ReviewPackageDto, ReviewPackageCrDto, ReviewPackageRoundDto } from "./doc-version.dto.js"
 import { listDocVersions } from "./doc-version.service.js"
 import { nextMajor } from "./versioning.js"
 import { assertNoRunningStep } from "../pipeline/run-state.service.js"
@@ -68,6 +68,30 @@ const toCrDto = (cr: IChangeRequest): ReviewPackageCrDto => ({
   written_at: (cr.updatedAt ?? cr.createdAt).toISOString()
 })
 
+/**
+ * FLF-480 (B13): `submitPackage` (`:138-147`) ghi đè `baseline_submission` bằng một bản mới mỗi lần gửi lại ⇒ lý do
+ * "Yêu cầu sửa" của vòng trước chỉ còn lại trong change log, không phải trên chính Spine. Không đổi schema Spine —
+ * dựng lại các vòng đã bị ghi đè kể từ lần phát hành gần nhất (hoặc từ đầu nếu chưa phát hành bản nào), mới nhất trước.
+ */
+const previousRounds = async (projectId: string, submission: BaselineSubmission | null): Promise<ReviewPackageRoundDto[]> => {
+  const versions = await listDocVersions(projectId)
+  const lastRelease = versions.find((v) => v.kind === "release") ?? null
+  const changes = await spineRepository.listChanges(projectId)
+  const rounds: ReviewPackageRoundDto[] = []
+  for (const change of changes) {
+    if (change.path !== "baseline_submission") continue
+    if (lastRelease && new Date(change.at).getTime() <= lastRelease.createdAt.getTime()) continue
+    const value = change.value as BaselineSubmission | null
+    if (value?.status === "rejected" && value.decided_by && value.decided_at) {
+      rounds.push({ decided_by: value.decided_by, decided_at: value.decided_at, reason: value.reason ?? null })
+    }
+  }
+  // Vòng đang hiệu lực (Lead vừa yêu cầu sửa, BA chưa gửi lại) đã hiện qua `submission` — không lặp lại ở "vòng trước".
+  const last = rounds[rounds.length - 1]
+  if (submission?.status === "rejected" && last && last.decided_at === submission.decided_at) rounds.pop()
+  return rounds.reverse()
+}
+
 /** Trạng thái gói hiện tại của dự án (mọi vai trò đọc được). */
 export const getPackage = async (projectId: string): Promise<ReviewPackageDto> => {
   const record = await spineRepository.get(projectId)
@@ -78,6 +102,7 @@ export const getPackage = async (projectId: string): Promise<ReviewPackageDto> =
   const submission = record.baseline_submission ?? null
   const redOpen = record.flags.filter((f) => f.level === "red" && f.resolved_at === null).length
   const status: ReviewPackageDto["status"] = submission?.status === "pending" ? "pending" : submission?.status === "rejected" ? "changes_requested" : "drafting"
+  const rounds = await previousRounds(projectId, submission)
   return {
     status,
     base_version: base,
@@ -87,7 +112,8 @@ export const getPackage = async (projectId: string): Promise<ReviewPackageDto> =
     change_requests: crIds.map((id) => byId.get(id)).filter((c): c is IChangeRequest => !!c).map(toCrDto),
     red_open: redOpen,
     submission,
-    spine_version: record.spine_version
+    spine_version: record.spine_version,
+    rounds
   }
 }
 
