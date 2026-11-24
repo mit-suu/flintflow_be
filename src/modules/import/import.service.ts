@@ -338,7 +338,7 @@ const previewOf = async (
 ) => {
   // Spine rỗng: lúc này chưa trích gì — dữ liệu của lần upload trước (chưa có bản gốc) không được làm mục "có nội dung"
   const plain = spineRepository.createEmptySpine({})
-  const blocks = dropKeys.length ? applyDropToBlocks(allBlocks, planDrop(allBlocks, textRegions(allBlocks, headingMap), new Set(dropKeys), doc.intent ?? "free")) : allBlocks
+  const blocks = dropKeys.length ? applyDropToBlocks(allBlocks, planDrop(allBlocks, textRegions(allBlocks, headingMap), new Set(dropKeys))) : allBlocks
   const layoutBlocks = blocks.map((b) => ({
     block_id: b.block_id,
     kind: b.kind,
@@ -460,7 +460,7 @@ export const applyDropText = async (doc: IImportedDocument): Promise<void> => {
     const profile = await TemplateProfile.findOne({ projectId: doc.projectId }, { heading_map: 1, drop_text: 1 }).lean()
     if (!profile?.drop_text?.length) return
     const { pkg, blocks } = await parseDocument(await loadImportFile(doc))
-    applyDropToDom(blocks, planDrop(blocks, textRegions(blocks, profile.heading_map), new Set(profile.drop_text), doc.intent ?? "free"))
+    applyDropToDom(blocks, planDrop(blocks, textRegions(blocks, profile.heading_map), new Set(profile.drop_text)))
     await cleanupDroppedPackage(pkg)
     const rewrittenRef = await docFileStore().save(await pkg.toBuffer(), { projectId: String(doc.projectId), kind: "upload", name: doc.original_name })
     doc.file_ref = rewrittenRef
@@ -475,6 +475,8 @@ export const applyDropText = async (doc: IImportedDocument): Promise<void> => {
       await docFileStore().remove(rewrittenRef).catch(() => undefined)
       throw err
     }
+    // Tách lại tạo hồ sơ mới (không còn lựa chọn Bỏ chữ) ⇒ ghi lại vùng đã bỏ cho I-5 (FLF-463)
+    await TemplateProfile.updateOne({ projectId: doc.projectId }, { $set: { dropped_text: profile.drop_text } })
     if (originalRef) await docFileStore().remove(originalRef).catch(() => undefined)
   } finally {
     await ImportedDocument.updateOne({ _id: doc._id }, { $set: { drop_applying: false } })

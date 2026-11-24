@@ -280,7 +280,9 @@ describe("Luồng 2 cho phần thiếu - chế độ 3", () => {
     const spine = (await spineRepository.get(projectId))!
     expect(spine.progress.current_step).toBe("B-1.1")
     const statusOf = (id: string) => spine.steps.filter((st) => st.id === id || st.id.startsWith(`${id}@`)).map((st) => st.status)
-    const keep = new Set(structure.sections.filter((sec) => sec.status === "present").flatMap((sec) => sec.owner_steps))
+    // FLF-463: heading riêng của file là mục của đích ⇒ mục riêng còn trống giữ bước soạn mục riêng mở (FLF-382: chỉ ghi đúng mục trống)
+    const missingOwners = new Set(structure.sections.filter((sec) => sec.status === "missing").flatMap((sec) => sec.owner_steps))
+    const keep = new Set(structure.sections.filter((sec) => sec.status === "present").flatMap((sec) => sec.owner_steps).filter((o) => !missingOwners.has(o)))
     for (const owner of keep) expect(statusOf(owner).includes("pending"), owner).toBe(false)
     const draft = [...new Set(structure.sections.filter((sec) => sec.status === "missing").flatMap((sec) => sec.owner_steps))].filter((o) => !keep.has(o))
     expect(draft.length).toBeGreaterThan(0)
@@ -345,18 +347,18 @@ describe("Luồng 2 cho phần thiếu - chế độ 3", () => {
       .toBe(readZipText(source, "word/styles.xml"))
   })
 
-  it("FLF-378 luồng C: mẫu mục nào cũng có chữ ví dụ ⇒ vẫn chế độ 3, mọi mục 'Sẽ soạn', không 0.1, không bước nào chốt sẵn; continue ⇒ bước sở hữu mục mẫu chờ soạn", async () => {
+  it("FLF-463 (đảo FLF-378 luồng C): khung mẫu giữ khung có mục đã viết (kể cả chữ ví dụ) ⇒ mục đó là có, được đọc, không soạn lại; chỉ soạn mục còn trống, không 0.1", async () => {
     const source = await makeDocx({
       styles: `<w:style w:type="paragraph" w:styleId="u1"><w:name w:val="heading 1"/></w:style><w:style w:type="paragraph" w:styleId="u2"><w:name w:val="heading 2"/></w:style>`,
       body:
         styled("u1", "1 Product Overview") +
         styled("u2", "1.1 Purpose") + p("Ví dụ: Hệ thống quản lý thư viện giúp thủ thư theo dõi sách mượn.") +
         styled("u2", "1.2 Scope") + p("The Library System covers borrowing and returning books for members.") +
-        styled("u2", "1.3 Document Conventions") + p("Requirements are written in bold, e.g. FR-001.")
+        styled("u2", "1.3 Document Conventions") + p("[Describe the conventions.]")
     })
     const { projectId, importId, userId } = await importAtExtracting({ buffer: source })
     await runExtraction(projectId, userId, importId)
-    // Hồ sơ trước màn đọc khung (không có bản sơ bộ): dự án mới có mẫu bắt buộc vẫn là khung mẫu như cũ
+    // Hồ sơ trước màn đọc khung (không có bản sơ bộ), dự án mới có mẫu bắt buộc: nhãn khung mẫu không làm mục đã viết thành thiếu
     await Project.updateOne({ _id: projectId }, { $set: { template_intent: "fixed", start_kind: "new" } })
     await TemplateProfile.updateOne({ projectId }, { $set: { structure_preview: null } })
     await startFinalize(projectId, userId, { import_id: importId, base_version: await version(projectId) })
@@ -364,31 +366,22 @@ describe("Luồng 2 cho phần thiếu - chế độ 3", () => {
     expect((await ImportedDocument.findById(importId))!.status).toBe("drafting")
     const structure = (await TemplateProfile.findOne({ projectId }).lean())!.target_structure!
     expect(structure.resolved_mode).toBe(3)
-    expect(structure.sections.length).toBeGreaterThan(0)
-    expect(structure.sections.every((s) => s.status === "missing")).toBe(true)
+    expect(structure.sections.find((s) => s.section_id === "fixed:1")?.status).toBe("present")
+    const conventions = structure.sections.find((s) => s.title.includes("Document Conventions"))!
+    expect(conventions.status).toBe("missing")
+    expect(structure.missing).toEqual([conventions.section_id])
     expect(await DocVersion.countDocuments({ projectId })).toBe(0)
-    const seeded = (await spineRepository.get(projectId))!
-    expect(seeded.steps.filter((s) => s.status === "accepted" && s.id !== "S-8.3").map((s) => s.id)).toEqual([])
-    // C2.1: chữ ví dụ của mẫu không thành dữ liệu Spine; nằm ở ngữ cảnh mẫu theo mục
-    expect(JSON.stringify(stripRecord(seeded))).not.toMatch(/thư viện|Library System/)
+    // Ngữ cảnh mẫu chỉ cho mục còn trống — mục đã viết không bị soạn lại
     const context = (await TemplateProfile.findOne({ projectId }).lean())!.template_context!
-    const overview = context.find((c) => c.section_id === "fixed:1")!
-    expect(overview.guidance).toEqual(["Sub-section: 1.1 Purpose", "Sub-section: 1.2 Scope"])
-    expect(overview.passages).toEqual([
-      { text: "Ví dụ: Hệ thống quản lý thư viện giúp thủ thư theo dõi sách mượn.", kind: "example" },
-      { text: "The Library System covers borrowing and returning books for members.", kind: "unclassified" }
-    ])
-    // Mục riêng của mẫu: nguyên văn không giữ lại (không lọt vào bản in), chữ nằm ở ngữ cảnh
-    expect(context.find((c) => c.heading.includes("Document Conventions"))!.passages).toEqual([{ text: "Requirements are written in bold, e.g. FR-001.", kind: "example" }])
-    expect(seeded.custom_sections.every((c) => c.blocks.length === 0)).toBe(true)
-    // Khung mẫu: không lưu Spine mốc (chữ của mẫu không in lại)
-    expect((await TemplateProfile.findOne({ projectId }).lean())!.flow2_entry_at ?? null).toBeNull()
+    expect(context.map((c) => c.section_id)).toEqual([conventions.section_id])
+    expect(context[0]!.guidance).toEqual(["Describe the conventions."])
+    // Có mục đã viết ⇒ như SRS viết dở: lưu Spine mốc để bản in giữ nguyên văn mục chưa đổi
+    expect((await TemplateProfile.findOne({ projectId }).lean())!.flow2_entry_at).toBeTruthy()
     const spine = (await spineRepository.get(projectId))!
-    const owners = new Set(structure.sections.flatMap((s) => s.owner_steps.map((id) => id.split("@")[0])))
-    expect(owners.size).toBeGreaterThan(0)
-    const ownerSteps = spine.steps.filter((s) => owners.has(s.id.split("@")[0]))
-    expect(ownerSteps.length).toBeGreaterThan(0)
-    expect(ownerSteps.every((s) => s.status === "pending")).toBe(true)
+    const statusOf = (id: string) => spine.steps.filter((st) => st.id === id || st.id.startsWith(`${id}@`)).map((st) => st.status)
+    for (const owner of conventions.owner_steps) expect(statusOf(owner.split("@")[0]), owner).toContain("pending")
+    const kept = structure.sections.find((s) => s.section_id === "fixed:1")!.owner_steps.filter((o) => !conventions.owner_steps.includes(o))
+    for (const owner of kept) expect(statusOf(owner).includes("pending"), owner).toBe(false)
   })
 })
 

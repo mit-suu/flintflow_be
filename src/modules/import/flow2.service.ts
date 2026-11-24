@@ -84,8 +84,8 @@ export const flow2StepOps = (
 
 /**
  * Hàm thuần: bước cần soạn / bước giữ chốt khi sang Luồng 2.
- * - Khung mẫu (`isTemplateFile`): chữ trong file là hướng dẫn / ví dụ ⇒ soạn **mọi mục của mẫu** (trừ Record of Changes, bìa,
- *   mục lục), không giữ bước nào (hồ sơ trước FLF-378 có thể đã đánh `accepted` vì chữ ví dụ).
+ * - Khung mẫu chưa có mục nào viết (`isTemplateFile`, không mục `present` — FLF-463): soạn **mọi mục của mẫu** (trừ Record of
+ *   Changes, bìa, mục lục), không giữ bước nào (hồ sơ trước FLF-378 có thể đã đánh `accepted` vì chữ ví dụ).
  * - SRS đã viết: chỉ bước sở hữu mục `missing`; bước sở hữu mục `present` giữ chốt — trừ bước soạn **mục riêng / phần nhỏ** của
  *   mẫu (FLF-382: S-8.1 sở hữu mọi mục riêng, S-9.4 phần Apportioning): còn mục riêng trống thì bước đó vẫn soạn, nhưng chỉ được
  *   ghi đúng mục còn trống (`template-guidance.ts`: đường ghi theo từng mục riêng, `template_context` chỉ có mục thiếu).
@@ -140,7 +140,8 @@ export const enterFlow2 = async (doc: IImportedDocument, by: string, baseVersion
   }
   const spine = await spineRepository.get(projectId)
   if (!spine) throw new Mode1Error("IMPORT_INVALID_STATE", "Dự án chưa có dữ liệu tài liệu", { status: doc.status })
-  const templateFile = isTemplateFile(project, profile)
+  // FLF-463: nhãn "Khung mẫu" không làm soạn lại mục đã viết — chỉ file chưa có mục nào viết mới soạn trọn mẫu
+  const templateFile = isTemplateFile(project, profile) && !profile.target_structure.sections.some((s) => s.status === "present")
   const { draft, keep } = flow2Owners(profile.target_structure.sections, templateFile)
   const applied = await applyTransaction(projectId, {
     base_version: baseVersion ?? spine.spine_version,
