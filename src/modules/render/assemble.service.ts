@@ -427,7 +427,22 @@ const pruneOldDraftCache = async (projectId: string): Promise<void> => {
 
 // ─── §I: changes nhẹ (review T5) + tên người ghi (review T7) ──────
 
-const RECORD_CHANGE_PROJECTION = { txn: 1, at: 1, by: 1, reason: 1, op: 1, step_id: 1, path: 1, seq: 1 } as const
+// FLF-474 (plan fix #7 phần 7c): `before.name/term/title/heading` — tên phần tử ngay trước khi op `remove` xoá nó,
+// để dòng §I không tra nhầm tên của phần tử khác nếu mã đã bị cấp lại (`removedNameOf` dưới).
+const RECORD_CHANGE_PROJECTION = {
+  txn: 1,
+  at: 1,
+  by: 1,
+  reason: 1,
+  op: 1,
+  step_id: 1,
+  path: 1,
+  seq: 1,
+  "before.name": 1,
+  "before.term": 1,
+  "before.title": 1,
+  "before.heading": 1
+} as const
 
 interface ChangeRecordDoc {
   txn: string
@@ -437,6 +452,15 @@ interface ChangeRecordDoc {
   op: string
   path: string
   step_id: string | null
+  before?: { name?: unknown; term?: unknown; title?: unknown; heading?: unknown } | null
+}
+
+const removedNameOf = (before: ChangeRecordDoc["before"]): string | undefined => {
+  for (const key of ["name", "term", "title", "heading"] as const) {
+    const v = before?.[key]
+    if (typeof v === "string" && v.trim()) return v.trim()
+  }
+  return undefined
 }
 
 /**
@@ -452,7 +476,8 @@ const recordChangeLog = createChangeLog<ChangeRecordRow>(RECORD_CHANGE_PROJECTIO
   reason: d.reason,
   op: d.op,
   path: d.path,
-  step_id: d.step_id
+  step_id: d.step_id,
+  ...(d.op === "remove" ? { removed_name: removedNameOf(d.before) } : {})
 }))
 
 /** Record of Changes không ghi dòng nào do đổi mẫu sinh ra (dòng `Baseline <số>` của lần phát hành vẫn có). */

@@ -58,12 +58,26 @@ export const isPlaceholderId = (value: unknown): value is string => typeof value
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
-/** Id kế tiếp cho danh sách `existing` theo `format`. */
-export const nextIdIn = (existing: readonly string[], format: IdFormat): string => {
+/**
+ * Id đã từng bị xoá của dự án, nhóm theo collection — khoá đúng như tham số `collection` của `allocateId`
+ * (`"use_cases"`, `"validations"`, `"states"`, `"activity_nodes"`, …). FLF-474 (plan fix #7, phần 7c):
+ * mã đã xoá tính "đã dùng" để không bị cấp lại cho phần tử khác. Chỉ dùng khi **cấp mã mới**; xem
+ * `spine/change-log.ts` `retiredIds` để tính tập này từ lịch sử `changes`.
+ */
+export type RetiredIds = ReadonlyMap<string, readonly string[]>
+
+/** Id kế tiếp cho danh sách `existing` theo `format`; `retired` (mã đã xoá, FLF-474) cũng bị coi là đã dùng. */
+export const nextIdIn = (existing: readonly string[], format: IdFormat, retired: readonly string[] = []): string => {
   const re = new RegExp(`^${escapeRe(format.prefix)}(\\d+)$`)
   let max = 0
   let width = format.width
   for (const id of existing) {
+    const m = re.exec(id)
+    if (!m) continue
+    max = Math.max(max, Number(m[1]))
+    width = Math.max(width, m[1].length)
+  }
+  for (const id of retired) {
     const m = re.exec(id)
     if (!m) continue
     max = Math.max(max, Number(m[1]))
@@ -99,22 +113,24 @@ export const allocatesIds = (collection: string): boolean => collection === "val
 /**
  * Id mới cho một phần tử thêm vào `collection`. `parentId` chỉ dùng cho `validations` (id function cha), `activity_nodes` (id use case) và `states` (id entity).
  * `null` ⇒ collection không do allocator quản lý (vd `steps`, `sections` — khoá có nghĩa, không đánh số).
+ * `retired` (FLF-474): mã đã từng bị xoá của dự án, cũng bị coi là đã dùng — không cấp lại cho phần tử khác.
  */
-export const allocateId = (spine: Spine, collection: string, parentId: string | null = null): string | null => {
+export const allocateId = (spine: Spine, collection: string, parentId: string | null = null, retired?: RetiredIds): string | null => {
+  const retiredFor = (key: string): readonly string[] => retired?.get(key) ?? []
   if (collection === "validations") {
     if (!parentId) return null
     const all = spine.functions.flatMap((f) => f.validations.map((v) => v.id))
-    return nextIdIn(all, { prefix: `${parentId}-V`, width: 1 })
+    return nextIdIn(all, { prefix: `${parentId}-V`, width: 1 }, retiredFor("validations"))
   }
   if (collection === "states") {
     // Trạng thái lồng trong entity: `<entity id>-ST<n>`, duy nhất trên toàn Spine (transition tham chiếu bằng id)
     if (!parentId) return null
-    return nextIdIn(spine.entities.flatMap((e) => (e.states ?? []).map((s) => s.id)), { prefix: `${parentId}-ST`, width: 1 })
+    return nextIdIn(spine.entities.flatMap((e) => (e.states ?? []).map((s) => s.id)), { prefix: `${parentId}-ST`, width: 1 }, retiredFor("states"))
   }
   if (collection === "activity_nodes") {
     // FLF-390: nút activity lồng trong use case: `<use case id>-AN<n>`, duy nhất trên toàn Spine (flow tham chiếu bằng id)
     if (!parentId) return null
-    return nextIdIn(spine.use_cases.flatMap((u) => (u.activity_nodes ?? []).map((n) => n.id)), { prefix: `${parentId}-AN`, width: 1 })
+    return nextIdIn(spine.use_cases.flatMap((u) => (u.activity_nodes ?? []).map((n) => n.id)), { prefix: `${parentId}-AN`, width: 1 }, retiredFor("activity_nodes"))
   }
   const format = ID_FORMATS[collection]
   if (!format) return null
@@ -122,7 +138,7 @@ export const allocateId = (spine: Spine, collection: string, parentId: string | 
   const ids = Array.isArray(list)
     ? list.map((el) => (typeof el === "object" && el !== null ? (el as { id?: unknown }).id : undefined)).filter((id): id is string => typeof id === "string")
     : []
-  return nextIdIn(ids, formatFor(ids, format))
+  return nextIdIn(ids, formatFor(ids, format), retiredFor(collection))
 }
 
 /** Thay id tạm đã được cấp trong chuỗi (path, hoặc giá trị như `assumptions[].path`). */

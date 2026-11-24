@@ -332,7 +332,7 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
   const spine = stripRecord(record)
   const locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
   // Sửa tay / "Sửa lại" cũng có thể mang id trùng ⇒ đổi trước khi chạy khô (FLF-307)
-  await fixDuplicateIds(spine, locations)
+  await fixDuplicateIds(spine, locations, String(cr.projectId))
   // Đề xuất của vị trí khác có thể đã đổi (sửa tay, "Sửa lại") ⇒ kết luận vẽ lại sơ đồ gốc tính lại trước khi kiểm (§4.13)
   await refreshDiagramLocations(spine, locations)
   const locks = ownedElements(cr.cr_id, locations)

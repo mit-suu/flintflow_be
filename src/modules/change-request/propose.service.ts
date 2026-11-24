@@ -23,6 +23,7 @@ import { expectedContentOf, partOfHeading, partsMentionedIn, skillOfPart, skillO
 import { splitInstruction } from "../../shared/utils/instruction-text.js"
 import { TemplateProfile, type HeadingMapEntry, type LayoutEntry } from "../import/template-profile.model.js"
 import { TransactionRejectedError, planTransaction } from "../spine/op-engine.js"
+import { retiredIds } from "../spine/change-log.js"
 import { userOpSchema, type Op } from "../spine/op.types.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
@@ -106,9 +107,13 @@ export const previewAfter = (spine: Spine, path: string, rawOps: readonly unknow
   }
 }
 
-/** FLF-307: id trùng trong op `add` của CR đổi sang id chưa dùng (`new-ids.ts`); vị trí bị đổi tính lại bản xem trước. */
-export const fixDuplicateIds = async (spine: Spine, locations: IChangeLocation[]): Promise<void> => {
-  for (const l of reassignDuplicateIds(spine, locations)) {
+/**
+ * FLF-307: id trùng trong op `add` của CR đổi sang id chưa dùng (`new-ids.ts`); vị trí bị đổi tính lại bản xem trước.
+ * FLF-474: id model tự đặt trùng mã đã bị xoá của dự án cũng bị đổi — `projectId` để tải tập mã đã xoá.
+ */
+export const fixDuplicateIds = async (spine: Spine, locations: IChangeLocation[], projectId: string): Promise<void> => {
+  const retired = await retiredIds(projectId)
+  for (const l of reassignDuplicateIds(spine, locations, retired)) {
     l.proposal!.new_text = previewAfter(spine, l.path, l.proposal!.spine_ops)
     l.verify = null
     l.markModified("proposal")
@@ -435,7 +440,7 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
       if (batch.length) console.warn(`[C-4] ${cr.cr_id}: model bỏ sót ${batch.map((l) => l.location_id).join(", ")} sau ${PROPOSE_ATTEMPTS} lượt - chờ sửa tay`)
     }
   }
-  await fixDuplicateIds(spine, locations)
+  await fixDuplicateIds(spine, locations, String(cr.projectId))
   await refreshDiagramLocations(spine, locations)
   await regroup(cr)
 }

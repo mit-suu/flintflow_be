@@ -35,4 +35,14 @@ describe("crRecordDescription", () => {
     expect(describeCrChanges(many, "en")).toBe("Update use case UC-01; Update use case UC-02; Update use case UC-03; and 2 more changes")
     expect(crRecordDescription("CR-003", ["CR-003: Sửa giúp"], [{ op: "set", path: "???" }], "en")).toBe("CR-003: Document updated")
   })
+
+  it("FLF-474: op remove có removed_name ⇒ dòng ghi đúng tên đã xoá dù Spine hiện có phần tử khác cùng mã", () => {
+    // UC34 "Chat với shop" bị CR-003 xoá; CR-006 sau đó thêm use case mới cũng mang mã UC34 (mã bị cấp lại trước khi
+    // vá FLF-474) — dòng §I của CR-003 không được đổi theo tên của use case mới.
+    const reused: Spine = { use_cases: [{ id: "UC34", name: "Tích điểm thành viên" }] } as unknown as Spine
+    const changes = [{ op: "remove", path: "use_cases[id=UC34]", removed_name: "Chat với shop" }]
+    expect(describeCrChanges(changes, "vi", reused)).toBe('Xoá use case "Chat với shop"')
+    // Không có removed_name (dữ liệu cũ, trước fix) ⇒ vẫn tra theo Spine hiện tại như cũ (tương thích ngược)
+    expect(describeCrChanges([{ op: "remove", path: "use_cases[id=UC34]" }], "vi", reused)).toBe('Xoá use case "Tích điểm thành viên"')
+  })
 })

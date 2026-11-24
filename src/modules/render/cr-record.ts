@@ -64,6 +64,8 @@ const TOP = /^([a-z_]+)(?:\[(?:id=)?([^\]]*)\])?(?:\.([a-z_]+))?/
 export interface CrRecordChange {
   op: string
   path?: string
+  /** Tên phần tử ngay trước khi bị xoá (FLF-474) — ưu tiên hơn tra theo Spine hiện tại khi `op === "remove"`. */
+  removed_name?: string
 }
 
 const nameOf = (spine: Spine | undefined, entity: string, id: string): string | null => {
@@ -88,7 +90,9 @@ const itemOf = (change: CrRecordChange, lang: Lang, spine: Spine | undefined): {
   // Op đặt lên chính phần tử (`actors[]`, `actors[id=A04]`) ⇒ thêm / xoá phần tử; op vào bên trong phần tử ⇒ cập nhật
   const onElement = whole === (change.path ?? "")
   const verb: keyof typeof VERB = onElement && change.op === "add" ? "add" : onElement && change.op === "remove" ? "remove" : "update"
-  const name = id ? nameOf(spine, entity, id) : null
+  // FLF-474: op `remove` thì phần tử không còn trong Spine hiện tại — mã của nó có thể đã được cấp lại cho phần tử
+  // khác (`spine/change-log.ts` `retiredIds`). Ưu tiên tên lưu sẵn lúc xoá; dữ liệu cũ chưa có thì tra Spine như cũ.
+  const name = onElement && change.op === "remove" ? change.removed_name ?? (id ? nameOf(spine, entity, id) : null) : id ? nameOf(spine, entity, id) : null
   const target = name ? `${label} "${name}"` : id && DOCUMENT_ID_ENTITIES.has(entity) ? `${label} ${id}` : label
   return { verb, target }
 }

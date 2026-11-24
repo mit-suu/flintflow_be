@@ -58,7 +58,13 @@ import type { SOURCE_COLLECTIONS } from "../project/requirement-source.service.j
  * (`assemble.service.ts`) đọc `Change` model trực tiếp với projection nhẹ này thay vì
  * `spine.repository.listChanges` (tải cả `before`/`value`, nặng không cần thiết cho §I).
  */
-export type ChangeRecordRow = Pick<Change, "txn" | "at" | "by" | "reason" | "op" | "step_id"> & { path?: string }
+/**
+ * `removed_name` (FLF-474, plan fix #7 phần 7c): tên phần tử ngay trước khi bị xoá (`before.name/term/title/heading`),
+ * dùng cho dòng §I khi op `remove` — Spine hiện tại có thể đã cấp lại đúng mã cho một phần tử khác (xem
+ * `spine/change-log.ts` `retiredIds`). Vắng với dữ liệu cũ (bản phát hành đã lưu trước fix) ⇒ `cr-record.ts` dò theo
+ * Spine hiện tại như cũ.
+ */
+export type ChangeRecordRow = Pick<Change, "txn" | "at" | "by" | "reason" | "op" | "step_id"> & { path?: string; removed_name?: string }
 import type {
   Block,
   BulletListBlock,

@@ -25,6 +25,16 @@ describe("nextIdIn", () => {
   it("bỏ qua id không đúng khuôn và không cấp trùng", () => {
     expect(nextIdIn(["UC-REMIND", "UC01"], { prefix: "UC", width: 2 })).toBe("UC02")
   })
+
+  it("FLF-474: mã đã xoá (retired) cũng tính là đã dùng, không cấp lại", () => {
+    const existing = Array.from({ length: 33 }, (_, i) => `UC${String(i + 1).padStart(2, "0")}`)
+    expect(nextIdIn(existing, { prefix: "UC", width: 2 }, ["UC34"])).toBe("UC35")
+    expect(nextIdIn([], { prefix: "UC", width: 2 }, ["UC34"])).toBe("UC35")
+  })
+
+  it("FLF-474: retired khác khuôn (UC-34 khi tài liệu dùng UC34) không ảnh hưởng", () => {
+    expect(nextIdIn(["UC33"], { prefix: "UC", width: 2 }, ["UC-34"])).toBe("UC34")
+  })
 })
 
 describe("allocateId", () => {
@@ -49,6 +59,13 @@ describe("allocateId", () => {
     expect(allocateId(s, "screens")).toBe("SCR-85")
     expect(formatFor(["UC01", "UC-7"], { prefix: "UC", width: 2 })).toEqual({ prefix: "UC", width: 2 })
     expect(formatFor([], { prefix: "UC", width: 2 })).toEqual({ prefix: "UC", width: 2 })
+  })
+
+  it("FLF-474: allocateId cũng né mã use_cases đã xoá (retired theo collection)", () => {
+    const retired = new Map([["use_cases", ["UC34"]]])
+    const s = structuredClone(FIXTURE)
+    s.use_cases = Array.from({ length: 33 }, (_, i) => ({ ...FIXTURE.use_cases[0], id: `UC${String(i + 1).padStart(2, "0")}` }))
+    expect(allocateId(s, "use_cases", null, retired)).toBe("UC35")
   })
 
   it("collection không đánh số (steps, sections) ⇒ null", () => {
