@@ -25,7 +25,7 @@ import {
 } from "./extracted-entities.js"
 import { findingOps } from "./check.service.js"
 import { MODE1_RULE_PROFILE } from "./mode1-rule-profile.js"
-import { buildImportOps, droppedPermissionFindings, relationPhrase, ruleTierOfSections, splitSubtitleComponents, type BuiltEntity, type DroppedPermission } from "./spine-builder.js"
+import { buildImportOps, commonCategoryOf, droppedPermissionFindings, priorityOf, relationPhrase, ruleTierOfSections, splitSubtitleComponents, unmappedPriorityFindings, type BuiltEntity, type DroppedPermission, type UnmappedPriority } from "./spine-builder.js"
 import { buildLayoutSections } from "../render/layout-sections.js"
 
 describe("extracted-entities", () => {
@@ -826,5 +826,56 @@ describe("dropReciprocalRelations - mỗi cặp quan hệ một chiều (QLHS 11
     expect(rel.E06).toEqual([])
     expect(rel.E20).toEqual(["E21"])
     expect(rel.E21).toEqual(["E20"])
+  })
+})
+
+describe("bug #1 FLF-447: mức ưu tiên theo thang của file", () => {
+  it("Cao / Trung bình / Thấp, High / Medium / Low (bỏ dấu, không phân biệt hoa thường) ⇒ MoSCoW", () => {
+    expect(["Cao", "CAO", "cao ", "High", "Trung bình", "trung binh", "MEDIUM", "Thấp", "low", "Must", "won't"].map(priorityOf))
+      .toEqual(["must", "must", "must", "must", "should", "should", "should", "could", "could", "must", "wont"])
+    expect(priorityOf("")).toBeNull()
+    expect(priorityOf(null)).toBeNull()
+    expect(priorityOf("Khẩn")).toBeUndefined()
+    expect(priorityOf("constructor")).toBeUndefined()
+  })
+
+  it("NFR / chức năng: ô map được vào Spine; ô lạ không bỏ im lặng mà thành cờ Cần xem", () => {
+    const spine = createEmptySpine()
+    const unmapped: UnmappedPriority[] = []
+    const ops = buildImportOps(spine, [
+      { entity: "nfrs", id: "NFR-01", value: { statement: "Trang tải dưới 2 giây", category: "performance", priority: "Cao" }, sections: ["fixed:4.2.3"] },
+      { entity: "nfrs", id: "NFR-02", value: { statement: "Chịu 1000 người dùng", category: "performance", priority: "Trung bình" }, sections: ["fixed:4.2.3"] },
+      { entity: "nfrs", id: "NFR-03", value: { statement: "Sao lưu hằng ngày", category: "performance", priority: "Khẩn" }, sections: ["fixed:4.2.3"] },
+      { entity: "nfrs", id: "NFR-04", value: { statement: "Không ghi ưu tiên", category: "performance" }, sections: ["fixed:4.2.3"] }
+    ], [], unmapped)
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.nfrs.map((n) => n.priority)).toEqual(["must", "should", null, null])
+    expect(unmapped).toEqual([{ entity: "nfrs", id: "NFR-03", value: "Khẩn", sections: ["fixed:4.2.3"] }])
+    const [finding] = unmappedPriorityFindings(unmapped)
+    expect(finding).toMatchObject({ rule: "needs_review", section_id: "fixed:4.2.3", target_id: "nfrs[id=NFR-03].priority" })
+    expect(finding.message).toContain('"Khẩn"')
+    const flagOps = findingOps(plan.spine, [finding], "import_needs_review")
+    expect(flagOps).toHaveLength(1)
+    expect(flagOps[0].value).toMatchObject({ rule_id: "import_needs_review", section_id: "fixed:4.2.3", target_id: "nfrs[id=NFR-03].priority" })
+  })
+})
+
+describe("bug #3 FLF-447: loại yêu cầu chung lưu theo khoá", () => {
+  it("nhãn tự do ⇒ khoá; không nhận ra ⇒ suy từ phần nhỏ nguồn, không có thì giữ chữ của file", () => {
+    expect(commonCategoryOf("Bảo mật")).toBe("security")
+    expect(commonCategoryOf("BẢO MẬT", ["slot:localization"])).toBe("security")
+    expect(commonCategoryOf("Mật khẩu", ["slot:security"])).toBe("security")
+    expect(commonCategoryOf("Mật khẩu", ["fixed:5.2"])).toBe("Mật khẩu")
+    expect(commonCategoryOf("", [])).toBe("General")
+  })
+
+  it("buildImportOps ghi khoá vào Spine", () => {
+    const spine = createEmptySpine()
+    const ops = buildImportOps(spine, [
+      { entity: "common_requirements", id: "COM-01", value: { category: "Bảo mật", statement: "Mật khẩu băm bằng Argon2" }, sections: ["slot:security"] },
+      { entity: "common_requirements", id: "COM-02", value: { category: "Phiên làm việc", statement: "Hết phiên sau 30 phút" }, sections: ["slot:security"] }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.common_requirements.map((c) => c.category)).toEqual(["security", "session"])
   })
 })

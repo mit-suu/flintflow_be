@@ -1115,3 +1115,50 @@ describe("renderSection - đường dẫn phần tử cho chip Nguồn (FLF-443)
     expect(vi.blocks[0]).toMatchObject({ row_entity_paths: ["actors[id=A01]", "actors[id=A05]"] })
   })
 })
+
+describe("bug #1 / #3 FLF-447 - bảng NFR và yêu cầu chung", () => {
+  const tableOf = (blocks: Block[]) => blocks.find((b): b is Extract<Block, { type: "table" }> => b.type === "table")!
+  const cells = (row: Extract<Block, { type: "table" }>["header"]) => row.map((c) => c.map((r) => r.text).join(""))
+  const nfrSpine = (): Spine => ({
+    ...emptySpine(),
+    nfrs: [{ id: "NFR-06", category: "performance", statement: "Tìm kiếm dưới 1 giây", kind: "quantitative", priority: "must" }]
+  })
+
+  it("mẫu cố định / đoạn file là bảng ⇒ bảng NFR có cột ID, ưu tiên theo ngôn ngữ tài liệu", () => {
+    for (const extra of [{ fixedTemplate: true }, { preferTable: true }]) {
+      const t = tableOf(renderSection(nfrSpine(), "fixed:4.2.3", ctx({ language: "vi", ...extra })).blocks)
+      expect(t.rows.map(cells)).toEqual([["NFR-06", "Tìm kiếm dưới 1 giây", "", "", "Phải có"]])
+      expect(t.header).toHaveLength(5)
+    }
+  })
+
+  it("mẫu FPT / mode 2 (functionLayout fpt) giữ 4 cột như cũ, kể cả khi preferTable", () => {
+    const fpt = tableOf(renderSection(nfrSpine(), "fixed:4.2.3", ctx({ language: "vi", functionLayout: "fpt", preferTable: true })).blocks)
+    expect(fpt.header).toHaveLength(4)
+    expect(cells(fpt.rows[0])).toEqual(["Tìm kiếm dưới 1 giây", "", "", "Phải có"])
+    const plain = tableOf(renderSection(nfrSpine(), "fixed:4.2.3", ctx({ language: "en" })).blocks)
+    expect(plain.header).toHaveLength(4)
+    expect(cells(plain.rows[0])).toEqual(["Tìm kiếm dưới 1 giây", "", "", "must"])
+  })
+
+  it("loại ghi tự do 'Bảo mật' (dữ liệu cũ) vẫn vào phần nhỏ bảo mật và không in trùng ở 5.2", () => {
+    const spine: Spine = {
+      ...emptySpine(),
+      common_requirements: [
+        { id: "COM-01", category: "Bảo mật", statement: "Mật khẩu băm bằng Argon2." },
+        { id: "COM-02", category: "security", statement: "Thanh toán qua TLS 1.3." },
+        { id: "COM-03", category: "pagination", statement: "Danh sách 20 dòng / trang." }
+      ]
+    }
+    const slot = tableOf(renderContentSlot(spine, "slot:security", ctx({ language: "vi", fixedTemplate: true })))
+    expect(slot.rows.map(cells)).toEqual([["Bảo mật", "Mật khẩu băm bằng Argon2."], ["Bảo mật", "Thanh toán qua TLS 1.3."]])
+    const rest = tableOf(renderSection(spine, "fixed:5.2", ctx({ language: "vi", fixedTemplate: true, representedSlots: new Set(["slot:security"]) })).blocks)
+    expect(rest.rows.map(cells)).toEqual([["Phân trang", "Danh sách 20 dòng / trang."]])
+  })
+
+  it("nhãn loại tiếng Anh của layout file: khoá ⇒ chữ hoa đầu, chữ tự do in nguyên", () => {
+    const spine: Spine = { ...emptySpine(), common_requirements: [{ id: "C1", category: "date_format", statement: "ISO 8601." }, { id: "C2", category: "Custom", statement: "x" }] }
+    const t = tableOf(renderSection(spine, "fixed:5.2", ctx({ language: "en" })).blocks)
+    expect(t.rows.map(cells).map((r) => r[0])).toEqual(["Date format", "Custom"])
+  })
+})
