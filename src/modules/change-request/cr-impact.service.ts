@@ -13,7 +13,7 @@ import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus } from "./change-request.service.js"
 import { ChangeLocation } from "./change-location.model.js"
 import { unlockPaths } from "./lock.service.js"
-import { emptySectionTargets, findSpineLocations, systemRenameLocations, systemRenameTarget, withOriginalDiagrams, withOriginalPassages, type FoundLocation } from "./spine-location.js"
+import { countMentionLocations, emptySectionTargets, findSpineLocations, mergeFoundLocations, systemRenameLocations, systemRenameTarget, withOriginalDiagrams, withOriginalPassages, type FoundLocation } from "./spine-location.js"
 import { TemplateProfile } from "../import/template-profile.model.js"
 import type { SectionSegments } from "../spine/segment-hash.js"
 import { systemName } from "../spine/system-name.js"
@@ -23,10 +23,33 @@ import { loadLayout, titleOfSection } from "../import/gap-report.service.js"
 import { ownerStepOf } from "../spine/section-registry.js"
 import { crQueryText } from "./embedding/element-text.js"
 import { vectorCandidates } from "./embedding/vector-search.js"
+import { TransactionRejectedError, planTransaction } from "../spine/op-engine.js"
+import { userOpSchema, type Op } from "../spine/op.types.js"
+import type { Spine } from "../spine/spine.types.js"
 
 export { elementPathOf } from "./spine-location.js"
 
 export const formatLocationId = (n: number): string => `L${String(n).padStart(3, "0")}`
+
+/**
+ * FLF-473: Spine sau khi áp thử `rawOps` (ops xem trước đính kèm CR) — op lỗi / không hợp lệ ⇒ `null` (bỏ qua câu đếm,
+ * không đoán). Không có ops nào ⇒ `null` (CR không có gì để làm đổi số phần tử qua đường này).
+ */
+const plannedAfterSeed = (spine: Spine, rawOps: readonly unknown[]): Spine | null => {
+  if (!rawOps.length) return null
+  const ops: Op[] = []
+  for (const raw of rawOps) {
+    const parsed = userOpSchema.safeParse(raw)
+    if (!parsed.success) return null
+    ops.push(parsed.data)
+  }
+  try {
+    return planTransaction(spine, { base_version: spine.spine_version, ops, by: "cr-impact:count" }, { startSeq: 1 }).spine
+  } catch (err) {
+    if (err instanceof TransactionRejectedError) return null
+    throw err
+  }
+}
 
 /** POST …/impact: tìm lại toàn bộ vị trí (thay lần trước) rồi khoá. */
 export const runImpact = async (cr: IChangeRequest): Promise<void> => {
@@ -41,7 +64,7 @@ export const runImpact = async (cr: IChangeRequest): Promise<void> => {
   // P08 (upload U2-7): CR chỉ đổi tên hệ thống ⇒ chỉ phần tử tên hệ thống + nơi nhắc tên, không dò từ khoá / nghĩa
   const renamesSystem = !approved && !cr.amendments?.length && systemRenameTarget(`${cr.title}
 ${cr.description}`) !== null
-  const located: FoundLocation[] = approved
+  let located: FoundLocation[] = approved
     ? withOriginalDiagrams(spine, cr.targets.entity_paths, approvedBatchLocations(spine, approved))
     : renamesSystem
     ? // sơ đồ ngữ cảnh / use case gốc của file in tên hệ thống (ô trung tâm, khung hệ thống) ⇒ vẽ lại theo tên mới
@@ -49,6 +72,10 @@ ${cr.description}`) !== null
     : findSpineLocations(spine, cr.targets.entity_paths, cr.targets.keywords, await vectorCandidates(String(cr.projectId), crQueryText(cr))).map((f) =>
         seedTargets.has(f.path) && !f.found_by.includes("preview") ? { ...f, found_by: [...f.found_by, "preview" as const] } : f
       )
+  // FLF-473 (EduCampus B14): CR làm đổi số phần tử (lô use case đã duyệt, hoặc ops xem trước đính kèm CR) ⇒ câu đếm
+  // trong văn xuôi khớp đúng loại đó cũng là vị trí cần sửa, dù không nhắc tên/mã gì.
+  const countAfter = approved ? approved.after : plannedAfterSeed(spine, cr.seed?.ops ?? [])
+  if (countAfter) located = mergeFoundLocations(located, countMentionLocations(spine, countAfter))
   // BF §3.2 C-3: đoạn văn giữ nguyên của file gốc nhắc phần tử bị đụng tới ⇒ vị trí "sửa chữ" (không cắt trần số vị trí)
   const segments = ((await TemplateProfile.findOne({ projectId: cr.projectId }).select("section_segments").lean()) as { section_segments?: SectionSegments[] } | null)?.section_segments ?? []
   const found = segments.length ? withOriginalPassages(spine, segments, located) : located

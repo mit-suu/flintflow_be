@@ -9,6 +9,7 @@ import { formatLocationId } from "./cr-impact.service.js"
 import {
   KEYWORD_MAX_HITS,
   rankByKeywords,
+  countMentionLocations,
   elementPathOf,
   elementValue,
   emptySectionTargets,
@@ -17,6 +18,7 @@ import {
   findSpineLocations,
   isArrayPath,
   listElements,
+  mergeFoundLocations,
   opElement,
   sectionOfElement,
   valueText
@@ -152,6 +154,55 @@ describe("C-3 findSpineLocations", () => {
     s.glossary.push({ id: "G2", term: "Report", definition: "A PDF report; an Excel copy is optional." } as never)
     const [first] = rankByKeywords([{ path: "glossary[id=G2]", value: s.glossary[s.glossary.length - 1] }, { path: "glossary[id=G1]", value: s.glossary[s.glossary.length - 2] }], ["import export Excel"])
     expect(first.path).toBe("glossary[id=G1]")
+  })
+})
+
+describe("FLF-473 (B14) - countMentionLocations: câu đếm là vị trí CR khi CR đổi đúng số phần tử đó", () => {
+  const block = (text: string) => ({ kind: "paragraph" as const, text, rows: null, image_ref: null })
+  const spineWith10UseCases = (): Spine => {
+    const s = spine()
+    s.custom_sections.push({ id: "CS07", heading: "", level: 3, source: "import", blocks: [block("Hệ thống có 10 use case cho người học.")] })
+    for (let i = 2; i <= 10; i++) s.use_cases.push({ id: `UC-${String(i).padStart(2, "0")}`, name: `Use case ${i}`, actor_ids: ["A01"], function_ids: [], description: "...", includes: [], extends: [] } as never)
+    return s
+  }
+
+  it("CR thêm 2 use case (10 ⇒ 12) ⇒ câu đếm use case là vị trí count; CR chỉ sửa mô tả use case (không đổi số) ⇒ không có", () => {
+    const before = spineWith10UseCases()
+    expect(before.use_cases).toHaveLength(10)
+    const addedTwo = structuredClone(before)
+    addedTwo.use_cases.push(
+      { id: "UC-11", name: "Use case 11", actor_ids: ["A01"], function_ids: [], description: "...", includes: [], extends: [] } as never,
+      { id: "UC-12", name: "Use case 12", actor_ids: ["A01"], function_ids: [], description: "...", includes: [], extends: [] } as never
+    )
+    const found = countMentionLocations(before, addedTwo)
+    expect(found).toEqual([{ path: "custom_sections[id=CS07]", section_id: "custom:CS07", found_by: ["count"], entity_paths: ["use_cases"], owner_step: null }])
+
+    const editedDescription = structuredClone(before)
+    editedDescription.use_cases[0].description = "Mô tả mới, không đổi số use case."
+    expect(countMentionLocations(before, editedDescription)).toEqual([])
+  })
+
+  it("không đổi số phần tử của loại câu đếm nhắc tới (CR thêm actor, câu đếm nói use case) ⇒ không có vị trí count", () => {
+    const before = spineWith10UseCases()
+    const addedActor = structuredClone(before)
+    addedActor.actors.push({ id: "A03", name: "Guest", kind: "human", description: "..." } as never)
+    expect(countMentionLocations(before, addedActor)).toEqual([])
+  })
+
+  it("after = null (op lỗi / không có ops) ⇒ không bắt câu đếm nào (không đoán số đổi thế nào)", () => {
+    expect(countMentionLocations(spineWith10UseCases(), null)).toEqual([])
+  })
+
+  it("mergeFoundLocations: cùng path thì hợp found_by/entity_paths, khác path thì thêm mới", () => {
+    const found = [{ path: "custom_sections[id=CS02]", section_id: "custom:CS02", found_by: ["keyword" as const], entity_paths: [], owner_step: null }]
+    const extra = [
+      { path: "custom_sections[id=CS02]", section_id: "custom:CS02", found_by: ["count" as const], entity_paths: ["use_cases"], owner_step: null },
+      { path: "project", section_id: "fixed:1", found_by: ["count" as const], entity_paths: ["actors"], owner_step: null }
+    ]
+    expect(mergeFoundLocations(found, extra)).toEqual([
+      { path: "custom_sections[id=CS02]", section_id: "custom:CS02", found_by: ["keyword", "count"], entity_paths: ["use_cases"], owner_step: null },
+      { path: "project", section_id: "fixed:1", found_by: ["count"], entity_paths: ["actors"], owner_step: null }
+    ])
   })
 })
 

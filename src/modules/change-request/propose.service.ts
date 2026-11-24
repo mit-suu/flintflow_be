@@ -22,7 +22,7 @@ import { STEP_SKILLS, parseStepId } from "../pipeline/context-projection.js"
 import { expectedContentOf, partOfHeading, partsMentionedIn, skillOfPart, skillOfSection } from "../import/part-bank.js"
 import { splitInstruction } from "../../shared/utils/instruction-text.js"
 import { TemplateProfile, type HeadingMapEntry, type LayoutEntry } from "../import/template-profile.model.js"
-import { planTransaction } from "../spine/op-engine.js"
+import { TransactionRejectedError, planTransaction } from "../spine/op-engine.js"
 import { userOpSchema, type Op } from "../spine/op.types.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
@@ -34,11 +34,12 @@ import { answersText, crHeader, crQuery, glossaryText, missingInfoText, relevant
 import { addedElements, elementValue, isArrayPath, isSectionTarget, opElement, snapshotOf, valueText } from "./spine-location.js"
 import { isDiagramLocation, refreshDiagramLocations } from "./diagram-location.js"
 import { reassignDuplicateIds } from "./new-ids.js"
-import { proposeUseCaseBatch } from "./add-use-case.service.js"
+import { approvedBatch, proposeUseCaseBatch } from "./add-use-case.service.js"
 import { elementText } from "./location-display.js"
 import { directHit } from "./word-diff.js"
 import { crDocumentLanguage, documentLanguageText } from "./cr-language.js"
 import { loadOutOfScopeSections, outOfScopeKind, type OutOfScopeKind } from "./out-of-scope.js"
+import { COUNT_COLLECTIONS, type CountCollection } from "./count-mentions.js"
 
 /**
  * Số vị trí gửi trong một lượt C-4. Trước là 12: prompt kèm giá trị JSON của từng phần tử (tới 2500 ký tự) và câu
@@ -126,6 +127,35 @@ const existingIdsText = (spine: Spine, path: string): string => {
   return ids.length ? `\n  Ids already used (never reuse one): ${truncate(ids.join(", "), 1500)}` : ""
 }
 
+/** FLF-473: Spine sau khi áp thử `rawOps` — op lỗi hoặc rỗng ⇒ `null` (bỏ qua, không đoán số). */
+const safePlanOps = (spine: Spine, rawOps: readonly unknown[]): Spine | null => {
+  if (!rawOps.length) return null
+  const ops: Op[] = []
+  for (const raw of rawOps) {
+    const parsed = userOpSchema.safeParse(raw)
+    if (!parsed.success) return null
+    ops.push(parsed.data)
+  }
+  try {
+    return planTransaction(spine, { base_version: spine.spine_version, ops, by: "cr-propose:count" }, { startSeq: 1 }).spine
+  } catch (err) {
+    if (err instanceof TransactionRejectedError) return null
+    throw err
+  }
+}
+
+/**
+ * FLF-473 (EduCampus B14): số phần tử đúng SAU khi CR ghi, cho từng loại câu đếm (`found_by: "count"`, C-3) — từ lô use
+ * case đã duyệt (FLF-318) hoặc ops xem trước đính kèm CR. Không tính được (CR không mang ops đổi số phần tử nào theo
+ * đường này, hoặc op lỗi) ⇒ map rỗng, C-4 không có gì để so sánh (model tự lo như trước FLF-473, không bắt buộc).
+ */
+export const countAfterOf = (cr: Pick<IChangeRequest, "seed" | "amendments" | "title" | "description" | "clarifications">, spine: Spine): ReadonlyMap<CountCollection, number> => {
+  const approved = approvedBatch(spine, cr)
+  const after = approved ? approved.after : safePlanOps(spine, cr.seed?.ops ?? [])
+  if (!after) return new Map()
+  return new Map(COUNT_COLLECTIONS.map((c) => [c, ((after as unknown as Record<string, unknown[]>)[c] ?? []).length]))
+}
+
 type PromptLocation = Pick<IChangeLocation, "location_id" | "path" | "section_id" | "found_by" | "entity_paths" | "verify"> & { kept_intent?: boolean }
 
 /** Ghi chú cho model về vị trí ngoài phạm vi (mục riêng của file mà FlintFlow không soạn): chỉ sửa chữ, hoặc chỉ ghi chú. */
@@ -144,9 +174,22 @@ export const seedOpsFor = (seedOps: readonly Record<string, unknown>[], path: st
   })
 
 /** Mô tả vị trí trong prompt C-4: `[L001] path (section; tìm thấy vì…)` rồi giá trị hiện tại (JSON, thụt lề). */
-export const locationPromptText = (spine: Spine, l: PromptLocation, seedOps: readonly Record<string, unknown>[] = [], outOfScope: OutOfScopeKind | null = null): string => {
+export const locationPromptText = (
+  spine: Spine,
+  l: PromptLocation,
+  seedOps: readonly Record<string, unknown>[] = [],
+  outOfScope: OutOfScopeKind | null = null,
+  countAfter?: ReadonlyMap<CountCollection, number>
+): string => {
   const why = `found by ${l.found_by.join(", ")}${l.entity_paths.length ? `; about ${l.entity_paths.join(", ")}` : ""}`
   const failed = l.verify && !l.verify.code_ok ? `\n  Previous proposal failed checks: ${l.verify.violations.map((v) => v.message).join("; ")}` : ""
+  // FLF-473 (B14): vị trí tìm thấy vì mang câu đếm — số đúng SAU CR do code đếm trên Spine, luật chỉ thay con số
+  const collection = l.found_by.includes("count") ? l.entity_paths.find((p): p is CountCollection => countAfter?.has(p as CountCollection) ?? false) : undefined
+  const correct = collection ? countAfter?.get(collection) : undefined
+  const count =
+    correct === undefined
+      ? ""
+      : `\n  COUNT CHECK: after this change request, "${collection}" has exactly ${correct} elements (computed from data). If this text has a sentence stating that count, change ONLY the number to ${correct} - never compute it yourself.`
   const section = l.section_id === "misc" ? "-" : titleOfSection(spine, l.section_id)
   const value = truncate(valueText(elementValue(spine, l.path)), 2500).split("\n").join("\n  ")
   // Ô thêm mới: path là cả mảng ⇒ việc hợp lệ duy nhất là thêm phần tử mới. Mục trống (phương án B) hoặc mục đã có
@@ -162,7 +205,7 @@ export const locationPromptText = (spine: Spine, l: PromptLocation, seedOps: rea
   const suggested = mine.length ? `\n  Requester's previewed ops for this location (suggestion): ${JSON.stringify(mine)}` : ""
   // C-4: BA đã chọn "Vẫn làm" sau cảnh báo ⇒ soạn theo yêu cầu, không cảnh báo lại
   const proceed = l.kept_intent ? "\n  The requester read your warning for this location and chose to proceed: draft the edit as asked, never warn again here." : ""
-  return `[${l.location_id}] ${l.path} (section: ${section}; ${why})\n  ${value}${how}${suggested}${proceed}${outOfScopeNote(outOfScope)}${failed}`
+  return `[${l.location_id}] ${l.path} (section: ${section}; ${why})\n  ${value}${how}${suggested}${proceed}${outOfScopeNote(outOfScope)}${failed}${count}`
 }
 
 /**
@@ -325,9 +368,11 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
   const guidance = templateGuidanceBySection(await TemplateProfile.findOne({ projectId: cr.projectId }).select("heading_map layout").lean())
   // QLHS 11/11 bug #17: nói rõ ngôn ngữ tài liệu — thiếu dòng này model viết bước mới bằng tiếng Anh vào tài liệu tiếng Việt
   const documentLanguage = documentLanguageText(await crDocumentLanguage(String(cr.projectId), spine))
+  // FLF-473 (B14): số đúng sau CR cho vị trí mang câu đếm (`found_by: "count"`) — tính một lần, dùng cho mọi lô
+  const countAfter = countAfterOf(cr, spine)
   let locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
   const outOfScope = await loadOutOfScopeSections(String(cr.projectId))
-  const promptOf = (l: IChangeLocation) => locationPromptText(spine, l, cr.seed?.ops ?? [], outOfScopeKind(spine, l, outOfScope))
+  const promptOf = (l: IChangeLocation) => locationPromptText(spine, l, cr.seed?.ops ?? [], outOfScopeKind(spine, l, outOfScope), countAfter)
 
   // FLF-318: CR thêm / xoá use case ⇒ soạn trọn lô một lượt như chat trước baseline (luật 3e / 3g), vị trí còn
   // lại đề xuất theo lô như dưới. Hết credit ⇒ dừng như C-4.
@@ -445,7 +490,7 @@ export const draftInOwnerStep = async (cr: IChangeRequest, userId: string, locat
     cr.markModified("clarifications")
     await cr.save()
   }
-  const promptOne = locationPromptText(spine, loc, cr.seed?.ops ?? [], outOfScopeKind(spine, loc, await loadOutOfScopeSections(String(cr.projectId))))
+  const promptOne = locationPromptText(spine, loc, cr.seed?.ops ?? [], outOfScopeKind(spine, loc, await loadOutOfScopeSections(String(cr.projectId))), countAfterOf(cr, spine))
   const result = await withMeteredAi<CrProposeOutput>({ projectId: String(cr.projectId), userId, stepId: `C-4:${cr.cr_id}` }, ActionType.CR_PROPOSE, {
     ...crHeader(cr),
     answers: `${answersText(cr)}

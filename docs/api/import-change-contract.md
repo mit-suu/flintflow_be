@@ -1073,3 +1073,21 @@ Additive cho #11 `reuploadDiffDtoSchema` (bản ghi cũ đọc ra giá trị m�
   `If-None-Match` ⇒ `304`. Chưa upload ⇒ `404 IMPORT_NOT_FOUND`.
 - Env: `IMPORT_CHECK_CONCURRENCY` (1-8, mặc định 3 — số lô kiểm tra 1.11 gọi cùng lúc); `IMPORT_AI_RETRY_BACKOFF_MS` mặc định
   `5000,15000,30000`.
+
+## FLF-473 (2026-11-24) — chat sửa đoạn văn nối + câu đếm theo số phần tử (chỉ thêm field / giá trị enum)
+
+Plan: `bug/plan-fix-06-sua-chat-doan-van-noi.md`. BE only trong lượt này; luật 14 của skill `apply-change-op/SKILL.md`
+(sửa cho phần nối) **chưa đổi** — hoãn tới sau khi FLF-449 merge (tránh xung đột trên cùng file), xem TODO trong
+`change.service.ts`. FE không đổi (không có worktree FE của ticket này).
+
+- **`POST /projects/:id/changes/preview`, dự án import sau baseline** (`meta.requires_cr: true`): model không ra được
+  lô hợp lệ (schema sai 3 lượt, trước đây chỉ có câu "chưa xác định được cần đổi gì") ⇒ `meta.cr_prefill?: { title,
+  description, source? }` (hình `CrPrefill` đã có ở `prefill`) — FE hiện thẻ "Mở change request" điền sẵn thay cho chỉ
+  câu hỏi lại. Không ảnh hưởng ca khác (field chỉ xuất hiện đúng tình huống này).
+- **`LOCATION_FOUND_BY`** thêm giá trị **`count`**: vị trí mang câu đếm số phần tử trong văn xuôi ("Hệ thống có 10 use
+  case") mà CR làm đổi đúng số phần tử của loại đó (thêm/xoá use case/actor/màn/chức năng/quy tắc nghiệp vụ qua lô đã
+  duyệt hoặc ops xem trước đính kèm CR). Với `found_by` chứa `count`, `entity_paths` của vị trí giữ **tên collection**
+  (`"use_cases"`…) thay cho path phần tử như các nguồn khác — chỉ để C-4/C-5 biết đếm loại nào, không đổi hình DTO.
+  Chỉ nhận số viết bằng **chữ số** ("10 use case"), không nhận số viết bằng chữ ("mười use case") — bản đầu.
+- Không đổi endpoint, không đổi schema Spine, không đổi `changeLocationDtoSchema` (giá trị enum mới nằm trong tập đã
+  khai kiểu `string`).

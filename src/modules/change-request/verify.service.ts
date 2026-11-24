@@ -59,6 +59,7 @@ export const withoutKept = (violations: readonly VerifyViolation[], kept: readon
 
 /** Vị trí AI cảnh báo mà BA chưa chọn "Vẫn làm" hay bỏ — chặn xác nhận. */
 export const hasPendingWarning = (l: Pick<IChangeLocation, "warning" | "kept_intent" | "conclusion">): boolean => !!l.warning && !l.kept_intent && l.conclusion !== "not_related"
+import { COUNT_COLLECTIONS, findCountMentionsInText, type CountCollection } from "./count-mentions.js"
 
 export const valueChanged = (loc: Pick<IChangeLocation, "location_id" | "path">): Mode1Error =>
   new Mode1Error("CR_VALUE_CHANGED", `${pathLabel(loc.path)} đã bị sửa ở chỗ khác kể từ lúc đề xuất - tải lại rồi đề xuất lại`, { location_id: loc.location_id, path: loc.path })
@@ -215,6 +216,48 @@ export const recheckBeforeWrite = async (cr: IChangeRequest, locations: IChangeL
   return out
 }
 
+/** FLF-473: Spine sau khi áp toàn bộ op `edit` của CR (như `checkSpineOps`) — op lỗi ⇒ `null` (bỏ qua câu đếm, lỗi thật đã bắt ở trên). */
+const plannedAfterAll = (spine: Spine, locations: readonly CheckLocation[]): Spine | null => {
+  const ops: Op[] = []
+  for (const l of locations) {
+    if (l.conclusion !== "edit") continue
+    for (const raw of l.proposal?.spine_ops ?? []) {
+      const parsed = userOpSchema.safeParse(raw)
+      if (parsed.success) ops.push(parsed.data)
+    }
+  }
+  if (!ops.length) return spine
+  try {
+    return planTransaction(spine, { base_version: spine.spine_version, ops, by: "cr-verify:count" }, { startSeq: 1 }).spine
+  } catch (err) {
+    if (err instanceof TransactionRejectedError) return null
+    throw err
+  }
+}
+
+type CountCheckLocation = CheckLocation & Pick<IChangeLocation, "found_by" | "entity_paths">
+
+/**
+ * FLF-473 (EduCampus B14): C-5 tất định cho câu đếm (`found_by: "count"`) — đề xuất vẫn ghi số cũ, hoặc AI tự tính sai
+ * (vd "10 trừ 1 = 9" thay vì đếm lại trên Spine), là một lỗi code như mọi lỗi khác (AI làm lại), không chỉ cờ vàng.
+ * `after`: Spine sau khi áp toàn bộ op `edit` của CR (`plannedAfterAll`).
+ */
+export const checkCountMentions = (after: Spine, locations: readonly CountCheckLocation[]): Map<string, VerifyViolation[]> => {
+  const counts = new Map<CountCollection, number>(COUNT_COLLECTIONS.map((c) => [c, ((after as unknown as Record<string, unknown[]>)[c] ?? []).length]))
+  const out = new Map<string, VerifyViolation[]>()
+  for (const l of locations) {
+    if (l.conclusion !== "edit" || !l.found_by.includes("count")) continue
+    const collection = l.entity_paths.find((p): p is CountCollection => counts.has(p as CountCollection))
+    if (!collection) continue
+    const correct = counts.get(collection)!
+    const wrong = [...new Set(findCountMentionsInText(l.proposal?.new_text ?? "").filter((m) => m.collection === collection && m.number !== correct).map((m) => m.number))]
+    if (wrong.length) {
+      out.set(l.location_id, [{ rule: "count_mismatch", message: `Câu đếm ở đây vẫn ghi ${wrong.join(", ")} - đúng phải là ${correct} theo dữ liệu sau khi ghi, không tự tính` }])
+    }
+  }
+  return out
+}
+
 /** Phần phạm vi cùng section (giữ chỗ cho phần tử section khác + đoạn văn giữ nguyên, FLF-367). */
 const NEIGHBOURS_CHARS = 5000
 
@@ -303,6 +346,9 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
   for (const [locId, vs] of checkSpineOps(spine, cr, locations, exempt)) violations.set(locId, [...(violations.get(locId) ?? []), ...vs])
   // C-5 "giữ theo ý mình": lỗi luật BA đã giữ không tính (cờ đỏ thật hiện sau khi ghi)
   for (const l of locations) if (l.kept_violations.length) violations.set(l.location_id, withoutKept(violations.get(l.location_id) ?? [], l.kept_violations))
+  // FLF-473 (B14): câu đếm phải khớp số đúng SAU khi ghi cả CR — op đã lỗi thì bỏ qua (checkSpineOps đã báo lỗi thật)
+  const countAfter = plannedAfterAll(spine, locations)
+  if (countAfter) for (const [locId, vs] of checkCountMentions(countAfter, locations)) violations.set(locId, [...(violations.get(locId) ?? []), ...vs])
 
   // AI consistency (FLF-307): chỉ khi cả CR đã qua kiểm code — vòng nào còn trượt thì AI làm lại, nhận xét lúc đó vô
   // ích. Không vị trí nào đổi đề xuất kể từ lần kiểm trước (`verify` còn nguyên) ⇒ giữ nhận xét cũ, không gọi lại: mỗi

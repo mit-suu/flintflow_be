@@ -19,6 +19,7 @@ import type { SectionSegments } from "../spine/segment-hash.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { LocationFoundBy } from "./change-request.constants.js"
 import { contentSlot } from "../import/content-slots.js"
+import { COUNT_COLLECTIONS, findCountMentions, type CountCollection } from "./count-mentions.js"
 
 export const PROJECT_PATH = "project"
 
@@ -468,16 +469,55 @@ export const originalDiagramLocations = (spine: Spine, targets: readonly string[
  * FLF-375: vị trí của lô thêm / xoá use case đã duyệt trong chat (FLF-318) cũng phải kèm sơ đồ gốc mà lô làm lệch —
  * trước đây nhánh này bỏ qua ⇒ thêm use case xong, sơ đồ use case / luồng màn của file vẫn là hình cũ.
  */
-export const withOriginalDiagrams = (spine: Spine, targets: readonly string[], found: FoundLocation[]): FoundLocation[] => {
+export const withOriginalDiagrams = (spine: Spine, targets: readonly string[], found: FoundLocation[]): FoundLocation[] =>
+  mergeFoundLocations(found, originalDiagramLocations(spine, targets, found))
+
+/**
+ * Gộp vị trí mới vào danh sách đã có: cùng `path` thì hợp `found_by` / `entity_paths` (một phần tử có thể được tìm thấy
+ * bằng nhiều cách — vd sơ đồ gốc + câu đếm), khác `path` thì thêm mới. Dùng cho sơ đồ gốc (§4.13) và câu đếm (FLF-473).
+ */
+export const mergeFoundLocations = (found: readonly FoundLocation[], extra: readonly FoundLocation[]): FoundLocation[] => {
   const out = found.map((f) => ({ ...f }))
-  for (const d of originalDiagramLocations(spine, targets, found)) {
-    const same = out.find((f) => f.path === d.path)
+  for (const e of extra) {
+    const same = out.find((f) => f.path === e.path)
     if (same) {
-      same.found_by = [...new Set([...same.found_by, ...d.found_by])]
-      same.entity_paths = [...new Set([...same.entity_paths, ...d.entity_paths])]
-    } else out.push(d)
+      same.found_by = [...new Set([...same.found_by, ...e.found_by])]
+      same.entity_paths = [...new Set([...same.entity_paths, ...e.entity_paths])]
+    } else out.push({ ...e })
   }
   return out
+}
+
+/**
+ * FLF-473 (EduCampus B14): câu đếm trong văn xuôi ("Hệ thống có 10 use case") mà CR thực sự làm đổi số phần tử của
+ * đúng loại đó. `after`: Spine sau khi áp thử ops của CR (lô use case đã duyệt, hoặc ops xem trước đính kèm CR) — chưa
+ * tính được (op lỗi, hoặc CR không mang ops nào) ⇒ `null`, bỏ qua (không bắt nhầm câu đếm khi chưa chắc số đổi thế nào).
+ * Chỉ thêm vị trí cho loại phần tử CR thực sự đổi số — câu đếm actor không phải vị trí của CR chỉ thêm use case.
+ * Lưu ý: với `found_by: "count"`, `entity_paths` giữ tên **collection** (`"use_cases"`…), không phải path phần tử như
+ * các nguồn khác — C-4/C-5 (`propose.service.ts`, `verify.service.ts`) đọc đúng field này để biết đếm loại nào.
+ */
+export const countMentionLocations = (spine: Spine, after: Spine | null): FoundLocation[] => {
+  if (!after) return []
+  const changed = new Set<CountCollection>(COUNT_COLLECTIONS.filter((c) => arrayOf(spine, c).length !== arrayOf(after, c).length))
+  if (!changed.size) return []
+  const byPath = new Map<string, FoundLocation>()
+  for (const m of findCountMentions(spine)) {
+    if (!changed.has(m.collection)) continue
+    const section_id = sectionOfElement(spine, m.path)
+    const cur = byPath.get(m.path)
+    if (cur) {
+      cur.entity_paths = [...new Set([...cur.entity_paths, m.collection])]
+      continue
+    }
+    byPath.set(m.path, {
+      path: m.path,
+      section_id,
+      found_by: ["count"],
+      entity_paths: [m.collection],
+      owner_step: section_id === "misc" || section_id.startsWith("custom:") ? null : ownerStepOf(section_id, spine)
+    })
+  }
+  return [...byPath.values()]
 }
 
 /** Mục nuôi bằng mảng `array` — ưu tiên mục CR đang nhắm; mảng không nuôi mục nào ⇒ null. */
