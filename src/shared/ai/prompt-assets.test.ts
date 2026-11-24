@@ -223,7 +223,8 @@ describe("FLF-449 N3: skill hành động nạp reference khai ở prompt_refere
   it("elicit-loop: template có when-to-offer-choices (luật khuyến nghị theo chốt 03 #3); conversation-style không khai thì không nạp", async () => {
     const { template } = await getPromptTemplate(ActionType.ELICIT)
     expect(template).toContain(`${REFERENCE_HEADING}when-to-offer-choices`)
-    expect(template).toContain("**Recommend only when you are sure**: a clear basis in the uploaded documents")
+    expect(template).toContain("**Recommend only when sure**")
+    expect(template).toContain("recommendation_reason")
     expect(template).toContain("recommendation from general practice alone")
     expect(template).not.toContain(`${REFERENCE_HEADING}conversation-style`)
     expect((await getPromptTemplate(ActionType.DISCOVERY_STEP)).template).toBe(template)
