@@ -40,7 +40,11 @@ export const titleOfSection = (
   id: string,
   layout?: readonly LayoutEntry[]
 ): string => {
-  const own = layout?.find((l) => l.section_id === id && l.heading_text.trim())?.heading_text.trim()
+  // Nhiều heading cùng section (heading con import gắn nhầm — Lỗi #6: "1.4 Hệ thống bên ngoài" mang `fixed:1`) ⇒ heading cấp nông nhất
+  const own = layout
+    ?.filter((l) => l.section_id === id && l.heading_text.trim())
+    .reduce<LayoutEntry | undefined>((best, l) => (!best || (l.level ?? 99) < (best.level ?? 99) ? l : best), undefined)
+    ?.heading_text.trim()
   if (own) return own
   const at = id.indexOf(":")
   const kind = at >= 0 ? id.slice(0, at) : id

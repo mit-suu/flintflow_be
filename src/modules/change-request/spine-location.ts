@@ -234,6 +234,36 @@ export const sectionOfElement = (spine: Spine, path: string): string => {
   return impact.owner[0] ?? impact.reads[0] ?? "misc"
 }
 
+/** Field của `project` có mục riêng (phần nhỏ của mẫu bắt buộc) — field khác thuộc `fixed:1`. */
+const PROJECT_FIELD_SLOT: Readonly<Record<string, string>> = {
+  goals: "slot:goals",
+  vision: "slot:vision",
+  release_scope: "slot:scope",
+  form_factor: "slot:platforms"
+}
+
+/** Field `project` mà op chạm: `project.goals` / `project.release_scope.in` ⇒ `goals` / `release_scope`. Theo thứ tự op, không trùng. */
+export const projectFieldsOfOps = (ops: readonly unknown[]): string[] => {
+  const fields: string[] = []
+  for (const o of ops) {
+    const path = o && typeof o === "object" ? (o as Row).path : undefined
+    const m = typeof path === "string" ? /^project\.(\w+)/.exec(path) : null
+    if (m && !fields.includes(m[1])) fields.push(m[1])
+  }
+  return fields
+}
+
+/**
+ * Lỗi #6: mục của vị trí `project` theo field bị đổi — `goals` ⇒ `slot:goals`… nếu layout của dự án có phần nhỏ đó, còn lại
+ * `fixed:1`. Không biết field nào đổi ⇒ `null` (giữ section đã lưu).
+ */
+export const projectSectionOf = (fields: readonly string[], layout?: readonly { section_id: string }[]): string | null => {
+  if (!fields.length) return null
+  const present = new Set((layout ?? []).map((l) => l.section_id))
+  const slot = fields.map((f) => PROJECT_FIELD_SLOT[f]).find((s) => s && present.has(s))
+  return slot ?? "fixed:1"
+}
+
 export interface SpineElement {
   path: string
   value: unknown
