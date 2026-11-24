@@ -2089,7 +2089,9 @@ export const runStep = async (
     const { spine: finalSpine, spineVersion: finalVersion } = await refresh(projectId)
     const finalFirstSeq = finalSpine.steps.find((s) => s.id === stepId)?.first_seq ?? null
     const { calls_used, regenerate_used } = await usageCounts(projectId, stepId, finalFirstSeq)
-    const actions: GateAction[] = regenerate_used >= REGENERATE_LIMIT_COUNT ? ["accept", "revision", "accept_as_is"] : ["accept", "revision", "regenerate"]
+    // FLF-449 (03-can-chot #2, BF §1 nguyên tắc 6): nội dung step vừa soạn chỉ có Chấp nhận, chưa ưng thì chat (`revision`).
+    // Không mời `regenerate` / `accept_as_is` nữa; `/gate` vẫn nhận hai lệnh đó cho client cũ (`gateActionSchema`).
+    const actions: GateAction[] = ["accept", "revision"]
     const creditsUsed = await meter.roundCost(projectId, stepId, finalFirstSeq)
     const progressAfter = buildProgressReport(finalSpine, await spineRepository.listChanges(projectId)).readiness.accepted_pct
 

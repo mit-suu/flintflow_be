@@ -308,6 +308,7 @@ Response `Content-Type: text/event-stream`. Mỗi sự kiện có dạng `event:
 Gate (`accept` · `revision` · `regenerate` · `accept_as_is`):
 - Trần **8 lượt gọi model/step** và **3 lần Regenerate/step**.
 - `accept_as_is` chỉ có trong `actions[]` khi đã hết Regenerate, hoặc khi `revision` không giải quyết được. Hành động này bắt buộc `note`.
+- FLF-449: `gate_ready.actions[]` của cổng step luôn là `["accept", "revision"]` (nội dung step vừa soạn chỉ có Chấp nhận, chưa ưng thì chat). Server không mời `regenerate` / `accept_as_is` nữa nhưng `/gate` vẫn nhận hai lệnh đó (trần và `note` như trên) cho client cũ.
 - Refund do `SPINE_VERSION_CONFLICT` **không** tính vào trần Regenerate.
 - `revision` (FLF-232): lời sửa của user có thể đổi hoặc bác bỏ một giả định đang hiện ở cổng. Server nhận, trong CÙNG một lô, `set` trường thật tại `assumptions[id].path` + `statement`/`statement_vi` mới + `status` (`confirmed`, hoặc `rejected` khi bỏ giả định); `confirmed_at` do server đặt. Lô đổi câu giả định mà không ghi trường thật của nó bị từ chối (`assumption_path_mismatch`, retry như op sai). Response của `revision` có thêm `message_vi?` = lời AI xác nhận điều vừa sửa.
 
@@ -336,6 +337,7 @@ chỉ đưa lựa chọn khi thật sự cần user quyết.
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-11-23 | FLF-449 (hành vi, không đổi shape) | `gate_ready.actions[]` của cổng step luôn `["accept", "revision"]`: không còn `regenerate` / `accept_as_is` (BF nguyên tắc 6). `gateActionSchema` và `/gate` giữ nguyên bốn lệnh cho client cũ; `regenerate_used` vẫn có trong sự kiện. Bước đã hỏi user trong lượt (`answer_needed`) không tự qua ở mọi `review_mode` (thay luật FLF-220): `gate_ready.auto` không bao giờ đi kèm bước đã hỏi |
 | 2026-11-12 | contract-change (tích hợp Google Docs) | Additive. Khai báo trước toàn bộ endpoint của tích hợp Google Docs: #40–#43 kết nối tài khoản Google (`/integrations/google`, mount sau `authMiddleware → requireActiveAccount`, không cần org), #44–#45 xuất sang Google Docs, #46 nhập từ Google Docs, #47 MCP server Google Docs, #48–#50 trợ lý AI. Mã lỗi mới `503 GOOGLE_INTEGRATION_DISABLED`, `400 GOOGLE_CONSENT_INCOMPLETE`, `415 UNSUPPORTED_MEDIA_TYPE` (#40 nhận body không phải JSON), `401 GOOGLE_RECONNECT_REQUIRED`, `403 GOOGLE_FILE_FORBIDDEN`, `404 GOOGLE_FILE_NOT_FOUND`, `409 GOOGLE_DOC_CHANGED`, `413 GOOGLE_EXPORT_TOO_LARGE`. Hiện thực #40–#43; #44–#50 hiện thực ở các phase sau, chỉnh shape (nếu cần) bằng dòng additive mới |
 | 2026-11-16 | Google Docs phase 2 (chưa qua PR contract-change) | Hiện thực #44, #45. Mã lỗi mới `503 GOOGLE_DRIVE_QUOTA_EXCEEDED`. Viewer gọi được #44 (chỉ `source=baseline`, như #18) và #45 |
 | 2026-11-17 | Google Docs phase 3–4 (chưa qua PR contract-change) | Hiện thực #46, #47. #46 bỏ `org_template_id?` (như `POST /:id/import`, chỉ nhận file), mã lỗi mới `400 GOOGLE_FILE_UNSUPPORTED`. #47: 5 tool, phản hồi JSON stateless, mã lỗi trong kết quả tool |
