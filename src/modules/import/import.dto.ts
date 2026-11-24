@@ -481,14 +481,36 @@ export const blockDiffSummarySchema = z.object({
   moved: z.number().int().min(0)
 })
 
+/** FLF-457: một chỗ Track Changes / comment của người ngoài trong file upload lại, mỗi chỗ một dòng khác biệt. */
+export const reuploadMarkupSchema = z.object({
+  kind: z.enum(["track_change", "comment"]),
+  author: z.string(),
+  change: z.enum(["text", "format"]).optional(),
+  text: z.string(),
+  section: z.string(),
+  location: z.object({ block_ord: z.number().int(), text: z.string() }).nullable()
+})
+
 export const reuploadDiffDtoSchema = z.object({
   id,
   original_name: z.string(),
+  /** Bản đem so: số version; chưa có baseline ⇒ `DRAFT` (nội dung đang soạn). */
   against_version: z.string().min(1),
   created_at: isoDateTime,
   summary: blockDiffSummarySchema,
   blocks: z.array(blockDiffEntrySchema),
-  sections: z.array(diffSectionStatSchema)
+  sections: z.array(diffSectionStatSchema),
+  /** FLF-457: chưa có baseline ⇒ chỗ nhận thành bản sửa qua chat (không tạo CR). */
+  before_baseline: z.boolean(),
+  /** FLF-457: file không có dấu version ⇒ đã so theo nội dung với bản nháp hiện tại. */
+  no_stamp: z.boolean(),
+  /** FLF-457: tỉ lệ heading của bản đang so tìm thấy trong file (0…1). */
+  heading_match: z.number().min(0).max(1),
+  /** FLF-457: heading khớp dưới ngưỡng ⇒ gợi ý Dùng làm tham khảo. */
+  suggest_reference: z.boolean(),
+  /** FLF-457: dấu version của file cũ hơn bản hiện tại. */
+  stale: z.object({ file_version: z.string(), current_version: z.string() }).nullable(),
+  markup: z.array(reuploadMarkupSchema)
 })
 
 /** `POST /projects/:id/reupload` (UC-24, nút 1.4) — multipart như `/import`. */

@@ -196,6 +196,14 @@ export const uploadImport = async (
   }
 
   const result = await preflightDocx(file.buffer)
+  // FLF-457: bản DRAFT của chính dự án khi đã có nội dung đang soạn (chưa baseline) ⇒ chỉ báo khác biệt, không đọc lại từ đầu
+  if (result.stamp?.project_id === projectId && current && (["baselining", "incomplete", "drafting"] as ImportStatus[]).includes(current.status)) {
+    throw new Mode1Error("IMPORT_INVALID_STATE", "File này tải về từ chính dự án - hãy dùng chức năng tải lại để xem khác biệt với nội dung đang soạn", {
+      status: current.status,
+      to: "uploaded",
+      allowed: []
+    })
+  }
   if (result.stamp && result.stamp.project_id !== projectId) {
     throw new Mode1Error("IMPORT_STAMP_FOREIGN_PROJECT", "File này được xuất từ một project FlintFlow khác", { stamp: result.stamp })
   }

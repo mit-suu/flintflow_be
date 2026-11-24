@@ -4,7 +4,7 @@ import { renderedDocumentSchema } from "./rendered-document.schema.js"
 import { buildDocxFileName, writeDocx } from "./docx-writer.js"
 import { loadFixedTemplateContext, writeProjectDocx } from "./project-docx-writer.js"
 import { resolveFixedBaselineVersion } from "../doc-version/template-source-binding.js"
-import { authorize } from "./render.controller.js"
+import { authorize, type Context } from "./render.controller.js"
 import { exportWordQuerySchema } from "../pipeline/pipeline.dto.js"
 import { getDocumentWithMeta, getDraftMeta, NoWorkingDraftError, renderSpineDocument, type DocumentWithMeta, type DraftMeta } from "./assemble.service.js"
 import { sourceFidelityFor } from "./source-fidelity.js"
@@ -20,6 +20,8 @@ import { validationError, validationIssues } from "../../shared/utils/validation
 import { docxToPdf, PdfConverterError } from "../../shared/pdf/gotenberg.client.js"
 import { isViewer } from "../../shared/auth/viewer-read-scope.middleware.js"
 import type { Spine } from "../spine/spine.types.js"
+
+type ExportWordQuery = z.infer<typeof exportWordQuerySchema>
 
 /** Chi tiết từng issue vào `meta.issues` (debug); user chỉ đọc một câu (FLF-247). */
 const renderedDocumentInvalid = (error: z.ZodError): ApiError =>
@@ -55,7 +57,7 @@ export const previewWord = catchAsync(async (req: Request, res: Response) => {
   return res.send(buffer)
 })
 
-interface ExportedDocx {
+export interface ExportedDocx {
   buffer: Buffer
   fileName: string
   documentLanguage: string
@@ -72,31 +74,15 @@ interface ExportedDocx {
  * `null` ⇒ đã trả lỗi `NO_WORKING_DRAFT` lên `res`.
  */
 const buildExportDocx = async (req: Request, res: Response): Promise<ExportedDocx | null> => {
-  const { projectId, projectName, mode, documentLanguage, sourceLanguage, convertedFrom, templateIntent } = await authorize(req)
+  const context = await authorize(req)
   const parsedQuery = exportWordQuerySchema.safeParse(req.query)
   if (!parsedQuery.success) throw validationError(parsedQuery.error)
-  const { lang, ...query } = parsedQuery.data
   // UC-50: Viewer chỉ tải bản đã phát hành — bản nháp (DRAFT) không
-  if (isViewer(req) && query.source !== "baseline") {
+  if (isViewer(req) && parsedQuery.data.source !== "baseline") {
     throw new ApiError(403, "Viewer chỉ tải được phiên bản đã phát hành.", "ORG_ROLE_FORBIDDEN")
   }
-  // FLF-334 B: `?lang=` — không truyền / trùng ngôn ngữ tài liệu ⇒ đúng đường cũ (byte như trước)
-  const locale = lang ?? documentLanguage
-  const otherLanguage = locale !== documentLanguage
-  // Mode 1 (import thật lẫn dự án chuyển từ mode 2): bản đang làm là bản nháp CR — chỉ version có baseline (#14) đổi được ngôn ngữ
-  if (otherLanguage && mode === "import") throw documentLanguageUnavailable()
-
-  let result: DocumentWithMeta
-  const savedVersion = templateIntent === "fixed" && query.source === "baseline" ? await resolveFixedBaselineVersion(projectId, query.baseline_id) : null
-  const template = templateIntent === "fixed" ? await loadFixedTemplateContext(projectId, savedVersion?.template_source ?? undefined) : null
   try {
-    // Ngôn ngữ khác cần lớp bản dịch ⇒ kiểm đủ TRƯỚC khi dựng, trên đúng Spine sắp dựng (không đọc lại giữa kiểm và
-    // dựng): thiếu ⇒ 409, không in chữ gốc thay chỗ thiếu
-    const beforeRender = otherLanguage && locale !== sourceLanguage ? (spine: Spine) => assertTranslationComplete(projectId, locale, spine) : undefined
-    const documentQuery = { ...query, languages: { locale, source: sourceLanguage }, ...(beforeRender ? { beforeRender } : {}), ...(template ? { freshTemplate: true, ...(savedVersion ? { recordChanges: savedVersion.record_snapshot ?? [] } : {}) } : {}) }
-    result = template
-      ? await getDocumentWithMeta(projectId, projectName, documentQuery, { loadTemplate: async () => template.layout })
-      : await getDocumentWithMeta(projectId, projectName, documentQuery)
+    return await renderExportDocx(context, parsedQuery.data)
   } catch (err) {
     if (err instanceof NoWorkingDraftError) {
       sendError(res, err.statusCode, err.code, err.message)
@@ -104,6 +90,30 @@ const buildExportDocx = async (req: Request, res: Response): Promise<ExportedDoc
     }
     throw err
   }
+}
+
+/**
+ * Dựng đúng file .docx mà người dùng tải về (Word / PDF / Google Docs), không qua HTTP. FLF-457: so file upload lại trước
+ * baseline với nội dung đang soạn dùng chính hàm này. Chưa có Spine ⇒ ném `NoWorkingDraftError`.
+ */
+export const renderExportDocx = async (context: Context, exportQuery: ExportWordQuery): Promise<ExportedDocx> => {
+  const { projectId, projectName, mode, documentLanguage, sourceLanguage, convertedFrom, templateIntent } = context
+  const { lang, ...query } = exportQuery
+  // FLF-334 B: `?lang=` — không truyền / trùng ngôn ngữ tài liệu ⇒ đúng đường cũ (byte như trước)
+  const locale = lang ?? documentLanguage
+  const otherLanguage = locale !== documentLanguage
+  // Mode 1 (import thật lẫn dự án chuyển từ mode 2): bản đang làm là bản nháp CR — chỉ version có baseline (#14) đổi được ngôn ngữ
+  if (otherLanguage && mode === "import") throw documentLanguageUnavailable()
+
+  const savedVersion = templateIntent === "fixed" && query.source === "baseline" ? await resolveFixedBaselineVersion(projectId, query.baseline_id) : null
+  const template = templateIntent === "fixed" ? await loadFixedTemplateContext(projectId, savedVersion?.template_source ?? undefined) : null
+  // Ngôn ngữ khác cần lớp bản dịch ⇒ kiểm đủ TRƯỚC khi dựng, trên đúng Spine sắp dựng (không đọc lại giữa kiểm và
+  // dựng): thiếu ⇒ 409, không in chữ gốc thay chỗ thiếu
+  const beforeRender = otherLanguage && locale !== sourceLanguage ? (spine: Spine) => assertTranslationComplete(projectId, locale, spine) : undefined
+  const documentQuery = { ...query, languages: { locale, source: sourceLanguage }, ...(beforeRender ? { beforeRender } : {}), ...(template ? { freshTemplate: true, ...(savedVersion ? { recordChanges: savedVersion.record_snapshot ?? [] } : {}) } : {}) }
+  const result: DocumentWithMeta = template
+    ? await getDocumentWithMeta(projectId, projectName, documentQuery, { loadTemplate: async () => template.layout })
+    : await getDocumentWithMeta(projectId, projectName, documentQuery)
 
   const parsed = renderedDocumentSchema.safeParse(result.doc)
   if (!parsed.success) throw renderedDocumentInvalid(parsed.error)

@@ -115,8 +115,8 @@ export const patchMapping = mode1Handler(async (req, res) => {
 })
 
 export const reupload = mode1Handler(async (req, res) => {
-  const auth = await authorizeMode1(req)
-  const diff = await reuploadService.reupload(auth.projectId, auth.userId, requireFile(req))
+  const auth = await authorizeMode1(req, { allowBeforeBaseline: true })
+  const diff = await reuploadService.reupload(auth.projectId, auth.userId, requireFile(req), auth.project)
   return sendSuccess(res, 201, reuploadService.toReuploadDto(diff))
 })
 

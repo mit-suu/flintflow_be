@@ -41,7 +41,7 @@ const parse = <T extends z.ZodType>(schema: T, input: unknown): z.infer<T> => {
   return parsed.data
 }
 
-interface Context {
+export interface Context {
   projectId: string
   projectName: string
   /** `import` = mode 1 (tài liệu nhập) — phụ lục cờ của file Word in tiếng Việt. */
@@ -62,7 +62,11 @@ export const authorize = async (req: Request): Promise<Context> => {
 
   const projectId = req.params.projectId as string
   if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
-  const project = await getProjectById(projectId, requireOrgId(req))
+  return contextOf(projectId, await getProjectById(projectId, requireOrgId(req)))
+}
+
+/** FLF-457: ngữ cảnh dựng tài liệu từ dự án đã kiểm quyền (dùng chung với so file upload lại trước baseline). */
+export const contextOf = async (projectId: string, project: Awaited<ReturnType<typeof getProjectById>>): Promise<Context> => {
   // FLF-265: mode 2 không truy vấn thêm; mode 1 đọc `TemplateProfile.language` (cả hai cùng ngôn ngữ file)
   const { locale, source } = await projectLanguages(projectId, project)
   return {
