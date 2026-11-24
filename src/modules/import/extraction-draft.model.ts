@@ -71,6 +71,8 @@ export interface IExtractionDraft extends Document {
   usage_id: string | null
   partial: ExtractionProgress | null
   error: string | null
+  /** Lúc section bắt đầu gọi AI; `null` khi không đang đọc (ghi bằng `$set` riêng, không qua `save()` của draft). */
+  reading_since: Date | null
   createdAt: Date
   updatedAt: Date
 }
@@ -105,7 +107,8 @@ const extractionDraftSchema = new Schema<IExtractionDraft>(
     diagram_images: { type: [new Schema({ block_id: { type: String, required: true }, kind: { type: String, required: true }, owner_id: { type: String, default: undefined } }, opts)], default: [] },
     usage_id: { type: String, default: null },
     partial: { type: Schema.Types.Mixed, default: null },
-    error: { type: String, default: null }
+    error: { type: String, default: null },
+    reading_since: { type: Date, default: null }
   },
   { timestamps: true, minimize: false }
 )

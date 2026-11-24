@@ -1000,3 +1000,17 @@ ready → applying → applied | cancelled | failed`.
   đủ hai chiều. Import **không** tự thêm actor `User` vào Spine nữa (FLF-390 đã thêm, nay bỏ — bản 0.1 giữ nguyên trạng file).
 - Script `npm run cleanup:manual-crs [--apply] [--project <id>]`: xoá CR còn vị trí `manual = true` từ trước (CR đã ghi ⇒ hoàn
   tác thay đổi Spine + xoá bản nháp của nó).
+
+## FLF-451 (2026-11-23) — màn đọc file trực tiếp (chỉ thêm field + 1 endpoint)
+
+- `GET /projects/:id/import` → `extraction.sections[]` (cùng shape trong `POST …/import/extract|resume|pause`) thêm `reading: boolean`
+  (AI đang đọc mục này; nhiều mục cùng lúc; import dừng / lỗi / dấu quá 15 phút ⇒ `false`) và
+  `found: [{ entity, count, names[≤3] }]` — số phần tử đã tìm thấy theo loại (`entity` là khoá loại như `use_cases`, `actors`;
+  ảnh sơ đồ đọc được = `diagram`, `names` = loại sơ đồ). Mục đã ghép lấy từ `fields`, mục đã đọc chưa ghép lấy từ output thô
+  `partial.raw_steps`. Không có `value` đầy đủ.
+- `GET /projects/:id/import/source` (mode import, quyền như `GET /import`): `{ import_id, sections: [{ section_id, title, level,
+  blocks: [{ block_id, kind, text }] }] }`, mục theo thứ tự xuất hiện trong file, block theo `anchor.ordinal`; bảng = các hàng
+  `| ô | ô |`, ảnh = `text` rỗng, block chưa gắn mục không trả. Header `ETag` (bản import + số block + số mục tách); gửi lại
+  `If-None-Match` ⇒ `304`. Chưa upload ⇒ `404 IMPORT_NOT_FOUND`.
+- Env: `IMPORT_CHECK_CONCURRENCY` (1-8, mặc định 3 — số lô kiểm tra 1.11 gọi cùng lúc); `IMPORT_AI_RETRY_BACKOFF_MS` mặc định
+  `5000,15000,30000`.

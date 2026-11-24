@@ -374,7 +374,9 @@ export const stepEventSchema = z.discriminatedUnion("type", [
     label_vi: z.string(),
     detail_vi: z.string().optional(),
     batch: z.object({ i: z.number().int().min(1), n: z.number().int().min(1) }).optional(),
-    est_ms: z.number().int().min(0).optional()
+    est_ms: z.number().int().min(0).optional(),
+    /** Chỉ stage `draft` / `check` / `render`: id các mục tài liệu (`data-section-id`) do bước này sở hữu; không có ánh xạ ⇒ bỏ field. */
+    section_ids: z.array(z.string()).optional()
   }),
   z.object({ type: z.literal("heartbeat"), step_id: z.string(), stage: runStageSchema, elapsed_ms: z.number().int().min(0) }),
   z.object({ type: z.literal("auto_accepted"), step_id: z.string(), reason_vi: z.string() }),

@@ -289,7 +289,7 @@ Response `Content-Type: text/event-stream`. Mỗi sự kiện có dạng `event:
 | `type` | Khi | `data` |
 | --- | --- | --- |
 | `intake` | Đầu mỗi step (từ FLF-221; trước đó chỉ khi vào phase mới): liệt kê field còn trống | `{ step_id, phase, empty_fields[] }` |
-| `stage` | Runner chuyển giai đoạn (đọc → hỏi → soạn → kiểm → vẽ → duyệt) hoặc sang lô function kế | `{ step_id, stage, label_vi, detail_vi?, batch?, est_ms? }` |
+| `stage` | Runner chuyển giai đoạn (đọc → hỏi → soạn → kiểm → vẽ → duyệt) hoặc sang lô function kế | `{ step_id, stage, label_vi, detail_vi?, batch?, est_ms?, section_ids? }` - `section_ids` (chỉ stage `draft`/`check`/`render`): id các mục tài liệu (`data-section-id`) do step sở hữu, bỏ field khi không có ánh xạ |
 | `heartbeat` | Mỗi 10 giây trong lúc chờ model/render — để FE biết lượt còn sống | `{ step_id, stage, elapsed_ms }` |
 | `elicit` | Model đang hỏi/giải thích (stream chữ) | `{ step_id, delta }` |
 | `answer_needed` | Cần user trả lời trước khi Draft | `{ step_id, questions[] }` — xem 2.1 |

@@ -13,7 +13,7 @@
  */
 
 import type { Spine } from "../spine/spine.types.js"
-import { stepsOf } from "../spine/section-registry.js"
+import { FIXED_OWNER_STEPS, stepsOf } from "../spine/section-registry.js"
 import { loadStepRegistry } from "../pipeline/step-registry.js"
 import { bindFixedTemplateHeadings, contentSlot, isContentSlot } from "./content-slots.js"
 import type { LayoutEntry } from "./template-profile.model.js"
@@ -67,6 +67,25 @@ export const templateSectionOwnerSteps = (sectionId: string, spine?: Spine): str
   const owners = slotOwnerSteps(sectionId, spine)
   const fallback = SLOT_FALLBACK_OWNER[sectionId]
   return owners.length || !fallback ? owners : [fallback.step]
+}
+
+/**
+ * Đảo của `templateSectionOwnerSteps`: các mục tài liệu (id đúng như `data-section-id` của khung đọc) do một bước sở hữu.
+ * Ứng viên = mục cố định, feature / function / mục riêng có trong Spine, cộng mục của `layout` (dự án import / theo mẫu, gồm
+ * phần nhỏ `slot:*`). Bước vòng S-5 (`S-5.2@S01`) chỉ nhận function của đúng màn đó + mục áp cho mọi vòng. Hàm thuần.
+ */
+export const sectionsOfStep = (stepId: string, spine: Spine, layout: readonly LayoutEntry[] = []): string[] => {
+  const base = stepId.split("@")[0]
+  const candidates = new Set<string>([
+    ...Object.keys(FIXED_OWNER_STEPS),
+    ...spine.features.map((f) => `feature:${f.id}`),
+    ...spine.functions.map((f) => `function:${f.id}`),
+    ...spine.custom_sections.map((c) => `custom:${c.id}`)
+  ])
+  for (const entry of [...layout].sort((a, b) => a.order - b.order)) {
+    if (isTemplateSection(entry.section_id)) candidates.add(entry.section_id)
+  }
+  return [...candidates].filter((id) => templateSectionOwnerSteps(id, spine).some((owner) => owner === stepId || owner === base))
 }
 
 const isTemplateSection = (id: string): boolean => id !== "unmapped" && !id.startsWith("group:")
