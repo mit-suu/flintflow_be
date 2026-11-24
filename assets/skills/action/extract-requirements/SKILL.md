@@ -1,7 +1,7 @@
 ---
 skill_id: extract-requirements
 kind: action
-version: 2.0.1
+version: 2.0.2
 description: Business-flow §3.6.1 - read a raw reference document (minutes, email, notes) and extract a list of requirements, each pointing to its source paragraph, labelled against the current SRS
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -58,6 +58,7 @@ the current SRS. A business analyst (BA) reviews your list and decides what beco
    - `contradiction` - it conflicts with an element, with another requirement in this document (two people saying
      opposite things), or with another document ⇒ ask the BA. Fill `question` (one sentence, in the output
      language), 2–4 `suggested_answers`, and `sides`: one entry per side with `speaker`, `para_id` and the verbatim `quote`.
+     One disagreement is **one** item with every side in `sides` - never one item per speaker with the same question.
    - `ambiguous` - not measurable, no milestone, or no actor ⇒ ask the BA. Fill `question` and `suggested_answers`.
    - `inferred` - the document does not ask for it, but a problem it mentions implies a need ("CS spends the whole
      morning searching Excel" ⇒ order status lookup; "we open a branch in Da Nang next month" ⇒ multi-branch). Fill

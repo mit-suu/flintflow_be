@@ -349,6 +349,21 @@ describe("FLF-449 bỏ trần 40, chia lô, gộp trùng ý", () => {
     expect(merged.find((i) => i.label === "inferred")!.group).not.toBe("G1")
   })
 
+  it("E2E 24/11 #4: một mâu thuẫn bị tách mỗi người một mục (cùng câu hỏi / cùng các bên) gộp thành một mục, đủ các bên", () => {
+    const spine = { project: { goals: [] } } as unknown as Spine
+    const hoa = { speaker: "Chị Hoa", para_id: "D1-P04", quote: "hoàn trong vòng 1 ngày làm việc" }
+    const binh = { speaker: "Anh Bình", para_id: "D1-P04", quote: "ít nhất 3 ngày làm việc mới hoàn được" }
+    const q = "Thời hạn hoàn tiền là 1 ngày hay ít nhất 3 ngày làm việc?"
+    const a = item({ id: "R1", label: "contradiction", text: "Hoàn tiền trong 1 ngày làm việc.", question: q, sides: [hoa, binh], group: "G1" })
+    const b = item({ id: "R2", label: "contradiction", text: "Kế toán kiểm tra trước, hoàn sau ít nhất 3 ngày.", question: `${q} `, sides: [binh], group: "G2" })
+    const c = item({ id: "R3", label: "contradiction", text: "Khác hẳn.", question: "Câu khác?", sides: [binh, hoa], group: "G3" })
+    const other = item({ id: "R4", label: "contradiction", text: "Mâu thuẫn khác.", question: "Hủy đơn tới khi nào?", sides: [hoa], group: "G4" })
+    const merged = mergeItems([[a, b, c, other]], spine)
+    expect(merged).toHaveLength(2)
+    expect(merged[0].sides).toHaveLength(2)
+    expect(merged[1].question).toBe("Hủy đơn tới khi nào?")
+  })
+
   it("nhãn nguồn cho người đọc: không mã đoạn", () => {
     expect(paragraphLabel("D1-P03")).toBe("đoạn 3")
     expect(paragraphLabel(null)).toBe("")

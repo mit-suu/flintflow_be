@@ -361,8 +361,26 @@ const mergeSituations = (parts: readonly ExtractionSituation[]): ExtractionSitua
 
 const samePaths = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && [...a].sort().join("|") === [...b].sort().join("|")
 
-/** Hai mục cùng ý: chữ gập (bỏ dấu, hoa thường, dấu câu) trùng; hoặc gần như trùng + cùng nhãn + cùng phần tử. */
+const sideKeys = (i: IExtractionItem): string =>
+  (i.sides ?? [])
+    .map((s) => `${foldText(s.speaker ?? "")}@${s.para_id}`)
+    .sort()
+    .join("|")
+
+/**
+ * Một mâu thuẫn bị AI tách thành nhiều mục (mỗi bên một mục, cùng một câu hỏi - E2E 24/11 #4): hai mục `contradiction` có
+ * câu hỏi gập trùng, hoặc cùng tập các bên (≥ 2 bên, người nói + đoạn) là một.
+ */
+export const sameConflict = (a: IExtractionItem, b: IExtractionItem): boolean => {
+  if (a.label !== "contradiction" || b.label !== "contradiction") return false
+  const qa = foldText(a.question ?? "")
+  if (qa && qa === foldText(b.question ?? "")) return true
+  return (a.sides?.length ?? 0) >= 2 && sideKeys(a) === sideKeys(b)
+}
+
+/** Hai mục cùng ý: chữ gập (bỏ dấu, hoa thường, dấu câu) trùng; hoặc gần như trùng + cùng nhãn + cùng phần tử; hoặc cùng một mâu thuẫn. */
 export const sameRequirement = (a: IExtractionItem, b: IExtractionItem): boolean => {
+  if (sameConflict(a, b)) return true
   const fa = foldText(a.text)
   if (fa && fa === foldText(b.text)) return true
   return a.label === b.label && samePaths(a.entity_paths, b.entity_paths) && titleSimilarity(a.text, b.text) >= MERGE_SIMILARITY
@@ -387,6 +405,10 @@ export const mergeItems = (batches: readonly (readonly IExtractionItem[])[], spi
       }
       twin.entity_paths = [...new Set([...twin.entity_paths, ...item.entity_paths])]
       twin.located_paths = [...new Set([...(twin.located_paths ?? []), ...(item.located_paths ?? [])])]
+      if (item.sides?.length) {
+        const have = new Set((twin.sides ?? []).map((s) => `${foldText(s.speaker ?? "")}@${s.para_id}@${foldText(s.quote)}`))
+        twin.sides = [...(twin.sides ?? []), ...item.sides.filter((s) => !have.has(`${foldText(s.speaker ?? "")}@${s.para_id}@${foldText(s.quote)}`))]
+      }
     }
   })
   const ordered = [...merged.filter((i) => i.label !== "inferred"), ...merged.filter((i) => i.label === "inferred")]
