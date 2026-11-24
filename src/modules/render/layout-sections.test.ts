@@ -7,6 +7,7 @@ import { parseDocument } from "../import/parse.service.js"
 import { assignBlockSections, matchProfile } from "../import/profile-match.service.js"
 import { buildLayout } from "../import/step-plan.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
+import type { SectionSegments } from "../spine/segment-hash.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { Block } from "./rendered-document.types.js"
 import { buildLayoutSections, customBlocks, mergeAdjacentTables, functionSourceHash, moveSectionsToEnd, numberSections, placeSections, repairFixedTemplateLayout, romanValue, type TemplateLayout, type TemplateLayoutEntry } from "./layout-sections.js"
@@ -909,5 +910,116 @@ describe("mergeAdjacentTables - đường dẫn phần tử (FLF-443)", () => {
     const blocks: Block[] = [a, b]
     mergeAdjacentTables(blocks, new WeakSet<Block>([a, b]))
     expect(blocks[0]).not.toHaveProperty("row_entity_paths")
+  })
+})
+
+describe("FLF-468 (lát B) — vá bảng nguyên văn của file theo hàng, thay dựng lại từ Spine", () => {
+  const spine468 = (): Spine => ({
+    ...createEmptySpine({ name: "P" }),
+    roles: [{ id: "R01", name: "Admin", actor_id: null }, { id: "R02", name: "Editor", actor_id: null }],
+    screens: [
+      { id: "SC01", feature_id: "", name: "Dashboard", description: "Trang tổng quan.", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: null, detail_status: "signed_off" },
+      { id: "SC03", feature_id: "", name: "Reports", description: "Báo cáo.", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: null, detail_status: "signed_off" }
+    ],
+    permissions: [
+      { id: "P1", screen_id: "SC01", role_id: "R01", action: "view" },
+      { id: "P2", screen_id: "SC01", role_id: "R02", action: "view" },
+      { id: "P3", screen_id: "SC03", role_id: "R01", action: "view" }
+    ],
+    messages: [
+      { id: "MSG70", code: "PAY-010", text: "Số dư không đủ để thanh toán.", function_ids: [], type: "error", context: "Payment" }
+    ]
+  })
+
+  const tableRowsOf = (blocks: readonly Block[]): string[][] | undefined => {
+    const t = blocks.find((b) => b.type === "table")
+    if (t?.type !== "table") return undefined
+    return [t.header, ...t.rows].map((r) => r.map((c) => c.map((x) => x.text).join("")))
+  }
+
+  const layoutOf = (sectionId: string): TemplateLayout["layout"] => [entry(0, "Heading", 1, sectionId)]
+
+  it("ma trận phân quyền (fixed:3.1.3): giữ dấu X cũ, chỉ bật ô mới; màn đã xoá bỏ hàng, màn mới thêm hàng", () => {
+    const matrixRows = [
+      ["Screen", "Admin", "Editor"],
+      ["Dashboard", "X", ""], // CR thêm quyền Editor cho Dashboard
+      ["Legacy", "X", "X"] // Legacy đã bị xoá khỏi Spine (cột Editor cần ≥ 1 ô X ở hàng khác để nhận ra là ma trận)
+    ]
+    const record: SectionSegments = {
+      section_id: "fixed:3.1.3",
+      parts: [{ kind: "spine", items: ["permissions:P1", "permissions:P2"], source_hash: "stale-hash", blocks: [{ kind: "table", text: "", rows: matrixRows, image_ref: null }], mentions: [] }],
+      known: [{ key: "permissions:P1", hash: "h1" }, { key: "permissions:P2", hash: "h2" }]
+    }
+    const template: TemplateLayout = { layout: layoutOf("fixed:3.1.3"), language: "en", sectionSegments: [record] }
+    const { sections } = buildLayoutSections(spine468(), template, [], { diagramPng: () => undefined })
+    const rows = tableRowsOf(sections.find((s) => s.id === "fixed:3.1.3")!.blocks)
+    expect(rows).toEqual([
+      ["Screen", "Admin", "Editor"],
+      ["Dashboard", "X", "X"],
+      ["Reports", "X", ""]
+    ])
+  })
+
+  it("bảng thông báo (fixed:5.3, phần nối nguyên văn — không phần tử nào gắn vào đoạn nào lúc import): sửa PAY-010, xoá CHAT-001, thêm PAY-020", () => {
+    const fileRows = [
+      ["Mã", "Kiểu", "Ngữ cảnh", "Nội dung"],
+      ["CHAT-001", "error", "Chat", "Không gửi được tin nhắn."],
+      ["PAY-010", "error", "Payment", "Không đủ số dư."]
+    ]
+    const sp: Spine = {
+      ...spine468(),
+      messages: [
+        { id: "MSG70", code: "PAY-010", text: "Số dư không đủ để thanh toán.", function_ids: [], type: "error", context: "Payment" },
+        { id: "MSG71", code: "PAY-020", text: "Giao dịch đang xử lý.", function_ids: [], type: "info", context: "Payment" }
+        // CHAT-001 (MSG-xx) đã bị CR xoá khỏi Spine
+      ],
+      custom_sections: [{ id: "CS-MSG", heading: "", level: 2, source: "import", blocks: [{ kind: "table", text: "", rows: fileRows, image_ref: null }] }]
+    }
+    const record: SectionSegments = {
+      section_id: "fixed:5.3",
+      parts: [{ kind: "original", custom_id: "CS-MSG", diagrams: [], mentions: [] }],
+      // 184 thông báo "nằm trong known, không thông báo nào gắn vào phần nào" (ChoViet #5/#11) — known chỉ ghi lại
+      // dấu, không ảnh hưởng đường "original" (vá theo toàn bộ phần tử hiện tại của thực thể)
+      known: [{ key: "messages:MSG70", hash: "old" }, { key: "messages:old-chat", hash: "old" }]
+    }
+    const template: TemplateLayout = { layout: layoutOf("fixed:5.3"), language: "en", sectionSegments: [record] }
+    const { sections } = buildLayoutSections(sp, template, [], { diagramPng: () => undefined })
+    const rows = tableRowsOf(sections.find((s) => s.id === "fixed:5.3")!.blocks)
+    expect(rows).toEqual([
+      ["Mã", "Kiểu", "Ngữ cảnh", "Nội dung"],
+      ["PAY-010", "error", "Payment", "Số dư không đủ để thanh toán."],
+      ["PAY-020", "info", "Payment", "Giao dịch đang xử lý."]
+    ])
+  })
+
+  it("bảng use case (fixed:2.2.2): sửa mô tả UC-01 ⇒ đúng hàng đổi, Includes/Extends vẫn ra tên use case khác", () => {
+    const fileRows = [
+      ["ID", "Use Case", "Actor", "Description", "Includes", "Extends"],
+      ["UC-01", "Login", "User", "User logs in.", "", ""],
+      ["UC-02", "View Dashboard", "User", "User views dashboard.", "UC-01", ""]
+    ]
+    const sp: Spine = {
+      ...spine468(),
+      actors: [{ id: "A01", name: "User", kind: "human", description: "" }],
+      use_cases: [
+        { id: "UC-01", name: "Login", actor_ids: ["A01"], description: "User logs in with email + OTP.", includes: [], extends: [], function_ids: [] },
+        { id: "UC-02", name: "View Dashboard", actor_ids: ["A01"], description: "User views dashboard.", includes: ["UC-01"], extends: [], function_ids: [] }
+      ]
+    }
+    const record: SectionSegments = {
+      section_id: "fixed:2.2.2",
+      parts: [{ kind: "spine", items: ["use_cases:UC-01", "use_cases:UC-02"], source_hash: "stale-hash", blocks: [{ kind: "table", text: "", rows: fileRows, image_ref: null }], mentions: [] }],
+      known: [{ key: "use_cases:UC-01", hash: "h1" }, { key: "use_cases:UC-02", hash: "h2" }]
+    }
+    const template: TemplateLayout = { layout: layoutOf("fixed:2.2.2"), language: "en", sectionSegments: [record] }
+    const { sections } = buildLayoutSections(sp, template, [], { diagramPng: () => undefined })
+    const rows = tableRowsOf(sections.find((s) => s.id === "fixed:2.2.2")!.blocks)
+    expect(rows).toEqual([
+      ["ID", "Use Case", "Actor", "Description", "Includes", "Extends"],
+      ["UC-01", "Login", "User", "User logs in with email + OTP.", "", ""],
+      ["UC-02", "View Dashboard", "User", "User views dashboard.", "Login", ""]
+    ])
+    // Không nhân đôi use case: đúng 2 hàng dữ liệu + 1 hàng tiêu đề
+    expect(rows).toHaveLength(3)
   })
 })
