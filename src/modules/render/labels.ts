@@ -32,6 +32,11 @@ export const VI_LABELS: Readonly<Record<string, string>> = {
   Kind: "Loại",
   Description: "Mô tả",
   Actors: "Tác nhân",
+  // FLF-468 (lát D, ChoViet #11): cột thiếu bản dịch khiến bảng tiếng Việt (mode 1, không qua `VI_FPT_LABELS`) lẫn chữ
+  // Anh — "Rule" (§5.1 Quy tắc nghiệp vụ), "Context" (§5.3 bảng thông báo, cả đoạn dựng lại ngoài đoạn — `trailing`).
+  // Không thêm "Role" / "Actor" ở đây: hai nhãn đó chỉ dành cho mẫu FPT (`VI_FPT_LABELS`), mode 1 giữ tiếng Anh như cũ.
+  Rule: "Quy tắc",
+  Context: "Ngữ cảnh",
   Screen: "Màn hình",
   Type: "Kiểu",
   Feature: "Chức năng",
@@ -110,8 +115,6 @@ export const VI_FPT_LABELS: Readonly<Record<string, string>> = {
   Actor: "Tác nhân",
   "#": "STT",
   "N/A": "Không có",
-  // P07: cột ngữ cảnh của bảng 5.3
-  Context: "Ngữ cảnh",
   // Khung §3.x.y mẫu FPT
   "Function trigger": "Kích hoạt chức năng",
   "Function description": "Mô tả chức năng",

@@ -166,14 +166,9 @@ export async function writeTemplateDocx(
           break
         case "heading": out.push(paragraph(xml, [{ text: block.text, bold: true }], ctx.pattern)); break
         case "bullet_list":
-        case "numbered_list": {
-          const listPattern = ctx.paragraphs.find((p) => {
-            const format = listFormat(p)
-            return block.type === "bullet_list" ? format === "bullet" : !!format && format !== "bullet"
-          })
-          block.items.forEach((runs, i) => out.push(paragraph(xml, listPattern ? runs : [{ text: block.type === "bullet_list" ? "• " : `${i + 1}. ` }, ...runs], listPattern ?? ctx.pattern)))
+        case "numbered_list":
+          out.push(...listParagraphs(xml, ctx, listFormat, block.items, block.type === "bullet_list"))
           break
-        }
         case "table": {
           const sourceTable = ctx.tables[ctx.cursor.table++]
           if (sourceTable) {
@@ -189,8 +184,12 @@ export async function writeTemplateDocx(
               out.push(table(xml, block, undefined, ctx.pattern, bodyStyleId))
             }
           }
-          else if (ctx.freeTables) out.push(table(xml, block, undefined, ctx.pattern, bodyStyleId))
-          else out.push(...tableAsParagraphs(xml, block, ctx.pattern))
+          // FLF-468 (lát D, "Cần chốt" #1): mục của mẫu cố định không có bảng nguồn (chưa có bảng, hoặc section có nhiều
+          // bảng hơn bảng nguồn — lưới an toàn của lát B) ⇒ không trải thành đoạn "Nhãn: giá trị" nữa. Bảng từ 3 cột
+          // (thông báo, NFR, rủi ro…) in bảng thật theo kiểu bảng FlintFlow (như mục chèn mới — `freeTables`); bảng 2 cột
+          // (quy tắc, yêu cầu chung) gọn hơn dưới dạng danh sách "<mã> – <nội dung>" theo đúng khuôn danh sách của mẫu.
+          else if (ctx.freeTables || block.header.length >= 3) out.push(table(xml, block, undefined, ctx.pattern, bodyStyleId))
+          else out.push(...listParagraphs(xml, ctx, listFormat, tableRowsAsListItems(block), true))
           break
         }
         case "image": out.push(...await image(pkg, xml, doc, block, drawingIds)); break
@@ -588,11 +587,36 @@ function paragraph(xml: Document, runs: InlineRun[], source?: Element): Element 
   return p
 }
 
-function tableAsParagraphs(xml: Document, block: Extract<Block, { type: "table" }>, pattern?: Element): Element[] {
-  const headers = block.header.map((cell) => cell.map((r) => r.text).join(""))
-  return block.rows.map((cells) => paragraph(xml, cells.flatMap((runs, i) => [
-    ...(i ? [{ text: "\n" }] : []), ...(headers[i] ? [{ text: `${headers[i]}: `, bold: true }] : []), ...runs
-  ]), pattern))
+/**
+ * Khối danh sách / số thứ tự theo đúng khuôn danh sách của mẫu (kiểu đánh số của một đoạn trong `ctx.paragraphs`), không
+ * có thì tự thêm dấu đầu dòng / số thứ tự — dùng chung cho `bullet_list`/`numbered_list` và danh sách dựng từ bảng
+ * (FLF-468 lát D).
+ */
+function listParagraphs(
+  xml: Document,
+  ctx: { paragraphs: readonly Element[]; pattern?: Element },
+  listFormat: (p: Element) => string | null,
+  items: readonly InlineRun[][],
+  bullet: boolean
+): Element[] {
+  const listPattern = ctx.paragraphs.find((p) => {
+    const format = listFormat(p)
+    return bullet ? format === "bullet" : !!format && format !== "bullet"
+  })
+  return items.map((runs, i) => paragraph(xml, listPattern ? runs : [{ text: bullet ? "• " : `${i + 1}. ` }, ...runs], listPattern ?? ctx.pattern))
+}
+
+/**
+ * FLF-468 (lát D): bảng 2 cột (mã + nội dung — quy tắc nghiệp vụ, yêu cầu chung) mà mẫu không có bảng nguồn ⇒ mỗi hàng
+ * một dòng danh sách "<mã> – <nội dung>" (cột đầu làm mã/nhãn đậm); bảng 1 cột ⇒ chỉ nội dung, không thêm dấu "–".
+ */
+function tableRowsAsListItems(block: Extract<Block, { type: "table" }>): InlineRun[][] {
+  return block.rows.map((cells) => {
+    const [first, ...rest] = cells
+    const label = (first ?? []).map((r) => r.text).join("").trim()
+    const content = rest.flatMap((runs, i) => (i > 0 && runs.some((r) => r.text.trim()) ? [{ text: " " }] : []).concat(runs))
+    return label && content.length ? [{ text: `${label} – `, bold: true }, ...content] : label ? [{ text: label, bold: true }] : content
+  })
 }
 
 /** Reuse the import's explicit field paths; no fuzzy header matching or overflow cells. */

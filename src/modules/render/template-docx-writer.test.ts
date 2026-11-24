@@ -447,6 +447,38 @@ describe("writeTemplateDocx", () => {
     })
   })
 
+  describe("FLF-468 lát D: mục mẫu cố định không có bảng nguồn (\"Cần chốt\" #1)", () => {
+    it("bảng 2 cột (mã + nội dung) ⇒ danh sách \"mã – nội dung\", không phải đoạn 'Nhãn: giá trị'", async () => {
+      const input = await template(), parsed = await parseDocument(input), doc = document()
+      const repeated = parsed.blocks.filter((b) => b.kind === "heading" && b.text === "Repeated")[0]
+      const map = [{ block_id: repeated.block_id, section_id: "slot:business_rules" }]
+      doc.sections = [{
+        id: "slot:business_rules", heading: "Repeated", number: "5.1", level: 2,
+        blocks: [{ type: "table", header: [runs("ID"), runs("Rule")], rows: [[runs("BR-01"), runs("Only University accounts.")]] }]
+      }]
+      const output = await parseDocument(await writeTemplateDocx(doc, input, map))
+      expect(output.blocks.some((b) => (b.text ?? "").includes("BR-01 – Only University accounts."))).toBe(true)
+      // Bảng nguồn của mục khác ("Requirements") vẫn còn — chỉ mục đã vá (Repeated) không sinh bảng mới
+      expect(output.blocks.filter((b) => b.kind === "table")).toHaveLength(1)
+      expect(output.blocks.some((b) => (b.text ?? "").includes("ID:") || (b.text ?? "").includes("Rule:"))).toBe(false)
+    })
+
+    it("bảng từ 3 cột (thông báo) ⇒ in bảng thật tại chỗ, không trải thành đoạn", async () => {
+      const input = await template(), parsed = await parseDocument(input), doc = document()
+      const repeated = parsed.blocks.filter((b) => b.kind === "heading" && b.text === "Repeated")[0]
+      const map = [{ block_id: repeated.block_id, section_id: "slot:messages" }]
+      doc.sections = [{
+        id: "slot:messages", heading: "Repeated", number: "5.3", level: 2,
+        blocks: [{ type: "table", header: [runs("Code"), runs("Type"), runs("Context"), runs("Content")], rows: [[runs("PAY-010"), runs(""), runs(""), runs("Not enough balance.")]] }]
+      }]
+      const output = await parseDocument(await writeTemplateDocx(doc, input, map))
+      const table = output.blocks.find((b) => b.kind === "table" && b.rows?.some((r) => r[0] === "PAY-010"))
+      expect(table).toBeDefined()
+      expect(table!.rows).toEqual([["Code", "Type", "Context", "Content"], ["PAY-010", "", "", "Not enough balance."]])
+      expect(output.blocks.some((b) => (b.text ?? "").includes("Code:"))).toBe(false)
+    })
+  })
+
   describe("FLF-416 chế độ 4: sắp lại bố cục file khách (rearrange)", () => {
     it("mục FPT soạn thêm ⇒ heading mới theo style heading cùng cấp, đúng vị trí bản in; mục Ngoài phạm vi (kèm mục con) xuống cuối", async () => {
       const input = await template(), parsed = await parseDocument(input), doc = document()
