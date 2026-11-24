@@ -44,7 +44,8 @@ const fakeByContent = (prompt: string): string | undefined => {
     items.push({ entity, key: null, value, confidence, field_confidence: {}, source_block_ids: [b] })
   }
   item(O.reportRequirement, "functions", { name: "Export monthly progress report", description: O.reportRequirement })
-  item(O.enrollRequirement, "functions", { name: "Enroll in a course", description: O.enrollRequirement })
+  // Điểm AI thấp ⇒ cờ "Cần xem" lúc tạo bản 0.1 (kiểm cờ nêu đúng mục riêng của heading tự đặt)
+  item(O.enrollRequirement, "functions", { name: "Enroll in a course", description: O.enrollRequirement }, 0.5)
   item(O.reminderFunction, "functions", { name: "Send nightly reminder email", description: O.reminderFunction })
   item(O.reminderNfr, "nfrs", { statement: O.reminderNfr, kind: "quantitative", metric: "delivery delay", threshold: "5 minutes", category: "performance" })
   item(O.proseActors[0], "actors", { name: "Learner", kind: "human", description: O.proseActors[0] })
@@ -98,6 +99,12 @@ describe("FLF-444 - File lệch format: I-4 đọc theo nội dung", () => {
     await finalizeImport(ctx.projectId, ctx.userId, { import_id: ctx.importId, base_version: before.spine_version })
     const spine = (await spineRepository.get(ctx.projectId))!
     expect(spine.functions.map((f) => f.name)).toEqual(expect.arrayContaining(["Export monthly progress report", "Enroll in a course"]))
+    // Cờ "Cần xem" của phần tử đọc từ heading tự đặt trỏ mục Spine sở hữu phần tử (chức năng ⇒ mục của chính chức năng đó),
+    // không rơi về Record of Changes, không lộ mã tạm `content:@B…`
+    expect(spine.flags.some((f) => f.section_id.startsWith("content:"))).toBe(false)
+    const enroll = spine.functions.find((f) => f.name === "Enroll in a course")!
+    const enrollFlag = spine.flags.find((f) => f.rule_id === "import_needs_review" && f.message.includes("Enroll in a course"))
+    expect(enrollFlag?.section_id).toBe(`function:${enroll.id}`)
     // Bố cục file giữ nguyên: hai heading tự đặt vẫn là mục riêng của layout, giữ thứ tự file
     const layout = (await TemplateProfile.findOne({ projectId: ctx.projectId }).lean())!.layout.map((l) => l.heading_text)
     expect(layout.indexOf("Phần mở rộng")).toBeGreaterThan(-1)

@@ -110,6 +110,8 @@ export interface LayoutResult {
   contextBlocks: { section_id: string; block: CustomBlock }[]
   /** P09: khối nội dung (không phải hướng dẫn / mẫu) ⇒ mục của layout chứa nó, theo thứ tự file — nguồn trích đoạn của màn đọc khung. */
   sectionBlocks: { section_id: string; block_id: string; block: CustomBlock }[]
+  /** FLF-444: block heading mở một mục của layout ⇒ mục đó (`fixed:*`, `custom:CSnn`…) - nối mục đọc theo nội dung `content:@B…` về mục riêng. */
+  entryOfHeading: Map<string, string>
 }
 
 const toCustomBlock = (b: LayoutBlock): CustomBlock | null => {
@@ -165,6 +167,7 @@ export const buildLayout = (
     (block.kind === "paragraph" || block.kind === "list_item") && (isInstructionText(block.text ?? "") || marks.has(id))
   const contextBlocks: LayoutResult["contextBlocks"] = []
   const sectionBlocks: LayoutResult["sectionBlocks"] = []
+  const entryOfHeading: LayoutResult["entryOfHeading"] = new Map()
   const layout: LayoutEntry[] = []
   const customSections: CustomSection[] = []
   const slices: LayoutSlice[] = []
@@ -258,6 +261,7 @@ export const buildLayout = (
         ...(b.number_label ? { number_label: b.number_label } : {})
       }
       layout.push(entry)
+      entryOfHeading.set(b.block_id, section)
       stack.push({ level: b.level, section, entry })
       owner = current ? null : entry
       if (owner && segmentOn && isSegmentedSection(section)) {
@@ -297,7 +301,7 @@ export const buildLayout = (
       else segment.parts.push({ kind: "spine", block_ids: [b.block_id], blocks: [block] })
     } else if (owner && (owner.section_id.startsWith("group:") || unmappedBlockIds.has(b.block_id))) continuationOf(owner).blocks.push(block)
   }
-  return { layout, customSections, slices, segments, contextBlocks, sectionBlocks }
+  return { layout, customSections, slices, segments, contextBlocks, sectionBlocks, entryOfHeading }
 }
 
 /** Phần tử Spine đã trích (finalize): khoá `entity` + `id` + khối nguồn. */
