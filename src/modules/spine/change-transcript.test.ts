@@ -65,6 +65,23 @@ describe("previewPayload", () => {
     expect(previewPayload(preview, "vi").reply).toContain("Áp dụng")
   })
 
+  it("FLF-473 (B5): có crPrefill ⇒ câu mời \"Mở change request\" + payload.cr_prefill, không phải câu \"nói rõ mục\"", () => {
+    const prefill = { title: "sửa đoạn use case", description: "sửa đoạn use case", source: { kind: "verbal" as const, ref: null } }
+    const payload = previewPayload(
+      { ...base, ok: false, clarification: "Mình chưa xác định được cần đổi gì trong tài liệu. Bạn nói rõ mục..." },
+      "vi",
+      { requiresCr: true, crPrefill: prefill }
+    )
+    expect(payload).toEqual({ kind: "change_clarification", reply: expect.stringContaining("Mở change request"), cr_prefill: prefill })
+    expect(payload.reply).not.toContain("nói rõ mục")
+  })
+
+  it("FLF-473 (B5): không có crPrefill (câu hỏi làm rõ bình thường) ⇒ giữ nguyên câu hỏi, không có cr_prefill", () => {
+    const payload = previewPayload({ ...base, ok: false, clarification: "Bạn muốn sửa use case nào?" }, "vi", { requiresCr: true })
+    expect(payload).toEqual({ kind: "change_clarification", reply: "Bạn muốn sửa use case nào?" })
+    expect(payload).not.toHaveProperty("cr_prefill")
+  })
+
   it("FLF-311: câu hỏi kèm lựa chọn ⇒ payload có questions[].options để FE hiện thẻ chọn nhanh", () => {
     const payload = previewPayload({ ...base, ok: false, clarification: "Màn hình riêng hay popup?", clarification_choices: ["Màn hình riêng", "Popup mở từ My Grades"] })
     expect(payload).toEqual({
