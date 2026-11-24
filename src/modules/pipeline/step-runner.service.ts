@@ -44,7 +44,7 @@ import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf, screenLoopOrder } from
 import { addendumForUnit, assumptionsForPrompt, buildStepContext, elicitProjection, getStepSpec, loadConversationVariables, loadLastAiReply, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
 import { buildConversationSummary } from "./conversation-summary.js"
 import { composeStepGateMessage, spokenAssumptionIds } from "./gate-message.js"
-import { askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
+import { askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt, normalizeTopicKey } from "./decisions.service.js"
 import { DEFAULT_CHOICE, diagramChoiceFallbackNote, diagramChoiceFor, diagramChoiceKindOfTopic, diagramChoiceLabel, diagramChoiceLead, diagramChoiceQuestion, projectDiagramChoiceStore, resolveDiagramChoice, type DiagramChoiceStore } from "./diagram-choice.js"
 import { elicitPolicyFor, keepConflictsOnly, reconcileReply, trimTailQuestion } from "./fast-path.js"
 import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, currentBatch, followUpQuestions, followUpReply, indexOfQuestion, questionIdsFor, sameText, shapeQuestions, splitNumberedAnswer, stripRecommended, verifiedExcerpt } from "./question-shape.js"
@@ -621,12 +621,23 @@ export const nextPendingAfterChat = (
   spine: Spine,
   remaining: PendingAnswerState["asked"],
   revised: ElicitOutput["questions"],
-  message = ""
+  message = "",
+  /**
+   * FLF-472 (phần D): `topic_key` (đã chuẩn hoá) của những câu vừa được chốt TRONG lượt này (thẻ + chat). Model hay chốt
+   * câu X rồi vẫn viết lại câu X trong `questions` của cùng lượt — chặn tường minh ở đây, không phụ thuộc việc Spine đã
+   * đọc lại kịp quyết định vừa ghi hay chưa.
+   */
+  settledThisTurn: readonly string[] = []
 ): PendingAnswerState["asked"] => {
   if (remaining.length === 0) return remaining
+  const settledTopics = new Set(settledThisTurn)
+  const revisedAfterSettled =
+    settledTopics.size === 0
+      ? revised
+      : revised.filter((q) => !settledTopics.has(normalizeTopicKey((q as { topic_key?: string }).topic_key, q.question)))
   // Sổ quyết định phải đã ghi câu trả lời thẻ của lượt này (caller đọc lại Spine sau khi ghi) — câu viết lại hỏi lại chủ đề
   // vừa chốt bị bỏ. Bỏ hết mà vẫn còn câu chưa trả lời ⇒ hỏi lại đúng những câu đó, không để lượt kết thúc trong im lặng.
-  const filtered = revised.length === 0 ? [] : shapeQuestions(filterAskedQuestions(spine, revised).questions).asked
+  const filtered = revisedAfterSettled.length === 0 ? [] : shapeQuestions(filterAskedQuestions(spine, revisedAfterSettled).questions).asked
   // FLF-393 (demo 2026-11-12): AI hỏi thêm một câu mới mà không viết lại câu đang chờ ⇒ câu đó (kèm thẻ lựa chọn) từng bị
   // thay mất dù user chưa trả lời. Câu chưa trả lời mà AI không viết lại (theo `topic_key`) được giữ nguyên, sau câu mới.
   const rewritten = new Set(filtered.map((q) => q.topic_key ?? q.question))
@@ -1824,7 +1835,11 @@ export const runStep = async (
         // FLF-393: câu chốt bằng tài liệu tham khảo ⇒ ghi nguồn cho quyết định vừa vào sổ (business-flow §3.6)
         if (settled.some((a) => a.source_paras?.length)) await captureSettledSources(projectId, stepId, (await refresh(projectId)).spine, pending, settled)
         const answered = new Set([...cardAnswers, ...settled].map((a) => indexOfQuestion(pending, a.question_id)))
-        const remaining = nextPendingAfterChat(spine, pending.filter((_, i) => !answered.has(i)), turn.questions, message)
+        // FLF-472 (phần D): `recordAnswers` đã ghi sổ quyết định ở trên — đọc lại Spine TRƯỚC khi lọc câu hỏi còn chờ,
+        // như `phase-runner.service.ts` đã làm, để `filterAskedQuestions` thấy đúng quyết định vừa chốt trong lượt này.
+        ;({ spine, spineVersion } = await refresh(projectId))
+        const settledTopicsThisTurn = [...answered].map((i) => pending[i]?.topic_key).filter((t): t is string => t !== undefined)
+        const remaining = nextPendingAfterChat(spine, pending.filter((_, i) => !answered.has(i)), turn.questions, message, settledTopicsThisTurn)
         // Câu hỏi đuôi trong lời AI tính vào trần câu hỏi của lượt (FLF-235)
         const chatReply = trimTailQuestion(turn.reply, remaining, PROMPT_QUESTIONS_PER_TURN, replyLanguage)
         emit({ type: "elicit", step_id: stepId, delta: chatReply })

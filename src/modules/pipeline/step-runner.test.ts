@@ -1336,6 +1336,29 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
     expect(userMsgs).toEqual(["Uptime 99% là đủ cho tụi mình", "Quản trị viên"])
   })
 
+  it("FLF-472 (phần D): model chốt câu uptime nhưng vẫn viết lại câu đó trong questions ⇒ không hỏi lại, chỉ còn câu actor", async () => {
+    seedSpine()
+    seedSession(true)
+    const rewrittenUptime = {
+      question: "Mức uptime mong muốn là bao nhiêu phần trăm?",
+      options: [{ label: "99.9% (Khuyến nghị)" }, { label: "99%" }],
+      multiple: false,
+      topic_key: "uptime"
+    } as never as ElicitOutput["questions"][number]
+    const s = start([
+      {
+        ...elicitReply("Đã ghi uptime 99%."),
+        data: { reply: "Đã ghi uptime 99%.", questions: [rewrittenUptime], settled: [{ topic_key: "uptime", answer: "99%" }] }
+      }
+    ])
+    await waitCount(s.events, "answer_needed", 1)
+    expect(submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [], message: "Uptime 99% là đủ cho tụi mình" })).toBe(true)
+    await waitCount(s.events, "answer_needed", 2)
+
+    const again = s.events.filter((e) => e.type === "answer_needed")[1] as Extract<StepEvent, { type: "answer_needed" }>
+    expect(again.questions.map((q) => q.id)).toEqual(["Q_primary_actor"])
+  })
+
   it("B-0.1 chưa có ý tưởng: tin nhắn kể ý tưởng đóng mọi câu gợi mở, không hỏi lại, đi soạn luôn", async () => {
     const spine = structuredClone(MINIMAL)
     spine.steps = []
