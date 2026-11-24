@@ -101,10 +101,11 @@ describe("re-upload - diff theo block", () => {
     expect(dto).toMatchObject({ original_name: "SRS_Lumen_v2.docx", against_version: "0.1", summary: { added: 1, removed: 1, modified: 1, moved: 1 } })
     expect(dto.blocks).toEqual(
       expect.arrayContaining([
-        { block_id: null, change: "modified", before: SRS_FIXTURE_TEXT.purpose, after: EDITED },
-        { block_id: null, change: "removed", before: NOTES },
-        { block_id: null, change: "moved", before: moved, after: moved },
-        { block_id: null, change: "added", after: "Added after baseline." }
+        // FLF-447: entry mang thêm mục chứa nó (`section`) + loại (`kind`)
+        expect.objectContaining({ block_id: null, change: "modified", before: SRS_FIXTURE_TEXT.purpose, after: EDITED, kind: "paragraph" }),
+        expect.objectContaining({ block_id: null, change: "removed", before: NOTES }),
+        expect.objectContaining({ block_id: null, change: "moved", before: moved, after: moved, kind: "heading" }),
+        expect.objectContaining({ block_id: null, change: "added", after: "Added after baseline." })
       ])
     )
 

@@ -519,6 +519,18 @@ describe("readBlocks - tín hiệu heading FLF-343", () => {
   const sized = (text: string, sz: number) => `<w:p><w:r><w:rPr><w:sz w:val="${sz}"/></w:rPr><w:t xml:space="preserve">${text}</w:t></w:r></w:p>`
   const body = "This paragraph is ordinary body text written in a full sentence for the reader."
 
+  it("bước luồng gõ số '1. …' dưới mục nhiều cấp không phải heading cấp 1; số một cấp nối tiếp dàn số vẫn là heading", async () => {
+    // Tài liệu có style heading: "1." / "4." gõ tay ngay dưới "3.3" (đã style) là danh sách bước, không phải heading
+    const styledDoc = await readBlocks(await load(styled("u1", "3 Functional") + styled("u2", "3.3 Product Catalog") + p("1. The customer clicks Compare on a product") + p("4. The customer opens the comparison screen") + styled("u2", "3.4 Checkout")))
+    expect(styledDoc.filter((b) => b.kind === "heading").map((b) => b.text)).toEqual(["3 Functional", "3.3 Product Catalog", "3.4 Checkout"])
+    // Tài liệu không style: dàn số gõ tay vẫn nhận, "2." nối tiếp "1.2" là heading, "1." lạc dưới "2.1" thì không
+    const plain = await readBlocks(await load(p("1. Introduction") + p("1.2 Scope") + p("2. Overall Description") + p("2.1 Product Perspective") + p("1. Step one of a flow")))
+    expect(plain.filter((b) => b.kind === "heading").map((b) => b.text)).toEqual(["1. Introduction", "1.2 Scope", "2. Overall Description", "2.1 Product Perspective"])
+    // Chỉ một heading mang style ở đầu (Record of Changes) ⇒ dàn số gõ tay phía sau vẫn nhận đủ
+    const mixed = await readBlocks(await load(styled("u1", "Record of Changes") + p("1. Introduction") + p("1.1 Purpose") + p("2. Overall Description") + p("3. Requirements")))
+    expect(mixed.filter((b) => b.kind === "heading").map((b) => b.text)).toEqual(["Record of Changes", "1. Introduction", "1.1 Purpose", "2. Overall Description", "3. Requirements"])
+  })
+
   it("số mục gõ tay + in đậm ⇒ numbering_pattern kèm tín hiệu bold; không đậm ⇒ không có tín hiệu", async () => {
     const blocks = await readBlocks(await load(bold("2.1 Actors") + p(body) + p("2.2 Use Cases") + p(body)))
     expect(blocks.filter((b) => b.kind === "heading").map((b) => [b.text, b.heading_detector, b.heading_signals])).toEqual([
