@@ -80,6 +80,8 @@ export interface IExtractionDraft extends Document {
   /** FLF-444: loại nội dung 29148 theo block (chỗ cho phân loại Ngoài phạm vi). */
   content_types: { block_id: string; iso29148: string; in_scope: boolean; confidence: number }[]
   error: string | null
+  /** Lúc section bắt đầu gọi AI; `null` khi không đang đọc (ghi bằng `$set` riêng, không qua `save()` của draft). */
+  reading_since: Date | null
   createdAt: Date
   updatedAt: Date
 }
@@ -120,7 +122,8 @@ const extractionDraftSchema = new Schema<IExtractionDraft>(
       type: [new Schema({ block_id: { type: String, required: true }, iso29148: { type: String, required: true }, in_scope: { type: Boolean, required: true }, confidence: { type: Number, required: true } }, opts)],
       default: []
     },
-    error: { type: String, default: null }
+    error: { type: String, default: null },
+    reading_since: { type: Date, default: null }
   },
   { timestamps: true, minimize: false }
 )

@@ -67,6 +67,8 @@ import { summarizeChanges } from "./change-summary.js"
 import { gateTableOf } from "./gate-table.js"
 import { buildProgressReport, computeSectionStates } from "../spine/section-status.js"
 import { ownerStepOf } from "../spine/section-registry.js"
+import { sectionsOfStep } from "../import/template-step-headings.js"
+import { loadTemplateLayout } from "./template-guidance.js"
 import { AnswerDetached, CALL_LIMIT, NOT_PIPELINE_SESSION, RUN_CANCELLED_REASON, STEP_NOT_RUNNABLE } from "./step-runner.errors.js"
 import {
   HEARTBEAT_MS,
@@ -199,7 +201,7 @@ export interface RunTracker {
   runId: string
   startedAt: number
   emit: Emit
-  stage: (stage: RunStage, extra?: { detail_vi?: string; batch?: { i: number; n: number } }) => void
+  stage: (stage: RunStage, extra?: { detail_vi?: string; batch?: { i: number; n: number }; section_ids?: string[] }) => void
   save: (patch: Parameters<typeof touchRun>[3]) => Promise<void>
   /** Phát `heartbeat` mỗi `HEARTBEAT_MS` trong lúc chờ model/render; luôn dọn ở `finally`. */
   beat: <T>(stage: RunStage, run: () => Promise<T>) => Promise<T>
@@ -230,7 +232,9 @@ export const createTracker = (projectId: string, stepId: string, runId: string, 
         stage,
         label_vi: STAGE_LABELS[stage],
         ...(detail ? { detail_vi: detail } : {}),
-        ...(extra.batch ? { batch: extra.batch } : {})
+        ...(extra.batch ? { batch: extra.batch } : {}),
+        // Rỗng ⇒ bỏ field: FE không quét mục nào, chỉ còn nhật ký hoạt động
+        ...(extra.section_ids?.length ? { section_ids: extra.section_ids } : {})
       }
       emit(event)
       // `stage` cũng vào `events` (FLF-221): nhật ký hoạt động dựng lại sau reload cần biết việc nào đã bắt đầu lúc nào
@@ -1612,6 +1616,16 @@ export const runStep = async (
     emit({ type: "intake", step_id: stepId, phase: stepDef.phase, empty_fields: ctx.emptyFields })
     tracker.stage("intake", { detail_vi: `Đọc dữ liệu cho bước ${stepId}` })
 
+    // Mục tài liệu bước này sở hữu, để khung đọc quét đúng chỗ AI đang soạn. Lỗi ở đây không được làm hỏng lượt chạy.
+    const templateLayout = await loadTemplateLayout(projectId).catch(() => [])
+    const ownedSections = (): string[] => {
+      try {
+        return sectionsOfStep(stepId, spine, templateLayout)
+      } catch {
+        return []
+      }
+    }
+
     // Mốc để gate nói được "cờ đỏ 3 → 2" và "3 giả định mới" (WP-5, BUG-13)
     const flagsBefore = {
       red: spine.flags.filter((f) => f.level === "red" && f.resolved_at === null).length,
@@ -2029,7 +2043,8 @@ export const runStep = async (
         const batchInfo = batches.length > 1 ? { i: index + 1, n: batches.length } : undefined
         tracker.stage("draft", {
           detail_vi: batchInfo ? `AI đang soạn nội dung · lô ${batchInfo.i}/${batchInfo.n}` : "AI đang soạn nội dung",
-          ...(batchInfo ? { batch: batchInfo } : {})
+          ...(batchInfo ? { batch: batchInfo } : {}),
+          section_ids: ownedSections()
         })
         // Mở lại bước đã chốt kèm lời nhắn = sửa đúng chỗ được nhắn (như "Tôi muốn sửa" ở cổng). Gọi `draft` thì skill
         // dựng lại từ đầu: S-4.1 mở lại để gắn use case thêm lại feature/màn đã có ⇒ trùng mã cả 3 lượt, NEEDS_USER_INPUT.
@@ -2051,8 +2066,9 @@ export const runStep = async (
       }
     }
 
-    tracker.stage("check", { detail_vi: "Kiểm tra quy tắc và tham chiếu" })
-    if (stepDef.renders.length > 0) tracker.stage("render", { detail_vi: `Vẽ lại ${stepDef.renders.length} sơ đồ` })
+    const sectionsAtReview = ownedSections()
+    tracker.stage("check", { detail_vi: "Kiểm tra quy tắc và tham chiếu", section_ids: sectionsAtReview })
+    if (stepDef.renders.length > 0) tracker.stage("render", { detail_vi: `Vẽ lại ${stepDef.renders.length} sơ đồ`, section_ids: sectionsAtReview })
     const review = await tracker.beat(stepDef.renders.length > 0 ? "render" : "check", () =>
       runRenderReviewPhase(projectId, stepId, stepDef.renders, parseStepId(stepId).loop, userId, emit, d, {
         flagsBefore,

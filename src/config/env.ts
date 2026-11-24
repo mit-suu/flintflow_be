@@ -224,7 +224,7 @@ const envSchema = z.object({
    */
   IMPORT_AI_RETRY_BACKOFF_MS: z
     .string()
-    .default("15000,45000,90000")
+    .default("5000,15000,30000")
     .transform((v) => v.split(",").map((x) => x.trim()).filter(Boolean).map(Number))
     .refine((v) => v.every((n) => Number.isFinite(n) && n >= 0), { message: "danh sách số ms ≥ 0, cách nhau dấu phẩy" }),
   /**
@@ -242,6 +242,8 @@ const envSchema = z.object({
    * trích × giá trị này; driver `bullmq` = `JOB_IMPORT_CONCURRENCY` × giá trị này.
    */
   IMPORT_EXTRACT_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(4),
+  /** Số lô kiểm tra AI (1.11) gọi cùng lúc trong một lượt kiểm tra sau baseline 0.1 (1 = nối tiếp từng lô). */
+  IMPORT_CHECK_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(3),
   /** Số job import (I-4 / finalize, mỗi job vài phút gọi AI) một worker chạy song song. */
   JOB_IMPORT_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(2),
   /**
