@@ -91,6 +91,7 @@ retention periods, key rotation intervals, audit-log horizons.
 5. English values, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).
 6. No number from the user: take the table default plus an `assumptions[]` entry (`draft-to-ops`
    rule 10).
+7. Every NFR row you add carries `source_ref`: a short English note on where it comes from (the brief, a user answer, a reference document and its passage, or who asked). Never invent a source; none known ⇒ "User request in this step".
 
 ## Example (S-6.4, production × high)
 

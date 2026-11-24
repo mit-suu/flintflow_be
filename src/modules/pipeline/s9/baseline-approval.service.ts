@@ -21,6 +21,7 @@ import * as repository from "../../spine/spine.repository.js"
 import type { BaselineSubmission, Spine } from "../../spine/spine.types.js"
 import { ApiError } from "../../../shared/utils/api-error.js"
 import { BaselineBlockedError, blockingFlags, recheckAtBaseline } from "./baseline.service.js"
+import { assertNoRunningStep } from "../run-state.service.js"
 
 /** Đã có bản đang chờ Lead quyết — nộp chồng lên là vô nghĩa. */
 export const BASELINE_ALREADY_SUBMITTED = "BASELINE_ALREADY_SUBMITTED"
@@ -90,6 +91,7 @@ export interface SubmitResult {
  * khi lượt từ chối trước còn comment chưa xử lý, 409 khi đã có bản đang chờ hoặc `base_version` lệch.
  */
 export const submitForApproval = async (actor: ApprovalActor, baseVersion: number): Promise<SubmitResult> => {
+  await assertNoRunningStep(actor.projectId)
   const { spine, checkedAtVersion } = await recheckAtBaseline(actor.projectId, actor.userId, baseVersion)
 
   const blocking = blockingFlags(spine)

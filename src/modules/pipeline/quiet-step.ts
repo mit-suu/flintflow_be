@@ -106,11 +106,63 @@ export const conflictsWithLedger = (statement: string | { text: string; text_vi?
   return false
 }
 
+/** Điều kiện cổng cứng chung của bước và của bản sửa qua chat (xem `hardGateOf`). */
+export interface HardGateInput {
+  /** Cờ đỏ tăng thêm (dương ⇒ có cờ đỏ mới). */
+  redDelta: number
+  /** Có xoá nội dung đã có. */
+  contentRemoved?: boolean
+  /** Có sơ đồ vẽ lỗi. */
+  renderFailed?: boolean
+  /** Giả định mới sinh trong lượt. */
+  newAssumptions: readonly { id: string; text: string; text_vi?: string }[]
+  spine: Spine
+}
+
+export type HardGate =
+  | { kind: "red_flags"; count: number }
+  | { kind: "content_removed" }
+  | { kind: "render_failed" }
+  | { kind: "assumption_conflict"; count: number }
+
+/**
+ * Lõi dùng chung: bốn điều kiện cổng cứng ở MỌI mức duyệt (FLF-337) — cờ đỏ mới, xoá nội dung, lỗi vẽ, giả định trái điều đã
+ * chốt. Bước (`isQuietStep`) và bản sửa qua chat (`chatEditVerdict`) cùng đọc hàm này để hai nơi không lệch luật.
+ */
+export const hardGateOf = (input: HardGateInput): HardGate | null => {
+  if (input.redDelta > 0) return { kind: "red_flags", count: input.redDelta }
+  if (input.contentRemoved) return { kind: "content_removed" }
+  if (input.renderFailed) return { kind: "render_failed" }
+  const conflicting = input.newAssumptions.filter((a) => conflictsWithLedger(a, input.spine))
+  if (conflicting.length > 0) return { kind: "assumption_conflict", count: conflicting.length }
+  return null
+}
+
+/** Lý do dừng của bước theo cổng cứng. */
+const stepHardGateReason = (gate: HardGate): string => {
+  switch (gate.kind) {
+    case "red_flags":
+      return `Bước mở thêm ${gate.count} cờ đỏ`
+    case "content_removed":
+      return "Bước xoá nội dung đã có"
+    case "render_failed":
+      return "Có sơ đồ vẽ lỗi"
+    case "assumption_conflict":
+      return `${gate.count} giả định trái với điều bạn đã chốt`
+  }
+}
+
+/** Mọi section lượt chạm đều nằm trong `project.skip_confirm_sections` ("Chấp nhận, không hỏi lại phần này"). */
+export const touchesOnlySkippedSections = (touched: readonly string[], spine: Spine): boolean => {
+  const skip = new Set(spine.project?.skip_confirm_sections ?? [])
+  return touched.length > 0 && skip.size > 0 && touched.every((id) => skip.has(id))
+}
+
 /** Bước này có được tự Accept không, và vì sao. */
 export const isQuietStep = (input: QuietInput): QuietVerdict => {
   if (ALWAYS_GATE.has(input.templateId)) return { quiet: false, reason_vi: ALWAYS_GATE_REASON[input.templateId] ?? "Bước này luôn cần bạn quyết" }
   // Mọi bước: dừng ở mọi bước — trừ bước chỉ chạm phần đã chọn "không hỏi lại" (FLF-337, xét ở dưới)
-  const touchedOnlySkipped = (input.touchedSections ?? []).length > 0 && (input.touchedSections ?? []).every((id) => (input.spine.project?.skip_confirm_sections ?? []).includes(id))
+  const touchedOnlySkipped = touchesOnlySkippedSections(input.touchedSections ?? [], input.spine)
   if (input.reviewMode === "strict" && !touchedOnlySkipped) return { quiet: false, reason_vi: "Chế độ duyệt chặt: dừng ở mọi bước" }
   if (input.settledEarlier) return { quiet: true, reason_vi: "Đã chốt ở bước trước - không cần hỏi lại" }
   // Chưa có tên hệ thống thì B-2.3 phải hỏi tên (FLF-232) — không bao giờ tự Accept qua nó, dù chế độ duyệt nào
@@ -118,19 +170,12 @@ export const isQuietStep = (input: QuietInput): QuietVerdict => {
     return { quiet: false, reason_vi: "Cần chốt tên hệ thống trước khi mở phần tiếp theo" }
   }
   // FLF-337: bốn điều kiện tự qua áp ở MỌI mức — cờ đỏ mới, xoá nội dung, lỗi vẽ, giả định trái điều đã chốt là cổng cứng
-  if (input.redDelta > 0) return { quiet: false, reason_vi: `Bước mở thêm ${input.redDelta} cờ đỏ` }
-  if (input.contentRemoved) return { quiet: false, reason_vi: "Bước xoá nội dung đã có" }
-  if (input.renderFailed) return { quiet: false, reason_vi: "Có sơ đồ vẽ lỗi" }
-  const conflicting = input.newAssumptions.filter((a) => conflictsWithLedger(a, input.spine))
-  if (conflicting.length > 0) {
-    return { quiet: false, reason_vi: `${conflicting.length} giả định trái với điều bạn đã chốt` }
-  }
+  const hard = hardGateOf(input)
+  if (hard) return { quiet: false, reason_vi: stepHardGateReason(hard) }
   // FLF-432 (FLF-413 #8): S-7.3 chỉ trao đổi mà `messages` vẫn rỗng ⇒ dừng ở cổng, không tự nhảy sang S-7.4
   if ((input.emptySections ?? []).length > 0) return { quiet: false, reason_vi: "Bước chưa ghi được nội dung cho mục nó phụ trách" }
   // FLF-337 "Chấp nhận, không hỏi lại phần này": bước chỉ chạm các section đã tắt hỏi ⇒ tự qua ở mọi mức (kể cả Mọi bước)
-  const touched = input.touchedSections ?? []
-  const skip = new Set(input.spine.project?.skip_confirm_sections ?? [])
-  if (touched.length > 0 && skip.size > 0 && touched.every((id) => skip.has(id))) {
+  if (touchesOnlySkippedSections(input.touchedSections ?? [], input.spine)) {
     return { quiet: true, reason_vi: "Chỉ chạm phần bạn đã chọn không hỏi lại" }
   }
   if (input.reviewMode === "milestones") {
@@ -144,4 +189,35 @@ export const isQuietStep = (input: QuietInput): QuietVerdict => {
   // "Cuối giai đoạn" (`fast`, và `balanced` cũ xử lý như `fast` — FLF-220): giả định mới không mâu thuẫn
   // được gom lên cổng chốt cuối phase, không dừng giữa phase.
   return { quiet: true, reason_vi: "Bước không có gì cần bạn quyết" }
+}
+
+export interface ChatEditInput extends HardGateInput {
+  reviewMode: ReviewMode
+  /** Section sở hữu mà bản sửa chạm tới. */
+  touchedSections: readonly string[]
+  /** AI cảnh báo yêu cầu không hợp lý, hoặc còn câu cần hỏi: cổng cứng ở mọi mức. */
+  needsPerson: boolean
+}
+
+/**
+ * Bản sửa qua chat TRƯỚC baseline có được tự ghi sau xem trước không (business-flow nguyên tắc 6, §1.2). Cùng cổng cứng với
+ * bước (`hardGateOf`) cộng cảnh báo / câu hỏi của AI; "Không hỏi lại" tự ghi ở mọi mức; còn lại chỉ mức *Mọi bước* (`strict`)
+ * hiện thẻ xác nhận. Không có "cuối giai đoạn" trong chat nên `balanced` / `fast` / `milestones` giống nhau. Sau baseline đi
+ * đường change request, hàm này không được gọi.
+ */
+export const chatEditVerdict = (input: ChatEditInput): QuietVerdict => {
+  if (input.needsPerson) return { quiet: false, reason_vi: "AI cần bạn quyết trước khi ghi" }
+  const hard = hardGateOf(input)
+  if (hard) {
+    const reason: Record<HardGate["kind"], string> = {
+      red_flags: `Thay đổi này mở thêm ${hard.kind === "red_flags" ? hard.count : 0} cờ đỏ chặn baseline`,
+      content_removed: "Thay đổi này xoá nội dung đã có",
+      render_failed: "Có sơ đồ vẽ lỗi",
+      assumption_conflict: "Có giả định trái với điều bạn đã chốt"
+    }
+    return { quiet: false, reason_vi: reason[hard.kind] }
+  }
+  if (touchesOnlySkippedSections(input.touchedSections, input.spine)) return { quiet: true, reason_vi: "Chỉ chạm phần bạn đã chọn không hỏi lại" }
+  if (input.reviewMode === "strict") return { quiet: false, reason_vi: "Mức duyệt Mọi bước: bạn xác nhận từng thay đổi" }
+  return { quiet: true, reason_vi: "Mức duyệt hiện tại cho phép tự ghi thay đổi không có rủi ro" }
 }

@@ -262,7 +262,8 @@ const functionSchema = new Schema(
     // FLF-418: sơ đồ tuần tự mức thành phần — cùng hình dạng message
     component_interactions: { type: [functionInteractionSchema], default: undefined },
     // FLF-365: bản phát hành (phân bổ yêu cầu) — thiếu = chưa phân bổ
-    release: { type: String, default: undefined }
+    release: { type: String, default: undefined },
+    source_ref: { type: String, default: undefined }
   },
   opts
 )
@@ -280,7 +281,8 @@ const nfrSchema = new Schema(
     metric: { type: String },
     threshold: { type: String },
     priority,
-    release: { type: String, default: undefined }
+    release: { type: String, default: undefined },
+    source_ref: { type: String, default: undefined }
   },
   opts
 )
@@ -290,7 +292,8 @@ const businessRuleSchema = new Schema(
     id: { type: String, required: true },
     tier: { type: String, enum: ["high", "detail"], required: true },
     statement: { type: String, default: "" },
-    source_validation_ids: { type: [String], default: [] }
+    source_validation_ids: { type: [String], default: [] },
+    source_ref: { type: String, default: undefined }
   },
   opts
 )

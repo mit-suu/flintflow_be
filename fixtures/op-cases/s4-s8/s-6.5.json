@@ -11,7 +11,8 @@
         "category": "other",
         "statement": "Personal data is deleted within thirty days of a deletion request.",
         "kind": "descriptive",
-        "priority": null
+        "priority": null,
+        "source_ref": "Client brief"
       },
       "reason": "S-6 other"
     },
@@ -23,7 +24,8 @@
         "category": "other",
         "statement": "Every destructive administrative action is written to an audit log kept for twelve months.",
         "kind": "descriptive",
-        "priority": null
+        "priority": null,
+        "source_ref": "Client brief"
       },
       "reason": "S-6 other"
     }

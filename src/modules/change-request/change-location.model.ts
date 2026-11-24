@@ -39,6 +39,15 @@ export interface VerifyViolation {
   path?: string
 }
 
+/**
+ * Cảnh báo của AI ở C-4 khi yêu cầu không hợp lý ở chỗ này (BF §3.2 C-4): kèm lý do. BA chọn "Vẫn làm" ⇒ `kept_intent`,
+ * AI soạn đề xuất theo yêu cầu và không cảnh báo lại.
+ */
+export interface LocationWarning {
+  text: string
+  reason: string
+}
+
 export interface LocationVerify {
   /** Kiểm tất định: giá trị tại path chưa đổi, op chạm đúng phần tử đã khoá, chạy khô + bất biến, không thêm cờ đỏ. */
   code_ok: boolean
@@ -88,6 +97,11 @@ export interface IChangeLocation extends Document {
   verify: LocationVerify | null
   group_id: string | null
   conflict: LocationConflict | null
+  warning: LocationWarning | null
+  /** BA đã chọn "Vẫn làm" sau cảnh báo: AI soạn theo yêu cầu, lỗi trùng luật đã giữ ⇒ hỏi BA ngay, không tự sửa (C-5). */
+  kept_intent: boolean
+  /** C-5 "giữ theo ý mình": mã luật (`VerifyViolation.rule`) BA chấp nhận vi phạm; kiểm coi như qua, cờ đỏ thật hiện sau khi ghi. */
+  kept_violations: string[]
 }
 
 const opts = { _id: false }
@@ -135,6 +149,9 @@ const changeLocationSchema = new Schema<IChangeLocation>(
       default: null
     },
     group_id: { type: String, default: null },
+    warning: { type: new Schema({ text: { type: String, default: "" }, reason: { type: String, default: "" } }, opts), default: null },
+    kept_intent: { type: Boolean, default: false },
+    kept_violations: { type: [String], default: [] },
     conflict: {
       type: new Schema(
         {

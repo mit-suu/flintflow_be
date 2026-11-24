@@ -28,7 +28,8 @@ const as = (projectId: string, token: string) => {
 
 /** Tuấn Anh (Lead của fixture) + Bình (Analyst cùng org). */
 const twoPeople = async () => {
-  const seeded: SeededFixture = await seedFixture("full")
+  // Mức Mọi bước: các ca dưới kiểm hai người xác nhận bản xem trước chưa áp (mức khác tự ghi ngay sau xem trước)
+  const seeded: SeededFixture = await seedFixture("full", { mutate: (spine) => void ((spine.project as Record<string, unknown>).review_mode = "strict") })
   const email = `binh-${Date.now()}@flintflow.test`
   const binh = await User.create({ email, name: "Bình", password: "test-password-123", emailVerified: true })
   await Membership.create({ organizationId: seeded.orgId, userId: binh._id, role: "analyst" })

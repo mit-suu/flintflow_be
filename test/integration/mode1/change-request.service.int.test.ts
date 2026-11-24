@@ -9,7 +9,7 @@ vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await imp
 
 import { seedFixture } from "../../setup.js"
 import { createMode1Project, mode1Api } from "../../helpers/mode1.js"
-import { CR_BODY, crDoc, crToImpact, detail, importedProject, lockedPaths, newCr, resetCrMock } from "../../helpers/mode1-cr-p4.js"
+import { CR_BODY, crDoc, crToImpact, detail, importedProject, lockedPaths, newCr, resetCrMock, secondAnalyst } from "../../helpers/mode1-cr-p4.js"
 import { makeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
 import { changeRequestDetailSchema, listChangeRequestsResponseSchema } from "../../../src/modules/change-request/change-request.dto.js"
 import * as crService from "../../../src/modules/change-request/change-request.service.js"
@@ -86,7 +86,13 @@ describe("C-1 BR-03 - phải có baseline", () => {
 describe("C-1 cr_id tăng dần theo project", () => {
   it("tuần tự: CR-001, CR-002, CR-003; project khác đếm lại từ CR-001", async () => {
     const a = await importedProject()
-    expect([await newCr(a.c), await newCr(a.c), await newCr(a.c)]).toEqual(["CR-001", "CR-002", "CR-003"])
+    // Mỗi người một CR mở một lúc ⇒ huỷ CR vừa tạo trước khi tạo CR kế; mã CR vẫn tăng dần
+    const ids: string[] = []
+    for (let i = 0; i < 3; i++) {
+      ids.push(await newCr(a.c))
+      detail(await a.c.post(`/change-requests/${ids[i]}/cancel`, { reason: "Chỉ để đếm mã CR" }))
+    }
+    expect(ids).toEqual(["CR-001", "CR-002", "CR-003"])
     const b = await importedProject()
     expect(await newCr(b.c)).toBe("CR-001")
     expect((await CrCounter.findOne({ projectId: a.projectId }).lean())?.seq).toBe(3)
@@ -114,10 +120,12 @@ describe("C-1 cr_id tăng dần theo project", () => {
 
 describe("đọc, lọc, chuyển trạng thái, huỷ", () => {
   it("GET list lọc theo status; CR không tồn tại ⇒ 404 CR_NOT_FOUND", async () => {
-    const { c } = await importedProject()
+    const { c, seeded, projectId } = await importedProject()
     await newCr(c)
-    const second = await newCr(c)
-    detail(await c.post(`/change-requests/${second}/clarify`))
+    // Mỗi người một CR mở một lúc ⇒ CR thứ hai do Analyst khác tạo
+    const other = await secondAnalyst(seeded, projectId)
+    const second = await newCr(other)
+    detail(await other.post(`/change-requests/${second}/clarify`))
     const drafts = listChangeRequestsResponseSchema.parse((await c.get("/change-requests?status=draft")).body.data)
     expect(drafts.map((x) => x.cr_id)).toEqual(["CR-001"])
     const review = listChangeRequestsResponseSchema.parse((await c.get("/change-requests?status=impact_review")).body.data)

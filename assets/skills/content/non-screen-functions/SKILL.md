@@ -80,6 +80,7 @@ includes: [], extends: []}`) rather than leaving the function unreachable from �
 5. English values, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).
 6. Still unclear: add the function with the most reasonable cadence plus an `assumptions[]` entry
    (`status: "unconfirmed"`), `draft-to-ops` rule 10.
+7. Every function row you add carries `source_ref`: a short English note on where it comes from (the brief, a user answer, a reference document and its passage, or who asked). Never invent a source; none known ⇒ "User request in this step".
 
 ## Example (a scheduled job and its use case)
 

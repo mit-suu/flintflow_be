@@ -26,6 +26,7 @@ import type { BaselineSubmission, Flag } from "../spine/spine.types.js"
 import type { ReviewPackageDto, ReviewPackageCrDto } from "./doc-version.dto.js"
 import { listDocVersions } from "./doc-version.service.js"
 import { nextMajor } from "./versioning.js"
+import { assertNoRunningStep } from "../pipeline/run-state.service.js"
 
 export interface PackageActor {
   projectId: string
@@ -119,6 +120,7 @@ const notifyLeads = async (actor: PackageActor, crIds: string[], submission: Bas
  */
 export const submitPackage = async (actor: PackageActor, baseVersion: number): Promise<ReviewPackageDto> => {
   await assertNoMigrationRunning(actor.projectId)
+  await assertNoRunningStep(actor.projectId)
   const record = await spineRepository.get(actor.projectId)
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   if (record.spine_version !== baseVersion) {

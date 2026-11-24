@@ -335,6 +335,20 @@ export const getActiveRun = async (projectId: string): Promise<RunStateDoc | nul
   return alive ?? candidates.find((d) => d.status === "interrupted" && d.paused_reason === "ai_error") ?? null
 }
 
+/** Gửi Lead duyệt khi còn lượt soạn đang chạy. */
+export const SUBMIT_STEP_RUNNING = "SUBMIT_STEP_RUNNING"
+
+/**
+ * Gửi Lead duyệt (baseline / gói) khi có lượt đang soạn ⇒ lượt đó ghi tiếp sau lúc nộp, Lead ký một bản khác bản đã nộp.
+ * Chỉ chặn lượt đang chạy thật (khoá còn hạn); lượt chờ trả lời / chờ cổng đã bị khoá nội dung chặn ở `/answer`, `/gate`.
+ */
+export const assertNoRunningStep = async (projectId: string): Promise<void> => {
+  const run = await getActiveRun(projectId)
+  if (run?.status === "running" && new Date(run.locked_until).getTime() > Date.now()) {
+    throw new ApiError(409, `Bước ${run.step_id} đang soạn - chờ bước xong hoặc huỷ lượt đó rồi gửi duyệt`, SUBMIT_STEP_RUNNING)
+  }
+}
+
 /** Step đang thật sự chạy (khoá còn hiệu lực) — resume không được revert nội dung đang được ghi. */
 export const isStepRunning = async (projectId: string, stepId: string): Promise<boolean> => {
   const doc = await getRunState(projectId, stepId)
