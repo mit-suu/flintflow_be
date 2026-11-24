@@ -21,7 +21,7 @@ import { renderVersionFile } from "./render-version.js"
 import type { DocBlockDto } from "../import/import.dto.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { toIso } from "../import/mode1.http.js"
-import { diffBlockLists } from "./block-diff.js"
+import { diffBlockLists, toDiffBlocks } from "./block-diff.js"
 import { docFileStore } from "./doc-file.store.js"
 import type { CompareResponse, DocVersionDto } from "./doc-version.dto.js"
 import type { IDocVersion } from "./doc-version.model.js"
@@ -192,9 +192,8 @@ const fixedVersionFile = async (projectId: string, projectName: string, v: IDocV
 export const compareVersions = async (projectId: string, from: string, to: string): Promise<CompareResponse> => {
   const [va, vb] = await Promise.all([requireDocVersion(projectId, from), requireDocVersion(projectId, to)])
   const [a, b] = await Promise.all([fileBlocksOfVersion(va), fileBlocksOfVersion(vb)])
-  const lite = (x: OoxmlBlock[]) => x.map((blk) => ({ block_id: null, para_id: blk.para_id, text: blk.text, text_hash: blk.text_hash }))
-  const { blocks, summary } = diffBlockLists(lite(a), lite(b))
-  return compareWithoutAuthors({ from, to, summary, blocks })
+  const { blocks, summary, sections } = diffBlockLists(toDiffBlocks(a), toDiffBlocks(b))
+  return compareWithoutAuthors({ from, to, summary, blocks, sections })
 }
 
 /** Tiêu đề cột người thực hiện của bảng Record of Changes (en / vi, `render/labels.ts`). */
@@ -212,11 +211,39 @@ export const blankInChargeColumn = (text: string): string => {
  * UC-47 / UC-48: bản so sánh không nói ai thực hiện thay đổi, và Viewer thấy đúng các block như Lead — FLF-411 (U2-6) in tên người
  * tạo CR vào cột "In charge" của Record of Changes, nên bản so sánh che cột đó cho mọi vai trò (tên vẫn ở trang Xem / file Word).
  */
-export const compareWithoutAuthors = (res: CompareResponse): CompareResponse => ({
-  ...res,
-  blocks: res.blocks.map((b) => ({
+export const compareWithoutAuthors = (res: CompareResponse): CompareResponse => {
+  const blocks = res.blocks.map((b) => ({
     ...b,
     ...(typeof b.before === "string" ? { before: blankInChargeColumn(b.before) } : {}),
-    ...(typeof b.after === "string" ? { after: blankInChargeColumn(b.after) } : {})
+    ...(typeof b.after === "string" ? { after: blankInChargeColumn(b.after) } : {}),
+    ...(b.table ? { table: blankInChargeTable(b.table) } : {})
   }))
-})
+  // Bảng chỉ khác ở cột người thực hiện ⇒ sau khi che không còn hàng đổi: không còn là thay đổi (bớt "sửa", tính vào khối không đổi)
+  const unchangedTable = (b: (typeof blocks)[number]) => !!b.table && !b.table.header_before && b.table.rows.every((r) => r.change === "unchanged")
+  const dropped = blocks.filter(unchangedTable)
+  if (!dropped.length) return { ...res, blocks }
+  const sections = res.sections.map((s) => ({ ...s, unchanged: s.unchanged + dropped.filter((d) => (d.section_key ?? d.section ?? "") === (s.key ?? s.title)).length }))
+  return { ...res, blocks: blocks.filter((b) => !unchangedTable(b)), summary: { ...res.summary, modified: res.summary.modified - dropped.length }, sections }
+}
+
+type CompareTable = NonNullable<CompareResponse["blocks"][number]["table"]>
+
+/** Hàm thuần: bảng diff theo hàng (FLF-447) mà hàng tiêu đề có cột "In charge" ⇒ ô cột đó thành trống ở mọi hàng thân; ô đó không tính là ô đổi. */
+export const blankInChargeTable = (table: CompareTable): CompareTable => {
+  const col = table.header.findIndex((c) => IN_CHARGE_HEADER.test(c.trim()))
+  if (col < 0) return table
+  const blank = (r?: string[]) => r?.map((c, i) => (i === col ? "" : c))
+  return {
+    ...table,
+    rows: table.rows
+      .map((r) => {
+        if (r.change === "unchanged") return { ...r, rows: r.rows.map((x) => blank(x)!) }
+        const before = blank(r.before)
+        const after = blank(r.after)
+        const cells = r.cells_changed?.filter((c) => c !== col)
+        return { ...r, ...(before ? { before } : {}), ...(after ? { after } : {}), ...(cells ? { cells_changed: cells } : {}) }
+      })
+      // Hàng chỉ đổi ở cột người thực hiện ⇒ không còn là thay đổi
+      .filter((r) => !(r.change === "modified" && r.cells_changed?.length === 0))
+  }
+}
