@@ -688,3 +688,97 @@ describe("phần tử theo mục cha có cặp — cuối cây con của heading
   })
 })
 
+
+describe("heading con cùng mục với heading cha (pairing.children) — lỗi #5 test FLF-447", () => {
+  const styles = (prefix: string) =>
+    `<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>` +
+    [1, 2, 3].map((n) => `<w:style w:type="paragraph" w:styleId="${prefix}${n}"><w:name w:val="heading ${n}"/><w:basedOn w:val="Normal"/></w:style>`).join("")
+  const pair = (old_key: string, new_key: string | null) => ({ old_key, new_key, by: new_key ? ("section_id" as const) : null, score: 1, needs_review: false })
+  const headingTexts = async (buf: Buffer): Promise<string[]> => {
+    const pkg = await DocxPackage.load(buf)
+    const body = (await pkg.requireXml(MAIN_PART)).getElementsByTagNameNS(NS.w, "body")[0]
+    return wKids(body)
+      .filter((el) => /<w:pStyle w:val="(?:Heading|u)\d"\/>/.test(xmlOf(el)))
+      .map((el) => wAll(el, "t").map((t) => t.textContent).join(""))
+  }
+  const oldHeadings = [
+    { key: "custom:CS01", heading_text: "1. Tổng quan sản phẩm", level: 1, section_id: "custom:CS01" },
+    { key: "slot:scope", heading_text: "1.2 Phạm vi phát hành 1.0", level: 2, section_id: "slot:scope" },
+    { key: "fixed:1", heading_text: "1.3 Quy tắc nghiệp vụ tổng quát", level: 2, section_id: "fixed:1" }
+  ]
+  const targetHeadings = [
+    { key: "n0", heading_text: "1. Tổng quan sản phẩm", section_id: "unmapped", level: 1 },
+    { key: "n1", heading_text: "1.2 Phạm vi phát hành 1.0", section_id: "slot:scope", level: 2 },
+    { key: "n2", heading_text: "Trong phạm vi", section_id: "slot:scope", level: 3, guidance: "[Liệt kê các chức năng thuộc phạm vi phát hành.]" },
+    { key: "n3", heading_text: "Ngoài phạm vi", section_id: "slot:scope", level: 3, guidance: "[Liệt kê các nội dung nằm ngoài phạm vi.]" },
+    { key: "n4", heading_text: "1.3 Quy tắc nghiệp vụ tổng quát", section_id: "fixed:1", level: 2 }
+  ]
+  const pairing = { pairs: [pair("custom:CS01", "n0"), pair("slot:scope", "n1"), pair("fixed:1", "n4")], followers: [], ignored_new: [], split: [], children: ["n2", "n3"] }
+  const input = async (over: Partial<BuildBaseFileInput> = {}): Promise<BuildBaseFileInput> => {
+    const source = await makeDocx({
+      styles: styles("u"),
+      body:
+        styledP("u1", "1. Tổng quan sản phẩm") +
+        styledP("u2", "1.2 Phạm vi phát hành 1.0") +
+        p("Trong phạm vi: quản lý tài khoản, giỏ hàng.") +
+        p("Ngoài phạm vi: kho lạnh tự động.") +
+        styledP("u2", "1.3 Quy tắc nghiệp vụ tổng quát") +
+        p("BR-01 Mỗi đơn hàng một hợp tác xã.")
+    })
+    const target = await makeDocx({
+      styles: styles("Heading"),
+      body:
+        styledP("Heading1", "1. Tổng quan sản phẩm") +
+        styledP("Heading2", "1.2 Phạm vi phát hành 1.0") +
+        styledP("Heading3", "Trong phạm vi") +
+        p("[Liệt kê các chức năng thuộc phạm vi phát hành.]") +
+        styledP("Heading3", "Ngoài phạm vi") +
+        p("[Liệt kê các nội dung nằm ngoài phạm vi.]") +
+        styledP("Heading2", "1.3 Quy tắc nghiệp vụ tổng quát") +
+        p("[Mô tả quy tắc nghiệp vụ.]")
+    })
+    return {
+      target,
+      targetHeadings,
+      oldHeadings,
+      pairing,
+      groups: emptyGroups(),
+      decisions: [],
+      direction: "forward",
+      source: { buffer: source, headingKeys: oldHeadings.map((h) => h.key) },
+      ...over
+    }
+  }
+  const expected = ["1. Tổng quan sản phẩm", "1.2 Phạm vi phát hành 1.0", "1.3 Quy tắc nghiệp vụ tổng quát"]
+
+  it("layout không có entry con, file nền không còn heading con + chữ hướng dẫn của nó; nội dung nằm dưới heading cha", async () => {
+    const built = await input()
+    const layout = planLayout(built, () => "CSX")
+    expect(layout.entries.map((e) => e.heading_text)).toEqual(expected)
+    expect(layout.entries.some((e) => e.missing)).toBe(false)
+    const result = await buildBaseFile(built)
+    expect(await headingTexts(result.buffer)).toEqual(expected)
+    const xml = await docText(result.buffer)
+    expect(xml).not.toContain("Liệt kê các chức năng")
+    expect(xml).not.toContain("Liệt kê các nội dung")
+    expect(xml.indexOf("Trong phạm vi: quản lý")).toBeGreaterThan(xml.indexOf("1.2 Phạm vi phát hành 1.0"))
+    expect(result.sections.filter((s) => s.mode === "removed").map((s) => s.key)).toEqual(["n2", "n3"])
+    expect(result.fellBackToSpine).toBe(false)
+  })
+
+  it("dựng từ Spine (không có file nền): heading con đã bỏ không làm writer lỗi định vị heading", async () => {
+    const renderFromSpine = vi.fn(async (ids: readonly string[]) => renderedDoc(ids.map((id) => section(id, id, `Body ${id}`))))
+    const result = await buildBaseFile(await input({ source: null, renderFromSpine }))
+    expect(await headingTexts(result.buffer)).toEqual(expected)
+    expect(result.sections.filter((s) => s.flag === "yellow")).toEqual([])
+    expect(await docText(result.buffer)).toContain("Body slot:scope")
+  })
+
+  it("bản ghi cũ không có children ⇒ giữ hành vi cũ (heading con là mục thiếu)", async () => {
+    const { children: _children, ...legacy } = pairing
+    const built = await input({ pairing: legacy })
+    const layout = planLayout(built, () => "CSX")
+    expect(layout.entries.filter((e) => e.missing).map((e) => e.heading_text)).toEqual(["Trong phạm vi", "Ngoài phạm vi"])
+    expect(await headingTexts((await buildBaseFile(built)).buffer)).toEqual(targetHeadings.map((h) => h.heading_text))
+  })
+})

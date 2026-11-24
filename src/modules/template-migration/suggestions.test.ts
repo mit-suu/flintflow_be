@@ -82,12 +82,38 @@ describe("nạp lại chính file xuất (CHỢVIỆT, bỏ 4.2.3)", () => {
     expect(outline.filter((o) => o.status !== "kept").map((o) => o.heading_text)).toEqual(["4.2.3 Hiệu năng"])
     expect(outline.some((o) => o.dropped_items && o.status !== "dropped")).toBe(false)
   })
+
+  it("dàn tiêu đề: heading con cùng mục (Trong / Ngoài phạm vi) hiện gộp vào mục cha, vẫn chấm xám", () => {
+    const outline = buildOutline({ old: choVietOld, neu: choVietNew, pairing, groups, decisions: [] })
+    expect(outline.filter((o) => o.merged_into !== undefined).map((o) => [o.heading_text, o.status, o.merged_into])).toEqual([
+      ["Trong phạm vi", "kept", "Phạm vi phát hành 1.0"],
+      ["Ngoài phạm vi", "kept", "Phạm vi phát hành 1.0"]
+    ])
+  })
+
+  it("bản ghi cũ không có children ⇒ không dòng nào gộp", () => {
+    const { children: _children, ...legacy } = pairing
+    const outline = buildOutline({ old: choVietOld, neu: choVietNew, pairing: legacy, groups, decisions: [] })
+    expect(outline.some((o) => o.merged_into !== undefined)).toBe(false)
+  })
 })
 
 describe("cột vai trò của bảng phân quyền màn hình", () => {
   it("vai trò khác nhau giữa dự án và mẫu không gây conflict bảng", () => {
     const { groups } = run([old("fixed:3.1.3", "3.1.3 Screen Authorization", 3)], [neu(0, "3.1.3 Screen Authorization", "fixed:3.1.3")], { oldTables: tables({ "fixed:3.1.3": [permOld] }), newTables: tables({ "fixed:3.1.3": [{ columns: ["h:man hinh", "h:admin"], headers: ["Màn hình", "Admin"] }] }) })
     expect(groups.conflict).toEqual([])
+  })
+
+  it("hai bên đều có cột vai trò chưa gán field (h:<tên vai trò>) ⇒ không conflict bảng (lỗi #2 test FLF-447)", () => {
+    const oldShape: TableShape = { columns: ["h:man hinh", "h:nguoi mua", "h:nguoi ban", "h:quan tri vien"], headers: ["Màn hình", "Người mua", "Người bán", "Quản trị viên"] }
+    const { groups } = run([old("fixed:3.1.3", "3.1.3 Phân quyền màn hình", 2)], [neu(0, "3.1.3 Phân quyền màn hình", "fixed:3.1.3", 2)], { oldTables: tables({ "fixed:3.1.3": [oldShape] }), newTables: tables({ "fixed:3.1.3": [permNew] }) })
+    expect(groups.conflict).toEqual([])
+  })
+
+  it("cột khung đứng trước cột màn hình vẫn được so", () => {
+    const withNo: TableShape = { columns: ["h:stt", "permissions[].screen_id", "h:nguoi mua"], headers: ["STT", "Màn hình", "Người mua"] }
+    const { groups } = run([old("fixed:3.1.3", "3.1.3 Phân quyền màn hình", 2)], [neu(0, "3.1.3 Phân quyền màn hình", "fixed:3.1.3", 2)], { oldTables: tables({ "fixed:3.1.3": [withNo] }), newTables: tables({ "fixed:3.1.3": [permNew] }) })
+    expect(groups.conflict.map((c) => c.kind)).toEqual(["table_columns"])
   })
 
   it("thiếu hẳn cột màn hình ở mẫu đích vẫn là conflict", () => {
