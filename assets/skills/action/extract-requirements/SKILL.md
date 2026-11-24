@@ -1,7 +1,7 @@
 ---
 skill_id: extract-requirements
 kind: action
-version: 2.0.0
+version: 2.0.1
 description: Business-flow §3.6.1 - read a raw reference document (minutes, email, notes) and extract a list of requirements, each pointing to its source paragraph, labelled against the current SRS
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -38,12 +38,15 @@ the current SRS. A business analyst (BA) reviews your list and decides what beco
 {{goals}}
 - Glossary:
 {{glossary}}
+- Output language: {{output_language}}. Every text you write (`text`, `situation` texts, `symptom`, `root_cause`,
+  `rationale`, option `label` / `description` / `pros` / `cons` / `risks`, `recommendation_reason`, `question`,
+  `suggested_answers`) is in this language, even when the document or the SRS index uses another one. Quotes stay verbatim.
 
 ## Rules
 
 1. One item per requirement. A requirement is a statement the system must satisfy or a change someone asked for - not a
    decision about the meeting, not a greeting, not a date. Keep the requirement's own wording; write `text` in the
-   document's language, one or two sentences, measurable when the source gives a number.
+   output language, one or two sentences, measurable when the source gives a number.
 2. `source.para_id` is the exact paragraph code the requirement comes from (`D1-P03`); `source.quote` is the verbatim
    sentence(s) from that paragraph, at most 300 characters. Never invent a code; never quote text that is not there.
 3. Exactly one `label` per item:
@@ -53,7 +56,7 @@ the current SRS. A business analyst (BA) reviews your list and decides what beco
    - `duplicate` - the SRS already states it; no change, the document just becomes a source for that element -
      list the element in `entity_paths`.
    - `contradiction` - it conflicts with an element, with another requirement in this document (two people saying
-     opposite things), or with another document ⇒ ask the BA. Fill `question` (one sentence, in the document's
+     opposite things), or with another document ⇒ ask the BA. Fill `question` (one sentence, in the output
      language), 2–4 `suggested_answers`, and `sides`: one entry per side with `speaker`, `para_id` and the verbatim `quote`.
    - `ambiguous` - not measurable, no milestone, or no actor ⇒ ask the BA. Fill `question` and `suggested_answers`.
    - `inferred` - the document does not ask for it, but a problem it mentions implies a need ("CS spends the whole

@@ -206,6 +206,8 @@ describe("FLF-449 rút yêu cầu: tài liệu dài chia lô, Suy ra, chỗ đã
     const extractPrompts = prompts.filter((p) => p.includes("# Extract requirements from a raw document"))
     expect(extractPrompts).toHaveLength(2)
     expect(extractPrompts.find((p) => p.includes(LAST))).toContain("nfrs[id=NFR-01]")
+    // E2E 24/11: chữ AI viết theo ngôn ngữ tài liệu SRS, có dòng ngôn ngữ cụ thể chứ không chỉ "document's language"
+    for (const p of extractPrompts) expect(p).toMatch(/Output language: (Vietnamese \(tiếng Việt\)|English)\./)
 
     // Suy ra tích mà chưa chọn phương án ⇒ 400
     const decisions = [

@@ -39,6 +39,7 @@ import type { Spine } from "../spine/spine.types.js"
 import { crProjection, glossaryText } from "./cr-context.js"
 import { createCr } from "./change-request.service.js"
 import { CR_MATERIAL_MAX_CHARS } from "./change-request.constants.js"
+import { crDocumentLanguage } from "./cr-language.js"
 import type { CrClarification } from "./change-request.model.js"
 import { vectorCandidates } from "./embedding/vector-search.js"
 import { candidatesText, elementName, locatedPathsFor, lookupParagraphs, type ParagraphHits } from "./extraction-lookup.js"
@@ -72,6 +73,8 @@ export const EXTRACTION_MAX_ITEMS = 500
 export const MERGE_SIMILARITY = 0.85
 /** Số phần tử tối đa gieo làm đích C-3 cho một CR từ danh sách rút. */
 export const EXTRACTION_SEED_MAX = 20
+/** Tên ngôn ngữ ghi vào dòng "Output language" của prompt rút yêu cầu. */
+export const EXTRACTION_LANGUAGE_NAME = { vi: "Vietnamese (tiếng Việt)", en: "English" } as const
 /** Nhãn cần BA trả lời trước khi đưa vào CR (§3.6.1 bước 4). */
 export const QUESTION_LABELS: ReadonlySet<ExtractionLabel> = new Set(["contradiction", "ambiguous"])
 
@@ -491,6 +494,9 @@ export const extractRequirements = async (projectId: string, userId: string, doc
   const hits = await lookupParagraphs(spine, paragraphs, (await vectorAllowed(projectId)) ? { vector: (text) => vectorCandidates(projectId, text) } : {})
   const goals = (spine.project.goals ?? []).map((g) => g.trim()).filter(Boolean)
   const glossary = glossaryText(spine)
+  // Chữ AI viết (yêu cầu, hiện trạng, Suy ra, câu hỏi) theo ngôn ngữ tài liệu SRS, như C-2 / C-4 (E2E 24/11: tài liệu tiếng
+  // Việt mà danh sách rút ra toàn tiếng Anh vì prompt chỉ dặn "document's language").
+  const outputLanguage = EXTRACTION_LANGUAGE_NAME[await crDocumentLanguage(projectId, spine)]
   const range = (b: ExtractionBatch) => Array.from({ length: b.end - b.start }, (_, k) => b.start + k)
 
   const results = await runLimited(batches, EXTRACTION_PARALLEL_BATCHES, (b): Promise<MeteredResult<ExtractRequirementsOutput>> => {
@@ -509,7 +515,8 @@ export const extractRequirements = async (projectId: string, userId: string, doc
         candidates: candidatesText(spine, hits, indices, (i) => paragraphId(docCode, i)),
         projection: crProjection(spine, indices.map((i) => paragraphs[i]).join("\n")),
         goals: goals.map((g) => `- ${g}`).join("\n") || "(none)",
-        glossary
+        glossary,
+        output_language: outputLanguage
       }
     )
   })
