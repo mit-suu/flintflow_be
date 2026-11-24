@@ -16,13 +16,14 @@ import { ActionType, type AiActionInput } from "../../shared/ai/ai-action.types.
 import type { KnowledgeAnswerOutput } from "../../shared/ai/response-parser.js"
 import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import type { KnowledgeSourceKind } from "./chunker.js"
+import { ISO_29148_CORPUS } from "./corpus.js"
 import { retrieveKnowledge, type RetrievalBackend, type RetrievalResult, type RetrievedChunk, type RetrieveOptions } from "./retrieve.js"
 
 /** Chat gửi `knowledge: true` khi `KNOWLEDGE_ENABLED` tắt (409). */
 export const KNOWLEDGE_DISABLED = "KNOWLEDGE_DISABLED"
 
-/** Corpus chat tra cứu (phase 1: skill nội bộ). */
-export const DEFAULT_KNOWLEDGE_CORPUS = "skills"
+/** Corpus chat tra cứu: skill nội bộ + điều khoản ISO/IEC/IEEE 29148 (FLF-465). */
+export const DEFAULT_KNOWLEDGE_CORPUS: readonly string[] = ["skills", ISO_29148_CORPUS]
 
 /** Câu từ chối cố định — phân biệt được với câu lỗi hệ thống (test + tin lưu trong phiên có `grounded: false`). */
 export const ABSTAIN_REPLY: Readonly<Record<ReplyLanguage, string>> = {

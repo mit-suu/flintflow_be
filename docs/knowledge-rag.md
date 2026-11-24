@@ -2,7 +2,8 @@
 
 Hỏi đáp có căn cứ trong chat: người dùng bật cờ `knowledge: true` khi gửi tin, server truy hồi chunk từ **kho tri thức**
 (phase 1: chính các skill nội bộ `assets/skills/**/SKILL.md`; phase 2: chuẩn ngoài như ISO 29148, mỗi chuẩn là một thư
-mục file điều khoản + `index.md`), rồi model trả lời **chỉ từ các chunk đó**, mỗi ý kèm nhãn trích dẫn. Không đủ căn
+mục file điều khoản + `index.md`; FLF-465: đã có `assets/knowledge/iso-29148`, corpus `iso-29148`, chat tra cả `skills`
+lẫn `iso-29148`), rồi model trả lời **chỉ từ các chunk đó**, mỗi ý kèm nhãn trích dẫn. Không đủ căn
 cứ ⇒ câu từ chối cố định, không gọi model, không trừ credit. Hợp đồng HTTP: `docs/api/pipeline-contract.md` §1.2.
 
 Code: `src/modules/knowledge/` · vận hành: `docs/ops.md` "Knowledge RAG" · eval: `npm run eval:knowledge`.
