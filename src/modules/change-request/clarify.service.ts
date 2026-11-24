@@ -135,6 +135,17 @@ export const forcedQuestions = (
 /** Từ khoá dự phòng khi hết vòng mà model vẫn thấy mơ hồ: từ dài trong tiêu đề CR. */
 const fallbackKeywords = (cr: IChangeRequest): string[] => cr.title.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 5).slice(0, 5)
 
+/**
+ * FLF-449: CR tạo từ danh sách rút đã trả lời câu hỏi (`seed.skip_clarify`), có chỗ đã tra, chưa gộp thêm lệnh và chỉ có đúng
+ * vòng hỏi đáp mang sang từ thẻ hỏi (đã trả lời đủ).
+ */
+export const extractionAnswered = (cr: Pick<IChangeRequest, "seed" | "amendments" | "clarifications">): boolean =>
+  !!cr.seed?.skip_clarify &&
+  (cr.seed.targets ?? []).length > 0 &&
+  !cr.amendments?.length &&
+  cr.clarifications.length === 1 &&
+  cr.clarifications[0].answers.length === cr.clarifications[0].questions.length
+
 export const runClarify = async (cr: IChangeRequest, userId: string): Promise<void> => {
   assertCrStatus(cr, ["draft", "clarifying"], "clarifying")
   await transitionCr(cr, "clarifying")
@@ -150,6 +161,17 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
   // FLF-318: CR tạo từ bản xem trước đã duyệt (thêm / xoá / sửa use case) ⇒ câu hỏi đã hỏi trong chat như trước
   // baseline, lô đã chốt ⇒ không hỏi thêm, không gọi model; C-3 lấy vị trí theo đúng lô
   if (approvedBatch(spine, cr)) {
+    cr.missing_info = []
+    cr.markModified("missing_info")
+    cr.targets = { entity_paths: [...new Set(cr.seed?.targets ?? [])], keywords: [] }
+    cr.markModified("targets")
+    await transitionCr(cr, "impact_review")
+    return
+  }
+  // FLF-449 (BF §3.6.1 "bỏ C-2 nếu đã hỏi ở bước 4"): CR từ danh sách rút, BA đã trả lời ở thẻ hỏi (câu trả lời nằm trong
+  // `clarifications`) và Code đã tra được chỗ ⇒ không hỏi lại, không gọi model; C-3 đi từ chỗ đã tra. Gộp thêm lệnh sau đó ⇒
+  // làm rõ như thường.
+  if (extractionAnswered(cr)) {
     cr.missing_info = []
     cr.markModified("missing_info")
     cr.targets = { entity_paths: [...new Set(cr.seed?.targets ?? [])], keywords: [] }

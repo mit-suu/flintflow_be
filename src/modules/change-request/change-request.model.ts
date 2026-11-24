@@ -99,6 +99,11 @@ export interface CrSeed {
   ops: Record<string, unknown>[]
   /** Phần tử Spine bị op chạm (`actors[id=A01]`, `project`). */
   targets: string[]
+  /**
+   * FLF-449 (BF §3.6.1): CR tạo từ danh sách rút mà BA đã trả lời câu hỏi ở thẻ hỏi ⇒ bỏ bước làm rõ (C-2), đi thẳng phân
+   * tích ảnh hưởng với `targets` (câu trả lời đã nằm trong `clarifications`). CR cũ: không có.
+   */
+  skip_clarify?: boolean
 }
 
 const opts = { _id: false }
@@ -146,7 +151,10 @@ const changeRequestSchema = new Schema<IChangeRequest>(
       default: () => ({ entity_paths: [], keywords: [] })
     },
     seed: {
-      type: new Schema({ instruction: { type: String, default: null }, ops: { type: [Schema.Types.Mixed], default: [] }, targets: { type: [String], default: [] } }, opts),
+      type: new Schema(
+        { instruction: { type: String, default: null }, ops: { type: [Schema.Types.Mixed], default: [] }, targets: { type: [String], default: [] }, skip_clarify: { type: Boolean, default: false } },
+        opts
+      ),
       default: null
     },
     flag_ids: { type: [String], default: [] },

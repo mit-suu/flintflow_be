@@ -14,7 +14,7 @@ import { Mode1Error } from "../import/mode1.errors.js"
 import { toIso } from "../import/mode1.http.js"
 import { clipMaterialText, formatCrId, formatMaterialId, type CrSourceKind } from "./change-request.constants.js"
 import type { ChangeRequestDetail, CreateChangeRequest, PendingSection } from "./change-request.dto.js"
-import { ChangeRequest, CrCounter, type CrSeed, type IChangeRequest } from "./change-request.model.js"
+import { ChangeRequest, CrCounter, type CrClarification, type CrSeed, type IChangeRequest } from "./change-request.model.js"
 import { CR_OPEN_STATUSES, CR_STATUSES, CR_STATUS_LABELS, assertTransition, isTerminal, type CrStatus } from "./change-request.state.js"
 import { seedFromFlags } from "./flag-seed.js"
 import { ChangeGroup } from "./change-group.model.js"
@@ -267,9 +267,17 @@ export type CreateCrInput = Omit<CreateChangeRequest, "source"> & { source: { ki
 export interface CreateCrOptions {
   /** Người tạo chỉ được một CR mở: có CR chưa xong ⇒ `409 CR_OWN_OPEN`. Đường người dùng tạo CR bật; lô hệ thống tạo thay họ thì không. */
   enforceOwnOpen?: boolean
+  /** Phần chỉ server đặt (không có trong body HTTP). FLF-449: CR từ danh sách rút mang chỗ đã tra (`seed.targets`). */
+  seed?: CrSeed | null
+  /** FLF-449: câu hỏi / câu trả lời của thẻ hỏi. */
+  clarifications?: CrClarification[]
 }
 
+/** FLF-449: tên cũ của phần tạo CR chỉ server đặt — gộp vào `CreateCrOptions`. */
+export type CreateCrInternal = CreateCrOptions
+
 export const createCr = async (projectId: string, userId: string, body: CreateCrInput, options: CreateCrOptions = {}): Promise<IChangeRequest> => {
+  const internal = options
   const record = await spineRepository.get(projectId)
   // FLF-330 C-7: gói đang chờ Lead ⇒ bản nháp khoá, không mở CR mới
   assertPackageNotPending(record?.baseline_submission)
@@ -290,7 +298,8 @@ export const createCr = async (projectId: string, userId: string, body: CreateCr
     description: body.description,
     source: body.source,
     requester: body.requester,
-    seed: mergeSeeds(body.preview_id ? seedFromPreview(projectId, userId, body.preview_id) : null, fromFlags?.seed ?? null),
+    seed: internal.seed ?? mergeSeeds(body.preview_id ? seedFromPreview(projectId, userId, body.preview_id) : null, fromFlags?.seed ?? null),
+    clarifications: internal.clarifications ?? [],
     flag_ids: fromFlags?.flagIds ?? [],
     materials: (body.materials ?? []).map((m, i) => ({ ...clipMaterialText(m.text), material_id: formatMaterialId(i + 1), kind: "text", name: m.name, round: 0, added_at: new Date() })),
     status: "draft",
