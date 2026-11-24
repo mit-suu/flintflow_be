@@ -192,6 +192,13 @@ describe("renderSection - fixed sections", () => {
     expect(section.blocks).toEqual([{ type: "image", png: "png-d02", caption: "Use Case Diagram" }])
   })
 
+  it("FLF-479 (12a): fixed:5.4 tài liệu tiếng Anh - cột Kind ghi nhãn 'Risk', không ghi 'risk' thô", () => {
+    const section = renderSection(spine(), "fixed:5.4", ctx({ number: "5.4" }))
+    const table = section.blocks[0]
+    expect(table).toMatchObject({ type: "table", header: [[{ text: "Kind" }], [{ text: "Statement" }]] })
+    expect(table.type === "table" && table.rows).toEqual([[[{ text: "Risk" }], [{ text: "Provider pricing may change." }]]])
+  })
+
   it("fixed:2.2.1 / fixed:2.1 - hình use case theo feature lấy chú thích từ <title> của SVG; hình phân cấp actor nằm ở §2.1 sau bảng actor", () => {
     const s = spine()
     const base = s.diagrams.find((d) => d.id === "D02")!

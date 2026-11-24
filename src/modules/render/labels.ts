@@ -193,8 +193,39 @@ export const VI_ENUM_LABELS = {
 
 export type EnumTable = keyof typeof VI_ENUM_LABELS
 
-export const enumLabel = (language: string | undefined, table: EnumTable, value: string): string =>
-  isVietnamese(language) ? ((VI_ENUM_LABELS[table] as Readonly<Record<string, string>>)[value] ?? value) : value
+/**
+ * FLF-479 (12a): bảng tiếng Anh cho enum in thô trong tài liệu tiếng Anh (`risk`, `open_question`, `date_format`…).
+ * Chỉ hai bảng này đọc không được trực tiếp; `actor_kind` ("Stripe (system)" đang cố ý viết thường), `priority`,
+ * `permission_action` đã đọc được, KHÔNG thêm vào đây (đổi sẽ vỡ golden test không cần thiết).
+ */
+export const EN_ENUM_LABELS = {
+  common_category: {
+    pagination: "Pagination",
+    date_format: "Date format",
+    error_handling: "Error handling",
+    audit: "Audit",
+    session: "Session",
+    security: "Security",
+    logging: "Logging",
+    validation: "Validation",
+    notification: "Notification",
+    localization: "Localization",
+    accessibility: "Accessibility"
+  } as Readonly<Record<string, string>>,
+  other_kind: {
+    risk: "Risk",
+    assumption: "Assumption",
+    open_question: "Open question",
+    technical_risk: "Technical risk"
+  } satisfies Record<OtherRequirementKind, string>
+} as const
+
+/** Nhãn enum theo ngôn ngữ — vi tra `VI_ENUM_LABELS`, en tra `EN_ENUM_LABELS`; không có bảng / không có giá trị ⇒ giữ nguyên như trước. */
+export const enumLabel = (language: string | undefined, table: EnumTable, value: string): string => {
+  if (isVietnamese(language)) return (VI_ENUM_LABELS[table] as Readonly<Record<string, string>>)[value] ?? value
+  const enTable = (EN_ENUM_LABELS as Partial<Record<EnumTable, Readonly<Record<string, string>>>>)[table]
+  return enTable?.[value] ?? value
+}
 
 // ─── loại yêu cầu chung (common_requirements[].category) ──
 
