@@ -174,8 +174,8 @@ Ba project vitest (`vitest.config.ts`), `npm test` chạy cả ba:
 - **Khi tạo commit message, không thêm `Co-Authored-By: Claude <noreply@anthropic.com>`** — cũng không
   nhắc Claude/AI ở bất kỳ đâu trong message.
 - **Gộp commit hợp lý, tránh commit vụn vặt** (`coding-rules.md` §7). Chỉ commit khi xong một đơn vị việc
-  có nghĩa: một bước trong DoD, hoặc một module hoàn chỉnh kèm test. Mục tiêu **3–5 commit cho một task**,
-  không phải 8–10. Không tạo commit riêng cho: sửa typo, format lại, chạy lại test, hay sửa lỗi do chính
+  có nghĩa: một bước trong DoD, hoặc một module hoàn chỉnh kèm test. Số commit mỗi task tuỳ việc, **một
+  commit cho cả task cũng được**. Không tạo commit riêng cho: sửa typo, format lại, chạy lại test, hay sửa lỗi do chính
   commit ngay trước gây ra — gộp vào commit đó (`git commit --amend`) khi nhánh chưa push.
 - Không format lại toàn file; diff chỉ chứa dòng thực sự đổi.
 
