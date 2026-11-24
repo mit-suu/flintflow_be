@@ -73,6 +73,8 @@ export interface LayoutBlock {
   diagram?: OriginalDiagram | null
   /** FLF-362: nhãn số Word tự đánh của heading — layout giữ lại để hiển thị / in đúng số của file. */
   number_label?: string | null
+  /** FLF-459: lớp chữ hướng dẫn gắn lúc import (1–3 chắc là hướng dẫn, 4 chưa kết luận); thiếu ⇒ luật ngoặc cũ (`templateMarks`). */
+  guidance_layer?: 1 | 2 | 3 | 4 | null
 }
 
 /**

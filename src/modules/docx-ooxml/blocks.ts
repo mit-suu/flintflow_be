@@ -77,6 +77,16 @@ export interface OoxmlBlock {
    * (xanh / xám). Chỉ là tín hiệu phụ: chữ hướng dẫn vẫn phải nằm trong `[ ]` / `{ }`. Không có ở heading / bảng.
    */
   guidance_format?: boolean
+  /**
+   * FLF-459 (business-flow §3.1.1 lớp 3): từng kiểu chữ hướng dẫn mà mọi run có chữ cùng mang — `italic`, `color` (xám / xanh,
+   * khác màu thân bài), `highlight`. Chỉ có khi `guidance_format` (có thể rỗng: kiểu lẫn lộn, hoặc màu khác xám / xanh).
+   */
+  guidance_signals?: ("italic" | "color" | "highlight")[]
+  /**
+   * FLF-459 (lớp 1, chắc chắn): đoạn nằm trong content control đang hiện placeholder (hoặc mọi run mang style Placeholder
+   * Text), style tên "Instruction" / "Hướng dẫn", hoặc toàn chữ ẩn. Chữ vẫn giữ nguyên trong `text` (không xoá lúc import).
+   */
+  guidance_certain?: "placeholder" | "style" | "hidden"
 }
 
 interface StyleInfo {
@@ -92,6 +102,8 @@ interface StyleInfo {
   color: string | null
   italic: boolean | null
   highlight: boolean | null
+  /** FLF-459: `w:rPr/w:vanish` (chữ ẩn). */
+  vanish: boolean | null
   /** Style mặc định của đoạn (`w:default="1"`, thường là Normal). */
   isDefault: boolean
   /** `numPr` của style: `numId` + `ilvl` (thiếu ilvl ⇒ 0). */
@@ -111,6 +123,7 @@ interface RunFormat {
   color: string | null
   italic: boolean | null
   highlight: boolean | null
+  vanish: boolean | null
 }
 
 const onOff = (el: Element | null | undefined): boolean | null => {
@@ -121,7 +134,7 @@ const onOff = (el: Element | null | undefined): boolean | null => {
 
 /** `w:b` / `w:sz` / `w:color` / `w:i` / `w:highlight` của một `rPr`. */
 const runFormat = (rPr: Element | undefined): RunFormat => {
-  if (!rPr) return { bold: null, size: null, color: null, italic: null, highlight: null }
+  if (!rPr) return { bold: null, size: null, color: null, italic: null, highlight: null, vanish: null }
   const sz = wAttr(wKid(rPr, "sz"), "val")
   const color = wAttr(wKid(rPr, "color"), "val")
   const hl = wAttr(wKid(rPr, "highlight"), "val")
@@ -130,7 +143,8 @@ const runFormat = (rPr: Element | undefined): RunFormat => {
     size: sz && Number(sz) > 0 ? Number(sz) : null,
     color: color && color.toLowerCase() !== "auto" ? color.toUpperCase() : null,
     italic: onOff(wKid(rPr, "i")),
-    highlight: hl === null ? null : hl !== "none"
+    highlight: hl === null ? null : hl !== "none",
+    vanish: onOff(wKid(rPr, "vanish"))
   }
 }
 
@@ -153,6 +167,71 @@ const guidanceFormat = (p: Element, chain: StyleInfo[], bodyColor: string | null
     const color = runColor(r, chain)
     return (f.italic ?? styleItalic) || f.highlight === true || (color !== null && color !== bodyColor)
   })
+}
+
+/** FLF-459: màu chữ hướng dẫn hay gặp — xám (độ bão hoà thấp, không đen / trắng) hoặc xanh (lam, lục lam). */
+export const isGuidanceColor = (hex: string): boolean => {
+  if (!/^[0-9A-F]{6}$/i.test(hex)) return false
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+  const max = Math.max(r, g, b)
+  const d = max - Math.min(r, g, b)
+  if (max === 0) return false
+  const saturation = d / max
+  if (saturation < 0.15) return max > 0.25 && max < 0.95
+  if (saturation < 0.25) return false
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4
+  const hue = (h * 60 + 360) % 360
+  return hue >= 170 && hue <= 260
+}
+
+/** FLF-459 (lớp 3): từng kiểu chữ hướng dẫn mà mọi run có chữ của đoạn cùng mang (nghiêng, màu xám / xanh, tô nền). */
+const guidanceSignals = (p: Element, chain: StyleInfo[], bodyColor: string | null): ("italic" | "color" | "highlight")[] => {
+  const runs = visibleRuns(p).filter((r) => runText(r).trim())
+  if (!runs.length) return []
+  const styleItalic = chain.find((s) => s.italic !== null)?.italic ?? false
+  const styleHighlight = chain.find((s) => s.highlight !== null)?.highlight ?? false
+  const formats = runs.map((r) => ({ f: runFormat(wKid(r, "rPr")), color: runColor(r, chain) }))
+  const out: ("italic" | "color" | "highlight")[] = []
+  if (formats.every(({ f }) => f.italic ?? styleItalic)) out.push("italic")
+  if (formats.every(({ color }) => color !== null && color !== bodyColor && isGuidanceColor(color))) out.push("color")
+  if (formats.every(({ f }) => f.highlight ?? styleHighlight)) out.push("highlight")
+  return out
+}
+
+const PLACEHOLDER_STYLE = /placeholder text/i
+const INSTRUCTION_STYLE = /instruction|hướng dẫn|huong dan/i
+
+/** Content control đang hiện chữ placeholder (`w:sdtPr/w:showingPlcHdr`). */
+const isPlaceholderSdt = (sdt: Element): boolean => {
+  const pr = wKid(sdt, "sdtPr")
+  return !!pr && onOff(wKid(pr, "showingPlcHdr")) === true
+}
+
+/** Run nằm trong content control placeholder cấp run (giữa run và đoạn). */
+const inPlaceholderRunSdt = (r: Element, p: Element): boolean => {
+  for (let x = r.parentNode; x && x !== p; x = x.parentNode) if (isW(x, "sdt") && isPlaceholderSdt(x as Element)) return true
+  return false
+}
+
+/**
+ * FLF-459 (lớp 1, chắc chắn): đoạn trong content control placeholder (cấp khối `inPlaceholder`, hoặc mọi run có chữ nằm trong
+ * content control placeholder cấp run / mang style Placeholder Text), style đoạn / mọi run tên "Instruction" / "Hướng dẫn",
+ * hoặc mọi run có chữ là chữ ẩn (`w:vanish`).
+ */
+const certainGuidance = (p: Element, chain: StyleInfo[], styles: Map<string, StyleInfo>, inPlaceholder: boolean): OoxmlBlock["guidance_certain"] | null => {
+  if (inPlaceholder) return "placeholder"
+  const runs = visibleRuns(p).filter((r) => runText(r).trim())
+  if (!runs.length) return null
+  const runChain = (r: Element): StyleInfo[] => {
+    const rPr = wKid(r, "rPr")
+    return styleChain(styles, rPr ? wAttr(wKid(rPr, "rStyle"), "val") : null)
+  }
+  if (runs.every((r) => inPlaceholderRunSdt(r, p) || runChain(r).some((s) => PLACEHOLDER_STYLE.test(s.name)))) return "placeholder"
+  if (chain.some((s) => INSTRUCTION_STYLE.test(s.name)) || runs.every((r) => runChain(r).some((s) => INSTRUCTION_STYLE.test(s.name)))) return "style"
+  const styleVanish = chain.find((s) => s.vanish !== null)?.vanish ?? false
+  const hidden = (r: Element): boolean => runFormat(wKid(r, "rPr")).vanish ?? runChain(r).find((s) => s.vanish !== null)?.vanish ?? styleVanish
+  if (runs.every(hidden)) return "hidden"
+  return null
 }
 
 const readStyles = (styles: Document | null): Map<string, StyleInfo> => {
@@ -723,6 +802,8 @@ export const parseBlocks = (
   let pendingBookmark: string | null = null
   let pendingTableBookmark: string | null = null
   let tableCount = 0
+  /** FLF-459: đang đi trong content control cấp khối đang hiện placeholder (lớp 1 chữ hướng dẫn). */
+  let placeholderDepth = 0
 
   const push = (b: Omit<OoxmlBlock, "ordinal" | "heading_path" | "text_hash">): OoxmlBlock => {
     const block: OoxmlBlock = { ...b, ordinal: blocks.length, heading_path: headingStack.map((h) => h.text), text_hash: textHash(b.text) }
@@ -904,8 +985,9 @@ export const parseBlocks = (
             ...(labels.has(p) && !typedNumber(text) ? { number_label: labels.get(p)! } : {})
           }
         : {}
-    const formatExtra = kind !== "heading" && guidanceFormat(p, chain, pre.bodyColor) ? { guidance_format: true } : {}
-    push({ ...base, kind, level, heading_detector: detector, bookmark, editable: !embedded && !hasField(p), ...headingExtra, ...formatExtra })
+    const formatExtra = kind !== "heading" && guidanceFormat(p, chain, pre.bodyColor) ? { guidance_format: true, guidance_signals: guidanceSignals(p, chain, pre.bodyColor) } : {}
+    const certain = kind !== "heading" ? certainGuidance(p, chain, styles, placeholderDepth > 0) : null
+    push({ ...base, kind, level, heading_detector: detector, bookmark, editable: !embedded && !hasField(p), ...headingExtra, ...formatExtra, ...(certain ? { guidance_certain: certain } : {}) })
     if (kind === "heading" && level !== null) headingStack.push({ level, text: text.trim() })
     if (kind === "heading") lastHeadingStyled = detector === "style" || detector === "outline_level"
   }
@@ -945,7 +1027,12 @@ export const parseBlocks = (
           break
         case "sdt": {
           const content = wKid(c, "sdtContent")
-          if (content && !isTocSdt(c)) walk(content, `${here}/sdtContent`, cell)
+          if (content && !isTocSdt(c)) {
+            const placeholder = isPlaceholderSdt(c)
+            if (placeholder) placeholderDepth++
+            walk(content, `${here}/sdtContent`, cell)
+            if (placeholder) placeholderDepth--
+          }
           break
         }
         case "customXml":

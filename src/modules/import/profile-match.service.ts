@@ -19,7 +19,17 @@ import type { ParsedBlock } from "./parse.service.js"
 import { PROVISIONAL_SECTION, isContentSection, provisionalFeatureId, provisionalFunctionId } from "./section-catalog.js"
 import { TABLE_ENTITIES, matchTable } from "./table-header-dictionary.js"
 import { SLOT_SUGGESTION_CONFIDENCE, bindFixedTemplateHeadings, isContentSlot, slotParents, suggestSlot } from "./content-slots.js"
-import { isInstructionText, splitInstruction } from "../../shared/utils/instruction-text.js"
+import {
+  guidanceVerdict,
+  isCertainGuidance,
+  isInstructionText,
+  splitInstruction,
+  textGuidanceSignals,
+  type GuidanceLayer,
+  type GuidanceSignal,
+  type GuidanceVerdict,
+  type KnownGuidance
+} from "../../shared/utils/instruction-text.js"
 import { PART_BANK, isWeakTitle, partById, partsMentionedIn, titleOrigins, type PartDef, type TemplateFamily } from "./part-bank.js"
 import type { HeadingMapEntry, TableMapEntry } from "./template-profile.model.js"
 import { foldText, foldTokens, splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
@@ -40,6 +50,62 @@ export interface ProfileBlock {
   number_label?: string | null
   /** FLF-364: đoạn có kiểu chữ hướng dẫn (nghiêng / tô nền / khác màu thân bài) — tín hiệu phụ của chữ hướng dẫn. */
   guidance_format?: boolean
+  /** FLF-459: từng kiểu chữ hướng dẫn của đoạn (`blocks.ts`). */
+  guidance_signals?: readonly ("italic" | "color" | "highlight")[]
+  /** FLF-459: dấu hiệu chắc chắn lớp 1 (`blocks.ts`). */
+  guidance_certain?: "placeholder" | "style" | "hidden"
+  /** FLF-459: lớp chữ hướng dẫn đã tính lúc import (`classifyGuidance`, có lớp 2). */
+  guidance_layer?: GuidanceLayer
+  guidance_by?: string[]
+}
+
+/** Loại block xét chữ hướng dẫn theo lớp (đoạn, gạch đầu dòng, đoạn trong ô bảng). */
+const GUIDANCE_KINDS: ReadonlySet<string> = new Set(["paragraph", "list_item", "table_cell"])
+
+/**
+ * FLF-459 (business-flow §3.1.1): lớp chữ hướng dẫn của một block — đã tính lúc import (`guidance_layer`, có lớp 2) hoặc tính
+ * tại chỗ từ dấu hiệu của block (lớp 2 chỉ khi có `known`). Bản ghi cũ chỉ có `guidance_format` ⇒ tính là một dấu hiệu kiểu chữ.
+ */
+export const guidanceLayerOf = (b: ProfileBlock, known: KnownGuidance | null = null): GuidanceVerdict | null => {
+  if (b.guidance_layer) return { layer: b.guidance_layer, signals: b.guidance_by ?? [] }
+  const format: GuidanceSignal[] = b.guidance_signals ? [...b.guidance_signals] : b.guidance_format ? ["format"] : []
+  return guidanceVerdict({ text: b.text, certain: b.guidance_certain ?? null, format, known })
+}
+
+/** Block là chữ hướng dẫn chắc chắn (lớp 1–3). Lớp 4 / không dấu hiệu ⇒ nội dung thật. */
+const isGuidanceBlock = (b: ProfileBlock, known: KnownGuidance | null = null): boolean => isCertainGuidance(guidanceLayerOf(b, known)?.layer)
+
+/**
+ * FLF-459 (I-2): gắn lớp chữ hướng dẫn cho đoạn / gạch đầu dòng / đoạn trong ô bảng — lớp 1 (placeholder, style, chữ ẩn), lớp 2
+ * (câu của mẫu đã biết), lớp 3 (≥ 2 dấu hiệu), lớp 4 (đúng 1 dấu hiệu, chờ AI). Sửa tại chỗ; không đổi chữ của block.
+ */
+export const classifyGuidance = <B extends ProfileBlock>(blocks: B[], known: KnownGuidance | null): B[] => {
+  for (const b of blocks) {
+    if (!GUIDANCE_KINDS.has(b.kind)) continue
+    const verdict = guidanceLayerOf({ ...b, guidance_layer: undefined }, known)
+    if (!verdict) continue
+    b.guidance_layer = verdict.layer
+    b.guidance_by = verdict.signals
+  }
+  return blocks
+}
+
+/** Nguồn nhận diện chữ hướng dẫn khi khớp profile. */
+export interface GuidanceOptions {
+  /** Lớp 2: câu hướng dẫn của mẫu đã biết. */
+  known?: KnownGuidance | null
+  /**
+   * File **mẫu** Lead / Analyst tải lên làm mẫu (đăng thư viện, mẫu đích khi đổi mẫu — `analyzeTemplateFile`), không phải SRS
+   * import: giữ luật ngoặc trước FLF-459 (mọi chữ trong `[ ]` / `{ }` là hướng dẫn của mẫu). Lớp chữ hướng dẫn chỉ áp cho file
+   * import (business-flow §3.1.1).
+   */
+  templateFile?: boolean
+}
+
+/** Chữ hướng dẫn của một đoạn đã kết luận: bỏ ngoặc trọn đoạn (`[…]`, `{…}`, `<<…>>`), không thì nguyên văn. */
+const guidanceTextOf = (text: string): string => {
+  const t = text.trim()
+  return textGuidanceSignals(t).includes("brackets") ? t.replace(/^(?:\[|\{\{?|<<)\s*/, "").replace(/\s*(?:\]|\}\}?|>>)$/, "").trim() : t
 }
 
 export interface ProfileMatch {
@@ -499,7 +565,7 @@ const contentHomes = (blocks: readonly ProfileBlock[]): Map<string, { section: s
       texts = 0
     } else if (heading && b.kind === "table" && b.rows?.length) {
       tables.push(tableHome(b.rows) ?? "")
-    } else if (heading && (b.kind === "paragraph" || b.kind === "list_item") && b.text.trim() && !isInstructionText(b.text)) {
+    } else if (heading && (b.kind === "paragraph" || b.kind === "list_item") && b.text.trim() && !isGuidanceBlock(b)) {
       texts++
       const home = CODE_HOME.find(([re]) => re.test(b.text))?.[1]
       if (home) codes.push(home)
@@ -553,11 +619,13 @@ const capGuidance = (text: string): string =>
   text.length > MAX_GUIDANCE_CHARS ? `${text.slice(0, MAX_GUIDANCE_CHARS - 1).trimEnd()}…` : text
 
 /**
- * Chữ hướng dẫn của mẫu dưới từng heading (business-flow 1.3 "detect guidance text"; FLF-364): mọi chữ trong `[ ]` / `{ }`
- * của các đoạn / gạch đầu dòng / ô bảng trước heading kế tiếp — cả đoạn ngoặc nằm trong câu có chữ thật — bỏ ngoặc, nối lại
- * nguyên văn (trần 4 000 ký tự). Màu / nghiêng chỉ ghi vào `by`, không tự thành hướng dẫn.
+ * Chữ hướng dẫn của mẫu dưới từng heading (business-flow §3.1.1): đoạn / gạch đầu dòng / ô bảng trước heading kế tiếp mà Code
+ * đã kết luận là chữ hướng dẫn (lớp 1–3, `guidanceLayerOf`; ô bảng xét theo chữ của ô), bỏ ngoặc trọn đoạn, nối lại nguyên văn
+ * (trần 4 000 ký tự). FLF-459 (đảo FLF-364): ngoặc một mình — trọn đoạn hay nằm trong câu có chữ thật — chỉ là một dấu hiệu
+ * (lớp 4) ⇒ nội dung thật, không vào đây. `by` ghi đoạn có kiểu chữ hướng dẫn (màu / nghiêng / tô nền).
  */
-export const guidanceByHeading = (blocks: readonly ProfileBlock[]): Map<string, HeadingGuidance> => {
+export const guidanceByHeading = (blocks: readonly ProfileBlock[], opts: GuidanceOptions = {}): Map<string, HeadingGuidance> => {
+  const known = opts.known ?? null
   const out = new Map<string, HeadingGuidance>()
   let heading: string | null = null
   let parts: string[] = []
@@ -578,8 +646,17 @@ export const guidanceByHeading = (blocks: readonly ProfileBlock[]): Map<string, 
       continue
     }
     if (!heading) continue
-    const texts = b.kind === "paragraph" || b.kind === "list_item" ? [b.text] : b.kind === "table" ? (b.rows ?? []).flat() : []
-    const found = texts.flatMap((t) => splitInstruction(t).guidance).filter(Boolean)
+    const found = (
+      opts.templateFile
+        ? (b.kind === "paragraph" || b.kind === "list_item" ? [b.text] : b.kind === "table" ? (b.rows ?? []).flat() : []).flatMap((t) => splitInstruction(t).guidance)
+        : b.kind === "paragraph" || b.kind === "list_item"
+        ? isGuidanceBlock(b, known)
+          ? [guidanceTextOf(b.text)]
+          : []
+        : b.kind === "table"
+          ? (b.rows ?? []).flat().filter((t) => isCertainGuidance(guidanceVerdict({ text: t, known })?.layer)).map(guidanceTextOf)
+          : []
+    ).filter(Boolean)
     if (!found.length) continue
     parts.push(...found)
     ids.push(b.block_id)
@@ -590,25 +667,26 @@ export const guidanceByHeading = (blocks: readonly ProfileBlock[]): Map<string, 
 }
 
 /**
- * FLF-364: chữ hướng dẫn trong từng cột bảng (ô dưới hàng tiêu đề nằm trọn trong `[ ]` / `{ }` — "[Tên tác nhân]",
- * "{mô tả vai trò}") ⇒ `table_map[].guidance` của cột đó.
+ * FLF-364: chữ hướng dẫn trong từng cột bảng ⇒ `table_map[].guidance` của cột đó. FLF-459: chỉ ô Code đã kết luận theo lớp
+ * (câu của mẫu đã biết, hoặc ≥ 2 dấu hiệu); ô chỉ có ngoặc ("[Tên tác nhân]") là lớp 4 ⇒ nội dung.
  */
-const columnGuidance = (blocks: readonly ProfileBlock[]): Map<string, string> => {
+const columnGuidance = (blocks: readonly ProfileBlock[], opts: GuidanceOptions = {}): Map<string, string> => {
+  const isGuidanceCell = (t: string): boolean => (opts.templateFile ? isInstructionText(t) : isCertainGuidance(guidanceVerdict({ text: t, known: opts.known ?? null })?.layer))
   const out = new Map<string, string>()
   for (const b of blocks) {
     if (b.kind !== "table" || !b.rows?.length) continue
     const width = Math.max(...b.rows.map((r) => r.length))
     for (let c = 0; c < width; c++) {
-      const cells = b.rows.slice(1).map((r) => r[c] ?? "").filter((t) => isInstructionText(t))
-      const text = [...new Set(cells.flatMap((t) => splitInstruction(t).guidance))].join(" ").trim()
+      const cells = b.rows.slice(1).map((r) => r[c] ?? "").filter(isGuidanceCell)
+      const text = [...new Set(cells.flatMap((t) => (opts.templateFile ? splitInstruction(t).guidance : [guidanceTextOf(t)])))].join(" ").trim()
       if (text) out.set(`${b.block_id}#${c}`, capGuidance(text))
     }
   }
   return out
 }
 
-export const matchProfile = (blocks: ProfileBlock[], options: { fixedTemplate?: boolean } = {}): ProfileMatch => {
-  const guidance = guidanceByHeading(blocks)
+export const matchProfile = (blocks: ProfileBlock[], options: { fixedTemplate?: boolean } & GuidanceOptions = {}): ProfileMatch => {
+  const guidance = guidanceByHeading(blocks, options)
   const matched = matchBankHeadings(headingsOf(blocks), guidance)
   const template_family = familyOf(matched.hits)
   const labels = new Map(blocks.filter((b) => b.number_label).map((b) => [b.block_id, b.number_label!]))
@@ -620,7 +698,7 @@ export const matchProfile = (blocks: ProfileBlock[], options: { fixedTemplate?: 
     ...(labels.has(h.block_id) ? { number_label: labels.get(h.block_id)! } : {})
   }))
   const sections = assignBlockSections(blocks, heading_map)
-  const columns = columnGuidance(blocks)
+  const columns = columnGuidance(blocks, options)
   return {
     heading_map,
     table_map: matchTables(blocks, sections).map((t) => {

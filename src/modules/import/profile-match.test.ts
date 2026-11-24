@@ -4,6 +4,7 @@ import { parseDocument } from "./parse.service.js"
 import {
   assignBlockSections,
   autoConfirmMapping,
+  classifyGuidance,
   detectorCap,
   detectTemplateFamily,
   guidanceByHeading,
@@ -18,6 +19,7 @@ import type { HeadingMapEntry, TableMapEntry } from "./template-profile.model.js
 import { makeSrsDocx } from "./testing/srs-fixture.js"
 import { splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
 import { matchTable, matchTableHeader } from "./table-header-dictionary.js"
+import { knownGuidanceMatcher } from "../../shared/utils/instruction-text.js"
 
 it("fixed source template binds Purpose and Scope despite the aggregate Introduction", async () => {
   const { blocks } = await parseDocument(await readFile(new URL("../../../fixtures/fixed-template-fu-it-srs-01.docx", import.meta.url)))
@@ -593,7 +595,7 @@ describe("FLF-363 - nội dung dưới heading (D1–D2)", () => {
   })
 })
 
-describe("FLF-364 - chữ hướng dẫn của mẫu trong [ ] / { }", () => {
+describe("FLF-364 → FLF-459 - chữ hướng dẫn của mẫu theo lớp (ngoặc một mình chưa đủ)", () => {
   const block = (n: number, kind: ProfileBlock["kind"], text: string, extra: Partial<ProfileBlock> = {}): ProfileBlock => ({
     block_id: `B${String(n).padStart(4, "0")}`,
     kind,
@@ -602,34 +604,62 @@ describe("FLF-364 - chữ hướng dẫn của mẫu trong [ ] / { }", () => {
     ...extra
   })
 
-  it("giữ nguyên văn (không cắt 400), gồm đoạn ngoặc trong câu và ô bảng; ghi nguồn + block; ( ) và câu mô tả là nội dung", () => {
+  it("giữ nguyên văn (không cắt 400); chỉ đoạn / ô từ 2 dấu hiệu; ngoặc trong câu, ngoặc một mình, câu mô tả một mình là nội dung", () => {
     const long = `[${"Mô tả chi tiết phạm vi. ".repeat(40).trim()}]`
     const blocks: ProfileBlock[] = [
       heading(1, 1, "Product Scope"),
-      block(2, "paragraph", long, { guidance_format: true }),
+      block(2, "paragraph", long, { guidance_format: true, guidance_signals: ["italic"] }),
       block(3, "paragraph", "Hệ thống quản lý học sinh {ghi rõ trường áp dụng}."),
       block(4, "paragraph", "This section describes the scope (phiên bản 1)."),
-      heading(5, 1, "Actors"),
-      block(6, "table", "", { rows: [["Actor", "Description"], ["[Tên tác nhân]", "[Vai trò của tác nhân]"]] })
+      block(5, "paragraph", "[Mục này mô tả phạm vi áp dụng của hệ thống]"),
+      heading(6, 1, "Actors"),
+      block(7, "table", "", { rows: [["Actor", "Description"], ["[Tên tác nhân]", "[This section describes the role of the actor]"]] })
     ]
     const g = guidanceByHeading(blocks)
     expect(g.get("B0001")?.text.length).toBeGreaterThan(400)
-    expect(g.get("B0001")?.text).toContain("ghi rõ trường áp dụng")
+    // FLF-459 (đảo FLF-364): ngoặc trong câu có chữ thật chỉ là một dấu hiệu ⇒ nội dung thật
+    expect(g.get("B0001")?.text).not.toContain("ghi rõ trường áp dụng")
     expect(g.get("B0001")?.text).not.toContain("This section describes")
-    expect(g.get("B0001")).toMatchObject({ by: "brackets+format", blocks: ["B0002", "B0003"] })
-    expect(g.get("B0005")).toMatchObject({ text: "Tên tác nhân Vai trò của tác nhân", by: "brackets", blocks: ["B0006"] })
+    expect(g.get("B0001")?.text).toContain("Mục này mô tả phạm vi áp dụng của hệ thống")
+    expect(g.get("B0001")).toMatchObject({ by: "brackets+format", blocks: ["B0002", "B0005"] })
+    // Ô "[Tên tác nhân]" chỉ có ngoặc ⇒ lớp 4, không phải hướng dẫn; ngoặc + câu mô tả ⇒ hướng dẫn
+    expect(g.get("B0006")).toMatchObject({ text: "This section describes the role of the actor", by: "brackets", blocks: ["B0007"] })
 
     const profile = matchProfile(blocks)
     const scope = profile.heading_map.find((h) => h.block_id === "B0001")!
-    expect(scope).toMatchObject({ guidance_by: "brackets+format", guidance_blocks: ["B0002", "B0003"] })
-    expect(profile.table_map.filter((t) => t.block_id === "B0006").map((t) => [t.header, t.guidance])).toEqual([
-      ["Actor", "Tên tác nhân"],
-      ["Description", "Vai trò của tác nhân"]
+    expect(scope).toMatchObject({ guidance_by: "brackets+format", guidance_blocks: ["B0002", "B0005"] })
+    expect(profile.table_map.filter((t) => t.block_id === "B0007").map((t) => [t.header, t.guidance ?? null])).toEqual([
+      ["Actor", null],
+      ["Description", "This section describes the role of the actor"]
     ])
   })
 
-  it("kiểu chữ hướng dẫn mà không có ngoặc ⇒ không phải hướng dẫn (màu không tự quyết)", () => {
-    const g = guidanceByHeading([heading(1, 1, "Purpose"), block(2, "paragraph", "Tài liệu dành cho giáo viên.", { guidance_format: true })])
+  it("FLF-459: chỉ có ngoặc ⇒ không là hướng dẫn (chuyển lớp 4); ngoặc + in nghiêng ⇒ hướng dẫn; kiểu chữ một mình ⇒ nội dung", () => {
+    const only = guidanceByHeading([heading(1, 1, "Purpose"), block(2, "paragraph", "[Describe the purpose of the document]")])
+    expect(only.has("B0001")).toBe(false)
+    const italic = guidanceByHeading([
+      heading(1, 1, "Purpose"),
+      block(2, "paragraph", "[Describe the purpose of the document]", { guidance_format: true, guidance_signals: ["italic"] })
+    ])
+    expect(italic.get("B0001")).toMatchObject({ text: "Describe the purpose of the document", blocks: ["B0002"] })
+    const g = guidanceByHeading([heading(1, 1, "Purpose"), block(2, "paragraph", "Tài liệu dành cho giáo viên.", { guidance_format: true, guidance_signals: ["italic"] })])
+    expect(g.has("B0001")).toBe(false)
+  })
+
+  it("FLF-459: file mẫu (đăng thư viện / mẫu đích đổi mẫu) giữ luật ngoặc — nguồn câu hướng dẫn của mẫu đã biết", () => {
+    const blocks = [heading(1, 1, "Actors"), block(2, "table", "", { rows: [["Actor", "Description"], ["[Tên tác nhân]", "x"]] }), block(3, "paragraph", "[Describe the actors]")]
+    expect(guidanceByHeading(blocks, { templateFile: true }).get("B0001")).toMatchObject({ text: "Tên tác nhân Describe the actors", blocks: ["B0002", "B0003"] })
+    expect(guidanceByHeading(blocks).has("B0001")).toBe(false)
+    expect(matchProfile(blocks, { templateFile: true }).table_map.find((t) => t.column_index === 0)?.guidance).toBe("Tên tác nhân")
+  })
+
+  it("FLF-459: bản ghi cũ chỉ có guidance_format (trước khi tách từng kiểu chữ) ⇒ kiểu chữ tính là một dấu hiệu", () => {
+    const g = guidanceByHeading([heading(1, 1, "Purpose"), block(2, "paragraph", "[Describe the purpose of the document]", { guidance_format: true })])
+    expect(g.get("B0001")?.blocks).toEqual(["B0002"])
+  })
+
+  it("FLF-459: màu khác xám / xanh (đỏ) ⇒ guidance_format nhưng không có dấu hiệu màu ⇒ ngoặc vẫn một mình", () => {
+    const g = guidanceByHeading([heading(1, 1, "Purpose"), block(2, "paragraph", "[Describe the purpose of the document]", { guidance_format: true, guidance_signals: [] })])
     expect(g.has("B0001")).toBe(false)
   })
 })
@@ -696,7 +726,19 @@ describe("FLF-343 - tín hiệu heading, tự nhận mapping độ tin thấp", 
 })
 
 describe("FLF-364 - nhận phần theo chữ hướng dẫn (sau tên, trước nội dung)", () => {
-  const para = (n: number, text: string): ProfileBlock => ({ block_id: `B${String(n).padStart(4, "0")}`, kind: "paragraph", level: null, text })
+  // FLF-459: chữ hướng dẫn phải đủ 2 dấu hiệu (ngoặc + in nghiêng) — ngoặc một mình là lớp 4, không dùng để nhận phần
+  const para = (n: number, text: string, extra: Partial<ProfileBlock> = { guidance_format: true, guidance_signals: ["italic"] }): ProfileBlock => ({
+    block_id: `B${String(n).padStart(4, "0")}`,
+    kind: "paragraph",
+    level: null,
+    text,
+    ...extra
+  })
+
+  it("FLF-459: hướng dẫn chỉ có ngoặc (lớp 4) ⇒ không dùng để nhận phần", () => {
+    const map = matchHeadings([heading(1, 1, "Nguồn trích dẫn"), para(2, "[Liệt kê mọi tài liệu tham khảo: tên, mã, ngày phát hành]", {})])
+    expect(map[0].template_section ?? null).toBeNull()
+  })
 
   it("heading lạ, hướng dẫn nhắc đúng một phần ⇒ nhận phần đó, độ tin 0.7; nhắc nhiều phần / không nhắc ⇒ giữ nguyên", () => {
     const map = Object.fromEntries(
@@ -714,5 +756,50 @@ describe("FLF-364 - nhận phần theo chữ hướng dẫn (sau tên, trước 
   it("tên khớp chắc thắng hướng dẫn", () => {
     const map = matchHeadings([heading(1, 1, "Glossary"), para(2, "[Liệt kê tài liệu tham khảo dùng thuật ngữ]")])
     expect(map[0]).toMatchObject({ section_id: "fixed:5.5", confidence: 1 })
+  })
+})
+
+describe("FLF-459 - gắn lớp chữ hướng dẫn cho block lúc import", () => {
+  const b = (n: number, kind: ProfileBlock["kind"], text: string, extra: Partial<ProfileBlock> = {}): ProfileBlock => ({
+    block_id: `B${String(n).padStart(4, "0")}`,
+    kind,
+    level: kind === "heading" ? 1 : null,
+    text,
+    ...extra
+  })
+
+  it("lớp 1 / 2 / 3 / 4 theo dấu hiệu; heading, bảng, đoạn không dấu hiệu không gắn; chữ giữ nguyên", () => {
+    const known = knownGuidanceMatcher(["[Provide the descriptions for the screens in the Screens Flow above]"])
+    const blocks = classifyGuidance(
+      [
+        b(1, "heading", "[Screen Descriptions]"),
+        b(2, "paragraph", "Bấm để nhập", { guidance_certain: "placeholder" }),
+        b(3, "paragraph", "Provide the descriptions for the screens in the Screens Flow above"),
+        b(4, "paragraph", "[Describe the screens]", { guidance_format: true, guidance_signals: ["italic"] }),
+        b(5, "paragraph", "[Describe the screens]"),
+        b(6, "table_cell", "[Tên màn hình]"),
+        b(7, "paragraph", "Màn hình đăng nhập cho giáo viên."),
+        b(8, "table", "[x] | [y]", { rows: [["[x]", "[y]"]] })
+      ],
+      known
+    )
+    expect(blocks.map((x) => [x.block_id, x.guidance_layer ?? null, x.guidance_by ?? null])).toEqual([
+      ["B0001", null, null],
+      ["B0002", 1, ["placeholder"]],
+      ["B0003", 2, ["known"]],
+      ["B0004", 3, ["italic", "brackets"]],
+      ["B0005", 4, ["brackets"]],
+      ["B0006", 4, ["brackets"]],
+      ["B0007", null, null],
+      ["B0008", null, null]
+    ])
+    expect(blocks[4].text).toBe("[Describe the screens]")
+  })
+
+  it("lớp 2 nhận câu của mẫu đã biết làm chữ hướng dẫn của heading dù không ngoặc, không kiểu chữ", () => {
+    const known = knownGuidanceMatcher(["Liệt kê mọi tác nhân của hệ thống và vai trò của từng tác nhân"])
+    const blocks = classifyGuidance([b(1, "heading", "Actors"), b(2, "paragraph", "Liệt kê mọi tác nhân của hệ thống và vai trò của từng tác nhân")], known)
+    expect(guidanceByHeading(blocks).get("B0001")?.blocks).toEqual(["B0002"])
+    expect(guidanceByHeading([b(1, "heading", "Actors"), b(2, "paragraph", "Liệt kê mọi tác nhân của hệ thống và vai trò của từng tác nhân")]).has("B0001")).toBe(false)
   })
 })
