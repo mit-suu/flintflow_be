@@ -108,8 +108,10 @@ describe("C-1 cr_id tăng dần theo project", () => {
   })
 
   it("tạo đồng thời qua HTTP ⇒ mọi request 201, cr_id không trùng", async () => {
-    const { c } = await importedProject()
-    const res = await Promise.all(Array.from({ length: 6 }, (_, i) => c.post("/change-requests", body({ title: `HTTP ${i}` }))))
+    const { c, seeded, projectId } = await importedProject()
+    // Mỗi người một CR dở ⇒ sáu người tạo cùng lúc (cùng một người thì luật đó chặn, không phải điều test này kiểm)
+    const clients = [c, ...(await Promise.all(Array.from({ length: 5 }, () => secondAnalyst(seeded, projectId))))]
+    const res = await Promise.all(clients.map((client, i) => client.post("/change-requests", body({ title: `HTTP ${i}` }))))
     expect(res.map((r) => r.status)).toEqual(Array(6).fill(201))
     const ids = res.map((r) => r.body.data.change_request.cr_id as string)
     expect(new Set(ids).size).toBe(6)
