@@ -32,7 +32,7 @@ import { assemble } from "../render/assemble.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { applyTransaction, CHANGE_RANGE_INVALID } from "../spine/op-engine.js"
 import type { Op } from "../spine/op.types.js"
-import type { Change, Spine, SpineRecord, StepState } from "../spine/spine.types.js"
+import type { Change, Diagram, Spine, SpineRecord, StepState } from "../spine/spine.types.js"
 import * as flagsService from "../spine/flags.service.js"
 import { sectionHasData } from "../spine/deterministic-check.js"
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
@@ -1377,6 +1377,32 @@ export interface RenderReviewOptions {
    * nút vẽ lại. Vẽ vẫn hỏng thì cờ ở lại như cũ (lỗi thật lộ ra).
    */
   retryRenderErrors?: boolean
+  /**
+   * FLF-489 (P07 #2): id mockup màn hình đã lạc hậu TRƯỚC khi step chạy. Vẽ lại mockup có thể gọi AI, nên step không liên
+   * quan không vẽ hộ chúng: cờ `diagram_stale` và nút "Vẽ lại" ở lại để người dùng tự quyết.
+   */
+  mockupsStaleAtStart?: ReadonlySet<string>
+}
+
+/**
+ * Đích vẽ lại tự động từ các hình đang lạc hậu (BUG-17): bỏ kind step đã vẽ, bỏ mockup lạc hậu từ trước step (FLF-489),
+ * gộp đích trùng. Hàm thuần.
+ */
+export const autoRerenderTargets = (
+  staleNow: readonly Diagram[],
+  staleAtStart: ReadonlySet<string>,
+  alreadyRendered: ReadonlySet<string>
+): RenderTarget[] => {
+  const targets: RenderTarget[] = []
+  for (const diagram of staleNow) {
+    if (alreadyRendered.has(diagram.kind)) continue
+    if (diagram.kind === "screen_layout" && staleAtStart.has(diagram.id)) continue
+    const target = targetOfDiagram(diagram)
+    const key = `${target.kind}:${target.owner_id ?? ""}`
+    if (targets.some((x) => `${x.kind}:${x.owner_id ?? ""}` === key)) continue
+    targets.push(target)
+  }
+  return targets
 }
 
 /** FLF-431: trần số hình đang lỗi vẽ lại ở S-9.1 (mỗi hình một lượt vẽ, không gọi model trừ bố cục màn). */
@@ -1456,14 +1482,11 @@ export const runRenderReviewPhase = async (
   // ⇒ vẽ lại ngay cuối step, thay vì để lại một cờ đỏ `diagram_stale` mà UI không có nút nào để gỡ.
   const { spine: spineAfterDraft } = await refresh(projectId)
   const alreadyRendered = new Set(renders)
-  const staleTargets: RenderTarget[] = []
-  for (const diagram of options.rerenderStale ? staleRenderedDiagrams(spineAfterDraft, await loadRenderContext(projectId)) : []) {
-    if (alreadyRendered.has(diagram.kind)) continue
-    const target = targetOfDiagram(diagram)
-    const key = `${target.kind}:${target.owner_id ?? ""}`
-    if (staleTargets.some((t) => `${t.kind}:${t.owner_id ?? ""}` === key)) continue
-    staleTargets.push(target)
-  }
+  const staleTargets = autoRerenderTargets(
+    options.rerenderStale ? staleRenderedDiagrams(spineAfterDraft, await loadRenderContext(projectId)) : [],
+    options.mockupsStaleAtStart ?? new Set(),
+    alreadyRendered
+  )
   if (staleTargets.length > 0) {
     const before = new Map(spineAfterDraft.diagrams.map((d) => [d.id, d]))
     const result = await renderDiagrams(projectId, staleTargets.slice(0, MAX_AUTO_RERENDER), { by: userId, step_id: stepId, deps: layoutRenderDeps(deps.renderDeps) })
@@ -1775,6 +1798,12 @@ export const runStep = async (
       yellow: spine.flags.filter((f) => f.level === "yellow" && f.resolved_at === null).length
     }
     const knownAssumptionIds = new Set(spine.assumptions.map((a) => a.id))
+    // FLF-489: mockup đã lạc hậu từ trước bước này thì bước không vẽ hộ (vẽ mockup có thể gọi AI, tốn credit ngoài ý người dùng)
+    const mockupsStaleAtStart = new Set(
+      staleRenderedDiagrams(spine, await loadRenderContext(projectId))
+        .filter((d) => d.kind === "screen_layout")
+        .map((d) => d.id)
+    )
     const progressBefore = buildProgressReport(spine, await spineRepository.listChanges(projectId)).readiness.accepted_pct
     const stepSummary: ChangeSummary[] = []
     /** Lượt chạy này có ghi được op nào không — dùng để báo "AI không soạn được gì" ở gate (L11b). */
@@ -2217,6 +2246,7 @@ export const runStep = async (
         flagsBefore,
         knownAssumptionIds,
         rerenderStale: stepSummary.length > 0,
+        mockupsStaleAtStart,
         retryRenderErrors: stepId === "S-9.1"
       })
     )
