@@ -409,6 +409,67 @@ describe("preview - diff + impact, không ghi", () => {
     expect(((vars.projection as Record<string, unknown>).use_case_context as { use_cases: { id: string }[] }).use_cases.map((u) => u.id)).toContain("UC24")
   })
 
+  describe("FLF-486: vòng soạn lại chỉ nhận lô tốt hơn", () => {
+    /** Một use case hai bước (hai màn mới nối nhau), mở từ S07; `action` null ⇒ không có dòng quyền. */
+    const twoStep = (action: string | null, withUseCase = true) => [
+      ...(withUseCase ? [{ op: "add", path: "use_cases[]", value: { name: "Send Absence Warning", actor_ids: ["A02"], function_ids: ["$f1", "$f2"], description: "Warn." } }] : []),
+      { op: "add", path: "screens[]", value: { id: "$s1", name: "Warning Form", description: "...", feature_id: "F3", flow_to: ["$s2"], tabs: [] } },
+      { op: "add", path: "screens[]", value: { id: "$s2", name: "Warning Sent", description: "...", feature_id: "F3", flow_to: [], tabs: [] } },
+      { op: "add", path: "functions[]", value: { id: "$f1", name: "Fill Warning", screen_id: "$s1", feature_id: "F3", trigger: "Click.", description: "d", normal: ["a"], abnormal: ["b"], validations: [], business_rule_ids: [] } },
+      { op: "add", path: "functions[]", value: { id: "$f2", name: "Confirm Warning", screen_id: "$s2", feature_id: "F3", trigger: "Click.", description: "d", normal: ["a"], abnormal: ["b"], validations: [], business_rule_ids: [] } },
+      { op: "set", path: "screens[id=S07].flow_to", value: ["S08", "S09", "S10", "$s1"] },
+      ...(action ? [{ op: "add", path: "permissions[]", value: { screen_id: "$s1", role_id: "R2", action } }, { op: "add", path: "permissions[]", value: { screen_id: "$s2", role_id: "R2", action } }] : [])
+    ]
+    const ask = async () => {
+      deps.changeExecutor = vi.fn(async () => aiResult({ ops: twoStep("view") as ChangeInstructionOutput["ops"] }))
+      const asked = await preview(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Send Absence Warning cho Analyst" }, {}, deps)
+      expect(asked.clarification_choices?.[0]).toBe("Mỗi bước một màn riêng")
+      return `User: Thêm use case Send Absence Warning cho Analyst
+AI: ${asked.clarification}`
+    }
+    const answer = (history: string) => ({ base_version: 1, instruction: "Mỗi bước một màn riêng", clarification_rounds: 1, chat_history: history })
+    const addedUseCases = (shown: { changes: { op: string; path: string }[] }) => shown.changes.filter((c) => c.op === "add" && c.path.startsWith("use_cases[")).length
+
+    beforeEach(() => {
+      deps.renderAfterChange = vi.fn(async () => undefined)
+    })
+
+    it("lần gọi lại làm mất use case user đã chọn ⇒ giữ lô trước (1 use case)", async () => {
+      await seed()
+      const history = await ask()
+      const executor = vi
+        .fn()
+        .mockResolvedValueOnce(aiResult({ ops: twoStep(null) as ChangeInstructionOutput["ops"] }))
+        .mockResolvedValue(aiResult({ ops: twoStep("view", false) as ChangeInstructionOutput["ops"] }))
+      deps.changeExecutor = executor
+      const shown = await preview(PROJECT, USER, answer(history), {}, deps)
+      expect(executor).toHaveBeenCalledTimes(2)
+      expect(addedUseCases(shown)).toBe(1)
+    })
+
+    it("lô đầu bị từ chối, lần gọi lại áp được ⇒ nhận lần gọi lại (giữ hành vi cũ)", async () => {
+      await seed()
+      const history = await ask()
+      const executor = vi
+        .fn()
+        .mockResolvedValueOnce(aiResult({ ops: [{ op: "remove", path: "use_cases[id=UC_NOPE]" }] as ChangeInstructionOutput["ops"] }))
+        .mockResolvedValue(aiResult({ ops: twoStep("view") as ChangeInstructionOutput["ops"] }))
+      deps.changeExecutor = executor
+      const shown = await preview(PROJECT, USER, answer(history), {}, deps)
+      expect(addedUseCases(shown)).toBe(1)
+    })
+
+    it("hồi quy E2E: quyền ghi access (ma trận X) ⇒ không gọi lại thêm lần nào", async () => {
+      await seed()
+      const history = await ask()
+      const executor = vi.fn().mockResolvedValue(aiResult({ ops: twoStep("access") as ChangeInstructionOutput["ops"] }))
+      deps.changeExecutor = executor
+      const shown = await preview(PROJECT, USER, answer(history), {}, deps)
+      expect(executor).toHaveBeenCalledTimes(1)
+      expect(addedUseCases(shown)).toBe(1)
+    })
+  })
+
   describe("FLF-311: người dùng chọn màn hình riêng hay popup", () => {
     const uiBatch = () => [
       { op: "add", path: "use_cases[]", value: { name: "Send Absence Warning", actor_ids: ["A02"], function_ids: ["$newFn"], description: "Warn students." } },

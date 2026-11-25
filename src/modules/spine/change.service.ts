@@ -1054,7 +1054,34 @@ const canPlan = (spine: Spine, ops: Op[]): boolean => {
   }
 }
 
+/** FLF-486 (B3): kết quả soát một lô — để so lô gọi lại với lô trước (`worseBatch`). */
+export interface BatchReport {
+  /** Áp thử bị từ chối (`TransactionRejectedError`). */
+  rejected: boolean
+  problems: string[]
+  /** Số use case user đã chọn trong kế hoạch giao diện mà lô làm mất. */
+  planMissing: number
+}
+
+/** Lô `a` tệ hơn lô `b`: bị từ chối tệ hơn áp được; cùng áp được thì mất nhiều use case hơn; bằng nhau thì nhiều lỗi hơn. */
+export const worseBatch = (a: BatchReport, b: BatchReport): boolean => {
+  if (a.rejected !== b.rejected) return a.rejected
+  if (a.planMissing !== b.planMissing) return a.planMissing > b.planMissing
+  return a.problems.length > b.problems.length
+}
+
 const batchProblems = (
+  spine: Spine,
+  ops: Op[],
+  instruction: string,
+  ucMode: UseCaseMode | null = null,
+  allowShared = false,
+  uiPlan: readonly UiPlanEntry[] = [],
+  removesUseCase = false,
+  editsUseCase = false
+): string[] => batchReport(spine, ops, instruction, ucMode, allowShared, uiPlan, removesUseCase, editsUseCase).problems
+
+const batchReport = (
   spine: Spine,
   ops: Op[],
   instruction: string,
@@ -1065,15 +1092,15 @@ const batchProblems = (
   removesUseCase = false,
   /** FLF-318: lệnh sửa use case ⇒ đổi actor thì quyền trên màn của use case đổi theo (luật 3h). */
   editsUseCase = false
-): string[] => {
-  if (ops.length === 0) return []
+): BatchReport => {
+  if (ops.length === 0) return { rejected: false, problems: [], planMissing: 0 }
   let plan: ReturnType<typeof planTransaction>
   try {
     plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "change-preview", step_id: null }, { startSeq: 1 })
   } catch (err) {
-    if (!(err instanceof TransactionRejectedError)) return []
+    if (!(err instanceof TransactionRejectedError)) return { rejected: false, problems: [], planMissing: 0 }
     const messages = err.violations.map((v) => v.message)
-    return err.violations.some((v) => v.rule === "schema_invalid") ? [...messages, SCHEMA_FIX] : messages
+    return { rejected: true, problems: err.violations.some((v) => v.rule === "schema_invalid") ? [...messages, SCHEMA_FIX] : messages, planMissing: 0 }
   }
   const asked = instruction.toLowerCase()
   const naming = useCaseNameIssues(spine, plan.spine)
@@ -1088,7 +1115,11 @@ const batchProblems = (
   const flagsLeft = unresolvedAfter(targetFlagsOf(spine, instruction), plan.spine).map(unresolvedProblemText)
   // Mục riêng của mẫu do AI soạn: bảng đúng cột của mẫu, không từ mơ hồ
   const drafted = sectionDraftProblems(spine, plan.spine, instruction)
-  return [...(naming.length > 0 ? [...naming, USE_CASE_NAME_FIX] : []), ...screens, ...leftovers, ...edits, ...flagsLeft, ...drafted]
+  return {
+    rejected: false,
+    problems: [...(naming.length > 0 ? [...naming, USE_CASE_NAME_FIX] : []), ...screens, ...leftovers, ...edits, ...flagsLeft, ...drafted],
+    planMissing: ui.plan.filter((i) => i.kind === "missing").length
+  }
 }
 
 /** FLF-318: phần lô sửa use case còn bỏ sót (lô không áp thử được ⇒ để lỗi bất biến lo). */
@@ -1277,13 +1308,21 @@ const opsFromInstruction = async (
   }
   // Lô sai thì gọi lại kèm lỗi: một lần; có kế hoạch giao diện (lệnh nhiều use case, 3–4 màn) thì tới hai lần
   for (let attempt = 0, max = uiPlan.length > 0 ? 2 : 1; attempt < max && !result.data.clarification_needed?.trim(); attempt++) {
-    const problems = batchProblems(spine, prepare((result.data.ops ?? []) as Op[]), instruction, ucMode, allowShared, uiPlan, removesUseCase, editsUseCase)
+    const report = (ops: unknown): BatchReport =>
+      batchReport(spine, prepare((ops ?? []) as Op[]), instruction, ucMode, allowShared, uiPlan, removesUseCase, editsUseCase)
+    const current = report(result.data.ops)
+    const problems = current.problems
     if (problems.length === 0) break
     const retry = await call(problems.join("\n")).catch((err: unknown) => {
       if (err instanceof AiActionError && AI_OUTPUT_ERRORS.has(err.code)) return null
       throw err
     })
     if (!retry || retry.data.clarification_needed?.trim() || (retry.data.ops ?? []).length === 0) break
+    // FLF-486 (B3): lô gọi lại tệ hơn lô trước (bị từ chối, mất use case user đã chọn, nhiều lỗi hơn) ⇒ giữ lô trước
+    if (worseBatch(report(retry.data.ops), current)) {
+      console.info("[change] bỏ lô gọi lại vì tệ hơn lô trước, giữ lô trước")
+      break
+    }
     result = retry
     adoptModelPlan(retry.data)
   }
