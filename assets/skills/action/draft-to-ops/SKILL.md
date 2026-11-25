@@ -85,12 +85,7 @@ You convert the conversation for one step into **a single transaction of operati
     when the user accepts, so an assumption you leave out stays open and comes back later. More than 2 of them ⇒ say the
     **two that matter** and stop - never a list of "Tôi tạm hiểu là …" sentences, and **never count the rest** ("Còn 3
     điều…"): the gate adds that line itself from the real number, so your own count would contradict it. On a `revision`,
-    confirm in words what changed. Empty `ops` ⇒ say why. When you state the size of the scope or any limit on it, count
-    in "use case" (the word the document uses) - never "chức năng" / "function" for a use case.
-{{#if mid_phase_run}}
-    **This step runs in the middle of a whole-phase run** and the next step starts right after it by itself: do **not**
-    invite the next move and do not name the next step. Say what this step did and stop; only the last step of the phase invites.
-{{/if}}
+    confirm in words what changed. Empty `ops` ⇒ say why. Count scope in "use case", never "chức năng" / "function".{{#if mid_phase_run}} **Mid-phase run:** the next step starts by itself - never invite or name it; say what this step did and stop.{{/if}}
 {{#if has_documents}}
 16. **Sources.** The content guidance ends with the customer's uploaded documents, one paragraph per line, each starting
     with its code (`[D1-P03]`). For every element you add or change **from what a document says**, add an entry to

@@ -2422,8 +2422,8 @@ describe("FLF-260: runPhase - ngôn ngữ đi qua phỏng vấn đầu giai đo�
     // Lời chốt theo luật 15: khối chỉ có khi mid_phase_run
     const { template } = await getPromptTemplate(ActionType.DRAFT)
     const base = { step_id: "B-1.1", call_kind: "draft" }
-    expect(interpolatePrompt(template, { ...base, mid_phase_run: true })).toContain("middle of a whole-phase run")
-    expect(interpolatePrompt(template, { ...base, mid_phase_run: false })).not.toContain("middle of a whole-phase run")
+    expect(interpolatePrompt(template, { ...base, mid_phase_run: true })).toContain("Mid-phase run")
+    expect(interpolatePrompt(template, { ...base, mid_phase_run: false })).not.toContain("Mid-phase run")
   })
 
   it("tin mở giai đoạn tiếng Anh (đoán thật) ⇒ lượt hỏi gộp nhận en và lời nhận tin bằng tiếng Anh", async () => {
