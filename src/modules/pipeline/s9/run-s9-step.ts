@@ -7,7 +7,7 @@
  * | Step | Gọi model | Meter | Việc |
  * | --- | --- | --- | --- |
  * | S-9.1 Completeness & Assumption Sweep | không | không | quét tất định `atBaseline`, gom giả định, báo glossary lạc hậu |
- * | S-9.2 Quality Lens Run | chỉ khi `REVIEW_LLM_ENABLED` | — | hoãn (Phases §9.1) |
+ * | S-9.2 Quality Lens Run | có (theo lô) | trong `ai-review` | cờ vàng `ai_review` (FLF-449 việc 5), tắt khẩn bằng `QUALITY_LENS_ENABLED` |
  * | S-9.3 Business Goal Validation | có | có | cờ vàng `goal_not_covered`, không chặn |
  * | S-9.4 Requirement Prioritization | có | có | MoSCoW vào `functions[]/nfrs[].priority` |
  * | S-9.5 Baseline Sign-off | không | không | chỉ quét lại; ký thật ở `POST /baseline` |
@@ -21,6 +21,7 @@ import type { DraftExecutor } from "../draft-to-ops.js"
 import { completenessSweep, type SweepResult } from "./completeness-sweep.js"
 import { validateGoals, type GoalValidationResult, type ReviewExecutor } from "./goal-validation.js"
 import { prioritize, type PrioritizeResult } from "./prioritization.js"
+import { runAiReview, type AiReviewResult } from "./ai-review.js"
 import type { ReplyLanguage } from "../../../shared/i18n/reply-language.js"
 
 export const S9_PHASE = "S-9"
@@ -40,8 +41,10 @@ export interface RunS9Result {
   step_id: string
   sweep?: SweepResult
   goals?: GoalValidationResult
+  /** S-9.2: kết quả soát chất lượng bằng AI. */
+  quality?: AiReviewResult
   prioritization?: PrioritizeResult
-  /** Step không có việc gì để làm ở đây (S-9.2 khi tắt review LLM). */
+  /** Step không có việc gì để làm ở đây (bước lạ; S-9.2 tắt bằng cờ env cũng ghi `quality.skipped`). */
   skipped?: boolean
 }
 
@@ -91,9 +94,14 @@ export const runS9Step = async (projectId: string, stepId: string, userId: strin
     case "S-9.1":
       return { step_id: stepId, sweep: await completenessSweep(projectId, userId) }
 
-    case "S-9.2":
-      // Quality Lens LLM hoãn (Phases §9.1) — bật lại bằng REVIEW_LLM_ENABLED khi có ngân sách.
-      return { step_id: stepId, skipped: true }
+    case "S-9.2": {
+      // Mỗi lô tự reserve / finalize lượt gọi bên trong `runAiReview` nên không bọc `metered` ở đây
+      const quality = await runAiReview(projectId, userId, "quality", {
+        ...(deps.reviewExecutor ? { executor: deps.reviewExecutor } : {}),
+        ...(deps.replyLanguage ? { replyLanguage: deps.replyLanguage } : {})
+      })
+      return { step_id: stepId, quality }
+    }
 
     case "S-9.3": {
       const goals = await metered(projectId, userId, stepId, "review", () =>
