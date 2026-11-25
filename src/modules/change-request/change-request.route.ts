@@ -120,6 +120,20 @@ router.get("/:projectId/documents/:documentId/extract", authMiddleware, crContro
 
 /**
  * @swagger
+ * /api/v1/projects/{projectId}/documents/{documentId}/extract/estimate:
+ *   get:
+ *     summary: FLF-449 — số lô + credit dự kiến của lượt rút yêu cầu (tài liệu dài chia lô, mỗi lô một lượt AI)
+ *     tags: [Change requests (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200: { description: "`extractionEstimateSchema` { batches, credits, cost_per_batch }" }
+ *       404: { description: DOCUMENT_NOT_FOUND }
+ */
+router.get("/:projectId/documents/:documentId/extract/estimate", authMiddleware, crController.estimateExtraction)
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/documents/{documentId}/extract/approve:
  *   post:
  *     summary: FLF-338 — BA duyệt danh sách (tick / bỏ + lý do / trả lời câu hỏi / tách nhóm) ⇒ mỗi nhóm một change request, mục trùng thành nguồn của phần tử

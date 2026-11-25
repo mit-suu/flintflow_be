@@ -351,6 +351,8 @@ export interface OtherRequirement {
   statement: string
   /** Câu bằng ngôn ngữ user (FLF-237); dữ liệu cũ không có. */
   statement_vi?: string | null
+  /** FLF-449: câu nguyên văn trong Brief / tài liệu làm nảy ra mục này (chỗ thiếu của Brief). Không in vào SRS; dữ liệu cũ không có. */
+  source_quote?: string | null
 }
 
 export interface GlossaryTerm {

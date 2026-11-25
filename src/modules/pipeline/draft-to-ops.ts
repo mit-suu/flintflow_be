@@ -16,7 +16,7 @@ import type { Spine } from "../spine/spine.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ActionType, AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import { executeAiAction, type ExecuteAiActionOptions } from "../../shared/ai/ai-action.service.js"
-import { getSkill } from "../../shared/ai/prompt-registry.service.js"
+import { getSkill, skillPromptText } from "../../shared/ai/prompt-registry.service.js"
 import type { LocalizedEntry, OpTransaction, SourceEntry } from "../../shared/ai/response-parser.js"
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { documentLanguageInput, type TurnDocumentLanguage } from "../translation/turn-language.js"
@@ -24,6 +24,7 @@ import type { StepContext } from "./context-projection.js"
 import { withFrameRenumber } from "../spine/template-frames.js"
 import { actorGeneralizationErrors, briefExtractionErrors, dropRedundantScalarAdds, requiredArrayErrors, sanitizeModelOps, useCaseNamingErrors, useCaseWiringErrors, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
 import { ESCALATION_MODEL, isErdOnly, normalizeEntityNames } from "./erd-retry.js"
+import { briefQuoteSources, dropUngroundedGaps } from "./gap-quote.js"
 
 export const NEEDS_USER_INPUT = "NEEDS_USER_INPUT"
 /** Phases §4.1: gửi lại model kèm lỗi tối đa 2 lần, rồi hỏi user. */
@@ -148,15 +149,15 @@ const contentMaxTokens = (ctx: StepContext): number | undefined => (ctx.skill ? 
 
 const PARAGRAPH = "\n\n"
 
-/** Thân skill nội dung + các reference skill khai ở `prompt_references` (FLF-370: luật chi tiết nằm ở reference phải tới được model). */
+/**
+ * Thân skill nội dung + các reference skill khai ở `prompt_references` (FLF-370: luật chi tiết nằm ở reference phải tới được model).
+ * Cùng hàm nối với skill hành động (`skillPromptText`, FLF-449 N3) — một chỗ nối, không nối hai lần.
+ */
 export const contentGuidance = (ctx: Pick<StepContext, "skill">): string => {
   if (!ctx.skill) return ""
   const base = getSkill(ctx.skill)
   if (base.stub) return `Content skill ${ctx.skill} is not written yet; follow the generic rules.`
-  if (base.promptReferences.length === 0) return base.template
-  const { references } = getSkill(ctx.skill, { references: base.promptReferences })
-  const blocks = base.promptReferences.map((name) => [`## Reference: ${name}`, references[name]].join(PARAGRAPH))
-  return [base.template, ...blocks].join(PARAGRAPH)
+  return skillPromptText(base)
 }
 
 const loadSpine = async (projectId: string, expectedVersion: number): Promise<Spine> => {
@@ -239,6 +240,12 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       ops = sanitized.errors.length > 0 ? sanitized.ops : withFrameRenumber(spine, dropRedundantScalarAdds(spine, sanitized.ops as Op[]))
       // FLF-433: bản vá ghép sau lô đã giữ; đuôi tên entity kiểu "Exam List" code tự bỏ (không tốn lượt thử)
       if (sanitized.errors.length === 0) ops = normalizeEntityNames(patchBase ? [...patchBase, ...ops] : ops)
+      // FLF-449 việc 16: chỗ thiếu của Brief không có câu trích thật (Brief / tài liệu / yêu cầu sửa) ⇒ bỏ, không đưa ra
+      if (sanitized.errors.length === 0) {
+        const grounded = dropUngroundedGaps(ops as Op[], stepId, briefQuoteSources(spine, [ctx.documents, options.revisionRequest]))
+        if (grounded.dropped.length > 0) console.warn(`[draft-to-ops] ${stepId}: bỏ ${grounded.dropped.length} chỗ thiếu không có câu trích thật`, grounded.dropped)
+        ops = grounded.ops
+      }
       errors = sanitized.errors.length > 0 ? sanitized.errors : validateOps(spine, ops, { writable: ctx.writable, stepId, visibleIds, ...(extraPaths ? { extraPaths } : {}) })
       // S-1.1 phải dựng vision/goals tiếng Anh từ addendum lõi — kể cả lô rỗng, nên kiểm sau validateOps
       if (errors.length === 0) errors = briefExtractionErrors(spine, ops as Op[], stepId, callKind)

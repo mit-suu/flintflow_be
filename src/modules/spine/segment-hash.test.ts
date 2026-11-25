@@ -40,6 +40,14 @@ describe("segmentItemHash / segmentHash", () => {
     expect(segmentHash(s, ["business_rules:BR-01", "use_cases:UC-01"])).toBe(segmentHash(s, ["use_cases:UC-01", "business_rules:BR-01"]))
   })
 
+  it("FLF-449: câu trích nguồn của chỗ thiếu (other_requirements[].source_quote) không in ra ⇒ không vào dấu; statement vẫn vào", () => {
+    const base = { ...spine(), other_requirements: [{ id: "OR01", kind: "open_question" as const, statement: "Which payment gateway?" }] }
+    const hash = segmentItemHash(base, "other_requirements:OR01")
+    const quoted = { ...base, other_requirements: [{ ...base.other_requirements[0], source_quote: "khách thanh toán online" }] }
+    expect(segmentItemHash(quoted, "other_requirements:OR01")).toBe(hash)
+    expect(segmentItemHash({ ...base, other_requirements: [{ ...base.other_requirements[0], statement: "Other?" }] }, "other_requirements:OR01")).not.toBe(hash)
+  })
+
   it("sectionItemKeys theo phần tử mục đó in ra: mục 1 chỉ BR cấp cao + actor không phải người + field project; 5.1 chỉ BR chi tiết", () => {
     expect(sectionItemKeys(spine(), "fixed:1")).toEqual(["project:vision", "project:goals", "project:release_scope", "business_rules:BR-02", "actors:A02"])
     expect(sectionItemKeys(spine(), "fixed:5.1")).toEqual(["business_rules:BR-01"])

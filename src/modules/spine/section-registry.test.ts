@@ -76,6 +76,12 @@ describe("sectionsOfPath", () => {
     expect(sectionsOfPath(FIXTURE, "functions[id=FN001].order")).toEqual({ owner: [], reads: [], derived: [] })
   })
 
+  it("FLF-449: other_requirements[].source_quote không in vào SRS ⇒ không làm mục 5.4 đổi / stale; field khác vẫn như cũ", () => {
+    expect(sectionsOfPath(FIXTURE, "other_requirements[id=OR01].source_quote")).toEqual({ owner: [], reads: [], derived: [] })
+    expect(sectionsOfPath(FIXTURE, "other_requirements[id=OR01].statement").owner).toEqual(["fixed:5.4"])
+    expect(sectionsOfPath(FIXTURE, "other_requirements[]").owner).toEqual(["fixed:5.4"])
+  })
+
   it("mục riêng custom_sections ⇒ chỉ section custom:<id> của chính nó (FLF-182)", () => {
     expect(sectionsOfPath(FIXTURE, "custom_sections[id=CS01].blocks")).toEqual({ owner: ["custom:CS01"], reads: [], derived: [] })
     expect(sectionsOfPath(FIXTURE, "custom_sections[]", { value: { id: "CS02" } }).owner).toEqual(["custom:CS02"])

@@ -271,6 +271,15 @@ describe("addendumForUnit - lượt hỏi gộp / chat thấy điều user đã 
     }
   })
 
+  it("FLF-449: Draft của S-1 nhận thêm lời gốc `content`; step khác giữ `content_en` như cũ", () => {
+    const withContent = projectStep(FIXTURE, "S-1.4").addendum
+    expect(withContent).toEqual(FIXTURE.addendum.map(({ id, topic, target_section, content_en, content }) => (content ? { id, topic, target_section, content_en, content } : { id, topic, target_section, content_en })))
+    expect(withContent.some((a) => a.content)).toBe(true)
+    for (const stepId of ["B-1.3", "S-2.1", "S-3.1"]) {
+      expect(projectStep(FIXTURE, stepId).addendum.every((a) => !("content" in a)), stepId).toBe(true)
+    }
+  })
+
   it("giai đoạn khác ⇒ không nạp (giữ như cũ)", () => {
     expect(addendumForUnit(FIXTURE, "S-4")).toEqual([])
     expect(addendumForUnit(FIXTURE, "S-5@S03")).toEqual([])

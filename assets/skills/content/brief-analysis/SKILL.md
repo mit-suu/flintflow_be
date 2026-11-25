@@ -1,7 +1,7 @@
 ---
 skill_id: brief-analysis
 kind: content
-version: 0.1.0
+version: 0.2.0
 description: "S-1.1 Brief Extraction, S-1.3 Conflict & Assumption Review, S-1.4 Gap List"
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -75,7 +75,15 @@ what the document will say. Present those; leave the rest for S-9.1's sweep. Do 
 What the SRS will need and the Brief does not have yet. Write each as
 `other_requirements[kind=open_question]` - one per gap, phrased as the question a reviewer would ask; `statement` English, `statement_vi` in the user's language.
 
-Sweep these, and say in `notes` when one genuinely does not apply:
+**Every gap carries `source_quote`**: the sentence that **raises the need**, copied verbatim (one or two sentences, no
+paragraph code) from the Brief - an addendum entry's `content` or `content_en`, a `project` field - or from an uploaded
+document. The quote is not about what is missing; it is what makes the gap matter: "khách thanh toán online" ⇒ gap
+"Which payment gateway is used, and what happens when a payment fails?" with `source_quote: "khách thanh toán online"`.
+No sentence raises the need ⇒ do not write the gap. The server drops every gap whose quote is missing or not found word
+for word in the Brief or the documents.
+
+Sweep these themes; keep a gap only when a quoted sentence raises it, and say in `notes` which themes nothing in the
+Brief raises:
 
 1. **Who else uses it** - an admin, a support role, an approver; almost every product has a second human
    actor the Brief forgot.
@@ -86,8 +94,18 @@ Sweep these, and say in `notes` when one genuinely does not apply:
 5. **Numbers** - any "fast", "reliable", "secure" with no figure behind it (S-6.3/S-6.4 will need one).
 6. **Data that outlives a session** - what is stored, and for how long.
 
-A gap list is not a complaint list: each entry should be answerable in one sentence by the user.
+A gap list is not a complaint list: each entry should be answerable in one sentence by the user. Fewer grounded gaps
+beat a full sweep of generic ones.
 
+<!-- ba-quality:shared:start -->
+**Analysis quality** - applies to every finding, gap, proposed change, recommendation and reason you write (not to the plain answer options of a question):
+- **(a) Quote it or drop it.** Each one rests on words you can copy verbatim from the uploaded documents, the Brief, the current SRS content or the user's messages. Where the output has a quote or source field, put that exact text there. Nothing to quote ⇒ do not raise it.
+- **(b) Never ask what is already answered** - in the documents, the Brief, the SRS content, a settled decision or an earlier answer.
+- **(c) Recommend only when you are sure**: a clear basis in the documents, the Brief, the SRS content or a settled decision. A recommendation always states its reason and that basis. Not sure ⇒ give the options side by side, with no recommendation.
+- **(d) Specific to this project, never generic advice**: name the screen, role, data or rule it is about.
+  - Fails: "nên cân nhắc bảo mật" (consider security).
+  - Passes: "màn đối soát hiện số tiền, nên chỉ cho vai Kế toán xem" (the reconciliation screen shows amounts, so only the Accountant role should see it).
+<!-- ba-quality:shared:end -->
 ## Rules
 
 1. Ids continue the existing sequence (`draft-to-ops` rule 5) - check the projection first.
@@ -115,11 +133,11 @@ A gap list is not a complaint list: each entry should be answerable in one sente
 ```json
 {
   "ops": [
-    { "op": "add", "path": "other_requirements[]", "value": { "id": "OR07", "kind": "open_question", "statement": "Who reviews and suspends accounts once the product is live, and what can that role see?" }, "reason": "S-1.4 gap: no second human actor named" },
-    { "op": "add", "path": "other_requirements[]", "value": { "id": "OR08", "kind": "open_question", "statement": "What response time counts as fast for a generation step, in seconds?" }, "reason": "S-1.4 gap: no number behind fast" },
+    { "op": "add", "path": "other_requirements[]", "value": { "id": "OR07", "kind": "open_question", "statement": "Who reviews and suspends patient accounts once the product is live, and what can that role see?", "source_quote": "Patients book clinic visits online" }, "reason": "S-1.4 gap: no second human actor named" },
+    { "op": "add", "path": "other_requirements[]", "value": { "id": "OR08", "kind": "open_question", "statement": "How many seconds may the booking page take to respond at the busiest hour?", "source_quote": "Cut the average time to book a visit to under two minutes" }, "reason": "S-1.4 gap: no response time behind the booking goal" },
     { "op": "add", "path": "assumptions[]", "value": { "id": "AS09", "path": "project.goals", "statement": "Reliable means the service is available during business hours, not 24/7.", "rationale": "The Brief says reliable with no window.", "origin_step_id": "S-1.4", "status": "unconfirmed", "confirmed_at": null }, "reason": "S-1.4 quantified a vague word" }
   ],
-  "notes": "No scheduled work implied by the Brief; data retention already answered in B-1.6."
+  "notes": "Nothing in the Brief raises scheduled work; data retention already answered in B-1.6."
 }
 ```
 
@@ -129,5 +147,5 @@ A gap list is not a complaint list: each entry should be answerable in one sente
 - [ ] `addendum[]` untouched except S-1.1 revision on `vision`/`goals`; no SRS collection written.
 - [ ] Every conflict is an `open_question` naming both sides - none silently resolved.
 - [ ] Assumptions only moved to `confirmed` on the user's word, with `confirmed_at`.
-- [ ] The six gap themes are covered or explained in `notes`.
+- [ ] Every gap has a `source_quote` copied verbatim from the Brief or a document; a theme nothing raises is named in `notes`, never invented.
 - [ ] Every gap is answerable in one sentence.

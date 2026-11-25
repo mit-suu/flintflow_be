@@ -1288,6 +1288,17 @@
                 "type": "null"
               }
             ]
+          },
+          "source_quote": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

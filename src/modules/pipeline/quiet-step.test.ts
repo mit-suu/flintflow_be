@@ -54,10 +54,22 @@ describe("isQuietStep (R1)", () => {
     expect(isQuietStep(input())).toMatchObject({ quiet: true })
   })
 
-  it("FLF-220: bước đã hỏi và user đã trả lời ⇒ Cuối giai đoạn không dừng giữa phase; Mọi bước vẫn dừng", () => {
-    expect(isQuietStep(input({ asked: true, reviewMode: "fast" })).quiet).toBe(true)
-    expect(isQuietStep(input({ asked: true, reviewMode: "balanced" })).quiet).toBe(true)
-    expect(isQuietStep(input({ asked: true, reviewMode: "strict" })).quiet).toBe(false)
+  // FLF-449 (03-can-chot #1) thay FLF-220: trước đây bước có hỏi vẫn tự qua ở "Cuối giai đoạn"; BF §1.2 "Step tự qua khi
+  // không hỏi gì" ⇒ có hỏi thì dừng ở mọi mức duyệt.
+  it("FLF-449: bước đã hỏi user trong lượt ⇒ không tự qua ở mọi mức duyệt", () => {
+    for (const reviewMode of ["strict", "fast", "balanced", "milestones"] as const) {
+      const verdict = isQuietStep(input({ asked: true, reviewMode, spine: { decisions: [], project: { system_name: "Lumen" } } as unknown as Spine }))
+      expect(verdict.quiet, reviewMode).toBe(false)
+    }
+    expect(isQuietStep(input({ asked: true, reviewMode: "fast" })).reason_vi).toContain("đã hỏi")
+  })
+
+  it("FLF-449: có hỏi vẫn dừng kể cả khi bước chỉ chạm phần đã chọn không hỏi lại; không hỏi thì tự qua như cũ", () => {
+    const spine = { decisions: [], project: { skip_confirm_sections: ["fixed:5"], system_name: "Lumen" } } as unknown as Spine
+    expect(isQuietStep(input({ asked: true, reviewMode: "fast", touchedSections: ["fixed:5"], spine })).quiet).toBe(false)
+    expect(isQuietStep(input({ asked: true, reviewMode: "strict", touchedSections: ["fixed:5"], spine })).quiet).toBe(false)
+    expect(isQuietStep(input({ asked: false, reviewMode: "fast", touchedSections: ["fixed:5"], spine })).quiet).toBe(true)
+    expect(isQuietStep(input({ asked: false, reviewMode: "milestones", spine })).quiet).toBe(true)
   })
 
   it("mọi lý do khiến user cần nhìn đều chặn tự Accept", () => {

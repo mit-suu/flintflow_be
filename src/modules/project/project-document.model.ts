@@ -14,6 +14,11 @@ export interface IProjectDocument extends Document {
   extractedText?: string | null
   parseStatus: "pending" | "success" | "failed"
   parseError?: string | null
+  /**
+   * FLF-449 việc 27: điều Code biết chắc đã mất khi trích chữ - `images_skipped` (hình / sơ đồ trong .docx không được đọc),
+   * `pdf_no_text` (PDF không có lớp chữ, đi kèm `parseStatus: "failed"`). Tài liệu tải trước FLF-449 đọc ra `[]`.
+   */
+  parseWarnings?: string[]
   tokenCount?: number | null
   // AI summary fields (Task 2b)
   summary?: string | null
@@ -99,6 +104,11 @@ const projectDocumentSchema = new Schema<IProjectDocument>(
     parseError: {
       type: String,
       default: null
+    },
+    parseWarnings: {
+      type: [String],
+      enum: ["pdf_no_text", "images_skipped"],
+      default: []
     },
     tokenCount: {
       type: Number,

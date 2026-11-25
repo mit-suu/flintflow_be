@@ -1,7 +1,7 @@
 ---
 skill_id: gate-check
 kind: action
-version: 1.0.0
+version: 1.1.0
 description: Commit gate - Accept / Request revision / Regenerate / Accept as-is; caps 8 calls and 3 regenerates per step; phase menu [A]/[P]/[C]
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -42,6 +42,8 @@ The gate card shows: what changed (ops summary + preview diff), open flags for t
 | **Request revision** | `status = revision_requested`; user's text → `draft-to-ops` with call kind `revision` | ✔ |
 | **Regenerate** | Revert the step's range, `draft-to-ops` with call kind `regenerate` | ✔ |
 | **Accept as-is** | Only when the regenerate cap is spent **and** a revision did not solve it. Accept + write a **yellow** flag with the user's reason | ✘ |
+
+FLF-449: a step gate offers only **Accept** and **Request revision** (`gate_ready.actions = [accept, revision]`): content a step just drafted has nothing to keep as-is, and the user asks for changes in chat. `gate.service.ts` still accepts `regenerate` / `accept_as_is` from older clients, with the caps below.
 
 ## Caps
 

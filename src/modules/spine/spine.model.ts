@@ -329,7 +329,9 @@ const otherRequirementSchema = new Schema(
       required: true
     },
     statement: { type: String, default: "" },
-    statement_vi: { type: String }
+    statement_vi: { type: String },
+    /** FLF-449: câu nguyên văn làm nảy ra mục (chỗ thiếu của Brief); không in vào SRS. */
+    source_quote: { type: String }
   },
   opts
 )

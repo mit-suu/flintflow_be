@@ -245,6 +245,8 @@ const matchRows = (t: Target): FieldSectionRow[] => {
     case "messages":
       return rowsOf(["messages"])
     case "other_requirements":
+      // FLF-449: câu trích nguồn của chỗ thiếu không in vào SRS — như `priority`, đổi riêng nó không làm mục 5.4 `stale`
+      if (t.sub === "source_quote") return []
       return rowsOf(["other_requirements"])
     case "glossary":
       return rowsOf(["glossary"])

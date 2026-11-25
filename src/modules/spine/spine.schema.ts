@@ -306,7 +306,12 @@ export const otherRequirementSchema = z.strictObject({
   kind: z.enum(["risk", "assumption", "open_question", "technical_risk"]),
   statement: z.string(),
   /** Câu bằng ngôn ngữ user (FLF-237) — panel Hồ sơ dự án hiện câu này; dữ liệu cũ không có ⇒ FE rơi về `statement`. */
-  statement_vi: z.string().min(1).nullish()
+  statement_vi: z.string().min(1).nullish(),
+  /**
+   * FLF-449 (việc 16): câu trong Brief / tài liệu làm nảy ra mục này, chép nguyên văn (chỗ thiếu của Brief bắt buộc có,
+   * server bỏ mục có câu trích không tìm thấy). Không in vào SRS. Dữ liệu cũ và mục do bước khác ghi không có.
+   */
+  source_quote: z.string().min(1).nullish()
 })
 
 export const glossaryTermSchema = z.strictObject({
