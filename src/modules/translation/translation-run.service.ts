@@ -73,6 +73,44 @@ export const acceptBatchItems = (batch: BatchItem[], items: TranslateDocumentOut
   })
 }
 
+/** Lý do một đơn vị gửi đi không nhận được bản dịch hợp lệ — chỉ để log/chẩn đoán, không phải hợp đồng dữ liệu. */
+export type RejectReason = "missing" | "shape_mismatch" | "copied_source"
+
+export interface AcceptBatchWithReasonsResult {
+  accepted: LocalizedUnit[]
+  /** Đơn vị gửi nhưng không nhận bản dịch hợp lệ, kèm lý do — người gọi quyết định thử lại hay bỏ. */
+  rejected: { item: BatchItem; reason: RejectReason }[]
+}
+
+/**
+ * Như `acceptBatchItems` nhưng trả thêm lý do loại từng đơn vị (key lạ model không trả về ⇒ "missing", lệch hình dạng
+ * (mảng khác độ dài / kiểu) ⇒ "shape_mismatch", chép nguyên câu gốc ⇒ "copied_source") — dùng để log chẩn đoán và để
+ * người gọi tách phần bị loại ra thử lại (đổi mẫu, FLF-471), không đổi hành vi của `acceptBatchItems` cho dịch thường.
+ */
+export const acceptBatchItemsWithReasons = (batch: BatchItem[], items: TranslateDocumentOutput["items"]): AcceptBatchWithReasonsResult => {
+  const byKey = new Map(batch.map((item) => [item.key, item]))
+  const done = new Set<string>()
+  const accepted: LocalizedUnit[] = []
+  const reasonByKey = new Map<string, RejectReason>()
+  for (const { key, text } of items) {
+    const sent = byKey.get(key)
+    if (!sent || done.has(key)) continue
+    const fitted = fitTranslation(sent.text, text)
+    if (fitted === null) {
+      reasonByKey.set(key, "shape_mismatch")
+      continue
+    }
+    if (copiedSource({ source: sent.text, text: fitted })) {
+      reasonByKey.set(key, "copied_source")
+      continue
+    }
+    done.add(key)
+    accepted.push({ key, sourceHash: sent.sourceHash, source: sent.text, text: fitted })
+  }
+  const rejected = batch.filter((item) => !done.has(item.key)).map((item) => ({ item, reason: reasonByKey.get(item.key) ?? ("missing" as const) }))
+  return { accepted, rejected }
+}
+
 const statusOf = (err: unknown): number | undefined =>
   typeof err === "object" && err !== null && "statusCode" in err ? (err as { statusCode?: number }).statusCode : undefined
 

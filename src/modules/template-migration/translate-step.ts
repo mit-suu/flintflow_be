@@ -4,18 +4,22 @@
  *
  *  - Tên phần tử (actor / màn / entity / tính năng) dịch trước, thân sau; tên đã dịch vào thuật ngữ tạm của lượt này để thân dùng
  *    đúng chữ (không ghi glossary DB — bản dịch của lần đổi mẫu không phải bản dịch lớp ngoài).
- *  - Mỗi lô một lượt `executeAiAction(TRANSLATE_DOCUMENT)` ⇒ giữ / trừ credit theo lô như dịch thường; lỗi giữa chừng ⇒ ném, phần
- *    đã dịch được lưu qua `onBatch` để lần chạy lại không dịch (không trừ) lần hai.
- *  - Lô lỗi / không nhận được đơn vị nào ⇒ ném (không ghi nửa chừng). Đơn vị model chép nguyên câu gốc (`copiedSource`) ⇒ giữ chữ gốc,
- *    đếm vào `untranslated` để báo BA.
+ *  - Mỗi lô một lượt `executeAiAction(TRANSLATE_DOCUMENT)` ⇒ giữ / trừ credit theo lô như dịch thường. Phần đã dịch được lưu qua
+ *    `onBatch` để lần chạy lại không dịch (không trừ) lần hai.
+ *  - Lô không nhận đủ đơn vị (0 hay một phần — key lạ, lệch hình dạng, chép nguyên câu, hoặc model trả lỗi parse 422) KHÔNG ném:
+ *    phần chưa nhận được gom lại, thử lại bằng cách chia đôi lô hỏng (dừng khi lô còn ≤5 đơn vị hoặc hết ngân sách thử lại —
+ *    tối đa thêm 50% số lô ban đầu, không quá 10 lượt). Đơn vị vẫn hỏng sau cùng ⇒ giữ chữ gốc, ghi key vào `untranslated_keys`
+ *    để bước áp dụng báo BA theo tên mục (FLF-471 — trước đây ném 502, hỏng cả lượt áp dụng và lặp lại mãi vì lô hỏng luôn
+ *    đứng đầu hàng dịch lại).
+ *  - Chỉ ném khi: hết credit (402), lỗi nhà cung cấp mà `executeAiAction` đã tự thử lại vẫn không qua, hoặc lượt bị huỷ — phần
+ *    đã dịch trước đó vẫn được giữ qua `onBatch`.
  *  - Nhãn wireframe trong `diagrams[].source` không có field Spine để ghi ⇒ không dịch ở đây (ghi chú trong `skipped`).
  */
 import type { UserLocale } from "../../shared/i18n/locale.js"
-import { ApiError } from "../../shared/utils/api-error.js"
 import { formatGlossary, glossaryFor, isNameUnit, namesOf, seedEntriesOf } from "../translation/glossary.service.js"
-import { acceptBatchItems, defaultTranslateDocumentExecutor, type TranslateDocumentExecutor } from "../translation/translation-run.service.js"
+import { acceptBatchItemsWithReasons, defaultTranslateDocumentExecutor, type RejectReason, type TranslateDocumentExecutor } from "../translation/translation-run.service.js"
 import { hashSource, readUnitField, translationUnits, writeUnitField, fitTranslation, type TranslationUnit, type UnitRef, type UnitValue } from "../translation/translation-units.js"
-import { splitBatches, uniqueBatchItems } from "../translation/translation.service.js"
+import { splitBatches, uniqueBatchItems, type BatchItem } from "../translation/translation.service.js"
 import type { Op } from "../spine/op.types.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { GlossaryEntry } from "../translation/translation.repository.js"
@@ -45,11 +49,31 @@ export interface TranslateStepResult {
   /** Op `set` ghi chữ dịch vào Spine (đường dẫn = key đơn vị). */
   ops: Op[]
   credits_used: number
-  /** Đơn vị giữ chữ gốc vì model chép lại nguyên câu. */
+  /** Đơn vị giữ chữ gốc vì model không dịch được dù đã thử lại (chia nhỏ lô) — bằng `untranslated_keys.length`. */
   untranslated: number
+  /** Key các đơn vị ở trên — bước áp dụng map sang tên mục để báo BA (FLF-471). */
+  untranslated_keys: string[]
   /** Đơn vị bỏ qua vì không có field Spine để ghi (nhãn wireframe). */
   skipped: number
 }
+
+const statusOf = (err: unknown): number | undefined => (typeof err === "object" && err !== null && "statusCode" in err ? (err as { statusCode?: number }).statusCode : undefined)
+
+/** Lô model trả sai định dạng (parser 422) — executor đã nhả credit, lô này xử lý như lô không nhận được đơn vị nào: thử lại chia nhỏ. */
+const isParseError = (err: unknown): boolean => statusOf(err) === 422
+
+/** Lô hỏng chỉ thử lại chia đôi tới khi còn ≤5 đơn vị — dưới mức này chia tiếp không còn ý nghĩa (lô quá nhỏ, phí lượt gọi). */
+const MIN_RETRY_BATCH_UNITS = 5
+/** Ngân sách lượt gọi thêm cho thử lại: tối đa 50% số lô ban đầu, không quá 10 lượt (Cần chốt #2 của plan — không hoàn credit lượt loại hết). */
+const MAX_RETRY_EXTRA_RATIO = 0.5
+const MAX_RETRY_EXTRA_CAP = 10
+
+const splitInHalf = (items: BatchItem[]): BatchItem[][] => {
+  const mid = Math.ceil(items.length / 2)
+  return [items.slice(0, mid), items.slice(mid)]
+}
+
+const REASON_LABELS: Record<RejectReason, string> = { missing: "key lạ/thiếu", shape_mismatch: "lệch hình dạng", copied_source: "chép nguyên câu gốc" }
 
 type Row = Record<string, unknown>
 const isRow = (v: unknown): v is Row => typeof v === "object" && v !== null && !Array.isArray(v)
@@ -91,28 +115,64 @@ export const translateForMigration = async (input: TranslateStepInput): Promise<
   }
 
   let creditsUsed = 0
-  let untranslated = 0
-  const batches = splitBatches(uniqueBatchItems(pending))
-  for (const batch of batches) {
-    const result = await executor(
-      {
-        promptVariables: {
-          source_language: LANGUAGE_NAMES[input.source],
-          target_language: LANGUAGE_NAMES[input.target],
-          glossary: formatGlossary(glossaryFor(glossary, batch.map((item) => item.text))),
-          items: JSON.stringify(batch.map(({ key, text }) => ({ key, text })), null, 2)
-        }
-      },
-      input.projectId,
-      input.userId
-    )
+  const untranslatedKeys = new Set<string>()
+  const initialBatches = splitBatches(uniqueBatchItems(pending))
+  const retryBudget = Math.min(Math.ceil(initialBatches.length * MAX_RETRY_EXTRA_RATIO), MAX_RETRY_EXTRA_CAP)
+  let retriesUsed = 0
+  const queue: BatchItem[][] = [...initialBatches]
+
+  const giveUp = (items: BatchItem[]): void => {
+    for (const item of items) untranslatedKeys.add(item.key)
+  }
+  // Lô vẫn hỏng: chia đôi thử lại trong ngân sách, hết ngân sách hoặc lô đã ≤5 đơn vị ⇒ giữ chữ gốc, không thử nữa.
+  const retry = (items: BatchItem[]): void => {
+    if (items.length === 0) return
+    if (items.length > MIN_RETRY_BATCH_UNITS && retriesUsed < retryBudget) {
+      const parts = splitInHalf(items)
+      retriesUsed += parts.length
+      queue.push(...parts)
+      return
+    }
+    giveUp(items)
+  }
+
+  while (queue.length > 0) {
+    const batch = queue.shift()!
+    let result
+    try {
+      result = await executor(
+        {
+          promptVariables: {
+            source_language: LANGUAGE_NAMES[input.source],
+            target_language: LANGUAGE_NAMES[input.target],
+            glossary: formatGlossary(glossaryFor(glossary, batch.map((item) => item.text))),
+            items: JSON.stringify(batch.map(({ key, text }) => ({ key, text })), null, 2)
+          }
+        },
+        input.projectId,
+        input.userId
+      )
+    } catch (err) {
+      // 402 hết credit / lỗi nhà cung cấp sau khi executor đã tự thử lại ⇒ ném thật — phần đã dịch trước đó đã lưu qua onBatch.
+      if (!isParseError(err)) throw err
+      console.warn(`[TemplateMigration] Lô dịch đổi mẫu lỗi parse (422), thử lại chia nhỏ — ${batch.length} đơn vị:`, err)
+      retry(batch)
+      continue
+    }
     creditsUsed += result.cost ?? 0
-    const accepted = acceptBatchItems(batch, result.data.items)
-    if (!accepted.length) throw new ApiError(502, "Dịch lô nội dung không trả về bản dịch hợp lệ nào. Chưa ghi gì vào tài liệu - thử áp dụng lại.", TRANSLATION_INCOMPLETE)
+    const { accepted, rejected } = acceptBatchItemsWithReasons(batch, result.data.items)
     for (const a of accepted) done.set(a.sourceHash, { key: a.key, source_hash: a.sourceHash, text: a.text })
-    untranslated += batch.length - accepted.length
     glossary.push(...namesOf(accepted))
     if (input.onBatch) await input.onBatch([...done.values()])
+    if (rejected.length > 0) {
+      const byReason = new Map<RejectReason, number>()
+      for (const r of rejected) byReason.set(r.reason, (byReason.get(r.reason) ?? 0) + 1)
+      const breakdown = [...byReason].map(([reason, count]) => `${REASON_LABELS[reason]}=${count}`).join(", ")
+      console.warn(
+        `[TemplateMigration] Lô dịch đổi mẫu nhận ${accepted.length}/${batch.length} đơn vị (logId=${result.logId}) — loại: ${breakdown}. rawText (2000 ký tự đầu): ${result.rawText.slice(0, 2000)}`
+      )
+      retry(rejected.map((r) => r.item))
+    }
   }
 
   // Ghi chữ dịch lên bản sao Spine để lấy giá trị field thật (mảng chữ của entity, cạnh luồng màn… có hình riêng)
@@ -130,5 +190,5 @@ export const translateForMigration = async (input: TranslateStepInput): Promise<
     ops.push({ op: "set", path: unit.key, value: slot.owner[slot.field], reason: "Dịch theo ngôn ngữ của mẫu mới" })
     out.push({ key: unit.key, source_hash: hit.source_hash, text: hit.text })
   }
-  return { units: out, ops, credits_used: creditsUsed, untranslated, skipped }
+  return { units: out, ops, credits_used: creditsUsed, untranslated: untranslatedKeys.size, untranslated_keys: [...untranslatedKeys], skipped }
 }
