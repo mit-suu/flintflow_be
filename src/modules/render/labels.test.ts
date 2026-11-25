@@ -172,6 +172,26 @@ describe("labels - bảng nhãn", () => {
     expect(enumLabel(undefined, "priority", "must")).toBe("must")
   })
 
+  it("FLF-479 (12a): enumLabel en tra EN_ENUM_LABELS cho other_kind / common_category, giá trị lạ giữ nguyên, actor_kind/priority/permission_action không đổi", () => {
+    expect(enumLabel("en", "other_kind", "open_question")).toBe("Open question")
+    expect(enumLabel("en", "other_kind", "risk")).toBe("Risk")
+    expect(enumLabel("en", "other_kind", "assumption")).toBe("Assumption")
+    expect(enumLabel("en", "other_kind", "technical_risk")).toBe("Technical risk")
+    expect(enumLabel("en", "common_category", "date_format")).toBe("Date format")
+    expect(enumLabel("en", "common_category", "pagination")).toBe("Pagination")
+    expect(enumLabel("en", "common_category", "error_handling")).toBe("Error handling")
+    // giá trị lạ (không có trong bảng) giữ nguyên
+    expect(enumLabel("en", "other_kind", "something_else")).toBe("something_else")
+    expect(enumLabel("en", "common_category", "unknown_category")).toBe("unknown_category")
+    // không đổi actor_kind / priority / permission_action (đọc được, không thêm bảng en)
+    expect(enumLabel("en", "actor_kind", "human")).toBe("human")
+    expect(enumLabel("en", "priority", "must")).toBe("must")
+    expect(enumLabel("en", "permission_action", "view")).toBe("view")
+    // tiếng Việt như cũ, không bị ảnh hưởng
+    expect(enumLabel("vi", "other_kind", "open_question")).toBe(VI_ENUM_LABELS.other_kind.open_question)
+    expect(enumLabel("vi", "common_category", "date_format")).toBe(VI_ENUM_LABELS.common_category.date_format)
+  })
+
   it("WRITER_TEXT hai ngôn ngữ cùng bộ key, cùng số cột §I", () => {
     expect(Object.keys(WRITER_TEXT.vi).sort()).toEqual(Object.keys(WRITER_TEXT.en).sort())
     expect(WRITER_TEXT.vi.rocHeader).toHaveLength(WRITER_TEXT.en.rocHeader.length)
