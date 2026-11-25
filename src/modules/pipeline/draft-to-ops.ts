@@ -124,8 +124,10 @@ export class DraftRejectedError extends ApiError {
   readonly errors: ValidationError[]
   readonly lastOps: unknown[]
   readonly attempts: DraftAttempt[]
+  /** FLF-477: usage (kèm `logId`) của từng lượt đã gọi model — để ghi trạng thái lượt bị từ chối vào log AI. */
+  readonly usage: DraftUsage[]
 
-  constructor(attempts: DraftAttempt[]) {
+  constructor(attempts: DraftAttempt[], usage: DraftUsage[] = []) {
     const last = attempts[attempts.length - 1]
     // FLF-247: câu cho user không mang text op/Zod — lỗi thô ở `errors` / `meta.errors` (lượt retry đưa model đọc
     // `errors`, không đọc message này)
@@ -138,6 +140,21 @@ export class DraftRejectedError extends ApiError {
     this.errors = last?.errors ?? []
     this.lastOps = last?.ops ?? []
     this.attempts = attempts
+    this.usage = usage
+  }
+
+  /** FLF-477: bản rút gọn từng lượt (luật, path, op_index, message ≤ 200 ký tự) để in một dòng log. */
+  summary(): Array<{ attempt: number; ops_count: number; errors: Array<{ rule: string; path?: string; op_index?: number; message: string }> }> {
+    return this.attempts.map((a) => ({
+      attempt: a.attempt,
+      ops_count: a.ops.length,
+      errors: a.errors.map((e) => ({
+        rule: e.rule,
+        ...(e.path !== undefined ? { path: e.path } : {}),
+        ...(e.op_index !== undefined ? { op_index: e.op_index } : {}),
+        message: e.message.slice(0, 200)
+      }))
+    }))
   }
 }
 
@@ -284,5 +301,5 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
     patchBase = isErdOnly(errors) ? ops : null
   }
 
-  throw new DraftRejectedError(attempts)
+  throw new DraftRejectedError(attempts, usage)
 }

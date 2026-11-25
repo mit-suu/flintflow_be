@@ -338,10 +338,12 @@ export const setDocumentLanguage = async (
 /**
  * Đổi ký pháp ERD (§3.1.5). Chỉ ghi field của Project — Spine không đổi. Ký pháp là một phần của hash hình ERD
  * (`renderedDiagramHash`), nên đổi xong ERD đã vẽ thành `diagram_stale`; ở đây vẽ lại ngay (renderer SVG không cần PlantUML)
- * để người dùng thấy hình mới mà không phải bấm "Vẽ lại". Vẽ lại lỗi chỉ ghi log: lựa chọn ký pháp đã lưu, hình stale
- * vẫn được vẽ lại ở lượt render kế tiếp.
+ * để người dùng thấy hình mới mà không phải bấm "Vẽ lại". Vẽ lại đụng `SPINE_VERSION_CONFLICT` (bước pipeline đang ghi
+ * Spine xen giữa) thì tự thử lại tối đa 3 lần (`redrawWithRetry`, FLF-477); lựa chọn ký pháp luôn được lưu dù vẽ lại
+ * thế nào — `erdRedraw` trong kết quả trả về cho FE biết hình đã vẽ lại (`done`), chưa có hình để vẽ (`skipped`), hay
+ * vẫn chưa vẽ được (`pending`) để báo người dùng.
  */
-export const setErdNotation = async (projectId: string, orgId: string, erdNotation: ErdNotation, userId: string): Promise<IProject> => {
+export const setErdNotation = async (projectId: string, orgId: string, erdNotation: ErdNotation, userId: string): Promise<{ project: IProject; erdRedraw: RedrawOutcome }> => {
   const notFound = () => new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   if (!mongoose.isValidObjectId(projectId)) throw notFound()
   const before = await Project.findOne({ _id: projectId, organizationId: orgId }).select("erdNotation").lean()
@@ -350,8 +352,8 @@ export const setErdNotation = async (projectId: string, orgId: string, erdNotati
   await assertProjectUnlocked(projectId)
   const project = await Project.findOneAndUpdate({ _id: projectId, organizationId: orgId }, { erdNotation }, { new: true })
   if (!project) throw notFound()
-  if (erdNotationOf(before) !== erdNotation) await redrawErd(projectId, userId)
-  return project
+  const erdRedraw = erdNotationOf(before) !== erdNotation ? await redrawErd(projectId, userId) : "skipped"
+  return { project, erdRedraw }
 }
 
 /**
@@ -391,36 +393,77 @@ export const setScreenTheme = async (projectId: string, orgId: string, patch: Pa
   return project
 }
 
+/**
+ * Kết quả vẽ lại sau khi đổi field hiển thị (ký pháp ERD, mức Sequence, theme mockup): `done` vẽ lại xong, `skipped`
+ * dự án chưa có hình loại đó (không có gì để vẽ), `pending` vẫn lỗi sau khi đã thử lại — hình cũ còn hiển thị.
+ */
+export type RedrawOutcome = "done" | "skipped" | "pending"
+
+const REDRAW_MAX_ATTEMPTS = 3
+/** Chờ giữa các lượt thử lại (ms) — lượt 1→2 ngắn, lượt 2→3 dài hơn để bước pipeline đang ghi Spine có thời gian xong. */
+const REDRAW_RETRY_DELAYS_MS = [300, 1000]
+
+const isSpineVersionConflict = (err: unknown): boolean => err instanceof ApiError && err.code === spineRepository.SPINE_VERSION_CONFLICT
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Thử vẽ lại tối đa `REDRAW_MAX_ATTEMPTS` lần khi đụng khoá lạc quan của Spine (`SPINE_VERSION_CONFLICT` — bước pipeline
+ * đang ghi Spine xen giữa lúc vẽ). `draw` tự đọc lại Spine mỗi lần gọi (`renderDiagram` đọc lúc bắt đầu vẽ) nên gọi lại là
+ * đủ, không cần tự đọc lại ở đây. Lỗi khác không thử lại — ghi log rồi trả `pending` ngay. Dùng chung cho ERD / Sequence /
+ * Screen layout (FLF-477).
+ */
+const redrawWithRetry = async (label: string, projectId: string, draw: () => Promise<unknown>): Promise<RedrawOutcome> => {
+  for (let attempt = 1; attempt <= REDRAW_MAX_ATTEMPTS; attempt++) {
+    try {
+      await draw()
+      return "done"
+    } catch (err) {
+      const conflict = isSpineVersionConflict(err)
+      if (conflict && attempt < REDRAW_MAX_ATTEMPTS) {
+        await delay(REDRAW_RETRY_DELAYS_MS[attempt - 1] ?? 1000)
+        continue
+      }
+      console.warn(`[project] vẽ lại ${label} lỗi (project ${projectId}, lượt ${attempt}): ${err instanceof Error ? err.message : String(err)}`)
+      return "pending"
+    }
+  }
+  return "pending"
+}
+
 /** Vẽ lại mockup đã có bằng spec đã lưu — không gọi model. Lỗi chỉ ghi log. */
-export const redrawScreenLayouts = async (projectId: string, userId: string): Promise<void> => {
+export const redrawScreenLayouts = async (projectId: string, userId: string): Promise<RedrawOutcome> => {
   try {
     const spine = await spineRepository.get(projectId)
-    if (!spine?.diagrams.some((d) => d.kind === "screen_layout")) return
+    if (!spine?.diagrams.some((d) => d.kind === "screen_layout")) return "skipped"
     const { redrawScreenLayoutsFromSpec } = await import("../diagram/diagram.service.js")
-    await redrawScreenLayoutsFromSpec(projectId, { by: userId, step_id: null })
+    return await redrawWithRetry("mockup màn", projectId, () => redrawScreenLayoutsFromSpec(projectId, { by: userId, step_id: null }))
   } catch (err) {
     console.warn(`[project] vẽ lại mockup màn sau khi đổi theme lỗi (project ${projectId}): ${err instanceof Error ? err.message : String(err)}`)
+    return "pending"
   }
 }
 
-const redrawSequences = async (projectId: string, userId: string): Promise<void> => {
+const redrawSequences = async (projectId: string, userId: string): Promise<RedrawOutcome> => {
   try {
     const spine = await spineRepository.get(projectId)
-    if (!spine?.diagrams.some((d) => d.kind === "sequence")) return
+    if (!spine?.diagrams.some((d) => d.kind === "sequence")) return "skipped"
     const { renderDiagram } = await import("../diagram/diagram.service.js")
-    await renderDiagram(projectId, "sequence", null, { by: userId, step_id: null })
+    return await redrawWithRetry("Sequence Diagram", projectId, () => renderDiagram(projectId, "sequence", null, { by: userId, step_id: null }))
   } catch (err) {
     console.warn(`[project] vẽ lại Sequence Diagram sau khi đổi mức lỗi (project ${projectId}): ${err instanceof Error ? err.message : String(err)}`)
+    return "pending"
   }
 }
 
-const redrawErd = async (projectId: string, userId: string): Promise<void> => {
+const redrawErd = async (projectId: string, userId: string): Promise<RedrawOutcome> => {
   try {
     const spine = await spineRepository.get(projectId)
-    if (!spine?.diagrams.some((d) => d.kind === "erd")) return
+    if (!spine?.diagrams.some((d) => d.kind === "erd")) return "skipped"
     const { renderDiagram } = await import("../diagram/diagram.service.js")
-    await renderDiagram(projectId, "erd", null, { by: userId, step_id: null })
+    return await redrawWithRetry("ERD", projectId, () => renderDiagram(projectId, "erd", null, { by: userId, step_id: null }))
   } catch (err) {
     console.warn(`[project] vẽ lại ERD sau khi đổi ký pháp lỗi (project ${projectId}): ${err instanceof Error ? err.message : String(err)}`)
+    return "pending"
   }
 }

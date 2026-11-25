@@ -117,7 +117,11 @@ export const setDocumentLanguage = catchAsync(async (req: Request, res: Response
   return sendSuccess(res, 200, project)
 })
 
-/** Đổi ký pháp ERD — body đã qua `UpdateErdNotationSchema` (strict) ở route; ERD đã vẽ được vẽ lại ngay bằng ký pháp mới. */
+/**
+ * Đổi ký pháp ERD — body đã qua `UpdateErdNotationSchema` (strict) ở route; ERD đã vẽ được vẽ lại ngay bằng ký pháp mới.
+ * `meta.erdRedraw` (FLF-477, thêm trường — client cũ bỏ qua được): `done` đã vẽ lại, `skipped` chưa có hình ERD,
+ * `pending` vẫn chưa vẽ lại được sau khi thử lại (bước pipeline đang ghi Spine) — FE nên báo người dùng.
+ */
 export const setErdNotation = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
@@ -125,8 +129,8 @@ export const setErdNotation = catchAsync(async (req: Request, res: Response) => 
   }
 
   const { erdNotation } = req.body as UpdateErdNotationDTO
-  const project = await projectService.setErdNotation(req.params.projectId as string, requireOrgId(req), erdNotation, userId)
-  return sendSuccess(res, 200, project)
+  const { project, erdRedraw } = await projectService.setErdNotation(req.params.projectId as string, requireOrgId(req), erdNotation, userId)
+  return sendSuccess(res, 200, project, { erdRedraw })
 })
 
 /** Đổi mức Sequence Diagram (FLF-418) — body đã qua `UpdateSequenceLevelSchema` (strict); sơ đồ đã vẽ được vẽ lại ngay theo mức mới. */
