@@ -626,3 +626,45 @@ export const withOriginalPassages = (spine: Spine, records: readonly SectionSegm
   }
   return out
 }
+
+/**
+ * FLF-480 (P09 #5): CR "bỏ quy tắc BR-03" / "remove UC-09" — nhận dạng tất định câu xoá một phần tử theo mã tài liệu.
+ * Trả mã; không phải lệnh xoá đứng riêng (kèm yêu cầu khác sau "và" / "and") ⇒ `null`, CR đó tìm vị trí như thường.
+ */
+const REMOVE_ELEMENT =
+  /^(?:(?:xo[áà]|bỏ|loại\s+bỏ|gỡ(?:\s+bỏ)?|remove|delete|drop)\s+(?:hẳn\s+)?(?:(?:quy\s+tắc|luật|use\s*case|usecase|chức\s+năng|màn(?:\s+hình)?|yêu\s+cầu|rule|business\s+rule|requirement|function|screen|actor|tác\s+nhân)\s+)?)["“'‘]?([A-Za-z]{1,6}-\d+(?:\.\d+)*)["”'’]?\s*[.!]?\s*$/iu
+
+export const removeElementTarget = (text: string): string | null => {
+  for (const line of text.split(/\n/).map((l) => l.trim()).filter(Boolean)) {
+    const code = REMOVE_ELEMENT.exec(line)?.[1]
+    if (code) return code
+  }
+  return null
+}
+
+/**
+ * Vị trí của CR xoá phần tử theo mã: chính phần tử + phần tử tham chiếu id đó (`business_rule_ids`, `includes`…) + phần tử có
+ * văn xuôi nhắc mã / tên. Không dò BM25 rộng (trước đây 22 phần được dò, chỉ 4 có đề xuất). Không có phần tử mang mã ⇒ [].
+ */
+export const removeElementLocations = (spine: Spine, code: string): FoundLocation[] => {
+  const elements = listElements(spine)
+  const target = elements.find((e) => ELEMENT.exec(e.path)?.[2]?.toLowerCase() === code.toLowerCase())
+  if (!target) return []
+  const value = target.value as Row | undefined
+  const names = [code, typeof value?.name === "string" ? value.name : undefined]
+    .filter((x): x is string => !!x && x.trim().length >= 2)
+    .map(wordPattern)
+  const referrers = new Set(impactOf(spine, [target.path]).referrers.map((r) => elementPathOf(r.path)).filter((x): x is string => !!x))
+  return elements
+    .filter((e) => e.path === target.path || referrers.has(e.path) || names.some((re) => re.test(textOf(e.value))))
+    .map((e) => {
+      const section_id = sectionOfElement(spine, e.path)
+      return {
+        path: e.path,
+        section_id,
+        found_by: [e.path === target.path || referrers.has(e.path) ? ("spine_link" as const) : ("mention" as const)],
+        entity_paths: [target.path],
+        owner_step: section_id === "misc" || section_id.startsWith("custom:") ? null : ownerStepOf(section_id, spine)
+      }
+    })
+}

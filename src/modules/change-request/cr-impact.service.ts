@@ -13,7 +13,7 @@ import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus } from "./change-request.service.js"
 import { ChangeLocation } from "./change-location.model.js"
 import { unlockPaths } from "./lock.service.js"
-import { countMentionLocations, emptySectionTargets, findSpineLocations, mergeFoundLocations, systemRenameLocations, systemRenameTarget, withOriginalDiagrams, withOriginalPassages, type FoundLocation } from "./spine-location.js"
+import { countMentionLocations, emptySectionTargets, findSpineLocations, mergeFoundLocations, removeElementLocations, removeElementTarget, systemRenameLocations, systemRenameTarget, withOriginalDiagrams, withOriginalPassages, type FoundLocation } from "./spine-location.js"
 import { TemplateProfile } from "../import/template-profile.model.js"
 import type { SectionSegments } from "../spine/segment-hash.js"
 import { systemName } from "../spine/system-name.js"
@@ -64,8 +64,14 @@ export const runImpact = async (cr: IChangeRequest): Promise<void> => {
   // P08 (upload U2-7): CR chỉ đổi tên hệ thống ⇒ chỉ phần tử tên hệ thống + nơi nhắc tên, không dò từ khoá / nghĩa
   const renamesSystem = !approved && !cr.amendments?.length && systemRenameTarget(`${cr.title}
 ${cr.description}`) !== null
+  // FLF-480 (P09 #5): CR chỉ xoá một phần tử theo mã (BR-03, UC-09…) ⇒ phần tử + nơi tham chiếu / nhắc mã, không dò BM25 rộng
+  const removedCode = !approved && !renamesSystem && !cr.amendments?.length ? removeElementTarget(`${cr.title}
+${cr.description}`) : null
+  const removal = removedCode ? removeElementLocations(spine, removedCode) : []
   let located: FoundLocation[] = approved
     ? withOriginalDiagrams(spine, cr.targets.entity_paths, approvedBatchLocations(spine, approved))
+    : removal.length
+    ? withOriginalDiagrams(spine, removal.map((r) => r.path), removal)
     : renamesSystem
     ? // sơ đồ ngữ cảnh / use case gốc của file in tên hệ thống (ô trung tâm, khung hệ thống) ⇒ vẽ lại theo tên mới
       withOriginalDiagrams(spine, ["fixed:1", "fixed:2.2.1"], systemRenameLocations(spine, systemName(spine.project)))
