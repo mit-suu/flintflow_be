@@ -25,7 +25,7 @@ export interface LocationDisplay {
 }
 
 /** Mã người đọc thấy trong tài liệu (mã khách đặt). Mã nội bộ FlintFlow (CS11, VER-05, F-3.2.9, A07, M9…) không hiện. */
-const DOC_ID = /^(UC|BR|REQ|NFR|MSG|TC|FR|US|IR|SR)[-_]?[A-Z0-9-]*\d/i
+export const DOC_ID = /^(UC|BR|REQ|NFR|MSG|TC|FR|US|IR|SR)[-_]?[A-Z0-9-]*\d/i
 
 const clip = (s: string, n = 90): string => {
   const t = s.replace(/\s+/g, " ").trim()
