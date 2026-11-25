@@ -17,6 +17,7 @@ import { countMentionLocations, emptySectionTargets, findSpineLocations, mergeFo
 import { TemplateProfile } from "../import/template-profile.model.js"
 import type { SectionSegments } from "../spine/segment-hash.js"
 import { systemName } from "../spine/system-name.js"
+import { crLiteralText, literalValues } from "./literal-values.js"
 import { approvedBatch, approvedBatchLocations } from "./add-use-case.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { loadLayout, titleOfSection } from "../import/gap-report.service.js"
@@ -75,7 +76,10 @@ ${cr.description}`) : null
     : renamesSystem
     ? // sơ đồ ngữ cảnh / use case gốc của file in tên hệ thống (ô trung tâm, khung hệ thống) ⇒ vẽ lại theo tên mới
       withOriginalDiagrams(spine, ["fixed:1", "fixed:2.2.1"], systemRenameLocations(spine, systemName(spine.project)))
-    : findSpineLocations(spine, cr.targets.entity_paths, cr.targets.keywords, await vectorCandidates(String(cr.projectId), crQueryText(cr))).map((f) =>
+    : findSpineLocations(spine, cr.targets.entity_paths, cr.targets.keywords, await vectorCandidates(String(cr.projectId), crQueryText(cr)), {
+        // FLF-483: giá trị cụ thể CR đổi ("5 triệu") phải có ở mọi chỗ đang ghi nó, không phụ thuộc xếp hạng từ khoá / tìm theo nghĩa
+        literals: literalValues(crLiteralText(cr))
+      }).map((f) =>
         seedTargets.has(f.path) && !f.found_by.includes("preview") ? { ...f, found_by: [...f.found_by, "preview" as const] } : f
       )
   // FLF-473 (EduCampus B14): CR làm đổi số phần tử (lô use case đã duyệt, hoặc ops xem trước đính kèm CR) ⇒ câu đếm
