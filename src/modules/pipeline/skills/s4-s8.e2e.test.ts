@@ -163,6 +163,7 @@ import type { AiActionResult } from "../../../shared/ai/ai-action.types.js"
 import { opTransactionSchema, type OpTransaction, type ElicitOutput } from "../../../shared/ai/response-parser.js"
 import { FUNCTION_BATCH_SIZE, runStep, submitAnswer, pendingAnswerFor, type StepRunnerDeps, defaultStepRunnerDeps } from "../step-runner.service.js"
 import { gate } from "../gate.service.js"
+import { acknowledgeCredit } from "../credit-ack.service.js"
 import { runPhase, resumePhaseInterview } from "../phase-runner.service.js"
 import { getRunState, resetMemoryRuns } from "../run-state.service.js"
 import { getSkill } from "../../../shared/ai/prompt-registry.service.js"
@@ -357,6 +358,8 @@ const walkToLastStep = async (deps: Partial<StepRunnerDeps>): Promise<string[]> 
     const result = await gate(PROJECT, next.id, USER, { action: "accept", base_version: beforeGate!.spine_version })
     expect(result.step.status, `${next.id} must be accepted`).toBe("accepted")
     visited.push(next.id)
+    // FLF-466 P08: chốt S-4.1 sinh lần báo credit phần màn; xác nhận mới chạy được vòng S-5
+    if (next.id === "S-4.1") await acknowledgeCredit(PROJECT, USER)
     if (next.id === LAST_STEP) break
   }
   return visited
@@ -622,6 +625,12 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
       const before = await repo.get(PROJECT)
       await gate(PROJECT, stepId, USER, { action: "accept", base_version: before!.spine_version })
     }
+
+    // Chưa xác nhận credit ⇒ server chặn 409; xác nhận xong chạy được (FLF-466 P08)
+    expect((await repo.get(PROJECT))!.progress.credit_ack_required?.scope).toBe("screens_locked")
+    await expect(runStep(PROJECT, "S-5.1@S91", SESSION, USER, collectEvents().emit, deps)).rejects.toMatchObject({ statusCode: 409, code: "CREDIT_ACK_REQUIRED" })
+    await acknowledgeCredit(PROJECT, USER)
+    expect((await repo.get(PROJECT))!.progress.credit_ack_required ?? null).toBeNull()
 
     const { emit } = collectEvents()
     await runStep(PROJECT, "S-5.1@S91", SESSION, USER, emit, deps)

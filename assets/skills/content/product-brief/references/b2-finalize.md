@@ -1,4 +1,4 @@
-# B-2 - chốt Brief trước khi mở S-1
+# B-2 - chốt Brief (S-1 đã chạy trước) trước khi mở S-2
 
 > Tài liệu cho người. **Không nạp lúc chạy** - luật thực thi nằm trong `../SKILL.md`.
 
@@ -44,5 +44,5 @@ phạm vi đã chốt (luật đặt tên và bộ lọc `sanitizeSuggestions` g
 (project cũ, hoặc user tự nêu từ B-0.1) thì không hỏi. Chưa chọn thì tài liệu dùng `project.name` (fallback sẵn có) và
 S-2.5 mở cờ vàng `system_name_missing`.
 
-Gate của B-2.3 là **Approve** của UC 2.5: chấp nhận ở đây mở S-1. Đây là điểm không quay lại rẻ nữa -
+Gate của B-2.3 là **Approve** của UC 2.5: chấp nhận ở đây mở S-2. Đây là điểm không quay lại rẻ nữa -
 sau đó Brief đã thành cấu trúc, sửa phải đi qua change flow.

@@ -760,7 +760,7 @@ const sectionsAtBaseline = (spine: Spine, changes: Pick<Change, "seq" | "path" |
 }
 
 /** Thứ tự phase để biết vòng S-5 đã đi qua chưa (không import step-registry: module này thuần trên Spine). */
-const PHASE_ORDER = ["B-0", "B-1", "B-2", "S-1", "S-2", "S-3", "S-4", "S-5", "S-6", "S-7", "S-8", "S-9"] as const
+const PHASE_ORDER = ["B-0", "B-1", "S-1", "B-2", "S-2", "S-3", "S-4", "S-5", "S-6", "S-7", "S-8", "S-9"] as const
 
 const pastLoopPhase = (spine: Spine): boolean => {
   const index = PHASE_ORDER.indexOf((spine.progress.current_phase ?? "") as (typeof PHASE_ORDER)[number])

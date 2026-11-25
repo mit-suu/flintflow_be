@@ -217,11 +217,38 @@ router.get("/:projectId/run-state/active", authMiddleware, pipelineController.ge
  *         schema:
  *           type: string
  *         description: "Id bước hoặc đơn vị giai đoạn bắt đầu đếm; thiếu ⇒ bước tới lượt"
+ *       - in: query
+ *         name: scope_kind
+ *         schema:
+ *           type: string
+ *           enum: [after_brief, screens_locked, screens_added]
+ *         description: "FLF-466 P08 - lần báo credit; thiếu thì theo progress.credit_ack_required (nếu có), không thì ước tính chạy liền như cũ"
  *     responses:
  *       200:
- *         description: "runEstimateResponseSchema — { scope, from_step, units[], steps_total, ai_steps_total, credits_total, available_credits }"
+ *         description: "runEstimateResponseSchema — { scope, from_step, units[], steps_total, ai_steps_total, credits_total, available_credits, scope_kind, screen_range, ack_required }"
  */
 router.get("/:projectId/run-estimate", authMiddleware, pipelineController.getRunEstimate)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/run-estimate/ack:
+ *   post:
+ *     tags: [Pipeline]
+ *     summary: "FLF-466 P08 - Xác nhận credit đang chờ (sau Approve Brief / chốt danh sách màn / thêm màn)"
+ *     description: "Gỡ chặn 409 CREDIT_ACK_REQUIRED của step thuộc phạm vi. Không đồng ý thì không gọi: tiến độ giữ nguyên."
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: "runEstimateAckResponseSchema - { scope, credits, spine_version }"
+ *       409:
+ *         description: NO_CREDIT_ACK_PENDING (không có thông báo nào đang chờ)
+ */
+router.post("/:projectId/run-estimate/ack", authMiddleware, requireRole("lead", "analyst"), pipelineController.ackRunEstimate)
 
 /**
  * @swagger

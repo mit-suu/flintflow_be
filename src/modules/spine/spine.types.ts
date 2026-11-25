@@ -62,12 +62,29 @@ export interface SpineProject {
   release_scope: ReleaseScope
 }
 
+/** Phạm vi báo credit cần user xác nhận trước khi chạy tiếp (FLF-466 P08, business-flow §2 "Báo trước khi chạy hàng loạt"). */
+export type CreditAckScope = "after_brief" | "screens_locked" | "screens_added"
+
+/** Thông báo credit đang chờ xác nhận — server chặn step thuộc phạm vi tới khi `POST /run-estimate/ack`. */
+export interface CreditAckRequired {
+  scope: CreditAckScope
+  /** Credit đã báo (chính xác phần step cố định / phần màn; `after_brief` không gồm phần ước tính màn). */
+  credits: number
+  created_at: string
+  /** Màn thuộc lần báo (`screens_locked`, `screens_added`). */
+  screens?: string[]
+}
+
 export interface Progress {
   current_phase: string | null
   current_step: string | null
   screen_cursor: string | null
   screen_queue: string[]
   elicit_turns_this_phase: number
+  /** FLF-466 P08: có ⇒ step thuộc phạm vi bị chặn 409 `CREDIT_ACK_REQUIRED` tới khi user xác nhận. Dự án cũ không có field. */
+  credit_ack_required?: CreditAckRequired | null
+  /** FLF-466 P08: màn đã được báo + xác nhận credit; màn mới ngoài danh sách (sau S-4.1) ⇒ báo lại `screens_added`. Thiếu ⇒ dự án cũ, không bắt. */
+  credit_acked_screens?: string[]
 }
 
 /** `skipped` (FLF-182): step không áp dụng cho template của project mode 1 — bị ẩn, không tính tiến độ. */

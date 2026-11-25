@@ -61,6 +61,7 @@ import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 import type { ElicitOutput, OpTransaction, ReviewOutput } from "../../shared/ai/response-parser.js"
 import { byLanguage, detectMessageLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
+import { enforceCreditAck } from "./credit-ack.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { PIPELINE_ERROR_STATUS, gateActionSchema, type ChangeSummary, type PipelineErrorCode, type RunIntent, type StepEvent } from "./pipeline.dto.js"
 import { summarizeChanges } from "./change-summary.js"
@@ -1494,6 +1495,9 @@ export const runStep = async (
     const needsDraft = spec.skill !== null && !stepDef.deterministic && !isLoopBookkeeping(stepId)
 
     let { spine, spineVersion } = await refresh(projectId)
+    // FLF-466 P08: chưa xác nhận credit (sau Approve Brief / chốt màn / thêm màn) ⇒ 409 CREDIT_ACK_REQUIRED, tiến độ giữ nguyên
+    await enforceCreditAck(projectId, spine, stepId, userId)
+    ;({ spine, spineVersion } = await refresh(projectId))
     let existingStep = spine.steps.find((s) => s.id === stepId)
     /** Bước đã từng accepted và đang được mở lại (B7 reopen) — kèm tin chat thì soạn như gate revision, không dựng lại từ đầu. */
     let reopenedAccepted = false
