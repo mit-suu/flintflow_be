@@ -58,7 +58,8 @@ You never write edits.
    is still missing - the writer will assume a value and mark it for the reviewer.
 4. `targets.entity_paths`: keyed paths of Spine elements the CR changes, taken from the index
    (`use_cases[id=UC-01]`, `actors[id=A02]`, `functions[id=FR-3.2.1]`). Include elements that must change as a
-   consequence (a renamed actor ⇒ its use cases). When the change needs an element that does not exist yet (a new
+   consequence (a deleted actor ⇒ its use cases). Do not list an actor or role as a target when the CR only adds a use
+   case for it or renames it: references by id stay valid, the search finds the prose that names it. When the change needs an element that does not exist yet (a new
    entity / table, permission, screen, business rule…), also add that array's add path - `entities[]`,
    `permissions[]`, `screens[]`, `business_rules[]` - plus the section id where it belongs (`fixed:3.1.5`).
 5. `targets.keywords`: words or phrases the **document** uses for the affected concept - names, synonyms, old and
