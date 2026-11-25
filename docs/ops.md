@@ -309,6 +309,11 @@ npm run migrate:spine-embeddings
 - Index tự cập nhật **chạy nền** sau finalize import (baseline 0.0) và sau khi C-7 ghi CR có op
   (`embedding-sync.service.ts`): chỉ embed phần tử đổi `text_hash`, xoá dòng của phần tử đã xoá. Lỗi chỉ ghi log
   `[embedding] …`, không chặn luồng; mỗi project một lượt đang chạy, gọi dồn ⇒ chạy lại một lần.
+- Kiểm C-3 đang tìm theo nghĩa chưa (FLF-483): khởi động server rồi tạo một CR có bước "Phần liên quan". Thấy log
+  `[C-3] EMBEDDING_PROVIDER=off - không tìm theo nghĩa` (một lần) hoặc `[C-3] Mongo không có $vectorSearch` ⇒ C-3 chỉ tìm
+  theo liên kết, mã / tên và từ khoá (giá trị cụ thể như "5 triệu" vẫn tìm ra, nhưng không có chỗ chỉ gần nghĩa). Không có dòng
+  nào trong hai dòng này ⇒ đang tìm theo nghĩa. Máy E2E / staging nên đặt `EMBEDDING_PROVIDER=gemini` (kèm `GEMINI_API_KEY`) và
+  chạy `npm run migrate:spine-embeddings`; dev cá nhân giữ `off`.
 - Chỉ số liên quan: log `[C-3] Mongo không có $vectorSearch` (không phải Atlas, nhớ cho cả process), `[C-3] tìm vị trí theo
   vector lỗi …` (rơi về từ khoá lượt đó).
 - Embedding **không trừ credit** (chi phí một lượt embed vài trăm phần tử ≈ vài nghìn token đầu vào) — chờ nhóm chốt
