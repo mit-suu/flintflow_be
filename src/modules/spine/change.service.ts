@@ -106,7 +106,6 @@ import { DEFAULT_REPLY_LANGUAGE, byLanguage, type ReplyLanguage } from "../../sh
 import { isWithdrawal } from "../../shared/i18n/withdrawal.js"
 import { foldDiacritics } from "../../shared/search/bm25.js"
 import { continuationOwnerSection, customSectionKey } from "../import/step-plan.js"
-import { templateHeadingsOf } from "../import/mode1-guard.js"
 import { TemplateProfile, type LayoutEntry } from "../import/template-profile.model.js"
 
 export const NEEDS_CLARIFICATION = "NEEDS_CLARIFICATION"
@@ -567,12 +566,29 @@ export const continuationSectionsByText = (spine: Spine, instruction: string): S
  * theo layout import. Số mục của file khách theo `TemplateProfile.layout` (`number_label`), không trùng số mẫu FPT
  * nên `referencedSections` (dò theo "§" + số mẫu FPT) không khớp được.
  */
+/**
+ * Bản sao thuần của `mode1-guard.ts#templateHeadingsOf` — KHÔNG import trực tiếp từ `mode1-guard.ts` ở đây: file đó có
+ * side effect nạp module (`flagsService.setRuleProfileResolver(ruleProfileOf)`, gọi Mongo không điều kiện) — import tĩnh
+ * sẽ kéo side effect đó vào mọi nơi `change.service.ts` được nạp (kể cả transitively qua `reconcile.service.ts` từ
+ * `s9/completeness-sweep.ts`), làm unit test không nối Mongo bị "buffering timed out". Theo `templateHeadingsOf`.
+ */
+const templateHeadingsOfLayout = (layout: readonly Pick<LayoutEntry, "section_id" | "heading_text" | "number_label">[]): Map<string, string> => {
+  const map = new Map<string, string>()
+  for (const l of layout) {
+    const text = l.heading_text.trim()
+    if (!l.section_id.startsWith("fixed:") || !text || map.has(l.section_id)) continue
+    const number = l.number_label?.trim()
+    map.set(l.section_id, number && !/^\d/.test(text) ? `${number} ${text}` : text)
+  }
+  return map
+}
+
 export const sectionIdByLayoutMention = (layout: readonly LayoutEntry[], haystack: string): string | null => {
   for (const l of layout) {
     const number = l.number_label?.trim()
     if (number && new RegExp(`(?:^|[^\\d.])${escapeRe(number)}(?![.\\d])`).test(haystack)) return l.section_id
   }
-  for (const [sectionId, heading] of templateHeadingsOf(layout)) {
+  for (const [sectionId, heading] of templateHeadingsOfLayout(layout)) {
     const h = heading.trim()
     if (h.length >= MIN_NAME_MATCH && haystack.includes(h.toLowerCase())) return sectionId
   }
