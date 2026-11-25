@@ -30,6 +30,14 @@ const client = (seeded: SeededFixture) => {
   }
 }
 
+/**
+ * Các ca dưới kiểm đường xem trước rồi xác nhận (`preview_id`) ⇒ dùng mức duyệt Mọi bước: mức khác tự ghi ngay sau xem trước
+ * (ca riêng ở cuối file).
+ */
+const strict = (spine: Record<string, unknown>) => {
+  ;(spine.project as Record<string, unknown>).review_mode = "strict"
+}
+
 const renameA01 = { op: "set", path: "actors[id=A01].name", value: "Product Owner", reason: "user rename" }
 
 beforeEach(() => {
@@ -38,7 +46,7 @@ beforeEach(() => {
 
 describe("sửa bằng instruction", () => {
   it("preview gọi model một lần, trả ops + preview_id; apply với preview_id không gọi lại model và ghi đúng op", async () => {
-    const seeded = await seedFixture("full")
+    const seeded = await seedFixture("full", { mutate: strict })
     const api = client(seeded)
     mockOverrides.next = () => JSON.stringify({ ops: [renameA01] })
     const instruction = "Rename actor A01 to Product Owner"
@@ -64,7 +72,7 @@ describe("sửa bằng instruction", () => {
   })
 
   it("instruction mơ hồ ⇒ preview ok=false kèm clarification; apply ⇒ 409 NEEDS_CLARIFICATION, Spine không đổi", async () => {
-    const seeded = await seedFixture("full")
+    const seeded = await seedFixture("full", { mutate: strict })
     const api = client(seeded)
     mockOverrides.next = () => JSON.stringify({ clarification_needed: "Which actor do you mean?" })
 
@@ -82,7 +90,7 @@ describe("sửa bằng instruction", () => {
   })
 
   it("body có cả ops lẫn instruction ⇒ 400 VALIDATION_ERROR", async () => {
-    const seeded = await seedFixture("full")
+    const seeded = await seedFixture("full", { mutate: strict })
     const res = await client(seeded).post("/changes", { base_version: seeded.spineVersion, ops: [renameA01], instruction: "x" })
     expect(res.status).toBe(400)
     expect(res.body.error.code).toBe("VALIDATION_ERROR")
@@ -91,7 +99,7 @@ describe("sửa bằng instruction", () => {
 
 describe("nhánh và baseline", () => {
   it("đổi field có nơi tham chiếu ⇒ nhánh dependent kèm impact (section, sơ đồ, referrer)", async () => {
-    const seeded = await seedFixture("full")
+    const seeded = await seedFixture("full", { mutate: strict })
     const preview = await client(seeded).post("/changes/preview", { base_version: seeded.spineVersion, ops: [renameA01] })
     const planned = changesPreviewResponseSchema.parse(preview.body.data)
     expect(planned.branch).toBe("dependent")
@@ -101,7 +109,7 @@ describe("nhánh và baseline", () => {
   })
 
   it("sau baseline: dự án sang mode 1 (FLF-318) ⇒ mọi lượt sửa thẳng bị từ chối kèm nội dung điền sẵn cho CR; không hoàn tác", async () => {
-    const seeded = await seedFixture("full")
+    const seeded = await seedFixture("full", { mutate: strict })
     const api = client(seeded)
     const baseline = await api.post("/baseline", { base_version: seeded.spineVersion })
     expect(baseline.status, JSON.stringify(baseline.body.error)).toBe(201)
@@ -122,7 +130,7 @@ describe("nhánh và baseline", () => {
   })
 
   it("không có section stale ⇒ reconcile trả preview silent rỗng, không ghi gì", async () => {
-    const seeded = await seedFixture("full")
+    const seeded = await seedFixture("full", { mutate: strict })
     const api = client(seeded)
     const res = await api.post("/reconcile", { base_version: seeded.spineVersion })
     expect(res.status).toBe(200)
@@ -136,7 +144,7 @@ describe("nhánh và baseline", () => {
 
 describe("GET /traceability", () => {
   it("actor A01 ⇒ đồ thị nối tới use case và màn hình; entity lạ ⇒ 400 VALIDATION_ERROR", async () => {
-    const seeded = await seedFixture("full")
+    const seeded = await seedFixture("full", { mutate: strict })
     const api = client(seeded)
 
     const res = await api.get("/traceability?entity=actor&id=A01")
@@ -154,6 +162,7 @@ describe("GET /traceability", () => {
 
 /** Fixture có `last_seq` lớn hơn seq của change mới trong DB test ⇒ bỏ đi để section stale được tính như dự án thật. */
 const freshSteps = (spine: Record<string, unknown>) => {
+  strict(spine)
   for (const step of spine.steps as Array<Record<string, unknown>>) {
     step.first_seq = null
     step.last_seq = null
@@ -202,7 +211,7 @@ describe("FLF-311 - thêm use case kéo theo chức năng, màn, luồng, phân 
   }
 
   it("một bản xem trước, áp một lần ⇒ UC + chức năng đủ chi tiết + màn trong screen flow + phân quyền, bất biến giữ", async () => {
-    const seeded = await seedFixture("full")
+    const seeded = await seedFixture("full", { mutate: strict })
     const api = client(seeded)
 
     const applied = await addUseCase(api)
@@ -220,7 +229,7 @@ describe("FLF-311 - thêm use case kéo theo chức năng, màn, luồng, phân 
   })
 
   it("sau baseline (FLF-318): lệnh thêm use case không áp thẳng - từ chối kèm nội dung điền sẵn cho CR (CR soạn lại đủ phần)", async () => {
-    const seeded = await seedFixture("full")
+    const seeded = await seedFixture("full", { mutate: strict })
     const api = client(seeded)
     expect((await api.post("/baseline", { base_version: seeded.spineVersion })).status).toBe(201)
 
@@ -320,7 +329,7 @@ describe("FLF-311 - thêm use case kéo theo chức năng, màn, luồng, phân 
 
 describe("hai người sửa cùng lúc trước baseline (BF §3.2)", () => {
   it("bản xem trước chưa áp của A ⇒ B thấy 'A có bản sửa chưa xác nhận' ở mục bị sửa; A không thấy của chính mình; A huỷ ⇒ hết", async () => {
-    const seeded = await seedFixture("full")
+    const seeded = await seedFixture("full", { mutate: strict })
     const a = client(seeded)
     const preview = await a.post("/changes/preview", { base_version: seeded.spineVersion, ops: [renameA01] })
     const planned = changesPreviewResponseSchema.parse(preview.body.data)
@@ -345,5 +354,53 @@ describe("hai người sửa cùng lúc trước baseline (BF §3.2)", () => {
     const discarded = await request(app).delete(`/api/v1/projects/${seeded.projectId}/changes/preview/${planned.preview_id}`).set({ Authorization: `Bearer ${seeded.token}` })
     expect(discarded.body.data).toEqual({ discarded: true })
     expect((await b.get("/changes/pending-sections")).body.data).toEqual([])
+  })
+})
+
+describe("sửa qua chat theo mức duyệt (HTTP)", () => {
+  const instruction = "Rename actor A01 to Product Owner"
+
+  it("mức Cuối giai đoạn (mặc định): xem trước tự ghi luôn, không còn preview_id, hoàn tác được bằng /undo", async () => {
+    const seeded = await seedFixture("full")
+    const api = client(seeded)
+    mockOverrides.next = () => JSON.stringify({ ops: [renameA01] })
+
+    const res = await api.post("/changes/preview", { base_version: seeded.spineVersion, instruction })
+    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+    expect(res.body.data).toMatchObject({ ok: true, auto_applied: true })
+    expect(res.body.data.preview_id).toBeUndefined()
+    expect(res.body.data.applied_version).toBe(await api.version())
+    expect(res.body.data.auto_apply_ok).toBeUndefined()
+    const spine = (await api.get("/spine")).body.data
+    expect(spine.actors.find((a: { id: string }) => a.id === "A01").name).toBe("Product Owner")
+
+    const undo = await api.post("/undo", { base_version: await api.version() })
+    expect(undo.status, JSON.stringify(undo.body.error)).toBe(200)
+    expect((await api.get("/spine")).body.data.actors.find((a: { id: string }) => a.id === "A01").name).not.toBe("Product Owner")
+  })
+
+  it("mức Mọi bước: vẫn thẻ xác nhận kèm lý do; lô op sẵn của giao diện không bao giờ tự ghi", async () => {
+    const strictSeed = await seedFixture("full", { mutate: strict })
+    mockOverrides.next = () => JSON.stringify({ ops: [renameA01] })
+    const res = await client(strictSeed).post("/changes/preview", { base_version: strictSeed.spineVersion, instruction })
+    expect(res.body.data.auto_applied).toBeUndefined()
+    expect(res.body.data.preview_id).toBeDefined()
+    expect(res.body.data.confirm_reason).toContain("Mọi bước")
+
+    const balanced = await seedFixture("full")
+    const byOps = await client(balanced).post("/changes/preview", { base_version: balanced.spineVersion, ops: [renameA01] })
+    expect(byOps.body.data.auto_applied).toBeUndefined()
+    expect(byOps.body.data.preview_id).toBeDefined()
+  })
+
+  it("cổng cứng: bản sửa mở cờ đỏ dự báo ⇒ chờ xác nhận dù mức duyệt cho tự ghi", async () => {
+    const seeded = await seedFixture("full")
+    const api = client(seeded)
+    mockOverrides.next = () => JSON.stringify({ ops: [{ op: "set", path: "nfrs[id=N07].statement", value: "Chat replies appear fast." }] })
+    const res = await api.post("/changes/preview", { base_version: seeded.spineVersion, instruction: "Make the chat latency requirement fast" })
+    expect(res.body.data.auto_applied).toBeUndefined()
+    expect(res.body.data.predicted_red_flags).toMatchObject([{ rule_id: "vague_wording", target_id: "N07" }])
+    expect(res.body.data.confirm_reason).toContain("cờ đỏ")
+    expect((await api.get("/spine")).body.data.nfrs.find((n: { id: string }) => n.id === "N07").statement).not.toContain("fast")
   })
 })

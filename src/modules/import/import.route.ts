@@ -111,6 +111,25 @@ router.get("/:id/import", authMiddleware, importController.getImport)
 
 /**
  * @swagger
+ * /api/v1/projects/{id}/import/source:
+ *   get:
+ *     summary: Chữ gốc của file import theo mục (màn đọc file), tải một lần
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *       - { in: header, name: If-None-Match, schema: { type: string }, description: "ETag của lần tải trước" }
+ *     responses:
+ *       200: { description: "`{ import_id, sections: [{ section_id, title, level, blocks: [{ block_id, kind, text }] }] }` theo thứ tự trong file; bảng = các hàng `| ô | ô |`; ảnh = text rỗng. Header `ETag`." }
+ *       304: { description: Chưa đổi so với ETag gửi lên }
+ *       404: { description: IMPORT_NOT_FOUND (project chưa upload) }
+ *       409: { description: PROJECT_MODE_MISMATCH }
+ */
+router.get("/:id/import/source", authMiddleware, importController.getImportSource)
+
+/**
+ * @swagger
  * /api/v1/projects/{id}/import/google-docs:
  *   post:
  *     summary: Như POST /import nhưng file lấy từ Google Drive (Google Doc ⇒ .docx, hoặc .docx có sẵn) — cần đã kết nối Google
@@ -257,7 +276,7 @@ router.post("/:id/reupload", authMiddleware, importController.receiveDocx, impor
  *         application/json:
  *           schema: { type: object, required: [import_id], properties: { import_id: { type: string }, confirm_latest: { type: boolean } } }
  *     responses:
- *       200: { description: "`{ import, sections: [{ section_id, status, fields_total, fields_needing_review, error }] }` — trả ngay, import ở extracting" }
+ *       200: { description: "`{ import, sections: [{ section_id, status, fields_total, fields_needing_review, error, reading, found }] }` — trả ngay, import ở extracting" }
  *       409: { description: "IMPORT_INVALID_STATE, IMPORT_NEEDS_LATEST_CONFIRM" }
  */
 router.post("/:id/import/extract", authMiddleware, importController.extract)
@@ -383,11 +402,12 @@ router.post("/:id/import/continue", authMiddleware, importController.continueFlo
 
 // FLF-278 trên FLF-335/336 — mẫu / thư viện nội dung của tổ chức, đi qua dự án (contract §FLF-278)
 router.post("/:id/import/from-org", authMiddleware, orgLibrary.importFromOrg)
-router.post("/:id/import/save-to-org", authMiddleware, orgLibrary.saveToOrg)
-// FLF-395 (D13): duyệt mục BA tự đặt trước khi vào mẫu khung tự lưu của tổ chức
-router.get("/:id/template-skeleton", authMiddleware, orgLibrary.getSkeletonPending)
-router.post("/:id/template-skeleton/decisions", authMiddleware, orgLibrary.decideSkeletonPending)
-router.post("/:id/template-skeleton/suggest", authMiddleware, orgLibrary.suggestSkeletonNames)
+// UC-85: đề xuất lưu cấu trúc dự án thành mẫu tổ chức (thẻ của tác giả baseline; Lead lưu bất cứ lúc nào)
+router.get("/:id/template-proposal", authMiddleware, orgLibrary.getTemplateProposal)
+router.post("/:id/template-proposal", authMiddleware, orgLibrary.createTemplateProposal)
+router.post("/:id/template-proposal/send", authMiddleware, orgLibrary.sendTemplateProposal)
+router.post("/:id/template-proposal/save", authMiddleware, orgLibrary.saveTemplateProposal)
+router.post("/:id/template-proposal/decline", authMiddleware, orgLibrary.declineTemplateProposal)
 
 /**
  * @swagger

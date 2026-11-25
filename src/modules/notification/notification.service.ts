@@ -2,6 +2,8 @@ import mongoose from "mongoose"
 import { Notification, INotification, NotificationType } from "./notification.model.js"
 import { User } from "../user/user.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { env } from "../../config/env.js"
+import { sendApprovalEmail } from "../../shared/email/email.service.js"
 
 export interface NotificationPayload {
   type: NotificationType
@@ -35,14 +37,52 @@ export const scopeToOrg = (userId: string, organizationId?: string | null): Reco
     : { organizationId: null })
 })
 
+/** UC-89: thông báo việc duyệt (gửi / quyết định baseline và gói thay đổi) được gửi kèm email. */
+export const APPROVAL_EMAIL_TYPES: ReadonlySet<string> = new Set([
+  "baseline_submitted",
+  "baseline_approved",
+  "baseline_rejected",
+  "review_package_submitted",
+  "review_package_changes_requested",
+  "review_package_released"
+])
+
+/** Link trong thông báo là đường dẫn tương đối của FE ⇒ ghép với APP_URL thành link mở được từ email. */
+const absoluteLink = (link?: string): string => {
+  const base = env.APP_URL.replace(/\/+$/, "")
+  if (!link) return base
+  if (/^https?:\/\//i.test(link)) return link
+  return `${base}${link.startsWith("/") ? "" : "/"}${link}`
+}
+
+/**
+ * Gửi email việc duyệt nếu người nhận chưa tắt (`approvalEmails !== false`: tài khoản cũ chưa có field coi như bật).
+ * Lỗi chỉ log, không làm hỏng thông báo trong app.
+ */
+const emailApproval = async (userId: string, payload: NotificationPayload): Promise<void> => {
+  try {
+    const user = await User.findById(userId).select("email name approvalEmails isActive").lean()
+    if (!user?.email || user.approvalEmails === false || user.isActive === false) return
+    await sendApprovalEmail(user.email, {
+      ...(user.name ? { name: user.name } : {}),
+      title: payload.title,
+      body: payload.body,
+      url: absoluteLink(payload.link)
+    })
+  } catch (error) {
+    console.error(`[Notification] approval email failed for user ${userId} (${payload.type}):`, error)
+  }
+}
+
 /**
  * Notification là side effect: lỗi ghi không được làm hỏng luồng chính
- * (thanh toán, trừ credit). Lỗi được log và trả về null.
+ * (thanh toán, trừ credit). Lỗi được log và trả về null. Thông báo việc duyệt kèm email (không chờ gửi).
  */
 export const notify = async (
   userId: string,
   payload: NotificationPayload
 ): Promise<INotification | null> => {
+  if (APPROVAL_EMAIL_TYPES.has(payload.type)) void emailApproval(userId, payload)
   try {
     return await Notification.create({
       userId: new mongoose.Types.ObjectId(userId),

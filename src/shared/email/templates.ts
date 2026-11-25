@@ -159,3 +159,44 @@ export const getInvitationEmailText = ({
     "",
     "Nếu bạn không định tham gia tổ chức này, hãy bỏ qua email này."
   ].join("\n")
+
+export interface ApprovalEmailParams {
+  name?: string
+  /** Cùng tiêu đề và nội dung với thông báo trong app (UC-89). */
+  title: string
+  body: string
+  /** Link tuyệt đối mở thẳng phần cần duyệt. */
+  url: string
+}
+
+const APPROVAL_FOOTER = "Bạn nhận email này vì đang bật Email việc duyệt. Có thể tắt trong Hồ sơ cá nhân trên FlintFlow."
+
+/** Email việc duyệt (UC-89). Cùng lối email mời: chữ là chính, link dạng chữ, có bản text thuần đi kèm. */
+export const getApprovalEmailHtml = ({ name, title, body, url }: ApprovalEmailParams): string => {
+  const greeting = name ? `Xin chào ${escapeHtml(name)},` : "Xin chào,"
+  const bodyLine = body ? `<p style="margin:0 0 16px;">${escapeHtml(body)}</p>` : ""
+  return `<!DOCTYPE html>
+<html lang="vi">
+<head><meta charset="utf-8" /><title>${escapeHtml(title)}</title></head>
+<body style="margin:0;padding:0;background:${BRAND_SOFT};font-family:${FONT};color:${TEXT};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${BRAND_SOFT};padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#FFFFFF;border:1px solid ${BORDER};border-radius:12px;padding:32px;">
+        <tr><td style="font-size:14px;line-height:22px;">
+          <p style="margin:0 0 16px;">${greeting}</p>
+          <p style="margin:0 0 8px;"><strong>${escapeHtml(title)}</strong></p>
+          ${bodyLine}
+          <p style="margin:0 0 16px;">Mở trên FlintFlow: <a href="${escapeHtml(url)}" style="color:${BRAND};">${escapeHtml(url)}</a></p>
+          <p style="margin:0;color:${MUTED};">${APPROVAL_FOOTER}</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`
+}
+
+export const getApprovalEmailText = ({ name, title, body, url }: ApprovalEmailParams): string =>
+  [name ? `Xin chào ${name},` : "Xin chào,", "", title, ...(body ? [body] : []), "", `Mở trên FlintFlow: ${url}`, "", APPROVAL_FOOTER].join(
+    "\n"
+  )

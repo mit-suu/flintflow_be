@@ -435,8 +435,10 @@ export interface OrgTemplateSummary {
   pending_count: number
   /** Mẫu khung tự lưu từ một dự án (D12). */
   skeleton: boolean
-  /** Dự án nguồn của mẫu khung tự lưu (mở màn duyệt heading chờ từ thư viện); mẫu thường ⇒ `null`. */
+  /** Dự án nguồn của mẫu lưu từ dự án (UC-85 / UC-88); mẫu thường ⇒ `null`. */
   skeleton_source_project_id: string | null
+  /** Tên dự án nguồn - FE hiện "Lưu từ dự án <tên>"; dự án đã xoá ⇒ `null`. */
+  skeleton_source_project_name: string | null
   /** Mới nhất trước. Bản nháp chỉ trả cho Lead. */
   versions: TemplateVersionSummary[]
 }
@@ -496,6 +498,10 @@ const summarizeFamilies = async (orgId: string, role: OrgRole, families: IOrgTem
     ])
   ])
   const names = await publisherNames(orgId, [...versions.map((v) => v.created_by), ...families.filter(isLegacy).map((f) => f.created_by)])
+  const sourceIds = families.flatMap((f) => (f.skeleton_of ? [f.skeleton_of] : []))
+  const sourceNames = new Map(
+    sourceIds.length ? (await Project.find({ _id: { $in: sourceIds } }).select("name").lean()).map((p) => [String(p._id), p.name] as const) : []
+  )
   const countOf = (t: unknown, v: number) => counts.find((c) => String(c._id.t) === String(t) && c._id.v === v)?.n ?? 0
   return families.flatMap((f) => {
     const own = versions.filter((v) => String(v.template_id) === String(f._id))
@@ -521,6 +527,7 @@ const summarizeFamilies = async (orgId: string, role: OrgRole, families: IOrgTem
         pending_count: summaries[0]?.pending_count ?? 0,
         skeleton: !!f.skeleton_of,
         skeleton_source_project_id: f.skeleton_of ? String(f.skeleton_of) : null,
+        skeleton_source_project_name: f.skeleton_of ? (sourceNames.get(String(f.skeleton_of)) ?? null) : null,
         versions: summaries
       }
     ]

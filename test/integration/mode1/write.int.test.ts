@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
 
 import { ChangeLocation } from "../../../src/modules/change-request/change-location.model.js"
-import { PERF_TARGETS, crToImpact, crToReady, crToReview, detail, gridFsFiles, importedProject, lockedPaths, resetCrMock, type Mode1Client } from "../../helpers/mode1-cr-p4.js"
+import { PERF_TARGETS, crToImpact, crToReady, crToReview, detail, gridFsFiles, importedProject, lockedPaths, resetCrMock, secondAnalyst, type Mode1Client } from "../../helpers/mode1-cr-p4.js"
 import { fakeCrClarify, fakeCrPropose, promptLocations } from "../../helpers/mode1.js"
 import { DocxPackage, acceptAll, readBlocks, readStamp } from "../../../src/modules/docx-ooxml/index.js"
 import { wAll, wAttr } from "../../../src/modules/docx-ooxml/xml.js"
@@ -173,13 +173,15 @@ describe("C-7 ghi Spine + render version mới", () => {
   })
 
   it("0.2 → 0.3: CR ghi sau render từ Spine đã có thay đổi của CR trước; CR đang mở không bị ảnh hưởng khi CR khác ghi", async () => {
-    const { c, projectId } = await importedProject()
+    const { c, projectId, seeded } = await importedProject()
+    // Mỗi người một CR mở một lúc ⇒ CR-002 do Analyst khác tạo
+    const other = await secondAnalyst(seeded, projectId)
     // CR-001 (UC-01/FR-3.2.2) đang mở; CR-002 (perf) ghi trước ⇒ 0.2, rồi CR-001 ghi ⇒ 0.3 (FLF-375: không khoá)
     const ucCr = await crToImpact(c, "Rename registration", "Rename UC-01 and adjust the login function.")
     const ucPaths = (await ChangeLocation.find({ projectId, cr_id: ucCr.crId }).distinct("path")) as string[]
     expect(ucPaths).toEqual(expect.arrayContaining(["functions[id=FR-3.2.2]", "use_cases[id=UC-01]"]))
-    const perfCr = await crToReview(c)
-    await approveAll(c, perfCr.cr, perfCr.submitted.groups)
+    const perfCr = await crToReview(other)
+    await approveAll(other, perfCr.cr, perfCr.submitted.groups)
     expect(((await ChangeLocation.find({ projectId, cr_id: ucCr.crId }).distinct("path")) as string[]).sort()).toEqual([...ucPaths].sort())
 
     detail(await c.post(`${ucCr.cr}/propose`))

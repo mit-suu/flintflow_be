@@ -15,8 +15,6 @@ import type { TemplateActor } from "./org-template-versions.service.js"
 import {
   importFromOrgSchema,
   publishVersionSchema,
-  skeletonDecisionsSchema,
-  saveToOrgSchema,
   templatesQuerySchema,
   uploadTemplateSchema,
   versionParamSchema
@@ -46,26 +44,40 @@ export const importFromOrg = mode1Handler(async (req, res) => {
   const doc = await service.importFromOrg(auth.projectId, requireOrgId(req), auth.userId, body)
   return sendSuccess(res, 201, { import: toImportDto(doc) })
 })
-export const saveToOrg = mode1Handler(async (req, res) => {
+/** UC-85: thẻ đề xuất lưu cấu trúc dự án thành mẫu - chỉ tác giả baseline thấy; `null` khi không có. */
+export const getTemplateProposal = catchAsync(async (req: Request, res: Response) => {
   const p = await projectOf(req)
-  const body = parseInput(saveToOrgSchema, req.body)
-  return sendSuccess(res, 201, await service.saveImportToOrg(p.projectId, p.orgId, actorOf(req), body))
+  return sendSuccess(res, 200, await skeleton.getProposalForAuthor(p.projectId, p.userId))
+})
+/** UC-85: Lead lưu cấu trúc dự án làm mẫu bất cứ lúc nào - dựng đề xuất từ bản mới nhất. */
+export const createTemplateProposal = catchAsync(async (req: Request, res: Response) => {
+  const p = await projectOf(req)
+  return sendSuccess(res, 201, await skeleton.createProposalNow(p.projectId, p.userId, req.orgContext!.role))
+})
+export const sendTemplateProposal = catchAsync(async (req: Request, res: Response) => {
+  const p = await projectOf(req)
+  return sendSuccess(res, 200, await skeleton.sendProposal(p.projectId, p.orgId, p.userId, req.orgContext!.role))
+})
+export const saveTemplateProposal = catchAsync(async (req: Request, res: Response) => {
+  const p = await projectOf(req)
+  return sendSuccess(res, 200, await skeleton.saveProposal(p.projectId, p.userId, req.orgContext!.role))
+})
+export const declineTemplateProposal = catchAsync(async (req: Request, res: Response) => {
+  const p = await projectOf(req)
+  return sendSuccess(res, 200, await skeleton.declineProposal(p.projectId, p.userId))
 })
 
-/** FLF-395 (D13): mục BA tự đặt của mẫu khung tự lưu — `null` khi dự án không có khung tự lưu. */
-export const getSkeletonPending = catchAsync(async (req: Request, res: Response) => {
-  const p = await projectOf(req)
-  return sendSuccess(res, 200, await skeleton.getPendingHeadings(p.projectId, p.orgId))
-})
-export const decideSkeletonPending = mode1Handler(async (req, res) => {
-  const p = await projectOf(req)
-  const body = parseInput(skeletonDecisionsSchema, req.body)
-  return sendSuccess(res, 200, await skeleton.decidePendingHeadings(p.projectId, p.orgId, req.orgContext!.role, body.decisions))
-})
-export const suggestSkeletonNames = mode1Handler(async (req, res) => {
-  const p = await projectOf(req)
-  return sendSuccess(res, 200, await skeleton.suggestGenericNames(p.projectId, p.orgId, p.userId, req.orgContext!.role))
-})
+/** UC-88: Lead duyệt đề xuất Analyst gửi (route tổ chức, `requireRole("lead")`). */
+export const listTemplateProposals = catchAsync(async (req: Request, res: Response) => sendSuccess(res, 200, await skeleton.listSentProposals(orgOf(req))))
+export const getOrgTemplateProposal = catchAsync(async (req: Request, res: Response) =>
+  sendSuccess(res, 200, await skeleton.getProposal(orgOf(req), String(req.params.proposalId)))
+)
+export const approveTemplateProposal = catchAsync(async (req: Request, res: Response) =>
+  sendSuccess(res, 200, await skeleton.approveProposal(orgOf(req), String(req.params.proposalId), actorOf(req)))
+)
+export const rejectTemplateProposal = catchAsync(async (req: Request, res: Response) =>
+  sendSuccess(res, 200, await skeleton.rejectProposal(orgOf(req), String(req.params.proposalId), req.user!.userId))
+)
 
 /** Có `page` ⇒ một trang + `meta` (trang Thư viện); không có ⇒ danh sách cũ cho ô chọn mẫu lúc tạo dự án. */
 export const listOrgTemplates = catchAsync(async (req: Request, res: Response) => {

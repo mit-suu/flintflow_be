@@ -30,6 +30,8 @@ export interface MeDTO extends UserDTO {
   creditOrganization: { id: string; name: string } | null
   /** UC-10 / FLF-427: tổ chức mặc định được ghi nhớ; `null` khi chưa ghi nhớ. */
   preferredOrganizationId: string | null
+  /** UC-89: nhận email việc duyệt; mặc định bật. */
+  approvalEmails: boolean
 }
 
 export interface UpdateMeInput {
@@ -37,6 +39,7 @@ export interface UpdateMeInput {
   onboardedAt?: Date | null
   locale?: UserLocale
   preferredOrganizationId?: string | null
+  approvalEmails?: boolean
 }
 
 export const getUserById = async (id: string): Promise<UserDTO> => {
@@ -90,6 +93,7 @@ export const getMe = async (id: string, activeOrgId?: string | null): Promise<Me
     hasPassword: Boolean(user.passwordHash),
     locale: toUserLocale(user.locale),
     preferredOrganizationId: user.preferredOrganizationId ? String(user.preferredOrganizationId) : null,
+    approvalEmails: user.approvalEmails !== false,
     ...credit
   }
 }

@@ -35,9 +35,9 @@ describe("class-layout - hộp class và đầu mút UML", () => {
     expect(attributeText({ name: "x".repeat(200), kind: "plain", required: true })).toMatch(/\.\.\.$/)
   })
 
-  it("hộp hai ngăn: tên đậm giữa, đường chia, thuộc tính căn trái; chỉ tên ⇒ không đường chia", () => {
+  it("hộp hai ngăn: tên chữ thường ở giữa (như Visual Paradigm), đường chia, thuộc tính căn trái; chỉ tên ⇒ không đường chia", () => {
     const s = scene({ nodes: [node("A", "Order", [{ name: "code", kind: "key", required: true }]), node("B", "Empty")], relations: [] })
-    expect(el(s, "A#name-0")).toMatchObject({ type: "text", bold: true, anchor: "middle" })
+    expect(el(s, "A#name-0")).toMatchObject({ type: "text", bold: false, anchor: "middle" })
     expect(el(s, "A#attr-0")).toMatchObject({ type: "text", text: "code {id}", anchor: "start", bold: false })
     expect(el(s, "A#rule-0")).toMatchObject({ role: "decoration" })
     expect(s.find("B#rule-0")).toBeUndefined()

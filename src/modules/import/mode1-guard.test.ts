@@ -16,6 +16,12 @@ vi.mock("../project/project.model.js", () => ({
   }
 }))
 
+/** Dự án có bản ghi Baseline do Lead ký (`type: generated`) — dự án tạo mới đã ký mà chuyển đổi chưa chạy xong. */
+const signed = new Set<string>()
+vi.mock("../spine/baseline.model.js", () => ({
+  Baseline: { exists: async (q: { projectId: string }) => (signed.has(q.projectId) ? { _id: "b" } : null) }
+}))
+
 vi.mock("../spine/spine.repository.js", () => ({
   get: async (id: string) => (baselines.has(id) ? { baselines: baselines.get(id) } : null)
 }))
@@ -27,6 +33,7 @@ import { Mode1Error } from "./mode1.errors.js"
 beforeEach(() => {
   projects.clear()
   baselines.clear()
+  signed.clear()
 })
 
 describe("prefillFrom", () => {
@@ -103,6 +110,14 @@ describe("isMode1Project / assertChangesAllowed", () => {
     expect(await changesRequireCr("noBaseline")).toBe(false)
     expect(await changesRequireCr("rel")).toBe(true)
     await expect(assertChangesAllowed("v0", prefillFrom("Xoá UC-02"))).rejects.toMatchObject({ code: "CHANGE_REQUIRES_CR" })
+  })
+
+  it("dự án tạo mới đã được Lead ký nhưng chuyển sang luồng CR chưa xong ⇒ vẫn bắt qua CR, không sửa thẳng sau baseline", async () => {
+    projects.set("signedFpt", { mode: "fpt" })
+    signed.add("signedFpt")
+    projects.set("draftFpt", { mode: "fpt" })
+    expect(await changesRequireCr("signedFpt")).toBe(true)
+    expect(await changesRequireCr("draftFpt")).toBe(false)
   })
 })
 

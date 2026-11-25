@@ -232,8 +232,26 @@ export const extractionSectionSchema = z.object({
   status: z.enum(EXTRACTION_STATUSES),
   fields_total: z.number().int().min(0),
   fields_needing_review: z.number().int().min(0),
-  error: z.string().nullable()
+  error: z.string().nullable(),
+  /** AI đang đọc mục này (nhiều mục có thể đang đọc cùng lúc); dấu cũ của lần chạy đã chết ⇒ `false`. */
+  reading: z.boolean(),
+  /** Đã tìm thấy gì ở mục: đếm theo loại + tối đa 3 tên (không có nội dung đầy đủ). Rỗng khi chưa đọc gì. */
+  found: z.array(z.object({ entity: z.string(), count: z.number().int().min(1), names: z.array(z.string()).max(3) }))
 })
+
+/** `GET /projects/:id/import/source` — chữ gốc của file theo mục, tải một lần. */
+export const importSourceResponseSchema = z.object({
+  import_id: id,
+  sections: z.array(
+    z.object({
+      section_id: z.string().min(1),
+      title: z.string(),
+      level: z.number().int().min(0).max(9),
+      blocks: z.array(z.object({ block_id: blockId, kind: z.enum(DOC_BLOCK_KINDS), text: z.string() }))
+    })
+  )
+})
+export type ImportSourceResponse = z.infer<typeof importSourceResponseSchema>
 
 // ─── request ─────────────────────────────────────────────────────
 

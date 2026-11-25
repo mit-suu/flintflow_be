@@ -293,6 +293,8 @@ export interface Function {
   component_interactions?: ComponentInteraction[]
   /** FLF-365: bản phát hành của yêu cầu (phân bổ yêu cầu, "1.0"; "deferred" = hoãn). Thiếu = chưa phân bổ. */
   release?: string | null
+  /** Nguồn của yêu cầu do AI soạn (tài liệu, đoạn hoặc người yêu cầu). Thiếu = chưa ghi nguồn. */
+  source_ref?: string | null
 }
 export type SpineFunction = Function
 
@@ -309,6 +311,7 @@ export interface Nfr {
   priority: Priority | null
   /** FLF-365: như `Function.release`. */
   release?: string | null
+  source_ref?: string | null
 }
 
 export type BusinessRuleTier = "high" | "detail"
@@ -318,6 +321,7 @@ export interface BusinessRule {
   tier: BusinessRuleTier
   statement: string
   source_validation_ids: string[]
+  source_ref?: string | null
 }
 
 export interface CommonRequirement {

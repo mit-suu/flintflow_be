@@ -58,6 +58,11 @@ beforeEach(async () => {
   resetMockLlm()
   prompts.length = 0
   seeded = await seedFixture("full")
+  // Mức "Mọi bước": bản sửa qua chat luôn dừng ở thẻ xem trước rồi mới áp theo `preview_id` (đường file này kiểm);
+  // mức mặc định tự ghi ngay ở lượt xem trước.
+  const mode = await request(app).patch(`/api/v1/projects/${seeded.projectId}/review-mode`).set({ Authorization: `Bearer ${seeded.token}` }).send({ review_mode: "strict" })
+  expect(mode.status, JSON.stringify(mode.body.error)).toBe(200)
+  seeded.spineVersion = mode.body.data.spine_version
 })
 
 describe("lượt sửa qua chat - dự án en", () => {

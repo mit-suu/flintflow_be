@@ -1,4 +1,5 @@
 import { erdNotationOf, type ErdNotation } from "../../shared/diagram/erd-notation.js"
+import { assertProjectUnlocked } from "../spine/draft-lock.js"
 import { sequenceLevelOf, type SequenceLevel } from "../../shared/diagram/sequence-level.js"
 import { screenThemeOf, type ScreenTheme } from "../../shared/diagram/screen-theme.js"
 import { Project, IProject, WITH_DELETED, type ProjectMode, type ProjectStartKind, type TemplateIntent } from "./project.model.js"
@@ -345,6 +346,8 @@ export const setErdNotation = async (projectId: string, orgId: string, erdNotati
   if (!mongoose.isValidObjectId(projectId)) throw notFound()
   const before = await Project.findOne({ _id: projectId, organizationId: orgId }).select("erdNotation").lean()
   if (!before) throw notFound()
+  // Đổi cách vẽ là đổi hình trong bản đang chờ Lead duyệt ⇒ khoá như mọi sửa (business-flow §2, C-7)
+  await assertProjectUnlocked(projectId)
   const project = await Project.findOneAndUpdate({ _id: projectId, organizationId: orgId }, { erdNotation }, { new: true })
   if (!project) throw notFound()
   if (erdNotationOf(before) !== erdNotation) await redrawErd(projectId, userId)
@@ -361,6 +364,8 @@ export const setSequenceLevel = async (projectId: string, orgId: string, sequenc
   if (!mongoose.isValidObjectId(projectId)) throw notFound()
   const before = await Project.findOne({ _id: projectId, organizationId: orgId }).select("sequenceLevel").lean()
   if (!before) throw notFound()
+  // Đổi cách vẽ là đổi hình trong bản đang chờ Lead duyệt ⇒ khoá như mọi sửa (business-flow §2, C-7)
+  await assertProjectUnlocked(projectId)
   const project = await Project.findOneAndUpdate({ _id: projectId, organizationId: orgId }, { sequenceLevel }, { new: true })
   if (!project) throw notFound()
   if (sequenceLevelOf(before) !== sequenceLevel) await redrawSequences(projectId, userId)
@@ -377,6 +382,8 @@ export const setScreenTheme = async (projectId: string, orgId: string, patch: Pa
   if (!mongoose.isValidObjectId(projectId)) throw notFound()
   const before = await Project.findOne({ _id: projectId, organizationId: orgId }).select("screenTheme").lean()
   if (!before) throw notFound()
+  // Đổi cách vẽ là đổi hình trong bản đang chờ Lead duyệt ⇒ khoá như mọi sửa (business-flow §2, C-7)
+  await assertProjectUnlocked(projectId)
   const next: ScreenTheme = { ...screenThemeOf(before), ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) }
   const project = await Project.findOneAndUpdate({ _id: projectId, organizationId: orgId }, { $set: { screenTheme: next } }, { new: true })
   if (!project) throw notFound()

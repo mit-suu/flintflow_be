@@ -21,7 +21,7 @@ import request from "supertest"
 import app from "../../../src/app.js"
 import { authAs, seedFixture, type SeededFixture } from "../../setup.js"
 import { crToReady, importedProject, resetCrMock } from "../../helpers/mode1-cr-p4.js"
-import { createMode1Project } from "../../helpers/mode1.js"
+import { createMode1Project, saveTemplateProposal } from "../../helpers/mode1.js"
 import { mockOverrides } from "../../helpers/mock-llm.js"
 import { fileOf } from "../../helpers/mode1-import-p4.js"
 import { mockTranslateItems } from "../../../src/shared/ai/providers/mock.provider.js"
@@ -217,6 +217,7 @@ describe("phục hồi kẹt (R2, R3)", () => {
 describe("hoàn tác: revertable, waiver, reverting (R4)", () => {
   it("revertable + lý do; cờ tính lại không chặn, waiver của BA chặn; có lần đổi mẫu mở ⇒ 409; reverting bị phục hồi chạy tiếp", async () => {
     const { seeded, projectId } = await importedProject()
+    await saveTemplateProposal(seeded.token, projectId)
     const before = (await Project.findById(projectId).lean())!.template_ref!
     const templateId = await publishTemplate(seeded.token, seeded.orgId, await makeSrsDocx({ extraBody: EXTRA }))
     const id = await migrate(seeded.token, projectId, templateId)
@@ -310,6 +311,7 @@ describe("ngôn ngữ của version cũ (R6)", () => {
 describe("đổi ngược: liên kết gãy (R7)", () => {
   it("broken_links báo trước ở GET; áp dụng 409 LINKS_BROKEN liệt kê; chọn Giữ hết ⇒ hết báo + áp dụng được", async () => {
     const { seeded, projectId } = await importedProject()
+    await saveTemplateProposal(seeded.token, projectId)
     const before = (await Project.findById(projectId).lean())!.template_ref!
     const templateId = await publishTemplate(seeded.token, seeded.orgId, await makeSrsDocx({ extraBody: EXTRA }))
     const forward = await migrate(seeded.token, projectId, templateId)

@@ -7142,7 +7142,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
                 "text": "Business rules: ",
               },
               {
-                "text": "Working mode must be one of fast or coaching.",
+                "text": "Working mode must be one of "fast" or "coaching".",
               },
             ],
             [
@@ -19040,7 +19040,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "Chat responses start streaming quickly after submission.",
+                  "text": "Chat responses start streaming within 3 seconds of submission.",
                 },
               ],
               [

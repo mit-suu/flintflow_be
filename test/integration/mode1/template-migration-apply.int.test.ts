@@ -13,7 +13,7 @@ import app from "../../../src/app.js"
 import { authAs, seedFixture, type SeededFixture } from "../../setup.js"
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { mockTranslateItems } from "../../../src/shared/ai/providers/mock.provider.js"
-import { createMode1Project, fakeMode1 } from "../../helpers/mode1.js"
+import { createMode1Project, fakeMode1, saveTemplateProposal } from "../../helpers/mode1.js"
 import { fileOf } from "../../helpers/mode1-import-p4.js"
 import { p, styled } from "../../../src/modules/docx-ooxml/testing/make-docx.js"
 import { makeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
@@ -170,6 +170,7 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
   it("B. có thay đổi sau lần đổi mẫu ⇒ hoàn tác bị chặn; đổi ngược về mẫu trước giữ CR, Hoàn tác hết trả lại chữ gốc", async () => {
     const lead = await seedFixture("minimal", { balance: 1000 })
     const projectId = await baselinedProject(lead, await makeSrsDocx())
+    await saveTemplateProposal(lead.token, projectId)
     const before = (await Project.findById(projectId).lean())!.template_ref!
     const templateId = await publishTemplate(lead, lead.orgId, "Mẫu mới", await makeSrsDocx({ extraBody: EXTRA }))
     const ready = await toReady(lead.token, projectId, { template_id: templateId, version: 1 })
@@ -215,6 +216,7 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
   it("B2. đổi ngược, mục đã sửa chọn Hoàn tác hết ⇒ sửa của CR bị đảo bằng lô mới, lịch sử CR giữ nguyên", async () => {
     const lead = await seedFixture("minimal", { balance: 1000 })
     const projectId = await baselinedProject(lead, await makeSrsDocx())
+    await saveTemplateProposal(lead.token, projectId)
     const before = (await Project.findById(projectId).lean())!.template_ref!
     const templateId = await publishTemplate(lead, lead.orgId, "Mẫu mới", await makeSrsDocx({ extraBody: EXTRA }))
     const ready = await toReady(lead.token, projectId, { template_id: templateId, version: 1 })

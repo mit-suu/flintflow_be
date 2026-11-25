@@ -28,6 +28,8 @@ export interface IUser extends Document {
   locale?: UserLocale
   /** Tổ chức mặc định được ghi nhớ để tự chọn khi đăng nhập (UC-10, FLF-427). */
   preferredOrganizationId?: mongoose.Types.ObjectId | null
+  /** UC-89: nhận email việc duyệt (áp cho mọi tổ chức); tài khoản cũ chưa có field coi như bật. */
+  approvalEmails?: boolean
   createdAt: Date
   updatedAt: Date
   comparePassword(password: string): Promise<boolean>
@@ -108,6 +110,10 @@ const userSchema = new Schema<IUser>(
       type: Schema.Types.ObjectId,
       ref: "Organization",
       default: null
+    },
+    approvalEmails: {
+      type: Boolean,
+      default: true
     }
   },
   { timestamps: true }
