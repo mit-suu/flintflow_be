@@ -464,11 +464,11 @@ export const autoSubmitHold = (
   after: Spine | null
 ): AutoSubmitHold | null => {
   const editing = locations.filter((l) => l.conclusion === "edit")
-  if (locations.some((l) => hasRemoveOp(l.proposal))) return "content_removed"
+  if (editing.some((l) => hasRemoveOp(l.proposal))) return "content_removed"
   if (after && removedItems(spine, after, editing.flatMap(opElements)).length) return "content_removed"
   if (locations.some((l) => (l.verify?.ai_flags?.length ?? 0) > 0)) return "ai_flags"
   if (locations.some((l) => hasPendingWarning(l))) return "pending_warning"
-  if (locations.some((l) => l.kept_violations.length > 0)) return "kept_violations"
+  if (locations.some((l) => (l.kept_violations?.length ?? 0) > 0)) return "kept_violations"
   return null
 }
 

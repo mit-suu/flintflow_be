@@ -2,10 +2,10 @@
  * C-3 tìm vị trí ảnh hưởng trên Spine — phần hàm thuần (`spine-location.ts`). Mode 1 v2 (FLF-186, plan v2 §8).
  * Phần chạy trên DB (khoá theo path, tìm lại) ở `test/integration/mode1/impact.int.test.ts`.
  */
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
-import { formatLocationId } from "./cr-impact.service.js"
+import { crImpactIntent, formatLocationId } from "./cr-impact.service.js"
 import {
   KEYWORD_MAX_HITS,
   rankByKeywords,
@@ -17,6 +17,7 @@ import {
   fillPathsOfSection,
   findSpineLocations,
   isArrayPath,
+  isGenericName,
   listElements,
   mergeFoundLocations,
   opElement,
@@ -36,7 +37,8 @@ const spine = (): Spine => {
 
 describe("C-3 findSpineLocations", () => {
   it("đích + phần tử tham chiếu tới đích (spine_link) + phần tử nhắc tên đích (mention) + từ khoá; theo thứ tự tài liệu, không trùng", () => {
-    const found = findSpineLocations(spine(), ["actors[id=A01].name"], ["registration"])
+    // FLF-483: đích actor chỉ kéo use case tham chiếu / nhắc mã khi CR xoá ⇒ ca này dùng intent "remove"
+    const found = findSpineLocations(spine(), ["actors[id=A01].name"], ["registration"], [], { intent: "remove" })
     expect(found.map((f) => [f.path, f.found_by])).toEqual([
       ["project", ["mention"]],
       ["actors[id=A01]", ["spine_link"]],
@@ -52,7 +54,7 @@ describe("C-3 findSpineLocations", () => {
   it("đã spine_link tới đích thì thôi mention cùng đích, nhưng nhắc đích KHÁC vẫn là mention (T10)", () => {
     const s = spine()
     s.use_cases.push({ id: "UC-02", name: "Manage courses", actor_ids: ["A01"], function_ids: [], description: "Admin reviews what the Learner submits.", includes: [], extends: [] } as never)
-    const found = findSpineLocations(s, ["actors[id=A01]", "actors[id=A02]"], [])
+    const found = findSpineLocations(s, ["actors[id=A01]", "actors[id=A02]"], [], [], { intent: "remove" })
     // UC-01 chỉ tham chiếu A01 bằng actor_ids ⇒ một cách tìm
     expect(found.find((f) => f.path === "use_cases[id=UC-01]")).toMatchObject({ found_by: ["spine_link"], entity_paths: ["actors[id=A01]"] })
     // UC-02 tham chiếu A01 (field) và nhắc tên A02 (văn xuôi) ⇒ hai cách tìm, hai đích
@@ -142,7 +144,9 @@ describe("C-3 findSpineLocations", () => {
 
   it(`FLF-375: từ khoá xếp hạng BM25 - tối đa ${KEYWORD_MAX_HITS} phần tử khớp nhất (không còn trả mọi phần tử chứa chữ)`, () => {
     const s = spine()
-    for (let i = 0; i < KEYWORD_MAX_HITS + 65; i++) s.glossary.push({ id: `G${i}`, term: `login ${i}`, definition: "login term" } as never)
+    for (let i = 0; i < 20; i++) s.glossary.push({ id: `G${i}`, term: `login ${i}`, definition: "login term" } as never)
+    // FLF-483: từ khoá khớp hơn 15% phần tử bị bỏ ⇒ thêm phần tử nền để 20 chỗ khớp vẫn là từ khoá hợp lệ
+    for (let i = 0; i < 150; i++) s.glossary.push({ id: `H${i}`, term: `Other ${i}`, definition: "unrelated" } as never)
     const found = findSpineLocations(s, [], ["login"])
     expect(found).toHaveLength(KEYWORD_MAX_HITS)
     expect(found.every((f) => f.found_by.includes("keyword") && (f.keyword_score ?? 0) > 0)).toBe(true)
@@ -229,5 +233,95 @@ describe("phần tử Spine làm vị trí", () => {
     expect(sectionOfElement(s, "nfrs[id=NFR-01]")).toBe("fixed:4.2.3")
     expect(sectionOfElement(s, "custom_sections[id=CS02]")).toBe("custom:CS02")
     expect(listElements(s).map((e) => e.path)[0]).toBe("project")
+  })
+})
+
+describe("FLF-483 (M4-b) - lọc nguồn nhiễu của C-3", () => {
+  const rule = (i: number, statement: string) => ({ id: `BR-${String(i).padStart(2, "0")}`, statement, tier: "detail" }) as never
+  /** 60 phần tử: thực thể E08 "Đơn hàng" được nhắc ở 20 quy tắc, 7 use case tham chiếu actor A01. */
+  const bigSpine = (): Spine => {
+    const s = createEmptySpine({ name: "Shop" })
+    s.actors.push({ id: "A01", name: "Student", kind: "human", description: "" } as never)
+    s.entities.push({ id: "E08", name: "Đơn hàng", description: "Đơn đặt mua" } as never)
+    for (let i = 1; i <= 7; i++) s.use_cases.push({ id: `UC-${String(i).padStart(2, "0")}`, name: `Case ${i}`, actor_ids: ["A01"], function_ids: [], description: `Flow ${i}`, includes: [], extends: [] } as never)
+    for (let i = 1; i <= 20; i++) s.business_rules.push(rule(i, `Đơn hàng phải được xác nhận lần ${i}`))
+    for (let i = 21; i <= 50; i++) s.business_rules.push(rule(i, `Quy tắc khác số ${i}`))
+    return s
+  }
+  const mentions = (found: ReturnType<typeof findSpineLocations>) => found.filter((f) => f.found_by.includes("mention")).map((f) => f.path)
+
+  it("tên 'Đơn hàng' ở 20/60 phần tử ⇒ intent other không có chỗ nhắc theo tên; rename ⇒ đủ 20", () => {
+    const s = bigSpine()
+    expect(isGenericName(s, "Đơn hàng")).toBe(true)
+    expect(isGenericName(s, "Student")).toBe(false)
+    expect(mentions(findSpineLocations(s, ["entities[id=E08]"], [], [], { intent: "other" }))).toEqual([])
+    expect(mentions(findSpineLocations(s, ["entities[id=E08]"], []))).toEqual([])
+    expect(mentions(findSpineLocations(s, ["entities[id=E08]"], [], [], { intent: "rename" }))).toHaveLength(20)
+    expect(mentions(findSpineLocations(s, ["entities[id=E08]"], [], [], { intent: "remove" }))).toHaveLength(20)
+  })
+
+  it("tên không chung vẫn là chỗ nhắc; mã tài liệu của đích chung vẫn dùng", () => {
+    const s = bigSpine()
+    s.business_rules.push(rule(51, "Chỉ BR-03 được áp dụng"))
+    s.business_rules.push(rule(52, "Khách Lumen Gold được giảm giá"))
+    s.entities.push({ id: "E09", name: "Lumen Gold", description: "" } as never)
+    expect(mentions(findSpineLocations(s, ["entities[id=E09]"], []))).toEqual(["business_rules[id=BR-52]"])
+    expect(mentions(findSpineLocations(s, ["business_rules[id=BR-03]"], []))).toContain("business_rules[id=BR-51]")
+  })
+
+  it("đích actor A01 + ô thêm use case ⇒ 7 use case cũ không thành vị trí chỉ vì tham chiếu actor; xoá actor ⇒ đủ 7", () => {
+    const s = bigSpine()
+    const adding = findSpineLocations(s, ["actors[id=A01]", "use_cases[]"], [])
+    expect(adding.map((f) => f.path)).toEqual(["actors[id=A01]", "use_cases[]"])
+    const removing = findSpineLocations(s, ["actors[id=A01]"], [], [], { intent: "remove" })
+    expect(removing.filter((f) => f.path.startsWith("use_cases[")).map((f) => f.path)).toHaveLength(7)
+    // đích loại khác (không phải actor / vai trò) vẫn kéo tham chiếu như cũ
+    expect(findSpineLocations(s, ["entities[id=E08]"], [])[0]?.path).toBe("entities[id=E08]")
+  })
+
+  it("đích mục 2.2.2 + ô thêm use case ⇒ không mở cả mục; đích mục đứng một mình ⇒ mở như cũ", () => {
+    const s = bigSpine()
+    const together = findSpineLocations(s, ["fixed:2.2.2", "use_cases[]"], []).map((f) => f.path)
+    expect(together.filter((p) => p.startsWith("use_cases[id="))).toEqual([])
+    expect(together).toContain("use_cases[]")
+    const alone = findSpineLocations(s, ["fixed:2.2.2"], []).map((f) => f.path)
+    expect(alone.filter((p) => p.startsWith("use_cases[id="))).toHaveLength(7)
+    // đích là phần tử nằm trong mục ⇒ mục chỉ là ngữ cảnh
+    const withElement = findSpineLocations(s, ["fixed:2.2.2", "use_cases[id=UC-01]"], []).map((f) => f.path)
+    expect(withElement.filter((p) => p.startsWith("use_cases[id="))).toEqual(["use_cases[id=UC-01]"])
+  })
+
+  it("từ khoá khớp hơn 15% phần tử bị bỏ (log một dòng); từ khoá hiếm vẫn giữ", () => {
+    const s = bigSpine()
+    const info = vi.spyOn(console, "info").mockImplementation(() => {})
+    s.business_rules.push(rule(60, "Zebra pricing applies"))
+    const found = findSpineLocations(s, [], ["xác nhận", "zebra"])
+    const paths = found.map((f) => f.path)
+    expect(paths).toContain("business_rules[id=BR-60]")
+    expect(paths).not.toContain("business_rules[id=BR-01]") // "xác nhận" khớp 20 > max(12, 15% của 61)
+    expect(info.mock.calls.some((c) => String(c[0]).includes('bỏ từ khoá chung "xác nhận"'))).toBe(true)
+    info.mockRestore()
+  })
+})
+
+describe("FLF-483 (M4-b) - crImpactIntent", () => {
+  const cr = (title: string, description = "", entity_paths: string[] = []) => ({ title, description, amendments: [], clarifications: [], targets: { entity_paths, keywords: [] } }) as never
+  const s = (() => {
+    const sp = createEmptySpine({ name: "Shop" })
+    sp.actors.push({ id: "A01", name: "Student", kind: "human", description: "" } as never)
+    return sp
+  })()
+
+  it("xoá: op remove, hoặc động từ xoá đứng trước tên / mã đích", () => {
+    expect(crImpactIntent(cr("Sửa"), [{ op: "remove", path: "actors[id=A01]" }])).toBe("remove")
+    expect(crImpactIntent(cr("Bỏ tác nhân Student", "", ["actors[id=A01]"]), [], s)).toBe("remove")
+    expect(crImpactIntent(cr("Xoá A01", "", ["actors[id=A01]"]))).toBe("remove")
+    expect(crImpactIntent(cr("Thêm use case cho Student, bỏ qua phần khác", "", ["actors[id=A01]"]), [], s)).toBe("other")
+  })
+
+  it("đổi tên: đổi tên hệ thống hoặc cụm đổi tên phần tử; còn lại other", () => {
+    expect(crImpactIntent(cr("Đổi tên Student thành Learner", "", ["actors[id=A01]"]), [], s)).toBe("rename")
+    expect(crImpactIntent(cr("Rename the app to Lumen"))).toBe("rename")
+    expect(crImpactIntent(cr("Hạ COD từ 5 triệu xuống 3 triệu"))).toBe("other")
   })
 })

@@ -13,12 +13,12 @@ import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus } from "./change-request.service.js"
 import { ChangeLocation } from "./change-location.model.js"
 import { unlockPaths } from "./lock.service.js"
-import { countMentionLocations, emptySectionTargets, findSpineLocations, mergeFoundLocations, removeElementLocations, removeElementTarget, systemRenameLocations, systemRenameTarget, withOriginalDiagrams, withOriginalPassages, type FoundLocation } from "./spine-location.js"
+import { countMentionLocations, elementValue, emptySectionTargets, findSpineLocations, mergeFoundLocations, removeElementLocations, removeElementTarget, systemRenameLocations, systemRenameTarget, withOriginalDiagrams, withOriginalPassages, type FoundLocation, type ImpactIntent } from "./spine-location.js"
 import { TemplateProfile } from "../import/template-profile.model.js"
 import type { SectionSegments } from "../spine/segment-hash.js"
 import { systemName } from "../spine/system-name.js"
 import { crLiteralText, literalValues } from "./literal-values.js"
-import { approvedBatch, approvedBatchLocations } from "./add-use-case.service.js"
+import { approvedBatch, approvedBatchLocations, crUseCaseIntent } from "./add-use-case.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { loadLayout, titleOfSection } from "../import/gap-report.service.js"
 import { ownerStepOf } from "../spine/section-registry.js"
@@ -52,6 +52,34 @@ const plannedAfterSeed = (spine: Spine, rawOps: readonly unknown[]): Spine | nul
   }
 }
 
+const REMOVE_VERB = "xoá|xóa|bỏ|gỡ|loại bỏ|remove|delete|drop"
+const RENAME_PHRASE = /(?<![\p{L}\p{N}])(?:đổi tên|thay tên|gọi là|rename)(?![\p{L}\p{N}])/iu
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+/**
+ * FLF-483 (M4-b): ý định của CR cho C-3 - `remove` (xoá phần tử: mọi tham chiếu và mọi chỗ nhắc tên đều phải sửa), `rename`
+ * (đổi tên: mọi chỗ nhắc tên cũ phải sửa), còn lại `other`. Hàm thuần, chỉ đọc chữ người yêu cầu + op xem trước.
+ * `remove`: op `remove` trong `seedOps`, CR xoá use case (`crUseCaseIntent`), hoặc động từ xoá đứng ngay trước tên / mã của
+ * một đích (cần `spine` để biết tên đích; không có ⇒ chỉ so mã).
+ */
+export const crImpactIntent = (cr: Pick<IChangeRequest, "title" | "description" | "amendments" | "targets" | "seed">, seedOps: readonly unknown[] = [], spine?: Spine): ImpactIntent => {
+  const text = [cr.title, cr.description, ...(cr.amendments ?? []).map((a) => a.text)].filter(Boolean).join("\n")
+  if (seedOps.some((o) => (o as { op?: unknown } | null)?.op === "remove")) return "remove"
+  if (crUseCaseIntent(cr as never) === "remove") return "remove"
+  const names = (cr.targets?.entity_paths ?? []).flatMap((t) => {
+    const code = /^\w+\[id=([^\]]+)\]/.exec(t)?.[1]
+    const value = spine ? (elementValue(spine, t.replace(/^(\w+\[id=[^\]]+\]).*$/, "$1")) as { name?: unknown } | undefined) : undefined
+    return [code, typeof value?.name === "string" ? value.name : undefined].filter((n): n is string => !!n && n.trim().length >= 2)
+  })
+  if (names.length) {
+    const edge = "(?<![\\p{L}\\p{N}])"
+    const verb = new RegExp(`${edge}(?:${REMOVE_VERB})(?![\\p{L}\\p{N}])[^.;\\n]{0,40}?${edge}(?:${names.map(escapeRe).join("|")})(?![\\p{L}\\p{N}])`, "iu")
+    if (verb.test(text)) return "remove"
+  }
+  if (systemRenameTarget(text) !== null || RENAME_PHRASE.test(text)) return "rename"
+  return "other"
+}
+
 /** POST …/impact: tìm lại toàn bộ vị trí (thay lần trước) rồi khoá. */
 export const runImpact = async (cr: IChangeRequest): Promise<void> => {
   assertCrStatus(cr, ["impact_review"], "impact_review")
@@ -78,7 +106,9 @@ ${cr.description}`) : null
       withOriginalDiagrams(spine, ["fixed:1", "fixed:2.2.1"], systemRenameLocations(spine, systemName(spine.project)))
     : findSpineLocations(spine, cr.targets.entity_paths, cr.targets.keywords, await vectorCandidates(String(cr.projectId), crQueryText(cr)), {
         // FLF-483: giá trị cụ thể CR đổi ("5 triệu") phải có ở mọi chỗ đang ghi nó, không phụ thuộc xếp hạng từ khoá / tìm theo nghĩa
-        literals: literalValues(crLiteralText(cr))
+        literals: literalValues(crLiteralText(cr)),
+        // FLF-483: xoá / đổi tên thì giữ tên chung và tham chiếu của actor / vai trò; việc khác thì lọc nguồn nhiễu
+        intent: crImpactIntent(cr, cr.seed?.ops ?? [], spine)
       }).map((f) =>
         seedTargets.has(f.path) && !f.found_by.includes("preview") ? { ...f, found_by: [...f.found_by, "preview" as const] } : f
       )
