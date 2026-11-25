@@ -740,6 +740,62 @@ describe("FLF-468 (E2E-1) - mục CR thêm ở mẫu cố định giữ heading 
   })
 })
 
+describe("FLF-468 (E2E-1) - chức năng / tính năng CR thêm ở mẫu cố định theo khuôn của file", () => {
+  const withNew = (): Spine => {
+    const s = spine()
+    s.functions[0] = { ...s.functions[0], trigger: "Học viên mở màn Đăng ký.", description: "Hệ thống tạo tài khoản.", normal: ["Nhập email."], validations: [{ id: "V1", kind: "required", statement: "Email không được trống." }] as never }
+    s.features.push({ id: "F-9", name: "Xác thực", order: 1 })
+    s.functions.push(
+      { ...s.functions[0], id: "FN02", order: 1, name: "Quên mật khẩu", trigger: "Người dùng bấm Quên mật khẩu.", description: "Gửi liên kết đặt lại.", normal: ["Nhập email."], validations: [{ id: "V2", kind: "business", statement: "Liên kết hết hạn sau 30 phút." }] as never },
+      { ...s.functions[0], id: "FN03", feature_id: "F-9", order: 0, name: "Đổi mật khẩu", trigger: "Người dùng bấm Đổi.", description: "Cập nhật mật khẩu.", normal: ["Nhập mật khẩu mới."], validations: [{ id: "V3", kind: "business", statement: "Tối thiểu 8 ký tự." }] as never }
+    )
+    return s
+  }
+  const para = (text: string) => ({ kind: "paragraph" as const, text, rows: null, image_ref: null, tags: undefined as never })
+  const tagged = (s: Spine): TemplateLayout => {
+    const fn = s.functions[0]
+    const values = { trigger: [fn.trigger], description: [fn.description], normal: fn.normal, abnormal: [], validations: [fn.validations[0].statement], business_rule_ids: [] }
+    const blocks = [
+      { ...para("Kích hoạt: Học viên mở màn Đăng ký."), tags: [{ field: "trigger" as const, index: 0 }] },
+      { ...para("Mô tả: Hệ thống tạo tài khoản."), tags: [{ field: "description" as const, index: 0 }] },
+      para("Luồng chính:"),
+      { kind: "list_item" as const, text: "Nhập email.", rows: null, image_ref: null, tags: [{ field: "normal" as const, index: 0 }] },
+      { ...para("Email không được trống."), tags: [{ field: "validations" as const, index: 0 }] }
+    ]
+    return { ...LAYOUT, fixedTemplate: true, functionOriginals: [{ section_id: "function:FN01", source_hash: functionSourceHash(fn), blocks, field_values: values }] }
+  }
+  const find = (sections: { id: string; blocks: unknown[] }[], id: string) => JSON.stringify(sections.find((x) => x.id === id)!.blocks)
+
+  it("chức năng mới cùng tính năng với chức năng của file ⇒ nhãn và kiểu khối của file, không thẻ thô, không khuôn cũ", () => {
+    const s = withNew()
+    const { sections } = buildLayoutSections(s, tagged(s), [], { diagramPng: () => undefined })
+    const json = find(sections, "function:FN02")
+    expect(json).toContain("Kích hoạt: Người dùng bấm Quên mật khẩu.")
+    expect(json).toContain("Mô tả: Gửi liên kết đặt lại.")
+    expect(json).toContain("Luồng chính:")
+    expect(json).toContain("Liên kết hết hạn sau 30 phút.")
+    for (const raw of ["[business]", "[required]", "[format]", "[undefined]", "Screens", "Trigger:", "Description:", "Validations"]) expect(json).not.toContain(raw)
+    // mục của file vẫn in nguyên văn file
+    expect(find(sections, "function:FN01")).not.toContain("Quên mật khẩu")
+  })
+
+  it("chức năng mới thuộc tính năng mới (không có chức năng anh em cùng tính năng) ⇒ vẫn theo khuôn chức năng gần nhất của file", () => {
+    const s = withNew()
+    const { sections } = buildLayoutSections(s, tagged(s), [], { diagramPng: () => undefined })
+    expect(find(sections, "function:FN03")).toContain("Kích hoạt: Người dùng bấm Đổi.")
+  })
+
+  it("file không có chức năng nào dùng được làm khuôn ⇒ khung FPT (tiêu đề con Kích hoạt chức năng / Mô tả chức năng), tính năng mới không dòng Screens", () => {
+    const s = withNew()
+    const { sections } = buildLayoutSections(s, { ...LAYOUT, fixedTemplate: true }, [], { diagramPng: () => undefined })
+    const fn = sections.find((x) => x.id === "function:FN02")!
+    expect(fn.blocks.filter((b) => b.type === "heading").map((b) => (b as { text: string }).text)).toEqual(expect.arrayContaining(["Kích hoạt chức năng", "Mô tả chức năng"]))
+    const json = JSON.stringify(fn.blocks)
+    for (const raw of ["[business]", "[required]", "[undefined]", "Screens", "Kích hoạt: "]) expect(json).not.toContain(raw)
+    expect(find(sections, "feature:F-9")).not.toContain("Screens")
+  })
+})
+
 describe("FLF-364 (câu 10) - chữ hướng dẫn của mẫu in khi mục trống, có dữ liệu thì bỏ", () => {
   // Mẫu thường (không bắt buộc); mẫu bắt buộc (FLF-371) xuất vào chính file mẫu nên luôn bỏ hướng dẫn
   const guideLayout: TemplateLayout = {

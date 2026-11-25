@@ -53,7 +53,7 @@ import { mediaId } from "./import-media.js"
 import { appendToFileTables, conformBlocksToFileTable } from "./file-table.js"
 import { patchFileTableRows, patchPermissionMatrix, resolveFileTableColumns, type PatchElement } from "./file-table-patch.js"
 import { deletedElementIds, dropDeletedElementLines, elementOfKey, isLabelLine, refreshTailBlock } from "./element-tail.js"
-import { functionFieldValues, patchFunctionOriginal, type FunctionFieldValues, type FunctionOriginalBlock } from "./function-original.js"
+import { functionBlocksLikeSibling, functionFieldValues, patchFunctionOriginal, type FunctionFieldValues, type FunctionOriginalBlock } from "./function-original.js"
 import { defaultSectionTitle, functionDiagramBlocks, generatedDiagramBlocks, renderContentSlot, renderSection, screenLayoutImages, type SectionRenderContext } from "./section-renderer.js"
 import { sentencesFor } from "./labels.js"
 import { originalSectionOfScreen } from "../diagram/screen-originals.js"
@@ -893,6 +893,7 @@ export const buildLayoutSections = (
       .filter((o) => o.blocks.some((b) => b.kind === "heading" && FPT_FUNCTION_HEADINGS.has(foldText(b.text))))
       .map((o) => o.section_id)
   )
+  const layoutIds = new Set(template.layout.map((e) => e.section_id))
   const originalOf = (sectionId: string): FunctionOriginalBlock[] | null => {
     if (frameSections.has(sectionId)) return null
     const o = originals.get(sectionId)
@@ -900,6 +901,24 @@ export const buildLayoutSections = (
     if (!o || !fn) return null
     if (functionSourceHash(fn) === o.source_hash) return [...o.blocks]
     return o.field_values ? patchFunctionOriginal(o.blocks, o.field_values, functionFieldValues(spine, fn)) : null
+  }
+  /**
+   * FLF-468 (E2E-1): chức năng MỚI ở mẫu cố định (CR thêm, file không có mục) ⇒ thân theo khuôn của chức năng anh em trong file:
+   * cùng tính năng (gần nhất đứng trước, không có thì đầu tiên), không có thì chức năng có nguyên văn gần nhất trước nó trong
+   * layout (không có thì gần nhất sau nó). `null` ⇒ không có khuôn dùng được, mục dựng theo khung FPT.
+   */
+  const siblingBlocks = (sectionId: string, order: readonly Numbered[]): FunctionOriginalBlock[] | null => {
+    const fn = spine.functions.find((f) => `function:${f.id}` === sectionId)
+    if (!template.fixedTemplate || !fn || layoutIds.has(sectionId) || frameSections.has(sectionId)) return null
+    const at = order.findIndex((x) => x.section_id === sectionId)
+    const usable = order
+      .map((x, index) => ({ x, index, o: originals.get(x.section_id) }))
+      .filter((c) => c.o && c.x.section_id.startsWith("function:") && !frameSections.has(c.x.section_id) && c.o.blocks.some((b) => b.tags?.length))
+    const featureOf = (id: string) => spine.functions.find((f) => `function:${f.id}` === id)?.feature_id
+    const sameFeature = usable.filter((c) => featureOf(c.x.section_id) === fn.feature_id)
+    const before = (list: typeof usable) => list.filter((c) => c.index < at).pop()
+    const pick = before(sameFeature) ?? sameFeature[0] ?? before(usable) ?? usable.find((c) => c.index > at)
+    return pick?.o ? functionBlocksLikeSibling(pick.o.blocks, functionFieldValues(spine, fn), pick.o.field_values) : null
   }
   /** FLF-410: mục nguyên văn ⇒ màn đã bật mockup (có hình mockup đã vẽ) + index ảnh bị thay. */
   const mockupBySection = new Map<string, { screenId: string; indexes: readonly number[]; caption: string }>()
@@ -979,7 +998,9 @@ export const buildLayoutSections = (
       // Screen layout / Function details) thay vì khung cũ không có tiêu đề con; mục tính năng không thêm dòng "Screens: …"
       // FLF-468 (lát C): mẫu cố định mà CHÍNH mục chức năng này dùng tiêu đề con khung FPT trong file ⇒ vẫn dựng theo khung đó
       // (không rơi về nhãn "Kích hoạt:/Mô tả:" khác file, không in thẻ loại validation thô "[business]")
-      ...(/^(feature|function):/.test(sectionId) && (!template.fixedTemplate || fptFunctionHeadingSections.has(sectionId)) ? { functionLayout: "fpt" as const } : {}),
+      // FLF-468 (E2E-1): mục mới (CR thêm, file không có mục) ở mẫu cố định cũng dựng theo khung FPT — không dựa vào tập tiêu đề con
+      // của file (file dùng đoạn có nhãn thì tập đó rỗng); chức năng có anh em trong file thì thân theo khuôn anh em (`siblingBlocks`)
+      ...(/^(feature|function):/.test(sectionId) && (!template.fixedTemplate || fptFunctionHeadingSections.has(sectionId) || !layoutIds.has(sectionId)) ? { functionLayout: "fpt" as const } : {}),
       ...(state?.status !== undefined ? { status: state.status } : {}),
       ...(state?.awaiting_reaccept !== undefined ? { awaiting_reaccept: state.awaiting_reaccept } : {})
     }
@@ -1124,7 +1145,6 @@ export const buildLayoutSections = (
   const emitted = new Set<string>()
   // FLF-468 (E2E-1): tính năng / chức năng CR thêm — mẫu có mục lặp mà mục này không có slot trong file ⇒ writer chèn heading mới
   // cho nó (vào mục lục như FLF-413); heading con trong thân vẫn là heading dưới heading mục, không thành đoạn đậm.
-  const layoutIds = new Set(template.layout.map((e) => e.section_id))
   const templateRepeats = template.layout.some((e) => isRepeatingSection(e.section_id))
   const insertedByCr = (id: string) => templateRepeats && isRepeatingSection(id) && !layoutIds.has(id)
   const push = (section: RenderedSection, level: number) => {
@@ -1212,7 +1232,15 @@ export const buildLayoutSections = (
       continue
     }
     const original = originalOf(n.section_id)
-    const rendered = original
+    const likeSibling = original ? null : siblingBlocks(n.section_id, numbered)
+    const rendered = likeSibling
+      ? {
+          ...section,
+          heading: n.title,
+          level: n.renderLevel,
+          blocks: [...functionBlocks(likeSibling, n.renderLevel, n.section_id, n.number), ...functionDiagramBlocks(contentSpine, n.section_id.slice("function:".length), "sequence", contextFor(n.section_id, n.number))]
+        }
+      : original
       ? { ...section, heading: n.title, level: n.renderLevel, blocks: functionBlocks(original, n.renderLevel, n.section_id, n.number) }
       : {
           ...section,
