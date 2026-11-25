@@ -77,7 +77,9 @@ export const TABLE_ENTITIES: readonly TableEntityDef[] = [
     sections: ["fixed:3.1.4", "feature:*"],
     columns: [
       { field: "id", headers: ["function id", "requirement id", "req id", "id", "mã chức năng", "mã yêu cầu"] },
-      { field: "name", headers: ["system function", "function", "function name", "name", "title", "tên chức năng", "chức năng"] },
+      // FLF-476: thiếu "tên" ⇒ cột "Tên" của bảng chức năng không màn hình (3.1.4) không khớp field nào, tên bị lấy từ
+      // cột Mô tả (cắt ngắn) thay vì cột Tên
+      { field: "name", headers: ["system function", "function", "function name", "name", "title", "tên chức năng", "chức năng", "tên", "tên gọi"] },
       { field: "feature_id", headers: ["feature", "feature name", "tính năng"] },
       { field: "trigger", headers: ["trigger", "kích hoạt", "sự kiện kích hoạt", "điều kiện kích hoạt"] },
       { field: "description", headers: ["description", "requirement", "requirement description", "statement", "mô tả", "yêu cầu"] },
