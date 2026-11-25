@@ -11,9 +11,11 @@ import {
   getSkillIndex,
   getSkillsDir,
   computeSkillAssetVersion,
-  invalidateSkillCache
+  invalidateSkillCache,
+  parseSkill,
+  MAX_SKILL_PROMPT_CHARS
 } from "./prompt-assets.js"
-import { getSkill, getPromptTemplate } from "./prompt-registry.service.js"
+import { getSkill, getPromptTemplate, REFERENCE_HEADING } from "./prompt-registry.service.js"
 import { OUTPUT_SCHEMA_BY_ACTION_TYPE } from "./response-parser.js"
 import { UI_TERM_BLACKLIST, USE_CASE_VERB_BLACKLIST } from "../../modules/spine/deterministic-check.js"
 
@@ -160,12 +162,22 @@ describe("skill trên đĩa (assets/skills)", () => {
   // FLF-418: function-detail thêm mục component_interactions (mức thành phần của sơ đồ tuần tự)
   const LINE_LIMIT_OVERRIDE: Readonly<Record<string, number>> = { "content/entities-erd": 260, "action/apply-change-op": 250, "content/function-detail": 165 }
 
-  it("skill action + skill đã viết (T10, T14) có nội dung thật, SKILL.md ≤ 150 dòng (trừ LINE_LIMIT_OVERRIDE); skill còn lại là stub", () => {
+  // FLF-449 N2: block luật chất lượng chép y hệt vào 9 skill (ba-quality-block.test.ts so từng byte) - không tính vào trần dòng,
+  // nếu không thì mỗi skill phân tích phải cắt luật riêng của nó để chứa luật chung.
+  const withoutSharedQualityBlock = (text: string): string => {
+    const start = text.indexOf("<!-- ba-quality:shared:start -->")
+    const endMarker = "<!-- ba-quality:shared:end -->\n"
+    const end = text.indexOf(endMarker)
+    return start >= 0 && end > start ? text.slice(0, start) + text.slice(end + endMarker.length) : text
+  }
+
+  it("skill action + skill đã viết (T10, T14) có nội dung thật, SKILL.md ≤ 150 dòng (trừ LINE_LIMIT_OVERRIDE, không tính block ba-quality); skill còn lại là stub", () => {
     for (const s of listSkillAssets()) {
       const dir = s.dir.replace(/\\/g, "/")
       if ((s.kind === "action" && !MODE1_SKELETON_ACTION.has(dir)) || WRITTEN_NON_ACTION.has(dir)) {
         expect(s.stub, `${s.dir} không được là stub`).toBe(false)
-        const lines = fs.readFileSync(path.join(getSkillsDir(), s.dir, "SKILL.md"), "utf-8").split("\n")
+        const text = fs.readFileSync(path.join(getSkillsDir(), s.dir, "SKILL.md"), "utf-8").replace(/\r\n/g, "\n")
+        const lines = withoutSharedQualityBlock(text).split("\n")
         expect(lines.length, `${s.dir}: ${lines.length} dòng`).toBeLessThanOrEqual(LINE_LIMIT_OVERRIDE[dir] ?? 150)
       } else {
         expect(s.stub, `${s.dir} phải đánh dấu stub`).toBe(true)
@@ -192,6 +204,94 @@ describe("skill trên đĩa (assets/skills)", () => {
     expect(loaded.skillId).toBe("draft-to-ops")
     expect(loaded.asset_version).toMatch(/^[0-9a-f]{64}$/)
     expect(loaded.providerConfig.model).toBeTruthy()
+  })
+})
+
+describe("FLF-449 N3: skill hành động nạp reference khai ở prompt_references", () => {
+  it("review-section: template có nguyên lenses.md sau thân skill, đúng một lần", async () => {
+    const { template, skillId } = await getPromptTemplate(ActionType.REVIEW)
+    expect(skillId).toBe("review-section")
+    expect(template).toContain(`${REFERENCE_HEADING}lenses`)
+    expect(template).toContain("Weasel words")
+    expect(template).toContain("## `goal_coverage` (S-9.3)")
+    expect(template.split(`${REFERENCE_HEADING}lenses`)).toHaveLength(2)
+    expect(template.indexOf(`${REFERENCE_HEADING}lenses`)).toBeGreaterThan(template.indexOf("## Output"))
+    // CONSISTENCY_PASS dùng cùng skill ⇒ cùng template
+    expect((await getPromptTemplate(ActionType.CONSISTENCY_PASS)).template).toBe(template)
+  })
+
+  it("elicit-loop: template có when-to-offer-choices (luật khuyến nghị theo chốt 03 #3); conversation-style không khai thì không nạp", async () => {
+    const { template } = await getPromptTemplate(ActionType.ELICIT)
+    expect(template).toContain(`${REFERENCE_HEADING}when-to-offer-choices`)
+    expect(template).toContain("**Recommend only when you are sure**: a clear basis in the uploaded documents")
+    expect(template).toContain("recommendation from general practice alone")
+    expect(template).not.toContain(`${REFERENCE_HEADING}conversation-style`)
+    expect((await getPromptTemplate(ActionType.DISCOVERY_STEP)).template).toBe(template)
+  })
+
+  it("reference nạp vào prompt không còn chữ nội bộ cũ (đường dẫn code trong chữ, 'Mình đề xuất', FPT)", () => {
+    for (const [skillId, name] of [["elicit-loop", "when-to-offer-choices"], ["review-section", "lenses"]] as const) {
+      const text = getSkill(skillId, { references: [name] }).references[name]
+      expect(text, `${skillId}/${name}`).not.toContain("Mình đề xuất")
+      expect(text, `${skillId}/${name}`).not.toMatch(/FPT/)
+      expect(text, `${skillId}/${name}`).not.toContain("Round one ships the schema")
+      expect(text, `${skillId}/${name}`).not.toContain("{{")
+    }
+  })
+
+  it("skill hành động không khai prompt_references ⇒ template đúng bằng thân SKILL.md (draft-to-ops)", async () => {
+    const { template } = await getPromptTemplate(ActionType.DRAFT)
+    expect(template).toBe(getSkill("draft-to-ops").template)
+    expect(template).not.toContain(REFERENCE_HEADING)
+  })
+
+  it("mọi skill: thân + prompt_references nằm dưới trần MAX_SKILL_PROMPT_CHARS", () => {
+    for (const s of listSkillAssets()) {
+      const refs = getSkill(s.skillId, { references: s.promptReferences }).references
+      const total = s.template.length + Object.values(refs).reduce((n, r) => n + r.length, 0)
+      expect(total, s.dir).toBeLessThanOrEqual(MAX_SKILL_PROMPT_CHARS)
+    }
+  })
+})
+
+describe("FLF-449 N3: kiểm prompt_references lúc nạp", () => {
+  let tmp: string
+  const skillFile = () => path.join(tmp, "action", "review-section", "SKILL.md")
+  const replaceInSkill = (from: string, to: string) => {
+    const text = fs.readFileSync(skillFile(), "utf-8").replace(/\r\n/g, "\n")
+    expect(text).toContain(from)
+    fs.writeFileSync(skillFile(), text.replace(from, to))
+  }
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skills-"))
+    fs.cpSync(path.join(getSkillsDir(), "action", "review-section"), path.join(tmp, "action", "review-section"), { recursive: true })
+  })
+
+  afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }))
+
+  it("bản gốc nạp được và khai lenses", () => {
+    expect(parseSkill(tmp, "action", "review-section").promptReferences).toEqual(["lenses"])
+  })
+
+  it("reference khai báo không tồn tại ⇒ lỗi lúc nạp", () => {
+    replaceInSkill("prompt_references:\n  - lenses\n", "prompt_references:\n  - lenses\n  - khong-co\n")
+    expect(() => parseSkill(tmp, "action", "review-section")).toThrow(/prompt_references trỏ tới reference không có: khong-co/)
+  })
+
+  it("file reference bị xoá mà frontmatter vẫn khai ⇒ lỗi lúc nạp", () => {
+    fs.rmSync(path.join(tmp, "action", "review-section", "references", "lenses.md"))
+    expect(() => parseSkill(tmp, "action", "review-section")).toThrow(/prompt_references trỏ tới reference không có: lenses/)
+  })
+
+  it("khai trùng tên ⇒ lỗi lúc nạp (reference bị nối hai lần)", () => {
+    replaceInSkill("prompt_references:\n  - lenses\n", "prompt_references:\n  - lenses\n  - lenses\n")
+    expect(() => parseSkill(tmp, "action", "review-section")).toThrow(/khai trùng tên/)
+  })
+
+  it("thân + reference vượt trần ⇒ lỗi lúc nạp", () => {
+    fs.appendFileSync(path.join(tmp, "action", "review-section", "references", "lenses.md"), `\n${"x".repeat(MAX_SKILL_PROMPT_CHARS)}\n`)
+    expect(() => parseSkill(tmp, "action", "review-section")).toThrow(/vượt trần/)
   })
 })
 

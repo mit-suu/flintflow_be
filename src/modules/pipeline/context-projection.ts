@@ -166,6 +166,20 @@ export interface AddendumForModel {
   topic: string
   target_section: string
   content_en: string
+  /** Lời gốc của user (ngôn ngữ user) — chỉ Draft của S-1 nhận (`addendumForDraft`). */
+  content?: string
+}
+
+/**
+ * Addendum gửi model ở lượt Draft của step. S-1 (đọc lại Brief) nhận thêm lời gốc `content`: chỗ thiếu của Brief (S-1.4)
+ * phải trích nguyên văn câu làm nảy ra nhu cầu (FLF-449 việc 16), và S-1.1 sửa entry vision/goals phải thấy `content` đang
+ * có. Step khác giữ `content_en` như cũ (không tăng token).
+ */
+export const addendumForDraft = (spine: Spine, stepId: string): AddendumForModel[] => {
+  const withOriginal = parseStepId(stepId).phase === "S-1"
+  return addendumFor(spine, stepId).map(({ id, topic, target_section, content_en, content }) =>
+    withOriginal && content ? { id, topic, target_section, content_en, content } : { id, topic, target_section, content_en }
+  )
 }
 
 /** Section step nuôi (nghịch đảo `stepsOf`) + feature của màn trong vòng S-5. */
@@ -353,7 +367,7 @@ export const projectStep = (spine: Spine, stepId: string): StepProjection => {
     spine_version: spine.spine_version,
     projection,
     emptyFields,
-    addendum: addendumFor(spine, stepId).map(({ id, topic, target_section, content_en }) => ({ id, topic, target_section, content_en }))
+    addendum: addendumForDraft(spine, stepId)
   }
 }
 

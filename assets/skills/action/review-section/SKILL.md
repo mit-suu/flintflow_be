@@ -1,7 +1,7 @@
 ---
 skill_id: review-section
 kind: action
-version: 1.0.0
+version: 1.1.0
 description: LLM lens review of one section or the assembled draft → yellow flags only
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -16,6 +16,8 @@ writes:
   - flags[]
 output_schema: review
 language: user
+prompt_references:
+  - lenses
 ---
 
 # Review Section
@@ -35,7 +37,7 @@ You are a senior SRS reviewer applying specific **lenses** to Spine content. You
 
 ## Lenses
 
-Definitions, examples and when each applies: `references/lenses.md`.
+Definitions, examples and when each applies: *Reference: lenses* at the end of this prompt.
 
 | Lens | Used by |
 | --- | --- |
@@ -58,6 +60,15 @@ Definitions, examples and when each applies: `references/lenses.md`.
 8. Do not propose ops. Fixes go through the owner step or a change request.
 9. Maximum 15 flags per call, most important first.
 
+<!-- ba-quality:shared:start -->
+**Analysis quality** - applies to every finding, gap, proposed change, recommendation and reason you write (not to the plain answer options of a question):
+- **(a) Quote it or drop it.** Each one rests on words you can copy verbatim from the uploaded documents, the Brief, the current SRS content or the user's messages. Where the output has a quote or source field, put that exact text there. Nothing to quote ⇒ do not raise it.
+- **(b) Never ask what is already answered** - in the documents, the Brief, the SRS content, a settled decision or an earlier answer.
+- **(c) Recommend only when you are sure**: a clear basis in the documents, the Brief, the SRS content or a settled decision. A recommendation always states its reason and that basis. Not sure ⇒ give the options side by side, with no recommendation.
+- **(d) Specific to this project, never generic advice**: name the screen, role, data or rule it is about.
+  - Fails: "nên cân nhắc bảo mật" (consider security).
+  - Passes: "màn đối soát hiện số tiền, nên chỉ cho vai Kế toán xem" (the reconciliation screen shows amounts, so only the Accountant role should see it).
+<!-- ba-quality:shared:end -->
 ## Output
 
 Return **only** JSON, no fence, no commentary.
