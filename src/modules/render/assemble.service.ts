@@ -389,8 +389,10 @@ const rehydrateImages = async (doc: RenderedDocument, projectId: string, load: D
  * lên, thay vì trả document thiếu field. Khoá ghi vẫn là `(projectId, spine_version | baseline_id | view+locale)` nên hàng cũ
  * được ghi đè, không đụng unique index.
  *   2: `entity_path` / `row_entity_paths` / `item_entity_paths` trên block (FLF-443).
+ *   3: bản in đổi theo các fix FLF-468…486 (mục tính năng của mẫu cố định không còn dòng "Screens:", mục CR thêm ở dự án
+ *      import, nhãn ngôn ngữ) — cache dựng trước đó cùng `spine_version` phải dựng lại, không trả bản cũ.
  */
-export const RENDER_FORMAT_VERSION = 2
+export const RENDER_FORMAT_VERSION = 3
 
 const isCurrentFormat = (row: { format_version?: unknown } | null | undefined): boolean => row?.format_version === RENDER_FORMAT_VERSION
 
