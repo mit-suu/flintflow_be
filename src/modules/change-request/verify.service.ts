@@ -103,8 +103,9 @@ const languageViolation = (loc: CheckLocation, current: unknown, language: UserL
     after = null
   }
   const texts = after === null ? [] : foreignTexts(language, current, after)
-  // FLF-480 (ChoViet #12b): lý do và ghi chú cũng là chữ người dùng đọc, phải cùng ngôn ngữ tài liệu
-  const notes = [loc.reason, loc.proposal?.comment_text]
+  // FLF-480 (ChoViet #12b): ghi chú (thành comment trong file) phải cùng ngôn ngữ tài liệu. Lý do (`reason`) chỉ hiện ở màn CR
+  // nên không chặn: chặn làm CR soạn lại nhiều vòng chỉ vì một câu giải thích
+  const notes = [loc.proposal?.comment_text]
     .map((t) => (typeof t === "string" ? t.trim() : ""))
     .filter((t) => t && isForeignText(t, language))
   const all = [...texts, ...notes]
