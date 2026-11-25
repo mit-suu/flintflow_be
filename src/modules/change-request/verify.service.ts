@@ -62,6 +62,7 @@ export const withoutKept = (violations: readonly VerifyViolation[], kept: readon
 /** Vị trí AI cảnh báo mà BA chưa chọn "Vẫn làm" hay bỏ — chặn xác nhận. */
 export const hasPendingWarning = (l: Pick<IChangeLocation, "warning" | "kept_intent" | "conclusion">): boolean => !!l.warning && !l.kept_intent && l.conclusion !== "not_related"
 import { COUNT_COLLECTIONS, findCountMentionsInText, type CountCollection } from "./count-mentions.js"
+import { removedItems } from "./content-removal.js"
 
 export const valueChanged = (loc: Pick<IChangeLocation, "location_id" | "path">): Mode1Error =>
   new Mode1Error("CR_VALUE_CHANGED", `${pathLabel(loc.path)} đã bị sửa ở chỗ khác kể từ lúc đề xuất - tải lại rồi đề xuất lại`, { location_id: loc.location_id, path: loc.path })
@@ -470,6 +471,29 @@ export const previousFindingsText = (flags: ReadonlyMap<string, readonly AiFlag[
 /** FLF-474: vị trí đang mang xung đột chưa được người dùng quyết (quyết xong thì `location.service` xoá `conflict`). */
 export const hasOpenConflict = (l: Pick<IChangeLocation, "conflict" | "conclusion">): boolean => !!l.conflict && l.conclusion === "edit"
 
+/** Vì sao CR đã qua kiểm mà vẫn dừng chờ BA ở mức "Chỉ ở mốc chốt" (`null` = được tự ghi). */
+export type AutoSubmitHold = "content_removed" | "ai_flags" | "pending_warning" | "kept_violations"
+
+/**
+ * FLF-483 (M1-a): điều kiện chặn tự ghi, tách riêng để các ticket khác thêm lý do mà không viết lại khối `autoSubmit`
+ * (FLF-469 C.3: `request_not_met`; FLF-448: `pending_warning`, `kept_violations`). Thứ tự xét: xoá nội dung, rồi nhận xét AI.
+ * "Xoá nội dung" = có op `remove` **hoặc** mục con có id biến mất sau op `set` (`removedItems`). `after`: Spine sau khi áp
+ * mọi op `edit` của CR (`plannedAfterAll`); `null` (op không chạy khô được) ⇒ chỉ còn dấu hiệu op `remove`.
+ */
+export const autoSubmitHold = (
+  spine: Spine,
+  locations: readonly (CheckLocation & Pick<IChangeLocation, "verify" | "warning" | "kept_intent" | "kept_violations">)[],
+  after: Spine | null
+): AutoSubmitHold | null => {
+  const editing = locations.filter((l) => l.conclusion === "edit")
+  if (locations.some((l) => hasRemoveOp(l.proposal))) return "content_removed"
+  if (after && removedItems(spine, after, editing.flatMap(opElements)).length) return "content_removed"
+  if (locations.some((l) => (l.verify?.ai_flags?.length ?? 0) > 0)) return "ai_flags"
+  if (locations.some((l) => hasPendingWarning(l))) return "pending_warning"
+  if (locations.some((l) => l.kept_violations.length > 0)) return "kept_violations"
+  return null
+}
+
 export const runVerify = async (cr: IChangeRequest, userId: string): Promise<void> => {
   assertCrStatus(cr, ["proposing", "manual_fix", "ready_to_submit", "verifying"], "verifying")
   await transitionCr(cr, "verifying")
@@ -592,11 +616,7 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
   // FLF-337: mức "Chỉ ở mốc chốt" sau baseline — CR qua C-5 (Code + AI không phàn nàn) tự xác nhận, ghi vào bản nháp (C-6 FLF-330).
   // Nguồn + người yêu cầu đã bắt buộc lúc tạo; Lead duyệt gói (C-7) vẫn là cổng cứng. AI có nhận xét ⇒ để BA xem.
   // BF §3.2 mức duyệt: CR có xoá nội dung, có cảnh báo AI chưa quyết hoặc có lỗi luật BA giữ theo ý mình luôn dừng chờ BA.
-  const autoSubmit =
-    next === "ready_to_submit" &&
-    spine.project.review_mode === "milestones" &&
-    !locations.some((l) => (l.verify?.ai_flags?.length ?? 0) > 0 || hasRemoveOp(l.proposal) || hasPendingWarning(l) || l.kept_violations.length > 0)
-  if (autoSubmit) {
+  if (next === "ready_to_submit" && spine.project.review_mode === "milestones" && autoSubmitHold(spine, locations, countAfter) === null) {
     await submitCr(cr, userId)
     // Kiểm lại lúc ghi thấy lỗi mới ⇒ CR quay về `manual_fix`, không ghi: không báo "tự ghi"
     if (cr.status !== "written") return
