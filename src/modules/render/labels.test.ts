@@ -9,6 +9,7 @@ import type { ChangeRecordRow } from "./section-renderer.js"
 import type { TemplateLayout } from "./layout-sections.js"
 import type { Block, InlineRun, RenderedDocument } from "./rendered-document.types.js"
 import {
+  normalizeCommonCategory,
   ASSEMBLE_TEXT,
   GROUP_HEADINGS,
   RECORD_TEXT,
@@ -342,5 +343,20 @@ describe("labels - writerOptionsFor (FLF-265 §3.1)", () => {
     expect(readZipText(await writeDocx(sample, writerOptionsFor("import", "vi")), "word/document.xml")).toBe(before)
     const en = readZipText(await writeDocx(sample, { flagLanguage: "en" }), "word/document.xml")
     expect(readZipText(await writeDocx(sample, writerOptionsFor("import", "en")), "word/document.xml")).toBe(en)
+  })
+})
+
+describe("normalizeCommonCategory (bug #3 FLF-447)", () => {
+  it("nhãn tiếng Việt, khoá, từ đồng nghĩa (bỏ dấu, không phân biệt hoa thường) ⇒ khoá; lạ ⇒ null", () => {
+    expect(["Bảo mật", "BẢO MẬT", "bao mat", "Security", "security", "An toàn thông tin"].map(normalizeCommonCategory)).toEqual(Array(6).fill("security"))
+    expect(normalizeCommonCategory("Phiên làm việc")).toBe("session")
+    expect(normalizeCommonCategory("Audit trail")).toBe("audit")
+    expect(normalizeCommonCategory("Định dạng ngày giờ")).toBe("date_format")
+    expect(normalizeCommonCategory("Đa ngôn ngữ")).toBe("localization")
+    expect(normalizeCommonCategory("date_format")).toBe("date_format")
+    expect(normalizeCommonCategory("Hiệu năng")).toBeNull()
+    expect(normalizeCommonCategory("constructor")).toBeNull()
+    expect(normalizeCommonCategory("")).toBeNull()
+    expect(normalizeCommonCategory(undefined)).toBeNull()
   })
 })

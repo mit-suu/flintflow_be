@@ -108,3 +108,36 @@ describe("writeProjectDocx", () => {
     ])
   })
 })
+
+describe("bug #1 FLF-447: đoạn nguyên văn đi qua binding của version", () => {
+  const sha = () => createHash("sha256").update(templateBytes).digest("hex")
+  const segments = [{ section_id: "fixed:4.2.3", parts: [], known: [] }]
+
+  it("binding có section_segments ⇒ layout của version dùng đúng đoạn đó, không đọc profile hiện tại", async () => {
+    const binding = { source_file_ref: "source", source_sha256: sha(), heading_map: headingMap, layout, table_map: [], section_segments: segments }
+    const context = await loadFixedTemplateContext("project", binding as never)
+    expect(context.layout.sectionSegments).toEqual(segments)
+    expect(mocks.profile).not.toHaveBeenCalled()
+  })
+
+  it("binding mới mang mảng rỗng ⇒ không mượn profile, layout không có đoạn", async () => {
+    const binding = { source_file_ref: "source", source_sha256: sha(), heading_map: headingMap, layout, table_map: [], section_segments: [] }
+    expect((await loadFixedTemplateContext("project", binding as never)).layout.sectionSegments).toBeUndefined()
+    expect(mocks.profile).not.toHaveBeenCalled()
+  })
+
+  it("binding cũ thiếu field ⇒ mượn đoạn của profile hiện tại chỉ khi cùng sha nguồn", async () => {
+    const binding = { source_file_ref: "source", source_sha256: sha(), heading_map: headingMap, layout, table_map: [] }
+    mocks.profile.mockResolvedValue({ source_sha256: sha(), section_segments: segments })
+    expect((await loadFixedTemplateContext("project", binding as never)).layout.sectionSegments).toEqual(segments)
+    mocks.profile.mockResolvedValue({ source_sha256: "khac-file-nguon", section_segments: segments })
+    expect((await loadFixedTemplateContext("project", binding as never)).layout.sectionSegments).toBeUndefined()
+    mocks.profile.mockResolvedValue({ source_sha256: null, section_segments: segments })
+    expect((await loadFixedTemplateContext("project", binding as never)).layout.sectionSegments).toBeUndefined()
+  })
+
+  it("bản in hiện tại (không binding) ⇒ đoạn của profile vào layout như giao diện web", async () => {
+    mocks.profile.mockResolvedValue({ source_file_ref: "source", heading_map: headingMap, layout, section_segments: segments })
+    expect((await loadFixedTemplateContext("project")).layout.sectionSegments).toEqual(segments)
+  })
+})

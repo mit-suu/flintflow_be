@@ -55,7 +55,7 @@ import { scanMentions, type NamedEntity } from "./mentions.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { IMPORT_IMAGE_RULE, IMPORT_NEEDS_REVIEW_RULE, IMPORT_TITLE_CONTENT_RULE, IMPORT_UNRESOLVED_RULE } from "./mode1-rule-profile.js"
 import { parseDocument } from "./parse.service.js"
-import { buildImportOps, droppedPermissionFindings, ruleTierOfSections, type DroppedPermission } from "./spine-builder.js"
+import { buildImportOps, droppedPermissionFindings, ruleTierOfSections, unmappedPriorityFindings, type DroppedPermission, type UnmappedPriority } from "./spine-builder.js"
 import { tableRows } from "./table-rows.js"
 import { buildLayout, buildStepPlan, customSectionOps, customSectionsWithContent, functionOriginals, projectFieldEntities, repeatSectionsWithContent, sectionSegments, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
 import { functionSourceHash } from "../render/layout-sections.js"
@@ -148,7 +148,9 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const genericActors = imageOnlyGenericActors(accepted)
   const entities = [...collectEntities(accepted)].filter(([key]) => !genericActors.has(key)).map(([, e]) => e)
   const droppedPermissions: DroppedPermission[] = []
-  const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value, sections: e.sections })), droppedPermissions)
+  // Mức ưu tiên có chữ mà không quy được về MoSCoW (vd "Gấp") ⇒ cờ "Cần xem" ở lô kế hoạch step
+  const unmappedPriorities: UnmappedPriority[] = []
+  const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value, sections: e.sections })), droppedPermissions, unmappedPriorities)
   // QLHS 11/11 bug #15: file không có sơ đồ / mục luồng màn, chỉ ghi vài chuyển màn ⇒ suy Đăng nhập → màn của từng vai (cùng
   // lô thực thể để dấu đoạn / hash tính trên dữ liệu đã có cạnh); cờ "Cần xem" liệt kê cạnh suy ra ở lô kế hoạch step
   const inferredFlow = hasOwnScreenFlow(drafts, profile.heading_map, provisional) ? [] : inferFlowAfter(stripRecord(before), ops)
@@ -300,7 +302,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
         rule: IMPORT_NEEDS_REVIEW_RULE
       },
       { findings: titleContentFindings(stripRecord(seeded), profile.heading_map, layout), rule: IMPORT_TITLE_CONTENT_RULE },
-      { findings: inferredFlowFindings(seeded, inferredFlow), rule: IMPORT_NEEDS_REVIEW_RULE }
+      { findings: inferredFlowFindings(seeded, inferredFlow), rule: IMPORT_NEEDS_REVIEW_RULE },
+      { findings: unmappedPriorityFindings(unmappedPriorities), rule: IMPORT_NEEDS_REVIEW_RULE }
     ]),
     ...seedStepOps(stripRecord(seeded), plan, { firstSeq: seqRange.first, lastSeq: seqRange.last, at: new Date().toISOString() })
   ]

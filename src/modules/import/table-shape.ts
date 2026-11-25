@@ -4,8 +4,9 @@
  * - Hàng nhóm: hàng có ô gộp (ít ô hơn hàng tiêu đề — parser đọc theo `w:tc`) và ≤ 2 ô có chữ: "PUBLIC SCREENS",
  *   "1 | Account & Organization". Không phải phần tử — nhãn nhóm cho các hàng bên dưới.
  * - Vai trò cột theo dữ liệu: số thứ tự (1, 2, 3 — không dùng làm mã), mã (`UC-01`, tiền tố cho biết loại phần tử),
- *   ngày, phiên bản, loại thay đổi A/M/D, ô đánh dấu của ma trận (X / ✓ / view), chữ dài, tên.
+ *   ngày, phiên bản, loại thay đổi A/M/D, ô đánh dấu của ma trận (X / ✓ / view / Xem / Duyệt / Từ chối), chữ dài, tên.
  */
+import { foldText } from "./text-similarity.js"
 
 export type ColumnRole = "row_no" | "code" | "date" | "version" | "change_type" | "mark" | "text" | "name" | "empty"
 
@@ -52,6 +53,20 @@ const ACTION_WORD =
   "view|read|list|search|create|add|update|edit|write|delete|remove|approve|reject|submit|assign|publish|confirm|cancel|" +
   "upload|download|export|import|print|send|execute|run|manage|full|all|access|crud|[rcud]"
 const ACTION = new RegExp(`^(?:${ACTION_WORD})(?:\\s*[,/;&+]\\s*(?:${ACTION_WORD}))*$`, "i")
+/** Từ hành động tiếng Việt, so trên chữ đã `foldText` (bỏ dấu, dấu câu thành khoảng trắng): "Xem / Sửa" ⇒ "xem sua". */
+const VI_ACTION_WORD = "xem|them|tao|sua|cap nhat|xoa|duyet|tu choi|nop|giao|xac nhan|an|quan ly|toan quyen|khong"
+const VI_ACTION = new RegExp(`^(?:${VI_ACTION_WORD})(?: (?:${VI_ACTION_WORD}))*$`)
+const VI_ACTION_LEAD = new RegExp(`^(?:${VI_ACTION_WORD})(?: |$)`)
+/** Ô "bắt đầu bằng từ hành động" chỉ tính khi ngắn ("Xem đơn của mình") — mô tả dài mở đầu bằng động từ không phải ô đánh dấu. */
+const LEAD_MAX_WORDS = 5
+
+/** Ô đánh dấu đúng nghĩa: dấu (X / ✓), hoặc chỉ gồm từ hành động (EN / VI). */
+const isExactMark = (v: string): boolean => MARK.test(v) || ACTION.test(v) || VI_ACTION.test(foldText(v))
+/** Ô ngắn mở đầu bằng từ hành động tiếng Việt ("Xem tất cả", "Nộp hồ sơ"). */
+const isLeadMark = (v: string): boolean => {
+  const folded = foldText(v)
+  return VI_ACTION_LEAD.test(folded) && folded.split(" ").length <= LEAD_MAX_WORDS
+}
 
 const share = (values: string[], re: RegExp): number => (values.length ? values.filter((v) => re.test(v)).length / values.length : 0)
 
@@ -81,7 +96,9 @@ export const columnRole = (values: string[]): { role: ColumnRole; prefix: string
   if (share(values, VERSION) >= 0.6) return { role: "version", prefix: null }
   if (share(values, CODE) >= 0.6 && !values.every((v) => /^\d+$/.test(v))) return { role: "code", prefix: majorityPrefix(values) }
   if (share(values, CHANGE) >= 0.6) return { role: "change_type", prefix: null }
-  if (values.filter((v) => MARK.test(v) || ACTION.test(v)).length / values.length >= 0.6) return { role: "mark", prefix: null }
+  // Cột tên mở đầu bằng động từ ("Tạo đơn hàng", "Xem sản phẩm") không phải cột đánh dấu: cần ít nhất một ô đánh dấu đúng nghĩa
+  const exact = values.filter(isExactMark).length
+  if (exact && values.filter((v) => isExactMark(v) || isLeadMark(v)).length / values.length >= 0.6) return { role: "mark", prefix: null }
   const avg = values.reduce((n, v) => n + v.length, 0) / values.length
   return { role: avg >= 40 ? "text" : "name", prefix: null }
 }
@@ -130,10 +147,10 @@ export const markMatrixColumns = (shape: TableShape): { nameColumn: number; mark
 
 export const isMarkMatrix = (shape: TableShape): boolean => markMatrixColumns(shape) !== null
 
-/** Ô đánh dấu ⇒ thao tác: "X"/"✓" ⇒ `access`; "view, create" ⇒ hai thao tác; ô trống / "—" ⇒ không có quyền. */
+/** Ô đánh dấu ⇒ thao tác: "X"/"✓" ⇒ `access`; "view, create" ⇒ hai thao tác; ô trống / "—" / "Không …" ⇒ không có quyền. */
 export const markActions = (cell: string): string[] => {
   const v = cell.trim()
-  if (!v || NONE.test(v)) return []
+  if (!v || NONE.test(v) || /^khong(?: |$)/.test(foldText(v))) return []
   if (MARK.test(v)) return ["access"]
   return v
     .split(/[,/;&+]/)

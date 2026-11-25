@@ -83,3 +83,27 @@ describe("conformToFileTable", () => {
     ])
   })
 })
+
+describe("bug #1 FLF-447: bảng NFR của file (Mã · Yêu cầu · Mức ưu tiên)", () => {
+  const fileNfr = () => table(["Mã", "Yêu cầu hiệu năng", "Mức ưu tiên"], [
+    ["NFR-01", "Trang chủ tải dưới 2 giây", "Cao"],
+    ["NFR-02", "Chịu 1000 người dùng đồng thời", "Trung bình"]
+  ])
+  const flintflowNfr = (priority: string) => table(["ID", "Statement", "Metric", "Threshold", "Priority"], [["NFR-06", "Tìm kiếm dưới 1 giây", "", "", priority]])
+
+  it("NFR mới ⇒ dòng mới có Mã, mức ưu tiên theo chữ của file ('Phải có' / 'must' ⇒ 'Cao')", () => {
+    for (const priority of ["Phải có", "must"]) {
+      const out: Block[] = [fileNfr()]
+      expect(appendToFileTables(out, [flintflowNfr(priority)], "fixed:4.2.3")).toEqual([])
+      expect(texts(out[0])[3]).toEqual(["NFR-06", "Tìm kiếm dưới 1 giây", "Cao"])
+    }
+  })
+
+  it("mức file chưa dùng ⇒ giữ nhãn FlintFlow; bảng dựng lại cả đoạn cũng theo chữ của file", () => {
+    const out: Block[] = [fileNfr()]
+    appendToFileTables(out, [flintflowNfr("Có thể có")], "fixed:4.2.3")
+    expect(texts(out[0])[3][2]).toBe("Có thể có")
+    const rebuilt = conformToFileTable(flintflowNfr("Nên có"), texts(fileNfr()), "fixed:4.2.3")
+    expect(texts(rebuilt)[1]).toEqual(["NFR-06", "Tìm kiếm dưới 1 giây", "Trung bình"])
+  })
+})
