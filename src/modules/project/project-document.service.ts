@@ -14,6 +14,7 @@ import { alignOutline, extractDocxHeadings, isDocx } from "../../shared/ai/docum
 import { deleteDocumentChunks, saveDocumentChunks } from "../../shared/ai/document-retrieval/chunk-index.service.js"
 import type { OutlineEntry } from "../../shared/ai/document-retrieval/chunker.js"
 import { assertReferenceProjectQuota, assertReferenceUploadLimit, type ReferenceTokenLimits } from "./document-token-limit.js"
+import { getActionCost, getOrCreateWallet, resolveWalletOrg } from "../../shared/ai/credit-reservation.service.js"
 
 /**
  * FLF-393: heading thật của file .docx, khớp về chỉ số đoạn - chữ phẳng mất style heading nên chỉ lấy được lúc còn buffer.
@@ -191,41 +192,71 @@ export const uploadProjectDocument = async (
   // FLF-393: cắt sẵn thành chunk theo cây section - lượt chat / Draft chỉ nạp đoạn liên quan khi tài liệu vượt trần
   if (parsed) await saveDocumentChunks(project._id, document._id, parsed.text, outline)
 
-  // Step 5: Summarize document bằng AI (Task 2b)
-  // Chỉ chạy nếu parse thành công VÀ chưa từng summarize (summaryStatus !== "success")
-  // Guard này đảm bảo không tính phí credit 2 lần cho cùng 1 document.
-  if (document.parseStatus === "success" && document.summaryStatus !== "success") {
+  // FLF-458 (business-flow §3.6 "Đọc một lần dùng lại nhiều lần"): AI chỉ đọc tài liệu sau khi báo credit và người dùng
+  // xác nhận (`summarizeReferenceDocuments`) — không còn tóm tắt ngay lúc tải lên. `summaryStatus` giữ "pending" (giá trị
+  // mặc định của model) khi parse thành công; parse lỗi thì không có gì để đọc.
+  return document
+}
+
+/** `getActionCost(SUMMARIZE_DOCUMENT)` — 1 tài liệu = 1 lượt AI (Task 2b), không theo độ dài. */
+const summarizeCreditCost = async (): Promise<number> => getActionCost(ActionType.SUMMARIZE_DOCUMENT)
+
+/**
+ * FLF-458: credit cần để AI đọc các tài liệu tham khảo **chưa đọc** của dự án (`summaryStatus: "pending"`, parse thành
+ * công) — báo trước khi chạy hàng loạt (business-flow §2), độc lập với `creditEstimateFor` của I-4. `withBalance`: kèm số
+ * credit khả dụng của ví org sở hữu project (Lead / Analyst).
+ */
+export const pendingSummaryEstimate = async (
+  orgId: string,
+  userId: string,
+  projectId: string,
+  opts: { withBalance: boolean }
+): Promise<{ documents: number; credits: number; available_credits: number | null }> => {
+  await getProjectById(projectId, orgId)
+  const pending = await ProjectDocument.countDocuments({ projectId, supersededBy: null, parseStatus: "success", summaryStatus: "pending" })
+  const credits = pending * (await summarizeCreditCost())
+  if (!pending || !opts.withBalance) return { documents: pending, credits, available_credits: null }
+  const walletOrgId = await resolveWalletOrg(projectId)
+  if (!walletOrgId) return { documents: pending, credits, available_credits: null }
+  const wallet = await getOrCreateWallet(userId, undefined, walletOrgId)
+  return { documents: pending, credits, available_credits: wallet.balance - wallet.reserved }
+}
+
+/**
+ * FLF-458: AI đọc các tài liệu tham khảo đã tải lên nhưng chưa đọc (`summaryStatus: "pending"` sau khi người dùng xác
+ * nhận credit ở `pendingSummaryEstimate`); `documentIds` rỗng ⇒ đọc hết các tài liệu đang chờ. Mỗi tài liệu gọi AI riêng,
+ * lỗi một tài liệu không chặn các tài liệu khác (giữ hành vi cũ: parse/summarize lỗi không chặn phần còn lại).
+ */
+export const summarizeReferenceDocuments = async (
+  orgId: string,
+  userId: string,
+  projectId: string,
+  documentIds: readonly string[] = []
+): Promise<any[]> => {
+  await getProjectById(projectId, orgId)
+  const filter = { projectId, supersededBy: null, parseStatus: "success" as const, summaryStatus: "pending" as const, ...(documentIds.length ? { _id: { $in: documentIds } } : {}) }
+  const documents = await ProjectDocument.find(filter)
+  const results = []
+  for (const document of documents) {
     try {
       const summarizeResult = await executeAiAction<{ summary: string; keyThemes?: string[] }>(
         ActionType.SUMMARIZE_DOCUMENT,
-        {
-          promptVariables: {
-            document_text: document.extractedText || ""
-          }
-        },
+        { promptVariables: { document_text: document.extractedText || "" } },
         projectId,
         userId
       )
-
       document.summary = summarizeResult.data.summary
       document.summaryStatus = "success"
       await document.save()
-
-      console.log(
-        `[DocumentSummarizer] Summarized "${originalName}": ${document.extractedText?.length} chars → ${document.summary?.length} chars`
-      )
+      console.log(`[DocumentSummarizer] Summarized "${document.originalName}": ${document.extractedText?.length} chars → ${document.summary?.length} chars`)
     } catch (summarizeErr: any) {
-      // Summarize thất bại KHÔNG chặn response — document vẫn có extractedText để dùng
       document.summaryStatus = "failed"
       await document.save()
-
-      console.warn(
-        `[DocumentSummarizer] Failed to summarize "${originalName}" (summaryStatus=failed): ${summarizeErr?.message}`
-      )
+      console.warn(`[DocumentSummarizer] Failed to summarize "${document.originalName}" (summaryStatus=failed): ${summarizeErr?.message}`)
     }
+    results.push(document)
   }
-
-  return document
+  return results
 }
 
 /**

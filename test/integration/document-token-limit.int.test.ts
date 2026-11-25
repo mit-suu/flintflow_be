@@ -89,7 +89,9 @@ describe("FLF-405 - trần tổng dự án theo gói", () => {
 
     const list = await request(app).get(url()).set(bearer(seeded.token))
     expect(list.status).toBe(200)
-    expect(list.body.meta).toEqual({ tokens_used: PER_PROJECT, tokens_limit: PER_PROJECT, tokens_per_upload_limit: PER_UPLOAD })
+    // FLF-458: meta thêm `summary_credit_estimate` (tài liệu tham khảo đang chờ AI đọc) — toMatchObject để không phải
+    // liệt kê lại toàn bộ khi có field mới
+    expect(list.body.meta).toMatchObject({ tokens_used: PER_PROJECT, tokens_limit: PER_PROJECT, tokens_per_upload_limit: PER_UPLOAD })
   })
 
   it("Thay bản cũ ⇒ trừ token bản bị thay trước khi so; bản đã bị thay không tính vào tổng", async () => {
