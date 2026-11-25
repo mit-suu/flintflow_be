@@ -161,9 +161,8 @@ app.use(
  * Vai trò cụ thể (Lead / Analyst / Viewer) do requireRole ở từng route quyết định (10.7).
  */
 const orgGuard = [authMiddleware, requireActiveAccount, orgContext] as const
-// Viewer chỉ đọc — chặn mọi thao tác ghi ở một chỗ. Allowlist "ghép tài liệu": chỉ dựng bản đọc từ Spine, không
-// sửa nội dung; chặn thì Viewer không đọc được bản nháp nào chưa có ai ghép. Comment và trả lời comment (UC-49):
-// Viewer được góp ý, comment không đổi nội dung (BR-05); "Resolve" vẫn bị chặn.
+// Viewer chỉ đọc — chặn mọi thao tác ghi ở một chỗ. FLF-466: Viewer chỉ thấy bản ổn định nên không còn allowlist
+// "ghép tài liệu" (dựng bản nháp). Comment và trả lời comment (UC-49): Viewer được góp ý, comment không đổi nội dung (BR-05); "Resolve" vẫn bị chặn.
 app.use(
   "/api/v1/projects",
   ...orgGuard,
