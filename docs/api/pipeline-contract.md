@@ -319,15 +319,18 @@ chỉ đưa lựa chọn khi thật sự cần user quyết.
 
 ```json
 { "id": "Q1", "text": "Hệ thống cần sẵn sàng tới mức nào?", "header": "Uptime", "multiple": false,
+  "recommendation_reason": "Bạn nói khách đặt lịch cả ban đêm",
   "options": [
-    { "label": "99.9% (Khuyến nghị)", "description": "Chuẩn SaaS; cần 2 máy chủ dự phòng" },
+    { "label": "99.9% (Khuyến nghị)", "recommended": true, "description": "Chuẩn SaaS; cần 2 máy chủ dự phòng",
+      "pros": ["Khách đặt lịch lúc nào cũng được"], "cons": ["Thêm chi phí máy chủ"], "risks": ["Giả định có người trực sự cố"] },
     { "label": "99%", "description": "Rẻ hơn; chấp nhận ~7 giờ gián đoạn/tháng" }
   ] }
 ```
 
-- `header` ≤ 12 ký tự (nhãn tab); `options` 2–4 phần tử `{ label, description?, preview? }`; `preview` là chuỗi monospace so bố cục màn/cấu trúc bảng.
+- `header` ≤ 12 ký tự (nhãn tab); `options` 2–4 phần tử `{ label, description?, preview?, pros?, cons?, risks?, recommended? }`; `preview` là chuỗi monospace so bố cục màn/cấu trúc bảng. `pros` / `cons` / `risks` (FLF-449): ưu / nhược / rủi ro-giả định, mỗi mục một chuỗi ngắn, thiếu = rỗng.
 - Server ép luật, không tin prompt: tối đa **4 câu/lượt**; câu còn 1 option ⇒ thành câu mở; > 4 option ⇒ cắt; bỏ option model tự viết kiểu "Khác"/"Other"; `header` cắt ≤ 12.
 - Phương án khuyến nghị đứng đầu, `label` có đuôi ` (Khuyến nghị)` (project EN: ` (Recommended)`). "Khác…" **không** nằm trong `options` — client tự thêm.
+- Khuyến nghị là tuỳ chọn (FLF-449, chốt 03 #3): AI chỉ khuyến nghị khi có căn cứ rõ. Phương án khuyến nghị có `recommended: true` **và** đuôi trên `label` (đuôi giữ cho run-state / client cũ); câu hỏi kèm `recommendation_reason` (vì sao, trỏ về điều cụ thể của dự án). Server bỏ khuyến nghị thiếu lý do (giữ thẻ). Run-state cũ chỉ có đuôi, không cờ, không lý do: client coi đuôi là khuyến nghị.
 - `inline` (FLF-232, tuỳ chọn, chỉ với câu không có `options`): câu mở AI đã hỏi ngay trong lời (`elicit.delta`); client không vẽ thẻ cho câu này — user vẫn trả lời bằng ô chat, server vẫn theo dõi qua `topic_key`. Thiếu ⇒ `false` (client cũ vẽ như câu mở thường).
 - `id` ổn định theo chủ đề: `Q_<topic_key>` (FLF-221; câu không có chủ đề vẫn `Q<n>`). Server vẫn nhận `Q<n>` theo vị trí cho lượt chờ lưu trước đó.
 - Tương thích ngược: `options` có thể là `string[]` ở run-state `waiting_answer` lưu trước 2026-09-27; client đọc cả hai dạng.
@@ -407,3 +410,5 @@ chỉ đưa lựa chọn khi thật sự cần user quyết.
 | 2026-11-23 | contract-change FLF-449 (cảnh báo PDF và ảnh, lỗi L3) | Additive + đổi hành vi. #54 `GET …/documents` và response `POST …/documents` thêm `parseWarnings: ("pdf_no_text" \| "images_skipped")[]` (tài liệu tải trước đó đọc ra `[]`): `images_skipped` = .docx có hình / sơ đồ trong thân, chỉ chữ được đọc; `pdf_no_text` = PDF không có lớp chữ (bản scan) hoặc chữ quá ít so với số trang. **Hành vi:** PDF không có lớp chữ nay lưu `parseStatus: "failed"` (trước là `success` với chữ rỗng, chỉ lộ lúc rút yêu cầu 422), `extractedText` / `tokenCount` `null`, không chunk, không gọi AI tóm tắt. `.doc` Word 97-2003 (nhị phân) lưu `failed` với `parseError` nêu lý do (lưu lại thành .docx). Đọc PDF chuyển sang API lớp `PDFParse` của pdf-parse v2 (cách gọi cũ ném lỗi nên mọi PDF trước đây đều `failed`) |
 
 | 2026-11-23 | contract-change FLF-449 (P1: luật chất lượng, chỗ thiếu của Brief có câu trích) | Additive. `Spine.other_requirements[].source_quote?` (chuỗi ≥ 1 ký tự hoặc `null`): câu nguyên văn trong Brief / tài liệu làm nảy ra mục; không in vào SRS, đổi riêng field này không làm mục `fixed:5.4` đổi / `stale` (`section-registry.ts`), không vào dấu đoạn chế độ 1 (`segment-hash.ts`). Dữ liệu cũ không có ⇒ FE coi như không có câu trích. Bước Danh sách thiếu (S-1.4): `step-registry.json` `reads` thêm `documents`; mỗi op `add other_requirements[]` `kind: open_question` thiếu `source_quote` hoặc có câu trích không là chuỗi con (chuẩn hoá khoảng trắng, nháy, hoa thường) của addendum `content` / `content_en`, chữ `project`, tài liệu của lượt hoặc yêu cầu sửa ⇒ server **bỏ op đó** trước khi kiểm lô (không lỗi, không tốn lượt thử). Draft của S-1 nhận thêm `content` (lời gốc) của addendum. JSON Schema `assets/schema/srs-spine.schema.json` xuất lại. |
+
+| 2026-11-23 | contract-change FLF-449 (thẻ phương án N1, việc 14 lát 1) | Additive. `Question` (`answer_needed`, `run-state.questions`) thêm `recommendation_reason?`; option thêm `pros?`, `cons?`, `risks?` (string[]) và `recommended?`. Đuôi ` (Khuyến nghị)` vẫn đi kèm cờ. Khuyến nghị thiếu lý do bị server bỏ (thẻ giữ). Kiểu dùng chung `OptionAnalysis` / `OptionSet` ở `src/shared/ai/option-analysis.ts` |
