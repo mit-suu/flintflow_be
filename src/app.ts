@@ -168,7 +168,6 @@ app.use(
   "/api/v1/projects",
   ...orgGuard,
   viewerReadOnly([
-    new RegExp("^/[^/]+/assemble$"),
     // Xuất Google Docs không sửa nội dung; như /export/word, Viewer chỉ xuất được bản baseline (kiểm ở controller)
     new RegExp("^/[^/]+/export/google-docs$"),
     new RegExp("^/[^/]+/comments$"),

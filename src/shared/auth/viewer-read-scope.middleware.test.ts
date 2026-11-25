@@ -33,6 +33,8 @@ const DENIED = [
   "/p1/changes",
   "/p1/sources",
   "/p1/documents",
+  "/p1/documents/d1/text",
+  "/p1/documents/d1/download",
   "/p1/chats",
   "/p1/chats/c1",
   "/p1/change-requests",

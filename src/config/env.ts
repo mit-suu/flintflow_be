@@ -164,6 +164,10 @@ const envSchema = z.object({
    */
   REFERENCE_MAX_TOKENS_PER_UPLOAD: z.coerce.number().int().min(1000).default(100000),
 
+  // FLF-466 P08: dải số màn ước tính sau Approve Brief = hệ số × số đầu vào có ở S-1 (goals, other_requirements, mục tính năng).
+  RUN_ESTIMATE_SCREENS_PER_INPUT_MIN: z.coerce.number().positive().default(1.5),
+  RUN_ESTIMATE_SCREENS_PER_INPUT_MAX: z.coerce.number().positive().default(2.5),
+
   // S-9.2 Quality Lens bằng LLM — mặc định TẮT (Phases §9.1, hoãn vì ngân sách).
   REVIEW_LLM_ENABLED: z
     .string()

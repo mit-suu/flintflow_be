@@ -6,14 +6,16 @@
  *
  * - không đích ⇒ Spine hiện tại (như trước; bản nháp mode 2 #18 `source=draft`)
  * - `baseline_id` ⇒ `Baseline.snapshot` (mode 2 #18 `source=baseline&baseline_id=`; `_id` hoặc `BLnnn`)
- * - `version` ⇒ snapshot baseline của DocVersion (mode 1 #14); version không có `baseline_ref` (bản nháp CR) ⇒ 409
- *   `DOCUMENT_LANGUAGE_UNAVAILABLE`, như lượt tải
+ * - `version` ⇒ snapshot baseline của DocVersion (mode 1 #14); Spine của version = `spine_snapshot` (bản nháp CR /
+ *   thay đổi hệ thống) hoặc snapshot baseline; không có cả hai (bản nháp cũ) ⇒ 409 `SNAPSHOT_UNAVAILABLE`, như lượt tải
  */
 
 import * as spineRepository from "../spine/spine.repository.js"
+import { spineSchema } from "../spine/spine.schema.js"
+import type { Spine } from "../spine/spine.types.js"
 import { loadBaselineSpine } from "../render/assemble.service.js"
 import { requireDocVersion } from "../doc-version/doc-version.service.js"
-import { documentLanguageUnavailable, type SpineLoader } from "./translation.service.js"
+import { snapshotUnavailable, type SpineLoader } from "./translation.service.js"
 
 export interface TranslationTarget {
   baseline_id?: string | undefined
@@ -26,7 +28,11 @@ export const targetSpineLoader =
   async () => {
     if (target.version !== undefined) {
       const v = await requireDocVersion(projectId, target.version)
-      if (!v.baseline_ref) throw documentLanguageUnavailable()
+      if (v.spine_snapshot) {
+        const parsed = spineSchema.safeParse(v.spine_snapshot)
+        return parsed.success ? parsed.data : (v.spine_snapshot as Spine)
+      }
+      if (!v.baseline_ref) throw snapshotUnavailable()
       return loadBaselineSpine(projectId, String(v.baseline_ref))
     }
     if (target.baseline_id !== undefined) return loadBaselineSpine(projectId, target.baseline_id)
