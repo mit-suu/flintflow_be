@@ -324,7 +324,9 @@ const BRIEF_UNOWNED_FIELDS: ReadonlySet<string> = new Set(["project.vision", "pr
  * "đã gửi qua email và Zalo OA" khi Zalo nằm ngoài phạm vi).
  */
 export const STEP_EXTRA_READS: Readonly<Record<string, readonly string[]>> = Object.freeze({
-  "S-7.3": ["project.release_scope"]
+  "S-7.3": ["project.release_scope"],
+  // FLF-478: S-2.3 quyết có dịch vụ push hay không, nên phải thấy nền tảng (form_factor)
+  "S-2.3": ["project.form_factor"]
 })
 
 /** Phần thuần của `buildStepContext` — không DB. */

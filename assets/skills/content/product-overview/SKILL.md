@@ -1,7 +1,7 @@
 ---
 skill_id: product-overview
 kind: content
-version: 0.4.0
+version: 0.4.1
 description: "S-2.1–S-2.3 Product Overview, Release 1.0 scope, external systems"
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -62,6 +62,13 @@ generation ⇒ "AI Model Provider"; credits/payments/plans ⇒ "Payment Gateway"
 the matching service. Add them with an `assumptions[]` entry; an empty S-2.3 batch needs a reason
 in `notes`.
 
+Mobile push: when `project.form_factor` contains `mobile_app` and the product reminds or notifies users
+(appointment reminders, status updates), add a system actor "Push Notification Service" (FCM for Android,
+APNs for iOS) with `flows_out: ["Push Notification Request"]` and an `assumptions[]` entry saying why.
+"In-app notification" does **not** mean no push on mobile: it is only seen when the app is open. Drop push
+only when the user said plainly that nobody needs to be told while the app is closed; then record the
+assumption "users only see reminders when they open the app". A web-only product gets no push service by default.
+
 For S-2.3 only, give every added or updated system actor its data exchanges for the Context Diagram.
 Directions are relative to OUR system: `flows_out` = data our system sends to the external actor;
 `flows_in` = data that actor sends back. Write English data noun phrases in Title Case naming the data packet that crosses the boundary ("Payment Request",
@@ -102,4 +109,5 @@ entry rather than an invented confirmed requirement.
 - [ ] `release_scope.in` entries each trace to a stated goal - except the size-limit line, which is there whenever the user gave one (number verbatim).
 - [ ] Every new actor has `kind: "system"` and a project-specific description.
 - [ ] S-2.3 system actors each have ≥1 `flows_in`/`flows_out` data noun phrase, one exchange per item; all actors together have both directions; one-way actors fine, no invented replies.
+- [ ] Mobile product with reminders or notifications ⇒ "Push Notification Service" actor present (or the user's explicit "no push while closed" recorded as an assumption); no push added for web-only.
 - [ ] No diacritics, no Vietnamese in any value that renders to SRS.
