@@ -20,6 +20,12 @@ export const listDocVersions = async (projectId: string | mongoose.Types.ObjectI
 export const latestDocVersion = async (projectId: string | mongoose.Types.ObjectId): Promise<IDocVersion | null> =>
   (await listDocVersions(projectId))[0] ?? null
 
+/** Số version mới nhất, chỉ đọc cột `version` (không nạp file ref / snapshot) — nhãn đầu tài liệu (FLF-484). `null` ⇒ không có DocVersion (mode 2). */
+export const latestDocVersionLabel = async (projectId: string | mongoose.Types.ObjectId): Promise<string | null> => {
+  const all = (await DocVersion.find({ projectId }, { version: 1 }).lean()) as { version: string }[]
+  return all.map((v) => v.version).sort((a, b) => compareDocVersions(b, a))[0] ?? null
+}
+
 export const requireDocVersion = async (projectId: string | mongoose.Types.ObjectId, version: string): Promise<IDocVersion> => {
   const doc = await DocVersion.findOne({ projectId, version })
   if (!doc) throw new Mode1Error("DOC_VERSION_NOT_FOUND", "Không tìm thấy phiên bản tài liệu này.")

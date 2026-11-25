@@ -1,13 +1,11 @@
 /**
- * FLF-411 (U2-6): mô tả dòng §I Record of Changes của một change request theo **ngôn ngữ tài liệu**.
- *
- * Lô ghi của CR mang `reason = "CR-001: <tiêu đề CR>"` — tiêu đề là chữ người dùng gõ (thường là câu chat, vd "Đổi tên hệ
- * thống thành TechMart Store nhé"). Tiêu đề cùng ngôn ngữ tài liệu ⇒ giữ (lời của người dùng); khác ngôn ngữ (câu tiếng Việt
- * trong tài liệu tiếng Anh) ⇒ mô tả dựng tất định từ các thay đổi đã ghi: "CR-001: Update system name; Add use case
- * "Checkout"". Không gọi model, không in mã nội bộ của phần tử (A04, S03) — chỉ tên, hoặc mã tài liệu (UC-01, BR-03).
+ * FLF-411 (U2-6): mô tả dòng §I Record of Changes của một change request theo **ngôn ngữ tài liệu**, dựng tất định từ các
+ * thay đổi đã ghi: "CR-001: Update system name; Add use case "Checkout"". Không gọi model, không in mã nội bộ của phần tử
+ * (A04, S03) — chỉ tên, hoặc mã tài liệu (UC-01, BR-03). FLF-484: không còn chép tiêu đề CR (câu chat của người dùng).
  */
 
-import { hasVietnameseMarks } from "../../shared/i18n/reply-language.js"
+import { createHash } from "node:crypto"
+import type { CrRecordSummary } from "../change-request/change-request.model.js"
 import { isVietnamese, recordTextFor } from "./labels.js"
 import type { Spine } from "../spine/spine.types.js"
 
@@ -58,7 +56,6 @@ const DOCUMENT_ID_ENTITIES: ReadonlySet<string> = new Set(["use_cases", "busines
 /** Số thay đổi nêu trong một dòng; còn lại ghi "and N more changes". */
 const MAX_ITEMS = 3
 
-const CR_REASON = /^(CR-\d{3,}):\s*(.*)$/s
 const TOP = /^([a-z_]+)(?:\[(?:id=)?([^\]]*)\])?(?:\.([a-z_]+))?/
 
 export interface CrRecordChange {
@@ -87,14 +84,31 @@ const itemOf = (change: CrRecordChange, lang: Lang, spine: Spine | undefined): {
   if (entity === "project") return { verb: "update", target: (PROJECT_FIELD_TEXT[field ?? ""] ?? PROJECT_TEXT)[lang] }
   const label = ENTITY_TEXT[entity]?.[lang]
   if (!label) return null
-  // Op đặt lên chính phần tử (`actors[]`, `actors[id=A04]`) ⇒ thêm / xoá phần tử; op vào bên trong phần tử ⇒ cập nhật
-  const onElement = whole === (change.path ?? "")
+  // Op đặt lên chính phần tử (`actors[]`, `actors[id=A04]`) ⇒ thêm / xoá phần tử; op vào bên trong phần tử (kể cả thêm vào
+  // một field mảng như `use_cases[id=UC-01].function_ids`) ⇒ cập nhật
+  const onElement = whole === (change.path ?? "") && !field
   const verb: keyof typeof VERB = onElement && change.op === "add" ? "add" : onElement && change.op === "remove" ? "remove" : "update"
   // FLF-474: op `remove` thì phần tử không còn trong Spine hiện tại — mã của nó có thể đã được cấp lại cho phần tử
   // khác (`spine/change-log.ts` `retiredIds`). Ưu tiên tên lưu sẵn lúc xoá; dữ liệu cũ chưa có thì tra Spine như cũ.
   const name = onElement && change.op === "remove" ? change.removed_name ?? (id ? nameOf(spine, entity, id) : null) : id ? nameOf(spine, entity, id) : null
   const target = name ? `${label} "${name}"` : id && DOCUMENT_ID_ENTITIES.has(entity) ? `${label} ${id}` : label
   return { verb, target }
+}
+
+/** Các thay đổi không trùng của một dòng §I dưới dạng (động từ, đối tượng) theo ngôn ngữ tài liệu — đầu vào của lượt "AI viết gọn" (FLF-492). */
+export const crChangeItems = (changes: readonly CrRecordChange[], language?: string, spine?: Spine): { verb: string; target: string }[] => {
+  const lang: Lang = isVietnamese(language) ? "vi" : "en"
+  const seen = new Set<string>()
+  const items: { verb: string; target: string }[] = []
+  for (const c of changes) {
+    const item = itemOf(c, lang, spine)
+    if (!item) continue
+    const key = `${item.verb} ${item.target}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    items.push({ verb: VERB[item.verb][lang], target: item.target })
+  }
+  return items
 }
 
 /** "Update system name; Add use case "Checkout"" — các thay đổi không trùng, tối đa `MAX_ITEMS`. */
@@ -115,21 +129,46 @@ export const describeCrChanges = (changes: readonly CrRecordChange[], language?:
   return `${items.slice(0, MAX_ITEMS).join("; ")}${more > 0 ? recordTextFor(language).more(more) : ""}`
 }
 
-/** Tiêu đề CR cùng ngôn ngữ tài liệu: tài liệu tiếng Việt ⇔ chữ có dấu tiếng Việt. */
-const fitsLanguage = (text: string, language?: string): boolean => hasVietnameseMarks(text) === isVietnamese(language)
+/** Loại thay đổi của một dòng §I (cột Change type): thêm / sửa / xoá. */
+export type ChangeKind = "A" | "M" | "D"
 
 /**
- * Mô tả dòng §I của một CR: `CR-001: <tiêu đề>` khi tiêu đề cùng ngôn ngữ tài liệu, ngược lại `CR-001: <mô tả dựng từ thay
- * đổi>`. Không dựng được (không path nào đọc được) ⇒ `CR-001: Document updated` theo ngôn ngữ tài liệu.
+ * FLF-484 (lát D): loại của một thay đổi, cùng luật `onElement` của `itemOf` — op `add` đặt lên chính phần tử ⇒ A,
+ * `remove` lên chính phần tử ⇒ D, còn lại (set / add vào mảng con / sửa field) ⇒ M.
+ */
+export const changeKindOf = (change: CrRecordChange): ChangeKind => {
+  const path = change.path ?? ""
+  const m = TOP.exec(path)
+  const onElement = !!m && m[0] === path && !m[3]
+  return onElement && change.op === "add" ? "A" : onElement && change.op === "remove" ? "D" : "M"
+}
+
+/** Dấu vân tay các thay đổi của một dòng §I (op + path, không phụ thuộc thứ tự) — gắn mô tả "AI viết gọn" với đúng dữ liệu nó viết. */
+export const recordChangesHash = (changes: readonly CrRecordChange[]): string =>
+  createHash("sha256")
+    .update(changes.map((c) => `${c.op} ${c.path ?? ""}`).sort().join("\n"))
+    .digest("hex")
+    .slice(0, 16)
+
+/** Ngôn ngữ lưu cùng mô tả viết gọn. */
+export const recordSummaryLanguage = (language?: string): CrRecordSummary["language"] => (isVietnamese(language) ? "vi" : "en")
+
+/**
+ * Mô tả dòng §I của một CR: `CR-001: <mô tả dựng từ thay đổi>` theo ngôn ngữ tài liệu (BF: dựng từ chính các thay đổi,
+ * không chép câu chat hay tiêu đề CR). Không dựng được (không path nào đọc được) ⇒ `CR-001: Document updated`.
  */
 export const crRecordDescription = (
   crId: string,
-  reasons: readonly string[],
   changes: readonly CrRecordChange[],
   language?: string,
-  spine?: Spine
+  spine?: Spine,
+  summaries?: readonly CrRecordSummary[]
 ): string => {
-  const title = reasons.map((r) => CR_REASON.exec(r)).find((m) => m && m[1] === crId)?.[2]?.trim()
-  if (title && fitsLanguage(title, language)) return `${crId}: ${title}`
+  // FLF-492: mô tả AI viết gọn khi còn khớp loại, ngôn ngữ và đúng các thay đổi của dòng; không ⇒ câu dựng sẵn
+  const hash = summaries?.length ? recordChangesHash(changes) : ""
+  const kind = changes.length ? changeKindOf(changes[0]) : "M"
+  const lang = recordSummaryLanguage(language)
+  const concise = summaries?.find((s) => s.kind === kind && s.language === lang && s.changes_hash === hash)
+  if (concise) return `${crId}: ${concise.text}`
   return `${crId}: ${describeCrChanges(changes, language, spine) ?? recordTextFor(language).documentUpdated}`
 }

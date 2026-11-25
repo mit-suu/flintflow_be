@@ -44,7 +44,7 @@ import { Baseline } from "../spine/baseline.model.js"
 import { createChangeLog } from "../spine/change-log.js"
 // T15 review T7: tra tên người ghi thay cho userId thô trong §I (chỉ đọc).
 import { User } from "../user/user.model.js"
-import { ChangeRequest } from "../change-request/change-request.model.js"
+import { ChangeRequest, type CrRecordSummary } from "../change-request/change-request.model.js"
 import { loadDiagramFile } from "../diagram/diagram.service.js"
 import { localizedDiagramPng, type DiagramSource } from "../diagram/localized-diagram.service.js"
 import { capitalize, sectionLabel } from "../spine/human-labels.js"
@@ -86,6 +86,7 @@ import type {
 } from "./rendered-document.types.js"
 import { renderedDocumentSchema } from "./rendered-document.schema.js"
 import { draftVersionLabel } from "./draft-version.js"
+import { latestDocVersionLabel } from "../doc-version/doc-version.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { withoutTemplateMigration } from "../doc-version/template-migration-change.js"
 
@@ -659,6 +660,11 @@ export interface AssembleDeps {
   now: () => Date
   /** T15 review T7: tra tên hiển thị cho `changes[].by` trong §I — mặc định giữ nguyên id (đủ cho test thuần, không cần DB). */
   resolveInCharge?: (by: string) => string
+  /**
+   * FLF-492 — mô tả "AI viết gọn" của dòng CR trong Record of Changes (khoá theo mã CR); mặc định đọc `ChangeRequest.record_summaries`.
+   * Không có ⇒ dòng CR dùng câu dựng sẵn từ thay đổi.
+   */
+  loadRecordSummaries?: RecordSummaryLoader
   /** Gọi khi tải xong ảnh (quan sát/log). `missing` không còn chặn cache — xem chú thích đầu file. */
   onImagesLoaded?: (result: ImageLoadResult) => void
   /** T15 review Th2: gọi khi S-8.4 chạy xong — caller quyết log/trả `meta`, không tự `console.warn` ở đây. */
@@ -760,7 +766,16 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
   }
 }
 
+export type RecordSummaryLoader = (projectId: string, crIds: readonly string[]) => Promise<Map<string, readonly CrRecordSummary[]>>
+
+const loadRecordSummaries: RecordSummaryLoader = async (projectId, crIds) => {
+  if (crIds.length === 0) return new Map()
+  const crs = (await ChangeRequest.find({ projectId, cr_id: { $in: [...crIds] } }, { cr_id: 1, record_summaries: 1 }).lean()) as { cr_id: string; record_summaries?: CrRecordSummary[] }[]
+  return new Map(crs.filter((c) => c.record_summaries?.length).map((c) => [c.cr_id, c.record_summaries as CrRecordSummary[]] as const))
+}
+
 const defaultDeps = (): AssembleDeps => ({
+  loadRecordSummaries,
   loadDiagramPng: defaultDiagramPngLoader,
   now: () => new Date(),
   loadTemplate: loadTemplateLayout,
@@ -865,6 +880,12 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
   const states = computeSectionStates(spine, input.statusChanges)
   // Chỉ mẫu FPT nhận ngôn ngữ — đường layout mode 1 giữ nguyên byte
   const language = input.template ? undefined : input.language
+  // FLF-484: Record of Changes theo ngôn ngữ tài liệu kể cả dự án import (mẫu của file mang `language`); nhãn mode 1 giữ `language`
+  const recordLanguage = input.language ?? input.template?.language
+  // FLF-492: mô tả dòng CR do AI viết gọn lúc phát hành (nếu có)
+  const summaries = deps.loadRecordSummaries
+    ? await deps.loadRecordSummaries(projectId, [...new Set(input.recordChanges.map((c) => c.by).filter((by) => CR_ACTOR.test(by)))])
+    : undefined
   // FLF-265 D11: ngôn ngữ tài liệu ≠ ngôn ngữ gốc ⇒ nội dung từ bản xem đã dịch; số hiệu, thứ tự, trạng thái, cờ vẫn
   // tính trên `spine` gốc. Ảnh: PNG theo ngôn ngữ của sơ đồ đã dịch (N1), còn lại ảnh gốc
   const translated =
@@ -920,7 +941,7 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
     // T15 (mode 1 v3): lịch sử sửa đổi của khách (file gốc) đứng trước, lịch sử FlintFlow nối tiếp. File đã có bảng lịch sử
     // của riêng nó ⇒ không thêm dòng chỉ vì import / ký bản gốc 0.1 (lô `by = import`): bản 0.1 giữ đúng bảng của file, mỗi
     // change request mới thành một dòng
-    recordOfChanges: [...(input.template?.legacyRecord ?? []), ...buildRecordOfChanges(withoutTemplateMigration(withoutImportRows(input.recordChanges, input.template?.legacyRecord?.length ?? 0)), inChargeFor(deps.resolveInCharge, language), language, spine)],
+    recordOfChanges: [...(input.template?.legacyRecord ?? []), ...buildRecordOfChanges(withoutTemplateMigration(withoutImportRows(input.recordChanges, input.template?.legacyRecord?.length ?? 0)), inChargeFor(deps.resolveInCharge, recordLanguage), recordLanguage, spine, summaries)],
     flagsAppendix: buildFlagsAppendix(spine, input.statusChanges, numbers, source, states, titles, language, translated?.localized)
   }
   if (source === "draft") refDoc.watermark = "DRAFT"
@@ -1007,6 +1028,7 @@ export async function assemble(
 
   const { projectId: _projectId, ...spine } = record
   const changes = await spineRepository.listChanges(projectId)
+  const docVersion = await latestDocVersionLabel(projectId)
   const recordChanges = await listChangesForRecord(projectId)
   const resolveInCharge = await buildInChargeResolver(recordChanges, projectId)
   const template = await (merged.loadTemplate ?? loadTemplateLayout)(projectId)
@@ -1020,7 +1042,7 @@ export async function assemble(
       statusChanges: changes,
       recordChanges,
       source: "draft",
-      version: draftVersionLabel(spine, changes),
+      version: draftVersionLabel(spine, changes, docVersion),
       template
     },
     {
@@ -1489,6 +1511,7 @@ const getTranslatedDraftDocument = async (
   const { projectId: _projectId, ...spine } = record
   if (beforeRender) await beforeRender(spine)
   const changes = await spineRepository.listChanges(projectId)
+  const docVersion = await latestDocVersionLabel(projectId)
   const recordChanges = await listChangesForRecord(projectId)
   const resolveInCharge = await buildInChargeResolver(recordChanges, projectId)
   const template = await (deps.loadTemplate ?? loadTemplateLayout)(projectId)
@@ -1501,7 +1524,7 @@ const getTranslatedDraftDocument = async (
       statusChanges: changes,
       recordChanges,
       source: "draft",
-      version: draftVersionLabel(spine, changes),
+      version: draftVersionLabel(spine, changes, docVersion),
       template,
       language: languages.locale,
       sourceLanguage: languages.source
@@ -1595,12 +1618,23 @@ export async function getDocumentWithMeta(
   const { languages } = query
   if (languages && (languages.locale !== languages.source || query.freshTemplate)) {
     const reuse = query.reuseTranslated === true && !query.freshTemplate
-    return query.source === "baseline"
-      ? getTranslatedBaselineDocument(projectId, projectName, query.baseline_id, languages, merged, query.beforeRender, query.recordChanges, reuse)
-      : getTranslatedDraftDocument(projectId, projectName, languages, merged, query.beforeRender, reuse, query.draftHead)
+    if (query.source === "baseline") return getTranslatedBaselineDocument(projectId, projectName, query.baseline_id, languages, merged, query.beforeRender, query.recordChanges, reuse)
+    return withDraftVersionLabel(projectId, await getTranslatedDraftDocument(projectId, projectName, languages, merged, query.beforeRender, reuse, query.draftHead))
   }
   if (query.source === "baseline") return { doc: await getBaselineDocument(projectId, projectName, query.baseline_id, merged) }
-  return getDraftDocument(projectId, projectName, merged, query.draftHead === undefined ? undefined : (query.draftHead?.spine_version ?? null))
+  return withDraftVersionLabel(
+    projectId,
+    await getDraftDocument(projectId, projectName, merged, query.draftHead === undefined ? undefined : (query.draftHead?.spine_version ?? null))
+  )
+}
+
+/**
+ * FLF-484: nhãn bản nháp theo `DocVersion` mới nhất. Bản dựng trong cache khoá theo `spine_version` / danh tính Spine, mà một CR
+ * chỉ có vị trí `comment` tạo version mới khi Spine không đổi ⇒ nhãn trong cache có thể cũ. Ghi đè lúc trả, không dựng lại.
+ */
+const withDraftVersionLabel = async <T extends { doc: RenderedDocument }>(projectId: string, result: T): Promise<T> => {
+  const docVersion = await latestDocVersionLabel(projectId)
+  return docVersion && result.doc.version !== docVersion ? { ...result, doc: { ...result.doc, version: docVersion } } : result
 }
 
 /** FLF-334 B — snapshot Spine của một baseline (`_id` hoặc `BLnnn`; không truyền ⇒ mới nhất). */

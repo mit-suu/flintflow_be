@@ -70,6 +70,8 @@ export const reviewPackageSchema = z.object({
   draft_label: z.string(),
   change_requests: z.array(reviewPackageCrSchema),
   red_open: z.number().int().min(0),
+  /** FLF-492: credit ước tính để AI viết gọn các dòng CR của gói (0 khi không có dòng nào cần viết). */
+  concise_record_credits: z.number().int().min(0),
   submission: z
     .object({
       status: z.enum(["pending", "rejected"]),
@@ -119,8 +121,11 @@ export const compareQuerySchema = z
   .object({ from: docVersionString, to: docVersionString })
   .refine((q) => q.from !== q.to, { message: "from và to phải khác nhau" })
 
-/** `POST /projects/:id/release` (Flow 6) — ghi baseline vào Spine ⇒ mang `base_version`. */
-export const releaseRequestSchema = z.strictObject({ base_version: z.number().int().min(1) })
+/**
+ * `POST /projects/:id/release` (Flow 6) — ghi baseline vào Spine ⇒ mang `base_version`. `concise_record` (FLF-492, M4-02): AI viết gọn
+ * mô tả các dòng CR trong Record of Changes; không truyền / `false` ⇒ câu dựng sẵn từ thay đổi, không tốn credit.
+ */
+export const releaseRequestSchema = z.strictObject({ base_version: z.number().int().min(1), concise_record: z.boolean().optional() })
 
 // ─── response ────────────────────────────────────────────────────
 

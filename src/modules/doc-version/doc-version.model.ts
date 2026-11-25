@@ -5,7 +5,7 @@ import type { ChangeRecordRow } from "../render/section-renderer.js"
  *   `original_ref` = file người dùng upload + stamp + bookmark neo (nút 1.10) để tải lại bản gốc.
  * - `cr_revision` — `0.1`, `0.2`…: `file_ref` = bản render sạch; `tracked_file_ref` (mode 1 v3) = cùng bản đó kèm Track Changes
  *   + comment tác giả = CR id so với version trước (nút 3.14).
- * - `release` — `1.0`, `2.0`…: `file_ref` giữ bản có Track Changes, `clean_file_ref` là bản accept-all (Flow 6).
+ * - `release` — `1.0`, `2.0`…: `file_ref` = `clean_file_ref` = bản render sạch; `tracked_file_ref` (FLF-484) = Track Changes gộp mọi thay đổi kể từ lần phát hành trước (Flow 6).
  */
 
 import type { Spine } from "../spine/spine.types.js"
@@ -20,7 +20,7 @@ export interface IDocVersion extends Document {
   kind: DocVersionKind
   file_ref: string
   clean_file_ref: string | null
-  /** Mode 1 v3 (BPMN 3.14, T6/T7): bản có đánh dấu so với version trước — chỉ `cr_revision`; dựng lỗi ⇒ `null`. */
+  /** Mode 1 v3 (BPMN 3.14, T6/T7): bản có đánh dấu so với version trước (`cr_revision`) hoặc so với lần phát hành trước (`release`); dựng lỗi / đổi mẫu có dịch ở giữa ⇒ `null`. */
   tracked_file_ref: string | null
   /** File người dùng upload (chỉ `imported`, FLF-184) — `null` với version render/CR/release. */
   original_ref: string | null

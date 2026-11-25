@@ -51,6 +51,17 @@ export interface CrAmendment {
   after_round: number
 }
 
+/**
+ * FLF-492 (BF §3.2, M4-02): mô tả "AI viết gọn" của một dòng CR trong Record of Changes. Lưu theo (loại A / M / D, ngôn ngữ);
+ * `changes_hash` là dấu vân tay các thay đổi của dòng lúc viết gọn — thay đổi lệch ⇒ bỏ mô tả này, dùng câu dựng sẵn.
+ */
+export interface CrRecordSummary {
+  kind: "A" | "M" | "D"
+  text: string
+  language: "vi" | "en"
+  changes_hash: string
+}
+
 export interface IChangeRequest extends Document {
   projectId: mongoose.Types.ObjectId
   cr_id: string
@@ -70,6 +81,8 @@ export interface IChangeRequest extends Document {
   seed: CrSeed | null
   /** FLF-445: cờ mà CR này sửa (tạo từ một nhóm cờ ở hàng việc chờ quyết). CR mở giữ các cờ này khỏi hàng đợi. */
   flag_ids: string[]
+  /** FLF-492: mô tả dòng Record of Changes do AI viết gọn khi phát hành (tuỳ chọn). CR cũ: không có. */
+  record_summaries?: CrRecordSummary[]
   materials: CrMaterial[]
   /**
    * Mode 1 v3 phase 7: dữ kiện C-2 báo vẫn thiếu khi buộc đi tiếp (hết vòng hỏi) ⇒ C-4 viết nhưng ghi giả định.
@@ -161,6 +174,20 @@ const changeRequestSchema = new Schema<IChangeRequest>(
       default: null
     },
     flag_ids: { type: [String], default: [] },
+    record_summaries: {
+      type: [
+        new Schema(
+          {
+            kind: { type: String, enum: ["A", "M", "D"], required: true },
+            text: { type: String, required: true, maxlength: 400 },
+            language: { type: String, enum: ["vi", "en"], required: true },
+            changes_hash: { type: String, required: true }
+          },
+          opts
+        )
+      ],
+      default: []
+    },
     proceed_after_warning: { type: Boolean, default: false },
     withdraw_suggested: { type: Boolean, default: false },
     materials: {

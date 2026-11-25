@@ -162,6 +162,7 @@ export const OUTPUT_SCHEMA_NAMES = [
   "crClarify",
   "crPropose",
   "crMaterialImage",
+  "crRecordSummary",
   // Knowledge RAG (FLF-267)
   "knowledgeAnswer",
   // FLF-338 rút yêu cầu từ tài liệu thô

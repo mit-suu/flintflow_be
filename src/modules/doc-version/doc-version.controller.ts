@@ -74,7 +74,7 @@ const packageActor = (req: Parameters<typeof authorizeMode1>[0], auth: Awaited<R
 export const releaseVersion = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const body = parseInput(releaseRequestSchema, req.body)
-  const result = await release(auth.projectId, auth.userId, body.base_version)
+  const result = await release(auth.projectId, auth.userId, body.base_version, { conciseRecord: body.concise_record === true })
   const spineVersion = await settleAfterRelease(packageActor(req, auth), { version: result.version.version, cr_ids: result.cr_ids, spine_version: result.spine_version })
   return sendSuccess(res, 201, { version: toVersionDto(result.version, auth.project), baseline: result.baseline, cr_ids: result.cr_ids, spine_version: spineVersion })
 })

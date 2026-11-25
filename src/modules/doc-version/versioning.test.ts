@@ -71,6 +71,11 @@ describe("versioning - G4", () => {
     expect(versionFileName({ name: "Lumen", release: false, base: "1.0", latestCr: "CR-001", tracked: true })).toBe("Lumen_v1.0+CR-001_tracked_DRAFT.docx")
     expect(versionFileName({ name: "Lumen", release: false, base: "0", original: true })).toBe("Lumen_v0_original.docx")
     expect(versionFileName({ name: "Lumen", release: true, base: "2.0", ext: "pdf" })).toBe("Lumen_v2.0.pdf")
+    // FLF-484: bản nháp mang số phụ, không gắn mã CR
+    expect(versionFileName({ name: "Lumen", release: false, base: "0.1", latestCr: "CR-003", version: "0.4" })).toBe("Lumen_v0.4_DRAFT.docx")
+    expect(versionFileName({ name: "Lumen", release: false, base: "0.1", latestCr: "CR-003", version: "0.4", tracked: true })).toBe("Lumen_v0.4_tracked_DRAFT.docx")
+    expect(versionFileName({ name: "Lumen", release: false, base: "1.0", latestCr: "CR-009", version: "1.3" })).toBe("Lumen_v1.3_DRAFT.docx")
+    expect(versionFileName({ name: "Lumen", release: true, base: "2.0", version: "2.0" })).toBe("Lumen_v2.0.docx")
     // release bỏ qua mã CR; không mang mã dự án
     expect(versionFileName({ name: "Lumen", release: true, base: "1.0", latestCr: "CR-009" })).toBe("Lumen_v1.0.docx")
   })

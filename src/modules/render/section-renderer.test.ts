@@ -6,7 +6,9 @@ import { listSections } from "../spine/section-registry.js"
 import { translationUnits, type UnitValue } from "../translation/translation-units.js"
 import { localizeSpine, renderView } from "./localized-spine.js"
 import type { Block } from "./rendered-document.types.js"
-import { buildRecordOfChanges, renderContentSlot, renderSection, sectionHeadingOf, type SectionRenderContext } from "./section-renderer.js"
+import { buildRecordOfChanges, crRecordUnits, renderContentSlot, renderSection, sectionHeadingOf, type SectionRenderContext } from "./section-renderer.js"
+import { recordChangesHash } from "./cr-record.js"
+import type { CrRecordSummary } from "../change-request/change-request.model.js"
 
 const emptySpine = (): Spine => ({
   project: {
@@ -603,8 +605,8 @@ describe("buildRecordOfChanges", () => {
       change({ txn: "t2", op: "set", reason: "typo fix", at: "2026-09-02T09:00:00.000Z", by: "u2" })
     ])
     expect(rows).toEqual([
-      { date: "2026-09-01", version: "v0.1", change_type: "A", in_charge: "u1", description: "Create Product Overview" },
-      { date: "2026-09-02", version: "v0.2", change_type: "M", in_charge: "u2", description: "Update Product Overview" }
+      { date: "2026-09-01", version: "-", change_type: "A", in_charge: "u1", description: "Create Product Overview" },
+      { date: "2026-09-02", version: "-", change_type: "M", in_charge: "u2", description: "Update Product Overview" }
     ])
   })
 
@@ -615,7 +617,7 @@ describe("buildRecordOfChanges", () => {
     expect(rows).toEqual([
       {
         date: "2026-09-01",
-        version: "v0.1",
+        version: "-",
         change_type: "M",
         in_charge: "u1, u2",
         description: "Create Product Overview"
@@ -631,8 +633,8 @@ describe("buildRecordOfChanges", () => {
       change({ txn: "t4", step_id: "S-5.2@S2", reason: "màn danh sách" })
     ])
     expect(rows.map((r) => [r.version, r.description])).toEqual([
-      ["v0.1", "Create User Requirements"],
-      ["v0.2", "Create Feature & Function Details"]
+      ["-", "Create User Requirements"],
+      ["-", "Create Feature & Function Details"]
     ])
   })
 
@@ -645,7 +647,7 @@ describe("buildRecordOfChanges", () => {
     expect(rows.map((r) => r.description)).toEqual(["Create Product Brief"])
   })
 
-  it("baseline đứng riêng một dòng mang mã baseline; sửa sau đó đánh v<baseline>.n", () => {
+  it("FLF-484: baseline đứng riêng một dòng mang mã baseline (không tiền tố v); dòng soạn trước nó mang số baseline; sửa sau, chưa có baseline kế ⇒ -", () => {
     const rows = buildRecordOfChanges([
       change({ txn: "t1", reason: "sửa trước ký" }),
       change({ txn: "t2", op: "add", path: "baselines[]", step_id: "S-9.5", reason: "Ký baseline v1.0" }),
@@ -653,50 +655,98 @@ describe("buildRecordOfChanges", () => {
       change({ txn: "t4", step_id: null, reason: "sửa ngày sau", at: "2026-09-02T09:00:00.000Z" })
     ])
     expect(rows.map((r) => [r.date, r.version, r.description])).toEqual([
-      ["2026-09-01", "v0.1", "Create Product Overview"],
-      ["2026-09-01", "v1.0", "Baseline v1.0 signed"],
-      ["2026-09-01", "v1.0.1", "sửa sau ký"],
-      ["2026-09-02", "v1.0.2", "sửa ngày sau"]
+      ["2026-09-01", "1.0", "Create Product Overview"],
+      ["2026-09-01", "1.0", "Baseline 1.0"],
+      ["2026-09-01", "-", "sửa sau ký"],
+      ["2026-09-02", "-", "sửa ngày sau"]
     ])
   })
 
-  it("FLF-318: mỗi CR một dòng; FLF-361: mang số bản tài liệu của CR (sau v1.0 là v1.1, v1.2), release in đúng v2.0", () => {
+  it("FLF-318 / FLF-484: mỗi CR một dòng; Version = số lần phát hành chứa dòng (CR trong gói 1.0 ghi 1.0, CR chưa phát hành ghi -)", () => {
     const rows = buildRecordOfChanges([
+      change({ txn: "t0", step_id: null, by: "CR-000", path: "screens[id=S01].name", reason: "CR-000: Thêm màn" }),
       change({ txn: "t1", op: "add", path: "baselines[]", step_id: "S-9.5", reason: "Ký baseline v1.0" }),
-      change({ txn: "t2", step_id: null, by: "CR-001", reason: "CR-001: Thêm use case gửi cảnh báo" }),
-      change({ txn: "t3", step_id: null, by: "CR-002", reason: "CR-002: Sửa tên màn" }),
+      change({ txn: "t2", step_id: null, by: "CR-001", path: "screens[id=S01].name", reason: "CR-001: Thêm use case gửi cảnh báo" }),
+      change({ txn: "t3", step_id: null, by: "CR-002", path: "screens[id=S02].name", reason: "CR-002: Sửa tên màn" }),
       change({ txn: "t4", op: "add", path: "baselines[]", step_id: null, reason: "Baseline 2.0", at: "2026-09-02T09:00:00.000Z" }),
-      change({ txn: "t5", step_id: null, by: "CR-003", reason: "CR-003: Bổ sung NFR", at: "2026-09-03T09:00:00.000Z" })
+      change({ txn: "t5", step_id: null, by: "CR-003", path: "screens[id=S03].name", reason: "CR-003: Bổ sung NFR", at: "2026-09-03T09:00:00.000Z" })
     ], undefined, "vi")
     expect(rows.map((r) => [r.version, r.description])).toEqual([
-      ["v1.0", "Ký baseline v1.0"],
-      ["v1.1", "CR-001: Thêm use case gửi cảnh báo"],
-      ["v1.2", "CR-002: Sửa tên màn"],
-      ["v2.0", "Ký baseline 2.0"],
-      ["v2.1", "CR-003: Bổ sung NFR"]
+      ["1.0", "CR-000: Cập nhật màn hình"],
+      ["1.0", "Baseline 1.0"],
+      ["2.0", "CR-001: Cập nhật màn hình"],
+      ["2.0", "CR-002: Cập nhật màn hình"],
+      ["2.0", "Baseline 2.0"],
+      ["-", "CR-003: Cập nhật màn hình"]
     ])
   })
 
-  it("FLF-318: baseline import 0.1 in v0.1 (trước đây rơi về v1.0); FLF-361: CR sau đó là bản 0.2", () => {
+  it("FLF-484: ba CR rồi lô phát hành 'Baseline 1.0' ⇒ ba dòng CR Version 1.0 + dòng Baseline 1.0; không baseline phía sau ⇒ -", () => {
+    const crs = ["CR-001", "CR-002", "CR-003"].map((by, i) => change({ txn: `c${i}`, step_id: null, by, path: "project.vision", reason: `${by}: x` }))
+    const released = buildRecordOfChanges([...crs, change({ txn: "r", op: "add", path: "baselines[]", step_id: null, by: "u1", reason: "Baseline 1.0" })])
+    expect(released.map((r) => [r.version, r.description])).toEqual([
+      ["1.0", "CR-001: Update product vision"],
+      ["1.0", "CR-002: Update product vision"],
+      ["1.0", "CR-003: Update product vision"],
+      ["1.0", "Baseline 1.0"]
+    ])
+    expect(buildRecordOfChanges(crs).map((r) => r.version)).toEqual(["-", "-", "-"])
+  })
+
+  it("FLF-484: mode 2 - dòng soạn trước 'Ký baseline v1.0' mang 1.0; không có baseline ⇒ -", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", step_id: "S-3.2", reason: "thêm use case" }),
+      change({ txn: "t2", op: "add", path: "baselines[]", step_id: "S-9.5", reason: "Ký baseline v1.0" })
+    ])
+    expect(rows.map((r) => [r.version, r.description])).toEqual([
+      ["1.0", "Create User Requirements"],
+      ["1.0", "Baseline 1.0"]
+    ])
+    expect(buildRecordOfChanges([change({ txn: "t1", step_id: "S-3.2", reason: "thêm use case" })])[0].version).toBe("-")
+  })
+
+  it("FLF-484: lô by import (kể cả Baseline 0.1) không sinh dòng nào; CR sau đó chưa phát hành ghi -", () => {
     const rows = buildRecordOfChanges([
       change({ txn: "t1", op: "add", path: "baselines[]", step_id: null, by: "import", reason: "Baseline 0.1" }),
-      change({ txn: "t2", step_id: null, by: "CR-001", reason: "CR-001: Sửa mô tả" })
+      change({ txn: "t2", step_id: null, by: "CR-001", path: "project.vision", reason: "CR-001: Sửa mô tả" })
     ])
-    expect(rows.map((r) => r.version)).toEqual(["v0.1", "v0.2"])
+    expect(rows.map((r) => [r.version, r.description])).toEqual([["-", "CR-001: Update product vision"]])
+    expect(buildRecordOfChanges([change({ txn: "t1", step_id: null, by: "import", reason: "Import SRS a.docx" })])).toEqual([])
   })
 
-  it("FLF-361: sau CR đầu tiên chỉ thêm một dòng cho CR (v0.2) - baseline import cùng bản với dòng import v0.1, không in dòng riêng", () => {
+  it("FLF-484: lô vẽ lại sơ đồ (reason render) sau CR không thành dòng riêng", () => {
     const rows = buildRecordOfChanges([
-      change({ txn: "t1", step_id: null, by: "import", reason: "Import SRS FAP_SRS_v1.0_fixed.docx" }),
-      change({ txn: "t2", step_id: null, by: "import", reason: "Import: kế hoạch step theo template" }),
-      change({ txn: "t2b", step_id: null, by: "import", reason: "render" }),
-      change({ txn: "t3", op: "add", path: "baselines[]", step_id: null, by: "import", reason: "Baseline 0.1" }),
-      change({ txn: "t4", step_id: null, by: "import", reason: "AI check: term_drift" }),
-      change({ txn: "t5", step_id: null, by: "CR-001", reason: "CR-001: Khoá tài khoản sau 3 lần đăng nhập sai liên tiếp." })
-    ], undefined, "vi")
-    expect(rows.map((r) => [r.version, r.description])).toEqual([
-      ["v0.1", "Import SRS FAP_SRS_v1.0_fixed.docx"],
-      ["v0.2", "CR-001: Khoá tài khoản sau 3 lần đăng nhập sai liên tiếp."]
+      change({ txn: "t1", step_id: null, by: "CR-001", path: "project.vision", reason: "CR-001: Sửa mô tả" }),
+      change({ txn: "t2", step_id: null, by: "CR-001", path: "diagrams[id=D01]", reason: "render" })
+    ])
+    expect(rows.map((r) => r.description)).toEqual(["CR-001: Update product vision"])
+  })
+
+  it("FLF-484: ngày ghi theo giờ Việt Nam (18:30 UTC ngày 24 = 01:30 ngày 25)", () => {
+    const rows = buildRecordOfChanges([change({ txn: "t1", step_id: null, by: "CR-001", path: "project.vision", reason: "x", at: "2026-11-24T18:30:00.000Z" })])
+    expect(rows[0].date).toBe("2026-11-25")
+  })
+
+  it("FLF-484 lát D: CR vừa thêm, vừa xoá, vừa sửa ⇒ ba dòng A / M / D cùng mã CR, cùng Version, mô tả từng nhóm", () => {
+    const spine = { use_cases: [{ id: "UC-09", name: "Remind" }], screens: [{ id: "S01", name: "Home" }] } as unknown as Spine
+    const cr = (over: Partial<Parameters<typeof buildRecordOfChanges>[0][number]>) =>
+      change({ txn: "t1", step_id: null, by: "CR-004", reason: "CR-004: Đổi nhiều thứ", ...over })
+    const rows = buildRecordOfChanges(
+      [
+        cr({ op: "remove", path: "messages[id=MSG-63]" }),
+        cr({ op: "set", path: "screens[id=S01].name" }),
+        cr({ op: "add", path: "use_cases[id=UC-09]" }),
+        change({ txn: "r", op: "add", path: "baselines[]", step_id: null, reason: "Baseline 1.0" })
+      ],
+      undefined,
+      "en",
+      spine
+    )
+    expect(rows.map((r) => [r.change_type, r.version, r.description])).toEqual([
+      ["A", "1.0", 'CR-004: Add use case "Remind"'],
+      ["M", "1.0", 'CR-004: Update screen "Home"'],
+      ["D", "1.0", "CR-004: Delete message MSG-63"],
+      ["A", "1.0", "Baseline 1.0"]
     ])
   })
 
@@ -713,9 +763,11 @@ describe("buildRecordOfChanges", () => {
       "en",
       spine
     )
-    expect(rows.slice(1).map((r) => [r.version, r.in_charge, r.description])).toEqual([
-      ["v0.2", "Tuan Anh", 'CR-001: Update system name; Add use case "Checkout"'],
-      ["v0.3", "CR-002", "CR-002: Faster response time"]
+    // FLF-484: tiêu đề CR không còn được chép; mô tả luôn dựng từ thay đổi, tách theo A / M / D
+    expect(rows.map((r) => [r.version, r.change_type, r.in_charge, r.description])).toEqual([
+      ["-", "A", "Tuan Anh", 'CR-001: Add use case "Checkout"'],
+      ["-", "M", "Tuan Anh", "CR-001: Update system name"],
+      ["-", "M", "CR-002", "CR-002: Update non-functional requirement NFR-01"]
     ])
   })
 
@@ -735,7 +787,7 @@ describe("buildRecordOfChanges", () => {
       change({ txn: "t1", op: "set", path: "steps[id=S-9.5].status", reason: "step-runner: init step" })
     ])
     expect(rows).toHaveLength(1)
-    expect(rows[0].description).toBe("Baseline v1.0 signed")
+    expect(rows[0].description).toBe("Baseline 1.0")
   })
 
   it("sau baseline: mô tả là lời user (tối đa 3), bỏ lý do cascade", () => {
@@ -902,7 +954,7 @@ describe("buildRecordOfChanges - tiếng Việt (FLF-265)", () => {
     expect(rows.map((r) => r.description)).toEqual([
       "Tạo Tổng quan sản phẩm",
       "Cập nhật Tổng quan sản phẩm",
-      "Ký baseline v1.0",
+      "Baseline 1.0",
       "CR 1; CR 2; Sửa sau baseline; và 2 thay đổi khác"
     ])
   })
@@ -916,7 +968,7 @@ describe("buildRecordOfChanges - tiếng Việt (FLF-265)", () => {
       undefined,
       "vi"
     )
-    expect(rows.map((r) => r.description)).toEqual(["Ký baseline", "Cập nhật tài liệu"])
+    expect(rows.map((r) => r.description)).toEqual(["Baseline", "Cập nhật tài liệu"])
   })
 
   it("không truyền ngôn ngữ ⇒ tiếng Anh như cũ", () => {
@@ -1172,5 +1224,45 @@ describe("bug #1 / #3 FLF-447 - bảng NFR và yêu cầu chung", () => {
     const spine: Spine = { ...emptySpine(), common_requirements: [{ id: "C1", category: "date_format", statement: "ISO 8601." }, { id: "C2", category: "Custom", statement: "x" }] }
     const t = tableOf(renderSection(spine, "fixed:5.2", ctx({ language: "en" })).blocks)
     expect(t.rows.map(cells).map((r) => r[0])).toEqual(["Date format", "Custom"])
+  })
+})
+
+// ─── FLF-492: mô tả dòng CR do AI viết gọn ─────────────────────────
+
+describe("buildRecordOfChanges - mô tả AI viết gọn (FLF-492)", () => {
+  const cr = (over: Partial<Parameters<typeof buildRecordOfChanges>[0][number]>) => ({
+    txn: "t1",
+    op: "set",
+    reason: "CR-003: x",
+    at: "2026-09-01T09:00:00.000Z",
+    by: "CR-003",
+    step_id: null,
+    path: "project.vision",
+    ...over
+  })
+  const changes = [cr({}), cr({ txn: "t2", by: "CR-004", path: "project.goals", reason: "CR-004: y" })]
+  const hashOf = (rows: typeof changes) => recordChangesHash(rows)
+
+  it("không truyền summaries ⇒ câu dựng sẵn", () => {
+    expect(buildRecordOfChanges(changes, undefined, "en").map((r) => r.description)).toEqual(["CR-003: Update product vision", "CR-004: Update business goals"])
+  })
+
+  it("mô tả khớp loại, ngôn ngữ và dấu vân tay ⇒ CR-xxx: <câu viết gọn>; lệch hash hoặc lệch ngôn ngữ ⇒ câu dựng sẵn", () => {
+    const summaries = new Map<string, readonly CrRecordSummary[]>([
+      ["CR-003", [{ kind: "M", text: "Reword the product vision", language: "en", changes_hash: hashOf([changes[0]]) }]],
+      ["CR-004", [{ kind: "M", text: "Reword the goals", language: "en", changes_hash: "stale" }]]
+    ])
+    expect(buildRecordOfChanges(changes, undefined, "en", undefined, summaries).map((r) => r.description)).toEqual(["CR-003: Reword the product vision", "CR-004: Update business goals"])
+    // Tài liệu tiếng Việt: mô tả tiếng Anh không dùng
+    expect(buildRecordOfChanges(changes, undefined, "vi", undefined, summaries).map((r) => r.description)).toEqual(["CR-003: Cập nhật tầm nhìn sản phẩm", "CR-004: Cập nhật mục tiêu"])
+  })
+
+  it("crRecordUnits trả đúng các dòng CR sẽ in, kèm câu dựng sẵn", () => {
+    const units = crRecordUnits([...changes, cr({ txn: "t3", by: "CR-004", op: "add", path: "use_cases[id=UC-01]", reason: "CR-004: y" })], "en")
+    expect(units.map((u) => [u.cr_id, u.kind, u.built])).toEqual([
+      ["CR-003", "M", "Update product vision"],
+      ["CR-004", "M", "Update business goals"],
+      ["CR-004", "A", "Add use case UC-01"]
+    ])
   })
 })

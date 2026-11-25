@@ -27,6 +27,9 @@ import type { ReviewPackageDto, ReviewPackageCrDto, ReviewPackageRoundDto } from
 import { listDocVersions } from "./doc-version.service.js"
 import { nextMajor } from "./versioning.js"
 import { assertNoRunningStep } from "../pipeline/run-state.service.js"
+import { stripRecord } from "../import/check.service.js"
+import { captureTemplateSourceBinding } from "./template-source-binding.js"
+import { estimateRecordSummaryCredits, resolveRecordLanguage } from "./record-summary.service.js"
 
 export interface PackageActor {
   projectId: string
@@ -92,6 +95,18 @@ const previousRounds = async (projectId: string, submission: BaselineSubmission 
   return rounds.reverse()
 }
 
+/** FLF-492: credit ước tính cho tuỳ chọn "AI viết gọn" khi phát hành; lỗi ước tính không làm hỏng việc đọc gói ⇒ 0. */
+const conciseRecordCredits = async (projectId: string, record: Parameters<typeof stripRecord>[0], crIds: readonly string[]): Promise<number> => {
+  if (crIds.length === 0) return 0
+  try {
+    const language = await resolveRecordLanguage(projectId, await captureTemplateSourceBinding(projectId))
+    return await estimateRecordSummaryCredits(projectId, stripRecord(record), crIds, language)
+  } catch (err) {
+    console.warn(`[review-package] ${projectId}: không ước tính được credit viết gọn:`, err instanceof Error ? err.message : err)
+    return 0
+  }
+}
+
 /** Trạng thái gói hiện tại của dự án (mọi vai trò đọc được). */
 export const getPackage = async (projectId: string): Promise<ReviewPackageDto> => {
   const record = await spineRepository.get(projectId)
@@ -111,6 +126,7 @@ export const getPackage = async (projectId: string): Promise<ReviewPackageDto> =
     draft_label: draftLabel(base, crIds.length),
     change_requests: crIds.map((id) => byId.get(id)).filter((c): c is IChangeRequest => !!c).map(toCrDto),
     red_open: redOpen,
+    concise_record_credits: await conciseRecordCredits(projectId, record, crIds),
     submission,
     spine_version: record.spine_version,
     rounds

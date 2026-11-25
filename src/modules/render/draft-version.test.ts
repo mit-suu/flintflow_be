@@ -37,6 +37,15 @@ describe("draftVersionLabel - FLF-295", () => {
     expect(draftVersionLabel(spine, changes)).toBe("v1.0 + 1 change")
     expect(draftVersionLabel(spine, [...changes, change("t4", "screens[id=S20]", "2026-10-17T12:00:00.000Z")])).toBe("v1.0 + 2 changes")
   })
+
+  it("FLF-484: có version tài liệu (mode 1) ⇒ trả đúng chuỗi đó, bỏ qua Spine; không có ⇒ luật cũ", () => {
+    const spine = { baselines: [baseline("0.1", "2026-10-17T10:00:00.000Z")] }
+    const changes = [change("t1", "use_cases[id=UC27]", "2026-10-17T11:00:00.000Z")]
+    expect(draftVersionLabel(spine, changes, "0.4")).toBe("0.4")
+    expect(draftVersionLabel(spine, changes, "1.2")).toBe("1.2")
+    expect(draftVersionLabel(spine, changes, null)).toBe("0.1 + 1 change")
+    expect(draftVersionLabel({ baselines: [] }, [], undefined)).toBe("v0")
+  })
 })
 
 describe("unreleasedChangeCount - đổi mẫu (Lỗi #4, BF L113)", () => {
