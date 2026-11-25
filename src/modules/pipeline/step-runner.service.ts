@@ -992,8 +992,8 @@ export const isFixedBatchedStep = (stepId: string): boolean => FIXED_BATCHED_TEM
  * S-7.1: có ít nhất một `validations[kind=business]`. S-7.3: có `abnormal[]` khác rỗng.
  */
 const fixedBatchSourceFn: Readonly<Record<string, (f: Spine["functions"][number]) => boolean>> = {
-  "S-7.1": (f) => f.validations.some((v) => v.kind === "business"),
-  "S-7.3": (f) => f.abnormal.length > 0
+  "S-7.1": (f) => (f.validations ?? []).some((v) => v.kind === "business"),
+  "S-7.3": (f) => (f.abnormal ?? []).length > 0
 }
 
 const isLoopBookkeeping = (stepId: string): boolean => LOOP_BOOKKEEPING_TEMPLATES.has(getStep(stepId).template_id)
