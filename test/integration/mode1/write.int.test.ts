@@ -67,7 +67,10 @@ describe("C-7 ghi Spine + render version mới", () => {
     expect(await readStamp(pkg)).toMatchObject({ project_id: projectId, version: "0.2", source: "cr_revision" })
     expect(texts).toContain(NEW_PERF)
     expect(texts.join("\n")).not.toContain("within 2 seconds")
-    expect(texts.some((t) => t.includes(`${crId}: Faster response time`))).toBe(true)
+    // FLF-484 lát D: mô tả dòng RoC dựng từ thay đổi thật ("Update non-functional requirement NFR-01"), không chép tiêu đề CR —
+    // tiêu đề do người soạn, có thể sai / dài; thay đổi do code ghi mới là sự thật của bản này
+    expect(texts.some((t) => t.includes(`${crId}: Update non-functional requirement NFR-01`))).toBe(true)
+    expect(texts.some((t) => t.includes(`${crId}: Faster response time`))).toBe(false)
     expect(await nfrThreshold(projectId)).toBe("1 s")
 
     // BPMN 3.14 (mode 1 v3, T6): bản có đánh dấu — Track Changes tác giả = CR id, accept-all ra đúng bản sạch
