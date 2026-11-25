@@ -354,6 +354,7 @@ export const planLayout = (input: PlanInput, nextCustomId: () => string): Planne
   const indexOfKey = new Map(targetHeadings.map((h, i) => [h.key, i]))
   const snapshot = !!input.targetIsSnapshot
   const suppressExamples = !snapshot && examplesSuppressed(pairing, input.hasSpineElements)
+  const merged = mergedChildren(pairing, snapshot)
   /** Mỗi mục đích: phần đầu (heading + phần tử đi kèm), phần chuyển vào, phần mục riêng giữ lại. */
   const slots = targetHeadings.map(() => ({ head: [] as PlannedLayoutEntry[], moved: [] as PlannedLayoutEntry[], custom: [] as PlannedLayoutEntry[], after: [] as PlannedLayoutEntry[] }))
   const tail: PlannedLayoutEntry[] = []
@@ -369,6 +370,8 @@ export const planLayout = (input: PlanInput, nextCustomId: () => string): Planne
     const movedPl = all.filter((p) => p.moved)
     const level = heading.level ?? 1
     if (!pairPl.length) {
+      // Heading con cùng mục với heading cha (vd "Trong phạm vi" dưới "1.2 Phạm vi"): nội dung in dưới mục cha, không tạo mục riêng
+      if (merged.has(heading.key) && !movedPl.length) return
       if (!(pairing.ignored_new.includes(heading.key) && suppressExamples)) {
         // Bản chụp: heading là của chính file cũ (đã có id mục thật), không phải mục thiếu của mẫu
         const unmapped = heading.section_id === UNMAPPED_SECTION && !snapshot
@@ -461,6 +464,13 @@ const entryOf = (old: OldHeading, kind: PlannedLayoutEntry["kind"], newKey: stri
  * file nền, giữ ví dụ lại sẽ in mỗi phần tử hai lần (một lần của dự án, một lần ví dụ của mẫu).
  */
 export const examplesSuppressed = (pairing: PairingResult, hasSpineElements = false): boolean => hasSpineElements || pairing.followers.some((f) => f.kind === "element")
+
+/**
+ * Heading con của mẫu đích cùng `section_id` với heading cha (`pairing.children`) gộp vào mục cha: không thành mục thiếu trong layout,
+ * bị bỏ khỏi file nền (cả chữ hướng dẫn) — file và layout khớp nhau. Bản chụp (đổi ngược) giữ nguyên heading của chính file cũ; bản
+ * ghi cũ không có `children` ⇒ rỗng, giữ hành vi cũ.
+ */
+const mergedChildren = (pairing: PairingResult, snapshot: boolean): ReadonlySet<string> => new Set(snapshot ? [] : (pairing.children ?? []))
 
 // ─── dựng ────────────────────────────────────────────────────────
 
@@ -733,6 +743,7 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
   }
 
   const suppressExamples = !input.targetIsSnapshot && examplesSuppressed(pairing, input.hasSpineElements)
+  const merged = mergedChildren(pairing, !!input.targetIsSnapshot)
   /** Mục cũ đã chép khối dưới heading đích ghép cặp — chỉ khi đó mới chép phần tử dời theo nó (như trước: mục dựng từ Spine không kèm khối file cũ). */
   const transplantedOld = new Set<string>()
   for (let i = 0; i < targetHeadings.length; i++) {
@@ -752,6 +763,10 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
           for (const n of elementsAfter(el, isTargetStop)) removeNode(n)
           removeNode(el)
           report({ ...base, key: heading.key, old_key: null, mode: "removed", reason: "Heading ví dụ của mẫu: mục cha đã có phần tử riêng" })
+        } else if (merged.has(heading.key) && !movedPl.length) {
+          for (const n of guidanceBefore) removeNode(n)
+          removeNode(el)
+          report({ ...base, key: heading.key, old_key: null, mode: "removed", reason: "Heading con cùng mục với heading cha: gộp vào mục cha" })
         } else if (!movedPl.length) {
           keepGuidanceOnly(guidanceBefore, heading.guidance)
           report({ ...base, key: heading.key, old_key: null, mode: "guidance" })
@@ -983,7 +998,8 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
         return block.block_id
       }
       const headingMap = [
-        ...headingEls.map((el, i) => ({ block_id: idOf(el), section_id: pairedSectionId(targetHeadings[i]) })),
+        // Heading con gộp vào mục cha đã bỏ khỏi file ⇒ không định vị (nội dung mục nằm dưới heading cha)
+        ...headingEls.flatMap((el, i) => (!el.parentNode && merged.has(targetHeadings[i].key) ? [] : [{ block_id: idOf(el), section_id: pairedSectionId(targetHeadings[i]) }])),
         ...customSlots.map((c) => ({ block_id: idOf(c.el), section_id: c.sectionId }))
       ]
       const spineIds = new Set(spineSlots.map((s) => s.sectionId))

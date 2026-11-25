@@ -27,12 +27,12 @@ import { notify } from "../notification/notification.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { unlockPaths } from "./lock.service.js"
 import { checkBeforeWrite, othersPending, pendingSections, userName } from "./concurrent-edit.js"
-import { elementText, locationDisplay } from "./location-display.js"
+import { changedProjectFields, elementText, locationDisplay } from "./location-display.js"
 import { LARGE_CR_LOCATIONS, previewAfter, proposeEstimate, type ProposeEstimate } from "./propose.service.js"
 import { hasPendingWarning, recheckBeforeWrite } from "./verify.service.js"
 import { getActionCost } from "../../shared/ai/credit-reservation.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
-import { addedElements, currentText, isArrayPath, opElement, valueText } from "./spine-location.js"
+import { PROJECT_PATH, addedElements, currentText, isArrayPath, opElement, projectSectionOf, valueText } from "./spine-location.js"
 import { peekPreview } from "../spine/change.service.js"
 import { markPreviewAsCr } from "../spine/change-transcript.js"
 
@@ -133,11 +133,14 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
   return {
     change_request: { ...toCrDto(cr), created_by_name: (await userName(String(cr.created_by))) ?? null },
     locations: locations.map((l) => {
+      // Lỗi #6: vị trí `project` lưu `fixed:1` từ lúc tìm — có đề xuất thì biết field nào đổi ⇒ đúng mục (vd `slot:goals`)
+      const section_id =
+        l.path === PROJECT_PATH ? (projectSectionOf(changedProjectFields(l.proposal, spine?.project), layout) ?? l.section_id) : l.section_id
       return {
         location_id: l.location_id,
         path: l.path,
-        section_id: l.section_id,
-        section_title: spine && l.section_id !== "misc" ? titleOfSection(spine, l.section_id, layout) : "",
+        section_id,
+        section_title: spine && section_id !== "misc" ? titleOfSection(spine, section_id, layout) : "",
         current_text: spine ? currentText(spine, l.path) : "",
         found_by: [...l.found_by],
         entity_paths: [...l.entity_paths],
