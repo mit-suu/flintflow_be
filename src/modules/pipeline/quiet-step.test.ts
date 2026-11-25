@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Decision, Spine } from "../spine/spine.types.js"
-import { ALWAYS_GATE, conflictsWithLedger, isQuietStep, type QuietInput } from "./quiet-step.js"
+import { ALWAYS_GATE, chatEditVerdict, conflictsWithLedger, hardGateOf, isQuietStep, touchesOnlySkippedSections, type ChatEditInput, type QuietInput } from "./quiet-step.js"
 
 const spineWith = (decisions: Decision[] = []): Spine => ({ decisions } as unknown as Spine)
 
@@ -186,5 +186,61 @@ describe("FLF-432 (FLF-413 #8): bước soạn mà mục của nó còn trống 
   })
   it("mục đã có nội dung ⇒ như cũ", () => {
     expect(isQuietStep(input({ templateId: "S-7.3", emptySections: [] })).quiet).toBe(true)
+  })
+})
+
+describe("lõi cổng cứng dùng chung với bản sửa qua chat", () => {
+  const spineWith2 = (project: Record<string, unknown> = {}): Spine => ({ decisions: [], project } as unknown as Spine)
+  const edit = (over: Partial<ChatEditInput> = {}): ChatEditInput => ({
+    reviewMode: "balanced",
+    touchedSections: ["fixed:2.1"],
+    redDelta: 0,
+    newAssumptions: [],
+    needsPerson: false,
+    spine: spineWith2(),
+    ...over
+  })
+
+  it("hardGateOf: cờ đỏ mới, xoá nội dung, lỗi vẽ, giả định trái điều đã chốt; không có ⇒ null", () => {
+    const base = { redDelta: 0, newAssumptions: [], spine: spineWith2() }
+    expect(hardGateOf(base)).toBeNull()
+    expect(hardGateOf({ ...base, redDelta: 2 })).toEqual({ kind: "red_flags", count: 2 })
+    expect(hardGateOf({ ...base, contentRemoved: true })).toEqual({ kind: "content_removed" })
+    expect(hardGateOf({ ...base, renderFailed: true })).toEqual({ kind: "render_failed" })
+    const decided = { decisions: [{ topic_key: "reliability_uptime", answer: "99%", superseded_by: null }], project: {} } as unknown as Spine
+    expect(hardGateOf({ ...base, spine: decided, newAssumptions: [{ id: "a", text: "Uptime is 99.5 percent" }] })).toEqual({ kind: "assumption_conflict", count: 1 })
+  })
+
+  it("bước vẫn dùng đúng câu lý do cũ sau khi tách lõi", () => {
+    expect(isQuietStep(input({ redDelta: 2 })).reason_vi).toBe("Bước mở thêm 2 cờ đỏ")
+    expect(isQuietStep(input({ contentRemoved: true })).reason_vi).toBe("Bước xoá nội dung đã có")
+    expect(isQuietStep(input({ renderFailed: true })).reason_vi).toBe("Có sơ đồ vẽ lỗi")
+  })
+
+  it("touchesOnlySkippedSections: cần có section và mọi section đều trong danh sách", () => {
+    const spine = spineWith2({ skip_confirm_sections: ["fixed:2.1", "fixed:5.1"] })
+    expect(touchesOnlySkippedSections(["fixed:2.1", "fixed:5.1"], spine)).toBe(true)
+    expect(touchesOnlySkippedSections(["fixed:2.1", "fixed:3.1.2"], spine)).toBe(false)
+    expect(touchesOnlySkippedSections([], spine)).toBe(false)
+  })
+
+  it("chatEditVerdict: strict dừng, ba mức còn lại tự ghi", () => {
+    expect(chatEditVerdict(edit({ reviewMode: "strict" })).quiet).toBe(false)
+    for (const reviewMode of ["balanced", "fast", "milestones"] as const) expect(chatEditVerdict(edit({ reviewMode })).quiet, reviewMode).toBe(true)
+  })
+
+  it("chatEditVerdict: cổng cứng thắng mọi mức, kể cả 'không hỏi lại'", () => {
+    const skipping = spineWith2({ skip_confirm_sections: ["fixed:2.1"] })
+    for (const reviewMode of ["strict", "balanced", "fast", "milestones"] as const) {
+      expect(chatEditVerdict(edit({ reviewMode, spine: skipping, needsPerson: true })).quiet, `${reviewMode} cần người`).toBe(false)
+      expect(chatEditVerdict(edit({ reviewMode, spine: skipping, contentRemoved: true })).reason_vi, `${reviewMode} xoá`).toContain("xoá")
+      expect(chatEditVerdict(edit({ reviewMode, spine: skipping, redDelta: 1 })).reason_vi, `${reviewMode} cờ đỏ`).toContain("1 cờ đỏ")
+    }
+  })
+
+  it("chatEditVerdict: chỉ chạm phần 'không hỏi lại' ⇒ tự ghi ở cả mức strict", () => {
+    const skipping = spineWith2({ skip_confirm_sections: ["fixed:2.1"] })
+    expect(chatEditVerdict(edit({ reviewMode: "strict", spine: skipping })).quiet).toBe(true)
+    expect(chatEditVerdict(edit({ reviewMode: "strict", spine: skipping, touchedSections: ["fixed:2.1", "fixed:3.1.2"] })).quiet).toBe(false)
   })
 })

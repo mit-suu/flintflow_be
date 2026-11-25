@@ -15,12 +15,10 @@ import { sectionHasData } from "../spine/deterministic-check.js"
 import { ORIGINAL_DIAGRAM_DATA, OWNER_COLLECTION, OWNER_DIAGRAM_KINDS, originalDiagramOf, originalSectionOf } from "../spine/original-diagram.js"
 import { impactOf } from "../spine/impact.service.js"
 import { ownerStepOf, sectionsOfPath } from "../spine/section-registry.js"
+import type { SectionSegments } from "../spine/segment-hash.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { LocationFoundBy } from "./change-request.constants.js"
 import { contentSlot } from "../import/content-slots.js"
-
-/** Trần số vị trí một CR — CR chạm quá nhiều chỗ nên tách nhỏ. */
-export const MAX_LOCATIONS = 80
 
 export const PROJECT_PATH = "project"
 
@@ -234,6 +232,36 @@ export const sectionOfElement = (spine: Spine, path: string): string => {
   return impact.owner[0] ?? impact.reads[0] ?? "misc"
 }
 
+/** Field của `project` có mục riêng (phần nhỏ của mẫu bắt buộc) — field khác thuộc `fixed:1`. */
+const PROJECT_FIELD_SLOT: Readonly<Record<string, string>> = {
+  goals: "slot:goals",
+  vision: "slot:vision",
+  release_scope: "slot:scope",
+  form_factor: "slot:platforms"
+}
+
+/** Field `project` mà op chạm: `project.goals` / `project.release_scope.in` ⇒ `goals` / `release_scope`. Theo thứ tự op, không trùng. */
+export const projectFieldsOfOps = (ops: readonly unknown[]): string[] => {
+  const fields: string[] = []
+  for (const o of ops) {
+    const path = o && typeof o === "object" ? (o as Row).path : undefined
+    const m = typeof path === "string" ? /^project\.(\w+)/.exec(path) : null
+    if (m && !fields.includes(m[1])) fields.push(m[1])
+  }
+  return fields
+}
+
+/**
+ * Lỗi #6: mục của vị trí `project` theo field bị đổi — `goals` ⇒ `slot:goals`… nếu layout của dự án có phần nhỏ đó, còn lại
+ * `fixed:1`. Không biết field nào đổi ⇒ `null` (giữ section đã lưu).
+ */
+export const projectSectionOf = (fields: readonly string[], layout?: readonly { section_id: string }[]): string | null => {
+  if (!fields.length) return null
+  const present = new Set((layout ?? []).map((l) => l.section_id))
+  const slot = fields.map((f) => PROJECT_FIELD_SLOT[f]).find((s) => s && present.has(s))
+  return slot ?? "fixed:1"
+}
+
 export interface SpineElement {
   path: string
   value: unknown
@@ -264,24 +292,6 @@ export interface FoundLocation {
 export interface VectorCandidate {
   ref: string
   score: number
-}
-
-/** Vị trí chỉ đến từ ứng viên vector / từ khoá (không có liên kết đồ thị nào). */
-const isRecallOnly = (f: Pick<FoundLocation, "found_by">): boolean => f.found_by.every((b) => b === "vector" || b === "keyword")
-
-/**
- * Trần `room` vị trí, giữ thứ tự tài liệu. Không có ứng viên vector ⇒ cắt đuôi như trước (hành vi cũ, nguồn từ khoá).
- * Có ⇒ ưu tiên vị trí đồ thị (không bị ứng viên vector đẩy ra), chỗ còn lại cho ứng viên vector điểm cao nhất.
- */
-export const capLocations = (found: readonly FoundLocation[], room: number): FoundLocation[] => {
-  if (!found.some((f) => f.found_by.includes("vector") || f.recall_score !== undefined)) return found.slice(0, room)
-  const graph = found.filter((f) => !isRecallOnly(f))
-  const recall = found
-    .filter(isRecallOnly)
-    .sort((a, b) => (b.recall_score ?? b.vector_score ?? 0) - (a.recall_score ?? a.vector_score ?? 0))
-    .slice(0, Math.max(0, room - graph.length))
-  const keep = new Set([...graph.slice(0, room), ...recall].map((f) => f.path))
-  return found.filter((f) => keep.has(f.path))
 }
 
 /**
@@ -420,8 +430,8 @@ export const findSpineLocations = (
     }
   }
   const extra = diagrams.filter((d) => !found.some((f) => f.path === d.path))
-  // Ô thêm mới và vị trí sơ đồ gốc luôn giữ lại khi phải cắt bớt vị trí
-  return [...capLocations(found, Math.max(0, MAX_LOCATIONS - slots.length - extra.length)), ...slots, ...extra]
+  // C-3 liệt kê đủ mọi vị trí chạm tới, không cắt trần (BF §3.2); chi phí C-4 báo trước ở `proposeEstimate`
+  return [...found, ...slots, ...extra]
 }
 
 /** Mảng Spine mà path thuộc về: `use_cases[id=UC-01]` / `use_cases[]` ⇒ `use_cases`; `project` ⇒ `project`. */
@@ -538,4 +548,41 @@ export const systemRenameLocations = (spine: Spine, currentName: string): FoundL
         owner_step: section_id === "misc" || section_id.startsWith("custom:") ? null : ownerStepOf(section_id, spine)
       }
     })
+}
+
+/**
+ * C-3 "sửa chữ" (BF §3.2): đoạn văn giữ nguyên của file gốc (`TemplateProfile.section_segments`, đoạn `original` = mục riêng
+ * `custom_sections[id=…]`) nhắc tên / mã của phần tử mà CR đụng tới ⇒ vị trí để CR sửa chữ trong đoạn đó (đổi tên actor mà
+ * đoạn văn còn tên cũ thì không còn cờ đỏ sau khi ghi). Dùng danh sách nhắc lúc import (`mentions`) nên bắt cả cách viết
+ * khác của mã (`UC01` / `UC-01`). Đã là vị trí rồi thì chỉ gắn thêm phần tử gây ra.
+ */
+export const originalPassageLocations = (spine: Spine, records: readonly SectionSegments[], found: readonly Pick<FoundLocation, "path">[]): FoundLocation[] => {
+  const changed = new Set(found.map((f) => f.path))
+  const exists = new Set(spine.custom_sections.map((c) => c.id))
+  const out = new Map<string, FoundLocation>()
+  for (const r of records) {
+    for (const part of r.parts) {
+      if (part.kind !== "original" || !exists.has(part.custom_id)) continue
+      const hit = part.mentions.map((m) => m.path).filter((p) => changed.has(p))
+      if (!hit.length) continue
+      const path = `custom_sections[id=${part.custom_id}]`
+      const cur = out.get(path) ?? { path, section_id: sectionOfElement(spine, path), found_by: ["mention" as const], entity_paths: [], owner_step: null }
+      cur.entity_paths = [...new Set([...cur.entity_paths, ...hit])]
+      out.set(path, cur)
+    }
+  }
+  return [...out.values()]
+}
+
+/** Gộp vị trí đoạn nguyên văn vào kết quả C-3: đã có thì nối `found_by` / `entity_paths`, chưa có thì thêm cuối. */
+export const withOriginalPassages = (spine: Spine, records: readonly SectionSegments[], found: FoundLocation[]): FoundLocation[] => {
+  const out = found.map((f) => ({ ...f }))
+  for (const p of originalPassageLocations(spine, records, found)) {
+    const same = out.find((f) => f.path === p.path)
+    if (same) {
+      same.found_by = [...new Set([...same.found_by, ...p.found_by])]
+      same.entity_paths = [...new Set([...same.entity_paths, ...p.entity_paths])]
+    } else out.push(p)
+  }
+  return out
 }

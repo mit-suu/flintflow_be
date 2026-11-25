@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Flag, Spine } from "../spine/spine.types.js"
 import { directLocationCount, flagTargets, seedFromFlags } from "./flag-seed.js"
-import { MAX_LOCATIONS } from "./spine-location.js"
 
 const flag = (id: string, over: Partial<Flag> = {}): Flag => ({
   id,
@@ -58,11 +57,11 @@ describe("seedFromFlags", () => {
     for (const id of ["F2", "F3", "F4"]) expect(codeOf(() => seedFromFlags(spine, ["F1", id]))).toBe("FLAG_NOT_OPEN")
   })
 
-  it("chạm quá MAX_LOCATIONS phần tử ⇒ CR_TOO_MANY_LOCATIONS", () => {
-    const n = MAX_LOCATIONS + 1
+  it("nhóm cờ chạm hơn 80 phần tử vẫn nhận, không từ chối", () => {
+    const n = 81
     const flags = Array.from({ length: n }, (_, i) => flag(`F${i}`, { target_id: `NFR-${String(i + 1).padStart(2, "0")}` }))
     const spine = spineWith(flags, n)
     expect(directLocationCount(spine, flagTargets(spine, flags))).toBe(n)
-    expect(codeOf(() => seedFromFlags(spine, flags.map((f) => f.id)))).toBe("CR_TOO_MANY_LOCATIONS")
+    expect(seedFromFlags(spine, flags.map((f) => f.id)).seed.targets).toHaveLength(n)
   })
 })

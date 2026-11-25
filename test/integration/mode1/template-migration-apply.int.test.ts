@@ -79,7 +79,7 @@ const toReady = async (token: string, projectId: string, body: object, choose?: 
   expect((await request(app).post(url(projectId, id, "/confirm-mapping")).set(H(token))).status).toBe(200)
   const dto = (await request(app).get(url(projectId, id)).set(H(token))).body.data as MigrationDto
   const items = [...dto.groups.extra, ...dto.groups.conflict]
-  const decisions = dto.undecided.map((d) => {
+  const decisions = [...dto.groups.extra, ...dto.groups.conflict].map((i) => i.id).map((d) => {
     const item = items.find((i) => i.id === d)!
     const safe = item.choices.filter((c) => !item.ai_choices.includes(c) && !c.startsWith("move_to:"))
     return { id: d, choice: choose?.(d, safe) ?? safe.find((c) => c === "keep_custom") ?? safe[0] }
@@ -199,7 +199,7 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
     const keepAll = await request(app).patch(url(projectId, rid, "/decisions")).set(H(lead.token)).send({ batch: "keep_all" })
     const fresh = keepAll.body.data as MigrationDto
     const items = [...fresh.groups.extra, ...fresh.groups.conflict]
-    const decisions = fresh.undecided.map((d) => ({ id: d, choice: items.find((i) => i.id === d)!.choices.find((c) => c === "delete" || c === "drop_from_print") ?? items.find((i) => i.id === d)!.choices[0] }))
+    const decisions = items.map((i) => i.id).map((d) => ({ id: d, choice: items.find((i) => i.id === d)!.choices.find((c) => c === "delete") ?? items.find((i) => i.id === d)!.choices.find((c) => c === "drop_from_print") ?? items.find((i) => i.id === d)!.choices[0] }))
     if (decisions.length) await request(app).patch(url(projectId, rid, "/decisions")).set(H(lead.token)).send({ decisions })
     expect((await request(app).post(url(projectId, rid, "/ready")).set(H(lead.token))).status).toBe(200)
     const reversed = await request(app).post(url(projectId, rid, "/apply")).set(H(lead.token))
@@ -232,7 +232,7 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
     await request(app).post(url(projectId, rid, "/confirm-mapping")).set(H(lead.token))
     const discard = (await request(app).patch(url(projectId, rid, "/decisions")).set(H(lead.token)).send({ batch: "discard_all" })).body.data as MigrationDto
     const items = [...discard.groups.extra, ...discard.groups.conflict]
-    const decisions = discard.undecided.map((d) => ({ id: d, choice: items.find((i) => i.id === d)!.choices.find((c) => c === "keep_custom") ?? items.find((i) => i.id === d)!.choices[0] }))
+    const decisions = items.map((i) => i.id).map((d) => ({ id: d, choice: items.find((i) => i.id === d)!.choices.find((c) => c === "keep_custom") ?? items.find((i) => i.id === d)!.choices[0] }))
     if (decisions.length) await request(app).patch(url(projectId, rid, "/decisions")).set(H(lead.token)).send({ decisions })
     expect((await request(app).post(url(projectId, rid, "/ready")).set(H(lead.token))).status).toBe(200)
     const applied = await request(app).post(url(projectId, rid, "/apply")).set(H(lead.token))
@@ -413,5 +413,27 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
       expect((await request(app).post(url(projectId, ready.id, suffix)).set(H(other.token))).status, suffix).toBe(404)
     }
     expect((await TemplateMigration.findById(ready.id).lean())!.state).toBe("ready")
+  })
+
+  it("G. mẫu có heading con cùng mục dưới Phạm vi (In / Out of Scope) ⇒ gộp vào mục cha: không thành mục thiếu, file + layout không có heading con (lỗi #5 test FLF-447)", async () => {
+    const lead = await seedFixture("minimal", { balance: 1000 })
+    const scope = styled("u1", "6 Release Scope") + p("In scope: course catalog and enrollment.") + p("Out of scope: offline mode.")
+    const projectId = await baselinedProject(lead, await makeSrsDocx({ extraBody: scope }))
+    const templateScope =
+      styled("u1", "6 Release Scope") + p("[Describe the release scope.]") + styled("u2", "In Scope") + p("[List the in-scope features.]") + styled("u2", "Out of Scope") + p("[List what is out of scope.]")
+    const templateId = await publishTemplate(lead, lead.orgId, "Mẫu chia phạm vi", await makeSrsDocx({ extraBody: templateScope }))
+    const ready = await toReady(lead.token, projectId, { template_id: templateId, version: 1 })
+    const pending = (await TemplateMigration.findById(ready.id).lean())!
+    expect(pending.pairing.children?.length, JSON.stringify(pending.pairing)).toBe(2)
+    expect(ready.groups.missing.map((m) => m.heading_text)).not.toContain("In Scope")
+
+    const applied = await request(app).post(url(projectId, ready.id, "/apply")).set(H(lead.token))
+    expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
+    const migration = (await TemplateMigration.findById(ready.id).lean())!
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    expect(profile.layout.filter((l) => l.section_id === "slot:scope").map((l) => l.heading_text)).toEqual(["6 Release Scope"])
+    expect(profile.layout.some((l) => /^(In|Out of) Scope$/.test(l.heading_text))).toBe(false)
+    expect(profile.migration_missing_sections ?? []).not.toContain("slot:scope")
+    expect(migration.warnings.filter((w) => /heading nhưng layout dự kiến|dựng toàn bộ từ Spine/.test(w))).toEqual([])
   })
 })

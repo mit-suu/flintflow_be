@@ -8,7 +8,6 @@ import type { Spine } from "../spine/spine.types.js"
 import { formatLocationId } from "./cr-impact.service.js"
 import {
   KEYWORD_MAX_HITS,
-  MAX_LOCATIONS,
   rankByKeywords,
   elementPathOf,
   elementValue,
@@ -141,7 +140,7 @@ describe("C-3 findSpineLocations", () => {
 
   it(`FLF-375: từ khoá xếp hạng BM25 - tối đa ${KEYWORD_MAX_HITS} phần tử khớp nhất (không còn trả mọi phần tử chứa chữ)`, () => {
     const s = spine()
-    for (let i = 0; i < MAX_LOCATIONS + 10; i++) s.glossary.push({ id: `G${i}`, term: `login ${i}`, definition: "login term" } as never)
+    for (let i = 0; i < KEYWORD_MAX_HITS + 65; i++) s.glossary.push({ id: `G${i}`, term: `login ${i}`, definition: "login term" } as never)
     const found = findSpineLocations(s, [], ["login"])
     expect(found).toHaveLength(KEYWORD_MAX_HITS)
     expect(found.every((f) => f.found_by.includes("keyword") && (f.keyword_score ?? 0) > 0)).toBe(true)

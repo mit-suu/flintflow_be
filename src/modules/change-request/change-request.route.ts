@@ -61,9 +61,9 @@ const router = Router()
  *                 items: { type: string }
  *     responses:
  *       201: { $ref: '#/components/responses/CrDetail' }
- *       400: { description: "CR_SOURCE_REQUIRED, VALIDATION_ERROR, FLAG_NOT_OPEN, CR_TOO_MANY_LOCATIONS" }
+ *       400: { description: "CR_SOURCE_REQUIRED, VALIDATION_ERROR, FLAG_NOT_OPEN" }
  *       404: { description: FLAG_NOT_FOUND }
- *       409: { description: CR_REQUIRES_BASELINE }
+ *       409: { description: "CR_REQUIRES_BASELINE, PACKAGE_PENDING, CR_OWN_OPEN" }
  *   get:
  *     summary: Danh sách change request, mới nhất trước
  *     tags: [Change requests (mode 1)]
@@ -503,6 +503,27 @@ router.post("/:projectId/change-requests/:crId/groups/:gid/decision", authMiddle
  *       409: { description: CR_INVALID_TRANSITION }
  */
 router.post("/:projectId/change-requests/:crId/close", authMiddleware, crController.close)
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/change-requests/{crId}/revert:
+ *   post:
+ *     summary: Hoàn tác một CR đã ghi = tạo CR mới (nguồn revert) dựng từ giá trị trước của các thay đổi, rồi kiểm C-5
+ *     tags: [Change requests (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/Mode1ProjectId'
+ *       - $ref: '#/components/parameters/CrId'
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [requester], properties: { requester: { type: string } } }
+ *     responses:
+ *       201: { $ref: '#/components/responses/CrDetail' }
+ *       409: { description: "CR_REVERT_NOT_WRITTEN, CR_REVERT_NOTHING, CR_OWN_OPEN, PACKAGE_PENDING" }
+ */
+router.post("/:projectId/change-requests/:crId/revert", authMiddleware, crController.revertCr)
 router.post("/:projectId/change-requests/:crId/cancel", authMiddleware, crController.cancel)
 
 export default router

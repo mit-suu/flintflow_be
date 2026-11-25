@@ -49,19 +49,21 @@ describe("deterministic check qua HTTP", () => {
     expect(flagsResponseSchema.parse((await client.post("/flags/recompute")).body.data)).toHaveLength(0)
 
     const first = await client.post("/flags/recompute", { at_baseline: true })
-    const opened = flagsResponseSchema.parse(first.body.data)
+    const all = flagsResponseSchema.parse(first.body.data)
+    // Lượt ký bản mở hết cổng: ngoài cờ đỏ, Spine trống còn thiếu loại nội dung theo 29148 (tầng 2, cờ vàng)
+    const opened = all.filter((f) => f.level === "red")
     expect(opened.length).toBeGreaterThan(0)
-    expect(opened.every((f) => f.level === "red")).toBe(true)
+    expect(all.filter((f) => f.level === "yellow").every((f) => f.rule_id === "content_type_missing")).toBe(true)
 
     const red = await client.get("/flags?level=red&open=true")
     expect(red.status).toBe(200)
     expect(flagsResponseSchema.parse(red.body.data)).toHaveLength(opened.length)
     const yellow = await client.get("/flags?level=yellow")
-    expect(flagsResponseSchema.parse(yellow.body.data)).toHaveLength(0)
+    expect(flagsResponseSchema.parse(yellow.body.data)).toHaveLength(all.length - opened.length)
 
     const second = await client.post("/flags/recompute", { at_baseline: true })
     expect(second.body.meta.opened).toEqual([])
-    expect(flagsResponseSchema.parse(second.body.data)).toHaveLength(opened.length)
+    expect(flagsResponseSchema.parse(second.body.data)).toHaveLength(all.length)
 
     const progress = progressResponseSchema.parse((await client.get("/progress")).body.data)
     expect(progress.readiness.red_open).toBe(opened.length)

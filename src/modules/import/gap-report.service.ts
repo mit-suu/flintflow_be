@@ -1,7 +1,8 @@
 /**
  * Gap report (nút 1.13, UC-23): cờ đỏ/vàng gộp theo section, hình chưa vẽ, field độ tin thấp. Cờ và mục xếp theo layout
  * file upload; mục riêng ngoài FPT liệt kê trong bố cục, không cờ. Mẫu FPT không bắt buộc (FLF-312): không còn liệt kê
- * đầu mục FPT thiếu / tiêu đề không khớp mẫu. Xuất JSON và `.docx` (báo cáo mới, dùng thư viện `docx` như mode 2 — không phải bản SRS).
+ * tiêu đề không khớp mẫu. Dự án không chọn "Bổ sung các mục còn thiếu": mỗi mục mẫu chuẩn mà khung file không có là một cờ vàng
+ * `standard_section_missing` - cờ nằm trong `spine.flags` nên tự vào `sections` của báo cáo (JSON và .docx), không cần luật riêng. Xuất JSON và `.docx` (báo cáo mới, dùng thư viện `docx` như mode 2 — không phải bản SRS).
  * FLF-171, plan §6 2C. Tải bản `.docx` khi đang `gap_review` ⇒ `delivered` (giao báo cáo, nhánh "không cần sửa").
  */
 
@@ -40,7 +41,11 @@ export const titleOfSection = (
   id: string,
   layout?: readonly LayoutEntry[]
 ): string => {
-  const own = layout?.find((l) => l.section_id === id && l.heading_text.trim())?.heading_text.trim()
+  // Nhiều heading cùng section (heading con import gắn nhầm — Lỗi #6: "1.4 Hệ thống bên ngoài" mang `fixed:1`) ⇒ heading cấp nông nhất
+  const own = layout
+    ?.filter((l) => l.section_id === id && l.heading_text.trim())
+    .reduce<LayoutEntry | undefined>((best, l) => (!best || (l.level ?? 99) < (best.level ?? 99) ? l : best), undefined)
+    ?.heading_text.trim()
   if (own) return own
   const at = id.indexOf(":")
   const kind = at >= 0 ? id.slice(0, at) : id

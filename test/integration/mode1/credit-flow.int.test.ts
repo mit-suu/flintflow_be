@@ -11,6 +11,7 @@ import { crToImpact, crDoc, detail, importedProject, newCr, resetCrMock } from "
 import { CreditWallet } from "../../../src/modules/credits/credit-wallet.model.js"
 import { Notification } from "../../../src/modules/notification/notification.model.js"
 import { ChangeRequest } from "../../../src/modules/change-request/change-request.model.js"
+import { createCr } from "../../../src/modules/change-request/change-request.service.js"
 import { TOPUP_NEEDED } from "../../../src/modules/import/credit-flow.service.js"
 import { fulfillTopupRequests } from "../../../src/modules/billing/topup-request.service.js"
 
@@ -47,7 +48,8 @@ describe("Flow 4 - mode 1", () => {
     await CreditWallet.updateOne({ organizationId: seeded.orgId }, { $set: { balance: 0 } })
     expect(detail(await c.post(`${cr}/propose`)).change_request.paused?.reason).toBe("credits")
 
-    const secondCrId = await newCr(c, "Second CR", "Change the password rule of BR-01 to 10 characters.")
+    // Dựng thẳng CR thứ hai ở service (không qua đường người dùng tạo - mỗi người một CR mở một lúc): chỉ cần một CR dừng "resume_later"
+    const secondCrId = (await createCr(projectId, seeded.userId, { title: "Second CR", description: "Change the password rule of BR-01 to 10 characters.", source: { kind: "verbal", ref: null, note: null }, requester: "PM" })).cr_id
     const other = await crDoc(projectId, secondCrId)
     await ChangeRequest.updateOne({ _id: other._id }, { $set: { status: "proposing", paused: { reason: "resume_later", at: new Date() } } })
 

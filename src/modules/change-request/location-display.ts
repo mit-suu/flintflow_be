@@ -6,7 +6,7 @@
 
 import type { CustomBlock, Spine } from "../spine/spine.types.js"
 import type { LocationProposal } from "./change-location.model.js"
-import { elementValue, isArrayPath } from "./spine-location.js"
+import { PROJECT_PATH, elementValue, isArrayPath, projectFieldsOfOps } from "./spine-location.js"
 
 type Row = Record<string, unknown>
 const isRow = (v: unknown): v is Row => typeof v === "object" && v !== null && !Array.isArray(v)
@@ -86,8 +86,60 @@ const parse = (text: string | null | undefined): unknown => {
   }
 }
 
+/** Op xoá (`remove`) — dấu "xoá nội dung" của CR suy từ `spine_ops`, không có field lưu riêng. */
+export const isRemoveOp = (op: unknown): boolean => isRow(op) && op.op === "remove"
+
+/** Đề xuất có xoá phần tử nào không (mọi op `remove`, kể cả phần tử con). */
+export const hasRemoveOp = (proposal: { spine_ops?: readonly unknown[] } | null | undefined): boolean => (proposal?.spine_ops ?? []).some(isRemoveOp)
+
 /** Mảng của path: `use_cases[id=UC-01]` / `use_cases[]` ⇒ `use_cases`; `project` ⇒ `project`. */
 const collectionOf = (path: string): string => /^(\w+)/.exec(path)?.[1] ?? path
+
+/** Nhãn field của `project` (Lỗi #6) — thẻ CR hiện "Thông tin dự án: Mục tiêu" thay vì tên dự án. */
+const PROJECT_FIELD_LABELS: Readonly<Record<string, string>> = {
+  name: "Tên dự án",
+  system_name: "Tên hệ thống",
+  vision: "Mục đích và tầm nhìn",
+  goals: "Mục tiêu",
+  type: "Loại sản phẩm",
+  domain: "Lĩnh vực",
+  complexity: "Độ phức tạp",
+  form_factor: "Nền tảng",
+  stakes: "Mức độ quan trọng",
+  working_mode: "Cách làm việc",
+  review_mode: "Cách duyệt",
+  skip_confirm_sections: "Mục không hỏi lại",
+  release_scope: "Phạm vi phát hành"
+}
+
+const projectFieldLabel = (field: string): string => PROJECT_FIELD_LABELS[field] ?? field
+
+/** Giá trị một field `project` dạng người đọc: danh sách mỗi dòng một mục, phạm vi tách trong / ngoài. */
+const projectFieldText = (field: string, value: unknown): string => {
+  if (value === null || value === undefined) return ""
+  if (typeof value === "string") return value
+  if (Array.isArray(value)) return value.map((v) => (typeof v === "string" ? v : JSON.stringify(v))).join("\n")
+  if (field === "release_scope" && isRow(value)) {
+    const list = (v: unknown): string => (Array.isArray(v) ? v.filter((x) => typeof x === "string").join("; ") : "")
+    return [list(value.in) && `Trong phạm vi: ${list(value.in)}`, list(value.out) && `Ngoài phạm vi: ${list(value.out)}`].filter(Boolean).join("\n")
+  }
+  return typeof value === "object" ? JSON.stringify(value) : String(value)
+}
+
+/**
+ * Field `project` mà đề xuất đổi: theo op (`project.<field>`); op không nói (ghi đè cả `project`) ⇒ so trước / sau từng field.
+ */
+export const changedProjectFields = (
+  proposal: Pick<LocationProposal, "old_text" | "new_text" | "spine_ops"> | null | undefined,
+  current?: unknown
+): string[] => {
+  const fromOps = projectFieldsOfOps(proposal?.spine_ops ?? [])
+  if (fromOps.length) return fromOps
+  const before = parse(proposal?.old_text) ?? current
+  const after = parse(proposal?.new_text)
+  if (!isRow(before) || !isRow(after)) return []
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])].filter((k) => JSON.stringify(before[k] ?? null) !== JSON.stringify(after[k] ?? null))
+}
 
 export const locationDisplay = (
   spine: Spine | null,
@@ -99,7 +151,7 @@ export const locationDisplay = (
   const current = spine ? elementValue(spine, path) : undefined
   const before = parse(proposal?.old_text) ?? current
   const after = parse(proposal?.new_text)
-  const removes = (proposal?.spine_ops ?? []).some((o) => isRow(o) && o.op === "remove" && o.path === path)
+  const removes = (proposal?.spine_ops ?? []).some((o) => isRemoveOp(o) && (o as Row).path === path)
 
   if (isArrayPath(path)) {
     const added = (Array.isArray(after) ? after : []).filter(isRow)
@@ -109,6 +161,22 @@ export const locationDisplay = (
       change: conclusion === "edit" && added.length ? "add" : conclusion === "comment" ? "comment" : "none",
       before: null,
       after: added.length ? added.map(elementText).join("\n") : null
+    }
+  }
+  if (path === PROJECT_PATH) {
+    const fields = changedProjectFields(proposal, current)
+    if (fields.length) {
+      const one = fields.length === 1
+      const text = (value: unknown): string =>
+        fields.map((f) => (one ? projectFieldText(f, isRow(value) ? value[f] : undefined) : `${projectFieldLabel(f)}: ${projectFieldText(f, isRow(value) ? value[f] : undefined)}`)).join("\n")
+      const change: DisplayChange = conclusion === "edit" ? "edit" : conclusion === "comment" ? "comment" : "none"
+      return {
+        kind: collection,
+        label: clip(fields.map(projectFieldLabel).join(", ")),
+        change,
+        before: before === undefined ? null : text(before),
+        after: change === "edit" ? (after === undefined ? null : text(after)) : change === "comment" ? (proposal?.comment_text ?? null) : null
+      }
     }
   }
   const kind = collection === "custom_sections" ? blockKind(before ?? after) : collection

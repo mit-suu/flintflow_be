@@ -249,6 +249,11 @@ describe("mode 1 - re-upload (UC-24)", () => {
     expect(diff.against_version).toBe("0.1")
     expect(diff.summary).toEqual({ added: 0, removed: 0, modified: 1, moved: 0 })
     expect(diff.blocks[0]).toMatchObject({ block_id: null, change: "modified", before: SRS_FIXTURE_TEXT.purpose, after: EDITED })
+    // FLF-447: entry mang mục chứa nó + loại; số đoạn không đổi theo mục để FE vẽ "⋯ n đoạn"
+    expect(diff.blocks[0]).toMatchObject({ kind: "paragraph", section: expect.any(String) })
+    expect(diff.blocks[0].section).not.toBe("")
+    expect(diff.sections.length).toBeGreaterThan(1)
+    expect(diff.sections.find((x) => x.title === diff.blocks[0].section)).toBeTruthy()
     expect(await DocVersion.countDocuments({ projectId })).toBe(1)
 
     const blocked = await c.upload(await makeSrsDocx())

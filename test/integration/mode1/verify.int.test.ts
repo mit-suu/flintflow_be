@@ -283,18 +283,18 @@ describe("FLF-367 C-5 thấy mâu thuẫn ⇒ hỏi người yêu cầu", () => 
     const asked = detail(await c.post(`${cr}/verify`))
     expect(asked.change_request.status).toBe("awaiting_answers")
     expect(asked.pending_questions).toEqual([CONFLICT])
-    expect(asked.change_request.clarifications.at(-1)!.suggestions).toEqual([[...CONTRADICTION_CHOICES]])
+    expect(asked.change_request.clarifications.at(-1)!.suggestions).toEqual([[...CONTRADICTION_CHOICES.vi]])
     // vị trí bỏ kết luận để C-4 đề xuất lại theo câu trả lời; vị trí giữ như luồng gộp lệnh
     expect(asked.locations.every((l) => l.conclusion === null && l.proposal === null && l.verify === null)).toBe(true)
     expect(((await ChangeLocation.find({ projectId, cr_id: crId }).distinct("path")) as string[]).sort()).toEqual([...pathsBefore].sort())
 
     // trả lời "đổi theo CR" ⇒ C-2 chạy lại với câu trả lời ⇒ C-3 / C-4 / C-5
-    const answered = detail(await c.post(`${cr}/answers`, { answers: [CONTRADICTION_CHOICES[0]] }))
+    const answered = detail(await c.post(`${cr}/answers`, { answers: [CONTRADICTION_CHOICES.vi[0]] }))
     expect(answered.change_request.status).toBe("impact_review")
-    expect(promptsOf("# CR Clarify").at(-1)).toContain(`Q1.1: ${CONFLICT}\nA: ${CONTRADICTION_CHOICES[0]}`)
+    expect(promptsOf("# CR Clarify").at(-1)).toContain(`Q1.1: ${CONFLICT}\nA: ${CONTRADICTION_CHOICES.vi[0]}`)
     detail(await c.post(`${cr}/impact`))
     detail(await c.post(`${cr}/propose`))
-    expect(promptsOf("# CR Propose").at(-1)).toContain(CONTRADICTION_CHOICES[0])
+    expect(promptsOf("# CR Propose").at(-1)).toContain(CONTRADICTION_CHOICES.vi[0])
     // model nêu lại đúng mâu thuẫn đã hỏi ⇒ không hỏi lần nữa, chỉ ghi chú vàng
     const done = detail(await c.post(`${cr}/verify`))
     expect(done.change_request.status).toBe("ready_to_submit")

@@ -8,7 +8,7 @@ import { parseResponse } from "../../shared/ai/response-parser.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
-import { CONTRADICTION_CHOICES, newContradictions } from "./clarify.service.js"
+import { CONTRADICTION_CHOICES, WARNING_CHOICES, newContradictions, pickedProceed } from "./clarify.service.js"
 import { RELATED_PASSAGES_CHARS, crProjection, plainValues, relatedElements, relatedPassages, relatedRules } from "./cr-context.js"
 import { scopeText } from "./verify.service.js"
 
@@ -117,8 +117,36 @@ describe("FLF-367 câu hỏi mâu thuẫn", () => {
       { question: "1 giây hay 2 giây?", suggestions: ["1 giây", " 1 giây ", "2 giây"] }
     ])
     expect(out).toEqual([
-      { question: "Mật khẩu 6 hay 8 ký tự?", suggestions: [...CONTRADICTION_CHOICES] },
+      { question: "Mật khẩu 6 hay 8 ký tự?", suggestions: [...CONTRADICTION_CHOICES.vi] },
       { question: "1 giây hay 2 giây?", suggestions: ["1 giây", "2 giây"] }
     ])
+  })
+
+  it("lựa chọn mặc định theo ngôn ngữ hỏi người yêu cầu", () => {
+    const out = newContradictions({ clarifications: [] } as never, [{ question: "3 or 5 attempts?", suggestions: [] }], "en")
+    expect(out[0].suggestions).toEqual([...CONTRADICTION_CHOICES.en])
+  })
+})
+
+describe("C-2 cảnh báo rồi người yêu cầu chọn làm tiếp", () => {
+  const round = (answers: string[]) => ({
+    round: 1,
+    questions: ["3 hay 5 lần?", "Bỏ đăng nhập làm BR-02 sai. Vẫn muốn làm?"],
+    answers,
+    suggestions: [["3", "5"], [...WARNING_CHOICES.vi]],
+    warning_questions: [1]
+  })
+
+  it("bấm đúng gợi ý đầu của câu cảnh báo ⇒ làm tiếp; chọn bỏ, lời khác hay câu không phải cảnh báo ⇒ không", () => {
+    expect(pickedProceed({ clarifications: [round(["3", " vẫn LÀM "])] } as never)).toBe(true)
+    expect(pickedProceed({ clarifications: [round(["3", "Bỏ yêu cầu này"])] } as never)).toBe(false)
+    expect(pickedProceed({ clarifications: [round(["Vẫn làm", ""])] } as never)).toBe(false)
+    expect(pickedProceed({ clarifications: [{ ...round(["3", "Vẫn làm"]), warning_questions: undefined }] } as never)).toBe(false)
+  })
+
+  it("schema C-2 nhận warning_accepted; sai kiểu thì bỏ qua, không hỏng cả lượt", () => {
+    const base = { ambiguous: false, targets: { keywords: ["đăng nhập"] } }
+    expect((parseResponse(JSON.stringify({ ...base, warning_accepted: true }), ActionType.CR_CLARIFY) as { warning_accepted?: boolean }).warning_accepted).toBe(true)
+    expect((parseResponse(JSON.stringify({ ...base, warning_accepted: "yes" }), ActionType.CR_CLARIFY) as { warning_accepted?: boolean }).warning_accepted).toBeUndefined()
   })
 })

@@ -7,6 +7,8 @@
  *   - flag_red: cờ đỏ mở, chưa "giữ nguyên"; riêng `unconfirmed_assumption` / `screen_pending_at_baseline` (S-9) đổi
  *     thành việc assumption / screen theo `target_id` để thẻ đưa đúng thao tác miễn phí;
  *   - flag_yellow_group: cờ vàng mở chưa waive, chưa giữ nguyên, gom theo phần tử đã chuẩn hoá, không có thì `rule_id@section_id`.
+ *   - chế độ 1 (`flagsOnly`): cờ đỏ cũng gom theo đúng khoá đó (một CR sửa cả nhóm); nhóm một cờ giữ khoá `flag_red:<id>`,
+ *     nhóm nhiều cờ khoá `flag_red:<khoá nhóm>`. Cờ đỏ vẫn đứng trước cờ vàng.
  *   - cờ đang thuộc change request chưa kết thúc (FLF-445) không vào hàng.
  */
 
@@ -160,10 +162,23 @@ export const buildPendingQueue = (spine: Spine, options: PendingQueueOptions = {
   }
 
   const yellow = new Map<string, Flag[]>()
+  const red = new Map<string, Flag[]>()
+  const groupKeyOf = (flag: Flag): string => normalizeTarget(flag.target_id, idIndex) ?? `${flag.rule_id}@${flag.section_id}`
+  const addTo = (map: Map<string, Flag[]>, flag: Flag): void => {
+    const key = groupKeyOf(flag)
+    const bucket = map.get(key)
+    if (bucket) bucket.push(flag)
+    else map.set(key, [flag])
+  }
   for (const flag of spine.flags) {
     if (flag.resolved_at !== null || flagsInCr.has(flag.id)) continue
     if (flag.level === "red") {
       if (flag.kept_reason !== null) continue
+      // Chế độ 1: cờ đỏ gom nhóm như cờ vàng (sửa qua CR theo nhóm)
+      if (flagsOnly) {
+        addTo(red, flag)
+        continue
+      }
       const target = flagsOnly ? null : (flag.target_id ?? null)
       const converted =
         target !== null && flag.rule_id === ASSUMPTION_FLAG_RULE
@@ -191,17 +206,32 @@ export const buildPendingQueue = (spine: Spine, options: PendingQueueOptions = {
     }
     // Đã bỏ qua, hoặc đã "giữ nguyên + lý do" (chế độ 1 không bỏ qua được, FLF-445) ⇒ người dùng đã quyết
     if (flag.waived_by_user || flag.kept_reason !== null) continue
-    const groupKey = normalizeTarget(flag.target_id, idIndex) ?? `${flag.rule_id}@${flag.section_id}`
-    const bucket = yellow.get(groupKey)
-    if (bucket) bucket.push(flag)
-    else yellow.set(groupKey, [flag])
+    addTo(yellow, flag)
+  }
+
+  // Đại diện nhóm: cờ có bước soạn sớm nhất, rồi section sớm nhất, rồi id nhỏ nhất
+  const byLead = (flags: readonly Flag[]): Flag[] =>
+    [...flags].sort((a, b) => stepRank(a.remediation_step) - stepRank(b.remediation_step) || sectionRank(a.section_id) - sectionRank(b.section_id) || compareIds(a.id, b.id))
+
+  for (const [groupKey, flags] of red) {
+    const sorted = byLead(flags)
+    const lead = sorted[0]
+    push({
+      elementId: flags.length === 1 ? lead.id : groupKey,
+      item: {
+        key: flags.length === 1 ? `flag_red:${lead.id}` : `flag_red:${groupKey}`,
+        kind: "flag_red",
+        blocking: true,
+        owner_step: lead.remediation_step,
+        section_id: lead.section_id,
+        entity_path: normalizeTarget(lead.target_id, idIndex),
+        refs: { flag_ids: sorted.map((f) => f.id).sort(compareIds) }
+      }
+    })
   }
 
   for (const [groupKey, flags] of yellow) {
-    // Đại diện nhóm: cờ có bước soạn sớm nhất, rồi section sớm nhất, rồi id nhỏ nhất
-    const sorted = [...flags].sort(
-      (a, b) => stepRank(a.remediation_step) - stepRank(b.remediation_step) || sectionRank(a.section_id) - sectionRank(b.section_id) || compareIds(a.id, b.id)
-    )
+    const sorted = byLead(flags)
     const lead = sorted[0]
     push({
       elementId: groupKey,

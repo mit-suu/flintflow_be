@@ -163,7 +163,9 @@ describe("buildPendingQueue - cờ", () => {
     ])
     // FLF-445: dự án import (chế độ 1) sửa qua change request ⇒ giữ là cờ, không đổi thành việc giả định / màn
     const flagsOnly = buildPendingQueue({ ...spine, progress: { ...spine.progress, current_phase: "S-1" } }, { flagsOnly: true })
-    expect(flagsOnly.items.map((i) => i.key).sort()).toEqual(["flag_red:F1", "flag_red:F2", "flag_red:F3"])
+    // F2 và F3 cùng phần tử màn S4 ⇒ một nhóm (cờ đỏ gom như cờ vàng); F1 một mình giữ khoá theo id cờ
+    expect(flagsOnly.items.map((i) => i.key).sort()).toEqual(["flag_red:F1", "flag_red:screens[id=S4]"])
+    expect(flagsOnly.items.find((i) => i.key === "flag_red:screens[id=S4]")?.refs.flag_ids).toEqual(["F2", "F3"])
     expect(flagsOnly.items.every((i) => i.kind === "flag_red")).toBe(true)
   })
 
@@ -198,6 +200,25 @@ describe("buildPendingQueue - cờ", () => {
       entity_path: "functions[id=FN3]",
       refs: { flag_ids: ["F1", "F2"] }
     })
+  })
+
+  it("chế độ 1: cờ đỏ gom nhóm cùng khoá với cờ vàng, đỏ đứng trước vàng; ngoài chế độ 1 mỗi cờ đỏ một việc", () => {
+    const spine = spineAt("S-7")
+    spine.functions = [{ id: "FN3" } as Spine["functions"][number]]
+    spine.flags = [
+      flag("Y1", { target_id: "FN3", rule_id: "y1" }),
+      flag("R1", { level: "red", target_id: "FN3", rule_id: "r1", remediation_step: "S-4.1" }),
+      flag("R2", { level: "red", target_id: "functions[id=FN3].normal", rule_id: "r2", remediation_step: "S-4.1" }),
+      flag("R3", { level: "red", target_id: null, rule_id: "r3", section_id: "fixed:5.2" }),
+      flag("R4", { level: "red", target_id: "FN3", rule_id: "r4", kept_reason: "giữ vì lý do dài hơn hai mươi ký tự" })
+    ]
+    const q = buildPendingQueue(spine, { flagsOnly: true })
+    expect(q.items.map((i) => [i.key, i.kind, i.blocking, i.refs.flag_ids])).toEqual([
+      ["flag_red:functions[id=FN3]", "flag_red", true, ["R1", "R2"]],
+      ["flag_red:R3", "flag_red", true, ["R3"]],
+      ["flag_yellow_group:functions[id=FN3]", "flag_yellow_group", false, ["Y1"]]
+    ])
+    expect(buildPendingQueue(spine).items.filter((i) => i.kind === "flag_red").map((i) => i.key)).toEqual(["flag_red:R1", "flag_red:R2", "flag_red:R3"])
   })
 
   it("cờ vàng không chuẩn hoá được gom theo rule_id@section_id, entity_path null", () => {

@@ -10,6 +10,7 @@
 
 import { matchTable, TABLE_ENTITIES } from "../import/table-header-dictionary.js"
 import { foldText } from "../import/text-similarity.js"
+import { priorityOf } from "../import/spine-builder.js"
 import type { Block, TableBlock, TableCell } from "./rendered-document.types.js"
 
 const cellText = (cell: TableCell): string => cell.map((r) => r.text).join("").trim()
@@ -63,16 +64,52 @@ const sequenceColumns = (rows: readonly string[][]): Set<number> => {
   return new Set(header.flatMap((h, j) => (SEQUENCE_HEADER.test(h.trim()) && body.every((r) => /^\d*$/.test((r[j] ?? "").trim())) ? [j] : [])))
 }
 
+/**
+ * Bug #1 (FLF-447 test): cột mức ưu tiên của bảng file ghi theo thang riêng ("Cao / Trung bình / Thấp") ⇒ từ vựng của file theo
+ * từng mức MoSCoW (`priorityOf`), lấy ô đầu tiên gặp trong thân bảng. Cột không phải ưu tiên / chưa có ô nào ⇒ không có.
+ */
+const priorityVocabulary = (body: readonly string[][], target: FieldMap): Map<number, Map<string, string>> => {
+  const out = new Map<number, Map<string, string>>()
+  target.fields.forEach((field, j) => {
+    if (!field?.endsWith("[].priority")) return
+    const vocab = new Map<string, string>()
+    for (const r of body) {
+      const value = (r[j] ?? "").trim()
+      const level = value ? priorityOf(value) : null
+      if (level && !vocab.has(level)) vocab.set(level, value)
+    }
+    if (vocab.size) out.set(j, vocab)
+  })
+  return out
+}
+
+/** Ô ưu tiên FlintFlow ("Phải có" / "must") ⇒ chữ cùng mức của file; file chưa dùng mức đó ⇒ giữ nguyên. */
+const inFileVocabulary = (cell: TableCell, vocab: Map<string, string> | undefined): TableCell => {
+  const level = vocab ? priorityOf(cellText(cell)) : null
+  const word = level ? vocab!.get(level) : undefined
+  return word && cell.length ? [{ ...cell[0], text: word }] : cell
+}
+
 /** Dòng của bảng FlintFlow `src` viết lại theo cột của bảng đích (header + bản đồ field + cột số thứ tự). */
-const conformRows = (src: TableBlock, srcMap: FieldMap, header: readonly string[], target: FieldMap, sequence: Set<number>, firstNumber: number): TableCell[][] =>
-  src.rows.map((row, k) =>
+const conformRows = (
+  src: TableBlock,
+  srcMap: FieldMap,
+  header: readonly string[],
+  target: FieldMap,
+  sequence: Set<number>,
+  firstNumber: number,
+  fileBody: readonly string[][] = []
+): TableCell[][] => {
+  const vocab = priorityVocabulary(fileBody, target)
+  return src.rows.map((row, k) =>
     header.map((_, j) => {
       if (sequence.has(j)) return [{ text: String(firstNumber + k) }]
       const field = target.fields[j]
       const i = field ? srcMap.fields.indexOf(field) : -1
-      return i >= 0 ? (row[i] ?? []) : []
+      return i >= 0 ? inFileVocabulary(row[i] ?? [], vocab.get(j)) : []
     })
   )
+}
 
 // ─── Ma trận phân quyền (hàng = màn, cột = vai trò) ────────────────────────────────────────────────
 
@@ -139,7 +176,7 @@ export const conformToFileTable = (block: TableBlock, fileRows: readonly string[
   const target = src ? targetFields(fileRows, sectionId, src.entity) : null
   if (!target || !src) return block
   const header: TableCell[] = fileRows[0].map((h) => [{ text: h, bold: true }])
-  return { type: "table", header, rows: conformRows(block, src, fileRows[0], target, sequenceColumns(fileRows), 1) }
+  return { type: "table", header, rows: conformRows(block, src, fileRows[0], target, sequenceColumns(fileRows), 1, fileRows.slice(1)) }
 }
 
 /** Mọi bảng trong `blocks` khớp lại theo bảng của file (cùng loại phần tử); khối khác giữ nguyên. */
@@ -170,7 +207,7 @@ export const appendToFileTables = (out: Block[], extra: readonly Block[], sectio
       const text = tableRowsText(t)
       const target = targetFields(text, sectionId, src.entity)
       if (!target) continue
-      out[i] = { ...t, rows: [...t.rows, ...conformRows(b, src, text[0], target, sequenceColumns(text), t.rows.length + 1)] }
+      out[i] = { ...t, rows: [...t.rows, ...conformRows(b, src, text[0], target, sequenceColumns(text), t.rows.length + 1, text.slice(1))] }
       merged = true
       break
     }

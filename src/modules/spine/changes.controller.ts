@@ -78,7 +78,10 @@ const authorize = async (req: Request): Promise<Authorized> => {
 const rawInstruction = (req: Request): string | undefined =>
   typeof req.body?.instruction === "string" ? req.body.instruction : undefined
 
-/** Mode 1 đã import xong (mode 1 v3, BPMN Flow 1 ⇒ 3.1): mọi sửa phải qua change request. */
+/**
+ * Sau baseline mọi sửa qua change request (business-flow §3.2): mode 1 đã import xong (dự án tạo mới chuyển sang mode 1
+ * ngay khi Lead ký).
+ */
 const mode1RequiresCr = async (auth: Authorized): Promise<boolean> => auth.mode === "import" && (await changesRequireCr(auth.projectId))
 
 /**
@@ -184,7 +187,11 @@ export const applyChanges = catchAsync(async (req: Request, res: Response) => {
             : byLanguage(replyLanguage, { vi: "Đã xác nhận: nội dung không đổi.", en: "Confirmed: the content is unchanged." })) + stillOpen,
         count,
         spine_version: result.spine_version,
-        ...(result.cr_id ? { cr_id: result.cr_id } : {})
+        ...(result.cr_id ? { cr_id: result.cr_id } : {}),
+        // "Vẫn làm": người dùng áp dụng dù AI cảnh báo — giữ lời cảnh báo cho lượt kiểm sau đọc
+        ...(result.kept_warning ? { kept_warning: result.kept_warning } : {}),
+        // Lệnh nhiều ý: phần rõ đã ghi nhưng câu hỏi cho phần còn lại chưa được trả lời
+        ...(result.request_open ? { request_open: true } : {})
       })
     }
     // FLF-271 (UC-40): sửa theo góp ý Lead ghim ⇒ góp ý tự đóng `fixed` khi có thay đổi thật; lỗi đóng không làm hỏng lượt áp
@@ -216,7 +223,7 @@ const resolveFixedComment = async (req: Request, auth: Authorized, commentId: st
   const role = req.orgContext?.role
   if (!role) return null
   try {
-    await commentService.resolveComment({ projectId: auth.projectId, projectName: auth.init.name ?? "", orgId: requireOrgId(req), userId: auth.userId, role }, commentId, { kind: "fixed", reason: null })
+    await commentService.resolveComment({ projectId: auth.projectId, projectName: auth.init.name ?? "", orgId: requireOrgId(req), userId: auth.userId, role }, commentId, { kind: "fixed", reason: null }, { reopenSteps: false })
     return commentId
   } catch (err) {
     if (err instanceof ApiError && err.code === "COMMENT_NOT_OPEN") return null
@@ -237,7 +244,9 @@ export const previewChanges = catchAsync(async (req: Request, res: Response) => 
   const replyLanguage = await turnReplyLanguage(session, body.instruction, auth.userId)
   let result: changeService.ChangePreviewResult
   try {
-    result = await changeService.preview(
+    // Lệnh gõ trong chat (không phải lô op sẵn của UI), trước baseline: mức duyệt cho phép thì tự ghi ngay sau xem trước
+    const run = requiresCr || body.instruction === undefined || body.ops !== undefined ? changeService.preview : changeService.previewAndMaybeApply
+    result = await run(
       auth.projectId,
       auth.userId,
       { ...body, chat_history: chatHistory, reply_language: replyLanguage, ...clarificationRoundsOf(session) },
@@ -250,7 +259,7 @@ export const previewChanges = catchAsync(async (req: Request, res: Response) => 
   }
   if (session && userText) await changeTranscript.recordChangeTurn(session, userText, changeTranscript.previewPayload(result, replyLanguage, { requiresCr }))
   // FLF-311: lựa chọn chỉ cho transcript (thẻ chọn trong chat) — hình response giữ đúng hợp đồng
-  const { clarification_choices: _choices, ...data } = result
+  const { clarification_choices: _choices, auto_apply_ok: _auto, ...data } = result
   return requiresCr ? sendSuccess(res, 200, data, { requires_cr: true }) : sendSuccess(res, 200, data)
 })
 
