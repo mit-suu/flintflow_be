@@ -86,6 +86,7 @@ import type {
 } from "./rendered-document.types.js"
 import { renderedDocumentSchema } from "./rendered-document.schema.js"
 import { draftVersionLabel } from "./draft-version.js"
+import { latestDocVersionLabel } from "../doc-version/doc-version.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { withoutTemplateMigration } from "../doc-version/template-migration-change.js"
 
@@ -980,6 +981,7 @@ export async function assemble(
 
   const { projectId: _projectId, ...spine } = record
   const changes = await spineRepository.listChanges(projectId)
+  const docVersion = await latestDocVersionLabel(projectId)
   const recordChanges = await listChangesForRecord(projectId)
   const resolveInCharge = await buildInChargeResolver(recordChanges, projectId)
   const template = await (merged.loadTemplate ?? loadTemplateLayout)(projectId)
@@ -993,7 +995,7 @@ export async function assemble(
       statusChanges: changes,
       recordChanges,
       source: "draft",
-      version: draftVersionLabel(spine, changes),
+      version: draftVersionLabel(spine, changes, docVersion),
       template
     },
     {
@@ -1462,6 +1464,7 @@ const getTranslatedDraftDocument = async (
   const { projectId: _projectId, ...spine } = record
   if (beforeRender) await beforeRender(spine)
   const changes = await spineRepository.listChanges(projectId)
+  const docVersion = await latestDocVersionLabel(projectId)
   const recordChanges = await listChangesForRecord(projectId)
   const resolveInCharge = await buildInChargeResolver(recordChanges, projectId)
   const template = await (deps.loadTemplate ?? loadTemplateLayout)(projectId)
@@ -1474,7 +1477,7 @@ const getTranslatedDraftDocument = async (
       statusChanges: changes,
       recordChanges,
       source: "draft",
-      version: draftVersionLabel(spine, changes),
+      version: draftVersionLabel(spine, changes, docVersion),
       template,
       language: languages.locale,
       sourceLanguage: languages.source
@@ -1568,12 +1571,23 @@ export async function getDocumentWithMeta(
   const { languages } = query
   if (languages && (languages.locale !== languages.source || query.freshTemplate)) {
     const reuse = query.reuseTranslated === true && !query.freshTemplate
-    return query.source === "baseline"
-      ? getTranslatedBaselineDocument(projectId, projectName, query.baseline_id, languages, merged, query.beforeRender, query.recordChanges, reuse)
-      : getTranslatedDraftDocument(projectId, projectName, languages, merged, query.beforeRender, reuse, query.draftHead)
+    if (query.source === "baseline") return getTranslatedBaselineDocument(projectId, projectName, query.baseline_id, languages, merged, query.beforeRender, query.recordChanges, reuse)
+    return withDraftVersionLabel(projectId, await getTranslatedDraftDocument(projectId, projectName, languages, merged, query.beforeRender, reuse, query.draftHead))
   }
   if (query.source === "baseline") return { doc: await getBaselineDocument(projectId, projectName, query.baseline_id, merged) }
-  return getDraftDocument(projectId, projectName, merged, query.draftHead === undefined ? undefined : (query.draftHead?.spine_version ?? null))
+  return withDraftVersionLabel(
+    projectId,
+    await getDraftDocument(projectId, projectName, merged, query.draftHead === undefined ? undefined : (query.draftHead?.spine_version ?? null))
+  )
+}
+
+/**
+ * FLF-484: nhãn bản nháp theo `DocVersion` mới nhất. Bản dựng trong cache khoá theo `spine_version` / danh tính Spine, mà một CR
+ * chỉ có vị trí `comment` tạo version mới khi Spine không đổi ⇒ nhãn trong cache có thể cũ. Ghi đè lúc trả, không dựng lại.
+ */
+const withDraftVersionLabel = async <T extends { doc: RenderedDocument }>(projectId: string, result: T): Promise<T> => {
+  const docVersion = await latestDocVersionLabel(projectId)
+  return docVersion && result.doc.version !== docVersion ? { ...result, doc: { ...result.doc, version: docVersion } } : result
 }
 
 /** FLF-334 B — snapshot Spine của một baseline (`_id` hoặc `BLnnn`; không truyền ⇒ mới nhất). */

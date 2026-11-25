@@ -226,6 +226,13 @@ describe("writeDocx - biến thể", () => {
   })
 })
 
+describe("buildDocxFileName - nhãn số bản nháp (FLF-484)", () => {
+  it("bản nháp mode 1 mang số version ⇒ `_v<số>_DRAFT`", () => {
+    expect(buildDocxFileName({ projectName: "Lumen", version: "0.4", source: "draft" })).toBe("Lumen_v0.4_DRAFT.docx")
+    expect(buildDocxFileName({ projectName: "Lumen", version: "1.2", source: "draft" })).toBe("Lumen_v1.2_DRAFT.docx")
+  })
+})
+
 describe("buildDocxFileName - quy tắc chung FLF-334", () => {
   it("bản nháp: gốc baseline (+ N changes bỏ đi) ⇒ _v<gốc>_DRAFT; chưa baseline (v0) ⇒ <tên>_DRAFT", () => {
     expect(buildDocxFileName({ projectName: "Lumen", version: "v1.0 + 3 changes", source: "draft" })).toBe("Lumen_v1.0_DRAFT.docx")

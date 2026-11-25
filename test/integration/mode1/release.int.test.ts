@@ -37,6 +37,7 @@ import {
 } from "../../helpers/mode1-release-p4.js"
 import { releaseResponseSchema, versionsResponseSchema } from "../../../src/modules/doc-version/doc-version.dto.js"
 import { release } from "../../../src/modules/doc-version/release.service.js"
+import { TemplateMigration } from "../../../src/modules/template-migration/template-migration.model.js"
 import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.js"
 import { DocFileNotFoundError, clearDocFileCache, docFileStore, gridFsDocFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
 import { DocxPackage, readBlocks, readStamp } from "../../../src/modules/docx-ooxml/index.js"
@@ -207,6 +208,103 @@ describe("release - gom CR", () => {
   })
 })
 
+describe("release - bản Track Changes gộp (FLF-484)", () => {
+  it("1.0 gộp thay đổi của cả hai CR so với bản gốc; bản sạch không có w:ins; tải được `_v1.0_tracked.docx`", async () => {
+    const { c, projectId } = await projectWithRevision()
+    routeReplaceCr("1 second", "500 ms")
+    expect(await writeCr(c, "Nhanh hơn", "500 ms")).toEqual({ crId: "CR-002", version: "0.3" })
+    const rel = await released(c)
+    expect(rel.cr_ids).toEqual(["CR-001", "CR-002"])
+    expect(rel.version.has_tracked_file).toBe(true)
+    const v10 = await DocVersion.findOne({ projectId, version: "1.0" }).lean()
+    expect(v10!.tracked_file_ref).toBeTruthy()
+    expect(v10!.tracked_file_ref).not.toBe(v10!.file_ref)
+
+    const trackedXml = await documentXml(await docFileStore().load(v10!.tracked_file_ref!))
+    expect(trackedXml).toMatch(/<w:ins[ >]/)
+    expect(trackedXml).toMatch(/<w:del[ >]/)
+    expect(trackedXml).toContain("500 ms")
+    expect(trackedXml).toContain("2 seconds")
+    expect(trackedXml).toContain('w:author="CR-001, CR-002"')
+    expect(await documentXml(await docFileStore().load(v10!.clean_file_ref!))).not.toMatch(/<w:ins[ >]|<w:del[ >]/)
+
+    const versions = versionsResponseSchema.parse((await c.get("/versions")).body.data)
+    expect(versions.find((v) => v.version === "1.0")?.has_tracked_file).toBe(true)
+    const dl = await binary(c.get("/versions/1.0/download?variant=tracked"))
+    expect(dl.status).toBe(200)
+    expect(decodeURIComponent(String(dl.headers["content-disposition"]))).toContain("Lumen LMS_v1.0_tracked.docx")
+  })
+
+  it("2.0 so với 1.0, không so với bản gốc: chỉ hiện thay đổi sau 1.0", async () => {
+    const { c, projectId } = await projectWithRevision()
+    await released(c)
+    routeReplaceCr("1 second", "500 ms")
+    expect(await writeCr(c, "Nhanh hơn", "500 ms")).toEqual({ crId: "CR-002", version: "1.1" })
+    const second = await released(c)
+    expect(second.version.has_tracked_file).toBe(true)
+    const v20 = await DocVersion.findOne({ projectId, version: "2.0" }).lean()
+    const xml = await documentXml(await docFileStore().load(v20!.tracked_file_ref!))
+    expect(xml).toContain('w:author="CR-002"')
+    expect(xml).not.toContain('w:author="CR-001')
+    expect(xml).toMatch(/<w:ins[ >]/)
+    // CR-001 (2 seconds ⇒ 1 second) đã nằm trong 1.0, không phải thay đổi của 2.0
+    expect(xml).not.toContain("2 seconds")
+  })
+})
+
+describe("release - bản Track Changes khi có đổi mẫu giữa hai lần phát hành (FLF-484)", () => {
+  // Chèn thẳng bản ghi đổi mẫu đã áp dụng (không qua dịch vụ đổi mẫu): `trackedPolicySince` chỉ đọc `state`, `applied_at`, `translated`
+  const insertMigration = (projectId: string, translated: boolean) =>
+    TemplateMigration.collection.insertOne({ projectId: new mongoose.Types.ObjectId(projectId), state: "applied", applied_at: new Date(Date.now() + 1000), translated })
+
+  it("đổi mẫu kèm dịch ⇒ bản phát hành không có bản đánh dấu", async () => {
+    const { c, projectId } = await projectWithRevision()
+    await insertMigration(projectId, true)
+    const rel = await released(c)
+    expect(rel.version.has_tracked_file).toBe(false)
+    expect((await DocVersion.findOne({ projectId, version: "1.0" }).lean())!.tracked_file_ref).toBeNull()
+  })
+
+  it("đổi mẫu không dịch ⇒ vẫn có bản đánh dấu (chỉ so nội dung)", async () => {
+    const { c, projectId } = await projectWithRevision()
+    await insertMigration(projectId, false)
+    const rel = await released(c)
+    expect(rel.version.has_tracked_file).toBe(true)
+    expect((await DocVersion.findOne({ projectId, version: "1.0" }).lean())!.tracked_file_ref).toBeTruthy()
+  })
+})
+
+describe("nhãn đầu tài liệu theo số bản nháp (FLF-484)", () => {
+  const draftLabel = async (c: Mode1Api) => {
+    const res = await c.get("/document?source=draft")
+    expect(res.status).toBe(200)
+    return res.body.data.version as string
+  }
+
+  it("bản nháp mang đúng số version mới nhất, không còn `+ N changes`; sau phát hành là 1.0", async () => {
+    const { c } = await projectWithRevision()
+    expect(await draftLabel(c)).toBe("0.2")
+    await released(c)
+    expect(await draftLabel(c)).toBe("1.0")
+  })
+
+  it("version mới mà spine_version không đổi (CR chỉ có comment) ⇒ nhãn theo version mới, không dính cache", async () => {
+    const { c, projectId } = await projectWithRevision()
+    expect(await draftLabel(c)).toBe("0.2")
+    const prev = (await DocVersion.findOne({ projectId, version: "0.2" }).lean())!
+    const { _id, ...rest } = prev
+    await DocVersion.create({ ...rest, version: "0.3", based_on: "0.2", cr_ids: ["CR-099"], tracked_file_ref: null })
+    expect(await draftLabel(c)).toBe("0.3")
+  })
+
+  it("tên file xuất bản nháp theo số version: `_v0.2_DRAFT.docx`", async () => {
+    const { c } = await projectWithRevision()
+    const res = await binary(c.get("/export/word?source=draft"))
+    expect(res.status).toBe(200)
+    expect(decodeURIComponent(String(res.headers["content-disposition"]))).toContain("_v0.2_DRAFT.docx")
+  })
+})
+
 describe("release - lỗi giữa chừng", () => {
   it("snapshot baseline lỗi ⇒ xoá file vừa lưu (không mồ côi), không tạo version; chạy lại được", async () => {
     const { c, projectId } = await projectWithRevision()
@@ -214,13 +312,15 @@ describe("release - lỗi giữa chừng", () => {
     failSnapshot.on = true
     const res = await releaseNow(c)
     expect(res.status).toBe(500)
+    // xoá cả bản sạch lẫn bản Track Changes gộp
     expect(await gridFsFileCount(projectId)).toBe(filesBefore)
     expect(await DocVersion.countDocuments({ projectId, version: "1.0" })).toBe(0)
 
     failSnapshot.on = false
     const again = await released(c)
     expect(again.version.version).toBe("1.0")
-    expect(await gridFsFileCount(projectId)).toBe(filesBefore + 1)
+    // bản sạch + bản Track Changes gộp (FLF-484)
+    expect(await gridFsFileCount(projectId)).toBe(filesBefore + 2)
   })
 })
 

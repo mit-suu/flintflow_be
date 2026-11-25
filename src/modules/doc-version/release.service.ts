@@ -24,7 +24,9 @@ import { docFileStore } from "./doc-file.store.js"
 import { DocVersion, type IDocVersion } from "./doc-version.model.js"
 import { listDocVersions } from "./doc-version.service.js"
 import { renderVersionFile } from "./render-version.js"
-import { nextMajor } from "./versioning.js"
+import { isStableDocVersion, nextMajor } from "./versioning.js"
+import { trackedPolicySince } from "./migration-tracked-policy.js"
+import { releaseTrackedAuthor, saveTrackedFile } from "./tracked-file.js"
 import { proposeTemplateFromBaseline } from "../import/template-skeleton.service.js"
 
 export interface ReleaseResult {
@@ -32,6 +34,20 @@ export interface ReleaseResult {
   baseline: BaselineEntry
   cr_ids: string[]
   spine_version: number
+}
+
+const buildReleaseTracked = async (projectId: string, versions: IDocVersion[], buffer: Buffer, crIds: readonly string[], next: string): Promise<string | null> => {
+  // `versions` đã sắp mới ⇒ cũ: mốc so là bản ổn định gần nhất (lần phát hành trước hoặc bản gốc import)
+  const prev = versions.find((v) => isStableDocVersion(v))
+  if (!prev) return null
+  const policy = await trackedPolicySince(projectId, prev.createdAt)
+  if (policy === "none") return null
+  return saveTrackedFile(projectId, prev.clean_file_ref ?? prev.file_ref, buffer, {
+    name: `${next}_tracked`,
+    author: releaseTrackedAuthor(crIds, next),
+    date: new Date(),
+    contentOnly: policy === "content_only"
+  })
 }
 
 export const release = async (projectId: string, userId: string, baseVersion: number): Promise<ReleaseResult> => {
@@ -69,6 +85,8 @@ export const release = async (projectId: string, userId: string, baseVersion: nu
   const recordSnapshot = templateSource ? await listChangesForRecord(projectId) : null
   const buffer = await renderVersionFile(projectId, projectName, stripRecord(record), { version: next, stampSource: "release", pendingRecord: [releaseRow], templateSource, ...(recordSnapshot ? { recordChanges: recordSnapshot } : {}) })
   const fileRef = await docFileStore().save(buffer, { projectId, kind: "version", name: next })
+  // FLF-484: bản Track Changes gộp mọi thay đổi kể từ lần phát hành trước (hoặc bản gốc import). Đổi mẫu có dịch ở giữa ⇒ không tạo.
+  const trackedRef = await buildReleaseTracked(projectId, versions, buffer, crIds, next)
 
   let baseline: BaselineEntry
   let spineVersion: number
@@ -85,6 +103,7 @@ export const release = async (projectId: string, userId: string, baseVersion: nu
     spineVersion = snap.spine_version
   } catch (err) {
     await docFileStore().remove(fileRef)
+    if (trackedRef) await docFileStore().remove(trackedRef)
     throw err
   }
 
@@ -94,6 +113,7 @@ export const release = async (projectId: string, userId: string, baseVersion: nu
     kind: "release",
     file_ref: fileRef,
     clean_file_ref: fileRef,
+    tracked_file_ref: trackedRef,
     based_on: latest.version,
     cr_ids: crIds,
     baseline_ref: baseline.id,
