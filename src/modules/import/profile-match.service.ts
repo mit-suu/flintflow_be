@@ -516,6 +516,9 @@ const TABLE_HOME: Readonly<Record<string, { section: string; header: RegExp | nu
   glossary: { section: "fixed:5.5", header: /term|thuật ngữ|abbreviation|acronym|viết tắt/i }
 }
 
+/** Mục phân quyền màn hình (ma trận màn hình × vai trò). */
+const PERMISSION_SECTION = "fixed:3.1.3"
+
 const tableHome = (rows: string[][]): string | null => {
   const { entity, shape } = matchTable(rows, null)
   const home = entity ? TABLE_HOME[entity] : undefined
@@ -593,6 +596,8 @@ const withContentSignals = (blocks: readonly ProfileBlock[], entries: HeadingMap
     const unmatched = !e.template_section && (e.section_id === UNMAPPED_SECTION || isContentSlot(e.section_id))
     if (matchedByTitle && (!isContentSection(e.section_id) || isProvisionalSection(e.section_id))) return e
     if (!matchedByTitle && !unmatched) return e
+    // Cột đầu của ma trận phân quyền luôn là màn hình: bảng trông như bảng màn hình không phải bằng chứng ngược với tiêu đề 3.1.3
+    if (matchedByTitle && e.section_id === PERMISSION_SECTION && home.entity === "screens") return e
     used.add(home.section)
     return {
       ...e,

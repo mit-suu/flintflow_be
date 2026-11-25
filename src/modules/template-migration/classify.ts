@@ -176,11 +176,18 @@ export const sameColumns = (a: TableShape, b: TableShape): boolean => {
 /** Mục phân quyền màn hình: cột vai trò là dữ liệu của dự án (mỗi vai trò một cột), không phải cột của khung. */
 const PERMISSION_SECTION = "fixed:3.1.3"
 const ROLE_COLUMN = "permissions[].role_id"
+const SCREEN_COLUMN = "permissions[].screen_id"
 
-/** Bảng ma trận phân quyền: chỉ so cột khung (bỏ cột vai trò); cột thừa của mẫu đích là vai trò ví dụ, không tính. */
+/**
+ * Bảng ma trận phân quyền: chỉ so cột khung (bỏ cột vai trò); cột thừa của mẫu đích là vai trò ví dụ, không tính. Cột vai trò có thể
+ * chưa gán field (`h:<tên vai trò>`, mapping chỉ biết chữ tiêu đề) ⇒ cột chưa gán field đứng sau cột màn hình cũng là cột vai trò.
+ * Cột màn hình = cột gán `permissions[].screen_id`, không có thì cột đầu (ma trận phân quyền luôn mở đầu bằng màn hình).
+ */
 const samePermissionColumns = (a: TableShape, b: TableShape): boolean => {
   const frame = (t: TableShape): TableShape => {
-    const idx = t.columns.map((_, i) => i).filter((i) => t.columns[i] !== ROLE_COLUMN)
+    const screen = Math.max(0, t.columns.indexOf(SCREEN_COLUMN))
+    const isRole = (i: number): boolean => t.columns[i] === ROLE_COLUMN || (i > screen && t.columns[i].startsWith("h:"))
+    const idx = t.columns.map((_, i) => i).filter((i) => !isRole(i))
     return { columns: idx.map((i) => t.columns[i]), ...(t.headers ? { headers: idx.map((i) => t.headers![i]) } : {}) }
   }
   const fa = frame(a)

@@ -196,6 +196,65 @@ export type EnumTable = keyof typeof VI_ENUM_LABELS
 export const enumLabel = (language: string | undefined, table: EnumTable, value: string): string =>
   isVietnamese(language) ? ((VI_ENUM_LABELS[table] as Readonly<Record<string, string>>)[value] ?? value) : value
 
+// ─── loại yêu cầu chung (common_requirements[].category) ──
+
+/** Khoá loại yêu cầu chung FlintFlow nhận biết (`VI_ENUM_LABELS.common_category`). Spine vẫn cho chữ tự do. */
+export const COMMON_CATEGORIES: readonly string[] = Object.keys(VI_ENUM_LABELS.common_category)
+
+/** Loại thuộc mục "Yêu cầu bảo mật chung" (`slot:security`) / "Yêu cầu bản địa hoá" (`slot:localization`). */
+export const SECURITY_CATEGORIES: readonly string[] = ["security", "session", "audit"]
+export const LOCALIZATION_CATEGORIES: readonly string[] = ["localization", "date_format"]
+
+const foldCategory = (s: string): string =>
+  s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[đĐ]/g, "d").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+
+/** Từ đồng nghĩa (đã bỏ dấu, chữ thường) ⇒ khoá; nhãn tiếng Việt và chính khoá được thêm tự động bên dưới. */
+const COMMON_CATEGORY_SYNONYMS: Readonly<Record<string, readonly string[]>> = {
+  security: ["security", "security requirements", "an toan", "an toan thong tin", "an ninh", "bao mat thong tin", "yeu cau bao mat"],
+  session: ["session", "sessions", "session management", "phien", "quan ly phien"],
+  audit: ["audit", "audit log", "audit trail", "auditing", "kiem toan", "nhat ky kiem toan"],
+  logging: ["logging", "log", "logs", "ghi log", "nhat ky"],
+  pagination: ["pagination", "paging"],
+  date_format: ["date format", "date time format", "datetime format", "date and time format", "dinh dang ngay", "dinh dang ngay thang"],
+  error_handling: ["error handling", "errors", "error", "loi"],
+  validation: ["validation", "data validation", "input validation", "xac thuc du lieu", "kiem tra dau vao"],
+  notification: ["notification", "notifications"],
+  localization: ["localization", "localisation", "internationalization", "internationalisation", "i18n", "l10n", "ban dia hoa", "da ngon ngu", "ngon ngu"],
+  accessibility: ["accessibility", "a11y", "tro nang"]
+}
+
+const COMMON_CATEGORY_INDEX: ReadonlyMap<string, string> = new Map(
+  COMMON_CATEGORIES.flatMap((key) => [
+    [foldCategory(key), key] as const,
+    [foldCategory(VI_ENUM_LABELS.common_category[key]), key] as const,
+    ...(COMMON_CATEGORY_SYNONYMS[key] ?? []).map((alias) => [foldCategory(alias), key] as const)
+  ])
+)
+
+/**
+ * Bug #3 (FLF-447 test): loại yêu cầu chung ghi tự do ("Bảo mật", "Security", "BẢO MẬT") ⇒ khoá FlintFlow (`security`). So sau
+ * khi bỏ dấu, không phân biệt hoa thường: khoá, nhãn tiếng Việt (`VI_ENUM_LABELS.common_category`) và từ đồng nghĩa tiếng
+ * Anh / Việt. Không nhận ra ⇒ `null` (bên gọi giữ chữ gốc). Dùng lúc import (lưu khoá) và lúc render / kiểm nội dung mục (dữ
+ * liệu cũ còn chữ tự do vẫn vào đúng mục, không cần migrate).
+ */
+export const normalizeCommonCategory = (category: string | null | undefined): string | null =>
+  category ? (COMMON_CATEGORY_INDEX.get(foldCategory(category)) ?? null) : null
+
+/** Loại của `category` (đã chuẩn hoá) thuộc nhóm `keys` — chữ tự do không nhận ra so nguyên văn. */
+export const commonCategoryIn = (category: string, keys: readonly string[]): boolean =>
+  keys.includes(normalizeCommonCategory(category) ?? category)
+
+/**
+ * Nhãn in của loại yêu cầu chung theo ngôn ngữ tài liệu: khoá FlintFlow ⇒ nhãn tiếng Việt / chữ hoa đầu tiếng Anh
+ * ("date_format" ⇒ "Date format"); chữ tự do (của file) ⇒ in nguyên.
+ */
+export const commonCategoryLabel = (language: string | undefined, category: string): string => {
+  if (!COMMON_CATEGORIES.includes(category)) return category
+  if (isVietnamese(language)) return VI_ENUM_LABELS.common_category[category] ?? category
+  const words = category.replace(/_/g, " ")
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
 // ─── câu ghép (glue word theo ngôn ngữ, giá trị Spine chèn nguyên) ──
 
 export interface RenderSentences {

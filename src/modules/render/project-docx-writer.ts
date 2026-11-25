@@ -107,6 +107,24 @@ export interface FixedTemplateContext {
   headingMap: { block_id: string; section_id: string }[]
 }
 
+/**
+ * Bug #1 (FLF-447 test): đoạn nguyên văn (`section_segments`) của binding version. Binding ghi trước khi có field này (`undefined`)
+ * ⇒ mượn đoạn của profile hiện tại **chỉ khi** profile vẫn trỏ đúng file nguồn của version (cùng sha256 nguồn) — đổi mẫu / tải lại
+ * file khác thì không mượn (in như cũ). Binding mới luôn mang mảng (có thể rỗng) ⇒ dùng nguyên.
+ */
+export const bindingSegments = async (
+  projectId: string,
+  binding: Pick<TemplateSourceBinding, "section_segments">,
+  sourceSha: string
+): Promise<TemplateSourceBinding["section_segments"]> => {
+  if (binding.section_segments !== undefined) return binding.section_segments
+  const current = (await TemplateProfile.findOne({ projectId }, { section_segments: 1, source_sha256: 1 }).lean()) as
+    | { section_segments?: TemplateSourceBinding["section_segments"]; source_sha256?: string | null }
+    | null
+  if (!current?.section_segments?.length || !current.source_sha256 || current.source_sha256 !== sourceSha) return undefined
+  return current.section_segments
+}
+
 /** Repair legacy heading/layout omissions from the retained source before assembly, never from cached rendered text. */
 export const loadFixedTemplateContext = async (
   projectId: string,
@@ -166,7 +184,12 @@ export const loadFixedTemplateContext = async (
   const repaired = rebind ? repairFixedTemplateLayout(profile.layout, bound) : profile.layout
   // Bản in hiện tại (không truyền binding đã lưu): chốt cờ theo trạng thái hiện tại; binding đã lưu mà thiếu cờ ⇒ đường snapshot (`stripTemplateTextLegacy`)
   const strip_template_text = sourceBinding ? undefined : await stripTemplateTextNow(projectId)
-  const binding = { ...profile, source_file_ref: ref, source_sha256: sha, layout: repaired, ...(strip_template_text === undefined ? {} : { strip_template_text }) } as TemplateSourceBinding
+  const section_segments = sourceBinding ? await bindingSegments(projectId, sourceBinding, sha) : undefined
+  const binding = {
+    ...profile, source_file_ref: ref, source_sha256: sha, layout: repaired,
+    ...(strip_template_text === undefined ? {} : { strip_template_text }),
+    ...(section_segments ? { section_segments } : {})
+  } as TemplateSourceBinding
   return {
     template, binding, layout: templateLayoutFromBinding(binding),
     headingMap: templateHeadingMap(bound, repaired)

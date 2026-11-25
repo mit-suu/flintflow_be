@@ -75,3 +75,11 @@ describe("content-slots (FLF-278 trên FLF-335/336)", () => {
     expect(bindFixedTemplateHeadings([{ heading_text: "3.2 Functional Requirements", section_id: "unmapped", level: 2 }])[0].section_id).toBe("slot:functional_requirements")
   })
 })
+
+describe("slotHasData - loại yêu cầu chung ghi tự do (bug #3 FLF-447)", () => {
+  it("'Bảo mật' (dữ liệu cũ) ⇒ phần nhỏ bảo mật có nội dung", () => {
+    const spine = { ...createEmptySpine(), common_requirements: [{ id: "COM-01", category: "Bảo mật", statement: "Argon2" }] }
+    expect(slotHasData(spine, "slot:security")).toBe(true)
+    expect(slotHasData(spine, "slot:localization")).toBe(false)
+  })
+})

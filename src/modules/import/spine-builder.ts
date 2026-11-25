@@ -10,6 +10,7 @@ import type { ActivityFlow, ActivityNode, ActivityNodeKind, EntityAttribute, Ent
 import { IdAllocator, compactKey, idKey, nameKey } from "./extracted-entities.js"
 import { foldText } from "./text-similarity.js"
 import { messageTypeOf } from "../spine/message-type.js"
+import { normalizeCommonCategory } from "../render/labels.js"
 
 export interface BuiltEntity {
   entity: string
@@ -380,17 +381,78 @@ export const relationPhrase = (ref: string, pool: { id: string; name?: string }[
   return { id: hits[0].id, verb: RELATION_VERB.test(verb) ? verb : "" }
 }
 
-const PRIORITIES = ["must", "should", "could", "wont"] as const
-const priority = (v: unknown): (typeof PRIORITIES)[number] | null => {
-  const s = str(v).toLowerCase()
-  return (PRIORITIES as readonly string[]).includes(s) ? (s as (typeof PRIORITIES)[number]) : null
+/** Phần nhỏ của mẫu chứa yêu cầu chung ⇒ loại suy ra khi ô loại không nhận ra (bug #3). */
+const SLOT_COMMON_CATEGORY: Readonly<Record<string, string>> = { "slot:security": "security", "slot:localization": "localization" }
+
+/**
+ * Bug #3 (FLF-447 test): loại yêu cầu chung lưu theo khoá FlintFlow (`normalizeCommonCategory`: "Bảo mật" ⇒ `security`) để mục
+ * "Bảo mật" / 5.2 lọc đúng. Không nhận ra ⇒ suy từ phần nhỏ nguồn (`slot:security` ⇒ `security`), không có thì giữ chữ của file.
+ */
+export const commonCategoryOf = (raw: string, sections?: Iterable<string>): string => {
+  const normalized = normalizeCommonCategory(raw)
+  if (normalized) return normalized
+  const fromSlot = [...(sections ?? [])].map((id) => SLOT_COMMON_CATEGORY[id]).find(Boolean)
+  return fromSlot ?? (raw || "General")
 }
+
+const PRIORITIES = ["must", "should", "could", "wont"] as const
+type Priority = (typeof PRIORITIES)[number]
+
+/**
+ * Bug #1 (FLF-447 test): thang ưu tiên hay gặp trong SRS của khách ⇒ MoSCoW của Spine (UC-39 chỉ có Must / Should / Could /
+ * Won't). So sau khi bỏ dấu + chữ thường (`foldText`): "Cao" / "High" ⇒ must, "Trung bình" / "Medium" ⇒ should, "Thấp" /
+ * "Low" ⇒ could. Trước đây chỉ nhận đúng chữ `must/should/could/wont` ⇒ "Cao" mất im lặng.
+ */
+const PRIORITY_ALIASES: ReadonlyMap<string, Priority> = new Map<string, Priority>([
+  ...["must", "must have", "m", "phai co", "bat buoc", "cao", "rat cao", "high"].map((k) => [k, "must"] as const),
+  ...["should", "should have", "s", "nen co", "trung binh", "medium"].map((k) => [k, "should"] as const),
+  ...["could", "could have", "c", "co the co", "thap", "low"].map((k) => [k, "could"] as const),
+  ...["wont", "won t", "wont have", "won t have", "w", "khong lam"].map((k) => [k, "wont"] as const)
+])
+
+/** Ô ưu tiên ⇒ MoSCoW; trống ⇒ `null`; có chữ mà không map được ⇒ `undefined` (bên gọi gắn cờ "Cần xem", không bỏ im lặng). */
+export const priorityOf = (v: unknown): Priority | null | undefined => {
+  const s = str(v)
+  if (!s) return null
+  return PRIORITY_ALIASES.get(foldText(s))
+}
+
+/** Ô ưu tiên có chữ mà không map được MoSCoW — finalize gắn cờ "Cần xem" (`import_needs_review`). */
+export interface UnmappedPriority {
+  entity: "nfrs" | "functions"
+  id: string
+  value: string
+  sections: string[]
+}
+
+/** Cờ vàng "Cần xem" cho mức ưu tiên không map được (dạng `Finding` của `check.service`). */
+export const unmappedPriorityFindings = (
+  unmapped: readonly UnmappedPriority[]
+): { rule: string; section_id: string; message: string; block_ids: string[]; target_id: string }[] =>
+  unmapped.map((u) => ({
+    rule: "needs_review",
+    section_id: u.sections[0] ?? "fixed:I",
+    message: `Cần xem: mức ưu tiên "${u.value}" của ${u.id} không thuộc thang Must / Should / Could / Won't - chưa vào dữ liệu; đặt lại mức ưu tiên bằng change request`,
+    block_ids: [],
+    target_id: `${u.entity}[id=${u.id}].priority`
+  }))
 
 /**
  * Dựng op cho Spine rỗng của project mode 1. Phần tử có id đã tồn tại trong `spine` bị bỏ qua. Quyền không phân giải được
- * màn / vai trò ghi vào `dropped` để finalize đặt cờ.
+ * màn / vai trò ghi vào `dropped`, mức ưu tiên có chữ mà không map được MoSCoW ghi vào `unmappedPriorities` để finalize đặt cờ.
  */
-export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: DroppedPermission[] = []): Op[] => {
+export const buildImportOps = (
+  spine: Spine,
+  entities: BuiltEntity[],
+  dropped: DroppedPermission[] = [],
+  unmappedPriorities: UnmappedPriority[] = []
+): Op[] => {
+  const priority = (entity: UnmappedPriority["entity"], e: BuiltEntity): Priority | null => {
+    const mapped = priorityOf(e.value.priority)
+    if (mapped !== undefined) return mapped
+    unmappedPriorities.push({ entity, id: e.id!, value: str(e.value.priority), sections: [...(e.sections ?? [])] })
+    return null
+  }
   const of = (entity: string) => entities.filter((e) => e.entity === entity && e.id !== null)
   const existing = (arr: { id: string }[]) => new Set(arr.map((x) => x.id))
   // Giữ chỗ cả id trích được trong lô — không thì feature "General" có thể nhận trùng F-01 của tài liệu (FLF-179)
@@ -632,7 +694,7 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
         })
         .filter((v) => v.statement),
       business_rule_ids: strList(f.value.business_rule_ids).map(resolveRule).filter((x): x is string => !!x),
-      priority: priority(f.value.priority),
+      priority: priority("functions", f),
       ...functionDiagramData(f.id!, f.value)
     })
   }
@@ -698,14 +760,14 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
       category: oneOf(n.value.category, ["interface", "usability", "reliability", "performance", "other"], "other"),
       statement,
       kind: oneOf(n.value.kind, ["quantitative", "descriptive"], /\d/.test(statement) ? "quantitative" : "descriptive"),
-      priority: priority(n.value.priority)
+      priority: priority("nfrs", n)
     }
     if (str(n.value.metric)) value.metric = str(n.value.metric)
     if (str(n.value.threshold)) value.threshold = str(n.value.threshold)
     add("nfrs", value)
   }
   for (const c of of("common_requirements").filter(skip(spine.common_requirements))) {
-    add("common_requirements", { id: c.id, category: str(c.value.category) || "General", statement: str(c.value.statement ?? c.value.description) })
+    add("common_requirements", { id: c.id, category: commonCategoryOf(str(c.value.category), c.sections), statement: str(c.value.statement ?? c.value.description) })
   }
   for (const m of of("messages").filter(skip(spine.messages))) {
     const functionIds = [...new Set(strList(m.value.function_ids).map(resolveFunction).filter((x): x is string => !!x))]
