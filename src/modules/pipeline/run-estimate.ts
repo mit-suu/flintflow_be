@@ -46,7 +46,20 @@ export interface RunEstimateUnit {
   ai_steps: number
   /** Lượt phỏng vấn mở giai đoạn (0 khi đã phỏng vấn hoặc giai đoạn không phỏng vấn). */
   interview_credits: number
+  /** Cận trên (= `credits_max`). */
   credits: number
+  /** Cận dưới. Chỉ khác `credits` ở đơn vị S-5 ước tính (chưa có danh sách màn); đơn vị chính xác thì bằng nhau. */
+  credits_min: number
+  credits_max: number
+  /** Khoảng số màn, chỉ có ở đơn vị S-5 ước tính. */
+  screens?: { min: number; max: number }
+}
+
+export type ScreenEstimateBasis = "use_cases" | "brief" | "default"
+export interface ScreenEstimate {
+  min: number
+  max: number
+  basis: ScreenEstimateBasis
 }
 
 export interface RunEstimate {
@@ -56,7 +69,12 @@ export interface RunEstimate {
   units: RunEstimateUnit[]
   steps_total: number
   ai_steps_total: number
+  /** Cận trên (= `credits_max`): client cũ chỉ đọc số này vẫn thấy số an toàn. */
   credits_total: number
+  credits_min: number
+  credits_max: number
+  /** `screens` = đã có màn (chính xác); còn lại là khoảng đoán; null khi lượt chạy không đi qua vòng màn hình. */
+  screen_estimate: { min: number; max: number; basis: ScreenEstimateBasis | "screens" } | null
   /** Credit khả dụng của ví org sở hữu project (`balance − reserved`); null khi không xác định được ví. */
   available_credits: number | null
 }
@@ -65,13 +83,6 @@ export interface RunEstimate {
 export const DEFAULT_SCREEN_RANGE = Object.freeze({ min: 6, max: 14 })
 /** Mục Mô tả màn hình: năng lực Brief (B-1.4) nhắm vào đây được dùng làm căn cứ đoán số màn. */
 const SCREEN_ADDENDUM_TARGET = "fixed:3.1.2"
-
-export type ScreenEstimateBasis = "use_cases" | "brief" | "default"
-export interface ScreenEstimate {
-  min: number
-  max: number
-  basis: ScreenEstimateBasis
-}
 
 /**
  * Đoán khoảng số màn khi chưa có danh sách màn (không gọi model). Căn cứ theo thứ tự: số use case (đã qua S-3) >
@@ -126,7 +137,7 @@ export const planRunEstimate = (spine: Spine, query: { scope: RunEstimateScope; 
     let entry = units.find((u) => u.unit === unit)
     if (!entry) {
       const interview = PHASES_WITHOUT_INTERVIEW.has(unit) || unitInterviewed(spine, unit) ? 0 : costs.elicit
-      entry = { unit, steps: 0, ai_steps: 0, interview_credits: interview, credits: interview }
+      entry = { unit, steps: 0, ai_steps: 0, interview_credits: interview, credits: interview, credits_min: interview, credits_max: interview }
       units.push(entry)
     }
     entry.steps += 1
@@ -137,26 +148,41 @@ export const planRunEstimate = (spine: Spine, query: { scope: RunEstimateScope; 
       entry.credits += calls * (costs.draft + (costs.reviewLlm ? costs.review : 0))
     }
   }
+  // Đơn vị chính xác: cận dưới = cận trên = credits.
+  for (const u of units) {
+    u.credits_min = u.credits
+    u.credits_max = u.credits
+  }
 
   // FLF-485: chưa có màn mà lượt chạy sẽ đi qua S-4.1 ⇒ thêm đơn vị S-5 ước tính (cận trên, cộng một vòng không màn).
   const s5Index = PHASES.indexOf(LOOP_PHASE as (typeof PHASES)[number])
   const s41 = statusOf("S-4.1")
   const passesScreenList =
     query.scope === "all" && loopKeys(spine).length === 0 && s41 !== "accepted" && s41 !== "skipped" && counted.some((s) => PHASES.indexOf(s.phase) < s5Index)
+  let screenEstimate: RunEstimate["screen_estimate"] = null
   if (passesScreenList) {
     const loopTemplates = loadStepRegistry().filter((t) => t.kind === "loop")
     const aiPerLoop = loopTemplates.filter((t) => !t.deterministic && !LOOP_BOOKKEEPING_TEMPLATES.has(t.id)).length
     const perScreen = costs.elicit + aiPerLoop * (costs.draft + (costs.reviewLlm ? costs.review : 0))
-    const loops = estimateScreenCount(spine).max + 1
+    const range = estimateScreenCount(spine)
+    screenEstimate = range
+    const loops = range.max + 1
     const at = units.findIndex((u) => PHASES.indexOf(u.unit.split("@")[0] as (typeof PHASES)[number]) > s5Index)
     const entry: RunEstimateUnit = {
       unit: LOOP_PHASE,
       steps: loopTemplates.length * loops,
       ai_steps: aiPerLoop * loops,
       interview_credits: costs.elicit * loops,
-      credits: perScreen * loops
+      credits: perScreen * loops,
+      credits_min: perScreen * range.min,
+      credits_max: perScreen * loops,
+      screens: { min: range.min, max: range.max }
     }
     units.splice(at < 0 ? units.length : at, 0, entry)
+  }
+  if (!screenEstimate && units.some((u) => u.unit.startsWith(LOOP_PHASE))) {
+    const n = spine.screens.filter((sc) => sc.detail_status !== "placeholder").length
+    screenEstimate = { min: n, max: n, basis: "screens" }
   }
   return {
     scope: query.scope,
@@ -164,7 +190,10 @@ export const planRunEstimate = (spine: Spine, query: { scope: RunEstimateScope; 
     units,
     steps_total: units.reduce((n, u) => n + u.steps, 0),
     ai_steps_total: units.reduce((n, u) => n + u.ai_steps, 0),
-    credits_total: units.reduce((n, u) => n + u.credits, 0)
+    credits_total: units.reduce((n, u) => n + u.credits_max, 0),
+    credits_min: units.reduce((n, u) => n + u.credits_min, 0),
+    credits_max: units.reduce((n, u) => n + u.credits_max, 0),
+    screen_estimate: screenEstimate
   }
 }
 

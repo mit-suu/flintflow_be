@@ -19,7 +19,7 @@ describe("planRunEstimate (FLF-332 - ước tính credit trước lượt chạy
   it("scope unit: chỉ đơn vị giai đoạn của bước tới lượt; mỗi bước gọi model một lượt Draft, giai đoạn chưa phỏng vấn thêm một lượt Elicit", () => {
     const est = planRunEstimate(spineAt("S-2.1"), { scope: "unit" }, COSTS)
     expect(est.from_step).toBe("S-2.1")
-    expect(est.units).toEqual([{ unit: "S-2", steps: 5, ai_steps: 5, interview_credits: 1, credits: 1 + 5 * 4 }])
+    expect(est.units).toEqual([{ unit: "S-2", steps: 5, ai_steps: 5, interview_credits: 1, credits: 21, credits_min: 21, credits_max: 21 }])
     expect(est.steps_total).toBe(5)
     expect(est.credits_total).toBe(21)
   })
@@ -40,11 +40,23 @@ describe("planRunEstimate (FLF-332 - ước tính credit trước lượt chạy
     const est = planRunEstimate(spineAt("S-1.1"), { scope: "all" }, COSTS)
     expect(est.units.map((u) => u.unit)).toEqual(["S-1", "S-2", "S-3", "S-4", "S-5", "S-6", "S-7", "S-8", "S-9"])
     // mỗi màn: 1 lượt hỏi + 3 bước gọi model × 4 = 13; (14 + 1) vòng
-    expect(est.units.find((u) => u.unit === "S-5")).toEqual({ unit: "S-5", steps: 75, ai_steps: 45, interview_credits: 15, credits: 15 * 13 })
+    expect(est.units.find((u) => u.unit === "S-5")).toEqual({
+      unit: "S-5",
+      steps: 75,
+      ai_steps: 45,
+      interview_credits: 15,
+      credits: 15 * 13,
+      credits_min: 6 * 13,
+      credits_max: 15 * 13,
+      screens: { min: 6, max: 14 }
+    })
     expect(est.steps_total).toBe(38 + 75)
     expect(est.ai_steps_total).toBe(34 + 45)
     // 34 bước × 4 + 8 giai đoạn × 1 lượt hỏi + vòng màn hình
     expect(est.credits_total).toBe(34 * 4 + 8 + 195)
+    expect(est.credits_max).toBe(est.credits_total)
+    expect(est.credits_min).toBe(34 * 4 + 8 + 78)
+    expect(est.screen_estimate).toEqual({ min: 6, max: 14, basis: "default" })
   })
 
   it("estimateScreenCount: use case > năng lực Brief nhắm mô tả màn hình > dải mặc định", () => {
@@ -98,9 +110,15 @@ describe("planRunEstimate (FLF-332 - ước tính credit trước lượt chạy
     })
     const est = planRunEstimate(spine, { scope: "all", from: "S-5@S01" }, COSTS)
     expect(est.units.slice(0, 2)).toEqual([
-      { unit: "S-5@S01", steps: 5, ai_steps: 3, interview_credits: 1, credits: 13 },
-      { unit: "S-5@S02", steps: 5, ai_steps: 3, interview_credits: 1, credits: 13 }
+      { unit: "S-5@S01", steps: 5, ai_steps: 3, interview_credits: 1, credits: 13, credits_min: 13, credits_max: 13 },
+      { unit: "S-5@S02", steps: 5, ai_steps: 3, interview_credits: 1, credits: 13, credits_min: 13, credits_max: 13 }
     ])
+    expect(est.screen_estimate).toEqual({ min: 2, max: 2, basis: "screens" })
+    expect(est.credits_min).toBe(est.credits_max)
+  })
+
+  it("scope unit không đi qua S-5 ⇒ screen_estimate null", () => {
+    expect(planRunEstimate(spineAt("S-2.1"), { scope: "unit" }, COSTS).screen_estimate).toBeNull()
   })
 
   it("REVIEW_LLM_ENABLED ⇒ mỗi bước gọi model thêm một lượt Review", () => {
