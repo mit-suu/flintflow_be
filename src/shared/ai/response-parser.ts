@@ -378,22 +378,57 @@ export const crMaterialImageSchema = z.object({ text: z.string().trim().min(1) }
 /**
  * FLF-338 (EXTRACT_REQUIREMENTS, §3.6.1): danh sách yêu cầu rút từ tài liệu thô. Code hậu kiểm mã đoạn / trích dẫn / đường dẫn
  * phần tử (`extraction.service.normalizeItems`) — schema chỉ giữ hình.
+ * FLF-449 (P6): không còn trần 40 mục — model trả nhiều hơn là lỗi parse mất cả lượt; độ dài đã bị chặn bởi `maxTokens` của
+ * skill và tài liệu dài được chia lô. Thêm nhãn `inferred` + khối `inference`, `speaker`, `sides`, `situation` (đều tuỳ chọn).
  */
+const extractionSourcedSchema = z.object({ para_id: z.string().nullable().default(null), quote: z.string().default("") })
 export const extractRequirementsSchema = z.object({
+  situation: z
+    .object({
+      current: z.array(extractionSourcedSchema.extend({ text: z.string().default("") })).default([]),
+      desired: z.array(extractionSourcedSchema.extend({ text: z.string().default("") })).default([])
+    })
+    .nullable()
+    .default(null),
   requirements: z
     .array(
       z.object({
         id: z.string().min(1),
         text: z.string().min(1),
         source: z.object({ para_id: z.string().min(1), quote: z.string().default("") }),
-        label: z.enum(["new", "modification", "duplicate", "contradiction", "ambiguous"]),
+        label: z.enum(["new", "modification", "duplicate", "contradiction", "ambiguous", "inferred"]),
         entity_paths: z.array(z.string().min(1)).default([]),
         group: z.string().nullable().default(null),
+        speaker: z.string().nullable().default(null),
+        sides: z.array(extractionSourcedSchema.extend({ speaker: z.string().nullable().default(null) })).default([]),
+        inference: z
+          .object({
+            symptom: z.string().default(""),
+            symptom_quote: z.string().default(""),
+            symptom_para_id: z.string().nullable().default(null),
+            root_cause: z.string().default(""),
+            rationale: z.string().default(""),
+            options: z
+              .array(
+                z.object({
+                  label: z.string().default(""),
+                  description: z.string().nullable().default(null),
+                  pros: z.array(z.string()).default([]),
+                  cons: z.array(z.string()).default([]),
+                  risks: z.array(z.string()).default([])
+                })
+              )
+              .default([]),
+            recommended: z.number().int().nullable().default(null),
+            recommendation_reason: z.string().nullable().default(null),
+            serves_goal: z.string().nullable().default(null)
+          })
+          .nullable()
+          .default(null),
         question: z.string().nullable().default(null),
         suggested_answers: z.array(z.string().min(1)).default([])
       })
     )
-    .max(40)
     .default([])
 })
 

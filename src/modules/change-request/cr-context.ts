@@ -13,7 +13,8 @@ import { listElements, sectionOfElement, valueText } from "./spine-location.js"
 const LIMIT = 8000
 export const truncate = (s: string, max = LIMIT): string => (s.length > max ? `${s.slice(0, max)}\n…(truncated)` : s)
 
-const ENTITY_ARRAY: Record<string, keyof Spine> = {
+/** Loại mention (`use_case`) ⇒ mảng Spine (`use_cases`). */
+export const ENTITY_ARRAY: Record<string, keyof Spine> = {
   use_case: "use_cases",
   function: "functions",
   nfr: "nfrs",
