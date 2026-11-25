@@ -28,7 +28,42 @@ A function contradicts an NFR.
 - Password / token shown or exported in plain text.
 - Admin function reachable by a non-admin role.
 
-## `semantic_duplicate` (S-8.4)
+## `requirement_conflict` (S-9.2)
+
+Any two requirements (function, business rule, validation, NFR, use case) that say opposite things.
+
+- Pass: BR03 "free cancellation up to 4 hours before" vs function Cancel Booking "up to 24 hours before". Quote one side, name the other.
+- Fail: two rules on different subjects, or a difference that is only wording.
+
+## `decision_conflict` (S-9.2)
+
+Content contradicts a settled decision (still valid, not superseded).
+
+- Pass: decision "expired profiles are anonymised, not deleted" vs a business rule "profile is deleted automatically after 4 years". Quote the rule sentence; name the decision by its topic.
+- Fail: content merely says less than the decision, or the decision was replaced.
+
+## `assumption_conflict` (S-9.2)
+
+Two assumptions that disagree, or an assumption against the content or a decision.
+
+- Pass: "used on desktop and tablet only" vs "customers use their phones". Quote the statement.
+- Fail: a rejected assumption, or two assumptions about different things.
+
+## `source_conflict` (S-9.2)
+
+The SRS says something different from an uploaded document (minutes, notes, original spec). Skip this lens when no document is given.
+
+- Pass: the minutes list 3 roles, the SRS actors list only 2. Quote the SRS side.
+- Fail: the document is silent on the point.
+
+## `cross_section_gap` (S-8.4)
+
+An element is mentioned in one section but the section that must list it does not, or a sentence states a count different from the real one.
+
+- Pass: NFRs mention an email service and backups, but External Interfaces and the system actors list neither; or prose says "seven feature groups" while only 6 exist.
+- Fail: an element that is correctly absent from that section.
+
+## `semantic_duplicate` (S-8.4 only)
 
 - Two use cases with different names and the same actor + goal.
 - Two business rules stating the same constraint.

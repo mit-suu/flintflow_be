@@ -221,6 +221,21 @@ describe("FLF-449 N3: skill hành động nạp reference khai ở prompt_refere
     expect((await getPromptTemplate(ActionType.CONSISTENCY_PASS)).template).toBe(template)
   })
 
+  it("FLF-449 việc 5, 6: review-section 1.2.0 gọn ≤ 150 dòng, có luật quote và 5 lens mới ở reference", async () => {
+    const skill = getSkill("review-section", { references: ["lenses"] })
+    expect(skill.version).toBe("1.2.0")
+    expect(skill.template.split("\n").length).toBeLessThanOrEqual(150)
+    const { template } = await getPromptTemplate(ActionType.REVIEW)
+    expect(template).toContain("verbatim")
+    expect(template).toContain("{{element_index}}")
+    expect(template).toContain("{{decisions}}")
+    expect(template).toContain("{{assumptions}}")
+    expect(template).toContain("{{documents}}")
+    for (const lens of ["requirement_conflict", "decision_conflict", "assumption_conflict", "source_conflict", "cross_section_gap"]) {
+      expect(skill.references.lenses, lens).toContain(`## \`${lens}\``)
+    }
+  })
+
   it("elicit-loop: template có when-to-offer-choices (luật khuyến nghị theo chốt 03 #3); conversation-style không khai thì không nạp", async () => {
     const { template } = await getPromptTemplate(ActionType.ELICIT)
     expect(template).toContain(`${REFERENCE_HEADING}when-to-offer-choices`)

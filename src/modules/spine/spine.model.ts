@@ -481,6 +481,7 @@ const flagSchema = new Schema(
     rule_id: { type: String, required: true },
     section_id: { type: String, required: true },
     target_id: nullableString,
+    lens: { type: String, default: undefined },
     message: { type: String, default: "" },
     remediation_step: { type: String, required: true },
     opened_at_version: { type: Number, required: true, min: 1 },
