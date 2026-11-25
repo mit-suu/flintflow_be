@@ -43,11 +43,27 @@ export const findSessionRememberMe = async (refreshToken: string): Promise<boole
 const followReplacedByChain = async (session: ISession): Promise<ISession> => {
   let current = session
   while (current.replacedBy) {
-    const next = await Session.findById(current.replacedBy)
+    const next = await findReplacement(current.replacedBy)
     if (!next) break
     current = next
   }
   return current
+}
+
+/**
+ * `rotateFromLeaf` ghi `replacedBy = newId` vào phiên cũ TRƯỚC khi tạo phiên `newId`. Request song song đọc
+ * đúng khe hở đó sẽ không thấy phiên mới và dừng ở phiên cũ (đã thu hồi) ⇒ 401 oan. Chờ ngắn cho lượt xoay
+ * kia tạo xong phiên mới (tối đa ~1s) rồi mới coi như chuỗi đứt.
+ */
+const REPLACEMENT_WAIT_STEPS = 20
+const REPLACEMENT_WAIT_MS = 50
+const findReplacement = async (id: mongoose.Types.ObjectId): Promise<ISession | null> => {
+  for (let i = 0; i < REPLACEMENT_WAIT_STEPS; i++) {
+    const next = await Session.findById(id)
+    if (next) return next
+    await new Promise((resolve) => setTimeout(resolve, REPLACEMENT_WAIT_MS))
+  }
+  return null
 }
 
 /**

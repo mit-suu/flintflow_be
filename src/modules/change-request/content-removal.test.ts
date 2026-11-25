@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { IChangeLocation } from "./change-location.model.js"
-import { hasRemoveOp, removedItems } from "./content-removal.js"
+import { hasRemoveOp, labelOf, removedItems } from "./content-removal.js"
 import { autoSubmitHold } from "./verify.service.js"
 
 const base = (): Spine => {
@@ -31,9 +31,9 @@ const withFn = (patch: Record<string, unknown>): Spine => {
 }
 
 describe("removedItems", () => {
-  it("set bỏ một điều kiện có id ⇒ một mục bị xoá, nhãn là câu điều kiện", () => {
+  it("set bỏ một điều kiện có id ⇒ một mục bị xoá, nhãn là câu điều kiện, không kèm id nội bộ (V2)", () => {
     const after = withFn({ validations: [{ id: "V1", rule: "Giỏ hàng không rỗng" }] })
-    expect(removedItems(base(), after, ["functions[id=F1]"])).toEqual([{ path: "functions[id=F1]", label: "V2 Tổng đơn tối đa 5 triệu" }])
+    expect(removedItems(base(), after, ["functions[id=F1]"])).toEqual([{ path: "functions[id=F1]", label: "Tổng đơn tối đa 5 triệu" }])
   })
 
   it("mảng chuỗi ngắn đi ⇒ không tính xoá; sửa chữ của mục con ⇒ không tính", () => {
@@ -83,5 +83,14 @@ describe("autoSubmitHold", () => {
 
   it("bỏ qua vị trí không phải edit", () => {
     expect(autoSubmitHold(base(), [loc({ conclusion: "comment", ops: dropV2 })], after)).toBeNull()
+  })
+})
+
+describe("labelOf (FLF-493)", () => {
+  it("id nội bộ (BR45, V2) không ghép; mã tài liệu (UC-06, FR-3.2.2) giữ trước tên; không có chữ ⇒ rơi về id", () => {
+    expect(labelOf({ id: "BR45", statement: "Phí giao hàng cố định" })).toBe("Phí giao hàng cố định")
+    expect(labelOf({ id: "UC-06", name: "Đặt hàng" })).toBe("UC-06 Đặt hàng")
+    expect(labelOf({ id: "FR-3.2.2", name: "Thanh toán" })).toBe("FR-3.2.2 Thanh toán")
+    expect(labelOf({ id: "BR45" })).toBe("BR45")
   })
 })

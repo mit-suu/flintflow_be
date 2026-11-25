@@ -473,7 +473,10 @@ export const renderChangedIfAvailable = async (projectId: string, newScreenIds: 
       const key = `${t.kind}|${t.owner_id ?? ""}`
       if (seen.has(key)) return false
       seen.add(key)
-      return plantUmlUp || isSvgTarget(t)
+      if (plantUmlUp) return true
+      // PlantUML tắt: chỉ target SVG; mockup màn chưa từng có hình thì bỏ (như renderAllIfAvailable) — vẽ mới cần một lượt
+      // model mỗi màn (chậm, tốn credit), trước FLF-493 đường này không vẽ gì. Màn mới vẽ khi có PlantUML hoặc nút "Vẽ lại".
+      return isSvgTarget(t) && (t.kind !== "screen_layout" || spine.diagrams.some((d) => sameTarget(d, t)))
     })
     if (targets.length === 0) return null
     return await renderDiagrams(projectId, targets, plantUmlUp ? options : { ...options, svgOnly: true })

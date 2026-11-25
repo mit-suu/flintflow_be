@@ -1360,6 +1360,17 @@ export const MAX_AUTO_RERENDER = 4
  */
 export const DIAGRAM_RENDER_ERROR_MESSAGE = "Chưa vẽ được sơ đồ này."
 
+/**
+ * FLF-489: id mockup màn hình đang lạc hậu TÍNH TỪ LÚC NÀY. Gọi trước khi soạn (step chạy chính và cổng revision / regenerate)
+ * để `runRenderReviewPhase` biết mockup nào lạc hậu từ trước, không vẽ hộ.
+ */
+export const mockupIdsStaleNow = async (projectId: string, spine: Spine): Promise<Set<string>> =>
+  new Set(
+    staleRenderedDiagrams(spine, await loadRenderContext(projectId))
+      .filter((d) => d.kind === "screen_layout")
+      .map((d) => d.id)
+  )
+
 export interface RenderReviewOptions {
   /** Số cờ mở TRƯỚC khi chạy step — để gate nói "cờ đỏ 3 → 2 (−1)" thay vì chỉ một con số. */
   flagsBefore?: { red: number; yellow: number }
@@ -1799,11 +1810,7 @@ export const runStep = async (
     }
     const knownAssumptionIds = new Set(spine.assumptions.map((a) => a.id))
     // FLF-489: mockup đã lạc hậu từ trước bước này thì bước không vẽ hộ (vẽ mockup có thể gọi AI, tốn credit ngoài ý người dùng)
-    const mockupsStaleAtStart = new Set(
-      staleRenderedDiagrams(spine, await loadRenderContext(projectId))
-        .filter((d) => d.kind === "screen_layout")
-        .map((d) => d.id)
-    )
+    const mockupsStaleAtStart = await mockupIdsStaleNow(projectId, spine)
     const progressBefore = buildProgressReport(spine, await spineRepository.listChanges(projectId)).readiness.accepted_pct
     const stepSummary: ChangeSummary[] = []
     /** Lượt chạy này có ghi được op nào không — dùng để báo "AI không soạn được gì" ở gate (L11b). */

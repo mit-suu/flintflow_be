@@ -105,6 +105,23 @@ describe("nameElementIds", () => {
   })
 })
 
+describe("nameElementIds - không ra 'X (X)' (FLF-474)", () => {
+  const spine = {
+    screens: [{ id: "S01", name: "S01" }, { id: "S02", name: "Reset Password" }, { id: "S03", name: "" }]
+  } as unknown as Parameters<typeof nameElementIds>[1]
+
+  it("tên rỗng / bằng mã ⇒ không thay, không ghép; câu 'BR-07 (BR-07)' gộp về 'BR-07'", () => {
+    expect(nameElementIds("Màn S01 và S03 giữ nguyên", spine)).toBe("Màn S01 và S03 giữ nguyên")
+    expect(nameElementIds("Quy tắc BR-07 (BR-07) mâu thuẫn", spine)).toBe("Quy tắc BR-07 mâu thuẫn")
+  })
+
+  it("tên chứa mã hoặc câu đã ghi 'mã (tên)' ⇒ chỉ còn một tên", () => {
+    const extra = new Map([["BR07", "BR07 giới hạn đăng nhập"], ["BR08", "Khoá tài khoản"]])
+    expect(nameElementIds("Xem BR07 và BR08", spine, extra)).toBe("Xem BR07 và 'Khoá tài khoản'")
+    expect(nameElementIds("Màn S02 (Reset Password) cần sửa", spine)).toBe("Màn 'Reset Password' cần sửa")
+  })
+})
+
 describe("elementLabel (FLF-411 U2-5)", () => {
   it("tên phần tử thay mã nội bộ; không tên ⇒ trích câu chính; mã use case giữ", () => {
     expect(elementLabel("actors", "A02", { id: "A02", name: "Customer" })).toBe('tác nhân "Customer"')
