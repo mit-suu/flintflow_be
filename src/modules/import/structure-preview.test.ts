@@ -85,7 +85,7 @@ describe("previewStructure - màn đọc khung lúc upload", () => {
     expect(long.endsWith("…")).toBe(true)
   })
 
-  it("FLF-382: mẫu mà mục nào cũng có câu ví dụ / chỗ điền vẫn là khung mẫu (câu ví dụ không tính là nội dung khách viết)", () => {
+  it("FLF-382: mẫu mà mục nào cũng có câu ví dụ / chỗ điền vẫn là khung mẫu (câu ví dụ không tính là nội dung khách viết); FLF-463: nhãn chỉ để tóm tắt, mục có chữ vẫn là có", () => {
     const ids = ["fixed:1", "fixed:2.1", "fixed:2.2", "fixed:2.3", "fixed:3.1.1"]
     const examples = [
       "e.g. The Library Management System lets librarians track borrowed books.",
@@ -97,33 +97,34 @@ describe("previewStructure - màn đọc khung lúc upload", () => {
     const blocks = ids.flatMap((id, i) => [heading(`h${i}`, `${i + 1} Section ${i}`, id), para(`p${i}`, examples[i], id)])
     const preview = previewStructure(blocks, new Map(ids.map((id, i) => [`h${i}`, id])), spine, "fixed", AT)
     expect(preview.summary.kind).toBe("template")
-    expect(preview.summary.missing).toBe(ids.length)
+    // FLF-463 (đảo FLF-378): ngưỡng 20% không làm mục có chữ thành "còn trống" — người dùng Bỏ chữ nếu đó là chữ của mẫu
+    expect(preview.summary).toMatchObject({ present: ids.length, missing: 0 })
     // Có một mục khách viết thật trong 5 ⇒ 20% ⇒ SRS đã viết (ngưỡng không đổi)
     blocks.push(para("real", "Students register for a dormitory room each semester; staff assign rooms by building.", "fixed:2.1"))
     expect(previewStructure(blocks, new Map(ids.map((id, i) => [`h${i}`, id])), spine, "fixed", AT).summary.kind).toBe("written")
   })
 
-  it("giữ khung, khung mẫu (gần như trống) ⇒ mọi mục của mẫu thiếu, kể cả mục có ví dụ - luôn chế độ 3", () => {
+  it("FLF-463 (đảo FLF-378 luồng C): giữ khung, khung mẫu (gần như trống) ⇒ mục có chữ là có, chỉ mục trống thiếu - chế độ 3", () => {
     const ids = ["fixed:1", "fixed:2.1", "fixed:2.2", "fixed:2.3", "fixed:3.1.1", "fixed:5.1"]
     const blocks = ids.flatMap((id, i) => [heading(`h${i}`, `${i + 1} Section ${i}`, id)])
     blocks.push(para("ex", "Example: The system shall allow the user to log in.", "fixed:1"))
     const preview = previewStructure(blocks, new Map(ids.map((id, i) => [`h${i}`, id])), spine, "fixed", AT)
     expect(preview.summary.kind).toBe("template")
-    expect(preview.summary.present).toBe(0)
-    expect(preview.summary.missing).toBe(ids.length)
+    expect(preview.summary.present).toBe(1)
+    expect(preview.summary.missing).toBe(ids.length - 1)
+    expect(preview.sections.find((s) => s.section_id === "fixed:1")?.status).toBe("present")
     expect(preview.resolved_mode).toBe(3)
   })
 
-  it("bổ sung theo mẫu chuẩn (free) ⇒ đích là mẫu FlintFlow; mục riêng của file là ngoài phạm vi, giữ vị trí trong file", () => {
+  it("bổ sung theo mẫu chuẩn (free) ⇒ đích = khung file cộng mẫu FlintFlow; FLF-463: mục riêng của file là có / thiếu (không ngoài phạm vi), giữ vị trí trong file", () => {
     const blocks = [heading("h1", "1 Overview", "fixed:1"), para("p1", "Lumen is a course management SaaS for small training centres.", "fixed:1"), heading("c1", "Budget", "custom")]
     const preview = previewStructure(blocks, new Map([["h1", "fixed:1"]]), spine, "free", AT)
     expect(preview.resolved_mode).toBe(4)
-    expect(preview.summary.out_of_scope).toBe(1)
+    expect(preview.summary.out_of_scope).toBe(0)
     expect(preview.sections[0]).toMatchObject({ section_id: "fixed:1", status: "present", order: 0 })
-    // Mục mẫu chuẩn file không có xếp sau mục của file
-    const custom = preview.sections.findIndex((s) => s.status === "out_of_scope")
-    const firstAbsent = preview.sections.findIndex((s) => s.status === "missing")
-    expect(custom).toBeLessThan(firstAbsent)
+    // Heading riêng của file còn trống ⇒ thiếu, đứng ngay sau mục của file; mục mẫu chuẩn file không có xếp sau
+    expect(preview.sections[1]).toMatchObject({ title: "Budget", status: "missing", order: 1 })
+    expect(preview.sections.slice(2).every((s) => s.status === "missing" && s.order > 1)).toBe(true)
   })
 })
 
@@ -227,13 +228,16 @@ describe("FLF-411 - màn đọc khung trên file thật (parse + khớp mẫu, k
     return previewStructure(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), createEmptySpine({}), intent, AT)
   }
 
-  it("template FPT Capstone Report3 trống (hướng dẫn [ ] nhiều đoạn, <<Sample … >>, bảng / hình mẫu) ⇒ khung mẫu, 0 mục có nội dung", async () => {
+  it("template FPT Capstone Report3 trống (hướng dẫn [ ] nhiều đoạn, <<Sample … >>, bảng / hình mẫu) ⇒ nhãn khung mẫu; FLF-463: mục còn bảng / hình mẫu là có (người dùng Bỏ chữ)", async () => {
     const preview = await previewOfFixture("fpt-report3-blank-template")
-    expect(preview.summary).toMatchObject({ kind: "template", present: 0 })
-    expect(preview.summary.missing).toBeGreaterThanOrEqual(20)
+    expect(preview.summary.kind).toBe("template")
+    // FLF-463 (đảo FLF-411): nhãn khung mẫu không làm mục có bảng / hình thành "còn trống" — Code không phân biệt chữ của mẫu với
+    // chữ thật, người dùng chọn Bỏ chữ ở màn đọc khung (§3.1.2)
+    expect(preview.summary.present).toBeGreaterThan(0)
+    expect(preview.summary.present + preview.summary.missing).toBeGreaterThanOrEqual(20)
     expect(preview.resolved_mode).toBe(3)
-    // P09 (#15): khung mẫu trống ⇒ không mục nào có trích đoạn (chữ hướng dẫn / ví dụ / bảng mẫu không phải nội dung)
-    expect(preview.sections.filter((s) => s.excerpt).map((s) => [s.section_id, s.status, s.excerpt])).toEqual([])
+    // P09 (#15): trích đoạn bỏ bảng / hình mẫu ⇒ không mục nào khoe chữ mẫu (Cafeteria) làm trích đoạn
+    expect(preview.sections.some((s) => /Cafeteria|Order Meals|Menu Manage/.test(s.excerpt ?? ""))).toBe(false)
   }, 30000)
 
   it("SRS đã viết (FPT, mẫu công ty còn sót `]` cuối câu) vẫn là SRS đã viết, đủ mục; mẫu FU-IT trống vẫn là khung mẫu", async () => {

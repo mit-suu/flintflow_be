@@ -5,8 +5,8 @@
  * dùng ở I-5 (`buildLayout`, `sectionsWithContent`, `compareTargetStructure`) trên Spine chưa trích gì: người dùng xem bản đồ
  * mục theo thứ tự file trước khi bấm Bắt đầu (trước khi tốn credit).
  *
- * `kind` phân biệt **khung mẫu** (phần lớn mục chưa có nội dung — chữ trong file là hướng dẫn / ví dụ) với **SRS đã viết**:
- * khung mẫu + giữ khung (`fixed`) ⇒ mọi mục của mẫu coi là thiếu, FlintFlow soạn đủ (`draftAll`). Sau I-5 cuối, mục nào đổi
+ * `kind` phân biệt **khung mẫu** (dưới 20% mục có nội dung) với **SRS đã viết** — chỉ để gắn nhãn câu tóm tắt (FLF-463): mục đã
+ * viết luôn là "có", không soạn lại mọi mục vì nhãn này. Sau I-5 cuối, mục nào đổi
  * trạng thái so với bản sơ bộ được ghi lại (`structureChanges`) để workspace báo người dùng — không dừng hỏi lại.
  */
 
@@ -155,7 +155,7 @@ export const previewStructure = (
   const { customSections, slices } = buildLayout(stripped, headingSections)
   const withContent = contentSections(stripped, customSections, slices)
   const kind = fileKindOf(layout, authoredSections(blocks, headingSections))
-  const structure = compareTargetStructure(layout, withContent, spine, intent, at, { draftAll: intent === "fixed" && kind === "template" })
+  const structure = compareTargetStructure(layout, withContent, spine, intent, at)
   return toPreview(structure, layout, kind, at, excerptsOf(blocks, sectionBlocks))
 }
 
