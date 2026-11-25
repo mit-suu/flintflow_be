@@ -29,6 +29,7 @@ import {
   runDraftPhase,
   runBatchedDraft,
   runRenderReviewPhase,
+  mockupIdsStaleNow,
   trackSeqRange,
   assertRangeOwnedByStep,
   CALLS_LIMIT,
@@ -345,6 +346,8 @@ const redraft = async (
   const spineNow = stripRecord(await load(projectId))
   const ctx = await buildStepContext(projectId, stepId)
   const noop = (): void => {}
+  // FLF-489: mockup đã lạc hậu từ trước lượt soạn lại thì bước không vẽ hộ (giống đường chạy chính)
+  const mockupsStaleAtStart = await mockupIdsStaleNow(projectId, spineNow)
   let draft: { spineVersion: number; applied: boolean; summary?: ChangeSummary[]; notes?: string }
   if (callKind === "regenerate") {
     const batched = await runBatchedDraft(projectId, stepId, ctx, spineNow, null, (batchCtx, batchSpine) =>
@@ -354,7 +357,7 @@ const redraft = async (
   } else {
     draft = await runDraftPhase(projectId, stepId, ctx, spineNow, userId, callKind, noop, deps, extra)
   }
-  const review = await runRenderReviewPhase(projectId, stepId, getStep(stepId).renders, parseStepId(stepId).loop, userId, noop, deps)
+  const review = await runRenderReviewPhase(projectId, stepId, getStep(stepId).renders, parseStepId(stepId).loop, userId, noop, deps, { mockupsStaleAtStart })
   const spineVersion = await trackSeqRange(projectId, review.spineVersion, stepId, userId, range.startSeq, range.existing)
   return { spineVersion, summary: draft.summary ?? [], applied: draft.applied, ...(draft.notes ? { notes: draft.notes } : {}) }
 }
