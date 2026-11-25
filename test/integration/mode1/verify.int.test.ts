@@ -48,6 +48,23 @@ describe("C-5 kiểm code (đỏ)", () => {
     expect(promptsOf("# CR Consistency")).toHaveLength(0)
   })
 
+  it("FLF-474 (7a): chỗ còn xung đột (người khác đã sửa) ⇒ kiểm không đụng, dừng manual_fix, không AI soạn lại; chỗ khác không bị đè", async () => {
+    const { c, projectId, cr, crId } = await toProposed()
+    await Spine.updateOne({ projectId, "nfrs.id": "NFR-01" }, { $set: { "nfrs.$.threshold": "3 s" }, $inc: { spine_version: 1 } })
+    const conflict = { at_proposal_text: "a", current_text: "b", proposal_text: "c", changed_by: "BA2", changed_at: null, proposed_at: null }
+    await ChangeLocation.updateOne({ projectId, cr_id: crId, path: NFR }, { $set: { conflict } })
+    const before = detail(await c.get(cr)).locations.find((l) => l.path === NFR)!
+    const proposeCalls = promptsOf("# CR Propose").length
+    const d = detail(await c.post(`${cr}/verify`))
+    expect(d.change_request.status).toBe("manual_fix")
+    const nfr = d.locations.find((l) => l.path === NFR)!
+    expect(nfr.conflict).not.toBeNull()
+    expect(nfr.verify!.violations).toEqual([])
+    expect(nfr.redo_count).toBe(before.redo_count)
+    expect(nfr.proposal).toEqual(before.proposal)
+    expect(promptsOf("# CR Propose")).toHaveLength(proposeCalls)
+  })
+
   it("op Spine làm hỏng Spine ⇒ vị trí đó đỏ, vị trí khác đạt; AI làm lại (proposing, redo_count 1)", async () => {
     routeCr((p) => clarifyPerf(p) ?? proposeBadOp(p))
     const { c, cr } = await toProposed()

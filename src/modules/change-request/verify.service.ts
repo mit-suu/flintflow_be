@@ -322,6 +322,9 @@ export const previousFindingsText = (flags: ReadonlyMap<string, readonly AiFlag[
   return messages.length ? truncate(messages.join("\n"), 3000) : "(none)"
 }
 
+/** FLF-474: vị trí đang mang xung đột chưa được người dùng quyết (quyết xong thì `location.service` xoá `conflict`). */
+export const hasOpenConflict = (l: Pick<IChangeLocation, "conflict" | "conclusion">): boolean => !!l.conflict && l.conclusion === "edit"
+
 export const runVerify = async (cr: IChangeRequest, userId: string): Promise<void> => {
   assertCrStatus(cr, ["proposing", "manual_fix", "ready_to_submit", "verifying"], "verifying")
   await transitionCr(cr, "verifying")
@@ -341,9 +344,13 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
   const language = await crDocumentLanguage(String(cr.projectId), spine)
   const outOfScope = await loadOutOfScopeSections(String(cr.projectId))
   const scopeOf = (l: IChangeLocation) => outOfScopeKind(spine, l, outOfScope)
-  const violations = new Map(locations.map((l) => [l.location_id, checkLocation(cr, l, spine, locks, language, scopeOf(l))]))
+  // FLF-474 (7a): chỗ còn xung đột (người khác đã sửa, chờ người dùng quyết ở màn 3 cột) không kiểm như chỗ thường —
+  // đề xuất của nó đã cũ, kiểm sẽ báo `value_changed` rồi AI tự soạn lại đè phần người khác vừa sửa (BF A5)
+  const inConflict = (l: IChangeLocation) => hasOpenConflict(l)
+  const checked = locations.filter((l) => !inConflict(l))
+  const violations = new Map(locations.map((l) => [l.location_id, inConflict(l) ? [] : checkLocation(cr, l, spine, locks, language, scopeOf(l))]))
   const exempt = new Set(locations.filter((l) => scopeOf(l) === "text").map((l) => l.location_id))
-  for (const [locId, vs] of checkSpineOps(spine, cr, locations, exempt)) violations.set(locId, [...(violations.get(locId) ?? []), ...vs])
+  for (const [locId, vs] of checkSpineOps(spine, cr, checked, exempt)) violations.set(locId, [...(violations.get(locId) ?? []), ...vs])
   // C-5 "giữ theo ý mình": lỗi luật BA đã giữ không tính (cờ đỏ thật hiện sau khi ghi)
   for (const l of locations) if (l.kept_violations.length) violations.set(l.location_id, withoutKept(violations.get(l.location_id) ?? [], l.kept_violations))
   // FLF-473 (B14): câu đếm phải khớp số đúng SAU khi ghi cả CR — op đã lỗi thì bỏ qua (checkSpineOps đã báo lỗi thật)
@@ -355,7 +362,7 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
   // lượt gọi ra một bộ nhận xét khác, người dùng tưởng sửa mãi không hết.
   const previous = previousFlags(locations)
   const codeOk = locations.every((l) => !violations.get(l.location_id)?.length)
-  const changed = locations.filter((l) => l.conclusion === "edit" || l.conclusion === "comment")
+  const changed = checked.filter((l) => l.conclusion === "edit" || l.conclusion === "comment")
   const aiFlags = new Map(previous)
   if (codeOk && changed.some((l) => l.verify === null)) {
     // Vị trí vừa đề xuất lại bỏ nhận xét cũ (có thể đã sửa đúng chỗ đó); AI thấy mọi nhận xét cũ để không nêu lại
@@ -408,8 +415,12 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
     l.verify = { code_ok: vs.length === 0, violations: vs, ai_flags: aiFlags.get(l.location_id) ?? [], at }
     if (vs.length) failing.push(l)
   }
+  const stillConflicting = locations.some(inConflict)
   let next: "ready_to_submit" | "proposing" | "manual_fix" = "ready_to_submit"
-  if (failing.length) {
+  if (stillConflicting) {
+    // Còn chỗ xung đột chưa quyết ⇒ dừng ở `manual_fix`, không để AI soạn lại (không tăng `redo_count`)
+    next = "manual_fix"
+  } else if (failing.length) {
     // Lỗi luật ở chỗ BA đã "Vẫn làm" ⇒ hỏi BA ngay (giữ theo ý mình hoặc đổi hướng), không tốn lượt AI làm lại
     const keptIntentFails = failing.some((l) => l.kept_intent && isKeepable(l.verify?.violations ?? []))
     next = keptIntentFails || failing.some((l) => l.manual || l.redo_count >= MAX_REDO_PER_LOCATION) ? "manual_fix" : "proposing"
