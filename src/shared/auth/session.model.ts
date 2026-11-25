@@ -17,6 +17,17 @@ export interface ISession extends Document {
   activeOrgId?: mongoose.Types.ObjectId | null
   userAgent?: string
   ip?: string
+  /**
+   * FLF-475: id của phiên gốc lúc đăng nhập (họ phiên). Phiên xoay ra kế thừa `familyId` của phiên cũ;
+   * dùng để phân biệt reuse "thật" (thu hồi cả họ) với reuse do phản hồi bị mất / request song song
+   * (chỉ xoay tiếp trong họ). `null`/thiếu ⇒ phiên tạo trước bản sửa này, không migrate — giữ hành vi cũ
+   * (thu hồi mọi phiên của user khi gặp reuse ở phiên đó).
+   */
+  familyId?: mongoose.Types.ObjectId | null
+  /** FLF-475: lúc phiên này bị XOAY (khác thu hồi do đăng xuất/đổi mật khẩu/logout-all). `null` = chưa xoay. */
+  rotatedAt?: Date | null
+  /** FLF-475: phiên mới sinh ra từ lần xoay này (nếu `rotatedAt` có). */
+  replacedBy?: mongoose.Types.ObjectId | null
   createdAt: Date
   updatedAt: Date
 }
@@ -57,6 +68,19 @@ const sessionSchema = new Schema<ISession>(
     },
     ip: {
       type: String
+    },
+    familyId: {
+      type: Schema.Types.ObjectId,
+      default: null,
+      index: true
+    },
+    rotatedAt: {
+      type: Date,
+      default: null
+    },
+    replacedBy: {
+      type: Schema.Types.ObjectId,
+      default: null
     }
   },
   { timestamps: true }

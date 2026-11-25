@@ -64,6 +64,12 @@ const envSchema = z.object({
   // cùng site (BE ở subdomain) ⇒ giữ `lax` và đặt COOKIE_DOMAIN=.flintflow.io.vn
   COOKIE_SAME_SITE: z.enum(["lax", "strict", "none"]).default("lax"),
   COOKIE_DOMAIN: z.string().default(""),
+  /**
+   * FLF-475: khoảng ân hạn (ms) sau khi một refresh token bị XOAY mà vẫn còn bị gửi lại (phản hồi bị mất
+   * giữa đường, F5 liên tục, request song song) — `session.service.ts` xoay tiếp trong CÙNG họ phiên thay
+   * vì coi là đánh cắp. Vượt khoảng này mới tính là reuse thật (thu hồi cả họ phiên).
+   */
+  REFRESH_REUSE_GRACE_MS: z.coerce.number().int().nonnegative().default(30000),
 
   SMTP_HOST: z.string().default("smtp.gmail.com"),
   SMTP_PORT: z.string().default("465"),
