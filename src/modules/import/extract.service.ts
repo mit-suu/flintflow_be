@@ -25,7 +25,7 @@ import { IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { DocBlock, type IDocBlock } from "./doc-block.model.js"
 import { applyDropToBlocks, planDrop, textRegions } from "./drop-text.js"
 import { isPlaceholderRow, isPlaceholderText, templateMarks } from "./template-markers.js"
-import { isTemplateContent, isTemplateFile } from "./structure-preview.js"
+import { isTemplateFile } from "./structure-preview.js"
 import { DIAGRAM_SECTIONS, DIAGRAM_TARGETS, NFR_CATEGORY_BY_SECTION, isExtractableSection, schemaExcerptFor, targetsOf } from "./extract-targets.js"
 import {
   IdAllocator,
@@ -810,27 +810,28 @@ interface ExtractionInputs {
 }
 
 /**
- * FLF-378 (luồng C, C2.1): file là **khung mẫu để điền** (giữ khung + màn đọc khung thấy phần lớn mục trống — `isTemplateFile`)
- * — chữ trong file là hướng dẫn / ví dụ, không phải dữ liệu ⇒ không trích nội dung vào Spine (không gọi AI, không đọc bảng tất
- * định). Chỉ giữ cấu trúc từ heading (tính năng / chức năng tạm của mapping) để mục của mẫu khớp được phần tử Spine; chữ của
- * mẫu thành `template_context` lúc finalize. Khung mẫu có tick bổ sung theo mẫu chuẩn cũng vậy (`isTemplateContent`, FLF-411).
+ * File **chỉ còn khung**: màn đọc khung không thấy mục nào có nội dung (mọi mục còn trống hoặc đã Bỏ chữ) ⇒ không có gì để trích
+ * vào Spine (không gọi AI, không đọc bảng tất định, không rà soát 1.11). Chỉ giữ cấu trúc từ heading (tính năng / chức năng tạm
+ * của mapping) để mục của mẫu khớp được phần tử Spine; chữ hướng dẫn thành `template_context` lúc finalize.
+ * FLF-463 (đảo FLF-378 / FLF-411): nhãn "Khung mẫu" (dưới 20% mục có chữ) không còn chặn đọc — mục đã viết luôn là "có" nên vẫn
+ * được đọc như SRS đã viết. Hồ sơ trước màn đọc khung (không có bản sơ bộ) ⇒ theo cách cũ (`isTemplateFile`).
  */
 export const isTemplateOnlyProject = async (projectId: string): Promise<boolean> => {
   const [project, profile] = await Promise.all([
     Project.findById(projectId, { start_kind: 1, template_intent: 1 }).lean(),
     TemplateProfile.findOne({ projectId }, { structure_preview: 1 }).lean()
   ])
-  // FLF-411: khung mẫu mà người dùng tick bổ sung theo mẫu chuẩn (ý định tự do) cũng không trích chữ / hình ví dụ của mẫu
-  return isTemplateFile(project, profile) || isTemplateContent(profile)
+  const preview = profile?.structure_preview
+  return preview ? preview.summary.present === 0 : isTemplateFile(project, profile)
 }
 
 export const loadExtractionInputs = async (projectId: string): Promise<ExtractionInputs | null> => {
   const profile = await TemplateProfile.findOne({ projectId })
   if (!profile) return null
   const stored = await DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }).sort({ "anchor.ordinal": 1 }).lean<BlockLite[]>()
-  // FLF-412: lựa chọn Bỏ chữ chưa áp vào file (trước Bắt đầu) ⇒ ước tính như file đã bỏ chữ. Ý định chỉ quyết định có bỏ heading
-  // mục riêng hay không — heading không tốn lượt đọc nên không cần biết
-  const blocks = profile.drop_text?.length ? applyDropToBlocks(stored, planDrop(stored, textRegions(stored, profile.heading_map), new Set(profile.drop_text), "fixed")) : stored
+  // FLF-412: lựa chọn Bỏ chữ chưa áp vào file (trước Bắt đầu) ⇒ ước tính như file đã bỏ chữ (FLF-463: chỉ còn heading, hàng tiêu đề
+  // bảng, chữ hướng dẫn — chữ cũ không vào lượt đọc của AI)
+  const blocks = profile.drop_text?.length ? applyDropToBlocks(stored, planDrop(stored, textRegions(stored, profile.heading_map), new Set(profile.drop_text))) : stored
   return { profile, blocks, provisional: resolveProvisional(profile.heading_map), plan: extractionPlan(blocks) }
 }
 

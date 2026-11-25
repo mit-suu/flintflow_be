@@ -3,13 +3,13 @@
  *
  * Sau khi Code dựng bố cục file và trích xong (I-4), so từng mục của **cấu trúc đích** với nội dung đã có ⇒ `present` /
  * `missing` / `out_of_scope`, rồi suy ra chế độ thật của dự án (§1 bảng "Lựa chọn khi tạo / Cấu trúc đích"):
- * - ý định `free` (có sẵn · tự do): đích = mẫu chuẩn FlintFlow ở mức tối thiểu (`REQUIRED_FIXED_SECTION_IDS`); đủ ⇒ chế độ 1,
- *   thiếu ⇒ **chế độ 4** (bổ sung + sắp lại bố cục). Mục riêng của file (`custom:*`) là `out_of_scope` — giữ nguyên, xuống cuối.
- * - ý định `fixed` (theo mẫu cố định / mẫu bắt buộc): đích = chính các heading của file; heading có mà trống ⇒ `missing`
+ * - ý định `free` (tick "Bổ sung các mục còn thiếu theo mẫu chuẩn FlintFlow"): đích = khung của file **cộng** các mục của mẫu chuẩn
+ *   FlintFlow ở mức tối thiểu (`REQUIRED_FIXED_SECTION_IDS`) mà file chưa có; đủ ⇒ chế độ 1, thiếu ⇒ **chế độ 4**. Heading riêng
+ *   của file (`custom:*`) là mục của đích như mọi heading khác (có / thiếu), không tự thành `out_of_scope` (FLF-463).
+ * - ý định `fixed` (mặc định, không tick): đích = chính các heading của file; heading có mà trống ⇒ `missing`
  *   ⇒ **chế độ 3** (chỉ soạn mục mẫu có, không thêm, không đổi thứ tự); mục FPT mẫu không có chỉ là cờ vàng (lát sau).
- * - FLF-378 (luồng C — **dự án mới** + mẫu bắt buộc, `draftAll`): file là **mẫu** (trống / hướng dẫn / ví dụ), không phải dữ
- *   liệu ⇒ chữ ngoài ngoặc chỉ là ví dụ, không làm mục thành "đã có". Mọi mục của mẫu (trừ Record of Changes, bìa, mục lục)
- *   là `missing` và luôn **chế độ 3** — FlintFlow soạn đủ mọi mục, kể cả khi mục nào của mẫu cũng có ví dụ.
+ * - FLF-463 (đảo FLF-378 luồng C): mục đã viết luôn là `present`, kể cả khi màn đọc khung gắn nhãn "Khung mẫu" (ngưỡng 20% chỉ để
+ *   gắn nhãn). Mục người dùng Bỏ chữ (`emptied`) tính là còn trống để Luồng 2 soạn lại.
  * Hàm thuần — finalize gọi trước khi chụp v0: còn `missing` ⇒ **không có v0 dở dang** (§1), import dừng ở `incomplete`.
  */
 
@@ -69,10 +69,10 @@ const isPlaceholderHeading = (sectionId: string, headingText: string): boolean =
 
 export interface CompareOptions {
   /**
-   * FLF-378: dự án mới theo mẫu bắt buộc (`start_kind = new`, `template_intent = fixed`) — soạn đủ mọi mục của mẫu, chữ trong
-   * mẫu không tính là nội dung. Chỉ có tác dụng với ý định `fixed`.
+   * FLF-463: mục người dùng chọn Bỏ chữ ở màn đọc khung — chỉ còn khung nên tính là còn trống (Luồng 2 soạn lại), kể cả khi Spine
+   * có dữ liệu của mục đó lấy từ chỗ khác trong file.
    */
-  draftAll?: boolean
+  emptied?: ReadonlySet<string>
 }
 
 const hasContent = (spine: Spine, sectionId: string, withContent: ReadonlySet<string>): boolean => {
@@ -102,6 +102,40 @@ const titleOf = (sectionId: string, layout: readonly LayoutEntry[]): string => {
   return (entry?.heading_text?.trim() && displayHeading(entry.heading_text, entry.number_label)) || sectionTitle(sectionId)
 }
 
+/**
+ * Mục của chính file theo thứ tự heading (bỏ nhóm bao `group:*` — không có nội dung riêng — và phần nối: mục riêng tiêu đề rỗng
+ * gom khối dưới heading nhóm / khối không trích, thuộc mục đứng trước chứ không phải heading của file).
+ */
+const fileSections = (
+  layout: readonly LayoutEntry[],
+  withContent: ReadonlySet<string>,
+  spine: Spine,
+  emptied: ReadonlySet<string>
+): TargetSection[] => {
+  const sections: TargetSection[] = []
+  const has = (id: string) => !emptied.has(id) && hasContent(spine, id, withContent)
+  const seen = new Set<string>()
+  const wrappers = templateWrapperIds(layout)
+  const ordered = [...layout].sort((a, b) => a.order - b.order)
+  for (const [i, entry] of ordered.entries()) {
+    if (entry.section_id.startsWith("group:") || seen.has(entry.section_id)) continue
+    if (entry.section_id.startsWith("custom:") && !entry.heading_text.trim()) continue
+    seen.add(entry.section_id)
+    // FLF-379: Record of Changes / Revision History tự sinh từ lịch sử thay đổi — không phải mục cần soạn
+    if (DERIVED_SECTIONS.has(entry.section_id)) continue
+    const own = has(entry.section_id)
+    // Heading bao chỉ chứa mục con (vd "2 Overall Description") không phải mục cần soạn
+    if (wrappers.has(entry.section_id) && !own) continue
+    // FLF-379: heading chỉ có mục con (tính năng "3.2 Course Registration" ⇒ chức năng 3.2.1…) — mục con có nội dung thì
+    // mục cha đã có nội dung, không "Sẽ soạn"
+    const present = own || childHasContent(ordered, i, spine, withContent)
+    // Bìa / mục lục / heading chỗ điền của mẫu còn trống không phải mục cần soạn (FLF-378, FLF-411)
+    if (!present && isNonDraftHeading(entry.section_id, entry.heading_text)) continue
+    sections.push({ section_id: entry.section_id, title: titleOf(entry.section_id, layout), status: present ? "present" : "missing", owner_steps: templateSectionOwnerSteps(entry.section_id, spine) })
+  }
+  return sections
+}
+
 export const compareTargetStructure = (
   layout: readonly LayoutEntry[],
   withContent: ReadonlySet<string>,
@@ -110,65 +144,17 @@ export const compareTargetStructure = (
   at: string = new Date().toISOString(),
   opts: CompareOptions = {}
 ): TargetStructure => {
-  const sections: TargetSection[] = []
-  const draftAll = intent === "fixed" && opts.draftAll === true
-  if (intent === "fixed") {
-    // Đích = heading của chính mẫu (bỏ nhóm bao `group:*` — không có nội dung riêng — và phần nối: mục riêng tiêu đề rỗng
-    // gom khối dưới heading nhóm / khối không trích, thuộc mục đứng trước chứ không phải heading của mẫu)
-    const seen = new Set<string>()
-    const wrappers = templateWrapperIds(layout)
-    const ordered = [...layout].sort((a, b) => a.order - b.order)
-    for (const [i, entry] of ordered.entries()) {
-      if (entry.section_id.startsWith("group:") || seen.has(entry.section_id)) continue
-      if (entry.section_id.startsWith("custom:") && !entry.heading_text.trim()) continue
-      seen.add(entry.section_id)
-      // FLF-379: Record of Changes / Revision History tự sinh từ lịch sử thay đổi — không phải mục cần soạn
-      if (DERIVED_SECTIONS.has(entry.section_id)) continue
-      if (draftAll && isNonDraftHeading(entry.section_id, entry.heading_text)) continue
-      // FLF-378: dự án mới theo mẫu bắt buộc — chữ trong mẫu không tính là nội dung
-      const own = draftAll ? false : hasContent(spine, entry.section_id, withContent)
-      // Heading bao chỉ chứa mục con (vd "2 Overall Description") không phải mục cần soạn
-      if (wrappers.has(entry.section_id) && !own) continue
-      // FLF-379: heading chỉ có mục con (tính năng "3.2 Course Registration" ⇒ chức năng 3.2.1…) — mục con có nội dung thì
-      // mục cha đã có nội dung, không "Sẽ soạn"
-      const present = !draftAll && (own || childHasContent(ordered, i, spine, withContent))
-      const owners = templateSectionOwnerSteps(entry.section_id, spine)
-      sections.push({ section_id: entry.section_id, title: titleOf(entry.section_id, layout), status: present ? "present" : "missing", owner_steps: owners })
-    }
-  } else {
+  const emptied = opts.emptied ?? new Set<string>()
+  const sections = fileSections(layout, withContent, spine, emptied)
+  if (intent === "free") {
+    // Mẫu chuẩn FlintFlow là mức tối thiểu: mục bắt buộc file chưa có ⇒ thêm vào đích (có dữ liệu trong Spine từ chỗ khác ⇒ có)
     for (const id of REQUIRED_FIXED_SECTION_IDS) {
-      const present = hasContent(spine, id, withContent)
+      if (DERIVED_SECTIONS.has(id) || sections.some((s) => s.section_id === id)) continue
+      const present = !emptied.has(id) && hasContent(spine, id, withContent)
       sections.push({ section_id: id, title: titleOf(id, layout), status: present ? "present" : "missing", owner_steps: stepsOf(id, spine) })
-    }
-    // FLF-411 (U3-2…U3-4): mục của file ngoài mẫu FPT. Tính năng / chức năng của file (3.2 Account › 3.2.1 Register…) là phần
-    // Functional Requirements của mẫu FPT ⇒ có / thiếu như mục FPT, không gộp thành một mục riêng. Phần nối (mục riêng tiêu đề
-    // rỗng) và heading bao chỉ chứa mục con ("II. Software Requirement Specification") không phải mục — không "Ngoài phạm vi"
-    const seen = new Set<string>()
-    const wrappers = templateWrapperIds(layout)
-    const ordered = [...layout].sort((a, b) => a.order - b.order)
-    for (const [i, entry] of ordered.entries()) {
-      const id = entry.section_id
-      if (seen.has(id)) continue
-      seen.add(id)
-      if (/^(feature|function):/.test(id)) {
-        if (wrappers.has(id) && !hasContent(spine, id, withContent)) continue
-        const present = hasContent(spine, id, withContent) || childHasContent(ordered, i, spine, withContent)
-        sections.push({ section_id: id, title: titleOf(id, layout), status: present ? "present" : "missing", owner_steps: templateSectionOwnerSteps(id, spine) })
-        continue
-      }
-      // Mục FPT của file ngoài danh sách tối thiểu (vd 4.2.4 Security) có nội dung ⇒ vẫn hiện "có", không biến mất khỏi bản đồ
-      if (!id.startsWith("custom:") && !id.startsWith("group:") && !sections.some((s) => s.section_id === id)) {
-        if (!DERIVED_SECTIONS.has(id) && hasContent(spine, id, withContent)) sections.push({ section_id: id, title: titleOf(id, layout), status: "present", owner_steps: stepsOf(id, spine) })
-        continue
-      }
-      if (!id.startsWith("custom:") || !entry.heading_text.trim()) continue
-      if (isNonDraftHeading(id, entry.heading_text)) continue
-      if (wrappers.has(id) && !withContent.has(id)) continue
-      sections.push({ section_id: id, title: titleOf(id, layout), status: "out_of_scope", owner_steps: [] })
     }
   }
   const missing = sections.filter((s) => s.status === "missing").map((s) => s.section_id)
-  // FLF-378: dự án mới theo mẫu bắt buộc luôn chế độ 3 (không bao giờ chụp bản 0.1 từ mẫu)
-  const resolved_mode: ResolvedMode = draftAll ? 3 : missing.length === 0 ? 1 : intent === "fixed" ? 3 : 4
+  const resolved_mode: ResolvedMode = missing.length === 0 ? 1 : intent === "fixed" ? 3 : 4
   return { target: intent === "fixed" ? "template" : "fpt", intent, resolved_mode, sections, missing, compared_at: at }
 }
