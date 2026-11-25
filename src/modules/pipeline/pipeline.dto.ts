@@ -634,7 +634,13 @@ export const runEstimateUnitSchema = z.object({
   steps: z.number().int().min(0),
   ai_steps: z.number().int().min(0),
   interview_credits: z.number().min(0),
-  credits: z.number().min(0)
+  /** Cận trên (= `credits_max`). */
+  credits: z.number().min(0),
+  /** FLF-485: cận dưới / cận trên; đơn vị chính xác thì bằng nhau, chỉ đơn vị S-5 ước tính mới khác. */
+  credits_min: z.number().min(0),
+  credits_max: z.number().min(0),
+  /** Khoảng số màn, chỉ có ở đơn vị S-5 ước tính (chưa có danh sách màn). */
+  screens: z.object({ min: z.number().int().min(0), max: z.number().int().min(0) }).optional()
 })
 
 export const runEstimateResponseSchema = z.object({
@@ -643,7 +649,14 @@ export const runEstimateResponseSchema = z.object({
   units: z.array(runEstimateUnitSchema),
   steps_total: z.number().int().min(0),
   ai_steps_total: z.number().int().min(0),
+  /** Cận trên (= `credits_max`). */
   credits_total: z.number().min(0),
+  credits_min: z.number().min(0),
+  credits_max: z.number().min(0),
+  /** `screens` = đã có màn (chính xác); còn lại là khoảng đoán theo use case / Brief / mặc định; null khi lượt chạy không đi qua vòng màn hình. */
+  screen_estimate: z
+    .object({ min: z.number().int().min(0), max: z.number().int().min(0), basis: z.enum(["screens", "use_cases", "brief", "default"]) })
+    .nullable(),
   /** `balance − reserved` của ví org sở hữu project; null khi không xác định được ví. */
   available_credits: z.number().nullable()
 })
