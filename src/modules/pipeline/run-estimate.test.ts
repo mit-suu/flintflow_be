@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine, StepStatus } from "../spine/spine.types.js"
 import { orderedSteps } from "./step-registry.js"
-import { planRunEstimate, type RunEstimateCosts } from "./run-estimate.js"
+import { estimateScreenCount, planRunEstimate, type RunEstimateCosts } from "./run-estimate.js"
 
 const COSTS: RunEstimateCosts = { draft: 4, review: 2, elicit: 1, reviewLlm: false }
 
@@ -36,13 +36,57 @@ describe("planRunEstimate (FLF-332 - ước tính credit trước lượt chạy
     expect(b0.units[0]).toMatchObject({ unit: "B-0", interview_credits: 0 })
   })
 
-  it("scope all từ sau Approve Brief: đếm hết S-1 → S-9, bước tất định (S-8.2, S-8.3, S-9.1, S-9.5) không tốn credit", () => {
+  it("scope all từ sau Approve Brief: có đơn vị S-5 ước tính (cận trên 14 màn + 1 vòng không màn), bước tất định không tốn credit", () => {
     const est = planRunEstimate(spineAt("S-1.1"), { scope: "all" }, COSTS)
-    expect(est.units.map((u) => u.unit)).toEqual(["S-1", "S-2", "S-3", "S-4", "S-6", "S-7", "S-8", "S-9"])
-    expect(est.steps_total).toBe(38)
-    expect(est.ai_steps_total).toBe(34)
-    // 34 bước × 4 + 8 giai đoạn × 1 lượt hỏi
-    expect(est.credits_total).toBe(34 * 4 + 8)
+    expect(est.units.map((u) => u.unit)).toEqual(["S-1", "S-2", "S-3", "S-4", "S-5", "S-6", "S-7", "S-8", "S-9"])
+    // mỗi màn: 1 lượt hỏi + 3 bước gọi model × 4 = 13; (14 + 1) vòng
+    expect(est.units.find((u) => u.unit === "S-5")).toEqual({ unit: "S-5", steps: 75, ai_steps: 45, interview_credits: 15, credits: 15 * 13 })
+    expect(est.steps_total).toBe(38 + 75)
+    expect(est.ai_steps_total).toBe(34 + 45)
+    // 34 bước × 4 + 8 giai đoạn × 1 lượt hỏi + vòng màn hình
+    expect(est.credits_total).toBe(34 * 4 + 8 + 195)
+  })
+
+  it("estimateScreenCount: use case > năng lực Brief nhắm mô tả màn hình > dải mặc định", () => {
+    const base = createEmptySpine({ name: "P" })
+    expect(estimateScreenCount(base)).toEqual({ min: 6, max: 14, basis: "default" })
+    const addendum = Array.from({ length: 5 }, (_, i) => ({ id: `A${i}`, topic: "t", content: "c", content_en: "c", target_section: "fixed:3.1.2", captured_at: "2026-11-25T00:00:00.000Z" }))
+    expect(estimateScreenCount({ ...base, addendum })).toEqual({ min: 5, max: 10, basis: "brief" })
+    const use_cases = Array.from({ length: 8 }, (_, i) => ({ id: `UC-${i}` })) as never
+    expect(estimateScreenCount({ ...base, addendum, use_cases })).toEqual({ min: 7, max: 12, basis: "use_cases" })
+  })
+
+  it("đơn vị S-5 ước tính theo số use case khi đã qua S-3, bắt đầu từ S-4.1", () => {
+    const use_cases = Array.from({ length: 8 }, (_, i) => ({ id: `UC-${i}` })) as never
+    const est = planRunEstimate(spineAt("S-4.1", { use_cases }), { scope: "all" }, COSTS)
+    expect(est.units.find((u) => u.unit === "S-5")?.credits).toBe(13 * 13)
+  })
+
+  it("không thêm đơn vị S-5 ước tính khi scope unit, khi S-4.1 đã accepted (dự án không màn), hoặc Spine đã có màn", () => {
+    expect(planRunEstimate(spineAt("S-2.1"), { scope: "unit" }, COSTS).units.map((u) => u.unit)).toEqual(["S-2"])
+    expect(planRunEstimate(spineAt("S-5.1@nonscreen"), { scope: "all", from: "S-6.1" }, COSTS).units.some((u) => u.unit === "S-5")).toBe(false)
+    expect(planRunEstimate(spineAt("S-4.2"), { scope: "all" }, COSTS).units.some((u) => u.unit === "S-5")).toBe(false)
+    const withScreens = spineAt("S-5.1@S01", { screens: [{ id: "S01", name: "A", order: 1 } as never] })
+    expect(planRunEstimate(withScreens, { scope: "all", from: "S-5@S01" }, COSTS).units.some((u) => u.unit === "S-5")).toBe(false)
+  })
+
+  it("màn placeholder ⇒ vòng của nó không được đếm", () => {
+    const spine = spineAt("S-5.1@S01", {
+      screens: [
+        { id: "S01", name: "A", order: 1, detail_status: "pending" } as never,
+        { id: "S02", name: "B", order: 2, detail_status: "placeholder" } as never
+      ]
+    })
+    const est = planRunEstimate(spine, { scope: "all", from: "S-5@S01" }, COSTS)
+    expect(est.units.map((u) => u.unit).filter((u) => u.startsWith("S-5"))).toEqual(["S-5@S01"])
+  })
+
+  it("lô: màn có 13 function ⇒ S-5.2 và S-5.4 mỗi bước 3 lượt Draft", () => {
+    const functions = Array.from({ length: 13 }, (_, i) => ({ id: `F${String(i + 1).padStart(2, "0")}`, screen_id: "S01", order: i })) as never
+    const spine = spineAt("S-5.1@S01", { screens: [{ id: "S01", name: "A", order: 1, detail_status: "pending" } as never], functions })
+    const est = planRunEstimate(spine, { scope: "all", from: "S-5@S01" }, COSTS)
+    // 1 hỏi + (3 + 1 + 3) × 4
+    expect(est.units[0]).toMatchObject({ unit: "S-5@S01", credits: 1 + 7 * 4 })
   })
 
   it("vòng S-5 tính theo từng màn, hai bước sổ sách S-5.1 / S-5.5 không gọi model", () => {
