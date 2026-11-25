@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
-import { functionFieldValues, patchFunctionOriginal, tagFunctionBlocks, type FunctionOriginalBlock } from "./function-original.js"
+import { functionBlocksLikeSibling, functionFieldValues, patchFunctionOriginal, tagFunctionBlocks, type FunctionOriginalBlock } from "./function-original.js"
 import { buildLayoutSections, functionSourceHash, type TemplateLayout } from "./layout-sections.js"
 
 const LOCK5 = "An account is locked temporarily after five consecutive failed login attempts and unlocks automatically after 15 minutes."
@@ -174,5 +174,89 @@ describe("FLF-361 mục chức năng sau CR - chỉ sửa đúng phần tử đ�
     expect(json).toContain(`Business rules: ${LOCK3}`)
     expect(json).not.toContain("after five consecutive failed login attempts and unlocks")
     expect(edited.blocks.filter((b) => b.type === "heading")).toHaveLength(4)
+  })
+
+  it("FLF-468 (lát C): mẫu cố định, mục chức năng dùng tiêu đề con FPT — CR đổi trigger không sửa tại chỗ được (dựng lại cả mục) vẫn giữ khung FPT, không rơi về nhãn 'Kích hoạt:' / thẻ loại validation thô \"[business]\"", () => {
+    const fn = fnOf({ trigger: "User opens the app" }) // số đoạn trigger khác lúc import ⇒ patchFunctionOriginal trả null
+    const s: Spine = { ...createEmptySpine({ name: "FAP" }), features: [{ id: "F-01", name: "Authentication", order: 0 }] as never, functions: [fn] }
+    const template: TemplateLayout = {
+      language: "en",
+      fixedTemplate: true,
+      layout: [
+        { order: 0, heading_text: "3.2 Authentication", level: 2, section_id: "feature:F-01" },
+        { order: 1, heading_text: "3.2.1 Log In", level: 3, section_id: "function:FR-3.2.1" }
+      ] as never,
+      functionOriginals: [{ section_id: "function:FR-3.2.1", source_hash: functionSourceHash(fnOf()), field_values: before, blocks: tagged }]
+    }
+    const rendered = buildLayoutSections(s, template, [], { diagramPng: (id) => `ref:${id}` }).sections.find((x) => x.id === "function:FR-3.2.1")!
+    const json = JSON.stringify(rendered.blocks)
+    expect(json).toContain("Function trigger")
+    expect(json).not.toContain("Kích hoạt")
+    expect(json).not.toMatch(/\[business\]/)
+  })
+})
+
+describe("FLF-468 (E2E-1) - thân chức năng mới theo khuôn chức năng anh em", () => {
+  const text = (blocks: readonly FunctionOriginalBlock[] | null) => (blocks ?? []).map((b) => [b.kind, "text" in b ? b.text : ""])
+  /** FR-3.5.1 kiểu đoạn có nhãn (không tiêu đề con): "Function trigger: …", "Function description: …". */
+  const SIB_VALUES = functionFieldValues(spine, fnOf({
+    trigger: "The Student opens SCR-08 Tuition.",
+    description: "The system shows the unpaid fees and lets the Student pay online.",
+    normal: ["The Student selects a fee and clicks Pay.", "The system redirects to the payment gateway."],
+    abnormal: ["The gateway is down: the system shows a retry message."],
+    validations: [{ id: "V1", kind: "required", statement: "A fee must be selected." }, { id: "V2", kind: "business", statement: "Only unpaid fees can be paid." }]
+  }))
+  const PAY: FunctionOriginalBlock[] = [
+    para("Function trigger: The Student opens SCR-08 Tuition."),
+    para("Function description: The system shows the unpaid fees and lets the Student pay online."),
+    para("Normal case:"),
+    item("The Student selects a fee and clicks Pay."),
+    item("The system redirects to the payment gateway."),
+    para("Abnormal case:"),
+    item("The gateway is down: the system shows a retry message."),
+    para("Validation:"),
+    item("A fee must be selected."),
+    item("Only unpaid fees can be paid.")
+  ]
+  const sibling = tagFunctionBlocks(PAY, SIB_VALUES)
+  const fresh = functionFieldValues(spine, fnOf({
+    id: "FR-05", name: "Reset Password", trigger: "The user clicks Forgot password.", description: "The system emails a reset link.",
+    normal: ["The user enters their email.", "The system sends the link."], abnormal: ["The email is unknown: the system shows an error."],
+    validations: [{ id: "V1", kind: "required", statement: "Email must not be empty." }, { id: "V2", kind: "business", statement: "A link expires after 30 minutes." }]
+  }))
+
+  it("mục mẫu kiểu đoạn có nhãn ⇒ Function trigger / Function description, nhãn riêng dòng, mỗi phần tử một khối cùng kiểu", () => {
+    expect(text(functionBlocksLikeSibling(sibling, fresh, SIB_VALUES))).toEqual([
+      ["paragraph", "Function trigger: The user clicks Forgot password."],
+      ["paragraph", "Function description: The system emails a reset link."],
+      ["paragraph", "Normal case:"], ["list_item", "The user enters their email."], ["list_item", "The system sends the link."],
+      ["paragraph", "Abnormal case:"], ["list_item", "The email is unknown: the system shows an error."],
+      ["paragraph", "Validation:"], ["list_item", "Email must not be empty."], ["list_item", "A link expires after 30 minutes."]
+    ])
+  })
+
+  it("không in thẻ loại validation, không tiêu đề con, không dòng Screens", () => {
+    const json = JSON.stringify(functionBlocksLikeSibling(sibling, fresh, SIB_VALUES))
+    for (const raw of ["[required]", "[business]", "[format]", "Screens:", '"heading"']) expect(json).not.toContain(raw)
+  })
+
+  it("trường mục mẫu không có ⇒ nhãn mặc định ở cuối; trường của chức năng mới trống ⇒ bỏ", () => {
+    const withoutAbnormal = PAY.filter((b) => !("text" in b) || !/^(Abnormal case|The gateway)/.test(b.text))
+    const out = text(functionBlocksLikeSibling(tagFunctionBlocks(withoutAbnormal, SIB_VALUES), fresh, SIB_VALUES))
+    expect(out.slice(-2)).toEqual([["paragraph", "Abnormal case:"], ["list_item", "The email is unknown: the system shows an error."]])
+    const sparse = functionFieldValues(spine, fnOf({ id: "FR-06", trigger: "t", description: "", normal: [], abnormal: [], validations: [] }))
+    expect(text(functionBlocksLikeSibling(sibling, sparse, SIB_VALUES))).toEqual([["paragraph", "Function trigger: t"]])
+  })
+
+  it("mục mẫu ghi nhãn ngay trong khối danh sách ⇒ mỗi phần tử mang nhãn đó (kể cả khi không có giá trị mẫu)", () => {
+    const labelled = tagFunctionBlocks([item("Validation: A fee must be selected."), item("Validation: Only unpaid fees can be paid.")], SIB_VALUES)
+    const expected = [["list_item", "Validation: Email must not be empty."], ["list_item", "Validation: A link expires after 30 minutes."]]
+    expect(text(functionBlocksLikeSibling(labelled, fresh, SIB_VALUES)).slice(0, 2)).toEqual(expected)
+    expect(text(functionBlocksLikeSibling(labelled, fresh)).slice(0, 2)).toEqual(expected)
+  })
+
+  it("mục mẫu dùng tiêu đề con hoặc không gắn phần tử nào ⇒ null (người gọi dùng khung FPT)", () => {
+    expect(functionBlocksLikeSibling(tagFunctionBlocks(LOGIN, functionFieldValues(spine, fnOf())), fresh)).toBeNull()
+    expect(functionBlocksLikeSibling([para("Free text")], fresh)).toBeNull()
   })
 })

@@ -145,9 +145,11 @@ const ENGLISH_LABELS = new Set<string>([
 ])
 
 describe("labels - bảng nhãn", () => {
-  it("VI_LABELS / VI_SECTION_TITLES của mode 1 giữ nguyên 42 nhãn / 19 mục (thêm key là đổi bản in mode 1)", () => {
+  it("VI_LABELS / VI_SECTION_TITLES của mode 1 giữ nguyên 44 nhãn / 19 mục (thêm key là đổi bản in mode 1)", () => {
     // 42 = 40 + chú thích hình `Class Diagram` và `State Machine Diagram` (chỉ hai kind mới dùng, không đổi bản in đã có)
-    expect(Object.keys(VI_LABELS)).toHaveLength(42)
+    // FLF-468 (lát D): +2 ("Rule", "Context") — cột bảng mode 1 (§5.1 / §5.3) in tiếng Anh giữa tài liệu tiếng Việt
+    // (ChoViet #11); đây là sửa lỗi có chủ đích, không phải thêm nhãn tuỳ ý.
+    expect(Object.keys(VI_LABELS)).toHaveLength(44)
     expect(Object.keys(VI_SECTION_TITLES)).toHaveLength(19)
     expect(labelFor("vi", "Use Case")).toBe("Use Case")
     expect(fptLabelFor("vi", "Use Case")).toBe("Use case")

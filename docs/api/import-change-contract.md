@@ -1110,3 +1110,26 @@ Plan: `bug/plan-fix-06-sua-chat-doan-van-noi.md`. BE only trong lượt này; lu
   đoán theo màn rồi theo tính năng, đúng một use case mới chọn). Không đoán được ⇒ ghi chú "chưa gắn" trên vị trí use case /
   `functions[]` để Lead xác nhận khi duyệt. `verify.ai_flags[].rule` có thêm `function_no_use_case` và `use_case_emptied` (cờ vàng,
   không chặn; FE hiện `message` sẵn có). Prompt `cr-propose` 2.10.0 (luật 16, 17) cho đường dự phòng theo từng vị trí.
+
+## FLF-468 (2026-11-25) — bản in chế độ giữ file gốc: mục CR thêm in đúng chỗ, đúng khuôn (không đổi API / Spine)
+
+Chỉ đổi file Word xuất ra của dự án **Upload SRS có sẵn** (`start_kind ≠ new`), kể cả theo mẫu cố định. Mục không bị CR chạm vẫn giống
+hệt bản trước (nguyên văn file).
+
+- **Tính năng / chức năng CR thêm mà file không có mục cho nó** (lỗi E2E-1):
+  - in thành **heading mới** cùng style heading của file (ưu tiên heading cùng loại tính năng / chức năng, cùng cấp), số mục gõ tay
+    được ghép theo bản in ("3.6 Authentication", "3.6.1 Reset Password");
+  - đặt đúng vị trí bản in, ngay **trước heading kế tiếp của file** (sau mục cuối của nhóm). Không còn gộp vào thân mục cha (trước "3.1")
+    thành chữ đậm;
+  - chức năng mới của tính năng **đã có** cũng là heading mới sau chức năng cuối của tính năng đó (3.5.2 sau 3.5.1), thân 3.5 giữ nguyên;
+  - có heading mới ⇒ mục lục của file đánh dấu cập nhật khi mở (Word hỏi cập nhật field; heading mới vào mục lục).
+- **Thân chức năng mới ở mẫu cố định** theo khuôn **chức năng anh em trong file** (cùng tính năng, gần nhất đứng trước; không có thì chức
+  năng gần nhất trong layout): cùng nhãn đầu dòng ("Function trigger: …", "Function description: …"), cùng kiểu khối (đoạn / dòng danh
+  sách), cùng thứ tự trường. Không in thẻ loại validation (`[required]`, `[format]`, `[business]`), không dòng "Screens: …". File
+  không có chức năng nào làm khuôn được (không đoạn gắn phần tử, hoặc dùng tiêu đề con) ⇒ khung FPT (tiêu đề con Function trigger /
+  Function description…), tính năng mới chỉ có heading.
+- Không đổi quy tắc FLF-335 cho **mục của mẫu** (chỉ heading của mẫu vào mục lục); mục lặp CR thêm là ngoại lệ vì tính năng / chức năng
+  là phần lặp của mẫu (như FLF-413, TechMart 11/11).
+- Ghi chú còn lại của FLF-468 (lát A–D): chức năng bị CR xoá mất cả heading lẫn thân (heading `_Toc` mất ⇒ mục lục cập nhật khi mở);
+  bảng của file (thông báo, quy tắc…) vá theo hàng thay vì dựng lại; mục `slot:*` của mẫu cố định không có bảng nguồn in bảng thật
+  (≥ 3 cột) hoặc danh sách "<mã> – <nội dung>" (2 cột); mục chức năng dùng tiêu đề con khung FPT trong file vẫn dựng theo khung đó.
