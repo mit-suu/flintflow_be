@@ -41,6 +41,8 @@ import { DocBlock } from "./doc-block.model.js"
 import { erdNotationOfDocument } from "./erd-notation-detect.js"
 import { fillScreenDomain } from "../diagram/screen-domain.js"
 import { captionOf } from "./extract.service.js"
+import { CONTENT_SECTION } from "./extract-targets.js"
+import { sectionsOfPath } from "../spine/section-registry.js"
 import { canonicalFieldIds, collectEntities, idKey, imageOnlyGenericActors, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
 import { ExtractionDraft, type IExtractionDraft } from "./extraction-draft.model.js"
 import { FieldAnchor } from "./field-anchor.model.js"
@@ -60,7 +62,7 @@ import { tableRows } from "./table-rows.js"
 import { buildLayout, buildStepPlan, customSectionOps, customSectionsWithContent, functionOriginals, projectFieldEntities, repeatSectionsWithContent, sectionSegments, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
 import { functionSourceHash } from "../render/layout-sections.js"
 import { functionFieldValues, tagFunctionBlocks } from "../render/function-original.js"
-import { isTemplateFile, structureChanges } from "./structure-preview.js"
+import { structureChanges } from "./structure-preview.js"
 import { enterFlow2, entersFlow2 } from "./flow2.service.js"
 import { TemplateProfile, type HeadingMapEntry, type LayoutEntry, type TableMapEntry } from "./template-profile.model.js"
 import { buildTemplateContext } from "./template-context.js"
@@ -258,18 +260,20 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   }
   const project = await Project.findById(projectId).lean()
   const intentRaw = (project as { template_intent?: string | null } | null)?.template_intent ?? null
-  // FLF-378 (luồng C): file là khung mẫu để điền (giữ khung + màn đọc khung thấy phần lớn mục trống) ⇒ không phải dữ liệu: mục
-  // riêng không giữ nguyên văn, chữ của mẫu thành `template_context` (hướng dẫn / ví dụ / ngữ cảnh theo mục); mọi mục mẫu
-  // "Sẽ soạn", luôn chế độ 3
+  // FLF-463 (đảo FLF-378 luồng C): nhãn "Khung mẫu" của màn đọc khung chỉ là nhãn câu tóm tắt — mục đã viết vẫn là "có", chỉ soạn
+  // mục còn thiếu (cùng đường với SRS viết dở giữ khung)
   const intent: TemplateIntent = intentRaw === "fixed" ? "fixed" : "free"
-  const draftAll = isTemplateFile(project, profile)
+  // FLF-463: mục người dùng Bỏ chữ (đã viết lại file lúc Bắt đầu) ⇒ còn trống, Luồng 2 soạn lại; còn mục Bỏ chữ ⇒ không có 0.1
+  const droppedKeys = new Set(profile.dropped_text ?? [])
+  const emptied = new Set(profile.heading_map.filter((h) => droppedKeys.has(h.block_id) && h.section_id !== "unmapped").map((h) => h.section_id))
   // FLF-366: file giữ khung còn mục trống là mẫu để điền (bản xuất điền vào chính file đó) ⇒ không chia đoạn nguyên văn. SRS
   // đã viết đủ khung (kể cả theo mẫu của công ty) vẫn giữ đoạn gốc như cấu trúc FlintFlow
   const previewMissing = (profile.structure_preview?.summary.missing ?? 0) > 0
-  const { layout, customSections, slices, segments, contextBlocks } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds, {
-    segment: !draftAll && !(intent === "fixed" && previewMissing),
-    templateOnly: draftAll
+  const { layout, customSections, slices, segments, entryOfHeading } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds, {
+    segment: !(intent === "fixed" && previewMissing)
   })
+  // FLF-444: ảnh trong mục đọc theo nội dung (`content:@<heading>`) ⇒ câu cờ nêu tiêu đề mục riêng của layout (`custom:CSnn`)
+  const reviewDrafts = drafts.map((d) => ({ ...d, section_id: layoutSectionOf(d.section_id, entryOfHeading) }))
   const seeded = await loadSpine(projectId)
   // Mẫu IEEE: phần tử trích từ heading lặp (Availability dưới 4.2.2) in dưới đúng heading đó của file
   const sliceItems = sectionSlices(slices, entities)
@@ -283,31 +287,32 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     ...repeatSectionsWithContent(slices, authoredBlocks),
     ...sliceItems.filter((sl) => sl.items.length).map((sl) => `custom:${sl.custom_id}`)
   ])
-  const structure = compareTargetStructure(layout, withContent, stripRecord(seeded), intent, undefined, { draftAll })
-  // Bước sở hữu mục của mẫu (id bước mẫu, bỏ `@màn`) — dự án mới theo mẫu bắt buộc: chờ soạn hết, không bước nào `accepted` sẵn
-  const draftOwners = draftAll ? new Set(structure.sections.flatMap((s) => s.owner_steps.map((id) => id.split("@")[0]))) : undefined
+  const structure = compareTargetStructure(layout, withContent, stripRecord(seeded), intent, undefined, { emptied })
   // Kế hoạch đọc Spine đã nạp dữ liệu: mục trích không ra gì thì vẫn là "thiếu", đừng đánh dấu step đã xong
-  const plan = buildStepPlan(layout, sectionsWithContent(authoredBlocks), stripRecord(seeded), draftOwners ? { draftOwners } : {})
+  const plan = buildStepPlan(layout, sectionsWithContent(authoredBlocks), stripRecord(seeded))
   // FLF-252: quyền của ma trận không khớp màn / vai trò nào ⇒ cờ vàng (trước đây bỏ im lặng), neo vào bảng phân quyền
   const matrixBlocks = [...new Set(entities.filter((e) => e.entity === "permissions").flatMap((e) => [...e.source_block_ids]))].slice(0, 1)
   const planOps = [
     ...customSectionOps(customSections),
     // Hai nhóm cờ trong cùng lô ⇒ id cờ cấp nối tiếp (gọi riêng từng nhóm thì trùng id, cả lô bị từ chối)
     ...findingOpsInOrder(stripRecord(seeded), [
-      { findings: unreadImageFindings(stripRecord(seeded), drafts, layout, provisional), rule: IMPORT_IMAGE_RULE },
+      { findings: unreadImageFindings(stripRecord(seeded), reviewDrafts, layout, provisional), rule: IMPORT_IMAGE_RULE },
       { findings: droppedPermissionFindings(droppedPermissions, matrixBlocks), rule: IMPORT_UNRESOLVED_RULE },
       {
-        findings: needsReviewFindings(stripRecord(seeded), drafts, profile, layout, provisional, (blockId) => {
-          const s = blockSectionsBefore.get(blockId)
-          return s ? realSectionId(s, provisional) : null
-        }),
+        findings: contentFindingsHome(
+          stripRecord(seeded),
+          needsReviewFindings(stripRecord(seeded), drafts, profile, layout, provisional, (blockId) => {
+            const s = blockSectionsBefore.get(blockId)
+            return s ? realSectionId(s, provisional) : null
+          })
+        ),
         rule: IMPORT_NEEDS_REVIEW_RULE
       },
       { findings: titleContentFindings(stripRecord(seeded), profile.heading_map, layout), rule: IMPORT_TITLE_CONTENT_RULE },
       { findings: inferredFlowFindings(seeded, inferredFlow), rule: IMPORT_NEEDS_REVIEW_RULE },
       { findings: unmappedPriorityFindings(unmappedPriorities), rule: IMPORT_NEEDS_REVIEW_RULE }
     ]),
-    ...seedStepOps(stripRecord(seeded), plan, { firstSeq: seqRange.first, lastSeq: seqRange.last, at: new Date().toISOString(), ...(draftOwners ? { draftOwners } : {}) })
+    ...seedStepOps(stripRecord(seeded), plan, { firstSeq: seqRange.first, lastSeq: seqRange.last, at: new Date().toISOString() })
   ]
   await applyTransaction(projectId, { base_version: seeded.spine_version, ops: planOps, by: "import", reason: "Import: kế hoạch step theo template", step_id: null })
   await step("layout + lô kế hoạch step")
@@ -341,12 +346,12 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // Màn đọc khung: mục mà kết quả cuối khác bản sơ bộ ⇒ workspace báo, không dừng hỏi lại (hồ sơ trước màn đọc khung ⇒ null)
   doc.structure_changes = profile.structure_preview ? structureChanges(profile.structure_preview, structure, (id) => realSectionId(id, provisional)) : null
   doc.markModified("structure_changes")
-  // FLF-382 (luồng B theo D4): SRS viết dở giữ khung sang Luồng 2 ⇒ ngữ cảnh mẫu (hướng dẫn `[ ]`/`{ }` của mục) chỉ cho các mục
-  // còn thiếu, để bước soạn biết mục cần viết gì; mục khách đã viết không vào (không bị soạn lại)
+  // FLF-382 (luồng B theo D4): file còn thiếu sang Luồng 2 ⇒ ngữ cảnh mẫu (hướng dẫn `[ ]`/`{ }` của mục) chỉ cho các mục
+  // còn thiếu, để bước soạn biết mục cần viết gì; mục khách đã viết không vào (không bị soạn lại). FLF-463: tick bổ sung theo mẫu
+  // chuẩn cũng vậy — heading của file còn trống là mục của đích, cần soạn
   const missingIds = new Set(structure.missing)
-  profile.template_context = draftAll
-    ? buildTemplateContext(layout, contextBlocks)
-    : intent === "fixed" && missingIds.size > 0
+  profile.template_context =
+    missingIds.size > 0
       ? buildTemplateContext(
           layout.filter((l) => missingIds.has(l.section_id)),
           customSections.filter((c) => missingIds.has(`custom:${c.id}`)).flatMap((c) => c.blocks.map((block) => ({ section_id: `custom:${c.id}`, block })))
@@ -356,8 +361,9 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   await profile.save()
   // Chỉ dự án có ý định (tạo qua picker FLF-335) mới dừng; dự án cũ không có `template_intent` giữ luồng cũ ⇒ v0 như hôm nay
   const structureGate = intentRaw === "fixed" || intentRaw === "free"
-  // FLF-378: dự án mới theo mẫu bắt buộc luôn dừng — không bao giờ có baseline / DocVersion 0.1 chụp từ mẫu
-  if (draftAll || (structureGate && structure.missing.length > 0 && !doc.complete_requested)) {
+  // FLF-463 (§3.1.2 "Mục bỏ chữ"): mục Bỏ chữ tính là còn trống (`emptied`) ⇒ còn ít nhất một mục Bỏ chữ thì không ra bản gốc 0.1,
+  // đi đường file còn thiếu — kể cả khi đã yêu cầu hoàn thiện
+  if (structureGate && structure.missing.length > 0 && (droppedKeys.size > 0 || !doc.complete_requested)) {
     await transitionImport(doc, "incomplete")
     // D4: file thiếu cấu trúc đích không có bản gốc 0.1. Giữ khung (chế độ 3) lẫn bổ sung theo mẫu chuẩn (chế độ 4, FLF-416) ⇒
     // sang Luồng 2 soạn phần thiếu ngay, không chờ bấm
@@ -471,6 +477,26 @@ const UNREAD_REASON: Readonly<Record<string, string>> = {
   unavailable: "AI đọc ảnh đang quá tải, chưa đọc được",
   failed: "AI không đọc được ảnh này"
 }
+
+/**
+ * FLF-444: mục đọc theo nội dung `content:@B…` ⇒ mục của layout mà block heading đó mở (thường là mục riêng `custom:CSnn`);
+ * mục khác giữ nguyên. Không tìm được (heading bị bỏ khỏi layout) ⇒ giữ id cũ.
+ */
+export const layoutSectionOf = (sectionId: string, entryOfHeading: ReadonlyMap<string, string>): string => {
+  const m = CONTENT_SECTION.exec(sectionId)
+  return m ? (entryOfHeading.get(m[1]) ?? sectionId) : sectionId
+}
+
+/**
+ * FLF-444: cờ "Cần xem" của phần tử đọc từ mục đọc theo nội dung (`content:@B…`, không phải mục Spine — bất biến chặn, trước
+ * đây rơi về `fixed:I`) ⇒ mục Spine sở hữu phần tử đó theo bảng §4 (chức năng ⇒ `function:<id>`, NFR ⇒ 4.x, thuật ngữ ⇒ 5.5…).
+ */
+export const contentFindingsHome = (spine: Spine, findings: Finding[]): Finding[] =>
+  findings.map((f) => {
+    if (!CONTENT_SECTION.test(f.section_id) || !f.target_id) return f
+    const home = sectionsOfPath(spine, f.target_id).owner[0]
+    return home ? { ...f, section_id: home } : f
+  })
 
 /** Ảnh ở mục diagram mà I-4 không đọc được (`other` / EMF / AI lỗi…) ⇒ cờ vàng: ảnh gốc được giữ, dữ liệu trong ảnh chưa vào Spine. */
 const unreadImageFindings = (

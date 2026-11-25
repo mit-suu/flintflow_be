@@ -9,7 +9,7 @@ import { readFile } from "node:fs/promises"
 import request from "supertest"
 import app from "../../../src/app.js"
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
-import { fakeMode1 } from "../../helpers/mode1.js"
+import { fakeMode1, dropAllText } from "../../helpers/mode1.js"
 import { seedFixture, type SeededFixture } from "../../setup.js"
 import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { acceptLatest } from "../../../src/modules/import/import.service.js"
@@ -40,6 +40,8 @@ const setupReport3 = async () => {
   const uploaded = await request(app).post(`/api/v1/projects/${projectId}/import`).set(H(seeded)).attach("file", await readFile(REPORT3_TEMPLATE), "SRS.docx")
   expect(uploaded.status, JSON.stringify(uploaded.body.error)).toBe(201)
   const importId = String(uploaded.body.data.import.id)
+  // FLF-463: Report3 còn bảng / hình mẫu ⇒ "có" nếu giữ ⇒ Bỏ tất cả ở màn đọc khung (khung tính năng / chức năng `<<…>>` vẫn giữ)
+  await dropAllText(seeded, projectId, importId)
   await acceptLatest((await ImportedDocument.findById(importId))!, true)
   await runExtraction(projectId, seeded.userId, importId)
   await startFinalize(projectId, seeded.userId, { import_id: importId, base_version: (await spineRepository.get(projectId))!.spine_version })
