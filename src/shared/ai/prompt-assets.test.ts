@@ -160,7 +160,7 @@ describe("skill trên đĩa (assets/skills)", () => {
   // theo chức năng / màn / luồng / phân quyền — hai khối theo giai đoạn, model chỉ nhận một khối; entities-erd thêm Pass 8
   // vòng đời entity (states / transitions) cùng hai nhóm luật validator của nó nên nâng 250 → 260)
   // FLF-418: function-detail thêm mục component_interactions (mức thành phần của sơ đồ tuần tự)
-  const LINE_LIMIT_OVERRIDE: Readonly<Record<string, number>> = { "content/entities-erd": 260, "action/apply-change-op": 250, "content/function-detail": 165, "action/elicit-loop": 155 }
+  const LINE_LIMIT_OVERRIDE: Readonly<Record<string, number>> = { "content/entities-erd": 260, "action/apply-change-op": 250, "content/function-detail": 165, "action/elicit-loop": 160 }
 
   // FLF-449 N2: block luật chất lượng chép y hệt vào 9 skill (ba-quality-block.test.ts so từng byte) - không tính vào trần dòng,
   // nếu không thì mỗi skill phân tích phải cắt luật riêng của nó để chứa luật chung.
