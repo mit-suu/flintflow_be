@@ -196,7 +196,9 @@ export const locationPromptText = (
       ? ""
       : `\n  COUNT CHECK: after this change request, "${collection}" has exactly ${correct} elements (computed from data). If this text has a sentence stating that count, change ONLY the number to ${correct} - never compute it yourself.`
   const section = l.section_id === "misc" ? "-" : titleOfSection(spine, l.section_id)
-  const value = truncate(valueText(elementValue(spine, l.path)), 2500).split("\n").join("\n  ")
+  // FLF-480 (ChoViet #12c): khoá ảnh (`word/media/...`) là mã nội bộ, model chép vào ghi chú ⇒ thay bằng "[hình]"
+  const shown = valueText(elementValue(spine, l.path)).replace(/("image_ref"\s*:\s*)"[^"]*"/g, '$1"[hình]"')
+  const value = truncate(shown, 2500).split("\n").join("\n  ")
   // Ô thêm mới: path là cả mảng ⇒ việc hợp lệ duy nhất là thêm phần tử mới. Mục trống (phương án B) hoặc mục đã có
   // dữ liệu mà CR cần phần tử chưa có (2026-09-24) — phần tử có sẵn là các vị trí riêng, không sửa từ đây.
   const isEmpty = isArrayPath(l.path) && !(elementValue(spine, l.path) as unknown[] | undefined)?.length

@@ -37,7 +37,7 @@ import { ChangeLocation, type IChangeLocation, type VerifyViolation } from "./ch
 import { newContradictions } from "./clarify.service.js"
 import { answersText, crHeader, glossaryText, plainValues, relatedElements, relatedPassages, truncate } from "./cr-context.js"
 import { regroup } from "./group.service.js"
-import { crDocumentLanguage, foreignTexts, wrongLanguageMessage } from "./cr-language.js"
+import { crDocumentLanguage, foreignTexts, isForeignText, wrongLanguageMessage } from "./cr-language.js"
 import type { UserLocale } from "../../shared/i18n/locale.js"
 import { refreshDiagramLocations } from "./diagram-location.js"
 import { fixDuplicateIds } from "./propose.service.js"
@@ -64,7 +64,7 @@ import { COUNT_COLLECTIONS, findCountMentionsInText, type CountCollection } from
 export const valueChanged = (loc: Pick<IChangeLocation, "location_id" | "path">): Mode1Error =>
   new Mode1Error("CR_VALUE_CHANGED", `${pathLabel(loc.path)} đã bị sửa ở chỗ khác kể từ lúc đề xuất - tải lại rồi đề xuất lại`, { location_id: loc.location_id, path: loc.path })
 
-type CheckLocation = Pick<IChangeLocation, "location_id" | "path" | "conclusion" | "proposal">
+type CheckLocation = Pick<IChangeLocation, "location_id" | "path" | "conclusion" | "proposal"> & Partial<Pick<IChangeLocation, "reason">>
 
 const opPath = (raw: unknown): string => {
   const path = (raw as { path?: unknown } | null)?.path
@@ -96,14 +96,19 @@ export const ownedElements = (crId: string, locations: readonly Pick<IChangeLoca
 
 /** Chữ mới của đề xuất viết khác ngôn ngữ tài liệu (QLHS 11/11 bug #17) — `new_text` là JSON giá trị sau khi sửa. */
 const languageViolation = (loc: CheckLocation, current: unknown, language: UserLocale): VerifyViolation[] => {
-  let after: unknown
+  let after: unknown = null
   try {
     after = JSON.parse(loc.proposal?.new_text ?? "null")
   } catch {
-    return []
+    after = null
   }
-  const texts = foreignTexts(language, current, after)
-  return texts.length ? [{ rule: "wrong_language", message: wrongLanguageMessage(pathLabel(loc.path), language, texts) }] : []
+  const texts = after === null ? [] : foreignTexts(language, current, after)
+  // FLF-480 (ChoViet #12b): lý do và ghi chú cũng là chữ người dùng đọc, phải cùng ngôn ngữ tài liệu
+  const notes = [loc.reason, loc.proposal?.comment_text]
+    .map((t) => (typeof t === "string" ? t.trim() : ""))
+    .filter((t) => t && isForeignText(t, language))
+  const all = [...texts, ...notes]
+  return all.length ? [{ rule: "wrong_language", message: wrongLanguageMessage(pathLabel(loc.path), language, all) }] : []
 }
 
 /** `language`: ngôn ngữ chữ của tài liệu (`crDocumentLanguage`) — thiếu ⇒ không kiểm ngôn ngữ. */

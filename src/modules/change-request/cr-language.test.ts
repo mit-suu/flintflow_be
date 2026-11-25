@@ -122,6 +122,15 @@ describe("C-5 checkLocation - wrong_language", () => {
     expect(checkLocation(cr, loc(VI_STEP), spine(), locks, "vi")).toEqual([])
     expect(checkLocation(cr, loc(EN_STEP), spine(), locks)).toEqual([])
   })
+
+  it("FLF-480: lý do tiếng Anh trong tài liệu tiếng Việt ⇒ wrong_language; lý do tiếng Việt ⇒ đạt", () => {
+    const en = { ...loc(VI_STEP), reason: "This step is added because the teacher must confirm the attendance list first" } as IChangeLocation
+    const vs = checkLocation(cr, en, spine(), locks, "vi")
+    expect(vs.map((v) => v.rule)).toEqual(["wrong_language"])
+    expect(vs[0].message).toContain("This step is added")
+    const vi = { ...loc(VI_STEP), reason: "Bước này được thêm vì giáo viên phải xác nhận danh sách điểm danh trước" } as IChangeLocation
+    expect(checkLocation(cr, vi, spine(), locks, "vi")).toEqual([])
+  })
 })
 describe("FLF-438: ngôn ngữ câu hỏi làm rõ (C-2)", () => {
   it("ngôn ngữ trả lời theo chữ người yêu cầu viết; mơ hồ ⇒ ngôn ngữ tài khoản ⇒ tiếng Việt", () => {

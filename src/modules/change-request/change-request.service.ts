@@ -12,6 +12,7 @@ import { hasBaseline } from "../import/import.state.js"
 import { latestImport, transitionImport } from "../import/import.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { toIso } from "../import/mode1.http.js"
+import { crDocumentLanguage } from "./cr-language.js"
 import { clipMaterialText, formatCrId, formatMaterialId, type CrSourceKind } from "./change-request.constants.js"
 import type { ChangeRequestDetail, CreateChangeRequest, PendingSection } from "./change-request.dto.js"
 import { ChangeRequest, CrCounter, type CrClarification, type CrSeed, type IChangeRequest } from "./change-request.model.js"
@@ -138,6 +139,7 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
     loadLayout(String(cr.projectId))
   ])
   const spine = record ? stripRecord(record) : null
+  const docLang = spine ? await crDocumentLanguage(String(cr.projectId), spine) : undefined
   const pending = await othersPending(cr.projectId, cr.cr_id, locations.map((l) => l.path))
   const asText = (json: string | null | undefined) => (json ? elementText(parseJson(json)) : "")
   return {
@@ -150,7 +152,7 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
         location_id: l.location_id,
         path: l.path,
         section_id,
-        section_title: spine && section_id !== "misc" ? titleOfSection(spine, section_id, layout) : "",
+        section_title: spine && section_id !== "misc" ? titleOfSection(spine, section_id, layout, docLang) : "",
         current_text: spine ? currentText(spine, l.path) : "",
         found_by: [...l.found_by],
         entity_paths: [...l.entity_paths],

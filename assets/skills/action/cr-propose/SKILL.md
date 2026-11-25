@@ -1,7 +1,7 @@
 ---
 skill_id: cr-propose
 kind: action
-version: 2.8.0
+version: 2.8.1
 description: Mode 1 C-4 - for every affected Spine element conclude edit | comment | not_related and propose the Spine ops
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -92,7 +92,7 @@ and keep every other field exactly as it is - each changed field is a revision t
     teacher saves…"; a new label in `flows_in` / `flows_out` follows the existing labels). Never translate content
     into the language of the change request or the material. Names quoted from the document or the CR keep their
     original form. A proposal with text in another language fails the checks and is redone.
-11. `reason`, `comment_text` and `assumptions`: User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`, `feature:@B0012`), element paths (`actors[id=A02].name`), block ids (`B0012`) or location ids (`L001`). Name a section by its heading and an element by its name or document code (`UC-01` is fine).
+11. `reason`, `comment_text` and `assumptions`: User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`, `feature:@B0012`), element paths (`actors[id=A02].name`), block ids (`B0012`), location ids (`L001`) or file paths of embedded images (`word/media/image1.png`, `image_ref`; call a picture "the figure"). Name a section by its heading and an element by its name or document code (`UC-01` is fine).
 12. **Unreasonable request - warn, do not draft.** When doing what the CR asks at this location would clearly harm
     the document (it contradicts a rule the document keeps, breaks a law or constraint the document states, makes two
     requirements impossible together, or removes something other parts depend on) and the location does **not** say
