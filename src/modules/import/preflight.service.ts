@@ -21,6 +21,24 @@ export interface PreflightResult {
    * FlintFlow (chắc chắn là SRS của hệ thống, không phân loại lại). `unknown` ⇒ vẫn nhận, FE cảnh báo ở bước xác nhận.
    */
   document_kind: DocumentKindResult | null
+  /**
+   * FLF-457: Track Changes / comment của người ngoài khi upload lại (`allowForeignMarkup`): nhận, mỗi chỗ một dòng trong
+   * báo cáo khác biệt thay vì từ chối. Lần import đầu không bật ⇒ luôn `[]`, vẫn từ chối như cũ.
+   */
+  markup: ForeignMarkup[]
+}
+
+/** FLF-457: một chỗ Track Changes / comment của người ngoài trong file upload lại. */
+export interface ForeignMarkup {
+  kind: "track_change" | "comment"
+  author: string
+  /** Track Changes: `text` = sửa chữ, `format` = đổi định dạng. */
+  change?: "text" | "format"
+  /** Chữ thêm / xoá (Track Changes) hoặc nội dung comment. */
+  text: string
+  /** Tiêu đề mục chứa chỗ đó ("" = trước heading đầu). */
+  section: string
+  location: PreflightIssue["location"]
 }
 
 const OLE_MAGIC = "d0cf11e0"
@@ -32,6 +50,7 @@ const reject = (code: PreflightIssue["code"], message: string, extra: Partial<Pr
   issues: [{ code, message, location: null }],
   stamp: null,
   document_kind: null,
+  markup: [],
   ...extra
 })
 
@@ -51,7 +70,14 @@ const REVISION_LABEL: Record<string, string> = {
 
 const INFLATED_TOO_LARGE = "Nội dung file sau giải nén quá lớn. Hãy nén ảnh trong Word (File → Compress Pictures) hoặc tách phụ lục rồi tải lại."
 
-export const preflightDocx = async (data: Buffer, opts: { maxBytes?: number } = {}): Promise<PreflightResult> => {
+/** Chữ thêm / xoá nằm trong một phần tử Track Changes (`w:t` lẫn `w:delText`). */
+const revisionText = (el: Element): string =>
+  Array.from(el.getElementsByTagName("*"))
+    .filter((n) => n.localName === "t" || n.localName === "delText")
+    .map((n) => n.textContent ?? "")
+    .join("")
+
+export const preflightDocx = async (data: Buffer, opts: { maxBytes?: number; allowForeignMarkup?: boolean } = {}): Promise<PreflightResult> => {
   const maxBytes = opts.maxBytes ?? IMPORT_MAX_FILE_BYTES
   if (data.length > maxBytes) return reject("FILE_TOO_LARGE", fileTooLargeMessage(data.length))
   const magic = data.subarray(0, 4).toString("hex")
@@ -95,6 +121,7 @@ export const preflightDocx = async (data: Buffer, opts: { maxBytes?: number } = 
 
   const byElement = new Map(blocks.map((b) => [b.element, b]))
   const issues: PreflightIssue[] = []
+  const markup: ForeignMarkup[] = []
   // Một lần sửa trong Word thường sinh cặp del + ins: gộp theo (thông báo, đoạn)
   const seen = new Set<string>()
   const push = (issue: PreflightIssue): void => {
@@ -103,21 +130,43 @@ export const preflightDocx = async (data: Buffer, opts: { maxBytes?: number } = 
     seen.add(key)
     issues.push(issue)
   }
+  const sectionOf = (p: Element | null): string => {
+    const block = p ? byElement.get(p) : undefined
+    if (!block) return ""
+    return (block.kind === "heading" ? block.text : (block.heading_path[block.heading_path.length - 1] ?? "")).trim()
+  }
   for (const rev of await listRevisions(pkg)) {
     if (CR_AUTHOR_PATTERN.test(rev.author)) continue
+    const paragraph = enclosingParagraph(rev.element)
+    const location = locationOf(byElement, paragraph)
+    if (opts.allowForeignMarkup) {
+      // Upload lại: mỗi chỗ sửa là một dòng (del + ins cạnh nhau vẫn là hai dòng, mỗi dòng mang đúng chữ của nó)
+      const format = rev.kind === "rPrChange" || rev.kind === "pPrChange"
+      const text = format ? "" : revisionText(rev.element)
+      // Dấu đoạn thêm / xoá (không chữ) đi kèm chỗ sửa chữ của chính đoạn đó ⇒ không thành dòng riêng
+      if (!format && !text.trim()) continue
+      markup.push({ kind: "track_change", author: rev.author, change: format ? "format" : "text", text, section: sectionOf(paragraph), location })
+      continue
+    }
     push({
       code: "FOREIGN_TRACK_CHANGE",
       message: `Track Changes (${REVISION_LABEL[rev.kind] ?? rev.kind}) của "${rev.author || "không rõ"}" chưa được Accept/Reject`,
-      location: locationOf(byElement, enclosingParagraph(rev.element))
+      location
     })
   }
   for (const c of await listComments(pkg)) {
     if (CR_AUTHOR_PATTERN.test(c.author)) continue
+    const paragraph = await commentParagraph(pkg, c.id)
+    const location = locationOf(byElement, paragraph)
+    if (opts.allowForeignMarkup) {
+      markup.push({ kind: "comment", author: c.author, text: c.text, section: sectionOf(paragraph), location })
+      continue
+    }
     push({
       code: "FOREIGN_COMMENT",
       message: `Comment của "${c.author || "không rõ"}" chưa được xử lý`,
-      location: locationOf(byElement, await commentParagraph(pkg, c.id))
+      location
     })
   }
-  return { status: issues.length ? "rejected" : "accepted", issues, stamp, document_kind: documentKind }
+  return { status: issues.length ? "rejected" : "accepted", issues, stamp, document_kind: documentKind, markup }
 }

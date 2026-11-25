@@ -177,7 +177,14 @@ describe("import.dto - response", () => {
       created_at: AT,
       summary: { added: 1, removed: 0, modified: 1, moved: 0 },
       blocks: [{ block_id: null, change: "added", after: "New paragraph" }, { block_id: "B0007", change: "modified", before: "a", after: "b" }],
-      sections: []
+      sections: [],
+      // FLF-457
+      before_baseline: false,
+      no_stamp: false,
+      heading_match: 1,
+      suggest_reference: false,
+      stale: null,
+      markup: [{ kind: "comment", author: "Lan", text: "Check this", section: "1 Introduction", location: { block_ord: 3, text: "Purpose" } }]
     }
     expect(reuploadDiffDtoSchema.safeParse(diff).success).toBe(true)
   })
