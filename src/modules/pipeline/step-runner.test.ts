@@ -126,6 +126,8 @@ const db = vi.hoisted(() => {
 vi.mock("../spine/spine.model.js", () => ({ Spine: db.Spine }))
 vi.mock("../spine/change.model.js", () => ({ Change: db.Change }))
 vi.mock("../spine/usage.model.js", () => ({ Usage: db.Usage }))
+const { aiActionLogUpdateOne } = vi.hoisted(() => ({ aiActionLogUpdateOne: vi.fn(async () => ({ modifiedCount: 1 })) }))
+vi.mock("../admin/ai-action-log.model.js", () => ({ AiActionLog: { updateOne: aiActionLogUpdateOne } }))
 vi.mock("../project/chat-session.model.js", () => ({ ChatSession: db.ChatSession }))
 vi.mock("../spine/op-engine.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../spine/op-engine.js")>()
@@ -416,6 +418,31 @@ describe("step-runner: lượt Draft trả kèm bản ngôn ngữ tài liệu (F
       expect(deps.documentLanguage).toEqual(VI)
     } finally {
       vi.mocked(documentLanguageForTurn).mockClear().mockImplementation(actual!)
+    }
+  })
+
+  it("FLF-477: lô bị từ chối sau 3 lượt ⇒ một dòng [draft-rejected], log AI 2 retried + 1 failed, lỗi vẫn ném ra", async () => {
+    seedSpine()
+    aiActionLogUpdateOne.mockClear()
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      let n = 0
+      const deps: Partial<StepRunnerDeps> = {
+        draftExecutor: async () => ({ ...draftReply([{ op: "set", path: "actors[id=A99].name", value: "Ghost" }]), logId: `log-${++n}` }),
+        renderDeps: renderStub()
+      }
+      const { projectId: _projectId, ...spine } = (await repo.get(PROJECT))!
+      const ctx = await buildStepContext(PROJECT, "S-3.1")
+      await expect(runDraftPhase(PROJECT, "S-3.1", ctx, spine, USER, "draft", () => {}, deps as StepRunnerDeps)).rejects.toMatchObject({ statusCode: 422 })
+      expect(aiActionLogUpdateOne).toHaveBeenCalledTimes(3)
+      const calls = aiActionLogUpdateOne.mock.calls as unknown as Array<[{ _id: string }, { $set: { status: string; errorMessage: string } }]>
+      expect(calls.map((c) => [c[0]._id, c[1].$set.status])).toEqual([["log-1", "retried"], ["log-2", "retried"], ["log-3", "failed"]])
+      expect(calls[2][1].$set.errorMessage).toContain("path_not_resolved @ actors[id=A99].name")
+      const line = errorSpy.mock.calls.find((c) => c[0] === "[draft-rejected]")
+      expect(line).toBeDefined()
+      expect(JSON.parse(line![1] as string)).toMatchObject({ projectId: PROJECT, stepId: "S-3.1", callKind: "draft" })
+    } finally {
+      errorSpy.mockRestore()
     }
   })
 

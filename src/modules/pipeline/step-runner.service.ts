@@ -49,6 +49,7 @@ import { DEFAULT_CHOICE, diagramChoiceFallbackNote, diagramChoiceFor, diagramCho
 import { elicitPolicyFor, keepConflictsOnly, reconcileReply, trimTailQuestion } from "./fast-path.js"
 import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, currentBatch, followUpQuestions, followUpReply, indexOfQuestion, questionIdsFor, sameText, shapeQuestions, splitNumberedAnswer, stripRecommended, verifiedExcerpt } from "./question-shape.js"
 import { MAX_SCHEMA_RETRIES, draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
+import { recordDraftRejected } from "./draft-rejected-log.js"
 import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
 import * as meter from "./meter.service.js"
 import { documentLanguageForTurn, type TurnDocumentLanguage } from "../translation/turn-language.js"
@@ -1141,6 +1142,7 @@ export const runDraftPhase = async (
     })
   } catch (err) {
     await meter.releaseCall(reservedId)
+    await recordDraftRejected(err, { projectId, stepId, callKind })
     throw err
   }
 

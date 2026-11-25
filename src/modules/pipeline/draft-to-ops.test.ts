@@ -228,8 +228,26 @@ describe("draftOps retry", () => {
     expect(rejected.attempts.map((a) => a.errors[0]?.rule)).toEqual(["schema_invalid", "path_not_writable", "key_change_forbidden"])
     expect(rejected.lastOps).toEqual([{ op: "set", path: "actors[id=A01].id", value: "A77" }])
     expect(executor.mock.calls.every((c) => c[0] === "regenerate")).toBe(true)
+    // FLF-477: lượt parse lỗi không có usage (executor ném trước khi trả); hai lượt có kết quả mang logId
+    expect(rejected.usage.map((u) => u.attempt)).toEqual([2, 3])
     expect(applyAndSave).not.toHaveBeenCalled()
     expect(saveWithVersion).not.toHaveBeenCalled()
+  })
+
+  it("FLF-477: hết lượt vì sai luật ở cả 3 lượt ⇒ DraftRejectedError có usage 3 lượt và summary() đủ rule/path", async () => {
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([{ op: "set", path: "actors[id=A99].name", value: "Ghost" }]))
+    const err = await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(DraftRejectedError)
+    const rejected = err as DraftRejectedError
+    expect(rejected.usage).toHaveLength(3)
+    expect(rejected.usage.map((u) => u.attempt)).toEqual([1, 2, 3])
+    const summary = rejected.summary()
+    expect(summary).toHaveLength(3)
+    for (const a of summary) {
+      expect(a.ops_count).toBe(1)
+      expect(a.errors[0]).toMatchObject({ rule: "path_not_resolved", path: "actors[id=A99].name" })
+      expect(a.errors[0].message.length).toBeLessThanOrEqual(200)
+    }
   })
 
   it("FLF-243: tên use case sai luật cờ vàng ⇒ gửi lại model kèm lỗi; lượt sau đúng thì qua", async () => {
