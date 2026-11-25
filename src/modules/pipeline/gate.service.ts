@@ -27,6 +27,7 @@ import { buildStepContext, parseStepId, sectionsFedBy } from "./context-projecti
 import * as meter from "./meter.service.js"
 import {
   runDraftPhase,
+  runBatchedDraft,
   runRenderReviewPhase,
   trackSeqRange,
   assertRangeOwnedByStep,
@@ -322,6 +323,13 @@ export const phaseGateAssumptions = (spine: Spine, stepId: string): GateAssumpti
     .map((a) => ({ id: a.id, text: a.statement, ...(a.statement_vi ? { text_vi: a.statement_vi } : {}) }))
 }
 
+/**
+ * FLF-470 #6: `regenerate` ("Soạn lại") chia lô như `/run` (`runBatchedDraft`, dùng chung với
+ * `step-runner.service.ts`) khi step chia lô theo function (S-5.2/S-5.4 có loop, S-7.1, S-7.3) — trước
+ * đây gọi `runDraftPhase` một lượt nên dự án lớn vẫn bị cắt token như trước FLF-433. `revision` ("Tôi
+ * muốn sửa") GIỮ một lượt: sửa đúng chỗ được nhắn, đầu ra nhỏ — không cần chia lô (rủi ro cắt token của
+ * revision trên step rất lớn vẫn còn, chưa gặp trong log).
+ */
 const redraft = async (
   projectId: string,
   stepId: string,
@@ -334,7 +342,15 @@ const redraft = async (
   const spineNow = stripRecord(await load(projectId))
   const ctx = await buildStepContext(projectId, stepId)
   const noop = (): void => {}
-  const draft = await runDraftPhase(projectId, stepId, ctx, spineNow, userId, callKind, noop, deps, extra)
+  let draft: { spineVersion: number; applied: boolean; summary?: ChangeSummary[]; notes?: string }
+  if (callKind === "regenerate") {
+    const batched = await runBatchedDraft(projectId, stepId, ctx, spineNow, null, (batchCtx, batchSpine) =>
+      runDraftPhase(projectId, stepId, batchCtx, batchSpine, userId, callKind, noop, deps, extra)
+    )
+    draft = { spineVersion: batched.spineVersion, applied: batched.wroteOps, summary: batched.summary, ...(batched.notes ? { notes: batched.notes } : {}) }
+  } else {
+    draft = await runDraftPhase(projectId, stepId, ctx, spineNow, userId, callKind, noop, deps, extra)
+  }
   const review = await runRenderReviewPhase(projectId, stepId, getStep(stepId).renders, parseStepId(stepId).loop, userId, noop, deps)
   const spineVersion = await trackSeqRange(projectId, review.spineVersion, stepId, userId, range.startSeq, range.existing)
   return { spineVersion, summary: draft.summary ?? [], applied: draft.applied, ...(draft.notes ? { notes: draft.notes } : {}) }
