@@ -102,7 +102,7 @@ describe("C-7 ghi Spine + render version mới", () => {
       })
     resetCrMock((p) => (p.includes("# CR Clarify") ? fakeCrClarify({ entity_paths: ["fixed:5.4"], keywords: [] })(p) : p.includes("# CR Propose") ? addOther(p) : undefined))
 
-    const { crId, cr, impact } = await crToImpact(c)
+    const { crId, cr, impact } = await crToImpact(c, "Bổ sung yêu cầu khác", "Thêm giả định về trình duyệt được hỗ trợ vào mục yêu cầu khác đang trống.")
     expect(impact.locations.map((l) => l.path)).toEqual(["other_requirements[]"])
     expect(detail(await c.post(`${cr}/propose`)).locations[0]).toMatchObject({ conclusion: "edit", proposal: { old_text: "[]" } })
     expect(detail(await c.post(`${cr}/verify`)).change_request.status).toBe("ready_to_submit")
