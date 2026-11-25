@@ -32,7 +32,7 @@ import { assemble } from "../render/assemble.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { applyTransaction, CHANGE_RANGE_INVALID } from "../spine/op-engine.js"
 import type { Op } from "../spine/op.types.js"
-import type { Spine, SpineRecord, StepState } from "../spine/spine.types.js"
+import type { Change, Spine, SpineRecord, StepState } from "../spine/spine.types.js"
 import * as flagsService from "../spine/flags.service.js"
 import { sectionHasData } from "../spine/deterministic-check.js"
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
@@ -90,6 +90,10 @@ import { runErrorOf } from "./pipeline-error-code.js"
 type GateAction = z.infer<typeof gateActionSchema>
 
 export { CALL_LIMIT, NOT_PIPELINE_SESSION, STEP_NOT_RUNNABLE }
+/** Bước đã từng được chốt (có change `status = accepted`) trước thời điểm này: chạy lại bước đã qua, hoặc bước bị hoà giải mở lại. */
+export const wasAcceptedBefore = (changes: readonly Pick<Change, "path" | "value">[], stepId: string): boolean =>
+  changes.some((c) => c.path === `steps[id=${stepId}].status` && c.value === "accepted")
+
 export const CALLS_LIMIT = 8
 export const REGENERATE_LIMIT_COUNT = 3
 
@@ -1671,9 +1675,7 @@ export const runStep = async (
     } else if (existingStep && existingStep.status !== "accepted") {
       // Lượt mở lại trước chết giữa chừng (bước còn in_progress/revision_requested/pending): nội dung của lần chốt cũ
       // vẫn nằm trong Spine, nên chạy tiếp kèm tin chat vẫn là sửa, không phải dựng lại.
-      reopenedAccepted = (await spineRepository.listChanges(projectId)).some(
-        (c) => c.path === `steps[id=${stepId}].status` && c.value === "accepted"
-      )
+      reopenedAccepted = wasAcceptedBefore(await spineRepository.listChanges(projectId), stepId)
     }
     if (!existingStep && !reopenLoop) {
       const next = nextStepOf(spine)

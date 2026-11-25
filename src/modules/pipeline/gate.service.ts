@@ -32,6 +32,7 @@ import {
   trackSeqRange,
   assertRangeOwnedByStep,
   CALLS_LIMIT,
+  wasAcceptedBefore,
   REGENERATE_LIMIT_COUNT,
   STEP_NOT_RUNNABLE,
   defaultStepRunnerDeps,
@@ -98,6 +99,8 @@ export interface GateResult {
   spine_version: number
   /** Sau `revision`: lời AI xác nhận điều vừa sửa (`notes` của lượt soạn lại). */
   message_vi?: string
+  /** Sau accept: bước vừa duyệt đã từng được chốt trước lượt này (chạy lại bước đã qua). Client không tự chạy tiếp quy trình. */
+  rerun?: boolean
 }
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
@@ -391,8 +394,11 @@ export const gate = async (
 
     let finalVersion = record.spine_version
     let revisionMessage: string | undefined
+    let rerun = false
 
     if (input.action === "accept" || input.action === "accept_as_is") {
+      // FLF-489: đọc TRƯỚC khi ghi accept, kẻo chính lượt accept này làm bước "đã từng accepted"
+      rerun = wasAcceptedBefore(await spineRepository.listChanges(projectId), stepId)
       const yellowNote = input.action === "accept_as_is" ? (input.note ?? "") : null
       if (getStep(stepId).template_id === SIGN_OFF_STEP) {
         // BUG-01: ký baseline ngay trong lượt Accept — signOff tự quét lại, kiểm cờ đỏ và đánh dấu S-9.5 accepted.
@@ -516,7 +522,7 @@ export const gate = async (
     const next = nextStepOf(afterSpine)
 
     succeeded = true
-    return { step: summary, next_step: next?.id ?? null, spine_version: finalVersion, ...(revisionMessage ? { message_vi: revisionMessage } : {}) }
+    return { step: summary, next_step: next?.id ?? null, spine_version: finalVersion, ...(revisionMessage ? { message_vi: revisionMessage } : {}), ...(rerun ? { rerun: true } : {}) }
   } finally {
     await finishRun(projectId, stepId, run.run_id, ...(await runEndAfterGate(projectId, stepId, succeeded ? null : previous)))
   }

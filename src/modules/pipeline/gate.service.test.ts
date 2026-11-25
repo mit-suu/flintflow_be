@@ -105,6 +105,7 @@ import { orderedSteps } from "./step-registry.js"
 import type { StepRunnerDeps } from "./step-runner.service.js"
 import { AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
+import { wasAcceptedBefore } from "./step-runner.service.js"
 import { gate, gateAssumptionIdsOf, phaseGateAssumptions, GateLimitError, REGENERATE_LIMIT, CALL_LIMIT } from "./gate.service.js"
 import { acquireRun, finishRun, resetMemoryRuns } from "./run-state.service.js"
 import { resumeProject } from "./resume.service.js"
@@ -578,6 +579,32 @@ describe("gate.service: accept", () => {
     const record = await repo.get(PROJECT)
     const err = await gate(PROJECT, STEP, USER, { action: "accept", base_version: record!.spine_version }).catch((e: unknown) => e)
     expect(err).toMatchObject({ statusCode: 409, code: "STEP_NOT_RUNNABLE" })
+  })
+
+  it("FLF-489: accept lần đầu ⇒ không có rerun; mở lại (revision) rồi accept ⇒ rerun: true", async () => {
+    seedSpine()
+    const version = await seedInProgressWithContent(STEP, "A90")
+    const first = await gate(PROJECT, STEP, USER, { action: "accept", base_version: version })
+    expect(first.rerun).toBeUndefined()
+
+    const revised = await gate(
+      PROJECT,
+      STEP,
+      USER,
+      { action: "revision", note: "cần sửa mô tả actor cho rõ hơn", base_version: first.spine_version },
+      { draftExecutor: async () => draftReply([{ op: "add", path: "actors[]", value: { id: "A95", name: "Rerun", kind: "human", description: "z" } }]) }
+    )
+    expect(revised.rerun).toBeUndefined()
+    const second = await gate(PROJECT, STEP, USER, { action: "accept", base_version: revised.spine_version })
+    expect(second.rerun).toBe(true)
+    expect(second.step.status).toBe("accepted")
+  })
+
+  it("FLF-489: wasAcceptedBefore chỉ tính change status=accepted của đúng bước", () => {
+    const c = (path: string, value: unknown) => ({ path, value })
+    expect(wasAcceptedBefore([c("steps[id=S-7.3].status", "accepted")], "S-7.3")).toBe(true)
+    expect(wasAcceptedBefore([c("steps[id=S-7.4].status", "accepted")], "S-7.3")).toBe(false)
+    expect(wasAcceptedBefore([c("steps[id=S-7.3].status", "in_progress")], "S-7.3")).toBe(false)
   })
 
   it("F19: accept step cuối cùng của phase S-2 ⇒ notify phase_accepted với đúng userId + meta.phase", async () => {
