@@ -1122,10 +1122,16 @@ export const buildLayoutSections = (
   /** Cấp layout (chưa chuẩn hoá) của từng section trong `out` — tìm section chủ của phần nối. */
   const levels: number[] = []
   const emitted = new Set<string>()
+  // FLF-468 (E2E-1): tính năng / chức năng CR thêm — mẫu có mục lặp mà mục này không có slot trong file ⇒ writer chèn heading mới
+  // cho nó (vào mục lục như FLF-413); heading con trong thân vẫn là heading dưới heading mục, không thành đoạn đậm.
+  const layoutIds = new Set(template.layout.map((e) => e.section_id))
+  const templateRepeats = template.layout.some((e) => isRepeatingSection(e.section_id))
+  const insertedByCr = (id: string) => templateRepeats && isRepeatingSection(id) && !layoutIds.has(id)
   const push = (section: RenderedSection, level: number) => {
     if (template.fixedTemplate) {
       // Only the template's own headings contribute to its outline.
-      section.blocks = emitted.has(section.id) ? [] : section.blocks.map((b) => b.type === "heading" ? { type: "paragraph", runs: [{ text: b.text, bold: true }] } : b)
+      const flatten = !insertedByCr(section.id)
+      section.blocks = emitted.has(section.id) ? [] : section.blocks.map((b) => b.type === "heading" && flatten ? { type: "paragraph", runs: [{ text: b.text, bold: true }] } : b)
       emitted.add(section.id)
     }
     out.push(section)

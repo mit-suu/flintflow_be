@@ -705,6 +705,41 @@ describe("phần nhỏ slot:* của mẫu khách (FLF-278 trên FLF-335/336)", (
   })
 })
 
+describe("FLF-468 (E2E-1) - mục CR thêm ở mẫu cố định giữ heading con", () => {
+  const spineWithNew = (): Spine => {
+    const s = spine()
+    s.functions.push({ ...s.functions[0], id: "FN02", order: 1, name: "Quên mật khẩu" })
+    return s
+  }
+  const sub = (section_id: string) => ({
+    section_id,
+    source_hash: "x",
+    blocks: [
+      { kind: "heading" as const, text: "Function trigger", level: 1 },
+      { kind: "paragraph" as const, text: "Học viên bấm Quên mật khẩu.", rows: null, image_ref: null }
+    ]
+  })
+  const fixed: TemplateLayout = { ...LAYOUT, fixedTemplate: true }
+
+  it("mục chức năng mới (không có slot) giữ heading con; mục có slot của mẫu vẫn thành đoạn đậm", () => {
+    const s = spineWithNew()
+    const fn01 = { ...sub("function:FN01"), source_hash: functionSourceHash(s.functions[0]) }
+    const fn02 = { ...sub("function:FN02"), source_hash: functionSourceHash(s.functions[1]) }
+    const { sections } = buildLayoutSections(s, { ...fixed, functionOriginals: [fn01, fn02] }, [], { diagramPng: () => undefined })
+    const heads = (id: string) => sections.find((x) => x.id === id)!.blocks.filter((b) => b.type === "heading")
+    expect(heads("function:FN02")).toEqual([{ type: "heading", level: 3, text: "Function trigger" }])
+    expect(heads("function:FN01")).toEqual([])
+    expect(JSON.stringify(sections.find((x) => x.id === "function:FN01")!.blocks)).toContain('"bold":true')
+  })
+
+  it("mẫu không có mục lặp ⇒ không đổi: heading con vẫn thành đoạn đậm", () => {
+    const s = spineWithNew()
+    const layout = [entry(0, "1 Giới thiệu", 1, "fixed:1")]
+    const { sections } = buildLayoutSections(s, { language: "vi", fixedTemplate: true, layout, functionOriginals: [{ ...sub("function:FN02"), source_hash: functionSourceHash(s.functions[1]) }] }, [], { diagramPng: () => undefined })
+    expect(sections.flatMap((x) => x.blocks).some((b) => b.type === "heading")).toBe(false)
+  })
+})
+
 describe("FLF-364 (câu 10) - chữ hướng dẫn của mẫu in khi mục trống, có dữ liệu thì bỏ", () => {
   // Mẫu thường (không bắt buộc); mẫu bắt buộc (FLF-371) xuất vào chính file mẫu nên luôn bỏ hướng dẫn
   const guideLayout: TemplateLayout = {
