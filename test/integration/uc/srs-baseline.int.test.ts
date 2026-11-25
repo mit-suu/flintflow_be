@@ -531,9 +531,10 @@ describe("UC-39 - Lead duyệt baseline SRS", () => {
   it("cờ đỏ giữ nguyên kèm lý do vẫn chặn baseline (BR-04)", async () => {
     const seeded = await seedFixture("full", { mutate: freshSteps })
     const api = client(seeded)
-    expect((await api.change(renameA01())).status).toBe(200)
+    // Mục "cần xem lại" chỉ còn là cờ vàng (theo flow 18/11), nên cờ đỏ ở đây đến từ luật tầng 3: từ mơ hồ trong yêu cầu
+    expect((await api.change([{ op: "set", path: "nfrs[id=N07].statement", value: "Chat replies appear fast.", reason: "reword" }])).status).toBe(200)
     const red = (await api.flagsAtBaseline()).filter((f) => f.level === "red")
-    expect(red.length).toBeGreaterThan(0)
+    expect(red.map((f) => f.rule_id)).toEqual(["vague_wording"])
     for (const flag of red) {
       // FLF-329: cờ đỏ không waive được — chỉ "giữ nguyên + lý do", và cờ vẫn chặn
       const waived = await api.post(`/flags/${flag.id}/waive`, { reason: "Keep as-is: the customer accepted this content." })
@@ -605,7 +606,7 @@ describe("UC-47 - Analyst sửa SRS theo comment từ chối baseline", () => {
     expect(await analyst.baselines()).toEqual([])
   })
 
-  it("kết luận hết comment ⇒ hết chặn vì comment; bước vừa mở lại thành cờ đỏ chặn tiếp (BR-04)", async () => {
+  it("kết luận hết comment ⇒ hết chặn vì comment; bước vừa mở lại chỉ còn là cờ vàng 'Cần xem lại', không chặn gửi lại", async () => {
     const seeded = await seedFixture("full")
     const lead = client(seeded)
     const analyst = client(seeded, await join(seeded, "analyst"))
@@ -617,12 +618,13 @@ describe("UC-47 - Analyst sửa SRS theo comment từ chối baseline", () => {
       expect(resolved.status, JSON.stringify(resolved.body.error)).toBe(200)
     }
 
-    // Comment đã kết luận hết nên cổng REJECTION_COMMENTS_OPEN im; nhưng resolve đã mở lại bước sở hữu
-    // section đó, nên lượt quét ở mức ký mở cờ đỏ "chờ duyệt lại" — phải chạy và accept lại bước mới nộp được.
+    // Comment đã kết luận hết nên cổng REJECTION_COMMENTS_OPEN im; resolve đã mở lại bước sở hữu section đó, lượt quét ở mức ký
+    // ghi cờ "chờ duyệt lại" nhưng theo flow 18/11 đó chỉ là cờ vàng nhắc việc: không chặn gửi lại
+    const reopened = (await analyst.flagsAtBaseline()).filter((f) => f.rule_id === "section_awaiting_reaccept")
+    expect(reopened.length).toBeGreaterThan(0)
+    expect(reopened.every((f) => f.level === "yellow")).toBe(true)
     const res = await analyst.post("/baseline/submit", { base_version: await analyst.version() })
-    expect(res.status).toBe(422)
-    expect(res.body.error.code).toBe("BASELINE_BLOCKED")
-    expect((res.body.meta.flags as Body[]).map((f) => f.rule_id)).toContain("section_awaiting_reaccept")
+    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
   })
 
   it("comment ghim ở section không có bước nào đang accepted ⇒ kết luận xong là gửi lại được", async () => {

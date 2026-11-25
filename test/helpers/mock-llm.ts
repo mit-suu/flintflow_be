@@ -82,6 +82,10 @@ export const mockCallLLM = async (
   if (override instanceof Error) throw override
 
   let text = override
+  if (text === undefined && prompt.includes("Generic names for custom template headings")) {
+    // UC-85: đổi tên riêng ở heading khi đề xuất mẫu sau baseline - mặc định giữ nguyên mọi heading (test cần thì ghi đè)
+    text = JSON.stringify({ suggestions: [...prompt.matchAll(/^(Bd{4,}): (.+)$/gm)].map((m) => ({ key: m[1], generic: m[2], reason: null })) })
+  }
   if (text === undefined) {
     if (kind === "draft") {
       const opCase = stepId ? findOpCase(stepId) : null

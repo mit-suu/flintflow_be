@@ -221,7 +221,7 @@ const buildScene = (d: UseCaseDiagram, option: LayoutOption): Scene => {
   const ry = Math.ceil(textH / 1.41 + 22)
 
   const cx = 0
-  const half = Math.max(rx + BOUND_PAD_X, Math.ceil(textWidth(d.system, TITLE_SIZE, true) / 2) + 24)
+  const half = Math.max(rx + BOUND_PAD_X, Math.ceil(textWidth(d.system, TITLE_SIZE) / 2) + 24)
   rows.forEach((r, i) => (r.cy = BOUND_PAD_TOP + ry + i * (2 * ry + ROW_GAP)))
   const boundBottom = (rows[rows.length - 1]?.cy ?? BOUND_PAD_TOP) + ry + BOUND_PAD_BOTTOM
 
@@ -271,7 +271,7 @@ const buildScene = (d: UseCaseDiagram, option: LayoutOption): Scene => {
   const hand = (a: DiagramActor): [number, number] => [columnX(a) + (sideOf(a) === "left" ? FIGURE.arm / 2 : -FIGURE.arm / 2), tops.get(a.id)! + FIGURE.armY]
 
   scene.rect("system", -half, 0, 2 * half, boundBottom, { fill: FILL, container: true, name: d.system })
-  scene.text("system#name", cx, BOUND_PAD_TOP / 2 + 1, d.system, { size: TITLE_SIZE, bold: true, owner: "system" })
+  scene.text("system#name", cx, BOUND_PAD_TOP / 2 + 1, d.system, { size: TITLE_SIZE, owner: "system" })
 
   // Association trước: ellipse vẽ đè đầu mút
   for (const link of d.associations) {

@@ -21,6 +21,7 @@ import { listSections } from "../spine/section-registry.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import { accountLocaleOf } from "../user/account-locale.js"
+import type { UserLocale } from "../../shared/i18n/locale.js"
 import { approvedBatch } from "./add-use-case.service.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus, transitionCr } from "./change-request.service.js"
@@ -59,15 +60,28 @@ export const sourceRefSections = (ref: string | null | undefined, headings: read
 const requesterText = (cr: IChangeRequest): string =>
   [cr.title, cr.description, ...(cr.amendments ?? []).map((a) => a.text), ...cr.clarifications.flatMap((c) => c.answers)].join("\n")
 
-/** Lựa chọn mặc định cho câu hỏi mâu thuẫn (FLF-367) khi model không gợi ý; người dùng vẫn tự gõ được ("khác"). */
-export const CONTRADICTION_CHOICES = ["Đổi theo CR và sửa cả chỗ cũ", "Giữ như cũ, không áp dụng phần này của CR"] as const
+/**
+ * Lựa chọn mặc định cho câu hỏi mâu thuẫn (FLF-367) khi model không gợi ý, theo ngôn ngữ hỏi người yêu cầu; người dùng
+ * vẫn tự gõ được ("khác").
+ */
+export const CONTRADICTION_CHOICES: Readonly<Record<UserLocale, readonly string[]>> = {
+  vi: ["Đổi theo CR và sửa cả chỗ cũ", "Giữ như cũ, không áp dụng phần này của CR"],
+  en: ["Change per the CR and fix the old text too", "Keep as is, skip this part of the CR"]
+}
+
+/** Lựa chọn mặc định cho câu hỏi cảnh báo yêu cầu không hợp lý (BF §3.2 C-4) khi model không gợi ý. Lựa chọn đầu = làm tiếp. */
+export const WARNING_CHOICES: Readonly<Record<UserLocale, readonly string[]>> = {
+  vi: ["Vẫn làm", "Bỏ yêu cầu này"],
+  en: ["Proceed anyway", "Drop this request"]
+}
 
 const questionKey = (q: string): string => q.replace(/\s+/g, " ").trim().toLowerCase()
 
-/** Câu hỏi mâu thuẫn chưa từng hỏi (so mọi vòng trước) kèm gợi ý; model không gợi ý ⇒ lựa chọn mặc định. */
+/** Câu hỏi mâu thuẫn chưa từng hỏi (so mọi vòng trước) kèm gợi ý; model không gợi ý ⇒ lựa chọn mặc định theo ngôn ngữ. */
 export const newContradictions = (
   cr: Pick<IChangeRequest, "clarifications">,
-  found: readonly { question: string; suggestions: readonly string[] }[]
+  found: readonly { question: string; suggestions: readonly string[] }[],
+  language: UserLocale = "vi"
 ): { question: string; suggestions: string[] }[] => {
   const seen = new Set(cr.clarifications.flatMap((c) => c.questions.map(questionKey)))
   const out: { question: string; suggestions: string[] }[] = []
@@ -76,9 +90,46 @@ export const newContradictions = (
     if (!key || seen.has(key)) continue
     seen.add(key)
     const suggestions = [...new Set(c.suggestions.map((s) => s.trim()).filter(Boolean))]
-    out.push({ question: c.question.trim(), suggestions: suggestions.length ? suggestions : [...CONTRADICTION_CHOICES] })
+    out.push({ question: c.question.trim(), suggestions: suggestions.length ? suggestions : [...CONTRADICTION_CHOICES[language]] })
   }
   return out
+}
+
+/**
+ * Người yêu cầu đã chọn làm tiếp sau một cảnh báo của C-2: bấm đúng gợi ý đầu của câu cảnh báo ("Vẫn làm" / "Proceed
+ * anyway"). Lời tự gõ do model đọc (`warning_accepted`).
+ */
+export const pickedProceed = (cr: Pick<IChangeRequest, "clarifications">): boolean =>
+  cr.clarifications.some((round) =>
+    (round.warning_questions ?? []).some((i) => {
+      const answer = round.answers[i]
+      const proceed = round.suggestions?.[i]?.[0]
+      return !!answer && !!proceed && questionKey(answer) === questionKey(proceed)
+    })
+  )
+
+type ForcedInput = Pick<CrClarifyOutput, "contradictions" | "warnings">
+
+/**
+ * Câu phải hỏi kể cả khi hết vòng làm rõ: mâu thuẫn (FLF-367) và cảnh báo yêu cầu không hợp lý (BF §3.2 C-4), mỗi câu kèm
+ * lựa chọn. Chống vòng hỏi vô tận: model diễn đạt lại câu cũ mỗi lượt thì so nguyên văn không bắt được ⇒ cảnh báo hỏi đúng một
+ * lần mỗi CR, mâu thuẫn chỉ thêm được một vòng sau trần làm rõ; quá đó thì đi tiếp (mâu thuẫn còn lại ra cờ vàng ở C-5).
+ */
+export const forcedQuestions = (
+  cr: Pick<IChangeRequest, "clarifications">,
+  out: ForcedInput,
+  asked: number,
+  language: UserLocale
+): { contradictions: { question: string; suggestions: string[] }[]; warningKeys: Set<string> } => {
+  if (asked > MAX_CLARIFY_ROUNDS) return { contradictions: [], warningKeys: new Set() }
+  const warnedBefore = cr.clarifications.some((round) => (round.warning_questions ?? []).length > 0)
+  const warnings = warnedBefore ? [] : out.warnings
+  const contradictions = newContradictions(
+    cr,
+    [...out.contradictions, ...warnings.map((w) => ({ question: w.question, suggestions: w.suggestions.length ? w.suggestions : [...WARNING_CHOICES[language]] }))],
+    language
+  )
+  return { contradictions, warningKeys: new Set(warnings.map((w) => questionKey(w.question))) }
 }
 
 /** Từ khoá dự phòng khi hết vòng mà model vẫn thấy mơ hồ: từ dài trong tiêu đề CR. */
@@ -110,10 +161,8 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
   // Mục người yêu cầu gọi tên ("phần 3.1.3 Screen Authorization") luôn là đích — code nhận, không trông vào model.
   const named = [...new Set([...mentionedSections(requesterText(cr), headings), ...sourceRefSections(cr.source?.ref, headings)])]
   // FLF-438: hỏi theo ngôn ngữ người yêu cầu; khác ngôn ngữ tài liệu ⇒ tên / đoạn trích kèm bản dịch trong ngoặc
-  const language = clarifyLanguageText(
-    crReplyLanguage(requesterText(cr), await accountLocaleOf(userId)),
-    await crDocumentLanguage(String(cr.projectId), spine)
-  )
+  const replyLanguage = crReplyLanguage(requesterText(cr), await accountLocaleOf(userId))
+  const language = clarifyLanguageText(replyLanguage, await crDocumentLanguage(String(cr.projectId), spine))
   const result = await withMeteredAi<CrClarifyOutput>({ projectId: String(cr.projectId), userId, stepId: `C-2:${cr.cr_id}` }, ActionType.CR_CLARIFY, {
     ...crHeader(cr),
     round: Math.min(asked + 1, MAX_CLARIFY_ROUNDS),
@@ -132,8 +181,14 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
     return
   }
   const out = result.data
+  // Câu trả lời vừa gửi là lời rút lại ⇒ FE hỏi huỷ CR (chỉ khi lượt này có câu trả lời; không bao giờ tự huỷ)
+  const answeredNow = (cr.clarifications[cr.clarifications.length - 1]?.answers ?? []).some((a) => a.trim() !== "")
+  cr.withdraw_suggested = answeredNow && out.withdraw === true
+  // Cảnh báo ở vòng trước đã được trả lời là làm tiếp (bấm "Vẫn làm", hoặc model đọc lời tự gõ) ⇒ ghi lại cho C-3 / C-4
+  if (!cr.proceed_after_warning && (pickedProceed(cr) || out.warning_accepted === true)) cr.proceed_after_warning = true
   // FLF-367: mâu thuẫn hỏi cả khi đã hết vòng làm rõ (không qua `canAskMore`), đứng trước câu hỏi mơ hồ
-  const contradictions = newContradictions(cr, out.contradictions)
+  // BF §3.2 C-4: yêu cầu không hợp lý ⇒ cảnh báo + lý do, hỏi "Vẫn làm" hay bỏ (một lần, như câu mâu thuẫn)
+  const { contradictions, warningKeys } = forcedQuestions(cr, out, asked, replyLanguage)
   const askAmbiguous = out.ambiguous && canAskMore(asked)
   if (askAmbiguous || contradictions.length) {
     // Gợi ý song song câu hỏi — model trả thiếu / thừa thì cắt, bù `[]`; bỏ gợi ý trùng
@@ -145,7 +200,8 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
       round,
       questions: [...contradictions.map((c) => c.question), ...ambiguous].map(withNames),
       answers: [],
-      suggestions: [...contradictions.map((c) => c.suggestions), ...suggestions].map((list) => list.map(withNames))
+      suggestions: [...contradictions.map((c) => c.suggestions), ...suggestions].map((list) => list.map(withNames)),
+      warning_questions: contradictions.flatMap((c, i) => (warningKeys.has(questionKey(c.question)) ? [i] : []))
     })
     await transitionCr(cr, "awaiting_answers")
     return

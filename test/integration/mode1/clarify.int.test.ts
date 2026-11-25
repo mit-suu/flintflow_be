@@ -160,6 +160,8 @@ describe("C-2 lỗi và biên", () => {
     detail(await c.post(`/change-requests/${crId}/clarify`))
     await expect(answerClarification(await crDoc(projectId, crId), seeded.userId, [])).rejects.toMatchObject({ statusCode: 400 })
 
+    // Mỗi người một CR mở một lúc ⇒ huỷ CR vừa hỏi trước khi tạo CR kế
+    detail(await c.post(`/change-requests/${crId}/cancel`, { reason: "Chỉ để thử CR kế tiếp" }))
     const other = await newCr(c)
     await Spine.deleteOne({ projectId })
     await expect(runClarify(await crDoc(projectId, other), seeded.userId)).rejects.toMatchObject({ statusCode: 404 })
@@ -224,7 +226,7 @@ describe("FLF-367 C-2: CR mâu thuẫn với tài liệu ⇒ hỏi người dùn
     expect(d.pending_questions).toHaveLength(1)
     expect(d.pending_questions[0]).toContain("3 lần")
     expect(d.pending_questions[0]).toContain(LOCK_PASSAGE)
-    expect(d.change_request.clarifications[0].suggestions).toEqual([[...CONTRADICTION_CHOICES]])
+    expect(d.change_request.clarifications[0].suggestions).toEqual([[...CONTRADICTION_CHOICES.vi]])
     const [prompt] = promptsOf("# CR Clarify")
     // tài liệu vừa ngân sách ⇒ gửi mọi đoạn văn giữ nguyên (không lọc theo từ chung); đoạn "5 lần" có đủ câu
     expect(prompt).toContain("Related passages of the document kept verbatim (not in the structured data above):\n")

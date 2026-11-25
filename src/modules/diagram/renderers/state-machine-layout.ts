@@ -88,7 +88,7 @@ const sizeState = (s: StateInput): Node => {
   const nameLines = wrapLines(s.name, NAME_SIZE, 150, 2)
   const internalLines = s.internal.flatMap((t) => wrapLines(t, INTERNAL_SIZE, 230, 3))
   const widest = Math.max(
-    ...nameLines.map((l) => textWidth(l, NAME_SIZE, true) + 28),
+    ...nameLines.map((l) => textWidth(l, NAME_SIZE) + 28),
     ...internalLines.map((l) => textWidth(l, INTERNAL_SIZE) + 24),
     STATE_MIN_W
   )
@@ -374,7 +374,7 @@ const build = (graph: Graph, centers: Centers): Built | null => {
       scene.rect(n.key, cx - n.w / 2, cy - n.h / 2, n.w, n.h, { name: n.name, radius: STATE_RADIUS })
       const head = n.internalLines.length === 0 ? n.h : n.h - n.internalLines.length * INTERNAL_LINE - 12
       n.nameLines.forEach((line, i) =>
-        scene.text(`${n.key}#name-${i}`, cx, cy - n.h / 2 + head / 2 + (i - (n.nameLines.length - 1) / 2) * NAME_LINE, line, { size: NAME_SIZE, bold: true, baseline: "central", owner: n.key, name: line })
+        scene.text(`${n.key}#name-${i}`, cx, cy - n.h / 2 + head / 2 + (i - (n.nameLines.length - 1) / 2) * NAME_LINE, line, { size: NAME_SIZE, baseline: "central", owner: n.key, name: line })
       )
       if (n.internalLines.length > 0) {
         const y = cy - n.h / 2 + head

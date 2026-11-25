@@ -98,7 +98,7 @@ vi.mock("../../shared/ai/prompt-registry.service.js", () => ({
 const changeMocks = vi.hoisted(() => ({ preview: vi.fn() }))
 vi.mock("../spine/change.service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../spine/change.service.js")>()
-  return { ...actual, preview: changeMocks.preview }
+  return { ...actual, preview: changeMocks.preview, previewAndMaybeApply: changeMocks.preview }
 })
 const spineRepoMocks = vi.hoisted(() => ({ get: vi.fn() }))
 vi.mock("../spine/spine.repository.js", () => spineRepoMocks)
@@ -112,6 +112,10 @@ vi.mock("../pipeline/step-runner.service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../pipeline/step-runner.service.js")>()
   return { ...actual, submitAnswer: stepMocks.submitAnswer }
 })
+
+/** Chế độ 1: mọi thay đổi đi qua CR ⇒ lượt CHAT không được rẽ sang change flow (mặc định: sửa qua chat được). */
+const mode1Mocks = vi.hoisted(() => ({ changesRequireCr: vi.fn(async () => false) }))
+vi.mock("../import/mode1-guard.js", () => mode1Mocks)
 
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { createChatSession, deleteChatSession, getChatSessions, sendMessageAndGetResponse, sendMessageStream, assertChatSessionOwnership, PIPELINE_SESSION_LOCKED } from "./chat-session.service.js"
@@ -132,6 +136,7 @@ beforeEach(() => {
   changeMocks.preview.mockReset()
   spineRepoMocks.get.mockReset()
   stepMocks.submitAnswer.mockReset().mockResolvedValue(false)
+  mode1Mocks.changesRequireCr.mockReset().mockResolvedValue(false)
   account.locale = null
   // T20: `tryAnswerRunningStep` đọc `progress.current_step` ⇒ stub phải có `progress` như bản ghi thật
   // FLF-244: CHAT/lệnh sửa dựng tóm tắt từ `project` + `decisions` + `addendum` ⇒ stub có đủ các field đó
@@ -288,6 +293,78 @@ describe("T17 - lệnh sửa đi qua change flow (mọi session)", () => {
 
     expect(changeMocks.preview).not.toHaveBeenCalled()
     expect(aiMocks.executeAiAction).toHaveBeenCalledWith(ActionType.CHAT, expect.anything(), PROJECT, USER)
+  })
+
+  describe("CHAT báo edit_request: lệnh sửa mà luật nhận lệnh bỏ sót", () => {
+    const POLITE = "Thêm giúp tôi nút xuất Excel ở màn báo cáo được không?"
+    const previewOk = {
+      ok: true,
+      txn: "t",
+      base_version: 7,
+      ops: [],
+      changes: [{ op: "add", path: "screens[id=S03].actions[]", before: null, value: "Export Excel", reason: null }],
+      violations: [],
+      referrers: [],
+      branch: "dependent",
+      impact: { fields: [], sections: [], diagrams: [], referrers: [] },
+      preview_id: "pv-9"
+    }
+
+    it("JSON: model trả edit_request ⇒ dựng bản xem trước, không lưu lời CHAT; prompt nhận edit_in_chat = yes", async () => {
+      await createChatSession(PROJECT)
+      const plain = await createChatSession(PROJECT)
+      aiMocks.executeAiAction.mockResolvedValue({ data: { reply: "Tôi dựng bản sửa ngay.", questions: [], edit_request: true }, tokensUsed: {}, cost: 0 })
+      changeMocks.preview.mockResolvedValue(previewOk)
+
+      const session = await sendMessageAndGetResponse(PROJECT, String(plain._id), POLITE, "overview", USER)
+
+      expect(aiMocks.executeAiAction.mock.calls[0][1].promptVariables.edit_in_chat).toBe("yes")
+      expect(changeMocks.preview).toHaveBeenCalledWith(PROJECT, USER, expect.objectContaining({ instruction: POLITE }))
+      const ai = session.messages.filter((m) => (m as { role: string }).role === "ai") as { content: string }[]
+      expect(ai).toHaveLength(1)
+      expect(JSON.parse(ai[0].content)).toMatchObject({ kind: "change_preview", preview_id: "pv-9" })
+    })
+
+    it("chế độ 1 ⇒ edit_in_chat = no, không rẽ sang change flow, edit_request không lưu vào tin", async () => {
+      mode1Mocks.changesRequireCr.mockResolvedValue(true)
+      await createChatSession(PROJECT)
+      const plain = await createChatSession(PROJECT)
+      aiMocks.executeAiAction.mockResolvedValue({ data: { reply: "Bạn tạo change request nhé.", questions: [], edit_request: true }, tokensUsed: {}, cost: 0 })
+
+      const session = await sendMessageAndGetResponse(PROJECT, String(plain._id), POLITE, "overview", USER)
+
+      expect(aiMocks.executeAiAction.mock.calls[0][1].promptVariables.edit_in_chat).toBe("no")
+      expect(changeMocks.preview).not.toHaveBeenCalled()
+      const last = session.messages[session.messages.length - 1] as { content: string }
+      expect(JSON.parse(last.content)).toEqual({ reply: "Bạn tạo change request nhé.", questions: [] })
+    })
+
+    it("không có edit_request ⇒ CHAT như cũ", async () => {
+      await createChatSession(PROJECT)
+      const plain = await createChatSession(PROJECT)
+      aiMocks.executeAiAction.mockResolvedValue({ data: { reply: "Có nên đổi thì tuỳ mục tiêu.", questions: [] }, tokensUsed: {}, cost: 0 })
+
+      await sendMessageAndGetResponse(PROJECT, String(plain._id), "Có nên đổi tên actor A01 không?", "overview", USER)
+
+      expect(changeMocks.preview).not.toHaveBeenCalled()
+    })
+
+    it("SSE: model trả edit_request ⇒ một sự kiện finish mang bản xem trước, không lưu lời CHAT", async () => {
+      await createChatSession(PROJECT)
+      const plain = await createChatSession(PROJECT)
+      aiMocks.executeAiActionStream.mockResolvedValue({ data: { reply: "Tôi dựng bản sửa ngay.", questions: [], edit_request: true }, tokensUsed: {}, cost: 0 })
+      changeMocks.preview.mockResolvedValue(previewOk)
+      const writes: string[] = []
+      const res = { destroyed: false, writableEnded: false, write: (s: string) => writes.push(s), end: () => undefined } as unknown as Response
+
+      await sendMessageStream(PROJECT, String(plain._id), POLITE, "overview", USER, res)
+
+      const finishes = writes.filter((w) => w.includes("\"type\":\"finish\""))
+      expect(finishes).toHaveLength(1)
+      expect(finishes[0]).toContain("pv-9")
+      const stored = db.rows.find((r) => r._id === String(plain._id))!.messages as { role: string }[]
+      expect(stored.filter((m) => m.role === "ai")).toHaveLength(1)
+    })
   })
 
   it("FLF-201 (BUG-09): lệnh sửa trong session pipeline cũng đi change flow, không để CHAT hứa suông", async () => {

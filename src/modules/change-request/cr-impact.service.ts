@@ -13,7 +13,9 @@ import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus } from "./change-request.service.js"
 import { ChangeLocation } from "./change-location.model.js"
 import { unlockPaths } from "./lock.service.js"
-import { emptySectionTargets, findSpineLocations, systemRenameLocations, systemRenameTarget, withOriginalDiagrams, type FoundLocation } from "./spine-location.js"
+import { emptySectionTargets, findSpineLocations, systemRenameLocations, systemRenameTarget, withOriginalDiagrams, withOriginalPassages, type FoundLocation } from "./spine-location.js"
+import { TemplateProfile } from "../import/template-profile.model.js"
+import type { SectionSegments } from "../spine/segment-hash.js"
 import { systemName } from "../spine/system-name.js"
 import { approvedBatch, approvedBatchLocations } from "./add-use-case.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
@@ -22,7 +24,7 @@ import { ownerStepOf } from "../spine/section-registry.js"
 import { crQueryText } from "./embedding/element-text.js"
 import { vectorCandidates } from "./embedding/vector-search.js"
 
-export { elementPathOf, MAX_LOCATIONS } from "./spine-location.js"
+export { elementPathOf } from "./spine-location.js"
 
 export const formatLocationId = (n: number): string => `L${String(n).padStart(3, "0")}`
 
@@ -39,7 +41,7 @@ export const runImpact = async (cr: IChangeRequest): Promise<void> => {
   // P08 (upload U2-7): CR chỉ đổi tên hệ thống ⇒ chỉ phần tử tên hệ thống + nơi nhắc tên, không dò từ khoá / nghĩa
   const renamesSystem = !approved && !cr.amendments?.length && systemRenameTarget(`${cr.title}
 ${cr.description}`) !== null
-  const found: FoundLocation[] = approved
+  const located: FoundLocation[] = approved
     ? withOriginalDiagrams(spine, cr.targets.entity_paths, approvedBatchLocations(spine, approved))
     : renamesSystem
     ? // sơ đồ ngữ cảnh / use case gốc của file in tên hệ thống (ô trung tâm, khung hệ thống) ⇒ vẽ lại theo tên mới
@@ -47,6 +49,11 @@ ${cr.description}`) !== null
     : findSpineLocations(spine, cr.targets.entity_paths, cr.targets.keywords, await vectorCandidates(String(cr.projectId), crQueryText(cr))).map((f) =>
         seedTargets.has(f.path) && !f.found_by.includes("preview") ? { ...f, found_by: [...f.found_by, "preview" as const] } : f
       )
+  // BF §3.2 C-3: đoạn văn giữ nguyên của file gốc nhắc phần tử bị đụng tới ⇒ vị trí "sửa chữ" (không cắt trần số vị trí)
+  const segments = ((await TemplateProfile.findOne({ projectId: cr.projectId }).select("section_segments").lean()) as { section_segments?: SectionSegments[] } | null)?.section_segments ?? []
+  const found = segments.length ? withOriginalPassages(spine, segments, located) : located
+  // C-2 đã cảnh báo yêu cầu không hợp lý và người yêu cầu chọn làm tiếp ⇒ mọi vị trí "giữ theo ý mình", C-4 không cảnh báo lại
+  const keptIntent = cr.proceed_after_warning ? { kept_intent: true } : {}
   // Phase 8: CR gộp thêm lệnh sau khi đã có đề xuất ⇒ vị trí đã có (đề xuất / kết luận / khoá) giữ nguyên, chỉ thêm
   // phần tử mới. Chưa có đề xuất nào ⇒ tìm lại như cũ (thay toàn bộ vị trí, trả khoá phần tử bị bỏ).
   const existing = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).select("path location_id conclusion").lean()
@@ -55,7 +62,9 @@ ${cr.description}`) !== null
     const fresh = found.filter((f) => !have.has(f.path))
     if (!fresh.length) return
     const next = existing.reduce((n, l) => Math.max(n, Number(l.location_id.slice(1)) || 0), 0)
-    await ChangeLocation.insertMany(fresh.map((f, i) => ({ projectId: cr.projectId, cr_id: cr.cr_id, location_id: formatLocationId(next + i + 1), ...f })))
+    await ChangeLocation.insertMany(
+      fresh.map((f, i) => ({ projectId: cr.projectId, cr_id: cr.cr_id, location_id: formatLocationId(next + i + 1), ...f, ...keptIntent }))
+    )
     return
   }
   if (!found.length) {
@@ -79,7 +88,7 @@ ${cr.description}`) !== null
   const previous: string[] = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).distinct("path")
   await ChangeLocation.deleteMany({ projectId: cr.projectId, cr_id: cr.cr_id })
   const docs = await ChangeLocation.insertMany(
-    found.map((f, i) => ({ projectId: cr.projectId, cr_id: cr.cr_id, location_id: formatLocationId(i + 1), ...f }))
+    found.map((f, i) => ({ projectId: cr.projectId, cr_id: cr.cr_id, location_id: formatLocationId(i + 1), ...f, ...keptIntent }))
   )
   // FLF-375 (business-flow §3.2): không khoá chỗ đang sửa — hai CR cùng chạm một phần tử được, C-6 kiểm lại lúc
   // xác nhận (`concurrent-edit.ts`). Chỉ dọn dòng khoá cũ (trước FLF-375) của phần tử không còn là vị trí.

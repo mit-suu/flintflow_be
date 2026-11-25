@@ -13,7 +13,7 @@ import request from "supertest"
 import app from "../../../src/app.js"
 import { authAs, seedFixture, type SeededFixture } from "../../setup.js"
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
-import { createMode1Project, fakeMode1 } from "../../helpers/mode1.js"
+import { createMode1Project, fakeMode1, saveTemplateProposal } from "../../helpers/mode1.js"
 import { fileOf } from "../../helpers/mode1-import-p4.js"
 import { p, styled } from "../../../src/modules/docx-ooxml/testing/make-docx.js"
 import { makeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
@@ -310,6 +310,7 @@ describe("đổi mẫu — chuẩn bị", () => {
   it("E. đổi ngược: đích = mẫu trước của lần đổi gần nhất ⇒ nhóm đã sửa sau lần đổi mẫu; Giữ hết / Hoàn tác hết", async () => {
     const lead = await seedFixture("minimal", { balance: 1000 })
     const projectId = await baselinedProject(lead, await makeSrsDocx())
+    await saveTemplateProposal(lead.token, projectId)
     const before = (await Project.findById(projectId).lean())!.template_ref!
     const templateId = await publishTemplate(lead, lead.orgId, "Mẫu mới", await makeSrsDocx({ extraBody: EXTRA }))
 

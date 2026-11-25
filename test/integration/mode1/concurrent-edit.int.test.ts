@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
 
-import { crToImpact, crToReady, detail, importedProject, lockedPaths, newCr, promptsOf, resetCrMock, type Mode1Client } from "../../helpers/mode1-cr-p4.js"
+import { crToImpact, crToReady, detail, importedProject, lockedPaths, newCr, promptsOf, resetCrMock, secondAnalyst, type Mode1Client } from "../../helpers/mode1-cr-p4.js"
 import { ChangeLocation } from "../../../src/modules/change-request/change-location.model.js"
 import { ChangeRequest } from "../../../src/modules/change-request/change-request.model.js"
 import { unlockPaths } from "../../../src/modules/change-request/lock.service.js"
@@ -35,9 +35,10 @@ const nfrOf = (d: ReturnType<typeof detail>) => d.locations.find((l) => l.path =
 
 describe("không khoá chỗ đang sửa", () => {
   it("hai CR cùng chạm một phần tử đều tìm được vị trí; mỗi bên thấy bên kia có bản sửa chưa xác nhận", async () => {
-    const { c, projectId } = await importedProject()
+    const { c, projectId, seeded } = await importedProject()
     const first = await crToReady(c)
-    const second = await crToImpact(c, "Tighter performance", "Also about the 2 seconds response time.")
+    // Mỗi người một CR mở một lúc ⇒ CR thứ hai do Analyst khác tạo
+    const second = await crToImpact(await secondAnalyst(seeded, projectId), "Tighter performance", "Also about the 2 seconds response time.")
     expect(second.impact.locations.map((l) => l.path)).toContain(NFR)
     expect(await lockedPaths(projectId, first.crId)).toEqual([])
     expect(nfrOf(detail(await c.get(second.cr))).others_pending).toEqual([expect.objectContaining({ cr_id: first.crId })])
@@ -111,8 +112,8 @@ describe("C-6 kiểm lại trên nội dung hiện tại", () => {
 
 describe("đề xuất chưa xác nhận không chặn ai", () => {
   it("CR tạo sau ghi trước; CR tạo trước xác nhận sau ⇒ kiểm lại trên nội dung mới", async () => {
-    const { c } = await importedProject()
-    const late = await newCr(c, "Faster response time", "Response time must be 1 second instead of 2 seconds.")
+    const { c, seeded, projectId } = await importedProject()
+    const late = await newCr(await secondAnalyst(seeded, projectId), "Faster response time", "Response time must be 1 second instead of 2 seconds.")
     const early = await crToReady(c)
     expect((await confirm(c, early.cr)).change_request.status).toBe("written")
     expect(late).not.toBe(early.crId)

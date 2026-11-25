@@ -91,15 +91,6 @@ describe("FLF-395 — version của mẫu tổ chức", () => {
     // Bản mới của họ có sẵn: Analyst cũng bị chặn
     expect((await uploadTemplate(analyst.token, `${base}/${templateId}/versions`, file)).status).toBe(403)
 
-    // Lưu từ dự án (đường cũ) cũng chỉ Lead
-    const projectId = await createMode1Project(lead)
-    await request(app).post(`/api/v1/projects/${projectId}/import/from-org`).set(H(lead.token)).send({ org_template_id: templateId })
-    const saveDenied = await request(app).post(`/api/v1/projects/${projectId}/import/save-to-org`).set(H(analyst.token)).send({ name: "Lậu" })
-    expect(saveDenied.status).toBe(403)
-    const saved = await request(app).post(`/api/v1/projects/${projectId}/import/save-to-org`).set(H(lead.token)).send({ name: "x", template_id: templateId })
-    expect(saved.status, JSON.stringify(saved.body.error)).toBe(201)
-    expect(saved.body.data).toMatchObject({ id: templateId, latest_version: 2 })
-    expect((await Project.findById(projectId).lean())!.template_ref).toMatchObject({ version: 2 })
   })
 
   it("B. đăng bản mới ⇒ báo Lead + Analyst có dự án theo bản cũ (không Viewer); template_update chỉ cho Lead / Analyst; import nhớ bản", async () => {

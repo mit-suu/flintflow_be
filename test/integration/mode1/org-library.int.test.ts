@@ -1,6 +1,6 @@
 /**
  * FLF-278 trên FLF-335/336 — mẫu cấp tổ chức, API + Mongo thật:
- *  A. Lưu file mẫu + mapping đã xác nhận ⇒ dự án khác của tổ chức dùng lại: import từ chính file, mapping áp sẵn, đi thẳng
+ *  A. Mẫu đã đăng trong thư viện ⇒ dự án khác của tổ chức dùng lại: import từ chính file, mapping áp sẵn, đi thẳng
  *     tới trích dữ liệu (không qua 1.5); tổ chức khác không thấy; Viewer chỉ xem.
  *  B. Trang Thư viện: phân trang, tìm không dấu, sắp xếp.
  *  C. Admin xem heading mẫu bắt buộc thành mục riêng.
@@ -20,7 +20,6 @@ import { acceptLatest, patchMapping, uploadImport } from "../../../src/modules/i
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
 import { OrgTemplate } from "../../../src/modules/import/org-library.model.js"
-import { classifySection } from "../../../src/modules/import/template-skeleton.js"
 import { Membership } from "../../../src/modules/organization/membership.model.js"
 import { User } from "../../../src/modules/user/user.model.js"
 
@@ -56,11 +55,16 @@ const viewerOf = async (orgId: string) => {
 describe("FLF-278 - mẫu và thư viện nội dung của tổ chức (luồng import)", () => {
   it("A. lưu mẫu + mapping ⇒ dự án khác dùng lại, mapping áp sẵn, bỏ qua xác nhận; tổ chức khác không dùng được", async () => {
     const owner = await seedFixture("minimal", { balance: 1000 })
-    const first = await mappedProject(owner)
-    const saved = await request(app).post(`/api/v1/projects/${first.projectId}/import/save-to-org`).set(H(owner.token)).send({ name: "Mẫu ngân hàng" })
-    expect(saved.status, JSON.stringify(saved.body.error)).toBe(201)
-    expect(saved.body.data).toMatchObject({ name: "Mẫu ngân hàng", uses: 0 })
-    expect(saved.body.data.heading_count).toBeGreaterThan(5)
+    // Mẫu vào thư viện qua đường Lead tải + đăng (UC-83); mẫu lưu từ dự án đi qua đề xuất UC-85 / UC-88 (template-skeleton.int.test)
+    const draft = await request(app)
+      .post(`/api/v1/orgs/${owner.orgId}/templates`)
+      .set(H(owner.token))
+      .attach("file", await makeSrsDocx({ extraBody: EXTRA }), "Mau ngan hang.docx")
+      .field("name", "Mẫu ngân hàng")
+    expect(draft.status, JSON.stringify(draft.body.error)).toBe(201)
+    const published = await request(app).post(`/api/v1/orgs/${owner.orgId}/templates/${draft.body.data.template_id}/versions/1/publish`).set(H(owner.token)).send({})
+    expect(published.status, JSON.stringify(published.body.error)).toBe(200)
+    const saved = { body: { data: { id: draft.body.data.template_id as string } } }
 
     const listed = await request(app).get(`/api/v1/orgs/${owner.orgId}/templates`).set(H(owner.token))
     expect(listed.body.data.map((t: { id: string }) => t.id)).toEqual([saved.body.data.id])
@@ -73,12 +77,7 @@ describe("FLF-278 - mẫu và thư viện nội dung của tổ chức (luồng 
     expect(doc.status).toBe("extracting")
     expect(String(doc.org_template_id)).toBe(saved.body.data.id)
     const fresh = (await TemplateProfile.findOne({ projectId: second }).lean())!
-    const original = (await TemplateProfile.findOne({ projectId: first.projectId }).lean())!
-    // FLF-412: mẫu lưu chỉ còn khung ⇒ không còn heading phần tử (UC, chức năng…) của dự án nguồn; mapping khung giữ như BA chốt
-    const framework = original.heading_map.filter((h) => classifySection(h) !== "element")
-    expect(fresh.heading_map.map((h) => [h.heading_text, h.section_id])).toEqual(framework.map((h) => [h.heading_text, h.section_id]))
-    // Mẫu tổ chức không phải dữ liệu của dự án này ⇒ không còn chữ nào để giữ / bỏ, không đọc nội dung cũ
-    expect((await request(app).get(`/api/v1/projects/${second}/import`).set(H(owner.token))).body.data.text_sections).toEqual([])
+    expect(fresh.heading_map.length).toBeGreaterThan(5)
     expect(fresh.heading_map.every((h) => h.confirmed)).toBe(true)
     expect((await OrgTemplate.findById(saved.body.data.id))!.uses).toBe(1)
 

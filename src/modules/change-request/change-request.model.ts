@@ -21,6 +21,8 @@ export interface CrClarification {
   answers: string[]
   /** Phase 7: đáp án AI gợi ý cho từng câu hỏi (cùng thứ tự `questions`); CR cũ không có. */
   suggestions?: string[][]
+  /** Chỉ số các câu là cảnh báo "yêu cầu không hợp lý" (BF §3.2 C-4); gợi ý đầu của chúng là "Vẫn làm". CR cũ không có. */
+  warning_questions?: number[]
 }
 
 /**
@@ -72,6 +74,13 @@ export interface IChangeRequest extends Document {
    * Rỗng khi CR + câu trả lời + tài liệu đã đủ.
    */
   missing_info: string[]
+  /**
+   * C-2 đã cảnh báo yêu cầu không hợp lý và người yêu cầu chọn làm tiếp ⇒ C-3 tạo mọi vị trí với `kept_intent`, C-4 không
+   * cảnh báo lại cùng chuyện đó. Nội bộ, không có trong DTO.
+   */
+  proceed_after_warning: boolean
+  /** C-2 đọc câu trả lời vòng vừa rồi là lời rút lại yêu cầu ⇒ FE hỏi có huỷ CR không. Tính lại mỗi lượt C-2. */
+  withdraw_suggested: boolean
   amendments: CrAmendment[]
   /** Version tài liệu lúc tạo CR; ghi Track Changes lên version mới nhất lúc write. */
   base_doc_version: string
@@ -118,7 +127,18 @@ const changeRequestSchema = new Schema<IChangeRequest>(
       default: null
     },
     clarifications: {
-      type: [new Schema({ round: { type: Number, required: true, min: 1 }, questions: [String], answers: [String], suggestions: { type: [[String]], default: [] } }, opts)],
+      type: [
+        new Schema(
+          {
+            round: { type: Number, required: true, min: 1 },
+            questions: [String],
+            answers: [String],
+            suggestions: { type: [[String]], default: [] },
+            warning_questions: { type: [Number], default: [] }
+          },
+          opts
+        )
+      ],
       default: []
     },
     targets: {
@@ -130,6 +150,8 @@ const changeRequestSchema = new Schema<IChangeRequest>(
       default: null
     },
     flag_ids: { type: [String], default: [] },
+    proceed_after_warning: { type: Boolean, default: false },
+    withdraw_suggested: { type: Boolean, default: false },
     materials: {
       type: [
         new Schema(

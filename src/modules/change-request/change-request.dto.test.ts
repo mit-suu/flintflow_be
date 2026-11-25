@@ -112,6 +112,7 @@ describe("change-request DTO - response", () => {
         seed: null,
         materials: [{ material_id: "M01", kind: "file", name: "bien-ban.docx", text: "Phản hồi ≤ 2 s", truncated: false, round: 1, added_at: AT }],
         missing_info: [],
+        withdraw_suggested: false,
         amendments: [{ text: "Thêm cả app mobile", at: AT }],
         created_at: AT,
         updated_at: AT

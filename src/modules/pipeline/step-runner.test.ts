@@ -719,6 +719,11 @@ describe("step-runner: trạng thái lượt chạy (FLF-177 BUG-05, BUG-07, BUG
     expect(stages).toContain("ask")
     expect(stages).toContain("draft")
     expect(stages).toContain("gate")
+    // Stage soạn / kiểm kèm mục tài liệu step sở hữu; stage khác thì không có field
+    const stageEvents = events.filter((e): e is Extract<StepEvent, { type: "stage" }> => e.type === "stage")
+    expect(stageEvents.find((e) => e.stage === "draft")?.section_ids).toContain("fixed:2.1")
+    expect(stageEvents.find((e) => e.stage === "check")?.section_ids).toContain("fixed:2.1")
+    expect(stageEvents.find((e) => e.stage === "intake")?.section_ids).toBeUndefined()
     // BUG-32: trạng thái đổi ngay khi nhận trả lời, không đợi tới lượt draft
     const answerReceived = events.findIndex((e) => e.type === "answer_received")
     const firstDraft = events.findIndex((e) => e.type === "draft")

@@ -102,7 +102,7 @@ const attributeRows = (notation: ErdNotation, attrs: readonly ErdAttribute[]): E
 const entityBox = (e: ErdEntityInput, notation: ErdNotation, degree: number, selfLoops: number, o = DEFAULT_ROUTE_OPTIONS): EntityBox => {
   const nameLines = wrapLines(clean(e.name) || e.id, NAME_SIZE, MAX_NAME_WIDTH, 2)
   const noteLines = e.elsewhere ? wrapLines(clean(e.elsewhere), ATTR_SIZE, MAX_NAME_WIDTH, 2) : []
-  const nameW = Math.max(...nameLines.map((l) => textWidth(l, NAME_SIZE, true)), ...noteLines.map((l) => textWidth(l, ATTR_SIZE)))
+  const nameW = Math.max(...nameLines.map((l) => textWidth(l, NAME_SIZE)), ...noteLines.map((l) => textWidth(l, ATTR_SIZE)))
   const rows = e.elsewhere ? [] : attributeRows(notation, e.attributes ?? [])
   const headerH = Math.max(38, nameLines.length * NAME_LINE + noteLines.length * ATTR_LINE + 16)
   const attrH = rows.length > 0 ? 12 + rows.length * ATTR_LINE + rows.filter((r) => r.gapBefore).length * 8 : 0
@@ -220,9 +220,9 @@ const OPTIONS: Record<ErdNotation, { gapX: number; gapY: number }> = {
 
 const placeholder = (label: string): Scene => {
   const scene = new Scene()
-  const w = Math.ceil(textWidth(label, NAME_SIZE, true)) + 40
+  const w = Math.ceil(textWidth(label, NAME_SIZE)) + 40
   scene.rect("NO_ENTITIES", 0, 0, w, 48, { name: label })
-  scene.text("NO_ENTITIES#name", w / 2, 24, label, { size: NAME_SIZE, bold: true, baseline: "central", owner: "NO_ENTITIES" })
+  scene.text("NO_ENTITIES#name", w / 2, 24, label, { size: NAME_SIZE, baseline: "central", owner: "NO_ENTITIES" })
   return scene
 }
 
@@ -360,7 +360,7 @@ const drawEntity = (scene: Scene, e: EntityBox, placed: PlacedNode, notation: Er
   // tên (và dòng ghi chú của thực thể ở hình khác) canh giữa phần đầu hộp
   const textH = e.nameLines.length * NAME_LINE + e.noteLines.length * ATTR_LINE
   const top = y + (e.headerH - textH) / 2
-  e.nameLines.forEach((line, i) => scene.text(`${id}#name-${i}`, x + w / 2, top + (i + 0.5) * NAME_LINE, line, { size: NAME_SIZE, bold: true, baseline: "central", owner: id }))
+  e.nameLines.forEach((line, i) => scene.text(`${id}#name-${i}`, x + w / 2, top + (i + 0.5) * NAME_LINE, line, { size: NAME_SIZE, baseline: "central", owner: id }))
   e.noteLines.forEach((line, i) =>
     scene.text(`${id}#note-${i}`, x + w / 2, top + e.nameLines.length * NAME_LINE + (i + 0.5) * ATTR_LINE, line, { size: ATTR_SIZE, italic: true, baseline: "central", owner: id })
   )
@@ -373,7 +373,7 @@ const drawEntity = (scene: Scene, e: EntityBox, placed: PlacedNode, notation: Er
         scene.decoration(`${id}#rule-${i + 1}`, id, [[x, cursor], [x + w, cursor]])
         cursor += 4
       }
-      scene.text(`${id}#attr-${i}`, x + 10, cursor + ATTR_LINE / 2, row.text, { size: ATTR_SIZE, bold: row.pk, anchor: "start", baseline: "central", owner: id })
+      scene.text(`${id}#attr-${i}`, x + 10, cursor + ATTR_LINE / 2, row.text, { size: ATTR_SIZE, anchor: "start", baseline: "central", owner: id })
       cursor += ATTR_LINE
     })
   }
@@ -386,9 +386,9 @@ const drawEntity = (scene: Scene, e: EntityBox, placed: PlacedNode, notation: Er
       const ovalId = `${id}.attr-${i}`
       const cx = left + v.rx
       scene.ellipse(ovalId, cx, cy, v.rx, v.ry, { name: v.name })
-      scene.text(`${ovalId}#name`, cx, cy, v.name, { size: ATTR_SIZE, bold: v.pk, baseline: "central", owner: ovalId })
+      scene.text(`${ovalId}#name`, cx, cy, v.name, { size: ATTR_SIZE, baseline: "central", owner: ovalId })
       if (v.pk) {
-        const half = textWidth(v.name, ATTR_SIZE, true) / 2
+        const half = textWidth(v.name, ATTR_SIZE) / 2
         scene.decoration(`${ovalId}#key`, ovalId, [[cx - half, cy + 8], [cx + half, cy + 8]])
       }
       scene.line(`${ovalId}#link`, [x + (w * (i + 1)) / (e.ovals.length + 1), y + h], [cx, cy - v.ry], { name: `${name} - ${v.name}` })
