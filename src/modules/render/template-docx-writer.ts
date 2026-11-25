@@ -96,7 +96,9 @@ export async function writeTemplateDocx(
     if (!own && keep?.has(section.id) && (rearrange || !slot)) continue
     // FLF-416 chế độ 4: mục không có heading trong file ⇒ heading mới đúng vị trí bản in, không gộp vào mục cha.
     // FLF-413: tính năng / chức năng dư của mẫu có khung ⇒ heading mới lặp theo định dạng khung (không thành đoạn chữ đậm)
-    if (!own && (rearrange || (frameMode && REPEATING_SECTION.test(section.id)))) {
+    // FLF-468 (E2E-1): dự án có sẵn (giữ file gốc) — tính năng / chức năng CR thêm không có slot ⇒ heading mới đúng vị trí bản in
+    // (sau mục cuối của file), không gộp vào thân mục cha (trước "3.1") thành chữ đậm
+    if (!own && (rearrange || ((frameMode || sourceMode) && REPEATING_SECTION.test(section.id)))) {
       inserted.push({ section, index })
       continue
     }
@@ -362,8 +364,10 @@ export async function writeTemplateDocx(
   const insertedHeading = (section: RenderedSection): Element => {
     const kind = REPEATING_SECTION.exec(section.id)?.[1]
     const frameSample = kind ? frameSlots.filter((s) => s.section_id.startsWith(`${kind}:`) && (s.heading.level ?? 1) === section.level).pop()?.heading : undefined
+    // FLF-468: ưu tiên heading cùng loại (tính năng / chức năng) cùng cấp của file hơn heading cùng cấp bất kỳ ("5.5 Glossary")
+    const kindSample = kind ? slots.filter((s) => s.section_id.startsWith(`${kind}:`) && (s.heading.level ?? 1) === section.level).pop()?.heading : undefined
     const sameLevel = headings.filter((h) => (h.level ?? 1) === section.level)
-    const sample = frameSample ?? sameLevel[sameLevel.length - 1]
+    const sample = frameSample ?? kindSample ?? sameLevel[sameLevel.length - 1]
     if (!sample) return paragraph(xml, [{ text: section.heading, bold: true }], bodyPatternFor(bodyPattern, bodyStyleId))
     const typed = /^\s*(\d+(\.\d+)*\.?|[IVXLC]+\.)\s+/.test(sample.text)
     const text = typed && section.number ? `${section.number} ${section.heading}` : section.heading
@@ -372,7 +376,15 @@ export async function writeTemplateDocx(
     return heading
   }
   if (rearrange) await rearrangeLayout()
-  else if (frameMode && (await fillTemplateFrames())) await requestFieldUpdate(pkg)
+  else if (frameMode) { if (await fillTemplateFrames()) await requestFieldUpdate(pkg) }
+  else if (inserted.length) {
+    // FLF-468 (E2E-1): heading mới của mục lặp ở chế độ giữ file gốc ⇒ mục lục tính lại khi mở file (FLF-413: chèn thì cập nhật)
+    const body = wKid(xml.documentElement, "body")
+    if (body) {
+      await insertSections(body, wKids(body, "sectPr")[0] ?? null, new Set())
+      await requestFieldUpdate(pkg)
+    }
+  }
   // FLF-468 (lát A): heading bị xoá mang theo bookmark `_Toc` của nó — mục lục field phải tính lại khi mở để không còn
   // dòng trỏ vào mục đã mất.
   if (sectionsRemoved && !(rearrange || frameMode)) await requestFieldUpdate(pkg)

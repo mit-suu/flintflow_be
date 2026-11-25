@@ -527,6 +527,68 @@ describe("writeTemplateDocx", () => {
   })
 })
 
+describe("FLF-468 (E2E-1): mục lặp mới ở chế độ giữ file gốc thành heading chèn mới", () => {
+  /** File: "3. Functional" (H1) › "3.5 Billing" (H2) › "3.5.1 Pay" (H3), rồi "4. Non-Functional" (H1). Heading gõ số tay. */
+  async function srsFile() {
+    const zip = await JSZip.loadAsync(await template())
+    zip.file("word/styles.xml", styles.replace("</w:styles>", '<w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/></w:style></w:styles>'))
+    const text = (t: string, level: number) => heading(t, level)
+    zip.file("word/document.xml", `<w:document xmlns:w="${NS.w}" xmlns:r="${NS.r}"><w:body><w:p><w:fldSimple w:instr="TOC \o &quot;1-3&quot;"><w:r><w:t>Contents</w:t></w:r></w:fldSimple></w:p>${text("3. Functional", 1)}${body.replace("Replace this guidance.", "Intro 3")}${text("3.5 Billing", 2)}${body.replace("Replace this guidance.", "Body 3.5")}${text("3.5.1 Pay", 3)}${body.replace("Replace this guidance.", "Body 3.5.1")}${text("4. Non-Functional", 1)}${body.replace("Replace this guidance.", "Body 4")}${text("5.5 Glossary", 2)}<w:sectPr><w:pgMar w:top="1134" w:left="1134"/></w:sectPr></w:body></w:document>`)
+    const input = await zip.generateAsync({ type: "nodebuffer" }), parsed = await parseDocument(input)
+    const heads = parsed.blocks.filter((b) => b.kind === "heading")
+    const map = ["group:3", "feature:F-3.5", "function:FR-3.5.1", "group:4", "fixed:V.5"].map((section_id, i) => ({ block_id: heads[i].block_id, section_id }))
+    return { input, map }
+  }
+  const sec = (id: string, headingText: string, number: string, level: number, text = ""): RenderedDocument["sections"][number] =>
+    ({ id, heading: headingText, number, level, blocks: text ? [{ type: "paragraph", runs: runs(text) }] : [] })
+  const keep = new Set(["group:3", "feature:F-3.5", "function:FR-3.5.1", "group:4", "fixed:V.5"])
+  const headingTexts = (blocks: Awaited<ReturnType<typeof parseDocument>>["blocks"]) => blocks.filter((b) => b.kind === "heading").map((b) => b.text)
+
+  it("tính năng + chức năng mới không có slot ⇒ 3.6 / 3.6.1 là heading trước heading '4.', vùng của '3.' không đổi", async () => {
+    const { input, map } = await srsFile(), doc = document()
+    doc.sections = [
+      sec("group:3", "Functional", "3", 1, "Intro 3"), sec("feature:F-3.5", "Billing", "3.5", 2, "Body 3.5"), sec("function:FR-3.5.1", "Pay", "3.5.1", 3, "Body 3.5.1"),
+      sec("feature:F-01", "Authentication", "3.6", 2), sec("function:FR-05", "Reset Password", "3.6.1", 3, "Reset body"),
+      sec("group:4", "Non-Functional", "4", 1, "Body 4"), sec("fixed:V.5", "Glossary", "5.5", 2)
+    ]
+    const out = await writeTemplateDocx(doc, input, map, [], { keepSource: keep })
+    const blocks = (await parseDocument(out)).blocks
+    expect(headingTexts(blocks)).toEqual(["3. Functional", "3.5 Billing", "3.5.1 Pay", "3.6 Authentication", "3.6.1 Reset Password", "4. Non-Functional", "5.5 Glossary"])
+    const feature = blocks.find((b) => b.text === "3.6 Authentication")!, fn = blocks.find((b) => b.text === "3.6.1 Reset Password")!
+    expect(wAttr(wKid(wKid(feature.element, "pPr")!, "pStyle"), "val")).toBe("Heading2")
+    expect(wAttr(wKid(wKid(fn.element, "pPr")!, "pStyle"), "val")).toBe("Heading3")
+    // Thân chức năng mới đứng ngay sau heading của nó; không có chữ mới giữa "3." và "3.5"
+    const at = (t: string) => blocks.findIndex((b) => b.text === t)
+    expect(at("Reset body")).toBe(at("3.6.1 Reset Password") + 1)
+    expect(blocks.slice(at("3. Functional"), at("3.5 Billing")).map((b) => b.text)).toEqual(["3. Functional", "Intro 3"])
+    expect(blocks.find((b) => b.text === "Body 3.5")).toBeTruthy()
+    // Mục lục tính lại khi mở file
+    expect(await (await JSZip.loadAsync(out)).file("word/document.xml")!.async("string")).toContain('w:dirty="true"')
+  })
+
+  it("chức năng mới của tính năng đã có ⇒ heading 3.5.2 sau 3.5.1, thân 3.5 không đổi", async () => {
+    const { input, map } = await srsFile(), doc = document()
+    doc.sections = [
+      sec("group:3", "Functional", "3", 1, "Intro 3"), sec("feature:F-3.5", "Billing", "3.5", 2, "Body 3.5"), sec("function:FR-3.5.1", "Pay", "3.5.1", 3, "Body 3.5.1"),
+      sec("function:FR-06", "Refund", "3.5.2", 3, "Refund body"), sec("group:4", "Non-Functional", "4", 1, "Body 4")
+    ]
+    const blocks = (await parseDocument(await writeTemplateDocx(doc, input, map, [], { keepSource: new Set(["group:3", "feature:F-3.5", "function:FR-3.5.1", "group:4"]) }))).blocks
+    expect(headingTexts(blocks)).toEqual(["3. Functional", "3.5 Billing", "3.5.1 Pay", "3.5.2 Refund", "4. Non-Functional", "5.5 Glossary"])
+    const at = (t: string) => blocks.findIndex((b) => b.text === t)
+    expect(at("Body 3.5")).toBeLessThan(at("3.5.1 Pay"))
+    expect(at("Body 3.5.1")).toBeLessThan(at("3.5.2 Refund"))
+    expect(at("Refund body")).toBe(at("3.5.2 Refund") + 1)
+  })
+
+  it("không có mục mới ⇒ file không đổi và không yêu cầu cập nhật mục lục", async () => {
+    const { input, map } = await srsFile(), doc = document()
+    doc.sections = [sec("group:3", "Functional", "3", 1, "Intro 3"), sec("feature:F-3.5", "Billing", "3.5", 2, "Body 3.5"), sec("function:FR-3.5.1", "Pay", "3.5.1", 3, "Body 3.5.1"), sec("group:4", "Non-Functional", "4", 1, "Body 4")]
+    const out = await writeTemplateDocx(doc, input, map, [], { keepSource: keep })
+    expect(headingTexts((await parseDocument(out)).blocks)).toEqual(["3. Functional", "3.5 Billing", "3.5.1 Pay", "4. Non-Functional", "5.5 Glossary"])
+    expect(await (await JSZip.loadAsync(out)).file("word/document.xml")!.async("string")).not.toContain('w:dirty="true"')
+  })
+})
+
 describe("FLF-413 - isFrameHeading", () => {
   it("heading mục lặp có chữ là chỗ điền (bỏ số gõ tay) ⇒ khung", () => {
     expect(isFrameHeading("feature:F-3.2", "3.2 <<Feature Name 1>>")).toBe(true)
