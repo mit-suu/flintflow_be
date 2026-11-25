@@ -23,6 +23,8 @@ export interface CrClarification {
   suggestions?: string[][]
   /** Chỉ số các câu là cảnh báo "yêu cầu không hợp lý" (BF §3.2 C-4); gợi ý đầu của chúng là "Vẫn làm". CR cũ không có. */
   warning_questions?: number[]
+  /** FLF-474: loại từng câu (song song `questions`): mâu thuẫn / cảnh báo hỏi cả khi hết vòng, hay câu mơ hồ. CR cũ không có. */
+  kinds?: ("contradiction" | "ambiguous")[]
 }
 
 /**
@@ -139,7 +141,8 @@ const changeRequestSchema = new Schema<IChangeRequest>(
             questions: [String],
             answers: [String],
             suggestions: { type: [[String]], default: [] },
-            warning_questions: { type: [Number], default: [] }
+            warning_questions: { type: [Number], default: [] },
+            kinds: { type: [String], default: [] }
           },
           opts
         )

@@ -23,7 +23,7 @@ import { withMeteredAi } from "../import/metered-ai.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { MODE1_RULE_PROFILE } from "../import/mode1-rule-profile.js"
 import { flagKey, runDeterministicCheck } from "../spine/deterministic-check.js"
-import { humanizeText, pathLabel, ruleLabel } from "../spine/human-labels.js"
+import { humanizeText, internalElementNames, nameElementIds, pathLabel, ruleLabel } from "../spine/human-labels.js"
 import { TransactionRejectedError, planTransaction } from "../spine/op-engine.js"
 import { userOpSchema, type Op } from "../spine/op.types.js"
 import * as spineRepository from "../spine/spine.repository.js"
@@ -305,7 +305,8 @@ const askContradictions = async (cr: IChangeRequest, locations: IChangeLocation[
     round: cr.clarifications.length + 1,
     questions: questions.map((q) => q.question),
     answers: [],
-    suggestions: questions.map((q) => q.suggestions)
+    suggestions: questions.map((q) => q.suggestions),
+    kinds: questions.map(() => "contradiction" as const)
   })
   cr.markModified("clarifications")
   await transitionCr(cr, "awaiting_answers")
@@ -391,7 +392,10 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
     // FLF-367: mâu thuẫn ⇒ hỏi người yêu cầu (câu đã hỏi thì thôi, thành ghi chú vàng như cũ); nhận xét khác vẫn vàng
     const contradictions = newContradictions(
       cr,
-      result.data.findings.filter((f) => f.rule === "contradiction").map((f) => ({ question: humanizeText(f.message), suggestions: [] }))
+      result.data.findings.filter((f) => f.rule === "contradiction").map((f) => ({ question: humanizeText(f.message), suggestions: [] })),
+      "vi",
+      // FLF-474: so với câu đã lưu (đã đổi mã sang tên) theo độ trùng từ, không nguyên văn
+      { name: (text) => nameElementIds(text, spine, internalElementNames(spine)) }
     )
     if (contradictions.length) {
       await askContradictions(cr, locations, contradictions)

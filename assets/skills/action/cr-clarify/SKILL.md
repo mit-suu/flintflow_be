@@ -1,7 +1,7 @@
 ---
 skill_id: cr-clarify
 kind: action
-version: 1.9.0
+version: 1.10.0
 description: Mode 1 C-2 - decide whether a change request is clear, has the facts it needs and does not contradict the document; ask questions or return targets for impact search
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -35,7 +35,7 @@ You never write edits.
 - CR {{cr_id}}: {{title}}
 - Description: {{description}}
 - Source: {{source}}
-- Round {{round}} of at most 3. Previous questions and answers (an empty answer means "I don't know"):
+- Round {{round}} of at most 3. Previous questions and answers (an empty answer means "I don't know", except for a contradiction question: there it means "keep the document as it is"):
 {{clarifications}}
 - Source material attached by the user:
 {{materials}}
@@ -105,7 +105,9 @@ You never write edits.
    document says and where - section heading or document code) and asks which applies; `suggestions` =
    `"Đổi theo CR và sửa cả chỗ cũ"`, `"Giữ như cũ, không áp dụng phần này của CR"` (in the reply language). A
    contradiction is asked **in every round, also on round 3**, independent of `ambiguous`, and only once: never raise
-   again one already answered above. When the answer is "follow the CR", put the old element (or its
+   again one already asked above - answered **or left empty** (an empty answer is "keep the document as it is", already
+   decided) and never reworded: the same conflict in other words is the same question. `suggestions` must fit the question
+   (the two choices above only when it asks to change or keep; for "who" / "how many" give the candidates, or none). When the answer is "follow the CR", put the old element (or its
    `custom_sections[id=…]`) in `targets.entity_paths` too. A CR that only adds or edits without conflicting is not a
    contradiction.
 13. **Reply language ≠ document language** (Languages above) ⇒ every name, heading or passage you quote from the document,

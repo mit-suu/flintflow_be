@@ -7,6 +7,7 @@ import {
   diagramLabel,
   elementLabel,
   humanizeText,
+  internalElementNames,
   nameElementIds,
   pathLabel,
   quotedSectionLabel,
@@ -121,5 +122,34 @@ describe("P06 - nameElementIds với mã màn kiểu SCR-05 (câu hỏi C-2 củ
   it("SCR-05 ⇒ tên màn; mã UC giữ nguyên", () => {
     const spine = { screens: [{ id: "SCR-05", name: "Product Detail" }], actors: [], roles: [], features: [], functions: [{ id: "FN009", name: "Add to Cart" }], entities: [] } as unknown as Parameters<typeof nameElementIds>[1]
     expect(nameElementIds("Màn SCR-05 có nút FN009 không? (UC-03)", spine)).toBe("Màn 'Product Detail' có nút 'Add to Cart' không? (UC-03)")
+  })
+})
+
+describe("FLF-474 - nameElementIds với mục riêng / quy tắc / thông báo", () => {
+  const spine = {
+    screens: [],
+    actors: [],
+    roles: [],
+    features: [],
+    functions: [],
+    entities: [],
+    custom_sections: [
+      { id: "CS05", heading: "Chính sách bảo mật" },
+      { id: "CS27", heading: "" }
+    ],
+    business_rules: [
+      { id: "BR07", statement: "Tài khoản bị khoá sau 5 lần đăng nhập sai liên tiếp trong vòng 15 phút" },
+      { id: "BR-75", statement: "Mã tài liệu" }
+    ],
+    messages: [],
+    nfrs: []
+  } as unknown as Parameters<typeof internalElementNames>[0] & Parameters<typeof nameElementIds>[1]
+
+  it("CS27 (phần nối tiêu đề rỗng) ⇒ 'Phần nối của …'; CS05 ⇒ tiêu đề; BR07 ⇒ câu trích; BR-75 (mã tài liệu) giữ", () => {
+    const names = internalElementNames(spine, (id) => (id === "custom:CS27" ? 'Phần nối của "Chính sách bảo mật"' : ""))
+    const text = nameElementIds("CS27 và CS05 mâu thuẫn BR07, còn BR-75 thì khác.", spine, names)
+    expect(text).toBe(
+      "'Phần nối của \"Chính sách bảo mật\"' và 'Chính sách bảo mật' mâu thuẫn 'Tài khoản bị khoá sau 5 lần đăng nhập sai liên tiếp trong vò…', còn BR-75 thì khác."
+    )
   })
 })
