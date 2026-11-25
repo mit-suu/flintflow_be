@@ -398,6 +398,13 @@ describe("Brief giữ tầm nhìn/mục tiêu ở addendum, S-1.1 dựng bản t
     expect(skill("action/apply-change-op")).toContain("brief_core")
   })
 
+  it("FLF-486 (B5): apply-change-op - cùng mục tiêu nhiều vai là MỘT use case; quyền dùng đúng chữ hành động của ma trận dự án", () => {
+    const text = skill("action/apply-change-op")
+    expect(text).toContain("ONE use case with all of them in `actor_ids`")
+    expect(text).toContain("never one use case per actor or per role")
+    expect(text).toContain("an imported X matrix uses `access`")
+  })
+
   it("FLF-411 (#18): apply-change-op - \"tên hệ thống\" ghi project.system_name, project.name chỉ khi nói tên dự án", () => {
     const text = skill("action/apply-change-op")
     expect(text).toContain("`set project.system_name`")

@@ -1,7 +1,7 @@
 ---
 skill_id: apply-change-op
 kind: action
-version: 1.9.0
+version: 1.10.0
 description: Chat change request → ops (or a clarification); impact query → 3 branches → stale; one-pass reconcile
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -75,7 +75,8 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 3e. **New use case ⇒ check it, then add its related parts in the same batch** (exception to rule 3; context in
    `use_case_context`). One use case = one goal: actors with different goals in the request (Student asks for a grade review,
    Lecturer settles it) ⇒ one use case + function per goal, each with only its actor ("Request Grade Review" for Student,
-   "Decide Grade Review" for Lecturer); never one use case for both. Same or overlapping goal as a `use_case_context.use_cases` entry
+   "Decide Grade Review" for Lecturer); never one use case for both. The **same goal for several actors** (log in, reset a
+   password) is ONE use case with all of them in `actor_ids`; never one use case per actor or per role. Same or overlapping goal as a `use_case_context.use_cases` entry
    of that actor (Suspend Student Account vs Deactivate Student Record), user silent ⇒ `clarification_needed` naming it: extend it, replace it, or keep both and how they differ.
    **A request needs someone to settle it - never leave the flow dead-ended.** When the new use case creates something
    another actor must act on (a request, an application, a report to approve), the batch MUST also hold the rest of that flow,
@@ -100,7 +101,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
      existing screen fits a pure read addition (a column, a filter, a read-only field) - never just a button;
    - the new screen: `name`, `description`, `feature_id`, `flow_to`, `tabs`, plus the edge into it - `add screens[id=…].flow_to[]`
      `{ "to": <new screen>, "trigger": "Click Export" }` on the screen that opens it (never a bare id);
-   - one `permissions[]` row per role of each actor on its screen, shared screen included (`view`, plus `create`/`update`/`delete` it does);
+   - one `permissions[]` row per role of each actor on its screen, shared screen included (`view`, plus `create`/`update`/`delete` it does) - use the action words the projection's `permissions` already use (an imported X matrix uses `access`: then write `access`, not `view`);
    - the function on that screen (system/time actor ⇒ only a function, `screen_id: null`). Declare temporary ids as
      each added element's own `"id": "$newFn"` / `"id": "$newScreen"`; `$newFn` goes in `function_ids`. Code sets
      `order`, `detail_status`; layout and diagrams are drawn after apply.
