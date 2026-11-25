@@ -471,7 +471,7 @@ export const gapReportResponseSchema = gapReportSchema
 /** Một dòng diff theo block — dùng chung cho re-upload (UC-24) và `versions/compare` (UC-55). */
 /** FLF-447: một hàng của bảng trong diff theo hàng. */
 const tableRowDiffSchema = z.union([
-  z.object({ change: z.enum(["added", "removed", "modified", "moved"]), before: z.array(z.string()).optional(), after: z.array(z.string()).optional(), cells_changed: z.array(z.number().int().min(0)).optional() }),
+  z.object({ change: z.enum(["added", "removed", "modified"]), before: z.array(z.string()).optional(), after: z.array(z.string()).optional(), cells_changed: z.array(z.number().int().min(0)).optional() }),
   z.object({ change: z.literal("unchanged"), count: z.number().int().min(1), rows: z.array(z.array(z.string())) })
 ])
 

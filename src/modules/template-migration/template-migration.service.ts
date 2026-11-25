@@ -31,19 +31,20 @@ import { assignBlockSections } from "../import/profile-match.service.js"
 import { isKnownSectionId, SECTION_CANDIDATES } from "../import/section-catalog.js"
 import { TemplateProfile, type HeadingMapEntry, type ITemplateProfile } from "../import/template-profile.model.js"
 import { foldText } from "../import/text-similarity.js"
-import { sourceLanguageOf } from "../project/document-language.js"
+import { documentLanguageOf, hasBaseFile, sourceLanguageOf } from "../project/document-language.js"
 import { getProjectById } from "../project/project.service.js"
 import type { IProject } from "../project/project.model.js"
 import { assertDraftUnlocked } from "../spine/draft-lock.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import { translationUnits } from "../translation/translation-units.js"
-import { toUserLocale } from "../../shared/i18n/locale.js"
+import { toUserLocale, type UserLocale } from "../../shared/i18n/locale.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import {
   classify,
   decidableItems,
   missingAfterMoves,
+  readChoice,
   settleDecisions,
   tableShapesBySection,
   withSuggestedDecisions,
@@ -51,6 +52,7 @@ import {
   type TableShape
 } from "./classify.js"
 import { buildOutline, type OutlineEntry } from "./outline.js"
+import { loadStandardTemplate, STANDARD_TEMPLATE_NAME } from "./standard-template.js"
 import { brokenLinks, revertability, type BrokenLink, type RevertBlockReason } from "./precheck.js"
 import { editedSince, sectionKeyResolver, type EditedSection } from "./edited-since.js"
 import { aiChoiceCounts, estimateMigrationCredits, loadMigrationUnitCosts, type MigrationCreditEstimate } from "./migration-credit.js"
@@ -83,6 +85,8 @@ export interface MigrationContext {
 
 export type StartInput =
   | { kind: "template"; template_id: string; version: number }
+  /** FLF-466: đích là mẫu chuẩn FlintFlow (đổi sang và đổi ngược về). `language` bỏ trống ⇒ ngôn ngữ tài liệu hiện tại của dự án. */
+  | { kind: "standard"; language?: UserLocale }
   | { kind: "file"; file: TemplateFile; publish_to_org: boolean; name?: string; template_id?: string }
 
 export const MIGRATION_NOT_FOUND = () => new ApiError(404, "Không tìm thấy lần đổi mẫu này.", "TEMPLATE_MIGRATION_NOT_FOUND")
@@ -158,6 +162,17 @@ const elementOptions = (spine: Spine): PairOptions => {
 
 export const sha256Of = (buffer: Buffer): string => createHash("sha256").update(buffer).digest("hex")
 
+/**
+ * Dự án đang theo mẫu chuẩn FlintFlow: chưa gắn mẫu org nào và (chưa có file nền riêng — mẫu FPT sinh từ Spine — hoặc lần đổi mẫu áp dụng gần nhất
+ * có đích là mẫu chuẩn).
+ */
+const followsStandard = async (projectId: string, project: Pick<IProject, "template_ref">, profile: Pick<ITemplateProfile, "source_file_ref"> | null): Promise<boolean> => {
+  if (project.template_ref) return false
+  const latest = (await TemplateMigration.findOne({ projectId, state: "applied", applied_at: { $ne: null } }, { "to.standard": 1 }).sort({ applied_at: -1 }).lean()) as { to?: { standard?: boolean } } | null
+  if (latest) return latest.to?.standard === true
+  return !profile?.source_file_ref
+}
+
 /** Binding hiện tại của dự án — để biết đổi từ đâu và để bước sau biết dữ liệu có đổi giữa chừng không. */
 export const currentBinding = async (project: IProject, profile: ITemplateProfile | null, spine: Spine): Promise<MigrationFrom> => {
   let sha = profile?.source_sha256 ?? null
@@ -172,10 +187,11 @@ export const currentBinding = async (project: IProject, profile: ITemplateProfil
   }
   return {
     template_ref: project.template_ref ? { template_id: project.template_ref.template_id, version: project.template_ref.version } : null,
+    standard: await followsStandard(String(project._id), project, profile),
     source_file_ref: profile?.source_file_ref ?? null,
     source_sha256: sha,
     doc_version: profile?.doc_version ?? null,
-    language: sourceLanguageOf(project, profile?.language),
+    language: sourceLanguageOf(project, profile?.language, profile),
     template_family: profile?.template_family ?? null,
     headings: oldHeadingsOf(profile, spine)
   }
@@ -229,6 +245,7 @@ const newHeadingsOf = (v: Pick<IOrgTemplateVersion, "headings">): NewHeading[] =
   }))
 
 const toSideOf = (family: Pick<IOrgTemplate, "_id" | "name">, v: IOrgTemplateVersion): MigrationTo => ({
+  standard: false,
   template_id: family._id as mongoose.Types.ObjectId,
   version: v.version,
   name: family.name,
@@ -292,6 +309,8 @@ const persistUploadedTarget = async (
 const reverseTargetOf = async (projectId: string, to: MigrationTo): Promise<ITemplateMigration | null> => {
   const latest = await TemplateMigration.findOne({ projectId, state: "applied", applied_at: { $ne: null } }).sort({ applied_at: -1 })
   if (!latest) return null
+  // Đích là mẫu chuẩn: mẫu trước của lần gần nhất là mẫu chuẩn (và lần đó không phải chính đổi sang mẫu chuẩn)
+  if (to.standard) return latest.from.standard === true && !latest.to.standard ? latest : null
   const ref = latest.from.template_ref
   const sameRef = !!ref && String(ref.template_id) === String(to.template_id) && ref.version === to.version
   const sameFile = !!latest.from.source_sha256 && latest.from.source_sha256 === to.sha256
@@ -301,7 +320,11 @@ const reverseTargetOf = async (projectId: string, to: MigrationTo): Promise<ITem
 export const sameRef = (a: MigrationFrom["template_ref"], b: MigrationFrom["template_ref"]): boolean =>
   (!a && !b) || (!!a && !!b && String(a.template_id) === String(b.template_id) && a.version === b.version)
 
-const sameAsCurrent = (from: MigrationFrom, to: MigrationTo): boolean =>
+/** Mẫu chuẩn: "cùng mẫu" chỉ khi dự án đang theo mẫu chuẩn **và** ngôn ngữ tài liệu đã đúng ngôn ngữ đích (khác ngôn ngữ ⇒ vẫn đổi được). */
+const sameAsCurrent = (from: MigrationFrom, to: MigrationTo, documentLanguage: UserLocale): boolean =>
+  to.standard ? from.standard === true && toUserLocale(to.language) === documentLanguage : sameAsCurrentTemplate(from, to)
+
+const sameAsCurrentTemplate = (from: MigrationFrom, to: MigrationTo): boolean =>
   (!!from.template_ref && String(from.template_ref.template_id) === String(to.template_id) && from.template_ref.version === to.version) || (!!from.source_sha256 && from.source_sha256 === to.sha256)
 
 const toRecord = (m: ReadonlyMap<string, TableShape[]>): Record<string, TableShape[]> => Object.fromEntries(m)
@@ -322,7 +345,7 @@ interface Prepared {
  * Đổi ngược có bản chụp file nền của lần đổi mẫu trước: đích thật là **chính bản chụp đó** (đúng file + heading + bảng của nó),
  * không phải file sạch của mẫu — bước dựng chép lại nguyên khối từ bản chụp. Không đọc được bản chụp ⇒ dùng mẫu đã chọn.
  */
-const snapshotTarget = async (previous: ITemplateMigration | null, to: MigrationTo, buffer: Buffer, version: IOrgTemplateVersion): Promise<{ to: MigrationTo; buffer: Buffer; version: Pick<IOrgTemplateVersion, "headings" | "table_map"> }> => {
+const snapshotTarget = async (previous: ITemplateMigration | null, to: MigrationTo, buffer: Buffer, version: Pick<IOrgTemplateVersion, "headings" | "table_map">): Promise<{ to: MigrationTo; buffer: Buffer; version: Pick<IOrgTemplateVersion, "headings" | "table_map"> }> => {
   const ref = previous?.snapshot?.source_file_ref
   if (!previous || !ref) return { to, buffer, version }
   try {
@@ -340,7 +363,7 @@ const snapshotTarget = async (previous: ITemplateMigration | null, to: Migration
   }
 }
 
-const prepare = async (projectId: string, spine: Spine, profile: ITemplateProfile | null, from: MigrationFrom, target: MigrationTo, targetBuffer: Buffer, targetVersion: IOrgTemplateVersion): Promise<Prepared> => {
+const prepare = async (projectId: string, spine: Spine, profile: ITemplateProfile | null, from: MigrationFrom, target: MigrationTo, targetBuffer: Buffer, targetVersion: Pick<IOrgTemplateVersion, "headings" | "table_map">): Promise<Prepared> => {
   const previous = await reverseTargetOf(projectId, target)
   const { to, buffer, version } = await snapshotTarget(previous, target, targetBuffer, targetVersion)
   const [oldTables, newSide] = await Promise.all([oldTablesOf(projectId, profile), newTablesOf(buffer, version)])
@@ -358,8 +381,14 @@ const prepare = async (projectId: string, spine: Spine, profile: ITemplateProfil
   return { to: { ...to, headings: neu }, pairing, analysis, groups, warnings, direction: previous ? "reverse" : "forward", reverse_of: previous ? (previous._id as mongoose.Types.ObjectId) : null }
 }
 
-/** Dự án giữ chữ gốc của khách trong Spine (import thật) — khác dự án tạo SRS / chuyển từ FPT (Spine luôn tiếng Anh). */
-export const keepsCustomerText = (project: Pick<IProject, "mode" | "converted_from">): boolean => project.mode === "import" && project.converted_from !== "fpt"
+/**
+ * Dự án có file nền (FLF-466, `hasBaseFile`): chữ trong Spine là của khách ⇒ đổi mẫu khác ngôn ngữ dịch đè vào Spine. Dự án tạo SRS / chuyển từ FPT chưa áp
+ * mẫu nào (Spine tiếng Anh, lớp bản dịch lo phần in) chỉ đổi ngôn ngữ tài liệu.
+ */
+export const keepsCustomerText = (
+  project: Pick<IProject, "mode" | "converted_from" | "template_ref">,
+  profile?: Pick<ITemplateProfile, "source_file_ref" | "migrated_base_at"> | null
+): boolean => hasBaseFile(project, profile)
 
 export const startMigration = async (ctx: MigrationContext, input: StartInput): Promise<MigrationDto> => {
   const project = await getProjectById(ctx.projectId, ctx.orgId)
@@ -370,10 +399,13 @@ export const startMigration = async (ctx: MigrationContext, input: StartInput): 
   const profile = await TemplateProfile.findOne({ projectId: ctx.projectId })
   const from = await currentBinding(project, profile, spine)
 
-  let family: IOrgTemplate
-  let version: IOrgTemplateVersion
+  let family: IOrgTemplate | null = null
+  let version: IOrgTemplateVersion | null = null
   let rollback: () => Promise<void> = async () => undefined
-  if (input.kind === "template") {
+  const documentLanguage = documentLanguageOf(project, profile?.language)
+  if (input.kind === "standard") {
+    // Không có họ mẫu: file + mapping của mẫu chuẩn theo ngôn ngữ đích dựng sẵn
+  } else if (input.kind === "template") {
     ;({ family, version } = await resolveOrgTarget(ctx.orgId, ctx.projectId, input.template_id, input.version))
   } else {
     // Lead mới đăng được lên thư viện: chặn trước khi đọc / lưu file
@@ -386,10 +418,24 @@ export const startMigration = async (ctx: MigrationContext, input: StartInput): 
   }
 
   try {
-    const to = toSideOf(family, version)
-    if (sameAsCurrent(from, to)) throw new ApiError(409, "Dự án đang theo đúng mẫu này.", "TEMPLATE_MIGRATION_SAME_TEMPLATE")
-    const buffer = input.kind === "file" ? input.file.buffer : await docFileStore().load(version.file_ref)
-    const prepared = await prepare(ctx.projectId, spine, profile, from, to, buffer, version)
+    const standard = input.kind === "standard" ? await loadStandardTemplate(input.language ?? documentLanguage) : null
+    const to: MigrationTo = standard
+      ? {
+          standard: true,
+          template_id: null,
+          version: 0,
+          name: STANDARD_TEMPLATE_NAME,
+          visibility: "org",
+          file_ref: standard.file_ref,
+          sha256: standard.sha256,
+          language: standard.language,
+          template_family: standard.analyzed.template_family,
+          headings: standard.headings
+        }
+      : toSideOf(family!, version!)
+    if (sameAsCurrent(from, to, documentLanguage)) throw new ApiError(409, "Dự án đang theo đúng mẫu này.", "TEMPLATE_MIGRATION_SAME_TEMPLATE")
+    const buffer = standard ? await docFileStore().load(standard.file_ref) : input.kind === "file" ? input.file.buffer : await docFileStore().load(version!.file_ref)
+    const prepared = await prepare(ctx.projectId, spine, profile, from, to, buffer, standard ? { headings: standard.analyzed.headings, table_map: standard.analyzed.table_map } : version!)
     const head = await spineRepository.versionHead(ctx.projectId)
     const translateTo = toUserLocale(to.language)
     if (!translateTo) prepared.warnings.push("Không xác định được ngôn ngữ của mẫu mới nên chưa tính việc dịch - kiểm tra lại ngôn ngữ trước khi áp dụng.")
@@ -408,8 +454,8 @@ export const startMigration = async (ctx: MigrationContext, input: StartInput): 
       decisions: [],
       // D9: chỉ dự án có file của khách (import) mới dịch đè Spine. Dự án tạo SRS (mode 2) / chuyển từ FPT: Spine luôn tiếng Anh, lớp bản dịch
       // ngoài Spine lo phần in ⇒ đổi mẫu khác ngôn ngữ chỉ đổi ngôn ngữ tài liệu (không dịch Spine, không credit)
-      needs_translation: !!translateTo && translateTo !== from.language && keepsCustomerText(project),
-      language_switch_only: !!translateTo && translateTo !== from.language && !keepsCustomerText(project),
+      needs_translation: !!translateTo && translateTo !== from.language && keepsCustomerText(project, profile),
+      language_switch_only: !!translateTo && translateTo !== from.language && !keepsCustomerText(project, profile),
       warnings: prepared.warnings,
       base_spine_version: spine.spine_version,
       base_content_seq: head?.content_seq ?? 0,
@@ -432,8 +478,10 @@ export const load = async (ctx: Pick<MigrationContext, "projectId" | "orgId">, i
   return doc
 }
 
-const effectiveChoice = (doc: Pick<ITemplateMigration, "decisions" | "groups">, id: string): string | null =>
-  doc.decisions.find((d) => d.id === id)?.choice ?? decidableItems(doc.groups).get(id)?.default ?? null
+const effectiveChoice = (doc: Pick<ITemplateMigration, "decisions" | "groups">, id: string): string | null => {
+  const stored = doc.decisions.find((d) => d.id === id)?.choice
+  return stored !== undefined ? readChoice(doc.groups, id, stored) : (decidableItems(doc.groups).get(id)?.default ?? null)
+}
 
 const estimateOf = async (doc: ITemplateMigration, spine: Spine | null): Promise<MigrationCreditEstimate> => {
   let chars = 0
@@ -463,8 +511,9 @@ export interface MigrationDto {
   state: MigrationState
   direction: "forward" | "reverse"
   reverse_of: string | null
-  from: { template_ref: { template_id: string; version: number } | null; language: string; template_family: string | null; headings: OldHeading[] }
-  to: { template_id: string; version: number; name: string; visibility: "org" | "project"; language: string; template_family: string | null; headings: NewHeading[] }
+  from: { template_ref: { template_id: string; version: number } | null; language: string; template_family: string | null; standard: boolean; headings: OldHeading[] }
+  /** `standard = true` (mẫu chuẩn FlintFlow) ⇒ `template_id = null`. */
+  to: { standard: boolean; template_id: string | null; version: number; name: string; visibility: "org" | "project"; language: string; template_family: string | null; headings: NewHeading[] }
   pairing: PairingResult
   groups: MigrationGroups
   decisions: { id: string; choice: string }[]
@@ -481,6 +530,8 @@ export interface MigrationDto {
   revertable: boolean | null
   revert_blocked_reason: RevertBlockReason | null
   previous_template: PreviousTemplate | null
+  /** FLF-466: mẫu trước là mẫu chuẩn FlintFlow ("Quay về mẫu trước" ⇒ bắt đầu với `{ kind: "standard" }`). */
+  previous_standard: boolean
   prepared_spine_version: number | null
   prepared_source_sha256: string | null
   applied_at: string | null
@@ -494,6 +545,9 @@ const revertFields = async (doc: ITemplateMigration): Promise<{ revertable: bool
   const r = await revertability(doc)
   return { revertable: r.revertable, revert_blocked_reason: r.reason }
 }
+
+/** FLF-466: mẫu trước của lần đổi mẫu này là mẫu chuẩn FlintFlow ⇒ "Quay về mẫu trước" bắt đầu với `{ kind: "standard" }`. */
+export const previousIsStandard = (doc: Pick<ITemplateMigration, "state" | "from">): boolean => (doc.state === "applied" || doc.state === "reverting") && doc.from.standard === true
 
 export const previousTemplateOf = async (doc: Pick<ITemplateMigration, "state" | "from" | "snapshot" | "orgId">): Promise<PreviousTemplate | null> => {
   if (doc.state !== "applied" && doc.state !== "reverting") return null
@@ -518,10 +572,12 @@ export const toDto = async (doc: ITemplateMigration, spineHint?: Spine | null): 
       template_ref: doc.from.template_ref ? { template_id: String(doc.from.template_ref.template_id), version: doc.from.template_ref.version } : null,
       language: doc.from.language,
       template_family: doc.from.template_family,
+      standard: doc.from.standard === true,
       headings: doc.from.headings
     },
     to: {
-      template_id: String(doc.to.template_id),
+      standard: doc.to.standard === true,
+      template_id: doc.to.template_id ? String(doc.to.template_id) : null,
       version: doc.to.version,
       name: doc.to.name,
       visibility: doc.to.visibility,
@@ -532,7 +588,7 @@ export const toDto = async (doc: ITemplateMigration, spineHint?: Spine | null): 
     pairing: doc.pairing,
     // Mục nhận nội dung "chuyển vào" không còn là mục phải viết (nhóm lưu trên migration là kết quả lúc ghép, chưa theo quyết định)
     groups: missingAfterMoves(doc.groups, doc.decisions),
-    decisions: doc.decisions.map((d) => ({ id: d.id, choice: d.choice })),
+    decisions: doc.decisions.map((d) => ({ id: d.id, choice: readChoice(doc.groups, d.id, d.choice) })),
     undecided: settleDecisions(doc.groups, doc.decisions).undecided,
     language: { source: doc.from.language, target: toUserLocale(doc.to.language) ?? "en", needs_translation: doc.needs_translation, switches_document_language: doc.language_switch_only },
     credit_estimate: await estimateOf(doc, spine),
@@ -541,6 +597,7 @@ export const toDto = async (doc: ITemplateMigration, spineHint?: Spine | null): 
     outline: buildOutline({ old: doc.from.headings, neu: doc.to.headings, pairing: doc.pairing, groups: doc.groups, decisions: doc.decisions, spine: outlineSpine }),
     ...(await revertFields(doc)),
     previous_template: await previousTemplateOf(doc),
+    previous_standard: previousIsStandard(doc),
     prepared_spine_version: doc.prepared_spine_version,
     prepared_source_sha256: doc.prepared_source_sha256,
     applied_at: doc.applied_at ? doc.applied_at.toISOString() : null,
@@ -558,14 +615,16 @@ export interface MigrationSummary {
   revertable: boolean | null
   revert_blocked_reason: RevertBlockReason | null
   previous_template: PreviousTemplate | null
-  to: { template_id: string; version: number; name: string }
+  /** FLF-466: mẫu trước là mẫu chuẩn FlintFlow (chỉ lần đổi mẫu đã áp dụng mới nhất). */
+  previous_standard: boolean
+  to: { template_id: string | null; standard: boolean; version: number; name: string }
   created_at: string
   applied_at: string | null
 }
 
 export const listMigrations = async (ctx: Pick<MigrationContext, "projectId" | "orgId">): Promise<MigrationSummary[]> => {
   await getProjectById(ctx.projectId, ctx.orgId)
-  const docs = await TemplateMigration.find({ projectId: ctx.projectId, orgId: ctx.orgId }).select("state direction to.template_id to.version to.name createdAt applied_at projectId orgId from snapshot.registered_ref").sort({ createdAt: -1 }).limit(20)
+  const docs = await TemplateMigration.find({ projectId: ctx.projectId, orgId: ctx.orgId }).select("state direction to.template_id to.standard to.version to.name createdAt applied_at projectId orgId from snapshot.registered_ref").sort({ createdAt: -1 }).limit(20)
   const latestApplied = docs.filter((d) => d.state === "applied").sort((a, b) => (b.applied_at?.getTime() ?? 0) - (a.applied_at?.getTime() ?? 0))[0]
   const latest = latestApplied ? { fields: await revertFields(latestApplied), previous: await previousTemplateOf(latestApplied) } : null
   return docs.map((d) => ({
@@ -575,7 +634,8 @@ export const listMigrations = async (ctx: Pick<MigrationContext, "projectId" | "
     revertable: d === latestApplied && latest ? latest.fields.revertable : null,
     revert_blocked_reason: d === latestApplied && latest ? latest.fields.revert_blocked_reason : null,
     previous_template: d === latestApplied && latest ? latest.previous : null,
-    to: { template_id: String(d.to.template_id), version: d.to.version, name: d.to.name },
+    previous_standard: d === latestApplied && previousIsStandard(d),
+    to: { template_id: d.to.template_id ? String(d.to.template_id) : null, standard: d.to.standard === true, version: d.to.version, name: d.to.name },
     created_at: d.createdAt.toISOString(),
     applied_at: d.applied_at ? d.applied_at.toISOString() : null
   }))

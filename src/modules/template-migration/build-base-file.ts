@@ -16,7 +16,7 @@ import { NS, insertAfter, isW, removeNode, wAll, wEl, wKid, wKids, wText } from 
 import { parseDocument } from "../import/parse.service.js"
 import type { RenderedDocument } from "../render/rendered-document.types.js"
 import { writeTemplateDocx } from "../render/template-docx-writer.js"
-import { columnIdentity, DROP_FROM_PRINT, RECORD_OF_CHANGES, isFreeTextSection, type MigrationGroups } from "./classify.js"
+import { columnIdentity, DROP_FROM_PRINT, RECORD_OF_CHANGES, isFreeTextSection, readChoice, type MigrationGroups } from "./classify.js"
 import { UNMAPPED_SECTION } from "../import/import.constants.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { isInstructionText, splitInstruction } from "../../shared/utils/instruction-text.js"
@@ -233,7 +233,7 @@ const TABLE_CONFLICTS = new Set(["table_columns", "record_of_changes"])
 export type PlanInput = Pick<BuildBaseFileInput, "targetHeadings" | "oldHeadings" | "pairing" | "groups" | "decisions" | "targetIsSnapshot" | "hasSpineElements">
 
 const planOf = (input: PlanInput): { byNew: Map<string, Placement[]>; customs: CustomPlan[]; removed: { oldKey: string; reason: string }[] } => {
-  const decision = new Map(input.decisions.map((d) => [d.id, d.choice]))
+  const decision = new Map(input.decisions.map((d) => [d.id, readChoice(input.groups, d.id, d.choice)]))
   const conflictsOf = new Map<string, MigrationGroups["conflict"]>()
   for (const c of input.groups.conflict) conflictsOf.set(c.old_key, [...(conflictsOf.get(c.old_key) ?? []), c])
   const validNew = new Set(input.targetHeadings.map((h) => h.key))
@@ -264,7 +264,7 @@ const planOf = (input: PlanInput): { byNew: Map<string, Placement[]>; customs: C
       continue
     }
     const extra = decision.get(`e:${pair.old_key}`) ?? decision.get(`c:record_of_changes:${pair.old_key}`)
-    if (extra === "delete" || extra === DROP_FROM_PRINT) removed.push({ oldKey: pair.old_key, reason: extra === DROP_FROM_PRINT ? "BA chọn bỏ khỏi bản in (dữ liệu giữ trong Spine)" : "BA chọn xoá" })
+    if (extra === DROP_FROM_PRINT) removed.push({ oldKey: pair.old_key, reason: "BA chọn bỏ khỏi bản in (dữ liệu giữ trong Spine)" })
     else if (extra?.startsWith("move_to:") && validNew.has(extra.slice(8))) {
       if (isFreeTextSection(oldSection.get(pair.old_key) ?? "")) add(extra.slice(8), { oldKey: pair.old_key, tableAction: "none", notes, moved: true })
       else frameworkMoves.push({ newKey: extra.slice(8), placement: { oldKey: pair.old_key, tableAction: "none", notes, moved: true } })

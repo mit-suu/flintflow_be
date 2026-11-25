@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { migrationIdSchema, patchDecisionsSchema, patchPairsSchema, startFromFileSchema, startFromTemplateSchema } from "./template-migration.dto.js"
+import { migrationIdSchema, patchDecisionsSchema, patchPairsSchema, startFromFileSchema, startFromStandardSchema, startFromTemplateSchema } from "./template-migration.dto.js"
 
 const ID = "64b7f0f2a1c2d3e4f5a6b7c8"
 
@@ -9,6 +9,15 @@ describe("template-migration DTO", () => {
     expect(startFromTemplateSchema.safeParse({ template_id: ID, version: 0 }).success).toBe(false)
     expect(startFromTemplateSchema.safeParse({ template_id: "x", version: 1 }).success).toBe(false)
     expect(startFromTemplateSchema.safeParse({ template_id: ID, version: 1, orgId: ID }).success).toBe(false)
+  })
+
+  it("start bằng mẫu chuẩn FlintFlow: kind = standard, ngôn ngữ tuỳ chọn vi / en, không field lạ", () => {
+    expect(startFromStandardSchema.safeParse({ kind: "standard" }).success).toBe(true)
+    expect(startFromStandardSchema.parse({ kind: "standard", language: "vi" })).toEqual({ kind: "standard", language: "vi" })
+    expect(startFromStandardSchema.safeParse({ kind: "standard", language: "fr" }).success).toBe(false)
+    expect(startFromStandardSchema.safeParse({ kind: "standard", template_id: ID }).success).toBe(false)
+    expect(startFromStandardSchema.safeParse({ template_id: ID, version: 1 }).success).toBe(false)
+    expect(startFromTemplateSchema.safeParse({ kind: "template", template_id: ID, version: 1 }).success).toBe(true)
   })
 
   it("start bằng file: field multipart là chữ, publish_to_org mặc định false", () => {

@@ -58,6 +58,15 @@ describe("preflightDocx", () => {
     expect((await preflightDocx(await withComment("CR-001"))).status).toBe("accepted")
   })
 
+  it("FLF-466 (BF C-6): tác giả bản nháp CR 'CR-012 (Lan)' bắt đầu bằng mã CR ⇒ nhận; 'CR-0123abc', 'CR-12', 'Lan (CR-012)' vẫn là tác giả lạ", async () => {
+    expect((await preflightDocx(await makeDocx({ body: trackedBody("CR-012 (Lan)") }))).status).toBe("accepted")
+    expect((await preflightDocx(await withComment("CR-012 (Nguyễn Văn A)"))).status).toBe("accepted")
+    for (const author of ["CR-0123abc", "CR-12", "Lan (CR-012)"]) {
+      const res = await preflightDocx(await makeDocx({ body: trackedBody(author) }))
+      expect(res.issues.map((i) => i.code)).toEqual(["FOREIGN_TRACK_CHANGE"])
+    }
+  })
+
   it("comment của người khác ⇒ FOREIGN_COMMENT có vị trí", async () => {
     const res = await preflightDocx(await withComment("Lan"))
     expect(res.issues).toEqual([{ code: "FOREIGN_COMMENT", message: 'Comment của "Lan" chưa được xử lý', location: { block_ord: 0, text: "Có comment" } }])

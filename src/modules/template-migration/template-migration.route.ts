@@ -11,6 +11,37 @@ import * as controller from "./template-migration.controller.js"
 const editor = requireRole("lead", "analyst")
 
 const router = Router()
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/template-migrations:
+ *   post:
+ *     summary: "FLF-466 - Bắt đầu đổi mẫu: mẫu của tổ chức, file mẫu upload hoặc mẫu chuẩn FlintFlow"
+ *     tags: [Template migration]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             description: "kind template (mặc định) cần template_id + version; kind standard là mẫu chuẩn FlintFlow, language tuỳ chọn (mặc định ngôn ngữ tài liệu); kind file là multipart upload"
+ *             properties:
+ *               kind: { type: string, enum: [template, standard, file] }
+ *               template_id: { type: string }
+ *               version: { type: integer }
+ *               language: { type: string, enum: [vi, en] }
+ *         multipart/form-data:
+ *           schema: { type: object, properties: { file: { type: string, format: binary } } }
+ *     responses:
+ *       201:
+ *         description: "MigrationDto - to và from có standard (boolean, to.template_id null khi standard), previous_standard (boolean)"
+ *       403: { description: ORG_ROLE_FORBIDDEN }
+ *       409: { description: "TEMPLATE_MIGRATION_SAME_TEMPLATE, DRAFT_LOCKED (gói duyệt đang chờ)" }
+ */
 router.post("/:id/template-migrations", authMiddleware, editor, controller.receiveTemplateFile, controller.start)
 router.get("/:id/template-migrations", authMiddleware, editor, controller.list)
 router.get("/:id/template-migrations/:migrationId", authMiddleware, editor, controller.get)
