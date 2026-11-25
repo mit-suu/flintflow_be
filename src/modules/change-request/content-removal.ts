@@ -20,12 +20,21 @@ export const hasRemoveOp = (proposal: { spine_ops?: readonly unknown[] } | null 
 
 const LABEL_FIELDS = ["name", "title", "term", "condition", "text", "description", "statement", "content", "message", "action", "label", "rule"] as const
 
-/** Nhãn đọc được của một mục (không in mã nội bộ nếu có chữ; chỉ còn id khi không có field chữ nào). */
+/**
+ * Mã tài liệu người đọc thấy trong SRS (`UC-06`, `FR-3.2.2`, `BR-01`: chữ hoa, gạch nối, số) ≠ id nội bộ do bộ cấp mã sinh
+ * (`BR45`, `V2`, `F1`: không gạch nối). Chỉ mã tài liệu được ghép trước tên.
+ */
+const DOCUMENT_CODE = /^[A-Z]{1,6}-\d[\w.-]*$/
+
+/**
+ * Nhãn đọc được của một mục (FLF-493: không in id nội bộ khi đã có chữ). Có tên / tiêu đề ⇒ chỉ tên, trừ mã tài liệu (ghép
+ * trước tên); không có field chữ nào ⇒ rơi về id.
+ */
 export const labelOf = (value: unknown): string => {
   if (!isRow(value)) return typeof value === "string" ? value.trim() : ""
   const text = LABEL_FIELDS.map((f) => value[f]).find((v): v is string => typeof v === "string" && v.trim().length > 0)
   const id = typeof value.id === "string" ? value.id : ""
-  const label = text ? (id && !text.includes(id) ? `${id} ${text}` : text) : id
+  const label = text ? (id && DOCUMENT_CODE.test(id) && !text.includes(id) ? `${id} ${text}` : text) : id
   return label.length > 120 ? `${label.slice(0, 117)}...` : label
 }
 
