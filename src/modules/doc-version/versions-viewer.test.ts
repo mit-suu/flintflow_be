@@ -27,7 +27,8 @@ describe("bản so sánh che cột In charge cho mọi vai trò (UC-47 / UC-48)"
       blocks: [
         { block_id: null, change: "modified", before: ROC, after: ROC },
         { block_id: null, change: "added", after: "Version: 0.2" }
-      ]
+      ],
+      sections: []
     })
     expect(JSON.stringify(out)).not.toContain("Fixture User")
     expect(out.blocks[1]).toEqual({ block_id: null, change: "added", after: "Version: 0.2" })

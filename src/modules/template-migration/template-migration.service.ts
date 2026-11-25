@@ -46,9 +46,11 @@ import {
   missingAfterMoves,
   settleDecisions,
   tableShapesBySection,
+  withSuggestedDecisions,
   type MigrationGroups,
   type TableShape
 } from "./classify.js"
+import { buildOutline, type OutlineEntry } from "./outline.js"
 import { brokenLinks, revertability, type BrokenLink, type RevertBlockReason } from "./precheck.js"
 import { editedSince, sectionKeyResolver, type EditedSection } from "./edited-since.js"
 import { aiChoiceCounts, estimateMigrationCredits, loadMigrationUnitCosts, type MigrationCreditEstimate } from "./migration-credit.js"
@@ -86,6 +88,8 @@ export type StartInput =
 export const MIGRATION_NOT_FOUND = () => new ApiError(404, "Không tìm thấy lần đổi mẫu này.", "TEMPLATE_MIGRATION_NOT_FOUND")
 export const invalidState = (state: MigrationState, allowed: readonly MigrationState[]) =>
   new ApiError(409, `Lần đổi mẫu đang ở bước "${state}", không thực hiện được thao tác này.`, "TEMPLATE_MIGRATION_INVALID_STATE", { state, allowed })
+/** Bước "Xem lại thay đổi": rà ghép và quyết định chung một màn — sửa cặp, ghi quyết định, sẵn sàng chạy được ở cả hai trạng thái. */
+export const REVIEW_STATES: readonly MigrationState[] = ["mapping_review", "decisions"]
 export const stale = (reason: string) => new ApiError(409, `${reason} Hãy huỷ và chuẩn bị lại lần đổi mẫu.`, "TEMPLATE_MIGRATION_STALE")
 
 // ─── kiểm tra điều kiện bắt đầu ──────────────────────────────────
@@ -471,6 +475,8 @@ export interface MigrationDto {
   warnings: string[]
   /** Đổi ngược: liên kết sẽ gãy nếu áp dụng ngay (chạy khô như bước áp dụng) — hiện trước khi bấm Áp dụng; rỗng = ổn. */
   broken_links: BrokenLink[]
+  /** Dàn tiêu đề của tài liệu sau khi đổi (bước Áp dụng), theo thứ tự mẫu đích. */
+  outline: OutlineEntry[]
   /** Lần đổi mẫu đã áp dụng: hoàn tác được không (cùng luật với `revert`); `null` khi chưa áp dụng. */
   revertable: boolean | null
   revert_blocked_reason: RevertBlockReason | null
@@ -500,6 +506,8 @@ export const previousTemplateOf = async (doc: Pick<ITemplateMigration, "state" |
 
 export const toDto = async (doc: ITemplateMigration, spineHint?: Spine | null): Promise<MigrationDto> => {
   const spine = doc.needs_translation && doc.direction === "forward" ? (spineHint ?? (await spineRepository.get(String(doc.projectId)))) : null
+  // Mục không in ra cần tóm tắt nội dung từ Spine
+  const outlineSpine = doc.groups.extra.length || doc.groups.conflict.length ? (spine ?? spineHint ?? (await spineRepository.get(String(doc.projectId)))) : null
   return {
     id: String(doc._id),
     project_id: String(doc.projectId),
@@ -530,6 +538,7 @@ export const toDto = async (doc: ITemplateMigration, spineHint?: Spine | null): 
     credit_estimate: await estimateOf(doc, spine),
     warnings: doc.warnings,
     broken_links: await brokenLinks(doc),
+    outline: buildOutline({ old: doc.from.headings, neu: doc.to.headings, pairing: doc.pairing, groups: doc.groups, decisions: doc.decisions, spine: outlineSpine }),
     ...(await revertFields(doc)),
     previous_template: await previousTemplateOf(doc),
     prepared_spine_version: doc.prepared_spine_version,
@@ -677,7 +686,8 @@ export type BatchAction = "keep_all" | "discard_all"
  */
 export const patchDecisions = async (ctx: MigrationContext, id: string, input: { decisions: { id: string; choice: string }[]; batch?: BatchAction }): Promise<MigrationDto> => {
   const doc = await load(ctx, id)
-  if (doc.state !== "decisions") throw invalidState(doc.state, ["decisions"])
+  // Ghép cặp và quyết định chung một màn: quyết định ghi được ngay ở bước rà ghép (không đổi trạng thái)
+  if (!REVIEW_STATES.includes(doc.state)) throw invalidState(doc.state, REVIEW_STATES)
   const items = decidableItems(doc.groups)
   const unknown = input.decisions.filter((d) => !items.has(d.id)).map((d) => d.id)
   if (unknown.length) throw badRequest("Có mục không thuộc lần đổi mẫu này.", "decisions", unknown)
@@ -694,7 +704,7 @@ export const patchDecisions = async (ctx: MigrationContext, id: string, input: {
   }
   for (const d of input.decisions) next.set(d.id, { id: d.id, choice: d.choice, at: now, by })
   const updated = await TemplateMigration.findOneAndUpdate(
-    { _id: doc._id, state: "decisions", updatedAt: doc.updatedAt },
+    { _id: doc._id, state: doc.state, updatedAt: doc.updatedAt },
     { $set: { decisions: [...next.values()], resolved_items: [] } },
     { returnDocument: "after" }
   )
@@ -705,12 +715,13 @@ export const patchDecisions = async (ctx: MigrationContext, id: string, input: {
 // ─── sẵn sàng / huỷ ──────────────────────────────────────────────
 
 /**
- * `decisions → ready`: mọi mục bắt buộc đã có quyết định; dữ liệu chưa đổi so với lúc chuẩn bị (file nền / mẫu hiện tại; đổi ngược:
- * không có sửa mới); bản nháp vẫn mở. Ghim `prepared_spine_version` + `prepared_source_sha256` cho bước áp dụng.
+ * `mapping_review | decisions → ready` (từ `mapping_review` coi như xác nhận ghép luôn): không còn dòng đoán chưa xác nhận; dữ liệu
+ * chưa đổi so với lúc chuẩn bị (file nền / mẫu hiện tại; đổi ngược: không có sửa mới); bản nháp vẫn mở. Lựa chọn chọn sẵn của mục BA
+ * không chạm được ghi thành quyết định, bước áp dụng chỉ đọc `decisions`. Ghim `prepared_spine_version` + `prepared_source_sha256`.
  */
 export const markReady = async (ctx: MigrationContext, id: string): Promise<MigrationDto> => {
   const doc = await load(ctx, id)
-  if (doc.state !== "decisions") throw invalidState(doc.state, ["decisions"])
+  if (!REVIEW_STATES.includes(doc.state)) throw invalidState(doc.state, REVIEW_STATES)
   const spine = await loadReadySpine(ctx.projectId)
   const { undecided } = settleDecisions(doc.groups, doc.decisions)
   if (undecided.length) throw new ApiError(409, `Còn ${undecided.length} mục chưa chọn cách xử lý.`, "TEMPLATE_MIGRATION_UNDECIDED", { undecided })
@@ -722,7 +733,14 @@ export const markReady = async (ctx: MigrationContext, id: string): Promise<Migr
   }
   if (doc.direction === "reverse" && (head?.content_seq ?? 0) !== doc.base_content_seq) throw stale("Tài liệu có thay đổi mới kể từ lúc chuẩn bị nên danh sách mục đã sửa không còn đúng.")
 
-  return toDto(await transition(ctx, id, ["decisions"], "ready", { ready_at: new Date(), prepared_spine_version: spine.spine_version, prepared_source_sha256: current.source_sha256 }, doc.updatedAt), spine)
+  const by = new mongoose.Types.ObjectId(ctx.actor.userId)
+  const now = new Date()
+  const decisions = withSuggestedDecisions(
+    doc.groups,
+    settleDecisions(doc.groups, doc.decisions).decisions.map((d) => ({ id: d.id, choice: d.choice, at: d.at, by: d.by })),
+    (itemId, choice) => ({ id: itemId, choice, at: now, by })
+  )
+  return toDto(await transition(ctx, id, REVIEW_STATES, "ready", { decisions, ready_at: now, prepared_spine_version: spine.spine_version, prepared_source_sha256: current.source_sha256 }, doc.updatedAt), spine)
 }
 
 /** Huỷ trước `applying`; giải phóng chỗ của dự án để mở lần đổi mẫu khác. */
