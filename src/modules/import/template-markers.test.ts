@@ -109,3 +109,23 @@ describe("sampleBlockIds - bảng / hình mẫu (chỉ để quyết khung mẫu
     expect(sampleBlockIds(blocks).size).toBe(0)
   })
 })
+
+describe("FLF-459 - đoạn trọn ngoặc theo lớp chữ hướng dẫn của lúc import", () => {
+  it("lớp 4 (chỉ có ngoặc) ⇒ nội dung; lớp 1–3 ⇒ hướng dẫn kể cả không ngoặc; không mang lớp (bản ghi cũ) ⇒ luật ngoặc cũ", () => {
+    const blocks: LayoutBlock[] = [
+      h("B1", "2.1 Actors", "fixed:2.1"),
+      { ...p("B2", "[Describe the actors]"), guidance_layer: 4 },
+      { ...p("B3", "[Describe the actors]"), guidance_layer: 3 },
+      { ...p("B4", "Mô tả các tác nhân của hệ thống."), guidance_layer: 1 },
+      p("B5", "[Describe the actors]"),
+      { ...p("B6", "Administrator quản lý tài khoản."), guidance_layer: 4 }
+    ]
+    const marks = templateMarks(blocks)
+    expect([...marks.entries()]).toEqual([
+      ["B3", "guidance"],
+      ["B4", "guidance"],
+      ["B5", "guidance"]
+    ])
+    expect(stripTemplateMarks(blocks).map((b) => b.block_id)).toEqual(["B1", "B2", "B6"])
+  })
+})

@@ -4,6 +4,8 @@
  *     tới trích dữ liệu (không qua 1.5); tổ chức khác không thấy; Viewer chỉ xem.
  *  B. Trang Thư viện: phân trang, tìm không dấu, sắp xếp.
  *  C. Admin xem heading mẫu bắt buộc thành mục riêng.
+ *  D. FLF-459: file theo mẫu org đã đăng, không chọn mẫu ⇒ I-3 tự khớp đúng mẫu đó (mapping Lead đã xác nhận, chữ hướng dẫn của
+ *     mẫu là lớp 2); org không có mẫu khớp ⇒ khớp như mẫu mới của riêng dự án, thư viện không thêm gì.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
@@ -19,7 +21,8 @@ import { makeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
 import { acceptLatest, patchMapping, uploadImport } from "../../../src/modules/import/import.service.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
-import { OrgTemplate } from "../../../src/modules/import/org-library.model.js"
+import { OrgTemplate, OrgTemplateVersion } from "../../../src/modules/import/org-library.model.js"
+import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
 import { Membership } from "../../../src/modules/organization/membership.model.js"
 import { User } from "../../../src/modules/user/user.model.js"
 
@@ -149,5 +152,54 @@ describe("FLF-278 - mẫu và thư viện nội dung của tổ chức (luồng 
     expect(beyond.body.data.rows).toEqual([])
     expect(beyond.body.data.projects).toBe(1)
     expect(beyond.body.meta.total).toBe(1)
+  })
+
+  it("D. FLF-459: không chọn mẫu ⇒ tự khớp mẫu thư viện đã đăng (mapping + chữ hướng dẫn lớp 2); org khác ⇒ mẫu mới riêng dự án", async () => {
+    const owner = await seedFixture("minimal", { balance: 1000 })
+    const draft = await request(app)
+      .post(`/api/v1/orgs/${owner.orgId}/templates`)
+      .set(H(owner.token))
+      .attach("file", await makeSrsDocx({ extraBody: EXTRA }), "Mau ngan hang.docx")
+      .field("name", "Mẫu ngân hàng")
+    expect(draft.status, JSON.stringify(draft.body.error)).toBe(201)
+    const templateId = draft.body.data.template_id as string
+    expect((await request(app).post(`/api/v1/orgs/${owner.orgId}/templates/${templateId}/versions/1/publish`).set(H(owner.token)).send({})).status).toBe(200)
+    // Lead đã xác nhận mapping riêng của mẫu (mục "Document Conventions" của tổ chức là quy tắc nghiệp vụ) + câu hướng dẫn của mẫu
+    const version = (await OrgTemplateVersion.findOne({ template_id: templateId, version: 1 }).lean())!
+    const headings = version.headings.map((h) =>
+      /Document Conventions/.test(h.heading_text)
+        ? { ...h, section_id: "fixed:5.1" }
+        : /Operating Environment/.test(h.heading_text)
+          ? { ...h, guidance: "Describe the operating environment." }
+          : h
+    )
+    await OrgTemplateVersion.updateOne({ _id: version._id }, { $set: { headings } })
+    const libraryBefore = await OrgTemplate.countDocuments({ orgId: owner.orgId })
+
+    // Dự án mới tải file theo mẫu đó lên, không chọn mẫu ở hộp Tạo dự án
+    const projectId = await createMode1Project(owner, "Bank app 3")
+    const doc = await uploadImport(projectId, owner.userId, fileOf(await makeSrsDocx({ extraBody: EXTRA })))
+    expect(doc.org_template_id ?? null).toBeNull()
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    expect(profile.org_match).toEqual({ template_id: templateId, version: 1 })
+    const conventions = profile.heading_map.find((h) => h.heading_text.includes("Document Conventions"))!
+    expect(conventions).toMatchObject({ section_id: "fixed:5.1", confidence: 1, confirmed: true })
+    // Chữ hướng dẫn chỉ có ngoặc nhưng trùng câu của mẫu đã biết ⇒ lớp 2 (chắc chắn); chữ vẫn nằm nguyên trong block
+    const envGuidance = (await DocBlock.findOne({ projectId, text: "[Describe the operating environment.]" }).lean())!
+    expect(envGuidance).toMatchObject({ guidance_layer: 2, guidance_by: ["known"] })
+    const otherGuidance = (await DocBlock.findOne({ projectId, text: "[Describe conventions.]" }).lean())!
+    expect(otherGuidance.guidance_layer).toBe(4)
+    // Không chọn mẫu ⇒ không mặc định Bỏ chữ (file là của dự án, không phải file mẫu)
+    expect(profile.drop_text ?? null).toBeNull()
+    expect(await OrgTemplate.countDocuments({ orgId: owner.orgId })).toBe(libraryBefore)
+
+    // Org khác không có mẫu này ⇒ khớp như mẫu mới riêng dự án, không đụng thư viện của ai
+    const stranger = await seedFixture("minimal", { balance: 1000 })
+    const theirs = await createMode1Project(stranger)
+    await uploadImport(theirs, stranger.userId, fileOf(await makeSrsDocx({ extraBody: EXTRA })))
+    const own = (await TemplateProfile.findOne({ projectId: theirs }).lean())!
+    expect(own.org_match ?? null).toBeNull()
+    expect(own.heading_map.find((h) => h.heading_text.includes("Document Conventions"))!.section_id).not.toBe("fixed:5.1")
+    expect(await OrgTemplate.countDocuments({ orgId: stranger.orgId })).toBe(0)
   })
 })

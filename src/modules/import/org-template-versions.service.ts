@@ -62,7 +62,8 @@ export const analyzeTemplateFile = async (buffer: Buffer): Promise<AnalyzedTempl
   const pre = await preflightDocx(buffer)
   if (pre.status === "rejected") throw new Mode1Error("IMPORT_FILE_REJECTED", "File mẫu chưa nhập được, xem danh sách lỗi", { issues: pre.issues })
   const { blocks } = await parseDocument(buffer)
-  const matched = matchProfile(blocks, { fixedTemplate: true })
+  // FLF-459: file mẫu ⇒ chữ trong ngoặc vẫn là hướng dẫn của mẫu (nguồn lớp 2 khi import file theo mẫu này)
+  const matched = matchProfile(blocks, { fixedTemplate: true, templateFile: true })
   autoConfirmMapping(matched)
   // FLF-412: vùng heading còn chữ thật (mẫu chưa xoá nội dung cũ) ⇒ cảnh báo ở màn rà mapping
   const withText = new Set(textRegions(blocks, matched.heading_map).filter((r) => r.has_text).map((r) => r.key))

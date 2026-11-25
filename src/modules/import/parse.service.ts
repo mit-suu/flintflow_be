@@ -19,6 +19,9 @@ import { scanCodeMentions, type Mention } from "./mentions.js"
 export interface ParsedBlock extends OoxmlBlock {
   block_id: string
   mentions: Mention[]
+  /** FLF-459: lớp chữ hướng dẫn gắn lúc import (`classifyGuidance` trong `profile-match.service`). */
+  guidance_layer?: 1 | 2 | 3 | 4
+  guidance_by?: string[]
 }
 
 export interface ParsedDocument {

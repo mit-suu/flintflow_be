@@ -142,6 +142,11 @@ export interface ITemplateProfile extends Document {
   /** FLF-412: khoá vùng heading (`block_id`) người dùng chọn Bỏ chữ ở màn đọc khung — áp vào file lúc bấm Bắt đầu rồi xoá. */
   drop_text?: string[] | null
   /**
+   * FLF-459 (I-3): mẫu thư viện org Code tự khớp với file khi người dùng không chọn mẫu (mapping của mẫu đã áp sẵn). `null` /
+   * thiếu = không khớp mẫu nào (khớp như mẫu mới của riêng dự án) hoặc người dùng đã chọn mẫu (`ImportedDocument.org_template_id`).
+   */
+  org_match?: { template_id: string; version: number } | null
+  /**
    * FLF-463: khoá vùng đã Bỏ chữ lúc bấm Bắt đầu (file đã viết lại). Mục của vùng tính là còn trống ở I-5 và còn vùng nào thì
    * không ra bản gốc 0.1 (§3.1.2 "Mục bỏ chữ").
    */
@@ -244,6 +249,7 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
     template_context: { type: Schema.Types.Mixed, default: null },
     structure_preview: { type: Schema.Types.Mixed, default: null },
     drop_text: { type: [String], default: null },
+    org_match: { type: new Schema({ template_id: { type: String, required: true }, version: { type: Number, required: true } }, { _id: false }), default: null },
     dropped_text: { type: [String], default: null },
     flow2_entry_spine: { type: Schema.Types.Mixed, default: null },
     flow2_entry_at: { type: Date, default: null },

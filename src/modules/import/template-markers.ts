@@ -13,7 +13,7 @@
  * bảng / hình thật, nên không chặn trích nội dung. Hàm thuần.
  */
 
-import { isInstructionText } from "../../shared/utils/instruction-text.js"
+import { isCertainGuidance, isInstructionText } from "../../shared/utils/instruction-text.js"
 import type { LayoutBlock } from "./step-plan.js"
 
 export type TemplateMark = "guidance" | "sample" | "placeholder"
@@ -49,13 +49,24 @@ export const cleanTableRows = (rows: readonly (readonly string[])[]): string[][]
 
 const depth = (text: string, open: string, close: string): number => [...text].reduce((d, ch) => d + (ch === open ? 1 : ch === close ? -1 : 0), 0)
 
+/** Đoạn mở khoảng hướng dẫn nhiều đoạn (`[` / `{` chưa đóng) — kể cả đoạn đã kết luận theo lớp (câu của mẫu đã biết). */
+const opensSpan = (text: string): boolean => (text.startsWith("[") && depth(text, "[", "]") > 0) || (text.startsWith("{") && depth(text, "{", "}") > 0)
+
 const isTextBlock = (b: Pick<LayoutBlock, "kind">): boolean => b.kind === "paragraph" || b.kind === "list_item"
+
+/**
+ * Đoạn trọn là chữ hướng dẫn. FLF-459 (business-flow §3.1.1, đảo FLF-364): block mang lớp chữ hướng dẫn của lúc import ⇒ chỉ lớp
+ * 1–3 (lớp 4: đúng một dấu hiệu, vd chỉ có ngoặc ⇒ nội dung thật cho tới khi AI / người xác nhận); block không mang lớp (bản ghi
+ * trước FLF-459) ⇒ luật trọn đoạn `[ ]` / `{ }` cũ.
+ */
+const isWholeGuidance = (b: Pick<LayoutBlock, "guidance_layer">, text: string): boolean =>
+  b.guidance_layer !== undefined && b.guidance_layer !== null ? isCertainGuidance(b.guidance_layer) : isInstructionText(text)
 
 /**
  * Khối là chữ của mẫu theo luật 1–2 (+ đoạn chỗ điền của luật 3), theo thứ tự file. Khoảng chưa đóng dừng ở heading kế. Khối
  * con của bảng (`table_row` / `table_cell`) theo khối bảng.
  */
-export const templateMarks = (blocks: readonly Pick<LayoutBlock, "block_id" | "kind" | "text">[]): Map<string, TemplateMark> => {
+export const templateMarks = (blocks: readonly Pick<LayoutBlock, "block_id" | "kind" | "text" | "guidance_layer">[]): Map<string, TemplateMark> => {
   const marks = new Map<string, TemplateMark>()
   let open: { mark: TemplateMark; close: string; opener: string } | null = null
   // Khoảng hướng dẫn bị heading cắt ngang (mở dưới heading nhóm "2.2 Use Cases", đóng dưới "2.2.2") — chỉ khi đó đoạn chỉ có ngoặc
@@ -78,9 +89,9 @@ export const templateMarks = (blocks: readonly Pick<LayoutBlock, "block_id" | "k
     if (text.startsWith("<<")) {
       marks.set(b.block_id, isPlaceholderText(text) ? "placeholder" : "sample")
       if (!text.includes(">>")) open = { mark: "sample", close: ">>", opener: "<<" }
-    } else if (isInstructionText(text)) {
+    } else if (isWholeGuidance(b, text) && !opensSpan(text)) {
       marks.set(b.block_id, "guidance")
-    } else if ((text.startsWith("[") && depth(text, "[", "]") > 0) || (text.startsWith("{") && depth(text, "{", "}") > 0)) {
+    } else if (opensSpan(text)) {
       marks.set(b.block_id, "guidance")
       open = text.startsWith("[") ? { mark: "guidance", close: "]", opener: "[" } : { mark: "guidance", close: "}", opener: "{" }
     } else if (text === "]" || text === "}" || (dangling && text.endsWith(dangling.close) && depth(text, dangling.opener, dangling.close) < 0)) {
