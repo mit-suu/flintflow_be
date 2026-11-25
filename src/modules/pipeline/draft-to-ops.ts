@@ -25,6 +25,7 @@ import { withFrameRenumber } from "../spine/template-frames.js"
 import { actorGeneralizationErrors, briefExtractionErrors, dropRedundantScalarAdds, requiredArrayErrors, sanitizeModelOps, useCaseNamingErrors, useCaseWiringErrors, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
 import { ESCALATION_MODEL, isErdOnly, normalizeEntityNames } from "./erd-retry.js"
 import { briefQuoteSources, dropUngroundedGaps } from "./gap-quote.js"
+import { localizedMissingErrors } from "./localized-missing.js"
 
 export const NEEDS_USER_INPUT = "NEEDS_USER_INPUT"
 /** Phases §4.1: gửi lại model kèm lỗi tối đa 2 lần, rồi hỏi user. */
@@ -257,6 +258,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       if (errors.length === 0 && attempt <= maxRetries && callKind !== "glossary_scan") errors = requiredArrayErrors(spine, ops as Op[], stepId)
       // Chức năng màn hình sinh ra từ use case ⇒ S-4.1 gắn ngay; còn use case người dùng chưa gắn ⇒ gửi lại model
       if (errors.length === 0 && attempt <= maxRetries) errors = useCaseWiringErrors(spine, ops as Op[], stepId)
+      // FLF-479 (12b-1): tài liệu khác ngôn ngữ Spine mà chữ model vừa viết không có `localized` ⇒ gửi lại model; lượt cuối nhận lô (banner "chưa dịch" là lưới cuối)
+      if (errors.length === 0 && attempt <= maxRetries && options.documentLanguage && callKind !== "glossary_scan") errors = localizedMissingErrors(ops as Op[], localized)
 
       if (errors.length === 0) {
         attempts.push({ attempt, ops, errors })
