@@ -18,6 +18,7 @@ import { Project, type TemplateIntent } from "../project/project.model.js"
 import { DocBlock } from "./doc-block.model.js"
 import { ExtractionDraft, type ExtractedField, type IExtractionDraft } from "./extraction-draft.model.js"
 import { needsConfirm } from "./import.constants.js"
+import { isReading, summarizeFound } from "./import-live-summary.js"
 import type { GetImportResponse, ImportedDocumentDto, MappingPatchRequest, ReviewField, TemplateProfileDto } from "./import.dto.js"
 import { IMPORT_STATUS_LABELS, assertTransition, hasBaseline, type ImportStatus } from "./import.state.js"
 import { ImportedDocument, type IImportedDocument } from "./imported-document.model.js"
@@ -604,13 +605,21 @@ export const toReviewFields = (
 const awaitingConfirm = (f: ExtractedField): boolean => !f.confirmed && needsConfirm(f)
 
 export const extractionSummary = async (importId: mongoose.Types.ObjectId | string): Promise<GetImportResponse["extraction"]> => {
-  const drafts = await ExtractionDraft.find({ import_id: importId }).lean()
+  const [drafts, owner] = await Promise.all([
+    ExtractionDraft.find({ import_id: importId }).lean(),
+    ImportedDocument.findOne({ _id: importId }, { status: 1, paused: 1 }).lean()
+  ])
+  // Dấu "đang đọc" chỉ có nghĩa khi lần import còn chạy; dừng / lỗi / server khởi động lại ⇒ không mục nào đang đọc
+  const active = owner?.status === "extracting" && !owner.paused
+  const now = Date.now()
   const sections = drafts.map((d) => ({
     section_id: d.section_id,
     status: d.status,
     fields_total: d.fields.length,
     fields_needing_review: d.fields.filter(awaitingConfirm).length,
-    error: d.error ?? null
+    error: d.error ?? null,
+    reading: isReading(d.reading_since, active, now),
+    found: summarizeFound(d)
   }))
   return { sections, review_fields: toReviewFields(drafts, awaitingConfirm) }
 }

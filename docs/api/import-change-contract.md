@@ -1053,3 +1053,17 @@ Additive cho #11 `reuploadDiffDtoSchema` (bản ghi cũ đọc ra giá trị m�
   comment của người ngoài trong file, **không** bị từ chối khi upload lại, mỗi chỗ một dòng. Lần import đầu (#2) vẫn từ chối.
 - #2: file mang dấu của chính dự án khi import đang `baselining` / `incomplete` / `drafting` ⇒ `409 IMPORT_INVALID_STATE`
   (dùng #11), không đọc lại từ đầu.
+
+## FLF-451 (2026-11-23) — màn đọc file trực tiếp (chỉ thêm field + 1 endpoint)
+
+- `GET /projects/:id/import` → `extraction.sections[]` (cùng shape trong `POST …/import/extract|resume|pause`) thêm `reading: boolean`
+  (AI đang đọc mục này; nhiều mục cùng lúc; import dừng / lỗi / dấu quá 15 phút ⇒ `false`) và
+  `found: [{ entity, count, names[≤3] }]` — số phần tử đã tìm thấy theo loại (`entity` là khoá loại như `use_cases`, `actors`;
+  ảnh sơ đồ đọc được = `diagram`, `names` = loại sơ đồ). Mục đã ghép lấy từ `fields`, mục đã đọc chưa ghép lấy từ output thô
+  `partial.raw_steps`. Không có `value` đầy đủ.
+- `GET /projects/:id/import/source` (mode import, quyền như `GET /import`): `{ import_id, sections: [{ section_id, title, level,
+  blocks: [{ block_id, kind, text }] }] }`, mục theo thứ tự xuất hiện trong file, block theo `anchor.ordinal`; bảng = các hàng
+  `| ô | ô |`, ảnh = `text` rỗng, block chưa gắn mục không trả. Header `ETag` (bản import + số block + số mục tách); gửi lại
+  `If-None-Match` ⇒ `304`. Chưa upload ⇒ `404 IMPORT_NOT_FOUND`.
+- Env: `IMPORT_CHECK_CONCURRENCY` (1-8, mặc định 3 — số lô kiểm tra 1.11 gọi cùng lúc); `IMPORT_AI_RETRY_BACKOFF_MS` mặc định
+  `5000,15000,30000`.

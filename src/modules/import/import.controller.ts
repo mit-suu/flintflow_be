@@ -30,6 +30,7 @@ import * as gapReportService from "./gap-report.service.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { assertNotMode1 } from "./mode1-guard.js"
 import * as importService from "./import.service.js"
+import { buildImportSource, importSourceEtag } from "./import-source.service.js"
 import * as reuploadService from "./reupload.service.js"
 import * as stepPlanService from "./step-plan.service.js"
 import { authorizeMode1, mode1Handler, parseInput } from "./mode1.http.js"
@@ -105,6 +106,19 @@ export const getImport = mode1Handler(async (req, res) => {
     view.credit_estimate = await extractService.creditEstimateFor(auth.projectId, auth.userId, current, { withBalance: role === "lead" || role === "analyst" })
   }
   return sendSuccess(res, 200, view)
+})
+
+/**
+ * Chữ gốc của file theo mục cho màn đọc file: tải một lần. `ETag` theo bản import + số block; FE gửi lại `If-None-Match` ⇒ 304
+ * không đọc nội dung.
+ */
+export const getImportSource = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const { importId, etag } = await importSourceEtag(auth.projectId)
+  res.setHeader("ETag", etag)
+  res.setHeader("Cache-Control", "private, no-cache")
+  if (req.headers["if-none-match"]?.split(",").some((t) => t.trim() === etag || t.trim() === `W/${etag}`)) return res.status(304).end()
+  return sendSuccess(res, 200, await buildImportSource(auth.projectId, importId))
 })
 
 export const patchMapping = mode1Handler(async (req, res) => {

@@ -34,6 +34,7 @@ import { env } from "../../../src/config/env.js"
 import { AI_BLOCK_CHARS, estimateExtraction, loadExtractionInputs, planPendingSections, runExtraction } from "../../../src/modules/import/extract.service.js"
 import { ExtractionDraft, type ExtractionProgress } from "../../../src/modules/import/extraction-draft.model.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
+import { extractionSummary } from "../../../src/modules/import/import.service.js"
 import { CreditWallet } from "../../../src/modules/credits/credit-wallet.model.js"
 import { buildPlaceholderPng } from "../../../src/modules/render/diagram-placeholder.js"
 import { Usage } from "../../../src/modules/spine/usage.model.js"
@@ -484,5 +485,41 @@ describe("I-4 — song song (IMPORT_EXTRACT_CONCURRENCY = 4)", () => {
     // chỉ lượt lưu hỏng được gọi lại (lần trước đã trừ credit cho nó)
     expect(await deductedI4(ctx)).toBe(estimate + 1)
     await golden(ctx)
+  }, 60_000)
+})
+
+describe("I-4 - dấu đang đọc của từng mục", () => {
+  useExtractConcurrency(4)
+
+  it("nhiều mục đọc cùng lúc thì summary báo các mục đang đọc; xong thì không mục nào còn dấu", async () => {
+    const ctx = await importAtExtracting(SRS)
+    delayOf = () => 150
+    let readingAtPeak: string[] = []
+    during = async () => {
+      const { sections } = await extractionSummary(ctx.importId)
+      const reading = sections.filter((s) => s.reading).map((s) => s.section_id)
+      if (reading.length > readingAtPeak.length) readingAtPeak = reading
+    }
+    await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
+    expect(readingAtPeak.length).toBeGreaterThanOrEqual(2)
+    expect(readingAtPeak.length).toBeLessThanOrEqual(env.IMPORT_EXTRACT_CONCURRENCY)
+    expect(await ExtractionDraft.countDocuments({ import_id: ctx.importId, reading_since: { $ne: null } })).toBe(0)
+    const { sections } = await extractionSummary(ctx.importId)
+    expect(sections.some((s) => s.reading)).toBe(false)
+    expect(sections.some((s) => s.found.length > 0)).toBe(true)
+  }, 60_000)
+
+  it("AI lỗi giữa chừng thì dấu đang đọc được bỏ; dấu cũ của lần chạy đã chết không làm mục báo đang đọc", async () => {
+    const ctx = await importAtExtracting(SRS)
+    reply = (prompt) => (isFixed1Batch(prompt, "P05") ? new Error("provider down") : goldenMock(prompt))
+    await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
+    expect(await ExtractionDraft.countDocuments({ import_id: ctx.importId, reading_since: { $ne: null } })).toBe(0)
+    // import đã dừng mà còn dấu thì không đọc
+    await ExtractionDraft.updateOne({ import_id: ctx.importId, section_id: "fixed:1" }, { $set: { reading_since: new Date() } })
+    expect((await extractionSummary(ctx.importId)).sections.some((s) => s.reading)).toBe(false)
+    // import chạy lại nhưng dấu quá cũ thì cũng không đọc
+    await ImportedDocument.updateOne({ _id: ctx.importId }, { $set: { paused: null } })
+    await ExtractionDraft.updateOne({ import_id: ctx.importId, section_id: "fixed:1" }, { $set: { reading_since: new Date(Date.now() - 60 * 60 * 1000) } })
+    expect((await extractionSummary(ctx.importId)).sections.some((s) => s.reading)).toBe(false)
   }, 60_000)
 })
