@@ -66,7 +66,7 @@ const edit = async (buffer: Buffer, fn: (doc: Document) => void): Promise<Buffer
 describe("re-upload diff theo block", () => {
   it("file không đổi ⇒ không có dòng diff", async () => {
     const { old, buffer } = await savedVersion()
-    expect(await diffAgainst(old, buffer)).toEqual({ blocks: [], summary: { added: 0, removed: 0, modified: 0, moved: 0 } })
+    expect(await diffAgainst(old, buffer)).toEqual({ blocks: [], summary: { added: 0, removed: 0, modified: 0, moved: 0 }, sections: [] })
   })
 
   it("sửa chữ trong đoạn ⇒ modified, giữ block_id theo bookmark", async () => {
@@ -86,7 +86,8 @@ describe("re-upload diff theo block", () => {
     })
     expect(await diffAgainst(old, file)).toEqual({
       blocks: [{ block_id: null, change: "added", after: "Lumen also supports mobile." }],
-      summary: { added: 1, removed: 0, modified: 0, moved: 0 }
+      summary: { added: 1, removed: 0, modified: 0, moved: 0 },
+      sections: []
     })
   })
 
@@ -99,7 +100,8 @@ describe("re-upload diff theo block", () => {
     const notes = old.find((b) => b.text === "Internal notes that do not belong to the template.")!
     expect(await diffAgainst(old, file)).toEqual({
       blocks: [{ block_id: notes.block_id, change: "removed", before: notes.text }],
-      summary: { added: 0, removed: 1, modified: 0, moved: 0 }
+      summary: { added: 0, removed: 1, modified: 0, moved: 0 },
+      sections: []
     })
   })
 

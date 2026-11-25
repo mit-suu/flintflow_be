@@ -1,7 +1,7 @@
 ---
 skill_id: cr-clarify
 kind: action
-version: 1.8.0
+version: 1.9.0
 description: Mode 1 C-2 - decide whether a change request is clear, has the facts it needs and does not contradict the document; ask questions or return targets for impact search
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -116,11 +116,25 @@ You never write edits.
    failed attempts" (Tài khoản bị khoá sau 5 lần đăng nhập sai)`. Document VI, reply EN: `"Phụ huynh (Parent)"`. Never
    translate codes (`UC-07`, `BR01`), product / proper names, or words spelled the same in both (`Email`, `Admin`, `OTP`).
    Same language ⇒ quote as written, no parentheses.
+14. **Unreasonable request** - doing what the CR asks would clearly harm the document (it breaks a rule or constraint
+   the document states, makes two requirements impossible together, or removes something other parts depend on) and no
+   answer above says to proceed ⇒ add one entry to `warnings`: `question` names the problem and why it is unreasonable
+   in one or two sentences and asks whether to proceed; `suggestions` = `"Vẫn làm"`, `"Bỏ yêu cầu này"` (in the reply
+   language, the proceed option always first). Asked once, like a contradiction (never again after an answer); ordinary
+   or merely unusual requests are not warnings. Text for people never uses the long dash character (use " - ") and never
+   contains the letters "FPT".
+   The requester answered such a warning in a round above and the answer, read as a person would, means go ahead (a
+   picked "Vẫn làm", or their own words like "cứ làm đi, khách đã chốt") ⇒ `"warning_accepted": true`. Otherwise leave it out.
+15. **Withdrawn** - the answers of the latest round, read as a person would, take the whole request back ("thôi khách đổi ý
+   rồi, khỏi làm", "never mind, we keep it as is") ⇒ `"withdraw": true` (code asks the requester to confirm cancelling; it
+   never cancels by itself). An answer that only keeps one value as it is ("giữ nguyên 5 lần") is an answer, not a withdrawal.
 
 ## Output
 
 JSON only. When asking: `{ "ambiguous": true, "questions": ["Mục Yêu cầu hiệu năng cần thời gian phản hồi tối đa bao nhiêu?"], "suggestions": [["≤ 2 giây cho 95% request", "≤ 3 giây cho mọi request", "≤ 1 giây cho màn tra cứu"]], "missing_info": [], "targets": { "entity_paths": [], "keywords": [] } }`
 
 When clear: `{ "ambiguous": false, "questions": [], "suggestions": [], "contradictions": [], "missing_info": [], "targets": { "entity_paths": ["use_cases[id=UC-04]"], "keywords": ["log out", "session"] } }`
+
+When the request is unreasonable: `{ "ambiguous": false, "questions": [], "suggestions": [], "contradictions": [], "warnings": [{ "question": "Bỏ bước đăng nhập sẽ làm quy tắc BR-02 (đơn hàng phải do người dùng đã đăng nhập đặt) không còn đúng. Bạn vẫn muốn làm?", "suggestions": ["Vẫn làm", "Bỏ yêu cầu này"] }], "missing_info": [], "targets": { "entity_paths": ["use_cases[id=UC-01]"], "keywords": ["đăng nhập"] } }`
 
 When contradicting (with or without other questions): `{ "ambiguous": false, "questions": [], "suggestions": [], "contradictions": [{ "question": "CR yêu cầu khoá tài khoản sau 3 lần đăng nhập sai, nhưng mục Bảo mật đang ghi \"khoá sau 5 lần\". Áp dụng con số nào?", "suggestions": ["Đổi theo CR và sửa cả chỗ cũ", "Giữ như cũ, không áp dụng phần này của CR"] }], "missing_info": [], "targets": { "entity_paths": ["business_rules[id=BR-04]"], "keywords": ["khoá tài khoản"] } }`

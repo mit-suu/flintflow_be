@@ -2,13 +2,14 @@
  * Check sau baseline v0 (nút 1.11 AI semantic — vàng, có credit; 1.12 code rule — đỏ/vàng). FLF-171, plan §6 2C.
  * 1.11 chạy kiểu map-reduce để đọc hết tài liệu dù dài bao nhiêu (trước đây chỉ 16k ký tự đầu):
  * - map: block chia lô ≤ `SEMANTIC_BATCH_CHARS` theo thứ tự tài liệu, mỗi lô một lượt `IMPORT_SEMANTIC_CHECK` (step
- *   `I-1.11:<n>`) kèm phần Spine của chính các section trong lô — tối đa `PARALLEL_BATCHES` lượt cùng lúc;
+ *   `I-1.11:<n>`) kèm phần Spine của chính các section trong lô — tối đa `IMPORT_CHECK_CONCURRENCY` lượt cùng lúc;
  * - reduce: cờ của từng lô áp theo thứ tự lô (`findingOps` bỏ cờ trùng cờ đang mở), rồi một lượt `IMPORT_CROSS_CHECK`
  *   (step `I-1.11:cross`) trên Spine gọn của cả tài liệu tìm lỗi giữa các section mà từng lô không thấy.
  * AI lỗi / hết credit ⇒ `paused` ở `checking`; resume bỏ qua lượt đã trừ credit (usage `deducted` theo step).
  * Cờ AI ghi vào `flags[]` với `rule_id = import_semantic` (không bị recompute đóng), mức vàng.
  */
 
+import { env } from "../../config/env.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { getActionCost } from "../../shared/ai/credit-reservation.service.js"
 import type { FindingsOutput } from "../../shared/ai/response-parser.js"
@@ -42,8 +43,8 @@ export const semanticBatchStep = (n: number): string => `${SEMANTIC_CHECK_STEP}:
 /** Ngân sách chữ mỗi lô map (~12k token in, GLM còn dư context) và trần một block. */
 export const SEMANTIC_BATCH_CHARS = 48_000
 const SEMANTIC_BLOCK_CHARS = 6_000
-/** Số lượt map gọi cùng lúc — finalize chạy đồng bộ nên không xếp hàng tuần tự từng lô. */
-export const PARALLEL_BATCHES = 3
+/** Số lượt map gọi cùng lúc (`IMPORT_CHECK_CONCURRENCY`) — finalize chạy đồng bộ nên không xếp hàng tuần tự từng lô. */
+export const parallelBatches = (): number => env.IMPORT_CHECK_CONCURRENCY
 const PROJECTION_LIMIT = 12_000
 const CROSS_PROJECTION_LIMIT = 48_000
 const RAISED_LIMIT = 8_000
@@ -289,7 +290,7 @@ type CheckFailure = Extract<MeteredResult<FindingsOutput>, { ok: false }>
  * 1.11 map + reduce. Trả lượt lỗi (để đặt `paused`) hoặc `null` khi đã xong hết. Lượt đã trừ credit ở lần chạy trước
  * (`done`) không gọi lại; lô xong trước lô lỗi vẫn được ghi cờ.
  */
-const runSemanticCheck = async (projectId: string, userId: string, done: ReadonlySet<string>, guard: CheckGuard): Promise<CheckFailure | null> => {
+const runSemanticCheck = async (projectId: string, importId: string, userId: string, done: ReadonlySet<string>, guard: CheckGuard): Promise<CheckFailure | null> => {
   const spine = await loadSpine(projectId)
   const [blocks, anchors, sectioned] = await Promise.all([
     DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS }, kind: { $in: ["paragraph", "list_item", "table_cell"] } })
@@ -302,9 +303,10 @@ const runSemanticCheck = async (projectId: string, userId: string, done: Readonl
   const scope = elementSections(anchors, new Map(sectioned.map((b) => [b.block_id, b.section_id ?? null])))
   const glossary = glossaryText(spine)
 
-  // map: các lô chưa xong, tối đa PARALLEL_BATCHES lượt cùng lúc
+  // map: các lô chưa xong, tối đa `IMPORT_CHECK_CONCURRENCY` lượt cùng lúc
   const pending = semanticBatches(blocks).filter((b) => !done.has(b.step_id))
-  const results = await runLimited(pending, PARALLEL_BATCHES, async (batch) => {
+  const mapStarted = Date.now()
+  const results = await runLimited(pending, parallelBatches(), async (batch) => {
     await guard()
     return withMeteredAi<FindingsOutput>({ projectId, userId, stepId: batch.step_id }, ActionType.IMPORT_SEMANTIC_CHECK, {
       section_ids: batch.section_ids.join(", "),
@@ -314,6 +316,8 @@ const runSemanticCheck = async (projectId: string, userId: string, done: Readonl
       glossary
     })
   })
+  // Đo thời gian bước kiểm tra theo lô (không log nội dung tài liệu)
+  console.info(`[I-1.11] import ${importId}: kiểm tra theo lô xong sau ${Date.now() - mapStarted} ms, ${pending.length} lô, ${pending.length} lượt AI, song song ${parallelBatches()}`)
   // reduce: ghi theo thứ tự lô ⇒ id cờ ổn định; hết credit được ưu tiên báo (nạp xong tự chạy tiếp — credit-flow)
   let failure: CheckFailure | null = null
   for (const r of results) {
@@ -330,12 +334,14 @@ const runSemanticCheck = async (projectId: string, userId: string, done: Readonl
   const hasContent = spine.use_cases.length + spine.functions.length + spine.nfrs.length + spine.business_rules.length > 0
   if (done.has(CROSS_CHECK_STEP) || !hasContent) return null
   await guard()
+  const crossStarted = Date.now()
   const now = await loadSpine(projectId)
   const cross = await withMeteredAi<FindingsOutput>({ projectId, userId, stepId: CROSS_CHECK_STEP }, ActionType.IMPORT_CROSS_CHECK, {
     projection: crossProjection(now, scope.sectionOf),
     glossary,
     raised: raisedText(now)
   })
+  console.info(`[I-1.11] import ${importId}: kiểm chéo xong sau ${Date.now() - crossStarted} ms, 1 lượt AI`)
   if (!cross.ok) return cross
   await applyFindings(projectId, cross.data.findings, "AI cross-section check (1.11)")
   return null
@@ -358,7 +364,7 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string, gua
   )
   // FLF-411 (U1-8): khung mẫu (chữ là hướng dẫn / ví dụ, Spine không nhận nội dung) ⇒ không có gì để AI đối chiếu, không trừ credit
   if (!done.has(SEMANTIC_CHECK_STEP) && !(await isTemplateOnlyProject(projectId))) {
-    const failure = await runSemanticCheck(projectId, userId, done, guard)
+    const failure = await runSemanticCheck(projectId, String(doc._id), userId, done, guard)
     if (failure) {
       doc.paused = { reason: failure.reason, at: new Date() }
       await doc.save()

@@ -24,6 +24,7 @@ import {
   locationIdSchema,
   materialParamsSchema,
   ownerStepDraftRequestSchema,
+  revertRequestSchema,
   patchLocationRequestSchema,
   approveExtractionSchema,
   extractionParamsSchema,
@@ -41,6 +42,8 @@ import { patchLocation } from "./location.service.js"
 import { addMaterial, removeMaterial } from "./material.service.js"
 import { draftInOwnerStep, runPropose } from "./propose.service.js"
 import { runVerify } from "./verify.service.js"
+import { createRevertCr } from "./revert-cr.service.js"
+import { assertPackageNotPending } from "../doc-version/review-package.service.js"
 import { assertConvertible, markConverted } from "../comment/comment.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -60,6 +63,8 @@ const loadCr = async (req: Request): Promise<{ auth: Mode1Auth; cr: IChangeReque
 const loadOwnCr = async (req: Request): Promise<{ auth: Mode1Auth; cr: IChangeRequest }> => {
   const loaded = await loadCr(req)
   await crService.assertRequester(loaded.cr, loaded.auth.userId)
+  // C-7: gói chờ Lead ⇒ bản nháp khoá; nội dung CR soạn lúc này sẽ vào gói nên mọi bước C-1…C-6 cũng dừng (business-flow §2)
+  assertPackageNotPending((await spineRepository.get(loaded.auth.projectId))?.baseline_submission)
   return loaded
 }
 
@@ -139,10 +144,20 @@ export const createCr = mode1Handler(async (req, res) => {
     }
     await assertConvertible(auth.projectId, body.comment_id)
   }
-  const cr = await crService.createCr(auth.projectId, auth.userId, body)
+  // BF §3.2 C-1: mỗi người một CR mở một lúc (kiểm sau gói chờ duyệt / baseline, trong createCr)
+  const cr = await crService.createCr(auth.projectId, auth.userId, body, { enforceOwnOpen: true })
   if (body.comment_id) await markConverted(auth.projectId, body.comment_id, cr.cr_id, auth.userId, requireOrgId(req))
   // Bản xem trước hết hạn / không phải của mình ⇒ CR vẫn tạo (3.1 không phụ thuộc bản xem trước), báo để FE nói rõ
   if (body.preview_id && !cr.seed) return sendSuccess(res, 201, await crService.toDetail(cr), { seed_dropped: true })
+  return detail(res, cr, 201)
+})
+
+/** BF §3.2: "hoàn tác CR-xxx" = CR mới dựng từ `before` của các Change của CR đã ghi, rồi chạy kiểm như CR thường. */
+export const revertCr = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const { crId } = parseInput(crParamsSchema, req.params)
+  const body = parseInput(revertRequestSchema, req.body)
+  const cr = await createRevertCr(auth.projectId, auth.userId, crId, body.requester)
   return detail(res, cr, 201)
 })
 
@@ -251,10 +266,10 @@ export const listPendingSections = mode1Handler(async (req, res) => {
 export const revise = action((cr) => crService.reviseCr(cr), { ownerOnly: false })
 
 export const updateLocation = mode1Handler(async (req, res) => {
-  const { cr } = await loadOwnCr(req)
+  const { auth, cr } = await loadOwnCr(req)
   const locId = parseInput(locationIdSchema, req.params.locId)
   const body = parseInput(patchLocationRequestSchema, req.body)
-  await patchLocation(cr, locId, body)
+  await patchLocation(cr, locId, body, auth.userId)
   return detail(res, cr)
 })
 

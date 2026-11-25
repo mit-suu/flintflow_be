@@ -106,6 +106,9 @@ export const assertTransition = (from: CrStatus, to: CrStatus): void => {
 
 export const isTerminal = (status: CrStatus): boolean => CR_TRANSITIONS[status].length === 0
 
+/** CR chưa kết thúc (còn trong luồng C-1…C-7): người tạo chỉ được có một CR như vậy một lúc (BF §3.2 C-1). */
+export const CR_OPEN_STATUSES: readonly CrStatus[] = CR_STATUSES.filter((s) => !isTerminal(s))
+
 export const canPause = (status: CrStatus): boolean => PAUSABLE_CR_STATUSES.includes(status)
 
 export const holdsLocks = (status: CrStatus): boolean => CR_STATUSES_HOLDING_LOCKS.includes(status)

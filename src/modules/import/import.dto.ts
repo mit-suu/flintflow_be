@@ -232,8 +232,26 @@ export const extractionSectionSchema = z.object({
   status: z.enum(EXTRACTION_STATUSES),
   fields_total: z.number().int().min(0),
   fields_needing_review: z.number().int().min(0),
-  error: z.string().nullable()
+  error: z.string().nullable(),
+  /** AI đang đọc mục này (nhiều mục có thể đang đọc cùng lúc); dấu cũ của lần chạy đã chết ⇒ `false`. */
+  reading: z.boolean(),
+  /** Đã tìm thấy gì ở mục: đếm theo loại + tối đa 3 tên (không có nội dung đầy đủ). Rỗng khi chưa đọc gì. */
+  found: z.array(z.object({ entity: z.string(), count: z.number().int().min(1), names: z.array(z.string()).max(3) }))
 })
+
+/** `GET /projects/:id/import/source` — chữ gốc của file theo mục, tải một lần. */
+export const importSourceResponseSchema = z.object({
+  import_id: id,
+  sections: z.array(
+    z.object({
+      section_id: z.string().min(1),
+      title: z.string(),
+      level: z.number().int().min(0).max(9),
+      blocks: z.array(z.object({ block_id: blockId, kind: z.enum(DOC_BLOCK_KINDS), text: z.string() }))
+    })
+  )
+})
+export type ImportSourceResponse = z.infer<typeof importSourceResponseSchema>
 
 // ─── request ─────────────────────────────────────────────────────
 
@@ -451,12 +469,28 @@ export const gapReportSchema = z.object({
 export const gapReportResponseSchema = gapReportSchema
 
 /** Một dòng diff theo block — dùng chung cho re-upload (UC-24) và `versions/compare` (UC-55). */
+/** FLF-447: một hàng của bảng trong diff theo hàng. */
+const tableRowDiffSchema = z.union([
+  z.object({ change: z.enum(["added", "removed", "modified", "moved"]), before: z.array(z.string()).optional(), after: z.array(z.string()).optional(), cells_changed: z.array(z.number().int().min(0)).optional() }),
+  z.object({ change: z.literal("unchanged"), count: z.number().int().min(1), rows: z.array(z.array(z.string())) })
+])
+
 export const blockDiffEntrySchema = z.object({
   block_id: blockId.nullable(),
   change: z.enum(REUPLOAD_CHANGES),
   before: z.string().optional(),
-  after: z.string().optional()
+  after: z.string().optional(),
+  /** FLF-447: tiêu đề mục chứa block ("" = trước heading đầu); bản ghi cũ không có. */
+  section: z.string().optional(),
+  /** FLF-447: khoá mục = đường heading ("A > B"); mục trùng tên ở hai chỗ khác nhau có khoá khác. */
+  section_key: z.string().optional(),
+  kind: z.enum(["paragraph", "table", "image", "heading"]).optional(),
+  /** FLF-447: bảng khớp mà khác chữ ⇒ diff theo hàng; hàng không đổi gộp thành `unchanged`. */
+  table: z.object({ header: z.array(z.string()), header_before: z.array(z.string()).optional(), rows: z.array(tableRowDiffSchema) }).optional()
 })
+
+/** FLF-447: số block không đổi theo mục (FE vẽ `⋯ n đoạn`), theo thứ tự tài liệu mới. */
+export const diffSectionStatSchema = z.object({ title: z.string(), key: z.string().optional(), unchanged: z.number().int().min(0) })
 
 export const blockDiffSummarySchema = z.object({
   added: z.number().int().min(0),
@@ -471,7 +505,8 @@ export const reuploadDiffDtoSchema = z.object({
   against_version: z.string().min(1),
   created_at: isoDateTime,
   summary: blockDiffSummarySchema,
-  blocks: z.array(blockDiffEntrySchema)
+  blocks: z.array(blockDiffEntrySchema),
+  sections: z.array(diffSectionStatSchema)
 })
 
 /** `POST /projects/:id/reupload` (UC-24, nút 1.4) — multipart như `/import`. */

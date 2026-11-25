@@ -8,16 +8,17 @@ describe("diffBlockLists", () => {
   const base = [b("B0001", "Intro"), b("B0002", "Actors"), b("B0003", "Learner enrolls"), b("B0004", "Glossary")]
 
   it("không đổi ⇒ rỗng", () => {
-    expect(diffBlockLists(base, base)).toEqual({ blocks: [], summary: { added: 0, removed: 0, modified: 0, moved: 0 } })
+    expect(diffBlockLists(base, base)).toEqual({ blocks: [], summary: { added: 0, removed: 0, modified: 0, moved: 0 }, sections: [] })
   })
 
   it("sửa theo bookmark, thêm, xoá", () => {
     const after = [b("B0001", "Intro"), b("B0003", "Learner enrolls in a course"), b(null, "New paragraph"), b("B0004", "Glossary")]
     const res = diffBlockLists(base, after)
+    // Khối bị xoá chen đúng chỗ trong tài liệu (trước khối cũ đứng sau nó), không dồn cuối danh sách
     expect(res.blocks).toEqual([
+      { block_id: "B0002", change: "removed", before: "Actors" },
       { block_id: "B0003", change: "modified", before: "Learner enrolls", after: "Learner enrolls in a course" },
-      { block_id: null, change: "added", after: "New paragraph" },
-      { block_id: "B0002", change: "removed", before: "Actors" }
+      { block_id: null, change: "added", after: "New paragraph" }
     ])
     expect(res.summary).toEqual({ added: 1, removed: 1, modified: 1, moved: 0 })
   })

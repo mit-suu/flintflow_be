@@ -11,7 +11,8 @@
         "category": "usability",
         "statement": "Every screen meets WCAG 2.1 AA for contrast and keyboard navigation.",
         "kind": "descriptive",
-        "priority": null
+        "priority": null,
+        "source_ref": "Client brief"
       },
       "reason": "S-6 usability"
     },
@@ -23,7 +24,8 @@
         "category": "usability",
         "statement": "The interface is available in English and Vietnamese, with the document content always in English.",
         "kind": "descriptive",
-        "priority": null
+        "priority": null,
+        "source_ref": "Client brief"
       },
       "reason": "S-6 usability"
     },
@@ -35,7 +37,8 @@
         "category": "usability",
         "statement": "Every long-running action shows progress and can be abandoned without losing accepted work.",
         "kind": "descriptive",
-        "priority": null
+        "priority": null,
+        "source_ref": "Client brief"
       },
       "reason": "S-6 usability"
     }

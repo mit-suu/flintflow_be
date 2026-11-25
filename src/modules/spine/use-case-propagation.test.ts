@@ -7,7 +7,7 @@ import { planTransaction } from "./op-engine.js"
 import type { Op } from "./op.types.js"
 import type { Spine } from "./spine.types.js"
 import { editIssues, editNote, editProblemText, removalLeftovers, removalNote, removalProblemText, removesUseCaseOrScreen, useCaseEditContext, useCaseIntent } from "./use-case-propagation.js"
-import { addedScreenIds, addsUseCaseOrScreen, declareTempIds, newUseCaseScreenIssues, useCaseScreenNote, useCaseScreenProblemText, wantsSharedScreen, isAddUseCaseInstruction, normalizeUseCaseBatch, useCaseContext, useCaseMode, useCaseOverlapNote, useCaseOverlaps, applyScreenKind, screenKindChoice, screenKindQuestion, askedList, askedUseCases, confirmedProposals, parseUiAnswer, uiPlanFor, uiPlanForModel, applyUiPlan, uiPlanIssues, uiPlanNote, uiPlanProblemText } from "./use-case-propagation.js"
+import { addedScreenIds, addsUseCaseOrScreen, declareTempIds, newUseCaseScreenIssues, useCaseScreenNote, useCaseScreenProblemText, wantsSharedScreen, isAddUseCaseInstruction, normalizeUseCaseBatch, useCaseContext, useCaseMode, useCaseOverlapNote, useCaseOverlaps, applyScreenKind, screenKindChoice, screenKindQuestion, askedList, askedUseCases, confirmedProposals, parseUiAnswer, uiPlanFromModel, uiPlanFor,uiPlanForModel, applyUiPlan, uiPlanIssues, uiPlanNote, uiPlanProblemText } from "./use-case-propagation.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 /** Fixture 19 màn: S-9, mọi bước accepted. */
@@ -485,6 +485,37 @@ describe("kế hoạch giao diện theo từng use case / từng màn - nhiều 
     ])
   })
 
+  it("parseUiAnswer: phủ định - 'không bỏ', 'không cần popup' không phải lệnh bỏ; chữ 'chung' trơn không phải dùng chung", () => {
+    expect(pick(parseUiAnswer("1 màn riêng, không bỏ 3", ASKED)).filter((e) => e.index === 3)).toEqual([
+      { index: 3, kind: undefined, group: undefined, screen: undefined, drop: false, merge: undefined, popupScreens: undefined }
+    ])
+    expect(parseUiAnswer("2 không cần popup, làm màn riêng", ASKED).find((e) => e.index === 2)).toMatchObject({ kind: "own" })
+    expect(parseUiAnswer("2 không cần popup, làm màn riêng", ASKED).find((e) => e.index === 2)?.drop).toBeUndefined()
+    expect(parseUiAnswer("Không bỏ các use case AI đề xuất, mỗi cái màn riêng", ASKED).every((e) => !e.drop)).toBe(true)
+    expect(parseUiAnswer("Nói chung là mỗi use case một màn riêng", ASKED).every((e) => e.kind === "own")).toBe(true)
+  })
+
+  it("uiPlanFromModel: nhận mục của model khi số thuộc danh sách đã hỏi; giữ mục use case đề xuất model không nhắc", () => {
+    const plan = uiPlanFromModel(
+      [
+        { index: 1, ui: "popup", screen: " Dashboard " },
+        { index: 3, drop: true, ui: "own" },
+        { index: 2, ui: "shared" },
+        { index: 9, drop: true }
+      ],
+      ASKED
+    )
+    expect(pick(plan!)).toEqual([
+      { index: 1, kind: "popup", group: undefined, screen: "Dashboard", drop: undefined, merge: undefined, popupScreens: undefined },
+      { index: 2, kind: "shared", group: 1, screen: undefined, drop: undefined, merge: undefined, popupScreens: undefined },
+      { index: 3, kind: undefined, group: undefined, screen: undefined, drop: true, merge: undefined, popupScreens: undefined },
+      { index: 4, kind: undefined, group: undefined, screen: undefined, drop: undefined, merge: undefined, popupScreens: undefined }
+    ])
+    expect(uiPlanFromModel(undefined, ASKED)).toBeNull()
+    expect(uiPlanFromModel([{ index: 7, ui: "own" }], ASKED)).toBeNull()
+    expect(uiPlanFromModel([{ index: 1, ui: "own" }], [])).toBeNull()
+  })
+
   it("parseUiAnswer: nút chọn nhanh - giữ tất cả / bỏ use case đề xuất / dùng chung", () => {
     expect(parseUiAnswer("Giữ tất cả, mỗi use case màn riêng", ASKED).map((e) => [e.index, e.kind ?? null, e.drop ?? false])).toEqual([
       [1, "own", false],
@@ -640,6 +671,13 @@ describe("FLF-318 - xoá use case (luật 3g)", () => {
     expect(useCaseIntent("bổ sung use case xem trạng thái")).toBe("add")
     expect(useCaseIntent("thêm use case X, bỏ màn popup cũ")).toBe("add")
     expect(useCaseIntent("xoá màn Login")).toBeNull()
+  })
+
+  it("useCaseIntent: động từ bị phủ định không tính", () => {
+    expect(useCaseIntent("không thêm UC nữa, chỉ sửa UC-3 cho đúng actor")).toBe("edit")
+    expect(useCaseIntent("đừng xoá use case Login, đổi tên nó thành Sign In")).toBe("edit")
+    expect(useCaseIntent("don't remove the use case, rename it to Sign In")).toBe("edit")
+    expect(isAddUseCaseInstruction("không thêm use case nào nữa")).toBe(false)
   })
 
   const uc = FIXTURE.use_cases.find((u) => u.function_ids.length > 0)!

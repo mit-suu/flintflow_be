@@ -52,7 +52,7 @@ const migrate = async (token: string, projectId: string, templateId: string): Pr
   await request(app).post(url(projectId, id, "/confirm-mapping")).set(H(token))
   const dto = (await request(app).get(url(projectId, id)).set(H(token))).body.data
   const items = [...dto.groups.extra, ...dto.groups.conflict] as { id: string; choices: string[]; ai_choices: string[] }[]
-  const decisions = (dto.undecided as string[]).map((d) => {
+  const decisions = [...dto.groups.extra, ...dto.groups.conflict].map((i: { id: string }) => i.id).map((d) => {
     const item = items.find((i) => i.id === d)!
     const safe = item.choices.filter((c) => !item.ai_choices.includes(c) && !c.startsWith("move_to:"))
     return { id: d, choice: safe[0] }

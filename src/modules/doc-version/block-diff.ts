@@ -5,9 +5,14 @@
  * (≥ `MODIFIED_SIMILARITY`) ⇒ `modified`.
  * Cặp khớp khác text ⇒ `modified`; cặp khớp đổi thứ tự (ngoài dãy con tăng dài nhất) ⇒ `moved`;
  * block cũ không khớp ⇒ `removed`; block mới không khớp ⇒ `added` (`block_id = null` nếu chưa có id).
+ * FLF-447: block mang `section` / `kind` / `rows` (từ `toDiffBlocks`) ⇒ entry ghi mục chứa nó + loại; hai bảng còn lẻ giữa cùng hai block
+ * đã khớp ghép theo vị trí; bảng khớp mà khác chữ ⇒ diff theo hàng (`table-row-diff.ts`), chỉ đổi thứ tự hàng theo mã ⇒ không là thay đổi;
+ * `sections` đếm block không đổi theo mục (FE vẽ `⋯ n đoạn`, không trả chữ).
  */
 
-import type { BlockDiffEntry } from "../import/reupload-diff.model.js"
+import type { OoxmlBlock } from "../docx-ooxml/index.js"
+import type { BlockDiffEntry, DiffBlockKind } from "../import/reupload-diff.model.js"
+import { diffTableRows, rowDiffable } from "./table-row-diff.js"
 
 export interface DiffBlock {
   /** `null` với block của file mới chưa mang bookmark FlintFlow. */
@@ -15,7 +20,39 @@ export interface DiffBlock {
   para_id?: string | null
   text: string
   text_hash: string
+  /** Loại block cho FE (FLF-447); thiếu ⇒ entry không mang `kind` / `section` (giữ shape cũ). */
+  kind?: DiffBlockKind
+  /** Chỉ với bảng: chữ từng ô theo hàng. */
+  rows?: string[][] | null
+  /** Tiêu đề mục chứa block (heading: chính nó); "" = trước heading đầu. */
+  section?: string
+  /** Khoá mục = cả đường heading (hai mục trùng tên ở hai chỗ khác nhau không bị gộp). */
+  section_key?: string
 }
+
+/** Số block không đổi của một mục (theo thứ tự tài liệu mới). */
+export interface SectionStat {
+  title: string
+  /** Khoá mục (đường heading); thiếu ở bản ghi cũ. */
+  key?: string
+  unchanged: number
+}
+
+/** Block đọc từ file ⇒ block để diff, kèm mục chứa nó + loại + hàng của bảng. */
+export const toDiffBlocks = (blocks: readonly OoxmlBlock[]): DiffBlock[] =>
+  blocks.map((b) => {
+    const kind: DiffBlockKind = b.kind === "heading" ? "heading" : b.kind === "table" ? "table" : b.image_ref ? "image" : "paragraph"
+    return {
+      block_id: null,
+      para_id: b.para_id,
+      text: b.text,
+      text_hash: b.text_hash,
+      kind,
+      rows: kind === "table" ? b.rows : null,
+      section: kind === "heading" ? b.text.trim() : (b.heading_path[b.heading_path.length - 1] ?? "").trim(),
+      section_key: (kind === "heading" ? [...b.heading_path, b.text] : b.heading_path).map((h) => h.trim()).join(" > ")
+    }
+  })
 
 export interface BlockDiffSummary {
   added: number
@@ -78,7 +115,7 @@ const similarity = (a: string, b: string): number => {
   return inter / (A.size + B.size - inter)
 }
 
-export const diffBlockLists = (before: DiffBlock[], after: DiffBlock[]): { blocks: BlockDiffEntry[]; summary: BlockDiffSummary } => {
+export const diffBlockLists = (before: DiffBlock[], after: DiffBlock[]): { blocks: BlockDiffEntry[]; summary: BlockDiffSummary; sections: SectionStat[] } => {
   const matchOfAfter = new Map<number, number>()
   const usedBefore = new Set<number>()
   const beforeById = new Map<string, number>()
@@ -126,7 +163,9 @@ export const diffBlockLists = (before: DiffBlock[], after: DiffBlock[]): { block
     let bestScore = MODIFIED_SIMILARITY
     for (let i = lo + 1; i < hi; i++) {
       if (usedBefore.has(i)) continue
-      const score = similarity(before[i].text, a.text)
+      // Hai bảng còn lẻ giữa cùng hai block đã khớp là một bảng bị sửa (thêm nhiều hàng làm độ giống từ tụt dưới ngưỡng)
+      const tables = a.kind === "table" && before[i].kind === "table"
+      const score = Math.max(similarity(before[i].text, a.text), tables ? MODIFIED_SIMILARITY : 0)
       if (score >= bestScore) {
         best = i
         bestScore = score
@@ -142,20 +181,56 @@ export const diffBlockLists = (before: DiffBlock[], after: DiffBlock[]): { block
   const inOrder = longestIncreasing(matchedAfter.map((j) => matchOfAfter.get(j)!))
   const moved = new Set(matchedAfter.filter((_, k) => !inOrder.has(k)))
 
+  /** Mục + loại của entry — chỉ khi block mang thông tin đó (caller cũ không truyền ⇒ shape cũ). */
+  const meta = (x: DiffBlock): Pick<BlockDiffEntry, "section" | "section_key" | "kind"> =>
+    x.section !== undefined ? { section: x.section, ...(x.section_key !== undefined ? { section_key: x.section_key } : {}), ...(x.kind ? { kind: x.kind } : {}) } : {}
+  /** Khoá mục ⇒ { tiêu đề, số khối không đổi }, theo thứ tự xuất hiện. */
+  const stats = new Map<string, { title: string; unchanged: number }>()
+  const keyOf = (x: { section?: string; section_key?: string }): string => x.section_key ?? x.section ?? ""
+  const note = (x: { section?: string; section_key?: string }): void => {
+    if (x.section !== undefined && !stats.has(keyOf(x))) stats.set(keyOf(x), { title: x.section, unchanged: 0 })
+  }
+  const unchanged = (x: DiffBlock): void => {
+    if (x.section === undefined) return
+    note(x)
+    stats.get(keyOf(x))!.unchanged++
+  }
+  for (const x of after) note(x)
+
   const entries: BlockDiffEntry[] = []
+  /** Khối bị xoá chen vào đúng chỗ trong tài liệu: trước khối mới đầu tiên ghép với khối cũ đứng sau nó. */
+  const emittedRemoved = new Set<number>()
+  const flushRemoved = (upTo: number): void => {
+    for (let k = 0; k < upTo; k++) {
+      if (usedBefore.has(k) || emittedRemoved.has(k)) continue
+      emittedRemoved.add(k)
+      entries.push({ block_id: before[k].block_id, change: "removed", before: before[k].text, ...meta(before[k]) })
+    }
+  }
   after.forEach((a, j) => {
     const i = matchOfAfter.get(j)
+    if (i !== undefined && !moved.has(j)) flushRemoved(i)
     if (i === undefined) {
-      entries.push({ block_id: a.block_id, change: "added", after: a.text })
+      entries.push({ block_id: a.block_id, change: "added", after: a.text, ...meta(a) })
       return
     }
     const b = before[i]
-    if (moved.has(j)) entries.push({ block_id: b.block_id, change: "moved", before: b.text, after: a.text })
-    else if (b.text_hash !== a.text_hash) entries.push({ block_id: b.block_id, change: "modified", before: b.text, after: a.text })
+    if (moved.has(j)) entries.push({ block_id: b.block_id, change: "moved", before: b.text, after: a.text, ...meta(a) })
+    else if (b.text_hash !== a.text_hash) {
+      if (a.kind === "table" && b.kind === "table" && a.rows?.length && b.rows?.length && rowDiffable(a.rows, b.rows)) {
+        const table = diffTableRows(b.rows, a.rows)
+        // Chỉ đổi thứ tự hàng theo cột mã ⇒ không phải thay đổi
+        if (!table) return unchanged(a)
+        entries.push({ block_id: b.block_id, change: "modified", before: b.text, after: a.text, ...meta(a), table })
+      } else entries.push({ block_id: b.block_id, change: "modified", before: b.text, after: a.text, ...meta(a) })
+    } else unchanged(a)
   })
-  before.forEach((b, i) => {
-    if (!usedBefore.has(i)) entries.push({ block_id: b.block_id, change: "removed", before: b.text })
-  })
+  flushRemoved(before.length)
+  for (const e of entries) note(e)
   const count = (c: BlockDiffEntry["change"]): number => entries.filter((e) => e.change === c).length
-  return { blocks: entries, summary: { added: count("added"), removed: count("removed"), modified: count("modified"), moved: count("moved") } }
+  return {
+    blocks: entries,
+    summary: { added: count("added"), removed: count("removed"), modified: count("modified"), moved: count("moved") },
+    sections: [...stats].map(([key, s]) => ({ title: s.title, key, unchanged: s.unchanged }))
+  }
 }
