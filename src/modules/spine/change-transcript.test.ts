@@ -172,3 +172,52 @@ describe("pendingChangeRequest - P08 T7", () => {
     expect(pendingChangeRequest([])).toBeNull()
   })
 })
+
+describe("lệnh nhiều ý: bản xem trước một phần đi cùng câu hỏi", () => {
+  const base: ChangePreviewResult = { ok: true, txn: "t", base_version: 1, ops: [], changes: [{ op: "set", path: "actors[id=A01].name", before: "A", value: "B", reason: null }], violations: [], referrers: [], preview_id: "pv" }
+  const ask = (q: string) => msg("ai", JSON.stringify({ kind: "change_clarification", reply: q }))
+  const appliedOpen = msg("ai", JSON.stringify({ kind: "change_applied", reply: "Đã áp dụng 1 thay đổi", request_open: true }))
+
+  it("có bản xem trước + câu hỏi ⇒ vẫn là change_clarification (đếm lượt hỏi), kèm preview_id và số thay đổi", () => {
+    const payload = previewPayload({ ...base, clarification: "Màn nào cần popup?" })
+    expect(payload).toMatchObject({ kind: "change_clarification", preview_id: "pv", change_count: 1 })
+    expect(String(payload.reply)).toContain("Màn nào cần popup?")
+    expect(String(payload.reply)).toContain("1 thay đổi")
+  })
+
+  it("bản một phần đã áp (request_open) không khép yêu cầu: câu trả lời kế tiếp vẫn nối với yêu cầu gốc", () => {
+    const messages = [msg("user", "đổi tên A01 và thêm popup"), ask("Màn nào?"), appliedOpen, msg("user", "Login")]
+    expect(clarificationRounds(messages)).toBe(1)
+    expect(pendingChangeRequest(messages)).toEqual({ request: "đổi tên A01 và thêm popup", question: "Màn nào?" })
+  })
+})
+
+describe("previewPayload - cảnh báo, dự báo cờ đỏ, tự ghi", () => {
+  const base: ChangePreviewResult = { ok: true, txn: "t", base_version: 1, ops: [], changes: [{ op: "set", path: "actors[id=A01].name", before: "A", value: "B", reason: null }], violations: [], referrers: [], preview_id: "pv" }
+
+  it("có cảnh báo ⇒ lời cảnh báo nằm trong câu trả lời, mời bấm 'Vẫn làm', payload mang warning", () => {
+    const payload = previewPayload({ ...base, warning: "Trái điều đã chốt." })
+    expect(payload).toMatchObject({ kind: "change_preview", warning: "Trái điều đã chốt." })
+    expect(String(payload.reply)).toContain("Trái điều đã chốt.")
+    expect(String(payload.reply)).toContain("Vẫn làm")
+    expect(String(previewPayload({ ...base, warning: "x" }, "en").reply)).toContain("Do it anyway")
+  })
+
+  it("dự báo cờ đỏ và lý do chờ xác nhận chỉ lưu số / chữ gọn vào phiên", () => {
+    const payload = previewPayload({
+      ...base,
+      predicted_red_flags: [{ rule_id: "vague_wording", section_id: "fixed:4.2.3", target_id: "N07", message: "x" }],
+      confirm_reason: "Thay đổi này mở thêm 1 cờ đỏ chặn baseline"
+    })
+    expect(payload).toMatchObject({ predicted_red_count: 1, confirm_reason: "Thay đổi này mở thêm 1 cờ đỏ chặn baseline" })
+    expect(JSON.stringify(payload)).not.toContain("vague_wording")
+  })
+
+  it("tự ghi ⇒ tin change_applied, hoàn tác được, không còn preview_id", () => {
+    const payload = previewPayload({ ...base, preview_id: undefined, auto_applied: true, applied_version: 5, notes: "Đã đổi tên." })
+    expect(payload).toMatchObject({ kind: "change_applied", count: 1, spine_version: 5, auto_applied: true })
+    expect(String(payload.reply)).toContain("Đã tự áp dụng 1 thay đổi")
+    expect(String(payload.reply)).toContain("Đã đổi tên.")
+    expect(payload).not.toHaveProperty("preview_id")
+  })
+})

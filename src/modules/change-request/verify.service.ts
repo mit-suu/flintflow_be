@@ -10,6 +10,9 @@
  *   FLF-307: chỉ chạy khi cả CR qua kiểm code và có vị trí đổi đề xuất từ lần trước; nhận xét cũ giữ lại và đưa AI xem
  *   để không nêu lại.
  * Trượt ⇒ AI làm lại vị trí đó (`redo_count` ≤ 2) ⇒ vẫn trượt / vị trí sửa tay trượt ⇒ `manual_fix` (3.9).
+ * BF §3.2 C-5: lỗi luật ở vị trí BA đã "Vẫn làm" sau cảnh báo (`kept_intent`) ⇒ hỏi BA ngay, không để AI tự sửa; BA "giữ theo
+ * ý mình" (`kept_violations`) ⇒ kiểm coi như qua, cờ đỏ thật hiện sau khi ghi. Mục ngoài phạm vi (`out-of-scope.ts`):
+ * sửa chữ thì không kiểm luật Spine, mục trống chỉ nhận ghi chú.
  */
 
 import { ActionType } from "../../shared/ai/ai-action.types.js"
@@ -39,6 +42,23 @@ import type { UserLocale } from "../../shared/i18n/locale.js"
 import { refreshDiagramLocations } from "./diagram-location.js"
 import { fixDuplicateIds } from "./propose.service.js"
 import { elementValue, isArrayPath, listElements, opElement, sectionOfElement, unchangedSince, valueText } from "./spine-location.js"
+import { hasRemoveOp } from "./location-display.js"
+import { loadOutOfScopeSections, outOfScopeKind, type OutOfScopeKind } from "./out-of-scope.js"
+
+/**
+ * Lỗi "luật" BA được phép giữ theo ý mình (C-5): đề xuất vẫn ghi được, chỉ làm Spine có cờ đỏ mới. Lỗi chữ cũ không còn
+ * khớp, op sai định dạng, bất biến gãy... không giữ được vì không ghi được.
+ */
+export const KEEPABLE_RULES: ReadonlySet<string> = new Set(["new_red_flag"])
+
+/** Mọi lỗi của vị trí đều là lỗi luật giữ được (và có ít nhất một lỗi). */
+export const isKeepable = (violations: readonly Pick<VerifyViolation, "rule">[]): boolean => violations.length > 0 && violations.every((v) => KEEPABLE_RULES.has(v.rule))
+
+/** Bỏ lỗi mà BA đã giữ theo ý mình. */
+export const withoutKept = (violations: readonly VerifyViolation[], kept: readonly string[]): VerifyViolation[] => violations.filter((v) => !kept.includes(v.rule))
+
+/** Vị trí AI cảnh báo mà BA chưa chọn "Vẫn làm" hay bỏ — chặn xác nhận. */
+export const hasPendingWarning = (l: Pick<IChangeLocation, "warning" | "kept_intent" | "conclusion">): boolean => !!l.warning && !l.kept_intent && l.conclusion !== "not_related"
 
 export const valueChanged = (loc: Pick<IChangeLocation, "location_id" | "path">): Mode1Error =>
   new Mode1Error("CR_VALUE_CHANGED", `${pathLabel(loc.path)} đã bị sửa ở chỗ khác kể từ lúc đề xuất - tải lại rồi đề xuất lại`, { location_id: loc.location_id, path: loc.path })
@@ -91,7 +111,8 @@ export const checkLocation = (
   loc: CheckLocation,
   spine: Spine,
   locks: ReadonlyMap<string, string>,
-  language?: UserLocale
+  language?: UserLocale,
+  scope: OutOfScopeKind | null = null
 ): VerifyViolation[] => {
   if (!loc.conclusion) return [{ rule: "unconcluded", message: "Vị trí chưa có kết luận" }]
   if (loc.conclusion === "not_related") return []
@@ -104,6 +125,7 @@ export const checkLocation = (
   // lại trên nội dung hiện tại như một lỗi kiểm thường; lúc xác nhận mới so 3 cột (`concurrent-edit.ts`)
   if (!unchangedSince(spine, loc.path, p)) return [...out, { rule: "value_changed", message: `${pathLabel(loc.path)} vừa được sửa ở chỗ khác - soạn lại trên nội dung hiện tại`, path: loc.path }]
   if (loc.conclusion === "edit") {
+    if (scope === "comment") out.push({ rule: "out_of_scope_empty", message: `${pathLabel(loc.path)} nằm ngoài phạm vi và còn trống - chỉ ghi chú, không thêm nội dung`, path: loc.path })
     if (!p.spine_ops.length) out.push({ rule: "edit_without_ops", message: "Kết luận là sửa nhưng chưa có nội dung sửa" })
     else if (p.new_text !== null && p.new_text === p.old_text) out.push({ rule: "edit_no_change", message: "Đề xuất không thay đổi gì ở phần tử này" })
     for (const el of opElements(loc)) {
@@ -133,7 +155,13 @@ export const checkLocation = (
 }
 
 /** Chạy khô toàn bộ op Spine của CR; vi phạm gắn về vị trí sinh ra op. */
-export const checkSpineOps = (spine: Spine, cr: Pick<IChangeRequest, "cr_id">, locations: CheckLocation[]): Map<string, VerifyViolation[]> => {
+/** `exempt`: vị trí không chịu kiểm luật (sửa chữ ở mục ngoài phạm vi) — lỗi đỏ mới không gắn vào chúng. */
+export const checkSpineOps = (
+  spine: Spine,
+  cr: Pick<IChangeRequest, "cr_id">,
+  locations: CheckLocation[],
+  exempt: ReadonlySet<string> = new Set()
+): Map<string, VerifyViolation[]> => {
   const out = new Map<string, VerifyViolation[]>()
   const push = (locId: string, v: VerifyViolation) => out.set(locId, [...(out.get(locId) ?? []), v])
   const ops: Op[] = []
@@ -159,13 +187,30 @@ export const checkSpineOps = (spine: Spine, cr: Pick<IChangeRequest, "cr_id">, l
     const newRed = runDeterministicCheck(plan.spine, [], { ruleProfile: MODE1_RULE_PROFILE }).filter(
       (c) => c.level === "red" && c.rule_id !== "diagram_stale" && !before.has(flagKey(c))
     )
-    for (const c of newRed) for (const locId of new Set(owner)) push(locId, { rule: "new_red_flag", message: `Đề xuất làm phát sinh lỗi đỏ mới: ${ruleLabel(c.rule_id) ? `${ruleLabel(c.rule_id)} - ` : ""}${c.message}` })
+    for (const c of newRed) for (const locId of new Set(owner.filter((o) => !exempt.has(o)))) push(locId, { rule: "new_red_flag", message: `Đề xuất làm phát sinh lỗi đỏ mới: ${ruleLabel(c.rule_id) ? `${ruleLabel(c.rule_id)} - ` : ""}${c.message}` })
   } catch (err) {
     if (!(err instanceof TransactionRejectedError)) throw err
     for (const v of err.violations) {
       const locId = v.op_index !== undefined ? owner[v.op_index] : undefined
       for (const id of locId ? [locId] : [...new Set(owner)]) push(id, { rule: v.rule, message: humanizeText(v.message), ...(v.path ? { path: v.path } : {}) })
     }
+  }
+  return out
+}
+
+/**
+ * C-6 (BF §3.2): kiểm lại toàn bộ op của CR trên nội dung **hiện tại** của Spine ngay trước khi ghi — chạy khô + bất biến +
+ * lỗi đỏ mới (so trước / sau, như lúc kiểm C-5). Trả lỗi theo vị trí sau khi trừ lỗi BA đã giữ theo ý mình và vị trí ngoài
+ * phạm vi; rỗng ⇒ ghi được. Không gọi AI.
+ */
+export const recheckBeforeWrite = async (cr: IChangeRequest, locations: IChangeLocation[], spine: Spine): Promise<Map<string, VerifyViolation[]>> => {
+  const outOfScope = await loadOutOfScopeSections(String(cr.projectId))
+  const exempt = new Set(locations.filter((l) => outOfScopeKind(spine, l, outOfScope) === "text").map((l) => l.location_id))
+  const out = new Map<string, VerifyViolation[]>()
+  for (const [locId, vs] of checkSpineOps(spine, cr, locations, exempt)) {
+    const loc = locations.find((l) => l.location_id === locId)
+    const left = withoutKept(vs, loc?.kept_violations ?? [])
+    if (left.length) out.set(locId, left)
   }
   return out
 }
@@ -251,8 +296,13 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
 
   // QLHS 11/11 bug #17: chữ mới phải cùng ngôn ngữ tài liệu — lệch ⇒ vi phạm, AI làm lại như mọi lỗi kiểm code
   const language = await crDocumentLanguage(String(cr.projectId), spine)
-  const violations = new Map(locations.map((l) => [l.location_id, checkLocation(cr, l, spine, locks, language)]))
-  for (const [locId, vs] of checkSpineOps(spine, cr, locations)) violations.set(locId, [...(violations.get(locId) ?? []), ...vs])
+  const outOfScope = await loadOutOfScopeSections(String(cr.projectId))
+  const scopeOf = (l: IChangeLocation) => outOfScopeKind(spine, l, outOfScope)
+  const violations = new Map(locations.map((l) => [l.location_id, checkLocation(cr, l, spine, locks, language, scopeOf(l))]))
+  const exempt = new Set(locations.filter((l) => scopeOf(l) === "text").map((l) => l.location_id))
+  for (const [locId, vs] of checkSpineOps(spine, cr, locations, exempt)) violations.set(locId, [...(violations.get(locId) ?? []), ...vs])
+  // C-5 "giữ theo ý mình": lỗi luật BA đã giữ không tính (cờ đỏ thật hiện sau khi ghi)
+  for (const l of locations) if (l.kept_violations.length) violations.set(l.location_id, withoutKept(violations.get(l.location_id) ?? [], l.kept_violations))
 
   // AI consistency (FLF-307): chỉ khi cả CR đã qua kiểm code — vòng nào còn trượt thì AI làm lại, nhận xét lúc đó vô
   // ích. Không vị trí nào đổi đề xuất kể từ lần kiểm trước (`verify` còn nguyên) ⇒ giữ nhận xét cũ, không gọi lại: mỗi
@@ -314,15 +364,24 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
   }
   let next: "ready_to_submit" | "proposing" | "manual_fix" = "ready_to_submit"
   if (failing.length) {
-    next = failing.some((l) => l.manual || l.redo_count >= MAX_REDO_PER_LOCATION) ? "manual_fix" : "proposing"
+    // Lỗi luật ở chỗ BA đã "Vẫn làm" ⇒ hỏi BA ngay (giữ theo ý mình hoặc đổi hướng), không tốn lượt AI làm lại
+    const keptIntentFails = failing.some((l) => l.kept_intent && isKeepable(l.verify?.violations ?? []))
+    next = keptIntentFails || failing.some((l) => l.manual || l.redo_count >= MAX_REDO_PER_LOCATION) ? "manual_fix" : "proposing"
     if (next === "proposing") for (const l of failing) l.redo_count += 1
   }
   await Promise.all(locations.map((l) => l.save()))
   await transitionCr(cr, next)
   // FLF-337: mức "Chỉ ở mốc chốt" sau baseline — CR qua C-5 (Code + AI không phàn nàn) tự xác nhận, ghi vào bản nháp (C-6 FLF-330).
   // Nguồn + người yêu cầu đã bắt buộc lúc tạo; Lead duyệt gói (C-7) vẫn là cổng cứng. AI có nhận xét ⇒ để BA xem.
-  if (next === "ready_to_submit" && spine.project.review_mode === "milestones" && !locations.some((l) => (l.verify?.ai_flags?.length ?? 0) > 0)) {
+  // BF §3.2 mức duyệt: CR có xoá nội dung, có cảnh báo AI chưa quyết hoặc có lỗi luật BA giữ theo ý mình luôn dừng chờ BA.
+  const autoSubmit =
+    next === "ready_to_submit" &&
+    spine.project.review_mode === "milestones" &&
+    !locations.some((l) => (l.verify?.ai_flags?.length ?? 0) > 0 || hasRemoveOp(l.proposal) || hasPendingWarning(l) || l.kept_violations.length > 0)
+  if (autoSubmit) {
     await submitCr(cr, userId)
+    // Kiểm lại lúc ghi thấy lỗi mới ⇒ CR quay về `manual_fix`, không ghi: không báo "tự ghi"
+    if (cr.status !== "written") return
     await recordAutoPass(String(cr.projectId), `C-6:${cr.cr_id}`, "Chỉ ở mốc chốt: change request qua kiểm tự ghi vào bản nháp", `${cr.cr_id} ${cr.title}`)
   }
 }

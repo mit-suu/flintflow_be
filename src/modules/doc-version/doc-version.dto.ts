@@ -5,7 +5,7 @@
 
 import { z } from "zod"
 import { baselineSchema } from "../spine/spine.schema.js"
-import { blockDiffEntrySchema, blockDiffSummarySchema, docBlockDtoSchema } from "../import/import.dto.js"
+import { blockDiffEntrySchema, blockDiffSummarySchema, diffSectionStatSchema, docBlockDtoSchema } from "../import/import.dto.js"
 import { DOC_VERSION_PATTERN } from "./versioning.js"
 import { DOC_VERSION_KINDS } from "./doc-version.constants.js"
 
@@ -121,7 +121,8 @@ export const compareResponseSchema = z.object({
   from: docVersionString,
   to: docVersionString,
   summary: blockDiffSummarySchema,
-  blocks: z.array(blockDiffEntrySchema)
+  blocks: z.array(blockDiffEntrySchema),
+  sections: z.array(diffSectionStatSchema)
 })
 
 export const releaseResponseSchema = z.object({

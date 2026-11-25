@@ -24,6 +24,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { buildDocumentContext, stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
 import { stepDocumentQuery } from "./step-document-query.js"
+import { loadFixComments } from "./step-comments.js"
 import { ChatSession } from "../project/chat-session.model.js"
 import { DOCUMENTS_READ, getStep, orderedSteps } from "./step-registry.js"
 import { buildTemplateStepContext, loadTemplateContext } from "./template-guidance.js"
@@ -487,6 +488,9 @@ export const buildStepContext = async (projectId: string, stepId: string, option
   }
   const componentLevel = sequenceProjection(spine, stepId, await loadSequenceLevel(projectId, stepId))
   if (Object.keys(componentLevel).length) projected.projection = { ...projected.projection, ...componentLevel }
+  // business-flow §3.5: step mở lại vì comment "đã sửa" ⇒ lượt soạn lại thấy đúng các comment đó
+  const fixComments = await loadFixComments(projectId, spine, stepId)
+  if (fixComments.length) projected.projection = { ...projected.projection, fix_comments: fixComments }
   const transcriptTail = await loadTranscriptTail(options.sessionId, stepId)
   const base = JSON.stringify(projected.projection) + JSON.stringify(projected.addendum) + transcriptTail
   // FLF-393: tài liệu vượt trần ⇒ chỉ đoạn của section step nuôi + đoạn BM25 theo nhãn step và câu trả lời của user

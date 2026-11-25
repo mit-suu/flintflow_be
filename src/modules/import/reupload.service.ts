@@ -9,7 +9,7 @@
 
 import { createHash } from "node:crypto"
 import type { OoxmlBlock } from "../docx-ooxml/index.js"
-import { diffBlockLists } from "../doc-version/block-diff.js"
+import { diffBlockLists, toDiffBlocks } from "../doc-version/block-diff.js"
 import { docFileStore } from "../doc-version/doc-file.store.js"
 import { fileBlocks, fileBlocksOfVersion, latestDocVersion } from "../doc-version/doc-version.service.js"
 import type { ReuploadDiffDto } from "./import.dto.js"
@@ -32,8 +32,13 @@ export const toReuploadDto = (d: IReuploadDiff): ReuploadDiffDto => {
       block_id: b.block_id ?? null,
       change: b.change,
       ...(b.before !== undefined ? { before: b.before } : {}),
-      ...(b.after !== undefined ? { after: b.after } : {})
-    }))
+      ...(b.after !== undefined ? { after: b.after } : {}),
+      ...(b.section !== undefined && b.section !== null ? { section: b.section } : {}),
+      ...(b.section_key !== undefined && b.section_key !== null ? { section_key: b.section_key } : {}),
+      ...(b.kind ? { kind: b.kind } : {}),
+      ...(b.table ? { table: b.table } : {})
+    })),
+    sections: (d.sections ?? []).map((s) => ({ title: s.title, ...(s.key ? { key: s.key } : {}), unchanged: s.unchanged }))
   }
 }
 
@@ -58,8 +63,7 @@ export const reupload = async (projectId: string, userId: string, file: Uploaded
     throw new Mode1Error("IMPORT_REUPLOAD_NO_STAMP", "File không mang stamp của project - chỉ file tải từ FlintFlow mới so khác biệt được")
   }
 
-  const lite = (x: OoxmlBlock[]) => x.map((b) => ({ block_id: null, para_id: b.para_id, text: b.text, text_hash: b.text_hash }))
-  const { blocks } = diffBlockLists(lite(await fileBlocksOfVersion(version)), lite(await fileBlocks(file.buffer)))
+  const { blocks, sections } = diffBlockLists(toDiffBlocks(await fileBlocksOfVersion(version)), toDiffBlocks(await fileBlocks(file.buffer)))
   const fileRef = await docFileStore().save(file.buffer, { projectId, kind: "reupload", name: file.originalname })
   return ReuploadDiff.create({
     projectId,
@@ -68,6 +72,7 @@ export const reupload = async (projectId: string, userId: string, file: Uploaded
     original_name: file.originalname,
     against_version: version.version,
     blocks,
+    sections,
     created_by: userId
   })
 }

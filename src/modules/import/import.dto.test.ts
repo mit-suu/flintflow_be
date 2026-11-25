@@ -176,7 +176,8 @@ describe("import.dto - response", () => {
       against_version: "0.1",
       created_at: AT,
       summary: { added: 1, removed: 0, modified: 1, moved: 0 },
-      blocks: [{ block_id: null, change: "added", after: "New paragraph" }, { block_id: "B0007", change: "modified", before: "a", after: "b" }]
+      blocks: [{ block_id: null, change: "added", after: "New paragraph" }, { block_id: "B0007", change: "modified", before: "a", after: "b" }],
+      sections: []
     }
     expect(reuploadDiffDtoSchema.safeParse(diff).success).toBe(true)
   })

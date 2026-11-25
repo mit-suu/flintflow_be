@@ -62,7 +62,7 @@ const migrate = async (token: string, projectId: string, body: object): Promise<
   await request(app).post(`${url}/${id}/confirm-mapping`).set(H(token))
   const dto = (await request(app).get(`${url}/${id}`).set(H(token))).body.data as MigrationDto
   const items = [...dto.groups.extra, ...dto.groups.conflict]
-  const decisions = dto.undecided.map((d) => {
+  const decisions = [...dto.groups.extra, ...dto.groups.conflict].map((i) => i.id).map((d) => {
     const item = items.find((i) => i.id === d)!
     const safe = item.choices.filter((c) => !item.ai_choices.includes(c) && !c.startsWith("move_to:"))
     return { id: d, choice: safe.find((c) => c === "keep_custom") ?? safe[0] }

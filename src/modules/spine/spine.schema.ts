@@ -20,6 +20,7 @@ const id = z.string().min(1)
 const isoDateTime = z.iso.datetime({ offset: true })
 const nonNegativeInt = z.number().int().min(0)
 const priority = z.enum(["must", "should", "could", "wont"])
+const sourceRef = z.string().nullable().optional()
 
 // ─── project / progress / steps ──────────────────────────────────
 
@@ -254,7 +255,9 @@ export const functionSchema = z.strictObject({
   // FLF-418: message giữa actor / màn / control / entity (sơ đồ tuần tự mức thành phần). Chỉ có khi dự án chọn mức component
   component_interactions: z.array(componentInteractionSchema).optional(),
   /** FLF-365: bản phát hành của yêu cầu (phân bổ yêu cầu, "1.0"; "deferred" = hoãn). Thiếu = chưa phân bổ. */
-  release: z.string().nullable().optional()
+  release: z.string().nullable().optional(),
+  /** Nguồn của yêu cầu do AI soạn (tài liệu, đoạn hoặc người yêu cầu). Thiếu = chưa ghi nguồn; Spine cũ không có. */
+  source_ref: sourceRef
 })
 
 export const nfrSchema = z.strictObject({
@@ -266,14 +269,16 @@ export const nfrSchema = z.strictObject({
   threshold: z.string().optional(),
   priority: priority.nullable(),
   /** FLF-365: như `functionSchema.release`. */
-  release: z.string().nullable().optional()
+  release: z.string().nullable().optional(),
+  source_ref: sourceRef
 })
 
 export const businessRuleSchema = z.strictObject({
   id,
   tier: z.enum(["high", "detail"]),
   statement: z.string(),
-  source_validation_ids: z.array(id)
+  source_validation_ids: z.array(id),
+  source_ref: sourceRef
 })
 
 export const commonRequirementSchema = z.strictObject({

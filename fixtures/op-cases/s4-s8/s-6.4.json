@@ -13,7 +13,8 @@
         "kind": "quantitative",
         "metric": "p95 response time",
         "threshold": "<= 2 s",
-        "priority": null
+        "priority": null,
+        "source_ref": "Client brief"
       },
       "reason": "S-6 performance"
     },
@@ -27,7 +28,8 @@
         "kind": "quantitative",
         "metric": "p95 step completion time",
         "threshold": "<= 60 s",
-        "priority": null
+        "priority": null,
+        "source_ref": "Client brief"
       },
       "reason": "S-6 performance"
     },
@@ -41,7 +43,8 @@
         "kind": "quantitative",
         "metric": "Concurrent users",
         "threshold": ">= 500",
-        "priority": null
+        "priority": null,
+        "source_ref": "Client brief"
       },
       "reason": "S-6 performance"
     }

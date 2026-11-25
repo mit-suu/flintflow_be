@@ -11,6 +11,7 @@
 
 import type { CrSourceKind } from "../change-request/change-request.constants.js"
 import { Project } from "../project/project.model.js"
+import { Baseline } from "../spine/baseline.model.js"
 import * as flagsService from "../spine/flags.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { Mode1Error, type Mode1ErrorCode } from "./mode1.errors.js"
@@ -164,7 +165,13 @@ export const mode1RuleProfileFor = async (projectId: string): Promise<RuleProfil
 
 /** Project mode 1 đã import xong (có baseline v0 trở lên) — từ đây mọi sửa phải qua CR. */
 export const changesRequireCr = async (projectId: string): Promise<boolean> => {
-  if (!(await isMode1Project(projectId))) return false
+  const project = await Project.findById(projectId).select("mode").lean()
+  if (project?.mode !== "import") {
+    // business-flow §3.2: sau baseline 1.0 mọi chế độ sửa qua C-*. Dự án tạo mới chuyển sang luồng này ngay lúc Lead ký;
+    // chuyển đổi lỗi thì dự án còn `fpt` đã ký (mở dự án sẽ chạy lại chuyển đổi) ⇒ vẫn bắt qua CR, không để sửa thẳng.
+    // Cùng điều kiện `needsConversion` (convert-from-fpt) nhưng không nạp service đó: nó kéo theo render / doc-version.
+    return !!project && (project.mode ?? "fpt") === "fpt" && !!(await Baseline.exists({ projectId, type: "generated" }))
+  }
   const spine = await spineRepository.get(projectId)
   return (spine?.baselines.length ?? 0) > 0
 }

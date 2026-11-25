@@ -73,7 +73,8 @@ describe("chế độ 3 - mẫu bắt buộc", () => {
     const open = spine.flags.filter((f) => !f.resolved_at)
     const empty = open.filter((f) => f.rule_id === "template_section_empty")
     expect(empty).toHaveLength(1)
-    expect(empty[0]).toMatchObject({ level: "yellow" })
+    // Theo flow 18/11: mục bắt buộc của mẫu còn trống là cờ đỏ, không waive
+    expect(empty[0]).toMatchObject({ level: "red" })
     expect(spine.custom_sections.find((c) => `custom:${c.id}` === empty[0].section_id)?.heading).toContain("Document Conventions")
     const absent = open.filter((f) => f.rule_id === "template_section_absent")
     expect(absent.length).toBeGreaterThan(0)

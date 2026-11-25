@@ -13,7 +13,8 @@
         "source_validation_ids": [
           "FN101-V2",
           "FN201-V2"
-        ]
+        ],
+        "source_ref": "Client brief"
       },
       "reason": "S-7.1 merged from two function validations"
     }

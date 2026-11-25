@@ -4,7 +4,7 @@
  * `test/integration/mode1/clarify.int.test.ts`.
  */
 import { describe, expect, it } from "vitest"
-import { sourceRefSections } from "./clarify.service.js"
+import { forcedQuestions, sourceRefSections } from "./clarify.service.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { IChangeRequest } from "./change-request.model.js"
@@ -146,5 +146,33 @@ describe("sourceRefSections — nút Viết của mục thiếu", () => {
     expect(sourceRefSections("fixed:9.9", headings)).toEqual([])
     expect(sourceRefSections("group:2", headings)).toEqual([])
     expect(sourceRefSections(null, headings)).toEqual([])
+  })
+})
+
+describe("C-2 câu hỏi bắt buộc (mâu thuẫn / cảnh báo) không lặp vô tận", () => {
+  const round = (questions: string[], warning_questions: number[] = []) => ({ round: 1, questions, answers: [], suggestions: [], warning_questions })
+  const out = (contradiction: string, warning: string) => ({
+    contradictions: [{ question: contradiction, suggestions: [] }],
+    warnings: [{ question: warning, suggestions: [] }]
+  })
+
+  it("lần đầu: hỏi cả mâu thuẫn lẫn cảnh báo, cảnh báo có lựa chọn mặc định", () => {
+    const got = forcedQuestions({ clarifications: [] } as unknown as Pick<IChangeRequest, "clarifications">, out("A mâu thuẫn B?", "100 giờ là quá lâu?"), 0, "vi")
+    expect(got.contradictions.map((c) => c.question)).toEqual(["A mâu thuẫn B?", "100 giờ là quá lâu?"])
+    expect(got.contradictions[1]?.suggestions).toEqual(["Vẫn làm", "Bỏ yêu cầu này"])
+    expect(got.warningKeys.size).toBe(1)
+  })
+
+  it("đã cảnh báo ở vòng trước: cảnh báo diễn đạt lại không hỏi nữa; mâu thuẫn mới vẫn hỏi", () => {
+    const cr = { clarifications: [round(["100 giờ là quá lâu?"], [0])] } as unknown as Pick<IChangeRequest, "clarifications">
+    const got = forcedQuestions(cr, out("C mâu thuẫn D?", "Thời gian 100 giờ có hợp lý không?"), 1, "vi")
+    expect(got.contradictions.map((c) => c.question)).toEqual(["C mâu thuẫn D?"])
+    expect(got.warningKeys.size).toBe(0)
+  })
+
+  it(`quá ${MAX_CLARIFY_ROUNDS} vòng: không hỏi thêm gì, đi tiếp`, () => {
+    const cr = { clarifications: Array.from({ length: MAX_CLARIFY_ROUNDS + 1 }, (_, i) => round([`Q${i}`])) } as unknown as Pick<IChangeRequest, "clarifications">
+    const got = forcedQuestions(cr, out("Lại mâu thuẫn, diễn đạt khác?", "Cảnh báo mới?"), MAX_CLARIFY_ROUNDS + 1, "vi")
+    expect(got.contradictions).toEqual([])
   })
 })

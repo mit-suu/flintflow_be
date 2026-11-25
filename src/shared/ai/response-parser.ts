@@ -210,9 +210,44 @@ export const changeInstructionSchema = z
     choices: z.array(z.string().trim().min(1).max(80)).max(6).optional(),
     /** FLF-311: tên use case model TỰ đề xuất thêm (ngoài yêu cầu) để khớp dự án — người dùng giữ hay bỏ. */
     proposed_use_cases: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
+    /**
+     * Câu trả lời cho câu hỏi giao diện do model đọc (số theo `use_case_context.ui_asked`): bỏ / màn riêng / popup / màn
+     * có sẵn / dùng chung. Code kiểm số và kiểu rồi dùng thay cách đọc bằng luật (`uiPlanFromModel`). Sai hình ⇒ bỏ qua
+     * trường này (không làm hỏng cả lô).
+     */
+    ui_plan: z
+      .array(
+        z.object({
+          index: z.number().int(),
+          drop: z.boolean().optional(),
+          ui: z.enum(["own", "popup", "shared", "existing"]).optional(),
+          screen: z.string().trim().max(120).optional(),
+          group: z.number().int().optional(),
+          merge: z.boolean().optional(),
+          popup_screens: z.array(z.string().trim().max(120)).max(10).optional()
+        })
+      )
+      .max(30)
+      .optional()
+      .catch(undefined),
     txn: z.string().optional(),
+    /** Lệnh nhiều ý: ý rõ ra op ngay, ý mơ hồ gom vào MỘT `clarification_needed` — cả hai có thể cùng có mặt. */
     ops: z.array(opSchema).optional(),
     notes: z.string().optional(),
+    /** Yêu cầu không hợp lý (theo ISO 29148 / điều đã chốt): lý do ngắn, ngôn ngữ trả lời. Người dùng vẫn có thể bấm "Vẫn làm". */
+    warning: z.string().trim().min(1).max(400).optional(),
+    /** Chỗ AI tự đoán vì yêu cầu chưa nói rõ (sau khi đã hỏi đủ lượt). `path` là chỗ trong tài liệu điều đoán nói về. */
+    assumptions: z
+      .array(
+        z.object({
+          path: z.string().min(1),
+          statement: z.string().trim().min(1),
+          statement_vi: z.string().trim().min(1).max(200).optional(),
+          rationale: z.string().trim().min(1).optional()
+        })
+      )
+      .max(6)
+      .optional(),
     localized: localizedField
   })
   .refine((v) => Boolean(v.clarification_needed) || (v.ops?.length ?? 0) > 0, {
@@ -359,6 +394,24 @@ export const crClarifySchema = z
       .array(z.object({ question: z.string().trim().min(1), suggestions: z.array(z.string().min(1)).max(4).default([]) }))
       .max(5)
       .default([]),
+    /**
+     * Yêu cầu không hợp lý (BF §3.2 C-4): cảnh báo + lý do, hỏi người yêu cầu "Vẫn làm" hay bỏ. Cùng dạng và cùng cách hỏi
+     * một lần như `contradictions`; không tính vào `ambiguous`.
+     */
+    warnings: z
+      .array(z.object({ question: z.string().trim().min(1), suggestions: z.array(z.string().min(1)).max(4).default([]) }))
+      .max(3)
+      .default([]),
+    /**
+     * Người yêu cầu đã trả lời một cảnh báo ở vòng trước và câu trả lời có nghĩa là vẫn làm (kể cả lời tự gõ như "cứ làm
+     * đi, khách chốt rồi") ⇒ `true`. Code còn nhận khi người yêu cầu bấm đúng gợi ý đầu ("Vẫn làm"). Sai hình ⇒ bỏ qua.
+     */
+    warning_accepted: z.boolean().optional().catch(undefined),
+    /**
+     * Câu trả lời vòng vừa rồi, đọc như người đọc, là lời rút lại cả yêu cầu ("thôi khách đổi ý rồi, khỏi làm") ⇒ `true`.
+     * Code chỉ hỏi người dùng có huỷ CR không, không tự huỷ. Sai hình ⇒ bỏ qua.
+     */
+    withdraw: z.boolean().optional().catch(undefined),
     targets: z.object({
       entity_paths: z.array(z.string().min(1)).default([]),
       keywords: z.array(z.string().min(1)).default([])
@@ -384,7 +437,9 @@ export const crProposeSchema = z.object({
         comment_text: z.string().min(1).optional(),
         spine_ops: z.array(opSchema).default([]),
         /** Mode 1 v3 phase 7: dữ kiện model tự giả định khi viết đề xuất này. */
-        assumptions: z.array(z.string().min(1)).max(10).default([])
+        assumptions: z.array(z.string().min(1)).max(10).default([]),
+        /** C-4: yêu cầu không hợp lý ở chỗ này ⇒ cảnh báo + lý do (kết luận `comment`, chưa soạn) cho tới khi BA chọn "Vẫn làm". */
+        warning: z.object({ text: z.string().trim().min(1), reason: z.string().trim().min(1) }).nullable().optional()
       })
       .refine((l) => l.conclusion !== "edit" || l.spine_ops.length > 0, { message: "edit cần spine_ops" })
       .refine((l) => l.conclusion !== "comment" || l.comment_text !== undefined, { message: "comment cần comment_text" })
