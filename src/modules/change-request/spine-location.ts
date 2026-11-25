@@ -20,6 +20,7 @@ import type { Spine } from "../spine/spine.types.js"
 import type { LocationFoundBy } from "./change-request.constants.js"
 import { contentSlot } from "../import/content-slots.js"
 import { COUNT_COLLECTIONS, findCountMentions, type CountCollection } from "./count-mentions.js"
+import { literalHits, literalValues, type Literal } from "./literal-values.js"
 
 export const PROJECT_PATH = "project"
 
@@ -299,11 +300,17 @@ export interface VectorCandidate {
  * C-3: gom vị trí từ đích C-2 (`targets` — path phần tử hoặc field) và từ khoá. Đích không còn trong Spine bị bỏ.
  * `vector` khác rỗng ⇒ ứng viên gần nghĩa thay nguồn từ khoá (từ khoá chỉ còn là dự phòng khi index không dùng được).
  */
+export interface FindOptions {
+  /** FLF-483: giá trị cụ thể của CR (`literalValues`) - phần tử ghi giá trị đó luôn là vị trí, không qua xếp hạng / trần từ khoá. */
+  literals?: readonly Literal[]
+}
+
 export const findSpineLocations = (
   spine: Spine,
   targets: readonly string[],
   keywords: readonly string[],
-  vector: readonly VectorCandidate[] = []
+  vector: readonly VectorCandidate[] = [],
+  options: FindOptions = {}
 ): FoundLocation[] => {
   targets = expandSlotTargets(targets)
   const elements = listElements(spine)
@@ -355,9 +362,18 @@ export const findSpineLocations = (
 
   // FLF-375: từ khoá xếp hạng bằng BM25 (thay regex có / không) — chỉ giữ phần tử điểm đủ cao so với phần tử khớp nhất,
   // bớt chỗ "không liên quan" AI phải đọc; có vector thì KHÔNG bỏ từ khoá nữa mà trộn hai nguồn bằng RRF
-  const keywordRanked = rankByKeywords(elements, keywords)
+  // FLF-483: từ khoá là giá trị cụ thể ("5 triệu") đã đi đường riêng bên dưới - khỏi đếm hai lần và khỏi chiếm chỗ trong trần
+  const literals = options.literals ?? []
+  const plainKeywords = literals.length ? keywords.filter((k) => literalValues(k).length === 0) : keywords
+  const keywordRanked = rankByKeywords(elements, plainKeywords)
   const keywordScores = new Map(keywordRanked.map((r) => [r.path, r.score]))
   for (const r of keywordRanked) hit(r.path, "keyword")
+  // FLF-483 (ChoViet #4): mọi phần tử ghi giá trị cụ thể của CR, không tính vào `KEYWORD_MAX_HITS`, điểm cao nhất
+  const literalPaths = literalHits(elements, literals)
+  for (const path of literalPaths) {
+    hit(path, "keyword")
+    keywordScores.set(path, 1)
+  }
   const scores = new Map<string, number>()
   for (const v of vector) {
     if (!exists.has(v.ref)) continue
@@ -369,6 +385,7 @@ export const findSpineLocations = (
     [...scores.entries()].sort((a, b) => b[1] - a[1]).map(([path]) => path)
   ])
 
+  for (const path of literalPaths) fused.set(path, 1) // RRF chỉ cỡ 0.03 ⇒ 1 luôn đứng đầu khi phải cắt bớt
   const found: FoundLocation[] = elements
     .filter((e) => hits.has(e.path))
     .map((e) => {
