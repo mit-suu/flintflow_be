@@ -158,6 +158,15 @@ export const humanizeText = (text: string): string => text.replace(PATH_IN_TEXT,
 type NamedElementSource = Partial<Pick<Spine, "screens" | "actors" | "roles" | "features" | "functions" | "entities">>
 const NAMED_COLLECTIONS = ["screens", "actors", "roles", "features", "functions", "entities"] as const
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+const idKey = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "")
+/** Tên dùng được để thay mã: không rỗng, không trùng mã (sau chuẩn hoá), không chứa mã - kẻo ra "BR-07 (BR-07)". */
+const usableName = (id: string, name: string | undefined | null): boolean => {
+  const n = name?.trim()
+  return !!n && idKey(n) !== idKey(id) && !n.toLowerCase().includes(id.toLowerCase())
+}
+/** "X (X)" (cùng chữ sau chuẩn hoá, có / không nháy) ⇒ "X". */
+const ECHO_PAIR = /(['"‘“][^'"’”\n]+['"’”]|[\p{L}\p{N}][\w.-]*)\s*\(\s*['"‘“]?([^'"’”()\n]+?)['"’”]?\s*\)/gu
+const collapseEcho = (text: string): string => text.replace(ECHO_PAIR, (m, first: string, again: string) => (idKey(first) === idKey(again) ? first : m))
 
 /**
  * Câu model viết cho người đọc (câu hỏi làm rõ khi sửa mục) mà vẫn chép mã phần tử: `S02` ⇒ `'Reset Password'`. Mã
@@ -167,18 +176,18 @@ const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 export const nameElementIds = (text: string, spine: NamedElementSource, extra?: ReadonlyMap<string, string>): string => {
   const names = new Map<string, string>()
   for (const key of NAMED_COLLECTIONS) {
-    for (const el of spine[key] ?? []) if (el.name?.trim() && !names.has(el.id)) names.set(el.id, el.name.trim())
+    for (const el of spine[key] ?? []) if (usableName(el.id, el.name) && !names.has(el.id)) names.set(el.id, el.name!.trim())
   }
   // FLF-474: tên của phần tử không có field `name` (mục riêng, quy tắc, thông báo…) do nơi gọi dựng sẵn (`internalElementNames`)
-  for (const [id, name] of extra ?? []) if (name.trim() && !names.has(id)) names.set(id, name.trim())
-  if (names.size === 0) return text
+  for (const [id, name] of extra ?? []) if (usableName(id, name) && !names.has(id)) names.set(id, name.trim())
+  if (names.size === 0) return collapseEcho(text)
   const alt = [...names.keys()].sort((a, b) => b.length - a.length).map(escapeRe).join("|")
   const quoted = (id: string) => `'${names.get(id)}'`
 
   const withoutEcho = text.replace(new RegExp(`\\s*\\((${alt})\\)`, "g"), (match, id: string, offset: number) =>
     text.slice(Math.max(0, offset - 80), offset).toLowerCase().includes(names.get(id)!.toLowerCase()) ? "" : ` ${quoted(id)}`
   )
-  return withoutEcho.replace(new RegExp(`['"‘“]?(?<![\\w.-])(${alt})(?![\\w-]|\\.\\d)['"’”]?`, "g"), (_m, id: string) => quoted(id))
+  return collapseEcho(withoutEcho.replace(new RegExp(`['"‘“]?(?<![\\w.-])(${alt})(?![\\w-]|\\.\\d)['"’”]?`, "g"), (_m, id: string) => quoted(id)))
 }
 
 /** Mã nội bộ do bộ cấp mã sinh (`BR07`, `MSG03`, `N02`), khác mã tài liệu có gạch nối (`BR-75`) là mã người đọc thấy trong tài liệu. */
