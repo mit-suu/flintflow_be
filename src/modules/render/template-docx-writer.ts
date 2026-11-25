@@ -2,6 +2,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { DocxPackage, MAIN_PART, readBlocks, writeStamp } from "../docx-ooxml/index.js"
 import { NS, isW, wAll, wAttr, wEl, wKid, wKids, wText } from "../docx-ooxml/xml.js"
 import { assignBlockIds, parseDocument } from "../import/parse.service.js"
+import { projectCode } from "../project/project-code.js"
 import { exportLineage, writeDocx } from "./docx-writer.js"
 import type { Block, InlineRun, RenderedDocument, RenderedSection } from "./rendered-document.types.js"
 import { isInstructionText } from "../../shared/utils/instruction-text.js"
@@ -359,7 +360,7 @@ export async function writeTemplateDocx(
   const addedIds = new Set(wAll(xml, "bookmarkStart").filter((b) => !originalBookmarkIds.has(wAttr(b, "id"))).map((b) => wAttr(b, "id")))
   for (const local of ["bookmarkStart", "bookmarkEnd"]) for (const bookmark of wAll(xml, local)) if (addedIds.has(wAttr(bookmark, "id"))) bookmark.parentNode?.removeChild(bookmark)
   const lineage = exportLineage(doc)
-  await writeStamp(pkg, { project_id: doc.projectId, version: doc.version, source: doc.source, base_version: lineage.base, kind: lineage.release ? "release" : "draft" })
+  await writeStamp(pkg, { project_id: doc.projectId, version: doc.version, source: doc.source, base_version: lineage.base, kind: lineage.release ? "release" : "draft", project_code: projectCode(doc.projectId) })
   return pkg.toBuffer()
 }
 

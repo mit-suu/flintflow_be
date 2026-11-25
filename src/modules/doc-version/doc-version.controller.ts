@@ -12,19 +12,20 @@ import { compareQuerySchema, downloadQuerySchema, releaseRequestSchema, requestC
 import { getPackage, requestChanges, settleAfterRelease, submitPackage, type PackageActor } from "./review-package.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { release } from "./release.service.js"
-import { compareVersions, downloadVersion, listVersions, toVersionDto, versionBlocks } from "./versions.service.js"
+import { assertViewerVersion, compareVersions, downloadVersion, listVersions, toVersionDto, versionBlocks } from "./versions.service.js"
 import { requireDocVersion } from "./doc-version.service.js"
 import { isStableDocVersion } from "./versioning.js"
 import { isViewer } from "../../shared/auth/viewer-read-scope.middleware.js"
 
 export const list = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
-  return sendSuccess(res, 200, await listVersions(auth.projectId, auth.project))
+  return sendSuccess(res, 200, await listVersions(auth.projectId, auth.project, { viewer: isViewer(req) }))
 })
 
 export const blocks = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const { v } = parseInput(versionParamsSchema, req.params)
+  if (isViewer(req)) await assertViewerVersion(auth.projectId, v)
   return sendSuccess(res, 200, await versionBlocks(auth.projectId, v))
 })
 
@@ -32,8 +33,8 @@ export const download = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const { v } = parseInput(versionParamsSchema, req.params)
   const { variant, format, lang } = parseInput(downloadQuerySchema, req.query)
-  // UC-50: Viewer chỉ tải bản đã phát hành (kể cả v0) — không bản nháp 0.x, không bản đánh dấu theo CR
-  if (isViewer(req) && (variant === "tracked" || !isStableDocVersion(await requireDocVersion(auth.projectId, v)))) {
+  // UC-50: Viewer chỉ tải bản đã phát hành (kể cả v0) — không bản nháp 0.x; bản Track Changes của chính bản phát hành thì được (FLF-466)
+  if (isViewer(req) && (!isStableDocVersion(await requireDocVersion(auth.projectId, v)))) {
     throw new ApiError(403, "Viewer chỉ tải được phiên bản đã phát hành.", "ORG_ROLE_FORBIDDEN")
   }
   if (format === "pdf" && variant === "original") throw new ApiError(400, "File gốc người dùng upload chỉ tải được dạng .docx.", "VALIDATION_ERROR")
@@ -60,6 +61,7 @@ export const download = mode1Handler(async (req, res) => {
 export const compare = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const query = parseInput(compareQuerySchema, req.query)
+  if (isViewer(req)) await assertViewerVersion(auth.projectId, query.from, query.to)
   return sendSuccess(res, 200, await compareVersions(auth.projectId, query.from, query.to))
 })
 

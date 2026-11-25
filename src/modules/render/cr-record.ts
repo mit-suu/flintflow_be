@@ -1,13 +1,8 @@
 /**
- * FLF-411 (U2-6): mô tả dòng §I Record of Changes của một change request theo **ngôn ngữ tài liệu**.
- *
- * Lô ghi của CR mang `reason = "CR-001: <tiêu đề CR>"` — tiêu đề là chữ người dùng gõ (thường là câu chat, vd "Đổi tên hệ
- * thống thành TechMart Store nhé"). Tiêu đề cùng ngôn ngữ tài liệu ⇒ giữ (lời của người dùng); khác ngôn ngữ (câu tiếng Việt
- * trong tài liệu tiếng Anh) ⇒ mô tả dựng tất định từ các thay đổi đã ghi: "CR-001: Update system name; Add use case
- * "Checkout"". Không gọi model, không in mã nội bộ của phần tử (A04, S03) — chỉ tên, hoặc mã tài liệu (UC-01, BR-03).
+ * FLF-411 (U2-6) / FLF-466: mô tả dòng §I Record of Changes của change request theo **ngôn ngữ tài liệu**, dựng tất định từ các thay đổi đã ghi
+ * ("Update system name; Add use case "Checkout""). Không gọi model, không in mã nội bộ của phần tử (A04, S03) — chỉ tên, hoặc mã tài liệu (UC-01, BR-03).
  */
 
-import { hasVietnameseMarks } from "../../shared/i18n/reply-language.js"
 import { isVietnamese, recordTextFor } from "./labels.js"
 import type { Spine } from "../spine/spine.types.js"
 
@@ -58,7 +53,6 @@ const DOCUMENT_ID_ENTITIES: ReadonlySet<string> = new Set(["use_cases", "busines
 /** Số thay đổi nêu trong một dòng; còn lại ghi "and N more changes". */
 const MAX_ITEMS = 3
 
-const CR_REASON = /^(CR-\d{3,}):\s*(.*)$/s
 const TOP = /^([a-z_]+)(?:\[(?:id=)?([^\]]*)\])?(?:\.([a-z_]+))?/
 
 export interface CrRecordChange {
@@ -111,21 +105,10 @@ export const describeCrChanges = (changes: readonly CrRecordChange[], language?:
   return `${items.slice(0, MAX_ITEMS).join("; ")}${more > 0 ? recordTextFor(language).more(more) : ""}`
 }
 
-/** Tiêu đề CR cùng ngôn ngữ tài liệu: tài liệu tiếng Việt ⇔ chữ có dấu tiếng Việt. */
-const fitsLanguage = (text: string, language?: string): boolean => hasVietnameseMarks(text) === isVietnamese(language)
-
 /**
- * Mô tả dòng §I của một CR: `CR-001: <tiêu đề>` khi tiêu đề cùng ngôn ngữ tài liệu, ngược lại `CR-001: <mô tả dựng từ thay
- * đổi>`. Không dựng được (không path nào đọc được) ⇒ `CR-001: Document updated` theo ngôn ngữ tài liệu.
+ * Mô tả một dòng §I của các CR liền nhau cùng loại A / M / D (BF §3.2, FLF-466): `CR-012, CR-013: <thay đổi gì>` — đủ mã các CR trong dòng, phần mô
+ * tả dựng tất định từ chính các thay đổi (tối đa `MAX_ITEMS` mục rồi "và N mục khác"), theo ngôn ngữ tài liệu; **không** chép tiêu đề CR / câu chat / nguồn CR.
+ * Không dựng được (không path nào đọc được) ⇒ `CR-012: Document updated` theo ngôn ngữ tài liệu.
  */
-export const crRecordDescription = (
-  crId: string,
-  reasons: readonly string[],
-  changes: readonly CrRecordChange[],
-  language?: string,
-  spine?: Spine
-): string => {
-  const title = reasons.map((r) => CR_REASON.exec(r)).find((m) => m && m[1] === crId)?.[2]?.trim()
-  if (title && fitsLanguage(title, language)) return `${crId}: ${title}`
-  return `${crId}: ${describeCrChanges(changes, language, spine) ?? recordTextFor(language).documentUpdated}`
-}
+export const crRowDescription = (crIds: readonly string[], changes: readonly CrRecordChange[], language?: string, spine?: Spine): string =>
+  `${[...new Set(crIds)].join(", ")}: ${describeCrChanges(changes, language, spine) ?? recordTextFor(language).documentUpdated}`

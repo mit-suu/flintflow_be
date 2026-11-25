@@ -7,7 +7,7 @@ import { z } from "zod"
 import { baselineSchema } from "../spine/spine.schema.js"
 import { blockDiffEntrySchema, blockDiffSummarySchema, diffSectionStatSchema, docBlockDtoSchema } from "../import/import.dto.js"
 import { DOC_VERSION_PATTERN } from "./versioning.js"
-import { DOC_VERSION_KINDS } from "./doc-version.constants.js"
+import { DOC_VERSION_KINDS, SYSTEM_CHANGE_TYPES } from "./doc-version.constants.js"
 
 const id = z.string().min(1)
 const isoDateTime = z.iso.datetime({ offset: true })
@@ -19,10 +19,14 @@ export const docVersionDtoSchema = z.object({
   based_on: docVersionString.nullable(),
   cr_ids: z.array(z.string()),
   baseline_id: z.string().nullable(),
+  /** FLF-466: chỉ `kind = system_change` (đổi mẫu / hoàn tác / vẽ lại màn); version khác ⇒ `null`. */
+  system_change: z.object({ type: z.enum(SYSTEM_CHANGE_TYPES), ref: z.string(), summary: z.string() }).nullable(),
   /** Release có bản sạch để tải (UC-57). */
   has_clean_file: z.boolean(),
   /** Mode 1 v3: có bản Track Changes của CR (`variant=tracked`). */
   has_tracked_file: z.boolean(),
+  /** FLF-466: release không có bản Track Changes vì sao; có hoặc không áp dụng => `null`. */
+  tracked_unavailable_reason: z.enum(["template_translated", "build_failed"]).nullable(),
   /** Có file gốc người dùng upload (bản import 0.1, FLF-184) — tải qua `variant=original`. */
   has_original_file: z.boolean(),
   /**
@@ -30,6 +34,8 @@ export const docVersionDtoSchema = z.object({
    * chuyển từ mode 2. `false` ⇒ FE ẩn lựa chọn ngôn ngữ.
    */
   other_language_available: z.boolean(),
+  /** FLF-466: mã dự án ngắn (`P` + 6 ký tự cuối `_id`) dùng ghép tên file khi tải. */
+  project_code: z.string().optional(),
   created_by: id,
   created_at: isoDateTime
 })
@@ -46,6 +52,18 @@ export const reviewPackageCrSchema = z.object({
 })
 export type ReviewPackageCrDto = z.infer<typeof reviewPackageCrSchema>
 
+/** FLF-466: mỗi thay đổi hệ thống (đổi mẫu, hoàn tác, vẽ lại / dùng ảnh gốc) một dòng riêng trong Gói duyệt. */
+export const reviewPackageSystemChangeSchema = z.object({
+  /** Số phụ của bản nháp chứa thay đổi này (1.3). */
+  version: docVersionString,
+  type: z.enum(SYSTEM_CHANGE_TYPES),
+  ref: z.string(),
+  summary: z.string(),
+  created_by: z.string(),
+  created_at: isoDateTime
+})
+export type ReviewPackageSystemChangeDto = z.infer<typeof reviewPackageSystemChangeSchema>
+
 /**
  * `GET /projects/:id/review-package` — gói = mọi CR đã ghi kể từ lần phát hành trước (business-flow §3.2).
  * `status`: `drafting` (BA đang ghi) · `pending` (chờ Lead, bản nháp khoá) · `changes_requested` (Lead yêu cầu sửa).
@@ -58,6 +76,10 @@ export const reviewPackageSchema = z.object({
   next_version: docVersionString.nullable(),
   draft_label: z.string(),
   change_requests: z.array(reviewPackageCrSchema),
+  /** FLF-466: thay đổi hệ thống kể từ lần phát hành trước, theo thứ tự ghi. Gói chỉ có mục này vẫn gửi / phát hành được. */
+  system_changes: z.array(reviewPackageSystemChangeSchema),
+  /** FLF-466: phát hành gói này sẽ không có bản Track Changes (`template_translated`: có đổi mẫu kèm dịch); còn lại `null`. */
+  tracked_unavailable_reason: z.enum(["template_translated"]).nullable(),
   red_open: z.number().int().min(0),
   submission: z
     .object({

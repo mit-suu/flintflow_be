@@ -43,12 +43,18 @@ describe("diffTableRows", () => {
     expect(d.rows.filter((r) => r.change !== "unchanged")).toEqual([{ change: "modified", before: reqs[0], after: ["NFR-01", "Page loads in 2 seconds", "Low"], cells_changed: [2] }])
   })
 
-  it("bảng không cột mã đảo hàng ⇒ chỉ moved, không added / removed", () => {
+  it("bảng không cột mã chỉ đảo hàng ⇒ không có thay đổi (FLF-466)", () => {
     const h = ["Term", "Meaning"]
     const rows = [["Cart", "Items to buy"], ["Shop", "Seller page"], ["Order", "A purchase"]]
-    const d = diffTableRows([h, ...rows], [h, rows[2], rows[0], rows[1]])!
-    expect(d.rows.some((r) => r.change === "added" || r.change === "removed")).toBe(false)
-    expect(d.rows.filter((r) => r.change === "moved").length).toBe(1)
+    expect(diffTableRows([h, ...rows], [h, rows[2], rows[0], rows[1]])).toBeNull()
+  })
+
+  it("bảng không cột mã đảo hàng và sửa một hàng ⇒ chỉ báo hàng sửa", () => {
+    const h = ["Term", "Meaning"]
+    const rows = [["Cart", "Items to buy"], ["Shop", "Seller page"], ["Order", "A purchase"]]
+    const d = diffTableRows([h, ...rows], [h, rows[2], rows[0], ["Shop", "Seller page online"]])!
+    expect(d.rows.some((r) => (r.change as string) === "moved")).toBe(false)
+    expect(d.rows.filter((r) => r.change !== "unchanged").map((r) => r.change)).toEqual(["modified"])
   })
 
   it("hàng tiêu đề đổi ⇒ header_before", () => {

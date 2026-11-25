@@ -15,6 +15,7 @@ import { toIso } from "../import/mode1.http.js"
 import { clipMaterialText, formatCrId, formatMaterialId, type CrSourceKind } from "./change-request.constants.js"
 import type { ChangeRequestDetail, CreateChangeRequest, PendingSection } from "./change-request.dto.js"
 import { ChangeRequest, CrCounter, type CrClarification, type CrSeed, type IChangeRequest } from "./change-request.model.js"
+import { DocVersion } from "../doc-version/doc-version.model.js"
 import { CR_OPEN_STATUSES, CR_STATUSES, CR_STATUS_LABELS, assertTransition, isTerminal, type CrStatus } from "./change-request.state.js"
 import { seedFromFlags } from "./flag-seed.js"
 import { ChangeGroup } from "./change-group.model.js"
@@ -55,6 +56,11 @@ export const transitionCr = async (cr: IChangeRequest, to: CrStatus): Promise<vo
   assertTransition(cr.status, to)
   cr.status = to
   await cr.save()
+  // FLF-466: bản phát hành đã liệt kê CR này trước khi nó kịp sang `written` (đua với release) ⇒ đi thẳng `released`
+  if (to === "written" && (await DocVersion.exists({ projectId: cr.projectId, kind: "release", cr_ids: cr.cr_id }))) {
+    cr.status = "released"
+    await cr.save()
+  }
 }
 
 const toCrDto = (cr: IChangeRequest): ChangeRequestDetail["change_request"] => ({

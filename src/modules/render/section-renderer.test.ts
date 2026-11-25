@@ -584,15 +584,15 @@ describe("buildRecordOfChanges", () => {
     ...over
   })
 
-  it("gộp theo txn, suy change_type từ tập op, gộp reason không trùng", () => {
+  it("gộp theo txn, suy change_type từ tập op, gộp reason không trùng; chưa baseline ⇒ Version '-'", () => {
     const rows = buildRecordOfChanges([
       change({ txn: "t1", op: "add", reason: "seed actor" }),
       change({ txn: "t1", op: "add", reason: "seed actor" }),
       change({ txn: "t2", op: "set", reason: "typo fix", at: "2026-09-02T09:00:00.000Z", by: "u2" })
     ])
     expect(rows).toEqual([
-      { date: "2026-09-01", version: "v0.1", change_type: "A", in_charge: "u1", description: "Create Product Overview" },
-      { date: "2026-09-02", version: "v0.2", change_type: "M", in_charge: "u2", description: "Update Product Overview" }
+      { date: "2026-09-01", version: "-", change_type: "A", in_charge: "u1", description: "Create Product Overview" },
+      { date: "2026-09-02", version: "-", change_type: "M", in_charge: "u2", description: "Update Product Overview" }
     ])
   })
 
@@ -603,7 +603,7 @@ describe("buildRecordOfChanges", () => {
     expect(rows).toEqual([
       {
         date: "2026-09-01",
-        version: "v0.1",
+        version: "-",
         change_type: "M",
         in_charge: "u1, u2",
         description: "Create Product Overview"
@@ -619,8 +619,8 @@ describe("buildRecordOfChanges", () => {
       change({ txn: "t4", step_id: "S-5.2@S2", reason: "màn danh sách" })
     ])
     expect(rows.map((r) => [r.version, r.description])).toEqual([
-      ["v0.1", "Create User Requirements"],
-      ["v0.2", "Create Feature & Function Details"]
+      ["-", "Create User Requirements"],
+      ["-", "Create Feature & Function Details"]
     ])
   })
 
@@ -633,78 +633,171 @@ describe("buildRecordOfChanges", () => {
     expect(rows.map((r) => r.description)).toEqual(["Create Product Brief"])
   })
 
-  it("baseline đứng riêng một dòng mang mã baseline; sửa sau đó đánh v<baseline>.n", () => {
-    const rows = buildRecordOfChanges([
+  it("FLF-466 chế độ 2: dòng soạn trước baseline '-' lúc soạn, thành '1.0' khi ký baseline; có dòng 'Baseline 1.0'; sửa sau đó chưa phát hành '-'", () => {
+    const draft = [
       change({ txn: "t1", reason: "sửa trước ký" }),
-      change({ txn: "t2", op: "add", path: "baselines[]", step_id: "S-9.5", reason: "Ký baseline v1.0" }),
-      change({ txn: "t3", step_id: null, reason: "sửa sau ký" }),
-      change({ txn: "t4", step_id: null, reason: "sửa ngày sau", at: "2026-09-02T09:00:00.000Z" })
+      change({ txn: "t1b", step_id: "S-3.1", reason: "thêm actor", at: "2026-09-02T09:00:00.000Z" })
+    ]
+    expect(buildRecordOfChanges(draft).map((r) => r.version)).toEqual(["-", "-"])
+    const rows = buildRecordOfChanges([
+      ...draft,
+      change({ txn: "t2", op: "add", path: "baselines[]", step_id: "S-9.5", reason: "Ký baseline v1.0", at: "2026-09-03T09:00:00.000Z" }),
+      change({ txn: "t3", step_id: null, reason: "sửa sau ký", at: "2026-09-04T09:00:00.000Z" }),
+      change({ txn: "t4", step_id: null, reason: "sửa ngày sau", at: "2026-09-05T09:00:00.000Z" })
     ])
     expect(rows.map((r) => [r.date, r.version, r.description])).toEqual([
-      ["2026-09-01", "v0.1", "Create Product Overview"],
-      ["2026-09-01", "v1.0", "Baseline v1.0 signed"],
-      ["2026-09-01", "v1.0.1", "sửa sau ký"],
-      ["2026-09-02", "v1.0.2", "sửa ngày sau"]
+      ["2026-09-01", "1.0", "Create Product Overview"],
+      ["2026-09-02", "1.0", "Create User Requirements"],
+      ["2026-09-03", "1.0", "Baseline 1.0 signed"],
+      ["2026-09-04", "-", "sửa sau ký"],
+      ["2026-09-05", "-", "sửa ngày sau"]
     ])
   })
 
-  it("FLF-318: mỗi CR một dòng; FLF-361: mang số bản tài liệu của CR (sau v1.0 là v1.1, v1.2), release in đúng v2.0", () => {
-    const rows = buildRecordOfChanges([
-      change({ txn: "t1", op: "add", path: "baselines[]", step_id: "S-9.5", reason: "Ký baseline v1.0" }),
-      change({ txn: "t2", step_id: null, by: "CR-001", reason: "CR-001: Thêm use case gửi cảnh báo" }),
-      change({ txn: "t3", step_id: null, by: "CR-002", reason: "CR-002: Sửa tên màn" }),
-      change({ txn: "t4", op: "add", path: "baselines[]", step_id: null, reason: "Baseline 2.0", at: "2026-09-02T09:00:00.000Z" }),
-      change({ txn: "t5", step_id: null, by: "CR-003", reason: "CR-003: Bổ sung NFR", at: "2026-09-03T09:00:00.000Z" })
-    ], undefined, "vi")
-    expect(rows.map((r) => [r.version, r.description])).toEqual([
-      ["v1.0", "Ký baseline v1.0"],
-      ["v1.1", "CR-001: Thêm use case gửi cảnh báo"],
-      ["v1.2", "CR-002: Sửa tên màn"],
-      ["v2.0", "Ký baseline 2.0"],
-      ["v2.1", "CR-003: Bổ sung NFR"]
+  it("FLF-466: mọi CR trong một gói cùng Version của lần phát hành chứa chúng (2.0), CR chưa phát hành '-'; không in số phụ 1.1 / 1.2", () => {
+    const rows = buildRecordOfChanges(
+      [
+        change({ txn: "t1", op: "add", path: "baselines[]", step_id: "S-9.5", reason: "Ký baseline v1.0" }),
+        change({ txn: "t2", step_id: null, by: "CR-001", reason: "CR-001: Thêm use case gửi cảnh báo", path: "use_cases[id=UC-01].name" }),
+        change({ txn: "t3", step_id: null, by: "CR-002", reason: "CR-002: Sửa tên màn", path: "screens[id=S1].name", at: "2026-09-02T09:00:00.000Z" }),
+        change({ txn: "t4", op: "add", path: "baselines[]", step_id: null, reason: "Baseline 2.0", at: "2026-09-03T09:00:00.000Z" }),
+        change({ txn: "t5", step_id: null, by: "CR-003", reason: "CR-003: Bổ sung NFR", path: "nfrs[id=NFR-01].threshold", at: "2026-09-04T09:00:00.000Z" })
+      ],
+      undefined,
+      "vi"
+    )
+    expect(rows.map((r) => [r.version, r.change_type, r.description])).toEqual([
+      ["1.0", "A", "Ký baseline 1.0"],
+      ["2.0", "M", "CR-001: Cập nhật use case UC-01"],
+      ["2.0", "M", "CR-002: Cập nhật màn hình"],
+      ["2.0", "A", "Ký baseline 2.0"],
+      ["-", "M", "CR-003: Cập nhật yêu cầu phi chức năng NFR-01"]
     ])
   })
 
-  it("FLF-318: baseline import 0.1 in v0.1 (trước đây rơi về v1.0); FLF-361: CR sau đó là bản 0.2", () => {
-    const rows = buildRecordOfChanges([
-      change({ txn: "t1", op: "add", path: "baselines[]", step_id: null, by: "import", reason: "Baseline 0.1" }),
-      change({ txn: "t2", step_id: null, by: "CR-001", reason: "CR-001: Sửa mô tả" })
-    ])
-    expect(rows.map((r) => r.version)).toEqual(["v0.1", "v0.2"])
+  it("FLF-466: bản gốc 0.1 không sinh dòng - mọi lô `by = import` (nạp file, ký Baseline 0.1, đọc lại ảnh sơ đồ) bị bỏ; CR sau đó '-'", () => {
+    const rows = buildRecordOfChanges(
+      [
+        change({ txn: "t1", step_id: null, by: "import", reason: "Import SRS FAP_SRS_v1.0_fixed.docx" }),
+        change({ txn: "t2", step_id: null, by: "import", reason: "Import: kế hoạch step theo template" }),
+        change({ txn: "t2b", step_id: null, by: "import", reason: "render" }),
+        change({ txn: "t3", op: "add", path: "baselines[]", step_id: null, by: "import", reason: "Baseline 0.1" }),
+        change({ txn: "t4", step_id: null, by: "import", reason: "Import: đọc lại ảnh sơ đồ IMG1" }),
+        change({ txn: "t5", step_id: null, by: "CR-001", path: "use_cases[id=UC-01].name", reason: "CR-001: Khoá tài khoản sau 3 lần đăng nhập sai liên tiếp." })
+      ],
+      undefined,
+      "vi"
+    )
+    expect(rows.map((r) => [r.version, r.description])).toEqual([["-", "CR-001: Cập nhật use case UC-01"]])
   })
 
-  it("FLF-361: sau CR đầu tiên chỉ thêm một dòng cho CR (v0.2) - baseline import cùng bản với dòng import v0.1, không in dòng riêng", () => {
-    const rows = buildRecordOfChanges([
-      change({ txn: "t1", step_id: null, by: "import", reason: "Import SRS FAP_SRS_v1.0_fixed.docx" }),
-      change({ txn: "t2", step_id: null, by: "import", reason: "Import: kế hoạch step theo template" }),
-      change({ txn: "t2b", step_id: null, by: "import", reason: "render" }),
-      change({ txn: "t3", op: "add", path: "baselines[]", step_id: null, by: "import", reason: "Baseline 0.1" }),
-      change({ txn: "t4", step_id: null, by: "import", reason: "AI check: term_drift" }),
-      change({ txn: "t5", step_id: null, by: "CR-001", reason: "CR-001: Khoá tài khoản sau 3 lần đăng nhập sai liên tiếp." })
-    ], undefined, "vi")
-    expect(rows.map((r) => [r.version, r.description])).toEqual([
-      ["v0.1", "Import SRS FAP_SRS_v1.0_fixed.docx"],
-      ["v0.2", "CR-001: Khoá tài khoản sau 3 lần đăng nhập sai liên tiếp."]
-    ])
-  })
-
-  it("FLF-411 (U2-6): tài liệu tiếng Anh, tiêu đề CR là câu chat tiếng Việt ⇒ mô tả dựng từ thay đổi; In charge do resolver trả", () => {
+  it("FLF-466: mô tả dòng CR dựng từ thay đổi theo ngôn ngữ tài liệu, không chép tiêu đề / câu chat; In charge do resolver trả", () => {
     const spine = { use_cases: [{ id: "UC-05", name: "Checkout" }] } as unknown as Spine
     const rows = buildRecordOfChanges(
       [
-        change({ txn: "t1", op: "add", path: "baselines[]", step_id: null, by: "import", reason: "Baseline 0.1" }),
         change({ txn: "t2", step_id: null, by: "CR-001", path: "project.system_name", reason: "CR-001: Đổi tên hệ thống thành TechMart Store nhé" }),
         change({ txn: "t2", step_id: null, by: "CR-001", op: "add", path: "use_cases[id=UC-05]", reason: "CR-001: Đổi tên hệ thống thành TechMart Store nhé" }),
-        change({ txn: "t3", step_id: null, by: "CR-002", path: "nfrs[id=NFR-01].threshold", reason: "CR-002: Faster response time" })
+        change({ txn: "t3", step_id: null, by: "CR-002", path: "nfrs[id=NFR-01].threshold", reason: "CR-002: Faster response time", at: "2026-09-02T09:00:00.000Z" })
       ],
       (by) => (by === "CR-001" ? "Tuan Anh" : by),
       "en",
       spine
     )
-    expect(rows.slice(1).map((r) => [r.version, r.in_charge, r.description])).toEqual([
-      ["v0.2", "Tuan Anh", 'CR-001: Update system name; Add use case "Checkout"'],
-      ["v0.3", "CR-002", "CR-002: Faster response time"]
+    expect(rows.map((r) => [r.version, r.change_type, r.in_charge, r.description])).toEqual([
+      ["-", "A", "Tuan Anh", 'CR-001: Add use case "Checkout"'],
+      ["-", "M", "Tuan Anh", "CR-001: Update system name"],
+      ["-", "M", "CR-002", "CR-002: Update non-functional requirement NFR-01"]
     ])
+  })
+
+  describe("FLF-466: dòng CR theo BF §3.2", () => {
+    const cr = (id: string, over: Partial<Parameters<typeof buildRecordOfChanges>[0][number]> = {}) =>
+      change({ txn: id, step_id: null, by: id, reason: `${id}: x`, path: "use_cases[id=UC-01].name", ...over })
+    const actors: Record<string, string> = { "CR-012": "lan", "CR-013": "lan", "CR-014": "lan", "CR-015": "minh", "CR-016": "lan" }
+    const options = { actorOf: (by: string) => actors[by] ?? by }
+
+    it("CR liền nhau, cùng ngày, cùng người, cùng loại ⇒ một dòng 'CR-012, CR-013: ...'", () => {
+      const rows = buildRecordOfChanges([cr("CR-012", { at: "2026-09-01T02:00:00.000Z" }), cr("CR-013", { at: "2026-09-01T02:30:00.000Z" })], undefined, "en", undefined, options)
+      expect(rows).toHaveLength(1)
+      expect(rows[0]).toMatchObject({ change_type: "M", description: "CR-012, CR-013: Update use case UC-01", date: "2026-09-01" })
+    })
+
+    it("Lan 9:00, Minh 10:00, Lan 11:00 ⇒ ba dòng theo đúng giờ (người khác chen giữa thì tách)", () => {
+      const rows = buildRecordOfChanges(
+        [cr("CR-012", { at: "2026-09-01T02:00:00.000Z" }), cr("CR-015", { at: "2026-09-01T03:00:00.000Z" }), cr("CR-016", { at: "2026-09-01T04:00:00.000Z" })],
+        undefined,
+        "en",
+        undefined,
+        options
+      )
+      expect(rows.map((r) => r.description.split(":")[0])).toEqual(["CR-012", "CR-015", "CR-016"])
+    })
+
+    it("CR cùng người nhưng khác ngày theo giờ Việt Nam ⇒ tách dòng; 23:30 UTC thuộc ngày VN hôm sau", () => {
+      const rows = buildRecordOfChanges([cr("CR-012", { at: "2026-09-01T16:59:00.000Z" }), cr("CR-013", { at: "2026-09-01T17:30:00.000Z" })], undefined, "en", undefined, options)
+      expect(rows.map((r) => [r.date, r.description.split(":")[0]])).toEqual([
+        ["2026-09-01", "CR-012"],
+        ["2026-09-02", "CR-013"]
+      ])
+    })
+
+    it("một CR vừa thêm, vừa sửa, vừa xoá ⇒ ba dòng theo thứ tự A, M, D", () => {
+      const rows = buildRecordOfChanges(
+        [
+          cr("CR-012", { txn: "t1", op: "remove", path: "screens[id=S1]" }),
+          cr("CR-012", { txn: "t1", op: "set", path: "project.system_name" }),
+          cr("CR-012", { txn: "t1", op: "add", path: "actors[id=A9]" })
+        ],
+        undefined,
+        "en",
+        undefined,
+        options
+      )
+      expect(rows.map((r) => [r.change_type, r.description])).toEqual([
+        ["A", "CR-012: Add actor"],
+        ["M", "CR-012: Update system name"],
+        ["D", "CR-012: Delete screen"]
+      ])
+    })
+
+    it("mỗi loại gộp riêng: CR-012 chỉ sửa, CR-013 thêm + sửa ⇒ A: CR-013; M: CR-012, CR-013", () => {
+      const rows = buildRecordOfChanges(
+        [
+          cr("CR-012", { path: "project.system_name", at: "2026-09-01T02:00:00.000Z" }),
+          cr("CR-013", { txn: "t13", op: "add", path: "actors[id=A9]", at: "2026-09-01T03:00:00.000Z" }),
+          cr("CR-013", { txn: "t13", op: "set", path: "project.system_name", at: "2026-09-01T03:00:00.000Z" })
+        ],
+        undefined,
+        "en",
+        undefined,
+        options
+      )
+      expect(rows.map((r) => [r.change_type, r.description.split(":")[0]])).toEqual([
+        ["A", "CR-013"],
+        ["M", "CR-012, CR-013"]
+      ])
+    })
+
+    it("file đang phát hành: releasingVersion in vào CR của gói dù chưa có dòng baseline; CR ngoài gói '-'", () => {
+      const log = [cr("CR-012", { at: "2026-09-01T02:00:00.000Z" }), cr("CR-015", { at: "2026-09-02T02:00:00.000Z", path: "screens[id=S1].name" })]
+      expect(buildRecordOfChanges(log, undefined, "en", undefined, { ...options, releasingVersion: "2.0", releasingCrIds: ["CR-012", "CR-015"] }).map((r) => r.version)).toEqual(["2.0", "2.0"])
+      expect(buildRecordOfChanges(log, undefined, "en", undefined, { ...options, releasingVersion: "2.0", releasingCrIds: ["CR-012"] }).map((r) => r.version)).toEqual(["2.0", "-"])
+      expect(buildRecordOfChanges(log, undefined, "en", undefined, options).map((r) => r.version)).toEqual(["-", "-"])
+    })
+
+    it("không sinh dòng: thay đổi hệ thống, gửi duyệt / yêu cầu sửa gói, bật / tắt step, mở lại bước theo comment, đọc lại ảnh sơ đồ, sơ đồ tự vẽ lại, cờ tự tính", () => {
+      const rows = buildRecordOfChanges([
+        change({ txn: "s1", step_id: null, by: "system_change:6500000000000000000000aa", reason: "Đổi mẫu sang Sở XD v3", path: "custom_sections[id=X].name" }),
+        change({ txn: "s2", step_id: null, by: "u1", op: "set", path: "baseline_submission", reason: "Gửi Lead duyệt gói CR-012" }),
+        change({ txn: "s3", step_id: null, by: "u2", op: "set", path: "baseline_submission", reason: "Lead yêu cầu sửa gói thay đổi" }),
+        change({ txn: "s4", step_id: null, by: "u1", path: "steps[id=S-3.1].enabled", reason: "Kế hoạch step: tắt S-3.1" }),
+        change({ txn: "s5", step_id: null, by: "u1", path: "steps[id=S-3.1].status", reason: "Mở lại bước theo comment đã xử lý" }),
+        change({ txn: "s6", step_id: null, by: "u1", path: "diagrams[id=D1]", reason: "render" }),
+        change({ txn: "s7", step_id: null, by: "u1", path: "flags[id=F1].resolved_at", reason: "Giữ nguyên rule1 kèm lý do" }),
+        change({ txn: "s8", step_id: null, by: "import", path: "diagrams[id=D2]", reason: "Đọc lại ảnh sơ đồ" })
+      ])
+      expect(rows).toEqual([])
+    })
   })
 
   it("FLF-204 (BUG-15): sổ sách của runner không vào §I", () => {
@@ -723,7 +816,7 @@ describe("buildRecordOfChanges", () => {
       change({ txn: "t1", op: "set", path: "steps[id=S-9.5].status", reason: "step-runner: init step" })
     ])
     expect(rows).toHaveLength(1)
-    expect(rows[0].description).toBe("Baseline v1.0 signed")
+    expect(rows[0].description).toBe("Baseline 1.0 signed")
   })
 
   it("sau baseline: mô tả là lời user (tối đa 3), bỏ lý do cascade", () => {
@@ -890,7 +983,7 @@ describe("buildRecordOfChanges - tiếng Việt (FLF-265)", () => {
     expect(rows.map((r) => r.description)).toEqual([
       "Tạo Tổng quan sản phẩm",
       "Cập nhật Tổng quan sản phẩm",
-      "Ký baseline v1.0",
+      "Ký baseline 1.0",
       "CR 1; CR 2; Sửa sau baseline; và 2 thay đổi khác"
     ])
   })

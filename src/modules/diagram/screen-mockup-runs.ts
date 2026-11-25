@@ -15,7 +15,7 @@ import { defineJob, enqueueJob } from "../../shared/queue/job-runner.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { Project } from "../project/project.model.js"
 import { ScreenMockupRun, type IScreenMockupRun } from "./screen-mockup-run.model.js"
-import { drawPrepared, prepare, revertPrepared, type MockupDeps, type MockupRequest } from "./screen-mockup.service.js"
+import { drawPrepared, prepare, recordMockupChange, revertPrepared, type MockupDeps, type MockupRequest } from "./screen-mockup.service.js"
 
 export const SCREEN_MOCKUP_RUNNING = "SCREEN_MOCKUP_RUNNING"
 export const SCREEN_MOCKUP_QUEUE_UNAVAILABLE = "SCREEN_MOCKUP_QUEUE_UNAVAILABLE"
@@ -104,7 +104,14 @@ export const executeRun = async (runId: string, orgId: string, deps?: MockupDeps
       }
     }
   )
-  await ScreenMockupRun.updateOne({ _id: runId }, { $set: { status: result.cancelled ? "cancelled" : "done", suggested_color: result.suggested_color ?? null } })
+  const updated = await ScreenMockupRun.findOneAndUpdate(
+    { _id: runId },
+    { $set: { status: result.cancelled ? "cancelled" : "done", suggested_color: result.suggested_color ?? null } },
+    { returnDocument: "after" }
+  ).lean()
+  // FLF-466: một version thay đổi hệ thống cho cả lượt (sau baseline); tính cả màn `reenabled` đã bật ở `startRun`
+  const totalChanged = updated?.done?.length ?? result.done.length
+  if (totalChanged > 0) await recordMockupChange(projectId, String(run.userId), `screen-mockup:${runId}`, `Vẽ lại bằng mockup ${totalChanged} màn hình`)
 }
 
 interface RunJobData {
@@ -146,6 +153,8 @@ export const startRun = async (projectId: string, orgId: string, userId: string,
     fell_back_to_system: prepared.fellBack,
     theme_color: prepared.themeColor
   })
+  // Chỉ bật lại hình mockup đã vẽ (0 credit, không có lượt nền) ⇒ thay đổi đã xảy ra ngay trong request này
+  if (prepared.ai.length === 0 && prepared.reenabled.length > 0) await recordMockupChange(projectId, userId, `screen-mockup:${String(run._id)}`, `Vẽ lại bằng mockup ${prepared.reenabled.length} màn hình`)
   if (prepared.ai.length > 0) {
     try {
       await withTimeout(schedule(String(run._id), orgId), SCHEDULE_TIMEOUT_MS)

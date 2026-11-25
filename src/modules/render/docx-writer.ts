@@ -23,6 +23,7 @@ import {
 } from "docx"
 import { imageSize } from "image-size"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { projectCode } from "../project/project-code.js"
 import { versionFileName } from "../doc-version/versioning.js"
 import { STAMP_PROPERTY } from "../import/import.constants.js"
 import { ruleLabel } from "../spine/human-labels.js"
@@ -134,7 +135,8 @@ function stampLineage(doc: RenderedDocument): { name: string; value: string }[] 
   const { release, base } = exportLineage(doc)
   return [
     ...(base ? [{ name: STAMP_PROPERTY.base_version, value: base }] : []),
-    { name: STAMP_PROPERTY.kind, value: release ? "release" : "draft" }
+    { name: STAMP_PROPERTY.kind, value: release ? "release" : "draft" },
+    ...(doc.projectId ? [{ name: STAMP_PROPERTY.project_code, value: projectCode(doc.projectId) }] : [])
   ]
 }
 
@@ -251,9 +253,9 @@ export function exportLineage(doc: Pick<RenderedDocument, "version" | "source">)
  * FLF-356: `_DRAFT` theo nội dung file — xuất `source=baseline` không có watermark DRAFT ⇒ tên cũng không có, kể cả
  * baseline `0.x` của dự án import (`FAP_v0.1.docx`); stamp `kind` vẫn theo `exportLineage` (0.x chưa phát hành).
  */
-export function buildDocxFileName(doc: Pick<RenderedDocument, "projectName" | "version" | "source">, language?: string): string {
+export function buildDocxFileName(doc: Pick<RenderedDocument, "projectName" | "version" | "source"> & { projectId?: string }, language?: string): string {
   const lineage = exportLineage(doc)
-  return versionFileName({ name: doc.projectName, ...lineage, release: lineage.release || doc.source === "baseline", ...(language ? { language } : {}) })
+  return versionFileName({ name: doc.projectName, code: doc.projectId ? projectCode(doc.projectId) : null, ...lineage, release: lineage.release || doc.source === "baseline", ...(language ? { language } : {}) })
 }
 
 function coverPage(doc: RenderedDocument, isDraft: boolean, t: WriterText): Paragraph[] {

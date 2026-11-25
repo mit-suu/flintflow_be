@@ -231,7 +231,7 @@ describe("buildDocxFileName - quy tắc chung FLF-334", () => {
     expect(buildDocxFileName({ projectName: "Lumen", version: "v1.0 + 3 changes", source: "draft" })).toBe("Lumen_v1.0_DRAFT.docx")
     expect(buildDocxFileName({ projectName: "Lumen", version: "v1.0", source: "draft" })).toBe("Lumen_v1.0_DRAFT.docx")
     expect(buildDocxFileName({ projectName: "Lumen", version: "v0", source: "draft" })).toBe("Lumen_DRAFT.docx")
-    expect(buildDocxFileName(sample)).toBe(`Lumen Học Trực Tuyến_v${sample.version.replace(/^v/, "")}_DRAFT.docx`)
+    expect(buildDocxFileName(sample)).toBe(`Lumen Học Trực Tuyến_P000001_v${sample.version.replace(/^v/, "")}_DRAFT.docx`)
   })
 
   it("baseline ⇒ _v<version>, không _DRAFT; version conditional giữ nguyên", () => {
