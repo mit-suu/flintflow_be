@@ -10,7 +10,7 @@ import type { IChangeRequest } from "./change-request.model.js"
 import { MAX_REDO_PER_LOCATION, nextAfterVerifyFail } from "./change-request.state.js"
 import { previewAfter } from "./propose.service.js"
 import { elementValue, valueText } from "./spine-location.js"
-import { checkLocation, checkSpineOps, previousFindingsText, previousFlags } from "./verify.service.js"
+import { afterAllOps, checkLocation, checkRequestDone, checkSpineOps, ownersOfPath, previousFindingsText, previousFlags } from "./verify.service.js"
 
 const cr = { cr_id: "CR-001" } as IChangeRequest
 const PATH = "actors[id=A01]"
@@ -110,5 +110,69 @@ describe("C-5 nhận xét AI lần trước (FLF-307)", () => {
     const same = [{ rule: "contradiction", message: "A" }]
     expect(previousFindingsText(new Map([["L004", same], ["L005", same]]))).toBe("- (contradiction) A")
     expect(previousFindingsText(new Map())).toBe("(none)")
+  })
+})
+
+describe("FLF-469 A: vi phạm gán đúng vị trí", () => {
+  const badEntity = { op: "add", path: "entities[]", value: { id: "E01", name: "Course", description: "x", relations: [], attributes: [{ name: "id", type: "string" }] } }
+  const entityLoc = (over: Partial<IChangeLocation> = {}) =>
+    loc({ location_id: "L002", path: "entities[]", proposal: { old_text: "[]", new_text: "[]", comment_text: null, spine_ops: [badEntity], ...over.proposal } as never, ...over })
+
+  it("vị trí 2 thêm thực thể sai khuôn ⇒ chỉ vị trí 2 có vi phạm, vị trí 1 sạch", () => {
+    const res = checkSpineOps(spine(), cr, [loc({ location_id: "L001" }), entityLoc()])
+    expect(res.has("L001")).toBe(false)
+    expect(res.get("L002")?.length).toBeGreaterThan(0)
+  })
+
+  it("ownersOfPath: path phần tử ⇒ op set cùng phần tử; op add theo value.id; không khớp ⇒ rỗng", () => {
+    const ops = [
+      { op: "set", path: "actors[id=A01].name", value: "S" },
+      { op: "add", path: "entities[]", value: { id: "E01", name: "C", description: "", relations: [] } }
+    ] as never[]
+    expect(ownersOfPath(ops, ["L001", "L002"], "entities[id=E01].attributes[0]")).toEqual(["L002"])
+    expect(ownersOfPath(ops, ["L001", "L002"], "actors[id=A01]")).toEqual(["L001"])
+    expect(ownersOfPath(ops, ["L001", "L002"], "E01")).toEqual(["L002"])
+    expect(ownersOfPath(ops, ["L001", "L002"], "roles[id=R9]")).toEqual([])
+  })
+
+  it("lô trượt không chỉ được vào đâu mà một vị trí chạy khô riêng đã hỏng (new_text null) ⇒ chỉ vị trí đó", () => {
+    const broken = loc({ location_id: "L002", path: "actors[id=A02]", proposal: proposal({ new_text: null, spine_ops: [{ op: "set", path: "actors[id=A99].name", value: "X" }] }) })
+    const res = checkSpineOps(spine(), cr, [loc({ location_id: "L001" }), broken])
+    expect(res.has("L001")).toBe(false)
+    expect(res.has("L002")).toBe(true)
+  })
+})
+
+describe("FLF-469 C: kiểm đối chiếu yêu cầu bằng code", () => {
+  const withFn = (): Spine => {
+    const s = spine()
+    s.functions.push({ id: "FR-3.3.5", name: "Gửi tin nhắn Trò chuyện với Shop", screen_id: null, feature_id: "F1", order: 0, trigger: "", description: "", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null } as never)
+    return s
+  }
+  const removeCr = { title: "Bỏ chức năng 3.3.5 Gửi tin nhắn Trò chuyện với Shop", description: "", amendments: [], clarifications: [], targets: { entity_paths: ["functions[id=FR-3.3.5]"] } } as never
+  const note = (path: string) => loc({ location_id: "L007", path, conclusion: "comment", proposal: proposal({ new_text: null, spine_ops: [], comment_text: "Không có thao tác nào để xoá" }) })
+
+  it("CR xoá chức năng mà chức năng còn sau lô ⇒ request_not_done ở vị trí của nó", () => {
+    const s = withFn()
+    const res = checkRequestDone(removeCr, s, afterAllOps(s, cr, [note("functions[id=FR-3.3.5]")]), [note("functions[id=FR-3.3.5]")])
+    expect(res.get("L007")?.map((v) => v.rule)).toEqual(["request_not_done"])
+  })
+
+  it("xoá thật bằng op remove ⇒ đạt", () => {
+    const s = withFn()
+    const l = loc({ location_id: "L007", path: "functions[id=FR-3.3.5]", proposal: proposal({ spine_ops: [{ op: "remove", path: "functions[id=FR-3.3.5]" }], new_text: "" }) })
+    expect(checkRequestDone(removeCr, s, afterAllOps(s, cr, [l]), [l]).size).toBe(0)
+  })
+
+  it("CR thêm chức năng mà mọi vị trí là ghi chú ⇒ chặn; có op add vào functions[] ⇒ đạt; ý yếu (cho phép) có sửa khác ⇒ không chặn", () => {
+    const s = withFn()
+    const addCr = { title: "Thêm một chức năng đổi địa chỉ giao hàng", description: "", amendments: [], clarifications: [], targets: { entity_paths: [] } } as never
+    const slot = loc({ location_id: "L001", path: "functions[]", conclusion: "comment", proposal: proposal({ new_text: null, spine_ops: [], comment_text: "Hãy thêm chức năng này" }) })
+    expect(checkRequestDone(addCr, s, s, [slot]).get("L001")?.[0]?.rule).toBe("request_not_done")
+    const done = loc({ location_id: "L001", path: "functions[]", proposal: proposal({ spine_ops: [{ op: "add", path: "functions[]", value: { id: "FR-9" } }], new_text: "[]" }) })
+    expect(checkRequestDone(addCr, s, s, [done]).size).toBe(0)
+    const weakCr = { title: "Cho phép người mua đổi địa chỉ", description: "", amendments: [], clarifications: [], targets: { entity_paths: ["feature:F1"] } } as never
+    expect(checkRequestDone(weakCr, s, s, [loc()]).size).toBe(0)
+    expect(checkRequestDone(weakCr, s, s, [slot]).size).toBe(1)
   })
 })

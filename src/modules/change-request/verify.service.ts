@@ -41,7 +41,8 @@ import { crDocumentLanguage, foreignTexts, isForeignText, wrongLanguageMessage }
 import type { UserLocale } from "../../shared/i18n/locale.js"
 import { refreshDiagramLocations } from "./diagram-location.js"
 import { fixDuplicateIds } from "./propose.service.js"
-import { elementValue, isArrayPath, listElements, opElement, sectionOfElement, unchangedSince, valueText } from "./spine-location.js"
+import { elementPathOf, elementValue, isArrayPath, listElements, opElement, sectionOfElement, unchangedSince, valueText } from "./spine-location.js"
+import { structuralRequest } from "./structural-intent.js"
 import { hasRemoveOp } from "./location-display.js"
 import { loadOutOfScopeSections, outOfScopeKind, type OutOfScopeKind } from "./out-of-scope.js"
 
@@ -161,6 +162,56 @@ export const checkLocation = (
   return out
 }
 
+/**
+ * FLF-469 (A.2): phần tử mà một op chạm tới, để tìm vị trí sở hữu của vi phạm không mang `op_index` (lỗi schema / bất biến
+ * tính trên cả Spine sau lô). `set` / `remove` ⇒ phần tử của path; `add` ⇒ phần tử mới theo `value.id` (`arr[id=X]`).
+ */
+const touchedElement = (op: Op): string | null => {
+  const array = /^(\w+)\[\]$/.exec(op.path)?.[1]
+  if (op.op === "add" && array) {
+    const id = (op as { value?: unknown }).value && typeof (op as { value?: unknown }).value === "object" ? ((op as { value: { id?: unknown } }).value.id) : undefined
+    return typeof id === "string" ? `${array}[id=${id}]` : null
+  }
+  return elementPathOf(op.path)
+}
+
+/**
+ * Vị trí sở hữu của vi phạm có `path` (hoặc cờ đỏ có `target_id`): op `set` / `remove` cùng phần tử, hoặc op `add` có
+ * `value.id` khớp. Cờ chỉ mang id (`FN045`) khớp phần tử `…[id=FN045]`. Không tìm được ⇒ rỗng (caller chọn cách dự phòng).
+ */
+export const ownersOfPath = (ops: readonly Op[], owner: readonly string[], violationPath: string): string[] => {
+  const element = elementPathOf(violationPath)
+  const byId = element ? null : (/^[\w.-]+$/.test(violationPath) ? `[id=${violationPath}]` : null)
+  const hit = new Set<string>()
+  ops.forEach((op, i) => {
+    const touched = touchedElement(op)
+    if (!touched) return
+    if ((element && touched === element) || (byId && touched.endsWith(byId))) hit.add(owner[i])
+  })
+  return [...hit]
+}
+
+/**
+ * FLF-469 (A.2): lỗi schema của lô sau khi áp (`schema_invalid`) có path dạng Zod `entities.0.attributes.0.kind` - chỉ số
+ * trong mảng SAU lô. Đổi `arr.N...` thành `arr[id=X]` bằng cách mô phỏng thứ tự mảng: phần tử có sẵn rồi phần tử op `add`
+ * thêm (theo thứ tự op), trừ phần tử op `remove` xoá. Không đổi được ⇒ trả nguyên path.
+ */
+export const indexPathToElement = (spine: Spine, ops: readonly Op[], violationPath: string): string => {
+  const m = /^(\w+)\.(\d+)(?:\.|$)/.exec(violationPath)
+  if (!m) return violationPath
+  const ids = ((spine as unknown as Record<string, unknown>)[m[1]] as { id?: unknown }[] | undefined)?.map((e) => String(e.id)) ?? []
+  for (const op of ops) {
+    const touched = touchedElement(op)
+    if (!touched?.startsWith(`${m[1]}[id=`)) continue
+    const id = /\[id=([^\]]+)\]/.exec(touched)?.[1]
+    if (!id) continue
+    if (op.op === "add" && !ids.includes(id)) ids.push(id)
+    else if (op.op === "remove") ids.splice(0, ids.length, ...ids.filter((x) => x !== id))
+  }
+  const id = ids[Number(m[2])]
+  return id === undefined ? violationPath : `${m[1]}[id=${id}]`
+}
+
 /** Chạy khô toàn bộ op Spine của CR; vi phạm gắn về vị trí sinh ra op. */
 /** `exempt`: vị trí không chịu kiểm luật (sửa chữ ở mục ngoài phạm vi) — lỗi đỏ mới không gắn vào chúng. */
 export const checkSpineOps = (
@@ -186,6 +237,9 @@ export const checkSpineOps = (
     }
   }
   if (!ops.length) return out
+  // FLF-469 (A.1): vị trí có op mà C-4 chạy khô riêng đã hỏng (`new_text = null`) — khi cả lô trượt mà vi phạm không chỉ
+  // được vào đâu, đó là nghi can duy nhất; vị trí khác không bị kéo theo (không soạn lại oan).
+  const broken = [...new Set(locations.filter((l) => l.conclusion === "edit" && l.proposal && l.proposal.new_text === null && l.proposal.spine_ops.length > 0).map((l) => l.location_id))].filter((id) => owner.includes(id))
   try {
     const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: cr.cr_id }, { startSeq: 1 })
     const before = new Set(runDeterministicCheck(spine, [], { ruleProfile: MODE1_RULE_PROFILE }).filter((c) => c.level === "red").map(flagKey))
@@ -194,12 +248,20 @@ export const checkSpineOps = (
     const newRed = runDeterministicCheck(plan.spine, [], { ruleProfile: MODE1_RULE_PROFILE }).filter(
       (c) => c.level === "red" && c.rule_id !== "diagram_stale" && !before.has(flagKey(c))
     )
-    for (const c of newRed) for (const locId of new Set(owner.filter((o) => !exempt.has(o)))) push(locId, { rule: "new_red_flag", message: `Đề xuất làm phát sinh lỗi đỏ mới: ${ruleLabel(c.rule_id) ? `${ruleLabel(c.rule_id)} - ` : ""}${c.message}` })
+    for (const c of newRed) {
+      // FLF-469 (A.3): cờ có đích phần tử ⇒ chỉ vị trí sinh ra phần tử đó; không khớp được mới gán cho mọi vị trí
+      const mine = c.target_id ? ownersOfPath(ops, owner, c.target_id) : []
+      const targets = mine.length ? mine : [...new Set(owner)]
+      for (const locId of targets.filter((o) => !exempt.has(o))) push(locId, { rule: "new_red_flag", message: `Đề xuất làm phát sinh lỗi đỏ mới: ${ruleLabel(c.rule_id) ? `${ruleLabel(c.rule_id)} - ` : ""}${c.message}` })
+    }
   } catch (err) {
     if (!(err instanceof TransactionRejectedError)) throw err
     for (const v of err.violations) {
-      const locId = v.op_index !== undefined ? owner[v.op_index] : undefined
-      for (const id of locId ? [locId] : [...new Set(owner)]) push(id, { rule: v.rule, message: humanizeText(v.message), ...(v.path ? { path: v.path } : {}) })
+      const byIndex = v.op_index !== undefined ? owner[v.op_index] : undefined
+      // FLF-469 (A.2): không có op_index mà có path ⇒ vị trí sở hữu phần tử đó; rồi tới vị trí chạy khô riêng đã hỏng
+      const byPath = byIndex || !v.path ? [] : ownersOfPath(ops, owner, indexPathToElement(spine, ops, v.path))
+      const targets = byIndex ? [byIndex] : byPath.length ? byPath : broken.length ? broken : [...new Set(owner)]
+      for (const id of targets) push(id, { rule: v.rule, message: humanizeText(v.message), ...(v.path ? { path: v.path } : {}) })
     }
   }
   return out
@@ -259,6 +321,60 @@ export const checkCountMentions = (after: Spine, locations: readonly CountCheckL
     const wrong = [...new Set(findCountMentionsInText(l.proposal?.new_text ?? "").filter((m) => m.collection === collection && m.number !== correct).map((m) => m.number))]
     if (wrong.length) {
       out.set(l.location_id, [{ rule: "count_mismatch", message: `Câu đếm ở đây vẫn ghi ${wrong.join(", ")} - đúng phải là ${correct} theo dữ liệu sau khi ghi, không tự tính` }])
+    }
+  }
+  return out
+}
+
+/** FLF-469 (C.1): Spine sau khi áp toàn bộ op `edit` của CR; op lỗi ⇒ `null` (lỗi thật đã báo ở `checkSpineOps`). */
+export const afterAllOps = (spine: Spine, _cr: Pick<IChangeRequest, "cr_id">, locations: readonly CheckLocation[]): Spine | null =>
+  plannedAfterAll(spine, locations)
+
+type RequestCr = Pick<IChangeRequest, "title" | "description" | "amendments" | "clarifications" | "targets">
+
+/** Đích C-2 của CR về phần tử của `collection` (`functions[id=FN1]`, hoặc mục `function:FN1`). */
+const targetElementsOf = (cr: Pick<IChangeRequest, "targets">, collection: string): string[] =>
+  [
+    ...new Set(
+      (cr.targets?.entity_paths ?? []).flatMap((t) => {
+        const fn = /^function:(.+)$/.exec(t)?.[1]
+        const el = fn ? `functions[id=${fn}]` : elementPathOf(t)
+        return el && el.startsWith(`${collection}[`) ? [el] : []
+      })
+    )
+  ]
+
+/**
+ * FLF-469 (C.1, ChoViet #2): kiểm "yêu cầu chính đã làm chưa" bằng code. CR có ý cấu trúc (`structural-intent.ts`):
+ * - xoá mà phần tử đích (CR nêu mã hoặc tên) vẫn còn sau khi chạy khô cả lô ⇒ `request_not_done` ở vị trí của phần tử;
+ * - thêm chức năng / màn mà không op nào `add` vào mảng đó ⇒ `request_not_done` ở ô thêm mới (hoặc vị trí đầu). Ý thêm suy
+ *   từ "cho phép…" (yếu) chỉ chặn khi cả CR không có vị trí `edit` nào.
+ * `after`: Spine sau cả lô (`afterAllOps`); `null` ⇒ bỏ qua (op lỗi đã bị báo riêng).
+ */
+export const checkRequestDone = (cr: RequestCr, spine: Spine, after: Spine | null, locations: readonly CheckLocation[]): Map<string, VerifyViolation[]> => {
+  const out = new Map<string, VerifyViolation[]>()
+  const request = structuralRequest(cr)
+  if (!request || !after || !locations.length) return out
+  const label = request.collection === "screens" ? "màn hình" : "chức năng"
+  const text = [cr.title, cr.description, ...(cr.amendments ?? []).map((a) => a.text), ...cr.clarifications.flatMap((c) => c.answers)].join(" ").toLowerCase()
+  const push = (locId: string, message: string) => out.set(locId, [...(out.get(locId) ?? []), { rule: "request_not_done", message }])
+  if (request.intent === "remove") {
+    for (const path of targetElementsOf(cr, request.collection)) {
+      const before = elementValue(spine, path) as { id?: unknown; name?: unknown } | undefined
+      if (!before || elementValue(after, path) === undefined) continue
+      const id = String(before.id ?? "").toLowerCase()
+      const name = typeof before.name === "string" ? before.name.trim().toLowerCase() : ""
+      if (!(name.length >= 3 && text.includes(name)) && !(id && text.includes(id))) continue
+      const holder = locations.find((l) => l.path === path) ?? locations[0]
+      push(holder.location_id, `Yêu cầu chính chưa làm: ${label} “${typeof before.name === "string" ? before.name : String(before.id)}” vẫn còn trong tài liệu - cần xoá hẳn ${label} này (thao tác xoá), không chỉ ghi chú`)
+    }
+  } else {
+    const slot = `${request.collection}[]`
+    const edits = locations.filter((l) => l.conclusion === "edit")
+    const added = edits.some((l) => (l.proposal?.spine_ops ?? []).some((raw) => (raw as { op?: unknown; path?: unknown }).op === "add" && opPath(raw) === slot))
+    if (!added && (request.strong || !edits.length)) {
+      const holder = locations.find((l) => l.path === slot) ?? locations[0]
+      push(holder.location_id, `Yêu cầu chính chưa làm: chưa có ${label} nào được thêm - cần thêm ${label} mới đầy đủ (thao tác thêm), không chỉ ghi chú nhắc tự làm`)
     }
   }
   return out
@@ -358,6 +474,8 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
   const violations = new Map(locations.map((l) => [l.location_id, inConflict(l) ? [] : checkLocation(cr, l, spine, locks, language, scopeOf(l))]))
   const exempt = new Set(locations.filter((l) => scopeOf(l) === "text").map((l) => l.location_id))
   for (const [locId, vs] of checkSpineOps(spine, cr, checked, exempt)) violations.set(locId, [...(violations.get(locId) ?? []), ...vs])
+  // FLF-469 (C.1): yêu cầu chính (xoá / thêm cả chức năng) phải thật sự được làm
+  for (const [locId, vs] of checkRequestDone(cr, spine, afterAllOps(spine, cr, locations), locations)) violations.set(locId, [...(violations.get(locId) ?? []), ...vs])
   // C-5 "giữ theo ý mình": lỗi luật BA đã giữ không tính (cờ đỏ thật hiện sau khi ghi)
   for (const l of locations) if (l.kept_violations.length) violations.set(l.location_id, withoutKept(violations.get(l.location_id) ?? [], l.kept_violations))
   // FLF-473 (B14): câu đếm phải khớp số đúng SAU khi ghi cả CR — op đã lỗi thì bỏ qua (checkSpineOps đã báo lỗi thật)
@@ -407,7 +525,14 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
       await askContradictions(cr, locations, contradictions)
       return
     }
-    for (const f of result.data.findings) {
+    // FLF-469 (C.2): `request_not_met` = yêu cầu chính chưa được làm ⇒ vi phạm chặn (quay về soạn lại, 2 lần rồi sửa tay),
+    // không phải ghi chú vàng. Gắn vào vị trí ghi chú (chỗ đáng lẽ phải làm), không có thì vị trí sửa đầu tiên.
+    const notMet = result.data.findings.filter((f) => f.rule === "request_not_met")
+    if (notMet.length) {
+      const holder = changed.find((l) => l.conclusion === "comment") ?? changed[0]
+      for (const f of notMet) violations.set(holder.location_id, [...(violations.get(holder.location_id) ?? []), { rule: "request_not_met", message: `Yêu cầu chính chưa làm: ${humanizeText(f.message)}` }])
+    }
+    for (const f of result.data.findings.filter((x) => x.rule !== "request_not_met")) {
       // Nhận xét gắn vào vị trí sửa cùng section; không khớp section nào thì vị trí sửa đầu tiên (người duyệt vẫn thấy)
       const hit = changed.filter((c) => c.section_id === f.section_id)
       const flag = { rule: f.rule, message: humanizeText(f.message) }

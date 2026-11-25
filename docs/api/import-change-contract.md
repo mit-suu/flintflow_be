@@ -1092,3 +1092,15 @@ Plan: `bug/plan-fix-06-sua-chat-doan-van-noi.md`. BE only trong lượt này; lu
   Chỉ nhận số viết bằng **chữ số** ("10 use case"), không nhận số viết bằng chữ ("mười use case") — bản đầu.
 - Không đổi endpoint, không đổi schema Spine, không đổi `changeLocationDtoSchema` (giá trị enum mới nằm trong tập đã
   khai kiểu `string`).
+
+### FLF-469: C-5 kiểm đề xuất (không đổi endpoint)
+
+- `verify.violations[].rule` có giá trị mới: `request_not_done` (code: CR xoá / thêm cả một chức năng hay màn hình mà phần tử đích
+  còn nguyên / chưa có phần tử nào được thêm) và `request_not_met` (AI: yêu cầu chính chưa được làm, chỉ có ghi chú nhắc người
+  duyệt tự làm). Cả hai là lỗi chặn như mọi vi phạm code: AI soạn lại tối đa 2 lần rồi sang sửa tay. FE hiện `message` sẵn có,
+  không cần đổi kiểu.
+- Lỗi schema / bất biến của cả lô giờ gắn về đúng vị trí sinh ra phần tử lỗi (trước đây gắn cho mọi vị trí có op), nên chỉ
+  vị trí đó bị soạn lại.
+- Vị trí mới `found_by: "mention"` cho đoạn văn còn nhắc phần tử CR xoá (tối đa 20); ô "thêm mới" `functions[]` / `screens[]`
+  cho mục tính năng; `reason` mới của lô soạn gộp: "Thêm chức năng kèm màn, thông báo và phần liên quan" / "Xoá chức năng kèm
+  màn, thông báo và phần chỉ thuộc nó".

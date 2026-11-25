@@ -39,6 +39,7 @@ import { approvedBatch, proposeUseCaseBatch } from "./add-use-case.service.js"
 import { elementText } from "./location-display.js"
 import { directHit } from "./word-diff.js"
 import { crDocumentLanguage, documentLanguageText } from "./cr-language.js"
+import { elementSchemasText } from "./element-schemas.js"
 import { loadOutOfScopeSections, outOfScopeKind, type OutOfScopeKind } from "./out-of-scope.js"
 import { COUNT_COLLECTIONS, type CountCollection } from "./count-mentions.js"
 
@@ -415,6 +416,7 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
           materials: await relevantMaterialsText(cr, crQuery(cr, ...batch.map(promptOf))),
           missing_info: missingInfoText(cr),
           locations: batch.map(promptOf).join("\n"),
+          element_schemas: elementSchemasText(batch),
           glossary: glossaryText(spine),
           document_language: documentLanguage
         })
@@ -513,6 +515,7 @@ Analyst's instruction for ${loc.location_id} (${loc.owner_step ? `fix in owner s
     materials: await relevantMaterialsText(cr, crQuery(cr, instruction, promptOne)),
     missing_info: missingInfoText(cr),
     locations: promptOne,
+    element_schemas: elementSchemasText([loc]),
     glossary: glossaryText(spine),
     document_language: documentLanguageText(await crDocumentLanguage(String(cr.projectId), spine))
   })

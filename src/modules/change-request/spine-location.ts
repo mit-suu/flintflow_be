@@ -414,6 +414,8 @@ export const findSpineLocations = (
     // Mục "field" trống vì field của phần tử có sẵn còn trống ⇒ sửa phần tử đó, không mời thêm phần tử mới
     if (empty.has(section) && fieldArray && arrayOf(spine, fieldArray).length) continue
     for (const path of fillPathsOfSection(section)) addSlot(path, section)
+    // FLF-469 (B.2): mục tính năng / chức năng (3.x.y) cũng có ô thêm chức năng / màn, gắn đúng mục tính năng chứa nó
+    for (const slot of featureSlots(spine, section)) addSlot(slot.path, slot.section)
   }
   // C-2 trả thẳng đích thêm mới (`entities[]`) khi thay đổi cần phần tử chưa có
   for (const t of targets) {
@@ -433,6 +435,22 @@ export const findSpineLocations = (
   const extra = diagrams.filter((d) => !found.some((f) => f.path === d.path))
   // C-3 liệt kê đủ mọi vị trí chạm tới, không cắt trần (BF §3.2); chi phí C-4 báo trước ở `proposeEstimate`
   return [...found, ...slots, ...extra]
+}
+
+/**
+ * FLF-469 (B.2): ô "thêm mới" của mục tính năng (`feature:<id>`) hoặc chức năng (`function:<id>`): `functions[]` (và
+ * `screens[]` với mục tính năng) gắn đúng mục tính năng chứa chúng - không đẩy về mục 3.1.4 (chức năng không màn hình).
+ */
+export const featureSlots = (spine: Spine, section: string): { path: string; section: string }[] => {
+  if (section.startsWith("feature:")) {
+    const id = section.slice("feature:".length)
+    return arrayOf(spine, "features").some((f) => String(f.id) === id) ? [{ path: "functions[]", section }, { path: "screens[]", section }] : []
+  }
+  if (section.startsWith("function:")) {
+    const fn = arrayOf(spine, "functions").find((f) => `function:${String(f.id)}` === section)
+    return fn && typeof fn.feature_id === "string" ? [{ path: "functions[]", section: `feature:${fn.feature_id}` }] : []
+  }
+  return []
 }
 
 /** Mảng Spine mà path thuộc về: `use_cases[id=UC-01]` / `use_cases[]` ⇒ `use_cases`; `project` ⇒ `project`. */
@@ -667,4 +685,53 @@ export const removeElementLocations = (spine: Spine, code: string): FoundLocatio
         owner_step: section_id === "misc" || section_id.startsWith("custom:") ? null : ownerStepOf(section_id, spine)
       }
     })
+}
+
+/** FLF-469 (D): tối đa vị trí "nhắc tới" thêm cho phần tử bị lô xoá (không đè trần `MAX_LOCATIONS`). */
+export const MAX_REMOVED_MENTIONS = 20
+
+/**
+ * FLF-469 (D): cách người ta gọi tắt một tên phần tử trong văn xuôi - mã, tên đầy đủ, và tên ngắn (động từ / từ đầu +
+ * từ cuối của tên từ 3 từ trở lên: "Xuất thời khóa biểu ra Excel" ⇒ "Xuất Excel"). Luật rẻ, hụt nhiều hơn nhờ AI.
+ */
+export const mentionNames = (id: string | undefined, name: string | undefined): string[] => {
+  const full = name?.trim() ?? ""
+  const words = full.split(/\s+/).filter(Boolean)
+  const short = words.length >= 3 ? `${words[0]} ${words[words.length - 1]}` : ""
+  return [...new Set([id ?? "", full, short].map((s) => s.trim()).filter((s) => s.length >= 2))]
+}
+
+/**
+ * FLF-469 (D): phần tử bị lô xoá (có trong `spine`, không còn trong `after`) mà văn xuôi / phần tử khác vẫn nhắc tới theo mã,
+ * tên đầy đủ hoặc tên ngắn - kể cả đoạn nguyên văn (`custom_sections`). Bỏ qua: chính các phần tử bị xoá, phần tử đã là vị
+ * trí (`exclude`) và phần tử tham chiếu tới nó bằng field (op xoá tự gỡ tham chiếu). Mỗi chỗ khớp là vị trí `mention`.
+ */
+export const removedMentionLocations = (spine: Spine, after: Spine, exclude: ReadonlySet<string>, limit = MAX_REMOVED_MENTIONS): FoundLocation[] => {
+  const elements = listElements(spine)
+  const removed = elements.filter((e) => e.path !== PROJECT_PATH && elementValue(after, e.path) === undefined)
+  if (!removed.length) return []
+  const gone = new Set(removed.map((r) => r.path))
+  const referrers = new Set(impactOf(spine, [...gone]).referrers.flatMap((r) => (elementPathOf(r.path) ? [elementPathOf(r.path)!] : [])))
+  const patterns = removed.map((r) => {
+    const v = r.value as Row
+    const name = typeof v?.name === "string" ? v.name : typeof v?.term === "string" ? v.term : undefined
+    return { path: r.path, res: mentionNames(ELEMENT.exec(r.path)?.[2], name).map(wordPattern) }
+  })
+  const out: FoundLocation[] = []
+  for (const e of elements) {
+    if (out.length >= limit) break
+    if (gone.has(e.path) || exclude.has(e.path) || referrers.has(e.path)) continue
+    const text = textOf(e.value)
+    const hit = patterns.filter((p) => p.res.some((re) => re.test(text)))
+    if (!hit.length) continue
+    const section_id = sectionOfElement(spine, e.path)
+    out.push({
+      path: e.path,
+      section_id,
+      found_by: ["mention"],
+      entity_paths: hit.map((h) => h.path),
+      owner_step: section_id === "misc" || section_id.startsWith("custom:") ? null : ownerStepOf(section_id, spine)
+    })
+  }
+  return out
 }
