@@ -669,6 +669,26 @@ describe("step-runner: F1 - usage Elicit ghi TRƯỚC change nội dung đầu t
   })
 })
 
+describe("step-runner: FLF-449 cổng step vừa soạn chỉ còn Chấp nhận (chưa ưng thì chat)", () => {
+  it("gate_ready.actions = accept + revision; không mời regenerate / accept_as_is, kể cả khi đã dùng hết lượt soạn lại", async () => {
+    seedSpine()
+    seedSession(true)
+    const deps: Partial<StepRunnerDeps> = {
+      elicitExecutor: async () => elicitReply(),
+      draftExecutor: async () => draftReply([{ op: "add", path: "actors[]", value: { id: "A09", name: "X", kind: "human", description: "d" } }]),
+      renderDeps: renderStub()
+    }
+    const { events, emit } = collectEvents()
+    await runStep(PROJECT, "S-3.1", SESSION, USER, emit, deps)
+    const gateReady = events.find((e) => e.type === "gate_ready") as Extract<StepEvent, { type: "gate_ready" }>
+    expect(gateReady.actions).toEqual(["accept", "revision"])
+    // Client cũ vẫn gửi được `regenerate` / `accept_as_is` (giữ API, xem gate.service.test.ts); chỉ cổng không mời nữa
+    const record = await repo.get(PROJECT)
+    const accepted = await gate(PROJECT, "S-3.1", USER, { action: "accept_as_is", note: "client cũ", base_version: record!.spine_version })
+    expect(accepted.step.status).toBe("accepted")
+  })
+})
+
 describe("step-runner: khoá step theo lượt chạy (F2 + FLF-177 WP-4)", () => {
   it("hai runStep đồng thời cùng step ⇒ request thứ hai 409 STEP_NOT_RUNNABLE, không đụng model; request đầu chạy trọn vẹn", async () => {
     seedSpine()

@@ -406,6 +406,69 @@ describe("draftOps - S-1.1 dựng lại tầm nhìn/mục tiêu từ addendum l�
   })
 })
 
+describe("draftOps - S-1.4 chỗ thiếu của Brief phải có câu trích thật (FLF-449 việc 16)", () => {
+  const gapSpine = (): Spine => ({
+    ...structuredClone(FIXTURE),
+    addendum: [
+      { id: "AD1", topic: "scope", content: "Khách thanh toán online qua ví điện tử.", content_en: "Customers pay online with an e-wallet.", target_section: "fixed:1", captured_at: "2026-11-23T00:00:00.000Z" }
+    ],
+    steps: FIXTURE.steps.map((s) => (s.id === "S-1.4" ? { ...s, status: "in_progress" as const } : s))
+  })
+  const gap = (id: string, statement: string, source_quote?: string) => ({
+    op: "add",
+    path: "other_requirements[]",
+    value: { id, kind: "open_question", statement, ...(source_quote !== undefined ? { source_quote } : {}) },
+    reason: "S-1.4 gap"
+  })
+
+  it("giữ chỗ thiếu trích đúng Brief (lời gốc) hoặc tài liệu; bỏ chỗ thiếu trích bịa hoặc không trích, không tốn lượt thử", async () => {
+    const spine = gapSpine()
+    const ctx = { ...ctxFor(spine, "S-1.4"), documents: "[D1-P02] Refunds above 2,000,000 VND need the manager's approval." }
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(
+      reply([
+        gap("OR06", "Which payment gateway is used, and what happens when a payment fails?", "thanh toán online qua ví điện tử"),
+        gap("OR07", "Who approves refunds below the manager threshold?", "Refunds above 2,000,000 VND need the manager's approval"),
+        gap("OR08", "How long are booking records kept?", "Customers must be able to export their data"),
+        gap("OR09", "What runs on a schedule?")
+      ])
+    )
+    const result = await draftOps("p", "S-1.4", ctx, { userId: "u", spine, executor })
+    expect(executor).toHaveBeenCalledTimes(1)
+    const values = (result.txn?.ops ?? []).map((op) => op.value as { id: string; source_quote?: string })
+    expect(values.map((v) => v.id)).toEqual(["OR06", "OR07"])
+    expect(values[0].source_quote).toBe("thanh toán online qua ví điện tử")
+  })
+
+  it("mọi chỗ thiếu đều trích bịa ⇒ không ghi gì (txn null), không lỗi", async () => {
+    const spine = gapSpine()
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([gap("OR06", "Which payment gateway?", "customers pay by credit card")]))
+    const result = await draftOps("p", "S-1.4", ctxFor(spine, "S-1.4"), { userId: "u", spine, executor })
+    expect(result.txn).toBeNull()
+  })
+
+  it("lượt sửa: câu trích lấy từ yêu cầu sửa của user được nhận", async () => {
+    const spine = gapSpine()
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([gap("OR06", "Which languages must the receipts support?", "hoá đơn cần cả tiếng Anh")]))
+    const result = await draftOps("p", "S-1.4", ctxFor(spine, "S-1.4"), { userId: "u", spine, executor, callKind: "revision", revisionRequest: "Thêm câu hỏi: hoá đơn cần cả tiếng Anh không?" })
+    expect(result.txn?.ops).toHaveLength(1)
+  })
+
+  it("prompt S-1.4 thấy lời gốc của addendum (content) bên cạnh content_en", async () => {
+    const spine = gapSpine()
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([]))
+    await draftOps("p", "S-1.4", ctxFor(spine, "S-1.4"), { userId: "u", spine, executor })
+    const vars = executor.mock.calls[0][1].promptVariables as { addendum: { content?: string; content_en: string }[] }
+    expect(vars.addendum[0]).toMatchObject({ content: "Khách thanh toán online qua ví điện tử.", content_en: "Customers pay online with an e-wallet." })
+  })
+
+  it("bước khác (S-1.3) không bị lọc: open_question không trích vẫn ghi", async () => {
+    const spine = { ...gapSpine(), steps: FIXTURE.steps.map((s) => (s.id === "S-1.3" ? { ...s, status: "in_progress" as const } : s)) }
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([gap("OR06", "Mobile first or a desktop dashboard?")]))
+    const result = await draftOps("p", "S-1.3", ctxFor(spine, "S-1.3"), { userId: "u", spine, executor })
+    expect(result.txn?.ops).toHaveLength(1)
+  })
+})
+
 describe("contentGuidance - FLF-370 reference khai ở prompt_references vào prompt", () => {
   it("S-3.x (actors-and-usecases) kèm nguyên actor-rules sau thân skill", () => {
     const guidance = contentGuidance({ skill: "actors-and-usecases" })

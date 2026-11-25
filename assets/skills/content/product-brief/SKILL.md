@@ -1,7 +1,7 @@
 ---
 skill_id: product-brief
 kind: content
-version: 0.5.0
+version: 0.6.0
 description: "B-0 Intake, B-1 Product Brief, B-2 Brief Finalize - adapted from BMAD bmad-product-brief"
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -107,6 +107,15 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
   never happened. `project.system_name` still null ⇒ if the answers hold a name the user picked, `set` it; none
   picked ⇒ leave it null, never invent one. Then hand over: accepting this gate opens S-1.
 
+<!-- ba-quality:shared:start -->
+**Analysis quality** - applies to every finding, gap, proposed change, recommendation and reason you write (not to the plain answer options of a question):
+- **(a) Quote it or drop it.** Each one rests on words you can copy verbatim from the uploaded documents, the Brief, the current SRS content or the user's messages. Where the output has a quote or source field, put that exact text there. Nothing to quote ⇒ do not raise it.
+- **(b) Never ask what is already answered** - in the documents, the Brief, the SRS content, a settled decision or an earlier answer.
+- **(c) Recommend only when you are sure**: a clear basis in the documents, the Brief, the SRS content or a settled decision. A recommendation always states its reason and that basis. Not sure ⇒ give the options side by side, with no recommendation.
+- **(d) Specific to this project, never generic advice**: name the screen, role, data or rule it is about.
+  - Fails: "nên cân nhắc bảo mật" (consider security).
+  - Passes: "màn đối soát hiện số tiền, nên chỉ cho vai Kế toán xem" (the reconciliation screen shows amounts, so only the Accountant role should see it).
+<!-- ba-quality:shared:end -->
 ## Rules
 
 1. Ids continue the existing sequence (`draft-to-ops` rule 5) - check the projection first.

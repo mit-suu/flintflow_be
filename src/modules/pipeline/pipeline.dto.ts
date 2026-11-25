@@ -22,6 +22,7 @@ import {
   WAIVE_REASON_MIN_LENGTH
 } from "../spine/spine.schema.js"
 import { opSchema, userOpSchema } from "../spine/op.types.js"
+import { optionAnalysisSchema } from "../../shared/ai/option-analysis.js"
 import { COMMENT_ID_PATTERN, COMMENT_RESOLUTIONS, COMMENT_STATUSES, COMMENT_TEXT_MAX, KEEP_REASON_MIN_LENGTH } from "../comment/comment.model.js"
 import { ORG_ROLES } from "../organization/membership.model.js"
 import { NEW_CR_SOURCE_KINDS } from "../change-request/change-request.constants.js"
@@ -345,11 +346,10 @@ export const gateTableSchema = z.object({
  * Một lựa chọn của thẻ hỏi (theo AskUserQuestion): `label` là thứ gửi lại qua `/answer`, `description` nói
  * chọn nó được/mất gì, `preview` là bản so sánh monospace (bố cục màn, cấu trúc bảng). Dạng `string` chỉ
  * còn để đọc run-state `waiting_answer` lưu trước khi đổi hợp đồng — server luôn phát dạng object.
+ * FLF-449 (N1): thêm `pros` / `cons` / `risks` (ưu / nhược / rủi ro-giả định, thiếu = rỗng) và `recommended` — đuôi
+ * " (Khuyến nghị)" trên `label` vẫn đi kèm cờ để client / run-state cũ đọc được.
  */
-export const questionOptionSchema = z.union([
-  z.string().min(1),
-  z.object({ label: z.string().min(1), description: z.string().optional(), preview: z.string().optional() })
-])
+export const questionOptionSchema = z.union([z.string().min(1), optionAnalysisSchema])
 
 export const questionSchema = z.object({
   id: z.string().min(1),
@@ -360,7 +360,9 @@ export const questionSchema = z.object({
   options: z.array(questionOptionSchema).optional(),
   multiple: z.boolean().optional(),
   /** Câu mở đã hỏi ngay trong lời AI (`elicit.delta`): FE không vẽ thẻ cho câu này, vẫn trả lời bằng ô chat. Thiếu ⇒ false. */
-  inline: z.boolean().optional()
+  inline: z.boolean().optional(),
+  /** FLF-449 (03 #3): vì sao khuyến nghị phương án có `recommended: true`. Không có phương án khuyến nghị ⇒ không có. */
+  recommendation_reason: z.string().optional()
 })
 
 /** Mỗi sự kiện SSE: `event: <type>` + `data: <JSON>` đúng schema dưới. */

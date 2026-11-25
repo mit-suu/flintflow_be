@@ -1,8 +1,8 @@
 import { Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow } from "docx"
 import { describe, expect, it } from "vitest"
-import { blockIdOfBookmark, bookmarkName, ensureBlockBookmarks, findBlock, followsNumber, readBlocks } from "./blocks.js"
+import { blockIdOfBookmark, bookmarkName, ensureBlockBookmarks, findBlock, followsNumber, isGuidanceColor, readBlocks } from "./blocks.js"
 import { DocxPackage } from "./package.js"
-import { imageRel, makeDocx, p, picture, styled, table } from "./testing/make-docx.js"
+import { VI_HEADING_STYLES, imageRel, makeDocx, p, picture, styled, table } from "./testing/make-docx.js"
 import { normalizeText, textHash } from "./text.js"
 import { wAll, wAttr } from "./xml.js"
 
@@ -777,6 +777,75 @@ describe("FLF-364 - kiểu chữ hướng dẫn (tín hiệu phụ)", () => {
       ["Chữ đen [chỗ điền]", false],
       ["Đoạn màu tự động", false]
     ])
+  })
+
+  it("FLF-459 lớp 3: từng kiểu chữ là một dấu hiệu riêng (nghiêng, màu xám / xanh, tô nền); màu đỏ không phải dấu hiệu màu", async () => {
+    const blocks = await readBlocks(
+      await load(
+        [
+          para(run("Hệ thống quản lý học sinh cho trường THPT, phục vụ giáo viên chủ nhiệm và phụ huynh.")),
+          para(run("Giáo viên nhập điểm, phụ huynh xem kết quả học tập theo từng kỳ.")),
+          para(run("[Mô tả mục đích tài liệu]", '<w:color w:val="0070C0"/>')),
+          para(run("[Liệt kê tài liệu tham khảo]", '<w:color w:val="808080"/><w:i/>')),
+          para(run("{Ghi chú cho người soạn}", '<w:highlight w:val="yellow"/>')),
+          para(run("[Cảnh báo]", '<w:color w:val="FF0000"/>'))
+        ].join("")
+      )
+    )
+    expect(blocks.map((b) => [b.text, b.guidance_signals ?? null])).toEqual([
+      ["Hệ thống quản lý học sinh cho trường THPT, phục vụ giáo viên chủ nhiệm và phụ huynh.", null],
+      ["Giáo viên nhập điểm, phụ huynh xem kết quả học tập theo từng kỳ.", null],
+      ["[Mô tả mục đích tài liệu]", ["color"]],
+      ["[Liệt kê tài liệu tham khảo]", ["italic", "color"]],
+      ["{Ghi chú cho người soạn}", ["highlight"]],
+      ["[Cảnh báo]", []]
+    ])
+  })
+})
+
+describe("FLF-459 - chữ hướng dẫn lớp 1 (content control placeholder, style hướng dẫn, chữ ẩn)", () => {
+  const run = (text: string, rPr = "") => `<w:r>${rPr ? `<w:rPr>${rPr}</w:rPr>` : ""}<w:t xml:space="preserve">${text}</w:t></w:r>`
+  const para = (inner: string, pPr = "") => `<w:p>${pPr ? `<w:pPr>${pPr}</w:pPr>` : ""}${inner}</w:p>`
+  const styles =
+    VI_HEADING_STYLES +
+    `<w:style w:type="paragraph" w:styleId="Instr"><w:name w:val="Instruction Text"/><w:basedOn w:val="Normal"/></w:style>` +
+    `<w:style w:type="paragraph" w:styleId="HuongDan"><w:name w:val="Hướng dẫn"/><w:basedOn w:val="Normal"/></w:style>` +
+    `<w:style w:type="paragraph" w:styleId="An"><w:name w:val="Ghi chu an"/><w:rPr><w:vanish/></w:rPr></w:style>` +
+    `<w:style w:type="character" w:styleId="PlaceholderText"><w:name w:val="Placeholder Text"/></w:style>`
+
+  it("nhận đúng loại; chữ vẫn giữ nguyên trong text; đoạn thường / heading không gắn", async () => {
+    const body = [
+      styled("u1", "Giới thiệu"),
+      `<w:sdt><w:sdtPr><w:showingPlcHdr/></w:sdtPr><w:sdtContent>${para(run("Bấm vào đây để nhập mục đích."))}</w:sdtContent></w:sdt>`,
+      `<w:sdt><w:sdtPr><w:alias w:val="Ten"/></w:sdtPr><w:sdtContent>${para(run("Hệ thống quản lý học sinh."))}</w:sdtContent></w:sdt>`,
+      para(`<w:sdt><w:sdtPr><w:showingPlcHdr/></w:sdtPr><w:sdtContent>${run("Nhập tên dự án")}</w:sdtContent></w:sdt>`),
+      para(run("Chọn ngày", '<w:rStyle w:val="PlaceholderText"/>')),
+      para(run("Mô tả phạm vi của hệ thống."), '<w:pStyle w:val="Instr"/>'),
+      para(run("Liệt kê các tác nhân."), '<w:pStyle w:val="HuongDan"/>'),
+      para(run("Ghi chú ẩn cho người soạn", "<w:vanish/>")),
+      para(run("Ghi chú ẩn theo style"), '<w:pStyle w:val="An"/>'),
+      para(run("Chữ hiện ") + run("chữ ẩn", "<w:vanish/>")),
+      p("Đoạn nội dung bình thường.")
+    ].join("")
+    const blocks = await readBlocks(await DocxPackage.load(await makeDocx({ body, styles })))
+    expect(blocks.map((b) => [b.text, b.guidance_certain ?? null])).toEqual([
+      ["Giới thiệu", null],
+      ["Bấm vào đây để nhập mục đích.", "placeholder"],
+      ["Hệ thống quản lý học sinh.", null],
+      ["Nhập tên dự án", "placeholder"],
+      ["Chọn ngày", "placeholder"],
+      ["Mô tả phạm vi của hệ thống.", "style"],
+      ["Liệt kê các tác nhân.", "style"],
+      ["Ghi chú ẩn cho người soạn", "hidden"],
+      ["Ghi chú ẩn theo style", "hidden"],
+      ["Chữ hiện chữ ẩn", null],
+      ["Đoạn nội dung bình thường.", null]
+    ])
+  })
+
+  it("isGuidanceColor: xám / xanh lam ⇒ có; đen, trắng, đỏ, xanh lá ⇒ không", () => {
+    expect(["808080", "7F7F7F", "A6A6A6", "0070C0", "4472C4", "1F497D", "00B0F0"].map(isGuidanceColor)).toEqual([true, true, true, true, true, true, true])
+    expect(["000000", "FFFFFF", "FF0000", "00B050", "C00000", "zz"].map(isGuidanceColor)).toEqual([false, false, false, false, false, false])
   })
 })
 

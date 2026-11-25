@@ -46,7 +46,8 @@ describe("I-4 - bảng khớp đủ cột", () => {
     expect(run.doc.status).toBe("baselining")
 
     for (const s of TABLE_SECTIONS) expect(calls, s).not.toContain(s)
-    expect(calls).toHaveLength(6)
+    // FLF-444: + mục riêng "5.9 Team Notes" (heading tự đặt cũng đọc theo nội dung)
+    expect(calls).toHaveLength(7)
     const drafts = await draftsOf(ctx.importId)
     for (const s of TABLE_SECTIONS) {
       const d = drafts.find((x) => x.section_id === s)!
@@ -62,8 +63,8 @@ describe("I-4 - bảng khớp đủ cột", () => {
       ])
     )
     expect(await Usage.countDocuments({ projectId: ctx.projectId, step_id: { $in: TABLE_SECTIONS.map((s) => `I-4:${s}`) } })).toBe(0)
-    // 6 lượt mẫu ngắn × 1 credit (quyết toán theo token)
-    expect(await wallet(ctx.userId)).toMatchObject({ balance: 994, reserved: 0 })
+    // 7 lượt mẫu ngắn × 1 credit (quyết toán theo token)
+    expect(await wallet(ctx.userId)).toMatchObject({ balance: 993, reserved: 0 })
   })
 })
 
@@ -81,9 +82,9 @@ describe("I-4 - output sai schema", () => {
     const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
     expect(run.doc.paused).toBeNull()
     expect(calls.filter((s) => s === "fixed:1")).toHaveLength(3)
-    expect(calls).toHaveLength(8)
+    expect(calls).toHaveLength(9)
     expect(await Usage.find({ projectId: ctx.projectId, step_id: "I-4:fixed:1" }).distinct("state")).toEqual(["deducted"])
-    expect(await wallet(ctx.userId)).toMatchObject({ balance: 994, reserved: 0 })
+    expect(await wallet(ctx.userId)).toMatchObject({ balance: 993, reserved: 0 })
     const d = (await draftsOf(ctx.importId)).find((x) => x.section_id === "fixed:1")!
     expect(d.status).toBe("done")
   }, 20_000)
@@ -168,7 +169,7 @@ describe("I-4 - hết credit, resume", () => {
     expect(resumed.doc.status).toBe("baselining")
     for (const s of done) expect(calls, s).not.toContain(s)
     expect(calls[0]).toBe(AI_ORDER[2])
-    expect(calls).toHaveLength(4)
+    expect(calls).toHaveLength(5)
     // field của section đã xong không bị ghi lại
     const after = await draftsOf(ctx.importId)
     for (const [s, fields] of snapshot) expect(JSON.stringify(after.find((d) => d.section_id === s)!.fields), s).toBe(fields)

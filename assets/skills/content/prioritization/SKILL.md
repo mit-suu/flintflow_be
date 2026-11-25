@@ -1,7 +1,7 @@
 ---
 skill_id: prioritization
 kind: content
-version: 0.1.0
+version: 0.2.0
 description: "S-9.4 MoSCoW priority for every function and NFR, written into functions[].priority / nfrs[].priority"
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -72,6 +72,15 @@ rule points at the answer. For every item you had to **guess** - especially anyt
 item and the level you chose, so the gate shows it with Đúng / Sửa / Bỏ instead of burying it in the
 document.
 
+<!-- ba-quality:shared:start -->
+**Analysis quality** - applies to every finding, gap, proposed change, recommendation and reason you write (not to the plain answer options of a question):
+- **(a) Quote it or drop it.** Each one rests on words you can copy verbatim from the uploaded documents, the Brief, the current SRS content or the user's messages. Where the output has a quote or source field, put that exact text there. Nothing to quote ⇒ do not raise it.
+- **(b) Never ask what is already answered** - in the documents, the Brief, the SRS content, a settled decision or an earlier answer.
+- **(c) Recommend only when you are sure**: a clear basis in the documents, the Brief, the SRS content or a settled decision. A recommendation always states its reason and that basis. Not sure ⇒ give the options side by side, with no recommendation.
+- **(d) Specific to this project, never generic advice**: name the screen, role, data or rule it is about.
+  - Fails: "nên cân nhắc bảo mật" (consider security).
+  - Passes: "màn đối soát hiện số tiền, nên chỉ cho vai Kế toán xem" (the reconciliation screen shows amounts, so only the Accountant role should see it).
+<!-- ba-quality:shared:end -->
 ## Rules
 
 1. Cover **every** function and NFR in the projection - a row left `null` is an unfinished step.

@@ -56,29 +56,52 @@ describe("planDrop", () => {
   const all = new Set(regions.map((r) => r.key))
 
   it("vùng bỏ chữ chỉ giữ heading + chữ hướng dẫn; heading phần tử và mọi thứ dưới nó bị bỏ", () => {
-    const after = applyDropToBlocks(BLOCKS, planDrop(BLOCKS, regions, all, "fixed"))
+    const after = applyDropToBlocks(BLOCKS, planDrop(BLOCKS, regions, all))
     expect(after.map((b) => b.block_id)).toEqual(["B0001", "B0002", "B0003", "B0005", "B0009", "B0010", "B0011"])
   })
 
   it("bảng ngay dưới heading khung giữ hàng tiêu đề + một hàng trống (dạng bảng của khung mẫu); bảng một hàng (khung) giữ nguyên", () => {
     const blocks: DropBlock[] = [h("B0001", "1 Actors"), { block_id: "B0002", kind: "table", text: "", rows: [["Actor", "Description"], ["Teller", "Bank staff"]] }]
     const heads = [{ block_id: "B0001", section_id: "fixed:2.1", heading_text: "1 Actors", template_section: null }]
-    const after = applyDropToBlocks(blocks, planDrop(blocks, textRegions(blocks, heads), new Set(["B0001"]), "fixed"))
+    const after = applyDropToBlocks(blocks, planDrop(blocks, textRegions(blocks, heads), new Set(["B0001"])))
     expect(after[1].rows).toEqual([["Actor", "Description"], ["", ""]])
     expect(textRegions(after, heads)[0].has_text).toBe(false)
     const frame: DropBlock[] = [h("B0001", "1 Actors"), { block_id: "B0002", kind: "table", text: "", rows: [["Actor", "Description"]] }]
     expect(textRegions(frame, heads)[0].has_text).toBe(false)
   })
 
-  it("mẫu chuẩn FlintFlow (free): mục BA tự đặt bỏ cả heading — không được soạn lại nên không để heading trống", () => {
-    const plan = planDrop(BLOCKS, regions, new Set(["B0011"]), "free")
-    expect([...plan.remove]).toEqual(["B0011", "B0012"])
-    const kept = planDrop(BLOCKS, regions, new Set(["B0011"]), "fixed")
-    expect([...kept.remove]).toEqual(["B0012"])
+  it("FLF-463 (đảo FLF-411): Bỏ chữ luôn giữ heading, kể cả mục BA tự đặt — heading của file là mục của cấu trúc đích, Luồng 2 soạn lại", () => {
+    const plan = planDrop(BLOCKS, regions, new Set(["B0011"]))
+    expect([...plan.remove]).toEqual(["B0012"])
+    const after = applyDropToBlocks(BLOCKS, planDrop(BLOCKS, regions, all))
+    for (const key of ["B0002", "B0005", "B0009", "B0011"]) expect(after.some((b) => b.block_id === key)).toBe(true)
+  })
+
+  it("FLF-463: heading khung phần tử của mẫu (<<Feature Name 1>>) là khung — không làm vùng có chữ, Bỏ chữ giữ lại; heading phần tử thật thì bỏ", () => {
+    const blocks: DropBlock[] = [
+      h("B0001", "3.1.5 Entity Relationship Diagram", 3),
+      { block_id: "B0002", kind: "table", text: "", rows: [["#", "Entity"], ["1", "Meal"]] },
+      h("B0003", "3.2 <<Feature Name 1>>", 2),
+      h("B0004", "3.2.1 <<Function Name 1>>", 3),
+      para("B0005", "[Describe the function.]"),
+      h("B0006", "3.3 Order Meals", 2),
+      para("B0007", "The customer orders meals for the week.")
+    ]
+    const heads = [
+      { block_id: "B0001", section_id: "fixed:3.1.5", heading_text: "3.1.5 Entity Relationship Diagram", template_section: null },
+      { block_id: "B0003", section_id: "feature:@B0003", heading_text: "3.2 <<Feature Name 1>>", template_section: null },
+      { block_id: "B0004", section_id: "function:@B0004", heading_text: "3.2.1 <<Function Name 1>>", template_section: null },
+      { block_id: "B0006", section_id: "feature:@B0006", heading_text: "3.3 Order Meals", template_section: null }
+    ]
+    const regions = textRegions(blocks, heads)
+    const after = applyDropToBlocks(blocks, planDrop(blocks, regions, new Set(["B0001"])))
+    expect(after.map((b) => b.block_id)).toEqual(["B0001", "B0002", "B0003", "B0004", "B0005"])
+    // Chỉ còn khung (bảng mẫu thành hàng trống, khung <<…>>, hướng dẫn) ⇒ vùng không còn chữ
+    expect(textRegions(after, heads)[0].has_text).toBe(false)
   })
 
   it("vùng giữ nội dung không đổi gì", () => {
-    const plan = planDrop(BLOCKS, regions, new Set(["B0002"]), "fixed")
+    const plan = planDrop(BLOCKS, regions, new Set(["B0002"]))
     expect([...plan.remove]).toEqual(["B0004"])
   })
 })
@@ -100,7 +123,7 @@ describe("applyDropToDom — viết lại file", () => {
     autoConfirmMapping(matched)
     const regions = textRegions(blocks, matched.heading_map)
     expect(regions.filter((r) => r.has_text)).toHaveLength(2)
-    applyDropToDom(blocks, planDrop(blocks, regions, new Set(regions.map((r) => r.key)), "fixed"))
+    applyDropToDom(blocks, planDrop(blocks, regions, new Set(regions.map((r) => r.key))))
     const rewritten = await pkg.toBuffer()
 
     const xml = await (await JSZip.loadAsync(rewritten)).file("word/document.xml")!.async("string")
@@ -139,7 +162,7 @@ describe("applyDropToDom — đoạn dùng chung nhiều khối, ảnh trong ô 
     const matched = matchProfile(blocks, { fixedTemplate: false })
     autoConfirmMapping(matched)
     const regions = textRegions(blocks, matched.heading_map)
-    applyDropToDom(blocks, planDrop(blocks, regions, new Set(regions.map((r) => r.key)), "fixed"))
+    applyDropToDom(blocks, planDrop(blocks, regions, new Set(regions.map((r) => r.key))))
     await cleanupDroppedPackage(pkg)
     const rewritten = await pkg.toBuffer()
 

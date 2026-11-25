@@ -15,6 +15,7 @@
 import { chatQuestionItemSchema, type QuestionOption } from "../../shared/ai/response-parser.js"
 import { RECOMMENDED_SUFFIX, sanitizeSuggestions, type AnsweredTopic } from "./decisions.service.js"
 import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
+import { clearRecommendation, isRecommended, logRecommendationDropped } from "../../shared/ai/option-analysis.js"
 
 /** Trần câu hỏi một lượt, cho mọi nơi — kể cả phỏng vấn đầu giai đoạn. Câu còn thiếu để step sau tự hỏi. */
 export const MAX_QUESTIONS_PER_TURN = 4
@@ -53,6 +54,8 @@ export interface ModelQuestion {
   topic_key?: string
   /** FLF-232: câu mở đã hỏi ngay trong lời `reply` ⇒ FE không hiện thêm thẻ. Chỉ có nghĩa với câu không có lựa chọn. */
   inline?: boolean
+  /** FLF-449 (03 #3): vì sao khuyến nghị phương án có cờ `recommended`. Chỉ có khi còn phương án được khuyến nghị. */
+  recommendation_reason?: string
   /** Nội bộ: số tin chat user đã gửi trong lúc câu này chờ mà AI chưa chốt được (không gửi FE — xem `settleRepeatedAnswer`). */
   replied?: number
 }
@@ -65,6 +68,8 @@ export interface ContractQuestion {
   options?: QuestionOption[]
   multiple?: boolean
   inline?: boolean
+  /** FLF-449: lý do khuyến nghị (FE hiện khối "Vì sao khuyến nghị" ở phương án có cờ `recommended`). */
+  recommendation_reason?: string
 }
 
 /** Lọc và cắt lựa chọn theo luật server; trả `[]` khi không còn đủ 2 lựa chọn thật. */
@@ -151,8 +156,8 @@ export const followUpQuestions = <Q extends ModelQuestion>(asked: readonly Q[], 
 
 export interface ShapeOptions {
   /**
-   * User chưa có ý tưởng (FLF-221, `hasIdea` false): chưa có gì làm căn cứ để khuyến nghị ⇒ bỏ đuôi "(Khuyến nghị)"
-   * ở mọi option, giữ nguyên thứ tự model đưa (không đẩy option nào lên đầu).
+   * User chưa có ý tưởng (FLF-221, `hasIdea` false): chưa có gì làm căn cứ để khuyến nghị ⇒ bỏ khuyến nghị (đuôi
+   * "(Khuyến nghị)", cờ `recommended`, lý do) ở mọi option, giữ nguyên thứ tự model đưa. FLF-449: có bỏ thì ghi log.
    */
   noIdeaYet?: boolean
   /** Chỉ hỏi bằng văn xuôi: bỏ hết option — câu gợi mở cho user chưa có ý tưởng không phải là câu chọn. */
@@ -169,14 +174,20 @@ export const shapeQuestions = <Q extends ModelQuestion>(input: readonly Q[], sha
       `[question-shape] bỏ ${dropped.length} câu quá trần ${MAX_QUESTIONS_PER_TURN} (${dropped.map((q) => q.topic_key ?? "(không có chủ đề)").join(", ")})`
     )
   }
+  const droppedNoIdea: string[] = []
   const asked = real
     .slice(0, MAX_QUESTIONS_PER_TURN)
     .map((q) => {
       const shaped = shape.proseOnly ? [] : shapeOptions(q.options, q.topic_key)
-      const options = shape.noIdeaYet ? shaped.map((o) => ({ ...o, label: stripRecommended(o.label) })) : shaped
+      if (shape.noIdeaYet && shaped.some(isRecommended)) droppedNoIdea.push(q.topic_key ?? "(không có chủ đề)")
+      const options = shape.noIdeaYet ? shaped.map(clearRecommendation) : shaped
       const header = shapeHeader(q.header)
-      return { ...q, options, header, multiple: options.length > 0 ? q.multiple : undefined }
+      // Lý do khuyến nghị chỉ còn nghĩa khi phương án được khuyến nghị còn trên thẻ (có thể bị lọc ở `shapeOptions`)
+      const { recommendation_reason: reason, ...rest } = q
+      const keepReason = reason !== undefined && options.some(isRecommended)
+      return { ...rest, options, header, multiple: options.length > 0 ? q.multiple : undefined, ...(keepReason ? { recommendation_reason: reason } : {}) } as Q
     })
+  logRecommendationDropped("no_idea_yet", "no_idea_yet", droppedNoIdea)
   const ids = questionIdsFor(asked)
   const shownKind = asked.length > 0 && isCard(asked[0])
   const contract = asked.map((q, i): ContractQuestion => ({
@@ -185,7 +196,8 @@ export const shapeQuestions = <Q extends ModelQuestion>(input: readonly Q[], sha
     ...(q.header ? { header: q.header } : {}),
     ...(q.options.length > 0 ? { options: q.options } : {}),
     ...(q.options.length > 0 && q.multiple !== undefined ? { multiple: q.multiple } : {}),
-    ...(q.options.length === 0 && q.inline ? { inline: true } : {})
+    ...(q.options.length === 0 && q.inline ? { inline: true } : {}),
+    ...(q.options.length > 0 && q.recommendation_reason ? { recommendation_reason: q.recommendation_reason } : {})
   }))
   const questions = contract.filter((_, i) => isCard(asked[i]) === shownKind)
   return { asked, questions }
@@ -268,6 +280,7 @@ export interface ChatQuestion {
   header?: string
   options?: QuestionOption[]
   multiple?: boolean
+  recommendation_reason?: string
 }
 
 /**
@@ -281,11 +294,12 @@ export const shapeChatQuestions = (raw: unknown): ChatQuestion[] => {
     const result = chatQuestionItemSchema.safeParse(item)
     return result.success ? [result.data] : []
   })
-  return shapeQuestions(parsed).asked.map((q) => ({
+  return shapeQuestions<ModelQuestion>(parsed).asked.map((q) => ({
     question: q.question,
     ...(q.header ? { header: q.header } : {}),
     ...(q.options.length > 0 ? { options: q.options } : {}),
-    ...(q.options.length > 0 && q.multiple !== undefined ? { multiple: q.multiple } : {})
+    ...(q.options.length > 0 && q.multiple !== undefined ? { multiple: q.multiple } : {}),
+    ...(q.options.length > 0 && q.recommendation_reason ? { recommendation_reason: q.recommendation_reason } : {})
   }))
 }
 

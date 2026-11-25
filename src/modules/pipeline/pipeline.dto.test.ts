@@ -114,6 +114,21 @@ describe("pipeline.dto", () => {
     expect(questionSchema.safeParse({ ...base, options: [{ description: "thiếu label" }] }).success).toBe(false)
   })
 
+  it("FLF-449: option mang pros / cons / risks / recommended; câu hỏi mang recommendation_reason (không bị cắt khi parse)", () => {
+    const question = {
+      id: "Q_uptime",
+      text: "Uptime bao nhiêu?",
+      recommendation_reason: "Phòng khám chỉ làm giờ hành chính",
+      options: [
+        { label: "99% (Khuyến nghị)", recommended: true, pros: ["Một máy chủ"], cons: ["Gián đoạn vài giờ"], risks: ["Không nhận lịch ban đêm"] },
+        { label: "99.9%" }
+      ]
+    }
+    const parsed = questionSchema.parse(question)
+    expect(parsed).toEqual(question)
+    expect(questionSchema.safeParse({ ...question, options: [{ label: "A", pros: "không phải mảng" }, { label: "B" }] }).success).toBe(false)
+  })
+
   it("waive: lý do ≥ 20 ký tự", () => {
     expect(waiveRequestSchema.safeParse({ reason: "quá ngắn" }).success).toBe(false)
     expect(waiveRequestSchema.safeParse({ reason: "Khách hàng chấp nhận rủi ro này" }).success).toBe(true)

@@ -49,6 +49,13 @@ export interface IDocBlock extends Document {
   number_label?: string | null
   /** FLF-364: đoạn có kiểu chữ hướng dẫn (nghiêng / tô nền / khác màu thân bài) — tín hiệu phụ, không tự quyết. */
   guidance_format?: boolean
+  /**
+   * FLF-459 (business-flow §3.1.1): lớp nhận diện chữ hướng dẫn lúc import — 1–3: Code đã kết luận là chữ hướng dẫn; 4: đúng
+   * một dấu hiệu, chờ AI phân loại trong I-4 + người xác nhận. Không có ⇒ không dấu hiệu nào (nội dung thật).
+   */
+  guidance_layer?: 1 | 2 | 3 | 4
+  /** FLF-459: dấu hiệu đã thấy (`placeholder`, `style`, `hidden`, `known`, `italic`, `color`, `brackets`…). */
+  guidance_by?: string[]
 }
 
 const opts = { _id: false }
@@ -78,6 +85,8 @@ const docBlockSchema = new Schema<IDocBlock>(
     rows: { type: [[String]], default: undefined },
     number_label: { type: String, default: undefined },
     guidance_format: { type: Boolean, default: undefined },
+    guidance_layer: { type: Number, enum: [1, 2, 3, 4], default: undefined },
+    guidance_by: { type: [String], default: undefined },
     text_hash: { type: String, required: true },
     section_id: { type: String, default: null },
     mentions: {

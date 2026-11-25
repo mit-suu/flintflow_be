@@ -1,6 +1,7 @@
-# Review lenses - source: Phases §6.4 (S-8.4, S-9.2, S-9.3), srs-spine.md §8.2; pattern from BMAD `bmad-review/references/lens-*.md`
+<!-- Source: Phases §6.4 (S-8.4, S-9.2, S-9.3), srs-spine.md §8.2; pattern from BMAD `bmad-review/references/lens-*.md`. Loaded into the review-section prompt (prompt_references). -->
+# Review lenses
 
-All lenses output **yellow** flags. Round one ships the schema; LLM yellow flags are cut from the round-one scope (Phases §9.1) except where a step explicitly enables a lens.
+All lenses output **yellow** flags. Apply only the lenses listed in *Lenses to apply*; each flag quotes the phrase or names the element it is about.
 
 ## `ambiguity`
 

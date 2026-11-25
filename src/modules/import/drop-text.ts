@@ -13,9 +13,10 @@ import { isInstructionText, isRealText, tableBodyHasRealText } from "../../share
 import type { DocxPackage } from "../docx-ooxml/index.js"
 import { NS } from "../docx-ooxml/xml.js"
 import { pruneUnreferencedParts, requestFieldUpdate } from "../template-migration/ooxml-transplant.js"
-import type { TemplateIntent } from "./target-structure.js"
 import { classifySection } from "./template-skeleton.js"
 import type { HeadingMapEntry } from "./template-profile.model.js"
+import { isPlaceholderText } from "./template-markers.js"
+import { splitHeadingNumber } from "./text-similarity.js"
 
 /** Khối tối thiểu cần để chia vùng (DocBlock đã lưu hoặc ParsedBlock vừa tách). */
 export interface DropBlock {
@@ -42,6 +43,12 @@ export interface TextRegion {
   /** Vùng có chữ thật (đoạn / bảng / ảnh / heading phần tử) — chỉ vùng này có lựa chọn Giữ / Bỏ chữ. */
   has_text: boolean
 }
+
+/**
+ * FLF-463: heading khung phần tử của mẫu (`3.2 <<Feature Name 1>>`) là một phần của khung, không phải phần tử của dự án cũ ⇒ không
+ * làm vùng "có chữ", Bỏ chữ giữ lại.
+ */
+const isFrameHeading = (b: DropBlock): boolean => b.kind === "heading" && isPlaceholderText(splitHeadingNumber(b.text).title)
 
 /** Khối thân mang nội dung thật của khách (chữ hướng dẫn, ô chỗ trống không tính). */
 const isRealBlock = (b: DropBlock): boolean => {
@@ -88,7 +95,7 @@ export const textRegions = (blocks: readonly DropBlock[], headingMap: readonly H
     if (!open) continue
     open.block_ids.push(b.block_id)
     // Heading phần tử bên trong (UC, chức năng…) là dữ liệu của dự án cũ ⇒ vùng có chữ
-    if (b.kind === "heading" || isRealBlock(b)) open.has_text = true
+    if ((b.kind === "heading" && !isFrameHeading(b)) || isRealBlock(b)) open.has_text = true
   }
   return regions
 }
@@ -104,29 +111,26 @@ export interface DropPlan {
 }
 
 /**
- * Mục BA tự đặt ở dự án theo mẫu chuẩn FlintFlow (`free`) không có trong cấu trúc đích nên không được soạn lại ⇒ bỏ chữ là bỏ
- * cả heading, không để lại một heading trống trong bản in.
+ * Hàm thuần: khối bỏ / bảng chỉ còn hàng tiêu đề + hàng trống cho các vùng `keys`. Vùng không có chữ không đổi gì. FLF-463: Bỏ chữ
+ * luôn **giữ heading** của vùng, kể cả mục BA tự đặt khi tick bổ sung theo mẫu chuẩn — heading của file là một mục của cấu trúc
+ * đích, còn trống thì Luồng 2 soạn lại.
  */
-const dropsHeading = (region: TextRegion, intent: TemplateIntent): boolean => region.custom && intent === "free"
-
-/** Hàm thuần: khối bỏ / bảng chỉ còn hàng tiêu đề + hàng trống cho các vùng `keys`. Vùng không có chữ không đổi gì. */
-export const planDrop = (blocks: readonly DropBlock[], regions: readonly TextRegion[], keys: ReadonlySet<string>, intent: TemplateIntent): DropPlan => {
+export const planDrop = (blocks: readonly DropBlock[], regions: readonly TextRegion[], keys: ReadonlySet<string>): DropPlan => {
   const byId = new Map(blocks.map((b) => [b.block_id, b]))
   const remove = new Set<string>()
   const blankBody = new Set<string>()
   for (const region of regions) {
     if (!keys.has(region.key) || !region.has_text) continue
-    if (dropsHeading(region, intent)) remove.add(region.key)
     // Sau heading phần tử đầu tiên, mọi khối đều thuộc phần tử của dự án cũ ⇒ bỏ hết, kể cả chữ hướng dẫn
     let inElement = false
     for (const id of region.block_ids) {
       const b = byId.get(id)
       if (!b) continue
-      if (b.kind === "heading") inElement = true
+      const frame = isFrameHeading(b)
+      if (b.kind === "heading" && !frame) inElement = true
       const keep =
         !inElement &&
-        !dropsHeading(region, intent) &&
-        (b.kind === "table" || ((b.kind === "paragraph" || b.kind === "list_item") && isInstructionText(b.text)))
+        (frame || b.kind === "table" || ((b.kind === "paragraph" || b.kind === "list_item") && isInstructionText(b.text)))
       if (!keep) remove.add(id)
       else if (b.kind === "table" && (b.rows?.length ?? 0) > 1) blankBody.add(id)
     }

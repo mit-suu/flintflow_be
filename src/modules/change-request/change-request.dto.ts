@@ -213,19 +213,52 @@ export const listChangeRequestsQuerySchema = z.object({ status: crStatusSchema.o
 export const crParamsSchema = z.object({ crId: crIdSchema })
 
 // ─── FLF-338 §3.6.1 rút yêu cầu từ tài liệu thô ─────────────────
+/** FLF-449: trần số mục một bản rút (thay trần 40) — cùng `EXTRACTION_MAX_ITEMS` của service. */
+export const EXTRACTION_DECISIONS_MAX = 500
+const extractionSourcedDto = z.object({ para_id: z.string().nullable(), quote: z.string() })
+/** FLF-449: phương án của mục Suy ra — tương thích kiểu `OptionAnalysis` chung (N1). */
+export const extractionOptionSchema = z.object({
+  label: z.string(),
+  description: z.string().nullable(),
+  pros: z.array(z.string()),
+  cons: z.array(z.string()),
+  risks: z.array(z.string())
+})
+export const extractionInferenceSchema = z.object({
+  symptom: z.string(),
+  symptom_quote: z.string(),
+  symptom_para_id: z.string().nullable(),
+  root_cause: z.string(),
+  rationale: z.string(),
+  options: z.array(extractionOptionSchema),
+  /** Chỉ số phương án khuyến nghị; `null` = không khuyến nghị (AI chưa chắc chắn). */
+  recommended: z.number().int().nullable(),
+  recommendation_reason: z.string().nullable(),
+  serves_goal: z.string().nullable()
+})
 export const extractionItemSchema = z.object({
   id: z.string().min(1),
   text: z.string(),
-  label: z.enum(["new", "modification", "duplicate", "contradiction", "ambiguous"]),
+  label: z.enum(["new", "modification", "duplicate", "contradiction", "ambiguous", "inferred"]),
   para_id: z.string().nullable(),
   quote: z.string(),
   group: z.string(),
   entity_paths: z.array(z.string()),
+  /** FLF-449: tên đọc được của từng phần tử trong `entity_paths` (cùng thứ tự, "" khi không có) — UI không in path thô. */
+  entity_names: z.array(z.string()),
+  /** FLF-449: người nói (chỉ khi tài liệu ghi rõ). */
+  speaker: z.string().nullable(),
+  /** FLF-449: mâu thuẫn — mỗi phía kèm người nói + câu trích. */
+  sides: z.array(extractionSourcedDto.extend({ speaker: z.string().nullable() })),
+  /** FLF-449: chỉ mục `inferred`. */
+  inference: extractionInferenceSchema.nullable(),
   question: z.string().nullable(),
   suggested_answers: z.array(z.string()),
   include: z.boolean().nullable(),
   drop_reason: z.string().nullable(),
   answer: z.string().nullable(),
+  /** FLF-449: phương án BA đã chọn của mục Suy ra. */
+  chosen_option: z.number().int().nullable(),
   cr_id: z.string().nullable()
 })
 export const extractionSchema = z.object({
@@ -233,7 +266,11 @@ export const extractionSchema = z.object({
   document_name: z.string(),
   doc_code: z.number().int().min(1),
   status: z.enum(["extracted", "approved"]),
+  /** FLF-449: đầu danh sách — hiện trạng / mong muốn kèm câu trích. */
+  situation: z.object({ current: z.array(extractionSourcedDto.extend({ text: z.string() })), desired: z.array(extractionSourcedDto.extend({ text: z.string() })) }),
   items: z.array(extractionItemSchema),
+  /** FLF-449: số lô (mỗi lô một lượt AI) — tài liệu dài chia lô. */
+  batches: z.number().int().min(0),
   credits: z.number().min(0),
   approved_at: z.string().nullable(),
   created_at: z.string(),
@@ -250,12 +287,16 @@ export const approveExtractionSchema = z.strictObject({
         include: z.boolean(),
         drop_reason: z.string().trim().max(500).nullable().optional(),
         answer: z.string().trim().max(2000).nullable().optional(),
-        group: z.string().trim().max(50).nullable().optional()
+        group: z.string().trim().max(50).nullable().optional(),
+        /** FLF-449: mục Suy ra được tick phải chọn một phương án (chỉ số trong `inference.options`). */
+        chosen_option: z.number().int().min(0).max(9).nullable().optional()
       })
     )
     .min(1)
-    .max(40)
+    .max(EXTRACTION_DECISIONS_MAX)
 })
+/** FLF-449: `GET …/extract/estimate` — số lô + credit dự kiến trước khi rút. */
+export const extractionEstimateSchema = z.object({ batches: z.number().int().min(0), credits: z.number().min(0), cost_per_batch: z.number().min(0) })
 export type ApproveExtractionDTO = z.infer<typeof approveExtractionSchema>
 
 /** `POST …/:crId/answers` (UC-49) — trả lời theo đúng thứ tự câu hỏi của vòng làm rõ gần nhất. */

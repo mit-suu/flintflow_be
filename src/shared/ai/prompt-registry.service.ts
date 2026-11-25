@@ -35,7 +35,7 @@ export interface LoadedSkill {
   references: Record<string, string>
   /** Mọi reference có sẵn — để caller chọn nạp. */
   referenceNames: string[]
-  /** Reference skill khai phải nạp kèm thân khi dùng làm skill nội dung của step (frontmatter `prompt_references`). */
+  /** Reference luôn nạp kèm thân skill (frontmatter `prompt_references`): skill hành động lẫn skill nội dung của step. */
   promptReferences: string[]
   asset_version: string
   outputSchema: OutputSchemaName[]
@@ -90,10 +90,26 @@ export const getSkill = (skillId: string, options: GetSkillOptions = {}): Loaded
   }
 }
 
+/** Tiêu đề khối reference nối sau thân skill — FE/test/log dò chuỗi này, giữ nguyên. */
+export const REFERENCE_HEADING = "## Reference: "
+
+/**
+ * Thân skill + các reference khai ở `prompt_references`, mỗi reference một khối `## Reference: <tên>` theo thứ tự khai.
+ * Một nguồn duy nhất cho cả hai đường nạp: skill hành động (`getPromptTemplate`) và skill nội dung của step
+ * (`contentGuidance`, FLF-370). Mỗi skill chỉ đi qua đây một lần cho mỗi prompt, nên reference không bị nối hai lần
+ * (prompt Draft = thân `draft-to-ops` + reference của nó, `{{content_guidance}}` = thân skill nội dung + reference của nó).
+ * FLF-449 N3: trước đây chỉ skill nội dung được nối, skill hành động khai `prompt_references` cũng không tới model.
+ */
+export const skillPromptText = (skill: Pick<LoadedSkill, "skillId" | "template" | "promptReferences">): string => {
+  if (skill.promptReferences.length === 0) return skill.template
+  const blocks = skill.promptReferences.map((name) => `${REFERENCE_HEADING}${name}\n\n${loadSkillReference(skill.skillId, name)}`)
+  return [skill.template, ...blocks].join("\n\n")
+}
+
 /**
  * Template cho `executeAiAction`. Thứ tự: prompt phẳng `assets/prompts/<actionType>.md`
- * → skill hành động theo `SKILL_BY_ACTION_TYPE`. Không có fallback generic là CÓ CHỦ Ý:
- * asset thiếu phải là lỗi ồn ào, không phải template vô nghĩa gửi thẳng tới model.
+ * → skill hành động theo `SKILL_BY_ACTION_TYPE` (thân + reference khai ở `prompt_references`, FLF-449 N3).
+ * Không có fallback generic là CÓ CHỦ Ý: asset thiếu phải là lỗi ồn ào, không phải template vô nghĩa gửi thẳng tới model.
  */
 export const getPromptTemplate = async (
   actionType: ActionType | string
@@ -118,7 +134,7 @@ export const getPromptTemplate = async (
     const skill = getSkill(skillId)
     return {
       actionType,
-      template: skill.template,
+      template: skillPromptText(skill),
       providerConfig: skill.providerConfig,
       skillId,
       asset_version: skill.asset_version

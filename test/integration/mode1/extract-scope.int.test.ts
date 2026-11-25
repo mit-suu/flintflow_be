@@ -49,7 +49,9 @@ describe("I-4 - known_keys theo phạm vi", () => {
   it("thêm 150 business rule không liên quan ⇒ prompt mỗi lượt chữ không dài thêm; mã được nhắc vẫn có trong known_keys", async () => {
     const base = await run()
     const big = await run({ srs: { extraRules: UNRELATED_RULES } })
-    expect(big.prompts.map((p) => p.section)).toEqual(base.prompts.map((p) => p.section))
+    // FLF-444: mục đọc theo nội dung mang id block heading - thêm hàng bảng thì id block đổi, mục vẫn là một
+    const sectionKey = (s: string) => s.replace(/^content:@B\d+$/, "content:@")
+    expect(big.prompts.map((p) => sectionKey(p.section))).toEqual(base.prompts.map((p) => sectionKey(p.section)))
     const total = (ps: { prompt: string }[], part: (p: string) => string = (p) => p) => ps.reduce((n, p) => n + part(p.prompt).length, 0)
     console.info(
       `[I-4 known_keys] fixture: ${base.prompts.length} lượt chữ, prompt ${total(base.prompts)} ký tự (known_keys ${total(base.prompts, knownKeysOf)}); ` +

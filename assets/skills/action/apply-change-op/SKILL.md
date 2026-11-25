@@ -215,6 +215,15 @@ User clicked **Reconcile** once for all `stale` sections (UC 6.10). For each sta
 
 Dependents ⇒ preview diff, then they turn `stale`; baseline ⇒ Impact Analysis mandatory; broken invariant ⇒ whole batch rejected. **No auto-propagation** except rule 3e.
 
+<!-- ba-quality:shared:start -->
+**Analysis quality** - applies to every finding, gap, proposed change, recommendation and reason you write (not to the plain answer options of a question):
+- **(a) Quote it or drop it.** Each one rests on words you can copy verbatim from the uploaded documents, the Brief, the current SRS content or the user's messages. Where the output has a quote or source field, put that exact text there. Nothing to quote ⇒ do not raise it.
+- **(b) Never ask what is already answered** - in the documents, the Brief, the SRS content, a settled decision or an earlier answer.
+- **(c) Recommend only when you are sure**: a clear basis in the documents, the Brief, the SRS content or a settled decision. A recommendation always states its reason and that basis. Not sure ⇒ give the options side by side, with no recommendation.
+- **(d) Specific to this project, never generic advice**: name the screen, role, data or rule it is about.
+  - Fails: "nên cân nhắc bảo mật" (consider security).
+  - Passes: "màn đối soát hiện số tiền, nên chỉ cho vai Kế toán xem" (the reconciliation screen shows amounts, so only the Accountant role should see it).
+<!-- ba-quality:shared:end -->
 ## Output
 
 Return **only** JSON, no fence, no commentary.

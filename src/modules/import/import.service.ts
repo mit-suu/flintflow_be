@@ -27,11 +27,13 @@ import { Mode1Error } from "./mode1.errors.js"
 import { toIso } from "./mode1.http.js"
 import { parseDocument, type ParsedBlock } from "./parse.service.js"
 import { preflightDocx } from "./preflight.service.js"
-import { assignBlockSections, autoConfirmMapping, matchProfile, needsMappingReview } from "./profile-match.service.js"
+import { assignBlockSections, autoConfirmMapping, classifyGuidance, matchProfile, needsMappingReview } from "./profile-match.service.js"
 import { isKnownSectionId } from "./section-catalog.js"
 import { normalizeTemplateFamily } from "./part-bank.js"
 import { slotOverlaps } from "./content-slots.js"
-import { applyOrgMapping, orgTemplateHeadings } from "./org-mapping.js"
+import { applyMatchedOrgMapping, applyOrgMapping, orgLibraryTemplates, orgTemplateHeadings, pickOrgTemplate } from "./org-mapping.js"
+import { STANDARD_GUIDANCE } from "./standard-guidance.js"
+import { knownGuidanceMatcher } from "../../shared/utils/instruction-text.js"
 import { TemplateProfile, type HeadingMapEntry, type ITemplateProfile } from "./template-profile.model.js"
 import { previewStructure } from "./structure-preview.js"
 import { applyDropToBlocks, applyDropToDom, cleanupDroppedPackage, planDrop, textRegions, validDropKeys } from "./drop-text.js"
@@ -319,7 +321,8 @@ const toBlockDoc = (projectId: mongoose.Types.ObjectId, b: ParsedBlock, sectionI
   image_ref: b.image_ref ?? null,
   ...(b.kind === "table" && b.rows ? { rows: b.rows } : {}),
   ...(b.number_label ? { number_label: b.number_label } : {}),
-  ...(b.guidance_format ? { guidance_format: true } : {})
+  ...(b.guidance_format ? { guidance_format: true } : {}),
+  ...(b.guidance_layer ? { guidance_layer: b.guidance_layer, guidance_by: b.guidance_by ?? [] } : {})
 })
 
 /** Dọn dữ liệu của lần import trước (chưa có baseline nên chỉ có version `0.1`). */
@@ -332,7 +335,7 @@ const clearPreviousImportData = async (projectId: mongoose.Types.ObjectId): Prom
 }
 
 /** Khối tối thiểu để tính bản sơ bộ (khối vừa tách hoặc DocBlock đã lưu). */
-type PreviewBlock = Pick<ParsedBlock, "block_id" | "kind" | "level" | "text"> & { rows?: string[][] | null; image_ref?: string | null; number_label?: string | null }
+type PreviewBlock = Pick<ParsedBlock, "block_id" | "kind" | "level" | "text"> & { rows?: string[][] | null; image_ref?: string | null; number_label?: string | null; guidance_layer?: 1 | 2 | 3 | 4 | null }
 
 /**
  * Cấu trúc đích sơ bộ của file vừa tách (ý định theo `import.intent`, Spine hiện tại — chưa trích gì). FLF-412: vùng người dùng
@@ -347,7 +350,7 @@ const previewOf = async (
 ) => {
   // Spine rỗng: lúc này chưa trích gì — dữ liệu của lần upload trước (chưa có bản gốc) không được làm mục "có nội dung"
   const plain = spineRepository.createEmptySpine({})
-  const blocks = dropKeys.length ? applyDropToBlocks(allBlocks, planDrop(allBlocks, textRegions(allBlocks, headingMap), new Set(dropKeys), doc.intent ?? "free")) : allBlocks
+  const blocks = dropKeys.length ? applyDropToBlocks(allBlocks, planDrop(allBlocks, textRegions(allBlocks, headingMap), new Set(dropKeys))) : allBlocks
   const layoutBlocks = blocks.map((b) => ({
     block_id: b.block_id,
     kind: b.kind,
@@ -356,7 +359,8 @@ const previewOf = async (
     section_id: sections.get(b.block_id) ?? null,
     rows: b.kind === "table" ? (b.rows ?? null) : null,
     image_ref: b.image_ref ?? null,
-    ...(b.number_label ? { number_label: b.number_label } : {})
+    ...(b.number_label ? { number_label: b.number_label } : {}),
+    ...(b.guidance_layer ? { guidance_layer: b.guidance_layer } : {})
   }))
   return previewStructure(layoutBlocks, new Map(headingMap.map((h) => [h.block_id, h.section_id])), plain, doc.intent ?? "free")
 }
@@ -368,11 +372,22 @@ const previewOf = async (
 const parseImport = async (doc: IImportedDocument, opts: { orgDefaultDrop: boolean }): Promise<void> => {
   const sourceFile = await loadImportFile(doc)
   const { blocks } = await parseDocument(sourceFile)
-  // Mẫu bắt buộc: profile lưu dùng đúng mapping của bản xuất (phần nhỏ, cha/con cùng mục) ⇒ I-5, kế hoạch step, cờ "Cần xem" khớp
-  const matched = matchProfile(blocks, { fixedTemplate: doc.intent === "fixed" })
   // FLF-278: mẫu đã lưu của tổ chức ⇒ mapping BA đã xác nhận ở dự án trước áp sẵn (bỏ bước 1.5 nếu khớp đủ)
   const saved = doc.org_template_id ? await orgTemplateHeadings(doc.org_template_id, doc.org_template_version ?? null) : null
-  const profile = saved ? { ...matched, heading_map: applyOrgMapping(matched.heading_map, saved) } : matched
+  // FLF-459 (I-3): mẫu đã biết = mẫu chuẩn + mẫu thư viện org (+ mẫu đã chọn) ⇒ lớp 2 chữ hướng dẫn; thư viện để tự khớp mẫu
+  const project = await Project.findById(doc.projectId).select("organizationId").lean()
+  const library = await orgLibraryTemplates(project?.organizationId ?? null)
+  const known = knownGuidanceMatcher([...STANDARD_GUIDANCE, ...[...library.flatMap((t) => t.headings), ...(saved ?? [])].map((h) => h.guidance ?? "")])
+  classifyGuidance(blocks, known)
+  // Mẫu bắt buộc: profile lưu dùng đúng mapping của bản xuất (phần nhỏ, cha/con cùng mục) ⇒ I-5, kế hoạch step, cờ "Cần xem" khớp
+  const matched = matchProfile(blocks, { fixedTemplate: doc.intent === "fixed", known })
+  // FLF-459: không chọn mẫu ⇒ tự khớp với thư viện org; không khớp mẫu nào ⇒ khớp như mẫu mới riêng cho dự án (không vào thư viện)
+  const auto = saved ? null : pickOrgTemplate(matched.heading_map, library)
+  const profile = saved
+    ? { ...matched, heading_map: applyOrgMapping(matched.heading_map, saved) }
+    : auto
+      ? { ...matched, heading_map: applyMatchedOrgMapping(matched.heading_map, auto), org_match: { template_id: auto.template_id, version: auto.version } }
+      : matched
   // FLF-343: không dừng ở bước xác nhận mapping — mục độ tin thấp tự nhận (giữ độ tin), finalize gắn cờ "Cần xem"
   autoConfirmMapping(profile)
   const sections = assignBlockSections(blocks, profile.heading_map)
@@ -404,7 +419,7 @@ export interface TextSectionView {
 const storedBlocks = async (projectId: mongoose.Types.ObjectId | string) =>
   DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } })
     .sort({ "anchor.ordinal": 1 })
-    .select("block_id kind level text rows image_ref section_id number_label")
+    .select("block_id kind level text rows image_ref section_id number_label guidance_layer")
     .lean()
 
 /** Chưa bấm Bắt đầu: còn ở `extracting`, chưa có lượt đọc nào, không dừng giữa chừng. Lựa chọn chỉ đổi được lúc này. */
@@ -469,7 +484,7 @@ export const applyDropText = async (doc: IImportedDocument): Promise<void> => {
     const profile = await TemplateProfile.findOne({ projectId: doc.projectId }, { heading_map: 1, drop_text: 1 }).lean()
     if (!profile?.drop_text?.length) return
     const { pkg, blocks } = await parseDocument(await loadImportFile(doc))
-    applyDropToDom(blocks, planDrop(blocks, textRegions(blocks, profile.heading_map), new Set(profile.drop_text), doc.intent ?? "free"))
+    applyDropToDom(blocks, planDrop(blocks, textRegions(blocks, profile.heading_map), new Set(profile.drop_text)))
     await cleanupDroppedPackage(pkg)
     const rewrittenRef = await docFileStore().save(await pkg.toBuffer(), { projectId: String(doc.projectId), kind: "upload", name: doc.original_name })
     doc.file_ref = rewrittenRef
@@ -484,6 +499,8 @@ export const applyDropText = async (doc: IImportedDocument): Promise<void> => {
       await docFileStore().remove(rewrittenRef).catch(() => undefined)
       throw err
     }
+    // Tách lại tạo hồ sơ mới (không còn lựa chọn Bỏ chữ) ⇒ ghi lại vùng đã bỏ cho I-5 (FLF-463)
+    await TemplateProfile.updateOne({ projectId: doc.projectId }, { $set: { dropped_text: profile.drop_text } })
     if (originalRef) await docFileStore().remove(originalRef).catch(() => undefined)
   } finally {
     await ImportedDocument.updateOne({ _id: doc._id }, { $set: { drop_applying: false } })
