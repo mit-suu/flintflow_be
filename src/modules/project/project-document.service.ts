@@ -6,7 +6,7 @@ import { uploadFileToCloudinary } from "../../shared/utils/cloudinary.js"
 import { destroyDocumentAsset } from "./project-document.storage.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
-import { parseFileContent } from "../../shared/utils/file-text.js"
+import { parseFileContent, type FileTextWarning } from "../../shared/utils/file-text.js"
 import { assignDocCodes } from "./document-code.service.js"
 import { contentHashOf, findDuplicate, findVersionCandidates, type ExistingDocument } from "./document-dedupe.js"
 import { paragraphId, splitParagraphs } from "../../shared/ai/document-paragraphs.js"
@@ -87,9 +87,19 @@ export const uploadProjectDocument = async (
   // Lỗi parse KHÔNG làm fail toàn bộ request — document vẫn được lưu với parseStatus = "failed".
   let parsed: { text: string; tokenCount: number } | null = null
   let parseError: string | null = null
+  // FLF-449 việc 27: điều Code biết chắc đã mất khi trích (ảnh trong .docx, PDF không có lớp chữ) - FE hiện trên dòng tài liệu
+  let parseWarnings: FileTextWarning[] = []
   try {
-    parsed = await parseFileContent(file.buffer, file.mimetype, extension)
-    console.log(`[DocumentParser] Parsed "${originalName}" successfully: ${parsed.text.length} chars, ~${parsed.tokenCount} tokens`)
+    const result = await parseFileContent(file.buffer, file.mimetype, extension)
+    parseWarnings = result.warnings
+    if (result.warnings.includes("pdf_no_text")) {
+      // L3: PDF scan / không có lớp chữ ⇒ "failed" ngay lúc tải (không chờ tới lượt rút mới lộ 422); không chunk, không tóm tắt
+      parseError = "PDF không có lớp chữ (có thể là bản scan). Hãy gửi lại bản .docx."
+      console.warn(`[DocumentParser] "${originalName}" has no text layer (parseStatus=failed)`)
+    } else {
+      parsed = result
+      console.log(`[DocumentParser] Parsed "${originalName}" successfully: ${parsed.text.length} chars, ~${parsed.tokenCount} tokens`)
+    }
   } catch (parseErr: any) {
     parseError = parseErr?.message || "Unknown parse error"
     console.warn(`[DocumentParser] Failed to parse "${originalName}" (parseStatus=failed): ${parseErr?.message}`)
@@ -163,6 +173,7 @@ export const uploadProjectDocument = async (
     tokenCount: parsed?.tokenCount ?? null,
     parseStatus: parsed ? "success" : "failed",
     parseError,
+    parseWarnings,
     ...(outline.length ? { outline } : {}),
     summaryStatus: "pending"
   })
