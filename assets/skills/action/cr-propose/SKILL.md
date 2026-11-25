@@ -1,7 +1,7 @@
 ---
 skill_id: cr-propose
 kind: action
-version: 2.9.0
+version: 2.10.0
 description: Mode 1 C-4 - for every affected Spine element conclude edit | comment | not_related and propose the Spine ops
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -118,11 +118,13 @@ and keep every other field exactly as it is - each changed field is a revision t
 16. **Removing a whole element.** The CR drops the element this location is (a function, a screen, a use case, a
     message...) ⇒ `conclusion: edit` and `spine_ops: [ { "op": "remove", "path": "functions[id=FN012]" } ]` with the
     element's own path. The code removes the references to it by itself. A comment that tells the reviewer to delete it
-    is **not** a substitute: the element would stay in the document.
+    is **not** a substitute: the element would stay in the document. Removing the last function of a use case that is in
+    the list ⇒ also `remove` that use case.
 17. **Adding a whole function / screen.** The CR adds a function (or a screen) ⇒ from the location `functions[]` /
     `screens[]` of the feature that holds it, `add` the complete element (id in the document's scheme, `feature_id` of
     that feature, `screen_id` of the screen it belongs to when it has one, trigger, description, normal / abnormal
-    flows, validations). "Add this function" as a comment is never an answer when such a location is in the list.
+    flows, validations). "Add this function" as a comment is never an answer when such a location is in the list. A use case
+    location in the list ⇒ `set` its `function_ids` to the old list plus the new function id.
 18. **Passage that mentions a removed element** (found by `mention`, about an element the CR removes): rewrite or drop
     exactly that sentence so the document no longer refers to it (set that element's text or the `blocks` of that
     `custom_sections` element, changing only that sentence). The sentence does not mention it any more after the edit ⇒ done.

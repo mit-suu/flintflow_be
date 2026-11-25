@@ -77,6 +77,8 @@ import {
   removalNote,
   removalProblemText,
   removesUseCaseOrScreen,
+  unlinkedNewFunctions,
+  emptiedUseCases,
   useCaseIntent,
   useCaseEditContext,
   editIssues,
@@ -1070,6 +1072,24 @@ export const worseBatch = (a: BatchReport, b: BatchReport): boolean => {
   return a.problems.length > b.problems.length
 }
 
+/** FLF-469: ý thêm / xoá cả một chức năng của CR (không nhắc use case) - bật luật 3i / 3j của lô soạn gộp. */
+export type StructuralHint = { intent: "add" | "remove"; collection: "functions" | "screens" }
+
+/** FLF-469 (luật 3i / 3j): chức năng mới không thuộc use case nào; xoá chức năng mà use case hết chức năng, màn / thông báo mồ côi. */
+const functionLinkProblems = (spine: Spine, after: Spine, hint: StructuralHint): string[] => {
+  if (hint.collection !== "functions") return []
+  if (hint.intent === "add") {
+    return unlinkedNewFunctions(spine, after).map(
+      (f) => `Function ${f.id} "${f.name}" belongs to no use case: set use_cases[id=...].function_ids of the fitting use case to its old list plus the new function (rule 3i).`
+    )
+  }
+  const emptied = emptiedUseCases(spine, after).map((u) => `Use case ${u.id} "${u.name}" has no function left: remove use_cases[id=${u.id}] (rule 3j).`)
+  const left = removalLeftovers(spine, after)
+    .filter((o) => o.kind !== "function")
+    .map((o) => removalProblemText(o).replace("rule 3g", "rule 3j"))
+  return [...emptied, ...left]
+}
+
 const batchProblems = (
   spine: Spine,
   ops: Op[],
@@ -1091,7 +1111,9 @@ const batchReport = (
   /** FLF-318: lệnh xoá use case ⇒ phần chỉ thuộc use case bị xoá phải đi cùng lô (luật 3g). */
   removesUseCase = false,
   /** FLF-318: lệnh sửa use case ⇒ đổi actor thì quyền trên màn của use case đổi theo (luật 3h). */
-  editsUseCase = false
+  editsUseCase = false,
+  /** FLF-469: CR thêm / xoá cả chức năng ⇒ chức năng mới phải thuộc use case (3i), use case hết chức năng bị xoá (3j). */
+  structural: StructuralHint | null = null
 ): BatchReport => {
   if (ops.length === 0) return { rejected: false, problems: [], planMissing: 0 }
   let plan: ReturnType<typeof planTransaction>
@@ -1111,13 +1133,14 @@ const batchReport = (
   const screens = [...ui.screen.map(useCaseScreenProblemText), ...ui.plan.map(uiPlanProblemText)]
   const leftovers = removesUseCase ? removalLeftovers(spine, plan.spine).map(removalProblemText) : []
   const edits = editsUseCase ? editIssues(spine, plan.spine).map(editProblemText) : []
+  const functionLinks = structural ? functionLinkProblems(spine, plan.spine, structural) : []
   // FLF-428: lệnh nhắm một cờ mà lô không đóng được cờ đó ⇒ một lượt thử lại kèm gợi ý sửa đúng field
   const flagsLeft = unresolvedAfter(targetFlagsOf(spine, instruction), plan.spine).map(unresolvedProblemText)
   // Mục riêng của mẫu do AI soạn: bảng đúng cột của mẫu, không từ mơ hồ
   const drafted = sectionDraftProblems(spine, plan.spine, instruction)
   return {
     rejected: false,
-    problems: [...(naming.length > 0 ? [...naming, USE_CASE_NAME_FIX] : []), ...screens, ...leftovers, ...edits, ...flagsLeft, ...drafted],
+    problems: [...(naming.length > 0 ? [...naming, USE_CASE_NAME_FIX] : []), ...screens, ...leftovers, ...edits, ...functionLinks, ...flagsLeft, ...drafted],
     planMissing: ui.plan.filter((i) => i.kind === "missing").length
   }
 }
@@ -1189,7 +1212,9 @@ const opsFromInstruction = async (
   /** FLF-318: `false` = soạn cho change request — không có người để hỏi, không hỏi giao diện / use case đề xuất thêm. */
   interactive = true,
   /** P08 (T7): lượt trả lời câu hỏi làm rõ — yêu cầu gốc + câu đã hỏi đi cùng câu trả lời trong `user_message`. */
-  pending: { request: string; question: string } | null = null
+  pending: { request: string; question: string } | null = null,
+  /** FLF-469: CR thêm / xoá cả một chức năng ⇒ bật luật 3i / 3j (chat không truyền). */
+  structural: StructuralHint | null = null
 ): Promise<ResolvedOps> => {
   const history = chatHistory?.trim() ?? ""
   // Người dùng rút lại yêu cầu đang dở (đang trả lời câu hỏi làm rõ) ⇒ dừng, không gọi model (model không có cách trả
@@ -1206,7 +1231,9 @@ const opsFromInstruction = async (
   const removesUseCase = intent === "remove"
   const editsUseCase = intent === "edit"
   const addsUseCase = !removesUseCase && !editsUseCase && (isAddUseCaseInstruction(instruction) || (clarificationRounds > 0 && isAddUseCaseInstruction(history)))
-  const ucMode = addsUseCase || editsUseCase ? useCaseMode(spine) : null
+  const addsFunction = structural?.intent === "add" && structural.collection === "functions"
+  const removesFunction = structural?.intent === "remove" && structural.collection === "functions"
+  const ucMode = addsUseCase || editsUseCase || addsFunction ? useCaseMode(spine) : null
   const ucUi = ucMode === "screen_pending" || ucMode === "full"
   // FLF-311: câu trả lời cho câu hỏi giao diện ⇒ kế hoạch từng use case (màn riêng / popup / màn có sẵn / dùng chung)
   // Đọc bằng luật trước (đưa model làm cách đọc tạm); model trả `ui_plan` của chính nó ⇒ dùng bản đó (`adoptModelPlan`)
@@ -1251,7 +1278,7 @@ const opsFromInstruction = async (
                 }
               : {}),
             // Lệnh xoá: model cần thấy chức năng / màn / thông báo của mọi use case để biết phần nào chỉ thuộc use case bị xoá
-            ...(removesUseCase ? { use_case_context: useCaseContext(spine, "full") } : {}),
+            ...(removesUseCase || removesFunction ? { use_case_context: useCaseContext(spine, "full") } : {}),
             // Lệnh sửa: giá trị hiện tại của use case được nhắc + phần của nó (chức năng đủ luồng, màn, quyền, thông báo)
             ...(editsUseCase
               ? {
@@ -1265,6 +1292,8 @@ const opsFromInstruction = async (
           use_case_mode: ucMode ?? "none",
           use_case_removal: removesUseCase,
           use_case_edit: editsUseCase,
+          function_add: addsFunction,
+          function_removal: removesFunction,
           use_case_ui: ucMode === "screen_pending" || ucMode === "full",
           messages_ready: ucMode === "full" && messagesReady(spine),
           glossary: spine.glossary.map(({ id, term, definition }) => ({ id, term, definition })),
@@ -1309,7 +1338,7 @@ const opsFromInstruction = async (
   // Lô sai thì gọi lại kèm lỗi: một lần; có kế hoạch giao diện (lệnh nhiều use case, 3–4 màn) thì tới hai lần
   for (let attempt = 0, max = uiPlan.length > 0 ? 2 : 1; attempt < max && !result.data.clarification_needed?.trim(); attempt++) {
     const report = (ops: unknown): BatchReport =>
-      batchReport(spine, prepare((ops ?? []) as Op[]), instruction, ucMode, allowShared, uiPlan, removesUseCase, editsUseCase)
+      batchReport(spine, prepare((ops ?? []) as Op[]), instruction, ucMode, allowShared, uiPlan, removesUseCase, editsUseCase, structural)
     const current = report(result.data.ops)
     const problems = current.problems
     if (problems.length === 0) break
@@ -1384,9 +1413,10 @@ export const draftUseCaseOps = (
   userId: string,
   spine: Spine,
   instruction: string,
-  deps: Partial<ChangeDeps> = {}
+  deps: Partial<ChangeDeps> = {},
+  options: { structural?: StructuralHint } = {}
 ): Promise<ResolvedOps> =>
-  opsFromInstruction(projectId, userId, spine, instruction, undefined, undefined, { ...defaultChangeDeps(), ...deps }, MAX_CLARIFICATION_ROUNDS, false)
+  opsFromInstruction(projectId, userId, spine, instruction, undefined, undefined, { ...defaultChangeDeps(), ...deps }, MAX_CLARIFICATION_ROUNDS, false, null, options.structural ?? null)
 
 const resolveOps = async (
   projectId: string,

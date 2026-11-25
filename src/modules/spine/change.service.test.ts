@@ -86,6 +86,7 @@ import { runDeterministicCheck } from "./deterministic-check.js"
 import {
   NeedsClarificationError,
   apply,
+  draftUseCaseOps,
   branchOf,
   buildChangeProjection,
   clearPreviewStore,
@@ -1901,5 +1902,59 @@ describe("sửa qua chat: soạn mục của mẫu chưa có step, Code kiểm b
     expect(rejected.violations[0].message).toContain('"fast"')
     const dictated = await preview(PROJECT, USER, { base_version: 1, instruction: 'Soạn mục Quality Targets, dòng QT-01 ghi "fast and user-friendly"' }, {}, deps)
     expect(dictated.ok).toBe(true)
+  })
+})
+
+describe("FLF-469: CR thêm / xoá cả chức năng ⇒ luật 3i / 3j của lô soạn gộp", () => {
+  const newFunction = (screen = "S01") => ({
+    op: "add",
+    path: "functions[]",
+    value: { id: "$newFn", name: "Change Delivery Address", screen_id: screen, feature_id: "F1", order: 90, trigger: "Click Change", description: "Changes the address.", normal: ["a"], abnormal: ["b"], validations: [] }
+  })
+  const uc02 = FIXTURE.use_cases.find((u) => u.id === "UC02")!
+  type Vars = { function_add: boolean; function_removal: boolean; use_case_mode: string; projection: { use_case_context?: { use_cases: { id: string; function_ids: string[] }[] } } }
+
+  it("structural add ⇒ prompt bật function_add kèm use_case_context có function_ids; chức năng không thuộc use case ⇒ gọi lại kèm lỗi 3i", async () => {
+    await seed()
+    const executor = vi
+      .fn()
+      .mockResolvedValueOnce(aiResult({ ops: [newFunction()] as ChangeInstructionOutput["ops"] }))
+      .mockResolvedValueOnce(
+        aiResult({ ops: [newFunction(), { op: "set", path: "use_cases[id=UC02].function_ids", value: [...uc02.function_ids, "$newFn"] }] as ChangeInstructionOutput["ops"] })
+      )
+    const drafted = await draftUseCaseOps(PROJECT, USER, FIXTURE, "Cho phép người mua đổi địa chỉ giao hàng", { changeExecutor: executor, documentLanguage: async () => null }, { structural: { intent: "add", collection: "functions" } })
+    expect(executor).toHaveBeenCalledTimes(2)
+    const first = executor.mock.calls[0][1].promptVariables as Vars
+    expect(first.function_add).toBe(true)
+    expect(first.function_removal).toBe(false)
+    expect(first.use_case_mode).toBe("full")
+    expect(first.projection.use_case_context?.use_cases.find((u) => u.id === "UC02")?.function_ids).toEqual(uc02.function_ids)
+    expect((executor.mock.calls[1][1].promptVariables as { previous_problems: string }).previous_problems).toContain("rule 3i")
+    expect(drafted.ops.some((o) => o.op === "set" && o.path === "use_cases[id=UC02].function_ids")).toBe(true)
+  })
+
+  it("structural remove ⇒ bật function_removal; use case hết chức năng ⇒ gọi lại kèm lỗi 3j, lô sau xoá use case", async () => {
+    await seed()
+    const executor = vi
+      .fn()
+      .mockResolvedValueOnce(aiResult({ ops: [{ op: "remove", path: "functions[id=FN022]" }] as ChangeInstructionOutput["ops"] }))
+      .mockResolvedValueOnce(aiResult({ ops: [{ op: "remove", path: "functions[id=FN022]" }, { op: "remove", path: "use_cases[id=UC24]" }] as ChangeInstructionOutput["ops"] }))
+    const drafted = await draftUseCaseOps(PROJECT, USER, FIXTURE, "Bỏ chức năng Archive Project", { changeExecutor: executor, documentLanguage: async () => null }, { structural: { intent: "remove", collection: "functions" } })
+    const first = executor.mock.calls[0][1].promptVariables as Vars
+    expect(first.function_removal).toBe(true)
+    expect(first.projection.use_case_context?.use_cases.length).toBe(FIXTURE.use_cases.length)
+    expect((executor.mock.calls[1][1].promptVariables as { previous_problems: string }).previous_problems).toContain("rule 3j")
+    expect(drafted.ops.map((o) => o.path)).toContain("use_cases[id=UC24]")
+  })
+
+  it("không truyền structural (chat trước baseline, lệnh không nhắc use case) ⇒ không bật 3i / 3j, không kèm use_case_context", async () => {
+    await seed()
+    const executor = vi.fn().mockResolvedValue(aiResult({ ops: [newFunction()] as ChangeInstructionOutput["ops"] }))
+    await draftUseCaseOps(PROJECT, USER, FIXTURE, "Cho phép người mua đổi địa chỉ giao hàng", { changeExecutor: executor, documentLanguage: async () => null })
+    const vars = executor.mock.calls[0][1].promptVariables as Vars
+    expect(vars.function_add).toBe(false)
+    expect(vars.function_removal).toBe(false)
+    expect(vars.use_case_mode).toBe("none")
+    expect(vars.projection.use_case_context).toBeUndefined()
   })
 })

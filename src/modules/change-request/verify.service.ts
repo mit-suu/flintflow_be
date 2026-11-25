@@ -43,6 +43,7 @@ import { refreshDiagramLocations } from "./diagram-location.js"
 import { fixDuplicateIds } from "./propose.service.js"
 import { elementPathOf, elementValue, isArrayPath, listElements, opElement, sectionOfElement, unchangedSince, valueText } from "./spine-location.js"
 import { structuralRequest } from "./structural-intent.js"
+import { emptiedUseCases, unlinkedNewFunctions } from "../spine/use-case-propagation.js"
 import { hasRemoveOp } from "./location-display.js"
 import { loadOutOfScopeSections, outOfScopeKind, type OutOfScopeKind } from "./out-of-scope.js"
 
@@ -380,6 +381,27 @@ export const checkRequestDone = (cr: RequestCr, spine: Spine, after: Spine | nul
   return out
 }
 
+/** FLF-469 (luật 3i / 3j): lệnh gắn / xoá chức năng mà use case không theo kịp - cờ vàng, không chặn. */
+export const FUNCTION_LINK_FLAG_RULES: readonly string[] = ["function_no_use_case", "use_case_emptied"]
+
+/**
+ * FLF-469: CR thêm chức năng mà chức năng mới không thuộc use case nào, hoặc xoá chức năng làm use case hết chức năng ⇒ cờ
+ * vàng ở ô `functions[]` (không có thì vị trí đầu). Không chặn: đề xuất theo từng vị trí không có vị trí use case thì AI
+ * không sửa được, người duyệt thấy cờ là đủ. `after`: Spine sau cả lô (`afterAllOps`).
+ */
+export const structuralLinkFlags = (cr: RequestCr, spine: Spine, after: Spine | null, locations: readonly CheckLocation[]): Map<string, AiFlag[]> => {
+  const out = new Map<string, AiFlag[]>()
+  const request = structuralRequest(cr)
+  if (!request || request.collection !== "functions" || !after || !locations.length) return out
+  const holder = locations.find((l) => l.path === "functions[]") ?? locations.find((l) => l.conclusion === "edit") ?? locations[0]
+  const flags: AiFlag[] =
+    request.intent === "add"
+      ? unlinkedNewFunctions(spine, after).map((f) => ({ rule: "function_no_use_case", message: `Chức năng mới “${f.name}” chưa thuộc use case nào` }))
+      : emptiedUseCases(spine, after).map((u) => ({ rule: "use_case_emptied", message: `Use case “${u.name}” không còn chức năng nào sau CR` }))
+  if (flags.length) out.set(holder.location_id, flags)
+  return out
+}
+
 /** Phần phạm vi cùng section (giữ chỗ cho phần tử section khác + đoạn văn giữ nguyên, FLF-367). */
 const NEIGHBOURS_CHARS = 5000
 
@@ -542,6 +564,10 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
       }
     }
   }
+
+  // FLF-469: cờ vàng gắn / xoá use case theo chức năng - tính lại mỗi lần (Spine sau lô có thể đã đổi), chạy cả khi lượt AI không chạy
+  for (const [locId, flags] of aiFlags) aiFlags.set(locId, flags.filter((f) => !FUNCTION_LINK_FLAG_RULES.includes(f.rule)))
+  for (const [locId, flags] of structuralLinkFlags(cr, spine, countAfter, locations)) aiFlags.set(locId, [...(aiFlags.get(locId) ?? []), ...flags])
 
   const at = new Date()
   const failing: IChangeLocation[] = []

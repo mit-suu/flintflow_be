@@ -97,7 +97,7 @@ export const useCaseContext = (spine: Spine, mode: UseCaseMode): Record<string, 
   return {
     mode,
     // Kiểm trùng / chồng mục tiêu với use case có sẵn của cùng actor (luật 3e) — mô tả cắt ngắn
-    use_cases: spine.use_cases.map(({ id, name, actor_ids, description }) => ({ id, name, actor_ids, description: description.slice(0, 160) })),
+    use_cases: spine.use_cases.map(({ id, name, actor_ids, function_ids, description }) => ({ id, name, actor_ids, function_ids, description: description.slice(0, 160) })),
     // FLF-318: chọn actor xử lý yêu cầu (luật 3e — giảng viên chấm lại, phòng đào tạo duyệt) — không đoán, không bịa actor
     actors: spine.actors.map(({ id, name, kind, description }) => ({ id, name, kind, description: description.slice(0, 120) })),
     features: spine.features.map(({ id, name }) => ({ id, name })),
@@ -1332,4 +1332,21 @@ export const uiPlanNote = (issues: readonly UiPlanIssue[], language: "vi" | "en"
     }
   }
   return issues.map(vi).join("\n")
+}
+
+// ─── FLF-469: CR thêm / xoá cả một chức năng ⇒ gắn vào use case có sẵn / use case hết chức năng thì xoá (luật 3i, 3j) ───
+
+type FunctionLinkParts = Pick<Spine, "use_cases" | "functions">
+
+/** Chức năng có ở `after` mà `before` chưa có và không use case nào của `after` liệt kê. */
+export const unlinkedNewFunctions = (before: FunctionLinkParts, after: FunctionLinkParts): { id: string; name: string }[] => {
+  const existed = new Set(before.functions.map((f) => f.id))
+  const linked = new Set(after.use_cases.flatMap((u) => u.function_ids))
+  return after.functions.filter((f) => !existed.has(f.id) && !linked.has(f.id)).map(({ id, name }) => ({ id, name }))
+}
+
+/** Use case còn ở `after` nhưng vừa hết chức năng (trước đó có ít nhất một). */
+export const emptiedUseCases = (before: FunctionLinkParts, after: FunctionLinkParts): { id: string; name: string }[] => {
+  const old = new Map(before.use_cases.map((u) => [u.id, u]))
+  return after.use_cases.filter((u) => u.function_ids.length === 0 && (old.get(u.id)?.function_ids.length ?? 0) > 0).map(({ id, name }) => ({ id, name }))
 }

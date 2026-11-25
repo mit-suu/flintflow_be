@@ -10,7 +10,7 @@ import type { IChangeRequest } from "./change-request.model.js"
 import { MAX_REDO_PER_LOCATION, nextAfterVerifyFail } from "./change-request.state.js"
 import { previewAfter } from "./propose.service.js"
 import { elementValue, valueText } from "./spine-location.js"
-import { afterAllOps, checkLocation, checkRequestDone, checkSpineOps, ownersOfPath, previousFindingsText, previousFlags } from "./verify.service.js"
+import { afterAllOps, checkLocation, checkRequestDone, checkSpineOps, ownersOfPath, previousFindingsText, previousFlags, structuralLinkFlags } from "./verify.service.js"
 
 const cr = { cr_id: "CR-001" } as IChangeRequest
 const PATH = "actors[id=A01]"
@@ -174,5 +174,38 @@ describe("FLF-469 C: kiểm đối chiếu yêu cầu bằng code", () => {
     const weakCr = { title: "Cho phép người mua đổi địa chỉ", description: "", amendments: [], clarifications: [], targets: { entity_paths: ["feature:F1"] } } as never
     expect(checkRequestDone(weakCr, s, s, [loc()]).size).toBe(0)
     expect(checkRequestDone(weakCr, s, s, [slot]).size).toBe(1)
+  })
+})
+
+describe("FLF-469: cờ vàng khi chức năng mới không thuộc use case / use case hết chức năng", () => {
+  const base = (): Spine => {
+    const s = spine()
+    s.use_cases.push({ id: "UC01", name: "Track Order", actor_ids: [], function_ids: ["FN001"], description: "" } as never)
+    s.functions.push({ id: "FN001", name: "Track", screen_id: null, feature_id: "F1", order: 0, trigger: "", description: "", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null } as never)
+    return s
+  }
+  const addCr = { title: "Thêm một chức năng đổi địa chỉ giao hàng", description: "", amendments: [], clarifications: [], targets: { entity_paths: [] } } as never
+  const removeCr = { title: "Bỏ chức năng Track", description: "", amendments: [], clarifications: [], targets: { entity_paths: [] } } as never
+
+  it("thêm chức năng mà không use case nào liệt kê ⇒ function_no_use_case ở ô functions[]", () => {
+    const s = base()
+    const after = structuredClone(s)
+    after.functions.push({ ...s.functions[0], id: "FN002", name: "Change Address" })
+    const slot = loc({ location_id: "L003", path: "functions[]" })
+    const flags = structuralLinkFlags(addCr, s, after, [loc({ location_id: "L001" }), slot])
+    expect(flags.get("L003")).toEqual([{ rule: "function_no_use_case", message: expect.stringContaining("Change Address") }])
+    after.use_cases[0].function_ids.push("FN002")
+    expect(structuralLinkFlags(addCr, s, after, [slot]).size).toBe(0)
+  })
+
+  it("xoá chức năng cuối cùng của use case mà use case còn ⇒ use_case_emptied; use case đã xoá thì không cờ", () => {
+    const s = base()
+    const after = structuredClone(s)
+    after.functions = []
+    after.use_cases[0].function_ids = []
+    const flags = structuralLinkFlags(removeCr, s, after, [loc({ location_id: "L001", path: "functions[id=FN001]" })])
+    expect(flags.get("L001")?.map((f) => f.rule)).toEqual(["use_case_emptied"])
+    after.use_cases = []
+    expect(structuralLinkFlags(removeCr, s, after, [loc()]).size).toBe(0)
   })
 })

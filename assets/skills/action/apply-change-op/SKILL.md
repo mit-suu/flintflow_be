@@ -1,7 +1,7 @@
 ---
 skill_id: apply-change-op
 kind: action
-version: 1.10.0
+version: 1.11.0
 description: Chat change request → ops (or a clarification); impact query → 3 branches → stale; one-pass reconcile
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -46,20 +46,15 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    only what the request asks now - never re-apply edits from earlier turns.
 1. **Locate** the target by key. Resolve names through the projection and glossary: "rename Admin to Administrator" → `actors[id=A03].name`.
 2. **Ambiguous?** Several possible targets, or the intent could mean different fields → `clarification_needed` with **one** short message in the reply language (the `## Reply language` section at the end of this prompt, Vietnamese when it is absent). Several facts missing ⇒ ask them all in that one message, never one per turn.
-2a. **Already asked (count above ≥ 1)?** Never ask again about anything the user answered - a short answer ("chỉ thao
-   tác xóa", "cả hai") is a full answer. Fill what is left from the projection yourself and return ops; ask again only for a fact the projection cannot give.
+2a. **Already asked (count above ≥ 1)?** Never ask again about anything the user answered - a short answer ("chỉ thao tác xóa", "cả hai") is a full answer. Fill what is left from the projection yourself and return ops; ask again only for a fact the projection cannot give.
 2b. **The question is read by the user, not by code.** Name every screen, actor, role, feature, function and entity by its
    **name**, never by id (`S02`, `A03`, `FN010`) or list of ids; no paths or section keys either. Use case codes (`UC-01`) are fine.
 2c. **Not a problem, do not ask:** in the Screens Flow, Login has no incoming edge except `Register → Login` - it is the root.
 2d. **Guess only after asking** (count ≥ 2, or the user says "just do it"): draft anyway and list each guess in `assumptions`:
    `[{ "path": <field the guess is about>, "statement": <English>, "statement_vi": <reply language, ≤ 200 chars>, "rationale": <short> }]`.
    Do not repeat them in `notes`: code says them in the reply.
-2e. **Several asks in one message:** each clear ask ⇒ ops now; all the ambiguous ones ⇒ ONE `clarification_needed` (+ `choices`) in the
-   same reply - never hold clear ops back for unclear ones. Once the chat shows the question answered, return ops for it; re-emit
-   an earlier clear part only when the chat does not show it applied.
-2f. **Not reasonable?** The request contradicts a decision in the ledger, makes the document inconsistent, or would write a vague
-   requirement (fast, easy, etc.) ⇒ still return the ops plus `warning`: one or two sentences in the reply language saying why.
-   Never refuse, never silently change what was asked.
+2e. **Several asks in one message:** each clear ask ⇒ ops now; all the ambiguous ones ⇒ ONE `clarification_needed` (+ `choices`) in the same reply - never hold clear ops back for unclear ones. Once the chat shows the question answered, return ops for it; re-emit an earlier clear part only when the chat does not show it applied.
+2f. **Not reasonable?** The request contradicts a decision in the ledger, makes the document inconsistent, or would write a vague requirement (fast, easy, etc.) ⇒ still return the ops plus `warning`: one or two sentences in the reply language saying why. Never refuse, never silently change what was asked.
 3. **Minimal batch.** Change exactly what was asked. Do not polish neighbouring text, do not rewrite a section.
 3b. **Adding something new** is `add` into the array, and you **leave `id` out** - the server assigns the next id. Never invent
    an id (`UC18`): a clash overwrites someone else's element, an unknown one dies with `path_not_resolved`. Need to point at the new
@@ -123,9 +118,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 3c. **Removing** one element is `remove` with the element path: `remove use_cases[id=UC07]`,
    `remove functions[id=FN005].validations[id=FN005-V2]`. Do not "remove" by setting the array to a shorter
    list - that is how whole elements vanish without a diff line.
-3d. **Elements inside an element** (a function's `validations`) are added and removed one by one, exactly the
-   same way. Sending the whole `validations` array is accepted but it is read as "make it look like this":
-   anything missing from your list is deleted.
+3d. **Elements inside an element** (a function's `validations`) are added and removed one by one, exactly the same way. Sending the whole `validations` array is accepted but it is read as "make it look like this": anything missing from your list is deleted.
 {{#if use_case_removal}}
 3g. **Removing a use case ⇒ remove what belongs only to it, in the same batch** (mirror of rule 3e; context in
    `use_case_context`). `remove use_cases[id=…]`, then:
@@ -159,14 +152,18 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    `clarification_needed` naming the other use cases, `choices` = change it for all / give this use case its own copy /
    leave it. Whatever no rule above reaches stays unchanged (rule 8). Say in `notes` (reply language) what changes.
 {{/if}}
+{{#if function_add}}
+3i. **Adding a function ⇒ attach it to an existing use case.** Add the function as in 3e (existing or new screen, `permissions`, messages by 3f) but do **not** add a use case when one fits: in `use_case_context.use_cases`, same actor as the function's user, and the function's goal is a step or variant of the use case's goal (prefer the one whose functions sit on the same screen). Attach: `set use_cases[id=…].function_ids` = its **old list plus** `"$newFn"` (never a list missing old ids). None fits ⇒ add a new use case by 3e (name by rule 10). Say in `notes` which use case got it.
+{{/if}}
+{{#if function_removal}}
+3j. **Removing a function ⇒ remove what belongs only to it, and a use case left with no function.** `remove functions[id=…]`; a screen left with no function ⇒ `remove screens[id=…]`; a message used only by it ⇒ `remove messages[id=…]` (like 3g). A use case whose `function_ids` held only that function ⇒ `remove use_cases[id=…]` in the same batch; say in `notes` which use cases go with it. Never ask (no one to answer): put the guess in `assumptions`.
+{{/if}}
 4. **Cascade** deletes in the same batch (`draft-to-ops/references/invariants.md`). If the change necessarily breaks an invariant (e.g. deleting the last screen), return `clarification_needed` explaining what blocks it.
 5. **Proper names** with a key (actor, entity, screen, glossary term) change in one place - do not also edit prose that mentions them; S-8.4 Consistency Pass catches prose.
 6. **English** values for SRS content; `reason` in the reply language - it becomes the §I Record of Changes line.
    `messages[].type` is exactly one of `error` | `warning` | `info` | `success` | `confirm`; `messages[].context` (when it shows) is English.
 7. **Never emit** ops on `flags[]`, `baselines[]`, `usage[]`, `steps[]`, `progress` or `sessions[]`.
-8. **Only touch what the request names** (only exceptions: supporting use cases of rule 3e, listed in `proposed_use_cases`; the parts of a removed use case, rule 3g; the parts of an edited use case, rule 3h). An element the user did not mention must come out of this batch
-   unchanged - renaming a neighbour "while we are here" is how two functions of another screen got
-   overwritten in the UI test.
+8. **Only touch what the request names** (only exceptions: supporting use cases of rule 3e, listed in `proposed_use_cases`; the parts of a removed use case, rule 3g; the parts of an edited use case, rule 3h; the use case that receives a new function, rule 3i, and the use case left with no function, rule 3j). An element the user did not mention must come out of this batch unchanged - renaming a neighbour "while we are here" is how two functions of another screen got overwritten in the UI test.
 9. Projection has `brief_core` ⇒ vision/goals are those addendum entries: `set addendum[id=…].content` (user's language) and `.content_en` (English); `add` a `goals` entry for a new goal, `remove` one for a dropped goal; never `project.vision`/`project.goals`.
 9b. **System name vs project name** (projection `project`): "tên hệ thống" / system name / product name ⇒ `set project.system_name` (English; it is the name on the cover, headers, diagrams and file name); `project.name` only when the user explicitly says project name ("tên dự án").
 10. **Use case names you word yourself** (a new use case, a split, a rename the user describes but does not spell
@@ -176,15 +173,9 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    "Update Student Profile", "Deactivate Student", not "Manage Students"); the actor is never the subject ("Teacher Enters Grades" ⇒ "Enter Grades"), but "Create Student Record" is fine; no UI or tech term
    (Button, Screen, Page, Form, Popup, Tab, Modal, API, Database); at most 5 words; unique. A name the user
    dictates word for word is used as given.
-11. **Screen authorization (§3.1.3)** is the `permissions[]` rows `{id, screen_id, role_id, action}` in the projection,
-   never a field on `screens[]`. Grant = `add` a row without `id` (`{"screen_id": "S01", "role_id": "R02", "action": "view"}`);
-   revoke = `remove permissions[id=P01]`. "Remove Guest" from a screen removes that role's rows for it, not the role.
-12. **Diagrams are drawn by code from the data**; a request naming a section ("Trong §3.1.5 …") puts its data in the projection. Never
-   ask the user to paste a diagram. "Redraw / regenerate" ⇒ `clarification_needed`: press "Vẽ lại sơ đồ" under the diagram. Moving
-   boxes, positions, colours or line style are not stored (automatic layout) ⇒ `clarification_needed` saying so and naming what does
-   reshape it (ERD: an entity, a relationship, its verb, its cardinality), with one example from the projection.
-13. **`empty_collections`** in the projection = the named section has nothing yet: `add` into its `add_path` with exactly
-   its `fields`, never into a look-alike collection (§5.2 Common Requirements is `common_requirements[]`, not `nfrs[]`).
+11. **Screen authorization (§3.1.3)** is the `permissions[]` rows `{id, screen_id, role_id, action}` in the projection, never a field on `screens[]`. Grant = `add` a row without `id` (`{"screen_id": "S01", "role_id": "R02", "action": "view"}`); revoke = `remove permissions[id=P01]`. "Remove Guest" from a screen removes that role's rows for it, not the role.
+12. **Diagrams are drawn by code from the data**; a request naming a section ("Trong §3.1.5 …") puts its data in the projection. Never ask the user to paste a diagram. "Redraw / regenerate" ⇒ `clarification_needed`: press "Vẽ lại sơ đồ" under the diagram. Moving boxes, positions, colours or line style are not stored (automatic layout) ⇒ `clarification_needed` saying so and naming what does reshape it (ERD: an entity, a relationship, its verb, its cardinality), with one example from the projection.
+13. **`empty_collections`** in the projection = the named section has nothing yet: `add` into its `add_path` with exactly its `fields`, never into a look-alike collection (§5.2 Common Requirements is `common_requirements[]`, not `nfrs[]`).
 14. **`custom_sections`** = headings of the customer's template with no Spine field; `guidance` is the template's note on what
    to write - follow it. Rewrite = `set custom_sections[id=…]` with the **whole** element (`id`, `heading`, `level`, `source`
    unchanged, `blocks` = all new text, the template's `[…]` guidance blocks dropped); append = `add custom_sections[id=…].blocks[]`.
@@ -195,9 +186,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    ⇒ no ops, `clarification_needed` with up to **3** numbered questions (overrides rule 2); draft once the user answers.
    The section has no step, so code checks your text before the user confirms: keep the template's table(s) exactly (same columns and
    header row, one body row per real item, never the placeholder rows) and use no vague word (fast, easy, etc., nhanh, thân thiện).
-16. **`target_flags`** = the user asked to fix those flags: the batch must close each one - follow its `fix_hint` (write the
-   field the rule reads, e.g. a reliability/performance NFR needs `kind: "quantitative"` + `metric` + `threshold`; never
-   append the number to `statement`). The value is not in the request, chat or projection ⇒ `clarification_needed` asking for it.
+16. **`target_flags`** = the user asked to fix those flags: the batch must close each one - follow its `fix_hint` (write the field the rule reads, e.g. a reliability/performance NFR needs `kind: "quantitative"` + `metric` + `threshold`; never append the number to `statement`). The value is not in the request, chat or projection ⇒ `clarification_needed` asking for it.
 17. **Text you write** (ops, `notes`, `warning`): a hyphen `-`, never an em dash; never the word "FPT" - say "FlintFlow standard template".
 
 ## Reconcile (`reconcile`)

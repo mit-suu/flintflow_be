@@ -1104,3 +1104,9 @@ Plan: `bug/plan-fix-06-sua-chat-doan-van-noi.md`. BE only trong lượt này; lu
 - Vị trí mới `found_by: "mention"` cho đoạn văn còn nhắc phần tử CR xoá (tối đa 20); ô "thêm mới" `functions[]` / `screens[]`
   cho mục tính năng; `reason` mới của lô soạn gộp: "Thêm chức năng kèm màn, thông báo và phần liên quan" / "Xoá chức năng kèm
   màn, thông báo và phần chỉ thuộc nó".
+- (FLF-469, gắn use case) Lô soạn gộp của CR chức năng bật luật 3i / 3j của `apply-change-op` (1.11.0): chức năng mới gắn vào use
+  case có sẵn (`set use_cases[id=…].function_ids` = danh sách cũ + chức năng mới), xoá chức năng cuối cùng của use case thì xoá
+  luôn use case trong lô và ghi giả định trên vị trí use case (không hỏi lại). Model sót thì code bù (`function-use-case-link.ts`,
+  đoán theo màn rồi theo tính năng, đúng một use case mới chọn). Không đoán được ⇒ ghi chú "chưa gắn" trên vị trí use case /
+  `functions[]` để Lead xác nhận khi duyệt. `verify.ai_flags[].rule` có thêm `function_no_use_case` và `use_case_emptied` (cờ vàng,
+  không chặn; FE hiện `message` sẵn có). Prompt `cr-propose` 2.10.0 (luật 16, 17) cho đường dự phòng theo từng vị trí.
