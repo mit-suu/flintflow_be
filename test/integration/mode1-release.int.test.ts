@@ -86,7 +86,7 @@ describe("mode 1 - version + tải về", () => {
 
     const draft = await binary(c.get("/versions/0.2/download"))
     expect(draft.status).toBe(200)
-    expect(decodeURIComponent(String(draft.headers["content-disposition"]))).toContain("Lumen LMS_v0.1+CR-001_DRAFT.docx")
+    expect(decodeURIComponent(String(draft.headers["content-disposition"]))).toContain("Lumen LMS_v0.2_DRAFT.docx")
     expect(await readStamp(await DocxPackage.load(draft.body as Buffer))).toMatchObject({ version: "0.2", base_version: "0.1", latest_cr: "CR-001", kind: "draft" })
     const zip = await JSZip.loadAsync(draft.body as Buffer)
     const headers = Object.keys(zip.files).filter((n) => /^word\/header\d+\.xml$/.test(n))
@@ -133,9 +133,9 @@ describe("mode 1 - release (Flow 6)", () => {
     expect(xml).not.toMatch(/<w:ins\b|<w:del\b|commentReference/)
     const cleanBlocks = await readBlocks(await DocxPackage.load(clean.body as Buffer))
     expect(cleanBlocks.find((b) => b.text.includes("The system shall respond"))?.text).toContain("1 second")
-    // FLF-186: bản release = render snapshot — bản "tracked" cũng là bản render (bản đánh dấu theo section: để sau)
+    // FLF-484 (M2-04): bản phát hành có bản Track Changes gộp mọi thay đổi kể từ lần phát hành trước (ở đây: từ bản gốc 0.1)
     const tracked = await documentXml((await binary(c.get("/versions/1.0/download?variant=tracked"))).body as Buffer)
-    expect(tracked).not.toMatch(/<w:ins\b/)
+    expect(tracked).toMatch(/<w:ins\b/)
 
     // CR sau release ⇒ 1.1 render từ Spine mới
     routeReplaceCr("1 second", "500 ms")
