@@ -12,7 +12,8 @@ import { NS } from "../docx-ooxml/xml.js"
 import { parseDocument } from "../import/parse.service.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
-import { buildLayoutSections, type TemplateLayout } from "./layout-sections.js"
+import { functionFieldValues, tagFunctionBlocks } from "./function-original.js"
+import { buildLayoutSections, functionSourceHash, type TemplateLayout } from "./layout-sections.js"
 import { fidelityFrom } from "./source-fidelity.js"
 import { writeTemplateDocx } from "./template-docx-writer.js"
 import type { RenderedDocument } from "./rendered-document.types.js"
@@ -135,5 +136,112 @@ describe("FLF-468 — tích hợp không AI: xuất 1.0 sau CR xoá chức năng
     // Mục không bị CR chạm: giữ nguyên văn
     expect(texts).toContain("Phụ lục")
     expect(texts).toContain("Ghi chú không đổi.")
+  })
+})
+
+/**
+ * FLF-468 (E2E-1) — dự án import theo mẫu cố định: CR thêm tính năng mới (kèm chức năng) và một chức năng vào tính năng có sẵn.
+ * File: 3. Functional Requirements › 3.1 System Functional Overview · 3.5 Tuition › 3.5.1 (đoạn có nhãn, không tiêu đề con) · 4. NFR.
+ */
+describe("FLF-468 (E2E-1) — tính năng / chức năng CR thêm ở dự án import mẫu cố định", () => {
+  const SRS_STYLES = styles.replace("</w:styles>", '<w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/></w:style></w:styles>')
+  const TRIGGER = "Function trigger: the Student opens SCR-08 Tuition."
+  const DESCRIPTION = "Function description: the system shows the unpaid fees and lets the Student pay online."
+  const srsDocx = async (): Promise<Buffer> => {
+    const zip = new JSZip()
+    zip.file("[Content_Types].xml", `<Types xmlns="${NS.ct}"><Default Extension="xml" ContentType="application/xml"/></Types>`)
+    zip.file(
+      "word/document.xml",
+      `<w:document xmlns:w="${NS.w}"><w:body>` +
+        heading("3. Functional Requirements", 1) + para("This chapter lists the functions.") +
+        heading("3.1 System Functional Overview", 2) + para("Overview text.") +
+        heading("3.5 Tuition", 2) + para("The Tuition feature.") +
+        heading("3.5.1 View tuition and pay online", 3) + para(TRIGGER) + para(DESCRIPTION) +
+        heading("4. Non-Functional Requirements", 1) + para("Performance text.") +
+        `<w:sectPr><w:pgMar w:top="1134" w:left="1134"/></w:sectPr></w:body></w:document>`
+    )
+    zip.file("word/styles.xml", SRS_STYLES)
+    return zip.generateAsync({ type: "nodebuffer" })
+  }
+  const pay = (over: Partial<Spine["functions"][number]> = {}) =>
+    fn({ id: "FR-3.5.1", feature_id: "F-3.5", name: "View tuition and pay online", trigger: "the Student opens SCR-08 Tuition.", description: "the system shows the unpaid fees and lets the Student pay online.", ...over })
+  const srsSpine = (extra: Partial<Spine> = {}): Spine => ({
+    ...createEmptySpine({ name: "Student Portal" }),
+    features: [{ id: "F-3.5", name: "Tuition", order: 0 }],
+    functions: [pay()],
+    ...extra
+  })
+  const srsTemplate = (): TemplateLayout => {
+    const values = functionFieldValues(srsSpine(), pay())
+    return {
+      language: "en",
+      fixedTemplate: true,
+      layout: [
+        { order: 0, heading_text: "3. Functional Requirements", level: 1, section_id: "group:3" },
+        { order: 1, heading_text: "3.1 System Functional Overview", level: 2, section_id: "group:3.1" },
+        { order: 2, heading_text: "3.5 Tuition", level: 2, section_id: "feature:F-3.5" },
+        { order: 3, heading_text: "3.5.1 View tuition and pay online", level: 3, section_id: "function:FR-3.5.1" },
+        { order: 4, heading_text: "4. Non-Functional Requirements", level: 1, section_id: "group:4" }
+      ],
+      functionOriginals: [{
+        section_id: "function:FR-3.5.1",
+        source_hash: functionSourceHash(pay()),
+        field_values: values,
+        blocks: tagFunctionBlocks([
+          { kind: "paragraph", text: TRIGGER, rows: null, image_ref: null },
+          { kind: "paragraph", text: DESCRIPTION, rows: null, image_ref: null }
+        ], values)
+      }]
+    }
+  }
+  const render = (sp: Spine): RenderedDocument => ({
+    projectId: "p", projectName: "Student Portal", version: "1.0", source: "draft", generatedAt: "2026-11-25T00:00:00Z", recordOfChanges: [],
+    sections: buildLayoutSections(sp, srsTemplate(), [], { diagramPng: () => undefined }).sections
+  })
+
+  it("3.6 / 3.6.1 và 3.5.2 là heading đúng chỗ, thân theo khuôn chức năng anh em, không thẻ thô; mục không bị CR chạm giữ nguyên văn", async () => {
+    const input = await srsDocx()
+    const parsed = await parseDocument(input)
+    const ids = ["group:3", "group:3.1", "feature:F-3.5", "function:FR-3.5.1", "group:4"]
+    const headingMap = parsed.blocks.filter((b) => b.kind === "heading").map((b, i) => ({ block_id: b.block_id, section_id: ids[i] }))
+    expect(headingMap).toHaveLength(5)
+
+    const before = srsSpine()
+    const after = srsSpine({
+      features: [{ id: "F-3.5", name: "Tuition", order: 0 }, { id: "F-01", name: "Authentication", order: 1 }],
+      functions: [
+        pay(),
+        fn({ id: "FR-3.5.2", feature_id: "F-3.5", order: 1, name: "Request refund", trigger: "the Student clicks Refund.", description: "the system files a refund request.", normal: ["The Student selects a payment.", "The system records the request."], validations: [{ id: "V1", kind: "business", statement: "Only paid fees can be refunded." }] as never }),
+        fn({ id: "FR-05", feature_id: "F-01", order: 0, name: "Reset Password", trigger: "the user clicks Forgot password.", description: "the system emails a reset link.", normal: ["The user enters their email.", "The system sends the link."], validations: [{ id: "V2", kind: "required", statement: "Email must not be empty." }, { id: "V3", kind: "format", statement: "Email must be valid." }] as never })
+      ]
+    })
+    const importedDoc = render(before)
+    const currentDoc = render(after)
+    const fidelity = await fidelityFrom(currentDoc, async () => importedDoc, before, false)
+    const output = await writeTemplateDocx(currentDoc, input, headingMap, [], {
+      keepSource: fidelity.keepSource,
+      importedSectionIds: fidelity.importedSectionIds,
+      legacyRecordCount: 0
+    })
+    const blocks = (await parseDocument(output)).blocks
+    const texts = blocks.map((b) => b.text)
+    const headings = blocks.filter((b) => b.kind === "heading").map((b) => b.text)
+
+    expect(headings).toEqual([
+      "3. Functional Requirements", "3.1 System Functional Overview", "3.5 Tuition", "3.5.1 View tuition and pay online",
+      "3.5.2 Request refund", "3.6 Authentication", "3.6.1 Reset Password", "4. Non-Functional Requirements"
+    ])
+    // Giữa "3." và "3.1" không có chữ mới; 3.5.1 và các mục cũ nguyên văn
+    expect(texts.slice(0, 4)).toEqual(["3. Functional Requirements", "This chapter lists the functions.", "3.1 System Functional Overview", "Overview text."])
+    expect(texts.slice(texts.indexOf("3.5 Tuition"), texts.indexOf("3.5.2 Request refund"))).toEqual(["3.5 Tuition", "The Tuition feature.", "3.5.1 View tuition and pay online", TRIGGER, DESCRIPTION])
+    expect(texts.slice(-2)).toEqual(["4. Non-Functional Requirements", "Performance text."])
+    // Thân chức năng mới theo khuôn anh em; không thẻ thô, không khuôn cũ
+    const body = (from: string, to: string) => texts.slice(texts.indexOf(from) + 1, texts.indexOf(to)).join("\n")
+    expect(body("3.5.2 Request refund", "3.6 Authentication")).toContain("Function trigger: the Student clicks Refund.")
+    expect(body("3.5.2 Request refund", "3.6 Authentication")).toContain("Function description: the system files a refund request.")
+    expect(body("3.6.1 Reset Password", "4. Non-Functional Requirements")).toContain("Function trigger: the user clicks Forgot password.")
+    const all = texts.join("\n")
+    for (const raw of ["[required]", "[format]", "[business]", "Screens:"]) expect(all).not.toContain(raw)
+    expect(all).toContain("Email must not be empty.")
   })
 })
