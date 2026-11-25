@@ -59,11 +59,13 @@ describe("check - hồ sơ luật mode 1", () => {
 
     const open = spine.flags.filter((f) => f.resolved_at === null)
     expect(open.filter((f) => EXCLUDED.includes(f.rule_id))).toEqual([])
-    const downgraded = open.filter((f) => MODE1_RULE_PROFILE.downgrade.has(f.rule_id))
-    expect(downgraded.length).toBeGreaterThan(0)
-    expect(downgraded.every((f) => f.level === "yellow")).toBe(true)
-    // SRS mẫu không có tham chiếu chết; đầu mục FPT file không có không còn bắt buộc ⇒ không cờ đỏ nào
-    expect(open.filter((f) => f.level === "red")).toEqual([])
+    // Theo flow 18/11: NFR thiếu số đo là đỏ cả ở chế độ 1 (không còn hạ vàng); danh sách NFR rỗng là chỗ thiếu ⇒ vàng
+    expect([...MODE1_RULE_PROFILE.downgrade]).toEqual(["usecase_relation_invalid"])
+    const nfr = open.filter((f) => f.rule_id === "nfr_missing_number")
+    expect(nfr.length).toBeGreaterThan(0)
+    expect(nfr.every((f) => f.level === (f.target_id ? "red" : "yellow"))).toBe(true)
+    // SRS mẫu không có tham chiếu chết; đầu mục FPT file không có không còn bắt buộc ⇒ cờ đỏ duy nhất là NFR thiếu số đo
+    expect(open.filter((f) => f.level === "red").every((f) => f.rule_id === "nfr_missing_number")).toBe(true)
   })
 })
 

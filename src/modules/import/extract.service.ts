@@ -1133,6 +1133,18 @@ export const runExtraction = async (projectId: string, userId: string, importId:
   }
 }
 
+/**
+ * Đặt / bỏ dấu "đang đọc" của một section. Chỉ `$set` field riêng (không `save()`) để không đè `partial` đang lưu song song;
+ * lỗi ghi chỉ ảnh hưởng hiệu ứng hiển thị nên không làm hỏng lượt đọc.
+ */
+const markReading = async (draftId: mongoose.Types.ObjectId, since: Date | null): Promise<void> => {
+  try {
+    await ExtractionDraft.updateOne({ _id: draftId }, { $set: { reading_since: since } })
+  } catch (err) {
+    console.warn("[I-4] không ghi được dấu đang đọc của mục:", err)
+  }
+}
+
 const extractSections = async (projectId: string, userId: string, importId: string, stats: { calls: number; notifiedTopUp: boolean }): Promise<ExtractionRun> => {
   const doc = await requireImport(projectId, importId)
   assertImportStatus(doc, ["extracting"], "extracting")
@@ -1142,6 +1154,8 @@ const extractSections = async (projectId: string, userId: string, importId: stri
 
   doc.paused = null
   await doc.save()
+  // Lần chạy trước chết giữa chừng (server khởi động lại) để lại dấu "đang đọc" — xoá trước khi mở pool
+  await ExtractionDraft.updateMany({ import_id: doc._id, reading_since: { $ne: null } }, { $set: { reading_since: null } })
   for (const section_id of plan) {
     await ExtractionDraft.updateOne(
       { import_id: doc._id, section_id },
@@ -1309,6 +1323,19 @@ const extractSections = async (projectId: string, userId: string, importId: stri
    */
   const readSection = async (planned: PlannedSection): Promise<PoolRead<ExtractionProgress | null>> => {
     const draft = draftOf.get(planned.section_id)!
+    const readStarted = Date.now()
+    const callsBefore = stats.calls
+    await markReading(draft._id as mongoose.Types.ObjectId, new Date())
+    try {
+      return await readSectionSteps(planned, draft)
+    } finally {
+      // Mọi đường thoát (đọc xong, dừng, hết credit, AI lỗi, ném lỗi) đều bỏ dấu "đang đọc"
+      await markReading(draft._id as mongoose.Types.ObjectId, null)
+      console.info(`[I-4] import ${importId} mục ${planned.section_id}: đọc xong sau ${Date.now() - readStarted} ms, ${stats.calls - callsBefore} lượt AI`)
+    }
+  }
+
+  const readSectionSteps = async (planned: PlannedSection, draft: ExtractionDraftDoc): Promise<PoolRead<ExtractionProgress | null>> => {
     const sc = sectionContext(planned, inputs)
     let progress: ExtractionProgress | null = stepsDoneOf(draft, planned) > 0 ? (draft.partial as ExtractionProgress) : null
     const raw: RawAiStep[] = [...(progress?.raw_steps ?? [])]

@@ -1,5 +1,5 @@
 /**
- * FLF-366 — dấu đoạn nguyên văn + cờ vàng văn xuôi gốc nhắc tới phần tử đã đổi. Hàm thuần.
+ * FLF-366 — dấu đoạn nguyên văn + cờ đỏ (theo flow 18/11) văn xuôi gốc nhắc tới phần tử đã đổi. Hàm thuần.
  */
 import { describe, expect, it } from "vitest"
 import { originalTextMentionsChanged } from "./deterministic-check.js"
@@ -102,12 +102,12 @@ describe("original_text_mentions_changed", () => {
     }
   ]
 
-  it("không đổi ⇒ không cờ; đổi tên actor ⇒ cờ vàng nêu tên cũ / mới; xoá use case được nhắc theo mã ⇒ cờ", () => {
+  it("không đổi ⇒ không cờ; đổi tên actor ⇒ cờ đỏ nêu tên cũ / mới; xoá use case được nhắc theo mã ⇒ cờ", () => {
     expect(originalTextMentionsChanged(spine(), records)).toEqual([])
     const renamed = { ...spine(), actors: spine().actors.map((a) => (a.id === "A01" ? { ...a, name: "Learner" } : a)) }
     const flags = originalTextMentionsChanged(renamed, records)
     expect(flags).toHaveLength(1)
-    expect(flags[0]).toMatchObject({ level: "yellow", rule_id: "original_text_mentions_changed", section_id: "fixed:1", target_id: "actors[id=A01]" })
+    expect(flags[0]).toMatchObject({ level: "red", rule_id: "original_text_mentions_changed", section_id: "fixed:1", target_id: "actors[id=A01]" })
     expect(flags[0].message).toContain('"Student"')
     expect(flags[0].message).toContain('"Learner"')
     const removed = { ...spine(), use_cases: [] }

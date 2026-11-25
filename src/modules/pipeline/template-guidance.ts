@@ -12,7 +12,7 @@
 
 import mongoose from "mongoose"
 import type { CustomSection, Spine } from "../spine/spine.types.js"
-import { TemplateProfile } from "../import/template-profile.model.js"
+import { TemplateProfile, type LayoutEntry } from "../import/template-profile.model.js"
 import { templatePromptBlock, type ProjectFacts, type TemplateContextEntry } from "../import/template-context.js"
 import { SLOT_FALLBACK_OWNER, templateSectionOwnerSteps } from "../import/template-step-headings.js"
 import { expectedContentOf, skillOfSection } from "../import/part-bank.js"
@@ -89,6 +89,13 @@ export const buildTemplateStepContext = (
   })
   const guidance = [block, brief, ...skills, customSections.length ? CUSTOM_WRITE_RULE : ""].filter(Boolean).join("\n\n")
   return { guidance, customSections, slotWrites, slotProjection }
+}
+
+/** Layout tài liệu của dự án import / theo mẫu (rỗng ⇒ dự án soạn mới, hoặc chưa nối Mongo). Chỉ để biết mục nào thuộc bước nào. */
+export const loadTemplateLayout = async (projectId: string): Promise<LayoutEntry[]> => {
+  if (mongoose.connection.readyState !== 1) return []
+  const profile = await TemplateProfile.findOne({ projectId }, { layout: 1 }).lean()
+  return (profile?.layout as LayoutEntry[] | undefined) ?? []
 }
 
 /** Nạp `template_context` của dự án (null ⇒ không phải dự án theo mẫu cần soạn). */

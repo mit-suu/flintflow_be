@@ -81,6 +81,8 @@ describe("C-6 BA xác nhận ⇒ ghi ngay (FLF-330)", () => {
     const early = await c.post(`/change-requests/${other}/submit`)
     expect(early.status).toBe(409)
     expect(early.body.error.code).toBe("CR_INVALID_TRANSITION")
+    // Mỗi người một CR mở một lúc ⇒ huỷ CR vừa thử trước khi tạo CR kế
+    detail(await c.post(`/change-requests/${other}/cancel`, { reason: "Chỉ để thử CR kế tiếp" }))
 
     const { cr, submitted } = await crToReview(c)
     const again = await decide(c, cr, submitted.groups[0].group_id, "approved")

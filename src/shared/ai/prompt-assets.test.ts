@@ -309,6 +309,24 @@ describe("Brief giữ tầm nhìn/mục tiêu ở addendum, S-1.1 dựng bản t
     expect(text).toContain("draft_context")
     expect(text).toContain("up to **3** numbered questions")
   })
+
+  it("apply-change-op: cảnh báo, nhiều ý (ý rõ ra op, ý mơ hồ một câu hỏi), giả định sau khi đã hỏi, soạn mục chưa có step", () => {
+    const text = skill("action/apply-change-op")
+    expect(text).toContain("{{decisions}}")
+    expect(text).toContain("still return the ops plus `warning`")
+    expect(text).toContain("ONE `clarification_needed`")
+    expect(text).toContain("never hold clear ops back")
+    expect(text).toContain("Guess only after asking")
+    expect(text).toContain("`assumptions`")
+    expect(text).toContain("keep the template's table(s) exactly")
+    expect(text).toContain("never an em dash")
+  })
+
+  it("chat.md: trả lời câu hỏi nội dung phần tử từ khối chi tiết kèm chỉ mục", async () => {
+    const { template } = await getPromptTemplate(ActionType.CHAT)
+    expect(template).toContain("Chi tiết các phần tử được nhắc trong câu hỏi")
+    expect(template).not.toMatch(/\{\{element_context\}\}/)
+  })
 })
 
 describe("FLF-243: skill đặt tên use case nêu đủ luật mà cờ vàng usecase_name_* kiểm", () => {

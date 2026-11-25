@@ -15,7 +15,8 @@ import { currentBatch, followUpReply, shapeChatQuestions } from "../pipeline/que
 import * as spineRepository from "../spine/spine.repository.js"
 import { replyLanguageForSession, typedPartOf } from "./reply-language.service.js"
 import { KNOWLEDGE_DAILY_LIMIT, answerKnowledgeQuestion, type KnowledgeAnswer } from "../knowledge/answer.service.js"
-import { buildChatSpineIndex } from "./chat-spine-index.js"
+import { chatSpineIndexFor } from "./chat-element-context.js"
+import { changesRequireCr } from "../import/mode1-guard.js"
 
 /** Chưa có Spine ⇒ nói thẳng cho model, để nó không đoán số phần tử theo lịch sử chat. */
 const NO_SPINE_INDEX = "(tài liệu chưa có dữ liệu)"
@@ -32,11 +33,22 @@ import { claimUserMessage } from "./user-message-dedupe.js"
  */
 const shapeChatReply = (data: unknown): unknown => {
   if (typeof data !== "object" || data === null || Array.isArray(data)) return data
-  const reply = data as Record<string, unknown>
+  // `edit_request` chỉ là tín hiệu rẽ luồng, không lưu vào tin
+  const { edit_request: _editRequest, ...reply } = data as Record<string, unknown>
   // FLF-355: một lượt một loại câu — nhóm khác loại lưu kèm tin, tin user kế tiếp nhận nó (`askDeferredQuestions`)
   const { now, later } = currentBatch(shapeChatQuestions(reply.questions))
   return { ...reply, questions: now, ...(later.length > 0 ? { deferred_questions: later } : {}) }
 }
+
+/**
+ * Lượt CHAT báo tin user thật ra là yêu cầu sửa SRS (`"edit_request": true`, `assets/prompts/chat.md` mục 5) — model đọc
+ * hiểu câu chữ, luật nhận lệnh (`isChangeInstruction`) chỉ bắt được các mẫu câu quen. Chỉ nhận đúng `true`.
+ */
+export const chatAskedForEdit = (data: unknown): boolean =>
+  typeof data === "object" && data !== null && (data as { edit_request?: unknown }).edit_request === true
+
+/** Dự án sửa được qua chat (không phải chế độ 1, nơi mọi thay đổi đi qua CR) — báo cho prompt CHAT. */
+const editInChatFlag = async (projectId: string): Promise<"yes" | "no"> => ((await changesRequireCr(projectId)) ? "no" : "yes")
 
 /**
  * FLF-355: tin AI ngay trước tin user vừa gửi còn nhóm câu chờ (`deferred_questions`) ⇒ hỏi nhóm đó luôn, không gọi model.
@@ -130,6 +142,8 @@ export const assertChatSessionOwnership = async (projectId: string, chatSessionI
  *
  * Trả về tin nhắn AI đã ghi vào transcript kèm bản xem trước đầy đủ (chỉ gửi qua SSE cho FE dựng thẻ có nút Áp dụng —
  * transcript chỉ lưu `change_count`, FLF-244), hoặc `null` khi tin nhắn không phải lệnh sửa (đi tiếp CHAT).
+ *
+ * `force`: lượt CHAT đã đọc tin và báo đây là yêu cầu sửa (`edit_request`) mà luật nhận lệnh bỏ sót — bỏ qua luật đó.
  */
 const tryChangeFlow = async (
   session: IChatSession,
@@ -137,9 +151,10 @@ const tryChangeFlow = async (
   content: string,
   step: string,
   userId: string,
-  replyLanguage: ReplyLanguage = "vi"
+  replyLanguage: ReplyLanguage = "vi",
+  force = false
 ): Promise<{ message: IChatMessage; preview: changeService.ChangePreviewResult | null } | null> => {
-  if (!changeService.isChangeInstruction(content)) return null
+  if (!force && !changeService.isChangeInstruction(content)) return null
 
   const record = await spineRepository.get(projectId)
   if (!record) return null
@@ -150,7 +165,8 @@ const tryChangeFlow = async (
     // Tin user của lượt này đã nằm cuối phiên — lịch sử là phần trước nó
     const chatHistory = formatChatContext(session.messages.slice(0, -1), record)
     const rounds = clarificationRounds(session.messages)
-    const preview = await changeService.preview(projectId, userId, {
+    // Mức duyệt cho phép (và không dính cổng cứng) ⇒ tự ghi sau xem trước; không thì trả bản xem trước chờ xác nhận
+    const preview = await changeService.previewAndMaybeApply(projectId, userId, {
       instruction: content,
       base_version: record.spine_version,
       chat_history: chatHistory,
@@ -161,7 +177,7 @@ const tryChangeFlow = async (
       ...(rounds > 0 ? { pending_request: pendingChangeRequest(session.messages.slice(0, -1)) } : {})
     })
     payload = previewPayload(preview, replyLanguage)
-    if (preview.ok && preview.preview_id && preview.changes.length > 0) shown = preview
+    if (preview.ok && (preview.preview_id || preview.auto_applied) && preview.changes.length > 0) shown = preview
   } catch (err) {
     // Lệnh sửa lỗi (hết credit, xung đột version…) không được làm hỏng phiên chat
     if (!(err instanceof ApiError)) console.error("[chat-session] change preview failed:", err)
@@ -351,7 +367,8 @@ const chatTurn = async (
     chat_history: historyText || "Không có lịch sử trước đó.",
     input_text: content,
     documentContext: docContext.contextText,
-    spine_index: buildChatSpineIndex(spine) || NO_SPINE_INDEX
+    spine_index: chatSpineIndexFor(spine, content) || NO_SPINE_INDEX,
+    edit_in_chat: await editInChatFlag(projectId)
   }
 
   // 6. Execute AI Action
@@ -382,6 +399,11 @@ const chatTurn = async (
     return session
   }
 
+  // 6b. Model nhận ra lệnh sửa mà luật nhận lệnh bỏ sót ⇒ đi change flow thay cho lời chat
+  if (promptVariables.edit_in_chat === "yes" && chatAskedForEdit(aiResult.data)) {
+    if (await tryChangeFlow(session, projectId, content, step, userId, replyLanguage, true)) return session
+  }
+
   // 7. Add AI response to history
   const replyData = shapeChatReply(aiResult.data)
   const contentToStore = typeof replyData === "string"
@@ -399,6 +421,24 @@ const chatTurn = async (
   await session.save()
 
   return session
+}
+
+/**
+ * Tin của change flow gửi bằng đúng sự kiện `finish` như luồng CHAT (không stream chữ) để FE không phải biết thêm loại
+ * event. `preview`: bản xem trước đầy đủ để FE mở thẻ sửa có nút Áp dụng ngay (E2E FAP: tin "bấm Áp dụng" mà không có nút).
+ */
+const writeChangeFinish = (
+  res: Response,
+  session: IChatSession,
+  changeMsg: { message: IChatMessage; preview: changeService.ChangePreviewResult | null }
+): void => {
+  try {
+    if (!res.destroyed && !res.writableEnded) {
+      const payload = { ...(JSON.parse(changeMsg.message.content) as Record<string, unknown>), ...(changeMsg.preview ? { preview: changeMsg.preview } : {}) }
+      res.write(`data: ${JSON.stringify({ type: "finish", session, data: payload, tokensUsed: null, cost: 0 })}\n\n`)
+      res.end()
+    }
+  } catch (_) {}
 }
 
 /** FLF-400: tin trùng ⇒ một sự kiện `finish` với phiên hiện có và `reply` rỗng (như tin vào hàng chờ trả lời của step). */
@@ -502,17 +542,7 @@ const streamChatTurn = async (
   // 1c. T17: lệnh sửa từ session không pipeline đi vào change flow — trả một sự kiện rồi đóng luồng
   const changeMsg = await tryChangeFlow(session, projectId, content, step, userId, replyLanguage)
   if (changeMsg) {
-    // Dùng đúng sự kiện `finish` như luồng CHAT (không stream chữ) để FE không phải biết thêm loại event
-    try {
-      if (!res.destroyed && !res.writableEnded) {
-        // `preview`: bản xem trước đầy đủ để FE mở thẻ sửa có nút Áp dụng ngay (E2E FAP: tin "bấm Áp dụng" mà không có nút)
-        const payload = { ...(JSON.parse(changeMsg.message.content) as Record<string, unknown>), ...(changeMsg.preview ? { preview: changeMsg.preview } : {}) }
-        res.write(`data: ${JSON.stringify({ type: "finish", session, data: payload, tokensUsed: null, cost: 0 })}
-
-`)
-        res.end()
-      }
-    } catch (_) {}
+    writeChangeFinish(res, session, changeMsg)
     return
   }
 
@@ -550,7 +580,8 @@ const streamChatTurn = async (
     chat_history: historyText || "Không có lịch sử trước đó.",
     input_text: content,
     documentContext: docContext.contextText,
-    spine_index: buildChatSpineIndex(spine) || NO_SPINE_INDEX
+    spine_index: chatSpineIndexFor(spine, content) || NO_SPINE_INDEX,
+    edit_in_chat: await editInChatFlag(projectId)
   }
 
   // 6. Execute stream with Vercel AI SDK
@@ -574,6 +605,16 @@ const streamChatTurn = async (
 
     // Dừng sát lúc model vừa xong: lượt đã tính phí nhưng user không còn chờ — không ghi tin dở vào phiên
     if (isStopped(options.signal)) return
+
+    // 6b. Model nhận ra lệnh sửa mà luật nhận lệnh bỏ sót ⇒ change flow; `finish` mang tin sửa thay cho câu chat ngắn
+    // vừa stream (FE thay cả phiên bằng bản trong `finish`, chữ stream không lưu)
+    if (promptVariables.edit_in_chat === "yes" && chatAskedForEdit(aiResult.data)) {
+      const rerouted = await tryChangeFlow(session, projectId, content, step, userId, replyLanguage, true)
+      if (rerouted) {
+        writeChangeFinish(res, session, rerouted)
+        return
+      }
+    }
 
     // 7. Add AI response to MongoDB history
     const replyData = shapeChatReply(aiResult.data)

@@ -86,6 +86,12 @@ const parse = (text: string | null | undefined): unknown => {
   }
 }
 
+/** Op xoá (`remove`) — dấu "xoá nội dung" của CR suy từ `spine_ops`, không có field lưu riêng. */
+export const isRemoveOp = (op: unknown): boolean => isRow(op) && op.op === "remove"
+
+/** Đề xuất có xoá phần tử nào không (mọi op `remove`, kể cả phần tử con). */
+export const hasRemoveOp = (proposal: { spine_ops?: readonly unknown[] } | null | undefined): boolean => (proposal?.spine_ops ?? []).some(isRemoveOp)
+
 /** Mảng của path: `use_cases[id=UC-01]` / `use_cases[]` ⇒ `use_cases`; `project` ⇒ `project`. */
 const collectionOf = (path: string): string => /^(\w+)/.exec(path)?.[1] ?? path
 
@@ -99,7 +105,7 @@ export const locationDisplay = (
   const current = spine ? elementValue(spine, path) : undefined
   const before = parse(proposal?.old_text) ?? current
   const after = parse(proposal?.new_text)
-  const removes = (proposal?.spine_ops ?? []).some((o) => isRow(o) && o.op === "remove" && o.path === path)
+  const removes = (proposal?.spine_ops ?? []).some((o) => isRemoveOp(o) && (o as Row).path === path)
 
   if (isArrayPath(path)) {
     const added = (Array.isArray(after) ? after : []).filter(isRow)

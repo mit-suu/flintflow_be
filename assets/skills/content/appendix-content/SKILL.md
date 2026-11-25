@@ -103,6 +103,7 @@ already sweeps `assumptions[]`. Keep this section to things a stakeholder must d
 4. English values, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).
 5. Still unanswered: derive the most reasonable row plus an `assumptions[]` entry
    (`status: "unconfirmed"`), `draft-to-ops` rule 10.
+6. Every business rule (S-7.1 only) row you add carries `source_ref`: a short English note on where it comes from (the brief, a user answer, a reference document and its passage, or who asked). Never invent a source; none known ⇒ "User request in this step".
 
 ## Example (S-7.1 merging one policy enforced twice, then S-7.3)
 

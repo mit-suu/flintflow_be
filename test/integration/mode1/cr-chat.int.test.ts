@@ -71,6 +71,8 @@ describe("phase 8 - gộp thêm lệnh sửa vào CR chưa nộp", () => {
     const r1 = await c.post(`/change-requests/${waiting}/amend`, { instruction: "x y z" })
     expect(r1.status).toBe(409)
     expect(r1.body.error.code).toBe("CR_INVALID_TRANSITION")
+    // Mỗi người một CR mở một lúc ⇒ huỷ CR đang chờ trả lời trước khi tạo CR kế
+    detail(await c.post(`/change-requests/${waiting}/cancel`, { reason: "Chỉ để thử CR kế tiếp" }))
 
     const { cr } = await crToReview(c)
     const r2 = await c.post(`${cr}/amend`, { instruction: "x y z" })

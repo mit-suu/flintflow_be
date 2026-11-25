@@ -5,7 +5,9 @@
  */
 import mongoose from "mongoose"
 import { expect } from "vitest"
-import { seedFixture, type SeededFixture } from "../setup.js"
+import { authAs, seedFixture, type SeededFixture } from "../setup.js"
+import { User } from "../../src/modules/user/user.model.js"
+import { Membership } from "../../src/modules/organization/membership.model.js"
 import { mockOverrides, resetMockLlm } from "./mock-llm.js"
 import { createMode1Project, fakeCrClarify, fakeCrPropose, fakeMode1, mode1Api } from "./mode1.js"
 import { makeSrsDocx } from "../../src/modules/import/testing/srs-fixture.js"
@@ -53,6 +55,17 @@ export const importedProject = async (): Promise<{ seeded: SeededFixture; projec
   expect(run.res.status, JSON.stringify(run.res.body.error)).toBe(200)
   expect(run.run?.import.status).toBe("gap_review")
   return { seeded, projectId, c }
+}
+
+/**
+ * Một Analyst khác cùng tổ chức, client trên cùng dự án. Mỗi người chỉ có một CR mở một lúc (BF §3.2 C-1) nên test cần hai
+ * CR mở cùng lúc phải để người thứ hai tạo.
+ */
+export const secondAnalyst = async (seeded: SeededFixture, projectId: string): Promise<Mode1Client> => {
+  const email = `analyst-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@flintflow.test`
+  const user = await User.create({ email, password: "test-password-123", emailVerified: true })
+  await Membership.create({ organizationId: seeded.orgId, userId: user._id, role: "analyst" })
+  return mode1Api({ ...seeded, token: await authAs({ _id: user._id, email, orgId: seeded.orgId }) }, projectId)
 }
 
 export const CR_BODY = { source: { kind: "stakeholder_email", ref: "Email PM 2026-09-17" }, requester: "PM Lan" } as const

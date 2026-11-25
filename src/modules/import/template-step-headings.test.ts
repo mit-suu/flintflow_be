@@ -4,7 +4,7 @@ import { parseDocument } from "./parse.service.js"
 import { assignBlockSections, matchProfile } from "./profile-match.service.js"
 import { buildLayout } from "./step-plan.js"
 import type { LayoutEntry } from "./template-profile.model.js"
-import { headingsOfStep, slotOwnerSteps, templateSectionOwnerSteps, templateSectionsByStep } from "./template-step-headings.js"
+import { headingsOfStep, sectionsOfStep, slotOwnerSteps, templateSectionOwnerSteps, templateSectionsByStep } from "./template-step-headings.js"
 
 let layout: LayoutEntry[] = []
 
@@ -74,5 +74,38 @@ describe("templateSectionsByStep - FLF-413 khung của mẫu", () => {
     const titles = [...templateSectionsByStep(layout, spine).values()].flat()
     expect(titles).toContain("3.2 Booking and Deposit")
     expect(titles.some((t) => t.includes("<<"))).toBe(false)
+  })
+})
+
+describe("sectionsOfStep", () => {
+  const spine = {
+    features: [{ id: "F-3.2" }],
+    functions: [{ id: "FN-1", screen_id: "S01" }, { id: "FN-2", screen_id: "S02" }, { id: "FN-3", screen_id: null }],
+    custom_sections: [{ id: "budget" }]
+  } as unknown as Parameters<typeof sectionsOfStep>[1]
+
+  it("mục cố định + feature của bước", () => {
+    expect(sectionsOfStep("S-7.1", spine)).toEqual(["fixed:5.1"])
+    expect(sectionsOfStep("S-4.1", spine)).toEqual(expect.arrayContaining(["fixed:3.1.2", "feature:F-3.2"]))
+  })
+
+  it("bước vòng S-5 chỉ nhận function của đúng màn", () => {
+    expect(sectionsOfStep("S-5.2@S01", spine)).toEqual(["function:FN-1"])
+    expect(sectionsOfStep("S-5.4@nonscreen", spine)).toEqual(["function:FN-3"])
+  })
+
+  it("mục riêng của mẫu thuộc S-8.1; bước không sở hữu mục nào ⇒ rỗng", () => {
+    expect(sectionsOfStep("S-8.1", spine)).toContain("custom:budget")
+    expect(sectionsOfStep("S-9.1", spine)).toEqual([])
+  })
+
+  it("có layout ⇒ thêm phần nhỏ slot:* của mẫu, bỏ nhóm bao", () => {
+    const entries: LayoutEntry[] = [
+      { order: 0, heading_text: "1.1 Purpose", level: 2, section_id: "slot:vision" },
+      { order: 1, heading_text: "Part", level: 1, section_id: "group:x" }
+    ]
+    const ids = sectionsOfStep("S-2.1", spine, entries)
+    expect(ids).toContain("slot:vision")
+    expect(ids.some((id) => id.startsWith("group:"))).toBe(false)
   })
 })

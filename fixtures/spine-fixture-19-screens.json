@@ -2309,7 +2309,8 @@
           "kind": "response",
           "flow": "normal"
         }
-      ]
+      ],
+      "source_ref": "Client brief, section on Submit Credentials"
     },
     {
       "id": "FN002",
@@ -2335,7 +2336,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Log In with Google"
     },
     {
       "id": "FN003",
@@ -2352,7 +2354,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "could"
+      "priority": "could",
+      "source_ref": "Client brief, section on Toggle Password Visibility"
     },
     {
       "id": "FN004",
@@ -2369,7 +2372,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Navigate to Register"
     },
     {
       "id": "FN005",
@@ -2386,7 +2390,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Open Forgot Password"
     },
     {
       "id": "FN006",
@@ -2417,7 +2422,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Submit Registration"
     },
     {
       "id": "FN007",
@@ -2443,7 +2449,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Verify Email Token"
     },
     {
       "id": "FN008",
@@ -2466,7 +2473,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Accept Terms"
     },
     {
       "id": "FN009",
@@ -2483,7 +2491,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Navigate to Login"
     },
     {
       "id": "FN010",
@@ -2532,7 +2541,8 @@
           "kind": "response",
           "flow": "normal"
         }
-      ]
+      ],
+      "source_ref": "Client brief, section on Submit Reset Request"
     },
     {
       "id": "FN011",
@@ -2558,7 +2568,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Complete Password Reset"
     },
     {
       "id": "FN012",
@@ -2581,7 +2592,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "could"
+      "priority": "could",
+      "source_ref": "Client brief, section on Resend Reset Email"
     },
     {
       "id": "FN013",
@@ -2598,7 +2610,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Close Popup"
     },
     {
       "id": "FN014",
@@ -2615,7 +2628,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Display Guided Tour"
     },
     {
       "id": "FN015",
@@ -2632,7 +2646,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Advance Tour Step"
     },
     {
       "id": "FN016",
@@ -2649,7 +2664,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Skip Tour"
     },
     {
       "id": "FN017",
@@ -2668,7 +2684,8 @@
       ],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Persist Onboarding Completion"
     },
     {
       "id": "FN018",
@@ -2694,7 +2711,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on List Projects"
     },
     {
       "id": "FN019",
@@ -2711,7 +2729,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Search Projects"
     },
     {
       "id": "FN020",
@@ -2728,7 +2747,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Filter by Status"
     },
     {
       "id": "FN021",
@@ -2748,7 +2768,8 @@
       ],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Open Project"
     },
     {
       "id": "FN022",
@@ -2772,7 +2793,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Archive Project"
     },
     {
       "id": "FN023",
@@ -2789,7 +2811,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Open Create Project"
     },
     {
       "id": "FN024",
@@ -2844,7 +2867,8 @@
           "kind": "response",
           "flow": "normal"
         }
-      ]
+      ],
+      "source_ref": "Client brief, section on Submit New Project"
     },
     {
       "id": "FN025",
@@ -2863,11 +2887,12 @@
         {
           "id": "FN025-V1",
           "kind": "business",
-          "statement": "Working mode must be one of fast or coaching."
+          "statement": "Working mode must be one of \"fast\" or \"coaching\"."
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Select Working Mode"
     },
     {
       "id": "FN026",
@@ -2884,7 +2909,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Validate Project Name"
     },
     {
       "id": "FN027",
@@ -2901,7 +2927,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Cancel Creation"
     },
     {
       "id": "FN028",
@@ -2970,7 +2997,8 @@
           "kind": "response",
           "flow": "normal"
         }
-      ]
+      ],
+      "source_ref": "Client brief, section on Send Chat Message"
     },
     {
       "id": "FN029",
@@ -2999,7 +3027,8 @@
       "business_rule_ids": [
         "BR05"
       ],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Stream AI Response"
     },
     {
       "id": "FN030",
@@ -3016,7 +3045,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Switch Tab"
     },
     {
       "id": "FN031",
@@ -3042,7 +3072,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Render Document Pane"
     },
     {
       "id": "FN032",
@@ -3070,7 +3101,8 @@
       "business_rule_ids": [
         "BR06"
       ],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Accept Step at Gate"
     },
     {
       "id": "FN033",
@@ -3096,7 +3128,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Request Revision at Gate"
     },
     {
       "id": "FN034",
@@ -3115,7 +3148,8 @@
       ],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Display Diagram"
     },
     {
       "id": "FN035",
@@ -3141,7 +3175,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Re-render Diagram"
     },
     {
       "id": "FN036",
@@ -3158,7 +3193,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "could"
+      "priority": "could",
+      "source_ref": "Client brief, section on Zoom Diagram"
     },
     {
       "id": "FN037",
@@ -3175,7 +3211,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "could"
+      "priority": "could",
+      "source_ref": "Client brief, section on Download Diagram Image"
     },
     {
       "id": "FN038",
@@ -3199,7 +3236,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on List Open Flags"
     },
     {
       "id": "FN039",
@@ -3232,7 +3270,8 @@
       "business_rule_ids": [
         "BR07"
       ],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Waive Flag"
     },
     {
       "id": "FN040",
@@ -3258,7 +3297,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Submit Change Request"
     },
     {
       "id": "FN041",
@@ -3278,7 +3318,8 @@
       ],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Preview Impact Diff"
     },
     {
       "id": "FN042",
@@ -3306,7 +3347,8 @@
       "business_rule_ids": [
         "BR06"
       ],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Apply Change Transaction"
     },
     {
       "id": "FN043",
@@ -3325,7 +3367,8 @@
       ],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Configure Export Options"
     },
     {
       "id": "FN044",
@@ -3351,7 +3394,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Export Working Draft"
     },
     {
       "id": "FN045",
@@ -3379,7 +3423,8 @@
       "business_rule_ids": [
         "BR09"
       ],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Export Baseline Document"
     },
     {
       "id": "FN046",
@@ -3396,7 +3441,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Show Export Blockers"
     },
     {
       "id": "FN047",
@@ -3413,7 +3459,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Download Exported File"
     },
     {
       "id": "FN048",
@@ -3430,7 +3477,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Display Plans"
     },
     {
       "id": "FN049",
@@ -3447,7 +3495,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Select Plan"
     },
     {
       "id": "FN050",
@@ -3475,7 +3524,8 @@
       "business_rule_ids": [
         "BR08"
       ],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Initiate Checkout"
     },
     {
       "id": "FN051",
@@ -3500,7 +3550,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "could"
+      "priority": "could",
+      "source_ref": "Client brief, section on Apply Promo Code"
     },
     {
       "id": "FN052",
@@ -3523,7 +3574,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on List Transactions"
     },
     {
       "id": "FN053",
@@ -3540,7 +3592,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Filter by Date Range"
     },
     {
       "id": "FN054",
@@ -3557,7 +3610,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on View Transaction Detail"
     },
     {
       "id": "FN055",
@@ -3574,7 +3628,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on View Credit Balance"
     },
     {
       "id": "FN056",
@@ -3591,7 +3646,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on List Notifications"
     },
     {
       "id": "FN057",
@@ -3608,7 +3664,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Mark as Read"
     },
     {
       "id": "FN058",
@@ -3625,7 +3682,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Mark All as Read"
     },
     {
       "id": "FN059",
@@ -3642,7 +3700,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "could"
+      "priority": "could",
+      "source_ref": "Client brief, section on Delete Notification"
     },
     {
       "id": "FN060",
@@ -3665,7 +3724,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on List Users"
     },
     {
       "id": "FN061",
@@ -3682,7 +3742,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Search Users"
     },
     {
       "id": "FN062",
@@ -3699,7 +3760,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Filter by Role"
     },
     {
       "id": "FN063",
@@ -3716,7 +3778,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Open User Detail"
     },
     {
       "id": "FN064",
@@ -3735,7 +3798,8 @@
       ],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Display User Profile"
     },
     {
       "id": "FN065",
@@ -3752,7 +3816,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Display User Projects"
     },
     {
       "id": "FN066",
@@ -3769,7 +3834,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Display Credit Balance"
     },
     {
       "id": "FN067",
@@ -3786,7 +3852,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "could"
+      "priority": "could",
+      "source_ref": "Client brief, section on Display Activity Log"
     },
     {
       "id": "FN068",
@@ -3803,7 +3870,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Display Usage Metrics"
     },
     {
       "id": "FN069",
@@ -3820,7 +3888,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Select Time Range"
     },
     {
       "id": "FN070",
@@ -3837,7 +3906,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Display Active Users Chart"
     },
     {
       "id": "FN071",
@@ -3854,7 +3924,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "could"
+      "priority": "could",
+      "source_ref": "Client brief, section on Refresh Metrics"
     },
     {
       "id": "FN072",
@@ -3877,7 +3948,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Display Cost Summary"
     },
     {
       "id": "FN073",
@@ -3894,7 +3966,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Group Costs by Provider"
     },
     {
       "id": "FN074",
@@ -3911,7 +3984,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Group Costs by Project"
     },
     {
       "id": "FN075",
@@ -3928,7 +4002,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "could"
+      "priority": "could",
+      "source_ref": "Client brief, section on Display Cost Trend"
     },
     {
       "id": "FN076",
@@ -3951,7 +4026,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on List Prompt Skills"
     },
     {
       "id": "FN077",
@@ -3968,7 +4044,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on View Skill Content"
     },
     {
       "id": "FN078",
@@ -3985,7 +4062,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "could"
+      "priority": "could",
+      "source_ref": "Client brief, section on Filter by Category"
     },
     {
       "id": "FN079",
@@ -4002,7 +4080,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "could"
+      "priority": "could",
+      "source_ref": "Client brief, section on Display Asset Version"
     },
     {
       "id": "FN080",
@@ -4019,7 +4098,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on List Audit Events"
     },
     {
       "id": "FN081",
@@ -4036,7 +4116,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "could"
+      "priority": "could",
+      "source_ref": "Client brief, section on Filter by Actor"
     },
     {
       "id": "FN082",
@@ -4053,7 +4134,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "could"
+      "priority": "could",
+      "source_ref": "Client brief, section on Filter by Event Type"
     },
     {
       "id": "FN083",
@@ -4070,7 +4152,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "could"
+      "priority": "could",
+      "source_ref": "Client brief, section on View Event Detail"
     },
     {
       "id": "FN084",
@@ -4112,7 +4195,8 @@
           "kind": "request",
           "flow": "normal"
         }
-      ]
+      ],
+      "source_ref": "Client brief, section on Reset Monthly Quota"
     },
     {
       "id": "FN085",
@@ -4136,7 +4220,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, section on Check Subscription Expiry"
     },
     {
       "id": "FN086",
@@ -4189,7 +4274,8 @@
           "kind": "response",
           "flow": "normal"
         }
-      ]
+      ],
+      "source_ref": "Client brief, section on Handle Payment Webhook"
     },
     {
       "id": "FN087",
@@ -4213,7 +4299,8 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Evaluate Completeness Proactively"
     },
     {
       "id": "FN088",
@@ -4231,7 +4318,8 @@
       "abnormal": [],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Aggregate AI Costs"
     },
     {
       "id": "FN089",
@@ -4251,7 +4339,8 @@
       ],
       "validations": [],
       "business_rule_ids": [],
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, section on Monitor Service Health"
     }
   ],
   "nfrs": [
@@ -4260,28 +4349,32 @@
       "category": "interface",
       "statement": "The web client communicates with the backend exclusively over HTTPS REST and SSE endpoints.",
       "kind": "descriptive",
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, quality expectations"
     },
     {
       "id": "N02",
       "category": "interface",
       "statement": "Diagram rendering integrates with a self-hosted PlantUML server so customer data never leaves the deployment.",
       "kind": "descriptive",
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, quality expectations"
     },
     {
       "id": "N03",
       "category": "usability",
       "statement": "A first-time user reaches their first accepted pipeline step within 15 minutes without external help.",
       "kind": "descriptive",
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, quality expectations"
     },
     {
       "id": "N04",
       "category": "usability",
       "statement": "Every gate decision is reachable with at most two clicks from the workspace.",
       "kind": "descriptive",
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, quality expectations"
     },
     {
       "id": "N05",
@@ -4290,7 +4383,8 @@
       "kind": "quantitative",
       "metric": "availability",
       "threshold": ">= 99.5% monthly",
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, quality expectations"
     },
     {
       "id": "N06",
@@ -4299,16 +4393,18 @@
       "kind": "quantitative",
       "metric": "recovery point",
       "threshold": "<= 1 step of work lost",
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, quality expectations"
     },
     {
       "id": "N07",
       "category": "performance",
-      "statement": "Chat responses start streaming quickly after submission.",
+      "statement": "Chat responses start streaming within 3 seconds of submission.",
       "kind": "quantitative",
       "metric": "time to first token, p95",
       "threshold": "<= 3 s",
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, quality expectations"
     },
     {
       "id": "N08",
@@ -4317,7 +4413,8 @@
       "kind": "quantitative",
       "metric": "export duration, p95",
       "threshold": "<= 30 s",
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, quality expectations"
     },
     {
       "id": "N09",
@@ -4326,21 +4423,24 @@
       "kind": "quantitative",
       "metric": "render duration, p95",
       "threshold": "<= 5 s",
-      "priority": "should"
+      "priority": "should",
+      "source_ref": "Client brief, quality expectations"
     },
     {
       "id": "N10",
       "category": "other",
       "statement": "Passwords are stored as salted bcrypt hashes; tokens and secrets never appear in logs or admin views.",
       "kind": "descriptive",
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, quality expectations"
     },
     {
       "id": "N11",
       "category": "other",
       "statement": "Only extracted text of uploaded documents is sent to the model provider; original files stay in object storage.",
       "kind": "descriptive",
-      "priority": "must"
+      "priority": "must",
+      "source_ref": "Client brief, quality expectations"
     }
   ],
   "business_rules": [
@@ -4348,25 +4448,29 @@
       "id": "BR01",
       "tier": "high",
       "statement": "Every statement rendered into the SRS must be traceable to a structured Spine field written by an accepted step.",
-      "source_validation_ids": []
+      "source_validation_ids": [],
+      "source_ref": "Client brief, business rules"
     },
     {
       "id": "BR02",
       "tier": "high",
       "statement": "Credits are reserved before any model call and settled or refunded when the call ends.",
-      "source_validation_ids": []
+      "source_validation_ids": [],
+      "source_ref": "Client brief, business rules"
     },
     {
       "id": "BR03",
       "tier": "high",
       "statement": "A baseline may only be signed when zero unresolved, unwaived red flags remain.",
-      "source_validation_ids": []
+      "source_validation_ids": [],
+      "source_ref": "Client brief, business rules"
     },
     {
       "id": "BR04",
       "tier": "high",
       "statement": "All content rendered into the SRS document is written in English.",
-      "source_validation_ids": []
+      "source_validation_ids": [],
+      "source_ref": "Client brief, business rules"
     },
     {
       "id": "BR05",
@@ -4374,7 +4478,8 @@
       "statement": "Raw model output that fails schema parsing is never persisted into the Spine.",
       "source_validation_ids": [
         "FN029-V1"
-      ]
+      ],
+      "source_ref": "Client brief, business rules"
     },
     {
       "id": "BR06",
@@ -4383,7 +4488,8 @@
       "source_validation_ids": [
         "FN032-V1",
         "FN042-V1"
-      ]
+      ],
+      "source_ref": "Client brief, business rules"
     },
     {
       "id": "BR07",
@@ -4392,7 +4498,8 @@
       "source_validation_ids": [
         "FN039-V1",
         "FN039-V2"
-      ]
+      ],
+      "source_ref": "Client brief, business rules"
     },
     {
       "id": "BR08",
@@ -4401,7 +4508,8 @@
       "source_validation_ids": [
         "FN050-V1",
         "FN086-V1"
-      ]
+      ],
+      "source_ref": "Client brief, business rules"
     },
     {
       "id": "BR09",
@@ -4409,7 +4517,8 @@
       "statement": "Baseline exports render from the baseline snapshot, never from the live Spine.",
       "source_validation_ids": [
         "FN045-V1"
-      ]
+      ],
+      "source_ref": "Client brief, business rules"
     }
   ],
   "common_requirements": [
