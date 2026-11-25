@@ -47,7 +47,7 @@ import { spineSchema } from "../../spine/spine.schema.js"
 import type { Flag, Spine } from "../../spine/spine.types.js"
 import type { AiActionInput, AiActionResult } from "../../../shared/ai/ai-action.types.js"
 import type { ReviewOutput } from "../../../shared/ai/response-parser.js"
-import { AI_REVIEW_MAX_BATCHES, buildReviewBatches, estimateReviewBatches, humanizeReviewMessage, runAiReview, type AiReviewExecutor } from "./ai-review.js"
+import { AI_REVIEW_MAX_AMBIGUITY_PER_BATCH, AI_REVIEW_MAX_BATCHES, buildReviewBatches, estimateReviewBatches, humanizeReviewMessage, runAiReview, type AiReviewExecutor } from "./ai-review.js"
 
 const PROJECT = "650000000000000000000099"
 const USER = "650000000000000000000098"
@@ -398,6 +398,65 @@ describe("runAiReview - S-8.4 consistency", () => {
     const exec = executorOf([])
     expect((await runAiReview(PROJECT, USER, "consistency", { executor: exec })).skipped).toBe(true)
     expect(exec).not.toHaveBeenCalled()
+  })
+})
+
+describe("FLF-449 lỗi 4: ambiguity không chiếm chỗ lens mâu thuẫn", () => {
+  const ambiguity = (n: number): RawFlag => ({
+    level: "yellow",
+    rule_id: "ambiguity",
+    section_id: "function:FN12",
+    target_id: "FN12",
+    quote: "Expired profiles are anonymised, not deleted.", // nằm ở quyết định, có mặt ở mọi lô
+    message: `Description is vague, case ${n}.`
+  })
+  const decisionConflict: RawFlag = {
+    level: "yellow",
+    rule_id: "decision_conflict",
+    section_id: "function:FN12",
+    target_id: "FN12",
+    quote: "Expired profiles are anonymised, not deleted.",
+    message: "Cancel Booking contradicts the decision on expired profiles."
+  }
+
+  it("(a) một lô: 8 ambiguity + 1 decision_conflict => mở 5 ambiguity + 1 decision_conflict", async () => {
+    seed(smallSpine())
+    const exec = executorOf([...Array.from({ length: 8 }, (_, i) => ambiguity(i)), decisionConflict])
+    const result = await runAiReview(PROJECT, USER, "quality", { executor: exec })
+    expect(result.batches).toBe(1)
+    const lenses = openFlags().map((f) => f.lens)
+    expect(lenses.filter((l) => l === "ambiguity")).toHaveLength(AI_REVIEW_MAX_AMBIGUITY_PER_BATCH)
+    expect(lenses.filter((l) => l === "decision_conflict")).toHaveLength(1)
+    expect(lenses).toHaveLength(6)
+  })
+
+  it("(b) hai lô, mỗi lô 6 ambiguity => tổng 10", async () => {
+    const spine = smallSpine()
+    spine.features.push({ id: "F2", name: "Payment", order: 1 })
+    spine.functions.push({
+      id: "FN13", screen_id: null, feature_id: "F2", order: 0, name: "Pay", trigger: "t", description: "y".repeat(25_000),
+      normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null
+    } as never)
+    seed(spine)
+    let call = 0
+    const exec = executorOf(() => {
+      const base = call * 10
+      call += 1
+      return Array.from({ length: 6 }, (_, i) => ambiguity(base + i))
+    })
+    const result = await runAiReview(PROJECT, USER, "quality", { executor: exec })
+    expect(result.batches).toBeGreaterThanOrEqual(2)
+    expect(exec).toHaveBeenCalledTimes(result.batches)
+    expect(openFlags().filter((f) => f.lens === "ambiguity")).toHaveLength(AI_REVIEW_MAX_AMBIGUITY_PER_BATCH * result.batches)
+  })
+
+  it("(c) danh sách lens trong prompt bắt đầu bằng decision_conflict, ambiguity đứng cuối", async () => {
+    seed(smallSpine())
+    const exec = executorOf([])
+    await runAiReview(PROJECT, USER, "quality", { executor: exec })
+    const lines = String(exec.mock.calls[0][0].promptVariables!.lenses).split("\n")
+    expect(lines[0].startsWith("decision_conflict")).toBe(true)
+    expect(lines[lines.length - 1].startsWith("ambiguity")).toBe(true)
   })
 })
 

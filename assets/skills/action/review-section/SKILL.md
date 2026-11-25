@@ -1,7 +1,7 @@
 ---
 skill_id: review-section
 kind: action
-version: 1.2.1
+version: 1.2.2
 description: LLM lens review of one section or the assembled draft → yellow flags only
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -60,17 +60,18 @@ Definitions, examples and when each applies: *Reference: lenses* at the end of t
 ## Rules
 
 1. Apply **only** the lenses listed in *Lenses to apply*.
-2. **Level is always `yellow`.** Never output `red`.
-3. `rule_id` = the lens name. `section_id` = logical key (`function:FN07`, `fixed:4.2.3`) - never a section number.
-4. `message` in the **user's language**: name the element by its **name** (not only its id), quote the problem phrase (in English as written), and say what would fix it. One problem per flag. Never write the lens name, `rule_id`, a step code or the word "Spine" in it. Never write a field name (any word with an underscore such as `function_ids`, `spine_version`, `actor_ids`) or a sub-item id (`FN006-V2`, `UC04-S3`). Say it in plain words ("the use case's function list", "when the document version changes") and refer to a rule or validation by quoting its text. Good: "the use case's function list names Cancel Booking twice". Bad: "function_ids has a duplicate at FN006-V2".
-5. **Be specific or stay silent.** "Could be clearer" is not a flag. No flag without a concrete quote or element id.
-6. Do not repeat anything already in *Already open flags*.
-7. Do not raise what `deterministic-check` already covers (empty sections, dead references, missing NFR numbers, orphan actors, non-English content).
-8. Do not propose ops. Fixes go through the owner step or a change request.
-9. Maximum 15 flags **per batch**, most important first.
-10. Every flag has `quote` = text copied **verbatim** from Content, a settled decision, an assumption or an uploaded document. For a flag that compares two places, quote the place in Content. Cannot quote it, no flag (a `cross_section_gap` about a wrong count may omit it).
-11. `target_id` = the id of the element the flag names, when there is one.
-12. `decision_conflict` only when a sentence in Content contradicts the **answer** of a settled decision. Name the decision by its topic in words, never by id.
+2. When *Settled decisions* or *Assumptions* are given, check **each one** against the Content before anything else, and report every contradiction (`decision_conflict`, `assumption_conflict`, including two assumptions that disagree with each other).
+3. **Level is always `yellow`.** Never output `red`.
+4. `rule_id` = the lens name. `section_id` = logical key (`function:FN07`, `fixed:4.2.3`) - never a section number.
+5. `message` in the **user's language**: name the element by its **name** (not only its id), quote the problem phrase (in English as written), and say what would fix it. One problem per flag. Never write the lens name, `rule_id`, a step code or the word "Spine" in it. Never write a field name (any word with an underscore such as `function_ids`, `spine_version`, `actor_ids`) or a sub-item id (`FN006-V2`, `UC04-S3`). Say it in plain words ("the use case's function list", "when the document version changes") and refer to a rule or validation by quoting its text. Good: "the use case's function list names Cancel Booking twice". Bad: "function_ids has a duplicate at FN006-V2".
+6. **Be specific or stay silent.** "Could be clearer" is not a flag. No flag without a concrete quote or element id.
+7. Do not repeat anything already in *Already open flags*.
+8. Do not raise what `deterministic-check` already covers (empty sections, dead references, missing NFR numbers, orphan actors, non-English content).
+9. Do not propose ops. Fixes go through the owner step or a change request.
+10. Order flags by lens priority: conflicts first (`decision_conflict`, `assumption_conflict`, `requirement_conflict`, `fr_nfr_conflict`, `source_conflict`), then `security_risk`, `semantic_duplicate`, `cross_section_gap`, `term_drift`, then `ambiguity`. At most 15 flags per call, of which at most 5 `ambiguity`.
+11. Every flag has `quote` = text copied **verbatim** from Content, a settled decision, an assumption or an uploaded document. For a flag that compares two places, quote the place in Content. Cannot quote it, no flag (a `cross_section_gap` about a wrong count may omit it).
+12. `target_id` = the id of the element the flag names, when there is one.
+13. `decision_conflict` only when a sentence in Content contradicts the **answer** of a settled decision. Name the decision by its topic in words, never by id.
 
 <!-- ba-quality:shared:start -->
 **Analysis quality** - applies to every finding, gap, proposed change, recommendation and reason you write (not to the plain answer options of a question):

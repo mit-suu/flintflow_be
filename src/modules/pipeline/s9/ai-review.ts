@@ -38,6 +38,8 @@ export const AI_REVIEW_RULE = "ai_review"
 export const AI_REVIEW_BATCH_CHARS = 24_000
 /** Trần số lô mỗi lượt chạy; vượt thì gom các khối cuối vào lô cuối. */
 export const AI_REVIEW_MAX_BATCHES = 6
+/** Số cờ `ambiguity` tối đa giữ lại từ một lô; lens khác không bị giới hạn. */
+export const AI_REVIEW_MAX_AMBIGUITY_PER_BATCH = 5
 /** Section mặc định của cờ khi không suy ra được từ `target_id`. */
 const DEFAULT_SECTION = "fixed:1"
 
@@ -64,13 +66,14 @@ const PROFILES: Readonly<Record<ReviewProfile, ProfileDef>> = {
     reason: "S-9.2 Soát chất lượng",
     withSettledContext: true,
     lenses: [
-      { name: "requirement_conflict", hint: "two requirements (function, business rule, validation, NFR, use case) say opposite things" },
-      { name: "fr_nfr_conflict", hint: "a function contradicts a non-functional requirement" },
-      { name: "ambiguity", hint: "vague or untestable wording, vague names" },
-      { name: "security_risk", hint: "missing authorization or sensitive data handling" },
+      // Thứ tự ưu tiên: mâu thuẫn trước, ambiguity sau cùng
       { name: "decision_conflict", hint: "content contradicts the answer of a settled decision" },
       { name: "assumption_conflict", hint: "two assumptions disagree, or an assumption contradicts the content or a decision" },
-      { name: "source_conflict", hint: "the SRS says something different from an uploaded source document (skip when no document is given)" }
+      { name: "requirement_conflict", hint: "two requirements (function, business rule, validation, NFR, use case) say opposite things" },
+      { name: "fr_nfr_conflict", hint: "a function contradicts a non-functional requirement" },
+      { name: "source_conflict", hint: "the SRS says something different from an uploaded source document (skip when no document is given)" },
+      { name: "security_risk", hint: "missing authorization or sensitive data handling" },
+      { name: "ambiguity", hint: "vague or untestable wording, vague names" }
     ]
   },
   consistency: {
@@ -388,6 +391,7 @@ export const runAiReview = async (projectId: string, userId: string, profile: Re
     const result = await meteredCall(projectId, userId, def, () => execute(input, projectId, userId))
     const sources = [...collectStrings(batch.projection), ...settledSources]
     const batchSections = new Set(batch.section_ids)
+    let ambiguityKept = 0
 
     // Không tin output: chỉ nhận cờ vàng, lens thuộc profile, câu trích khớp nguồn
     for (const f of result.data.flags ?? []) {
@@ -407,7 +411,13 @@ export const runAiReview = async (projectId: string, userId: string, profile: Re
       }
 
       const key = flagDedupeKey(lens, sectionId, targetId, message)
-      if (!accepted.has(key)) accepted.set(key, { lens, section_id: sectionId, target_id: targetId, message })
+      if (accepted.has(key)) continue
+      // Giữ theo thứ tự model trả; ambiguity không được chiếm hết chỗ của lens mâu thuẫn
+      if (lens === "ambiguity") {
+        if (ambiguityKept >= AI_REVIEW_MAX_AMBIGUITY_PER_BATCH) continue
+        ambiguityKept += 1
+      }
+      accepted.set(key, { lens, section_id: sectionId, target_id: targetId, message })
     }
   }
   if (droppedUnquoted > 0) console.warn(`[ai-review] ${def.stepId}: bỏ ${droppedUnquoted} cờ vì câu trích không khớp nguồn`)
