@@ -226,6 +226,24 @@ describe("UC-49 - comment trên bản nháp (mode 2)", () => {
     expect(await recipients("comment_resolved")).toEqual([])
   })
 
+  it("thông báo comment theo ngôn ngữ giao diện của người nhận; chưa chọn ⇒ tiếng Việt", async () => {
+    const section = await firstSection(lead)
+    const viewerUser = await join(seeded, "viewer-en@flintflow.test", "viewer")
+    await User.updateOne({ _id: viewerUser.userId }, { $set: { locale: "en" } })
+    const viewerEn = api(seeded.projectId, viewerUser.token)
+    await lead.post("/comments", { version: { source: "draft" }, anchor: { section_id: section.id }, text: "Câu hỏi về phạm vi" })
+    await viewerEn.post("/comments/CM-001/replies", { text: "Does scope include cancel?" })
+    await Notification.deleteMany({})
+
+    await analyst.c.post("/comments/CM-001/replies", { text: "Có, gồm cả huỷ." })
+
+    const toViewer = await Notification.findOne({ type: "comment_replied", userId: viewerUser.userId }).lean()
+    expect(toViewer?.title).toBe("New reply on CM-001")
+    expect(toViewer?.body).toMatch(/^On "/)
+    const toLead = await Notification.findOne({ type: "comment_replied", userId: seeded.userId }).lean()
+    expect(toLead?.title).toBe("Trả lời mới ở CM-001")
+  })
+
   it("người ngoài org không đọc được comment của project", async () => {
     const outsider = await seedFixture("minimal", { email: "outsider@flintflow.test" })
     const res = await api(seeded.projectId, outsider.token).get("/comments")

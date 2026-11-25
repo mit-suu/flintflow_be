@@ -30,13 +30,14 @@ import { IMPORT_SEMANTIC_RULE, MODE1_RULE_PROFILE } from "./mode1-rule-profile.j
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FULL: Spine = spineSchema.parse(JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../fixtures/spine-fixture-19-screens.json"), "utf8")))
 
-const EXCLUDED = ["array_empty", "section_empty", "section_stale_at_baseline", "section_awaiting_reaccept", "screen_pending_at_baseline", "orphan_screen_at_baseline", "orphan_entity_at_baseline", "non_english_content", "usecase_no_function", "usecase_name_style", "system_name_missing"]
-const DOWNGRADED = ["nfr_missing_number", "usecase_relation_invalid"]
+const EXCLUDED = ["array_empty", "section_empty", "section_stale_at_baseline", "section_awaiting_reaccept", "screen_pending_at_baseline", "orphan_screen_at_baseline", "orphan_entity_at_baseline", "non_english_content", "usecase_no_function", "usecase_name_style", "system_name_missing", "source_missing"]
+// Theo flow 18/11: NFR thiếu số đo là tầng 3 theo luật ⇒ đỏ cả ở chế độ 1, không hạ vàng nữa
+const DOWNGRADED = ["usecase_relation_invalid"]
 
 const rulesOf = (c: FlagCandidate[]) => new Set(c.map((f) => f.rule_id))
 
 describe("hồ sơ luật mode 1", () => {
-  it("cấu hình một chỗ: 11 luật loại trừ, 2 luật hạ mức, đều là luật có thật", () => {
+  it("cấu hình một chỗ: 12 luật loại trừ, 1 luật hạ mức, đều là luật có thật", () => {
     expect([...MODE1_RULE_PROFILE.exclude].sort()).toEqual([...EXCLUDED].sort())
     expect([...MODE1_RULE_PROFILE.downgrade].sort()).toEqual([...DOWNGRADED].sort())
     const known = new Set(RULES.map((r) => r.rule_id))
@@ -49,7 +50,8 @@ describe("hồ sơ luật mode 1", () => {
       level: r.level,
       rule_id: r.rule_id,
       section_id: "fixed:1",
-      target_id: null,
+      // NFR cụ thể thiếu số đo (target_id có) - khác với "chưa có NFR nào" (target_id null, xem test riêng)
+      target_id: r.rule_id === "nfr_missing_number" ? "N01" : null,
       message: r.rule_id,
       remediation_step: "S-1"
     }))
@@ -60,8 +62,28 @@ describe("hồ sơ luật mode 1", () => {
       else if (DOWNGRADED.includes(r.rule_id)) expect(hit?.level, r.rule_id).toBe("yellow")
       else expect(hit?.level, r.rule_id).toBe(r.level)
     }
-    // giữ đỏ: dead_reference, render_error, diagram_stale, unconfirmed_assumption, template_section_migration_missing (chỉ sinh khi hồ sơ mang danh sách mục thiếu sau đổi mẫu)
-    expect(out.filter((c) => c.level === "red").map((c) => c.rule_id).sort()).toEqual(["dead_reference", "diagram_stale", "render_error", "template_section_migration_missing", "unconfirmed_assumption"])
+    // giữ đỏ: dead_reference, render_error, diagram_stale, unconfirmed_assumption, duplicate_name, vague_wording, nfr_missing_number
+    // (luật chất lượng chạy cả chế độ 1), original_text_mentions_changed, template_section_empty / _migration_missing (chỉ sinh khi hồ sơ mang mẫu)
+    expect(out.filter((c) => c.level === "red").map((c) => c.rule_id).sort()).toEqual([
+      "dead_reference",
+      "diagram_stale",
+      "duplicate_name",
+      "nfr_missing_number",
+      "original_text_mentions_changed",
+      "render_error",
+      "template_section_empty",
+      "template_section_migration_missing",
+      "unconfirmed_assumption",
+      "vague_wording"
+    ])
+  })
+
+  it("NFR có mà thiếu số đo ⇒ đỏ ở chế độ 1; 'chưa có NFR nào' là mảng rỗng ⇒ vàng (cùng lý do loại array_empty)", () => {
+    const spine = createEmptySpine({ name: "Lumen" })
+    spine.nfrs = [{ id: "N01", category: "performance", statement: "Pages load in a time", kind: "quantitative", priority: null }]
+    const flags = runDeterministicCheck(spine, [], { atBaseline: true, ruleProfile: MODE1_RULE_PROFILE }).filter((f) => f.rule_id === "nfr_missing_number")
+    expect(flags.find((f) => f.target_id === "N01")?.level).toBe("red")
+    expect(flags.find((f) => f.target_id === null && f.message.includes("độ tin cậy"))?.level).toBe("yellow")
   })
 
   it("Spine rỗng (import chưa trích được gì): mode 1 không có cờ đỏ - mục FPT thiếu không bắt buộc, chỉ vào gap report", () => {

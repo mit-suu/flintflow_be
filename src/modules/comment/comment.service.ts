@@ -6,12 +6,48 @@ import type { CreateCommentDTO } from "../pipeline/pipeline.dto.js"
 import { getDocument, NoWorkingDraftError } from "../render/assemble.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { applyTransaction } from "../spine/op-engine.js"
+import { assertProjectUnlocked } from "../spine/draft-lock.js"
 import { stepsOf } from "../spine/section-registry.js"
 import type { Op } from "../spine/op.types.js"
 import { Membership, type OrgRole } from "../organization/membership.model.js"
 import { User } from "../user/user.model.js"
 import { notify } from "../notification/notification.service.js"
+import { accountLocaleOf } from "../user/account-locale.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import type { UserLocale } from "../../shared/i18n/locale.js"
+
+type NoticeKind = "posted" | "replied" | "resolved" | "converted"
+
+interface NoticeParams {
+  project: string
+  commentId: string
+  label: string
+  versionLabel?: string
+  text?: string
+  crId?: string
+}
+
+/** Tiêu đề + nội dung thông báo comment theo ngôn ngữ giao diện của **người nhận** (chưa chọn ⇒ tiếng Việt). */
+const NOTICES: Readonly<Record<UserLocale, Readonly<Record<NoticeKind, (p: NoticeParams) => { title: string; body: string }>>>> = {
+  vi: {
+    posted: (p) => ({ title: `Comment mới ở ${p.project}`, body: `${p.commentId} trên "${p.label}" (${p.versionLabel}): ${p.text}` }),
+    replied: (p) => ({ title: `Trả lời mới ở ${p.commentId}`, body: `Trên "${p.label}" (${p.project}): ${p.text}` }),
+    resolved: (p) => ({ title: `Comment ${p.commentId} đã được xử lý`, body: `Góp ý của bạn trên "${p.label}" (${p.project}) đã được đánh dấu đã xử lý.` }),
+    converted: (p) => ({
+      title: `Comment ${p.commentId} đã thành ${p.crId}`,
+      body: `Góp ý của bạn trên "${p.label}" đã được ghi nhận thành change request ${p.crId}.`
+    })
+  },
+  en: {
+    posted: (p) => ({ title: `New comment in ${p.project}`, body: `${p.commentId} on "${p.label}" (${p.versionLabel}): ${p.text}` }),
+    replied: (p) => ({ title: `New reply on ${p.commentId}`, body: `On "${p.label}" (${p.project}): ${p.text}` }),
+    resolved: (p) => ({ title: `Comment ${p.commentId} was resolved`, body: `Your comment on "${p.label}" (${p.project}) was marked as resolved.` }),
+    converted: (p) => ({ title: `Comment ${p.commentId} became ${p.crId}`, body: `Your comment on "${p.label}" was turned into change request ${p.crId}.` })
+  }
+}
+
+export const commentNotice = async (recipientId: string, kind: NoticeKind, params: NoticeParams): Promise<{ title: string; body: string }> =>
+  NOTICES[(await accountLocaleOf(recipientId)) ?? "vi"][kind](params)
 
 /** Người đang thao tác: project đã qua kiểm quyền org, vai trò lấy từ `orgContext`. */
 export interface CommentActor {
@@ -151,11 +187,16 @@ const notifyHandlers = async (actor: CommentActor, comment: IComment): Promise<v
     .select("userId")
     .lean()
   await Promise.all(
-    handlers.map((m) =>
+    handlers.map(async (m) =>
       notify(String(m.userId), {
         type: "comment_posted",
-        title: `Comment mới ở ${actor.projectName}`,
-        body: `${comment.comment_id} trên "${comment.anchor.label}" (${comment.version.label}): ${comment.text.slice(0, 200)}`,
+        ...(await commentNotice(String(m.userId), "posted", {
+          project: actor.projectName,
+          commentId: comment.comment_id,
+          label: comment.anchor.label,
+          versionLabel: comment.version.label,
+          text: comment.text.slice(0, 200)
+        })),
         link: `/projects/${actor.projectId}/view?comment=${comment.comment_id}`,
         organizationId: actor.orgId,
         meta: {
@@ -220,11 +261,10 @@ export const replyComment = async (actor: CommentActor, commentId: string, text:
   comment.replies.push({ author_id: new mongoose.Types.ObjectId(actor.userId), author_role: actor.role, text, at: new Date() })
   await comment.save()
   await Promise.all(
-    followers.map((userId) =>
+    followers.map(async (userId) =>
       notify(userId, {
         type: "comment_replied",
-        title: `Trả lời mới ở ${comment.comment_id}`,
-        body: `Trên "${comment.anchor.label}" (${actor.projectName}): ${text.slice(0, 200)}`,
+        ...(await commentNotice(userId, "replied", { project: actor.projectName, commentId: comment.comment_id, label: comment.anchor.label, text: text.slice(0, 200) })),
         link: `/projects/${actor.projectId}/view?comment=${comment.comment_id}`,
         organizationId: actor.orgId,
         meta: {
@@ -284,25 +324,29 @@ const reopenOwnerSteps = async (projectId: string, sectionId: string, userId: st
 /**
  * Kết luận một comment theo `business-flow.md §3.5`: **đã sửa** (nội dung đổi qua chat) hoặc **giữ nguyên
  * kèm lý do**. Hai nhánh, không phải một cú tick — Lead duyệt lại phải đọc được vì sao comment được đóng.
+ * Chỉ "đã sửa" mới mở lại step sở hữu (§3.5: "giữ nguyên" không đổi gì). Lượt sửa qua chat từ chính comment đó đã đổi nội dung
+ * rồi ⇒ nơi gọi truyền `reopenSteps: false`. Mở lại step là ghi Spine ⇒ chờ Lead duyệt thì khoá (§2, C-7).
  * Role kiểm ở route; báo tác giả comment.
  */
 export const resolveComment = async (
   actor: CommentActor,
   commentId: string,
-  resolution: CommentResolution
+  resolution: CommentResolution,
+  options: { reopenSteps?: boolean } = {}
 ): Promise<CommentDto> => {
+  const reopen = resolution.kind === "fixed" && options.reopenSteps !== false
+  if (reopen) await assertProjectUnlocked(actor.projectId)
   const updated = await Comment.findOneAndUpdate(
     { projectId: actor.projectId, comment_id: commentId, status: "open" },
     { $set: { status: "resolved", handled_by: actor.userId, handled_at: new Date(), resolution } },
     { returnDocument: "after" }
   )
   if (!updated) throw notOpen(await requireComment(actor.projectId, commentId))
-  await reopenOwnerSteps(actor.projectId, updated.anchor.section_id, actor.userId)
+  if (reopen) await reopenOwnerSteps(actor.projectId, updated.anchor.section_id, actor.userId)
   if (String(updated.author_id) !== actor.userId) {
     await notify(String(updated.author_id), {
       type: "comment_resolved",
-      title: `Comment ${updated.comment_id} đã được xử lý`,
-      body: `Góp ý của bạn trên "${updated.anchor.label}" (${actor.projectName}) đã được đánh dấu đã xử lý.`,
+      ...(await commentNotice(String(updated.author_id), "resolved", { project: actor.projectName, commentId: updated.comment_id, label: updated.anchor.label })),
       link: `/projects/${actor.projectId}/view?comment=${updated.comment_id}`,
       organizationId: actor.orgId,
       meta: {
@@ -347,8 +391,7 @@ export const markConverted = async (
   if (String(updated.author_id) !== userId) {
     await notify(String(updated.author_id), {
       type: "comment_converted",
-      title: `Comment ${updated.comment_id} đã thành ${crId}`,
-      body: `Góp ý của bạn trên "${updated.anchor.label}" đã được ghi nhận thành change request ${crId}.`,
+      ...(await commentNotice(String(updated.author_id), "converted", { project: "", commentId: updated.comment_id, label: updated.anchor.label, crId })),
       link: `/projects/${projectId}/view?comment=${updated.comment_id}`,
       organizationId: orgId,
       meta: { projectId, comment_id: updated.comment_id, anchor_label: updated.anchor.label, cr_id: crId }

@@ -26,7 +26,21 @@ import { stampAddendum } from "./addendum-stamp.js"
 import { nameElementIds } from "./human-labels.js"
 import { BRIEF_PROJECT_WRITE_MESSAGE, briefCoreEntries, isInBriefPhase, writesProjectVisionOrGoals } from "./brief-core.js"
 import { PathError, parsePath } from "./path-resolver.js"
-import { USE_CASE_NAME_FIX, useCaseNameIssues } from "./deterministic-check.js"
+import { USE_CASE_NAME_FIX, useCaseNameIssues, type RuleProfile } from "./deterministic-check.js"
+import {
+  assumptionOps,
+  assumptionsNote,
+  predictRedFlags,
+  predictedRedNote,
+  sectionDraftProblems,
+  stampChatSource,
+  type ChatAssumption,
+  type PredictedRedFlag
+} from "./chat-edit-support.js"
+import { chatEditVerdict } from "../pipeline/quiet-step.js"
+import { activeDecisions } from "../pipeline/decisions.service.js"
+import { recordAutoPass } from "../pipeline/auto-pass.service.js"
+import mongoose from "mongoose"
 import { FIELD_SECTION_MAP, FIXED_SECTIONS, sectionsOfPath } from "./section-registry.js"
 import { classifyPlace, conflictFields, placeLabel, placeOfPath, placeValue, readableValue, rebaseOps, type PlaceOutcome } from "./concurrent-merge.js"
 import { elementFieldsOf } from "./element-defaults.js"
@@ -54,6 +68,8 @@ import {
   applyUiPlan,
   uiPlanFor,
   uiPlanForModel,
+  uiPlanFromModel,
+  askedList,
   uiPlanIssues,
   uiPlanNote,
   uiPlanProblemText,
@@ -170,6 +186,10 @@ interface StoredPreview {
   language?: TurnLanguagePair | null
   /** FLF-318: ý của cả vòng hỏi đáp (thêm / xoá / sửa use case) — lượt áp chỉ còn câu trả lời cuối, không đoán lại được. */
   use_case_intent?: UseCaseIntent | null
+  /** Lời cảnh báo của AI ở lượt xem trước: người dùng bấm áp dụng bản này là "Vẫn làm" - giữ ý, ghi lại cho lượt kiểm sau đọc. */
+  warning?: string
+  /** Lệnh nhiều ý: bản xem trước chỉ là phần rõ, còn một câu hỏi cho phần mơ hồ chờ trả lời - áp bản này không khép yêu cầu. */
+  request_open?: boolean
   /**
    * P12 (BF §3.2): giá trị lúc xem trước (`before`) và đề xuất (`after`) của từng chỗ lô chạm — lượt áp sau khi người khác
    * ghi kiểm lại theo nội dung từng chỗ thay vì 409 theo `spine_version` cả tài liệu.
@@ -680,6 +700,18 @@ const QUESTION_MARKERS: readonly string[] = Object.freeze(["?", "là gì", "tạ
 /** Từ hỏi tiếng Anh, khớp nguyên từ (FLF-260): khớp chuỗi con thì "how" trong "showing" biến lệnh sửa thành câu hỏi. */
 const QUESTION_WORDS = /\b(?:what|why|how)\b/
 
+/**
+ * Câu hỏi khi kết bằng "?" hoặc vế đầu (tới dấu phẩy / chấm đầu tiên) có dấu hiệu hỏi. Dấu hiệu ở vế sau chỉ là lời giải
+ * thích kèm lệnh: "Đổi mô tả UC-03, vì sao khách hay quên pass thì ghi rõ" vẫn là lệnh sửa (trước đây "vì sao" ở bất kỳ
+ * đâu chặn luôn, lệnh bị bỏ). Lệnh lịch sự kết bằng "?" ("Thêm nút xuất Excel được không?") do lượt chat bắt lại qua
+ * `edit_request` (`project/chat-session.service.ts`).
+ */
+const isQuestion = (text: string): boolean => {
+  if (text.endsWith("?")) return true
+  const firstClause = text.split(/[,.;:!\n]/u)[0] ?? text
+  return QUESTION_MARKERS.some((marker) => firstClause.includes(marker)) || QUESTION_WORDS.test(firstClause)
+}
+
 /** Số từ đầu câu được xét — "đổi tên actor A01" nhận, "tôi nghĩ là nên đổi" thì không. */
 export const CHANGE_VERB_WINDOW = 4
 
@@ -690,7 +722,7 @@ export const CHANGE_VERB_WINDOW = 4
 export const isChangeInstruction = (message: string): boolean => {
   const text = message.trim().toLowerCase()
   if (text.length === 0) return false
-  if (QUESTION_MARKERS.some((marker) => text.includes(marker)) || QUESTION_WORDS.test(text)) return false
+  if (isQuestion(text)) return false
   const words = text.split(/\s+/).map((word) => word.replace(/[^\p{L}]/gu, ""))
   const lead = words[0] === "please" ? words[1] : words[0]
   if (lead !== undefined && LEADING_CHANGE_VERBS.includes(lead)) return true
@@ -740,6 +772,15 @@ export interface ChangeDeps {
   renderAfterChange?: (projectId: string, userId: string, newScreenIds: string[]) => Promise<unknown>
   /** P12: người sửa gần nhất của một chỗ (màn so sánh, câu "đã được … sửa giống"); thiếu ⇒ đọc `changes`. */
   lastEditor?: LastEditor
+  /** Hồ sơ luật của dự án cho lượt dự báo cờ đỏ; thiếu ⇒ `ruleProfileOf` (chế độ 1 / mẫu bắt buộc), unit test không nối Mongo ⇒ không hồ sơ. */
+  ruleProfile?: (projectId: string) => Promise<RuleProfile | undefined>
+}
+
+/** Nạp muộn như `defaultLastEditor`: `spine/` không kéo module import lúc load; không có Mongo ⇒ chạy đủ luật như chế độ 2. */
+const defaultRuleProfile = async (projectId: string): Promise<RuleProfile | undefined> => {
+  if (mongoose.connection.readyState !== 1 || !mongoose.isValidObjectId(projectId)) return undefined
+  const { ruleProfileOf } = await import("../import/mode1-guard.js")
+  return ruleProfileOf(projectId)
 }
 
 /** Path của phần use case (use case, màn, chức năng, quyền, thông báo) — lô sửa chạm tới thì vẽ lại sơ đồ. */
@@ -827,6 +868,10 @@ export interface ResolvedOps {
   proposed?: string[]
   /** FLF-318: ý của lệnh về use case (gồm cả câu hỏi làm rõ trước đó). */
   intent?: UseCaseIntent | null
+  /** AI cho rằng yêu cầu không hợp lý (ngôn ngữ trả lời): bản xem trước hiện cảnh báo + nút "Vẫn làm". */
+  warning?: string
+  /** Chỗ AI tự đoán vì yêu cầu chưa nói rõ — ghi vào `spine.assumptions` cùng lô, nói thẳng trong lời trả lời. */
+  assumptions?: ChatAssumption[]
 }
 
 /** Model gửi field không có trong Spine (`screens[].authorized_role_ids`) — nhắc nó chỉ dùng field thấy trong projection. */
@@ -863,6 +908,17 @@ const removalLeftoversOf = (spine: Spine, ops: Op[]): RemovalLeftover[] => {
   }
 }
 
+/** Lô áp thử được trên Spine (không phá schema, bất biến). */
+const canPlan = (spine: Spine, ops: Op[]): boolean => {
+  try {
+    planTransaction(spine, { base_version: spine.spine_version, ops, by: "change-preview", step_id: null }, { startSeq: 1 })
+    return true
+  } catch (err) {
+    if (err instanceof TransactionRejectedError) return false
+    throw err
+  }
+}
+
 const batchProblems = (
   spine: Spine,
   ops: Op[],
@@ -895,7 +951,9 @@ const batchProblems = (
   const edits = editsUseCase ? editIssues(spine, plan.spine).map(editProblemText) : []
   // FLF-428: lệnh nhắm một cờ mà lô không đóng được cờ đó ⇒ một lượt thử lại kèm gợi ý sửa đúng field
   const flagsLeft = unresolvedAfter(targetFlagsOf(spine, instruction), plan.spine).map(unresolvedProblemText)
-  return [...(naming.length > 0 ? [...naming, USE_CASE_NAME_FIX] : []), ...screens, ...leftovers, ...edits, ...flagsLeft]
+  // Mục riêng của mẫu do AI soạn: bảng đúng cột của mẫu, không từ mơ hồ
+  const drafted = sectionDraftProblems(spine, plan.spine, instruction)
+  return [...(naming.length > 0 ? [...naming, USE_CASE_NAME_FIX] : []), ...screens, ...leftovers, ...edits, ...flagsLeft, ...drafted]
 }
 
 /** FLF-318: phần lô sửa use case còn bỏ sót (lô không áp thử được ⇒ để lỗi bất biến lo). */
@@ -985,12 +1043,20 @@ const opsFromInstruction = async (
   const ucMode = addsUseCase || editsUseCase ? useCaseMode(spine) : null
   const ucUi = ucMode === "screen_pending" || ucMode === "full"
   // FLF-311: câu trả lời cho câu hỏi giao diện ⇒ kế hoạch từng use case (màn riêng / popup / màn có sẵn / dùng chung)
-  const uiPlan = ucUi ? uiPlanFor(instruction, history) : []
+  // Đọc bằng luật trước (đưa model làm cách đọc tạm); model trả `ui_plan` của chính nó ⇒ dùng bản đó (`adoptModelPlan`)
+  const asked = ucUi ? askedList(history) : []
+  let uiPlan = ucUi ? uiPlanFor(instruction, history) : []
   // Có kế hoạch ⇒ dùng chung hay không do kế hoạch kiểm; không có ⇒ user nói "dùng chung" thì không nhắc tách màn
-  const allowShared = ucMode !== null && (uiPlan.length > 0 || wantsSharedScreen(instruction, history))
+  let allowShared = ucMode !== null && (uiPlan.length > 0 || wantsSharedScreen(instruction, history))
+  const adoptModelPlan = (data: { ui_plan?: Parameters<typeof uiPlanFromModel>[0] }): void => {
+    const fromModel = uiPlanFromModel(data.ui_plan, asked)
+    if (!fromModel) return
+    uiPlan = fromModel
+    allowShared = ucMode !== null
+  }
   // Op chỉ số trên mảng chuỗi (`normal[2]`) ⇒ set cả mảng (op engine cấm chỉ số)
   const prepare = (ops: Op[]): Op[] =>
-    applyUiPlan(expandIndexSelectors(spine, ucMode ? normalizeUseCaseBatch(spine, stampAddendum(ops)) : stampAddendum(ops)), uiPlan)
+    stampChatSource(applyUiPlan(expandIndexSelectors(spine, ucMode ? normalizeUseCaseBatch(spine, stampAddendum(ops)) : stampAddendum(ops)), uiPlan))
   // FLF-265 D16: một lần cho cả lượt (kể cả lượt gọi lại kèm lỗi)
   const language = await (deps.documentLanguage ?? documentLanguageForTurn)(projectId)
   const call = (previousProblems?: string) =>
@@ -1006,7 +1072,16 @@ const opsFromInstruction = async (
           // Câu trả lời cho câu hỏi làm rõ ("A03") thường không nhắc lại thực thể của yêu cầu gốc ⇒ dò cả đoạn hội thoại
           projection: {
             ...buildChangeProjection(spine, history ? `${history}\n${instruction}` : instruction),
-            ...(ucMode ? { use_case_context: { ...useCaseContext(spine, ucMode), ...(uiPlan.length ? { ui_plan: uiPlanForModel(uiPlan) } : {}) } } : {}),
+            ...(ucMode
+              ? {
+                  use_case_context: {
+                    ...useCaseContext(spine, ucMode),
+                    // Câu hỏi giao diện đã hỏi (đánh số) ⇒ model tự đọc câu trả lời, trả `ui_plan` (luật 3e)
+                    ...(asked.length ? { ui_asked: asked.map((u, i) => ({ index: i + 1, use_case: u.name, proposed: u.proposed })) } : {}),
+                    ...(uiPlan.length ? { ui_plan: uiPlanForModel(uiPlan) } : {})
+                  }
+                }
+              : {}),
             // Lệnh xoá: model cần thấy chức năng / màn / thông báo của mọi use case để biết phần nào chỉ thuộc use case bị xoá
             ...(removesUseCase ? { use_case_context: useCaseContext(spine, "full") } : {}),
             // Lệnh sửa: giá trị hiện tại của use case được nhắc + phần của nó (chức năng đủ luồng, màn, quyền, thông báo)
@@ -1026,6 +1101,8 @@ const opsFromInstruction = async (
           messages_ready: ucMode === "full" && messagesReady(spine),
           glossary: spine.glossary.map(({ id, term, definition }) => ({ id, term, definition })),
           stale_sections: [],
+          // Điều người dùng đã chốt (sổ quyết định): yêu cầu trái chúng ⇒ model trả `warning`, không tự làm
+          decisions: [...activeDecisions(spine).values()].slice(-20).map(({ topic_key, question, answer }) => ({ topic_key, question, answer })),
           clarification_rounds: clarificationRounds,
           ...(previousProblems ? { previous_problems: previousProblems } : {})
         },
@@ -1041,6 +1118,7 @@ const opsFromInstruction = async (
   let result: Awaited<ReturnType<typeof call>>
   try {
     result = await call()
+    adoptModelPlan(result.data)
   } catch (err) {
     if (err instanceof AiActionError && AI_OUTPUT_ERRORS.has(err.code)) {
       return { ops: [], clarification: byLanguage(replyLanguage ?? DEFAULT_REPLY_LANGUAGE, UNCLEAR_INSTRUCTION), notes: null }
@@ -1050,12 +1128,15 @@ const opsFromInstruction = async (
   // FLF-299: đã hỏi đủ mà model vẫn hỏi ⇒ gọi lại MỘT lần, bắt soạn từ câu trả lời của user + projection
   if (result.data.clarification_needed?.trim() && clarificationRounds >= MAX_CLARIFICATION_ROUNDS) {
     const forced = await call(
-      `You already asked ${clarificationRounds} clarifying questions for this request and the user answered them. Do not ask again: draft the batch now from those answers and the projection (rule 2a).`
+      `You already asked ${clarificationRounds} clarifying questions for this request and the user answered them. Do not ask again: draft the batch now from those answers and the projection (rule 2a). Everything you had to guess goes in \`assumptions\` (rule 2d).`
     ).catch((err: unknown) => {
       if (err instanceof AiActionError && AI_OUTPUT_ERRORS.has(err.code)) return null
       throw err
     })
-    if (forced && !forced.data.clarification_needed?.trim() && (forced.data.ops ?? []).length > 0) result = forced
+    if (forced && !forced.data.clarification_needed?.trim() && (forced.data.ops ?? []).length > 0) {
+      result = forced
+      adoptModelPlan(forced.data)
+    }
   }
   // Lô sai thì gọi lại kèm lỗi: một lần; có kế hoạch giao diện (lệnh nhiều use case, 3–4 màn) thì tới hai lần
   for (let attempt = 0, max = uiPlan.length > 0 ? 2 : 1; attempt < max && !result.data.clarification_needed?.trim(); attempt++) {
@@ -1067,12 +1148,24 @@ const opsFromInstruction = async (
     })
     if (!retry || retry.data.clarification_needed?.trim() || (retry.data.ops ?? []).length === 0) break
     result = retry
+    adoptModelPlan(retry.data)
   }
 
   // Câu hỏi làm rõ và ghi chú preview hiện thẳng cho user: mã phần tử model còn chép (`S02`) đổi sang tên
   const clarification = result.data.clarification_needed?.trim()
   const choices = result.data.choices?.length ? { choices: result.data.choices.map((c) => nameElementIds(c, spine)) } : {}
-  if (clarification) return { ops: [], clarification: nameElementIds(clarification, spine), notes: null, ...choices }
+  if (clarification) {
+    // Lệnh nhiều ý: ý rõ đã ra op, ý mơ hồ gom vào MỘT câu hỏi. Lô một phần phải áp thử được, không thì chỉ còn câu hỏi như trước.
+    const partial = prepare((result.data.ops ?? []) as Op[])
+    const usable = partial.length > 0 && canPlan(spine, partial)
+    return {
+      ops: usable ? partial : [],
+      clarification: nameElementIds(clarification, spine),
+      notes: usable && result.data.notes ? nameElementIds(result.data.notes, spine) : null,
+      ...(usable && result.data.localized?.length ? { localized: result.data.localized, language: languagePairOf(language) } : {}),
+      ...choices
+    }
+  }
   let ops = prepare((result.data.ops ?? []) as Op[])
   // FLF-311: giao diện là quyết định của người dùng. Đã chọn ⇒ code áp đúng lựa chọn; chưa chọn mà lô thêm màn và đoạn
   // hội thoại chưa có câu hỏi giao diện ⇒ hỏi (kèm lựa chọn nhanh) thay vì tự quyết — model không tự hỏi phần này.
@@ -1098,7 +1191,9 @@ const opsFromInstruction = async (
       .join("\n") || null
   const localized = result.data.localized?.length ? { localized: result.data.localized } : {}
   const proposed = result.data.proposed_use_cases?.length ? { proposed: [...result.data.proposed_use_cases] } : {}
-  return { ops, clarification: null, notes, ...localized, ...proposed, intent, language: languagePairOf(language) }
+  const warning = result.data.warning?.trim() ? { warning: nameElementIds(result.data.warning.trim(), spine) } : {}
+  const assumptions = result.data.assumptions?.length ? { assumptions: result.data.assumptions.map((a) => ({ ...a })) } : {}
+  return { ops, clarification: null, notes, ...localized, ...proposed, ...warning, ...assumptions, intent, language: languagePairOf(language) }
 }
 
 /**
@@ -1160,6 +1255,23 @@ export interface ChangePreviewResult extends PreviewResult {
   /** Hoà giải: section vẫn đúng nội dung, user chỉ cần xác nhận nguyên trạng (BUG-16). */
   no_change?: boolean
   /**
+   * AI cho rằng yêu cầu không hợp lý (kèm lý do, ngôn ngữ trả lời). Có ⇒ không tự ghi; áp dụng bản xem trước này là "Vẫn làm"
+   * (giữ ý sau cảnh báo, lưu vào phiên chat cho lượt kiểm sau đọc).
+   */
+  warning?: string
+  /** Cờ đỏ mới mà bản sửa sẽ mở (Code chạy deterministic check trước / sau). Có ⇒ "sửa này sẽ chặn baseline". */
+  predicted_red_flags?: PredictedRedFlag[]
+  /** Chỗ AI tự đoán, đã ghi vào giả định của tài liệu cùng lô; lời trả lời (`notes`) đã nói giả định thẳng. */
+  assumptions?: { statement: string; statement_vi?: string }[]
+  /** Bản sửa đã được tự ghi ngay (mức duyệt cho phép, không dính cổng cứng) — hoàn tác được, tính vào "Chưa xem". */
+  auto_applied?: boolean
+  /** `spine_version` sau khi tự ghi. */
+  applied_version?: number
+  /** Lý do vẫn chờ người dùng xác nhận dù là lệnh sửa chat trước baseline (mức Mọi bước, cổng cứng, cảnh báo, câu hỏi). */
+  confirm_reason?: string
+  /** Nội bộ: bản xem trước đủ điều kiện tự ghi (`previewAndMaybeApply` đọc, controller bỏ đi). */
+  auto_apply_ok?: boolean
+  /**
    * Nội bộ (không trả qua HTTP — controller bỏ đi) — FLF-311: lựa chọn kèm `clarification`, ghi vào phiên chat dạng
    * `questions[].options` để FE hiện thẻ chọn nhanh.
    */
@@ -1196,13 +1308,14 @@ export const preview = async (
   const spine = stripRecord(record)
 
   const resolved = await resolveOps(projectId, userId, spine, body, d)
-  if (resolved.clarification !== null) {
-    return {
-      ...rejectedPreview(body.base_version, []),
-      clarification: resolved.clarification,
-      ...(resolved.choices?.length ? { clarification_choices: resolved.choices } : {})
-    }
-  }
+  // Lệnh nhiều ý: ý rõ đã ra op, ý mơ hồ nằm trong câu hỏi - bản xem trước vẫn dựng cho phần rõ, kèm câu hỏi
+  const partial = resolved.clarification !== null && resolved.ops.length > 0
+  const clarifyOnly = (): ChangePreviewResult => ({
+    ...rejectedPreview(body.base_version, []),
+    clarification: resolved.clarification ?? "",
+    ...(resolved.choices?.length ? { clarification_choices: resolved.choices } : {})
+  })
+  if (resolved.clarification !== null && !partial) return clarifyOnly()
   if (resolved.withdrawn) return { ok: true, txn: randomUUID(), base_version: body.base_version, ops: [], changes: [], violations: [], referrers: [], notes: resolved.notes ?? undefined }
   if (resolved.ops.length === 0) {
     return { ...rejectedPreview(body.base_version, [{ rule: "op_value_missing", message: "Không có thay đổi nào để xem trước" }]) }
@@ -1212,23 +1325,63 @@ export const preview = async (
   if (notWritable.length > 0) return rejectedPreview(body.base_version, notWritable)
 
   const txnId = randomUUID()
+  // Giả định ghi cùng lô như step làm (undo cùng lô). Giả định có path chết làm lô bị từ chối ⇒ bỏ riêng chúng, vẫn ghi phần chính.
+  const extraOps = assumptionOps(spine, resolved.assumptions ?? [])
+  let ops = [...resolved.ops, ...extraOps]
   let plan
   try {
-    plan = planTransaction(spine, toTransaction(userId, body, resolved.ops, txnId), { startSeq: 1 })
+    plan = planTransaction(spine, toTransaction(userId, body, ops, txnId), { startSeq: 1 })
   } catch (err) {
     if (!(err instanceof TransactionRejectedError)) throw err
-    const rejected = rejectedPreview(body.base_version, err.violations, err.referrers)
-    return { ...rejected, txn: txnId }
+    try {
+      if (extraOps.length === 0) throw err
+      ops = resolved.ops
+      plan = planTransaction(spine, toTransaction(userId, body, ops, txnId), { startSeq: 1 })
+    } catch (inner) {
+      if (!(inner instanceof TransactionRejectedError)) throw inner
+      if (partial) return clarifyOnly()
+      return { ...rejectedPreview(body.base_version, inner.violations, inner.referrers), txn: txnId }
+    }
+  }
+  const recordedAssumptions = ops.length > resolved.ops.length ? (resolved.assumptions ?? []) : []
+
+  // Mục riêng do AI soạn: bảng sai cột / từ mơ hồ còn sót sau lượt thử lại ⇒ không cho xác nhận (luật tầng 3 là cổng cứng)
+  if (body.ops === undefined && body.instruction !== undefined) {
+    const drafted = sectionDraftProblems(spine, plan.spine, body.instruction)
+    if (drafted.length > 0) {
+      return { ...rejectedPreview(body.base_version, drafted.map((message) => ({ rule: "schema_invalid" as const, message }))), txn: txnId }
+    }
   }
 
-  const impact = impactOfChanges(spine, plan.changes, plan.spine)
+  const shownChanges = plan.changes.filter((c) => !c.path.startsWith("assumptions"))
+  const impact = impactOfChanges(spine, shownChanges, plan.spine)
   const branch = branchOf(spine, impact)
+
+  // Dự báo cờ đỏ: Code chạy deterministic check trước / sau trên Spine của lô, không tin lời AI
+  const language = body.reply_language ?? DEFAULT_REPLY_LANGUAGE
+  const profile = await (d.ruleProfile ?? defaultRuleProfile)(projectId)
+  const predicted = predictRedFlags(spine, plan.spine, profile)
+  // Sửa qua chat bằng câu lệnh, trước baseline: mức duyệt quyết định thẻ xác nhận hay tự ghi (sau baseline đi đường change request)
+  const chatEdit = body.instruction !== undefined && body.ops === undefined && branch !== "post_baseline"
+  const verdict = chatEdit
+    ? chatEditVerdict({
+        reviewMode: spine.project.review_mode ?? "balanced",
+        touchedSections: impact.sections.filter((s) => s.relation === "owner").map((s) => s.id),
+        redDelta: predicted.length,
+        contentRemoved: shownChanges.some((c) => c.op === "remove"),
+        newAssumptions: recordedAssumptions.map((a, i) => ({ id: `chat-${i + 1}`, text: a.statement, ...(a.statement_vi ? { text_vi: a.statement_vi } : {}) })),
+        needsPerson: Boolean(resolved.warning) || partial,
+        spine
+      })
+    : null
   // FLF-298: use case mới chưa có chức năng/màn hình — sửa không tự lan, báo ngay để author yêu cầu tiếp
   // FLF-311: use case mới chồng mục tiêu với use case có sẵn cùng actor ⇒ cảnh báo (lưới an toàn sau luật 3e)
   const notes = [
     resolved.notes,
     newUseCaseGapNote(newUseCaseGaps(spine, plan.spine), body.reply_language),
-    useCaseOverlapNote(useCaseOverlaps(spine, plan.spine), body.reply_language)
+    useCaseOverlapNote(useCaseOverlaps(spine, plan.spine), body.reply_language),
+    predictedRedNote(predicted, language),
+    assumptionsNote(recordedAssumptions, language)
   ]
     .filter(Boolean)
     .join("\n")
@@ -1239,13 +1392,15 @@ export const preview = async (
     userId,
     instruction: body.instruction?.trim() || null,
     base_version: body.base_version,
-    ops: resolved.ops,
+    ops,
     reason: body.reason ?? null,
     impact,
     branch,
     ...(resolved.localized?.length ? { localized: resolved.localized, language: languagePairOf(resolved.language) } : {}),
     use_case_intent: resolved.intent ?? null,
-    places: placesOf(spine, plan.spine, resolved.ops),
+    ...(resolved.warning ? { warning: resolved.warning } : {}),
+    ...(partial ? { request_open: true } : {}),
+    places: placesOf(spine, plan.spine, ops.filter((o) => !o.path.startsWith("assumptions"))),
     created_at: Date.now(),
     expires_at: Date.now() + PREVIEW_TTL_MS
   })
@@ -1254,14 +1409,19 @@ export const preview = async (
     ok: true,
     txn: txnId,
     base_version: body.base_version,
-    ops: plan.ops,
-    changes: plan.changes.map(({ op, path, before, value, reason }) => ({ op, path, before, value, reason })),
+    ops: plan.ops.filter((o) => !o.path.startsWith("assumptions")),
+    changes: shownChanges.map(({ op, path, before, value, reason }) => ({ op, path, before, value, reason })),
     violations: [],
     referrers: impact.referrers,
     branch,
     impact,
     preview_id: previewId,
-    ...(notes ? { notes } : {})
+    ...(notes ? { notes } : {}),
+    ...(resolved.warning ? { warning: resolved.warning } : {}),
+    ...(predicted.length > 0 ? { predicted_red_flags: predicted } : {}),
+    ...(recordedAssumptions.length > 0 ? { assumptions: recordedAssumptions.map(({ statement, statement_vi }) => ({ statement, ...(statement_vi ? { statement_vi } : {}) })) } : {}),
+    ...(partial ? { clarification: resolved.clarification ?? "", ...(resolved.choices?.length ? { clarification_choices: resolved.choices } : {}) } : {}),
+    ...(verdict ? (verdict.quiet ? { auto_apply_ok: true } : { confirm_reason: verdict.reason_vi }) : {})
   }
 }
 
@@ -1276,6 +1436,10 @@ export interface ChangeApplyResult extends ApplyResult {
   already_applied?: PlaceSame[]
   /** P12 (`on_conflict: "skip"`): chỗ người khác vừa sửa đúng chữ — không ghi, bên gọi cho AI soạn lại. */
   skipped?: PlaceConflict[]
+  /** Lời cảnh báo của AI mà người dùng đã chọn bỏ qua ("Vẫn làm") khi áp bản xem trước này — controller ghi vào phiên chat. */
+  kept_warning?: string
+  /** Bản xem trước vừa áp chỉ là phần rõ của lệnh nhiều ý; câu hỏi cho phần còn lại vẫn đang chờ. */
+  request_open?: boolean
 }
 
 /**
@@ -1312,7 +1476,9 @@ const reacceptReviewedSections = async (
 }
 
 /**
- * Áp lô lên Spine trong một transaction rồi chạy lại deterministic check.
+ * Áp lô lên Spine trong một transaction, rồi `recomputeFlags` (deterministic check trên Spine mới ghi). KHÔNG kiểm cờ đỏ trước
+ * khi ghi: dự báo cờ đỏ là việc của `preview` (`predicted_red_flags`). Lượt áp chỉ kiểm lại những gì đổi từ lúc xem trước: version,
+ * chỗ người khác vừa sửa (`recheckPlaces`), bất biến (`planTransaction`), CR sau baseline.
  * `preview_id` ⇒ dùng đúng lô đã xem trước, không gọi model lần hai.
  */
 export const apply = async (
@@ -1430,6 +1596,46 @@ export const apply = async (
     cr_id: crId,
     ...(unresolved.length > 0 ? { unresolved_flags: unresolved } : {}),
     ...(drift?.same.length ? { already_applied: drift.same } : {}),
-    ...(drift?.conflicts.length ? { skipped: drift.conflicts } : {})
+    ...(drift?.conflicts.length ? { skipped: drift.conflicts } : {}),
+    ...(stored?.warning ? { kept_warning: stored.warning } : {}),
+    ...(stored?.request_open ? { request_open: true } : {})
+  }
+}
+
+/**
+ * Xem trước một lệnh sửa gõ trong chat; đủ điều kiện (`auto_apply_ok`: mức duyệt cho phép và không dính cổng cứng) thì ghi luôn
+ * bằng chính bản xem trước đó. Bản tự ghi vẫn nằm trong `changes[]` nên undo được như mọi lượt sửa, và vào sổ "Chưa xem". Ghi lỗi
+ * (người khác vừa sửa, lô vỡ bất biến) ⇒ trả lại bản xem trước chưa ghi để người dùng xác nhận như thường.
+ */
+export const previewAndMaybeApply = async (
+  projectId: string,
+  userId: string,
+  body: ChangeBody,
+  init: repository.SpineInit = {},
+  deps: Partial<ChangeDeps> = {}
+): Promise<ChangePreviewResult> => {
+  const { auto_apply_ok: auto, ...result } = await preview(projectId, userId, body, init, deps)
+  if (!auto || !result.preview_id || !result.ok) return result
+  const previewId = result.preview_id
+  const kept = previewStore.get(previewId)
+  try {
+    const applied = await apply(
+      projectId,
+      userId,
+      { base_version: result.base_version, preview_id: previewId, ...(body.reply_language ? { reply_language: body.reply_language } : {}) },
+      init,
+      deps
+    )
+    if (applied.txn === null) return result
+    const label = (body.instruction ?? "").trim().replace(/\s+/g, " ")
+    await recordAutoPass(projectId, `chat:${applied.txn}`, "Sửa qua chat: mức duyệt cho phép tự ghi thay đổi này", label ? `Sửa qua chat: ${label.length > 80 ? `${label.slice(0, 77)}...` : label}` : "Sửa qua chat")
+    const { preview_id: _consumed, ...rest } = result
+    return { ...rest, auto_applied: true, applied_version: applied.spine_version }
+  } catch (err) {
+    if (!(err instanceof ApiError || err instanceof TransactionRejectedError)) throw err
+    // Bản xem trước đã bị lấy đi (hoặc chưa kịp) ⇒ trả về kho để nút Áp dụng vẫn dùng được
+    if (kept && !previewStore.has(previewId)) previewStore.set(previewId, kept)
+    console.warn(`[change] ${projectId}: tự ghi bản sửa qua chat lỗi, chờ người dùng xác nhận`, err instanceof Error ? err.message : err)
+    return { ...result, confirm_reason: "Chưa tự ghi được (tài liệu vừa đổi) - xem lại rồi bấm Áp dụng" }
   }
 }

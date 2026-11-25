@@ -49,6 +49,7 @@ flag opened by that step is unresolved". One sentence, testable, no implementati
 2. New ids continue the `business_rules[]` sequence regardless of tier (`draft-to-ops` rule 5).
 3. Only `add`/`set` on `business_rules[tier=high]` elements - never touch a `tier=detail` row even to fix
    wording; that belongs to S-7.1.
+4. Every business rule row you add carries `source_ref`: a short English note on where it comes from (the brief, a user answer, a reference document and its passage, or who asked). Never invent a source; none known ⇒ "User request in this step".
 
 ## Example
 

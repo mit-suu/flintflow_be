@@ -27,7 +27,7 @@ You convert the conversation for one step into **a single transaction of operati
 - Step: **{{step_id}}** - {{step_name}}
 - Call kind: **{{call_kind}}** (`draft` | `regenerate` | `revision` | `glossary_scan`)
 - Fields this step may write: {{writable_paths}}
-- Projection (current values, keyed): {{projection}}
+- Projection (current values, keyed): {{projection}} - `fix_comments` (when present): reviewer comments on this step's sections that this redraft must resolve; change the content they point at
 - Addendum for this step: {{addendum}}
 - User answers for this step: {{answers}}
 - Revision request (only for `revision`): {{revision_request}}

@@ -119,6 +119,7 @@ at sign-off it turns red (`orphan_screen_at_baseline`) and blocks the baseline.
 4. `detail_status` is only `pending` or `placeholder` at this step - `in_progress` and `signed_off` are
    set by the S-5 loop, never by you.
 5. Still unclear: pick the most reasonable default + an `assumptions[]` entry (`status: "unconfirmed"`).
+6. Every function row you add carries `source_ref`: a short English note on where it comes from (the brief, a user answer, a reference document and its passage, or who asked). Never invent a source; none known ⇒ "User request in this step".
 
 ## Example (S-4.1, one feature + one core screen + its function)
 

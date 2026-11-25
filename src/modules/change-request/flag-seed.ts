@@ -10,7 +10,7 @@ import { FLAG_NOT_FOUND } from "../spine/flags.service.js"
 import type { Flag, Spine } from "../spine/spine.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import type { CrSeed } from "./change-request.model.js"
-import { MAX_LOCATIONS, elementPathOf, isSectionTarget, listElements, sectionOfElement } from "./spine-location.js"
+import { elementPathOf, isSectionTarget, listElements, sectionOfElement } from "./spine-location.js"
 
 /** Cờ còn phải xử lý: chưa đóng, chưa "giữ nguyên", chưa bỏ qua. */
 export const isOpenFlag = (flag: Flag): boolean => flag.resolved_at === null && flag.kept_reason === null && !flag.waived_by_user
@@ -33,7 +33,7 @@ export const directLocationCount = (spine: Spine, targets: readonly string[]): n
 
 /**
  * Kiểm `flag_ids` rồi trả gợi ý của CR. Id không có trong Spine của project ⇒ 404 `FLAG_NOT_FOUND`; cờ đã đóng / giữ nguyên /
- * bỏ qua ⇒ 400 `FLAG_NOT_OPEN`; chạm quá `MAX_LOCATIONS` phần tử ⇒ 400 `CR_TOO_MANY_LOCATIONS`.
+ * bỏ qua ⇒ 400 `FLAG_NOT_OPEN`. Không giới hạn số phần tử: C-3 liệt kê đủ, chi phí C-4 báo trước ở chi tiết CR.
  */
 export const seedFromFlags = (spine: Spine, flagIds: readonly string[]): { flagIds: string[]; seed: CrSeed } => {
   const ids = [...new Set(flagIds)]
@@ -45,13 +45,5 @@ export const seedFromFlags = (spine: Spine, flagIds: readonly string[]): { flagI
   if (closed.length) {
     throw new Mode1Error("FLAG_NOT_OPEN", `Cờ ${closed.join(", ")} đã được xử lý - tải lại danh sách việc chờ quyết.`, { flag_ids: closed })
   }
-  const targets = flagTargets(spine, flags)
-  const count = directLocationCount(spine, targets)
-  if (count > MAX_LOCATIONS) {
-    throw new Mode1Error("CR_TOO_MANY_LOCATIONS", `Nhóm cờ này chạm ${count} chỗ trong tài liệu, quá ${MAX_LOCATIONS} chỗ cho một change request - tách nhóm nhỏ hơn.`, {
-      count,
-      limit: MAX_LOCATIONS
-    })
-  }
-  return { flagIds: ids, seed: { instruction: null, ops: [], targets } }
+  return { flagIds: ids, seed: { instruction: null, ops: [], targets: flagTargets(spine, flags) } }
 }
