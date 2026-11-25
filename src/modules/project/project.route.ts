@@ -2,6 +2,7 @@ import { Router } from "express"
 import multer from "multer"
 import * as projectController from "./project.controller.js"
 import * as chatSessionController from "./chat-session.controller.js"
+import { streamProjectEvents } from "./project-events.controller.js"
 import * as projectDocumentController from "./project-document.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
 import { requireRole } from "../../shared/auth/require-role.middleware.js"
@@ -1031,5 +1032,27 @@ router.post("/:projectId/chats/:chatId/messages", authMiddleware, requireRole("l
  *         description: KNOWLEDGE_DISABLED — gửi knowledge=true khi server tắt Knowledge RAG
  */
 router.post("/:projectId/chats/:chatId/messages/stream", authMiddleware, requireRole("lead", "analyst"), chatSessionController.sendMessageStream)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/events:
+ *   get:
+ *     summary: Luồng SSE báo ghi tài liệu + thông báo mới (FLF-487, pipeline-contract #40)
+ *     tags: [Projects]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: "text/event-stream — ready { spine_version }, spine_written { actor_user_id, actor_name, source, cr_id, sections[], more, spine_version, at }, notification_created { notification_id, organization_id, at }, bye { reason }; comment `: ping` giữ kết nối"
+ *       404:
+ *         description: PROJECT_NOT_FOUND
+ */
+router.get("/:projectId/events", authMiddleware, streamProjectEvents)
 
 export default router
