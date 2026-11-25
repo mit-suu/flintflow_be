@@ -111,8 +111,8 @@ export const asPrintedIn = (sectionId: string, array: string, el: Record<string,
   return el
 }
 
-/** Field không in ra / đổi mà nội dung không đổi (thứ tự) — không vào dấu. */
-const VOLATILE_FIELDS = new Set(["order"])
+/** Field không in ra / đổi mà nội dung không đổi (thứ tự; câu trích nguồn của chỗ thiếu, FLF-449) — không vào dấu. */
+const VOLATILE_FIELDS = new Set(["order", "source_quote"])
 
 /** Mảng có tên hiển thị — đích của các tham chiếu mà bảng in tên thay cho id. */
 const NAMED_ARRAYS = ["actors", "roles", "use_cases", "features", "screens", "functions", "entities", "glossary", "messages"] as const

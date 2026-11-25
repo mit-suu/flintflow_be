@@ -47,7 +47,10 @@ export interface QuietInput {
   /** Id template (không có `@màn`). */
   templateId: string
   reviewMode: ReviewMode
-  /** Bước có hỏi user câu nào trong lượt này không. */
+  /**
+   * Bước có hỏi user câu nào trong lượt này không (đã phát `answer_needed` trong lượt `runStep` của chính bước, kể cả khi
+   * user đã trả lời ngay trong lượt). Có hỏi ⇒ không tự qua ở mọi mức duyệt (FLF-449).
+   */
   asked: boolean
   /** Cờ đỏ tăng thêm sau bước (dương ⇒ có cờ đỏ mới). */
   redDelta: number
@@ -169,6 +172,10 @@ export const isQuietStep = (input: QuietInput): QuietVerdict => {
   if (input.templateId === SYSTEM_NAME_STEP && (input.spine.project?.system_name ?? null) === null) {
     return { quiet: false, reason_vi: "Cần chốt tên hệ thống trước khi mở phần tiếp theo" }
   }
+  // FLF-449 (03-can-chot #1, BF §1.2 "Step tự qua khi không hỏi gì"): bước đã hỏi user trong lượt thì không tự qua, ở MỌI
+  // mức duyệt, kể cả khi chỉ chạm phần "không hỏi lại" (AI cần hỏi là cổng cứng). Thay luật FLF-220 cũ cho bước có hỏi qua
+  // im ở "Cuối giai đoạn" / "Chỉ ở mốc chốt".
+  if (input.asked) return { quiet: false, reason_vi: "Bước đã hỏi bạn - xem lại nội dung vừa soạn từ câu trả lời" }
   // FLF-337: bốn điều kiện tự qua áp ở MỌI mức — cờ đỏ mới, xoá nội dung, lỗi vẽ, giả định trái điều đã chốt là cổng cứng
   const hard = hardGateOf(input)
   if (hard) return { quiet: false, reason_vi: stepHardGateReason(hard) }
@@ -184,8 +191,6 @@ export const isQuietStep = (input: QuietInput): QuietVerdict => {
     return { quiet: true, reason_vi: "Chỉ ở mốc chốt: bước này tự qua" }
   }
   if (input.phaseTerminal) return { quiet: false, reason_vi: "Cổng chốt cuối giai đoạn" }
-  // FLF-220: bước có hỏi thì user đã trả lời ngay trong lượt chạy — ở "Cuối giai đoạn" điều đó không đòi
-  // thêm một cổng giữa giai đoạn; nội dung vẫn gom lên cổng chốt cuối phase.
   // "Cuối giai đoạn" (`fast`, và `balanced` cũ xử lý như `fast` — FLF-220): giả định mới không mâu thuẫn
   // được gom lên cổng chốt cuối phase, không dừng giữa phase.
   return { quiet: true, reason_vi: "Bước không có gì cần bạn quyết" }

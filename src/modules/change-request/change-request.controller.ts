@@ -94,13 +94,35 @@ const toExtractionDto = (e: IRequirementExtraction): ExtractionDto => ({
     quote: i.quote,
     group: i.group,
     entity_paths: [...i.entity_paths],
+    entity_names: i.entity_paths.map((_, n) => i.entity_names?.[n] ?? ""),
+    speaker: i.speaker ?? null,
+    sides: (i.sides ?? []).map((side) => ({ speaker: side.speaker ?? null, para_id: side.para_id ?? null, quote: side.quote })),
+    inference: i.inference
+      ? {
+          symptom: i.inference.symptom,
+          symptom_quote: i.inference.symptom_quote,
+          symptom_para_id: i.inference.symptom_para_id ?? null,
+          root_cause: i.inference.root_cause ?? "",
+          rationale: i.inference.rationale ?? "",
+          options: i.inference.options.map((o) => ({ label: o.label, description: o.description ?? null, pros: [...o.pros], cons: [...o.cons], risks: [...o.risks] })),
+          recommended: i.inference.recommended ?? null,
+          recommendation_reason: i.inference.recommendation_reason ?? null,
+          serves_goal: i.inference.serves_goal ?? null
+        }
+      : null,
     question: i.question ?? null,
     suggested_answers: [...i.suggested_answers],
     include: i.include ?? null,
     drop_reason: i.drop_reason ?? null,
     answer: i.answer ?? null,
+    chosen_option: i.chosen_option ?? null,
     cr_id: i.cr_id ?? null
   })),
+  situation: {
+    current: (e.situation?.current ?? []).map((p) => ({ text: p.text, para_id: p.para_id ?? null, quote: p.quote })),
+    desired: (e.situation?.desired ?? []).map((p) => ({ text: p.text, para_id: p.para_id ?? null, quote: p.quote }))
+  },
+  batches: e.batches ?? 1,
   credits: e.credits,
   approved_at: e.approved_at ? e.approved_at.toISOString() : null,
   created_at: e.createdAt.toISOString(),
@@ -112,6 +134,13 @@ export const extractRequirements = mode1Handler(async (req, res) => {
   const { documentId } = parseInput(extractionParamsSchema, req.params)
   const extraction = await extractionService.extractRequirements(auth.projectId, auth.userId, documentId)
   return sendSuccess(res, 201, toExtractionDto(extraction))
+})
+
+/** FLF-449: số lô + credit dự kiến của lượt rút (tài liệu dài chia lô, mỗi lô một lượt). */
+export const estimateExtraction = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const { documentId } = parseInput(extractionParamsSchema, req.params)
+  return sendSuccess(res, 200, await extractionService.estimateExtraction(auth.projectId, documentId))
 })
 
 export const getExtraction = mode1Handler(async (req, res) => {

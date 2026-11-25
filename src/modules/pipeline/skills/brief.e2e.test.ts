@@ -268,6 +268,12 @@ describe("T20: project rỗng đi trọn B-0.1 → B-2.3 → S-1.4 (mock provide
     expect(final.addendum.length, "addendum >= 5").toBeGreaterThanOrEqual(5)
     expect(final.assumptions.length, "assumptions >= 2").toBeGreaterThanOrEqual(2)
     expect(final.other_requirements.length).toBeGreaterThan(0)
+
+    // FLF-449 việc 16: chỗ thiếu của Brief chỉ được ghi khi câu trích có thật trong Brief; OR10 trích câu bịa ⇒ bị bỏ
+    const gaps = Object.fromEntries(final.other_requirements.map((o) => [o.id, o]))
+    expect(gaps.OR08?.source_quote, "trích lời gốc tiếng Việt của addendum").toBe("Người duyệt cần thấy mục tiêu kinh doanh đằng sau từng phần.")
+    expect(gaps.OR09?.source_quote, "trích bản tiếng Anh của addendum").toBe("Make the cost of producing one document predictable")
+    expect(gaps.OR10, "câu trích không có trong Brief ⇒ chỗ thiếu bị bỏ").toBeUndefined()
     expect(final.addendum.every((a) => a.content.length > 0 && a.content_en.length > 0), "cả hai ngôn ngữ").toBe(true)
 
     // Brief KHÔNG được chạm vào cấu trúc SRS
