@@ -11,6 +11,7 @@
  */
 
 import type { Spine } from "../spine/spine.types.js"
+import { LOCALIZATION_CATEGORIES, SECURITY_CATEGORIES, commonCategoryIn } from "../render/labels.js"
 
 export interface ContentSlotDef {
   id: `slot:${string}`
@@ -112,9 +113,10 @@ export const slotHasData = (spine: Spine, slotId: string): boolean => {
     case "slot:open_questions":
       return spine.other_requirements.some((o) => o.kind === "open_question")
     case "slot:security":
-      return spine.common_requirements.some((c) => ["security", "session", "audit"].includes(c.category))
+      // Bug #3: loại ghi tự do ("Bảo mật") cũng tính — so sau `normalizeCommonCategory`
+      return spine.common_requirements.some((c) => commonCategoryIn(c.category, SECURITY_CATEGORIES))
     case "slot:localization":
-      return spine.common_requirements.some((c) => ["localization", "date_format"].includes(c.category))
+      return spine.common_requirements.some((c) => commonCategoryIn(c.category, LOCALIZATION_CATEGORIES))
     case "slot:analysis_models":
       return spine.diagrams.some((d) => d.kind === "usecase" || d.kind === "screen_flow" || d.kind === "erd")
     case "slot:references":

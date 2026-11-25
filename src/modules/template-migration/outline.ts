@@ -3,7 +3,8 @@
  *
  * Theo thứ tự heading của mẫu đích; mục cũ không in ra / giữ thành mục riêng chen vào sau mục mới mà heading cũ đứng trước nó đã
  * ghép tới (đúng chỗ người đọc tìm). Trạng thái mỗi dòng:
- *  - `kept`         : heading có cặp (chép nguyên nội dung), heading nhóm, heading con cùng mục, mục cũ giữ thành mục riêng;
+ *  - `kept`         : heading có cặp (chép nguyên nội dung), heading nhóm, mục cũ giữ thành mục riêng; heading con cùng mục với
+ *                     heading cha (`pairing.children`) cũng `kept` nhưng mang `merged_into` — bước áp dụng gộp nó vào mục cha;
  *  - `receives`     : mục thiếu nhận nội dung "chuyển vào" từ mục thừa;
  *  - `needs_content`: mục thiếu cần viết (cờ đỏ chặn phát hành tới khi viết xong);
  *  - `dropped`      : mục cũ không in ra (dữ liệu giữ trong Spine) — kèm tóm tắt nội dung sẽ không in.
@@ -34,6 +35,8 @@ export interface OutlineEntry {
   /** `dropped`: tóm tắt nội dung không in (tối đa `DROPPED_PREVIEW` dòng) + tổng số phần tử. */
   dropped_items?: DroppedItem[]
   dropped_total?: number
+  /** Heading con cùng mục với heading cha: không in thành mục riêng, nội dung nằm dưới heading cha (chữ heading cha). */
+  merged_into?: string
 }
 
 export interface OutlineInput {
@@ -109,6 +112,17 @@ export const buildOutline = (input: OutlineInput): OutlineEntry[] => {
   const pairedNew = new Map<string, string>()
   for (const p of input.pairing.pairs) if (p.new_key) pairedNew.set(p.old_key, splitTarget.get(p.old_key) ?? p.new_key)
 
+  // Heading con gộp vào mục cha ⇒ chữ heading cha gần nhất (theo cấp); bản ghi cũ không có `children` ⇒ không dòng nào gộp
+  const children = new Set(input.pairing.children ?? [])
+  const parentText = new Map<string, string>()
+  const stack: NewHeading[] = []
+  for (const n of input.neu) {
+    if (n.level === undefined) continue
+    while (stack.length && stack[stack.length - 1].level! >= n.level) stack.pop()
+    if (children.has(n.key) && stack.length) parentText.set(n.key, stack[stack.length - 1].heading_text)
+    stack.push(n)
+  }
+
   const entries: { key: string; entry: OutlineEntry }[] = []
   for (const n of input.neu) {
     if (ignored.has(n.key)) continue
@@ -121,7 +135,8 @@ export const buildOutline = (input: OutlineInput): OutlineEntry[] => {
     } else {
       const owner = [...pairedNew].find(([, nk]) => nk === n.key)?.[0]
       const change = owner ? tableOf.get(owner) : undefined
-      entries.push({ key: n.key, entry: { heading_text: n.heading_text, level, status: "kept", ...(change ? { table_change: change } : {}) } })
+      const parent = parentText.get(n.key)
+      entries.push({ key: n.key, entry: { heading_text: n.heading_text, level, status: "kept", ...(change ? { table_change: change } : {}), ...(parent !== undefined ? { merged_into: parent } : {}) } })
     }
   }
 

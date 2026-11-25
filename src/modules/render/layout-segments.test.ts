@@ -312,3 +312,36 @@ describe("FLF-428 - NFR §4.2.x viết bằng đoạn văn: dựng lại thành 
     expect(out.join(" | ")).toContain("Availability 99.9% per month for the store front; 99.5% for staff screens")
   })
 })
+
+describe("bug #1 FLF-447 - CR thêm NFR vào bảng 4.2.3 của file (Mã · Yêu cầu hiệu năng · Mức ưu tiên)", () => {
+  const ROWS = [
+    ["Mã", "Yêu cầu hiệu năng", "Mức ưu tiên"],
+    ["NFR-01", "Trang chủ tải dưới 2 giây", "Cao"],
+    ["NFR-02", "Chịu 1000 người dùng đồng thời", "Cao"],
+    ["NFR-03", "Tìm kiếm trả kết quả dưới 3 giây", "Trung bình"]
+  ]
+  const BLOCKS_423: LayoutBlock[] = [h("T01", "4.2.3 Hiệu năng", 3, "fixed:4.2.3"), table("T02", ROWS, "fixed:4.2.3")]
+  const nfr = (id: string, statement: string, priority: "must" | "should") =>
+    ({ id, category: "performance", kind: "quantitative", statement, priority }) as Spine["nfrs"][number]
+  const setup = (fixedTemplate: boolean) => {
+    const spine: Spine = {
+      ...createEmptySpine({ name: "ChoViet" }),
+      nfrs: [nfr("NFR-01", ROWS[1][1], "must"), nfr("NFR-02", ROWS[2][1], "must"), nfr("NFR-03", ROWS[3][1], "should")]
+    }
+    const { layout, customSections, segments } = buildLayout(BLOCKS_423, new Map([["T01", "fixed:4.2.3"]]), new Set())
+    const entities = ["NFR-01", "NFR-02", "NFR-03"].map((id) => ({ entity: "nfrs", id, source_block_ids: ["T02"] }))
+    const records = sectionSegments(segments, customSections, entities, spine, [])
+    const template: TemplateLayout = { layout, language: "vi", sectionSegments: records, ...(fixedTemplate ? { fixedTemplate: true } : {}) }
+    return { spine: { ...spine, custom_sections: customSections }, template }
+  }
+
+  for (const fixedTemplate of [true, false]) {
+    it(`${fixedTemplate ? "mẫu cố định" : "layout file"}: hàng cũ giữ nguyên văn, hàng mới có Mã + mức ưu tiên theo chữ của file`, () => {
+      const { spine, template } = setup(fixedTemplate)
+      const withCr: Spine = { ...spine, nfrs: [...spine.nfrs, nfr("NFR-06", "Thanh toán xử lý dưới 5 giây", "must")] }
+      const tables = section(render(withCr, template), "fixed:4.2.3").blocks.filter((b) => b.type === "table")
+      expect(tables).toHaveLength(1)
+      expect(textOf(tables[0]).split(" / ")).toEqual([...ROWS.map((r) => r.join(",")), "NFR-06,Thanh toán xử lý dưới 5 giây,Cao"])
+    })
+  }
+})
