@@ -97,6 +97,8 @@ export interface DraftOptions {
   statusAssumptionIds?: ReadonlySet<string>
   /** User đã quyết trong lượt của step (thẻ/chat) — cho phép step rà giả định B-2.1 đổi status giả định (xem `USER_DECISION_SWEEP_STEPS`). */
   userDecided?: boolean
+  /** FLF-480 (P13 #5): bước đang chạy giữa một lượt chạy cả giai đoạn (còn bước sau trong giai đoạn) ⇒ `notes` không báo bước kế. */
+  midPhaseRun?: boolean
   /**
    * FLF-260: ngôn ngữ trả lời của phiên — có thì mọi lượt gọi (kể cả retry) mang nó, `buildPrompt` nối khối "Reply language"
    * để `notes` và câu giả định cho user (`statement_vi`, `rationale_vi`) đúng ngôn ngữ. Thiếu ⇒ prompt như cũ.
@@ -206,6 +208,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       content_guidance: ctx.documents ? `${guidance}\n\n${ctx.documents}` : guidance,
       // FLF-292: có tài liệu upload ⇒ skill bật luật khai `sources` (khối `{{#if has_documents}}`)
       has_documents: ctx.documents ? true : false,
+      // FLF-480 (P13 #5): giữa lượt chạy cả giai đoạn — chỉ bước cuối mới mời bước kế (khối `{{#if mid_phase_run}}` ở luật 15)
+      mid_phase_run: options.midPhaseRun === true,
       validation_errors: errors.length > 0 ? errors : "(none)",
       previous_ops: previousOps ?? "(none)",
       patch_mode: patchBase !== null

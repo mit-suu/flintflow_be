@@ -133,6 +133,8 @@ export interface StepRunnerDeps {
    * Test không nối Mongo truyền thẳng.
    */
   documentLanguage?: TurnDocumentLanguage | null
+  /** FLF-480 (P13 #5): `runPhase` đặt khi bước này không phải bước cuối của giai đoạn — lời chốt (`notes`) không nhắc bước kế. */
+  midPhaseRun?: boolean
   /**
    * FLF-222: chạy tiếp lượt đã tách khỏi kết nối từ ngay sau Elicit — không gọi model hỏi lại, dùng đúng câu đã
    * hỏi + câu trả lời vừa nhận. `run` là khoá `/answer` đã chiếm (xem `resumeWaitingStep`).
@@ -1132,6 +1134,7 @@ export const runDraftPhase = async (
       spine,
       callKind,
       documentLanguage,
+      ...(deps.midPhaseRun ? { midPhaseRun: true } : {}),
       // Lượt thử lại phải nói ngay, bằng lời thường — user đang nhìn màn hình chờ (03 Lớp 3)
       onAttempt: ({ attempt, max, previousErrors }) => {
         if (attempt === 1 || previousErrors.length === 0) return

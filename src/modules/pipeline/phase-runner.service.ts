@@ -784,7 +784,8 @@ export const runPhase = async (
       decision = await decideStep({ projectId, next, unit, gateEvent, signals: collector.signals, phaseSummary, outcomes, flagsAtStart, language })
       return decision
     }
-    await runStep(projectId, next.id, sessionId, userId, collector.emit, { ...stepDeps, resolveGate: async (g, language) => toResolution(await decide(g, language)) })
+    // FLF-480 (P13 #5): chạy cả giai đoạn ⇒ chỉ bước cuối mời bước kế, các bước giữa không lặp câu đó
+    await runStep(projectId, next.id, sessionId, userId, collector.emit, { ...stepDeps, midPhaseRun: !isPhaseTerminal(spine, next), resolveGate: async (g, language) => toResolution(await decide(g, language)) })
     const { gate: gateEvent, error } = collector.signals
 
     if (error || !gateEvent) {

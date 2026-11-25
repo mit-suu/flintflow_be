@@ -2406,6 +2406,26 @@ describe("FLF-260: runPhase - ngôn ngữ đi qua phỏng vấn đầu giai đo�
     expect(phaseGate.message_vi).toBe(`${SUMMARY_EN} There are 6 more things I'm assuming; we'll go over them in the summary.`)
   })
 
+  it("FLF-480 (P13 #5): chạy cả giai đoạn ⇒ chỉ bước cuối không mang mid_phase_run; chạy một bước riêng ⇒ không mang", async () => {
+    seedB1()
+    const t = tracked()
+    const midByStep = new Map<string, unknown>()
+    const draftExecutor: StepRunnerDeps["draftExecutor"] = async (type, input, ...rest) => {
+      const vars = input.promptVariables as { step_id: string; mid_phase_run?: unknown }
+      midByStep.set(vars.step_id, vars.mid_phase_run)
+      return t.draftExecutor(type, input, ...rest)
+    }
+    const { emit } = collectEvents()
+    await runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: t.elicitExecutor, draftExecutor, replyLanguage: "en", message: "Online booking for a small clinic" })
+    expect([...midByStep]).toEqual(B1_STEPS.map((id) => [id, id !== "B-1.6"]))
+
+    // Lời chốt theo luật 15: khối chỉ có khi mid_phase_run
+    const { template } = await getPromptTemplate(ActionType.DRAFT)
+    const base = { step_id: "B-1.1", call_kind: "draft" }
+    expect(interpolatePrompt(template, { ...base, mid_phase_run: true })).toContain("middle of a whole-phase run")
+    expect(interpolatePrompt(template, { ...base, mid_phase_run: false })).not.toContain("middle of a whole-phase run")
+  })
+
   it("tin mở giai đoạn tiếng Anh (đoán thật) ⇒ lượt hỏi gộp nhận en và lời nhận tin bằng tiếng Anh", async () => {
     seedB1()
     const t = tracked()
