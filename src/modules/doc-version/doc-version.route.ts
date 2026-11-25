@@ -23,7 +23,7 @@ const router = Router()
  *     parameters:
  *       - { in: path, name: projectId, required: true, schema: { type: string } }
  *     responses:
- *       200: { description: "`[{ version, kind, based_on, cr_ids, baseline_id, has_clean_file, has_tracked_file, has_original_file, created_by, created_at }]`" }
+ *       200: { description: "`[{ version, kind (imported, cr_revision, system_change, release), based_on, cr_ids, baseline_id, system_change ({ type, ref, summary } hoặc null), has_clean_file, has_tracked_file, tracked_unavailable_reason (template_translated, build_failed hoặc null), has_original_file, other_language_available, created_by, created_at }]`. FLF-466 - Viewer chỉ thấy bản gốc và bản phát hành (không bản nháp, cr_ids rỗng)." }
  * /api/v1/projects/{projectId}/versions/compare:
  *   get:
  *     summary: So sánh hai version theo block (UC-55)
@@ -36,7 +36,7 @@ const router = Router()
  *       - { in: query, name: to, required: true, schema: { type: string, example: "0.2" } }
  *     responses:
  *       200: { description: "`{ from, to, summary: { added, removed, modified, moved }, blocks: [{ block_id, change, before?, after? }] }`" }
- *       404: { description: DOC_VERSION_NOT_FOUND }
+ *       404: { description: "DOC_VERSION_NOT_FOUND (Viewer so với bản nháp cũng 404)" }
  * /api/v1/projects/{projectId}/versions/{v}/blocks:
  *   get:
  *     summary: Block của một version theo thứ tự tài liệu; bản có Track Changes kèm revisions[] (UC-54)
@@ -48,11 +48,11 @@ const router = Router()
  *       - { in: path, name: v, required: true, schema: { type: string, example: "0.1" } }
  *     responses:
  *       200: { description: "`DocBlock[]`" }
- *       404: { description: DOC_VERSION_NOT_FOUND }
+ *       404: { description: "DOC_VERSION_NOT_FOUND (Viewer xem bản nháp cũng 404)" }
  * /api/v1/projects/{projectId}/versions/{v}/download:
  *   get:
  *     summary: Tải file .docx của một version (UC-57)
- *     description: "`auto` — release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT. Tên (FLF-334) `<tên>_v2.0.docx` · `<tên>_v1.0+CR-014_DRAFT.docx` · `<tên>_v0.1_DRAFT.docx` (chưa release: số bản import, FLF-356); stamp thêm `flintflow_base_version`, `flintflow_latest_cr`, `flintflow_kind`. `tracked` — bản có Track Changes của CR (mode 1 v3: file riêng `tracked_file_ref`; version không có ⇒ bản render). `original` — file người dùng upload (chỉ bản 0.1 / 0.0; version khác ⇒ 404), tên `…_original.docx`. `lang` khác ngôn ngữ tài liệu (FLF-334 B, chỉ version có snapshot baseline của dự án chuyển từ mode 2) ⇒ dựng lại theo `lang`, hậu tố ngôn ngữ cuối tên: `<tên>_v2.0_VI.docx`."
+ *     description: "`auto` — release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT. Tên (FLF-466) `<Tên>_<mã dự án>_v2.0.docx` (phát hành) · `<Tên>_<mã>_v1.3.docx` (bản nháp, số phụ, watermark DRAFT trong file) · `<Tên>_<mã>_DRAFT.docx` (trước baseline); stamp thêm `flintflow_base_version`, `flintflow_latest_cr`, `flintflow_kind`, `flintflow_project_code`. `tracked` — bản có Track Changes (bản phát hành: so với lần phát hành trước, file riêng `tracked_file_ref`; không có thì xem `tracked_unavailable_reason`). `original` — file người dùng upload (chỉ bản 0.1 / 0.0; version khác ⇒ 404), tên `…_original.docx`. `lang` khác ngôn ngữ tài liệu (FLF-334 B; FLF-466 - mọi version có snapshot baseline hoặc spine_snapshot, kể cả dự án upload thật) ⇒ dựng lại theo Spine của version, hậu tố ngôn ngữ cuối tên: `<Tên>_<mã>_v2.0_VI.docx`. Viewer chỉ tải bản đã phát hành."
  *     tags: [Versions (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -62,10 +62,11 @@ const router = Router()
  *       - { in: query, name: variant, schema: { type: string, enum: [auto, tracked, original], default: auto } }
  *       - { in: query, name: lang, description: "FLF-334 B — ngôn ngữ của file (mặc định ngôn ngữ tài liệu)", schema: { type: string, enum: [vi, en] } }
  *     responses:
- *       200: { description: "File .docx — tên `<tên>_v2.0[_EN|_VI].docx`" }
+ *       200: { description: "File .docx — tên `<Tên>_<mã>_v2.0[_EN|_VI].docx`" }
  *       400: { description: "VALIDATION_ERROR (`lang` lạ; `variant` tracked/original + `lang` khác)" }
+ *       403: { description: "ORG_ROLE_FORBIDDEN (Viewer tải bản nháp)" }
  *       404: { description: DOC_VERSION_NOT_FOUND }
- *       409: { description: TRANSLATION_INCOMPLETE (meta locale/missing/total) · DOCUMENT_LANGUAGE_UNAVAILABLE }
+ *       409: { description: "TRANSLATION_INCOMPLETE (meta locale/missing/total), DOCUMENT_LANGUAGE_UNAVAILABLE, SNAPSHOT_UNAVAILABLE (bản nháp cũ không có bản chụp nội dung)" }
  * /api/v1/projects/{projectId}/release:
  *   post:
  *     summary: Release — đóng dấu major (1.0, 2.0…), khoá baseline, render bản sạch (Flow 6)
@@ -82,7 +83,7 @@ const router = Router()
  *     responses:
  *       201: { description: "`{ version, baseline (type release), cr_ids, spine_version }`" }
  *       403: { description: "ORG_ROLE_FORBIDDEN — chỉ Lead release" }
- *       409: { description: SPINE_VERSION_CONFLICT }
+ *       409: { description: "SPINE_VERSION_CONFLICT, PACKAGE_CHANGED_AFTER_SUBMIT (nội dung đã đổi sau lần gửi duyệt), DOC_VERSION_BUSY (lượt ghi version khác giữ khoá quá 30 giây)" }
  *       422: { description: "RELEASE_RED_FLAGS_OPEN (`meta.flags`)" }
  */
 router.get("/:projectId/versions", authMiddleware, versionController.list)
@@ -96,7 +97,7 @@ router.post("/:projectId/release", authMiddleware, requireRole("lead"), versionC
  * @swagger
  * /api/v1/projects/{projectId}/review-package:
  *   get:
- *     summary: Gói duyệt (FLF-330, C-7) — mọi CR đã ghi kể từ lần phát hành trước, trạng thái chờ Lead, nhãn bản nháp
+ *     summary: Gói duyệt (FLF-330, C-7) — mọi CR đã ghi và thay đổi hệ thống kể từ lần phát hành trước, trạng thái chờ Lead, nhãn bản nháp
  *     tags: [Version (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -104,7 +105,7 @@ router.post("/:projectId/release", authMiddleware, requireRole("lead"), versionC
  *       - { in: path, name: projectId, required: true, schema: { type: string } }
  *     responses:
  *       200:
- *         description: "`reviewPackageSchema`"
+ *         description: "`reviewPackageSchema` - { status, base_version, latest_version, next_version, draft_label, change_requests[], system_changes[] ({ version, type, ref, summary, created_by, created_at }), red_open, submission, spine_version, tracked_unavailable_reason (template_translated hoặc null) }"
  */
 router.get("/:projectId/review-package", authMiddleware, versionController.getReviewPackage)
 
@@ -127,7 +128,7 @@ router.get("/:projectId/review-package", authMiddleware, versionController.getRe
  *       200:
  *         description: "`reviewPackageSchema` (status pending)"
  *       409:
- *         description: PACKAGE_ALREADY_SUBMITTED, PACKAGE_EMPTY, SPINE_VERSION_CONFLICT
+ *         description: "PACKAGE_ALREADY_SUBMITTED, PACKAGE_EMPTY (không có CR lẫn thay đổi hệ thống), SPINE_VERSION_CONFLICT"
  *       422:
  *         description: RELEASE_RED_FLAGS_OPEN (meta.flags[])
  */

@@ -180,6 +180,10 @@ npm run migrate:sections -- --dry-run                                # project m
 npm run migrate:mode1-v2 -- --dry-run                                # xem trước
 npm run migrate:mode1-v2                                             # xoá index chết của CR-theo-block (an toàn)
 npm run migrate:mode1-v2 -- --clean-data                             # + xoá vị trí CR bản cũ, bỏ field chết (một chiều)
+npm run migrate:cr-released -- --dry-run                             # FLF-466 P01: backfill CR written → released (theo release cr_ids)
+npm run migrate:cr-released
+npm run migrate:s1-order -- --dry-run                                # FLF-466 P08: đồng bộ tiến độ S-1 trước B-2 cho Spine cũ
+npm run migrate:s1-order
 ```
 
 **`migrate:mode1-v2` bắt buộc với DB đã chạy P2–P4 trước mode 1 v2 (FLF-186).** Vị trí CR giờ theo `path` phần tử

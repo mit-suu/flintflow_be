@@ -50,6 +50,7 @@ const router = Router()
  *           nullable: true
  *           properties:
  *             project_id: { type: string }
+ *             project_code: { type: string, nullable: true }
  *             version: { type: string, nullable: true }
  *             source: { type: string, nullable: true }
  *         confirmed_latest_at: { type: string, format: date-time, nullable: true }
@@ -408,6 +409,30 @@ router.post("/:id/template-proposal", authMiddleware, orgLibrary.createTemplateP
 router.post("/:id/template-proposal/send", authMiddleware, orgLibrary.sendTemplateProposal)
 router.post("/:id/template-proposal/save", authMiddleware, orgLibrary.saveTemplateProposal)
 router.post("/:id/template-proposal/decline", authMiddleware, orgLibrary.declineTemplateProposal)
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/template-proposal/chat:
+ *   post:
+ *     summary: "FLF-466 - Sửa đề xuất mẫu lưu từ dự án qua chat (một lượt AI, giữ credit trước mỗi lượt)"
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [message], properties: { message: { type: string, minLength: 1, maxLength: 500 } } }
+ *     responses:
+ *       200: { description: "ProposalView đã sửa theo lời người dùng" }
+ *       402: { description: INSUFFICIENT_CREDIT }
+ *       403: { description: "ORG_ROLE_FORBIDDEN (chỉ Lead / Analyst, đề xuất của chính người gọi)" }
+ *       404: { description: TEMPLATE_PROPOSAL_NOT_FOUND }
+ *       409: { description: TEMPLATE_PROPOSAL_CONFLICT }
+ *       503: { description: TEMPLATE_PROPOSAL_AI_UNAVAILABLE }
+ */
+router.post("/:id/template-proposal/chat", authMiddleware, orgLibrary.reviseTemplateProposal)
 
 /**
  * @swagger

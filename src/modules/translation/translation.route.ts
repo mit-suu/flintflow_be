@@ -35,7 +35,7 @@ const router = Router()
  *       - in: query
  *         name: version
  *         required: false
- *         description: "FLF-334 B — đếm trên snapshot baseline của DocVersion này (mode 1, vd 1.0); không dùng cùng baseline_id"
+ *         description: "FLF-334 B / FLF-466 — đếm trên snapshot của DocVersion này (mode 1, có baseline hoặc spine_snapshot, vd 1.0 hay 0.2); không dùng cùng baseline_id"
  *         schema:
  *           type: string
  *     responses:
@@ -43,10 +43,12 @@ const router = Router()
  *         description: "{ locale, source_locale, total, missing, batches, estimated_credits } — ngôn ngữ đích = ngôn ngữ gốc ⇒ total 0"
  *       400:
  *         description: VALIDATION_ERROR (locale lạ; cả baseline_id lẫn version)
+ *       403:
+ *         description: ORG_ROLE_FORBIDDEN (Viewer không gọi được endpoint dịch)
  *       404:
  *         description: PROJECT_NOT_FOUND, BASELINE_NOT_FOUND, DOC_VERSION_NOT_FOUND
  *       409:
- *         description: DOCUMENT_LANGUAGE_UNAVAILABLE (dự án mode 1 import thật hỏi ngôn ngữ khác; version không có snapshot baseline)
+ *         description: SNAPSHOT_UNAVAILABLE (version cũ không có baseline hoặc spine_snapshot)
  */
 router.get("/:projectId/translations/status", authMiddleware, translationController.getTranslationStatus)
 

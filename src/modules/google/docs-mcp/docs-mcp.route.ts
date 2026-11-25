@@ -27,7 +27,7 @@ const router = Router()
  *       - BearerAuth: []
  *     responses:
  *       200:
- *         description: Phản hồi JSON-RPC; lỗi Google nằm trong kết quả tool `isError: true` với mã GOOGLE_*
+ *         description: "Phản hồi JSON-RPC; lỗi Google nằm trong kết quả tool `isError: true` với mã GOOGLE_*"
  *       401:
  *         description: UNAUTHORIZED
  *       503:
