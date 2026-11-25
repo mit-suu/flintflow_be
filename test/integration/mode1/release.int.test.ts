@@ -36,10 +36,13 @@ import {
   type Mode1Api
 } from "../../helpers/mode1-release-p4.js"
 import { releaseResponseSchema, versionsResponseSchema } from "../../../src/modules/doc-version/doc-version.dto.js"
+import { ChangeRequest } from "../../../src/modules/change-request/change-request.model.js"
+import JSZip from "jszip"
 import { release } from "../../../src/modules/doc-version/release.service.js"
 import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.js"
 import { DocFileNotFoundError, clearDocFileCache, docFileStore, gridFsDocFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
 import { DocxPackage, readBlocks, readStamp } from "../../../src/modules/docx-ooxml/index.js"
+import { projectCode } from "../../../src/modules/project/project-code.js"
 import { lockedPaths } from "../../helpers/mode1-cr-p4.js"
 import { applyTransaction } from "../../../src/modules/spine/op-engine.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
@@ -138,7 +141,7 @@ describe("release - bản sạch + baseline", () => {
     // bản sạch = bản render (file_ref và clean_file_ref cùng một file)
     expect(v10!.clean_file_ref).toBe(v10!.file_ref)
     const clean = await DocxPackage.load(await docFileStore().load(v10!.clean_file_ref!))
-    expect(await readStamp(clean)).toEqual({ project_id: projectId, version: "1.0", source: "release", base_version: null, latest_cr: null, kind: null })
+    expect(await readStamp(clean)).toMatchObject({ project_id: projectId, version: "1.0", source: "release", base_version: null, latest_cr: null, kind: null })
     const cleanXml = await documentXml(await docFileStore().load(v10!.clean_file_ref!))
     expect(cleanXml).not.toMatch(/<w:ins\b|<w:del\b|<w:delText\b|commentReference|commentRangeStart/)
     const cleanBlocks = await readBlocks(clean)
@@ -147,8 +150,8 @@ describe("release - bản sạch + baseline", () => {
 
     // tải về 1.0 ⇒ bản sạch không _DRAFT
     const dl = await binary(c.get("/versions/1.0/download"))
-    expect(decodeURIComponent(String(dl.headers["content-disposition"]))).toContain("Lumen LMS_v1.0.docx")
-    expect(await readStamp(await DocxPackage.load(dl.body as Buffer))).toEqual({ project_id: projectId, version: "1.0", source: "release", base_version: "1.0", latest_cr: null, kind: "release" })
+    expect(decodeURIComponent(String(dl.headers["content-disposition"]))).toContain(`Lumen LMS_${projectCode(projectId)}_v1.0.docx`)
+    expect(await readStamp(await DocxPackage.load(dl.body as Buffer))).toMatchObject({ project_id: projectId, version: "1.0", source: "release", base_version: "1.0", latest_cr: null, kind: "release" })
     expect(await documentXml(dl.body as Buffer)).not.toMatch(/<w:ins\b|<w:del\b/)
 
     // FLF-316: format=pdf đi qua Gotenberg — test trỏ cổng đóng ⇒ 503 có mã riêng, bản .docx vẫn tải được
@@ -220,7 +223,55 @@ describe("release - lỗi giữa chừng", () => {
     failSnapshot.on = false
     const again = await released(c)
     expect(again.version.version).toBe("1.0")
-    expect(await gridFsFileCount(projectId)).toBe(filesBefore + 1)
+    // FLF-466: bản phát hành lưu thêm file Track Changes so với lần ổn định trước
+    expect(await gridFsFileCount(projectId)).toBe(filesBefore + 2)
+  })
+})
+
+describe("FLF-466 - CR released, tracked comments, post-submit DocVersion & revert", () => {
+  it("phát hành ⇒ CR chuyển sang released, bản tracked mang comment tác giả CR, revert được CR released, và DocVersion nháp sau submit chặn release", async () => {
+    const { seeded, c, projectId } = await projectWithRevision()
+    const rel = await released(c)
+    expect(rel.cr_ids).toEqual(["CR-001"])
+
+    const crAfterRelease = await ChangeRequest.findOne({ projectId, cr_id: "CR-001" }).lean()
+    expect(crAfterRelease?.status).toBe("released")
+
+    // Bản tracked của lần phát hành chứa Word comment mang tác giả "CR-001 (...)"
+    const v10 = (await DocVersion.findOne({ projectId, version: "1.0" }).lean())!
+    expect(v10.tracked_file_ref).toBeTruthy()
+    const zip = await JSZip.loadAsync(await docFileStore().load(v10.tracked_file_ref!))
+    const commentsXml = await zip.file("word/comments.xml")?.async("string")
+    expect(commentsXml).toContain("CR-001 (")
+
+    // Cờ đỏ đang mở dù từng gắn với CR written/released vẫn hiện trong pending-queue
+    await addRedFlag(projectId)
+    const recomputed = await c.post("/flags/recompute")
+    expect(recomputed.status).toBe(200)
+    const openRed = ((await spineRepository.get(projectId))!.flags).find((f) => f.level === "red")!
+    await ChangeRequest.updateOne({ projectId, cr_id: "CR-001" }, { $set: { flag_ids: [openRed.id] } })
+    const queue = await c.get("/pending-queue")
+    expect(queue.status).toBe(200)
+    expect(queue.body.data.items.some((i: { kind: string }) => i.kind === "flag_red")).toBe(true)
+
+    // Hoàn tác CR đã released
+    const rev = await c.post("/change-requests/CR-001/revert", { requester: "Lead" })
+    expect(rev.status, JSON.stringify(rev.body.error)).toBe(201)
+    expect(rev.body.data.change_request.source.kind).toBe("revert")
+
+    // Gửi duyệt rồi phát sinh DocVersion nháp sau thời điểm submitted_at ⇒ 409 PACKAGE_CHANGED_AFTER_SUBMIT
+    const spine = (await spineRepository.get(projectId))!
+    await applyTransaction(projectId, { base_version: spine.spine_version, by: "test", ops: [{ op: "remove", path: "diagrams[id=D01]", reason: "fix" }] })
+    const sysHead = (await spineRepository.get(projectId))!
+    await applyTransaction(projectId, {
+      base_version: sysHead.spine_version,
+      by: "test",
+      ops: [{ op: "set", path: "baseline_submission", value: { status: "pending", submitted_by: seeded.userId, submitted_at: new Date("2026-01-01T00:00:00.000Z").toISOString(), spine_version: sysHead.spine_version, decided_by: null, decided_at: null, reason: null, rejection_comment_ids: [] } }]
+    })
+    await DocVersion.create({ projectId, version: "1.9", kind: "cr_revision", file_ref: v10.clean_file_ref!, based_on: "1.0", cr_ids: ["CR-999"], created_by: seeded.userId, createdAt: new Date("2026-01-02T00:00:00.000Z") })
+    const blockedRel = await releaseNow(c)
+    expect(blockedRel.status).toBe(409)
+    expect(blockedRel.body.error.code).toBe("PACKAGE_CHANGED_AFTER_SUBMIT")
   })
 })
 

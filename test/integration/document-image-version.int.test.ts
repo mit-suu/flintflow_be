@@ -21,6 +21,8 @@ import { SpineTranslation } from "../../src/modules/translation/spine-translatio
 import { RenderedDocumentCache } from "../../src/modules/render/rendered-document.model.js"
 import { _internal } from "../../src/modules/render/assemble.service.js"
 import { clearDocumentMemo } from "../../src/modules/render/rendered-document-memo.js"
+import { DocVersion } from "../../src/modules/doc-version/doc-version.model.js"
+import { stripRecord } from "../../src/modules/import/check.service.js"
 import * as spineRepository from "../../src/modules/spine/spine.repository.js"
 
 const PNG_1X1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64")
@@ -121,6 +123,12 @@ describe("GET /document + /document/image", () => {
   it("Viewer xem được ảnh và /version; org khác ⇒ 404", async () => {
     const token = imagePngs((await lead.get("/document?source=draft")).body.data).find((png) => png.startsWith("image-ref:"))!
     const viewer = api(seeded.projectId, await join(seeded, "viewer@flintflow.test", "viewer"))
+    // FLF-466: Viewer đọc ảnh theo snapshot của version ổn định mới nhất; chưa có bản ổn định ⇒ 404
+    const noStable = await viewer.get(imageUrl(token))
+    expect(noStable.status).toBe(404)
+    expect(noStable.body.error.code).toBe("VIEWER_NO_STABLE_VERSION")
+    const spine = (await spineRepository.get(seeded.projectId))!
+    await DocVersion.create({ projectId: seeded.projectId, version: "1.0", kind: "release", file_ref: "test-file", spine_snapshot: stripRecord(spine), based_on: null, cr_ids: [], created_by: seeded.userId })
     expect((await viewer.download(imageUrl(token))).status).toBe(200)
     expect((await viewer.get("/version")).status).toBe(200)
 

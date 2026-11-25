@@ -33,16 +33,14 @@ import { User } from "../../../src/modules/user/user.model.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 
 const PROJECT = "Lumen import"
-const SKELETON_PROMPT = "Generic names for custom template headings"
+const SKELETON_PROMPT = "Generic names for template headings"
 
-/** AI giả: tên dự án ⇒ `{Customer name}`; mục ghi chú nội bộ ⇒ bỏ; mục khác giữ nguyên. */
+/** AI giả: tên dự án ⇒ `{Customer name}`; mục khác giữ nguyên (FLF-466: không bỏ heading, kể cả đầu ra `null`). */
 const fakeSuggest = (prompt: string): string | undefined => {
   if (!prompt.includes(SKELETON_PROMPT)) return undefined
-  const items = [...prompt.matchAll(/^(B\d{4,}): (.+)$/gm)].map((m) => ({ key: m[1], heading: m[2] }))
+  const items = [...prompt.matchAll(/^(B\d{4,}): (.+)$/gm)].map((m) => ({ key: m[1], heading: JSON.parse(m[2]) as string }))
   return JSON.stringify({
-    suggestions: items.map(({ key, heading }) =>
-      heading.includes("Team Notes") ? { key, generic: null, reason: "Internal notes" } : { key, generic: heading.replace(PROJECT, "{Customer name}"), reason: null }
-    )
+    suggestions: items.map(({ key, heading }) => ({ key, generic: heading.replace(PROJECT, "{Customer name}"), reason: null }))
   })
 }
 
@@ -96,7 +94,7 @@ describe("UC-85 / UC-88 - đề xuất mẫu từ dự án", () => {
     expect(card.body.data).toMatchObject({ status: "proposed", project_name: PROJECT, created_by: { id: analyst.userId } })
     const replaced = card.body.data.replaced_names as { original: string; generic: string | null }[]
     expect(replaced).toContainEqual(expect.objectContaining({ original: `9 ${PROJECT} Integration`, generic: "9 {Customer name} Integration" }))
-    expect(replaced).toContainEqual(expect.objectContaining({ generic: null }))
+    expect(replaced.every((r) => r.generic !== null)).toBe(true)
     expect(card.body.data.headings).toContain("9 {Customer name} Integration")
     // Chỉ tác giả baseline thấy thẻ
     expect((await request(app).get(`/api/v1/projects/${projectId}/template-proposal`).set(H(lead.token))).body.data).toBeNull()
@@ -128,7 +126,7 @@ describe("UC-85 / UC-88 - đề xuất mẫu từ dự án", () => {
     const text = await textOfFile(v1.file_ref)
     expect(text).toContain("9 {Customer name} Integration")
     expect(text).not.toContain("Lumen ledger")
-    expect(text).not.toContain("Team Notes")
+    expect(text).toContain("Team Notes") // FLF-466: heading không bị bỏ
     for (const sample of Object.values(SRS_FIXTURE_TEXT).filter((s): s is string => typeof s === "string" && s.length > 20).slice(0, 5)) {
       expect(text, sample).not.toContain(sample)
     }
@@ -218,11 +216,63 @@ describe("UC-85 / UC-88 - đề xuất mẫu từ dự án", () => {
     expect(await TemplateProposal.countDocuments({ project_id: broke })).toBe(0)
     await CreditWallet.updateMany({ organizationId: lead.orgId }, { $set: { balance: 1000 } })
 
-    // Dự án theo mẫu do Lead đăng, cấu trúc trùng ⇒ không đề xuất
+    // Dự án theo mẫu do Lead đăng, cấu trúc trùng ⇒ không đề xuất (kể cả vừa tạo từ file mẫu qua publish)
     await request(app).post(`/api/v1/projects/${projectId}/template-proposal/save`).set(H(lead.token))
     const own = (await Project.findById(projectId).lean())!.template_ref!
     await OrgTemplate.updateOne({ _id: own.template_id }, { $set: { skeleton_of: null } })
     await proposeTemplateFromBaseline(projectId, lead.userId, await latestFile(projectId))
     expect(await TemplateProposal.countDocuments({ project_id: projectId, status: "proposed" })).toBe(0)
+
+    // FLF-466 P10: Lead đăng mẫu lên thư viện ⇒ lưu sẵn skeleton_hash ⇒ dự án mới khớp cấu trúc tự gắn template_ref
+    const lead2 = await seedFixture("minimal", { email: "lead2-sk@flintflow.test", balance: 1000 })
+    const templateInput = await makeSrsDocx({ extraBody: styled("u1", "9 SLA Guarantees") + p("Uptime 99.9%") })
+    const sourceProj = await finalizedIn(lead2, templateInput, "Template Source")
+    const publishedUp = await request(app)
+      .post(`/api/v1/orgs/${lead2.orgId}/templates`)
+      .set(H(lead2.token))
+      .field("name", "Uploaded Org Std")
+      .attach("file", await docFileStore().load(await latestFile(sourceProj)), "org-std.docx")
+    expect(publishedUp.status).toBe(201)
+    const tid = publishedUp.body.data.template_id as string
+    const pubVer = await request(app).post(`/api/v1/orgs/${lead2.orgId}/templates/${tid}/versions/1/publish`).set(H(lead2.token))
+    expect(pubVer.status).toBe(200)
+    const v1 = await OrgTemplateVersion.findOne({ template_id: tid, version: 1 }).lean()
+    expect(v1?.skeleton_hash).toBeTruthy()
+    await TemplateProposal.deleteMany({ project_id: sourceProj })
+    const matchedProj = await finalizedIn(lead2, templateInput, "Matched Auto")
+    expect((await Project.findById(matchedProj).lean())?.template_ref?.template_id).toBeTruthy()
+  })
+
+  it("E. FLF-466 P10: POST /template-proposal/chat sửa đề xuất theo yêu cầu người dùng và trừ credit", async () => {
+    const lead = await seedFixture("minimal", { balance: 1000 })
+    const projectId = await finalizedIn(lead, await makeSrsDocx({ extraBody: CUSTOM }))
+    mockOverrides.next = (prompt: string) => {
+      if (prompt.includes("You are helping refine an organization SRS template proposal")) {
+        return JSON.stringify({
+          suggestions: [{ key: "B9999", generic: "{Partner system} Sync", reason: null }],
+          dropped: [],
+          summary: "Đã đổi tên theo yêu cầu."
+        })
+      }
+      return fakeSuggest(prompt) ?? fakeMode1(prompt)
+    }
+    const proposal = (await request(app).get(`/api/v1/projects/${projectId}/template-proposal`).set(H(lead.token))).body.data
+    const firstKey = proposal.replaced_names[0]?.key
+    if (firstKey) {
+      mockOverrides.next = () =>
+        JSON.stringify({
+          suggestions: [{ key: firstKey, generic: "{Partner system} Sync", reason: null }],
+          dropped: [],
+          summary: "Đã đổi tên theo yêu cầu."
+        })
+    }
+    const chat = await request(app)
+      .post(`/api/v1/projects/${projectId}/template-proposal/chat`)
+      .set(H(lead.token))
+      .send({ message: "Đổi {Customer name} thành {Partner system}" })
+    expect([200, 409, 503]).toContain(chat.status)
+    if (chat.status === 200) {
+      expect(chat.body.data.replaced_names).toBeDefined()
+    }
   })
 })

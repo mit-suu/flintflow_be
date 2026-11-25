@@ -67,7 +67,8 @@ describe("C-7 ghi Spine + render version mới", () => {
     expect(await readStamp(pkg)).toMatchObject({ project_id: projectId, version: "0.2", source: "cr_revision" })
     expect(texts).toContain(NEW_PERF)
     expect(texts.join("\n")).not.toContain("within 2 seconds")
-    expect(texts.some((t) => t.includes(`${crId}: Faster response time`))).toBe(true)
+    // FLF-466 (BF §3.2): mô tả dòng Record of Changes dựng từ chính thay đổi, không chép tiêu đề CR
+    expect(texts.some((t) => t.includes(`${crId}: Update non-functional requirement`))).toBe(true)
     expect(await nfrThreshold(projectId)).toBe("1 s")
 
     // BPMN 3.14 (mode 1 v3, T6): bản có đánh dấu — Track Changes tác giả = CR id, accept-all ra đúng bản sạch
@@ -76,7 +77,7 @@ describe("C-7 ghi Spine + render version mới", () => {
     const doc = await tracked.requireXml("word/document.xml")
     const marks = [...wAll(doc, "ins"), ...wAll(doc, "del")]
     expect(marks.length).toBeGreaterThan(0)
-    expect(new Set(marks.map((m) => wAttr(m, "author")))).toEqual(new Set([crId]))
+    expect(new Set(marks.map((m) => wAttr(m, "author")))).toEqual(new Set([`${crId} (Fixture User)`])) // FLF-466: `CR-xxx (người ghi)`
     await acceptAll(tracked)
     expect((await readBlocks(tracked)).map((b) => b.text)).toEqual(texts)
     const dl = await c.get("/versions/0.2/download?variant=tracked").buffer(true).parse((r, cb) => {

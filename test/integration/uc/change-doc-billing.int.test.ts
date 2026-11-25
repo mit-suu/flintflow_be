@@ -170,10 +170,13 @@ describe("UC-48 - so sánh hai phiên bản SRS", () => {
   it("Viewer xem được so sánh, cùng các block khác biệt như Lead", async () => {
     const { seeded, projectId, c } = await importedProject()
     await writeCr(c, "Nhanh hơn", "1 second instead of 2 seconds")
+    // FLF-466 (BF §2): Viewer chỉ so sánh các bản ổn định (gốc + phát hành), không thấy bản nháp 0.2
+    expect((await releaseNow(c)).status).toBe(201)
     const viewer = await joinOrg(seeded.orgId, "viewer")
+    expect((await apiAs(seeded, viewer.token, projectId).get("/versions/compare?from=0.1&to=0.2")).status).toBe(404)
 
-    const lead = compareResponseSchema.parse((await c.get("/versions/compare?from=0.1&to=0.2")).body.data)
-    const res = await apiAs(seeded, viewer.token, projectId).get("/versions/compare?from=0.1&to=0.2")
+    const lead = compareResponseSchema.parse((await c.get("/versions/compare?from=0.1&to=1.0")).body.data)
+    const res = await apiAs(seeded, viewer.token, projectId).get("/versions/compare?from=0.1&to=1.0")
     expect(res.status, JSON.stringify(res.body.error)).toBe(200)
     const seen = compareResponseSchema.parse(res.body.data)
     expect(seen.blocks.filter((b) => b.change === "modified")).toEqual(lead.blocks.filter((b) => b.change === "modified"))
@@ -182,9 +185,12 @@ describe("UC-48 - so sánh hai phiên bản SRS", () => {
   it("Viewer không thấy tác giả thay đổi trong bản so sánh (projection UC-47)", async () => {
     const { seeded, projectId, c } = await importedProject()
     await writeCr(c, "Nhanh hơn", "1 second instead of 2 seconds")
+    // FLF-466 (BF §2): Viewer chỉ so sánh các bản ổn định (gốc + phát hành), không thấy bản nháp 0.2
+    expect((await releaseNow(c)).status).toBe(201)
     const viewer = await joinOrg(seeded.orgId, "viewer")
+    expect((await apiAs(seeded, viewer.token, projectId).get("/versions/compare?from=0.1&to=0.2")).status).toBe(404)
 
-    const res = await apiAs(seeded, viewer.token, projectId).get("/versions/compare?from=0.1&to=0.2")
+    const res = await apiAs(seeded, viewer.token, projectId).get("/versions/compare?from=0.1&to=1.0")
     expect(res.status).toBe(200)
     const text = JSON.stringify(res.body.data)
     expect(text).not.toContain("Fixture User")
