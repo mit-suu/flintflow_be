@@ -430,7 +430,7 @@ describe("assemble()", () => {
     it("system ⇒ 'System'; user có tên ⇒ tên; user không còn ⇒ id rút gọn", async () => {
       changeDb.setRows([
         { projectId: PROJECT, txn: "t1", at: new Date("2026-09-01T00:00:00.000Z"), by: "650000000000000000000010", reason: "seed", op: "add", step_id: null, seq: 1 },
-        { projectId: PROJECT, txn: "t2", at: new Date("2026-09-02T00:00:00.000Z"), by: "system", reason: "render", op: "set", step_id: null, seq: 2 },
+        { projectId: PROJECT, txn: "t2", at: new Date("2026-09-02T00:00:00.000Z"), by: "system", reason: "waive vì ngoài phạm vi bản này", op: "set", step_id: null, seq: 2 },
         { projectId: PROJECT, txn: "t3", at: new Date("2026-09-03T00:00:00.000Z"), by: "650000000000000000000099deadbeef", reason: "manual", op: "set", step_id: null, seq: 3 }
       ])
       userDb.setRows([{ _id: "650000000000000000000010", name: "Alice", email: "alice@example.com" }])
@@ -454,7 +454,7 @@ describe("assemble()", () => {
       await assemble(PROJECT, "Demo", 22)
       const doc = await getDocument(PROJECT, "Demo", { source: "draft" })
       crDb.rows = []
-      expect(doc.recordOfChanges[0]).toMatchObject({ in_charge: "Alice", description: "CR-001: Faster response" })
+      expect(doc.recordOfChanges[0]).toMatchObject({ in_charge: "Alice", description: "CR-001: Update non-functional requirement NFR-01" })
     })
   })
 

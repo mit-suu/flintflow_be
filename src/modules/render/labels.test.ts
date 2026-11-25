@@ -197,7 +197,8 @@ describe("labels - fixture 19 màn qua đường mode 2 (mẫu FPT)", () => {
     expect(slots.captions.length).toBeGreaterThan(0)
     // §I: câu máy + người ghi "system"
     for (const text of slots.record) {
-      expect(ENGLISH_LABELS.has(text), text).toBe(false)
+      // FLF-484: "Baseline" là từ mượn, giữ nguyên ở cả hai ngôn ngữ (dòng ký baseline ghi `Baseline <số>`)
+      if (text !== "Baseline") expect(ENGLISH_LABELS.has(text), text).toBe(false)
       expect(text).not.toMatch(/^(Create|Update) |more change|signed$|reconciled|Edited after|Assumptions confirmed|Reviewed:/)
     }
     expect(vi.recordOfChanges.map((r) => r.description)).toContain("Customer asked to rename Login; Sửa sau baseline; Hoà giải các mục cần xem lại; và 2 thay đổi khác")
@@ -306,7 +307,8 @@ describe("labels - fixture 19 màn qua đường mode 2 (mẫu FPT)", () => {
     expect(withLanguage).toEqual(await build(spine, { template }))
     // Bằng chứng nhãn mới không lọt vào mode 1: ô actor kind vẫn là giá trị thô
     expect(JSON.stringify(withLanguage)).toContain('"text":"human"')
-    expect(withLanguage.recordOfChanges.some((r) => /^Create /.test(r.description))).toBe(true)
+    // FLF-484: Record of Changes theo ngôn ngữ của file (mẫu `language: vi`) dù nhãn khác vẫn giữ như file
+    expect(withLanguage.recordOfChanges.some((r) => /^Tạo /.test(r.description))).toBe(true)
   })
 })
 

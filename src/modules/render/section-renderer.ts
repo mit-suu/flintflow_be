@@ -24,7 +24,7 @@ import { activitySectionOf } from "../diagram/renderers/activity.renderer.js"
 import { isComponentSequenceSource } from "../diagram/renderers/sequence.renderer.js"
 import { DEFAULT_RELATION_VERB, relationVerb } from "../diagram/renderers/erd.renderer.js"
 import { describeInterface } from "./interface-description.js"
-import { crRecordDescription } from "./cr-record.js"
+import { changeKindOf, crRecordDescription, type ChangeKind } from "./cr-record.js"
 import { diagramErrorMarker } from "./diagram-placeholder.js"
 import { matchTableHeader } from "../import/table-header-dictionary.js"
 import { loadStepRegistry } from "../pipeline/step-registry.js"
@@ -999,10 +999,10 @@ const changeTypeOf = (ops: Set<string>): RocChangeType => {
  * Lý do do MÁY ghi trong lúc chạy quy trình. §I là lịch sử tài liệu cho người đọc, không phải nhật ký của
  * runner: lượt test xuất ra 425 dòng mà phần lớn là "step-runner: elicit turn" (BUG-15).
  * Mode 1: cờ do AI kiểm tra đặt (`AI check: ambiguity`, `AI semantic check (1.11)`) và kế hoạch step lúc import
- * cũng là sổ sách của máy — không in vào tài liệu.
+ * cũng là sổ sách của máy — không in vào tài liệu. FLF-484: lý do `render` (vẽ lại sơ đồ sau CR / import) cũng là việc của máy.
  */
 const INTERNAL_REASON =
-  /^(step-runner:|gate:|resume:|Revert seq|Hoà giải: chờ chấp nhận lại|Phỏng vấn đầu giai đoạn|Chốt |confirmed_at do server đặt|Mở cờ |Waiver |Đóng cờ |AI check:|AI semantic check|Import: kế hoạch step)/
+  /^(step-runner:|gate:|resume:|Revert seq|Hoà giải: chờ chấp nhận lại|Phỏng vấn đầu giai đoạn|Chốt |confirmed_at do server đặt|Mở cờ |Waiver |Đóng cờ |AI check:|AI semantic check|Import: kế hoạch step|render(?::|$))/
 
 /**
  * Câu do máy sinh → câu theo ngôn ngữ tài liệu (mặc định tiếng Anh; bảng `MACHINE_DESCRIPTIONS` ở `labels.ts`);
@@ -1048,18 +1048,20 @@ const BASELINE_VERSION = /\bv?\d+\.\d+(?:-conditional)?\b/
 /** Lô ghi của một change request (`write.service`: `by` = mã CR) — mỗi CR một dòng riêng (FLF-318). */
 const CR_ACTOR = /^CR-\d{3,}$/
 const isCrTxn = (group: readonly ChangeRecordRow[]): boolean => group.some((c) => CR_ACTOR.test(c.by))
-const withV = (version: string): string => (version.startsWith("v") ? version : `v${version}`)
-/**
- * FLF-361: bản tài liệu thứ `k` sau mốc `version` — khớp `nextMinor` của version tài liệu mode 1 (mỗi CR ghi xong ra một
- * bản `DocVersion`): sau `v0.1` CR đầu là `v0.2`, CR kế `v0.3`; sau `v1.0` là `v1.1`. Trước đây CR mang số bản phát hành
- * kế tiếp (`v1.0`) trong khi tài liệu là bản 0.2.
- */
-const nthDraftAfter = (version: string, k: number): string => {
-  const m = /^v(\d+)\.(\d+)/.exec(version)
-  return m ? `v${m[1]}.${Number(m[2]) + k}` : version
+/** Số baseline in ở cột Version: bỏ tiền tố `v` (`v1.0` ⇒ `1.0`; đuôi `-conditional` giữ). */
+const stripV = (version: string): string => version.replace(/^v/, "")
+/** Dòng chưa nằm trong lần phát hành / baseline nào (bản nháp chưa ký) in `-` ở cột Version. */
+const NO_VERSION = "-"
+/** FLF-484: ngày ghi theo giờ Việt Nam (`yyyy-mm-dd`); `at` không đọc được ⇒ cắt 10 ký tự đầu như trước. */
+const vnDate = (at: string): string => {
+  const d = new Date(at)
+  return Number.isNaN(d.getTime()) ? String(at).slice(0, 10) : VN_DATE.format(d)
 }
+const VN_DATE = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh", year: "numeric", month: "2-digit", day: "2-digit" })
 /** Lô ký baseline lúc import (mode 1: `by: import`, "Baseline 0.1") — cùng bản với dòng import, không thêm dòng riêng. */
 const isImportBaseline = (group: readonly ChangeRecordRow[]): boolean => group.every((c) => c.by === "import")
+
+const KIND_ORDER: readonly ChangeKind[] = ["A", "M", "D"]
 
 const describeRow = (reasons: readonly string[], language?: string): string => {
   const shown = reasons.slice(0, MAX_REASONS_PER_ROW).join("; ")
@@ -1078,11 +1080,11 @@ const MACHINE_REASON = /^Cascade:/
  * step nhập vào dòng liền trước cùng ngày; sau baseline (không còn giai đoạn) gom theo ngày. Lô ký baseline luôn
  * là một dòng riêng.
  *
- * `version` đánh theo dòng, không theo `spine_version`: trước baseline `v0.1, v0.2…`; dòng ký lấy đúng mã
- * baseline (`v1.0`; version tài liệu mode 1 `0.1` / `2.0` in thành `v0.1` / `v2.0`); sau đó `v1.0.1, v1.0.2…` cho tới
- * baseline kế tiếp. Lô của change request (mode 1, FLF-318) là một dòng riêng; FLF-361: mang **số bản tài liệu của CR**
- * (`DocVersion` minor kế tiếp: sau `v0.1` là `v0.2`, `v0.3`…; sau `v1.0` là `v1.1`). Baseline lúc import cùng bản với dòng
- * import ⇒ không in dòng riêng.
+ * `version` (BF §3.2, FLF-484): số của **lần phát hành / baseline chứa dòng** — dòng baseline mang số của chính nó
+ * (`1.0`, không tiền tố `v`), mọi dòng khác (CR, soạn trước baseline, sửa ngoài quy trình) mang số của baseline **đầu tiên
+ * đứng sau nó**; chưa có baseline nào sau ⇒ `-` (bản nháp). Số phụ của bản nháp không in vào bảng. Lô của change request
+ * (mode 1, FLF-318) là một dòng riêng, tách thêm theo loại thay đổi A / M / D (một dòng mỗi loại có mặt, cùng mã CR, cùng
+ * version). Lô `by: import` (nạp file + ký bản gốc 0.1) không thành dòng nào (BF: không sinh dòng cho bản gốc 0.1).
  *
  * `resolveInCharge` (T7): `by` lưu trong `changes[]` là userId thô (hoặc `"system"`) — caller truyền
  * hàm tra `User.name`/email theo lô để hiển thị tên thay vì id; mặc định giữ nguyên `by` (test thuần
@@ -1114,7 +1116,9 @@ export function buildRecordOfChanges(
   for (const txn of order) {
     const group = groups.get(txn) as ChangeRecordRow[]
     if (!keepInRecordOfChanges(group)) continue
-    const date = group[0].at.slice(0, 10)
+    // Bản gốc 0.1 (nạp dữ liệu + ký baseline lúc import) không sinh dòng (BF §3.2)
+    if (isImportBaseline(group)) continue
+    const date = vnDate(group[0].at)
     const baseline = isBaselineTxn(group)
     const cr = !baseline && isCrTxn(group)
     const last = rows[rows.length - 1]
@@ -1125,16 +1129,10 @@ export function buildRecordOfChanges(
     else rows.push({ date, phase, baseline, cr, changes: [...group] })
   }
 
-  let base = "v0"
-  let minor = 0
-  let crs = 0
   let baselines = 0
   const seenPhases = new Set<string>()
-  const describe = (row: (typeof rows)[number], reasons: readonly string[], raw: readonly string[]): string => {
+  const describe = (row: (typeof rows)[number], reasons: readonly string[]): string => {
     if (row.baseline) return reasons.length > 0 ? describeRow(reasons, language) : text.baselineSigned
-    // FLF-411 (U2-6): dòng CR theo ngôn ngữ tài liệu — tiêu đề CR khác ngôn ngữ (câu chat tiếng Việt) ⇒ mô tả từ thay đổi
-    const crId = row.cr ? row.changes.find((c) => CR_ACTOR.test(c.by))?.by : undefined
-    if (crId) return crRecordDescription(crId, raw, row.changes, language, spine)
     // Dòng của quy trình: mô tả bằng giai đoạn, kiểu FPT "Create/Update <mục>" — reason từng op là của model
     const label = phaseLabelOf(row.phase, language)
     if (label) {
@@ -1145,41 +1143,49 @@ export function buildRecordOfChanges(
     // Ngoài quy trình (yêu cầu sửa sau baseline): lời của user
     return reasons.length > 0 ? describeRow(reasons, language) : text.documentUpdated
   }
+  const reasonsOf = (row: (typeof rows)[number]): { raw: string[]; reasons: string[] } => {
+    const raw = row.changes.map((c) => c.reason).filter((r): r is string => !!r && !INTERNAL_REASON.test(r) && !MACHINE_REASON.test(r))
+    return { raw, reasons: [...new Set(raw.map((r) => toDocumentLanguage(r, language)))] }
+  }
+
+  // Cột Version: baseline mang số của nó; dòng khác mang số baseline đầu tiên đứng sau (duyệt ngược), chưa có ⇒ "-"
+  const baselineNumbers = rows.map((row) => {
+    if (!row.baseline) return null
+    // Fallback khớp `nextBaselineVersion` (baseline.service) khi lý do không mang mã
+    const found = reasonsOf(row).raw.map((r) => BASELINE_VERSION.exec(r)?.[0]).find((v) => v !== undefined)
+    const number = found ? stripV(found) : `1.${baselines}`
+    baselines += 1
+    return number
+  })
+  const versions: string[] = new Array(rows.length)
+  let following = NO_VERSION
+  for (let i = rows.length - 1; i >= 0; i--) {
+    following = baselineNumbers[i] ?? following
+    versions[i] = following
+  }
+
   const out: RocRow[] = []
-  for (const row of rows) {
-    // FLF-361: lô vẽ sơ đồ lúc import (`by: import`, lý do "render") là việc của máy, không in vào mô tả dòng v0.1
-    const raw = row.changes
-      .filter((c) => !(c.by === "import" && c.reason === "render"))
-      .map((c) => c.reason)
-      .filter((r): r is string => !!r && !INTERNAL_REASON.test(r) && !MACHINE_REASON.test(r))
-    const reasons = [...new Set(raw.map((r) => toDocumentLanguage(r, language)))]
-    let version: string
-    if (row.baseline) {
-      // Fallback khớp `nextBaselineVersion` (baseline.service) khi lý do không mang mã
-      const found = raw.map((r) => BASELINE_VERSION.exec(r)?.[0]).find((v) => v !== undefined)
-      version = found ? withV(found) : `v1.${baselines}`
-      baselines += 1
-      base = version.replace(/-conditional$/, "")
-      minor = 0
-      crs = 0
-      // FLF-361: baseline của bản import trùng bản với dòng import (`v0.1`) ⇒ không in thêm dòng "Baseline 0.1 signed"
-      if (isImportBaseline(row.changes) && out[out.length - 1]?.version === version) continue
-    } else if (row.cr) {
-      // Mode 1: mỗi CR một bản tài liệu (`DocVersion` minor kế tiếp), mốc không đổi
-      crs += 1
-      version = nthDraftAfter(base, crs)
-    } else {
-      minor += 1
-      version = `${base}.${minor}`
+  rows.forEach((row, i) => {
+    const { reasons } = reasonsOf(row)
+    const inCharge = [...new Set(row.changes.map((c) => resolveInCharge(c.by)))].join(", ")
+    const crId = row.cr ? row.changes.find((c) => CR_ACTOR.test(c.by))?.by : undefined
+    if (crId) {
+      // Dòng CR tách theo loại thay đổi A, M, D; mỗi nhóm có mặt một dòng, mô tả dựng từ chính các thay đổi của nhóm
+      for (const kind of KIND_ORDER) {
+        const group = row.changes.filter((c) => changeKindOf(c) === kind)
+        if (group.length === 0) continue
+        out.push({ date: row.date, version: versions[i], change_type: kind, in_charge: inCharge, description: crRecordDescription(crId, group, language, spine) })
+      }
+      return
     }
     out.push({
       date: row.date,
-      version,
+      version: versions[i],
       change_type: changeTypeOf(new Set(row.changes.map((c) => c.op))),
-      in_charge: [...new Set(row.changes.map((c) => resolveInCharge(c.by)))].join(", "),
-      description: describe(row, reasons, raw)
+      in_charge: inCharge,
+      description: describe(row, reasons)
     })
-  }
+  })
   return out
 }
 

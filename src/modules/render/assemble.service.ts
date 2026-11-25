@@ -839,6 +839,8 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
   const states = computeSectionStates(spine, input.statusChanges)
   // Chỉ mẫu FPT nhận ngôn ngữ — đường layout mode 1 giữ nguyên byte
   const language = input.template ? undefined : input.language
+  // FLF-484: Record of Changes theo ngôn ngữ tài liệu kể cả dự án import (mẫu của file mang `language`); nhãn mode 1 giữ `language`
+  const recordLanguage = input.language ?? input.template?.language
   // FLF-265 D11: ngôn ngữ tài liệu ≠ ngôn ngữ gốc ⇒ nội dung từ bản xem đã dịch; số hiệu, thứ tự, trạng thái, cờ vẫn
   // tính trên `spine` gốc. Ảnh: PNG theo ngôn ngữ của sơ đồ đã dịch (N1), còn lại ảnh gốc
   const translated =
@@ -894,7 +896,7 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
     // T15 (mode 1 v3): lịch sử sửa đổi của khách (file gốc) đứng trước, lịch sử FlintFlow nối tiếp. File đã có bảng lịch sử
     // của riêng nó ⇒ không thêm dòng chỉ vì import / ký bản gốc 0.1 (lô `by = import`): bản 0.1 giữ đúng bảng của file, mỗi
     // change request mới thành một dòng
-    recordOfChanges: [...(input.template?.legacyRecord ?? []), ...buildRecordOfChanges(withoutTemplateMigration(withoutImportRows(input.recordChanges, input.template?.legacyRecord?.length ?? 0)), inChargeFor(deps.resolveInCharge, language), language, spine)],
+    recordOfChanges: [...(input.template?.legacyRecord ?? []), ...buildRecordOfChanges(withoutTemplateMigration(withoutImportRows(input.recordChanges, input.template?.legacyRecord?.length ?? 0)), inChargeFor(deps.resolveInCharge, recordLanguage), recordLanguage, spine)],
     flagsAppendix: buildFlagsAppendix(spine, input.statusChanges, numbers, source, states, titles, language, translated?.localized)
   }
   if (source === "draft") refDoc.watermark = "DRAFT"

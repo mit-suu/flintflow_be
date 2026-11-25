@@ -383,13 +383,13 @@ export const VI_PHASE_LABELS: Readonly<Record<string, string>> = {
 
 export const RECORD_TEXT = {
   en: {
-    baselineSigned: "Baseline signed",
+    baselineSigned: "Baseline",
     documentUpdated: "Document updated",
     more: (n: number) => `; and ${n} more change${n > 1 ? "s" : ""}`,
     phaseRow: (first: boolean, phaseLabel: string) => `${first ? "Create" : "Update"} ${phaseLabel}`
   },
   vi: {
-    baselineSigned: "Ký baseline",
+    baselineSigned: "Baseline",
     documentUpdated: "Cập nhật tài liệu",
     more: (n: number) => `; và ${n} thay đổi khác`,
     phaseRow: (first: boolean, phaseLabel: string) => `${first ? "Tạo" : "Cập nhật"} ${phaseLabel}`
@@ -403,8 +403,9 @@ export const recordTextFor = (language: string | undefined) => RECORD_TEXT[isVie
  * khớp mẫu nào ⇒ giữ nguyên văn (`docs/spec-gaps.md:43`).
  */
 export const MACHINE_DESCRIPTIONS: readonly { re: RegExp; en: (m: RegExpExecArray) => string; vi: (m: RegExpExecArray) => string }[] = [
-  { re: /^Ký baseline (.+)$/, en: (m) => `Baseline ${m[1]} signed`, vi: (m) => `Ký baseline ${m[1]}` },
-  { re: /^Baseline (.+)$/, en: (m) => `Baseline ${m[1]} signed`, vi: (m) => `Ký baseline ${m[1]}` },
+  // FLF-484 (BF §3.2): dòng ký ghi `Baseline <số>` (không tiền tố v) cho cả hai ngôn ngữ
+  { re: /^Ký baseline v?(.+)$/, en: (m) => `Baseline ${m[1]}`, vi: (m) => `Baseline ${m[1]}` },
+  { re: /^Baseline v?(.+)$/, en: (m) => `Baseline ${m[1]}`, vi: (m) => `Baseline ${m[1]}` },
   { re: /^Hoà giải section stale$/, en: () => "Stale sections reconciled", vi: () => "Hoà giải các mục cần xem lại" },
   { re: /^Hoà giải: user xác nhận nội dung không đổi$/, en: () => "Reviewed: content still correct", vi: () => "Đã xem lại: nội dung vẫn đúng" },
   { re: /^sửa sau baseline$/, en: () => "Edited after baseline", vi: () => "Sửa sau baseline" },

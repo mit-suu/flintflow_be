@@ -1,13 +1,9 @@
 /**
- * FLF-411 (U2-6): mô tả dòng §I Record of Changes của một change request theo **ngôn ngữ tài liệu**.
- *
- * Lô ghi của CR mang `reason = "CR-001: <tiêu đề CR>"` — tiêu đề là chữ người dùng gõ (thường là câu chat, vd "Đổi tên hệ
- * thống thành TechMart Store nhé"). Tiêu đề cùng ngôn ngữ tài liệu ⇒ giữ (lời của người dùng); khác ngôn ngữ (câu tiếng Việt
- * trong tài liệu tiếng Anh) ⇒ mô tả dựng tất định từ các thay đổi đã ghi: "CR-001: Update system name; Add use case
- * "Checkout"". Không gọi model, không in mã nội bộ của phần tử (A04, S03) — chỉ tên, hoặc mã tài liệu (UC-01, BR-03).
+ * FLF-411 (U2-6): mô tả dòng §I Record of Changes của một change request theo **ngôn ngữ tài liệu**, dựng tất định từ các
+ * thay đổi đã ghi: "CR-001: Update system name; Add use case "Checkout"". Không gọi model, không in mã nội bộ của phần tử
+ * (A04, S03) — chỉ tên, hoặc mã tài liệu (UC-01, BR-03). FLF-484: không còn chép tiêu đề CR (câu chat của người dùng).
  */
 
-import { hasVietnameseMarks } from "../../shared/i18n/reply-language.js"
 import { isVietnamese, recordTextFor } from "./labels.js"
 import type { Spine } from "../spine/spine.types.js"
 
@@ -58,7 +54,6 @@ const DOCUMENT_ID_ENTITIES: ReadonlySet<string> = new Set(["use_cases", "busines
 /** Số thay đổi nêu trong một dòng; còn lại ghi "and N more changes". */
 const MAX_ITEMS = 3
 
-const CR_REASON = /^(CR-\d{3,}):\s*(.*)$/s
 const TOP = /^([a-z_]+)(?:\[(?:id=)?([^\]]*)\])?(?:\.([a-z_]+))?/
 
 export interface CrRecordChange {
@@ -85,8 +80,9 @@ const itemOf = (change: CrRecordChange, lang: Lang, spine: Spine | undefined): {
   if (entity === "project") return { verb: "update", target: (PROJECT_FIELD_TEXT[field ?? ""] ?? PROJECT_TEXT)[lang] }
   const label = ENTITY_TEXT[entity]?.[lang]
   if (!label) return null
-  // Op đặt lên chính phần tử (`actors[]`, `actors[id=A04]`) ⇒ thêm / xoá phần tử; op vào bên trong phần tử ⇒ cập nhật
-  const onElement = whole === (change.path ?? "")
+  // Op đặt lên chính phần tử (`actors[]`, `actors[id=A04]`) ⇒ thêm / xoá phần tử; op vào bên trong phần tử (kể cả thêm vào
+  // một field mảng như `use_cases[id=UC-01].function_ids`) ⇒ cập nhật
+  const onElement = whole === (change.path ?? "") && !field
   const verb: keyof typeof VERB = onElement && change.op === "add" ? "add" : onElement && change.op === "remove" ? "remove" : "update"
   const name = id ? nameOf(spine, entity, id) : null
   const target = name ? `${label} "${name}"` : id && DOCUMENT_ID_ENTITIES.has(entity) ? `${label} ${id}` : label
@@ -111,21 +107,23 @@ export const describeCrChanges = (changes: readonly CrRecordChange[], language?:
   return `${items.slice(0, MAX_ITEMS).join("; ")}${more > 0 ? recordTextFor(language).more(more) : ""}`
 }
 
-/** Tiêu đề CR cùng ngôn ngữ tài liệu: tài liệu tiếng Việt ⇔ chữ có dấu tiếng Việt. */
-const fitsLanguage = (text: string, language?: string): boolean => hasVietnameseMarks(text) === isVietnamese(language)
+/** Loại thay đổi của một dòng §I (cột Change type): thêm / sửa / xoá. */
+export type ChangeKind = "A" | "M" | "D"
 
 /**
- * Mô tả dòng §I của một CR: `CR-001: <tiêu đề>` khi tiêu đề cùng ngôn ngữ tài liệu, ngược lại `CR-001: <mô tả dựng từ thay
- * đổi>`. Không dựng được (không path nào đọc được) ⇒ `CR-001: Document updated` theo ngôn ngữ tài liệu.
+ * FLF-484 (lát D): loại của một thay đổi, cùng luật `onElement` của `itemOf` — op `add` đặt lên chính phần tử ⇒ A,
+ * `remove` lên chính phần tử ⇒ D, còn lại (set / add vào mảng con / sửa field) ⇒ M.
  */
-export const crRecordDescription = (
-  crId: string,
-  reasons: readonly string[],
-  changes: readonly CrRecordChange[],
-  language?: string,
-  spine?: Spine
-): string => {
-  const title = reasons.map((r) => CR_REASON.exec(r)).find((m) => m && m[1] === crId)?.[2]?.trim()
-  if (title && fitsLanguage(title, language)) return `${crId}: ${title}`
-  return `${crId}: ${describeCrChanges(changes, language, spine) ?? recordTextFor(language).documentUpdated}`
+export const changeKindOf = (change: CrRecordChange): ChangeKind => {
+  const path = change.path ?? ""
+  const m = TOP.exec(path)
+  const onElement = !!m && m[0] === path && !m[3]
+  return onElement && change.op === "add" ? "A" : onElement && change.op === "remove" ? "D" : "M"
 }
+
+/**
+ * Mô tả dòng §I của một CR: `CR-001: <mô tả dựng từ thay đổi>` theo ngôn ngữ tài liệu (BF: dựng từ chính các thay đổi,
+ * không chép câu chat hay tiêu đề CR). Không dựng được (không path nào đọc được) ⇒ `CR-001: Document updated`.
+ */
+export const crRecordDescription = (crId: string, changes: readonly CrRecordChange[], language?: string, spine?: Spine): string =>
+  `${crId}: ${describeCrChanges(changes, language, spine) ?? recordTextFor(language).documentUpdated}`
