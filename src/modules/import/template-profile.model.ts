@@ -147,6 +147,11 @@ export interface ITemplateProfile extends Document {
    */
   org_match?: { template_id: string; version: number } | null
   /**
+   * FLF-463: khoá vùng đã Bỏ chữ lúc bấm Bắt đầu (file đã viết lại). Mục của vùng tính là còn trống ở I-5 và còn vùng nào thì
+   * không ra bản gốc 0.1 (§3.1.2 "Mục bỏ chữ").
+   */
+  dropped_text?: string[] | null
+  /**
    * Chế độ 3 từ SRS đã viết: Spine lúc vào Luồng 2 — mốc so "nguyên vẹn" của bản in (mục chưa đổi so với mốc in nguyên văn
    * file gốc). Không có bản gốc 0.1 nên không dùng Spine lúc import. Khung mẫu / dự án khác ⇒ null.
    */
@@ -245,6 +250,7 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
     structure_preview: { type: Schema.Types.Mixed, default: null },
     drop_text: { type: [String], default: null },
     org_match: { type: new Schema({ template_id: { type: String, required: true }, version: { type: Number, required: true } }, { _id: false }), default: null },
+    dropped_text: { type: [String], default: null },
     flow2_entry_spine: { type: Schema.Types.Mixed, default: null },
     flow2_entry_at: { type: Date, default: null },
     migrated_base_at: { type: Date, default: null },

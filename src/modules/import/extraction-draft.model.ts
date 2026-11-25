@@ -70,6 +70,15 @@ export interface IExtractionDraft extends Document {
   /** Usage của lượt gọi AI (null nếu section chỉ trích deterministic). */
   usage_id: string | null
   partial: ExtractionProgress | null
+  /**
+   * FLF-444: tên mục và nội dung khác nhau (mục "Use Case" chứa test case; mọi phần tử AI đọc ra thuộc loại khác mục) -
+   * I-4 tin nội dung, phần tử AI của mục bị hạ độ tin để người xác nhận ở bước 1.6. `null` = khớp.
+   */
+  content_mismatch: { by_heading: string[]; by_content: string[]; note: string | null } | null
+  /** FLF-444: kết quả lớp 4 chữ hướng dẫn của AI theo block (chỗ cho bước 1.6). */
+  guidance_blocks: { block_id: string; is_guidance: boolean; confidence: number }[]
+  /** FLF-444: loại nội dung 29148 theo block (chỗ cho phân loại Ngoài phạm vi). */
+  content_types: { block_id: string; iso29148: string; in_scope: boolean; confidence: number }[]
   error: string | null
   /** Lúc section bắt đầu gọi AI; `null` khi không đang đọc (ghi bằng `$set` riêng, không qua `save()` của draft). */
   reading_since: Date | null
@@ -107,6 +116,12 @@ const extractionDraftSchema = new Schema<IExtractionDraft>(
     diagram_images: { type: [new Schema({ block_id: { type: String, required: true }, kind: { type: String, required: true }, owner_id: { type: String, default: undefined } }, opts)], default: [] },
     usage_id: { type: String, default: null },
     partial: { type: Schema.Types.Mixed, default: null },
+    content_mismatch: { type: Schema.Types.Mixed, default: null },
+    guidance_blocks: { type: [new Schema({ block_id: { type: String, required: true }, is_guidance: { type: Boolean, required: true }, confidence: { type: Number, required: true } }, opts)], default: [] },
+    content_types: {
+      type: [new Schema({ block_id: { type: String, required: true }, iso29148: { type: String, required: true }, in_scope: { type: Boolean, required: true }, confidence: { type: Number, required: true } }, opts)],
+      default: []
+    },
     error: { type: String, default: null },
     reading_since: { type: Date, default: null }
   },

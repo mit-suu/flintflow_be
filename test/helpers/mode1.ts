@@ -6,7 +6,23 @@ import request from "supertest"
 import { expect } from "vitest"
 import app from "../../src/app.js"
 import { getImportResponseSchema } from "../../src/modules/import/import.dto.js"
+import { applyDropText } from "../../src/modules/import/import.service.js"
+import { ImportedDocument } from "../../src/modules/import/imported-document.model.js"
 import type { SeededFixture } from "../setup.js"
+
+/**
+ * FLF-463: màn đọc khung "Bỏ tất cả" rồi viết lại file như lúc bấm Bắt đầu. Khung mẫu (vd Report3) còn bảng / hình mẫu thì mục đó
+ * là "có" (Code không phân biệt chữ của mẫu với chữ thật) — người dùng Bỏ chữ để FlintFlow soạn từ đầu. `keep`: mục (theo tiêu đề)
+ * giữ nội dung.
+ */
+export const dropAllText = async (seeded: SeededFixture, projectId: string, importId: string, keep?: RegExp): Promise<void> => {
+  const auth = { Authorization: `Bearer ${seeded.token}` }
+  const view = await request(app).get(`/api/v1/projects/${projectId}/import`).set(auth)
+  const keys = ((view.body.data.text_sections ?? []) as { key: string; title: string }[]).filter((s) => !keep?.test(s.title)).map((s) => s.key)
+  const res = await request(app).patch(`/api/v1/projects/${projectId}/import/drop-text`).set(auth).send({ import_id: importId, keys })
+  expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+  await applyDropText((await ImportedDocument.findById(importId))!)
+}
 
 export const createMode1Project = async (seeded: SeededFixture, name = "Lumen import"): Promise<string> => {
   const res = await request(app).post("/api/v1/projects").set("Authorization", `Bearer ${seeded.token}`).send({ name, mode: "import" })

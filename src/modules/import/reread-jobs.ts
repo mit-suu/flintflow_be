@@ -27,7 +27,7 @@ import { assemble } from "../render/assemble.service.js"
 import { Project } from "../project/project.model.js"
 import { stripRecord } from "./check.service.js"
 import { ExtractionDraft, type IExtractionDraft } from "./extraction-draft.model.js"
-import { applyRereadToDraft, loadExtractionInputs, readDiagramImage, rereadContextOf, unavailableImagesOf, type DiagramRead } from "./extract.service.js"
+import { applyRereadToDraft, loadContentInputs, readDiagramImage, rereadContextOf, unavailableImagesOf, type DiagramRead } from "./extract.service.js"
 import { IdAllocator, idKey, nameKey, type EntityItem } from "./extracted-entities.js"
 import { refreshSegmentHashes } from "./finalize.service.js"
 import { ImportedDocument } from "./imported-document.model.js"
@@ -193,7 +193,7 @@ export const runImageReread = async ({ projectId, userId, importId }: Omit<Rerea
   if (!doc || ["uploaded", "awaiting_latest_confirm", "mapping_review", "extracting", "baselining"].includes(doc.status)) return "stopped"
   const drafts = await ExtractionDraft.find({ import_id: doc._id })
   if (!unavailableImagesOf(drafts).length) return "done"
-  const inputs = await loadExtractionInputs(projectId)
+  const inputs = await loadContentInputs(projectId)
   const record = await spineRepository.get(projectId)
   if (!inputs || !record) return "stopped"
   // Giữ chỗ mọi id đang có (Spine + bản trích) ⇒ phần tử mới đọc từ ảnh không nhận trùng id
