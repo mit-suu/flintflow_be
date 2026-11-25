@@ -131,7 +131,8 @@ export interface WriteDocxOptions {
 
 /** FLF-334: stamp mang release gốc + loại bản (mode 2 không có CR ⇒ không ghi `flintflow_latest_cr`). */
 function stampLineage(doc: RenderedDocument): { name: string; value: string }[] {
-  const { release, base } = exportLineage(doc)
+  const { release } = exportLineage(doc)
+  const base = stampBaseVersion(doc)
   return [
     ...(base ? [{ name: STAMP_PROPERTY.base_version, value: base }] : []),
     { name: STAMP_PROPERTY.kind, value: release ? "release" : "draft" }
@@ -228,6 +229,17 @@ export async function writeDocx(doc: RenderedDocument, options: WriteDocxOptions
   })
 
   return Packer.toBuffer(document)
+}
+
+/**
+ * FLF-484: `flintflow_base_version` của stamp luôn là release gốc, không phải số bản nháp. Nhãn mode 1 là số bản nháp
+ * (`0.4`, `1.2`) nên `exportLineage` ra chính nó; bản nháp `N.m` đứng sau release `N.0` (`0.m` sau bản import `0.1`).
+ * Nhãn kiểu mode 2 (có tiền tố `v`: `v1.0 + 3 changes`, `v0.3`) giữ như `exportLineage`.
+ */
+export function stampBaseVersion(doc: Pick<RenderedDocument, "version" | "source">): string | null {
+  const draft = doc.source === "draft" ? /^(\d+)\.(\d+)$/.exec(doc.version.trim()) : null
+  if (draft) return Number(draft[1]) >= 1 ? `${Number(draft[1])}.0` : "0.1"
+  return exportLineage(doc).base
 }
 
 /**
