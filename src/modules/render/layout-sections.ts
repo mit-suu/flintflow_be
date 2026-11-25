@@ -1173,8 +1173,21 @@ export const buildLayoutSections = (
         // Rebinding its heading must retain that prose while removing template prompts.
         const sourceId = originalLayout.find((e) => e.order === n.sourceOrder)?.section_id
         const original = sourceId ? customById.get(sourceId) : undefined
+        // FLF-468 (lát B): mục mẫu cố định (`slot:business_rules` / `slot:messages`…) không đi qua `segmentBlocks`
+        // (không nằm trong `SECTION_ITEM_ARRAYS`) — bảng gốc của file nằm ở đúng mục riêng lúc chưa rebind
+        // (`customById`/`sourceId` trên). Vá đúng hàng theo bảng đó thay bảng FlintFlow vừa dựng (ChoViet §5.3).
+        const patchedTable = original ? patchTableInBlocks(spine, n.section_id, original.blocks, new Set()) : null
+        if (patchedTable) {
+          const at = blocks.findIndex((b) => b.type === "table")
+          if (at >= 0) blocks.splice(at, 1, patchedTable)
+          else blocks.push(patchedTable)
+        }
         const renderedText = JSON.stringify(blocks)
-        const retained = original?.blocks.filter((b) => !isInstructionText(b.text) && (b.kind !== "table" || tableBodyHasRealText(b.rows)) && (!b.text.trim() || !renderedText.includes(b.text))) ?? []
+        const retained = original?.blocks.filter((b) =>
+          !isInstructionText(b.text) &&
+          (b.kind !== "table" || (!patchedTable && tableBodyHasRealText(b.rows))) &&
+          (!b.text.trim() || !renderedText.includes(b.text))
+        ) ?? []
         blocks.push(...customBlocks(retained, (ref) => opts.diagramPng(mediaId(ref)), slotFor(n.section_id, n.number)))
       }
       // FLF-364 (câu 10): phần nhỏ chưa có dữ liệu ⇒ in chữ hướng dẫn của mẫu (mẫu bắt buộc thì không)
