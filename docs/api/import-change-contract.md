@@ -527,7 +527,7 @@ Business-flow §3.2 (C-6, C-7), §2 "Bản nháp / Gói duyệt / Baseline". **�
 
 - **#25 `POST …/change-requests/:crId/submit`** nay là **C-6 BA xác nhận**: `ready_to_submit` ⇒ Code kiểm lại trên nội dung hiện tại (`CR_VALUE_CHANGED` nếu lệch) ⇒ ghi Track Changes vào bản nháp **ngay** ⇒ `written` (có `result_doc_version`), mọi group ghi nhận `approved` bởi chính người xác nhận. Không còn `in_review` cho CR mới; vị trí BA muốn bỏ thì đặt kết luận `not_related` trước khi xác nhận (#27). `in_review` + #26 `groups/:gid/decision` + `revise` / `close` chỉ còn cho CR tạo trước FLF-330 (script `npm run migrate:cr-package` đưa chúng về `ready_to_submit` để BA xác nhận lại).
 - **Gói duyệt (C-7)** — không có model riêng: gói = mọi CR `written` kể từ lần phát hành trước (suy từ `DocVersion.cr_revision`), trạng thái chờ nằm ở `Spine.baseline_submission` (cùng field với nộp baseline mode 2 ⇒ `DRAFT_LOCKED` / `PACKAGE_PENDING` khoá mọi đường sửa):
-  - `GET /projects/:id/review-package` → `reviewPackageSchema` `{ status: drafting | pending | changes_requested, base_version ("v0" / "1.0"), latest_version, next_version, draft_label ("1.0 · 3 thay đổi chưa duyệt"), change_requests[], red_open, submission, spine_version }`. Mọi vai trò trong org.
+  - `GET /projects/:id/review-package` → `reviewPackageSchema` `{ status: drafting | pending | changes_requested, base_version ("v0" / "1.0"), latest_version, next_version, draft_label ("1.0 · 3 thay đổi chưa duyệt"), change_requests[], red_open, concise_record_credits (FLF-492), submission, spine_version }`. Mọi vai trò trong org.
   - `POST /projects/:id/review-package/submit` `{ base_version }` (Lead, Analyst): quét lại cờ (hồ sơ mode 1, `at_baseline`), cờ đỏ > 0 ⇒ `422 RELEASE_RED_FLAGS_OPEN` (`meta.flags[]`); chưa có CR ⇒ `409 PACKAGE_EMPTY`; đã gửi ⇒ `409 PACKAGE_ALREADY_SUBMITTED`. Đặt `baseline_submission = pending`, báo in-app `review_package_submitted` cho mọi Lead khác.
   - `POST /projects/:id/review-package/request-changes` `{ base_version, reason ≥ 10 }` (Lead): `baseline_submission = rejected` + lý do, mở khoá, báo người gửi `review_package_changes_requested`; không có gói chờ ⇒ `422 NO_PENDING_SUBMISSION`.
   - **Lead duyệt cả gói = `POST /projects/:id/release`** (#31, không đổi body): phát hành số chính như cũ, rồi xoá `baseline_submission` và báo người gửi `review_package_released`. Lead tự làm thì gọi thẳng, không qua bước gửi.
@@ -662,6 +662,14 @@ Cả hai đều không tự chuyển sang mẫu chuẩn FlintFlow.
 - Cột **Version** của Record of Changes là số lần phát hành chứa dòng: dòng CR / dòng soạn trước baseline mang số của baseline đầu tiên đứng sau (`1.0`, không tiền tố `v`), chưa phát hành ⇒ `-`. Dòng baseline ghi `Baseline <số>` cho cả tiếng Việt và tiếng Anh. Không còn số phụ của bản nháp trong bảng.
 - Dòng CR tách theo loại thay đổi: một dòng mỗi loại có mặt (A, M, D), cùng mã CR, cùng version. Mô tả dựng từ chính các thay đổi theo **ngôn ngữ tài liệu** (dự án import lấy ngôn ngữ của file / mẫu), không còn chép tiêu đề CR.
 - Không còn dòng cho bản gốc 0.1 (lô `by: import`) và cho việc tự vẽ lại sơ đồ (lý do `render`). Ngày ghi theo giờ Việt Nam.
+
+## FLF-492 (2026-11-25) — tuỳ chọn "AI viết gọn" mô tả dòng CR khi phát hành (chỉ thêm field)
+
+**Additive** ⇒ PR nhãn `contract-change`.
+
+- #31 `POST /projects/:id/release`: body thêm `concise_record?: boolean` (mặc định `false`). Bật ⇒ trước khi dựng bản sạch, AI viết gọn mô tả các dòng CR của gói (một lượt mỗi 20 dòng, action `cr_record_summary`, 1 credit mỗi lượt); câu hợp lệ lưu vào `ChangeRequest.record_summaries` và bảng đọc lại từ đó. AI lỗi / hết credit / câu sai ngôn ngữ ⇒ dòng đó giữ câu dựng sẵn, phát hành vẫn thành công.
+- #review-package `GET /projects/:id/review-package`: thêm `concise_record_credits: number` — credit ước tính cho tuỳ chọn trên (0 khi không có dòng CR nào cần viết).
+- Không đổi response của #31.
 
 ## FLF-334 B (2026-10-29) — tải version theo ngôn ngữ còn lại
 

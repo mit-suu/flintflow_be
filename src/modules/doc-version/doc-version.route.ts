@@ -78,7 +78,7 @@ const router = Router()
  *       required: true
  *       content:
  *         application/json:
- *           schema: { type: object, required: [base_version], properties: { base_version: { type: integer } } }
+ *           schema: { type: object, required: [base_version], properties: { base_version: { type: integer }, concise_record: { type: boolean, description: "FLF-492: AI viết gọn mô tả các dòng CR trong Record of Changes (mặc định false, tốn credit; lỗi AI không chặn phát hành)" } } }
  *     responses:
  *       201: { description: "`{ version, baseline (type release), cr_ids, spine_version }`" }
  *       403: { description: "ORG_ROLE_FORBIDDEN — chỉ Lead release" }
@@ -104,7 +104,7 @@ router.post("/:projectId/release", authMiddleware, requireRole("lead"), versionC
  *       - { in: path, name: projectId, required: true, schema: { type: string } }
  *     responses:
  *       200:
- *         description: "`reviewPackageSchema`"
+ *         description: "`reviewPackageSchema` (kèm `concise_record_credits`: credit ước tính cho tuỳ chọn AI viết gọn khi phát hành)"
  */
 router.get("/:projectId/review-package", authMiddleware, versionController.getReviewPackage)
 

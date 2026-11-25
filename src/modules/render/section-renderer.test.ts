@@ -6,7 +6,9 @@ import { listSections } from "../spine/section-registry.js"
 import { translationUnits, type UnitValue } from "../translation/translation-units.js"
 import { localizeSpine, renderView } from "./localized-spine.js"
 import type { Block } from "./rendered-document.types.js"
-import { buildRecordOfChanges, renderContentSlot, renderSection, sectionHeadingOf, type SectionRenderContext } from "./section-renderer.js"
+import { buildRecordOfChanges, crRecordUnits, renderContentSlot, renderSection, sectionHeadingOf, type SectionRenderContext } from "./section-renderer.js"
+import { recordChangesHash } from "./cr-record.js"
+import type { CrRecordSummary } from "../change-request/change-request.model.js"
 
 const emptySpine = (): Spine => ({
   project: {
@@ -1210,5 +1212,45 @@ describe("bug #1 / #3 FLF-447 - bảng NFR và yêu cầu chung", () => {
     const spine: Spine = { ...emptySpine(), common_requirements: [{ id: "C1", category: "date_format", statement: "ISO 8601." }, { id: "C2", category: "Custom", statement: "x" }] }
     const t = tableOf(renderSection(spine, "fixed:5.2", ctx({ language: "en" })).blocks)
     expect(t.rows.map(cells).map((r) => r[0])).toEqual(["Date format", "Custom"])
+  })
+})
+
+// ─── FLF-492: mô tả dòng CR do AI viết gọn ─────────────────────────
+
+describe("buildRecordOfChanges - mô tả AI viết gọn (FLF-492)", () => {
+  const cr = (over: Partial<Parameters<typeof buildRecordOfChanges>[0][number]>) => ({
+    txn: "t1",
+    op: "set",
+    reason: "CR-003: x",
+    at: "2026-09-01T09:00:00.000Z",
+    by: "CR-003",
+    step_id: null,
+    path: "project.vision",
+    ...over
+  })
+  const changes = [cr({}), cr({ txn: "t2", by: "CR-004", path: "project.goals", reason: "CR-004: y" })]
+  const hashOf = (rows: typeof changes) => recordChangesHash(rows)
+
+  it("không truyền summaries ⇒ câu dựng sẵn", () => {
+    expect(buildRecordOfChanges(changes, undefined, "en").map((r) => r.description)).toEqual(["CR-003: Update product vision", "CR-004: Update business goals"])
+  })
+
+  it("mô tả khớp loại, ngôn ngữ và dấu vân tay ⇒ CR-xxx: <câu viết gọn>; lệch hash hoặc lệch ngôn ngữ ⇒ câu dựng sẵn", () => {
+    const summaries = new Map<string, readonly CrRecordSummary[]>([
+      ["CR-003", [{ kind: "M", text: "Reword the product vision", language: "en", changes_hash: hashOf([changes[0]]) }]],
+      ["CR-004", [{ kind: "M", text: "Reword the goals", language: "en", changes_hash: "stale" }]]
+    ])
+    expect(buildRecordOfChanges(changes, undefined, "en", undefined, summaries).map((r) => r.description)).toEqual(["CR-003: Reword the product vision", "CR-004: Update business goals"])
+    // Tài liệu tiếng Việt: mô tả tiếng Anh không dùng
+    expect(buildRecordOfChanges(changes, undefined, "vi", undefined, summaries).map((r) => r.description)).toEqual(["CR-003: Cập nhật tầm nhìn sản phẩm", "CR-004: Cập nhật mục tiêu"])
+  })
+
+  it("crRecordUnits trả đúng các dòng CR sẽ in, kèm câu dựng sẵn", () => {
+    const units = crRecordUnits([...changes, cr({ txn: "t3", by: "CR-004", op: "add", path: "use_cases[id=UC-01]", reason: "CR-004: y" })], "en")
+    expect(units.map((u) => [u.cr_id, u.kind, u.built])).toEqual([
+      ["CR-003", "M", "Update product vision"],
+      ["CR-004", "M", "Update business goals"],
+      ["CR-004", "A", "Add use case UC-01"]
+    ])
   })
 })

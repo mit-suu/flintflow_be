@@ -95,8 +95,9 @@ describe("skill trên đĩa (assets/skills)", () => {
     // +3 content FLF-365: references-list, requirement-apportioning, verification-matrix (mục IEEE 29148, Mode 1).
     // +1 renderer FLF-390: renderer/activity (activity diagram, luồng xử lý mỗi function một hình).
     // +1 renderer FLF-390: renderer/deployment (deployment diagram của hệ thống, §4.1).
-    expect(listSkillAssets()).toHaveLength(52)
-    expect(byKind("action")).toBe(22)
+    // +1 action FLF-492: cr-record-summary (viết gọn mô tả dòng CR trong Record of Changes khi phát hành).
+    expect(listSkillAssets()).toHaveLength(53)
+    expect(byKind("action")).toBe(23)
     expect(byKind("content")).toBe(18)
     expect(byKind("renderer")).toBe(10)
     expect(byKind("output")).toBe(2)

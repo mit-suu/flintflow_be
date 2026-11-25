@@ -354,6 +354,12 @@ export const importExtractDiagramSchema = importExtractSchema.extend({
   diagram_kind: z.enum(DIAGRAM_IMAGE_KINDS)
 })
 
+/** FLF-492 (CR_RECORD_SUMMARY): một câu ngắn cho mỗi dòng Record of Changes (khoá theo `cr_id` + loại A / M / D). */
+export const crRecordSummarySchema = z.object({
+  rows: z.array(z.object({ cr_id: z.string().min(1), kind: z.enum(["A", "M", "D"]), text: z.string().trim().min(1).max(400) })).max(100)
+})
+export type CrRecordSummaryOutput = z.infer<typeof crRecordSummarySchema>
+
 /** FLF-395 (SKELETON_GENERIC_NAMES, D13): dạng chung gợi ý cho từng mục BA tự đặt; `generic: null` = không dùng lại được. */
 export const skeletonGenericNamesSchema = z.object({
   suggestions: z.array(z.object({ key: z.string().min(1), generic: z.string().trim().min(1).max(300).nullable(), reason: z.string().nullable().default(null) })).max(200)
@@ -572,6 +578,7 @@ export const OUTPUT_SCHEMA_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, s
   [ActionType.CR_PROPOSE]: "crPropose",
   [ActionType.CR_CONSISTENCY]: "findings",
   [ActionType.CR_MATERIAL_IMAGE]: "crMaterialImage",
+  [ActionType.CR_RECORD_SUMMARY]: "crRecordSummary",
   [ActionType.KNOWLEDGE_ANSWER]: "knowledgeAnswer",
   [ActionType.EXTRACT_REQUIREMENTS]: "extractRequirements",
   [ActionType.SKELETON_GENERIC_NAMES]: "skeletonGenericNames",
@@ -602,6 +609,7 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.CR_PROPOSE]: crProposeSchema,
   [ActionType.CR_CONSISTENCY]: findingsSchema,
   [ActionType.CR_MATERIAL_IMAGE]: crMaterialImageSchema,
+  [ActionType.CR_RECORD_SUMMARY]: crRecordSummarySchema,
   [ActionType.KNOWLEDGE_ANSWER]: knowledgeAnswerSchema,
   [ActionType.EXTRACT_REQUIREMENTS]: extractRequirementsSchema,
   [ActionType.SKELETON_GENERIC_NAMES]: skeletonGenericNamesSchema,

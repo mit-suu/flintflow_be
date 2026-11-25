@@ -21,7 +21,9 @@ vi.mock("../../../src/modules/pipeline/s9/baseline.service.js", async (importOri
 })
 
 import { seedFixture } from "../../setup.js"
-import { resetMockLlm } from "../../helpers/mock-llm.js"
+import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
+import { mockRecordSummaryRows } from "../../../src/shared/ai/providers/mock.provider.js"
+import { ChangeRequest } from "../../../src/modules/change-request/change-request.model.js"
 import { createMode1Project, mode1Api } from "../../helpers/mode1.js"
 import {
   binary,
@@ -377,5 +379,56 @@ describe("doc-file.store - GridFS", () => {
     expect(await gridFsFileCount("B")).toBe(1)
     expect((await gridFsDocFileStore.load(b)).toString()).toBe("b")
     await expect(gridFsDocFileStore.removeProject("khong-co")).resolves.toBeUndefined()
+  })
+})
+
+describe("release - AI viết gọn mô tả Record of Changes (FLF-492)", () => {
+  const SUMMARY_PROMPT = "Record of Changes - concise descriptions"
+  let summaryCalls = 0
+
+  /** Trả lời lượt viết gọn bằng provider mock thật (rút gọn câu dựng sẵn); lượt khác đi đường mặc định. */
+  const answerSummary = (fail = false) => {
+    summaryCalls = 0
+    mockOverrides.next = (prompt) => {
+      if (!prompt.includes(SUMMARY_PROMPT)) return undefined
+      summaryCalls += 1
+      if (fail) return new Error("model down")
+      return JSON.stringify({ rows: mockRecordSummaryRows(prompt) })
+    }
+  }
+  const releaseWith = async (c: Mode1Api, body: Record<string, unknown>) => c.post("/release", { base_version: await c.spineVersion(), ...body })
+  const cleanXml = async (projectId: string): Promise<string> => {
+    const v10 = (await DocVersion.findOne({ projectId, version: "1.0" }).lean())!
+    return documentXml(await docFileStore().load(v10.clean_file_ref!))
+  }
+
+  it("gói duyệt báo credit ước tính; không bật ô chọn ⇒ không gọi AI, bảng dùng câu dựng sẵn", async () => {
+    const { c, projectId } = await projectWithRevision()
+    answerSummary()
+    const pkg = await c.get("/review-package")
+    expect(pkg.body.data.concise_record_credits).toBe(1)
+    expect((await releaseWith(c, {})).status).toBe(201)
+    expect(summaryCalls).toBe(0)
+    const xml = await cleanXml(projectId)
+    expect(xml).toContain("CR-001:")
+    expect(xml).not.toContain("[MOCK AI]")
+  })
+
+  it("concise_record: true ⇒ dòng CR dùng mô tả viết gọn, lưu vào CR", async () => {
+    const { c, projectId } = await projectWithRevision()
+    answerSummary()
+    expect((await releaseWith(c, { concise_record: true })).status).toBe(201)
+    expect(await cleanXml(projectId)).toContain("[MOCK AI]")
+    const cr = await ChangeRequest.findOne({ projectId, cr_id: "CR-001" }).lean()
+    expect(cr?.record_summaries?.length).toBeGreaterThan(0)
+  })
+
+  it("AI lỗi lúc viết gọn ⇒ vẫn phát hành, dòng CR giữ câu dựng sẵn", async () => {
+    const { c, projectId } = await projectWithRevision()
+    answerSummary(true)
+    expect((await releaseWith(c, { concise_record: true })).status).toBe(201)
+    const xml = await cleanXml(projectId)
+    expect(xml).toContain("CR-001:")
+    expect(xml).not.toContain("[MOCK AI]")
   })
 })

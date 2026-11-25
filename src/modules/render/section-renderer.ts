@@ -24,6 +24,7 @@ import { activitySectionOf } from "../diagram/renderers/activity.renderer.js"
 import { isComponentSequenceSource } from "../diagram/renderers/sequence.renderer.js"
 import { DEFAULT_RELATION_VERB, relationVerb } from "../diagram/renderers/erd.renderer.js"
 import { describeInterface } from "./interface-description.js"
+import type { CrRecordSummary } from "../change-request/change-request.model.js"
 import { changeKindOf, crRecordDescription, type ChangeKind } from "./cr-record.js"
 import { diagramErrorMarker } from "./diagram-placeholder.js"
 import { matchTableHeader } from "../import/table-header-dictionary.js"
@@ -1072,6 +1073,61 @@ const describeRow = (reasons: readonly string[], language?: string): string => {
 /** Lý do op-engine gắn cho op cascade — đi kèm lô của user, không phải lời của user. */
 const MACHINE_REASON = /^Cascade:/
 
+type RecordRow = { date: string; phase: string; baseline: boolean; cr: boolean; changes: ChangeRecordRow[] }
+
+/** Gom lô được giữ thành dòng §I (chưa tính version / mô tả): liền nhau cùng ngày + cùng giai đoạn thì dồn, baseline và CR đứng riêng. */
+const groupRecordRows = (changes: readonly ChangeRecordRow[]): RecordRow[] => {
+  const order: string[] = []
+  const groups = new Map<string, ChangeRecordRow[]>()
+  for (const change of changes) {
+    const list = groups.get(change.txn)
+    if (list) list.push(change)
+    else {
+      groups.set(change.txn, [change])
+      order.push(change.txn)
+    }
+  }
+
+  // Gom lô được giữ thành dòng: liền nhau cùng ngày + cùng giai đoạn thì dồn, baseline đứng riêng.
+  const rows: RecordRow[] = []
+  for (const txn of order) {
+    const group = groups.get(txn) as ChangeRecordRow[]
+    if (!keepInRecordOfChanges(group)) continue
+    // Bản gốc 0.1 (nạp dữ liệu + ký baseline lúc import) không sinh dòng (BF §3.2)
+    if (isImportBaseline(group)) continue
+    const date = vnDate(group[0].at)
+    const baseline = isBaselineTxn(group)
+    const cr = !baseline && isCrTxn(group)
+    const last = rows[rows.length - 1]
+    // Lô không gắn step (xác nhận giả định ở cổng, lệnh sửa chat giữa step) thuộc giai đoạn đang chạy — không cắt nhóm
+    const phase = phaseKeyOf(group[0].step_id) || (last && !last.baseline && last.date === date ? last.phase : "")
+    // Lô CR luôn đứng riêng một dòng (= một version tài liệu), không gộp theo ngày
+    if (!baseline && !cr && last && !last.baseline && !last.cr && last.date === date && last.phase === phase) last.changes.push(...group)
+    else rows.push({ date, phase, baseline, cr, changes: [...group] })
+  }
+  return rows
+}
+
+/** Một dòng §I của CR sau khi tách theo loại thay đổi: đơn vị mà "AI viết gọn" viết lại (FLF-492). */
+export interface CrRecordUnit {
+  cr_id: string
+  kind: ChangeKind
+  changes: ChangeRecordRow[]
+  /** Câu dựng sẵn (không có tiền tố `CR-xxx:`). */
+  built: string
+}
+
+/** Các dòng CR của Record of Changes, đúng như `buildRecordOfChanges` sẽ in (cùng cách gom, cùng cách tách A / M / D). */
+export const crRecordUnits = (changes: readonly ChangeRecordRow[], language?: string, spine?: Spine): CrRecordUnit[] =>
+  groupRecordRows(changes).flatMap((row) => {
+    const crId = row.cr ? row.changes.find((c) => CR_ACTOR.test(c.by))?.by : undefined
+    if (!crId) return []
+    return KIND_ORDER.flatMap((kind): CrRecordUnit[] => {
+      const group = row.changes.filter((c) => changeKindOf(c) === kind)
+      return group.length === 0 ? [] : [{ cr_id: crId, kind, changes: group, built: crRecordDescription(crId, group, language, spine).replace(`${crId}: `, "") }]
+    })
+  })
+
 /**
  * §I là lịch sử cho người đọc tài liệu, không phải nhật ký từng transaction: một ngày chat sửa vài chục lần
  * từng ra vài chục dòng/version. Nay gộp các lô được giữ (`keepInRecordOfChanges`) **liền nhau, cùng ngày, cùng
@@ -1097,37 +1153,12 @@ export function buildRecordOfChanges(
   changes: ChangeRecordRow[],
   resolveInCharge: (by: string) => string = (by) => by,
   language?: string,
-  spine?: Spine
+  spine?: Spine,
+  /** FLF-492: mô tả "AI viết gọn" theo mã CR (tuỳ chọn); không truyền ⇒ chỉ câu dựng sẵn. */
+  summaries?: ReadonlyMap<string, readonly CrRecordSummary[]>
 ): RocRow[] {
   const text = recordTextFor(language)
-  const order: string[] = []
-  const groups = new Map<string, ChangeRecordRow[]>()
-  for (const change of changes) {
-    const list = groups.get(change.txn)
-    if (list) list.push(change)
-    else {
-      groups.set(change.txn, [change])
-      order.push(change.txn)
-    }
-  }
-
-  // Gom lô được giữ thành dòng: liền nhau cùng ngày + cùng giai đoạn thì dồn, baseline đứng riêng.
-  const rows: { date: string; phase: string; baseline: boolean; cr: boolean; changes: ChangeRecordRow[] }[] = []
-  for (const txn of order) {
-    const group = groups.get(txn) as ChangeRecordRow[]
-    if (!keepInRecordOfChanges(group)) continue
-    // Bản gốc 0.1 (nạp dữ liệu + ký baseline lúc import) không sinh dòng (BF §3.2)
-    if (isImportBaseline(group)) continue
-    const date = vnDate(group[0].at)
-    const baseline = isBaselineTxn(group)
-    const cr = !baseline && isCrTxn(group)
-    const last = rows[rows.length - 1]
-    // Lô không gắn step (xác nhận giả định ở cổng, lệnh sửa chat giữa step) thuộc giai đoạn đang chạy — không cắt nhóm
-    const phase = phaseKeyOf(group[0].step_id) || (last && !last.baseline && last.date === date ? last.phase : "")
-    // Lô CR luôn đứng riêng một dòng (= một version tài liệu), không gộp theo ngày
-    if (!baseline && !cr && last && !last.baseline && !last.cr && last.date === date && last.phase === phase) last.changes.push(...group)
-    else rows.push({ date, phase, baseline, cr, changes: [...group] })
-  }
+  const rows = groupRecordRows(changes)
 
   let baselines = 0
   const seenPhases = new Set<string>()
@@ -1174,7 +1205,7 @@ export function buildRecordOfChanges(
       for (const kind of KIND_ORDER) {
         const group = row.changes.filter((c) => changeKindOf(c) === kind)
         if (group.length === 0) continue
-        out.push({ date: row.date, version: versions[i], change_type: kind, in_charge: inCharge, description: crRecordDescription(crId, group, language, spine) })
+        out.push({ date: row.date, version: versions[i], change_type: kind, in_charge: inCharge, description: crRecordDescription(crId, group, language, spine, summaries?.get(crId)) })
       }
       return
     }

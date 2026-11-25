@@ -28,6 +28,7 @@ import { isStableDocVersion, nextMajor } from "./versioning.js"
 import { trackedPolicySince } from "./migration-tracked-policy.js"
 import { releaseTrackedAuthor, saveTrackedFile } from "./tracked-file.js"
 import { proposeTemplateFromBaseline } from "../import/template-skeleton.service.js"
+import { resolveRecordLanguage, summarizeRecordRows } from "./record-summary.service.js"
 
 export interface ReleaseResult {
   version: IDocVersion
@@ -50,7 +51,12 @@ const buildReleaseTracked = async (projectId: string, versions: IDocVersion[], b
   })
 }
 
-export const release = async (projectId: string, userId: string, baseVersion: number): Promise<ReleaseResult> => {
+export interface ReleaseOptions {
+  /** FLF-492 (M4-02): AI viết gọn mô tả các dòng CR của gói trong Record of Changes. Mặc định tắt; lỗi AI không chặn phát hành. */
+  conciseRecord?: boolean
+}
+
+export const release = async (projectId: string, userId: string, baseVersion: number, options: ReleaseOptions = {}): Promise<ReleaseResult> => {
   await assertNoMigrationRunning(projectId)
   const before = await spineRepository.get(projectId)
   if (!before) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
@@ -82,6 +88,14 @@ export const release = async (projectId: string, userId: string, baseVersion: nu
   // §I của chính file release phải có dòng của nó (Record of Changes khớp số version) — lô baseline ghi sau khi render
   const releaseRow = { txn: `release:${next}`, at: new Date().toISOString(), by: userId, reason: `Baseline ${next}`, op: "add", path: "baselines[]", step_id: null }
   const templateSource = await captureTemplateSourceBinding(projectId)
+  // FLF-492: viết gọn mô tả dòng CR trước khi dựng bản sạch (bảng đọc lại từ `ChangeRequest.record_summaries`). Không bao giờ làm hỏng phát hành.
+  if (options.conciseRecord && crIds.length > 0) {
+    try {
+      await summarizeRecordRows(projectId, userId, stripRecord(record), crIds, await resolveRecordLanguage(projectId, templateSource), `release:${next}`)
+    } catch (err) {
+      console.warn(`[release] ${projectId}: bỏ qua bước AI viết gọn:`, err instanceof Error ? err.message : err)
+    }
+  }
   const recordSnapshot = templateSource ? await listChangesForRecord(projectId) : null
   const buffer = await renderVersionFile(projectId, projectName, stripRecord(record), { version: next, stampSource: "release", pendingRecord: [releaseRow], templateSource, ...(recordSnapshot ? { recordChanges: recordSnapshot } : {}) })
   const fileRef = await docFileStore().save(buffer, { projectId, kind: "version", name: next })
