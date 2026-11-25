@@ -34,7 +34,11 @@ import {
   VI_LABELS,
   VI_PHASE_LABELS,
   VI_SECTION_TITLES,
+  LOCALIZATION_CATEGORIES,
+  SECURITY_CATEGORIES,
   assembleTextFor,
+  commonCategoryIn,
+  commonCategoryLabel,
   enumLabel,
   fptLabelFor,
   isVietnamese,
@@ -848,10 +852,23 @@ const nfrList = (spine: Spine, category: NfrCategory, ctx: SectionRenderContext)
   return items.length === 0 ? [] : [bulletList(items.map((n) => nfrStatement(n, fptLanguage(ctx))), pathsOf("nfrs", items))]
 }
 
+/**
+ * Bảng NFR §4.2.x. Bug #1 (FLF-447 test): bảng dựng lại cho mẫu cố định / đoạn mà file gốc là bảng (`preferTable`) mang thêm
+ * cột ID ⇒ cột "Mã" của bảng file nhận đúng mã khi ghép cột (`file-table.ts`, `projectTableColumns`); bảng mặc định của mẫu
+ * FPT / mode 2 giữ 4 cột như cũ. Mức ưu tiên dịch theo ngôn ngữ tài liệu ở mọi layout (trước đây chỉ mẫu FPT ⇒ in "must").
+ */
 const nfrTable = (spine: Spine, category: NfrCategory, ctx: SectionRenderContext): Block[] => {
   const items = spine.nfrs.filter((n) => n.category === category)
   if (items.length === 0) return []
-  return [tableBlock(["Statement", "Metric", "Threshold", "Priority"], items.map((n) => [n.statement, n.metric ?? "", n.threshold ?? "", n.priority ? enumLabel(fptLanguage(ctx), "priority", n.priority) : ""]), pathsOf("nfrs", items))]
+  const withId = ctx.functionLayout !== "fpt" && (!!ctx.fixedTemplate || !!ctx.preferTable)
+  const priorityCell = (n: Nfr) => (n.priority ? enumLabel(ctx.language, "priority", n.priority) : "")
+  return [
+    tableBlock(
+      [...(withId ? ["ID"] : []), "Statement", "Metric", "Threshold", "Priority"],
+      items.map((n) => [...(withId ? [n.id] : []), n.statement, n.metric ?? "", n.threshold ?? "", priorityCell(n)]),
+      pathsOf("nfrs", items)
+    )
+  ]
 }
 
 // ─── §5 Requirement Appendix ────────────────────────────────────────
@@ -862,10 +879,17 @@ const businessRulesDetail = (spine: Spine, ctx?: SectionRenderContext): Block[] 
   return ctx?.preferTable ? [tableBlock(["ID", "Rule"], items.map((r) => [r.id, r.statement]), pathsOf("business_rules", items))] : [bulletList(items.map((r) => r.statement), pathsOf("business_rules", items))]
 }
 
+/**
+ * Nhãn loại yêu cầu chung: mẫu FPT như cũ; layout file (mode 1) ⇒ khoá FlintFlow (import đã chuẩn hoá, bug #3) in theo ngôn ngữ
+ * tài liệu, chữ tự do của file in nguyên.
+ */
+const commonCategoryCell = (category: string, ctx: SectionRenderContext): string =>
+  ctx.functionLayout === "fpt" ? enumLabel(ctx.language, "common_category", category) : commonCategoryLabel(ctx.language, category)
+
 const commonRequirements = (spine: Spine, ctx: SectionRenderContext): Block[] =>
   spine.common_requirements.length === 0
     ? []
-    : [tableBlock(["Category", "Statement"], spine.common_requirements.map((c) => [enumLabel(fptLanguage(ctx), "common_category", c.category), c.statement]), pathsOf("common_requirements", spine.common_requirements))]
+    : [tableBlock(["Category", "Statement"], spine.common_requirements.map((c) => [commonCategoryCell(c.category, ctx), c.statement]), pathsOf("common_requirements", spine.common_requirements))]
 
 /** P07: nhãn cột "Type" theo ngôn ngữ tài liệu; Spine cũ không có loại ⇒ ô trống. */
 const messageTypeCell = (type: Message["type"], ctx?: SectionRenderContext): string =>
@@ -928,8 +952,8 @@ const blocksFor = (spine: Spine, sectionId: string, ctx: SectionRenderContext): 
       return ctx.fixedTemplate && ctx.representedSlots?.has("slot:business_rules") ? [] : businessRulesDetail(spine, ctx)
     case "fixed:5.2":
       return commonRequirements(ctx.fixedTemplate ? { ...spine, common_requirements: spine.common_requirements.filter((c) =>
-        !(ctx.representedSlots?.has("slot:security") && ["security", "session", "audit"].includes(c.category)) &&
-        !(ctx.representedSlots?.has("slot:localization") && ["localization", "date_format"].includes(c.category))) } : spine, ctx)
+        !(ctx.representedSlots?.has("slot:security") && commonCategoryIn(c.category, SECURITY_CATEGORIES)) &&
+        !(ctx.representedSlots?.has("slot:localization") && commonCategoryIn(c.category, LOCALIZATION_CATEGORIES))) } : spine, ctx)
     case "fixed:5.3":
       return ctx.fixedTemplate && ctx.representedSlots?.has("slot:messages") ? [] : messagesList(spine, ctx)
     case "fixed:5.4":
@@ -1175,11 +1199,12 @@ const externalSystems = (spine: Spine, ctx: SectionRenderContext): Block[] => {
 
 const otherOf = (spine: Spine, kinds: readonly string[]) => spine.other_requirements.filter((o) => kinds.includes(o.kind))
 
+/** Bug #3: loại ghi tự do ("Bảo mật") của dữ liệu cũ vẫn vào đúng phần nhỏ — so sau `normalizeCommonCategory`. */
 const commonOf = (spine: Spine, categories: readonly string[], ctx: SectionRenderContext): Block[] => {
-  const items = spine.common_requirements.filter((c) => categories.includes(c.category))
+  const items = spine.common_requirements.filter((c) => commonCategoryIn(c.category, categories))
   if (items.length === 0) return []
   const text = slotTextFor(ctx.language)
-  return [tableBlock([text.category, text.statement], items.map((c) => [enumLabel(fptLanguage(ctx), "common_category", c.category), c.statement]))]
+  return [tableBlock([text.category, text.statement], items.map((c) => [commonCategoryCell(c.category, ctx), c.statement]))]
 }
 
 const slotBlocks = (spine: Spine, slotId: string, ctx: SectionRenderContext): Block[] => {
@@ -1290,9 +1315,9 @@ const slotBlocks = (spine: Spine, slotId: string, ctx: SectionRenderContext): Bl
         : []
     }
     case "slot:security":
-      return commonOf(spine, ["security", "session", "audit"], ctx)
+      return commonOf(spine, SECURITY_CATEGORIES, ctx)
     case "slot:localization":
-      return commonOf(spine, ["localization", "date_format"], ctx)
+      return commonOf(spine, LOCALIZATION_CATEGORIES, ctx)
     case "slot:analysis_models":
       return [
         ...diagramImages(spine, "usecase", undefined, ctx, "Use Case Diagram", svgCaption),

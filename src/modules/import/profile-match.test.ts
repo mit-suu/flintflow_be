@@ -587,6 +587,35 @@ describe("FLF-363 - nội dung dưới heading (D1–D2)", () => {
     expect(map.B0001.content_mismatch).toBeUndefined()
   })
 
+  // Lỗi #2 test FLF-447: "3.1.3 Phân quyền màn hình" với ô tiếng Việt bị đổi sang 3.1.2 (bảng màn hình) ⇒ mất phân quyền
+  const permissionRows = [
+    ["Màn hình", "Người mua", "Người bán", "Quản trị viên"],
+    ["Danh sách sản phẩm", "Xem", "Xem / Sửa", "Xem / Ẩn"],
+    ["Quản lý đơn hàng", "Xem đơn của mình", "Xác nhận / Giao", "Xem tất cả"],
+    ["Duyệt hồ sơ HTX", "Không", "Nộp hồ sơ", "Duyệt / Từ chối"]
+  ]
+
+  it("3.1.3 Phân quyền màn hình + ma trận ô tiếng Việt ⇒ giữ fixed:3.1.3, cột vai trò map vào permissions", () => {
+    const blocks = [heading(1, 1, "3. Yêu cầu chức năng"), heading(2, 2, "3.1.3 Phân quyền màn hình"), table(3, permissionRows), heading(4, 2, "3.2 Chi tiết Use Case")]
+    const result = matchProfile(blocks)
+    const map = Object.fromEntries(result.heading_map.map((h) => [h.block_id, h]))
+    expect(map.B0002).toMatchObject({ section_id: "fixed:3.1.3" })
+    expect(map.B0002.content_mismatch).toBeUndefined()
+    expect(result.table_map.filter((c) => c.block_id === "B0003").map((c) => c.field_path)).toEqual([
+      "permissions[].screen_id",
+      "permissions[].role_id",
+      "permissions[].role_id",
+      "permissions[].role_id"
+    ])
+  })
+
+  it("bảng dưới 3.1.3 trông như bảng màn hình (ô vai trò không nhận ra) vẫn không kéo heading sang 3.1.2", () => {
+    const rows = [["Màn hình", "Người mua", "Người bán"], ["Danh sách sản phẩm", "Được phép", "Hạn chế"], ["Giỏ hàng", "Được phép", "Hạn chế"]]
+    const map = byId([heading(1, 1, "3. Yêu cầu chức năng"), heading(2, 2, "3.1.3 Phân quyền màn hình"), table(3, rows), heading(4, 2, "3.2 Chi tiết Use Case")])
+    expect(map.B0002).toMatchObject({ section_id: "fixed:3.1.3" })
+    expect(map.B0002.content_mismatch).toBeUndefined()
+  })
+
   it("nội dung khớp mục theo tên (bảng use case dưới Use Case Diagram) ⇒ giữ nguyên", () => {
     const map = byId([heading(1, 1, "Use Case Diagram"), table(2, [["Use Case ID", "Use Case Name", "Actor"], ["UC-01", "Login", "User"]])])
     expect(map.B0001).toMatchObject({ section_id: "fixed:2.2.1", confidence: 1 })

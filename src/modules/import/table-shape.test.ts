@@ -98,4 +98,24 @@ describe("tableShape", () => {
     expect(shape.columns.map((c) => c.role)).toEqual(["name", "mark", "mark", "mark"])
     expect(isMarkMatrix(shape)).toBe(true)
   })
+
+  it("ma trận ô tiếng Việt (Xem / Sửa, Duyệt / Từ chối, ô mở đầu bằng từ hành động) ⇒ ma trận phân quyền (lỗi #2 test FLF-447)", () => {
+    const shape = tableShape([
+      ["Màn hình", "Người mua", "Người bán", "Quản trị viên"],
+      ["Danh sách sản phẩm", "Xem", "Xem / Sửa", "Xem / Ẩn"],
+      ["Quản lý đơn hàng", "Xem đơn của mình", "Xác nhận / Giao", "Xem tất cả"],
+      ["Duyệt hồ sơ HTX", "Không", "Nộp hồ sơ", "Duyệt / Từ chối"]
+    ])
+    expect(shape.columns.map((c) => c.role)).toEqual(["name", "mark", "mark", "mark"])
+    expect(markMatrixColumns(shape)).toEqual({ nameColumn: 0, markColumns: [1, 2, 3] })
+    expect(markActions("Xem / Sửa")).toEqual(["xem", "sửa"])
+    expect(markActions("Không")).toEqual([])
+    expect(markActions("Không có quyền")).toEqual([])
+  })
+
+  it("cột tên mở đầu bằng động từ tiếng Việt (tên use case) không thành cột đánh dấu", () => {
+    expect(columnRole(["Tạo đơn hàng", "Xem sản phẩm", "Quản lý tài khoản"]).role).toBe("name")
+    // ô dài mở đầu bằng động từ không tính là ô đánh dấu
+    expect(columnRole(["Xem danh sách sản phẩm theo danh mục và bộ lọc giá", "Cho phép người bán cập nhật tồn kho", "Xem"]).role).not.toBe("mark")
+  })
 })

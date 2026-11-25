@@ -38,3 +38,36 @@ describe("draftVersionLabel - FLF-295", () => {
     expect(draftVersionLabel(spine, [...changes, change("t4", "screens[id=S20]", "2026-10-17T12:00:00.000Z")])).toBe("v1.0 + 2 changes")
   })
 })
+
+describe("unreleasedChangeCount - đổi mẫu (Lỗi #4, BF L113)", () => {
+  const since = "2026-11-20T10:00:00.000Z"
+  const spine = { baselines: [baseline("0.1", since)] }
+  const apply = [
+    change("template-migration:abc123", "custom_sections[id=CS09]", "2026-11-20T11:00:00.000Z"),
+    change("template-migration:abc123:revert", "custom_sections[id=CS02].blocks", "2026-11-20T11:00:00.000Z")
+  ]
+  const undo = [change("template-migration:abc123:undo", "custom_sections[id=CS09]", "2026-11-20T12:00:00.000Z")]
+  const cr = change("t-cr", "nfrs[id=NFR-06]", "2026-11-20T13:00:00.000Z")
+
+  it("áp dụng + hoàn tác ⇒ triệt tiêu, về đúng version baseline", () => {
+    expect(draftVersionLabel(spine, [...apply, ...undo])).toBe("0.1")
+  })
+
+  it("chỉ áp dụng (kể cả lô :revert) ⇒ +1 change", () => {
+    expect(draftVersionLabel(spine, apply)).toBe("0.1 + 1 change")
+  })
+
+  it("áp dụng + hoàn tác + 1 CR ⇒ +1 change", () => {
+    expect(draftVersionLabel(spine, [...apply, ...undo, cr])).toBe("0.1 + 1 change")
+  })
+
+  it("áp dụng trước khi ký, hoàn tác sau ⇒ hoàn tác là một thay đổi", () => {
+    const before = apply.map((c) => ({ ...c, at: "2026-11-19T11:00:00.000Z" }))
+    expect(draftVersionLabel(spine, [...before, ...undo])).toBe("0.1 + 1 change")
+  })
+
+  it("hai lần đổi mẫu, một lần bị hoàn tác ⇒ chỉ đếm lần còn lại", () => {
+    const other = change("template-migration:def456", "custom_sections[id=CS10]", "2026-11-20T14:00:00.000Z")
+    expect(unreleasedChangeCount([...apply, ...undo, other], since)).toBe(1)
+  })
+})

@@ -24,7 +24,7 @@ vi.mock("../docx-ooxml/index.js", () => ({
 
 import { addDraftWatermark } from "../docx-ooxml/index.js"
 import { downloadVersion } from "./versions.service.js"
-import { captureTemplateSourceBinding, resolveFixedBaselineBinding, FIXED_TEMPLATE_RENDERER_REVISION } from "./template-source-binding.js"
+import { captureTemplateSourceBinding, resolveFixedBaselineBinding, templateLayoutFromBinding, FIXED_TEMPLATE_RENDERER_REVISION } from "./template-source-binding.js"
 
 const binding = { source_file_ref: "original-upload", source_sha256: "sha", layout: [{ section_id: "old-layout" }] }
 const base = { _id: "version-id", version: "0.1", kind: "imported", file_ref: "old-generic", baseline_ref: "BL001", createdAt: new Date(), cr_ids: [], based_on: null }
@@ -143,6 +143,20 @@ describe("captureTemplateSourceBinding", () => {
     profile.layout[0].section_id = "new"
     expect(captured?.layout[0].section_id).toBe("old")
     expect(m.resolveCurrent).not.toHaveBeenCalled()
+  })
+
+  it("bug #1 FLF-447: chốt section_segments của profile vào binding (thiếu ⇒ mảng rỗng)", async () => {
+    const segments = [{ section_id: "fixed:4.2.3", parts: [], known: [] }]
+    const profile = { source_file_ref: "raw", heading_map: [{ block_id: "B1" }], table_map: [], layout: [{ section_id: "old" }], language: "vi", section_segments: segments }
+    m.profile.mockReturnValue({ lean: async () => profile })
+    m.load.mockResolvedValue(Buffer.from("abc"))
+    const captured = await captureTemplateSourceBinding("project")
+    expect(captured?.section_segments).toEqual(segments)
+    expect(templateLayoutFromBinding(captured!).sectionSegments).toEqual(segments)
+    m.profile.mockReturnValue({ lean: async () => ({ ...profile, section_segments: undefined }) })
+    const empty = await captureTemplateSourceBinding("project")
+    expect(empty?.section_segments).toEqual([])
+    expect(templateLayoutFromBinding(empty!).sectionSegments).toBeUndefined()
   })
 
   it("rejects bytes that no longer match the mapped source SHA", async () => {

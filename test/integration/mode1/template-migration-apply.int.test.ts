@@ -414,4 +414,26 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
     }
     expect((await TemplateMigration.findById(ready.id).lean())!.state).toBe("ready")
   })
+
+  it("G. mẫu có heading con cùng mục dưới Phạm vi (In / Out of Scope) ⇒ gộp vào mục cha: không thành mục thiếu, file + layout không có heading con (lỗi #5 test FLF-447)", async () => {
+    const lead = await seedFixture("minimal", { balance: 1000 })
+    const scope = styled("u1", "6 Release Scope") + p("In scope: course catalog and enrollment.") + p("Out of scope: offline mode.")
+    const projectId = await baselinedProject(lead, await makeSrsDocx({ extraBody: scope }))
+    const templateScope =
+      styled("u1", "6 Release Scope") + p("[Describe the release scope.]") + styled("u2", "In Scope") + p("[List the in-scope features.]") + styled("u2", "Out of Scope") + p("[List what is out of scope.]")
+    const templateId = await publishTemplate(lead, lead.orgId, "Mẫu chia phạm vi", await makeSrsDocx({ extraBody: templateScope }))
+    const ready = await toReady(lead.token, projectId, { template_id: templateId, version: 1 })
+    const pending = (await TemplateMigration.findById(ready.id).lean())!
+    expect(pending.pairing.children?.length, JSON.stringify(pending.pairing)).toBe(2)
+    expect(ready.groups.missing.map((m) => m.heading_text)).not.toContain("In Scope")
+
+    const applied = await request(app).post(url(projectId, ready.id, "/apply")).set(H(lead.token))
+    expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
+    const migration = (await TemplateMigration.findById(ready.id).lean())!
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    expect(profile.layout.filter((l) => l.section_id === "slot:scope").map((l) => l.heading_text)).toEqual(["6 Release Scope"])
+    expect(profile.layout.some((l) => /^(In|Out of) Scope$/.test(l.heading_text))).toBe(false)
+    expect(profile.migration_missing_sections ?? []).not.toContain("slot:scope")
+    expect(migration.warnings.filter((w) => /heading nhưng layout dự kiến|dựng toàn bộ từ Spine/.test(w))).toEqual([])
+  })
 })
