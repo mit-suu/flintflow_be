@@ -610,13 +610,21 @@ describe("renderAllIfAvailable - FLF-493 mockup lệch vẫn được vẽ lại
   })
 
   it("PlantUML tắt ⇒ mockup (svg) vẽ lại, sequence giữ nguyên", async () => {
-    const { deps } = makeDeps()
+    const { deps: baseDeps } = makeDeps()
+    // Mockup SVG thật (model trả spec) — noAiLayout chỉ ra bảng PlantUML, loại hình đó không vẽ lại được khi PlantUML tắt
+    const context: RenderContext = { screenTheme: { primaryColor: "#3F5591", domain: "flintflow.io", platforms: ["web"] } }
+    const deps: Partial<DiagramServiceDeps> = {
+      ...baseDeps,
+      renderContext: async () => context,
+      renderSvgPng: async () => Buffer.from("png"),
+      drawLayout: async () => ({ spec: { ...SIGNUP_SPEC, platforms: ["web"] }, screenImages: null, primaryColor: null })
+    }
     await seed()
     const first = await renderAll(PROJECT, { by: USER, deps })
     const sc = first.diagrams.find((d) => d.kind === "screen_layout")!
     const screenId = sc.owner_id!
     await applyTransaction(PROJECT, { base_version: first.spine_version, by: USER, ops: [{ op: "set", path: `screens[id=${screenId}].name`, value: "Man doi ten" }] })
-    const stale = staleRenderedDiagrams((await repo.get(PROJECT))!)
+    const stale = staleRenderedDiagrams((await repo.get(PROJECT))!, context)
     expect(stale.some((d) => d.id === sc.id)).toBe(true)
     plantuml.reachable = false
 
@@ -624,7 +632,7 @@ describe("renderAllIfAvailable - FLF-493 mockup lệch vẫn được vẽ lại
 
     expect(result).not.toBeNull()
     const after = (await repo.get(PROJECT))!
-    expect(staleRenderedDiagrams(after).some((d) => DIAGRAM_ENGINES[d.kind].startsWith("svg@"))).toBe(false)
+    expect(staleRenderedDiagrams(after, context).some((d) => DIAGRAM_ENGINES[d.kind].startsWith("svg@"))).toBe(false)
     expect(after.diagrams.some((d) => d.render_status === "error")).toBe(false)
   })
 })

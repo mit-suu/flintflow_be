@@ -212,6 +212,11 @@ export interface RenderOptions {
   force?: boolean
   /** `screen_layout`: chỉ vẽ lại từ spec đã lưu — màn chưa có spec giữ nguyên hình, không gọi model (đổi theme). */
   specOnly?: boolean
+  /**
+   * FLF-493: PlantUML tắt ⇒ chỉ ghi hình ra SVG. Target mà kết quả có phần PlantUML (vd. mockup rơi về bảng function khi model
+   * không vẽ được) giữ nguyên hình cũ — vẽ bằng PlantUML sẽ ghi `render_error` (cờ đỏ chặn baseline) chỉ vì môi trường.
+   */
+  svgOnly?: boolean
   /** Kết quả lượt model vẽ mockup của từng màn (ảnh màn hình, màu ảnh gốc). */
   onLayoutDrawn?: (screenId: string, envelope: ScreenEnvelope | null) => void
   deps?: Partial<DiagramServiceDeps>
@@ -339,6 +344,10 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
       produced.push(...existing)
       continue
     }
+    if (options.svgOnly && parts.some((p) => p.format !== "svg")) {
+      produced.push(...existing)
+      continue
+    }
     const ids = assignPartIds(target.kind, existing, parts, nextId)
 
     for (const [i, part] of parts.entries()) {
@@ -434,9 +443,12 @@ const isSvgTarget = (t: RenderTarget): boolean => DIAGRAM_ENGINES[t.kind].starts
 export const renderAllIfAvailable = async (projectId: string, options: RenderOptions): Promise<RenderResult | null> => {
   try {
     if (await isPlantUmlReachable()) return await renderAll(projectId, options)
-    const targets = allTargets(stripRecord(await loadSpine(projectId))).filter(isSvgTarget)
+    const spine = stripRecord(await loadSpine(projectId))
+    // Màn chưa từng có mockup: bỏ — vẽ mới cần một lượt model mỗi màn (chậm, tốn credit) và rơi về bảng PlantUML khi model lỗi.
+    // Mockup đã có thì vẽ lại được (đúng ý FLF-493: mockup lệch dữ liệu); màn mới đã có `renderChangedIfAvailable`.
+    const targets = allTargets(spine).filter((t) => isSvgTarget(t) && (t.kind !== "screen_layout" || spine.diagrams.some((d) => sameTarget(d, t))))
     if (targets.length === 0) return null
-    return await renderDiagrams(projectId, targets, options)
+    return await renderDiagrams(projectId, targets, { ...options, svgOnly: true })
   } catch (err) {
     console.warn(`[diagram] vẽ lại diagram lỗi (project ${projectId}, by ${options.by}): ${err instanceof Error ? err.message : String(err)}`)
     return null
@@ -464,7 +476,7 @@ export const renderChangedIfAvailable = async (projectId: string, newScreenIds: 
       return plantUmlUp || isSvgTarget(t)
     })
     if (targets.length === 0) return null
-    return await renderDiagrams(projectId, targets, options)
+    return await renderDiagrams(projectId, targets, plantUmlUp ? options : { ...options, svgOnly: true })
   } catch (err) {
     console.warn(`[diagram] vẽ lại sau lô sửa lỗi (project ${projectId}, by ${options.by}): ${err instanceof Error ? err.message : String(err)}`)
     return null

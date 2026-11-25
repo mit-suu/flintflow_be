@@ -103,7 +103,7 @@ describe("mode 1 - version + tải về", () => {
 describe("mode 1 - release (Flow 6)", () => {
   it("còn cờ đỏ ⇒ 422 RELEASE_RED_FLAGS_OPEN; hết đỏ ⇒ 1.0 sạch, baseline release, gom CR", async () => {
     const { c, projectId } = await projectWithRevision()
-    // Sơ đồ render lỗi ⇒ cờ đỏ render_error (mode 1 không waive)
+    // Sơ đồ render lỗi ⇒ cờ đỏ render_error (mode 1 không waive). FLF-493: import đã vẽ sẵn D01… (SVG) khi PlantUML tắt ⇒ dùng id D99 riêng
     const spine = (await spineRepository.get(projectId))!
     await applyTransaction(projectId, {
       base_version: spine.spine_version,
@@ -112,7 +112,7 @@ describe("mode 1 - release (Flow 6)", () => {
         {
           op: "add",
           path: "diagrams[]",
-          value: { id: "D01", kind: "erd", format: "puml", source: "@startuml\n@enduml", section: "fixed:3.1.5", owner_kind: null, owner_id: null, render_status: "error", error: "boom", source_hash: "x", rendered_at: null }
+          value: { id: "D99", kind: "erd", format: "puml", source: "@startuml\n@enduml", section: "fixed:3.1.5", owner_kind: null, owner_id: null, render_status: "error", error: "boom", source_hash: "x", rendered_at: null }
         }
       ]
     })
@@ -122,7 +122,7 @@ describe("mode 1 - release (Flow 6)", () => {
     expect(blocked.body.meta.flags.map((f: { rule_id: string }) => f.rule_id)).toContain("render_error")
 
     const now = (await spineRepository.get(projectId))!
-    await applyTransaction(projectId, { base_version: now.spine_version, by: "test", ops: [{ op: "remove", path: "diagrams[id=D01]" }] })
+    await applyTransaction(projectId, { base_version: now.spine_version, by: "test", ops: [{ op: "remove", path: "diagrams[id=D99]" }] })
     const res = await releaseNow(c)
     expect(res.status, JSON.stringify(res.body.error)).toBe(201)
     const rel = releaseResponseSchema.parse(res.body.data)
