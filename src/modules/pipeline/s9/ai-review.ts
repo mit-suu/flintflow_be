@@ -360,8 +360,11 @@ export const runAiReview = async (projectId: string, userId: string, profile: Re
     ? spine.assumptions.filter((a) => a.status !== "rejected").map((a) => ({ id: a.id, statement: a.statement, status: a.status }))
     : []
   const documents = def.withSettledContext ? (await buildDocumentContext({ projectId, actionType: ActionType.REVIEW })).contextText : ""
+  // Cờ của chính bước này mà lượt chạy lại sẽ đóng (chưa "Giữ nguyên") không đưa vào "đừng nhắc lại": nếu đưa, model im
+  // về đúng phát hiện đó, cờ cũ bị đóng ⇒ mất phát hiện (E2E 26/11: bắt / hụt xen kẽ từng lượt). Cờ đã giữ vẫn đưa.
+  const willClose = (f: Flag): boolean => f.rule_id === AI_REVIEW_RULE && baseStep(f.remediation_step) === def.stepId && f.kept_reason === null
   const openFlags = spine.flags
-    .filter((f) => f.resolved_at === null)
+    .filter((f) => f.resolved_at === null && !willClose(f))
     .map(({ rule_id, lens, section_id, message }) => ({ rule_id, lens: lens ?? null, section_id, message }))
   const settledSources = [...decisions.map((d) => d.answer), ...assumptions.map((a) => a.statement), documents]
   const knownSections = new Set(spine.sections.map((s) => s.id))

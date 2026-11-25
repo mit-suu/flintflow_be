@@ -230,6 +230,23 @@ describe("runAiReview - S-9.2 quality", () => {
     expect((store.record!.flags as Flag[]).filter((f) => f.rule_id === "ai_review")).toHaveLength(2)
   })
 
+  it("chạy lại: cờ cũ của chính bước (sẽ đóng) không vào open_flags, cờ đã giữ và cờ bước khác vẫn vào", async () => {
+    const spine = smallSpine()
+    spine.flags = [
+      flagOf({ id: "FL001", message: "old finding of this step" }),
+      flagOf({ id: "FL002", message: "kept finding", kept_reason: "Business owner confirmed 4 hours is correct for this property.", kept_by: USER, kept_at: "2026-11-25T00:00:00.000Z" }),
+      flagOf({ id: "FL003", message: "finding of S-8.4", remediation_step: "S-8.4" })
+    ]
+    seed(spine)
+    const exec = executorOf([])
+    await runAiReview(PROJECT, USER, "quality", { executor: exec })
+
+    const sent = (exec.mock.calls[0]![0].promptVariables as { open_flags: { message: string }[] }).open_flags.map((f) => f.message)
+    expect(sent).not.toContain("old finding of this step")
+    expect(sent).toContain("kept finding")
+    expect(sent).toContain("finding of S-8.4")
+  })
+
   it("(5) cờ đã Giữ nguyên + lý do vẫn mở; cờ mới trùng chỗ và lens không thêm; cờ waive không đụng", async () => {
     const spine = smallSpine()
     spine.flags = [
