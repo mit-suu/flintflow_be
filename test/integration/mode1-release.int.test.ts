@@ -93,7 +93,10 @@ describe("mode 1 - version + tải về", () => {
     expect(headers.length).toBeGreaterThan(0)
     expect(await zip.file(headers[0])!.async("string")).toContain('string="DRAFT"')
     // §I Record of Changes của bản render có dòng của CR
-    expect(await documentXml(draft.body as Buffer)).toContain("CR-001: Faster")
+    // FLF-484 lát D: mô tả dựng từ thay đổi, không chép tiêu đề CR ("Faster")
+    const draftXml = await documentXml(draft.body as Buffer)
+    expect(draftXml).toContain("CR-001: ")
+    expect(draftXml).not.toContain("CR-001: Faster")
   })
 })
 
@@ -149,7 +152,8 @@ describe("mode 1 - release (Flow 6)", () => {
     expect(done!.body.data.change_request.result_doc_version).toBe("1.1")
     const v11 = await documentXml((await binary(c.get("/versions/1.1/download"))).body as Buffer)
     expect(v11).toContain("500 ms")
-    expect(v11).toContain("CR-002: Even faster")
+    expect(v11).toContain("CR-002: ")
+    expect(v11).not.toContain("CR-002: Even faster")
   })
 })
 

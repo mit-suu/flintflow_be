@@ -655,6 +655,14 @@ Cả hai đều không tự chuyển sang mẫu chuẩn FlintFlow.
 - **Nhãn đầu tài liệu**: `RenderedDocument.version` của `GET /document?source=draft` dự án mode 1 là số bản nháp (`0.4`) thay vì `0.1 + 3 changes`. Mode 2 giữ nhãn cũ (`v0`, `v1.0 + N changes`).
 - **Bản phát hành có Track Changes gộp**: `GET /versions` trả `has_tracked_file: true` cho bản phát hành; `variant=tracked` là thay đổi gộp kể từ lần phát hành trước (không có nếu giữa hai lần phát hành có đổi mẫu kèm dịch).
 
+## FLF-484 lát C, D (2026-11-25) — Record of Changes: cột Version, ngôn ngữ, tách dòng CR
+
+**Đổi nội dung file xuất** (không đổi schema) ⇒ PR nhãn `contract-change`.
+
+- Cột **Version** của Record of Changes là số lần phát hành chứa dòng: dòng CR / dòng soạn trước baseline mang số của baseline đầu tiên đứng sau (`1.0`, không tiền tố `v`), chưa phát hành ⇒ `-`. Dòng baseline ghi `Baseline <số>` cho cả tiếng Việt và tiếng Anh. Không còn số phụ của bản nháp trong bảng.
+- Dòng CR tách theo loại thay đổi: một dòng mỗi loại có mặt (A, M, D), cùng mã CR, cùng version. Mô tả dựng từ chính các thay đổi theo **ngôn ngữ tài liệu** (dự án import lấy ngôn ngữ của file / mẫu), không còn chép tiêu đề CR.
+- Không còn dòng cho bản gốc 0.1 (lô `by: import`) và cho việc tự vẽ lại sơ đồ (lý do `render`). Ngày ghi theo giờ Việt Nam.
+
 ## FLF-334 B (2026-10-29) — tải version theo ngôn ngữ còn lại
 
 **Additive** ⇒ PR nhãn `contract-change` (cùng `pipeline-contract.md` #18/#34/#26/#27).
