@@ -59,9 +59,13 @@ export const changeRequestDtoSchema = z.object({
       questions: z.array(z.string()),
       answers: z.array(z.string()),
       /** Phase 7: đáp án AI gợi ý, song song `questions` (`[]` cho câu không có gợi ý). */
-      suggestions: z.array(z.array(z.string()))
+      suggestions: z.array(z.array(z.string())),
+      /** FLF-474: loại từng câu, song song `questions` ("contradiction" bắt buộc trả lời, "ambiguous" bỏ qua được); CR cũ ⇒ `[]`. */
+      kinds: z.array(z.enum(["contradiction", "ambiguous"])).default([])
     })
   ),
+  /** FLF-474: nhãn vòng làm rõ đang chờ trả lời — BE đếm đúng như `runClarify`; `extra` = vòng thêm sau trần 3 (câu mâu thuẫn). `null` khi không chờ. */
+  clarify_round: z.object({ n: z.number().int().min(1), max: z.number().int().min(1), extra: z.boolean() }).nullable().default(null),
   base_doc_version: z.string().min(1),
   result_doc_version: z.string().nullable(),
   created_by: id,

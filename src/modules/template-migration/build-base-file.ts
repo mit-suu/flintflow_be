@@ -309,7 +309,7 @@ export const relocatedFollowers = (oldHeadings: readonly OldHeading[], pairing: 
       current = null
       continue
     }
-    if (f.kind === "element" && f.parent_old_key && paired.has(f.parent_old_key)) current = f.parent_old_key
+    if ((f.kind === "element" || f.kind === "child") && f.parent_old_key && paired.has(f.parent_old_key)) current = f.parent_old_key
     if (current) out.set(h.key, current)
   }
   return out

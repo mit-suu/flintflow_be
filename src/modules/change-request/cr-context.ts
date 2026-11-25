@@ -253,6 +253,8 @@ export const crHeader = (cr: IChangeRequest) => ({
   source: `${cr.source.kind}${cr.source.ref ? ` - ${cr.source.ref}` : ""}`
 })
 
+const NO_ANSWER_KEEP = "(no answer - keep the document as it is and skip this part of the CR; never ask this again)"
+
 /**
  * Câu hỏi – trả lời làm rõ theo vòng. FLF-307: vòng sau thường sửa vòng trước (vòng 1 "mọi actor", vòng 2 "chỉ tài
  * khoản email/mật khẩu") — model đọc ngang hàng thì vẫn làm theo vòng 1 ⇒ nói rõ vòng sau thắng khi lệch nhau.
@@ -261,7 +263,13 @@ export const answersText = (cr: Pick<IChangeRequest, "clarifications">): string 
   const rounds = cr.clarifications ?? []
   const lines = rounds
     // Mode 1 v3 phase 7: câu trả lời trống = người dùng chưa biết ⇒ model coi dữ kiện đó là thiếu
-    .flatMap((c) => c.questions.map((q, i) => `Q${c.round}.${i + 1}: ${q}\nA: ${c.answers[i]?.trim() || "(no answer - unknown)"}`))
+    // FLF-474: câu mâu thuẫn bỏ trống = giữ như cũ, không hỏi lại (câu mơ hồ bỏ trống vẫn là "chưa biết")
+    .flatMap((c) =>
+      c.questions.map((q, i) => {
+        const keep = c.kinds?.[i] === "contradiction" && !(c.warning_questions ?? []).includes(i)
+        return `Q${c.round}.${i + 1}: ${q}\nA: ${c.answers[i]?.trim() || (keep ? NO_ANSWER_KEEP : "(no answer - unknown)")}`
+      })
+    )
     .join("\n")
   if (!lines) return "(none)"
   if (rounds.length < 2) return lines

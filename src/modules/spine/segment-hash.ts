@@ -57,8 +57,12 @@ export const isSegmentedSection = (sectionId: string): boolean => sectionId in S
 
 type Element = { id?: string } & Record<string, unknown>
 
-/** Phần tử của mảng có được mục đó in ra không (mục 1 chỉ in BR cấp cao + actor không phải người, NFR theo nhóm…). */
-const printsIn = (sectionId: string, array: string, el: Element): boolean => {
+/**
+ * Phần tử của mảng có được mục đó in ra không (mục 1 chỉ in BR cấp cao + actor không phải người, NFR theo nhóm…).
+ * Export cho `render/layout-sections.ts` (FLF-468 lát B): lọc phần tử hiện tại trước khi vá bảng của file theo đúng
+ * tập phần tử mà mục đó in ra, như `sectionItemKeys`.
+ */
+export const printsIn = (sectionId: string, array: string, el: Element): boolean => {
   if (sectionId === "fixed:1") {
     if (array === "business_rules") return el.tier === "high"
     if (array === "actors") return el.kind !== "human"

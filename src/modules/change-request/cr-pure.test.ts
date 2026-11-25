@@ -48,4 +48,23 @@ describe("locationPromptText - vị trí trong prompt C-4", () => {
     expect(text).toContain('"name": "Learner"')
     expect(text).toContain("Previous proposal failed checks: Op không đổi gì")
   })
+
+  it("FLF-480: khoá ảnh word/media không lọt vào prompt", () => {
+    const s = createEmptySpine({ name: "Lumen" })
+    s.custom_sections.push({
+      id: "CS01",
+      heading: "Phụ lục",
+      blocks: [{ kind: "image", text: "", rows: null, image_ref: "word/media/image1.png", diagram: null }]
+    } as never)
+    const text = locationPromptText(s, {
+      location_id: "L002",
+      path: "custom_sections[id=CS01]",
+      section_id: "custom:CS01",
+      found_by: ["bm25"],
+      entity_paths: [],
+      verify: null
+    } as never)
+    expect(text).not.toContain("word/media")
+    expect(text).toContain("[hình]")
+  })
 })

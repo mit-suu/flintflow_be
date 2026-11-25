@@ -302,7 +302,15 @@ const batchFunctionIds = (promptVariables: Record<string, unknown>): string[] =>
 }
 
 /** Every (step, batch) the draft executor was asked for — the batching evidence. */
-const draftCalls: { step_id: string; function_ids: string[] }[] = []
+const draftCalls: { step_id: string; function_ids: string[]; business_rule_ids_seen: string[]; message_ids_seen: string[] }[] = []
+
+/** `business_rules[]` / `messages[]` already in THIS call's projection — FLF-470: a later S-7.1/S-7.3 batch
+ * must see what an earlier batch just wrote (`isFixedBatchedStep` rebuilds the projection per batch). */
+const seenIds = (promptVariables: Record<string, unknown>, collection: "business_rules" | "messages"): string[] => {
+  const projection = promptVariables.projection as Record<string, unknown>
+  const list = projection[collection]
+  return Array.isArray(list) ? list.map((el) => (el as { id: string }).id) : []
+}
 
 const draftExecutor: StepRunnerDeps["draftExecutor"] = async (actionType, input) => {
   const vars = input.promptVariables as Record<string, unknown>
@@ -312,9 +320,16 @@ const draftExecutor: StepRunnerDeps["draftExecutor"] = async (actionType, input)
   const perFunction = template === "S-5.2" || template === "S-5.4"
 
   const batch = perFunction ? batchFunctionIds(vars) : []
-  // FLF-433: S-7.3 chia lô theo function — lô sau đọc lại `messages` đã ghi, như model thật không thêm lại mã đã có
-  const laterFixedBatch = template === "S-7.3" && draftCalls.some((c) => c.step_id === stepId)
-  draftCalls.push({ step_id: stepId, function_ids: batch })
+  // FLF-433/FLF-470: S-7.1/S-7.3 chia lô theo function — lô sau đọc lại `business_rules`/`messages` đã ghi,
+  // như model thật không thêm lại mã đã có
+  const fixedBatched = template === "S-7.1" || template === "S-7.3"
+  const laterFixedBatch = fixedBatched && draftCalls.some((c) => c.step_id === stepId)
+  draftCalls.push({
+    step_id: stepId,
+    function_ids: batch,
+    business_rule_ids_seen: template === "S-7.1" ? seenIds(vars, "business_rules") : [],
+    message_ids_seen: template === "S-7.3" ? seenIds(vars, "messages") : []
+  })
   const ops = perFunction ? batch.flatMap((id) => expandTemplate(opCase.ops, id)) : laterFixedBatch ? [] : opCase.ops
 
   const tokensIn = estimateTokens(JSON.stringify(vars))
@@ -443,6 +458,15 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
     expect(final.messages.every((m) => /^[A-Z]+-\d{3}$/.test(m.code)), "message codes are AREA-NNN").toBe(true)
     expect(final.common_requirements.length).toBeGreaterThanOrEqual(3)
     expect(final.other_requirements.length).toBeGreaterThan(0)
+
+    // ── FLF-470: S-7.1 chia lô như S-7.3 (20 function > cỡ lô 10) ───────────────────────────────
+    const s71Calls = draftCalls.filter((c) => c.step_id === "S-7.1")
+    expect(s71Calls.length, "S-7.1 phải chia >= 2 lô với 20 function của fixture").toBeGreaterThanOrEqual(2)
+    expect(s71Calls[1].business_rule_ids_seen, "lô 2 của S-7.1 phải thấy business_rules lô 1 vừa ghi").toContain("BR10")
+
+    const s73Calls = draftCalls.filter((c) => c.step_id === "S-7.3")
+    expect(s73Calls.length, "S-7.3 phải chia >= 2 lô với 20 function của fixture").toBeGreaterThanOrEqual(2)
+    expect(s73Calls[1].message_ids_seen, "lô 2 của S-7.3 phải thấy messages lô 1 vừa ghi").toEqual(expect.arrayContaining(["M01", "M02"]))
 
     // ── S-8.1 glossary ───────────────────────────────────────────────────────────────────────────
     expect(final.glossary.length).toBeGreaterThanOrEqual(5)

@@ -18,6 +18,7 @@ import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language
 import type { ChangePreviewResult } from "./change.service.js"
 import type { Spine } from "./spine.types.js"
 import { buildConversationSummary, type TranscriptMessage } from "../pipeline/conversation-summary.js"
+import type { CrPrefill } from "../import/mode1-guard.js"
 
 /** `buildConversationSummary` trả chuỗi này khi chưa có gì để tóm tắt. */
 const EMPTY_SUMMARY = "(chưa có gì)"
@@ -142,8 +143,15 @@ export const loadProjectSession = async (projectId: string, sessionId: string): 
 export const previewPayload = (
   preview: ChangePreviewResult,
   language: ReplyLanguage = "vi",
-  /** FLF-318: dự án sau baseline (mode 1, `meta.requires_cr`) — bản xem trước để tạo change request, không áp thẳng. */
-  opts: { requiresCr?: boolean } = {}
+  opts: {
+    /** FLF-318: dự án sau baseline (mode 1, `meta.requires_cr`) — bản xem trước để tạo change request, không áp thẳng. */
+    requiresCr?: boolean
+    /**
+     * FLF-473 (B5): lưới an toàn — model không ra được lô hợp lệ ở dự án import sau baseline ⇒ nội dung điền sẵn cho
+     * thẻ "Mở change request" (luồng CR định vị được cả đoạn văn nối, chat thường không). `null` ⇒ không mời.
+     */
+    crPrefill?: CrPrefill | null
+  } = {}
 ): Record<string, unknown> =>
   preview.auto_applied
     ? {
@@ -165,7 +173,12 @@ export const previewPayload = (
     : preview.clarification
     ? {
         kind: "change_clarification",
-        reply: [
+        reply: opts.crPrefill
+          ? byLanguage(language, {
+              vi: `Mình chưa xác định được cần đổi gì theo đúng mục trong tài liệu. Bấm "Mở change request" để gửi yêu cầu này cho luồng xử lý đầy đủ - luồng đó định vị được cả đoạn văn xuôi, không chỉ các mục có cấu trúc.`,
+              en: `I couldn't pin down the exact section to change in the document. Press "Mở change request" (Open change request) to send this - that flow can locate prose paragraphs too, not just structured sections.`
+            })
+          : [
           preview.clarification,
           // Lệnh nhiều ý: phần rõ đã có bản xem trước đi kèm câu hỏi này
           preview.ok && preview.changes.length > 0
@@ -179,9 +192,12 @@ export const previewPayload = (
           .filter(Boolean)
           .join("\n"),
         ...(preview.ok && preview.preview_id ? { preview_id: preview.preview_id, branch: preview.branch ?? null, change_count: preview.changes.length } : {}),
+        ...(opts.crPrefill ? { cr_prefill: opts.crPrefill } : {}),
         // FLF-311: câu có lựa chọn (màn riêng / popup) ⇒ FE hiện thẻ chọn nhanh; chọn xong đi tiếp lệnh sửa
+        // P08 #1 (FLF-480): trước đây `question` luôn cố định "Chọn giao diện" / "Choose the UI" dù câu hỏi không
+        // về giao diện — đổi thành chính câu `preview.clarification` (đã đúng ngôn ngữ từ change.service).
         ...(preview.clarification_choices?.length
-          ? { questions: [{ question: byLanguage(language, { vi: "Chọn giao diện", en: "Choose the UI" }), options: preview.clarification_choices.map((label) => ({ label })) }] }
+          ? { questions: [{ question: preview.clarification, options: preview.clarification_choices.map((label) => ({ label })) }] }
           : {})
       }
     : {

@@ -7,10 +7,10 @@
 
 import type { Op } from "../spine/op.types.js"
 import type { ActivityFlow, ActivityNode, ActivityNodeKind, EntityAttribute, EntityState, EntityTransition, FlowEdge, FunctionInteraction, Spine } from "../spine/spine.types.js"
-import { IdAllocator, compactKey, idKey, nameKey } from "./extracted-entities.js"
+import { IdAllocator, compactKey, entityKey, nameKey } from "./extracted-entities.js"
 import { foldText } from "./text-similarity.js"
 import { messageTypeOf } from "../spine/message-type.js"
-import { normalizeCommonCategory } from "../render/labels.js"
+import { isVietnamese, normalizeCommonCategory } from "../render/labels.js"
 
 export interface BuiltEntity {
   entity: string
@@ -437,6 +437,12 @@ export const unmappedPriorityFindings = (
     target_id: `${u.entity}[id=${u.id}].priority`
   }))
 
+/** Tuỳ chọn của `buildImportOps`. */
+export interface BuildImportOpsOptions {
+  /** Ngôn ngữ tài liệu (`profile.language`) — tên nhóm dự phòng "General" / "Chức năng khác" theo ngôn ngữ này (FLF-476). */
+  language?: string
+}
+
 /**
  * Dựng op cho Spine rỗng của project mode 1. Phần tử có id đã tồn tại trong `spine` bị bỏ qua. Quyền không phân giải được
  * màn / vai trò ghi vào `dropped`, mức ưu tiên có chữ mà không map được MoSCoW ghi vào `unmappedPriorities` để finalize đặt cờ.
@@ -445,7 +451,8 @@ export const buildImportOps = (
   spine: Spine,
   entities: BuiltEntity[],
   dropped: DroppedPermission[] = [],
-  unmappedPriorities: UnmappedPriority[] = []
+  unmappedPriorities: UnmappedPriority[] = [],
+  opts: BuildImportOpsOptions = {}
 ): Op[] => {
   const priority = (entity: UnmappedPriority["entity"], e: BuiltEntity): Priority | null => {
     const mapped = priorityOf(e.value.priority)
@@ -468,13 +475,14 @@ export const buildImportOps = (
     const byLoose = uniqueIndex(pool, (p) => (p.name ? looseKey(p.name) : ""))
     // Mã so lỏng (FLF-252): quan hệ ghi "E-12" vẫn ra phần tử "E12" (id cấp tự động không cùng dạng mã tài liệu).
     // Tên khác quy ước đặt tên: quan hệ ERD ghi "PrAnalysis" ra thực thể "pr_analyses" của bảng
-    const byIdKey = uniqueIndex(pool, (p) => idKey(p.id))
+    // FLF-476: bỏ cả tiền tố riêng của loại (`entityKey`) — quan hệ ghi "UC-02" vẫn ra use case "02" của bảng
+    const byIdKey = uniqueIndex(pool, (p) => entityKey(entity, p.id))
     const byCompact = uniqueIndex(pool, (p) => (p.name ? compactKey(p.name) : ""))
     return (ref: unknown): string | null => {
       const s = str(ref)
       if (!s) return null
       if (ids.has(s)) return s
-      return byIdKey.get(idKey(s)) ?? byName.get(nameKey(s)) ?? byLoose.get(looseKey(s)) ?? byCompact.get(compactKey(s)) ?? null
+      return byIdKey.get(entityKey(entity, s)) ?? byName.get(nameKey(s)) ?? byLoose.get(looseKey(s)) ?? byCompact.get(compactKey(s)) ?? null
     }
   }
   const pool = (entity: string, spineArr: { id: string; name?: string }[]) => [
@@ -538,12 +546,14 @@ export const buildImportOps = (
   }
   const fromTable = new Map<string, string>()
   let general: string | null = null
+  // FLF-476: tên nhóm dự phòng theo ngôn ngữ tài liệu — "General" chỉ còn cho tài liệu tiếng Anh
+  const generalFeatureName = isVietnamese(opts.language) ? "Chức năng khác" : "General"
   const featureOr = (ref: unknown): string => {
     const name = str(ref)
     const hit = resolveFeature(ref) ?? (name ? featureByWords(name) : null)
     if (hit) return hit
-    // Không ghi tính năng / chỉ là mã không phân giải được ("F-09") ⇒ "General"
-    if (!name || CODE_LIKE.test(name)) return (general ??= newFeature("General"))
+    // Không ghi tính năng / chỉ là mã không phân giải được ("F-09") ⇒ nhóm dự phòng
+    if (!name || CODE_LIKE.test(name)) return (general ??= newFeature(generalFeatureName))
     // Bảng màn / bảng chức năng ghi tính năng mà mục 3 không có heading (Dashboard, Billing & Subscription…) ⇒ tính năng
     // theo đúng tên đó (FLF-252) — trước đây gom hết vào "General", mất tên tài liệu ghi
     const key = looseKey(name)

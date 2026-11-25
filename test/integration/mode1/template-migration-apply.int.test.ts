@@ -29,6 +29,7 @@ import { Change } from "../../../src/modules/spine/change.model.js"
 import { applyTransaction } from "../../../src/modules/spine/op-engine.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 import { Membership, type OrgRole } from "../../../src/modules/organization/membership.model.js"
+import { translationUnits } from "../../../src/modules/translation/translation-units.js"
 import { applyMigration } from "../../../src/modules/template-migration/apply.service.js"
 import { recoverApplyingMigration, recoverStuckMigrations } from "../../../src/modules/template-migration/recover-applying.js"
 import { TemplateMigration } from "../../../src/modules/template-migration/template-migration.model.js"
@@ -397,6 +398,49 @@ describe("đổi mẫu — áp dụng / hoàn tác", () => {
     spineRepository.clearReadCache()
     if (visionBefore) expect((await spineRepository.get(projectId))!.project.vision).toBe(`[en] ${visionBefore}`)
     expect((await DocVersion.find({ projectId }).lean()).map((v) => v.file_ref)).toEqual(versionsBefore.map((v) => v.file_ref))
+  })
+
+  it("E2. một lô dịch hỏng một đơn vị (model không trả) ⇒ áp dụng vẫn xong (không 502), translation_summary báo đúng, Spine giữ chữ gốc đúng đơn vị đó", async () => {
+    const lead = await seedFixture("minimal", { balance: 1000 })
+    const projectId = await baselinedProject(lead, await makeSrsDocx())
+    const enTemplate = await publishTemplate(lead, lead.orgId, "Mẫu EN", await makeSrsDocx({ extraBody: EXTRA }))
+    await TemplateProfile.updateOne({ projectId }, { $set: { language: "vi" } })
+
+    const spineBefore = (await spineRepository.get(projectId))!
+    const units = translationUnits(spineBefore).filter((u) => u.ref.group !== "diagrams")
+    expect(units.length).toBeGreaterThan(0)
+    const failingUnit = units[0]
+
+    // Lô dịch: model không bao giờ trả về đúng một đơn vị (mô phỏng lỗi hình dạng câu trả lời của ChoViet #8) — còn lại dịch như thường
+    mockOverrides.next = (prompt) => {
+      if (!prompt.includes("You translate a batch")) return fakeMode1(prompt)
+      const translated = mockTranslateItems(prompt).filter((i) => i.key !== failingUnit.key)
+      return JSON.stringify({ items: translated })
+    }
+
+    const ready = await toReady(lead.token, projectId, { template_id: enTemplate, version: 1 })
+    expect(ready.language).toMatchObject({ source: "vi", target: "en", needs_translation: true })
+    const applied = await request(app).post(url(projectId, ready.id, "/apply")).set(H(lead.token))
+    expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
+    expect(applied.body.data.state).toBe("applied")
+    expect(applied.body.data.translation_summary?.untranslated).toBeGreaterThan(0)
+    expect(applied.body.data.translation_summary?.translated).toBeGreaterThan(0)
+    expect(applied.body.data.translation_summary?.sections.length).toBeGreaterThan(0)
+
+    const migration = (await TemplateMigration.findById(ready.id).lean())!
+    expect(migration.untranslated_keys).toContain(failingUnit.key)
+
+    spineRepository.clearReadCache()
+    const spineAfter = (await spineRepository.get(projectId))!
+    const afterUnits = translationUnits(spineAfter).filter((u) => u.ref.group !== "diagrams")
+    // Đơn vị hỏng giữ nguyên chữ gốc (không bị bỏ trống / mất nội dung)
+    expect(afterUnits.find((u) => u.key === failingUnit.key)?.value).toEqual(failingUnit.value)
+    // Các đơn vị khác dịch được bình thường
+    const otherTranslated = afterUnits.find((u) => u.key !== failingUnit.key && u.ref.group === failingUnit.ref.group)
+    if (otherTranslated) {
+      const text = Array.isArray(otherTranslated.value) ? otherTranslated.value[0] : otherTranslated.value
+      if (text) expect(text).toMatch(/^\[en\]/)
+    }
   })
 
   it("F. Viewer và dự án org khác không áp dụng / hoàn tác được", async () => {

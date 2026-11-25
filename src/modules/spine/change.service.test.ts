@@ -86,6 +86,7 @@ import { runDeterministicCheck } from "./deterministic-check.js"
 import {
   NeedsClarificationError,
   apply,
+  draftUseCaseOps,
   branchOf,
   buildChangeProjection,
   clearPreviewStore,
@@ -101,6 +102,7 @@ import { AiActionError, type AiActionResult } from "../../shared/ai/ai-action.ty
 import type { ChangeInstructionOutput } from "../../shared/ai/response-parser.js"
 import { fakeRepository, resetStore, store } from "../translation/__tests__/translation-store.js"
 import { hashSource } from "../translation/translation-units.js"
+import type { LayoutEntry } from "../import/template-profile.model.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(
@@ -406,6 +408,67 @@ describe("preview - diff + impact, không ghi", () => {
     const vars = vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as Record<string, unknown>
     expect(vars.use_case_ui).toBe(true)
     expect(((vars.projection as Record<string, unknown>).use_case_context as { use_cases: { id: string }[] }).use_cases.map((u) => u.id)).toContain("UC24")
+  })
+
+  describe("FLF-486: vòng soạn lại chỉ nhận lô tốt hơn", () => {
+    /** Một use case hai bước (hai màn mới nối nhau), mở từ S07; `action` null ⇒ không có dòng quyền. */
+    const twoStep = (action: string | null, withUseCase = true) => [
+      ...(withUseCase ? [{ op: "add", path: "use_cases[]", value: { name: "Send Absence Warning", actor_ids: ["A02"], function_ids: ["$f1", "$f2"], description: "Warn." } }] : []),
+      { op: "add", path: "screens[]", value: { id: "$s1", name: "Warning Form", description: "...", feature_id: "F3", flow_to: ["$s2"], tabs: [] } },
+      { op: "add", path: "screens[]", value: { id: "$s2", name: "Warning Sent", description: "...", feature_id: "F3", flow_to: [], tabs: [] } },
+      { op: "add", path: "functions[]", value: { id: "$f1", name: "Fill Warning", screen_id: "$s1", feature_id: "F3", trigger: "Click.", description: "d", normal: ["a"], abnormal: ["b"], validations: [], business_rule_ids: [] } },
+      { op: "add", path: "functions[]", value: { id: "$f2", name: "Confirm Warning", screen_id: "$s2", feature_id: "F3", trigger: "Click.", description: "d", normal: ["a"], abnormal: ["b"], validations: [], business_rule_ids: [] } },
+      { op: "set", path: "screens[id=S07].flow_to", value: ["S08", "S09", "S10", "$s1"] },
+      ...(action ? [{ op: "add", path: "permissions[]", value: { screen_id: "$s1", role_id: "R2", action } }, { op: "add", path: "permissions[]", value: { screen_id: "$s2", role_id: "R2", action } }] : [])
+    ]
+    const ask = async () => {
+      deps.changeExecutor = vi.fn(async () => aiResult({ ops: twoStep("view") as ChangeInstructionOutput["ops"] }))
+      const asked = await preview(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Send Absence Warning cho Analyst" }, {}, deps)
+      expect(asked.clarification_choices?.[0]).toBe("Mỗi bước một màn riêng")
+      return `User: Thêm use case Send Absence Warning cho Analyst
+AI: ${asked.clarification}`
+    }
+    const answer = (history: string) => ({ base_version: 1, instruction: "Mỗi bước một màn riêng", clarification_rounds: 1, chat_history: history })
+    const addedUseCases = (shown: { changes: { op: string; path: string }[] }) => shown.changes.filter((c) => c.op === "add" && c.path.startsWith("use_cases[")).length
+
+    beforeEach(() => {
+      deps.renderAfterChange = vi.fn(async () => undefined)
+    })
+
+    it("lần gọi lại làm mất use case user đã chọn ⇒ giữ lô trước (1 use case)", async () => {
+      await seed()
+      const history = await ask()
+      const executor = vi
+        .fn()
+        .mockResolvedValueOnce(aiResult({ ops: twoStep(null) as ChangeInstructionOutput["ops"] }))
+        .mockResolvedValue(aiResult({ ops: twoStep("view", false) as ChangeInstructionOutput["ops"] }))
+      deps.changeExecutor = executor
+      const shown = await preview(PROJECT, USER, answer(history), {}, deps)
+      expect(executor).toHaveBeenCalledTimes(2)
+      expect(addedUseCases(shown)).toBe(1)
+    })
+
+    it("lô đầu bị từ chối, lần gọi lại áp được ⇒ nhận lần gọi lại (giữ hành vi cũ)", async () => {
+      await seed()
+      const history = await ask()
+      const executor = vi
+        .fn()
+        .mockResolvedValueOnce(aiResult({ ops: [{ op: "remove", path: "use_cases[id=UC_NOPE]" }] as ChangeInstructionOutput["ops"] }))
+        .mockResolvedValue(aiResult({ ops: twoStep("view") as ChangeInstructionOutput["ops"] }))
+      deps.changeExecutor = executor
+      const shown = await preview(PROJECT, USER, answer(history), {}, deps)
+      expect(addedUseCases(shown)).toBe(1)
+    })
+
+    it("hồi quy E2E: quyền ghi access (ma trận X) ⇒ không gọi lại thêm lần nào", async () => {
+      await seed()
+      const history = await ask()
+      const executor = vi.fn().mockResolvedValue(aiResult({ ops: twoStep("access") as ChangeInstructionOutput["ops"] }))
+      deps.changeExecutor = executor
+      const shown = await preview(PROJECT, USER, answer(history), {}, deps)
+      expect(executor).toHaveBeenCalledTimes(1)
+      expect(addedUseCases(shown)).toBe(1)
+    })
   })
 
   describe("FLF-311: người dùng chọn màn hình riêng hay popup", () => {
@@ -788,6 +851,9 @@ describe("instruction - câu lệnh tự nhiên qua skill apply-change-op", () =
     expect(english.clarification).toMatch(/^I couldn't tell what to change in the document\./)
     // Giao diện chỉ có tiếng Việt ⇒ gọi nút đúng nhãn đang hiện, kèm chú thích tiếng Anh
     expect(english.clarification).toContain('"Vẽ lại sơ đồ" (Redraw diagram)')
+    // FLF-473 (B5): lỗi schema của model (không phải câu hỏi làm rõ bình thường) ⇒ đánh dấu `unclear` để controller mời
+    // "Mở change request" ở dự án import sau baseline
+    expect(english.unclear).toBe(true)
     await expect(
       apply(PROJECT, USER, { base_version: 1, instruction: "Regenerate the ERD", reply_language: "en" }, {}, deps)
     ).rejects.toMatchObject({ code: "NEEDS_CLARIFICATION", clarification: english.clarification })
@@ -795,6 +861,15 @@ describe("instruction - câu lệnh tự nhiên qua skill apply-change-op", () =
     const vietnamese = await preview(PROJECT, USER, { base_version: 1, instruction: "Vẽ lại ERD" }, {}, deps)
     expect(vietnamese.clarification).toMatch(/^Mình chưa xác định được cần đổi gì trong tài liệu\./)
     expect(vietnamese.clarification).toContain("Vẽ lại sơ đồ")
+    expect(vietnamese.unclear).toBe(true)
+  })
+
+  it("FLF-473 (B5): câu hỏi làm rõ bình thường (model hỏi lại có mục đích, không phải lỗi schema) ⇒ không gắn `unclear`", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ clarification_needed: "Bạn muốn sửa use case nào?" }))
+    const asked = await preview(PROJECT, USER, { base_version: 1, instruction: "sửa UC đó" }, {}, deps)
+    expect(asked.clarification).toBe("Bạn muốn sửa use case nào?")
+    expect(asked.unclear).toBeUndefined()
   })
 
   it("preview_id đã dùng rồi ⇒ 422 PREVIEW_EXPIRED", async () => {
@@ -1371,6 +1446,57 @@ describe("FLF-278 - mục riêng của mẫu khách qua chat (soạn nháp từ 
   })
 })
 
+describe("FLF-473 - đoạn văn nối (heading rỗng) qua chat (EduCampus B5)", () => {
+  const block = (text: string) => ({ kind: "paragraph" as const, text, rows: null, image_ref: null })
+  const continuation: Spine["custom_sections"][number] = {
+    id: "CS07",
+    heading: "",
+    level: 3,
+    blocks: [block("Hệ thống có 10 use case cho người học và giảng viên.")],
+    source: "import"
+  }
+  const WITH_CONTINUATION: Spine = { ...FIXTURE, custom_sections: [continuation] }
+  // layout thật (step-plan.ts): mục chủ ở layout trước phần nối, phần nối level = mục chủ + 1, heading rỗng
+  const layoutWithNumber: LayoutEntry[] = [
+    { order: 0, heading_text: "Use Case Descriptions", level: 2, section_id: "fixed:2.2.1", number_label: "2.2.1" },
+    { order: 1, heading_text: "", level: 3, section_id: "custom:CS07" }
+  ]
+  const layoutByName: LayoutEntry[] = [
+    { order: 0, heading_text: "Use Case Descriptions", level: 2, section_id: "fixed:2.2.1" },
+    { order: 1, heading_text: "", level: 3, section_id: "custom:CS07" }
+  ]
+
+  it("lệnh trích nguyên văn câu trong đoạn nối ⇒ projection.custom_sections có đúng phần nối đó", () => {
+    const projection = buildChangeProjection(WITH_CONTINUATION, 'Sửa câu "Hệ thống có 10 use case cho người học và giảng viên" thành 12 use case')
+    expect(projection.custom_sections).toEqual([continuation])
+  })
+
+  it("lệnh nhắc cụm ≥4 từ liên tiếp không trích ngoặc (gõ không dấu) vẫn khớp được", () => {
+    const projection = buildChangeProjection(WITH_CONTINUATION, "sua doan noi he thong co 10 use case cho nguoi hoc thanh 12 use case")
+    expect(projection.custom_sections).toEqual([continuation])
+  })
+
+  it('lệnh nhắc mục theo số ("mục 2.2.1") kèm layout ⇒ gồm cả phần nối thuộc mục đó, dù không trích câu', () => {
+    const projection = buildChangeProjection(WITH_CONTINUATION, "sửa đoạn đầu mục 2.2.1 cho rõ hơn", layoutWithNumber)
+    expect(projection.custom_sections).toEqual([continuation])
+  })
+
+  it("lệnh nhắc tên mục mẫu (không số) kèm layout ⇒ vẫn khớp được qua tên mục", () => {
+    const projection = buildChangeProjection(WITH_CONTINUATION, "sửa đoạn trong Use Case Descriptions cho rõ hơn", layoutByName)
+    expect(projection.custom_sections).toEqual([continuation])
+  })
+
+  it("lệnh không nhắc gì liên quan tới phần nối ⇒ không đưa phần nối nào (không nạp cả tài liệu)", () => {
+    const projection = buildChangeProjection(WITH_CONTINUATION, "Đổi tên actor A01 thành Product Owner", layoutWithNumber)
+    expect(projection.custom_sections).toBeUndefined()
+  })
+
+  it("không có layout (dự án mode 2 / chưa có profile) ⇒ vẫn khớp được theo chữ, không lỗi", () => {
+    const projection = buildChangeProjection(WITH_CONTINUATION, 'Sửa câu "Hệ thống có 10 use case cho người học và giảng viên" thành 12 use case')
+    expect(projection.custom_sections).toEqual([continuation])
+  })
+})
+
 describe("FLF-428 - sửa trong chat từ cờ nfr_missing_number (AC-38.2)", () => {
   const nfrId = () => FIXTURE.nfrs.find((n) => n.category === "reliability")!.id
   const flagged = (): Spine => {
@@ -1776,5 +1902,59 @@ describe("sửa qua chat: soạn mục của mẫu chưa có step, Code kiểm b
     expect(rejected.violations[0].message).toContain('"fast"')
     const dictated = await preview(PROJECT, USER, { base_version: 1, instruction: 'Soạn mục Quality Targets, dòng QT-01 ghi "fast and user-friendly"' }, {}, deps)
     expect(dictated.ok).toBe(true)
+  })
+})
+
+describe("FLF-469: CR thêm / xoá cả chức năng ⇒ luật 3i / 3j của lô soạn gộp", () => {
+  const newFunction = (screen = "S01") => ({
+    op: "add",
+    path: "functions[]",
+    value: { id: "$newFn", name: "Change Delivery Address", screen_id: screen, feature_id: "F1", order: 90, trigger: "Click Change", description: "Changes the address.", normal: ["a"], abnormal: ["b"], validations: [] }
+  })
+  const uc02 = FIXTURE.use_cases.find((u) => u.id === "UC02")!
+  type Vars = { function_add: boolean; function_removal: boolean; use_case_mode: string; projection: { use_case_context?: { use_cases: { id: string; function_ids: string[] }[] } } }
+
+  it("structural add ⇒ prompt bật function_add kèm use_case_context có function_ids; chức năng không thuộc use case ⇒ gọi lại kèm lỗi 3i", async () => {
+    await seed()
+    const executor = vi
+      .fn()
+      .mockResolvedValueOnce(aiResult({ ops: [newFunction()] as ChangeInstructionOutput["ops"] }))
+      .mockResolvedValueOnce(
+        aiResult({ ops: [newFunction(), { op: "set", path: "use_cases[id=UC02].function_ids", value: [...uc02.function_ids, "$newFn"] }] as ChangeInstructionOutput["ops"] })
+      )
+    const drafted = await draftUseCaseOps(PROJECT, USER, FIXTURE, "Cho phép người mua đổi địa chỉ giao hàng", { changeExecutor: executor, documentLanguage: async () => null }, { structural: { intent: "add", collection: "functions" } })
+    expect(executor).toHaveBeenCalledTimes(2)
+    const first = executor.mock.calls[0][1].promptVariables as Vars
+    expect(first.function_add).toBe(true)
+    expect(first.function_removal).toBe(false)
+    expect(first.use_case_mode).toBe("full")
+    expect(first.projection.use_case_context?.use_cases.find((u) => u.id === "UC02")?.function_ids).toEqual(uc02.function_ids)
+    expect((executor.mock.calls[1][1].promptVariables as { previous_problems: string }).previous_problems).toContain("rule 3i")
+    expect(drafted.ops.some((o) => o.op === "set" && o.path === "use_cases[id=UC02].function_ids")).toBe(true)
+  })
+
+  it("structural remove ⇒ bật function_removal; use case hết chức năng ⇒ gọi lại kèm lỗi 3j, lô sau xoá use case", async () => {
+    await seed()
+    const executor = vi
+      .fn()
+      .mockResolvedValueOnce(aiResult({ ops: [{ op: "remove", path: "functions[id=FN022]" }] as ChangeInstructionOutput["ops"] }))
+      .mockResolvedValueOnce(aiResult({ ops: [{ op: "remove", path: "functions[id=FN022]" }, { op: "remove", path: "use_cases[id=UC24]" }] as ChangeInstructionOutput["ops"] }))
+    const drafted = await draftUseCaseOps(PROJECT, USER, FIXTURE, "Bỏ chức năng Archive Project", { changeExecutor: executor, documentLanguage: async () => null }, { structural: { intent: "remove", collection: "functions" } })
+    const first = executor.mock.calls[0][1].promptVariables as Vars
+    expect(first.function_removal).toBe(true)
+    expect(first.projection.use_case_context?.use_cases.length).toBe(FIXTURE.use_cases.length)
+    expect((executor.mock.calls[1][1].promptVariables as { previous_problems: string }).previous_problems).toContain("rule 3j")
+    expect(drafted.ops.map((o) => o.path)).toContain("use_cases[id=UC24]")
+  })
+
+  it("không truyền structural (chat trước baseline, lệnh không nhắc use case) ⇒ không bật 3i / 3j, không kèm use_case_context", async () => {
+    await seed()
+    const executor = vi.fn().mockResolvedValue(aiResult({ ops: [newFunction()] as ChangeInstructionOutput["ops"] }))
+    await draftUseCaseOps(PROJECT, USER, FIXTURE, "Cho phép người mua đổi địa chỉ giao hàng", { changeExecutor: executor, documentLanguage: async () => null })
+    const vars = executor.mock.calls[0][1].promptVariables as Vars
+    expect(vars.function_add).toBe(false)
+    expect(vars.function_removal).toBe(false)
+    expect(vars.use_case_mode).toBe("none")
+    expect(vars.projection.use_case_context).toBeUndefined()
   })
 })

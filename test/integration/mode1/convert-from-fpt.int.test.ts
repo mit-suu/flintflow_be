@@ -133,10 +133,13 @@ describe("FLF-318 - chuyển dự án tạo SRS sang mode 1 khi Lead ký baselin
     expect(versionsResponseSchema.parse((await c.get("/versions")).body.data).map((v) => v.version)).toEqual(["2.0", "1.1", "1.0"])
     // Record of Changes khớp số version tài liệu
     const xml = await documentXml((await binary(c.get("/versions/2.0/download"))).body as Buffer)
-    const printed = [...xml.matchAll(/>(v\d+\.\d+(?:\.\d+)?)</g)].map((m) => m[1])
-    // FLF-361: dòng CR mang số bản tài liệu của CR (v1.1 — đúng bản 1.1 ở trên), release v2.0; không số phụ kiểu mode 2
-    expect(printed).toEqual(expect.arrayContaining(["v1.0", "v1.1", "v2.0"]))
-    expect(printed).not.toContain("v1.0.1")
+    const printed = [...xml.matchAll(/>(v?\d+\.\d+(?:\.\d+)?)</g)].map((m) => m[1])
+    // FLF-484: cột Version là số lần phát hành chứa dòng, không tiền tố v: baseline 1.0 của mode 2, CR-001 và dòng phát hành
+    // thuộc 2.0; không còn số phụ của bản nháp (1.1) hay số kiểu mode 2 (1.0.1)
+    expect(printed).toEqual(expect.arrayContaining(["1.0", "2.0"]))
+    expect(printed).not.toContain("1.1")
+    expect(printed).not.toContain("1.0.1")
+    expect(printed.filter((v) => v.startsWith("v"))).toEqual([])
   })
 
   it("chuyển đổi lỗi ⇒ vẫn fpt đã ký, không bản ghi dở; mở dự án ⇒ chạy lại thành công, không trùng", async () => {

@@ -122,6 +122,8 @@ export interface ITemplateMigration extends Document {
   /** Đã chạy bước dịch (D9): Spine của dự án được ghi chữ đã dịch; phát hành đọc để không tạo bản tracked. */
   translated: boolean
   translated_units: MigrationTranslatedUnit[]
+  /** Key các đơn vị dịch không ra chữ hợp lệ dù đã thử lại (chia nhỏ lô) — tài liệu giữ chữ gốc ở đúng các đơn vị này (FLF-471). */
+  untranslated_keys: string[]
   snapshot: MigrationSnapshot | null
   /** File nền mới đã lưu ở bước áp dụng (xoá khi trả về `ready` / hoàn tác). */
   new_base_file_ref: string | null
@@ -213,6 +215,7 @@ const templateMigrationSchema = new Schema<ITemplateMigration>(
     resolved_items: { type: Schema.Types.Mixed, default: () => [] },
     translated: { type: Boolean, default: false },
     translated_units: { type: Schema.Types.Mixed, default: () => [] },
+    untranslated_keys: { type: [String], default: () => [] },
     snapshot: { type: Schema.Types.Mixed, default: null },
     new_base_file_ref: { type: String, default: null },
     new_profile: { type: Schema.Types.Mixed, default: null },

@@ -260,6 +260,39 @@ describe("reconcile lượt 1 - preview diff gộp", () => {
     expect(steps).toContain("S-4.3")
   })
 
+  describe("FLF-493: lô hoà giải xoá mục ⇒ removed_items", () => {
+    const previewWith = async (ops: OpTransaction["ops"]) => {
+      await seed()
+      await renameActor()
+      const version = (await repo.get(PROJECT))!.spine_version
+      deps.reconcileExecutor = vi.fn(async (_type, input) => ((input.promptVariables as { step_id: string }).step_id === "S-3.2" ? opsResult(ops) : opsResult([])))
+      const result = await reconcile(PROJECT, USER, { base_version: version }, {}, deps)
+      if (isReconcileApplied(result)) throw new Error("preview mong đợi")
+      return result
+    }
+
+    it("op remove cả quy tắc ⇒ removed_items nêu quy tắc đó, op vẫn còn trong bản xem trước", async () => {
+      const result = await previewWith([{ op: "remove", path: "business_rules[id=BR02]" }])
+      expect(result.ok, JSON.stringify(result.violations)).toBe(true)
+      expect(result.removed_items).toEqual([{ path: "business_rules[id=BR02]", label: expect.stringContaining("Credits are reserved") }])
+      expect(result.ops).toContainEqual(expect.objectContaining({ op: "remove", path: "business_rules[id=BR02]" }))
+    })
+
+    it("op set mảng validations thiếu một mục có id ⇒ removed_items nêu validation bị bỏ", async () => {
+      const result = await previewWith([
+        { op: "set", path: "functions[id=FN001].validations", value: [{ id: "FN001-V1", kind: "format", statement: "Email must be a syntactically valid address." }] }
+      ])
+      expect(result.ok, JSON.stringify(result.violations)).toBe(true)
+      expect(result.removed_items).toEqual([{ path: "functions[id=FN001]", label: expect.stringContaining("Password must not be empty") }])
+    })
+
+    it("op chỉ sửa chữ, giữ id ⇒ không có removed_items", async () => {
+      const result = await previewWith([{ op: "set", path: "use_cases[id=UC02].description", value: "The Product Owner creates a project." }])
+      expect(result.ok).toBe(true)
+      expect(result.removed_items).toBeUndefined()
+    })
+  })
+
   it("model sửa một dòng mảng chuỗi bằng chỉ số (actor_ids[0]) ⇒ vẫn ra bản xem trước ok (set cả mảng), không chết cả lô", async () => {
     await seed()
     await renameActor()

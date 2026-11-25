@@ -177,6 +177,8 @@ export const changesPreviewResponseSchema = z.object({
   notes: z.string().optional(),
   /** Hoà giải (BUG-16): không có gì cần đổi — gửi lại `preview_id` để xác nhận section nguyên trạng. */
   no_change: z.boolean().optional(),
+  /** FLF-493 (hoà giải): mục lô op sẽ xoá (quy tắc, validation, phần tử…) — FE hiện khối đỏ trước khi áp. */
+  removed_items: z.array(z.object({ path: z.string(), label: z.string() })).optional(),
   /** Nguyên tắc 6: AI thấy yêu cầu không hợp lý — không bao giờ tự ghi; "Vẫn làm" = áp `preview_id` như thường. */
   warning: z.string().optional(),
   /** Cờ đỏ mới mà bản sửa sẽ mở (Code tính trước / sau) — sửa này sẽ chặn baseline. */
@@ -521,7 +523,9 @@ export const gateResponseSchema = z.object({
   next_step: z.string().nullable(),
   spine_version: baseVersion,
   /** FLF-232: sau `revision`, lời AI xác nhận bằng chữ điều vừa sửa (từ `notes` của lượt soạn lại). Thiếu với accept/regenerate. */
-  message_vi: z.string().optional()
+  message_vi: z.string().optional(),
+  /** FLF-489: bước vừa duyệt đã từng được chốt trước lượt này (chạy lại bước đã qua, hoặc bước bị hoà giải mở lại). Client không tự chạy tiếp quy trình, trừ khi chính nó đang chạy liền cả giai đoạn. */
+  rerun: z.boolean().optional()
 })
 
 // ─── progress / flags ────────────────────────────────────────────
@@ -634,7 +638,13 @@ export const runEstimateUnitSchema = z.object({
   steps: z.number().int().min(0),
   ai_steps: z.number().int().min(0),
   interview_credits: z.number().min(0),
-  credits: z.number().min(0)
+  /** Cận trên (= `credits_max`). */
+  credits: z.number().min(0),
+  /** FLF-485: cận dưới / cận trên; đơn vị chính xác thì bằng nhau, chỉ đơn vị S-5 ước tính mới khác. */
+  credits_min: z.number().min(0),
+  credits_max: z.number().min(0),
+  /** Khoảng số màn, chỉ có ở đơn vị S-5 ước tính (chưa có danh sách màn). */
+  screens: z.object({ min: z.number().int().min(0), max: z.number().int().min(0) }).optional()
 })
 
 export const runEstimateResponseSchema = z.object({
@@ -643,7 +653,14 @@ export const runEstimateResponseSchema = z.object({
   units: z.array(runEstimateUnitSchema),
   steps_total: z.number().int().min(0),
   ai_steps_total: z.number().int().min(0),
+  /** Cận trên (= `credits_max`). */
   credits_total: z.number().min(0),
+  credits_min: z.number().min(0),
+  credits_max: z.number().min(0),
+  /** `screens` = đã có màn (chính xác); còn lại là khoảng đoán theo use case / Brief / mặc định; null khi lượt chạy không đi qua vòng màn hình. */
+  screen_estimate: z
+    .object({ min: z.number().int().min(0), max: z.number().int().min(0), basis: z.enum(["screens", "use_cases", "brief", "default"]) })
+    .nullable(),
   /** `balance − reserved` của ví org sở hữu project; null khi không xác định được ví. */
   available_credits: z.number().nullable()
 })

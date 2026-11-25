@@ -164,11 +164,13 @@ const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
  * trong ngoặc đứng ngay sau chính tên của nó (`'Login' (S01)`) thì bỏ hẳn. Mã use case (`UC-01`) là mã tài liệu nên
  * giữ; mã không có trong spine giữ nguyên.
  */
-export const nameElementIds = (text: string, spine: NamedElementSource): string => {
+export const nameElementIds = (text: string, spine: NamedElementSource, extra?: ReadonlyMap<string, string>): string => {
   const names = new Map<string, string>()
   for (const key of NAMED_COLLECTIONS) {
     for (const el of spine[key] ?? []) if (el.name?.trim() && !names.has(el.id)) names.set(el.id, el.name.trim())
   }
+  // FLF-474: tên của phần tử không có field `name` (mục riêng, quy tắc, thông báo…) do nơi gọi dựng sẵn (`internalElementNames`)
+  for (const [id, name] of extra ?? []) if (name.trim() && !names.has(id)) names.set(id, name.trim())
   if (names.size === 0) return text
   const alt = [...names.keys()].sort((a, b) => b.length - a.length).map(escapeRe).join("|")
   const quoted = (id: string) => `'${names.get(id)}'`
@@ -177,6 +179,37 @@ export const nameElementIds = (text: string, spine: NamedElementSource): string 
     text.slice(Math.max(0, offset - 80), offset).toLowerCase().includes(names.get(id)!.toLowerCase()) ? "" : ` ${quoted(id)}`
   )
   return withoutEcho.replace(new RegExp(`['"‘“]?(?<![\\w.-])(${alt})(?![\\w-]|\\.\\d)['"’”]?`, "g"), (_m, id: string) => quoted(id))
+}
+
+/** Mã nội bộ do bộ cấp mã sinh (`BR07`, `MSG03`, `N02`), khác mã tài liệu có gạch nối (`BR-75`) là mã người đọc thấy trong tài liệu. */
+const INTERNAL_ID: Readonly<Record<string, RegExp>> = { business_rules: /^BR\d+$/, messages: /^MSG\d+$/, nfrs: /^N\d+$/ }
+
+/**
+ * FLF-474: tên người đọc được cho phần tử mà `nameElementIds` không có field `name` để thay ("CS27" lộ ra trong câu hỏi làm
+ * rõ): mục riêng (`custom_sections`) ⇒ `customTitle(id)` (tiêu đề; phần nối tiêu đề rỗng do nơi gọi đặt tên theo mục chủ);
+ * quy tắc nghiệp vụ / thông báo / yêu cầu phi chức năng mang mã nội bộ ⇒ câu trích ngắn. Mã tài liệu (`BR-75`) giữ nguyên.
+ */
+export const internalElementNames = (
+  spine: Partial<Pick<Spine, "custom_sections" | "business_rules" | "messages" | "nfrs">>,
+  customTitle?: (sectionId: string) => string
+): Map<string, string> => {
+  const out = new Map<string, string>()
+  for (const c of spine.custom_sections ?? []) {
+    const title = c.heading?.trim() || customTitle?.(`custom:${c.id}`)?.trim()
+    if (title) out.set(c.id, title)
+  }
+  const quoted: [keyof typeof INTERNAL_ID, readonly { id: string; statement?: string; text?: string }[]][] = [
+    ["business_rules", spine.business_rules ?? []],
+    ["messages", spine.messages ?? []],
+    ["nfrs", spine.nfrs ?? []]
+  ]
+  for (const [key, list] of quoted) {
+    for (const el of list) {
+      const quote = (el.statement ?? el.text ?? "").trim()
+      if (quote && INTERNAL_ID[key].test(el.id)) out.set(el.id, shortQuote(quote))
+    }
+  }
+  return out
 }
 
 /** Field tên của phần tử, theo thứ tự ưu tiên; phần tử không có tên (quy tắc, thông báo…) thì trích câu chính. */

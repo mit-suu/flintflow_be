@@ -95,8 +95,9 @@ describe("skill trên đĩa (assets/skills)", () => {
     // +3 content FLF-365: references-list, requirement-apportioning, verification-matrix (mục IEEE 29148, Mode 1).
     // +1 renderer FLF-390: renderer/activity (activity diagram, luồng xử lý mỗi function một hình).
     // +1 renderer FLF-390: renderer/deployment (deployment diagram của hệ thống, §4.1).
-    expect(listSkillAssets()).toHaveLength(52)
-    expect(byKind("action")).toBe(22)
+    // +1 action FLF-492: cr-record-summary (viết gọn mô tả dòng CR trong Record of Changes khi phát hành).
+    expect(listSkillAssets()).toHaveLength(53)
+    expect(byKind("action")).toBe(23)
     expect(byKind("content")).toBe(18)
     expect(byKind("renderer")).toBe(10)
     expect(byKind("output")).toBe(2)
@@ -160,7 +161,7 @@ describe("skill trên đĩa (assets/skills)", () => {
   // theo chức năng / màn / luồng / phân quyền — hai khối theo giai đoạn, model chỉ nhận một khối; entities-erd thêm Pass 8
   // vòng đời entity (states / transitions) cùng hai nhóm luật validator của nó nên nâng 250 → 260)
   // FLF-418: function-detail thêm mục component_interactions (mức thành phần của sơ đồ tuần tự)
-  const LINE_LIMIT_OVERRIDE: Readonly<Record<string, number>> = { "content/entities-erd": 260, "action/apply-change-op": 250, "content/function-detail": 165 }
+  const LINE_LIMIT_OVERRIDE: Readonly<Record<string, number>> = { "content/entities-erd": 260, "action/apply-change-op": 250, "content/function-detail": 165, "action/elicit-loop": 160 }
 
   // FLF-449 N2: block luật chất lượng chép y hệt vào 9 skill (ba-quality-block.test.ts so từng byte) - không tính vào trần dòng,
   // nếu không thì mỗi skill phân tích phải cắt luật riêng của nó để chứa luật chung.
@@ -394,8 +395,21 @@ describe("Brief giữ tầm nhìn/mục tiêu ở addendum, S-1.1 dựng bản t
     expect(text).toContain("Removing a use case of a flow is the user's call")
   })
 
+  it("FLF-493: apply-change-op (Reconcile) cấm xoá phần tử / mục con khi không có thay đổi gốc nào kéo theo", () => {
+    const text = skill("action/apply-change-op")
+    expect(text).toContain("Never remove an element or a sub-item")
+    expect(text).toContain("Rewording keeps the id")
+  })
+
   it("apply-change-op: có luật brief_core cho lệnh sửa ở pha Brief", () => {
     expect(skill("action/apply-change-op")).toContain("brief_core")
+  })
+
+  it("FLF-486 (B5): apply-change-op - cùng mục tiêu nhiều vai là MỘT use case; quyền dùng đúng chữ hành động của ma trận dự án", () => {
+    const text = skill("action/apply-change-op")
+    expect(text).toContain("ONE use case with all of them in `actor_ids`")
+    expect(text).toContain("never one use case per actor or per role")
+    expect(text).toContain("an imported X matrix uses `access`")
   })
 
   it("FLF-411 (#18): apply-change-op - \"tên hệ thống\" ghi project.system_name, project.name chỉ khi nói tên dự án", () => {
@@ -460,6 +474,17 @@ describe("FLF-260: skill chat viết theo ngôn ngữ trả lời nối ở cu�
     expect(skill("action/elicit-loop")).toContain('(English reply: "Internal rules only" / "Internal rules and the law")')
     // draft-to-ops phải nhận ra vế nội bộ bằng tiếng Anh: vế này không tự quyết internal hay production
     expect(skill("action/draft-to-ops")).toContain('English reply: "Internal rules only"')
+  })
+
+  it("FLF-478: nhắc lịch trên mobile tách 'đẩy trên điện thoại' với 'chỉ trong app'; S-2.3 thêm dịch vụ push", () => {
+    const ask = skill("action/elicit-loop")
+    expect(ask).toContain("Notification channel on mobile")
+    expect(ask).toContain("push notification on the phone")
+    expect(ask).toContain("in-app only")
+    expect(ask).toContain("never conclude")
+    const overview = skill("content/product-overview")
+    expect(overview).toContain("Push Notification Service")
+    expect(overview).toContain("mobile_app")
   })
 
   it("trích đoạn chốt câu hỏi mở không bị dịch theo ngôn ngữ trả lời - server chỉ nhận chuỗi con của tin user", () => {
