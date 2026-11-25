@@ -195,7 +195,7 @@ User clicked **Reconcile** once for all `stale` sections (UC 6.10). For each sta
 
 - One call per stale section: `{{projection}}` is the owning step's own projection (its `reads`), nothing else.
 - Read **only** the dependent fields that changed (`stale_sections[0].changes`).
-- Propose ops that bring the owned fields back in line with those changes, e.g. a renamed actor that still appears in `use_cases[].description`.
+- Propose ops that bring the owned fields back in line with those changes, e.g. a renamed actor that still appears in `use_cases[].description`. Never remove an element or a sub-item (business rule, validation, step) unless `stale_sections[0].changes` removed what it depends on. Rewording keeps the id.
 - Do not touch sections that are not stale. Diagrams with a mismatched `source_hash` are re-rendered by code, not by you.
 - Stay inside `{{writable_paths}}`; ops on other roots are rejected by the op validator before the user ever sees them.
 - Nothing to bring back in line ⇒ return `{"ops": []}`. An empty batch is a valid answer, not a failure.

@@ -395,6 +395,12 @@ describe("Brief giữ tầm nhìn/mục tiêu ở addendum, S-1.1 dựng bản t
     expect(text).toContain("Removing a use case of a flow is the user's call")
   })
 
+  it("FLF-493: apply-change-op (Reconcile) cấm xoá phần tử / mục con khi không có thay đổi gốc nào kéo theo", () => {
+    const text = skill("action/apply-change-op")
+    expect(text).toContain("Never remove an element or a sub-item")
+    expect(text).toContain("Rewording keeps the id")
+  })
+
   it("apply-change-op: có luật brief_core cho lệnh sửa ở pha Brief", () => {
     expect(skill("action/apply-change-op")).toContain("brief_core")
   })

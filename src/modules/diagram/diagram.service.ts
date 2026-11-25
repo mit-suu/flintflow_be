@@ -25,7 +25,7 @@ import * as repository from "../spine/spine.repository.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import type { Op } from "../spine/op.types.js"
 import type { Diagram, Spine, SpineRecord } from "../spine/spine.types.js"
-import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "../spine/source-hash.js"
+import { DIAGRAM_ENGINES, UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "../spine/source-hash.js"
 import { checkPlantUml, type CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { isPlantUmlReachable, renderPlantUml } from "../../shared/diagram/plantuml.client.js"
 import { svgToPng } from "../../shared/diagram/svg-to-png.js"
@@ -423,14 +423,20 @@ export const renderAll = async (projectId: string, options: RenderOptions): Prom
   return renderDiagrams(projectId, allTargets(stripRecord(record)), options)
 }
 
+/** FLF-493: kind vẽ bằng SVG tự dựng (không cần PlantUML). */
+const isSvgTarget = (t: RenderTarget): boolean => DIAGRAM_ENGINES[t.kind].startsWith("svg@")
+
 /**
- * Vẽ lại mọi diagram khi PlantUML có mặt; không có (dev/test, sự cố) ⇒ `null` thay vì ghi hàng loạt `render_error`.
+ * Vẽ lại mọi diagram khi PlantUML có mặt. Không có (dev/test, sự cố) ⇒ chỉ vẽ target SVG (mockup, use case, ERD…), bỏ
+ * target PlantUML (sequence, deployment) thay vì ghi hàng loạt `render_error`; không còn target nào ⇒ `null`.
  * Lỗi vẽ chỉ ghi log — không chặn việc gọi (finalize import, ghi CR). Hình vẫn lệch thì cờ `diagram_stale` báo.
  */
 export const renderAllIfAvailable = async (projectId: string, options: RenderOptions): Promise<RenderResult | null> => {
   try {
-    if (!(await isPlantUmlReachable())) return null
-    return await renderAll(projectId, options)
+    if (await isPlantUmlReachable()) return await renderAll(projectId, options)
+    const targets = allTargets(stripRecord(await loadSpine(projectId))).filter(isSvgTarget)
+    if (targets.length === 0) return null
+    return await renderDiagrams(projectId, targets, options)
   } catch (err) {
     console.warn(`[diagram] vẽ lại diagram lỗi (project ${projectId}, by ${options.by}): ${err instanceof Error ? err.message : String(err)}`)
     return null
@@ -439,12 +445,12 @@ export const renderAllIfAvailable = async (projectId: string, options: RenderOpt
 
 /**
  * FLF-311: sau lô sửa thêm use case / màn — vẽ lại các hình đã vẽ mà dữ liệu nguồn vừa đổi (use case, screen flow…, đúng
- * tập cờ `diagram_stale` bắt) cùng bố cục các màn mới. Không có PlantUML hoặc lỗi ⇒ `null`, lượt sửa vẫn thành công
+ * tập cờ `diagram_stale` bắt) cùng bố cục các màn mới. Không có PlantUML ⇒ chỉ vẽ target SVG (FLF-493); không còn gì để vẽ hoặc lỗi ⇒ `null`, lượt sửa vẫn thành công
  * (cờ `diagram_stale` còn đó, nút "Vẽ lại sơ đồ" như trước).
  */
 export const renderChangedIfAvailable = async (projectId: string, newScreenIds: readonly string[], options: RenderOptions): Promise<RenderResult | null> => {
   try {
-    if (!(await isPlantUmlReachable())) return null
+    const plantUmlUp = await isPlantUmlReachable()
     const spine = stripRecord(await loadSpine(projectId))
     const context = await loadRenderContext(projectId)
     const seen = new Set<string>()
@@ -455,7 +461,7 @@ export const renderChangedIfAvailable = async (projectId: string, newScreenIds: 
       const key = `${t.kind}|${t.owner_id ?? ""}`
       if (seen.has(key)) return false
       seen.add(key)
-      return true
+      return plantUmlUp || isSvgTarget(t)
     })
     if (targets.length === 0) return null
     return await renderDiagrams(projectId, targets, options)

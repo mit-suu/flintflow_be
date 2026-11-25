@@ -177,6 +177,8 @@ export const changesPreviewResponseSchema = z.object({
   notes: z.string().optional(),
   /** Hoà giải (BUG-16): không có gì cần đổi — gửi lại `preview_id` để xác nhận section nguyên trạng. */
   no_change: z.boolean().optional(),
+  /** FLF-493 (hoà giải): mục lô op sẽ xoá (quy tắc, validation, phần tử…) — FE hiện khối đỏ trước khi áp. */
+  removed_items: z.array(z.object({ path: z.string(), label: z.string() })).optional(),
   /** Nguyên tắc 6: AI thấy yêu cầu không hợp lý — không bao giờ tự ghi; "Vẫn làm" = áp `preview_id` như thường. */
   warning: z.string().optional(),
   /** Cờ đỏ mới mà bản sửa sẽ mở (Code tính trước / sau) — sửa này sẽ chặn baseline. */

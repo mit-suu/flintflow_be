@@ -1460,6 +1460,8 @@ export interface ChangePreviewResult extends PreviewResult {
   notes?: string
   /** Hoà giải: section vẫn đúng nội dung, user chỉ cần xác nhận nguyên trạng (BUG-16). */
   no_change?: boolean
+  /** FLF-493 (hoà giải): mục mà lô sẽ xoá — FE hiện khối cảnh báo trước khi áp; không chặn, không tự bỏ op. */
+  removed_items?: { path: string; label: string }[]
   /**
    * AI cho rằng yêu cầu không hợp lý (kèm lý do, ngôn ngữ trả lời). Có ⇒ không tự ghi; áp dụng bản xem trước này là "Vẫn làm"
    * (giữ ý sau cảnh báo, lưu vào phiên chat cho lượt kiểm sau đọc).

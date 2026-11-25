@@ -21,7 +21,7 @@ export const hasRemoveOp = (proposal: { spine_ops?: readonly unknown[] } | null 
 const LABEL_FIELDS = ["name", "title", "term", "condition", "text", "description", "statement", "content", "message", "action", "label", "rule"] as const
 
 /** Nhãn đọc được của một mục (không in mã nội bộ nếu có chữ; chỉ còn id khi không có field chữ nào). */
-const labelOf = (value: unknown): string => {
+export const labelOf = (value: unknown): string => {
   if (!isRow(value)) return typeof value === "string" ? value.trim() : ""
   const text = LABEL_FIELDS.map((f) => value[f]).find((v): v is string => typeof v === "string" && v.trim().length > 0)
   const id = typeof value.id === "string" ? value.id : ""
