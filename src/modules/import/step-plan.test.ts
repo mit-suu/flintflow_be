@@ -53,6 +53,18 @@ const HEADINGS = new Map([
 ])
 
 describe("buildLayout", () => {
+  it("FLF-444: block heading mở mục nào của layout (mục riêng `custom:CSnn` cho heading không khớp); heading con cùng section không mở mục", () => {
+    const { entryOfHeading } = buildLayout(BLOCKS, HEADINGS)
+    expect([...entryOfHeading]).toEqual([
+      ["B0001", "fixed:1"],
+      ["B0005", "custom:CS01"],
+      ["B0009", "fixed:2.1"],
+      ["B0010", "fixed:5.1"],
+      ["B0011", "custom:CS02"],
+      ["B0015", "custom:CS03"]
+    ])
+  })
+
   it("FLF-362: heading có số Word tự đánh ⇒ layout giữ `number_label`, `heading_text` giữ nguyên chữ", () => {
     const blocks: LayoutBlock[] = [{ ...h("B0001", "Product Overview", 1), number_label: "1." }, p("B0002", "Text", "fixed:1")]
     const { layout } = buildLayout(blocks, new Map([["B0001", "fixed:1"]]))
@@ -149,7 +161,7 @@ describe("buildLayout", () => {
   })
 
   it("không có heading ⇒ layout rỗng; block trước heading đầu tiên không vào mục riêng", () => {
-    expect(buildLayout([p("B0001", "Cover page", null)], new Map())).toEqual({ layout: [], customSections: [], slices: [], segments: [], contextBlocks: [], sectionBlocks: [] })
+    expect(buildLayout([p("B0001", "Cover page", null)], new Map())).toEqual({ layout: [], customSections: [], slices: [], segments: [], contextBlocks: [], sectionBlocks: [], entryOfHeading: new Map() })
   })
 
   it("FLF-184: văn xuôi I-4 không trích được ⇒ phần nối (tiêu đề rỗng, cấp + 1) ngay sau section; khối dưới heading con cùng section gom vào cùng phần nối", () => {

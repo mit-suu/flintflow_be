@@ -41,6 +41,8 @@ import { DocBlock } from "./doc-block.model.js"
 import { erdNotationOfDocument } from "./erd-notation-detect.js"
 import { fillScreenDomain } from "../diagram/screen-domain.js"
 import { captionOf } from "./extract.service.js"
+import { CONTENT_SECTION } from "./extract-targets.js"
+import { sectionsOfPath } from "../spine/section-registry.js"
 import { canonicalFieldIds, collectEntities, idKey, imageOnlyGenericActors, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
 import { ExtractionDraft, type IExtractionDraft } from "./extraction-draft.model.js"
 import { FieldAnchor } from "./field-anchor.model.js"
@@ -267,9 +269,11 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // FLF-366: file giữ khung còn mục trống là mẫu để điền (bản xuất điền vào chính file đó) ⇒ không chia đoạn nguyên văn. SRS
   // đã viết đủ khung (kể cả theo mẫu của công ty) vẫn giữ đoạn gốc như cấu trúc FlintFlow
   const previewMissing = (profile.structure_preview?.summary.missing ?? 0) > 0
-  const { layout, customSections, slices, segments } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds, {
+  const { layout, customSections, slices, segments, entryOfHeading } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds, {
     segment: !(intent === "fixed" && previewMissing)
   })
+  // FLF-444: ảnh trong mục đọc theo nội dung (`content:@<heading>`) ⇒ câu cờ nêu tiêu đề mục riêng của layout (`custom:CSnn`)
+  const reviewDrafts = drafts.map((d) => ({ ...d, section_id: layoutSectionOf(d.section_id, entryOfHeading) }))
   const seeded = await loadSpine(projectId)
   // Mẫu IEEE: phần tử trích từ heading lặp (Availability dưới 4.2.2) in dưới đúng heading đó của file
   const sliceItems = sectionSlices(slices, entities)
@@ -292,13 +296,16 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     ...customSectionOps(customSections),
     // Hai nhóm cờ trong cùng lô ⇒ id cờ cấp nối tiếp (gọi riêng từng nhóm thì trùng id, cả lô bị từ chối)
     ...findingOpsInOrder(stripRecord(seeded), [
-      { findings: unreadImageFindings(stripRecord(seeded), drafts, layout, provisional), rule: IMPORT_IMAGE_RULE },
+      { findings: unreadImageFindings(stripRecord(seeded), reviewDrafts, layout, provisional), rule: IMPORT_IMAGE_RULE },
       { findings: droppedPermissionFindings(droppedPermissions, matrixBlocks), rule: IMPORT_UNRESOLVED_RULE },
       {
-        findings: needsReviewFindings(stripRecord(seeded), drafts, profile, layout, provisional, (blockId) => {
-          const s = blockSectionsBefore.get(blockId)
-          return s ? realSectionId(s, provisional) : null
-        }),
+        findings: contentFindingsHome(
+          stripRecord(seeded),
+          needsReviewFindings(stripRecord(seeded), drafts, profile, layout, provisional, (blockId) => {
+            const s = blockSectionsBefore.get(blockId)
+            return s ? realSectionId(s, provisional) : null
+          })
+        ),
         rule: IMPORT_NEEDS_REVIEW_RULE
       },
       { findings: titleContentFindings(stripRecord(seeded), profile.heading_map, layout), rule: IMPORT_TITLE_CONTENT_RULE },
@@ -470,6 +477,26 @@ const UNREAD_REASON: Readonly<Record<string, string>> = {
   unavailable: "AI đọc ảnh đang quá tải, chưa đọc được",
   failed: "AI không đọc được ảnh này"
 }
+
+/**
+ * FLF-444: mục đọc theo nội dung `content:@B…` ⇒ mục của layout mà block heading đó mở (thường là mục riêng `custom:CSnn`);
+ * mục khác giữ nguyên. Không tìm được (heading bị bỏ khỏi layout) ⇒ giữ id cũ.
+ */
+export const layoutSectionOf = (sectionId: string, entryOfHeading: ReadonlyMap<string, string>): string => {
+  const m = CONTENT_SECTION.exec(sectionId)
+  return m ? (entryOfHeading.get(m[1]) ?? sectionId) : sectionId
+}
+
+/**
+ * FLF-444: cờ "Cần xem" của phần tử đọc từ mục đọc theo nội dung (`content:@B…`, không phải mục Spine — bất biến chặn, trước
+ * đây rơi về `fixed:I`) ⇒ mục Spine sở hữu phần tử đó theo bảng §4 (chức năng ⇒ `function:<id>`, NFR ⇒ 4.x, thuật ngữ ⇒ 5.5…).
+ */
+export const contentFindingsHome = (spine: Spine, findings: Finding[]): Finding[] =>
+  findings.map((f) => {
+    if (!CONTENT_SECTION.test(f.section_id) || !f.target_id) return f
+    const home = sectionsOfPath(spine, f.target_id).owner[0]
+    return home ? { ...f, section_id: home } : f
+  })
 
 /** Ảnh ở mục diagram mà I-4 không đọc được (`other` / EMF / AI lỗi…) ⇒ cờ vàng: ảnh gốc được giữ, dữ liệu trong ảnh chưa vào Spine. */
 const unreadImageFindings = (
