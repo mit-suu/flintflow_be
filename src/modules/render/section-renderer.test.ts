@@ -453,6 +453,11 @@ describe("renderSection - feature/function", () => {
     expect(section.blocks).toEqual([{ type: "paragraph", runs: [{ text: "Screens: Login" }] }])
   })
 
+  it("FLF-480: mẫu cố định (mode 1) ⇒ feature không thêm dòng \"Screens: …\"", () => {
+    const section = renderSection(spine(), "feature:F1", ctx({ number: "3.2", fixedTemplate: true }))
+    expect(section.blocks).toEqual([])
+  })
+
   it("function:<id> - trigger/description/normal/abnormal/validations/business rules + ảnh screen_layout khi là primary_function_id", () => {
     const section = renderSection(spine(), "function:FN01", ctx({ number: "3.2.1" }))
     expect(section.heading).toBe("Submit Credentials")

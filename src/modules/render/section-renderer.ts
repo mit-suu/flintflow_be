@@ -540,7 +540,8 @@ const featureOverview = (spine: Spine, featureId: string, ctx: SectionRenderCont
   const classDiagrams: Block[] = diagramImages(spine, "class", featureId, ctx, "Class Diagram", svgCaption)
   // FLF-390: sơ đồ activity của use case thuộc tính năng (phần chức năng) — chỉ có khi đã có dữ liệu luồng
   const activities = useCaseActivities(spine, `feature:${featureId}`, ctx)
-  if (ctx.functionLayout === "fpt") return [...classDiagrams, ...activities]
+  // FLF-480 (P09 #3): mẫu cố định in đoạn nguyên văn của file, bản Xem không thêm dòng liệt kê màn mà file không có
+  if (ctx.functionLayout === "fpt" || ctx.fixedTemplate) return [...classDiagrams, ...activities]
   const screens = spine.screens.filter((s) => s.feature_id === featureId)
   return [...classDiagrams, ...(screens.length === 0 ? [] : [p(`Screens: ${screens.map((s) => s.name).join(", ")}`)]), ...activities]
 }
