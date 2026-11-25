@@ -23,7 +23,8 @@ vi.mock("../notification/notification.service.js", () => ({
   notify: vi.fn().mockResolvedValue(null)
 }))
 
-vi.mock("../organization/membership.model.js", () => ({
+vi.mock("../organization/membership.model.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../organization/membership.model.js")>()),
   Membership: {
     find: vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue([]) }) })
   }
