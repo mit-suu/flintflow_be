@@ -44,10 +44,10 @@ import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf, screenLoopOrder } from
 import { addendumForUnit, assumptionsForPrompt, buildStepContext, elicitProjection, getStepSpec, loadConversationVariables, loadLastAiReply, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
 import { buildConversationSummary } from "./conversation-summary.js"
 import { composeStepGateMessage, spokenAssumptionIds } from "./gate-message.js"
-import { askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt, normalizeTopicKey } from "./decisions.service.js"
+import { askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt, normalizeTopicKey, type AnsweredTopic } from "./decisions.service.js"
 import { DEFAULT_CHOICE, diagramChoiceFallbackNote, diagramChoiceFor, diagramChoiceKindOfTopic, diagramChoiceLabel, diagramChoiceLead, diagramChoiceQuestion, projectDiagramChoiceStore, resolveDiagramChoice, type DiagramChoiceStore } from "./diagram-choice.js"
 import { elicitPolicyFor, keepConflictsOnly, reconcileReply, trimTailQuestion } from "./fast-path.js"
-import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, currentBatch, followUpQuestions, followUpReply, indexOfQuestion, questionIdsFor, sameText, shapeQuestions, splitNumberedAnswer, stripRecommended, verifiedExcerpt } from "./question-shape.js"
+import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, currentBatch, followUpQuestions, followUpReply, indexOfQuestion, questionIdsFor, sameText, shapeQuestions, splitNumberedAnswer, stripRecommended, verifiedDecisionUpdates, verifiedExcerpt } from "./question-shape.js"
 import { MAX_SCHEMA_RETRIES, draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
 import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
 import * as meter from "./meter.service.js"
@@ -491,7 +491,7 @@ export const replyLanguageAfterMessage = async (
  */
 export const settleFromChat = (
   asked: PendingAnswerState["asked"],
-  settled: readonly { topic_key: string; answer: string; source_paras?: readonly string[] }[] | undefined,
+  settled: readonly { topic_key: string; id?: string; answer: string; source_paras?: readonly string[] }[] | undefined,
   message: string,
   /** Tin user chỉ là "Đúng rồi" với đề xuất AI vừa nêu ⇒ đề xuất đó (lời AI trước) cũng là nguồn trích đoạn hợp lệ. */
   agreedProposal?: string,
@@ -506,9 +506,20 @@ export const settleFromChat = (
   const done = new Set<number>()
   const norm = (s: string): string => stripRecommended(s).trim().toLowerCase()
   const openIndexes = asked.flatMap((q, i) => (q.options.length === 0 ? [i] : []))
+  // FLF-472 (phần C): khớp theo `id` của câu chờ trước, rồi `topic_key` ĐÃ CHUẨN HOÁ cả hai phía ("Order Completion",
+  // "order-completion" và alias như `availability` đều rơi về khoá của câu chờ).
+  const findAsked = (item: { topic_key: string; id?: string }, skip: ReadonlySet<number> = new Set()): number => {
+    const byId = item.id ? indexOfQuestion(asked, item.id.trim()) : -1
+    if (byId >= 0 && !skip.has(byId)) return byId
+    const key = normalizeTopicKey(item.topic_key, "")
+    return asked.findIndex((q, i) => q.topic_key !== undefined && !skip.has(i) && normalizeTopicKey(q.topic_key, q.question) === key)
+  }
+  const dropped = (item: { topic_key: string }, reason: string): void => {
+    console.info("[settle] bỏ", { topic_key: item.topic_key, reason })
+  }
   const openSettled = new Set(
     (settled ?? []).flatMap((item) => {
-      const index = asked.findIndex((q) => q.topic_key === item.topic_key)
+      const index = findAsked(item)
       return index >= 0 && asked[index].options.length === 0 ? [index] : []
     })
   )
@@ -516,8 +527,11 @@ export const settleFromChat = (
   const useNumbered = openSettled.size > 1 && numbered.size >= openSettled.size
   const openTexts: string[] = []
   for (const item of settled ?? []) {
-    const index = asked.findIndex((q, i) => q.topic_key === item.topic_key && !done.has(i))
-    if (index < 0) continue
+    const index = findAsked(item, done)
+    if (index < 0) {
+      dropped(item, "không khớp câu nào đang chờ (hoặc câu đó đã chốt)")
+      continue
+    }
     const question = asked[index]
     // FLF-393: đoạn tài liệu model dẫn mà tra được ra chữ — mã bịa / sai khuôn bị bỏ
     const docParas = [...new Set((item.source_paras ?? []).flatMap((raw) => {
@@ -536,14 +550,20 @@ export const settleFromChat = (
       if (!text) {
         // Không phải điều user nói ⇒ chỉ chốt bằng tài liệu: câu trả lời phải là trích đoạn nguyên văn của đoạn được dẫn
         const quoted = docText ? verifiedExcerpt(item.answer, docText) : undefined
-        if (!quoted || openTexts.some((t) => sameText(t, quoted))) continue
+        if (!quoted || openTexts.some((t) => sameText(t, quoted))) {
+          dropped(item, quoted ? "đoạn trích trùng câu khác" : "không phải trích đoạn nguyên văn của tin nhắn")
+          continue
+        }
         out.push({ question_id: ids[index], answer: quoted, source_paras: docParas })
         openTexts.push(quoted)
         done.add(index)
         continue
       }
       // Nguyên văn cả tin nhắn hoặc đoạn đã gán cho câu khác ⇒ không tách được cho câu này, câu vẫn chờ
-      if ((openSettled.size > 1 && sameText(text, message)) || openTexts.some((t) => sameText(t, text))) continue
+      if ((openSettled.size > 1 && sameText(text, message)) || openTexts.some((t) => sameText(t, text))) {
+        dropped(item, "không tách được đoạn riêng cho câu này (trùng câu khác)")
+        continue
+      }
       out.push({ question_id: ids[index], answer: text })
       openTexts.push(text)
       done.add(index)
@@ -554,12 +574,24 @@ export const settleFromChat = (
     const labels = parts.map(labelOf)
     if (labels.length === 0 || labels.some((l) => l === undefined)) {
       // P05 (E2E 17/11): câu có lựa chọn được trả lời bằng lời riêng như ô "Khác…" ("Cả ba đều đúng, đặt số luôn: …") — model
-      // chốt câu này nhưng không trùng nhãn ⇒ trước đây bị bỏ, sổ quyết định không ghi và AI hỏi lại đúng câu đó. Chỉ khi đây là
-      // câu DUY NHẤT đang chờ (còn câu khác thì chữ tự do có thể là câu trả lời của câu kia — giữ luật khớp nhãn): chốt bằng
-      // trích đoạn nguyên văn của tin, model diễn lại thì bằng cả tin.
-      if (asked.length !== 1 || !isSubstantiveAnswer(message)) continue
-      const custom = verifiedExcerpt(item.answer, message) ?? message.trim()
-      if (!custom || openTexts.some((t) => sameText(t, custom))) continue
+      // chốt câu này nhưng không trùng nhãn ⇒ trước đây bị bỏ, sổ quyết định không ghi và AI hỏi lại đúng câu đó.
+      // FLF-472 (phần B): trích đoạn NGUYÊN VĂN của tin đã chứng minh đó là chữ của user ⇒ nhận bất kể còn mấy câu chờ
+      // (`openTexts` vẫn chặn một đoạn cho hai câu). Model diễn lại (không phải trích đoạn) thì chỉ khi đây là câu DUY NHẤT đang
+      // chờ mới lấy cả tin — còn câu khác thì chữ tự do có thể là câu trả lời của câu kia.
+      if (!isSubstantiveAnswer(message)) {
+        dropped(item, "tin nhắn không phải câu trả lời thật (hỏi ngược / uỷ quyền / đồng ý suông)")
+        continue
+      }
+      const excerpt = verifiedExcerpt(item.answer, message)
+      if (!excerpt && asked.length !== 1) {
+        dropped(item, "không trùng nhãn nào và không phải trích đoạn nguyên văn của tin (còn nhiều câu chờ)")
+        continue
+      }
+      const custom = excerpt ?? message.trim()
+      if (!custom || openTexts.some((t) => sameText(t, custom))) {
+        dropped(item, "lời riêng trùng câu khác")
+        continue
+      }
       out.push({ question_id: ids[index], answer: custom })
       openTexts.push(custom)
       done.add(index)
@@ -743,7 +775,9 @@ export const settleWithoutModel = (
 }
 
 /** Một lượt elicit đọc tin chat: trả lời user + câu nào đã chốt được (đã kiểm) + câu còn chờ AI đã viết lại. */
-export const runChatTurn = async (input: ChatTurnInput): Promise<{ reply: string; settled: AnswerInput[]; questions: ElicitOutput["questions"] }> => {
+export const runChatTurn = async (
+  input: ChatTurnInput
+): Promise<{ reply: string; settled: AnswerInput[]; questions: ElicitOutput["questions"]; decisionUpdates: AnsweredTopic[] }> => {
   const ids = questionIdsFor(input.asked)
   const conversation = input.sessionId
     ? await loadConversationVariables(input.sessionId, input.spine)
@@ -818,7 +852,14 @@ export const runChatTurn = async (input: ChatTurnInput): Promise<{ reply: string
   const documentParagraphs = cited.length ? await paragraphTexts(input.projectId, cited) : undefined
   const verified = settleFromChat(input.asked, result.data.settled, input.message, proposal ?? undefined, documentParagraphs)
   const settled = input.closing ? verified : settleRepeatedAnswer(input.asked, verified, input.message, result.data.still_open ?? [])
-  return { reply: result.data.reply, settled, questions: result.data.questions ?? [] }
+  // FLF-472 (phần 5b): tin user sửa lại điều đã chốt trong sổ — server kiểm trích đoạn + chủ đề (không phải câu đang chờ)
+  const decisionUpdates = verifiedDecisionUpdates(
+    input.spine,
+    result.data.decision_updates,
+    input.message,
+    input.asked.map((q) => q.topic_key ?? "").filter(Boolean)
+  )
+  return { reply: result.data.reply, settled, questions: result.data.questions ?? [], decisionUpdates }
 }
 
 /**
@@ -1679,7 +1720,7 @@ export const runStep = async (
     const recordAnswers = async (
       asked: PendingAnswerState["asked"],
       answers: readonly AnswerInput[],
-      options: { transcript?: readonly AnswerInput[]; settledIds?: ReadonlySet<string> } = {}
+      options: { transcript?: readonly AnswerInput[]; settledIds?: ReadonlySet<string>; corrections?: readonly AnsweredTopic[] } = {}
     ): Promise<void> => {
       // Lượt soạn phải thấy câu hỏi, không chỉ "Q2: …" — câu mở không vào sổ thì đây là nơi duy nhất nó xuất hiện
       const questionOf = (id: string): string => asked[indexOfQuestion(asked, id)]?.question ?? id
@@ -1694,7 +1735,8 @@ export const runStep = async (
       // vài phút, trong lúc đó Spine đổi ở nơi khác (đổi chế độ duyệt, sửa qua chat, tab khác) — ghi bằng
       // version cũ là 409 SPINE_VERSION_CONFLICT và cả bước chết sau khi user đã trả lời. Đọc lại trước khi ghi.
       ;({ spine, spineVersion } = await refresh(projectId))
-      const ledgerOps = decisionOps(spine, stepId, answeredTopics(asked, answers, options.settledIds))
+      // FLF-472 (phần 5b): đính chính trong chat (thay quyết định đã chốt) ghi cùng lúc với câu vừa chốt
+      const ledgerOps = decisionOps(spine, stepId, [...answeredTopics(asked, answers, options.settledIds), ...(options.corrections ?? [])])
       if (ledgerOps.length > 0) {
         const ledgerApplied = await applyTransaction(projectId, {
           base_version: spineVersion,
@@ -1830,7 +1872,8 @@ export const runStep = async (
         const settled = turn.settled.filter((a) => !answeredByCard.has(indexOfQuestion(pending, a.question_id)))
         await recordAnswers(pending, [...cardAnswers, ...settled], {
           transcript: [],
-          settledIds: new Set(settled.map((a) => a.question_id))
+          settledIds: new Set(settled.map((a) => a.question_id)),
+          corrections: turn.decisionUpdates ?? []
         })
         // FLF-393: câu chốt bằng tài liệu tham khảo ⇒ ghi nguồn cho quyết định vừa vào sổ (business-flow §3.6)
         if (settled.some((a) => a.source_paras?.length)) await captureSettledSources(projectId, stepId, (await refresh(projectId)).spine, pending, settled)

@@ -1,7 +1,7 @@
 ---
 skill_id: elicit-loop
 kind: action
-version: 1.8.0
+version: 1.9.0
 description: Talk like a senior BA - reply first, ask at most two questions, as cards with suggested answers whenever you can propose them
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -126,8 +126,8 @@ When `project.system_name` is in `{{missing}}` at B-2.3: ask it once as a card -
 ### Free chat while questions are pending (`pending_questions` not empty)
 
 The user typed a message instead of using the cards. Pending questions: {{pending_questions}}.
-- `settled`: only questions the message **really answers** - `[{ "topic_key", "answer" }]`. With options: `answer` is exactly one option label. Open question: `answer` is the **exact excerpt** of the message, copied character for character, never paraphrased, translated or shortened (the server drops anything that is not a substring of the message - a paraphrase means the question stays open and gets asked again). A qualitative answer or an idea counts (Rules 9); a reply to a question you already re-asked settles it. Delegation ⇒ not settled: propose (Rules 10). A bare agreement ("Đúng rồi, đi tiếp", "ok") to values your **previous reply** proposed settles those questions: `answer` is then the exact excerpt of **your previous reply** naming the value. Unsure, off-topic or partial ⇒ leave it out. **The uploaded documents answer a pending question** (the user asks you to look it up, or the excerpts state it): settle it too, and `"source_paras": ["D1-P391"]` is **required** - the codes of the paragraphs that state it (the server records them as the decision's source) - and `answer` = an exact excerpt copied from those paragraphs (option question: the option label); say so in `reply` ("theo tài liệu …"). No real paragraph code ⇒ do not settle from documents.
-- `still_open`: the `topic_key` of every pending question this message does **not** answer (off-topic, partial, delegation). A key is in `settled` or in `still_open`, never both.
+- `settled`: only questions the message **really answers** - `[{ "id", "topic_key", "answer" }]`, where `id` is the `id` of the pending question (copy it from `{{pending_questions}}`). With options: `answer` is exactly one option label **when the message names one**. The message answers an option question **in the user's own words** that match no label (a number, a rule, "khi người mua bấm đã nhận hàng, hoặc 7 ngày sau khi giao") ⇒ it is still settled: `answer` is the **exact excerpt** of the message, as for an open question. Never force it onto the nearest label and never leave it in `still_open` - the user answered. A topic in `settled` is **never** also in `questions` (do not re-ask or rewrite what you just settled). Open question: `answer` is the **exact excerpt** of the message, copied character for character, never paraphrased, translated or shortened (the server drops anything that is not a substring of the message - a paraphrase means the question stays open and gets asked again). A qualitative answer or an idea counts (Rules 9); a reply to a question you already re-asked settles it. Delegation ⇒ not settled: propose (Rules 10). A bare agreement ("Đúng rồi, đi tiếp", "ok") to values your **previous reply** proposed settles those questions: `answer` is then the exact excerpt of **your previous reply** naming the value. Unsure, off-topic or partial ⇒ leave it out. **The uploaded documents answer a pending question** (the user asks you to look it up, or the excerpts state it): settle it too, and `"source_paras": ["D1-P391"]` is **required** - the codes of the paragraphs that state it (the server records them as the decision's source) - and `answer` = an exact excerpt copied from those paragraphs (option question: the option label); say so in `reply` ("theo tài liệu …"). No real paragraph code ⇒ do not settle from documents.
+- `still_open`: the `topic_key` of every pending question this message does **not** answer (off-topic, partial, delegation). A key is in `settled` or in `still_open`, never both. `decision_updates`: the message **corrects** something already in `{{decisions}}` (the user changes their mind about a decided topic, e.g. the ledger says "Chỉ VNPay và MoMo" and they write "À không, GHN và GHTK cũng nối API nhé") ⇒ `[{ "topic_key": "<the exact key in the ledger>", "answer": "<exact excerpt of the message>" }]`, at most 3. Never for a topic that is pending (that is `settled`); a message that only asks or repeats the decided value ⇒ omit it. Say the change in one sentence in `reply` ("Mình đã đổi: <topic in plain words> thành <new value>") so the user can correct you.
 - `reply`: answer what the user said in 1–3 sentences, in the same voice; never say you still wait for what this message just answered. `questions`: the still-open ones **rewritten to build on what the user just said** (keep `topic_key`, `inline` if asked in prose); `[]` ⇒ re-asked as is.
 {{#if close_interview}}
 **Closing turn (`close_interview`)**: this ends the phase interview. `reply`: react to what the user said and say what you will assume for anything they did not answer - **no question at all** (none in `reply`, `questions: []`, no new topic, nothing re-asked). `settled` only what the message really answers.
@@ -147,12 +147,12 @@ Return **only** JSON, no markdown fence, no text around it.
         { "label": "Giữ 99% như đã chốt (Khuyến nghị)", "description": "Đủ cho phòng khám; bảo trì ngoài giờ", "pros": ["Một máy chủ là đủ"], "cons": ["Có thể gián đoạn vài giờ mỗi tháng"], "risks": ["Giả định không nhận lịch ban đêm"] },
         { "label": "99.9%", "description": "Ít gián đoạn hơn; cần máy chủ dự phòng", "pros": ["Khách đặt lịch lúc nào cũng được"], "cons": ["Thêm chi phí máy chủ dự phòng"], "risks": [] } ] }
   ],
-  "settled": [{ "topic_key": "uptime", "answer": "99.9%" }, { "topic_key": "form_factor", "answer": "Web", "source_paras": ["D1-P07"] }],
-  "still_open": ["booking_flow"],
+  "settled": [{ "id": "Q_uptime", "topic_key": "uptime", "answer": "99.9%" }, { "id": "Q_form_factor", "topic_key": "form_factor", "answer": "Web", "source_paras": ["D1-P07"] }],
+  "still_open": ["booking_flow"], "decision_updates": [{ "topic_key": "external_partners", "answer": "GHN và GHTK cũng nối API" }],
   "ops": [
     { "op": "add", "path": "addendum[]", "value": { "id": "AD7", "topic": "scale", "content": "...", "content_en": "...", "target_section": "fixed:4.2.3" }, "reason": "captured during B-1.4" }
   ]
 }
 ```
 
-`ops` only for `discovery_step`; omit it for `elicit`. `settled` and `still_open` only in a free-chat turn.
+`ops` only for `discovery_step`; omit it for `elicit`. `settled`, `still_open` and `decision_updates` only in a free-chat turn.

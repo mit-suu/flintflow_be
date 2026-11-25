@@ -1781,7 +1781,9 @@ describe("settleFromChat: ghép câu trả lời đúng câu hỏi", () => {
 
   it("câu lựa chọn giữ luật khớp nhãn", () => {
     expect(settleFromChat(asked, [{ topic_key: "platform", answer: "web" }], "Làm web thôi")).toEqual([{ question_id: "Q_platform", answer: "Web" }])
-    expect(settleFromChat(asked, [{ topic_key: "platform", answer: "Desktop" }], "Desktop")).toEqual([])
+    // FLF-472 (B): lời riêng là trích đoạn nguyên văn của tin ⇒ nhận dù còn nhiều thẻ chờ; diễn lại thì không
+    expect(settleFromChat(asked, [{ topic_key: "platform", answer: "Desktop" }], "Desktop")).toEqual([{ question_id: "Q_platform", answer: "Desktop" }])
+    expect(settleFromChat(asked, [{ topic_key: "platform", answer: "Máy tính" }], "Desktop")).toEqual([])
   })
 })
 
@@ -1807,6 +1809,64 @@ describe("settleFromChat: câu có lựa chọn trả lời bằng lời riêng 
     expect(settleFromChat([goals], [{ topic_key: "project_goals", answer: "Ít bỏ sót đơn" }], "ít bỏ sót đơn")).toEqual([
       { question_id: "Q_project_goals", answer: ["Ít bỏ sót đơn"] }
     ])
+  })
+})
+
+describe("settleFromChat: khớp theo id / topic_key chuẩn hoá (FLF-472, C)", () => {
+  const asked = [{ topic_key: "order_completion", question: "Đơn hoàn tất tính khi nào?", options: [{ label: "Người mua bấm đã nhận" }, { label: "Sau 7 ngày" }] }]
+  const message = "khi người mua bấm đã nhận hàng, hoặc 7 ngày sau khi giao"
+
+  it("topic_key viết hoa / gạch nối khác khoá câu chờ ⇒ vẫn khớp", () => {
+    for (const key of ["Order Completion", "order-completion"]) {
+      expect(settleFromChat(asked, [{ topic_key: key, answer: message }], message)).toEqual([{ question_id: "Q_order_completion", answer: message }])
+    }
+  })
+
+  it("alias của khoá chuẩn ⇒ khớp câu chờ mang khoá chuẩn", () => {
+    const uptime = [{ topic_key: "uptime", question: "Cần sẵn sàng tới mức nào?", options: [{ label: "99%" }, { label: "99.9%" }] }]
+    expect(settleFromChat(uptime, [{ topic_key: "availability", answer: "99.9%" }], "chọn 99.9%")).toEqual([{ question_id: "Q_uptime", answer: "99.9%" }])
+  })
+
+  it("id đúng nhưng topic_key sai ⇒ vẫn chốt theo id; không có gì khớp ⇒ bỏ và log lý do", () => {
+    expect(settleFromChat(asked, [{ id: "Q_order_completion", topic_key: "completely_wrong", answer: message }], message)).toEqual([
+      { question_id: "Q_order_completion", answer: message }
+    ])
+    const info = vi.spyOn(console, "info").mockImplementation(() => {})
+    expect(settleFromChat(asked, [{ topic_key: "completely_wrong", answer: message }], message)).toEqual([])
+    expect(info).toHaveBeenCalledWith("[settle] bỏ", expect.objectContaining({ topic_key: "completely_wrong" }))
+    info.mockRestore()
+  })
+})
+
+describe("settleFromChat: lời riêng cho câu có lựa chọn khi có nhiều thẻ chờ (FLF-472, B)", () => {
+  const completion = { topic_key: "order_completion", question: "Đơn hoàn tất tính khi nào?", options: [{ label: "Người mua bấm đã nhận" }, { label: "Sau 7 ngày" }] }
+  const platform = { topic_key: "platform", question: "Nền tảng?", options: [{ label: "Web" }, { label: "Ứng dụng di động" }] }
+  const message = "khi người mua bấm đã nhận hàng, hoặc 7 ngày sau khi giao"
+
+  it("hai thẻ chờ, model chốt thẻ X bằng trích đoạn nguyên văn không trùng nhãn ⇒ ghi trích đoạn", () => {
+    expect(settleFromChat([completion, platform], [{ topic_key: "order_completion", answer: message }], message)).toEqual([
+      { question_id: "Q_order_completion", answer: message }
+    ])
+  })
+
+  it("hai thẻ chờ, model diễn lại (không phải trích đoạn) ⇒ không chốt", () => {
+    expect(settleFromChat([completion, platform], [{ topic_key: "order_completion", answer: "đã nhận hoặc 7 ngày" }], message)).toEqual([])
+  })
+
+  it("một thẻ chờ, model diễn lại ⇒ lấy cả tin (luật P05 cũ)", () => {
+    expect(settleFromChat([completion], [{ topic_key: "order_completion", answer: "đã nhận hoặc 7 ngày" }], message)).toEqual([
+      { question_id: "Q_order_completion", answer: message }
+    ])
+  })
+
+  it("một đoạn không được ghi cho hai thẻ", () => {
+    expect(
+      settleFromChat(
+        [completion, platform],
+        [{ topic_key: "order_completion", answer: message }, { topic_key: "platform", answer: message }],
+        message
+      )
+    ).toEqual([{ question_id: "Q_order_completion", answer: message }])
   })
 })
 
