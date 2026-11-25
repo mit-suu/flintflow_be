@@ -1,7 +1,7 @@
 ---
 skill_id: review-section
 kind: action
-version: 1.2.0
+version: 1.2.1
 description: LLM lens review of one section or the assembled draft → yellow flags only
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -62,7 +62,7 @@ Definitions, examples and when each applies: *Reference: lenses* at the end of t
 1. Apply **only** the lenses listed in *Lenses to apply*.
 2. **Level is always `yellow`.** Never output `red`.
 3. `rule_id` = the lens name. `section_id` = logical key (`function:FN07`, `fixed:4.2.3`) - never a section number.
-4. `message` in the **user's language**: name the element by its **name** (not only its id), quote the problem phrase (in English as written), and say what would fix it. One problem per flag. Never write the lens name, `rule_id`, a step code or the word "Spine" in it.
+4. `message` in the **user's language**: name the element by its **name** (not only its id), quote the problem phrase (in English as written), and say what would fix it. One problem per flag. Never write the lens name, `rule_id`, a step code or the word "Spine" in it. Never write a field name (any word with an underscore such as `function_ids`, `spine_version`, `actor_ids`) or a sub-item id (`FN006-V2`, `UC04-S3`). Say it in plain words ("the use case's function list", "when the document version changes") and refer to a rule or validation by quoting its text. Good: "the use case's function list names Cancel Booking twice". Bad: "function_ids has a duplicate at FN006-V2".
 5. **Be specific or stay silent.** "Could be clearer" is not a flag. No flag without a concrete quote or element id.
 6. Do not repeat anything already in *Already open flags*.
 7. Do not raise what `deterministic-check` already covers (empty sections, dead references, missing NFR numbers, orphan actors, non-English content).

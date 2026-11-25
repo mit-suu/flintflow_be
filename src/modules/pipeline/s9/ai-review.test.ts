@@ -47,7 +47,7 @@ import { spineSchema } from "../../spine/spine.schema.js"
 import type { Flag, Spine } from "../../spine/spine.types.js"
 import type { AiActionInput, AiActionResult } from "../../../shared/ai/ai-action.types.js"
 import type { ReviewOutput } from "../../../shared/ai/response-parser.js"
-import { AI_REVIEW_MAX_BATCHES, buildReviewBatches, estimateReviewBatches, runAiReview, type AiReviewExecutor } from "./ai-review.js"
+import { AI_REVIEW_MAX_BATCHES, buildReviewBatches, estimateReviewBatches, humanizeReviewMessage, runAiReview, type AiReviewExecutor } from "./ai-review.js"
 
 const PROJECT = "650000000000000000000099"
 const USER = "650000000000000000000098"
@@ -443,5 +443,41 @@ describe("buildReviewBatches (hàm thuần)", () => {
   it("Spine rỗng ⇒ đúng một lô (khối chung)", () => {
     expect(buildReviewBatches(createEmptySpine({ name: "P" }), "quality")).toHaveLength(1)
     expect(estimateReviewBatches(createEmptySpine({ name: "P" }), "consistency")).toBe(1)
+  })
+})
+
+describe("humanizeReviewMessage", () => {
+  it("vi: tên trường và mã con thành chữ thường / mã cha", () => {
+    const out = humanizeReviewMessage("`function_ids` chỉ có 1 mục; waiver hết hạn khi spine_version đổi; xem FN006-V2.", "vi")
+    expect(out).toContain("danh sách chức năng")
+    expect(out).toContain("phiên bản tài liệu")
+    expect(out).toContain("FN006")
+    expect(out).not.toMatch(/function_ids|spine_version|FN006-V2|`/)
+  })
+
+  it("en: dùng từ điển tiếng Anh", () => {
+    const out = humanizeReviewMessage("function_ids is short and spine_version changed at FN029-V1", "en")
+    expect(out).toBe("function list is short and document version changed at FN029")
+  })
+
+  it("token lạ giữ nguyên, có cảnh báo", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    expect(humanizeReviewMessage("trường foo_bar sai", "vi")).toBe("trường foo_bar sai")
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it("cờ ghi ra đã được làm sạch, cờ có token lạ vẫn mở", async () => {
+    seed(smallSpine())
+    const exec = executorOf([
+      { ...conflict, message: "Cancel Booking: function_ids và spine_version lệch ở FN006-V2." },
+      { ...conflict, message: "Cancel Booking có trường foo_bar lạ.", target_id: null, section_id: "fixed:1" }
+    ])
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    await runAiReview(PROJECT, USER, "quality", { executor: exec })
+    warn.mockRestore()
+    const msgs = openFlags().map((f) => f.message)
+    expect(msgs.some((m) => m.includes("danh sách chức năng") && m.includes("phiên bản tài liệu") && m.includes("FN006") && !m.includes("FN006-V2"))).toBe(true)
+    expect(msgs.some((m) => m.includes("foo_bar"))).toBe(true)
   })
 })

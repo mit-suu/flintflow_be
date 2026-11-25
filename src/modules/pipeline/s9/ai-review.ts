@@ -248,6 +248,31 @@ const sectionOfTarget = (spine: Spine, targetId: string | null): string =>
 
 const baseStep = (stepId: string): string => stepId.split("@")[0] ?? stepId
 
+/** Tên trường hay gặp ⇒ chữ thường theo ngôn ngữ (cờ hiện cho người dùng, không được lộ tên nội bộ). */
+const FIELD_WORDS: Record<string, { vi: string; en: string }> = {
+  function_ids: { vi: "danh sách chức năng", en: "function list" },
+  actor_ids: { vi: "danh sách tác nhân", en: "actor list" },
+  use_case_ids: { vi: "danh sách use case", en: "use case list" },
+  business_rule_ids: { vi: "danh sách quy tắc nghiệp vụ", en: "business rule list" },
+  screen_id: { vi: "màn hình", en: "screen" },
+  feature_id: { vi: "nhóm chức năng", en: "feature" },
+  spine_version: { vi: "phiên bản tài liệu", en: "document version" },
+  section_id: { vi: "mục", en: "section" }
+}
+
+/** Làm sạch câu cờ do model viết: mã con (`FN006-V2`) về mã cha, tên trường về chữ thường. Token lạ giữ nguyên, chỉ cảnh báo. */
+export const humanizeReviewMessage = (message: string, language: ReplyLanguage = "vi"): string => {
+  const lang = language === "en" ? "en" : "vi"
+  let out = message.replace(/\b([A-Z]{1,4}\d{1,4})-[A-Z]{1,2}\d{1,3}\b/g, "$1")
+  out = out.replace(/([`'"“”‘’]?)\b([a-z]+(?:_[a-z]+)+)\b\1/g, (whole, _q: string, token: string) => {
+    const word = FIELD_WORDS[token]
+    if (word) return word[lang]
+    console.warn(`[ai-review] token nội bộ chưa có trong từ điển: ${token}`)
+    return whole
+  })
+  return out
+}
+
 const flagDedupeKey = (lens: string, sectionId: string, targetId: string | null, message: string): string =>
   `${lens}|${sectionId}|${targetId ?? ""}|${normalizeQuoteText(message)}`
 /** Khoá "cùng chỗ, cùng lens" để cờ mới không đè lên cờ người đã giữ / waive. */
@@ -367,7 +392,7 @@ export const runAiReview = async (projectId: string, userId: string, profile: Re
     // Không tin output: chỉ nhận cờ vàng, lens thuộc profile, câu trích khớp nguồn
     for (const f of result.data.flags ?? []) {
       const lens = f.rule_id ?? ""
-      const message = f.message.trim()
+      const message = humanizeReviewMessage(f.message.trim(), options.replyLanguage ?? "vi")
       if (f.level !== "yellow" || !lensNames.has(lens) || message === "") continue
 
       const targetId = f.target_id && indexIds.has(f.target_id) ? f.target_id : null
