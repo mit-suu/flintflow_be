@@ -340,6 +340,7 @@ npm run migrate:knowledge-index -- --dry-run      # xem sẽ tạo gì
 npm run migrate:knowledge-index                   # collection knowledge_chunks + text index + vector index knowledge_chunks_vector (Atlas)
 npm run ingest:knowledge -- --dir assets/skills --corpus skills --dry-run   # thống kê chunk, không embed, không nối DB
 npm run ingest:knowledge -- --dir assets/skills --corpus skills             # embed chunk mới/đổi, xoá chunk đã mất
+npm run ingest:knowledge -- --dir assets/knowledge/iso-29148 --corpus iso-29148   # FLF-465: điều khoản ISO/IEC/IEEE 29148 (chat tra cả hai corpus)
 ```
 
 Script migrate idempotent, **không bao giờ sửa / xoá index đang có** — lệch định nghĩa (đổi `EMBEDDING_DIMENSIONS`,

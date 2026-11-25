@@ -128,7 +128,7 @@ describe("answerFromRetrieval", () => {
 })
 
 describe("answerKnowledgeQuestion", () => {
-  it("truy hồi corpus skills rồi gọi executeAiAction(KNOWLEDGE_ANSWER) với project/user của lượt chat", async () => {
+  it("truy hồi corpus skills + điều khoản 29148 (FLF-465) rồi gọi executeAiAction(KNOWLEDGE_ANSWER) với project/user của lượt chat", async () => {
     retrieveKnowledge.mockResolvedValue(retrieval([chunk("gate-check#caps")]))
     executeAiAction.mockResolvedValue({
       data: { grounded: true, answer: "8 calls [K1]", claims: [{ text: "8 calls per step", refs: ["K1"] }] },
@@ -136,7 +136,7 @@ describe("answerKnowledgeQuestion", () => {
       tokensUsed: { promptTokens: 10, completionTokens: 5, totalTokens: 15 }
     })
     const out = await answerKnowledgeQuestion("How many calls?", { projectId: "p1", userId: "u1", language: "en" })
-    expect(retrieveKnowledge).toHaveBeenCalledWith("How many calls?", { corpus: "skills" })
+    expect(retrieveKnowledge).toHaveBeenCalledWith("How many calls?", { corpus: ["skills", "iso-29148"] })
     expect(executeAiAction).toHaveBeenCalledWith(ActionType.KNOWLEDGE_ANSWER, expect.objectContaining({ replyLanguage: "en" }), "p1", "u1", {})
     expect(out).toMatchObject({ grounded: true, cost: 2, tokensUsed: { totalTokens: 15 } })
     expect(out.citations).toEqual([{ ref: "K1", chunk_id: "gate-check#caps", source: "gate-check", section: "Rules", source_kind: "internal_skill" }])
@@ -160,5 +160,35 @@ describe("FLF-333 - hạn mức câu hỏi tri thức mỗi ngày (không tốn 
     await expect(answerKnowledgeQuestion("How many model calls per step?", { projectId: "p1", userId: "u1", language: "en" })).rejects.toMatchObject({ statusCode: 429, code: "KNOWLEDGE_DAILY_LIMIT", meta: { limit: env.KNOWLEDGE_DAILY_LIMIT } })
     expect(retrieveKnowledge).not.toHaveBeenCalled()
     expect(executeAiAction).not.toHaveBeenCalled()
+  })
+})
+
+describe("FLF-465 - hỏi về ISO/IEC/IEEE 29148 (nguyên tắc 9, UC-79)", () => {
+  const clause = chunk("iso-29148/5-2-5-individual-characteristics#5-2-5", {
+    source: "ISO/IEC/IEEE 29148:2018",
+    source_kind: "standard",
+    section: "5.2.5 Characteristics of individual requirements"
+  })
+
+  it("có căn cứ ⇒ trả lời kèm trích dẫn điều khoản (nguồn, số điều khoản, kind standard), 0 credit", async () => {
+    retrieveKnowledge.mockResolvedValue(retrieval([clause]))
+    executeAiAction.mockResolvedValue({
+      data: { grounded: true, answer: "Mỗi yêu cầu phải kiểm chứng được [K1].", claims: [{ text: "Mỗi yêu cầu phải kiểm chứng được.", refs: ["K1"] }] },
+      cost: 0
+    })
+    const out = await answerKnowledgeQuestion("Theo 29148 một yêu cầu cần đặc tính gì?", { projectId: "p1", userId: "u1", language: "vi" })
+    const vars = executeAiAction.mock.calls[0]![1].promptVariables as { chunks: string }
+    expect(vars.chunks).toContain("[K1] source: ISO/IEC/IEEE 29148:2018 · section: 5.2.5 Characteristics of individual requirements · kind: standard (external standard)")
+    expect(out).toMatchObject({ grounded: true, cost: 0 })
+    expect(out.citations).toEqual([
+      { ref: "K1", chunk_id: clause.chunk_id, source: "ISO/IEC/IEEE 29148:2018", section: "5.2.5 Characteristics of individual requirements", source_kind: "standard" }
+    ])
+  })
+
+  it("không có căn cứ ⇒ câu từ chối cố định, KHÔNG gọi model, cost 0", async () => {
+    retrieveKnowledge.mockResolvedValue(retrieval([clause], { abstain: true, top_vector_score: 0.1 }))
+    const out = await answerKnowledgeQuestion("BABOK có bao nhiêu knowledge area?", { projectId: "p1", userId: "u1", language: "vi" })
+    expect(executeAiAction).not.toHaveBeenCalled()
+    expect(out).toMatchObject({ grounded: false, answer: ABSTAIN_REPLY.vi, citations: [], abstain_reason: "low_score", cost: 0, tokensUsed: null })
   })
 })

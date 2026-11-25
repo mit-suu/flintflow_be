@@ -15,7 +15,7 @@ import { ChatSession } from "../../src/modules/project/chat-session.model.js"
 import { CreditWallet } from "../../src/modules/credits/credit-wallet.model.js"
 import { AiActionLog } from "../../src/modules/admin/ai-action-log.model.js"
 import { chunkCorpus } from "../../src/modules/knowledge/chunker.js"
-import { loadCorpus } from "../../src/modules/knowledge/corpus.js"
+import { ISO_29148_CORPUS, ISO_29148_CORPUS_DIR, loadCorpus } from "../../src/modules/knowledge/corpus.js"
 import { ingestChunks } from "../../src/modules/knowledge/ingest.js"
 import { ABSTAIN_REPLY } from "../../src/modules/knowledge/answer.service.js"
 import { invalidateMemoryIndex } from "../../src/modules/knowledge/vector-backend.js"
@@ -150,5 +150,44 @@ describe("FLF-267 chat - trả lời có căn cứ", () => {
     expect(ai).toHaveProperty("grounded")
     expect(ai).not.toHaveProperty("kind")
     expect(mockCalls.every((c) => c.kind !== "change")).toBe(true)
+  })
+})
+
+describe("FLF-465 chat - kho điều khoản ISO/IEC/IEEE 29148 (nguyên tắc 9, UC-79)", () => {
+  const clauseChunks = chunkCorpus(loadCorpus(ISO_29148_CORPUS_DIR, { corpus: ISO_29148_CORPUS })).chunks
+  const CLAUSE_QUESTION = "Which characteristics of individual requirements does ISO 29148 list: necessary, unambiguous, singular, feasible, verifiable?"
+
+  beforeEach(async () => {
+    await ingestChunks(clauseChunks, { corpus: ISO_29148_CORPUS })
+  })
+
+  it("câu hỏi có căn cứ ⇒ trả lời kèm trích dẫn điều khoản 29148 (kind standard, số điều khoản), không trừ credit", async () => {
+    const f = await seedFixture("minimal")
+    const before = await balance(f)
+    const prompts: string[] = []
+    mockOverrides.before = (prompt) => void prompts.push(prompt)
+    const res = await request(app).post(messages(f)).set(bearer(f)).send({ content: CLAUSE_QUESTION, step: "chat", knowledge: true })
+    expect(res.status).toBe(200)
+    expect(mockCalls).toHaveLength(1)
+    // Điều khoản 29148 nằm trong khối chunk gửi model, kèm nhãn chuẩn ngoài
+    expect(prompts[0]).toContain("source: ISO/IEC/IEEE 29148:2018 · section: 5.2.5 Characteristics of individual requirements · kind: standard")
+    const ai = await lastAi(f)
+    expect(ai).toMatchObject({ grounded: true, questions: [] })
+    const citations = ai!.citations as { ref: string; chunk_id: string; source: string; section: string; source_kind: string }[]
+    expect(citations).toHaveLength(1)
+    expect(citations[0]).toMatchObject({ ref: "K1", source: "ISO/IEC/IEEE 29148:2018", source_kind: "standard", section: "5.2.5 Characteristics of individual requirements" })
+    expect(clauseChunks.some((c) => c.chunk_id === citations[0]!.chunk_id)).toBe(true)
+    expect(await balance(f)).toBe(before)
+  })
+
+  it("không có căn cứ trong cả hai kho ⇒ câu từ chối cố định, KHÔNG gọi model, không trừ credit", async () => {
+    const f = await seedFixture("minimal")
+    const before = await balance(f)
+    const res = await request(app).post(messages(f)).set(bearer(f)).send({ content: "zyxwv qqqqq plugh", step: "chat", knowledge: true })
+    expect(res.status).toBe(200)
+    expect(await lastAi(f)).toEqual({ reply: ABSTAIN_REPLY.vi, questions: [], grounded: false, citations: [] })
+    expect(mockCalls).toHaveLength(0)
+    expect(await balance(f)).toBe(before)
+    expect(await AiActionLog.countDocuments({ userId: f.userId, actionType: "knowledge_answer" })).toBe(0)
   })
 })
