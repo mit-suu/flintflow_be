@@ -447,6 +447,55 @@ describe("writeTemplateDocx", () => {
     })
   })
 
+  describe("xoá mục ở file đánh số gõ tay: số heading anh em phía sau dồn theo bản in", () => {
+    const screenTable = `<w:tbl><w:tblPr/><w:tblGrid><w:gridCol w:w="3000"/><w:gridCol w:w="3000"/></w:tblGrid><w:tr>${cell("Screen")}${cell("Function")}</w:tr><w:tr>${cell("Home")}${cell("3.3 Discovery")}</w:tr><w:tr>${cell("Cart page")}${cell("3.4 Cart")}</w:tr></w:tbl>`
+    const numberedFile = async () => {
+      const zip = new JSZip()
+      zip.file("[Content_Types].xml", `<Types xmlns="${NS.ct}"><Default Extension="xml" ContentType="application/xml"/></Types>`)
+      zip.file("word/document.xml", `<w:document xmlns:w="${NS.w}" xmlns:r="${NS.r}"><w:body>${heading("3 Functional Requirements")}${heading("3.1 Overview", 2)}${screenTable}${heading("3.2 Account", 2)}${body}${heading("3.3 Discovery", 2)}${body}${heading("3.4 Cart", 2)}${body}<w:sectPr/></w:body></w:document>`)
+      zip.file("word/styles.xml", styles)
+      zip.file("word/_rels/document.xml.rels", `<Relationships xmlns="${NS.rels}"></Relationships>`)
+      return zip.generateAsync({ type: "nodebuffer" })
+    }
+
+    it("xoá 3.2 ⇒ heading 3.3 / 3.4 giữ từ file nền ghi thành 3.2 / 3.3, ô bảng ghi đúng chữ heading cũ đổi theo", async () => {
+      const input = await numberedFile(), parsed = await parseDocument(input), doc = document()
+      const id = (text: string) => parsed.blocks.find((b) => b.kind === "heading" && b.text === text)!.block_id
+      const map = [
+        { block_id: id("3 Functional Requirements"), section_id: "fixed:3" },
+        { block_id: id("3.1 Overview"), section_id: "fixed:3.1" },
+        { block_id: id("3.2 Account"), section_id: "feature:F2" },
+        { block_id: id("3.3 Discovery"), section_id: "feature:F3" },
+        { block_id: id("3.4 Cart"), section_id: "feature:F4" }
+      ]
+      doc.sections = [
+        { id: "fixed:3", heading: "Functional Requirements", number: "3", level: 1, blocks: [] },
+        { id: "fixed:3.1", heading: "Overview", number: "3.1", level: 2, blocks: [] },
+        { id: "feature:F3", heading: "Discovery", number: "3.2", level: 2, blocks: [] },
+        { id: "feature:F4", heading: "Cart", number: "3.3", level: 2, blocks: [] }
+      ]
+      const keepSource = new Set(doc.sections.map((s) => s.id))
+      const output = await writeTemplateDocx(doc, input, map, [], { keepSource, importedSectionIds: new Set([...keepSource, "feature:F2"]) })
+      const result = await parseDocument(output)
+      expect(result.blocks.filter((b) => b.kind === "heading").map((b) => b.text)).toEqual(["3 Functional Requirements", "3.1 Overview", "3.2 Discovery", "3.3 Cart"])
+      expect(result.blocks.find((b) => b.kind === "table")!.rows).toEqual([["Screen", "Function"], ["Home", "3.2 Discovery"], ["Cart page", "3.3 Cart"]])
+      // Heading giữ định dạng run gốc (chỉ đổi số trong chữ)
+      const kept = result.blocks.find((b) => b.kind === "heading" && b.text === "3.2 Discovery")!.element
+      expect(wAll(kept, "b")).toHaveLength(1)
+    })
+
+    it("số của bản in trùng số gõ tay của file ⇒ không đổi gì", async () => {
+      const input = await numberedFile(), parsed = await parseDocument(input), doc = document()
+      const id = (text: string) => parsed.blocks.find((b) => b.kind === "heading" && b.text === text)!.block_id
+      const map = [{ block_id: id("3.3 Discovery"), section_id: "feature:F3" }]
+      doc.sections = [{ id: "feature:F3", heading: "Discovery", number: "3.3", level: 2, blocks: [] }]
+      const output = await writeTemplateDocx(doc, input, map, [], { keepSource: new Set(["feature:F3"]) })
+      const result = await parseDocument(output)
+      expect(result.blocks.filter((b) => b.kind === "heading").map((b) => b.text)).toContain("3.3 Discovery")
+      expect(result.blocks.find((b) => b.kind === "table")!.rows![1]).toEqual(["Home", "3.3 Discovery"])
+    })
+  })
+
   describe("FLF-468 lát D: mục mẫu cố định không có bảng nguồn (\"Cần chốt\" #1)", () => {
     it("bảng 2 cột (mã + nội dung) ⇒ danh sách \"mã – nội dung\", không phải đoạn 'Nhãn: giá trị'", async () => {
       const input = await template(), parsed = await parseDocument(input), doc = document()

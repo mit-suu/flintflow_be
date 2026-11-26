@@ -277,6 +277,11 @@ interface Placed {
   label?: string
   /** FLF-364 (câu 10): chữ hướng dẫn của mẫu dưới heading (mục FPT / phần nhỏ). */
   guidance?: readonly string[]
+  /**
+   * Mục layout đứng ngay trước mục này mà phần tử đã bị xoá (tính năng / chức năng / mục riêng): không in, nhưng vẫn tính khi
+   * xét file đánh số đều — xoá "3.2" thì "3.3" phía sau dồn thành "3.2" thay vì tài liệu hổng số.
+   */
+  droppedBefore?: readonly Placed[]
 }
 
 // ─── mục riêng ⇒ block ─────────────────────────────────────────────
@@ -447,17 +452,35 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
   const placed: Placed[] = []
   const used = new Set<string>()
   const insertMissing = (candidates: readonly SectionDef[]) => insertMissingSections(placed, used, defs, candidates, spine, template)
+  /** Mục layout mà phần tử đã bị xoá, chờ gắn vào mục layout kế tiếp được đặt (`droppedBefore`). */
+  let dropped: Placed[] = []
+  let mark = 0
+  const attachDropped = () => {
+    if (dropped.length && placed.length > mark) {
+      placed[mark] = { ...placed[mark], droppedBefore: dropped }
+      dropped = []
+    }
+    if (!dropped.length) mark = placed.length
+  }
+  const featureIds = new Set(spine.features.map((f) => `feature:${f.id}`))
+  const functionIds = new Set(spine.functions.map((f) => `function:${f.id}`))
 
   for (const entry of [...template.layout].sort((a, b) => a.order - b.order)) {
+    attachDropped()
     const id = entry.section_id
     if (used.has(id) && !template.fixedTemplate) continue
     const { typed, title, label } = fileNumber(entry.heading_text, entry.number_label)
     const level = clampLevel(entry.level)
+    // Writer cũng bỏ hẳn heading của các mục này trong file nền (`removeDeletedSlot`) ⇒ số anh em phía sau dồn được ở cả hai nơi
+    const drop = () => dropped.push({ section_id: id, kind: "custom", title, level, fromLayout: true, typed, label })
     if (id.startsWith(GROUP_PREFIX)) {
       placed.push({ section_id: id, kind: "group", title: title || id.slice(GROUP_PREFIX.length), level, fromLayout: true, typed, label })
     } else if (id.startsWith(CUSTOM_PREFIX)) {
       const custom = customById.get(id.slice(CUSTOM_PREFIX.length))
-      if (!custom && !template.fixedTemplate) continue
+      if (!custom && !template.fixedTemplate) {
+        drop()
+        continue
+      }
       // Phần nối (heading rỗng) mà mục riêng đã không còn: không có gì để in — không dựng mục trống tên "—"
       if (!custom && !entry.heading_text.trim()) continue
       if (!custom) {
@@ -491,10 +514,12 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
         guidance: entry.template_guidance
       })
     } else {
+      if ((id.startsWith("feature:") && !featureIds.has(id)) || (id.startsWith("function:") && !functionIds.has(id))) drop()
       continue
     }
     used.add(id)
   }
+  attachDropped()
 
   if (template.fixedTemplate) {
     insertMissing(defs.filter((d) => isRepeatingSection(d.id)))
@@ -717,7 +742,9 @@ export const numberSections = (placed: readonly Placed[]): Numbered[] => {
   const flat = (p: Placed, number: string): Numbered => ({ ...p, number, renderLevel: Math.min(MAX_LEVEL, p.level) })
   if (!placed.some((p) => p.fromLayout && p.kind !== "continuation" && p.typed)) return placed.map((p) => flat(p, ""))
   const sameAsFile = (n: Numbered): boolean => !!n.label && bareLabel(n.label) === bareLabel(n.number)
-  const regular = countNumbers(placed.filter((p) => p.fromLayout)).every((n) => !n.typed || sameAsFile(n))
+  // Xét "đều" trên layout của file kể cả mục đã xoá: xoá "3.2" không làm file thành "không đều" ⇒ "3.3" phía sau dồn thành "3.2"
+  const fileRows = placed.filter((p) => p.fromLayout).flatMap((p) => [...(p.droppedBefore ?? []), p])
+  const regular = countNumbers(fileRows).every((n) => !n.typed || sameAsFile(n))
   if (regular) return countNumbers(placed)
   const out: Numbered[] = []
   for (const p of placed) {
