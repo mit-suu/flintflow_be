@@ -17,9 +17,9 @@ import { IMPORTED_DOC_VERSION, IMPORTED_DOC_VERSIONS } from "../doc-version/vers
 import { Project, type TemplateIntent } from "../project/project.model.js"
 import { DocBlock } from "./doc-block.model.js"
 import { ExtractionDraft, type ExtractedField, type IExtractionDraft } from "./extraction-draft.model.js"
-import { needsConfirm } from "./import.constants.js"
+import { needsConfirm, needsConfirmGuidance } from "./import.constants.js"
 import { isReading, summarizeFound } from "./import-live-summary.js"
-import type { GetImportResponse, ImportedDocumentDto, MappingPatchRequest, ReviewField, TemplateProfileDto } from "./import.dto.js"
+import type { GetImportResponse, ImportedDocumentDto, MappingPatchRequest, ReviewContentMismatch, ReviewField, ReviewGuidance, TemplateProfileDto } from "./import.dto.js"
 import { IMPORT_STATUS_LABELS, assertTransition, hasBaseline, type ImportStatus } from "./import.state.js"
 import { ImportedDocument, type IImportedDocument } from "./imported-document.model.js"
 import { legacyRecordRows } from "./legacy-record.js"
@@ -621,10 +621,29 @@ export const toReviewFields = (
 
 const awaitingConfirm = (f: ExtractedField): boolean => !f.confirmed && needsConfirm(f)
 
+/** FLF-462 (bước 1.6): đoạn lớp 4 chữ hướng dẫn chưa xác nhận, độ tin < 0.7. */
+const awaitingGuidance = (g: IExtractionDraft["guidance_blocks"][number]): boolean => !g.confirmed && needsConfirmGuidance(g)
+
+/** FLF-462 (bước 1.6): đoạn lớp 4 chưa xác nhận của mọi draft, kèm nguyên văn (đọc từ DocBlock để hiển thị). */
+const toReviewGuidance = async (
+  drafts: readonly Pick<IExtractionDraft, "section_id" | "guidance_blocks">[],
+  projectId: mongoose.Types.ObjectId | string
+): Promise<ReviewGuidance[]> => {
+  const pending = drafts.flatMap((d) => d.guidance_blocks.filter(awaitingGuidance).map((g) => ({ section_id: d.section_id, ...g })))
+  if (!pending.length) return []
+  const blocks = await DocBlock.find({ projectId, block_id: { $in: pending.map((g) => g.block_id) } }).select("block_id text").lean()
+  const textOf = new Map(blocks.map((b) => [b.block_id, b.text]))
+  return pending.map((g) => ({ ...g, text: textOf.get(g.block_id) ?? "" }))
+}
+
+/** FLF-462 (bước 1.6, FLF-444 đánh dấu): mục tên đúng nội dung sai chưa xem qua. */
+const toReviewContentMismatch = (drafts: readonly Pick<IExtractionDraft, "section_id" | "content_mismatch">[]): ReviewContentMismatch[] =>
+  drafts.filter((d) => d.content_mismatch && !d.content_mismatch.confirmed).map((d) => ({ section_id: d.section_id, ...d.content_mismatch! }))
+
 export const extractionSummary = async (importId: mongoose.Types.ObjectId | string): Promise<GetImportResponse["extraction"]> => {
   const [drafts, owner] = await Promise.all([
     ExtractionDraft.find({ import_id: importId }).lean(),
-    ImportedDocument.findOne({ _id: importId }, { status: 1, paused: 1 }).lean()
+    ImportedDocument.findOne({ _id: importId }, { status: 1, paused: 1, projectId: 1 }).lean()
   ])
   // Dấu "đang đọc" chỉ có nghĩa khi lần import còn chạy; dừng / lỗi / server khởi động lại ⇒ không mục nào đang đọc
   const active = owner?.status === "extracting" && !owner.paused
@@ -638,12 +657,17 @@ export const extractionSummary = async (importId: mongoose.Types.ObjectId | stri
     reading: isReading(d.reading_since, active, now),
     found: summarizeFound(d)
   }))
-  return { sections, review_fields: toReviewFields(drafts, awaitingConfirm) }
+  return {
+    sections,
+    review_fields: toReviewFields(drafts, awaitingConfirm),
+    review_guidance: owner ? await toReviewGuidance(drafts, owner.projectId) : [],
+    review_content_mismatch: toReviewContentMismatch(drafts)
+  }
 }
 
 export const getImportView = async (projectId: string): Promise<GetImportResponse> => {
   const doc = await latestImport(projectId)
-  if (!doc) return { import: null, profile: null, extraction: { sections: [], review_fields: [] }, blocks_count: 0 }
+  if (!doc) return { import: null, profile: null, extraction: { sections: [], review_fields: [], review_guidance: [], review_content_mismatch: [] }, blocks_count: 0 }
   const [profile, extraction, blocksCount] = await Promise.all([
     TemplateProfile.findOne({ projectId }),
     extractionSummary(doc._id as mongoose.Types.ObjectId),

@@ -27,7 +27,7 @@ const router = Router()
  *         status:
  *           type: string
  *           enum: [uploaded, preflight_rejected, awaiting_latest_confirm, parsing, mapping_review, extracting, fields_review, baselining, incomplete, drafting, checking, gap_review, delivered, change_requested]
- *           description: "FLF-343: file mới đi uploaded → parsing → extracting (chờ Bắt đầu) → baselining → checking → gap_review; awaiting_latest_confirm / mapping_review / fields_review chỉ còn ở bản ghi cũ"
+ *           description: "FLF-343: file mới đi uploaded → parsing → extracting (chờ Bắt đầu) → baselining → checking → gap_review; awaiting_latest_confirm / mapping_review chỉ còn ở bản ghi cũ. FLF-462: extracting còn dừng ở fields_review (bước 1.6) khi có gì cần xác nhận"
  *         preflight:
  *           type: object
  *           properties:
@@ -103,7 +103,7 @@ const router = Router()
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: string } }
  *     responses:
- *       200: { description: "`{ import, profile, extraction: { sections, review_fields }, blocks_count }`" }
+ *       200: { description: "`{ import, profile, extraction: { sections, review_fields, review_guidance, review_content_mismatch }, blocks_count }`" }
  *       409: { description: PROJECT_MODE_MISMATCH }
  */
 router.post("/:id/import", authMiddleware, importController.receiveDocx, importController.uploadImport)
@@ -311,7 +311,7 @@ router.patch("/:id/import/drop-text", authMiddleware, importController.dropText)
  * @swagger
  * /api/v1/projects/{id}/import/fields:
  *   patch:
- *     summary: (Bản ghi cũ ở fields_review) xác nhận / sửa / bỏ field độ tin thấp (UC-22, nút 1.9)
+ *     summary: Bước 1.6/1.9 - xác nhận field độ tin thấp, đoạn lớp 4 chữ hướng dẫn, mục tên đúng nội dung sai (UC-22)
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -335,9 +335,25 @@ router.patch("/:id/import/drop-text", authMiddleware, importController.dropText)
  *                     path: { type: string, example: "actors[id=A01].kind" }
  *                     confirmed: { type: boolean, description: "false ⇒ bỏ field" }
  *                     edited_value: {}
+ *               guidance:
+ *                 type: array
+ *                 description: "FLF-462 - xác nhận đoạn lớp 4 là / không là chữ hướng dẫn"
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     section_id: { type: string }
+ *                     block_id: { type: string }
+ *                     is_guidance: { type: boolean }
+ *               content_mismatch:
+ *                 type: array
+ *                 description: "FLF-462 - xác nhận đã xem mục tên đúng nội dung sai"
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     section_id: { type: string }
  *               confirm_all: { type: boolean }
  *     responses:
- *       200: { description: "`{ import }` — baselining khi không còn field chưa xác nhận" }
+ *       200: { description: "`{ import }` — baselining khi không còn gì chờ xác nhận" }
  *       409: { description: IMPORT_INVALID_STATE }
  */
 router.patch("/:id/import/fields", authMiddleware, importController.patchFields)

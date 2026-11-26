@@ -97,6 +97,9 @@ export const needsConfirm = (f: { confidence: number; origin?: string }): boolea
 /** Trần độ tin của thực thể đọc từ ảnh. */
 export const VISION_CONFIDENCE_CAP = 0.7
 
+/** FLF-462 (bước 1.6): đoạn lớp 4 AI phân loại ở I-4 phải qua người xác nhận khi độ tin dưới ngưỡng field. */
+export const needsConfirmGuidance = (g: { confidence: number }): boolean => g.confidence < FIELD_CONFIDENCE_THRESHOLD
+
 export const EXTRACTION_STATUSES = ["pending", "done", "failed"] as const
 export type ExtractionStatus = (typeof EXTRACTION_STATUSES)[number]
 
