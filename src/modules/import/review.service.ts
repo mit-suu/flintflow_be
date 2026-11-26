@@ -23,6 +23,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { DocBlock } from "./doc-block.model.js"
 import { type CheckBlock, findingOps, parallelBatches, runLimited, semanticBatches, semanticProjection, stripRecord } from "./check.service.js"
+import { userStopRequested } from "./extract.service.js"
 import { enterFlow2, type Flow2Result } from "./flow2.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
 import { withMeteredAi } from "./metered-ai.js"
@@ -50,10 +51,21 @@ const ownerMatchesSection = (owner: string, sectionId: string): boolean => {
 export const reviewInputSections = (structure: Pick<TargetStructure, "sections" | "missing">): string[] => {
   if (!structure.missing.length) return []
   const missingIds = new Set(structure.missing)
+  // `diagram:<kind>` (cột derived/reads) là hình thuộc mục sở hữu của hàng `diagram_<kind>`: mục đó thiếu ⇒ hình thiếu
+  for (const r of FIELD_SECTION_MAP) {
+    const kind = /^diagram_(.+)$/.exec(r.key)?.[1]
+    if (kind && r.owner.some((o) => missingIds.has(o))) missingIds.add(`diagram:${kind}`)
+  }
+  /** Dạng id trong reads/derived khớp một mục thiếu: literal, hoặc khuôn `function:<screen>` / `feature:<id>`. */
+  const touchesMissing = (token: string): boolean => {
+    if (missingIds.has(token)) return true
+    const m = /^(feature|function):<.*>$/.exec(token)
+    return !!m && [...missingIds].some((id) => id.startsWith(`${m[1]}:`))
+  }
   const present = structure.sections.filter((s) => s.status === "present").map((s) => s.section_id)
   const inputs = new Set<string>()
   for (const row of FIELD_SECTION_MAP) {
-    if (!row.reads.some((r) => missingIds.has(r))) continue
+    if (![...row.reads, ...row.derived].some(touchesMissing)) continue
     for (const owner of row.owner) for (const id of present) if (ownerMatchesSection(owner, id)) inputs.add(id)
   }
   if (present.includes("fixed:1")) inputs.add("fixed:1")
@@ -81,7 +93,7 @@ const reviewBlocks = async (projectId: string, sectionIds: readonly string[]): P
     section_id: { $in: [...sectionIds] }
   })
     .sort({ "anchor.ordinal": 1 })
-    .select("block_id text section_id mentions")
+    .select("block_id text section_id mentions guidance_layer")
     .lean<CheckBlock[]>()
 
 /** Ước tính credit vòng rà soát (báo trước khi chạy, business-flow §2 "Báo trước khi chạy hàng loạt"). */
@@ -122,6 +134,9 @@ export const runReview = async (
   guard: ReviewGuard = noGuard
 ): Promise<{ paused: true } | Flow2Result> => {
   const projectId = String(doc.projectId)
+  // Chạy tiếp sau khi dừng: xoá dấu `paused` cũ; bấm Dừng sau đó được đọc lại từ DB trước mỗi lô (`userStopRequested`)
+  doc.paused = null
+  await doc.save()
   if (sectionIds.length) {
     const done = new Set<string>(await Usage.find({ projectId, step_id: { $regex: /^I-1\.11r(:|$)/ }, state: "deducted" }).distinct("step_id"))
     const blocks = await reviewBlocks(projectId, sectionIds)
@@ -131,23 +146,31 @@ export const runReview = async (
       .filter((b) => !done.has(b.step_id))
     const results = await runLimited(batches, parallelBatches(), async (batch) => {
       await guard()
+      // BF §2 "Dừng giữa chừng": Code ngắt lượt gọi kế tiếp, lô chưa chạy chưa trừ credit
+      if (await userStopRequested(doc)) return { ok: false as const, reason: "user" as const }
       return withMeteredAi<FindingsOutput>({ projectId, userId, stepId: batch.step_id }, ActionType.IMPORT_REVIEW_EXISTING, {
         section_ids: batch.section_ids.join(", "),
         projection: semanticProjection(spine),
         blocks: batch.lines
       })
     })
+    // Ghi hết kết quả thành công của mọi lô (lô song song khác đã trừ credit, resume sẽ bỏ qua vì `deducted`), rồi mới dừng
+    let failure: Extract<(typeof results)[number], { ok: false }> | null = null
     for (const r of results) {
       if (!r) continue
       if (!r.ok) {
-        doc.paused = { reason: r.reason, at: new Date() }
-        await doc.save()
-        return { paused: true }
+        if (!failure || r.reason === "credits") failure = r
+        continue
       }
       await applyReviewFindings(projectId, r.data.findings, "AI rà soát phần có sẵn (business-flow §3.1.2)")
     }
+    if (failure) {
+      doc.paused = { reason: failure.reason, at: new Date() }
+      await doc.save()
+      return { paused: true }
+    }
   }
-  doc.paused = null
-  await doc.save()
+  // Dừng bấm sau lô cuối: không sang Luồng 2 (lần tiếp tục sẽ chạy lại, lô đã trừ credit được bỏ qua)
+  if (await userStopRequested(doc)) return { paused: true }
   return enterFlow2(doc, userId)
 }
