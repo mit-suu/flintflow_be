@@ -1,7 +1,7 @@
 ---
 skill_id: apply-change-op
 kind: action
-version: 1.11.0
+version: 1.12.0
 description: Chat change request → ops (or a clarification); impact query → 3 branches → stale; one-pass reconcile
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -187,7 +187,11 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    The section has no step, so code checks your text before the user confirms: keep the template's table(s) exactly (same columns and
    header row, one body row per real item, never the placeholder rows) and use no vague word (fast, easy, etc., nhanh, thân thiện).
 16. **`target_flags`** = the user asked to fix those flags: the batch must close each one - follow its `fix_hint` (write the field the rule reads, e.g. a reliability/performance NFR needs `kind: "quantitative"` + `metric` + `threshold`; never append the number to `statement`). The value is not in the request, chat or projection ⇒ `clarification_needed` asking for it.
-17. **Text you write** (ops, `notes`, `warning`): a hyphen `-`, never an em dash; never the word "FPT" - say "FlintFlow standard template".
+17. **Device / platform of who uses the product** ("Bệnh nhân chỉ dùng app trên điện thoại; lễ tân, bác sĩ dùng web") is a field of the **actor**, not a sentence of an NFR: `set actors[id=A04].platforms` with the **whole** list, `"mobile"` (phone app) and / or `"web"` (browser; a tablet or a desktop is `"web"`), one op per `human` actor the request names (a general actor such as `User` may stay empty: it inherits its children). The projection lists every human actor with `platforms` (`null` = not stated) and `project.form_factor`; read names from there ("Bệnh nhân" = Patient). Code redraws each screen's mockup only on the platforms of the actors using that screen, so a wrong value hides or adds a mockup. Never invent a third value. A platform the product does not have (`project.form_factor` has no `mobile_app` but the request says phone) ⇒ still write what was asked and put the mismatch in `warning`. The request also states a quality target (an NFR sentence) ⇒ that is a second op; never replace the actor op with it.
+   ```json
+   { "op": "set", "path": "actors[id=A04].platforms", "value": ["mobile"], "reason": "bệnh nhân chỉ dùng app trên điện thoại" }
+   ```
+18. **Text you write** (ops, `notes`, `warning`): a hyphen `-`, never an em dash; never the word "FPT" - say "FlintFlow standard template".
 
 ## Reconcile (`reconcile`)
 

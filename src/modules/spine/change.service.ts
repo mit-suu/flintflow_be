@@ -623,6 +623,16 @@ const COLLECTION_NAME_HINTS: readonly [(typeof TARGET_COLLECTIONS)[number], RegE
   ["use_cases", /use cases?|ca sử dụng/i]
 ]
 
+/**
+ * FLF-493 (I1): lệnh nói về thiết bị / nền tảng người dùng ("Bệnh nhân chỉ dùng app trên điện thoại; lễ tân, bác sĩ dùng web").
+ * Câu như vậy hay không nhắc tên actor nào theo chữ model đọc được ⇒ không có dòng này model chỉ sửa một câu yêu cầu phi chức năng
+ * và không đặt `actors[].platforms`, mockup màn không đổi.
+ */
+const PLATFORM_HINT = /nền tảng|platform|điện thoại|di động|mobile|app|ứng dụng|web|trình duyệt|máy tính|desktop|tablet|devices?|thiết bị/i
+
+/** Số actor tối đa đưa vào projection khi lệnh nói về nền tảng — đủ cho mọi actor người của một dự án. */
+const PLATFORM_ACTOR_LIMIT = 60
+
 /** Lệnh nói về mục tiêu / tầm nhìn / phạm vi phát hành của §1 Tổng quan sản phẩm. */
 const PROJECT_OVERVIEW_HINT = /mục tiêu|muc tieu|tầm nhìn|tam nhin|phạm vi phát hành|trong phạm vi|ngoài phạm vi|tổng quan sản phẩm|product overview|\bgoals?\b|\bvision\b|release scope|in scope|out of scope/i
 
@@ -705,6 +715,17 @@ export const buildChangeProjection = (spine: Spine, instruction: string, layout:
     }
   }
 
+  // FLF-493 (I1): lệnh nói về thiết bị ⇒ model thấy mọi actor người kèm `platforms` (`null` = chưa khai) và nền tảng của sản phẩm
+  const aboutPlatforms = PLATFORM_HINT.test(haystack) && spine.actors.some((a) => a.kind === "human")
+  if (aboutPlatforms) {
+    const hits = (projection.actors as Spine["actors"] | undefined) ?? []
+    const humans = spine.actors.filter((a) => a.kind === "human").slice(0, PLATFORM_ACTOR_LIMIT)
+    const byId = new Map<string, Record<string, unknown>>()
+    for (const a of [...humans, ...hits]) byId.set(a.id, { ...a, ...(a.kind === "human" ? { platforms: a.platforms ?? null } : {}) })
+    projection.actors = [...byId.values()]
+    matched += humans.length
+  }
+
   const permissions = permissionRows(spine, haystack, projection)
   if (permissions.length > 0) {
     projection.permissions = permissions
@@ -756,7 +777,8 @@ export const buildChangeProjection = (spine: Spine, instruction: string, layout:
   const project = {
     name: spine.project.name,
     system_name: spine.project.system_name ?? null,
-    ...(aboutOverview ? { vision: spine.project.vision, goals: spine.project.goals, release_scope: spine.project.release_scope } : {})
+    ...(aboutOverview ? { vision: spine.project.vision, goals: spine.project.goals, release_scope: spine.project.release_scope } : {}),
+    ...(aboutPlatforms ? { form_factor: spine.project.form_factor } : {})
   }
 
   if (matched > 0) return { project, ...projection, existing_ids: existingIds }

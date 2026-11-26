@@ -45,6 +45,7 @@ export const FIELD_LABELS: Readonly<Record<string, string>> = {
   actor_id: "Tác nhân",
   actor_ids: "Tác nhân",
   parent_id: "Tác nhân cha",
+  platforms: "Nền tảng",
   function_ids: "Chức năng liên quan",
   includes: "Include",
   extends: "Extend",
