@@ -446,20 +446,25 @@ describe("FLF-265 §3.1 - ngôn ngữ tài liệu theo project", () => {
         expect(outcome.body).toMatchObject({ error: { code: "NO_WORKING_DRAFT" } })
       })
 
-      it("mode 1 + lang khác ⇒ 409 DOCUMENT_LANGUAGE_UNAVAILABLE; lang lạ ⇒ 400", async () => {
+      it("mode 1 import thật + lang khác, source=baseline ⇒ dựng bản dịch (FLF-466 phase 07); source=draft ⇒ 409; lang lạ ⇒ 400", async () => {
         asProject({ name: "Demo", mode: "import" })
         withTemplateLanguage("vi")
-        const outcome = await invoke(exportWord, OWNER, PROJECT, { source: "baseline", lang: "en" })
-        expect(outcome.error).toMatchObject({ statusCode: 409, code: "DOCUMENT_LANGUAGE_UNAVAILABLE" })
+        renderingWith(snapshot)
+        const ok = await invoke(exportWord, OWNER, PROJECT, { source: "baseline", lang: "en" })
+        expect(ok.error).toBeUndefined()
+        expect(assertTranslationComplete).toHaveBeenCalledWith(PROJECT, "en", snapshot)
+        vi.mocked(getDocumentWithMeta).mockClear()
+        const draft = await invoke(exportWord, OWNER, PROJECT, { source: "draft", lang: "en" })
+        expect(draft.error).toMatchObject({ statusCode: 409, code: "DOCUMENT_LANGUAGE_UNAVAILABLE" })
         const invalid = await invoke(exportWord, OWNER, PROJECT, { source: "baseline", lang: "fr" })
         expect(invalid.error).toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
         expect(getDocumentWithMeta).not.toHaveBeenCalled()
       })
 
-      it("dự án chuyển từ mode 2 (converted_from fpt) + lang khác ⇒ 409 DOCUMENT_LANGUAGE_UNAVAILABLE (bản đang làm là nháp CR)", async () => {
+      it("dự án chuyển từ mode 2 (converted_from fpt) + lang khác, source=draft ⇒ 409 DOCUMENT_LANGUAGE_UNAVAILABLE (bản đang làm là nháp CR)", async () => {
         asProject({ name: "Demo", mode: "import", converted_from: "fpt", documentLanguage: "en" })
         withTemplateLanguage("en")
-        const outcome = await invoke(exportWord, OWNER, PROJECT, { source: "baseline", lang: "vi" })
+        const outcome = await invoke(exportWord, OWNER, PROJECT, { source: "draft", lang: "vi" })
         expect(outcome.error).toMatchObject({ statusCode: 409, code: "DOCUMENT_LANGUAGE_UNAVAILABLE" })
         expect(getDocumentWithMeta).not.toHaveBeenCalled()
       })

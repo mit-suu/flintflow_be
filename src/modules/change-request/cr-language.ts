@@ -24,7 +24,7 @@ export const guessSpineLanguage = (spine: Pick<Spine, "functions" | "use_cases" 
 
 /** Khai báo `vi` (không bao giờ là giá trị mặc định) ⇒ tin ngay; còn lại (`en` có thể chỉ là mặc định) ⇒ chữ thật của Spine trước. */
 export const crDocumentLanguage = async (projectId: string, spine: Parameters<typeof guessSpineLanguage>[0]): Promise<UserLocale> => {
-  const project = await Project.findById(projectId, { mode: 1, converted_from: 1 }).lean()
+  const project = await Project.findById(projectId, { mode: 1, converted_from: 1, source_language: 1 }).lean()
   const profile = project?.mode === "import" ? await TemplateProfile.findOne({ projectId }, { language: 1 }).lean() : null
   const declared = project ? sourceLanguageOf(project, profile?.language) : null
   if (declared === "vi") return declared

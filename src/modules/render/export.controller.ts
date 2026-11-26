@@ -102,8 +102,9 @@ export const renderExportDocx = async (context: Context, exportQuery: ExportWord
   // FLF-334 B: `?lang=` — không truyền / trùng ngôn ngữ tài liệu ⇒ đúng đường cũ (byte như trước)
   const locale = lang ?? documentLanguage
   const otherLanguage = locale !== documentLanguage
-  // Mode 1 (import thật lẫn dự án chuyển từ mode 2): bản đang làm là bản nháp CR — chỉ version có baseline (#14) đổi được ngôn ngữ
-  if (otherLanguage && mode === "import") throw documentLanguageUnavailable()
+  // Mode 1: bản đang làm là bản nháp CR (không có snapshot theo version ở đường này) ⇒ chỉ `source=baseline` đổi được ngôn ngữ;
+  // bản nháp của version tải qua #14 (`spine_snapshot`). Import thật không còn bị chặn (FLF-466 phase 07)
+  if (otherLanguage && mode === "import" && query.source !== "baseline") throw documentLanguageUnavailable()
 
   const savedVersion = templateIntent === "fixed" && query.source === "baseline" ? await resolveFixedBaselineVersion(projectId, query.baseline_id) : null
   const template = templateIntent === "fixed" ? await loadFixedTemplateContext(projectId, savedVersion?.template_source ?? undefined) : null

@@ -44,6 +44,11 @@ describe("templateUpdateOf", () => {
     expect(await templateUpdateOf(project(1, null), "lead")).toBeNull()
   })
 
+  it("họ mẫu lưu từ dự án (skeleton_of) vẫn báo khi có bản mới (FLF-466)", async () => {
+    store.family = { ...store.family!, skeleton_of: new mongoose.Types.ObjectId(), latest_version: 2 }
+    expect(await templateUpdateOf(project(1), "lead")).toEqual({ template_id: String(templateId), name: "Mẫu ngân hàng", current_version: 1, latest_version: 2 })
+  })
+
   it("đang ở bản mới nhất, hoặc họ mẫu thuộc org khác / đã xoá ⇒ null", async () => {
     expect(await templateUpdateOf(project(3), "lead")).toBeNull()
     expect(await templateUpdateOf(project(1, new mongoose.Types.ObjectId()), "lead")).toBeNull()

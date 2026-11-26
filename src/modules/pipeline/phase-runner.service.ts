@@ -28,6 +28,7 @@ import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import * as meter from "./meter.service.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import { gate, phaseGateAssumptions } from "./gate.service.js"
+import { enforceCreditAck } from "./credit-ack.service.js"
 import { PHASES, getStep, nextStep as nextStepOf, orderedSteps, type ExpandedStep } from "./step-registry.js"
 import { isQuietStep, type QuietVerdict, type QuietInput } from "./quiet-step.js"
 import { composePhaseGateMessage, spokenAssumptionIds, stripModelCountSentences } from "./gate-message.js"
@@ -713,6 +714,8 @@ export const runPhase = async (
   const { spine: startSpine } = await load(projectId)
   const first = nextStepOf(startSpine)
   if (!first) return { phase, stopped_at: null, reason_vi: "Đã đi hết quy trình", steps: [] }
+  // FLF-466 P08: chặn TRƯỚC lượt phỏng vấn mở giai đoạn (đã gọi model, tốn credit) khi chưa xác nhận credit
+  await enforceCreditAck(projectId, startSpine, first.id, userId)
 
   // FLF-432 (luồng C #2): client gửi giai đoạn ĐÃ QUA (con trỏ cũ: các bước còn lại của S-4 đều `skipped`, bước tới lượt là
   // S-5.1@S02) ⇒ chạy đúng đơn vị tới lượt thay vì trả "Đã xong giai đoạn này" rỗng. Giai đoạn chưa tới vẫn về như cũ.

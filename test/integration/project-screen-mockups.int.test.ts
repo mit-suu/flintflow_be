@@ -15,6 +15,11 @@ import { AiActionLog } from "../../src/modules/admin/ai-action-log.model.js"
 import { CreditWallet } from "../../src/modules/credits/credit-wallet.model.js"
 import { renderDiagram } from "../../src/modules/diagram/diagram.service.js"
 import { TemplateProfile } from "../../src/modules/import/template-profile.model.js"
+import { DocVersion } from "../../src/modules/doc-version/doc-version.model.js"
+import { docFileStore } from "../../src/modules/doc-version/doc-file.store.js"
+import { renderVersionFile } from "../../src/modules/doc-version/render-version.js"
+import { stripRecord } from "../../src/modules/import/check.service.js"
+import { applyTransaction } from "../../src/modules/spine/op-engine.js"
 import { loadFunctionOriginals } from "../../src/modules/diagram/screen-originals.js"
 import * as spineRepository from "../../src/modules/spine/spine.repository.js"
 import * as mockups from "../../src/modules/diagram/screen-mockup.service.js"
@@ -271,5 +276,95 @@ describe("screen-mockups chạy nền (dừng, tiến độ, một lượt mỗi
     const base = `/api/v1/projects/${seeded.projectId}/screen-mockups`
     expect((await request(app).get(`${base}/run`).set(bearer(seeded.token))).body.data).toBeNull()
     expect((await request(app).post(`${base}/run/cancel`).set(bearer(viewer))).status).toBe(403)
+  })
+})
+
+// ─── FLF-466: sau baseline, vẽ lại / dùng ảnh gốc là thay đổi hệ thống ─────────────
+
+describe("FLF-466: vẽ lại bằng mockup / dùng ảnh gốc sau baseline = thay đổi hệ thống", () => {
+  beforeEach(seedOriginals)
+
+  /** Dự án có baseline: một DocVersion 1.0 (bản phát hành đã in từ Spine). */
+  const withBaseline = async () => {
+    const record = (await spineRepository.get(seeded.projectId))!
+    const file = await renderVersionFile(seeded.projectId, "Demo", stripRecord(record), { version: "1.0", stampSource: "release" })
+    await DocVersion.create({ projectId: seeded.projectId, version: "1.0", kind: "release", file_ref: await docFileStore().save(file, { projectId: seeded.projectId, kind: "version", name: "1.0" }), based_on: null, cr_ids: [], created_by: seeded.userId })
+  }
+  /** Lượt nền chạy sau khi startRun trả (như hàng đợi thật): test chờ `finished`, không để dựng version làm quá thời gian xếp hàng. */
+  let finished: Promise<unknown> = Promise.resolve()
+  const inline = (deps: MockupDeps) => async (runId: string, orgId: string): Promise<void> => {
+    finished = runs.executeRun(runId, orgId, deps)
+  }
+
+  const systemVersions = () => DocVersion.find({ projectId: seeded.projectId, kind: "system_change" }).sort({ version: 1 }).lean()
+
+  it("một lượt nền xong ⇒ đúng MỘT version cho cả lượt (số phụ kế tiếp, cr_ids rỗng); màn đã đúng kiểu ⇒ không ghi thêm", async () => {
+    await withBaseline()
+    const { deps } = await depsWith()
+    const view = await runs.startRun(seeded.projectId, seeded.orgId, seeded.userId, { mode: "system", scope: "all" }, deps, inline(deps))
+    await finished
+    const versions = await systemVersions()
+    expect(versions).toHaveLength(1)
+    expect(versions[0]).toMatchObject({ version: "1.1", based_on: "1.0", cr_ids: [], created_by: expect.anything(), system_change: { type: "screen_mockup", ref: `screen-mockup:${view.run_id}` } })
+    expect(versions[0].system_change?.summary).toContain("2 màn")
+    expect(versions[0].spine_snapshot).toBeTruthy()
+
+    // Chạy lại "tất cả": mọi màn đã đúng kiểu ⇒ không lượt AI, không version mới
+    await runs.startRun(seeded.projectId, seeded.orgId, seeded.userId, { mode: "system", scope: "all" }, deps, inline(deps))
+    await finished
+    expect(await systemVersions()).toHaveLength(1)
+  })
+
+  it("Dùng ảnh gốc ⇒ một version; không màn nào đang bật ⇒ không ghi", async () => {
+    await withBaseline()
+    const { deps } = await depsWith()
+    await mockups.run(seeded.projectId, seeded.orgId, seeded.userId, { mode: "system", scope: "screen", screen_id: "S01" }, deps)
+    expect(await mockups.disable(seeded.projectId, seeded.orgId, { scope: "screen", screen_id: "S01" }, deps, seeded.userId)).toEqual({ disabled: ["S01"] })
+    const versions = await systemVersions()
+    expect(versions.map((v) => [v.version, v.system_change?.type])).toEqual([["1.1", "screen_mockup"]])
+    expect(versions[0].system_change?.ref).toMatch(/^screen-mockup:disable:/)
+    expect(await mockups.disable(seeded.projectId, seeded.orgId, { scope: "screen", screen_id: "S01" }, deps, seeded.userId)).toEqual({ disabled: [] })
+    expect(await systemVersions()).toHaveLength(1)
+  })
+
+  it("chưa có baseline (chưa có version nào) ⇒ không phải thay đổi hệ thống, không ghi version", async () => {
+    const { deps } = await depsWith()
+    await runs.startRun(seeded.projectId, seeded.orgId, seeded.userId, { mode: "system", scope: "all" }, deps, inline(deps))
+    await finished
+    expect(await DocVersion.countDocuments({ projectId: seeded.projectId })).toBe(0)
+  })
+
+  it("gói đang chờ Lead duyệt ⇒ bản nháp khoá: không bắt đầu vẽ lại, không dùng ảnh gốc (409 DRAFT_LOCKED), chưa đổi gì", async () => {
+    await withBaseline()
+    const { deps, render } = await depsWith()
+    const record = (await spineRepository.get(seeded.projectId))!
+    await applyTransaction(seeded.projectId, {
+      base_version: record.spine_version,
+      ops: [{ op: "set", path: "baseline_submission", value: { status: "pending", submitted_by: seeded.userId, submitted_at: new Date().toISOString(), spine_version: record.spine_version, decided_by: null, decided_at: null, reason: null, rejection_comment_ids: [] } }],
+      by: seeded.userId,
+      step_id: null
+    })
+    await expect(runs.startRun(seeded.projectId, seeded.orgId, seeded.userId, { mode: "system", scope: "all" }, deps, async () => undefined)).rejects.toMatchObject({ statusCode: 409, code: "DRAFT_LOCKED" })
+    await expect(mockups.disable(seeded.projectId, seeded.orgId, { scope: "all" }, deps, seeded.userId)).rejects.toMatchObject({ statusCode: 409, code: "DRAFT_LOCKED" })
+    expect(render).not.toHaveBeenCalled()
+    expect(await states()).toEqual([])
+    expect(await systemVersions()).toHaveLength(0)
+  })
+
+  it("lượt chạy trộn reenabled + ai mà phần ai lỗi vẫn ghi system_change với đúng số màn reenabled", async () => {
+    await withBaseline()
+    const { deps: okDeps } = await depsWith()
+    await mockups.run(seeded.projectId, seeded.orgId, seeded.userId, { mode: "system", scope: "screen", screen_id: "S01" }, okDeps)
+    await mockups.disable(seeded.projectId, seeded.orgId, { scope: "screen", screen_id: "S01" }, okDeps, seeded.userId)
+    const beforeCount = (await systemVersions()).length
+
+    const failingRender = vi.fn<MockupDeps["render"]>(async () => ({ ok: false, failed: ["S05"], error: "ai failed" }) as never)
+    const { deps } = await depsWith({ render: failingRender })
+    const view = await runs.startRun(seeded.projectId, seeded.orgId, seeded.userId, { mode: "system", scope: "all" }, deps, inline(deps))
+    await finished
+    const afterVersions = await systemVersions()
+    expect(afterVersions.length).toBe(beforeCount + 1)
+    expect(afterVersions.at(-1)?.system_change).toMatchObject({ type: "screen_mockup", ref: `screen-mockup:${view.run_id}` })
+    expect(afterVersions.at(-1)?.system_change?.summary).toContain("1 màn")
   })
 })

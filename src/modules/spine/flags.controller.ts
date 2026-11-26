@@ -27,6 +27,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { validationError } from "../../shared/utils/validation-message.js"
 import { assertNotMode1 } from "../import/mode1-guard.js"
 import { isViewer } from "../../shared/auth/viewer-read-scope.middleware.js"
+import { viewerSpine, VIEWER_NO_STABLE_VERSION } from "../../shared/auth/viewer-spine.js"
 import { viewerProgress } from "../render/viewer-projection.js"
 
 interface Context {
@@ -101,9 +102,24 @@ export const keepFlag = catchAsync(async (req: Request, res: Response) => {
 })
 
 export const getProgress = catchAsync(async (req: Request, res: Response) => {
+  if (isViewer(req)) {
+    const userId = req.user?.userId
+    if (!userId) throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
+    const projectId = req.params.projectId as string
+    if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
+    const project = await getProjectById(projectId, requireOrgId(req))
+    try {
+      const stable = await viewerSpine(projectId)
+      return sendSuccess(res, 200, viewerProgress(buildPipelineProgressReport(stable, [])))
+    } catch (err) {
+      if (err instanceof ApiError && err.code === VIEWER_NO_STABLE_VERSION) {
+        return sendSuccess(res, 200, viewerProgress(buildPipelineProgressReport(spineRepository.createEmptySpine({ name: project.name, domain: project.domain ?? null }), [])))
+      }
+      throw err
+    }
+  }
   const { projectId, spine } = await context(req)
   const changes = await spineRepository.listChanges(projectId)
   const report = buildPipelineProgressReport(spine, changes)
-  // UC-20: Viewer không thấy cờ đỏ
-  return sendSuccess(res, 200, isViewer(req) ? viewerProgress(report) : report)
+  return sendSuccess(res, 200, report)
 })

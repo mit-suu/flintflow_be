@@ -125,7 +125,8 @@ describe("dự án cũ không có field", () => {
 
     const one = await request(app).get(`/api/v1/projects/${seeded.projectId}`).set(bearer(seeded.token))
     expect(one.status).toBe(200)
-    expect(one.body.data.documentLanguage).toBeUndefined()
+    // FLF-466: GET /projects/:id trả ngôn ngữ đã suy ra (documentLanguageOf) — dự án cũ không field ⇒ "en"
+    expect(one.body.data.documentLanguage).toBe("en")
 
     const list = await request(app).get("/api/v1/projects").set(bearer(seeded.token))
     expect(list.status).toBe(200)

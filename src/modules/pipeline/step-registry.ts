@@ -25,7 +25,11 @@ export const STEP_NOT_FOUND = "STEP_NOT_FOUND"
 /** Token trong `reads`: step được nạp tài liệu upload — không phải selector projection. */
 export const DOCUMENTS_READ = "documents"
 
-export const PHASES = Object.freeze(["B-0", "B-1", "B-2", "S-1", "S-2", "S-3", "S-4", "S-5", "S-6", "S-7", "S-8", "S-9"] as const)
+/**
+ * Thứ tự giai đoạn (FLF-466 P08, business-flow §1.1): S-1 phân tích chạy TRƯỚC B-2 (rà giả định, phân loại addendum,
+ * Approve Brief B-2.3); Approve Brief mới mở S-2. Một thứ tự duy nhất cho BE; FE copy registry qua `sync:registry`.
+ */
+export const PHASES = Object.freeze(["B-0", "B-1", "S-1", "B-2", "S-2", "S-3", "S-4", "S-5", "S-6", "S-7", "S-8", "S-9"] as const)
 export type PhaseId = (typeof PHASES)[number]
 
 export const LOOP_PHASE: PhaseId = "S-5"

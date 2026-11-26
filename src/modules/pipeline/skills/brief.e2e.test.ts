@@ -165,6 +165,8 @@ const BRIEF_STEPS = [
   "B-2.1", "B-2.2", "B-2.3"
 ] as const
 const S1_STEPS = ["S-1.1", "S-1.2", "S-1.3", "S-1.4"] as const
+/** FLF-466 P08: thứ tự chạy thật — S-1 phân tích TRƯỚC B-2 (rà giả định, phân loại addendum, Approve Brief). */
+const FLOW_ORDER = [...BRIEF_STEPS.slice(0, 9), ...S1_STEPS, ...BRIEF_STEPS.slice(9)] as const
 
 const loadOpCase = (stepId: string): OpTransaction => {
   const raw = JSON.parse(fs.readFileSync(path.join(CASES, `${stepId.toLowerCase()}.json`), "utf8")) as { ops: unknown; notes?: string }
@@ -245,7 +247,7 @@ beforeEach(() => {
 describe("T20: project rỗng đi trọn B-0.1 → B-2.3 → S-1.4 (mock provider)", () => {
   it("ghi project{}, addendum[], assumptions[], other_requirements[] bằng op - không còn nằm trong tin nhắn", async () => {
     seedEmpty()
-    for (const stepId of BRIEF_STEPS) await runAndAccept(stepId)
+    for (const stepId of BRIEF_STEPS.slice(0, 9)) await runAndAccept(stepId)
 
     // Pha Brief giữ tầm nhìn/mục tiêu ở addendum lõi, không chạm project.vision/goals
     const afterBrief = (await repo.get(PROJECT))!
@@ -256,6 +258,7 @@ describe("T20: project rỗng đi trọn B-0.1 → B-2.3 → S-1.4 (mock provide
     expect(core.goals.length, "B-1.1 ghi addendum goals").toBeGreaterThanOrEqual(3)
 
     for (const stepId of S1_STEPS) await runAndAccept(stepId)
+    for (const stepId of BRIEF_STEPS.slice(9)) await runAndAccept(stepId)
     const final = (await repo.get(PROJECT))!
 
     // S-1.1 dựng project.vision/goals tiếng Anh, khớp 1:1 với addendum goals
@@ -290,7 +293,7 @@ describe("T20: project rỗng đi trọn B-0.1 → B-2.3 → S-1.4 (mock provide
 
   it("B-2.1 chuyển giả định sang confirmed; B-2.2 để dành addendum chứ không xoá thông tin", async () => {
     seedEmpty()
-    for (const stepId of BRIEF_STEPS) await runAndAccept(stepId, stepId === "B-2.1" ? "Đúng rồi, các điều bạn đoán đều đúng" : undefined)
+    for (const stepId of FLOW_ORDER) await runAndAccept(stepId, stepId === "B-2.1" ? "Đúng rồi, các điều bạn đoán đều đúng" : undefined)
     const final = (await repo.get(PROJECT))!
 
     const confirmed = final.assumptions.filter((a) => a.status === "confirmed")
@@ -308,27 +311,27 @@ describe("T20: project rỗng đi trọn B-0.1 → B-2.3 → S-1.4 (mock provide
 
   it("B-2.1 không có quyết định nào của user trong lượt ⇒ model không tự xác nhận giả định (giữ nguyên status)", async () => {
     seedEmpty()
-    for (const stepId of BRIEF_STEPS) await runAndAccept(stepId)
+    for (const stepId of FLOW_ORDER) await runAndAccept(stepId)
     const final = (await repo.get(PROJECT))!
     expect(final.assumptions.length).toBeGreaterThan(0)
     expect(final.assumptions.filter((a) => a.status !== "unconfirmed")).toEqual([])
     expect(final.assumptions.every((a) => a.confirmed_at === null)).toBe(true)
   })
 
-  it("approve B-2.3 mở S-1: nextStep trỏ S-1.1, và chạy S-1.1 đặt progress.current_phase = S-1", async () => {
+  it("FLF-466 P08: S-1 chạy trước B-2; S-1.4 xong thì tới B-2.1, approve B-2.3 mới mở S-2.1", async () => {
     seedEmpty()
-    for (const stepId of BRIEF_STEPS) await runAndAccept(stepId)
-
-    const afterBrief = (await repo.get(PROJECT))!
-    expect(afterBrief.progress.current_phase, "vẫn đang ở B-2 cho tới khi chạy step sau").toBe("B-2")
-    expect(nextStep(afterBrief)?.id, "approve B-2.3 mở S-1.1").toBe("S-1.1")
+    for (const stepId of BRIEF_STEPS.slice(0, 9)) await runAndAccept(stepId)
+    expect(nextStep((await repo.get(PROJECT))!)?.id, "B-1 xong ⇒ S-1.1, không phải B-2.1").toBe("S-1.1")
 
     await runAndAccept("S-1.1")
     expect((await repo.get(PROJECT))!.progress.current_phase).toBe("S-1")
-
-    // S-1.4 accepted thì bước kế là S-2.1
     for (const stepId of ["S-1.2", "S-1.3", "S-1.4"]) await runAndAccept(stepId)
-    expect(nextStep((await repo.get(PROJECT))!)?.id).toBe("S-2.1")
+    expect(nextStep((await repo.get(PROJECT))!)?.id, "S-1.4 xong ⇒ B-2.1").toBe("B-2.1")
+
+    for (const stepId of ["B-2.1", "B-2.2"]) await runAndAccept(stepId)
+    expect(nextStep((await repo.get(PROJECT))!)?.id).toBe("B-2.3")
+    await runAndAccept("B-2.3")
+    expect(nextStep((await repo.get(PROJECT))!)?.id, "Approve Brief mở S-2.1").toBe("S-2.1")
   })
 
   it("FLF-220: hỏi khi bước còn field trống, working_mode không còn cắt lượt hỏi", async () => {
@@ -628,14 +631,14 @@ describe("FLF-232: tên hệ thống hỏi ở B-2.3, không hỏi sớm", () =>
 
   it("tên còn null: B-2.3 hỏi tên (system_name nằm trong missing); đã có tên thì không", async () => {
     seedEmpty()
-    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps([...B0_B1, "B-2.1", "B-2.2"])
+    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps([...B0_B1, ...S1_STEPS, "B-2.1", "B-2.2"])
     const missing = new Map<string, unknown[]>()
     await runStep(PROJECT, "B-2.3", SESSION, USER, collect().emit, { elicitExecutor: capture(missing), draftExecutor: async () => draftResult([]) })
     expect(missing.get("B-2.3")).toContain("project.system_name")
 
     db.reset()
     seedEmpty()
-    ;(db.spines[0] as { steps: unknown[]; project: Record<string, unknown> }).steps = acceptSteps([...B0_B1, "B-2.1", "B-2.2"])
+    ;(db.spines[0] as { steps: unknown[]; project: Record<string, unknown> }).steps = acceptSteps([...B0_B1, ...S1_STEPS, "B-2.1", "B-2.2"])
     ;(db.spines[0] as { project: Record<string, unknown> }).project.system_name = "Minh An Booking"
     const again = new Map<string, unknown[]>()
     await runStep(PROJECT, "B-2.3", SESSION, USER, collect().emit, { elicitExecutor: capture(again), draftExecutor: async () => draftResult([]) })
@@ -645,7 +648,7 @@ describe("FLF-232: tên hệ thống hỏi ở B-2.3, không hỏi sớm", () =>
   it("B-2.3 chọn tên qua thẻ ⇒ draft nhận câu trả lời, ghi system_name; tên gợi ý sai luật (đuôi System) bị lọc", async () => {
     seedEmpty()
     ;(db.spines[0] as { project: Record<string, unknown> }).project.vision = "Đặt lịch khám cho phòng khám nhỏ"
-    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps([...B0_B1, "B-2.1", "B-2.2"])
+    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps([...B0_B1, ...S1_STEPS, "B-2.1", "B-2.2"])
     const { events, emit } = collect()
     const run = runStep(PROJECT, "B-2.3", SESSION, USER, emit, {
       elicitExecutor: async () =>
@@ -1131,7 +1134,7 @@ describe("fast path Brief: một lượt hỏi gộp, bước B-1.x viết trư�
   it("giai đoạn ngoài fast path giữ lượt hỏi gộp cũ: projection rỗng, không guidance, trần prompt cũ", async () => {
     seedB1({ reviewMode: "fast" })
     const elicit = trackedElicit()
-    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps([...AFTER_B0, ...Object.keys(TEXTS)])
+    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps([...AFTER_B0, ...Object.keys(TEXTS), ...S1_STEPS])
     await runPhase(PROJECT, "B-2", SESSION, USER, collect().emit, { elicitExecutor: elicit.executor, draftExecutor: async () => draftResult([]), message: "Sang phần sau" })
     const interview = elicit.calls.find((c) => c.vars.phase_interview)
     expect(interview, "B-2 có lượt hỏi gộp").toBeTruthy()
@@ -1219,7 +1222,7 @@ describe("fast path Brief: một lượt hỏi gộp, bước B-1.x viết trư�
     expect(interpolatePrompt(template, b1.vars)).toContain(FAST_SENTENCE)
 
     seedB1({ reviewMode: "fast" })
-    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps([...AFTER_B0, ...Object.keys(TEXTS)])
+    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps([...AFTER_B0, ...Object.keys(TEXTS), ...S1_STEPS])
     const other = trackedElicit()
     await runPhase(PROJECT, "B-2", SESSION, USER, collect().emit, { elicitExecutor: other.executor, draftExecutor: async () => draftResult([]), message: "Sang phần sau" })
     const b2 = other.calls.find((c) => c.vars.phase_interview)!

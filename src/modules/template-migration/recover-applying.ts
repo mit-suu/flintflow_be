@@ -11,7 +11,7 @@
 import { randomUUID } from "node:crypto"
 import { notify } from "../notification/notification.service.js"
 import { TemplateMigration, stateUpdate, type ITemplateMigration } from "./template-migration.model.js"
-import { finalizeApplied, hasSpineWrites, rollbackToReady, writeProfileAndProject, writeSpine } from "./apply.service.js"
+import { finalizeApplied, hasSpineWrites, rollbackToReady, writeProfileAndProject, writeSpine, writeSystemChangeVersion } from "./apply.service.js"
 import { runUndo } from "./revert.service.js"
 
 export type RecoverOutcome = "applied" | "ready" | "reverted" | "failed" | "pending" | "skipped"
@@ -66,7 +66,9 @@ export const recoverApplyingMigration = async (id: string, options: { force?: bo
     await TemplateMigration.updateOne({ _id: doc._id, apply_token: doc.apply_token }, { $set: { "apply_steps.spine": true, spine_written_at: doc.spine_written_at ?? new Date() } })
     const fresh = (await TemplateMigration.findById(id))!
     await writeProfileAndProject(fresh)
-    const done = await finalizeApplied(fresh, new Date())
+    // FLF-466: version thay đổi hệ thống idempotent theo ref — sập sau `profile` hay sau chính bước này đều ra đúng một version
+    await writeSystemChangeVersion((await TemplateMigration.findById(id))!, String(doc.created_by))
+    const done = await finalizeApplied((await TemplateMigration.findById(id))!, new Date())
     return done.state === "applied" ? "applied" : "pending"
   } catch (error) {
     // Spine đã bị ghi chen (409 khoá lạc quan) hoặc lỗi lặp lại: lượt sau thử tiếp, quá giới hạn ⇒ apply_failed

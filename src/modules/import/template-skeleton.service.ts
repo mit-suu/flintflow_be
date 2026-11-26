@@ -31,15 +31,17 @@ import {
   type ITemplateProposal,
   type ProposalDecision,
   type ProposalReplacedName,
+  type ProposalTextReplacement,
   type TemplateProposalStatus
 } from "./template-proposal.model.js"
-import { buildSkeleton, genericSuggestion, type BuiltSkeleton, type PendingDecision, type SkeletonOptions } from "./template-skeleton.js"
+import { buildSkeleton, genericSuggestion, type BuiltSkeleton, type PendingDecision, type ReviewHeading, type ScrubText, type SkeletonOptions } from "./template-skeleton.js"
+import { isValidScrub } from "./skeleton-scrub.js"
 
 const NAME_MAX = 120
 
-/** Tên mặc định theo ngôn ngữ tài liệu: VI `<tên dự án> - khung`, EN `<tên dự án> - template` (gạch ngắn, chữ hiện trên UI). */
+/** Tên mặc định theo ngôn ngữ tài liệu: VI `<tên dự án> - mẫu`, EN `<tên dự án> - template` (gạch ngắn, không em dash, chữ hiện trên UI). */
 export const skeletonName = (projectName: string, language: "vi" | "en"): string => {
-  const suffix = language === "vi" ? " - khung" : " - template"
+  const suffix = language === "vi" ? " - mẫu" : " - template"
   return `${projectName.trim().slice(0, NAME_MAX - suffix.length)}${suffix}`
 }
 
@@ -85,6 +87,50 @@ const pendingList = (built: BuiltSkeleton, decided: ReadonlyMap<string, PendingD
       generic_text: d?.decision === "generic" ? d.text : null
     }
   })
+
+/** Một lượt AI đổi tên riêng cho heading + chữ hướng dẫn + tiêu đề cột; chữ khách đưa vào dưới dạng chuỗi JSON (dữ liệu, không phải lệnh). */
+const scrubWithAi = async (
+  meter: { projectId: string; userId: string; stepId: string },
+  ctx: Pick<SkeletonContext, "project" | "opts">,
+  headings: readonly { key: string; text: string; current?: string | null }[],
+  texts: readonly { key: string; text: string; current?: string | null }[],
+  instruction = ""
+): Promise<{ ok: true; byKey: Map<string, string | null> } | { ok: false; reason: "credits" | "resume_later" }> => {
+  const line = (e: { key: string; text: string; current?: string | null }) => `${e.key}: ${JSON.stringify(e.current && e.current !== e.text ? { text: e.text, current: e.current } : e.text)}`
+  const result = await withMeteredAi<SkeletonGenericNamesOutput>(meter, ActionType.SKELETON_GENERIC_NAMES, {
+    project_name: ctx.project.name,
+    language: ctx.opts.language === "vi" ? "Vietnamese" : "English",
+    headings: headings.map(line).join("\n") || "(none)",
+    texts: texts.map(line).join("\n") || "(none)",
+    instruction
+  })
+  if (!result.ok) return { ok: false, reason: result.reason }
+  return { ok: true, byKey: new Map(result.data.suggestions.map((s) => [s.key, s.generic] as const)) }
+}
+
+/** Các chỗ AI đã đổi (heading có quyết định `generic`, chữ hướng dẫn / tiêu đề cột) để người duyệt xem trước. */
+const replacedOf = (
+  review: readonly ReviewHeading[],
+  texts: readonly ScrubText[],
+  decisions: ReadonlyMap<string, PendingDecision>,
+  textRepl: ReadonlyMap<string, string>,
+  previous: readonly ProposalReplacedName[]
+): ProposalReplacedName[] => {
+  const reasonOf = (key: string) => previous.find((p) => p.key === key)?.reason ?? null
+  const out: ProposalReplacedName[] = []
+  for (const r of review) {
+    const d = decisions.get(r.key)
+    if (d?.decision === "generic") out.push({ key: r.key, original: r.heading_text, generic: d.text, reason: reasonOf(r.key), kind: "heading" })
+  }
+  for (const t of texts) {
+    const g = textRepl.get(t.text)
+    if (g) out.push({ key: t.key, original: t.text, generic: g, reason: reasonOf(t.key), kind: t.kind })
+  }
+  return out
+}
+
+const textReplacementsOf = (texts: readonly ScrubText[], textRepl: ReadonlyMap<string, string>): ProposalTextReplacement[] =>
+  texts.flatMap((t) => (textRepl.has(t.text) ? [{ key: t.key, original: t.text, generic: textRepl.get(t.text)! }] : []))
 
 const sameHeadings = (a: readonly { heading_text: string }[], b: readonly { heading_text: string }[]): boolean =>
   a.length === b.length && a.every((h, i) => normalizeTitle(h.heading_text) === normalizeTitle(b[i].heading_text))
@@ -159,34 +205,34 @@ const draftProposal = async (ctx: SkeletonContext, sourceRef: string, authorId: 
   const open = await TemplateProposal.findOne({ project_id: projectId, structure_hash: structureHash, status: { $in: OPEN_STATUSES } })
   if (open) return { proposal: open }
 
-  // AI đổi tên riêng ở heading BA tự đặt chưa có quyết định (một lượt, giữ credit trước - BR-01)
+  // AI đổi tên riêng ở heading chưa có quyết định + chữ hướng dẫn + tiêu đề cột (một lượt, giữ credit trước - BR-01)
   const decisions = new Map(carried)
-  const replaced: ProposalReplacedName[] = []
   const undecided = base.review.filter((r) => !decisions.has(r.key))
+  const textRepl = new Map<string, string>()
   let built = base
-  if (undecided.length) {
-    const result = await withMeteredAi<SkeletonGenericNamesOutput>({ projectId, userId: authorId, stepId: `TEMPLATE_PROPOSAL:${projectId}` }, ActionType.SKELETON_GENERIC_NAMES, {
-      project_name: ctx.project.name,
-      language: ctx.opts.language === "vi" ? "Vietnamese" : "English",
-      headings: undecided.map((r) => `${r.key}: ${r.heading_text}`).join("\n")
-    })
+  if (undecided.length || base.texts.length) {
+    const result = await scrubWithAi(
+      { projectId, userId: authorId, stepId: `TEMPLATE_PROPOSAL:${projectId}` },
+      ctx,
+      undecided.map((r) => ({ key: r.key, text: r.heading_text })),
+      base.texts.map((t) => ({ key: t.key, text: t.text }))
+    )
     // Thiếu credit / AI lỗi ⇒ không đề xuất lần này, lần phát hành sau đề xuất lại
     if (!result.ok) return { reason: "ai_unavailable" }
-    const byKey = new Map(result.data.suggestions.map((s) => [s.key, s] as const))
     for (const r of undecided) {
-      const s = byKey.get(r.key)
-      if (!s) continue
-      if (s.generic === null) {
-        decisions.set(r.key, { decision: "drop" })
-        replaced.push({ key: r.key, original: r.heading_text, generic: null, reason: s.reason ?? null })
-      } else if (s.generic.trim() && s.generic.trim() !== r.heading_text.trim()) {
-        decisions.set(r.key, { decision: "generic", text: s.generic.trim() })
-        replaced.push({ key: r.key, original: r.heading_text, generic: s.generic.trim(), reason: s.reason ?? null })
-      } else decisions.set(r.key, { decision: "keep" })
+      const s = result.byKey.get(r.key)
+      // Không bỏ heading: đầu ra sai dạng / không đổi ⇒ giữ chữ gốc cho người xem lại
+      if (s && isValidScrub(r.heading_text, s) && s.trim() !== r.heading_text.trim()) decisions.set(r.key, { decision: "generic", text: s.trim() })
+      else decisions.set(r.key, { decision: "keep" })
     }
-    built = await buildSkeleton(source, ctx.opts, decisions)
+    for (const t of base.texts) {
+      const s = result.byKey.get(t.key)
+      if (s && isValidScrub(t.text, s) && s.trim() !== t.text.trim()) textRepl.set(t.text, s.trim())
+    }
+    built = await buildSkeleton(source, ctx.opts, decisions, textRepl)
     if (built.empty) return { reason: "empty" }
   }
+  const replaced = replacedOf(built.review, built.texts, decisions, textRepl, [])
 
   // Baseline mới thay đề xuất còn mở của cấu trúc cũ
   await TemplateProposal.updateMany({ project_id: projectId, status: { $in: OPEN_STATUSES } }, { $set: { status: "superseded" } })
@@ -197,6 +243,7 @@ const draftProposal = async (ctx: SkeletonContext, sourceRef: string, authorId: 
     structure_hash: structureHash,
     decisions: [...decisions].map(([key, d]) => ({ key, decision: d.decision, generic_text: d.decision === "generic" ? d.text : null })),
     replaced_names: replaced,
+    text_replacements: textReplacementsOf(built.texts, textRepl),
     headings: built.headings.map((h) => ({ heading_text: h.heading_text })),
     status: "proposed",
     created_by: authorId
@@ -225,7 +272,8 @@ const publishProposal = async (proposal: ITemplateProposal, actor: TemplateActor
   const profile = await TemplateProfile.findOne({ projectId: project._id }).select("language").lean()
   const opts: SkeletonOptions = { projectName: project.name, language: documentLanguageOf(project, profile?.language) }
   const decided = decisionsOf(proposal.decisions)
-  const built = await buildSkeleton(await docFileStore().load(proposal.source_ref), opts, decided)
+  const textRepl = new Map(proposal.text_replacements.map((t) => [t.original, t.generic] as const))
+  const built = await buildSkeleton(await docFileStore().load(proposal.source_ref), opts, decided, textRepl)
   let createdFamily: IOrgTemplate | null = null
   let draftId: unknown = null
   try {
@@ -283,7 +331,7 @@ const viewOf = async (p: ITemplateProposal): Promise<ProposalView> => {
     project_name: project?.name ?? "",
     status: p.status,
     headings: p.headings.map((h) => h.heading_text),
-    replaced_names: p.replaced_names.map((r) => ({ key: r.key, original: r.original, generic: r.generic ?? null, reason: r.reason ?? null })),
+    replaced_names: p.replaced_names.map((r) => ({ key: r.key, original: r.original, generic: r.generic ?? null, reason: r.reason ?? null, kind: r.kind ?? "heading" })),
     created_by: { id: String(p.created_by), name: author?.name || author?.email || null },
     created_at: p.createdAt.toISOString(),
     template_id: p.template_id ? String(p.template_id) : null,
@@ -308,6 +356,78 @@ const claimOwn = async (projectId: string, userId: string, set: Record<string, u
   const claimed = await TemplateProposal.findOneAndUpdate({ _id: current._id, status: "proposed" }, { $set: set }, { returnDocument: "after" })
   if (!claimed) throw CHANGED()
   return claimed
+}
+
+/** Người sửa đề xuất qua chat: Lead hoặc Analyst (Viewer không). */
+export const assertReviewer = (role: OrgRole): void => {
+  if (role !== "lead" && role !== "analyst") throw FORBIDDEN("Chỉ Lead hoặc Analyst sửa đề xuất mẫu.")
+}
+
+/** Đề xuất `proposed` do chính người này tạo, của dự án thuộc đúng org đang mở. */
+const ownSkeleton = async (projectId: string, orgId: string, userId: string): Promise<{ project: IProject; proposal: ITemplateProposal }> => {
+  if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
+  const project = await Project.findOne({ _id: projectId, organizationId: orgId })
+  if (!project) throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
+  const proposal = await TemplateProposal.findOne({ project_id: projectId, orgId, created_by: userId, status: "proposed" }).sort({ createdAt: -1 })
+  if (!proposal) throw NOT_FOUND()
+  return { project, proposal }
+}
+
+export const REVISE_MESSAGE_MAX = 500
+
+/**
+ * Sửa đề xuất qua chat (UC-85): người dùng nói điều muốn đổi ("giữ tên X ở mục 3", "đổi thêm tên Y"), AI trả lại chữ cho từng chỗ,
+ * code chỉ nhận chữ qua kiểm diff (`isValidScrub`). Giữ credit trước mỗi lượt; thiếu credit / AI lỗi ⇒ đề xuất giữ nguyên.
+ */
+export const reviseProposal = async (projectId: string, orgId: string, userId: string, role: OrgRole, message: string): Promise<ProposalView> => {
+  assertReviewer(role)
+  const instruction = message.trim()
+  if (!instruction || instruction.length > REVISE_MESSAGE_MAX) throw new ApiError(400, `Nội dung sửa phải từ 1 đến ${REVISE_MESSAGE_MAX} ký tự.`, "VALIDATION_ERROR", { field: "message" })
+  const { project, proposal } = await ownSkeleton(projectId, orgId, userId)
+  const profile = await TemplateProfile.findOne({ projectId }).select("language").lean()
+  const opts: SkeletonOptions = { projectName: project.name, language: documentLanguageOf(project, profile?.language) }
+  const source = await docFileStore().load(proposal.source_ref)
+  const decisions = new Map(decisionsOf(proposal.decisions))
+  const textRepl = new Map(proposal.text_replacements.map((t) => [t.original, t.generic] as const))
+  const current = await buildSkeleton(source, opts, decisions, textRepl)
+  const headingEntries = current.review.map((r) => {
+    const d = decisions.get(r.key)
+    return { key: r.key, text: r.heading_text, current: d?.decision === "generic" ? d.text : null }
+  })
+  const textEntries = current.texts.map((t) => ({ key: t.key, text: t.text, current: textRepl.get(t.text) ?? null }))
+  const result = await scrubWithAi({ projectId, userId, stepId: `TEMPLATE_PROPOSAL_CHAT:${projectId}` }, { project, opts }, headingEntries, textEntries, instruction)
+  if (!result.ok) {
+    throw result.reason === "credits"
+      ? new ApiError(402, "Không đủ credit để AI sửa đề xuất.", "INSUFFICIENT_CREDIT")
+      : new ApiError(503, "AI đang lỗi, đề xuất giữ nguyên - thử lại sau.", "TEMPLATE_PROPOSAL_AI_UNAVAILABLE")
+  }
+  for (const r of current.review) {
+    const s = result.byKey.get(r.key)
+    if (!s || !isValidScrub(r.heading_text, s)) continue
+    decisions.set(r.key, s.trim() === r.heading_text.trim() ? { decision: "keep" } : { decision: "generic", text: s.trim() })
+  }
+  for (const t of current.texts) {
+    const s = result.byKey.get(t.key)
+    if (!s || !isValidScrub(t.text, s)) continue
+    if (s.trim() === t.text.trim()) textRepl.delete(t.text)
+    else textRepl.set(t.text, s.trim())
+  }
+  const built = await buildSkeleton(source, opts, decisions, textRepl)
+  if (built.empty) throw new ApiError(409, "Khung không còn heading nào để lưu.", "TEMPLATE_PROPOSAL_UNAVAILABLE", { reason: "empty" })
+  const updated = await TemplateProposal.findOneAndUpdate(
+    { _id: proposal._id, status: "proposed" },
+    {
+      $set: {
+        decisions: [...decisions].map(([key, d]) => ({ key, decision: d.decision, generic_text: d.decision === "generic" ? d.text : null })),
+        replaced_names: replacedOf(built.review, built.texts, decisions, textRepl, proposal.replaced_names),
+        text_replacements: textReplacementsOf(built.texts, textRepl),
+        headings: built.headings.map((h) => ({ heading_text: h.heading_text }))
+      }
+    },
+    { returnDocument: "after" }
+  )
+  if (!updated) throw CHANGED()
+  return viewOf(updated)
 }
 
 /** Analyst gửi đề xuất cho Lead duyệt (UC-85 ⇒ UC-88). Lead thì dùng Save to library. */

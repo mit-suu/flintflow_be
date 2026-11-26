@@ -23,6 +23,15 @@ export interface ProposalReplacedName {
   original: string
   generic: string | null
   reason: string | null
+  /** Chỗ đổi: heading, chữ hướng dẫn hay tiêu đề cột (bản ghi cũ không có = heading). */
+  kind?: "heading" | "guidance" | "column"
+}
+
+/** Chữ hướng dẫn / tiêu đề cột đã đổi tên riêng (khoá theo chữ gốc đã cắt khoảng trắng). */
+export interface ProposalTextReplacement {
+  key: string
+  original: string
+  generic: string
 }
 
 /** Quyết định áp khi dựng lại file khung (cùng kiểu `PendingDecision` của `template-skeleton.ts`). */
@@ -40,6 +49,7 @@ export interface ITemplateProposal extends Document {
   structure_hash: string
   decisions: ProposalDecision[]
   replaced_names: ProposalReplacedName[]
+  text_replacements: ProposalTextReplacement[]
   /** Heading của khung sau khi đổi tên - để người quyết định xem cấu trúc mà không cần mở file. */
   headings: { heading_text: string }[]
   status: TemplateProposalStatus
@@ -65,9 +75,10 @@ const templateProposalSchema = new Schema<ITemplateProposal>(
       default: []
     },
     replaced_names: {
-      type: [new Schema({ key: String, original: String, generic: { type: String, default: null }, reason: { type: String, default: null } }, { _id: false })],
+      type: [new Schema({ key: String, original: String, generic: { type: String, default: null }, reason: { type: String, default: null }, kind: { type: String, enum: ["heading", "guidance", "column"], default: "heading" } }, { _id: false })],
       default: []
     },
+    text_replacements: { type: [new Schema({ key: String, original: String, generic: String }, { _id: false })], default: [] },
     headings: { type: [new Schema({ heading_text: String }, { _id: false })], default: [] },
     status: { type: String, enum: TEMPLATE_PROPOSAL_STATUSES, required: true },
     created_by: { type: Schema.Types.ObjectId, ref: "User", required: true },

@@ -27,6 +27,9 @@ import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { validationError } from "../../shared/utils/validation-message.js"
 import { isViewer } from "../../shared/auth/viewer-read-scope.middleware.js"
+import { viewerSpine } from "../../shared/auth/viewer-spine.js"
+import { listDocVersions } from "../doc-version/doc-version.service.js"
+import { isStableDocVersion } from "../doc-version/versioning.js"
 import { viewerDocument } from "./viewer-projection.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { DIAGRAM_FILE_CSP } from "../diagram/diagram.controller.js"
@@ -96,6 +99,8 @@ export const assembleController = catchAsync(async (req: Request, res: Response)
 export const getDocumentController = catchAsync(async (req: Request, res: Response) => {
   const { projectId, projectName, documentLanguage, sourceLanguage, templateIntent } = await authorize(req)
   const query = parse(documentQuerySchema, req.query)
+  // FLF-466 (BF §2): Viewer không xem bản nháp
+  if (isViewer(req) && query.source === "draft") throw new ApiError(403, "Viewer chỉ xem được bản đã phát hành.", "ORG_ROLE_FORBIDDEN")
   // FLF-369: revision đọc TRƯỚC khi dựng ⇒ thay đổi chen giữa làm revision cũ hơn tài liệu thực tế, client tải lại thêm
   // một lần (an toàn), không bao giờ ngược lại
   const version = query.source === "draft" ? await documentVersion(projectId, { locale: documentLanguage, source: sourceLanguage }) : null
@@ -168,7 +173,8 @@ export const getDocumentImageController = catchAsync(async (req: Request, res: R
   const { ref: token } = parse(imageQuerySchema, req.query)
   const ref = parseImageRef(token)
   if (!ref) throw notFound()
-  const spine = await spineRepository.get(projectId)
+  // FLF-466: Viewer chỉ mở ảnh có trong bản ổn định mới nhất
+  const spine = isViewer(req) ? await viewerSpine(projectId) : await spineRepository.get(projectId)
   if (!spine) throw notFound()
   if (ref.kind === "diagram") {
     if (!spine.diagrams.some((d) => d.id === ref.id)) throw notFound()
@@ -202,6 +208,13 @@ export const getDocumentImageController = catchAsync(async (req: Request, res: R
  */
 export const getVersionController = catchAsync(async (req: Request, res: Response) => {
   const { projectId, documentLanguage, sourceLanguage } = await authorize(req)
+  if (isViewer(req)) {
+    const stable = (await listDocVersions(projectId)).find(isStableDocVersion)
+    return sendSuccess(res, 200, {
+      spine_version: stable?.spine_snapshot?.spine_version ?? 0,
+      document_revision: stable ? `stable:${stable.version}:${documentLanguage}` : `none:${documentLanguage}`
+    })
+  }
   const version = await documentVersion(projectId, { locale: documentLanguage, source: sourceLanguage })
   if (!version) throw new ApiError(404, "Dự án chưa có dữ liệu tài liệu.", "SPINE_NOT_FOUND")
   // Đúng hợp đồng #39 — phần nội bộ (danh tính Spine, revision bản dịch) không trả ra

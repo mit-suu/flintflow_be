@@ -4,6 +4,7 @@ import * as googleAuthService from "./google-auth.service.js"
 import { listLinks } from "./google-export.service.js"
 import { getProjectById } from "../project/project.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
+import { isViewer } from "../../shared/auth/viewer-read-scope.middleware.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -40,7 +41,8 @@ export const listProjectLinks = catchAsync(async (req: Request, res: Response) =
   }
   // Ném PROJECT_NOT_FOUND nếu dự án không thuộc org đang mở
   await getProjectById(projectId, requireOrgId(req))
-  return sendSuccess(res, 200, await listLinks(projectId, userId))
+  const links = await listLinks(projectId, userId)
+  return sendSuccess(res, 200, isViewer(req) ? links.filter((l) => l.source === "baseline") : links)
 })
 
 export const getAccessToken = catchAsync(async (req: Request, res: Response) => {

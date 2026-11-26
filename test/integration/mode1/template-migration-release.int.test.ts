@@ -87,14 +87,19 @@ describe("phát hành sau đổi mẫu", () => {
     expect(marks.join("\n")).toMatch(/second/)
   })
 
-  it("B. đổi mẫu có dịch ⇒ CR sau đó không tạo bản đánh dấu", async () => {
+  it("B. đổi mẫu có dịch ⇒ thành bản nháp thay đổi hệ thống riêng; bản đánh dấu của CR sau đó so với bản đó, không đánh dấu chữ đã dịch", async () => {
     const { seeded, projectId, c } = await importedProject()
     const templateId = await publishTemplate(seeded.token, seeded.orgId, await makeSrsDocx({ extraBody: VI_BODY }))
     const id = await migrate(seeded.token, projectId, templateId)
     expect((await TemplateMigration.findById(id).lean())!.translated).toBe(true)
     const { crId } = await crToReview(c)
+    // FLF-466: đổi mẫu = version `system_change` (0.2); CR kế tiếp (0.3) so với nó nên bản dịch đã nằm sẵn ở bên trước.
+    // "Không tracked khi có dịch" áp cho lần phát hành chứa đổi mẫu (BF §3.7), không cho bản nháp CR sau đó.
+    const system = (await DocVersion.findOne({ projectId, kind: "system_change" }).lean())!
+    expect(system.version).toBe("0.2")
     const v = (await DocVersion.findOne({ projectId, cr_ids: crId }).lean())!
-    expect(v.tracked_file_ref ?? null).toBeNull()
+    expect(v.based_on).toBe("0.2")
+    if (v.tracked_file_ref) expect((await markedText(v.tracked_file_ref)).join(" ")).not.toContain("Môi trường vận hành")
   })
 
   it("C. version đã phát hành nguyên vẹn sau đổi mẫu; cờ bỏ chữ khung mẫu lấy từ ảnh chụp của lần đổi mẫu đầu, không từ profile hiện tại", async () => {
@@ -105,8 +110,11 @@ describe("phát hành sau đổi mẫu", () => {
     const id = await migrate(seeded.token, projectId, templateId)
 
     const after = await DocVersion.find({ projectId }).lean()
-    expect(after.map((v) => [v.version, v.file_ref, v.template_source ?? null])).toEqual(before.map((v) => [v.version, v.file_ref, v.template_source ?? null]))
-    expect(await Promise.all(after.map(async (v) => (await docFileStore().load(v.file_ref)).toString("base64")))).toEqual(bytesBefore)
+    // FLF-466: đổi mẫu thêm một bản nháp `system_change` (0.2); version cũ giữ nguyên file + mẫu
+    const kept = after.filter((v) => v.kind !== "system_change")
+    expect(after.filter((v) => v.kind === "system_change").map((v) => v.version)).toEqual(["0.2"])
+    expect(kept.map((v) => [v.version, v.file_ref, v.template_source ?? null])).toEqual(before.map((v) => [v.version, v.file_ref, v.template_source ?? null]))
+    expect(await Promise.all(kept.map(async (v) => (await docFileStore().load(v.file_ref)).toString("base64")))).toEqual(bytesBefore)
 
     // Dự án này từng là khung mẫu để điền (structure_preview.kind = template) ở profile trước lần đổi mẫu
     const migration = (await TemplateMigration.findById(id).lean())!

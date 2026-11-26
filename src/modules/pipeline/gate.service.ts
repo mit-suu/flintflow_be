@@ -51,6 +51,7 @@ import { signOff, SIGN_OFF_STEP } from "./s9/baseline.service.js"
 import { notify } from "../../modules/notification/notification.service.js"
 import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { recordCreditAckAfterAccept } from "./credit-ack.service.js"
 import type { z } from "zod"
 
 type GateActionKind = z.infer<typeof gateActionSchema>
@@ -283,7 +284,9 @@ const doAccept = async (projectId: string, stepId: string, userId: string, recor
   const afterSpine = stripRecord(applied.spine)
   if (phaseFullyAccepted(afterSpine, def.phase)) notifyPhaseAccepted(userId, def.phase)
 
-  return applied.spine_version
+  // FLF-466 P08: Approve Brief (B-2.3) và chốt danh sách màn (S-4.1) sinh lần báo credit — server chặn tới khi user xác nhận
+  const ackVersion = await recordCreditAckAfterAccept(projectId, stepId, userId)
+  return ackVersion ?? applied.spine_version
 }
 
 // ─── revision / regenerate ──────────────────────────────────────────

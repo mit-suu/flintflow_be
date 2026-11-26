@@ -26,6 +26,8 @@ export interface RenderVersionOptions {
   stampSource: string
   /** Change của snapshot chưa ghi DB (C-7 render trước khi ghi Spine). */
   pendingRecord?: ChangeRecordRow[]
+  /** FLF-466: lần phát hành đang dựng (`release()`): §I in Version đúng cho CR của gói dù DocVersion chưa tồn tại. */
+  releasing?: { version: string; crIds: readonly string[] }
   /** FLF-318: ngôn ngữ cho bản 1.0 lúc chuyển đổi — dự án chưa đổi mode nên chưa tự suy ra được. */
   languages?: ProjectLanguages
   /** In lại version đã lưu chưa có mốc trong binding: thời điểm tạo version (bỏ qua các lần đổi mẫu về sau). */
@@ -37,7 +39,7 @@ export interface RenderVersionOptions {
  * dịch, như bản Lead đã ký. Dự án import thật ⇒ `null` (giữ đường cũ, không đổi byte nào).
  */
 export const convertedLanguages = async (projectId: string, versionCreatedAt?: Date): Promise<ProjectLanguages | null> => {
-  const project = await Project.findById(projectId, { mode: 1, converted_from: 1, documentLanguage: 1 }).lean()
+  const project = await Project.findById(projectId, { mode: 1, converted_from: 1, documentLanguage: 1, source_language: 1 }).lean()
   if (project?.converted_from !== "fpt") return null
   if (versionCreatedAt) {
     // Version chưa có `languages` trong binding mà một lần đổi mẫu đã áp dụng sau đó: ngôn ngữ hiện tại có thể đã đổi theo mẫu —
@@ -45,7 +47,10 @@ export const convertedLanguages = async (projectId: string, versionCreatedAt?: D
     const first = (await TemplateMigration.findOne({ projectId, applied_at: { $gt: versionCreatedAt } }, { snapshot: 1 }).sort({ applied_at: 1 }).lean()) as { snapshot?: { document_language?: string | null } | null } | null
     if (first?.snapshot) {
       const { documentLanguage: _current, ...rest } = project
-      return projectLanguages(projectId, { ...rest, ...(first.snapshot.document_language ? { documentLanguage: first.snapshot.document_language as "vi" | "en" } : {}) })
+      // Ngôn ngữ chữ trong Spine lúc đó cũng theo snapshot (dịch đè của chính lần đổi mẫu đó chưa xảy ra)
+      const { source_language: _source, ...atVersion } = rest
+      const snapSource = (first.snapshot as { source_language?: string | null }).source_language
+      return projectLanguages(projectId, { ...atVersion, ...(snapSource ? { source_language: snapSource } : {}), ...(first.snapshot.document_language ? { documentLanguage: first.snapshot.document_language as "vi" | "en" } : {}) })
     }
   }
   return projectLanguages(projectId, project)
@@ -60,6 +65,7 @@ export const renderVersionFile = async (projectId: string, projectName: string, 
     version: opts.version,
     source: "baseline" as const,
     pendingRecord: opts.pendingRecord,
+    ...(opts.releasing ? { releasing: opts.releasing } : {}),
     ...(opts.recordChanges !== undefined ? { recordChanges: opts.recordChanges } : {}),
     ...(languages ? { languages } : {})
   }

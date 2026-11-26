@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { documentLanguageOf, sourceLanguageOf } from "./document-language.js"
+import { documentLanguageOf, hasBaseFile, sourceLanguageOf } from "./document-language.js"
 
 describe("documentLanguageOf (FLF-265, D1)", () => {
   it("field đã lưu ⇒ dùng field, kể cả mode 1", () => {
@@ -45,5 +45,28 @@ describe("sourceLanguageOf (D4)", () => {
     const converted = { mode: "import" as const, converted_from: "fpt" as const, documentLanguage: "vi" as const }
     expect(sourceLanguageOf(converted, "vi")).toBe("en")
     expect(documentLanguageOf(converted, "vi")).toBe("vi")
+  })
+})
+
+describe("hasBaseFile + source_language (FLF-466, BF §3.7 bảng 4 loại dự án)", () => {
+  const cases: [string, Parameters<typeof hasBaseFile>, boolean][] = [
+    ["chế độ 1 / 3 / 4 (upload thật hoặc tạo từ mẫu org: mode import)", [{ mode: "import", converted_from: null }], true],
+    ["chế độ 2 chưa áp mẫu nào (kể cả đã chuyển, converted_from = fpt)", [{ mode: "import", converted_from: "fpt" }, null], false],
+    ["chế độ 2 chưa chuyển", [{ mode: "fpt", converted_from: null }, null], false],
+    ["chế độ 2 đã chuyển + đã áp một lần đổi mẫu không phải chỉ đổi ngôn ngữ (migrated_base_at)", [{ mode: "import", converted_from: "fpt" }, { migrated_base_at: new Date() }], true],
+    ["chế độ 2 đã áp mẫu nhưng chỉ đổi ngôn ngữ (migrated_base_at = null)", [{ mode: "import", converted_from: "fpt" }, { migrated_base_at: null }], false]
+  ]
+  it.each(cases)("%s ⇒ %s", (_name, args, expected) => {
+    expect(hasBaseFile(...args)).toBe(expected)
+  })
+
+  it("source_language đã ghi thắng luật cũ; thiếu ⇒ suy như trước", () => {
+    // Dự án chế độ 2 dịch đè sang vi: chữ Spine nay là vi dù converted_from = fpt
+    expect(sourceLanguageOf({ mode: "import", converted_from: "fpt", source_language: "vi" })).toBe("vi")
+    expect(sourceLanguageOf({ mode: "import", converted_from: "fpt" })).toBe("en")
+    // Dự án import dịch đè từ vi sang en: không còn đọc ngôn ngữ file cũ
+    expect(sourceLanguageOf({ mode: "import", converted_from: null, source_language: "en" }, "vi")).toBe("en")
+    expect(sourceLanguageOf({ mode: "import", converted_from: null }, "vi")).toBe("vi")
+    expect(sourceLanguageOf({ mode: "fpt", source_language: "fr" })).toBe("en")
   })
 })

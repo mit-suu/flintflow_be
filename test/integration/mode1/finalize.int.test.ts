@@ -43,6 +43,7 @@ import { DocxPackage, blockIdOfBookmark, readBlocks, readStamp } from "../../../
 import { Baseline } from "../../../src/modules/spine/baseline.model.js"
 import { Spine } from "../../../src/modules/spine/spine.model.js"
 import { Project } from "../../../src/modules/project/project.model.js"
+import { projectCode } from "../../../src/modules/project/project-code.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 import { applyTransaction } from "../../../src/modules/spine/op-engine.js"
 import { originalDiagramHash } from "../../../src/modules/spine/original-diagram.js"
@@ -188,7 +189,7 @@ describe("finalize - DocVersion 0.1 + baseline imported", () => {
     for (const b of fileBlocks.filter((x) => x.bookmark)) expect(stored.some((s) => s.block_id === blockIdOfBookmark(b.bookmark))).toBe(true)
 
     const rendered = await DocxPackage.load(await docFileStore().load(v.file_ref))
-    expect(await readStamp(rendered)).toEqual({ project_id: projectId, version: "0.1", source: "import", base_version: null, latest_cr: null, kind: null })
+    expect(await readStamp(rendered)).toEqual({ project_id: projectId, version: "0.1", source: "import", base_version: null, latest_cr: null, kind: null, project_code: projectCode(projectId) })
     const texts = (await readBlocks(rendered)).map((b) => b.text)
     // Bản render mang nội dung Spine (không phải bản sao file gốc), tiêu đề theo file người dùng
     expect(texts).toContain("1 Product Overview")
@@ -200,11 +201,11 @@ describe("finalize - DocVersion 0.1 + baseline imported", () => {
     const { projectId } = await importFinalized()
     const v = (await DocVersion.findOne({ projectId, version: "0.1" }).lean())!
     const rendered = await downloadVersion(projectId, "Lumen", "0.1", "auto")
-    expect(rendered.filename).toBe("Lumen_v0.1_DRAFT.docx") // FLF-334: không mã project (máy đọc stamp); FLF-356: chưa release ⇒ số bản import
-    expect(await readStamp(await DocxPackage.load(rendered.data))).toEqual({ project_id: projectId, version: "0.1", source: "import", base_version: "0.1", latest_cr: null, kind: "draft" })
+    expect(rendered.filename).toBe(`Lumen_${projectCode(projectId)}_v0.1.docx`) // FLF-466: mã dự án + số bản, bản nháp nhận ra qua số + watermark
+    expect(await readStamp(await DocxPackage.load(rendered.data))).toEqual({ project_id: projectId, version: "0.1", source: "import", base_version: "0.1", latest_cr: null, kind: "draft", project_code: projectCode(projectId) })
     expect((await readBlocks(await DocxPackage.load(rendered.data))).some((b) => b.text === "1 Product Overview")).toBe(true)
     const original = await downloadVersion(projectId, "Lumen", "0.1", "original")
-    expect(original.filename).toBe("Lumen_v0.1_original.docx")
+    expect(original.filename).toBe(`Lumen_${projectCode(projectId)}_v0.1_original.docx`)
     expect(original.data.equals(await docFileStore().load(v.original_ref!))).toBe(true)
     expect(toVersionDto(v as never, { mode: "import" })).toMatchObject({ version: "0.1", has_original_file: true })
     await DocVersion.updateOne({ _id: v._id }, { $set: { original_ref: null } })
@@ -716,8 +717,8 @@ describe("finalize - tương thích bản gốc cũ 0.0 (FLF-284)", () => {
     const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
     expect(toVersionDto(v as never, { mode: "import" })).toMatchObject({ version: "0.0", kind: "imported", has_original_file: true })
     const rendered = await downloadVersion(projectId, "Lumen", "0.0", "auto")
-    expect(rendered.filename).toBe("Lumen_v0.0_DRAFT.docx")
+    expect(rendered.filename).toBe(`Lumen_${projectCode(projectId)}_v0.0.docx`)
     const original = await downloadVersion(projectId, "Lumen", "0.0", "original")
-    expect(original.filename).toBe("Lumen_v0.0_original.docx")
+    expect(original.filename).toBe(`Lumen_${projectCode(projectId)}_v0.0_original.docx`)
   })
 })

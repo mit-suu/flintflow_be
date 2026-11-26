@@ -170,6 +170,10 @@ const envSchema = z.object({
    */
   REFERENCE_MAX_TOKENS_PER_UPLOAD: z.coerce.number().int().min(1000).default(100000),
 
+  // FLF-466 P08: dải số màn ước tính sau Approve Brief = hệ số × số đầu vào có ở S-1 (goals, other_requirements, mục tính năng).
+  RUN_ESTIMATE_SCREENS_PER_INPUT_MIN: z.coerce.number().positive().default(1.5),
+  RUN_ESTIMATE_SCREENS_PER_INPUT_MAX: z.coerce.number().positive().default(2.5),
+
   // FLF-449 việc 5, 6: kiểm AI là một phần luồng (business-flow 71, 131-138) ⇒ BẬT mặc định; cờ chỉ để tắt khẩn.
   // Tắt ⇒ bước trả `skipped`, ước tính credit tính 0.
   /** S-9.2 Soát chất lượng bằng AI. */

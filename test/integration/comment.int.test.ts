@@ -146,13 +146,17 @@ describe("UC-49 - comment trên bản nháp (mode 2)", () => {
     expect(baseline.body.error.code).toBe("BASELINE_NOT_FOUND")
   })
 
-  it("mọi vai trò trả lời được; Viewer không Resolve được; Analyst Resolve ⇒ ẩn khỏi danh sách mặc định, Resolve lần hai ⇒ 409", async () => {
+  it("Viewer không trả lời được comment bản nháp (404); mọi vai trò soạn trả lời được; Viewer không Resolve được; Analyst Resolve ⇒ ẩn khỏi danh sách mặc định, Resolve lần hai ⇒ 409", async () => {
     const section = await firstSection(lead)
     await lead.post("/comments", { version: { source: "draft" }, anchor: { section_id: section.id }, text: "Câu hỏi về phạm vi" })
 
-    const reply = await viewer.post("/comments/CM-001/replies", { text: "Tôi cũng thắc mắc" })
+    const deniedReply = await viewer.post("/comments/CM-001/replies", { text: "Tôi cũng thắc mắc" })
+    expect(deniedReply.status).toBe(404)
+    expect(deniedReply.body.error.code).toBe("COMMENT_NOT_FOUND")
+
+    const reply = await analyst.c.post("/comments/CM-001/replies", { text: "Tôi cũng thắc mắc" })
     expect(reply.status, JSON.stringify(reply.body.error)).toBe(201)
-    expect(reply.body.data.replies).toMatchObject([{ author_role: "viewer", text: "Tôi cũng thắc mắc", author: { name: "viewer" } }])
+    expect(reply.body.data.replies).toMatchObject([{ author_role: "analyst", text: "Tôi cũng thắc mắc", author: { name: "analyst" } }])
 
     const viewerResolve = await viewer.post("/comments/CM-001/resolve", { kind: "fixed" })
     expect(viewerResolve.status).toBe(403)
@@ -175,7 +179,9 @@ describe("UC-49 - comment trên bản nháp (mode 2)", () => {
     })
 
     expect((await viewer.get("/comments")).body.data).toEqual([])
-    const all = await viewer.get("/comments?status=all")
+    // FLF-466 (BF §3.6): Viewer không thấy comment gắn bản nháp; người có quyền soạn vẫn thấy
+    expect((await viewer.get("/comments?status=all")).body.data).toEqual([])
+    const all = await lead.get("/comments?status=all")
     expect(commentsResponseSchema.safeParse(all.body.data).error).toBeUndefined()
     expect(all.body.data.map((c: { comment_id: string }) => c.comment_id)).toEqual(["CM-001"])
 
@@ -190,22 +196,22 @@ describe("UC-49 - comment trên bản nháp (mode 2)", () => {
 
   it("trả lời ⇒ báo tác giả + người đã trả lời (trừ người vừa viết); Resolve ⇒ báo tác giả, tự Resolve comment của mình thì không", async () => {
     const section = await firstSection(lead)
-    const viewerUser = await join(seeded, "viewer2@flintflow.test", "viewer")
-    const viewer2 = api(seeded.projectId, viewerUser.token)
+    const analyst2User = await join(seeded, "analyst2@flintflow.test", "analyst")
+    const analyst2 = api(seeded.projectId, analyst2User.token)
     await lead.post("/comments", { version: { source: "draft" }, anchor: { section_id: section.id }, text: "Câu hỏi về phạm vi" })
     await Notification.deleteMany({})
     const recipients = async (type: string) =>
       (await Notification.find({ type }).lean()).map((n) => String(n.userId)).sort()
 
-    // Viewer trả lời ⇒ chỉ tác giả (Lead) được báo
-    await viewer2.post("/comments/CM-001/replies", { text: "Phạm vi gồm cả huỷ?" })
+    // Thành viên thứ hai trả lời ⇒ tác giả (Lead) và người có quyền trong org (trừ người vừa viết)
+    await analyst2.post("/comments/CM-001/replies", { text: "Phạm vi gồm cả huỷ?" })
     expect(await recipients("comment_replied")).toEqual([seeded.userId])
 
-    // Analyst trả lời ⇒ Lead (tác giả) + Viewer (đã trả lời), không báo chính Analyst
+    // Analyst trả lời ⇒ Lead (tác giả) + thành viên đã trả lời, không báo chính Analyst
     await Notification.deleteMany({})
     await analyst.c.post("/comments/CM-001/replies", { text: "Có, gồm cả huỷ." })
-    expect(await recipients("comment_replied")).toEqual([seeded.userId, viewerUser.userId].sort())
-    const note = await Notification.findOne({ type: "comment_replied", userId: viewerUser.userId }).lean()
+    expect(await recipients("comment_replied")).toEqual([seeded.userId, analyst2User.userId].sort())
+    const note = await Notification.findOne({ type: "comment_replied", userId: analyst2User.userId }).lean()
     expect(note?.link).toBe(`/projects/${seeded.projectId}/view?comment=CM-001`)
     expect(note?.body).toContain("Có, gồm cả huỷ.")
     expect(String(note?.organizationId)).toBe(seeded.orgId)
@@ -228,18 +234,18 @@ describe("UC-49 - comment trên bản nháp (mode 2)", () => {
 
   it("thông báo comment theo ngôn ngữ giao diện của người nhận; chưa chọn ⇒ tiếng Việt", async () => {
     const section = await firstSection(lead)
-    const viewerUser = await join(seeded, "viewer-en@flintflow.test", "viewer")
-    await User.updateOne({ _id: viewerUser.userId }, { $set: { locale: "en" } })
-    const viewerEn = api(seeded.projectId, viewerUser.token)
+    const analystEnUser = await join(seeded, "analyst-en@flintflow.test", "analyst")
+    await User.updateOne({ _id: analystEnUser.userId }, { $set: { locale: "en" } })
+    const analystEn = api(seeded.projectId, analystEnUser.token)
     await lead.post("/comments", { version: { source: "draft" }, anchor: { section_id: section.id }, text: "Câu hỏi về phạm vi" })
-    await viewerEn.post("/comments/CM-001/replies", { text: "Does scope include cancel?" })
+    await analystEn.post("/comments/CM-001/replies", { text: "Does scope include cancel?" })
     await Notification.deleteMany({})
 
     await analyst.c.post("/comments/CM-001/replies", { text: "Có, gồm cả huỷ." })
 
-    const toViewer = await Notification.findOne({ type: "comment_replied", userId: viewerUser.userId }).lean()
-    expect(toViewer?.title).toBe("New reply on CM-001")
-    expect(toViewer?.body).toMatch(/^On "/)
+    const toAnalystEn = await Notification.findOne({ type: "comment_replied", userId: analystEnUser.userId }).lean()
+    expect(toAnalystEn?.title).toBe("New reply on CM-001")
+    expect(toAnalystEn?.body).toMatch(/^On "/)
     const toLead = await Notification.findOne({ type: "comment_replied", userId: seeded.userId }).lean()
     expect(toLead?.title).toBe("Trả lời mới ở CM-001")
   })
@@ -248,6 +254,12 @@ describe("UC-49 - comment trên bản nháp (mode 2)", () => {
     const outsider = await seedFixture("minimal", { email: "outsider@flintflow.test" })
     const res = await api(seeded.projectId, outsider.token).get("/comments")
     expect(res.status).toBe(404)
+  })
+
+  it("FLF-466: Viewer gọi POST /assemble ⇒ 403 ORG_ROLE_FORBIDDEN", async () => {
+    const res = await viewer.post("/assemble", { base_version: 1 })
+    expect(res.status).toBe(403)
+    expect(res.body.error.code).toBe("ORG_ROLE_FORBIDDEN")
   })
 })
 
@@ -276,6 +288,10 @@ describe("UC-49 - Viewer comment trên baseline, Analyst chuyển thành change 
     })
     expect(posted.status, JSON.stringify(posted.body.error)).toBe(201)
     expect(posted.body.data.version).toMatchObject({ source: "baseline", label: baselines[0].version })
+
+    // FLF-466: Viewer trả lời được trên comment gắn bản đã phát hành
+    const baselineReply = await viewer.post("/comments/CM-001/replies", { text: "Xác nhận giúp phần này." })
+    expect(baselineReply.status, JSON.stringify(baselineReply.body.error)).toBe(201)
 
     // Viewer không tạo CR được dù gửi comment_id
     const crBody = {

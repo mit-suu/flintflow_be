@@ -220,7 +220,8 @@ vi.mock("../doc-version/doc-version.service.js", () => ({
 
 vi.mock("../doc-version/doc-version.model.js", () => ({
   DocVersion: {
-    find: vi.fn().mockResolvedValue([])
+    find: vi.fn().mockResolvedValue([]),
+    exists: vi.fn().mockResolvedValue(null)
   }
 }))
 
