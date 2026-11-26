@@ -117,9 +117,10 @@ export const acknowledgeCredit = async (projectId: string, userId: string): Prom
  */
 const referenceDocumentsAck = async (projectId: string, spine: Spine, stepId: string): Promise<CreditAckRequired | null> => {
   if (stepId.split(".")[0] !== "B-0") return null
-  const project = await Project.findById(projectId).select("mode").lean()
   const { pendingSummaryCredits } = await import("../project/project-document.service.js")
   const { documents, credits } = await pendingSummaryCredits(projectId)
+  if (documents === 0) return null
+  const project = await Project.findById(projectId).select("mode").lean()
   if (!referenceAckDue(spine, stepId, project?.mode, documents)) return null
   return { scope: "reference_documents", credits, documents, created_at: new Date().toISOString() }
 }
