@@ -53,7 +53,8 @@ import { recordDraftRejected } from "./draft-rejected-log.js"
 import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
 import { runAiReview, type ReviewProfile } from "./s9/ai-review.js"
 import * as meter from "./meter.service.js"
-import { documentLanguageForTurn, type TurnDocumentLanguage } from "../translation/turn-language.js"
+import { documentLanguageForTurn, languagePairOf, type TurnDocumentLanguage } from "../translation/turn-language.js"
+import { translatedViewOf } from "../translation/localized-view.js"
 import { captureForTurn } from "../translation/capture.service.js"
 import { captureSources, paragraphTexts } from "../project/requirement-source.service.js"
 import { paragraphId, parseParagraphId } from "../../shared/ai/document-paragraphs.js"
@@ -2299,6 +2300,11 @@ export const runStep = async (
     // hết điều tạm hiểu nên không lọc.
     const spokenIds = (gateNotes ?? "").trim() === "" ? null : spokenAssumptionIds(gateMessage, review.new_assumptions)
     const gateAssumptions = spokenIds ? review.new_assumptions.filter((a) => spokenIds.has(a.id)) : review.new_assumptions
+    // FLF-479 #6: bảng tại cổng nói bằng ngôn ngữ tài liệu khi bản dịch đã có (chưa có ⇒ giữ chữ gốc, không gọi AI dịch thêm)
+    const gateTable = gateTableOf(
+      stepDef.template_id === "S-1.1" ? await translatedViewOf(projectId, finalSpine, languagePairOf(deps.documentLanguage ?? (await documentLanguageForTurn(projectId)))) : finalSpine,
+      stepDef.template_id
+    )
     const gateEvent: Extract<StepEvent, { type: "gate_ready" }> = {
       type: "gate_ready",
       step_id: stepId,
@@ -2313,7 +2319,7 @@ export const runStep = async (
       flags: { red: review.red_open, yellow: review.yellow_open, red_delta: review.red_delta, yellow_delta: review.yellow_delta },
       duration_ms: Date.now() - tracker.startedAt,
       credits_used: creditsUsed,
-      ...(gateTableOf(finalSpine, stepDef.template_id) ? { table: gateTableOf(finalSpine, stepDef.template_id) as NonNullable<ReturnType<typeof gateTableOf>> } : {}),
+      ...(gateTable ? { table: gateTable } : {}),
       doc_progress: { before: progressBefore, after: progressAfter },
       ...(gateMessage ? { message_vi: gateMessage } : {}),
       ...(stepSummary.length === 0

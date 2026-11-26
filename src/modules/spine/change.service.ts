@@ -99,6 +99,8 @@ import type { ChangeInstructionOutput, LocalizedEntry } from "../../shared/ai/re
 import { documentLanguageForTurn, documentLanguageInput, languagePairOf, type TurnDocumentLanguage, type TurnLanguagePair } from "../translation/turn-language.js"
 import { captureForTurn } from "../translation/capture.service.js"
 import { assertDraftUnlocked } from "./draft-lock.js"
+import { localizeChangeText } from "./preview-localize.js"
+import { translatedViewOf } from "../translation/localized-view.js"
 import { expandIndexSelectors } from "./index-selector-fix.js"
 import { stillOpenIn, targetFlagsOf, unresolvedAfter, unresolvedProblemText, type TargetFlag } from "./flag-target.js"
 import type { ChangeRequestInfo } from "../pipeline/pipeline.dto.js"
@@ -1630,6 +1632,8 @@ export const preview = async (
   ]
     .filter(Boolean)
     .join("\n")
+  // FLF-479 #6: chữ hiện trong hộp xem trước theo ngôn ngữ tài liệu (bản dịch có sẵn, không gọi AI)
+  const localizedView = resolved.language ? await translatedViewOf(projectId, spine, resolved.language) : null
   const previewId = randomUUID()
   prunePreviews(Date.now())
   previewStore.set(previewId, {
@@ -1655,7 +1659,7 @@ export const preview = async (
     txn: txnId,
     base_version: body.base_version,
     ops: plan.ops.filter((o) => !o.path.startsWith("assumptions")),
-    changes: shownChanges.map(({ op, path, before, value, reason }) => ({ op, path, before, value, reason })),
+    changes: shownChanges.map(({ op, path, before, value, reason }) => localizeChangeText({ op, path, before, value, reason }, localizedView, resolved.localized)),
     violations: [],
     referrers: impact.referrers,
     branch,
