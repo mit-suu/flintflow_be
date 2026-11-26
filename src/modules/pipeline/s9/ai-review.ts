@@ -168,12 +168,28 @@ const buildBlocks = (spine: Spine): Block[] => {
   })
 
   const common = block("common", fixedSectionIds(spine), {
-    project: { name: spine.project.name, vision: spine.project.vision, goals: spine.project.goals, form_factor: spine.project.form_factor },
+    // FLF-449 (M1): tên hệ thống in trên tài liệu được phép khác tên dự án - thiếu nó model báo "tên hệ thống khác tên dự án"
+    project: {
+      name: spine.project.name,
+      system_name: spine.project.system_name ?? null,
+      system_name_note: "system_name is the product name printed on the document; it may differ from the project name - not a conflict.",
+      vision: spine.project.vision,
+      goals: spine.project.goals,
+      form_factor: spine.project.form_factor
+    },
     actors: spine.actors.map((a) => ({ id: a.id, name: a.name, kind: a.kind, description: a.description })),
     roles: spine.roles.map((r) => ({ id: r.id, name: r.name, actor_id: r.actor_id })),
     nfrs: spine.nfrs.map((n) => ({ id: n.id, category: n.category, statement: n.statement, metric: n.metric, threshold: n.threshold })),
     entities: spine.entities.map((e) => ({ id: e.id, name: e.name, description: e.description })),
-    external_interfaces: spine.deployment_nodes.map((n) => ({ id: n.id, name: n.name, kind: n.kind, components: n.components, artifacts: n.artifacts })),
+    // FLF-449 (M1): giao tiếp ngoài = NFR giao tiếp (`category = interface`) + actor không phải người (hệ thống / thời gian).
+    // Nút triển khai là khoá riêng, chỉ khi có - dự án để trống không được hiện thành "danh sách giao tiếp ngoài trống".
+    external_interfaces: {
+      interface_requirements: spine.nfrs.filter((n) => n.category === "interface").map((n) => ({ id: n.id, statement: n.statement })),
+      external_actors: spine.actors.filter((a) => a.kind !== "human").map((a) => ({ id: a.id, name: a.name, kind: a.kind, description: a.description }))
+    },
+    ...(spine.deployment_nodes.length > 0
+      ? { deployment_nodes: spine.deployment_nodes.map((n) => ({ id: n.id, name: n.name, kind: n.kind, components: n.components, artifacts: n.artifacts })) }
+      : {}),
     permissions: spine.permissions.map((p) => ({ screen_id: p.screen_id, role_id: p.role_id, action: p.action })),
     common_requirements: spine.common_requirements.map((c) => ({ id: c.id, category: c.category, statement: c.statement })),
     business_rules: spine.business_rules.filter((r) => !usedRules.has(r.id)).map((r) => ({ id: r.id, statement: r.statement })),

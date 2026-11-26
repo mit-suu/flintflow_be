@@ -1,7 +1,7 @@
 ---
 skill_id: review-section
 kind: action
-version: 1.2.3
+version: 1.2.4
 description: LLM lens review of one section or the assembled draft → yellow flags only
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -72,6 +72,7 @@ Definitions, examples and when each applies: *Reference: lenses* at the end of t
 11. Every flag has `quote` = text copied **verbatim** from Content, a settled decision, an assumption or an uploaded document. For a flag that compares two places, quote the place in Content. Cannot quote it, no flag (a `cross_section_gap` about a wrong count may omit it).
 12. `target_id` = the id of the element the flag names, when there is one.
 13. `decision_conflict` only when a sentence in Content contradicts the **answer** of a settled decision. Name the decision by its topic in words, never by id.
+14. **An empty list or a missing key in Content means the data is not given here, not that the document lacks it.** Never flag a list as empty or missing on that basis (for example external interfaces: look at `interface_requirements` and `external_actors` too). `system_name` may differ from the project `name`: that is not a conflict.
 
 <!-- ba-quality:shared:start -->
 **Analysis quality** - applies to every finding, gap, proposed change, recommendation and reason you write (not to the plain answer options of a question):
