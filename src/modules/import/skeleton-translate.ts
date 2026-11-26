@@ -6,7 +6,8 @@
  */
 import type { UserLocale } from "../../shared/i18n/locale.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
-import { getActionCost } from "../../shared/ai/credit-reservation.service.js"
+import { AiActionError } from "../../shared/ai/ai-action.types.js"
+import { getActionCost, getOrCreateWallet, resolveWalletOrg } from "../../shared/ai/credit-reservation.service.js"
 import { hashSource } from "../translation/translation-units.js"
 import { acceptBatchItems, defaultTranslateDocumentExecutor, type TranslateDocumentExecutor } from "../translation/translation-run.service.js"
 import { splitBatches, type BatchItem } from "../translation/translation.service.js"
@@ -37,13 +38,37 @@ export interface SkeletonTranslateInput {
   target: UserLocale
   units: readonly Pick<SkeletonUnit, "key" | "text">[]
   executor?: TranslateDocumentExecutor
+  /** Số credit khả dụng của ví (mặc định: ví org sở hữu dự án). Thay được khi test. */
+  availableCredits?: () => Promise<number | null>
+}
+
+const walletAvailable = async (projectId: string, userId: string): Promise<number | null> => {
+  const orgId = await resolveWalletOrg(projectId)
+  if (!orgId) return null
+  const wallet = await getOrCreateWallet(userId, undefined, orgId)
+  return wallet.balance - wallet.reserved
+}
+
+/**
+ * Kiểm số dư đủ cho **mọi lô** trước khi chạy lô đầu: lô 1 đã trừ credit mà lô 2 hết thì file chưa ghi nhưng credit lô 1 mất.
+ * Không đủ ⇒ 402 `INSUFFICIENT_CREDIT`, chưa trừ gì.
+ */
+const assertEnoughForAllBatches = async (input: SkeletonTranslateInput, batches: number): Promise<void> => {
+  if (batches <= 1) return
+  const cost = batches * (await getActionCost(ActionType.TRANSLATE_DOCUMENT))
+  const available = await (input.availableCredits ?? (() => walletAvailable(input.projectId, input.userId)))()
+  if (available !== null && available < cost) {
+    throw new AiActionError(402, `Không đủ credit. Yêu cầu: ${cost} credit, Khả dụng: ${available} credit.`, "INSUFFICIENT_CREDIT", { cost, available })
+  }
 }
 
 /** Bản dịch theo `key` của đơn vị (đơn vị không dịch được không có trong kết quả). */
 export const translateSkeleton = async (input: SkeletonTranslateInput): Promise<Map<string, string>> => {
   const executor = input.executor ?? defaultTranslateDocumentExecutor
   const byHash = new Map<string, string>()
-  for (const batch of skeletonBatches(input.units)) {
+  const batches = skeletonBatches(input.units)
+  await assertEnoughForAllBatches(input, batches.length)
+  for (const batch of batches) {
     let result
     try {
       result = await executor(
