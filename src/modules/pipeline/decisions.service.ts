@@ -265,8 +265,14 @@ export const SYSTEM_NAME_STEP = "B-2.3"
  * Field trống mà step này được phép hỏi. `project.system_name` chỉ được hỏi ở B-2.3: các step khác đọc nó (B-1.x, S-1…) cũng
  * thấy nó trống nhưng hỏi ở đó là hỏi tên trước khi Brief đủ để gợi ý — và đúng điều FLF-232 bỏ khỏi câu đầu.
  */
-export const askableFields = (templateId: string, fields: readonly string[]): string[] =>
-  templateId === SYSTEM_NAME_STEP ? [...fields] : fields.filter((field) => field !== SYSTEM_NAME_FIELD)
+export const askableFields = (templateId: string, fields: readonly string[]): string[] => {
+  // FLF-449: trường sổ sách của hệ thống (`progress.*`, `steps.*`, `sections.*`, `flags.*`) trống là bình thường, không phải
+  // điều người dùng chưa kể — để lọt vào "còn thiếu" thì model bịa câu hỏi ("có cần ghi nhận nguồn (credit) không?")
+  const userFields = fields.filter((field) => !BOOKKEEPING_FIELD.test(field))
+  return templateId === SYSTEM_NAME_STEP ? userFields : userFields.filter((field) => field !== SYSTEM_NAME_FIELD)
+}
+
+const BOOKKEEPING_FIELD = /^(progress|steps|sections|flags)(\.|\[|$)/
 
 /**
  * Đuôi đánh dấu phương án khuyến nghị trên nhãn lựa chọn (FLF-220). FLF-449: định nghĩa chuyển sang `option-analysis.ts`
