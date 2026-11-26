@@ -57,6 +57,11 @@ const startAndFinalize = async (seeded: SeededFixture, projectId: string, import
   const started = await request(app).post(`/api/v1/projects/${projectId}/import/extract`).set(H(seeded)).send({ import_id: importId, confirm_latest: true })
   expect(started.status, JSON.stringify(started.body.error)).toBe(200)
   await waitForExtraction(importId)
+  // FLF-462 (bước 1.6): còn gì cần xác nhận (field / đoạn lớp 4 độ tin thấp, mục tên đúng nội dung sai) ⇒ xác nhận hết
+  // theo gợi ý AI - test này không quan tâm bước 1.6, chỉ cần qua để kiểm I-5
+  if ((await ImportedDocument.findById(importId))?.status === "fields_review") {
+    await request(app).patch(`/api/v1/projects/${projectId}/import/fields`).set(H(seeded)).send({ import_id: importId, confirm_all: true })
+  }
   await startFinalize(projectId, seeded.userId, { import_id: importId, base_version: (await spineRepository.get(projectId))!.spine_version })
   await waitForFinalize(importId)
   // FLF-453: AI giả không phát hiện gì ở vòng rà soát (business-flow §3.1.2) — test này không chủ đích kiểm vòng rà soát

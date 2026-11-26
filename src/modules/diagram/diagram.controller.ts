@@ -17,6 +17,9 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { validationError } from "../../shared/utils/validation-message.js"
 import * as diagramService from "./diagram.service.js"
 import { loadRenderContext } from "./render-context.js"
+import { assertPackageNotPending } from "../doc-version/review-package.service.js"
+import { isViewer } from "../../shared/auth/viewer-read-scope.middleware.js"
+import { viewerSpine } from "../../shared/auth/viewer-spine.js"
 import { DIAGRAM_KINDS } from "./renderers/index.js"
 
 const context = async (req: Request): Promise<{ projectId: string; userId: string; spine: SpineRecord }> => {
@@ -25,7 +28,10 @@ const context = async (req: Request): Promise<{ projectId: string; userId: strin
   const projectId = req.params.projectId as string
   if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   const project = await getProjectById(projectId, requireOrgId(req))
-  const spine = await spineRepository.getOrCreate(projectId, { name: project.name, domain: project.domain ?? null })
+  // FLF-466: Viewer đọc sơ đồ theo bản ổn định mới nhất, không theo Spine sống
+  const spine = isViewer(req)
+    ? ({ ...(await viewerSpine(projectId)), projectId } as unknown as SpineRecord)
+    : await spineRepository.getOrCreate(projectId, { name: project.name, domain: project.domain ?? null })
   return { projectId, userId, spine }
 }
 
@@ -83,7 +89,8 @@ export const renderDiagramRoute = catchAsync(async (req: Request, res: Response)
   const ownerId = body.data.owner_id ?? null
   if (known === "screen_layout" && ownerId === null) throw new ApiError(400, "Cần chọn màn hình để vẽ sơ đồ bố cục màn.", "VALIDATION_ERROR")
 
-  const { projectId, userId } = await context(req)
+  const { projectId, userId, spine } = await context(req)
+  assertPackageNotPending(spine.baseline_submission)
   const options = { by: userId, force: body.data.force ?? false, deps: diagramService.layoutRenderDeps() }
   const result = known
     ? await diagramService.renderDiagram(projectId, known, known === "screen_layout" ? ownerId : null, options)

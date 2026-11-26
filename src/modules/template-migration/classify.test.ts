@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { classify, columnIdentity, decidableItems, missingAfterMoves, sameColumns, settleDecisions, tableShapesBySection, withSuggestedDecisions, type TableShape, type TableShapes } from "./classify.js"
+import { classify, columnIdentity, decidableItems, missingAfterMoves, readChoice, sameColumns, settleDecisions, tableShapesBySection, withSuggestedDecisions, type TableShape, type TableShapes } from "./classify.js"
 import { pairSections, type NewHeading, type OldHeading } from "./pair-sections.js"
 import type { EditedSection } from "./edited-since.js"
 
@@ -42,7 +42,7 @@ describe("classify — 4 nhóm cho một lần đổi mẫu v1 → v2", () => {
 
   it("mục thừa: giữ / xoá / chuyển vào mục thiếu; chuyển vào mục có cấu trúc cần AI", () => {
     const { groups } = run(oldDoc, newDoc, { oldTables, newTables })
-    expect(groups.extra[0]).toMatchObject({ id: "e:custom:c2", choices: ["keep_custom", "drop_from_print", "delete", "move_to:n4", "move_to:n5"], ai_choices: ["move_to:n5"], decision_required: true })
+    expect(groups.extra[0]).toMatchObject({ id: "e:custom:c2", choices: ["keep_custom", "drop_from_print", "move_to:n4", "move_to:n5"], ai_choices: ["move_to:n5"], decision_required: true })
   })
 
   it("đổi cột bảng chỉ là đổi thứ tự ⇒ vẫn khớp", () => {
@@ -202,7 +202,8 @@ describe("quyết định", () => {
     // Lần đổi mẫu mở từ trước khi có gợi ý: mục không mang `suggested` ⇒ BA phải chọn như luồng cũ
     const legacy = { ...groups, extra: groups.extra.map(({ suggested: _s, suggested_reason: _r, confidence: _c, ...e }) => e), conflict: groups.conflict.map(({ suggested: _s, suggested_reason: _r, confidence: _c, ...c }) => c) }
     const r = settleDecisions(legacy, [{ id: "e:custom:c2", choice: "delete" }, { id: "c:table_columns:fixed:5.1", choice: "keep_custom" }, { id: "m:fixed:1", choice: "keep" }])
-    expect(r.decisions).toEqual([{ id: "e:custom:c2", choice: "delete" }])
+    // FLF-466: nhóm Thừa không còn xoá — quyết định `delete` đã lưu đọc thành drop_from_print
+    expect(r.decisions).toEqual([{ id: "e:custom:c2", choice: "drop_from_print" }])
     expect(r.undecided).toEqual(["c:table_columns:fixed:5.1"])
   })
 
@@ -256,6 +257,27 @@ describe("so cột bảng giữa hai phía", () => {
     const newDoc = [neu(0, "5.1 Business Rules", "fixed:5.1")]
     const { groups } = run(oldDoc, newDoc, { oldTables: tables({ "fixed:5.1": [shape("h:br id", "h:business rule")] }), newTables: tables({ "fixed:5.1": [shape("h:br id")] }) })
     expect(groups.conflict[0].old_columns).toEqual([["br id", "business rule"]])
+  })
+})
+
+describe("FLF-466: nhóm Thừa không còn xoá; conflict bảng giữ delete", () => {
+  const oldDoc = [old("fixed:2.1", "2.1 Actors", 2), old("custom:c2", "9 Legacy Interfaces", 1)]
+  const newDoc = [neu(0, "2.1 Actors", "fixed:2.1")]
+  const oldTables = tables({ "fixed:2.1": [shape("h:actor", "h:description")] })
+
+  it("mục Thừa chữ tự do không có delete; conflict bảng không có bảng đích vẫn có delete", () => {
+    const { groups } = run(oldDoc, newDoc, { oldTables, newTables: tables({}) })
+    expect(groups.extra.flatMap((e) => e.choices)).not.toContain("delete")
+    expect(groups.conflict[0].choices).toContain("delete")
+  })
+
+  it("lần đổi mẫu đang mở còn `delete` trong choices / quyết định của mục Thừa ⇒ đọc thành drop_from_print", () => {
+    const { groups } = run(oldDoc, newDoc, { oldTables, newTables: tables({}) })
+    const legacy = { ...groups, extra: groups.extra.map((e) => ({ ...e, choices: [...e.choices, "delete"] })) }
+    expect(decidableItems(legacy).get("e:custom:c2")?.choices).not.toContain("delete")
+    expect(readChoice(legacy, "e:custom:c2", "delete")).toBe("drop_from_print")
+    // Conflict bảng: delete giữ nguyên nghĩa
+    expect(readChoice(legacy, groups.conflict[0].id, "delete")).toBe("delete")
   })
 })
 

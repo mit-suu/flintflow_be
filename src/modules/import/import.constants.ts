@@ -34,7 +34,9 @@ export const fileTooLargeMessage = (bytes?: number): string =>
   `${bytes === undefined ? "File" : `File nặng ${toMb(bytes)} MB,`} vượt giới hạn ${IMPORT_MAX_FILE_MB} MB. Hãy nén ảnh trong Word (File → Compress Pictures) hoặc tách phụ lục rồi tải lại.`
 
 /** Author Track Changes/comment do FlintFlow ghi = mã CR (plan §1 nút 3.14). Tác giả khác ⇒ preflight từ chối. */
-export const CR_AUTHOR_PATTERN = /^CR-\d{3,}$/
+export const CR_AUTHOR_PATTERN = /^CR-\d{3,}(?=$|[\s(:])/
+// FLF-466 (BF C-6): bản nháp CR mang tác giả `CR-012 (Tên BA)` — nhận mọi tác giả BẮT ĐẦU bằng mã CR (theo sau là hết chuỗi, khoảng trắng, `(` hoặc `:`);
+// `CR-1` (ít hơn 3 số) và `CR-0123abc` vẫn là tác giả lạ.
 
 /** Custom property stamp — cùng tên với `render/docx-writer.ts` (mode 2) để đọc được file do mode 2 xuất. */
 export const STAMP_PROPERTY = {
@@ -46,7 +48,9 @@ export const STAMP_PROPERTY = {
   /** FLF-334: CR mới nhất đã ghi vào bản nháp (`CR-014`); release / không có ⇒ không ghi. */
   latest_cr: "flintflow_latest_cr",
   /** FLF-334: `release` | `draft`. */
-  kind: "flintflow_kind"
+  kind: "flintflow_kind",
+  /** FLF-466: mã dự án ngắn (`P77049B`) mang trong tên file; file cũ không có ⇒ không đọc ra. */
+  project_code: "flintflow_project_code"
 } as const
 
 /** FLF-334: loại bản trong stamp (`flintflow_kind`). */
@@ -96,6 +100,9 @@ export const needsConfirm = (f: { confidence: number; origin?: string }): boolea
 
 /** Trần độ tin của thực thể đọc từ ảnh. */
 export const VISION_CONFIDENCE_CAP = 0.7
+
+/** FLF-462 (bước 1.6): đoạn lớp 4 AI phân loại ở I-4 phải qua người xác nhận khi độ tin dưới ngưỡng field. */
+export const needsConfirmGuidance = (g: { confidence: number }): boolean => g.confidence < FIELD_CONFIDENCE_THRESHOLD
 
 export const EXTRACTION_STATUSES = ["pending", "done", "failed"] as const
 export type ExtractionStatus = (typeof EXTRACTION_STATUSES)[number]

@@ -98,14 +98,14 @@ model → op[] → op-engine.applyTransaction() → Spine mới + changes[] → 
 
 ## 4. Luồng step (pipeline)
 
-12 phase, `50 step cố định + 5 × N` (N = số màn, +1 nếu có function không thuộc màn):
+12 phase (`B-0 → B-1 → S-1 → B-2 → S-2 … → S-9`), tổng `49 step cố định + 5 × N` (`4 × N` khi mẫu bỏ Screen Layout; N = số màn, +1 nếu có function không thuộc màn):
 
 | Phase | Tên | Step |
 |---|---|---|
-| B-0 | Intake | 4 |
+| B-0 | Intake | 3 (`B-0.4` đã bỏ) |
 | B-1 | Product Brief | 6 |
-| B-2 | Brief Finalize | 3 |
 | S-1 | Analyze & Validate Brief | 4 |
+| B-2 | Brief Finalize | 3 |
 | S-2 | Product Overview | 5 |
 | S-3 | User Requirements | 6 |
 | S-4 | System Functional Overview | 5 |

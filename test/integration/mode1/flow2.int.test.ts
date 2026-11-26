@@ -6,6 +6,7 @@
  * `incomplete` ⇒ `POST /import/continue`.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { projectCode } from "../../../src/modules/project/project-code.js"
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
 import mongoose from "mongoose"
 import request from "supertest"
@@ -132,7 +133,7 @@ describe("Luồng 2 cho phần thiếu - chế độ 3", () => {
     const fileRef = await docFileStore().save(versionFile, { projectId, kind: "version", name: "0.1" })
     await DocVersion.create({ projectId, version: "0.1", kind: "imported", file_ref: fileRef, template_source: templateSource, spine_snapshot: stripRecord(spine), record_snapshot: recordSnapshot, created_by: userId })
     const downloaded = await downloadVersion(projectId, "Lumen", "0.1", "auto", { project })
-    expect(downloaded.filename).toContain("DRAFT")
+    expect(downloaded.filename).toBe(`Lumen_${projectCode(projectId)}_v0.1.docx`) // FLF-466: bản nháp nhận ra qua số + watermark (dòng dưới)
     const storedVersion = (await DocVersion.findOne({ projectId, version: "0.1" }).lean())!
     expect(storedVersion.file_ref).toBe(fileRef)
     expect(storedVersion.template_source?.source_file_ref).toBe(templateSource?.source_file_ref)

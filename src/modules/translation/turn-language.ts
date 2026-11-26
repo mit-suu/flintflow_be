@@ -51,7 +51,7 @@ const spineSeeds = async (projectId: string, locale: UserLocale): Promise<Glossa
 export const documentLanguageForTurn = async (projectId: string): Promise<TurnDocumentLanguage | null> => {
   if (mongoose.connection.readyState !== 1 || !mongoose.isValidObjectId(projectId)) return null
   try {
-    const project = await Project.findById(projectId, { mode: 1, documentLanguage: 1 }).lean()
+    const project = await Project.findById(projectId, { mode: 1, documentLanguage: 1, source_language: 1 }).lean()
     if (!project) return null
     const { locale, source } = await projectLanguages(projectId, project)
     if (locale === source) return null

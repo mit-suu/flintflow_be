@@ -6,6 +6,7 @@ import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { templateCurrentOf, templateUpdateOf } from "../import/template-update.js"
+import { projectCode } from "./project-code.js"
 import type { CreateProjectDTO, DisableScreenMockupsDTO, MoveProjectDTO, RunScreenMockupsDTO, UpdateDocumentLanguageDTO, UpdateErdNotationDTO, UpdateScreenThemeDTO, UpdateSequenceLevelDTO } from "./project.validation.js"
 import { ListProjectsQuerySchema, ScreenMockupsQuerySchema } from "./project.validation.js"
 import { validationError } from "../../shared/utils/validation-message.js"
@@ -55,15 +56,21 @@ export const getProject = catchAsync(async (req: Request, res: Response) => {
   const project = await projectService.openProject(projectId, orgId)
   // FLF-318: dự án tạo SRS đã ký baseline mà chưa chuyển sang mode 1 (lượt ký lỗi giữa chừng / ký trước khi deploy)
   const current = (await retryPendingConversion(project, userId)) ? await projectService.getProjectById(projectId, orgId) : project
-  // FLF-395: bản mẫu tổ chức mới hơn bản dự án đang theo (chỉ Lead / Analyst)
-  // FLF-480 (ChoViet #14): `document_language` — ngôn ngữ đã suy đúng (field riêng ⇒ ngôn ngữ file của mode 1 import),
-  // không để FE tự suy lại thiếu field này (trang khách hiện tiêu đề tiếng Anh dù file tiếng Việt).
+  // FLF-395: bản mẫu tổ chức mới hơn bản dự án đang theo (chỉ Lead / Analyst); FLF-466: trả ngôn ngữ tài liệu + project_code
+  // FLF-480 (ChoViet #14): `document_language` — ngôn ngữ đã suy đúng (field riêng ⇒ ngôn ngữ file của mode 1 import)
   const [templateUpdate, templateCurrent, languages] = await Promise.all([
     templateUpdateOf(current, req.orgContext?.role),
     templateCurrentOf(current),
     projectLanguages(projectId, current)
   ])
-  return sendSuccess(res, 200, { ...current.toJSON(), template_update: templateUpdate, template_current: templateCurrent, document_language: languages.locale })
+  return sendSuccess(res, 200, {
+    ...current.toJSON(),
+    documentLanguage: languages.locale,
+    document_language: languages.locale,
+    project_code: projectCode(projectId),
+    template_update: templateUpdate,
+    template_current: templateCurrent
+  })
 })
 
 export const deleteProject = catchAsync(async (req: Request, res: Response) => {
@@ -210,7 +217,7 @@ export const cancelScreenMockupRun = catchAsync(async (req: Request, res: Respon
 
 /** FLF-410: DELETE /projects/:id/screen-mockups — dùng lại ảnh gốc (giữ hình đã vẽ), không tốn credit. */
 export const disableScreenMockups = catchAsync(async (req: Request, res: Response) => {
-  requireUser(req)
+  const userId = requireUser(req)
   const body = req.body as DisableScreenMockupsDTO
-  return sendSuccess(res, 200, await screenMockupService.disable(req.params.projectId as string, requireOrgId(req), body))
+  return sendSuccess(res, 200, await screenMockupService.disable(req.params.projectId as string, requireOrgId(req), body, undefined, userId))
 })

@@ -47,6 +47,8 @@ export const MODE1_ERROR_STATUS = {
   PACKAGE_PENDING: 409,
   /** FLF-330: gửi duyệt khi chưa có CR nào ghi vào bản nháp kể từ lần phát hành trước. */
   PACKAGE_EMPTY: 409,
+  /** FLF-466: phát hành khi nội dung (không tính cờ) đã đổi kể từ lúc gửi duyệt gói ⇒ Lead duyệt không đúng bản đã gửi. */
+  PACKAGE_CHANGED_AFTER_SUBMIT: 409,
   /** FLF-182: tắt bước luôn chạy (ghép / kiểm tra tài liệu) hoặc step đã có dữ liệu. */
   CORE_STEP_REQUIRED: 409,
   /** Mode 1 v3 (BPMN Flow 1): không chạy step / gate / bật-tắt step, không ký baseline v1, không waive cờ. */

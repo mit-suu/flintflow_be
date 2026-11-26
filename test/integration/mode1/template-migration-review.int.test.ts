@@ -23,7 +23,7 @@ import { authAs, seedFixture, type SeededFixture } from "../../setup.js"
 import { crToReady, importedProject, resetCrMock } from "../../helpers/mode1-cr-p4.js"
 import { createMode1Project, saveTemplateProposal } from "../../helpers/mode1.js"
 import { mockOverrides } from "../../helpers/mock-llm.js"
-import { fileOf } from "../../helpers/mode1-import-p4.js"
+import { fileOf, runExtraction } from "../../helpers/mode1-import-p4.js"
 import { mockTranslateItems } from "../../../src/shared/ai/providers/mock.provider.js"
 import { makeDocx, p, styled } from "../../../src/modules/docx-ooxml/testing/make-docx.js"
 import { makeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
@@ -33,7 +33,6 @@ import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.j
 import { release } from "../../../src/modules/doc-version/release.service.js"
 import { convertedLanguages } from "../../../src/modules/doc-version/render-version.js"
 import { acceptLatest, uploadImport } from "../../../src/modules/import/import.service.js"
-import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { finalizeImport } from "../../../src/modules/import/finalize.service.js"
 import { OrgTemplateVersion } from "../../../src/modules/import/org-library.model.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
@@ -97,7 +96,7 @@ const decide = async (token: string, projectId: string, id: string, choose?: Cho
   const decisions = [...dto.groups.extra, ...dto.groups.conflict].map((i) => i.id).map((d) => {
     const item = items.find((i) => i.id === d)!
     const safe = item.choices.filter((c) => !item.ai_choices.includes(c) && !c.startsWith("move_to:"))
-    return { id: d, choice: choose?.(d, item.choices, item.ai_choices) ?? (safe.find((c) => c === "delete") ?? safe.find((c) => c === "drop_from_print")) ?? safe[0] }
+    return { id: d, choice: choose?.(d, item.choices, item.ai_choices) ?? safe.find((c) => c === "drop_from_print") ?? safe[0] }
   })
   if (decisions.length) expect((await request(app).patch(url(projectId, id, "/decisions")).set(H(token)).send({ decisions })).status).toBe(200)
   return (await request(app).get(url(projectId, id)).set(H(token))).body.data as MigrationDto
@@ -198,12 +197,14 @@ describe("phục hồi kẹt (R2, R3)", () => {
     const lead = await seedFixture("minimal", { balance: 1000 })
     const projectId = await baselinedProject(lead, await makeSrsDocx({ extraBody: LEGACY }))
     const templateId = await publishTemplate(lead.token, lead.orgId, await makeSrsDocx({ extraBody: EXTRA }))
-    const ready = await startReady(lead.token, projectId, { template_id: templateId, version: 1 })
+    // FLF-466: không còn "Xoá" nên không có lô op tự nhiên từ nhóm Thừa nên đặt tay một op vào kế hoạch
+    const ready = await startReady(lead.token, projectId, { template_id: templateId, version: 1 }, undefined)
     await expect(applyMigration(ctxOf(lead, projectId), ready.id, { afterStep: crash("file"), recoverOnError: false })).rejects.toThrow()
     spineRepository.clearReadCache()
     const head = (await spineRepository.get(projectId))!
     await applyTransaction(projectId, { base_version: head.spine_version, ops: [{ op: "set", path: "project.vision", value: "Sửa chen giữa" }], by: "CR-920", reason: "CR-920", step_id: null })
     spineRepository.clearReadCache()
+    await TemplateMigration.updateOne({ _id: ready.id }, { $set: { "spine_plan.ops": [{ op: "set", path: "project.name", value: "Từ kế hoạch cũ", reason: "kế hoạch" }] } })
     const doc = (await TemplateMigration.findById(ready.id))!
     expect(doc.spine_plan?.ops?.length).toBeGreaterThan(0)
     await expect(writeSpine(doc, lead.userId)).rejects.toMatchObject({ code: spineRepository.SPINE_VERSION_CONFLICT })

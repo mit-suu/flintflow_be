@@ -61,7 +61,17 @@ export const progressSchema = z.strictObject({
   current_step: z.string().nullable(),
   screen_cursor: z.string().nullable(),
   screen_queue: z.array(id),
-  elicit_turns_this_phase: nonNegativeInt
+  elicit_turns_this_phase: nonNegativeInt,
+  credit_ack_required: z
+    .strictObject({
+      scope: z.enum(["after_brief", "screens_locked", "screens_added"]),
+      credits: z.number().min(0),
+      created_at: z.string(),
+      screens: z.array(id).optional()
+    })
+    .nullable()
+    .optional(),
+  credit_acked_screens: z.array(id).optional()
 })
 
 export const stepStateSchema = z.strictObject({

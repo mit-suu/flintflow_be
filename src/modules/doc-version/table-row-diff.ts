@@ -2,14 +2,14 @@
  * So hai bảng theo hàng (so sánh version UC-50, tải lại file UC-25) — hàm thuần. Ghép hàng ba tầng:
  *  1. Cột mã (cùng tiêu đề ở hai bảng, mọi ô thân có dạng mã như `UC-01`, `NFR-17`, không trùng) ⇒ ghép theo mã rồi so từng ô;
  *     đổi thứ tự hàng không tính là thay đổi.
- *  2. Hàng còn lại: LCS theo chữ cả hàng; hàng y hệt nằm ngoài dãy LCS ⇒ `moved` (FE không tô xanh / đỏ).
+ *  2. Hàng còn lại: LCS theo chữ cả hàng; hàng khớp nguyên nội dung khác vị trí không đánh `moved`, không tính thay đổi (FLF-466 P11).
  *  3. Hàng còn lẻ giữa hai hàng đã ghép ⇒ ghép theo độ giống từ (≥ `MODIFIED_SIMILARITY`) ⇒ `modified` kèm chỉ số ô đổi; còn lại
  *     mới là `added` / `removed`.
  * Kết quả theo thứ tự bảng mới, hàng bị xoá chen vào đúng chỗ; hàng không đổi gộp thành một nhóm `unchanged` (FE vẽ `⋯ n hàng`).
  */
 import { foldText } from "../import/text-similarity.js"
 
-export type RowChange = "added" | "removed" | "modified" | "moved"
+export type RowChange = "added" | "removed" | "modified"
 
 export type TableRowDiff =
   | { change: RowChange; before?: string[]; after?: string[]; cells_changed?: number[] }
@@ -115,7 +115,7 @@ export const diffTableRows = (beforeRows: readonly string[][], afterRows: readon
     matchOf.set(restA[y], restB[x])
     used.add(restB[x])
   }
-  // Hàng y hệt ngoài dãy LCS ⇒ di chuyển
+  // Hàng y hệt ngoài dãy LCS ⇒ chỉ đổi chỗ (ghép để không thành thêm / xoá, không tính là thay đổi)
   const moved = new Set<number>()
   after.forEach((r, j) => {
     if (matchOf.has(j)) return
@@ -151,6 +151,26 @@ export const diffTableRows = (beforeRows: readonly string[][], afterRows: readon
     }
   })
 
+  // FLF-466: hàng vừa đổi chỗ vừa sửa chữ nằm ngoài khoảng giữa hai hàng đã ghép ⇒ ghép theo độ giống bất kể vị trí (không thì thành xoá + thêm)
+  after.forEach((r, j) => {
+    if (matchOf.has(j)) return
+    let best = -1
+    let bestScore = ROW_SIMILARITY
+    before.forEach((b, i) => {
+      if (used.has(i)) return
+      const score = similarity(rowText(b), rowText(r))
+      if (score >= bestScore) {
+        best = i
+        bestScore = score
+      }
+    })
+    if (best >= 0) {
+      matchOf.set(j, best)
+      used.add(best)
+      moved.add(j)
+    }
+  })
+
   const out: TableRowDiff[] = []
   let changes = 0
   const pushUnchanged = (row: string[]): void => {
@@ -182,10 +202,7 @@ export const diffTableRows = (beforeRows: readonly string[][], afterRows: readon
     if (cells.length) {
       out.push({ change: "modified", before: before[i], after: r, cells_changed: cells })
       changes++
-    } else if (moved.has(j)) {
-      out.push({ change: "moved", before: before[i], after: r })
-      changes++
-    } else pushUnchanged(r)
+    } else pushUnchanged(r) // FLF-466 (BF §4): đổi thứ tự hàng nguyên văn không phải thay đổi
   })
   flushRemoved(before.length)
 

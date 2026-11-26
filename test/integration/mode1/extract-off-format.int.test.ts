@@ -8,8 +8,7 @@ vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await imp
 
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeMode1 } from "../../helpers/mode1.js"
-import { importAtExtracting, useExtractConcurrency } from "../../helpers/mode1-import-p4.js"
-import { runExtraction } from "../../../src/modules/import/extract.service.js"
+import { importAtExtracting, runExtraction, useExtractConcurrency } from "../../helpers/mode1-import-p4.js"
 import { finalizeImport } from "../../../src/modules/import/finalize.service.js"
 import { ExtractionDraft } from "../../../src/modules/import/extraction-draft.model.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
@@ -99,12 +98,13 @@ describe("FLF-444 - File lệch format: I-4 đọc theo nội dung", () => {
     await finalizeImport(ctx.projectId, ctx.userId, { import_id: ctx.importId, base_version: before.spine_version })
     const spine = (await spineRepository.get(ctx.projectId))!
     expect(spine.functions.map((f) => f.name)).toEqual(expect.arrayContaining(["Export monthly progress report", "Enroll in a course"]))
-    // Cờ "Cần xem" của phần tử đọc từ heading tự đặt trỏ mục Spine sở hữu phần tử (chức năng ⇒ mục của chính chức năng đó),
-    // không rơi về Record of Changes, không lộ mã tạm `content:@B…`
     expect(spine.flags.some((f) => f.section_id.startsWith("content:"))).toBe(false)
+    // FLF-462 (đảo FLF-343): phần tử đọc từ heading tự đặt có độ tin thấp ("Enroll in a course", 0.5) không còn đưa thẳng
+    // vào bản gốc kèm cờ vàng "Cần xem" - `extract()` (helper `runExtraction`) đã xác nhận hết ở bước 1.6 trước khi tới
+    // đây, nên field đã `confirmed: true` và không còn đủ điều kiện ra cờ (`needsReviewFindings`)
     const enroll = spine.functions.find((f) => f.name === "Enroll in a course")!
-    const enrollFlag = spine.flags.find((f) => f.rule_id === "import_needs_review" && f.message.includes("Enroll in a course"))
-    expect(enrollFlag?.section_id).toBe(`function:${enroll.id}`)
+    expect(enroll).toBeTruthy()
+    expect(spine.flags.some((f) => f.rule_id === "import_needs_review" && f.message.includes("Enroll in a course"))).toBe(false)
     // Bố cục file giữ nguyên: hai heading tự đặt vẫn là mục riêng của layout, giữ thứ tự file
     const layout = (await TemplateProfile.findOne({ projectId: ctx.projectId }).lean())!.layout.map((l) => l.heading_text)
     expect(layout.indexOf("Phần mở rộng")).toBeGreaterThan(-1)
@@ -116,7 +116,8 @@ describe("FLF-444 - File lệch format: I-4 đọc theo nội dung", () => {
     const uc = drafts.find((d) => d.section_id === "fixed:2.2.2")!
     expect(uc.status).toBe("done")
     expect(uc.fields.filter((f) => f.path.startsWith("use_cases["))).toEqual([])
-    expect(uc.content_mismatch).toEqual({ by_heading: ["use_cases"], by_content: [], note: "test cases" })
+    // FLF-462: extract() xác nhận hết ở bước 1.6 (confirm_all) ⇒ mục tên đúng nội dung sai đã `confirmed: true`
+    expect(uc.content_mismatch).toEqual({ by_heading: ["use_cases"], by_content: [], note: "test cases", confirmed: true })
     // Block test case giữ nguyên văn trong file
     expect(uc.unmapped_block_ids.length).toBe(O.testCases.length)
   })

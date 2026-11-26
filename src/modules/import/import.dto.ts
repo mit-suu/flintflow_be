@@ -227,6 +227,26 @@ export const reviewFieldSchema = z.object({
   entity_name: z.string().optional()
 })
 
+/** FLF-462 (bước 1.6): đoạn lớp 4 chữ hướng dẫn AI phân loại ở I-4, độ tin < 0.7, chờ người xác nhận. */
+export const reviewGuidanceSchema = z.object({
+  section_id: z.string().min(1),
+  block_id: blockId,
+  /** Nguyên văn đoạn, để người dùng đọc và quyết định đây có phải chữ hướng dẫn không. */
+  text: z.string(),
+  is_guidance: z.boolean(),
+  confidence,
+  confirmed: z.boolean()
+})
+
+/** FLF-462 (bước 1.6, FLF-444 đánh dấu): mục khớp theo tên mà I-4 đọc ra nội dung của loại khác, chờ người xem qua. */
+export const reviewContentMismatchSchema = z.object({
+  section_id: z.string().min(1),
+  by_heading: z.array(z.string()),
+  by_content: z.array(z.string()),
+  note: z.string().nullable(),
+  confirmed: z.boolean()
+})
+
 export const extractionSectionSchema = z.object({
   section_id: z.string().min(1),
   status: z.enum(EXTRACTION_STATUSES),
@@ -285,7 +305,7 @@ export const extractRequestSchema = z.strictObject({ import_id: id, confirm_late
 /** FLF-412 `PATCH /projects/:id/import/drop-text`: cả tập vùng (khoá `block_id` của heading) người dùng chọn Bỏ chữ. */
 export const dropTextRequestSchema = z.strictObject({ import_id: id, keys: z.array(z.string().min(1).max(32)).max(500) })
 
-/** `PATCH /projects/:id/import/fields` (UC-22, nút 1.9). */
+/** `PATCH /projects/:id/import/fields` (UC-22, nút 1.6/1.9). */
 export const fieldsPatchRequestSchema = z
   .strictObject({
     import_id: id,
@@ -300,10 +320,16 @@ export const fieldsPatchRequestSchema = z
         })
       )
       .default([]),
-    /** `true` ⇒ xác nhận mọi field còn lại theo giá trị AI trích và chuyển `baselining`. */
+    /** FLF-462: xác nhận đoạn lớp 4 là / không là chữ hướng dẫn (có thể sửa lại giá trị AI chấm). */
+    guidance: z.array(z.strictObject({ section_id: z.string().min(1), block_id: blockId, is_guidance: z.boolean() })).default([]),
+    /** FLF-462: xác nhận đã xem mục tên đúng nội dung sai; không đổi phân loại, chỉ bỏ cờ chờ. */
+    content_mismatch: z.array(z.strictObject({ section_id: z.string().min(1) })).default([]),
+    /** `true` ⇒ xác nhận mọi field / đoạn lớp 4 / cảnh báo còn lại theo giá trị AI trích và chuyển `baselining`. */
     confirm_all: z.boolean().default(false)
   })
-  .refine((v) => v.fields.length > 0 || v.confirm_all, { message: "Cần chọn ít nhất một trường dữ liệu, hoặc xác nhận tất cả." })
+  .refine((v) => v.fields.length > 0 || v.guidance.length > 0 || v.content_mismatch.length > 0 || v.confirm_all, {
+    message: "Cần chọn ít nhất một mục cần xác nhận, hoặc xác nhận tất cả."
+  })
 
 /** `POST /projects/:id/import/finalize` (nút 1.10–1.12) — ghi Spine ⇒ mang `base_version`. */
 /**
@@ -380,7 +406,11 @@ export const getImportResponseSchema = z.object({
   extraction: z.object({
     sections: z.array(extractionSectionSchema),
     /** Field độ tin < 0.7 chưa xác nhận (nút 1.9). */
-    review_fields: z.array(reviewFieldSchema)
+    review_fields: z.array(reviewFieldSchema),
+    /** FLF-462 (bước 1.6): đoạn lớp 4 chữ hướng dẫn độ tin thấp chưa xác nhận. */
+    review_guidance: z.array(reviewGuidanceSchema),
+    /** FLF-462 (bước 1.6): mục tên đúng nội dung sai (FLF-444 đánh dấu) chưa xem qua. */
+    review_content_mismatch: z.array(reviewContentMismatchSchema)
   }),
   blocks_count: z.number().int().min(0),
   /** FLF-336: có sau lần finalize đầu (kể cả khi dừng ở `incomplete`); null khi chưa so. */
@@ -483,7 +513,7 @@ export const gapReportResponseSchema = gapReportSchema
 /** Một dòng diff theo block — dùng chung cho re-upload (UC-24) và `versions/compare` (UC-55). */
 /** FLF-447: một hàng của bảng trong diff theo hàng. */
 const tableRowDiffSchema = z.union([
-  z.object({ change: z.enum(["added", "removed", "modified", "moved"]), before: z.array(z.string()).optional(), after: z.array(z.string()).optional(), cells_changed: z.array(z.number().int().min(0)).optional() }),
+  z.object({ change: z.enum(["added", "removed", "modified"]), before: z.array(z.string()).optional(), after: z.array(z.string()).optional(), cells_changed: z.array(z.number().int().min(0)).optional() }),
   z.object({ change: z.literal("unchanged"), count: z.number().int().min(1), rows: z.array(z.array(z.string())) })
 ])
 
@@ -556,6 +586,8 @@ export type ImportedDocumentDto = z.infer<typeof importedDocumentDtoSchema>
 export type DocBlockDto = z.infer<typeof docBlockDtoSchema>
 export type TemplateProfileDto = z.infer<typeof templateProfileDtoSchema>
 export type ReviewField = z.infer<typeof reviewFieldSchema>
+export type ReviewGuidance = z.infer<typeof reviewGuidanceSchema>
+export type ReviewContentMismatch = z.infer<typeof reviewContentMismatchSchema>
 export type MappingPatchRequest = z.infer<typeof mappingPatchRequestSchema>
 export type FieldsPatchRequest = z.infer<typeof fieldsPatchRequestSchema>
 export type FinalizeRequest = z.infer<typeof finalizeRequestSchema>

@@ -8,7 +8,10 @@ import request from "supertest"
 
 vi.mock("../../src/shared/ai/providers/llm.router.js", async () => (await import("../helpers/mock-llm.js")).mockLlmRouterModule())
 
+import mongoose from "mongoose"
+import { Membership } from "../../src/modules/organization/membership.model.js"
 import app from "../../src/app.js"
+import { TemplateMigration } from "../../src/modules/template-migration/template-migration.model.js"
 import { seedFixture } from "../setup.js"
 import { mockOverrides, resetMockLlm } from "../helpers/mock-llm.js"
 import { createMode1Project, fakeCrClarify, fakeCrPropose, fakeMode1, mode1Api } from "../helpers/mode1.js"
@@ -19,8 +22,9 @@ import { changeRequestDetailSchema } from "../../src/modules/change-request/chan
 import { compareResponseSchema, releaseResponseSchema, versionBlocksResponseSchema, versionsResponseSchema } from "../../src/modules/doc-version/doc-version.dto.js"
 import { changeRequiresCrMetaSchema } from "../../src/modules/change-request/change-request.dto.js"
 import { applyTransaction } from "../../src/modules/spine/op-engine.js"
-import { DocxPackage, readBlocks, readStamp } from "../../src/modules/docx-ooxml/index.js"
+import { DocxPackage, acceptAll, readBlocks, readStamp } from "../../src/modules/docx-ooxml/index.js"
 import * as spineRepository from "../../src/modules/spine/spine.repository.js"
+import { projectCode } from "../../src/modules/project/project-code.js"
 
 const TARGETS = { entity_paths: ["nfrs[id=NFR-01]"], keywords: ["2 seconds"] }
 
@@ -86,16 +90,16 @@ describe("mode 1 - version + tải về", () => {
 
     const draft = await binary(c.get("/versions/0.2/download"))
     expect(draft.status).toBe(200)
-    expect(decodeURIComponent(String(draft.headers["content-disposition"]))).toContain("Lumen LMS_v0.2_DRAFT.docx")
+    // FLF-466: mã dự án + số của chính file (bản nháp nhận ra qua số phụ + watermark, không còn `+CR-…_DRAFT`)
+    expect(decodeURIComponent(String(draft.headers["content-disposition"]))).toContain(`Lumen LMS_${projectCode(projectId)}_v0.2.docx`)
     expect(await readStamp(await DocxPackage.load(draft.body as Buffer))).toMatchObject({ version: "0.2", base_version: "0.1", latest_cr: "CR-001", kind: "draft" })
     const zip = await JSZip.loadAsync(draft.body as Buffer)
     const headers = Object.keys(zip.files).filter((n) => /^word\/header\d+\.xml$/.test(n))
     expect(headers.length).toBeGreaterThan(0)
     expect(await zip.file(headers[0])!.async("string")).toContain('string="DRAFT"')
     // §I Record of Changes của bản render có dòng của CR
-    // FLF-484 lát D: mô tả dựng từ thay đổi, không chép tiêu đề CR ("Faster")
     const draftXml = await documentXml(draft.body as Buffer)
-    expect(draftXml).toContain("CR-001: ")
+    expect(draftXml).toContain("CR-001: Update non-functional requirement NFR-01")
     expect(draftXml).not.toContain("CR-001: Faster")
   })
 })
@@ -131,14 +135,21 @@ describe("mode 1 - release (Flow 6)", () => {
     expect(rel.baseline).toMatchObject({ type: "release", version: "1.0", doc_version: "1.0" })
 
     const clean = await binary(c.get("/versions/1.0/download"))
-    expect(decodeURIComponent(String(clean.headers["content-disposition"]))).toContain("Lumen LMS_v1.0.docx")
+    expect(decodeURIComponent(String(clean.headers["content-disposition"]))).toContain(`Lumen LMS_${projectCode(projectId)}_v1.0.docx`)
     const xml = await documentXml(clean.body as Buffer)
     expect(xml).not.toMatch(/<w:ins\b|<w:del\b|commentReference/)
     const cleanBlocks = await readBlocks(await DocxPackage.load(clean.body as Buffer))
     expect(cleanBlocks.find((b) => b.text.includes("The system shall respond"))?.text).toContain("1 second")
-    // FLF-484 (M2-04): bản phát hành có bản Track Changes gộp mọi thay đổi kể từ lần phát hành trước (ở đây: từ bản gốc 0.1)
-    const tracked = await documentXml((await binary(c.get("/versions/1.0/download?variant=tracked"))).body as Buffer)
-    expect(tracked).toMatch(/<w:ins\b/)
+    // FLF-466 phase 03: bản phát hành có Track Changes so với lần ổn định trước (bản gốc 0.1), tác giả = CR sửa sau cùng
+    expect(rel.version).toMatchObject({ has_tracked_file: true, tracked_unavailable_reason: null })
+    const trackedRes = await binary(c.get("/versions/1.0/download?variant=tracked"))
+    expect(decodeURIComponent(String(trackedRes.headers["content-disposition"]))).toContain("_tracked")
+    const trackedPkg = await DocxPackage.load(trackedRes.body as Buffer)
+    const tracked = await documentXml(trackedRes.body as Buffer)
+    expect(tracked).toContain("<w:ins ")
+    expect(tracked).toContain('w:author="CR-001 (')
+    await acceptAll(trackedPkg)
+    expect((await readBlocks(trackedPkg)).find((b) => b.text.includes("The system shall respond"))?.text).toContain("1 second")
 
     // CR sau release ⇒ 1.1 render từ Spine mới
     routeReplaceCr("1 second", "500 ms")
@@ -152,8 +163,30 @@ describe("mode 1 - release (Flow 6)", () => {
     expect(done!.body.data.change_request.result_doc_version).toBe("1.1")
     const v11 = await documentXml((await binary(c.get("/versions/1.1/download"))).body as Buffer)
     expect(v11).toContain("500 ms")
-    expect(v11).toContain("CR-002: ")
+    expect(v11).toContain("CR-002: Update non-functional requirement NFR-01")
     expect(v11).not.toContain("CR-002: Even faster")
+  })
+
+  it("FLF-466: có lần đổi mẫu kèm dịch kể từ bản ổn định gần nhất ⇒ Gói báo lý do, release không có bản tracked + lý do ở version", async () => {
+    const { c, projectId, seeded } = await projectWithRevision()
+    // Lần đổi mẫu đã áp dụng, có dịch, sau bản gốc 0.1 (bản ổn định gần nhất)
+    await TemplateMigration.collection.insertOne({ projectId: new mongoose.Types.ObjectId(projectId), state: "applied", translated: true, applied_at: new Date(Date.now() + 1000) })
+    expect((await c.get("/review-package")).body.data.tracked_unavailable_reason).toBe("template_translated")
+
+    const res = await releaseNow(c)
+    expect(res.status, JSON.stringify(res.body.error)).toBe(201)
+    const rel = releaseResponseSchema.parse(res.body.data)
+    expect(rel.version).toMatchObject({ version: "1.0", has_tracked_file: false, tracked_unavailable_reason: "template_translated" })
+    const list = versionsResponseSchema.parse((await c.get("/versions")).body.data)
+    expect(list.find((v) => v.version === "1.0")).toMatchObject({ has_tracked_file: false, tracked_unavailable_reason: "template_translated" })
+  })
+
+  it("FLF-466: Viewer tải được bản tracked của bản phát hành, vẫn không tải được bản nháp", async () => {
+    const { c, seeded } = await projectWithRevision()
+    expect((await releaseNow(c)).status).toBe(201)
+    await Membership.updateOne({ userId: seeded.userId }, { $set: { role: "viewer" } })
+    expect((await c.get("/versions/1.0/download?variant=tracked")).status).toBe(200)
+    expect((await c.get("/versions/0.2/download?variant=tracked")).status).toBe(403)
   })
 })
 
