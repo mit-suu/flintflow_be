@@ -106,6 +106,8 @@ export interface LayoutResult {
   layout: LayoutEntry[]
   customSections: CustomSection[]
   slices: LayoutSlice[]
+  /** FLF-453: mục riêng của heading tự đặt (không khớp mục nào) + khối dưới nó — phần tử trích từ đó đã in nguyên văn ở mục riêng. */
+  verbatimSlices: LayoutSlice[]
   /** FLF-366: đoạn của từng mục FPT `fixed:*` có trong file (kể cả mục chỉ có heading). */
   segments: LayoutSegment[]
   /** FLF-378 (`templateOnly`): mọi khối dưới heading của mẫu, theo mục (`section_id` của layout) — nguồn của `template_context`. */
@@ -173,6 +175,8 @@ export const buildLayout = (
   const layout: LayoutEntry[] = []
   const customSections: CustomSection[] = []
   const slices: LayoutSlice[] = []
+  const verbatimSlices: LayoutSlice[] = []
+  let vslice: LayoutSlice | null = null
   /** Heading lặp đang mở — gom khối để biết phần tử nào trích từ heading này. */
   let slice: LayoutSlice | null = null
   const seen = new Set<string>()
@@ -227,6 +231,7 @@ export const buildLayout = (
         stack.push({ level: b.level, section: mapped, entry: enclosing.entry })
         current = null
         slice = null
+        vslice = null
         owner = enclosing.entry
         // FLF-378: mục con của mẫu (1.1 Purpose dưới 1 Product Overview) ⇒ ngữ cảnh mẫu ghi tên mục con để bước soạn thấy cấu trúc
         if (templateOnly && heading) {
@@ -248,12 +253,15 @@ export const buildLayout = (
         seen.add(mapped)
         current = null
         slice = null
+        vslice = null
       } else {
         current = newCustom(heading, clampLevel(b.level))
         currentRepeats = mapped !== UNMAPPED_SECTION && !mapped.startsWith("group:")
         section = customSectionKey(current.id)
         slice = currentRepeats ? { custom_id: current.id, section_id: mapped, block_ids: [b.block_id] } : null
         if (slice) slices.push(slice)
+        vslice = mapped === UNMAPPED_SECTION ? { custom_id: current.id, section_id: "verbatim", block_ids: [b.block_id] } : null
+        if (vslice) verbatimSlices.push(vslice)
       }
       const entry: LayoutEntry = {
         order: layout.length,
@@ -274,6 +282,7 @@ export const buildLayout = (
       continue
     }
     slice?.block_ids.push(b.block_id)
+    vslice?.block_ids.push(b.block_id)
     const block = toCustomBlock(b)
     if (!block) continue
     if (templateOnly) {
@@ -303,7 +312,7 @@ export const buildLayout = (
       else segment.parts.push({ kind: "spine", block_ids: [b.block_id], blocks: [block] })
     } else if (owner && (owner.section_id.startsWith("group:") || unmappedBlockIds.has(b.block_id))) continuationOf(owner).blocks.push(block)
   }
-  return { layout, customSections, slices, segments, contextBlocks, sectionBlocks, entryOfHeading }
+  return { layout, customSections, slices, verbatimSlices, segments, contextBlocks, sectionBlocks, entryOfHeading }
 }
 
 /** Phần tử Spine đã trích (finalize): khoá `entity` + `id` + khối nguồn. */
@@ -327,7 +336,7 @@ export const sliceItemKey = (entity: string, id: string): string => `${entity}:$
  * heading chứa **quá nửa** khối nguồn của nó. Còn lại (kể cả phần tử thêm sau qua change request) in ở lần đầu của section
  * như trước. Section không có mảng phần tử có id (Product Overview) ⇒ không chia.
  */
-export const sectionSlices = (slices: readonly LayoutSlice[], entities: readonly SlicedEntity[]): SectionSlice[] => {
+export const sectionSlices = (slices: readonly LayoutSlice[], entities: readonly SlicedEntity[], verbatim: readonly LayoutSlice[] = []): SectionSlice[] => {
   const out = slices.map((s) => ({ custom_id: s.custom_id, section_id: s.section_id, items: [] as string[] }))
   const owners = new Map<string, number>()
   slices.forEach((s, i) => s.block_ids.forEach((b) => owners.set(b, i)))
@@ -343,7 +352,28 @@ export const sectionSlices = (slices: readonly LayoutSlice[], entities: readonly
       if (n * 2 > sources.length && targetsOf(slices[at].section_id).includes(e.entity)) out[at].items.push(sliceItemKey(e.entity, e.id))
     }
   }
-  return out.filter((s) => s.items.length)
+  return [...out, ...verbatimSliceItems(verbatim, entities)].filter((s) => s.items.length)
+}
+
+/**
+ * FLF-453: phần tử trích từ mục riêng của heading tự đặt (quá nửa khối nguồn nằm dưới heading đó) — mục riêng giữ nguyên văn
+ * nên mục FlintFlow cùng loại không in lại. `section_id` = "verbatim" ⇒ chỉ là dấu "đã in ở mục riêng", không in thêm dưới heading.
+ */
+const verbatimSliceItems = (slices: readonly LayoutSlice[], entities: readonly SlicedEntity[]): SectionSlice[] => {
+  const out = slices.map((s) => ({ custom_id: s.custom_id, section_id: "verbatim", items: [] as string[] }))
+  const owners = new Map<string, number>()
+  slices.forEach((s, i) => s.block_ids.forEach((b) => owners.set(b, i)))
+  for (const e of entities) {
+    if (!e.id) continue
+    const sources = [...new Set(e.source_block_ids)]
+    const counts = new Map<number, number>()
+    for (const b of sources) {
+      const at = owners.get(b)
+      if (at !== undefined) counts.set(at, (counts.get(at) ?? 0) + 1)
+    }
+    for (const [at, n] of counts) if (n * 2 > sources.length) out[at].items.push(sliceItemKey(e.entity, e.id))
+  }
+  return out
 }
 
 /** Mảng Spine của phần tử nhắc tới trong văn xuôi (`mentions.ts`). */
