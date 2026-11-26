@@ -28,7 +28,7 @@ import { toIso } from "./mode1.http.js"
 import { parseDocument, type ParsedBlock } from "./parse.service.js"
 import { preflightDocx } from "./preflight.service.js"
 import { assignBlockSections, autoConfirmMapping, classifyGuidance, matchProfile, needsMappingReview } from "./profile-match.service.js"
-import { isKnownSectionId } from "./section-catalog.js"
+import { isKnownSectionId, sectionTitle } from "./section-catalog.js"
 import { normalizeTemplateFamily } from "./part-bank.js"
 import { slotOverlaps } from "./content-slots.js"
 import { applyMatchedOrgMapping, applyOrgMapping, orgLibraryTemplates, orgTemplateHeadings, pickOrgTemplate } from "./org-mapping.js"
@@ -379,7 +379,15 @@ const previewOf = async (
     ...(b.number_label ? { number_label: b.number_label } : {}),
     ...(b.guidance_layer ? { guidance_layer: b.guidance_layer } : {})
   }))
-  return previewStructure(layoutBlocks, new Map(headingMap.map((h) => [h.block_id, h.section_id])), plain, doc.intent ?? "free")
+  // FLF-460: dấu chưa chắc (I-3 tự nhận mục độ tin thấp) và nhãn Ngoài phạm vi người dùng đã đổi
+  const marks = new Map(
+    headingMap.flatMap((h) =>
+      h.auto_confirmed || h.scope_label
+        ? [[h.block_id, { ...(h.auto_confirmed ? { uncertain: true, ...(isKnownSectionId(h.section_id) && h.section_id !== "unmapped" ? { matched_title: sectionTitle(h.section_id) } : {}) } : {}), ...(h.scope_label ? { scope_label: h.scope_label } : {}) }] as const]
+        : []
+    )
+  )
+  return previewStructure(layoutBlocks, new Map(headingMap.map((h) => [h.block_id, h.section_id])), plain, doc.intent ?? "free", undefined, marks)
 }
 
 /**
@@ -541,19 +549,58 @@ export const recomputeBlockSections = async (projectId: mongoose.Types.ObjectId,
   if (ops.length) await DocBlock.bulkWrite(ops)
 }
 
+/**
+ * FLF-460: đổi nhãn có hiệu lực ở ba thời điểm (business-flow §3.1 "đổi được nhãn"):
+ * - trước Bắt đầu (màn đọc khung): so lại cấu trúc đích / gap report / credit theo nhãn mới, không tốn credit;
+ * - sau import, trước bản gốc: mục đổi nhãn (cũ và mới) bị đọc lại ở I-4, quay về màn báo credit trước khi chạy;
+ * - sau bản gốc: phải qua change request. Luồng CR chưa nhận loại thay đổi "đổi nhãn" ⇒ báo, không tự dựng cơ chế mới.
+ */
+const RELABEL_AFTER_BASELINE = (doc: IImportedDocument) =>
+  new Mode1Error("IMPORT_INVALID_STATE", "Đã có bản gốc: đổi nhãn mục phải đi qua yêu cầu thay đổi, mà luồng này chưa nhận loại thay đổi đổi nhãn", { status: doc.status, to: "extracting", allowed: ["mapping_review", "extracting", "fields_review"] })
+
+type RelabelWhen = "legacy" | "before_start" | "after_import"
+
+const relabelMoment = async (doc: IImportedDocument): Promise<RelabelWhen> => {
+  if (doc.status === "mapping_review") return "legacy"
+  if (doc.status === "extracting") {
+    if (await extractionNotStarted(doc)) return "before_start"
+    // Đã bắt đầu: chỉ đổi được khi lượt đọc đang dừng (không có job chạy)
+    if (doc.paused) return "after_import"
+    throw new Mode1Error("IMPORT_INVALID_STATE", "Đang đọc tài liệu, dừng lại rồi mới đổi nhãn", { status: doc.status, to: "extracting", allowed: ["extracting"] })
+  }
+  if (doc.status === "fields_review") return "after_import"
+  if (doc.status === "baselining") throw new Mode1Error("IMPORT_INVALID_STATE", "Đang tạo bản gốc, chờ xong rồi mới đổi nhãn", { status: doc.status, to: "extracting", allowed: [] })
+  throw RELABEL_AFTER_BASELINE(doc)
+}
+
 export const patchMapping = async (projectId: string, body: MappingPatchRequest): Promise<IImportedDocument> => {
   const doc = await requireImport(projectId, body.import_id)
-  assertImportStatus(doc, ["mapping_review"], "extracting")
+  const moment = await relabelMoment(doc)
   const profile = await TemplateProfile.findOne({ projectId })
   if (!profile) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa đọc xong bố cục tài liệu", { status: doc.status, to: "extracting", allowed: [] })
+  /** Mục đổi nhãn (id cũ và mới) ⇒ I-4 đọc lại ở thời điểm `after_import`. */
+  const relabeled = new Set<string>()
 
   for (const h of body.headings) {
     const entry = profile.heading_map.find((e) => e.block_id === h.block_id)
     if (!entry) throw new Mode1Error("IMPORT_INVALID_STATE", "Tiêu đề được chọn không có trong tài liệu", { status: doc.status, to: "extracting", allowed: [] })
-    if (!isKnownSectionId(h.section_id)) {
-      throw new Mode1Error("IMPORT_INVALID_STATE", "Mục được chọn không có trong mẫu FPT", { status: doc.status, to: "extracting", allowed: [] })
+    if (h.section_id !== undefined) {
+      if (!isKnownSectionId(h.section_id)) {
+        throw new Mode1Error("IMPORT_INVALID_STATE", "Mục được chọn không có trong mẫu chuẩn FlintFlow", { status: doc.status, to: "extracting", allowed: [] })
+      }
+      if (h.section_id !== entry.section_id) {
+        relabeled.add(entry.section_id)
+        relabeled.add(h.section_id)
+        // Người dùng tự chọn ⇒ không còn là mục "chưa chắc"
+        entry.auto_confirmed = undefined
+      }
+      entry.section_id = h.section_id
     }
-    entry.section_id = h.section_id
+    if (h.scope !== undefined) {
+      const next = h.scope === "auto" ? undefined : h.scope
+      if (entry.scope_label !== next) relabeled.add(entry.section_id)
+      entry.scope_label = next
+    }
     entry.confirmed = true
   }
   for (const t of body.tables) {
@@ -585,7 +632,20 @@ export const patchMapping = async (projectId: string, body: MappingPatchRequest)
   profile.markModified("table_map")
   await profile.save()
   await recomputeBlockSections(doc.projectId, profile)
-  if (!needsMappingReview(profile)) await transitionImport(doc, "extracting")
+  if (moment === "legacy") {
+    if (!needsMappingReview(profile)) await transitionImport(doc, "extracting")
+    return doc
+  }
+  // Màn đọc khung: so lại cấu trúc đích theo nhãn mới (chưa trích gì, không gọi AI, không tốn credit)
+  const blocks = await storedBlocks(doc.projectId)
+  const keys = validDropKeys(textRegions(blocks, profile.heading_map), profile.drop_text ?? [])
+  const structure_preview = await previewOf(doc, blocks, new Map(blocks.map((b) => [b.block_id, b.section_id ?? null])), profile.heading_map, keys)
+  await TemplateProfile.updateOne({ _id: profile._id }, { $set: { structure_preview } })
+  if (moment === "after_import" && relabeled.size) {
+    // I-4 đọc lại đúng các mục đổi nhãn: bỏ bản đọc cũ rồi về màn báo credit (`credit_estimate` chỉ tính mục chưa đọc)
+    await ExtractionDraft.deleteMany({ import_id: doc._id, section_id: { $in: [...relabeled] } })
+    if (doc.status !== "extracting") await transitionImport(doc, "extracting")
+  }
   return doc
 }
 

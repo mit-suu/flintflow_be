@@ -28,6 +28,8 @@ export interface HeadingMapEntry {
    * nguyên độ tin; finalize gắn cờ vàng "Cần xem" (`import_needs_review`). Người dùng xác nhận tay ⇒ không có.
    */
   auto_confirmed?: boolean
+  /** FLF-460: người dùng đổi nhãn Ngoài phạm vi của heading này (màn đọc khung); không có = để hệ thống tự phân loại. */
+  scope_label?: "out_of_scope" | "in_scope"
   /** FLF-363: phần của ngân hàng phần khớp theo tên (`part:ieee:references`) — nội bộ, không hiện cho người dùng. */
   template_section?: string | null
   /** FLF-363 (D2): mục theo tên khác mục theo nội dung — heading đã đổi theo nội dung; finalize bật cờ vàng. */
@@ -201,6 +203,7 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             detected_by: { type: String, enum: HEADING_DETECTORS, required: true },
             confirmed: { type: Boolean, default: false },
             auto_confirmed: { type: Boolean, default: undefined },
+            scope_label: { type: String, enum: ["out_of_scope", "in_scope"], default: undefined },
             template_section: { type: String, default: null },
             content_mismatch: { type: new Schema({ by_title: String, by_content: String }, { _id: false }), default: undefined },
             guidance: { type: String, default: undefined },

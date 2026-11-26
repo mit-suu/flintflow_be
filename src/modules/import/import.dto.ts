@@ -287,7 +287,14 @@ export const confirmLatestRequestSchema = z.strictObject({ import_id: id })
 export const mappingPatchRequestSchema = z
   .strictObject({
     import_id: id,
-    headings: z.array(z.strictObject({ block_id: blockId, section_id: z.string().min(1) })).default([]),
+    // FLF-460: `section_id` đổi mục khớp; `scope` đưa heading vào / ra Ngoài phạm vi ("auto" = bỏ nhãn tay, để hệ thống tự phân loại)
+    headings: z
+      .array(
+        z
+          .strictObject({ block_id: blockId, section_id: z.string().min(1).optional(), scope: z.enum(["out_of_scope", "in_scope", "auto"]).optional() })
+          .refine((h) => h.section_id !== undefined || h.scope !== undefined, { message: "Cần chọn mục hoặc nhãn Ngoài phạm vi." })
+      )
+      .default([]),
     tables: z
       .array(z.strictObject({ block_id: blockId, column_index: z.number().int().min(0), field_path: z.string().min(1).nullable() }))
       .default([]),
@@ -383,7 +390,20 @@ export const structurePreviewSchema = z.object({
     kind: z.enum(["written", "template"])
   }),
   // P09 (#15): `excerpt` — trích đoạn chữ khách viết dưới mục (≤ 200 ký tự); mục không có chữ / bản sơ bộ cũ ⇒ không có
-  sections: z.array(z.object({ section_id: z.string().min(1), title: z.string(), status: z.enum(["present", "missing", "out_of_scope"]), order: z.number().int().min(0), excerpt: z.string().max(200).optional() })),
+  // FLF-460: `block_id` (đổi nhãn), `uncertain` + `matched_title` (I-3 độ tin thấp), `scope_label` (nhãn Ngoài phạm vi người dùng đổi)
+  sections: z.array(
+    z.object({
+      section_id: z.string().min(1),
+      title: z.string(),
+      status: z.enum(["present", "missing", "out_of_scope"]),
+      order: z.number().int().min(0),
+      excerpt: z.string().max(200).optional(),
+      block_id: z.string().optional(),
+      uncertain: z.boolean().optional(),
+      matched_title: z.string().optional(),
+      scope_label: z.enum(["out_of_scope", "in_scope"]).optional()
+    })
+  ),
   resolved_mode: z.union([z.literal(1), z.literal(3), z.literal(4)]),
   intent: z.enum(["fixed", "free"]),
   computed_at: isoDateTime

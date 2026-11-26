@@ -21,7 +21,7 @@ import {
 } from "./step-plan.js"
 import { looksLikeExample } from "./template-context.js"
 import { sampleBlockIds, stripTemplateMarks } from "./template-markers.js"
-import { compareTargetStructure, isNonDraftHeading, type ResolvedMode, type TargetSectionStatus, type TargetStructure, type TemplateIntent } from "./target-structure.js"
+import { compareTargetStructure, isNonDraftHeading, type ResolvedMode, type TargetSection, type TargetSectionStatus, type TargetStructure, type TemplateIntent } from "./target-structure.js"
 
 export type FileKind = "written" | "template"
 
@@ -39,6 +39,22 @@ export interface PreviewSection {
    * FlintFlow đọc được gì ở mỗi mục. Mục không có chữ / còn trống ⇒ không có.
    */
   excerpt?: string
+  /** FLF-460: id heading của file (khoá để đổi nhãn qua `PATCH /import/mapping`). Mục không do heading của file (mục bắt buộc thêm) thì không có. */
+  block_id?: string
+  /** FLF-460: I-3 khớp độ tin thấp: dấu "chưa chắc" + cờ vàng Cần xem; `matched_title` = mục FlintFlow đang được gán. */
+  uncertain?: boolean
+  matched_title?: string
+  /** FLF-460: người dùng đã đổi nhãn Ngoài phạm vi (đưa vào / ra) cho heading này. */
+  scope_label?: ScopeLabel
+}
+
+export type ScopeLabel = "out_of_scope" | "in_scope"
+
+/** FLF-460: thông tin theo heading để gắn vào bản đồ mục (độ tin thấp ở I-3, nhãn Ngoài phạm vi do người dùng đổi). */
+export interface HeadingMark {
+  uncertain?: boolean
+  matched_title?: string
+  scope_label?: ScopeLabel
 }
 
 /** Độ dài tối đa của trích đoạn một mục (kể cả dấu "…"). */
@@ -116,7 +132,9 @@ export const toPreview = (
   layout: readonly LayoutEntry[],
   kind: FileKind,
   at: string,
-  excerpts: ReadonlyMap<string, string> = new Map()
+  excerpts: ReadonlyMap<string, string> = new Map(),
+  /** FLF-460: section_id của layout kèm heading của file + dấu của heading đó. */
+  marks: ReadonlyMap<string, HeadingMark & { block_id: string }> = new Map()
 ): StructurePreview => {
   const orderOf = new Map<string, number>()
   for (const l of layout) if (!orderOf.has(l.section_id)) orderOf.set(l.section_id, l.order)
@@ -126,7 +144,17 @@ export const toPreview = (
     .map(({ s, order }, i) => {
       // Mục "Còn trống" không có trích đoạn: chữ dưới nó (nếu có) là hướng dẫn / ví dụ của mẫu, không phải nội dung
       const excerpt = s.status === "missing" ? undefined : excerpts.get(s.section_id)
-      return { section_id: s.section_id, title: s.title, status: s.status, order: order === Number.MAX_SAFE_INTEGER ? layout.length + i : order, ...(excerpt ? { excerpt } : {}) }
+      const mark = marks.get(s.section_id)
+      return {
+        section_id: s.section_id,
+        title: s.title,
+        status: s.status,
+        order: order === Number.MAX_SAFE_INTEGER ? layout.length + i : order,
+        ...(excerpt ? { excerpt } : {}),
+        ...(mark ? { block_id: mark.block_id } : {}),
+        ...(mark?.uncertain ? { uncertain: true, ...(mark.matched_title ? { matched_title: mark.matched_title } : {}) } : {}),
+        ...(mark?.scope_label ? { scope_label: mark.scope_label } : {})
+      }
     })
   const count = (status: TargetSectionStatus) => sections.filter((s) => s.status === status).length
   return {
@@ -147,16 +175,47 @@ export const previewStructure = (
   headingSections: ReadonlyMap<string, string>,
   spine: Spine,
   intent: TemplateIntent,
-  at: string = new Date().toISOString()
+  at: string = new Date().toISOString(),
+  headingMarks: ReadonlyMap<string, HeadingMark> = new Map()
 ): StructurePreview => {
-  const { layout, sectionBlocks } = buildLayout(blocks, headingSections)
+  const { layout, sectionBlocks, entryOfHeading } = buildLayout(blocks, headingSections)
   // FLF-411: mục chỉ có chữ của mẫu (hướng dẫn nhiều đoạn, `<<Sample … >>`, chỗ điền) là "Còn trống" — như I-5
   const stripped = stripTemplateMarks(blocks)
   const { customSections, slices } = buildLayout(stripped, headingSections)
   const withContent = contentSections(stripped, customSections, slices)
   const kind = fileKindOf(layout, authoredSections(blocks, headingSections))
-  const structure = compareTargetStructure(layout, withContent, spine, intent, at)
-  return toPreview(structure, layout, kind, at, excerptsOf(blocks, sectionBlocks))
+  const structure = applyScopeLabels(compareTargetStructure(layout, withContent, spine, intent, at), headingMarks, entryOfHeading, withContent)
+  // FLF-460: mỗi mục của layout gắn với heading đầu tiên của nó (để đổi nhãn) và dấu của heading đó
+  const marks = new Map<string, HeadingMark & { block_id: string }>()
+  for (const [block_id, section_id] of entryOfHeading) if (!marks.has(section_id)) marks.set(section_id, { block_id, ...(headingMarks.get(block_id) ?? {}) })
+  return toPreview(structure, layout, kind, at, excerptsOf(blocks, sectionBlocks), marks)
+}
+
+/**
+ * FLF-460: nhãn Ngoài phạm vi do người dùng đổi thắng cách tự phân loại. `out_of_scope`: mục không soạn, không kiểm; `in_scope`:
+ * mục tự xếp ngoài phạm vi (vd heading "Chi phí") quay về có / còn trống theo nội dung. Tính lại danh sách thiếu và chế độ.
+ */
+export const applyScopeLabels = (
+  structure: TargetStructure,
+  headingMarks: ReadonlyMap<string, HeadingMark>,
+  entryOfHeading: ReadonlyMap<string, string>,
+  withContent: ReadonlySet<string>
+): TargetStructure => {
+  const labelOf = new Map<string, ScopeLabel>()
+  for (const [block_id, section_id] of entryOfHeading) {
+    const label = headingMarks.get(block_id)?.scope_label
+    if (label && !labelOf.has(section_id)) labelOf.set(section_id, label)
+  }
+  if (!labelOf.size) return structure
+  const sections = structure.sections.map((s): TargetSection => {
+    const label = labelOf.get(s.section_id)
+    if (label === "out_of_scope" && s.status !== "out_of_scope") return { ...s, status: "out_of_scope", owner_steps: [] }
+    if (label === "in_scope" && s.status === "out_of_scope") return { ...s, status: withContent.has(s.section_id) ? "present" : "missing" }
+    return s
+  })
+  const missing = sections.filter((s) => s.status === "missing").map((s) => s.section_id)
+  const resolved_mode: ResolvedMode = missing.length === 0 ? 1 : structure.intent === "fixed" ? 3 : 4
+  return { ...structure, sections, missing, resolved_mode }
 }
 
 /**
