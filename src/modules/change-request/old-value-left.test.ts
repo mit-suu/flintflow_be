@@ -16,14 +16,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DATA = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../fixtures/cr-old-value-fn005-fn006.json"), "utf8")) as Record<string, Record<string, unknown>>
 
 /** Phần tử trước CR: chỗ model đã đổi (Luồng ngoại lệ, Tương tác) còn 4 giờ. */
-const beforeOf = (id: "FN005" | "FN006") => JSON.parse(JSON.stringify(DATA[id]).replaceAll("6 hours", "4 hours")) as Record<string, unknown>
+const beforeOf = (id: "FN005" | "FN006") => JSON.parse(JSON.stringify(DATA[id]).replace(/6 hours/g, "4 hours")) as Record<string, unknown>
 const modelProposed = (id: "FN005" | "FN006") => structuredClone(DATA[id])
 
 /** Đề xuất đúng: đổi mọi chỗ 4 giờ thành 6 giờ trong phần tử (trừ nguồn gốc). */
 const fullyChanged = (id: "FN005" | "FN006") => {
   const el = structuredClone(DATA[id])
   const source = el.source_ref
-  const swapped = JSON.parse(JSON.stringify({ ...el, source_ref: null }).replaceAll("4 hours", "6 hours")) as Record<string, unknown>
+  const swapped = JSON.parse(JSON.stringify({ ...el, source_ref: null }).replace(/4 hours/g, "6 hours")) as Record<string, unknown>
   swapped.source_ref = source
   return swapped
 }
