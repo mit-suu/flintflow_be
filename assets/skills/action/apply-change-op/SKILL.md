@@ -1,7 +1,7 @@
 ---
 skill_id: apply-change-op
 kind: action
-version: 1.12.0
+version: 1.13.0
 description: Chat change request → ops (or a clarification); impact query → 3 branches → stale; one-pass reconcile
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -44,7 +44,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 0. **Read the request in context.** If your last chat turn asked a question, the request is the answer: combine it with
    the original request above it ("A03" after "Admin A01 or A03?" → rename A03). Resolve "it", "that one" from the chat. Change
    only what the request asks now - never re-apply edits from earlier turns.
-1. **Locate** the target by key. Resolve names through the projection and glossary: "rename Admin to Administrator" → `actors[id=A03].name`.
+1. **Locate** the target by key. Resolve names through the projection and glossary: "rename Admin to Administrator" → `actors[id=A03].name`. The projection's `element_index` lists every actor / role / use case / function / screen / feature as `{id, name, name_vi?}`: match the user's words against `name` or `name_vi`. **Never ask the user for an internal id or code** - resolve names from the index; ask only when two elements carry the same name. A rename carries `old_name_mentions`: those elements still contain the old name - decide each place (replace only where it means the renamed thing) and emit one op per place; the server does not replace text by itself.
 2. **Ambiguous?** Several possible targets, or the intent could mean different fields → `clarification_needed` with **one** short message in the reply language (the `## Reply language` section at the end of this prompt, Vietnamese when it is absent). Several facts missing ⇒ ask them all in that one message, never one per turn.
 2a. **Already asked (count above ≥ 1)?** Never ask again about anything the user answered - a short answer ("chỉ thao tác xóa", "cả hai") is a full answer. Fill what is left from the projection yourself and return ops; ask again only for a fact the projection cannot give.
 2b. **The question is read by the user, not by code.** Name every screen, actor, role, feature, function and entity by its
