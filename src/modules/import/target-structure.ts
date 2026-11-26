@@ -5,7 +5,8 @@
  * `missing` / `out_of_scope`, rồi suy ra chế độ thật của dự án (§1 bảng "Lựa chọn khi tạo / Cấu trúc đích"):
  * - ý định `free` (tick "Bổ sung các mục còn thiếu theo mẫu chuẩn FlintFlow"): đích = khung của file **cộng** các mục của mẫu chuẩn
  *   FlintFlow ở mức tối thiểu (`REQUIRED_FIXED_SECTION_IDS`) mà file chưa có; đủ ⇒ chế độ 1, thiếu ⇒ **chế độ 4**. Heading riêng
- *   của file (`custom:*`) là mục của đích như mọi heading khác (có / thiếu), không tự thành `out_of_scope` (FLF-463).
+ *   của file (`custom:*`) là mục của đích như mọi heading khác (có / thiếu), không tự thành `out_of_scope` chỉ vì không có trong mẫu
+ *   chuẩn (FLF-463). FLF-455: `out_of_scope` theo loại nội dung 29148 (`out-of-scope.ts`), áp cho mọi chế độ.
  * - ý định `fixed` (mặc định, không tick): đích = chính các heading của file; heading có mà trống ⇒ `missing`
  *   ⇒ **chế độ 3** (chỉ soạn mục mẫu có, không thêm, không đổi thứ tự); mục FPT mẫu không có chỉ là cờ vàng (lát sau).
  * - FLF-463 (đảo FLF-378 luồng C): mục đã viết luôn là `present`, kể cả khi màn đọc khung gắn nhãn "Khung mẫu" (ngưỡng 20% chỉ để
@@ -24,6 +25,7 @@ import { displayHeading } from "./heading-label.js"
 import { templateSectionOwnerSteps } from "./template-step-headings.js"
 import { isPlaceholderText } from "./template-markers.js"
 import { splitHeadingNumber } from "./text-similarity.js"
+import { isOutOfScopeHeading } from "./out-of-scope.js"
 
 export type TargetSectionStatus = "present" | "missing" | "out_of_scope"
 export type TemplateIntent = "fixed" | "free"
@@ -73,6 +75,11 @@ export interface CompareOptions {
    * có dữ liệu của mục đó lấy từ chỗ khác trong file.
    */
   emptied?: ReadonlySet<string>
+  /**
+   * FLF-455: mục riêng (`custom:*`) mà I-4 xếp ngoài SRS theo 29148 (`outOfScopeSectionIds`). Mục riêng còn trống mà heading thuộc
+   * loại ngoài SRS (dự toán chi phí) cũng là Ngoài phạm vi - xét trong hàm này, không cần AI.
+   */
+  outOfScope?: ReadonlySet<string>
 }
 
 const hasContent = (spine: Spine, sectionId: string, withContent: ReadonlySet<string>): boolean => {
@@ -110,7 +117,8 @@ const fileSections = (
   layout: readonly LayoutEntry[],
   withContent: ReadonlySet<string>,
   spine: Spine,
-  emptied: ReadonlySet<string>
+  emptied: ReadonlySet<string>,
+  outOfScope: ReadonlySet<string>
 ): TargetSection[] => {
   const sections: TargetSection[] = []
   const has = (id: string) => !emptied.has(id) && hasContent(spine, id, withContent)
@@ -126,6 +134,11 @@ const fileSections = (
     const own = has(entry.section_id)
     // Heading bao chỉ chứa mục con (vd "2 Overall Description") không phải mục cần soạn
     if (wrappers.has(entry.section_id) && !own) continue
+    // FLF-455 (BF nguyên tắc 4): Ngoài phạm vi theo loại nội dung 29148, mọi chế độ - giữ nguyên, không soạn, không kiểm
+    if (entry.section_id.startsWith("custom:") && (outOfScope.has(entry.section_id) || (!has(entry.section_id) && isOutOfScopeHeading(entry.heading_text)))) {
+      sections.push({ section_id: entry.section_id, title: titleOf(entry.section_id, layout), status: "out_of_scope", owner_steps: [] })
+      continue
+    }
     // FLF-379: heading chỉ có mục con (tính năng "3.2 Course Registration" ⇒ chức năng 3.2.1…) — mục con có nội dung thì
     // mục cha đã có nội dung, không "Sẽ soạn"
     const present = own || childHasContent(ordered, i, spine, withContent)
@@ -145,7 +158,7 @@ export const compareTargetStructure = (
   opts: CompareOptions = {}
 ): TargetStructure => {
   const emptied = opts.emptied ?? new Set<string>()
-  const sections = fileSections(layout, withContent, spine, emptied)
+  const sections = fileSections(layout, withContent, spine, emptied, opts.outOfScope ?? new Set())
   if (intent === "free") {
     // Mẫu chuẩn FlintFlow là mức tối thiểu: mục bắt buộc file chưa có ⇒ thêm vào đích (có dữ liệu trong Spine từ chỗ khác ⇒ có)
     for (const id of REQUIRED_FIXED_SECTION_IDS) {

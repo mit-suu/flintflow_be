@@ -67,6 +67,7 @@ import { enterFlow2, entersFlow2 } from "./flow2.service.js"
 import { TemplateProfile, type HeadingMapEntry, type LayoutEntry, type TableMapEntry } from "./template-profile.model.js"
 import { buildTemplateContext } from "./template-context.js"
 import { compareTargetStructure, type TargetStructure, type TemplateIntent } from "./target-structure.js"
+import { outOfScopeSectionIds } from "./out-of-scope.js"
 import { titleOfSection } from "./gap-report.service.js"
 import { scheduleEmbeddingSync } from "../change-request/embedding/embedding-sync.service.js"
 import { stripTemplateMarks } from "./template-markers.js"
@@ -297,7 +298,9 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     ...repeatSectionsWithContent(slices, authoredBlocks),
     ...sliceItems.filter((sl) => sl.items.length).map((sl) => `custom:${sl.custom_id}`)
   ])
-  const structure = compareTargetStructure(layout, withContent, stripRecord(seeded), intent, undefined, { emptied })
+  // FLF-455: mục riêng mà I-4 xếp ngoài SRS theo 29148 ⇒ Ngoài phạm vi (mọi chế độ), giữ nguyên - không soạn, không kiểm
+  const outOfScope = outOfScopeSectionIds(drafts, (id) => layoutSectionOf(id, entryOfHeading))
+  const structure = compareTargetStructure(layout, withContent, stripRecord(seeded), intent, undefined, { emptied, outOfScope })
   // Kế hoạch đọc Spine đã nạp dữ liệu: mục trích không ra gì thì vẫn là "thiếu", đừng đánh dấu step đã xong
   const plan = buildStepPlan(layout, sectionsWithContent(authoredBlocks), stripRecord(seeded))
   // FLF-252: quyền của ma trận không khớp màn / vai trò nào ⇒ cờ vàng (trước đây bỏ im lặng), neo vào bảng phân quyền
