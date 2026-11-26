@@ -32,6 +32,8 @@ import * as spineRepository from "../../../src/modules/spine/spine.repository.js
 import { projectStep } from "../../../src/modules/pipeline/context-projection.js"
 import { hasIdea } from "../../../src/modules/pipeline/step-runner.service.js"
 import { askableFields } from "../../../src/modules/pipeline/decisions.service.js"
+import { parseDocument } from "../../../src/modules/import/parse.service.js"
+import { layoutPreviewResponseSchema } from "../../../src/modules/import/import.dto.js"
 import { buildTemplateStepContext } from "../../../src/modules/pipeline/template-guidance.js"
 import { docFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
 import { DocxPackage } from "../../../src/modules/docx-ooxml/index.js"
@@ -425,3 +427,67 @@ describe("Luồng 2 cho phần thiếu - chế độ 3", () => {
   })
 })
 
+
+describe("FLF-461 bước 2.9a - chế độ 4 xem trước bố cục, xác nhận rồi mới áp", () => {
+  const exportDraft = async (projectId: string, token: string) => {
+    const res = await request(app)
+      .get(`/api/v1/projects/${projectId}/export/word?source=draft`)
+      .set({ Authorization: `Bearer ${token}` })
+      .buffer(true)
+      .parse((r, callback) => {
+        const chunks: Buffer[] = []
+        r.on("data", (chunk: Buffer) => chunks.push(chunk))
+        r.on("end", () => callback(null, Buffer.concat(chunks)))
+      })
+    expect(res.status, String(res.body)).toBe(200)
+    return (await parseDocument(res.body as Buffer)).blocks.filter((b) => b.kind === "heading").map((b) => b.text)
+  }
+
+  it("chưa xác nhận ⇒ bản in giữ bố cục file (mục Ngoài phạm vi chưa xuống cuối); xác nhận xong mới áp, mục Ngoài phạm vi xuống cuối", async () => {
+    const { projectId, token } = await toFinalized("free")
+    const base = `/api/v1/projects/${projectId}/import/layout-preview`
+    const auth = { Authorization: `Bearer ${token}` }
+
+    // Mục đầu của file được coi là Ngoài phạm vi: giữ nguyên nội dung, chỉ đổi vị trí
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    const first = [...profile.layout].sort((a, b) => a.order - b.order).find((l) => l.level === 1 && !l.section_id.startsWith("group:") && l.heading_text.trim())!
+    await TemplateProfile.updateOne(
+      { projectId, "target_structure.sections.section_id": first.section_id },
+      { $set: { "target_structure.sections.$.status": "out_of_scope", "target_structure.sections.$.owner_steps": [] } }
+    )
+
+    const before = await exportDraft(projectId, token)
+    const at = (headings: string[]) => headings.findIndex((h) => h.includes(first.heading_text.trim()))
+    expect(at(before)).toBeGreaterThanOrEqual(0)
+    expect(at(before)).toBeLessThan(before.length - 1)
+
+    // Xem trước: có bố cục mới nhưng chưa xác nhận
+    const preview = layoutPreviewResponseSchema.parse((await request(app).get(base).set(auth)).body.data)
+    expect(preview).toMatchObject({ applicable: true, confirmed_at: null })
+    expect(preview.sections.filter((s) => s.origin === "out_of_scope").map((s) => s.section_id)).toContain(first.section_id)
+    expect(preview.sections.at(-1)?.origin).toBe("out_of_scope")
+    // Xem trước không áp: bản in vẫn như trước
+    expect(await exportDraft(projectId, token)).toEqual(before)
+    expect((await TemplateProfile.findOne({ projectId }).lean())!.layout_confirmed_at ?? null).toBeNull()
+
+    // Người xác nhận ⇒ từ giờ áp bố cục mới
+    const confirmed = layoutPreviewResponseSchema.parse((await request(app).post(`${base}/confirm`).set(auth)).body.data)
+    expect(confirmed.confirmed_at).not.toBeNull()
+    const after = await exportDraft(projectId, token)
+    expect(at(after)).toBeGreaterThan(at(before))
+    expect(after.slice(at(after)).filter((h) => !h.includes(first.heading_text.trim())).length).toBeLessThan(after.length - at(after))
+    // Gọi lại xác nhận không đổi mốc
+    const again = layoutPreviewResponseSchema.parse((await request(app).post(`${base}/confirm`).set(auth)).body.data)
+    expect(again.confirmed_at).toBe(confirmed.confirmed_at)
+  })
+
+  it("chế độ 3 không có bước xem trước bố cục (giữ đúng thứ tự mẫu): applicable false, xác nhận bị chặn", async () => {
+    const { projectId, token } = await toFinalized("fixed")
+    const base = `/api/v1/projects/${projectId}/import/layout-preview`
+    const auth = { Authorization: `Bearer ${token}` }
+    expect((await request(app).get(base).set(auth)).body.data).toMatchObject({ applicable: false, sections: [] })
+    const res = await request(app).post(`${base}/confirm`).set(auth)
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe("IMPORT_INVALID_STATE")
+  })
+})

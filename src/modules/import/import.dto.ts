@@ -352,6 +352,21 @@ export const continueFlow2RequestSchema = z.strictObject({
   base_version: baseVersion
 })
 
+/** FLF-461 bước 2.9a — `GET /import/layout-preview` và `POST /import/layout-preview/confirm` (chế độ 4). */
+export const layoutPreviewResponseSchema = z.object({
+  applicable: z.boolean(),
+  confirmed_at: isoDateTime.nullable(),
+  sections: z.array(
+    z.object({
+      section_id: z.string().min(1),
+      title: z.string(),
+      level: z.number().int().min(1),
+      origin: z.enum(["file", "added", "out_of_scope"])
+    })
+  )
+})
+export type LayoutPreviewDto = z.infer<typeof layoutPreviewResponseSchema>
+
 /** FLF-336 I-5 — kết quả so cấu trúc đích (`TemplateProfile.target_structure`). */
 export const targetSectionSchema = z.object({
   section_id: z.string().min(1),

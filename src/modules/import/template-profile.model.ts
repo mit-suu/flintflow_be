@@ -158,6 +158,11 @@ export interface ITemplateProfile extends Document {
   flow2_entry_spine?: Spine | null
   flow2_entry_at?: Date | null
   /**
+   * FLF-461 (business-flow bước 2.9a): lúc người dùng xác nhận bố cục mới của chế độ 4 (mục FlintFlow soạn thêm chèn đúng vị trí,
+   * mục Ngoài phạm vi xuống cuối). Chưa xác nhận ⇒ bản in giữ nguyên bố cục file của khách, chưa sắp lại.
+   */
+  layout_confirmed_at?: Date | null
+  /**
    * FLF-453 (business-flow §3.1.2 "Rà soát phần có sẵn"): id mục Code chọn cho AI rà trước khi sang Luồng 2 — mục là đầu vào
    * của phần thiếu, hay mục đang mang cờ đỏ (`review.service.ts` `sectionsNeedingAiReview`). Rỗng / vắng ⇒ không mục nào cần
    * rà (import bỏ qua trạng thái `reviewing`, sang thẳng Luồng 2 như trước FLF-453).
@@ -259,6 +264,7 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
     dropped_text: { type: [String], default: null },
     flow2_entry_spine: { type: Schema.Types.Mixed, default: null },
     flow2_entry_at: { type: Date, default: null },
+    layout_confirmed_at: { type: Date, default: null },
     review_sections: { type: [String], default: null },
     migrated_base_at: { type: Date, default: null },
     migrated_base_spine: { type: Schema.Types.Mixed, default: null },

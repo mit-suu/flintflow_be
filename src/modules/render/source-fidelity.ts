@@ -76,6 +76,8 @@ interface ProfileFacts {
   structure_preview?: StructurePreview | null
   /** Chế độ 3 / 4 từ SRS đã viết đã vào Luồng 2 (có Spine mốc). */
   flow2_entry_at?: Date | string | null
+  /** FLF-461 (bước 2.9a): người dùng đã xác nhận bố cục mới của chế độ 4. */
+  layout_confirmed_at?: Date | string | null
   /** Đã đổi mẫu: `source_file_ref` là file nền mới do FlintFlow dựng. */
   migrated_base_at?: Date | string | null
 }
@@ -97,10 +99,11 @@ export const sourceBasedFrom = (project: ProjectFacts | null, profile: ProfileFa
 
 /**
  * Hàm thuần (FLF-416): dự án chế độ 4 đã vào Luồng 2 (tick bổ sung theo mẫu chuẩn, có Spine mốc) ⇒ sắp lại bố cục; khác ⇒ `null`
- * (chế độ 3 giữ đúng thứ tự mẫu, chế độ 1 giữ đúng file).
+ * (chế độ 3 giữ đúng thứ tự mẫu, chế độ 1 giữ đúng file). FLF-461 (bước 2.9a): chỉ áp **sau khi người dùng xác nhận** bố cục
+ * xem trước (`layout_confirmed_at`); chưa xác nhận ⇒ bản in giữ bố cục file.
  */
 export const rearrangeOf = (project: ProjectFacts | null, profile: ProfileFacts | null): LayoutRearrange | null => {
-  if (project?.template_intent !== "free" || !profile?.flow2_entry_at) return null
+  if (project?.template_intent !== "free" || !profile?.flow2_entry_at || !profile.layout_confirmed_at) return null
   const moveToEnd = (profile.target_structure?.sections ?? []).filter((s) => s.status === "out_of_scope").map((s) => s.section_id)
   return { moveToEnd }
 }
@@ -108,7 +111,7 @@ export const rearrangeOf = (project: ProjectFacts | null, profile: ProfileFacts 
 const loadFacts = async (projectId: string): Promise<[ProjectFacts | null, ProfileFacts | null]> => {
   const [project, profile] = await Promise.all([
     Project.findById(projectId, { start_kind: 1, converted_from: 1, template_intent: 1, mode: 1 }).lean(),
-    TemplateProfile.findOne({ projectId }, { source_file_ref: 1, target_structure: 1, structure_preview: 1, flow2_entry_at: 1, migrated_base_at: 1 }).lean()
+    TemplateProfile.findOne({ projectId }, { source_file_ref: 1, target_structure: 1, structure_preview: 1, flow2_entry_at: 1, layout_confirmed_at: 1, migrated_base_at: 1 }).lean()
   ])
   return [project as ProjectFacts | null, profile as ProfileFacts | null]
 }
