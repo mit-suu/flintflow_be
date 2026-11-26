@@ -147,7 +147,7 @@ export const similarQuestion = (a: string | null | undefined, b: string | null |
 const comparableAnswer = (text: string): string => text.replace(RECOMMENDED_SUFFIX, "").replace(/\s+/g, " ").trim().toLowerCase()
 
 /** Số từ khoá chung và tỉ lệ trùng (Jaccard) của hai câu hỏi. */
-const questionOverlap = (a: string, b: string): { shared: number; ratio: number } => {
+export const questionOverlap = (a: string, b: string): { shared: number; ratio: number } => {
   const wa = questionWords(a)
   const wb = questionWords(b)
   let shared = 0

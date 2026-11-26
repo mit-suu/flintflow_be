@@ -22,7 +22,7 @@ import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { documentLanguageInput, type TurnDocumentLanguage } from "../translation/turn-language.js"
 import type { StepContext } from "./context-projection.js"
 import { withFrameRenumber } from "../spine/template-frames.js"
-import { actorGeneralizationErrors, briefExtractionErrors, dropRedundantScalarAdds, requiredArrayErrors, sanitizeModelOps, useCaseNamingErrors, useCaseWiringErrors, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
+import { actorGeneralizationErrors, addendumDuplicateErrors, briefExtractionErrors, dropRedundantScalarAdds, requiredArrayErrors, sanitizeModelOps, useCaseNamingErrors, useCaseWiringErrors, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
 import { ESCALATION_MODEL, isErdOnly, normalizeEntityNames } from "./erd-retry.js"
 import { briefQuoteSources, dropUngroundedGaps } from "./gap-quote.js"
 import { localizedMissingErrors } from "./localized-missing.js"
@@ -301,6 +301,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       if (errors.length === 0) errors = briefExtractionErrors(spine, ops as Op[], stepId, callKind)
       // FLF-243: tên use case sai luật cờ vàng ⇒ gửi lại model kèm lỗi; lượt cuối thì nhận lô (cờ vàng là lưới cuối)
       if (errors.length === 0 && attempt <= maxRetries) errors = useCaseNamingErrors(spine, ops as Op[])
+      // FLF-449 D1: ghi chú Brief trùng ý ghi chú đã có ⇒ gửi lại model; lượt cuối nhận lô
+      if (errors.length === 0 && attempt <= maxRetries) errors = addendumDuplicateErrors(spine, ops as Op[], stepId)
       // FLF-370: use case tài khoản gắn thẳng ≥ 2 actor người ⇒ gửi lại model thêm actor tổng quát; lượt cuối nhận lô (cờ vàng là lưới cuối)
       if (errors.length === 0 && attempt <= maxRetries && callKind === "draft") errors = actorGeneralizationErrors(spine, ops as Op[], stepId)
       // FLF-248: danh sách bắt buộc của step vẫn trống sau lô ⇒ gửi lại model; lượt cuối nhận lô (cờ array_empty là lưới cuối)

@@ -29,7 +29,8 @@ import { restatesAssumption } from "./text-overlap.js"
 import { normalizeFormFactorAt } from "../spine/form-factor.js"
 import { USE_CASE_NAME_FIX, emptyProtectedArraysOf, orphanEntities, sharedAccessGroups, sharedAccessMessage, useCaseNameIssues, type SharedAccessGroup } from "../spine/deterministic-check.js"
 import { stampAddendum } from "../spine/addendum-stamp.js"
-import { RECOMMENDED_SUFFIX } from "./decisions.service.js"
+import { RECOMMENDED_SUFFIX, questionOverlap } from "./decisions.service.js"
+import { negated } from "./text-overlap.js"
 import {
   BRIEF_EXTRACTION_STEP,
   BRIEF_PROJECT_WRITE_MESSAGE,
@@ -37,6 +38,7 @@ import {
   hasBriefCore,
   isBriefCoreTopic,
   isBriefPhase,
+  normalizeBriefTopic,
   writesProjectVisionOrGoals
 } from "../spine/brief-core.js"
 
@@ -515,6 +517,15 @@ export const sanitizeModelOps = (
       return op
     }
 
+    // FLF-449 D1: ở Brief, topic đồng nghĩa của mục tiêu ("target", "objective"…) ⇒ "goals" để S-1.1 đưa vào Mục tiêu
+    if (isBriefPhase(base) && op.op === "add" && op.path === "addendum[]" && isRecord(op.value) && typeof op.value.topic === "string") {
+      const topic = normalizeBriefTopic(op.value.topic)
+      if (topic !== op.value.topic) return { ...op, value: { ...op.value, topic } }
+    }
+    if (isBriefPhase(base) && op.op === "set" && /^addendum\[[^\]]+\]\.topic$/.test(op.path) && typeof op.value === "string") {
+      const topic = normalizeBriefTopic(op.value)
+      if (topic !== op.value) return { ...op, value: topic }
+    }
     if (op.op === "add" && op.path === "screens[]" && isRecord(op.value)) {
       return { ...op, value: { ...op.value, detail_status: "pending" } }
     }
@@ -1318,6 +1329,43 @@ export const useCaseWiringErrors = (spine: Spine, ops: readonly Op[], stepId: st
   } catch {
     return []
   }
+}
+
+/** Ngưỡng trùng từ (Jaccard) để coi hai ghi chú Brief là một ý. */
+export const ADDENDUM_DUPLICATE_RATIO = 0.8
+
+/**
+ * FLF-449 D1 (lỗi #2): ở pha Brief, `add addendum[]` mà `content_en` trùng ≥ 0,8 với ghi chú đã có (hoặc với ghi chú thêm
+ * sớm hơn trong cùng lô) ⇒ báo lỗi kèm mã ghi chú cũ; model muốn bổ sung thì `set` ghi chú cũ. Lỗi **mềm** như
+ * `useCaseNamingErrors`: `draftOps` chỉ dùng ở các lượt còn retry, hết lượt thì nhận lô — không hỏng bước vì một chuyện trùng chữ.
+ * Ghi chú bị xoá trong cùng lô không tính; hai câu khác chiều khẳng định/phủ định không trùng.
+ */
+export const addendumDuplicateErrors = (spine: Spine, ops: readonly Op[], stepId: string): ValidationError[] => {
+  if (!isBriefPhase(stepId)) return []
+  const removed = new Set<string>()
+  for (const op of ops) {
+    const m = op.op === "remove" ? /^addendum\[id=([^\],]+)\]$/.exec(op.path) : null
+    if (m) removed.add(m[1])
+  }
+  const seen: { id: string; text: string }[] = spine.addendum.filter((a) => !removed.has(a.id)).map((a) => ({ id: a.id, text: a.content_en || a.content }))
+  const errors: ValidationError[] = []
+  ops.forEach((op, index) => {
+    if (op.op !== "add" || op.path !== "addendum[]" || !isRecord(op.value)) return
+    const text = typeof op.value.content_en === "string" && op.value.content_en.trim() !== "" ? op.value.content_en : typeof op.value.content === "string" ? op.value.content : ""
+    if (text.trim() === "") return
+    const same = seen.find((s) => negated(s.text) === negated(text) && questionOverlap(s.text, text).ratio >= ADDENDUM_DUPLICATE_RATIO)
+    if (same) {
+      errors.push({
+        rule: "addendum_duplicate",
+        op_index: index,
+        path: "addendum[]",
+        message: `Ghi chú này trùng ý với ghi chú ${same.id} đã có - không thêm lại. Cần bổ sung thì \`set addendum[id=${same.id}].content\` và \`.content_en\`; không có gì mới thì bỏ op này.`
+      })
+      return
+    }
+    seen.push({ id: `op#${index}`, text })
+  })
+  return errors
 }
 
 export const validateOps = (spine: Spine, ops: unknown, options: ValidateOptions = {}): ValidationError[] => {
