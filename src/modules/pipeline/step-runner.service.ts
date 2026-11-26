@@ -1189,6 +1189,8 @@ export interface DraftPhaseResult {
   summary?: ChangeSummary[]
   /** `notes` model viết cho cổng (FLF-232: tin nhắn cổng 2–4 câu). Lô rỗng vẫn có — lý do step không đổi gì nằm ở đây. */
   notes?: string
+  /** FLF-482 (C2): phần lời sửa nằm ngoài các trường bước này được ghi (chỉ lượt `revision`). */
+  outOfScope?: string
 }
 
 /**
@@ -1279,7 +1281,10 @@ export const runDraftPhase = async (
 
   for (const attempt of draftResult.attempts) emit({ type: "draft", step_id: stepId, attempt: attempt.attempt })
 
-  const notes = draftResult.notes?.trim() ? { notes: draftResult.notes.trim() } : {}
+  const notes = {
+    ...(draftResult.notes?.trim() ? { notes: draftResult.notes.trim() } : {}),
+    ...(draftResult.outOfScope ? { outOfScope: draftResult.outOfScope } : {})
+  }
   if (!draftResult.txn) return { spineVersion: spine.spine_version, applied: false, ...notes }
 
   try {

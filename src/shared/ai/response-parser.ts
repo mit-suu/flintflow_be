@@ -204,7 +204,12 @@ export const opTransactionSchema = z.object({
   notes: z.string().optional(),
   localized: localizedField,
   sources: sourcesField,
-  answered_questions: answeredQuestionsField
+  answered_questions: answeredQuestionsField,
+  /** FLF-482 (C2): phần lời sửa mà bước này không ghi được (nằm ở mục khác). Chỉ chuỗi không rỗng mới có nghĩa. */
+  out_of_scope: z
+    .unknown()
+    .transform((v): string | undefined => (typeof v === "string" && v.trim() !== "" ? v.trim() : undefined))
+    .optional()
 })
 
 /**

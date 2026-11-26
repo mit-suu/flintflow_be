@@ -528,7 +528,9 @@ export const gateResponseSchema = z.object({
   /** FLF-232: sau `revision`, lời AI xác nhận bằng chữ điều vừa sửa (từ `notes` của lượt soạn lại). Thiếu với accept/regenerate. */
   message_vi: z.string().optional(),
   /** FLF-489: bước vừa duyệt đã từng được chốt trước lượt này (chạy lại bước đã qua, hoặc bước bị hoà giải mở lại). Client không tự chạy tiếp quy trình, trừ khi chính nó đang chạy liền cả giai đoạn. */
-  rerun: z.boolean().optional()
+  rerun: z.boolean().optional(),
+  /** FLF-482 (C2): lời sửa (một phần) nằm ngoài mục bước này ghi được ⇒ client mở Sửa tài liệu với đúng câu này (bản xem trước + Áp dụng). Chỉ có sau `revision`. */
+  route_to_change: z.object({ instruction: z.string() }).optional()
 })
 
 // ─── progress / flags ────────────────────────────────────────────

@@ -79,6 +79,8 @@ export interface DraftResult {
   localized?: LocalizedEntry[]
   /** FLF-292: nguồn tài liệu model khai cho phần tử nó viết. Người gọi lưu SAU khi áp `txn` (`captureSources`). */
   sources?: SourceEntry[]
+  /** FLF-482 (C2): lượt `revision` báo một phần lời sửa nằm ngoài các trường bước này được ghi — cổng chuyển sang Sửa tài liệu. */
+  outOfScope?: string
 }
 
 export interface DraftOptions {
@@ -256,6 +258,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
     let localized: LocalizedEntry[] | undefined
     let sources: SourceEntry[] | undefined
     let answered: AnsweredQuestion[] | undefined
+    let outOfScope: string | undefined
     try {
       const minMaxTokens = contentMaxTokens(ctx)
       // FLF-433: lượt thử cuối mà lô vẫn chỉ vướng luật ERD ⇒ model mạnh hơn, chỉ đúng lượt này
@@ -274,6 +277,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       localized = result.data.localized?.length ? result.data.localized : undefined
       sources = result.data.sources?.length ? result.data.sources : undefined
       answered = result.data.answered_questions?.length ? result.data.answered_questions : undefined
+      outOfScope = callKind === "revision" ? result.data.out_of_scope : undefined
       // BUG-03/BUG-29: field chỉ user/code quyết được chuẩn hoá trước khi kiểm; lô ghi là lô ĐÃ chuẩn hoá
       const sanitized = sanitizeModelOps(spine, result.data.ops, stepId, new Date(), { revision: callKind === "revision", userDecided: options.userDecided === true, ...(statusIds ? { statusAssumptionIds: statusIds } : {}) })
       // Gắn lại liên kết đã có (S-4.1 không thấy function_ids) là vô hại — bỏ trước khi kiểm, không để chết cả lô.
@@ -310,7 +314,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
         attempts.push({ attempt, ops, errors })
         // FLF-472: câu trả lời câu hỏi mở vào sổ quyết định cùng lô (op do server sinh, không qua `writable`)
         const answerOps = answeredQuestionOps(spine, stepId, answered)
-        if (ops.length === 0 && answerOps.length === 0) return { txn: null, attempts, usage, notes, contextTokens: ctx.contextTokens }
+        if (ops.length === 0 && answerOps.length === 0) return { txn: null, attempts, usage, notes, contextTokens: ctx.contextTokens, ...(outOfScope ? { outOfScope } : {}) }
         const txn: Transaction = {
           // Id lô luôn do server sinh — không tin `txn` model trả (có thể trùng lô khác)
           txn: randomUUID(),
@@ -319,7 +323,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
           by: options.userId,
           step_id: stepId
         }
-        return { txn, attempts, usage, notes, contextTokens: ctx.contextTokens, ...(localized ? { localized } : {}), ...(sources ? { sources } : {}) }
+        return { txn, attempts, usage, notes, contextTokens: ctx.contextTokens, ...(localized ? { localized } : {}), ...(sources ? { sources } : {}), ...(outOfScope ? { outOfScope } : {}) }
       }
     } catch (err) {
       if (!(err instanceof AiActionError) || !SCHEMA_ERROR_CODES.has(err.code)) throw err

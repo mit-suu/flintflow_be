@@ -1,7 +1,7 @@
 ---
 skill_id: draft-to-ops
 kind: action
-version: 1.5.1
+version: 1.6.0
 description: Turn the user's answers into ONE Spine op transaction - validated by schema, invariants checked at end of batch
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -73,7 +73,7 @@ You convert the conversation for one step into **a single transaction of operati
     A batch that restates an assumption but does not write its `path` is rejected. That `path` may lie outside `writable_paths` - allowed for any
     open assumption of the step the gate belongs to. `status` is narrower: only the assumptions the gate message itself stated may change `status`, and
     only the one the user just settled in this request. An assumption the gate never stated is one the user has not read, so their revision says nothing
-    about it - it stays `unconfirmed` until a gate states it.
+    about it - it stays `unconfirmed` until a gate states it. **Out of scope:** when part of the request names something this step may not write (a value that lives in another section - a payment provider in `actors`, a feature dropped from `release_scope` while this step writes only `screens`), do not touch it and never promise to update it: return `"out_of_scope": "<that part, one short English phrase>"` beside `ops` (`revision` only). The server then opens the document editor with the user's sentence and says so itself; `notes` covers only what this step did (nothing changed here ⇒ say so). Never write "sẽ cập nhật" / "I will update" for work this step cannot do.
 13. **Batch size**: at S-5, at most 6 functions per call.
 14. `reason` is a short log line (it feeds §I Record of Changes): *why*, not *what*.
 15. **`notes` is the message the user reads at the gate**, in the reply language, in a friendly BA voice. It follows the
