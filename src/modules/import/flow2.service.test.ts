@@ -79,7 +79,7 @@ describe("flow2Owners - bước cần soạn / bước giữ chốt", () => {
     { section_id: "custom:CS01", title: "Team Notes", status: "present" as const, owner_steps: ["S-8.1"] },
     { section_id: "custom:CS02", title: "Document Conventions", status: "missing" as const, owner_steps: ["S-8.1"] },
     { section_id: "fixed:I", title: "Record of Changes", status: "missing" as const, owner_steps: ["S-9.1"] },
-    { section_id: "custom:CS03", title: "Budget", status: "out_of_scope" as const, owner_steps: [] }
+    { section_id: "custom:CS03", title: "Dự toán chi phí", status: "out_of_scope" as const, owner_steps: [] }
   ]
   it("SRS đã viết ⇒ soạn mục thiếu, giữ chốt mục đã viết; bỏ Record of Changes / ngoài phạm vi", () => {
     // FLF-382: S-8.1 sở hữu cả mục riêng đã viết lẫn mục riêng còn trống ⇒ vẫn soạn (chỉ ghi được mục còn trống)
