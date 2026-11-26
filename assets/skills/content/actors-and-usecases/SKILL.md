@@ -1,7 +1,7 @@
 ---
 skill_id: actors-and-usecases
 kind: content
-version: 0.13.0
+version: 0.14.0
 description: "S-3.1–S-3.5 actors, roles, actor–goal list, missing use case sweep, relationships, descriptions"
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -45,7 +45,7 @@ Naming: **A1** a singular role/party noun phrase, never a person's name or a tea
 ("Dashboard User" ⇒ "Project Owner"). **A4** a `system` actor is the outside role, not the vendor or version ("Stripe API v3" ⇒
 "Payment Gateway"). **A5** a `time` actor is named after what it triggers ("Cron" ⇒ "Nightly Billing Scheduler"). **A6** two names
 sharing every capability are one actor with two `roles[]` rows. **A8** `description` is one sentence tied to this product, saying
-who they are, what they do here and why they care - not a dictionary gloss.
+who they are, what they do here and why they care - not a dictionary gloss. **Platform (`platforms`) - every `human` actor gets one.** A subset of the product platforms in `project.form_factor` (`mobile_app` ⇒ `"mobile"`, `web_app` ⇒ `"web"`), inferred from the Brief/addendum: which device does this actor use? Code draws each screen's mockup only on the platforms of the actors using that screen, so a wrong value hides or adds a mockup. Customer who uses the phone app ⇒ `["mobile"]`; counter staff at a desktop ⇒ `["web"]`; a doctor on a computer and a tablet ⇒ `["web"]` (a tablet runs the web app); device not stated ⇒ both platforms the product has (`["web","mobile"]`). A product with a single platform ⇒ that one for every human actor. A general actor (`User`) may omit it: it inherits the union of its children. `system` and `time` actors have no `platforms`.
 
 **General actor (generalization) - decide it in THIS batch, right after access.** Count the human actors that sign in to this product (`self-registers`, `invited` or `identity provider`). **≥ 2 ⇒ they all share Log In ⇒ you MUST** add a general human actor `User` (no role of its own), `set` each of their `parent_id` to it (`{"op":"set","path":"actors[id=A02].parent_id","value":"A05"}`; diagram `Customer --|> User`), and write its `description` naming every specialized actor ("Any signed-in Student or Lecturer.") - else yellow flag `actor_generalization_children_unlisted`. Code checks it: an account use case listing ≥ 2 human actors raises `actor_generalization_missing` and the batch is sent back. Never a child: a `system`/`time` actor, an identity provider, or a party that does not sign in (a Guest with no account, a customer who only receives emails). Exactly one signing-in human actor ⇒ no `User`, `parent_id` unset. Full rules and the university example: Reference `actor-rules` below.
 
@@ -134,13 +134,13 @@ extending use case opens with its condition ("When …"); every other one starts
 ## Example (S-3.1, one human actor + role)
 
 ```json
-{ "ops": [ { "op": "add", "path": "actors[]", "value": { "id": "A01", "name": "Store Manager", "kind": "human", "description": "Runs a single store and needs the day's orders settled before closing.", "flows_in": ["Daily Sales Report Request"], "flows_out": ["Settled Orders Summary"] }, "reason": "S-3.1 primary human actor and context exchange from Brief" }, { "op": "add", "path": "roles[]", "value": { "id": "R01", "name": "Store Manager", "actor_id": "A01" }, "reason": "S-3.1 role for primary actor" } ], "notes": "Primary human actor and matching role added." }
+{ "ops": [ { "op": "add", "path": "actors[]", "value": { "id": "A01", "name": "Store Manager", "kind": "human", "description": "Runs a single store and needs the day's orders settled before closing.", "platforms": ["web"], "flows_in": ["Daily Sales Report Request"], "flows_out": ["Settled Orders Summary"] }, "reason": "S-3.1 primary human actor and context exchange from Brief" }, { "op": "add", "path": "roles[]", "value": { "id": "R01", "name": "Store Manager", "actor_id": "A01" }, "reason": "S-3.1 role for primary actor" } ], "notes": "Primary human actor and matching role added." }
 ```
 
 ## Self-check
 
 - [ ] ≥ 2 human actors sign in ⇒ `User` exists, each of them has `parent_id` = `User`, its `description` names them all, and Log In / Reset Password list `User` only (no account use case lists two human actors).
-- [ ] Every actor has `kind` correct, a product-specific `description`, and a name following A1/A3–A6/A8; `parent_id` only human → general human actor; `User` only on goals every specialized role shares, subsets list their roles.
+- [ ] Every `human` actor has `platforms` (subset of `project.form_factor`, by device used), `system`/`time` none; every actor has `kind` correct, a product-specific `description`, and a name following A1/A3–A6/A8; `parent_id` only human → general human actor; `User` only on goals every specialized role shares, subsets list their roles.
 - [ ] S-3.1/S-3.2/S-3.3 actors each have ≥1 `flows_in`/`flows_out` data noun phrase, one exchange per item; all actors together have both directions; one-way actors fine, no invented replies.
 - [ ] Every use case name passes U1–U9 (no Manage/Maintain/Handle…, no "and", ≤ 5 words, actor never the subject), `function_ids: []`.
 - [ ] `actor_ids` lists participants, primary first; notification actors only on emitting use cases; each

@@ -29,7 +29,7 @@ const withSystemNameStep = (s: Spine, status: StepStatus): void => {
 }
 
 describe("RULES", () => {
-  it("17 luật đỏ + 31 luật vàng (tầng 3 theo luật: duplicate_name, vague_wording, source_missing; tầng 2: content_type_missing; mục mẫu chuẩn thiếu: standard_section_missing; theo flow 18/11: template_section_empty và original_text_mentions_changed đỏ, section_stale_at_baseline và section_awaiting_reaccept vàng; FLF-428: screen_no_actor; FLF-418: sequence_component_missing; FLF-278: template_section_absent / _empty; FLF-365: verification_orphan; FLF-366: original_text_mentions_changed; FLF-370: actor_generalization_missing); mọi luật đỏ không waive được (FLF-329)", () => {
+  it("17 luật đỏ + 32 luật vàng (tầng 3 theo luật: duplicate_name, vague_wording, source_missing; tầng 2: content_type_missing; mục mẫu chuẩn thiếu: standard_section_missing; theo flow 18/11: template_section_empty và original_text_mentions_changed đỏ, section_stale_at_baseline và section_awaiting_reaccept vàng; FLF-428: screen_no_actor; FLF-418: sequence_component_missing; FLF-278: template_section_absent / _empty; FLF-365: verification_orphan; FLF-366: original_text_mentions_changed; FLF-370: actor_generalization_missing; FLF-483: actor_no_usecase); mọi luật đỏ không waive được (FLF-329)", () => {
     expect(RULES.filter((r) => r.level === "red")).toHaveLength(17)
     // FLF-177: thêm screen_placeholder (BUG-03), function_without_uc (BUG-12),
     // derived_from_changed_assumption (BUG-14); mode 1 §4.13: original_diagram_stale;
@@ -37,7 +37,7 @@ describe("RULES", () => {
     // FLF-370: actor_generalization_missing; FLF-365: verification_orphan; FLF-366: original_text_mentions_changed; đổi mẫu: template_section_migration_missing (đỏ) + section_reference_after_migration (vàng)
     // FLF-418: sequence_component_missing
     // FLF-428: screen_no_actor
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(31)
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(32)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(RULES.filter((r) => r.level === "red").map((r) => r.rule_id).sort())
     expect(RULES.filter((r) => r.level === "yellow").every((r) => r.waivable)).toBe(true)
   })
@@ -542,6 +542,41 @@ describe("runDeterministicCheck", () => {
 
     const actorFlags = byRule(runDeterministicCheck(variant((s) => (s.actors[0].name = "User"))), "actor_name_shape")
     expect(actorFlags).toMatchObject([{ target_id: FIXTURE.actors[0].id, level: "yellow", section_id: "fixed:2.1", remediation_step: "S-3.1" }])
+  })
+
+  it("FLF-483 (H1): sau khi thu hẹp phạm vi, actor con không còn use case riêng ⇒ cờ vàng actor_no_usecase; còn use case riêng thì không", () => {
+    const narrowed = variant((s) => {
+      s.actors.push({ id: "A10", name: "User", kind: "human", description: "Any signed-in person: a business ANALYST or an Administrator." })
+      s.actors.find((a) => a.id === "A02")!.parent_id = "A10"
+      s.actors.find((a) => a.id === "A03")!.parent_id = "A10"
+      s.use_cases = s.use_cases.filter((u) => !["UC20", "UC21"].includes(u.id))
+      for (const u of s.use_cases) u.actor_ids = u.actor_ids.filter((a) => a !== "A03")
+      s.use_cases.find((u) => u.id === "UC02")!.actor_ids.push("A10")
+    })
+    const flags = byRule(runDeterministicCheck(narrowed), "actor_no_usecase")
+    expect(flags).toMatchObject([{ target_id: "A03", level: "yellow", section_id: "fixed:2.1", remediation_step: "S-3.2" }])
+    expect(flags[0].message).toContain(FIXTURE.actors.find((a) => a.id === "A03")!.name)
+    // A02 vẫn còn use case riêng, A10 là tác nhân tổng quát có use case riêng ⇒ không cờ
+    expect(flags.map((f) => f.target_id)).not.toContain("A02")
+    expect(flags.map((f) => f.target_id)).not.toContain("A10")
+    // actor không thuộc use case nào và không có cha vẫn là orphan_actor, không nhân đôi cờ
+    expect(byRule(runDeterministicCheck(narrowed), "orphan_actor").map((f) => f.target_id)).not.toContain("A03")
+  })
+
+  it("FLF-483 (H1): vai trò công khai Guest không gắn tác nhân không bị cờ; vai trò khác không gắn tác nhân vẫn bị", () => {
+    const flags = byRule(
+      runDeterministicCheck(
+        variant((s) => {
+          s.roles[0].actor_id = null
+          s.roles[0].name = "Guest"
+          s.roles[1].actor_id = null
+          s.roles[1].name = "Auditor"
+          s.roles.push({ id: "R98", name: "Khách", actor_id: null }, { id: "R99", name: "Khách hàng", actor_id: null })
+        })
+      ),
+      "role_no_actor"
+    )
+    expect(flags.map((f) => f.target_id).sort()).toEqual([FIXTURE.roles[1].id, "R99"].sort())
   })
 
   it("generalization: actor cha tên User được miễn A2, actor con thừa kế use case, parent_id sai ⇒ cờ vàng", () => {
