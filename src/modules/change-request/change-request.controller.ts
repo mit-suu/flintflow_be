@@ -22,6 +22,7 @@ import {
   groupIdSchema,
   listChangeRequestsQuerySchema,
   locationIdSchema,
+  diagramPreviewQuerySchema,
   materialParamsSchema,
   ownerStepDraftRequestSchema,
   revertRequestSchema,
@@ -39,6 +40,8 @@ import { handleCrMessage } from "./cr-message.service.js"
 import { runImpact } from "./cr-impact.service.js"
 import { decideGroup } from "./decision.service.js"
 import { patchLocation } from "./location.service.js"
+import { diagramPreview } from "./diagram-preview.service.js"
+import type { OriginalDiagramKind } from "../spine/spine.types.js"
 import { addMaterial, removeMaterial } from "./material.service.js"
 import { draftInOwnerStep, runPropose } from "./propose.service.js"
 import { runVerify } from "./verify.service.js"
@@ -300,6 +303,19 @@ export const updateLocation = mode1Handler(async (req, res) => {
   const body = parseInput(patchLocationRequestSchema, req.body)
   await patchLocation(cr, locId, body, auth.userId)
   return detail(res, cr)
+})
+
+/** §4.13: ảnh của vị trí sơ đồ gốc — sơ đồ FlintFlow vẽ từ dữ liệu sau CR, hoặc ảnh gốc của file (`variant=original`). Không ghi gì, không gọi AI. Ai xem được CR thì xem được. */
+export const locationDiagramPreview = mode1Handler(async (req, res) => {
+  const { cr } = await loadCr(req)
+  const locId = parseInput(locationIdSchema, req.params.locId)
+  const query = parseInput(diagramPreviewQuerySchema, req.query)
+  const preview = await diagramPreview(cr, locId, query.kind as OriginalDiagramKind, query.owner ?? null, { part: query.part, variant: query.variant })
+  res.setHeader("Content-Type", preview.mime)
+  res.setHeader("Cache-Control", "private, no-store")
+  res.setHeader("X-Diagram-Parts", String(preview.parts))
+  res.setHeader("Access-Control-Expose-Headers", "X-Diagram-Parts")
+  return res.status(200).send(preview.image)
 })
 
 /** BPMN 3.9 (mode 1 v3): sửa đề xuất một vị trí bằng skill của step sở hữu, theo hướng của BA — chỉ ghi đề xuất. */

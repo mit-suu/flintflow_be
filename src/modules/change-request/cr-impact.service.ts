@@ -13,6 +13,7 @@ import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus } from "./change-request.service.js"
 import { ChangeLocation } from "./change-location.model.js"
 import { unlockPaths } from "./lock.service.js"
+import { narrowDiagramCandidates } from "./diagram-location.js"
 import { countMentionLocations, elementValue, emptySectionTargets, findSpineLocations, mergeFoundLocations, removeElementLocations, removeElementTarget, systemRenameLocations, systemRenameTarget, withOriginalDiagrams, withOriginalPassages, type FoundLocation, type ImpactIntent } from "./spine-location.js"
 import { TemplateProfile } from "../import/template-profile.model.js"
 import type { SectionSegments } from "../spine/segment-hash.js"
@@ -118,7 +119,9 @@ ${cr.description}`) : null
   if (countAfter) located = mergeFoundLocations(located, countMentionLocations(spine, countAfter))
   // BF §3.2 C-3: đoạn văn giữ nguyên của file gốc nhắc phần tử bị đụng tới ⇒ vị trí "sửa chữ" (không cắt trần số vị trí)
   const segments = ((await TemplateProfile.findOne({ projectId: cr.projectId }).select("section_segments").lean()) as { section_segments?: SectionSegments[] } | null)?.section_segments ?? []
-  const found = segments.length ? withOriginalPassages(spine, segments, located) : located
+  const withPassages = segments.length ? withOriginalPassages(spine, segments, located) : located
+  // CR mang sẵn op (bản xem trước) ⇒ bỏ hình gốc mà dữ liệu của nó không đổi (không bắt người dùng quyết từng hình)
+  const found = narrowDiagramCandidates(spine, withPassages, cr.seed?.ops)
   // C-2 đã cảnh báo yêu cầu không hợp lý và người yêu cầu chọn làm tiếp ⇒ mọi vị trí "giữ theo ý mình", C-4 không cảnh báo lại
   const keptIntent = cr.proceed_after_warning ? { kept_intent: true } : {}
   // Phase 8: CR gộp thêm lệnh sau khi đã có đề xuất ⇒ vị trí đã có (đề xuất / kết luận / khoá) giữ nguyên, chỉ thêm

@@ -4,6 +4,7 @@ import { User } from "../user/user.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { env } from "../../config/env.js"
 import { sendApprovalEmail } from "../../shared/email/email.service.js"
+import { publishRealtime, userKey } from "../../shared/realtime/project-events.js"
 
 export interface NotificationPayload {
   type: NotificationType
@@ -84,7 +85,7 @@ export const notify = async (
 ): Promise<INotification | null> => {
   if (APPROVAL_EMAIL_TYPES.has(payload.type)) void emailApproval(userId, payload)
   try {
-    return await Notification.create({
+    const created = await Notification.create({
       userId: new mongoose.Types.ObjectId(userId),
       organizationId: payload.organizationId ? new mongoose.Types.ObjectId(payload.organizationId) : null,
       type: payload.type,
@@ -93,6 +94,14 @@ export const notify = async (
       link: payload.link ?? null,
       meta: payload.meta ?? null
     })
+    // FLF-487: chuông workspace của người nhận tải lại ngay thay vì chờ poll 60s
+    publishRealtime(userKey(userId), {
+      type: "notification_created",
+      notification_id: String(created._id),
+      organization_id: payload.organizationId ?? null,
+      at: new Date().toISOString()
+    })
+    return created
   } catch (error) {
     console.error(`[Notification] notify failed for user ${userId} (${payload.type}):`, error)
     return null

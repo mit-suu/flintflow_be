@@ -130,6 +130,9 @@ const envSchema = z.object({
   EMBEDDING_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
   /** Số ứng viên vector tối đa C-3 lấy thêm, và điểm tối thiểu (`vectorSearchScore` cosine của Atlas, 0..1). */
   CR_VECTOR_TOP_K: z.coerce.number().int().min(1).max(200).default(20),
+  /** FLF-487: luồng SSE `GET /projects/:id/events` — nhịp ping giữ kết nối qua proxy, và thời gian sống tối đa (hết ⇒ FE nối lại với token mới). */
+  PROJECT_EVENTS_PING_MS: z.coerce.number().int().min(1000).default(25000),
+  PROJECT_EVENTS_MAX_MS: z.coerce.number().int().min(10000).default(600000),
   CR_VECTOR_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.82),
 
   // ─── Knowledge RAG (FLF-267, `modules/knowledge/`, docs/ops.md "Knowledge RAG") ───────────
