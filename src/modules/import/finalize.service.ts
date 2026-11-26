@@ -305,7 +305,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const outOfScope = outOfScopeSectionIds(drafts, (id) => layoutSectionOf(id, entryOfHeading))
   // FLF-460 (BF §3.1.2): nhãn Ngoài phạm vi người dùng đổi ở màn đọc khung (đưa vào / ra) có hiệu lực ở cấu trúc đích cuối, khớp bản sơ bộ
   const scopeMarks = new Map<string, HeadingMark>(profile.heading_map.flatMap((h) => (h.scope_label ? [[h.block_id, { scope_label: h.scope_label }] as const] : [])))
-  const structure = applyScopeLabels(compareTargetStructure(layout, withContent, stripRecord(seeded), intent, undefined, { emptied, outOfScope }), scopeMarks, entryOfHeading, withContent)
+  const structure = applyScopeLabels(compareTargetStructure(layout, withContent, stripRecord(seeded), intent, undefined, { emptied, outOfScope }), scopeMarks, entryOfHeading, withContent, stripRecord(seeded))
   // Kế hoạch đọc Spine đã nạp dữ liệu: mục trích không ra gì thì vẫn là "thiếu", đừng đánh dấu step đã xong
   const plan = buildStepPlan(layout, sectionsWithContent(authoredBlocks), stripRecord(seeded))
   // FLF-252: quyền của ma trận không khớp màn / vai trò nào ⇒ cờ vàng (trước đây bỏ im lặng), neo vào bảng phân quyền
@@ -397,7 +397,9 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
           console.error(`[import] Rà luật Code (I-5) cho import ${String(doc._id)} lỗi:`, err)
           return null
         })
-      const reviewSections = checked ? sectionsNeedingAiReview(structure, checked.flags) : []
+      // Rà luật Code lỗi ⇒ không bỏ qua vòng rà soát âm thầm: mục là đầu vào của phần thiếu không cần cờ để chọn, cờ đỏ lấy từ
+      // Spine hiện có (BF §3.1.2 chỉ cho bỏ qua khi không có mục nào cần AI rà)
+      const reviewSections = sectionsNeedingAiReview(structure, checked ? checked.flags : (await loadSpine(projectId)).flags)
       if (reviewSections.length) {
         profile.review_sections = reviewSections
         await profile.save()

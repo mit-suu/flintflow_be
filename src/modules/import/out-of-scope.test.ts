@@ -14,6 +14,9 @@ describe("isOutOfScopeHeading (mục trống xét theo heading)", () => {
     for (const h of ["6 Dự toán kinh phí", "Phụ lục A Dự toán", "4.2 Chi phí dự kiến", "Budget", "Cost Estimate", "Ngân sách dự án", "Báo giá"]) expect(isOutOfScopeHeading(h), h).toBe(true)
   })
   it("heading thường của SRS hoặc không rõ loại ⇒ không đoán", () => {
+    // FLF-455: heading thường chứa chữ "chi phí" / "pricing" không bị bắt; chữ tổ hợp NFC / NFD đều khớp
+    for (const h of ["Quản lý chi phí", "Chi phí vận hành", "Pricing rules", "Budgetary controls", "Cost-aware routing"]) expect(isOutOfScopeHeading(h), h).toBe(false)
+    expect(isOutOfScopeHeading("Dự toán chi phí".normalize("NFD"))).toBe(true)
     for (const h of ["Ghi chú nhóm", "Open Issues", "Product Overview", "Rủi ro đã biết", ""]) expect(isOutOfScopeHeading(h), h).toBe(false)
   })
 })

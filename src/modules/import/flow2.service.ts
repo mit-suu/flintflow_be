@@ -17,7 +17,7 @@
  * mục FPT soạn thêm chèn đúng vị trí mẫu chuẩn, mục **Ngoài phạm vi** chuyển xuống cuối (`render/source-fidelity.ts`).
  */
 
-import { SLOT_FALLBACK_OWNER } from "./template-step-headings.js"
+import { SLOT_FALLBACK_OWNER, templateSectionOwnerSteps } from "./template-step-headings.js"
 import { Project } from "../project/project.model.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import * as spineRepository from "../spine/spine.repository.js"
@@ -54,7 +54,9 @@ export const flow2StepOps = (
   templateOwners: readonly string[] = [],
   keepOwners: readonly string[] = [],
   acceptedAt: string = new Date().toISOString(),
-  inputOwners: readonly string[] = []
+  inputOwners: readonly string[] = [],
+  /** Bước sở hữu mục Ngoài phạm vi (không soạn, không kiểm): đang `pending` ⇒ `skipped`, trừ bước cũng sở hữu mục cần soạn / giữ. */
+  skipOwners: readonly string[] = []
 ): Op[] => {
   const brief = new Set(loadStepRegistry().filter((s) => FLOW2_BRIEF_PHASES.has(s.phase)).map((s) => s.id))
   const owners = new Set(templateOwners)
@@ -69,10 +71,14 @@ export const flow2StepOps = (
   const pending = new Set([...reopened, ...redraft])
   const settle = spine.steps.filter((s) => !pending.has(s.id) && s.status === "pending" && owns(keep, s.id)).map((s) => s.id)
   const settled = new Set(settle)
+  const skip = new Set(skipOwners)
+  const skipped = new Set(
+    spine.steps.filter((s) => s.status === "pending" && owns(skip, s.id) && !pending.has(s.id) && !settled.has(s.id) && !owns(keep, s.id) && !owns(owners, s.id)).map((s) => s.id)
+  )
   // Mốc chốt như các bước chốt lúc import (cùng lô nạp dữ liệu) — mục không bị coi là cũ hơn dữ liệu của nó
   const importSeq = spine.steps.find((s) => s.status === "accepted" && s.last_seq !== null)
   const statusOf = (id: string) =>
-    pending.has(id) ? "pending" : settled.has(id) ? "accepted" : (spine.steps.find((s) => s.id === id)?.status ?? "pending")
+    pending.has(id) ? "pending" : settled.has(id) ? "accepted" : skipped.has(id) ? "skipped" : (spine.steps.find((s) => s.id === id)?.status ?? "pending")
   const next = orderedSteps(spine).find((st) => statusOf(st.id) !== "accepted" && statusOf(st.id) !== "skipped")
   return [
     ...[...reopened].map((id): Op => ({ op: "set", path: `steps[id=${id}].status`, value: "pending" })),
@@ -89,6 +95,7 @@ export const flow2StepOps = (
       { op: "set", path: `steps[id=${id}].last_seq`, value: importSeq?.last_seq ?? null },
       { op: "set", path: `steps[id=${id}].accepted_at`, value: acceptedAt }
     ]),
+    ...[...skipped].map((id): Op => ({ op: "set", path: `steps[id=${id}].status`, value: "skipped" })),
     { op: "set", path: "progress.current_phase", value: next?.phase ?? null },
     { op: "set", path: "progress.current_step", value: next?.id ?? null }
   ]
@@ -114,6 +121,22 @@ export const flow2Owners = (sections: readonly TargetSection[], templateFile: bo
     ownersOf(missing),
     ownersOf(draftable.filter((s) => s.status === "present")).filter((id) => !perSectionWrite.has(id))
   )
+}
+
+/**
+ * Hàm thuần: bước chỉ phục vụ mục Ngoài phạm vi (BF nguyên tắc 4: không soạn, không kiểm) - bước cũng sở hữu mục cần soạn / giữ /
+ * cung cấp đầu vào thì không nằm trong đây. `owner_steps` của mục Ngoài phạm vi đã xoá, nên tra lại theo mục (`spine` cho mục
+ * tính năng / chức năng).
+ */
+export const flow2SkipOwners = (
+  sections: readonly TargetSection[],
+  spine: Spine | undefined,
+  active: { draft: readonly string[]; keep: readonly string[]; inputs: readonly string[] }
+): string[] => {
+  const used = new Set([...active.draft, ...active.keep, ...active.inputs].map((id) => id.split("@")[0]))
+  const owned = sections.filter((s) => s.status === "out_of_scope").flatMap((s) => templateSectionOwnerSteps(s.section_id, spine))
+  const activeOwners = new Set(sections.filter((s) => s.status !== "out_of_scope").flatMap((s) => s.owner_steps ?? []).map((id) => id.split("@")[0]))
+  return [...new Set(owned)].filter((id) => !used.has(id.split("@")[0]) && !activeOwners.has(id.split("@")[0]))
 }
 
 /**
@@ -160,7 +183,7 @@ export const enterFlow2 = async (doc: IImportedDocument, by: string, baseVersion
   const { draft, keep, inputs } = flow2Owners(profile.target_structure.sections, templateFile)
   const applied = await applyTransaction(projectId, {
     base_version: baseVersion ?? spine.spine_version,
-    ops: flow2StepOps(spine, draft, keep, undefined, inputs),
+    ops: flow2StepOps(spine, draft, keep, undefined, inputs, flow2SkipOwners(profile.target_structure.sections, spine, { draft, keep, inputs })),
     by,
     // Lý do in vào Record of Changes của tài liệu (bản đầu của dự án) — câu cho người đọc tài liệu, không phải tên luồng nội bộ
     reason: templateFile ? "Start drafting from the required template" : "Start completing the missing sections",

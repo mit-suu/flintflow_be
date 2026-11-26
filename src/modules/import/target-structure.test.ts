@@ -180,3 +180,28 @@ describe("FLF-463 bảng cấu trúc đích (business-flow §1 \"Khi tạo dự 
     expect(r.sections.map((s) => s.section_id)).toEqual([...REQUIRED_FIXED_SECTION_IDS])
   })
 })
+
+describe("FLF-455 / FLF-463: nhãn Ngoài phạm vi của nhóm và mục Bỏ chữ của heading bao", () => {
+  it("mục riêng nằm dưới heading bao Ngoài phạm vi (Dự toán) thừa hưởng nhãn; mục cùng cấp sau đó thì không", () => {
+    const layout = [
+      entry(0, "fixed:1", "1 Giới thiệu", 1),
+      entry(1, "custom:CS01", "2 Dự toán chi phí", 1),
+      entry(2, "custom:CS02", "2.1 Nhân sự", 2),
+      entry(3, "custom:CS03", "3 Ghi chú", 1)
+    ]
+    const result = compareTargetStructure(layout, new Set(["fixed:1", "custom:CS03", "custom:CS02"]), spineWith(), "fixed")
+    const byId = new Map(result.sections.map((s) => [s.section_id, s.status]))
+    expect(byId.get("custom:CS02")).toBe("out_of_scope")
+    expect(byId.get("custom:CS03")).toBe("present")
+  })
+
+  it("heading bao có đoạn dẫn riêng bị Bỏ chữ ⇒ còn trống (missing), không biến mất ⇒ không ra bản gốc 0.1", () => {
+    const layout = [entry(0, "custom:CS01", "2 Mô tả chung", 1), entry(1, "custom:CS02", "2.1 Bối cảnh", 2)]
+    const withContent = new Set(["custom:CS01", "custom:CS02"])
+    const kept = compareTargetStructure(layout, withContent, spineWith(), "fixed")
+    expect(kept.missing).toEqual([])
+    const dropped = compareTargetStructure(layout, withContent, spineWith(), "fixed", undefined, { emptied: new Set(["custom:CS01"]) })
+    expect(dropped.missing).toEqual(["custom:CS01"])
+    expect(dropped.resolved_mode).toBe(3)
+  })
+})

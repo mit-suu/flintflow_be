@@ -37,6 +37,8 @@ export interface TargetSection {
   status: TargetSectionStatus
   /** Bước Luồng 2 soạn mục này (để lát sau chỉ chạy step của phần thiếu). */
   owner_steps: string[]
+  /** FLF-454: heading đầu tiên của mục trong file (khoá `DocBlock.block_id`) - để nối khối chữ với mục của nó. */
+  block_id?: string
 }
 
 export interface TargetStructure {
@@ -128,6 +130,8 @@ const fileSections = (
   const seen = new Set<string>()
   const wrappers = templateWrapperIds(layout)
   const ordered = [...layout].sort((a, b) => a.order - b.order)
+  /** Cấp của heading Ngoài phạm vi đang mở: mục riêng nằm dưới nó (cấp sâu hơn) thừa hưởng nhãn. */
+  let scopeRoot: number | null = null
   for (const [i, entry] of ordered.entries()) {
     if (entry.section_id.startsWith("group:") || seen.has(entry.section_id)) continue
     if (entry.section_id.startsWith("custom:") && !entry.heading_text.trim()) continue
@@ -135,16 +139,24 @@ const fileSections = (
     // FLF-379: Record of Changes / Revision History tự sinh từ lịch sử thay đổi — không phải mục cần soạn
     if (DERIVED_SECTIONS.has(entry.section_id)) continue
     const own = has(entry.section_id)
-    // Heading bao chỉ chứa mục con (vd "2 Overall Description") không phải mục cần soạn
-    if (wrappers.has(entry.section_id) && !own) continue
+    if (scopeRoot !== null && entry.level <= scopeRoot) scopeRoot = null
+    const isCustom = entry.section_id.startsWith("custom:")
+    const outHere = isCustom && (outOfScope.has(entry.section_id) || (!own && isOutOfScopeHeading(entry.heading_text)))
+    if (outHere && scopeRoot === null) scopeRoot = entry.level
+    // Heading bao chỉ chứa mục con (vd "2 Overall Description") không phải mục cần soạn - nhưng mục con của heading bao Ngoài phạm vi
+    // vẫn thừa hưởng nhãn (scopeRoot đã đặt ở trên)
+    // FLF-463: heading bao có đoạn dẫn riêng mà người dùng Bỏ chữ vẫn là mục Bỏ chữ (còn trống), không biến mất khỏi cấu trúc đích
+    const droppedOwn = emptied.has(entry.section_id) && hasContent(spine, entry.section_id, withContent)
+    if (wrappers.has(entry.section_id) && !own && !droppedOwn) continue
     // FLF-455 (BF nguyên tắc 4): Ngoài phạm vi theo loại nội dung 29148, mọi chế độ - giữ nguyên, không soạn, không kiểm
-    if (entry.section_id.startsWith("custom:") && (outOfScope.has(entry.section_id) || (!has(entry.section_id) && isOutOfScopeHeading(entry.heading_text)))) {
+    if (isCustom && (outHere || scopeRoot !== null)) {
       sections.push({ section_id: entry.section_id, title: titleOf(entry.section_id, layout), status: "out_of_scope", owner_steps: [] })
       continue
     }
     // FLF-379: heading chỉ có mục con (tính năng "3.2 Course Registration" ⇒ chức năng 3.2.1…) — mục con có nội dung thì
     // mục cha đã có nội dung, không "Sẽ soạn"
-    const present = own || childHasContent(ordered, i, spine, withContent)
+    // Mục Bỏ chữ tính là còn trống dù mục con có nội dung (BF §3.1.2: còn ít nhất một mục Bỏ chữ thì không ra bản gốc 0.1)
+    const present = emptied.has(entry.section_id) ? false : own || childHasContent(ordered, i, spine, withContent)
     // Bìa / mục lục / heading chỗ điền của mẫu còn trống không phải mục cần soạn (FLF-378, FLF-411)
     if (!present && isNonDraftHeading(entry.section_id, entry.heading_text)) continue
     sections.push({ section_id: entry.section_id, title: titleOf(entry.section_id, layout), status: present ? "present" : "missing", owner_steps: templateSectionOwnerSteps(entry.section_id, spine) })

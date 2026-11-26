@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { loadStepRegistry } from "../pipeline/step-registry.js"
 import type { StepState } from "../spine/spine.types.js"
-import { entersFlow2, flow2Owners, flow2StepOps } from "./flow2.service.js"
+import { entersFlow2, flow2Owners, flow2SkipOwners, flow2StepOps } from "./flow2.service.js"
+import { templateSectionOwnerSteps } from "./template-step-headings.js"
 import { inputStepsOf } from "./step-plan.js"
 
 const state = (id: string, status: StepState["status"]): StepState => ({ id, status, first_seq: null, last_seq: null, accepted_at: null })
@@ -158,5 +159,28 @@ describe("FLF-461 lọc step chế độ 3/4 - giữ bước cung cấp đầu v
     expect(ops.some((o) => o.path.startsWith("steps[id=S-4.3]"))).toBe(false)
     const kept = flow2StepOps({ steps, screens: [], functions: [] }, ["S-5.2"], ["S-4.1"], "2026-11-08T00:00:00.000Z", ["S-4.1"])
     expect(kept.some((o) => o.path.startsWith("steps[id=S-4.1]") && o.path.endsWith(".status") && o.value === "pending")).toBe(false)
+  })
+})
+
+describe("FLF-455 x FLF-460: bước của mục Ngoài phạm vi không được soạn", () => {
+  const owner = templateSectionOwnerSteps("fixed:5.4", undefined)[0]
+  const other = templateSectionOwnerSteps("fixed:5.5", undefined)[0]
+  const sections = [
+    { section_id: "fixed:5.4", title: "5.4 Other Requirements", status: "out_of_scope" as const, owner_steps: [] },
+    { section_id: "fixed:2.1", title: "2.1 Actors", status: "missing" as const, owner_steps: ["S-3.1"] }
+  ]
+
+  it("bước sở hữu mục Ngoài phạm vi đang pending ⇒ skipped, bước soạn mục thiếu vẫn pending", () => {
+    expect(owner).toBeTruthy()
+    const skip = flow2SkipOwners(sections, undefined, { draft: ["S-3.1"], keep: [], inputs: [] })
+    expect(skip).toContain(owner)
+    const steps = [state(owner, "pending"), state("S-3.1", "pending")]
+    const ops = flow2StepOps({ steps, screens: [], functions: [] }, ["S-3.1"], [], undefined, [], skip)
+    expect(ops).toContainEqual({ op: "set", path: `steps[id=${owner}].status`, value: "skipped" })
+  })
+
+  it("bước cũng sở hữu mục cần soạn thì không bị bỏ qua", () => {
+    const shared = [...sections, { section_id: "fixed:5.5", title: "5.5", status: "missing" as const, owner_steps: [owner, other] }]
+    expect(flow2SkipOwners(shared, undefined, { draft: [owner], keep: [], inputs: [] })).not.toContain(owner)
   })
 })

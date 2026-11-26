@@ -21,6 +21,7 @@ import {
 } from "./step-plan.js"
 import { looksLikeExample } from "./template-context.js"
 import { sampleBlockIds, stripTemplateMarks } from "./template-markers.js"
+import { templateSectionOwnerSteps } from "./template-step-headings.js"
 import { compareTargetStructure, isNonDraftHeading, type ResolvedMode, type TargetSection, type TargetSectionStatus, type TargetStructure, type TemplateIntent } from "./target-structure.js"
 
 export type FileKind = "written" | "template"
@@ -184,7 +185,7 @@ export const previewStructure = (
   const { customSections, slices } = buildLayout(stripped, headingSections)
   const withContent = contentSections(stripped, customSections, slices)
   const kind = fileKindOf(layout, authoredSections(blocks, headingSections))
-  const structure = applyScopeLabels(compareTargetStructure(layout, withContent, spine, intent, at), headingMarks, entryOfHeading, withContent)
+  const structure = applyScopeLabels(compareTargetStructure(layout, withContent, spine, intent, at), headingMarks, entryOfHeading, withContent, spine)
   // FLF-460: mỗi mục của layout gắn với heading đầu tiên của nó (để đổi nhãn) và dấu của heading đó
   const marks = new Map<string, HeadingMark & { block_id: string }>()
   for (const [block_id, section_id] of entryOfHeading) if (!marks.has(section_id)) marks.set(section_id, { block_id, ...(headingMarks.get(block_id) ?? {}) })
@@ -199,19 +200,27 @@ export const applyScopeLabels = (
   structure: TargetStructure,
   headingMarks: ReadonlyMap<string, HeadingMark>,
   entryOfHeading: ReadonlyMap<string, string>,
-  withContent: ReadonlySet<string>
+  withContent: ReadonlySet<string>,
+  spine?: Spine
 ): TargetStructure => {
   const labelOf = new Map<string, ScopeLabel>()
+  /** FLF-454: heading đầu tiên của từng mục của layout - để bước kiểm 1.9 nối khối chữ với mục của nó. */
+  const headingOf = new Map<string, string>()
   for (const [block_id, section_id] of entryOfHeading) {
+    if (!headingOf.has(section_id)) headingOf.set(section_id, block_id)
     const label = headingMarks.get(block_id)?.scope_label
     if (label && !labelOf.has(section_id)) labelOf.set(section_id, label)
   }
-  if (!labelOf.size) return structure
   const sections = structure.sections.map((s): TargetSection => {
     const label = labelOf.get(s.section_id)
-    if (label === "out_of_scope" && s.status !== "out_of_scope") return { ...s, status: "out_of_scope", owner_steps: [] }
-    if (label === "in_scope" && s.status === "out_of_scope") return { ...s, status: withContent.has(s.section_id) ? "present" : "missing" }
-    return s
+    const withHeading = (t: TargetSection): TargetSection => (headingOf.has(s.section_id) ? { ...t, block_id: headingOf.get(s.section_id) } : t)
+    if (label === "out_of_scope" && s.status !== "out_of_scope") return withHeading({ ...s, status: "out_of_scope", owner_steps: [] })
+    // Đưa vào phạm vi: mục phải có bước sở hữu như mục thường (Luồng 2 mở bước, tiến độ theo mục đếm "còn lại")
+    if (label === "in_scope" && s.status === "out_of_scope") {
+      const status = withContent.has(s.section_id) ? "present" : "missing"
+      return withHeading({ ...s, status, owner_steps: templateSectionOwnerSteps(s.section_id, spine) })
+    }
+    return withHeading(s)
   })
   const missing = sections.filter((s) => s.status === "missing").map((s) => s.section_id)
   const resolved_mode: ResolvedMode = missing.length === 0 ? 1 : structure.intent === "fixed" ? 3 : 4

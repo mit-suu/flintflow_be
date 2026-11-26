@@ -898,6 +898,18 @@ export const isTemplateOnlyProject = async (projectId: string): Promise<boolean>
   return preview ? preview.summary.present === 0 : isTemplateFile(project, profile)
 }
 
+/**
+ * FLF-460 (BF §3.1.2 "số credit tính theo nhãn đã sửa"): mục người dùng gắn nhãn Ngoài phạm vi ở màn đọc khung không được đọc ở
+ * I-4 (không soạn, không kiểm, không tính credit). Chỉ nhãn tay: mục I-4 tự xếp ngoài SRS (FLF-455) vẫn phải đọc để phân loại.
+ * Id mục đọc = id mapping của heading, hoặc `content:@<heading>` khi heading chưa khớp mục nào.
+ */
+export const userOutOfScopeReadSections = (profile: Pick<ITemplateProfile, "heading_map">): Set<string> =>
+  new Set(
+    profile.heading_map
+      .filter((h) => h.scope_label === "out_of_scope")
+      .map((h) => (h.section_id === "unmapped" ? contentSectionId(h.block_id) : h.section_id))
+  )
+
 export const loadExtractionInputs = async (projectId: string): Promise<ExtractionInputs | null> => {
   const profile = await TemplateProfile.findOne({ projectId })
   if (!profile) return null
@@ -1340,6 +1352,23 @@ const extractSections = async (projectId: string, userId: string, importId: stri
   }
   const drafts = await ExtractionDraft.find({ import_id: doc._id })
   const draftOf = new Map(drafts.map((d) => [d.section_id, d]))
+  // Mục gắn nhãn Ngoài phạm vi: coi như đã đọc xong (không gọi AI, không trừ credit), chỉ giữ cấu trúc từ heading
+  const userOut = userOutOfScopeReadSections(profile)
+  for (const section_id of plan) {
+    const draft = draftOf.get(section_id)!
+    if (!userOut.has(section_id) || draft.status === "done") continue
+    draft.fields = mergeItems(provisionalItems(section_id, provisional)).flatMap(flattenItem) as ExtractedField[]
+    draft.status = "done"
+    draft.error = null
+    draft.unmapped_block_ids = []
+    draft.diagram_images = []
+    draft.content_mismatch = null
+    draft.guidance_blocks = []
+    draft.content_types = []
+    draft.partial = null
+    draft.markModified("fields")
+    await draft.save()
+  }
 
   if (await isTemplateOnlyProject(projectId)) {
     for (const section_id of plan) {
@@ -1755,7 +1784,7 @@ export const estimateExtraction = async (projectId: string, doc: Pick<IImportedD
     Pick<IExtractionDraft, "section_id" | "status" | "partial" | "diagram_images">[]
   >()
   const draftOf = new Map(drafts.map((d) => [d.section_id, d]))
-  const done = new Set(drafts.filter((d) => d.status === "done").map((d) => d.section_id))
+  const done = new Set([...drafts.filter((d) => d.status === "done").map((d) => d.section_id), ...userOutOfScopeReadSections(inputs.profile)])
   let text = 0
   let images = 0
   for (const planned of planPendingSections(inputs.plan, inputs.blocks, inputs.profile, inputs.provisional, done)) {
@@ -1783,18 +1812,20 @@ export const creditEstimateFor = async (
   doc: IImportedDocument,
   opts: { withBalance: boolean }
 ): Promise<(ExtractionEstimate & { check_calls: number; translate_batches: number; reference_documents: number; reference_credits: number; available_credits: number | null }) | null> => {
-  if (doc.status !== "mapping_review" && doc.status !== "extracting") return null
+  // FLF-454: finalize dừng ở `checking` (paused: user) để báo lại credit 1.9 lớn hơn số đã báo ⇒ trả số mới (chỉ phần kiểm)
+  const recheck = doc.status === "checking" && doc.paused?.reason === "user"
+  if (doc.status !== "mapping_review" && doc.status !== "extracting" && !recheck) return null
   const extraction = await estimateExtraction(projectId, doc)
   if (!extraction) return null
   // Import động: check.service dùng `chunkBlocks` của file này
   const { estimateCheckCalls } = await import("./check.service.js")
   const check = await estimateCheckCalls(projectId)
   // FLF-456: file chỉ còn khung + chọn ngôn ngữ khác file ⇒ cộng phần dịch khung (cùng lượt Bắt đầu)
-  const translate = await skeletonTranslationEstimate(doc)
+  const translate = recheck ? null : await skeletonTranslationEstimate(doc)
   const translateBatches = translate?.batches ?? 0
   // FLF-458 (BF §2): tài liệu tham khảo đang chờ đọc cộng vào màn đọc khung, đọc cùng lượt Bắt đầu
   const { pendingSummaryCredits } = await import("../project/project-document.service.js")
-  const reference = await pendingSummaryCredits(projectId)
+  const reference = recheck ? { documents: 0, credits: 0 } : await pendingSummaryCredits(projectId)
   const estimate = {
     ...extraction,
     check_calls: check.calls,

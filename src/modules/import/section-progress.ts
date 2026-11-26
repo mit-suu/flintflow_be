@@ -23,7 +23,8 @@ export interface SectionProgress {
 export const sectionProgressOf = (sections: readonly TargetSection[], steps: readonly Pick<StepState, "id" | "status">[]): SectionProgress => {
   const todo = sections.filter((s) => s.status === "missing" && !isNonDraftHeading(s.section_id, s.title))
   const open = (owner: string) => steps.some((st) => (st.id === owner || st.id.startsWith(`${owner}@`)) && st.status !== "accepted" && st.status !== "skipped")
-  return { total: todo.length, remaining: todo.filter((s) => (s.owner_steps ?? []).some(open)).length }
+  return { total: todo.length, // Mục thiếu mà không có bước soạn nào (owner_steps rỗng) chưa xong: không ai soạn nó, không được coi là đã xong
+    remaining: todo.filter((s) => !(s.owner_steps ?? []).length || (s.owner_steps ?? []).some(open)).length }
 }
 
 /** Dự án chế độ 3/4 đang ở Luồng 2 ⇒ tiến độ theo mục; còn lại `null` (tiến độ theo bước như cũ). */

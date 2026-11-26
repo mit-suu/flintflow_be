@@ -18,21 +18,28 @@ export const OUT_OF_SCOPE_MIN_CONFIDENCE = 0.6
  * Heading của mục trống thuộc loại nội dung rõ ràng ngoài SRS (chi phí, ngân sách, báo giá). Danh sách ngắn có chủ ý: mục trống
  * không rõ loại thì không đoán, vẫn là mục của đích (mẫu của người dùng).
  */
+/** Ranh giới từ theo chữ cái / chữ số Unicode (không dùng \b vì chữ có dấu). */
+const W0 = String.raw`(?<![\p{L}\p{N}])`
+const W1 = String.raw`(?![\p{L}\p{N}])`
+const word = (re: string): RegExp => new RegExp(`${W0}(?:${re})${W1}`, "iu")
 const NON_SRS_HEADINGS: readonly RegExp[] = [
-  /dự\s*toán/iu,
-  /chi\s*phí/iu,
-  /ngân\s*sách/iu,
-  /báo\s*giá/iu,
-  /(?<![a-z])cost\s+(estimat\w*|breakdown|analysis)/iu,
-  /(?<![a-z])budget(ing)?(?![a-z])/iu,
-  /(?<![a-z])(price\s+quot\w*|quotation|pricing)/iu
+  // Dự toán (chi phí / kinh phí / dự án) - ví dụ của BF
+  word(String.raw`dự\s*toán`),
+  // Chi phí của dự án (không bắt "Quản lý chi phí", "Chi phí vận hành" là NFR)
+  word(String.raw`chi\s*phí\s+(?:dự\s*kiến|dự\s*án|phát\s*triển|triển\s*khai)`),
+  word(String.raw`ngân\s*sách(?:\s+(?:dự\s*án|dự\s*kiến|phát\s*triển|triển\s*khai))?`),
+  word(String.raw`báo\s*giá`),
+  word(String.raw`cost\s+(?:estimat\w*|breakdown)`),
+  word(String.raw`(?:project\s+)?budget(?:ing)?`),
+  word(String.raw`price\s+quot\w*|quotation`)
 ]
 
 const stripNumber = (heading: string): string => heading.trim().replace(/^[\dIVXivx]+(\.[\dIVXivx]+)*\.?\s+/, "")
 
 /** Heading của mục còn trống cho thấy nội dung ngoài SRS theo 29148. */
 export const isOutOfScopeHeading = (heading: string): boolean => {
-  const title = stripNumber(heading)
+  // NFC: chữ có dấu gõ dạng tổ hợp (e + dấu) vẫn khớp
+  const title = stripNumber(heading.normalize("NFC"))
   return !!title && NON_SRS_HEADINGS.some((re) => re.test(title))
 }
 

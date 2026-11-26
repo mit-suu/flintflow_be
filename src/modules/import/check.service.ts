@@ -117,6 +117,34 @@ export interface CheckBlock {
 export interface CheckScope {
   /** Section không đưa cho AI (Ngoài phạm vi, còn trống, tự sinh). */
   excluded_sections?: ReadonlySet<string>
+  /**
+   * Block chữ thuộc mục bị loại. Khối chữ dưới heading riêng có `section_id = null` và heading của mục lục / bìa là `unmapped`
+   * nên so `section_id` không đủ - nối khối với heading của nó (`excludedCheckBlocks`).
+   */
+  excluded_blocks?: ReadonlySet<string>
+}
+
+/**
+ * FLF-454: block thuộc mục bị loại khỏi lượt AI. Đi theo thứ tự tài liệu: heading mở mục (có trong cấu trúc đích / bản sơ bộ qua
+ * `block_id`, hoặc là mục tự sinh theo bảng heading) đặt mục hiện tại; heading con của mục đó giữ nguyên mục. Hàm thuần.
+ */
+export const excludedCheckBlocks = (
+  blocks: readonly { block_id: string; kind?: string; text?: string }[],
+  structure: { sections: readonly { section_id: string; status: "present" | "missing" | "out_of_scope"; block_id?: string }[] } | null | undefined,
+  headingMap: readonly { block_id: string; section_id: string }[] = []
+): Set<string> => {
+  const entries = new Map<string, boolean>()
+  for (const s of structure?.sections ?? []) if (s.block_id) entries.set(s.block_id, s.status !== "present")
+  const mapped = new Map(headingMap.map((h) => [h.block_id, h.section_id]))
+  const out = new Set<string>()
+  let excluded = false
+  for (const b of blocks) {
+    if (b.kind === "heading") {
+      const derived = isDerivedHeading(mapped.get(b.block_id) ?? "", b.text ?? "")
+      if (derived || entries.has(b.block_id)) excluded = derived || entries.get(b.block_id)!
+    } else if (excluded) out.add(b.block_id)
+  }
+  return out
 }
 
 /** Hàm thuần: id section loại khỏi lượt AI từ cấu trúc đích (hoặc bản sơ bộ) và bảng heading của file. */
@@ -135,6 +163,7 @@ const inCheckScope = (b: CheckBlock, scope: CheckScope): boolean =>
   !!b.text.trim() &&
   !(b.guidance_layer !== undefined && b.guidance_layer <= 3) &&
   !(b.section_id && scope.excluded_sections?.has(b.section_id)) &&
+  !scope.excluded_blocks?.has(b.block_id) &&
   !(b.section_id && isDerivedHeading(b.section_id, ""))
 
 export interface SemanticBatch {
@@ -324,26 +353,34 @@ const raisedText = (spine: Spine): string =>
  * I-5 cuối (`target_structure`), chưa finalize thì bản sơ bộ ở màn đọc khung. Dự án cũ không có ý định (`template_intent`) hoặc chưa
  * có kết quả so ⇒ không chặn (giữ luồng cũ).
  */
-const lacksTargetStructure = async (projectId: string): Promise<boolean> => {
+/** `preview`: chỉ bản sơ bộ ở màn đọc khung — đúng cái màn báo credit đã dùng, để so với lúc chạy thật. */
+type StructureSource = "latest" | "preview"
+
+const lacksTargetStructure = async (projectId: string, source: StructureSource = "latest"): Promise<boolean> => {
   const [project, profile] = await Promise.all([
     Project.findById(projectId, { template_intent: 1 }).lean(),
     TemplateProfile.findOne({ projectId }, { target_structure: 1, structure_preview: 1 }).lean()
   ])
   if (project?.template_intent !== "fixed" && project?.template_intent !== "free") return false
-  const mode = (profile?.target_structure ?? profile?.structure_preview)?.resolved_mode
+  const mode = (source === "preview" ? profile?.structure_preview : (profile?.target_structure ?? profile?.structure_preview))?.resolved_mode
   return mode !== undefined && mode !== 1
 }
 
 /** Block chữ đưa vào 1.9 + phạm vi loại (Ngoài phạm vi, mục tự sinh). Dùng chung cho lượt chạy và số credit báo trước. */
-const loadCheckInput = async (projectId: string): Promise<{ blocks: CheckBlock[]; scope: CheckScope }> => {
-  const [blocks, profile] = await Promise.all([
-    DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS }, kind: { $in: ["paragraph", "list_item", "table_cell"] } })
+export const loadCheckInput = async (projectId: string, source: StructureSource = "latest"): Promise<{ blocks: CheckBlock[]; scope: CheckScope }> => {
+  const [all, profile] = await Promise.all([
+    DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS }, kind: { $in: ["heading", "paragraph", "list_item", "table_cell"] } })
       .sort({ "anchor.ordinal": 1 })
-      .select("block_id text section_id mentions guidance_layer")
-      .lean<CheckBlock[]>(),
+      .select("block_id kind text section_id mentions guidance_layer")
+      .lean<(CheckBlock & { kind: string })[]>(),
     TemplateProfile.findOne({ projectId }, { target_structure: 1, structure_preview: 1, heading_map: 1 }).lean()
   ])
-  return { blocks, scope: { excluded_sections: excludedCheckSections(profile?.target_structure ?? profile?.structure_preview, profile?.heading_map) } }
+  const structure = source === "preview" ? profile?.structure_preview : (profile?.target_structure ?? profile?.structure_preview)
+  const blocks = all.filter((b) => b.kind !== "heading")
+  return {
+    blocks,
+    scope: { excluded_sections: excludedCheckSections(structure, profile?.heading_map), excluded_blocks: excludedCheckBlocks(all, structure, profile?.heading_map) }
+  }
 }
 
 type CheckFailure = Extract<MeteredResult<FindingsOutput>, { ok: false }>
@@ -427,6 +464,13 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string, gua
   // FLF-411 (U1-8): khung mẫu (chữ là hướng dẫn / ví dụ, Spine không nhận nội dung) ⇒ không có gì để AI đối chiếu, không trừ credit
   // FLF-454: file chưa đủ cấu trúc đích không chạy 1.9, không trừ credit
   if (!done.has(SEMANTIC_CHECK_STEP) && !(await isTemplateOnlyProject(projectId)) && !(await lacksTargetStructure(projectId))) {
+    // BF §2 "Báo trước khi chạy hàng loạt": credit 1.9 lúc chạy (cấu trúc đích cuối) lớn hơn số màn đọc khung đã báo (bản sơ bộ,
+    // vd sơ bộ chế độ 3/4 ⇒ 0, sau finalize chế độ 1) ⇒ dừng, báo lại số mới; bấm tiếp tục = xác nhận đúng số đó
+    if (await needsCreditReconfirm(projectId)) {
+      doc.paused = { reason: "user", at: new Date() }
+      await doc.save()
+      return false
+    }
     const failure = await runSemanticCheck(projectId, String(doc._id), userId, done, guard)
     if (failure) {
       doc.paused = { reason: failure.reason, at: new Date() }
@@ -442,17 +486,29 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string, gua
   return true
 }
 
+const needsCreditReconfirm = async (projectId: string): Promise<boolean> => {
+  const profile = await TemplateProfile.findOne({ projectId }, { structure_preview: 1, check_credit_notice: 1 })
+  if (!profile?.structure_preview) return false
+  const [actual, announced] = await Promise.all([estimateCheckCalls(projectId), estimateCheckCalls(projectId, "preview")])
+  if (actual.credits <= announced.credits) return false
+  if ((profile.check_credit_notice?.credits ?? -1) >= actual.credits) return false
+  profile.check_credit_notice = { credits: actual.credits, at: new Date().toISOString() }
+  profile.markModified("check_credit_notice")
+  await profile.save()
+  return true
+}
+
 /**
  * FLF-343: ước tính lượt AI của bước kiểm tra (1.11) cho màn báo credit một lần sau upload — cùng cách chia lô của lượt chạy
  * (`semanticBatches` trên block chữ, section hiện tại) + một lượt kiểm chéo. Là cận trên: sau finalize section tạm
  * (`function:@B0012`) đổi sang id thật ngắn hơn nên số lô không tăng; tài liệu không có phần tử nào thì lượt kiểm chéo không chạy.
  */
-export const estimateCheckCalls = async (projectId: string): Promise<{ batches: number; calls: number; credits: number }> => {
+export const estimateCheckCalls = async (projectId: string, source: StructureSource = "latest"): Promise<{ batches: number; calls: number; credits: number }> => {
   // FLF-411 (U1-8): khung mẫu không chạy 1.11 (`runImportCheck`) ⇒ màn đọc khung không báo "Dự kiến ~6 credit"
   if (await isTemplateOnlyProject(projectId)) return { batches: 0, calls: 0, credits: 0 }
   // FLF-454: file chưa đủ cấu trúc đích ⇒ 1.9 không chạy, không báo credit
-  if (await lacksTargetStructure(projectId)) return { batches: 0, calls: 0, credits: 0 }
-  const { blocks, scope } = await loadCheckInput(projectId)
+  if (await lacksTargetStructure(projectId, source)) return { batches: 0, calls: 0, credits: 0 }
+  const { blocks, scope } = await loadCheckInput(projectId, source)
   const batches = semanticBatches(blocks, SEMANTIC_BATCH_CHARS, scope).length
   const [batchCost, crossCost] = await Promise.all([getActionCost(ActionType.IMPORT_SEMANTIC_CHECK), getActionCost(ActionType.IMPORT_CROSS_CHECK)])
   return { batches, calls: batches + 1, credits: batches * batchCost + crossCost }

@@ -132,6 +132,8 @@ export const MODEL_OWNED_RULES: ReadonlySet<string> = new Set([
   "import_needs_review",
   // FLF-363: tiêu đề và nội dung chỉ hai mục khác nhau lúc import — chỉ import đặt được, recompute không đóng
   "import_title_content_mismatch",
+  // FLF-453: cờ vòng AI rà soát phần có sẵn (chế độ 3/4) — chỉ import đặt được, recompute không đóng
+  "import_review",
   "cr_consistency",
   // FLF-449 việc 5, 6: cờ AI S-9.2 / S-8.4, tên lens ở `Flag.lens`
   "ai_review"
