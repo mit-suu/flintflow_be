@@ -223,6 +223,23 @@ export const pendingSummaryEstimate = async (
 }
 
 /**
+ * FLF-458: số tài liệu tham khảo đang chờ đọc + credit để đọc — cộng vào số báo trước ở màn đọc khung (`GET /import`
+ * `credit_estimate`, BF §2: có SRS thì đọc cùng lượt Bắt đầu). Không kiểm quyền (caller đã qua `authorizeMode1`).
+ */
+export const pendingSummaryCredits = async (projectId: string): Promise<{ documents: number; credits: number }> => {
+  const documents = await ProjectDocument.countDocuments({ projectId, supersededBy: null, parseStatus: "success", summaryStatus: "pending" })
+  return { documents, credits: documents * (documents ? await summarizeCreditCost() : 0) }
+}
+
+/** FLF-458: bấm Bắt đầu ở màn đọc khung ⇒ đọc luôn các tài liệu tham khảo đang chờ (đã báo credit cùng số của lượt đọc file). */
+export const summarizePendingAtStart = async (projectId: string, userId: string): Promise<void> => {
+  const { documents } = await pendingSummaryCredits(projectId)
+  if (!documents) return
+  const orgId = await resolveWalletOrg(projectId)
+  if (orgId) await summarizeReferenceDocuments(orgId, userId, projectId)
+}
+
+/**
  * FLF-458: AI đọc các tài liệu tham khảo đã tải lên nhưng chưa đọc (`summaryStatus: "pending"` sau khi người dùng xác
  * nhận credit ở `pendingSummaryEstimate`); `documentIds` rỗng ⇒ đọc hết các tài liệu đang chờ. Mỗi tài liệu gọi AI riêng,
  * lỗi một tài liệu không chặn các tài liệu khác (giữ hành vi cũ: parse/summarize lỗi không chặn phần còn lại).

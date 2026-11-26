@@ -5,11 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const h = vi.hoisted(() => ({ docs: [] as { originalName: string; extractedText: string; summaryStatus: string; summary?: string; save: () => Promise<void> }[], ai: vi.fn() }))
 
-vi.mock("./project-document.model.js", () => ({ ProjectDocument: { find: async () => h.docs } }))
+vi.mock("./project-document.model.js", () => ({ ProjectDocument: { find: async () => h.docs, countDocuments: async () => h.docs.length } }))
 vi.mock("./project.service.js", () => ({ getProjectById: vi.fn(async () => ({})) }))
 vi.mock("../../shared/ai/ai-action.service.js", () => ({ executeAiAction: h.ai }))
 
-import { summarizeReferenceDocuments } from "./project-document.service.js"
+import { pendingSummaryCredits, summarizeReferenceDocuments } from "./project-document.service.js"
 
 const doc = (name: string) => ({ originalName: name, extractedText: "x", summaryStatus: "pending", save: vi.fn(async () => undefined) })
 
@@ -38,5 +38,17 @@ describe("summarizeReferenceDocuments - FLF-458 hết credit", () => {
     await summarizeReferenceDocuments("o", "u", "507f1f77bcf86cd799439011")
     expect(a.summaryStatus).toBe("failed")
     expect(b.summaryStatus).toBe("success")
+  })
+})
+
+describe("pendingSummaryCredits - FLF-458 cộng vào màn đọc khung", () => {
+  it("không tài liệu chờ ⇒ 0 credit; có n tài liệu ⇒ n lượt đọc", async () => {
+    h.docs = []
+    expect(await pendingSummaryCredits("p")).toEqual({ documents: 0, credits: 0 })
+    h.docs = [doc("a"), doc("b")]
+    const r = await pendingSummaryCredits("p")
+    expect(r.documents).toBe(2)
+    expect(r.credits).toBeGreaterThan(0)
+    expect(r.credits % 2).toBe(0)
   })
 })
