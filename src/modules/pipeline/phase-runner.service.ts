@@ -17,7 +17,7 @@
 
 import { runStep, defaultStepRunnerDeps, recordUserMessage, B0_FIELD_STEPS, type Emit, type GateResolution, type StepRunnerDeps } from "./step-runner.service.js"
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
-import { addendumForUnit, assumptionsForPrompt, loadConversationVariables, projectStep, sectionsFedBy } from "./context-projection.js"
+import { addendumForUnit, assumptionsForPrompt, loadConversationVariables, projectStep, sectionsFedBy, settledProjection } from "./context-projection.js"
 import { mergeStepDocumentQueries, stepDocumentQuery } from "./step-document-query.js"
 import { SYSTEM_NAME_FIELD, askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt, type AnsweredTopic } from "./decisions.service.js"
 import { FAST_PATH_PHASES, interviewBudget, interviewGuidance, interviewProjection, noQuestionAck, reconcileReply, trimTailQuestion, withoutQuestions } from "./fast-path.js"
@@ -410,7 +410,8 @@ const askPhaseInterview = async (
           fast_path: fast,
           missing,
           pending_questions: [],
-          projection: fast ? interviewProjection(spine, unit) : {},
+          // FLF-472: giai đoạn thường vẫn thấy quy tắc cấp cao + phạm vi 1.0 đã chốt (trước đây `{}` ở S-* ⇒ hỏi lại 4 giờ / 10 năm)
+          projection: fast ? interviewProjection(spine, unit) : unit.startsWith("S-") ? settledProjection(spine) : {},
           addendum: addendumForUnit(spine, unit),
           // FLF-358: giả định còn mở của giai đoạn
           assumptions: assumptionsForPrompt(spine, unit),

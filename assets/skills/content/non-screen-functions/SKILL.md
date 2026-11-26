@@ -1,7 +1,7 @@
 ---
 skill_id: non-screen-functions
 kind: content
-version: 0.4.0
+version: 0.5.0
 description: "S-4.4 functions with no screen - cron jobs, webhooks, background engines"
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -73,6 +73,7 @@ includes: [], extends: []}`) rather than leaving the function unreachable from Â
 
 ## Rules
 
+0. Read the Brief notes and the high-level rules first: a time, a lead time or a hold the user already gave (reminders 24h and 2h before, a slot held 15 minutes) goes straight into the function; never write "the user has not said" for it.
 1. Ids continue the existing sequence (`draft-to-ops` rule 5); check the projection first.
 2. `feature_id` and every id in `actor_ids`/`function_ids` must exist after this batch.
 3. Never set `screen_id` to a screen here - that is what makes it a non-screen function.
