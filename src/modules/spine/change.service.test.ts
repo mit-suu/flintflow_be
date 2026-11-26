@@ -1958,3 +1958,45 @@ describe("FLF-469: CR thêm / xoá cả chức năng ⇒ luật 3i / 3j của l�
     expect(vars.projection.use_case_context).toBeUndefined()
   })
 })
+
+describe("FLF-473 (L1): ngữ cảnh lệnh sửa nhặt phần tử qua tên đã dịch", () => {
+  const spine = (): Spine => {
+    const s = structuredClone(FIXTURE)
+    s.roles = [{ id: "R03", name: "Doctor", actor_id: s.actors[0]?.id ?? "A01" }] as Spine["roles"]
+    s.functions = [
+      { ...s.functions[0], id: "FN90", name: "Confirm visit", description: "The doctor reviews the booking.", normal: ["Doctor confirms the slot"] }
+    ] as Spine["functions"]
+    return s
+  }
+  const names = new Map([
+    ["roles:R03", "Bác sĩ"],
+    ["use_cases:UC-01", "Gửi nhắc lịch"]
+  ])
+
+  it("lệnh 'Đổi tên vai Bác sĩ thành Nha sĩ' ⇒ có vai R03 và chức năng nhắc doctor, kèm mục lục", () => {
+    const p = buildChangeProjection(spine(), "Đổi tên vai Bác sĩ thành Nha sĩ trong toàn tài liệu", [], names)
+    expect((p.roles as { id: string }[]).map((r) => r.id)).toContain("R03")
+    expect((p.functions as { id: string }[]).map((f) => f.id)).toContain("FN90")
+    expect(p.old_name_mentions).toMatchObject({ old_names: expect.arrayContaining(["Doctor"]) })
+    expect((p.element_index as Record<string, { id: string; name_vi?: string }[]>).roles).toEqual([{ id: "R03", name: "Doctor", name_vi: "Bác sĩ" }])
+  })
+
+  it("gõ không dấu vẫn khớp tên đã dịch", () => {
+    const p = buildChangeProjection(spine(), "doi ten vai bac si thanh Nha si", [], names)
+    expect((p.roles as { id: string }[]).map((r) => r.id)).toContain("R03")
+  })
+
+  it("không khớp gì vẫn có mục lục kèm name_vi; khớp vẫn có mục lục", () => {
+    const s = spine()
+    const none = buildChangeProjection(s, "đổi ưu tiên Gửi nhắc lịch thành Must", [], new Map([["roles:R03", "Bác sĩ"]]))
+    expect(none.element_index).toBeDefined()
+    const hit = buildChangeProjection(s, "Đổi tên actor A01 thành Product Owner", [], names)
+    expect(hit.actors).toBeDefined()
+    expect(hit.element_index).toBeDefined()
+  })
+
+  it("không có bản dịch ⇒ như trước (không name_vi)", () => {
+    const p = buildChangeProjection(spine(), "Đổi tên vai Doctor thành Dentist")
+    expect((p.element_index as Record<string, Record<string, unknown>[]>).roles[0]).not.toHaveProperty("name_vi")
+  })
+})

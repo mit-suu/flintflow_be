@@ -1005,3 +1005,53 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
     expect(accepted.message_vi).toBeUndefined()
   })
 })
+
+describe("gate.service: FLF-482 (C2) - lời sửa ngoài mục của bước", () => {
+  const reply = (data: Record<string, unknown>) => ({ ...draftReply([]), data: { ops: [], ...data } }) as unknown as AiActionResult<OpTransaction>
+
+  it("model báo out_of_scope, không ghi op ⇒ route_to_change mang đúng câu user, lời cổng nói thật", async () => {
+    seedSpine()
+    const version = await seedInProgressWithContent(STEP, "A90")
+    const result = await gate(
+      PROJECT,
+      STEP,
+      USER,
+      { action: "revision", note: "bản 1.0 bỏ hai nhóm quản lý chi nhánh", base_version: version },
+      { draftExecutor: async () => reply({ out_of_scope: "drop two feature groups from release", notes: "Tôi sẽ cập nhật phạm vi 1.0." }) }
+    )
+    expect(result.route_to_change).toEqual({ instruction: "bản 1.0 bỏ hai nhóm quản lý chi nhánh" })
+    expect(result.message_vi).toContain("Sửa tài liệu")
+    expect(result.message_vi).not.toMatch(/sẽ cập nhật/)
+  })
+
+  it("không ghi op, không out_of_scope mà lời hứa 'sẽ cập nhật' ⇒ thay bằng câu trung thực, không route", async () => {
+    seedSpine()
+    const version = await seedInProgressWithContent(STEP, "A90")
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const result = await gate(
+      PROJECT,
+      STEP,
+      USER,
+      { action: "revision", note: "nhận thêm ZaloPay", base_version: version },
+      { draftExecutor: async () => reply({ notes: "Tôi sẽ cập nhật cổng thanh toán ở phần vai trò." }) }
+    )
+    expect(result.route_to_change).toBeUndefined()
+    expect(result.message_vi).toContain("chưa ghi gì")
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("[gate-promise-no-op]"))
+    warn.mockRestore()
+  })
+
+  it("lượt có ghi op và không out_of_scope ⇒ không đổi lời, không route", async () => {
+    seedSpine()
+    const version = await seedInProgressWithContent(STEP, "A90")
+    const result = await gate(
+      PROJECT,
+      STEP,
+      USER,
+      { action: "revision", note: "thêm actor", base_version: version },
+      { draftExecutor: async () => reply({ ops: [{ op: "add", path: "actors[]", value: { id: "A95", name: "New", kind: "human", description: "q" } }], notes: "Tôi đã thêm vai mới." }) }
+    )
+    expect(result.route_to_change).toBeUndefined()
+    expect(result.message_vi).toBe("Tôi đã thêm vai mới.")
+  })
+})

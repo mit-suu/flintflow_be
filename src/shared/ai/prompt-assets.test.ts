@@ -222,9 +222,9 @@ describe("FLF-449 N3: skill hành động nạp reference khai ở prompt_refere
     expect((await getPromptTemplate(ActionType.CONSISTENCY_PASS)).template).toBe(template)
   })
 
-  it("FLF-449 việc 5, 6: review-section 1.2.2 gọn ≤ 150 dòng, có luật quote và 5 lens mới ở reference", async () => {
+  it("FLF-449 việc 5, 6: review-section 1.2.4 gọn ≤ 150 dòng, có luật quote và 5 lens mới ở reference", async () => {
     const skill = getSkill("review-section", { references: ["lenses"] })
-    expect(skill.version).toBe("1.2.2")
+    expect(skill.version).toBe("1.2.4")
     expect(skill.template.split("\n").length).toBeLessThanOrEqual(150)
     const { template } = await getPromptTemplate(ActionType.REVIEW)
     expect(template).toContain("verbatim")

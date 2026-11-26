@@ -30,6 +30,7 @@ import { replyLanguageForSessionId } from "../project/reply-language.service.js"
 import { assemble } from "../render/assemble.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { applyTransaction, CHANGE_RANGE_INVALID } from "../spine/op-engine.js"
+import { retiredIds } from "../spine/change-log.js"
 import type { Op } from "../spine/op.types.js"
 import type { Change, Diagram, Spine, SpineRecord, StepState } from "../spine/spine.types.js"
 import * as flagsService from "../spine/flags.service.js"
@@ -38,6 +39,7 @@ import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import { layoutRenderDeps, renderDiagrams, sameDiagramSubject, staleRenderedDiagrams, type DiagramServiceDeps } from "../diagram/diagram.service.js"
 import { loadRenderContext } from "../diagram/render-context.js"
 import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "../spine/source-hash.js"
+import { stripInternalCodes } from "../spine/human-labels.js"
 import { targetOfDiagram, type RenderTarget } from "../diagram/renderers/index.js"
 import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf, screenLoopOrder } from "./step-registry.js"
 import { addendumForUnit, assumptionsForPrompt, buildStepContext, elicitProjection, getStepSpec, loadConversationVariables, loadLastAiReply, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
@@ -1187,6 +1189,8 @@ export interface DraftPhaseResult {
   summary?: ChangeSummary[]
   /** `notes` model viết cho cổng (FLF-232: tin nhắn cổng 2–4 câu). Lô rỗng vẫn có — lý do step không đổi gì nằm ở đây. */
   notes?: string
+  /** FLF-482 (C2): phần lời sửa nằm ngoài các trường bước này được ghi (chỉ lượt `revision`). */
+  outOfScope?: string
 }
 
 /**
@@ -1240,6 +1244,7 @@ export const runDraftPhase = async (
       spine,
       callKind,
       documentLanguage,
+      retiredLoader: () => retiredIds(projectId),
       ...(deps.midPhaseRun ? { midPhaseRun: true } : {}),
       // Lượt thử lại phải nói ngay, bằng lời thường — user đang nhìn màn hình chờ (03 Lớp 3)
       onAttempt: ({ attempt, max, previousErrors }) => {
@@ -1276,7 +1281,10 @@ export const runDraftPhase = async (
 
   for (const attempt of draftResult.attempts) emit({ type: "draft", step_id: stepId, attempt: attempt.attempt })
 
-  const notes = draftResult.notes?.trim() ? { notes: draftResult.notes.trim() } : {}
+  const notes = {
+    ...(draftResult.notes?.trim() ? { notes: draftResult.notes.trim() } : {}),
+    ...(draftResult.outOfScope ? { outOfScope: draftResult.outOfScope } : {})
+  }
   if (!draftResult.txn) return { spineVersion: spine.spine_version, applied: false, ...notes }
 
   try {
@@ -2242,7 +2250,8 @@ export const runStep = async (
       spineVersion = batched.spineVersion
       if (batched.wroteOps) wroteOps = true
       stepSummary.push(...batched.summary)
-      if (batched.notes) gateNotes = batched.notes
+      // FLF-480: tin cổng do model viết có thể còn mã nội bộ của câu hỏi mở đã đóng (OR01…) ⇒ bỏ trước khi người dùng thấy
+      if (batched.notes) gateNotes = stripInternalCodes(batched.notes)
     }
 
     const sectionsAtReview = ownedSections()
@@ -2375,7 +2384,7 @@ export const elicitGuidance = (ctx: StepContext): string => {
 export const noChangeReason = (templateId: string, needsDraft: boolean, language: ReplyLanguage = "vi"): string => {
   if (LOOP_BOOKKEEPING_TEMPLATES.has(templateId)) {
     return byLanguage(language, {
-      vi: "Bước sổ sách của vòng màn hình - không có nội dung để ghi.",
+      vi: "Màn này không còn gì cần ghi thêm.",
       en: "A bookkeeping step of the screen loop - there's no content to write."
     })
   }

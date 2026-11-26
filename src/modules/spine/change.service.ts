@@ -24,7 +24,7 @@ import { impactOfChanges, type Impact } from "./impact.service.js"
 import * as flagsService from "./flags.service.js"
 import { OP_INVALID, type ApplyResult, type Op, type PreviewResult, type Transaction, type Violation } from "./op.types.js"
 import { stampAddendum } from "./addendum-stamp.js"
-import { nameElementIds } from "./human-labels.js"
+import { internalElementNames, nameElementIds as nameIds } from "./human-labels.js"
 import { BRIEF_PROJECT_WRITE_MESSAGE, briefCoreEntries, isInBriefPhase, writesProjectVisionOrGoals } from "./brief-core.js"
 import { PathError, parsePath } from "./path-resolver.js"
 import { USE_CASE_NAME_FIX, useCaseNameIssues, type RuleProfile } from "./deterministic-check.js"
@@ -98,6 +98,8 @@ import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import type { ChangeInstructionOutput, LocalizedEntry } from "../../shared/ai/response-parser.js"
 import { documentLanguageForTurn, documentLanguageInput, languagePairOf, type TurnDocumentLanguage, type TurnLanguagePair } from "../translation/turn-language.js"
 import { captureForTurn } from "../translation/capture.service.js"
+import * as translationRepository from "../translation/translation.repository.js"
+import { hashSource, translationUnits } from "../translation/translation-units.js"
 import { assertDraftUnlocked } from "./draft-lock.js"
 import { expandIndexSelectors } from "./index-selector-fix.js"
 import { stillOpenIn, targetFlagsOf, unresolvedAfter, unresolvedProblemText, type TargetFlag } from "./flag-target.js"
@@ -133,6 +135,13 @@ export class NeedsClarificationError extends ApiError {
  * cờ đi qua `/flags` (waive/recompute), step/progress qua step runner và gate, baseline qua `/baseline`,
  * section và diagram do engine/render ghi.
  */
+/**
+ * FLF-480: thay đổi người dùng đọc được trong bản xem trước / số đếm "Đã áp dụng N thay đổi". Giả định (`assumptions`) có
+ * dòng riêng, hàng đợi màn / cờ tiến độ (`progress.screen_queue[=S18]`) là sổ sách do cascade dọn - đều không đếm, để số
+ * xem trước bằng số báo sau khi áp và không in đường dẫn nội bộ.
+ */
+export const isUserVisiblePath = (path: string): boolean => !path.startsWith("assumptions") && !path.startsWith("progress")
+
 export const SYSTEM_MANAGED_ROOTS: ReadonlySet<string> = new Set(["flags", "steps", "progress", "baselines", "sections", "diagrams"])
 
 export const notWritableViolations = (ops: readonly Op[], spine?: Pick<Spine, "project" | "progress" | "steps">): Violation[] =>
@@ -616,16 +625,84 @@ const COLLECTION_NAME_HINTS: readonly [(typeof TARGET_COLLECTIONS)[number], RegE
   ["use_cases", /use cases?|ca sử dụng/i]
 ]
 
+/**
+ * FLF-493 (I1): lệnh nói về thiết bị / nền tảng người dùng ("Bệnh nhân chỉ dùng app trên điện thoại; lễ tân, bác sĩ dùng web").
+ * Câu như vậy hay không nhắc tên actor nào theo chữ model đọc được ⇒ không có dòng này model chỉ sửa một câu yêu cầu phi chức năng
+ * và không đặt `actors[].platforms`, mockup màn không đổi.
+ */
+const PLATFORM_HINT = /nền tảng|platform|điện thoại|di động|mobile|app|ứng dụng|web|trình duyệt|máy tính|desktop|tablet|devices?|thiết bị/i
+
+/** Số actor tối đa đưa vào projection khi lệnh nói về nền tảng — đủ cho mọi actor người của một dự án. */
+const PLATFORM_ACTOR_LIMIT = 60
+
 /** Lệnh nói về mục tiêu / tầm nhìn / phạm vi phát hành của §1 Tổng quan sản phẩm. */
 const PROJECT_OVERVIEW_HINT = /mục tiêu|muc tieu|tầm nhìn|tam nhin|phạm vi phát hành|trong phạm vi|ngoài phạm vi|tổng quan sản phẩm|product overview|\bgoals?\b|\bvision\b|release scope|in scope|out of scope/i
+
+/**
+ * FLF-473 (L1): tên đã dịch của phần tử (khoá `<collection>:<id>`), để lệnh viết bằng ngôn ngữ tài liệu ("Bác sĩ", "Gửi nhắc lịch")
+ * nhặt được phần tử mà Spine lưu tiếng Anh. Dự án không có ngôn ngữ riêng (`language = null`) hoặc đọc lỗi ⇒ rỗng.
+ */
+export type NameTranslations = ReadonlyMap<string, string>
+
+const NAME_UNIT_KEY = /^([a-z_]+)\[id=([^\]]+)\]\.(?:name|term)$/
+
+export const loadNameTranslations = async (projectId: string, spine: Spine, language: TurnLanguagePair | null): Promise<NameTranslations> => {
+  if (!language) return new Map()
+  try {
+    const { actors, roles, use_cases, features, screens, functions, entities, glossary } = spine
+    const units = translationUnits({ actors, roles, use_cases, features, screens, functions, entities, glossary }).filter(
+      (u) => NAME_UNIT_KEY.test(u.key) && typeof u.value === "string"
+    )
+    const stored = await translationRepository.findByHashes(projectId, language.locale, units.map((u) => hashSource(u.value)))
+    return new Map(
+      units.flatMap((u) => {
+        const text = stored.get(hashSource(u.value))?.text
+        const m = NAME_UNIT_KEY.exec(u.key)
+        return m && typeof text === "string" && text.trim() ? [[`${m[1]}:${m[2]}`, text.trim()] as const] : []
+      })
+    )
+  } catch (err) {
+    console.warn("[loadNameTranslations] Không đọc được tên đã dịch - lệnh chỉ khớp theo tên gốc:", err)
+    return new Map()
+  }
+}
+
+/** Loại phần tử có mục lục gọn (id + tên + tên đã dịch) trong ngữ cảnh lệnh sửa - đủ cả loại, không phụ thuộc lệnh có khớp gì. */
+const ELEMENT_INDEX_COLLECTIONS = ["actors", "roles", "use_cases", "functions", "screens", "features"] as const
+const ELEMENT_INDEX_LIMIT = 200
+
+/** Lệnh đổi tên ("Đổi tên vai 'Bác sĩ' thành 'Nha sĩ'", "rename ..."). */
+const RENAME_HINT = /đổi\s+tên|đặt\s+lại\s+tên|gọi\s+lại|\brename[ds]?\b/i
+
+/** Loại phần tử mà lệnh đổi tên nhắm tới (tên vai / actor / thuật ngữ). */
+const RENAME_SOURCE_COLLECTIONS = ["roles", "actors", "glossary"] as const
+
+/** Loại phần tử được quét tìm chỗ nhắc tên cũ. */
+const RENAME_SCAN_COLLECTIONS = ["roles", "actors", "use_cases", "functions", "screens", "business_rules", "messages", "glossary", "features"] as const
+
+const stringsIn = (value: unknown, out: string[] = []): string[] => {
+  if (typeof value === "string") out.push(value)
+  else if (Array.isArray(value)) for (const v of value) stringsIn(v, out)
+  else if (value && typeof value === "object") for (const v of Object.values(value)) stringsIn(v, out)
+  return out
+}
+
+/** Tên cũ như một từ (hoa / thường, số nhiều đơn giản: Doctor, doctor, doctors). */
+const oldNameRegex = (name: string): RegExp => new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(name)}(?:e?s)?(?![\\p{L}\\p{N}])`, "iu")
 
 /**
  * `layout` tuỳ chọn (FLF-473): mục import có số/tên mình (`TemplateProfile.layout`) — dùng để nhận "mục 2.2.1" / tên
  * mục mẫu và gom các phần nối thuộc mục đó. Dự án không phải import (mode 2, hoặc chưa có profile) ⇒ bỏ qua, hàm thuần
  * như trước (chỉ nhận Spine).
  */
-export const buildChangeProjection = (spine: Spine, instruction: string, layout: readonly LayoutEntry[] = []): Record<string, unknown> => {
+export const buildChangeProjection = (
+  spine: Spine,
+  instruction: string,
+  layout: readonly LayoutEntry[] = [],
+  names: NameTranslations = new Map()
+): Record<string, unknown> => {
   const haystack = instruction.toLowerCase()
+  const foldedHaystack = foldDiacritics(haystack)
   const projection: Record<string, unknown> = {}
   let matched = 0
   // FLF-200 (BUG-08): model phải thấy id nào ĐANG tồn tại, nếu không nó đoán `UC18`, `UC-REMIND` rồi lô
@@ -644,7 +721,14 @@ export const buildChangeProjection = (spine: Spine, instruction: string, layout:
       const id = String(element.id ?? "")
       if (id.length > 0 && haystack.includes(id.toLowerCase())) return true
       const label = textOf(element)
-      return label.length >= MIN_NAME_MATCH && haystack.includes(label.toLowerCase())
+      if (label.length >= MIN_NAME_MATCH && haystack.includes(label.toLowerCase())) return true
+      // FLF-473 (L1): tên đã dịch ("Bác sĩ") - khớp cả khi người dùng gõ không dấu
+      const translated = names.get(`${collection}:${id}`)
+      if (translated && translated.length >= MIN_NAME_MATCH) {
+        const lower = translated.toLowerCase()
+        return haystack.includes(lower) || foldedHaystack.includes(foldDiacritics(lower))
+      }
+      return false
     })
     if (hits.length === 0) continue
     projection[collection] = hits.slice(0, PROJECTION_ELEMENT_LIMIT)
@@ -695,6 +779,53 @@ export const buildChangeProjection = (spine: Spine, instruction: string, layout:
       if (!Array.isArray(list) || list.length === 0) continue
       projection[collection] = list.slice(0, SECTION_ELEMENT_LIMIT)
       matched += Math.min(list.length, SECTION_ELEMENT_LIMIT)
+    }
+  }
+
+  // FLF-493 (I1): lệnh nói về thiết bị ⇒ model thấy mọi actor người kèm `platforms` (`null` = chưa khai) và nền tảng của sản phẩm
+  const aboutPlatforms = PLATFORM_HINT.test(haystack) && spine.actors.some((a) => a.kind === "human")
+  if (aboutPlatforms) {
+    const hits = (projection.actors as Spine["actors"] | undefined) ?? []
+    const humans = spine.actors.filter((a) => a.kind === "human").slice(0, PLATFORM_ACTOR_LIMIT)
+    const byId = new Map<string, Record<string, unknown>>()
+    for (const a of [...humans, ...hits]) byId.set(a.id, { ...a, ...(a.kind === "human" ? { platforms: a.platforms ?? null } : {}) })
+    projection.actors = [...byId.values()]
+    matched += humans.length
+  }
+
+  // FLF-493 (L1): lệnh đổi tên ⇒ gom MỌI chỗ nhắc tên cũ (chức năng, màn, quy tắc, thông báo...) vào ngữ cảnh để model quyết từng chỗ
+  // (quyết định 3: server không thay chữ máy móc - dễ sai ở số nhiều, sở hữu cách, chỗ khác nghĩa)
+  if (RENAME_HINT.test(instruction)) {
+    const oldNames = [
+      ...new Set(
+        RENAME_SOURCE_COLLECTIONS.flatMap((collection) =>
+          ((projection[collection] as Record<string, unknown>[] | undefined) ?? []).flatMap((el) => {
+            const name = typeof el.name === "string" ? el.name : typeof el.term === "string" ? el.term : ""
+            return name.length >= MIN_NAME_MATCH ? [name] : []
+          })
+        )
+      )
+    ]
+    if (oldNames.length > 0) {
+      const regexes = oldNames.map(oldNameRegex)
+      let mentioned = 0
+      for (const collection of RENAME_SCAN_COLLECTIONS) {
+        const list = spine[collection] as unknown as Record<string, unknown>[]
+        if (!Array.isArray(list)) continue
+        const have = (projection[collection] as Record<string, unknown>[] | undefined) ?? []
+        const haveIds = new Set(have.map((el) => String(el.id)))
+        const extra = list.filter((el) => !haveIds.has(String(el.id)) && stringsIn(el).some((text) => regexes.some((re) => re.test(text))))
+        if (extra.length === 0) continue
+        projection[collection] = [...have, ...extra].slice(0, Math.max(SECTION_ELEMENT_LIMIT, have.length))
+        mentioned += extra.length
+      }
+      if (mentioned > 0) {
+        projection.old_name_mentions = {
+          old_names: oldNames,
+          note: "These elements mention the old name. Decide for each place whether it refers to the renamed role/actor/term and replace it only there; leave same-word uses with a different meaning."
+        }
+        matched += mentioned
+      }
     }
   }
 
@@ -749,10 +880,23 @@ export const buildChangeProjection = (spine: Spine, instruction: string, layout:
   const project = {
     name: spine.project.name,
     system_name: spine.project.system_name ?? null,
-    ...(aboutOverview ? { vision: spine.project.vision, goals: spine.project.goals, release_scope: spine.project.release_scope } : {})
+    ...(aboutOverview ? { vision: spine.project.vision, goals: spine.project.goals, release_scope: spine.project.release_scope } : {}),
+    ...(aboutPlatforms ? { form_factor: spine.project.form_factor } : {})
   }
 
-  if (matched > 0) return { project, ...projection, existing_ids: existingIds }
+  // FLF-473 (L1): mục lục gọn luôn có (cả khi đã khớp phần tử) - model tự đổi tên thành id, không đòi người dùng đưa mã
+  const elementIndex: Record<string, unknown[]> = {}
+  for (const collection of ELEMENT_INDEX_COLLECTIONS) {
+    const list = spine[collection] as unknown as Record<string, unknown>[]
+    if (!Array.isArray(list) || list.length === 0) continue
+    elementIndex[collection] = list.slice(0, ELEMENT_INDEX_LIMIT).map((el) => {
+      const translated = names.get(`${collection}:${String(el.id)}`)
+      return { id: el.id, name: el.name, ...(translated && translated !== el.name ? { name_vi: translated } : {}) }
+    })
+  }
+  const withIndex = Object.keys(elementIndex).length > 0 ? { element_index: elementIndex } : {}
+
+  if (matched > 0) return { project, ...projection, ...withIndex, existing_ids: existingIds }
 
   const index: Record<string, unknown> = {}
   for (const collection of TARGET_COLLECTIONS) {
@@ -763,7 +907,7 @@ export const buildChangeProjection = (spine: Spine, instruction: string, layout:
   if (spine.custom_sections.length > 0) {
     index.custom_sections = spine.custom_sections.slice(0, PROJECTION_ELEMENT_LIMIT).map(({ id, heading }) => ({ id, label: heading }))
   }
-  return { project, ...index, ...(projection.brief_core ? { brief_core: projection.brief_core } : {}), existing_ids: existingIds }
+  return { project, ...index, ...withIndex, ...(projection.brief_core ? { brief_core: projection.brief_core } : {}), existing_ids: existingIds }
 }
 
 // ─── nhận diện lệnh sửa trong chat thường ────────────────────────
@@ -1254,6 +1398,8 @@ const opsFromInstruction = async (
   const language = await (deps.documentLanguage ?? documentLanguageForTurn)(projectId)
   // FLF-473: layout import — để buildChangeProjection nhận "mục 2.2.1" / tên mục mẫu (phần nối). Mode 2 ⇒ undefined, bỏ qua.
   const layout = (await (deps.loadLayout ?? defaultLoadLayout)(projectId)) ?? []
+  // FLF-473 (L1): tên đã dịch của phần tử - lệnh tiếng Việt nhặt được phần tử Spine lưu tiếng Anh
+  const nameTranslations = await loadNameTranslations(projectId, spine, languagePairOf(language))
   const call = (previousProblems?: string) =>
     deps.changeExecutor(
       ActionType.CHANGE_INSTRUCTION,
@@ -1266,7 +1412,7 @@ const opsFromInstruction = async (
           has_baseline: spine.baselines.length > 0,
           // Câu trả lời cho câu hỏi làm rõ ("A03") thường không nhắc lại thực thể của yêu cầu gốc ⇒ dò cả đoạn hội thoại
           projection: {
-            ...buildChangeProjection(spine, history ? `${history}\n${instruction}` : instruction, layout),
+            ...buildChangeProjection(spine, history ? `${history}\n${instruction}` : instruction, layout, nameTranslations),
             ...(ucMode
               ? {
                   use_case_context: {
@@ -1357,6 +1503,9 @@ const opsFromInstruction = async (
   }
 
   // Câu hỏi làm rõ và ghi chú preview hiện thẳng cho user: mã phần tử model còn chép (`S02`) đổi sang tên
+  // FLF-480: mã nội bộ không có field tên (OR10, BR07, N02, MSG57…) cũng đổi sang câu trích, không chỉ màn / actor / tính năng
+  const extraNames = internalElementNames(spine)
+  const nameElementIds = (text: string, source: typeof spine): string => nameIds(text, source, extraNames)
   const clarification = result.data.clarification_needed?.trim()
   const choices = result.data.choices?.length ? { choices: result.data.choices.map((c) => nameElementIds(c, spine)) } : {}
   if (clarification) {
@@ -1566,7 +1715,7 @@ export const preview = async (
     }
   }
 
-  const shownChanges = plan.changes.filter((c) => !c.path.startsWith("assumptions"))
+  const shownChanges = plan.changes.filter((c) => isUserVisiblePath(c.path))
   const impact = impactOfChanges(spine, shownChanges, plan.spine)
   const branch = branchOf(spine, impact)
 

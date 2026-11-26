@@ -18,6 +18,7 @@ import { entitiesOfFeature } from "./entity-features.js"
 import { screenActorMap, screenActorSets, sharedScreenIds } from "./screen-actors.js"
 import { systemName } from "./system-name.js"
 import { DEFAULT_ERD_NOTATION, type RenderContext } from "../../shared/diagram/erd-notation.js"
+import { screenPlatforms } from "./screen-platforms.js"
 import { resolveScreenTheme } from "../../shared/diagram/screen-theme.js"
 import { DEFAULT_SEQUENCE_LEVEL, type SequenceLevel } from "../../shared/diagram/sequence-level.js"
 import { excludedDiagramKind } from "../../shared/diagram/diagram-inclusion.js"
@@ -208,7 +209,7 @@ const renderedExtras = (spine: Spine, diagram: Pick<Diagram, "kind" | "owner_id"
   // đọc (mô tả màn, trigger, validation, pop-up/tab, màn đích — `screen-layout.ai.ts#layoutContext`) cũng vào hash ⇒ đổi
   // quy tắc thì hình `diagram_stale`, vẽ lại thì `contentHash` của spec đã lưu lệch ⇒ gọi model lại
   if (diagram.kind === "screen_layout")
-    return { theme: resolveScreenTheme(context.screenTheme, spine.project.form_factor), system_name: systemName(spine.project), content: screenLayoutContent(spine, diagram.owner_id) }
+    return screenLayoutExtras(spine, diagram.owner_id, context)
   const features = byId(spine.features).map(({ id, name, order }) => ({ id, name, order }))
   if (diagram.kind === "screen_flow")
     return {
@@ -227,6 +228,17 @@ const renderedExtras = (spine: Spine, diagram: Pick<Diagram, "kind" | "owner_id"
     functions: byId(spine.functions.filter((f) => referenced.has(f.id))).map(({ id, feature_id }) => ({ id, feature_id })),
     features
   }
+}
+
+/**
+ * Phần hash riêng của `screen_layout`. FLF-493: khoá `platforms` chỉ có khi nền tảng của màn (theo actor dùng màn) KHÁC theme
+ * dự án — màn không thu hẹp giữ nội dung hash y như trước, hình dự án cũ không bị đánh cũ hàng loạt.
+ */
+const screenLayoutExtras = (spine: Spine, screenId: string | null, context: RenderContext): unknown => {
+  const theme = resolveScreenTheme(context.screenTheme, spine.project.form_factor)
+  const platforms = screenPlatforms(spine, screenId ?? "", theme.platforms)
+  const narrowed = platforms.length !== theme.platforms.length || platforms.some((p, i) => p !== theme.platforms[i])
+  return { theme, system_name: systemName(spine.project), content: screenLayoutContent(spine, screenId), ...(narrowed ? { platforms } : {}) }
 }
 
 /** Chữ của màn mà model đọc khi vẽ mockup, ngoài `sourceProjection` (tên màn, tên + mô tả function đã có ở đó). */
