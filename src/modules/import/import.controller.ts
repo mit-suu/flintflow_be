@@ -185,8 +185,9 @@ export const continueFlow2 = mode1Handler(async (req, res) => {
 })
 
 /**
- * Tiếp tục bước đang dừng: `extracting` ⇒ I-4 từ cursor; `baselining` (job finalize lỗi / mất) ⇒ chạy lại finalize từ
- * mốc; `checking` ⇒ 1.11–1.12. Đều chạy nền, trả ngay.
+ * Tiếp tục bước đang dừng: `extracting` ⇒ I-4 từ cursor; `fields_review` (FLF-462, bước 1.6) ⇒ báo lỗi nếu còn gì cần
+ * xác nhận (xem `PATCH /import/fields`), hết việc cần xác nhận mới sang `baselining`; `baselining` (job finalize lỗi /
+ * mất) ⇒ chạy lại finalize từ mốc; `checking` ⇒ 1.11–1.12. Đều chạy nền, trả ngay.
  */
 export const resume = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)

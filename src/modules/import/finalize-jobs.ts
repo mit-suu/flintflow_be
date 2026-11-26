@@ -28,6 +28,8 @@ import { UnrecoverableError } from "bullmq"
 import { env } from "../../config/env.js"
 import { defineJob, isJobActive, jobState, releaseJobKey, startJob, waitForJob } from "../../shared/queue/job-runner.js"
 import * as spineRepository from "../spine/spine.repository.js"
+import { needsReview } from "./extract.service.js"
+import { ExtractionDraft } from "./extraction-draft.model.js"
 import { finalizeCheckpoint, finalizeImport, resumeCheck, rollbackPartialFinalize, assertCanFinalize, type FinalizeRunOptions } from "./finalize.service.js"
 import type { FinalizeRequest } from "./import.dto.js"
 import { assertImportStatus, requireImport, transitionImport } from "./import.service.js"
@@ -247,13 +249,25 @@ export const startAutoFinalize = async (projectId: string, userId: string, impor
 
 /**
  * `POST /import/resume` cho bước sau trích field: `checking` ⇒ 1.11–1.12 phần còn thiếu; `baselining` có mốc (job
- * finalize lỗi / mất / kẹt) ⇒ hoàn về mốc rồi chạy lại finalize; `baselining` chưa có mốc (FLF-343: job nối tiếp chưa kịp bật)
- * hoặc bản ghi cũ ở `fields_review` ⇒ finalize một mạch. Đang có job còn sống ⇒ không làm gì.
+ * finalize lỗi / mất / kẹt) ⇒ hoàn về mốc rồi chạy lại finalize; `baselining` chưa có mốc (FLF-343: job nối tiếp chưa kịp
+ * bật) ⇒ finalize một mạch. `fields_review` (FLF-462, bước 1.6): còn gì cần xác nhận thì báo lỗi, hướng người dùng sang
+ * `PATCH /import/fields`; hết việc cần xác nhận mà vẫn kẹt ở đây (job nối tiếp chưa kịp chuyển) mới tự sang `baselining`.
+ * Đang có job còn sống ⇒ không làm gì.
  */
 export const startResume = async (projectId: string, userId: string, importId: string): Promise<IImportedDocument> => {
   const doc = await requireImport(projectId, importId)
   if (await isFinalizeAlive(doc)) return doc
-  if (doc.status === "fields_review") await transitionImport(doc, "baselining")
+  if (doc.status === "fields_review") {
+    const drafts = await ExtractionDraft.find({ import_id: doc._id })
+    if (needsReview(drafts)) {
+      throw new Mode1Error("IMPORT_INVALID_STATE", "Còn phần cần xác nhận ở bước 1.6 - xác nhận qua PATCH /import/fields trước khi tiếp tục.", {
+        status: doc.status,
+        to: "baselining",
+        allowed: []
+      })
+    }
+    await transitionImport(doc, "baselining")
+  }
   assertImportStatus(doc, ["baselining", "checking"], doc.status === "baselining" ? "checking" : "gap_review")
   if (doc.status === "checking") return launch(doc, { mode: "check", projectId, userId, importId }, (runId) => prepareCheck(doc, runId))
   if (!doc.finalize_checkpoint) return startAutoFinalize(projectId, userId, importId)

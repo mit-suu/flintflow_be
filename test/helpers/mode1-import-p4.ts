@@ -9,9 +9,22 @@ import { seedFixture } from "../setup.js"
 import { createMode1Project } from "./mode1.js"
 import { makeSrsDocx, type SrsFixtureOptions } from "../../src/modules/import/testing/srs-fixture.js"
 import { acceptLatest, uploadImport } from "../../src/modules/import/import.service.js"
-import { runExtraction } from "../../src/modules/import/extract.service.js"
+import { patchFields, runExtraction as runExtractionRaw, type ExtractionRun } from "../../src/modules/import/extract.service.js"
 import { finalizeImport } from "../../src/modules/import/finalize.service.js"
 import * as spineRepository from "../../src/modules/spine/spine.repository.js"
+
+/**
+ * `runExtraction` cho test không quan tâm bước 1.6 (FLF-462): còn gì cần xác nhận (field / đoạn lớp 4 độ tin thấp, mục
+ * tên đúng nội dung sai) thì xác nhận hết theo gợi ý của AI (`confirm_all`) ngay trong lượt gọi, để kết quả trả về như
+ * trước FLF-462 (thẳng tới `baselining` khi I-4 không còn section nào dở). Test riêng cho bước 1.6 import trực tiếp
+ * `runExtraction` từ `extract.service.js` để giữ nguyên trạng thái `fields_review`.
+ */
+export const runExtraction = async (projectId: string, userId: string, importId: string): Promise<ExtractionRun> => {
+  const run = await runExtractionRaw(projectId, userId, importId)
+  if (run.doc.status !== "fields_review") return run
+  const doc = await patchFields(projectId, { import_id: importId, fields: [], guidance: [], content_mismatch: [], confirm_all: true })
+  return { ...run, doc }
+}
 
 /**
  * Đặt `IMPORT_EXTRACT_CONCURRENCY` cho mọi test của file (FLF-392). Test khẳng định thứ tự lượt gọi / số dư ví theo bản
@@ -47,7 +60,7 @@ export const importAtExtracting = async (opts: { balance?: number; srs?: SrsFixt
   return { projectId, userId: seeded.userId, importId: String(doc._id) }
 }
 
-/** Chạy I-4 ⇒ `baselining` (FLF-343: không còn dừng ở `fields_review`). */
+/** Chạy I-4 rồi tới `baselining` (xem `runExtraction` ở trên — bước 1.6 tự xác nhận hết theo gợi ý AI). */
 export const importAtBaselining = async (opts: { balance?: number; srs?: SrsFixtureOptions } = {}): Promise<Mode1Ctx> => {
   const ctx = await importAtExtracting(opts)
   const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)

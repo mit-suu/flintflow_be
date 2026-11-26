@@ -55,6 +55,13 @@ export const mode1Api = (seeded: SeededFixture, projectId: string) => {
       const { waitForExtraction } = await import("../../src/modules/import/extract-jobs.js")
       const { waitForFinalize } = await import("../../src/modules/import/finalize-jobs.js")
       await waitForExtraction(importId)
+      // FLF-462 (bước 1.6): còn gì cần xác nhận (field / đoạn lớp 4 độ tin thấp, mục tên đúng nội dung sai) ⇒ xác nhận
+      // hết theo gợi ý AI rồi tự chạy tiếp, để test khác (không quan tâm bước này) vẫn đi hết một mạch như trước
+      const afterExtract = (await request(app).get(`${base}/import`).set(auth)).body.data
+      if (afterExtract.import.status === "fields_review") {
+        await request(app).patch(`${base}/import/fields`).set(auth).send({ import_id: importId, confirm_all: true })
+        await request(app).post(`${base}/import/resume`).set(auth).send({ import_id: importId })
+      }
       // FLF-343: I-4 xong ⇒ job finalize (baseline 0.1 + kiểm tra) chạy nối tiếp — chờ luôn tới cuối lượt một mạch
       await waitForFinalize(importId)
       const deadline = Date.now() + timeoutMs

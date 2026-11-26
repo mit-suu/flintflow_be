@@ -994,8 +994,9 @@ describe("FLF-444 - mục đọc theo nội dung (heading tự đặt) và mục
   })
 
   it("contentMismatchOf: tên đúng nội dung sai (AI báo, hoặc mọi phần tử thuộc loại ngoài mục); mục nhiều loại không tính", () => {
-    expect(contentMismatchOf("fixed:2.2.2", ["use_cases"], [], "test cases")).toEqual({ by_heading: ["use_cases"], by_content: [], note: "test cases" })
-    expect(contentMismatchOf("fixed:2.2.2", ["use_cases"], [{ entity: "verifications" }], null)).toEqual({ by_heading: ["use_cases"], by_content: ["verifications"], note: null })
+    // FLF-462: mới phát hiện ⇒ `confirmed: false` (chờ người xác nhận ở bước 1.6)
+    expect(contentMismatchOf("fixed:2.2.2", ["use_cases"], [], "test cases")).toEqual({ by_heading: ["use_cases"], by_content: [], note: "test cases", confirmed: false })
+    expect(contentMismatchOf("fixed:2.2.2", ["use_cases"], [{ entity: "verifications" }], null)).toEqual({ by_heading: ["use_cases"], by_content: ["verifications"], note: null, confirmed: false })
     // Mục chức năng có cả NFR ⇒ một section nhiều loại nội dung, không phải lệch
     expect(contentMismatchOf("fixed:3.1.4", ["functions"], [{ entity: "functions" }, { entity: "nfrs" }], null)).toBeNull()
     expect(contentMismatchOf("fixed:3.1.4", ["functions"], [], null)).toBeNull()

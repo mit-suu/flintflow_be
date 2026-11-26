@@ -73,10 +73,14 @@ export interface IExtractionDraft extends Document {
   /**
    * FLF-444: tên mục và nội dung khác nhau (mục "Use Case" chứa test case; mọi phần tử AI đọc ra thuộc loại khác mục) -
    * I-4 tin nội dung, phần tử AI của mục bị hạ độ tin để người xác nhận ở bước 1.6. `null` = khớp.
+   * FLF-462: `confirmed` = người dùng đã xem ở bước 1.6 (không đổi phân loại, chỉ bỏ cờ chờ xác nhận).
    */
-  content_mismatch: { by_heading: string[]; by_content: string[]; note: string | null } | null
-  /** FLF-444: kết quả lớp 4 chữ hướng dẫn của AI theo block (chỗ cho bước 1.6). */
-  guidance_blocks: { block_id: string; is_guidance: boolean; confidence: number }[]
+  content_mismatch: { by_heading: string[]; by_content: string[]; note: string | null; confirmed: boolean } | null
+  /**
+   * FLF-444: kết quả lớp 4 chữ hướng dẫn của AI theo block (chỗ cho bước 1.6).
+   * FLF-462: `confirmed` = người dùng đã xác nhận `is_guidance` ở bước 1.6 (có thể sửa lại giá trị AI chấm).
+   */
+  guidance_blocks: { block_id: string; is_guidance: boolean; confidence: number; confirmed: boolean }[]
   /** FLF-444: loại nội dung 29148 theo block (chỗ cho phân loại Ngoài phạm vi). */
   content_types: { block_id: string; iso29148: string; in_scope: boolean; confidence: number }[]
   error: string | null
@@ -117,7 +121,15 @@ const extractionDraftSchema = new Schema<IExtractionDraft>(
     usage_id: { type: String, default: null },
     partial: { type: Schema.Types.Mixed, default: null },
     content_mismatch: { type: Schema.Types.Mixed, default: null },
-    guidance_blocks: { type: [new Schema({ block_id: { type: String, required: true }, is_guidance: { type: Boolean, required: true }, confidence: { type: Number, required: true } }, opts)], default: [] },
+    guidance_blocks: {
+      type: [
+        new Schema(
+          { block_id: { type: String, required: true }, is_guidance: { type: Boolean, required: true }, confidence: { type: Number, required: true }, confirmed: { type: Boolean, default: false } },
+          opts
+        )
+      ],
+      default: []
+    },
     content_types: {
       type: [new Schema({ block_id: { type: String, required: true }, iso29148: { type: String, required: true }, in_scope: { type: Boolean, required: true }, confidence: { type: Number, required: true } }, opts)],
       default: []
