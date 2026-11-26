@@ -8,7 +8,7 @@
  * - tối đa `MAX_QUESTIONS_PER_TURN` câu/lượt;
  * - câu có lựa chọn giữ 2–4 option; còn 1 ⇒ thành câu mở (một lựa chọn duy nhất không phải là hỏi);
  * - bỏ option "Khác"/"Other" model tự viết — FE luôn tự thêm dòng "Khác…";
- * - `header` (nhãn tab) cắt ≤ 12 ký tự;
+ * - `header` (nhãn tab) cắt ≤ 12 ký tự theo ranh giới từ (thêm "…");
  * - một lượt chỉ hỏi MỘT loại câu (FLF-355): toàn câu có lựa chọn hoặc toàn câu mở — loại kia chờ lượt sau.
  */
 
@@ -91,9 +91,25 @@ export const shapeOptions = (options: readonly QuestionOption[], topicKey?: stri
   return capped.length >= MIN_OPTIONS ? capped : []
 }
 
+/**
+ * Nhãn tab dài quá giới hạn ⇒ cắt theo ranh giới từ và thêm "…" (tổng không quá MAX_HEADER_LENGTH ký tự), không cắt
+ * giữa chữ ("Dịch vụ ngoà"). Đếm theo ký tự sau khi chuẩn hoá NFC để dấu tiếng Việt không bị tách khỏi chữ cái.
+ */
 const shapeHeader = (header: string | undefined): string | undefined => {
-  const trimmed = header?.trim().slice(0, MAX_HEADER_LENGTH).trim()
-  return trimmed ? trimmed : undefined
+  const chars = Array.from(header?.normalize("NFC").trim() ?? "")
+  if (chars.length === 0) return undefined
+  if (chars.length <= MAX_HEADER_LENGTH) return chars.join("")
+  const room = MAX_HEADER_LENGTH - 1 // chừa chỗ cho "…"
+  let cut = room
+  if (!/\s/u.test(chars[room] ?? "")) {
+    // Lùi về khoảng trắng gần nhất trong phạm vi cho phép.
+    let i = room
+    while (i > 0 && !/\s/u.test(chars[i - 1]!)) i--
+    if (i > 0) cut = i - 1
+    else while (cut > 0 && /\p{M}/u.test(chars[cut]!)) cut-- // một từ dài: cắt cứng, không tách dấu tổ hợp
+  }
+  const head = chars.slice(0, cut).join("").trim()
+  return head ? `${head}…` : undefined
 }
 
 /**
