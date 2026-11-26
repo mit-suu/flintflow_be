@@ -16,7 +16,7 @@ import type { Spine } from "../spine/spine.types.js"
 import { MODE1_RULE_PROFILE } from "../import/mode1-rule-profile.js"
 import type { IChangeLocation } from "./change-location.model.js"
 import type { IChangeRequest } from "./change-request.model.js"
-import { redrawDecision } from "./diagram-location.js"
+import { keptOriginalAckOps, narrowDiagramCandidates, redrawDecision } from "./diagram-location.js"
 import { previewAfter } from "./propose.service.js"
 import { elementValue, findSpineLocations, originalDiagramLocations, valueText, withOriginalDiagrams } from "./spine-location.js"
 import { checkSpineOps } from "./verify.service.js"
@@ -187,5 +187,58 @@ describe("§4.13 C-5 chạy khô", () => {
     s.diagrams = s.diagrams.map((d) => ({ ...d, source_hash: computeSourceHash(s, d) }))
     const out = checkSpineOps(s, cr, [{ ...loc("use_cases[id=UC01]", RENAME_UC), location_id: "L001" }] as never)
     expect([...out.values()].flat()).toEqual([])
+  })
+})
+
+describe("hình gốc chỉ vào CR khi dữ liệu của nó thật sự đổi", () => {
+  const diagramLoc = { path: CUSTOM, found_by: ["diagram"] as IChangeLocation["found_by"] }
+  const textLoc = { path: "use_cases[id=UC01]", found_by: ["spine_link"] as IChangeLocation["found_by"] }
+
+  it("CR có op không đổi dữ liệu hình (mô tả use case) ⇒ bỏ vị trí chỉ-sơ-đồ ngay ở C-3", () => {
+    const s = withOriginal()
+    expect(narrowDiagramCandidates(s, [textLoc, diagramLoc], RENAME_DESC)).toEqual([textLoc])
+  })
+
+  it("CR có op đổi dữ liệu hình (tên use case) ⇒ giữ vị trí sơ đồ", () => {
+    const s = withOriginal()
+    expect(narrowDiagramCandidates(s, [textLoc, diagramLoc], RENAME_UC)).toEqual([textLoc, diagramLoc])
+  })
+
+  it("không có op sẵn / op không áp được / vị trí còn nguồn khác ⇒ giữ nguyên danh sách", () => {
+    const s = withOriginal()
+    expect(narrowDiagramCandidates(s, [diagramLoc], undefined)).toEqual([diagramLoc])
+    expect(narrowDiagramCandidates(s, [diagramLoc], [{ op: "set", path: "use_cases[id=NOPE].name", value: "x" }])).toEqual([diagramLoc])
+    const both = { path: CUSTOM, found_by: ["diagram", "mention"] as IChangeLocation["found_by"] }
+    expect(narrowDiagramCandidates(s, [both], RENAME_DESC)).toEqual([both])
+  })
+})
+
+describe("giữ hình gốc: cờ lệch không hỏi lại ngay sau khi ghi", () => {
+  const kept = (over: Partial<IChangeLocation> = {}) =>
+    ({ path: CUSTOM, found_by: ["diagram"], conclusion: "not_related", manual: true, ...over }) as unknown as IChangeLocation
+  const staleFlag = (s: Spine) => runDeterministicCheck(s, [], { ruleProfile: MODE1_RULE_PROFILE }).some((f) => f.rule_id === "original_diagram_stale")
+
+  it("dữ liệu sau CR làm hình lệch + người dùng chọn giữ ⇒ op đóng dấu hash mới, ảnh và chữ giữ nguyên, hết cờ", () => {
+    const s = withOriginal()
+    const after = structuredClone(s)
+    after.use_cases = after.use_cases.map((u) => (u.id === "UC01" ? { ...u, name: "Create Account" } : u))
+    const ops = keptOriginalAckOps(after, [kept()])
+    expect(ops).toHaveLength(1)
+    const blocks = (ops[0] as { value: Spine["custom_sections"][number]["blocks"] }).value
+    const before = (elementValue(after, CUSTOM) as Spine["custom_sections"][number]).blocks
+    expect(blocks.map((b) => [b.kind, b.text, b.image_ref])).toEqual(before.map((b) => [b.kind, b.text, b.image_ref]))
+    expect(blocks[1].diagram?.source_hash).toBe(originalDiagramHash(after, "usecase"))
+    const acked = structuredClone(after)
+    acked.custom_sections = acked.custom_sections.map((c) => (c.id === "CS01" ? { ...c, blocks } : c))
+    expect(staleFlag(after)).toBe(true)
+    expect(staleFlag(acked)).toBe(false)
+  })
+
+  it("AI tự kết luận không liên quan (không phải người chọn) / hình chưa lệch ⇒ không có op", () => {
+    const s = withOriginal()
+    expect(keptOriginalAckOps(s, [kept()])).toEqual([])
+    const after = structuredClone(s)
+    after.use_cases = after.use_cases.map((u) => (u.id === "UC01" ? { ...u, name: "Create Account" } : u))
+    expect(keptOriginalAckOps(after, [kept({ manual: false })])).toEqual([])
   })
 })
