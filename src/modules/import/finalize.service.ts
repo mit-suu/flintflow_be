@@ -283,14 +283,14 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // FLF-366: file giữ khung còn mục trống là mẫu để điền (bản xuất điền vào chính file đó) ⇒ không chia đoạn nguyên văn. SRS
   // đã viết đủ khung (kể cả theo mẫu của công ty) vẫn giữ đoạn gốc như cấu trúc FlintFlow
   const previewMissing = (profile.structure_preview?.summary.missing ?? 0) > 0
-  const { layout, customSections, slices, segments, entryOfHeading } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds, {
+  const { layout, customSections, slices, verbatimSlices, segments, entryOfHeading } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds, {
     segment: !(intent === "fixed" && previewMissing)
   })
   // FLF-444: ảnh trong mục đọc theo nội dung (`content:@<heading>`) ⇒ câu cờ nêu tiêu đề mục riêng của layout (`custom:CSnn`)
   const reviewDrafts = drafts.map((d) => ({ ...d, section_id: layoutSectionOf(d.section_id, entryOfHeading) }))
   const seeded = await loadSpine(projectId)
   // Mẫu IEEE: phần tử trích từ heading lặp (Availability dưới 4.2.2) in dưới đúng heading đó của file
-  const sliceItems = sectionSlices(slices, entities)
+  const sliceItems = sectionSlices(slices, entities, verbatimSlices)
   // FLF-336 I-5: so cấu trúc đích (trước kế hoạch step) — ý định theo `Project.template_intent` (FLF-335); dự án cũ ⇒ tự do.
   // Heading lặp (vd "Business Rules" của từng chức năng) mà nội dung đã trích vào Spine qua slice vẫn là mục có nội dung
   // FLF-411: chữ của mẫu (hướng dẫn nhiều đoạn, `<<Sample … >>`, chỗ điền) không làm mục "có nội dung" — khớp màn đọc khung
