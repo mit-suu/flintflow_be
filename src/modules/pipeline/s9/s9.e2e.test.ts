@@ -149,6 +149,7 @@ vi.mock("../../spine/spine.model.js", () => ({ Spine: db.Spine }))
 vi.mock("../../spine/change.model.js", () => ({ Change: db.Change }))
 vi.mock("../../spine/usage.model.js", () => ({ Usage: db.Usage }))
 vi.mock("../../spine/baseline.model.js", () => ({ Baseline: db.Baseline }))
+vi.mock("../../import/layout-preview.service.js", () => ({ assertLayoutConfirmedForBaseline: async () => undefined }))
 vi.mock("../../project/chat-session.model.js", () => ({ ChatSession: db.ChatSession }))
 vi.mock("../../../shared/ai/document-context.service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../shared/ai/document-context.service.js")>()
