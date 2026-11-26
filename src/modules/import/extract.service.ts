@@ -813,7 +813,7 @@ export const needsReview = (drafts: Pick<IExtractionDraft, "fields" | "guidance_
 // ─── kế hoạch lượt AI (chung cho lượt chạy và ước tính credit) ───
 
 /** Một lượt AI của section theo thứ tự chạy: ảnh diagram trước (thực thể ảnh vào known_keys của lô chữ), rồi lô chữ. */
-export type SectionAiStep = { kind: "image"; block: BlockLite } | { kind: "text"; batch: BlockLite[] }
+export type SectionAiStep = { kind: "image"; block: BlockLite } | { kind: "text"; batch: BlockLite[]; guidance_cells?: BlockLite[] }
 
 /** Section chưa xong: phần đọc tất định + các lượt AI theo thứ tự. */
 export interface PlannedSection {
@@ -847,12 +847,19 @@ export const sectionAiSteps = (sectionId: string, blocks: BlockLite[], settled: 
   // Phase 5: ảnh diagram (EMF/WMF / file gốc không còn ⇒ lúc chạy ghi `unsupported`, không gọi AI)
   const images = sectionBlocks.filter((b) => b.kind === "image" && b.image_ref && readsImage(sectionId, captionOf(b, sectionBlocks)))
   const batches = targetsOf(sectionId).length ? chunkBlocks(aiBlocks) : []
-  return [...images.map((block) => ({ kind: "image" as const, block })), ...batches.map((batch) => ({ kind: "text" as const, batch }))]
+  // FLF-462 (lớp 4): ô bảng đúng 1 dấu hiệu không vào lô riêng (AI nhận cả bảng) - đi kèm lô chứa bảng của nó làm ứng viên, không thêm lượt gọi
+  const layer4Cells = sectionBlocks.filter((b) => b.kind === "table_cell" && b.guidance_layer === 4 && b.text.trim())
+  const textSteps = batches.map((batch) => {
+    const prefixes = batch.filter((b) => b.kind === "table").map((b) => `${b.anchor.xml_path}/`)
+    const cells = layer4Cells.filter((c) => prefixes.some((prefix) => c.anchor.xml_path.startsWith(prefix)))
+    return { kind: "text" as const, batch, ...(cells.length ? { guidance_cells: cells } : {}) }
+  })
+  return [...images.map((block) => ({ kind: "image" as const, block })), ...textSteps]
 }
 
 export const stepsHash = (steps: SectionAiStep[]): string =>
   createHash("sha1")
-    .update(JSON.stringify(steps.map((s) => (s.kind === "image" ? ["image", s.block.block_id, s.block.image_ref] : ["text", s.batch.map((b) => [b.block_id, b.text])]))))
+    .update(JSON.stringify(steps.map((s) => (s.kind === "image" ? ["image", s.block.block_id, s.block.image_ref] : ["text", s.batch.map((b) => [b.block_id, b.text]), ...(s.guidance_cells ? [s.guidance_cells.map((c) => c.block_id)] : [])]))))
     .digest("hex")
 
 /** Đọc tất định + lượt AI của mọi section chưa `done`, theo thứ tự tài liệu. */
@@ -1239,7 +1246,7 @@ const applyRawStep = (state: SectionState, step: SectionAiStep, raw: RawAiStep, 
   if (mismatch) state.contentMismatch = mergeMismatch(state.contentMismatch, mismatch)
   state.items.push(...(mismatch ? read.map(needsConfirmation) : read))
   // FLF-462: chỉ nhận lớp 4 thật của batch (block Code đã gắn `guidance_layer === 4`) - AI không tự đưa block khác vào đây
-  const layer4 = new Set(batch.filter((b) => b.guidance_layer === 4).map((b) => b.block_id))
+  const layer4 = new Set([...batch, ...(step.kind === "text" ? step.guidance_cells ?? [] : [])].filter((b) => b.guidance_layer === 4).map((b) => b.block_id))
   state.guidanceBlocks.push(...(raw.data.guidance_blocks ?? []).filter((g) => layer4.has(g.block_id)).map((g) => ({ ...g, confirmed: false })))
   state.contentTypes.push(...(raw.data.content_types ?? []).filter((c) => inBatch.has(c.block_id)))
   state.unmapped.push(...tablesToKeepVerbatim(batch, state.items).filter((id) => !state.unmapped.includes(id)))
@@ -1520,7 +1527,7 @@ const extractSections = async (projectId: string, userId: string, importId: stri
           })
         ),
         // FLF-462: lớp 4 chữ hướng dẫn (Code chỉ thấy đúng một dấu hiệu) - AI phân loại trong cùng lượt đọc, không gọi thêm
-        guidance_candidates: step.batch.filter((b) => b.guidance_layer === 4).map((b) => b.block_id).join(", ") || "none",
+        guidance_candidates: [...step.batch.filter((b) => b.guidance_layer === 4).map((b) => b.block_id), ...(step.guidance_cells ?? []).map((c) => `${c.block_id} (table cell: "${c.text.trim().slice(0, 200)}")`)].join(", ") || "none",
         blocks: text
       },
       { notifyTopUp: false }

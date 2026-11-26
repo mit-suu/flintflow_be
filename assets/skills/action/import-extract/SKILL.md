@@ -69,7 +69,8 @@ An SRS that is silent on something stays silent - leave the field out.
     `guidance_blocks` with `is_guidance` (true/false) and your own `confidence` (0-1, keep it low when the wording
     could honestly go either way). Never add an id that is not listed there. Still extract any real content you
     find in those blocks as usual (rule 1) regardless of your guess - a human confirms the final answer. Nothing
-    listed - return `guidance_blocks: []`.
+    listed - return `guidance_blocks: []`. An entry written `B0040 (table cell: "...")` is one cell of a table above;
+    its id is `B0040` (never the table's id).
 11. Classify every block of the section by the kind of content under ISO/IEC/IEEE 29148 (`iso29148`: a short label such as
     `functional requirement`, `constraint`, `interface`, `cost estimate`, `project schedule`, `staffing`). Return one
     `content_types` entry per block with `in_scope` (true when an SRS under 29148 holds that kind of content, false for
