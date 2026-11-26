@@ -309,6 +309,15 @@ export const moveProjectToFolder = async (
   return project
 }
 
+/** FLF-456: cờ khoá ngôn ngữ BE trả cho FE (`document_language_locked`) — cùng điều kiện với `setDocumentLanguage`, để FE không mời đổi rồi nhận 409. */
+export const isDocumentLanguageLocked = async (
+  projectId: string,
+  project: Pick<IProject, "mode" | "converted_from"> & { template_ref?: unknown }
+): Promise<boolean> => {
+  const profile = await TemplateProfile.findOne({ projectId }).select("source_file_ref migrated_base_at").lean()
+  return hasBaseFile(project, profile)
+}
+
 /**
  * Đổi ngôn ngữ tài liệu (FLF-265, D2). Chỉ ghi field — không đụng Spine, không xoá cache render (phase 3 đưa ngôn
  * ngữ vào đường render). Mode 1 ⇒ 409 `DOCUMENT_LANGUAGE_LOCKED` (D3). Lọc `mode` ngay trong lệnh ghi: dự án cũ
