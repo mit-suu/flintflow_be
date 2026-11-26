@@ -20,6 +20,8 @@ import { TemplateProfile } from "../../../src/modules/import/template-profile.mo
 import { Project } from "../../../src/modules/project/project.model.js"
 import { User } from "../../../src/modules/user/user.model.js"
 import { Usage } from "../../../src/modules/spine/usage.model.js"
+import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
+import { IMPORTED_DOC_VERSION } from "../../../src/modules/doc-version/versioning.js"
 import { CreditWallet } from "../../../src/modules/credits/credit-wallet.model.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 import { sectionsNeedingAiReview } from "../../../src/modules/import/review.service.js"
@@ -292,5 +294,42 @@ describe("FLF-453 - nút Rà soát bằng AI cho từng mục chỉ được Cod
     expect(run.status, JSON.stringify(run.body.error)).toBe(200)
     expect(run.body.data).toMatchObject({ reviewed: false, import: { status: "reviewing", paused: { reason: "credits" } } })
     expect((await spineRepository.get(projectId))!.flags.filter((f) => f.rule_id === "import_review")).toHaveLength(0)
+  })
+
+  it("mục nhiều lô, lô 1 đã trừ, lô 2 chưa ⇒ mục vẫn hiện (phần còn lại) và rà tiếp chỉ chạy lô còn lại", async () => {
+    const { projectId, importId, userId, headers } = await toOptional()
+    const last = (await DocBlock.findOne({ projectId, doc_version: IMPORTED_DOC_VERSION }).sort({ "anchor.ordinal": -1 }).lean())!
+    await DocBlock.insertMany(
+      Array.from({ length: 200 }, (_, i) => ({
+        projectId: last.projectId,
+        doc_version: IMPORTED_DOC_VERSION,
+        block_id: `B${9000 + i}`,
+        kind: "paragraph",
+        anchor: { xml_path: `/extra/${i}`, ordinal: last.anchor.ordinal + 1 + i },
+        text: "The system shall keep records as needed. ".repeat(48),
+        text_hash: `extra-${i}`,
+        section_id: "fixed:1"
+      }))
+    )
+    const listed = async () => {
+      const view = await request(app).get(url(projectId, "")).set(headers)
+      return (view.body.data.review.optional_sections as { section_id: string; calls: number }[]).find((o) => o.section_id === "fixed:1")
+    }
+    const full = (await listed())!
+    expect(full.calls).toBeGreaterThan(1)
+    await Usage.create({
+      projectId, userId, step_id: "I-1.11r:s:fixed:1:1", call_kind: "import_review_existing", attempt: 1, cost: 1, state: "deducted",
+      expires_at: new Date(Date.now() + 60_000)
+    })
+    expect((await listed())!.calls).toBe(full.calls - 1)
+    let calls = 0
+    mockOverrides.next = (prompt) => {
+      if (prompt.includes("# Import Review Existing")) calls++
+      return fakeMode1(prompt)
+    }
+    const run = await request(app).post(url(projectId, "review/section")).set(headers).send({ import_id: importId, section_id: "fixed:1", confirm: true })
+    expect(run.status, JSON.stringify(run.body.error)).toBe(200)
+    expect(calls).toBe(full.calls - 1)
+    expect(await listed()).toBeUndefined()
   })
 })

@@ -223,13 +223,12 @@ export const optionalReviewSections = async (
   if (!candidates.length) return []
   const blocks = await reviewBlocks(projectId, candidates.map((s) => s.section_id))
   const cost = await getActionCost(ActionType.IMPORT_REVIEW_EXISTING)
-  const reviewed = new Set<string>(
-    (await Usage.find({ projectId, step_id: { $regex: /^I-1\.11r:s:/ }, state: "deducted" }).distinct("step_id")).map((id: string) => id.replace(/:\d+$/, ":"))
-  )
+  // Lô đã trừ credit (giữ `:n`): mục chỉ coi là đã rà khi MỌI lô của mục đã `deducted` (mục rà dở vẫn rà tiếp được)
+  const done = new Set<string>(await Usage.find({ projectId, step_id: { $regex: /^I-1\.11r:s:/ }, state: "deducted" }).distinct("step_id"))
   const out: OptionalReviewSection[] = []
   for (const s of candidates) {
-    if (reviewed.has(sectionBatchPrefix(s.section_id))) continue
-    const calls = semanticBatches(blocks.filter((b) => b.section_id === s.section_id)).length
+    const prefix = sectionBatchPrefix(s.section_id)
+    const calls = semanticBatches(blocks.filter((b) => b.section_id === s.section_id)).filter((_, i) => !done.has(`${prefix}${i + 1}`)).length
     if (calls) out.push({ section_id: s.section_id, title: s.title, calls, credits: calls * cost })
   }
   return out
