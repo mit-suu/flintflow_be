@@ -192,19 +192,39 @@ export const sectionsFedBy = (spine: Spine, stepId: string): string[] => {
   return feature ? [...new Set([...fed, `feature:${feature}`])] : fed
 }
 
+/** FLF-472: trần khối "Điều đã chốt" — số ghi chú Brief đưa thêm vào mỗi lượt và độ dài tối đa mỗi dòng (ký tự). */
+export const SETTLED_NOTES_MAX = 60
+export const SETTLED_NOTE_CHARS = 200
+
+const clip = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text)
+
+/**
+ * FLF-472: dữ kiện user đã chốt trong ý tưởng (15 phút giữ chỗ, huỷ trước 4 giờ, nhắc 24h/2h, giữ hồ sơ 10 năm) nằm ở ghi chú Brief
+ * mà B-2 gán sang mục khác ⇒ bước sau lọc theo mục không thấy và hỏi lại. Đưa mọi ghi chú còn lại vào, dạng gọn (`content_en`,
+ * cắt dòng, trần số dòng). Phần đã có trong `taken` thì bỏ.
+ */
+const settledNotes = (spine: Spine, taken: readonly Addendum[]): Addendum[] =>
+  spine.addendum
+    .filter((a) => !taken.some((t) => t.id === a.id))
+    .slice(0, SETTLED_NOTES_MAX)
+    .map((a) => ({ ...a, content_en: clip(a.content_en ?? a.content, SETTLED_NOTE_CHARS) }))
+
 const addendumFor = (spine: Spine, stepId: string): Addendum[] => {
   const { phase } = parseStepId(stepId)
   // Brief và S-1 đọc toàn bộ addendum (Phases §6.1 "Input từ Brief")
   if (phase.startsWith("B-") || phase === "S-1") return spine.addendum
   // P13 (E2E P05 #3): S-2.2 ghi phạm vi bản 1.0 nên phải thấy giới hạn quy mô user đặt ("bản đầu gọn, khoảng 5-8 use case")
   // dù B-2.2 gán ghi chú đó sang mục khác (3.1.2) — trước đây S-2.2 không thấy, `release_scope` mất con số.
-  if (phase === "S-2") return spine.addendum.filter((a) => sectionsFedBy(spine, stepId).includes(a.target_section) || isScaleNote(a))
+  if (phase === "S-2") {
+    const own = spine.addendum.filter((a) => sectionsFedBy(spine, stepId).includes(a.target_section) || isScaleNote(a))
+    return [...own, ...settledNotes(spine, own)]
+  }
 
   const sections = new Set(sectionsFedBy(spine, stepId))
   const fed = spine.addendum.filter((a) => sections.has(a.target_section))
   // P05 (BarberGo #3, #11): S-3 / S-4 dựng use case, màn, chức năng — phải thấy ý tưởng gốc bằng chính lời user (tầm nhìn + mục tiêu
   // lõi), nơi user nêu quy mô ("bản đầu gọn, khoảng 5–8 use case"). Trước đây chỉ thấy addendum của section bước nuôi ⇒ sinh 16 use case.
-  if (phase !== "S-3" && phase !== "S-4") return fed
+  if (phase !== "S-3" && phase !== "S-4") return [...fed, ...settledNotes(spine, fed)]
   const core = briefCoreEntries(spine)
   // E2E P05 17/11: ghi chú quy mô ("Bản đầu gọn, khoảng 5-8 use case") bị B-2 "Sắp xếp ghi chú" gán sang 3.1.2 và S-2 bỏ con số
   // khỏi release_scope ⇒ S-3.2 không thấy trần, sinh 16 use case. Ghi chú nêu quy mô bằng số luôn đi kèm, gán mục nào cũng vậy.
@@ -212,7 +232,8 @@ const addendumFor = (spine: Spine, stepId: string): Addendum[] => {
   const extra = [core.vision, ...core.goals, ...scale].filter(
     (a, i, all): a is Addendum => a !== null && !fed.some((f) => f.id === a.id) && all.findIndex((b) => b?.id === a.id) === i
   )
-  return [...extra, ...fed]
+  const prior = [...extra, ...fed]
+  return [...prior, ...settledNotes(spine, prior)]
 }
 
 /** Ghi chú Brief nêu quy mô bằng con số: "khoảng 5-8 use case", "tối đa 10 màn hình", "~20 chức năng", "8 screens". */
@@ -222,12 +243,13 @@ export const isScaleNote = (a: Pick<Addendum, "content" | "content_en">): boolea
 /**
  * Addendum cho lượt hỏi không có `StepContext` (phỏng vấn đầu giai đoạn, chat tự do) — `unit` là step (`B-1.3`) hoặc
  * đơn vị giai đoạn (`B-1`, `S-5@S03`). Brief và S-1 thấy toàn bộ "Điều bạn đã kể", như lượt hỏi của step: thiếu nó thì
- * AI hỏi lại điều user đã kể. Giai đoạn khác giữ như cũ (không nạp) — addendum ở đó lọc theo section của từng step.
+ * AI hỏi lại điều user đã kể. FLF-472: giai đoạn sau S-1 cũng thấy khối "Điều đã chốt" (ghi chú Brief dạng gọn) — trước đây
+ * trả `[]` nên phỏng vấn đầu vòng màn và chat tự do hỏi lại 15 phút / 4 giờ / 10 năm đã nêu trong ý tưởng.
  */
 export const addendumForUnit = (spine: Spine, unit: string): AddendumForModel[] => {
   const phase = unit.split("@")[0].replace(/\.\d+$/, "")
-  if (!phase.startsWith("B-") && phase !== "S-1") return []
-  return spine.addendum.map(({ id, topic, target_section, content_en }) => ({ id, topic, target_section, content_en }))
+  const notes = !phase.startsWith("B-") && phase !== "S-1" ? settledNotes(spine, []) : spine.addendum
+  return notes.map(({ id, topic, target_section, content_en }) => ({ id, topic, target_section, content_en }))
 }
 
 export interface AssumptionForModel {
@@ -323,7 +345,19 @@ const BRIEF_UNOWNED_FIELDS: ReadonlySet<string> = new Set(["project.vision", "pr
  * S-7.3 cần phạm vi bản phát hành để câu thông báo không nhắc kênh / tính năng chưa có ở bản 1.0 (e2e flf-413 #12:
  * "đã gửi qua email và Zalo OA" khi Zalo nằm ngoài phạm vi).
  */
+/** FLF-472: quy tắc cấp cao + phạm vi 1.0 đã chốt — các bước soạn không đọc quy tắc cấp cao (S-4.4, S-6 không đọc quy tắc nào) cần thấy để khỏi hỏi lại / bỏ sót. */
+const SETTLED_RULE_READS = ["business_rules[tier=high]:id,statement", "project.release_scope"] as const
+
 export const STEP_EXTRA_READS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  "S-3.1": SETTLED_RULE_READS,
+  "S-4.4": SETTLED_RULE_READS,
+  "S-5.2": SETTLED_RULE_READS,
+  "S-5.4": SETTLED_RULE_READS,
+  "S-6.1": SETTLED_RULE_READS,
+  "S-6.2": SETTLED_RULE_READS,
+  "S-6.3": SETTLED_RULE_READS,
+  "S-6.4": SETTLED_RULE_READS,
+  "S-6.5": SETTLED_RULE_READS,
   "S-7.3": ["project.release_scope"],
   // FLF-478: S-2.3 quyết có dịch vụ push hay không, nên phải thấy nền tảng (form_factor)
   "S-2.3": ["project.form_factor"],
@@ -407,6 +441,10 @@ export const sequenceProjection = (spine: Spine, stepId: string, level: Sequence
   level === "none" ? (getStep(stepId).template_id === "S-5.4" ? { sequence_diagram: "none" } : {}) : componentLevelProjection(spine, stepId, level)
 
 // ─── có DB ───────────────────────────────────────────────────────
+
+/** FLF-472: phần đã chốt (quy tắc cấp cao + phạm vi 1.0) cho lượt hỏi không có projection riêng — phỏng vấn đầu vòng màn. */
+export const settledProjection = (spine: Spine): Record<string, unknown> =>
+  Object.fromEntries(SETTLED_RULE_READS.map((raw) => [raw, selectValue(spine, parseSelector(raw), null)]))
 
 /** Projection dành riêng cho vòng hỏi: projection của step + các gốc đã chốt (BUG-19). */
 export const elicitProjection = (spine: Spine, stepId: string): Record<string, unknown> => {
