@@ -217,6 +217,11 @@ export interface RenderOptions {
    * không vẽ được) giữ nguyên hình cũ — vẽ bằng PlantUML sẽ ghi `render_error` (cờ đỏ chặn baseline) chỉ vì môi trường.
    */
   svgOnly?: boolean
+  /**
+   * Chỉ vẽ lại các hình có id trong tập này; hình khác của cùng target giữ nguyên (không compile, không gỡ). Có tập này
+   * ⇒ KHÔNG chạy vòng gỡ hình cũ không còn id — dọn hình thừa chỉ làm ở lượt vẽ đủ bộ.
+   */
+  onlyIds?: ReadonlySet<string>
   /** Kết quả lượt model vẽ mockup của từng màn (ảnh màn hình, màu ảnh gốc). */
   onLayoutDrawn?: (screenId: string, envelope: ScreenEnvelope | null) => void
   deps?: Partial<DiagramServiceDeps>
@@ -230,6 +235,11 @@ export interface RenderResult {
   /** Id hình đã compile lại trong lần gọi này. */
   rendered: string[]
   removed: string[]
+  /**
+   * Id hình PlantUML đang lệch dữ liệu nhưng chưa vẽ lại được vì PlantUML không phản hồi (chỉ các lượt `*IfAvailable`).
+   * Thiếu / rỗng ⇒ không bỏ hình nào.
+   */
+  skipped?: string[]
 }
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
@@ -305,9 +315,11 @@ const syncFiles = async (
 /** Render một lô target trong MỘT transaction. */
 export const renderDiagrams = async (projectId: string, targets: RenderTarget[], options: RenderOptions): Promise<RenderResult> => {
   const deps: DiagramServiceDeps = { ...defaultDeps(), ...options.deps }
+  const t0 = Date.now()
   const record = await loadSpine(projectId)
   const spine = stripRecord(record)
   const context = await deps.renderContext(projectId)
+  const tLoaded = Date.now()
   const nextId = nextIdFactory(spine.diagrams)
   const byExistingId = new Map(spine.diagrams.map((d) => [d.id, d]))
 
@@ -353,6 +365,10 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
     for (const [i, part] of parts.entries()) {
       const id = ids[i]
       const previous = byExistingId.get(id)
+      if (options.onlyIds && !options.onlyIds.has(id)) {
+        if (previous) produced.push(previous)
+        continue
+      }
       if (unchanged(previous, part, options.force ?? false)) {
         produced.push(previous)
         continue
@@ -389,7 +405,7 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
     }
 
     for (const old of existing) {
-      if (ids.includes(old.id)) continue
+      if (ids.includes(old.id) || options.onlyIds) continue
       ops.push({ op: "remove", path: `diagrams[id=${old.id}]`, reason: "render: diagram split changed" })
       removed.push(old.id)
     }
@@ -397,6 +413,7 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
 
   if (ops.length === 0) return { spine_version: record.spine_version, diagrams: produced, rendered, removed }
 
+  const tCompiled = Date.now()
   const result = await applyTransaction(projectId, {
     base_version: record.spine_version,
     ops,
@@ -404,7 +421,10 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
     reason: "render",
     step_id: options.step_id ?? null
   })
+  const tTxn = Date.now()
   await syncFiles(projectId, toStore, [...removed, ...errored], deps)
+  // Đo thời gian từng pha: lượt vẽ cả bộ từng mất 79 giây mà không biết tốn ở đâu
+  console.info(`[diagram] render ${rendered.length} hình (project ${projectId}, by ${options.by}): load ${tLoaded - t0}ms, compile ${tCompiled - tLoaded}ms, txn ${tTxn - tCompiled}ms, files ${Date.now() - tTxn}ms`)
   return { spine_version: result.spine_version, diagrams: produced, rendered, removed }
 }
 
@@ -423,6 +443,36 @@ export const redrawScreenLayoutsFromSpec = async (projectId: string, options: Om
   )
 }
 
+/**
+ * Vẽ đúng các hình có id trong danh sách (nút "Vẽ lại tất cả" ở Kiểm & chốt gửi cả lô một lần). Hình khác cùng loại giữ
+ * nguyên, không compile lại, không bị gỡ. Id lạ bị bỏ qua (nằm trong `skipped`). PlantUML không phản hồi ⇒ hình PlantUML
+ * trong danh sách không vẽ (tránh ghi `render_error` chỉ vì môi trường), id của chúng nằm trong `skipped` kèm log.
+ */
+export const renderDiagramsByIds = async (projectId: string, ids: readonly string[], options: RenderOptions): Promise<RenderResult> => {
+  const spine = stripRecord(await loadSpine(projectId))
+  const known = spine.diagrams.filter((d) => ids.includes(d.id))
+  const unknown = ids.filter((id) => !known.some((d) => d.id === id))
+  const needsPlantUml = known.filter((d) => !isSvgTarget(targetOfDiagram(d)))
+  const plantUmlUp = needsPlantUml.length === 0 || (await plantUmlAvailable())
+  const skippedPuml = plantUmlUp ? [] : needsPlantUml.map((d) => d.id)
+  if (skippedPuml.length) console.warn(`[diagram] PlantUML không phản hồi sau ${PLANTUML_PROBE.attempts} lần dò - bỏ ${skippedPuml.length} hình PlantUML (${skippedPuml.join(", ")}) (by ${options.by})`)
+  const wanted = new Set(known.map((d) => d.id).filter((id) => !skippedPuml.includes(id)))
+  const seen = new Set<string>()
+  const targets = known
+    .filter((d) => wanted.has(d.id))
+    .map(targetOfDiagram)
+    .filter((t) => {
+      const key = `${t.kind}|${MULTI_OWNER_KINDS.has(t.kind) ? "" : (t.owner_id ?? "")}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  const result = targets.length
+    ? await renderDiagrams(projectId, targets, { ...options, onlyIds: wanted })
+    : { spine_version: spine.spine_version, diagrams: spine.diagrams, rendered: [], removed: [] }
+  return { ...result, skipped: [...skippedPuml, ...unknown] }
+}
+
 export const renderDiagram = (projectId: string, kind: DiagramKind, ownerId: string | null, options: RenderOptions) =>
   renderDiagrams(projectId, [{ kind, owner_id: ownerId }], options)
 
@@ -430,6 +480,29 @@ export const renderDiagram = (projectId: string, kind: DiagramKind, ownerId: str
 export const renderAll = async (projectId: string, options: RenderOptions): Promise<RenderResult> => {
   const record = await loadSpine(projectId)
   return renderDiagrams(projectId, allTargets(stripRecord(record)), options)
+}
+
+/**
+ * Dò PlantUML trước lượt vẽ lại tự động. BE có thể đang bận (ghi CR 100 giây, request khác 15–23 giây) nên một lần dò
+ * 1,5 giây hết giờ dù PlantUML vẫn chạy ⇒ dò lại vài lần, timeout dài hơn, trước khi coi là tắt.
+ */
+export const PLANTUML_PROBE = { attempts: 3, timeoutMs: 5000, gapMs: 1000 }
+
+const plantUmlAvailable = async (): Promise<boolean> => {
+  for (let attempt = 1; attempt <= PLANTUML_PROBE.attempts; attempt++) {
+    if (await isPlantUmlReachable(PLANTUML_PROBE.timeoutMs)) return true
+    if (attempt < PLANTUML_PROBE.attempts && PLANTUML_PROBE.gapMs > 0) await new Promise((resolve) => setTimeout(resolve, PLANTUML_PROBE.gapMs))
+  }
+  return false
+}
+
+/** Hình PlantUML đã vẽ mà dữ liệu nguồn lệch — đúng tập bị bỏ khi PlantUML tắt. Báo log để không bỏ lặng lẽ. */
+const skippedPlantUml = (spine: Spine, context: RenderContext, by: string): string[] => {
+  const ids = staleRenderedDiagrams(spine, context)
+    .filter((d) => !isSvgTarget(targetOfDiagram(d)))
+    .map((d) => d.id)
+  console.warn(`[diagram] PlantUML không phản hồi sau ${PLANTUML_PROBE.attempts} lần dò - bỏ ${ids.length} hình PlantUML${ids.length ? ` (${ids.join(", ")})` : ""} (by ${by})`)
+  return ids
 }
 
 /** FLF-493: kind vẽ bằng SVG tự dựng (không cần PlantUML). */
@@ -442,13 +515,14 @@ const isSvgTarget = (t: RenderTarget): boolean => DIAGRAM_ENGINES[t.kind].starts
  */
 export const renderAllIfAvailable = async (projectId: string, options: RenderOptions): Promise<RenderResult | null> => {
   try {
-    if (await isPlantUmlReachable()) return await renderAll(projectId, options)
+    if (await plantUmlAvailable()) return await renderAll(projectId, options)
     const spine = stripRecord(await loadSpine(projectId))
+    const skipped = skippedPlantUml(spine, await loadRenderContext(projectId), options.by)
     // Màn chưa từng có mockup: bỏ — vẽ mới cần một lượt model mỗi màn (chậm, tốn credit) và rơi về bảng PlantUML khi model lỗi.
     // Mockup đã có thì vẽ lại được (đúng ý FLF-493: mockup lệch dữ liệu); màn mới đã có `renderChangedIfAvailable`.
     const targets = allTargets(spine).filter((t) => isSvgTarget(t) && (t.kind !== "screen_layout" || spine.diagrams.some((d) => sameTarget(d, t))))
-    if (targets.length === 0) return null
-    return await renderDiagrams(projectId, targets, { ...options, svgOnly: true })
+    if (targets.length === 0) return skipped.length ? { spine_version: spine.spine_version, diagrams: [], rendered: [], removed: [], skipped } : null
+    return { ...(await renderDiagrams(projectId, targets, { ...options, svgOnly: true })), skipped }
   } catch (err) {
     console.warn(`[diagram] vẽ lại diagram lỗi (project ${projectId}, by ${options.by}): ${err instanceof Error ? err.message : String(err)}`)
     return null
@@ -462,9 +536,10 @@ export const renderAllIfAvailable = async (projectId: string, options: RenderOpt
  */
 export const renderChangedIfAvailable = async (projectId: string, newScreenIds: readonly string[], options: RenderOptions): Promise<RenderResult | null> => {
   try {
-    const plantUmlUp = await isPlantUmlReachable()
+    const plantUmlUp = await plantUmlAvailable()
     const spine = stripRecord(await loadSpine(projectId))
     const context = await loadRenderContext(projectId)
+    const skipped = plantUmlUp ? [] : skippedPlantUml(spine, context, options.by)
     const seen = new Set<string>()
     const targets: RenderTarget[] = [
       ...staleRenderedDiagrams(spine, context).map(targetOfDiagram),
@@ -478,8 +553,9 @@ export const renderChangedIfAvailable = async (projectId: string, newScreenIds: 
       // model mỗi màn (chậm, tốn credit), trước FLF-493 đường này không vẽ gì. Màn mới vẽ khi có PlantUML hoặc nút "Vẽ lại".
       return isSvgTarget(t) && (t.kind !== "screen_layout" || spine.diagrams.some((d) => sameTarget(d, t)))
     })
-    if (targets.length === 0) return null
-    return await renderDiagrams(projectId, targets, plantUmlUp ? options : { ...options, svgOnly: true })
+    if (targets.length === 0) return skipped.length ? { spine_version: spine.spine_version, diagrams: [], rendered: [], removed: [], skipped } : null
+    const result = await renderDiagrams(projectId, targets, plantUmlUp ? options : { ...options, svgOnly: true })
+    return skipped.length ? { ...result, skipped } : result
   } catch (err) {
     console.warn(`[diagram] vẽ lại sau lô sửa lỗi (project ${projectId}, by ${options.by}): ${err instanceof Error ? err.message : String(err)}`)
     return null

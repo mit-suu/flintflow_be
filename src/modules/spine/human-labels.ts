@@ -379,6 +379,8 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   accepted_as_is: "Chấp nhận nguyên trạng",
   goal_not_covered: "Mục tiêu chưa được đáp ứng",
   cr_consistency: "Chưa nhất quán sau khi sửa",
+  cr_old_value_left: "Còn giá trị cũ sau khi sửa",
+  old_value_left: "Còn giá trị cũ trong phần tử",
   // luật kiểm đề xuất CR (3.7)
   unconcluded: "Chưa có kết luận",
   element_missing: "Phần tử không còn trong tài liệu",
