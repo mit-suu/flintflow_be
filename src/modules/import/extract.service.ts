@@ -1857,6 +1857,25 @@ export const creditEstimateFor = async (
  * xác nhận là hướng dẫn (`is_guidance: true`) chuyển sang lớp chắc chắn ngay trên block đã lưu, để I-5 không còn tính là
  * nội dung thật (có thể biến mục "có" thành "thiếu"). Hết việc cần xác nhận ⇒ sang `baselining` như FLF-343.
  */
+/** Id khối `table` chứa ô vừa xác nhận là hướng dẫn và không còn ô nào là nội dung thật (mọi ô không rỗng đều là chữ hướng dẫn). */
+const tablesWithoutContent = async (projectId: string, confirmed: readonly string[]): Promise<string[]> => {
+  const scope = { projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }
+  const cells = await DocBlock.find({ ...scope, kind: "table_cell", block_id: { $in: confirmed } }).select("section_id").lean()
+  const sections = [...new Set(cells.map((c) => c.section_id))]
+  if (!sections.length) return []
+  const inSection = await DocBlock.find({ ...scope, kind: { $in: ["table", "table_cell"] }, section_id: { $in: sections } }).select("block_id kind text anchor guidance_layer").lean()
+  const done = new Set(confirmed)
+  const allCells = inSection.filter((b) => b.kind === "table_cell")
+  return inSection
+    .filter((t) => t.kind === "table" && allCells.some((c) => done.has(c.block_id) && c.anchor.xml_path.startsWith(`${t.anchor.xml_path}/`)))
+    .filter((t) =>
+      allCells
+        .filter((c) => c.anchor.xml_path.startsWith(`${t.anchor.xml_path}/`) && c.text.trim())
+        .every((c) => done.has(c.block_id) || (c.guidance_layer !== undefined && c.guidance_layer <= 3))
+    )
+    .map((t) => t.block_id)
+}
+
 export const patchFields = async (projectId: string, body: FieldsPatchRequest): Promise<IImportedDocument> => {
   const doc = await requireImport(projectId, body.import_id)
   assertImportStatus(doc, ["fields_review"], "baselining")
@@ -1915,6 +1934,9 @@ export const patchFields = async (projectId: string, body: FieldsPatchRequest): 
   // còn dữ liệu thật, I-5 tính "thiếu"; field còn nguồn từ khối khác thì giữ
   if (confirmedGuidance.length) {
     const guidanceIds = new Set(confirmedGuidance)
+    // Lô AI gửi cả bảng (nguồn field là id khối `table`, không phải id ô): bảng mà mọi ô có chữ đều là chữ hướng dẫn (lớp 1–3 hoặc
+    // vừa xác nhận) thì không còn nội dung thật ⇒ id bảng tính như đã xác nhận; còn ô nội dung thật ⇒ giữ field (không chắc thì là nội dung)
+    for (const id of await tablesWithoutContent(projectId, confirmedGuidance)) guidanceIds.add(id)
     for (const d of drafts) {
       const kept = d.fields.filter((f) => !(f.source_block_ids.length > 0 && f.source_block_ids.every((id) => guidanceIds.has(id))))
       if (kept.length !== d.fields.length) {
@@ -1924,7 +1946,7 @@ export const patchFields = async (projectId: string, body: FieldsPatchRequest): 
     }
   }
   await Promise.all(drafts.map((d) => d.save()))
-  if (confirmedGuidance.length) await DocBlock.updateMany({ projectId, block_id: { $in: confirmedGuidance } }, { $set: { guidance_layer: 3 } })
+  if (confirmedGuidance.length) await DocBlock.updateMany({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS }, block_id: { $in: confirmedGuidance } }, { $set: { guidance_layer: 3 } })
   if (!needsReview(drafts)) await transitionImport(doc, "baselining")
   return doc
 }

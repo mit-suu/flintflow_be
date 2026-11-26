@@ -336,7 +336,7 @@ describe("FLF-462 - bước 1.6: đoạn lớp 4 chữ hướng dẫn (AI phân 
 
 describe("FLF-462 - bước 1.6: ô bảng lớp 4 (đúng 1 dấu hiệu) vào guidance_candidates của lượt I-4, AI phân loại, người xác nhận", () => {
   /** Thêm bảng 1 ô vào mục 4.2.3 (bảng không khớp cột nào ⇒ AI đọc), ô gắn lớp 4. */
-  const withCellLayer4 = async (clearLowConfidence: boolean, confidence: number) => {
+  const withCellLayer4 = async (clearLowConfidence: boolean, confidence: number, headerIsGuidance = false) => {
     const ctx = await importAtExtracting()
     const ref = await DocBlock.findOne({ projectId: ctx.projectId, section_id: "fixed:4.2.3", kind: "paragraph" }).lean()
     expect(ref, "cần block ở fixed:4.2.3 làm mẫu").toBeTruthy()
@@ -346,7 +346,7 @@ describe("FLF-462 - bước 1.6: ô bảng lớp 4 (đúng 1 dấu hiệu) vào 
     await DocBlock.create([
       { ...base, block_id: "B9001", kind: "table", text: `Target
 ${cellText}`, text_hash: "t9001", rows: [["Target"], [cellText]], anchor: anchor("body/tbl[99]", 9001) },
-      { ...base, block_id: "B9002", kind: "table_cell", text: "Target", text_hash: "t9002", anchor: anchor("body/tbl[99]/tr[0]/tc[0]/p[0]", 9002) },
+      { ...base, block_id: "B9002", kind: "table_cell", text: "Target", text_hash: "t9002", ...(headerIsGuidance ? { guidance_layer: 3 } : {}), anchor: anchor("body/tbl[99]/tr[0]/tc[0]/p[0]", 9002) },
       { ...base, block_id: "B9003", kind: "table_cell", text: cellText, text_hash: "t9003", guidance_layer: 4, guidance_by: ["italic"], anchor: anchor("body/tbl[99]/tr[1]/tc[0]/p[0]", 9003) }
     ])
     const prompts: string[] = []
@@ -357,13 +357,16 @@ ${cellText}`, text_hash: "t9001", rows: [["Target"], [cellText]], anchor: anchor
       if (clearLowConfidence) for (const i of json.items) i.field_confidence = {}
       if (sectionOf(prompt) === "fixed:4.2.3") {
         prompts.push(prompt)
+        // AI đọc cả bảng ⇒ nguồn của field là id khối bảng, không phải id ô
+        for (const i of json.items as unknown as { source_block_ids: string[] }[]) i.source_block_ids = ["B9001"]
         json.guidance_blocks = [{ block_id: "B9003", is_guidance: true, confidence }]
       }
       return JSON.stringify(json)
     })
     const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
+    const tableFields = async () => ((await draftsOf(ctx.importId)).find((d) => d.section_id === "fixed:4.2.3")?.fields ?? []).filter((f) => f.source_block_ids.includes("B9001")).length
     const cell = async () => (await DocBlock.findOne({ projectId: ctx.projectId, block_id: "B9003" }).lean())?.guidance_layer
-    return { ctx, run, prompts, cellText, cell }
+    return { ctx, run, prompts, cellText, cell, tableFields }
   }
 
   it("ô lớp 4 là ứng viên trong prompt, AI độ tin thấp ⇒ bản ghi lớp 4 chưa xác nhận, dừng fields_review, hiện ở review_guidance; xác nhận ⇒ ô lên lớp 3; không thêm lượt gọi AI", async () => {
@@ -402,5 +405,25 @@ ${cellText}`, text_hash: "t9001", rows: [["Target"], [cellText]], anchor: anchor
     expect(await cell()).toBe(4)
     const draft = (await draftsOf(ctx.importId)).find((d) => d.section_id === "fixed:4.2.3")!
     expect(draft.guidance_blocks).toEqual([expect.objectContaining({ block_id: "B9003", confirmed: false })])
+  })
+
+  const confirmCell = (ctx: { projectId: string; importId: string }) =>
+    patchFields(ctx.projectId, { import_id: ctx.importId, fields: [], guidance: [{ section_id: "fixed:4.2.3", block_id: "B9003", is_guidance: true }], content_mismatch: [], confirm_all: false })
+
+  it("bảng không còn ô nội dung thật ⇒ field nguồn là bảng bị bỏ (mục thành thiếu)", async () => {
+    const { ctx, cell, tableFields } = await withCellLayer4(false, 0.4, true)
+    expect(await tableFields()).toBeGreaterThan(0)
+    await confirmCell(ctx)
+    expect(await cell()).toBe(3)
+    expect(await tableFields()).toBe(0)
+  })
+
+  it("bảng còn ô nội dung thật ⇒ giữ field", async () => {
+    const { ctx, cell, tableFields } = await withCellLayer4(false, 0.4, false)
+    const before = await tableFields()
+    expect(before).toBeGreaterThan(0)
+    await confirmCell(ctx)
+    expect(await cell()).toBe(3)
+    expect(await tableFields()).toBe(before)
   })
 })
