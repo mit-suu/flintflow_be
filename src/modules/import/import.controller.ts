@@ -27,6 +27,7 @@ import * as extractService from "./extract.service.js"
 import * as extractJobs from "./extract-jobs.js"
 import * as finalizeJobs from "./finalize-jobs.js"
 import { continueInFlow2 } from "./flow2.service.js"
+import * as layoutPreviewService from "./layout-preview.service.js"
 import * as gapReportService from "./gap-report.service.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { assertNotMode1 } from "./mode1-guard.js"
@@ -195,6 +196,18 @@ export const continueFlow2 = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const body = parseInput(continueFlow2RequestSchema, req.body)
   return sendSuccess(res, 200, await continueInFlow2(auth.projectId, auth.userId, body))
+})
+
+/** FLF-461 (bước 2.9a): xem trước bố cục mới của chế độ 4 trước khi áp vào bản in. */
+export const layoutPreview = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req, { allowDrafting: true })
+  return sendSuccess(res, 200, await layoutPreviewService.getLayoutPreview(auth.projectId))
+})
+
+/** FLF-461 (bước 2.9a): người dùng xác nhận bố cục mới ⇒ bản in từ giờ áp bố cục đó. */
+export const layoutConfirm = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req, { allowDrafting: true })
+  return sendSuccess(res, 200, await layoutPreviewService.confirmLayout(auth.projectId))
 })
 
 /**

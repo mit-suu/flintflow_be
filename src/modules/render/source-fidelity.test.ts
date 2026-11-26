@@ -62,8 +62,13 @@ describe("rearrangeOf - FLF-416 sắp lại bố cục chế độ 4", () => {
     { section_id: "custom:c1", status: "out_of_scope" },
     { section_id: "fixed:II.1", status: "present" }
   ]
-  it("chế độ 4 đã vào Luồng 2 ⇒ mục Ngoài phạm vi xuống cuối", () => {
-    expect(rearrangeOf({ template_intent: "free", mode: "fpt" }, { source_file_ref: "f", target_structure: { resolved_mode: 4, sections }, flow2_entry_at: "2026-11-12" })).toEqual({ moveToEnd: ["custom:c1"] })
+  it("FLF-461: chế độ 4 đã vào Luồng 2 và người dùng đã xác nhận bố cục (2.9a) ⇒ mục Ngoài phạm vi xuống cuối", () => {
+    const profile = { source_file_ref: "f", target_structure: { resolved_mode: 4, sections }, flow2_entry_at: "2026-11-12", layout_confirmed_at: "2026-11-13" }
+    expect(rearrangeOf({ template_intent: "free", mode: "fpt" }, profile)).toEqual({ moveToEnd: ["custom:c1"] })
+  })
+  it("FLF-461: chưa xác nhận bố cục xem trước ⇒ chưa áp (giữ bố cục file)", () => {
+    expect(rearrangeOf({ template_intent: "free", mode: "fpt" }, { source_file_ref: "f", target_structure: { resolved_mode: 4, sections }, flow2_entry_at: "2026-11-12" })).toBeNull()
+    expect(rearrangeOf({ template_intent: "free", mode: "fpt" }, { source_file_ref: "f", target_structure: { resolved_mode: 4, sections }, flow2_entry_at: "2026-11-12", layout_confirmed_at: null })).toBeNull()
   })
   it("giữ khung (chế độ 3), chưa vào Luồng 2 ⇒ không sắp lại", () => {
     expect(rearrangeOf({ template_intent: "fixed", mode: "fpt" }, { source_file_ref: "f", target_structure: { resolved_mode: 3, sections }, flow2_entry_at: "2026-11-12" })).toBeNull()

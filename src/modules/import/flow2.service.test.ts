@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest"
 import { loadStepRegistry } from "../pipeline/step-registry.js"
 import type { StepState } from "../spine/spine.types.js"
 import { entersFlow2, flow2Owners, flow2StepOps } from "./flow2.service.js"
+import { inputStepsOf } from "./step-plan.js"
 
 const state = (id: string, status: StepState["status"]): StepState => ({ id, status, first_seq: null, last_seq: null, accepted_at: null })
 
 describe("flow2StepOps - chế độ 3 sang Luồng 2 tại 2.4", () => {
-  it("mở lại Brief B-1…S-1 (đang bỏ qua), giữ B-0 bỏ qua, giữ bước đã chốt / bước mục thiếu; bước kế tiếp là B-1.1", () => {
+  it("FLF-461: mở lại B-0 và Brief B-1…S-1 (đang bỏ qua), giữ bước đã chốt / bước mục thiếu; bước kế tiếp là B-0.1 (phần đã có làm đầu vào, AI chỉ hỏi phần thiếu)", () => {
     const registry = loadStepRegistry().filter((s) => s.kind !== "loop")
     const steps = registry.map((s) =>
       state(s.id, s.phase.startsWith("B-") || s.phase === "S-1" ? "skipped" : s.id === "S-2.1" ? "accepted" : s.id === "S-2.2" ? "pending" : "skipped")
@@ -16,10 +17,12 @@ describe("flow2StepOps - chế độ 3 sang Luồng 2 tại 2.4", () => {
     expect(reopened).toContain("steps[id=B-1.1].status")
     expect(reopened).toContain("steps[id=B-2.3].status")
     expect(reopened).toContain("steps[id=S-1.1].status")
-    expect(reopened.some((p) => p.startsWith("steps[id=B-0."))).toBe(false)
+    expect(reopened).toContain("steps[id=B-0.1].status")
+    expect(reopened).toContain("steps[id=B-0.2].status")
+    expect(reopened).toContain("steps[id=B-0.3].status")
     expect(reopened.some((p) => p.includes("S-2."))).toBe(false)
-    expect(ops.find((o) => o.path === "progress.current_step")?.value).toBe("B-1.1")
-    expect(ops.find((o) => o.path === "progress.current_phase")?.value).toBe("B-1")
+    expect(ops.find((o) => o.path === "progress.current_step")?.value).toBe("B-0.1")
+    expect(ops.find((o) => o.path === "progress.current_phase")?.value).toBe("B-0")
   })
 
   it("FLF-378: bước sở hữu mục mẫu đang accepted / skipped ⇒ pending (bỏ mốc chốt), id mẫu S-5 áp mọi vòng; bước khác giữ nguyên", () => {
@@ -41,7 +44,7 @@ describe("flow2StepOps - chế độ 3 sang Luồng 2 tại 2.4", () => {
     expect(set("steps[id=S-5.2@S01].status")).toBe("pending")
     expect(ops.some((o) => o.path.startsWith("steps[id=S-5.3@S01]"))).toBe(false)
     expect(ops.some((o) => o.path.startsWith("steps[id=S-3.1]"))).toBe(false)
-    expect(set("progress.current_step")).toBe("B-1.1")
+    expect(set("progress.current_step")).toBe("B-0.1")
   })
 
   it("SRS đã viết: bước sở hữu mục khách viết không bao giờ mở lại (kể cả khi cũng sở hữu mục thiếu); bước giữ chốt còn pending ⇒ accepted với mốc của lô import", () => {
@@ -79,7 +82,7 @@ describe("flow2Owners - bước cần soạn / bước giữ chốt", () => {
   ]
   it("SRS đã viết ⇒ soạn mục thiếu, giữ chốt mục đã viết; bỏ Record of Changes / ngoài phạm vi", () => {
     // FLF-382: S-8.1 sở hữu cả mục riêng đã viết lẫn mục riêng còn trống ⇒ vẫn soạn (chỉ ghi được mục còn trống)
-    expect(flow2Owners(sections, false)).toEqual({ draft: ["S-3.1", "S-8.1"], keep: ["S-2.1"] })
+    expect(flow2Owners(sections, false)).toEqual({ draft: ["S-3.1", "S-8.1"], keep: ["S-2.1"], inputs: [] })
   })
   it("FLF-382: bước sở hữu mục FPT đã viết lẫn mục FPT còn thiếu vẫn giữ chốt (D4 - không soạn lại phần khách viết)", () => {
     const fpt = [
@@ -88,10 +91,10 @@ describe("flow2Owners - bước cần soạn / bước giữ chốt", () => {
       { section_id: "slot:references", title: "1.4 References", status: "missing" as const, owner_steps: ["S-8.1"] },
       { section_id: "fixed:5.5", title: "Glossary", status: "present" as const, owner_steps: ["S-8.1"] }
     ]
-    expect(flow2Owners(fpt, false)).toEqual({ draft: ["S-2.2", "S-8.1"], keep: ["S-2.1", "S-2.2"] })
+    expect(flow2Owners(fpt, false)).toEqual({ draft: ["S-2.2", "S-8.1"], keep: ["S-2.1", "S-2.2"], inputs: [] })
   })
   it("khung mẫu ⇒ soạn mọi mục của mẫu, không giữ bước nào", () => {
-    expect(flow2Owners(sections, true)).toEqual({ draft: ["S-2.1", "S-3.1", "S-8.1"], keep: [] })
+    expect(flow2Owners(sections, true)).toEqual({ draft: ["S-2.1", "S-3.1", "S-8.1"], keep: [], inputs: [] })
   })
 })
 
@@ -118,5 +121,42 @@ describe("flow2Owners - chế độ 4 (đích = mẫu chuẩn FlintFlow)", () =>
     ], false)
     expect(draft).toEqual(["S-8.3"])
     expect(keep).toEqual(["S-1.1"])
+  })
+})
+
+describe("FLF-461 lọc step chế độ 3/4 - giữ bước cung cấp đầu vào", () => {
+  it("mẫu không có Screen Layout (S-5.3) vẫn giữ Screen Inventory (S-4.1) và Actor (S-3.1) cho vòng soạn theo màn", () => {
+    // Mẫu có chức năng theo màn (S-5.2, S-5.4) nhưng không có mục Screen Layout, không có mục Screen Inventory
+    const owners = ["S-5.2", "S-5.4"]
+    expect(owners).not.toContain("S-5.3")
+    const inputs = inputStepsOf(owners)
+    expect(inputs).toContain("S-4.1")
+    expect(inputs).toContain("S-3.1")
+    expect(inputs).not.toContain("S-5.3")
+    expect(inputs).not.toContain("S-5.2")
+  })
+
+  it("id vòng S-5 mang @màn vẫn tính; bước đã là bước soạn không lặp lại trong đầu vào", () => {
+    expect(inputStepsOf(["S-5.2@SCR-01"])).toContain("S-4.1")
+    expect(inputStepsOf(["S-4.1", "S-5.2"])).toEqual(["S-3.1"])
+    expect(inputStepsOf(["S-2.1"])).toEqual([])
+  })
+
+  it("flow2Owners: bước đầu vào không nằm trong bước giữ chốt (mục khách đã viết)", () => {
+    const sections = [{ section_id: "feature:F1", title: "Feature", status: "missing" as const, owner_steps: ["S-5.2", "S-5.4"] }]
+    expect(flow2Owners(sections, false).inputs).toEqual(["S-3.1", "S-4.1"])
+    const withKeep = [...sections, { section_id: "fixed:4.1", title: "Screens", status: "present" as const, owner_steps: ["S-4.1"] }]
+    expect(flow2Owners(withKeep, false).inputs).toEqual(["S-3.1"])
+  })
+
+  it("flow2StepOps: bước đầu vào đang bị ẩn (skipped) ⇒ pending; đã chốt hoặc đang chờ giữ nguyên, bước giữ chốt không bao giờ mở", () => {
+    const steps = [state("B-0.1", "skipped"), state("S-4.1", "skipped"), state("S-3.1", "accepted"), state("S-4.3", "skipped")]
+    const ops = flow2StepOps({ steps, screens: [], functions: [] }, ["S-5.2"], [], "2026-11-08T00:00:00.000Z", ["S-4.1", "S-3.1"])
+    const set = (path: string) => ops.find((o) => o.path === path)?.value
+    expect(set("steps[id=S-4.1].status")).toBe("pending")
+    expect(ops.some((o) => o.path.startsWith("steps[id=S-3.1]"))).toBe(false)
+    expect(ops.some((o) => o.path.startsWith("steps[id=S-4.3]"))).toBe(false)
+    const kept = flow2StepOps({ steps, screens: [], functions: [] }, ["S-5.2"], ["S-4.1"], "2026-11-08T00:00:00.000Z", ["S-4.1"])
+    expect(kept.some((o) => o.path.startsWith("steps[id=S-4.1]") && o.path.endsWith(".status") && o.value === "pending")).toBe(false)
   })
 })

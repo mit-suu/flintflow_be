@@ -722,7 +722,7 @@ export const isExistingSrs = (project: { mode?: string | null; start_kind?: stri
 export const loadTemplateLayout: TemplateLoader = async (projectId) => {
   const profile = (await TemplateProfile.findOne(
     { projectId },
-    { layout: 1, language: 1, template_family: 1, legacy_record_of_changes: 1, non_screen_table: 1, function_originals: 1, section_slices: 1, section_segments: 1, target_structure: 1, flow2_entry_at: 1, "structure_preview.summary.kind": 1 },
+    { layout: 1, language: 1, template_family: 1, legacy_record_of_changes: 1, non_screen_table: 1, function_originals: 1, section_slices: 1, section_segments: 1, target_structure: 1, flow2_entry_at: 1, layout_confirmed_at: 1, "structure_preview.summary.kind": 1 },
     { lean: true }
   )) as
     | {
@@ -736,6 +736,7 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
         section_segments?: TemplateLayout["sectionSegments"]
         target_structure?: { sections?: { section_id: string; status: string }[]; resolved_mode?: number | null } | null
         flow2_entry_at?: Date | null
+        layout_confirmed_at?: Date | null
       }
     | null
   if (!profile?.layout?.length) return null
