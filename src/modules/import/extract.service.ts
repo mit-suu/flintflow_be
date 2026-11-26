@@ -1856,13 +1856,28 @@ export const patchFields = async (projectId: string, body: FieldsPatchRequest): 
     for (const d of drafts) {
       for (const f of d.fields) f.confirmed = true
       for (const g of d.guidance_blocks) {
+        // Một quy tắc cho cả hai đường: chỉ đoạn đã đưa ra cho người xem (độ tin thấp) mới lên lớp 3 khi "Xác nhận tất cả";
+        // đoạn AI chấm độ tin cao (không dừng, người chưa thấy) giữ lớp 4 (BF §3.1.1: điểm AI không là tín hiệu duy nhất)
+        const shown = !g.confirmed && needsConfirmGuidance(g)
         g.confirmed = true
-        if (g.is_guidance && !confirmedGuidance.includes(g.block_id)) confirmedGuidance.push(g.block_id)
+        if (shown && g.is_guidance && !confirmedGuidance.includes(g.block_id)) confirmedGuidance.push(g.block_id)
       }
       if (d.content_mismatch) d.content_mismatch.confirmed = true
       d.markModified("fields")
       d.markModified("guidance_blocks")
       d.markModified("content_mismatch")
+    }
+  }
+  // FLF-462: field chỉ có nguồn từ đoạn đã xác nhận là hướng dẫn thì bỏ (AI vẫn trích nội dung ở lớp 4, prompt luật 10) ⇒ mục không
+  // còn dữ liệu thật, I-5 tính "thiếu"; field còn nguồn từ khối khác thì giữ
+  if (confirmedGuidance.length) {
+    const guidanceIds = new Set(confirmedGuidance)
+    for (const d of drafts) {
+      const kept = d.fields.filter((f) => !(f.source_block_ids.length > 0 && f.source_block_ids.every((id) => guidanceIds.has(id))))
+      if (kept.length !== d.fields.length) {
+        d.fields = kept as typeof d.fields
+        d.markModified("fields")
+      }
     }
   }
   await Promise.all(drafts.map((d) => d.save()))

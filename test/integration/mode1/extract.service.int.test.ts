@@ -245,6 +245,11 @@ describe("FLF-462 - bước 1.6: đoạn lớp 4 chữ hướng dẫn (AI phân 
       expect.objectContaining({ section_id: "fixed:4.2.3", block_id: nfrBlock!.block_id, is_guidance: true, confidence: 0.4, confirmed: false })
     ])
 
+    // Trước xác nhận: AI vẫn trích NFR từ đoạn lớp 4 (prompt luật 10) ⇒ mục 4.2.3 còn field nguồn từ đoạn đó
+    const nfrFields = async () => ((await draftsOf(ctx.importId)).find((d) => d.section_id === "fixed:4.2.3")?.fields ?? []).filter((f) => f.source_block_ids.includes(nfrBlock!.block_id))
+    expect((await nfrFields()).length).toBeGreaterThan(0)
+    const otherBefore = (await draftsOf(ctx.importId)).filter((d) => d.section_id !== "fixed:4.2.3").map((d) => d.fields.length)
+
     // Xác nhận riêng đoạn lớp 4 là hướng dẫn: còn 2 field độ tin thấp khác (function:@B…) ⇒ vẫn ở fields_review
     const afterGuidance = await patchFields(ctx.projectId, {
       import_id: ctx.importId,
@@ -257,6 +262,10 @@ describe("FLF-462 - bước 1.6: đoạn lớp 4 chữ hướng dẫn (AI phân 
     // FLF-462: đoạn được xác nhận là hướng dẫn ⇒ Code nâng `guidance_layer` lên 3 (chắc chắn) ngay trên DocBlock đã lưu,
     // để I-5 (templateMarks / stripTemplateMarks) không còn tính đoạn này là nội dung thật
     expect((await DocBlock.findOne({ _id: nfrBlock!._id }).lean())?.guidance_layer).toBe(3)
+    // Tiêu chí Jira FLF-462: người xác nhận là hướng dẫn ⇒ mục thành "thiếu" ở I-5: không còn field nào chỉ có nguồn từ đoạn đó
+    // (Spine không nhận dữ liệu 4.2.3), field của mục khác giữ nguyên
+    expect(await nfrFields()).toEqual([])
+    expect((await draftsOf(ctx.importId)).filter((d) => d.section_id !== "fixed:4.2.3").map((d) => d.fields.length)).toEqual(otherBefore)
 
     // Xác nhận hết phần còn lại theo gợi ý AI ⇒ hết việc cần xác nhận ⇒ baselining
     const done = await patchFields(ctx.projectId, { import_id: ctx.importId, fields: [], guidance: [], content_mismatch: [], confirm_all: true })
@@ -283,5 +292,44 @@ describe("FLF-462 - bước 1.6: đoạn lớp 4 chữ hướng dẫn (AI phân 
       confirm_all: false
     })
     expect((await DocBlock.findOne({ _id: nfrBlock!._id }).lean())?.guidance_layer).toBe(4)
+    // Là nội dung thật ⇒ field vẫn giữ (mục vẫn "có")
+    const fields = (await draftsOf(ctx.importId)).find((d) => d.section_id === "fixed:4.2.3")!.fields
+    expect(fields.some((f) => f.source_block_ids.includes(nfrBlock!.block_id))).toBe(true)
+  })
+
+  /** Đoạn lớp 4 AI chấm `is_guidance: true` độ tin cao 0.9: không tự thành hướng dẫn chắc chắn (BF §3.1.1: điểm AI không là tín hiệu duy nhất). */
+  const highConfidenceGuidance = async (clearLowConfidence: boolean) => {
+    const ctx = await importAtExtracting()
+    const nfrBlock = await DocBlock.findOne({ projectId: ctx.projectId, section_id: "fixed:4.2.3", kind: "paragraph" }).lean()
+    await DocBlock.updateOne({ _id: nfrBlock!._id }, { $set: { guidance_layer: 4 } })
+    mockOverrides.next = record((prompt) => {
+      const out = fakeMode1(prompt)
+      if (!out || !prompt.includes("# Import Extract")) return out
+      const json = JSON.parse(out) as { items: { field_confidence: Record<string, number> }[]; guidance_blocks?: unknown[] }
+      if (clearLowConfidence) for (const i of json.items) i.field_confidence = {}
+      if (sectionOf(prompt) === "fixed:4.2.3") json.guidance_blocks = [{ block_id: nfrBlock!.block_id, is_guidance: true, confidence: 0.9 }]
+      return JSON.stringify(json)
+    })
+    const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
+    return { ctx, nfrBlock: nfrBlock!, run }
+  }
+  const layerOf = async (id: import("mongoose").Types.ObjectId) => (await DocBlock.findOne({ _id: id }).lean())?.guidance_layer
+  const nfrFieldCount = async (importId: string, blockId: string) =>
+    ((await draftsOf(importId)).find((d) => d.section_id === "fixed:4.2.3")?.fields ?? []).filter((f) => f.source_block_ids.includes(blockId)).length
+
+  it("lớp 4 AI độ tin cao, không có gì khác để xác nhận ⇒ baselining, giữ lớp 4 và field (nội dung thật)", async () => {
+    const { ctx, nfrBlock, run } = await highConfidenceGuidance(true)
+    expect(run.doc.status).toBe("baselining")
+    expect(await layerOf(nfrBlock._id)).toBe(4)
+    expect(await nfrFieldCount(ctx.importId, nfrBlock.block_id)).toBeGreaterThan(0)
+  })
+
+  it("lớp 4 AI độ tin cao, có việc khác dừng ở 1.6 rồi Xác nhận tất cả ⇒ cùng kết quả: giữ lớp 4 và field", async () => {
+    const { ctx, nfrBlock, run } = await highConfidenceGuidance(false)
+    expect(run.doc.status).toBe("fields_review")
+    const done = await patchFields(ctx.projectId, { import_id: ctx.importId, fields: [], guidance: [], content_mismatch: [], confirm_all: true })
+    expect(done.status).toBe("baselining")
+    expect(await layerOf(nfrBlock._id)).toBe(4)
+    expect(await nfrFieldCount(ctx.importId, nfrBlock.block_id)).toBeGreaterThan(0)
   })
 })
