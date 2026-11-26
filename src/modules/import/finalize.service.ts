@@ -397,7 +397,9 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
           console.error(`[import] Rà luật Code (I-5) cho import ${String(doc._id)} lỗi:`, err)
           return null
         })
-      const reviewSections = checked ? sectionsNeedingAiReview(structure, checked.flags) : []
+      // Rà luật Code lỗi ⇒ không bỏ qua vòng rà soát âm thầm: mục là đầu vào của phần thiếu không cần cờ để chọn, cờ đỏ lấy từ
+      // Spine hiện có (BF §3.1.2 chỉ cho bỏ qua khi không có mục nào cần AI rà)
+      const reviewSections = sectionsNeedingAiReview(structure, checked ? checked.flags : (await loadSpine(projectId)).flags)
       if (reviewSections.length) {
         profile.review_sections = reviewSections
         await profile.save()

@@ -128,3 +128,17 @@ describe("FLF-453 sửa lỗi", () => {
     expect((await ImportedDocument.findById(importId))!.status).toBe("reviewing")
   })
 })
+
+describe("FLF-453 - rà luật Code (I-5) lỗi lúc finalize", () => {
+  it("recompute lỗi ⇒ vẫn dừng ở reviewing với mục đầu vào, không bỏ qua vòng rà soát", async () => {
+    const spy = vi.spyOn(flagsService, "recompute").mockRejectedValueOnce(new Error("recompute down"))
+    try {
+      const { projectId } = await toReview()
+      const { TemplateProfile } = await import("../../../src/modules/import/template-profile.model.js")
+      const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+      expect(profile.review_sections).toContain("fixed:1")
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})
