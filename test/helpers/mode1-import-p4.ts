@@ -8,9 +8,12 @@ import { env } from "../../src/config/env.js"
 import { seedFixture } from "../setup.js"
 import { createMode1Project } from "./mode1.js"
 import { makeSrsDocx, type SrsFixtureOptions } from "../../src/modules/import/testing/srs-fixture.js"
-import { acceptLatest, uploadImport } from "../../src/modules/import/import.service.js"
+import { acceptLatest, requireImport, uploadImport } from "../../src/modules/import/import.service.js"
 import { patchFields, runExtraction as runExtractionRaw, type ExtractionRun } from "../../src/modules/import/extract.service.js"
 import { finalizeImport } from "../../src/modules/import/finalize.service.js"
+import { runReview } from "../../src/modules/import/review.service.js"
+import { TemplateProfile } from "../../src/modules/import/template-profile.model.js"
+import type { IImportedDocument } from "../../src/modules/import/imported-document.model.js"
 import * as spineRepository from "../../src/modules/spine/spine.repository.js"
 
 /**
@@ -74,4 +77,18 @@ export const importFinalized = async (opts: { balance?: number; srs?: SrsFixture
   const before = (await spineRepository.get(ctx.projectId))!
   const result = await finalizeImport(ctx.projectId, ctx.userId, { import_id: ctx.importId, base_version: before.spine_version })
   return { ...ctx, result, baseVersionBefore: before.spine_version }
+}
+
+/**
+ * FLF-453 (business-flow §3.1.2 "Rà soát phần có sẵn"): finalize của chế độ 3/4 có thể dừng ở `reviewing` (còn mục cần AI
+ * rà) trước khi vào Luồng 2 (`drafting`). Dùng cho test không chủ đích kiểm vòng rà soát — chạy vòng rà soát với AI giả
+ * (`mockOverrides.next` đang đặt, mặc định không phát hiện gì — `fakeReviewExisting`) rồi trả về bản ghi đã ở `drafting`
+ * như trước FLF-453. Không ở `reviewing` ⇒ trả nguyên bản ghi hiện tại.
+ */
+export const finishReviewIfPending = async (projectId: string, userId: string, importId: string): Promise<IImportedDocument> => {
+  const doc = await requireImport(projectId, importId)
+  if (doc.status !== "reviewing") return doc
+  const profile = await TemplateProfile.findOne({ projectId })
+  await runReview(doc, userId, profile?.review_sections ?? [])
+  return requireImport(projectId, importId)
 }

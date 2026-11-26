@@ -30,6 +30,10 @@ import * as gapReportService from "./gap-report.service.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { assertNotMode1 } from "./mode1-guard.js"
 import * as importService from "./import.service.js"
+import { assertImportStatus } from "./import.service.js"
+import { IMPORT_STATUS_LABELS } from "./import.state.js"
+import { TemplateProfile } from "./template-profile.model.js"
+import * as reviewService from "./review.service.js"
 import { buildImportSource, importSourceEtag } from "./import-source.service.js"
 import * as reuploadService from "./reupload.service.js"
 import * as stepPlanService from "./step-plan.service.js"
@@ -182,6 +186,35 @@ export const continueFlow2 = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const body = parseInput(continueFlow2RequestSchema, req.body)
   return sendSuccess(res, 200, await continueInFlow2(auth.projectId, auth.userId, body))
+})
+
+/**
+ * FLF-453 (business-flow §3.1.2 "Rà soát phần có sẵn"): người dùng xác nhận credit ở `reviewing` ⇒ chạy AI rà các mục
+ * Code đã chọn (`TemplateProfile.review_sections`), rồi sang Luồng 2 như `continueFlow2`. Lượt AI lỗi / hết credit ⇒
+ * trả `import` đang `paused`, không sang Luồng 2 — gọi lại endpoint này để tiếp tục (lượt đã trừ credit không chạy lại).
+ */
+export const reviewRun = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(importResumeRequestSchema, req.body)
+  const doc = await importService.requireImport(auth.projectId, body.import_id)
+  assertImportStatus(doc, ["reviewing"], "drafting")
+  const profile = await TemplateProfile.findOne({ projectId: auth.projectId })
+  const result = await reviewService.runReview(doc, auth.userId, profile?.review_sections ?? [])
+  if ("paused" in result) return sendSuccess(res, 200, { import: importService.toImportDto(doc) })
+  return sendSuccess(res, 200, result)
+})
+
+/** Bấm Dừng khi vòng rà soát đang chạy (business-flow §2 "Dừng giữa chừng") — giữ tiến độ, lượt chưa trừ credit không chạy. */
+export const reviewStop = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(importResumeRequestSchema, req.body)
+  const doc = await importService.requireImport(auth.projectId, body.import_id)
+  if (doc.status !== "reviewing") {
+    throw new Mode1Error("IMPORT_INVALID_STATE", `Không thực hiện được khi lần nhập tài liệu đang ở bước "${IMPORT_STATUS_LABELS[doc.status] ?? doc.status}"`, { status: doc.status, to: "reviewing", allowed: ["reviewing"] })
+  }
+  doc.paused = { reason: "user", at: new Date() }
+  await doc.save()
+  return sendSuccess(res, 200, { import: importService.toImportDto(doc) })
 })
 
 /**

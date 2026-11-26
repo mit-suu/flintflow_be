@@ -8,7 +8,7 @@ import { projectCode } from "../../../src/modules/project/project-code.js"
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
 
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
-import { fileOf, importAtBaselining, importAtExtracting, importFinalized } from "../../helpers/mode1-import-p4.js"
+import { fileOf, finishReviewIfPending, importAtBaselining, importAtExtracting, importFinalized } from "../../helpers/mode1-import-p4.js"
 import { reupload, toReuploadDto } from "../../../src/modules/import/reupload.service.js"
 import { ReuploadDiff } from "../../../src/modules/import/reupload-diff.model.js"
 import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
@@ -263,6 +263,8 @@ const beforeBaseline = async () => {
     .updateOne({ _id: new mongoose.Types.ObjectId(ctx.projectId) }, { $set: { template_intent: "fixed", start_kind: "new" } })
   await startFinalize(ctx.projectId, ctx.userId, { import_id: ctx.importId, base_version: (await spineRepository.get(ctx.projectId))!.spine_version })
   await waitForFinalize(ctx.importId)
+  // FLF-453: AI giả không phát hiện gì ở vòng rà soát (business-flow §3.1.2) — test này không chủ đích kiểm vòng rà soát
+  await finishReviewIfPending(ctx.projectId, ctx.userId, ctx.importId)
   expect((await Project.findById(ctx.projectId).lean())!.mode).toBe("fpt")
   expect(await DocVersion.countDocuments({ projectId: ctx.projectId })).toBe(0)
   return ctx

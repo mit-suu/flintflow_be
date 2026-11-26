@@ -134,6 +134,9 @@ export const fakeSemanticCheck = (prompt: string): string | undefined => {
   return JSON.stringify({ findings: [{ rule: "ambiguity", section_id: "fixed:4.2.3", message: "\"95% of requests\" needs a load profile.", block_ids: [b] }] })
 }
 
+/** FLF-453 (business-flow §3.1.2 "Rà soát phần có sẵn") — mặc định không phát hiện gì; test riêng của vòng rà soát ghi `mockOverrides.next` khác. */
+export const fakeReviewExisting = (prompt: string): string | undefined => (prompt.includes("# Import Review Existing") ? JSON.stringify({ findings: [] }) : undefined)
+
 /**
  * I-4 phần ảnh (phase 5): mặc định ảnh không phải diagram đọc được (`other`). Ảnh có chú thích chứa "USECASE-IMG" ⇒
  * use case diagram: actor "Guest" mới + UC-02 (đã có từ chữ) thêm actor Guest.
@@ -152,7 +155,8 @@ export const fakeDiagram = (prompt: string): string | undefined => {
   })
 }
 
-export const fakeMode1 = (prompt: string): string | undefined => fakeImportExtract(prompt) ?? fakeDiagram(prompt) ?? fakeSemanticCheck(prompt)
+export const fakeMode1 = (prompt: string): string | undefined =>
+  fakeImportExtract(prompt) ?? fakeDiagram(prompt) ?? fakeSemanticCheck(prompt) ?? fakeReviewExisting(prompt)
 
 // ─── change request ─────────────────────────────────────────────
 
