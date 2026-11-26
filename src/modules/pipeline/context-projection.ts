@@ -349,7 +349,6 @@ const BRIEF_UNOWNED_FIELDS: ReadonlySet<string> = new Set(["project.vision", "pr
 const SETTLED_RULE_READS = ["business_rules[tier=high]:id,statement", "project.release_scope"] as const
 
 export const STEP_EXTRA_READS: Readonly<Record<string, readonly string[]>> = Object.freeze({
-  "S-3.1": SETTLED_RULE_READS,
   "S-4.4": SETTLED_RULE_READS,
   "S-5.2": SETTLED_RULE_READS,
   "S-5.4": SETTLED_RULE_READS,
@@ -362,7 +361,7 @@ export const STEP_EXTRA_READS: Readonly<Record<string, readonly string[]>> = Obj
   // FLF-478: S-2.3 quyết có dịch vụ push hay không, nên phải thấy nền tảng (form_factor)
   "S-2.3": ["project.form_factor"],
   // FLF-493: S-3.1–S-3.3 ghi `actors[].platforms` (tập con của nền tảng dự án) nên phải thấy form_factor
-  "S-3.1": ["project.form_factor"],
+  "S-3.1": [...SETTLED_RULE_READS, "project.form_factor"],
   "S-3.2": ["project.form_factor"],
   "S-3.3": ["project.form_factor"]
 })
