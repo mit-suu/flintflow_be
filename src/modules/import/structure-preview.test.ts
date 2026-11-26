@@ -264,3 +264,32 @@ describe("FLF-411 - màn đọc khung trên file thật (parse + khớp mẫu, k
     expect((await previewOfFixture("techmart-srs-fpt", "fixed")).summary).toMatchObject({ kind: "written", missing: 0 })
   }, 30000)
 })
+
+describe("FLF-460 - dấu chưa chắc và nhãn Ngoài phạm vi trên bản đồ mục", () => {
+  const spine = createEmptySpine({ name: "Lumen" })
+  const blocks = [
+    heading("h1", "1 Overview", "fixed:1"),
+    para("p1", "Lumen is a course management SaaS for small training centres.", "fixed:1"),
+    heading("h2", "Những gì hệ thống làm", "fixed:3.2", 2),
+    para("p2", "Learners enrol in courses; instructors publish lessons and grade quizzes.", "fixed:3.2")
+  ]
+  const sections = new Map([["h1", "fixed:1"], ["h2", "fixed:3.2"]])
+
+  it("heading độ tin thấp ⇒ section gắn uncertain + matched_title + block_id", () => {
+    const preview = previewStructure(blocks, sections, spine, "free", AT, new Map([["h2", { uncertain: true, matched_title: "Functional Requirements" }]]))
+    expect(preview.sections.find((s) => s.block_id === "h2")).toMatchObject({ uncertain: true, matched_title: "Functional Requirements" })
+    expect(preview.sections.find((s) => s.block_id === "h1")?.uncertain).toBeUndefined()
+  })
+
+  it("nhãn out_of_scope đưa mục ra khỏi phạm vi; in_scope đưa mục tự xếp ngoài phạm vi trở lại", () => {
+    const out = previewStructure(blocks, sections, spine, "free", AT, new Map([["h2", { scope_label: "out_of_scope" as const }]]))
+    expect(out.sections.find((s) => s.block_id === "h2")).toMatchObject({ status: "out_of_scope", scope_label: "out_of_scope" })
+    expect(out.summary.out_of_scope).toBe(1)
+
+    const cost = [heading("c1", "Chi phí dự kiến", "unmapped"), ...blocks]
+    const auto = previewStructure(cost, new Map([...sections, ["c1", "unmapped"]]), spine, "free", AT)
+    expect(auto.sections.find((s) => s.block_id === "c1")?.status).toBe("out_of_scope")
+    const back = previewStructure(cost, new Map([...sections, ["c1", "unmapped"]]), spine, "free", AT, new Map([["c1", { scope_label: "in_scope" as const }]]))
+    expect(back.sections.find((s) => s.block_id === "c1")).toMatchObject({ status: "missing", scope_label: "in_scope" })
+  })
+})

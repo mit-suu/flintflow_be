@@ -13,6 +13,8 @@ import { getImportResponseSchema, importStateResponseSchema, importRejectedMetaS
 import { DocBlock } from "../../src/modules/import/doc-block.model.js"
 import { IMPORT_MAX_FILE_BYTES } from "../../src/modules/import/import.constants.js"
 import { Project } from "../../src/modules/project/project.model.js"
+import { ExtractionDraft } from "../../src/modules/import/extraction-draft.model.js"
+import { ImportedDocument } from "../../src/modules/import/imported-document.model.js"
 import { createMode1Project } from "../helpers/mode1.js"
 
 const api = (seeded: SeededFixture, projectId: string) => {
@@ -73,10 +75,19 @@ describe("mode 1 import - upload, preflight, parse, mapping", () => {
     expect(low.length).toBeGreaterThan(0)
     expect(low.every((h) => h.confirmed && h.auto_confirmed)).toBe(true)
     expect(view.profile!.heading_map.filter((h) => h.confidence >= 0.8).every((h) => !h.auto_confirmed)).toBe(true)
-    // PATCH mapping chỉ còn cho bản ghi cũ ở mapping_review
+    // FLF-460 (đảo FLF-343): màn đọc khung (chưa bấm Bắt đầu) đổi được nhãn; mục chưa chắc hiện dấu chưa chắc ở bản đồ mục
+    const lowIds = new Set(low.map((h) => h.block_id))
+    const flagged = view.structure_preview!.sections.filter((s) => s.uncertain)
+    expect(flagged.length).toBeGreaterThan(0)
+    expect(flagged.every((s) => s.block_id && lowIds.has(s.block_id))).toBe(true)
     const notes = view.profile!.heading_map.find((h) => h.heading_text === "5.9 Team Notes")!
-    const late = await c.patch("/import/mapping", { import_id: up.body.data.import.id, headings: [{ block_id: notes.block_id, section_id: "fixed:5.4" }] })
-    expect(late.status).toBe(409)
+    const relabel = await c.patch("/import/mapping", { import_id: up.body.data.import.id, headings: [{ block_id: notes.block_id, section_id: "fixed:5.4" }] })
+    expect(relabel.status, JSON.stringify(relabel.body.error)).toBe(200)
+    expect(relabel.body.data.import.status).toBe("extracting")
+    const after = getImportResponseSchema.parse((await c.get()).body.data)
+    // người dùng tự chọn nên không còn chưa chắc
+    expect(after.profile!.heading_map.find((h) => h.block_id === notes.block_id)).toMatchObject({ section_id: "fixed:5.4", confirmed: true })
+    expect(after.structure_preview!.sections.find((s) => s.block_id === notes.block_id)?.uncertain).toBeUndefined()
   })
 
   it("preflight từ chối ⇒ 422 kèm issues, bản ghi preflight_rejected; upload lại được", async () => {
@@ -214,5 +225,83 @@ describe("mode 1 import - upload, preflight, parse, mapping", () => {
     expect(importStateResponseSchema.parse(up.body.data).import.status).toBe("extracting")
     const profile = getImportResponseSchema.parse((await c.get()).body.data).profile!
     expect(profile.table_map.map((t) => t.header)).toEqual(["Use Case ID", "", "Actor"])
+  })
+})
+
+describe("FLF-460 - đổi nhãn mục ở ba thời điểm", () => {
+  const setup = async () => {
+    const seeded = await seedFixture("minimal")
+    const projectId = await createMode1Project(seeded)
+    const c = api(seeded, projectId)
+    const up = await c.upload(await makeSrsDocx())
+    expect(up.status, JSON.stringify(up.body.error)).toBe(201)
+    const importId = up.body.data.import.id as string
+    const view = getImportResponseSchema.parse((await c.get()).body.data)
+    return { c, importId, heading: view.profile!.heading_map.find((h) => h.heading_text === "2.1 Actors")! }
+  }
+
+  it("trước Bắt đầu: đưa mục vào Ngoài phạm vi, bản đồ mục tính lại, không đổi credit; bỏ nhãn tay thì quay về như cũ", async () => {
+    const { c, importId, heading } = await setup()
+    const before = getImportResponseSchema.parse((await c.get()).body.data)
+
+    const out = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, scope: "out_of_scope" }] })
+    expect(out.status, JSON.stringify(out.body.error)).toBe(200)
+    const view = getImportResponseSchema.parse((await c.get()).body.data)
+    expect(view.structure_preview!.sections.find((s) => s.block_id === heading.block_id)).toMatchObject({ status: "out_of_scope", scope_label: "out_of_scope" })
+    expect(view.structure_preview!.summary.out_of_scope).toBe(before.structure_preview!.summary.out_of_scope + 1)
+    expect(view.credit_estimate).toEqual(before.credit_estimate)
+    expect(view.import!.status).toBe("extracting")
+
+    const back = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, scope: "auto" }] })
+    expect(back.status).toBe(200)
+    const restored = getImportResponseSchema.parse((await c.get()).body.data)
+    expect(restored.structure_preview!.summary).toEqual(before.structure_preview!.summary)
+  })
+
+  it("trước Bắt đầu: đổi mục khớp được; mục không có trong mẫu bị từ chối", async () => {
+    const { c, importId, heading } = await setup()
+    const res = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, section_id: "unmapped" }] })
+    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+    const view = getImportResponseSchema.parse((await c.get()).body.data)
+    expect(view.profile!.heading_map.find((h) => h.block_id === heading.block_id)?.section_id).toBe("unmapped")
+    const rejected = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, section_id: "khong-co" }] })
+    expect(rejected.status).toBe(409)
+  })
+
+  it("sau import (trước bản gốc): bỏ bản đọc cũ của mục đổi nhãn (id cũ và mới), về màn báo credit để I-4 đọc lại", async () => {
+    const { c, importId, heading } = await setup()
+    const doc = (await ImportedDocument.findById(importId))!
+    const other = "fixed:3.1"
+    for (const section_id of [heading.section_id, "fixed:5.4", other]) {
+      await ExtractionDraft.create({ projectId: doc.projectId, import_id: doc._id, section_id, status: "done", fields: [], ops: [] })
+    }
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { status: "fields_review" } })
+
+    const res = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, section_id: "fixed:5.4" }] })
+    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+    expect(res.body.data.import.status).toBe("extracting")
+    expect((await ExtractionDraft.find({ import_id: importId }).lean()).map((d) => d.section_id)).toEqual([other])
+    const view = getImportResponseSchema.parse((await c.get()).body.data)
+    expect(view.import!.status).toBe("extracting")
+    expect(view.credit_estimate).not.toBeNull()
+  })
+
+  it("sau import: đang đọc (không dừng) hoặc đang tạo bản gốc thì từ chối", async () => {
+    const { c, importId, heading } = await setup()
+    const doc = (await ImportedDocument.findById(importId))!
+    await ExtractionDraft.create({ projectId: doc.projectId, import_id: doc._id, section_id: "fixed:3.1", status: "pending", fields: [], ops: [] })
+    const body = { import_id: importId, headings: [{ block_id: heading.block_id, section_id: "fixed:5.4" }] }
+    expect((await c.patch("/import/mapping", body)).status).toBe(409)
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { status: "baselining" } })
+    expect((await c.patch("/import/mapping", body)).status).toBe(409)
+  })
+
+  it("sau bản gốc: không đổi trực tiếp; luồng CR chưa nhận loại thay đổi đổi nhãn nên báo rõ", async () => {
+    const { c, importId, heading } = await setup()
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { status: "gap_review" } })
+    const res = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, scope: "out_of_scope" }] })
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe("IMPORT_INVALID_STATE")
+    expect(res.body.error.message).toContain("yêu cầu thay đổi")
   })
 })
