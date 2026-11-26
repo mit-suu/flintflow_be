@@ -1812,14 +1812,16 @@ export const creditEstimateFor = async (
   doc: IImportedDocument,
   opts: { withBalance: boolean }
 ): Promise<(ExtractionEstimate & { check_calls: number; translate_batches: number; available_credits: number | null }) | null> => {
-  if (doc.status !== "mapping_review" && doc.status !== "extracting") return null
+  // FLF-454: finalize dừng ở `checking` (paused: user) để báo lại credit 1.9 lớn hơn số đã báo ⇒ trả số mới (chỉ phần kiểm)
+  const recheck = doc.status === "checking" && doc.paused?.reason === "user"
+  if (doc.status !== "mapping_review" && doc.status !== "extracting" && !recheck) return null
   const extraction = await estimateExtraction(projectId, doc)
   if (!extraction) return null
   // Import động: check.service dùng `chunkBlocks` của file này
   const { estimateCheckCalls } = await import("./check.service.js")
   const check = await estimateCheckCalls(projectId)
   // FLF-456: file chỉ còn khung + chọn ngôn ngữ khác file ⇒ cộng phần dịch khung (cùng lượt Bắt đầu)
-  const translate = await skeletonTranslationEstimate(doc)
+  const translate = recheck ? null : await skeletonTranslationEstimate(doc)
   const translateBatches = translate?.batches ?? 0
   const estimate = {
     ...extraction,

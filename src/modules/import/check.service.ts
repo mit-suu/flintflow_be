@@ -353,18 +353,21 @@ const raisedText = (spine: Spine): string =>
  * I-5 cuối (`target_structure`), chưa finalize thì bản sơ bộ ở màn đọc khung. Dự án cũ không có ý định (`template_intent`) hoặc chưa
  * có kết quả so ⇒ không chặn (giữ luồng cũ).
  */
-const lacksTargetStructure = async (projectId: string): Promise<boolean> => {
+/** `preview`: chỉ bản sơ bộ ở màn đọc khung — đúng cái màn báo credit đã dùng, để so với lúc chạy thật. */
+type StructureSource = "latest" | "preview"
+
+const lacksTargetStructure = async (projectId: string, source: StructureSource = "latest"): Promise<boolean> => {
   const [project, profile] = await Promise.all([
     Project.findById(projectId, { template_intent: 1 }).lean(),
     TemplateProfile.findOne({ projectId }, { target_structure: 1, structure_preview: 1 }).lean()
   ])
   if (project?.template_intent !== "fixed" && project?.template_intent !== "free") return false
-  const mode = (profile?.target_structure ?? profile?.structure_preview)?.resolved_mode
+  const mode = (source === "preview" ? profile?.structure_preview : (profile?.target_structure ?? profile?.structure_preview))?.resolved_mode
   return mode !== undefined && mode !== 1
 }
 
 /** Block chữ đưa vào 1.9 + phạm vi loại (Ngoài phạm vi, mục tự sinh). Dùng chung cho lượt chạy và số credit báo trước. */
-export const loadCheckInput = async (projectId: string): Promise<{ blocks: CheckBlock[]; scope: CheckScope }> => {
+export const loadCheckInput = async (projectId: string, source: StructureSource = "latest"): Promise<{ blocks: CheckBlock[]; scope: CheckScope }> => {
   const [all, profile] = await Promise.all([
     DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS }, kind: { $in: ["heading", "paragraph", "list_item", "table_cell"] } })
       .sort({ "anchor.ordinal": 1 })
@@ -372,7 +375,7 @@ export const loadCheckInput = async (projectId: string): Promise<{ blocks: Check
       .lean<(CheckBlock & { kind: string })[]>(),
     TemplateProfile.findOne({ projectId }, { target_structure: 1, structure_preview: 1, heading_map: 1 }).lean()
   ])
-  const structure = profile?.target_structure ?? profile?.structure_preview
+  const structure = source === "preview" ? profile?.structure_preview : (profile?.target_structure ?? profile?.structure_preview)
   const blocks = all.filter((b) => b.kind !== "heading")
   return {
     blocks,
@@ -461,6 +464,13 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string, gua
   // FLF-411 (U1-8): khung mẫu (chữ là hướng dẫn / ví dụ, Spine không nhận nội dung) ⇒ không có gì để AI đối chiếu, không trừ credit
   // FLF-454: file chưa đủ cấu trúc đích không chạy 1.9, không trừ credit
   if (!done.has(SEMANTIC_CHECK_STEP) && !(await isTemplateOnlyProject(projectId)) && !(await lacksTargetStructure(projectId))) {
+    // BF §2 "Báo trước khi chạy hàng loạt": credit 1.9 lúc chạy (cấu trúc đích cuối) lớn hơn số màn đọc khung đã báo (bản sơ bộ,
+    // vd sơ bộ chế độ 3/4 ⇒ 0, sau finalize chế độ 1) ⇒ dừng, báo lại số mới; bấm tiếp tục = xác nhận đúng số đó
+    if (await needsCreditReconfirm(projectId)) {
+      doc.paused = { reason: "user", at: new Date() }
+      await doc.save()
+      return false
+    }
     const failure = await runSemanticCheck(projectId, String(doc._id), userId, done, guard)
     if (failure) {
       doc.paused = { reason: failure.reason, at: new Date() }
@@ -476,17 +486,29 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string, gua
   return true
 }
 
+const needsCreditReconfirm = async (projectId: string): Promise<boolean> => {
+  const profile = await TemplateProfile.findOne({ projectId }, { structure_preview: 1, check_credit_notice: 1 })
+  if (!profile?.structure_preview) return false
+  const [actual, announced] = await Promise.all([estimateCheckCalls(projectId), estimateCheckCalls(projectId, "preview")])
+  if (actual.credits <= announced.credits) return false
+  if ((profile.check_credit_notice?.credits ?? -1) >= actual.credits) return false
+  profile.check_credit_notice = { credits: actual.credits, at: new Date().toISOString() }
+  profile.markModified("check_credit_notice")
+  await profile.save()
+  return true
+}
+
 /**
  * FLF-343: ước tính lượt AI của bước kiểm tra (1.11) cho màn báo credit một lần sau upload — cùng cách chia lô của lượt chạy
  * (`semanticBatches` trên block chữ, section hiện tại) + một lượt kiểm chéo. Là cận trên: sau finalize section tạm
  * (`function:@B0012`) đổi sang id thật ngắn hơn nên số lô không tăng; tài liệu không có phần tử nào thì lượt kiểm chéo không chạy.
  */
-export const estimateCheckCalls = async (projectId: string): Promise<{ batches: number; calls: number; credits: number }> => {
+export const estimateCheckCalls = async (projectId: string, source: StructureSource = "latest"): Promise<{ batches: number; calls: number; credits: number }> => {
   // FLF-411 (U1-8): khung mẫu không chạy 1.11 (`runImportCheck`) ⇒ màn đọc khung không báo "Dự kiến ~6 credit"
   if (await isTemplateOnlyProject(projectId)) return { batches: 0, calls: 0, credits: 0 }
   // FLF-454: file chưa đủ cấu trúc đích ⇒ 1.9 không chạy, không báo credit
-  if (await lacksTargetStructure(projectId)) return { batches: 0, calls: 0, credits: 0 }
-  const { blocks, scope } = await loadCheckInput(projectId)
+  if (await lacksTargetStructure(projectId, source)) return { batches: 0, calls: 0, credits: 0 }
+  const { blocks, scope } = await loadCheckInput(projectId, source)
   const batches = semanticBatches(blocks, SEMANTIC_BATCH_CHARS, scope).length
   const [batchCost, crossCost] = await Promise.all([getActionCost(ActionType.IMPORT_SEMANTIC_CHECK), getActionCost(ActionType.IMPORT_CROSS_CHECK)])
   return { batches, calls: batches + 1, credits: batches * batchCost + crossCost }

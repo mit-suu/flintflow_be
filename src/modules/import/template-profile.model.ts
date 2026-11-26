@@ -175,6 +175,8 @@ export interface ITemplateProfile extends Document {
    * rà (import bỏ qua trạng thái `reviewing`, sang thẳng Luồng 2 như trước FLF-453).
    */
   review_sections?: string[] | null
+  /** FLF-454: credit bước 1.9 đã báo lại sau finalize khi lớn hơn số báo ở màn đọc khung (BF §2 "Báo trước khi chạy hàng loạt"). */
+  check_credit_notice?: { credits: number; at: string } | null
   /**
    * Sau khi đổi mẫu: `source_file_ref` là file nền mới do FlintFlow dựng (kể cả dự án chưa từng có file nền). Mốc áp dụng + Spine
    * lúc áp dụng — mốc so "nguyên vẹn" của bản in thay cho Spine lúc import. Chưa đổi mẫu ⇒ null.
@@ -275,6 +277,7 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
     flow2_entry_at: { type: Date, default: null },
     layout_confirmed_at: { type: Date, default: null },
     review_sections: { type: [String], default: null },
+    check_credit_notice: { type: Schema.Types.Mixed, default: null },
     migrated_base_at: { type: Date, default: null },
     migrated_base_spine: { type: Schema.Types.Mixed, default: null },
     migrated_base_migration_id: { type: Schema.Types.ObjectId, ref: "TemplateMigration", default: null },

@@ -13,9 +13,10 @@ import { fakeMode1 } from "../../helpers/mode1.js"
 import { importAtBaselining } from "../../helpers/mode1-import-p4.js"
 import { p, styled } from "../../../src/modules/docx-ooxml/testing/make-docx.js"
 import { startFinalize, waitForFinalize } from "../../../src/modules/import/finalize-jobs.js"
-import { estimateCheckCalls } from "../../../src/modules/import/check.service.js"
+import { estimateCheckCalls, runImportCheck } from "../../../src/modules/import/check.service.js"
 import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
+import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { Usage } from "../../../src/modules/spine/usage.model.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 
@@ -132,5 +133,32 @@ describe("FLF-454: khối chữ dưới heading riêng bị loại theo dữ li�
     expect(blocks.some((b) => b.section_id) && lines.length).toBeGreaterThan(0)
     void userId
     void importId
+  })
+})
+
+describe("FLF-454: credit 1.9 lúc chạy lớn hơn số đã báo ở màn đọc khung", () => {
+  it("bản sơ bộ chế độ 4 (báo 0 cho 1.9) nhưng cấu trúc đích cuối là chế độ 1 ⇒ dừng báo lại credit, chưa gọi AI; tiếp tục thì chạy", async () => {
+    const { projectId, userId, importId } = await importAtBaselining()
+    await setIntent(projectId, "free")
+    await TemplateProfile.updateOne(
+      { projectId },
+      {
+        $set: {
+          "structure_preview.resolved_mode": 4,
+          target_structure: { target: "fpt", intent: "free", resolved_mode: 1, sections: [], missing: [], compared_at: new Date().toISOString() }
+        }
+      }
+    )
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { status: "checking" } })
+    const doc = (await ImportedDocument.findById(importId))!
+    expect(await runImportCheck(doc, userId)).toBe(false)
+    expect(doc.paused?.reason).toBe("user")
+    expect((await TemplateProfile.findOne({ projectId }).lean())!.check_credit_notice?.credits).toBeGreaterThan(0)
+    expect(semanticCalls).toBe(0)
+
+    // Bấm tiếp tục = xác nhận đúng số đã báo lại
+    expect(await runImportCheck(doc, userId)).toBe(true)
+    expect(semanticCalls).toBeGreaterThan(0)
+    expect(doc.status).toBe("gap_review")
   })
 })
