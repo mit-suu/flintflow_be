@@ -231,6 +231,9 @@ export const pendingSummaryCredits = async (projectId: string): Promise<{ docume
   return { documents, credits: documents * (documents ? await summarizeCreditCost() : 0) }
 }
 
+/** Một tài liệu `running` quá lâu (lượt đọc chết giữa chừng) thì được giành lại. */
+const SUMMARY_CLAIM_TTL_MS = 10 * 60_000
+
 /** FLF-458: bấm Bắt đầu ở màn đọc khung ⇒ đọc luôn các tài liệu tham khảo đang chờ (đã báo credit cùng số của lượt đọc file). */
 export const summarizePendingAtStart = async (projectId: string, userId: string): Promise<void> => {
   const { documents } = await pendingSummaryCredits(projectId)
@@ -251,8 +254,19 @@ export const summarizeReferenceDocuments = async (
   documentIds: readonly string[] = []
 ): Promise<any[]> => {
   await getProjectById(projectId, orgId)
-  const filter = { projectId, supersededBy: null, parseStatus: "success" as const, summaryStatus: "pending" as const, ...(documentIds.length ? { _id: { $in: documentIds } } : {}) }
-  const documents = await ProjectDocument.find(filter)
+  const staleRunning = { summaryStatus: "running" as const, summaryClaimedAt: { $lt: new Date(Date.now() - SUMMARY_CLAIM_TTL_MS) } }
+  const filter = { projectId, supersededBy: null, parseStatus: "success" as const, $or: [{ summaryStatus: "pending" as const }, staleRunning], ...(documentIds.length ? { _id: { $in: documentIds } } : {}) }
+  const candidates = await ProjectDocument.find(filter)
+  // Giành từng tài liệu bằng cập nhật nguyên tử: hai lượt đồng thời không cùng gọi AI / trừ credit cho một tài liệu. `running` quá hạn (máy chủ chết giữa chừng) được giành lại.
+  const documents = []
+  for (const candidate of candidates) {
+    const claimed = await ProjectDocument.findOneAndUpdate(
+      { _id: candidate._id, supersededBy: null, $or: [{ summaryStatus: "pending" }, staleRunning] },
+      { $set: { summaryStatus: "running", summaryClaimedAt: new Date() } },
+      { new: true }
+    )
+    if (claimed) documents.push(claimed)
+  }
   const results = []
   // Hết credit giữa chừng: tài liệu đó và các tài liệu sau giữ `pending` (nạp credit rồi đọc lại được), không đánh dấu `failed` hàng loạt
   let creditError: unknown = null
@@ -272,6 +286,10 @@ export const summarizeReferenceDocuments = async (
       if (summarizeErr?.code === "INSUFFICIENT_CREDIT") {
         creditError = summarizeErr
         console.warn(`[DocumentSummarizer] Hết credit khi đọc "${document.originalName}" - giữ pending, dừng lượt đọc`)
+        // Trả tài liệu này và các tài liệu đã giành sau nó về `pending`
+        document.summaryStatus = "pending"
+        await document.save()
+        await ProjectDocument.updateMany({ _id: { $in: documents.slice(documents.indexOf(document) + 1).map((d) => d._id) }, summaryStatus: "running" }, { $set: { summaryStatus: "pending" } })
         break
       }
       document.summaryStatus = "failed"
