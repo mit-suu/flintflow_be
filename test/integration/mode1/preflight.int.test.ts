@@ -107,16 +107,14 @@ describe("preflight - 3 nhánh stamp", () => {
     })
   })
 
-  it("stamp của project khác ⇒ 422 IMPORT_STAMP_FOREIGN_PROJECT, không tạo bản ghi, không lưu file", async () => {
+  it("FLF-458: stamp của project khác khi tạo dự án ⇒ nhận như file mới (bỏ dấu cũ, ghi project nguồn), không từ chối", async () => {
     const { projectId, userId } = await project()
     const foreign = "66f0000000000000000000ff"
-    await expect(uploadImport(projectId, userId, fileOf(await stamped(foreign)))).rejects.toMatchObject({
-      code: "IMPORT_STAMP_FOREIGN_PROJECT",
-      statusCode: 422,
-      meta: { stamp: { project_id: foreign } }
-    })
-    expect(await ImportedDocument.countDocuments({ projectId })).toBe(0)
-    expect(await sourceFiles(projectId)).toBe(0)
+    const doc = await uploadImport(projectId, userId, fileOf(await stamped(foreign)))
+    expect(doc.preflight.status).toBe("accepted")
+    expect(doc.stamp).toBeNull()
+    expect(doc.foreign_project?.project_id).toBe(foreign)
+    expect(await ImportedDocument.countDocuments({ projectId })).toBe(1)
   })
 })
 
