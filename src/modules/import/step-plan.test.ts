@@ -161,7 +161,7 @@ describe("buildLayout", () => {
   })
 
   it("không có heading ⇒ layout rỗng; block trước heading đầu tiên không vào mục riêng", () => {
-    expect(buildLayout([p("B0001", "Cover page", null)], new Map())).toEqual({ layout: [], customSections: [], slices: [], segments: [], contextBlocks: [], sectionBlocks: [], entryOfHeading: new Map() })
+    expect(buildLayout([p("B0001", "Cover page", null)], new Map())).toEqual({ layout: [], customSections: [], slices: [], verbatimSlices: [], segments: [], contextBlocks: [], sectionBlocks: [], entryOfHeading: new Map() })
   })
 
   it("FLF-184: văn xuôi I-4 không trích được ⇒ phần nối (tiêu đề rỗng, cấp + 1) ngay sau section; khối dưới heading con cùng section gom vào cùng phần nối", () => {
@@ -462,6 +462,16 @@ describe("FLF-378 luồng C - dự án mới theo mẫu bắt buộc: không bư
     expect(of("S-8.3").state).toBe("applied")
     expect(of("S-8.4")).toMatchObject({ state: "applied", section_ids: [] })
     expect(of("B-1.1").state).toBe("hidden")
+  })
+
+  it("FLF-461: mẫu không có Screen Layout (S-5.3) vẫn giữ Screen Inventory (S-4.1) chạy; Screen Layout không vào kế hoạch", () => {
+    expect(of("S-4.1")).toMatchObject({ state: "enabled", reason: "Cung cấp đầu vào cho các bước soạn" })
+    expect(of("S-3.1").state).toBe("enabled")
+    const noLayout = buildStepPlan(layout, sectionsWithContent(BLOCKS), undefined, { draftOwners: new Set(["S-5.2", "S-5.4"]) })
+    expect(noLayout.find((s) => s.step_id === "S-4.1")?.state).toBe("enabled")
+    // Mẫu không có mục nào cần màn hình ⇒ không có lý do giữ Screen Inventory
+    const noScreens = buildStepPlan(layout, sectionsWithContent(BLOCKS), undefined, { draftOwners: new Set(["S-2.1"]) })
+    expect(noScreens.find((s) => s.step_id === "S-4.1")?.state).toBe("hidden")
   })
 
   it("seed: không step nào accepted ngoài Record of Changes; vòng S-5 sở hữu mục mẫu ⇒ pending, còn lại skipped", () => {

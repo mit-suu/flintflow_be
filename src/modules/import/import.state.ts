@@ -82,10 +82,12 @@ export const IMPORT_TRANSITIONS: Readonly<Record<ImportStatus, readonly ImportSt
   parsing: ["mapping_review", "extracting", "preflight_rejected"],
   mapping_review: ["extracting"],
   extracting: ["fields_review", "baselining"],
-  fields_review: ["baselining"],
+  // FLF-460: đổi nhãn sau import (trước bản gốc) ⇒ I-4 đọc lại mục đó, về màn báo credit
+  fields_review: ["baselining", "extracting"],
   baselining: ["checking", "incomplete"],
-  incomplete: ["baselining", "drafting", "reviewing"],
-  reviewing: ["drafting"],
+  // FLF-460: chế độ 3/4 chưa có bản gốc vẫn đổi nhãn được ⇒ về `extracting` đọc lại mục đổi nhãn
+  incomplete: ["baselining", "drafting", "reviewing", "extracting"],
+  reviewing: ["drafting", "extracting"],
   drafting: ["delivered"],
   checking: ["gap_review"],
   gap_review: ["delivered", "change_requested"],

@@ -28,6 +28,10 @@ export interface HeadingMapEntry {
    * nguyên độ tin; finalize gắn cờ vàng "Cần xem" (`import_needs_review`). Người dùng xác nhận tay ⇒ không có.
    */
   auto_confirmed?: boolean
+  /** FLF-460: người dùng đổi nhãn Ngoài phạm vi của heading này (màn đọc khung); không có = để hệ thống tự phân loại. */
+  scope_label?: "out_of_scope" | "in_scope"
+  /** FLF-460: người dùng tự chọn nhãn / phạm vi / xác nhận heading này (khác kết quả khớp tự động) - giữ lại khi tách lại file lúc Bắt đầu. */
+  manual?: boolean
   /** FLF-363: phần của ngân hàng phần khớp theo tên (`part:ieee:references`) — nội bộ, không hiện cho người dùng. */
   template_section?: string | null
   /** FLF-363 (D2): mục theo tên khác mục theo nội dung — heading đã đổi theo nội dung; finalize bật cờ vàng. */
@@ -144,6 +148,11 @@ export interface ITemplateProfile extends Document {
   /** FLF-412: khoá vùng heading (`block_id`) người dùng chọn Bỏ chữ ở màn đọc khung — áp vào file lúc bấm Bắt đầu rồi xoá. */
   drop_text?: string[] | null
   /**
+   * FLF-456: ngôn ngữ tài liệu người dùng chọn ở màn đọc khung khi file chỉ còn khung (`skeleton-language.ts`). Chỉ có tác dụng
+   * khi mọi mục có chữ đã Bỏ chữ; lúc bấm Bắt đầu, khác ngôn ngữ file ⇒ khung được dịch rồi tách lại và `language` = giá trị này.
+   */
+  skeleton_language?: "en" | "vi" | null
+  /**
    * FLF-459 (I-3): mẫu thư viện org Code tự khớp với file khi người dùng không chọn mẫu (mapping của mẫu đã áp sẵn). `null` /
    * thiếu = không khớp mẫu nào (khớp như mẫu mới của riêng dự án) hoặc người dùng đã chọn mẫu (`ImportedDocument.org_template_id`).
    */
@@ -160,11 +169,20 @@ export interface ITemplateProfile extends Document {
   flow2_entry_spine?: Spine | null
   flow2_entry_at?: Date | null
   /**
+   * FLF-461 (business-flow bước 2.9a): lúc người dùng xác nhận bố cục mới của chế độ 4 (mục FlintFlow soạn thêm chèn đúng vị trí,
+   * mục Ngoài phạm vi xuống cuối). Chưa xác nhận ⇒ bản in giữ nguyên bố cục file của khách, chưa sắp lại.
+   */
+  layout_confirmed_at?: Date | null
+  /** FLF-461: dấu của bố cục lúc xác nhận (`layoutSignatureOf`). Bố cục đổi sau đó (mục mới được soạn) ⇒ xác nhận cũ hết hiệu lực. */
+  layout_confirmed_signature?: string | null
+  /**
    * FLF-453 (business-flow §3.1.2 "Rà soát phần có sẵn"): id mục Code chọn cho AI rà trước khi sang Luồng 2 — mục là đầu vào
    * của phần thiếu, hay mục đang mang cờ đỏ (`review.service.ts` `sectionsNeedingAiReview`). Rỗng / vắng ⇒ không mục nào cần
    * rà (import bỏ qua trạng thái `reviewing`, sang thẳng Luồng 2 như trước FLF-453).
    */
   review_sections?: string[] | null
+  /** FLF-454: credit bước 1.9 đã báo lại sau finalize khi lớn hơn số báo ở màn đọc khung (BF §2 "Báo trước khi chạy hàng loạt"). */
+  check_credit_notice?: { credits: number; at: string } | null
   /**
    * Sau khi đổi mẫu: `source_file_ref` là file nền mới do FlintFlow dựng (kể cả dự án chưa từng có file nền). Mốc áp dụng + Spine
    * lúc áp dụng — mốc so "nguyên vẹn" của bản in thay cho Spine lúc import. Chưa đổi mẫu ⇒ null.
@@ -203,6 +221,8 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             detected_by: { type: String, enum: HEADING_DETECTORS, required: true },
             confirmed: { type: Boolean, default: false },
             auto_confirmed: { type: Boolean, default: undefined },
+            scope_label: { type: String, enum: ["out_of_scope", "in_scope"], default: undefined },
+            manual: { type: Boolean, default: undefined },
             template_section: { type: String, default: null },
             content_mismatch: { type: new Schema({ by_title: String, by_content: String }, { _id: false }), default: undefined },
             guidance: { type: String, default: undefined },
@@ -257,11 +277,15 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
     template_context: { type: Schema.Types.Mixed, default: null },
     structure_preview: { type: Schema.Types.Mixed, default: null },
     drop_text: { type: [String], default: null },
+    skeleton_language: { type: String, enum: ["en", "vi"], default: null },
     org_match: { type: new Schema({ template_id: { type: String, required: true }, version: { type: Number, required: true } }, { _id: false }), default: null },
     dropped_text: { type: [String], default: null },
     flow2_entry_spine: { type: Schema.Types.Mixed, default: null },
     flow2_entry_at: { type: Date, default: null },
+    layout_confirmed_at: { type: Date, default: null },
+    layout_confirmed_signature: { type: String, default: null },
     review_sections: { type: [String], default: null },
+    check_credit_notice: { type: Schema.Types.Mixed, default: null },
     migrated_base_at: { type: Date, default: null },
     migrated_base_spine: { type: Schema.Types.Mixed, default: null },
     migrated_base_migration_id: { type: Schema.Types.ObjectId, ref: "TemplateMigration", default: null },

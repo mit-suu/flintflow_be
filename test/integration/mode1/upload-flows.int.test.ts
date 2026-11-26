@@ -144,9 +144,10 @@ describe("FLF-411 - ba luồng upload", () => {
     for (const owner of draftOwners) expect(statusOf(owner), owner).toContain("pending")
     // Bước sở hữu mục khách đã viết giữ chốt
     for (const owner of keepOwners) expect(statusOf(owner).includes("pending"), owner).toBe(false)
-    // Brief mở lại (2.4): B-1.1 chờ chạy, B-0 bỏ qua
+    // FLF-461: B-0 chạy lại (phần đã có làm đầu vào) rồi Brief mở lại: B-0.1 chờ chạy
+    expect(r.spine.steps.find((st) => st.id === "B-0.1")?.status).toBe("pending")
     expect(r.spine.steps.find((st) => st.id === "B-1.1")?.status).toBe("pending")
-    expect(r.spine.progress.current_step).toBe("B-1.1")
+    expect(r.spine.progress.current_step).toBe("B-0.1")
 
     // Bản in (2.10): file khách là nền (giữ style), Glossary soạn thêm chèn thành heading mới đúng vị trí mẫu chuẩn
     const term = "Checkout Basket FLF416"
@@ -154,6 +155,16 @@ describe("FLF-411 - ba luồng upload", () => {
       base_version: r.spine.spine_version, by: r.seeded.userId, reason: "Draft glossary", step_id: null,
       ops: [{ op: "add", path: "glossary[]", value: { id: "G-416", term, definition: "Giỏ hàng lúc thanh toán." } }]
     })
+    // FLF-461 (bước 2.9a nằm sau khi soạn xong): mục thiếu đã soạn (Glossary ở trên) ⇒ coi như đã có, bản xem trước xác nhận được (`ready`)
+    const draftedProfile = (await TemplateProfile.findOne({ projectId: r.projectId }).lean())!
+    await TemplateProfile.updateOne(
+      { projectId: r.projectId },
+      { $set: { "target_structure.sections": draftedProfile.target_structure!.sections.map((sec) => (sec.status === "missing" ? { ...sec, status: "present", owner_steps: [] } : sec)), "target_structure.missing": [] } }
+    )
+    // FLF-461 (bước 2.9a): người xác nhận bố cục mới rồi bản in mới chèn mục soạn thêm đúng vị trí mẫu chuẩn
+    const confirmed = await request(app).post(`/api/v1/projects/${r.projectId}/import/layout-preview/confirm`).set(H(r.seeded))
+    expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200)
+    expect(confirmed.body.data.confirmed_at).toBeTruthy()
     const original = await docFileStore().load(r.profile.source_file_ref!)
     const exported = await request(app)
       .get(`/api/v1/projects/${r.projectId}/export/word?source=draft`)

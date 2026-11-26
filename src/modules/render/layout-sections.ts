@@ -1005,11 +1005,23 @@ export const buildLayoutSections = (
   const fromOriginal = new Set<RenderedSection>()
   // Mẫu IEEE: phần tử của heading lặp in dưới heading đó; lần đầu của section bỏ chúng
   const sliceOf = new Map((template.sectionSlices ?? []).map((sl) => [`${CUSTOM_PREFIX}${sl.custom_id}`, sl]))
-  const claimed = new Map<string, Set<string>>()
+  const claimedBy = new Map<string, Set<string>>()
+  /** FLF-453: phần tử đã in nguyên văn ở mục riêng của heading tự đặt (`section_id` = "verbatim") — mục FlintFlow nào cũng không in lại. */
+  const verbatimClaimed = new Set<string>()
   for (const sl of template.sectionSlices ?? []) {
-    const set = claimed.get(sl.section_id) ?? new Set<string>()
+    if (sl.section_id === "verbatim") {
+      sl.items.forEach((k) => verbatimClaimed.add(k))
+      continue
+    }
+    const set = claimedBy.get(sl.section_id) ?? new Set<string>()
     sl.items.forEach((k) => set.add(k))
-    claimed.set(sl.section_id, set)
+    claimedBy.set(sl.section_id, set)
+  }
+  const claimed = {
+    get: (id: string): Set<string> | undefined => {
+      const own = claimedBy.get(id)
+      return verbatimClaimed.size ? new Set([...(own ?? []), ...verbatimClaimed]) : own
+    }
   }
   const useCaseIds = template.relabelUseCases ? useCaseDisplayIds(spine) : undefined
   const contextFor = (sectionId: string, number: string): SectionRenderContext => {
@@ -1162,7 +1174,7 @@ export const buildLayoutSections = (
   /** Khối Spine của heading lặp — phần tử đã xoá hết ⇒ không có gì. */
   const sliceBlocks = (n: Numbered): Block[] => {
     const sl = sliceOf.get(n.section_id)
-    if (!sl) return []
+    if (!sl || sl.section_id === "verbatim") return []
     const section = renderSection(filterSliceItems(contentSpine, new Set(sl.items), true), sl.section_id, contextFor(sl.section_id, n.number))
     return shiftHeadings(section.blocks, n.renderLevel - section.level)
   }

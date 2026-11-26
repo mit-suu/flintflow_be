@@ -5,6 +5,7 @@ import mongoose from "mongoose"
 
 const notifySpy = vi.fn().mockResolvedValue(null)
 
+vi.mock("../import/layout-preview.service.js", () => ({ assertLayoutConfirmedForBaseline: async () => undefined }))
 vi.mock("./notification.service.js", () => ({
   notify: (...args: unknown[]) => notifySpy(...args)
 }))

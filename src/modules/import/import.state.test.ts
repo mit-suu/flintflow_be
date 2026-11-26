@@ -24,6 +24,8 @@ const EXPECTED: [ImportStatus, ImportStatus][] = [
   ["extracting", "fields_review"],
   ["extracting", "baselining"],
   ["fields_review", "baselining"],
+  // FLF-460: đổi nhãn sau import (trước bản gốc) ⇒ I-4 đọc lại mục đó
+  ["fields_review", "extracting"],
   ["baselining", "checking"],
   // FLF-336: I-5 thấy thiếu mục ⇒ dừng; "Hoàn thiện" ⇒ chạy lại finalize
   ["baselining", "incomplete"],
@@ -32,7 +34,10 @@ const EXPECTED: [ImportStatus, ImportStatus][] = [
   ["incomplete", "drafting"],
   // FLF-453: còn mục cần AI rà (đầu vào của phần thiếu, hoặc cờ đỏ) ⇒ dừng ở đây trước khi sang Luồng 2
   ["incomplete", "reviewing"],
+  // FLF-460: chế độ 3/4 chưa có bản gốc đổi nhãn ⇒ đọc lại mục đổi nhãn
+  ["incomplete", "extracting"],
   ["reviewing", "drafting"],
+  ["reviewing", "extracting"],
   ["drafting", "delivered"],
   ["checking", "gap_review"],
   ["gap_review", "delivered"],

@@ -30,6 +30,7 @@ import {
   type GuidanceVerdict,
   type KnownGuidance
 } from "../../shared/utils/instruction-text.js"
+import { isOutOfScopeHeading } from "./out-of-scope.js"
 import { PART_BANK, isWeakTitle, partById, partsMentionedIn, titleOrigins, type PartDef, type TemplateFamily } from "./part-bank.js"
 import type { HeadingMapEntry, TableMapEntry } from "./template-profile.model.js"
 import { foldText, foldTokens, splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
@@ -264,6 +265,8 @@ const assignParts = (headings: MatchHeading[], parents: number[], limits: Limits
       if (!isWeakTitle(text)) best.set(h, Math.max(best.get(h) ?? 0, score))
       if (limits.detail.has(h) || (limits.inFeatures.has(h) && !allowedInFeatures(part))) continue
       if (score < (limits.strict.has(h) ? STRONG_TITLE : MATCH_MIN)) continue
+      // FLF-455 (BF §5.3 "Phụ lục A Dự toán → Ngoài phạm vi"): phụ lục mà tên chỉ loại nội dung ngoài SRS không phải nhóm Phụ lục của mẫu chuẩn
+      if (part.target === "group:5" && isOutOfScopeHeading(b.title)) continue
       pairs.push({ h, part, score, title: text })
     }
   })

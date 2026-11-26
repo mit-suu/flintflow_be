@@ -114,6 +114,20 @@ describe("sectionAiSteps - kế hoạch lượt AI (chung cho lượt chạy và
     block(`${block_id}C`, "caption", caption, `body/p[${block_id}c]`, "fixed:2.2.1")
   ]
 
+  it("FLF-462: ô bảng lớp 4 (1 dấu hiệu) đi kèm lô chứa bảng làm ứng viên; ô lớp 3 / không dấu hiệu thì không; băm đổi theo ứng viên", () => {
+    const tbl = block("B0010", "table", "a | b\nc | d", "body/tbl[0]", "fixed:2.2.1")
+    const cell = (id: string, text: string, layer?: 1 | 2 | 3 | 4): Lite => ({ ...block(id, "table_cell", text, `body/tbl[0]/tr[0]/tc[${id}]/p[0]`, "fixed:2.2.1"), ...(layer ? { guidance_layer: layer } : {}) })
+    const blocks: Lite[] = [tbl, cell("B0011", "a", 4), cell("B0012", "b", 3), cell("B0013", "c"), cell("B0014", "d", 4)]
+    const steps = sectionAiSteps("fixed:2.2.1", blocks, none)
+    expect(steps).toHaveLength(1)
+    const step = steps[0]
+    expect(step.kind === "text" && step.batch.map((b) => b.block_id)).toEqual(["B0010"])
+    expect(step.kind === "text" && step.guidance_cells?.map((c) => c.block_id)).toEqual(["B0011", "B0014"])
+    const noCand = sectionAiSteps("fixed:2.2.1", [tbl, cell("B0011", "a"), cell("B0012", "b", 3)], none)
+    expect(noCand[0].kind === "text" && noCand[0].guidance_cells).toBeUndefined()
+    expect(stepsHash(noCand)).not.toBe(stepsHash(steps))
+  })
+
   it("ảnh đọc được trước, rồi lô chữ; bỏ heading, bảng đã đọc tất định, ảnh chụp màn hình; băm ổn định", () => {
     const blocks: Lite[] = [
       block("B0001", "heading", "2.2.1 Use Case Diagram", "body/p[0]", "fixed:2.2.1"),

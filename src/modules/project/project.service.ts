@@ -15,10 +15,10 @@ import { vietnameseSearchPattern } from "../../shared/utils/vi-search.js"
 import type { ListProjectsQuery, ProjectListSort } from "./project.validation.js"
 import { assertFolderOwned, folderStillExists } from "../folder/folder.service.js"
 import { TemplateProfile } from "../import/template-profile.model.js"
+import { hasBaseFile } from "./document-language.js"
 import { docFileStore } from "../doc-version/doc-file.store.js"
 import { Subscription } from "../credits/subscription.model.js"
 import { getPlan } from "../billing/plan.config.js"
-import { accountLocaleOf } from "../user/account-locale.js"
 import type { UserLocale } from "../../shared/i18n/locale.js"
 import { Mode1Error, type Mode1ErrorCode } from "../import/mode1.errors.js"
 
@@ -101,9 +101,9 @@ export const createProject = async (
   // Tạo thẳng trong thư mục (một request) — thư mục phải thuộc cùng org
   if (folderId) await assertFolderOwned(orgId, folderId)
   await assertProjectQuota(orgId)
-  // FLF-265 (D2, D3): dự án mới không mẫu lưu body ⇒ ngôn ngữ tài khoản ⇒ en. Dự án tải file lên bỏ qua giá trị gửi lên, để trống —
-  // ngôn ngữ theo file upload
-  const language = resolved.mode === "import" ? null : (documentLanguage ?? (await accountLocaleOf(userId)) ?? "en")
+  // FLF-456 (business-flow §1, đảo FLF-265): tạo mới không có file ⇒ mặc định **tiếng Anh**, không theo ngôn ngữ giao diện; chỉ khi
+  // người dùng chọn khác. Dự án tải file lên bỏ qua giá trị gửi lên, để trống — ngôn ngữ theo file upload
+  const language = resolved.mode === "import" ? null : (documentLanguage ?? "en")
   // Mode 1 vẫn có Spine: ở đó Spine là chỉ mục trích từ tài liệu import (G2), không phải nguồn sự thật
   const project = await Project.create({
     organizationId: orgId,
@@ -309,6 +309,15 @@ export const moveProjectToFolder = async (
   return project
 }
 
+/** FLF-456: cờ khoá ngôn ngữ BE trả cho FE (`document_language_locked`) — cùng điều kiện với `setDocumentLanguage`, để FE không mời đổi rồi nhận 409. */
+export const isDocumentLanguageLocked = async (
+  projectId: string,
+  project: Pick<IProject, "mode" | "converted_from"> & { template_ref?: unknown }
+): Promise<boolean> => {
+  const profile = await TemplateProfile.findOne({ projectId }).select("source_file_ref migrated_base_at").lean()
+  return hasBaseFile(project, profile)
+}
+
 /**
  * Đổi ngôn ngữ tài liệu (FLF-265, D2). Chỉ ghi field — không đụng Spine, không xoá cache render (phase 3 đưa ngôn
  * ngữ vào đường render). Mode 1 ⇒ 409 `DOCUMENT_LANGUAGE_LOCKED` (D3). Lọc `mode` ngay trong lệnh ghi: dự án cũ
@@ -322,6 +331,14 @@ export const setDocumentLanguage = async (
 ): Promise<IProject> => {
   const notFound = () => new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   if (!mongoose.isValidObjectId(projectId)) throw notFound()
+  // FLF-456: dự án có file nền (tải file, chọn mẫu của org, đã áp mẫu) khoá ngôn ngữ — chỉ đổi khi chuyển sang mẫu khác ngôn ngữ
+  // (đổi mẫu, FLF-466). Chưa có file nền (tạo mới, kể cả đã chuyển mode 1 sau baseline) vẫn đổi được
+  const [current, profile] = await Promise.all([
+    Project.findOne({ _id: projectId, organizationId: orgId }).select("mode converted_from template_ref").lean(),
+    TemplateProfile.findOne({ projectId }).select("source_file_ref migrated_base_at").lean()
+  ])
+  if (!current) throw notFound()
+  if (hasBaseFile(current, profile)) throw new Mode1Error(DOCUMENT_LANGUAGE_LOCKED, "Dự án có file nền dùng ngôn ngữ của file, chỉ đổi khi chuyển sang mẫu khác ngôn ngữ.")
   const project = await Project.findOneAndUpdate(
     { _id: projectId, organizationId: orgId, $or: [{ mode: { $ne: "import" } }, { converted_from: "fpt" }] },
     { documentLanguage },

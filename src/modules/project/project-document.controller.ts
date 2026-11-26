@@ -69,9 +69,31 @@ export const getDocuments = catchAsync(async (req: Request, res: Response) => {
 
   const projectId = Array.isArray(req.params.projectId) ? req.params.projectId[0] : req.params.projectId
   const orgId = requireOrgId(req)
-  const documents = await projectDocumentService.getProjectDocuments(orgId, projectId)
-  // FLF-405: FE hiện "đã dùng x / y token" của tài liệu tham khảo
-  return sendSuccess(res, 200, documents, await referenceTokenMeta(orgId, projectId))
+  const role = req.orgContext?.role
+  const [documents, tokenMeta, summaryEstimate] = await Promise.all([
+    projectDocumentService.getProjectDocuments(orgId, projectId),
+    referenceTokenMeta(orgId, projectId),
+    // FLF-458: credit cần để AI đọc tài liệu tham khảo đang chờ (`summaryStatus: "pending"`) — báo trước khi xác nhận đọc
+    projectDocumentService.pendingSummaryEstimate(orgId, userId, projectId, { withBalance: role === "lead" || role === "analyst" })
+  ])
+  return sendSuccess(res, 200, documents, { ...tokenMeta, summary_credit_estimate: summaryEstimate })
+})
+
+/**
+ * FLF-458: `POST /projects/:id/documents/summarize` — xác nhận AI đọc các tài liệu tham khảo đang chờ (business-flow §3.6:
+ * báo credit trước ở `GET /documents` `meta.summary_credit_estimate`, chỉ đọc sau khi người dùng xác nhận). `document_ids`
+ * rỗng / không gửi ⇒ đọc hết tài liệu đang chờ của dự án.
+ */
+export const summarizeDocuments = catchAsync(async (req: Request, res: Response) => {
+  const userId = req.user?.userId
+  if (!userId) {
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
+  }
+  const projectId = Array.isArray(req.params.projectId) ? req.params.projectId[0] : req.params.projectId
+  const body = (req.body ?? {}) as { document_ids?: unknown }
+  const documentIds = Array.isArray(body.document_ids) ? body.document_ids.filter((id): id is string => typeof id === "string") : []
+  const documents = await projectDocumentService.summarizeReferenceDocuments(requireOrgId(req), userId, projectId, documentIds)
+  return sendSuccess(res, 200, documents.map((d) => d.toJSON()))
 })
 
 export const deleteDocument = catchAsync(async (req: Request, res: Response) => {
