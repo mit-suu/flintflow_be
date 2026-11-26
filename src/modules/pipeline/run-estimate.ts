@@ -256,6 +256,25 @@ export const planRunEstimate = (
   const ack = spine.progress.credit_ack_required ?? null
   const kind = query.scope_kind ?? ack?.scope ?? null
 
+  // FLF-458: lần báo đọc tài liệu tham khảo ở B-0 — số credit đã tính sẵn trong lần báo, không đếm step
+  if (kind === "reference_documents") {
+    const credits = ack?.scope === "reference_documents" ? ack.credits : 0
+    return {
+      scope: query.scope,
+      scope_kind: kind,
+      screen_range: null,
+      ack_required: ack,
+      from_step: null,
+      units: [],
+      steps_total: 0,
+      ai_steps_total: 0,
+      credits_total: credits,
+      credits_min: credits,
+      credits_max: credits,
+      screen_estimate: null
+    }
+  }
+
   if (kind) {
     const pending = all.filter((s) => PENDING_STATUSES.has(statusOf(s.id)) && applicableToProfile(s, profile))
     let counted: ExpandedStep[]

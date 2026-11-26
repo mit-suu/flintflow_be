@@ -64,10 +64,11 @@ export const progressSchema = z.strictObject({
   elicit_turns_this_phase: nonNegativeInt,
   credit_ack_required: z
     .strictObject({
-      scope: z.enum(["after_brief", "screens_locked", "screens_added"]),
+      scope: z.enum(["after_brief", "screens_locked", "screens_added", "reference_documents"]),
       credits: z.number().min(0),
       created_at: z.string(),
-      screens: z.array(id).optional()
+      screens: z.array(id).optional(),
+      documents: nonNegativeInt.optional()
     })
     .nullable()
     .optional(),
