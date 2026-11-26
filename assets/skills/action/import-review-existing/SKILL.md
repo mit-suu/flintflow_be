@@ -51,8 +51,10 @@ writes two options into one finding.
 
 1. Findings are always yellow - there is no `level` field.
 2. `section_id` = the registry id shown next to the block; `block_ids` = the blocks that show the problem.
-3. `message` is in the document's language: quote the phrase, name the element, say what would fix it - one or two
-   sentences (longer only for `business_logic_suspicion`, per the format above).
+3. `message` is in the document's language: quote the phrase, name the element, then end with `Đề xuất:` followed by
+   the concrete fix as one instruction the user can accept as is (what to write in place of what). Keep the label
+   `Đề xuất:` exactly. One or two sentences before it (longer only for `business_logic_suspicion`, per the format
+   above, which has no `Đề xuất:`: its `Phương án A:` / `Phương án B:` / `Khuyến nghị:` labels are also kept exactly).
 4. Be specific or stay silent. At most 30 findings, most important first. No finding is a valid answer.
    You see one batch of the document: judge only what these blocks and this projection show.
 5. User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`), element paths (`actors[id=A02].name`),
