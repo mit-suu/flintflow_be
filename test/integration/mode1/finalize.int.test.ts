@@ -28,10 +28,9 @@ vi.mock("../../../src/shared/ai/retry.service.js", async (orig) => {
 import mongoose from "mongoose"
 import { mockImages, mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeMode1 } from "../../helpers/mode1.js"
-import { importAtBaselining, importAtExtracting, importFinalized } from "../../helpers/mode1-import-p4.js"
+import { importAtBaselining, importAtExtracting, importFinalized, runExtraction } from "../../helpers/mode1-import-p4.js"
 import { finalizeImport } from "../../../src/modules/import/finalize.service.js"
 import { AiActionError } from "../../../src/shared/ai/ai-action.types.js"
-import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { ExtractionDraft } from "../../../src/modules/import/extraction-draft.model.js"
 import { extractionSummary } from "../../../src/modules/import/import.service.js"
 import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
@@ -105,23 +104,27 @@ describe("finalize - Spine", () => {
     expect(spine.screens.every((s) => s.detail_status !== "pending")).toBe(true)
   })
 
-  it("FLF-343: field độ tin thấp chưa xác nhận KHÔNG bị bỏ - vào Spine kèm đúng một cờ vàng Cần xem / phần tử (FLF-411 U2-5, mang đường dẫn phần tử); mapping tự nhận cũng có cờ", async () => {
+  it("FLF-462 (đảo FLF-343): field độ tin thấp được xác nhận ở bước 1.6 trước khi vào baseline ⇒ không còn cờ vàng Cần xem cho field; mapping I-3 tự nhận vẫn có cờ như trước (autoConfirmMapping không đổi)", async () => {
+    // importAtBaselining (test/helpers/mode1-import-p4.js) tự xác nhận hết ở bước 1.6 (confirm_all) trước khi tới baselining
     const { projectId, importId, userId } = await importAtBaselining({ srs: { numberedOnly: true } })
     const before = (await spineRepository.get(projectId))!
     await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
     const spine = (await spineRepository.get(projectId))!
     expect(spine.functions.map((f) => f.trigger)).toEqual(["Learner submits the form", "Learner submits the form"])
     const review = spine.flags.filter((f) => f.rule_id === "import_needs_review" && f.resolved_at === null)
+    // FLF-462: field độ tin thấp đã qua người xác nhận ở bước 1.6 (dù qua confirm_all theo gợi ý AI) ⇒ không còn
+    // là "chưa xác nhận" nữa, nên không còn cờ vàng Cần xem riêng cho field (đảo nguyên nhân cờ của FLF-343)
     const fieldFlags = review.filter((f) => f.target_id?.startsWith("functions["))
-    expect(fieldFlags.map((f) => f.target_id).sort()).toEqual(["functions[id=FR-3.2.1]", "functions[id=FR-3.2.2]"])
-    expect(fieldFlags.every((f) => f.level === "yellow" && f.message.startsWith("Cần xem:") && f.section_id.startsWith("function:FR-3.2."))).toBe(true)
-    // heading không style (độ tin 0.75) ⇒ mỗi heading tự nhận một cờ, target = block heading
+    expect(fieldFlags).toEqual([])
+    const draft = await ExtractionDraft.findOne({ import_id: importId, section_id: { $regex: "^function:@" } }).lean()
+    expect(draft?.fields.filter((f) => f.path.endsWith(".trigger")).every((f) => f.confirmed)).toBe(true)
+    // heading không style (độ tin 0.75) ⇒ mỗi heading tự nhận một cờ, target = block heading (I-3, không đổi bởi FLF-462)
     const profile = (await TemplateProfile.findOne({ projectId }).lean())!
     const auto = profile.heading_map.filter((h) => h.auto_confirmed)
     expect(auto.length).toBeGreaterThan(0)
     for (const h of auto) expect(review.filter((f) => f.target_id === h.block_id), h.heading_text).toHaveLength(1)
-    // recompute tất định không đóng cờ do import đặt
-    expect(review.length).toBe(fieldFlags.length + auto.length + profile.table_map.filter((t) => t.auto_confirmed && t.field_path).length)
+    // recompute tất định không đóng cờ do import đặt; không còn fieldFlags trong tổng
+    expect(review.length).toBe(auto.length + profile.table_map.filter((t) => t.auto_confirmed && t.field_path).length)
   })
 })
 
@@ -495,8 +498,11 @@ describe("ảnh - giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 phase
     for (const f of guest) expect(f.confidence).toBeLessThanOrEqual(0.7)
     // actor Guest (0.95 từ model) bị hạ trần 0.7 nhưng vẫn phải xác nhận
     expect(guest.some((f) => f.path.startsWith("actors[") && f.value === "Guest" && f.confidence === 0.7)).toBe(true)
+    // FLF-462: runExtraction (helper) đã xác nhận hết ở bước 1.6 (confirm_all) ⇒ field vision không còn trong review_fields,
+    // nhưng vẫn giữ nguồn gốc vision + độ tin ≤ 0.7 trên draft
     const view = await extractionSummary(importId)
-    expect(view.review_fields.some((f) => f.origin === "vision" && f.value === "Guest")).toBe(true)
+    expect(view.review_fields.some((f) => f.origin === "vision")).toBe(false)
+    expect(guest.find((f) => f.path.startsWith("actors[") && f.value === "Guest")?.confirmed).toBe(true)
     const visionPrompt = prompts.find((p) => p.includes("# Read Diagram Image"))!
     expect(visionPrompt).toContain("Figure 1 USECASE-IMG")
     expect(visionPrompt).toContain("Section (registry id): fixed:2.2.1")

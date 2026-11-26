@@ -8,9 +8,9 @@ vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await imp
 
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { createMode1Project, fakeMode1, mode1Api } from "../../helpers/mode1.js"
-import { importAtExtracting, useExtractConcurrency } from "../../helpers/mode1-import-p4.js"
+import { importAtExtracting, useExtractConcurrency, runExtraction } from "../../helpers/mode1-import-p4.js"
 import { seedFixture } from "../../setup.js"
-import { AI_BLOCK_CHARS, estimateExtraction, runExtraction } from "../../../src/modules/import/extract.service.js"
+import { AI_BLOCK_CHARS, estimateExtraction } from "../../../src/modules/import/extract.service.js"
 import { ExtractionDraft } from "../../../src/modules/import/extraction-draft.model.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { getImportResponseSchema } from "../../../src/modules/import/import.dto.js"
