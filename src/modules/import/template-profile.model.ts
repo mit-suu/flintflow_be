@@ -169,6 +169,8 @@ export interface ITemplateProfile extends Document {
    * mục Ngoài phạm vi xuống cuối). Chưa xác nhận ⇒ bản in giữ nguyên bố cục file của khách, chưa sắp lại.
    */
   layout_confirmed_at?: Date | null
+  /** FLF-461: dấu của bố cục lúc xác nhận (`layoutSignatureOf`). Bố cục đổi sau đó (mục mới được soạn) ⇒ xác nhận cũ hết hiệu lực. */
+  layout_confirmed_signature?: string | null
   /**
    * FLF-453 (business-flow §3.1.2 "Rà soát phần có sẵn"): id mục Code chọn cho AI rà trước khi sang Luồng 2 — mục là đầu vào
    * của phần thiếu, hay mục đang mang cờ đỏ (`review.service.ts` `sectionsNeedingAiReview`). Rỗng / vắng ⇒ không mục nào cần
@@ -274,6 +276,7 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
     flow2_entry_spine: { type: Schema.Types.Mixed, default: null },
     flow2_entry_at: { type: Date, default: null },
     layout_confirmed_at: { type: Date, default: null },
+    layout_confirmed_signature: { type: String, default: null },
     review_sections: { type: [String], default: null },
     migrated_base_at: { type: Date, default: null },
     migrated_base_spine: { type: Schema.Types.Mixed, default: null },
