@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import { elicitSchema } from "../../shared/ai/response-parser.js"
-import { answerText, answeredTopics, chatReplyQuestionId, currentBatch, indexOfQuestion, questionIdsFor, shapeChatQuestions, shapeOptions, shapeQuestions, splitNumberedAnswer, verifiedExcerpt, type ModelQuestion } from "./question-shape.js"
+import { answerText, answeredTopics, chatReplyQuestionId, currentBatch, indexOfQuestion, questionIdsFor, shapeChatQuestions, shapeOptions, shapeQuestions, splitNumberedAnswer, verifiedDecisionUpdates, verifiedExcerpt, type ModelQuestion } from "./question-shape.js"
 
 const opts = (...labels: string[]) => labels.map((label) => ({ label }))
 const q = (question: string, extra: Partial<ModelQuestion> = {}): ModelQuestion & { topic_key: string } => ({
@@ -339,5 +339,40 @@ describe("FLF-449: thẻ phương án qua shapeQuestions", () => {
     const parsed = elicitSchema.parse({ reply: "Ok", questions: [{ question: "Uptime?", topic_key: "uptime", options: ["99.9% (Khuyến nghị)", "99%"] }] })
     const { questions } = shapeQuestions(parsed.questions)
     expect(questions[0].options?.map((o) => o.label)).toEqual(["99.9%", "99%"])
+  })
+})
+
+describe("verifiedDecisionUpdates (FLF-472, 5b)", () => {
+  const dc = (over: Record<string, unknown> = {}) => ({
+    id: "DC01",
+    topic_key: "external_partners",
+    question: "Đối tác ngoài nào nối API?",
+    answer: "Chỉ VNPay và MoMo",
+    step_id: "S-1",
+    at: "2026-11-01T00:00:00.000Z",
+    superseded_by: null,
+    ...over
+  })
+  const spine = { decisions: [dc()] } as never
+  const message = "À không, GHN và GHTK cũng nối API nhé"
+
+  it("khoá không có trong sổ ⇒ bỏ", () => {
+    expect(verifiedDecisionUpdates(spine, [{ topic_key: "shipping", answer: "GHN và GHTK cũng nối API" }], message)).toEqual([])
+  })
+
+  it("trích đoạn không phải chữ của tin ⇒ bỏ", () => {
+    expect(verifiedDecisionUpdates(spine, [{ topic_key: "external_partners", answer: "Thêm GHN, GHTK" }], message)).toEqual([])
+  })
+
+  it("hợp lệ (khoá chuẩn hoá được, trích đoạn nguyên văn) ⇒ trả mục đính chính", () => {
+    expect(verifiedDecisionUpdates(spine, [{ topic_key: "External Partners", answer: "GHN và GHTK cũng nối API" }], message)).toEqual([
+      { topic_key: "external_partners", question: "Đối tác ngoài nào nối API?", answer: "GHN và GHTK cũng nối API", correction: true }
+    ])
+  })
+
+  it("trùng đáp án đang có, chủ đề đang chờ, hoặc quyết định đã bị thay thế ⇒ bỏ", () => {
+    expect(verifiedDecisionUpdates(spine, [{ topic_key: "external_partners", answer: "chỉ vnpay và momo" }], "Chỉ VNPay và MoMo")).toEqual([])
+    expect(verifiedDecisionUpdates(spine, [{ topic_key: "external_partners", answer: "GHN và GHTK cũng nối API" }], message, ["external_partners"])).toEqual([])
+    expect(verifiedDecisionUpdates({ decisions: [dc({ superseded_by: "DC02" })] } as never, [{ topic_key: "external_partners", answer: "GHN và GHTK cũng nối API" }], message)).toEqual([])
   })
 })

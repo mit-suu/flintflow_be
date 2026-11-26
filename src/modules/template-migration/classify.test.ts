@@ -122,7 +122,7 @@ describe("classify — heading nhóm", () => {
 })
 
 describe("classify — heading nhóm của mẫu đích và mục nhận nội dung chuyển vào (test tay 11/11)", () => {
-  const oldDoc = [old("fixed:1", "1. Product Overview", 1), old("fixed:4.2.4", "4.2.4 Domain-Specific Attributes", 2), old("custom:c9", "5.9 Team Notes", 2)]
+  const oldDoc = [old("fixed:1", "1. Product Overview", 1), old("fixed:4.2.3", "4.2.3 Performance Requirements", 2), old("custom:c9", "5.9 Team Notes", 2)]
   const newDoc = [
     neu(0, "II. Software Requirement Specification", "unmapped", { level: 1 }),
     neu(1, "1. Product Overview", "fixed:1", { level: 2 }),
@@ -139,7 +139,7 @@ describe("classify — heading nhóm của mẫu đích và mục nhận nội d
     ])
     expect(groups.extra.find((e) => e.old_key === "custom:c9")?.choices).not.toContain("move_to:n0")
     // Mục khung chuyển chỗ in không gọi AI ⇒ không có lựa chọn AI (không nhãn "dùng AI", không tính credit)
-    expect(groups.extra.find((e) => e.old_key === "fixed:4.2.4")?.ai_choices).toEqual([])
+    expect(groups.extra.find((e) => e.old_key === "fixed:4.2.3")?.ai_choices).toEqual([])
   })
 
   it("không biết cấp heading ⇒ giữ như cũ (cần viết)", () => {
@@ -278,5 +278,21 @@ describe("FLF-466: nhóm Thừa không còn xoá; conflict bảng giữ delete",
     expect(readChoice(legacy, "e:custom:c2", "delete")).toBe("drop_from_print")
     // Conflict bảng: delete giữ nguyên nghĩa
     expect(readChoice(legacy, groups.conflict[0].id, "delete")).toBe("delete")
+  })
+})
+
+describe("classify — FLF-491: ghép theo danh mục và mục con đi theo mục cha", () => {
+  it("nhóm Thừa chỉ còn mục không có chỗ (Thuật ngữ); không còn gợi ý chuyển vào 4.2.4", () => {
+    const oldDoc = [
+      old("custom:CS01", "1 Tổng quan sản phẩm", 1),
+      old("slot:goals", "Mục tiêu", 2),
+      old("custom:CS04", "Hệ thống bên ngoài", 2),
+      old("fixed:4.2.4", "4.2.4 Thuộc tính đặc thù", 3),
+      old("fixed:5.5", "5.5 Thuật ngữ", 2)
+    ]
+    const { groups } = run(oldDoc, [neu(0, "1. Product Overview", "fixed:1", { level: 2 }), neu(1, "4.2.4 …", "unmapped", { level: 3 })])
+    expect(groups.extra.map((e) => e.old_key)).toEqual(["fixed:5.5"])
+    expect(groups.extra[0].choices.some((c) => c.startsWith("move_to:"))).toBe(false)
+    expect(groups.extra[0]).toMatchObject({ follower_keys: [] })
   })
 })

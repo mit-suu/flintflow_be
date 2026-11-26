@@ -225,7 +225,7 @@ router.get("/:projectId/run-state/active", authMiddleware, pipelineController.ge
  *         description: "FLF-466 P08 - lần báo credit; thiếu thì theo progress.credit_ack_required (nếu có), không thì ước tính chạy liền như cũ"
  *     responses:
  *       200:
- *         description: "runEstimateResponseSchema — { scope, from_step, units[], steps_total, ai_steps_total, credits_total, available_credits, scope_kind, screen_range, ack_required }"
+ *         description: "runEstimateResponseSchema — { scope, from_step, units[], steps_total, ai_steps_total, credits_total (= credits_max), credits_min, credits_max, screen_estimate, available_credits, scope_kind, screen_range, ack_required }"
  */
 router.get("/:projectId/run-estimate", authMiddleware, pipelineController.getRunEstimate)
 

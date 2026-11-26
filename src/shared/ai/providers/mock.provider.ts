@@ -17,6 +17,7 @@
  * | `render_fix` | `{ puml }` |
  * | `import_extract_fields` `import_extract_diagram` | `{ section_id, items: [] }` (+ `diagram_kind: "other"`) — mode 1 chạy được I-4 |
  * | `import_semantic_check` `import_cross_check` | `{ findings: [] }` |
+ * | `cr_record_summary` | `{ rows }` — mỗi dòng của khối `Rows:` (một dòng JSON) với câu dựng sẵn rút gọn, tiền tố `[MOCK AI] ` |
  * | `translate` | `{ statement }` |
  * | `translate_document` | `{ items }` — mỗi item của lô trong prompt, chữ thêm tiền tố `[vi] ` |
  * | `knowledge_answer` | `{ grounded, answer, claims }` — trích chunk `K1` nếu prompt có chunk, không có ⇒ `grounded: false` |
@@ -73,6 +74,28 @@ export const mockTranslateItems = (prompt: string): { key: string; text: string 
   })
 }
 
+/**
+ * FLF-492: "viết gọn" giả — đọc khối `Rows:` (một dòng JSON ngay sau nhãn) và trả mỗi dòng với câu dựng sẵn cắt còn 60 ký tự. Cho
+ * FE / dev / E2E chạy thử tuỳ chọn "AI viết gọn" mà không gọi model. Không đọc được ⇒ `[]`.
+ */
+export const mockRecordSummaryRows = (prompt: string): { cr_id: string; kind: string; text: string }[] => {
+  const markers = [...prompt.matchAll(/(?:^|\n)Rows:\r?\n/g)]
+  const last = markers[markers.length - 1]
+  if (!last || last.index === undefined) return []
+  let rows: unknown
+  try {
+    rows = JSON.parse(prompt.slice(last.index + last[0].length).split(/\r?\n/, 1)[0].trim())
+  } catch {
+    return []
+  }
+  if (!Array.isArray(rows)) return []
+  return rows.flatMap((row) => {
+    const { cr_id, kind, built } = (row ?? {}) as { cr_id?: unknown; kind?: unknown; built?: unknown }
+    if (typeof cr_id !== "string" || typeof kind !== "string" || typeof built !== "string") return []
+    return [{ cr_id, kind, text: `[MOCK AI] ${built.slice(0, 60)}` }]
+  })
+}
+
 /** Đầu ra hợp schema của `response-parser.ts` cho từng `call_kind`; `null` ⇒ dùng nhánh văn bản tự do. */
 export const mockOutputFor = (actionType: string | undefined, prompt: string): string | null => {
   if (!actionType) return null
@@ -91,6 +114,9 @@ export const mockOutputFor = (actionType: string | undefined, prompt: string): s
   }
   if (actionType === "translate") {
     return fenced({ statement: "[MOCK AI] Translated assumption." })
+  }
+  if (actionType === "cr_record_summary") {
+    return fenced({ rows: mockRecordSummaryRows(prompt) })
   }
   if (actionType === "template_migration_resolve") {
     return fenced({ ops: [], choice: null, notes: "[MOCK AI] Không giải quyết được." })

@@ -124,7 +124,7 @@ tiếp. `.env.example` là danh sách đầy đủ kèm giải thích; dưới �
 | `GOTENBERG_URL` | production | thiếu ⇒ default `localhost:3001` ⇒ xuất PDF luôn `503 PDF_EXPORT_UNAVAILABLE` trong khi `/health` vẫn HTTP 200 (`gotenberg: "error"`). Production: `https://flintflow-gotenberg.azurewebsites.net` (§5) |
 | `GOTENBERG_TIMEOUT_MS` | không | default 60000. Production đặt **90000**, khớp `--api-timeout=90s` của Gotenberg: tài liệu lớn ở lượt đầu sau khi container khởi động lâu hơn nhiều so với lúc warm |
 | `AI_PROVIDER_OVERRIDE` | không | ghi đè provider của mọi skill; chỉ dùng cho CI / smoke (`mock`) |
-| `REVIEW_LLM_ENABLED` | không | S-9.2 Quality Lens bằng LLM, mặc định tắt |
+| `QUALITY_LENS_ENABLED` `CONSISTENCY_LLM_ENABLED` | không | FLF-449: S-9.2 Soát chất lượng và S-8.4 Rà nhất quán bằng AI, mặc định **bật** (tốn credit theo lô). `false` để tắt khẩn: bước trả `skipped`, ước tính credit tính 0 |
 | `EMBEDDING_PROVIDER` | không | `off` (mặc định) · `gemini` · `mock`. C-3 tìm vị trí CR theo nghĩa (§2 "Bật tìm vị trí CR theo nghĩa"). `gemini` dùng `GEMINI_API_KEY`; kèm `EMBEDDING_MODEL` (`gemini-embedding-001`), `EMBEDDING_DIMENSIONS` (768 — phải bằng số chiều của Atlas index), `EMBEDDING_API_BASE_URL`, `EMBEDDING_TIMEOUT_MS`, `CR_VECTOR_TOP_K` (20), `CR_VECTOR_MIN_SCORE` (0.82) |
 | `KNOWLEDGE_ENABLED` `KNOWLEDGE_*` | không | Knowledge RAG trong chat, mặc định tắt — xem §4 "Knowledge RAG" |
 | `AI_PAYLOAD_RETENTION_DAYS` | không | default 30. Số ngày giữ prompt/response của lượt gọi model (`aiactionpayloads`, TTL index). Prompt mang nguyên văn điều người dùng nhập ⇒ đây là **hạn giữ dữ liệu người dùng**, đổi thì phải đổi cả cam kết với người dùng. `0` = không lưu gì. Đổi giá trị chỉ có tác dụng với document mới: TTL index đã tạo thì phải `collMod` hoặc drop index để Mongo nhận hạn mới |
@@ -313,6 +313,11 @@ npm run migrate:spine-embeddings
 - Index tự cập nhật **chạy nền** sau finalize import (baseline 0.0) và sau khi C-7 ghi CR có op
   (`embedding-sync.service.ts`): chỉ embed phần tử đổi `text_hash`, xoá dòng của phần tử đã xoá. Lỗi chỉ ghi log
   `[embedding] …`, không chặn luồng; mỗi project một lượt đang chạy, gọi dồn ⇒ chạy lại một lần.
+- Kiểm C-3 đang tìm theo nghĩa chưa (FLF-483): khởi động server rồi tạo một CR có bước "Phần liên quan". Thấy log
+  `[C-3] EMBEDDING_PROVIDER=off - không tìm theo nghĩa` (một lần) hoặc `[C-3] Mongo không có $vectorSearch` ⇒ C-3 chỉ tìm
+  theo liên kết, mã / tên và từ khoá (giá trị cụ thể như "5 triệu" vẫn tìm ra, nhưng không có chỗ chỉ gần nghĩa). Không có dòng
+  nào trong hai dòng này ⇒ đang tìm theo nghĩa. Máy E2E / staging nên đặt `EMBEDDING_PROVIDER=gemini` (kèm `GEMINI_API_KEY`) và
+  chạy `npm run migrate:spine-embeddings`; dev cá nhân giữ `off`.
 - Chỉ số liên quan: log `[C-3] Mongo không có $vectorSearch` (không phải Atlas, nhớ cho cả process), `[C-3] tìm vị trí theo
   vector lỗi …` (rơi về từ khoá lượt đó).
 - Embedding **không trừ credit** (chi phí một lượt embed vài trăm phần tử ≈ vài nghìn token đầu vào) — chờ nhóm chốt

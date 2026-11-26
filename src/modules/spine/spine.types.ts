@@ -548,6 +548,8 @@ export interface Flag {
   section_id: string
   /** Tài liệu ghi `target_id?` và "nullable" — chấp nhận cả hai. */
   target_id?: string | null
+  /** FLF-449: tên lens của cờ AI (`rule_id = "ai_review"`); null / thiếu với mọi cờ khác. */
+  lens?: string | null
   message: string
   remediation_step: string
   opened_at_version: number

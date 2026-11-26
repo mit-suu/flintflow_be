@@ -13,7 +13,8 @@
  */
 
 import { chatQuestionItemSchema, type QuestionOption } from "../../shared/ai/response-parser.js"
-import { RECOMMENDED_SUFFIX, sanitizeSuggestions, type AnsweredTopic } from "./decisions.service.js"
+import { RECOMMENDED_SUFFIX, activeDecisions, normalizeTopicKey, sanitizeSuggestions, type AnsweredTopic } from "./decisions.service.js"
+import type { Spine } from "../spine/spine.types.js"
 import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { clearRecommendation, isRecommended, logRecommendationDropped } from "../../shared/ai/option-analysis.js"
 
@@ -273,6 +274,35 @@ export const verifiedExcerpt = (excerpt: string, message: string): string | unde
 
 /** Hai đoạn chữ giống nhau khi bỏ khác biệt khoảng trắng, hoa/thường. */
 export const sameText = (a: string, b: string): boolean => normalizeText(a) === normalizeText(b)
+
+/** Số đính chính tối đa nhận trong một lượt chat. */
+export const MAX_DECISION_UPDATES = 3
+
+/**
+ * FLF-472 (phần 5b): kiểm `decision_updates` model báo — không tin model. Chỉ nhận mục có `topic_key` (chuẩn hoá) là quyết
+ * định còn hiệu lực trong sổ, KHÔNG phải chủ đề đang chờ (`pendingTopics` — đó là việc của `settled`), `answer` là trích
+ * đoạn nguyên văn của tin user và khác đáp án đang có. Mỗi chủ đề một lần. Trả đúng dạng `decisionOps` ghi sổ (thay thế).
+ */
+export const verifiedDecisionUpdates = (
+  spine: Pick<Spine, "decisions">,
+  updates: readonly { topic_key: string; answer: string }[] | undefined,
+  message: string,
+  pendingTopics: readonly string[] = []
+): AnsweredTopic[] => {
+  if (!updates?.length) return []
+  const active = activeDecisions(spine)
+  const pending = new Set(pendingTopics.map((t) => normalizeTopicKey(t, "")))
+  const out: AnsweredTopic[] = []
+  for (const update of updates.slice(0, MAX_DECISION_UPDATES)) {
+    const topic = normalizeTopicKey(update.topic_key, "")
+    const current = active.get(topic)
+    if (!current || pending.has(topic) || out.some((o) => o.topic_key === topic)) continue
+    const answer = verifiedExcerpt(update.answer, message)
+    if (!answer || sameText(answer, current.answer)) continue
+    out.push({ topic_key: topic, question: current.question, answer, correction: true })
+  }
+  return out
+}
 
 /** Câu hỏi lưu trong tin nhắn chat Discovery — FE đọc `question`/`options` (tin nhắn cũ: `suggestedAnswers`). */
 export interface ChatQuestion {

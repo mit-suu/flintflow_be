@@ -98,14 +98,16 @@ describe("mode 1 - version + tải về", () => {
     expect(headers.length).toBeGreaterThan(0)
     expect(await zip.file(headers[0])!.async("string")).toContain('string="DRAFT"')
     // §I Record of Changes của bản render có dòng của CR
-    expect(await documentXml(draft.body as Buffer)).toContain("CR-001: Update non-functional requirement NFR-01")
+    const draftXml = await documentXml(draft.body as Buffer)
+    expect(draftXml).toContain("CR-001: Update non-functional requirement NFR-01")
+    expect(draftXml).not.toContain("CR-001: Faster")
   })
 })
 
 describe("mode 1 - release (Flow 6)", () => {
   it("còn cờ đỏ ⇒ 422 RELEASE_RED_FLAGS_OPEN; hết đỏ ⇒ 1.0 sạch, baseline release, gom CR", async () => {
     const { c, projectId } = await projectWithRevision()
-    // Sơ đồ render lỗi ⇒ cờ đỏ render_error (mode 1 không waive)
+    // Sơ đồ render lỗi ⇒ cờ đỏ render_error (mode 1 không waive). FLF-493: import đã vẽ sẵn D01… (SVG) khi PlantUML tắt ⇒ dùng id D99 riêng
     const spine = (await spineRepository.get(projectId))!
     await applyTransaction(projectId, {
       base_version: spine.spine_version,
@@ -114,7 +116,7 @@ describe("mode 1 - release (Flow 6)", () => {
         {
           op: "add",
           path: "diagrams[]",
-          value: { id: "D01", kind: "erd", format: "puml", source: "@startuml\n@enduml", section: "fixed:3.1.5", owner_kind: null, owner_id: null, render_status: "error", error: "boom", source_hash: "x", rendered_at: null }
+          value: { id: "D99", kind: "erd", format: "puml", source: "@startuml\n@enduml", section: "fixed:3.1.5", owner_kind: null, owner_id: null, render_status: "error", error: "boom", source_hash: "x", rendered_at: null }
         }
       ]
     })
@@ -124,7 +126,7 @@ describe("mode 1 - release (Flow 6)", () => {
     expect(blocked.body.meta.flags.map((f: { rule_id: string }) => f.rule_id)).toContain("render_error")
 
     const now = (await spineRepository.get(projectId))!
-    await applyTransaction(projectId, { base_version: now.spine_version, by: "test", ops: [{ op: "remove", path: "diagrams[id=D01]" }] })
+    await applyTransaction(projectId, { base_version: now.spine_version, by: "test", ops: [{ op: "remove", path: "diagrams[id=D99]" }] })
     const res = await releaseNow(c)
     expect(res.status, JSON.stringify(res.body.error)).toBe(201)
     const rel = releaseResponseSchema.parse(res.body.data)
@@ -162,6 +164,7 @@ describe("mode 1 - release (Flow 6)", () => {
     const v11 = await documentXml((await binary(c.get("/versions/1.1/download"))).body as Buffer)
     expect(v11).toContain("500 ms")
     expect(v11).toContain("CR-002: Update non-functional requirement NFR-01")
+    expect(v11).not.toContain("CR-002: Even faster")
   })
 
   it("FLF-466: có lần đổi mẫu kèm dịch kể từ bản ổn định gần nhất ⇒ Gói báo lý do, release không có bản tracked + lý do ở version", async () => {

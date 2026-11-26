@@ -71,7 +71,8 @@ const authorsOf = async (ref: string): Promise<string[]> => {
 /** `withMissing`: mẫu đích có thêm mục "Operating Environment" mà dự án chưa có ⇒ mục thiếu = cờ đỏ chặn gửi / phát hành. */
 const setup = async (withMissing = true) => {
   const { seeded, projectId, c } = await importedProject()
-  const templateId = await publishTemplate(seeded.token, seeded.orgId, await makeSrsDocx(withMissing ? { extraBody: EXTRA } : {}))
+  // `withMissing = false` vẫn phải khác byte với file đã import (tránh trùng sha256 ⇒ 409 TEMPLATE_MIGRATION_SAME_TEMPLATE khi cùng giây ZIP)
+  const templateId = await publishTemplate(seeded.token, seeded.orgId, await makeSrsDocx({ extraBody: withMissing ? EXTRA : p("[Template v2]") }))
   return { seeded, projectId, c, templateId }
 }
 

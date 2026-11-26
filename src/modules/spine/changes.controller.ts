@@ -259,10 +259,14 @@ export const previewChanges = catchAsync(async (req: Request, res: Response) => 
     if (session && userText && payload) await changeTranscript.recordChangeTurn(session, userText, payload)
     return sendDomainError(res, err)
   }
-  if (session && userText) await changeTranscript.recordChangeTurn(session, userText, changeTranscript.previewPayload(result, replyLanguage, { requiresCr }))
+  // FLF-473 (B5): dự án import sau baseline mà model không ra được lô hợp lệ ⇒ lưới an toàn "Mở change request" điền
+  // sẵn lệnh, thay vì lặp lại "nói rõ mục" (luồng CR định vị được cả đoạn văn nối, chat thường thì không - xem skill
+  // `apply-change-op/SKILL.md` luật 14, phần sửa cho đoạn nối sẽ làm sau khi FLF-449 merge, xem plan fix #6).
+  const crPrefill = requiresCr && result.unclear ? prefillFrom(body.instruction, result.clarification ?? "Sửa tài liệu", { kind: "verbal", ref: null }) : null
+  if (session && userText) await changeTranscript.recordChangeTurn(session, userText, changeTranscript.previewPayload(result, replyLanguage, { requiresCr, crPrefill }))
   // FLF-311: lựa chọn chỉ cho transcript (thẻ chọn trong chat) — hình response giữ đúng hợp đồng
-  const { clarification_choices: _choices, auto_apply_ok: _auto, ...data } = result
-  return requiresCr ? sendSuccess(res, 200, data, { requires_cr: true }) : sendSuccess(res, 200, data)
+  const { clarification_choices: _choices, auto_apply_ok: _auto, unclear: _unclear, ...data } = result
+  return requiresCr ? sendSuccess(res, 200, data, { requires_cr: true, ...(crPrefill ? { cr_prefill: crPrefill } : {}) }) : sendSuccess(res, 200, data)
 })
 
 export const reconcileChanges = catchAsync(async (req: Request, res: Response) => {

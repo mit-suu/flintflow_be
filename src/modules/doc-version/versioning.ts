@@ -68,6 +68,11 @@ export interface VersionFileNameParts {
   base: string | null
   /** Bản nháp: CR mới nhất đã ghi vào nó (`CR-014`); bỏ qua với release. */
   latestCr?: string | null
+  /**
+   * FLF-484 (lát F): số bản nháp (`0.4`, `1.3`). Bản nháp có `version` ⇒ nhãn `_v<version>`, không gắn `base` / mã CR
+   * (`Lumen_v0.4_DRAFT.docx`). Không truyền ⇒ như cũ (mode 2). Bỏ qua với release.
+   */
+  version?: string | null
   tracked?: boolean
   /** File gốc người dùng upload: `_original` thay cho `_DRAFT`. */
   original?: boolean
@@ -88,8 +93,9 @@ export interface VersionFileNameParts {
  * `Lumen_v2.0_EN.docx` / `Lumen_v1.0_DRAFT_VI.docx` (FLF-334 B).
  */
 export const versionFileName = (parts: VersionFileNameParts): string => {
-  const base = parts.base ? sanitizeFileBase(parts.base.trim().replace(/^v/i, "")) : null
-  const cr = !parts.numbered && !parts.release && base && parts.latestCr ? `+${sanitizeFileBase(parts.latestCr)}` : ""
+  const draftVersion = !parts.release && parts.version ? sanitizeFileBase(parts.version.trim().replace(/^v/i, "")) : null
+  const base = draftVersion ?? (parts.base ? sanitizeFileBase(parts.base.trim().replace(/^v/i, "")) : null)
+  const cr = !parts.numbered && !draftVersion && !parts.release && base && parts.latestCr ? `+${sanitizeFileBase(parts.latestCr)}` : ""
   const label = base ? `_v${base}${cr}` : ""
   const tail = parts.original ? "_original" : parts.release || (parts.numbered && base) ? "" : "_DRAFT"
   const code = parts.code ? `_${sanitizeFileBase(parts.code)}` : ""

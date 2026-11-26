@@ -6,7 +6,9 @@ import { listSections } from "../spine/section-registry.js"
 import { translationUnits, type UnitValue } from "../translation/translation-units.js"
 import { localizeSpine, renderView } from "./localized-spine.js"
 import type { Block } from "./rendered-document.types.js"
-import { buildRecordOfChanges, renderContentSlot, renderSection, sectionHeadingOf, type SectionRenderContext } from "./section-renderer.js"
+import { buildRecordOfChanges, crRecordUnits, renderContentSlot, renderSection, sectionHeadingOf, type SectionRenderContext } from "./section-renderer.js"
+import { recordChangesHash } from "./cr-record.js"
+import type { CrRecordSummary } from "../change-request/change-request.model.js"
 
 const emptySpine = (): Spine => ({
   project: {
@@ -190,6 +192,13 @@ describe("renderSection - fixed sections", () => {
   it("fixed:2.2.1 - use case diagram image only", () => {
     const section = renderSection(spine(), "fixed:2.2.1", ctx({ number: "2.2.1" }))
     expect(section.blocks).toEqual([{ type: "image", png: "png-d02", caption: "Use Case Diagram" }])
+  })
+
+  it("FLF-479 (12a): fixed:5.4 tài liệu tiếng Anh - cột Kind ghi nhãn 'Risk', không ghi 'risk' thô", () => {
+    const section = renderSection(spine(), "fixed:5.4", ctx({ number: "5.4" }))
+    const table = section.blocks[0]
+    expect(table).toMatchObject({ type: "table", header: [[{ text: "Kind" }], [{ text: "Statement" }]] })
+    expect(table.type === "table" && table.rows).toEqual([[[{ text: "Risk" }], [{ text: "Provider pricing may change." }]]])
   })
 
   it("fixed:2.2.1 / fixed:2.1 - hình use case theo feature lấy chú thích từ <title> của SVG; hình phân cấp actor nằm ở §2.1 sau bảng actor", () => {
@@ -453,6 +462,11 @@ describe("renderSection - feature/function", () => {
     expect(section.blocks).toEqual([{ type: "paragraph", runs: [{ text: "Screens: Login" }] }])
   })
 
+  it("FLF-480: mẫu cố định (mode 1) ⇒ feature không thêm dòng \"Screens: …\"", () => {
+    const section = renderSection(spine(), "feature:F1", ctx({ number: "3.2", fixedTemplate: true }))
+    expect(section.blocks).toEqual([])
+  })
+
   it("function:<id> - trigger/description/normal/abnormal/validations/business rules + ảnh screen_layout khi là primary_function_id", () => {
     const section = renderSection(spine(), "function:FN01", ctx({ number: "3.2.1" }))
     expect(section.heading).toBe("Submit Credentials")
@@ -633,7 +647,7 @@ describe("buildRecordOfChanges", () => {
     expect(rows.map((r) => r.description)).toEqual(["Create Product Brief"])
   })
 
-  it("FLF-466 chế độ 2: dòng soạn trước baseline '-' lúc soạn, thành '1.0' khi ký baseline; có dòng 'Baseline 1.0'; sửa sau đó chưa phát hành '-'", () => {
+  it("FLF-466 / FLF-484 chế độ 2: dòng soạn trước baseline '-' lúc soạn, thành '1.0' khi ký baseline; có dòng 'Baseline 1.0'; sửa sau đó chưa phát hành '-'", () => {
     const draft = [
       change({ txn: "t1", reason: "sửa trước ký" }),
       change({ txn: "t1b", step_id: "S-3.1", reason: "thêm actor", at: "2026-09-02T09:00:00.000Z" })
@@ -648,7 +662,7 @@ describe("buildRecordOfChanges", () => {
     expect(rows.map((r) => [r.date, r.version, r.description])).toEqual([
       ["2026-09-01", "1.0", "Create Product Overview"],
       ["2026-09-02", "1.0", "Create User Requirements"],
-      ["2026-09-03", "1.0", "Baseline 1.0 signed"],
+      ["2026-09-03", "1.0", "Baseline 1.0"],
       ["2026-09-04", "-", "sửa sau ký"],
       ["2026-09-05", "-", "sửa ngày sau"]
     ])
@@ -667,10 +681,10 @@ describe("buildRecordOfChanges", () => {
       "vi"
     )
     expect(rows.map((r) => [r.version, r.change_type, r.description])).toEqual([
-      ["1.0", "A", "Ký baseline 1.0"],
+      ["1.0", "A", "Baseline 1.0"],
       ["2.0", "M", "CR-001: Cập nhật use case UC-01"],
       ["2.0", "M", "CR-002: Cập nhật màn hình"],
-      ["2.0", "A", "Ký baseline 2.0"],
+      ["2.0", "A", "Baseline 2.0"],
       ["-", "M", "CR-003: Cập nhật yêu cầu phi chức năng NFR-01"]
     ])
   })
@@ -691,7 +705,43 @@ describe("buildRecordOfChanges", () => {
     expect(rows.map((r) => [r.version, r.description])).toEqual([["-", "CR-001: Cập nhật use case UC-01"]])
   })
 
-  it("FLF-466: mô tả dòng CR dựng từ thay đổi theo ngôn ngữ tài liệu, không chép tiêu đề / câu chat; In charge do resolver trả", () => {
+  it("FLF-484: lô vẽ lại sơ đồ (reason render) sau CR không thành dòng riêng", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", step_id: null, by: "CR-001", path: "project.vision", reason: "CR-001: Sửa mô tả" }),
+      change({ txn: "t2", step_id: null, by: "CR-001", path: "diagrams[id=D01]", reason: "render" })
+    ])
+    expect(rows.map((r) => r.description)).toEqual(["CR-001: Update product vision"])
+  })
+
+  it("FLF-484: ngày ghi theo giờ Việt Nam (18:30 UTC ngày 24 = 01:30 ngày 25)", () => {
+    const rows = buildRecordOfChanges([change({ txn: "t1", step_id: null, by: "CR-001", path: "project.vision", reason: "x", at: "2026-11-24T18:30:00.000Z" })])
+    expect(rows[0].date).toBe("2026-11-25")
+  })
+
+  it("FLF-484 lát D: CR vừa thêm, vừa xoá, vừa sửa ⇒ ba dòng A / M / D cùng mã CR, cùng Version, mô tả từng nhóm", () => {
+    const spine = { use_cases: [{ id: "UC-09", name: "Remind" }], screens: [{ id: "S01", name: "Home" }] } as unknown as Spine
+    const cr = (over: Partial<Parameters<typeof buildRecordOfChanges>[0][number]>) =>
+      change({ txn: "t1", step_id: null, by: "CR-004", reason: "CR-004: Đổi nhiều thứ", ...over })
+    const rows = buildRecordOfChanges(
+      [
+        cr({ op: "remove", path: "messages[id=MSG-63]" }),
+        cr({ op: "set", path: "screens[id=S01].name" }),
+        cr({ op: "add", path: "use_cases[id=UC-09]" }),
+        change({ txn: "r", op: "add", path: "baselines[]", step_id: null, reason: "Baseline 1.0" })
+      ],
+      undefined,
+      "en",
+      spine
+    )
+    expect(rows.map((r) => [r.change_type, r.version, r.description])).toEqual([
+      ["A", "1.0", 'CR-004: Add use case "Remind"'],
+      ["M", "1.0", 'CR-004: Update screen "Home"'],
+      ["D", "1.0", "CR-004: Delete message MSG-63"],
+      ["A", "1.0", "Baseline 1.0"]
+    ])
+  })
+
+  it("FLF-466 / FLF-411 (U2-6): mô tả dòng CR dựng từ thay đổi theo ngôn ngữ tài liệu, không chép tiêu đề / câu chat; In charge do resolver trả", () => {
     const spine = { use_cases: [{ id: "UC-05", name: "Checkout" }] } as unknown as Spine
     const rows = buildRecordOfChanges(
       [
@@ -703,6 +753,7 @@ describe("buildRecordOfChanges", () => {
       "en",
       spine
     )
+    // FLF-484: tiêu đề CR không còn được chép; mô tả luôn dựng từ thay đổi, tách theo A / M / D
     expect(rows.map((r) => [r.version, r.change_type, r.in_charge, r.description])).toEqual([
       ["-", "A", "Tuan Anh", 'CR-001: Add use case "Checkout"'],
       ["-", "M", "Tuan Anh", "CR-001: Update system name"],
@@ -816,7 +867,7 @@ describe("buildRecordOfChanges", () => {
       change({ txn: "t1", op: "set", path: "steps[id=S-9.5].status", reason: "step-runner: init step" })
     ])
     expect(rows).toHaveLength(1)
-    expect(rows[0].description).toBe("Baseline 1.0 signed")
+    expect(rows[0].description).toBe("Baseline 1.0")
   })
 
   it("sau baseline: mô tả là lời user (tối đa 3), bỏ lý do cascade", () => {
@@ -983,7 +1034,7 @@ describe("buildRecordOfChanges - tiếng Việt (FLF-265)", () => {
     expect(rows.map((r) => r.description)).toEqual([
       "Tạo Tổng quan sản phẩm",
       "Cập nhật Tổng quan sản phẩm",
-      "Ký baseline 1.0",
+      "Baseline 1.0",
       "CR 1; CR 2; Sửa sau baseline; và 2 thay đổi khác"
     ])
   })
@@ -997,7 +1048,7 @@ describe("buildRecordOfChanges - tiếng Việt (FLF-265)", () => {
       undefined,
       "vi"
     )
-    expect(rows.map((r) => r.description)).toEqual(["Ký baseline", "Cập nhật tài liệu"])
+    expect(rows.map((r) => r.description)).toEqual(["Baseline", "Cập nhật tài liệu"])
   })
 
   it("không truyền ngôn ngữ ⇒ tiếng Anh như cũ", () => {
@@ -1253,5 +1304,45 @@ describe("bug #1 / #3 FLF-447 - bảng NFR và yêu cầu chung", () => {
     const spine: Spine = { ...emptySpine(), common_requirements: [{ id: "C1", category: "date_format", statement: "ISO 8601." }, { id: "C2", category: "Custom", statement: "x" }] }
     const t = tableOf(renderSection(spine, "fixed:5.2", ctx({ language: "en" })).blocks)
     expect(t.rows.map(cells).map((r) => r[0])).toEqual(["Date format", "Custom"])
+  })
+})
+
+// ─── FLF-492: mô tả dòng CR do AI viết gọn ─────────────────────────
+
+describe("buildRecordOfChanges - mô tả AI viết gọn (FLF-492)", () => {
+  const cr = (over: Partial<Parameters<typeof buildRecordOfChanges>[0][number]>) => ({
+    txn: "t1",
+    op: "set",
+    reason: "CR-003: x",
+    at: "2026-09-01T09:00:00.000Z",
+    by: "CR-003",
+    step_id: null,
+    path: "project.vision",
+    ...over
+  })
+  const changes = [cr({}), cr({ txn: "t2", by: "CR-004", path: "project.goals", reason: "CR-004: y" })]
+  const hashOf = (rows: typeof changes) => recordChangesHash(rows)
+
+  it("không truyền summaries ⇒ câu dựng sẵn", () => {
+    expect(buildRecordOfChanges(changes, undefined, "en").map((r) => r.description)).toEqual(["CR-003: Update product vision", "CR-004: Update business goals"])
+  })
+
+  it("mô tả khớp loại, ngôn ngữ và dấu vân tay ⇒ CR-xxx: <câu viết gọn>; lệch hash hoặc lệch ngôn ngữ ⇒ câu dựng sẵn", () => {
+    const summaries = new Map<string, readonly CrRecordSummary[]>([
+      ["CR-003", [{ kind: "M", text: "Reword the product vision", language: "en", changes_hash: hashOf([changes[0]]) }]],
+      ["CR-004", [{ kind: "M", text: "Reword the goals", language: "en", changes_hash: "stale" }]]
+    ])
+    expect(buildRecordOfChanges(changes, undefined, "en", undefined, summaries).map((r) => r.description)).toEqual(["CR-003: Reword the product vision", "CR-004: Update business goals"])
+    // Tài liệu tiếng Việt: mô tả tiếng Anh không dùng
+    expect(buildRecordOfChanges(changes, undefined, "vi", undefined, summaries).map((r) => r.description)).toEqual(["CR-003: Cập nhật tầm nhìn sản phẩm", "CR-004: Cập nhật mục tiêu"])
+  })
+
+  it("crRecordUnits trả đúng các dòng CR sẽ in, kèm câu dựng sẵn", () => {
+    const units = crRecordUnits([...changes, cr({ txn: "t3", by: "CR-004", op: "add", path: "use_cases[id=UC-01]", reason: "CR-004: y" })], "en")
+    expect(units.map((u) => [u.cr_id, u.kind, u.built])).toEqual([
+      ["CR-003", "M", "Update product vision"],
+      ["CR-004", "M", "Update business goals"],
+      ["CR-004", "A", "Add use case UC-01"]
+    ])
   })
 })

@@ -14,9 +14,11 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { latestDocVersion } from "../doc-version/doc-version.service.js"
 import { stripRecord } from "../import/check.service.js"
 import { DocBlock } from "../import/doc-block.model.js"
-import { loadLayout } from "../import/gap-report.service.js"
+import { loadLayout, titleOfSection } from "../import/gap-report.service.js"
+import type { LayoutEntry } from "../import/template-profile.model.js"
 import { withMeteredAi } from "../import/metered-ai.js"
-import { nameElementIds } from "../spine/human-labels.js"
+import { internalElementNames, nameElementIds } from "../spine/human-labels.js"
+import { similarQuestion } from "../pipeline/decisions.service.js"
 import { listSections } from "../spine/section-registry.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
@@ -77,20 +79,43 @@ export const WARNING_CHOICES: Readonly<Record<UserLocale, readonly string[]>> = 
 
 const questionKey = (q: string): string => q.replace(/\s+/g, " ").trim().toLowerCase()
 
-/** Câu hỏi mâu thuẫn chưa từng hỏi (so mọi vòng trước) kèm gợi ý; model không gợi ý ⇒ lựa chọn mặc định theo ngôn ngữ. */
+/**
+ * Câu hỏi "ai / bao nhiêu" (trả lời bằng một giá trị): lựa chọn mặc định "Đổi theo CR / Giữ như cũ" không khớp câu này (EduCampus
+ * B9: "tác nhân của UC-11 nên là ai" mà chỉ có hai nút đổi / giữ) ⇒ model không gợi ý thì để người dùng tự gõ.
+ */
+export const asksForValue = (question: string): boolean =>
+  /(?<![\p{L}\p{N}])(ai|who|whom|bao nhiêu|how many|how much)(?![\p{L}\p{N}])/iu.test(question)
+
+type NewContradictionOptions = {
+  /** Đổi mã nội bộ trong câu mới sang tên như câu đã lưu (câu đã lưu qua `nameElementIds` rồi) — so cùng một dạng. */
+  name?: (text: string) => string
+}
+
+/**
+ * Câu hỏi mâu thuẫn chưa từng hỏi (so mọi vòng trước, có trả lời hay bỏ trống) kèm gợi ý. FLF-474: so **cả hai phía** đã đổi mã
+ * sang tên, theo độ trùng từ (`similarQuestion`) chứ không nguyên văn — model diễn đạt lại một chút mỗi vòng. Model không gợi ý ⇒
+ * lựa chọn mặc định theo ngôn ngữ, trừ câu "ai / bao nhiêu" (để trống, người dùng tự gõ). `question` trả về là chữ gốc của model.
+ */
 export const newContradictions = (
   cr: Pick<IChangeRequest, "clarifications">,
   found: readonly { question: string; suggestions: readonly string[] }[],
-  language: UserLocale = "vi"
+  language: UserLocale = "vi",
+  options: NewContradictionOptions = {}
 ): { question: string; suggestions: string[] }[] => {
-  const seen = new Set(cr.clarifications.flatMap((c) => c.questions.map(questionKey)))
+  const name = options.name ?? ((t: string) => t)
+  const seen: string[] = cr.clarifications.flatMap((c) => c.questions)
+  const isSeen = (named: string): boolean => {
+    const key = questionKey(named)
+    return seen.some((q) => questionKey(q) === key || similarQuestion(q, named))
+  }
   const out: { question: string; suggestions: string[] }[] = []
   for (const c of found) {
-    const key = questionKey(c.question)
-    if (!key || seen.has(key)) continue
-    seen.add(key)
+    const named = name(c.question)
+    if (!questionKey(named) || isSeen(named)) continue
+    seen.push(named)
     const suggestions = [...new Set(c.suggestions.map((s) => s.trim()).filter(Boolean))]
-    out.push({ question: c.question.trim(), suggestions: suggestions.length ? suggestions : [...CONTRADICTION_CHOICES[language]] })
+    const fallback = asksForValue(c.question) ? [] : [...CONTRADICTION_CHOICES[language]]
+    out.push({ question: c.question.trim(), suggestions: suggestions.length ? suggestions : fallback })
   }
   return out
 }
@@ -119,7 +144,8 @@ export const forcedQuestions = (
   cr: Pick<IChangeRequest, "clarifications">,
   out: ForcedInput,
   asked: number,
-  language: UserLocale
+  language: UserLocale,
+  options: NewContradictionOptions = {}
 ): { contradictions: { question: string; suggestions: string[] }[]; warningKeys: Set<string> } => {
   if (asked > MAX_CLARIFY_ROUNDS) return { contradictions: [], warningKeys: new Set() }
   const warnedBefore = cr.clarifications.some((round) => (round.warning_questions ?? []).length > 0)
@@ -127,7 +153,8 @@ export const forcedQuestions = (
   const contradictions = newContradictions(
     cr,
     [...out.contradictions, ...warnings.map((w) => ({ question: w.question, suggestions: w.suggestions.length ? w.suggestions : [...WARNING_CHOICES[language]] }))],
-    language
+    language,
+    options
   )
   return { contradictions, warningKeys: new Set(warnings.map((w) => questionKey(w.question))) }
 }
@@ -145,6 +172,12 @@ export const extractionAnswered = (cr: Pick<IChangeRequest, "seed" | "amendments
   !cr.amendments?.length &&
   cr.clarifications.length === 1 &&
   cr.clarifications[0].answers.length === cr.clarifications[0].questions.length
+
+/** Câu mâu thuẫn (không kể cảnh báo) đã hỏi mà người dùng bỏ trống ⇒ coi như "Giữ như cũ" (FLF-474). */
+export const unansweredContradictions = (cr: Pick<IChangeRequest, "clarifications">): string[] =>
+  cr.clarifications.flatMap((round) =>
+    round.questions.filter((_, i) => round.kinds?.[i] === "contradiction" && !(round.warning_questions ?? []).includes(i) && !round.answers[i]?.trim() && round.answers.length > 0)
+  )
 
 export const runClarify = async (cr: IChangeRequest, userId: string): Promise<void> => {
   assertCrStatus(cr, ["draft", "clarifying"], "clarifying")
@@ -210,27 +243,32 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
   if (!cr.proceed_after_warning && (pickedProceed(cr) || out.warning_accepted === true)) cr.proceed_after_warning = true
   // FLF-367: mâu thuẫn hỏi cả khi đã hết vòng làm rõ (không qua `canAskMore`), đứng trước câu hỏi mơ hồ
   // BF §3.2 C-4: yêu cầu không hợp lý ⇒ cảnh báo + lý do, hỏi "Vẫn làm" hay bỏ (một lần, như câu mâu thuẫn)
-  const { contradictions, warningKeys } = forcedQuestions(cr, out, asked, replyLanguage)
+  // P06 (CR #3) + FLF-474: câu hỏi / gợi ý cho người dùng không lộ mã nội bộ ("SCR-05", "FN009", "CS27") — thay bằng tên phần tử
+  const layout: LayoutEntry[] | undefined = await loadLayout(String(cr.projectId))
+  const extraNames = internalElementNames(spine, (id) => titleOfSection(spine, id, layout))
+  const withNames = (text: string) => nameElementIds(text, spine, extraNames)
+  const { contradictions, warningKeys } = forcedQuestions(cr, out, asked, replyLanguage, { name: withNames })
   const askAmbiguous = out.ambiguous && canAskMore(asked)
   if (askAmbiguous || contradictions.length) {
     // Gợi ý song song câu hỏi — model trả thiếu / thừa thì cắt, bù `[]`; bỏ gợi ý trùng
     const ambiguous = askAmbiguous ? out.questions : []
     const suggestions = ambiguous.map((_, i) => [...new Set((out.suggestions[i] ?? []).map((s) => s.trim()).filter(Boolean))])
-    // P06 (CR #3): câu hỏi / gợi ý cho người dùng không lộ mã nội bộ ("SCR-05", "FN009") — thay bằng tên phần tử
-    const withNames = (text: string) => nameElementIds(text, spine)
     cr.clarifications.push({
       round,
       questions: [...contradictions.map((c) => c.question), ...ambiguous].map(withNames),
       answers: [],
       suggestions: [...contradictions.map((c) => c.suggestions), ...suggestions].map((list) => list.map(withNames)),
-      warning_questions: contradictions.flatMap((c, i) => (warningKeys.has(questionKey(c.question)) ? [i] : []))
+      warning_questions: contradictions.flatMap((c, i) => (warningKeys.has(questionKey(c.question)) ? [i] : [])),
+      kinds: [...contradictions.map(() => "contradiction" as const), ...ambiguous.map(() => "ambiguous" as const)]
     })
     await transitionCr(cr, "awaiting_answers")
     return
   }
   // Phase 7: đi tiếp mà còn thiếu dữ kiện (thường là hết vòng hỏi) ⇒ C-4 viết kèm giả định. Model vẫn thấy "mơ hồ" ở
   // vòng cuối mà không liệt kê ⇒ câu hỏi chưa được trả lời chính là dữ kiện thiếu.
-  cr.missing_info = (out.missing_info.length ? out.missing_info : out.ambiguous ? out.questions : []).map((text) => nameElementIds(text, spine))
+  // FLF-474: câu mâu thuẫn bỏ trống = giữ như cũ ⇒ ghi vào dữ kiện còn thiếu để C-4 viết kèm giả định, không hỏi lại
+  const missing = (out.missing_info.length ? out.missing_info : out.ambiguous ? out.questions : []).map(withNames)
+  cr.missing_info = [...new Set([...missing, ...unansweredContradictions(cr)])]
   cr.markModified("missing_info")
   // Đã chỉ đích danh mục thì bỏ từ khoá của model: từ khoá kiểu "SCR-01", "Hộ gia đình" kéo cả tài liệu vào CR.
   // FLF-445: CR tạo từ nhóm cờ đã có đích là chỗ bị cờ ⇒ cũng bỏ từ khoá, để C-3 bám đúng chỗ đó.

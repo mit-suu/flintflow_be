@@ -462,6 +462,8 @@ export const flagSchema = z.strictObject({
   rule_id: z.string().min(1),
   section_id: z.string().min(1),
   target_id: id.nullable().optional(),
+  // FLF-449: tên lens của cờ AI `ai_review`; thiếu với mọi cờ khác
+  lens: z.string().min(1).nullable().optional(),
   message: z.string(),
   remediation_step: z.string().min(1),
   opened_at_version: z.number().int().min(1),

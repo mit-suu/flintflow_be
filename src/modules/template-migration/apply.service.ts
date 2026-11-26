@@ -558,7 +558,7 @@ export const rollbackToReady = async (doc: ITemplateMigration): Promise<void> =>
   await TemplateMigration.updateOne(
     { _id: doc._id, state: "applying", apply_token: doc.apply_token },
     {
-      $set: stateUpdate("ready", { apply_steps: { ...NO_STEPS }, new_base_file_ref: null, new_profile: null, spine_plan: null, anchor_spine: null, snapshot: null, missing_sections: [], applying_heartbeat: null, apply_token: null }),
+      $set: stateUpdate("ready", { apply_steps: { ...NO_STEPS }, new_base_file_ref: null, new_profile: null, spine_plan: null, anchor_spine: null, snapshot: null, missing_sections: [], untranslated_keys: [], applying_heartbeat: null, apply_token: null }),
       ...(failures.length ? { $push: { warnings: { $each: failures } } } : {})
     }
   )
@@ -626,6 +626,8 @@ export const applyMigration = async (ctx: MigrationContext, id: string, options:
       (afterRevert) =>
         resolveAiChoices({ doc, projectId: ctx.projectId, userId: ctx.actor.userId, spine: afterRevert, ...(options.resolveExecutor ? { executor: options.resolveExecutor } : {}), onItem: (items) => touch(doc, { resolved_items: items }) })
     )
+    // Đơn vị dịch không ra chữ dù đã thử lại — tài liệu giữ chữ gốc, lưu key để toDto() map sang tên mục báo BA (FLF-471).
+    await touch(doc, { untranslated_keys: work.translation?.untranslated_keys ?? [] })
     await step("translated")
     await beat(doc)
     await takeSnapshot(ctx, doc, profile)

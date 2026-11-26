@@ -24,8 +24,9 @@ import { activitySectionOf } from "../diagram/renderers/activity.renderer.js"
 import { isComponentSequenceSource } from "../diagram/renderers/sequence.renderer.js"
 import { DEFAULT_RELATION_VERB, relationVerb } from "../diagram/renderers/erd.renderer.js"
 import { describeInterface } from "./interface-description.js"
-import { crRowDescription } from "./cr-record.js"
 import { isSystemChangeActor } from "../doc-version/doc-version.constants.js"
+import type { CrRecordSummary } from "../change-request/change-request.model.js"
+import { changeKindOf, crRecordDescription, crRowDescription, type ChangeKind } from "./cr-record.js"
 import { diagramErrorMarker } from "./diagram-placeholder.js"
 import { matchTableHeader } from "../import/table-header-dictionary.js"
 import { loadStepRegistry } from "../pipeline/step-registry.js"
@@ -59,7 +60,13 @@ import type { SOURCE_COLLECTIONS } from "../project/requirement-source.service.j
  * (`assemble.service.ts`) đọc `Change` model trực tiếp với projection nhẹ này thay vì
  * `spine.repository.listChanges` (tải cả `before`/`value`, nặng không cần thiết cho §I).
  */
-export type ChangeRecordRow = Pick<Change, "txn" | "at" | "by" | "reason" | "op" | "step_id"> & { path?: string }
+/**
+ * `removed_name` (FLF-474, plan fix #7 phần 7c): tên phần tử ngay trước khi bị xoá (`before.name/term/title/heading`),
+ * dùng cho dòng §I khi op `remove` — Spine hiện tại có thể đã cấp lại đúng mã cho một phần tử khác (xem
+ * `spine/change-log.ts` `retiredIds`). Vắng với dữ liệu cũ (bản phát hành đã lưu trước fix) ⇒ `cr-record.ts` dò theo
+ * Spine hiện tại như cũ.
+ */
+export type ChangeRecordRow = Pick<Change, "txn" | "at" | "by" | "reason" | "op" | "step_id"> & { path?: string; removed_name?: string }
 import type {
   Block,
   BulletListBlock,
@@ -535,7 +542,8 @@ const featureOverview = (spine: Spine, featureId: string, ctx: SectionRenderCont
   const classDiagrams: Block[] = diagramImages(spine, "class", featureId, ctx, "Class Diagram", svgCaption)
   // FLF-390: sơ đồ activity của use case thuộc tính năng (phần chức năng) — chỉ có khi đã có dữ liệu luồng
   const activities = useCaseActivities(spine, `feature:${featureId}`, ctx)
-  if (ctx.functionLayout === "fpt") return [...classDiagrams, ...activities]
+  // FLF-480 (P09 #3): mẫu cố định in đoạn nguyên văn của file, bản Xem không thêm dòng liệt kê màn mà file không có
+  if (ctx.functionLayout === "fpt" || ctx.fixedTemplate) return [...classDiagrams, ...activities]
   const screens = spine.screens.filter((s) => s.feature_id === featureId)
   return [...classDiagrams, ...(screens.length === 0 ? [] : [p(`Screens: ${screens.map((s) => s.name).join(", ")}`)]), ...activities]
 }
@@ -1000,10 +1008,10 @@ const changeTypeOf = (ops: Set<string>): RocChangeType => {
  * Lý do do MÁY ghi trong lúc chạy quy trình. §I là lịch sử tài liệu cho người đọc, không phải nhật ký của
  * runner: lượt test xuất ra 425 dòng mà phần lớn là "step-runner: elicit turn" (BUG-15).
  * Mode 1: cờ do AI kiểm tra đặt (`AI check: ambiguity`, `AI semantic check (1.11)`) và kế hoạch step lúc import
- * cũng là sổ sách của máy — không in vào tài liệu.
+ * cũng là sổ sách của máy — không in vào tài liệu. FLF-484: lý do `render` (vẽ lại sơ đồ sau CR / import) cũng là việc của máy.
  */
 const INTERNAL_REASON =
-  /^(step-runner:|gate:|resume:|Revert seq|Hoà giải: chờ chấp nhận lại|Phỏng vấn đầu giai đoạn|Chốt |confirmed_at do server đặt|Mở cờ |Waiver |Đóng cờ |AI check:|AI semantic check|Import: kế hoạch step|Kế hoạch step|Mở lại bước theo comment|render|\[C\] |Gửi Lead duyệt|Lead yêu cầu sửa|Lead đã duyệt gói|Recompute deterministic)/
+  /^(step-runner:|gate:|resume:|Revert seq|Hoà giải: chờ chấp nhận lại|Phỏng vấn đầu giai đoạn|Chốt |confirmed_at do server đặt|Mở cờ |Waiver |Đóng cờ |AI check:|AI semantic check|Import: kế hoạch step|Kế hoạch step|Mở lại bước theo comment|render(?::|$)|\[C\] |Gửi Lead duyệt|Lead yêu cầu sửa|Lead đã duyệt gói|Recompute deterministic)/
 
 /**
  * Câu do máy sinh → câu theo ngôn ngữ tài liệu (mặc định tiếng Anh; bảng `MACHINE_DESCRIPTIONS` ở `labels.ts`);
@@ -1055,7 +1063,7 @@ const vnDateFormat = new Intl.DateTimeFormat("en-CA", { timeZone: RECORD_TIME_ZO
 /** `YYYY-MM-DD` theo giờ Việt Nam của một mốc ISO; mốc không đọc được ⇒ 10 ký tự đầu như trước. */
 export const recordDateOf = (at: string): string => {
   const time = new Date(at)
-  return Number.isNaN(time.getTime()) ? at.slice(0, 10) : vnDateFormat.format(time)
+  return Number.isNaN(time.getTime()) ? String(at).slice(0, 10) : vnDateFormat.format(time)
 }
 
 /**
@@ -1065,6 +1073,8 @@ export const recordDateOf = (at: string): string => {
  */
 const NON_RECORD_PATH = /^(flags|progress|steps|baseline_submission)(\[|\.|$)/
 const isRecordNoise = (c: ChangeRecordRow): boolean => c.by === "import" || isSystemChangeActor(c.by) || NON_RECORD_PATH.test(c.path ?? "")
+
+const KIND_ORDER: readonly ChangeKind[] = ["A", "M", "D"]
 
 const describeRow = (reasons: readonly string[], language?: string): string => {
   const shown = reasons.slice(0, MAX_REASONS_PER_ROW).join("; ")
@@ -1085,42 +1095,14 @@ export interface RecordOfChangesOptions {
   releasingCrIds?: readonly string[]
   /** `by` ⇒ định danh người ghi dùng để quyết định gộp dòng CR (mã CR ⇒ người tạo CR); mặc định chính `by`. */
   actorOf?: (by: string) => string
+  /** FLF-492: mô tả "AI viết gọn" theo mã CR (tuỳ chọn); không truyền ⇒ chỉ câu dựng sẵn. */
+  summaries?: ReadonlyMap<string, readonly CrRecordSummary[]>
 }
 
-const BUCKET_ORDER: readonly RocChangeType[] = ["A", "M", "D"]
-const bucketOf = (op: string): RocChangeType => (op === "add" ? "A" : op === "remove" ? "D" : "M")
+type RecordRow = { date: string; phase: string; baseline: boolean; cr: boolean; changes: ChangeRecordRow[] }
 
-type RecordItem =
-  | { kind: "baseline"; date: string; changes: ChangeRecordRow[] }
-  | { kind: "phase"; date: string; phase: string; changes: ChangeRecordRow[] }
-  | { kind: "cr"; date: string; actor: string; releaseKey: boolean; crs: { crId: string; changes: ChangeRecordRow[] }[] }
-
-/**
- * §I là bảng lịch sử cho người đọc tài liệu, không phải nhật ký thao tác (BF §3.2). Dựng từ log Change theo thứ tự ghi:
- *
- * - **Dòng soạn trước baseline** (chế độ 2, 3, 4): mỗi giai đoạn một dòng `Create <giai đoạn>` lần đầu, `Update <giai đoạn>` khi quay lại; các lô liền
- *   nhau, cùng ngày (giờ VN), cùng giai đoạn gộp một dòng. Lô không gắn step thuộc giai đoạn đang chạy.
- * - **Dòng baseline / phát hành**: một dòng `Baseline <số>` mỗi lần ký.
- * - **Dòng CR**: các CR liền nhau theo giờ ghi, cùng ngày VN, cùng người ghi, cùng lần phát hành gộp vào một dòng cho mỗi loại A / M / D
- *   (xen giữa có CR của người khác hoặc dòng khác thì tách); thứ tự dòng: theo giờ, trong một nhóm A rồi M rồi D. Mô tả `CR-012, CR-013: <thay đổi gì>`
- *   dựng từ chính các thay đổi (`cr-record.ts`), không chép tiêu đề / câu chat của CR.
- * - **Cột Version**: số của lần phát hành / baseline chứa dòng (dòng baseline kế tiếp trong log, hoặc `releasingVersion` cho file đang phát hành);
- *   chưa phát hành ⇒ `-`. Không in số phụ của bản nháp.
- * - **Không sinh dòng**: bản gốc 0.1 (`by = import`), thay đổi hệ thống, gửi duyệt / yêu cầu sửa gói, bật / tắt step, mở lại bước theo comment, đọc
- *   lại ảnh sơ đồ, sơ đồ tự vẽ lại (xem `NON_RECORD_PATH`, `INTERNAL_REASON`).
- *
- * `resolveInCharge` (T7): `by` lưu trong `changes[]` là userId thô (hoặc `"system"`) — caller truyền hàm tra `User.name`/email; mặc định giữ nguyên `by`.
- * `language` (FLF-265): câu máy sinh + nhãn phase theo ngôn ngữ tài liệu; không truyền ⇒ tiếng Anh. `spine` (FLF-411 U2-6): tra tên phần tử cho mô tả CR.
- */
-export function buildRecordOfChanges(
-  changes: ChangeRecordRow[],
-  resolveInCharge: (by: string) => string = (by) => by,
-  language?: string,
-  spine?: Spine,
-  options: RecordOfChangesOptions = {}
-): RocRow[] {
-  const text = recordTextFor(language)
-  const actorOf = options.actorOf ?? ((by: string) => by)
+/** Gom lô được giữ thành dòng §I (chưa tính version / mô tả): liền nhau cùng ngày + cùng giai đoạn thì dồn, baseline và CR đứng riêng. */
+const groupRecordRows = (changes: readonly ChangeRecordRow[]): RecordRow[] => {
   const order: string[] = []
   const groups = new Map<string, ChangeRecordRow[]>()
   for (const change of changes) {
@@ -1133,30 +1115,105 @@ export function buildRecordOfChanges(
     }
   }
 
-  const releasing = options.releasingVersion
-  const releasingIds = options.releasingCrIds ? new Set(options.releasingCrIds) : null
-  const releaseKeyOf = (crId: string): boolean => (releasingIds ? releasingIds.has(crId) : true)
-
-  // 1. Gom lô được giữ thành mục theo thứ tự ghi
-  const items: RecordItem[] = []
+  // Gom lô được giữ thành dòng: liền nhau cùng ngày + cùng giai đoạn thì dồn, baseline và CR đứng riêng.
+  const rows: RecordRow[] = []
   for (const txn of order) {
     const group = groups.get(txn) as ChangeRecordRow[]
     if (!keepInRecordOfChanges(group)) continue
     const date = recordDateOf(group[0].at)
+    const baseline = isBaselineTxn(group)
+    const cr = !baseline && isCrTxn(group)
+    const last = rows[rows.length - 1]
+    // Lô không gắn step (xác nhận giả định ở cổng, lệnh sửa chat giữa step) thuộc giai đoạn đang chạy — không cắt nhóm
+    const phase = phaseKeyOf(group[0].step_id) || (last && !last.baseline && last.date === date ? last.phase : "")
+    if (!baseline && !cr && last && !last.baseline && !last.cr && last.date === date && last.phase === phase) last.changes.push(...group)
+    else rows.push({ date, phase, baseline, cr, changes: [...group] })
+  }
+  return rows
+}
+
+/** Một dòng §I của CR sau khi tách theo loại thay đổi: đơn vị mà "AI viết gọn" viết lại (FLF-492). */
+export interface CrRecordUnit {
+  cr_id: string
+  kind: ChangeKind
+  changes: ChangeRecordRow[]
+  /** Câu dựng sẵn (không có tiền tố `CR-xxx:`). */
+  built: string
+}
+
+/** Các dòng CR của Record of Changes, đúng như `buildRecordOfChanges` sẽ in (cùng cách gom, cùng cách tách A / M / D). */
+export const crRecordUnits = (changes: readonly ChangeRecordRow[], language?: string, spine?: Spine): CrRecordUnit[] =>
+  groupRecordRows(changes).flatMap((row) => {
+    const crId = row.cr ? row.changes.find((c) => CR_ACTOR.test(c.by))?.by : undefined
+    if (!crId) return []
+    return KIND_ORDER.flatMap((kind): CrRecordUnit[] => {
+      const group = row.changes.filter((c) => changeKindOf(c) === kind)
+      return group.length === 0 ? [] : [{ cr_id: crId, kind, changes: group, built: crRecordDescription(crId, group, language, spine).replace(`${crId}: `, "") }]
+    })
+  })
+
+/**
+ * §I là lịch sử cho người đọc tài liệu, không phải nhật ký từng transaction: một ngày chat sửa vài chục lần
+ * từng ra vài chục dòng/version. Nay gộp các lô được giữ (`keepInRecordOfChanges`) **liền nhau, cùng ngày, cùng
+ * giai đoạn quy trình** thành một dòng, mô tả kiểu FPT `Create <giai đoạn>` (lần đầu) / `Update <giai đoạn>`
+ * — không in `reason` từng op vì đó là nhật ký của model. Sau baseline mô tả là lời user (tối đa 3). Lô không gắn
+ * step nhập vào dòng liền trước cùng ngày; sau baseline (không còn giai đoạn) gom theo ngày. Lô ký baseline luôn
+ * là một dòng riêng.
+ *
+ * `version` (BF §3.2, FLF-484): số của **lần phát hành / baseline chứa dòng** — dòng baseline mang số của chính nó
+ * (`1.0`, không tiền tố `v`), mọi dòng khác (CR, soạn trước baseline, sửa ngoài quy trình) mang số của baseline **đầu tiên
+ * đứng sau nó**; chưa có baseline nào sau ⇒ `-` (bản nháp). Số phụ của bản nháp không in vào bảng. Lô của change request
+ * (mode 1, FLF-318) là một dòng riêng, tách thêm theo loại thay đổi A / M / D (một dòng mỗi loại có mặt, cùng mã CR, cùng
+ * version). Lô `by: import` (nạp file + ký bản gốc 0.1) không thành dòng nào (BF: không sinh dòng cho bản gốc 0.1).
+ *
+ * `resolveInCharge` (T7): `by` lưu trong `changes[]` là userId thô (hoặc `"system"`) — caller truyền
+ * hàm tra `User.name`/email theo lô để hiển thị tên thay vì id; mặc định giữ nguyên `by` (test thuần
+ * không cần DB). Nhiều người sửa trong ngày ⇒ liệt kê tên không trùng.
+ *
+ * `language` (FLF-265, nội bộ): câu máy sinh + nhãn phase theo ngôn ngữ tài liệu; không truyền ⇒ tiếng Anh như trước.
+ * `spine` (FLF-411 U2-6): tra tên phần tử cho mô tả dòng CR dựng từ thay đổi (`cr-record.ts`); không truyền ⇒ chỉ loại phần tử.
+ */
+export function buildRecordOfChanges(
+  changes: ChangeRecordRow[],
+  resolveInCharge: (by: string) => string = (by) => by,
+  language?: string,
+  spine?: Spine,
+  /** FLF-466 / FLF-492: tuỳ chọn gộp dòng CR / releasingVersion / mô tả AI viết gọn (cũng nhận trực tiếp Map summaries). */
+  optionsOrSummaries?: RecordOfChangesOptions | ReadonlyMap<string, readonly CrRecordSummary[]>
+): RocRow[] {
+  const options: RecordOfChangesOptions =
+    optionsOrSummaries && typeof (optionsOrSummaries as ReadonlyMap<string, readonly CrRecordSummary[]>).get === "function"
+      ? { summaries: optionsOrSummaries as ReadonlyMap<string, readonly CrRecordSummary[]> }
+      : ((optionsOrSummaries as RecordOfChangesOptions | undefined) ?? {})
+  const text = recordTextFor(language)
+  const actorOf = options.actorOf ?? ((by: string) => by)
+  const releasing = options.releasingVersion
+  const releasingIds = options.releasingCrIds ? new Set(options.releasingCrIds) : null
+  const releaseKeyOf = (crId: string): boolean => (releasingIds ? releasingIds.has(crId) : true)
+  const summaries = options.summaries
+
+  // 1. Gom từ `groupRecordRows`: thêm gộp các CR liền nhau cùng ngày VN, cùng người ghi, cùng lần phát hành (BF §3.2, FLF-466)
+  type RecordItem =
+    | { kind: "baseline"; date: string; changes: ChangeRecordRow[] }
+    | { kind: "phase"; date: string; phase: string; changes: ChangeRecordRow[] }
+    | { kind: "cr"; date: string; actor: string; releaseKey: boolean; crs: { crId: string; changes: ChangeRecordRow[] }[] }
+
+  const items: RecordItem[] = []
+  for (const row of groupRecordRows(changes)) {
     const last = items[items.length - 1]
-    if (isBaselineTxn(group)) {
-      items.push({ kind: "baseline", date, changes: [...group] })
-    } else if (isCrTxn(group)) {
-      const crId = group.find((c) => CR_ACTOR.test(c.by))!.by
+    if (row.baseline) {
+      items.push({ kind: "baseline", date: row.date, changes: row.changes })
+    } else if (row.cr) {
+      const crId = row.changes.find((c) => CR_ACTOR.test(c.by))!.by
       const actor = actorOf(crId)
       const releaseKey = releaseKeyOf(crId)
-      if (last?.kind === "cr" && last.date === date && last.actor === actor && last.releaseKey === releaseKey) last.crs.push({ crId, changes: [...group] })
-      else items.push({ kind: "cr", date, actor, releaseKey, crs: [{ crId, changes: [...group] }] })
+      if (last?.kind === "cr" && last.date === row.date && last.actor === actor && last.releaseKey === releaseKey) {
+        last.crs.push({ crId, changes: row.changes })
+      } else {
+        items.push({ kind: "cr", date: row.date, actor, releaseKey, crs: [{ crId, changes: row.changes }] })
+      }
     } else {
-      // Lô không gắn step (xác nhận giả định ở cổng, lệnh sửa chat giữa step) thuộc giai đoạn đang chạy — không cắt nhóm
-      const phase = phaseKeyOf(group[0].step_id) || (last?.kind === "phase" && last.date === date ? last.phase : "")
-      if (last?.kind === "phase" && last.date === date && last.phase === phase) last.changes.push(...group)
-      else items.push({ kind: "phase", date, phase, changes: [...group] })
+      items.push({ kind: "phase", date: row.date, phase: row.phase, changes: row.changes })
     }
   }
 
@@ -1184,15 +1241,16 @@ export function buildRecordOfChanges(
       return
     }
     if (item.kind === "cr") {
-      for (const bucket of BUCKET_ORDER) {
+      for (const bucket of KIND_ORDER) {
         const picked = item.crs
-          .map((cr) => ({ crId: cr.crId, changes: cr.changes.filter((c) => bucketOf(c.op) === bucket) }))
+          .map((cr) => ({ crId: cr.crId, changes: cr.changes.filter((c) => changeKindOf(c) === bucket) }))
           .filter((cr) => cr.changes.length > 0)
         if (picked.length === 0) continue
         const crIds = picked.map((p) => p.crId)
         const rows = picked.flatMap((p) => p.changes)
         const version = versionAfter[i] !== "-" ? versionAfter[i] : releasing && (!releasingIds || crIds.every((id) => releasingIds.has(id))) ? releasing : "-"
-        out.push({ date: item.date, version, change_type: bucket, in_charge: namesOf(rows), description: crRowDescription(crIds, rows, language, spine) })
+        const crSummaries = crIds.length === 1 ? summaries?.get(crIds[0]) : undefined
+        out.push({ date: item.date, version, change_type: bucket, in_charge: namesOf(rows), description: crRowDescription(crIds, rows, language, spine, crSummaries) })
       }
       return
     }

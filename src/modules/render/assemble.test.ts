@@ -132,6 +132,11 @@ vi.mock("./rendered-document.model.js", () => ({
 vi.mock("../spine/baseline.model.js", () => ({ Baseline: { findOne: baselineDb.findOne } }))
 vi.mock("../spine/change.model.js", () => ({ Change: { find: changeDb.find, findOne: changeDb.findOne } }))
 vi.mock("../user/user.model.js", () => ({ User: { find: userDb.find } }))
+// FLF-484: nhãn bản nháp lấy từ số DocVersion (mode 1); mode 2 không có hàng nào
+const docVersionDb = vi.hoisted(() => ({ versions: [] as string[] }))
+vi.mock("../doc-version/doc-version.model.js", () => ({
+  DocVersion: { find: () => ({ lean: async () => docVersionDb.versions.map((version) => ({ version })) }) }
+}))
 // FLF-411 (U2-6): "In charge" của dòng CR = người tạo CR
 const crDb = vi.hoisted(() => ({ rows: [] as Record<string, unknown>[] }))
 vi.mock("../change-request/change-request.model.js", () => ({
@@ -485,6 +490,20 @@ describe("getDocument() - source=draft", () => {
     expect((await getDraftMeta(PROJECT))?.assembled_at_version).toBe(2)
     // FLF-295: nhãn version không lộ spine_version
     expect(doc.version).toBe("v0")
+  })
+
+  it("FLF-484: dự án mode 1 (có DocVersion) ⇒ nhãn là số version mới nhất, kể cả khi bản cache dựng lúc nhãn cũ", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 1 }))
+    docVersionDb.versions = ["0.1", "0.2"]
+    try {
+      await assemble(PROJECT, "Demo", 1)
+      expect((await getDocument(PROJECT, "Demo", { source: "draft" })).version).toBe("0.2")
+      // version mới (CR chỉ có comment) mà spine_version không đổi ⇒ cache giữ nhãn cũ, nhưng bản trả về theo nhãn mới
+      docVersionDb.versions = ["0.1", "0.2", "0.10"]
+      expect((await getDocument(PROJECT, "Demo", { source: "draft" })).version).toBe("0.10")
+    } finally {
+      docVersionDb.versions = []
+    }
   })
 
   it("flagsAppendix: cờ đỏ mở + waive đúng", async () => {

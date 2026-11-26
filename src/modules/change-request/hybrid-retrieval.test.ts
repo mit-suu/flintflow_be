@@ -29,11 +29,18 @@ describe("findSpineLocations + ứng viên vector", () => {
   })
 
   it("FLF-375: có vector ⇒ trộn với từ khoá BM25 (không bỏ từ khoá); đồ thị giữ nguyên; phần tử không còn bị bỏ; điểm ghi ở vị trí", () => {
-    const found = findSpineLocations(spine(), ["actors[id=A01]"], ["respond"], [
-      { ref: "nfrs[id=NFR-01]", score: 0.88 },
-      { ref: "use_cases[id=UC-01]", score: 0.82 },
-      { ref: "actors[id=A99]", score: 0.99 }
-    ])
+    // FLF-483: đích actor chỉ kéo use case tham chiếu khi CR xoá ⇒ ca này dùng intent "remove"
+    const found = findSpineLocations(
+      spine(),
+      ["actors[id=A01]"],
+      ["respond"],
+      [
+        { ref: "nfrs[id=NFR-01]", score: 0.88 },
+        { ref: "use_cases[id=UC-01]", score: 0.82 },
+        { ref: "actors[id=A99]", score: 0.99 }
+      ],
+      { intent: "remove" }
+    )
     expect(found.map((f) => [f.path, f.found_by, f.vector_score])).toEqual([
       ["actors[id=A01]", ["spine_link"], undefined],
       ["use_cases[id=UC-01]", ["spine_link", "vector"], 0.82],
@@ -50,7 +57,7 @@ describe("không cắt trần vị trí", () => {
     const s = spine()
     for (let i = 0; i < 90; i++) s.glossary.push({ id: `G${i}`, term: `Term ${i}`, definition: "x" } as never)
     const vector = s.glossary.map((g, i) => ({ ref: `glossary[id=${g.id}]`, score: 0.8 + i / 1000 }))
-    const found = findSpineLocations(s, ["actors[id=A01]"], [], vector)
+    const found = findSpineLocations(s, ["actors[id=A01]"], [], vector, { intent: "remove" })
     expect(found).toHaveLength(92)
     expect(found.filter((f) => f.found_by.includes("spine_link")).map((f) => f.path)).toEqual(["actors[id=A01]", "use_cases[id=UC-01]"])
     expect(found.filter((f) => f.found_by.includes("vector"))).toHaveLength(90)

@@ -65,6 +65,17 @@ export const reviewPackageSystemChangeSchema = z.object({
 export type ReviewPackageSystemChangeDto = z.infer<typeof reviewPackageSystemChangeSchema>
 
 /**
+ * FLF-480 (B13): một vòng "Yêu cầu sửa" trước lần gửi lại hiện tại — `submitPackage` ghi đè `baseline_submission`
+ * nên lý do của vòng trước chỉ còn lại ở change log; `getPackage` dựng lại từ đó để không mất lý do khi gửi lại.
+ */
+export const reviewPackageRoundSchema = z.object({
+  decided_by: z.string(),
+  decided_at: isoDateTime,
+  reason: z.string().nullable()
+})
+export type ReviewPackageRoundDto = z.infer<typeof reviewPackageRoundSchema>
+
+/**
  * `GET /projects/:id/review-package` — gói = mọi CR đã ghi kể từ lần phát hành trước (business-flow §3.2).
  * `status`: `drafting` (BA đang ghi) · `pending` (chờ Lead, bản nháp khoá) · `changes_requested` (Lead yêu cầu sửa).
  * `draft_label`: "1.0 · 3 thay đổi chưa duyệt" — chỉ số chính, không số phụ.
@@ -81,6 +92,8 @@ export const reviewPackageSchema = z.object({
   /** FLF-466: phát hành gói này sẽ không có bản Track Changes (`template_translated`: có đổi mẫu kèm dịch); còn lại `null`. */
   tracked_unavailable_reason: z.enum(["template_translated"]).nullable(),
   red_open: z.number().int().min(0),
+  /** FLF-492: credit ước tính để AI viết gọn các dòng CR của gói (0 khi không có dòng nào cần viết). */
+  concise_record_credits: z.number().int().min(0),
   submission: z
     .object({
       status: z.enum(["pending", "rejected"]),
@@ -93,7 +106,9 @@ export const reviewPackageSchema = z.object({
       rejection_comment_ids: z.array(z.string())
     })
     .nullable(),
-  spine_version: z.number().int()
+  spine_version: z.number().int(),
+  /** FLF-480 (B13): các vòng "Yêu cầu sửa" trước lần gửi lại hiện tại, mới nhất trước — thêm field, additive. */
+  rounds: z.array(reviewPackageRoundSchema)
 })
 export type ReviewPackageDto = z.infer<typeof reviewPackageSchema>
 
@@ -128,8 +143,11 @@ export const compareQuerySchema = z
   .object({ from: docVersionString, to: docVersionString })
   .refine((q) => q.from !== q.to, { message: "from và to phải khác nhau" })
 
-/** `POST /projects/:id/release` (Flow 6) — ghi baseline vào Spine ⇒ mang `base_version`. */
-export const releaseRequestSchema = z.strictObject({ base_version: z.number().int().min(1) })
+/**
+ * `POST /projects/:id/release` (Flow 6) — ghi baseline vào Spine ⇒ mang `base_version`. `concise_record` (FLF-492, M4-02): AI viết gọn
+ * mô tả các dòng CR trong Record of Changes; không truyền / `false` ⇒ câu dựng sẵn từ thay đổi, không tốn credit.
+ */
+export const releaseRequestSchema = z.strictObject({ base_version: z.number().int().min(1), concise_record: z.boolean().optional() })
 
 // ─── response ────────────────────────────────────────────────────
 

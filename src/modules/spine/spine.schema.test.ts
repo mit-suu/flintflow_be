@@ -214,6 +214,18 @@ describe("spineSchema", () => {
     expect(spineSchema.safeParse(s).success).toBe(false)
   })
 
+  it("FLF-449: cờ có lens hợp lệ; cờ cũ không có lens vẫn hợp lệ; lens rỗng bị từ chối", () => {
+    const s = sampleSpine()
+    expect(spineSchema.safeParse(s).success, "cờ cũ không có lens").toBe(true)
+    s.flags[0] = { ...s.flags[0], level: "yellow", rule_id: "ai_review", lens: "decision_conflict" }
+    const parsed = spineSchema.parse(s)
+    expect(parsed.flags[0].lens).toBe("decision_conflict")
+    s.flags[0] = { ...s.flags[0], lens: null }
+    expect(spineSchema.safeParse(s).success).toBe(true)
+    s.flags[0] = { ...s.flags[0], lens: "" }
+    expect(spineSchema.safeParse(s).success).toBe(false)
+  })
+
   it("từ chối spine_version < 1 và thời điểm không phải ISO", () => {
     expect(spineSchema.safeParse({ ...createEmptySpine(), spine_version: 0 }).success).toBe(false)
 

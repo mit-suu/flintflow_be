@@ -317,6 +317,17 @@ describe("các loại op", () => {
     expect((plan.changes[0].before as { text: string }[])[0].text).toContain("UC-09")
   })
 
+  it("FLF-473: set đủ phần tử custom_sections[id=CS07] của phần nối (B5) — đổi đúng một block, heading vẫn rỗng", () => {
+    const base = structuredClone(FIXTURE)
+    const original = { kind: "paragraph" as const, text: "Hệ thống có 10 use case cho người học và giảng viên.", rows: null, image_ref: null }
+    base.custom_sections.push({ id: "CS07", heading: "", level: 3, source: "import", blocks: [original] })
+    const value = { id: "CS07", heading: "", level: 3, source: "import" as const, blocks: [{ ...original, text: "Hệ thống có 12 use case cho người học và giảng viên." }] }
+    const plan = planTransaction(base, txn([{ op: "set", path: "custom_sections[id=CS07]", value } as Op]), { startSeq: 1 })
+    const after = plan.spine.custom_sections.find((c) => c.id === "CS07")
+    expect(after?.heading).toBe("")
+    expect(after?.blocks).toEqual(value.blocks)
+  })
+
   it("không xoá được section bắt buộc và màn đang là screen_cursor", () => {
     const e1 = rejection(() => planTransaction(FIXTURE, txn([{ op: "remove", path: "sections[id=fixed:3.1.1]" }]), { startSeq: 1 }))
     expect(e1.violations.map((v) => v.rule)).toContain("invariant_1_required_section")

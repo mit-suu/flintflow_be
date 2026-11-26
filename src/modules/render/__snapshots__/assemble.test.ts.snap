@@ -19279,7 +19279,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "pagination",
+                  "text": "Pagination",
                 },
               ],
               [
@@ -19291,7 +19291,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "date_format",
+                  "text": "Date format",
                 },
               ],
               [
@@ -19303,7 +19303,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "error_handling",
+                  "text": "Error handling",
                 },
               ],
               [
@@ -19315,7 +19315,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "audit",
+                  "text": "Audit",
                 },
               ],
               [
@@ -19327,7 +19327,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "session",
+                  "text": "Session",
                 },
               ],
               [
@@ -19641,7 +19641,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "risk",
+                  "text": "Risk",
                 },
               ],
               [
@@ -19653,7 +19653,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "assumption",
+                  "text": "Assumption",
                 },
               ],
               [
@@ -19665,7 +19665,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "open_question",
+                  "text": "Open question",
                 },
               ],
               [
@@ -19677,7 +19677,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "technical_risk",
+                  "text": "Technical risk",
                 },
               ],
               [
@@ -19689,7 +19689,7 @@ exports[`DoD1 - snapshot RenderedDocument từ fixture 19 màn > snapshot ổn �
             [
               [
                 {
-                  "text": "technical_risk",
+                  "text": "Technical risk",
                 },
               ],
               [

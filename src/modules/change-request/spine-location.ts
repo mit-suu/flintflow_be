@@ -19,6 +19,9 @@ import type { SectionSegments } from "../spine/segment-hash.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { LocationFoundBy } from "./change-request.constants.js"
 import { contentSlot } from "../import/content-slots.js"
+import { COUNT_COLLECTIONS, findCountMentions, type CountCollection } from "./count-mentions.js"
+import { literalHits, literalValues, type Literal } from "./literal-values.js"
+import { DOC_ID } from "./location-display.js"
 
 export const PROJECT_PATH = "project"
 
@@ -201,6 +204,17 @@ export const KEYWORD_MIN_RATIO = 0.35
 export const KEYWORD_MAX_HITS = 15
 
 /**
+ * FLF-483 (plan fix #14): ngưỡng **lọc nguồn nhiễu**, không phải trần số vị trí (BF §3.2 không cắt trần). Tên / từ khoá
+ * khớp nhiều hơn ngưỡng (theo tỉ lệ phần tử của tài liệu) thì không còn chỉ ra chỗ cần sửa nữa.
+ */
+export const GENERIC_NAME_MAX_DF = 8
+export const GENERIC_NAME_RATIO = 0.05
+export const GENERIC_KEYWORD_MAX_DF = 12
+export const GENERIC_KEYWORD_RATIO = 0.15
+export const genericNameMaxDf = (total: number): number => Math.max(GENERIC_NAME_MAX_DF, Math.ceil(GENERIC_NAME_RATIO * total))
+export const genericKeywordMaxDf = (total: number): number => Math.max(GENERIC_KEYWORD_MAX_DF, Math.ceil(GENERIC_KEYWORD_RATIO * total))
+
+/**
  * FLF-375: phần tử Spine xếp theo BM25 của từ khoá C-2 (`shared/search/bm25.ts` — tách âm tiết Việt, bỏ dấu, giữ mã).
  * Mỗi từ khoá là một ý riêng ⇒ chấm **theo từng từ khoá**: giữ phần tử có điểm ≥ `KEYWORD_MIN_RATIO` × điểm cao nhất của
  * chính từ khoá đó (phần tử chỉ khớp một ý không bị ý khác lấn át), hợp lại theo điểm chuẩn hoá, tối đa `KEYWORD_MAX_HITS`.
@@ -210,11 +224,17 @@ export const rankByKeywords = (elements: readonly { path: string; value: unknown
   if (!terms.length) return []
   const index = new Bm25(elements, (e) => textOf(e.value))
   const best = new Map<string, number>()
+  const genericDf = genericKeywordMaxDf(elements.length)
   for (const term of terms) {
     const hits = index.search(term)
     const top = hits[0]?.score ?? 0
-    for (const h of hits) {
-      if (h.score < top * KEYWORD_MIN_RATIO) continue
+    const kept = hits.filter((h) => h.score >= top * KEYWORD_MIN_RATIO)
+    // FLF-483: từ khoá khớp quá nhiều phần tử ("use case", "version 1.0") không còn phân biệt được chỗ cần sửa - bỏ cả từ khoá
+    if (kept.length > genericDf) {
+      console.info(`[C-3] bỏ từ khoá chung "${term}" (${kept.length}/${elements.length})`)
+      continue
+    }
+    for (const h of kept) {
       const norm = top ? h.score / top : 0
       best.set(h.item.path, Math.max(best.get(h.item.path) ?? 0, norm))
     }
@@ -298,11 +318,37 @@ export interface VectorCandidate {
  * C-3: gom vị trí từ đích C-2 (`targets` — path phần tử hoặc field) và từ khoá. Đích không còn trong Spine bị bỏ.
  * `vector` khác rỗng ⇒ ứng viên gần nghĩa thay nguồn từ khoá (từ khoá chỉ còn là dự phòng khi index không dùng được).
  */
+export interface FindOptions {
+  /** FLF-483: giá trị cụ thể của CR (`literalValues`) - phần tử ghi giá trị đó luôn là vị trí, không qua xếp hạng / trần từ khoá. */
+  literals?: readonly Literal[]
+  /** FLF-483: ý định của CR (`crImpactIntent`) - xoá / đổi tên thì mọi chỗ nhắc tên phần tử và mọi tham chiếu tới nó đều phải sửa. */
+  intent?: ImpactIntent
+}
+
+/** FLF-483: CR xoá phần tử, đổi tên phần tử, hay việc khác. */
+export type ImpactIntent = "remove" | "rename" | "other"
+
+/** Tập đích "trung tâm": mọi use case / quyền tham chiếu nó bằng id, tham chiếu id chỉ cần sửa khi đích bị **xoá**. */
+export const HUB_COLLECTIONS: readonly string[] = ["actors", "roles"]
+
+/**
+ * FLF-483: tên của phần tử xuất hiện ở quá nhiều phần tử ("Đơn hàng", "Thanh toán") thì không dùng để tìm chỗ nhắc tới.
+ * Ngưỡng `genericNameMaxDf` (tối thiểu 8 phần tử, hoặc 5% tổng số phần tử).
+ */
+export const isGenericName = (spine: Spine, name: string, elements: readonly SpineElement[] = listElements(spine)): boolean => {
+  const re = wordPattern(name)
+  const limit = genericNameMaxDf(elements.length)
+  let n = 0
+  for (const e of elements) if (re.test(textOf(e.value)) && ++n > limit) return true
+  return false
+}
+
 export const findSpineLocations = (
   spine: Spine,
   targets: readonly string[],
   keywords: readonly string[],
-  vector: readonly VectorCandidate[] = []
+  vector: readonly VectorCandidate[] = [],
+  options: FindOptions = {}
 ): FoundLocation[] => {
   targets = expandSlotTargets(targets)
   const elements = listElements(spine)
@@ -319,8 +365,13 @@ export const findSpineLocations = (
   const targetElements = [...new Set(targets.map(elementPathOf).filter((p): p is string => !!p && exists.has(p)))]
   for (const t of targetElements) hit(t, "spine_link", t)
 
-  // Đích là mã section ⇒ mọi phần tử section đó sở hữu là vị trí (liên kết cấu trúc, không phải nhắc tên)
-  const sectionTargets = [...new Set(targets.filter(isSectionTarget))]
+  // Đích là mã section ⇒ mọi phần tử section đó sở hữu là vị trí (liên kết cấu trúc, không phải nhắc tên).
+  // FLF-483: trừ khi CR đã chỉ rõ chỗ trong mục đó - ô thêm mới của mục ("thêm use case") hoặc đích là một phần tử của mục -
+  // khi ấy mục chỉ là ngữ cảnh, mở cả mục kéo theo hàng chục phần tử cũ không liên quan
+  const intent = options.intent ?? "other"
+  const pinned = (section: string): boolean =>
+    fillPathsOfSection(section).some((p) => targets.includes(p)) || targetElements.some((t) => sectionOfElement(spine, t) === section)
+  const sectionTargets = [...new Set(targets.filter(isSectionTarget))].filter((s) => !pinned(s))
   if (sectionTargets.length) {
     for (const e of elements) {
       const section = sectionOfElement(spine, e.path)
@@ -328,7 +379,9 @@ export const findSpineLocations = (
     }
   }
   const idTargets = targetElements.filter((t) => t !== PROJECT_PATH)
-  for (const r of impactOf(spine, idTargets).referrers) {
+  // FLF-483: actor / vai trò tham chiếu bằng id - thêm use case hay đổi tên không làm tham chiếu sai, chỉ xoá mới phải sửa
+  const referredTargets = idTargets.filter((t) => intent === "remove" || !HUB_COLLECTIONS.includes(ELEMENT.exec(t)?.[1] ?? ""))
+  for (const r of impactOf(spine, referredTargets).referrers) {
     const el = elementPathOf(r.path)
     const about = idTargets.find((t) => t.endsWith(`[id=${r.id}]`))
     if (el) hit(el, "spine_link", about)
@@ -343,8 +396,15 @@ export const findSpineLocations = (
   }
   for (const t of idTargets) {
     const value = elementValue(spine, t) as Row | undefined
-    const names = [ELEMENT.exec(t)?.[2], typeof value?.name === "string" ? value.name : undefined, typeof value?.term === "string" ? value.term : undefined]
+    const code = ELEMENT.exec(t)?.[2]
+    // FLF-483: tên chung ("Đơn hàng" ở hàng chục phần tử) không chỉ ra chỗ cần sửa - chỉ dùng mã tài liệu; xoá / đổi tên
+    // thì mọi chỗ nhắc tên đều phải sửa nên vẫn dùng tên
+    const useName = (name: string): boolean => intent !== "other" || !isGenericName(spine, name, elements)
+    // Đích trung tâm (actor / vai trò) mà CR không xoá: use case / quyền tham chiếu nó có chứa mã trong field - không phải chỗ nhắc tới
+    const hub = intent !== "remove" && HUB_COLLECTIONS.includes(ELEMENT.exec(t)?.[1] ?? "")
+    const names = [hub ? undefined : code, typeof value?.name === "string" ? value.name : undefined, typeof value?.term === "string" ? value.term : undefined]
       .filter((s): s is string => !!s && s.trim().length >= 2)
+      .filter((s) => s === code ? (!isGenericName(spine, s, elements) || intent !== "other" || DOC_ID.test(s)) : useName(s))
       .map(wordPattern)
     for (const e of elements) {
       if (e.path === t || linkedTo(e.path, t)) continue
@@ -354,9 +414,18 @@ export const findSpineLocations = (
 
   // FLF-375: từ khoá xếp hạng bằng BM25 (thay regex có / không) — chỉ giữ phần tử điểm đủ cao so với phần tử khớp nhất,
   // bớt chỗ "không liên quan" AI phải đọc; có vector thì KHÔNG bỏ từ khoá nữa mà trộn hai nguồn bằng RRF
-  const keywordRanked = rankByKeywords(elements, keywords)
+  // FLF-483: từ khoá là giá trị cụ thể ("5 triệu") đã đi đường riêng bên dưới - khỏi đếm hai lần và khỏi chiếm chỗ trong trần
+  const literals = options.literals ?? []
+  const plainKeywords = literals.length ? keywords.filter((k) => literalValues(k).length === 0) : keywords
+  const keywordRanked = rankByKeywords(elements, plainKeywords)
   const keywordScores = new Map(keywordRanked.map((r) => [r.path, r.score]))
   for (const r of keywordRanked) hit(r.path, "keyword")
+  // FLF-483 (ChoViet #4): mọi phần tử ghi giá trị cụ thể của CR, không tính vào `KEYWORD_MAX_HITS`, điểm cao nhất
+  const literalPaths = literalHits(elements, literals)
+  for (const path of literalPaths) {
+    hit(path, "keyword")
+    keywordScores.set(path, 1)
+  }
   const scores = new Map<string, number>()
   for (const v of vector) {
     if (!exists.has(v.ref)) continue
@@ -368,6 +437,7 @@ export const findSpineLocations = (
     [...scores.entries()].sort((a, b) => b[1] - a[1]).map(([path]) => path)
   ])
 
+  for (const path of literalPaths) fused.set(path, 1) // RRF chỉ cỡ 0.03 ⇒ 1 luôn đứng đầu khi phải cắt bớt
   const found: FoundLocation[] = elements
     .filter((e) => hits.has(e.path))
     .map((e) => {
@@ -388,7 +458,7 @@ export const findSpineLocations = (
   // Mục có dữ liệu ở field của phần tử mục khác ⇒ phần tử đó là vị trí, gắn với mục được nhắm (step sở hữu = step
   // của mục đó, vd S-4.2 cho Screens Flow)
   const seen = new Set(found.map((f) => f.path))
-  for (const section of new Set(targets.filter((t) => t in SECTION_FIELD_ARRAYS))) {
+  for (const section of new Set(targets.filter((t) => t in SECTION_FIELD_ARRAYS && !pinned(t)))) {
     const arr = SECTION_FIELD_ARRAYS[section]!
     for (const el of arrayOf(spine, arr)) {
       const path = `${arr}[id=${String(el.id)}]`
@@ -413,6 +483,8 @@ export const findSpineLocations = (
     // Mục "field" trống vì field của phần tử có sẵn còn trống ⇒ sửa phần tử đó, không mời thêm phần tử mới
     if (empty.has(section) && fieldArray && arrayOf(spine, fieldArray).length) continue
     for (const path of fillPathsOfSection(section)) addSlot(path, section)
+    // FLF-469 (B.2): mục tính năng / chức năng (3.x.y) cũng có ô thêm chức năng / màn, gắn đúng mục tính năng chứa nó
+    for (const slot of featureSlots(spine, section)) addSlot(slot.path, slot.section)
   }
   // C-2 trả thẳng đích thêm mới (`entities[]`) khi thay đổi cần phần tử chưa có
   for (const t of targets) {
@@ -432,6 +504,22 @@ export const findSpineLocations = (
   const extra = diagrams.filter((d) => !found.some((f) => f.path === d.path))
   // C-3 liệt kê đủ mọi vị trí chạm tới, không cắt trần (BF §3.2); chi phí C-4 báo trước ở `proposeEstimate`
   return [...found, ...slots, ...extra]
+}
+
+/**
+ * FLF-469 (B.2): ô "thêm mới" của mục tính năng (`feature:<id>`) hoặc chức năng (`function:<id>`): `functions[]` (và
+ * `screens[]` với mục tính năng) gắn đúng mục tính năng chứa chúng - không đẩy về mục 3.1.4 (chức năng không màn hình).
+ */
+export const featureSlots = (spine: Spine, section: string): { path: string; section: string }[] => {
+  if (section.startsWith("feature:")) {
+    const id = section.slice("feature:".length)
+    return arrayOf(spine, "features").some((f) => String(f.id) === id) ? [{ path: "functions[]", section }, { path: "screens[]", section }] : []
+  }
+  if (section.startsWith("function:")) {
+    const fn = arrayOf(spine, "functions").find((f) => `function:${String(f.id)}` === section)
+    return fn && typeof fn.feature_id === "string" ? [{ path: "functions[]", section: `feature:${fn.feature_id}` }] : []
+  }
+  return []
 }
 
 /** Mảng Spine mà path thuộc về: `use_cases[id=UC-01]` / `use_cases[]` ⇒ `use_cases`; `project` ⇒ `project`. */
@@ -468,16 +556,55 @@ export const originalDiagramLocations = (spine: Spine, targets: readonly string[
  * FLF-375: vị trí của lô thêm / xoá use case đã duyệt trong chat (FLF-318) cũng phải kèm sơ đồ gốc mà lô làm lệch —
  * trước đây nhánh này bỏ qua ⇒ thêm use case xong, sơ đồ use case / luồng màn của file vẫn là hình cũ.
  */
-export const withOriginalDiagrams = (spine: Spine, targets: readonly string[], found: FoundLocation[]): FoundLocation[] => {
+export const withOriginalDiagrams = (spine: Spine, targets: readonly string[], found: FoundLocation[]): FoundLocation[] =>
+  mergeFoundLocations(found, originalDiagramLocations(spine, targets, found))
+
+/**
+ * Gộp vị trí mới vào danh sách đã có: cùng `path` thì hợp `found_by` / `entity_paths` (một phần tử có thể được tìm thấy
+ * bằng nhiều cách — vd sơ đồ gốc + câu đếm), khác `path` thì thêm mới. Dùng cho sơ đồ gốc (§4.13) và câu đếm (FLF-473).
+ */
+export const mergeFoundLocations = (found: readonly FoundLocation[], extra: readonly FoundLocation[]): FoundLocation[] => {
   const out = found.map((f) => ({ ...f }))
-  for (const d of originalDiagramLocations(spine, targets, found)) {
-    const same = out.find((f) => f.path === d.path)
+  for (const e of extra) {
+    const same = out.find((f) => f.path === e.path)
     if (same) {
-      same.found_by = [...new Set([...same.found_by, ...d.found_by])]
-      same.entity_paths = [...new Set([...same.entity_paths, ...d.entity_paths])]
-    } else out.push(d)
+      same.found_by = [...new Set([...same.found_by, ...e.found_by])]
+      same.entity_paths = [...new Set([...same.entity_paths, ...e.entity_paths])]
+    } else out.push({ ...e })
   }
   return out
+}
+
+/**
+ * FLF-473 (EduCampus B14): câu đếm trong văn xuôi ("Hệ thống có 10 use case") mà CR thực sự làm đổi số phần tử của
+ * đúng loại đó. `after`: Spine sau khi áp thử ops của CR (lô use case đã duyệt, hoặc ops xem trước đính kèm CR) — chưa
+ * tính được (op lỗi, hoặc CR không mang ops nào) ⇒ `null`, bỏ qua (không bắt nhầm câu đếm khi chưa chắc số đổi thế nào).
+ * Chỉ thêm vị trí cho loại phần tử CR thực sự đổi số — câu đếm actor không phải vị trí của CR chỉ thêm use case.
+ * Lưu ý: với `found_by: "count"`, `entity_paths` giữ tên **collection** (`"use_cases"`…), không phải path phần tử như
+ * các nguồn khác — C-4/C-5 (`propose.service.ts`, `verify.service.ts`) đọc đúng field này để biết đếm loại nào.
+ */
+export const countMentionLocations = (spine: Spine, after: Spine | null): FoundLocation[] => {
+  if (!after) return []
+  const changed = new Set<CountCollection>(COUNT_COLLECTIONS.filter((c) => arrayOf(spine, c).length !== arrayOf(after, c).length))
+  if (!changed.size) return []
+  const byPath = new Map<string, FoundLocation>()
+  for (const m of findCountMentions(spine)) {
+    if (!changed.has(m.collection)) continue
+    const section_id = sectionOfElement(spine, m.path)
+    const cur = byPath.get(m.path)
+    if (cur) {
+      cur.entity_paths = [...new Set([...cur.entity_paths, m.collection])]
+      continue
+    }
+    byPath.set(m.path, {
+      path: m.path,
+      section_id,
+      found_by: ["count"],
+      entity_paths: [m.collection],
+      owner_step: section_id === "misc" || section_id.startsWith("custom:") ? null : ownerStepOf(section_id, spine)
+    })
+  }
+  return [...byPath.values()]
 }
 
 /** Mục nuôi bằng mảng `array` — ưu tiên mục CR đang nhắm; mảng không nuôi mục nào ⇒ null. */
@@ -583,6 +710,97 @@ export const withOriginalPassages = (spine: Spine, records: readonly SectionSegm
       same.found_by = [...new Set([...same.found_by, ...p.found_by])]
       same.entity_paths = [...new Set([...same.entity_paths, ...p.entity_paths])]
     } else out.push(p)
+  }
+  return out
+}
+
+/**
+ * FLF-480 (P09 #5): CR "bỏ quy tắc BR-03" / "remove UC-09" — nhận dạng tất định câu xoá một phần tử theo mã tài liệu.
+ * Trả mã; không phải lệnh xoá đứng riêng (kèm yêu cầu khác sau "và" / "and") ⇒ `null`, CR đó tìm vị trí như thường.
+ */
+const REMOVE_ELEMENT =
+  /^(?:(?:xo[áà]|bỏ|loại\s+bỏ|gỡ(?:\s+bỏ)?|remove|delete|drop)\s+(?:hẳn\s+)?(?:(?:quy\s+tắc|luật|use\s*case|usecase|chức\s+năng|màn(?:\s+hình)?|yêu\s+cầu|rule|business\s+rule|requirement|function|screen|actor|tác\s+nhân)\s+)?)["“'‘]?([A-Za-z]{1,6}-\d+(?:\.\d+)*)["”'’]?\s*[.!]?\s*$/iu
+
+export const removeElementTarget = (text: string): string | null => {
+  for (const line of text.split(/\n/).map((l) => l.trim()).filter(Boolean)) {
+    const code = REMOVE_ELEMENT.exec(line)?.[1]
+    if (code) return code
+  }
+  return null
+}
+
+/**
+ * Vị trí của CR xoá phần tử theo mã: chính phần tử + phần tử tham chiếu id đó (`business_rule_ids`, `includes`…) + phần tử có
+ * văn xuôi nhắc mã / tên. Không dò BM25 rộng (trước đây 22 phần được dò, chỉ 4 có đề xuất). Không có phần tử mang mã ⇒ [].
+ */
+export const removeElementLocations = (spine: Spine, code: string): FoundLocation[] => {
+  const elements = listElements(spine)
+  const target = elements.find((e) => ELEMENT.exec(e.path)?.[2]?.toLowerCase() === code.toLowerCase())
+  if (!target) return []
+  const value = target.value as Row | undefined
+  const names = [code, typeof value?.name === "string" ? value.name : undefined]
+    .filter((x): x is string => !!x && x.trim().length >= 2)
+    .map(wordPattern)
+  const referrers = new Set(impactOf(spine, [target.path]).referrers.map((r) => elementPathOf(r.path)).filter((x): x is string => !!x))
+  return elements
+    .filter((e) => e.path === target.path || referrers.has(e.path) || names.some((re) => re.test(textOf(e.value))))
+    .map((e) => {
+      const section_id = sectionOfElement(spine, e.path)
+      return {
+        path: e.path,
+        section_id,
+        found_by: [e.path === target.path || referrers.has(e.path) ? ("spine_link" as const) : ("mention" as const)],
+        entity_paths: [target.path],
+        owner_step: section_id === "misc" || section_id.startsWith("custom:") ? null : ownerStepOf(section_id, spine)
+      }
+    })
+}
+
+/** FLF-469 (D): tối đa vị trí "nhắc tới" thêm cho phần tử bị lô xoá (không đè trần `MAX_LOCATIONS`). */
+export const MAX_REMOVED_MENTIONS = 20
+
+/**
+ * FLF-469 (D): cách người ta gọi tắt một tên phần tử trong văn xuôi - mã, tên đầy đủ, và tên ngắn (động từ / từ đầu +
+ * từ cuối của tên từ 3 từ trở lên: "Xuất thời khóa biểu ra Excel" ⇒ "Xuất Excel"). Luật rẻ, hụt nhiều hơn nhờ AI.
+ */
+export const mentionNames = (id: string | undefined, name: string | undefined): string[] => {
+  const full = name?.trim() ?? ""
+  const words = full.split(/\s+/).filter(Boolean)
+  const short = words.length >= 3 ? `${words[0]} ${words[words.length - 1]}` : ""
+  return [...new Set([id ?? "", full, short].map((s) => s.trim()).filter((s) => s.length >= 2))]
+}
+
+/**
+ * FLF-469 (D): phần tử bị lô xoá (có trong `spine`, không còn trong `after`) mà văn xuôi / phần tử khác vẫn nhắc tới theo mã,
+ * tên đầy đủ hoặc tên ngắn - kể cả đoạn nguyên văn (`custom_sections`). Bỏ qua: chính các phần tử bị xoá, phần tử đã là vị
+ * trí (`exclude`) và phần tử tham chiếu tới nó bằng field (op xoá tự gỡ tham chiếu). Mỗi chỗ khớp là vị trí `mention`.
+ */
+export const removedMentionLocations = (spine: Spine, after: Spine, exclude: ReadonlySet<string>, limit = MAX_REMOVED_MENTIONS): FoundLocation[] => {
+  const elements = listElements(spine)
+  const removed = elements.filter((e) => e.path !== PROJECT_PATH && elementValue(after, e.path) === undefined)
+  if (!removed.length) return []
+  const gone = new Set(removed.map((r) => r.path))
+  const referrers = new Set(impactOf(spine, [...gone]).referrers.flatMap((r) => (elementPathOf(r.path) ? [elementPathOf(r.path)!] : [])))
+  const patterns = removed.map((r) => {
+    const v = r.value as Row
+    const name = typeof v?.name === "string" ? v.name : typeof v?.term === "string" ? v.term : undefined
+    return { path: r.path, res: mentionNames(ELEMENT.exec(r.path)?.[2], name).map(wordPattern) }
+  })
+  const out: FoundLocation[] = []
+  for (const e of elements) {
+    if (out.length >= limit) break
+    if (gone.has(e.path) || exclude.has(e.path) || referrers.has(e.path)) continue
+    const text = textOf(e.value)
+    const hit = patterns.filter((p) => p.res.some((re) => re.test(text)))
+    if (!hit.length) continue
+    const section_id = sectionOfElement(spine, e.path)
+    out.push({
+      path: e.path,
+      section_id,
+      found_by: ["mention"],
+      entity_paths: hit.map((h) => h.path),
+      owner_step: section_id === "misc" || section_id.startsWith("custom:") ? null : ownerStepOf(section_id, spine)
+    })
   }
   return out
 }

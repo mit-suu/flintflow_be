@@ -400,6 +400,85 @@ describe("writeTemplateDocx", () => {
     })
   })
 
+  describe("FLF-468 lát A: mục của phần tử đã xoá (importedSectionIds)", () => {
+    const toc = `<w:p><w:bookmarkStart w:id="700" w:name="_Toc700"/><w:fldSimple w:instr=" TOC \\o &quot;1-3&quot; \\h "><w:r><w:t>Requirements\t1</w:t></w:r></w:fldSimple><w:bookmarkEnd w:id="700"/></w:p>`
+    const withToc = async () => {
+      const zip = await JSZip.loadAsync(await template())
+      zip.file("word/document.xml", (await zip.file("word/document.xml")!.async("string")).replace(heading("Requirements"), `${toc}${heading("Requirements").replace("<w:p>", `<w:p><w:bookmarkStart w:id="701" w:name="_Toc701"/>`).replace("</w:p>", "<w:bookmarkEnd w:id=\"701\"/></w:p>")}`))
+      return zip.generateAsync({ type: "nodebuffer" })
+    }
+
+    it("mục chức năng (function:) đã xoá ⇒ bỏ cả heading lẫn thân, gỡ bookmark TOC của heading, giữ mục khác", async () => {
+      const input = await withToc(), parsed = await parseDocument(input), doc = document()
+      const headingBlock = parsed.blocks.find((b) => b.kind === "heading" && b.text === "Requirements")!
+      const map = [{ block_id: headingBlock.block_id, section_id: "function:FN1" }]
+      // Spine hiện tại không còn section function:FN1 ⇒ doc.sections rỗng; importedSectionIds báo nó có lúc import
+      const output = await writeTemplateDocx(doc, input, map, [], { keepSource: new Set(), importedSectionIds: new Set(["function:FN1"]) })
+      const result = await parseDocument(output)
+      const xml = await (await JSZip.loadAsync(output)).file("word/document.xml")!.async("string")
+      // Heading "Requirements" và chính thân của nó (table + đoạn ngay sau nó) biến mất — chỉ còn 3 đoạn "Replace this
+      // guidance." của các mục khác (Repeated × 2, Unmapped) không bị đụng tới
+      expect(result.blocks.some((b) => b.text === "Requirements")).toBe(false)
+      expect(result.blocks.filter((b) => b.text === "Replace this guidance.")).toHaveLength(3)
+      expect(result.blocks.some((b) => b.kind === "table")).toBe(false)
+      expect(xml).not.toContain("_Toc701")
+      // Mục anh em khác (Unmapped) vẫn còn
+      expect(result.blocks.some((b) => b.text === "Unmapped")).toBe(true)
+    })
+
+    it("mục cố định của mẫu đã mất dữ liệu từ lúc import ⇒ giữ heading, thân về trống (bảng chỉ còn hàng tiêu đề)", async () => {
+      const input = await template(), parsed = await parseDocument(input), doc = document()
+      const map = [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:1" }]
+      const output = await writeTemplateDocx(doc, input, map, [], { keepSource: new Set(), importedSectionIds: new Set(["fixed:1"]) })
+      const result = await parseDocument(output)
+      expect(result.blocks.some((b) => b.text === "Requirements")).toBe(true)
+      // Chỉ đoạn thân của "Requirements" bị bỏ; 3 đoạn "Replace this guidance." của mục khác vẫn còn
+      expect(result.blocks.filter((b) => b.text === "Replace this guidance.")).toHaveLength(3)
+      expect(result.blocks.find((b) => b.kind === "table")!.rows).toEqual([["A", "B"]])
+    })
+
+    it("mục chưa từng có lúc import (không trong importedSectionIds) ⇒ giữ nguyên như trước (đường cũ)", async () => {
+      const input = await template(), parsed = await parseDocument(input), doc = document()
+      const map = [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "function:FN1" }]
+      const output = await writeTemplateDocx(doc, input, map, [], { keepSource: new Set(), importedSectionIds: new Set() })
+      const result = await parseDocument(output)
+      expect(result.blocks.some((b) => b.text === "Requirements")).toBe(true)
+      expect(result.blocks.some((b) => b.text === "Replace this guidance.")).toBe(true)
+    })
+  })
+
+  describe("FLF-468 lát D: mục mẫu cố định không có bảng nguồn (\"Cần chốt\" #1)", () => {
+    it("bảng 2 cột (mã + nội dung) ⇒ danh sách \"mã – nội dung\", không phải đoạn 'Nhãn: giá trị'", async () => {
+      const input = await template(), parsed = await parseDocument(input), doc = document()
+      const repeated = parsed.blocks.filter((b) => b.kind === "heading" && b.text === "Repeated")[0]
+      const map = [{ block_id: repeated.block_id, section_id: "slot:business_rules" }]
+      doc.sections = [{
+        id: "slot:business_rules", heading: "Repeated", number: "5.1", level: 2,
+        blocks: [{ type: "table", header: [runs("ID"), runs("Rule")], rows: [[runs("BR-01"), runs("Only University accounts.")]] }]
+      }]
+      const output = await parseDocument(await writeTemplateDocx(doc, input, map))
+      expect(output.blocks.some((b) => (b.text ?? "").includes("BR-01 – Only University accounts."))).toBe(true)
+      // Bảng nguồn của mục khác ("Requirements") vẫn còn — chỉ mục đã vá (Repeated) không sinh bảng mới
+      expect(output.blocks.filter((b) => b.kind === "table")).toHaveLength(1)
+      expect(output.blocks.some((b) => (b.text ?? "").includes("ID:") || (b.text ?? "").includes("Rule:"))).toBe(false)
+    })
+
+    it("bảng từ 3 cột (thông báo) ⇒ in bảng thật tại chỗ, không trải thành đoạn", async () => {
+      const input = await template(), parsed = await parseDocument(input), doc = document()
+      const repeated = parsed.blocks.filter((b) => b.kind === "heading" && b.text === "Repeated")[0]
+      const map = [{ block_id: repeated.block_id, section_id: "slot:messages" }]
+      doc.sections = [{
+        id: "slot:messages", heading: "Repeated", number: "5.3", level: 2,
+        blocks: [{ type: "table", header: [runs("Code"), runs("Type"), runs("Context"), runs("Content")], rows: [[runs("PAY-010"), runs(""), runs(""), runs("Not enough balance.")]] }]
+      }]
+      const output = await parseDocument(await writeTemplateDocx(doc, input, map))
+      const table = output.blocks.find((b) => b.kind === "table" && b.rows?.some((r) => r[0] === "PAY-010"))
+      expect(table).toBeDefined()
+      expect(table!.rows).toEqual([["Code", "Type", "Context", "Content"], ["PAY-010", "", "", "Not enough balance."]])
+      expect(output.blocks.some((b) => (b.text ?? "").includes("Code:"))).toBe(false)
+    })
+  })
+
   describe("FLF-416 chế độ 4: sắp lại bố cục file khách (rearrange)", () => {
     it("mục FPT soạn thêm ⇒ heading mới theo style heading cùng cấp, đúng vị trí bản in; mục Ngoài phạm vi (kèm mục con) xuống cuối", async () => {
       const input = await template(), parsed = await parseDocument(input), doc = document()
@@ -445,6 +524,68 @@ describe("writeTemplateDocx", () => {
       expect(blocks.some((b) => b.kind === "heading" && b.text === "Child")).toBe(false)
       expect(blocks.some((b) => b.text === "Child text")).toBe(true)
     })
+  })
+})
+
+describe("FLF-468 (E2E-1): mục lặp mới ở chế độ giữ file gốc thành heading chèn mới", () => {
+  /** File: "3. Functional" (H1) › "3.5 Billing" (H2) › "3.5.1 Pay" (H3), rồi "4. Non-Functional" (H1). Heading gõ số tay. */
+  async function srsFile() {
+    const zip = await JSZip.loadAsync(await template())
+    zip.file("word/styles.xml", styles.replace("</w:styles>", '<w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/></w:style></w:styles>'))
+    const text = (t: string, level: number) => heading(t, level)
+    zip.file("word/document.xml", `<w:document xmlns:w="${NS.w}" xmlns:r="${NS.r}"><w:body><w:p><w:fldSimple w:instr="TOC \o &quot;1-3&quot;"><w:r><w:t>Contents</w:t></w:r></w:fldSimple></w:p>${text("3. Functional", 1)}${body.replace("Replace this guidance.", "Intro 3")}${text("3.5 Billing", 2)}${body.replace("Replace this guidance.", "Body 3.5")}${text("3.5.1 Pay", 3)}${body.replace("Replace this guidance.", "Body 3.5.1")}${text("4. Non-Functional", 1)}${body.replace("Replace this guidance.", "Body 4")}${text("5.5 Glossary", 2)}<w:sectPr><w:pgMar w:top="1134" w:left="1134"/></w:sectPr></w:body></w:document>`)
+    const input = await zip.generateAsync({ type: "nodebuffer" }), parsed = await parseDocument(input)
+    const heads = parsed.blocks.filter((b) => b.kind === "heading")
+    const map = ["group:3", "feature:F-3.5", "function:FR-3.5.1", "group:4", "fixed:V.5"].map((section_id, i) => ({ block_id: heads[i].block_id, section_id }))
+    return { input, map }
+  }
+  const sec = (id: string, headingText: string, number: string, level: number, text = ""): RenderedDocument["sections"][number] =>
+    ({ id, heading: headingText, number, level, blocks: text ? [{ type: "paragraph", runs: runs(text) }] : [] })
+  const keep = new Set(["group:3", "feature:F-3.5", "function:FR-3.5.1", "group:4", "fixed:V.5"])
+  const headingTexts = (blocks: Awaited<ReturnType<typeof parseDocument>>["blocks"]) => blocks.filter((b) => b.kind === "heading").map((b) => b.text)
+
+  it("tính năng + chức năng mới không có slot ⇒ 3.6 / 3.6.1 là heading trước heading '4.', vùng của '3.' không đổi", async () => {
+    const { input, map } = await srsFile(), doc = document()
+    doc.sections = [
+      sec("group:3", "Functional", "3", 1, "Intro 3"), sec("feature:F-3.5", "Billing", "3.5", 2, "Body 3.5"), sec("function:FR-3.5.1", "Pay", "3.5.1", 3, "Body 3.5.1"),
+      sec("feature:F-01", "Authentication", "3.6", 2), sec("function:FR-05", "Reset Password", "3.6.1", 3, "Reset body"),
+      sec("group:4", "Non-Functional", "4", 1, "Body 4"), sec("fixed:V.5", "Glossary", "5.5", 2)
+    ]
+    const out = await writeTemplateDocx(doc, input, map, [], { keepSource: keep })
+    const blocks = (await parseDocument(out)).blocks
+    expect(headingTexts(blocks)).toEqual(["3. Functional", "3.5 Billing", "3.5.1 Pay", "3.6 Authentication", "3.6.1 Reset Password", "4. Non-Functional", "5.5 Glossary"])
+    const feature = blocks.find((b) => b.text === "3.6 Authentication")!, fn = blocks.find((b) => b.text === "3.6.1 Reset Password")!
+    expect(wAttr(wKid(wKid(feature.element, "pPr")!, "pStyle"), "val")).toBe("Heading2")
+    expect(wAttr(wKid(wKid(fn.element, "pPr")!, "pStyle"), "val")).toBe("Heading3")
+    // Thân chức năng mới đứng ngay sau heading của nó; không có chữ mới giữa "3." và "3.5"
+    const at = (t: string) => blocks.findIndex((b) => b.text === t)
+    expect(at("Reset body")).toBe(at("3.6.1 Reset Password") + 1)
+    expect(blocks.slice(at("3. Functional"), at("3.5 Billing")).map((b) => b.text)).toEqual(["3. Functional", "Intro 3"])
+    expect(blocks.find((b) => b.text === "Body 3.5")).toBeTruthy()
+    // Mục lục tính lại khi mở file
+    expect(await (await JSZip.loadAsync(out)).file("word/document.xml")!.async("string")).toContain('w:dirty="true"')
+  })
+
+  it("chức năng mới của tính năng đã có ⇒ heading 3.5.2 sau 3.5.1, thân 3.5 không đổi", async () => {
+    const { input, map } = await srsFile(), doc = document()
+    doc.sections = [
+      sec("group:3", "Functional", "3", 1, "Intro 3"), sec("feature:F-3.5", "Billing", "3.5", 2, "Body 3.5"), sec("function:FR-3.5.1", "Pay", "3.5.1", 3, "Body 3.5.1"),
+      sec("function:FR-06", "Refund", "3.5.2", 3, "Refund body"), sec("group:4", "Non-Functional", "4", 1, "Body 4")
+    ]
+    const blocks = (await parseDocument(await writeTemplateDocx(doc, input, map, [], { keepSource: new Set(["group:3", "feature:F-3.5", "function:FR-3.5.1", "group:4"]) }))).blocks
+    expect(headingTexts(blocks)).toEqual(["3. Functional", "3.5 Billing", "3.5.1 Pay", "3.5.2 Refund", "4. Non-Functional", "5.5 Glossary"])
+    const at = (t: string) => blocks.findIndex((b) => b.text === t)
+    expect(at("Body 3.5")).toBeLessThan(at("3.5.1 Pay"))
+    expect(at("Body 3.5.1")).toBeLessThan(at("3.5.2 Refund"))
+    expect(at("Refund body")).toBe(at("3.5.2 Refund") + 1)
+  })
+
+  it("không có mục mới ⇒ file không đổi và không yêu cầu cập nhật mục lục", async () => {
+    const { input, map } = await srsFile(), doc = document()
+    doc.sections = [sec("group:3", "Functional", "3", 1, "Intro 3"), sec("feature:F-3.5", "Billing", "3.5", 2, "Body 3.5"), sec("function:FR-3.5.1", "Pay", "3.5.1", 3, "Body 3.5.1"), sec("group:4", "Non-Functional", "4", 1, "Body 4")]
+    const out = await writeTemplateDocx(doc, input, map, [], { keepSource: keep })
+    expect(headingTexts((await parseDocument(out)).blocks)).toEqual(["3. Functional", "3.5 Billing", "3.5.1 Pay", "4. Non-Functional", "5.5 Glossary"])
+    expect(await (await JSZip.loadAsync(out)).file("word/document.xml")!.async("string")).not.toContain('w:dirty="true"')
   })
 })
 

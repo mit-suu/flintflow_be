@@ -44,3 +44,27 @@ describe("systemRenameLocations + sơ đồ gốc", () => {
     expect(found.map((f) => f.path)).toEqual(expect.arrayContaining(["project", "custom_sections[id=CS01]"]))
   })
 })
+
+describe("FLF-480 (P09 #5): CR xoá phần tử theo mã", () => {
+  it("removeElementTarget nhận câu xoá đứng riêng, trả mã", async () => {
+    const { removeElementTarget } = await import("./spine-location.js")
+    expect(removeElementTarget("Bỏ quy tắc BR-03")).toBe("BR-03")
+    expect(removeElementTarget("Xoá use case UC-09.")).toBe("UC-09")
+    expect(removeElementTarget("Remove BR-03")).toBe("BR-03")
+    expect(removeElementTarget("Bỏ quy tắc BR-03 và thêm quy tắc mới")).toBeNull()
+    expect(removeElementTarget("Thêm quy tắc BR-03")).toBeNull()
+  })
+  it("removeElementLocations: phần tử + nơi tham chiếu / nhắc mã, không kéo phần tử không liên quan", async () => {
+    const { removeElementLocations } = await import("./spine-location.js")
+    const s = spine()
+    s.business_rules.push({ id: "BR-03", statement: "Giá không âm", description: "" } as never)
+    s.business_rules.push({ id: "BR-04", statement: "Giỏ hàng tối đa 50 món", description: "" } as never)
+    s.functions.push({ id: "FR-01", name: "Thêm giỏ", description: "Theo BR-03", normal: [], abnormal: [], validations: [], business_rule_ids: ["BR-03"], priority: null } as never)
+    const paths = removeElementLocations(s, "BR-03").map((f) => f.path)
+    expect(paths).toContain("business_rules[id=BR-03]")
+    expect(paths).toContain("functions[id=FR-01]")
+    expect(paths).not.toContain("business_rules[id=BR-04]")
+    expect(paths).not.toContain("nfrs[id=NFR-01]")
+    expect(removeElementLocations(s, "BR-99")).toEqual([])
+  })
+})

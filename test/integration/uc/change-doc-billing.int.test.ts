@@ -58,7 +58,7 @@ const joinOrg = async (orgId: string, role: OrgRole) => {
 /** Client mode 1 của một thành viên khác trên cùng project (cùng org với fixture). */
 const apiAs = (seeded: SeededFixture, token: string, projectId: string) => mode1Api({ ...seeded, token }, projectId)
 
-/** Sơ đồ render lỗi ⇒ cờ đỏ `render_error` do code dựng (BR-04, không waive được). */
+/** Sơ đồ render lỗi ⇒ cờ đỏ `render_error` do code dựng (BR-04, không waive được). FLF-493: import đã vẽ sẵn D01… ⇒ dùng id D99. */
 const addRedFlag = async (projectId: string) => {
   const spine = (await spineRepository.get(projectId))!
   await applyTransaction(projectId, {
@@ -68,7 +68,7 @@ const addRedFlag = async (projectId: string) => {
       {
         op: "add",
         path: "diagrams[]",
-        value: { id: "D01", kind: "erd", format: "puml", source: "@startuml\n@enduml", section: "fixed:3.1.5", owner_kind: null, owner_id: null, render_status: "error", error: "boom", source_hash: "x", rendered_at: null }
+        value: { id: "D99", kind: "erd", format: "puml", source: "@startuml\n@enduml", section: "fixed:3.1.5", owner_kind: null, owner_id: null, render_status: "error", error: "boom", source_hash: "x", rendered_at: null }
       }
     ]
   })
