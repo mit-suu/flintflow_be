@@ -113,8 +113,35 @@ const kindOf = (change: ChangeLike): ChangeSummary["kind"] => {
   return "update"
 }
 
+/**
+ * FLF-479: giá trị enum model ghi (`mobile_and_web_application`, `web_app`) không in thô vào nhật ký. Cụm đã biết ⇒ tiếng
+ * Việt; chuỗi snake_case lạ ⇒ bỏ gạch dưới. Chữ thường (câu tự do) giữ nguyên.
+ */
+const ENUM_VALUE_VI: Readonly<Record<string, string>> = Object.freeze({
+  web_app: "Ứng dụng web",
+  web_application: "Ứng dụng web",
+  mobile_app: "Ứng dụng di động",
+  mobile_application: "Ứng dụng di động",
+  desktop_app: "Ứng dụng máy tính",
+  desktop_application: "Ứng dụng máy tính",
+  mobile_and_web_application: "Ứng dụng di động và web",
+  web_and_mobile_application: "Ứng dụng di động và web",
+  web_and_mobile_app: "Ứng dụng di động và web",
+  mobile_and_web_app: "Ứng dụng di động và web",
+  api_service: "Dịch vụ API",
+  cli: "Công cụ dòng lệnh",
+  embedded: "Hệ thống nhúng"
+})
+const humanEnumValue = (value: string): string => {
+  if (!/^[a-z0-9]+(?:_[a-z0-9]+)+$|^cli$|^embedded$/.test(value)) return value
+  return ENUM_VALUE_VI[value] ?? value.replace(/_/g, " ")
+}
+
 const shortValue = (value: unknown): string => {
-  if (typeof value === "string") return value.length > 60 ? `${value.slice(0, 57)}…` : value
+  if (typeof value === "string") {
+    const text = humanEnumValue(value)
+    return text.length > 60 ? `${text.slice(0, 57)}…` : text
+  }
   if (Array.isArray(value)) return `${value.length} mục`
   if (value === null) return "trống"
   if (isRecord(value)) return titleOf(value, "…")
