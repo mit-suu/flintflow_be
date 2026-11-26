@@ -82,7 +82,14 @@ describe("shapeQuestions", () => {
 
   it("câu mở không mang options/multiple; header cắt ≤ 12 ký tự", () => {
     const [open] = shapeQuestions([q("Mô tả quy trình đặt lịch?", { multiple: true, header: "  Quy trình đặt lịch  " })]).questions
-    expect(open).toMatchObject({ text: "Mô tả quy trình đặt lịch?", header: "Quy trình đặ" })
+    expect(open).toMatchObject({ text: "Mô tả quy trình đặt lịch?", header: "Quy trình…" })
+    const h = (header: string) => shapeQuestions([q("Hỏi?", { header })]).questions[0]?.header
+    expect(h("Dịch vụ ngoài")).toBe("Dịch vụ…")
+    expect(h("Quy tắc quan trọng")).toBe("Quy tắc…")
+    expect(h("Uptime")).toBe("Uptime")
+    expect(h("Khôngcókhoảngtrắng")).toBe("Khôngcókhoả…")
+    expect(Array.from(h("Hoả̉ng lâu dài hơn nhiều")!).length).toBeLessThanOrEqual(12)
+    expect(h("   ")).toBeUndefined()
     expect(open.options).toBeUndefined()
     expect(open).not.toHaveProperty("multiple")
     const [card] = shapeQuestions([q("Uptime?", { options: opts("99.9% (Khuyến nghị)", "99%"), multiple: false, header: "Uptime" })]).questions
