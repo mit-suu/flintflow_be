@@ -19,6 +19,7 @@ import {
   continueFlow2RequestSchema,
   gapReportQuerySchema,
   importResumeRequestSchema,
+  reviewSectionRequestSchema,
   mappingPatchRequestSchema,
   stepPlanPatchRequestSchema,
   uploadImportBodySchema
@@ -224,6 +225,26 @@ export const reviewRun = mode1Handler(async (req, res) => {
   const result = await reviewService.runReview(doc, auth.userId, profile?.review_sections ?? [])
   if ("paused" in result) return sendSuccess(res, 200, { import: importService.toImportDto(doc) })
   return sendSuccess(res, 200, result)
+})
+
+/**
+ * FLF-453 nút "Rà soát bằng AI" của một mục chỉ được Code kiểm (business-flow §3.1.2), ở `reviewing`. Không có `confirm: true`
+ * ⇒ chỉ báo credit riêng của mục (không gọi AI, không trừ). Có `confirm` ⇒ chạy qua `runReview` cùng đường lô; vẫn `reviewing`
+ * (không sang Luồng 2). Hết credit / lỗi ⇒ `{ import }` đang `paused`.
+ */
+export const reviewSection = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(reviewSectionRequestSchema, req.body)
+  const doc = await importService.requireImport(auth.projectId, body.import_id)
+  assertImportStatus(doc, ["reviewing"], "reviewing")
+  const profile = await TemplateProfile.findOne({ projectId: auth.projectId })
+  const options = await reviewService.optionalReviewSections(auth.projectId, profile?.target_structure, profile?.review_sections ?? [])
+  const option = options.find((o) => o.section_id === body.section_id)
+  if (!option) throw new Mode1Error("IMPORT_INVALID_STATE", "Mục này không có chữ để AI rà riêng hoặc đã được rà.", { section_id: body.section_id })
+  if (!body.confirm) return sendSuccess(res, 200, { section_id: option.section_id, calls: option.calls, credits: option.credits, reviewed: false })
+  const result = await reviewService.runSectionReview(doc, auth.userId, option.section_id)
+  if ("paused" in result) return sendSuccess(res, 200, { import: importService.toImportDto(doc), section_id: option.section_id, reviewed: false })
+  return sendSuccess(res, 200, { import: importService.toImportDto(doc), section_id: option.section_id, reviewed: true })
 })
 
 /** Bấm Dừng khi vòng rà soát đang chạy (business-flow §2 "Dừng giữa chừng") — giữ tiến độ, lượt chưa trừ credit không chạy. */

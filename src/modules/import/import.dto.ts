@@ -432,6 +432,9 @@ export type StructurePreviewDto = z.infer<typeof structurePreviewSchema>
 /** `POST /projects/:id/import/resume` (UC-61, UC-75). */
 export const importResumeRequestSchema = z.strictObject({ import_id: id })
 
+/** `POST /projects/:id/import/review/section` (FLF-453): rà riêng một mục chỉ được Code kiểm; `confirm` chưa true ⇒ chỉ báo credit. */
+export const reviewSectionRequestSchema = z.strictObject({ import_id: id, section_id: z.string().min(1).max(200), confirm: z.boolean().optional() })
+
 /** `GET /projects/:id/gap-report?format=json|docx` (UC-23). */
 export const gapReportQuerySchema = z.object({ format: z.enum(["json", "docx"]).default("json") })
 
@@ -490,7 +493,9 @@ export const getImportResponseSchema = z.object({
     .object({
       section_ids: z.array(z.string()),
       calls: z.number().int().min(0),
-      credits: z.number().min(0)
+      credits: z.number().min(0),
+      /** Mục chỉ được Code kiểm có chữ để AI rà, kèm credit riêng (nút "Rà soát bằng AI" từng mục). */
+      optional_sections: z.array(z.object({ section_id: z.string(), title: z.string(), calls: z.number().int().min(1), credits: z.number().min(0) })).optional()
     })
     .nullable()
     .optional()

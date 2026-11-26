@@ -526,6 +526,30 @@ router.post("/:id/import/review/run", authMiddleware, importController.reviewRun
  */
 router.post("/:id/import/review/stop", authMiddleware, importController.reviewStop)
 
+/**
+ * @swagger
+ * /api/v1/projects/{id}/import/review/section:
+ *   post:
+ *     summary: FLF-453 - nút "Rà soát bằng AI" cho một mục chỉ được Code kiểm (business-flow §3.1.2); báo credit riêng của mục trước, xác nhận mới chạy
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [import_id, section_id], properties: { import_id: { type: string }, section_id: { type: string }, confirm: { type: boolean, description: "Không có / false ⇒ chỉ báo credit, không gọi AI, không trừ" } } }
+ *     responses:
+ *       200: { description: "Chưa `confirm` ⇒ `{ section_id, calls, credits, reviewed: false }`; xong ⇒ `{ import, section_id, reviewed: true }` (vẫn `reviewing`, phát hiện là cờ vàng `import_review`); hết credit / lỗi AI ⇒ `{ import (paused), section_id, reviewed: false }`" }
+ *       409: { description: "IMPORT_INVALID_STATE (không ở reviewing, mục đã nằm trong vòng cụm, không có chữ để rà, hoặc đã rà)" }
+ */
+router.post("/:id/import/review/section", authMiddleware, importController.reviewSection)
+
 // FLF-278 trên FLF-335/336 — mẫu / thư viện nội dung của tổ chức, đi qua dự án (contract §FLF-278)
 router.post("/:id/import/from-org", authMiddleware, orgLibrary.importFromOrg)
 // UC-85: đề xuất lưu cấu trúc dự án thành mẫu tổ chức (thẻ của tác giả baseline; Lead lưu bất cứ lúc nào)
