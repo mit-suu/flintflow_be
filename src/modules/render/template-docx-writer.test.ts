@@ -566,6 +566,27 @@ describe("FLF-468 (E2E-1): mục lặp mới ở chế độ giữ file gốc th
     expect(await (await JSZip.loadAsync(out)).file("word/document.xml")!.async("string")).toContain('w:dirty="true"')
   })
 
+  it("file chưa có heading cấp 4: heading mới theo style 'heading 4' của mẫu, có style thì dùng, không thì heading sâu nhất + outlineLvl", async () => {
+    const { input, map } = await srsFile()
+    const doc = document()
+    doc.sections = [
+      sec("group:3", "Functional", "3", 1, "Intro 3"), sec("feature:F-3.5", "Billing", "3.5", 2, "Body 3.5"), sec("function:FR-3.5.1", "Pay", "3.5.1", 3, "Body 3.5.1"),
+      sec("function:FR-07", "Pay detail", "3.5.1.1", 4, "Detail body"), sec("group:4", "Non-Functional", "4", 1, "Body 4"), sec("fixed:V.5", "Glossary", "5.5", 2)
+    ]
+    const keepAll = { keepSource: new Set(["group:3", "feature:F-3.5", "function:FR-3.5.1", "group:4", "fixed:V.5"]) }
+    // Mẫu không có style cấp 4 ⇒ heading cấp 3 + outlineLvl 3 (vẫn vào mục lục), không phải đoạn thường in đậm
+    const plain = (await parseDocument(await writeTemplateDocx(doc, input, map, [], keepAll))).blocks.find((b) => b.text === "3.5.1.1 Pay detail")!
+    expect(plain.kind).toBe("heading")
+    expect(wAttr(wKid(wKid(plain.element, "pPr")!, "outlineLvl"), "val")).toBe("3")
+    // Mẫu có style "heading 4" (chưa dùng trong thân) ⇒ dùng đúng style đó
+    const zip = await JSZip.loadAsync(input)
+    const st = (await zip.file("word/styles.xml")!.async("string")).replace("</w:styles>", '<w:style w:type="paragraph" w:styleId="Heading4"><w:name w:val="heading 4"/></w:style></w:styles>')
+    zip.file("word/styles.xml", st)
+    const withStyle = await zip.generateAsync({ type: "nodebuffer" })
+    const styled = (await parseDocument(await writeTemplateDocx(doc, withStyle, map, [], keepAll))).blocks.find((b) => b.text === "3.5.1.1 Pay detail")!
+    expect(wAttr(wKid(wKid(styled.element, "pPr")!, "pStyle"), "val")).toBe("Heading4")
+  })
+
   it("chức năng mới của tính năng đã có ⇒ heading 3.5.2 sau 3.5.1, thân 3.5 không đổi", async () => {
     const { input, map } = await srsFile(), doc = document()
     doc.sections = [

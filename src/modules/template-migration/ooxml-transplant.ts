@@ -183,8 +183,11 @@ class TargetStyles {
     return undefined
   }
 
-  /** `exact = false` ⇒ mẫu đích không có style cùng vai trò, đã rơi về Normal (`id` = style mặc định hoặc `null`). */
-  paragraph(role: ParaRole): { id: string | null; exact: boolean } {
+  /**
+   * `exact = false` ⇒ mẫu đích không có style cùng vai trò. Heading cấp N mà mẫu không có style cấp đó ⇒ style heading sâu nhất có sẵn
+   * + `outline` (người gọi gắn `outlineLvl` vào đoạn: vẫn là heading, vào mục lục); vai trò khác rơi về Normal.
+   */
+  paragraph(role: ParaRole): { id: string | null; exact: boolean; outline?: number } {
     if (role === "normal") return { id: this.defaultPara?.id ?? null, exact: true }
     let hit: StyleDef | undefined
     if (role === "list") hit = this.named("paragraph", "list paragraph")
@@ -192,6 +195,11 @@ class TargetStyles {
     else if (role === "footnoteText") hit = this.named("paragraph", "footnote text")
     else if (role.startsWith("toc")) hit = this.named("paragraph", `toc ${role.slice(3)}`)
     else hit = this.named("paragraph", `heading ${role.slice(1)}`) ?? this.headingByOutline.get(Number(role.slice(1)) - 1)
+    if (!hit && /^h\d$/.test(role)) {
+      const want = Number(role.slice(1)) - 1
+      const deepest = [...this.headingByOutline.entries()].filter(([o]) => o < want).sort((a, b) => b[0] - a[0])[0]?.[1]
+      if (deepest) return { id: deepest.id, exact: false, outline: want }
+    }
     return hit ? { id: hit.id, exact: true } : { id: this.defaultPara?.id ?? null, exact: false }
   }
 
@@ -548,10 +556,10 @@ class SectionBuilder {
   }
 
   /** Vai trò → style đích; không có style cùng vai trò thì cảnh báo (một lần mỗi vai trò). */
-  private paragraphStyle(role: ParaRole): string | null {
+  private paragraphStyle(role: ParaRole): { id: string | null; outline?: number } {
     const s = this.env.tgtStyles.paragraph(role)
-    if (!s.exact) this.pending.warnings.add(`Mẫu đích không có style cho vai trò "${role}", dùng Normal`)
-    return s.id
+    if (!s.exact) this.pending.warnings.add(s.outline !== undefined ? `Mẫu đích không có style cho vai trò "${role}", dùng heading sâu nhất + cấp đề mục` : `Mẫu đích không có style cho vai trò "${role}", dùng Normal`)
+    return { id: s.id, ...(s.outline !== undefined ? { outline: s.outline } : {}) }
   }
 
   // ── khối cấp body ──
@@ -647,9 +655,13 @@ class SectionBuilder {
     const group = role === "normal" || role === "footnoteText" ? PPR_KEEP_BODY : role === "list" ? PPR_KEEP_LIST : role === "caption" ? PPR_KEEP_CAPTION : new Set<string>()
 
     const fresh = wEl(this.doc, "pPr")
-    const styleId = this.paragraphStyle(role)
+    const { id: styleId, outline } = this.paragraphStyle(role)
     if (styleId) fresh.appendChild(wEl(this.doc, "pStyle", { val: styleId }))
     for (const c of pPr ? wKids(pPr) : []) if (group.has(c.localName)) fresh.appendChild(c.cloneNode(true))
+    if (outline !== undefined) {
+      for (const o of wKids(fresh, "outlineLvl")) removeNode(o)
+      fresh.insertBefore(wEl(this.doc, "outlineLvl", { val: String(outline) }), wKids(fresh).find((k) => ["rPr", "sectPr", "pPrChange"].includes(k.localName)) ?? null)
+    }
     if (role === "list" && num) {
       const newNum = await this.mapNumId(num.numId)
       if (newNum) {
@@ -940,6 +952,34 @@ const AFTER_UPDATE_FIELDS = ["hdrShapeDefaults", "footnotePr", ...AFTER_FOOTNOTE
  * ("<<Feature Name 1>>", "Error! Bookmark not defined."). Đánh dấu field TOC `w:dirty` và bật `w:updateFields` để Word dựng lại khi
  * mở (cùng cách bản xuất thường của `docx-writer`). Không có settings.xml ⇒ chỉ đánh dấu field.
  */
+/**
+ * Mục lục của mẫu giới hạn cấp (`TOC \o "1-3"`) mà tài liệu sau khi đổi mẫu có heading sâu hơn (chức năng ở cấp 4) ⇒ nới tới `maxLevel`
+ * để tên chức năng vào mục lục. Chỉ sửa lệnh nằm trọn trong một `instrText` / `fldSimple`; trả số lệnh đã sửa.
+ */
+export const widenTocLevels = async (pkg: DocxPackage, maxLevel: number): Promise<number> => {
+  const doc = await pkg.xml(MAIN_PART)
+  if (!doc || maxLevel < 1) return 0
+  const top = Math.min(9, maxLevel)
+  const widen = (instr: string): string => instr.replace(/(\\o\s+"?)(\d)-(\d)("?)/, (m, pre: string, from: string, to: string, post: string) => (Number(to) < top && /^\s*TOC\b/.test(instr) ? `${pre}${from}-${top}${post}` : m))
+  let changed = 0
+  for (const t of wAll(doc, "instrText")) {
+    const next = widen(t.textContent ?? "")
+    if (next !== t.textContent) {
+      t.textContent = next
+      changed++
+    }
+  }
+  for (const f of wAll(doc, "fldSimple")) {
+    const instr = wAttr(f, "instr") ?? ""
+    const next = widen(instr)
+    if (next !== instr) {
+      f.setAttributeNS(NS.w, "w:instr", next)
+      changed++
+    }
+  }
+  return changed
+}
+
 export const requestFieldUpdate = async (pkg: DocxPackage): Promise<{ tocFields: number }> => {
   let tocFields = 0
   const doc = await pkg.xml(MAIN_PART)

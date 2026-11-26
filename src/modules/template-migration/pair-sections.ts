@@ -170,6 +170,16 @@ const childKeys = (neu: readonly NewHeading[]): Set<string> => {
   return out
 }
 
+/** Heading có heading ngay sau sâu hơn (heading nhóm có mục con) — chỉ suy được khi biết cấp. */
+export const wrapperKeys = (headings: readonly { key: string; level?: number }[]): Set<string> => {
+  const out = new Set<string>()
+  headings.forEach((h, i) => {
+    const next = headings[i + 1]?.level
+    if (h.level !== undefined && next !== undefined && next > h.level) out.add(h.key)
+  })
+  return out
+}
+
 /** Id dùng để ghép theo id: id khung của heading, hoặc id mục khung suy từ danh mục khi heading đứng ngoài khung (FLF-491). */
 const effectiveId = (h: { heading_text: string; section_id: string }): string => (isFrameworkId(h.section_id) ? h.section_id : (catalogSectionOf(h.heading_text) ?? h.section_id))
 
@@ -184,10 +194,14 @@ export const pairSections = (old: readonly OldHeading[], neu: readonly NewHeadin
   const ignored_new = neu.filter((n) => ignored.has(n.key)).map((n) => n.key)
   const candidates = neu.filter((n) => !ignored.has(n.key))
   const children = childKeys(candidates)
+  // Heading nhóm có mục con của mẫu đích ("1. Giới thiệu") không nhận id mục khung theo danh mục: bí danh "Giới thiệu" của Tổng quan
+  // làm nó giành mục cũ của mục con thật ("2.1 Góc nhìn sản phẩm")
+  const wrappers = wrapperKeys(candidates)
+  const newId = (n: NewHeading): string => (wrappers.has(n.key) && !isFrameworkId(n.section_id) ? n.section_id : effectiveId(n))
 
   const byId = new Map<string, NewHeading[]>()
   for (const n of candidates) {
-    const id = effectiveId(n)
+    const id = newId(n)
     if (isFrameworkId(id) && !children.has(n.key)) byId.set(id, [...(byId.get(id) ?? []), n])
   }
 
@@ -278,7 +292,7 @@ export const pairSections = (old: readonly OldHeading[], neu: readonly NewHeadin
     if (free) continue
     const eo = effectiveId(o)
     const ea = effectiveId(a)
-    const en = effectiveId(neu[at])
+    const en = newId(neu[at])
     const related = (x: string, y: string): boolean => x === y || overlapsOf(x).includes(y) || overlapsOf(y).includes(x)
     if (isFrameworkId(eo) && !related(eo, ea) && !related(eo, en)) continue
     childOf.set(o.key, a.key)

@@ -49,9 +49,14 @@ import {
   settleDecisions,
   tableShapesBySection,
   withSuggestedDecisions,
+  RECORD_OF_CHANGES,
+  type ClassifyInput,
   type MigrationGroups,
   type TableShape
 } from "./classify.js"
+import { sectionDataOf, spineFilled } from "./section-data.js"
+import { recordColumnOfHeader } from "../import/legacy-record.js"
+import { numberingOfHeadings, type HeadingNumbering } from "./numbering.js"
 import { buildOutline, type OutlineEntry } from "./outline.js"
 import { loadStandardTemplate, STANDARD_TEMPLATE_NAME } from "./standard-template.js"
 import { brokenLinks, revertability, type BrokenLink, type RevertBlockReason } from "./precheck.js"
@@ -211,11 +216,11 @@ const oldTablesOf = async (projectId: string, profile: ITemplateProfile | null):
  * Bảng của mẫu đích theo mục: đọc lại file mẫu (cùng file ⇒ cùng `block_id` như lúc phân tích) và gán mục theo mapping đã rà
  * của bản. Không đọc được ⇒ bỏ qua so bảng và báo trong `warnings` (không lặng lẽ).
  */
-const newTablesOf = async (buffer: Buffer, version: Pick<IOrgTemplateVersion, "headings" | "table_map">): Promise<{ tables: Map<string, TableShape[]>; warning: string | null; levels: number[] | null }> => {
+const newTablesOf = async (buffer: Buffer, version: Pick<IOrgTemplateVersion, "headings" | "table_map">): Promise<{ tables: Map<string, TableShape[]>; warning: string | null; levels: number[] | null; preHeadingRecord: boolean; numbering: HeadingNumbering | null }> => {
   try {
     const { blocks } = await parseDocument(buffer)
     const headingBlocks = blocks.filter((b) => b.kind === "heading" && b.level !== null)
-    if (headingBlocks.length !== version.headings.length) return { tables: new Map(), levels: null, warning: "Không đối chiếu được bảng của mẫu mới (số heading của file không khớp mapping), nên chưa phát hiện được bảng đổi cột." }
+    if (headingBlocks.length !== version.headings.length) return { tables: new Map(), levels: null, preHeadingRecord: false, numbering: null, warning: "Không đối chiếu được bảng của mẫu mới (số heading của file không khớp mapping), nên chưa phát hiện được bảng đổi cột." }
     const headingMap: HeadingMapEntry[] = headingBlocks.map((b, i) => ({
       block_id: b.block_id,
       heading_text: version.headings[i].heading_text,
@@ -227,12 +232,41 @@ const newTablesOf = async (buffer: Buffer, version: Pick<IOrgTemplateVersion, "h
     const sections = assignBlockSections(blocks, headingMap)
     const paths = new Map(version.table_map.map((t) => [`${t.block_id}#${t.column_index}`, t.field_path]))
     const tables = blocks.filter((b) => b.kind === "table").map((b) => ({ block_id: b.block_id, section_id: sections.get(b.block_id) ?? null, rows: b.rows }))
-    return { tables: tableShapesBySection(tables, paths), warning: null, levels: headingBlocks.map((b) => b.level as number) }
+    // Bảng lịch sử sửa đổi đứng trước heading đầu (trang bìa của mẫu, không thuộc mục nào) — mẫu không có heading Record of Changes riêng
+    const firstHeading = blocks.findIndex((b) => b.kind === "heading" && b.level !== null)
+    const record = version.headings.some((h) => h.section_id === RECORD_OF_CHANGES)
+      ? undefined
+      : blocks.slice(0, Math.max(0, firstHeading)).find((b) => b.kind === "table" && (b.rows?.[0] ?? []).filter((h) => recordColumnOfHeader(h)).length >= 2)
+    const withRecord = record ? tables.map((t) => (t.block_id === record.block_id ? { ...t, section_id: RECORD_OF_CHANGES } : t)) : tables
+    return { tables: tableShapesBySection(withRecord, paths), warning: null, levels: headingBlocks.map((b) => b.level as number), preHeadingRecord: !!record, numbering: numberingOfBlocks(headingBlocks) }
   } catch (error) {
     console.error("[TemplateMigration] đọc bảng của mẫu đích lỗi:", error instanceof Error ? error.message : error)
-    return { tables: new Map(), levels: null, warning: "Không đọc được bảng của mẫu mới nên chưa phát hiện được bảng đổi cột." }
+    return { tables: new Map(), levels: null, preHeadingRecord: false, numbering: null, warning: "Không đọc được bảng của mẫu mới nên chưa phát hiện được bảng đổi cột." }
   }
 }
+
+/** Kiểu đánh số heading của mẫu: ≥ một nửa heading có nhãn số Word tự đánh ⇒ `auto`; không thì suy từ chữ heading. */
+const numberingOfBlocks = (headings: readonly { text: string; number_label?: string | null }[]): HeadingNumbering =>
+  headings.length && headings.filter((h) => h.number_label).length * 2 >= headings.length ? "auto" : numberingOfHeadings(headings.map((h) => ({ heading_text: h.text })))
+
+/**
+ * Dữ liệu Spine cho phân nhóm: tóm tắt từng mục cũ (chấm chỗ đặt) + mục mẫu đích in được từ Spine dù không có cặp. Mục mẫu mang id mà
+ * tài liệu hiện tại đã có heading riêng thì không tính (dữ liệu đó đã in ở mục cũ ghép vào đâu đó — tính nữa sẽ in hai lần).
+ */
+const spineInputsOf = (spine: Spine, old: readonly OldHeading[], neu: readonly NewHeading[]): Pick<MigrationAnalysis, "old_data" | "new_filled"> => {
+  const oldIds = new Set(old.map((o) => o.section_id))
+  return {
+    old_data: Object.fromEntries(old.filter((o) => o.heading_text.trim()).map((o) => [o.key, sectionDataOf(o.section_id, spine)])),
+    new_filled: neu.filter((n) => !oldIds.has(n.section_id) && spineFilled(n.section_id, spine)).map((n) => n.key)
+  }
+}
+
+/** Phần đầu vào của `classify` lưu trên `analysis` (bản ghi cũ thiếu ⇒ phân nhóm như trước). */
+const classifyExtras = (analysis: MigrationAnalysis): Pick<ClassifyInput, "oldData" | "newFilled" | "preHeadingRecord"> => ({
+  ...(analysis.old_data ? { oldData: new Map(Object.entries(analysis.old_data)) } : {}),
+  ...(analysis.new_filled ? { newFilled: new Set(analysis.new_filled) } : {}),
+  ...(analysis.pre_heading_record ? { preHeadingRecord: true } : {})
+})
 
 // ─── mẫu đích ────────────────────────────────────────────────────
 
@@ -377,8 +411,8 @@ const prepare = async (projectId: string, spine: Spine, profile: ITemplateProfil
     edited = result.sections
     if (result.unattributed) warnings.push(`${result.unattributed} thay đổi sau lần đổi mẫu trước không gắn được vào mục nào của tài liệu - kiểm tra lại khi áp dụng.`)
   }
-  const analysis: MigrationAnalysis = { old_tables: toRecord(oldTables), new_tables: toRecord(newSide.tables), edited }
-  const groups = classify({ old: from.headings, neu, pairing, oldTables, newTables: newSide.tables, edited })
+  const analysis: MigrationAnalysis = { old_tables: toRecord(oldTables), new_tables: toRecord(newSide.tables), edited, ...spineInputsOf(spine, from.headings, neu), ...(newSide.preHeadingRecord ? { pre_heading_record: true } : {}), ...(newSide.numbering ? { target_numbering: newSide.numbering } : {}) }
+  const groups = classify({ old: from.headings, neu, pairing, oldTables, newTables: newSide.tables, edited, ...classifyExtras(analysis) })
   return { to: { ...to, headings: neu }, pairing, analysis, groups, warnings, direction: previous ? "reverse" : "forward", reverse_of: previous ? (previous._id as mongoose.Types.ObjectId) : null }
 }
 
@@ -614,7 +648,7 @@ export const toDto = async (doc: ITemplateMigration, spineHint?: Spine | null): 
     credit_estimate: await estimateOf(doc, spine),
     warnings: doc.warnings,
     broken_links: await brokenLinks(doc),
-    outline: buildOutline({ old: doc.from.headings, neu: doc.to.headings, pairing: doc.pairing, groups: doc.groups, decisions: doc.decisions, spine: outlineSpine }),
+    outline: buildOutline({ old: doc.from.headings, neu: doc.to.headings, pairing: doc.pairing, groups: doc.groups, decisions: doc.decisions, spine: outlineSpine, targetIsSnapshot: doc.direction === "reverse" && !!doc.reverse_of, ...(doc.analysis?.target_numbering ? { numbering: doc.analysis.target_numbering } : {}) }),
     ...(await revertFields(doc)),
     previous_template: await previousTemplateOf(doc),
     previous_standard: previousIsStandard(doc),
@@ -704,7 +738,8 @@ export const patchPairs = async (ctx: MigrationContext, id: string, edits: reado
     pairing,
     oldTables: toMap(doc.analysis.old_tables),
     newTables: toMap(doc.analysis.new_tables),
-    edited: doc.analysis.edited
+    edited: doc.analysis.edited,
+    ...classifyExtras(doc.analysis)
   })
   const decisions = settleDecisions(groups, doc.decisions).decisions.map((d) => ({ id: d.id, choice: d.choice, at: d.at, by: d.by }))
   const updated = await TemplateMigration.findOneAndUpdate(

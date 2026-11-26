@@ -125,6 +125,8 @@ export interface ITemplateProfile extends Document {
    * (`nfrs:NFR-03`) — bản in đặt phần tử dưới đúng heading của file thay vì dồn hết lên lần đầu của section.
    */
   section_slices: { custom_id: string; section_id: string; items: string[] }[]
+  /** Đổi mẫu: mục cũ BA chọn "Không in ra" — bản in coi như đã có chỗ (không in ngầm vào mục khác). Profile cũ không có. */
+  print_suppressed?: string[]
   /**
    * FLF-366: đoạn của từng mục FPT `fixed:*` theo thứ tự file (`spine/segment-hash.ts`) — đoạn còn khớp dấu in nguyên văn
    * file, lệch thì chỉ phần tử của đoạn dựng lại từ Spine. Project import trước FLF-366 không có ⇒ bản in như cũ.
@@ -264,6 +266,7 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
     migrated_base_spine: { type: Schema.Types.Mixed, default: null },
     migrated_base_migration_id: { type: Schema.Types.ObjectId, ref: "TemplateMigration", default: null },
     migration_missing_sections: { type: [String], default: [] },
+    print_suppressed: { type: [String], default: undefined },
     // FLF-366: đoạn nguyên văn theo mục (`SectionSegments` — khối gốc, phần tử, dấu) — chỉ để in lại
     section_segments: { type: Schema.Types.Mixed, default: [] },
     section_slices: {

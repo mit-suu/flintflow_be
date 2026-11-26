@@ -469,9 +469,12 @@ describe("AI cho lựa chọn của BA (R11)", () => {
     const started = await request(app).post(url(projectId)).set(H(lead.token)).send({ template_id: templateId, version: 1 })
     const id = started.body.data.id as string
     await request(app).post(url(projectId, id, "/confirm-mapping")).set(H(lead.token))
-    const dto = await decide(lead.token, projectId, id, choose)
+    // Mọi mục có cấu trúc của mẫu đều nhận được (cần AI); BA chọn chuyển vào mục Giả định
+    const prepared = (await request(app).get(url(projectId, id)).set(H(lead.token))).body.data as MigrationDto
+    const assumptions = prepared.groups.missing.find((m) => /Assumptions/.test(m.heading_text))!.new_key
+    const dto = await decide(lead.token, projectId, id, (_id, choices, aiChoices) => aiChoices.find((c) => c === `move_to:${assumptions}`) ?? choose(_id, choices, aiChoices))
     const legacy = dto.groups.extra.find((e) => /Legacy/.test(e.heading_text))!
-    expect(legacy.ai_choices.length, JSON.stringify(legacy)).toBeGreaterThan(0)
+    expect(legacy.ai_choices, JSON.stringify(legacy)).toContain(`move_to:${assumptions}`)
     expect(dto.decisions.find((d) => d.id === legacy.id)!.choice).toMatch(/^move_to:/)
     expect(dto.credit_estimate.structural_moves.count).toBe(1)
     const ready = await request(app).post(url(projectId, id, "/ready")).set(H(lead.token))
@@ -691,11 +694,12 @@ describe("chọn sẵn phương án miễn phí (Xem lại thay đổi)", () => 
     const dto = started.body.data as MigrationDto
     const id = dto.id
     expect(dto.state).toBe("mapping_review")
-    expect(dto.undecided).toEqual([])
     const legacy = dto.groups.extra.find((e) => /Legacy/.test(e.heading_text))!
-    expect(legacy).toMatchObject({ suggested: "drop_from_print", confidence: "high", suggested_reason: "no_place" })
-    // Dàn tiêu đề: mục không in ra hiện đúng chỗ, mục cần viết vàng
-    expect(dto.outline.find((o) => /Legacy/.test(o.heading_text))).toMatchObject({ status: "dropped" })
+    // Mục có dữ liệu mà không mục nào của mẫu hợp nghĩa ⇒ giữ thành mục riêng (BA xác nhận), không bao giờ Không in ra độ tin cao
+    expect(legacy).toMatchObject({ suggested: "keep_custom", confidence: "guess", suggested_reason: "kept_for_data" })
+    expect(dto.undecided).toEqual([legacy.id])
+    // Dàn tiêu đề: mục giữ lại hiện đúng chỗ, mục cần viết vàng
+    expect(dto.outline.find((o) => /Legacy/.test(o.heading_text))).toMatchObject({ status: "kept" })
     expect(dto.outline.find((o) => /Operating Environment/.test(o.heading_text))).toMatchObject({ status: "needs_content" })
 
     // Quyết định ở bước rà ghép, rồi sửa một cặp không liên quan ⇒ quyết định còn

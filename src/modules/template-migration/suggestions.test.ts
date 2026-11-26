@@ -123,7 +123,7 @@ describe("cột vai trò của bảng phân quyền màn hình", () => {
 })
 
 describe("lựa chọn chọn sẵn theo từng loại", () => {
-  it("bảng khác cột ⇒ xếp theo cột mới; mẫu mới không có bảng ⇒ giữ bảng cũ; Record of Changes ⇒ chuyển lịch sử; tách ⇒ heading đầu", () => {
+  it("bảng khác cột ⇒ xếp theo cột mới; mẫu mới không có bảng ⇒ giữ bảng cũ; Record of Changes ⇒ chuyển lịch sử; tách ⇒ heading hợp nghĩa", () => {
     const { groups } = run(
       [old("fixed:I", "I. Record of Changes", 1), old("fixed:2.1", "2.1 Actors", 2), old("fixed:5.2", "5.2 Common", 2), old("fixed:4.2.2", "4.2.2 Reliability", 3)],
       [neu(0, "Revision History", "fixed:I"), neu(1, "2.1 Actors", "fixed:2.1"), neu(2, "5.2 Common", "fixed:5.2"), neu(3, "Reliability", "fixed:4.2.2"), neu(4, "Availability", "fixed:4.2.2")],
@@ -136,7 +136,7 @@ describe("lựa chọn chọn sẵn theo từng loại", () => {
       ["c:record_of_changes:fixed:I", "map_by_header", "keep_history", "high"],
       ["c:table_columns:fixed:2.1", "map_by_header", "map_columns", "high"],
       ["c:table_columns:fixed:5.2", "keep_old_table", "no_table_in_new", "high"],
-      ["c:split_section:fixed:4.2.2", "to:n3", "first_heading", "high"]
+      ["c:split_section:fixed:4.2.2", "to:n3", "best_fit", "high"]
     ])
   })
 
@@ -160,30 +160,36 @@ describe("lựa chọn chọn sẵn theo từng loại", () => {
   })
 })
 
-describe("đoán Chuyển vào: phải đủ cả 3 điều kiện", () => {
-  // Mục riêng tên gần giống đã được ghép theo chữ; đoán chỉ còn cho hai mục khung khác id (không bao giờ ghép theo chữ)
+describe("gợi ý Chuyển vào theo nghĩa (place-score)", () => {
   const baseOld = [old("group:4.2", "4.2 Quality Attributes", 2), old("slot:security", "4.2.4 Security", 3)]
   const baseNew = [neu(0, "4.2 Quality Attributes", "group:4.2", 2), neu(1, "4.2.5 Security requirements", "fixed:4.2.4", 3)]
 
-  it("tên gần giống + cùng nhóm cha + mục đích trống ⇒ đoán (guess), chặn ready tới khi xác nhận", () => {
+  it("mục mẫu nói đúng khái niệm, hơn hẳn hạng hai ⇒ chọn sẵn (high), không chặn ready", () => {
     const { groups } = run(baseOld, baseNew)
-    expect(groups.extra[0]).toMatchObject({ suggested: "move_to:n1", confidence: "guess", suggested_reason: "close_name" })
-    expect(settleDecisions(groups, []).undecided).toEqual(["e:slot:security"])
-    expect(settleDecisions(groups, [{ id: "e:slot:security", choice: "move_to:n1" }]).undecided).toEqual([])
+    expect(groups.extra[0]).toMatchObject({ suggested: "move_to:n1", confidence: "high", suggested_reason: "best_fit" })
+    expect(groups.extra[0].targets?.[0]).toMatchObject({ new_key: "n1" })
+    expect(settleDecisions(groups, []).undecided).toEqual([])
   })
 
-  it("thiếu tên gần giống ⇒ không đoán", () => {
+  it("không mục nào hợp nghĩa, mục không có dữ liệu ⇒ Không in ra", () => {
     const { groups } = run(baseOld, [neu(0, "4.2 Quality Attributes", "group:4.2", 2), neu(1, "4.2.5 Specific attributes", "fixed:4.2.4", 3)])
-    expect(groups.extra[0]).toMatchObject({ suggested: "drop_from_print", confidence: "high" })
+    expect(groups.extra[0]).toMatchObject({ suggested: "drop_from_print", confidence: "high", suggested_reason: "no_place" })
   })
 
-  it("khác nhóm cha ⇒ không đoán", () => {
+  it("không mục nào hợp nghĩa nhưng mục có dữ liệu ⇒ giữ thành mục riêng (guess), không bao giờ Không in ra độ tin cao", () => {
+    const pairing = pairSections(baseOld, [neu(0, "4.2 Quality Attributes", "group:4.2", 2), neu(1, "4.2.5 Specific attributes", "fixed:4.2.4", 3)])
+    const groups = classify({ old: baseOld, neu: [neu(0, "4.2 Quality Attributes", "group:4.2", 2), neu(1, "4.2.5 Specific attributes", "fixed:4.2.4", 3)], pairing, oldData: new Map([["slot:security", { size: 3, sample: "" }]]) })
+    expect(groups.extra[0]).toMatchObject({ suggested: "keep_custom", confidence: "guess", suggested_reason: "kept_for_data", data_size: 3 })
+    expect(settleDecisions(groups, []).undecided).toEqual(["e:slot:security"])
+  })
+
+  it("khác nhóm cha vẫn gợi ý được (nghĩa quyết định, không phải vị trí)", () => {
     const { groups } = run(baseOld, [neu(0, "4.2 Quality Attributes", "group:4.2", 2), neu(2, "5 Appendix", "group:5", 2), neu(1, "5.9 Security requirements", "fixed:4.2.4", 3)])
-    expect(groups.extra[0]).toMatchObject({ suggested: "drop_from_print", confidence: "high" })
+    expect(groups.extra[0]).toMatchObject({ suggested: "move_to:n1" })
   })
 
-  it("mục đích đã có cặp (không trống) ⇒ không đoán", () => {
+  it("mục đích đã có cặp vẫn nhận được phần gộp (N mục cũ ⇒ 1 mục mới)", () => {
     const { groups } = run([...baseOld, old("fixed:4.2.4", "4.2.4 Other", 3)], baseNew)
-    expect(groups.extra.find((e) => e.id === "e:slot:security")).toMatchObject({ suggested: "drop_from_print", confidence: "high" })
+    expect(groups.extra.find((e) => e.id === "e:slot:security")).toMatchObject({ suggested: "move_to:n1" })
   })
 })
