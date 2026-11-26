@@ -57,6 +57,9 @@ const NON_DRAFT_TITLES: ReadonlySet<string> = new Set(
 )
 const normalizeTitle = (text: string): string =>
   text.trim().replace(/^[\dIVXivx]+(\.[\dIVXivx]+)*\.?\s+/, "").replace(/\s+/g, " ").toLowerCase()
+/** FLF-454: mục tự sinh (Record of Changes, bìa, mục lục): nội dung dẫn xuất, không phải yêu cầu ⇒ AI không rà. */
+export const isDerivedHeading = (sectionId: string, headingText: string): boolean =>
+  DERIVED_SECTIONS.has(sectionId) || NON_DRAFT_TITLES.has(normalizeTitle(headingText))
 export const isNonDraftHeading = (sectionId: string, headingText: string): boolean =>
   DERIVED_SECTIONS.has(sectionId) || NON_DRAFT_TITLES.has(normalizeTitle(headingText)) || isPlaceholderHeading(sectionId, headingText)
 
