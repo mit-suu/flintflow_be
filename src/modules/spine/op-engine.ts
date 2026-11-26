@@ -47,6 +47,7 @@ import { withElementDefaults } from "./element-defaults.js"
 import { normalizeFormFactorAt } from "./form-factor.js"
 import { normalizeDiagramAt } from "./legacy-diagram.js"
 import { normalizeFlowAt } from "./legacy-flow.js"
+import { notifySpineWritten } from "./spine-written-event.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
 export const CHANGE_RANGE_INVALID = "CHANGE_RANGE_INVALID"
@@ -727,6 +728,8 @@ export const applyTransaction = async (projectId: string, txn: Transaction): Pro
     baseVersion: input.base_version,
     changes: plan.changes
   })
+  // Báo tab khác đang mở dự án (SSE); không await, lỗi không ảnh hưởng lệnh ghi
+  notifySpineWritten(projectId, saved.spine, saved.changes)
   return { spine: saved.spine, changes: saved.changes, txn: plan.txn, spine_version: saved.spine.spine_version }
 }
 
@@ -810,5 +813,6 @@ const saveRevert = async (projectId: string, record: SpineRecord, changes: Chang
     baseVersion: record.spine_version,
     changes: plan.changes
   })
+  notifySpineWritten(projectId, saved.spine, saved.changes)
   return { spine: saved.spine, changes: saved.changes, txn: plan.txn, spine_version: saved.spine.spine_version }
 }
