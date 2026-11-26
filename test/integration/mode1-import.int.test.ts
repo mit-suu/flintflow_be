@@ -311,22 +311,34 @@ describe("FLF-460 - đổi nhãn mục ở ba thời điểm", () => {
     expect((await ImportedDocument.findById(importId))!.status).toBe("extracting")
   })
 
-  it("chưa có bản gốc (incomplete / reviewing) ⇒ đổi nhãn được, về extracting; đang viết lại file (drop_applying) ⇒ 409", async () => {
-    for (const status of ["incomplete", "reviewing"] as const) {
+  it("chưa có bản gốc: incomplete đổi nhãn được, về extracting; reviewing (rà soát AI có thể đang chạy) ⇒ 409; đang viết lại file (drop_applying) ⇒ 409; khoá quá hạn ⇒ đổi được", async () => {
+    {
+      const status = "incomplete" as const
       const { c, importId, heading } = await setup()
       const doc = (await ImportedDocument.findById(importId))!
       await ExtractionDraft.create({ projectId: doc.projectId, import_id: doc._id, section_id: heading.section_id, status: "done", fields: [], ops: [] })
-      await ImportedDocument.updateOne({ _id: importId }, { $set: { status, paused: status === "reviewing" ? { reason: "credits", at: new Date() } : null } })
+      await ImportedDocument.updateOne({ _id: importId }, { $set: { status, paused: null } })
       const res = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, section_id: "fixed:5.4" }] })
       expect(res.status, JSON.stringify(res.body.error)).toBe(200)
       const after = (await ImportedDocument.findById(importId))!
       expect(after.status).toBe("extracting")
       expect(after.paused ?? null).toBeNull()
     }
+    {
+      const { c, importId, heading } = await setup()
+      await ImportedDocument.updateOne({ _id: importId }, { $set: { status: "reviewing", paused: { reason: "credits", at: new Date() } } })
+      const res = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, section_id: "fixed:5.4" }] })
+      expect(res.status).toBe(409)
+      expect((await ImportedDocument.findById(importId))!.status).toBe("reviewing")
+    }
     const { c, importId, heading } = await setup()
-    await ImportedDocument.updateOne({ _id: importId }, { $set: { drop_applying: true } })
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { drop_applying: true, drop_applying_at: new Date() } })
     const busy = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, scope: "out_of_scope" }] })
     expect(busy.status).toBe(409)
+    // FLF-460: khoá treo quá 5 phút (máy chủ chết giữa chừng) ⇒ hết hạn, đổi nhãn tiếp tục được
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { drop_applying_at: new Date(Date.now() - 6 * 60_000) } })
+    const freed = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, scope: "out_of_scope" }] })
+    expect(freed.status, JSON.stringify(freed.body.error)).toBe(200)
   })
 
   it("sau bản gốc: không đổi trực tiếp; luồng CR chưa nhận loại thay đổi đổi nhãn nên báo rõ", async () => {

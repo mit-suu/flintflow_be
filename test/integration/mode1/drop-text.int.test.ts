@@ -114,6 +114,14 @@ describe("FLF-412 - Bỏ chữ theo vùng ở màn đọc khung", () => {
     expect(res.body.error.code).toBe("IMPORT_INVALID_STATE")
   })
 
+  it("khoá viết lại file treo quá hạn ⇒ chọn lại được; khoá mới ⇒ vẫn chặn", async () => {
+    const { seeded, projectId, importId } = await upload({ has_srs_file: true })
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { drop_applying: true, drop_applying_at: new Date() } })
+    expect((await drop(seeded, projectId, importId, [])).status).toBe(409)
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { drop_applying_at: new Date(Date.now() - 6 * 60_000) } })
+    expect((await drop(seeded, projectId, importId, [])).status).toBe(200)
+  })
+
   it("Bỏ chữ một vùng ⇒ chỉ vùng đó thành còn trống; khoá lạ bị bỏ qua; Giữ tất cả quay lại như cũ", async () => {
     const { seeded, projectId, importId } = await upload({ has_srs_file: true })
     const before = await view(seeded, projectId)
