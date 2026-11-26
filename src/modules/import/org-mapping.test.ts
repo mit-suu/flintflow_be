@@ -68,3 +68,31 @@ describe("FLF-459 - I-3 tự khớp mẫu thư viện org", () => {
     expect(pickOrgTemplate(file, [hospital, { ...hospital, version: 3 }])?.version).toBe(3)
   })
 })
+
+describe("FLF-459 - độ tin chỗ khớp I-3 chỉ từ tín hiệu Code (BF §Độ tin: tên heading gần section của mẫu)", () => {
+  it("khớp mẫu org nhưng một heading tên lệch nhiều ⇒ heading đó không được ghép, không tự xác nhận, độ tin < 1, giữ đề xuất của matcher", () => {
+    const file = [
+      entry(1, "1. Giới thiệu"),
+      entry(2, "2. Nghiệp vụ ngân hàng"),
+      entry(3, "3. Màn hình"),
+      entry(4, "4. Quy định nội bộ"),
+      entry(5, "Chương cuối viết tự do", "fixed:5.4", 0.55)
+    ]
+    const hit = pickOrgTemplate(file, [bank])
+    // 4/5 heading của mẫu cùng tên (80%) ⇒ vẫn khớp mẫu
+    expect(hit).toMatchObject({ template_id: "t-bank" })
+    const out = applyMatchedOrgMapping(file, hit!)
+    const drifted = out[4]
+    expect(drifted.confidence).toBeLessThan(1)
+    expect(drifted.confirmed).toBe(false)
+    expect(drifted.section_id).toBe("fixed:5.4")
+    // Chỉ heading cùng tên mới nhận độ tin 1 (tín hiệu Code: đúng tên + đúng thứ tự)
+    expect(out.slice(0, 4).every((e) => e.confidence === 1 && e.confirmed)).toBe(true)
+  })
+
+  it("tên chỉ khác số mục / dấu câu / hoa thường vẫn là cùng tên (độ tin 1); khác chữ thì không", () => {
+    const file = [entry(1, "I) GIỚI THIỆU"), entry(2, "2. Nghiệp vụ ngân hàng!"), entry(3, "3. Màn hình"), entry(4, "4. Quy định chung"), entry(5, "5. Phụ lục riêng")]
+    const out = applyMatchedOrgMapping(file, pickOrgTemplate(file, [bank])!)
+    expect(out.map((e) => e.confidence === 1 && e.confirmed)).toEqual([true, true, true, false, true])
+  })
+})

@@ -19,6 +19,7 @@ import { ImportedDocument } from "../../../src/modules/import/imported-document.
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
 import { Project } from "../../../src/modules/project/project.model.js"
 import { User } from "../../../src/modules/user/user.model.js"
+import { Usage } from "../../../src/modules/spine/usage.model.js"
 import { CreditWallet } from "../../../src/modules/credits/credit-wallet.model.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 import { sectionsNeedingAiReview } from "../../../src/modules/import/review.service.js"
@@ -115,6 +116,11 @@ describe("FLF-453 - nhánh 3: không mục nào cần rà ⇒ bỏ qua vòng rà
   const REPORT3_TEMPLATE = new URL("../../../fixtures/fpt-report3-blank-template.docx", import.meta.url)
 
   it("mẫu trống, Bỏ tất cả ở màn đọc khung ⇒ không mục nào có chữ ⇒ không dừng ở reviewing, sang thẳng Luồng 2 như trước FLF-453", async () => {
+    const reviewPrompts: string[] = []
+    mockOverrides.next = (prompt) => {
+      if (prompt.includes("# Import Review Existing")) reviewPrompts.push(prompt)
+      return fakeMode1(prompt)
+    }
     const seeded = await (await import("../../setup.js")).seedFixture("minimal", { balance: 1000 })
     const created = await request(app).post("/api/v1/projects").set({ Authorization: `Bearer ${seeded.token}` }).send({ name: "Khung mẫu", has_srs_file: true })
     expect(created.status, JSON.stringify(created.body.error)).toBe(201)
@@ -144,6 +150,12 @@ describe("FLF-453 - nhánh 3: không mục nào cần rà ⇒ bỏ qua vòng rà
     const after = (await ImportedDocument.findById(importId))!
     // Không có mục có sẵn nào (toàn Bỏ chữ) ⇒ không có đầu vào, không có cờ đỏ ⇒ không dừng ở reviewing
     expect(after.status).not.toBe("reviewing")
+    // Đã sang Luồng 2 (drafting), không có lượt AI rà soát nào và không có Usage của vòng rà soát
+    expect(after.status).toBe("drafting")
+    expect(reviewPrompts).toHaveLength(0)
+    expect(await Usage.countDocuments({ projectId, step_id: /^I-1\.11r/ })).toBe(0)
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    expect(profile.review_sections ?? []).toEqual([])
   })
 })
 
@@ -154,9 +166,10 @@ describe("FLF-453 - nhánh 4: nghi sai nghiệp vụ ra 2 phương án + khuyế
       srs: { extraBody: styled("u2", "5.10 Document Conventions") + p("[Describe the conventions.]") }
     })
     expect((await ImportedDocument.findById(importId))!.status).toBe("reviewing")
+    const reviewPrompts: string[] = []
     mockOverrides.next = (prompt) =>
       prompt.includes("# Import Review Existing")
-        ? JSON.stringify({ findings: [{ rule: "business_logic_suspicion", section_id: "fixed:1", message: SUSPICION, block_ids: [] }] })
+        ? (reviewPrompts.push(prompt), JSON.stringify({ findings: [{ rule: "business_logic_suspicion", section_id: "fixed:1", message: SUSPICION, block_ids: [] }] }))
         : fakeMode1(prompt)
     const headers = await asHttp(projectId, userId)
     const run = await request(app).post(`/api/v1/projects/${projectId}/import/review/run`).set(headers).send({ import_id: importId })
@@ -168,6 +181,17 @@ describe("FLF-453 - nhánh 4: nghi sai nghiệp vụ ra 2 phương án + khuyế
     expect(flag!.message).toContain("Phương án A")
     expect(flag!.message).toContain("Phương án B")
     expect(flag!.message).toContain("Khuyến nghị")
+
+    // Prompt thật gửi AI buộc đúng định dạng: nghi ngờ, 2 phương án kèm ưu/nhược + rủi ro/giả định, đúng một khuyến nghị kèm lý do
+    expect(reviewPrompts.length).toBeGreaterThan(0)
+    const prompt = reviewPrompts[0]
+    const order = ["Phương án A:", "Phương án B:", "Khuyến nghị:"].map((k) => prompt.indexOf(k))
+    expect(order.every((i) => i >= 0), JSON.stringify(order)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+    expect(prompt).toMatch(/pros\/cons and\s+risk\/assumption/)
+    expect(prompt).toMatch(/exactly one of\s+A or B with the reason/)
+    // Không còn câu cấm chọn bên mâu thuẫn với khuyến nghị (BF nguyên tắc 10)
+    expect(prompt).not.toMatch(/do not pick a side/i)
   })
 })
 

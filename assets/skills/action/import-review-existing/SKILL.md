@@ -42,10 +42,12 @@ sections, broken references) are decided by code rules - do not repeat them.
 
 ## `business_logic_suspicion`
 
-You cannot know which answer is correct - do not fix it and do not pick a side. The `message` must contain, in
-this exact order: the suspicion in one sentence, then `Phương án A:` with its pros/cons, then `Phương án B:` with
-its pros/cons, then `Khuyến nghị:` naming A or B with the reason. Keep each part short; this is the only lens that
-writes two options into one finding.
+You cannot know which answer is correct - do not fix it silently; the user chooses. The `message` must contain, in
+this exact order: the suspicion in one sentence (quote the phrase), then `Phương án A:` with its pros/cons and
+risk/assumption, then `Phương án B:` with its pros/cons and risk/assumption, then `Khuyến nghị:` naming exactly one of
+A or B with the reason. This lens is the exception to rule (c) of the shared quality block below: two options always
+come with one recommendation (never "up to you"); when unsure, recommend the safer option and state the assumption it
+rests on. Keep each part short; this is the only lens that writes two options into one finding.
 
 ## Rules
 

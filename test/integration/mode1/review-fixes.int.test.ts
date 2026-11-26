@@ -17,6 +17,7 @@ import { ImportedDocument } from "../../../src/modules/import/imported-document.
 import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
 import { Project } from "../../../src/modules/project/project.model.js"
 import { User } from "../../../src/modules/user/user.model.js"
+import { CreditWallet } from "../../../src/modules/credits/credit-wallet.model.js"
 import { Usage } from "../../../src/modules/spine/usage.model.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 import * as flagsService from "../../../src/modules/spine/flags.service.js"
@@ -126,6 +127,49 @@ describe("FLF-453 sửa lỗi", () => {
     const done = await Usage.countDocuments({ projectId, step_id: /^I-1\.11r/, state: "deducted" })
     expect(done).toBeLessThanOrEqual(3)
     expect((await ImportedDocument.findById(importId))!.status).toBe("reviewing")
+  })
+})
+
+describe("FLF-453 - Dừng hoàn credit lượt chưa chạy", () => {
+  it("Dừng giữa chừng ⇒ ví chỉ bị trừ đúng các lô đã trừ (Usage deducted); Tiếp tục chỉ chạy lô còn lại, lô đã trừ không bị chạy lại, tổng trừ = tổng Usage.cost", async () => {
+    const { projectId, importId, userId } = await toReview()
+    await addBlocks(projectId, 200)
+    const project = (await Project.findById(projectId).lean())!
+    const balance = async () => (await CreditWallet.findOne({ organizationId: project.organizationId }).lean())!.balance
+    // Giá mỗi lô theo token thực dùng (Usage.cost): đối chiếu ví với tổng Usage.cost của lô đã trừ
+    const charged = async () => (await Usage.find({ projectId, step_id: /^I-1.11r/, state: "deducted" }).lean()).reduce((n, u) => n + u.cost, 0)
+    const start = await balance()
+    const headers = await asHttp(projectId, userId)
+
+    // Lượt 1: Dừng ngay khi lô đầu bắt đầu
+    mockOverrides.before = async (prompt) => {
+      if (!prompt.includes("# Import Review Existing")) return
+      await ImportedDocument.updateOne({ _id: importId }, { $set: { paused: { reason: "user", at: new Date() } } })
+    }
+    const first = await request(app).post(`/api/v1/projects/${projectId}/import/review/run`).set(headers).send({ import_id: importId })
+    expect(first.status, JSON.stringify(first.body.error)).toBe(200)
+    expect(first.body.data.import).toMatchObject({ status: "reviewing", paused: { reason: "user" } })
+    const deductedFirst = await Usage.countDocuments({ projectId, step_id: /^I-1.11r/, state: "deducted" })
+    // Mọi Usage của vòng rà soát đều đã trừ (không có lượt giữ chỗ treo) và số dư giảm đúng số lô đã trừ
+    expect(await Usage.countDocuments({ projectId, step_id: /^I-1.11r/, state: { $ne: "deducted" } })).toBe(0)
+    expect(start - (await balance())).toBe(await charged())
+
+    // Lượt 2: Tiếp tục — chỉ chạy lô chưa trừ
+    mockOverrides.before = undefined
+    let calls = 0
+    mockOverrides.next = (prompt) => {
+      if (prompt.includes("# Import Review Existing")) calls++
+      return fakeMode1(prompt)
+    }
+    const second = await request(app).post(`/api/v1/projects/${projectId}/import/review/run`).set(headers).send({ import_id: importId })
+    expect(second.status, JSON.stringify(second.body.error)).toBe(200)
+    expect(second.body.data).toMatchObject({ import_state: "drafting" })
+    const total = await Usage.countDocuments({ projectId, step_id: /^I-1.11r/, state: "deducted" })
+    expect(total).toBeGreaterThan(deductedFirst)
+    expect(calls).toBe(total - deductedFirst)
+    expect(start - (await balance())).toBe(await charged())
+    // Mỗi lô chỉ trừ một lần
+    expect((await Usage.find({ projectId, step_id: /^I-1.11r/, state: "deducted" }).distinct("step_id")).length).toBe(total)
   })
 })
 
