@@ -205,3 +205,29 @@ describe("FLF-455 / FLF-463: nhãn Ngoài phạm vi của nhóm và mục Bỏ c
     expect(dropped.resolved_mode).toBe(3)
   })
 })
+
+describe("FLF-460 nhãn Ngoài phạm vi tay lan xuống mục con (cùng quy tắc nhãn tự động)", () => {
+  const statuses = (layout: LayoutEntry[], labels: Record<string, "in_scope" | "out_of_scope">) =>
+    Object.fromEntries(
+      compareTargetStructure(layout, new Set(), spineWith(), "free", undefined, { scopeLabels: new Map(Object.entries(labels)) })
+        .sections.filter((s) => s.section_id.startsWith("custom:"))
+        .map((s) => [s.section_id, s.status])
+    )
+  it("out_of_scope tay trên heading bao ⇒ mục con ngoài phạm vi; nhãn tay in_scope của mục con thắng; mục cùng cấp sau đó không bị ảnh hưởng", () => {
+    const layout = [entry(0, "custom:CS01", "3 Phụ lục", 1), entry(1, "custom:CS02", "3.1 Ghi chú", 2), entry(2, "custom:CS03", "3.2 Khác", 2), entry(3, "custom:CS04", "4 Rủi ro", 1)]
+    expect(statuses(layout, { "custom:CS01": "out_of_scope", "custom:CS03": "in_scope" })).toEqual({ "custom:CS02": "out_of_scope", "custom:CS03": "missing", "custom:CS04": "missing" })
+  })
+  it("in_scope tay trên mục cha tự xếp Ngoài phạm vi ⇒ mục con cũng trở lại, trừ mục con có nhãn out_of_scope tay", () => {
+    const layout = [entry(0, "custom:CS01", "4 Chi phí dự kiến", 1), entry(1, "custom:CS02", "4.1 Chi tiết", 2), entry(2, "custom:CS03", "4.2 Dự toán", 2), entry(3, "custom:CS04", "5 Ghi chú", 1)]
+    expect(statuses(layout, {})).toMatchObject({ "custom:CS02": "out_of_scope" })
+    expect(statuses(layout, { "custom:CS01": "in_scope", "custom:CS03": "out_of_scope" })).toEqual({ "custom:CS02": "missing", "custom:CS03": "out_of_scope", "custom:CS04": "missing" })
+  })
+})
+
+describe("FLF-454 mục bìa / mục lục dạng chữ tổ hợp (NFD)", () => {
+  it("'Mục lục' / 'Trang bìa' NFD vẫn là mục tự sinh, không phải mục cần soạn", async () => {
+    const { isDerivedHeading } = await import("./target-structure.js")
+    expect(isDerivedHeading("custom:CS01", "Mục lục".normalize("NFD"))).toBe(true)
+    expect(isDerivedHeading("custom:CS02", "Trang bìa".normalize("NFD"))).toBe(true)
+  })
+})

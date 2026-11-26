@@ -185,11 +185,21 @@ export const previewStructure = (
   const { customSections, slices } = buildLayout(stripped, headingSections)
   const withContent = contentSections(stripped, customSections, slices)
   const kind = fileKindOf(layout, authoredSections(blocks, headingSections))
-  const structure = applyScopeLabels(compareTargetStructure(layout, withContent, spine, intent, at), headingMarks, entryOfHeading, withContent, spine)
+  const structure = applyScopeLabels(compareTargetStructure(layout, withContent, spine, intent, at, { scopeLabels: scopeLabelsOf(headingMarks, entryOfHeading) }), headingMarks, entryOfHeading, withContent, spine)
   // FLF-460: mỗi mục của layout gắn với heading đầu tiên của nó (để đổi nhãn) và dấu của heading đó
   const marks = new Map<string, HeadingMark & { block_id: string }>()
   for (const [block_id, section_id] of entryOfHeading) if (!marks.has(section_id)) marks.set(section_id, { block_id, ...(headingMarks.get(block_id) ?? {}) })
   return toPreview(structure, layout, kind, at, excerptsOf(blocks, sectionBlocks), marks)
+}
+
+/** FLF-460: nhãn Ngoài phạm vi tay của từng mục (nhãn của heading đầu tiên có nhãn) - để `compareTargetStructure` lan xuống mục con. */
+export const scopeLabelsOf = (headingMarks: ReadonlyMap<string, HeadingMark>, entryOfHeading: ReadonlyMap<string, string>): Map<string, ScopeLabel> => {
+  const out = new Map<string, ScopeLabel>()
+  for (const [block_id, section_id] of entryOfHeading) {
+    const label = headingMarks.get(block_id)?.scope_label
+    if (label && !out.has(section_id)) out.set(section_id, label)
+  }
+  return out
 }
 
 /**

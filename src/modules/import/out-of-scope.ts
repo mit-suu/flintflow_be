@@ -27,11 +27,12 @@ const NON_SRS_HEADINGS: readonly RegExp[] = [
   word(String.raw`dự\s*toán`),
   // Chi phí của dự án (không bắt "Quản lý chi phí", "Chi phí vận hành" là NFR)
   word(String.raw`chi\s*phí\s+(?:dự\s*kiến|dự\s*án|phát\s*triển|triển\s*khai)`),
-  word(String.raw`ngân\s*sách(?:\s+(?:dự\s*án|dự\s*kiến|phát\s*triển|triển\s*khai))?`),
-  word(String.raw`báo\s*giá`),
+  // FLF-455: ngân sách / báo giá / budget chỉ bắt khi nêu rõ dự án / phát triển (không bắt "Quản lý ngân sách", "Chức năng báo giá", "Performance budget")
+  word(String.raw`ngân\s*sách\s+(?:dự\s*án|dự\s*kiến|phát\s*triển|triển\s*khai)`),
+  word(String.raw`báo\s*giá\s+(?:dự\s*án|phát\s*triển|triển\s*khai)`),
   word(String.raw`cost\s+(?:estimat\w*|breakdown)`),
-  word(String.raw`(?:project\s+)?budget(?:ing)?`),
-  word(String.raw`price\s+quot\w*|quotation`)
+  word(String.raw`(?:project|development)\s+budget(?:ing)?|budget\s+estimat\w*`),
+  word(String.raw`project\s+quot\w*`)
 ]
 
 const stripNumber = (heading: string): string => heading.trim().replace(/^[\dIVXivx]+(\.[\dIVXivx]+)*\.?\s+/, "")
