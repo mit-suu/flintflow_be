@@ -516,6 +516,46 @@ const DERIVED_SECTIONS: ReadonlySet<string> = new Set(["fixed:I"])
 
 const isHiddenPhase = (phase: PhaseId): boolean => phase.startsWith("B-") || phase === "S-1"
 
+/**
+ * FLF-461 (business-flow §5.3 "Lọc step"): bước **dựng danh sách dữ liệu** mà các bước sau đọc. Mẫu bắt buộc / SRS dang dở
+ * không có mục của bước đó (vd mẫu không có Screen Layout hay Screen Inventory) vẫn phải chạy nó, vì vòng soạn theo màn cần
+ * danh sách màn (chỉ xét bước đọc ở S-3 … S-5). Khoá = gốc dữ liệu trong `reads` của registry; giá trị = bước tạo ra danh sách đó.
+ */
+const INPUT_PROVIDER: Readonly<Record<string, string>> = Object.freeze({
+  actors: "S-3.1",
+  use_cases: "S-3.1",
+  features: "S-4.1",
+  screens: "S-4.1",
+  functions: "S-4.1"
+})
+
+/**
+ * Hàm thuần: bước cung cấp đầu vào (kể cả gián tiếp) cho các bước soạn `owners`, không tính chính `owners`. Id vòng S-5 có thể
+ * mang `@màn`. Thứ tự theo registry.
+ */
+export const inputStepsOf = (owners: Iterable<string>): string[] => {
+  const registry = loadStepRegistry()
+  const byId = new Map(registry.map((s) => [s.id, s]))
+  const position = new Map(registry.map((s, i) => [s.id, i]))
+  const owned = new Set([...owners].map((id) => id.split("@")[0]))
+  const found = new Set<string>()
+  const queue = [...owned]
+  for (let id = queue.pop(); id !== undefined; id = queue.pop()) {
+    const reader = byId.get(id)
+    // Chỉ chuỗi use case / màn hình / vòng theo màn (S-3 … S-5) cần danh sách do bước khác dựng; bước soạn mục lẻ (S-2, S-6 … S-9)
+    // chỉ đọc dữ liệu có sẵn, không bắt dự án phải dựng danh sách màn
+    if (!reader || !/^S-[345]$/.test(reader.phase)) continue
+    for (const raw of reader.reads) {
+      const provider = INPUT_PROVIDER[raw.split(/[:[.]/)[0]]
+      // Chỉ bước đứng TRƯỚC mới cung cấp đầu vào (S-2.1 đọc `actors` nhưng S-3.1 dựng danh sách đó sau nó)
+      if (!provider || owned.has(provider) || found.has(provider) || (position.get(provider) ?? 0) >= (position.get(id) ?? 0)) continue
+      found.add(provider)
+      queue.push(provider)
+    }
+  }
+  return registry.filter((s) => found.has(s.id)).map((s) => s.id)
+}
+
 const matches = (section: string, pool: Iterable<string>): boolean => {
   if (section !== FEATURE_SECTIONS) return [...pool].includes(section)
   return [...pool].some((s) => s.startsWith("feature:"))
@@ -538,8 +578,9 @@ export interface StepPlanOptions {
   draftOwners?: ReadonlySet<string>
 }
 
-export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string>, spine?: Spine, opts: StepPlanOptions = {}): StepPlanItem[] =>
-  loadStepRegistry()
+export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string>, spine?: Spine, opts: StepPlanOptions = {}): StepPlanItem[] => {
+  const inputSteps = opts.draftOwners ? new Set(inputStepsOf(opts.draftOwners)) : null
+  return loadStepRegistry()
     .filter((s) => s.kind !== "loop")
     .map((s): StepPlanItem => {
       if (isHiddenPhase(s.phase)) {
@@ -551,9 +592,10 @@ export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string
         return { step_id: s.id, state: "applied", section_ids: owned, reason: "Mục tự sinh từ lịch sử thay đổi" }
       }
       if (opts.draftOwners) {
-        return opts.draftOwners.has(s.id)
-          ? { step_id: s.id, state: "enabled", section_ids: owned, reason: "Mục của mẫu bắt buộc - FlintFlow soạn" }
-          : { step_id: s.id, state: "hidden", section_ids: owned, reason: "Mẫu không có mục này" }
+        if (opts.draftOwners.has(s.id)) return { step_id: s.id, state: "enabled", section_ids: owned, reason: "Mục của mẫu bắt buộc - FlintFlow soạn" }
+        // FLF-461: bước dựng danh sách mà bước soạn cần (vd Screen Inventory dù mẫu không có Screen Layout) vẫn chạy
+        if (inputSteps?.has(s.id)) return { step_id: s.id, state: "enabled", section_ids: owned, reason: "Cung cấp đầu vào cho các bước soạn" }
+        return { step_id: s.id, state: "hidden", section_ids: owned, reason: "Mẫu không có mục này" }
       }
       const hasContent = owned.some((sec) => {
         const inSpine = spine ? sectionHasData(spine, sec) : null
@@ -569,6 +611,7 @@ export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string
       }
       return { step_id: s.id, state: "hidden", section_ids: owned, reason: "File không có đầu mục này - bật nếu muốn AI soạn thêm" }
     })
+}
 
 /** Trạng thái step khởi đầu theo kế hoạch: ẩn ⇒ skipped; `applied` có section (đã có nội dung) ⇒ accepted; còn lại ⇒ pending. */
 const initialStatus = (item: StepPlanItem): StepState["status"] => {
@@ -598,12 +641,13 @@ export const seedStepOps = (spine: Spine, plan: StepPlanItem[], opts: SeedOption
   })
   const withFunctions = new Set(spine.functions.filter((f) => !isTemplateFrame(f)).map((f) => f.screen_id ?? "nonscreen"))
   const loopTemplates = loadStepRegistry().filter((s) => s.kind === "loop")
+  const inputSteps = opts.draftOwners ? new Set(inputStepsOf(opts.draftOwners)) : new Set<string>()
   for (const key of loopKeys(spine)) {
     if (!withFunctions.has(key)) continue
     for (const t of loopTemplates) {
       const id = `${t.id}@${key}`
       if (!opts.draftOwners) steps.push(accepted(id))
-      else steps.push({ id, status: opts.draftOwners.has(t.id) ? "pending" : "skipped", first_seq: null, last_seq: null, accepted_at: null })
+      else steps.push({ id, status: opts.draftOwners.has(t.id) || inputSteps.has(t.id) ? "pending" : "skipped", first_seq: null, last_seq: null, accepted_at: null })
     }
   }
 

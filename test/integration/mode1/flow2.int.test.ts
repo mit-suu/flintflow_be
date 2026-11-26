@@ -1,6 +1,6 @@
 /**
  * Chế độ 3 (file giữ khung còn thiếu mục) đi thẳng Luồng 2, Mongo thật: file thiếu cấu trúc đích không có bản gốc 0.1 — finalize
- * tự đưa dự án sang pipeline tạo mới (`mode = fpt`, `import_state = drafting`), Brief mở lại từ B-1.1, bước mục thiếu chờ chạy,
+ * tự đưa dự án sang pipeline tạo mới (`mode = fpt`, `import_state = drafting`), B-0 và Brief mở lại từ B-0.1, bước mục thiếu chờ chạy,
  * bước mục khách đã viết giữ chốt; bản in vẫn theo file (không thêm mục ngoài mẫu, mục khách viết in nguyên văn). "Hoàn thiện"
  * từ `incomplete` bị chặn. FLF-416: bổ sung theo mẫu chuẩn (chế độ 4) còn thiếu đi cùng luồng (Luồng 2). Bản ghi cũ còn
  * `incomplete` ⇒ `POST /import/continue`.
@@ -29,6 +29,9 @@ import { RenderedDocumentCache } from "../../../src/modules/render/rendered-docu
 import { applyTransaction } from "../../../src/modules/spine/op-engine.js"
 import { getDocument, listChangesForRecord } from "../../../src/modules/render/assemble.service.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
+import { projectStep } from "../../../src/modules/pipeline/context-projection.js"
+import { hasIdea } from "../../../src/modules/pipeline/step-runner.service.js"
+import { askableFields } from "../../../src/modules/pipeline/decisions.service.js"
 import { buildTemplateStepContext } from "../../../src/modules/pipeline/template-guidance.js"
 import { docFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
 import { DocxPackage } from "../../../src/modules/docx-ooxml/index.js"
@@ -62,7 +65,7 @@ const toFinalized = async (intent: "fixed" | "free", startKind: "new" | "existin
 }
 
 describe("Luồng 2 cho phần thiếu - chế độ 3", () => {
-  it("giữ khung còn thiếu ⇒ finalize tự sang Luồng 2: mode fpt + drafting, Brief từ B-1.1, không 0.1, chạy step được, bản in theo mẫu", async () => {
+  it("giữ khung còn thiếu ⇒ finalize tự sang Luồng 2: mode fpt + drafting, B-0 + Brief từ B-0.1, không 0.1, chạy step được, bản in theo mẫu", async () => {
     const { projectId, importId, token, userId } = await toFinalized("fixed")
     expect(await DocVersion.countDocuments({ projectId })).toBe(0)
 
@@ -73,10 +76,11 @@ describe("Luồng 2 cho phần thiếu - chế độ 3", () => {
 
     const spine = (await spineRepository.get(projectId))!
     const status = (id: string) => spine.steps.find((s) => s.id === id)?.status
-    expect(status("B-0.1")).toBe("skipped")
+    // FLF-461: B-0 chạy lại (phần đã có làm đầu vào), Brief mở lại; bước kế tiếp là B-0.1
+    expect(status("B-0.1")).toBe("pending")
     expect(status("B-1.1")).toBe("pending")
     expect(status("S-1.1")).toBe("pending")
-    expect(spine.progress.current_step).toBe("B-1.1")
+    expect(spine.progress.current_step).toBe("B-0.1")
 
     // Không còn bị chặn MODE1_NO_STEPS — workspace chạy step như dự án tạo mới
     const steps = await request(app).get(`/api/v1/projects/${projectId}/steps`).set({ Authorization: `Bearer ${token}` })
@@ -144,6 +148,37 @@ describe("Luồng 2 cho phần thiếu - chế độ 3", () => {
     const downloadedPkg = await DocxPackage.load(downloaded.data)
     expect(headerXml(downloadedPkg, downloaded.data)).toContain('string="DRAFT"')
     expect(readZipText(downloaded.data, "word/styles.xml")).toBe(readZipText(original, "word/styles.xml"))
+  })
+
+  it("FLF-461: file đã có Product Overview ⇒ B-0 chạy lại nhưng không hỏi lại phần đó; chỉ hỏi nền tảng + mức độ quan trọng file chưa có", async () => {
+    const { projectId, userId } = await toFinalized("fixed")
+    const spine = (await spineRepository.get(projectId))!
+    // B-0 là bước kế tiếp của Luồng 2 (không còn bỏ qua)
+    expect(spine.progress.current_step).toBe("B-0.1")
+    expect(spine.steps.filter((st) => st.id.startsWith("B-0.")).map((st) => st.status)).toEqual(["pending", "pending", "pending"])
+    // Product Overview của file đã vào Spine ⇒ B-0.1 coi là đã có ý tưởng (không hỏi gợi mở), vision không phải field "thiếu"
+    expect(spine.project.vision).toBeTruthy()
+    expect(hasIdea({ spine, documents: "" })).toBe(true)
+    const asked = askableFields("B-0.1", projectStep(spine, "B-0.1").emptyFields)
+    expect(asked).not.toContain("project.vision")
+    // Phần file chưa có (nền tảng, mức độ quan trọng) mới là thứ hỏi, gộp một lượt ở B-0.1
+    expect(asked).toEqual(expect.arrayContaining(["project.form_factor", "project.stakes"]))
+    expect(spine.project.form_factor).toEqual([])
+    // Phần file đã có (nền tảng, mức độ quan trọng) thì B-0.2 / B-0.3 không còn gì để hỏi (runner bỏ qua, 0 lượt model)
+    await applyTransaction(projectId, {
+      base_version: spine.spine_version,
+      ops: [
+        { op: "set", path: "project.form_factor", value: ["web"] },
+        { op: "set", path: "project.stakes", value: "internal" }
+      ],
+      by: userId,
+      reason: "test: nền tảng và mức độ quan trọng đã có từ file",
+      step_id: null
+    })
+    const after = (await spineRepository.get(projectId))!
+    expect(projectStep(after, "B-0.2").emptyFields).toEqual([])
+    expect(projectStep(after, "B-0.3").emptyFields).toEqual([])
+    expect(askableFields("B-0.1", projectStep(after, "B-0.1").emptyFields)).not.toEqual(expect.arrayContaining(["project.form_factor"]))
   })
 
   it("Hoàn thiện (complete: true) từ incomplete bị chặn - không bao giờ khoá file thiếu cấu trúc đích thành bản gốc", async () => {
@@ -256,7 +291,7 @@ describe("Luồng 2 cho phần thiếu - chế độ 3", () => {
       .set({ Authorization: `Bearer ${token}` })
       .send({ import_id: importId, base_version: await version(projectId) })
     expect(res.status, JSON.stringify(res.body.error)).toBe(200)
-    expect(res.body.data).toMatchObject({ project_mode: "fpt", import_state: "drafting", current_step: "B-1.1" })
+    expect(res.body.data).toMatchObject({ project_mode: "fpt", import_state: "drafting", current_step: "B-0.1" })
     expect((await ImportedDocument.findById(importId))!.status).toBe("drafting")
   })
 
@@ -268,11 +303,11 @@ describe("Luồng 2 cho phần thiếu - chế độ 3", () => {
       .set({ Authorization: `Bearer ${token}` })
       .send({ import_id: importId, base_version: await version(projectId) })
     expect(res.status, JSON.stringify(res.body.error)).toBe(200)
-    expect(res.body.data).toMatchObject({ project_mode: "fpt", import_state: "drafting", current_step: "B-1.1" })
+    expect(res.body.data).toMatchObject({ project_mode: "fpt", import_state: "drafting", current_step: "B-0.1" })
     expect((await TemplateProfile.findOne({ projectId }).lean())!.flow2_entry_at).toBeTruthy()
   })
 
-  it("FLF-416 tick bổ sung theo mẫu chuẩn (chế độ 4) còn thiếu ⇒ finalize tự sang Luồng 2 như chế độ 3: mode fpt + drafting, Brief từ B-1.1, bước mục thiếu chờ soạn, bước mục đã viết giữ chốt, có Spine mốc", async () => {
+  it("FLF-416 tick bổ sung theo mẫu chuẩn (chế độ 4) còn thiếu ⇒ finalize tự sang Luồng 2 như chế độ 3: mode fpt + drafting, B-0 + Brief từ B-0.1, bước mục thiếu chờ soạn, bước mục đã viết giữ chốt, có Spine mốc", async () => {
     const { projectId, importId, token } = await toFinalized("free")
     const profile = (await TemplateProfile.findOne({ projectId }).lean())!
     const structure = profile.target_structure!
@@ -281,7 +316,7 @@ describe("Luồng 2 cho phần thiếu - chế độ 3", () => {
     expect(await DocVersion.countDocuments({ projectId })).toBe(0)
     expect((await Project.findById(projectId).lean())!).toMatchObject({ mode: "fpt", import_state: "drafting", template_intent: "free" })
     const spine = (await spineRepository.get(projectId))!
-    expect(spine.progress.current_step).toBe("B-1.1")
+    expect(spine.progress.current_step).toBe("B-0.1")
     const statusOf = (id: string) => spine.steps.filter((st) => st.id === id || st.id.startsWith(`${id}@`)).map((st) => st.status)
     // FLF-463: heading riêng của file là mục của đích ⇒ mục riêng còn trống giữ bước soạn mục riêng mở (FLF-382: chỉ ghi đúng mục trống)
     const missingOwners = new Set(structure.sections.filter((sec) => sec.status === "missing").flatMap((sec) => sec.owner_steps))

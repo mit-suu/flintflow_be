@@ -144,9 +144,10 @@ describe("FLF-411 - ba luồng upload", () => {
     for (const owner of draftOwners) expect(statusOf(owner), owner).toContain("pending")
     // Bước sở hữu mục khách đã viết giữ chốt
     for (const owner of keepOwners) expect(statusOf(owner).includes("pending"), owner).toBe(false)
-    // Brief mở lại (2.4): B-1.1 chờ chạy, B-0 bỏ qua
+    // FLF-461: B-0 chạy lại (phần đã có làm đầu vào) rồi Brief mở lại: B-0.1 chờ chạy
+    expect(r.spine.steps.find((st) => st.id === "B-0.1")?.status).toBe("pending")
     expect(r.spine.steps.find((st) => st.id === "B-1.1")?.status).toBe("pending")
-    expect(r.spine.progress.current_step).toBe("B-1.1")
+    expect(r.spine.progress.current_step).toBe("B-0.1")
 
     // Bản in (2.10): file khách là nền (giữ style), Glossary soạn thêm chèn thành heading mới đúng vị trí mẫu chuẩn
     const term = "Checkout Basket FLF416"
