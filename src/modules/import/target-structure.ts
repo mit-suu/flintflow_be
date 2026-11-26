@@ -37,6 +37,8 @@ export interface TargetSection {
   status: TargetSectionStatus
   /** Bước Luồng 2 soạn mục này (để lát sau chỉ chạy step của phần thiếu). */
   owner_steps: string[]
+  /** FLF-454: heading đầu tiên của mục trong file (khoá `DocBlock.block_id`) - để nối khối chữ với mục của nó. */
+  block_id?: string
 }
 
 export interface TargetStructure {

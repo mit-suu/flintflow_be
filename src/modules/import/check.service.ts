@@ -117,6 +117,34 @@ export interface CheckBlock {
 export interface CheckScope {
   /** Section không đưa cho AI (Ngoài phạm vi, còn trống, tự sinh). */
   excluded_sections?: ReadonlySet<string>
+  /**
+   * Block chữ thuộc mục bị loại. Khối chữ dưới heading riêng có `section_id = null` và heading của mục lục / bìa là `unmapped`
+   * nên so `section_id` không đủ - nối khối với heading của nó (`excludedCheckBlocks`).
+   */
+  excluded_blocks?: ReadonlySet<string>
+}
+
+/**
+ * FLF-454: block thuộc mục bị loại khỏi lượt AI. Đi theo thứ tự tài liệu: heading mở mục (có trong cấu trúc đích / bản sơ bộ qua
+ * `block_id`, hoặc là mục tự sinh theo bảng heading) đặt mục hiện tại; heading con của mục đó giữ nguyên mục. Hàm thuần.
+ */
+export const excludedCheckBlocks = (
+  blocks: readonly { block_id: string; kind?: string; text?: string }[],
+  structure: { sections: readonly { section_id: string; status: "present" | "missing" | "out_of_scope"; block_id?: string }[] } | null | undefined,
+  headingMap: readonly { block_id: string; section_id: string }[] = []
+): Set<string> => {
+  const entries = new Map<string, boolean>()
+  for (const s of structure?.sections ?? []) if (s.block_id) entries.set(s.block_id, s.status !== "present")
+  const mapped = new Map(headingMap.map((h) => [h.block_id, h.section_id]))
+  const out = new Set<string>()
+  let excluded = false
+  for (const b of blocks) {
+    if (b.kind === "heading") {
+      const derived = isDerivedHeading(mapped.get(b.block_id) ?? "", b.text ?? "")
+      if (derived || entries.has(b.block_id)) excluded = derived || entries.get(b.block_id)!
+    } else if (excluded) out.add(b.block_id)
+  }
+  return out
 }
 
 /** Hàm thuần: id section loại khỏi lượt AI từ cấu trúc đích (hoặc bản sơ bộ) và bảng heading của file. */
@@ -135,6 +163,7 @@ const inCheckScope = (b: CheckBlock, scope: CheckScope): boolean =>
   !!b.text.trim() &&
   !(b.guidance_layer !== undefined && b.guidance_layer <= 3) &&
   !(b.section_id && scope.excluded_sections?.has(b.section_id)) &&
+  !scope.excluded_blocks?.has(b.block_id) &&
   !(b.section_id && isDerivedHeading(b.section_id, ""))
 
 export interface SemanticBatch {
@@ -335,15 +364,20 @@ const lacksTargetStructure = async (projectId: string): Promise<boolean> => {
 }
 
 /** Block chữ đưa vào 1.9 + phạm vi loại (Ngoài phạm vi, mục tự sinh). Dùng chung cho lượt chạy và số credit báo trước. */
-const loadCheckInput = async (projectId: string): Promise<{ blocks: CheckBlock[]; scope: CheckScope }> => {
-  const [blocks, profile] = await Promise.all([
-    DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS }, kind: { $in: ["paragraph", "list_item", "table_cell"] } })
+export const loadCheckInput = async (projectId: string): Promise<{ blocks: CheckBlock[]; scope: CheckScope }> => {
+  const [all, profile] = await Promise.all([
+    DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS }, kind: { $in: ["heading", "paragraph", "list_item", "table_cell"] } })
       .sort({ "anchor.ordinal": 1 })
-      .select("block_id text section_id mentions guidance_layer")
-      .lean<CheckBlock[]>(),
+      .select("block_id kind text section_id mentions guidance_layer")
+      .lean<(CheckBlock & { kind: string })[]>(),
     TemplateProfile.findOne({ projectId }, { target_structure: 1, structure_preview: 1, heading_map: 1 }).lean()
   ])
-  return { blocks, scope: { excluded_sections: excludedCheckSections(profile?.target_structure ?? profile?.structure_preview, profile?.heading_map) } }
+  const structure = profile?.target_structure ?? profile?.structure_preview
+  const blocks = all.filter((b) => b.kind !== "heading")
+  return {
+    blocks,
+    scope: { excluded_sections: excludedCheckSections(structure, profile?.heading_map), excluded_blocks: excludedCheckBlocks(all, structure, profile?.heading_map) }
+  }
 }
 
 type CheckFailure = Extract<MeteredResult<FindingsOutput>, { ok: false }>

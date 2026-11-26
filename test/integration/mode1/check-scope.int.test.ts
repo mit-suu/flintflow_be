@@ -45,12 +45,13 @@ describe("credit bước 1.9 báo ở màn đọc khung", () => {
     expect(full.calls).toBe(full.batches + 1)
     expect(full.credits).toBeGreaterThan(0)
 
-    // Mọi section có chữ Ngoài phạm vi ⇒ không còn lô nào, credit giảm đúng phần lô
-    await DocBlock.updateMany({ projectId, section_id: null }, { $set: { section_id: "custom:CS99" } })
-    const sectionIds = (await DocBlock.distinct("section_id", { projectId })).filter((s): s is string => !!s)
+    // Mọi section Ngoài phạm vi ⇒ không còn lô nào, credit giảm đúng phần lô. Giữ nguyên `DocBlock.section_id` thật (khối chữ dưới
+    // heading riêng là null): bản sơ bộ gắn mục vào heading qua `block_id`
+    const preview = (await TemplateProfile.findOne({ projectId }).lean())!.structure_preview!
+    expect(preview.sections.some((s) => s.block_id)).toBe(true)
     await TemplateProfile.updateOne(
       { projectId },
-      { $set: { "structure_preview.sections": sectionIds.map((section_id, order) => ({ section_id, title: section_id, status: "out_of_scope", order })) } }
+      { $set: { "structure_preview.sections": preview.sections.map((s) => ({ ...s, status: "out_of_scope" })) } }
     )
     const scoped = await estimateCheckCalls(projectId)
     expect(scoped.batches).toBe(0)
@@ -75,7 +76,61 @@ describe("file thiếu cấu trúc đích: bước 1.9 không chạy", () => {
 
     const profile = (await TemplateProfile.findOne({ projectId }).lean())!
     expect(profile.target_structure!.resolved_mode).not.toBe(1)
+    // FLF-454: finalize gắn mỗi mục với heading đầu của nó để bước 1.9 nối khối chữ với mục
+    expect(profile.target_structure!.sections.some((s) => s.block_id)).toBe(true)
     expect(semanticCalls).toBe(0)
     expect(await Usage.countDocuments({ projectId, step_id: /^I-1\.11/ })).toBe(0)
+  })
+})
+
+describe("FLF-454: khối chữ dưới heading riêng bị loại theo dữ liệu thật qua finalize", () => {
+  it("mục Ngoài phạm vi (chữ chi phí, section_id của khối là null) và mục lục không vào lượt AI; mục thường vẫn vào", async () => {
+    const { projectId, userId, importId } = await importAtBaselining({
+      srs: { extraBody: styled("u2", "5.10 Document Conventions") + p("[Describe the conventions.]") }
+    })
+    await setIntent(projectId, "free")
+    // Mục riêng "Kế hoạch tài chính" ngoài phạm vi theo nhãn người dùng; mục lục tự sinh
+    const COST_TEXT = "Chi phí phát triển dự kiến 500 triệu đồng COSTMARK"
+    const last = (await DocBlock.findOne({ projectId }).sort({ "anchor.ordinal": -1 }).lean())!
+    const mk = (i: number, kind: string, text: string, extra: Record<string, unknown> = {}) => ({
+      projectId: last.projectId,
+      doc_version: last.doc_version,
+      block_id: `B${8000 + i}`,
+      kind,
+      anchor: { xml_path: `/x/${i}`, ordinal: last.anchor.ordinal + 1 + i },
+      text,
+      text_hash: `x-${i}`,
+      ...extra
+    })
+    await DocBlock.insertMany([
+      mk(0, "heading", "Mục lục", { level: 1, section_id: null }),
+      mk(1, "paragraph", "TOCMARK 1 Giới thiệu ........ 3", { section_id: null }),
+      mk(2, "heading", "Kế hoạch tài chính", { level: 1, section_id: null }),
+      mk(3, "paragraph", COST_TEXT, { section_id: null })
+    ])
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    // Cấu trúc đích như finalize ghi: mục tài chính ngoài phạm vi, gắn heading đầu của mục
+    const sections = [
+      ...(profile.target_structure?.sections ?? profile.structure_preview?.sections ?? []).map((x) => ({ ...x, block_id: undefined })),
+      { section_id: "custom:CS90", title: "Kế hoạch tài chính", status: "out_of_scope", owner_steps: [], block_id: "B8002" }
+    ]
+    await TemplateProfile.updateOne(
+      { projectId },
+      {
+        $set: {
+          target_structure: { target: "fpt", intent: "free", resolved_mode: 1, sections, missing: [], compared_at: new Date().toISOString() },
+          heading_map: [...profile.heading_map, { block_id: "B8000", section_id: "unmapped", heading_text: "Mục lục" }]
+        }
+      }
+    )
+    const { loadCheckInput, semanticBatches } = await import("../../../src/modules/import/check.service.js")
+    const { blocks, scope } = await loadCheckInput(projectId)
+    const lines = semanticBatches(blocks, 48_000, scope).map((b) => b.lines).join("\n")
+    expect(lines).not.toContain("COSTMARK")
+    expect(lines).not.toContain("TOCMARK")
+    // Chữ thường của file vẫn được kiểm
+    expect(blocks.some((b) => b.section_id) && lines.length).toBeGreaterThan(0)
+    void userId
+    void importId
   })
 })
