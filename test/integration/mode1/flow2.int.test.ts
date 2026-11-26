@@ -183,6 +183,28 @@ describe("Luồng 2 cho phần thiếu - chế độ 3", () => {
     expect(askableFields("B-0.1", projectStep(after, "B-0.1").emptyFields)).not.toEqual(expect.arrayContaining(["project.form_factor"]))
   })
 
+  it("FLF-461: tiến độ chế độ 3 là số mục còn cần xử lý, giảm khi bước sở hữu mục thiếu được chốt", async () => {
+    const { projectId, token, userId } = await toFinalized("fixed")
+    const auth = { Authorization: `Bearer ${token}` }
+    const first = (await request(app).get(`/api/v1/projects/${projectId}/progress`).set(auth)).body.data
+    expect(first.section_progress.total).toBeGreaterThan(0)
+    expect(first.section_progress.remaining).toBe(first.section_progress.total)
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    const missing = profile.target_structure!.sections.filter((sec) => sec.status === "missing" && sec.owner_steps.length > 0)
+    const target = missing.find((sec) => sec.owner_steps.every((o) => !o.includes("@")))!
+    const spine = (await spineRepository.get(projectId))!
+    await applyTransaction(projectId, {
+      base_version: spine.spine_version,
+      ops: target.owner_steps.map((o) => ({ op: "set" as const, path: `steps[id=${o}].status`, value: "accepted" })),
+      by: userId,
+      reason: "test: chốt bước sở hữu mục thiếu",
+      step_id: null
+    })
+    const next = (await request(app).get(`/api/v1/projects/${projectId}/progress`).set(auth)).body.data
+    expect(next.section_progress.total).toBe(first.section_progress.total)
+    expect(next.section_progress.remaining).toBeLessThan(first.section_progress.remaining)
+  })
+
   it("Hoàn thiện (complete: true) từ incomplete bị chặn - không bao giờ khoá file thiếu cấu trúc đích thành bản gốc", async () => {
     const { projectId, importId, token } = await toFinalized("free")
     const res = await request(app)

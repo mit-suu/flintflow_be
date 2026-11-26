@@ -550,6 +550,8 @@ export const progressResponseSchema = z.object({
     current_step: z.string().nullable(),
     show_percent: z.boolean()
   }),
+  /** FLF-461: chế độ 3/4 đếm số mục còn cần xử lý thay vì 12 giai đoạn. Dự án khác ⇒ vắng / null. */
+  section_progress: z.object({ remaining: z.number().int().min(0), total: z.number().int().min(0) }).nullable().optional(),
   sections: z.array(
     z.object({
       id: z.string().min(1),

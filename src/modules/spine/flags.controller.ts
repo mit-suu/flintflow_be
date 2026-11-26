@@ -26,6 +26,7 @@ import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { validationError } from "../../shared/utils/validation-message.js"
 import { assertNotMode1 } from "../import/mode1-guard.js"
+import { flow2SectionProgress } from "../import/section-progress.js"
 import { isViewer } from "../../shared/auth/viewer-read-scope.middleware.js"
 import { viewerSpine, VIEWER_NO_STABLE_VERSION } from "../../shared/auth/viewer-spine.js"
 import { viewerProgress } from "../render/viewer-projection.js"
@@ -121,5 +122,7 @@ export const getProgress = catchAsync(async (req: Request, res: Response) => {
   const { projectId, spine } = await context(req)
   const changes = await spineRepository.listChanges(projectId)
   const report = buildPipelineProgressReport(spine, changes)
-  return sendSuccess(res, 200, report)
+  // FLF-461: chế độ 3/4 đếm mục còn cần xử lý
+  const sectionProgress = await flow2SectionProgress(projectId)
+  return sendSuccess(res, 200, sectionProgress ? { ...report, section_progress: sectionProgress } : report)
 })
