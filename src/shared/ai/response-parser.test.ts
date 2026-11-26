@@ -240,6 +240,22 @@ describe("IMPORT_EXTRACT_DIAGRAM - sơ đồ triển khai (FLF-390, QLHS 11/11 b
   })
 })
 
+describe("FLF-449: review nhận quote và target_id (S-9.2, S-8.4)", () => {
+  const review = (flags: unknown[]) => parseResponse<ReviewOutput>(JSON.stringify({ flags }), ActionType.REVIEW).flags
+
+  it("parse được quote và target_id", () => {
+    const [flag] = review([{ level: "yellow", rule_id: "requirement_conflict", section_id: "function:FN12", target_id: "FN12", quote: "up to 24 hours", message: "Conflict." }])
+    expect(flag).toMatchObject({ quote: "up to 24 hours", target_id: "FN12" })
+    expect(review([{ level: "yellow", section_id: "fixed:1", target_id: null, message: "m" }])[0].target_id).toBeNull()
+  })
+
+  it("output cũ không có hai trường vẫn parse (S-9.3)", () => {
+    const [flag] = review([{ level: "yellow", rule_id: "goal_not_covered", section_id: "fixed:1", message: "Goal 2 is not covered." }])
+    expect(flag.quote).toBeUndefined()
+    expect(flag.target_id).toBeUndefined()
+  })
+})
+
 describe("FLF-449: thẻ phương án ELICIT (ưu / nhược / rủi ro, luật khuyến nghị 03 #3)", () => {
   type Q = { question: string; options: Array<Record<string, unknown>>; recommendation_reason?: string }
   const elicit = (questions: unknown[]) =>

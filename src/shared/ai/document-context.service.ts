@@ -36,7 +36,9 @@ import { headChunks, pinnedChunkIds, selectChunks } from "./document-retrieval/s
  * thẳng chữ của chính tài liệu vừa upload (`project-document.service.ts`).
  */
 const ACTION_NEEDS_SOURCE_DOCUMENTS: Record<string, boolean> = {
-  [ActionType.CHAT]: true
+  [ActionType.CHAT]: true,
+  // FLF-449 việc 9: S-9.2 Soát chất lượng đối chiếu SRS với tài liệu tải lên (lens source_conflict)
+  [ActionType.REVIEW]: true
 }
 
 // ─── Step-level: Draft của pipeline (T11) ────────────────────────────────────

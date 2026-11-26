@@ -4,7 +4,7 @@ import type { Spine, StepStatus } from "../spine/spine.types.js"
 import { orderedSteps } from "./step-registry.js"
 import { estimateScreenCount, planRunEstimate, type RunEstimateCosts } from "./run-estimate.js"
 
-const COSTS: RunEstimateCosts = { draft: 4, review: 2, elicit: 1, reviewLlm: false }
+const COSTS: RunEstimateCosts = { draft: 4, review: 2, elicit: 1, consistency: 3, qualityLens: true, consistencyLlm: true }
 
 /** Spine với mọi bước trước `upTo` đã accepted, bước `upTo` trở đi pending. */
 const spineAt = (upTo: string, extra: Partial<Spine> = {}): Spine => {
@@ -52,10 +52,10 @@ describe("planRunEstimate (FLF-332 - ước tính credit trước lượt chạy
     })
     expect(est.steps_total).toBe(38 + 75)
     expect(est.ai_steps_total).toBe(34 + 45)
-    // 34 bước × 4 + 8 giai đoạn × 1 lượt hỏi + vòng màn hình
-    expect(est.credits_total).toBe(34 * 4 + 8 + 195)
+    // 31 bước Draft × 4 + S-8.4 (3 × 1 lô) + S-9.2 (2 × 1 lô) + S-9.3 (2) + 8 giai đoạn × 1 lượt hỏi + vòng màn hình
+    expect(est.credits_total).toBe(31 * 4 + 3 + 2 + 2 + 8 + 195)
     expect(est.credits_max).toBe(est.credits_total)
-    expect(est.credits_min).toBe(34 * 4 + 8 + 78)
+    expect(est.credits_min).toBe(31 * 4 + 3 + 2 + 2 + 8 + 78)
     expect(est.screen_estimate).toEqual({ min: 6, max: 14, basis: "default" })
   })
 
@@ -121,9 +121,26 @@ describe("planRunEstimate (FLF-332 - ước tính credit trước lượt chạy
     expect(planRunEstimate(spineAt("S-2.1"), { scope: "unit" }, COSTS).screen_estimate).toBeNull()
   })
 
-  it("REVIEW_LLM_ENABLED ⇒ mỗi bước gọi model thêm một lượt Review", () => {
-    const est = planRunEstimate(spineAt("S-2.1"), { scope: "unit" }, { ...COSTS, reviewLlm: true })
-    expect(est.credits_total).toBe(1 + 5 * (4 + 2))
+  it("FLF-449: S-9.2 tính Review × lô, S-8.4 tính Consistency × lô, S-9.3 tính Review; không còn tính Review cộng thêm cho bước khác", () => {
+    const s9 = planRunEstimate(spineAt("S-9.2"), { scope: "unit" }, COSTS)
+    // S-9.2 (2) + S-9.3 (2) + S-9.4 (4); S-9.5 tất định
+    expect(s9.units[0]).toMatchObject({ unit: "S-9", ai_steps: 3 })
+    expect(s9.units[0].credits - s9.units[0].interview_credits).toBe(2 + 2 + 4)
+    const s8 = planRunEstimate(spineAt("S-8.4"), { scope: "unit" }, COSTS)
+    expect(s8.units[0]).toMatchObject({ unit: "S-8", ai_steps: 1 })
+    expect(s8.units[0].credits - s8.units[0].interview_credits).toBe(3)
+    // Giá nhân theo số lô: tăng giá để thấy tích, Spine rỗng ⇒ 1 lô
+    const pricey = planRunEstimate(spineAt("S-9.2"), { scope: "unit" }, { ...COSTS, review: 5 }).units[0]
+    expect(pricey.credits - pricey.interview_credits).toBe(5 + 5 + 4)
+  })
+
+  it("FLF-449: cờ env tắt ⇒ S-9.2 / S-8.4 tính 0 và không cộng ai_steps", () => {
+    const off = { ...COSTS, qualityLens: false, consistencyLlm: false }
+    const s9 = planRunEstimate(spineAt("S-9.2"), { scope: "unit" }, off)
+    expect(s9.units[0].ai_steps).toBe(2)
+    expect(s9.units[0].credits - s9.units[0].interview_credits).toBe(2 + 4)
+    const s8 = planRunEstimate(spineAt("S-8.4"), { scope: "unit" }, off)
+    expect(s8.units[0]).toMatchObject({ ai_steps: 0, credits: s8.units[0].interview_credits })
   })
 
   it("không còn bước nào ⇒ rỗng, 0 credit; `from` không có trong pipeline ⇒ 404 STEP_NOT_FOUND", () => {

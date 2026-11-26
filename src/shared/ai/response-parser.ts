@@ -238,7 +238,11 @@ export const reviewFlagSchema = z.object({
   rule_id: z.string().optional(),
   /** Khoá logic section: `fixed:3.1.3`, `feature:F2`, `function:FN07`. */
   section_id: z.string().min(1),
-  message: z.string().min(1)
+  message: z.string().min(1),
+  /** FLF-449: câu trích nguyên văn (Content, quyết định, giả định hoặc tài liệu) — code hậu kiểm bằng `verifyQuote`. */
+  quote: z.string().optional(),
+  /** FLF-449: id phần tử bị nêu (nếu có) — code kiểm có thật trong Spine. */
+  target_id: z.string().nullable().optional()
 })
 
 export const reviewSchema = z.object({
