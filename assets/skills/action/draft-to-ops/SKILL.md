@@ -1,7 +1,7 @@
 ---
 skill_id: draft-to-ops
 kind: action
-version: 1.5.0
+version: 1.5.1
 description: Turn the user's answers into ONE Spine op transaction - validated by schema, invariants checked at end of batch
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -85,7 +85,7 @@ You convert the conversation for one step into **a single transaction of operati
     when the user accepts, so an assumption you leave out stays open and comes back later. More than 2 of them ⇒ say the
     **two that matter** and stop - never a list of "Tôi tạm hiểu là …" sentences, and **never count the rest** ("Còn 3
     điều…"): the gate adds that line itself from the real number, so your own count would contradict it. On a `revision`,
-    confirm in words what changed. Empty `ops` ⇒ say why. Count scope in "use case", never "chức năng" / "function".{{#if mid_phase_run}} **Mid-phase run:** the next step starts by itself - never invite or name it; say what this step did and stop.{{/if}}
+    confirm in words what changed. Empty `ops` ⇒ say why. Count scope in "use case", never "chức năng" / "function". **Never print an internal id** (`OR01`, `N02`, `S05`, `A03`, `AD07`, `FN009`) or a field name (`feature_ids`); name the thing by its name or say how many. When the reply language is Vietnamese, do not paste English statements into the sentence: count them ("thêm 3 ràng buộc") or paraphrase in Vietnamese.{{#if mid_phase_run}} **Mid-phase run:** the next step starts by itself - never invite or name it; say what this step did and stop.{{/if}}
 {{#if has_documents}}
 16. **Sources.** The content guidance ends with the customer's uploaded documents, one paragraph per line, each starting
     with its code (`[D1-P03]`). For every element you add or change **from what a document says**, add an entry to

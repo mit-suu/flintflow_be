@@ -1229,3 +1229,15 @@ describe("mục mẫu chuẩn còn thiếu (khi không chọn 'Bổ sung các m�
     expect(byRule(runDeterministicCheck(empty, [], { ruleProfile: MODE1_RULE_PROFILE, atBaseline: true }), "standard_section_missing")).toEqual([])
   })
 })
+
+describe("FLF-480: câu cờ không lộ mã yêu cầu", () => {
+  it("source_missing gọi yêu cầu bằng câu trích, không bằng mã (N01 / BR07)", () => {
+    const spine = variant((s) => {
+      s.nfrs[0].source_ref = null
+      delete s.business_rules[0].source_ref
+    })
+    const flags = byRule(runDeterministicCheck(spine, []), "source_missing").filter((f) => [FIXTURE.nfrs[0].id, FIXTURE.business_rules[0].id].includes(f.target_id ?? ""))
+    expect(flags).toHaveLength(2)
+    for (const f of flags) expect(f.message).not.toContain(f.target_id)
+  })
+})

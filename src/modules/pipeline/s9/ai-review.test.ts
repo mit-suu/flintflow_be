@@ -553,7 +553,7 @@ describe("humanizeReviewMessage", () => {
     await runAiReview(PROJECT, USER, "quality", { executor: exec })
     warn.mockRestore()
     const msgs = openFlags().map((f) => f.message)
-    expect(msgs.some((m) => m.includes("danh sách chức năng") && m.includes("phiên bản tài liệu") && m.includes("FN006") && !m.includes("FN006-V2"))).toBe(true)
+    expect(msgs.some((m) => m.includes("danh sách chức năng") && m.includes("phiên bản tài liệu") && !m.includes("FN006"))).toBe(true)
     expect(msgs.some((m) => m.includes("foo_bar"))).toBe(true)
   })
 })

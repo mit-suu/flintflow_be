@@ -13,6 +13,7 @@ import {
   quotedSectionLabel,
   ruleLabel,
   sectionLabel,
+  stripInternalCodes,
   UNKNOWN_PATH_LABEL
 } from "./human-labels.js"
 
@@ -168,5 +169,36 @@ describe("FLF-474 - nameElementIds với mục riêng / quy tắc / thông báo"
     expect(text).toBe(
       "'Phần nối của \"Chính sách bảo mật\"' và 'Chính sách bảo mật' mâu thuẫn 'Tài khoản bị khoá sau 5 lần đăng nhập sai liên tiếp trong vò…', còn BR-75 thì khác."
     )
+  })
+})
+
+describe("FLF-480: mã nội bộ trong lời cho người đọc", () => {
+  const spine = {
+    screens: [],
+    actors: [],
+    roles: [],
+    features: [],
+    functions: [],
+    entities: [],
+    custom_sections: [],
+    business_rules: [],
+    messages: [{ id: "M57", text: "Thông báo hủy lịch hẹn thành công" }],
+    nfrs: [],
+    other_requirements: [{ id: "OR10", statement: "Who reviews patient accounts?", statement_vi: "Ai duyệt tài khoản bệnh nhân?" }],
+    common_requirements: [],
+    addendum: [],
+    assumptions: []
+  } as unknown as Parameters<typeof internalElementNames>[0] & Parameters<typeof nameElementIds>[1]
+
+  it("OR10 và M57 còn trong spine ⇒ đổi sang câu trích, không còn mã", () => {
+    const text = nameElementIds("Đã đóng OR10 và sửa M57.", spine, internalElementNames(spine))
+    expect(text).not.toMatch(/OR10|M57/)
+    expect(text).toContain("Ai duyệt tài khoản bệnh nhân?")
+  })
+
+  it("stripInternalCodes: dãy mã trong ngoặc bỏ cả ngoặc, mã trần bỏ, mã tài liệu có gạch nối giữ", () => {
+    expect(stripInternalCodes("Đã đóng 11 điểm còn mở (OR01, OR05 đến OR14) rồi.")).toBe("Đã đóng 11 điểm còn mở rồi.")
+    expect(stripInternalCodes("Các điểm còn mở gồm OR02, OR03, OR04.")).toBe("Các điểm còn mở gồm.")
+    expect(stripInternalCodes("UC-01 và BR-75 giữ nguyên")).toBe("UC-01 và BR-75 giữ nguyên")
   })
 })
