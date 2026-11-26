@@ -553,11 +553,12 @@ describe("draftOps - trả lời câu hỏi mở ở cổng (FLF-472)", () => {
     steps: FIXTURE.steps.map((s) => (s.id === "S-1.4" ? { ...s, status: "in_progress" as const } : s))
   })
   const remove = (id: string) => ({ op: "remove", path: `other_requirements[id=${id}]`, reason: "User trả lời" })
+  const aq = (id: string, answer: string) => ({ id, answer, question: undefined, topic_key: undefined })
 
   it("đóng câu hỏi kèm answered_questions ⇒ có op add decisions[] mang đúng câu trả lời (khoá open_question:*)", async () => {
     const spine = openSpine()
     const executor = vi.fn<DraftExecutor>().mockResolvedValue(
-      reply([remove("OR10"), remove("OR11")], { answered_questions: [{ id: "OR10", answer: "10 năm rồi ẩn danh họ tên, SĐT" }, { id: "OR11", answer: "Đổi lịch trước ít nhất 4 tiếng" }] })
+      reply([remove("OR10"), remove("OR11")], { answered_questions: [aq("OR10", "10 năm rồi ẩn danh họ tên, SĐT"), aq("OR11", "Đổi lịch trước ít nhất 4 tiếng")] })
     )
     const result = await draftOps("p", "S-1.4", ctxFor(spine, "S-1.4"), { userId: "u", spine, executor, callKind: "revision", revisionRequest: "OR10: 10 năm ..." })
     const decisions = (result.txn?.ops ?? []).filter((op) => op.op === "add" && op.path === "decisions[]").map((op) => op.value as { topic_key: string; question: string; answer: string; step_id: string })
@@ -579,8 +580,8 @@ describe("draftOps - trả lời câu hỏi mở ở cổng (FLF-472)", () => {
     const spine = openSpine()
     const executor = vi
       .fn<DraftExecutor>()
-      .mockResolvedValueOnce(reply([remove("OR10"), remove("OR11")], { answered_questions: [{ id: "OR10", answer: "10 năm" }] }))
-      .mockResolvedValueOnce(reply([remove("OR10"), remove("OR11")], { answered_questions: [{ id: "OR10", answer: "10 năm" }, { id: "OR11", answer: "4 tiếng" }] }))
+      .mockResolvedValueOnce(reply([remove("OR10"), remove("OR11")], { answered_questions: [aq("OR10", "10 năm")] }))
+      .mockResolvedValueOnce(reply([remove("OR10"), remove("OR11")], { answered_questions: [aq("OR10", "10 năm"), aq("OR11", "4 tiếng")] }))
     const result = await draftOps("p", "S-1.4", ctxFor(spine, "S-1.4"), { userId: "u", spine, executor, callKind: "revision", revisionRequest: "x" })
     expect(result.attempts).toHaveLength(2)
     expect(result.txn?.ops.filter((op) => op.path === "decisions[]")).toHaveLength(2)
