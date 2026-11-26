@@ -155,6 +155,12 @@ describe("FLF-411 - ba luồng upload", () => {
       base_version: r.spine.spine_version, by: r.seeded.userId, reason: "Draft glossary", step_id: null,
       ops: [{ op: "add", path: "glossary[]", value: { id: "G-416", term, definition: "Giỏ hàng lúc thanh toán." } }]
     })
+    // FLF-461 (bước 2.9a nằm sau khi soạn xong): mục thiếu đã soạn (Glossary ở trên) ⇒ coi như đã có, bản xem trước xác nhận được (`ready`)
+    const draftedProfile = (await TemplateProfile.findOne({ projectId: r.projectId }).lean())!
+    await TemplateProfile.updateOne(
+      { projectId: r.projectId },
+      { $set: { "target_structure.sections": draftedProfile.target_structure!.sections.map((sec) => (sec.status === "missing" ? { ...sec, status: "present", owner_steps: [] } : sec)), "target_structure.missing": [] } }
+    )
     // FLF-461 (bước 2.9a): người xác nhận bố cục mới rồi bản in mới chèn mục soạn thêm đúng vị trí mẫu chuẩn
     const confirmed = await request(app).post(`/api/v1/projects/${r.projectId}/import/layout-preview/confirm`).set(H(r.seeded))
     expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200)
