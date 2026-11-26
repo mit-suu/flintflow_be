@@ -107,3 +107,10 @@ describe("P06 - không lộ tên field / mã nội bộ", () => {
     expect(JSON.stringify(rows)).not.toContain("target_section")
   })
 })
+
+describe("FLF-479: giá trị enum trong nhật ký", () => {
+  it("project.type snake_case ⇒ chữ tiếng Việt, không in mã enum thô", () => {
+    const rows = summarizeChanges([change("set", "project.type", null, "mobile_and_web_application")], FIXTURE)
+    expect(rows[0].title_vi).toBe("Loại: Ứng dụng di động và web")
+  })
+})

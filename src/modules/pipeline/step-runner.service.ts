@@ -39,6 +39,7 @@ import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import { layoutRenderDeps, renderDiagrams, sameDiagramSubject, staleRenderedDiagrams, type DiagramServiceDeps } from "../diagram/diagram.service.js"
 import { loadRenderContext } from "../diagram/render-context.js"
 import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "../spine/source-hash.js"
+import { stripInternalCodes } from "../spine/human-labels.js"
 import { targetOfDiagram, type RenderTarget } from "../diagram/renderers/index.js"
 import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf, screenLoopOrder } from "./step-registry.js"
 import { addendumForUnit, assumptionsForPrompt, buildStepContext, elicitProjection, getStepSpec, loadConversationVariables, loadLastAiReply, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
@@ -2244,7 +2245,8 @@ export const runStep = async (
       spineVersion = batched.spineVersion
       if (batched.wroteOps) wroteOps = true
       stepSummary.push(...batched.summary)
-      if (batched.notes) gateNotes = batched.notes
+      // FLF-480: tin cổng do model viết có thể còn mã nội bộ của câu hỏi mở đã đóng (OR01…) ⇒ bỏ trước khi người dùng thấy
+      if (batched.notes) gateNotes = stripInternalCodes(batched.notes)
     }
 
     const sectionsAtReview = ownedSections()

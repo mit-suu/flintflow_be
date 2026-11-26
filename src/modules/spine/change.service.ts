@@ -24,7 +24,7 @@ import { impactOfChanges, type Impact } from "./impact.service.js"
 import * as flagsService from "./flags.service.js"
 import { OP_INVALID, type ApplyResult, type Op, type PreviewResult, type Transaction, type Violation } from "./op.types.js"
 import { stampAddendum } from "./addendum-stamp.js"
-import { nameElementIds } from "./human-labels.js"
+import { internalElementNames, nameElementIds as nameIds } from "./human-labels.js"
 import { BRIEF_PROJECT_WRITE_MESSAGE, briefCoreEntries, isInBriefPhase, writesProjectVisionOrGoals } from "./brief-core.js"
 import { PathError, parsePath } from "./path-resolver.js"
 import { USE_CASE_NAME_FIX, useCaseNameIssues, type RuleProfile } from "./deterministic-check.js"
@@ -133,6 +133,13 @@ export class NeedsClarificationError extends ApiError {
  * cờ đi qua `/flags` (waive/recompute), step/progress qua step runner và gate, baseline qua `/baseline`,
  * section và diagram do engine/render ghi.
  */
+/**
+ * FLF-480: thay đổi người dùng đọc được trong bản xem trước / số đếm "Đã áp dụng N thay đổi". Giả định (`assumptions`) có
+ * dòng riêng, hàng đợi màn / cờ tiến độ (`progress.screen_queue[=S18]`) là sổ sách do cascade dọn - đều không đếm, để số
+ * xem trước bằng số báo sau khi áp và không in đường dẫn nội bộ.
+ */
+export const isUserVisiblePath = (path: string): boolean => !path.startsWith("assumptions") && !path.startsWith("progress")
+
 export const SYSTEM_MANAGED_ROOTS: ReadonlySet<string> = new Set(["flags", "steps", "progress", "baselines", "sections", "diagrams"])
 
 export const notWritableViolations = (ops: readonly Op[], spine?: Pick<Spine, "project" | "progress" | "steps">): Violation[] =>
@@ -1357,6 +1364,9 @@ const opsFromInstruction = async (
   }
 
   // Câu hỏi làm rõ và ghi chú preview hiện thẳng cho user: mã phần tử model còn chép (`S02`) đổi sang tên
+  // FLF-480: mã nội bộ không có field tên (OR10, BR07, N02, MSG57…) cũng đổi sang câu trích, không chỉ màn / actor / tính năng
+  const extraNames = internalElementNames(spine)
+  const nameElementIds = (text: string, source: typeof spine): string => nameIds(text, source, extraNames)
   const clarification = result.data.clarification_needed?.trim()
   const choices = result.data.choices?.length ? { choices: result.data.choices.map((c) => nameElementIds(c, spine)) } : {}
   if (clarification) {
@@ -1566,7 +1576,7 @@ export const preview = async (
     }
   }
 
-  const shownChanges = plan.changes.filter((c) => !c.path.startsWith("assumptions"))
+  const shownChanges = plan.changes.filter((c) => isUserVisiblePath(c.path))
   const impact = impactOfChanges(spine, shownChanges, plan.spine)
   const branch = branchOf(spine, impact)
 

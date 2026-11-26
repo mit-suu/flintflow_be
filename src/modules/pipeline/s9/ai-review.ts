@@ -19,6 +19,7 @@
 import { env } from "../../../config/env.js"
 import { applyTransaction } from "../../spine/op-engine.js"
 import * as repository from "../../spine/spine.repository.js"
+import { internalElementNames, nameElementIds, stripInternalCodes } from "../../spine/human-labels.js"
 import type { Op } from "../../spine/op.types.js"
 import type { Flag, Spine, SpineRecord } from "../../spine/spine.types.js"
 import { ActionType, type AiActionInput, type AiActionResult } from "../../../shared/ai/ai-action.types.js"
@@ -368,6 +369,7 @@ export const runAiReview = async (projectId: string, userId: string, profile: Re
     .map(({ rule_id, lens, section_id, message }) => ({ rule_id, lens: lens ?? null, section_id, message }))
   const settledSources = [...decisions.map((d) => d.answer), ...assumptions.map((a) => a.statement), documents]
   const knownSections = new Set(spine.sections.map((s) => s.id))
+  const internalNames = internalElementNames(spine)
 
   const lensText = def.lenses.map((l) => `${l.name} - ${l.hint}`).join("\n")
   const accepted = new Map<string, { lens: string; section_id: string; target_id: string | null; message: string }>()
@@ -399,7 +401,8 @@ export const runAiReview = async (projectId: string, userId: string, profile: Re
     // Không tin output: chỉ nhận cờ vàng, lens thuộc profile, câu trích khớp nguồn
     for (const f of result.data.flags ?? []) {
       const lens = f.rule_id ?? ""
-      const message = humanizeReviewMessage(f.message.trim(), options.replyLanguage ?? "vi")
+      // FLF-480: cờ do model viết còn chép mã nội bộ (N23, BR04, A06, AS43…) ⇒ đổi sang tên; mã không còn phần tử thì bỏ
+      const message = stripInternalCodes(nameElementIds(humanizeReviewMessage(f.message.trim(), options.replyLanguage ?? "vi"), spine, internalNames))
       if (f.level !== "yellow" || !lensNames.has(lens) || message === "") continue
 
       const targetId = f.target_id && indexIds.has(f.target_id) ? f.target_id : null

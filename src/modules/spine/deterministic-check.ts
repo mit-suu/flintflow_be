@@ -26,7 +26,7 @@ import type { ErdNotation, RenderContext } from "../../shared/diagram/erd-notati
 import { hasComponentSequence, needsSequence } from "../diagram/renderers/sequence.renderer.js"
 import { ORIGINAL_DIAGRAM_LABELS, diagramKey, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds, originalKey, originalSectionOf } from "./original-diagram.js"
 import { isVerbatim, type SectionSegments } from "./segment-hash.js"
-import { NFR_CATEGORY_LABELS, capitalize, diagramLabel, pathLabel, quotedSectionLabel } from "./human-labels.js"
+import { NFR_CATEGORY_LABELS, capitalize, diagramLabel, pathLabel, quotedSectionLabel, shortQuote } from "./human-labels.js"
 import { PROJECT_TEXT_FIELDS, SRS_TEXT_FIELDS, VALIDATION_TEXT_FIELDS, pickTextFields } from "./srs-text-fields.js"
 import { isRealText, tableBodyHasRealText } from "../../shared/utils/instruction-text.js"
 
@@ -643,7 +643,7 @@ const nfrMissingNumber = (spine: Spine, gate: StepGate): FlagCandidate[] =>
         rule_id: "nfr_missing_number",
         section_id: section,
         target_id: n.id,
-        message: `Yêu cầu ${NFR_CATEGORY_LABELS[category]} ${n.id} thiếu chỉ số đo / ngưỡng`,
+        message: `Yêu cầu ${NFR_CATEGORY_LABELS[category]} ${quotedStatement(n)} thiếu chỉ số đo / ngưỡng`,
         remediation_step: step
       }))
   })
@@ -656,6 +656,15 @@ const nfrMissingNumber = (spine: Spine, gate: StepGate): FlagCandidate[] =>
  */
 const ASSUMPTION_SWEEP_STEP = "S-9.2"
 
+/**
+ * FLF-480: câu cờ gọi yêu cầu bằng câu trích ngắn của nó ("N01 chưa ghi nguồn" lộ mã nội bộ). Không có câu thì dùng mã
+ * (mã tài liệu như `BR-75` người đọc thấy trong tài liệu).
+ */
+const quotedStatement = (el: { id: string; statement?: string }): string => {
+  const text = el.statement?.trim()
+  return text ? `"${shortQuote(text)}"` : el.id
+}
+
 const unconfirmedAssumption = (spine: Spine): FlagCandidate[] =>
   spine.assumptions
     .filter((a) => a.status === "unconfirmed")
@@ -664,7 +673,7 @@ const unconfirmedAssumption = (spine: Spine): FlagCandidate[] =>
       rule_id: "unconfirmed_assumption",
       section_id: sectionsOfPath(spine, a.path).owner[0] ?? "fixed:5.4",
       target_id: a.id,
-      message: `Giả định ${a.id} chưa được xác nhận: ${a.statement}`,
+      message: `Giả định chưa được xác nhận: ${a.statement}`,
       remediation_step: ASSUMPTION_SWEEP_STEP
     }))
 
@@ -1805,7 +1814,7 @@ const requirementItems = (spine: Spine): RequirementItem[] => [
   })),
   ...spine.nfrs.map((n): RequirementItem => ({
     id: n.id,
-    label: `Yêu cầu ${NFR_CATEGORY_LABELS[n.category]} ${n.id}`,
+    label: `Yêu cầu ${NFR_CATEGORY_LABELS[n.category]} ${quotedStatement(n)}`,
     section: NFR_SECTION[n.category].section,
     step: NFR_SECTION[n.category].step,
     fields: pickTextFields(n, SRS_TEXT_FIELDS.nfrs),
@@ -1814,7 +1823,7 @@ const requirementItems = (spine: Spine): RequirementItem[] => [
   })),
   ...spine.business_rules.map((b): RequirementItem => ({
     id: b.id,
-    label: `Quy tắc nghiệp vụ ${b.id}`,
+    label: `Quy tắc nghiệp vụ ${quotedStatement(b)}`,
     section: b.tier === "high" ? "fixed:1" : "fixed:5.1",
     step: b.tier === "high" ? "S-2.4" : "S-7.1",
     fields: pickTextFields(b, SRS_TEXT_FIELDS.business_rules),
