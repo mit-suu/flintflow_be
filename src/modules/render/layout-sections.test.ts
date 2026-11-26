@@ -218,6 +218,59 @@ describe("numberSections", () => {
   })
 })
 
+describe("numberSections - xoá mục ở file đánh số gõ tay đều", () => {
+  const layout: TemplateLayout = {
+    language: "vi",
+    layout: [
+      entry(0, "3 Yêu cầu chức năng", 1, "group:functional"),
+      entry(1, "3.1 Tài khoản", 2, "feature:F1"),
+      entry(2, "3.2 Thanh toán", 2, "feature:F2"),
+      entry(3, "3.2.1 Trả tiền", 3, "function:FN2"),
+      entry(4, "3.3 Khám phá", 2, "feature:F3"),
+      entry(5, "3.3.1 Tìm kiếm", 3, "function:FN3"),
+      entry(6, "3.4 Giỏ hàng", 2, "custom:CART")
+    ]
+  }
+  const fn = (id: string, feature_id: string, name: string): Spine["functions"][number] => ({
+    id, screen_id: null, feature_id, order: 0, name, trigger: "", description: "", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null
+  })
+  const withAll = (): Spine => ({
+    ...createEmptySpine({ name: "x" }),
+    features: [{ id: "F1", name: "Tài khoản", order: 0 }, { id: "F2", name: "Thanh toán", order: 1 }, { id: "F3", name: "Khám phá", order: 2 }],
+    functions: [fn("FN2", "F2", "Trả tiền"), fn("FN3", "F3", "Tìm kiếm")],
+    custom_sections: [{ id: "CART", heading: "3.4 Giỏ hàng", level: 2, source: "import", blocks: [] }]
+  })
+  it("placeSections: tính năng / chức năng / mục riêng đã xoá không in, gắn vào mục layout kế tiếp (`droppedBefore`)", () => {
+    const s = withAll()
+    s.features = s.features.filter((f) => f.id !== "F2")
+    s.functions = s.functions.filter((f) => f.feature_id !== "F2")
+    const placed = placeSections(s, layout)
+    expect(placed.some((p) => p.section_id === "feature:F2" || p.section_id === "function:FN2")).toBe(false)
+    expect(placed.find((p) => p.section_id === "feature:F3")?.droppedBefore?.map((d) => [d.section_id, d.label])).toEqual([["feature:F2", "3.2"], ["function:FN2", "3.2.1"]])
+    expect(placed.find((p) => p.section_id === "feature:F1")?.droppedBefore).toBeUndefined()
+  })
+
+  type Row = Parameters<typeof numberSections>[0][number]
+  const row = (section_id: string, label: string, level: number): Row => ({ section_id, kind: "custom", title: section_id, level, fromLayout: true, typed: true, label })
+
+  it("file đánh số đều, xoá 3.2 (kèm 3.2.1) ⇒ 3.3 dồn thành 3.2, mục con và anh em phía sau dồn theo", () => {
+    const placed = [
+      row("ch1", "1", 1),
+      row("ch3", "2", 1),
+      row("F1", "2.1", 2),
+      { ...row("F3", "2.3", 2), droppedBefore: [row("F2", "2.2", 2), row("FN2", "2.2.1", 3)] },
+      row("FN3", "2.3.1", 3),
+      row("CART", "2.4", 2)
+    ]
+    expect(numberSections(placed).map((n) => n.number)).toEqual(["1", "2", "2.1", "2.2", "2.2.1", "2.3"])
+  })
+
+  it("file đánh số không đều (nhảy số) ⇒ xoá mục vẫn giữ nguyên văn số của file", () => {
+    const placed = [row("ch1", "1", 1), row("F1", "1.1", 2), { ...row("F3", "1.5", 2), droppedBefore: [row("F2", "1.2", 2)] }, row("CART", "1.6", 2)]
+    expect(numberSections(placed).map((n) => n.number)).toEqual(["1", "1.1", "1.5", "1.6"])
+  })
+})
+
 describe("numberSections - phần đánh số La Mã (nợ T14)", () => {
   const placed = (rows: [string, string, number, string][]) =>
     rows.map(([section_id, title, level, label]) => ({ section_id, kind: "fpt" as const, title, level, fromLayout: true, typed: label !== "", label }))
