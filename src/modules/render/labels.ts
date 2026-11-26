@@ -32,6 +32,11 @@ export const VI_LABELS: Readonly<Record<string, string>> = {
   Kind: "Loại",
   Description: "Mô tả",
   Actors: "Tác nhân",
+  // FLF-468 (lát D, ChoViet #11): cột thiếu bản dịch khiến bảng tiếng Việt (mode 1, không qua `VI_FPT_LABELS`) lẫn chữ
+  // Anh — "Rule" (§5.1 Quy tắc nghiệp vụ), "Context" (§5.3 bảng thông báo, cả đoạn dựng lại ngoài đoạn — `trailing`).
+  // Không thêm "Role" / "Actor" ở đây: hai nhãn đó chỉ dành cho mẫu FPT (`VI_FPT_LABELS`), mode 1 giữ tiếng Anh như cũ.
+  Rule: "Quy tắc",
+  Context: "Ngữ cảnh",
   Screen: "Màn hình",
   Type: "Kiểu",
   Feature: "Chức năng",
@@ -110,8 +115,6 @@ export const VI_FPT_LABELS: Readonly<Record<string, string>> = {
   Actor: "Tác nhân",
   "#": "STT",
   "N/A": "Không có",
-  // P07: cột ngữ cảnh của bảng 5.3
-  Context: "Ngữ cảnh",
   // Khung §3.x.y mẫu FPT
   "Function trigger": "Kích hoạt chức năng",
   "Function description": "Mô tả chức năng",
@@ -193,8 +196,39 @@ export const VI_ENUM_LABELS = {
 
 export type EnumTable = keyof typeof VI_ENUM_LABELS
 
-export const enumLabel = (language: string | undefined, table: EnumTable, value: string): string =>
-  isVietnamese(language) ? ((VI_ENUM_LABELS[table] as Readonly<Record<string, string>>)[value] ?? value) : value
+/**
+ * FLF-479 (12a): bảng tiếng Anh cho enum in thô trong tài liệu tiếng Anh (`risk`, `open_question`, `date_format`…).
+ * Chỉ hai bảng này đọc không được trực tiếp; `actor_kind` ("Stripe (system)" đang cố ý viết thường), `priority`,
+ * `permission_action` đã đọc được, KHÔNG thêm vào đây (đổi sẽ vỡ golden test không cần thiết).
+ */
+export const EN_ENUM_LABELS = {
+  common_category: {
+    pagination: "Pagination",
+    date_format: "Date format",
+    error_handling: "Error handling",
+    audit: "Audit",
+    session: "Session",
+    security: "Security",
+    logging: "Logging",
+    validation: "Validation",
+    notification: "Notification",
+    localization: "Localization",
+    accessibility: "Accessibility"
+  } as Readonly<Record<string, string>>,
+  other_kind: {
+    risk: "Risk",
+    assumption: "Assumption",
+    open_question: "Open question",
+    technical_risk: "Technical risk"
+  } satisfies Record<OtherRequirementKind, string>
+} as const
+
+/** Nhãn enum theo ngôn ngữ — vi tra `VI_ENUM_LABELS`, en tra `EN_ENUM_LABELS`; không có bảng / không có giá trị ⇒ giữ nguyên như trước. */
+export const enumLabel = (language: string | undefined, table: EnumTable, value: string): string => {
+  if (isVietnamese(language)) return (VI_ENUM_LABELS[table] as Readonly<Record<string, string>>)[value] ?? value
+  const enTable = (EN_ENUM_LABELS as Partial<Record<EnumTable, Readonly<Record<string, string>>>>)[table]
+  return enTable?.[value] ?? value
+}
 
 // ─── loại yêu cầu chung (common_requirements[].category) ──
 
@@ -383,13 +417,13 @@ export const VI_PHASE_LABELS: Readonly<Record<string, string>> = {
 
 export const RECORD_TEXT = {
   en: {
-    baselineSigned: "Baseline signed",
+    baselineSigned: "Baseline",
     documentUpdated: "Document updated",
     more: (n: number) => `; and ${n} more change${n > 1 ? "s" : ""}`,
     phaseRow: (first: boolean, phaseLabel: string) => `${first ? "Create" : "Update"} ${phaseLabel}`
   },
   vi: {
-    baselineSigned: "Ký baseline",
+    baselineSigned: "Baseline",
     documentUpdated: "Cập nhật tài liệu",
     more: (n: number) => `; và ${n} thay đổi khác`,
     phaseRow: (first: boolean, phaseLabel: string) => `${first ? "Tạo" : "Cập nhật"} ${phaseLabel}`
@@ -403,8 +437,9 @@ export const recordTextFor = (language: string | undefined) => RECORD_TEXT[isVie
  * khớp mẫu nào ⇒ giữ nguyên văn (`docs/spec-gaps.md:43`).
  */
 export const MACHINE_DESCRIPTIONS: readonly { re: RegExp; en: (m: RegExpExecArray) => string; vi: (m: RegExpExecArray) => string }[] = [
-  { re: /^Ký baseline (.+)$/, en: (m) => `Baseline ${m[1]} signed`, vi: (m) => `Ký baseline ${m[1]}` },
-  { re: /^Baseline (.+)$/, en: (m) => `Baseline ${m[1]} signed`, vi: (m) => `Ký baseline ${m[1]}` },
+  // FLF-484 (BF §3.2): dòng ký ghi `Baseline <số>` (không tiền tố v) cho cả hai ngôn ngữ
+  { re: /^Ký baseline v?(.+)$/, en: (m) => `Baseline ${m[1]}`, vi: (m) => `Baseline ${m[1]}` },
+  { re: /^Baseline v?(.+)$/, en: (m) => `Baseline ${m[1]}`, vi: (m) => `Baseline ${m[1]}` },
   { re: /^Hoà giải section stale$/, en: () => "Stale sections reconciled", vi: () => "Hoà giải các mục cần xem lại" },
   { re: /^Hoà giải: user xác nhận nội dung không đổi$/, en: () => "Reviewed: content still correct", vi: () => "Đã xem lại: nội dung vẫn đúng" },
   { re: /^sửa sau baseline$/, en: () => "Edited after baseline", vi: () => "Sửa sau baseline" },

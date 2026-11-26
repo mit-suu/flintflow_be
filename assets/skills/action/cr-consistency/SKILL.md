@@ -1,7 +1,7 @@
 ---
 skill_id: cr-consistency
 kind: action
-version: 2.2.0
+version: 2.3.0
 description: Mode 1 C-5 (node 3.8) - consistency check limited to the scope a change request touches → contradictions go back to the user, other findings are yellow
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -21,8 +21,8 @@ language: user
 
 Code has already verified the proposal mechanically: the element was not changed elsewhere, the Spine ops pass the invariants,
 no new red flag opens. You look for **meaning** problems the edit introduces in its neighbourhood. A `contradiction`
-sends the CR back to the requester as a question (the CR waits for the answer); every other finding is a yellow note
-for the reviewer. Silence is a valid answer.
+sends the CR back to the requester as a question (the CR waits for the answer); `request_not_met` blocks the proposal until
+the asked work is done; every other finding is a yellow note for the reviewer. Silence is a valid answer.
 
 ## Context
 
@@ -44,10 +44,13 @@ for the reviewer. Silence is a valid answer.
 | `contradiction` | The new value contradicts an untouched element or passage of the scope (numbers, actors, order of steps) - asked to the requester |
 | `dangling_reference` | An untouched element still mentions what the edit removed or renamed |
 | `incomplete_edit` | The CR clearly needs the same change in an element that was not edited |
+| `request_not_met` | The CR asks for X (adding or removing a function, a screen, a rule...) but no edit does X. A note that only tells the reviewer to do it themselves (`Hãy thêm chức năng này…`, `Kiểm tra và gỡ…`, "add this function") does not count as done. Blocks the CR: it is redrafted or fixed by hand |
 
 ## Rules
 
-1. Only the given scope; do not review the whole document. Raise only real problems a reviewer would act on - wording
+1. First ask: does the set of edits do what the CR title and description ask? If the main request is not done, raise one
+   `request_not_met` (message in the document's language: what is asked and what is missing) - it is the most important finding.
+   Then, only the given scope; do not review the whole document. Raise only real problems a reviewer would act on - wording
    or naming style, and the language of a label, is not a finding.
 2. A note already shown (above) is not raised again, reworded or not. Raise a new note only for a problem the current
    edits still have that no earlier note covers; nothing new ⇒ `{ "findings": [] }`.

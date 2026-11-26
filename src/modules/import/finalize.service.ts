@@ -155,7 +155,14 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const droppedPermissions: DroppedPermission[] = []
   // Mức ưu tiên có chữ mà không quy được về MoSCoW (vd "Gấp") ⇒ cờ "Cần xem" ở lô kế hoạch step
   const unmappedPriorities: UnmappedPriority[] = []
-  const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value, sections: e.sections })), droppedPermissions, unmappedPriorities)
+  // FLF-476: tên nhóm dự phòng ("General" / "Chức năng khác") theo ngôn ngữ tài liệu
+  const ops = buildImportOps(
+    stripRecord(before),
+    entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value, sections: e.sections })),
+    droppedPermissions,
+    unmappedPriorities,
+    { language: profile.language }
+  )
   // QLHS 11/11 bug #15: file không có sơ đồ / mục luồng màn, chỉ ghi vài chuyển màn ⇒ suy Đăng nhập → màn của từng vai (cùng
   // lô thực thể để dấu đoạn / hash tính trên dữ liệu đã có cạnh); cờ "Cần xem" liệt kê cạnh suy ra ở lô kế hoạch step
   const inferredFlow = hasOwnScreenFlow(drafts, profile.heading_map, provisional) ? [] : inferFlowAfter(stripRecord(before), ops)

@@ -143,3 +143,44 @@ describe("applyPairEdits", () => {
     expect(() => applyPairEdits(base, newDoc, edits)).toThrow(PairEditError)
   })
 })
+
+describe("pairSections — FLF-491: mục chương 1 và 4.2.4 theo danh mục, heading con đi theo mục cha", () => {
+  const oldDoc = [
+    old("custom:CS01", "1 Tổng quan sản phẩm", 1),
+    old("slot:goals", "Mục tiêu", 2),
+    old("slot:scope", "Phạm vi phát hành 1.0", 2),
+    old("fixed:1", "Quy tắc nghiệp vụ tổng quát", 2),
+    old("custom:CS04", "Hệ thống bên ngoài", 2),
+    old("fixed:4.2.4", "4.2.4 Thuộc tính đặc thù", 3),
+    old("fixed:5.5", "5.5 Thuật ngữ", 2)
+  ]
+  const target = [neu(0, "1. Product Overview", "fixed:1", { level: 2 }), neu(1, "4.2.4 …", "unmapped", { level: 3 })]
+
+  it("mục cha ghép theo danh mục (Cần xem), bốn mục con là follower child, 4.2.4 ghép, chỉ Thuật ngữ chưa ghép", () => {
+    const r = pairSections(oldDoc, target)
+    expect(pairOf(r, "custom:CS01")).toMatchObject({ new_key: "n0", by: "title", needs_review: true })
+    expect(r.followers.filter((f) => f.kind === "child").map((f) => [f.old_key, f.parent_old_key])).toEqual([
+      ["slot:goals", "custom:CS01"],
+      ["slot:scope", "custom:CS01"],
+      ["fixed:1", "custom:CS01"],
+      ["custom:CS04", "custom:CS01"]
+    ])
+    expect(pairOf(r, "fixed:4.2.4")).toMatchObject({ new_key: "n1", needs_review: true })
+    expect(pairOf(r, "fixed:5.5")).toMatchObject({ new_key: null })
+    expect(r.pairs.map((p) => p.old_key)).toEqual(["custom:CS01", "fixed:4.2.4", "fixed:5.5"])
+  })
+
+  it("mẫu đích có heading con tương ứng ⇒ mục con ghép heading con đó, không thành child", () => {
+    const r = pairSections(oldDoc, [neu(0, "1. Product Overview", "fixed:1", { level: 2 }), neu(1, "1.1 Goals", "slot:goals", { level: 3 })])
+    expect(pairOf(r, "slot:goals")).toMatchObject({ new_key: "n1" })
+    expect(r.followers.find((f) => f.old_key === "slot:goals")).toBeUndefined()
+    // "Hệ thống bên ngoài" không có chỗ riêng nhưng cây con của chương 1 đã hết heading chưa có chủ ⇒ vẫn theo mục cha
+    expect(r.followers.find((f) => f.old_key === "custom:CS04")).toMatchObject({ kind: "child" })
+  })
+
+  it("mẫu đích có heading con chưa có chủ ⇒ mục riêng tên lạ vẫn là mục thừa", () => {
+    const r = pairSections(oldDoc, [neu(0, "1. Product Overview", "fixed:1", { level: 2 }), neu(1, "1.1 Vision", "unmapped", { level: 3 })])
+    expect(r.followers.find((f) => f.old_key === "custom:CS04")).toBeUndefined()
+    expect(pairOf(r, "custom:CS04")).toMatchObject({ new_key: null })
+  })
+})

@@ -219,7 +219,7 @@ router.get("/:projectId/run-state/active", authMiddleware, pipelineController.ge
  *         description: "Id bước hoặc đơn vị giai đoạn bắt đầu đếm; thiếu ⇒ bước tới lượt"
  *     responses:
  *       200:
- *         description: "runEstimateResponseSchema — { scope, from_step, units[], steps_total, ai_steps_total, credits_total, available_credits }"
+ *         description: "runEstimateResponseSchema — { scope, from_step, units[], steps_total, ai_steps_total, credits_total (= credits_max), credits_min, credits_max, screen_estimate, available_credits }"
  */
 router.get("/:projectId/run-estimate", authMiddleware, pipelineController.getRunEstimate)
 

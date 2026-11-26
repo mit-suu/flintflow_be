@@ -25,6 +25,7 @@ import { withFrameRenumber } from "../spine/template-frames.js"
 import { actorGeneralizationErrors, briefExtractionErrors, dropRedundantScalarAdds, requiredArrayErrors, sanitizeModelOps, useCaseNamingErrors, useCaseWiringErrors, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
 import { ESCALATION_MODEL, isErdOnly, normalizeEntityNames } from "./erd-retry.js"
 import { briefQuoteSources, dropUngroundedGaps } from "./gap-quote.js"
+import { localizedMissingErrors } from "./localized-missing.js"
 
 export const NEEDS_USER_INPUT = "NEEDS_USER_INPUT"
 /** Phases §4.1: gửi lại model kèm lỗi tối đa 2 lần, rồi hỏi user. */
@@ -97,6 +98,8 @@ export interface DraftOptions {
   statusAssumptionIds?: ReadonlySet<string>
   /** User đã quyết trong lượt của step (thẻ/chat) — cho phép step rà giả định B-2.1 đổi status giả định (xem `USER_DECISION_SWEEP_STEPS`). */
   userDecided?: boolean
+  /** FLF-480 (P13 #5): bước đang chạy giữa một lượt chạy cả giai đoạn (còn bước sau trong giai đoạn) ⇒ `notes` không báo bước kế. */
+  midPhaseRun?: boolean
   /**
    * FLF-260: ngôn ngữ trả lời của phiên — có thì mọi lượt gọi (kể cả retry) mang nó, `buildPrompt` nối khối "Reply language"
    * để `notes` và câu giả định cho user (`statement_vi`, `rationale_vi`) đúng ngôn ngữ. Thiếu ⇒ prompt như cũ.
@@ -122,8 +125,10 @@ export class DraftRejectedError extends ApiError {
   readonly errors: ValidationError[]
   readonly lastOps: unknown[]
   readonly attempts: DraftAttempt[]
+  /** FLF-477: usage (kèm `logId`) của từng lượt đã gọi model — để ghi trạng thái lượt bị từ chối vào log AI. */
+  readonly usage: DraftUsage[]
 
-  constructor(attempts: DraftAttempt[]) {
+  constructor(attempts: DraftAttempt[], usage: DraftUsage[] = []) {
     const last = attempts[attempts.length - 1]
     // FLF-247: câu cho user không mang text op/Zod — lỗi thô ở `errors` / `meta.errors` (lượt retry đưa model đọc
     // `errors`, không đọc message này)
@@ -136,6 +141,21 @@ export class DraftRejectedError extends ApiError {
     this.errors = last?.errors ?? []
     this.lastOps = last?.ops ?? []
     this.attempts = attempts
+    this.usage = usage
+  }
+
+  /** FLF-477: bản rút gọn từng lượt (luật, path, op_index, message ≤ 200 ký tự) để in một dòng log. */
+  summary(): Array<{ attempt: number; ops_count: number; errors: Array<{ rule: string; path?: string; op_index?: number; message: string }> }> {
+    return this.attempts.map((a) => ({
+      attempt: a.attempt,
+      ops_count: a.ops.length,
+      errors: a.errors.map((e) => ({
+        rule: e.rule,
+        ...(e.path !== undefined ? { path: e.path } : {}),
+        ...(e.op_index !== undefined ? { op_index: e.op_index } : {}),
+        message: e.message.slice(0, 200)
+      }))
+    }))
   }
 }
 
@@ -206,6 +226,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       content_guidance: ctx.documents ? `${guidance}\n\n${ctx.documents}` : guidance,
       // FLF-292: có tài liệu upload ⇒ skill bật luật khai `sources` (khối `{{#if has_documents}}`)
       has_documents: ctx.documents ? true : false,
+      // FLF-480 (P13 #5): giữa lượt chạy cả giai đoạn — chỉ bước cuối mới mời bước kế (khối `{{#if mid_phase_run}}` ở luật 15)
+      mid_phase_run: options.midPhaseRun === true,
       validation_errors: errors.length > 0 ? errors : "(none)",
       previous_ops: previousOps ?? "(none)",
       patch_mode: patchBase !== null
@@ -257,6 +279,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       if (errors.length === 0 && attempt <= maxRetries && callKind !== "glossary_scan") errors = requiredArrayErrors(spine, ops as Op[], stepId)
       // Chức năng màn hình sinh ra từ use case ⇒ S-4.1 gắn ngay; còn use case người dùng chưa gắn ⇒ gửi lại model
       if (errors.length === 0 && attempt <= maxRetries) errors = useCaseWiringErrors(spine, ops as Op[], stepId)
+      // FLF-479 (12b-1): tài liệu khác ngôn ngữ Spine mà chữ model vừa viết không có `localized` ⇒ gửi lại model; lượt cuối nhận lô (banner "chưa dịch" là lưới cuối)
+      if (errors.length === 0 && attempt <= maxRetries && options.documentLanguage && callKind !== "glossary_scan") errors = localizedMissingErrors(ops as Op[], localized)
 
       if (errors.length === 0) {
         attempts.push({ attempt, ops, errors })
@@ -280,5 +304,5 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
     patchBase = isErdOnly(errors) ? ops : null
   }
 
-  throw new DraftRejectedError(attempts)
+  throw new DraftRejectedError(attempts, usage)
 }

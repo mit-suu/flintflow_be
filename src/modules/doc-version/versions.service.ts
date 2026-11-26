@@ -6,7 +6,7 @@ import { FIXED_TEMPLATE_RENDERER_REVISION, templateLayoutUnavailable } from "./t
  * Mode 1 v2 (FLF-186): version là bản render từ Spine — block (#13) và so sánh (#15) đọc từ file của version, khớp theo
  * text (file render không mang bookmark neo); không còn Track Changes theo block.
  * Tải bản draft ⇒ file có Track Changes + watermark DRAFT (G8, chỉ bản tải về, không sửa file lưu),
- * tên theo `versionFileName` (FLF-334, `…_v1.0+CR-002_DRAFT.docx`) + stamp có release gốc / CR mới nhất; bản release ⇒ bản sạch (accept-all) trừ khi xin `variant=tracked`.
+ * tên theo `versionFileName` (FLF-334, `…_v1.2_DRAFT.docx`) + stamp có release gốc / CR mới nhất; bản release ⇒ bản sạch (accept-all) trừ khi xin `variant=tracked`.
  */
 
 import { DocxPackage, addDraftWatermark, readStamp, writeStamp, type OoxmlBlock } from "../docx-ooxml/index.js"
@@ -115,7 +115,7 @@ export const downloadVersion = async (
   }
   const lineage = versionLineage(await listDocVersions(projectId), v.version)
   const name = (opts: { tracked?: boolean; original?: boolean; language?: string } = {}) =>
-    versionFileName({ name: projectName, release: lineage.release, base: lineage.base, latestCr: lineage.latestCr, ...opts })
+    versionFileName({ name: projectName, release: lineage.release, base: lineage.base, latestCr: lineage.latestCr, version: v.version, ...opts })
   if (otherLanguage) {
     // Chỉ version có snapshot baseline của dự án chuyển từ mode 2 — import thật (đường layout) / bản nháp CR chưa hỗ trợ
     if (!options.project || !otherLanguageAvailable(v, options.project)) throw documentLanguageUnavailable()

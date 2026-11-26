@@ -12,10 +12,11 @@ import { hasBaseline } from "../import/import.state.js"
 import { latestImport, transitionImport } from "../import/import.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { toIso } from "../import/mode1.http.js"
+import { crDocumentLanguage } from "./cr-language.js"
 import { clipMaterialText, formatCrId, formatMaterialId, type CrSourceKind } from "./change-request.constants.js"
 import type { ChangeRequestDetail, CreateChangeRequest, PendingSection } from "./change-request.dto.js"
 import { ChangeRequest, CrCounter, type CrClarification, type CrSeed, type IChangeRequest } from "./change-request.model.js"
-import { CR_OPEN_STATUSES, CR_STATUSES, CR_STATUS_LABELS, assertTransition, isTerminal, type CrStatus } from "./change-request.state.js"
+import { CR_OPEN_STATUSES, CR_STATUSES, MAX_CLARIFY_ROUNDS, CR_STATUS_LABELS, assertTransition, isTerminal, type CrStatus } from "./change-request.state.js"
 import { seedFromFlags } from "./flag-seed.js"
 import { ChangeGroup } from "./change-group.model.js"
 import { ChangeLocation, type LocationProposal } from "./change-location.model.js"
@@ -57,6 +58,14 @@ export const transitionCr = async (cr: IChangeRequest, to: CrStatus): Promise<vo
   await cr.save()
 }
 
+/** FLF-474: vòng làm rõ đang chờ trả lời, đếm từ lần gộp lệnh gần nhất như `runClarify` (`asked`). */
+export const clarifyRoundOf = (cr: IChangeRequest): { n: number; max: number; extra: boolean } | null => {
+  if (cr.status !== "awaiting_answers" || cr.clarifications.length === 0) return null
+  const lastAmendment = cr.amendments?.length ? cr.amendments[cr.amendments.length - 1] : null
+  const n = Math.max(1, cr.clarifications.length - (lastAmendment?.after_round ?? 0))
+  return { n, max: MAX_CLARIFY_ROUNDS, extra: n > MAX_CLARIFY_ROUNDS }
+}
+
 const toCrDto = (cr: IChangeRequest): ChangeRequestDetail["change_request"] => ({
   cr_id: cr.cr_id,
   project_id: String(cr.projectId),
@@ -70,8 +79,10 @@ const toCrDto = (cr: IChangeRequest): ChangeRequestDetail["change_request"] => (
     round: c.round,
     questions: [...c.questions],
     answers: [...c.answers],
-    suggestions: c.questions.map((_, i) => [...(c.suggestions?.[i] ?? [])])
+    suggestions: c.questions.map((_, i) => [...(c.suggestions?.[i] ?? [])]),
+    kinds: c.kinds?.length ? [...c.kinds] : []
   })),
+  clarify_round: clarifyRoundOf(cr),
   base_doc_version: cr.base_doc_version,
   result_doc_version: cr.result_doc_version ?? null,
   created_by: String(cr.created_by),
@@ -128,6 +139,7 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
     loadLayout(String(cr.projectId))
   ])
   const spine = record ? stripRecord(record) : null
+  const docLang = spine ? await crDocumentLanguage(String(cr.projectId), spine) : undefined
   const pending = await othersPending(cr.projectId, cr.cr_id, locations.map((l) => l.path))
   const asText = (json: string | null | undefined) => (json ? elementText(parseJson(json)) : "")
   return {
@@ -140,7 +152,7 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
         location_id: l.location_id,
         path: l.path,
         section_id,
-        section_title: spine && section_id !== "misc" ? titleOfSection(spine, section_id, layout) : "",
+        section_title: spine && section_id !== "misc" ? titleOfSection(spine, section_id, layout, docLang) : "",
         current_text: spine ? currentText(spine, l.path) : "",
         found_by: [...l.found_by],
         entity_paths: [...l.entity_paths],

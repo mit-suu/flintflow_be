@@ -42,6 +42,8 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   [ActionType.CR_CONSISTENCY]: 2,
   // Một ảnh / lượt, output ngắn (chép chữ + mô tả) — rẻ hơn ảnh diagram của I-4
   [ActionType.CR_MATERIAL_IMAGE]: 1,
+  // FLF-492: một lượt cho tối đa 20 dòng Record of Changes, output ngắn (một câu mỗi dòng)
+  [ActionType.CR_RECORD_SUMMARY]: 1,
   // FLF-333 (business-flow nguyên tắc 9, UC-79): hỏi tri thức về SRS / 29148 KHÔNG tốn credit — chống lạm dụng bằng
   // giới hạn số câu mỗi ngày (`KNOWLEDGE_DAILY_LIMIT`), không chuyển sang trừ credit. Vẫn ghi `AiActionLog` cho admin.
   [ActionType.KNOWLEDGE_ANSWER]: 0,

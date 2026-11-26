@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { RenderedDocument } from "./rendered-document.types.js"
-import { pristineSectionIds, rearrangeOf, sourceBasedFrom } from "./source-fidelity.js"
+import { fidelityFrom, pristineSectionIds, rearrangeOf, sourceBasedFrom } from "./source-fidelity.js"
 
 const doc = (sections: RenderedDocument["sections"]): RenderedDocument => ({
   projectId: "p", projectName: "Portal", version: "0.1", source: "draft", generatedAt: "2026-11-06T00:00:00Z", recordOfChanges: [], sections
@@ -137,6 +137,30 @@ describe("pristineSectionIds - khoá mục", () => {
 
   it("dự án đã đổi mẫu: mục khung neo theo section_id; feature / function / custom đổi tên vẫn là sửa", () => {
     expect(pristineSectionIds(renamed, imported, { anchorById: true })).toEqual(new Set(["fixed:1"]))
+  })
+})
+
+describe("fidelityFrom - importedSectionIds (FLF-468 lát A)", () => {
+  const spineStub = {} as Parameters<typeof fidelityFrom>[2]
+
+  it("đang dựng chính bản import (chưa có Spine mốc) ⇒ mọi mục hiện tại coi như đã có lúc import", async () => {
+    const current = doc([{ id: "function:FN1", number: "3.1.1", heading: "Sign in", level: 3, blocks: [para("A")] }])
+    const result = await fidelityFrom(current, async () => current, null, false)
+    expect(result.importedSectionIds).toEqual(new Set(["function:FN1"]))
+    expect(result.keepSource).toEqual(new Set(["function:FN1"]))
+  })
+
+  it("Spine mốc có mục mà bản in hiện tại không còn section ⇒ mục đó vẫn nằm trong importedSectionIds (đã bị CR xoá)", async () => {
+    const imported = doc([
+      { id: "function:FN1", number: "3.1.1", heading: "Sign in", level: 3, blocks: [para("A")] },
+      { id: "function:FN2", number: "3.1.2", heading: "Export schedule", level: 3, blocks: [para("B")] }
+    ])
+    // Bản hiện tại: chức năng Export schedule đã bị CR xoá ⇒ Spine hiện tại không còn dựng được section đó
+    const current = doc([{ id: "function:FN1", number: "3.1.1", heading: "Sign in", level: 3, blocks: [para("A")] }])
+    const result = await fidelityFrom(current, async () => imported, spineStub, false)
+    expect(result.importedSectionIds).toEqual(new Set(["function:FN1", "function:FN2"]))
+    // Mục còn section (FN1) nhưng in khác lúc import ở ví dụ này thì không nguyên vẹn — ở đây giống lúc import ⇒ vẫn giữ
+    expect(result.keepSource).toEqual(new Set(["function:FN1"]))
   })
 })
 

@@ -25,7 +25,7 @@ export interface LocationDisplay {
 }
 
 /** Mã người đọc thấy trong tài liệu (mã khách đặt). Mã nội bộ FlintFlow (CS11, VER-05, F-3.2.9, A07, M9…) không hiện. */
-const DOC_ID = /^(UC|BR|REQ|NFR|MSG|TC|FR|US|IR|SR)[-_]?[A-Z0-9-]*\d/i
+export const DOC_ID = /^(UC|BR|REQ|NFR|MSG|TC|FR|US|IR|SR)[-_]?[A-Z0-9-]*\d/i
 
 const clip = (s: string, n = 90): string => {
   const t = s.replace(/\s+/g, " ").trim()
@@ -33,9 +33,16 @@ const clip = (s: string, n = 90): string => {
 }
 
 const LABEL_FIELDS = ["name", "term", "title", "statement", "artifact", "description", "definition", "content", "text"] as const
-const BODY_FIELDS = ["name", "term", "title", "statement", "description", "definition", "content", "text", "rationale", "acceptance"] as const
+// FLF-480 (B16): thêm `trigger` (chuỗi) của chức năng — thiếu field này khiến CR chỉ đổi "điều kiện bắt đầu" ra
+// "Trước / Sau" giống nhau.
+const BODY_FIELDS = ["name", "term", "title", "statement", "description", "definition", "content", "text", "rationale", "acceptance", "trigger"] as const
 /** Field ngắn in kèm sau chữ chính ("số đo: ngưỡng") — vd NFR đổi ngưỡng 2 s ⇒ 1 s phải thấy trong trước / sau. */
 const DETAIL_FIELDS = ["metric", "threshold"] as const
+/**
+ * FLF-480 (B16): luồng chính (`normal`) / luồng rẽ nhánh (`abnormal`) của chức năng — mảng bước, không phải chuỗi
+ * nên không lọt qua `BODY_FIELDS`. CR chỉ đổi một bước giữa luồng cũng phải thấy khác ở "Trước / Sau".
+ */
+const STEP_LIST_FIELDS = ["normal", "abnormal"] as const
 
 const blockText = (b: CustomBlock): string => {
   if (b.kind === "table") return (b.rows ?? []).map((r) => r.join(" | ")).join("\n")
@@ -46,7 +53,12 @@ const blockText = (b: CustomBlock): string => {
 /** Chữ của khối văn bản mục riêng / phần nối — mỗi khối một dòng. */
 const blocksText = (blocks: readonly CustomBlock[]): string => blocks.map(blockText).filter((t) => t.trim()).join("\n")
 
-/** Chữ chính của một phần tử Spine (tên — mô tả / phát biểu), không dạng `khoá: giá trị`. */
+/**
+ * Chữ chính của một phần tử Spine (tên — mô tả / phát biểu), không dạng `khoá: giá trị`.
+ * FLF-480 (B16): chức năng còn có luồng chính / luồng rẽ nhánh (mảng bước) và điều kiện kiểm tra (`validations`,
+ * mảng object) — cộng thêm vào cuối, mỗi bước / điều kiện một dòng (xuống dòng, không nối bằng ", ": bước đã kết
+ * thúc bằng dấu chấm mà nối thêm ", " ra thừa dấu kiểu "...,").
+ */
 export const elementText = (value: unknown): string => {
   if (isRow(value) && Array.isArray(value.blocks)) return blocksText(value.blocks as CustomBlock[])
   if (!isRow(value)) return typeof value === "string" ? value : ""
@@ -54,7 +66,22 @@ export const elementText = (value: unknown): string => {
   const parts = BODY_FIELDS.map((f) => value[f]).filter((v): v is string => typeof v === "string" && v.trim().length > 0)
   const unique = parts.filter((p, i) => parts.indexOf(p) === i)
   const detail = DETAIL_FIELDS.map((f) => value[f]).filter((v): v is string => typeof v === "string" && v.trim().length > 0).join(": ")
-  return [id && !unique.some((p) => p.includes(id)) ? id : "", ...unique, detail ? `(${detail})` : ""].filter(Boolean).join(" - ")
+  const steps = STEP_LIST_FIELDS.flatMap((f) => {
+    const list = value[f]
+    return Array.isArray(list) ? list.filter((s): s is string => typeof s === "string" && s.trim().length > 0) : []
+  })
+  const validations = Array.isArray(value.validations)
+    ? (value.validations as unknown[]).filter(isRow).map((v) => v.statement).filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+    : []
+  return [
+    id && !unique.some((p) => p.includes(id)) ? id : "",
+    ...unique,
+    detail ? `(${detail})` : "",
+    ...(steps.length ? [steps.join("\n")] : []),
+    ...(validations.length ? [validations.join("\n")] : [])
+  ]
+    .filter(Boolean)
+    .join(" - ")
 }
 
 const elementLabel = (value: unknown): string => {

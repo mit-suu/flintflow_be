@@ -92,7 +92,7 @@ describe("decisionOps", () => {
 
   it("sổ đưa vào prompt chỉ gồm điều còn hiệu lực", () => {
     const spine = spineWith([decision(), decision({ id: "DC02", topic_key: "deposit_amount", answer: "50.000đ", superseded_by: "DC03" })])
-    expect(ledgerForPrompt(spine)).toEqual([{ topic_key: "uptime", answer: "99%", step_id: "S-1.4" }])
+    expect(ledgerForPrompt(spine)).toEqual([{ topic_key: "uptime", question: "Mức uptime mong muốn?", answer: "99%", step_id: "S-1.4" }])
   })
 })
 
@@ -129,5 +129,69 @@ describe("P05 - câu đã chốt mà model đặt topic_key khác vẫn bị b�
     ] as never)
     expect(out.dropped).toMatchObject([{ answer: "800 học sinh, 30 lớp" }])
     expect(out.questions.map((q) => q.topic_key)).toEqual(["grade_scale"])
+  })
+})
+
+describe("FLF-472 (E) - hỏi lại bằng chữ khác nhưng lựa chọn trùng đáp án đã chốt", () => {
+  const settled = spineWith([
+    decision({ topic_key: "order_completion", question: "Đơn hoàn tất tính khi nào?", answer: "Người mua xác nhận đã nhận hàng" })
+  ])
+  const opt = (...labels: string[]) => labels.map((label) => ({ label }))
+
+  it("khoá khác + câu diễn đạt khác nhưng có lựa chọn đúng đáp án đã chốt ⇒ bỏ", () => {
+    const out = filterAskedQuestions(settled, [
+      { topic_key: "transaction_success", question: "Khi nào coi là giao dịch thành công?", options: opt("Người mua xác nhận đã nhận hàng (Khuyến nghị)", "Sau 7 ngày kể từ lúc giao") }
+    ] as never)
+    expect(out.questions).toEqual([])
+    expect(out.dropped).toMatchObject([{ answer: "Người mua xác nhận đã nhận hàng" }])
+  })
+
+  it("câu không liên quan dù có lựa chọn trùng đáp án ⇒ giữ", () => {
+    const out = filterAskedQuestions(settled, [
+      { topic_key: "refund_trigger", question: "Cửa hàng nhận thông báo bằng kênh nào?", options: opt("Người mua xác nhận đã nhận hàng", "Email") }
+    ] as never)
+    expect(out.questions.map((q) => q.topic_key)).toEqual(["refund_trigger"])
+  })
+
+  it("không có lựa chọn nào trùng đáp án đã chốt ⇒ giữ (khác nghĩa hoặc user đổi ý có kèm conflict)", () => {
+    const out = filterAskedQuestions(settled, [
+      { topic_key: "transaction_success", question: "Khi nào coi là giao dịch thành công?", options: opt("Ngay khi thanh toán", "Sau 7 ngày kể từ lúc giao") }
+    ] as never)
+    expect(out.questions).toHaveLength(1)
+    const withConflict = filterAskedQuestions(settled, [
+      { topic_key: "transaction_success", question: "Khi nào coi là giao dịch thành công?", conflict: "user vừa đổi ý", options: opt("Người mua xác nhận đã nhận hàng", "Sau 7 ngày") }
+    ] as never)
+    expect(withConflict.questions).toHaveLength(1)
+  })
+
+  it("đáp án ngắn (dưới 3 từ) cần trùng câu hỏi ≥ 0.35 - lựa chọn 'Có' trùng ngẫu nhiên không bị bỏ", () => {
+    const shortDecided = spineWith([decision({ topic_key: "refund", question: "Có hoàn tiền không?", answer: "Có" })])
+    const unrelated = filterAskedQuestions(shortDecided, [
+      { topic_key: "invoice", question: "Khi nào xuất hoá đơn cho khách?", options: opt("Có", "Không") }
+    ] as never)
+    expect(unrelated.questions).toHaveLength(1)
+    const related = filterAskedQuestions(shortDecided, [
+      { topic_key: "refund_again", question: "Có hoàn tiền khi khách huỷ không?", options: opt("Có", "Không") }
+    ] as never)
+    expect(related.questions).toEqual([])
+  })
+})
+
+describe("FLF-472 - ledgerForPrompt kèm câu hỏi gốc", () => {
+  it("mỗi mục có question (rút gọn khi quá dài); quyết định cũ thiếu câu hỏi vẫn đọc được", () => {
+    const long = "x".repeat(300)
+    const out = ledgerForPrompt(spineWith([decision(), decision({ id: "DC02", topic_key: "roles", question: long, answer: "A" }), decision({ id: "DC03", topic_key: "old", question: "" })]))
+    expect(out[0]).toMatchObject({ topic_key: "uptime", question: "Mức uptime mong muốn?", answer: "99%" })
+    expect(out[1].question).toHaveLength(160)
+    expect(out[2]).not.toHaveProperty("question")
+  })
+})
+
+describe("FLF-472 (5b) - decisionOps cho đính chính", () => {
+  it("đính chính thay quyết định cũ: dòng cũ superseded_by, dòng mới ghi lý do đính chính", () => {
+    const spine = spineWith([decision({ topic_key: "external_partners", answer: "Chỉ VNPay và MoMo" })])
+    const ops = decisionOps(spine, "B-1", [{ topic_key: "external_partners", question: "Đối tác ngoài?", answer: "GHN và GHTK cũng nối API", correction: true }])
+    expect(ops[0]).toMatchObject({ op: "set", path: "decisions[id=DC01].superseded_by" })
+    expect(ops[1]).toMatchObject({ op: "add", path: "decisions[]", reason: "Đính chính external_partners qua chat" })
   })
 })

@@ -23,7 +23,7 @@ import { withMeteredAi } from "../import/metered-ai.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { MODE1_RULE_PROFILE } from "../import/mode1-rule-profile.js"
 import { flagKey, runDeterministicCheck } from "../spine/deterministic-check.js"
-import { humanizeText, pathLabel, ruleLabel } from "../spine/human-labels.js"
+import { humanizeText, internalElementNames, nameElementIds, pathLabel, ruleLabel } from "../spine/human-labels.js"
 import { TransactionRejectedError, planTransaction } from "../spine/op-engine.js"
 import { userOpSchema, type Op } from "../spine/op.types.js"
 import * as spineRepository from "../spine/spine.repository.js"
@@ -37,11 +37,13 @@ import { ChangeLocation, type IChangeLocation, type VerifyViolation } from "./ch
 import { newContradictions } from "./clarify.service.js"
 import { answersText, crHeader, glossaryText, plainValues, relatedElements, relatedPassages, truncate } from "./cr-context.js"
 import { regroup } from "./group.service.js"
-import { crDocumentLanguage, foreignTexts, wrongLanguageMessage } from "./cr-language.js"
+import { crDocumentLanguage, foreignTexts, isForeignText, wrongLanguageMessage } from "./cr-language.js"
 import type { UserLocale } from "../../shared/i18n/locale.js"
 import { refreshDiagramLocations } from "./diagram-location.js"
 import { fixDuplicateIds } from "./propose.service.js"
-import { elementValue, isArrayPath, listElements, opElement, sectionOfElement, unchangedSince, valueText } from "./spine-location.js"
+import { elementPathOf, elementValue, isArrayPath, listElements, opElement, sectionOfElement, unchangedSince, valueText } from "./spine-location.js"
+import { structuralRequest } from "./structural-intent.js"
+import { emptiedUseCases, unlinkedNewFunctions } from "../spine/use-case-propagation.js"
 import { hasRemoveOp } from "./location-display.js"
 import { loadOutOfScopeSections, outOfScopeKind, type OutOfScopeKind } from "./out-of-scope.js"
 
@@ -59,11 +61,13 @@ export const withoutKept = (violations: readonly VerifyViolation[], kept: readon
 
 /** Vị trí AI cảnh báo mà BA chưa chọn "Vẫn làm" hay bỏ — chặn xác nhận. */
 export const hasPendingWarning = (l: Pick<IChangeLocation, "warning" | "kept_intent" | "conclusion">): boolean => !!l.warning && !l.kept_intent && l.conclusion !== "not_related"
+import { COUNT_COLLECTIONS, findCountMentionsInText, type CountCollection } from "./count-mentions.js"
+import { removedItems } from "./content-removal.js"
 
 export const valueChanged = (loc: Pick<IChangeLocation, "location_id" | "path">): Mode1Error =>
   new Mode1Error("CR_VALUE_CHANGED", `${pathLabel(loc.path)} đã bị sửa ở chỗ khác kể từ lúc đề xuất - tải lại rồi đề xuất lại`, { location_id: loc.location_id, path: loc.path })
 
-type CheckLocation = Pick<IChangeLocation, "location_id" | "path" | "conclusion" | "proposal">
+type CheckLocation = Pick<IChangeLocation, "location_id" | "path" | "conclusion" | "proposal"> & Partial<Pick<IChangeLocation, "reason">>
 
 const opPath = (raw: unknown): string => {
   const path = (raw as { path?: unknown } | null)?.path
@@ -95,14 +99,20 @@ export const ownedElements = (crId: string, locations: readonly Pick<IChangeLoca
 
 /** Chữ mới của đề xuất viết khác ngôn ngữ tài liệu (QLHS 11/11 bug #17) — `new_text` là JSON giá trị sau khi sửa. */
 const languageViolation = (loc: CheckLocation, current: unknown, language: UserLocale): VerifyViolation[] => {
-  let after: unknown
+  let after: unknown = null
   try {
     after = JSON.parse(loc.proposal?.new_text ?? "null")
   } catch {
-    return []
+    after = null
   }
-  const texts = foreignTexts(language, current, after)
-  return texts.length ? [{ rule: "wrong_language", message: wrongLanguageMessage(pathLabel(loc.path), language, texts) }] : []
+  const texts = after === null ? [] : foreignTexts(language, current, after)
+  // FLF-480 (ChoViet #12b): ghi chú (thành comment trong file) phải cùng ngôn ngữ tài liệu. Lý do (`reason`) chỉ hiện ở màn CR
+  // nên không chặn: chặn làm CR soạn lại nhiều vòng chỉ vì một câu giải thích
+  const notes = [loc.proposal?.comment_text]
+    .map((t) => (typeof t === "string" ? t.trim() : ""))
+    .filter((t) => t && isForeignText(t, language))
+  const all = [...texts, ...notes]
+  return all.length ? [{ rule: "wrong_language", message: wrongLanguageMessage(pathLabel(loc.path), language, all) }] : []
 }
 
 /** `language`: ngôn ngữ chữ của tài liệu (`crDocumentLanguage`) — thiếu ⇒ không kiểm ngôn ngữ. */
@@ -154,6 +164,56 @@ export const checkLocation = (
   return out
 }
 
+/**
+ * FLF-469 (A.2): phần tử mà một op chạm tới, để tìm vị trí sở hữu của vi phạm không mang `op_index` (lỗi schema / bất biến
+ * tính trên cả Spine sau lô). `set` / `remove` ⇒ phần tử của path; `add` ⇒ phần tử mới theo `value.id` (`arr[id=X]`).
+ */
+const touchedElement = (op: Op): string | null => {
+  const array = /^(\w+)\[\]$/.exec(op.path)?.[1]
+  if (op.op === "add" && array) {
+    const id = (op as { value?: unknown }).value && typeof (op as { value?: unknown }).value === "object" ? ((op as { value: { id?: unknown } }).value.id) : undefined
+    return typeof id === "string" ? `${array}[id=${id}]` : null
+  }
+  return elementPathOf(op.path)
+}
+
+/**
+ * Vị trí sở hữu của vi phạm có `path` (hoặc cờ đỏ có `target_id`): op `set` / `remove` cùng phần tử, hoặc op `add` có
+ * `value.id` khớp. Cờ chỉ mang id (`FN045`) khớp phần tử `…[id=FN045]`. Không tìm được ⇒ rỗng (caller chọn cách dự phòng).
+ */
+export const ownersOfPath = (ops: readonly Op[], owner: readonly string[], violationPath: string): string[] => {
+  const element = elementPathOf(violationPath)
+  const byId = element ? null : (/^[\w.-]+$/.test(violationPath) ? `[id=${violationPath}]` : null)
+  const hit = new Set<string>()
+  ops.forEach((op, i) => {
+    const touched = touchedElement(op)
+    if (!touched) return
+    if ((element && touched === element) || (byId && touched.endsWith(byId))) hit.add(owner[i])
+  })
+  return [...hit]
+}
+
+/**
+ * FLF-469 (A.2): lỗi schema của lô sau khi áp (`schema_invalid`) có path dạng Zod `entities.0.attributes.0.kind` - chỉ số
+ * trong mảng SAU lô. Đổi `arr.N...` thành `arr[id=X]` bằng cách mô phỏng thứ tự mảng: phần tử có sẵn rồi phần tử op `add`
+ * thêm (theo thứ tự op), trừ phần tử op `remove` xoá. Không đổi được ⇒ trả nguyên path.
+ */
+export const indexPathToElement = (spine: Spine, ops: readonly Op[], violationPath: string): string => {
+  const m = /^(\w+)\.(\d+)(?:\.|$)/.exec(violationPath)
+  if (!m) return violationPath
+  const ids = ((spine as unknown as Record<string, unknown>)[m[1]] as { id?: unknown }[] | undefined)?.map((e) => String(e.id)) ?? []
+  for (const op of ops) {
+    const touched = touchedElement(op)
+    if (!touched?.startsWith(`${m[1]}[id=`)) continue
+    const id = /\[id=([^\]]+)\]/.exec(touched)?.[1]
+    if (!id) continue
+    if (op.op === "add" && !ids.includes(id)) ids.push(id)
+    else if (op.op === "remove") ids.splice(0, ids.length, ...ids.filter((x) => x !== id))
+  }
+  const id = ids[Number(m[2])]
+  return id === undefined ? violationPath : `${m[1]}[id=${id}]`
+}
+
 /** Chạy khô toàn bộ op Spine của CR; vi phạm gắn về vị trí sinh ra op. */
 /** `exempt`: vị trí không chịu kiểm luật (sửa chữ ở mục ngoài phạm vi) — lỗi đỏ mới không gắn vào chúng. */
 export const checkSpineOps = (
@@ -179,6 +239,9 @@ export const checkSpineOps = (
     }
   }
   if (!ops.length) return out
+  // FLF-469 (A.1): vị trí có op mà C-4 chạy khô riêng đã hỏng (`new_text = null`) — khi cả lô trượt mà vi phạm không chỉ
+  // được vào đâu, đó là nghi can duy nhất; vị trí khác không bị kéo theo (không soạn lại oan).
+  const broken = [...new Set(locations.filter((l) => l.conclusion === "edit" && l.proposal && l.proposal.new_text === null && l.proposal.spine_ops.length > 0).map((l) => l.location_id))].filter((id) => owner.includes(id))
   try {
     const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: cr.cr_id }, { startSeq: 1 })
     const before = new Set(runDeterministicCheck(spine, [], { ruleProfile: MODE1_RULE_PROFILE }).filter((c) => c.level === "red").map(flagKey))
@@ -187,12 +250,20 @@ export const checkSpineOps = (
     const newRed = runDeterministicCheck(plan.spine, [], { ruleProfile: MODE1_RULE_PROFILE }).filter(
       (c) => c.level === "red" && c.rule_id !== "diagram_stale" && !before.has(flagKey(c))
     )
-    for (const c of newRed) for (const locId of new Set(owner.filter((o) => !exempt.has(o)))) push(locId, { rule: "new_red_flag", message: `Đề xuất làm phát sinh lỗi đỏ mới: ${ruleLabel(c.rule_id) ? `${ruleLabel(c.rule_id)} - ` : ""}${c.message}` })
+    for (const c of newRed) {
+      // FLF-469 (A.3): cờ có đích phần tử ⇒ chỉ vị trí sinh ra phần tử đó; không khớp được mới gán cho mọi vị trí
+      const mine = c.target_id ? ownersOfPath(ops, owner, c.target_id) : []
+      const targets = mine.length ? mine : [...new Set(owner)]
+      for (const locId of targets.filter((o) => !exempt.has(o))) push(locId, { rule: "new_red_flag", message: `Đề xuất làm phát sinh lỗi đỏ mới: ${ruleLabel(c.rule_id) ? `${ruleLabel(c.rule_id)} - ` : ""}${c.message}` })
+    }
   } catch (err) {
     if (!(err instanceof TransactionRejectedError)) throw err
     for (const v of err.violations) {
-      const locId = v.op_index !== undefined ? owner[v.op_index] : undefined
-      for (const id of locId ? [locId] : [...new Set(owner)]) push(id, { rule: v.rule, message: humanizeText(v.message), ...(v.path ? { path: v.path } : {}) })
+      const byIndex = v.op_index !== undefined ? owner[v.op_index] : undefined
+      // FLF-469 (A.2): không có op_index mà có path ⇒ vị trí sở hữu phần tử đó; rồi tới vị trí chạy khô riêng đã hỏng
+      const byPath = byIndex || !v.path ? [] : ownersOfPath(ops, owner, indexPathToElement(spine, ops, v.path))
+      const targets = byIndex ? [byIndex] : byPath.length ? byPath : broken.length ? broken : [...new Set(owner)]
+      for (const id of targets) push(id, { rule: v.rule, message: humanizeText(v.message), ...(v.path ? { path: v.path } : {}) })
     }
   }
   return out
@@ -212,6 +283,123 @@ export const recheckBeforeWrite = async (cr: IChangeRequest, locations: IChangeL
     const left = withoutKept(vs, loc?.kept_violations ?? [])
     if (left.length) out.set(locId, left)
   }
+  return out
+}
+
+/** FLF-473: Spine sau khi áp toàn bộ op `edit` của CR (như `checkSpineOps`) — op lỗi ⇒ `null` (bỏ qua câu đếm, lỗi thật đã bắt ở trên). */
+const plannedAfterAll = (spine: Spine, locations: readonly CheckLocation[]): Spine | null => {
+  const ops: Op[] = []
+  for (const l of locations) {
+    if (l.conclusion !== "edit") continue
+    for (const raw of l.proposal?.spine_ops ?? []) {
+      const parsed = userOpSchema.safeParse(raw)
+      if (parsed.success) ops.push(parsed.data)
+    }
+  }
+  if (!ops.length) return spine
+  try {
+    return planTransaction(spine, { base_version: spine.spine_version, ops, by: "cr-verify:count" }, { startSeq: 1 }).spine
+  } catch (err) {
+    if (err instanceof TransactionRejectedError) return null
+    throw err
+  }
+}
+
+type CountCheckLocation = CheckLocation & Pick<IChangeLocation, "found_by" | "entity_paths">
+
+/**
+ * FLF-473 (EduCampus B14): C-5 tất định cho câu đếm (`found_by: "count"`) — đề xuất vẫn ghi số cũ, hoặc AI tự tính sai
+ * (vd "10 trừ 1 = 9" thay vì đếm lại trên Spine), là một lỗi code như mọi lỗi khác (AI làm lại), không chỉ cờ vàng.
+ * `after`: Spine sau khi áp toàn bộ op `edit` của CR (`plannedAfterAll`).
+ */
+export const checkCountMentions = (after: Spine, locations: readonly CountCheckLocation[]): Map<string, VerifyViolation[]> => {
+  const counts = new Map<CountCollection, number>(COUNT_COLLECTIONS.map((c) => [c, ((after as unknown as Record<string, unknown[]>)[c] ?? []).length]))
+  const out = new Map<string, VerifyViolation[]>()
+  for (const l of locations) {
+    if (l.conclusion !== "edit" || !l.found_by.includes("count")) continue
+    const collection = l.entity_paths.find((p): p is CountCollection => counts.has(p as CountCollection))
+    if (!collection) continue
+    const correct = counts.get(collection)!
+    const wrong = [...new Set(findCountMentionsInText(l.proposal?.new_text ?? "").filter((m) => m.collection === collection && m.number !== correct).map((m) => m.number))]
+    if (wrong.length) {
+      out.set(l.location_id, [{ rule: "count_mismatch", message: `Câu đếm ở đây vẫn ghi ${wrong.join(", ")} - đúng phải là ${correct} theo dữ liệu sau khi ghi, không tự tính` }])
+    }
+  }
+  return out
+}
+
+/** FLF-469 (C.1): Spine sau khi áp toàn bộ op `edit` của CR; op lỗi ⇒ `null` (lỗi thật đã báo ở `checkSpineOps`). */
+export const afterAllOps = (spine: Spine, _cr: Pick<IChangeRequest, "cr_id">, locations: readonly CheckLocation[]): Spine | null =>
+  plannedAfterAll(spine, locations)
+
+type RequestCr = Pick<IChangeRequest, "title" | "description" | "amendments" | "clarifications" | "targets">
+
+/** Đích C-2 của CR về phần tử của `collection` (`functions[id=FN1]`, hoặc mục `function:FN1`). */
+const targetElementsOf = (cr: Pick<IChangeRequest, "targets">, collection: string): string[] =>
+  [
+    ...new Set(
+      (cr.targets?.entity_paths ?? []).flatMap((t) => {
+        const fn = /^function:(.+)$/.exec(t)?.[1]
+        const el = fn ? `functions[id=${fn}]` : elementPathOf(t)
+        return el && el.startsWith(`${collection}[`) ? [el] : []
+      })
+    )
+  ]
+
+/**
+ * FLF-469 (C.1, ChoViet #2): kiểm "yêu cầu chính đã làm chưa" bằng code. CR có ý cấu trúc (`structural-intent.ts`):
+ * - xoá mà phần tử đích (CR nêu mã hoặc tên) vẫn còn sau khi chạy khô cả lô ⇒ `request_not_done` ở vị trí của phần tử;
+ * - thêm chức năng / màn mà không op nào `add` vào mảng đó ⇒ `request_not_done` ở ô thêm mới (hoặc vị trí đầu). Ý thêm suy
+ *   từ "cho phép…" (yếu) chỉ chặn khi cả CR không có vị trí `edit` nào.
+ * `after`: Spine sau cả lô (`afterAllOps`); `null` ⇒ bỏ qua (op lỗi đã bị báo riêng).
+ */
+export const checkRequestDone = (cr: RequestCr, spine: Spine, after: Spine | null, locations: readonly CheckLocation[]): Map<string, VerifyViolation[]> => {
+  const out = new Map<string, VerifyViolation[]>()
+  const request = structuralRequest(cr)
+  if (!request || !after || !locations.length) return out
+  const label = request.collection === "screens" ? "màn hình" : "chức năng"
+  const text = [cr.title, cr.description, ...(cr.amendments ?? []).map((a) => a.text), ...cr.clarifications.flatMap((c) => c.answers)].join(" ").toLowerCase()
+  const push = (locId: string, message: string) => out.set(locId, [...(out.get(locId) ?? []), { rule: "request_not_done", message }])
+  if (request.intent === "remove") {
+    for (const path of targetElementsOf(cr, request.collection)) {
+      const before = elementValue(spine, path) as { id?: unknown; name?: unknown } | undefined
+      if (!before || elementValue(after, path) === undefined) continue
+      const id = String(before.id ?? "").toLowerCase()
+      const name = typeof before.name === "string" ? before.name.trim().toLowerCase() : ""
+      if (!(name.length >= 3 && text.includes(name)) && !(id && text.includes(id))) continue
+      const holder = locations.find((l) => l.path === path) ?? locations[0]
+      push(holder.location_id, `Yêu cầu chính chưa làm: ${label} “${typeof before.name === "string" ? before.name : String(before.id)}” vẫn còn trong tài liệu - cần xoá hẳn ${label} này (thao tác xoá), không chỉ ghi chú`)
+    }
+  } else {
+    const slot = `${request.collection}[]`
+    const edits = locations.filter((l) => l.conclusion === "edit")
+    const added = edits.some((l) => (l.proposal?.spine_ops ?? []).some((raw) => (raw as { op?: unknown; path?: unknown }).op === "add" && opPath(raw) === slot))
+    if (!added && (request.strong || !edits.length)) {
+      const holder = locations.find((l) => l.path === slot) ?? locations[0]
+      push(holder.location_id, `Yêu cầu chính chưa làm: chưa có ${label} nào được thêm - cần thêm ${label} mới đầy đủ (thao tác thêm), không chỉ ghi chú nhắc tự làm`)
+    }
+  }
+  return out
+}
+
+/** FLF-469 (luật 3i / 3j): lệnh gắn / xoá chức năng mà use case không theo kịp - cờ vàng, không chặn. */
+export const FUNCTION_LINK_FLAG_RULES: readonly string[] = ["function_no_use_case", "use_case_emptied"]
+
+/**
+ * FLF-469: CR thêm chức năng mà chức năng mới không thuộc use case nào, hoặc xoá chức năng làm use case hết chức năng ⇒ cờ
+ * vàng ở ô `functions[]` (không có thì vị trí đầu). Không chặn: đề xuất theo từng vị trí không có vị trí use case thì AI
+ * không sửa được, người duyệt thấy cờ là đủ. `after`: Spine sau cả lô (`afterAllOps`).
+ */
+export const structuralLinkFlags = (cr: RequestCr, spine: Spine, after: Spine | null, locations: readonly CheckLocation[]): Map<string, AiFlag[]> => {
+  const out = new Map<string, AiFlag[]>()
+  const request = structuralRequest(cr)
+  if (!request || request.collection !== "functions" || !after || !locations.length) return out
+  const holder = locations.find((l) => l.path === "functions[]") ?? locations.find((l) => l.conclusion === "edit") ?? locations[0]
+  const flags: AiFlag[] =
+    request.intent === "add"
+      ? unlinkedNewFunctions(spine, after).map((f) => ({ rule: "function_no_use_case", message: `Chức năng mới “${f.name}” chưa thuộc use case nào` }))
+      : emptiedUseCases(spine, after).map((u) => ({ rule: "use_case_emptied", message: `Use case “${u.name}” không còn chức năng nào sau CR` }))
+  if (flags.length) out.set(holder.location_id, flags)
   return out
 }
 
@@ -262,7 +450,8 @@ const askContradictions = async (cr: IChangeRequest, locations: IChangeLocation[
     round: cr.clarifications.length + 1,
     questions: questions.map((q) => q.question),
     answers: [],
-    suggestions: questions.map((q) => q.suggestions)
+    suggestions: questions.map((q) => q.suggestions),
+    kinds: questions.map(() => "contradiction" as const)
   })
   cr.markModified("clarifications")
   await transitionCr(cr, "awaiting_answers")
@@ -279,6 +468,32 @@ export const previousFindingsText = (flags: ReadonlyMap<string, readonly AiFlag[
   return messages.length ? truncate(messages.join("\n"), 3000) : "(none)"
 }
 
+/** FLF-474: vị trí đang mang xung đột chưa được người dùng quyết (quyết xong thì `location.service` xoá `conflict`). */
+export const hasOpenConflict = (l: Pick<IChangeLocation, "conflict" | "conclusion">): boolean => !!l.conflict && l.conclusion === "edit"
+
+/** Vì sao CR đã qua kiểm mà vẫn dừng chờ BA ở mức "Chỉ ở mốc chốt" (`null` = được tự ghi). */
+export type AutoSubmitHold = "content_removed" | "ai_flags" | "pending_warning" | "kept_violations"
+
+/**
+ * FLF-483 (M1-a): điều kiện chặn tự ghi, tách riêng để các ticket khác thêm lý do mà không viết lại khối `autoSubmit`
+ * (FLF-469 C.3: `request_not_met`; FLF-448: `pending_warning`, `kept_violations`). Thứ tự xét: xoá nội dung, rồi nhận xét AI.
+ * "Xoá nội dung" = có op `remove` **hoặc** mục con có id biến mất sau op `set` (`removedItems`). `after`: Spine sau khi áp
+ * mọi op `edit` của CR (`plannedAfterAll`); `null` (op không chạy khô được) ⇒ chỉ còn dấu hiệu op `remove`.
+ */
+export const autoSubmitHold = (
+  spine: Spine,
+  locations: readonly (CheckLocation & Pick<IChangeLocation, "verify" | "warning" | "kept_intent" | "kept_violations">)[],
+  after: Spine | null
+): AutoSubmitHold | null => {
+  const editing = locations.filter((l) => l.conclusion === "edit")
+  if (editing.some((l) => hasRemoveOp(l.proposal))) return "content_removed"
+  if (after && removedItems(spine, after, editing.flatMap(opElements)).length) return "content_removed"
+  if (locations.some((l) => (l.verify?.ai_flags?.length ?? 0) > 0)) return "ai_flags"
+  if (locations.some((l) => hasPendingWarning(l))) return "pending_warning"
+  if (locations.some((l) => (l.kept_violations?.length ?? 0) > 0)) return "kept_violations"
+  return null
+}
+
 export const runVerify = async (cr: IChangeRequest, userId: string): Promise<void> => {
   assertCrStatus(cr, ["proposing", "manual_fix", "ready_to_submit", "verifying"], "verifying")
   await transitionCr(cr, "verifying")
@@ -289,7 +504,7 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
   const spine = stripRecord(record)
   const locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
   // Sửa tay / "Sửa lại" cũng có thể mang id trùng ⇒ đổi trước khi chạy khô (FLF-307)
-  await fixDuplicateIds(spine, locations)
+  await fixDuplicateIds(spine, locations, String(cr.projectId))
   // Đề xuất của vị trí khác có thể đã đổi (sửa tay, "Sửa lại") ⇒ kết luận vẽ lại sơ đồ gốc tính lại trước khi kiểm (§4.13)
   await refreshDiagramLocations(spine, locations)
   const locks = ownedElements(cr.cr_id, locations)
@@ -298,18 +513,27 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
   const language = await crDocumentLanguage(String(cr.projectId), spine)
   const outOfScope = await loadOutOfScopeSections(String(cr.projectId))
   const scopeOf = (l: IChangeLocation) => outOfScopeKind(spine, l, outOfScope)
-  const violations = new Map(locations.map((l) => [l.location_id, checkLocation(cr, l, spine, locks, language, scopeOf(l))]))
+  // FLF-474 (7a): chỗ còn xung đột (người khác đã sửa, chờ người dùng quyết ở màn 3 cột) không kiểm như chỗ thường —
+  // đề xuất của nó đã cũ, kiểm sẽ báo `value_changed` rồi AI tự soạn lại đè phần người khác vừa sửa (BF A5)
+  const inConflict = (l: IChangeLocation) => hasOpenConflict(l)
+  const checked = locations.filter((l) => !inConflict(l))
+  const violations = new Map(locations.map((l) => [l.location_id, inConflict(l) ? [] : checkLocation(cr, l, spine, locks, language, scopeOf(l))]))
   const exempt = new Set(locations.filter((l) => scopeOf(l) === "text").map((l) => l.location_id))
-  for (const [locId, vs] of checkSpineOps(spine, cr, locations, exempt)) violations.set(locId, [...(violations.get(locId) ?? []), ...vs])
+  for (const [locId, vs] of checkSpineOps(spine, cr, checked, exempt)) violations.set(locId, [...(violations.get(locId) ?? []), ...vs])
+  // FLF-469 (C.1): yêu cầu chính (xoá / thêm cả chức năng) phải thật sự được làm
+  for (const [locId, vs] of checkRequestDone(cr, spine, afterAllOps(spine, cr, locations), locations)) violations.set(locId, [...(violations.get(locId) ?? []), ...vs])
   // C-5 "giữ theo ý mình": lỗi luật BA đã giữ không tính (cờ đỏ thật hiện sau khi ghi)
   for (const l of locations) if (l.kept_violations.length) violations.set(l.location_id, withoutKept(violations.get(l.location_id) ?? [], l.kept_violations))
+  // FLF-473 (B14): câu đếm phải khớp số đúng SAU khi ghi cả CR — op đã lỗi thì bỏ qua (checkSpineOps đã báo lỗi thật)
+  const countAfter = plannedAfterAll(spine, locations)
+  if (countAfter) for (const [locId, vs] of checkCountMentions(countAfter, locations)) violations.set(locId, [...(violations.get(locId) ?? []), ...vs])
 
   // AI consistency (FLF-307): chỉ khi cả CR đã qua kiểm code — vòng nào còn trượt thì AI làm lại, nhận xét lúc đó vô
   // ích. Không vị trí nào đổi đề xuất kể từ lần kiểm trước (`verify` còn nguyên) ⇒ giữ nhận xét cũ, không gọi lại: mỗi
   // lượt gọi ra một bộ nhận xét khác, người dùng tưởng sửa mãi không hết.
   const previous = previousFlags(locations)
   const codeOk = locations.every((l) => !violations.get(l.location_id)?.length)
-  const changed = locations.filter((l) => l.conclusion === "edit" || l.conclusion === "comment")
+  const changed = checked.filter((l) => l.conclusion === "edit" || l.conclusion === "comment")
   const aiFlags = new Map(previous)
   if (codeOk && changed.some((l) => l.verify === null)) {
     // Vị trí vừa đề xuất lại bỏ nhận xét cũ (có thể đã sửa đúng chỗ đó); AI thấy mọi nhận xét cũ để không nêu lại
@@ -338,13 +562,23 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
     // FLF-367: mâu thuẫn ⇒ hỏi người yêu cầu (câu đã hỏi thì thôi, thành ghi chú vàng như cũ); nhận xét khác vẫn vàng
     const contradictions = newContradictions(
       cr,
-      result.data.findings.filter((f) => f.rule === "contradiction").map((f) => ({ question: humanizeText(f.message), suggestions: [] }))
+      result.data.findings.filter((f) => f.rule === "contradiction").map((f) => ({ question: humanizeText(f.message), suggestions: [] })),
+      "vi",
+      // FLF-474: so với câu đã lưu (đã đổi mã sang tên) theo độ trùng từ, không nguyên văn
+      { name: (text) => nameElementIds(text, spine, internalElementNames(spine)) }
     )
     if (contradictions.length) {
       await askContradictions(cr, locations, contradictions)
       return
     }
-    for (const f of result.data.findings) {
+    // FLF-469 (C.2): `request_not_met` = yêu cầu chính chưa được làm ⇒ vi phạm chặn (quay về soạn lại, 2 lần rồi sửa tay),
+    // không phải ghi chú vàng. Gắn vào vị trí ghi chú (chỗ đáng lẽ phải làm), không có thì vị trí sửa đầu tiên.
+    const notMet = result.data.findings.filter((f) => f.rule === "request_not_met")
+    if (notMet.length) {
+      const holder = changed.find((l) => l.conclusion === "comment") ?? changed[0]
+      for (const f of notMet) violations.set(holder.location_id, [...(violations.get(holder.location_id) ?? []), { rule: "request_not_met", message: `Yêu cầu chính chưa làm: ${humanizeText(f.message)}` }])
+    }
+    for (const f of result.data.findings.filter((x) => x.rule !== "request_not_met")) {
       // Nhận xét gắn vào vị trí sửa cùng section; không khớp section nào thì vị trí sửa đầu tiên (người duyệt vẫn thấy)
       const hit = changed.filter((c) => c.section_id === f.section_id)
       const flag = { rule: f.rule, message: humanizeText(f.message) }
@@ -355,6 +589,10 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
     }
   }
 
+  // FLF-469: cờ vàng gắn / xoá use case theo chức năng - tính lại mỗi lần (Spine sau lô có thể đã đổi), chạy cả khi lượt AI không chạy
+  for (const [locId, flags] of aiFlags) aiFlags.set(locId, flags.filter((f) => !FUNCTION_LINK_FLAG_RULES.includes(f.rule)))
+  for (const [locId, flags] of structuralLinkFlags(cr, spine, countAfter, locations)) aiFlags.set(locId, [...(aiFlags.get(locId) ?? []), ...flags])
+
   const at = new Date()
   const failing: IChangeLocation[] = []
   for (const l of locations) {
@@ -362,8 +600,12 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
     l.verify = { code_ok: vs.length === 0, violations: vs, ai_flags: aiFlags.get(l.location_id) ?? [], at }
     if (vs.length) failing.push(l)
   }
+  const stillConflicting = locations.some(inConflict)
   let next: "ready_to_submit" | "proposing" | "manual_fix" = "ready_to_submit"
-  if (failing.length) {
+  if (stillConflicting) {
+    // Còn chỗ xung đột chưa quyết ⇒ dừng ở `manual_fix`, không để AI soạn lại (không tăng `redo_count`)
+    next = "manual_fix"
+  } else if (failing.length) {
     // Lỗi luật ở chỗ BA đã "Vẫn làm" ⇒ hỏi BA ngay (giữ theo ý mình hoặc đổi hướng), không tốn lượt AI làm lại
     const keptIntentFails = failing.some((l) => l.kept_intent && isKeepable(l.verify?.violations ?? []))
     next = keptIntentFails || failing.some((l) => l.manual || l.redo_count >= MAX_REDO_PER_LOCATION) ? "manual_fix" : "proposing"
@@ -374,11 +616,7 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
   // FLF-337: mức "Chỉ ở mốc chốt" sau baseline — CR qua C-5 (Code + AI không phàn nàn) tự xác nhận, ghi vào bản nháp (C-6 FLF-330).
   // Nguồn + người yêu cầu đã bắt buộc lúc tạo; Lead duyệt gói (C-7) vẫn là cổng cứng. AI có nhận xét ⇒ để BA xem.
   // BF §3.2 mức duyệt: CR có xoá nội dung, có cảnh báo AI chưa quyết hoặc có lỗi luật BA giữ theo ý mình luôn dừng chờ BA.
-  const autoSubmit =
-    next === "ready_to_submit" &&
-    spine.project.review_mode === "milestones" &&
-    !locations.some((l) => (l.verify?.ai_flags?.length ?? 0) > 0 || hasRemoveOp(l.proposal) || hasPendingWarning(l) || l.kept_violations.length > 0)
-  if (autoSubmit) {
+  if (next === "ready_to_submit" && spine.project.review_mode === "milestones" && autoSubmitHold(spine, locations, countAfter) === null) {
     await submitCr(cr, userId)
     // Kiểm lại lúc ghi thấy lỗi mới ⇒ CR quay về `manual_fix`, không ghi: không báo "tự ghi"
     if (cr.status !== "written") return

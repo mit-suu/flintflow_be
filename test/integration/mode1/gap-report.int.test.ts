@@ -109,15 +109,21 @@ describe("gap report - gộp nhóm", () => {
     expect(ranks).toEqual([...ranks].sort((a, b) => a - b))
   })
 
-  it("nợ T4: import khi không có PlantUML ⇒ báo cáo liệt kê hình chưa vẽ (loại có dữ liệu), không chặn baseline", async () => {
+  it("nợ T4 (FLF-493): import khi không có PlantUML ⇒ hình SVG (context, use case, luồng màn, ERD) vẫn được vẽ ⇒ báo cáo không còn liệt kê hình chưa vẽ, không chặn baseline", async () => {
     const { projectId } = await importFinalized()
     const report = gapReportSchema.parse(await buildGapReport(projectId))
     const spine = (await spineRepository.get(projectId))!
-    expect(spine.diagrams).toEqual([]) // môi trường test không có PlantUML ⇒ finalize bỏ qua bước vẽ
-    expect(report.totals.unrendered_diagrams).toBe(report.unrendered_diagrams.length)
-    expect(report.unrendered_diagrams.length).toBeGreaterThan(0)
-    for (const d of report.unrendered_diagrams) expect(d).toMatchObject({ diagram_id: "", reason: "not_rendered" })
-    // chỉ là thông tin: không đẻ cờ đỏ nào về hình
+    // FLF-493: finalize vẽ target SVG dù PlantUML tắt (trước đó bỏ qua bước vẽ ⇒ spine.diagrams rỗng)
+    expect(spine.diagrams.map((d) => [d.kind, d.format, d.render_status])).toEqual([
+      ["context", "svg", "ok"],
+      ["usecase", "svg", "ok"],
+      ["screen_flow", "svg", "ok"],
+      ["erd", "svg", "ok"]
+    ])
+    // cả 4 loại báo cáo theo dõi đều là SVG ⇒ không còn hình "chưa vẽ" (mục này chỉ còn khi PlantUML-only bị bỏ qua)
+    expect(report.unrendered_diagrams).toEqual([])
+    expect(report.totals.unrendered_diagrams).toBe(0)
+    // không đẻ cờ đỏ nào về hình
     expect(spine.flags.some((f) => f.rule_id === "render_error" && f.resolved_at === null)).toBe(false)
   })
 

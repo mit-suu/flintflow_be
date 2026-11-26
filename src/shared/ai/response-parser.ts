@@ -65,10 +65,17 @@ export const chatQuestionItemSchema = z.union([
   z.string().transform((q) => ({ question: q, header: undefined as string | undefined, options: [] as QuestionOption[], multiple: false}))
 ])
 
+/**
+ * FLF-472: tin user SỬA lại một điều đã chốt trong sổ quyết định — `answer` là trích đoạn nguyên văn của tin. Server kiểm
+ * (`verifiedDecisionUpdates`) rồi mới ghi; chỉ nhận tối đa 3 mục một lượt (không ràng buộc ở schema để không bỏ cả lượt).
+ */
+export const decisionUpdatesSchema = z.array(z.object({ topic_key: z.string().min(1), answer: z.string().min(1) })).optional()
+
 export const chatSchema = z.object({
   reply: z.string(),
   questions: z.array(chatQuestionItemSchema).optional().default([]),
-  suggestedQuestions: z.array(z.string()).optional()
+  suggestedQuestions: z.array(z.string()).optional(),
+  decision_updates: decisionUpdatesSchema
 })
 
 // Task 2b: schema cho action SUMMARIZE_DOCUMENT
@@ -204,9 +211,20 @@ export const elicitSchema = elicitBaseSchema.extend({
    * FLF-393 (business-flow §3.6): câu chờ mà tài liệu tham khảo đã trả lời ⇒ chốt kèm `source_paras` (mã đoạn `D1-P391`).
    * Server tra mã ra chữ thật và đòi câu trả lời là trích đoạn nguyên văn của đoạn đó, rồi ghi nguồn cho quyết định.
    */
-  settled: z.array(z.object({ topic_key: z.string().min(1), answer: z.string(), source_paras: z.array(z.string()).max(5).optional() })).optional(),
+  settled: z
+    .array(
+      z.object({
+        topic_key: z.string().min(1),
+        /** FLF-472: `id` của câu đang chờ (`Q_…` trong `pending_questions`) — khớp theo id trước, `topic_key` sau. */
+        id: z.string().optional(),
+        answer: z.string(),
+        source_paras: z.array(z.string()).max(5).optional()
+      })
+    )
+    .optional(),
   /** `topic_key` của câu đang chờ mà tin này KHÔNG trả lời — server không tự chốt câu đó bằng luật trả-lời-lặp. */
-  still_open: z.array(z.string()).optional()
+  still_open: z.array(z.string()).optional(),
+  decision_updates: decisionUpdatesSchema
 })
 
 /** B-0…B-2: vừa hỏi vừa ghi ngay (addendum, project.*) — ops tuỳ chọn. Không có `settled`. */
@@ -353,6 +371,12 @@ export type DiagramImageKind = (typeof DIAGRAM_IMAGE_KINDS)[number]
 export const importExtractDiagramSchema = importExtractSchema.extend({
   diagram_kind: z.enum(DIAGRAM_IMAGE_KINDS)
 })
+
+/** FLF-492 (CR_RECORD_SUMMARY): một câu ngắn cho mỗi dòng Record of Changes (khoá theo `cr_id` + loại A / M / D). */
+export const crRecordSummarySchema = z.object({
+  rows: z.array(z.object({ cr_id: z.string().min(1), kind: z.enum(["A", "M", "D"]), text: z.string().trim().min(1).max(400) })).max(100)
+})
+export type CrRecordSummaryOutput = z.infer<typeof crRecordSummarySchema>
 
 /** FLF-395 (SKELETON_GENERIC_NAMES, D13): dạng chung gợi ý cho từng mục BA tự đặt; `generic: null` = không dùng lại được. */
 export const skeletonGenericNamesSchema = z.object({
@@ -573,6 +597,7 @@ export const OUTPUT_SCHEMA_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, s
   [ActionType.CR_PROPOSE]: "crPropose",
   [ActionType.CR_CONSISTENCY]: "findings",
   [ActionType.CR_MATERIAL_IMAGE]: "crMaterialImage",
+  [ActionType.CR_RECORD_SUMMARY]: "crRecordSummary",
   [ActionType.KNOWLEDGE_ANSWER]: "knowledgeAnswer",
   [ActionType.EXTRACT_REQUIREMENTS]: "extractRequirements",
   [ActionType.SKELETON_GENERIC_NAMES]: "skeletonGenericNames",
@@ -604,6 +629,7 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.CR_PROPOSE]: crProposeSchema,
   [ActionType.CR_CONSISTENCY]: findingsSchema,
   [ActionType.CR_MATERIAL_IMAGE]: crMaterialImageSchema,
+  [ActionType.CR_RECORD_SUMMARY]: crRecordSummarySchema,
   [ActionType.KNOWLEDGE_ANSWER]: knowledgeAnswerSchema,
   [ActionType.EXTRACT_REQUIREMENTS]: extractRequirementsSchema,
   [ActionType.SKELETON_GENERIC_NAMES]: skeletonGenericNamesSchema,

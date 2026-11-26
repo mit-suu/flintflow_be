@@ -10,6 +10,7 @@ import { callMockLLM, mockOutputFor, mockTranslateItems } from "./mock.provider.
 import { ActionType } from "../ai-action.types.js"
 import {
   changeInstructionSchema,
+  crRecordSummarySchema,
   discoveryStepSchema,
   elicitSchema,
   findingsSchema,
@@ -116,5 +117,21 @@ describe("callMockLLM", () => {
   it("không có actionType thì vẫn trả JSON hợp lệ (đường chat cũ)", async () => {
     const res = await callMockLLM("Tóm tắt tài liệu này", { provider: "mock", model: "mock" })
     expect(json(res.text)).toHaveProperty("summary")
+  })
+})
+
+describe("mockOutputFor - cr_record_summary (FLF-492)", () => {
+  it("trả mỗi dòng của khối Rows với câu dựng sẵn rút gọn, đúng schema; không đọc được ⇒ rows rỗng", () => {
+    const rows = [
+      { cr_id: "CR-001", kind: "A", built: "Add use case UC-05", changes: [] },
+      { cr_id: "CR-001", kind: "D", built: "Delete message MSG-63", changes: [] }
+    ]
+    const prompt = ["Document language: English", "", "Rows:", JSON.stringify(rows)].join("\n")
+    const parsed = crRecordSummarySchema.parse(json(mockOutputFor(ActionType.CR_RECORD_SUMMARY, prompt) as string))
+    expect(parsed.rows).toEqual([
+      { cr_id: "CR-001", kind: "A", text: "[MOCK AI] Add use case UC-05" },
+      { cr_id: "CR-001", kind: "D", text: "[MOCK AI] Delete message MSG-63" }
+    ])
+    expect(crRecordSummarySchema.parse(json(mockOutputFor(ActionType.CR_RECORD_SUMMARY, "prompt bất kỳ") as string)).rows).toEqual([])
   })
 })

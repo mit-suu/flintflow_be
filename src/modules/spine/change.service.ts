@@ -16,6 +16,7 @@
  */
 
 import { assertNoMigrationRunning } from "../template-migration/migration-guard.js"
+import mongoose from "mongoose"
 import { randomUUID } from "node:crypto"
 import { TransactionRejectedError, applyTransaction, planTransaction } from "./op-engine.js"
 import * as repository from "./spine.repository.js"
@@ -40,7 +41,6 @@ import {
 import { chatEditVerdict } from "../pipeline/quiet-step.js"
 import { activeDecisions } from "../pipeline/decisions.service.js"
 import { recordAutoPass } from "../pipeline/auto-pass.service.js"
-import mongoose from "mongoose"
 import { FIELD_SECTION_MAP, FIXED_SECTIONS, sectionsOfPath } from "./section-registry.js"
 import { classifyPlace, conflictFields, placeLabel, placeOfPath, placeValue, readableValue, rebaseOps, type PlaceOutcome } from "./concurrent-merge.js"
 import { elementFieldsOf } from "./element-defaults.js"
@@ -77,6 +77,8 @@ import {
   removalNote,
   removalProblemText,
   removesUseCaseOrScreen,
+  unlinkedNewFunctions,
+  emptiedUseCases,
   useCaseIntent,
   useCaseEditContext,
   editIssues,
@@ -104,6 +106,9 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { splitInstruction } from "../../shared/utils/instruction-text.js"
 import { DEFAULT_REPLY_LANGUAGE, byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { isWithdrawal } from "../../shared/i18n/withdrawal.js"
+import { foldDiacritics } from "../../shared/search/bm25.js"
+import { continuationOwnerSection, customSectionKey } from "../import/step-plan.js"
+import { TemplateProfile, type LayoutEntry } from "../import/template-profile.model.js"
 
 export const NEEDS_CLARIFICATION = "NEEDS_CLARIFICATION"
 /**
@@ -512,6 +517,90 @@ const referencedCustomSections = (spine: Spine, haystack: string) =>
       return { ...c, ...(guidance ? { guidance } : {}) }
     })
 
+/**
+ * FLF-473 (EduCampus B5): "đoạn văn nối" — `custom_sections` **tiêu đề rỗng** (văn xuôi gốc giữ nguyên giữa các phần
+ * trích được, `import/step-plan.ts` `continuationOf`/`runOf`). `referencedCustomSections` không bao giờ khớp được
+ * (heading rỗng, không đủ 3 ký tự) nên lệnh chat nhắm đúng một đoạn văn nối luôn ra "chưa xác định được cần đổi gì".
+ * Chuẩn hoá bỏ dấu + chữ thường để so khớp — người dùng gõ lại câu có thể lệch dấu/khoảng trắng với file gốc.
+ *
+ * TODO (plan fix #6, `bug/plan-fix-06-sua-chat-doan-van-noi.md` §6a bước 2): luật 14 của skill
+ * `assets/skills/action/apply-change-op/SKILL.md` (sửa `custom_sections`) chỉ nói về heading của mẫu khách, chưa nói
+ * phần nối (heading rỗng phải giữ rỗng, chỉ thay đúng block chứa câu cần sửa). CHƯA sửa SKILL.md trong lượt này —
+ * hoãn tới sau khi nhánh FLF-449 merge (nhánh đó sửa thêm 11 dòng luật chất lượng vào đúng file, tránh xung đột).
+ * Phần dưới đây chỉ đảm bảo model THẤY đúng phần nối trong `projection.custom_sections`.
+ */
+const normalizeForMatch = (text: string): string => foldDiacritics(text.normalize("NFC")).toLowerCase().replace(/\s+/g, " ").trim()
+
+/** Cụm trong ngoặc kép / ngoặc đơn (thẳng hoặc cong) của câu lệnh — người dùng trích nguyên văn đoạn cần sửa. */
+const quotedPhrasesOf = (instruction: string): string[] =>
+  [...instruction.matchAll(/["“”'‘’]([^"“”'‘’]{3,400})["“”'‘’]/g)].map((m) => m[1].trim()).filter((s) => s.length >= 4)
+
+/** Cụm ≥4 từ liên tiếp của `instructionNorm` có xuất hiện nguyên trong `blockNorm` không — bắt cả lệnh không trích ngoặc. */
+const CONTINUATION_WORD_WINDOW = 4
+const hasConsecutiveWordMatch = (instructionNorm: string, blockNorm: string, window = CONTINUATION_WORD_WINDOW): boolean => {
+  if (!blockNorm) return false
+  const words = instructionNorm.split(" ").filter(Boolean)
+  for (let i = 0; i + window <= words.length; i++) {
+    const phrase = words.slice(i, i + window).join(" ")
+    if (phrase.length >= 8 && blockNorm.includes(phrase)) return true
+  }
+  return false
+}
+
+/**
+ * Phần nối (heading rỗng) mà lệnh trích nguyên văn (trong ngoặc) hoặc có cụm ≥4 từ liên tiếp trùng chữ của nó.
+ * Không lọc theo `instruction` gốc (đã lowercase ở `haystack`) — tự chuẩn hoá bỏ dấu riêng, tránh lệch với các bộ lọc khác.
+ */
+export const continuationSectionsByText = (spine: Spine, instruction: string): Spine["custom_sections"] => {
+  const quoted = quotedPhrasesOf(instruction).map(normalizeForMatch)
+  const fullNorm = normalizeForMatch(instruction)
+  return spine.custom_sections.filter((c) => {
+    if (c.heading.trim().length > 0) return false
+    const blockNorm = c.blocks.map((b) => normalizeForMatch(b.text)).join(" ")
+    if (!blockNorm) return false
+    if (quoted.some((q) => blockNorm.includes(q))) return true
+    return hasConsecutiveWordMatch(fullNorm, blockNorm)
+  })
+}
+
+/**
+ * "mục 2.2.1", "2.2.1", hoặc tên mục mẫu (tiêu đề tiếng Việt/Anh của file khách, không phải tên mục FPT) ⇒ section_id
+ * theo layout import. Số mục của file khách theo `TemplateProfile.layout` (`number_label`), không trùng số mẫu FPT
+ * nên `referencedSections` (dò theo "§" + số mẫu FPT) không khớp được.
+ */
+/**
+ * Bản sao thuần của `mode1-guard.ts#templateHeadingsOf` — KHÔNG import trực tiếp từ `mode1-guard.ts` ở đây: file đó có
+ * side effect nạp module (`flagsService.setRuleProfileResolver(ruleProfileOf)`, gọi Mongo không điều kiện) — import tĩnh
+ * sẽ kéo side effect đó vào mọi nơi `change.service.ts` được nạp (kể cả transitively qua `reconcile.service.ts` từ
+ * `s9/completeness-sweep.ts`), làm unit test không nối Mongo bị "buffering timed out". Theo `templateHeadingsOf`.
+ */
+const templateHeadingsOfLayout = (layout: readonly Pick<LayoutEntry, "section_id" | "heading_text" | "number_label">[]): Map<string, string> => {
+  const map = new Map<string, string>()
+  for (const l of layout) {
+    const text = l.heading_text.trim()
+    if (!l.section_id.startsWith("fixed:") || !text || map.has(l.section_id)) continue
+    const number = l.number_label?.trim()
+    map.set(l.section_id, number && !/^\d/.test(text) ? `${number} ${text}` : text)
+  }
+  return map
+}
+
+export const sectionIdByLayoutMention = (layout: readonly LayoutEntry[], haystack: string): string | null => {
+  for (const l of layout) {
+    const number = l.number_label?.trim()
+    if (number && new RegExp(`(?:^|[^\\d.])${escapeRe(number)}(?![.\\d])`).test(haystack)) return l.section_id
+  }
+  for (const [sectionId, heading] of templateHeadingsOfLayout(layout)) {
+    const h = heading.trim()
+    if (h.length >= MIN_NAME_MATCH && haystack.includes(h.toLowerCase())) return sectionId
+  }
+  return null
+}
+
+/** Mọi phần nối (heading rỗng) có mục chủ là `sectionId` — mục lệnh nhắc theo số/tên bao trọn cả các phần nối của nó. */
+const continuationSectionsOfOwner = (spine: Spine, layout: readonly LayoutEntry[], sectionId: string): Spine["custom_sections"] =>
+  spine.custom_sections.filter((c) => c.heading.trim() === "" && continuationOwnerSection(layout, customSectionKey(c.id)) === sectionId)
+
 /** Lệnh áp cho cả một loại phần tử: "toàn bộ thông báo", "tất cả quy tắc", "mọi NFR", "all messages". */
 const WHOLE_COLLECTION_HINT = /toàn bộ|tất cả|mọi |từng |cả \d+|\ball\b|\bevery\b|\beach\b/i
 
@@ -530,7 +619,12 @@ const COLLECTION_NAME_HINTS: readonly [(typeof TARGET_COLLECTIONS)[number], RegE
 /** Lệnh nói về mục tiêu / tầm nhìn / phạm vi phát hành của §1 Tổng quan sản phẩm. */
 const PROJECT_OVERVIEW_HINT = /mục tiêu|muc tieu|tầm nhìn|tam nhin|phạm vi phát hành|trong phạm vi|ngoài phạm vi|tổng quan sản phẩm|product overview|\bgoals?\b|\bvision\b|release scope|in scope|out of scope/i
 
-export const buildChangeProjection = (spine: Spine, instruction: string): Record<string, unknown> => {
+/**
+ * `layout` tuỳ chọn (FLF-473): mục import có số/tên mình (`TemplateProfile.layout`) — dùng để nhận "mục 2.2.1" / tên
+ * mục mẫu và gom các phần nối thuộc mục đó. Dự án không phải import (mode 2, hoặc chưa có profile) ⇒ bỏ qua, hàm thuần
+ * như trước (chỉ nhận Spine).
+ */
+export const buildChangeProjection = (spine: Spine, instruction: string, layout: readonly LayoutEntry[] = []): Record<string, unknown> => {
   const haystack = instruction.toLowerCase()
   const projection: Record<string, unknown> = {}
   let matched = 0
@@ -619,6 +713,24 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
     projection.custom_sections = customSections
     projection.draft_context = draftContextOf(spine)
     matched += customSections.length
+  }
+
+  // FLF-473 (B5): phần nối (heading rỗng) — `referencedCustomSections` không khớp được (heading không đủ 3 ký tự).
+  // Khớp theo chữ (trích nguyên văn / cụm liên tiếp) hoặc theo số/tên mục import mà phần nối đó thuộc về.
+  const ownerSectionId = layout.length > 0 ? sectionIdByLayoutMention(layout, haystack) : null
+  const continuationSections = [
+    ...new Map(
+      [...continuationSectionsByText(spine, instruction), ...(ownerSectionId ? continuationSectionsOfOwner(spine, layout, ownerSectionId) : [])].map((c) => [c.id, c] as const)
+    ).values()
+  ]
+  if (continuationSections.length > 0) {
+    const already = new Set(((projection.custom_sections as { id: string }[] | undefined) ?? []).map((c) => c.id))
+    const add = continuationSections.filter((c) => !already.has(c.id))
+    if (add.length > 0) {
+      projection.custom_sections = [...((projection.custom_sections as unknown[] | undefined) ?? []), ...add]
+      if (!projection.draft_context) projection.draft_context = draftContextOf(spine)
+      matched += add.length
+    }
   }
   if (spine.custom_sections.length > 0) existingIds.custom_sections = spine.custom_sections.map((c) => c.id).slice(0, 200)
 
@@ -772,6 +884,11 @@ export interface ChangeDeps {
   renderAfterChange?: (projectId: string, userId: string, newScreenIds: string[]) => Promise<unknown>
   /** P12: người sửa gần nhất của một chỗ (màn so sánh, câu "đã được … sửa giống"); thiếu ⇒ đọc `changes`. */
   lastEditor?: LastEditor
+  /**
+   * FLF-473: layout import của dự án (mục + số/tên theo file khách) để `buildChangeProjection` nhận "mục 2.2.1" và gom
+   * các phần nối thuộc mục đó. Dự án mode 2 / chưa có profile ⇒ `undefined`; thiếu dep ⇒ `defaultLoadLayout`.
+   */
+  loadLayout?: (projectId: string) => Promise<readonly LayoutEntry[] | undefined>
   /** Hồ sơ luật của dự án cho lượt dự báo cờ đỏ; thiếu ⇒ `ruleProfileOf` (chế độ 1 / mẫu bắt buộc), unit test không nối Mongo ⇒ không hồ sơ. */
   ruleProfile?: (projectId: string) => Promise<RuleProfile | undefined>
 }
@@ -786,9 +903,24 @@ const defaultRuleProfile = async (projectId: string): Promise<RuleProfile | unde
 /** Path của phần use case (use case, màn, chức năng, quyền, thông báo) — lô sửa chạm tới thì vẽ lại sơ đồ. */
 const USE_CASE_PARTS = /^(use_cases|screens|functions|permissions|messages)\[/
 
+/**
+ * FLF-473: cùng lưới an toàn với `documentLanguageForTurn` — chưa nối Mongo (unit test) hoặc id không hợp lệ ⇒ `undefined`
+ * ngay, không gọi `TemplateProfile.findOne` (nếu không, driver xếp lệnh vào hàng đợi rồi "buffering timed out" sau 10s).
+ * Đọc trực tiếp (không qua `import/gap-report.service.js` dù nó có `loadLayout` giống vậy): file đó import cả
+ * `import.service.ts` (module nặng, kéo theo `imported-document.model.ts`/`project.model.js` TEMPLATE_INTENTS) — nạp
+ * thêm cả cây đó vào `change.service.ts` chỉ để đọc layout là không cần thiết và làm hỏng mock tối giản của test khác
+ * (`mode1-guard.test.ts` mock `project.model.js` không có `TEMPLATE_INTENTS`).
+ */
+const defaultLoadLayout = async (projectId: string): Promise<readonly LayoutEntry[] | undefined> => {
+  if (mongoose.connection.readyState !== 1 || !mongoose.isValidObjectId(projectId)) return undefined
+  const profile = await TemplateProfile.findOne({ projectId }, { layout: 1 }).lean()
+  return profile?.layout?.length ? (profile.layout as LayoutEntry[]) : undefined
+}
+
 export const defaultChangeDeps = (): ChangeDeps => ({
   changeExecutor: (actionType, input, projectId, userId) => executeAiAction<ChangeInstructionOutput>(actionType, input, projectId, userId),
   recomputeFlags: (projectId, userId) => flagsService.recompute(projectId, { by: userId }),
+  loadLayout: defaultLoadLayout,
   documentLanguage: documentLanguageForTurn,
   renderAfterChange: (projectId, userId, newScreenIds) =>
     renderChangedIfAvailable(projectId, newScreenIds, { by: userId, step_id: null, deps: layoutRenderDeps() })
@@ -872,6 +1004,11 @@ export interface ResolvedOps {
   warning?: string
   /** Chỗ AI tự đoán vì yêu cầu chưa nói rõ — ghi vào `spine.assumptions` cùng lô, nói thẳng trong lời trả lời. */
   assumptions?: ChatAssumption[]
+  /**
+   * FLF-473 (B5): model không ra được lô / câu hỏi hợp lệ (lỗi schema sau 3 lượt) — khác câu hỏi làm rõ bình thường.
+   * Dự án import sau baseline dùng cờ này để mời "Mở change request" thay vì lặp lại "nói rõ mục" (`changes.controller.ts`).
+   */
+  unclear?: boolean
 }
 
 /** Model gửi field không có trong Spine (`screens[].authorized_role_ids`) — nhắc nó chỉ dùng field thấy trong projection. */
@@ -919,7 +1056,52 @@ const canPlan = (spine: Spine, ops: Op[]): boolean => {
   }
 }
 
+/** FLF-486 (B3): kết quả soát một lô — để so lô gọi lại với lô trước (`worseBatch`). */
+export interface BatchReport {
+  /** Áp thử bị từ chối (`TransactionRejectedError`). */
+  rejected: boolean
+  problems: string[]
+  /** Số use case user đã chọn trong kế hoạch giao diện mà lô làm mất. */
+  planMissing: number
+}
+
+/** Lô `a` tệ hơn lô `b`: bị từ chối tệ hơn áp được; cùng áp được thì mất nhiều use case hơn; bằng nhau thì nhiều lỗi hơn. */
+export const worseBatch = (a: BatchReport, b: BatchReport): boolean => {
+  if (a.rejected !== b.rejected) return a.rejected
+  if (a.planMissing !== b.planMissing) return a.planMissing > b.planMissing
+  return a.problems.length > b.problems.length
+}
+
+/** FLF-469: ý thêm / xoá cả một chức năng của CR (không nhắc use case) - bật luật 3i / 3j của lô soạn gộp. */
+export type StructuralHint = { intent: "add" | "remove"; collection: "functions" | "screens" }
+
+/** FLF-469 (luật 3i / 3j): chức năng mới không thuộc use case nào; xoá chức năng mà use case hết chức năng, màn / thông báo mồ côi. */
+const functionLinkProblems = (spine: Spine, after: Spine, hint: StructuralHint): string[] => {
+  if (hint.collection !== "functions") return []
+  if (hint.intent === "add") {
+    return unlinkedNewFunctions(spine, after).map(
+      (f) => `Function ${f.id} "${f.name}" belongs to no use case: set use_cases[id=...].function_ids of the fitting use case to its old list plus the new function (rule 3i).`
+    )
+  }
+  const emptied = emptiedUseCases(spine, after).map((u) => `Use case ${u.id} "${u.name}" has no function left: remove use_cases[id=${u.id}] (rule 3j).`)
+  const left = removalLeftovers(spine, after)
+    .filter((o) => o.kind !== "function")
+    .map((o) => removalProblemText(o).replace("rule 3g", "rule 3j"))
+  return [...emptied, ...left]
+}
+
 const batchProblems = (
+  spine: Spine,
+  ops: Op[],
+  instruction: string,
+  ucMode: UseCaseMode | null = null,
+  allowShared = false,
+  uiPlan: readonly UiPlanEntry[] = [],
+  removesUseCase = false,
+  editsUseCase = false
+): string[] => batchReport(spine, ops, instruction, ucMode, allowShared, uiPlan, removesUseCase, editsUseCase).problems
+
+const batchReport = (
   spine: Spine,
   ops: Op[],
   instruction: string,
@@ -929,16 +1111,18 @@ const batchProblems = (
   /** FLF-318: lệnh xoá use case ⇒ phần chỉ thuộc use case bị xoá phải đi cùng lô (luật 3g). */
   removesUseCase = false,
   /** FLF-318: lệnh sửa use case ⇒ đổi actor thì quyền trên màn của use case đổi theo (luật 3h). */
-  editsUseCase = false
-): string[] => {
-  if (ops.length === 0) return []
+  editsUseCase = false,
+  /** FLF-469: CR thêm / xoá cả chức năng ⇒ chức năng mới phải thuộc use case (3i), use case hết chức năng bị xoá (3j). */
+  structural: StructuralHint | null = null
+): BatchReport => {
+  if (ops.length === 0) return { rejected: false, problems: [], planMissing: 0 }
   let plan: ReturnType<typeof planTransaction>
   try {
     plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "change-preview", step_id: null }, { startSeq: 1 })
   } catch (err) {
-    if (!(err instanceof TransactionRejectedError)) return []
+    if (!(err instanceof TransactionRejectedError)) return { rejected: false, problems: [], planMissing: 0 }
     const messages = err.violations.map((v) => v.message)
-    return err.violations.some((v) => v.rule === "schema_invalid") ? [...messages, SCHEMA_FIX] : messages
+    return { rejected: true, problems: err.violations.some((v) => v.rule === "schema_invalid") ? [...messages, SCHEMA_FIX] : messages, planMissing: 0 }
   }
   const asked = instruction.toLowerCase()
   const naming = useCaseNameIssues(spine, plan.spine)
@@ -949,11 +1133,16 @@ const batchProblems = (
   const screens = [...ui.screen.map(useCaseScreenProblemText), ...ui.plan.map(uiPlanProblemText)]
   const leftovers = removesUseCase ? removalLeftovers(spine, plan.spine).map(removalProblemText) : []
   const edits = editsUseCase ? editIssues(spine, plan.spine).map(editProblemText) : []
+  const functionLinks = structural ? functionLinkProblems(spine, plan.spine, structural) : []
   // FLF-428: lệnh nhắm một cờ mà lô không đóng được cờ đó ⇒ một lượt thử lại kèm gợi ý sửa đúng field
   const flagsLeft = unresolvedAfter(targetFlagsOf(spine, instruction), plan.spine).map(unresolvedProblemText)
   // Mục riêng của mẫu do AI soạn: bảng đúng cột của mẫu, không từ mơ hồ
   const drafted = sectionDraftProblems(spine, plan.spine, instruction)
-  return [...(naming.length > 0 ? [...naming, USE_CASE_NAME_FIX] : []), ...screens, ...leftovers, ...edits, ...flagsLeft, ...drafted]
+  return {
+    rejected: false,
+    problems: [...(naming.length > 0 ? [...naming, USE_CASE_NAME_FIX] : []), ...screens, ...leftovers, ...edits, ...functionLinks, ...flagsLeft, ...drafted],
+    planMissing: ui.plan.filter((i) => i.kind === "missing").length
+  }
 }
 
 /** FLF-318: phần lô sửa use case còn bỏ sót (lô không áp thử được ⇒ để lỗi bất biến lo). */
@@ -1023,7 +1212,9 @@ const opsFromInstruction = async (
   /** FLF-318: `false` = soạn cho change request — không có người để hỏi, không hỏi giao diện / use case đề xuất thêm. */
   interactive = true,
   /** P08 (T7): lượt trả lời câu hỏi làm rõ — yêu cầu gốc + câu đã hỏi đi cùng câu trả lời trong `user_message`. */
-  pending: { request: string; question: string } | null = null
+  pending: { request: string; question: string } | null = null,
+  /** FLF-469: CR thêm / xoá cả một chức năng ⇒ bật luật 3i / 3j (chat không truyền). */
+  structural: StructuralHint | null = null
 ): Promise<ResolvedOps> => {
   const history = chatHistory?.trim() ?? ""
   // Người dùng rút lại yêu cầu đang dở (đang trả lời câu hỏi làm rõ) ⇒ dừng, không gọi model (model không có cách trả
@@ -1040,7 +1231,9 @@ const opsFromInstruction = async (
   const removesUseCase = intent === "remove"
   const editsUseCase = intent === "edit"
   const addsUseCase = !removesUseCase && !editsUseCase && (isAddUseCaseInstruction(instruction) || (clarificationRounds > 0 && isAddUseCaseInstruction(history)))
-  const ucMode = addsUseCase || editsUseCase ? useCaseMode(spine) : null
+  const addsFunction = structural?.intent === "add" && structural.collection === "functions"
+  const removesFunction = structural?.intent === "remove" && structural.collection === "functions"
+  const ucMode = addsUseCase || editsUseCase || addsFunction ? useCaseMode(spine) : null
   const ucUi = ucMode === "screen_pending" || ucMode === "full"
   // FLF-311: câu trả lời cho câu hỏi giao diện ⇒ kế hoạch từng use case (màn riêng / popup / màn có sẵn / dùng chung)
   // Đọc bằng luật trước (đưa model làm cách đọc tạm); model trả `ui_plan` của chính nó ⇒ dùng bản đó (`adoptModelPlan`)
@@ -1059,6 +1252,8 @@ const opsFromInstruction = async (
     stampChatSource(applyUiPlan(expandIndexSelectors(spine, ucMode ? normalizeUseCaseBatch(spine, stampAddendum(ops)) : stampAddendum(ops)), uiPlan))
   // FLF-265 D16: một lần cho cả lượt (kể cả lượt gọi lại kèm lỗi)
   const language = await (deps.documentLanguage ?? documentLanguageForTurn)(projectId)
+  // FLF-473: layout import — để buildChangeProjection nhận "mục 2.2.1" / tên mục mẫu (phần nối). Mode 2 ⇒ undefined, bỏ qua.
+  const layout = (await (deps.loadLayout ?? defaultLoadLayout)(projectId)) ?? []
   const call = (previousProblems?: string) =>
     deps.changeExecutor(
       ActionType.CHANGE_INSTRUCTION,
@@ -1071,7 +1266,7 @@ const opsFromInstruction = async (
           has_baseline: spine.baselines.length > 0,
           // Câu trả lời cho câu hỏi làm rõ ("A03") thường không nhắc lại thực thể của yêu cầu gốc ⇒ dò cả đoạn hội thoại
           projection: {
-            ...buildChangeProjection(spine, history ? `${history}\n${instruction}` : instruction),
+            ...buildChangeProjection(spine, history ? `${history}\n${instruction}` : instruction, layout),
             ...(ucMode
               ? {
                   use_case_context: {
@@ -1083,7 +1278,7 @@ const opsFromInstruction = async (
                 }
               : {}),
             // Lệnh xoá: model cần thấy chức năng / màn / thông báo của mọi use case để biết phần nào chỉ thuộc use case bị xoá
-            ...(removesUseCase ? { use_case_context: useCaseContext(spine, "full") } : {}),
+            ...(removesUseCase || removesFunction ? { use_case_context: useCaseContext(spine, "full") } : {}),
             // Lệnh sửa: giá trị hiện tại của use case được nhắc + phần của nó (chức năng đủ luồng, màn, quyền, thông báo)
             ...(editsUseCase
               ? {
@@ -1097,6 +1292,8 @@ const opsFromInstruction = async (
           use_case_mode: ucMode ?? "none",
           use_case_removal: removesUseCase,
           use_case_edit: editsUseCase,
+          function_add: addsFunction,
+          function_removal: removesFunction,
           use_case_ui: ucMode === "screen_pending" || ucMode === "full",
           messages_ready: ucMode === "full" && messagesReady(spine),
           glossary: spine.glossary.map(({ id, term, definition }) => ({ id, term, definition })),
@@ -1121,7 +1318,7 @@ const opsFromInstruction = async (
     adoptModelPlan(result.data)
   } catch (err) {
     if (err instanceof AiActionError && AI_OUTPUT_ERRORS.has(err.code)) {
-      return { ops: [], clarification: byLanguage(replyLanguage ?? DEFAULT_REPLY_LANGUAGE, UNCLEAR_INSTRUCTION), notes: null }
+      return { ops: [], clarification: byLanguage(replyLanguage ?? DEFAULT_REPLY_LANGUAGE, UNCLEAR_INSTRUCTION), notes: null, unclear: true }
     }
     throw err
   }
@@ -1140,13 +1337,21 @@ const opsFromInstruction = async (
   }
   // Lô sai thì gọi lại kèm lỗi: một lần; có kế hoạch giao diện (lệnh nhiều use case, 3–4 màn) thì tới hai lần
   for (let attempt = 0, max = uiPlan.length > 0 ? 2 : 1; attempt < max && !result.data.clarification_needed?.trim(); attempt++) {
-    const problems = batchProblems(spine, prepare((result.data.ops ?? []) as Op[]), instruction, ucMode, allowShared, uiPlan, removesUseCase, editsUseCase)
+    const report = (ops: unknown): BatchReport =>
+      batchReport(spine, prepare((ops ?? []) as Op[]), instruction, ucMode, allowShared, uiPlan, removesUseCase, editsUseCase, structural)
+    const current = report(result.data.ops)
+    const problems = current.problems
     if (problems.length === 0) break
     const retry = await call(problems.join("\n")).catch((err: unknown) => {
       if (err instanceof AiActionError && AI_OUTPUT_ERRORS.has(err.code)) return null
       throw err
     })
     if (!retry || retry.data.clarification_needed?.trim() || (retry.data.ops ?? []).length === 0) break
+    // FLF-486 (B3): lô gọi lại tệ hơn lô trước (bị từ chối, mất use case user đã chọn, nhiều lỗi hơn) ⇒ giữ lô trước
+    if (worseBatch(report(retry.data.ops), current)) {
+      console.info("[change] bỏ lô gọi lại vì tệ hơn lô trước, giữ lô trước")
+      break
+    }
     result = retry
     adoptModelPlan(retry.data)
   }
@@ -1208,9 +1413,10 @@ export const draftUseCaseOps = (
   userId: string,
   spine: Spine,
   instruction: string,
-  deps: Partial<ChangeDeps> = {}
+  deps: Partial<ChangeDeps> = {},
+  options: { structural?: StructuralHint } = {}
 ): Promise<ResolvedOps> =>
-  opsFromInstruction(projectId, userId, spine, instruction, undefined, undefined, { ...defaultChangeDeps(), ...deps }, MAX_CLARIFICATION_ROUNDS, false)
+  opsFromInstruction(projectId, userId, spine, instruction, undefined, undefined, { ...defaultChangeDeps(), ...deps }, MAX_CLARIFICATION_ROUNDS, false, null, options.structural ?? null)
 
 const resolveOps = async (
   projectId: string,
@@ -1254,6 +1460,8 @@ export interface ChangePreviewResult extends PreviewResult {
   notes?: string
   /** Hoà giải: section vẫn đúng nội dung, user chỉ cần xác nhận nguyên trạng (BUG-16). */
   no_change?: boolean
+  /** FLF-493 (hoà giải): mục mà lô sẽ xoá — FE hiện khối cảnh báo trước khi áp; không chặn, không tự bỏ op. */
+  removed_items?: { path: string; label: string }[]
   /**
    * AI cho rằng yêu cầu không hợp lý (kèm lý do, ngôn ngữ trả lời). Có ⇒ không tự ghi; áp dụng bản xem trước này là "Vẫn làm"
    * (giữ ý sau cảnh báo, lưu vào phiên chat cho lượt kiểm sau đọc).
@@ -1276,6 +1484,10 @@ export interface ChangePreviewResult extends PreviewResult {
    * `questions[].options` để FE hiện thẻ chọn nhanh.
    */
   clarification_choices?: string[]
+  /**
+   * Nội bộ (không trả qua HTTP — controller đọc để quyết định có mời "Mở change request" không, xem `ResolvedOps.unclear`).
+   */
+  unclear?: boolean
 }
 
 const rejectedPreview = (baseVersion: number, violations: Violation[], referrers: PreviewResult["referrers"] = []): ChangePreviewResult => ({
@@ -1313,7 +1525,8 @@ export const preview = async (
   const clarifyOnly = (): ChangePreviewResult => ({
     ...rejectedPreview(body.base_version, []),
     clarification: resolved.clarification ?? "",
-    ...(resolved.choices?.length ? { clarification_choices: resolved.choices } : {})
+    ...(resolved.choices?.length ? { clarification_choices: resolved.choices } : {}),
+    ...(resolved.unclear ? { unclear: true } : {})
   })
   if (resolved.clarification !== null && !partial) return clarifyOnly()
   if (resolved.withdrawn) return { ok: true, txn: randomUUID(), base_version: body.base_version, ops: [], changes: [], violations: [], referrers: [], notes: resolved.notes ?? undefined }
