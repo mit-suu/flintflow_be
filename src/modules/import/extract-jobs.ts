@@ -14,7 +14,7 @@
 
 import { defineJob, isJobActive, startJob, waitForJob } from "../../shared/queue/job-runner.js"
 import { ImportedDocument, type IImportedDocument } from "./imported-document.model.js"
-import { acceptLatest, applyDropText, assertImportStatus, autoConfirmPendingMapping, requireImport } from "./import.service.js"
+import { acceptLatest, applyDropText, assertImportStatus, assertStartAffordable, autoConfirmPendingMapping, requireImport } from "./import.service.js"
 import { runExtraction } from "./extract.service.js"
 import { startAutoFinalize } from "./finalize-jobs.js"
 import { Mode1Error } from "./mode1.errors.js"
@@ -77,6 +77,8 @@ export const startExtraction = async (projectId: string, userId: string, importI
   assertImportStatus(doc, ["extracting"], "extracting")
   // FLF-412: vùng Bỏ chữ ⇒ viết lại file + tách lại trước lượt đọc đầu tiên
   if (!(await isExtractionRunning(importId))) {
+    // FLF-458: đủ credit cho tài liệu tham khảo + dịch khung rồi mới viết lại file (thiếu ⇒ 402, chưa ghi / trừ gì)
+    await assertStartAffordable(doc, userId)
     await applyDropText(doc, userId)
     // FLF-458: tài liệu tham khảo đang chờ đọc cùng lượt Bắt đầu (credit đã cộng vào màn báo); lỗi khác credit không chặn
     const { summarizePendingAtStart } = await import("../project/project-document.service.js")

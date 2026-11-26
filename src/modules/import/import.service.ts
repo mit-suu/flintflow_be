@@ -541,6 +541,28 @@ export const skeletonTranslationEstimate = async (doc: IImportedDocument): Promi
   return { target, ...(await skeletonTranslationCost(skeletonUnits(kept))) }
 }
 
+/**
+ * FLF-458: lượt Bắt đầu trả tiền cho tài liệu tham khảo đang chờ đọc + dịch khung (I-4 tự dừng được khi hết credit nên không
+ * tính ở đây). Kiểm số dư đủ cho TOÀN BỘ phần đó TRƯỚC khi viết lại file / trừ credit — thiếu ⇒ 402, file và credit nguyên vẹn.
+ */
+export const assertStartAffordable = async (doc: IImportedDocument, userId: string): Promise<void> => {
+  const projectId = String(doc.projectId)
+  const { pendingSummaryCredits } = await import("../project/project-document.service.js")
+  const reference = await pendingSummaryCredits(projectId)
+  const translate = (await extractionNotStarted(doc)) ? await skeletonTranslationEstimate(doc) : null
+  const cost = reference.credits + (translate?.credits ?? 0)
+  if (!cost) return
+  const { getOrCreateWallet, resolveWalletOrg } = await import("../../shared/ai/credit-reservation.service.js")
+  const orgId = await resolveWalletOrg(projectId)
+  if (!orgId) return
+  const wallet = await getOrCreateWallet(userId, undefined, orgId)
+  const available = wallet.balance - wallet.reserved
+  if (available < cost) {
+    const { AiActionError } = await import("../../shared/ai/ai-action.types.js")
+    throw new AiActionError(402, `Không đủ credit. Yêu cầu: ${cost} credit, Khả dụng: ${available} credit.`, "INSUFFICIENT_CREDIT", { cost, available, balance: wallet.balance, reserved: wallet.reserved })
+  }
+}
+
 /** Thời gian tối đa chờ lần Bắt đầu kia viết lại file xong (file lớn tách lại mất vài giây). */
 const DROP_WAIT_MS = 60_000
 const DROP_POLL_MS = 200
