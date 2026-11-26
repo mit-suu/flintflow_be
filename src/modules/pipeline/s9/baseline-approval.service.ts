@@ -13,6 +13,7 @@
  * Analyst không nộp được một bản mà Lead chắc chắn không ký được.
  */
 
+import { assertLayoutConfirmedForBaseline } from "../../import/layout-preview.service.js"
 import { Comment } from "../../comment/comment.model.js"
 import { Membership } from "../../organization/membership.model.js"
 import { notify } from "../../notification/notification.service.js"
@@ -92,6 +93,7 @@ export interface SubmitResult {
  */
 export const submitForApproval = async (actor: ApprovalActor, baseVersion: number): Promise<SubmitResult> => {
   await assertNoRunningStep(actor.projectId)
+  await assertLayoutConfirmedForBaseline(actor.projectId)
   const { spine, checkedAtVersion } = await recheckAtBaseline(actor.projectId, actor.userId, baseVersion)
 
   const blocking = blockingFlags(spine)

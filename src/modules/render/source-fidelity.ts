@@ -16,12 +16,15 @@
  *   `section_id` (không tính chữ heading do mẫu đích đặt); dự án chưa đổi mẫu giữ khoá cũ (heading + khối).
  */
 
+import { createHash } from "node:crypto"
 import { DocVersion } from "../doc-version/doc-version.model.js"
 import { IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { TemplateMigration } from "../template-migration/template-migration.model.js"
 import { TemplateProfile } from "../import/template-profile.model.js"
 import { isTemplateContent, isTemplateFile, type StructurePreview } from "../import/structure-preview.js"
 import { Project } from "../project/project.model.js"
+import { listSections } from "../spine/section-registry.js"
+import * as spineRepository from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { RenderedDocument } from "./rendered-document.types.js"
 
@@ -76,6 +79,9 @@ interface ProfileFacts {
   structure_preview?: StructurePreview | null
   /** Chế độ 3 / 4 từ SRS đã viết đã vào Luồng 2 (có Spine mốc). */
   flow2_entry_at?: Date | string | null
+  /** FLF-461 (bước 2.9a): người dùng đã xác nhận bố cục mới của chế độ 4. */
+  layout_confirmed_at?: Date | string | null
+  layout_confirmed_signature?: string | null
   /** Đã đổi mẫu: `source_file_ref` là file nền mới do FlintFlow dựng. */
   migrated_base_at?: Date | string | null
 }
@@ -95,20 +101,38 @@ export const sourceBasedFrom = (project: ProjectFacts | null, profile: ProfileFa
   return profile.target_structure?.resolved_mode === 1
 }
 
+/** FLF-461: dấu của bố cục = danh sách mục theo thứ tự (mục `feature:*` / `function:*` / riêng mới soạn thì dấu đổi). */
+export const layoutSignatureOf = (spine: Spine): string =>
+  createHash("sha1").update([...listSections(spine).map((d) => d.id), "|", ...spine.custom_sections.map((c) => c.id)].join("|")).digest("hex")
+
+/** Hàm thuần: xác nhận bố cục còn hiệu lực (đã xác nhận và bố cục không đổi từ lúc xác nhận; xác nhận cũ chưa có dấu ⇒ còn hiệu lực). */
+export const layoutConfirmationValid = (profile: ProfileFacts | null, spine: Spine | null): boolean => {
+  if (!profile?.layout_confirmed_at) return false
+  return !profile.layout_confirmed_signature || !spine || profile.layout_confirmed_signature === layoutSignatureOf(spine)
+}
+
 /**
  * Hàm thuần (FLF-416): dự án chế độ 4 đã vào Luồng 2 (tick bổ sung theo mẫu chuẩn, có Spine mốc) ⇒ sắp lại bố cục; khác ⇒ `null`
- * (chế độ 3 giữ đúng thứ tự mẫu, chế độ 1 giữ đúng file).
+ * (chế độ 3 giữ đúng thứ tự mẫu, chế độ 1 giữ đúng file). FLF-461 (bước 2.9a): mục Ngoài phạm vi chỉ xuống cuối **sau khi người
+ * dùng xác nhận** bố cục xem trước (còn hiệu lực, xem `layoutConfirmationValid`). Chưa xác nhận ⇒ bản nháp: mục FlintFlow soạn
+ * thêm vẫn thành heading mới đúng vị trí (không gộp vào mục cha, không rơi về bản in FlintFlow mất file và style của khách),
+ * mục Ngoài phạm vi chưa xuống cuối.
  */
-export const rearrangeOf = (project: ProjectFacts | null, profile: ProfileFacts | null): LayoutRearrange | null => {
+export const rearrangeOf = (project: ProjectFacts | null, profile: ProfileFacts | null, spine: Spine | null = null): LayoutRearrange | null => {
   if (project?.template_intent !== "free" || !profile?.flow2_entry_at) return null
+  if (!layoutConfirmationValid(profile, spine)) return { moveToEnd: [] }
   const moveToEnd = (profile.target_structure?.sections ?? []).filter((s) => s.status === "out_of_scope").map((s) => s.section_id)
   return { moveToEnd }
 }
 
+/** Nạp Spine chỉ khi cần kiểm dấu bố cục (đã xác nhận và có dấu). */
+export const spineForLayoutCheck = async (projectId: string, profile: ProfileFacts | null): Promise<Spine | null> =>
+  profile?.layout_confirmed_at && profile.layout_confirmed_signature ? spineRepository.get(projectId) : null
+
 const loadFacts = async (projectId: string): Promise<[ProjectFacts | null, ProfileFacts | null]> => {
   const [project, profile] = await Promise.all([
     Project.findById(projectId, { start_kind: 1, converted_from: 1, template_intent: 1, mode: 1 }).lean(),
-    TemplateProfile.findOne({ projectId }, { source_file_ref: 1, target_structure: 1, structure_preview: 1, flow2_entry_at: 1, migrated_base_at: 1 }).lean()
+    TemplateProfile.findOne({ projectId }, { source_file_ref: 1, target_structure: 1, structure_preview: 1, flow2_entry_at: 1, layout_confirmed_at: 1, layout_confirmed_signature: 1, migrated_base_at: 1 }).lean()
   ])
   return [project as ProjectFacts | null, profile as ProfileFacts | null]
 }
@@ -236,7 +260,7 @@ export const sourceFidelityFor = async (
   if (opts.otherLanguage) return undefined
   const [project, profile] = await loadFacts(projectId)
   // FLF-416 chế độ 4: sắp lại bố cục theo dữ liệu hiện tại của dự án (bố cục, không phải mốc nguyên vẹn)
-  const rearrange = rearrangeOf(project, profile)
+  const rearrange = rearrangeOf(project, profile, await spineForLayoutCheck(projectId, profile))
   if (opts.anchor) {
     if (!opts.anchor.source_based) return undefined
     return fidelityFrom(current, renderImported, await anchorSpineOf(projectId, opts.anchor), opts.anchor.by_id, rearrange)

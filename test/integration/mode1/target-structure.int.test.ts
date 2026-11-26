@@ -13,6 +13,7 @@ import { startFinalize, waitForFinalize } from "../../../src/modules/import/fina
 import { getImportView } from "../../../src/modules/import/import.service.js"
 import { buildGapReport } from "../../../src/modules/import/gap-report.service.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
+import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
 import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 
@@ -64,5 +65,18 @@ describe("FLF-336 I-5 - so cấu trúc đích trước v0", () => {
     expect(await DocVersion.countDocuments({ projectId })).toBe(1)
     const view = await getImportView(projectId)
     expect(view.target_structure?.intent).toBe("free")
+  })
+
+  it("FLF-460 (BF §3.1.2): nhãn Ngoài phạm vi người dùng đổi ở màn đọc khung có hiệu lực ở cấu trúc đích cuối", async () => {
+    const { projectId, userId, importId } = await importAtBaselining()
+    const profile = (await TemplateProfile.findOne({ projectId }))!
+    const heading = profile.heading_map.find((h) => h.heading_text === "2.1 Actors")!
+    await TemplateProfile.updateOne({ projectId, "heading_map.block_id": heading.block_id }, { $set: { "heading_map.$.scope_label": "out_of_scope" } })
+
+    await finalize(projectId, userId, importId)
+    const target = (await getImportView(projectId)).target_structure!
+    const section = target.sections.find((s) => s.section_id === heading.section_id)
+    expect(section?.status).toBe("out_of_scope")
+    expect(section?.owner_steps).toEqual([])
   })
 })

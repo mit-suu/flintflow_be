@@ -65,7 +65,7 @@ export interface SpineProject {
 }
 
 /** Phạm vi báo credit cần user xác nhận trước khi chạy tiếp (FLF-466 P08, business-flow §2 "Báo trước khi chạy hàng loạt"). */
-export type CreditAckScope = "after_brief" | "screens_locked" | "screens_added"
+export type CreditAckScope = "after_brief" | "screens_locked" | "screens_added" | "reference_documents"
 
 /** Thông báo credit đang chờ xác nhận — server chặn step thuộc phạm vi tới khi `POST /run-estimate/ack`. */
 export interface CreditAckRequired {
@@ -75,6 +75,8 @@ export interface CreditAckRequired {
   created_at: string
   /** Màn thuộc lần báo (`screens_locked`, `screens_added`). */
   screens?: string[]
+  /** FLF-458: `reference_documents` — số tài liệu tham khảo chờ đọc đã báo. */
+  documents?: number
 }
 
 export interface Progress {

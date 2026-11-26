@@ -13,6 +13,8 @@ import { getImportResponseSchema, importStateResponseSchema, importRejectedMetaS
 import { DocBlock } from "../../src/modules/import/doc-block.model.js"
 import { IMPORT_MAX_FILE_BYTES } from "../../src/modules/import/import.constants.js"
 import { Project } from "../../src/modules/project/project.model.js"
+import { ExtractionDraft } from "../../src/modules/import/extraction-draft.model.js"
+import { ImportedDocument } from "../../src/modules/import/imported-document.model.js"
 import { createMode1Project } from "../helpers/mode1.js"
 
 const api = (seeded: SeededFixture, projectId: string) => {
@@ -73,10 +75,19 @@ describe("mode 1 import - upload, preflight, parse, mapping", () => {
     expect(low.length).toBeGreaterThan(0)
     expect(low.every((h) => h.confirmed && h.auto_confirmed)).toBe(true)
     expect(view.profile!.heading_map.filter((h) => h.confidence >= 0.8).every((h) => !h.auto_confirmed)).toBe(true)
-    // PATCH mapping chỉ còn cho bản ghi cũ ở mapping_review
+    // FLF-460 (đảo FLF-343): màn đọc khung (chưa bấm Bắt đầu) đổi được nhãn; mục chưa chắc hiện dấu chưa chắc ở bản đồ mục
+    const lowIds = new Set(low.map((h) => h.block_id))
+    const flagged = view.structure_preview!.sections.filter((s) => s.uncertain)
+    expect(flagged.length).toBeGreaterThan(0)
+    expect(flagged.every((s) => s.block_id && lowIds.has(s.block_id))).toBe(true)
     const notes = view.profile!.heading_map.find((h) => h.heading_text === "5.9 Team Notes")!
-    const late = await c.patch("/import/mapping", { import_id: up.body.data.import.id, headings: [{ block_id: notes.block_id, section_id: "fixed:5.4" }] })
-    expect(late.status).toBe(409)
+    const relabel = await c.patch("/import/mapping", { import_id: up.body.data.import.id, headings: [{ block_id: notes.block_id, section_id: "fixed:5.4" }] })
+    expect(relabel.status, JSON.stringify(relabel.body.error)).toBe(200)
+    expect(relabel.body.data.import.status).toBe("extracting")
+    const after = getImportResponseSchema.parse((await c.get()).body.data)
+    // người dùng tự chọn nên không còn chưa chắc
+    expect(after.profile!.heading_map.find((h) => h.block_id === notes.block_id)).toMatchObject({ section_id: "fixed:5.4", confirmed: true })
+    expect(after.structure_preview!.sections.find((s) => s.block_id === notes.block_id)?.uncertain).toBeUndefined()
   })
 
   it("preflight từ chối ⇒ 422 kèm issues, bản ghi preflight_rejected; upload lại được", async () => {
@@ -97,7 +108,7 @@ describe("mode 1 import - upload, preflight, parse, mapping", () => {
     expect(ok.status).toBe(201)
   })
 
-  it("stamp của project khác ⇒ 422 IMPORT_STAMP_FOREIGN_PROJECT; stamp đúng project ⇒ parse ngay", async () => {
+  it("stamp đúng project ⇒ parse ngay, coi như đã xác nhận bản mới nhất", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)
     const c = api(seeded, projectId)
@@ -106,15 +117,43 @@ describe("mode 1 import - upload, preflight, parse, mapping", () => {
       await writeStamp(pkg, { project_id: project, version: "v0.3", source: "baseline" })
       return pkg.toBuffer()
     }
-    const other = await c.upload(await stamped("66f0000000000000000000ff"))
-    expect(other.status).toBe(422)
-    expect(other.body.error.code).toBe("IMPORT_STAMP_FOREIGN_PROJECT")
-    expect(other.body.meta.stamp.project_id).toBe("66f0000000000000000000ff")
-
     const own = await c.upload(await stamped(projectId))
     expect(own.status).toBe(201)
-    expect(own.body.data.import).toMatchObject({ status: "extracting", stamp: { project_id: projectId } })
+    expect(own.body.data.import).toMatchObject({ status: "extracting", stamp: { project_id: projectId }, foreign_project: null })
     expect(own.body.data.import.confirmed_latest_at).not.toBeNull()
+  })
+
+  it("FLF-458: tạo dự án bằng file mang dấu của một project FlintFlow khác ⇒ nhận như file mới (bỏ dấu cũ), báo nguồn, mặc định Bỏ chữ mọi mục", async () => {
+    const seeded = await seedFixture("minimal")
+    const originProjectId = await createMode1Project(seeded, "Dự án gốc")
+    const projectId = await createMode1Project(seeded, "Dự án mới")
+    const c = api(seeded, projectId)
+    const stamped = async (project: string) => {
+      const pkg = await DocxPackage.load(await makeSrsDocx())
+      await writeStamp(pkg, { project_id: project, version: "v0.3", source: "baseline" })
+      return pkg.toBuffer()
+    }
+
+    const up = await c.upload(await stamped(originProjectId))
+    expect(up.status, JSON.stringify(up.body.error)).toBe(201)
+    const uploaded = importStateResponseSchema.parse(up.body.data).import
+    // Dấu cũ bị bỏ (xử lý như file mới) — vẫn hỏi "bản mới nhất" như file không stamp
+    expect(uploaded).toMatchObject({ status: "extracting", stamp: null, confirmed_latest_at: null })
+    expect(uploaded?.foreign_project).toMatchObject({ project_id: originProjectId, name: "Dự án gốc" })
+
+    const view = getImportResponseSchema.parse((await c.get()).body.data)
+    expect(view.import?.foreign_project).toMatchObject({ project_id: originProjectId, name: "Dự án gốc" })
+    // Mặc định Bỏ chữ mọi mục có chữ (như mẫu của tổ chức, FLF-412) — người dùng tự quyết định mục nào giữ lại
+    expect(view.text_sections?.length).toBeGreaterThan(0)
+    expect(view.text_sections?.every((s) => s.dropped)).toBe(true)
+
+    // Dự án khác tổ chức ⇒ không lộ tên, chỉ báo chung
+    const stranger = await seedFixture("minimal")
+    const strangerProjectId = await createMode1Project(stranger)
+    const foreignC = api(stranger, strangerProjectId)
+    const fromOtherOrg = await foreignC.upload(await stamped(originProjectId))
+    expect(fromOtherOrg.status, JSON.stringify(fromOtherOrg.body.error)).toBe(201)
+    expect(fromOtherOrg.body.data.import.foreign_project).toMatchObject({ project_id: originProjectId, name: null })
   })
 
   it("project mode fpt ⇒ 409 PROJECT_MODE_MISMATCH; project người khác ⇒ 404", async () => {
@@ -186,5 +225,128 @@ describe("mode 1 import - upload, preflight, parse, mapping", () => {
     expect(importStateResponseSchema.parse(up.body.data).import.status).toBe("extracting")
     const profile = getImportResponseSchema.parse((await c.get()).body.data).profile!
     expect(profile.table_map.map((t) => t.header)).toEqual(["Use Case ID", "", "Actor"])
+  })
+})
+
+describe("FLF-460 - đổi nhãn mục ở ba thời điểm", () => {
+  const setup = async () => {
+    const seeded = await seedFixture("minimal")
+    const projectId = await createMode1Project(seeded)
+    const c = api(seeded, projectId)
+    const up = await c.upload(await makeSrsDocx())
+    expect(up.status, JSON.stringify(up.body.error)).toBe(201)
+    const importId = up.body.data.import.id as string
+    const view = getImportResponseSchema.parse((await c.get()).body.data)
+    return { c, importId, heading: view.profile!.heading_map.find((h) => h.heading_text === "2.1 Actors")! }
+  }
+
+  it("trước Bắt đầu: đưa mục vào Ngoài phạm vi, bản đồ mục tính lại, không đổi credit; bỏ nhãn tay thì quay về như cũ", async () => {
+    const { c, importId, heading } = await setup()
+    const before = getImportResponseSchema.parse((await c.get()).body.data)
+
+    const out = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, scope: "out_of_scope" }] })
+    expect(out.status, JSON.stringify(out.body.error)).toBe(200)
+    const view = getImportResponseSchema.parse((await c.get()).body.data)
+    expect(view.structure_preview!.sections.find((s) => s.block_id === heading.block_id)).toMatchObject({ status: "out_of_scope", scope_label: "out_of_scope" })
+    expect(view.structure_preview!.summary.out_of_scope).toBe(before.structure_preview!.summary.out_of_scope + 1)
+    expect(view.credit_estimate).toEqual(before.credit_estimate)
+    expect(view.import!.status).toBe("extracting")
+
+    const back = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, scope: "auto" }] })
+    expect(back.status).toBe(200)
+    const restored = getImportResponseSchema.parse((await c.get()).body.data)
+    expect(restored.structure_preview!.summary).toEqual(before.structure_preview!.summary)
+  })
+
+  it("trước Bắt đầu: đổi mục khớp được; mục không có trong mẫu bị từ chối", async () => {
+    const { c, importId, heading } = await setup()
+    const res = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, section_id: "unmapped" }] })
+    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+    const view = getImportResponseSchema.parse((await c.get()).body.data)
+    expect(view.profile!.heading_map.find((h) => h.block_id === heading.block_id)?.section_id).toBe("unmapped")
+    const rejected = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, section_id: "khong-co" }] })
+    expect(rejected.status).toBe(409)
+  })
+
+  it("sau import (trước bản gốc): bỏ bản đọc cũ của mục đổi nhãn (id cũ và mới), về màn báo credit để I-4 đọc lại", async () => {
+    const { c, importId, heading } = await setup()
+    const doc = (await ImportedDocument.findById(importId))!
+    const other = "fixed:3.1"
+    for (const section_id of [heading.section_id, "fixed:5.4", other]) {
+      await ExtractionDraft.create({ projectId: doc.projectId, import_id: doc._id, section_id, status: "done", fields: [], ops: [] })
+    }
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { status: "fields_review" } })
+
+    const res = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, section_id: "fixed:5.4" }] })
+    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+    expect(res.body.data.import.status).toBe("extracting")
+    expect((await ExtractionDraft.find({ import_id: importId }).lean()).map((d) => d.section_id)).toEqual([other])
+    const view = getImportResponseSchema.parse((await c.get()).body.data)
+    expect(view.import!.status).toBe("extracting")
+    expect(view.credit_estimate).not.toBeNull()
+  })
+
+  it("sau import: đang đọc (không dừng) hoặc đang tạo bản gốc thì từ chối", async () => {
+    const { c, importId, heading } = await setup()
+    const doc = (await ImportedDocument.findById(importId))!
+    await ExtractionDraft.create({ projectId: doc.projectId, import_id: doc._id, section_id: "fixed:3.1", status: "pending", fields: [], ops: [] })
+    // đã có lượt đọc (con trỏ) mà không dừng ⇒ coi là đang đọc
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { extract_cursor: "fixed:3.1" } })
+    const body = { import_id: importId, headings: [{ block_id: heading.block_id, section_id: "fixed:5.4" }] }
+    expect((await c.patch("/import/mapping", body)).status).toBe(409)
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { status: "baselining" } })
+    expect((await c.patch("/import/mapping", body)).status).toBe(409)
+  })
+
+  it("đã đổi nhãn một lần (extracting, không con trỏ, không job, còn bản đọc) ⇒ đổi nhãn lại được; heading chưa khớp xoá đúng bản đọc content:@<block>", async () => {
+    const { c, importId, heading } = await setup()
+    const doc = (await ImportedDocument.findById(importId))!
+    const content = `content:@${heading.block_id}`
+    for (const section_id of [content, "fixed:3.1"]) {
+      await ExtractionDraft.create({ projectId: doc.projectId, import_id: doc._id, section_id, status: "done", fields: [], ops: [] })
+    }
+    const res = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, section_id: "fixed:5.4" }] })
+    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+    expect((await ExtractionDraft.find({ import_id: importId }).lean()).map((d) => d.section_id)).toEqual(["fixed:3.1"])
+    expect((await ImportedDocument.findById(importId))!.status).toBe("extracting")
+  })
+
+  it("chưa có bản gốc: incomplete đổi nhãn được, về extracting; reviewing (rà soát AI có thể đang chạy) ⇒ 409; đang viết lại file (drop_applying) ⇒ 409; khoá quá hạn ⇒ đổi được", async () => {
+    {
+      const status = "incomplete" as const
+      const { c, importId, heading } = await setup()
+      const doc = (await ImportedDocument.findById(importId))!
+      await ExtractionDraft.create({ projectId: doc.projectId, import_id: doc._id, section_id: heading.section_id, status: "done", fields: [], ops: [] })
+      await ImportedDocument.updateOne({ _id: importId }, { $set: { status, paused: null } })
+      const res = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, section_id: "fixed:5.4" }] })
+      expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+      const after = (await ImportedDocument.findById(importId))!
+      expect(after.status).toBe("extracting")
+      expect(after.paused ?? null).toBeNull()
+    }
+    {
+      const { c, importId, heading } = await setup()
+      await ImportedDocument.updateOne({ _id: importId }, { $set: { status: "reviewing", paused: { reason: "credits", at: new Date() } } })
+      const res = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, section_id: "fixed:5.4" }] })
+      expect(res.status).toBe(409)
+      expect((await ImportedDocument.findById(importId))!.status).toBe("reviewing")
+    }
+    const { c, importId, heading } = await setup()
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { drop_applying: true, drop_applying_at: new Date() } })
+    const busy = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, scope: "out_of_scope" }] })
+    expect(busy.status).toBe(409)
+    // FLF-460: khoá treo quá 5 phút (máy chủ chết giữa chừng) ⇒ hết hạn, đổi nhãn tiếp tục được
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { drop_applying_at: new Date(Date.now() - 6 * 60_000) } })
+    const freed = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, scope: "out_of_scope" }] })
+    expect(freed.status, JSON.stringify(freed.body.error)).toBe(200)
+  })
+
+  it("sau bản gốc: không đổi trực tiếp; luồng CR chưa nhận loại thay đổi đổi nhãn nên báo rõ", async () => {
+    const { c, importId, heading } = await setup()
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { status: "gap_review" } })
+    const res = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, scope: "out_of_scope" }] })
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe("IMPORT_INVALID_STATE")
+    expect(res.body.error.message).toContain("yêu cầu thay đổi")
   })
 })

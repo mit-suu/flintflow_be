@@ -21,6 +21,21 @@ export const CREDIT_ACK_REQUIRED_MESSAGE = "Cần xác nhận credit trước kh
 export const APPROVE_BRIEF_STEP = "B-2.3"
 export const SCREENS_LOCK_STEP = "S-4.1"
 
+/** FLF-458: B-0 là bước Intake đầu; dự án không có SRS báo credit đọc tài liệu tham khảo ở đây (business-flow §2). */
+export const REFERENCE_DOCUMENTS_PHASE = "B-0"
+
+const phaseOfStep = (stepId: string): string => parseStepId(stepId).base.replace(/\.\d+$/, "")
+
+/**
+ * FLF-458: tới lượt báo credit đọc tài liệu tham khảo chưa? Chỉ khi: dự án tạo không có SRS (`fpt`), step thuộc B-0, B-0 chưa
+ * bắt đầu (tài liệu đính kèm giữa chừng đã có thẻ credit riêng), và còn tài liệu chờ đọc. Dự án có SRS (`import`) đã cộng số
+ * này ở màn đọc khung nên không báo lần hai.
+ */
+export const referenceAckDue = (spine: Pick<Spine, "steps">, stepId: string, projectMode: string | null | undefined, pendingDocuments: number): boolean => {
+  if (projectMode !== "fpt" || pendingDocuments <= 0 || phaseOfStep(stepId) !== REFERENCE_DOCUMENTS_PHASE) return false
+  return !spine.steps.some((s) => phaseOfStep(s.id) === REFERENCE_DOCUMENTS_PHASE && s.status !== "pending" && s.status !== "skipped")
+}
+
 const indexOfPhase = (phase: string): number => (PHASES as readonly string[]).indexOf(phase)
 const FIRST_SRS_PHASE_INDEX = indexOfPhase("S-2")
 
@@ -36,6 +51,8 @@ export const creditAckBlocks = (ack: CreditAckRequired | null | undefined, stepI
       return loop !== null
     case "screens_added":
       return loop !== null && (ack.screens ?? []).includes(loop)
+    case "reference_documents":
+      return true
   }
 }
 

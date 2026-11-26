@@ -310,6 +310,32 @@ router.patch("/:id/import/drop-text", authMiddleware, importController.dropText)
 
 /**
  * @swagger
+ * /api/v1/projects/{id}/import/document-language:
+ *   patch:
+ *     summary: (FLF-456) Màn đọc khung — chọn ngôn ngữ tài liệu (EN / VI) khi file chỉ còn khung; khác ngôn ngữ file thì khung được dịch một lần lúc Bắt đầu
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [import_id, language]
+ *             properties:
+ *               import_id: { type: string }
+ *               language: { type: string, enum: [en, vi] }
+ *     responses:
+ *       200: { description: "`{ import }` — đọc lại GET /import để có `skeleton_language`, `credit_estimate` mới" }
+ *       409: { description: "IMPORT_INVALID_STATE (đã bấm Bắt đầu, hoặc còn mục giữ nội dung)" }
+ */
+router.patch("/:id/import/document-language", authMiddleware, importController.documentLanguage)
+
+/**
+ * @swagger
  * /api/v1/projects/{id}/import/fields:
  *   patch:
  *     summary: Bước 1.6/1.9 - xác nhận field độ tin thấp, đoạn lớp 4 chữ hướng dẫn, mục tên đúng nội dung sai (UC-22)
@@ -418,6 +444,41 @@ router.post("/:id/import/finalize", authMiddleware, importController.finalize)
 router.post("/:id/import/continue", authMiddleware, importController.continueFlow2)
 
 /**
+ * @openapi
+ * /api/v1/projects/{id}/import/layout-preview:
+ *   get:
+ *     summary: Chế độ 4, bước 2.9a - xem trước bố cục mới của tài liệu
+ *     description: |
+ *       Chế độ 4 đã vào Luồng 2: danh sách mục theo thứ tự bản in sẽ có (mục FlintFlow soạn thêm chèn đúng vị trí mẫu chuẩn, mục
+ *       Ngoài phạm vi giữ nguyên nội dung và xuống cuối). Chưa xác nhận thì bản in vẫn giữ bố cục file của khách. Chế độ khác thì
+ *       `applicable: false`.
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     responses:
+ *       200: { description: "`{ applicable, confirmed_at, sections: [{ section_id, title, level, origin: file | added | out_of_scope }] }`" }
+ */
+router.get("/:id/import/layout-preview", authMiddleware, importController.layoutPreview)
+
+/**
+ * @openapi
+ * /api/v1/projects/{id}/import/layout-preview/confirm:
+ *   post:
+ *     summary: Chế độ 4, bước 2.9a - xác nhận bố cục mới, từ đó bản in áp bố cục này
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     responses:
+ *       200: { description: "Như `GET /import/layout-preview`, `confirmed_at` đã có" }
+ *       409: { description: "IMPORT_INVALID_STATE (không phải chế độ 4 đang soạn)" }
+ */
+router.post("/:id/import/layout-preview/confirm", authMiddleware, importController.layoutConfirm)
+
+/**
  * @swagger
  * /api/v1/projects/{id}/import/review/run:
  *   post:
@@ -464,6 +525,30 @@ router.post("/:id/import/review/run", authMiddleware, importController.reviewRun
  *       409: { description: IMPORT_INVALID_STATE (không ở reviewing) }
  */
 router.post("/:id/import/review/stop", authMiddleware, importController.reviewStop)
+
+/**
+ * @swagger
+ * /api/v1/projects/{id}/import/review/section:
+ *   post:
+ *     summary: FLF-453 - nút "Rà soát bằng AI" cho một mục chỉ được Code kiểm (business-flow §3.1.2); báo credit riêng của mục trước, xác nhận mới chạy
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [import_id, section_id], properties: { import_id: { type: string }, section_id: { type: string }, confirm: { type: boolean, description: "Không có / false ⇒ chỉ báo credit, không gọi AI, không trừ" } } }
+ *     responses:
+ *       200: { description: "Chưa `confirm` ⇒ `{ section_id, calls, credits, reviewed: false }`; xong ⇒ `{ import, section_id, reviewed: true }` (vẫn `reviewing`, phát hiện là cờ vàng `import_review`); hết credit / lỗi AI ⇒ `{ import (paused), section_id, reviewed: false }`" }
+ *       409: { description: "IMPORT_INVALID_STATE (không ở reviewing, mục đã nằm trong vòng cụm, không có chữ để rà, hoặc đã rà)" }
+ */
+router.post("/:id/import/review/section", authMiddleware, importController.reviewSection)
 
 // FLF-278 trên FLF-335/336 — mẫu / thư viện nội dung của tổ chức, đi qua dự án (contract §FLF-278)
 router.post("/:id/import/from-org", authMiddleware, orgLibrary.importFromOrg)

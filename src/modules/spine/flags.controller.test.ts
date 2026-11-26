@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { NextFunction, Request, RequestHandler, Response } from "express"
 
 vi.mock("../project/project.service.js", () => ({ getProjectById: vi.fn() }))
+vi.mock("../import/section-progress.js", () => ({ flow2SectionProgress: vi.fn(async () => null) }))
 vi.mock("./spine.repository.js", () => ({ getOrCreate: vi.fn(), listChanges: vi.fn() }))
 vi.mock("../../shared/auth/auth.middleware.js", () => ({ authMiddleware: vi.fn() }))
 vi.mock("./flags.service.js", async (importOriginal) => {

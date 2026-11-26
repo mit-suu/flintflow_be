@@ -6,7 +6,7 @@
 import { makeDocx, p, styled, table } from "../../docx-ooxml/testing/make-docx.js"
 import { SRS_FIXTURE_TEXT } from "./srs-fixture.js"
 
-export const OFF_FORMAT_VARIANTS = ["renamed", "mismatch", "mixed", "prose", "bold"] as const
+export const OFF_FORMAT_VARIANTS = ["renamed", "mismatch", "mixed", "prose", "bold", "twice"] as const
 export type OffFormatVariant = (typeof OFF_FORMAT_VARIANTS)[number]
 
 const STYLES =
@@ -23,6 +23,8 @@ export const OFF_FORMAT_TEXT = {
   /** Một section nhiều loại nội dung: chức năng nền lẫn NFR. */
   reminderFunction: "The system sends a reminder email to learners every night.",
   reminderNfr: "Reminder emails shall be delivered within 5 minutes of the scheduled time.",
+  /** FLF-453: NFR trong mục riêng (heading tự đặt) khi file còn mục 4.2.3 FlintFlow. */
+  customNfr: "Course search results shall load within 2 seconds for 500 concurrent learners.",
   /** Văn xuôi thay cho bảng, không có ID. */
   proseActors: ["A learner enrolls in courses and takes quizzes.", "An administrator manages courses and user accounts."]
 }
@@ -49,6 +51,7 @@ export const makeOffFormatSrsDocx = async (variant: OffFormatVariant): Promise<B
     ...useCases,
     ...(variant === "renamed" ? [h(1, "Phần mở rộng"), p(O.reportRequirement), h(2, "Những gì hệ thống làm được"), p(O.enrollRequirement)] : []),
     ...(variant === "mixed" ? [h(1, "3 Functional Requirements"), h(2, "3.1 System Functional Overview"), h(3, "3.1.4 Non-Screen Functions"), p(O.reminderFunction), p(O.reminderNfr)] : []),
+    ...(variant === "twice" ? [h(1, "Những gì hệ thống làm được"), p(O.customNfr), h(1, "4 Non-Functional Requirements"), h(2, "4.2 Quality Attributes"), h(3, "4.2.3 Performance"), p(T.perf)] : []),
     ...(variant === "bold" ? [h(1, "4 Non-Functional Requirements"), h(2, "4.2 Quality Attributes"), h(3, "4.2.3 Performance"), p(T.perf)] : []),
     h(1, "5 Requirement Appendix"),
     h(2, "5.1 Business Rules"),

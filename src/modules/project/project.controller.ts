@@ -58,15 +58,18 @@ export const getProject = catchAsync(async (req: Request, res: Response) => {
   const current = (await retryPendingConversion(project, userId)) ? await projectService.getProjectById(projectId, orgId) : project
   // FLF-395: bản mẫu tổ chức mới hơn bản dự án đang theo (chỉ Lead / Analyst); FLF-466: trả ngôn ngữ tài liệu + project_code
   // FLF-480 (ChoViet #14): `document_language` — ngôn ngữ đã suy đúng (field riêng ⇒ ngôn ngữ file của mode 1 import)
-  const [templateUpdate, templateCurrent, languages] = await Promise.all([
+  const [templateUpdate, templateCurrent, languages, languageLocked] = await Promise.all([
     templateUpdateOf(current, req.orgContext?.role),
     templateCurrentOf(current),
-    projectLanguages(projectId, current)
+    projectLanguages(projectId, current),
+    projectService.isDocumentLanguageLocked(projectId, current)
   ])
   return sendSuccess(res, 200, {
     ...current.toJSON(),
     documentLanguage: languages.locale,
     document_language: languages.locale,
+    // FLF-456: dự án có file nền khoá ngôn ngữ (cùng điều kiện `PATCH /document-language` trả 409)
+    document_language_locked: languageLocked,
     project_code: projectCode(projectId),
     template_update: templateUpdate,
     template_current: templateCurrent

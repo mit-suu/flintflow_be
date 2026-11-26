@@ -15,10 +15,11 @@ import { applyTransaction } from "../spine/op-engine.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { TemplateLoopHint } from "../spine/section-status.js"
 import { TemplateProfile } from "../import/template-profile.model.js"
+import { Project } from "../project/project.model.js"
 import type { CreditAckRequired, CreditAckScope, Spine, SpineRecord } from "../spine/spine.types.js"
 import type { Op } from "../spine/op.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { APPROVE_BRIEF_STEP, CREDIT_ACK_REQUIRED, CREDIT_ACK_REQUIRED_MESSAGE, SCREENS_LOCK_STEP, creditAckBlocks, uncoveredScreens } from "./credit-ack.js"
+import { APPROVE_BRIEF_STEP, CREDIT_ACK_REQUIRED, CREDIT_ACK_REQUIRED_MESSAGE, SCREENS_LOCK_STEP, creditAckBlocks, referenceAckDue, uncoveredScreens } from "./credit-ack.js"
 import { loadRunEstimateCosts, planRunEstimate } from "./run-estimate.js"
 
 export const NO_CREDIT_ACK_PENDING = "NO_CREDIT_ACK_PENDING"
@@ -78,6 +79,11 @@ export const acknowledgeCredit = async (projectId: string, userId: string): Prom
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   const ack = record.progress.credit_ack_required
   if (!ack) throw new ApiError(409, "Không có thông báo credit nào đang chờ xác nhận.", NO_CREDIT_ACK_PENDING)
+  // FLF-458: xác nhận đọc tài liệu tham khảo ở B-0 ⇒ đọc ngay (lúc này mới trừ credit). Hết credit ⇒ 402, giữ lần báo, tài liệu còn `pending`.
+  if (ack.scope === "reference_documents") {
+    const { summarizePendingAtStart } = await import("../project/project-document.service.js")
+    await summarizePendingAtStart(projectId, userId)
+  }
   const ops: Op[] = [{ op: "set", path: "progress.credit_ack_required", value: null }]
   if (ack.screens) {
     const acked = [...new Set([...(record.progress.credit_acked_screens ?? []), ...ack.screens])]
@@ -106,6 +112,20 @@ export const acknowledgeCredit = async (projectId: string, userId: string): Prom
 }
 
 /**
+ * FLF-458: lần báo `reference_documents` — dự án tạo không có SRS mà có tài liệu tham khảo đang chờ đọc, step đầu của B-0 sắp
+ * chạy. Trả `null` khi không tới lượt báo (có SRS, B-0 đã bắt đầu, không có tài liệu chờ).
+ */
+const referenceDocumentsAck = async (projectId: string, spine: Spine, stepId: string): Promise<CreditAckRequired | null> => {
+  if (stepId.split(".")[0] !== "B-0") return null
+  const { pendingSummaryCredits } = await import("../project/project-document.service.js")
+  const { documents, credits } = await pendingSummaryCredits(projectId)
+  if (documents === 0) return null
+  const project = await Project.findById(projectId).select("mode").lean()
+  if (!referenceAckDue(spine, stepId, project?.mode, documents)) return null
+  return { scope: "reference_documents", credits, documents, created_at: new Date().toISOString() }
+}
+
+/**
  * Chặn step thuộc phạm vi lần báo chưa xác nhận. Phát hiện lười lần báo `screens_added` (màn thêm sau S-4.1 chưa báo). Ném
  * 409 `CREDIT_ACK_REQUIRED` kèm lần báo trong `details`.
  */
@@ -115,8 +135,10 @@ export const enforceCreditAck = async (projectId: string, spine: Spine, stepId: 
     const fresh = uncoveredScreens(spine)
     // Chỉ chặn khi chính step này thuộc một màn chưa được báo
     const loop = stepId.includes("@") ? stepId.slice(stepId.indexOf("@") + 1) : null
-    if (fresh.length === 0 || loop === null || !fresh.includes(loop)) return
-    ack = await buildCreditAck(spine, "screens_added", fresh)
+    const screensDue = fresh.length > 0 && loop !== null && fresh.includes(loop)
+    const next = screensDue ? await buildCreditAck(spine, "screens_added", fresh) : await referenceDocumentsAck(projectId, spine, stepId)
+    if (!next) return
+    ack = next
     const record = await spineRepository.get(projectId)
     if (record) {
       await applyTransaction(projectId, {
@@ -124,7 +146,7 @@ export const enforceCreditAck = async (projectId: string, spine: Spine, stepId: 
         ops: [{ op: "set", path: "progress.credit_ack_required", value: ack }],
         by: userId,
         step_id: null,
-        reason: "credit: báo screens_added"
+        reason: `credit: báo ${ack.scope}`
       })
     }
   }

@@ -61,7 +61,7 @@ import { ExtractionDraft, type ExtractedField, type ExtractionProgress, type IEx
 import { FIELD_CONFIDENCE_THRESHOLD, UNMAPPED_SECTION, VISION_CONFIDENCE_CAP, needsConfirm, needsConfirmGuidance, type FieldOrigin, type MentionEntity } from "./import.constants.js"
 import type { FieldsPatchRequest, GetImportResponse } from "./import.dto.js"
 import { Project } from "../project/project.model.js"
-import { assertImportStatus, extractionSummary, requireImport, transitionImport } from "./import.service.js"
+import { assertImportStatus, extractionSummary, requireImport, skeletonTranslationEstimate, transitionImport } from "./import.service.js"
 import { ImportedDocument, type IImportedDocument } from "./imported-document.model.js"
 import { knownKeysText, scopeKnownKeys } from "./known-keys.js"
 import { VISION_UNAVAILABLE, withMeteredAi, type MeteredResult } from "./metered-ai.js"
@@ -813,7 +813,7 @@ export const needsReview = (drafts: Pick<IExtractionDraft, "fields" | "guidance_
 // ─── kế hoạch lượt AI (chung cho lượt chạy và ước tính credit) ───
 
 /** Một lượt AI của section theo thứ tự chạy: ảnh diagram trước (thực thể ảnh vào known_keys của lô chữ), rồi lô chữ. */
-export type SectionAiStep = { kind: "image"; block: BlockLite } | { kind: "text"; batch: BlockLite[] }
+export type SectionAiStep = { kind: "image"; block: BlockLite } | { kind: "text"; batch: BlockLite[]; guidance_cells?: BlockLite[] }
 
 /** Section chưa xong: phần đọc tất định + các lượt AI theo thứ tự. */
 export interface PlannedSection {
@@ -847,12 +847,19 @@ export const sectionAiSteps = (sectionId: string, blocks: BlockLite[], settled: 
   // Phase 5: ảnh diagram (EMF/WMF / file gốc không còn ⇒ lúc chạy ghi `unsupported`, không gọi AI)
   const images = sectionBlocks.filter((b) => b.kind === "image" && b.image_ref && readsImage(sectionId, captionOf(b, sectionBlocks)))
   const batches = targetsOf(sectionId).length ? chunkBlocks(aiBlocks) : []
-  return [...images.map((block) => ({ kind: "image" as const, block })), ...batches.map((batch) => ({ kind: "text" as const, batch }))]
+  // FLF-462 (lớp 4): ô bảng đúng 1 dấu hiệu không vào lô riêng (AI nhận cả bảng) - đi kèm lô chứa bảng của nó làm ứng viên, không thêm lượt gọi
+  const layer4Cells = sectionBlocks.filter((b) => b.kind === "table_cell" && b.guidance_layer === 4 && b.text.trim())
+  const textSteps = batches.map((batch) => {
+    const prefixes = batch.filter((b) => b.kind === "table").map((b) => `${b.anchor.xml_path}/`)
+    const cells = layer4Cells.filter((c) => prefixes.some((prefix) => c.anchor.xml_path.startsWith(prefix)))
+    return { kind: "text" as const, batch, ...(cells.length ? { guidance_cells: cells } : {}) }
+  })
+  return [...images.map((block) => ({ kind: "image" as const, block })), ...textSteps]
 }
 
 export const stepsHash = (steps: SectionAiStep[]): string =>
   createHash("sha1")
-    .update(JSON.stringify(steps.map((s) => (s.kind === "image" ? ["image", s.block.block_id, s.block.image_ref] : ["text", s.batch.map((b) => [b.block_id, b.text])]))))
+    .update(JSON.stringify(steps.map((s) => (s.kind === "image" ? ["image", s.block.block_id, s.block.image_ref] : ["text", s.batch.map((b) => [b.block_id, b.text]), ...(s.guidance_cells ? [s.guidance_cells.map((c) => c.block_id)] : [])]))))
     .digest("hex")
 
 /** Đọc tất định + lượt AI của mọi section chưa `done`, theo thứ tự tài liệu. */
@@ -897,6 +904,18 @@ export const isTemplateOnlyProject = async (projectId: string): Promise<boolean>
   const preview = profile?.structure_preview
   return preview ? preview.summary.present === 0 : isTemplateFile(project, profile)
 }
+
+/**
+ * FLF-460 (BF §3.1.2 "số credit tính theo nhãn đã sửa"): mục người dùng gắn nhãn Ngoài phạm vi ở màn đọc khung không được đọc ở
+ * I-4 (không soạn, không kiểm, không tính credit). Chỉ nhãn tay: mục I-4 tự xếp ngoài SRS (FLF-455) vẫn phải đọc để phân loại.
+ * Id mục đọc = id mapping của heading, hoặc `content:@<heading>` khi heading chưa khớp mục nào.
+ */
+export const userOutOfScopeReadSections = (profile: Pick<ITemplateProfile, "heading_map">): Set<string> =>
+  new Set(
+    profile.heading_map
+      .filter((h) => h.scope_label === "out_of_scope")
+      .map((h) => (h.section_id === "unmapped" ? contentSectionId(h.block_id) : h.section_id))
+  )
 
 export const loadExtractionInputs = async (projectId: string): Promise<ExtractionInputs | null> => {
   const profile = await TemplateProfile.findOne({ projectId })
@@ -1227,7 +1246,7 @@ const applyRawStep = (state: SectionState, step: SectionAiStep, raw: RawAiStep, 
   if (mismatch) state.contentMismatch = mergeMismatch(state.contentMismatch, mismatch)
   state.items.push(...(mismatch ? read.map(needsConfirmation) : read))
   // FLF-462: chỉ nhận lớp 4 thật của batch (block Code đã gắn `guidance_layer === 4`) - AI không tự đưa block khác vào đây
-  const layer4 = new Set(batch.filter((b) => b.guidance_layer === 4).map((b) => b.block_id))
+  const layer4 = new Set([...batch, ...(step.kind === "text" ? step.guidance_cells ?? [] : [])].filter((b) => b.guidance_layer === 4).map((b) => b.block_id))
   state.guidanceBlocks.push(...(raw.data.guidance_blocks ?? []).filter((g) => layer4.has(g.block_id)).map((g) => ({ ...g, confirmed: false })))
   state.contentTypes.push(...(raw.data.content_types ?? []).filter((c) => inBatch.has(c.block_id)))
   state.unmapped.push(...tablesToKeepVerbatim(batch, state.items).filter((id) => !state.unmapped.includes(id)))
@@ -1340,6 +1359,23 @@ const extractSections = async (projectId: string, userId: string, importId: stri
   }
   const drafts = await ExtractionDraft.find({ import_id: doc._id })
   const draftOf = new Map(drafts.map((d) => [d.section_id, d]))
+  // Mục gắn nhãn Ngoài phạm vi: coi như đã đọc xong (không gọi AI, không trừ credit), chỉ giữ cấu trúc từ heading
+  const userOut = userOutOfScopeReadSections(profile)
+  for (const section_id of plan) {
+    const draft = draftOf.get(section_id)!
+    if (!userOut.has(section_id) || draft.status === "done") continue
+    draft.fields = mergeItems(provisionalItems(section_id, provisional)).flatMap(flattenItem) as ExtractedField[]
+    draft.status = "done"
+    draft.error = null
+    draft.unmapped_block_ids = []
+    draft.diagram_images = []
+    draft.content_mismatch = null
+    draft.guidance_blocks = []
+    draft.content_types = []
+    draft.partial = null
+    draft.markModified("fields")
+    await draft.save()
+  }
 
   if (await isTemplateOnlyProject(projectId)) {
     for (const section_id of plan) {
@@ -1491,7 +1527,7 @@ const extractSections = async (projectId: string, userId: string, importId: stri
           })
         ),
         // FLF-462: lớp 4 chữ hướng dẫn (Code chỉ thấy đúng một dấu hiệu) - AI phân loại trong cùng lượt đọc, không gọi thêm
-        guidance_candidates: step.batch.filter((b) => b.guidance_layer === 4).map((b) => b.block_id).join(", ") || "none",
+        guidance_candidates: [...step.batch.filter((b) => b.guidance_layer === 4).map((b) => b.block_id), ...(step.guidance_cells ?? []).map((c) => `${c.block_id} (table cell: "${c.text.trim().slice(0, 200)}")`)].join(", ") || "none",
         blocks: text
       },
       { notifyTopUp: false }
@@ -1755,7 +1791,7 @@ export const estimateExtraction = async (projectId: string, doc: Pick<IImportedD
     Pick<IExtractionDraft, "section_id" | "status" | "partial" | "diagram_images">[]
   >()
   const draftOf = new Map(drafts.map((d) => [d.section_id, d]))
-  const done = new Set(drafts.filter((d) => d.status === "done").map((d) => d.section_id))
+  const done = new Set([...drafts.filter((d) => d.status === "done").map((d) => d.section_id), ...userOutOfScopeReadSections(inputs.profile)])
   let text = 0
   let images = 0
   for (const planned of planPendingSections(inputs.plan, inputs.blocks, inputs.profile, inputs.provisional, done)) {
@@ -1780,16 +1816,32 @@ export const estimateExtraction = async (projectId: string, doc: Pick<IImportedD
 export const creditEstimateFor = async (
   projectId: string,
   userId: string,
-  doc: Pick<IImportedDocument, "_id" | "status">,
+  doc: IImportedDocument,
   opts: { withBalance: boolean }
-): Promise<(ExtractionEstimate & { check_calls: number; available_credits: number | null }) | null> => {
-  if (doc.status !== "mapping_review" && doc.status !== "extracting") return null
+): Promise<(ExtractionEstimate & { check_calls: number; translate_batches: number; reference_documents: number; reference_credits: number; available_credits: number | null }) | null> => {
+  // FLF-454: finalize dừng ở `checking` (paused: user) để báo lại credit 1.9 lớn hơn số đã báo ⇒ trả số mới (chỉ phần kiểm)
+  const recheck = doc.status === "checking" && doc.paused?.reason === "user"
+  if (doc.status !== "mapping_review" && doc.status !== "extracting" && !recheck) return null
   const extraction = await estimateExtraction(projectId, doc)
   if (!extraction) return null
   // Import động: check.service dùng `chunkBlocks` của file này
   const { estimateCheckCalls } = await import("./check.service.js")
   const check = await estimateCheckCalls(projectId)
-  const estimate = { ...extraction, check_calls: check.calls, ai_calls: extraction.ai_calls + check.calls, credits: extraction.credits + check.credits }
+  // FLF-456: file chỉ còn khung + chọn ngôn ngữ khác file ⇒ cộng phần dịch khung (cùng lượt Bắt đầu)
+  const translate = recheck ? null : await skeletonTranslationEstimate(doc)
+  const translateBatches = translate?.batches ?? 0
+  // FLF-458 (BF §2): tài liệu tham khảo đang chờ đọc cộng vào màn đọc khung, đọc cùng lượt Bắt đầu
+  const { pendingSummaryCredits } = await import("../project/project-document.service.js")
+  const reference = recheck ? { documents: 0, credits: 0 } : await pendingSummaryCredits(projectId)
+  const estimate = {
+    ...extraction,
+    check_calls: check.calls,
+    translate_batches: translateBatches,
+    reference_documents: reference.documents,
+    reference_credits: reference.credits,
+    ai_calls: extraction.ai_calls + check.calls + translateBatches + reference.documents,
+    credits: extraction.credits + check.credits + (translate?.credits ?? 0) + reference.credits
+  }
   if (!opts.withBalance) return { ...estimate, available_credits: null }
   const orgId = await resolveWalletOrg(projectId)
   if (!orgId) return { ...estimate, available_credits: null }
@@ -1805,6 +1857,25 @@ export const creditEstimateFor = async (
  * xác nhận là hướng dẫn (`is_guidance: true`) chuyển sang lớp chắc chắn ngay trên block đã lưu, để I-5 không còn tính là
  * nội dung thật (có thể biến mục "có" thành "thiếu"). Hết việc cần xác nhận ⇒ sang `baselining` như FLF-343.
  */
+/** Id khối `table` chứa ô vừa xác nhận là hướng dẫn và không còn ô nào là nội dung thật (mọi ô không rỗng đều là chữ hướng dẫn). */
+const tablesWithoutContent = async (projectId: string, confirmed: readonly string[]): Promise<string[]> => {
+  const scope = { projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }
+  const cells = await DocBlock.find({ ...scope, kind: "table_cell", block_id: { $in: confirmed } }).select("section_id").lean()
+  const sections = [...new Set(cells.map((c) => c.section_id))]
+  if (!sections.length) return []
+  const inSection = await DocBlock.find({ ...scope, kind: { $in: ["table", "table_cell"] }, section_id: { $in: sections } }).select("block_id kind text anchor guidance_layer").lean()
+  const done = new Set(confirmed)
+  const allCells = inSection.filter((b) => b.kind === "table_cell")
+  return inSection
+    .filter((t) => t.kind === "table" && allCells.some((c) => done.has(c.block_id) && c.anchor.xml_path.startsWith(`${t.anchor.xml_path}/`)))
+    .filter((t) =>
+      allCells
+        .filter((c) => c.anchor.xml_path.startsWith(`${t.anchor.xml_path}/`) && c.text.trim())
+        .every((c) => done.has(c.block_id) || (c.guidance_layer !== undefined && c.guidance_layer <= 3))
+    )
+    .map((t) => t.block_id)
+}
+
 export const patchFields = async (projectId: string, body: FieldsPatchRequest): Promise<IImportedDocument> => {
   const doc = await requireImport(projectId, body.import_id)
   assertImportStatus(doc, ["fields_review"], "baselining")
@@ -1847,8 +1918,11 @@ export const patchFields = async (projectId: string, body: FieldsPatchRequest): 
     for (const d of drafts) {
       for (const f of d.fields) f.confirmed = true
       for (const g of d.guidance_blocks) {
+        // Một quy tắc cho cả hai đường: chỉ đoạn đã đưa ra cho người xem (độ tin thấp) mới lên lớp 3 khi "Xác nhận tất cả";
+        // đoạn AI chấm độ tin cao (không dừng, người chưa thấy) giữ lớp 4 (BF §3.1.1: điểm AI không là tín hiệu duy nhất)
+        const shown = !g.confirmed && needsConfirmGuidance(g)
         g.confirmed = true
-        if (g.is_guidance && !confirmedGuidance.includes(g.block_id)) confirmedGuidance.push(g.block_id)
+        if (shown && g.is_guidance && !confirmedGuidance.includes(g.block_id)) confirmedGuidance.push(g.block_id)
       }
       if (d.content_mismatch) d.content_mismatch.confirmed = true
       d.markModified("fields")
@@ -1856,8 +1930,23 @@ export const patchFields = async (projectId: string, body: FieldsPatchRequest): 
       d.markModified("content_mismatch")
     }
   }
+  // FLF-462: field chỉ có nguồn từ đoạn đã xác nhận là hướng dẫn thì bỏ (AI vẫn trích nội dung ở lớp 4, prompt luật 10) ⇒ mục không
+  // còn dữ liệu thật, I-5 tính "thiếu"; field còn nguồn từ khối khác thì giữ
+  if (confirmedGuidance.length) {
+    const guidanceIds = new Set(confirmedGuidance)
+    // Lô AI gửi cả bảng (nguồn field là id khối `table`, không phải id ô): bảng mà mọi ô có chữ đều là chữ hướng dẫn (lớp 1–3 hoặc
+    // vừa xác nhận) thì không còn nội dung thật ⇒ id bảng tính như đã xác nhận; còn ô nội dung thật ⇒ giữ field (không chắc thì là nội dung)
+    for (const id of await tablesWithoutContent(projectId, confirmedGuidance)) guidanceIds.add(id)
+    for (const d of drafts) {
+      const kept = d.fields.filter((f) => !(f.source_block_ids.length > 0 && f.source_block_ids.every((id) => guidanceIds.has(id))))
+      if (kept.length !== d.fields.length) {
+        d.fields = kept as typeof d.fields
+        d.markModified("fields")
+      }
+    }
+  }
   await Promise.all(drafts.map((d) => d.save()))
-  if (confirmedGuidance.length) await DocBlock.updateMany({ projectId, block_id: { $in: confirmedGuidance } }, { $set: { guidance_layer: 3 } })
+  if (confirmedGuidance.length) await DocBlock.updateMany({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS }, block_id: { $in: confirmedGuidance } }, { $set: { guidance_layer: 3 } })
   if (!needsReview(drafts)) await transitionImport(doc, "baselining")
   return doc
 }

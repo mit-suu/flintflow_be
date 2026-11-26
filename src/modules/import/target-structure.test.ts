@@ -10,20 +10,22 @@ const entry = (order: number, section_id: string, heading_text: string, level = 
 const spineWith = (over: Partial<Spine> = {}): Spine => ({ ...createEmptySpine({ name: "Thư viện" }), ...over })
 
 describe("compareTargetStructure (FLF-336 I-5 - so cấu trúc đích)", () => {
-  it("ý định tự do, file thiếu mục ⇒ chế độ 4: mục FPT bắt buộc có chữ / dữ liệu là present, còn lại missing; FLF-463: mục riêng trống là missing, không out_of_scope", () => {
-    const layout = [entry(0, "fixed:1", "1. Tổng quan"), entry(1, "fixed:3.1.1", "3.1.1 Luồng màn"), entry(2, "custom:CS01", "Phụ lục Dự toán")]
+  it("ý định tự do, file thiếu mục ⇒ chế độ 4: mục FPT bắt buộc có chữ / dữ liệu là present, còn lại missing; FLF-463: mục riêng trống là missing; FLF-455: heading dự toán chi phí là out_of_scope theo 29148", () => {
+    const layout = [entry(0, "fixed:1", "1. Tổng quan"), entry(1, "fixed:3.1.1", "3.1.1 Luồng màn"), entry(2, "custom:CS01", "Phụ lục Dự toán"), entry(3, "custom:CS03", "Phụ lục Ghi chú")]
     const spine = spineWith({ screens: [{ id: "S01", feature_id: "F01", name: "Trang chủ", description: "", flow_to: [], is_popup: false } as never] })
     const result = compareTargetStructure(layout, new Set(["fixed:1"]), spine, "free", "2026-10-27T00:00:00.000Z")
     expect(result).toMatchObject({ target: "fpt", intent: "free", resolved_mode: 4, compared_at: "2026-10-27T00:00:00.000Z" })
     const byId = new Map(result.sections.map((s) => [s.section_id, s]))
     expect(byId.get("fixed:1")).toMatchObject({ status: "present", title: "1. Tổng quan" })
     expect(byId.get("fixed:2.1")?.status).toBe("missing")
-    // FLF-463 (đảo FLF-411): heading riêng của file là mục của đích — không tự thành Ngoài phạm vi (FLF-455 xét theo 29148)
-    expect(byId.get("custom:CS01")).toMatchObject({ status: "missing", title: "Phụ lục Dự toán" })
+    // FLF-463 (đảo FLF-411): heading riêng của file không tự thành Ngoài phạm vi; FLF-455: chỉ khi loại nội dung ngoài 29148 (dự toán)
+    expect(byId.get("custom:CS01")).toMatchObject({ status: "out_of_scope", title: "Phụ lục Dự toán", owner_steps: [] })
+    expect(byId.get("custom:CS03")).toMatchObject({ status: "missing", title: "Phụ lục Ghi chú" })
     expect(result.missing).toContain("fixed:2.1")
     expect(result.missing).not.toContain("fixed:1")
+    expect(result.missing).not.toContain("custom:CS01")
     // Mỗi mục FPT bắt buộc xuất hiện đúng một lần, kèm bước sở hữu
-    expect(result.sections.some((s) => s.status === "out_of_scope")).toBe(false)
+    expect(result.sections.filter((s) => s.status === "out_of_scope").map((s) => s.section_id)).toEqual(["custom:CS01"])
     const fpt = result.sections.filter((s) => !s.section_id.startsWith("custom:")).map((s) => s.section_id)
     expect(fpt.length).toBe(new Set(fpt).size)
     expect([...fpt].sort()).toEqual([...REQUIRED_FIXED_SECTION_IDS].sort())
@@ -176,5 +178,56 @@ describe("FLF-463 bảng cấu trúc đích (business-flow §1 \"Khi tạo dự 
     const r = compareTargetStructure([], new Set(), spineWith(), "free")
     expect(r).toMatchObject({ target: "fpt", resolved_mode: 4 })
     expect(r.sections.map((s) => s.section_id)).toEqual([...REQUIRED_FIXED_SECTION_IDS])
+  })
+})
+
+describe("FLF-455 / FLF-463: nhãn Ngoài phạm vi của nhóm và mục Bỏ chữ của heading bao", () => {
+  it("mục riêng nằm dưới heading bao Ngoài phạm vi (Dự toán) thừa hưởng nhãn; mục cùng cấp sau đó thì không", () => {
+    const layout = [
+      entry(0, "fixed:1", "1 Giới thiệu", 1),
+      entry(1, "custom:CS01", "2 Dự toán chi phí", 1),
+      entry(2, "custom:CS02", "2.1 Nhân sự", 2),
+      entry(3, "custom:CS03", "3 Ghi chú", 1)
+    ]
+    const result = compareTargetStructure(layout, new Set(["fixed:1", "custom:CS03", "custom:CS02"]), spineWith(), "fixed")
+    const byId = new Map(result.sections.map((s) => [s.section_id, s.status]))
+    expect(byId.get("custom:CS02")).toBe("out_of_scope")
+    expect(byId.get("custom:CS03")).toBe("present")
+  })
+
+  it("heading bao có đoạn dẫn riêng bị Bỏ chữ ⇒ còn trống (missing), không biến mất ⇒ không ra bản gốc 0.1", () => {
+    const layout = [entry(0, "custom:CS01", "2 Mô tả chung", 1), entry(1, "custom:CS02", "2.1 Bối cảnh", 2)]
+    const withContent = new Set(["custom:CS01", "custom:CS02"])
+    const kept = compareTargetStructure(layout, withContent, spineWith(), "fixed")
+    expect(kept.missing).toEqual([])
+    const dropped = compareTargetStructure(layout, withContent, spineWith(), "fixed", undefined, { emptied: new Set(["custom:CS01"]) })
+    expect(dropped.missing).toEqual(["custom:CS01"])
+    expect(dropped.resolved_mode).toBe(3)
+  })
+})
+
+describe("FLF-460 nhãn Ngoài phạm vi tay lan xuống mục con (cùng quy tắc nhãn tự động)", () => {
+  const statuses = (layout: LayoutEntry[], labels: Record<string, "in_scope" | "out_of_scope">) =>
+    Object.fromEntries(
+      compareTargetStructure(layout, new Set(), spineWith(), "free", undefined, { scopeLabels: new Map(Object.entries(labels)) })
+        .sections.filter((s) => s.section_id.startsWith("custom:"))
+        .map((s) => [s.section_id, s.status])
+    )
+  it("out_of_scope tay trên heading bao ⇒ mục con ngoài phạm vi; nhãn tay in_scope của mục con thắng; mục cùng cấp sau đó không bị ảnh hưởng", () => {
+    const layout = [entry(0, "custom:CS01", "3 Phụ lục", 1), entry(1, "custom:CS02", "3.1 Ghi chú", 2), entry(2, "custom:CS03", "3.2 Khác", 2), entry(3, "custom:CS04", "4 Rủi ro", 1)]
+    expect(statuses(layout, { "custom:CS01": "out_of_scope", "custom:CS03": "in_scope" })).toEqual({ "custom:CS02": "out_of_scope", "custom:CS03": "missing", "custom:CS04": "missing" })
+  })
+  it("in_scope tay trên mục cha tự xếp Ngoài phạm vi ⇒ mục con cũng trở lại, trừ mục con có nhãn out_of_scope tay", () => {
+    const layout = [entry(0, "custom:CS01", "4 Chi phí dự kiến", 1), entry(1, "custom:CS02", "4.1 Chi tiết", 2), entry(2, "custom:CS03", "4.2 Dự toán", 2), entry(3, "custom:CS04", "5 Ghi chú", 1)]
+    expect(statuses(layout, {})).toMatchObject({ "custom:CS02": "out_of_scope" })
+    expect(statuses(layout, { "custom:CS01": "in_scope", "custom:CS03": "out_of_scope" })).toEqual({ "custom:CS02": "missing", "custom:CS03": "out_of_scope", "custom:CS04": "missing" })
+  })
+})
+
+describe("FLF-454 mục bìa / mục lục dạng chữ tổ hợp (NFD)", () => {
+  it("'Mục lục' / 'Trang bìa' NFD vẫn là mục tự sinh, không phải mục cần soạn", async () => {
+    const { isDerivedHeading } = await import("./target-structure.js")
+    expect(isDerivedHeading("custom:CS01", "Mục lục".normalize("NFD"))).toBe(true)
+    expect(isDerivedHeading("custom:CS02", "Trang bìa".normalize("NFD"))).toBe(true)
   })
 })

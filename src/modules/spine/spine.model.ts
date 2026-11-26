@@ -45,10 +45,11 @@ const projectSchema = new Schema(
 /** FLF-466 P08: lần báo credit chờ xác nhận (`progress.credit_ack_required`). */
 const creditAckSchema = new Schema(
   {
-    scope: { type: String, enum: ["after_brief", "screens_locked", "screens_added"], required: true },
+    scope: { type: String, enum: ["after_brief", "screens_locked", "screens_added", "reference_documents"], required: true },
     credits: { type: Number, required: true, min: 0 },
     created_at: { type: String, required: true },
-    screens: { type: [String], default: undefined }
+    screens: { type: [String], default: undefined },
+    documents: { type: Number, default: undefined, min: 0 }
   },
   opts
 )

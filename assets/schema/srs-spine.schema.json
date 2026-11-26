@@ -209,7 +209,8 @@
                   "enum": [
                     "after_brief",
                     "screens_locked",
-                    "screens_added"
+                    "screens_added",
+                    "reference_documents"
                   ]
                 },
                 "credits": {
@@ -225,6 +226,11 @@
                     "type": "string",
                     "minLength": 1
                   }
+                },
+                "documents": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
                 }
               },
               "required": [
