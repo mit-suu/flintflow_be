@@ -35,8 +35,9 @@ import { userOpSchema, type Op } from "../spine/op.types.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Change } from "../spine/spine.types.js"
 import type { IChangeRequest } from "./change-request.model.js"
-import type { IChangeLocation } from "./change-location.model.js"
+import { ChangeLocation, type IChangeLocation } from "./change-location.model.js"
 import { unlockPaths } from "./lock.service.js"
+import { keptOriginalAckOps } from "./diagram-location.js"
 import { unchangedSince } from "./spine-location.js"
 import { valueChanged } from "./verify.service.js"
 import { scheduleEmbeddingSync } from "./embedding/embedding-sync.service.js"
@@ -115,7 +116,21 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
     return { next, fileRef, trackedRef, tracked, spineVersion }
   })
   const { next, fileRef, trackedRef, tracked } = slot
-  const { spineVersion } = slot
+  // `let`: bước "giữ hình gốc" bên dưới có thể ghi thêm một lượt
+  let { spineVersion } = slot
+
+  // "Giữ hình gốc": đóng dấu hình được giữ theo dữ liệu sau CR ⇒ cờ "Hình gốc lệch dữ liệu" không bật ngay lại. Lượt ghi riêng
+  // sau cùng: không đổi chữ hay hình của file vừa in; lỗi chỉ ghi log (cờ vàng còn đó, không mất dữ liệu)
+  // `approved` chỉ có vị trí sửa / ghi chú; vị trí "giữ hình gốc" là `not_related` do người dùng tự chọn
+  const kept = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id, found_by: "diagram", conclusion: "not_related", manual: true })
+  const ackOps = keptOriginalAckOps(plan?.spine ?? current, kept)
+  if (ackOps.length) {
+    try {
+      spineVersion = (await applyTransaction(projectId, { base_version: spineVersion, ops: ackOps, by: cr.cr_id, reason: `${cr.cr_id}: giữ hình gốc`, step_id: null })).spine_version
+    } catch (err) {
+      console.warn(`[C-7] ${cr.cr_id}: đã ghi ${next} nhưng ghi nhận "giữ hình gốc" lỗi - cờ hình gốc lệch còn hiện`, err)
+    }
+  }
 
   // FLF-318: CR thêm use case / màn ⇒ bố cục màn mới vẽ như chat FLF-311 (wireframe của model), không để cờ `diagram_stale`
   const newScreens = plan ? addedScreenIds(current, plan.spine) : []

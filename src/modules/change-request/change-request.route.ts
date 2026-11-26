@@ -418,6 +418,29 @@ router.patch("/:projectId/change-requests/:crId/locations/:locId", authMiddlewar
 
 /**
  * @swagger
+ * /api/v1/projects/{projectId}/change-requests/{crId}/locations/{locId}/diagram-preview.png:
+ *   get:
+ *     summary: "§4.13 — PNG sơ đồ FlintFlow sẽ thay ảnh gốc ở vị trí sơ đồ gốc, vẽ từ dữ liệu sau CR (chạy khô, không ghi, không gọi AI)"
+ *     tags: [Change requests (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/Mode1ProjectId'
+ *       - $ref: '#/components/parameters/CrId'
+ *       - { in: path, name: locId, required: true, schema: { type: string } }
+ *       - { in: query, name: kind, required: true, schema: { type: string, enum: [context, usecase, screen_flow, erd, sequence, activity, deployment] } }
+ *       - { in: query, name: owner, schema: { type: string }, description: "Chủ của sơ đồ gắn phần tử (sequence ⇒ function, activity ⇒ use case)" }
+ *       - { in: query, name: part, schema: { type: integer, default: 0 }, description: "Phần thứ mấy (use case tách theo feature); tổng số phần ở header X-Diagram-Parts" }
+ *       - { in: query, name: variant, schema: { type: string, enum: [after, original], default: after }, description: "original = ảnh gốc của file ở khối đó" }
+ *     responses:
+ *       200: { description: "image/png | image/jpeg; header X-Diagram-Parts = số phần" }
+ *       404: { description: "CR_LOCATION_NOT_FOUND (vị trí không giữ ảnh gốc loại đó), DIAGRAM_PREVIEW_FAILED (không có dữ liệu để vẽ / không đọc được ảnh gốc)" }
+ *       422: { description: "DIAGRAM_PREVIEW_FAILED — máy chủ vẽ hình chưa sẵn sàng / sơ đồ lỗi bố cục" }
+ */
+router.get("/:projectId/change-requests/:crId/locations/:locId/diagram-preview.png", authMiddleware, crController.locationDiagramPreview)
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/change-requests/{crId}/locations/{locId}/owner-step-draft:
  *   post:
  *     summary: "Soạn lại đề xuất một vị trí theo hướng của BA (BPMN 3.9; phase 8: nút \"Sửa lại\" trong chat) — skill step sở hữu (nếu có), chỉ ghi đề xuất (manual = true); ready_to_submit ⇒ verifying"

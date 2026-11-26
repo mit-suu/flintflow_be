@@ -17,6 +17,8 @@ import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.j
 import { buildPlaceholderPng } from "../../../src/modules/render/diagram-placeholder.js"
 import { clearImportMediaCache } from "../../../src/modules/render/import-media.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
+import { originalDiagramHash } from "../../../src/modules/spine/original-diagram.js"
+import { stripRecord } from "../../../src/modules/import/check.service.js"
 
 const PNG = buildPlaceholderPng(12, 7, 0x40)
 const NEW_NAME = "Sign In"
@@ -116,16 +118,18 @@ describe("§4.13 sơ đồ gốc của người dùng", () => {
     expect((await mediaOf(projectId, "0.2")).some((m) => m.equals(PNG))).toBe(false)
   })
 
-  it("BA bỏ riêng vị trí vẽ lại (not_related) ⇒ 0.2 giữ ảnh gốc, cờ vàng hình gốc lệch dữ liệu", async () => {
+  it("BA chọn giữ hình gốc (not_related) ⇒ 0.2 giữ ảnh gốc, hình được đóng dấu theo dữ liệu mới, không bị hỏi lại bằng cờ lệch", async () => {
     const { projectId, c } = await importWithDiagram()
     const { submitted } = await renameToReview(c, { keepOriginal: true })
     expect(submitted.change_request.status).toBe("written")
 
     expect(await keptImages(projectId)).toHaveLength(1)
     const spine = (await spineRepository.get(projectId))!
-    expect(spine.flags.filter((f) => f.rule_id === "original_diagram_stale" && !f.resolved_at)).toEqual([
-      expect.objectContaining({ level: "yellow", section_id: "fixed:2.2.1" })
-    ])
+    expect(spine.use_cases.find((u) => u.id === "UC-02")?.name).toBe(NEW_NAME)
+    // Lựa chọn giữ được ghi nhận: hash của khối ảnh theo dữ liệu sau CR ⇒ cờ "Hình gốc lệch dữ liệu" chỉ bật lại khi dữ liệu đổi tiếp
+    const kept = spine.custom_sections.flatMap((s) => s.blocks).find((b) => b.kind === "image" && b.image_ref && b.diagram)
+    expect(kept?.diagram?.source_hash).toBe(originalDiagramHash(stripRecord(spine), "usecase"))
+    expect(spine.flags.filter((f) => f.rule_id === "original_diagram_stale" && !f.resolved_at)).toEqual([])
     expect((await mediaOf(projectId, "0.2")).some((m) => m.equals(PNG))).toBe(true)
   })
 })

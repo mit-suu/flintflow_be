@@ -20,6 +20,7 @@ import {
   NEW_CR_SOURCE_KINDS
 } from "./change-request.constants.js"
 import { COMMENT_ID_PATTERN } from "../comment/comment.model.js"
+import { ORIGINAL_DIAGRAM_KINDS } from "../spine/original-diagram.js"
 
 const id = z.string().min(1)
 const isoDateTime = z.iso.datetime({ offset: true })
@@ -30,6 +31,15 @@ export const crIdSchema = z.string().regex(CR_ID_PATTERN, "Mã change request kh
 export const locationIdSchema = z.string().regex(LOCATION_ID_PATTERN, "Mã vị trí cần sửa không hợp lệ.")
 export const materialIdSchema = z.string().regex(MATERIAL_ID_PATTERN, "Mã tài liệu bổ sung không hợp lệ.")
 export const groupIdSchema = z.string().regex(GROUP_ID_PATTERN, "Mã nhóm thay đổi không hợp lệ.")
+
+/** Hình xem trước của vị trí sơ đồ gốc: loại sơ đồ, chủ (loại gắn phần tử), phần thứ mấy (use case tách theo feature). */
+export const diagramPreviewQuerySchema = z.object({
+  kind: z.enum(ORIGINAL_DIAGRAM_KINDS as unknown as [string, ...string[]]),
+  owner: z.string().trim().min(1).max(100).optional(),
+  part: z.coerce.number().int().min(0).max(50).default(0),
+  /** `after` = sơ đồ FlintFlow sau CR (mặc định); `original` = ảnh gốc của file đang giữ ở chỗ đó */
+  variant: z.enum(["after", "original"]).default("after")
+})
 
 /** Lý do từ chối group / đóng / huỷ — đủ dài để có nghĩa khi đọc lại lịch sử. */
 export const DECISION_REASON_MIN_LENGTH = 10
