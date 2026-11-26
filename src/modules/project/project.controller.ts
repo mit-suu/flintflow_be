@@ -6,8 +6,6 @@ import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { templateCurrentOf, templateUpdateOf } from "../import/template-update.js"
-import { TemplateProfile } from "../import/template-profile.model.js"
-import { documentLanguageOf } from "./document-language.js"
 import { projectCode } from "./project-code.js"
 import type { CreateProjectDTO, DisableScreenMockupsDTO, MoveProjectDTO, RunScreenMockupsDTO, UpdateDocumentLanguageDTO, UpdateErdNotationDTO, UpdateScreenThemeDTO, UpdateSequenceLevelDTO } from "./project.validation.js"
 import { ListProjectsQuerySchema, ScreenMockupsQuerySchema } from "./project.validation.js"
@@ -60,15 +58,14 @@ export const getProject = catchAsync(async (req: Request, res: Response) => {
   const current = (await retryPendingConversion(project, userId)) ? await projectService.getProjectById(projectId, orgId) : project
   // FLF-395: bản mẫu tổ chức mới hơn bản dự án đang theo (chỉ Lead / Analyst); FLF-466: trả ngôn ngữ tài liệu + project_code
   // FLF-480 (ChoViet #14): `document_language` — ngôn ngữ đã suy đúng (field riêng ⇒ ngôn ngữ file của mode 1 import)
-  const [templateUpdate, templateCurrent, profile, languages] = await Promise.all([
+  const [templateUpdate, templateCurrent, languages] = await Promise.all([
     templateUpdateOf(current, req.orgContext?.role),
     templateCurrentOf(current),
-    current.mode === "import" ? TemplateProfile.findOne({ projectId }).select("language").lean() : Promise.resolve(null),
     projectLanguages(projectId, current)
   ])
   return sendSuccess(res, 200, {
     ...current.toJSON(),
-    documentLanguage: documentLanguageOf(current, profile?.language),
+    documentLanguage: languages.locale,
     document_language: languages.locale,
     project_code: projectCode(projectId),
     template_update: templateUpdate,
