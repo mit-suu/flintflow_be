@@ -333,3 +333,74 @@ describe("FLF-462 - bước 1.6: đoạn lớp 4 chữ hướng dẫn (AI phân 
     expect(await nfrFieldCount(ctx.importId, nfrBlock.block_id)).toBeGreaterThan(0)
   })
 })
+
+describe("FLF-462 - bước 1.6: ô bảng lớp 4 (đúng 1 dấu hiệu) vào guidance_candidates của lượt I-4, AI phân loại, người xác nhận", () => {
+  /** Thêm bảng 1 ô vào mục 4.2.3 (bảng không khớp cột nào ⇒ AI đọc), ô gắn lớp 4. */
+  const withCellLayer4 = async (clearLowConfidence: boolean, confidence: number) => {
+    const ctx = await importAtExtracting()
+    const ref = await DocBlock.findOne({ projectId: ctx.projectId, section_id: "fixed:4.2.3", kind: "paragraph" }).lean()
+    expect(ref, "cần block ở fixed:4.2.3 làm mẫu").toBeTruthy()
+    const base = { projectId: ref!.projectId, doc_version: ref!.doc_version, section_id: "fixed:4.2.3", heading_path: ref!.heading_path, level: null, mentions: [], editable: true, locked_by_cr: null }
+    const anchor = (xml_path: string, ordinal: number) => ({ bookmark: null, para_id: null, xml_path, ordinal })
+    const cellText = "Describe the response time target here"
+    await DocBlock.create([
+      { ...base, block_id: "B9001", kind: "table", text: `Target
+${cellText}`, text_hash: "t9001", rows: [["Target"], [cellText]], anchor: anchor("body/tbl[99]", 9001) },
+      { ...base, block_id: "B9002", kind: "table_cell", text: "Target", text_hash: "t9002", anchor: anchor("body/tbl[99]/tr[0]/tc[0]/p[0]", 9002) },
+      { ...base, block_id: "B9003", kind: "table_cell", text: cellText, text_hash: "t9003", guidance_layer: 4, guidance_by: ["italic"], anchor: anchor("body/tbl[99]/tr[1]/tc[0]/p[0]", 9003) }
+    ])
+    const prompts: string[] = []
+    mockOverrides.next = record((prompt) => {
+      const out = fakeMode1(prompt)
+      if (!out || !prompt.includes("# Import Extract")) return out
+      const json = JSON.parse(out) as { items: { field_confidence: Record<string, number> }[]; guidance_blocks?: unknown[] }
+      if (clearLowConfidence) for (const i of json.items) i.field_confidence = {}
+      if (sectionOf(prompt) === "fixed:4.2.3") {
+        prompts.push(prompt)
+        json.guidance_blocks = [{ block_id: "B9003", is_guidance: true, confidence }]
+      }
+      return JSON.stringify(json)
+    })
+    const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
+    const cell = async () => (await DocBlock.findOne({ projectId: ctx.projectId, block_id: "B9003" }).lean())?.guidance_layer
+    return { ctx, run, prompts, cellText, cell }
+  }
+
+  it("ô lớp 4 là ứng viên trong prompt, AI độ tin thấp ⇒ bản ghi lớp 4 chưa xác nhận, dừng fields_review, hiện ở review_guidance; xác nhận ⇒ ô lên lớp 3; không thêm lượt gọi AI", async () => {
+    const { ctx, run, prompts, cellText, cell } = await withCellLayer4(false, 0.4)
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toContain(`B9003 (table cell: "${cellText}")`)
+    // Chỉ ô nằm trong danh sách ứng viên: ô tiêu đề (không dấu hiệu) và id bảng thì không
+    expect(prompts[0]).not.toContain("B9002 (table cell")
+    expect(prompts[0]).not.toContain("B9001 (table cell")
+    // không thêm lượt gọi AI: cùng 7 lượt như khi không có ô lớp 4
+    expect(calls).toHaveLength(7)
+
+    expect(run.doc.status).toBe("fields_review")
+    const draft = (await draftsOf(ctx.importId)).find((d) => d.section_id === "fixed:4.2.3")!
+    expect(draft.guidance_blocks).toEqual([expect.objectContaining({ block_id: "B9003", is_guidance: true, confidence: 0.4, confirmed: false })])
+    const { extractionSummary } = await import("../../../src/modules/import/import.service.js")
+    const summary = await extractionSummary(run.doc._id as unknown as string)
+    expect(summary.review_guidance).toEqual([expect.objectContaining({ section_id: "fixed:4.2.3", block_id: "B9003", is_guidance: true, confirmed: false })])
+    expect(await cell()).toBe(4)
+
+    await patchFields(ctx.projectId, {
+      import_id: ctx.importId,
+      fields: [],
+      guidance: [{ section_id: "fixed:4.2.3", block_id: "B9003", is_guidance: true }],
+      content_mismatch: [],
+      confirm_all: false
+    })
+    expect(await cell()).toBe(3)
+  })
+
+  it("AI độ tin cao ⇒ ô không tự lên lớp 3 (giữ lớp 4, nội dung thật); chỉ xác nhận của người mới nâng lớp", async () => {
+    const { ctx, run, prompts, cell } = await withCellLayer4(true, 0.9)
+    expect(prompts).toHaveLength(1)
+    expect(calls).toHaveLength(7)
+    expect(run.doc.status).toBe("baselining")
+    expect(await cell()).toBe(4)
+    const draft = (await draftsOf(ctx.importId)).find((d) => d.section_id === "fixed:4.2.3")!
+    expect(draft.guidance_blocks).toEqual([expect.objectContaining({ block_id: "B9003", confirmed: false })])
+  })
+})
