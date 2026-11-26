@@ -26,6 +26,7 @@ import { loadStepRegistry, orderedSteps } from "../pipeline/step-registry.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { assertImportStatus, requireImport, transitionImport } from "./import.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
+import { fileLanguageOf } from "./skeleton-language.js"
 import { isTemplateFile } from "./structure-preview.js"
 import { TemplateProfile } from "./template-profile.model.js"
 import { isNonDraftHeading, type TargetSection } from "./target-structure.js"
@@ -161,11 +162,12 @@ export const enterFlow2 = async (doc: IImportedDocument, by: string, baseVersion
     profile.markModified("flow2_entry_spine")
     await profile.save()
   }
-  // Bước cuối: đổi luồng. Ngôn ngữ tài liệu = ngôn ngữ của file (dự án tải file lên không có `documentLanguage`)
+  // Bước cuối: đổi luồng. Ngôn ngữ tài liệu = `profile.language` (dự án tải file lên không có `documentLanguage`): ngôn ngữ của file,
+  // hoặc ngôn ngữ người dùng chọn ở màn đọc khung khi file chỉ còn khung (FLF-456 — lúc Bắt đầu khung đã dịch và `language` đổi theo)
   await transitionImport(doc, "drafting")
   await Project.updateOne(
     { _id: projectId, mode: "import" },
-    { $set: { mode: "fpt", ...(project.documentLanguage ? {} : { documentLanguage: profile.language === "vi" ? "vi" : "en" }) } }
+    { $set: { mode: "fpt", ...(project.documentLanguage ? {} : { documentLanguage: fileLanguageOf(profile) }) } }
   )
   return { project_mode: "fpt", import_state: "drafting", current_step: applied.spine.progress.current_step ?? null, spine_version: applied.spine.spine_version }
 }

@@ -12,6 +12,7 @@ import {
   IMPORT_FILE_FIELD,
   confirmLatestRequestSchema,
   extractRequestSchema,
+  documentLanguageRequestSchema,
   dropTextRequestSchema,
   fieldsPatchRequestSchema,
   finalizeRequestSchema,
@@ -159,6 +160,14 @@ export const dropText = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const body = parseInput(dropTextRequestSchema, req.body)
   const doc = await importService.setDropText(auth.projectId, body)
+  return sendSuccess(res, 200, { import: importService.toImportDto(doc) })
+})
+
+/** FLF-456: lưu ngôn ngữ tài liệu khi file chỉ còn khung (trước Bắt đầu); FE đọc lại `GET /import` để có credit mới. */
+export const documentLanguage = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(documentLanguageRequestSchema, req.body)
+  const doc = await importService.setSkeletonLanguage(auth.projectId, body)
   return sendSuccess(res, 200, { import: importService.toImportDto(doc) })
 })
 

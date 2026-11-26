@@ -6,6 +6,7 @@
  */
 
 import { z } from "zod"
+import { USER_LOCALES } from "../../shared/i18n/locale.js"
 import { baselineSchema, flagSchema } from "../spine/spine.schema.js"
 import { IMPORT_PAUSE_REASONS, IMPORT_STATUSES } from "./import.state.js"
 import { DOC_VERSION_PATTERN } from "../doc-version/versioning.js"
@@ -314,6 +315,9 @@ export const extractRequestSchema = z.strictObject({ import_id: id, confirm_late
 /** FLF-412 `PATCH /projects/:id/import/drop-text`: cả tập vùng (khoá `block_id` của heading) người dùng chọn Bỏ chữ. */
 export const dropTextRequestSchema = z.strictObject({ import_id: id, keys: z.array(z.string().min(1).max(32)).max(500) })
 
+/** FLF-456 `PATCH /projects/:id/import/document-language`: ngôn ngữ tài liệu khi file chỉ còn khung (trước Bắt đầu). */
+export const documentLanguageRequestSchema = z.strictObject({ import_id: id, language: z.enum(USER_LOCALES) })
+
 /** `PATCH /projects/:id/import/fields` (UC-22, nút 1.6/1.9). */
 export const fieldsPatchRequestSchema = z
   .strictObject({
@@ -441,6 +445,8 @@ export const getImportResponseSchema = z.object({
   structure_preview: structurePreviewSchema.nullable().optional(),
   /** FLF-412: vùng heading có chữ + lựa chọn Bỏ chữ — chỉ có trước Bắt đầu (`extracting` chưa đọc lượt nào); khác ⇒ null. */
   text_sections: z.array(z.object({ key: z.string(), title: z.string(), level: z.number().int(), dropped: z.boolean() })).nullable().optional(),
+  /** FLF-456: ô ngôn ngữ tài liệu của màn đọc khung — chỉ trước Bắt đầu; `visible` chỉ khi mọi mục có chữ đã Bỏ chữ. */
+  skeleton_language: z.object({ visible: z.boolean(), file: z.enum(USER_LOCALES), selected: z.enum(USER_LOCALES) }).nullable().optional(),
   /**
    * FLF-343: ước tính cả lượt một mạch (I-4 còn phải chạy + kiểm tra AI 1.11) — chỉ có khi import ở `mapping_review` hoặc `extracting` mà job chưa chạy / đang dừng; trạng
    * thái khác hoặc đang chạy ⇒ `null` / không có. Tính bằng chính kế hoạch lượt của lượt chạy (lô chữ sau phần đọc tất định +
@@ -453,6 +459,8 @@ export const getImportResponseSchema = z.object({
       diagram_images: z.number().int().min(0),
       /** FLF-343: lượt AI của bước kiểm tra (1.11) chạy nối tiếp — đã gộp vào `ai_calls` / `credits`. */
       check_calls: z.number().int().min(0).optional(),
+      /** FLF-456: số lô dịch khung (chọn ngôn ngữ khác file khi file chỉ còn khung) — đã gộp vào `ai_calls` / `credits`. */
+      translate_batches: z.number().int().min(0).optional(),
       ai_calls: z.number().int().min(0),
       credits: z.number().min(0),
       available_credits: z.number().nullable()

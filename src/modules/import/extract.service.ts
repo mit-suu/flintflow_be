@@ -61,7 +61,7 @@ import { ExtractionDraft, type ExtractedField, type ExtractionProgress, type IEx
 import { FIELD_CONFIDENCE_THRESHOLD, UNMAPPED_SECTION, VISION_CONFIDENCE_CAP, needsConfirm, needsConfirmGuidance, type FieldOrigin, type MentionEntity } from "./import.constants.js"
 import type { FieldsPatchRequest, GetImportResponse } from "./import.dto.js"
 import { Project } from "../project/project.model.js"
-import { assertImportStatus, extractionSummary, requireImport, transitionImport } from "./import.service.js"
+import { assertImportStatus, extractionSummary, requireImport, skeletonTranslationEstimate, transitionImport } from "./import.service.js"
 import { ImportedDocument, type IImportedDocument } from "./imported-document.model.js"
 import { knownKeysText, scopeKnownKeys } from "./known-keys.js"
 import { VISION_UNAVAILABLE, withMeteredAi, type MeteredResult } from "./metered-ai.js"
@@ -1780,16 +1780,25 @@ export const estimateExtraction = async (projectId: string, doc: Pick<IImportedD
 export const creditEstimateFor = async (
   projectId: string,
   userId: string,
-  doc: Pick<IImportedDocument, "_id" | "status">,
+  doc: IImportedDocument,
   opts: { withBalance: boolean }
-): Promise<(ExtractionEstimate & { check_calls: number; available_credits: number | null }) | null> => {
+): Promise<(ExtractionEstimate & { check_calls: number; translate_batches: number; available_credits: number | null }) | null> => {
   if (doc.status !== "mapping_review" && doc.status !== "extracting") return null
   const extraction = await estimateExtraction(projectId, doc)
   if (!extraction) return null
   // Import động: check.service dùng `chunkBlocks` của file này
   const { estimateCheckCalls } = await import("./check.service.js")
   const check = await estimateCheckCalls(projectId)
-  const estimate = { ...extraction, check_calls: check.calls, ai_calls: extraction.ai_calls + check.calls, credits: extraction.credits + check.credits }
+  // FLF-456: file chỉ còn khung + chọn ngôn ngữ khác file ⇒ cộng phần dịch khung (cùng lượt Bắt đầu)
+  const translate = await skeletonTranslationEstimate(doc)
+  const translateBatches = translate?.batches ?? 0
+  const estimate = {
+    ...extraction,
+    check_calls: check.calls,
+    translate_batches: translateBatches,
+    ai_calls: extraction.ai_calls + check.calls + translateBatches,
+    credits: extraction.credits + check.credits + (translate?.credits ?? 0)
+  }
   if (!opts.withBalance) return { ...estimate, available_credits: null }
   const orgId = await resolveWalletOrg(projectId)
   if (!orgId) return { ...estimate, available_credits: null }

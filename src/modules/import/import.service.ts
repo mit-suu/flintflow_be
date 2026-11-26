@@ -37,6 +37,9 @@ import { knownGuidanceMatcher } from "../../shared/utils/instruction-text.js"
 import { TemplateProfile, type HeadingMapEntry, type ITemplateProfile } from "./template-profile.model.js"
 import { previewStructure } from "./structure-preview.js"
 import { applyDropToBlocks, applyDropToDom, cleanupDroppedPackage, planDrop, textRegions, validDropKeys } from "./drop-text.js"
+import { fileLanguageOf, isSkeletonOnly, skeletonLanguageView, skeletonTranslationTarget, skeletonUnits, type SkeletonLanguageView } from "./skeleton-language.js"
+import { skeletonTranslationCost, translateSkeleton } from "./skeleton-translate.js"
+import type { UserLocale } from "../../shared/i18n/locale.js"
 import * as spineRepository from "../spine/spine.repository.js"
 
 export interface UploadedFile {
@@ -480,6 +483,45 @@ export const setDropText = async (projectId: string, body: { import_id: string; 
   return doc
 }
 
+// ─── FLF-456 Ngôn ngữ tài liệu khi file chỉ còn khung ───────────────
+
+type SkeletonProfile = Pick<ITemplateProfile, "heading_map" | "drop_text" | "language" | "skeleton_language">
+
+/** Ô EN / VI của màn đọc khung (chỉ trước Bắt đầu): hiện khi mọi mục có chữ đã Bỏ chữ, mặc định theo ngôn ngữ file. */
+export const skeletonLanguageOf = async (doc: IImportedDocument, profile: SkeletonProfile): Promise<SkeletonLanguageView | null> => {
+  const regions = await textSectionsOf(doc, profile)
+  return regions ? skeletonLanguageView(profile, regions) : null
+}
+
+/** Lưu lựa chọn ngôn ngữ (trước Bắt đầu, khi file chỉ còn khung). Dịch khung chạy lúc bấm Bắt đầu. */
+export const setSkeletonLanguage = async (projectId: string, body: { import_id: string; language: UserLocale }): Promise<IImportedDocument> => {
+  const doc = await requireImport(projectId, body.import_id)
+  if (doc.drop_applying || !(await extractionNotStarted(doc))) throw NOT_BEFORE_START(doc)
+  const profile = await TemplateProfile.findOne({ projectId })
+  if (!profile) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa đọc xong bố cục tài liệu", { status: doc.status, to: doc.status, allowed: [] })
+  const regions = await textSectionsOf(doc, profile)
+  if (!regions || !isSkeletonOnly(regions)) {
+    throw new Mode1Error("IMPORT_INVALID_STATE", "Chỉ chọn ngôn ngữ tài liệu khi file chỉ còn khung", { status: doc.status, to: doc.status, allowed: [] })
+  }
+  const written = await TemplateProfile.updateOne({ _id: profile._id }, { $set: { skeleton_language: body.language } })
+  if (!written.matchedCount) throw NOT_BEFORE_START(doc)
+  return doc
+}
+
+/**
+ * Phần dịch khung của lượt đọc sắp chạy: ngôn ngữ đích + số lô / credit; `null` khi không dịch (còn mục giữ nội dung, hoặc chọn đúng
+ * ngôn ngữ file). Tính trên khối đã lưu, như file sau khi Bỏ chữ.
+ */
+export const skeletonTranslationEstimate = async (doc: IImportedDocument): Promise<{ target: UserLocale; batches: number; credits: number } | null> => {
+  const profile = await TemplateProfile.findOne({ projectId: doc.projectId }, { heading_map: 1, drop_text: 1, language: 1, skeleton_language: 1 }).lean()
+  const regions = profile ? await textSectionsOf(doc, profile) : null
+  const target = profile && regions ? skeletonTranslationTarget(profile, regions) : null
+  if (!profile || !target) return null
+  const blocks = await storedBlocks(doc.projectId)
+  const kept = applyDropToBlocks(blocks, planDrop(blocks, textRegions(blocks, profile.heading_map), new Set(profile.drop_text ?? [])))
+  return { target, ...(await skeletonTranslationCost(skeletonUnits(kept))) }
+}
+
 /** Thời gian tối đa chờ lần Bắt đầu kia viết lại file xong (file lớn tách lại mất vài giây). */
 const DROP_WAIT_MS = 60_000
 const DROP_POLL_MS = 200
@@ -500,18 +542,35 @@ const waitDropApplied = async (doc: IImportedDocument): Promise<void> => {
  * đã bắt đầu ⇒ không làm gì. Khoá `drop_applying` để hai lần Bắt đầu không cùng viết lại: lần sau chờ lần trước viết xong rồi đi
  * tiếp (cùng một job I-4), không báo lỗi; lỗi giữa chừng ⇒ quay về file gốc và giữ lựa chọn để bấm lại.
  */
-export const applyDropText = async (doc: IImportedDocument): Promise<void> => {
+export const applyDropText = async (doc: IImportedDocument, userId: string = String(doc.created_by)): Promise<void> => {
   if (!(await extractionNotStarted(doc))) return
-  // Không có vùng Bỏ chữ ⇒ không cần khoá (hai lần Bắt đầu liền tay không chặn nhau)
-  if (!(await TemplateProfile.exists({ projectId: doc.projectId, "drop_text.0": { $exists: true } }))) return
+  // Không có vùng Bỏ chữ và không dịch khung ⇒ không cần khoá (hai lần Bắt đầu liền tay không chặn nhau)
+  const head = await TemplateProfile.findOne({ projectId: doc.projectId }, { heading_map: 1, drop_text: 1, language: 1, skeleton_language: 1 }).lean()
+  if (!head) return
+  const headRegions = await textSectionsOf(doc, head)
+  if (!head.drop_text?.length && !(headRegions && skeletonTranslationTarget(head, headRegions))) return
   const locked = await ImportedDocument.findOneAndUpdate({ _id: doc._id, drop_applying: { $ne: true } }, { $set: { drop_applying: true } })
   if (!locked) return waitDropApplied(doc)
   const originalRef = doc.file_ref
   try {
-    const profile = await TemplateProfile.findOne({ projectId: doc.projectId }, { heading_map: 1, drop_text: 1 }).lean()
-    if (!profile?.drop_text?.length) return
+    const profile = await TemplateProfile.findOne({ projectId: doc.projectId }, { heading_map: 1, drop_text: 1, language: 1, skeleton_language: 1 }).lean()
+    if (!profile) return
+    const regions = await textSectionsOf(doc, profile)
+    const target = regions ? skeletonTranslationTarget(profile, regions) : null
+    if (!profile.drop_text?.length && !target) return
+    const dropped = profile.drop_text ?? []
     const { pkg, blocks } = await parseDocument(await loadImportFile(doc))
-    applyDropToDom(blocks, planDrop(blocks, textRegions(blocks, profile.heading_map), new Set(profile.drop_text)))
+    const plan = planDrop(blocks, textRegions(blocks, profile.heading_map), new Set(dropped))
+    applyDropToDom(blocks, plan)
+    // FLF-456: file chỉ còn khung + ngôn ngữ khác file ⇒ dịch khung một lần (hết credit ⇒ ném, file chưa ghi gì)
+    if (target) {
+      const units = skeletonUnits(applyDropToBlocks(blocks, plan))
+      const translated = await translateSkeleton({ projectId: String(doc.projectId), userId, source: fileLanguageOf(profile), target, units })
+      for (const u of units) {
+        const text = translated.get(u.key)
+        if (text) u.apply?.(text)
+      }
+    }
     await cleanupDroppedPackage(pkg)
     const rewrittenRef = await docFileStore().save(await pkg.toBuffer(), { projectId: String(doc.projectId), kind: "upload", name: doc.original_name })
     doc.file_ref = rewrittenRef
@@ -522,12 +581,13 @@ export const applyDropText = async (doc: IImportedDocument): Promise<void> => {
       doc.file_ref = originalRef
       await doc.save()
       await parseImport(doc, { orgDefaultDrop: false }).catch(() => undefined)
-      await TemplateProfile.updateOne({ projectId: doc.projectId }, { $set: { drop_text: profile.drop_text } }).catch(() => undefined)
+      await TemplateProfile.updateOne({ projectId: doc.projectId }, { $set: { drop_text: dropped.length ? dropped : null, skeleton_language: profile.skeleton_language ?? null } }).catch(() => undefined)
       await docFileStore().remove(rewrittenRef).catch(() => undefined)
       throw err
     }
     // Tách lại tạo hồ sơ mới (không còn lựa chọn Bỏ chữ) ⇒ ghi lại vùng đã bỏ cho I-5 (FLF-463)
-    await TemplateProfile.updateOne({ projectId: doc.projectId }, { $set: { dropped_text: profile.drop_text } })
+    // FLF-456: ngôn ngữ đã chọn thành ngôn ngữ của file mới (khung đã dịch), để Luồng 2 viết đúng ngôn ngữ đó
+    await TemplateProfile.updateOne({ projectId: doc.projectId }, { $set: { dropped_text: dropped.length ? dropped : null, ...(target ? { language: target, skeleton_language: target } : {}) } })
     if (originalRef) await docFileStore().remove(originalRef).catch(() => undefined)
   } finally {
     await ImportedDocument.updateOne({ _id: doc._id }, { $set: { drop_applying: false } })
@@ -770,6 +830,7 @@ export const getImportView = async (projectId: string): Promise<GetImportRespons
     target_structure: profile?.target_structure ?? null,
     structure_preview: profile?.structure_preview ?? null,
     text_sections: profile ? await textSectionsOf(doc, profile) : null,
+    skeleton_language: profile ? await skeletonLanguageOf(doc, profile) : null,
     review
   }
 }

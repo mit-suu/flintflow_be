@@ -144,6 +144,11 @@ export interface ITemplateProfile extends Document {
   /** FLF-412: khoá vùng heading (`block_id`) người dùng chọn Bỏ chữ ở màn đọc khung — áp vào file lúc bấm Bắt đầu rồi xoá. */
   drop_text?: string[] | null
   /**
+   * FLF-456: ngôn ngữ tài liệu người dùng chọn ở màn đọc khung khi file chỉ còn khung (`skeleton-language.ts`). Chỉ có tác dụng
+   * khi mọi mục có chữ đã Bỏ chữ; lúc bấm Bắt đầu, khác ngôn ngữ file ⇒ khung được dịch rồi tách lại và `language` = giá trị này.
+   */
+  skeleton_language?: "en" | "vi" | null
+  /**
    * FLF-459 (I-3): mẫu thư viện org Code tự khớp với file khi người dùng không chọn mẫu (mapping của mẫu đã áp sẵn). `null` /
    * thiếu = không khớp mẫu nào (khớp như mẫu mới của riêng dự án) hoặc người dùng đã chọn mẫu (`ImportedDocument.org_template_id`).
    */
@@ -258,6 +263,7 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
     template_context: { type: Schema.Types.Mixed, default: null },
     structure_preview: { type: Schema.Types.Mixed, default: null },
     drop_text: { type: [String], default: null },
+    skeleton_language: { type: String, enum: ["en", "vi"], default: null },
     org_match: { type: new Schema({ template_id: { type: String, required: true }, version: { type: Number, required: true } }, { _id: false }), default: null },
     dropped_text: { type: [String], default: null },
     flow2_entry_spine: { type: Schema.Types.Mixed, default: null },
