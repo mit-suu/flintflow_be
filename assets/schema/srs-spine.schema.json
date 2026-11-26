@@ -198,6 +198,53 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
+        },
+        "credit_ack_required": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "after_brief",
+                    "screens_locked",
+                    "screens_added"
+                  ]
+                },
+                "credits": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "screens": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "required": [
+                "scope",
+                "credits",
+                "created_at"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "credit_acked_screens": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       },
       "required": [
@@ -1935,6 +1982,17 @@
             "minLength": 1
           },
           "target_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lens": {
             "anyOf": [
               {
                 "type": "string",

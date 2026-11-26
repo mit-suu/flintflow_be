@@ -21,6 +21,7 @@ import * as repository from "../../spine/spine.repository.js"
 import type { Priority, Spine, SpineRecord } from "../../spine/spine.types.js"
 import { buildStepContext } from "../context-projection.js"
 import { draftOps, type DraftExecutor, type DraftUsage } from "../draft-to-ops.js"
+import { recordDraftRejected } from "../draft-rejected-log.js"
 import { ApiError } from "../../../shared/utils/api-error.js"
 import type { ReplyLanguage } from "../../../shared/i18n/reply-language.js"
 
@@ -113,6 +114,9 @@ export const prioritize = async (projectId: string, userId: string, options: Pri
     spine,
     ...(options.executor ? { executor: options.executor } : {}),
     ...(options.replyLanguage ? { replyLanguage: options.replyLanguage } : {})
+  }).catch(async (err: unknown) => {
+    await recordDraftRejected(err, { projectId, stepId: PRIORITIZATION_STEP, callKind: "draft" })
+    throw err
   })
 
   let spineVersion = record.spine_version

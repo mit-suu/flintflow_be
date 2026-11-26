@@ -58,37 +58,47 @@ const importToGapReview = async () => {
 }
 
 describe("mode 1 - trích field (I-4) + xác nhận", () => {
-  it("FLF-343: bảng khớp cột trích tất định, chữ gọi AI theo section; một lần Bắt đầu chạy tới gap_review, field độ tin thấp vào baseline + cờ Cần xem", async () => {
+  it("FLF-462 (đảo FLF-343): bảng khớp cột trích tất định, chữ gọi AI theo section; dừng ở bước 1.6 cho 2 field độ tin thấp, xác nhận rồi mới tới gap_review", async () => {
     const { c, id, projectId } = await startImport()
-    const { res, run: polled } = await c.extractAndWait(id)
+    const res = await c.post("/import/extract", { import_id: id, confirm_latest: true })
     expect(res.status, JSON.stringify(res.body.error)).toBe(200)
     // chạy nền: request trả ngay ở `extracting`, không dừng
     expect(extractResponseSchema.parse(res.body.data).import).toMatchObject({ status: "extracting", paused: null })
-    const run = extractResponseSchema.parse(polled)
-    expect(run.import.status).toBe("gap_review")
-    expect(run.import.extract_cursor).toBeNull()
-    expect(run.sections.every((s) => s.status === "done")).toBe(true)
+    const { waitForExtraction } = await import("../../src/modules/import/extract-jobs.js")
+    await waitForExtraction(id)
+
+    // FLF-462: I-4 xong nhưng còn 2 field độ tin thấp chưa xác nhận ⇒ dừng ở bước 1.6 (fields_review), chưa tới gap_review
+    const paused = getImportResponseSchema.parse((await c.get("/import")).body.data)
+    expect(paused.import?.status).toBe("fields_review")
+    expect(paused.import?.extract_cursor).toBeNull()
+    expect(paused.extraction.sections.every((s) => s.status === "done")).toBe(true)
     // 6 section có chữ + mục riêng "5.9 Team Notes" (FLF-444: heading tự đặt cũng đọc theo nội dung) ⇒ 7 lượt AI; bảng actor/UC/BR không gọi AI
     expect(extractCalls()).toBe(7)
     const steps = await Usage.find({ projectId, state: "deducted" }).distinct("step_id")
     expect(steps).toContain("I-4:fixed:1")
     expect(steps.some((s: string) => s.startsWith("I-4:function:@B"))).toBe(true)
+    // trigger độ tin thấp của 2 function: chờ người xác nhận ở bước 1.6, chưa vào Spine
+    expect(paused.extraction.review_fields.map((f) => f.path).sort()).toEqual(["functions[id=FR-3.2.1].trigger", "functions[id=FR-3.2.2].trigger"])
+
+    const confirmed = await c.patch("/import/fields", { import_id: id, confirm_all: true })
+    expect(confirmed.status, JSON.stringify(confirmed.body.error)).toBe(200)
+    const { waitForFinalize } = await import("../../src/modules/import/finalize-jobs.js")
+    const resumeRes = await c.post("/import/resume", { import_id: id })
+    expect(resumeRes.status, JSON.stringify(resumeRes.body.error)).toBe(200)
+    await waitForFinalize(id)
 
     const view = getImportResponseSchema.parse((await c.get("/import")).body.data)
+    expect(view.import?.status).toBe("gap_review")
     const actors = view.extraction.sections.find((s) => s.section_id === "fixed:2.1")!
     expect(actors.fields_total).toBeGreaterThanOrEqual(4)
-    // trigger độ tin thấp của 2 function: không bị bỏ — có trong Spine, mỗi field một cờ vàng "Cần xem" mang đường dẫn
-    expect(view.extraction.review_fields.map((f) => f.path).sort()).toEqual(["functions[id=FR-3.2.1].trigger", "functions[id=FR-3.2.2].trigger"])
+    // FLF-462: đã xác nhận ở bước 1.6 ⇒ không còn trong danh sách chờ, nhưng Spine vẫn giữ giá trị AI trích
+    expect(view.extraction.review_fields).toEqual([])
     const spine = (await spineRepository.get(projectId))!
     expect(spine.functions.map((f) => f.trigger)).toEqual(["Learner submits the form", "Learner submits the form"])
     const review = spine.flags.filter((f) => f.rule_id === "import_needs_review" && f.resolved_at === null)
-    // FLF-411 (U2-5): một cờ mỗi phần tử, target = đường dẫn phần tử
-    expect(review.filter((f) => f.target_id?.startsWith("functions[")).map((f) => f.target_id).sort()).toEqual([
-      "functions[id=FR-3.2.1]",
-      "functions[id=FR-3.2.2]"
-    ])
-    expect(review.every((f) => f.level === "yellow")).toBe(true)
-    // bước xác nhận field không còn
+    // FLF-462 (đảo FLF-343, FLF-411 U2-5): field đã qua người xác nhận ở bước 1.6 ⇒ không còn cờ vàng Cần xem riêng cho field
+    expect(review.filter((f) => f.target_id?.startsWith("functions["))).toEqual([])
+    // bước xác nhận field không còn (đã baseline xong)
     const late = await c.patch("/import/fields", { import_id: id, confirm_all: true })
     expect(late.status).toBe(409)
   })
@@ -259,5 +269,38 @@ describe("mode 1 - re-upload (UC-24)", () => {
     const blocked = await c.upload(await makeSrsDocx())
     expect(blocked.status).toBe(409)
     expect(blocked.body.error.code).toBe("IMPORT_INVALID_STATE")
+  })
+})
+
+describe("mode 1 - FLF-476 import UC trùng (mã bảng trơn khớp mã có tiền tố AI đọc từ chữ)", () => {
+  it("bảng 2.2.2 ghi mã trơn '05' (EduCampus: '01'..'10' không tiền tố), đoạn 2.2.1 model đọc 'UC-05' không tên ⇒ một use case, không nhân đôi", async () => {
+    const seeded = await seedFixture("minimal", { balance: 1000 })
+    const projectId = await createMode1Project(seeded)
+    const c = mode1Api(seeded, projectId)
+    // Đoạn 2.2.1 (chữ, không bảng): model trả use case khoá "UC-05" không tên - đúng như log gốc EduCampus B6
+    // ("Người xếp lịch tham gia UC-02 đến UC-09…" không tên, nằm cạnh mã trơn của bảng 2.2.2)
+    mockOverrides.next = counting((prompt) => {
+      if (prompt.includes("# Import Extract") && prompt.includes("Section (registry id): fixed:2.2.1")) {
+        const tail = prompt.slice(prompt.indexOf("Blocks of the section"))
+        const b = /\n\[(B\d{4,})\]/.exec(tail)?.[1] ?? "B0001"
+        return JSON.stringify({
+          section_id: "fixed:2.2.1",
+          items: [{ entity: "use_cases", key: "UC-05", value: {}, confidence: 0.6, field_confidence: {}, source_block_ids: [b] }],
+          unmapped_block_ids: []
+        })
+      }
+      return fakeMode1(prompt)
+    })
+    const up = await c.upload(await makeSrsDocx({ ucIdNoPrefix: true }))
+    expect(up.body.data.import.status).toBe("extracting")
+    const id = up.body.data.import.id as string
+    const ex = await c.extractAndWait(id)
+    expect(ex.res.status, JSON.stringify(ex.res.body.error)).toBe(200)
+    expect(ex.run?.import.status).toBe("gap_review")
+
+    const spine = (await spineRepository.get(projectId))!
+    // Đúng 2 use case mã "01"/"05" như bảng - không có "UC-01"/"UC-05" rỗng tên đứng cạnh (bug gốc: 9 mục rỗng trùng)
+    expect(spine.use_cases.map((u) => u.id).sort()).toEqual(["01", "05"])
+    expect(spine.use_cases.find((u) => u.id === "05")).toMatchObject({ name: "Log in" })
   })
 })

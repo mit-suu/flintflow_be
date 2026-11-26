@@ -85,7 +85,7 @@ import { runDeterministicCheck } from "../spine/deterministic-check.js"
 import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { createMemoryDiagramStore } from "./diagram-file.store.js"
 import { renderKind } from "./renderers/index.js"
-import { compileWithFix, defaultDeps, loadDiagramFile, noAutoFix, redrawScreenLayoutsFromSpec, renderAll, renderChangedIfAvailable, renderDiagram, renderDiagrams, sameDiagramSubject, staleDiagrams, staleRenderedDiagrams, type DiagramServiceDeps } from "./diagram.service.js"
+import { compileWithFix, defaultDeps, loadDiagramFile, noAutoFix, redrawScreenLayoutsFromSpec, renderAll, renderAllIfAvailable, renderChangedIfAvailable, renderDiagram, renderDiagrams, sameDiagramSubject, staleDiagrams, staleRenderedDiagrams, type DiagramServiceDeps } from "./diagram.service.js"
 import type { RenderContext } from "../../shared/diagram/erd-notation.js"
 import { svgTitleOf } from "./renderers/common.js"
 import { screenSpecOf } from "./renderers/screen-mockup.js"
@@ -557,13 +557,83 @@ describe("renderChangedIfAvailable - FLF-311 vẽ lại sau lô thêm use case /
     expect(after.diagrams.some((d) => d.kind === "screen_layout" && d.owner_id === newScreen && d.render_status === "ok")).toBe(true)
   })
 
-  it("PlantUML không chạy ⇒ null, không ghi gì, không ném", async () => {
+  // FLF-493: PlantUML tắt ⇒ vẫn vẽ lại target SVG (mockup, use case…), bỏ target PlantUML, không ghi render_error mới
+  it("PlantUML không chạy ⇒ chỉ vẽ lại hình SVG, hình PlantUML giữ nguyên, không có render_error mới", async () => {
     const { deps } = makeDeps()
-    const before = await renderedThenRenamed(deps)
+    await renderedThenRenamed(deps)
+    // Một hình PlantUML đã vẽ mà hash lệch (không phụ thuộc fixture có sẵn hình PlantUML nào)
+    const base = (await repo.get(PROJECT))!
+    await applyTransaction(PROJECT, {
+      base_version: base.spine_version,
+      by: USER,
+      ops: [
+        {
+          op: "add",
+          path: "diagrams[]",
+          value: { id: "D99", kind: "deployment", format: "puml", source: "@startuml", section: "fixed:4.1", owner_kind: null, owner_id: null, render_status: "ok", source_hash: "stale-fixture-hash", rendered_at: "2026-09-14T09:00:00.000Z" }
+        }
+      ]
+    })
+    const before = (await repo.get(PROJECT))!
+    const staleBefore = staleRenderedDiagrams(before)
+    const staleSvg = staleBefore.filter((d) => DIAGRAM_ENGINES[d.kind].startsWith("svg@"))
+    const stalePuml = staleBefore.filter((d) => !DIAGRAM_ENGINES[d.kind].startsWith("svg@"))
+    expect(staleSvg.length).toBeGreaterThan(0)
+    expect(stalePuml.length).toBeGreaterThan(0)
     plantuml.reachable = false
 
-    await expect(renderChangedIfAvailable(PROJECT, ["S02"], { by: USER, deps })).resolves.toBeNull()
-    expect((await repo.get(PROJECT))?.spine_version).toBe(before.spine_version)
+    const result = await renderChangedIfAvailable(PROJECT, [], { by: USER, deps })
+
+    expect(result).not.toBeNull()
+    const after = (await repo.get(PROJECT))!
+    expect(staleRenderedDiagrams(after).map((d) => d.id).sort()).toEqual(stalePuml.map((d) => d.id).sort())
+    expect(after.diagrams.filter((d) => d.render_status === "error")).toEqual(before.diagrams.filter((d) => d.render_status === "error"))
+    for (const d of stalePuml) expect(after.diagrams.find((a) => a.id === d.id)).toEqual(before.diagrams.find((b) => b.id === d.id))
+  })
+
+  it("PlantUML không chạy, chỉ còn hình PlantUML cũ ⇒ null, không ghi gì, không ném", async () => {
+    const { deps } = makeDeps()
+    await renderedThenRenamed(deps)
+    plantuml.reachable = true
+    await renderChangedIfAvailable(PROJECT, [], { by: USER, deps })
+    const settled = (await repo.get(PROJECT))!
+    plantuml.reachable = false
+    await expect(renderChangedIfAvailable(PROJECT, [], { by: USER, deps })).resolves.toBeNull()
+    expect((await repo.get(PROJECT))?.spine_version).toBe(settled.spine_version)
+  })
+})
+
+describe("renderAllIfAvailable - FLF-493 mockup lệch vẫn được vẽ lại khi PlantUML tắt", () => {
+  beforeEach(() => {
+    db.reset()
+    plantuml.reachable = true
+  })
+
+  it("PlantUML tắt ⇒ mockup (svg) vẽ lại, sequence giữ nguyên", async () => {
+    const { deps: baseDeps } = makeDeps()
+    // Mockup SVG thật (model trả spec) — noAiLayout chỉ ra bảng PlantUML, loại hình đó không vẽ lại được khi PlantUML tắt
+    const context: RenderContext = { screenTheme: { primaryColor: "#3F5591", domain: "flintflow.io", platforms: ["web"] } }
+    const deps: Partial<DiagramServiceDeps> = {
+      ...baseDeps,
+      renderContext: async () => context,
+      renderSvgPng: async () => Buffer.from("png"),
+      drawLayout: async () => ({ spec: { ...SIGNUP_SPEC, platforms: ["web"] }, screenImages: null, primaryColor: null })
+    }
+    await seed()
+    const first = await renderAll(PROJECT, { by: USER, deps })
+    const sc = first.diagrams.find((d) => d.kind === "screen_layout")!
+    const screenId = sc.owner_id!
+    await applyTransaction(PROJECT, { base_version: first.spine_version, by: USER, ops: [{ op: "set", path: `screens[id=${screenId}].name`, value: "Man doi ten" }] })
+    const stale = staleRenderedDiagrams((await repo.get(PROJECT))!, context)
+    expect(stale.some((d) => d.id === sc.id)).toBe(true)
+    plantuml.reachable = false
+
+    const result = await renderAllIfAvailable(PROJECT, { by: USER, deps })
+
+    expect(result).not.toBeNull()
+    const after = (await repo.get(PROJECT))!
+    expect(staleRenderedDiagrams(after, context).some((d) => DIAGRAM_ENGINES[d.kind].startsWith("svg@"))).toBe(false)
+    expect(after.diagrams.some((d) => d.render_status === "error")).toBe(false)
   })
 })
 

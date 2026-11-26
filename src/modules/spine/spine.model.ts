@@ -42,13 +42,27 @@ const projectSchema = new Schema(
   opts
 )
 
+/** FLF-466 P08: lần báo credit chờ xác nhận (`progress.credit_ack_required`). */
+const creditAckSchema = new Schema(
+  {
+    scope: { type: String, enum: ["after_brief", "screens_locked", "screens_added"], required: true },
+    credits: { type: Number, required: true, min: 0 },
+    created_at: { type: String, required: true },
+    screens: { type: [String], default: undefined }
+  },
+  opts
+)
+
 const progressSchema = new Schema(
   {
     current_phase: nullableString,
     current_step: nullableString,
     screen_cursor: nullableString,
     screen_queue: { type: [String], default: [] },
-    elicit_turns_this_phase: { type: Number, default: 0, min: 0 }
+    elicit_turns_this_phase: { type: Number, default: 0, min: 0 },
+    // FLF-466 P08: báo credit chờ xác nhận + màn đã xác nhận (dự án cũ không có)
+    credit_ack_required: { type: creditAckSchema, default: undefined },
+    credit_acked_screens: { type: [String], default: undefined }
   },
   opts
 )
@@ -481,6 +495,7 @@ const flagSchema = new Schema(
     rule_id: { type: String, required: true },
     section_id: { type: String, required: true },
     target_id: nullableString,
+    lens: { type: String, default: undefined },
     message: { type: String, default: "" },
     remediation_step: { type: String, required: true },
     opened_at_version: { type: Number, required: true, min: 1 },

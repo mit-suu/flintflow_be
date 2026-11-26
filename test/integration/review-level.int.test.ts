@@ -102,3 +102,35 @@ describe("FLF-337 sau baseline - Chỉ ở mốc chốt: CR qua kiểm tự ghi 
     expect(passed.items[0].label_vi).toContain(crId)
   })
 })
+
+describe("FLF-483 Chỉ ở mốc chốt - cổng xoá nội dung", () => {
+  /** C-4 chuẩn nhưng BR-01 bị xoá (op `remove`) thay vì ghi chú. */
+  const proposeRemoveBr = (p: string) => {
+    if (!p.includes("# CR Propose")) return undefined
+    const out = JSON.parse(fakeCrPropose(p)!)
+    for (const l of out.locations) if (l.conclusion === "comment") Object.assign(l, { conclusion: "edit", comment_text: undefined, spine_ops: [{ op: "remove", path: "business_rules[id=BR-01]" }] })
+    return JSON.stringify(out)
+  }
+  const verifyWith = async (propose: (p: string) => string | undefined) => {
+    resetCrMock((p) => (p.includes("# CR Consistency") ? JSON.stringify({ findings: [] }) : (fakeCrClarify(PERF_TARGETS)(p) ?? propose(p))))
+    const { c } = await importedProject()
+    expect((await c.patch("/review-mode", { review_mode: "milestones" })).status).toBe(200)
+    const cr = `/change-requests/${await newCr(c)}`
+    detail(await c.post(`${cr}/clarify`))
+    detail(await c.post(`${cr}/impact`))
+    detail(await c.post(`${cr}/propose`))
+    return { c, cr, verified: detail(await c.post(`${cr}/verify`)) }
+  }
+
+  it("CR xoá một phần tử ⇒ dừng ở ready_to_submit dù đạt kiểm, Spine chưa đổi; bấm xác nhận ⇒ written", async () => {
+    const { c, cr, verified } = await verifyWith(proposeRemoveBr)
+    expect(verified.locations.flatMap((l) => l.verify?.violations ?? [])).toEqual([])
+    expect(verified.change_request.status).toBe("ready_to_submit")
+    expect((await c.get("/spine")).body.data.business_rules.some((r: { id: string }) => r.id === "BR-01")).toBe(true)
+    expect(detail(await c.post(`${cr}/submit`)).change_request.status).toBe("written")
+  })
+
+  it("CR không xoá gì ⇒ vẫn tự ghi như cũ (AC-45.6)", async () => {
+    expect((await verifyWith(fakeCrPropose)).verified.change_request.status).toBe("written")
+  })
+})

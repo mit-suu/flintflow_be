@@ -1,7 +1,7 @@
 /**
  * Tìm phần tử Spine gần nghĩa với CR bằng Atlas Vector Search (`$vectorSearch`, index `spine_embeddings_vector`).
  * Mọi đường lỗi trả `[]` — C-3 khi đó tìm theo từ khoá như cũ:
- *   - embedding tắt / thiếu key ⇒ `[]`, không đụng DB;
+ *   - embedding tắt / thiếu key ⇒ `[]`, không đụng DB, log một lần `[C-3] EMBEDDING_PROVIDER=off`;
  *   - Mongo không có `$vectorSearch` (Mongo in-memory, standalone, community không có mongot) ⇒ `[]`, **nhớ** kết quả
  *     cho cả process (thăm dò một lần, không gọi model embed query);
  *   - lỗi khác (mạng, provider) ⇒ log + `[]`, không nhớ (lần sau thử lại).
@@ -29,9 +29,13 @@ export const isVectorSearchUnsupported = (err: unknown): boolean => {
 /** `null` = chưa thăm dò; nhớ cho cả process. */
 let support: boolean | null = null
 
+/** FLF-483: đã log "embedding tắt" chưa (một lần cho cả process). */
+let offLogged = false
+
 /** Test: quên kết quả thăm dò. */
 export const resetVectorSearchSupport = (): void => {
   support = null
+  offLogged = false
 }
 
 const vectorStage = (projectId: mongoose.Types.ObjectId, queryVector: number[], limit: number) => ({
@@ -78,7 +82,16 @@ export interface VectorSearchOptions {
 export const vectorCandidates = async (projectId: string, queryText: string, options: VectorSearchOptions = {}): Promise<VectorCandidate[]> => {
   const limit = options.limit ?? env.CR_VECTOR_TOP_K
   const minScore = options.minScore ?? env.CR_VECTOR_MIN_SCORE
-  if (!queryText.trim() || !embeddingAvailable() || !(await isVectorSearchSupported())) return []
+  if (!queryText.trim()) return []
+  if (!embeddingAvailable()) {
+    // FLF-483: trước đây im lặng ⇒ máy test không ai biết C-3 đang chỉ tìm theo từ khoá
+    if (!offLogged) {
+      offLogged = true
+      console.info("[C-3] EMBEDDING_PROVIDER=off - không tìm theo nghĩa")
+    }
+    return []
+  }
+  if (!(await isVectorSearchSupported())) return []
   try {
     const [queryVector] = await embedTexts([queryText], { taskType: "RETRIEVAL_QUERY" })
     const rows = (await SpineEmbedding.aggregate([

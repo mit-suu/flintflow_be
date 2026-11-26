@@ -103,3 +103,23 @@ describe("buildTrackedDocx", () => {
     expect(wAll(doc, "ins")).toHaveLength(0)
   })
 })
+
+describe("buildTrackedDocx — tác giả theo từng chỗ sửa (FLF-466 phase 03)", () => {
+  it("authorOf gán CR sửa đoạn đó; chỗ không gán mang tên người phát hành; mọi w:id khác nhau", async () => {
+    const prev = await docx(["Alpha stays the same.", "Beta needs a change here.", "Gamma needs a change too."])
+    const next = await docx(["Alpha stays the same.", "Beta needs a better change here.", "Gamma needs a change soon."])
+    const out = await buildTrackedDocx(prev, next, { author: "Lan", date: DATE }, [{ section_title: "", text: "ghi chú", author: "CR-020 (Hà)" }], {
+      authorOf: (c) => (c.after.startsWith("Beta") ? "CR-014 (Lan)" : null)
+    })
+    const doc = await (await DocxPackage.load(out.data)).requireXml("word/document.xml")
+    const revisions = [...wAll(doc, "ins"), ...wAll(doc, "del")]
+    const byAuthor = (name: string) => revisions.filter((r) => wAttr(r, "author") === name).length
+    expect(byAuthor("CR-014 (Lan)")).toBeGreaterThan(0)
+    expect(byAuthor("Lan")).toBeGreaterThan(0)
+    const ids = revisions.map((r) => wAttr(r, "id"))
+    expect(new Set(ids).size).toBe(ids.length)
+    const comments = await listComments(await DocxPackage.load(out.data))
+    expect(comments.map((c) => c.author)).toEqual(["CR-020 (Hà)"])
+    expect(await acceptedTexts(out.data)).toEqual(["Alpha stays the same.", "Beta needs a better change here.", "Gamma needs a change soon."])
+  })
+})

@@ -64,6 +64,12 @@ const envSchema = z.object({
   // cùng site (BE ở subdomain) ⇒ giữ `lax` và đặt COOKIE_DOMAIN=.flintflow.io.vn
   COOKIE_SAME_SITE: z.enum(["lax", "strict", "none"]).default("lax"),
   COOKIE_DOMAIN: z.string().default(""),
+  /**
+   * FLF-475: khoảng ân hạn (ms) sau khi một refresh token bị XOAY mà vẫn còn bị gửi lại (phản hồi bị mất
+   * giữa đường, F5 liên tục, request song song) — `session.service.ts` xoay tiếp trong CÙNG họ phiên thay
+   * vì coi là đánh cắp. Vượt khoảng này mới tính là reuse thật (thu hồi cả họ phiên).
+   */
+  REFRESH_REUSE_GRACE_MS: z.coerce.number().int().nonnegative().default(30000),
 
   SMTP_HOST: z.string().default("smtp.gmail.com"),
   SMTP_PORT: z.string().default("465"),
@@ -164,11 +170,22 @@ const envSchema = z.object({
    */
   REFERENCE_MAX_TOKENS_PER_UPLOAD: z.coerce.number().int().min(1000).default(100000),
 
-  // S-9.2 Quality Lens bằng LLM — mặc định TẮT (Phases §9.1, hoãn vì ngân sách).
-  REVIEW_LLM_ENABLED: z
+  // FLF-466 P08: dải số màn ước tính sau Approve Brief = hệ số × số đầu vào có ở S-1 (goals, other_requirements, mục tính năng).
+  RUN_ESTIMATE_SCREENS_PER_INPUT_MIN: z.coerce.number().positive().default(1.5),
+  RUN_ESTIMATE_SCREENS_PER_INPUT_MAX: z.coerce.number().positive().default(2.5),
+
+  // FLF-449 việc 5, 6: kiểm AI là một phần luồng (business-flow 71, 131-138) ⇒ BẬT mặc định; cờ chỉ để tắt khẩn.
+  // Tắt ⇒ bước trả `skipped`, ước tính credit tính 0.
+  /** S-9.2 Soát chất lượng bằng AI. */
+  QUALITY_LENS_ENABLED: z
     .string()
-    .default("false")
-    .transform((v) => v === "true" || v === "1"),
+    .default("true")
+    .transform((v) => !(v === "false" || v === "0")),
+  /** S-8.4 Rà nhất quán bằng AI (trùng nghĩa, thuật ngữ lệch, thiếu chỗ liệt kê). */
+  CONSISTENCY_LLM_ENABLED: z
+    .string()
+    .default("true")
+    .transform((v) => !(v === "false" || v === "0")),
 
   // ─── PlantUML (render diagram phía server, Phases §7.1) ───────────
   // Self-host: `docker compose up -d plantuml`. Ở production PlantUML là một

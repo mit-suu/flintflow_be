@@ -152,7 +152,14 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const droppedPermissions: DroppedPermission[] = []
   // Mức ưu tiên có chữ mà không quy được về MoSCoW (vd "Gấp") ⇒ cờ "Cần xem" ở lô kế hoạch step
   const unmappedPriorities: UnmappedPriority[] = []
-  const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value, sections: e.sections })), droppedPermissions, unmappedPriorities)
+  // FLF-476: tên nhóm dự phòng ("General" / "Chức năng khác") theo ngôn ngữ tài liệu
+  const ops = buildImportOps(
+    stripRecord(before),
+    entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value, sections: e.sections })),
+    droppedPermissions,
+    unmappedPriorities,
+    { language: profile.language }
+  )
   // QLHS 11/11 bug #15: file không có sơ đồ / mục luồng màn, chỉ ghi vài chuyển màn ⇒ suy Đăng nhập → màn của từng vai (cùng
   // lô thực thể để dấu đoạn / hash tính trên dữ liệu đã có cạnh); cờ "Cần xem" liệt kê cạnh suy ra ở lô kế hoạch step
   const inferredFlow = hasOwnScreenFlow(drafts, profile.heading_map, provisional) ? [] : inferFlowAfter(stripRecord(before), ops)
@@ -225,7 +232,10 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     // Ô thật của bảng (FLF-251) — tách `text` theo dòng làm gãy hàng khi ô có xuống dòng (Record of Changes ra 0 dòng)
     rows: b.kind === "table" ? tableRows(b, ordered) : null,
     image_ref: b.image_ref ?? null,
-    ...(b.number_label ? { number_label: b.number_label } : {})
+    ...(b.number_label ? { number_label: b.number_label } : {}),
+    // FLF-462: lớp chữ hướng dẫn (1-3 chắc chắn, có thể đã nâng từ lớp 4 lúc xác nhận ở bước 1.6) - cần để `stripTemplateMarks`
+    // dưới đây tính đúng mục nào còn nội dung thật (I-5), không chỉ đọc theo luật ngoặc cũ
+    ...(b.guidance_layer ? { guidance_layer: b.guidance_layer } : {})
   }))
   // QLHS 11/11 bug #12b: file ghi ký pháp ERD (danh mục hình / chú thích "ký hiệu chân chim") ⇒ dự án vẽ lại ERD đúng ký
   // pháp đó; không ghi ⇒ giữ ký pháp của dự án. Ghi trước khi vẽ sơ đồ (bước 4)

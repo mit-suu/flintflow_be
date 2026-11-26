@@ -97,7 +97,7 @@ export const useCaseContext = (spine: Spine, mode: UseCaseMode): Record<string, 
   return {
     mode,
     // Kiểm trùng / chồng mục tiêu với use case có sẵn của cùng actor (luật 3e) — mô tả cắt ngắn
-    use_cases: spine.use_cases.map(({ id, name, actor_ids, description }) => ({ id, name, actor_ids, description: description.slice(0, 160) })),
+    use_cases: spine.use_cases.map(({ id, name, actor_ids, function_ids, description }) => ({ id, name, actor_ids, function_ids, description: description.slice(0, 160) })),
     // FLF-318: chọn actor xử lý yêu cầu (luật 3e — giảng viên chấm lại, phòng đào tạo duyệt) — không đoán, không bịa actor
     actors: spine.actors.map(({ id, name, kind, description }) => ({ id, name, kind, description: description.slice(0, 120) })),
     features: spine.features.map(({ id, name }) => ({ id, name })),
@@ -414,6 +414,13 @@ export type EditIssue =
  * Phần lô sửa use case bỏ sót khi **đổi actor**: vai trò của actor mới chưa có quyền xem màn của use case; vai trò của actor
  * cũ vẫn còn quyền trên màn mà không use case nào khác của actor đó dùng.
  */
+/**
+ * FLF-486 (B1): hành động nào tính là "được mở màn". `view` là cách FlintFlow ghi; `access` là dấu X của ma trận phân quyền
+ * dự án import (`import/table-shape.ts` `markActions`). Hành động khác (create, update...) không tự mở màn.
+ */
+const OPENS_SCREEN = new Set(["view", "access"])
+const opensScreen = (action: string): boolean => OPENS_SCREEN.has(String(action).trim().toLowerCase())
+
 export const editIssues = (before: EditParts, after: EditParts): EditIssue[] => {
   const out: EditIssue[] = []
   const rolesOf = (spine: EditParts, actorId: string) => spine.roles.filter((r) => r.actor_id === actorId)
@@ -427,7 +434,7 @@ export const editIssues = (before: EditParts, after: EditParts): EditIssue[] => 
     const screenName = (id: string) => after.screens.find((s) => s.id === id)?.name ?? id
     for (const screen of screens) {
       for (const role of added.flatMap((a) => rolesOf(after, a))) {
-        if (!after.permissions.some((p) => p.screen_id === screen && p.role_id === role.id && p.action === "view")) {
+        if (!after.permissions.some((p) => p.screen_id === screen && p.role_id === role.id && opensScreen(p.action))) {
           out.push({ kind: "new_actor_no_view", use_case: uc.name, role: role.name, screen: screenName(screen) })
         }
       }
@@ -475,7 +482,7 @@ export type UseCaseScreenIssue =
   | { kind: "no_screen"; use_case: string; name: string }
   | { kind: "shared_new_screen"; use_case: string; name: string; other: string; screen: string }
   | { kind: "no_edge"; use_case: string; screen: string }
-  | { kind: "no_view"; use_case: string; role: string }
+  | { kind: "no_view"; use_case: string; role: string; name?: string }
   | { kind: "not_chained"; use_case: string; name: string; screens: string[] }
   | { kind: "no_use_case" }
   | { kind: "not_in_actor_flow"; use_case: string; screen: string; from: string[] }
@@ -525,7 +532,7 @@ export const newUseCaseScreenIssues = (
     }
     const roles = after.roles.filter((r) => r.actor_id !== null && uc.actor_ids.includes(r.actor_id) && human.has(r.actor_id))
     // Màn vào của use case phải mở từ màn mà vai trò của actor xem được — không thì không nằm trong screen flow của actor
-    const viewable = new Set(after.permissions.filter((p) => p.action === "view" && roles.some((r) => r.id === p.role_id)).map((p) => p.screen_id))
+    const viewable = new Set(after.permissions.filter((p) => opensScreen(p.action) && roles.some((r) => r.id === p.role_id)).map((p) => p.screen_id))
     for (const entry of fresh) {
       const from = after.screens.filter((s) => !screens.includes(s.id) && s.flow_to.some((e) => e.to === entry))
       // Màn không có dòng quyền nào (Login, màn công khai) ⇒ ai cũng mở được
@@ -534,8 +541,8 @@ export const newUseCaseScreenIssues = (
       issues.push({ kind: "not_in_actor_flow", use_case: uc.id, screen: nameOf.get(entry) ?? entry, from: from.map((s) => s.name) })
     }
     for (const role of roles) {
-      if (screens.some((s) => after.permissions.some((p) => p.screen_id === s && p.role_id === role.id && p.action === "view"))) continue
-      issues.push({ kind: "no_view", use_case: uc.id, role: role.name })
+      if (screens.some((s) => after.permissions.some((p) => p.screen_id === s && p.role_id === role.id && opensScreen(p.action)))) continue
+      issues.push({ kind: "no_view", use_case: uc.id, role: role.name, name: uc.name })
     }
   }
   return issues
@@ -551,7 +558,7 @@ export const useCaseScreenProblemText = (issue: UseCaseScreenIssue): string => {
     case "no_edge":
       return `New screen "${issue.screen}" of ${issue.use_case} has no edge into it: set flow_to on the screen that opens it (rule 3e).`
     case "no_view":
-      return `Role "${issue.role}" of ${issue.use_case} has no view permission on its screen: add a permissions[] row (rule 3e).`
+      return `Role "${issue.role}" of use case ${issue.name ? `"${issue.name}"` : issue.use_case} has no view permission on its screen: add a permissions[] row (rule 3e). Keep this use case and its actors as they are; only add the missing permissions[] row with action "view" (or the action the project's matrix already uses).`
     case "not_in_actor_flow":
       return `New screen "${issue.screen}" of ${issue.use_case} opens only from ${issue.from.map((n) => `"${n}"`).join(", ")}, which its actor's role cannot view: open it from a screen in that actor's flow (rule 3e).`
     case "no_use_case":
@@ -850,19 +857,25 @@ export const screenKindQuestion = (
     const offered = ordered.filter((u) => u.proposed).map((u, i) => describeItem(u, i + requested.length, language))
     const anyProposed = offered.length > 0
     const lines = [DETAILED_HEADER[language], ...requested, ...(anyProposed ? [PROPOSED_HEADER[language], ...offered] : [])]
+    // FLF-486 (B4): một use case nhiều màn => lựa chọn nói về "bước", tránh đọc thành "mỗi vai một use case"
+    const single = requested.length === 1 && !anyProposed
     if (language === "en") {
       return {
         text: `${lines.join("\n")}\nHow should each look: its own screen, a popup${host ? ` opened from "${host}"` : ""}, an existing screen, or one shared screen? Answer per number or per screen, e.g. "1 own screen, step “Confirm” is a popup; 2 and 3 share one screen${anyProposed ? "; drop 4" : ""}".`,
         choices: anyProposed
           ? ["Keep all, each its own screen", "Drop the proposed use cases", "One shared screen"]
-          : ["Each use case its own screen", "One shared screen", host ? `Popups opened from ${host}` : "Popups"]
+          : single
+            ? ["Each step its own screen", "Merge the steps into one screen", host ? `Popup opened from ${host}` : "Popup"]
+            : ["Each use case its own screen", "One shared screen", host ? `Popups opened from ${host}` : "Popups"]
       }
     }
     return {
       text: `${lines.join("\n")}\nMỗi use case dùng giao diện nào: màn hình riêng, popup${host ? ` mở từ "${host}"` : ""}, màn có sẵn, hay dùng chung một màn? Trả lời theo số hoặc theo màn, vd. "1 màn riêng, bước “Confirm” là popup; 2 và 3 dùng chung một màn${anyProposed ? "; bỏ 4" : ""}".`,
       choices: anyProposed
         ? ["Giữ tất cả, mỗi use case màn riêng", "Bỏ các use case AI đề xuất", "Dùng chung một màn hình"]
-        : ["Mỗi use case một màn hình riêng", "Dùng chung một màn hình", host ? `Popup mở từ ${host}` : "Popup"]
+        : single
+          ? ["Mỗi bước một màn riêng", "Gộp các bước vào một màn", host ? `Popup mở từ ${host}` : "Popup"]
+          : ["Mỗi use case một màn hình riêng", "Dùng chung một màn hình", host ? `Popup mở từ ${host}` : "Popup"]
     }
   }
   const name = String(added[0].name ?? "")
@@ -1319,4 +1332,21 @@ export const uiPlanNote = (issues: readonly UiPlanIssue[], language: "vi" | "en"
     }
   }
   return issues.map(vi).join("\n")
+}
+
+// ─── FLF-469: CR thêm / xoá cả một chức năng ⇒ gắn vào use case có sẵn / use case hết chức năng thì xoá (luật 3i, 3j) ───
+
+type FunctionLinkParts = Pick<Spine, "use_cases" | "functions">
+
+/** Chức năng có ở `after` mà `before` chưa có và không use case nào của `after` liệt kê. */
+export const unlinkedNewFunctions = (before: FunctionLinkParts, after: FunctionLinkParts): { id: string; name: string }[] => {
+  const existed = new Set(before.functions.map((f) => f.id))
+  const linked = new Set(after.use_cases.flatMap((u) => u.function_ids))
+  return after.functions.filter((f) => !existed.has(f.id) && !linked.has(f.id)).map(({ id, name }) => ({ id, name }))
+}
+
+/** Use case còn ở `after` nhưng vừa hết chức năng (trước đó có ít nhất một). */
+export const emptiedUseCases = (before: FunctionLinkParts, after: FunctionLinkParts): { id: string; name: string }[] => {
+  const old = new Map(before.use_cases.map((u) => [u.id, u]))
+  return after.use_cases.filter((u) => u.function_ids.length === 0 && (old.get(u.id)?.function_ids.length ?? 0) > 0).map(({ id, name }) => ({ id, name }))
 }

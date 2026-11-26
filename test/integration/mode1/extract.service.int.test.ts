@@ -9,9 +9,10 @@ vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await imp
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeMode1 } from "../../helpers/mode1.js"
 import { importAtExtracting, useExtractConcurrency } from "../../helpers/mode1-import-p4.js"
-import { runExtraction } from "../../../src/modules/import/extract.service.js"
+import { patchFields, runExtraction } from "../../../src/modules/import/extract.service.js"
 import { ExtractionDraft } from "../../../src/modules/import/extraction-draft.model.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
+import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
 import { CreditWallet } from "../../../src/modules/credits/credit-wallet.model.js"
 import { Usage } from "../../../src/modules/spine/usage.model.js"
 
@@ -43,7 +44,8 @@ describe("I-4 - bảng khớp đủ cột", () => {
   it("bảng actor/UC/BR trích tất định, không gọi AI, không usage, không trừ credit", async () => {
     const ctx = await importAtExtracting()
     const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
-    expect(run.doc.status).toBe("baselining")
+    // FLF-462: 2 field độ tin thấp của mục đọc theo nội dung ("function:@B…") ⇒ dừng ở bước 1.6 chờ xác nhận
+    expect(run.doc.status).toBe("fields_review")
 
     for (const s of TABLE_SECTIONS) expect(calls, s).not.toContain(s)
     // FLF-444: + mục riêng "5.9 Team Notes" (heading tự đặt cũng đọc theo nội dung)
@@ -105,10 +107,10 @@ describe("I-4 - output sai schema", () => {
 })
 
 describe("I-4 - độ tin", () => {
-  it("FLF-343: field độ tin < 0.7 ⇒ vẫn sang baselining (không dừng ở fields_review), chỉ field đó đếm là cần xem", async () => {
+  it("FLF-462 (đảo FLF-343): field độ tin < 0.7 ⇒ dừng ở fields_review (bước 1.6), chỉ field đó đếm là cần xem", async () => {
     const ctx = await importAtExtracting()
     const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
-    expect(run.doc.status).toBe("baselining")
+    expect(run.doc.status).toBe("fields_review")
     const needing = run.sections.filter((s) => s.fields_needing_review > 0)
     expect(needing.map((s) => s.fields_needing_review)).toEqual([1, 1])
     expect(needing.every((s) => s.section_id.startsWith("function:@B"))).toBe(true)
@@ -166,7 +168,8 @@ describe("I-4 - hết credit, resume", () => {
     const resumed = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
     expect(resumed.doc.paused).toBeNull()
     expect(resumed.doc.extract_cursor).toBeNull()
-    expect(resumed.doc.status).toBe("baselining")
+    // FLF-462: cùng 2 field độ tin thấp của mục đọc theo nội dung ⇒ dừng ở bước 1.6
+    expect(resumed.doc.status).toBe("fields_review")
     for (const s of done) expect(calls, s).not.toContain(s)
     expect(calls[0]).toBe(AI_ORDER[2])
     expect(calls).toHaveLength(5)
@@ -183,7 +186,8 @@ describe("I-4 - hết credit, resume", () => {
     calls = []
     const again = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
     expect(calls).toEqual([])
-    expect(again.doc.status).toBe("baselining")
+    // FLF-462: cùng 2 field độ tin thấp của mục đọc theo nội dung ⇒ dừng ở bước 1.6
+    expect(again.doc.status).toBe("fields_review")
   })
 })
 
@@ -205,7 +209,8 @@ describe("I-4 - lỗi AI", () => {
     const resumed = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
     expect(calls[0]).toBe(AI_ORDER[2])
     expect(resumed.sections.every((s) => s.status === "done")).toBe(true)
-    expect(resumed.doc.status).toBe("baselining")
+    // FLF-462: cùng 2 field độ tin thấp của mục đọc theo nội dung ⇒ dừng ở bước 1.6
+    expect(resumed.doc.status).toBe("fields_review")
   })
 
   it("import không ở extracting ⇒ IMPORT_INVALID_STATE, không gọi AI", async () => {
@@ -213,5 +218,70 @@ describe("I-4 - lỗi AI", () => {
     await ImportedDocument.updateOne({ _id: ctx.importId }, { $set: { status: "fields_review" } })
     await expect(runExtraction(ctx.projectId, ctx.userId, ctx.importId)).rejects.toMatchObject({ code: "IMPORT_INVALID_STATE" })
     expect(calls).toEqual([])
+  })
+})
+
+describe("FLF-462 - bước 1.6: đoạn lớp 4 chữ hướng dẫn (AI phân loại ở I-4) dừng xác nhận; xác nhận là hướng dẫn nâng lớp chắc chắn", () => {
+  it("đoạn lớp 4 độ tin thấp ⇒ dừng ở fields_review, hiện trong review_guidance; xác nhận là hướng dẫn ⇒ DocBlock lên lớp 3, confirm_all hết việc còn lại ⇒ baselining", async () => {
+    const ctx = await importAtExtracting()
+    const nfrBlock = await DocBlock.findOne({ projectId: ctx.projectId, section_id: "fixed:4.2.3", kind: "paragraph" }).lean()
+    expect(nfrBlock, "cần một block ở fixed:4.2.3 để gắn lớp 4 giả").toBeTruthy()
+    await DocBlock.updateOne({ _id: nfrBlock!._id }, { $set: { guidance_layer: 4 } })
+
+    mockOverrides.next = record((prompt) => {
+      const out = fakeMode1(prompt)
+      if (!out || sectionOf(prompt) !== "fixed:4.2.3") return out
+      const json = JSON.parse(out) as { guidance_blocks?: unknown[] }
+      json.guidance_blocks = [{ block_id: nfrBlock!.block_id, is_guidance: true, confidence: 0.4 }]
+      return JSON.stringify(json)
+    })
+
+    const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
+    expect(run.doc.status).toBe("fields_review")
+
+    const { extractionSummary } = await import("../../../src/modules/import/import.service.js")
+    const summary = await extractionSummary(run.doc._id as unknown as string)
+    expect(summary.review_guidance).toEqual([
+      expect.objectContaining({ section_id: "fixed:4.2.3", block_id: nfrBlock!.block_id, is_guidance: true, confidence: 0.4, confirmed: false })
+    ])
+
+    // Xác nhận riêng đoạn lớp 4 là hướng dẫn: còn 2 field độ tin thấp khác (function:@B…) ⇒ vẫn ở fields_review
+    const afterGuidance = await patchFields(ctx.projectId, {
+      import_id: ctx.importId,
+      fields: [],
+      guidance: [{ section_id: "fixed:4.2.3", block_id: nfrBlock!.block_id, is_guidance: true }],
+      content_mismatch: [],
+      confirm_all: false
+    })
+    expect(afterGuidance.status).toBe("fields_review")
+    // FLF-462: đoạn được xác nhận là hướng dẫn ⇒ Code nâng `guidance_layer` lên 3 (chắc chắn) ngay trên DocBlock đã lưu,
+    // để I-5 (templateMarks / stripTemplateMarks) không còn tính đoạn này là nội dung thật
+    expect((await DocBlock.findOne({ _id: nfrBlock!._id }).lean())?.guidance_layer).toBe(3)
+
+    // Xác nhận hết phần còn lại theo gợi ý AI ⇒ hết việc cần xác nhận ⇒ baselining
+    const done = await patchFields(ctx.projectId, { import_id: ctx.importId, fields: [], guidance: [], content_mismatch: [], confirm_all: true })
+    expect(done.status).toBe("baselining")
+  })
+
+  it("xác nhận là nội dung thật ⇒ không đổi guidance_layer của DocBlock", async () => {
+    const ctx = await importAtExtracting()
+    const nfrBlock = await DocBlock.findOne({ projectId: ctx.projectId, section_id: "fixed:4.2.3", kind: "paragraph" }).lean()
+    await DocBlock.updateOne({ _id: nfrBlock!._id }, { $set: { guidance_layer: 4 } })
+    mockOverrides.next = record((prompt) => {
+      const out = fakeMode1(prompt)
+      if (!out || sectionOf(prompt) !== "fixed:4.2.3") return out
+      const json = JSON.parse(out) as { guidance_blocks?: unknown[] }
+      json.guidance_blocks = [{ block_id: nfrBlock!.block_id, is_guidance: true, confidence: 0.4 }]
+      return JSON.stringify(json)
+    })
+    await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
+    await patchFields(ctx.projectId, {
+      import_id: ctx.importId,
+      fields: [],
+      guidance: [{ section_id: "fixed:4.2.3", block_id: nfrBlock!.block_id, is_guidance: false }],
+      content_mismatch: [],
+      confirm_all: false
+    })
+    expect((await DocBlock.findOne({ _id: nfrBlock!._id }).lean())?.guidance_layer).toBe(4)
   })
 })

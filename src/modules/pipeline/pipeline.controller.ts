@@ -49,6 +49,7 @@ import { runPhase, resumePhaseInterview, standaloneGate } from "./phase-runner.s
 import { cancelRun, getActiveRun, getRunState, type RunStateDoc } from "./run-state.service.js"
 import { toPipelineErrorCode } from "./pipeline-error-code.js"
 import { runEstimate } from "./run-estimate.js"
+import { acknowledgeCredit } from "./credit-ack.service.js"
 import { listAutoPassed, markAutoPassedSeen } from "./auto-pass.service.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import { parseInput } from "../import/mode1.http.js"
@@ -435,7 +436,17 @@ export const getRunEstimate = catchAsync(async (req: Request, res: Response) => 
   const { projectId, userId, mode } = await authorize(req)
   assertNotMode1(mode, "steps")
   const query = runEstimateQuerySchema.parse(req.query)
-  return sendSuccess(res, 200, await runEstimate(projectId, userId, { scope: query.scope, from: query.from ?? null }))
+  return sendSuccess(res, 200, await runEstimate(projectId, userId, { scope: query.scope, from: query.from ?? null, scope_kind: query.scope_kind ?? null }))
+})
+
+/**
+ * POST /run-estimate/ack — FLF-466 P08: user xác nhận credit sau Approve Brief / chốt danh sách màn / thêm màn. Server chặn step
+ * thuộc phạm vi (409 CREDIT_ACK_REQUIRED) tới khi gọi endpoint này; không đồng ý ⇒ không gọi, tiến độ giữ.
+ */
+export const ackRunEstimate = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, userId, mode } = await authorize(req)
+  assertNotMode1(mode, "steps")
+  return sendSuccess(res, 200, await acknowledgeCredit(projectId, userId))
 })
 
 // ─── FLF-337: mức duyệt / không hỏi lại / thay đổi tự qua ─────────

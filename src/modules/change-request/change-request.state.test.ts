@@ -40,9 +40,11 @@ const FORWARD: [CrStatus, CrStatus][] = [
   ["ready_to_submit", "clarifying"],
   ["in_review", "written"],
   ["in_review", "proposing"],
-  ["in_review", "rejected"]
+  ["in_review", "rejected"],
+  // FLF-466: bản phát hành liệt kê CR ⇒ đã phát hành
+  ["written", "released"]
 ]
-const TERMINAL: CrStatus[] = ["written", "rejected", "cancelled"]
+const TERMINAL: CrStatus[] = ["written", "released", "rejected", "cancelled"]
 const CANCEL: [CrStatus, CrStatus][] = CR_STATUSES.filter((s) => !TERMINAL.includes(s)).map((s) => [s, "cancelled"])
 const key = (from: CrStatus, to: CrStatus) => `${from}→${to}`
 const allowed = new Set([...FORWARD, ...CANCEL].map(([f, t]) => key(f, t)))
@@ -77,7 +79,7 @@ describe("change-request.state - cạnh chuyển trạng thái", () => {
     }
   })
 
-  it("ghi xong / đóng / huỷ là trạng thái cuối", () => {
+  it("ghi xong / đã phát hành / đóng / huỷ là trạng thái cuối (written vẫn đi tiếp được sang released nhưng không phải CR mở)", () => {
     expect(CR_STATUSES.filter(isTerminal)).toEqual(TERMINAL)
   })
 })

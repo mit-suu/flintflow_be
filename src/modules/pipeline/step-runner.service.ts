@@ -23,7 +23,6 @@
  */
 
 import { randomUUID } from "node:crypto"
-import { env } from "../../config/env.js"
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
 import { claimUserMessage } from "../project/user-message-dedupe.js"
 import { Project } from "../project/project.model.js"
@@ -32,7 +31,7 @@ import { assemble } from "../render/assemble.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { applyTransaction, CHANGE_RANGE_INVALID } from "../spine/op-engine.js"
 import type { Op } from "../spine/op.types.js"
-import type { Spine, SpineRecord, StepState } from "../spine/spine.types.js"
+import type { Change, Diagram, Spine, SpineRecord, StepState } from "../spine/spine.types.js"
 import * as flagsService from "../spine/flags.service.js"
 import { sectionHasData } from "../spine/deterministic-check.js"
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
@@ -44,12 +43,14 @@ import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf, screenLoopOrder } from
 import { addendumForUnit, assumptionsForPrompt, buildStepContext, elicitProjection, getStepSpec, loadConversationVariables, loadLastAiReply, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
 import { buildConversationSummary } from "./conversation-summary.js"
 import { composeStepGateMessage, spokenAssumptionIds } from "./gate-message.js"
-import { askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
+import { askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt, normalizeTopicKey, type AnsweredTopic } from "./decisions.service.js"
 import { DEFAULT_CHOICE, diagramChoiceFallbackNote, diagramChoiceFor, diagramChoiceKindOfTopic, diagramChoiceLabel, diagramChoiceLead, diagramChoiceQuestion, projectDiagramChoiceStore, resolveDiagramChoice, type DiagramChoiceStore } from "./diagram-choice.js"
 import { elicitPolicyFor, keepConflictsOnly, reconcileReply, trimTailQuestion } from "./fast-path.js"
-import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, currentBatch, followUpQuestions, followUpReply, indexOfQuestion, questionIdsFor, sameText, shapeQuestions, splitNumberedAnswer, stripRecommended, verifiedExcerpt } from "./question-shape.js"
+import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, currentBatch, followUpQuestions, followUpReply, indexOfQuestion, questionIdsFor, sameText, shapeQuestions, splitNumberedAnswer, stripRecommended, verifiedDecisionUpdates, verifiedExcerpt } from "./question-shape.js"
 import { MAX_SCHEMA_RETRIES, draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
+import { recordDraftRejected } from "./draft-rejected-log.js"
 import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
+import { runAiReview, type ReviewProfile } from "./s9/ai-review.js"
 import * as meter from "./meter.service.js"
 import { documentLanguageForTurn, type TurnDocumentLanguage } from "../translation/turn-language.js"
 import { captureForTurn } from "../translation/capture.service.js"
@@ -61,6 +62,7 @@ import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 import type { ElicitOutput, OpTransaction, ReviewOutput } from "../../shared/ai/response-parser.js"
 import { byLanguage, detectMessageLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
+import { enforceCreditAck } from "./credit-ack.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { PIPELINE_ERROR_STATUS, gateActionSchema, type ChangeSummary, type PipelineErrorCode, type RunIntent, type StepEvent } from "./pipeline.dto.js"
 import { summarizeChanges } from "./change-summary.js"
@@ -89,6 +91,10 @@ import { runErrorOf } from "./pipeline-error-code.js"
 type GateAction = z.infer<typeof gateActionSchema>
 
 export { CALL_LIMIT, NOT_PIPELINE_SESSION, STEP_NOT_RUNNABLE }
+/** Bước đã từng được chốt (có change `status = accepted`) trước thời điểm này: chạy lại bước đã qua, hoặc bước bị hoà giải mở lại. */
+export const wasAcceptedBefore = (changes: readonly Pick<Change, "path" | "value">[], stepId: string): boolean =>
+  changes.some((c) => c.path === `steps[id=${stepId}].status` && c.value === "accepted")
+
 export const CALLS_LIMIT = 8
 export const REGENERATE_LIMIT_COUNT = 3
 
@@ -103,8 +109,10 @@ export interface StepRunnerDeps {
   /** Draft/Regenerate/Revision — mặc định gọi `executeAiAction` (T04 reserve/deduct/release credit thật ở ví). */
   draftExecutor: DraftExecutor
   elicitExecutor: ElicitExecutor
-  /** Chỉ dùng khi `REVIEW_LLM_ENABLED=true` (mặc định tắt). */
+  /** S-9.2 Soát chất lượng và S-9.3 Đối chiếu mục tiêu (lens review của skill `review-section`). */
   reviewExecutor: ReviewExecutor
+  /** S-8.4 Rà nhất quán (FLF-449 việc 6) — mặc định `executeAiAction(CONSISTENCY_PASS)`; tiêm được trong test. */
+  consistencyExecutor?: ReviewExecutor
   renderDeps?: Partial<DiagramServiceDeps>
   /** S-8.2: ghép RenderedDocument ở `spineVersion` và lưu cache — mặc định gọi `assemble()` (T15). */
   assembleDocument: (projectId: string, spineVersion: number) => Promise<void>
@@ -133,6 +141,8 @@ export interface StepRunnerDeps {
    * Test không nối Mongo truyền thẳng.
    */
   documentLanguage?: TurnDocumentLanguage | null
+  /** FLF-480 (P13 #5): `runPhase` đặt khi bước này không phải bước cuối của giai đoạn — lời chốt (`notes`) không nhắc bước kế. */
+  midPhaseRun?: boolean
   /**
    * FLF-222: chạy tiếp lượt đã tách khỏi kết nối từ ngay sau Elicit — không gọi model hỏi lại, dùng đúng câu đã
    * hỏi + câu trả lời vừa nhận. `run` là khoá `/answer` đã chiếm (xem `resumeWaitingStep`).
@@ -166,6 +176,7 @@ export const defaultStepRunnerDeps = (signal?: AbortSignal): StepRunnerDeps => (
   draftExecutor: (actionType, input, projectId, userId, options) => executeAiAction<OpTransaction>(actionType, input, projectId, userId, { ...options, signal }),
   elicitExecutor: (input, projectId, userId) => executeAiAction<ElicitOutput>(ActionType.ELICIT, input, projectId, userId, { signal }),
   reviewExecutor: (input, projectId, userId) => executeAiAction<ReviewOutput>(ActionType.REVIEW, input, projectId, userId, { signal }),
+  consistencyExecutor: (input, projectId, userId) => executeAiAction<ReviewOutput>(ActionType.CONSISTENCY_PASS, input, projectId, userId, { signal }),
   assembleDocument: async (projectId, spineVersion) => {
     const project = await Project.findById(projectId, { name: 1 }).lean()
     if (!project) throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
@@ -179,6 +190,16 @@ export const defaultStepRunnerDeps = (signal?: AbortSignal): StepRunnerDeps => (
  * `/export/word` luôn 409 NO_WORKING_DRAFT dù S-8.2 đã accepted.
  */
 export const ASSEMBLE_STEP = "S-8.2"
+
+/** Câu ở tin cổng khi lượt kiểm AI mở cờ vàng — không lộ mã bước, tên lens. */
+const aiReviewGateNote = (profile: ReviewProfile, count: number, language: ReplyLanguage): string =>
+  byLanguage(language, {
+    vi: `${profile === "quality" ? "Soát chất lượng" : "Rà nhất quán"} mở ${count} cờ vàng để bạn xem ở Kiểm & chốt.`,
+    en: `${profile === "quality" ? "Quality review" : "Consistency review"} raised ${count} yellow flags - see Check & sign-off.`
+  })
+
+/** S-8.4 Rà nhất quán: nhánh tất định chạy lúc ghép tài liệu; nhánh AI chạy ở lượt bước này (`s9/ai-review.ts`). */
+export const CONSISTENCY_STEP = "S-8.4"
 
 // ─── tiến trình trực tiếp: stage + heartbeat (03-live-status-flow §5) ───
 
@@ -491,7 +512,7 @@ export const replyLanguageAfterMessage = async (
  */
 export const settleFromChat = (
   asked: PendingAnswerState["asked"],
-  settled: readonly { topic_key: string; answer: string; source_paras?: readonly string[] }[] | undefined,
+  settled: readonly { topic_key: string; id?: string; answer: string; source_paras?: readonly string[] }[] | undefined,
   message: string,
   /** Tin user chỉ là "Đúng rồi" với đề xuất AI vừa nêu ⇒ đề xuất đó (lời AI trước) cũng là nguồn trích đoạn hợp lệ. */
   agreedProposal?: string,
@@ -506,9 +527,20 @@ export const settleFromChat = (
   const done = new Set<number>()
   const norm = (s: string): string => stripRecommended(s).trim().toLowerCase()
   const openIndexes = asked.flatMap((q, i) => (q.options.length === 0 ? [i] : []))
+  // FLF-472 (phần C): khớp theo `id` của câu chờ trước, rồi `topic_key` ĐÃ CHUẨN HOÁ cả hai phía ("Order Completion",
+  // "order-completion" và alias như `availability` đều rơi về khoá của câu chờ).
+  const findAsked = (item: { topic_key: string; id?: string }, skip: ReadonlySet<number> = new Set()): number => {
+    const byId = item.id ? indexOfQuestion(asked, item.id.trim()) : -1
+    if (byId >= 0 && !skip.has(byId)) return byId
+    const key = normalizeTopicKey(item.topic_key, "")
+    return asked.findIndex((q, i) => q.topic_key !== undefined && !skip.has(i) && normalizeTopicKey(q.topic_key, q.question) === key)
+  }
+  const dropped = (item: { topic_key: string }, reason: string): void => {
+    console.info("[settle] bỏ", { topic_key: item.topic_key, reason })
+  }
   const openSettled = new Set(
     (settled ?? []).flatMap((item) => {
-      const index = asked.findIndex((q) => q.topic_key === item.topic_key)
+      const index = findAsked(item)
       return index >= 0 && asked[index].options.length === 0 ? [index] : []
     })
   )
@@ -516,8 +548,11 @@ export const settleFromChat = (
   const useNumbered = openSettled.size > 1 && numbered.size >= openSettled.size
   const openTexts: string[] = []
   for (const item of settled ?? []) {
-    const index = asked.findIndex((q, i) => q.topic_key === item.topic_key && !done.has(i))
-    if (index < 0) continue
+    const index = findAsked(item, done)
+    if (index < 0) {
+      dropped(item, "không khớp câu nào đang chờ (hoặc câu đó đã chốt)")
+      continue
+    }
     const question = asked[index]
     // FLF-393: đoạn tài liệu model dẫn mà tra được ra chữ — mã bịa / sai khuôn bị bỏ
     const docParas = [...new Set((item.source_paras ?? []).flatMap((raw) => {
@@ -536,14 +571,20 @@ export const settleFromChat = (
       if (!text) {
         // Không phải điều user nói ⇒ chỉ chốt bằng tài liệu: câu trả lời phải là trích đoạn nguyên văn của đoạn được dẫn
         const quoted = docText ? verifiedExcerpt(item.answer, docText) : undefined
-        if (!quoted || openTexts.some((t) => sameText(t, quoted))) continue
+        if (!quoted || openTexts.some((t) => sameText(t, quoted))) {
+          dropped(item, quoted ? "đoạn trích trùng câu khác" : "không phải trích đoạn nguyên văn của tin nhắn")
+          continue
+        }
         out.push({ question_id: ids[index], answer: quoted, source_paras: docParas })
         openTexts.push(quoted)
         done.add(index)
         continue
       }
       // Nguyên văn cả tin nhắn hoặc đoạn đã gán cho câu khác ⇒ không tách được cho câu này, câu vẫn chờ
-      if ((openSettled.size > 1 && sameText(text, message)) || openTexts.some((t) => sameText(t, text))) continue
+      if ((openSettled.size > 1 && sameText(text, message)) || openTexts.some((t) => sameText(t, text))) {
+        dropped(item, "không tách được đoạn riêng cho câu này (trùng câu khác)")
+        continue
+      }
       out.push({ question_id: ids[index], answer: text })
       openTexts.push(text)
       done.add(index)
@@ -554,12 +595,24 @@ export const settleFromChat = (
     const labels = parts.map(labelOf)
     if (labels.length === 0 || labels.some((l) => l === undefined)) {
       // P05 (E2E 17/11): câu có lựa chọn được trả lời bằng lời riêng như ô "Khác…" ("Cả ba đều đúng, đặt số luôn: …") — model
-      // chốt câu này nhưng không trùng nhãn ⇒ trước đây bị bỏ, sổ quyết định không ghi và AI hỏi lại đúng câu đó. Chỉ khi đây là
-      // câu DUY NHẤT đang chờ (còn câu khác thì chữ tự do có thể là câu trả lời của câu kia — giữ luật khớp nhãn): chốt bằng
-      // trích đoạn nguyên văn của tin, model diễn lại thì bằng cả tin.
-      if (asked.length !== 1 || !isSubstantiveAnswer(message)) continue
-      const custom = verifiedExcerpt(item.answer, message) ?? message.trim()
-      if (!custom || openTexts.some((t) => sameText(t, custom))) continue
+      // chốt câu này nhưng không trùng nhãn ⇒ trước đây bị bỏ, sổ quyết định không ghi và AI hỏi lại đúng câu đó.
+      // FLF-472 (phần B): trích đoạn NGUYÊN VĂN của tin đã chứng minh đó là chữ của user ⇒ nhận bất kể còn mấy câu chờ
+      // (`openTexts` vẫn chặn một đoạn cho hai câu). Model diễn lại (không phải trích đoạn) thì chỉ khi đây là câu DUY NHẤT đang
+      // chờ mới lấy cả tin — còn câu khác thì chữ tự do có thể là câu trả lời của câu kia.
+      if (!isSubstantiveAnswer(message)) {
+        dropped(item, "tin nhắn không phải câu trả lời thật (hỏi ngược / uỷ quyền / đồng ý suông)")
+        continue
+      }
+      const excerpt = verifiedExcerpt(item.answer, message)
+      if (!excerpt && asked.length !== 1) {
+        dropped(item, "không trùng nhãn nào và không phải trích đoạn nguyên văn của tin (còn nhiều câu chờ)")
+        continue
+      }
+      const custom = excerpt ?? message.trim()
+      if (!custom || openTexts.some((t) => sameText(t, custom))) {
+        dropped(item, "lời riêng trùng câu khác")
+        continue
+      }
       out.push({ question_id: ids[index], answer: custom })
       openTexts.push(custom)
       done.add(index)
@@ -621,12 +674,23 @@ export const nextPendingAfterChat = (
   spine: Spine,
   remaining: PendingAnswerState["asked"],
   revised: ElicitOutput["questions"],
-  message = ""
+  message = "",
+  /**
+   * FLF-472 (phần D): `topic_key` (đã chuẩn hoá) của những câu vừa được chốt TRONG lượt này (thẻ + chat). Model hay chốt
+   * câu X rồi vẫn viết lại câu X trong `questions` của cùng lượt — chặn tường minh ở đây, không phụ thuộc việc Spine đã
+   * đọc lại kịp quyết định vừa ghi hay chưa.
+   */
+  settledThisTurn: readonly string[] = []
 ): PendingAnswerState["asked"] => {
   if (remaining.length === 0) return remaining
+  const settledTopics = new Set(settledThisTurn)
+  const revisedAfterSettled =
+    settledTopics.size === 0
+      ? revised
+      : revised.filter((q) => !settledTopics.has(normalizeTopicKey((q as { topic_key?: string }).topic_key, q.question)))
   // Sổ quyết định phải đã ghi câu trả lời thẻ của lượt này (caller đọc lại Spine sau khi ghi) — câu viết lại hỏi lại chủ đề
   // vừa chốt bị bỏ. Bỏ hết mà vẫn còn câu chưa trả lời ⇒ hỏi lại đúng những câu đó, không để lượt kết thúc trong im lặng.
-  const filtered = revised.length === 0 ? [] : shapeQuestions(filterAskedQuestions(spine, revised).questions).asked
+  const filtered = revisedAfterSettled.length === 0 ? [] : shapeQuestions(filterAskedQuestions(spine, revisedAfterSettled).questions).asked
   // FLF-393 (demo 2026-11-12): AI hỏi thêm một câu mới mà không viết lại câu đang chờ ⇒ câu đó (kèm thẻ lựa chọn) từng bị
   // thay mất dù user chưa trả lời. Câu chưa trả lời mà AI không viết lại (theo `topic_key`) được giữ nguyên, sau câu mới.
   const rewritten = new Set(filtered.map((q) => q.topic_key ?? q.question))
@@ -732,7 +796,9 @@ export const settleWithoutModel = (
 }
 
 /** Một lượt elicit đọc tin chat: trả lời user + câu nào đã chốt được (đã kiểm) + câu còn chờ AI đã viết lại. */
-export const runChatTurn = async (input: ChatTurnInput): Promise<{ reply: string; settled: AnswerInput[]; questions: ElicitOutput["questions"] }> => {
+export const runChatTurn = async (
+  input: ChatTurnInput
+): Promise<{ reply: string; settled: AnswerInput[]; questions: ElicitOutput["questions"]; decisionUpdates: AnsweredTopic[] }> => {
   const ids = questionIdsFor(input.asked)
   const conversation = input.sessionId
     ? await loadConversationVariables(input.sessionId, input.spine)
@@ -807,7 +873,14 @@ export const runChatTurn = async (input: ChatTurnInput): Promise<{ reply: string
   const documentParagraphs = cited.length ? await paragraphTexts(input.projectId, cited) : undefined
   const verified = settleFromChat(input.asked, result.data.settled, input.message, proposal ?? undefined, documentParagraphs)
   const settled = input.closing ? verified : settleRepeatedAnswer(input.asked, verified, input.message, result.data.still_open ?? [])
-  return { reply: result.data.reply, settled, questions: result.data.questions ?? [] }
+  // FLF-472 (phần 5b): tin user sửa lại điều đã chốt trong sổ — server kiểm trích đoạn + chủ đề (không phải câu đang chờ)
+  const decisionUpdates = verifiedDecisionUpdates(
+    input.spine,
+    result.data.decision_updates,
+    input.message,
+    input.asked.map((q) => q.topic_key ?? "").filter(Boolean)
+  )
+  return { reply: result.data.reply, settled, questions: result.data.questions ?? [], decisionUpdates }
 }
 
 /**
@@ -965,12 +1038,36 @@ const BATCHED_TEMPLATES: ReadonlySet<string> = new Set(["S-5.2", "S-5.4"])
  * FLF-433 (FLF-413 #7): step cố định đọc MỌI function rồi sinh một dòng cho từng luồng bất thường — S-7.3 Thông báo ứng dụng.
  * ~30 function nhiều luồng bất thường (kèm bản dịch) vượt trần đầu ra cả 3 lượt, kể cả khi lượt thử lại gấp đôi trần ⇒ chia lô
  * theo function như vòng S-5. Lô sau đọc lại `messages` mới nhất để dùng lại mã đã có, không sinh trùng.
+ *
+ * FLF-470 (FLF-413 #7, phần còn lại): FLF-433 chỉ chia lô S-7.3. S-7.1 Quy tắc nghiệp vụ đọc
+ * `functions:id,name,validations` của MỌI function — dự án ~55 function, nhiều validation kind=business,
+ * kèm bản dịch thì vượt cả trần thử lại gấp đôi (6144*2 bản dịch + 4096 suy nghĩ = 16384; thử lại không
+ * bản dịch gấp đôi = 20480). Đo thật trên log: dự án FLF-441 ~55 function ≈ 17k token đầu ra. Chia lô
+ * như S-7.3 nhưng chỉ đưa function CÓ NGUỒN cho bước vào lô (bớt lô, bớt token) — xem `fixedBatchSourceFn`.
  */
-const FIXED_BATCHED_TEMPLATES: ReadonlySet<string> = new Set(["S-7.3"])
-/** Cỡ lô của step cố định chia lô: mỗi function vài dòng ngắn nên lô lớn hơn vòng S-5. */
-export const FIXED_FUNCTION_BATCH_SIZE = 10
+const FIXED_BATCHED_TEMPLATES: ReadonlySet<string> = new Set(["S-7.1", "S-7.3"])
+/** Cỡ lô gốc của từng step cố định chia lô (trước khi co giãn theo `MAX_FIXED_BATCHES`): mỗi function
+ * vài dòng ngắn nên lô lớn hơn vòng S-5. */
+export const FIXED_FUNCTION_BATCH_SIZE: Readonly<Record<string, number>> = { "S-7.1": 10, "S-7.3": 10 }
+/**
+ * FLF-470 "Cần chốt" 1 (đề xuất mặc định đã chọn): trần 8 lượt gọi/step (`CALLS_LIMIT`) không đổi, mỗi lô
+ * vẫn giữ một lượt (`:1115-1116` cũ) — chừa 2 lượt cho thử lại/sửa ở cổng. Dự án rất lớn (nhiều function
+ * có nguồn) thì TĂNG cỡ lô để số lô không vượt `MAX_FIXED_BATCHES`, không bỏ luật trần. Lô to hơn lại dễ
+ * bị cắt hơn — quá khoảng 120 function có nguồn thì vẫn có thể cắt, đo lại khi gặp.
+ */
+export const MAX_FIXED_BATCHES = 6
 /** Step cố định chia lô theo function: lô sau phải đọc lại projection (dữ liệu lô trước vừa ghi). */
 export const isFixedBatchedStep = (stepId: string): boolean => FIXED_BATCHED_TEMPLATES.has(getStep(stepId).template_id)
+
+/**
+ * Function "có nguồn" cho step cố định chia lô: chỉ đưa vào lô những function thực sự sinh ra nội dung ở
+ * bước đó — bớt lô, bớt token so với đưa nguyên projection (FLF-470 Hướng sửa BE #2).
+ * S-7.1: có ít nhất một `validations[kind=business]`. S-7.3: có `abnormal[]` khác rỗng.
+ */
+const fixedBatchSourceFn: Readonly<Record<string, (f: Spine["functions"][number]) => boolean>> = {
+  "S-7.1": (f) => (f.validations ?? []).some((v) => v.kind === "business"),
+  "S-7.3": (f) => (f.abnormal ?? []).length > 0
+}
 
 const isLoopBookkeeping = (stepId: string): boolean => LOOP_BOOKKEEPING_TEMPLATES.has(getStep(stepId).template_id)
 
@@ -1036,15 +1133,26 @@ const functionsOfLoop = (spine: Spine, loop: string): string[] =>
     .map((f) => f.id)
 
 /**
- * Chia function của vòng thành các lô ≤ `FUNCTION_BATCH_SIZE`. Step không chia lô (hoặc ít function)
- * trả một lô duy nhất `[]` — nghĩa là "dùng nguyên projection của step, không lọc".
+ * Chia function của vòng (hoặc function có nguồn, với step cố định) thành các lô. Step không chia lô
+ * (hoặc ít function) trả một lô duy nhất `[]` — nghĩa là "dùng nguyên projection của step, không lọc".
+ *
+ * FLF-470 #1/#2/#3: step cố định (S-7.1/S-7.3) chỉ lấy function có nguồn cho đúng bước đó
+ * (`fixedBatchSourceFn`); cỡ lô co giãn theo số function để giữ số lô ≤ `MAX_FIXED_BATCHES` (trần 8
+ * lượt/step không đổi) — lô to hơn cỡ gốc khi dự án lớn, cỡ gốc khi dự án nhỏ.
  */
 export const functionBatches = (spine: Spine, stepId: string): string[][] => {
   const step = getStep(stepId)
   const fixed = FIXED_BATCHED_TEMPLATES.has(step.template_id)
   if (!fixed && (!BATCHED_TEMPLATES.has(step.template_id) || step.loop === null)) return [[]]
-  const ids = fixed ? [...spine.functions].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map((f) => f.id) : functionsOfLoop(spine, step.loop as string)
-  const size = fixed ? FIXED_FUNCTION_BATCH_SIZE : FUNCTION_BATCH_SIZE
+  const sourceFilter = fixed ? fixedBatchSourceFn[step.template_id] : undefined
+  const ids = fixed
+    ? [...spine.functions]
+        .filter((f) => !sourceFilter || sourceFilter(f))
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+        .map((f) => f.id)
+    : functionsOfLoop(spine, step.loop as string)
+  const baseSize = fixed ? FIXED_FUNCTION_BATCH_SIZE[step.template_id] ?? FUNCTION_BATCH_SIZE : FUNCTION_BATCH_SIZE
+  const size = fixed ? Math.max(baseSize, Math.ceil(ids.length / MAX_FIXED_BATCHES)) : baseSize
   if (ids.length <= size) return [[]]
 
   const batches: string[][] = []
@@ -1132,6 +1240,7 @@ export const runDraftPhase = async (
       spine,
       callKind,
       documentLanguage,
+      ...(deps.midPhaseRun ? { midPhaseRun: true } : {}),
       // Lượt thử lại phải nói ngay, bằng lời thường — user đang nhìn màn hình chờ (03 Lớp 3)
       onAttempt: ({ attempt, max, previousErrors }) => {
         if (attempt === 1 || previousErrors.length === 0) return
@@ -1141,6 +1250,7 @@ export const runDraftPhase = async (
     })
   } catch (err) {
     await meter.releaseCall(reservedId)
+    await recordDraftRejected(err, { projectId, stepId, callKind })
     throw err
   }
 
@@ -1195,6 +1305,55 @@ export const runDraftPhase = async (
   }
 }
 
+/** Kết quả gộp của mọi lô — khớp phần dùng được từ `DraftPhaseResult` của từng lô. */
+export interface BatchedDraftResult {
+  spineVersion: number
+  /** Có lô nào ghi được op không (L11b: gate báo "AI không soạn được gì" khi không). */
+  wroteOps: boolean
+  summary: ChangeSummary[]
+  notes?: string
+}
+
+/**
+ * Chạy `functionBatches(spine, stepId)` lô theo lô qua `runOne` (gọi `runDraftPhase`), gộp kết quả.
+ * Dùng chung cho vòng lặp lô của `/run` (T18 — S-5.2/S-5.4, S-7.1, S-7.3) và `regenerate` ở cổng
+ * (FLF-470 #6: trước chỉ `/run` chia lô, `gate.service` gọi `runDraftPhase` một lượt nên S-7.1/S-7.3 của
+ * dự án lớn vẫn bị cắt token khi "Soạn lại"). Step không chia lô thì `functionBatches` trả `[[]]`, vòng
+ * chạy đúng một lần với `ctx`/`spine` ban đầu — hệt gọi `runDraftPhase` trực tiếp.
+ *
+ * Mỗi lô đọc lại Spine mới nhất trước khi chạy (lô trước vừa ghi); lô sau của step cố định
+ * (`isFixedBatchedStep`) còn dựng lại `ctx` từ Spine mới (đọc lại `messages`/`business_rules` lô trước
+ * ghi — `:2053` cũ). `runOne` nhận `ctx`/`spine` của đúng lô đó và tự quyết định cách gọi `runDraftPhase`
+ * (tracker, callKind, extra…) — hàm này chỉ lo phần chia lô và gộp kết quả.
+ */
+export const runBatchedDraft = async (
+  projectId: string,
+  stepId: string,
+  ctx: StepContext,
+  spine: Spine,
+  sessionId: string | null | undefined,
+  runOne: (batchCtx: StepContext, batchSpine: Spine, batchInfo?: { i: number; n: number }) => Promise<DraftPhaseResult>
+): Promise<BatchedDraftResult> => {
+  const batches = functionBatches(spine, stepId)
+  let spineVersion = spine.spine_version
+  let wroteOps = false
+  const summary: ChangeSummary[] = []
+  let notes: string | undefined
+  for (const [index, batch] of batches.entries()) {
+    const current = await refresh(projectId)
+    spine = current.spine
+    spineVersion = current.spineVersion
+    const batchInfo = batches.length > 1 ? { i: index + 1, n: batches.length } : undefined
+    const baseCtx = index > 0 && isFixedBatchedStep(stepId) ? await buildStepContext(projectId, stepId, { sessionId: sessionId ?? null }) : ctx
+    const draftPhase = await runOne(batchContext(baseCtx, batch), spine, batchInfo)
+    spineVersion = draftPhase.spineVersion
+    if (draftPhase.applied) wroteOps = true
+    summary.push(...(draftPhase.summary ?? []))
+    if (draftPhase.notes) notes = draftPhase.notes
+  }
+  return { spineVersion, wroteOps, summary, ...(notes ? { notes } : {}) }
+}
+
 /**
  * Mục step này nuôi mà CHẠY XONG VẪN TRỐNG — tính bằng đúng hàm mà luật `section_empty` soi (`sectionHasData`),
  * nên cái gate nói ra luôn khớp với cờ đỏ hiện trên cột kế hoạch. Mục ngoài bảng ⇒ `sectionHasData` trả `null`
@@ -1205,7 +1364,7 @@ export const emptyFedSections = (spine: Spine, stepId: string): { section_id: st
     .filter((id) => sectionHasData(spine, id) === false)
     .map((id) => ({ section_id: id, title: FIXED_SECTIONS.find((s) => s.id === id)?.title_en ?? id }))
 
-/** Render mọi diagram của step (nếu có) + Review (deterministic check; LLM review tuỳ `REVIEW_LLM_ENABLED`). */
+/** Render mọi diagram của step (nếu có) + Review (deterministic check). */
 /** Trần hình tự vẽ lại cuối một step — một step sửa nhiều thứ không được biến thành lượt render cả bộ. */
 export const MAX_AUTO_RERENDER = 4
 
@@ -1214,6 +1373,17 @@ export const MAX_AUTO_RERENDER = 4
  * để debug / cờ `render_error` — chỉ cái đi ra client được làm sạch.
  */
 export const DIAGRAM_RENDER_ERROR_MESSAGE = "Chưa vẽ được sơ đồ này."
+
+/**
+ * FLF-489: id mockup màn hình đang lạc hậu TÍNH TỪ LÚC NÀY. Gọi trước khi soạn (step chạy chính và cổng revision / regenerate)
+ * để `runRenderReviewPhase` biết mockup nào lạc hậu từ trước, không vẽ hộ.
+ */
+export const mockupIdsStaleNow = async (projectId: string, spine: Spine): Promise<Set<string>> =>
+  new Set(
+    staleRenderedDiagrams(spine, await loadRenderContext(projectId))
+      .filter((d) => d.kind === "screen_layout")
+      .map((d) => d.id)
+  )
 
 export interface RenderReviewOptions {
   /** Số cờ mở TRƯỚC khi chạy step — để gate nói "cờ đỏ 3 → 2 (−1)" thay vì chỉ một con số. */
@@ -1232,6 +1402,32 @@ export interface RenderReviewOptions {
    * nút vẽ lại. Vẽ vẫn hỏng thì cờ ở lại như cũ (lỗi thật lộ ra).
    */
   retryRenderErrors?: boolean
+  /**
+   * FLF-489 (P07 #2): id mockup màn hình đã lạc hậu TRƯỚC khi step chạy. Vẽ lại mockup có thể gọi AI, nên step không liên
+   * quan không vẽ hộ chúng: cờ `diagram_stale` và nút "Vẽ lại" ở lại để người dùng tự quyết.
+   */
+  mockupsStaleAtStart?: ReadonlySet<string>
+}
+
+/**
+ * Đích vẽ lại tự động từ các hình đang lạc hậu (BUG-17): bỏ kind step đã vẽ, bỏ mockup lạc hậu từ trước step (FLF-489),
+ * gộp đích trùng. Hàm thuần.
+ */
+export const autoRerenderTargets = (
+  staleNow: readonly Diagram[],
+  staleAtStart: ReadonlySet<string>,
+  alreadyRendered: ReadonlySet<string>
+): RenderTarget[] => {
+  const targets: RenderTarget[] = []
+  for (const diagram of staleNow) {
+    if (alreadyRendered.has(diagram.kind)) continue
+    if (diagram.kind === "screen_layout" && staleAtStart.has(diagram.id)) continue
+    const target = targetOfDiagram(diagram)
+    const key = `${target.kind}:${target.owner_id ?? ""}`
+    if (targets.some((x) => `${x.kind}:${x.owner_id ?? ""}` === key)) continue
+    targets.push(target)
+  }
+  return targets
 }
 
 /** FLF-431: trần số hình đang lỗi vẽ lại ở S-9.1 (mỗi hình một lượt vẽ, không gọi model trừ bố cục màn). */
@@ -1311,14 +1507,11 @@ export const runRenderReviewPhase = async (
   // ⇒ vẽ lại ngay cuối step, thay vì để lại một cờ đỏ `diagram_stale` mà UI không có nút nào để gỡ.
   const { spine: spineAfterDraft } = await refresh(projectId)
   const alreadyRendered = new Set(renders)
-  const staleTargets: RenderTarget[] = []
-  for (const diagram of options.rerenderStale ? staleRenderedDiagrams(spineAfterDraft, await loadRenderContext(projectId)) : []) {
-    if (alreadyRendered.has(diagram.kind)) continue
-    const target = targetOfDiagram(diagram)
-    const key = `${target.kind}:${target.owner_id ?? ""}`
-    if (staleTargets.some((t) => `${t.kind}:${t.owner_id ?? ""}` === key)) continue
-    staleTargets.push(target)
-  }
+  const staleTargets = autoRerenderTargets(
+    options.rerenderStale ? staleRenderedDiagrams(spineAfterDraft, await loadRenderContext(projectId)) : [],
+    options.mockupsStaleAtStart ?? new Set(),
+    alreadyRendered
+  )
   if (staleTargets.length > 0) {
     const before = new Map(spineAfterDraft.diagrams.map((d) => [d.id, d]))
     const result = await renderDiagrams(projectId, staleTargets.slice(0, MAX_AUTO_RERENDER), { by: userId, step_id: stepId, deps: layoutRenderDeps(deps.renderDeps) })
@@ -1378,40 +1571,6 @@ export const runRenderReviewPhase = async (
     ...(options.flagsBefore ? { red_delta: redOpen - options.flagsBefore.red, yellow_delta: yellowOpen - options.flagsBefore.yellow } : {}),
     ...(options.knownAssumptionIds ? { new_assumptions: newAssumptions } : {})
   })
-
-  // Lớp phủ LLM review — tắt mặc định (đọc process.env trực tiếp, không qua src/config theo yêu cầu task).
-  // F2/F11: kiểm trần + reserve trước khi gọi, như elicit/draft. Lớp phủ không chặn step: lỗi/hết trần chỉ log.
-  if (env.REVIEW_LLM_ENABLED && !deps.signal?.aborted) {
-    const { spine: spineForReview } = await refresh(projectId)
-    const currentFirstSeq = spineForReview.steps.find((s) => s.id === stepId)?.first_seq ?? null
-    const { calls_used } = await meter.roundCounts(projectId, stepId, currentFirstSeq)
-    if (calls_used >= CALLS_LIMIT) {
-      console.error(`[step-runner] LLM review bị bỏ qua cho ${stepId}: đã hết ${CALLS_LIMIT} lượt gọi model`)
-    } else {
-      const reservedId = await meter.reserveCall(projectId, userId, stepId, "review")
-      try {
-        const spine = spineForReview
-        const spec = getStepSpec(stepId)
-        const result = await deps.reviewExecutor(
-          { promptVariables: { step_id: stepId, step_name: spec.label_en } },
-          projectId,
-          userId
-        )
-        await meter.finalizeCall(reservedId, {
-          call_kind: "review",
-          attempt: 1,
-          tokens_in: result.tokensUsed.promptTokens,
-          tokens_out: result.tokensUsed.completionTokens,
-          cost: result.cost,
-          logId: result.logId || null
-        })
-      } catch (err) {
-        // Review LLM là lớp phủ thêm, không chặn step — lỗi chỉ log.
-        await meter.releaseCall(reservedId)
-        console.error(`[step-runner] LLM review thất bại cho ${stepId}:`, err)
-      }
-    }
-  }
 
   return {
     spineVersion,
@@ -1494,6 +1653,9 @@ export const runStep = async (
     const needsDraft = spec.skill !== null && !stepDef.deterministic && !isLoopBookkeeping(stepId)
 
     let { spine, spineVersion } = await refresh(projectId)
+    // FLF-466 P08: chưa xác nhận credit (sau Approve Brief / chốt màn / thêm màn) ⇒ 409 CREDIT_ACK_REQUIRED, tiến độ giữ nguyên
+    await enforceCreditAck(projectId, spine, stepId, userId)
+    ;({ spine, spineVersion } = await refresh(projectId))
     let existingStep = spine.steps.find((s) => s.id === stepId)
     /** Bước đã từng accepted và đang được mở lại (B7 reopen) — kèm tin chat thì soạn như gate revision, không dựng lại từ đầu. */
     let reopenedAccepted = false
@@ -1530,9 +1692,7 @@ export const runStep = async (
     } else if (existingStep && existingStep.status !== "accepted") {
       // Lượt mở lại trước chết giữa chừng (bước còn in_progress/revision_requested/pending): nội dung của lần chốt cũ
       // vẫn nằm trong Spine, nên chạy tiếp kèm tin chat vẫn là sửa, không phải dựng lại.
-      reopenedAccepted = (await spineRepository.listChanges(projectId)).some(
-        (c) => c.path === `steps[id=${stepId}].status` && c.value === "accepted"
-      )
+      reopenedAccepted = wasAcceptedBefore(await spineRepository.listChanges(projectId), stepId)
     }
     if (!existingStep && !reopenLoop) {
       const next = nextStepOf(spine)
@@ -1632,6 +1792,8 @@ export const runStep = async (
       yellow: spine.flags.filter((f) => f.level === "yellow" && f.resolved_at === null).length
     }
     const knownAssumptionIds = new Set(spine.assumptions.map((a) => a.id))
+    // FLF-489: mockup đã lạc hậu từ trước bước này thì bước không vẽ hộ (vẽ mockup có thể gọi AI, tốn credit ngoài ý người dùng)
+    const mockupsStaleAtStart = await mockupIdsStaleNow(projectId, spine)
     const progressBefore = buildProgressReport(spine, await spineRepository.listChanges(projectId)).readiness.accepted_pct
     const stepSummary: ChangeSummary[] = []
     /** Lượt chạy này có ghi được op nào không — dùng để báo "AI không soạn được gì" ở gate (L11b). */
@@ -1668,7 +1830,7 @@ export const runStep = async (
     const recordAnswers = async (
       asked: PendingAnswerState["asked"],
       answers: readonly AnswerInput[],
-      options: { transcript?: readonly AnswerInput[]; settledIds?: ReadonlySet<string> } = {}
+      options: { transcript?: readonly AnswerInput[]; settledIds?: ReadonlySet<string>; corrections?: readonly AnsweredTopic[] } = {}
     ): Promise<void> => {
       // Lượt soạn phải thấy câu hỏi, không chỉ "Q2: …" — câu mở không vào sổ thì đây là nơi duy nhất nó xuất hiện
       const questionOf = (id: string): string => asked[indexOfQuestion(asked, id)]?.question ?? id
@@ -1683,7 +1845,8 @@ export const runStep = async (
       // vài phút, trong lúc đó Spine đổi ở nơi khác (đổi chế độ duyệt, sửa qua chat, tab khác) — ghi bằng
       // version cũ là 409 SPINE_VERSION_CONFLICT và cả bước chết sau khi user đã trả lời. Đọc lại trước khi ghi.
       ;({ spine, spineVersion } = await refresh(projectId))
-      const ledgerOps = decisionOps(spine, stepId, answeredTopics(asked, answers, options.settledIds))
+      // FLF-472 (phần 5b): đính chính trong chat (thay quyết định đã chốt) ghi cùng lúc với câu vừa chốt
+      const ledgerOps = decisionOps(spine, stepId, [...answeredTopics(asked, answers, options.settledIds), ...(options.corrections ?? [])])
       if (ledgerOps.length > 0) {
         const ledgerApplied = await applyTransaction(projectId, {
           base_version: spineVersion,
@@ -1819,12 +1982,17 @@ export const runStep = async (
         const settled = turn.settled.filter((a) => !answeredByCard.has(indexOfQuestion(pending, a.question_id)))
         await recordAnswers(pending, [...cardAnswers, ...settled], {
           transcript: [],
-          settledIds: new Set(settled.map((a) => a.question_id))
+          settledIds: new Set(settled.map((a) => a.question_id)),
+          corrections: turn.decisionUpdates ?? []
         })
         // FLF-393: câu chốt bằng tài liệu tham khảo ⇒ ghi nguồn cho quyết định vừa vào sổ (business-flow §3.6)
         if (settled.some((a) => a.source_paras?.length)) await captureSettledSources(projectId, stepId, (await refresh(projectId)).spine, pending, settled)
         const answered = new Set([...cardAnswers, ...settled].map((a) => indexOfQuestion(pending, a.question_id)))
-        const remaining = nextPendingAfterChat(spine, pending.filter((_, i) => !answered.has(i)), turn.questions, message)
+        // FLF-472 (phần D): `recordAnswers` đã ghi sổ quyết định ở trên — đọc lại Spine TRƯỚC khi lọc câu hỏi còn chờ,
+        // như `phase-runner.service.ts` đã làm, để `filterAskedQuestions` thấy đúng quyết định vừa chốt trong lượt này.
+        ;({ spine, spineVersion } = await refresh(projectId))
+        const settledTopicsThisTurn = [...answered].map((i) => pending[i]?.topic_key).filter((t): t is string => t !== undefined)
+        const remaining = nextPendingAfterChat(spine, pending.filter((_, i) => !answered.has(i)), turn.questions, message, settledTopicsThisTurn)
         // Câu hỏi đuôi trong lời AI tính vào trần câu hỏi của lượt (FLF-235)
         const chatReply = trimTailQuestion(turn.reply, remaining, PROMPT_QUESTIONS_PER_TURN, replyLanguage)
         emit({ type: "elicit", step_id: stepId, delta: chatReply })
@@ -1903,14 +2071,31 @@ export const runStep = async (
         emit({ type: "draft", step_id: stepId, attempt: 1 })
       }
       tracker.stage("draft", { detail_vi: "Quét cuối và xếp ưu tiên" })
-      await tracker.beat("draft", () =>
+      const s9Result = await tracker.beat("draft", () =>
         runS9Step(projectId, stepId, userId, { draftExecutor: d.draftExecutor, reviewExecutor: d.reviewExecutor, sessionId, replyLanguage })
       )
+      // Cờ là sổ sách nên `summarizeChanges` không tóm được: nói ở tin cổng (không lộ mã bước, lens)
+      if (s9Result.quality && s9Result.quality.opened.length > 0) gateNotes = aiReviewGateNote("quality", s9Result.quality.opened.length, replyLanguage)
       ;({ spine, spineVersion } = await refresh(projectId))
       // Pha S-9 ghi thẳng qua service riêng (không qua runDraftPhase) — vẫn phải tóm tắt được ở gate,
       // nếu không thì S-9.4 xếp lại ưu tiên cả tài liệu mà gate hiện đúng một dòng trống (BUG-20).
       const s9Changes = (await spineRepository.listChanges(projectId, { fromSeq: startSeq })).filter((c) => c.step_id === stepId)
       stepSummary.push(...summarizeChanges(s9Changes, spine))
+    }
+
+    // FLF-449 việc 6: S-8.4 Rà nhất quán bằng AI. Ghi cờ vàng, không sửa nội dung; GET /document và export không đi qua đây.
+    if (stepDef.template_id === CONSISTENCY_STEP) {
+      assertNotAborted(d.signal, stepId)
+      emit({ type: "draft", step_id: stepId, attempt: 1 })
+      tracker.stage("draft", { detail_vi: "Rà trùng lặp và thuật ngữ" })
+      const consistency = await tracker.beat("draft", () =>
+        runAiReview(projectId, userId, "consistency", {
+          executor: d.consistencyExecutor ?? ((input, pid, uid) => executeAiAction<ReviewOutput>(ActionType.CONSISTENCY_PASS, input, pid, uid, { signal: d.signal })),
+          replyLanguage
+        })
+      )
+      ;({ spine, spineVersion } = await refresh(projectId))
+      if (consistency.opened.length > 0) gateNotes = aiReviewGateNote("consistency", consistency.opened.length, replyLanguage)
     }
 
     if (needsDraft && !fieldAlreadySet) {
@@ -2032,38 +2217,32 @@ export const runStep = async (
         ;({ spine, spineVersion } = await refresh(projectId))
       }
 
-      // T18 — S-5.2/S-5.4: màn nhiều function chia thành nhiều lượt Draft ≤ 6 function. Mỗi lượt vẫn
-      // tự kiểm trần 8 lượt gọi/step trong `runDraftPhase`; màn quá lớn sẽ dừng ở CALL_LIMIT và user
-      // chốt phần đã có ở gate (không có ngoại lệ trần cho vòng lặp).
-      const batches = functionBatches(spine, stepId)
-      for (const [index, batch] of batches.entries()) {
-        const current = await refresh(projectId)
-        spine = current.spine
-        spineVersion = current.spineVersion
-        const batchInfo = batches.length > 1 ? { i: index + 1, n: batches.length } : undefined
+      // T18 — S-5.2/S-5.4/S-7.1/S-7.3: màn/step nhiều function chia thành nhiều lượt Draft. Mỗi lượt vẫn
+      // tự kiểm trần 8 lượt gọi/step trong `runDraftPhase`; quá lớn sẽ dừng ở CALL_LIMIT và user chốt
+      // phần đã có ở gate (không có ngoại lệ trần cho vòng lặp). FLF-470 #6: vòng lặp lô dùng chung với
+      // `regenerate` ở cổng qua `runBatchedDraft` (`gate.service.ts`).
+      // Mở lại bước đã chốt kèm lời nhắn = sửa đúng chỗ được nhắn (như "Tôi muốn sửa" ở cổng). Gọi `draft` thì skill
+      // dựng lại từ đầu: S-4.1 mở lại để gắn use case thêm lại feature/màn đã có ⇒ trùng mã cả 3 lượt, NEEDS_USER_INPUT.
+      const revise = reopenedAccepted && userMessage !== undefined
+      const batched = await runBatchedDraft(projectId, stepId, ctx, spine, sessionId, (batchCtx, batchSpine, batchInfo) => {
         tracker.stage("draft", {
           detail_vi: batchInfo ? `AI đang soạn nội dung · lô ${batchInfo.i}/${batchInfo.n}` : "AI đang soạn nội dung",
           ...(batchInfo ? { batch: batchInfo } : {}),
           section_ids: ownedSections()
         })
-        // Mở lại bước đã chốt kèm lời nhắn = sửa đúng chỗ được nhắn (như "Tôi muốn sửa" ở cổng). Gọi `draft` thì skill
-        // dựng lại từ đầu: S-4.1 mở lại để gắn use case thêm lại feature/màn đã có ⇒ trùng mã cả 3 lượt, NEEDS_USER_INPUT.
-        const revise = reopenedAccepted && userMessage !== undefined
-        // FLF-433: S-7.3 lô sau đọc lại projection — `messages` lô trước vừa ghi, để dùng lại mã thay vì sinh trùng
-        const baseCtx = index > 0 && isFixedBatchedStep(stepId) ? await buildStepContext(projectId, stepId, { sessionId }) : ctx
-        const draftPhase = await tracker.beat("draft", () =>
-          runDraftPhase(projectId, stepId, batchContext(baseCtx, batch), spine, userId, revise ? "revision" : "draft", emit, d, {
+        return tracker.beat("draft", () =>
+          runDraftPhase(projectId, stepId, batchCtx, batchSpine, userId, revise ? "revision" : "draft", emit, d, {
             answers: answersText,
             userDecided,
             replyLanguage,
             ...(revise ? { revisionRequest: userMessage } : {})
           })
         )
-        spineVersion = draftPhase.spineVersion
-        if (draftPhase.applied) wroteOps = true
-        stepSummary.push(...(draftPhase.summary ?? []))
-        if (draftPhase.notes) gateNotes = draftPhase.notes
-      }
+      })
+      spineVersion = batched.spineVersion
+      if (batched.wroteOps) wroteOps = true
+      stepSummary.push(...batched.summary)
+      if (batched.notes) gateNotes = batched.notes
     }
 
     const sectionsAtReview = ownedSections()
@@ -2074,6 +2253,7 @@ export const runStep = async (
         flagsBefore,
         knownAssumptionIds,
         rerenderStale: stepSummary.length > 0,
+        mockupsStaleAtStart,
         retryRenderErrors: stepId === "S-9.1"
       })
     )

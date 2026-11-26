@@ -8,7 +8,6 @@
  *  - heading mẫu chuẩn nhưng chữ khác tên chuẩn ("1 Introduction to ACME") — chưa duyệt thì ghi tên chuẩn.
  * Tên dự án trong chữ giữ lại tự đổi thành chỗ trống `{Tên khách hàng}` / `{Customer name}`.
  */
-import { createHash } from "node:crypto"
 import { XMLSerializer } from "@xmldom/xmldom"
 import JSZip from "jszip"
 import { DocxPackage } from "../docx-ooxml/index.js"
@@ -22,6 +21,8 @@ import { SECTION_CANDIDATES } from "./section-catalog.js"
 import type { HeadingMapEntry, TableMapEntry } from "./template-profile.model.js"
 import { splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
 import { recordColumnOfHeader } from "./legacy-record.js"
+import { skeletonSignature } from "./skeleton-signature.js"
+import { scrubKey } from "./skeleton-scrub.js"
 
 export type SkeletonClass = "framework" | "element" | "custom"
 
@@ -173,8 +174,12 @@ export const planSkeleton = <B extends PlanBlock>(
     if (b.kind === "table") {
       const headers = tables.get(b.block_id)
       if (headers) items.push({ kind: "table", block: b, headers })
-      // Bảng Record of Changes: luôn giữ hàng tiêu đề, không bao giờ giữ dòng lịch sử
-      else if (section.sectionId === RECORD_OF_CHANGES) items.push({ kind: "table", block: b, headers: [] })
+      // Bảng Record of Changes: luôn giữ hàng tiêu đề, không bao giờ giữ dòng lịch sử; giữ chữ tiêu đề để AI scrub & băm chữ ký
+      else if (section.sectionId === RECORD_OF_CHANGES) {
+        const firstRow = (b as { rows?: string[][] }).rows?.[0]
+        const rocHeaders = firstRow && isRecordHeaderRow(firstRow) ? firstRow.map((h) => scrubProjectName(h, opts)) : []
+        items.push({ kind: "table", block: b, headers: rocHeaders })
+      }
     } else if (section.guidance.has(b.block_id) && isInstructionText(b.text)) {
       items.push({ kind: "guidance", block: b, text: scrubProjectName(b.text, opts) })
     }
@@ -183,16 +188,8 @@ export const planSkeleton = <B extends PlanBlock>(
   return { items, review, waiting: review.filter((r) => !decided.has(r.key)).map((r) => r.key) }
 }
 
-/** Dấu khung: heading (cấp + chữ chuẩn hoá) + tiêu đề cột + heading còn chờ duyệt — hai dự án khác mục riêng không trùng nhau. */
-export const skeletonHash = (items: readonly PlannedItem<unknown>[], waiting: readonly Pick<ReviewHeading, "level" | "heading_text">[]): string =>
-  createHash("sha256")
-    .update(
-      [
-        ...items.flatMap((i) => (i.kind === "heading" ? [`h|${i.level}|${normalizeTitle(i.text)}`] : i.kind === "table" ? [`t|${i.headers.map(normalizeTitle).join("|")}`] : [])),
-        ...waiting.map((w) => `p|${w.level}|${normalizeTitle(w.heading_text)}`)
-      ].join("\n")
-    )
-    .digest("hex")
+/** Dấu khung: xem `skeleton-signature.ts` (heading + tiêu đề cột + chữ hướng dẫn chuẩn hoá + heading còn chờ duyệt). */
+export const skeletonHash = skeletonSignature
 
 // ─── DOM ─────────────────────────────────────────────────────────
 
@@ -352,7 +349,42 @@ export interface BuiltSkeleton {
   headings: { heading_text: string; section_id: string }[]
   /** Mapping cột của khung (theo tiêu đề đã giữ). */
   table_map: { block_id: string; column_index: number; header: string; field_path: string | null }[]
+  /** Chữ hướng dẫn + tiêu đề cột của khung (trước khi AI đổi tên riêng) - đầu vào của lượt đổi tên. */
+  texts: ScrubText[]
 }
+
+/** Một đoạn chữ của khung (không phải heading) mà AI quét tên riêng; `key` ổn định theo nội dung. */
+export interface ScrubText {
+  key: string
+  text: string
+  kind: "guidance" | "column"
+}
+
+/** Chữ hướng dẫn + tiêu đề cột trong các mục của khung, không trùng, theo thứ tự xuất hiện. */
+const scrubTextsOf = (items: readonly PlannedItem<unknown>[]): ScrubText[] => {
+  const seen = new Map<string, ScrubText>()
+  const add = (text: string, kind: ScrubText["kind"]) => {
+    const t = text.trim()
+    if (t && /\p{L}/u.test(t) && !seen.has(t)) seen.set(t, { key: scrubKey(t), text: t, kind })
+  }
+  for (const i of items) {
+    if (i.kind === "guidance") add(i.text, "guidance")
+    else if (i.kind === "table") i.headers.forEach((h) => add(h, "column"))
+  }
+  return [...seen.values()]
+}
+
+/** Thay chữ theo bảng `replacements` (chữ gốc đã cắt khoảng trắng ⇒ chữ mới). */
+const applyReplacements = <B>(items: PlannedItem<B>[], replacements: ReadonlyMap<string, string>): PlannedItem<B>[] =>
+  replacements.size
+    ? items.map((i) =>
+        i.kind === "guidance"
+          ? { ...i, text: replacements.get(i.text.trim()) ?? i.text }
+          : i.kind === "table"
+            ? { ...i, headers: i.headers.map((h) => replacements.get(h.trim()) ?? h) }
+            : i
+      )
+    : items
 
 /**
  * Tiêu đề cột của bảng có cấu trúc: chỉ bảng có ít nhất một cột Code ánh xạ được vào field (`field_path`), và chỉ ghi chữ của
@@ -360,17 +392,31 @@ export interface BuiltSkeleton {
  * mang được chữ của khách sang khung. Tên dự án trong tiêu đề ⇒ chỗ trống.
  */
 const headersByTable = (table: readonly TableMapEntry[], opts: SkeletonOptions): Map<string, string[]> => {
-  const out = new Map<string, string[]>()
+  const byBlock = new Map<string, TableMapEntry[]>()
   for (const t of table) {
-    const row = out.get(t.block_id) ?? []
-    row[t.column_index] = t.field_path ? scrubProjectName(t.header, opts) : ""
-    out.set(t.block_id, row)
+    const list = byBlock.get(t.block_id) ?? []
+    list.push(t)
+    byBlock.set(t.block_id, list)
   }
-  return new Map([...out].filter(([, row]) => row.some((h) => h?.trim())).map(([id, row]) => [id, Array.from(row, (h) => h ?? "")]))
+  const out = new Map<string, string[]>()
+  for (const [id, cols] of byBlock) {
+    // Bảng có ít nhất một cột ánh xạ được vào field ⇒ giữ đủ tiêu đề cột (gồm cột chưa ánh xạ) để đưa vào chữ ký & AI scrub tên riêng
+    if (!cols.some((c) => Boolean(c.field_path))) continue
+    const row: string[] = []
+    for (const c of cols) row[c.column_index] = scrubProjectName(c.header, opts)
+    if (row.some((h) => h?.trim())) out.set(id, Array.from(row, (h) => h ?? ""))
+  }
+  return out
 }
 
 /** File tài liệu (bản vừa phát hành) ⇒ khớp mẫu (tất định, không AI) ⇒ khung + dấu + danh sách heading cần duyệt. */
-export const buildSkeleton = async (source: Buffer, opts: SkeletonOptions, decisions: ReadonlyMap<string, PendingDecision> = new Map()): Promise<BuiltSkeleton> => {
+export const buildSkeleton = async (
+  source: Buffer,
+  opts: SkeletonOptions,
+  decisions: ReadonlyMap<string, PendingDecision> = new Map(),
+  /** Chữ hướng dẫn / tiêu đề cột đã được AI đổi tên riêng (chữ gốc ⇒ chữ mới). Không ảnh hưởng dấu khung. */
+  replacements: ReadonlyMap<string, string> = new Map()
+): Promise<BuiltSkeleton> => {
   const { pkg, blocks } = await parseDocument(source)
   const matched = matchProfile(blocks, { fixedTemplate: false })
   autoConfirmMapping(matched)
@@ -378,13 +424,16 @@ export const buildSkeleton = async (source: Buffer, opts: SkeletonOptions, decis
   const byBlock = new Map(matched.heading_map.map((h) => [h.block_id, h]))
   const waiting = plan.review.filter((r) => plan.waiting.includes(r.key))
   const fieldOf = (blockId: string, column: number) => matched.table_map.find((t) => t.block_id === blockId && t.column_index === column)?.field_path ?? null
+  const items = applyReplacements(plan.items, replacements)
   return {
-    buffer: await writeSkeletonDocx(pkg, plan.items),
+    buffer: await writeSkeletonDocx(pkg, items),
+    // Dấu khung tính trên chữ gốc: lượt AI khác nhau không làm cùng khung thành khác
     hash: skeletonHash(plan.items, waiting),
+    texts: scrubTextsOf(plan.items),
     empty: !plan.items.some((i) => i.kind === "heading"),
     review: plan.review,
     waiting: plan.waiting,
-    headings: plan.items.flatMap((i) => (i.kind === "heading" ? [{ heading_text: i.text, section_id: byBlock.get(i.block.block_id)?.section_id ?? "unmapped" }] : [])),
-    table_map: plan.items.flatMap((i) => (i.kind === "table" ? i.headers.map((header, column_index) => ({ block_id: i.block.block_id, column_index, header, field_path: fieldOf(i.block.block_id, column_index) })) : []))
+    headings: items.flatMap((i) => (i.kind === "heading" ? [{ heading_text: i.text, section_id: byBlock.get(i.block.block_id)?.section_id ?? "unmapped" }] : [])),
+    table_map: items.flatMap((i) => (i.kind === "table" ? i.headers.map((header, column_index) => ({ block_id: i.block.block_id, column_index, header, field_path: fieldOf(i.block.block_id, column_index) })) : []))
   }
 }

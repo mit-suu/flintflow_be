@@ -8,7 +8,9 @@
  * `restoreFromSnapshot` là cùng việc cho lần áp dụng kẹt (`apply_failed`), kết thúc ở `failed`.
  */
 import { randomUUID } from "node:crypto"
-import { ensureTemplateMigrationCr, revertTemplateMigrationChanges } from "../change-request/write.service.js"
+import { systemChangeActor } from "../doc-version/doc-version.constants.js"
+import { recordSystemChange } from "../doc-version/system-change.service.js"
+import { revertTemplateMigrationChanges } from "../change-request/write.service.js"
 import { TemplateProfile } from "../import/template-profile.model.js"
 import { Project } from "../project/project.model.js"
 import { TransactionRejectedError } from "../spine/op-engine.js"
@@ -56,11 +58,11 @@ export const runUndo = async (doc: ITemplateMigration, userId: string, options: 
       // Cờ / tiến độ tính lại sau đó có thể trỏ vào mục riêng do đổi mẫu thêm ⇒ đảo cùng (rồi tính lại)
       const firstSeq = forward.reduce((m, c) => Math.min(m, c.seq), Infinity)
       const set = [...forward, ...all.filter((c) => c.seq >= firstSeq && !isMigrationTxn(c.txn, id) && isDerivedChange(c))]
-      const crId = doc.spine_cr_id ?? (await ensureTemplateMigrationCr(projectId, id, userId, "Hoàn tác đổi mẫu"))
+      const by = systemChangeActor(id)
       const head = await spineRepository.versionHead(projectId)
       try {
         // Khoá lạc quan theo version vừa kiểm: ai ghi chen vào giữa ⇒ 409, chưa đảo gì
-        await revertTemplateMigrationChanges(projectId, set, { crId, txn: undoTxn, ...(head ? { baseVersion: head.spine_version } : {}) })
+        await revertTemplateMigrationChanges(projectId, set, { by, txn: undoTxn, ...(head ? { baseVersion: head.spine_version } : {}) })
       } catch (err) {
         if (err instanceof TransactionRejectedError) {
           throw new ApiError(409, "Không đảo được các thay đổi của lần đổi mẫu này.", REVERT_BLOCKED, { violations: err.violations.map((v) => ({ rule: v.rule, path: v.path ?? null, message: v.message })) })
@@ -71,13 +73,22 @@ export const runUndo = async (doc: ITemplateMigration, userId: string, options: 
   }
 
   await restoreFromSnapshot(doc)
+  // FLF-466: hoàn tác đổi mẫu cũng là thay đổi hệ thống (số phụ kế tiếp). Khôi phục từ lần áp dụng kẹt (`failed`) thì chưa từng có version ⇒ không ghi
+  if (options.finalState === "reverted") {
+    await recordSystemChange(
+      projectId,
+      userId,
+      { type: "template_revert", ref: `${id}:revert`, summary: `Hoàn tác đổi mẫu sang ${doc.to.name || "mẫu mới"}` },
+      { tracked: doc.translated ? "none" : "content_only" }
+    )
+  }
   const failures = await cleanupArtifacts(doc)
   const done = await TemplateMigration.findOneAndUpdate(
     { _id: doc._id, state: { $in: ["reverting", "apply_failed"] } },
     { $set: stateUpdate(options.finalState, { reverted_at: new Date(), apply_token: null, applying_heartbeat: null }), ...(failures.length ? { $push: { warnings: { $each: failures } } } : {}) },
     { returnDocument: "after" }
   )
-  await recomputeFlags(projectId, doc.spine_cr_id ?? "template-migration")
+  await recomputeFlags(projectId, systemChangeActor(id))
   return done ?? (await TemplateMigration.findById(doc._id))!
 }
 
@@ -93,8 +104,9 @@ const restoreFromSnapshot = async (doc: ITemplateMigration): Promise<void> => {
   await Project.updateOne(
     { _id: projectId },
     {
-      $set: { template_ref: snap.template_ref, template_intent: snap.template_intent, ...(snap.document_language ? { documentLanguage: snap.document_language } : {}) },
-      ...(snap.document_language ? {} : { $unset: { documentLanguage: 1 } })
+      $set: { template_ref: snap.template_ref, template_intent: snap.template_intent, ...(snap.document_language ? { documentLanguage: snap.document_language } : {}), ...(snap.source_language ? { source_language: snap.source_language } : {}) },
+      // `source_language` thiếu ở snapshot cũ ⇒ lúc đó chưa từng dịch đè ⇒ bỏ
+      ...(snap.document_language && snap.source_language ? {} : { $unset: { ...(snap.document_language ? {} : { documentLanguage: 1 }), ...(snap.source_language ? {} : { source_language: 1 }) } })
     }
   )
 }

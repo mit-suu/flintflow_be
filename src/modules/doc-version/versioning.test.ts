@@ -63,6 +63,12 @@ describe("versioning - G4", () => {
 
   it("FLF-334 tên file: release / nháp có CR / nháp v0 / mode 2 chưa baseline / tracked / original / pdf", () => {
     expect(versionFileName({ name: "Lumen SRS", release: true, base: "2.0" })).toBe("Lumen SRS_v2.0.docx")
+    // FLF-466: mã dự án + số của chính file; bản nháp mang số phụ, không `+CR`, không `_DRAFT`
+    expect(versionFileName({ name: "Lumen SRS", release: true, base: "2.0", numbered: true, code: "P77049B" })).toBe("Lumen SRS_P77049B_v2.0.docx")
+    expect(versionFileName({ name: "Lumen SRS", release: false, base: "1.3", latestCr: "CR-014", numbered: true, code: "P77049B" })).toBe("Lumen SRS_P77049B_v1.3.docx")
+    expect(versionFileName({ name: "Lumen SRS", release: false, base: "1.3", numbered: true, code: "P77049B", tracked: true, language: "en" })).toBe("Lumen SRS_P77049B_v1.3_tracked_EN.docx")
+    expect(versionFileName({ name: "Lumen SRS", release: false, base: null, code: "P77049B" })).toBe("Lumen SRS_P77049B_DRAFT.docx")
+    expect(versionFileName({ name: "Lumen SRS", release: true, base: "0.1", numbered: true, code: "P77049B", original: true })).toBe("Lumen SRS_P77049B_v0.1_original.docx")
     expect(versionFileName({ name: "Lumen SRS", release: false, base: "1.0", latestCr: "CR-014" })).toBe("Lumen SRS_v1.0+CR-014_DRAFT.docx")
     expect(versionFileName({ name: "Lumen", release: false, base: "0", latestCr: "CR-002" })).toBe("Lumen_v0+CR-002_DRAFT.docx")
     expect(versionFileName({ name: "Lumen", release: false, base: "v0", latestCr: null })).toBe("Lumen_v0_DRAFT.docx")
@@ -71,6 +77,11 @@ describe("versioning - G4", () => {
     expect(versionFileName({ name: "Lumen", release: false, base: "1.0", latestCr: "CR-001", tracked: true })).toBe("Lumen_v1.0+CR-001_tracked_DRAFT.docx")
     expect(versionFileName({ name: "Lumen", release: false, base: "0", original: true })).toBe("Lumen_v0_original.docx")
     expect(versionFileName({ name: "Lumen", release: true, base: "2.0", ext: "pdf" })).toBe("Lumen_v2.0.pdf")
+    // FLF-484: bản nháp mang số phụ, không gắn mã CR
+    expect(versionFileName({ name: "Lumen", release: false, base: "0.1", latestCr: "CR-003", version: "0.4" })).toBe("Lumen_v0.4_DRAFT.docx")
+    expect(versionFileName({ name: "Lumen", release: false, base: "0.1", latestCr: "CR-003", version: "0.4", tracked: true })).toBe("Lumen_v0.4_tracked_DRAFT.docx")
+    expect(versionFileName({ name: "Lumen", release: false, base: "1.0", latestCr: "CR-009", version: "1.3" })).toBe("Lumen_v1.3_DRAFT.docx")
+    expect(versionFileName({ name: "Lumen", release: true, base: "2.0", version: "2.0" })).toBe("Lumen_v2.0.docx")
     // release bỏ qua mã CR; không mang mã dự án
     expect(versionFileName({ name: "Lumen", release: true, base: "1.0", latestCr: "CR-009" })).toBe("Lumen_v1.0.docx")
   })

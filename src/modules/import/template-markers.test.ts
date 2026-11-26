@@ -128,4 +128,14 @@ describe("FLF-459 - đoạn trọn ngoặc theo lớp chữ hướng dẫn của
     ])
     expect(stripTemplateMarks(blocks).map((b) => b.block_id)).toEqual(["B1", "B2", "B6"])
   })
+
+  it("FLF-462 (bước 1.6): đoạn lớp 4 được người xác nhận là hướng dẫn ⇒ nâng lên lớp 3 (patchFields cập nhật DocBlock) ⇒ I-5 không còn tính là nội dung thật", () => {
+    const before: LayoutBlock[] = [h("B1", "3.4 Security requirements", "fixed:3.4"), { ...p("B2", "[Describe security requirements]"), guidance_layer: 4 }]
+    // Trước xác nhận: lớp 4 vẫn là nội dung thật (chưa chắc thì là nội dung) ⇒ mục "có"
+    expect(stripTemplateMarks(before).map((b) => b.block_id)).toEqual(["B1", "B2"])
+    // Người xác nhận là hướng dẫn ở bước 1.6 ⇒ BE nâng `guidance_layer` của B2 lên 3 (chắc chắn)
+    const after: LayoutBlock[] = before.map((b) => (b.block_id === "B2" ? { ...b, guidance_layer: 3 } : b))
+    // Sau xác nhận: B2 bị loại khỏi nội dung thật ⇒ mục 3.4 chỉ còn heading, I-5 tính là "thiếu"
+    expect(stripTemplateMarks(after).map((b) => b.block_id)).toEqual(["B1"])
+  })
 })

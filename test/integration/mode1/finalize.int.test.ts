@@ -28,10 +28,9 @@ vi.mock("../../../src/shared/ai/retry.service.js", async (orig) => {
 import mongoose from "mongoose"
 import { mockImages, mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeMode1 } from "../../helpers/mode1.js"
-import { importAtBaselining, importAtExtracting, importFinalized } from "../../helpers/mode1-import-p4.js"
+import { importAtBaselining, importAtExtracting, importFinalized, runExtraction } from "../../helpers/mode1-import-p4.js"
 import { finalizeImport } from "../../../src/modules/import/finalize.service.js"
 import { AiActionError } from "../../../src/shared/ai/ai-action.types.js"
-import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { ExtractionDraft } from "../../../src/modules/import/extraction-draft.model.js"
 import { extractionSummary } from "../../../src/modules/import/import.service.js"
 import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
@@ -44,6 +43,7 @@ import { DocxPackage, blockIdOfBookmark, readBlocks, readStamp } from "../../../
 import { Baseline } from "../../../src/modules/spine/baseline.model.js"
 import { Spine } from "../../../src/modules/spine/spine.model.js"
 import { Project } from "../../../src/modules/project/project.model.js"
+import { projectCode } from "../../../src/modules/project/project-code.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 import { applyTransaction } from "../../../src/modules/spine/op-engine.js"
 import { originalDiagramHash } from "../../../src/modules/spine/original-diagram.js"
@@ -105,23 +105,27 @@ describe("finalize - Spine", () => {
     expect(spine.screens.every((s) => s.detail_status !== "pending")).toBe(true)
   })
 
-  it("FLF-343: field độ tin thấp chưa xác nhận KHÔNG bị bỏ - vào Spine kèm đúng một cờ vàng Cần xem / phần tử (FLF-411 U2-5, mang đường dẫn phần tử); mapping tự nhận cũng có cờ", async () => {
+  it("FLF-462 (đảo FLF-343): field độ tin thấp được xác nhận ở bước 1.6 trước khi vào baseline ⇒ không còn cờ vàng Cần xem cho field; mapping I-3 tự nhận vẫn có cờ như trước (autoConfirmMapping không đổi)", async () => {
+    // importAtBaselining (test/helpers/mode1-import-p4.js) tự xác nhận hết ở bước 1.6 (confirm_all) trước khi tới baselining
     const { projectId, importId, userId } = await importAtBaselining({ srs: { numberedOnly: true } })
     const before = (await spineRepository.get(projectId))!
     await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
     const spine = (await spineRepository.get(projectId))!
     expect(spine.functions.map((f) => f.trigger)).toEqual(["Learner submits the form", "Learner submits the form"])
     const review = spine.flags.filter((f) => f.rule_id === "import_needs_review" && f.resolved_at === null)
+    // FLF-462: field độ tin thấp đã qua người xác nhận ở bước 1.6 (dù qua confirm_all theo gợi ý AI) ⇒ không còn
+    // là "chưa xác nhận" nữa, nên không còn cờ vàng Cần xem riêng cho field (đảo nguyên nhân cờ của FLF-343)
     const fieldFlags = review.filter((f) => f.target_id?.startsWith("functions["))
-    expect(fieldFlags.map((f) => f.target_id).sort()).toEqual(["functions[id=FR-3.2.1]", "functions[id=FR-3.2.2]"])
-    expect(fieldFlags.every((f) => f.level === "yellow" && f.message.startsWith("Cần xem:") && f.section_id.startsWith("function:FR-3.2."))).toBe(true)
-    // heading không style (độ tin 0.75) ⇒ mỗi heading tự nhận một cờ, target = block heading
+    expect(fieldFlags).toEqual([])
+    const draft = await ExtractionDraft.findOne({ import_id: importId, section_id: { $regex: "^function:@" } }).lean()
+    expect(draft?.fields.filter((f) => f.path.endsWith(".trigger")).every((f) => f.confirmed)).toBe(true)
+    // heading không style (độ tin 0.75) ⇒ mỗi heading tự nhận một cờ, target = block heading (I-3, không đổi bởi FLF-462)
     const profile = (await TemplateProfile.findOne({ projectId }).lean())!
     const auto = profile.heading_map.filter((h) => h.auto_confirmed)
     expect(auto.length).toBeGreaterThan(0)
     for (const h of auto) expect(review.filter((f) => f.target_id === h.block_id), h.heading_text).toHaveLength(1)
-    // recompute tất định không đóng cờ do import đặt
-    expect(review.length).toBe(fieldFlags.length + auto.length + profile.table_map.filter((t) => t.auto_confirmed && t.field_path).length)
+    // recompute tất định không đóng cờ do import đặt; không còn fieldFlags trong tổng
+    expect(review.length).toBe(auto.length + profile.table_map.filter((t) => t.auto_confirmed && t.field_path).length)
   })
 })
 
@@ -185,7 +189,7 @@ describe("finalize - DocVersion 0.1 + baseline imported", () => {
     for (const b of fileBlocks.filter((x) => x.bookmark)) expect(stored.some((s) => s.block_id === blockIdOfBookmark(b.bookmark))).toBe(true)
 
     const rendered = await DocxPackage.load(await docFileStore().load(v.file_ref))
-    expect(await readStamp(rendered)).toEqual({ project_id: projectId, version: "0.1", source: "import", base_version: null, latest_cr: null, kind: null })
+    expect(await readStamp(rendered)).toEqual({ project_id: projectId, version: "0.1", source: "import", base_version: null, latest_cr: null, kind: null, project_code: projectCode(projectId) })
     const texts = (await readBlocks(rendered)).map((b) => b.text)
     // Bản render mang nội dung Spine (không phải bản sao file gốc), tiêu đề theo file người dùng
     expect(texts).toContain("1 Product Overview")
@@ -197,11 +201,11 @@ describe("finalize - DocVersion 0.1 + baseline imported", () => {
     const { projectId } = await importFinalized()
     const v = (await DocVersion.findOne({ projectId, version: "0.1" }).lean())!
     const rendered = await downloadVersion(projectId, "Lumen", "0.1", "auto")
-    expect(rendered.filename).toBe("Lumen_v0.1_DRAFT.docx") // FLF-334: không mã project (máy đọc stamp); FLF-356: chưa release ⇒ số bản import
-    expect(await readStamp(await DocxPackage.load(rendered.data))).toEqual({ project_id: projectId, version: "0.1", source: "import", base_version: "0.1", latest_cr: null, kind: "draft" })
+    expect(rendered.filename).toBe(`Lumen_${projectCode(projectId)}_v0.1.docx`) // FLF-466: mã dự án + số bản, bản nháp nhận ra qua số + watermark
+    expect(await readStamp(await DocxPackage.load(rendered.data))).toEqual({ project_id: projectId, version: "0.1", source: "import", base_version: "0.1", latest_cr: null, kind: "draft", project_code: projectCode(projectId) })
     expect((await readBlocks(await DocxPackage.load(rendered.data))).some((b) => b.text === "1 Product Overview")).toBe(true)
     const original = await downloadVersion(projectId, "Lumen", "0.1", "original")
-    expect(original.filename).toBe("Lumen_v0.1_original.docx")
+    expect(original.filename).toBe(`Lumen_${projectCode(projectId)}_v0.1_original.docx`)
     expect(original.data.equals(await docFileStore().load(v.original_ref!))).toBe(true)
     expect(toVersionDto(v as never, { mode: "import" })).toMatchObject({ version: "0.1", has_original_file: true })
     await DocVersion.updateOne({ _id: v._id }, { $set: { original_ref: null } })
@@ -495,8 +499,11 @@ describe("ảnh - giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 phase
     for (const f of guest) expect(f.confidence).toBeLessThanOrEqual(0.7)
     // actor Guest (0.95 từ model) bị hạ trần 0.7 nhưng vẫn phải xác nhận
     expect(guest.some((f) => f.path.startsWith("actors[") && f.value === "Guest" && f.confidence === 0.7)).toBe(true)
+    // FLF-462: runExtraction (helper) đã xác nhận hết ở bước 1.6 (confirm_all) ⇒ field vision không còn trong review_fields,
+    // nhưng vẫn giữ nguồn gốc vision + độ tin ≤ 0.7 trên draft
     const view = await extractionSummary(importId)
-    expect(view.review_fields.some((f) => f.origin === "vision" && f.value === "Guest")).toBe(true)
+    expect(view.review_fields.some((f) => f.origin === "vision")).toBe(false)
+    expect(guest.find((f) => f.path.startsWith("actors[") && f.value === "Guest")?.confirmed).toBe(true)
     const visionPrompt = prompts.find((p) => p.includes("# Read Diagram Image"))!
     expect(visionPrompt).toContain("Figure 1 USECASE-IMG")
     expect(visionPrompt).toContain("Section (registry id): fixed:2.2.1")
@@ -710,8 +717,8 @@ describe("finalize - tương thích bản gốc cũ 0.0 (FLF-284)", () => {
     const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
     expect(toVersionDto(v as never, { mode: "import" })).toMatchObject({ version: "0.0", kind: "imported", has_original_file: true })
     const rendered = await downloadVersion(projectId, "Lumen", "0.0", "auto")
-    expect(rendered.filename).toBe("Lumen_v0.0_DRAFT.docx")
+    expect(rendered.filename).toBe(`Lumen_${projectCode(projectId)}_v0.0.docx`)
     const original = await downloadVersion(projectId, "Lumen", "0.0", "original")
-    expect(original.filename).toBe("Lumen_v0.0_original.docx")
+    expect(original.filename).toBe(`Lumen_${projectCode(projectId)}_v0.0_original.docx`)
   })
 })

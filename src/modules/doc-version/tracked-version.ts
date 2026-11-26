@@ -24,6 +24,8 @@ export interface ParagraphChange {
 export interface TrackedComment {
   section_title: string
   text: string
+  /** Tác giả riêng của comment (bản phát hành: CR của comment đó); không có => `who.author`. */
+  author?: string
 }
 
 const words = (s: string): string[] => tokenize(s).filter((t) => !/^\s+$/.test(t))
@@ -134,10 +136,19 @@ export interface TrackedOptions {
    * chứ không phải thay đổi của khách. Mục chuyển sang mẫu mới giữ nguyên thứ tự nên so theo cặp đoạn của phần còn lại.
    */
   contentOnly?: boolean
+  /**
+   * Tác giả theo từng chỗ sửa (bản phát hành: CR sửa đoạn đó sau cùng, FLF-466); trả `null` hoặc không truyền => `who.author`.
+   * Mọi tác giả dùng chung một bộ cấp `w:id`.
+   */
+  authorOf?: (change: ParagraphChange) => string | null
 }
 
 const comparable = (blocks: readonly OoxmlBlock[], contentOnly: boolean): OoxmlBlock[] =>
   blocks.filter(isParagraph).filter((b) => !contentOnly || (b.kind !== "heading" && !isGuidanceText(b.text)))
+
+/** Chữ từng đoạn (theo `comparable`) của một file .docx — để so các bản nháp liên tiếp. */
+export const paragraphTexts = async (file: Buffer, contentOnly = false): Promise<string[]> =>
+  comparable(await readBlocks(await DocxPackage.load(file)), contentOnly).map((b) => b.text)
 
 export interface TrackedResult {
   data: Buffer
@@ -164,6 +175,10 @@ export const buildTrackedDocx = async (
   const next = comparable(await readBlocks(pkg), contentOnly)
   const author = { author: who.author, date: who.date, ids: new RevisionIds(await pkg.requireXml(MAIN_PART)) }
 
+  const authorFor = (ch: ParagraphChange): typeof author => {
+    const name = options.authorOf?.(ch)
+    return name && name !== author.author ? { ...author, author: name } : author
+  }
   let changes = 0
   let skipped = 0
   for (const ch of pairParagraphs(
@@ -180,7 +195,7 @@ export const buildTrackedDocx = async (
       if (next[ch.next_index]) anchor.parentNode.insertBefore(p, anchor)
       else anchor.parentNode.insertBefore(p, anchor.nextSibling)
       setParagraphText(p, ch.before)
-      applyEdit(p, ch.before, "", author)
+      applyEdit(p, ch.before, "", authorFor(ch))
       changes++
       continue
     }
@@ -190,7 +205,7 @@ export const buildTrackedDocx = async (
       continue
     }
     setParagraphText(block.element, ch.before)
-    applyEdit(block.element, ch.before, ch.after, author)
+    applyEdit(block.element, ch.before, ch.after, authorFor(ch))
     changes++
   }
 
@@ -198,7 +213,7 @@ export const buildTrackedDocx = async (
     const title = normalizeText(c.section_title).toLowerCase()
     const target = (title && next.find((b) => b.kind === "heading" && normalizeText(b.text).toLowerCase().includes(title))) || next[0]
     if (!target) continue
-    await addComment(pkg, target.element, c.text, { author: who.author, date: who.date, initials: "CR" })
+    await addComment(pkg, target.element, c.text, { author: c.author ?? who.author, date: who.date, initials: "CR" })
   }
   return { data: await pkg.toBuffer(), changes, skipped }
 }

@@ -624,7 +624,10 @@ router.patch(
  *                 enum: [chen, crowsfoot, idef1x]
  *     responses:
  *       200:
- *         description: Dự án sau khi đổi (kèm erdNotation)
+ *         description: >
+ *           Dự án sau khi đổi (kèm erdNotation) ở `data`; `meta.erdRedraw` (FLF-477, thêm trường) báo kết quả vẽ lại:
+ *           `done` đã vẽ lại xong, `skipped` dự án chưa có hình ERD, `pending` vẫn chưa vẽ lại được sau khi thử lại
+ *           (một bước pipeline đang ghi Spine) — nên báo người dùng và gợi ý bấm "Vẽ lại" sau.
  *       400:
  *         description: VALIDATION_ERROR — giá trị ngoài chen/crowsfoot/idef1x hoặc có key lạ
  *       403:

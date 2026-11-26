@@ -9,6 +9,7 @@
  * ready_to_submit ─► written                             (FLF-330, C-6: BA xác nhận ⇒ ghi ngay vào bản nháp chung — CR = commit)
  * ready_to_submit ─► in_review                           (CŨ, chỉ còn cho CR tạo trước FLF-330; Lead duyệt cả GÓI ở C-7, không duyệt từng CR)
  * in_review ─► written | proposing | rejected            (cũ: 3.14 ghi · sửa lại khi mọi group bị từ chối · 3.13 đóng)
+ * written ─► released                                    (FLF-466: bản phát hành liệt kê CR này ⇒ đã phát hành, không quay lại)
  * mọi trạng thái chưa kết thúc ─► cancelled              (3.10, UC-53 — kể cả khi đang paused)
  *
  * `paused` là field riêng, chỉ đặt ở bước gọi AI (clarifying, proposing, verifying). Khoá block giữ nguyên khi pause.
@@ -27,6 +28,7 @@ export const CR_STATUSES = [
   "ready_to_submit",
   "in_review",
   "written",
+  "released",
   "rejected",
   "cancelled"
 ] as const
@@ -45,6 +47,7 @@ export const CR_STATUS_LABELS: Readonly<Record<CrStatus, string>> = {
   ready_to_submit: "Sẵn sàng xác nhận",
   in_review: "Đang chờ duyệt (luồng cũ)",
   written: "Đã ghi vào bản nháp",
+  released: "Đã phát hành",
   rejected: "Bị từ chối",
   cancelled: "Đã huỷ"
 }
@@ -65,7 +68,8 @@ export const CR_TRANSITIONS: Readonly<Record<CrStatus, readonly CrStatus[]>> = {
   // FLF-375: xác nhận mà chỗ đã bị người khác sửa đúng phần đề xuất định đổi ⇒ không ghi, về "Cần bạn quyết" (so 3 cột)
   ready_to_submit: ["written", "in_review", "verifying", "manual_fix", "clarifying", "cancelled"],
   in_review: ["written", "proposing", "rejected", "cancelled"],
-  written: [],
+  written: ["released"],
+  released: [],
   rejected: [],
   cancelled: []
 }
@@ -104,7 +108,10 @@ export const assertTransition = (from: CrStatus, to: CrStatus): void => {
   }
 }
 
-export const isTerminal = (status: CrStatus): boolean => CR_TRANSITIONS[status].length === 0
+/** `written` vẫn là đã xong (không phải CR mở) dù còn cạnh sang `released` (FLF-466) ⇒ tập cuối nêu tường minh, không suy từ cạnh ra. */
+const TERMINAL_STATUSES: readonly CrStatus[] = ["written", "released", "rejected", "cancelled"]
+
+export const isTerminal = (status: CrStatus): boolean => TERMINAL_STATUSES.includes(status)
 
 /** CR chưa kết thúc (còn trong luồng C-1…C-7): người tạo chỉ được có một CR như vậy một lúc (BF §3.2 C-1). */
 export const CR_OPEN_STATUSES: readonly CrStatus[] = CR_STATUSES.filter((s) => !isTerminal(s))

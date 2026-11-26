@@ -61,7 +61,17 @@ export const progressSchema = z.strictObject({
   current_step: z.string().nullable(),
   screen_cursor: z.string().nullable(),
   screen_queue: z.array(id),
-  elicit_turns_this_phase: nonNegativeInt
+  elicit_turns_this_phase: nonNegativeInt,
+  credit_ack_required: z
+    .strictObject({
+      scope: z.enum(["after_brief", "screens_locked", "screens_added"]),
+      credits: z.number().min(0),
+      created_at: z.string(),
+      screens: z.array(id).optional()
+    })
+    .nullable()
+    .optional(),
+  credit_acked_screens: z.array(id).optional()
 })
 
 export const stepStateSchema = z.strictObject({
@@ -452,6 +462,8 @@ export const flagSchema = z.strictObject({
   rule_id: z.string().min(1),
   section_id: z.string().min(1),
   target_id: id.nullable().optional(),
+  // FLF-449: tên lens của cờ AI `ai_review`; thiếu với mọi cờ khác
+  lens: z.string().min(1).nullable().optional(),
   message: z.string(),
   remediation_step: z.string().min(1),
   opened_at_version: z.number().int().min(1),

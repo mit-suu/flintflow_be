@@ -164,8 +164,10 @@ export const toDtos = async (comments: readonly IComment[]): Promise<CommentDto[
 }
 
 /** Cũ trước — đọc như một luồng thảo luận. `open` (mặc định) ẩn comment đã xử lý / đã chuyển CR. */
-export const listComments = async (projectId: string, status: "open" | "all"): Promise<CommentDto[]> => {
-  const comments = await Comment.find(status === "open" ? { projectId, status: "open" as const } : { projectId }).sort({ createdAt: 1 })
+export const listComments = async (projectId: string, status: "open" | "all", options: { viewer?: boolean } = {}): Promise<CommentDto[]> => {
+  const filter = status === "open" ? { projectId, status: "open" as const } : { projectId }
+  // FLF-466 (BF §2, §3.6): Viewer không thấy comment gắn bản nháp; luồng trên bản ổn định (kể cả trả lời của Analyst / Lead) hiện đủ
+  const comments = await Comment.find(options.viewer ? { ...filter, "version.baseline_id": { $ne: null } } : filter).sort({ createdAt: 1 })
   return toDtos(comments)
 }
 
@@ -256,6 +258,10 @@ const commentFollowers = (comment: IComment, actorId: string): string[] =>
 
 export const replyComment = async (actor: CommentActor, commentId: string, text: string): Promise<CommentDto> => {
   const comment = await requireComment(actor.projectId, commentId)
+  // FLF-466 (BF §2): Viewer chỉ xem/trả lời comment trên bản ổn định, không trả lời hay đọc được comment gắn bản nháp
+  if (actor.role === "viewer" && comment.version.baseline_id === null) {
+    throw new ApiError(404, `Không tìm thấy comment ${commentId}.`, "COMMENT_NOT_FOUND")
+  }
   // Lấy người theo dõi TRƯỚC khi thêm trả lời mới — người vừa trả lời không tự báo cho mình
   const followers = commentFollowers(comment, actor.userId)
   comment.replies.push({ author_id: new mongoose.Types.ObjectId(actor.userId), author_role: actor.role, text, at: new Date() })

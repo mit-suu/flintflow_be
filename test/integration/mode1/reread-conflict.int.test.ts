@@ -30,9 +30,8 @@ vi.mock("../../../src/modules/spine/op-engine.js", async (orig) => {
 
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeMode1 } from "../../helpers/mode1.js"
-import { importAtExtracting } from "../../helpers/mode1-import-p4.js"
+import { importAtExtracting, runExtraction } from "../../helpers/mode1-import-p4.js"
 import { AiActionError } from "../../../src/shared/ai/ai-action.types.js"
-import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { finalizeImport } from "../../../src/modules/import/finalize.service.js"
 import { runImageReread } from "../../../src/modules/import/reread-jobs.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"

@@ -289,6 +289,9 @@ export const fitTranslation = (source: UnitValue, localized: unknown): UnitValue
 const MIN_SENTENCE_WORDS = 3
 const isSentence = (text: string): boolean => text.trim().split(/\s+/).length >= MIN_SENTENCE_WORDS
 
+/** Đơn vị có ít nhất một câu (≥ 3 từ) ⇒ phải có bản dịch; chỉ toàn tên ngắn thì để tiếng Anh vẫn được (FLF-479). */
+export const needsTranslation = (source: UnitValue): boolean => (typeof source === "string" ? [source] : source).some(isSentence)
+
 /**
  * Model chép nguyên câu gốc thay vì dịch ⇒ không phải bản dịch. Lưu lại thì đơn vị không còn "thiếu", dịch theo lô bỏ
  * qua, mà không có sửa tay (D7) ⇒ tài liệu hiện tiếng Anh mãi. Dùng chung cho lượt AI trả kèm (`localizedUnitsOf`) và

@@ -72,10 +72,10 @@ const rawOf = (el: Element): Record<string, unknown> => {
  * Tham chiếu phân giải bằng chính `buildImportOps` trên Spine bỏ phần tử đó ⇒ cùng luật với import (mã lỏng, tên, khác quy
  * ước đặt tên).
  */
-export const rereadOps = (spine: Spine, items: readonly EntityItem[]): Op[] => {
+export const rereadOps = (spine: Spine, items: readonly EntityItem[], opts: { language?: string } = {}): Op[] => {
   // FLF-390: ảnh sequence / activity không tạo function mới — chỉ thêm luồng cho function đã có
   const fresh = items.filter((it) => it.id && isDiagramArray(it.entity) && it.entity !== "functions" && !findElement(spine, it.entity, it.id))
-  const ops: Op[] = fresh.length ? buildImportOps(spine, fresh.map((it) => ({ entity: it.entity, id: it.id, value: it.value }))) : []
+  const ops: Op[] = fresh.length ? buildImportOps(spine, fresh.map((it) => ({ entity: it.entity, id: it.id, value: it.value })), undefined, undefined, opts) : []
   // Quan hệ của phần tử đã có phân giải trên Spine ĐÃ có phần tử mới (use case cũ nối thêm actor "Guest" vừa đọc được)
   const base = ops.length ? planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 }).spine : spine
   for (const it of items) {
@@ -90,7 +90,7 @@ export const rereadOps = (spine: Spine, items: readonly EntityItem[]): Op[] => {
       else if (current[field] === undefined || current[field] === null || current[field] === "") merged[field] = v
     }
     const without = { ...base, [it.entity]: elementsOf(base, it.entity).filter((e) => e !== current) } as Spine
-    const rebuilt = buildImportOps(without, [{ entity: it.entity, id: current.id, value: merged }]).find(
+    const rebuilt = buildImportOps(without, [{ entity: it.entity, id: current.id, value: merged }], undefined, undefined, opts).find(
       (o) => o.op === "add" && o.path === `${it.entity}[]` && (o.value as Element | undefined)?.id === current.id
     )?.value as Element | undefined
     if (!rebuilt) continue
@@ -126,9 +126,10 @@ export const imageRereadOps = (
   spine: Spine,
   read: Extract<DiagramRead, { status: "read" }>,
   image: { block_id: string; image_ref: string },
-  now: string
+  now: string,
+  opts: { language?: string } = {}
 ): Op[] => {
-  const data = rereadOps(spine, read.items)
+  const data = rereadOps(spine, read.items, opts)
   const planned = data.length ? planTransaction(spine, { base_version: spine.spine_version, ops: data, by: "import" }, { startSeq: 1 }).spine : spine
   const ops: Op[] = [...data]
   const owner = spine.custom_sections.find((c) => c.blocks.some((b) => b.kind === "image" && b.image_ref === image.image_ref))
@@ -161,12 +162,17 @@ const SPINE_CONFLICT = spineRepository.SPINE_VERSION_CONFLICT
 const isConflict = (err: unknown): boolean => (err as { code?: unknown } | null)?.code === SPINE_CONFLICT
 
 /** Ghi một ảnh vừa đọc: xung đột khoá lạc quan ⇒ đọc lại Spine, dựng lại op, thử thêm một lần. Trả path đã ghi. */
-const writeImage = async (projectId: string, read: Extract<DiagramRead, { status: "read" }>, image: { block_id: string; image_ref: string }): Promise<string[] | null> => {
+const writeImage = async (
+  projectId: string,
+  read: Extract<DiagramRead, { status: "read" }>,
+  image: { block_id: string; image_ref: string },
+  opts: { language?: string } = {}
+): Promise<string[] | null> => {
   for (let attempt = 0; attempt < 2; attempt++) {
     const record = await spineRepository.get(projectId)
     if (!record) return null
     const spine = stripRecord(record)
-    const ops = imageRereadOps(spine, read, image, new Date().toISOString())
+    const ops = imageRereadOps(spine, read, image, new Date().toISOString(), opts)
     if (!ops.length) return []
     try {
       await applyTransaction(projectId, { base_version: spine.spine_version, ops, by: "import", reason: `Import: đọc lại ảnh sơ đồ ${image.block_id}`, step_id: null })
@@ -223,7 +229,8 @@ export const runImageReread = async ({ projectId, userId, importId }: Omit<Rerea
       continue
     }
     if (r.status === "read") {
-      const paths = await writeImage(projectId, r, { block_id, image_ref: img.image_ref })
+      // FLF-476: tên nhóm dự phòng ("General" / "Chức năng khác") theo ngôn ngữ profile dự án
+      const paths = await writeImage(projectId, r, { block_id, image_ref: img.image_ref }, { language: inputs.profile.language })
       if (paths === null) {
         outcome = "retry"
         continue

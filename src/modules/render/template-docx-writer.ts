@@ -2,6 +2,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { DocxPackage, MAIN_PART, readBlocks, writeStamp } from "../docx-ooxml/index.js"
 import { NS, isW, wAll, wAttr, wEl, wKid, wKids, wText } from "../docx-ooxml/xml.js"
 import { assignBlockIds, parseDocument } from "../import/parse.service.js"
+import { projectCode } from "../project/project-code.js"
 import { exportLineage, writeDocx } from "./docx-writer.js"
 import type { Block, InlineRun, RenderedDocument, RenderedSection } from "./rendered-document.types.js"
 import { isInstructionText } from "../../shared/utils/instruction-text.js"
@@ -28,6 +29,12 @@ const GROUP_OF_CUSTOM = "group:custom:"
 
 export interface SourceWriteOptions {
   keepSource?: ReadonlySet<string>
+  /**
+   * FLF-468 (lát A): id mục có section lúc import / mốc nguyên vẹn. Slot không còn section nào trong bản in hiện tại mà
+   * id của nó nằm trong tập này ⇒ CR đã xoá hẳn phần tử — mục của phần tử (`function:` / `feature:` / `custom:`) bỏ cả
+   * heading lẫn thân; mục cố định của mẫu giữ heading, thân về chữ hướng dẫn.
+   */
+  importedSectionIds?: ReadonlySet<string>
   legacyRecordCount?: number
   /**
    * FLF-378 (luồng C, C2.5): file là **mẫu** của dự án mới — hướng dẫn, ví dụ, ngữ cảnh của mẫu không lọt vào bản in: mục
@@ -90,7 +97,9 @@ export async function writeTemplateDocx(
     if (!own && keep?.has(section.id) && (rearrange || !slot)) continue
     // FLF-416 chế độ 4: mục không có heading trong file ⇒ heading mới đúng vị trí bản in, không gộp vào mục cha.
     // FLF-413: tính năng / chức năng dư của mẫu có khung ⇒ heading mới lặp theo định dạng khung (không thành đoạn chữ đậm)
-    if (!own && (rearrange || (frameMode && REPEATING_SECTION.test(section.id)))) {
+    // FLF-468 (E2E-1): dự án có sẵn (giữ file gốc) — tính năng / chức năng CR thêm không có slot ⇒ heading mới đúng vị trí bản in
+    // (sau mục cuối của file), không gộp vào thân mục cha (trước "3.1") thành chữ đậm
+    if (!own && (rearrange || ((frameMode || sourceMode) && REPEATING_SECTION.test(section.id)))) {
       inserted.push({ section, index })
       continue
     }
@@ -160,14 +169,9 @@ export async function writeTemplateDocx(
           break
         case "heading": out.push(paragraph(xml, [{ text: block.text, bold: true }], ctx.pattern)); break
         case "bullet_list":
-        case "numbered_list": {
-          const listPattern = ctx.paragraphs.find((p) => {
-            const format = listFormat(p)
-            return block.type === "bullet_list" ? format === "bullet" : !!format && format !== "bullet"
-          })
-          block.items.forEach((runs, i) => out.push(paragraph(xml, listPattern ? runs : [{ text: block.type === "bullet_list" ? "• " : `${i + 1}. ` }, ...runs], listPattern ?? ctx.pattern)))
+        case "numbered_list":
+          out.push(...listParagraphs(xml, ctx, listFormat, block.items, block.type === "bullet_list"))
           break
-        }
         case "table": {
           const sourceTable = ctx.tables[ctx.cursor.table++]
           if (sourceTable) {
@@ -183,8 +187,12 @@ export async function writeTemplateDocx(
               out.push(table(xml, block, undefined, ctx.pattern, bodyStyleId))
             }
           }
-          else if (ctx.freeTables) out.push(table(xml, block, undefined, ctx.pattern, bodyStyleId))
-          else out.push(...tableAsParagraphs(xml, block, ctx.pattern))
+          // FLF-468 (lát D, "Cần chốt" #1): mục của mẫu cố định không có bảng nguồn (chưa có bảng, hoặc section có nhiều
+          // bảng hơn bảng nguồn — lưới an toàn của lát B) ⇒ không trải thành đoạn "Nhãn: giá trị" nữa. Bảng từ 3 cột
+          // (thông báo, NFR, rủi ro…) in bảng thật theo kiểu bảng FlintFlow (như mục chèn mới — `freeTables`); bảng 2 cột
+          // (quy tắc, yêu cầu chung) gọn hơn dưới dạng danh sách "<mã> – <nội dung>" theo đúng khuôn danh sách của mẫu.
+          else if (ctx.freeTables || block.header.length >= 3) out.push(table(xml, block, undefined, ctx.pattern, bodyStyleId))
+          else out.push(...listParagraphs(xml, ctx, listFormat, tableRowsAsListItems(block), true))
           break
         }
         case "image": out.push(...await image(pkg, xml, doc, block, drawingIds)); break
@@ -194,6 +202,18 @@ export async function writeTemplateDocx(
   }
   const skipSlot = (slot: typeof slots[number], reason: string): void => {
     console.warn(`[template-docx] Giữ nguyên mục "${slot.heading.text}" của file nền: ${reason}`)
+  }
+  // FLF-468 (lát A): mục của phần tử (chức năng / tính năng / mục riêng) ⇒ xoá cả heading lẫn thân khi CR đã xoá phần
+  // tử đó. Mục cố định của mẫu không bị xoá — chỉ trống dữ liệu, giữ heading + chữ hướng dẫn.
+  const DATA_DRIVEN_SECTION = /^(feature|function|custom):/
+  let sectionsRemoved = false
+  const removeDeletedSlot = (slot: typeof slots[number]): void => {
+    if (DATA_DRIVEN_SECTION.test(slot.section_id)) {
+      for (const node of [slot.heading.element, ...slot.nodes]) node.parentNode?.removeChild(node)
+      sectionsRemoved = true
+    } else {
+      clearToGuidance(xml, slot.heading.element, slot.nodes, [], bodyPatternFor(bodyPattern, bodyStyleId))
+    }
   }
   for (const slot of slots) {
     if (handledSlots.has(slot)) continue
@@ -206,6 +226,10 @@ export async function writeTemplateDocx(
       continue
     }
     if (!slot.sections.some((s) => s.blocks.length || s.id !== slot.section_id)) {
+      if (!slot.sections.length && slot.section_id !== "fixed:I" && sourceOptions.importedSectionIds?.has(slot.section_id)) {
+        removeDeletedSlot(slot)
+        continue
+      }
       if (sourceOptions.stripTemplateText && slot.section_id !== "fixed:I") stripTemplateBody(slot.nodes)
       continue
     }
@@ -341,8 +365,10 @@ export async function writeTemplateDocx(
   const insertedHeading = (section: RenderedSection): Element => {
     const kind = REPEATING_SECTION.exec(section.id)?.[1]
     const frameSample = kind ? frameSlots.filter((s) => s.section_id.startsWith(`${kind}:`) && (s.heading.level ?? 1) === section.level).pop()?.heading : undefined
+    // FLF-468: ưu tiên heading cùng loại (tính năng / chức năng) cùng cấp của file hơn heading cùng cấp bất kỳ ("5.5 Glossary")
+    const kindSample = kind ? slots.filter((s) => s.section_id.startsWith(`${kind}:`) && (s.heading.level ?? 1) === section.level).pop()?.heading : undefined
     const sameLevel = headings.filter((h) => (h.level ?? 1) === section.level)
-    const sample = frameSample ?? sameLevel[sameLevel.length - 1]
+    const sample = frameSample ?? kindSample ?? sameLevel[sameLevel.length - 1]
     if (!sample) return paragraph(xml, [{ text: section.heading, bold: true }], bodyPatternFor(bodyPattern, bodyStyleId))
     const typed = /^\s*(\d+(\.\d+)*\.?|[IVXLC]+\.)\s+/.test(sample.text)
     const text = typed && section.number ? `${section.number} ${section.heading}` : section.heading
@@ -351,7 +377,18 @@ export async function writeTemplateDocx(
     return heading
   }
   if (rearrange) await rearrangeLayout()
-  else if (frameMode && (await fillTemplateFrames())) await requestFieldUpdate(pkg)
+  else if (frameMode) { if (await fillTemplateFrames()) await requestFieldUpdate(pkg) }
+  else if (inserted.length) {
+    // FLF-468 (E2E-1): heading mới của mục lặp ở chế độ giữ file gốc ⇒ mục lục tính lại khi mở file (FLF-413: chèn thì cập nhật)
+    const body = wKid(xml.documentElement, "body")
+    if (body) {
+      await insertSections(body, wKids(body, "sectPr")[0] ?? null, new Set())
+      await requestFieldUpdate(pkg)
+    }
+  }
+  // FLF-468 (lát A): heading bị xoá mang theo bookmark `_Toc` của nó — mục lục field phải tính lại khi mở để không còn
+  // dòng trỏ vào mục đã mất.
+  if (sectionsRemoved && !(rearrange || frameMode)) await requestFieldUpdate(pkg)
   // Mẫu để điền: thay chữ giữ chỗ của bìa. Dự án có sẵn: bìa là của file đã viết ⇒ giữ nguyên
   if (!sourceMode) replacePlaceholders(xml, { "[Project name]": doc.projectName, "[Version]": doc.version, "[Date]": doc.generatedAt.slice(0, 10) })
   // Import-only anchors are useful while resolving slots, but untouched source
@@ -359,7 +396,7 @@ export async function writeTemplateDocx(
   const addedIds = new Set(wAll(xml, "bookmarkStart").filter((b) => !originalBookmarkIds.has(wAttr(b, "id"))).map((b) => wAttr(b, "id")))
   for (const local of ["bookmarkStart", "bookmarkEnd"]) for (const bookmark of wAll(xml, local)) if (addedIds.has(wAttr(bookmark, "id"))) bookmark.parentNode?.removeChild(bookmark)
   const lineage = exportLineage(doc)
-  await writeStamp(pkg, { project_id: doc.projectId, version: doc.version, source: doc.source, base_version: lineage.base, kind: lineage.release ? "release" : "draft" })
+  await writeStamp(pkg, { project_id: doc.projectId, version: doc.version, source: doc.source, base_version: lineage.base, kind: lineage.release ? "release" : "draft", project_code: projectCode(doc.projectId) })
   return pkg.toBuffer()
 }
 
@@ -563,11 +600,36 @@ function paragraph(xml: Document, runs: InlineRun[], source?: Element): Element 
   return p
 }
 
-function tableAsParagraphs(xml: Document, block: Extract<Block, { type: "table" }>, pattern?: Element): Element[] {
-  const headers = block.header.map((cell) => cell.map((r) => r.text).join(""))
-  return block.rows.map((cells) => paragraph(xml, cells.flatMap((runs, i) => [
-    ...(i ? [{ text: "\n" }] : []), ...(headers[i] ? [{ text: `${headers[i]}: `, bold: true }] : []), ...runs
-  ]), pattern))
+/**
+ * Khối danh sách / số thứ tự theo đúng khuôn danh sách của mẫu (kiểu đánh số của một đoạn trong `ctx.paragraphs`), không
+ * có thì tự thêm dấu đầu dòng / số thứ tự — dùng chung cho `bullet_list`/`numbered_list` và danh sách dựng từ bảng
+ * (FLF-468 lát D).
+ */
+function listParagraphs(
+  xml: Document,
+  ctx: { paragraphs: readonly Element[]; pattern?: Element },
+  listFormat: (p: Element) => string | null,
+  items: readonly InlineRun[][],
+  bullet: boolean
+): Element[] {
+  const listPattern = ctx.paragraphs.find((p) => {
+    const format = listFormat(p)
+    return bullet ? format === "bullet" : !!format && format !== "bullet"
+  })
+  return items.map((runs, i) => paragraph(xml, listPattern ? runs : [{ text: bullet ? "• " : `${i + 1}. ` }, ...runs], listPattern ?? ctx.pattern))
+}
+
+/**
+ * FLF-468 (lát D): bảng 2 cột (mã + nội dung — quy tắc nghiệp vụ, yêu cầu chung) mà mẫu không có bảng nguồn ⇒ mỗi hàng
+ * một dòng danh sách "<mã> – <nội dung>" (cột đầu làm mã/nhãn đậm); bảng 1 cột ⇒ chỉ nội dung, không thêm dấu "–".
+ */
+function tableRowsAsListItems(block: Extract<Block, { type: "table" }>): InlineRun[][] {
+  return block.rows.map((cells) => {
+    const [first, ...rest] = cells
+    const label = (first ?? []).map((r) => r.text).join("").trim()
+    const content = rest.flatMap((runs, i) => (i > 0 && runs.some((r) => r.text.trim()) ? [{ text: " " }] : []).concat(runs))
+    return label && content.length ? [{ text: `${label} – `, bold: true }, ...content] : label ? [{ text: label, bold: true }] : content
+  })
 }
 
 /** Reuse the import's explicit field paths; no fuzzy header matching or overflow cells. */

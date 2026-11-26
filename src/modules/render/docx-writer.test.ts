@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest"
 import { readFileSync } from "node:fs"
 import mammoth from "mammoth"
-import { HEADING_TABLE_SPACING, buildDocxFileName, exportLineage, writeDocx } from "./docx-writer.js"
+import { HEADING_TABLE_SPACING, buildDocxFileName, exportLineage, stampBaseVersion, writeDocx } from "./docx-writer.js"
 import { makePng, readZipEntries, readZipText } from "./zip.test-helper.js"
 import type { RenderedDocument } from "./rendered-document.types.js"
 import { writerOptionsFor } from "./labels.js"
@@ -226,12 +226,19 @@ describe("writeDocx - biến thể", () => {
   })
 })
 
+describe("buildDocxFileName - nhãn số bản nháp (FLF-484)", () => {
+  it("bản nháp mode 1 mang số version ⇒ `_v<số>_DRAFT`", () => {
+    expect(buildDocxFileName({ projectName: "Lumen", version: "0.4", source: "draft" })).toBe("Lumen_v0.4_DRAFT.docx")
+    expect(buildDocxFileName({ projectName: "Lumen", version: "1.2", source: "draft" })).toBe("Lumen_v1.2_DRAFT.docx")
+  })
+})
+
 describe("buildDocxFileName - quy tắc chung FLF-334", () => {
   it("bản nháp: gốc baseline (+ N changes bỏ đi) ⇒ _v<gốc>_DRAFT; chưa baseline (v0) ⇒ <tên>_DRAFT", () => {
     expect(buildDocxFileName({ projectName: "Lumen", version: "v1.0 + 3 changes", source: "draft" })).toBe("Lumen_v1.0_DRAFT.docx")
     expect(buildDocxFileName({ projectName: "Lumen", version: "v1.0", source: "draft" })).toBe("Lumen_v1.0_DRAFT.docx")
     expect(buildDocxFileName({ projectName: "Lumen", version: "v0", source: "draft" })).toBe("Lumen_DRAFT.docx")
-    expect(buildDocxFileName(sample)).toBe(`Lumen Học Trực Tuyến_v${sample.version.replace(/^v/, "")}_DRAFT.docx`)
+    expect(buildDocxFileName(sample)).toBe(`Lumen Học Trực Tuyến_P000001_v${sample.version.replace(/^v/, "")}_DRAFT.docx`)
   })
 
   it("baseline ⇒ _v<version>, không _DRAFT; version conditional giữ nguyên", () => {
@@ -475,5 +482,18 @@ describe("writeDocx - mục lục ghi sẵn cho file version mode 1 (FLF-344)", 
     const plain = readZipText(await writeDocx(structuredClone(sample)), "word/document.xml")
     const explicit = readZipText(await writeDocx(structuredClone(sample), { tocEntries: false }), "word/document.xml")
     expect(explicit).toBe(plain)
+  })
+})
+
+describe("stamp base_version của bản nháp mode 1 (FLF-484)", () => {
+  it("nhãn số bản nháp ⇒ base_version là release gốc, không phải số bản nháp; tên file vẫn mang số bản nháp", async () => {
+    const stampOf = async (version: string) => readZipText(await writeDocx({ ...baseline(), version, source: "draft", watermark: "DRAFT" }), "docProps/custom.xml")
+    expect(await stampOf("0.4")).toMatch(/name="flintflow_base_version"[^>]*>\s*<vt:lpwstr>0.1<\/vt:lpwstr>/)
+    expect(await stampOf("1.2")).toMatch(/name="flintflow_base_version"[^>]*>\s*<vt:lpwstr>1.0<\/vt:lpwstr>/)
+    expect(await stampOf("2.0")).toMatch(/name="flintflow_base_version"[^>]*>\s*<vt:lpwstr>2.0<\/vt:lpwstr>/)
+    expect(await stampOf("1.2")).toMatch(/name="flintflow_kind"[^>]*>\s*<vt:lpwstr>draft<\/vt:lpwstr>/)
+    expect(stampBaseVersion({ version: "v1.0 + 3 changes", source: "draft" })).toBe("1.0")
+    expect(stampBaseVersion({ version: "v0", source: "draft" })).toBeNull()
+    expect(buildDocxFileName({ projectName: "Lumen", version: "1.2", source: "draft" })).toBe("Lumen_v1.2_DRAFT.docx")
   })
 })

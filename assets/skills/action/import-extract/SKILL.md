@@ -35,6 +35,9 @@ An SRS that is silent on something stays silent - leave the field out.
 {{known_keys}}
 - Blocks of the section (`[B0001] text`; a table is `[B0020] (table)` followed by `| cell | cell |` rows):
 {{blocks}}
+- Guidance check - block ids below read like leftover template instructions (placeholder text for whoever fills this
+  template in), but the signal alone is not enough to be sure; decide for each one (rule 10). `none` = skip this part:
+  {{guidance_candidates}}
 
 ## Rules
 
@@ -61,6 +64,12 @@ An SRS that is silent on something stays silent - leave the field out.
 9. Trust content over the heading. When the blocks are not what the heading says (a "Use Case" section that holds
    test cases), set `content_mismatch: { "content": "<what the blocks really are, a few words>" }`; do not force
    them into the heading's entity. Otherwise `content_mismatch` is `null`.
+10. For every block id listed under *Guidance check*, decide whether it is really leftover instruction/placeholder
+    text for the next author, not a real requirement the document's author wrote. Return each one in
+    `guidance_blocks` with `is_guidance` (true/false) and your own `confidence` (0-1, keep it low when the wording
+    could honestly go either way). Never add an id that is not listed there. Still extract any real content you
+    find in those blocks as usual (rule 1) regardless of your guess - a human confirms the final answer. Nothing
+    listed - return `guidance_blocks: []`.
 
 ## Output
 
@@ -74,5 +83,6 @@ JSON only, no prose:
       "confidence": 0.95, "field_confidence": { "kind": 0.6 }, "source_block_ids": ["B0031"] }
   ],
   "unmapped_block_ids": ["B0030"],
-  "content_mismatch": null }
+  "content_mismatch": null,
+  "guidance_blocks": [{ "block_id": "B0032", "is_guidance": true, "confidence": 0.55 }] }
 ```

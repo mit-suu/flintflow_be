@@ -16,7 +16,7 @@
           "B0062"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A03].kind",
@@ -26,7 +26,7 @@
           "B0062"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A13].name",
@@ -36,7 +36,7 @@
           "B0062"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A13].kind",
@@ -46,7 +46,7 @@
           "B0062"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-99].name",
@@ -56,7 +56,7 @@
           "B0062"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-99].actor_ids",
@@ -68,7 +68,7 @@
           "B0062"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       }
     ]
   },
@@ -89,7 +89,7 @@
           "B0044"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       }
     ]
   },
@@ -112,7 +112,7 @@
           "B0011"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A03].name",
@@ -124,7 +124,7 @@
           "B0011"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A03].kind",
@@ -136,7 +136,7 @@
           "B0011"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A04].name",
@@ -146,7 +146,7 @@
           "B0002"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A04].kind",
@@ -156,7 +156,7 @@
           "B0002"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-90].name",
@@ -166,7 +166,7 @@
           "B0002"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-90].actor_ids",
@@ -178,7 +178,7 @@
           "B0002"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-91].name",
@@ -188,7 +188,7 @@
           "B0002"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-91].actor_ids",
@@ -200,7 +200,7 @@
           "B0002"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A05].name",
@@ -210,7 +210,7 @@
           "B0007"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A05].kind",
@@ -220,7 +220,7 @@
           "B0007"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-92].name",
@@ -230,7 +230,7 @@
           "B0007"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-92].actor_ids",
@@ -242,7 +242,7 @@
           "B0007"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A06].name",
@@ -252,7 +252,7 @@
           "B0011"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A06].kind",
@@ -262,7 +262,7 @@
           "B0011"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-93].name",
@@ -272,7 +272,7 @@
           "B0011"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-93].actor_ids",
@@ -284,7 +284,7 @@
           "B0011"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       }
     ]
   },
@@ -305,7 +305,7 @@
           "B0015"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A01].description",
@@ -315,7 +315,7 @@
           "B0015"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A02].name",
@@ -325,7 +325,7 @@
           "B0015"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A02].description",
@@ -335,7 +335,7 @@
           "B0015"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       }
     ]
   },
@@ -366,7 +366,7 @@
           "B0025"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A07].kind",
@@ -377,7 +377,7 @@
           "B0025"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-02].name",
@@ -388,7 +388,7 @@
           "B0025"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-02].actor_ids",
@@ -402,7 +402,7 @@
           "B0025"
         ],
         "origin": "vision",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A03].name",
@@ -412,7 +412,7 @@
           "B0024"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A03].kind",
@@ -422,7 +422,7 @@
           "B0024"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A08].name",
@@ -432,7 +432,7 @@
           "B0024"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A08].kind",
@@ -442,7 +442,7 @@
           "B0024"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-94].name",
@@ -452,7 +452,7 @@
           "B0024"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-94].actor_ids",
@@ -464,7 +464,7 @@
           "B0024"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       }
     ]
   },
@@ -485,7 +485,7 @@
           "B0030"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-01].actor_ids",
@@ -497,7 +497,7 @@
           "B0030"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-02].name",
@@ -507,7 +507,7 @@
           "B0030"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-02].actor_ids",
@@ -519,7 +519,7 @@
           "B0030"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       }
     ]
   },
@@ -540,7 +540,7 @@
           "B0043"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "screens[id=SCR-01].description",
@@ -550,7 +550,7 @@
           "B0043"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A03].name",
@@ -560,7 +560,7 @@
           "B0043"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A03].kind",
@@ -570,7 +570,7 @@
           "B0043"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A09].name",
@@ -580,7 +580,7 @@
           "B0043"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A09].kind",
@@ -590,7 +590,7 @@
           "B0043"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-95].name",
@@ -600,7 +600,7 @@
           "B0043"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-95].actor_ids",
@@ -612,7 +612,7 @@
           "B0043"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       }
     ]
   },
@@ -633,7 +633,7 @@
           "B0053"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "nfrs[id=NFR-01].kind",
@@ -643,7 +643,7 @@
           "B0053"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "nfrs[id=NFR-01].metric",
@@ -653,7 +653,7 @@
           "B0053"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "nfrs[id=NFR-01].threshold",
@@ -663,7 +663,7 @@
           "B0053"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "nfrs[id=NFR-01].category",
@@ -673,7 +673,7 @@
           "B0053"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A03].name",
@@ -683,7 +683,7 @@
           "B0053"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A03].kind",
@@ -693,7 +693,7 @@
           "B0053"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A12].name",
@@ -703,7 +703,7 @@
           "B0053"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A12].kind",
@@ -713,7 +713,7 @@
           "B0053"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-98].name",
@@ -723,7 +723,7 @@
           "B0053"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-98].actor_ids",
@@ -735,7 +735,7 @@
           "B0053"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       }
     ]
   },
@@ -756,7 +756,7 @@
           "B0056"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       }
     ]
   },
@@ -778,7 +778,7 @@
           "B0046"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "functions[id=FR-3.2.1].feature_id",
@@ -789,7 +789,7 @@
           "B0046"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "functions[id=FR-3.2.1].trigger",
@@ -800,7 +800,7 @@
           "B0046"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "functions[id=FR-3.2.1].normal",
@@ -814,7 +814,7 @@
           "B0046"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "functions[id=FR-3.2.1].abnormal",
@@ -827,7 +827,7 @@
           "B0046"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A03].name",
@@ -837,7 +837,7 @@
           "B0046"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A03].kind",
@@ -847,7 +847,7 @@
           "B0046"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A10].name",
@@ -857,7 +857,7 @@
           "B0046"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A10].kind",
@@ -867,7 +867,7 @@
           "B0046"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-96].name",
@@ -877,7 +877,7 @@
           "B0046"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-96].actor_ids",
@@ -889,7 +889,7 @@
           "B0046"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       }
     ]
   },
@@ -911,7 +911,7 @@
           "B0048"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "functions[id=FR-3.2.2].feature_id",
@@ -922,7 +922,7 @@
           "B0048"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "functions[id=FR-3.2.2].trigger",
@@ -933,7 +933,7 @@
           "B0048"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "functions[id=FR-3.2.2].normal",
@@ -947,7 +947,7 @@
           "B0048"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "functions[id=FR-3.2.2].abnormal",
@@ -960,7 +960,7 @@
           "B0048"
         ],
         "origin": "deterministic",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A03].name",
@@ -970,7 +970,7 @@
           "B0048"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A03].kind",
@@ -980,7 +980,7 @@
           "B0048"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A11].name",
@@ -990,7 +990,7 @@
           "B0048"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "actors[id=A11].kind",
@@ -1000,7 +1000,7 @@
           "B0048"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-97].name",
@@ -1010,7 +1010,7 @@
           "B0048"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       },
       {
         "path": "use_cases[id=UC-97].actor_ids",
@@ -1022,7 +1022,7 @@
           "B0048"
         ],
         "origin": "ai",
-        "confirmed": false
+        "confirmed": true
       }
     ]
   }

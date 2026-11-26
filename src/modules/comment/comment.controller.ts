@@ -32,7 +32,7 @@ const authorize = async (req: Request): Promise<commentService.CommentActor> => 
 export const listComments = catchAsync(async (req: Request, res: Response) => {
   const actor = await authorize(req)
   const { status } = parse(listCommentsQuerySchema, req.query)
-  return sendSuccess(res, 200, await commentService.listComments(actor.projectId, status))
+  return sendSuccess(res, 200, await commentService.listComments(actor.projectId, status, { viewer: actor.role === "viewer" }))
 })
 
 export const createComment = catchAsync(async (req: Request, res: Response) => {

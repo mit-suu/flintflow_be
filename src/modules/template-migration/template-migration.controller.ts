@@ -9,7 +9,7 @@ import { parseInput } from "../import/mode1.http.js"
 import { applyMigration } from "./apply.service.js"
 import { restoreMigration, revertMigration } from "./revert.service.js"
 import * as service from "./template-migration.service.js"
-import { migrationIdSchema, patchDecisionsSchema, patchMappingSchema, patchPairsSchema, startFromFileSchema, startFromTemplateSchema } from "./template-migration.dto.js"
+import { migrationIdSchema, patchDecisionsSchema, patchMappingSchema, patchPairsSchema, startFromFileSchema, startFromStandardSchema, startFromTemplateSchema } from "./template-migration.dto.js"
 
 export { receiveDocx as receiveTemplateFile }
 
@@ -30,7 +30,9 @@ export const start = catchAsync(async (req: Request, res: Response) => {
   const ctx = contextOf(req)
   const input: service.StartInput = req.file
     ? { kind: "file", file: requireFile(req), ...parseInput(startFromFileSchema, req.body) }
-    : { kind: "template", ...parseInput(startFromTemplateSchema, req.body) }
+    : req.body?.kind === "standard"
+      ? { ...parseInput(startFromStandardSchema, req.body) }
+      : { ...parseInput(startFromTemplateSchema, req.body), kind: "template" }
   return sendSuccess(res, 201, await service.startMigration(ctx, input))
 })
 

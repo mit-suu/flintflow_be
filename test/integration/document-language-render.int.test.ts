@@ -157,7 +157,9 @@ describe("FLF-334 B - tải theo ngôn ngữ còn lại (mode 2)", () => {
       const res = await api.get(path)
       expect(res.status, path).toBe(409)
       expect(res.body.error.code).toBe("TRANSLATION_INCOMPLETE")
-      expect(res.body.meta).toEqual({ locale: "vi", missing: status.body.data.missing, total: status.body.data.total })
+      expect(res.body.meta).toMatchObject({ locale: "vi", missing: status.body.data.missing, total: status.body.data.total })
+      expect(res.body.meta.batches).toBeGreaterThan(0)
+      expect(res.body.meta.estimated_credits).toBeGreaterThanOrEqual(0)
     }
     expect(executeAiAction).not.toHaveBeenCalled()
   })

@@ -29,9 +29,9 @@ vi.mock("../../../src/modules/render/import-media.js", async (orig) => {
 
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeMode1 } from "../../helpers/mode1.js"
-import { importAtExtracting, useExtractConcurrency, type Mode1Ctx } from "../../helpers/mode1-import-p4.js"
+import { importAtExtracting, useExtractConcurrency, type Mode1Ctx, runExtraction } from "../../helpers/mode1-import-p4.js"
 import { env } from "../../../src/config/env.js"
-import { AI_BLOCK_CHARS, estimateExtraction, loadExtractionInputs, planPendingSections, runExtraction } from "../../../src/modules/import/extract.service.js"
+import { AI_BLOCK_CHARS, estimateExtraction, loadExtractionInputs, planPendingSections } from "../../../src/modules/import/extract.service.js"
 import { ExtractionDraft, type ExtractionProgress } from "../../../src/modules/import/extraction-draft.model.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { extractionSummary } from "../../../src/modules/import/import.service.js"

@@ -1,7 +1,7 @@
 ---
 skill_id: cr-clarify
 kind: action
-version: 1.9.0
+version: 1.10.0
 description: Mode 1 C-2 - decide whether a change request is clear, has the facts it needs and does not contradict the document; ask questions or return targets for impact search
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -35,7 +35,7 @@ You never write edits.
 - CR {{cr_id}}: {{title}}
 - Description: {{description}}
 - Source: {{source}}
-- Round {{round}} of at most 3. Previous questions and answers (an empty answer means "I don't know"):
+- Round {{round}} of at most 3. Previous questions and answers (an empty answer means "I don't know", except for a contradiction question: there it means "keep the document as it is"):
 {{clarifications}}
 - Source material attached by the user:
 {{materials}}
@@ -58,12 +58,14 @@ You never write edits.
    is still missing - the writer will assume a value and mark it for the reviewer.
 4. `targets.entity_paths`: keyed paths of Spine elements the CR changes, taken from the index
    (`use_cases[id=UC-01]`, `actors[id=A02]`, `functions[id=FR-3.2.1]`). Include elements that must change as a
-   consequence (a renamed actor ⇒ its use cases). When the change needs an element that does not exist yet (a new
+   consequence (a deleted actor ⇒ its use cases). Do not list an actor or role as a target when the CR only adds a use
+   case for it or renames it: references by id stay valid, the search finds the prose that names it. When the change needs an element that does not exist yet (a new
    entity / table, permission, screen, business rule…), also add that array's add path - `entities[]`,
    `permissions[]`, `screens[]`, `business_rules[]` - plus the section id where it belongs (`fixed:3.1.5`).
 5. `targets.keywords`: words or phrases the **document** uses for the affected concept - names, synonyms, old and
    new wording (e.g. `"log out"`, `"sign out"`, `"session"`). They find prose that is not linked to any element.
-   3–10 keywords, each at least 3 characters.
+   3–10 keywords, each at least 3 characters. A value the CR changes (an amount, a time limit, a threshold) must appear
+   verbatim in `keywords`, exactly as the document writes it (`"5 triệu"`, `"30 minutes"`).
 6. Questions: User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`, `feature:@B0012`), element paths (`actors[id=A02].name`), block ids (`B0012`) or location ids (`L001`). Screen, function, actor, role, feature and entity ids (`S01`, `SCR-05`, `FN009`, `A02`) are internal too. Name a section by its heading and an element by its name or document code (`UC-01` is fine).
    The same holds for `missing_info`.
 7. Facts a writer needs, by kind of content: a non-functional requirement needs the measurable threshold and its
@@ -105,7 +107,9 @@ You never write edits.
    document says and where - section heading or document code) and asks which applies; `suggestions` =
    `"Đổi theo CR và sửa cả chỗ cũ"`, `"Giữ như cũ, không áp dụng phần này của CR"` (in the reply language). A
    contradiction is asked **in every round, also on round 3**, independent of `ambiguous`, and only once: never raise
-   again one already answered above. When the answer is "follow the CR", put the old element (or its
+   again one already asked above - answered **or left empty** (an empty answer is "keep the document as it is", already
+   decided) and never reworded: the same conflict in other words is the same question. `suggestions` must fit the question
+   (the two choices above only when it asks to change or keep; for "who" / "how many" give the candidates, or none). When the answer is "follow the CR", put the old element (or its
    `custom_sections[id=…]`) in `targets.entity_paths` too. A CR that only adds or edits without conflicting is not a
    contradiction.
 13. **Reply language ≠ document language** (Languages above) ⇒ every name, heading or passage you quote from the document,

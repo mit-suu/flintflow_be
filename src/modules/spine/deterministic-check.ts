@@ -132,7 +132,9 @@ export const MODEL_OWNED_RULES: ReadonlySet<string> = new Set([
   "import_needs_review",
   // FLF-363: tiêu đề và nội dung chỉ hai mục khác nhau lúc import — chỉ import đặt được, recompute không đóng
   "import_title_content_mismatch",
-  "cr_consistency"
+  "cr_consistency",
+  // FLF-449 việc 5, 6: cờ AI S-9.2 / S-8.4, tên lens ở `Flag.lens`
+  "ai_review"
 ])
 
 export interface FlagCandidate {
@@ -760,7 +762,7 @@ const sectionsAtBaseline = (spine: Spine, changes: Pick<Change, "seq" | "path" |
 }
 
 /** Thứ tự phase để biết vòng S-5 đã đi qua chưa (không import step-registry: module này thuần trên Spine). */
-const PHASE_ORDER = ["B-0", "B-1", "B-2", "S-1", "S-2", "S-3", "S-4", "S-5", "S-6", "S-7", "S-8", "S-9"] as const
+const PHASE_ORDER = ["B-0", "B-1", "S-1", "B-2", "S-2", "S-3", "S-4", "S-5", "S-6", "S-7", "S-8", "S-9"] as const
 
 const pastLoopPhase = (spine: Spine): boolean => {
   const index = PHASE_ORDER.indexOf((spine.progress.current_phase ?? "") as (typeof PHASE_ORDER)[number])

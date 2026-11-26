@@ -19,7 +19,7 @@ import { runStep, defaultStepRunnerDeps, recordUserMessage, B0_FIELD_STEPS, type
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
 import { addendumForUnit, assumptionsForPrompt, loadConversationVariables, projectStep, sectionsFedBy } from "./context-projection.js"
 import { mergeStepDocumentQueries, stepDocumentQuery } from "./step-document-query.js"
-import { SYSTEM_NAME_FIELD, askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
+import { SYSTEM_NAME_FIELD, askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt, type AnsweredTopic } from "./decisions.service.js"
 import { FAST_PATH_PHASES, interviewBudget, interviewGuidance, interviewProjection, noQuestionAck, reconcileReply, trimTailQuestion, withoutQuestions } from "./fast-path.js"
 import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, currentBatch, followUpQuestions, followUpReply, indexOfQuestion, shapeQuestions } from "./question-shape.js"
 import { askTranscript, captureSettledSources, chatBudgetLeft, chatBudgetReply, nextPendingAfterChat, replyLanguageAfterMessage, runChatTurn, settleWithoutModel, listenForAnswer, type AnswerPayload } from "./step-runner.service.js"
@@ -28,6 +28,7 @@ import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import * as meter from "./meter.service.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import { gate, phaseGateAssumptions } from "./gate.service.js"
+import { enforceCreditAck } from "./credit-ack.service.js"
 import { PHASES, getStep, nextStep as nextStepOf, orderedSteps, type ExpandedStep } from "./step-registry.js"
 import { isQuietStep, type QuietVerdict, type QuietInput } from "./quiet-step.js"
 import { composePhaseGateMessage, spokenAssumptionIds, stripModelCountSentences } from "./gate-message.js"
@@ -103,7 +104,7 @@ const recordInterviewAnswers = async (
   asked: PendingAnswerState["asked"],
   answers: readonly AnswerInput[],
   /** Lượt chat tự do (FLF-221): transcript đã ghi từng tin, chỉ còn sổ quyết định; câu chốt qua chat ghi sổ riêng. */
-  chat: { settledIds: ReadonlySet<string> } | null = null
+  chat: { settledIds: ReadonlySet<string>; corrections?: readonly AnsweredTopic[] } | null = null
 ): Promise<void> => {
   if (!chat) {
     // Lượt hỏi vào lịch sử đúng MỘT bản, dạng JSON khung chat vẽ được: sau một lượt chat tự do nó đã được ghi (câu còn
@@ -118,7 +119,8 @@ const recordInterviewAnswers = async (
   }
 
   const { record, spine: spineNow } = await load(projectId)
-  const ops = decisionOps(spineNow, unit, answeredTopics(asked, answers, chat?.settledIds))
+  // FLF-472 (phần 5b): đính chính trong chat thay quyết định đã chốt, ghi cùng lúc với câu vừa chốt
+  const ops = decisionOps(spineNow, unit, [...answeredTopics(asked, answers, chat?.settledIds), ...(chat?.corrections ?? [])])
   if (ops.length > 0) {
     await applyTransaction(projectId, { base_version: record.spine_version, ops, by: userId, step_id: null, reason: `Phỏng vấn đầu giai đoạn ${unit}` })
   }
@@ -210,7 +212,8 @@ const interviewChatTurn = async (
   const byCard = new Set(cardAnswers.map((a) => indexOfQuestion(asked, a.question_id)))
   const settled = turn.settled.filter((a) => !byCard.has(indexOfQuestion(asked, a.question_id)))
   await recordInterviewAnswers(projectId, unit, sessionId, userId, turn.reply, asked, [...cardAnswers, ...settled], {
-    settledIds: new Set(settled.map((a) => a.question_id))
+    settledIds: new Set(settled.map((a) => a.question_id)),
+    corrections: turn.decisionUpdates ?? []
   })
   // FLF-393: câu chốt bằng tài liệu tham khảo ⇒ ghi nguồn cho quyết định vừa vào sổ (business-flow §3.6)
   if (settled.some((a) => a.source_paras?.length)) await captureSettledSources(projectId, unit, (await load(projectId)).spine, asked, settled)
@@ -221,7 +224,8 @@ const interviewChatTurn = async (
     return { reply: closingReply, remaining: [] }
   }
   const { spine: after } = await load(projectId)
-  const remaining = nextPendingAfterChat(after, asked.filter((_, i) => !answered.has(i)), turn.questions, message)
+  const settledTopicsThisTurn = [...answered].map((i) => asked[i]?.topic_key).filter((t): t is string => t !== undefined)
+  const remaining = nextPendingAfterChat(after, asked.filter((_, i) => !answered.has(i)), turn.questions, message, settledTopicsThisTurn)
   // Câu hỏi đuôi trong lời AI tính vào trần câu hỏi của lượt (FLF-235): đã hỏi lại đủ câu thì không còn "bạn thấy hợp lý chứ?"
   const reply = trimTailQuestion(turn.reply, remaining, PROMPT_QUESTIONS_PER_TURN, language)
   await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: askTranscript(reply, currentBatch(remaining).now), step: unit, createdAt: new Date() }])
@@ -710,6 +714,8 @@ export const runPhase = async (
   const { spine: startSpine } = await load(projectId)
   const first = nextStepOf(startSpine)
   if (!first) return { phase, stopped_at: null, reason_vi: "Đã đi hết quy trình", steps: [] }
+  // FLF-466 P08: chặn TRƯỚC lượt phỏng vấn mở giai đoạn (đã gọi model, tốn credit) khi chưa xác nhận credit
+  await enforceCreditAck(projectId, startSpine, first.id, userId)
 
   // FLF-432 (luồng C #2): client gửi giai đoạn ĐÃ QUA (con trỏ cũ: các bước còn lại của S-4 đều `skipped`, bước tới lượt là
   // S-5.1@S02) ⇒ chạy đúng đơn vị tới lượt thay vì trả "Đã xong giai đoạn này" rỗng. Giai đoạn chưa tới vẫn về như cũ.
@@ -784,7 +790,8 @@ export const runPhase = async (
       decision = await decideStep({ projectId, next, unit, gateEvent, signals: collector.signals, phaseSummary, outcomes, flagsAtStart, language })
       return decision
     }
-    await runStep(projectId, next.id, sessionId, userId, collector.emit, { ...stepDeps, resolveGate: async (g, language) => toResolution(await decide(g, language)) })
+    // FLF-480 (P13 #5): chạy cả giai đoạn ⇒ chỉ bước cuối mời bước kế, các bước giữa không lặp câu đó
+    await runStep(projectId, next.id, sessionId, userId, collector.emit, { ...stepDeps, midPhaseRun: !isPhaseTerminal(spine, next), resolveGate: async (g, language) => toResolution(await decide(g, language)) })
     const { gate: gateEvent, error } = collector.signals
 
     if (error || !gateEvent) {

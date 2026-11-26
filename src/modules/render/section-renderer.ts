@@ -24,7 +24,9 @@ import { activitySectionOf } from "../diagram/renderers/activity.renderer.js"
 import { isComponentSequenceSource } from "../diagram/renderers/sequence.renderer.js"
 import { DEFAULT_RELATION_VERB, relationVerb } from "../diagram/renderers/erd.renderer.js"
 import { describeInterface } from "./interface-description.js"
-import { crRecordDescription } from "./cr-record.js"
+import { isSystemChangeActor } from "../doc-version/doc-version.constants.js"
+import type { CrRecordSummary } from "../change-request/change-request.model.js"
+import { changeKindOf, crRecordDescription, crRowDescription, type ChangeKind } from "./cr-record.js"
 import { diagramErrorMarker } from "./diagram-placeholder.js"
 import { matchTableHeader } from "../import/table-header-dictionary.js"
 import { loadStepRegistry } from "../pipeline/step-registry.js"
@@ -58,7 +60,13 @@ import type { SOURCE_COLLECTIONS } from "../project/requirement-source.service.j
  * (`assemble.service.ts`) đọc `Change` model trực tiếp với projection nhẹ này thay vì
  * `spine.repository.listChanges` (tải cả `before`/`value`, nặng không cần thiết cho §I).
  */
-export type ChangeRecordRow = Pick<Change, "txn" | "at" | "by" | "reason" | "op" | "step_id"> & { path?: string }
+/**
+ * `removed_name` (FLF-474, plan fix #7 phần 7c): tên phần tử ngay trước khi bị xoá (`before.name/term/title/heading`),
+ * dùng cho dòng §I khi op `remove` — Spine hiện tại có thể đã cấp lại đúng mã cho một phần tử khác (xem
+ * `spine/change-log.ts` `retiredIds`). Vắng với dữ liệu cũ (bản phát hành đã lưu trước fix) ⇒ `cr-record.ts` dò theo
+ * Spine hiện tại như cũ.
+ */
+export type ChangeRecordRow = Pick<Change, "txn" | "at" | "by" | "reason" | "op" | "step_id"> & { path?: string; removed_name?: string }
 import type {
   Block,
   BulletListBlock,
@@ -534,7 +542,8 @@ const featureOverview = (spine: Spine, featureId: string, ctx: SectionRenderCont
   const classDiagrams: Block[] = diagramImages(spine, "class", featureId, ctx, "Class Diagram", svgCaption)
   // FLF-390: sơ đồ activity của use case thuộc tính năng (phần chức năng) — chỉ có khi đã có dữ liệu luồng
   const activities = useCaseActivities(spine, `feature:${featureId}`, ctx)
-  if (ctx.functionLayout === "fpt") return [...classDiagrams, ...activities]
+  // FLF-480 (P09 #3): mẫu cố định in đoạn nguyên văn của file, bản Xem không thêm dòng liệt kê màn mà file không có
+  if (ctx.functionLayout === "fpt" || ctx.fixedTemplate) return [...classDiagrams, ...activities]
   const screens = spine.screens.filter((s) => s.feature_id === featureId)
   return [...classDiagrams, ...(screens.length === 0 ? [] : [p(`Screens: ${screens.map((s) => s.name).join(", ")}`)]), ...activities]
 }
@@ -999,10 +1008,10 @@ const changeTypeOf = (ops: Set<string>): RocChangeType => {
  * Lý do do MÁY ghi trong lúc chạy quy trình. §I là lịch sử tài liệu cho người đọc, không phải nhật ký của
  * runner: lượt test xuất ra 425 dòng mà phần lớn là "step-runner: elicit turn" (BUG-15).
  * Mode 1: cờ do AI kiểm tra đặt (`AI check: ambiguity`, `AI semantic check (1.11)`) và kế hoạch step lúc import
- * cũng là sổ sách của máy — không in vào tài liệu.
+ * cũng là sổ sách của máy — không in vào tài liệu. FLF-484: lý do `render` (vẽ lại sơ đồ sau CR / import) cũng là việc của máy.
  */
 const INTERNAL_REASON =
-  /^(step-runner:|gate:|resume:|Revert seq|Hoà giải: chờ chấp nhận lại|Phỏng vấn đầu giai đoạn|Chốt |confirmed_at do server đặt|Mở cờ |Waiver |Đóng cờ |AI check:|AI semantic check|Import: kế hoạch step)/
+  /^(step-runner:|gate:|resume:|Revert seq|Hoà giải: chờ chấp nhận lại|Phỏng vấn đầu giai đoạn|Chốt |confirmed_at do server đặt|Mở cờ |Waiver |Đóng cờ |AI check:|AI semantic check|Import: kế hoạch step|Kế hoạch step|Mở lại bước theo comment|render(?::|$)|\[C\] |Gửi Lead duyệt|Lead yêu cầu sửa|Lead đã duyệt gói|Recompute deterministic)/
 
 /**
  * Câu do máy sinh → câu theo ngôn ngữ tài liệu (mặc định tiếng Anh; bảng `MACHINE_DESCRIPTIONS` ở `labels.ts`);
@@ -1045,21 +1054,27 @@ const phaseLabelOf = (phase: string, language?: string): string | undefined => {
 /** Mã baseline (`v1.0`, `v1.2-conditional`) nằm trong lý do `Ký baseline v1.0` do baseline.service ghi. */
 // Mã baseline trong lý do: mode 2 `Baseline v1.0`; version tài liệu mode 1 `Baseline 0.1` / `Baseline 2.0` (không `v`)
 const BASELINE_VERSION = /\bv?\d+\.\d+(?:-conditional)?\b/
-/** Lô ghi của một change request (`write.service`: `by` = mã CR) — mỗi CR một dòng riêng (FLF-318). */
+/** Lô ghi của một change request (`write.service`: `by` = mã CR). */
 const CR_ACTOR = /^CR-\d{3,}$/
 const isCrTxn = (group: readonly ChangeRecordRow[]): boolean => group.some((c) => CR_ACTOR.test(c.by))
-const withV = (version: string): string => (version.startsWith("v") ? version : `v${version}`)
-/**
- * FLF-361: bản tài liệu thứ `k` sau mốc `version` — khớp `nextMinor` của version tài liệu mode 1 (mỗi CR ghi xong ra một
- * bản `DocVersion`): sau `v0.1` CR đầu là `v0.2`, CR kế `v0.3`; sau `v1.0` là `v1.1`. Trước đây CR mang số bản phát hành
- * kế tiếp (`v1.0`) trong khi tài liệu là bản 0.2.
- */
-const nthDraftAfter = (version: string, k: number): string => {
-  const m = /^v(\d+)\.(\d+)/.exec(version)
-  return m ? `v${m[1]}.${Number(m[2]) + k}` : version
+/** Múi giờ của cột Date (BF §3.2): ngày ghi theo giờ Việt Nam, không theo UTC. */
+export const RECORD_TIME_ZONE = "Asia/Ho_Chi_Minh"
+const vnDateFormat = new Intl.DateTimeFormat("en-CA", { timeZone: RECORD_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" })
+/** `YYYY-MM-DD` theo giờ Việt Nam của một mốc ISO; mốc không đọc được ⇒ 10 ký tự đầu như trước. */
+export const recordDateOf = (at: string): string => {
+  const time = new Date(at)
+  return Number.isNaN(time.getTime()) ? String(at).slice(0, 10) : vnDateFormat.format(time)
 }
-/** Lô ký baseline lúc import (mode 1: `by: import`, "Baseline 0.1") — cùng bản với dòng import, không thêm dòng riêng. */
-const isImportBaseline = (group: readonly ChangeRecordRow[]): boolean => group.every((c) => c.by === "import")
+
+/**
+ * Thay đổi không bao giờ thành dòng §I (BF §3.2 "Không sinh dòng"): cờ / tiến độ tự tính, kế hoạch step (bật / tắt step), gửi duyệt /
+ * yêu cầu sửa gói (`baseline_submission`); lô của máy khi import (`by = import`: nạp dữ liệu file, ký bản gốc 0.1, đọc lại ảnh sơ đồ) và của
+ * thay đổi hệ thống (`by = system_change:<id>`: đổi mẫu, vẽ lại màn).
+ */
+const NON_RECORD_PATH = /^(flags|progress|steps|baseline_submission)(\[|\.|$)/
+const isRecordNoise = (c: ChangeRecordRow): boolean => c.by === "import" || isSystemChangeActor(c.by) || NON_RECORD_PATH.test(c.path ?? "")
+
+const KIND_ORDER: readonly ChangeKind[] = ["A", "M", "D"]
 
 const describeRow = (reasons: readonly string[], language?: string): string => {
   const shown = reasons.slice(0, MAX_REASONS_PER_ROW).join("; ")
@@ -1070,6 +1085,73 @@ const describeRow = (reasons: readonly string[], language?: string): string => {
 /** Lý do op-engine gắn cho op cascade — đi kèm lô của user, không phải lời của user. */
 const MACHINE_REASON = /^Cascade:/
 
+export interface RecordOfChangesOptions {
+  /**
+   * Số của lần phát hành đang dựng (`2.0`): file đó được render trước khi DocVersion tồn tại nên chính file cũng in đúng Version cho CR của gói
+   * (BF §3.2, red-team #7). CR chưa có dòng baseline nào sau nó nhận số này; không truyền ⇒ `-`.
+   */
+  releasingVersion?: string
+  /** CR nằm trong lần phát hành đó; không truyền ⇒ mọi CR chưa có baseline sau nó. */
+  releasingCrIds?: readonly string[]
+  /** `by` ⇒ định danh người ghi dùng để quyết định gộp dòng CR (mã CR ⇒ người tạo CR); mặc định chính `by`. */
+  actorOf?: (by: string) => string
+  /** FLF-492: mô tả "AI viết gọn" theo mã CR (tuỳ chọn); không truyền ⇒ chỉ câu dựng sẵn. */
+  summaries?: ReadonlyMap<string, readonly CrRecordSummary[]>
+}
+
+type RecordRow = { date: string; phase: string; baseline: boolean; cr: boolean; changes: ChangeRecordRow[] }
+
+/** Gom lô được giữ thành dòng §I (chưa tính version / mô tả): liền nhau cùng ngày + cùng giai đoạn thì dồn, baseline và CR đứng riêng. */
+const groupRecordRows = (changes: readonly ChangeRecordRow[]): RecordRow[] => {
+  const order: string[] = []
+  const groups = new Map<string, ChangeRecordRow[]>()
+  for (const change of changes) {
+    if (isRecordNoise(change)) continue
+    const list = groups.get(change.txn)
+    if (list) list.push(change)
+    else {
+      groups.set(change.txn, [change])
+      order.push(change.txn)
+    }
+  }
+
+  // Gom lô được giữ thành dòng: liền nhau cùng ngày + cùng giai đoạn thì dồn, baseline và CR đứng riêng.
+  const rows: RecordRow[] = []
+  for (const txn of order) {
+    const group = groups.get(txn) as ChangeRecordRow[]
+    if (!keepInRecordOfChanges(group)) continue
+    const date = recordDateOf(group[0].at)
+    const baseline = isBaselineTxn(group)
+    const cr = !baseline && isCrTxn(group)
+    const last = rows[rows.length - 1]
+    // Lô không gắn step (xác nhận giả định ở cổng, lệnh sửa chat giữa step) thuộc giai đoạn đang chạy — không cắt nhóm
+    const phase = phaseKeyOf(group[0].step_id) || (last && !last.baseline && last.date === date ? last.phase : "")
+    if (!baseline && !cr && last && !last.baseline && !last.cr && last.date === date && last.phase === phase) last.changes.push(...group)
+    else rows.push({ date, phase, baseline, cr, changes: [...group] })
+  }
+  return rows
+}
+
+/** Một dòng §I của CR sau khi tách theo loại thay đổi: đơn vị mà "AI viết gọn" viết lại (FLF-492). */
+export interface CrRecordUnit {
+  cr_id: string
+  kind: ChangeKind
+  changes: ChangeRecordRow[]
+  /** Câu dựng sẵn (không có tiền tố `CR-xxx:`). */
+  built: string
+}
+
+/** Các dòng CR của Record of Changes, đúng như `buildRecordOfChanges` sẽ in (cùng cách gom, cùng cách tách A / M / D). */
+export const crRecordUnits = (changes: readonly ChangeRecordRow[], language?: string, spine?: Spine): CrRecordUnit[] =>
+  groupRecordRows(changes).flatMap((row) => {
+    const crId = row.cr ? row.changes.find((c) => CR_ACTOR.test(c.by))?.by : undefined
+    if (!crId) return []
+    return KIND_ORDER.flatMap((kind): CrRecordUnit[] => {
+      const group = row.changes.filter((c) => changeKindOf(c) === kind)
+      return group.length === 0 ? [] : [{ cr_id: crId, kind, changes: group, built: crRecordDescription(crId, group, language, spine).replace(`${crId}: `, "") }]
+    })
+  })
+
 /**
  * §I là lịch sử cho người đọc tài liệu, không phải nhật ký từng transaction: một ngày chat sửa vài chục lần
  * từng ra vài chục dòng/version. Nay gộp các lô được giữ (`keepInRecordOfChanges`) **liền nhau, cùng ngày, cùng
@@ -1078,11 +1160,11 @@ const MACHINE_REASON = /^Cascade:/
  * step nhập vào dòng liền trước cùng ngày; sau baseline (không còn giai đoạn) gom theo ngày. Lô ký baseline luôn
  * là một dòng riêng.
  *
- * `version` đánh theo dòng, không theo `spine_version`: trước baseline `v0.1, v0.2…`; dòng ký lấy đúng mã
- * baseline (`v1.0`; version tài liệu mode 1 `0.1` / `2.0` in thành `v0.1` / `v2.0`); sau đó `v1.0.1, v1.0.2…` cho tới
- * baseline kế tiếp. Lô của change request (mode 1, FLF-318) là một dòng riêng; FLF-361: mang **số bản tài liệu của CR**
- * (`DocVersion` minor kế tiếp: sau `v0.1` là `v0.2`, `v0.3`…; sau `v1.0` là `v1.1`). Baseline lúc import cùng bản với dòng
- * import ⇒ không in dòng riêng.
+ * `version` (BF §3.2, FLF-484): số của **lần phát hành / baseline chứa dòng** — dòng baseline mang số của chính nó
+ * (`1.0`, không tiền tố `v`), mọi dòng khác (CR, soạn trước baseline, sửa ngoài quy trình) mang số của baseline **đầu tiên
+ * đứng sau nó**; chưa có baseline nào sau ⇒ `-` (bản nháp). Số phụ của bản nháp không in vào bảng. Lô của change request
+ * (mode 1, FLF-318) là một dòng riêng, tách thêm theo loại thay đổi A / M / D (một dòng mỗi loại có mặt, cùng mã CR, cùng
+ * version). Lô `by: import` (nạp file + ký bản gốc 0.1) không thành dòng nào (BF: không sinh dòng cho bản gốc 0.1).
  *
  * `resolveInCharge` (T7): `by` lưu trong `changes[]` là userId thô (hoặc `"system"`) — caller truyền
  * hàm tra `User.name`/email theo lô để hiển thị tên thay vì id; mặc định giữ nguyên `by` (test thuần
@@ -1095,91 +1177,95 @@ export function buildRecordOfChanges(
   changes: ChangeRecordRow[],
   resolveInCharge: (by: string) => string = (by) => by,
   language?: string,
-  spine?: Spine
+  spine?: Spine,
+  /** FLF-466 / FLF-492: tuỳ chọn gộp dòng CR / releasingVersion / mô tả AI viết gọn (cũng nhận trực tiếp Map summaries). */
+  optionsOrSummaries?: RecordOfChangesOptions | ReadonlyMap<string, readonly CrRecordSummary[]>
 ): RocRow[] {
+  const options: RecordOfChangesOptions =
+    optionsOrSummaries && typeof (optionsOrSummaries as ReadonlyMap<string, readonly CrRecordSummary[]>).get === "function"
+      ? { summaries: optionsOrSummaries as ReadonlyMap<string, readonly CrRecordSummary[]> }
+      : ((optionsOrSummaries as RecordOfChangesOptions | undefined) ?? {})
   const text = recordTextFor(language)
-  const order: string[] = []
-  const groups = new Map<string, ChangeRecordRow[]>()
-  for (const change of changes) {
-    const list = groups.get(change.txn)
-    if (list) list.push(change)
-    else {
-      groups.set(change.txn, [change])
-      order.push(change.txn)
-    }
-  }
+  const actorOf = options.actorOf ?? ((by: string) => by)
+  const releasing = options.releasingVersion
+  const releasingIds = options.releasingCrIds ? new Set(options.releasingCrIds) : null
+  const releaseKeyOf = (crId: string): boolean => (releasingIds ? releasingIds.has(crId) : true)
+  const summaries = options.summaries
 
-  // Gom lô được giữ thành dòng: liền nhau cùng ngày + cùng giai đoạn thì dồn, baseline đứng riêng.
-  const rows: { date: string; phase: string; baseline: boolean; cr: boolean; changes: ChangeRecordRow[] }[] = []
-  for (const txn of order) {
-    const group = groups.get(txn) as ChangeRecordRow[]
-    if (!keepInRecordOfChanges(group)) continue
-    const date = group[0].at.slice(0, 10)
-    const baseline = isBaselineTxn(group)
-    const cr = !baseline && isCrTxn(group)
-    const last = rows[rows.length - 1]
-    // Lô không gắn step (xác nhận giả định ở cổng, lệnh sửa chat giữa step) thuộc giai đoạn đang chạy — không cắt nhóm
-    const phase = phaseKeyOf(group[0].step_id) || (last && !last.baseline && last.date === date ? last.phase : "")
-    // Lô CR luôn đứng riêng một dòng (= một version tài liệu), không gộp theo ngày
-    if (!baseline && !cr && last && !last.baseline && !last.cr && last.date === date && last.phase === phase) last.changes.push(...group)
-    else rows.push({ date, phase, baseline, cr, changes: [...group] })
-  }
+  // 1. Gom từ `groupRecordRows`: thêm gộp các CR liền nhau cùng ngày VN, cùng người ghi, cùng lần phát hành (BF §3.2, FLF-466)
+  type RecordItem =
+    | { kind: "baseline"; date: string; changes: ChangeRecordRow[] }
+    | { kind: "phase"; date: string; phase: string; changes: ChangeRecordRow[] }
+    | { kind: "cr"; date: string; actor: string; releaseKey: boolean; crs: { crId: string; changes: ChangeRecordRow[] }[] }
 
-  let base = "v0"
-  let minor = 0
-  let crs = 0
-  let baselines = 0
-  const seenPhases = new Set<string>()
-  const describe = (row: (typeof rows)[number], reasons: readonly string[], raw: readonly string[]): string => {
-    if (row.baseline) return reasons.length > 0 ? describeRow(reasons, language) : text.baselineSigned
-    // FLF-411 (U2-6): dòng CR theo ngôn ngữ tài liệu — tiêu đề CR khác ngôn ngữ (câu chat tiếng Việt) ⇒ mô tả từ thay đổi
-    const crId = row.cr ? row.changes.find((c) => CR_ACTOR.test(c.by))?.by : undefined
-    if (crId) return crRecordDescription(crId, raw, row.changes, language, spine)
-    // Dòng của quy trình: mô tả bằng giai đoạn, kiểu FPT "Create/Update <mục>" — reason từng op là của model
-    const label = phaseLabelOf(row.phase, language)
-    if (label) {
-      const first = !seenPhases.has(row.phase)
-      seenPhases.add(row.phase)
-      return text.phaseRow(first, label)
-    }
-    // Ngoài quy trình (yêu cầu sửa sau baseline): lời của user
-    return reasons.length > 0 ? describeRow(reasons, language) : text.documentUpdated
-  }
-  const out: RocRow[] = []
-  for (const row of rows) {
-    // FLF-361: lô vẽ sơ đồ lúc import (`by: import`, lý do "render") là việc của máy, không in vào mô tả dòng v0.1
-    const raw = row.changes
-      .filter((c) => !(c.by === "import" && c.reason === "render"))
-      .map((c) => c.reason)
-      .filter((r): r is string => !!r && !INTERNAL_REASON.test(r) && !MACHINE_REASON.test(r))
-    const reasons = [...new Set(raw.map((r) => toDocumentLanguage(r, language)))]
-    let version: string
+  const items: RecordItem[] = []
+  for (const row of groupRecordRows(changes)) {
+    const last = items[items.length - 1]
     if (row.baseline) {
-      // Fallback khớp `nextBaselineVersion` (baseline.service) khi lý do không mang mã
-      const found = raw.map((r) => BASELINE_VERSION.exec(r)?.[0]).find((v) => v !== undefined)
-      version = found ? withV(found) : `v1.${baselines}`
-      baselines += 1
-      base = version.replace(/-conditional$/, "")
-      minor = 0
-      crs = 0
-      // FLF-361: baseline của bản import trùng bản với dòng import (`v0.1`) ⇒ không in thêm dòng "Baseline 0.1 signed"
-      if (isImportBaseline(row.changes) && out[out.length - 1]?.version === version) continue
+      items.push({ kind: "baseline", date: row.date, changes: row.changes })
     } else if (row.cr) {
-      // Mode 1: mỗi CR một bản tài liệu (`DocVersion` minor kế tiếp), mốc không đổi
-      crs += 1
-      version = nthDraftAfter(base, crs)
+      const crId = row.changes.find((c) => CR_ACTOR.test(c.by))!.by
+      const actor = actorOf(crId)
+      const releaseKey = releaseKeyOf(crId)
+      if (last?.kind === "cr" && last.date === row.date && last.actor === actor && last.releaseKey === releaseKey) {
+        last.crs.push({ crId, changes: row.changes })
+      } else {
+        items.push({ kind: "cr", date: row.date, actor, releaseKey, crs: [{ crId, changes: row.changes }] })
+      }
     } else {
-      minor += 1
-      version = `${base}.${minor}`
+      items.push({ kind: "phase", date: row.date, phase: row.phase, changes: row.changes })
     }
-    out.push({
-      date: row.date,
-      version,
-      change_type: changeTypeOf(new Set(row.changes.map((c) => c.op))),
-      in_charge: [...new Set(row.changes.map((c) => resolveInCharge(c.by)))].join(", "),
-      description: describe(row, reasons, raw)
-    })
   }
+
+  // 2. Version của từng mục = số của baseline kế tiếp trong log (duyệt từ cuối); sau baseline cuối: `-` (CR của gói đang phát hành: số đó)
+  const baselineNumber = (changesOfItem: readonly ChangeRecordRow[]): string => {
+    const found = changesOfItem.map((c) => (c.reason ? BASELINE_VERSION.exec(c.reason)?.[0] : undefined)).find((v) => v !== undefined)
+    return found ? found.replace(/^v/, "").replace(/-conditional$/, "") : "-"
+  }
+  const versionAfter: string[] = new Array(items.length).fill("-")
+  let next = "-"
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]
+    if (item.kind === "baseline") next = baselineNumber(item.changes)
+    versionAfter[i] = next
+  }
+
+  // 3. Dòng
+  const out: RocRow[] = []
+  const seenPhases = new Set<string>()
+  const namesOf = (rows: readonly ChangeRecordRow[]): string => [...new Set(rows.map((c) => resolveInCharge(c.by)))].join(", ")
+  items.forEach((item, i) => {
+    if (item.kind === "baseline") {
+      const reasons = [...new Set(item.changes.map((c) => c.reason).filter((r): r is string => !!r && !INTERNAL_REASON.test(r)).map((r) => toDocumentLanguage(r, language)))]
+      out.push({ date: item.date, version: versionAfter[i], change_type: changeTypeOf(new Set(item.changes.map((c) => c.op))), in_charge: namesOf(item.changes), description: versionAfter[i] !== "-" ? toDocumentLanguage(`Baseline ${versionAfter[i]}`, language) : reasons.length > 0 ? describeRow(reasons, language) : text.baselineSigned })
+      return
+    }
+    if (item.kind === "cr") {
+      for (const bucket of KIND_ORDER) {
+        const picked = item.crs
+          .map((cr) => ({ crId: cr.crId, changes: cr.changes.filter((c) => changeKindOf(c) === bucket) }))
+          .filter((cr) => cr.changes.length > 0)
+        if (picked.length === 0) continue
+        const crIds = picked.map((p) => p.crId)
+        const rows = picked.flatMap((p) => p.changes)
+        const version = versionAfter[i] !== "-" ? versionAfter[i] : releasing && (!releasingIds || crIds.every((id) => releasingIds.has(id))) ? releasing : "-"
+        const crSummaries = crIds.length === 1 ? summaries?.get(crIds[0]) : undefined
+        out.push({ date: item.date, version, change_type: bucket, in_charge: namesOf(rows), description: crRowDescription(crIds, rows, language, spine, crSummaries) })
+      }
+      return
+    }
+    // Dòng của quy trình: mô tả bằng giai đoạn, kiểu FPT "Create/Update <mục>" — reason từng op là của model
+    const raw = item.changes.map((c) => c.reason).filter((r): r is string => !!r && !INTERNAL_REASON.test(r) && !MACHINE_REASON.test(r))
+    const reasons = [...new Set(raw.map((r) => toDocumentLanguage(r, language)))]
+    const label = phaseLabelOf(item.phase, language)
+    let description: string
+    if (label) {
+      const first = !seenPhases.has(item.phase)
+      seenPhases.add(item.phase)
+      description = text.phaseRow(first, label)
+    } else description = reasons.length > 0 ? describeRow(reasons, language) : text.documentUpdated // Ngoài quy trình: lời của user
+    out.push({ date: item.date, version: versionAfter[i], change_type: changeTypeOf(new Set(item.changes.map((c) => c.op))), in_charge: namesOf(item.changes), description })
+  })
   return out
 }
 

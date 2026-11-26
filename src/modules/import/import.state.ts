@@ -1,14 +1,18 @@
 /**
  * Máy trạng thái import (mode 1, Flow 1 nút 1.1–1.13) — hàm thuần, không đụng DB. FLF-171, plan §5.2.
  *
- * FLF-343 — chế độ 1 chạy một mạch: một điểm dừng duy nhất là `extracting` chưa chạy (màn báo credit + câu hỏi "bản mới
- * nhất"), rồi I-4 ⇒ baseline 0.1 ⇒ kiểm tra ⇒ `gap_review` (FE vào thẳng trang tạo CR) không chờ người dùng:
+ * FLF-343 — chế độ 1 chạy một mạch, chỉ dừng khi cần: điểm dừng #1 là `extracting` chưa chạy (màn báo credit + câu hỏi
+ * "bản mới nhất"), rồi I-4; điểm dừng #2 (FLF-462, bước 1.6) là `fields_review` - chỉ khi còn phần tử / đoạn lớp 4 độ tin
+ * thấp, hoặc mục tên đúng nội dung sai chưa xác nhận (UC-22 `PATCH /import/fields`); không có gì cần xác nhận thì bỏ qua,
+ * đi thẳng baseline 0.1 ⇒ kiểm tra ⇒ `gap_review` (FE vào thẳng trang tạo CR) không chờ người dùng:
  * uploaded ─┬─ preflight_rejected                        (1.2 bị từ chối — user upload file khác = bản ghi mới)
  *           └─ parsing ─► extracting                    (tách file + khớp mẫu; mục độ tin thấp tự nhận + cờ "Cần xem")
- * extracting ─► baselining                              (job I-4 xong ⇒ job finalize nối tiếp, base_version do server tính)
+ * extracting ─┬─ fields_review ─► baselining            (có gì cần xác nhận ở bước 1.6, FLF-462)
+ *             └─ baselining                              (job I-4 xong, không có gì cần xác nhận ⇒ job finalize nối tiếp,
+ *                                                         base_version do server tính)
  * baselining ─► checking ─► gap_review                  (1.10 → 1.11/1.12)
  * Bản ghi cũ (trước FLF-343) còn đi được nhánh: uploaded ─► awaiting_latest_confirm ─► parsing ─► mapping_review ─►
- * extracting ─► fields_review ─► baselining — `POST /import/extract` / `/import/resume` đưa chúng về luồng một mạch.
+ * extracting ─► fields_review ─► baselining — `POST /import/extract` đưa chúng về luồng một mạch.
  * gap_review ─► delivered | change_requested
  * delivered ─► change_requested                         (giao gap report xong, sau đó mới quyết định sửa)
  * incomplete ─► drafting                                (FLF-278 trên FLF-336: chế độ 3 sang Luồng 2 — dự án chạy pipeline

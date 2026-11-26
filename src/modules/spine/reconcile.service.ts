@@ -36,7 +36,9 @@ import { assertDraftUnlocked } from "./draft-lock.js"
 import { expandIndexSelectors } from "./index-selector-fix.js"
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { accountLocaleOf } from "../user/account-locale.js"
-import { applyTransaction } from "./op-engine.js"
+import { TransactionRejectedError, applyTransaction, planTransaction } from "./op-engine.js"
+import { labelOf, removedItems } from "../change-request/content-removal.js"
+import { elementPathOf, elementValue } from "../change-request/spine-location.js"
 import * as repository from "./spine.repository.js"
 import { acceptSeqByStep, computeSectionStates, isCancelledAfter, isRerenderOnly, revertPairs } from "./section-status.js"
 import { sectionsOfPath, stepsOf } from "./section-registry.js"
@@ -205,6 +207,25 @@ const proposeOps = async (
   return { ops: expandIndexSelectors(spine, ops), sections, localized, language: language ?? null }
 }
 
+/**
+ * FLF-493: mục (phần tử, hoặc mục con có id như quy tắc / validation) mà lô op hoà giải sẽ xoá. Chạy khô lô; không chạy
+ * khô được ⇒ chỉ đếm op `remove` cả phần tử (không nhận ra mục con bị bỏ khỏi một op `set` cả mảng).
+ */
+export const droppedByOps = (spine: Spine, ops: readonly Op[]): { path: string; label: string }[] => {
+  try {
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops: [...ops], by: "reconcile:removed" }, { startSeq: 1 })
+    const elements = ops.map((op) => elementPathOf(op.path)).filter((p): p is string => !!p)
+    return removedItems(spine, plan.spine, elements)
+  } catch (err) {
+    if (!(err instanceof TransactionRejectedError)) throw err
+    return ops.flatMap((op) => {
+      if (op.op !== "remove" || elementPathOf(op.path) !== op.path) return []
+      const was = elementValue(spine, op.path)
+      return was === undefined ? [] : [{ path: op.path, label: labelOf(was) }]
+    })
+  }
+}
+
 // ─── điểm vào ────────────────────────────────────────────────────
 
 export interface ReconcileBody {
@@ -337,7 +358,9 @@ export const reconcile = async (
   // có nút xác nhận và cờ không bao giờ gỡ được (E2E FAP: "Viết lại" → "Không có thay đổi nào").
   if (preview.ok && preview.changes.length === 0) return noChange()
   if (preview.preview_id !== undefined) reconciledSections.set(preview.preview_id, proposed.sections)
-  return preview
+  // FLF-493: hoà giải không có cổng xoá như CR ⇒ báo mục sẽ bị xoá để FE nêu rõ trước khi áp (không tự bỏ op)
+  const removed = preview.ok ? droppedByOps(spine, proposed.ops) : []
+  return removed.length > 0 ? { ...preview, removed_items: removed } : preview
 }
 
 /**

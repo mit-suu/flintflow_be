@@ -4,7 +4,7 @@
  * Code đổi id trùng sang id chưa dùng (cùng khuôn với tài liệu) thay vì bắt AI làm lại. Hàm thuần — không DB.
  */
 
-import { ID_FORMATS, formatFor, isPlaceholderId, nextIdIn } from "../spine/id-allocator.js"
+import { ID_FORMATS, formatFor, isPlaceholderId, nextIdIn, type RetiredIds } from "../spine/id-allocator.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { IChangeLocation } from "./change-location.model.js"
 
@@ -34,14 +34,18 @@ type IdLocation = Pick<IChangeLocation, "location_id" | "conclusion" | "proposal
  * cùng CR vừa thêm ⇒ id kế tiếp chưa dùng. Tham chiếu tới id cũ trong **op `add` khác** của CR đổi theo (phần tử mới
  * nhắc phần tử mới — model tưởng id đó còn trống); op `set`/`remove` giữ nguyên vì nhắm phần tử có sẵn.
  * Ghi đè `proposal.spine_ops` của vị trí bị đổi; trả các vị trí đó (caller tính lại `new_text` rồi lưu).
+ *
+ * `retired` (FLF-474): mã đã từng bị xoá của dự án (`spine/change-log.ts` `retiredIds`) — model nhìn Spine hiện tại
+ * nên rất hay tự đặt đúng mã vừa bị xoá (lớn nhất trong khuôn); coi mã đó cũng là "đã dùng" để không bị cấp lại.
  */
-export const reassignDuplicateIds = <L extends IdLocation>(spine: Spine, locations: readonly L[]): L[] => {
+export const reassignDuplicateIds = <L extends IdLocation>(spine: Spine, locations: readonly L[], retired: RetiredIds = new Map()): L[] => {
   const taken = new Map<string, Set<string>>()
   const takenIn = (collection: string): Set<string> => {
     let set = taken.get(collection)
     if (!set) {
       const list = (spine as unknown as Rec)[collection]
       set = new Set(Array.isArray(list) ? list.flatMap((el) => (isRecord(el) && typeof el.id === "string" ? [el.id] : [])) : [])
+      for (const id of retired.get(collection) ?? []) set.add(id)
       taken.set(collection, set)
     }
     return set

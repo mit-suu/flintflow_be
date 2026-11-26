@@ -245,3 +245,78 @@ export const patchFunctionOriginal = (blocks: readonly FunctionOriginalBlock[], 
   }
   return out
 }
+
+/** Dòng nhãn riêng của file ("Normal case:", "Validation"): đoạn ngắn, không câu văn. */
+const LABEL_LINE = /^[^:.;!?\n]{1,45}:?$/
+
+/** Nhãn đầu dòng của khối chứa một phần tử ("Function trigger: …"): phần chữ đứng trước giá trị. */
+const inlineLabel = (text: string, value: string | undefined): string | null => {
+  const t = text.trim()
+  if (value) {
+    const at = norm(t).toLowerCase().indexOf(norm(value).toLowerCase())
+    if (at <= 0) return null
+    const m = /^([^:\n]{1,45}):\s*$/.exec(norm(t).slice(0, at))
+    return m ? m[1].trim() : null
+  }
+  const m = /^([^:\n.;,!?]{1,45}):\s+\S/.exec(t)
+  return m && m[1].trim().split(/\s+/).length <= 5 ? m[1].trim() : null
+}
+
+/**
+ * FLF-468 (E2E-1): thân của chức năng MỚI (CR thêm, file không có mục cho nó) theo khuôn của một chức năng anh em trong file —
+ * cùng nhãn đầu dòng ("Function trigger: …"), cùng kiểu khối (đoạn / dòng danh sách), cùng thứ tự trường; không thẻ loại
+ * validation. Hàm thuần.
+ * - Trường vô hướng (trigger, mô tả): một đoạn "Nhãn: giá trị".
+ * - Trường danh sách: đoạn nhãn riêng của file (nếu có) rồi mỗi phần tử một khối cùng kiểu với file; file ghi nhãn ngay trong
+ *   khối ("Validation: …") thì mỗi phần tử mang nhãn đó.
+ * - Trường mà mục mẫu không có (chữ lúc import) ⇒ nhãn mặc định `FIELD_LABEL`, đặt cuối.
+ * `null` khi mục mẫu không dùng được (không có khối nào gắn phần tử, hoặc dùng tiêu đề con — khi đó người gọi dùng khung FPT).
+ * `siblingValues`: chữ từng trường của mục mẫu lúc import — tách nhãn đầu dòng chính xác hơn đoán theo dấu hai chấm.
+ */
+export const functionBlocksLikeSibling = (
+  sibling: readonly FunctionOriginalBlock[],
+  values: FunctionFieldValues,
+  siblingValues?: Readonly<FunctionFieldValues>
+): FunctionOriginalBlock[] | null => {
+  if (sibling.some((b) => b.kind === "heading") || !sibling.some((b) => b.tags?.length)) return null
+  interface Shape {
+    field: FunctionTextField
+    at: number
+    kind: "paragraph" | "list_item"
+    label: string | null
+    labelLine: string | null
+  }
+  const shapes: Shape[] = []
+  for (const field of FUNCTION_TEXT_FIELDS) {
+    const at = sibling.findIndex((b) => b.tags?.some((t) => t.field === field))
+    if (at < 0) continue
+    const first = sibling[at]
+    const tag = first.tags!.find((t) => t.field === field)!
+    const text = textOf(first) ?? ""
+    const value = siblingValues?.[field]?.[tag.index]
+    const label = inlineLabel(text, tag.part !== undefined && value ? partsOf(value)[tag.part] : value)
+    const prev = at > 0 ? sibling[at - 1] : undefined
+    const prevText = prev && !prev.tags?.length && prev.kind === "paragraph" ? prev.text.trim() : ""
+    // Nhãn riêng dòng chỉ cho trường danh sách (đứng ngay trước phần tử đầu); trường vô hướng thì nhãn nằm trong khối
+    const labelLine = !SCALAR.has(field) && !label && prevText && LABEL_LINE.test(prevText) ? prevText : null
+    shapes.push({ field, at, kind: first.kind === "list_item" ? "list_item" : "paragraph", label, labelLine })
+  }
+  shapes.sort((a, b) => a.at - b.at)
+  const out: FunctionOriginalBlock[] = []
+  const emit = (field: FunctionTextField, shape: Shape | undefined): void => {
+    const vals = values[field] ?? []
+    if (!vals.length) return
+    const label = shape ? shape.label : FIELD_LABEL[field]
+    const kind = shape?.kind ?? (SCALAR.has(field) ? "paragraph" : "list_item")
+    if (SCALAR.has(field)) {
+      out.push(...vals.map((v) => block("paragraph", label ? `${label}: ${v}` : v)))
+      return
+    }
+    const header = shape ? shape.labelLine : `${FIELD_LABEL[field]}:`
+    if (header) out.push(block("paragraph", header))
+    out.push(...vals.map((v) => block(kind, shape?.label ? `${shape.label}: ${v}` : v)))
+  }
+  for (const shape of shapes) emit(shape.field, shape)
+  for (const field of FUNCTION_TEXT_FIELDS) if (!shapes.some((s) => s.field === field)) emit(field, undefined)
+  return out
+}

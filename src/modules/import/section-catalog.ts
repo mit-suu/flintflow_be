@@ -10,6 +10,8 @@
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import { UNMAPPED_SECTION } from "./import.constants.js"
 import { isContentSlot } from "./content-slots.js"
+import { foldText, splitHeadingNumber } from "./text-similarity.js"
+import { isPlaceholderText } from "./template-markers.js"
 
 export interface SectionCandidate {
   id: string
@@ -112,4 +114,24 @@ export const isKnownSectionId = (id: string): boolean =>
 /** Section có nội dung để trích (không phải nhóm, không unmapped). */
 export const isContentSection = (id: string | null): id is string => !!id && id !== UNMAPPED_SECTION && !isGroupSection(id)
 
-export const sectionTitle = (id: string): string => SECTION_CANDIDATES.find((c) => c.id === id)?.titles[0] ?? id
+/** `language: "vi"` ⇒ tên tiếng Việt đầu tiên trong danh sách (FLF-480): mẫu cố định hiện "Quy tắc nghiệp vụ" thay "Business Rule". */
+export const sectionTitle = (id: string, language?: "vi" | "en"): string => {
+  const titles = SECTION_CANDIDATES.find((c) => c.id === id)?.titles
+  if (!titles) return id
+  if (language === "vi") return titles.find((t) => /[^\x00-\x7f]/.test(t)) ?? titles[0]
+  return titles[0]
+}
+
+/**
+ * FLF-491: id mục khung theo danh mục cho heading đứng ngoài khung (`custom:*` / `unmapped`). Tên (bỏ số mục) trùng **đúng** một
+ * tên trong `titles` của mục cố định ⇒ id đó. Tên là chỗ điền / rỗng mà số mục trùng số của một mục cố định ("4.2.4 …") ⇒ id đó.
+ * Không so gần đúng. Không khớp ⇒ `null`.
+ */
+export const catalogSectionOf = (headingText: string): string | null => {
+  const { number, title } = splitHeadingNumber(headingText)
+  const fixed = SECTION_CANDIDATES.filter((c) => c.kind === "fixed")
+  if (!title.trim() || isPlaceholderText(title)) return number ? (fixed.find((c) => c.number === number)?.id ?? null) : null
+  const folded = foldText(title)
+  if (!folded) return null
+  return fixed.find((c) => c.titles.some((t) => foldText(t) === folded))?.id ?? null
+}

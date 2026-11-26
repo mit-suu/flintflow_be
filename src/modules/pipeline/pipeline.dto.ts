@@ -48,6 +48,9 @@ export const PIPELINE_ERROR_STATUS = {
   REGENERATE_LIMIT: 409,
   CALL_LIMIT: 409,
   STEP_NOT_RUNNABLE: 409,
+  /** FLF-466 P08: chưa xác nhận credit (sau Approve Brief / chốt danh sách màn / thêm màn) — `POST /run-estimate/ack` rồi chạy lại. */
+  CREDIT_ACK_REQUIRED: 409,
+  NO_CREDIT_ACK_PENDING: 409,
   NO_WORKING_DRAFT: 409,
   INVARIANT_VIOLATION: 422,
   OP_INVALID: 422,
@@ -177,6 +180,8 @@ export const changesPreviewResponseSchema = z.object({
   notes: z.string().optional(),
   /** Hoà giải (BUG-16): không có gì cần đổi — gửi lại `preview_id` để xác nhận section nguyên trạng. */
   no_change: z.boolean().optional(),
+  /** FLF-493 (hoà giải): mục lô op sẽ xoá (quy tắc, validation, phần tử…) — FE hiện khối đỏ trước khi áp. */
+  removed_items: z.array(z.object({ path: z.string(), label: z.string() })).optional(),
   /** Nguyên tắc 6: AI thấy yêu cầu không hợp lý — không bao giờ tự ghi; "Vẫn làm" = áp `preview_id` như thường. */
   warning: z.string().optional(),
   /** Cờ đỏ mới mà bản sửa sẽ mở (Code tính trước / sau) — sửa này sẽ chặn baseline. */
@@ -521,7 +526,9 @@ export const gateResponseSchema = z.object({
   next_step: z.string().nullable(),
   spine_version: baseVersion,
   /** FLF-232: sau `revision`, lời AI xác nhận bằng chữ điều vừa sửa (từ `notes` của lượt soạn lại). Thiếu với accept/regenerate. */
-  message_vi: z.string().optional()
+  message_vi: z.string().optional(),
+  /** FLF-489: bước vừa duyệt đã từng được chốt trước lượt này (chạy lại bước đã qua, hoặc bước bị hoà giải mở lại). Client không tự chạy tiếp quy trình, trừ khi chính nó đang chạy liền cả giai đoạn. */
+  rerun: z.boolean().optional()
 })
 
 // ─── progress / flags ────────────────────────────────────────────
@@ -626,7 +633,26 @@ export const runEstimateQuerySchema = z.object({
   /** `unit`: chỉ đơn vị giai đoạn của bước đầu; `all`: tới hết pipeline (sau Approve Brief). */
   scope: z.enum(["unit", "all"]).default("all"),
   /** Id bước hoặc đơn vị giai đoạn (`S-4`, `S-5@S03`) để bắt đầu đếm; thiếu ⇒ bước tới lượt. */
-  from: z.string().min(1).optional()
+  from: z.string().min(1).optional(),
+  /** FLF-466 P08: lần báo cần tính; thiếu ⇒ theo `progress.credit_ack_required` nếu có. */
+  scope_kind: z.enum(["after_brief", "screens_locked", "screens_added"]).optional()
+})
+
+export const creditAckRequiredSchema = z.object({
+  scope: z.enum(["after_brief", "screens_locked", "screens_added"]),
+  credits: z.number().min(0),
+  created_at: z.string(),
+  screens: z.array(z.string()).optional()
+})
+
+export const screenRangeSchema = z.object({
+  min: z.number().int().min(0),
+  max: z.number().int().min(0),
+  credits_per_screen: z.number().min(0),
+  credits_min: z.number().min(0),
+  credits_max: z.number().min(0),
+  inputs: z.object({ goals: z.number().int(), other_requirements: z.number().int(), feature_notes: z.number().int(), total: z.number().int() }),
+  estimated: z.literal(true)
 })
 
 export const runEstimateUnitSchema = z.object({
@@ -634,7 +660,13 @@ export const runEstimateUnitSchema = z.object({
   steps: z.number().int().min(0),
   ai_steps: z.number().int().min(0),
   interview_credits: z.number().min(0),
-  credits: z.number().min(0)
+  /** Cận trên (= `credits_max`). */
+  credits: z.number().min(0),
+  /** FLF-485: cận dưới / cận trên; đơn vị chính xác thì bằng nhau, chỉ đơn vị S-5 ước tính mới khác. */
+  credits_min: z.number().min(0),
+  credits_max: z.number().min(0),
+  /** Khoảng số màn, chỉ có ở đơn vị S-5 ước tính (chưa có danh sách màn). */
+  screens: z.object({ min: z.number().int().min(0), max: z.number().int().min(0) }).optional()
 })
 
 export const runEstimateResponseSchema = z.object({
@@ -643,9 +675,27 @@ export const runEstimateResponseSchema = z.object({
   units: z.array(runEstimateUnitSchema),
   steps_total: z.number().int().min(0),
   ai_steps_total: z.number().int().min(0),
+  /** Cận trên (= `credits_max`). */
   credits_total: z.number().min(0),
+  credits_min: z.number().min(0),
+  credits_max: z.number().min(0),
+  /** `screens` = đã có màn (chính xác); còn lại là khoảng đoán theo use case / Brief / mặc định; null khi lượt chạy không đi qua vòng màn hình. */
+  screen_estimate: z
+    .object({ min: z.number().int().min(0), max: z.number().int().min(0), basis: z.enum(["screens", "use_cases", "brief", "default"]) })
+    .nullable(),
   /** `balance − reserved` của ví org sở hữu project; null khi không xác định được ví. */
-  available_credits: z.number().nullable()
+  available_credits: z.number().nullable(),
+  // FLF-466 P08 — chỉ thêm trường
+  scope_kind: z.enum(["after_brief", "screens_locked", "screens_added"]).nullable(),
+  screen_range: screenRangeSchema.nullable(),
+  ack_required: creditAckRequiredSchema.nullable()
+})
+
+/** POST /projects/:id/run-estimate/ack — user xác nhận lần báo credit đang chờ (FLF-466 P08). */
+export const runEstimateAckResponseSchema = z.object({
+  scope: z.enum(["after_brief", "screens_locked", "screens_added"]),
+  credits: z.number().min(0),
+  spine_version: z.number().int()
 })
 
 /** POST /projects/:id/steps/:stepId/cancel */

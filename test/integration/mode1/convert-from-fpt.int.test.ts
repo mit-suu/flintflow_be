@@ -8,6 +8,10 @@ import JSZip from "jszip"
 
 const failVersion = vi.hoisted(() => ({ on: false }))
 
+// Mỗi test đi trọn ký baseline + chuyển đổi + CR + ghi version (10–25 s trên máy dev): trần 30 s chung làm CI đỏ ngẫu nhiên
+// (develop 26/11, hai test CR quá 30 s). Không đổi hành vi, chỉ nới trần của file này.
+vi.setConfig({ testTimeout: 90_000 })
+
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
 vi.mock("../../../src/modules/doc-version/doc-version.model.js", async (importOriginal) => {
   const orig = await importOriginal<typeof import("../../../src/modules/doc-version/doc-version.model.js")>()
@@ -133,10 +137,13 @@ describe("FLF-318 - chuyển dự án tạo SRS sang mode 1 khi Lead ký baselin
     expect(versionsResponseSchema.parse((await c.get("/versions")).body.data).map((v) => v.version)).toEqual(["2.0", "1.1", "1.0"])
     // Record of Changes khớp số version tài liệu
     const xml = await documentXml((await binary(c.get("/versions/2.0/download"))).body as Buffer)
-    const printed = [...xml.matchAll(/>(v\d+\.\d+(?:\.\d+)?)</g)].map((m) => m[1])
-    // FLF-361: dòng CR mang số bản tài liệu của CR (v1.1 — đúng bản 1.1 ở trên), release v2.0; không số phụ kiểu mode 2
-    expect(printed).toEqual(expect.arrayContaining(["v1.0", "v1.1", "v2.0"]))
-    expect(printed).not.toContain("v1.0.1")
+    const printed = [...xml.matchAll(/>(v?\d+\.\d+(?:\.\d+)?)</g)].map((m) => m[1])
+    // FLF-466 / FLF-484: cột Version là số lần phát hành chứa dòng, không tiền tố v: baseline 1.0 của mode 2, CR-001 và dòng phát hành
+    // thuộc 2.0; không còn số phụ của bản nháp (1.1) hay số kiểu mode 2 (1.0.1)
+    expect(printed).toEqual(expect.arrayContaining(["1.0", "2.0"]))
+    expect(printed).not.toContain("1.1")
+    expect(printed).not.toContain("1.0.1")
+    expect(printed.filter((v) => v.startsWith("v"))).toEqual([])
   })
 
   it("chuyển đổi lỗi ⇒ vẫn fpt đã ký, không bản ghi dở; mở dự án ⇒ chạy lại thành công, không trùng", async () => {
@@ -466,21 +473,25 @@ describe("FLF-334 B - tải version của dự án chuyển đổi theo ngôn ng
     // lang = ngôn ngữ tài liệu ⇒ như mặc định
     expect(decodeURIComponent((await binary(c.get("/versions/1.0/download?lang=en"))).headers["content-disposition"])).toMatch(/_v1\.0\.docx$/)
 
-    // Bản nháp CR 1.1 không có snapshot baseline: tải và đích #26 đều 409
+    // Bản nháp CR 1.1 (FLF-466 phase 07): dịch theo `spine_snapshot` của chính nó, không lấy Spine sống
     const v11 = versionsResponseSchema.parse((await c.get("/versions")).body.data).find((v) => v.version === "1.1")
-    expect(v11?.other_language_available).toBe(false)
+    expect(v11?.other_language_available).toBe(true)
     const draft = await c.get("/versions/1.1/download?lang=vi")
     expect(draft.status).toBe(409)
-    expect(draft.body.error.code).toBe("DOCUMENT_LANGUAGE_UNAVAILABLE")
-    expect((await c.get("/translations/status?locale=vi&version=1.1")).body.error.code).toBe("DOCUMENT_LANGUAGE_UNAVAILABLE")
+    expect(draft.body.error.code).toBe("TRANSLATION_INCOMPLETE")
+    await translateRest(c, { locale: "vi", version: "1.1" })
+    const vi11 = await binary(c.get("/versions/1.1/download?lang=vi"))
+    expect(vi11.status).toBe(200)
+    expect(await documentXml(vi11.body as Buffer)).toContain("99.9%")
+    // Bản nháp cũ không có snapshot ⇒ 409 SNAPSHOT_UNAVAILABLE, tải và đích #26
+    await DocVersion.updateOne({ projectId: seeded.projectId, version: "1.1" }, { $set: { spine_snapshot: null, baseline_ref: null } })
+    expect((await c.get("/versions/1.1/download?lang=vi")).body.error.code).toBe("SNAPSHOT_UNAVAILABLE")
+    expect((await c.get("/translations/status?locale=vi&version=1.1")).body.error.code).toBe("SNAPSHOT_UNAVAILABLE")
     expect((await c.get("/versions/1.0/download?lang=vi&variant=tracked")).body.error.code).toBe("VALIDATION_ERROR")
     expect((await c.get("/versions/1.0/download?lang=fr")).status).toBe(400)
 
-    // Release 2.0: đoạn CR sửa chưa có bản dịch ⇒ 409; Dịch nốt đích 2.0 ⇒ tải được, có stamp + tên phần A
+    // Release 2.0: chữ CR đã dịch ở bước bản nháp 1.1 (dịch theo hash chữ gốc) ⇒ tải được, có stamp + tên phần A
     expect((await releaseNow(c)).status).toBe(201)
-    const missing20 = await c.get("/versions/2.0/download?lang=vi")
-    expect(missing20.status).toBe(409)
-    expect(missing20.body.error.code).toBe("TRANSLATION_INCOMPLETE")
     await translateRest(c, { locale: "vi", version: "2.0" })
     const vi20 = await binary(c.get("/versions/2.0/download?lang=vi"))
     expect(vi20.status).toBe(200)
@@ -490,11 +501,9 @@ describe("FLF-334 B - tải version của dự án chuyển đổi theo ngôn ng
     expect(props).toContain(seeded.projectId)
     expect(await documentXml(vi20.body as Buffer)).toContain("[vi] ")
 
-    // Dự án import thật (không chuyển đổi) ⇒ không có lựa chọn ngôn ngữ; #26 / #27 hỏi ngôn ngữ khác ⇒ 409
+    // Dự án import thật (không chuyển đổi) cũng tải được ngôn ngữ còn lại qua lớp bản dịch; #26 hỏi ngôn ngữ khác ⇒ 200
     await Project.updateOne({ _id: seeded.projectId }, { $unset: { converted_from: 1 } })
-    expect(versionsResponseSchema.parse((await c.get("/versions")).body.data).every((v) => !v.other_language_available)).toBe(true)
-    expect((await c.get("/versions/2.0/download?lang=vi")).body.error.code).toBe("DOCUMENT_LANGUAGE_UNAVAILABLE")
-    expect((await c.get("/translations/status?locale=vi")).body.error.code).toBe("DOCUMENT_LANGUAGE_UNAVAILABLE")
-    expect((await c.post("/translations/run", { locale: "vi" })).body.error.code).toBe("DOCUMENT_LANGUAGE_UNAVAILABLE")
+    expect(versionsResponseSchema.parse((await c.get("/versions")).body.data).find((v) => v.version === "2.0")?.other_language_available).toBe(true)
+    expect((await c.get("/translations/status?locale=vi")).status).toBe(200)
   })
 })

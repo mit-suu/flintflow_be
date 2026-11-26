@@ -120,10 +120,27 @@ export const idKey = (id: string): string =>
     .replace(/[-_\s]+/g, "")
     .replace(/(^|\D)0+(?=\d)/g, "$1")
 
-/** Id đã biết cùng loại có mã trùng (so theo `idKey`); không có ⇒ `null`. */
+/** Tiền tố tài liệu của mỗi loại phần tử (rút từ `ID_PREFIX`, bỏ dấu nối cuối, viết hoa) — `UC`, `FR`, `BR`, `NFR`, `SCR`, `MSG`… */
+const ENTITY_DOC_PREFIX: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(ID_PREFIX).map(([entity, { prefix }]) => [entity, prefix.replace(/[-_]+$/, "").toUpperCase()])
+)
+
+/**
+ * FLF-476: khoá so mã THEO LOẠI phần tử — như `idKey`, nhưng bỏ thêm tiền tố riêng của chính loại đó khi mã có tiền tố:
+ * `entityKey("use_cases", "UC-02") = entityKey("use_cases", "02") = "2"` (bảng 2.2.2 ghi "02", đoạn 2.2.1 nhắc "UC-02" là
+ * cùng một use case). Chỉ bỏ tiền tố của đúng loại ⇒ `entityKey("use_cases", "BR-02")` vẫn khác `entityKey("use_cases", "02")`
+ * (không đụng mã của loại khác nhắc lẫn trong mục).
+ */
+export const entityKey = (entity: string, id: string): string => {
+  const key = idKey(id)
+  const prefix = ENTITY_DOC_PREFIX[entity]
+  return prefix && key.startsWith(prefix) ? key.slice(prefix.length) : key
+}
+
+/** Id đã biết cùng loại có mã trùng (so theo `entityKey`); không có ⇒ `null`. */
 export const findKnownKey = (known: readonly EntityItem[], entity: string, key: string): string | null => {
-  const k = idKey(key)
-  return known.find((x) => x.entity === entity && x.id !== null && idKey(x.id) === k)?.id ?? null
+  const k = entityKey(entity, key)
+  return known.find((x) => x.entity === entity && x.id !== null && entityKey(entity, x.id) === k)?.id ?? null
 }
 
 /**
@@ -164,13 +181,13 @@ export class IdAllocator {
 
   reserve(entity: string, id: string): void {
     const set = this.used.get(entity) ?? new Set<string>()
-    set.add(idKey(id))
+    set.add(entityKey(entity, id))
     this.used.set(entity, set)
     this.raw.set(entity, [...(this.raw.get(entity) ?? []), id])
   }
 
   has(entity: string, id: string): boolean {
-    return this.used.get(entity)?.has(idKey(id)) ?? false
+    return this.used.get(entity)?.has(entityKey(entity, id)) ?? false
   }
 
   next(entity: string): string {
@@ -339,17 +356,28 @@ export const imageOnlyGenericActors = (fields: readonly Pick<ExtractedField, "pa
 
 /**
  * FLF-361: một phần tử, một cách viết mã — field của cùng phần tử trích từ nhiều nguồn ghi mã khác dạng (`UC01` ở bảng,
- * `UC-01` ở mục đặc tả) ⇒ dùng cách viết gặp đầu tiên cho mọi path (so theo `idKey`). Trước đây `normalizeKey` đổi mọi mã
- * sang `UC-01` nên không trùng, nhưng mất dạng mã của tài liệu.
+ * `UC-01` ở mục đặc tả) ⇒ dùng cách viết gặp đầu tiên cho mọi path (so theo `entityKey` — FLF-476: bỏ cả tiền tố riêng
+ * của loại, "UC-02" của đoạn văn = "02" của bảng). Trước đây `normalizeKey` đổi mọi mã sang `UC-01` nên không trùng,
+ * nhưng mất dạng mã của tài liệu.
+ * FLF-476: cách viết của BẢNG luôn thắng (field `origin: "deterministic"`) dù xuất hiện sau trong tài liệu — đoạn văn
+ * 2.2.1 ("UC-02") thường đứng trước bảng 2.2.2 ("02"); không ưu tiên bảng thì Spine giữ "UC-02" trong khi mọi id khác
+ * của bảng không có tiền tố, lạc khuôn. Không có field nào từ bảng ⇒ giữ cách viết gặp đầu tiên như cũ.
  */
-export const canonicalFieldIds = <F extends { path: string }>(fields: readonly F[]): F[] => {
+export const canonicalFieldIds = <F extends { path: string; origin?: FieldOrigin }>(fields: readonly F[]): F[] => {
   const first = new Map<string, string>()
+  const fromTable = new Map<string, string>()
+  for (const f of fields) {
+    const p = parseFieldPath(f.path)
+    if (!p?.id) continue
+    const key = `${p.entity}|${entityKey(p.entity, p.id)}`
+    if (!first.has(key)) first.set(key, p.id)
+    if (f.origin === "deterministic" && !fromTable.has(key)) fromTable.set(key, p.id)
+  }
   return fields.map((f) => {
     const p = parseFieldPath(f.path)
     if (!p?.id) return f
-    const key = `${p.entity}|${idKey(p.id)}`
-    const id = first.get(key) ?? p.id
-    first.set(key, id)
+    const key = `${p.entity}|${entityKey(p.entity, p.id)}`
+    const id = fromTable.get(key) ?? first.get(key)!
     return id === p.id ? f : { ...f, path: f.path.replace(`${p.entity}[id=${p.id}]`, `${p.entity}[id=${id}]`) }
   })
 }

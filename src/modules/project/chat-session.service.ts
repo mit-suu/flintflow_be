@@ -11,7 +11,9 @@ import { chatDocumentQuery } from "../../shared/ai/document-retrieval/query.js"
 import * as changeService from "../spine/change.service.js"
 import { changeErrorReply, clarificationRounds, formatChatContext, pendingChangeRequest, previewPayload } from "../spine/change-transcript.js"
 import { submitAnswer } from "../pipeline/step-runner.service.js"
-import { currentBatch, followUpReply, shapeChatQuestions } from "../pipeline/question-shape.js"
+import { currentBatch, followUpReply, shapeChatQuestions, verifiedDecisionUpdates } from "../pipeline/question-shape.js"
+import { decisionOps, ledgerForPrompt } from "../pipeline/decisions.service.js"
+import { applyTransaction } from "../spine/op-engine.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { replyLanguageForSession, typedPartOf } from "./reply-language.service.js"
 import { KNOWLEDGE_DAILY_LIMIT, answerKnowledgeQuestion, type KnowledgeAnswer } from "../knowledge/answer.service.js"
@@ -33,8 +35,8 @@ import { claimUserMessage } from "./user-message-dedupe.js"
  */
 const shapeChatReply = (data: unknown): unknown => {
   if (typeof data !== "object" || data === null || Array.isArray(data)) return data
-  // `edit_request` chỉ là tín hiệu rẽ luồng, không lưu vào tin
-  const { edit_request: _editRequest, ...reply } = data as Record<string, unknown>
+  // `edit_request` chỉ là tín hiệu rẽ luồng, `decision_updates` đã ghi vào sổ (FLF-472) — không lưu vào tin
+  const { edit_request: _editRequest, decision_updates: _decisionUpdates, ...reply } = data as Record<string, unknown>
   // FLF-355: một lượt một loại câu — nhóm khác loại lưu kèm tin, tin user kế tiếp nhận nó (`askDeferredQuestions`)
   const { now, later } = currentBatch(shapeChatQuestions(reply.questions))
   return { ...reply, questions: now, ...(later.length > 0 ? { deferred_questions: later } : {}) }
@@ -46,6 +48,35 @@ const shapeChatReply = (data: unknown): unknown => {
  */
 export const chatAskedForEdit = (data: unknown): boolean =>
   typeof data === "object" && data !== null && (data as { edit_request?: unknown }).edit_request === true
+
+/**
+ * FLF-472 (phần 5b): lượt chat thường mà tin user SỬA một điều đã chốt trong sổ quyết định ("GHN và GHTK cũng nối API nhé").
+ * Model báo `decision_updates`; server kiểm (chủ đề có trong sổ, đáp án là trích đoạn nguyên văn của tin, khác đáp án cũ) rồi
+ * ghi bằng `decisionOps` — dòng cũ mang `superseded_by`, giữ lịch sử. Chỉ sổ quyết định: Spine đã soạn đổi theo đường lệnh sửa.
+ * Lỗi ghi chỉ log — lời chat vẫn trả cho user. Trả số đính chính đã ghi.
+ */
+export const applyChatDecisionUpdates = async (
+  projectId: string,
+  userId: string,
+  step: string,
+  data: unknown,
+  message: string
+): Promise<number> => {
+  const raw = typeof data === "object" && data !== null ? (data as { decision_updates?: { topic_key: string; answer: string }[] }).decision_updates : undefined
+  if (!Array.isArray(raw) || raw.length === 0) return 0
+  try {
+    const record = await spineRepository.get(projectId)
+    if (!record) return 0
+    const updates = verifiedDecisionUpdates(record, raw, message)
+    const ops = decisionOps(record, step, updates)
+    if (ops.length === 0) return 0
+    await applyTransaction(projectId, { base_version: record.spine_version, ops, by: userId, step_id: null, reason: "Đính chính qua chat" })
+    return updates.length
+  } catch (error) {
+    console.error("[decision-update] không ghi được đính chính qua chat:", error)
+    return 0
+  }
+}
 
 /** Dự án sửa được qua chat (không phải chế độ 1, nơi mọi thay đổi đi qua CR) — báo cho prompt CHAT. */
 const editInChatFlag = async (projectId: string): Promise<"yes" | "no"> => ((await changesRequireCr(projectId)) ? "no" : "yes")
@@ -368,7 +399,9 @@ const chatTurn = async (
     input_text: content,
     documentContext: docContext.contextText,
     spine_index: chatSpineIndexFor(spine, content) || NO_SPINE_INDEX,
-    edit_in_chat: await editInChatFlag(projectId)
+    edit_in_chat: await editInChatFlag(projectId),
+    // FLF-472: sổ quyết định còn hiệu lực (kèm câu hỏi) — để model nhận ra tin sửa lại một điều đã chốt
+    decisions: ledgerForPrompt({ decisions: spine?.decisions ?? [] })
   }
 
   // 6. Execute AI Action
@@ -405,6 +438,7 @@ const chatTurn = async (
   }
 
   // 7. Add AI response to history
+  await applyChatDecisionUpdates(projectId, userId, step, aiResult.data, content)
   const replyData = shapeChatReply(aiResult.data)
   const contentToStore = typeof replyData === "string"
     ? replyData
@@ -581,7 +615,9 @@ const streamChatTurn = async (
     input_text: content,
     documentContext: docContext.contextText,
     spine_index: chatSpineIndexFor(spine, content) || NO_SPINE_INDEX,
-    edit_in_chat: await editInChatFlag(projectId)
+    edit_in_chat: await editInChatFlag(projectId),
+    // FLF-472: sổ quyết định còn hiệu lực (kèm câu hỏi) — để model nhận ra tin sửa lại một điều đã chốt
+    decisions: ledgerForPrompt({ decisions: spine?.decisions ?? [] })
   }
 
   // 6. Execute stream with Vercel AI SDK
@@ -617,6 +653,7 @@ const streamChatTurn = async (
     }
 
     // 7. Add AI response to MongoDB history
+    await applyChatDecisionUpdates(projectId, userId, step, aiResult.data, content)
     const replyData = shapeChatReply(aiResult.data)
     const contentToStore = typeof replyData === "string"
       ? replyData

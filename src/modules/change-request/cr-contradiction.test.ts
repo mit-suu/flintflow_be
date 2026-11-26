@@ -8,7 +8,9 @@ import { parseResponse } from "../../shared/ai/response-parser.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
-import { CONTRADICTION_CHOICES, WARNING_CHOICES, newContradictions, pickedProceed } from "./clarify.service.js"
+import { CONTRADICTION_CHOICES, WARNING_CHOICES, asksForValue, newContradictions, pickedProceed, unansweredContradictions } from "./clarify.service.js"
+import { answersText } from "./cr-context.js"
+import { clarifyRoundOf } from "./change-request.service.js"
 import { RELATED_PASSAGES_CHARS, crProjection, plainValues, relatedElements, relatedPassages, relatedRules } from "./cr-context.js"
 import { scopeText } from "./verify.service.js"
 
@@ -148,5 +150,47 @@ describe("C-2 cảnh báo rồi người yêu cầu chọn làm tiếp", () => {
     const base = { ambiguous: false, targets: { keywords: ["đăng nhập"] } }
     expect((parseResponse(JSON.stringify({ ...base, warning_accepted: true }), ActionType.CR_CLARIFY) as { warning_accepted?: boolean }).warning_accepted).toBe(true)
     expect((parseResponse(JSON.stringify({ ...base, warning_accepted: "yes" }), ActionType.CR_CLARIFY) as { warning_accepted?: boolean }).warning_accepted).toBeUndefined()
+  })
+})
+
+describe("FLF-474: câu mâu thuẫn không hỏi lại khi model diễn đạt khác", () => {
+  const old = "CR đổi số lần khoá thành 3 nhưng phần Chính sách bảo mật ghi khoá sau 5 lần đăng nhập sai. Áp dụng con số nào?"
+
+  it("câu mới khác câu cũ vài từ ⇒ bỏ (không so nguyên văn)", () => {
+    const cr = { clarifications: [{ round: 1, questions: [old], answers: [], suggestions: [], kinds: ["contradiction"] }] }
+    const reworded = "CR đổi số lần khoá thành 3, nhưng phần Chính sách bảo mật ghi là khoá sau 5 lần đăng nhập sai. Con số nào được áp dụng?"
+    expect(newContradictions(cr as never, [{ question: reworded, suggestions: [] }])).toEqual([])
+  })
+
+  it("câu cũ đã đổi mã sang tên, câu mới còn mã ⇒ vẫn nhận ra là một", () => {
+    const stored = "Phần 'Chính sách bảo mật' ghi khoá sau 5 lần, CR đổi thành 3 lần. Áp dụng con số nào?"
+    const raw = "Phần CS27 ghi khoá sau 5 lần, CR đổi thành 3 lần. Áp dụng con số nào?"
+    const cr = { clarifications: [{ round: 1, questions: [stored], answers: [""], suggestions: [] }] }
+    expect(newContradictions(cr as never, [{ question: raw, suggestions: [] }])).toHaveLength(1)
+    const named = (t: string) => t.replace("CS27", "'Chính sách bảo mật'")
+    expect(newContradictions(cr as never, [{ question: raw, suggestions: [] }], "vi", { name: named })).toEqual([])
+  })
+
+  it("câu 'ai / bao nhiêu' mà model không gợi ý ⇒ không gắn lựa chọn đổi / giữ", () => {
+    const out = newContradictions({ clarifications: [] } as never, [{ question: "Tác nhân của UC-11 nên là ai?", suggestions: [] }])
+    expect(out).toEqual([{ question: "Tác nhân của UC-11 nên là ai?", suggestions: [] }])
+    expect(asksForValue("Bao nhiêu lần thử là hợp lý?")).toBe(true)
+    expect(asksForValue("Hai con số khác nhau, áp dụng cái nào?")).toBe(false)
+  })
+
+  it("câu mâu thuẫn bỏ trống ⇒ answersText ghi 'giữ như cũ' và unansweredContradictions trả câu đó", () => {
+    const cr = { clarifications: [{ round: 1, questions: [old, "Bạn cần thêm gì?"], answers: ["", ""], suggestions: [], kinds: ["contradiction", "ambiguous"] }] }
+    const text = answersText(cr as never)
+    expect(text).toContain(`Q1.1: ${old}\nA: (no answer - keep the document as it is`)
+    expect(text).toContain("Q1.2: Bạn cần thêm gì?\nA: (no answer - unknown)")
+    expect(unansweredContradictions(cr as never)).toEqual([old])
+  })
+
+  it("clarifyRoundOf: đếm từ lần gộp lệnh gần nhất; vòng thứ 4 là vòng thêm", () => {
+    const rounds = (n: number) => Array.from({ length: n }, (_, i) => ({ round: i + 1, questions: ["q"], answers: [], suggestions: [] }))
+    expect(clarifyRoundOf({ status: "awaiting_answers", clarifications: rounds(2), amendments: [] } as never)).toEqual({ n: 2, max: 3, extra: false })
+    expect(clarifyRoundOf({ status: "awaiting_answers", clarifications: rounds(4), amendments: [] } as never)).toEqual({ n: 4, max: 3, extra: true })
+    expect(clarifyRoundOf({ status: "awaiting_answers", clarifications: rounds(4), amendments: [{ text: "x", at: new Date(), after_round: 3 }] } as never)).toEqual({ n: 1, max: 3, extra: false })
+    expect(clarifyRoundOf({ status: "impact_review", clarifications: rounds(1), amendments: [] } as never)).toBeNull()
   })
 })

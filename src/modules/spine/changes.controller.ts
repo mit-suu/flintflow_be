@@ -24,6 +24,8 @@ import { changeErrorReply } from "./change-transcript.js"
 import * as reconcileService from "./reconcile.service.js"
 import * as undoService from "./undo.service.js"
 import { translateAssumption } from "./assumption-translate.service.js"
+import { isViewer } from "../../shared/auth/viewer-read-scope.middleware.js"
+import { viewerSpine } from "../../shared/auth/viewer-spine.js"
 import * as spineRepository from "./spine.repository.js"
 import { trace, type TraceEntity } from "./traceability.service.js"
 import { TransactionRejectedError } from "./op-engine.js"
@@ -257,10 +259,14 @@ export const previewChanges = catchAsync(async (req: Request, res: Response) => 
     if (session && userText && payload) await changeTranscript.recordChangeTurn(session, userText, payload)
     return sendDomainError(res, err)
   }
-  if (session && userText) await changeTranscript.recordChangeTurn(session, userText, changeTranscript.previewPayload(result, replyLanguage, { requiresCr }))
+  // FLF-473 (B5): dự án import sau baseline mà model không ra được lô hợp lệ ⇒ lưới an toàn "Mở change request" điền
+  // sẵn lệnh, thay vì lặp lại "nói rõ mục" (luồng CR định vị được cả đoạn văn nối, chat thường thì không - xem skill
+  // `apply-change-op/SKILL.md` luật 14, phần sửa cho đoạn nối sẽ làm sau khi FLF-449 merge, xem plan fix #6).
+  const crPrefill = requiresCr && result.unclear ? prefillFrom(body.instruction, result.clarification ?? "Sửa tài liệu", { kind: "verbal", ref: null }) : null
+  if (session && userText) await changeTranscript.recordChangeTurn(session, userText, changeTranscript.previewPayload(result, replyLanguage, { requiresCr, crPrefill }))
   // FLF-311: lựa chọn chỉ cho transcript (thẻ chọn trong chat) — hình response giữ đúng hợp đồng
-  const { clarification_choices: _choices, auto_apply_ok: _auto, ...data } = result
-  return requiresCr ? sendSuccess(res, 200, data, { requires_cr: true }) : sendSuccess(res, 200, data)
+  const { clarification_choices: _choices, auto_apply_ok: _auto, unclear: _unclear, ...data } = result
+  return requiresCr ? sendSuccess(res, 200, data, { requires_cr: true, ...(crPrefill ? { cr_prefill: crPrefill } : {}) }) : sendSuccess(res, 200, data)
 })
 
 export const reconcileChanges = catchAsync(async (req: Request, res: Response) => {
@@ -360,6 +366,8 @@ export const discardPreview = catchAsync(async (req: Request, res: Response) => 
 export const getTraceability = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
   const query = parse(traceabilityQuerySchema, req.query)
+  // FLF-466: Viewer truy vết theo bản ổn định mới nhất
+  if (isViewer(req)) return sendSuccess(res, 200, trace(await viewerSpine(auth.projectId), { entity: query.entity as TraceEntity, id: query.id }))
   const record = await spineRepository.get(auth.projectId)
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   const { projectId: _projectId, ...spine } = record

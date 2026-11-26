@@ -31,7 +31,7 @@
       "language": "en",
       "question": "How many flags may the section review output per call, and what level are they?",
       "answer_points": ["At most 15 flags per call, most important first", "Level is always yellow, never red", "rule_id is the lens name"],
-      "gold_chunk_ids": ["review-section#rules"]
+      "gold_chunk_ids": ["review-section#rules/1-9", "review-section#rules/10-13"]
     },
     {
       "id": "q05",

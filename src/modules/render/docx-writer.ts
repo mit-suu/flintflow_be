@@ -23,6 +23,7 @@ import {
 } from "docx"
 import { imageSize } from "image-size"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { projectCode } from "../project/project-code.js"
 import { versionFileName } from "../doc-version/versioning.js"
 import { STAMP_PROPERTY } from "../import/import.constants.js"
 import { ruleLabel } from "../spine/human-labels.js"
@@ -131,10 +132,12 @@ export interface WriteDocxOptions {
 
 /** FLF-334: stamp mang release gốc + loại bản (mode 2 không có CR ⇒ không ghi `flintflow_latest_cr`). */
 function stampLineage(doc: RenderedDocument): { name: string; value: string }[] {
-  const { release, base } = exportLineage(doc)
+  const { release } = exportLineage(doc)
+  const base = stampBaseVersion(doc)
   return [
     ...(base ? [{ name: STAMP_PROPERTY.base_version, value: base }] : []),
-    { name: STAMP_PROPERTY.kind, value: release ? "release" : "draft" }
+    { name: STAMP_PROPERTY.kind, value: release ? "release" : "draft" },
+    ...(doc.projectId ? [{ name: STAMP_PROPERTY.project_code, value: projectCode(doc.projectId) }] : [])
   ]
 }
 
@@ -231,6 +234,17 @@ export async function writeDocx(doc: RenderedDocument, options: WriteDocxOptions
 }
 
 /**
+ * FLF-484: `flintflow_base_version` của stamp luôn là release gốc, không phải số bản nháp. Nhãn mode 1 là số bản nháp
+ * (`0.4`, `1.2`) nên `exportLineage` ra chính nó; bản nháp `N.m` đứng sau release `N.0` (`0.m` sau bản import `0.1`).
+ * Nhãn kiểu mode 2 (có tiền tố `v`: `v1.0 + 3 changes`, `v0.3`) giữ như `exportLineage`.
+ */
+export function stampBaseVersion(doc: Pick<RenderedDocument, "version" | "source">): string | null {
+  const draft = doc.source === "draft" ? /^(\d+)\.(\d+)$/.exec(doc.version.trim()) : null
+  if (draft) return Number(draft[1]) >= 1 ? `${Number(draft[1])}.0` : "0.1"
+  return exportLineage(doc).base
+}
+
+/**
  * Release gốc của bản xuất mode 2 (FLF-334), suy từ nhãn version (`draftVersionLabel`): baseline ⇒ chính nó (`v1.0` ⇒
  * `1.0`); bản nháp `v0` ⇒ chưa có baseline (`null`); `v1.0 + 3 changes` ⇒ `1.0`. Gốc `0.x` (bản import của dự án mode 1)
  * ⇒ `0` và luôn là bản nháp (kể cả baseline), như quy tắc mode 1.
@@ -251,9 +265,9 @@ export function exportLineage(doc: Pick<RenderedDocument, "version" | "source">)
  * FLF-356: `_DRAFT` theo nội dung file — xuất `source=baseline` không có watermark DRAFT ⇒ tên cũng không có, kể cả
  * baseline `0.x` của dự án import (`FAP_v0.1.docx`); stamp `kind` vẫn theo `exportLineage` (0.x chưa phát hành).
  */
-export function buildDocxFileName(doc: Pick<RenderedDocument, "projectName" | "version" | "source">, language?: string): string {
+export function buildDocxFileName(doc: Pick<RenderedDocument, "projectName" | "version" | "source"> & { projectId?: string }, language?: string): string {
   const lineage = exportLineage(doc)
-  return versionFileName({ name: doc.projectName, ...lineage, release: lineage.release || doc.source === "baseline", ...(language ? { language } : {}) })
+  return versionFileName({ name: doc.projectName, code: doc.projectId ? projectCode(doc.projectId) : null, ...lineage, release: lineage.release || doc.source === "baseline", ...(language ? { language } : {}) })
 }
 
 function coverPage(doc: RenderedDocument, isDraft: boolean, t: WriterText): Paragraph[] {

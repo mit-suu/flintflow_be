@@ -348,8 +348,8 @@ export const classify = (input: ClassifyInput): MigrationGroups => {
       // AI", không tính credit (test tay 11/11: ước tính 3 credit, thực tế 0)
       const free = isFreeTextSection(o.section_id)
       const ai_choices = free ? aiMoves : []
-      // "Không in ra" an toàn cho cả mục chữ tự do (dữ liệu giữ trong Spine); "xoá" chỉ khi BA tự chọn
-      const choices = ["keep_custom", ...(free ? [DROP_FROM_PRINT, "delete"] : [DROP_FROM_PRINT]), ...moveChoices]
+      // "Không in ra" an toàn cho cả mục chữ tự do (dữ liệu giữ trong Spine). Đổi mẫu không xoá dữ liệu (BF §3.7, FLF-466): không có lựa chọn "xoá" ở nhóm Thừa
+      const choices = ["keep_custom", DROP_FROM_PRINT, ...moveChoices]
       const guess = moveGuess(o)
       // Không bao giờ đoán sẵn một lựa chọn cần AI
       const suggestion: Suggestion = guess && !ai_choices.includes(guess) ? { suggested: guess, suggested_reason: "close_name", confidence: "guess" } : high(DROP_FROM_PRINT, "no_place")
@@ -420,9 +420,21 @@ const chosenFor = (item: Pick<ExtraItem, "choices" | "ai_choices" | "suggested" 
   item.confidence === "high" && item.suggested && item.suggested !== "ai_resolve" && item.choices.includes(item.suggested) && !item.ai_choices.includes(item.suggested) ? item.suggested : null
 
 /** Mọi mục nhận quyết định, theo id — nguồn kiểm "id có trong nhóm" + "lựa chọn đúng nhóm" ở PATCH decisions. */
+/**
+ * FLF-466: nhóm Thừa không còn "xoá". Lần đổi mẫu đang mở từ trước còn `delete` trong `choices` / quyết định ⇒ đọc thành `drop_from_print`
+ * (chỉ nhóm Thừa; "xoá" của conflict bảng giữ nguyên).
+ */
+export const LEGACY_DELETE = "delete"
+export const extraChoiceOf = (choice: string): string => (choice === LEGACY_DELETE ? DROP_FROM_PRINT : choice)
+/** Đọc lựa chọn đã lưu của một mục: nhóm Thừa đổi `delete` thành `drop_from_print`, nhóm khác giữ nguyên. */
+export const readChoice = (groups: Pick<MigrationGroups, "extra">, id: string, choice: string): string =>
+  groups.extra.some((e) => e.id === id) ? extraChoiceOf(choice) : choice
+
+const extraChoices = (choices: readonly string[]): string[] => [...new Set(choices.map(extraChoiceOf))]
+
 export const decidableItems = (groups: MigrationGroups): Map<string, DecidableItem> => {
   const out = new Map<string, DecidableItem>()
-  for (const e of groups.extra) out.set(e.id, { group: "extra", choices: e.choices, ai_choices: e.ai_choices, required: true, default: chosenFor(e) })
+  for (const e of groups.extra) out.set(e.id, { group: "extra", choices: extraChoices(e.choices), ai_choices: e.ai_choices, required: true, default: chosenFor({ ...e, choices: extraChoices(e.choices) }) })
   for (const c of groups.conflict) out.set(c.id, { group: "conflict", choices: c.choices, ai_choices: c.ai_choices, required: true, default: chosenFor(c) })
   for (const s of groups.edited_since) out.set(s.id, { group: "edited_since", choices: s.choices, ai_choices: [], required: false, default: s.default })
   return out
@@ -437,9 +449,12 @@ export interface DecisionLike {
  * Quyết định còn hiệu lực + mục bắt buộc chưa có quyết định **và không có lựa chọn chọn sẵn** (dòng đoán chưa xác nhận, hoặc mục của
  * bản ghi trước khi có gợi ý). Quyết định không còn khớp nhóm mới bị bỏ.
  */
+/** Bản sao quyết định với lựa chọn khác (quyết định có thể là subdocument mongoose). */
+const withChoice = <D extends DecisionLike>(d: D, choice: string): D => ({ ...(typeof (d as { toObject?: () => D }).toObject === "function" ? (d as unknown as { toObject: () => D }).toObject() : d), choice })
+
 export const settleDecisions = <D extends DecisionLike>(groups: MigrationGroups, decisions: readonly D[]): { decisions: D[]; undecided: string[] } => {
   const items = decidableItems(groups)
-  const kept = decisions.filter((d) => items.get(d.id)?.choices.includes(d.choice))
+  const kept = decisions.map((d) => (groups.extra.some((e) => e.id === d.id) && d.choice === LEGACY_DELETE ? withChoice(d, DROP_FROM_PRINT) : d)).filter((d) => items.get(d.id)?.choices.includes(d.choice))
   const decided = new Set(kept.map((d) => d.id))
   return { decisions: kept, undecided: [...items].filter(([id, item]) => item.required && !decided.has(id) && item.default === null).map(([id]) => id) }
 }

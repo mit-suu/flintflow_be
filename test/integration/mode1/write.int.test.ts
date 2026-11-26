@@ -67,7 +67,10 @@ describe("C-7 ghi Spine + render version mới", () => {
     expect(await readStamp(pkg)).toMatchObject({ project_id: projectId, version: "0.2", source: "cr_revision" })
     expect(texts).toContain(NEW_PERF)
     expect(texts.join("\n")).not.toContain("within 2 seconds")
-    expect(texts.some((t) => t.includes(`${crId}: Faster response time`))).toBe(true)
+    // FLF-466 / FLF-484 lát D: mô tả dòng RoC dựng từ thay đổi thật ("Update non-functional requirement NFR-01"), không chép tiêu đề CR —
+    // tiêu đề do người soạn, có thể sai / dài; thay đổi do code ghi mới là sự thật của bản này
+    expect(texts.some((t) => t.includes(`${crId}: Update non-functional requirement NFR-01`))).toBe(true)
+    expect(texts.some((t) => t.includes(`${crId}: Faster response time`))).toBe(false)
     expect(await nfrThreshold(projectId)).toBe("1 s")
 
     // BPMN 3.14 (mode 1 v3, T6): bản có đánh dấu — Track Changes tác giả = CR id, accept-all ra đúng bản sạch
@@ -76,7 +79,7 @@ describe("C-7 ghi Spine + render version mới", () => {
     const doc = await tracked.requireXml("word/document.xml")
     const marks = [...wAll(doc, "ins"), ...wAll(doc, "del")]
     expect(marks.length).toBeGreaterThan(0)
-    expect(new Set(marks.map((m) => wAttr(m, "author")))).toEqual(new Set([crId]))
+    expect(new Set(marks.map((m) => wAttr(m, "author")))).toEqual(new Set([`${crId} (Fixture User)`])) // FLF-466: `CR-xxx (người ghi)`
     await acceptAll(tracked)
     expect((await readBlocks(tracked)).map((b) => b.text)).toEqual(texts)
     const dl = await c.get("/versions/0.2/download?variant=tracked").buffer(true).parse((r, cb) => {
@@ -102,7 +105,7 @@ describe("C-7 ghi Spine + render version mới", () => {
       })
     resetCrMock((p) => (p.includes("# CR Clarify") ? fakeCrClarify({ entity_paths: ["fixed:5.4"], keywords: [] })(p) : p.includes("# CR Propose") ? addOther(p) : undefined))
 
-    const { crId, cr, impact } = await crToImpact(c)
+    const { crId, cr, impact } = await crToImpact(c, "Bổ sung yêu cầu khác", "Thêm giả định về trình duyệt được hỗ trợ vào mục yêu cầu khác đang trống.")
     expect(impact.locations.map((l) => l.path)).toEqual(["other_requirements[]"])
     expect(detail(await c.post(`${cr}/propose`)).locations[0]).toMatchObject({ conclusion: "edit", proposal: { old_text: "[]" } })
     expect(detail(await c.post(`${cr}/verify`)).change_request.status).toBe("ready_to_submit")
