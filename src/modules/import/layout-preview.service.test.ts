@@ -38,7 +38,11 @@ describe("layout-preview - FLF-461 BF 2.9a", () => {
     await confirmLayout("p1")
     expect(h.update).toHaveBeenCalledOnce()
   })
-  it("ký baseline khi chưa xác nhận bố cục ⇒ 409 LAYOUT_NOT_CONFIRMED", async () => {
+  it("ký baseline khi còn mục chưa soạn xong ⇒ 409 LAYOUT_NOT_READY (báo đúng nguyên nhân, không phải chưa xác nhận)", async () => {
+    await expect(assertLayoutConfirmedForBaseline("p1")).rejects.toMatchObject({ code: "LAYOUT_NOT_READY" })
+  })
+  it("ký baseline khi đã soạn xong nhưng chưa xác nhận bố cục ⇒ 409 LAYOUT_NOT_CONFIRMED", async () => {
+    h.spine = { ...createEmptySpine({ name: "X" }), steps: [{ id: "S-4.1", status: "accepted" }] }
     await expect(assertLayoutConfirmedForBaseline("p1")).rejects.toMatchObject({ code: "LAYOUT_NOT_CONFIRMED" })
   })
   it("đã xác nhận ⇒ cho ký; bố cục đổi sau xác nhận ⇒ chặn lại", async () => {

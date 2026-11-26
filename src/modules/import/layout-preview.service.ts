@@ -101,6 +101,10 @@ export const confirmLayout = async (projectId: string): Promise<LayoutPreview> =
  */
 export const assertLayoutConfirmedForBaseline = async (projectId: string): Promise<void> => {
   const preview = await getLayoutPreview(projectId)
+  // Còn mục chưa soạn thì chưa xác nhận được bố cục (thẻ 2.9a chưa hiện): báo đúng nguyên nhân thay vì "chưa xác nhận"
+  if (preview.applicable && !preview.ready) {
+    throw new Mode1Error("LAYOUT_NOT_READY", `Còn ${preview.remaining} mục chưa soạn xong - soạn xong rồi mới chốt baseline`, { remaining: preview.remaining })
+  }
   if (preview.applicable && !preview.confirmed_at) {
     throw new Mode1Error("LAYOUT_NOT_CONFIRMED", "Chưa xác nhận bố cục mới của tài liệu - xem trước và xác nhận bố cục trước khi chốt baseline", { remaining: preview.remaining })
   }
