@@ -542,3 +542,67 @@ describe("contentGuidance - FLF-370 reference khai ở prompt_references vào pr
     expect(contentGuidance({ skill: null })).toBe("")
   })
 })
+
+describe("draftOps - trả lời câu hỏi mở ở cổng (FLF-472)", () => {
+  const openSpine = (): Spine => ({
+    ...structuredClone(FIXTURE),
+    other_requirements: [
+      { id: "OR10", kind: "open_question", statement: "How long are patient records kept before they are anonymised?", statement_vi: "Hồ sơ bệnh nhân giữ bao lâu thì ẩn danh?", source_quote: "x" },
+      { id: "OR11", kind: "open_question", statement: "How many hours ahead may a patient reschedule?", statement_vi: "Đổi lịch trước tối thiểu mấy giờ?", source_quote: "y" }
+    ],
+    steps: FIXTURE.steps.map((s) => (s.id === "S-1.4" ? { ...s, status: "in_progress" as const } : s))
+  })
+  const remove = (id: string) => ({ op: "remove", path: `other_requirements[id=${id}]`, reason: "User trả lời" })
+
+  it("đóng câu hỏi kèm answered_questions ⇒ có op add decisions[] mang đúng câu trả lời (khoá open_question:*)", async () => {
+    const spine = openSpine()
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(
+      reply([remove("OR10"), remove("OR11")], { answered_questions: [{ id: "OR10", answer: "10 năm rồi ẩn danh họ tên, SĐT" }, { id: "OR11", answer: "Đổi lịch trước ít nhất 4 tiếng" }] })
+    )
+    const result = await draftOps("p", "S-1.4", ctxFor(spine, "S-1.4"), { userId: "u", spine, executor, callKind: "revision", revisionRequest: "OR10: 10 năm ..." })
+    const decisions = (result.txn?.ops ?? []).filter((op) => op.op === "add" && op.path === "decisions[]").map((op) => op.value as { topic_key: string; question: string; answer: string; step_id: string })
+    expect(decisions).toHaveLength(2)
+    expect(decisions[0]).toMatchObject({ topic_key: "open_question:how_long_are_patient_records_kept_before_they_are_anonymised", question: "Hồ sơ bệnh nhân giữ bao lâu thì ẩn danh?", answer: "10 năm rồi ẩn danh họ tên, SĐT", step_id: "S-1.4" })
+    expect(decisions[1].answer).toBe("Đổi lịch trước ít nhất 4 tiếng")
+    expect(() => planTransaction(spine, result.txn!, { startSeq: 1 })).not.toThrow()
+  })
+
+  it("revision xoá câu hỏi mở mà không kèm câu trả lời ⇒ open_question_closed_without_answer (3 lượt rồi từ chối)", async () => {
+    const spine = openSpine()
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([remove("OR10")]))
+    const err = await draftOps("p", "S-1.4", ctxFor(spine, "S-1.4"), { userId: "u", spine, executor, callKind: "revision", revisionRequest: "10 năm" }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(DraftRejectedError)
+    expect((err as DraftRejectedError).errors.map((e) => e.rule)).toContain("open_question_closed_without_answer")
+  })
+
+  it("thiếu câu trả lời cho một trong hai câu ⇒ lượt sau gửi lại thì nhận", async () => {
+    const spine = openSpine()
+    const executor = vi
+      .fn<DraftExecutor>()
+      .mockResolvedValueOnce(reply([remove("OR10"), remove("OR11")], { answered_questions: [{ id: "OR10", answer: "10 năm" }] }))
+      .mockResolvedValueOnce(reply([remove("OR10"), remove("OR11")], { answered_questions: [{ id: "OR10", answer: "10 năm" }, { id: "OR11", answer: "4 tiếng" }] }))
+    const result = await draftOps("p", "S-1.4", ctxFor(spine, "S-1.4"), { userId: "u", spine, executor, callKind: "revision", revisionRequest: "x" })
+    expect(result.attempts).toHaveLength(2)
+    expect(result.txn?.ops.filter((op) => op.path === "decisions[]")).toHaveLength(2)
+  })
+
+  it("câu trả lời tự do (id null) lưu theo khoá chuẩn, kể cả khi lô không có op nào khác", async () => {
+    const spine = openSpine()
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([], { answered_questions: [{ id: null, question: "Còn ai khác dùng hệ thống không?", topic_key: "roles", answer: "Đủ rồi, như mình kể" }] }))
+    const result = await draftOps("p", "S-1.4", ctxFor(spine, "S-1.4"), { userId: "u", spine, executor, callKind: "revision", revisionRequest: "đủ rồi" })
+    expect(result.txn?.ops).toHaveLength(1)
+    expect(result.txn?.ops[0].value).toMatchObject({ topic_key: "roles", answer: "Đủ rồi, như mình kể", step_id: "S-1.4" })
+  })
+
+  it("câu hỏi mới không dùng lại mã đã xoá ở lượt trước ⇒ đổi sang mã tạm, server cấp mã kế tiếp", async () => {
+    const spine = { ...openSpine(), other_requirements: [] }
+    const add = (id: string) => ({ op: "add", path: "other_requirements[]", value: { id, kind: "open_question", statement: "Which reports does the branch manager need?", source_quote: "branch manager reports weekly" }, reason: "gap" })
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([add("OR10")]))
+    const retiredLoader = vi.fn(async () => new Map([["other_requirements", ["OR10"]]]))
+    const result = await draftOps("p", "S-1.4", { ...ctxFor(spine, "S-1.4"), documents: "[D1-P01] The branch manager reports weekly." }, { userId: "u", spine, executor, retiredLoader })
+    const added = (result.txn?.ops ?? []).filter((op) => op.path === "other_requirements[]")
+    expect(retiredLoader).toHaveBeenCalledTimes(1)
+    expect(added).toHaveLength(1)
+    expect((added[0].value as { id: string }).id).toBe("$new_OR10")
+  })
+})

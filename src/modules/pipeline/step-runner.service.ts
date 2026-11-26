@@ -30,6 +30,7 @@ import { replyLanguageForSessionId } from "../project/reply-language.service.js"
 import { assemble } from "../render/assemble.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { applyTransaction, CHANGE_RANGE_INVALID } from "../spine/op-engine.js"
+import { retiredIds } from "../spine/change-log.js"
 import type { Op } from "../spine/op.types.js"
 import type { Change, Diagram, Spine, SpineRecord, StepState } from "../spine/spine.types.js"
 import * as flagsService from "../spine/flags.service.js"
@@ -1240,6 +1241,7 @@ export const runDraftPhase = async (
       spine,
       callKind,
       documentLanguage,
+      retiredLoader: () => retiredIds(projectId),
       ...(deps.midPhaseRun ? { midPhaseRun: true } : {}),
       // Lượt thử lại phải nói ngay, bằng lời thường — user đang nhìn màn hình chờ (03 Lớp 3)
       onAttempt: ({ attempt, max, previousErrors }) => {
@@ -2375,7 +2377,7 @@ export const elicitGuidance = (ctx: StepContext): string => {
 export const noChangeReason = (templateId: string, needsDraft: boolean, language: ReplyLanguage = "vi"): string => {
   if (LOOP_BOOKKEEPING_TEMPLATES.has(templateId)) {
     return byLanguage(language, {
-      vi: "Bước sổ sách của vòng màn hình - không có nội dung để ghi.",
+      vi: "Màn này không còn gì cần ghi thêm.",
       en: "A bookkeeping step of the screen loop - there's no content to write."
     })
   }

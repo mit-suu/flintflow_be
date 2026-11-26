@@ -310,3 +310,21 @@ describe("FLF-449: thẻ phương án ELICIT (ưu / nhược / rủi ro, luật 
     expect(out.questions[0].options[0]).toEqual({ label: "Web (Khuyến nghị)", cons: ["Cần mạng"], recommended: true })
   })
 })
+
+describe("parseResponse - answered_questions (FLF-472)", () => {
+  it("REVISION nhận answered_questions; mục thiếu answer bị bỏ, không làm hỏng lô; id rỗng ⇒ null", () => {
+    const raw = JSON.stringify({
+      ops: [],
+      answered_questions: [{ id: "OR10", answer: "10 năm" }, { id: "OR11" }, { id: "", question: "Còn ai khác dùng?", topic_key: "roles", answer: "Đủ rồi" }]
+    })
+    const out = parseResponse<OpTransaction>(raw, ActionType.REVISION)
+    expect(out.answered_questions).toEqual([
+      { id: "OR10", answer: "10 năm", question: undefined, topic_key: undefined },
+      { id: null, answer: "Đủ rồi", question: "Còn ai khác dùng?", topic_key: "roles" }
+    ])
+  })
+
+  it("không phải mảng ⇒ coi như không có", () => {
+    expect(parseResponse<OpTransaction>('{"ops":[],"answered_questions":"x"}', ActionType.REVISION).answered_questions).toBeUndefined()
+  })
+})

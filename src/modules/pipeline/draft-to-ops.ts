@@ -17,7 +17,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { ActionType, AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import { executeAiAction, type ExecuteAiActionOptions } from "../../shared/ai/ai-action.service.js"
 import { getSkill, skillPromptText } from "../../shared/ai/prompt-registry.service.js"
-import type { LocalizedEntry, OpTransaction, SourceEntry } from "../../shared/ai/response-parser.js"
+import type { AnsweredQuestion, LocalizedEntry, OpTransaction, SourceEntry } from "../../shared/ai/response-parser.js"
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { documentLanguageInput, type TurnDocumentLanguage } from "../translation/turn-language.js"
 import type { StepContext } from "./context-projection.js"
@@ -26,6 +26,8 @@ import { actorGeneralizationErrors, briefExtractionErrors, dropRedundantScalarAd
 import { ESCALATION_MODEL, isErdOnly, normalizeEntityNames } from "./erd-retry.js"
 import { briefQuoteSources, dropUngroundedGaps } from "./gap-quote.js"
 import { localizedMissingErrors } from "./localized-missing.js"
+import { addsExplicitQuestionId, answeredQuestionErrors, answeredQuestionOps, renewReusedQuestionIds } from "./answered-questions.js"
+import type { RetiredIds } from "../spine/id-allocator.js"
 
 export const NEEDS_USER_INPUT = "NEEDS_USER_INPUT"
 /** Phases §4.1: gửi lại model kèm lỗi tối đa 2 lần, rồi hỏi user. */
@@ -110,6 +112,11 @@ export interface DraftOptions {
    * "Document language" và model trả `localized` cạnh `ops`. Thiếu / `null` (dự án `en`, mode 1) ⇒ prompt như cũ.
    */
   documentLanguage?: TurnDocumentLanguage | null
+  /**
+   * FLF-472 (#8): tải tập mã đã từng bị xoá của dự án — chỉ gọi khi lô thêm câu hỏi mở mang mã tường minh. Thiếu ⇒ chỉ
+   * tính mã bị xoá trong chính lô.
+   */
+  retiredLoader?: () => Promise<RetiredIds>
   /** Spine để validate; mặc định đọc repository (phải cùng `spine_version` với ctx). */
   spine?: Spine
   executor?: DraftExecutor
@@ -190,6 +197,17 @@ const loadSpine = async (projectId: string, expectedVersion: number): Promise<Sp
   return spine
 }
 
+/** Mã câu hỏi mở đã từng bị xoá của dự án; không tải được thì chỉ còn kiểm trong chính lô (không làm hỏng lượt soạn). */
+const loadRetiredQuestionIds = async (loader: DraftOptions["retiredLoader"]): Promise<readonly string[]> => {
+  if (!loader) return []
+  try {
+    return (await loader()).get("other_requirements") ?? []
+  } catch (err) {
+    console.warn("[draft-to-ops] không tải được mã đã xoá", err)
+    return []
+  }
+}
+
 export const draftOps = async (projectId: string, stepId: string, ctx: StepContext, options: DraftOptions): Promise<DraftResult> => {
   const callKind = options.callKind ?? "draft"
   const maxRetries = options.maxSchemaRetries ?? MAX_SCHEMA_RETRIES
@@ -237,6 +255,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
     let notes: string | null = null
     let localized: LocalizedEntry[] | undefined
     let sources: SourceEntry[] | undefined
+    let answered: AnsweredQuestion[] | undefined
     try {
       const minMaxTokens = contentMaxTokens(ctx)
       // FLF-433: lượt thử cuối mà lô vẫn chỉ vướng luật ERD ⇒ model mạnh hơn, chỉ đúng lượt này
@@ -254,6 +273,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       notes = result.data.notes ?? null
       localized = result.data.localized?.length ? result.data.localized : undefined
       sources = result.data.sources?.length ? result.data.sources : undefined
+      answered = result.data.answered_questions?.length ? result.data.answered_questions : undefined
       // BUG-03/BUG-29: field chỉ user/code quyết được chuẩn hoá trước khi kiểm; lô ghi là lô ĐÃ chuẩn hoá
       const sanitized = sanitizeModelOps(spine, result.data.ops, stepId, new Date(), { revision: callKind === "revision", userDecided: options.userDecided === true, ...(statusIds ? { statusAssumptionIds: statusIds } : {}) })
       // Gắn lại liên kết đã có (S-4.1 không thấy function_ids) là vô hại — bỏ trước khi kiểm, không để chết cả lô.
@@ -262,6 +282,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       ops = sanitized.errors.length > 0 ? sanitized.ops : withFrameRenumber(spine, dropRedundantScalarAdds(spine, sanitized.ops as Op[]))
       // FLF-433: bản vá ghép sau lô đã giữ; đuôi tên entity kiểu "Exam List" code tự bỏ (không tốn lượt thử)
       if (sanitized.errors.length === 0) ops = normalizeEntityNames(patchBase ? [...patchBase, ...ops] : ops)
+      // FLF-472 (#8): câu hỏi mở mới không dùng lại mã đã xoá — đổi sang mã tạm để server cấp mã kế tiếp
+      if (sanitized.errors.length === 0 && addsExplicitQuestionId(ops as Op[])) ops = renewReusedQuestionIds(ops as Op[], await loadRetiredQuestionIds(options.retiredLoader))
       // FLF-449 việc 16: chỗ thiếu của Brief không có câu trích thật (Brief / tài liệu / yêu cầu sửa) ⇒ bỏ, không đưa ra
       if (sanitized.errors.length === 0) {
         const grounded = dropUngroundedGaps(ops as Op[], stepId, briefQuoteSources(spine, [ctx.documents, options.revisionRequest]))
@@ -269,6 +291,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
         ops = grounded.ops
       }
       errors = sanitized.errors.length > 0 ? sanitized.errors : validateOps(spine, ops, { writable: ctx.writable, stepId, visibleIds, ...(extraPaths ? { extraPaths } : {}) })
+      // FLF-472: đóng câu hỏi mở phải kèm câu trả lời (lưu vào sổ quyết định); không thì gửi lại model
+      if (errors.length === 0) errors = answeredQuestionErrors(spine, ops as Op[], answered, callKind)
       // S-1.1 phải dựng vision/goals tiếng Anh từ addendum lõi — kể cả lô rỗng, nên kiểm sau validateOps
       if (errors.length === 0) errors = briefExtractionErrors(spine, ops as Op[], stepId, callKind)
       // FLF-243: tên use case sai luật cờ vàng ⇒ gửi lại model kèm lỗi; lượt cuối thì nhận lô (cờ vàng là lưới cuối)
@@ -284,12 +308,14 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
 
       if (errors.length === 0) {
         attempts.push({ attempt, ops, errors })
-        if (ops.length === 0) return { txn: null, attempts, usage, notes, contextTokens: ctx.contextTokens }
+        // FLF-472: câu trả lời câu hỏi mở vào sổ quyết định cùng lô (op do server sinh, không qua `writable`)
+        const answerOps = answeredQuestionOps(spine, stepId, answered)
+        if (ops.length === 0 && answerOps.length === 0) return { txn: null, attempts, usage, notes, contextTokens: ctx.contextTokens }
         const txn: Transaction = {
           // Id lô luôn do server sinh — không tin `txn` model trả (có thể trùng lô khác)
           txn: randomUUID(),
           base_version: spine.spine_version,
-          ops: ops as Op[],
+          ops: [...(ops as Op[]), ...answerOps],
           by: options.userId,
           step_id: stepId
         }
