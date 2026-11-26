@@ -310,6 +310,32 @@ router.patch("/:id/import/drop-text", authMiddleware, importController.dropText)
 
 /**
  * @swagger
+ * /api/v1/projects/{id}/import/document-language:
+ *   patch:
+ *     summary: (FLF-456) Màn đọc khung — chọn ngôn ngữ tài liệu (EN / VI) khi file chỉ còn khung; khác ngôn ngữ file thì khung được dịch một lần lúc Bắt đầu
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [import_id, language]
+ *             properties:
+ *               import_id: { type: string }
+ *               language: { type: string, enum: [en, vi] }
+ *     responses:
+ *       200: { description: "`{ import }` — đọc lại GET /import để có `skeleton_language`, `credit_estimate` mới" }
+ *       409: { description: "IMPORT_INVALID_STATE (đã bấm Bắt đầu, hoặc còn mục giữ nội dung)" }
+ */
+router.patch("/:id/import/document-language", authMiddleware, importController.documentLanguage)
+
+/**
+ * @swagger
  * /api/v1/projects/{id}/import/fields:
  *   patch:
  *     summary: Bước 1.6/1.9 - xác nhận field độ tin thấp, đoạn lớp 4 chữ hướng dẫn, mục tên đúng nội dung sai (UC-22)

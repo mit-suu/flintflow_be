@@ -76,7 +76,7 @@ export const startExtraction = async (projectId: string, userId: string, importI
   await autoConfirmPendingMapping(doc)
   assertImportStatus(doc, ["extracting"], "extracting")
   // FLF-412: vùng Bỏ chữ ⇒ viết lại file + tách lại trước lượt đọc đầu tiên
-  if (!(await isExtractionRunning(importId))) await applyDropText(doc)
+  if (!(await isExtractionRunning(importId))) await applyDropText(doc, userId)
   // Bỏ `paused` trước khi trả lời để lần poll đầu không thấy trạng thái dừng cũ.
   const started = await startJob(
     extractJob,

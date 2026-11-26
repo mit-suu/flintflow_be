@@ -1,6 +1,6 @@
 /**
- * FLF-265 phase 1: ngôn ngữ tài liệu là thuộc tính dự án — `POST /projects` lưu `documentLanguage` (mode 2: body ⇒
- * `User.locale` ⇒ en; mode 1 bỏ qua), `PATCH /projects/:id/document-language` chỉ Lead/Analyst, mode 1 ⇒ 409.
+ * FLF-265 phase 1: ngôn ngữ tài liệu là thuộc tính dự án — `POST /projects` lưu `documentLanguage` (mode 2: body ⇒ en, không theo
+ * `User.locale` — FLF-456; mode 1 bỏ qua), `PATCH /projects/:id/document-language` chỉ Lead/Analyst, mode 1 ⇒ 409.
  * Qua HTTP trên Mongo thật.
  */
 import { describe, it, expect, beforeEach } from "vitest"
@@ -38,14 +38,15 @@ describe("POST /projects - documentLanguage", () => {
     expect(one.body.data.documentLanguage).toBe("vi")
   })
 
-  it("thiếu ⇒ lấy User.locale; tài khoản chưa chọn ⇒ en", async () => {
+  // FLF-456 (đảo FLF-265): tạo mới không file mặc định tiếng Anh, giao diện tiếng Việt cũng vậy
+  it("thiếu ⇒ en, kể cả khi giao diện tài khoản là tiếng Việt", async () => {
     const fallback = await request(app).post("/api/v1/projects").set(bearer(seeded.token)).send({ name: "Không chọn" })
     expect(fallback.body.data.documentLanguage).toBe("en")
 
     await User.updateOne({ _id: seeded.userId }, { locale: "vi" })
-    const fromAccount = await request(app).post("/api/v1/projects").set(bearer(seeded.token)).send({ name: "Theo tài khoản" })
-    expect(fromAccount.status).toBe(201)
-    expect(fromAccount.body.data.documentLanguage).toBe("vi")
+    const viewVi = await request(app).post("/api/v1/projects").set(bearer(seeded.token)).send({ name: "Giao diện tiếng Việt" })
+    expect(viewVi.status).toBe(201)
+    expect(viewVi.body.data.documentLanguage).toBe("en")
   })
 
   it("giá trị lạ ⇒ 400 VALIDATION_ERROR", async () => {
@@ -103,6 +104,15 @@ describe("PATCH /projects/:id/document-language", () => {
     expect(res.status).toBe(409)
     expect(res.body.error.code).toBe("DOCUMENT_LANGUAGE_LOCKED")
     expect((await Project.findById(created.body.data._id).lean())?.documentLanguage).toBeUndefined()
+  })
+
+  it("dự án có file nền (tạo từ mẫu của org) ⇒ 409 DOCUMENT_LANGUAGE_LOCKED, không ghi", async () => {
+    const created = await request(app).post("/api/v1/projects").set(bearer(seeded.token)).send({ name: "Từ mẫu org", documentLanguage: "en" })
+    await Project.updateOne({ _id: created.body.data._id }, { template_ref: { template_id: seeded.userId, version: 1 } })
+    const res = await patchLanguage(created.body.data._id, seeded.token, { documentLanguage: "vi" })
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe("DOCUMENT_LANGUAGE_LOCKED")
+    expect((await Project.findById(created.body.data._id).lean())?.documentLanguage).toBe("en")
   })
 
   it("dự án của org khác ⇒ 404 PROJECT_NOT_FOUND; id sai định dạng ⇒ 404", async () => {

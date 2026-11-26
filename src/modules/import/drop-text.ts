@@ -180,7 +180,7 @@ const clearParagraph = (p: Element): void => {
 }
 
 /** Đoạn chỉ còn `text` (giữ định dạng run đầu tiên) — heading gõ chung đoạn với nội dung cũ chỉ giữ phần heading. */
-const setParagraphText = (p: Element, text: string): void => {
+export const setParagraphText = (p: Element, text: string): void => {
   const rPr = descendantsW(p, "rPr").find((r) => (r.parentNode as Element | null)?.localName === "r")?.cloneNode(true) ?? null
   clearParagraph(p)
   const doc = p.ownerDocument!
