@@ -69,7 +69,7 @@ import { documentTranslationMetaSchema } from "../pipeline/pipeline.dto.js"
 import { RenderedDocumentCache } from "./rendered-document.model.js"
 import { cacheMemoKey, createMemo } from "./rendered-document-memo.js"
 import { buildLayoutSections, type TemplateLayout } from "./layout-sections.js"
-import { rearrangeOf } from "./source-fidelity.js"
+import { rearrangeOf, spineForLayoutCheck } from "./source-fidelity.js"
 // Mode 1 v2 (FLF-184): layout của file người dùng upload — chỉ đọc
 import { TemplateProfile } from "../import/template-profile.model.js"
 import { Project } from "../project/project.model.js"
@@ -722,7 +722,7 @@ export const isExistingSrs = (project: { mode?: string | null; start_kind?: stri
 export const loadTemplateLayout: TemplateLoader = async (projectId) => {
   const profile = (await TemplateProfile.findOne(
     { projectId },
-    { layout: 1, language: 1, template_family: 1, legacy_record_of_changes: 1, non_screen_table: 1, function_originals: 1, section_slices: 1, section_segments: 1, target_structure: 1, flow2_entry_at: 1, layout_confirmed_at: 1, "structure_preview.summary.kind": 1 },
+    { layout: 1, language: 1, template_family: 1, legacy_record_of_changes: 1, non_screen_table: 1, function_originals: 1, section_slices: 1, section_segments: 1, target_structure: 1, flow2_entry_at: 1, layout_confirmed_at: 1, layout_confirmed_signature: 1, "structure_preview.summary.kind": 1 },
     { lean: true }
   )) as
     | {
@@ -737,6 +737,7 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
         target_structure?: { sections?: { section_id: string; status: string }[]; resolved_mode?: number | null } | null
         flow2_entry_at?: Date | null
         layout_confirmed_at?: Date | null
+        layout_confirmed_signature?: string | null
       }
     | null
   if (!profile?.layout?.length) return null
@@ -748,7 +749,7 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
     screenMockups?: unknown
   } | null
   // FLF-416 chế độ 4 đã vào Luồng 2: mục Ngoài phạm vi của file xuống cuối tài liệu (bố cục sắp lại theo mẫu chuẩn)
-  const rearrange = project?.template_intent === "free" ? rearrangeOf(project, profile) : null
+  const rearrange = project?.template_intent === "free" ? rearrangeOf(project, profile, await spineForLayoutCheck(projectId, profile)) : null
   const mockups = screenMockupsOf(project).filter((m) => m.enabled)
   return {
     ...(rearrange?.moveToEnd.length ? { moveToEnd: rearrange.moveToEnd } : {}),

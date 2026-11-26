@@ -1782,7 +1782,7 @@ export const creditEstimateFor = async (
   userId: string,
   doc: IImportedDocument,
   opts: { withBalance: boolean }
-): Promise<(ExtractionEstimate & { check_calls: number; translate_batches: number; available_credits: number | null }) | null> => {
+): Promise<(ExtractionEstimate & { check_calls: number; translate_batches: number; reference_documents: number; reference_credits: number; available_credits: number | null }) | null> => {
   if (doc.status !== "mapping_review" && doc.status !== "extracting") return null
   const extraction = await estimateExtraction(projectId, doc)
   if (!extraction) return null
@@ -1792,12 +1792,17 @@ export const creditEstimateFor = async (
   // FLF-456: file chỉ còn khung + chọn ngôn ngữ khác file ⇒ cộng phần dịch khung (cùng lượt Bắt đầu)
   const translate = await skeletonTranslationEstimate(doc)
   const translateBatches = translate?.batches ?? 0
+  // FLF-458 (BF §2): tài liệu tham khảo đang chờ đọc cộng vào màn đọc khung, đọc cùng lượt Bắt đầu
+  const { pendingSummaryCredits } = await import("../project/project-document.service.js")
+  const reference = await pendingSummaryCredits(projectId)
   const estimate = {
     ...extraction,
     check_calls: check.calls,
     translate_batches: translateBatches,
-    ai_calls: extraction.ai_calls + check.calls + translateBatches,
-    credits: extraction.credits + check.credits + (translate?.credits ?? 0)
+    reference_documents: reference.documents,
+    reference_credits: reference.credits,
+    ai_calls: extraction.ai_calls + check.calls + translateBatches + reference.documents,
+    credits: extraction.credits + check.credits + (translate?.credits ?? 0) + reference.credits
   }
   if (!opts.withBalance) return { ...estimate, available_credits: null }
   const orgId = await resolveWalletOrg(projectId)

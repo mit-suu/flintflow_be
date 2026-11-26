@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { RenderedDocument } from "./rendered-document.types.js"
-import { fidelityFrom, pristineSectionIds, rearrangeOf, sourceBasedFrom } from "./source-fidelity.js"
+import { createEmptySpine } from "../spine/spine.repository.js"
+import { fidelityFrom, layoutConfirmationValid, layoutSignatureOf, pristineSectionIds, rearrangeOf, sourceBasedFrom } from "./source-fidelity.js"
 
 const doc = (sections: RenderedDocument["sections"]): RenderedDocument => ({
   projectId: "p", projectName: "Portal", version: "0.1", source: "draft", generatedAt: "2026-11-06T00:00:00Z", recordOfChanges: [], sections
@@ -66,9 +67,9 @@ describe("rearrangeOf - FLF-416 sắp lại bố cục chế độ 4", () => {
     const profile = { source_file_ref: "f", target_structure: { resolved_mode: 4, sections }, flow2_entry_at: "2026-11-12", layout_confirmed_at: "2026-11-13" }
     expect(rearrangeOf({ template_intent: "free", mode: "fpt" }, profile)).toEqual({ moveToEnd: ["custom:c1"] })
   })
-  it("FLF-461: chưa xác nhận bố cục xem trước ⇒ chưa áp (giữ bố cục file)", () => {
-    expect(rearrangeOf({ template_intent: "free", mode: "fpt" }, { source_file_ref: "f", target_structure: { resolved_mode: 4, sections }, flow2_entry_at: "2026-11-12" })).toBeNull()
-    expect(rearrangeOf({ template_intent: "free", mode: "fpt" }, { source_file_ref: "f", target_structure: { resolved_mode: 4, sections }, flow2_entry_at: "2026-11-12", layout_confirmed_at: null })).toBeNull()
+  it("FLF-461: chưa xác nhận bố cục xem trước ⇒ bản nháp: mục thêm thành heading mới, chưa chuyển Ngoài phạm vi xuống cuối", () => {
+    expect(rearrangeOf({ template_intent: "free", mode: "fpt" }, { source_file_ref: "f", target_structure: { resolved_mode: 4, sections }, flow2_entry_at: "2026-11-12" })).toEqual({ moveToEnd: [] })
+    expect(rearrangeOf({ template_intent: "free", mode: "fpt" }, { source_file_ref: "f", target_structure: { resolved_mode: 4, sections }, flow2_entry_at: "2026-11-12", layout_confirmed_at: null })).toEqual({ moveToEnd: [] })
   })
   it("giữ khung (chế độ 3), chưa vào Luồng 2 ⇒ không sắp lại", () => {
     expect(rearrangeOf({ template_intent: "fixed", mode: "fpt" }, { source_file_ref: "f", target_structure: { resolved_mode: 3, sections }, flow2_entry_at: "2026-11-12" })).toBeNull()
@@ -181,5 +182,23 @@ describe("pristineSectionIds - mục in giống hệt lúc import", () => {
       { id: "fixed:5.2", number: "5.2", heading: "Common Requirements", level: 2, blocks: [para("New")] }
     ])
     expect(pristineSectionIds(current, imported)).toEqual(new Set(["fixed:1"]))
+  })
+})
+
+describe("layoutConfirmationValid - FLF-461 xác nhận bố cục hết hiệu lực khi bố cục đổi", () => {
+  const spine = createEmptySpine({ name: "X" })
+  const confirmed = { layout_confirmed_at: "2026-11-13", layout_confirmed_signature: layoutSignatureOf(spine) }
+  it("chưa xác nhận ⇒ không hợp lệ; xác nhận cũ chưa có dấu ⇒ còn hợp lệ", () => {
+    expect(layoutConfirmationValid({ source_file_ref: "f" }, spine)).toBe(false)
+    expect(layoutConfirmationValid({ source_file_ref: "f", layout_confirmed_at: "2026-11-13" }, spine)).toBe(true)
+  })
+  it("bố cục không đổi ⇒ hợp lệ; thêm mục riêng sau xác nhận ⇒ hết hiệu lực và rearrange về bản nháp", () => {
+    expect(layoutConfirmationValid({ source_file_ref: "f", ...confirmed }, spine)).toBe(true)
+    const changed = { ...spine, custom_sections: [{ id: "c9", heading: "Mới", level: 2, body: "" }] } as unknown as typeof spine
+    expect(layoutSignatureOf(changed)).not.toBe(layoutSignatureOf(spine))
+    expect(layoutConfirmationValid({ source_file_ref: "f", ...confirmed }, changed)).toBe(false)
+    const profile = { source_file_ref: "f", ...confirmed, flow2_entry_at: "2026-11-12", target_structure: { resolved_mode: 4, sections: [{ section_id: "custom:c1", status: "out_of_scope" }] } }
+    expect(rearrangeOf({ template_intent: "free", mode: "fpt" }, profile, changed)).toEqual({ moveToEnd: [] })
+    expect(rearrangeOf({ template_intent: "free", mode: "fpt" }, profile, spine)).toEqual({ moveToEnd: ["custom:c1"] })
   })
 })

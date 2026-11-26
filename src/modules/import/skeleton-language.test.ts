@@ -72,4 +72,20 @@ describe("translateSkeleton (FLF-456)", () => {
     }
     await expect(translateSkeleton({ projectId: "p", userId: "u", source: "en", target: "vi", units, executor: noCredit })).rejects.toMatchObject({ statusCode: 402 })
   })
+
+  it("FLF-456: nhiều lô mà số dư không đủ cho mọi lô ⇒ 402 trước khi chạy lô đầu (không trừ credit lô 1 rồi mất)", async () => {
+    const units = Array.from({ length: 200 }, (_, n) => ({ key: `u${n}`, text: `Heading number ${n} `.repeat(30) }))
+    expect(skeletonBatches(units).length).toBeGreaterThan(1)
+    let calls = 0
+    const counting = async (input: { promptVariables?: Record<string, string> }) => {
+      calls++
+      return echo(input)
+    }
+    await expect(
+      translateSkeleton({ projectId: "p", userId: "u", source: "en", target: "vi", units, executor: counting, availableCredits: async () => 1 })
+    ).rejects.toMatchObject({ code: "INSUFFICIENT_CREDIT" })
+    expect(calls).toBe(0)
+    await translateSkeleton({ projectId: "p", userId: "u", source: "en", target: "vi", units, executor: counting, availableCredits: async () => 100000 })
+    expect(calls).toBeGreaterThan(1)
+  })
 })

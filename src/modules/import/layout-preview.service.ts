@@ -10,9 +10,11 @@
 import { Project } from "../project/project.model.js"
 import { loadTemplateLayout } from "../render/assemble.service.js"
 import { placeSections } from "../render/layout-sections.js"
+import { layoutConfirmationValid, layoutSignatureOf } from "../render/source-fidelity.js"
 import { RenderedDocumentCache } from "../render/rendered-document.model.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { Mode1Error } from "./mode1.errors.js"
+import { sectionProgressOf } from "./section-progress.js"
 import { sectionTitle } from "./section-catalog.js"
 import { TemplateProfile } from "./template-profile.model.js"
 
@@ -27,16 +29,21 @@ export interface LayoutPreviewItem {
 export interface LayoutPreview {
   /** Chỉ chế độ 4 đã vào Luồng 2 mới có bước xem trước bố cục. */
   applicable: boolean
+  /** Mốc xác nhận còn hiệu lực; bố cục đổi sau xác nhận (mục mới được soạn) ⇒ `null`, phải xác nhận lại. */
   confirmed_at: string | null
+  /** BF 2.9a nằm sau 2.8-2.9: chỉ `true` khi mọi mục file còn thiếu đã soạn xong (`remaining === 0`); chưa `ready` thì chưa xác nhận được. */
+  ready: boolean
+  /** Số mục còn cần xử lý (như thanh tiến độ) — FE tải lại xem trước khi số này đổi. */
+  remaining: number
   sections: LayoutPreviewItem[]
 }
 
-const NOT_APPLICABLE: LayoutPreview = { applicable: false, confirmed_at: null, sections: [] }
+const NOT_APPLICABLE: LayoutPreview = { applicable: false, confirmed_at: null, ready: false, remaining: 0, sections: [] }
 
 export const getLayoutPreview = async (projectId: string): Promise<LayoutPreview> => {
   const [project, profile] = await Promise.all([
     Project.findById(projectId, { mode: 1, template_intent: 1 }).lean(),
-    TemplateProfile.findOne({ projectId }, { target_structure: 1, flow2_entry_at: 1, layout_confirmed_at: 1 }).lean()
+    TemplateProfile.findOne({ projectId }, { target_structure: 1, flow2_entry_at: 1, layout_confirmed_at: 1, layout_confirmed_signature: 1 }).lean()
   ])
   const structure = profile?.target_structure
   if (!project || project.mode === "import" || project.template_intent !== "free" || !profile?.flow2_entry_at || structure?.resolved_mode !== 4) return NOT_APPLICABLE
@@ -57,19 +64,44 @@ export const getLayoutPreview = async (projectId: string): Promise<LayoutPreview
     const origin = movedLevel !== null ? "out_of_scope" : added.has(p.section_id) || !p.fromLayout ? "added" : "file"
     sections.push({ section_id: p.section_id, title: p.title.trim() || sectionTitle(p.section_id), level: p.level, origin })
   }
-  return { applicable: true, confirmed_at: profile.layout_confirmed_at ? new Date(profile.layout_confirmed_at).toISOString() : null, sections }
+  const { remaining } = sectionProgressOf(structure.sections, spine.steps)
+  const valid = layoutConfirmationValid(profile, spine)
+  return {
+    applicable: true,
+    confirmed_at: valid && profile.layout_confirmed_at ? new Date(profile.layout_confirmed_at).toISOString() : null,
+    ready: remaining === 0,
+    remaining,
+    sections
+  }
 }
 
-/** Người dùng xác nhận bố cục mới ⇒ từ giờ bản in sắp lại theo bố cục đó. Gọi lại khi đã xác nhận ⇒ giữ mốc cũ. */
+/**
+ * Người dùng xác nhận bố cục mới ⇒ từ giờ bản in sắp lại theo bố cục đó. Chưa soạn xong (BF 2.9a sau 2.8-2.9) ⇒ 409
+ * `LAYOUT_NOT_READY`. Gọi lại khi còn hiệu lực ⇒ giữ mốc cũ; bố cục đã đổi sau lần xác nhận trước ⇒ xác nhận lại.
+ */
 export const confirmLayout = async (projectId: string): Promise<LayoutPreview> => {
   const preview = await getLayoutPreview(projectId)
   if (!preview.applicable) {
     throw new Mode1Error("IMPORT_INVALID_STATE", "Chỉ chế độ hoàn thiện SRS dang dở mới có bước xem trước bố cục", { applicable: false })
   }
+  if (!preview.ready) {
+    throw new Mode1Error("LAYOUT_NOT_READY", `Còn ${preview.remaining} mục chưa soạn xong - soạn xong rồi mới xác nhận bố cục mới`, { remaining: preview.remaining })
+  }
   if (!preview.confirmed_at) {
-    await TemplateProfile.updateOne({ projectId, layout_confirmed_at: null }, { $set: { layout_confirmed_at: new Date() } })
+    const spine = await spineRepository.get(projectId)
+    await TemplateProfile.updateOne({ projectId }, { $set: { layout_confirmed_at: new Date(), layout_confirmed_signature: spine ? layoutSignatureOf(spine) : null } })
     // Bản dựng cache theo `spine_version`, mà xác nhận không đổi Spine ⇒ bỏ cache để lần tải sau theo bố cục mới
     await RenderedDocumentCache.deleteMany({ projectId })
   }
   return getLayoutPreview(projectId)
+}
+
+/**
+ * BF 2.10-2.11: chế độ 4 đã vào Luồng 2 phải xác nhận bố cục (còn hiệu lực) rồi mới ký baseline. Dự án không thuộc 2.9a ⇒ bỏ qua.
+ */
+export const assertLayoutConfirmedForBaseline = async (projectId: string): Promise<void> => {
+  const preview = await getLayoutPreview(projectId)
+  if (preview.applicable && !preview.confirmed_at) {
+    throw new Mode1Error("LAYOUT_NOT_CONFIRMED", "Chưa xác nhận bố cục mới của tài liệu - xem trước và xác nhận bố cục trước khi chốt baseline", { remaining: preview.remaining })
+  }
 }
