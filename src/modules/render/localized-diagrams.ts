@@ -24,6 +24,7 @@ import { diagramLabelsFor } from "../diagram/renderers/labels.js"
 import { isWireframeSalt, localizeSalt } from "../diagram/salt-text.js"
 import { MOCKUP_MARGIN, renderScreenMockup, screenSpecOf } from "../diagram/renderers/screen-mockup.js"
 import { mapSpecText } from "../diagram/screen-spec.js"
+import { screenThemeFor } from "../spine/screen-platforms.js"
 import { resolveScreenTheme } from "../../shared/diagram/screen-theme.js"
 import { checkScene } from "../../shared/diagram/svg-geometry.js"
 import { svgTitleOf } from "../diagram/renderers/common.js"
@@ -118,7 +119,7 @@ export const localizeDiagrams = (
     const title = (svgTitleOf(source.source) ?? "").replace(originalName, name)
     const scene = renderScreenMockup({
       spec,
-      theme: resolveScreenTheme(context.screenTheme, canonical.project.form_factor),
+      theme: screenThemeFor(canonical, source.owner_id ?? "", resolveScreenTheme(context.screenTheme, canonical.project.form_factor)),
       platform: stored.platform,
       systemName: systemName(view.project),
       screenName: name,

@@ -20,6 +20,7 @@ import { assertProjectUnlocked } from "../spine/draft-lock.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { getActionCost, getOrCreateWallet, resolveWalletOrg } from "../../shared/ai/credit-reservation.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { screenThemeFor } from "../spine/screen-platforms.js"
 import { resolveScreenTheme, screenMockupsOf, screenThemeOf, type ScreenMockupMode, type ScreenMockupState } from "../../shared/diagram/screen-theme.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
@@ -163,7 +164,7 @@ const targetsOf = (spine: Spine, originals: readonly FunctionOriginalLite[], req
 const upToDate = (l: Loaded, screenId: string, mode: ScreenMockupMode, themeContext: Parameters<typeof resolveScreenTheme>[0]): boolean => {
   const section = originalSectionOfScreen(l.spine, l.originals, screenId)
   const images = section ? originalImages(section.blocks) : []
-  const theme = resolveScreenTheme(themeContext, l.spine.project.form_factor)
+  const theme = screenThemeFor(l.spine, screenId, resolveScreenTheme(themeContext, l.spine.project.form_factor))
   const context = layoutContext(l.spine, screenId, theme.platforms, { mode, images: images.map(({ index, caption, context: c }) => ({ index, caption, context: c })) })
   if (!context) return false
   const hash = layoutContentHash(context, mode, imageHashOf(images))
