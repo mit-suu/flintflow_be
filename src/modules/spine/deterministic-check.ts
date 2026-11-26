@@ -61,6 +61,8 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("vague_wording", "red", false),
   rule("source_missing", "red", false),
   rule("orphan_actor", "yellow", true),
+  // FLF-483 (H1): actor con của tác nhân tổng quát không còn use case riêng (thu hẹp phạm vi gỡ hết) — `orphan_actor` bỏ qua vì thừa kế
+  rule("actor_no_usecase", "yellow", true),
   rule("usecase_no_function", "yellow", true),
   rule("screen_no_function", "yellow", true),
   rule("orphan_screen", "yellow", true),
@@ -272,6 +274,7 @@ export interface StepGate {
  */
 const GATE_STEP = {
   orphan_actor: "S-3.2",
+  actor_no_usecase: "S-3.2",
   /** Use case truy cập tài khoản chỉ có từ S-3.2; trước đó chưa thể có nhóm dùng chung. */
   actor_generalization_missing: "S-3.2",
   usecase_no_function: "S-4.4",
@@ -1077,6 +1080,10 @@ const sectionReferencesAfterMigration = (spine: Spine, baseline?: ReadonlyMap<st
     }))
   })
 
+/** Vai trò công khai (chưa đăng nhập) — skill phân quyền màn tự thêm với `actor_id: null`, không gắn tác nhân người nào. */
+const PUBLIC_ROLE_NAMES: ReadonlySet<string> = new Set(["guest", "anonymous", "anonymous user", "visitor", "unauthenticated user", "public", "khách", "khách vãng lai", "người dùng ẩn danh", "ẩn danh"])
+const isPublicRoleName = (name: string): boolean => PUBLIC_ROLE_NAMES.has(name.normalize("NFC").trim().toLowerCase())
+
 const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
   const yellow = (rule_id: string, section_id: string, target_id: string, message: string, remediation_step: string): FlagCandidate => ({
     level: "yellow",
@@ -1114,6 +1121,11 @@ const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
       spine.actors
         .filter((a) => !isUsed(a.id))
         .map((a) => yellow("orphan_actor", "fixed:2.1", a.id, `Tác nhân "${a.name}" không thuộc use case nào`, "S-3.2"))),
+    // FLF-483 (H1): sau khi thu hẹp phạm vi, actor con còn treo (chỉ thừa kế use case của tác nhân cha) cũng phải có cờ
+    ...when("actor_no_usecase", () =>
+      spine.actors
+        .filter((a) => a.kind === "human" && a.parent_id && !usedActors.has(a.id) && isUsed(a.id))
+        .map((a) => yellow("actor_no_usecase", "fixed:2.1", a.id, `Tác nhân "${a.name}" không còn use case riêng nào (chỉ thừa kế từ tác nhân cha)`, "S-3.2"))),
     ...when("usecase_no_function", () =>
       spine.use_cases
         .filter((u) => u.function_ids.length === 0)
@@ -1137,7 +1149,8 @@ const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
         .map((f) => yellow("empty_feature", `feature:${f.id}`, f.id, `Tính năng "${f.name}" chưa có màn hình hay chức năng nào`, "S-4.1"))),
     ...when("role_no_actor", () =>
       spine.roles
-        .filter((r) => r.actor_id === null)
+        // FLF-483 (H1): skill phân quyền cho phép khách chưa đăng nhập `actor_id: null` ⇒ không phải thiếu sót
+        .filter((r) => r.actor_id === null && !isPublicRoleName(r.name))
         .map((r) => yellow("role_no_actor", "fixed:3.1.3", r.id, `Vai trò "${r.name}" chưa gắn tác nhân`, "S-3.1"))),
     ...when("orphan_entity", () =>
       orphanEntities(spine).map(({ entity, why }) => yellow("orphan_entity", "fixed:3.1.5", entity.id, `Entity "${entity.name}" ${why}`, "S-4.5"))),

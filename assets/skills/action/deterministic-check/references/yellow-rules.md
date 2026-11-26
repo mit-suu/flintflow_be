@@ -5,12 +5,13 @@ Deterministic, non-blocking, each with a `rule_id`.
 | `rule_id` | Condition | `remediation_step` |
 | --- | --- | --- |
 | `orphan_actor` | An actor of any kind (human, system, time) is in no `use_cases[].actor_ids[]` - the diagram only declares actors that have an edge, so it would vanish silently | S-3.2 |
+| `actor_no_usecase` | (FLF-483) A human actor with a `parent_id` that no use case lists itself - `orphan_actor` skips it because it inherits the parent's use cases, but after a scope cut it has nothing of its own | S-3.2 |
 | `usecase_no_function` | `use_cases[].function_ids[]` empty | S-3.2 |
 | `screen_no_function` | A screen has no function | S-4.1 |
 | `orphan_screen` | Once any `flow_to` edge exists: a screen with no incoming and no outgoing edge, or a pop-up nothing opens | S-4.2 |
 | `screen_no_actor` | A screen no human actor uses (once any screen ↔ actor link exists): not in the §3.1.3 permissions and no use-case function on it. Section §3.1.3 (FLF-428 split from `orphan_screen`) | S-4.3 |
 | `empty_feature` | A feature has neither screen nor function | S-4.1 |
-| `role_no_actor` | `roles[].actor_id` is null | S-3.1 |
+| `role_no_actor` | `roles[].actor_id` is null, except a public role (`Guest`, `Anonymous`, `Visitor`, `Khách`...): S-4.3 may add it without an actor | S-3.1 |
 | `non_english_content` | A field in the **Owns** column contains Vietnamese diacritics | owner step of the field |
 | `usecase_floating` | A use case has no actor, no `extends[]`, and is included by nobody | S-3.2 |
 | `usecase_auth_relation` | An authentication / account-access use case (Log In, Sign In, Register, Reset Password, Recover Account… and their Vietnamese forms, matched as whole phrases) is included by another use case, or itself extends one | S-3.4 |

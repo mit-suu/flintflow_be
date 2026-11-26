@@ -342,6 +342,7 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   orphan_screen: "Màn hình không nằm trong luồng nào",
   screen_no_actor: "Màn hình chưa có tác nhân nào dùng",
   orphan_actor: "Tác nhân chưa gắn use case",
+  actor_no_usecase: "Tác nhân không còn use case riêng",
   usecase_no_function: "Use case chưa gắn chức năng",
   screen_no_function: "Màn hình chưa có chức năng",
   empty_feature: "Tính năng chưa có màn hình hay chức năng",
