@@ -17,6 +17,7 @@ import { IMPORTED_DOC_VERSION, IMPORTED_DOC_VERSIONS } from "../doc-version/vers
 import { Project, type TemplateIntent } from "../project/project.model.js"
 import { DocBlock } from "./doc-block.model.js"
 import { ExtractionDraft, type ExtractedField, type IExtractionDraft } from "./extraction-draft.model.js"
+import { contentSectionId } from "./extract-targets.js"
 import { needsConfirm, needsConfirmGuidance } from "./import.constants.js"
 import { isReading, summarizeFound } from "./import-live-summary.js"
 import type { GetImportResponse, ImportedDocumentDto, MappingPatchRequest, ReviewContentMismatch, ReviewField, ReviewGuidance, TemplateProfileDto } from "./import.dto.js"
@@ -218,15 +219,19 @@ export const uploadImport = async (
 
   const result = await preflightDocx(file.buffer)
   // FLF-457: bản DRAFT của chính dự án khi đã có nội dung đang soạn (chưa baseline) ⇒ chỉ báo khác biệt, không đọc lại từ đầu
-  if (result.stamp?.project_id === projectId && current && (["baselining", "incomplete", "drafting"] as ImportStatus[]).includes(current.status)) {
+  if (result.stamp?.project_id === projectId && current && (["baselining", "incomplete", "reviewing", "drafting"] as ImportStatus[]).includes(current.status)) {
     throw new Mode1Error("IMPORT_INVALID_STATE", "File này tải về từ chính dự án - hãy dùng chức năng tải lại để xem khác biệt với nội dung đang soạn", {
       status: current.status,
       to: "uploaded",
       allowed: []
     })
   }
-  // FLF-458: tạo dự án bằng file mang dấu của một project FlintFlow khác ⇒ nhận như file mới (bỏ dấu cũ), không từ chối —
-  // chỉ `/reupload` (upload lại vào dự án đang có, UC-24) mới từ chối dấu của project khác.
+  // FLF-458 / I-1: tạo dự án bằng file mang dấu của một project FlintFlow khác ⇒ nhận như file mới (bỏ dấu cũ). Dự án đã có
+  // lần import đang làm dở (đã đọc, đang soạn, đang rà…) thì đây là upload lại ⇒ từ chối, báo import vào đúng project đó.
+  const foreignAllowed = !current || (["uploaded", "preflight_rejected"] as ImportStatus[]).includes(current.status)
+  if (result.stamp && result.stamp.project_id !== projectId && !foreignAllowed) {
+    throw new Mode1Error("IMPORT_STAMP_FOREIGN_PROJECT", "File này được xuất từ một project FlintFlow khác", { stamp: result.stamp })
+  }
   const foreignProject = result.stamp && result.stamp.project_id !== projectId ? await resolveForeignProject(projectId, result.stamp.project_id) : null
   const base = {
     projectId,
@@ -393,11 +398,22 @@ const previewOf = async (
   return previewStructure(layoutBlocks, new Map(headingMap.map((h) => [h.block_id, h.section_id])), plain, doc.intent ?? "free", undefined, marks)
 }
 
+/** Áp lại chỉnh tay (`manual`) của heading cũ lên heading vừa tách lại có cùng block_id. */
+const restoreManualHeadings = (fresh: HeadingMapEntry[], previous: readonly HeadingMapEntry[]): HeadingMapEntry[] => {
+  const manual = new Map(previous.filter((h) => h.manual).map((h) => [h.block_id, h]))
+  return fresh.map((e) => {
+    const m = manual.get(e.block_id)
+    if (!m) return e
+    const { auto_confirmed: _auto, scope_label: _scope, ...rest } = e
+    return { ...rest, section_id: m.section_id, confidence: m.confidence, confirmed: true, manual: true, ...(m.scope_label ? { scope_label: m.scope_label } : {}) }
+  })
+}
+
 /**
  * Tách file của import thành block + profile + bản sơ bộ (thay dữ liệu tách trước đó). `orgDefaultDrop`: dự án dùng mẫu của
  * tổ chức ⇒ mặc định Bỏ chữ mọi vùng có chữ (FLF-412 — mẫu không phải dữ liệu của dự án này).
  */
-const parseImport = async (doc: IImportedDocument, opts: { orgDefaultDrop: boolean }): Promise<void> => {
+const parseImport = async (doc: IImportedDocument, opts: { orgDefaultDrop: boolean; keepManual?: readonly HeadingMapEntry[] }): Promise<void> => {
   const sourceFile = await loadImportFile(doc)
   const { blocks } = await parseDocument(sourceFile)
   // FLF-278: mẫu đã lưu của tổ chức ⇒ mapping BA đã xác nhận ở dự án trước áp sẵn (bỏ bước 1.5 nếu khớp đủ)
@@ -417,6 +433,8 @@ const parseImport = async (doc: IImportedDocument, opts: { orgDefaultDrop: boole
       ? { ...matched, heading_map: applyMatchedOrgMapping(matched.heading_map, auto), org_match: { template_id: auto.template_id, version: auto.version } }
       : matched
   // FLF-343: không dừng ở bước xác nhận mapping — mục độ tin thấp tự nhận (giữ độ tin), finalize gắn cờ "Cần xem"
+  // FLF-460: tách lại lúc Bắt đầu ⇒ giữ nhãn / phạm vi / xác nhận người dùng đã chỉnh tay (theo block_id, ổn định qua bookmark)
+  if (opts.keepManual?.length) profile.heading_map = restoreManualHeadings(profile.heading_map, opts.keepManual)
   autoConfirmMapping(profile)
   const sections = assignBlockSections(blocks, profile.heading_map)
   // Record of Changes đọc ngay lúc tách file (FLF-252) — finalize dùng đúng các dòng đọc từ file
@@ -425,7 +443,8 @@ const parseImport = async (doc: IImportedDocument, opts: { orgDefaultDrop: boole
   await DocBlock.insertMany(blocks.map((b) => toBlockDoc(doc.projectId, b, sections.get(b.block_id) ?? null)))
   // Màn đọc khung (business-flow §3.1.2): cấu trúc đích sơ bộ bằng Code, trước khi người dùng bấm Bắt đầu — không gọi AI
   // FLF-458: file lấy từ một project FlintFlow khác (I-1) ⇒ mặc định Bỏ chữ mọi mục, như mẫu của tổ chức (FLF-412)
-  const defaultDropAll = (opts.orgDefaultDrop && doc.org_template_id) || doc.foreign_project
+  // Mặc định Bỏ chỉ ở lần tách đầu; tách lại lúc Bắt đầu (`orgDefaultDrop: false`) giữ lựa chọn của người dùng (§3.1.2)
+  const defaultDropAll = opts.orgDefaultDrop && (doc.org_template_id || doc.foreign_project)
   const drop_text = defaultDropAll ? textRegions(blocks, profile.heading_map).filter((r) => r.has_text).map((r) => r.key) : []
   const structure_preview = await previewOf(doc, blocks, sections, profile.heading_map, drop_text)
   await TemplateProfile.create({ projectId: doc.projectId, source: "imported", doc_version: IMPORTED_DOC_VERSION, ...profile, source_file_ref: doc.file_ref, source_sha256: createHash("sha256").update(sourceFile).digest("hex"), legacy_record_of_changes, structure_preview, drop_text: drop_text.length ? drop_text : null })
@@ -576,11 +595,11 @@ export const applyDropText = async (doc: IImportedDocument, userId: string = Str
     doc.file_ref = rewrittenRef
     await doc.save()
     try {
-      await parseImport(doc, { orgDefaultDrop: false })
+      await parseImport(doc, { orgDefaultDrop: false, keepManual: profile.heading_map })
     } catch (err) {
       doc.file_ref = originalRef
       await doc.save()
-      await parseImport(doc, { orgDefaultDrop: false }).catch(() => undefined)
+      await parseImport(doc, { orgDefaultDrop: false, keepManual: profile.heading_map }).catch(() => undefined)
       await TemplateProfile.updateOne({ projectId: doc.projectId }, { $set: { drop_text: dropped.length ? dropped : null, skeleton_language: profile.skeleton_language ?? null } }).catch(() => undefined)
       await docFileStore().remove(rewrittenRef).catch(() => undefined)
       throw err
@@ -623,13 +642,20 @@ type RelabelWhen = "legacy" | "before_start" | "after_import"
 const relabelMoment = async (doc: IImportedDocument): Promise<RelabelWhen> => {
   if (doc.status === "mapping_review") return "legacy"
   if (doc.status === "extracting") {
+    const busy = () => new Mode1Error("IMPORT_INVALID_STATE", "Đang đọc tài liệu, dừng lại rồi mới đổi nhãn", { status: doc.status, to: "extracting", allowed: ["extracting"] })
+    // Đang viết lại file lúc Bắt đầu, hoặc job I-4 còn sống (giữ bản đọc trong bộ nhớ) ⇒ chưa đổi nhãn được
+    if (doc.drop_applying) throw new Mode1Error("IMPORT_INVALID_STATE", "File đang được chuẩn bị, thử lại sau giây lát", { status: doc.status, to: "extracting", allowed: ["extracting"] })
+    const { isExtractionRunning } = await import("./extract-jobs.js")
+    if (await isExtractionRunning(String(doc._id))) throw busy()
     if (await extractionNotStarted(doc)) return "before_start"
-    // Đã bắt đầu: chỉ đổi được khi lượt đọc đang dừng (không có job chạy)
-    if (doc.paused) return "after_import"
-    throw new Mode1Error("IMPORT_INVALID_STATE", "Đang đọc tài liệu, dừng lại rồi mới đổi nhãn", { status: doc.status, to: "extracting", allowed: ["extracting"] })
+    // Đã bắt đầu, không có job: đổi được khi lượt đọc đang dừng, hoặc vừa đổi nhãn một lần (về màn báo credit, chưa Bắt đầu lại)
+    if (doc.paused || !doc.extract_cursor) return "after_import"
+    throw busy()
   }
-  if (doc.status === "fields_review") return "after_import"
+  // Chưa có bản gốc (chế độ 3/4: chưa hoàn thiện, đang rà soát) ⇒ vẫn đổi nhãn được, mục đổi nhãn đọc lại
+  if (doc.status === "fields_review" || doc.status === "incomplete" || doc.status === "reviewing") return "after_import"
   if (doc.status === "baselining") throw new Mode1Error("IMPORT_INVALID_STATE", "Đang tạo bản gốc, chờ xong rồi mới đổi nhãn", { status: doc.status, to: "extracting", allowed: [] })
+  if (!hasBaseline(doc.status)) throw new Mode1Error("IMPORT_INVALID_STATE", "Đang soạn phần còn thiếu, chờ xong rồi mới đổi nhãn", { status: doc.status, to: "extracting", allowed: [] })
   throw RELABEL_AFTER_BASELINE(doc)
 }
 
@@ -640,6 +666,8 @@ export const patchMapping = async (projectId: string, body: MappingPatchRequest)
   if (!profile) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa đọc xong bố cục tài liệu", { status: doc.status, to: "extracting", allowed: [] })
   /** Mục đổi nhãn (id cũ và mới) ⇒ I-4 đọc lại ở thời điểm `after_import`. */
   const relabeled = new Set<string>()
+  /** Có heading đổi sang mục khác (khác với chỉ đổi nhãn phạm vi) ⇒ chắc chắn có mục phải đọc. */
+  let sectionChanged = false
 
   for (const h of body.headings) {
     const entry = profile.heading_map.find((e) => e.block_id === h.block_id)
@@ -651,17 +679,25 @@ export const patchMapping = async (projectId: string, body: MappingPatchRequest)
       if (h.section_id !== entry.section_id) {
         relabeled.add(entry.section_id)
         relabeled.add(h.section_id)
-        // Người dùng tự chọn ⇒ không còn là mục "chưa chắc"
-        entry.auto_confirmed = undefined
+        // Heading chưa khớp (hoặc mới khớp) được đọc theo nội dung dưới khoá `content:@<block>`
+        relabeled.add(contentSectionId(entry.block_id))
+        sectionChanged = true
       }
+      // Người dùng tự chọn (kể cả chọn lại đúng mục đang gợi ý) ⇒ không còn là mục "chưa chắc"
+      entry.auto_confirmed = undefined
       entry.section_id = h.section_id
     }
     if (h.scope !== undefined) {
       const next = h.scope === "auto" ? undefined : h.scope
-      if (entry.scope_label !== next) relabeled.add(entry.section_id)
+      if (entry.scope_label !== next) {
+        relabeled.add(entry.section_id)
+        relabeled.add(contentSectionId(entry.block_id))
+      }
       entry.scope_label = next
     }
     entry.confirmed = true
+    // FLF-460: chỉnh tay ⇒ giữ lại khi tách lại file lúc Bắt đầu
+    entry.manual = true
   }
   for (const t of body.tables) {
     const entry = profile.table_map.find((e) => e.block_id === t.block_id && e.column_index === t.column_index)
@@ -703,8 +739,12 @@ export const patchMapping = async (projectId: string, body: MappingPatchRequest)
   await TemplateProfile.updateOne({ _id: profile._id }, { $set: { structure_preview } })
   if (moment === "after_import" && relabeled.size) {
     // I-4 đọc lại đúng các mục đổi nhãn: bỏ bản đọc cũ rồi về màn báo credit (`credit_estimate` chỉ tính mục chưa đọc)
-    await ExtractionDraft.deleteMany({ import_id: doc._id, section_id: { $in: [...relabeled] } })
-    if (doc.status !== "extracting") await transitionImport(doc, "extracting")
+    const removed = await ExtractionDraft.deleteMany({ import_id: doc._id, section_id: { $in: [...relabeled] } })
+    // Chỉ đổi nhãn phạm vi mà chẳng có bản đọc nào của mục đó ⇒ không có gì để đọc lại, giữ nguyên trạng thái
+    if ((removed.deletedCount || sectionChanged) && doc.status !== "extracting") {
+      doc.paused = null
+      await transitionImport(doc, "extracting")
+    }
   }
   return doc
 }

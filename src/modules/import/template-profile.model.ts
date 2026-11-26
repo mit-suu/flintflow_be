@@ -30,6 +30,8 @@ export interface HeadingMapEntry {
   auto_confirmed?: boolean
   /** FLF-460: người dùng đổi nhãn Ngoài phạm vi của heading này (màn đọc khung); không có = để hệ thống tự phân loại. */
   scope_label?: "out_of_scope" | "in_scope"
+  /** FLF-460: người dùng tự chọn nhãn / phạm vi / xác nhận heading này (khác kết quả khớp tự động) - giữ lại khi tách lại file lúc Bắt đầu. */
+  manual?: boolean
   /** FLF-363: phần của ngân hàng phần khớp theo tên (`part:ieee:references`) — nội bộ, không hiện cho người dùng. */
   template_section?: string | null
   /** FLF-363 (D2): mục theo tên khác mục theo nội dung — heading đã đổi theo nội dung; finalize bật cờ vàng. */
@@ -214,6 +216,7 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             confirmed: { type: Boolean, default: false },
             auto_confirmed: { type: Boolean, default: undefined },
             scope_label: { type: String, enum: ["out_of_scope", "in_scope"], default: undefined },
+            manual: { type: Boolean, default: undefined },
             template_section: { type: String, default: null },
             content_mismatch: { type: new Schema({ by_title: String, by_content: String }, { _id: false }), default: undefined },
             guidance: { type: String, default: undefined },

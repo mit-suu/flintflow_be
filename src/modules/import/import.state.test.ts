@@ -34,7 +34,10 @@ const EXPECTED: [ImportStatus, ImportStatus][] = [
   ["incomplete", "drafting"],
   // FLF-453: còn mục cần AI rà (đầu vào của phần thiếu, hoặc cờ đỏ) ⇒ dừng ở đây trước khi sang Luồng 2
   ["incomplete", "reviewing"],
+  // FLF-460: chế độ 3/4 chưa có bản gốc đổi nhãn ⇒ đọc lại mục đổi nhãn
+  ["incomplete", "extracting"],
   ["reviewing", "drafting"],
+  ["reviewing", "extracting"],
   ["drafting", "delivered"],
   ["checking", "gap_review"],
   ["gap_review", "delivered"],
