@@ -64,6 +64,9 @@ import { functionSourceHash } from "../render/layout-sections.js"
 import { functionFieldValues, tagFunctionBlocks } from "../render/function-original.js"
 import { structureChanges } from "./structure-preview.js"
 import { enterFlow2, entersFlow2 } from "./flow2.service.js"
+import * as flagsService from "../spine/flags.service.js"
+import { mode1RuleProfileFor } from "./mode1-guard.js"
+import { sectionsNeedingAiReview } from "./review.service.js"
 import { TemplateProfile, type HeadingMapEntry, type LayoutEntry, type TableMapEntry } from "./template-profile.model.js"
 import { buildTemplateContext } from "./template-context.js"
 import { compareTargetStructure, type TargetStructure, type TemplateIntent } from "./target-structure.js"
@@ -370,7 +373,23 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     // Chuyển lỗi (vd xung đột phiên bản Spine) ⇒ giữ `incomplete`: workspace có nút "Soạn phần còn thiếu"
     // (`POST /import/continue`), không chạy lại finalize
     if (entersFlow2(intent, structure.resolved_mode)) {
-      await enterFlow2(doc, userId).catch((err: unknown) => console.error(`[import] Chuyển Luồng 2 cho import ${String(doc._id)} lỗi:`, err))
+      // FLF-453 (business-flow §3.1.2 "Rà soát phần có sẵn"): I-5 chạy luật Code trên mọi mục có sẵn trước Luồng 2, không
+      // tốn credit — dùng để chọn mục cần AI rà (mục có cờ đỏ) và để gỡ cờ đỏ Code đã bắt từ trước khi có bước nào của
+      // FlintFlow kiểm phần này.
+      const checked = await flagsService
+        .recompute(projectId, { by: "import", ruleProfile: await mode1RuleProfileFor(projectId), atBaseline: true })
+        .catch((err: unknown) => {
+          console.error(`[import] Rà luật Code (I-5) cho import ${String(doc._id)} lỗi:`, err)
+          return null
+        })
+      const reviewSections = checked ? sectionsNeedingAiReview(structure, checked.flags) : []
+      if (reviewSections.length) {
+        profile.review_sections = reviewSections
+        await profile.save()
+        await transitionImport(doc, "reviewing")
+      } else {
+        await enterFlow2(doc, userId).catch((err: unknown) => console.error(`[import] Chuyển Luồng 2 cho import ${String(doc._id)} lỗi:`, err))
+      }
     }
     const stopped = await loadSpine(projectId)
     return { doc, baseline: null, spine_version: stopped.spine_version, flags: null, target_structure: structure }

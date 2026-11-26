@@ -35,6 +35,8 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   // 1.11 theo lô (~12k token in / lô) + một lượt kiểm chéo trên Spine gọn
   [ActionType.IMPORT_SEMANTIC_CHECK]: 3,
   [ActionType.IMPORT_CROSS_CHECK]: 3,
+  // FLF-453: vòng rà soát phần có sẵn chế độ 3/4 (business-flow §3.1.2) — theo lô như 1.11, scope nhỏ hơn (chỉ mục cần rà)
+  [ActionType.IMPORT_REVIEW_EXISTING]: 3,
   [ActionType.CR_CLARIFY]: 1,
   [ActionType.CR_PROPOSE]: 3,
   [ActionType.CR_CONSISTENCY]: 2,

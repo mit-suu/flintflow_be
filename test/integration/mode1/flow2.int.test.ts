@@ -15,7 +15,7 @@ import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeMode1 } from "../../helpers/mode1.js"
 import { stripRecord } from "../../../src/modules/import/check.service.js"
 import { runExtraction } from "../../../src/modules/import/extract.service.js"
-import { importAtBaselining, importAtExtracting } from "../../helpers/mode1-import-p4.js"
+import { finishReviewIfPending, importAtBaselining, importAtExtracting } from "../../helpers/mode1-import-p4.js"
 import { makeDocx, p, styled } from "../../../src/modules/docx-ooxml/testing/make-docx.js"
 import { startFinalize, waitForFinalize } from "../../../src/modules/import/finalize-jobs.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
@@ -50,6 +50,8 @@ const toFinalized = async (intent: "fixed" | "free", startKind: "new" | "existin
     .updateOne({ _id: new mongoose.Types.ObjectId(ctx.projectId) }, { $set: { template_intent: intent, start_kind: startKind } })
   await startFinalize(ctx.projectId, ctx.userId, { import_id: ctx.importId, base_version: await version(ctx.projectId) })
   await waitForFinalize(ctx.importId)
+  // FLF-453: Product Overview có sẵn ⇒ cần rà trước Luồng 2 (business-flow §3.1.2) — AI giả không phát hiện gì
+  await finishReviewIfPending(ctx.projectId, ctx.userId, ctx.importId)
   // Giữ khung còn thiếu (chế độ 3) lẫn bổ sung theo mẫu chuẩn còn thiếu (chế độ 4, FLF-416) ⇒ tự sang Luồng 2
   expect((await ImportedDocument.findById(ctx.importId))!.status).toBe("drafting")
   const user = (await User.findById(ctx.userId).lean())!
@@ -305,6 +307,7 @@ describe("Luồng 2 cho phần thiếu - chế độ 3", () => {
     await Project.updateOne({ _id: projectId }, { $set: { template_intent: "fixed", start_kind: "new" } })
     await startFinalize(projectId, userId, { import_id: importId, base_version: await version(projectId) })
     await waitForFinalize(importId)
+    await finishReviewIfPending(projectId, userId, importId)
     const user = (await User.findById(userId).lean())!
     const project = (await Project.findById(projectId).lean())!
     const token = await authAs({ _id: user._id, email: user.email, orgId: String(project.organizationId) })
@@ -363,6 +366,7 @@ describe("Luồng 2 cho phần thiếu - chế độ 3", () => {
     await TemplateProfile.updateOne({ projectId }, { $set: { structure_preview: null } })
     await startFinalize(projectId, userId, { import_id: importId, base_version: await version(projectId) })
     await waitForFinalize(importId)
+    await finishReviewIfPending(projectId, userId, importId)
     expect((await ImportedDocument.findById(importId))!.status).toBe("drafting")
     const structure = (await TemplateProfile.findOne({ projectId }).lean())!.target_structure!
     expect(structure.resolved_mode).toBe(3)

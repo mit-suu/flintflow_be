@@ -649,5 +649,24 @@ export const getImportView = async (projectId: string): Promise<GetImportRespons
     extractionSummary(doc._id as mongoose.Types.ObjectId),
     DocBlock.countDocuments({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } })
   ])
-  return { import: toImportDto(doc), profile: profile ? toProfileDto(profile) : null, extraction, blocks_count: blocksCount, target_structure: profile?.target_structure ?? null, structure_preview: profile?.structure_preview ?? null, text_sections: profile ? await textSectionsOf(doc, profile) : null }
+  // FLF-453: báo credit vòng rà soát trước khi người dùng xác nhận chạy (business-flow §3.1.2)
+  const review =
+    doc.status === "reviewing"
+      ? await (async () => {
+          const { estimateReviewCredit } = await import("./review.service.js")
+          const sectionIds = profile?.review_sections ?? []
+          const estimate = await estimateReviewCredit(projectId, sectionIds)
+          return { section_ids: sectionIds, calls: estimate.calls, credits: estimate.credits }
+        })()
+      : null
+  return {
+    import: toImportDto(doc),
+    profile: profile ? toProfileDto(profile) : null,
+    extraction,
+    blocks_count: blocksCount,
+    target_structure: profile?.target_structure ?? null,
+    structure_preview: profile?.structure_preview ?? null,
+    text_sections: profile ? await textSectionsOf(doc, profile) : null,
+    review
+  }
 }

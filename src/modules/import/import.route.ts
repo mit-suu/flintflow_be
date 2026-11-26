@@ -26,7 +26,7 @@ const router = Router()
  *         sha256: { type: string }
  *         status:
  *           type: string
- *           enum: [uploaded, preflight_rejected, awaiting_latest_confirm, parsing, mapping_review, extracting, fields_review, baselining, incomplete, drafting, checking, gap_review, delivered, change_requested]
+ *           enum: [uploaded, preflight_rejected, awaiting_latest_confirm, parsing, mapping_review, extracting, fields_review, baselining, incomplete, reviewing, drafting, checking, gap_review, delivered, change_requested]
  *           description: "FLF-343: file mới đi uploaded → parsing → extracting (chờ Bắt đầu) → baselining → checking → gap_review; awaiting_latest_confirm / mapping_review / fields_review chỉ còn ở bản ghi cũ"
  *         preflight:
  *           type: object
@@ -399,6 +399,54 @@ router.post("/:id/import/finalize", authMiddleware, importController.finalize)
  *       409: { description: IMPORT_INVALID_STATE (không phải chế độ 3 / không ở incomplete), SPINE_VERSION_CONFLICT }
  */
 router.post("/:id/import/continue", authMiddleware, importController.continueFlow2)
+
+/**
+ * @swagger
+ * /api/v1/projects/{id}/import/review/run:
+ *   post:
+ *     summary: FLF-453 - xác nhận credit, chạy vòng rà soát phần có sẵn rồi sang Luồng 2 (business-flow §3.1.2)
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [import_id], properties: { import_id: { type: string } } }
+ *     responses:
+ *       200: { description: "Xong ⇒ `{ project_mode: \"fpt\", import_state: \"drafting\", current_step, spine_version }`; lượt AI lỗi / hết credit ⇒ `{ import }` đang `paused`" }
+ *       409: { description: IMPORT_INVALID_STATE (không ở reviewing) }
+ */
+router.post("/:id/import/review/run", authMiddleware, importController.reviewRun)
+
+/**
+ * @swagger
+ * /api/v1/projects/{id}/import/review/stop:
+ *   post:
+ *     summary: FLF-453 - bấm Dừng khi vòng rà soát đang chạy (business-flow §2 "Dừng giữa chừng") — giữ tiến độ
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [import_id], properties: { import_id: { type: string } } }
+ *     responses:
+ *       200: { description: "`{ import }` đang `reviewing`, `paused: { reason: \"user\" }`" }
+ *       409: { description: IMPORT_INVALID_STATE (không ở reviewing) }
+ */
+router.post("/:id/import/review/stop", authMiddleware, importController.reviewStop)
 
 // FLF-278 trên FLF-335/336 — mẫu / thư viện nội dung của tổ chức, đi qua dự án (contract §FLF-278)
 router.post("/:id/import/from-org", authMiddleware, orgLibrary.importFromOrg)

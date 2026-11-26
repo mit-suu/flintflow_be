@@ -18,6 +18,7 @@ import { seedFixture, type SeededFixture } from "../../setup.js"
 import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { acceptLatest, applyDropText } from "../../../src/modules/import/import.service.js"
 import { startFinalize, waitForFinalize } from "../../../src/modules/import/finalize-jobs.js"
+import { finishReviewIfPending } from "../../helpers/mode1-import-p4.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
 import { Project } from "../../../src/modules/project/project.model.js"
@@ -72,6 +73,8 @@ const uploadAndFinalize = async (file: URL, completeToStandard: boolean, opts: {
   const usageAfterRead = await Usage.countDocuments({ projectId })
   await startFinalize(projectId, seeded.userId, { import_id: importId, base_version: (await spineRepository.get(projectId))!.spine_version })
   await waitForFinalize(importId)
+  // FLF-453: AI giả không phát hiện gì ở vòng rà soát (business-flow §3.1.2) — test này không chủ đích kiểm vòng rà soát
+  await finishReviewIfPending(projectId, seeded.userId, importId)
   const project = (await Project.findById(projectId).lean())!
   const spine = (await spineRepository.get(projectId))!
   const profile = (await TemplateProfile.findOne({ projectId }).lean())!

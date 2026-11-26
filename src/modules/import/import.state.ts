@@ -32,6 +32,11 @@ export const IMPORT_STATUSES = [
   "baselining",
   /** FLF-336 I-5: file thiếu mục của cấu trúc đích ⇒ không có v0 dở dang, dừng ở "Kết quả đọc file" (Dừng / Hoàn thiện). */
   "incomplete",
+  /**
+   * FLF-453 (business-flow §3.1.2 "Rà soát phần có sẵn"): chế độ 3/4 còn mục cần AI rà (đầu vào của phần thiếu, hoặc cờ
+   * đỏ) ⇒ dừng ở đây chờ xác nhận credit trước Luồng 2. Không mục nào cần rà ⇒ bỏ qua, giữ `incomplete` ─► `drafting` cũ.
+   */
+  "reviewing",
   /** FLF-278: chế độ 3 (mẫu bắt buộc) đi tiếp Luồng 2 — soạn phần thiếu bằng pipeline, không tạo v0 từ mẫu. */
   "drafting",
   "checking",
@@ -53,6 +58,7 @@ export const IMPORT_STATUS_LABELS: Readonly<Record<ImportStatus, string>> = {
   fields_review: "Duyệt dữ liệu trích",
   baselining: "Đang chốt bản gốc",
   incomplete: "Chưa hoàn thiện - chờ bạn quyết",
+  reviewing: "Rà soát phần có sẵn",
   drafting: "Đang soạn phần còn thiếu",
   checking: "Đang kiểm tra",
   gap_review: "Xem báo cáo thiếu sót",
@@ -74,7 +80,8 @@ export const IMPORT_TRANSITIONS: Readonly<Record<ImportStatus, readonly ImportSt
   extracting: ["fields_review", "baselining"],
   fields_review: ["baselining"],
   baselining: ["checking", "incomplete"],
-  incomplete: ["baselining", "drafting"],
+  incomplete: ["baselining", "drafting", "reviewing"],
+  reviewing: ["drafting"],
   drafting: ["delivered"],
   checking: ["gap_review"],
   gap_review: ["delivered", "change_requested"],
@@ -86,7 +93,7 @@ export const IMPORT_TRANSITIONS: Readonly<Record<ImportStatus, readonly ImportSt
  * Hai bước có gọi AI (I-4 trích field, 1.11 AI semantic check) — hết credit/lỗi AI thì pause. `baselining`: job finalize
  * chạy nền lỗi hoặc mất (máy chủ khởi động lại) ⇒ hoàn về mốc + `resume_later`, resume chạy lại finalize (`finalize-jobs.ts`).
  */
-export const PAUSABLE_IMPORT_STATUSES: readonly ImportStatus[] = ["extracting", "baselining", "checking"]
+export const PAUSABLE_IMPORT_STATUSES: readonly ImportStatus[] = ["extracting", "baselining", "checking", "reviewing"]
 
 /** Đã có baseline v0 (từ `checking` trở đi) — BR-03: mọi sửa sau đây phải qua CR. */
 export const IMPORT_STATUSES_WITH_BASELINE: readonly ImportStatus[] = ["checking", "gap_review", "delivered", "change_requested"]

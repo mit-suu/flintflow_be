@@ -18,6 +18,7 @@ import { ImportedDocument } from "../../../src/modules/import/imported-document.
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
 import { waitForExtraction } from "../../../src/modules/import/extract-jobs.js"
 import { startFinalize, waitForFinalize } from "../../../src/modules/import/finalize-jobs.js"
+import { finishReviewIfPending } from "../../helpers/mode1-import-p4.js"
 import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 
@@ -58,7 +59,8 @@ const startAndFinalize = async (seeded: SeededFixture, projectId: string, import
   await waitForExtraction(importId)
   await startFinalize(projectId, seeded.userId, { import_id: importId, base_version: (await spineRepository.get(projectId))!.spine_version })
   await waitForFinalize(importId)
-  return (await ImportedDocument.findById(importId))!
+  // FLF-453: AI giả không phát hiện gì ở vòng rà soát (business-flow §3.1.2) — test này không chủ đích kiểm vòng rà soát
+  return finishReviewIfPending(projectId, seeded.userId, importId)
 }
 
 const CHAPTER_1 = "Cổng cấp phép xây dựng trực tuyến cho phép người dân nộp hồ sơ xin phép xây dựng và theo dõi tiến độ xử lý."
