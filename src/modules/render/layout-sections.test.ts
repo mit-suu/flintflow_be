@@ -591,6 +591,9 @@ describe("phần nhỏ slot:* của mẫu khách (FLF-278 trên FLF-335/336)", (
     ] }])
     const withSeparateGoals = buildLayoutSections(s, { language: "en", fixedTemplate: true, layout: [...layout, entry(4, "Goals", 2, "slot:goals")] }, [], { diagramPng: () => undefined })
     expect(JSON.stringify(withSeparateGoals.sections.find((x) => x.id === "slot:scope")!.blocks)).not.toContain("Increase club participation")
+    // Đổi mẫu: BA chọn "Không in ra" cho mục Mục tiêu ⇒ Phạm vi không in ngầm mục tiêu
+    const suppressed = buildLayoutSections(s, { language: "en", fixedTemplate: true, layout, printSuppressed: ["slot:goals"] }, [], { diagramPng: () => undefined })
+    expect(JSON.stringify(suppressed.sections.find((x) => x.id === "slot:scope")!.blocks)).not.toContain("Increase club participation")
     s.messages = []
     const empty = buildLayoutSections(s, { language: "en", fixedTemplate: true, layout }, [], { diagramPng: () => undefined })
     expect(empty.sections.find((x) => x.id === "slot:messages")!.blocks).toEqual([])

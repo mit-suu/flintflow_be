@@ -140,6 +140,30 @@ export async function writeTemplateDocx(
   const styles = await pkg.xml("word/styles.xml")
   const defaultBodyStyle = (styles ? wAll(styles, "style") : []).find((s) => wAttr(s, "type") === "paragraph" && (wAttr(s, "default") === "1" || /^(normal|body text)$/i.test(wAttr(wKid(s, "name"), "val") ?? "")))
   const bodyStyleId = wAttr(defaultBodyStyle, "styleId") ?? undefined
+  /** Đoạn mẫu cho heading cấp `level` khi file chưa có heading cấp đó: style "heading N" / outlineLvl N-1 của mẫu, hoặc heading sâu nhất + outlineLvl. */
+  const headingSampleOfLevel = (level: number): { element: Element; text: string } | undefined => {
+    const style = (styles ? wAll(styles, "style") : []).find(
+      (s) => wAttr(s, "type") === "paragraph" && (new RegExp(`^heading\\s*${level}$`, "i").test(wAttr(wKid(s, "name"), "val") ?? "") || wAttr(wKid(wKid(s, "pPr") ?? s, "outlineLvl"), "val") === String(level - 1))
+    )
+    const p = wEl(xml, "p")
+    const pPr = wEl(xml, "pPr")
+    p.appendChild(pPr)
+    const styleId = wAttr(style, "styleId")
+    if (styleId) {
+      pPr.appendChild(wEl(xml, "pStyle", { val: styleId }))
+      return { element: p, text: "" }
+    }
+    const deepest = [...headings].filter((h) => (h.level ?? 1) < level).sort((a, b) => (b.level ?? 1) - (a.level ?? 1))[0]
+    if (!deepest) return undefined
+    const own = wKid(deepest.element, "pPr")
+    const clone = own ? (own.cloneNode(true) as Element) : pPr
+    for (const old of wKids(clone, "outlineLvl")) clone.removeChild(old)
+    // Thứ tự con của pPr theo schema: outlineLvl đứng trước rPr / sectPr / pPrChange
+    const tail = wKids(clone).find((k) => ["rPr", "sectPr", "pPrChange"].includes(k.localName))
+    clone.insertBefore(wEl(xml, "outlineLvl", { val: String(level - 1) }), tail ?? null)
+    if (clone !== pPr) p.replaceChild(clone, pPr)
+    return { element: p, text: "" }
+  }
   const numbering = await pkg.xml("word/numbering.xml")
   const listFormat = (p: Element): string | null => {
     if (!numbering) return null
@@ -368,9 +392,12 @@ export async function writeTemplateDocx(
     // FLF-468: ưu tiên heading cùng loại (tính năng / chức năng) cùng cấp của file hơn heading cùng cấp bất kỳ ("5.5 Glossary")
     const kindSample = kind ? slots.filter((s) => s.section_id.startsWith(`${kind}:`) && (s.heading.level ?? 1) === section.level).pop()?.heading : undefined
     const sameLevel = headings.filter((h) => (h.level ?? 1) === section.level)
-    const sample = frameSample ?? kindSample ?? sameLevel[sameLevel.length - 1]
+    const found = frameSample ?? kindSample ?? sameLevel[sameLevel.length - 1]
+    // File chưa có heading nào ở cấp này (mẫu chỉ dùng Heading 1–3): heading theo style "heading N" của mẫu; mẫu không có style đó ⇒
+    // theo heading sâu nhất của file + outlineLvl — vẫn là heading (vào mục lục), không rơi về đoạn thường in đậm
+    const sample = found ?? headingSampleOfLevel(section.level)
     if (!sample) return paragraph(xml, [{ text: section.heading, bold: true }], bodyPatternFor(bodyPattern, bodyStyleId))
-    const typed = /^\s*(\d+(\.\d+)*\.?|[IVXLC]+\.)\s+/.test(sample.text)
+    const typed = /^\s*(\d+(\.\d+)*\.?|[IVXLC]+\.)\s+/.test(found ? sample.text : (headings.find((h) => h.text.trim())?.text ?? ""))
     const text = typed && section.number ? `${section.number} ${section.heading}` : section.heading
     const heading = paragraph(xml, [{ text }], sample.element)
     for (const pr of wAll(heading, "sectPr")) pr.parentNode?.removeChild(pr)

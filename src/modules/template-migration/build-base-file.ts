@@ -20,8 +20,12 @@ import { columnIdentity, DROP_FROM_PRINT, RECORD_OF_CHANGES, isFreeTextSection, 
 import { UNMAPPED_SECTION } from "../import/import.constants.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { isInstructionText, splitInstruction } from "../../shared/utils/instruction-text.js"
-import { createTransplanter, enforceRelsAllowList, pruneUnreferencedParts, requestFieldUpdate, validateDocxStructure, type DroppedItem } from "./ooxml-transplant.js"
-import type { NewHeading, OldHeading, PairingResult } from "./pair-sections.js"
+import { createTransplanter, enforceRelsAllowList, pruneUnreferencedParts, requestFieldUpdate, validateDocxStructure, widenTocLevels, type DroppedItem } from "./ooxml-transplant.js"
+import { wrapperKeys, type NewHeading, type OldHeading, type PairingResult } from "./pair-sections.js"
+import { numberingOfHeadings, renumberEntries, type HeadingNumbering } from "./numbering.js"
+import { overlapsOf } from "../import/content-slots.js"
+import { targetsOf } from "../import/extract-targets.js"
+import { foldText, splitHeadingNumber } from "../import/text-similarity.js"
 
 // ─── kiểu công khai ──────────────────────────────────────────────
 
@@ -66,6 +70,10 @@ export interface BuildBaseFileInput {
   forceSpine?: boolean
   /** Spine có phần tử (chức năng / use case / tính năng / màn): heading ví dụ của mẫu bỏ đi dù file cũ không có heading phần tử (dự án FPT / từ Spine). */
   hasSpineElements?: boolean
+  /** Kiểu đánh số heading của mẫu đích (đọc lúc chuẩn bị); thiếu ⇒ suy từ chữ heading của mẫu. */
+  numbering?: HeadingNumbering
+  /** Layout đã lập ở bước áp dụng (cùng id mục riêng với Spine) — thiếu ⇒ lập lại từ kế hoạch. */
+  plannedLayout?: PlannedLayout
 }
 
 export type SectionMode = "transplant" | "table_mapped" | "spine" | "guidance" | "restored" | "custom" | "moved" | "removed"
@@ -155,6 +163,17 @@ const cellText = (tc: Element): string =>
 
 const rowTexts = (tr: Element): string[] => wKids(tr, "tc").map(cellText)
 
+const paragraphText = (p: Element): string => wAll(p, "t").map((t) => t.textContent ?? "").join("")
+
+/** Đổi chữ của một đoạn, giữ định dạng run đầu: chữ dồn vào `w:t` đầu, các `w:t` khác để trống (bookmark / field không đụng). */
+const setParagraphText = (p: Element, text: string): void => {
+  const ts = wAll(p, "t")
+  if (!ts.length) return
+  ts[0].textContent = text
+  ts[0].setAttribute("xml:space", "preserve")
+  for (const t of ts.slice(1)) t.textContent = ""
+}
+
 /** Ghi chữ vào ô: giữ pPr / rPr của đoạn + run đầu của ô mẫu (định dạng của mẫu đích), mỗi dòng một đoạn. */
 const setCellText = (tc: Element, text: string): void => {
   const doc = tc.ownerDocument
@@ -218,8 +237,17 @@ interface Placement {
   oldKey: string
   tableAction: TableAction
   notes: string[]
-  /** `move_to`: bỏ heading cũ, chỉ chuyển phần thân vào mục thiếu của mẫu đích. */
+  /**
+   * Phần gộp giữ heading cũ (bỏ số cũ, đánh số lại) ở **cấp heading đích + 1**, đặt cuối cây con của heading đích — sau cặp chính và phần
+   * tử của nó. `false` = cặp chính, hoặc phần gộp duy nhất vào mục đích trống (bỏ heading cũ, nội dung nằm ngay dưới heading đích).
+   */
   moved: boolean
+  /** Phần gộp mà mục đích đã in đúng dữ liệu đó từ Spine (`same_data`): không chép khối, không có mục trong layout (không in hai lần). */
+  skip?: boolean
+  /** Chia theo phần tử (`distribute`): mã phần tử Spine in dưới heading này; mục dựng từ Spine. */
+  items?: string[]
+  /** Chia theo phần tử: heading đầu (cặp gốc) giữ `section_id` của mục, in phần tử còn lại; heading khác thành mục riêng có lát phần tử. */
+  primary?: boolean
 }
 
 interface CustomPlan {
@@ -230,9 +258,14 @@ interface CustomPlan {
 const TABLE_CONFLICTS = new Set(["table_columns", "record_of_changes"])
 
 /** Phần của đầu vào đủ để lập kế hoạch đặt mục (không cần file). */
-export type PlanInput = Pick<BuildBaseFileInput, "targetHeadings" | "oldHeadings" | "pairing" | "groups" | "decisions" | "targetIsSnapshot" | "hasSpineElements">
+export type PlanInput = Pick<BuildBaseFileInput, "targetHeadings" | "oldHeadings" | "pairing" | "groups" | "decisions" | "targetIsSnapshot" | "hasSpineElements" | "numbering">
 
-const planOf = (input: PlanInput): { byNew: Map<string, Placement[]>; customs: CustomPlan[]; removed: { oldKey: string; reason: string }[] } => {
+const relatedIds = (a: string, b: string): boolean => a === b || overlapsOf(a).includes(b) || overlapsOf(b).includes(a)
+
+/** `new_key` của mục thiếu theo cặp mà Spine có dữ liệu để in. */
+const filledKeys = (groups: MigrationGroups): Set<string> => new Set(groups.missing.filter((m) => m.filled_from_spine).map((m) => m.new_key))
+
+const planOf = (input: PlanInput): { byNew: Map<string, Placement[]>; customs: CustomPlan[]; removed: { oldKey: string; reason: string }[]; records: string[] } => {
   const decision = new Map(input.decisions.map((d) => [d.id, readChoice(input.groups, d.id, d.choice)]))
   const conflictsOf = new Map<string, MigrationGroups["conflict"]>()
   for (const c of input.groups.conflict) conflictsOf.set(c.old_key, [...(conflictsOf.get(c.old_key) ?? []), c])
@@ -240,21 +273,47 @@ const planOf = (input: PlanInput): { byNew: Map<string, Placement[]>; customs: C
   const byNew = new Map<string, Placement[]>()
   const customs: CustomPlan[] = []
   const removed: { oldKey: string; reason: string }[] = []
+  /** Record of Changes cũ ghép theo tên cột vào bảng lịch sử đứng trước heading đầu của mẫu (mẫu không có heading riêng cho nó). */
+  const records: string[] = []
   const add = (newKey: string, p: Placement): void => void byNew.set(newKey, [...(byNew.get(newKey) ?? []), p])
   const dropped = new Set(input.groups.structure_only_dropped)
   const oldSection = new Map(input.oldHeadings.map((h) => [h.key, h.section_id]))
-  const frameworkMoves: { newKey: string; placement: Placement }[] = []
+  const targetByKey = new Map(input.targetHeadings.map((h) => [h.key, h]))
+  const filled = filledKeys(input.groups)
+  const wrappers = wrapperKeys(input.targetHeadings)
+  /** Phần gộp (mục thừa / mục đặt sai chỗ chọn "chuyển vào"), theo thứ tự tài liệu cũ. */
+  const moves: { newKey: string; oldKey: string; notes: string[]; free: boolean }[] = []
 
   for (const pair of input.pairing.pairs) {
     const notes: string[] = []
     if (pair.new_key && validNew.has(pair.new_key)) {
+      // Cặp theo id nhưng sai nghĩa: BA chọn gộp sang mục khác / giữ thành mục riêng thay vì giữ cặp
+      const placement = decision.get(`c:placement:${pair.old_key}`)
+      if (placement?.startsWith("move_to:") && validNew.has(placement.slice(8))) {
+        moves.push({ newKey: placement.slice(8), oldKey: pair.old_key, notes, free: false })
+        continue
+      }
+      if (placement === "keep_custom") {
+        customs.push({ oldKey: pair.old_key, notes })
+        continue
+      }
       let newKey = pair.new_key
       let tableAction: TableAction = "none"
+      let distribute: MigrationGroups["conflict"][number] | null = null
       for (const c of conflictsOf.get(pair.old_key) ?? []) {
         const choice = decision.get(c.id)
         if (choice === "ai_resolve") notes.push("ai_resolve chưa chạy ở bước dựng file: dùng cách ghép tự động")
         if (TABLE_CONFLICTS.has(c.kind)) tableAction = choice === "keep_old_table" || choice === "keep_custom" ? "keep" : choice === "delete" || choice === DROP_FROM_PRINT ? "drop" : "map"
         else if (c.kind === "split_section" && choice?.startsWith("to:") && validNew.has(choice.slice(3))) newKey = choice.slice(3)
+        else if (c.kind === "split_section" && choice === "distribute" && c.item_targets?.length) distribute = c
+      }
+      if (distribute) {
+        // Mỗi heading của mục bị tách nhận đúng phần tử của nó; heading đầu nhận cả phần tử không phân loại được
+        for (const k of distribute.candidate_keys.filter((key) => validNew.has(key))) {
+          const items = distribute.item_targets!.filter((t) => t.new_key === k).map((t) => t.id)
+          if (k === newKey || items.length) add(k, { oldKey: pair.old_key, tableAction, notes: [...notes, "Chia theo từng phần tử: dựng từ Spine"], moved: false, items, primary: k === newKey })
+        }
+        continue
       }
       add(newKey, { oldKey: pair.old_key, tableAction, notes, moved: false })
       continue
@@ -264,25 +323,30 @@ const planOf = (input: PlanInput): { byNew: Map<string, Placement[]>; customs: C
       continue
     }
     const extra = decision.get(`e:${pair.old_key}`) ?? decision.get(`c:record_of_changes:${pair.old_key}`)
-    if (extra === DROP_FROM_PRINT) removed.push({ oldKey: pair.old_key, reason: "BA chọn bỏ khỏi bản in (dữ liệu giữ trong Spine)" })
-    else if (extra?.startsWith("move_to:") && validNew.has(extra.slice(8))) {
-      if (isFreeTextSection(oldSection.get(pair.old_key) ?? "")) add(extra.slice(8), { oldKey: pair.old_key, tableAction: "none", notes, moved: true })
-      else frameworkMoves.push({ newKey: extra.slice(8), placement: { oldKey: pair.old_key, tableAction: "none", notes, moved: true } })
-    }
+    if (extra === "map_by_header" && oldSection.get(pair.old_key) === RECORD_OF_CHANGES) records.push(pair.old_key)
+    else if (extra === DROP_FROM_PRINT) removed.push({ oldKey: pair.old_key, reason: "BA chọn bỏ khỏi bản in (dữ liệu giữ trong Spine)" })
+    else if (extra?.startsWith("move_to:") && validNew.has(extra.slice(8))) moves.push({ newKey: extra.slice(8), oldKey: pair.old_key, notes, free: isFreeTextSection(oldSection.get(pair.old_key) ?? "") })
     else {
       if (extra === undefined) notes.push("Chưa có quyết định cho mục này: giữ thành mục riêng để không mất nội dung")
       if (extra === "ai_resolve") notes.push("ai_resolve chưa chạy ở bước dựng file: giữ thành mục riêng")
       customs.push({ oldKey: pair.old_key, notes })
     }
   }
-  // Mục khung (dữ liệu có cấu trúc) "chuyển vào" một heading của mẫu **chưa có cặp** (mục thiếu) = ghép với heading đó: nội dung
-  // nằm dưới heading đích, không kèm heading cũ — trước đây thành mục anh em, heading đích còn trống + cờ vàng (test tay 11/11).
-  // Heading đã có cặp (vd. đổi ngược về bản chụp) giữ cách cũ: chép kèm heading gốc làm ranh giới, nối sau phần thân hiện có.
-  for (const { newKey, placement } of frameworkMoves) {
-    const paired = (byNew.get(newKey) ?? []).some((p) => !p.moved)
-    add(newKey, { ...placement, moved: paired })
+  // Phần gộp N → 1. Mục khung "chuyển vào" một heading **trống** của mẫu và là phần duy nhất = ghép với heading đó: nội dung nằm dưới
+  // heading đích, không kèm heading cũ (test tay 11/11). Mục đích đã có nội dung (cặp chính / dữ liệu Spine), nhận ≥ 2 phần, hoặc là
+  // heading nhóm ⇒ mỗi phần giữ heading cũ ở cấp đích + 1, cuối cây con. Mục chữ tự do luôn giữ heading của nó.
+  const partsOf = new Map<string, number>()
+  for (const m of moves) partsOf.set(m.newKey, (partsOf.get(m.newKey) ?? 0) + 1)
+  for (const m of moves) {
+    const target = targetByKey.get(m.newKey)!
+    if (filled.has(m.newKey) && relatedIds(oldSection.get(m.oldKey) ?? "", target.section_id)) {
+      add(m.newKey, { oldKey: m.oldKey, tableAction: "none", notes: [...m.notes, "Dữ liệu đã in từ Spine ở mục đích: không chép lần hai"], moved: true, skip: true })
+      continue
+    }
+    const hasContent = (byNew.get(m.newKey) ?? []).some((p) => !p.moved) || filled.has(m.newKey) || wrappers.has(m.newKey) || (partsOf.get(m.newKey) ?? 0) > 1
+    add(m.newKey, { oldKey: m.oldKey, tableAction: "none", notes: m.notes, moved: m.free || hasContent })
   }
-  return { byNew, customs, removed }
+  return { byNew, customs, removed, records }
 }
 
 /** `old_key` của mục cũ ⇒ vị trí heading mẫu đích nó ghép cặp (không tính mục chuyển vào). */
@@ -334,31 +398,48 @@ export interface PlannedLayoutEntry {
   /** Mục thiếu của mẫu đích (trống + chữ hướng dẫn của mẫu). */
   missing: boolean
   guidance: string | null
+  /** Chia theo phần tử: chỉ in các phần tử Spine này dưới heading (mục bị tách chọn "chia theo từng yêu cầu"). */
+  items?: string[]
+  /** Mục thiếu theo cặp nhưng in từ dữ liệu Spine. */
+  from_spine?: true
 }
 
 export interface PlannedLayout {
   entries: PlannedLayoutEntry[]
   /** Heading của mẫu đích không có `section_id` (mục riêng của mẫu) và chưa có cặp: cần một mục riêng trống trong Spine. */
   newCustoms: { section_id: string; heading_text: string; level: number }[]
+  /** Chữ heading cũ ⇒ chữ mới của heading đã đánh số lại (sửa tham chiếu chéo nguyên ô / nguyên đoạn trong file). */
+  renumbered: Map<string, string>
+  /**
+   * Chia theo phần tử: heading lặp lại một mục (vd "3.3.4 Tính sẵn sàng" của 4.2.2) là mục riêng trống + lát phần tử in dưới nó
+   * (`profile.section_slices`, `nfrs:NFR-06`); heading đầu của mục in phần còn lại.
+   */
+  slices: { custom_id: string; section_id: string; items: string[] }[]
 }
+
+/** Kiểu đánh số dùng cho lần dựng: bản chụp (đổi ngược) giữ nguyên chữ của chính file cũ. */
+const numberingFor = (input: PlanInput): HeadingNumbering => (input.targetIsSnapshot ? "none" : (input.numbering ?? numberingOfHeadings(input.targetHeadings)))
 
 /**
  * Layout của file kết quả suy ra từ kế hoạch (cùng `planOf` và cùng thứ tự đặt với `buildOnce`), không cần file: bước áp dụng cần nó
  * trước khi dựng — bản in từ Spine của mục trong file phải theo đúng layout mới. Phần tử / phần nối đi theo mục cha của chúng.
- * `nextCustomId` cấp id `custom:*` cho heading riêng của mẫu chưa có cặp.
+ * Thứ tự trong một heading đích: cặp chính, mục riêng giữ sau nó, phần tử dời theo cặp, rồi phần gộp (theo thứ tự tài liệu cũ; phần gộp
+ * của heading sâu hơn đứng trước phần gộp của heading nhóm chứa nó). `nextCustomId` cấp id `custom:*` cho heading riêng của mẫu chưa có cặp.
  */
 export const planLayout = (input: PlanInput, nextCustomId: () => string): PlannedLayout => {
   const { byNew, customs } = planOf(input)
   const { targetHeadings, pairing } = input
   const oldByKey = new Map(input.oldHeadings.map((h) => [h.key, h]))
-  const indexOfKey = new Map(targetHeadings.map((h, i) => [h.key, i]))
   const snapshot = !!input.targetIsSnapshot
   const suppressExamples = !snapshot && examplesSuppressed(pairing, input.hasSpineElements)
   const merged = mergedChildren(pairing, snapshot)
-  /** Mỗi mục đích: phần đầu (heading + phần tử đi kèm), phần chuyển vào, phần mục riêng giữ lại. */
-  const slots = targetHeadings.map(() => ({ head: [] as PlannedLayoutEntry[], moved: [] as PlannedLayoutEntry[], custom: [] as PlannedLayoutEntry[], after: [] as PlannedLayoutEntry[] }))
+  const filled = filledKeys(input.groups)
+  const levels = targetHeadings.map((h) => h.level ?? 1)
+  /** Mỗi mục đích: phần đầu (heading + cặp), mục riêng giữ lại, phần tử dời theo cặp, phần gộp (kèm cấp heading đích để xếp sâu trước). */
+  const slots = targetHeadings.map(() => ({ head: [] as PlannedLayoutEntry[], custom: [] as PlannedLayoutEntry[], after: [] as PlannedLayoutEntry[], merged: [] as { level: number; entries: PlannedLayoutEntry[] }[] }))
   const tail: PlannedLayoutEntry[] = []
   const newCustoms: PlannedLayout["newCustoms"] = []
+  const slices: PlannedLayout["slices"] = []
   /** Nơi nhận phần tử / phần nối của từng mục cũ: chúng nằm vật lý sau mục cũ đứng ngay trước chúng, đúng như vùng chép khối. */
   const containerOf = new Map<string, PlannedLayoutEntry[]>()
   /** Độ lệch cấp của từng mục cũ đã đặt (cấp nơi đặt − cấp cũ) — phần tử / mục riêng đi theo nó dịch cùng độ lệch, như `buildOnce`. */
@@ -367,7 +448,7 @@ export const planLayout = (input: PlanInput, nextCustomId: () => string): Planne
   targetHeadings.forEach((heading, i) => {
     const all = byNew.get(heading.key) ?? []
     const pairPl = all.filter((p) => !p.moved)
-    const movedPl = all.filter((p) => p.moved)
+    const movedPl = all.filter((p) => p.moved && !p.skip)
     const level = heading.level ?? 1
     if (!pairPl.length) {
       // Heading con cùng mục với heading cha (vd "Trong phạm vi" dưới "1.2 Phạm vi"): nội dung in dưới mục cha, không tạo mục riêng
@@ -377,26 +458,41 @@ export const planLayout = (input: PlanInput, nextCustomId: () => string): Planne
         const unmapped = heading.section_id === UNMAPPED_SECTION && !snapshot
         const id = unmapped ? `custom:${nextCustomId()}` : heading.section_id
         if (unmapped) newCustoms.push({ section_id: id, heading_text: heading.heading_text, level })
-        slots[i].head.push({ heading_text: heading.heading_text, level, section_id: id, kind: "target", new_key: heading.key, old_key: null, missing: !movedPl.length && !snapshot, guidance: heading.guidance ?? null })
+        const fromSpine = filled.has(heading.key)
+        slots[i].head.push({ heading_text: heading.heading_text, level, section_id: id, kind: "target", new_key: heading.key, old_key: null, missing: !movedPl.length && !snapshot && !fromSpine, guidance: heading.guidance ?? null, ...(fromSpine ? { from_spine: true as const } : {}) })
       }
     } else {
       const first = oldByKey.get(pairPl[0].oldKey)
       // Heading mẫu đích có `section_id` thì giữ; mục riêng của mẫu ghép với mục cũ thì mang id của mục cũ (dữ liệu nằm ở đó)
       const id = heading.section_id === UNMAPPED_SECTION ? (first?.section_id ?? heading.section_id) : heading.section_id
-      slots[i].head.push({ heading_text: heading.heading_text, level, section_id: id, kind: "target", new_key: heading.key, old_key: pairPl[0].oldKey, missing: false, guidance: null })
+      const split = pairPl.find((p) => p.items)
+      let sectionId = id
+      if (split && !split.primary && !snapshot && first) {
+        // Heading lặp lại mục: mục riêng trống + lát phần tử (renderer in phần tử dưới chính heading này)
+        sectionId = `custom:${nextCustomId()}`
+        newCustoms.push({ section_id: sectionId, heading_text: heading.heading_text, level })
+        const collection = targetsOf(first.section_id)[0] ?? "nfrs"
+        slices.push({ custom_id: sectionId.slice("custom:".length), section_id: first.section_id, items: split.items!.map((x) => `${collection}:${x}`) })
+      }
+      slots[i].head.push({ heading_text: heading.heading_text, level, section_id: sectionId, kind: "target", new_key: heading.key, old_key: pairPl[0].oldKey, missing: false, guidance: null, ...(split ? { items: split.items } : {}) })
       for (const pl of pairPl) {
+        // Mục chia theo phần tử dựng từ Spine: phần tử / phần nối của khối cũ không chép theo
+        if (pl.items) continue
         containerOf.set(pl.oldKey, slots[i].head)
         const o = oldByKey.get(pl.oldKey)
         if (o) shiftOf.set(pl.oldKey, level - o.level)
       }
     }
+    if (!movedPl.length) return
+    // Phần gộp: heading cũ ở cấp đích + 1 (bản chụp: cùng cấp như trước), cuối cây con của heading đích
+    const end = snapshot ? i : subtreeEnd(levels, i) - 1
     for (const m of movedPl) {
       const old = oldByKey.get(m.oldKey)
       if (!old) continue
-      // Mục chuyển vào là một khối có heading riêng cùng cấp heading đích (như `buildOnce`)
-      const shift = level - old.level
-      slots[i].moved.push(entryOf(old, "moved", heading.key, shift))
-      containerOf.set(old.key, slots[i].moved)
+      const shift = level + (snapshot ? 0 : 1) - old.level
+      const bucket: PlannedLayoutEntry[] = [entryOf(old, "moved", heading.key, shift)]
+      slots[end].merged.push({ level, entries: bucket })
+      containerOf.set(old.key, bucket)
       shiftOf.set(old.key, shift)
     }
   })
@@ -426,7 +522,6 @@ export const planLayout = (input: PlanInput, nextCustomId: () => string): Planne
   if (!snapshot) {
     const followerKeys = new Set(pairing.followers.map((f) => f.old_key))
     const relocated = relocatedFollowers(input.oldHeadings, pairing, placed)
-    const levels = targetHeadings.map((h) => h.level ?? 1)
     let current: PlannedLayoutEntry[] | null = null
     let currentShift = 0
     for (const old of input.oldHeadings) {
@@ -444,8 +539,17 @@ export const planLayout = (input: PlanInput, nextCustomId: () => string): Planne
       current?.push({ ...entryOf(old, "follower", null, currentShift) })
     }
   }
-  return { entries: [...slots.flatMap((s) => [...s.head, ...s.moved, ...s.custom, ...s.after]), ...tail], newCustoms }
+  const entries = [...slots.flatMap((s) => [...s.head, ...s.custom, ...s.after, ...mergedOf(s.merged)]), ...tail]
+  const { texts, changed } = renumberEntries(entries, numberingFor(input))
+  return { entries: entries.map((e, i) => (texts[i] === e.heading_text ? e : { ...e, heading_text: texts[i] })), newCustoms, renumbered: changed, slices }
 }
+
+/** Phần gộp của heading sâu hơn đứng trước phần gộp của heading nhóm chứa nó (cùng chỗ cuối cây con); cùng cấp giữ thứ tự tài liệu cũ. */
+const mergedOf = <T>(merged: readonly { level: number; entries: T[] }[]): T[] =>
+  merged
+    .map((m, i) => ({ ...m, i }))
+    .sort((a, b) => b.level - a.level || a.i - b.i)
+    .flatMap((m) => m.entries)
 
 /** Mục cũ trong layout mới; `shift` = độ lệch cấp của nơi đặt (cấp heading đích − cấp heading cũ của mục chủ), kẹp 1–9. */
 const entryOf = (old: OldHeading, kind: PlannedLayoutEntry["kind"], newKey: string | null, shift = 0): PlannedLayoutEntry => ({
@@ -643,7 +747,7 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
   const indexOfKey = new Map(targetHeadings.map((h, i) => [h.key, i]))
   const isTargetStop = (n: Element): boolean => headingSet.has(n)
 
-  const { byNew, customs, removed } = planOf(input)
+  const { byNew, customs, removed, records } = planOf(input)
   // Phần tử theo mục cha có cặp: chép riêng vào cuối cây con của heading đích (như `planLayout`) ⇒ vùng chép của mục khác dừng ở đó.
   // Bản chụp (đổi ngược) đã chứa heading phần tử của chính nó: không dời.
   const relocated = input.targetIsSnapshot ? new Map<string, string>() : relocatedFollowers(input.oldHeadings, pairing, pairedIndexOf(byNew, targetHeadings))
@@ -746,13 +850,17 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
   const merged = mergedChildren(pairing, !!input.targetIsSnapshot)
   /** Mục cũ đã chép khối dưới heading đích ghép cặp — chỉ khi đó mới chép phần tử dời theo nó (như trước: mục dựng từ Spine không kèm khối file cũ). */
   const transplantedOld = new Set<string>()
+  const filled = filledKeys(input.groups)
+  /** Phần gộp chờ đặt sau khi phần tử dời theo cặp đã vào chỗ (phần gộp đứng cuối cây con của heading đích). */
+  const mergeQueue: { i: number; pl: Placement; guidance: Element[] }[] = []
   for (let i = 0; i < targetHeadings.length; i++) {
     const heading = targetHeadings[i]
     const el = headingEls[i]
     const all = byNew.get(heading.key) ?? []
     const pairPl = all.filter((p) => !p.moved)
-    const movedPl = all.filter((p) => p.moved)
+    const movedPl = all.filter((p) => p.moved && !p.skip)
     const base = { new_key: heading.key, section_id: heading.section_id }
+    for (const sk of all.filter((p) => p.skip)) report({ ...base, key: sk.oldKey, old_key: sk.oldKey, mode: "moved", reason: sk.notes[sk.notes.length - 1] })
     // Chữ hướng dẫn trước khi chèn gì vào heading này (chỉ dùng khi heading chỉ nhận nội dung chuyển vào)
     const guidanceBefore = !pairPl.length && !input.targetIsSnapshot ? elementsAfter(el, isTargetStop).filter(isGuidance) : []
 
@@ -767,6 +875,10 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
           for (const n of guidanceBefore) removeNode(n)
           removeNode(el)
           report({ ...base, key: heading.key, old_key: null, mode: "removed", reason: "Heading con cùng mục với heading cha: gộp vào mục cha" })
+        } else if (filled.has(heading.key)) {
+          // Mục thiếu theo cặp nhưng Spine có dữ liệu (tầm nhìn, giả định…): in từ Spine như workspace, không chỉ chữ hướng dẫn
+          const r = report({ ...base, key: heading.key, old_key: null, mode: "spine", reason: "Mục in từ dữ liệu Spine" })
+          spineSlots.push({ el, sectionId: heading.section_id, report: r })
         } else if (!movedPl.length) {
           keepGuidanceOnly(guidanceBefore, heading.guidance)
           report({ ...base, key: heading.key, old_key: null, mode: "guidance" })
@@ -782,14 +894,17 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
       const notes = pairPl.flatMap((p) => p.notes)
       const asSpine = (reason: string, flag?: "yellow"): void => {
         const r = report({ ...base, key: heading.key, old_key: oldKey, mode: "spine", ...(flag ? { flag } : {}), reason, warnings: notes })
-        spineSlots.push({ el, sectionId: pairedSectionId(heading), report: r })
+        // Heading lặp lại mục (chia theo phần tử) mang id mục riêng của layout — writer điền đúng lát phần tử của nó
+        const layoutId = pairPl.some((p) => p.items && !p.primary) ? input.plannedLayout?.entries.find((e) => e.kind === "target" && e.new_key === heading.key)?.section_id : undefined
+        spineSlots.push({ el, sectionId: layoutId ?? pairedSectionId(heading), report: r })
       }
 
       if (!view) {
         asSpine(input.forceSpine ? "Dựng lại toàn file từ Spine" : input.source ? "File nền không đọc được theo layout" : "Dự án không có khối gốc")
         return
       }
-      const wanted = pairPl.map((p) => spineReason(p.oldKey)).find((w) => w !== null)
+      // Chia theo phần tử: mỗi heading in đúng phần tử của nó từ Spine (khối cũ gồm mọi phần tử, không chép được một phần)
+      const wanted = pairPl.some((p) => p.items) ? { reason: "Chia theo từng phần tử: dựng từ Spine", flag: undefined } : pairPl.map((p) => spineReason(p.oldKey)).find((w) => w !== null)
       if (wanted) {
         asSpine(wanted.reason, wanted.flag)
         return
@@ -872,15 +987,7 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
 
     // Nội dung BA chuyển vào heading này: đặt sau phần thân hiện có, kèm heading gốc làm ranh giới (mục đứng trước dựng từ Spine
     // vẫn không ghi đè được). Mục chuyển không bao giờ bị bỏ lặng lẽ: không chép được thì dựng từ Spine + cờ vàng.
-    let movedTransplanted = false
-    for (const m of movedPl) {
-      const old = oldByKey.get(m.oldKey)
-      if (!old) continue
-      // Mục chuyển vào là một khối có heading riêng cùng cấp heading đích, nối sau phần thân của nó
-      const placed = await placeSection(old, tailOf(el), m.notes, "moved", heading.key, shiftOf(old.key, i))
-      movedTransplanted ||= placed.transplanted
-    }
-    if (movedTransplanted && guidanceBefore.length) for (const n of guidanceBefore) removeNode(n)
+    for (const pl of movedPl) mergeQueue.push({ i, pl, guidance: guidanceBefore })
   }
 
   // Mục riêng (giữ theo quyết định): đặt sau mục có cặp đứng trước nó trong tài liệu cũ
@@ -952,11 +1059,76 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
       warnings.push(...res.warnings)
     }
   }
+  // Phần gộp: heading cũ ở cấp đích + 1, cuối cây con của heading đích (sau cặp chính, mục riêng, phần tử dời) — như `planLayout`. Cùng chỗ
+  // cuối cây con: heading sâu hơn trước heading nhóm chứa nó; cùng heading giữ thứ tự tài liệu cũ. Bản chụp giữ cách cũ (cùng cấp, sau thân).
+  {
+    const levels = targetHeadings.map((h) => h.level ?? 1)
+    const snapshot = !!input.targetIsSnapshot
+    const queue = mergeQueue
+      .map((q, order) => ({ ...q, order, end: snapshot ? q.i + 1 : subtreeEnd(levels, q.i) }))
+      .sort((a, b) => a.end - b.end || levels[b.i] - levels[a.i] || a.order - b.order)
+    const transplantedInto = new Set<number>()
+    for (const q of queue) {
+      const old = oldByKey.get(q.pl.oldKey)
+      if (!old) continue
+      let after: Element | null
+      if (snapshot) after = tailOf(headingEls[q.i])
+      else {
+        const stop = headingEls.slice(q.end).find((h) => h.parentNode)
+        after = stop ? (stop.previousSibling as Element | null) : lastBodyNode()
+        while (after && after.nodeType !== 1) after = after.previousSibling as Element | null
+      }
+      if (!after) continue
+      const shift = tgtLevel(q.i) + (snapshot ? 0 : 1) - old.level
+      const placed = await placeSection(old, after, q.pl.notes, "moved", targetHeadings[q.i].key, shift)
+      if (placed.transplanted) transplantedInto.add(q.i)
+    }
+    // Heading đích trống chỉ nhận phần gộp: bỏ chữ hướng dẫn khi đã có nội dung chép sang
+    for (const q of mergeQueue) if (transplantedInto.has(q.i)) for (const n of q.guidance) if (n.parentNode) removeNode(n)
+  }
   let tailAfter: Element | null = null
   for (const old of tailCustoms) tailAfter = (await placeSection(old, tailAfter ?? lastBodyNode(), customByKey.get(old.key)!.notes, "custom", null, 0)).last
   for (const r of removed) {
     const o = oldByKey.get(r.oldKey)
     report({ key: r.oldKey, old_key: r.oldKey, new_key: null, section_id: o?.section_id ?? "", mode: "removed", reason: r.reason })
+  }
+
+  // Bảng lịch sử cũ ⇒ bảng lịch sử của mẫu đứng trước heading đầu, ghép theo tên cột (Phiên bản, Ngày, Người thực hiện, Mô tả)
+  for (const oldKey of records) {
+    const firstHeading = headingEls.find((h) => h.parentNode)
+    const before: Element[] = []
+    for (let n = bodyEl.firstChild; n && n !== firstHeading; n = n.nextSibling) if (n.nodeType === 1) before.push(n as Element)
+    const target = before.filter((n) => isW(n, "tbl")).find((t) => { const tr = wKids(t, "tr")[0]; return !!tr && rowTexts(tr).filter((h) => columnIdentity(h, null, RECORD_OF_CHANGES).startsWith("roc:")).length >= 2 })
+    const source = view?.region(oldKey)?.find((n) => isW(n, "tbl"))
+    if (target && source) {
+      fillTable(target, source, RECORD_OF_CHANGES)
+      report({ key: oldKey, old_key: oldKey, new_key: null, section_id: RECORD_OF_CHANGES, mode: "table_mapped", reason: "Ghép vào bảng lịch sử sửa đổi đầu tài liệu của mẫu" })
+    } else report({ key: oldKey, old_key: oldKey, new_key: null, section_id: RECORD_OF_CHANGES, mode: "removed", flag: "yellow", reason: "Không ghép được bảng lịch sử cũ vào bảng lịch sử của mẫu" })
+  }
+
+  // Đánh số lại heading đến từ tài liệu cũ theo layout (mẫu đánh số bằng chữ): heading đã chép giữ chữ cũ ⇒ ghi số mới; ô / đoạn có chữ
+  // đúng bằng chữ heading cũ (bảng "Chức năng" của mô tả màn hình) đổi theo. Chỉ thay nguyên ô / nguyên đoạn, không thay chuỗi con.
+  if (!input.targetIsSnapshot) {
+    const plan = input.plannedLayout ?? planLayout(input, () => "renumber")
+    if (plan.renumbered.size) {
+      const live = (await readBlocks(tgt)).filter((b) => b.kind === "heading" && b.level !== null && !b.tail)
+      const titleKey = (text: string): string => foldText(splitHeadingNumber(text).title)
+      let at = 0
+      for (const e of plan.entries) {
+        if (!e.heading_text.trim()) continue
+        const idx = live.findIndex((b, j) => j >= at && titleKey(b.text) === titleKey(e.heading_text))
+        if (idx < 0) continue
+        at = idx + 1
+        const current = paragraphText(live[idx].element).trim()
+        if (current !== e.heading_text && plan.renumbered.get(current) === e.heading_text) setParagraphText(live[idx].element, e.heading_text)
+      }
+      const headingSet = new Set(live.map((b) => b.element))
+      for (const p of wAll(bodyEl, "p")) {
+        if (headingSet.has(p)) continue
+        const next = plan.renumbered.get(paragraphText(p).trim())
+        if (next) setParagraphText(p, next)
+      }
+    }
   }
 
   // Dựng từ Spine bằng writer mẫu: chỉ các mục trong `spineSlots`, mục khác đánh `keepSource`
@@ -1020,6 +1192,8 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
   const finalPkg = await DocxPackage.load(buffer)
   mergeDropped(dropped, await enforceRelsAllowList(finalPkg))
   await pruneUnreferencedParts(finalPkg)
+  // Mục lục của mẫu giới hạn cấp ⇒ nới tới cấp heading sâu nhất của layout mới (tên chức năng ở cấp 4 vào mục lục)
+  if (!input.targetIsSnapshot) await widenTocLevels(finalPkg, Math.max(0, ...(input.plannedLayout ?? planLayout(input, () => "toc")).entries.filter((e) => e.heading_text.trim()).map((e) => e.level)))
   // Mục lục chép theo file mẫu là mục lục của mẫu ⇒ yêu cầu Word dựng lại khi mở
   await requestFieldUpdate(finalPkg)
   const out = await finalPkg.toBuffer()

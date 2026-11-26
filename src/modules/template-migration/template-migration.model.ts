@@ -7,7 +7,8 @@
  */
 import mongoose, { Schema, Document } from "mongoose"
 import type { Op } from "../spine/op.types.js"
-import type { MigrationGroups, TableShape } from "./classify.js"
+import type { MigrationGroups, OldSectionData, TableShape } from "./classify.js"
+import type { HeadingNumbering } from "./numbering.js"
 import type { EditedSection } from "./edited-since.js"
 import type { NewHeading, OldHeading, PairingResult } from "./pair-sections.js"
 
@@ -59,6 +60,14 @@ export interface MigrationAnalysis {
   new_tables: Record<string, TableShape[]>
   /** Đổi ngược: mục đã sửa sau lần đổi mẫu trước; `null` = đổi xuôi. */
   edited: EditedSection[] | null
+  /** Tóm tắt dữ liệu Spine của mục cũ theo `old_key` (chấm chỗ đặt). Bản ghi cũ không có. */
+  old_data?: Record<string, OldSectionData>
+  /** `new_key` của mục mẫu đích có dữ liệu Spine để in dù không có cặp. Bản ghi cũ không có. */
+  new_filled?: string[]
+  /** Mẫu đích có bảng lịch sử sửa đổi đứng trước heading đầu. Bản ghi cũ không có. */
+  pre_heading_record?: boolean
+  /** Kiểu đánh số heading của mẫu đích (`text` gõ tay / `auto` Word tự đánh / `none`). Bản ghi cũ không có ⇒ suy từ chữ heading. */
+  target_numbering?: HeadingNumbering
 }
 
 /** Ảnh chụp trước khi áp dụng — đủ để khôi phục bản nháp về đúng trạng thái cũ (hoàn tác, phục hồi `applying`). */

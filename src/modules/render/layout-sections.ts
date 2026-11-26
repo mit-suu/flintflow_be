@@ -134,6 +134,8 @@ export interface TemplateLayout {
    * (`nfrs:NFR-03`). Phần tử in dưới heading đó, lần đầu của section chỉ in phần còn lại (kể cả phần tử thêm sau).
    */
   sectionSlices?: readonly SectionSliceView[]
+  /** Đổi mẫu: mục BA chọn "Không in ra" — coi như đã có chỗ, phần dữ liệu của nó không in ngầm vào mục chứa (Phạm vi in mục tiêu). */
+  printSuppressed?: readonly string[]
   /**
    * Mẫu bắt buộc (`Project.template_intent = fixed`, chế độ 3 — business-flow 2.10): chỉ in đúng các mục của mẫu, **không
    * chèn** heading FlintFlow mẫu không có. Dữ liệu chức năng in trong bảng của mục chức năng gốc;
@@ -992,7 +994,7 @@ export const buildLayoutSections = (
       language: template.language,
       ...(useCaseIds ? { useCaseIds } : {}),
       ...(distributionSlot ? { distributionSlot: true } : {}),
-      ...(template.fixedTemplate ? { fixedTemplate: true, representedSlots: new Set(template.layout.filter((e) => isContentSlot(e.section_id)).map((e) => e.section_id)) } : {}),
+      ...(template.fixedTemplate ? { fixedTemplate: true, representedSlots: new Set([...template.layout.filter((e) => isContentSlot(e.section_id)).map((e) => e.section_id), ...(template.printSuppressed ?? []).filter((id) => isContentSlot(id))]) } : {}),
       ...(nonScreen ? { nonScreenFunctionIds: nonScreen } : {}),
       // FLF-361: tài liệu nhập tự do — mục chức năng dựng từ Spine theo khung FPT (Function trigger / Function description /
       // Screen layout / Function details) thay vì khung cũ không có tiêu đề con; mục tính năng không thêm dòng "Screens: …"
