@@ -33,6 +33,7 @@ import { releaseResponseSchema, versionsResponseSchema } from "../../../src/modu
 import { DocxPackage, readStamp } from "../../../src/modules/docx-ooxml/index.js"
 import type { Flag } from "../../../src/modules/spine/spine.types.js"
 import { ChatSession } from "../../../src/modules/project/chat-session.model.js"
+import { projectCode } from "../../../src/modules/project/project-code.js"
 import { CreditWallet } from "../../../src/modules/credits/credit-wallet.model.js"
 
 type Client = ReturnType<typeof mode1Api>
@@ -158,9 +159,9 @@ describe("mode 1 v3 - hành trình BPMN trên một dự án", () => {
     expect(gapCr.written.change_request.result_doc_version, "CR đầu ⇒ 0.2").toBe("0.2")
     expect(((await c.get("/spine")).body.data.other_requirements as unknown[]).length, "mục 5.4 có dữ liệu").toBeGreaterThan(0)
 
-    // Bản có đánh dấu của 0.2: Track Changes đứng tên CR (3.14); bản thường không có đánh dấu
+    // Bản có đánh dấu của 0.2: Track Changes đứng tên CR + người ghi `CR-001 (Tên)` (3.14, FLF-466 phase 03); bản thường không có đánh dấu
     const tracked = await documentXml(await download(c, "/versions/0.2/download?variant=tracked"))
-    expect(tracked).toMatch(new RegExp(`<w:ins [^>]*w:author="${gapCr.crId}"`))
+    expect(tracked).toMatch(new RegExp(`<w:ins [^>]*w:author="${gapCr.crId} \\(`))
     expect(tracked).toContain("Chrome 120")
     expect(await documentXml(await download(c, "/versions/0.2/download"))).not.toContain("<w:ins ")
 
@@ -200,7 +201,7 @@ describe("mode 1 v3 - hành trình BPMN trên một dự án", () => {
     expect(v1Xml).toContain("1 second")
     expect(v1Xml).not.toContain("2 seconds")
     expect(v1Xml, "bản release là bản sạch").not.toContain("<w:ins ")
-    expect(await readStamp(await DocxPackage.load(v1))).toEqual({ project_id: projectId, version: "1.0", source: "release", base_version: "1.0", latest_cr: null, kind: "release" })
+    expect(await readStamp(await DocxPackage.load(v1))).toEqual({ project_id: projectId, project_code: projectCode(projectId), version: "1.0", source: "release", base_version: "1.0", latest_cr: null, kind: "release" })
 
     // ── Upload lại file 1.0 khách đã sửa (còn stamp) ⇒ 1.4 diff ⇒ 3.1 nguồn reupload ───────────────────────
     const zip = await JSZip.loadAsync(v1)

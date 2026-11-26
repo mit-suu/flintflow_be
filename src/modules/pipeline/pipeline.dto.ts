@@ -48,6 +48,9 @@ export const PIPELINE_ERROR_STATUS = {
   REGENERATE_LIMIT: 409,
   CALL_LIMIT: 409,
   STEP_NOT_RUNNABLE: 409,
+  /** FLF-466 P08: chưa xác nhận credit (sau Approve Brief / chốt danh sách màn / thêm màn) — `POST /run-estimate/ack` rồi chạy lại. */
+  CREDIT_ACK_REQUIRED: 409,
+  NO_CREDIT_ACK_PENDING: 409,
   NO_WORKING_DRAFT: 409,
   INVARIANT_VIOLATION: 422,
   OP_INVALID: 422,
@@ -630,7 +633,26 @@ export const runEstimateQuerySchema = z.object({
   /** `unit`: chỉ đơn vị giai đoạn của bước đầu; `all`: tới hết pipeline (sau Approve Brief). */
   scope: z.enum(["unit", "all"]).default("all"),
   /** Id bước hoặc đơn vị giai đoạn (`S-4`, `S-5@S03`) để bắt đầu đếm; thiếu ⇒ bước tới lượt. */
-  from: z.string().min(1).optional()
+  from: z.string().min(1).optional(),
+  /** FLF-466 P08: lần báo cần tính; thiếu ⇒ theo `progress.credit_ack_required` nếu có. */
+  scope_kind: z.enum(["after_brief", "screens_locked", "screens_added"]).optional()
+})
+
+export const creditAckRequiredSchema = z.object({
+  scope: z.enum(["after_brief", "screens_locked", "screens_added"]),
+  credits: z.number().min(0),
+  created_at: z.string(),
+  screens: z.array(z.string()).optional()
+})
+
+export const screenRangeSchema = z.object({
+  min: z.number().int().min(0),
+  max: z.number().int().min(0),
+  credits_per_screen: z.number().min(0),
+  credits_min: z.number().min(0),
+  credits_max: z.number().min(0),
+  inputs: z.object({ goals: z.number().int(), other_requirements: z.number().int(), feature_notes: z.number().int(), total: z.number().int() }),
+  estimated: z.literal(true)
 })
 
 export const runEstimateUnitSchema = z.object({
@@ -662,7 +684,18 @@ export const runEstimateResponseSchema = z.object({
     .object({ min: z.number().int().min(0), max: z.number().int().min(0), basis: z.enum(["screens", "use_cases", "brief", "default"]) })
     .nullable(),
   /** `balance − reserved` của ví org sở hữu project; null khi không xác định được ví. */
-  available_credits: z.number().nullable()
+  available_credits: z.number().nullable(),
+  // FLF-466 P08 — chỉ thêm trường
+  scope_kind: z.enum(["after_brief", "screens_locked", "screens_added"]).nullable(),
+  screen_range: screenRangeSchema.nullable(),
+  ack_required: creditAckRequiredSchema.nullable()
+})
+
+/** POST /projects/:id/run-estimate/ack — user xác nhận lần báo credit đang chờ (FLF-466 P08). */
+export const runEstimateAckResponseSchema = z.object({
+  scope: z.enum(["after_brief", "screens_locked", "screens_added"]),
+  credits: z.number().min(0),
+  spine_version: z.number().int()
 })
 
 /** POST /projects/:id/steps/:stepId/cancel */

@@ -13,7 +13,7 @@
 import { NFR_CATEGORY_BY_SECTION, targetsOf } from "../import/extract-targets.js"
 import { contentSlot } from "../import/content-slots.js"
 import type { Spine } from "../spine/spine.types.js"
-import { DROP_FROM_PRINT, isFreeTextSection, missingAfterMoves, type MigrationGroups } from "./classify.js"
+import { DROP_FROM_PRINT, isFreeTextSection, missingAfterMoves, readChoice, type MigrationGroups } from "./classify.js"
 import type { NewHeading, OldHeading, PairingResult } from "./pair-sections.js"
 
 export type OutlineStatus = "kept" | "receives" | "needs_content" | "dropped"
@@ -88,7 +88,7 @@ export const droppedItemsOf = (sectionId: string, spine: NonNullable<OutlineInpu
 }
 
 export const buildOutline = (input: OutlineInput): OutlineEntry[] => {
-  const decided = new Map(input.decisions.map((d) => [d.id, d.choice]))
+  const decided = new Map(input.decisions.map((d) => [d.id, readChoice(input.groups, d.id, d.choice)]))
   const choiceOf = (item: { id: string; suggested?: string }): string | null => decided.get(item.id) ?? item.suggested ?? null
   const groups = missingAfterMoves(input.groups, [...input.groups.extra, ...input.groups.conflict].map((i) => ({ id: i.id, choice: choiceOf(i) ?? "" })))
   const oldByKey = new Map(input.old.map((o) => [o.key, o]))
@@ -168,7 +168,7 @@ export const buildOutline = (input: OutlineInput): OutlineEntry[] => {
   }
   for (const e of groups.extra) {
     const choice = choiceOf(e)
-    if (choice === DROP_FROM_PRINT || choice === "delete") pushOld(e.old_key, "dropped")
+    if (choice === DROP_FROM_PRINT) pushOld(e.old_key, "dropped")
     else if (choice === "keep_custom" || choice === null) pushOld(e.old_key, "kept")
   }
   for (const c of groups.conflict) {

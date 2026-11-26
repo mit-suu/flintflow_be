@@ -62,6 +62,12 @@ export const saveTemplateProposal = catchAsync(async (req: Request, res: Respons
   const p = await projectOf(req)
   return sendSuccess(res, 200, await skeleton.saveProposal(p.projectId, p.userId, req.orgContext!.role))
 })
+/** UC-85: sửa đề xuất qua chat (Lead / Analyst, đề xuất của chính người gọi; giữ credit trước mỗi lượt). */
+export const reviseTemplateProposal = catchAsync(async (req: Request, res: Response) => {
+  const p = await projectOf(req)
+  const message = typeof req.body?.message === "string" ? req.body.message : ""
+  return sendSuccess(res, 200, await skeleton.reviseProposal(p.projectId, p.orgId, p.userId, req.orgContext!.role, message))
+})
 export const declineTemplateProposal = catchAsync(async (req: Request, res: Response) => {
   const p = await projectOf(req)
   return sendSuccess(res, 200, await skeleton.declineProposal(p.projectId, p.userId))

@@ -174,11 +174,11 @@ describe("translationStatus - GET /translations/status", () => {
 })
 
 describe("FLF-334 B - tải theo ngôn ngữ khác", () => {
-  it("targetLocale: yêu cầu ⇒ theo yêu cầu; mode 1 import thật hỏi ngôn ngữ khác ⇒ 409; dự án chuyển đổi ⇒ theo yêu cầu", () => {
+  it("targetLocale: yêu cầu ⇒ theo yêu cầu; mode 1 import thật hỏi ngôn ngữ khác ⇒ theo yêu cầu (FLF-466 phase 07)", () => {
     const languages = { locale: "en" as const, source: "en" as const }
     expect(targetLocale({ mode: "fpt" }, languages, "vi")).toBe("vi")
     expect(targetLocale({ mode: "fpt" }, languages)).toBe("en")
-    expect(() => targetLocale({ mode: "import" }, languages, "vi")).toThrow(expect.objectContaining({ statusCode: 409, code: "DOCUMENT_LANGUAGE_UNAVAILABLE" }))
+    expect(targetLocale({ mode: "import" }, languages, "vi")).toBe("vi")
     expect(targetLocale({ mode: "import" }, languages, "en")).toBe("en")
     expect(targetLocale({ mode: "import" }, languages)).toBe("en")
     expect(targetLocale({ mode: "import", converted_from: "fpt" }, languages, "vi")).toBe("vi")
@@ -198,15 +198,15 @@ describe("FLF-334 B - tải theo ngôn ngữ khác", () => {
     expect(loadSpine).not.toHaveBeenCalled()
   })
 
-  it("đủ bản dịch ⇒ qua; thiếu ⇒ 409 TRANSLATION_INCOMPLETE { locale, missing, total }", async () => {
+  it("đủ bản dịch ⇒ qua; thiếu ⇒ 409 TRANSLATION_INCOMPLETE { locale, missing, total, batches, estimated_credits }", async () => {
     const spine = { actors: FIXTURE.actors.slice(0, 2) } as unknown as Spine
     const total = translationUnits(spine).length
     seedTranslation(FIXTURE.actors[0].name, "Khách")
-    await expect(translationCompleteness(PROJECT, "vi", spine)).resolves.toEqual({ locale: "vi", missing: total - 1, total })
+    await expect(translationCompleteness(PROJECT, "vi", spine)).resolves.toMatchObject({ locale: "vi", missing: total - 1, total, batches: 1, estimated_credits: 2 })
     await expect(assertTranslationComplete(PROJECT, "vi", spine)).rejects.toMatchObject({
       statusCode: 409,
       code: "TRANSLATION_INCOMPLETE",
-      meta: { locale: "vi", missing: total - 1, total }
+      meta: { locale: "vi", missing: total - 1, total, batches: 1, estimated_credits: 2 }
     })
     for (const u of translationUnits(spine)) seedTranslation(u.value, Array.isArray(u.value) ? u.value.map((x) => `[vi] ${x}`) : `[vi] ${u.value}`)
     await expect(assertTranslationComplete(PROJECT, "vi", spine)).resolves.toBeUndefined()

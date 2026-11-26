@@ -57,6 +57,11 @@ export interface IProject extends Document {
    */
   documentLanguage?: UserLocale
   /**
+   * FLF-466: ngôn ngữ chữ trong Spine sau một lần dịch đè khi đổi mẫu (BF §3.7). Không default: thiếu field ⇒ suy như cũ ở
+   * `sourceLanguageOf` (import thật = ngôn ngữ file, còn lại `en`) — đừng đọc thẳng.
+   */
+  source_language?: UserLocale
+  /**
    * Ký pháp ERD của cả tài liệu (§3.1.5): `chen` | `crowsfoot` | `idef1x`. Không nằm trong Spine. FLF-418: không default — thiếu
    * field = chưa chọn (S-4.5 hỏi trong khung chat); khi vẽ đọc qua `erdNotationOf` (thiếu ⇒ `chen`), đừng đọc thẳng.
    */
@@ -166,6 +171,11 @@ const projectSchema = new Schema<IProject>(
     },
     // FLF-265: KHÔNG default — dự án cũ / mode 1 không có field, giá trị suy ra ở `documentLanguageOf`
     documentLanguage: {
+      type: String,
+      enum: [...USER_LOCALES]
+    },
+    // FLF-466: KHÔNG default — thiếu field ⇒ `sourceLanguageOf` suy như trước
+    source_language: {
       type: String,
       enum: [...USER_LOCALES]
     },

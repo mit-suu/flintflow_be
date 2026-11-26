@@ -8,7 +8,7 @@
  *   `…:<id>:revert`  lô đảo Change của đổi ngược (mục `discard` + chữ gốc của mục chưa sửa)
  *   `…:<id>:undo`    lô đảo toàn bộ lần đổi mẫu khi hoàn tác
  */
-import { decidableItems, DROP_FROM_PRINT, type MigrationGroups } from "./classify.js"
+import { decidableItems, DROP_FROM_PRINT, readChoice, type MigrationGroups } from "./classify.js"
 import { TEMPLATE_MIGRATION_TXN_PREFIX, sectionKeyResolver, type KeyResolver } from "./edited-since.js"
 import type { Follower, OldHeading } from "./pair-sections.js"
 import type { PlannedLayoutEntry } from "./build-base-file.js"
@@ -38,34 +38,9 @@ interface DecisionView {
 }
 
 /** Lựa chọn hiệu lực của một mục (quyết định của BA, không có thì mặc định của nhóm). */
-export const choiceOf = (doc: DecisionView, id: string): string | null => doc.decisions.find((d) => d.id === id)?.choice ?? decidableItems(doc.groups).get(id)?.default ?? null
-
-/**
- * Mục riêng cũ (`custom:*`) bị BA chọn `delete` ⇒ op xoá khỏi Spine, kèm phần nối đi theo mục đó. Mục khung (`fixed:*`…) chọn `delete`
- * chỉ bị bỏ khỏi file nền: dữ liệu có cấu trúc của nó (use case, bảng…) vẫn là của Spine, không xoá.
- */
-export const deleteOps = (doc: DecisionView, oldHeadings: readonly OldHeading[], spine: Pick<Spine, "custom_sections">): Op[] => {
-  const byKey = new Map(oldHeadings.map((h) => [h.key, h]))
-  const indexOf = new Map(oldHeadings.map((h, i) => [h.key, i]))
-  const existing = new Set(spine.custom_sections.map((c) => c.id))
-  const ids = new Set<string>()
-  for (const e of doc.groups.extra) {
-    if (choiceOf(doc, e.id) !== "delete") continue
-    // Chỉ phần nối liền ngay sau chính mục này (heading rỗng tới heading có chữ kế tiếp). Phần nối của phần tử đi theo (chức năng
-    // 3.2.1 dưới heading nhóm bị xoá) là thân của phần tử đó, không thuộc mục bị xoá — xoá nó để lại mục rỗng "—" (test tay 11/11).
-    const followers = new Set(e.follower_keys)
-    const keys = [e.old_key]
-    for (let i = (indexOf.get(e.old_key) ?? oldHeadings.length) + 1; i < oldHeadings.length; i++) {
-      const h = oldHeadings[i]
-      if (h.heading_text.trim() || !followers.has(h.key)) break
-      keys.push(h.key)
-    }
-    for (const key of keys) {
-      const section = byKey.get(key)?.section_id
-      if (section?.startsWith("custom:")) ids.add(section.slice("custom:".length))
-    }
-  }
-  return [...ids].filter((id) => existing.has(id)).map((id) => ({ op: "remove", path: `custom_sections[id=${id}]`, reason: "Xoá mục riêng theo lựa chọn khi đổi mẫu" }))
+export const choiceOf = (doc: DecisionView, id: string): string | null => {
+  const stored = doc.decisions.find((d) => d.id === id)?.choice
+  return stored !== undefined ? readChoice(doc.groups, id, stored) : (decidableItems(doc.groups).get(id)?.default ?? null)
 }
 
 const CUSTOM_ID = /^CS(\d+)$/
@@ -153,7 +128,7 @@ export const affectedSectionIds = (doc: DecisionView, oldHeadings: readonly OldH
   const add = (key: string): void => void (byKey.get(key) && out.add(byKey.get(key)!.section_id))
   for (const e of doc.groups.extra) {
     const choice = choiceOf(doc, e.id)
-    if (choice === "delete" || choice === DROP_FROM_PRINT || choice?.startsWith("move_to:")) for (const k of [e.old_key, ...e.follower_keys]) add(k)
+    if (choice === DROP_FROM_PRINT || choice?.startsWith("move_to:")) for (const k of [e.old_key, ...e.follower_keys]) add(k)
   }
   for (const k of dropped) add(k)
   return out

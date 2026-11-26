@@ -435,6 +435,12 @@ const main = async (): Promise<void> => {
     log(`[${stepCount}] ${current}`)
 
     let outcome = await runStep(projectId, sessionId, current, version)
+    if (outcome.error?.code === "CREDIT_ACK_REQUIRED") {
+      log(`      · ${current}: xác nhận credit trước khi chạy tiếp (/run-estimate/ack)`)
+      await call("POST", `/projects/${projectId}/run-estimate/ack`)
+      version = await spineVersion(projectId)
+      outcome = await runStep(projectId, sessionId, current, version)
+    }
     if (outcome.error?.retryable) {
       log(`      ! ${outcome.error.code} — thử lại một lần`)
       version = await spineVersion(projectId)

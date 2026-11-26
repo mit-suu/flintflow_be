@@ -508,7 +508,7 @@ export const planTransaction = (spine: Spine, txn: Transaction, options: PlanOpt
     for (const op of planFeatureRenumber(state.spine, state.removed)) run(op)
     for (const op of planScreenQueueAppend(state.spine, before)) run(op)
     // migrate nạp lại cả Spine (không phải một lần sửa Brief) ⇒ không đánh dấu S-1.1
-    if (!txn.ops.some((op) => op.op === "migrate")) for (const op of planBriefReextract(state.spine, before)) run(op)
+    if (!txn.ops.some((op) => op.op === "migrate")) for (const op of planBriefReextract(state.spine, before, txn.step_id)) run(op)
     invariantViolations = checkInvariants(state.spine, state.baseline ?? before)
   } catch (err) {
     // BUG-04 (lớp phòng thủ): dữ liệu sai hình lọt tới cascade/bất biến ⇒ schema báo lỗi cho model, không 501

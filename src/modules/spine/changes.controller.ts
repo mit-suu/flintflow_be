@@ -24,6 +24,8 @@ import { changeErrorReply } from "./change-transcript.js"
 import * as reconcileService from "./reconcile.service.js"
 import * as undoService from "./undo.service.js"
 import { translateAssumption } from "./assumption-translate.service.js"
+import { isViewer } from "../../shared/auth/viewer-read-scope.middleware.js"
+import { viewerSpine } from "../../shared/auth/viewer-spine.js"
 import * as spineRepository from "./spine.repository.js"
 import { trace, type TraceEntity } from "./traceability.service.js"
 import { TransactionRejectedError } from "./op-engine.js"
@@ -364,6 +366,8 @@ export const discardPreview = catchAsync(async (req: Request, res: Response) => 
 export const getTraceability = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
   const query = parse(traceabilityQuerySchema, req.query)
+  // FLF-466: Viewer truy vết theo bản ổn định mới nhất
+  if (isViewer(req)) return sendSuccess(res, 200, trace(await viewerSpine(auth.projectId), { entity: query.entity as TraceEntity, id: query.id }))
   const record = await spineRepository.get(auth.projectId)
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   const { projectId: _projectId, ...spine } = record

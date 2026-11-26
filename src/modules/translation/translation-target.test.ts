@@ -33,13 +33,20 @@ describe("targetSpineLoader - FLF-334 B đích snapshot của #26 / #27", () => 
     expect(mocks.getSpine).not.toHaveBeenCalled()
   })
 
-  it("version có baseline_ref ⇒ snapshot của version; không có (bản nháp CR) ⇒ 409 DOCUMENT_LANGUAGE_UNAVAILABLE", async () => {
+  it("version có spine_snapshot ⇒ chính snapshot đó; có baseline_ref ⇒ snapshot baseline; không có cả hai (bản nháp cũ) ⇒ 409 SNAPSHOT_UNAVAILABLE", async () => {
     mocks.requireDocVersion.mockResolvedValueOnce({ version: "1.0", baseline_ref: "650000000000000000000077" })
     await expect(targetSpineLoader(PROJECT, { version: "1.0" })()).resolves.toBe(snapshot)
     expect(mocks.loadBaselineSpine).toHaveBeenCalledWith(PROJECT, "650000000000000000000077")
 
+    const draftSpine = { actors: [] }
+    mocks.loadBaselineSpine.mockClear()
+    mocks.requireDocVersion.mockResolvedValueOnce({ version: "1.2", baseline_ref: null, spine_snapshot: draftSpine })
+    await expect(targetSpineLoader(PROJECT, { version: "1.2" })()).resolves.toBe(draftSpine)
+    expect(mocks.loadBaselineSpine).not.toHaveBeenCalled()
+    expect(mocks.getSpine).not.toHaveBeenCalled()
+
     mocks.requireDocVersion.mockResolvedValueOnce({ version: "1.1", baseline_ref: null })
-    await expect(targetSpineLoader(PROJECT, { version: "1.1" })()).rejects.toMatchObject({ statusCode: 409, code: "DOCUMENT_LANGUAGE_UNAVAILABLE" })
+    await expect(targetSpineLoader(PROJECT, { version: "1.1" })()).rejects.toMatchObject({ statusCode: 409, code: "SNAPSHOT_UNAVAILABLE" })
   })
 
   it("loader lười: tạo loader không đọc gì", () => {

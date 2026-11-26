@@ -27,7 +27,7 @@ Covers **S-1.1 Brief Extraction · S-1.3 Conflict & Assumption Review · S-1.4 G
 (S-1.2 Project Classification is a different skill, `project-classifier`.)
 
 S-1 is the hinge between a conversation and a document: the Brief has already been captured as
-`project{}` + `addendum[]` by B-0…B-2, and this phase makes that material **usable** - complete enough,
+`project{}` + `addendum[]` by B-0…B-1 (S-1 runs before B-2: triage and approval come after it), and this phase makes that material **usable** - complete enough,
 consistent enough, and honest about what is still missing. It writes **no SRS section**; S-2 is the first
 step that does.
 
@@ -53,7 +53,7 @@ The Brief keeps vision and goals in the user's language as addendum entries (`to
   both EN fields in the same batch. Only the English wording changes ⇒ edit just the EN fields.
 - `notes` (the message the user reads at the gate) is in the user's language, plain and warm: say what you turned
   into the SRS vision and goals, no field names.
-- Other `addendum[]` entries are not yours: extraction reads them, triage happened at B-2.2.
+- Other `addendum[]` entries are not yours: extraction reads them unfiltered; triage happens later, at B-2.2.
 
 Nothing to extract is a valid outcome: return `ops: []` and say so in `notes`.
 

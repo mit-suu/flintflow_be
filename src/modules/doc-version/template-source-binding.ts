@@ -45,7 +45,7 @@ export const templateLayoutUnavailable = () => new ApiError(409,
 
 /** Ngôn ngữ nhãn của dự án chuyển từ mode 2 — chốt vào binding để đổi ngôn ngữ tài liệu về sau không đổi bản in version cũ. */
 const captureLanguages = async (projectId: string): Promise<ProjectLanguages | null> => {
-  const project = await Project.findById(projectId, { mode: 1, converted_from: 1, documentLanguage: 1 }).lean()
+  const project = await Project.findById(projectId, { mode: 1, converted_from: 1, documentLanguage: 1, source_language: 1 }).lean()
   if (project?.converted_from !== "fpt") return null
   const { projectLanguages } = await import("../translation/translation.service.js")
   return projectLanguages(projectId, project)

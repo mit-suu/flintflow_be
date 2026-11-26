@@ -23,10 +23,14 @@ import * as flagsService from "../spine/flags.service.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { BaselineSubmission, Flag } from "../spine/spine.types.js"
-import type { ReviewPackageDto, ReviewPackageCrDto, ReviewPackageRoundDto } from "./doc-version.dto.js"
+import type { ReviewPackageDto, ReviewPackageCrDto, ReviewPackageRoundDto, ReviewPackageSystemChangeDto } from "./doc-version.dto.js"
+import { Change as ChangeModel } from "../spine/change.model.js"
+import { DERIVED_PATH } from "../template-migration/apply-plan.js"
 import { listDocVersions } from "./doc-version.service.js"
+import { DocVersion } from "./doc-version.model.js"
 import { nextMajor } from "./versioning.js"
 import { assertNoRunningStep } from "../pipeline/run-state.service.js"
+import { trackedUnavailableReasonFor } from "./release-tracked.js"
 import { stripRecord } from "../import/check.service.js"
 import { captureTemplateSourceBinding } from "./template-source-binding.js"
 import { estimateRecordSummaryCredits, resolveRecordLanguage } from "./record-summary.service.js"
@@ -38,8 +42,11 @@ export interface PackageActor {
   userId: string
 }
 
-/** Mã CR đã ghi vào bản nháp kể từ lần phát hành gần nhất (thứ tự ghi), cùng version bản nháp mới nhất và bản phát hành gốc. */
-export const pendingCrIds = async (projectId: string): Promise<{ crIds: string[]; latest: string | null; base: string | null }> => {
+/**
+ * Gói = mọi CR **và thay đổi hệ thống** đã ghi kể từ lần phát hành gần nhất (BF §2, FLF-466): mã CR (thứ tự ghi), các thay đổi hệ thống
+ * (đổi mẫu, hoàn tác, vẽ lại / dùng ảnh gốc), version bản nháp mới nhất và bản phát hành gốc.
+ */
+export const pendingCrIds = async (projectId: string): Promise<{ crIds: string[]; systemChanges: ReviewPackageSystemChangeDto[]; latest: string | null; base: string | null }> => {
   const versions = await listDocVersions(projectId)
   const latest = versions[0] ?? null
   const lastRelease = versions.find((v) => v.kind === "release") ?? null
@@ -51,8 +58,12 @@ export const pendingCrIds = async (projectId: string): Promise<{ crIds: string[]
         .flatMap((v) => v.cr_ids)
     )
   ]
+  const systemChanges = versions
+    .filter((v) => v.kind === "system_change" && v.system_change && (!lastRelease || v.createdAt > lastRelease.createdAt))
+    .reverse()
+    .map((v) => ({ version: v.version, type: v.system_change!.type, ref: v.system_change!.ref, summary: v.system_change!.summary, created_by: String(v.created_by), created_at: v.createdAt.toISOString() }))
   const imported = versions.find((v) => v.kind === "imported") ?? null
-  return { crIds, latest: latest?.version ?? null, base: lastRelease?.version ?? (imported ? "v0" : null) }
+  return { crIds, systemChanges, latest: latest?.version ?? null, base: lastRelease?.version ?? (imported ? "v0" : null) }
 }
 
 /** "1.0 · 3 thay đổi chưa duyệt" — nhãn bản nháp theo business-flow §2 (chỉ số chính, không số phụ). */
@@ -111,7 +122,7 @@ const conciseRecordCredits = async (projectId: string, record: Parameters<typeof
 export const getPackage = async (projectId: string): Promise<ReviewPackageDto> => {
   const record = await spineRepository.get(projectId)
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
-  const { crIds, latest, base } = await pendingCrIds(projectId)
+  const { crIds, systemChanges, latest, base } = await pendingCrIds(projectId)
   const crs = crIds.length ? await ChangeRequest.find({ projectId, cr_id: { $in: crIds } }).lean<IChangeRequest[]>() : []
   const byId = new Map(crs.map((c) => [c.cr_id, c]))
   const submission = record.baseline_submission ?? null
@@ -123,13 +134,32 @@ export const getPackage = async (projectId: string): Promise<ReviewPackageDto> =
     base_version: base,
     latest_version: latest,
     next_version: latest ? nextMajor(latest) : null,
-    draft_label: draftLabel(base, crIds.length),
+    draft_label: draftLabel(base, crIds.length + systemChanges.length),
     change_requests: crIds.map((id) => byId.get(id)).filter((c): c is IChangeRequest => !!c).map(toCrDto),
+    system_changes: systemChanges,
+    tracked_unavailable_reason: (await trackedUnavailableReasonFor(projectId, await listDocVersions(projectId))) === "template_translated" ? "template_translated" : null,
     red_open: redOpen,
     concise_record_credits: await conciseRecordCredits(projectId, record, crIds),
     submission,
     spine_version: record.spine_version,
     rounds
+  }
+}
+
+/**
+ * FLF-466 (red-team #5): Lead duyệt đúng bản đã gửi. Từ lúc gửi (`set baseline_submission` gần nhất) tới giờ không được có Change nội dung nào
+ * (cờ / tiến độ tự tính không tính). Phát hành không qua bước gửi (Lead tự làm) thì không có gì để so.
+ */
+export const assertPackageUnchangedSinceSubmit = async (projectId: string, submission: BaselineSubmission | null | undefined): Promise<void> => {
+  if (submission?.status !== "pending") return
+  const sent = (await ChangeModel.findOne({ projectId, path: "baseline_submission", op: "set" }, { seq: 1 }, { sort: { seq: -1 }, lean: true })) as { seq: number } | null
+  if (sent) {
+    const later = await ChangeModel.exists({ projectId, seq: { $gt: sent.seq }, path: { $not: DERIVED_PATH } })
+    if (later) throw new Mode1Error("PACKAGE_CHANGED_AFTER_SUBMIT", "Nội dung tài liệu đã thay đổi sau khi gói được gửi duyệt nên không phát hành đúng bản đã gửi. Yêu cầu BA gửi lại gói.")
+  }
+  if (submission.submitted_at) {
+    const laterVersion = await DocVersion.exists({ projectId, kind: { $in: ["cr_revision", "system_change"] }, createdAt: { $gt: new Date(submission.submitted_at) } })
+    if (laterVersion) throw new Mode1Error("PACKAGE_CHANGED_AFTER_SUBMIT", "Nội dung tài liệu đã thay đổi sau khi gói được gửi duyệt nên không phát hành đúng bản đã gửi. Yêu cầu BA gửi lại gói.")
   }
 }
 
@@ -171,8 +201,10 @@ export const submitPackage = async (actor: PackageActor, baseVersion: number): P
   if (record.baseline_submission?.status === "pending") {
     throw new ApiError(409, "Gói thay đổi đang chờ Lead duyệt - không gửi lại được.", "PACKAGE_ALREADY_SUBMITTED")
   }
-  const { crIds } = await pendingCrIds(actor.projectId)
-  if (crIds.length === 0) throw new Mode1Error("PACKAGE_EMPTY", "Chưa có thay đổi nào được ghi vào bản nháp kể từ lần phát hành trước - không có gì để gửi duyệt.")
+  const { crIds, systemChanges } = await pendingCrIds(actor.projectId)
+  // FLF-466: gói chỉ có thay đổi hệ thống vẫn gửi được (BF §2)
+  if (crIds.length === 0 && systemChanges.length === 0) throw new Mode1Error("PACKAGE_EMPTY", "Chưa có thay đổi nào được ghi vào bản nháp kể từ lần phát hành trước - không có gì để gửi duyệt.")
+  const items = [...crIds, ...systemChanges.map((s) => s.summary)]
 
   // BR-04: cờ đỏ = 0 — quét lại đúng như lúc release để Lead chắc chắn duyệt được
   const checked = await flagsService.recompute(actor.projectId, { by: actor.userId, ruleProfile: await mode1RuleProfileFor(actor.projectId), atBaseline: true })
@@ -191,12 +223,12 @@ export const submitPackage = async (actor: PackageActor, baseVersion: number): P
   }
   await applyTransaction(actor.projectId, {
     base_version: checked.checked_at_version,
-    ops: [{ op: "set", path: "baseline_submission", value: submission, reason: `Gửi Lead duyệt gói ${crIds.join(", ")}` }],
+    ops: [{ op: "set", path: "baseline_submission", value: submission, reason: `Gửi Lead duyệt gói ${items.join(", ")}` }],
     by: actor.userId,
     step_id: null,
     reason: "Gửi duyệt gói thay đổi"
   })
-  await notifyLeads(actor, crIds, submission)
+  await notifyLeads(actor, items, submission)
   return getPackage(actor.projectId)
 }
 

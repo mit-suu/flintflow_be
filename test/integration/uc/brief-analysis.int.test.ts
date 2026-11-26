@@ -340,7 +340,7 @@ describe("UC-30 - duyệt Product Brief (B-2.3)", () => {
     expect(mockCalls).toHaveLength(0)
   })
 
-  it("B-2.3 tới cổng nhưng chưa bấm duyệt ⇒ S-1.1 vẫn khoá; duyệt ⇒ B-2.3 accepted, mở S-1.1 và chạy được", { timeout: 90_000 }, async () => {
+  it("B-2.3 tới cổng nhưng chưa bấm duyệt ⇒ S-2.1 vẫn khoá; duyệt ⇒ B-2.3 accepted, báo credit (CREDIT_ACK_REQUIRED), ack xong S-2.1 chạy được (FLF-466: S-1 chạy trước B-2)", { timeout: 90_000 }, async () => {
     const seeded = await seedFixture("minimal", { mutate: startAt("B-2.3") })
 
     const review = await runStepHttp(app, seeded, "B-2.3", await spineVersionOf(app, seeded))
@@ -350,7 +350,7 @@ describe("UC-30 - duyệt Product Brief (B-2.3)", () => {
     // Duyệt Brief là quyết định của người: không tự Accept
     expect(gateReady?.auto).toBeFalsy()
 
-    const locked = await runStepHttp(app, seeded, "S-1.1", await spineVersionOf(app, seeded))
+    const locked = await runStepHttp(app, seeded, "S-2.1", await spineVersionOf(app, seeded))
     expect(locked.errorCode).toBe("STEP_NOT_RUNNABLE")
 
     const approved = await gateHttp(app, seeded, "B-2.3", await spineVersionOf(app, seeded))
@@ -358,15 +358,21 @@ describe("UC-30 - duyệt Product Brief (B-2.3)", () => {
     const data = gateResponseSchema.parse(approved.body.data)
     expect(data.step).toMatchObject({ id: "B-2.3", status: "accepted" })
     expect(data.step.accepted_at).not.toBeNull()
-    expect(data.next_step).toBe("S-1.1")
+    expect(data.next_step).toBe("S-2.1")
 
     const steps = await request(app).get(`${base(seeded)}/steps`).set(auth(seeded))
-    expect(steps.body.data.current_step).toBe("S-1.1")
+    expect(steps.body.data.current_step).toBe("S-2.1")
 
-    const next = await runStepHttp(app, seeded, "S-1.1", await spineVersionOf(app, seeded))
+    // FLF-466 P08: Approve Brief sinh lần báo credit; S-2.1 bị chặn tới khi xác nhận
+    const blocked = await runStepHttp(app, seeded, "S-2.1", await spineVersionOf(app, seeded))
+    expect(blocked.errorCode).toBe("CREDIT_ACK_REQUIRED")
+    const ack = await request(app).post(`${base(seeded)}/run-estimate/ack`).set(auth(seeded))
+    expect(ack.status, JSON.stringify(ack.body)).toBe(200)
+
+    const next = await runStepHttp(app, seeded, "S-2.1", await spineVersionOf(app, seeded))
     expect(next.status).toBe(200)
     expect(next.errorCode, JSON.stringify(next.events.at(-1))).toBeNull()
-    expect(next.events.at(-1)?.type).toBe("gate_ready")
+    expect(["gate_ready", "auto_accepted"]).toContain(next.events.at(-1)?.type) // S-2.1 không phải bước luôn dừng cổng
   })
 
   it("duyệt khi B-2.3 chưa chạy tới cổng ⇒ 409 STEP_NOT_RUNNABLE, Brief chưa được duyệt", async () => {

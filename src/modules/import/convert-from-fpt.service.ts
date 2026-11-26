@@ -24,6 +24,7 @@ import { renderVersionFile } from "../doc-version/render-version.js"
 import { captureTemplateSourceBinding } from "../doc-version/template-source-binding.js"
 import { listChangesForRecord } from "../render/assemble.service.js"
 import { versionFileName } from "../doc-version/versioning.js"
+import { projectCode } from "../project/project-code.js"
 import { notify } from "../notification/notification.service.js"
 import { Project } from "../project/project.model.js"
 import { Baseline } from "../spine/baseline.model.js"
@@ -120,10 +121,10 @@ const convert = async (projectId: string, userId: string, opts: ConvertOptions):
       projectId,
       file_ref: null,
       sha256: createHash("sha256").update(buffer).digest("hex"),
-      original_name: versionFileName({ name: project.name, release: true, base: CONVERTED_DOC_VERSION }),
+      original_name: versionFileName({ name: project.name, code: projectCode(projectId), release: true, base: CONVERTED_DOC_VERSION }),
       size: buffer.length,
       preflight: { status: "accepted", issues: [] },
-      stamp: { project_id: projectId, version: CONVERTED_DOC_VERSION, source: CONVERT_STAMP_SOURCE },
+      stamp: { project_id: projectId, project_code: projectCode(projectId), version: CONVERTED_DOC_VERSION, source: CONVERT_STAMP_SOURCE },
       confirmed_latest_at: at,
       status: "delivered",
       created_by: userId

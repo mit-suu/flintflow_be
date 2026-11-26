@@ -149,7 +149,7 @@ export const createRevertCr = async (projectId: string, userId: string, sourceCr
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   assertPackageNotPending(record.baseline_submission)
   const source = await requireCr(projectId, sourceCrId)
-  if (source.status !== "written") {
+  if (source.status !== "written" && source.status !== "released") {
     throw new ApiError(409, `${source.cr_id} chưa ghi vào tài liệu nên không có gì để hoàn tác.`, "CR_REVERT_NOT_WRITTEN", { cr_id: source.cr_id, status: source.status })
   }
   const spine = stripRecord(record)
