@@ -155,6 +155,10 @@ describe("FLF-411 - ba luồng upload", () => {
       base_version: r.spine.spine_version, by: r.seeded.userId, reason: "Draft glossary", step_id: null,
       ops: [{ op: "add", path: "glossary[]", value: { id: "G-416", term, definition: "Giỏ hàng lúc thanh toán." } }]
     })
+    // FLF-461 (bước 2.9a): người xác nhận bố cục mới rồi bản in mới chèn mục soạn thêm đúng vị trí mẫu chuẩn
+    const confirmed = await request(app).post(`/api/v1/projects/${r.projectId}/import/layout-preview/confirm`).set(H(r.seeded))
+    expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200)
+    expect(confirmed.body.data.confirmed_at).toBeTruthy()
     const original = await docFileStore().load(r.profile.source_file_ref!)
     const exported = await request(app)
       .get(`/api/v1/projects/${r.projectId}/export/word?source=draft`)
