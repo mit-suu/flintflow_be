@@ -487,10 +487,16 @@ export const textSectionsOf = async (doc: IImportedDocument, profile: Pick<ITemp
 const NOT_BEFORE_START = (doc: IImportedDocument) =>
   new Mode1Error("IMPORT_INVALID_STATE", "Chỉ chọn Giữ / Bỏ chữ trước khi bấm Bắt đầu", { status: doc.status, to: doc.status, allowed: ["extracting"] })
 
+/** Khoá `drop_applying` giữ quá lâu (máy chủ chết giữa lúc viết lại file) thì coi là hết hạn. Không có thời điểm (khoá cũ) ⇒ vẫn coi là đang giữ. */
+export const DROP_LOCK_TTL_MS = 5 * 60_000
+
+const dropLockActive = (doc: { drop_applying?: boolean | null; drop_applying_at?: Date | null }, now = Date.now()): boolean =>
+  !!doc.drop_applying && (!doc.drop_applying_at || now - new Date(doc.drop_applying_at).getTime() < DROP_LOCK_TTL_MS)
+
 export const setDropText = async (projectId: string, body: { import_id: string; keys: string[] }): Promise<IImportedDocument> => {
   const doc = await requireImport(projectId, body.import_id)
   // Đang viết lại file (đã bấm Bắt đầu) ⇒ lựa chọn không còn tác dụng
-  if (doc.drop_applying || !(await extractionNotStarted(doc))) throw NOT_BEFORE_START(doc)
+  if (dropLockActive(doc) || !(await extractionNotStarted(doc))) throw NOT_BEFORE_START(doc)
   const profile = await TemplateProfile.findOne({ projectId })
   if (!profile) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa đọc xong bố cục tài liệu", { status: doc.status, to: doc.status, allowed: [] })
   const blocks = await storedBlocks(doc.projectId)
@@ -515,7 +521,7 @@ export const skeletonLanguageOf = async (doc: IImportedDocument, profile: Skelet
 /** Lưu lựa chọn ngôn ngữ (trước Bắt đầu, khi file chỉ còn khung). Dịch khung chạy lúc bấm Bắt đầu. */
 export const setSkeletonLanguage = async (projectId: string, body: { import_id: string; language: UserLocale }): Promise<IImportedDocument> => {
   const doc = await requireImport(projectId, body.import_id)
-  if (doc.drop_applying || !(await extractionNotStarted(doc))) throw NOT_BEFORE_START(doc)
+  if (dropLockActive(doc) || !(await extractionNotStarted(doc))) throw NOT_BEFORE_START(doc)
   const profile = await TemplateProfile.findOne({ projectId })
   if (!profile) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa đọc xong bố cục tài liệu", { status: doc.status, to: doc.status, allowed: [] })
   const regions = await textSectionsOf(doc, profile)
@@ -567,12 +573,13 @@ export const assertStartAffordable = async (doc: IImportedDocument, userId: stri
 const DROP_WAIT_MS = 60_000
 const DROP_POLL_MS = 200
 
-/** Lần Bắt đầu khác đang viết lại file ⇒ chờ nó xong (khoá nhả) rồi đi tiếp; quá lâu ⇒ báo thử lại. */
-const waitDropApplied = async (doc: IImportedDocument): Promise<void> => {
+/** Lần Bắt đầu khác đang viết lại file ⇒ chờ nó xong (khoá nhả) rồi đi tiếp; quá lâu ⇒ báo thử lại. Trả `false` khi khoá hết hạn (phải giành lại). */
+const waitDropApplied = async (doc: IImportedDocument): Promise<boolean> => {
   for (let waited = 0; waited < DROP_WAIT_MS; waited += DROP_POLL_MS) {
     await new Promise((resolve) => setTimeout(resolve, DROP_POLL_MS))
-    const current = await ImportedDocument.findById(doc._id, { drop_applying: 1 }).lean()
-    if (!current?.drop_applying) return
+    const current = await ImportedDocument.findById(doc._id, { drop_applying: 1, drop_applying_at: 1 }).lean()
+    if (!current?.drop_applying) return true
+    if (!dropLockActive(current)) return false
   }
   throw new Mode1Error("IMPORT_INVALID_STATE", "File đang được chuẩn bị, thử lại sau giây lát", { status: doc.status, to: doc.status, allowed: ["extracting"] })
 }
@@ -590,8 +597,11 @@ export const applyDropText = async (doc: IImportedDocument, userId: string = Str
   if (!head) return
   const headRegions = await textSectionsOf(doc, head)
   if (!head.drop_text?.length && !(headRegions && skeletonTranslationTarget(head, headRegions))) return
-  const locked = await ImportedDocument.findOneAndUpdate({ _id: doc._id, drop_applying: { $ne: true } }, { $set: { drop_applying: true } })
-  if (!locked) return waitDropApplied(doc)
+  const locked = await ImportedDocument.findOneAndUpdate(
+    { _id: doc._id, $or: [{ drop_applying: { $ne: true } }, { drop_applying_at: { $lt: new Date(Date.now() - DROP_LOCK_TTL_MS) } }] },
+    { $set: { drop_applying: true, drop_applying_at: new Date() } }
+  )
+  if (!locked) return (await waitDropApplied(doc)) ? undefined : applyDropText(doc, userId)
   const originalRef = doc.file_ref
   try {
     const profile = await TemplateProfile.findOne({ projectId: doc.projectId }, { heading_map: 1, drop_text: 1, language: 1, skeleton_language: 1 }).lean()
@@ -631,7 +641,7 @@ export const applyDropText = async (doc: IImportedDocument, userId: string = Str
     await TemplateProfile.updateOne({ projectId: doc.projectId }, { $set: { dropped_text: dropped.length ? dropped : null, ...(target ? { language: target, skeleton_language: target } : {}) } })
     if (originalRef) await docFileStore().remove(originalRef).catch(() => undefined)
   } finally {
-    await ImportedDocument.updateOne({ _id: doc._id }, { $set: { drop_applying: false } })
+    await ImportedDocument.updateOne({ _id: doc._id }, { $set: { drop_applying: false, drop_applying_at: null } })
   }
 }
 
@@ -666,7 +676,7 @@ const relabelMoment = async (doc: IImportedDocument): Promise<RelabelWhen> => {
   if (doc.status === "extracting") {
     const busy = () => new Mode1Error("IMPORT_INVALID_STATE", "Đang đọc tài liệu, dừng lại rồi mới đổi nhãn", { status: doc.status, to: "extracting", allowed: ["extracting"] })
     // Đang viết lại file lúc Bắt đầu, hoặc job I-4 còn sống (giữ bản đọc trong bộ nhớ) ⇒ chưa đổi nhãn được
-    if (doc.drop_applying) throw new Mode1Error("IMPORT_INVALID_STATE", "File đang được chuẩn bị, thử lại sau giây lát", { status: doc.status, to: "extracting", allowed: ["extracting"] })
+    if (dropLockActive(doc)) throw new Mode1Error("IMPORT_INVALID_STATE", "File đang được chuẩn bị, thử lại sau giây lát", { status: doc.status, to: "extracting", allowed: ["extracting"] })
     const { isExtractionRunning } = await import("./extract-jobs.js")
     if (await isExtractionRunning(String(doc._id))) throw busy()
     if (await extractionNotStarted(doc)) return "before_start"
@@ -674,8 +684,10 @@ const relabelMoment = async (doc: IImportedDocument): Promise<RelabelWhen> => {
     if (doc.paused || !doc.extract_cursor) return "after_import"
     throw busy()
   }
-  // Chưa có bản gốc (chế độ 3/4: chưa hoàn thiện, đang rà soát) ⇒ vẫn đổi nhãn được, mục đổi nhãn đọc lại
-  if (doc.status === "fields_review" || doc.status === "incomplete" || doc.status === "reviewing") return "after_import"
+  // Chưa có bản gốc (chế độ 3/4: chưa hoàn thiện) ⇒ vẫn đổi nhãn được, mục đổi nhãn đọc lại
+  // `reviewing`: rà soát AI từng mục chạy ngay trong request, không có cờ / job để biết lượt nào đang chạy ⇒ không đổi nhãn
+  if (doc.status === "reviewing") throw new Mode1Error("IMPORT_INVALID_STATE", "Đang rà soát nội dung, chưa đổi nhãn mục được", { status: doc.status, to: "extracting", allowed: [] })
+  if (doc.status === "fields_review" || doc.status === "incomplete") return "after_import"
   if (doc.status === "baselining") throw new Mode1Error("IMPORT_INVALID_STATE", "Đang tạo bản gốc, chờ xong rồi mới đổi nhãn", { status: doc.status, to: "extracting", allowed: [] })
   if (!hasBaseline(doc.status)) throw new Mode1Error("IMPORT_INVALID_STATE", "Đang soạn phần còn thiếu, chờ xong rồi mới đổi nhãn", { status: doc.status, to: "extracting", allowed: [] })
   throw RELABEL_AFTER_BASELINE(doc)

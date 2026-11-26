@@ -3,15 +3,31 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const h = vi.hoisted(() => ({ docs: [] as { originalName: string; extractedText: string; summaryStatus: string; summary?: string; save: () => Promise<void> }[], ai: vi.fn() }))
+const h = vi.hoisted(() => ({ docs: [] as { _id: string; originalName: string; extractedText: string; summaryStatus: string; summaryClaimedAt?: Date | null; summary?: string; save: () => Promise<void> }[], ai: vi.fn() }))
 
-vi.mock("./project-document.model.js", () => ({ ProjectDocument: { find: async () => h.docs, countDocuments: async () => h.docs.length } }))
+vi.mock("./project-document.model.js", () => ({
+  ProjectDocument: {
+    find: async () => h.docs,
+    countDocuments: async () => h.docs.length,
+    // Giành nguyên tử: chỉ tài liệu còn pending mới giành được
+    findOneAndUpdate: async (q: { _id: string }) => {
+      const d = h.docs.find((x) => x._id === q._id)
+      if (!d || d.summaryStatus !== "pending") return null
+      d.summaryStatus = "running"
+      return d
+    },
+    updateMany: async (q: { _id: { $in: string[] } }) => {
+      for (const d of h.docs) if (q._id.$in.includes(d._id) && d.summaryStatus === "running") d.summaryStatus = "pending"
+    }
+  }
+}))
 vi.mock("./project.service.js", () => ({ getProjectById: vi.fn(async () => ({})) }))
 vi.mock("../../shared/ai/ai-action.service.js", () => ({ executeAiAction: h.ai }))
 
 import { pendingSummaryCredits, summarizeReferenceDocuments } from "./project-document.service.js"
 
-const doc = (name: string) => ({ originalName: name, extractedText: "x", summaryStatus: "pending", save: vi.fn(async () => undefined) })
+let seq = 0
+const doc = (name: string) => ({ _id: `d${++seq}`, originalName: name, extractedText: "x", summaryStatus: "pending", save: vi.fn(async () => undefined) })
 
 describe("summarizeReferenceDocuments - FLF-458 hết credit", () => {
   beforeEach(() => {
@@ -38,6 +54,22 @@ describe("summarizeReferenceDocuments - FLF-458 hết credit", () => {
     await summarizeReferenceDocuments("o", "u", "507f1f77bcf86cd799439011")
     expect(a.summaryStatus).toBe("failed")
     expect(b.summaryStatus).toBe("success")
+  })
+})
+
+describe("summarizeReferenceDocuments - hai lượt Bắt đầu đồng thời", () => {
+  it("cùng tài liệu pending ⇒ chỉ một lượt gọi AI / trừ credit", async () => {
+    const [a, b] = [doc("a"), doc("b")]
+    h.docs = [a, b]
+    h.ai.mockReset()
+    h.ai.mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 5))
+      return { data: { summary: "ok" } }
+    })
+    vi.spyOn(console, "log").mockImplementation(() => undefined)
+    await Promise.all([summarizeReferenceDocuments("o", "u", "p"), summarizeReferenceDocuments("o", "u", "p")])
+    expect(h.ai).toHaveBeenCalledTimes(2)
+    expect([a.summaryStatus, b.summaryStatus]).toEqual(["success", "success"])
   })
 })
 
