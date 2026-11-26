@@ -135,6 +135,8 @@ export const MODEL_OWNED_RULES: ReadonlySet<string> = new Set([
   // FLF-363: tiêu đề và nội dung chỉ hai mục khác nhau lúc import — chỉ import đặt được, recompute không đóng
   "import_title_content_mismatch",
   "cr_consistency",
+  // FLF-483: CR đổi giá trị mà còn chỗ ghi giá trị cũ (lượt quét sau ghi) — recompute không đóng
+  "cr_old_value_left",
   // FLF-449 việc 5, 6: cờ AI S-9.2 / S-8.4, tên lens ở `Flag.lens`
   "ai_review"
 ])

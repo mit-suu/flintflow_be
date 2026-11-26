@@ -1,7 +1,7 @@
 ---
 skill_id: cr-propose
 kind: action
-version: 2.10.0
+version: 2.11.0
 description: Mode 1 C-4 - for every affected Spine element conclude edit | comment | not_related and propose the Spine ops
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -128,6 +128,9 @@ and keep every other field exactly as it is - each changed field is a revision t
 18. **Passage that mentions a removed element** (found by `mention`, about an element the CR removes): rewrite or drop
     exactly that sentence so the document no longer refers to it (set that element's text or the `blocks` of that
     `custom_sections` element, changing only that sentence). The sentence does not mention it any more after the edit ⇒ done.
+19. **Changing a value.** The CR changes a value (a number, a duration, an amount): change **every place in this element**
+    that states the old value with the same meaning (normal and abnormal flows, validations, interactions, guards, description),
+    not only the one the reason mentions. Leave a place unchanged only when the number means something else, and say so in `reason`.
 
 ## Output
 

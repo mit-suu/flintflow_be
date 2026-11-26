@@ -32,6 +32,11 @@ import { assemble } from "../render/assemble.service.js"
 import * as flagsService from "../spine/flags.service.js"
 import { applyTransaction, planTransaction, revertChanges } from "../spine/op-engine.js"
 import { userOpSchema, type Op } from "../spine/op.types.js"
+import { findingOps } from "../import/check.service.js"
+import { pathLabel } from "../spine/human-labels.js"
+import { sectionOfElement } from "./spine-location.js"
+import { ChangeLocation } from "./change-location.model.js"
+import { crReplacedValues, sweepOldValues, OLD_VALUE_LEFT_RULE } from "./old-value-left.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Change } from "../spine/spine.types.js"
 import type { IChangeRequest } from "./change-request.model.js"
@@ -127,6 +132,7 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
   } catch (err) {
     console.warn(`[C-7] ${cr.cr_id}: đã ghi ${next} nhưng recompute cờ lỗi - cờ sẽ được tính lại ở lần recompute sau`, err)
   }
+  await flagOldValuesLeft(projectId, cr, approved)
   await unlockPaths(projectId, cr.cr_id)
   try {
     const latest = await spineRepository.get(projectId)
@@ -137,6 +143,37 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
   // Spine vừa đổi ⇒ embed lại phần tử đổi chữ cho C-3 của CR sau — chạy nền, không chặn/không làm hỏng C-7
   if (ops.length) scheduleEmbeddingSync(projectId)
   return next
+}
+
+/**
+ * FLF-483 (lỗi #32): lượt quét sau khi ghi — CR đổi một giá trị mà phần tử khác (hoặc chữ spec của mockup) còn ghi giá trị cũ
+ * ⇒ cờ vàng cho từng phần tử, không chặn. Bỏ phần tử C-3 kết luận "không liên quan" và chỗ BA đã chọn "giữ nguyên". Lỗi chỉ
+ * ghi log: Spine đã ghi, cờ lệch sẽ không làm hỏng bản ghi.
+ */
+const flagOldValuesLeft = async (projectId: string, cr: IChangeRequest, approved: readonly IChangeLocation[]): Promise<void> => {
+  try {
+    const replaced = crReplacedValues(approved)
+    if (!replaced.size) return
+    const notRelated: string[] = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id, conclusion: "not_related" }).distinct("path")
+    const kept = approved.filter((l) => l.kept_violations?.includes(OLD_VALUE_LEFT_RULE)).map((l) => l.path)
+    const record = await spineRepository.get(projectId)
+    if (!record) return
+    const spine = stripRecord(record)
+    const hits = sweepOldValues(spine, replaced, new Set([...notRelated, ...kept]))
+    if (!hits.length) return
+    const findings = hits.map((h) => ({
+      rule: "old_value_left",
+      section_id: sectionOfElement(spine, h.path),
+      target_id: h.path,
+      block_ids: [],
+      message: `${pathLabel(h.path)} còn ghi giá trị cũ ${h.values.map((v) => `“${v}”`).join(", ")} ở ${h.places.join(", ")} sau ${cr.cr_id}. Sửa cho khớp hoặc giữ nguyên nếu con số này mang nghĩa khác`
+    }))
+    const ops = findingOps(spine, findings, "cr_old_value_left")
+    if (!ops.length) return
+    await applyTransaction(projectId, { base_version: record.spine_version, ops, by: cr.cr_id, reason: `${cr.cr_id}: còn giá trị cũ`, step_id: null })
+  } catch (err) {
+    console.warn(`[C-7] ${cr.cr_id}: quét giá trị cũ còn sót lỗi - bỏ qua`, err)
+  }
 }
 
 /**
