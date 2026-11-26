@@ -438,6 +438,18 @@ export const getImportResponseSchema = z.object({
       available_credits: z.number().nullable()
     })
     .nullable()
+    .optional(),
+  /**
+   * FLF-453 (business-flow §3.1.2 "Rà soát phần có sẵn"): chỉ có khi import ở `reviewing` — mục Code chọn cho AI rà + ước
+   * tính credit vòng rà soát, báo trước khi người dùng xác nhận chạy. Trạng thái khác ⇒ `null`.
+   */
+  review: z
+    .object({
+      section_ids: z.array(z.string()),
+      calls: z.number().int().min(0),
+      credits: z.number().min(0)
+    })
+    .nullable()
     .optional()
 })
 

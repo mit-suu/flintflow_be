@@ -8,7 +8,7 @@ vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await imp
 import mongoose from "mongoose"
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeMode1 } from "../../helpers/mode1.js"
-import { importAtBaselining } from "../../helpers/mode1-import-p4.js"
+import { finishReviewIfPending, importAtBaselining } from "../../helpers/mode1-import-p4.js"
 import { startFinalize, waitForFinalize } from "../../../src/modules/import/finalize-jobs.js"
 import { getImportView } from "../../../src/modules/import/import.service.js"
 import { buildGapReport } from "../../../src/modules/import/gap-report.service.js"
@@ -25,7 +25,8 @@ const version = async (projectId: string) => (await spineRepository.get(projectI
 const finalize = async (projectId: string, userId: string, importId: string, body: { complete?: boolean } = {}) => {
   await startFinalize(projectId, userId, { import_id: importId, base_version: await version(projectId), ...body })
   await waitForFinalize(importId)
-  return (await ImportedDocument.findById(importId))!
+  // FLF-453: AI giả không phát hiện gì ở vòng rà soát (business-flow §3.1.2) — test này không chủ đích kiểm vòng rà soát
+  return finishReviewIfPending(projectId, userId, importId)
 }
 
 describe("FLF-336 I-5 - so cấu trúc đích trước v0", () => {

@@ -30,6 +30,9 @@ const EXPECTED: [ImportStatus, ImportStatus][] = [
   ["incomplete", "baselining"],
   // FLF-278: chế độ 3 sang Luồng 2; ký baseline 1.0 (FLF-318) khép lần import mẫu
   ["incomplete", "drafting"],
+  // FLF-453: còn mục cần AI rà (đầu vào của phần thiếu, hoặc cờ đỏ) ⇒ dừng ở đây trước khi sang Luồng 2
+  ["incomplete", "reviewing"],
+  ["reviewing", "drafting"],
   ["drafting", "delivered"],
   ["checking", "gap_review"],
   ["gap_review", "delivered"],
@@ -79,8 +82,9 @@ describe("import.state - trạng thái đặc biệt", () => {
     expect(IMPORT_STATUSES.filter(isTerminal)).toEqual(["preflight_rejected", "change_requested"])
   })
 
-  it("hai bước gọi AI (extracting, checking) + baselining (job finalize nền lỗi / mất) được pause", () => {
-    expect(IMPORT_STATUSES.filter(canPause)).toEqual(["extracting", "baselining", "checking"])
+  it("ba bước gọi AI (extracting, checking, reviewing) + baselining (job finalize nền lỗi / mất) được pause", () => {
+    // FLF-453: "reviewing" (vòng rà soát phần có sẵn) cũng gọi AI nên được pause như "checking"
+    expect(IMPORT_STATUSES.filter(canPause)).toEqual(["extracting", "baselining", "reviewing", "checking"])
   })
 
   it("có baseline v0 từ checking trở đi (BR-03)", () => {

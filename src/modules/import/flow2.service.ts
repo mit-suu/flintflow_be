@@ -127,7 +127,8 @@ export interface Flow2Result {
  * độ 3 không có bản gốc 0.1 để so).
  */
 export const enterFlow2 = async (doc: IImportedDocument, by: string, baseVersion?: number): Promise<Flow2Result> => {
-  assertImportStatus(doc, ["incomplete"], "drafting")
+  // FLF-453: vòng rà soát phần có sẵn (business-flow §3.1.2) gọi hàm này sau khi rà xong, từ trạng thái "reviewing"
+  assertImportStatus(doc, ["incomplete", "reviewing"], "drafting")
   const projectId = String(doc.projectId)
   const [project, profile] = await Promise.all([Project.findById(projectId).lean(), TemplateProfile.findOne({ projectId })])
   const mode = profile?.target_structure?.resolved_mode
