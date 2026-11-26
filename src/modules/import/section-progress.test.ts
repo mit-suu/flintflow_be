@@ -23,4 +23,7 @@ describe("sectionProgressOf - FLF-461 tiến độ chế độ 3/4 theo mục c�
     expect(sectionProgressOf(sections, steps)).toEqual({ total: 3, remaining: 1 })
     expect(sectionProgressOf(sections, [step("S-3.1", "accepted"), step("S-8.3", "accepted"), step("S-5.2@S01", "accepted")])).toEqual({ total: 3, remaining: 0 })
   })
+  it("mục thiếu không có bước soạn nào (owner_steps rỗng) vẫn là mục còn việc, không coi là xong", () => {
+    expect(sectionProgressOf([sec("custom:c2", "missing", [])], [step("S-8.1", "accepted")])).toEqual({ total: 1, remaining: 1 })
+  })
 })

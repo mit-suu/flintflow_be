@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { LayoutBlock } from "./step-plan.js"
 import type { LayoutEntry } from "./template-profile.model.js"
-import { EXCERPT_MAX, excerptOf, fileKindOf, isTemplateFile, previewStructure, structureChanges, toPreview, type StructurePreview } from "./structure-preview.js"
+import { applyScopeLabels, EXCERPT_MAX, excerptOf, fileKindOf, isTemplateFile, previewStructure, structureChanges, toPreview, type StructurePreview } from "./structure-preview.js"
 import type { TargetStructure } from "./target-structure.js"
 
 const entry = (order: number, section_id: string, heading_text: string, level = 1): LayoutEntry => ({ order, section_id, heading_text, level })
@@ -279,6 +279,21 @@ describe("FLF-460 - dấu chưa chắc và nhãn Ngoài phạm vi trên bản đ
     const preview = previewStructure(blocks, sections, spine, "free", AT, new Map([["h2", { uncertain: true, matched_title: "Functional Requirements" }]]))
     expect(preview.sections.find((s) => s.block_id === "h2")).toMatchObject({ uncertain: true, matched_title: "Functional Requirements" })
     expect(preview.sections.find((s) => s.block_id === "h1")?.uncertain).toBeUndefined()
+  })
+
+  it("FLF-460: đưa vào phạm vi mục tự xếp Ngoài phạm vi ⇒ mục có owner steps (Luồng 2 mở bước, tiến độ đếm còn lại)", () => {
+    const structure: TargetStructure = {
+      target: "fpt",
+      intent: "free",
+      resolved_mode: 1,
+      sections: [{ section_id: "custom:CS01", title: "Chi phí dự kiến", status: "out_of_scope", owner_steps: [] }],
+      missing: [],
+      compared_at: AT
+    }
+    const back = applyScopeLabels(structure, new Map([["c1", { scope_label: "in_scope" as const }]]), new Map([["c1", "custom:CS01"]]), new Set())
+    expect(back.sections[0]).toMatchObject({ status: "missing", owner_steps: ["S-8.1"], block_id: "c1" })
+    expect(back.missing).toEqual(["custom:CS01"])
+    expect(back.resolved_mode).toBe(4)
   })
 
   it("nhãn out_of_scope đưa mục ra khỏi phạm vi; in_scope đưa mục tự xếp ngoài phạm vi trở lại", () => {
