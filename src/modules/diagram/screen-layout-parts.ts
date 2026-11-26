@@ -16,6 +16,7 @@ import { stableStringify } from "../spine/source-hash.js"
 import { checkScene } from "../../shared/diagram/svg-geometry.js"
 import type { RenderContext } from "../../shared/diagram/erd-notation.js"
 import { resolveScreenTheme, SCREEN_PLATFORMS, type ResolvedScreenTheme, type ScreenMockupMode, type ScreenPlatform } from "../../shared/diagram/screen-theme.js"
+import { screenThemeFor } from "../spine/screen-platforms.js"
 import { systemName } from "../spine/system-name.js"
 import { renderKind, type RenderedDiagramPart } from "./renderers/index.js"
 import { compareIds } from "./renderers/common.js"
@@ -121,7 +122,8 @@ export const screenLayoutParts = async (input: ScreenLayoutPartsInput): Promise<
   if (!base) return []
   if (!input.force && existing.length > 0 && existing.every((d) => d.render_status === "ok" && d.source_hash === base.source_hash)) return existing.map(asPart)
 
-  const theme = resolveScreenTheme(context.screenTheme, spine.project.form_factor)
+  // FLF-493: nền tảng của màn do actor dùng màn quyết định (giao với theme dự án), model chỉ thu hẹp thêm
+  const theme = screenThemeFor(spine, screenId, resolveScreenTheme(context.screenTheme, spine.project.form_factor))
   const mode = mockupModeOf(context, screenId)
   const imported = context.screenMockups?.some((m) => m.screen_id === screenId) ?? false
   const original = imported && input.loadOriginal ? await input.loadOriginal(input.projectId, spine, screenId, mode).catch(() => null) : null

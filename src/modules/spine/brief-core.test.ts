@@ -6,7 +6,7 @@ import { spineSchema } from "./spine.schema.js"
 import type { Addendum, Spine } from "./spine.types.js"
 import { planTransaction } from "./op-engine.js"
 import type { Op } from "./op.types.js"
-import { briefCoreEntries, hasBriefCore, isBriefCoreTopic, isBriefPhase, isInBriefPhase, planBriefReextract, writesProjectVisionOrGoals } from "./brief-core.js"
+import { briefCoreEntries, hasBriefCore, normalizeBriefTopic, isBriefCoreTopic, isBriefPhase, isInBriefPhase, planBriefReextract, writesProjectVisionOrGoals } from "./brief-core.js"
 import { createEmptySpine } from "./spine.repository.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -125,5 +125,12 @@ describe("planBriefReextract - S-1 chạy trước B-2 (FLF-466 P08)", () => {
     expect(planBriefReextract(after, before, "B-2.2")).toEqual([])
     expect(planBriefReextract(after, before, null)).toHaveLength(1)
     expect(planBriefReextract(after, before, "B-1.1")).toHaveLength(1)
+  })
+})
+
+describe("normalizeBriefTopic (FLF-449 D1)", () => {
+  it("target / objective / mục tiêu (hoa thường, dấu) ⇒ goals; topic khác giữ nguyên", () => {
+    for (const t of ["target", "Target", " OBJECTIVE ", "goal", "Mục tiêu", "goals"]) expect(normalizeBriefTopic(t)).toBe("goals")
+    for (const t of ["metric: no-show rate", "vision", "scale"]) expect(normalizeBriefTopic(t)).toBe(t)
   })
 })

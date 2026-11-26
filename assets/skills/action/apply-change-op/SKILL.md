@@ -1,7 +1,7 @@
 ---
 skill_id: apply-change-op
 kind: action
-version: 1.11.0
+version: 1.13.0
 description: Chat change request → ops (or a clarification); impact query → 3 branches → stale; one-pass reconcile
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -44,7 +44,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 0. **Read the request in context.** If your last chat turn asked a question, the request is the answer: combine it with
    the original request above it ("A03" after "Admin A01 or A03?" → rename A03). Resolve "it", "that one" from the chat. Change
    only what the request asks now - never re-apply edits from earlier turns.
-1. **Locate** the target by key. Resolve names through the projection and glossary: "rename Admin to Administrator" → `actors[id=A03].name`.
+1. **Locate** the target by key. Resolve names through the projection and glossary: "rename Admin to Administrator" → `actors[id=A03].name`. The projection's `element_index` lists every actor / role / use case / function / screen / feature as `{id, name, name_vi?}`: match the user's words against `name` or `name_vi`. **Never ask the user for an internal id or code** - resolve names from the index; ask only when two elements carry the same name. A rename carries `old_name_mentions`: those elements still contain the old name - decide each place (replace only where it means the renamed thing) and emit one op per place; the server does not replace text by itself.
 2. **Ambiguous?** Several possible targets, or the intent could mean different fields → `clarification_needed` with **one** short message in the reply language (the `## Reply language` section at the end of this prompt, Vietnamese when it is absent). Several facts missing ⇒ ask them all in that one message, never one per turn.
 2a. **Already asked (count above ≥ 1)?** Never ask again about anything the user answered - a short answer ("chỉ thao tác xóa", "cả hai") is a full answer. Fill what is left from the projection yourself and return ops; ask again only for a fact the projection cannot give.
 2b. **The question is read by the user, not by code.** Name every screen, actor, role, feature, function and entity by its
@@ -187,7 +187,11 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    The section has no step, so code checks your text before the user confirms: keep the template's table(s) exactly (same columns and
    header row, one body row per real item, never the placeholder rows) and use no vague word (fast, easy, etc., nhanh, thân thiện).
 16. **`target_flags`** = the user asked to fix those flags: the batch must close each one - follow its `fix_hint` (write the field the rule reads, e.g. a reliability/performance NFR needs `kind: "quantitative"` + `metric` + `threshold`; never append the number to `statement`). The value is not in the request, chat or projection ⇒ `clarification_needed` asking for it.
-17. **Text you write** (ops, `notes`, `warning`): a hyphen `-`, never an em dash; never the word "FPT" - say "FlintFlow standard template".
+17. **Device / platform of who uses the product** ("Bệnh nhân chỉ dùng app trên điện thoại; lễ tân, bác sĩ dùng web") is a field of the **actor**, not a sentence of an NFR: `set actors[id=A04].platforms` with the **whole** list, `"mobile"` (phone app) and / or `"web"` (browser; a tablet or a desktop is `"web"`), one op per `human` actor the request names (a general actor such as `User` may stay empty: it inherits its children). The projection lists every human actor with `platforms` (`null` = not stated) and `project.form_factor`; read names from there ("Bệnh nhân" = Patient). Code redraws each screen's mockup only on the platforms of the actors using that screen, so a wrong value hides or adds a mockup. Never invent a third value. A platform the product does not have (`project.form_factor` has no `mobile_app` but the request says phone) ⇒ still write what was asked and put the mismatch in `warning`. The request also states a quality target (an NFR sentence) ⇒ that is a second op; never replace the actor op with it.
+   ```json
+   { "op": "set", "path": "actors[id=A04].platforms", "value": ["mobile"], "reason": "bệnh nhân chỉ dùng app trên điện thoại" }
+   ```
+18. **Text you write** (ops, `notes`, `warning`): a hyphen `-`, never an em dash; never the word "FPT" - say "FlintFlow standard template".
 
 ## Reconcile (`reconcile`)
 

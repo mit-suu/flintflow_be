@@ -118,6 +118,11 @@ describe("askableFields (FLF-232)", () => {
     expect(askableFields("S-2.2", fields)).toEqual(["project.vision", "project.form_factor"])
     expect(askableFields("B-2.3", fields)).toEqual(fields)
   })
+
+  it("FLF-449: trường sổ sách (progress.*, steps.*, sections.*, flags.*) không bao giờ là câu để hỏi", () => {
+    expect(askableFields("S-5.1", ["progress.credit_ack_required", "progress.screen_queue", "steps.x", "sections.y", "flags", "screens"])).toEqual(["screens"])
+    expect(askableFields("B-2.3", ["progress.credit_ack_required", "project.system_name"])).toEqual(["project.system_name"])
+  })
 })
 
 describe("P05 - câu đã chốt mà model đặt topic_key khác vẫn bị bỏ", () => {

@@ -100,7 +100,8 @@ const actorSchema = new Schema(
     description: { type: String, default: "" },
     flows_in: { type: [String], default: undefined },
     flows_out: { type: [String], default: undefined },
-    parent_id: { type: String, default: undefined }
+    parent_id: { type: String, default: undefined },
+    platforms: { type: [{ type: String, enum: ["web", "mobile"] }], default: undefined }
   },
   opts
 )

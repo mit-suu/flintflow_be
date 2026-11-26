@@ -19,6 +19,20 @@ export const BRIEF_EXTRACTION_STEP = "S-1.1"
 export const isBriefCoreTopic = (topic: unknown): boolean =>
   typeof topic === "string" && [BRIEF_VISION_TOPIC, BRIEF_GOALS_TOPIC].includes(topic.trim().toLowerCase())
 
+/** Cách model hay gọi một mục tiêu kinh doanh — đều là `goals` (FLF-449 D1: `target` làm mục tiêu 20% → 8% rơi khỏi §1). */
+const GOALS_TOPIC_ALIASES: ReadonlySet<string> = new Set(["goal", "goals", "target", "targets", "objective", "objectives", "muc tieu"])
+
+/** Chuẩn hoá `topic` của ghi chú Brief: đồng nghĩa của mục tiêu ⇒ `goals` (không phân biệt hoa thường, dấu); topic khác giữ nguyên. */
+export const normalizeBriefTopic = (topic: string): string => {
+  const key = topic
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/đ/g, "d")
+  return GOALS_TOPIC_ALIASES.has(key) ? BRIEF_GOALS_TOPIC : topic
+}
+
 const topicOf = (entry: Pick<Addendum, "topic">): string => entry.topic.trim().toLowerCase()
 
 export interface BriefCoreEntries {

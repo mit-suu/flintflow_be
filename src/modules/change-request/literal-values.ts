@@ -21,7 +21,26 @@ export interface Literal {
 const CODE = /\b[A-Za-z]{1,6}(?:[-_.][A-Za-z0-9]+)*[-_.]\d+(?:\.\d+)*\b/g
 
 const MONEY_UNITS: Readonly<Record<string, number>> = { tỷ: 1e9, tỉ: 1e9, triệu: 1e6, tr: 1e6, nghìn: 1e3, ngàn: 1e3, k: 1e3, đồng: 1, đ: 1, vnđ: 1, vnd: 1 }
-const OTHER_UNITS = "phút|giờ|ngày|tuần|tháng|năm|giây|ms|s|%|lần|sản phẩm|người dùng|minutes?|mins?|hours?|days?|weeks?|months?|years?|seconds?|secs?|times|users?|items?|products?"
+const OTHER_UNITS = "phút|giờ|tiếng|ngày|tuần|tháng|năm|giây|ms|s|%|lần|sản phẩm|người dùng|minutes?|mins?|hours?|days?|weeks?|months?|years?|seconds?|secs?|times|users?|items?|products?"
+
+/**
+ * Đơn vị thời gian Việt ↔ Anh quy về một dạng ("4 tiếng" = "4 giờ" = "4 hours" ⇒ `4 hour`), để câu CR tiếng Việt khớp
+ * tài liệu tiếng Anh (FLF-483, lỗi #32). Đơn vị khác giữ nguyên chữ (bỏ dấu, chữ thường).
+ */
+const UNIT_CANON: readonly (readonly [RegExp, string])[] = [
+  [/^(?:gio|tieng|hours?)$/, "hour"],
+  [/^(?:phut|minutes?|mins?)$/, "minute"],
+  [/^(?:ngay|days?)$/, "day"],
+  [/^(?:tuan|weeks?)$/, "week"],
+  [/^(?:thang|months?)$/, "month"],
+  [/^(?:nam|years?)$/, "year"],
+  [/^(?:giay|seconds?|secs?)$/, "second"]
+]
+
+const canonUnit = (unit: string): string => {
+  const folded = foldDiacritics(unit).toLowerCase()
+  return UNIT_CANON.find(([re]) => re.test(folded))?.[1] ?? folded
+}
 
 const NUMBER = "\\d{1,3}(?:[.,]\\d{3})+|\\d+(?:[.,]\\d+)?"
 const START = "(?<![\\p{L}\\p{N}.,-])"
@@ -48,7 +67,7 @@ export const literalValues = (text: string): Literal[] => {
   for (const m of clean.matchAll(PHRASE)) {
     const n = parseNumber(m[1])
     if (!Number.isFinite(n)) continue
-    const folded = `${n} ${foldDiacritics(m[2]).toLowerCase()}`
+    const folded = `${n} ${canonUnit(m[2])}`
     if (!out.has(folded)) out.set(folded, { raw: m[0].trim(), kind: "phrase", folded })
   }
   return [...out.values()]

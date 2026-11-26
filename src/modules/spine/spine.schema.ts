@@ -100,7 +100,9 @@ export const actorSchema = z.strictObject({
   flows_in: z.array(z.string()).optional(),
   flows_out: z.array(z.string()).optional(),
   /** Actor cha (generalization); vắng/null ⇒ actor không chuyên biệt hoá actor nào. */
-  parent_id: id.nullable().optional()
+  parent_id: id.nullable().optional(),
+  /** FLF-493: nền tảng actor người dùng (`web` / `mobile`); vắng ⇒ chưa biết. */
+  platforms: z.array(z.enum(["web", "mobile"])).optional()
 })
 
 export const roleSchema = z.strictObject({

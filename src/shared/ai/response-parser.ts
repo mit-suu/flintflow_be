@@ -171,12 +171,45 @@ const sourcesField = z
   )
   .optional()
 
+/**
+ * FLF-472: một câu hỏi mở (hoặc chủ đề tự do ở lời cổng) mà user vừa trả lời trong tin của lượt revision. `id` = mã
+ * `other_requirements` của câu hỏi (null khi là câu hỏi tự do trong lời cổng, lúc đó đưa `question`); `answer` = lời user
+ * (trích nguyên văn, không diễn giải). Server đổi mỗi mục thành một dòng sổ quyết định trước khi câu hỏi bị đóng.
+ */
+export const answeredQuestionSchema = z.object({
+  id: z.string().nullish().transform((v) => (v && v.trim() !== "" ? v.trim() : null)),
+  answer: z.string(),
+  question: z.string().nullish().transform((v) => v ?? undefined),
+  topic_key: z.string().nullish().transform((v) => v ?? undefined)
+})
+
+export type AnsweredQuestion = z.infer<typeof answeredQuestionSchema>
+
+/** Như `localized`: tuỳ chọn, không phải mảng ⇒ coi như không có; mục sai khuôn bị bỏ (câu thiếu `answer` thì không có gì để lưu). */
+const answeredQuestionsField = z
+  .unknown()
+  .transform((value): AnsweredQuestion[] | undefined =>
+    Array.isArray(value)
+      ? value.flatMap((entry) => {
+          const parsed = answeredQuestionSchema.safeParse(entry)
+          return parsed.success ? [parsed.data] : []
+        })
+      : undefined
+  )
+  .optional()
+
 export const opTransactionSchema = z.object({
   txn: z.string().optional(),
   ops: z.array(opSchema),
   notes: z.string().optional(),
   localized: localizedField,
-  sources: sourcesField
+  sources: sourcesField,
+  answered_questions: answeredQuestionsField,
+  /** FLF-482 (C2): phần lời sửa mà bước này không ghi được (nằm ở mục khác). Chỉ chuỗi không rỗng mới có nghĩa. */
+  out_of_scope: z
+    .unknown()
+    .transform((v): string | undefined => (typeof v === "string" && v.trim() !== "" ? v.trim() : undefined))
+    .optional()
 })
 
 /**

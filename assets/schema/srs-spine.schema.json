@@ -399,6 +399,16 @@
                 "type": "null"
               }
             ]
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "web",
+                "mobile"
+              ]
+            }
           }
         },
         "required": [

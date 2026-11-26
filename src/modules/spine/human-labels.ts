@@ -45,6 +45,7 @@ export const FIELD_LABELS: Readonly<Record<string, string>> = {
   actor_id: "Tác nhân",
   actor_ids: "Tác nhân",
   parent_id: "Tác nhân cha",
+  platforms: "Nền tảng",
   function_ids: "Chức năng liên quan",
   includes: "Include",
   extends: "Extend",
@@ -190,8 +191,34 @@ export const nameElementIds = (text: string, spine: NamedElementSource, extra?: 
   return collapseEcho(withoutEcho.replace(new RegExp(`['"‘“]?(?<![\\w.-])(${alt})(?![\\w-]|\\.\\d)['"’”]?`, "g"), (_m, id: string) => quoted(id)))
 }
 
+/**
+ * FLF-480: lưới an toàn cho lời model viết cho người đọc (tin cổng) khi nó vẫn chép mã nội bộ của phần tử đã bị xoá nên
+ * không còn tên để thay ("Đã đóng 11 điểm còn mở (OR01, OR05 đến OR14)"). Dãy mã (cách nhau dấu phẩy / "và" / "đến" /
+ * "and" / "to") nằm trong ngoặc ⇒ bỏ cả ngoặc; nằm ngoài ngoặc ⇒ bỏ dãy. Mã tài liệu có gạch nối (`BR-75`, `UC-01`)
+ * không đụng tới.
+ */
+const CODE = String.raw`(?:OR|BR|MSG|CR|AD|AS|DC|FL|N|FN|CS|A|S|R|E|F)\d{2,3}`
+const CODE_RUN = String.raw`${CODE}(?:\s*(?:,|;|và|đến|tới|and|to|-)\s*${CODE})*`
+const PAREN_CODES = new RegExp(String.raw`\s*[(（]\s*${CODE_RUN}\s*[)）]`, "g")
+const BARE_CODES = new RegExp(String.raw`(?<![\w-])${CODE_RUN}(?![\w-])`, "g")
+export const stripInternalCodes = (text: string): string =>
+  text
+    .replace(PAREN_CODES, "")
+    .replace(BARE_CODES, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+
 /** Mã nội bộ do bộ cấp mã sinh (`BR07`, `MSG03`, `N02`), khác mã tài liệu có gạch nối (`BR-75`) là mã người đọc thấy trong tài liệu. */
-const INTERNAL_ID: Readonly<Record<string, RegExp>> = { business_rules: /^BR\d+$/, messages: /^MSG\d+$/, nfrs: /^N\d+$/ }
+const INTERNAL_ID: Readonly<Record<string, RegExp>> = {
+  business_rules: /^BR\d+$/,
+  messages: /^M(?:SG)?-?\d+$/,
+  nfrs: /^N\d+$/,
+  // FLF-480: câu hỏi mở / yêu cầu khác (`OR10`) lộ trong lời chat và ghi chú xem trước
+  other_requirements: /^OR\d+$/,
+  common_requirements: /^CR\d+$/,
+  addendum: /^AD\d+$/,
+  assumptions: /^AS\d+$/
+}
 
 /**
  * FLF-474: tên người đọc được cho phần tử mà `nameElementIds` không có field `name` để thay ("CS27" lộ ra trong câu hỏi làm
@@ -199,7 +226,7 @@ const INTERNAL_ID: Readonly<Record<string, RegExp>> = { business_rules: /^BR\d+$
  * quy tắc nghiệp vụ / thông báo / yêu cầu phi chức năng mang mã nội bộ ⇒ câu trích ngắn. Mã tài liệu (`BR-75`) giữ nguyên.
  */
 export const internalElementNames = (
-  spine: Partial<Pick<Spine, "custom_sections" | "business_rules" | "messages" | "nfrs">>,
+  spine: Partial<Pick<Spine, "custom_sections" | "business_rules" | "messages" | "nfrs" | "other_requirements" | "common_requirements" | "addendum" | "assumptions">>,
   customTitle?: (sectionId: string) => string
 ): Map<string, string> => {
   const out = new Map<string, string>()
@@ -207,14 +234,18 @@ export const internalElementNames = (
     const title = c.heading?.trim() || customTitle?.(`custom:${c.id}`)?.trim()
     if (title) out.set(c.id, title)
   }
-  const quoted: [keyof typeof INTERNAL_ID, readonly { id: string; statement?: string; text?: string }[]][] = [
+  const quoted: [keyof typeof INTERNAL_ID, readonly { id: string; statement?: string; statement_vi?: string | null; text?: string; content?: string }[]][] = [
     ["business_rules", spine.business_rules ?? []],
     ["messages", spine.messages ?? []],
-    ["nfrs", spine.nfrs ?? []]
+    ["nfrs", spine.nfrs ?? []],
+    ["other_requirements", spine.other_requirements ?? []],
+    ["common_requirements", spine.common_requirements ?? []],
+    ["addendum", spine.addendum ?? []],
+    ["assumptions", spine.assumptions ?? []]
   ]
   for (const [key, list] of quoted) {
     for (const el of list) {
-      const quote = (el.statement ?? el.text ?? "").trim()
+      const quote = (el.statement_vi ?? el.statement ?? el.text ?? el.content ?? "").trim()
       if (quote && INTERNAL_ID[key].test(el.id)) out.set(el.id, shortQuote(quote))
     }
   }
@@ -227,7 +258,7 @@ const ELEMENT_TEXT_FIELDS = ["statement", "text", "description", "content"] as c
 /** Số ký tự tối đa của câu trích khi phần tử không có tên. */
 const ELEMENT_QUOTE_MAX = 60
 
-const shortQuote = (text: string): string => {
+export const shortQuote = (text: string): string => {
   const t = text.replace(/\s+/g, " ").trim()
   return t.length > ELEMENT_QUOTE_MAX ? `${t.slice(0, ELEMENT_QUOTE_MAX).trimEnd()}…` : t
 }
@@ -311,6 +342,7 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   orphan_screen: "Màn hình không nằm trong luồng nào",
   screen_no_actor: "Màn hình chưa có tác nhân nào dùng",
   orphan_actor: "Tác nhân chưa gắn use case",
+  actor_no_usecase: "Tác nhân không còn use case riêng",
   usecase_no_function: "Use case chưa gắn chức năng",
   screen_no_function: "Màn hình chưa có chức năng",
   empty_feature: "Tính năng chưa có màn hình hay chức năng",
@@ -347,6 +379,8 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   accepted_as_is: "Chấp nhận nguyên trạng",
   goal_not_covered: "Mục tiêu chưa được đáp ứng",
   cr_consistency: "Chưa nhất quán sau khi sửa",
+  cr_old_value_left: "Còn giá trị cũ sau khi sửa",
+  old_value_left: "Còn giá trị cũ trong phần tử",
   // luật kiểm đề xuất CR (3.7)
   unconcluded: "Chưa có kết luận",
   element_missing: "Phần tử không còn trong tài liệu",

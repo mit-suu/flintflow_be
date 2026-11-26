@@ -167,7 +167,7 @@ export const applyChanges = catchAsync(async (req: Request, res: Response) => {
           })
         : ""
     if (session) {
-      const count = result.changes.length
+      const count = result.changes.filter((c) => changeService.isUserVisiblePath(c.path)).length
       await changeTranscript.recordChangeTurn(session, userText, {
         kind: "change_applied",
         reply:

@@ -516,6 +516,24 @@ describe("buildReviewBatches (hàm thuần)", () => {
     expect(keys).toEqual(["common", ...spine.features.map((f) => `feature:${f.id}`)])
   })
 
+  it("FLF-449 (M1): khối chung có system_name; giao tiếp ngoài lấy từ NFR giao tiếp + actor không phải người, không từ nút triển khai", () => {
+    const spine = createEmptySpine({ name: "Nha Khoa Sao Mai E2E" })
+    spine.project.system_name = "Sao Mai Dental Booking"
+    spine.actors = [
+      { id: "A01", name: "Patient", kind: "human", description: "d" },
+      { id: "A02", name: "SMS Gateway", kind: "system", description: "d" }
+    ] as never
+    spine.nfrs = [{ id: "N01", category: "interface", statement: "Sends SMS through a gateway.", kind: "descriptive", priority: null }] as never
+    spine.deployment_nodes = []
+    const common = buildReviewBatches(spine, "consistency")[0].projection.common as Record<string, unknown>
+    expect(common.project).toMatchObject({ name: "Nha Khoa Sao Mai E2E", system_name: "Sao Mai Dental Booking" })
+    expect(common.external_interfaces).toMatchObject({
+      interface_requirements: [{ id: "N01" }],
+      external_actors: [{ id: "A02", name: "SMS Gateway" }]
+    })
+    expect(common).not.toHaveProperty("deployment_nodes")
+  })
+
   it("Spine rỗng ⇒ đúng một lô (khối chung)", () => {
     expect(buildReviewBatches(createEmptySpine({ name: "P" }), "quality")).toHaveLength(1)
     expect(estimateReviewBatches(createEmptySpine({ name: "P" }), "consistency")).toBe(1)
@@ -553,7 +571,7 @@ describe("humanizeReviewMessage", () => {
     await runAiReview(PROJECT, USER, "quality", { executor: exec })
     warn.mockRestore()
     const msgs = openFlags().map((f) => f.message)
-    expect(msgs.some((m) => m.includes("danh sách chức năng") && m.includes("phiên bản tài liệu") && m.includes("FN006") && !m.includes("FN006-V2"))).toBe(true)
+    expect(msgs.some((m) => m.includes("danh sách chức năng") && m.includes("phiên bản tài liệu") && !m.includes("FN006"))).toBe(true)
     expect(msgs.some((m) => m.includes("foo_bar"))).toBe(true)
   })
 })

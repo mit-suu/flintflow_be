@@ -3,17 +3,19 @@ import type { NextFunction, Request, RequestHandler, Response } from "express"
 
 vi.mock("../project/project.service.js", () => ({ getProjectById: vi.fn() }))
 vi.mock("../../shared/auth/auth.middleware.js", () => ({ authMiddleware: vi.fn() }))
+vi.mock("../spine/flags.service.js", async (importOriginal) => ({ ...(await importOriginal<typeof import("../spine/flags.service.js")>()), recompute: vi.fn() }))
 vi.mock("./diagram.service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./diagram.service.js")>()
-  return { ...actual, renderDiagram: vi.fn(), renderAll: vi.fn(), loadDiagramFile: vi.fn() }
+  return { ...actual, renderDiagram: vi.fn(), renderAll: vi.fn(), renderDiagramsByIds: vi.fn(), loadDiagramFile: vi.fn() }
 })
 
-import { getDiagramFile, listDiagrams, renderDiagramRoute } from "./diagram.controller.js"
+import { getDiagramFile, listDiagrams, renderDiagramRoute, renderDiagramsByIdsRoute } from "./diagram.controller.js"
 import diagramRoutes from "./diagram.route.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
 import { getProjectById } from "../project/project.service.js"
 import { createEmptySpine, getOrCreate } from "../spine/spine.repository.js"
-import { loadDiagramFile, renderAll, renderDiagram } from "./diagram.service.js"
+import { loadDiagramFile, renderAll, renderDiagram, renderDiagramsByIds } from "./diagram.service.js"
+import * as flagsService from "../spine/flags.service.js"
 import type { Diagram } from "../spine/spine.types.js"
 
 /**
@@ -128,11 +130,23 @@ describe("diagram.controller", () => {
     expect(renderDiagram).toHaveBeenCalledWith(PROJECT, "screen_layout", "S07", { by: OWNER, force: true, deps: { drawLayout: expect.any(Function) } })
   })
 
+  it("POST /diagrams/render: vẽ theo danh sách id rồi tính lại cờ, trả { rendered, skipped, flags }", async () => {
+    expect((await invoke(renderDiagramsByIdsRoute, {}, { diagram_ids: [] })).error).toMatchObject({ statusCode: 400 })
+    vi.mocked(renderDiagramsByIds).mockResolvedValue({ spine_version: 5, diagrams: [], rendered: ["D19", "D21"], removed: [], skipped: [] })
+    vi.mocked(flagsService.recompute).mockResolvedValue({ checked_at_version: 6, flags: [], opened: [], resolved: ["FL125", "FL126"], reopened: [] })
+    const out = await invoke(renderDiagramsByIdsRoute, {}, { diagram_ids: ["D19", "D21", "D19"], force: true })
+    expect(out.status).toBe(200)
+    expect(renderDiagramsByIds).toHaveBeenCalledWith(PROJECT, ["D19", "D21"], { by: OWNER, force: true, deps: { drawLayout: expect.any(Function) } })
+    expect(flagsService.recompute).toHaveBeenCalledTimes(1)
+    expect(out.body).toMatchObject({ data: { spine_version: 6, rendered: ["D19", "D21"], skipped: [], flags: [] } })
+  })
+
   it("route: 3 endpoint kèm authMiddleware", () => {
     for (const [p, method] of [
       ["/:projectId/diagrams", "get"],
       ["/:projectId/diagrams/:file", "get"],
-      ["/:projectId/diagrams/:kind/render", "post"]
+      ["/:projectId/diagrams/:kind/render", "post"],
+      ["/:projectId/diagrams/render", "post"]
     ] as const) {
       const route = diagramRoutes.stack.find((l) => l.route?.path === p)?.route as unknown as { methods: Record<string, boolean>; stack: { handle: unknown }[] }
       expect(route?.methods[method], p).toBe(true)

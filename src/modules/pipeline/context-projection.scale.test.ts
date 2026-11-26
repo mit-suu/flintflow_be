@@ -28,14 +28,14 @@ const withNotes = (...notes: Addendum[]): Spine => {
 }
 
 describe("P13 - S-2.2 thấy giới hạn quy mô user đặt cho bản đầu", () => {
-  it("ghi chú quy mô bị gán sang 3.1.2 vẫn tới S-2.2; ghi chú 3.1.2 không nêu số thì không", () => {
+  it("ghi chú quy mô bị gán sang 3.1.2 vẫn tới S-2.2 (đứng trước); ghi chú 3.1.2 không nêu số đứng sau như dữ kiện đã chốt", () => {
     const s = withNotes(
       note("AD900", "fixed:3.1.2", "Bản đầu gọn, khoảng 5-8 use case; chưa làm app mobile"),
       note("AD901", "fixed:3.1.2", "Màn đặt lịch có ô chọn giờ lấy đồ")
     )
     const ids = projectStep(s, "S-2.2").addendum.map((a) => a.id)
-    expect(ids).toContain("AD900")
-    expect(ids).not.toContain("AD901")
+    expect(ids.indexOf("AD900")).toBeGreaterThanOrEqual(0)
+    expect(ids.indexOf("AD900")).toBeLessThan(ids.indexOf("AD901"))
   })
 
   it("ghi chú đúng mục fixed:1 vẫn tới S-2.2 đúng một lần", () => {
@@ -43,9 +43,9 @@ describe("P13 - S-2.2 thấy giới hạn quy mô user đặt cho bản đầu",
     expect(projectStep(s, "S-2.2").addendum.filter((a) => a.id === "AD900")).toHaveLength(1)
   })
 
-  it("giai đoạn khác giữ lọc theo mục bước nuôi (S-6 không nhận ghi chú quy mô ở 3.1.2)", () => {
+  it("FLF-472: S-6 cũng nhận ghi chú quy mô ở 3.1.2, dưới dạng điều đã chốt (không đứng đầu)", () => {
     const s = withNotes(note("AD900", "fixed:3.1.2", "Bản đầu gọn, khoảng 5-8 use case"))
-    expect(projectStep(s, "S-6.1").addendum.map((a) => a.id)).not.toContain("AD900")
+    expect(projectStep(s, "S-6.1").addendum.map((a) => a.id)).toContain("AD900")
   })
 
   it("isScaleNote nhận các cách nêu quy mô, bỏ qua con số không phải quy mô", () => {

@@ -528,7 +528,9 @@ export const gateResponseSchema = z.object({
   /** FLF-232: sau `revision`, lời AI xác nhận bằng chữ điều vừa sửa (từ `notes` của lượt soạn lại). Thiếu với accept/regenerate. */
   message_vi: z.string().optional(),
   /** FLF-489: bước vừa duyệt đã từng được chốt trước lượt này (chạy lại bước đã qua, hoặc bước bị hoà giải mở lại). Client không tự chạy tiếp quy trình, trừ khi chính nó đang chạy liền cả giai đoạn. */
-  rerun: z.boolean().optional()
+  rerun: z.boolean().optional(),
+  /** FLF-482 (C2): lời sửa (một phần) nằm ngoài mục bước này ghi được ⇒ client mở Sửa tài liệu với đúng câu này (bản xem trước + Áp dụng). Chỉ có sau `revision`. */
+  route_to_change: z.object({ instruction: z.string() }).optional()
 })
 
 // ─── progress / flags ────────────────────────────────────────────
@@ -655,11 +657,15 @@ export const screenRangeSchema = z.object({
   credits_min: z.number().min(0),
   credits_max: z.number().min(0),
   inputs: z.object({ goals: z.number().int(), other_requirements: z.number().int(), feature_notes: z.number().int(), total: z.number().int() }),
+  /** FLF-485: căn cứ của dải — ghi chú quy mô trong Brief hay đầu vào S-1. */
+  basis: z.enum(["scale_note", "inputs"]),
   estimated: z.literal(true)
 })
 
 export const runEstimateUnitSchema = z.object({
   unit: z.string().min(1),
+  /** FLF-485 (#18): nhãn người dùng đọc được (tên màn / nhãn giai đoạn) để FE không hiện mã đơn vị. */
+  label: z.string(),
   steps: z.number().int().min(0),
   ai_steps: z.number().int().min(0),
   interview_credits: z.number().min(0),
