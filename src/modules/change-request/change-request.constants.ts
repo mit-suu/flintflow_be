@@ -25,7 +25,11 @@ export const NEW_CR_SOURCE_KINDS = ["stakeholder_email", "meeting_minutes", "gap
  * `vector` (hybrid retrieval): phần tử gần nghĩa với CR theo Atlas Vector Search (`embedding/vector-search.ts`) — thay nguồn
  * `keyword` khi index embedding dùng được; điểm nằm ở `vector_score` của vị trí.
  */
-export const LOCATION_FOUND_BY = ["spine_link", "mention", "keyword", "preview", "diagram", "vector"] as const
+/**
+ * `count` (FLF-473): phần tử mang câu đếm số phần tử trong văn xuôi ("Hệ thống có 10 use case") mà CR làm đổi đúng
+ * số phần tử của loại đó (thêm/xoá) — `count-mentions.ts`. Không qua AI để tìm, số đúng do code đếm (C-4 đưa vào prompt).
+ */
+export const LOCATION_FOUND_BY = ["spine_link", "mention", "keyword", "preview", "diagram", "vector", "count"] as const
 export type LocationFoundBy = (typeof LOCATION_FOUND_BY)[number]
 
 /** Kết luận của C-4 cho từng vị trí (nút 3.6, UC-81). Vị trí chưa kết luận chặn nộp (CR_LOCATION_UNCONCLUDED). */

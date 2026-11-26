@@ -38,6 +38,17 @@ describe("STEP_EXTRA_READS (P07)", () => {
     expect(empty.emptyFields.some((f) => f.includes("release_scope"))).toBe(false)
     expect(projectStep(FIXTURE, "S-7.1").projection).not.toHaveProperty("project.release_scope")
   })
+
+  it("FLF-478: S-2.3 thấy nền tảng (form_factor), không đổi reads registry, không thêm field thiếu", () => {
+    const withMobile = { ...FIXTURE, project: { ...FIXTURE.project, form_factor: ["mobile_app", "web_app"] } } as unknown as Spine
+    const p = projectStep(withMobile, "S-2.3")
+    expect(p.projection["project.form_factor"]).toEqual(["mobile_app", "web_app"])
+    expect(getStepSpec("S-2.3").reads).not.toContain("project.form_factor")
+    const before = projectStep(FIXTURE, "S-2.3").emptyFields
+    const emptyFactor = projectStep({ ...FIXTURE, project: { ...FIXTURE.project, form_factor: [] } } as unknown as Spine, "S-2.3")
+    expect(emptyFactor.emptyFields).toEqual(before)
+    expect(projectStep(FIXTURE, "S-7.1").projection).not.toHaveProperty("project.form_factor")
+  })
 })
 
 describe("getStepSpec (step registry T12 + STEP_SKILLS)", () => {

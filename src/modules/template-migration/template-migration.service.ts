@@ -36,6 +36,7 @@ import { getProjectById } from "../project/project.service.js"
 import type { IProject } from "../project/project.model.js"
 import { assertDraftUnlocked } from "../spine/draft-lock.js"
 import * as spineRepository from "../spine/spine.repository.js"
+import { sectionsOfPath } from "../spine/section-registry.js"
 import type { Spine } from "../spine/spine.types.js"
 import { translationUnits } from "../translation/translation-units.js"
 import { toUserLocale } from "../../shared/i18n/locale.js"
@@ -471,6 +472,8 @@ export interface MigrationDto {
   /** Mục bắt buộc chọn mà chưa có quyết định — phải rỗng mới `ready` được. */
   undecided: string[]
   language: { source: string; target: string; needs_translation: boolean; /** Chỉ đổi ngôn ngữ tài liệu (dự án mode 2 / chuyển từ FPT): không dịch Spine, không credit. */ switches_document_language: boolean }
+  /** D9 (FLF-471): đơn vị dịch không ra chữ hợp lệ dù đã thử lại — tài liệu giữ chữ gốc ở đúng các mục này. `null` = chưa áp dụng / không cần dịch. */
+  translation_summary: { translated: number; untranslated: number; sections: { section_id: string; title: string }[] } | null
   credit_estimate: MigrationCreditEstimate
   warnings: string[]
   /** Đổi ngược: liên kết sẽ gãy nếu áp dụng ngay (chạy khô như bước áp dụng) — hiện trước khi bấm Áp dụng; rỗng = ổn. */
@@ -487,6 +490,22 @@ export interface MigrationDto {
   created_by: string
   created_at: string
   updated_at: string
+}
+
+/** D9 (FLF-471): mục nào còn chữ gốc chưa dịch — `untranslated_keys` là path Spine, quy về mục khung qua `sectionKeyResolver`. */
+const translationSummaryOf = (doc: ITemplateMigration, spine: Spine | null): MigrationDto["translation_summary"] => {
+  if (!doc.translated || !spine) return null
+  const resolve = sectionKeyResolver(doc.from.headings, doc.pairing.followers)
+  const titleOf = new Map(doc.from.headings.map((h) => [h.key, h.heading_text]))
+  const sectionIds = new Set<string>()
+  for (const key of doc.untranslated_keys ?? []) {
+    for (const owner of sectionsOfPath(spine, key).owner) {
+      const resolved = resolve(owner)
+      if (resolved) sectionIds.add(resolved)
+    }
+  }
+  const sections = [...sectionIds].map((id) => ({ section_id: id, title: titleOf.get(id) ?? id })).filter((s) => s.title.trim() !== "")
+  return { translated: doc.translated_units.length, untranslated: (doc.untranslated_keys ?? []).length, sections }
 }
 
 const revertFields = async (doc: ITemplateMigration): Promise<{ revertable: boolean | null; revert_blocked_reason: RevertBlockReason | null }> => {
@@ -535,6 +554,7 @@ export const toDto = async (doc: ITemplateMigration, spineHint?: Spine | null): 
     decisions: doc.decisions.map((d) => ({ id: d.id, choice: d.choice })),
     undecided: settleDecisions(doc.groups, doc.decisions).undecided,
     language: { source: doc.from.language, target: toUserLocale(doc.to.language) ?? "en", needs_translation: doc.needs_translation, switches_document_language: doc.language_switch_only },
+    translation_summary: translationSummaryOf(doc, spine),
     credit_estimate: await estimateOf(doc, spine),
     warnings: doc.warnings,
     broken_links: await brokenLinks(doc),

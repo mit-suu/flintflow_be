@@ -27,6 +27,11 @@ export interface SrsFixtureOptions {
   overviewParagraphs?: string[]
   /** Hàng thêm vào bảng business rule 5.1 (`[mã, câu quy tắc]`) — đo known_keys khi có nhiều phần tử không liên quan. */
   extraRules?: string[][]
+  /**
+   * FLF-476: bảng 2.2.2 ghi mã trơn "01"/"02" (không tiền tố "UC-") như EduCampus, trong khi đoạn 2.2.1 / 3.2.1 vẫn nhắc
+   * "UC-01"/"UC-02" — đo use case của bảng và use case model đọc từ chữ (không tên) ghép đúng một phần tử (`entityKey`).
+   */
+  ucIdNoPrefix?: boolean
 }
 
 /** Bảng mà ô có `\n` thành nhiều đoạn trong ô (helper `table` chỉ dựng một đoạn mỗi ô). */
@@ -56,10 +61,15 @@ export const makeSrsDocx = async (opts: SrsFixtureOptions = {}): Promise<Buffer>
     table([["Actor", "Description"], T.actorRow, ["Admin", "Manages courses and users."]]),
     h(2, "2.2", "Use Cases"),
     h(3, "2.2.1", "Use Case Diagram"),
-    p("The diagram shows UC-01 and UC-02."),
+    // FLF-476: mã trơn "01"/"05" (không "02") tránh bị nhận là cột số thứ tự (dãy liên tiếp 1,2 ⇒ `row_no`, FLF-252)
+    p(opts.ucIdNoPrefix ? "The diagram shows UC-01 and UC-05." : "The diagram shows UC-01 and UC-02."),
     ...(opts.images ?? []).map((img, i) => picture(`rIdImg${i + 1}`) + (img.caption ? styled("Caption", img.caption) : "")),
     h(3, "2.2.2", "Use Case Descriptions"),
-    table([["Use Case ID", "Use Case Name", "Actor"], T.ucRow, ["UC-02", "Log in", "Learner"]]),
+    table([
+      ["Use Case ID", "Use Case Name", "Actor"],
+      opts.ucIdNoPrefix ? ["01", T.ucRow[1], T.ucRow[2]] : T.ucRow,
+      opts.ucIdNoPrefix ? ["05", "Log in", "Learner"] : ["UC-02", "Log in", "Learner"]
+    ]),
     h(1, "3", "Functional Requirements"),
     h(2, "3.1", "System Functional Overview"),
     h(3, "3.1.2", "Screen Descriptions"),

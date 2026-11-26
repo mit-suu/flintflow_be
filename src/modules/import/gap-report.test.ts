@@ -154,6 +154,11 @@ describe("readableValue / formatReportTime", () => {
 
 describe("titleOfSection", () => {
   const spine = { features: [{ id: "F-3.2", name: "Authentication" }], functions: [{ id: "FR-3.2.1", name: "Register account" }] } as never
+  it("FLF-480: tài liệu tiếng Việt ⇒ mục cố định không có heading trong layout hiện nhãn tiếng Việt", () => {
+    expect(titleOfSection(spine, "fixed:5.1", undefined, "vi")).toBe("Quy tắc nghiệp vụ")
+    expect(titleOfSection(spine, "fixed:5.1", undefined, "en")).toBe("Business Rules")
+    expect(titleOfSection(spine, "fixed:5.1")).toBe("Business Rules")
+  })
   it("section cố định theo registry, feature/function theo tên trong Spine, không tìm thấy ⇒ nhãn chung (không in khoá)", () => {
     expect(titleOfSection(spine, "fixed:3.1.1")).toBe("Screens Flow")
     expect(titleOfSection(spine, "feature:F-3.2")).toBe("Authentication")

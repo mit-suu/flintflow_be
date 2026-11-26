@@ -38,7 +38,7 @@ import {
   withContentSections
 } from "./extract.service.js"
 import { CONTENT_TARGETS, contentSectionId, isExtractableSection, otherTargetsOf, targetsOf } from "./extract-targets.js"
-import { IdAllocator, flattenItem, idKey, type EntityItem } from "./extracted-entities.js"
+import { IdAllocator, findKnownId, flattenItem, idKey, type EntityItem } from "./extracted-entities.js"
 import type { ITemplateProfile, TableMapEntry } from "./template-profile.model.js"
 import { FIELD_CONFIDENCE_THRESHOLD } from "./import.constants.js"
 import { indentedCells, tableGrid } from "./table-rows.js"
@@ -402,6 +402,35 @@ describe("deterministicTableItems - bảng khớp đủ cột (G7)", () => {
   })
 })
 
+describe("FLF-476: cột \"Tên\" của bảng chức năng không màn hình (3.1.4) - ChoViet #3", () => {
+  it("bảng 'Tên | Kích hoạt | Mô tả' ⇒ cột 0 là name, cột 1 là trigger, cột 2 là description (trước đây không cột nào khớp 'Tên')", () => {
+    const rows = [
+      ["Tên", "Kích hoạt", "Mô tả"],
+      ["Hoàn tất đơn hàng đã giao", "Người bán xác nhận đã giao", "Đánh dấu các đơn hàng này là đã hoàn tất để tính doanh thu."]
+    ]
+    const m = matchTable(rows, "fixed:3.1.4")
+    expect(m.entity).toBe("functions")
+    expect(m.columns.map((c) => c.field_path)).toEqual(["functions[].name", "functions[].trigger", "functions[].description"])
+  })
+
+  it("phần đọc tất định của bảng 3.1.4 có tên trùng tiêu đề heading 3.5.7 ⇒ ghép theo tên (không cấp id mới) - mô phỏng ghép tại extractSections", () => {
+    const rows = [
+      ["Tên", "Kích hoạt", "Mô tả"],
+      ["Hoàn tất đơn hàng đã giao", "Người bán xác nhận đã giao", "Đánh dấu các đơn hàng này là đã hoàn tất để tính doanh thu."]
+    ]
+    const m = matchTable(rows, "fixed:3.1.4")
+    const t = { ...block("B0900", "table", "", "body/tbl[12]", "fixed:3.1.4"), rows }
+    const profile = { table_map: m.columns.map((c) => ({ block_id: "B0900", column_index: c.column_index, header: c.header, field_path: c.field_path, confidence: c.confidence, confirmed: true })) } as unknown as ITemplateProfile
+    const items = deterministicTableItems(t, rows, profile)!
+    expect(items[0].value.name).toBe("Hoàn tất đơn hàng đã giao")
+    expect(items[0].id).toBeNull()
+    // Cùng bước ghép của `extractSections` (extract.service.ts): item không mã ⇒ dùng id của phần tử cùng tên đã biết
+    const known: EntityItem[] = [{ entity: "functions", id: "FR-3.5.7", value: { name: "Hoàn tất đơn hàng đã giao" }, confidence: 1, field_confidence: {}, source_block_ids: [], origin: "deterministic" }]
+    const resolvedId = findKnownId([...known, ...items], "functions", items[0].value.name) ?? new IdAllocator().next("functions")
+    expect(resolvedId).toBe("FR-3.5.7")
+  })
+})
+
 describe("chunkBlocks - lô gửi AI", () => {
   const b = (id: string, len: number) => ({ block_id: id, text: "x".repeat(len) })
 
@@ -508,6 +537,28 @@ describe("itemsFromAi - output model ⇒ item", () => {
     expect(keepMentionedRules([fn(["BR05", "BR-01", "Only admins can log out."])], new Set([idKey("BR-05")]))[0].value.business_rule_ids).toEqual(["BR05"])
     const ok = fn(["BR-05"])
     expect(keepMentionedRules([ok], new Set([idKey("BR-05")]))[0]).toBe(ok)
+  })
+
+  it("FLF-476 lưới an toàn: đoạn văn (không bảng, không ảnh) chỉ có khoá, không tên, không khớp phần tử đã biết ⇒ không tạo mới", () => {
+    // Khoá "UC-02" không khớp phần tử đã biết nào (known rỗng), không có tên ⇒ bỏ hẳn, không cấp id mới
+    const dropped = itemsFromAi({ section_id: "fixed:2.2.1", items: [item({ key: "UC-02", value: {} })], unmapped_block_ids: [] }, ctx())
+    expect(dropped).toEqual([])
+    // Có tên ⇒ vẫn tạo phần tử mới như trước (không phải lưới an toàn)
+    const named = itemsFromAi({ section_id: "fixed:2.2.1", items: [item({ key: "UC-02", value: { name: "Log in" } })], unmapped_block_ids: [] }, ctx())
+    expect(named.map((i) => i.value)).toEqual([{ name: "Log in" }])
+    // Khoá khớp phần tử đã biết (bảng) dù không tên ⇒ ghép vào phần tử đó, không bị lưới an toàn chặn
+    const known: EntityItem[] = [{ entity: "use_cases", id: "02", value: { name: "Log in" }, confidence: 1, field_confidence: {}, source_block_ids: [], origin: "deterministic" }]
+    const matched = itemsFromAi({ section_id: "fixed:2.2.1", items: [item({ key: "UC-02", value: {} })], unmapped_block_ids: [] }, ctx(known))
+    expect(matched.map((i) => i.id)).toEqual(["02"])
+    // Ảnh (fromImage: true) không áp lưới an toàn - khoá model tự đặt trên sơ đồ vẫn được tạo mới như trước
+    const fromImage = itemsFromAi(
+      { section_id: "fixed:2.2.1", items: [item({ key: "UC-02", value: {} })], unmapped_block_ids: [] },
+      { ...ctx(), fromImage: true }
+    )
+    expect(fromImage.length).toBe(1)
+    // Loại không bắt buộc có tên (actors) không áp lưới an toàn
+    const actor = itemsFromAi({ section_id: "fixed:1", items: [item({ entity: "actors", key: "ACT-9", value: {} })], unmapped_block_ids: [] }, ctx([], "fixed:1"))
+    expect(actor.length).toBe(1)
   })
 
   it("section function: item function đầu tiên nhận id của function theo heading", () => {

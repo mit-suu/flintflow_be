@@ -228,8 +228,26 @@ describe("draftOps retry", () => {
     expect(rejected.attempts.map((a) => a.errors[0]?.rule)).toEqual(["schema_invalid", "path_not_writable", "key_change_forbidden"])
     expect(rejected.lastOps).toEqual([{ op: "set", path: "actors[id=A01].id", value: "A77" }])
     expect(executor.mock.calls.every((c) => c[0] === "regenerate")).toBe(true)
+    // FLF-477: lượt parse lỗi không có usage (executor ném trước khi trả); hai lượt có kết quả mang logId
+    expect(rejected.usage.map((u) => u.attempt)).toEqual([2, 3])
     expect(applyAndSave).not.toHaveBeenCalled()
     expect(saveWithVersion).not.toHaveBeenCalled()
+  })
+
+  it("FLF-477: hết lượt vì sai luật ở cả 3 lượt ⇒ DraftRejectedError có usage 3 lượt và summary() đủ rule/path", async () => {
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([{ op: "set", path: "actors[id=A99].name", value: "Ghost" }]))
+    const err = await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(DraftRejectedError)
+    const rejected = err as DraftRejectedError
+    expect(rejected.usage).toHaveLength(3)
+    expect(rejected.usage.map((u) => u.attempt)).toEqual([1, 2, 3])
+    const summary = rejected.summary()
+    expect(summary).toHaveLength(3)
+    for (const a of summary) {
+      expect(a.ops_count).toBe(1)
+      expect(a.errors[0]).toMatchObject({ rule: "path_not_resolved", path: "actors[id=A99].name" })
+      expect(a.errors[0].message.length).toBeLessThanOrEqual(200)
+    }
   })
 
   it("FLF-243: tên use case sai luật cờ vàng ⇒ gửi lại model kèm lỗi; lượt sau đúng thì qua", async () => {
@@ -350,6 +368,47 @@ describe("draftOps retry", () => {
     expect(result.txn?.ops).toEqual([{ op: "set", path: "actors[id=A01].name", value: "Owner" }])
     // Chỉ localized của lô được nhận — lô hỏng lượt 1 không lọt ra
     expect(result.localized).toEqual(localized)
+  })
+
+  describe("FLF-479 12b-1: chữ model viết mà thiếu localized ⇒ gửi lại model", () => {
+    const language = { locale: "vi" as const, source: "en" as const, glossary: [] }
+    const desc = "Owns the shop and manages bookings every day"
+    const op = { op: "set", path: "actors[id=A01].description", value: desc }
+    const okLocalized = [{ path: "actors[id=A01].description", value: "Chủ cửa hàng và quản lý lịch đặt mỗi ngày" }]
+
+    it("lượt 1 không có localized ⇒ lượt 2 nhận lỗi localized_missing; lượt 2 đủ thì qua", async () => {
+      const executor = vi.fn<DraftExecutor>().mockResolvedValueOnce(reply([op])).mockResolvedValueOnce(reply([op], { localized: okLocalized }))
+      const result = await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor, documentLanguage: language })
+      expect(result.attempts.map((a) => a.errors[0]?.rule)).toEqual(["localized_missing", undefined])
+      expect(result.attempts[0].errors[0]).toMatchObject({ path: "actors[id=A01].description", op_index: 0 })
+      expect(executor.mock.calls[1][1].promptVariables).toMatchObject({ validation_errors: [{ rule: "localized_missing" }] })
+      expect(result.localized).toEqual(okLocalized)
+    })
+
+    it("model chép nguyên câu Anh vẫn bị coi là thiếu", async () => {
+      const copied = [{ path: "actors[id=A01].description", value: desc }]
+      const executor = vi.fn<DraftExecutor>().mockResolvedValueOnce(reply([op], { localized: copied })).mockResolvedValueOnce(reply([op], { localized: okLocalized }))
+      const result = await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor, documentLanguage: language })
+      expect(result.attempts[0].errors[0]?.rule).toBe("localized_missing")
+    })
+
+    it("lượt cuối vẫn nhận lô dù thiếu localized; tên ngắn không bị bắt", async () => {
+      const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([op]))
+      const result = await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor, documentLanguage: language })
+      expect(executor).toHaveBeenCalledTimes(3)
+      expect(result.txn?.ops).toEqual([op])
+      expect(result.attempts.map((a) => a.errors.length)).toEqual([1, 1, 0])
+
+      const short = vi.fn<DraftExecutor>().mockResolvedValue(reply([{ op: "set", path: "actors[id=A01].name", value: "Owner" }]))
+      await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor: short, documentLanguage: language })
+      expect(short).toHaveBeenCalledTimes(1)
+    })
+
+    it("không có documentLanguage ⇒ không kiểm", async () => {
+      const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([op]))
+      await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor })
+      expect(executor).toHaveBeenCalledTimes(1)
+    })
   })
 
   it("FLF-265 D16: documentLanguage null / thiếu ⇒ input không có field (prompt như cũ), kết quả không có localized", async () => {

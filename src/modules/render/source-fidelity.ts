@@ -28,6 +28,13 @@ import type { RenderedDocument } from "./rendered-document.types.js"
 export interface SourceFidelity {
   /** Mục in nguyên văn từ file nền (không dựng lại). */
   keepSource: ReadonlySet<string>
+  /**
+   * FLF-468 (lát A): id mục có section trong bản dựng lúc import / mốc nguyên vẹn (`renderImported`). Mục `function:` /
+   * `feature:` / `custom:` còn trong tập này mà bản in hiện tại không còn section ⇒ CR đã xoá phần tử — writer bỏ hẳn
+   * heading + thân thay vì giữ nguyên văn file (B3). Mục cố định của mẫu (`fixed:` / `group:` / `slot:`) không bị xoá —
+   * chỉ trống dữ liệu — writer vẫn giữ heading, chữ hướng dẫn.
+   */
+  importedSectionIds: ReadonlySet<string>
   /** FLF-416 chế độ 4: sắp lại bố cục theo mẫu chuẩn FlintFlow trong file khách. Không có ⇒ giữ đúng bố cục file. */
   rearrange?: LayoutRearrange
 }
@@ -197,7 +204,8 @@ export interface SourceFidelityOptions {
   versionCreatedAt?: Date
 }
 
-const fidelityFrom = async (
+/** Hàm thuần (tiêm `renderImported`) — tách riêng để test `importedSectionIds` không cần DB (FLF-468 lát A). */
+export const fidelityFrom = async (
   current: RenderedDocument,
   renderImported: (spine: Spine) => Promise<RenderedDocument>,
   imported: Spine | null,
@@ -205,9 +213,13 @@ const fidelityFrom = async (
   rearrange: LayoutRearrange | null = null
 ): Promise<SourceFidelity> => {
   const extra = rearrange ? { rearrange } : {}
-  // Đang dựng chính bản 0.1 từ Spine vừa import ⇒ mọi mục nguyên vẹn
-  if (!imported) return { keepSource: new Set(current.sections.map((s) => s.id)), ...extra }
-  return { keepSource: pristineSectionIds(current, await renderImported(imported), { anchorById }), ...extra }
+  // Đang dựng chính bản 0.1 từ Spine vừa import ⇒ mọi mục nguyên vẹn, không mục nào có thể "đã xoá so với lúc import"
+  if (!imported) {
+    const ids = new Set(current.sections.map((s) => s.id))
+    return { keepSource: ids, importedSectionIds: ids, ...extra }
+  }
+  const importedDoc = await renderImported(imported)
+  return { keepSource: pristineSectionIds(current, importedDoc, { anchorById }), importedSectionIds: new Set(importedDoc.sections.map((s) => s.id)), ...extra }
 }
 
 /**

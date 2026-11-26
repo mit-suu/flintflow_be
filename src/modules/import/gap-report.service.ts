@@ -39,7 +39,8 @@ const REPORT_STATUSES: readonly ImportStatus[] = ["incomplete", "gap_review", "d
 export const titleOfSection = (
   spine: Pick<Spine, "features" | "functions"> & Partial<Pick<Spine, "custom_sections">>,
   id: string,
-  layout?: readonly LayoutEntry[]
+  layout?: readonly LayoutEntry[],
+  language?: "vi" | "en"
 ): string => {
   // Nhiều heading cùng section (heading con import gắn nhầm — Lỗi #6: "1.4 Hệ thống bên ngoài" mang `fixed:1`) ⇒ heading cấp nông nhất
   const own = layout
@@ -63,7 +64,7 @@ export const titleOfSection = (
   // Phần nhỏ của mẫu bắt buộc (FLF-278) — cùng nhãn FE hiện ở mapping / khung tài liệu
   const slot = contentSlot(id)
   if (slot) return slot.label_vi
-  const title = sectionTitle(id)
+  const title = sectionTitle(id, language)
   return title === id ? "Mục khác" : title
 }
 
@@ -140,7 +141,7 @@ export const buildGapReport = async (projectId: string): Promise<GapReport> => {
   const sections = [...bySection]
     .map(([section_id, flags]) => ({
       section_id,
-      title: titleOfSection(spine, section_id, profile?.layout),
+      title: titleOfSection(spine, section_id, profile?.layout, profile?.language === "vi" ? "vi" : undefined),
       flags: [...flags].sort((a, b) => (a.level === b.level ? 0 : a.level === "red" ? -1 : 1))
     }))
     .sort((a, b) => (orderOf.get(a.section_id) ?? Infinity) - (orderOf.get(b.section_id) ?? Infinity))

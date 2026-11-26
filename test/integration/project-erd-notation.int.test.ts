@@ -2,7 +2,7 @@
  * Ký pháp ERD là thuộc tính dự án: `PATCH /projects/:id/erd-notation` chỉ Lead/Analyst, GET trả `erdNotation` (FLF-418: dự án
  * chưa chọn không có field — FE và renderer đọc là `chen`, S-4.5 hỏi trong khung chat), đổi ký pháp thì ERD đã vẽ được vẽ lại bằng ký pháp mới. Qua HTTP trên Mongo thật.
  */
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, vi } from "vitest"
 import request from "supertest"
 import app from "../../src/app.js"
 import { User } from "../../src/modules/user/user.model.js"
@@ -10,6 +10,7 @@ import { Project } from "../../src/modules/project/project.model.js"
 import { Membership, type OrgRole } from "../../src/modules/organization/membership.model.js"
 import { renderDiagram } from "../../src/modules/diagram/diagram.service.js"
 import * as spineRepository from "../../src/modules/spine/spine.repository.js"
+import { Spine } from "../../src/modules/spine/spine.model.js"
 import { staleDiagrams } from "../../src/modules/diagram/diagram.service.js"
 import { authAs, seedFixture, type SeededFixture } from "../setup.js"
 
@@ -105,6 +106,34 @@ describe("PATCH /projects/:id/erd-notation", () => {
     expect(staleDiagrams(spine, { erdNotation: "crowsfoot" }).map((d) => d.kind)).not.toContain("erd")
     // hình đang có không khớp ký pháp khác ⇒ stale
     expect(staleDiagrams(spine, { erdNotation: "idef1x" }).map((d) => d.kind)).toContain("erd")
+  })
+
+  it("FLF-477: bước pipeline ghi Spine xen giữa lúc vẽ lại (SPINE_VERSION_CONFLICT) ⇒ tự thử lại, 200, hình ERD có ký pháp mới", async () => {
+    await renderDiagram(seeded.projectId, "erd", null, { by: "test" })
+    const realGet = spineRepository.get
+    let calls = 0
+    // Lượt gọi `get` thứ 3 là lúc `applyTransaction` đọc lại Spine để kiểm `base_version` (#1 là redrawErd kiểm có
+    // hình ERD, #2 là `renderDiagrams` đọc Spine để vẽ) — chèn một lượt ghi Spine "xen giữa" đúng lúc đó, giống một
+    // bước pipeline khác vừa ghi xong.
+    const spy = vi.spyOn(spineRepository, "get").mockImplementation(async (projectId: string) => {
+      calls += 1
+      if (calls === 3) await Spine.updateOne({ projectId }, { $inc: { spine_version: 1 } })
+      return realGet(projectId)
+    })
+
+    try {
+      const res = await patch(seeded.projectId, seeded.token, { erdNotation: "crowsfoot" })
+      expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+      expect(res.body.meta?.erdRedraw).toBe("done")
+      expect(calls).toBeGreaterThan(3) // thử lại ít nhất một lần sau xung đột
+    } finally {
+      spy.mockRestore()
+    }
+
+    const after = (await spineRepository.get(seeded.projectId))!.diagrams.find((d) => d.kind === "erd")!
+    expect(after.render_status).toBe("ok")
+    expect(after.source).not.toContain("<polygon") // không còn hình thoi Chen — đã vẽ lại bằng Crow's Foot
+    expect((await Project.findById(seeded.projectId).lean())?.erdNotation).toBe("crowsfoot")
   })
 
   it("chưa vẽ ERD ⇒ đổi ký pháp chỉ ghi field: Spine không đổi, không tạo hình", async () => {

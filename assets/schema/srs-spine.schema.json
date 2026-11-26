@@ -1945,6 +1945,17 @@
               }
             ]
           },
+          "lens": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "message": {
             "type": "string"
           },

@@ -40,7 +40,9 @@ import {
   asPrintedIn,
   homedItems,
   isVerbatim,
+  printsIn,
   SECTION_ITEM_ARRAYS,
+  segmentItemKey,
   sectionItemKeys,
   segmentItemHashes,
   type SectionSegments
@@ -49,8 +51,9 @@ import type { CustomBlock, CustomSection, OriginalDiagram, Spine } from "../spin
 import type { Block, InlineRun, RenderedSection, RocRow, TableCell } from "./rendered-document.types.js"
 import { mediaId } from "./import-media.js"
 import { appendToFileTables, conformBlocksToFileTable } from "./file-table.js"
+import { patchFileTableRows, patchPermissionMatrix, resolveFileTableColumns, type PatchElement } from "./file-table-patch.js"
 import { deletedElementIds, dropDeletedElementLines, elementOfKey, isLabelLine, refreshTailBlock } from "./element-tail.js"
-import { functionFieldValues, patchFunctionOriginal, type FunctionFieldValues, type FunctionOriginalBlock } from "./function-original.js"
+import { functionBlocksLikeSibling, functionFieldValues, patchFunctionOriginal, type FunctionFieldValues, type FunctionOriginalBlock } from "./function-original.js"
 import { defaultSectionTitle, functionDiagramBlocks, generatedDiagramBlocks, renderContentSlot, renderSection, screenLayoutImages, type SectionRenderContext } from "./section-renderer.js"
 import { sentencesFor } from "./labels.js"
 import { originalSectionOfScreen } from "../diagram/screen-originals.js"
@@ -59,6 +62,7 @@ import { bindFixedTemplateSlots, isContentSlot, slotParents } from "../import/co
 import { isInstructionText, isRealText, splitInstruction, tableBodyHasRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
 import { templateWrapperIds } from "../import/template-wrappers.js"
 import { isPlaceholderText } from "../import/template-markers.js"
+import { foldText } from "../import/text-similarity.js"
 import { useCaseDisplayIds } from "./usecase-display-ids.js"
 
 /** Một mục layout (cùng hình `LayoutEntry` của `import/template-profile.model.ts`). */
@@ -742,6 +746,107 @@ export interface LayoutSectionsResult {
   omittedSectionIds?: string[]
 }
 
+// ─── FLF-468 (lát B): vá bảng của file theo hàng ────────────────────
+
+/** Field tham chiếu phần tử khác bằng id ⇒ tên hiển thị (vd `use_cases[].includes` ⇒ tên use case khác), không có tên ⇒ giữ id. */
+const patchFieldText = (spine: Spine, entity: string, field: string, value: unknown): string => {
+  if (!Array.isArray(value)) return value === null || value === undefined ? "" : String(value)
+  const named: Readonly<Record<string, readonly { id: string; name: string }[]>> = {
+    "use_cases.includes": spine.use_cases, "use_cases.extends": spine.use_cases,
+    "use_cases.actor_ids": spine.actors, "screens.actor_ids": spine.actors,
+    "functions.actor_ids": spine.actors, "messages.function_ids": spine.functions,
+    "use_cases.function_ids": spine.functions
+  }
+  const list = named[`${entity}.${field}`]
+  return value.map((id) => (list?.find((x) => x.id === id)?.name) ?? String(id)).join(", ")
+}
+
+/** Field ưu tiên dùng làm "mã" để ghép hàng ↔ phần tử ("Ghép hàng ↔ phần tử: theo cột mã... không có thì theo cột tên"). */
+const PATCH_MATCH_FIELDS = ["code", "id", "name"] as const
+
+/**
+ * Phần tử hiện tại của `entity` mà mục `sectionId` in ra (`printsIn`, như `sectionItemKeys`), đã rút field cần vá
+ * thành chuỗi. `itemKeys` (tuỳ chọn): chỉ phần tử thuộc đúng đoạn đang vá (`part.items` — một mục có thể chia nhiều
+ * bảng riêng cùng loại phần tử, như §5.1 có 2 bảng BR liên tiếp; không giới hạn ⇒ lấy toàn bộ, dùng cho phần nối
+ * nguyên văn gộp cả mục, vd ChoViet §5.3 không phần tử nào gắn vào đoạn nào lúc import).
+ */
+const patchElementsFor = (
+  spine: Spine,
+  sectionId: string,
+  entity: string,
+  fields: readonly (string | null)[],
+  itemKeys?: ReadonlySet<string>
+): PatchElement[] => {
+  const list = (spine as unknown as Record<string, unknown>)[entity]
+  if (!Array.isArray(list)) return []
+  const needed = [...new Set(fields.filter((f): f is string => !!f))]
+  return (list as ({ id?: string } & Record<string, unknown>)[])
+    // `itemKeys` (đoạn cụ thể): mã phần tử đã trích lúc import là đủ để biết nó thuộc đoạn này, kể cả khi AI xếp sai
+    // loại (tier NFR / BR) về sau — như `segmentSpine`, không lọc lại theo `printsIn`. Không có `itemKeys` (phần nối
+    // nguyên văn gộp cả mục): lọc đúng tập phần tử mục đó in ra, như `sectionItemKeys`.
+    .filter((el) => el.id && (itemKeys ? itemKeys.has(segmentItemKey(entity, el.id)) : printsIn(sectionId, entity, el)))
+    .map((el) => {
+      const matchField = PATCH_MATCH_FIELDS.find((f) => typeof el[f] === "string" && (el[f] as string).trim())
+      const matchValue = matchField ? String(el[matchField]) : String(el.id ?? "")
+      const out: Record<string, string> = {}
+      for (const field of needed) out[field] = patchFieldText(spine, entity, field, el[field])
+      return { matchValue, fields: out }
+    })
+}
+
+/** Quyền hiện tại theo tên màn ⇒ tập tên vai trò có quyền (ma trận §3.1.3). Màn không còn phần tử nào vẫn có dòng rỗng. */
+const permissionGrantsOf = (spine: Spine): Map<string, Set<string>> => {
+  const roleName = new Map(spine.roles.map((r) => [r.id, r.name]))
+  const out = new Map<string, Set<string>>(spine.screens.map((s) => [s.name, new Set<string>()]))
+  for (const p of spine.permissions) {
+    const screen = spine.screens.find((s) => s.id === p.screen_id)
+    const role = roleName.get(p.role_id)
+    if (screen && role) out.get(screen.name)?.add(role)
+  }
+  return out
+}
+
+/** Bảng `rows` (tiêu đề + thân, chữ thuần) ⇒ `Block` bảng, hàng tiêu đề đậm. */
+const blockFromRows = (rows: readonly string[][]): Block => ({
+  type: "table",
+  header: (rows[0] ?? []).map((text) => [{ text, bold: true }]),
+  rows: rows.slice(1).map((row) => row.map((text) => [{ text }]))
+})
+
+/**
+ * Vá bảng nguyên văn của file theo đúng hàng (thay cho dựng lại từ Spine — `conformBlocksToFileTable` / bảng thứ
+ * hai): tìm bảng trong `blocks` (nguyên văn lúc import), ghép cột ⇒ field (từ điển `tableFields`, không có `table_map`
+ * ở tầng này — `CustomBlock` không giữ `block_id`), rồi vá theo đúng loại phần tử hiện tại của `sectionId`. Không ghép
+ * được cột mã / tên, hoặc bảng không phải loại đã biết ⇒ `null` ("Cần chốt" #2 — bên gọi giữ đường cũ: dựng lại /
+ * in nguyên văn, không tự vá).
+ *
+ * `itemKeys`: đoạn `spine` — chỉ vá theo đúng phần tử của **đoạn này** (một mục có thể chia nhiều bảng riêng cùng
+ * loại phần tử, FLF-428 §5.1 ví dụ 2 bảng BR liên tiếp — không được trộn cả hai thành một). Không truyền (phần nối
+ * nguyên văn gộp cả mục — ChoViet §5.3) ⇒ vá theo **mọi** phần tử hiện tại của thực thể đó, kể cả phần tử mới (CR
+ * thêm), và `alreadyPatched` được đánh dấu để bên gọi không chèn lại phần tử đó ở bước "trailing" cuối mục.
+ */
+const patchTableInBlocks = (
+  spine: Spine,
+  sectionId: string,
+  blocks: readonly CustomBlock[],
+  alreadyPatched: Set<string>,
+  itemKeys?: ReadonlySet<string>
+): Block | null => {
+  const source = blocks.find((b) => b.kind === "table" && b.rows?.length)
+  if (!source?.rows) return null
+  const columns = resolveFileTableColumns(source.rows, sectionId, null, [])
+  if (!columns || (!itemKeys && alreadyPatched.has(columns.entity))) return null
+  if (columns.entity === "permissions") {
+    if (!itemKeys) alreadyPatched.add(columns.entity)
+    return blockFromRows(patchPermissionMatrix({ fileRows: source.rows, current: permissionGrantsOf(spine) }).rows)
+  }
+  const current = patchElementsFor(spine, sectionId, columns.entity, columns.fields, itemKeys)
+  const result = patchFileTableRows({ fileRows: source.rows, columns, current })
+  if (result.unmatched) return null
+  if (!itemKeys) alreadyPatched.add(columns.entity)
+  return blockFromRows(result.rows)
+}
+
 export const buildLayoutSections = (
   spine: Spine,
   template: TemplateLayout,
@@ -774,6 +879,21 @@ export const buildLayoutSections = (
   // FLF-413: mục có heading là chỗ điền của mẫu (`3.2.1 <<Function Name 1>>`) — "nguyên văn" của nó là hướng dẫn + hình mẫu, không
   // phải nội dung: tính năng / chức năng thật lấp vào thì dựng từ Spine
   const frameSections = new Set(template.layout.filter((e) => isPlaceholderText(fileNumber(e.heading_text, e.number_label).title)).map((e) => e.section_id))
+  /**
+   * FLF-468 (lát C): file dùng tiêu đề con khung FPT ("Function trigger" / "Function description" / "Screen layout" /
+   * "Function details", hoặc bản tiếng Việt "Kích hoạt chức năng"…) cho mục chức năng này — nhận theo heading con
+   * nguyên văn đã đọc lúc import (`functionOriginals`), không theo `template.fixedTemplate` (B2 3.4.1: EduCampus là
+   * mẫu cố định nhưng mục chức năng vẫn có 4 tiêu đề con kiểu FPT).
+   */
+  const FPT_FUNCTION_HEADINGS = new Set(
+    ["Function trigger", "Function description", "Screen layout", "Function details", "Kích hoạt chức năng", "Mô tả chức năng", "Bố cục màn hình", "Chi tiết chức năng"].map(foldText)
+  )
+  const fptFunctionHeadingSections = new Set(
+    (template.functionOriginals ?? [])
+      .filter((o) => o.blocks.some((b) => b.kind === "heading" && FPT_FUNCTION_HEADINGS.has(foldText(b.text))))
+      .map((o) => o.section_id)
+  )
+  const layoutIds = new Set(template.layout.map((e) => e.section_id))
   const originalOf = (sectionId: string): FunctionOriginalBlock[] | null => {
     if (frameSections.has(sectionId)) return null
     const o = originals.get(sectionId)
@@ -781,6 +901,24 @@ export const buildLayoutSections = (
     if (!o || !fn) return null
     if (functionSourceHash(fn) === o.source_hash) return [...o.blocks]
     return o.field_values ? patchFunctionOriginal(o.blocks, o.field_values, functionFieldValues(spine, fn)) : null
+  }
+  /**
+   * FLF-468 (E2E-1): chức năng MỚI ở mẫu cố định (CR thêm, file không có mục) ⇒ thân theo khuôn của chức năng anh em trong file:
+   * cùng tính năng (gần nhất đứng trước, không có thì đầu tiên), không có thì chức năng có nguyên văn gần nhất trước nó trong
+   * layout (không có thì gần nhất sau nó). `null` ⇒ không có khuôn dùng được, mục dựng theo khung FPT.
+   */
+  const siblingBlocks = (sectionId: string, order: readonly Numbered[]): FunctionOriginalBlock[] | null => {
+    const fn = spine.functions.find((f) => `function:${f.id}` === sectionId)
+    if (!template.fixedTemplate || !fn || layoutIds.has(sectionId) || frameSections.has(sectionId)) return null
+    const at = order.findIndex((x) => x.section_id === sectionId)
+    const usable = order
+      .map((x, index) => ({ x, index, o: originals.get(x.section_id) }))
+      .filter((c) => c.o && c.x.section_id.startsWith("function:") && !frameSections.has(c.x.section_id) && c.o.blocks.some((b) => b.tags?.length))
+    const featureOf = (id: string) => spine.functions.find((f) => `function:${f.id}` === id)?.feature_id
+    const sameFeature = usable.filter((c) => featureOf(c.x.section_id) === fn.feature_id)
+    const before = (list: typeof usable) => list.filter((c) => c.index < at).pop()
+    const pick = before(sameFeature) ?? sameFeature[0] ?? before(usable) ?? usable.find((c) => c.index > at)
+    return pick?.o ? functionBlocksLikeSibling(pick.o.blocks, functionFieldValues(spine, fn), pick.o.field_values) : null
   }
   /** FLF-410: mục nguyên văn ⇒ màn đã bật mockup (có hình mockup đã vẽ) + index ảnh bị thay. */
   const mockupBySection = new Map<string, { screenId: string; indexes: readonly number[]; caption: string }>()
@@ -858,7 +996,11 @@ export const buildLayoutSections = (
       ...(nonScreen ? { nonScreenFunctionIds: nonScreen } : {}),
       // FLF-361: tài liệu nhập tự do — mục chức năng dựng từ Spine theo khung FPT (Function trigger / Function description /
       // Screen layout / Function details) thay vì khung cũ không có tiêu đề con; mục tính năng không thêm dòng "Screens: …"
-      ...(!template.fixedTemplate && /^(feature|function):/.test(sectionId) ? { functionLayout: "fpt" as const } : {}),
+      // FLF-468 (lát C): mẫu cố định mà CHÍNH mục chức năng này dùng tiêu đề con khung FPT trong file ⇒ vẫn dựng theo khung đó
+      // (không rơi về nhãn "Kích hoạt:/Mô tả:" khác file, không in thẻ loại validation thô "[business]")
+      // FLF-468 (E2E-1): mục mới (CR thêm, file không có mục) ở mẫu cố định cũng dựng theo khung FPT — không dựa vào tập tiêu đề con
+      // của file (file dùng đoạn có nhãn thì tập đó rỗng); chức năng có anh em trong file thì thân theo khuôn anh em (`siblingBlocks`)
+      ...(/^(feature|function):/.test(sectionId) && (!template.fixedTemplate || fptFunctionHeadingSections.has(sectionId) || !layoutIds.has(sectionId)) ? { functionLayout: "fpt" as const } : {}),
       ...(state?.status !== undefined ? { status: state.status } : {}),
       ...(state?.awaiting_reaccept !== undefined ? { awaiting_reaccept: state.awaiting_reaccept } : {})
     }
@@ -890,6 +1032,9 @@ export const buildLayoutSections = (
       return header ? rendered : conformBlocksToFileTable(rendered, fileTableRows(blocks), sectionId)
     }
     const out: Block[] = []
+    // FLF-468 (lát B): thực thể đã vá theo hàng trong lượt này — không vá hai lần, không cho trailing chèn lại cuối mục
+    // (bảng đã vá gồm sẵn phần tử mới, không homed ở đoạn nào).
+    const alreadyPatched = new Set<string>()
     // FLF-428: mỗi đoạn nguồn dựng lại riêng ⇒ mỗi đoạn một bảng (§4.2.x: 3–4 bảng NFR lặp tiêu đề). Đánh dấu bảng do `rebuild`
     // sinh **từ đoạn văn / danh sách** để gộp các bảng liền kề cùng tiêu đề sau vòng lặp. Đoạn gốc vốn là bảng thì file có bao
     // nhiêu bảng in bấy nhiêu (FLF-366), bảng nguyên văn không gộp
@@ -929,12 +1074,22 @@ export const buildLayoutSections = (
           continue
         }
         const verbatim = part.items.length === 0 ? dropDeletedElementLines(part.blocks, deletedIds) : part.blocks
+        if (!isVerbatim(spine, part)) {
+          // FLF-468 (lát B): đoạn mang bảng của file ⇒ vá đúng hàng (sửa / xoá) theo đúng phần tử của đoạn này — không
+          // trộn với bảng khác cùng loại của mục (FLF-428 §5.1: 2 bảng BR liên tiếp vẫn phải tách riêng)
+          const patched = patchTableInBlocks(spine, sectionId, part.blocks, alreadyPatched, new Set(part.items))
+          if (patched) { out.push(patched); continue }
+        }
         out.push(...(isVerbatim(spine, part) ? customBlocks(verbatim, originalPng, slotFor(n.section_id, n.number)) : rebuildMarked(part.items, part.blocks)))
         continue
       }
       const blocks = customById.get(`${CUSTOM_PREFIX}${part.custom_id}`)?.blocks ?? []
+      // FLF-468 (lát B): phần nối nguyên văn mang cả bảng của file (vd ChoViet §5.3 — không phần tử nào gắn vào phần nào
+      // lúc import) ⇒ cũng vá theo đúng hàng, với mọi phần tử hiện tại của thực thể đó (không chỉ phần tử đã đổi).
+      const patchedTable = patchTableInBlocks(spine, sectionId, blocks, alreadyPatched)
       // FLF-364: dãy có nội dung thật ⇒ bỏ chữ hướng dẫn của mẫu, như mọi phần nối
-      out.push(...customBlocks(guidanceWhileEmpty(blocks, template.existingSrs), originalPng, slotFor(n.section_id, n.number)))
+      out.push(...customBlocks(guidanceWhileEmpty(patchedTable ? blocks.filter((b) => b.kind !== "table") : blocks, template.existingSrs), originalPng, slotFor(n.section_id, n.number)))
+      if (patchedTable) out.push(patchedTable)
       // Ảnh sơ đồ gốc CR đã bỏ (đề xuất vẽ lại, §4.13) ⇒ sơ đồ FlintFlow cùng loại đúng chỗ ảnh; loại còn ảnh gốc ở chỗ khác thì thôi
       const present = new Set(blocks.flatMap((b) => (b.image_ref ? [b.image_ref] : [])))
       // Bug #16: khối giữ chỗ đã in hình vẽ lại ngay chỗ ảnh ⇒ không in lần nữa
@@ -959,7 +1114,8 @@ export const buildLayoutSections = (
     // Phần tử mới / đã đổi từ lúc import mà không đoạn nào in (CR thêm) ⇒ cuối mục
     const known = new Map(record.known.map((k) => [k.key, k.hash]))
     const taken = claimed.get(sectionId)
-    const candidates = sectionItemKeys(spine, sectionId).filter((k) => !homed.has(k) && !taken?.has(k))
+    // FLF-468 (lát B): thực thể đã vá theo hàng ở trên đã gồm sẵn phần tử mới (thêm hàng cuối bảng) — không chèn lại.
+    const candidates = sectionItemKeys(spine, sectionId).filter((k) => !homed.has(k) && !taken?.has(k) && ![...alreadyPatched].some((e) => k.startsWith(`${e}:`)))
     const trailing = segmentItemHashes(spine, candidates).filter((h) => known.get(h.key) !== h.hash).map((h) => h.key)
     // phần tử mới cuối mục: cột theo bảng của file (FLF-361), không ép thành bảng (FLF-380)
     if (trailing.length) {
@@ -987,10 +1143,15 @@ export const buildLayoutSections = (
   /** Cấp layout (chưa chuẩn hoá) của từng section trong `out` — tìm section chủ của phần nối. */
   const levels: number[] = []
   const emitted = new Set<string>()
+  // FLF-468 (E2E-1): tính năng / chức năng CR thêm — mẫu có mục lặp mà mục này không có slot trong file ⇒ writer chèn heading mới
+  // cho nó (vào mục lục như FLF-413); heading con trong thân vẫn là heading dưới heading mục, không thành đoạn đậm.
+  const templateRepeats = template.layout.some((e) => isRepeatingSection(e.section_id))
+  const insertedByCr = (id: string) => templateRepeats && isRepeatingSection(id) && !layoutIds.has(id)
   const push = (section: RenderedSection, level: number) => {
     if (template.fixedTemplate) {
       // Only the template's own headings contribute to its outline.
-      section.blocks = emitted.has(section.id) ? [] : section.blocks.map((b) => b.type === "heading" ? { type: "paragraph", runs: [{ text: b.text, bold: true }] } : b)
+      const flatten = !insertedByCr(section.id)
+      section.blocks = emitted.has(section.id) ? [] : section.blocks.map((b) => b.type === "heading" && flatten ? { type: "paragraph", runs: [{ text: b.text, bold: true }] } : b)
       emitted.add(section.id)
     }
     out.push(section)
@@ -1038,8 +1199,21 @@ export const buildLayoutSections = (
         // Rebinding its heading must retain that prose while removing template prompts.
         const sourceId = originalLayout.find((e) => e.order === n.sourceOrder)?.section_id
         const original = sourceId ? customById.get(sourceId) : undefined
+        // FLF-468 (lát B): mục mẫu cố định (`slot:business_rules` / `slot:messages`…) không đi qua `segmentBlocks`
+        // (không nằm trong `SECTION_ITEM_ARRAYS`) — bảng gốc của file nằm ở đúng mục riêng lúc chưa rebind
+        // (`customById`/`sourceId` trên). Vá đúng hàng theo bảng đó thay bảng FlintFlow vừa dựng (ChoViet §5.3).
+        const patchedTable = original ? patchTableInBlocks(spine, n.section_id, original.blocks, new Set()) : null
+        if (patchedTable) {
+          const at = blocks.findIndex((b) => b.type === "table")
+          if (at >= 0) blocks.splice(at, 1, patchedTable)
+          else blocks.push(patchedTable)
+        }
         const renderedText = JSON.stringify(blocks)
-        const retained = original?.blocks.filter((b) => !isInstructionText(b.text) && (b.kind !== "table" || tableBodyHasRealText(b.rows)) && (!b.text.trim() || !renderedText.includes(b.text))) ?? []
+        const retained = original?.blocks.filter((b) =>
+          !isInstructionText(b.text) &&
+          (b.kind !== "table" || (!patchedTable && tableBodyHasRealText(b.rows))) &&
+          (!b.text.trim() || !renderedText.includes(b.text))
+        ) ?? []
         blocks.push(...customBlocks(retained, (ref) => opts.diagramPng(mediaId(ref)), slotFor(n.section_id, n.number)))
       }
       // FLF-364 (câu 10): phần nhỏ chưa có dữ liệu ⇒ in chữ hướng dẫn của mẫu (mẫu bắt buộc thì không)
@@ -1058,7 +1232,15 @@ export const buildLayoutSections = (
       continue
     }
     const original = originalOf(n.section_id)
-    const rendered = original
+    const likeSibling = original ? null : siblingBlocks(n.section_id, numbered)
+    const rendered = likeSibling
+      ? {
+          ...section,
+          heading: n.title,
+          level: n.renderLevel,
+          blocks: [...functionBlocks(likeSibling, n.renderLevel, n.section_id, n.number), ...functionDiagramBlocks(contentSpine, n.section_id.slice("function:".length), "sequence", contextFor(n.section_id, n.number))]
+        }
+      : original
       ? { ...section, heading: n.title, level: n.renderLevel, blocks: functionBlocks(original, n.renderLevel, n.section_id, n.number) }
       : {
           ...section,

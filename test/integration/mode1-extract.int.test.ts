@@ -271,3 +271,36 @@ describe("mode 1 - re-upload (UC-24)", () => {
     expect(blocked.body.error.code).toBe("IMPORT_INVALID_STATE")
   })
 })
+
+describe("mode 1 - FLF-476 import UC trùng (mã bảng trơn khớp mã có tiền tố AI đọc từ chữ)", () => {
+  it("bảng 2.2.2 ghi mã trơn '05' (EduCampus: '01'..'10' không tiền tố), đoạn 2.2.1 model đọc 'UC-05' không tên ⇒ một use case, không nhân đôi", async () => {
+    const seeded = await seedFixture("minimal", { balance: 1000 })
+    const projectId = await createMode1Project(seeded)
+    const c = mode1Api(seeded, projectId)
+    // Đoạn 2.2.1 (chữ, không bảng): model trả use case khoá "UC-05" không tên - đúng như log gốc EduCampus B6
+    // ("Người xếp lịch tham gia UC-02 đến UC-09…" không tên, nằm cạnh mã trơn của bảng 2.2.2)
+    mockOverrides.next = counting((prompt) => {
+      if (prompt.includes("# Import Extract") && prompt.includes("Section (registry id): fixed:2.2.1")) {
+        const tail = prompt.slice(prompt.indexOf("Blocks of the section"))
+        const b = /\n\[(B\d{4,})\]/.exec(tail)?.[1] ?? "B0001"
+        return JSON.stringify({
+          section_id: "fixed:2.2.1",
+          items: [{ entity: "use_cases", key: "UC-05", value: {}, confidence: 0.6, field_confidence: {}, source_block_ids: [b] }],
+          unmapped_block_ids: []
+        })
+      }
+      return fakeMode1(prompt)
+    })
+    const up = await c.upload(await makeSrsDocx({ ucIdNoPrefix: true }))
+    expect(up.body.data.import.status).toBe("extracting")
+    const id = up.body.data.import.id as string
+    const ex = await c.extractAndWait(id)
+    expect(ex.res.status, JSON.stringify(ex.res.body.error)).toBe(200)
+    expect(ex.run?.import.status).toBe("gap_review")
+
+    const spine = (await spineRepository.get(projectId))!
+    // Đúng 2 use case mã "01"/"05" như bảng - không có "UC-01"/"UC-05" rỗng tên đứng cạnh (bug gốc: 9 mục rỗng trùng)
+    expect(spine.use_cases.map((u) => u.id).sort()).toEqual(["01", "05"])
+    expect(spine.use_cases.find((u) => u.id === "05")).toMatchObject({ name: "Log in" })
+  })
+})

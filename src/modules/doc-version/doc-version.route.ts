@@ -52,7 +52,7 @@ const router = Router()
  * /api/v1/projects/{projectId}/versions/{v}/download:
  *   get:
  *     summary: Tải file .docx của một version (UC-57)
- *     description: "`auto` — release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT. Tên (FLF-334) `<tên>_v2.0.docx` · `<tên>_v1.0+CR-014_DRAFT.docx` · `<tên>_v0.1_DRAFT.docx` (chưa release: số bản import, FLF-356); stamp thêm `flintflow_base_version`, `flintflow_latest_cr`, `flintflow_kind`. `tracked` — bản có Track Changes của CR (mode 1 v3: file riêng `tracked_file_ref`; version không có ⇒ bản render). `original` — file người dùng upload (chỉ bản 0.1 / 0.0; version khác ⇒ 404), tên `…_original.docx`. `lang` khác ngôn ngữ tài liệu (FLF-334 B, chỉ version có snapshot baseline của dự án chuyển từ mode 2) ⇒ dựng lại theo `lang`, hậu tố ngôn ngữ cuối tên: `<tên>_v2.0_VI.docx`."
+ *     description: "`auto` — release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT. Tên (FLF-334) `<tên>_v2.0.docx` · `<tên>_v1.0+CR-014_DRAFT.docx` · `<tên>_v0.1_DRAFT.docx` (chưa release: số bản import, FLF-356); stamp thêm `flintflow_base_version`, `flintflow_latest_cr`, `flintflow_kind`. `tracked` — bản có Track Changes (mode 1 v3: file riêng `tracked_file_ref`; version không có ⇒ bản render). Bản phát hành: Track Changes gộp mọi thay đổi kể từ lần phát hành trước, tên `<tên>_v1.0_tracked.docx`. `original` — file người dùng upload (chỉ bản 0.1 / 0.0; version khác ⇒ 404), tên `…_original.docx`. `lang` khác ngôn ngữ tài liệu (FLF-334 B, chỉ version có snapshot baseline của dự án chuyển từ mode 2) ⇒ dựng lại theo `lang`, hậu tố ngôn ngữ cuối tên: `<tên>_v2.0_VI.docx`."
  *     tags: [Versions (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -78,7 +78,7 @@ const router = Router()
  *       required: true
  *       content:
  *         application/json:
- *           schema: { type: object, required: [base_version], properties: { base_version: { type: integer } } }
+ *           schema: { type: object, required: [base_version], properties: { base_version: { type: integer }, concise_record: { type: boolean, description: "FLF-492: AI viết gọn mô tả các dòng CR trong Record of Changes (mặc định false, tốn credit; lỗi AI không chặn phát hành)" } } }
  *     responses:
  *       201: { description: "`{ version, baseline (type release), cr_ids, spine_version }`" }
  *       403: { description: "ORG_ROLE_FORBIDDEN — chỉ Lead release" }
@@ -104,7 +104,7 @@ router.post("/:projectId/release", authMiddleware, requireRole("lead"), versionC
  *       - { in: path, name: projectId, required: true, schema: { type: string } }
  *     responses:
  *       200:
- *         description: "`reviewPackageSchema`"
+ *         description: "`reviewPackageSchema` (kèm `concise_record_credits`: credit ước tính cho tuỳ chọn AI viết gọn khi phát hành)"
  */
 router.get("/:projectId/review-package", authMiddleware, versionController.getReviewPackage)
 

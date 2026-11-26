@@ -65,13 +65,36 @@ describe("previewPayload", () => {
     expect(previewPayload(preview, "vi").reply).toContain("Áp dụng")
   })
 
+  it("FLF-473 (B5): có crPrefill ⇒ câu mời \"Mở change request\" + payload.cr_prefill, không phải câu \"nói rõ mục\"", () => {
+    const prefill = { title: "sửa đoạn use case", description: "sửa đoạn use case", source: { kind: "verbal" as const, ref: null } }
+    const payload = previewPayload(
+      { ...base, ok: false, clarification: "Mình chưa xác định được cần đổi gì trong tài liệu. Bạn nói rõ mục..." },
+      "vi",
+      { requiresCr: true, crPrefill: prefill }
+    )
+    expect(payload).toEqual({ kind: "change_clarification", reply: expect.stringContaining("Mở change request"), cr_prefill: prefill })
+    expect(payload.reply).not.toContain("nói rõ mục")
+  })
+
+  it("FLF-473 (B5): không có crPrefill (câu hỏi làm rõ bình thường) ⇒ giữ nguyên câu hỏi, không có cr_prefill", () => {
+    const payload = previewPayload({ ...base, ok: false, clarification: "Bạn muốn sửa use case nào?" }, "vi", { requiresCr: true })
+    expect(payload).toEqual({ kind: "change_clarification", reply: "Bạn muốn sửa use case nào?" })
+    expect(payload).not.toHaveProperty("cr_prefill")
+  })
+
   it("FLF-311: câu hỏi kèm lựa chọn ⇒ payload có questions[].options để FE hiện thẻ chọn nhanh", () => {
     const payload = previewPayload({ ...base, ok: false, clarification: "Màn hình riêng hay popup?", clarification_choices: ["Màn hình riêng", "Popup mở từ My Grades"] })
     expect(payload).toEqual({
       kind: "change_clarification",
       reply: "Màn hình riêng hay popup?",
-      questions: [{ question: "Chọn giao diện", options: [{ label: "Màn hình riêng" }, { label: "Popup mở từ My Grades" }] }]
+      questions: [{ question: "Màn hình riêng hay popup?", options: [{ label: "Màn hình riêng" }, { label: "Popup mở từ My Grades" }] }]
     })
+  })
+
+  it("P08 #1 (FLF-480): question là chính câu clarification, không cố định 'Chọn giao diện' khi câu hỏi không về giao diện", () => {
+    const payload = previewPayload({ ...base, ok: false, clarification: "Áp dụng từ ngày nào?", clarification_choices: ["Ngay bây giờ", "Từ học kỳ sau"] })
+    expect(payload).toMatchObject({ questions: [{ question: "Áp dụng từ ngày nào?" }] })
+    expect(payload.questions).not.toEqual(expect.arrayContaining([expect.objectContaining({ question: "Chọn giao diện" })]))
   })
 
   it("FLF-298: notes (vd use case mới chưa có màn hình) nối vào câu trả lời", () => {

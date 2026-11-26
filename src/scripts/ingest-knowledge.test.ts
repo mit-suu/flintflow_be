@@ -1,6 +1,7 @@
 import { afterEach, describe, it, expect } from "vitest"
 import mongoose from "mongoose"
 import { env } from "../config/env.js"
+import { loadCorpus } from "../modules/knowledge/corpus.js"
 import { formatIngestSummary, parseIngestArgs, runIngest } from "./ingest-knowledge.js"
 
 const original = env.EMBEDDING_PROVIDER
@@ -23,7 +24,10 @@ describe("ingest-knowledge — chạy", () => {
     const lines: string[] = []
     const code = await runIngest({ dir: "assets/skills", corpus: "skills", dryRun: true }, (l) => lines.push(l))
     expect(code).toBe(0)
-    expect(lines.join("\n")).toMatch(/tài liệu: 51 · chunk: \d+ · token .* p50 \d+, p90 \d+, max \d+/)
+    // Số tài liệu = số SKILL.md đang có (thêm / bớt skill không làm hỏng test), không hằng số
+    const docCount = loadCorpus("assets/skills", { corpus: "skills" }).length
+    expect(docCount).toBeGreaterThan(0)
+    expect(lines.join("\n")).toMatch(new RegExp(`tài liệu: ${docCount} · chunk: \\d+ · token .* p50 \\d+, p90 \\d+, max \\d+`))
     expect(lines.join("\n")).toMatch(/gộp \(chunk chứa ≥ 2 section\): \d+ · section bị cắt: \d+/)
     expect(lines[lines.length - 1]).toMatch(/dry-run/)
     expect(mongoose.connection.readyState).toBe(0)

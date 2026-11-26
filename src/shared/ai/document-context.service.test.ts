@@ -98,6 +98,15 @@ describe("buildDocumentContext (FLF-393)", () => {
     expect(store.finds).toBe(0)
   })
 
+  it("FLF-449: action REVIEW (S-9.2) nhận context tài liệu; action không có trong bảng vẫn rỗng", async () => {
+    store.docs = [doc("d1", 1, SMALL)]
+    const review = await buildDocumentContext({ projectId: "p", actionType: ActionType.REVIEW })
+    expect(review.mode).not.toBe("none")
+    expect(review.contextText).toContain("Biên bản họp kick-off")
+    expect((await buildDocumentContext({ projectId: "p", actionType: ActionType.CONSISTENCY_PASS })).mode).toBe("none")
+    expect((await buildDocumentContext({ projectId: "p", actionType: ActionType.ELICIT })).mode).toBe("none")
+  })
+
   it("không có tài liệu ⇒ rỗng", async () => {
     expect(await buildDocumentContext({ projectId: "p", actionType: ActionType.CHAT })).toMatchObject({ contextText: "", mode: "none", documentsUsed: 0 })
   })

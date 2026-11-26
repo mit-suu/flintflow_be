@@ -611,6 +611,52 @@ describe("phần tử theo mục cha có cặp — cuối cây con của heading
     expect(xml.indexOf("Overview text")).toBeLessThan(xml.indexOf("2. System Features"))
   })
 
+  it("FLF-491: mục con cũ (follower child) nằm dưới heading đích của mục cha, giữ chữ và cấp heading con (cấp heading đích + 1)", async () => {
+    const source = await makeDocx({
+      styles: styles("u"),
+      body:
+        styledP("u1", "1 Tổng quan sản phẩm") +
+        p("Overview text") +
+        styledP("u2", "Mục tiêu") +
+        p("Goals text") +
+        styledP("u1", "2 Tiếp theo") +
+        p("Next text")
+    })
+    const target = await makeDocx({
+      styles: styles("Heading"),
+      body: styledP("Heading2", "1. Product Overview") + p("Guide overview") + styledP("Heading2", "2. Next") + p("Guide next")
+    })
+    const oldHeadings = [
+      { key: "custom:CS01", heading_text: "1 Tổng quan sản phẩm", level: 1, section_id: "custom:CS01" },
+      { key: "slot:goals", heading_text: "Mục tiêu", level: 2, section_id: "slot:goals" },
+      { key: "fixed:2", heading_text: "2 Tiếp theo", level: 1, section_id: "fixed:2" }
+    ]
+    const input: BuildBaseFileInput = {
+      target,
+      targetHeadings: [
+        { key: "n0", heading_text: "1. Product Overview", section_id: "fixed:1", level: 2 },
+        { key: "n1", heading_text: "2. Next", section_id: "fixed:2", level: 2 }
+      ],
+      oldHeadings,
+      pairing: { pairs: [pair("custom:CS01", "n0"), pair("fixed:2", "n1")], followers: [{ old_key: "slot:goals", kind: "child", parent_old_key: "custom:CS01" }], ignored_new: [], split: [] },
+      groups: emptyGroups(),
+      decisions: [],
+      direction: "forward",
+      source: { buffer: source, headingKeys: oldHeadings.map((h) => h.key) }
+    }
+    const expected: [string, number][] = [
+      ["1. Product Overview", 2],
+      ["Mục tiêu", 3],
+      ["2. Next", 2]
+    ]
+    expect(planLayout(input, () => "CSX").entries.map((e) => [e.heading_text, e.level])).toEqual(expected)
+    const result = await buildBaseFile(input)
+    expect(await headingsOf(result.buffer)).toEqual(expected)
+    const xml = await docText(result.buffer)
+    expect(xml.indexOf("Goals text")).toBeGreaterThan(xml.indexOf("Overview text"))
+    expect(xml.indexOf("Goals text")).toBeLessThan(xml.indexOf("2. Next"))
+  })
+
   it("IEEE → mẫu FPTU: tính năng đứng ngay sau mục cha cũ vẫn xếp sau cây con của heading đích (sau 3.1 System Overview)", async () => {
     const source = await makeDocx({
       styles: styles("u"),

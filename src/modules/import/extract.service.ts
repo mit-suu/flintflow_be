@@ -510,7 +510,7 @@ export const itemsFromAi = (
   }
 ): EntityItem[] => {
   let functionUsed = false
-  return out.items.map((raw) => {
+  return out.items.flatMap((raw) => {
     const value = { ...raw.value }
     delete value.id
     let id: string | null = null
@@ -529,6 +529,13 @@ export const itemsFromAi = (
         const byKey = raw.key?.trim() ? findKnownKey(ctx.known, raw.entity, raw.key) : null
         const byName = findKnownId(ctx.known, raw.entity, value.name ?? value.term)
         ambiguous = !!byKey && !!byName && byKey !== byName
+        // FLF-476 lưới an toàn: item đọc từ đoạn văn (không bảng, không ảnh) chỉ có khoá, không có tên, không khớp phần
+        // tử nào đã biết ⇒ không tạo phần tử mới (EduCampus: đoạn 2.2.1 nhắc "UC-02" không tên nằm cạnh use case "02"
+        // thật của bảng 2.2.2 ⇒ 9 use case rỗng trùng). Mã vẫn còn trong chữ nguyên văn + `mentions` của block (C-3).
+        // `knownKey` (không phải `found`): `found` luôn có giá trị khi model đọc được khoá (`aiItemId` trả lại đúng khoá
+        // đó để giữ dạng tài liệu — FLF-361), dù khoá không khớp phần tử nào đã biết. Chỉ áp khi model CÓ đọc khoá
+        // (`raw.key`) — không khoá, không tên là ca khác (model không đọc được gì), giữ hành vi cũ (cấp id mới).
+        if (raw.key && !knownKey && !ctx.fromImage && NAME_REQUIRED_TO_CREATE.has(raw.entity) && !hasName(value)) return []
         id = found ?? ctx.alloc.next(raw.entity)
         ctx.alloc.reserve(raw.entity, id)
       }
@@ -538,16 +545,27 @@ export const itemsFromAi = (
     const signals = codeSignals(raw, { validBlocks: ctx.validBlocks, blockText: ctx.blockText, knownKey, sectionConfidence: ctx.sectionConfidence, ambiguous })
     // FLF-444: không tìm được đúng một đối tượng tương ứng ⇒ luôn Cần xem
     const score = (ai: number) => (ambiguous ? Math.min(combineAiConfidence(ai, signals), belowThreshold()) : combineAiConfidence(ai, signals))
-    return {
-      entity: raw.entity,
-      id,
-      value,
-      confidence: score(raw.confidence),
-      field_confidence: Object.fromEntries(Object.entries(raw.field_confidence ?? {}).map(([k, v]) => [k, score(v)])),
-      source_block_ids: sources.length ? sources : [...ctx.validBlocks].slice(0, 1),
-      origin: "ai" as const
-    }
+    return [
+      {
+        entity: raw.entity,
+        id,
+        value,
+        confidence: score(raw.confidence),
+        field_confidence: Object.fromEntries(Object.entries(raw.field_confidence ?? {}).map(([k, v]) => [k, score(v)])),
+        source_block_ids: sources.length ? sources : [...ctx.validBlocks].slice(0, 1),
+        origin: "ai" as const
+      }
+    ]
   })
+}
+
+/** Loại bắt buộc có tên — không có tên thì không phải phần tử (lưới an toàn FLF-476). */
+const NAME_REQUIRED_TO_CREATE: ReadonlySet<string> = new Set(["use_cases", "functions", "business_rules"])
+
+/** Giá trị model trả có tên / thuật ngữ không rỗng (`name`, `term`, hoặc `statement` của business rule). */
+const hasName = (value: Record<string, unknown>): boolean => {
+  const v = value.name ?? value.term ?? value.statement
+  return typeof v === "string" && v.trim() !== ""
 }
 
 // ─── ảnh diagram (mode 1 v3 phase 5) ─────────────────────────────
