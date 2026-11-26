@@ -9,7 +9,7 @@ import { planTransaction } from "../spine/op-engine.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import { collectEntities, realSectionId, resolveProvisional } from "./extracted-entities.js"
 import type { ExtractedField } from "./extraction-draft.model.js"
-import { needsReviewFindings, titleContentFindings } from "./finalize.service.js"
+import { contentFindingsHome, needsReviewFindings, titleContentFindings } from "./finalize.service.js"
 import { needsConfirm } from "./import.constants.js"
 import { buildImportOps } from "./spine-builder.js"
 
@@ -306,5 +306,23 @@ describe("FLF-343 needsReviewFindings - trùng đường dẫn, phần tử bị
     const spine = { ...createEmptySpine(), actors: [{ id: "A01" }] } as unknown as Parameters<typeof needsReviewFindings>[0]
     const out = needsReviewFindings(spine, drafts, { heading_map: [], table_map: [] }, [], new Map(), () => null)
     expect(out.map((f) => f.target_id)).toEqual(["actors[id=A01]"])
+  })
+})
+
+describe("FLF-444 contentFindingsHome - cờ của mục đọc theo nội dung về đúng mục Spine", () => {
+  const spine = { ...createEmptySpine(), functions: [{ id: "FR-01", name: "Đăng nhập" }] } as unknown as Parameters<typeof contentFindingsHome>[0]
+  const finding = (section_id: string, target_id: string | null) => ({ rule: "x", section_id, message: "Cần xem: m", block_ids: ["B0001"], target_id })
+
+  it("content:@B0001 + target functions[id=FR-01].name ⇒ section_id = function:FR-01, không rơi về fixed:I hay content:@B…", () => {
+    const [out] = contentFindingsHome(spine, [finding("content:@B0001", "functions[id=FR-01].name")])
+    expect(out.section_id).toBe("function:FR-01")
+    expect(out.section_id).not.toBe("fixed:I")
+    expect(out.section_id).not.toMatch(/^content:@/)
+    expect(out.target_id).toBe("functions[id=FR-01].name")
+  })
+
+  it("mục thường, hoặc không có target_id, hoặc target không phải đường dẫn ⇒ giữ nguyên", () => {
+    const keep = [finding("fixed:2.1", "functions[id=FR-01].name"), finding("content:@B0002", null), finding("content:@B0003", "!!không phải đường dẫn")]
+    expect(contentFindingsHome(spine, keep).map((f) => f.section_id)).toEqual(["fixed:2.1", "content:@B0002", "content:@B0003"])
   })
 })
