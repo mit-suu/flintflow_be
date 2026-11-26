@@ -59,10 +59,13 @@ const db = vi.hoisted(() => {
 vi.mock("../spine/spine.model.js", () => ({ Spine: db.Spine }))
 vi.mock("../spine/change.model.js", () => ({ Change: db.Change }))
 // FLF-311: renderChangedIfAvailable hỏi PlantUML có chạy không — test bật / tắt
-const plantuml = vi.hoisted(() => ({ reachable: true }))
+const plantuml = vi.hoisted(() => ({ reachable: true, calls: 0, failFirst: 0 }))
 vi.mock("../../shared/diagram/plantuml.client.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../shared/diagram/plantuml.client.js")>()),
-  isPlantUmlReachable: async () => plantuml.reachable
+  isPlantUmlReachable: async () => {
+    plantuml.calls += 1
+    return plantuml.calls <= plantuml.failFirst ? false : plantuml.reachable
+  }
 }))
 
 // FLF-339: thay renderer của một kind bằng part svg dựng sẵn (chưa kind nào dùng svg thật)
@@ -85,7 +88,7 @@ import { runDeterministicCheck } from "../spine/deterministic-check.js"
 import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { createMemoryDiagramStore } from "./diagram-file.store.js"
 import { renderKind } from "./renderers/index.js"
-import { compileWithFix, defaultDeps, loadDiagramFile, noAutoFix, redrawScreenLayoutsFromSpec, renderAll, renderAllIfAvailable, renderChangedIfAvailable, renderDiagram, renderDiagrams, sameDiagramSubject, staleDiagrams, staleRenderedDiagrams, type DiagramServiceDeps } from "./diagram.service.js"
+import { compileWithFix, defaultDeps, loadDiagramFile, noAutoFix, redrawScreenLayoutsFromSpec, renderAll, PLANTUML_PROBE, renderAllIfAvailable, renderChangedIfAvailable, renderDiagram, renderDiagrams, renderDiagramsByIds, sameDiagramSubject, staleDiagrams, staleRenderedDiagrams, type DiagramServiceDeps } from "./diagram.service.js"
 import type { RenderContext } from "../../shared/diagram/erd-notation.js"
 import { svgTitleOf } from "./renderers/common.js"
 import { screenSpecOf } from "./renderers/screen-mockup.js"
@@ -532,6 +535,9 @@ describe("renderChangedIfAvailable - FLF-311 vẽ lại sau lô thêm use case /
   beforeEach(() => {
     db.reset()
     plantuml.reachable = true
+    plantuml.calls = 0
+    plantuml.failFirst = 0
+    PLANTUML_PROBE.gapMs = 0
   })
 
   const renderedThenRenamed = async (deps: Partial<DiagramServiceDeps>) => {
@@ -585,6 +591,8 @@ describe("renderChangedIfAvailable - FLF-311 vẽ lại sau lô thêm use case /
     const result = await renderChangedIfAvailable(PROJECT, [], { by: USER, deps })
 
     expect(result).not.toBeNull()
+    // FLF-493: hình PlantUML bị bỏ thì báo lại id, không bỏ lặng lẽ
+    expect([...(result?.skipped ?? [])].sort()).toEqual(stalePuml.map((d) => d.id).sort())
     const after = (await repo.get(PROJECT))!
     expect(staleRenderedDiagrams(after).map((d) => d.id).sort()).toEqual(stalePuml.map((d) => d.id).sort())
     expect(after.diagrams.filter((d) => d.render_status === "error")).toEqual(before.diagrams.filter((d) => d.render_status === "error"))
@@ -601,12 +609,74 @@ describe("renderChangedIfAvailable - FLF-311 vẽ lại sau lô thêm use case /
     await expect(renderChangedIfAvailable(PROJECT, [], { by: USER, deps })).resolves.toBeNull()
     expect((await repo.get(PROJECT))?.spine_version).toBe(settled.spine_version)
   })
+
+  it("lần dò đầu hết giờ nhưng lần sau PlantUML trả lời ⇒ vẫn vẽ lại hình PlantUML, không bỏ", async () => {
+    const { deps } = makeDeps()
+    await renderedThenRenamed(deps)
+    plantuml.calls = 0
+    plantuml.failFirst = 2
+    const result = await renderChangedIfAvailable(PROJECT, [], { by: USER, deps })
+    expect(plantuml.calls).toBe(3)
+    expect(result?.skipped).toBeUndefined()
+    expect(staleRenderedDiagrams((await repo.get(PROJECT))!)).toEqual([])
+  })
+})
+
+describe("renderDiagramsByIds - vẽ theo danh sách id (FLF-493)", () => {
+  beforeEach(() => {
+    db.reset()
+    plantuml.reachable = true
+    plantuml.calls = 0
+    plantuml.failFirst = 0
+    PLANTUML_PROBE.gapMs = 0
+  })
+
+  it("chỉ compile hình trong danh sách, không gỡ và không đụng hình sequence khác", async () => {
+    const { deps } = makeDeps()
+    await seed()
+    const first = await renderAll(PROJECT, { by: USER, deps })
+    const sequences = first.diagrams.filter((d) => d.kind === "sequence")
+    expect(sequences.length).toBeGreaterThan(2)
+    const checks = (deps.check as ReturnType<typeof vi.fn>).mock.calls.length
+
+    const result = await renderDiagramsByIds(PROJECT, [sequences[0].id], { by: USER, force: true, deps })
+
+    expect(result.rendered).toEqual([sequences[0].id])
+    expect(result.removed).toEqual([])
+    expect((deps.check as ReturnType<typeof vi.fn>).mock.calls.length - checks).toBe(1)
+    const after = (await repo.get(PROJECT))!
+    expect(after.diagrams.filter((d) => d.kind === "sequence").map((d) => d.id)).toEqual(sequences.map((d) => d.id))
+    expect(after.diagrams).toHaveLength(first.diagrams.length)
+  })
+
+  it("id lạ bị bỏ qua và nằm trong skipped, không ném", async () => {
+    const { deps } = makeDeps()
+    await seed()
+    const result = await renderDiagramsByIds(PROJECT, ["D9999"], { by: USER, deps })
+    expect(result).toMatchObject({ rendered: [], skipped: ["D9999"] })
+  })
+
+  it("PlantUML không phản hồi ⇒ hình sequence trong danh sách không vẽ, nằm trong skipped, có log", async () => {
+    const { deps } = makeDeps()
+    await seed()
+    const first = await renderAll(PROJECT, { by: USER, deps })
+    const seq = first.diagrams.find((d) => d.kind === "sequence")!
+    plantuml.reachable = false
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const result = await renderDiagramsByIds(PROJECT, [seq.id], { by: USER, force: true, deps })
+    expect(result).toMatchObject({ rendered: [], skipped: [seq.id] })
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("PlantUML không phản hồi"))
+    warn.mockRestore()
+  })
 })
 
 describe("renderAllIfAvailable - FLF-493 mockup lệch vẫn được vẽ lại khi PlantUML tắt", () => {
   beforeEach(() => {
     db.reset()
     plantuml.reachable = true
+    plantuml.calls = 0
+    plantuml.failFirst = 0
+    PLANTUML_PROBE.gapMs = 0
   })
 
   it("PlantUML tắt ⇒ mockup (svg) vẽ lại, sequence giữ nguyên", async () => {

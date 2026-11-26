@@ -223,13 +223,13 @@ export type PlantUmlProbe =
  * đường gốc, khiến `/health` báo `ok` trong khi PlantUML chưa hề chạy.
  * Không gọi `renderPlantUml` vì hàm đó dùng `PLANTUML_TIMEOUT_MS` của render.
  */
-export const probePlantUml = async (): Promise<PlantUmlProbe> => {
+export const probePlantUml = async (timeoutMs: number = HEALTH_TIMEOUT_MS): Promise<PlantUmlProbe> => {
   try {
     // Timeout ngan: day la health check, khong phai render.
     const res = await withTimeout(
       `${baseUrl()}/svg/${encodePlantUml(HEALTH_PROBE_SOURCE)}`,
       { method: "GET" },
-      HEALTH_TIMEOUT_MS
+      timeoutMs
     )
 
     // Probe chỉ đọc header ⇒ huỷ body để nhả socket ngay.
@@ -252,4 +252,5 @@ export const probePlantUml = async (): Promise<PlantUmlProbe> => {
 }
 
 /** Server có sống không — cổng `describe.skipIf` của test và nguồn của `/health`. */
-export const isPlantUmlReachable = async (): Promise<boolean> => (await probePlantUml()).ok
+/** `timeoutMs` mặc định 1,5 giây (health check); lượt vẽ lại sau ghi CR truyền số lớn hơn vì BE có thể đang bận. */
+export const isPlantUmlReachable = async (timeoutMs?: number): Promise<boolean> => (await probePlantUml(timeoutMs)).ok
