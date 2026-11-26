@@ -116,14 +116,14 @@ describe("previewStructure - màn đọc khung lúc upload", () => {
     expect(preview.resolved_mode).toBe(3)
   })
 
-  it("bổ sung theo mẫu chuẩn (free) ⇒ đích = khung file cộng mẫu FlintFlow; FLF-463: mục riêng của file là có / thiếu (không ngoài phạm vi), giữ vị trí trong file", () => {
+  it("bổ sung theo mẫu chuẩn (free) ⇒ đích = khung file cộng mẫu FlintFlow; FLF-463: mục riêng của file là có / thiếu, giữ vị trí trong file; FLF-455: heading Budget ngoài 29148 ⇒ ngoài phạm vi", () => {
     const blocks = [heading("h1", "1 Overview", "fixed:1"), para("p1", "Lumen is a course management SaaS for small training centres.", "fixed:1"), heading("c1", "Budget", "custom")]
     const preview = previewStructure(blocks, new Map([["h1", "fixed:1"]]), spine, "free", AT)
     expect(preview.resolved_mode).toBe(4)
-    expect(preview.summary.out_of_scope).toBe(0)
+    expect(preview.summary.out_of_scope).toBe(1)
     expect(preview.sections[0]).toMatchObject({ section_id: "fixed:1", status: "present", order: 0 })
-    // Heading riêng của file còn trống ⇒ thiếu, đứng ngay sau mục của file; mục mẫu chuẩn file không có xếp sau
-    expect(preview.sections[1]).toMatchObject({ title: "Budget", status: "missing", order: 1 })
+    // Heading dự toán còn trống ⇒ Ngoài phạm vi (xét theo heading), đứng ngay sau mục của file; mục mẫu chuẩn file không có xếp sau
+    expect(preview.sections[1]).toMatchObject({ title: "Budget", status: "out_of_scope", order: 1 })
     expect(preview.sections.slice(2).every((s) => s.status === "missing" && s.order > 1)).toBe(true)
   })
 })

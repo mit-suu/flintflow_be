@@ -90,11 +90,11 @@ const soXdTemplate = () =>
   })
 
 describe("FLF-463 - mục đã viết là \"có\", Bỏ chữ giữ heading, Bỏ chữ không ra 0.1", () => {
-  it("§5.3: file 1/6 mục đã viết (nhãn Khung mẫu) ⇒ chương đã viết là \"có\" và được đọc, chỉ soạn 5 mục còn lại; không có 0.1", async () => {
+  it("§5.3: file 1/6 mục đã viết (nhãn Khung mẫu) ⇒ chương đã viết là \"có\" và được đọc, chỉ soạn 4 mục còn lại, mục Dự toán kinh phí là Ngoài phạm vi (FLF-455); không có 0.1", async () => {
     const { seeded, projectId, importId } = await upload(await soXdTemplate())
     const preview = (await view(seeded, projectId)).structure_preview
     // Ngưỡng 20% chỉ gắn nhãn câu tóm tắt
-    expect(preview.summary).toMatchObject({ kind: "template", present: 1, missing: 5 })
+    expect(preview.summary).toMatchObject({ kind: "template", present: 1, missing: 4, out_of_scope: 1 })
     expect(preview.intent).toBe("fixed")
 
     const doc = await startAndFinalize(seeded, projectId, importId)
@@ -106,7 +106,8 @@ describe("FLF-463 - mục đã viết là \"có\", Bỏ chữ giữ heading, B�
     expect(structure).toMatchObject({ target: "template", intent: "fixed", resolved_mode: 3 })
     const present = structure.sections.filter((s) => s.status === "present")
     expect(present.map((s) => s.title)).toEqual(["1 Giới thiệu"])
-    expect(structure.missing).toHaveLength(5)
+    expect(structure.missing).toHaveLength(4)
+    expect(structure.sections.filter((s) => s.status === "out_of_scope").map((s) => s.title)).toEqual(["6 Dự toán kinh phí"])
     // Ngữ cảnh mẫu cho Luồng 2 chỉ có mục còn trống — chương đã viết không bị soạn lại
     const contextIds = (profile.template_context ?? []).map((e) => e.section_id)
     expect(contextIds).not.toContain(present[0]!.section_id)

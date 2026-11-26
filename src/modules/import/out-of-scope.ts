@@ -19,13 +19,13 @@ export const OUT_OF_SCOPE_MIN_CONFIDENCE = 0.6
  * không rõ loại thì không đoán, vẫn là mục của đích (mẫu của người dùng).
  */
 const NON_SRS_HEADINGS: readonly RegExp[] = [
-  /\bdự\s*toán\b/i,
-  /\bchi\s*phí\b/i,
-  /\bngân\s*sách\b/i,
-  /\bbáo\s*giá\b/i,
-  /\bcost\s+(estimat\w*|breakdown|analysis)\b/i,
-  /\bbudget(ing)?\b/i,
-  /\b(price\s+quot\w*|quotation|pricing)\b/i
+  /dự\s*toán/iu,
+  /chi\s*phí/iu,
+  /ngân\s*sách/iu,
+  /báo\s*giá/iu,
+  /(?<![a-z])cost\s+(estimat\w*|breakdown|analysis)/iu,
+  /(?<![a-z])budget(ing)?(?![a-z])/iu,
+  /(?<![a-z])(price\s+quot\w*|quotation|pricing)/iu
 ]
 
 const stripNumber = (heading: string): string => heading.trim().replace(/^[\dIVXivx]+(\.[\dIVXivx]+)*\.?\s+/, "")

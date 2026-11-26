@@ -70,6 +70,12 @@ An SRS that is silent on something stays silent - leave the field out.
     could honestly go either way). Never add an id that is not listed there. Still extract any real content you
     find in those blocks as usual (rule 1) regardless of your guess - a human confirms the final answer. Nothing
     listed - return `guidance_blocks: []`.
+11. Classify every block of the section by the kind of content under ISO/IEC/IEEE 29148 (`iso29148`: a short label such as
+    `functional requirement`, `constraint`, `interface`, `cost estimate`, `project schedule`, `staffing`). Return one
+    `content_types` entry per block with `in_scope` (true when an SRS under 29148 holds that kind of content, false for
+    content outside an SRS such as cost estimates, budgets, schedules or staffing plans) and your own `confidence`
+    (0-1). Judge by what the text says, not by the heading. Classification only: never drop or skip an element because
+    it is out of scope, and keep extracting items as usual (rule 1).
 
 ## Output
 
@@ -84,5 +90,6 @@ JSON only, no prose:
   ],
   "unmapped_block_ids": ["B0030"],
   "content_mismatch": null,
-  "guidance_blocks": [{ "block_id": "B0032", "is_guidance": true, "confidence": 0.55 }] }
+  "guidance_blocks": [{ "block_id": "B0032", "is_guidance": true, "confidence": 0.55 }],
+  "content_types": [{ "block_id": "B0031", "iso29148": "functional requirement", "in_scope": true, "confidence": 0.9 }] }
 ```

@@ -10,20 +10,22 @@ const entry = (order: number, section_id: string, heading_text: string, level = 
 const spineWith = (over: Partial<Spine> = {}): Spine => ({ ...createEmptySpine({ name: "Thư viện" }), ...over })
 
 describe("compareTargetStructure (FLF-336 I-5 - so cấu trúc đích)", () => {
-  it("ý định tự do, file thiếu mục ⇒ chế độ 4: mục FPT bắt buộc có chữ / dữ liệu là present, còn lại missing; FLF-463: mục riêng trống là missing, không out_of_scope", () => {
-    const layout = [entry(0, "fixed:1", "1. Tổng quan"), entry(1, "fixed:3.1.1", "3.1.1 Luồng màn"), entry(2, "custom:CS01", "Phụ lục Dự toán")]
+  it("ý định tự do, file thiếu mục ⇒ chế độ 4: mục FPT bắt buộc có chữ / dữ liệu là present, còn lại missing; FLF-463: mục riêng trống là missing; FLF-455: heading dự toán chi phí là out_of_scope theo 29148", () => {
+    const layout = [entry(0, "fixed:1", "1. Tổng quan"), entry(1, "fixed:3.1.1", "3.1.1 Luồng màn"), entry(2, "custom:CS01", "Phụ lục Dự toán"), entry(3, "custom:CS03", "Phụ lục Ghi chú")]
     const spine = spineWith({ screens: [{ id: "S01", feature_id: "F01", name: "Trang chủ", description: "", flow_to: [], is_popup: false } as never] })
     const result = compareTargetStructure(layout, new Set(["fixed:1"]), spine, "free", "2026-10-27T00:00:00.000Z")
     expect(result).toMatchObject({ target: "fpt", intent: "free", resolved_mode: 4, compared_at: "2026-10-27T00:00:00.000Z" })
     const byId = new Map(result.sections.map((s) => [s.section_id, s]))
     expect(byId.get("fixed:1")).toMatchObject({ status: "present", title: "1. Tổng quan" })
     expect(byId.get("fixed:2.1")?.status).toBe("missing")
-    // FLF-463 (đảo FLF-411): heading riêng của file là mục của đích — không tự thành Ngoài phạm vi (FLF-455 xét theo 29148)
-    expect(byId.get("custom:CS01")).toMatchObject({ status: "missing", title: "Phụ lục Dự toán" })
+    // FLF-463 (đảo FLF-411): heading riêng của file không tự thành Ngoài phạm vi; FLF-455: chỉ khi loại nội dung ngoài 29148 (dự toán)
+    expect(byId.get("custom:CS01")).toMatchObject({ status: "out_of_scope", title: "Phụ lục Dự toán", owner_steps: [] })
+    expect(byId.get("custom:CS03")).toMatchObject({ status: "missing", title: "Phụ lục Ghi chú" })
     expect(result.missing).toContain("fixed:2.1")
     expect(result.missing).not.toContain("fixed:1")
+    expect(result.missing).not.toContain("custom:CS01")
     // Mỗi mục FPT bắt buộc xuất hiện đúng một lần, kèm bước sở hữu
-    expect(result.sections.some((s) => s.status === "out_of_scope")).toBe(false)
+    expect(result.sections.filter((s) => s.status === "out_of_scope").map((s) => s.section_id)).toEqual(["custom:CS01"])
     const fpt = result.sections.filter((s) => !s.section_id.startsWith("custom:")).map((s) => s.section_id)
     expect(fpt.length).toBe(new Set(fpt).size)
     expect([...fpt].sort()).toEqual([...REQUIRED_FIXED_SECTION_IDS].sort())
