@@ -290,10 +290,43 @@ describe("FLF-460 - đổi nhãn mục ở ba thời điểm", () => {
     const { c, importId, heading } = await setup()
     const doc = (await ImportedDocument.findById(importId))!
     await ExtractionDraft.create({ projectId: doc.projectId, import_id: doc._id, section_id: "fixed:3.1", status: "pending", fields: [], ops: [] })
+    // đã có lượt đọc (con trỏ) mà không dừng ⇒ coi là đang đọc
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { extract_cursor: "fixed:3.1" } })
     const body = { import_id: importId, headings: [{ block_id: heading.block_id, section_id: "fixed:5.4" }] }
     expect((await c.patch("/import/mapping", body)).status).toBe(409)
     await ImportedDocument.updateOne({ _id: importId }, { $set: { status: "baselining" } })
     expect((await c.patch("/import/mapping", body)).status).toBe(409)
+  })
+
+  it("đã đổi nhãn một lần (extracting, không con trỏ, không job, còn bản đọc) ⇒ đổi nhãn lại được; heading chưa khớp xoá đúng bản đọc content:@<block>", async () => {
+    const { c, importId, heading } = await setup()
+    const doc = (await ImportedDocument.findById(importId))!
+    const content = `content:@${heading.block_id}`
+    for (const section_id of [content, "fixed:3.1"]) {
+      await ExtractionDraft.create({ projectId: doc.projectId, import_id: doc._id, section_id, status: "done", fields: [], ops: [] })
+    }
+    const res = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, section_id: "fixed:5.4" }] })
+    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+    expect((await ExtractionDraft.find({ import_id: importId }).lean()).map((d) => d.section_id)).toEqual(["fixed:3.1"])
+    expect((await ImportedDocument.findById(importId))!.status).toBe("extracting")
+  })
+
+  it("chưa có bản gốc (incomplete / reviewing) ⇒ đổi nhãn được, về extracting; đang viết lại file (drop_applying) ⇒ 409", async () => {
+    for (const status of ["incomplete", "reviewing"] as const) {
+      const { c, importId, heading } = await setup()
+      const doc = (await ImportedDocument.findById(importId))!
+      await ExtractionDraft.create({ projectId: doc.projectId, import_id: doc._id, section_id: heading.section_id, status: "done", fields: [], ops: [] })
+      await ImportedDocument.updateOne({ _id: importId }, { $set: { status, paused: status === "reviewing" ? { reason: "credits", at: new Date() } : null } })
+      const res = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, section_id: "fixed:5.4" }] })
+      expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+      const after = (await ImportedDocument.findById(importId))!
+      expect(after.status).toBe("extracting")
+      expect(after.paused ?? null).toBeNull()
+    }
+    const { c, importId, heading } = await setup()
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { drop_applying: true } })
+    const busy = await c.patch("/import/mapping", { import_id: importId, headings: [{ block_id: heading.block_id, scope: "out_of_scope" }] })
+    expect(busy.status).toBe(409)
   })
 
   it("sau bản gốc: không đổi trực tiếp; luồng CR chưa nhận loại thay đổi đổi nhãn nên báo rõ", async () => {

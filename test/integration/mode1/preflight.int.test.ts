@@ -118,6 +118,25 @@ describe("preflight - 3 nhánh stamp", () => {
   })
 })
 
+describe("preflight - FLF-458 stamp project khác khi dự án đang làm dở", () => {
+  it("dự án đã đọc file (đang extracting) ⇒ upload file của project khác bị từ chối IMPORT_STAMP_FOREIGN_PROJECT 422, không đổi lần import", async () => {
+    const { projectId, userId } = await project()
+    await uploadImport(projectId, userId, fileOf(await makeSrsDocx()))
+    const before = await ImportedDocument.findOne({ projectId }).lean()
+    expect(before?.status).toBe("extracting")
+    await expect(uploadImport(projectId, userId, fileOf(await stamped("66f0000000000000000000ff")))).rejects.toMatchObject({ code: "IMPORT_STAMP_FOREIGN_PROJECT", statusCode: 422 })
+    expect(await ImportedDocument.countDocuments({ projectId })).toBe(1)
+    expect((await ImportedDocument.findOne({ projectId }).lean())?._id).toEqual(before?._id)
+  })
+
+  it("file của chính dự án khi đang rà soát (reviewing) ⇒ chỉ báo khác biệt, không đọc lại", async () => {
+    const { projectId, userId } = await project()
+    const doc = await uploadImport(projectId, userId, fileOf(await makeSrsDocx()))
+    await ImportedDocument.updateOne({ _id: doc._id }, { $set: { status: "reviewing" } })
+    await expect(uploadImport(projectId, userId, fileOf(await stamped(projectId)))).rejects.toMatchObject({ code: "IMPORT_INVALID_STATE" })
+  })
+})
+
 describe("preflight - từ chối", () => {
   it("Track Changes tác giả lạ ⇒ bản ghi preflight_rejected kèm issue có vị trí, không lưu file", async () => {
     const { projectId, userId } = await project()

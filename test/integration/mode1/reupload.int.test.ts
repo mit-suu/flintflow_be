@@ -317,3 +317,17 @@ describe("FLF-457 - upload lại trước baseline (nội dung đang soạn)", (
     expect(dto).toMatchObject({ against_version: "DRAFT", before_baseline: true, no_stamp: true, suggest_reference: false })
   })
 })
+
+describe("FLF-457 - dự án `mode = fpt` đã có baseline", () => {
+  it("upload lại so với file version (sau baseline), không phải bản DRAFT, dù mode không còn là import", async () => {
+    const { projectId, userId } = await importFinalized()
+    await Project.updateOne({ _id: projectId }, { $set: { mode: "fpt" } })
+    const { buffer } = await editVersion(projectId, (doc) => {
+      const purpose = para(doc, SRS_FIXTURE_TEXT.purpose)
+      purpose.parentNode!.insertBefore(newPara(doc, "Added after baseline."), purpose.nextSibling)
+    })
+    const dto = toReuploadDto(await reupload(projectId, userId, fileOf(buffer, "SRS_Lumen_v2.docx")))
+    expect(dto).toMatchObject({ against_version: "0.1", before_baseline: false })
+    expect(dto.blocks).toEqual([expect.objectContaining({ change: "added", after: "Added after baseline." })])
+  })
+})
