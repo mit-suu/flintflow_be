@@ -237,6 +237,8 @@ export const summarizeReferenceDocuments = async (
   const filter = { projectId, supersededBy: null, parseStatus: "success" as const, summaryStatus: "pending" as const, ...(documentIds.length ? { _id: { $in: documentIds } } : {}) }
   const documents = await ProjectDocument.find(filter)
   const results = []
+  // Hết credit giữa chừng: tài liệu đó và các tài liệu sau giữ `pending` (nạp credit rồi đọc lại được), không đánh dấu `failed` hàng loạt
+  let creditError: unknown = null
   for (const document of documents) {
     try {
       const summarizeResult = await executeAiAction<{ summary: string; keyThemes?: string[] }>(
@@ -250,12 +252,18 @@ export const summarizeReferenceDocuments = async (
       await document.save()
       console.log(`[DocumentSummarizer] Summarized "${document.originalName}": ${document.extractedText?.length} chars → ${document.summary?.length} chars`)
     } catch (summarizeErr: any) {
+      if (summarizeErr?.code === "INSUFFICIENT_CREDIT") {
+        creditError = summarizeErr
+        console.warn(`[DocumentSummarizer] Hết credit khi đọc "${document.originalName}" - giữ pending, dừng lượt đọc`)
+        break
+      }
       document.summaryStatus = "failed"
       await document.save()
       console.warn(`[DocumentSummarizer] Failed to summarize "${document.originalName}" (summaryStatus=failed): ${summarizeErr?.message}`)
     }
     results.push(document)
   }
+  if (creditError) throw creditError
   return results
 }
 
