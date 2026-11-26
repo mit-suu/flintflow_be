@@ -74,6 +74,8 @@ export const importedDocumentDtoSchema = z.object({
   status: importStatusSchema,
   preflight: z.object({ status: z.enum(["accepted", "rejected"]), issues: z.array(preflightIssueSchema), document_kind: documentKindSchema.nullable().optional() }),
   stamp: docStampSchema.nullable(),
+  /** FLF-458: file nhận lúc tạo dự án mang dấu của một project FlintFlow khác (dấu đã bị bỏ, xem `stamp`). */
+  foreign_project: z.object({ project_id: id, name: z.string().nullable() }).nullable().optional(),
   confirmed_latest_at: isoDateTime.nullable(),
   paused: importPausedSchema.nullable(),
   extract_cursor: z.string().nullable(),

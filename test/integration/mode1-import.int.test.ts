@@ -97,7 +97,7 @@ describe("mode 1 import - upload, preflight, parse, mapping", () => {
     expect(ok.status).toBe(201)
   })
 
-  it("stamp của project khác ⇒ 422 IMPORT_STAMP_FOREIGN_PROJECT; stamp đúng project ⇒ parse ngay", async () => {
+  it("stamp đúng project ⇒ parse ngay, coi như đã xác nhận bản mới nhất", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)
     const c = api(seeded, projectId)
@@ -106,15 +106,43 @@ describe("mode 1 import - upload, preflight, parse, mapping", () => {
       await writeStamp(pkg, { project_id: project, version: "v0.3", source: "baseline" })
       return pkg.toBuffer()
     }
-    const other = await c.upload(await stamped("66f0000000000000000000ff"))
-    expect(other.status).toBe(422)
-    expect(other.body.error.code).toBe("IMPORT_STAMP_FOREIGN_PROJECT")
-    expect(other.body.meta.stamp.project_id).toBe("66f0000000000000000000ff")
-
     const own = await c.upload(await stamped(projectId))
     expect(own.status).toBe(201)
-    expect(own.body.data.import).toMatchObject({ status: "extracting", stamp: { project_id: projectId } })
+    expect(own.body.data.import).toMatchObject({ status: "extracting", stamp: { project_id: projectId }, foreign_project: null })
     expect(own.body.data.import.confirmed_latest_at).not.toBeNull()
+  })
+
+  it("FLF-458: tạo dự án bằng file mang dấu của một project FlintFlow khác ⇒ nhận như file mới (bỏ dấu cũ), báo nguồn, mặc định Bỏ chữ mọi mục", async () => {
+    const seeded = await seedFixture("minimal")
+    const originProjectId = await createMode1Project(seeded, "Dự án gốc")
+    const projectId = await createMode1Project(seeded, "Dự án mới")
+    const c = api(seeded, projectId)
+    const stamped = async (project: string) => {
+      const pkg = await DocxPackage.load(await makeSrsDocx())
+      await writeStamp(pkg, { project_id: project, version: "v0.3", source: "baseline" })
+      return pkg.toBuffer()
+    }
+
+    const up = await c.upload(await stamped(originProjectId))
+    expect(up.status, JSON.stringify(up.body.error)).toBe(201)
+    const uploaded = importStateResponseSchema.parse(up.body.data).import
+    // Dấu cũ bị bỏ (xử lý như file mới) — vẫn hỏi "bản mới nhất" như file không stamp
+    expect(uploaded).toMatchObject({ status: "extracting", stamp: null, confirmed_latest_at: null })
+    expect(uploaded?.foreign_project).toMatchObject({ project_id: originProjectId, name: "Dự án gốc" })
+
+    const view = getImportResponseSchema.parse((await c.get()).body.data)
+    expect(view.import?.foreign_project).toMatchObject({ project_id: originProjectId, name: "Dự án gốc" })
+    // Mặc định Bỏ chữ mọi mục có chữ (như mẫu của tổ chức, FLF-412) — người dùng tự quyết định mục nào giữ lại
+    expect(view.text_sections?.length).toBeGreaterThan(0)
+    expect(view.text_sections?.every((s) => s.dropped)).toBe(true)
+
+    // Dự án khác tổ chức ⇒ không lộ tên, chỉ báo chung
+    const stranger = await seedFixture("minimal")
+    const strangerProjectId = await createMode1Project(stranger)
+    const foreignC = api(stranger, strangerProjectId)
+    const fromOtherOrg = await foreignC.upload(await stamped(originProjectId))
+    expect(fromOtherOrg.status, JSON.stringify(fromOtherOrg.body.error)).toBe(201)
+    expect(fromOtherOrg.body.data.import.foreign_project).toMatchObject({ project_id: originProjectId, name: null })
   })
 
   it("project mode fpt ⇒ 409 PROJECT_MODE_MISMATCH; project người khác ⇒ 404", async () => {

@@ -71,6 +71,7 @@ export const toImportDto = (doc: IImportedDocument): ImportedDocumentDto => ({
         kind: doc.stamp.kind ?? null
       }
     : null,
+  foreign_project: doc.foreign_project ? { project_id: doc.foreign_project.project_id, name: doc.foreign_project.name ?? null } : null,
   confirmed_latest_at: toIso(doc.confirmed_latest_at),
   paused: doc.paused ? { reason: doc.paused.reason, at: toIso(doc.paused.at)! } : null,
   extract_cursor: doc.extract_cursor ?? null,
@@ -178,6 +179,20 @@ const resolveUploadIntent = async (projectId: string): Promise<TemplateIntent> =
   return project?.template_intent ?? "free"
 }
 
+/**
+ * FLF-458: tên của project mà file vừa tải lên thực ra thuộc về (I-1), để màn đọc khung báo "File này lấy từ dự án
+ * <tên>". Chỉ lộ tên khi project gốc cùng tổ chức với dự án đang tạo (tránh lộ tên dự án của tổ chức khác); project gốc
+ * khác tổ chức hoặc đã bị xoá ⇒ `name: null`, FE hiện câu chung.
+ */
+const resolveForeignProject = async (projectId: string, foreignProjectId: string): Promise<{ project_id: string; name: string | null }> => {
+  const [current, origin] = await Promise.all([
+    Project.findById(projectId, { organizationId: 1 }).lean(),
+    Project.findById(foreignProjectId, { organizationId: 1, name: 1 }).lean()
+  ])
+  const sameOrg = Boolean(current?.organizationId && origin?.organizationId && String(current.organizationId) === String(origin.organizationId))
+  return { project_id: foreignProjectId, name: sameOrg ? origin!.name : null }
+}
+
 export const uploadImport = async (
   projectId: string,
   userId: string,
@@ -207,15 +222,16 @@ export const uploadImport = async (
       allowed: []
     })
   }
-  if (result.stamp && result.stamp.project_id !== projectId) {
-    throw new Mode1Error("IMPORT_STAMP_FOREIGN_PROJECT", "File này được xuất từ một project FlintFlow khác", { stamp: result.stamp })
-  }
+  // FLF-458: tạo dự án bằng file mang dấu của một project FlintFlow khác ⇒ nhận như file mới (bỏ dấu cũ), không từ chối —
+  // chỉ `/reupload` (upload lại vào dự án đang có, UC-24) mới từ chối dấu của project khác.
+  const foreignProject = result.stamp && result.stamp.project_id !== projectId ? await resolveForeignProject(projectId, result.stamp.project_id) : null
   const base = {
     projectId,
     sha256: createHash("sha256").update(file.buffer).digest("hex"),
     original_name: file.originalname,
     size: file.size,
-    stamp: result.stamp,
+    stamp: foreignProject ? null : result.stamp,
+    foreign_project: foreignProject,
     intent: await resolveUploadIntent(projectId),
     ...(body.org_template_id ? { org_template_id: body.org_template_id, org_template_version: body.org_template_version ?? null } : {}),
     created_by: userId
@@ -230,8 +246,9 @@ export const uploadImport = async (
   const fileRef = await docFileStore().save(file.buffer, { projectId, kind: "upload", name: file.originalname })
   const doc = await ImportedDocument.create({ ...base, file_ref: fileRef, preflight: { status: "accepted", issues: [], document_kind: result.document_kind }, status: "uploaded" })
   // Mẫu của tổ chức là file mẫu, không phải một bản SRS ⇒ không hỏi "bản mới nhất"
-  // Stamp đúng project (file từng xuất từ chính project này, chưa có baseline) ⇒ coi như đã xác nhận
-  if (result.stamp || body.org_template_id) doc.confirmed_latest_at = new Date()
+  // Stamp đúng project (file từng xuất từ chính project này, chưa có baseline) ⇒ coi như đã xác nhận.
+  // FLF-458: dấu của project khác bị bỏ (`base.stamp = null`) ⇒ xử lý như file mới, vẫn hỏi "bản mới nhất" như bình thường.
+  if (base.stamp || body.org_template_id) doc.confirmed_latest_at = new Date()
   // FLF-343: tách file + khớp mẫu ngay (tất định, không gọi AI) ⇒ màn báo credit có số; câu hỏi "bản mới nhất" (file không
   // stamp) trả lời cùng nút Bắt đầu (`POST /import/extract` `confirm_latest`)
   // FLF-395: tải file riêng (không từ mẫu tổ chức) thay lần import trước ⇒ dự án không còn theo mẫu tổ chức nào
@@ -396,7 +413,9 @@ const parseImport = async (doc: IImportedDocument, opts: { orgDefaultDrop: boole
   await clearPreviousImportData(doc.projectId)
   await DocBlock.insertMany(blocks.map((b) => toBlockDoc(doc.projectId, b, sections.get(b.block_id) ?? null)))
   // Màn đọc khung (business-flow §3.1.2): cấu trúc đích sơ bộ bằng Code, trước khi người dùng bấm Bắt đầu — không gọi AI
-  const drop_text = opts.orgDefaultDrop && doc.org_template_id ? textRegions(blocks, profile.heading_map).filter((r) => r.has_text).map((r) => r.key) : []
+  // FLF-458: file lấy từ một project FlintFlow khác (I-1) ⇒ mặc định Bỏ chữ mọi mục, như mẫu của tổ chức (FLF-412)
+  const defaultDropAll = (opts.orgDefaultDrop && doc.org_template_id) || doc.foreign_project
+  const drop_text = defaultDropAll ? textRegions(blocks, profile.heading_map).filter((r) => r.has_text).map((r) => r.key) : []
   const structure_preview = await previewOf(doc, blocks, sections, profile.heading_map, drop_text)
   await TemplateProfile.create({ projectId: doc.projectId, source: "imported", doc_version: IMPORTED_DOC_VERSION, ...profile, source_file_ref: doc.file_ref, source_sha256: createHash("sha256").update(sourceFile).digest("hex"), legacy_record_of_changes, structure_preview, drop_text: drop_text.length ? drop_text : null })
 }

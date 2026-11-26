@@ -58,6 +58,12 @@ export interface IImportedDocument extends Document {
   size: number
   preflight: { status: "accepted" | "rejected"; issues: PreflightIssue[]; document_kind?: DocumentKindInfo | null }
   stamp: DocStamp | null
+  /**
+   * FLF-458: file mang dấu của một project FlintFlow khác, nhận lúc **tạo dự án** (chưa có baseline) — dấu cũ bị bỏ
+   * (`stamp = null`) để file được xử lý như file mới; giữ lại nguồn gốc để màn đọc khung báo "File này lấy từ dự án
+   * <tên>" và mặc định Bỏ chữ mọi mục (`parseImport`). `name = null` khi dự án gốc khác tổ chức hoặc không còn.
+   */
+  foreign_project: { project_id: string; name: string | null } | null
   confirmed_latest_at: Date | null
   status: ImportStatus
   paused: { reason: ImportPauseReason; at: Date } | null
@@ -150,6 +156,10 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
         },
         opts
       ),
+      default: null
+    },
+    foreign_project: {
+      type: new Schema({ project_id: { type: String, required: true }, name: { type: String, default: null } }, opts),
       default: null
     },
     confirmed_latest_at: { type: Date, default: null },
