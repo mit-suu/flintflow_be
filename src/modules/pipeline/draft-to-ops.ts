@@ -25,6 +25,7 @@ import { withFrameRenumber } from "../spine/template-frames.js"
 import { actorGeneralizationErrors, addendumDuplicateErrors, briefExtractionErrors, dropRedundantScalarAdds, requiredArrayErrors, sanitizeModelOps, useCaseNamingErrors, useCaseWiringErrors, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
 import { ESCALATION_MODEL, isErdOnly, normalizeEntityNames } from "./erd-retry.js"
 import { briefQuoteSources, dropUngroundedGaps } from "./gap-quote.js"
+import { sanitizeDraftForm } from "./draft-sanitize.js"
 import { localizedMissingErrors } from "./localized-missing.js"
 import { addsExplicitQuestionId, answeredQuestionErrors, answeredQuestionOps, renewReusedQuestionIds } from "./answered-questions.js"
 import type { RetiredIds } from "../spine/id-allocator.js"
@@ -274,12 +275,14 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
         logId: result.logId || null
       })
       notes = result.data.notes ?? null
-      localized = result.data.localized?.length ? result.data.localized : undefined
+      // FLF-477: lỗi hình thức (dấu phẩy / ngoặc vuông trong nhãn sơ đồ…) server tự sửa trước khi kiểm, không từ chối cả lượt
+      const form = sanitizeDraftForm(result.data.ops, result.data.localized?.length ? result.data.localized : undefined)
+      localized = form.localized
       sources = result.data.sources?.length ? result.data.sources : undefined
       answered = result.data.answered_questions?.length ? result.data.answered_questions : undefined
       outOfScope = callKind === "revision" ? result.data.out_of_scope : undefined
       // BUG-03/BUG-29: field chỉ user/code quyết được chuẩn hoá trước khi kiểm; lô ghi là lô ĐÃ chuẩn hoá
-      const sanitized = sanitizeModelOps(spine, result.data.ops, stepId, new Date(), { revision: callKind === "revision", userDecided: options.userDecided === true, ...(statusIds ? { statusAssumptionIds: statusIds } : {}) })
+      const sanitized = sanitizeModelOps(spine, form.ops, stepId, new Date(), { revision: callKind === "revision", userDecided: options.userDecided === true, ...(statusIds ? { statusAssumptionIds: statusIds } : {}) })
       // Gắn lại liên kết đã có (S-4.1 không thấy function_ids) là vô hại — bỏ trước khi kiểm, không để chết cả lô.
       // Chỉ lọc khi sanitize không báo lỗi: lỗi của nó trỏ op_index theo lô gốc.
       // FLF-413: model không thấy khung của mẫu ⇒ `order` tính năng mới trùng khung — nối renumber (op cuối, không lệch op_index)
