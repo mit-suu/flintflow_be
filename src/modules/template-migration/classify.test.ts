@@ -42,7 +42,13 @@ describe("classify — 4 nhóm cho một lần đổi mẫu v1 → v2", () => {
 
   it("mục thừa: giữ / xoá / chuyển vào mục thiếu; chuyển vào mục có cấu trúc cần AI", () => {
     const { groups } = run(oldDoc, newDoc, { oldTables, newTables })
-    expect(groups.extra[0]).toMatchObject({ id: "e:custom:c2", choices: ["keep_custom", "drop_from_print", "move_to:n4", "move_to:n5"], ai_choices: ["move_to:n5"], decision_required: true })
+    // Mọi mục của mẫu đích nhận được (kể cả mục đã có cặp: phần gộp nối sau nội dung đang có)
+    expect(groups.extra[0]).toMatchObject({
+      id: "e:custom:c2",
+      choices: ["keep_custom", "drop_from_print", "move_to:n0", "move_to:n1", "move_to:n2", "move_to:n3", "move_to:n4", "move_to:n5"],
+      ai_choices: ["move_to:n0", "move_to:n1", "move_to:n2", "move_to:n5"],
+      decision_required: true
+    })
   })
 
   it("đổi cột bảng chỉ là đổi thứ tự ⇒ vẫn khớp", () => {
@@ -130,14 +136,16 @@ describe("classify — heading nhóm của mẫu đích và mục nhận nội d
     neu(3, "Appendix", "unmapped", { level: 2 })
   ]
 
-  it("heading nhóm (heading sau sâu hơn) không cần viết và không là đích chuyển vào; heading lá vẫn cần viết", () => {
+  it("heading nhóm (heading sau sâu hơn) không cần viết, vẫn chọn tay được (thành mục con cuối của nhóm); heading lá vẫn cần viết", () => {
     const { groups } = run(oldDoc, newDoc)
     expect(groups.missing.map((m) => [m.heading_text, m.needs_content])).toEqual([
       ["II. Software Requirement Specification", false],
       ["4.2.4 …", true],
       ["Appendix", true]
     ])
-    expect(groups.extra.find((e) => e.old_key === "custom:c9")?.choices).not.toContain("move_to:n0")
+    expect(groups.extra.find((e) => e.old_key === "custom:c9")?.choices).toContain("move_to:n0")
+    // Heading nhóm có mục con không bao giờ là đích gợi ý khi có mục con hợp hơn
+    expect(groups.extra.find((e) => e.old_key === "custom:c9")?.suggested).not.toBe("move_to:n0")
     // Mục khung chuyển chỗ in không gọi AI ⇒ không có lựa chọn AI (không nhãn "dùng AI", không tính credit)
     expect(groups.extra.find((e) => e.old_key === "fixed:4.2.3")?.ai_choices).toEqual([])
   })
@@ -282,7 +290,7 @@ describe("FLF-466: nhóm Thừa không còn xoá; conflict bảng giữ delete",
 })
 
 describe("classify — FLF-491: ghép theo danh mục và mục con đi theo mục cha", () => {
-  it("nhóm Thừa chỉ còn mục không có chỗ (Thuật ngữ); không còn gợi ý chuyển vào 4.2.4", () => {
+  it("nhóm Thừa chỉ còn mục không có chỗ (Thuật ngữ); không mục nào hợp nghĩa ⇒ Không in ra (mục không có dữ liệu)", () => {
     const oldDoc = [
       old("custom:CS01", "1 Tổng quan sản phẩm", 1),
       old("slot:goals", "Mục tiêu", 2),
@@ -292,7 +300,6 @@ describe("classify — FLF-491: ghép theo danh mục và mục con đi theo m�
     ]
     const { groups } = run(oldDoc, [neu(0, "1. Product Overview", "fixed:1", { level: 2 }), neu(1, "4.2.4 …", "unmapped", { level: 3 })])
     expect(groups.extra.map((e) => e.old_key)).toEqual(["fixed:5.5"])
-    expect(groups.extra[0].choices.some((c) => c.startsWith("move_to:"))).toBe(false)
-    expect(groups.extra[0]).toMatchObject({ follower_keys: [] })
+    expect(groups.extra[0]).toMatchObject({ follower_keys: [], suggested: "drop_from_print", suggested_reason: "no_place", confidence: "high", data_size: 0 })
   })
 })

@@ -184,3 +184,14 @@ describe("pairSections — FLF-491: mục chương 1 và 4.2.4 theo danh mục, 
     expect(pairOf(r, "custom:CS04")).toMatchObject({ new_key: null })
   })
 })
+
+describe("pairSections — heading nhóm có mục con của mẫu đích không nhận id khung theo danh mục", () => {
+  it("'1. Giới thiệu' (bí danh của Tổng quan) không giành mục cũ của mục con thật '2.1 Góc nhìn sản phẩm'", () => {
+    const r = pairSections(
+      [old("fixed:1", "Quy tắc nghiệp vụ tổng quát", 2)],
+      [neu(0, "1. Giới thiệu", "unmapped", { level: 1 }), neu(1, "1.1 Mục đích tài liệu", "slot:vision", { level: 2 }), neu(2, "2. Tổng quan sản phẩm", "unmapped", { level: 1 }), neu(3, "2.1 Góc nhìn sản phẩm", "fixed:1", { level: 2 })]
+    )
+    expect(pairOf(r, "fixed:1").new_key).toBe("n3")
+    expect(r.split).toEqual([])
+  })
+})

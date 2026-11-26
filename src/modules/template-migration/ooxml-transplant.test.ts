@@ -4,7 +4,7 @@ import { DocxPackage, MAIN_PART } from "../docx-ooxml/index.js"
 import { makeDocx, p } from "../docx-ooxml/testing/make-docx.js"
 import { NS, wAll, wKids } from "../docx-ooxml/xml.js"
 import { makePng } from "../render/zip.test-helper.js"
-import { createTransplanter, enforceRelsAllowList, pruneUnreferencedParts, requestFieldUpdate, transplantSections, validateDocxStructure, type TransplantRequest } from "./ooxml-transplant.js"
+import { createTransplanter, enforceRelsAllowList, pruneUnreferencedParts, requestFieldUpdate, transplantSections, validateDocxStructure, widenTocLevels, type TransplantRequest } from "./ooxml-transplant.js"
 
 const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 const CT = "application/vnd.openxmlformats-officedocument.wordprocessingml"
@@ -620,3 +620,14 @@ describe("transplantSections — headingShift (mẫu đích lồng sâu hơn fil
   })
 })
 
+
+describe("widenTocLevels — nới cấp mục lục của mẫu", () => {
+  it("TOC \\o \"1-3\" ⇒ tới cấp sâu nhất đang dùng; lệnh khác không đụng", async () => {
+    const pkg = await DocxPackage.load(await makeDocx({ body: `<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" \\h </w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p><w:p><w:fldSimple w:instr="PAGEREF _Toc1 \\h"><w:r><w:t>1</w:t></w:r></w:fldSimple></w:p>` + p("x") }))
+    expect(await widenTocLevels(pkg, 5)).toBe(1)
+    const xml = await (await JSZip.loadAsync(await pkg.toBuffer())).file("word/document.xml")!.async("string")
+    expect(xml).toContain('TOC \\o "1-5"')
+    expect(xml).toContain("PAGEREF _Toc1")
+    expect(await widenTocLevels(pkg, 3)).toBe(0)
+  })
+})

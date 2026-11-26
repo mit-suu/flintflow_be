@@ -43,7 +43,7 @@ import { toUserLocale } from "../../shared/i18n/locale.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { addCustomOps, affectedSectionIds, customIdAllocator, migrationTxn, ownerKeysOf, selectReverseChanges, withSnapshotContinuations } from "./apply-plan.js"
 import { BuildBaseFileError, buildBaseFile, planLayout, type PlannedLayout } from "./build-base-file.js"
-import { missingAfterMoves } from "./classify.js"
+import { DROP_FROM_PRINT, missingAfterMoves, readChoice } from "./classify.js"
 import { composeProfile } from "./compose-profile.js"
 import { editedSections, sectionKeyResolver } from "./edited-since.js"
 import {
@@ -191,7 +191,8 @@ const planInput = (doc: ITemplateMigration, spine?: Pick<Spine, "functions" | "u
   pairing: doc.pairing,
   groups: doc.groups,
   decisions: decisions ?? doc.decisions.map((d) => ({ id: d.id, choice: d.choice })),
-  targetIsSnapshot: doc.direction === "reverse" && !!doc.reverse_of
+  targetIsSnapshot: doc.direction === "reverse" && !!doc.reverse_of,
+  ...(doc.analysis?.target_numbering ? { numbering: doc.analysis.target_numbering } : {})
 })
 
 const rejected = (doc: ITemplateMigration, err: TransactionRejectedError): ApiError =>
@@ -339,6 +340,12 @@ const loadSource = async (profile: ProfileLean | null): Promise<Buffer | null> =
   }
 }
 
+/** `section_id` của mục cũ có quyết định "Không in ra" (mục thừa, Record of Changes mất chỗ). */
+const printSuppressedOf = (doc: ITemplateMigration, decisions: readonly { id: string; choice: string }[]): string[] => {
+  const choice = new Map(decisions.map((d) => [d.id, readChoice(doc.groups, d.id, d.choice)]))
+  return doc.groups.extra.filter((e) => choice.get(e.id) === DROP_FROM_PRINT).map((e) => e.section_id)
+}
+
 /** Layout dùng để dựng bản in từ Spine cho các mục của file mới: theo layout dự kiến, giữ phần còn lại của profile cũ. */
 const renderLayoutOf = (doc: ITemplateMigration, work: SpineWork, profile: ProfileLean | null): TemplateLayout => {
   const translated = doc.needs_translation && doc.direction === "forward"
@@ -349,7 +356,8 @@ const renderLayoutOf = (doc: ITemplateMigration, work: SpineWork, profile: Profi
     legacyRecord: (profile?.legacy_record_of_changes ?? []) as TemplateLayout["legacyRecord"],
     ...(profile?.non_screen_table?.length ? { nonScreenTable: profile.non_screen_table } : {}),
     ...(!translated && profile?.function_originals?.length ? { functionOriginals: profile.function_originals as TemplateLayout["functionOriginals"] } : {}),
-    ...(profile?.section_slices?.length ? { sectionSlices: profile.section_slices } : {}),
+    ...(profile?.section_slices?.length || work.layout.slices.length ? { sectionSlices: [...(profile?.section_slices ?? []), ...work.layout.slices] } : {}),
+    printSuppressed: printSuppressedOf(doc, work.decisions),
     ...(!translated && profile?.section_segments?.length ? { sectionSegments: profile.section_segments } : {})
   }
 }
@@ -388,6 +396,8 @@ const buildFile = async (ctx: MigrationContext, doc: ITemplateMigration, work: S
     renderFromSpine,
     ...(profile?.legacy_record_of_changes ? { legacyRecordCount: (profile.legacy_record_of_changes as unknown[]).length } : {}),
     targetIsSnapshot: !!planInput(doc).targetIsSnapshot,
+    plannedLayout: work.layout,
+    ...(planInput(doc).numbering ? { numbering: planInput(doc).numbering } : {}),
     hasSpineElements: planInput(doc, work.planned).hasSpineElements
   }).catch((err: unknown) => {
     if (err instanceof BuildBaseFileError) throw new ApiError(422, "Không dựng được file nền mới từ mẫu đích: số heading của file không khớp mapping đã lưu.", "TEMPLATE_MIGRATION_BUILD_FAILED", { reason: err.code })
@@ -408,7 +418,9 @@ const buildFile = async (ctx: MigrationContext, doc: ITemplateMigration, work: S
       plan: work.layout.entries,
       // Quyết định đã giải: mục nhận nội dung "chuyển vào" không phải viết; AI không chuyển được (về `keep_custom`) ⇒ vẫn là mục thiếu
       needsContent: new Set(missingAfterMoves(doc.groups, work.decisions).missing.filter((m) => m.needs_content).map((m) => m.new_key)),
-      knownColumns: known
+      knownColumns: known,
+      printSuppressed: printSuppressedOf(doc, work.decisions),
+      slices: work.layout.slices
     })
     // Mục của lần đổi trước còn chờ viết và vẫn là mục của mẫu đích: giữ cờ chặn phát hành dù lần này nó được ghép "khớp" với heading rỗng
     const carried = await carriedMissingSections(profile as CarryProfile | null, work.planned, new Set(work.layout.entries.filter((e) => e.new_key !== null).map((e) => e.section_id)), composed.missing_sections)
@@ -481,7 +493,7 @@ export const writeProfileAndProject = async (doc: ITemplateMigration, now: Date 
     // Chữ đã dịch ⇒ nguyên văn / đoạn nguyên văn của file cũ không còn đúng ngôn ngữ: bản in dùng Spine
     function_originals: translated ? [] : (base?.function_originals ?? []),
     section_segments: translated ? [] : (base?.section_segments ?? []),
-    section_slices: base?.section_slices ?? [],
+    section_slices: [...(base?.section_slices ?? []), ...((np.section_slices as { custom_id: string; section_id: string; items: string[] }[] | undefined) ?? [])],
     migration_missing_sections: doc.missing_sections,
     // Mốc nguyên vẹn = Spine theo kế hoạch lúc áp dụng (không đọc Spine sống: chạy tiếp sau lỗi có thể đã lẫn sửa của người khác)
     // Chỉ đổi ngôn ngữ tài liệu (mode 2 / FPT): bản in tiếp tục từ Spine qua lớp bản dịch, không coi file nền mới là nền nguyên văn
