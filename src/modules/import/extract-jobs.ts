@@ -79,13 +79,14 @@ export const startExtraction = async (projectId: string, userId: string, importI
   if (!(await isExtractionRunning(importId))) {
     // FLF-458: đủ credit cho tài liệu tham khảo + dịch khung rồi mới viết lại file (thiếu ⇒ 402, chưa ghi / trừ gì)
     await assertStartAffordable(doc, userId)
-    await applyDropText(doc, userId)
+    // Đọc tài liệu tham khảo (AI chậm) TRƯỚC khi viết lại file: sau applyDropText không còn lệnh chậm nào trước job I-4, nên lựa chọn Bỏ chữ / nhãn không chen vào được
     // FLF-458: tài liệu tham khảo đang chờ đọc cùng lượt Bắt đầu (credit đã cộng vào màn báo); lỗi khác credit không chặn
     const { summarizePendingAtStart } = await import("../project/project-document.service.js")
     await summarizePendingAtStart(projectId, userId).catch((err) => {
       if ((err as { code?: string })?.code === "INSUFFICIENT_CREDIT") throw err
       console.warn(`[I-4] Không đọc được tài liệu tham khảo của dự án ${projectId}:`, err)
     })
+    await applyDropText(doc, userId)
   }
   // Bỏ `paused` trước khi trả lời để lần poll đầu không thấy trạng thái dừng cũ.
   const started = await startJob(
