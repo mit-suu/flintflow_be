@@ -473,10 +473,11 @@ describe("FLF-461 bước 2.9a - chế độ 4 xem trước bố cục, xác nh�
     // Mục đầu của file được coi là Ngoài phạm vi: giữ nguyên nội dung, chỉ đổi vị trí
     const profile = (await TemplateProfile.findOne({ projectId }).lean())!
     const first = [...profile.layout].sort((a, b) => a.order - b.order).find((l) => l.level === 1 && !l.section_id.startsWith("group:") && l.heading_text.trim())!
-    await TemplateProfile.updateOne(
-      { projectId, "target_structure.sections.section_id": first.section_id },
-      { $set: { "target_structure.sections.$.status": "out_of_scope", "target_structure.sections.$.owner_steps": [] } }
+    // BF 2.9a nằm sau khi soạn xong (2.8-2.9): các mục thiếu còn lại coi như đã soạn để bản xem trước xác nhận được (`ready`)
+    const sections = profile.target_structure!.sections.map((s) =>
+      s.section_id === first.section_id ? { ...s, status: "out_of_scope", owner_steps: [] } : s.status === "missing" ? { ...s, status: "present", owner_steps: [] } : s
     )
+    await TemplateProfile.updateOne({ projectId }, { $set: { "target_structure.sections": sections, "target_structure.missing": [] } })
 
     const before = await exportDraft(projectId, token)
     const at = (headings: string[]) => headings.findIndex((h) => h.includes(first.heading_text.trim()))
