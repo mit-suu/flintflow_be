@@ -195,3 +195,78 @@ describe("FLF-453 - từ chối credit / Dừng giữa chừng", () => {
     expect(run.body.data.import.paused).toMatchObject({ reason: "credits" })
   })
 })
+
+describe("FLF-453 - nút Rà soát bằng AI cho từng mục chỉ được Code kiểm", () => {
+  const SRS = { srs: { extraBody: styled("u2", "5.10 Document Conventions") + p("[Describe the conventions.]") } }
+  const url = (projectId: string, tail: string) => `/api/v1/projects/${projectId}/import/${tail}`
+
+  /** Đưa fixed:1 ra khỏi nhóm AI tự rà ⇒ thành mục chỉ Code kiểm. */
+  const toOptional = async () => {
+    const ctx = await toReviewGate("fixed", SRS)
+    await TemplateProfile.updateOne({ projectId: ctx.projectId }, { $set: { review_sections: [] } })
+    return { ...ctx, headers: await asHttp(ctx.projectId, ctx.userId) }
+  }
+
+  it("báo credit riêng của mục, chưa xác nhận thì không gọi AI và không trừ; mục Ngoài phạm vi không được đề nghị", async () => {
+    const { projectId, importId, headers } = await toOptional()
+    let aiCalls = 0
+    mockOverrides.next = (prompt) => {
+      if (prompt.includes("# Import Review Existing")) aiCalls++
+      return fakeMode1(prompt)
+    }
+    const view = await request(app).get(url(projectId, "")).set(headers)
+    const opt = view.body.data.review.optional_sections as { section_id: string; calls: number; credits: number }[]
+    expect(opt.map((o) => o.section_id)).toContain("fixed:1")
+    const mine = opt.find((o) => o.section_id === "fixed:1")!
+    expect(mine.credits).toBeGreaterThan(0)
+
+    const project = (await Project.findById(projectId).lean())!
+    const before = (await CreditWallet.findOne({ organizationId: project.organizationId }).lean())!.balance
+    const quote = await request(app).post(url(projectId, "review/section")).set(headers).send({ import_id: importId, section_id: "fixed:1" })
+    expect(quote.status, JSON.stringify(quote.body.error)).toBe(200)
+    expect(quote.body.data).toMatchObject({ section_id: "fixed:1", credits: mine.credits, reviewed: false })
+    expect(aiCalls).toBe(0)
+    expect((await CreditWallet.findOne({ organizationId: project.organizationId }).lean())!.balance).toBe(before)
+
+    // Ngoài phạm vi ⇒ không còn đề nghị, xác nhận trực tiếp bị từ chối
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    await TemplateProfile.updateOne(
+      { projectId },
+      { $set: { "target_structure.sections": profile.target_structure!.sections.map((s) => (s.section_id === "fixed:1" ? { ...s, status: "out_of_scope" } : s)) } }
+    )
+    const denied = await request(app).post(url(projectId, "review/section")).set(headers).send({ import_id: importId, section_id: "fixed:1", confirm: true })
+    expect(denied.status).toBe(409)
+    expect(aiCalls).toBe(0)
+  })
+
+  it("xác nhận ⇒ chạy, ghi cờ import_review, vẫn reviewing, prompt không có chữ hướng dẫn; chạy lại không còn đề nghị", async () => {
+    const { projectId, importId, headers } = await toOptional()
+    const prompts: string[] = []
+    mockOverrides.next = (prompt) => {
+      if (!prompt.includes("# Import Review Existing")) return fakeMode1(prompt)
+      prompts.push(prompt)
+      return JSON.stringify({ findings: [{ rule: "business_logic_suspicion", section_id: "fixed:1", message: "Nghi sai nghiệp vụ. Phương án A, Phương án B. Khuyến nghị: B.", block_ids: [] }] })
+    }
+    const run = await request(app).post(url(projectId, "review/section")).set(headers).send({ import_id: importId, section_id: "fixed:1", confirm: true })
+    expect(run.status, JSON.stringify(run.body.error)).toBe(200)
+    expect(run.body.data).toMatchObject({ reviewed: true, import: { status: "reviewing" } })
+    expect(prompts.length).toBeGreaterThan(0)
+    for (const pr of prompts) expect(pr).not.toContain("[Describe the conventions.]")
+    const spine = (await spineRepository.get(projectId))!
+    const flag = spine.flags.find((f) => f.rule_id === "import_review")
+    expect(flag).toBeTruthy()
+    expect(flag!.level).toBe("yellow")
+    const view = await request(app).get(url(projectId, "")).set(headers)
+    expect((view.body.data.review.optional_sections as { section_id: string }[]).map((o) => o.section_id)).not.toContain("fixed:1")
+  })
+
+  it("hết credit ⇒ paused credits, vẫn reviewing, không cờ nào", async () => {
+    const { projectId, importId, headers } = await toOptional()
+    const project = (await Project.findById(projectId).lean())!
+    await CreditWallet.updateOne({ organizationId: project.organizationId }, { $set: { balance: 0 } })
+    const run = await request(app).post(url(projectId, "review/section")).set(headers).send({ import_id: importId, section_id: "fixed:1", confirm: true })
+    expect(run.status, JSON.stringify(run.body.error)).toBe(200)
+    expect(run.body.data).toMatchObject({ reviewed: false, import: { status: "reviewing", paused: { reason: "credits" } } })
+    expect((await spineRepository.get(projectId))!.flags.filter((f) => f.rule_id === "import_review")).toHaveLength(0)
+  })
+})

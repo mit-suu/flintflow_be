@@ -856,10 +856,11 @@ export const getImportView = async (projectId: string): Promise<GetImportRespons
   const review =
     doc.status === "reviewing"
       ? await (async () => {
-          const { estimateReviewCredit } = await import("./review.service.js")
+          const { estimateReviewCredit, optionalReviewSections } = await import("./review.service.js")
           const sectionIds = profile?.review_sections ?? []
           const estimate = await estimateReviewCredit(projectId, sectionIds)
-          return { section_ids: sectionIds, calls: estimate.calls, credits: estimate.credits }
+          const optional_sections = await optionalReviewSections(projectId, profile?.target_structure, sectionIds)
+          return { section_ids: sectionIds, calls: estimate.calls, credits: estimate.credits, optional_sections }
         })()
       : null
   return {

@@ -123,6 +123,54 @@ type ReviewGuard = () => Promise<void>
 const noGuard: ReviewGuard = async () => undefined
 
 /**
+ * Chạy các lô AI rà `sectionIds` (dùng chung cho vòng cụm và nút "Rà soát bằng AI" của một mục): bỏ lô đã trừ credit (`doneRe`),
+ * ghi phát hiện của mọi lô thành công rồi mới dừng. Trả `{ paused: true }` (đã đặt `doc.paused`) khi có lô lỗi / hết credit /
+ * người dùng Dừng; ngược lại `null`.
+ */
+const runReviewBatches = async (
+  doc: IImportedDocument,
+  userId: string,
+  sectionIds: readonly string[],
+  guard: ReviewGuard,
+  stepFor: (n: number) => string,
+  doneRe: RegExp
+): Promise<{ paused: true } | null> => {
+  const projectId = String(doc.projectId)
+  const done = new Set<string>(await Usage.find({ projectId, step_id: { $regex: doneRe }, state: "deducted" }).distinct("step_id"))
+  const blocks = await reviewBlocks(projectId, sectionIds)
+  const spine = await loadSpine(projectId)
+  const batches = semanticBatches(blocks)
+    .map((b, i) => ({ ...b, step_id: stepFor(i + 1) }))
+    .filter((b) => !done.has(b.step_id))
+  const results = await runLimited(batches, parallelBatches(), async (batch) => {
+    await guard()
+    // BF §2 "Dừng giữa chừng": Code ngắt lượt gọi kế tiếp, lô chưa chạy chưa trừ credit
+    if (await userStopRequested(doc)) return { ok: false as const, reason: "user" as const }
+    return withMeteredAi<FindingsOutput>({ projectId, userId, stepId: batch.step_id }, ActionType.IMPORT_REVIEW_EXISTING, {
+      section_ids: batch.section_ids.join(", "),
+      projection: semanticProjection(spine),
+      blocks: batch.lines
+    })
+  })
+  // Ghi hết kết quả thành công của mọi lô (lô song song khác đã trừ credit, resume sẽ bỏ qua vì `deducted`), rồi mới dừng
+  let failure: Extract<(typeof results)[number], { ok: false }> | null = null
+  for (const r of results) {
+    if (!r) continue
+    if (!r.ok) {
+      if (!failure || r.reason === "credits") failure = r
+      continue
+    }
+    await applyReviewFindings(projectId, r.data.findings, "AI rà soát phần có sẵn (business-flow §3.1.2)")
+  }
+  if (failure) {
+    doc.paused = { reason: failure.reason, at: new Date() }
+    await doc.save()
+    return { paused: true }
+  }
+  return null
+}
+
+/**
  * Chạy vòng rà soát (business-flow §3.1.2) rồi vào Luồng 2. `sectionIds` rỗng ⇒ không gọi AI, vào Luồng 2 ngay (nhánh
  * "không mục nào cần rà"). Lượt AI lỗi / hết credit ⇒ `doc.paused` được đặt, trả `{ paused: true }`, giữ tiến độ — lượt
  * đã trừ credit (`Usage` `deducted`) không gọi lại khi resume (gọi lại chính hàm này).
@@ -138,39 +186,64 @@ export const runReview = async (
   doc.paused = null
   await doc.save()
   if (sectionIds.length) {
-    const done = new Set<string>(await Usage.find({ projectId, step_id: { $regex: /^I-1\.11r(:|$)/ }, state: "deducted" }).distinct("step_id"))
-    const blocks = await reviewBlocks(projectId, sectionIds)
-    const spine = await loadSpine(projectId)
-    const batches = semanticBatches(blocks)
-      .map((b, i) => ({ ...b, step_id: reviewBatchStep(i + 1) }))
-      .filter((b) => !done.has(b.step_id))
-    const results = await runLimited(batches, parallelBatches(), async (batch) => {
-      await guard()
-      // BF §2 "Dừng giữa chừng": Code ngắt lượt gọi kế tiếp, lô chưa chạy chưa trừ credit
-      if (await userStopRequested(doc)) return { ok: false as const, reason: "user" as const }
-      return withMeteredAi<FindingsOutput>({ projectId, userId, stepId: batch.step_id }, ActionType.IMPORT_REVIEW_EXISTING, {
-        section_ids: batch.section_ids.join(", "),
-        projection: semanticProjection(spine),
-        blocks: batch.lines
-      })
-    })
-    // Ghi hết kết quả thành công của mọi lô (lô song song khác đã trừ credit, resume sẽ bỏ qua vì `deducted`), rồi mới dừng
-    let failure: Extract<(typeof results)[number], { ok: false }> | null = null
-    for (const r of results) {
-      if (!r) continue
-      if (!r.ok) {
-        if (!failure || r.reason === "credits") failure = r
-        continue
-      }
-      await applyReviewFindings(projectId, r.data.findings, "AI rà soát phần có sẵn (business-flow §3.1.2)")
-    }
-    if (failure) {
-      doc.paused = { reason: failure.reason, at: new Date() }
-      await doc.save()
-      return { paused: true }
-    }
+    const stopped = await runReviewBatches(doc, userId, sectionIds, guard, reviewBatchStep, /^I-1\.11r(:|$)/)
+    if (stopped) return stopped
   }
   // Dừng bấm sau lô cuối: không sang Luồng 2 (lần tiếp tục sẽ chạy lại, lô đã trừ credit được bỏ qua)
   if (await userStopRequested(doc)) return { paused: true }
   return enterFlow2(doc, userId)
+}
+
+// ─── Nút "Rà soát bằng AI" cho một mục chỉ được Code kiểm (business-flow §3.1.2) ───
+
+/** Tiền tố step lô của một mục (`I-1.11r:s:<mục>:<n>`) — không đụng id lô của vòng cụm (`I-1.11r:<n>`). */
+const sectionBatchPrefix = (sectionId: string): string => `${REVIEW_STEP}:s:${sectionId}:`
+const escapeRe = (v: string): string => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+export interface OptionalReviewSection {
+  section_id: string
+  title: string
+  calls: number
+  credits: number
+}
+
+/**
+ * Mục có sẵn chỉ được Code kiểm (không nằm trong `review_sections` của vòng cụm), còn chữ thật để AI rà (không tính chữ hướng
+ * dẫn / mục Ngoài phạm vi, vì `status` phải là `present` và lô lấy qua `semanticBatches`) và chưa được rà riêng. Kèm credit
+ * riêng của từng mục, báo trước khi người dùng xác nhận (business-flow §2). Mục đã rà riêng xong (có lô `deducted`) thì không
+ * còn hiện (rà lại sẽ không có gì mới).
+ */
+export const optionalReviewSections = async (
+  projectId: string,
+  structure: Pick<TargetStructure, "sections"> | null | undefined,
+  reviewSections: readonly string[]
+): Promise<OptionalReviewSection[]> => {
+  const chosen = new Set(reviewSections)
+  const candidates = (structure?.sections ?? []).filter((s) => s.status === "present" && !chosen.has(s.section_id))
+  if (!candidates.length) return []
+  const blocks = await reviewBlocks(projectId, candidates.map((s) => s.section_id))
+  const cost = await getActionCost(ActionType.IMPORT_REVIEW_EXISTING)
+  const reviewed = new Set<string>(
+    (await Usage.find({ projectId, step_id: { $regex: /^I-1\.11r:s:/ }, state: "deducted" }).distinct("step_id")).map((id: string) => id.replace(/:\d+$/, ":"))
+  )
+  const out: OptionalReviewSection[] = []
+  for (const s of candidates) {
+    if (reviewed.has(sectionBatchPrefix(s.section_id))) continue
+    const calls = semanticBatches(blocks.filter((b) => b.section_id === s.section_id)).length
+    if (calls) out.push({ section_id: s.section_id, title: s.title, calls, credits: calls * cost })
+  }
+  return out
+}
+
+/**
+ * Rà riêng một mục (qua cùng `runReviewBatches`: `semanticBatches`, `applyReviewFindings`, cờ `import_review`). KHÔNG sang
+ * Luồng 2 (import vẫn `reviewing`). Lỗi / hết credit / Dừng ⇒ `doc.paused` được đặt, `{ paused: true }`, lô đã trừ credit không
+ * chạy lại khi gọi lại.
+ */
+export const runSectionReview = async (doc: IImportedDocument, userId: string, sectionId: string): Promise<{ paused: true } | { reviewed: true }> => {
+  doc.paused = null
+  await doc.save()
+  const prefix = sectionBatchPrefix(sectionId)
+  const stopped = await runReviewBatches(doc, userId, [sectionId], noGuard, (n) => `${prefix}${n}`, new RegExp(`^${escapeRe(prefix)}\\d+$`))
+  return stopped ?? { reviewed: true }
 }
