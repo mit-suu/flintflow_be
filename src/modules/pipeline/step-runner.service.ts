@@ -23,7 +23,6 @@
  */
 
 import { randomUUID } from "node:crypto"
-import { env } from "../../config/env.js"
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
 import { claimUserMessage } from "../project/user-message-dedupe.js"
 import { Project } from "../project/project.model.js"
@@ -51,6 +50,7 @@ import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, currentBatch, fo
 import { MAX_SCHEMA_RETRIES, draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
 import { recordDraftRejected } from "./draft-rejected-log.js"
 import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
+import { runAiReview, type ReviewProfile } from "./s9/ai-review.js"
 import * as meter from "./meter.service.js"
 import { documentLanguageForTurn, type TurnDocumentLanguage } from "../translation/turn-language.js"
 import { captureForTurn } from "../translation/capture.service.js"
@@ -108,8 +108,10 @@ export interface StepRunnerDeps {
   /** Draft/Regenerate/Revision — mặc định gọi `executeAiAction` (T04 reserve/deduct/release credit thật ở ví). */
   draftExecutor: DraftExecutor
   elicitExecutor: ElicitExecutor
-  /** Chỉ dùng khi `REVIEW_LLM_ENABLED=true` (mặc định tắt). */
+  /** S-9.2 Soát chất lượng và S-9.3 Đối chiếu mục tiêu (lens review của skill `review-section`). */
   reviewExecutor: ReviewExecutor
+  /** S-8.4 Rà nhất quán (FLF-449 việc 6) — mặc định `executeAiAction(CONSISTENCY_PASS)`; tiêm được trong test. */
+  consistencyExecutor?: ReviewExecutor
   renderDeps?: Partial<DiagramServiceDeps>
   /** S-8.2: ghép RenderedDocument ở `spineVersion` và lưu cache — mặc định gọi `assemble()` (T15). */
   assembleDocument: (projectId: string, spineVersion: number) => Promise<void>
@@ -173,6 +175,7 @@ export const defaultStepRunnerDeps = (signal?: AbortSignal): StepRunnerDeps => (
   draftExecutor: (actionType, input, projectId, userId, options) => executeAiAction<OpTransaction>(actionType, input, projectId, userId, { ...options, signal }),
   elicitExecutor: (input, projectId, userId) => executeAiAction<ElicitOutput>(ActionType.ELICIT, input, projectId, userId, { signal }),
   reviewExecutor: (input, projectId, userId) => executeAiAction<ReviewOutput>(ActionType.REVIEW, input, projectId, userId, { signal }),
+  consistencyExecutor: (input, projectId, userId) => executeAiAction<ReviewOutput>(ActionType.CONSISTENCY_PASS, input, projectId, userId, { signal }),
   assembleDocument: async (projectId, spineVersion) => {
     const project = await Project.findById(projectId, { name: 1 }).lean()
     if (!project) throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
@@ -186,6 +189,16 @@ export const defaultStepRunnerDeps = (signal?: AbortSignal): StepRunnerDeps => (
  * `/export/word` luôn 409 NO_WORKING_DRAFT dù S-8.2 đã accepted.
  */
 export const ASSEMBLE_STEP = "S-8.2"
+
+/** Câu ở tin cổng khi lượt kiểm AI mở cờ vàng — không lộ mã bước, tên lens. */
+const aiReviewGateNote = (profile: ReviewProfile, count: number, language: ReplyLanguage): string =>
+  byLanguage(language, {
+    vi: `${profile === "quality" ? "Soát chất lượng" : "Rà nhất quán"} mở ${count} cờ vàng để bạn xem ở Kiểm & chốt.`,
+    en: `${profile === "quality" ? "Quality review" : "Consistency review"} raised ${count} yellow flags - see Check & sign-off.`
+  })
+
+/** S-8.4 Rà nhất quán: nhánh tất định chạy lúc ghép tài liệu; nhánh AI chạy ở lượt bước này (`s9/ai-review.ts`). */
+export const CONSISTENCY_STEP = "S-8.4"
 
 // ─── tiến trình trực tiếp: stage + heartbeat (03-live-status-flow §5) ───
 
@@ -1350,7 +1363,7 @@ export const emptyFedSections = (spine: Spine, stepId: string): { section_id: st
     .filter((id) => sectionHasData(spine, id) === false)
     .map((id) => ({ section_id: id, title: FIXED_SECTIONS.find((s) => s.id === id)?.title_en ?? id }))
 
-/** Render mọi diagram của step (nếu có) + Review (deterministic check; LLM review tuỳ `REVIEW_LLM_ENABLED`). */
+/** Render mọi diagram của step (nếu có) + Review (deterministic check). */
 /** Trần hình tự vẽ lại cuối một step — một step sửa nhiều thứ không được biến thành lượt render cả bộ. */
 export const MAX_AUTO_RERENDER = 4
 
@@ -1557,40 +1570,6 @@ export const runRenderReviewPhase = async (
     ...(options.flagsBefore ? { red_delta: redOpen - options.flagsBefore.red, yellow_delta: yellowOpen - options.flagsBefore.yellow } : {}),
     ...(options.knownAssumptionIds ? { new_assumptions: newAssumptions } : {})
   })
-
-  // Lớp phủ LLM review — tắt mặc định (đọc process.env trực tiếp, không qua src/config theo yêu cầu task).
-  // F2/F11: kiểm trần + reserve trước khi gọi, như elicit/draft. Lớp phủ không chặn step: lỗi/hết trần chỉ log.
-  if (env.REVIEW_LLM_ENABLED && !deps.signal?.aborted) {
-    const { spine: spineForReview } = await refresh(projectId)
-    const currentFirstSeq = spineForReview.steps.find((s) => s.id === stepId)?.first_seq ?? null
-    const { calls_used } = await meter.roundCounts(projectId, stepId, currentFirstSeq)
-    if (calls_used >= CALLS_LIMIT) {
-      console.error(`[step-runner] LLM review bị bỏ qua cho ${stepId}: đã hết ${CALLS_LIMIT} lượt gọi model`)
-    } else {
-      const reservedId = await meter.reserveCall(projectId, userId, stepId, "review")
-      try {
-        const spine = spineForReview
-        const spec = getStepSpec(stepId)
-        const result = await deps.reviewExecutor(
-          { promptVariables: { step_id: stepId, step_name: spec.label_en } },
-          projectId,
-          userId
-        )
-        await meter.finalizeCall(reservedId, {
-          call_kind: "review",
-          attempt: 1,
-          tokens_in: result.tokensUsed.promptTokens,
-          tokens_out: result.tokensUsed.completionTokens,
-          cost: result.cost,
-          logId: result.logId || null
-        })
-      } catch (err) {
-        // Review LLM là lớp phủ thêm, không chặn step — lỗi chỉ log.
-        await meter.releaseCall(reservedId)
-        console.error(`[step-runner] LLM review thất bại cho ${stepId}:`, err)
-      }
-    }
-  }
 
   return {
     spineVersion,
@@ -2088,14 +2067,31 @@ export const runStep = async (
         emit({ type: "draft", step_id: stepId, attempt: 1 })
       }
       tracker.stage("draft", { detail_vi: "Quét cuối và xếp ưu tiên" })
-      await tracker.beat("draft", () =>
+      const s9Result = await tracker.beat("draft", () =>
         runS9Step(projectId, stepId, userId, { draftExecutor: d.draftExecutor, reviewExecutor: d.reviewExecutor, sessionId, replyLanguage })
       )
+      // Cờ là sổ sách nên `summarizeChanges` không tóm được: nói ở tin cổng (không lộ mã bước, lens)
+      if (s9Result.quality && s9Result.quality.opened.length > 0) gateNotes = aiReviewGateNote("quality", s9Result.quality.opened.length, replyLanguage)
       ;({ spine, spineVersion } = await refresh(projectId))
       // Pha S-9 ghi thẳng qua service riêng (không qua runDraftPhase) — vẫn phải tóm tắt được ở gate,
       // nếu không thì S-9.4 xếp lại ưu tiên cả tài liệu mà gate hiện đúng một dòng trống (BUG-20).
       const s9Changes = (await spineRepository.listChanges(projectId, { fromSeq: startSeq })).filter((c) => c.step_id === stepId)
       stepSummary.push(...summarizeChanges(s9Changes, spine))
+    }
+
+    // FLF-449 việc 6: S-8.4 Rà nhất quán bằng AI. Ghi cờ vàng, không sửa nội dung; GET /document và export không đi qua đây.
+    if (stepDef.template_id === CONSISTENCY_STEP) {
+      assertNotAborted(d.signal, stepId)
+      emit({ type: "draft", step_id: stepId, attempt: 1 })
+      tracker.stage("draft", { detail_vi: "Rà trùng lặp và thuật ngữ" })
+      const consistency = await tracker.beat("draft", () =>
+        runAiReview(projectId, userId, "consistency", {
+          executor: d.consistencyExecutor ?? ((input, pid, uid) => executeAiAction<ReviewOutput>(ActionType.CONSISTENCY_PASS, input, pid, uid, { signal: d.signal })),
+          replyLanguage
+        })
+      )
+      ;({ spine, spineVersion } = await refresh(projectId))
+      if (consistency.opened.length > 0) gateNotes = aiReviewGateNote("consistency", consistency.opened.length, replyLanguage)
     }
 
     if (needsDraft && !fieldAlreadySet) {

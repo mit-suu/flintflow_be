@@ -8,6 +8,10 @@ import JSZip from "jszip"
 
 const failVersion = vi.hoisted(() => ({ on: false }))
 
+// Mỗi test đi trọn ký baseline + chuyển đổi + CR + ghi version (10–25 s trên máy dev): trần 30 s chung làm CI đỏ ngẫu nhiên
+// (develop 26/11, hai test CR quá 30 s). Không đổi hành vi, chỉ nới trần của file này.
+vi.setConfig({ testTimeout: 90_000 })
+
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
 vi.mock("../../../src/modules/doc-version/doc-version.model.js", async (importOriginal) => {
   const orig = await importOriginal<typeof import("../../../src/modules/doc-version/doc-version.model.js")>()

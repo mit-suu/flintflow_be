@@ -170,11 +170,18 @@ const envSchema = z.object({
    */
   REFERENCE_MAX_TOKENS_PER_UPLOAD: z.coerce.number().int().min(1000).default(100000),
 
-  // S-9.2 Quality Lens bằng LLM — mặc định TẮT (Phases §9.1, hoãn vì ngân sách).
-  REVIEW_LLM_ENABLED: z
+  // FLF-449 việc 5, 6: kiểm AI là một phần luồng (business-flow 71, 131-138) ⇒ BẬT mặc định; cờ chỉ để tắt khẩn.
+  // Tắt ⇒ bước trả `skipped`, ước tính credit tính 0.
+  /** S-9.2 Soát chất lượng bằng AI. */
+  QUALITY_LENS_ENABLED: z
     .string()
-    .default("false")
-    .transform((v) => v === "true" || v === "1"),
+    .default("true")
+    .transform((v) => !(v === "false" || v === "0")),
+  /** S-8.4 Rà nhất quán bằng AI (trùng nghĩa, thuật ngữ lệch, thiếu chỗ liệt kê). */
+  CONSISTENCY_LLM_ENABLED: z
+    .string()
+    .default("true")
+    .transform((v) => !(v === "false" || v === "0")),
 
   // ─── PlantUML (render diagram phía server, Phases §7.1) ───────────
   // Self-host: `docker compose up -d plantuml`. Ở production PlantUML là một

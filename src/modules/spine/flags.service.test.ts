@@ -194,6 +194,29 @@ const seed = async (spine: Spine) => {
 const nfrFlag = (flags: Flag[]) => flags.filter((f) => f.rule_id === "nfr_missing_number")
 const current = async () => (await repo.get(PROJECT))!
 
+describe("FLF-449: cờ ai_review (model-owned) không bị recompute đóng hay gộp", () => {
+  const ai = (over: Partial<Flag>): Flag => flag({ level: "yellow", rule_id: "ai_review", lens: "requirement_conflict", section_id: "fixed:4.2.3", target_id: null, remediation_step: "S-9.2", ...over })
+
+  it("planFlagOps: hai cờ ai_review mở cùng section và target ⇒ không cờ nào bị đóng / gộp, không op", () => {
+    const plan = planFlagOps(withFlags([ai({ id: "FL001", message: "one" }), ai({ id: "FL002", message: "two", lens: "ambiguity" })]), [])
+    expect(plan.resolved).toEqual([])
+    expect(plan.reopened).toEqual([])
+    expect(plan.ops).toEqual([])
+  })
+
+  it("recompute qua op engine: cả hai cờ vẫn mở sau lượt tính lại", async () => {
+    db.reset()
+    await seed({ ...structuredClone(FIXTURE), flags: [ai({ id: "FL901", message: "one" }), ai({ id: "FL902", message: "two", lens: "ambiguity" })] })
+    const result = await recompute(PROJECT, { by: USER })
+    const rows = result.flags.filter((x) => x.rule_id === "ai_review")
+    expect(rows.map((x) => x.id).sort()).toEqual(["FL901", "FL902"])
+    expect(rows.every((x) => x.resolved_at === null)).toBe(true)
+    expect(rows.map((x) => x.lens).sort()).toEqual(["ambiguity", "requirement_conflict"])
+    expect(result.resolved).not.toContain("FL901")
+    expect(result.resolved).not.toContain("FL902")
+  })
+})
+
 describe("planFlagOps - luật chỉ chạy ở S-9", () => {
   it("check thường không đóng cờ S-9 đang mở (không chạy luật ≠ hết lỗi); check at_baseline thì đóng", () => {
     const spine = withFlags([flag({ rule_id: "unconfirmed_assumption" })])

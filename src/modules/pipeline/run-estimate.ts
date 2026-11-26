@@ -4,7 +4,7 @@
  * FLF-332 — "Biết trước tốn bao nhiêu credit trước khi AI chạy hàng loạt" (business-flow §2, cổng cứng §1.2).
  *
  * Ước tính cho lượt chạy liền (`POST /phases/:phase/run` chạy hết một đơn vị giai đoạn rồi tự sang đơn vị kế khi mọi bước
- * đều im): mỗi bước còn chờ tính một lượt Draft (+ một lượt Review nếu `REVIEW_LLM_ENABLED`), mỗi đơn vị giai đoạn chưa
+ * đều im): mỗi bước còn chờ tính một lượt Draft (riêng S-9.2, S-8.4, S-9.3 theo giá riêng, xem `stepCredits`), mỗi đơn vị giai đoạn chưa
  * phỏng vấn tính một lượt Elicit. Bước tất định và hai bước sổ sách của vòng S-5 không gọi model ⇒ 0. Đây là con số
  * **trước khi chạy** — lượt chạy thật có thể ít hơn (bước im không hỏi, model trả sớm) hoặc nhiều hơn (lô S-5.2 / S-5.4 chia
  * theo 6 function, câu hỏi thêm) nên FE nói "ước tính".
@@ -27,6 +27,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { LOOP_PHASE, PHASES, getStep, isPhaseUnit, isRegisteredStep, loadStepRegistry, loopKeys, nextStep, orderedSteps, type ExpandedStep } from "./step-registry.js"
 import { PHASES_WITHOUT_INTERVIEW, phaseUnitOf } from "./phase-runner.service.js"
 import { LOOP_BOOKKEEPING_TEMPLATES, functionBatches } from "./step-runner.service.js"
+import { estimateReviewBatches } from "./s9/ai-review.js"
 
 export type RunEstimateScope = "unit" | "all"
 
@@ -34,8 +35,12 @@ export interface RunEstimateCosts {
   draft: number
   review: number
   elicit: number
-  /** `REVIEW_LLM_ENABLED` — mặc định tắt: Review chỉ là kiểm tất định, không tốn credit. */
-  reviewLlm: boolean
+  /** Giá một lượt `CONSISTENCY_PASS` (S-8.4). */
+  consistency: number
+  /** `QUALITY_LENS_ENABLED` — tắt ⇒ S-9.2 không gọi model, tính 0. */
+  qualityLens: boolean
+  /** `CONSISTENCY_LLM_ENABLED` — tắt ⇒ S-8.4 không gọi model, tính 0. */
+  consistencyLlm: boolean
 }
 
 export interface RunEstimateUnit {
@@ -106,6 +111,29 @@ const PENDING_STATUSES = new Set(["pending", "in_progress", "revision_requested"
 
 const stepCallsModel = (step: ExpandedStep): boolean => !step.deterministic && !LOOP_BOOKKEEPING_TEMPLATES.has(step.template_id)
 
+/**
+ * Credit của một bước có gọi model (FLF-449 việc 5, 6):
+ * - S-9.2 Soát chất lượng: `review` × số lô của Spine hiện tại (tối thiểu 1); cờ env tắt ⇒ 0.
+ * - S-8.4 Rà nhất quán: `consistency` × số lô; cờ env tắt ⇒ 0.
+ * - S-9.3 Đối chiếu mục tiêu: gọi REVIEW một lượt nên tính `review`. Dù `project.goals` rỗng thì bước bỏ qua, ở đây vẫn tính
+ *   vì lúc ước tính mục tiêu có thể chưa được chốt (ước tính, không phải hoá đơn).
+ * - Bước khác: một lượt Draft mỗi lô (FLF-485: bước chia lô theo function gọi model mỗi lô một lượt; chỉ đếm được khi
+ *   Spine đã có function).
+ * Số lô lấy trên Spine lúc ước tính (sau Approve Brief còn ít phần tử nên thường là 1).
+ */
+export const stepCredits = (step: ExpandedStep, spine: Spine, costs: RunEstimateCosts): number => {
+  switch (step.template_id) {
+    case "S-9.2":
+      return costs.qualityLens ? costs.review * estimateReviewBatches(spine, "quality") : 0
+    case "S-8.4":
+      return costs.consistencyLlm ? costs.consistency * estimateReviewBatches(spine, "consistency") : 0
+    case "S-9.3":
+      return costs.review
+    default:
+      return costs.draft * Math.max(1, functionBatches(spine, step.id).length)
+  }
+}
+
 /** Đơn vị đã phỏng vấn: có quyết định còn hiệu lực ghi dưới id đơn vị (cùng dấu `runPhaseInterview` đọc). */
 const unitInterviewed = (spine: Spine, unit: string): boolean => spine.decisions.some((d) => d.step_id === unit && d.superseded_by === null)
 
@@ -141,11 +169,10 @@ export const planRunEstimate = (spine: Spine, query: { scope: RunEstimateScope; 
       units.push(entry)
     }
     entry.steps += 1
-    if (stepCallsModel(step)) {
+    const credits = stepCallsModel(step) ? stepCredits(step, spine, costs) : 0
+    if (credits > 0) {
       entry.ai_steps += 1
-      // Bước chia lô gọi model mỗi lô một lượt (chỉ đếm được khi Spine đã có function).
-      const calls = Math.max(1, functionBatches(spine, step.id).length)
-      entry.credits += calls * (costs.draft + (costs.reviewLlm ? costs.review : 0))
+      entry.credits += credits
     }
   }
   // Đơn vị chính xác: cận dưới = cận trên = credits.
@@ -163,7 +190,7 @@ export const planRunEstimate = (spine: Spine, query: { scope: RunEstimateScope; 
   if (passesScreenList) {
     const loopTemplates = loadStepRegistry().filter((t) => t.kind === "loop")
     const aiPerLoop = loopTemplates.filter((t) => !t.deterministic && !LOOP_BOOKKEEPING_TEMPLATES.has(t.id)).length
-    const perScreen = costs.elicit + aiPerLoop * (costs.draft + (costs.reviewLlm ? costs.review : 0))
+    const perScreen = costs.elicit + aiPerLoop * costs.draft
     const range = estimateScreenCount(spine)
     screenEstimate = range
     const loops = range.max + 1
@@ -205,8 +232,20 @@ export const runEstimate = async (projectId: string, userId: string, query: { sc
   const record = await spineRepository.get(projectId)
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   const { projectId: _p, ...spine } = record
-  const [draft, review, elicit] = await Promise.all([getActionCost(ActionType.DRAFT), getActionCost(ActionType.REVIEW), getActionCost(ActionType.ELICIT)])
-  const plan = planRunEstimate(spine as Spine, query, { draft, review, elicit, reviewLlm: env.REVIEW_LLM_ENABLED })
+  const [draft, review, elicit, consistency] = await Promise.all([
+    getActionCost(ActionType.DRAFT),
+    getActionCost(ActionType.REVIEW),
+    getActionCost(ActionType.ELICIT),
+    getActionCost(ActionType.CONSISTENCY_PASS)
+  ])
+  const plan = planRunEstimate(spine as Spine, query, {
+    draft,
+    review,
+    elicit,
+    consistency,
+    qualityLens: env.QUALITY_LENS_ENABLED,
+    consistencyLlm: env.CONSISTENCY_LLM_ENABLED
+  })
   const orgId = await resolveWalletOrg(projectId)
   if (!orgId) return { ...plan, available_credits: null }
   const wallet = await getOrCreateWallet(userId, undefined, orgId)
