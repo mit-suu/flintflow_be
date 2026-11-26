@@ -62,7 +62,7 @@ import { tableRows } from "./table-rows.js"
 import { buildLayout, buildStepPlan, customSectionOps, customSectionsWithContent, functionOriginals, projectFieldEntities, repeatSectionsWithContent, sectionSegments, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
 import { functionSourceHash } from "../render/layout-sections.js"
 import { functionFieldValues, tagFunctionBlocks } from "../render/function-original.js"
-import { structureChanges } from "./structure-preview.js"
+import { applyScopeLabels, structureChanges, type HeadingMark } from "./structure-preview.js"
 import { enterFlow2, entersFlow2 } from "./flow2.service.js"
 import * as flagsService from "../spine/flags.service.js"
 import { mode1RuleProfileFor } from "./mode1-guard.js"
@@ -303,7 +303,9 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   ])
   // FLF-455: mục riêng mà I-4 xếp ngoài SRS theo 29148 ⇒ Ngoài phạm vi (mọi chế độ), giữ nguyên - không soạn, không kiểm
   const outOfScope = outOfScopeSectionIds(drafts, (id) => layoutSectionOf(id, entryOfHeading))
-  const structure = compareTargetStructure(layout, withContent, stripRecord(seeded), intent, undefined, { emptied, outOfScope })
+  // FLF-460 (BF §3.1.2): nhãn Ngoài phạm vi người dùng đổi ở màn đọc khung (đưa vào / ra) có hiệu lực ở cấu trúc đích cuối, khớp bản sơ bộ
+  const scopeMarks = new Map<string, HeadingMark>(profile.heading_map.flatMap((h) => (h.scope_label ? [[h.block_id, { scope_label: h.scope_label }] as const] : [])))
+  const structure = applyScopeLabels(compareTargetStructure(layout, withContent, stripRecord(seeded), intent, undefined, { emptied, outOfScope }), scopeMarks, entryOfHeading, withContent)
   // Kế hoạch đọc Spine đã nạp dữ liệu: mục trích không ra gì thì vẫn là "thiếu", đừng đánh dấu step đã xong
   const plan = buildStepPlan(layout, sectionsWithContent(authoredBlocks), stripRecord(seeded))
   // FLF-252: quyền của ma trận không khớp màn / vai trò nào ⇒ cờ vàng (trước đây bỏ im lặng), neo vào bảng phân quyền
