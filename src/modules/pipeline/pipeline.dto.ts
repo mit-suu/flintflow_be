@@ -654,11 +654,15 @@ export const screenRangeSchema = z.object({
   credits_min: z.number().min(0),
   credits_max: z.number().min(0),
   inputs: z.object({ goals: z.number().int(), other_requirements: z.number().int(), feature_notes: z.number().int(), total: z.number().int() }),
+  /** FLF-485: căn cứ của dải — ghi chú quy mô trong Brief hay đầu vào S-1. */
+  basis: z.enum(["scale_note", "inputs"]),
   estimated: z.literal(true)
 })
 
 export const runEstimateUnitSchema = z.object({
   unit: z.string().min(1),
+  /** FLF-485 (#18): nhãn người dùng đọc được (tên màn / nhãn giai đoạn) để FE không hiện mã đơn vị. */
+  label: z.string(),
   steps: z.number().int().min(0),
   ai_steps: z.number().int().min(0),
   interview_credits: z.number().min(0),
