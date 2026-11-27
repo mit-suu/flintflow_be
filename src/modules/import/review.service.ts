@@ -85,6 +85,18 @@ export const sectionsNeedingAiReview = (structure: Pick<TargetStructure, "sectio
   ...new Set([...reviewInputSections(structure), ...redFlaggedPresentSections(structure, flags)])
 ]
 
+/**
+ * Cờ đỏ chưa gỡ của các mục đang rà, đưa cho AI để đề xuất cách sửa (BF §3.1.2 "Mỗi phát hiện: AI đề xuất cách sửa"; §5.4). AI không quyết
+ * định cờ đỏ — chỉ đề xuất. `ref` = `target_id` của cờ (thiếu ⇒ id cờ): finding đề xuất mang đúng `ref` làm `target_id`. Mục Ngoài phạm vi
+ * không được rà nên không có mặt ở đây.
+ */
+export const redFlagsForPrompt = (spine: Pick<Spine, "flags">, sectionIds: readonly string[]): string =>
+  JSON.stringify(
+    spine.flags
+      .filter((f) => f.level === "red" && f.resolved_at === null && sectionIds.includes(f.section_id))
+      .map((f) => ({ ref: f.target_id ?? f.id, rule: f.rule_id, section_id: f.section_id, message: f.message }))
+  )
+
 const reviewBlocks = async (projectId: string, sectionIds: readonly string[]): Promise<CheckBlock[]> =>
   DocBlock.find({
     projectId,
@@ -149,6 +161,7 @@ const runReviewBatches = async (
     return withMeteredAi<FindingsOutput>({ projectId, userId, stepId: batch.step_id }, ActionType.IMPORT_REVIEW_EXISTING, {
       section_ids: batch.section_ids.join(", "),
       projection: semanticProjection(spine),
+      red_flags: redFlagsForPrompt(spine, batch.section_ids),
       blocks: batch.lines
     })
   })

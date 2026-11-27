@@ -394,6 +394,9 @@ describe("dự án chuyển từ FPT (R9)", () => {
   it("mẫu khác ngôn ngữ ⇒ chỉ đổi ngôn ngữ tài liệu: không dịch Spine, không credit, không đặt nền nguyên văn", async () => {
     const { seeded, projectId } = await importedProject()
     await Project.updateOne({ _id: projectId }, { $set: { converted_from: "fpt" } })
+    // Dự án tạo bằng chat rồi chuyển sang import (FLF-318) không có file nền: hồ sơ chỉ là khung tối thiểu, không `source_file_ref`.
+    // Dự án có file đã tải lên rồi ký baseline (chế độ 3/4) cũng mang `converted_from = fpt` nhưng BỊ KHOÁ ngôn ngữ (BF §1, dòng 52).
+    await TemplateProfile.updateOne({ projectId }, { $unset: { source_file_ref: "", flow2_entry_at: "" } })
     const visionBefore = (await spineRepository.get(projectId))!.project.vision
     const templateId = await publishTemplate(seeded.token, seeded.orgId, await makeSrsDocx({ extraBody: VI_BODY }))
     const startBalance = await balanceOf(seeded.orgId)
