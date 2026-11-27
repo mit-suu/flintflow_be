@@ -54,6 +54,10 @@ describe("hasBaseFile + source_language (FLF-466, BF §3.7 bảng 4 loại dự 
     ["chế độ 2 chưa áp mẫu nào (kể cả đã chuyển, converted_from = fpt)", [{ mode: "import", converted_from: "fpt" }, null], false],
     ["chế độ 2 chưa chuyển", [{ mode: "fpt", converted_from: null }, null], false],
     ["chế độ 2 đã chuyển + đã áp một lần đổi mẫu không phải chỉ đổi ngôn ngữ (migrated_base_at)", [{ mode: "import", converted_from: "fpt" }, { migrated_base_at: new Date() }], true],
+    ["chế độ 3/4 đã ký baseline (converted_from = fpt, có source_file_ref)", [{ mode: "import", converted_from: "fpt" }, { source_file_ref: "f1", migrated_base_at: null }], true],
+    ["chế độ 3 Luồng 2 đã ký baseline (flow2_entry_at)", [{ mode: "import", converted_from: "fpt" }, { flow2_entry_at: new Date() }], true],
+    ["dự án tạo bằng chat đã chuyển, không file nền (source_file_ref = null)", [{ mode: "import", converted_from: "fpt" }, { source_file_ref: null, migrated_base_at: null }], false],
+    ["dự án theo mẫu tổ chức (template_ref) đã chuyển", [{ mode: "import", converted_from: "fpt", template_ref: "t1" }, null], true],
     ["chế độ 2 đã áp mẫu nhưng chỉ đổi ngôn ngữ (migrated_base_at = null)", [{ mode: "import", converted_from: "fpt" }, { migrated_base_at: null }], false]
   ]
   it.each(cases)("%s ⇒ %s", (_name, args, expected) => {

@@ -314,7 +314,7 @@ export const isDocumentLanguageLocked = async (
   projectId: string,
   project: Pick<IProject, "mode" | "converted_from"> & { template_ref?: unknown }
 ): Promise<boolean> => {
-  const profile = await TemplateProfile.findOne({ projectId }).select("source_file_ref migrated_base_at").lean()
+  const profile = await TemplateProfile.findOne({ projectId }).select("source_file_ref migrated_base_at flow2_entry_at").lean()
   return hasBaseFile(project, profile)
 }
 
@@ -335,7 +335,7 @@ export const setDocumentLanguage = async (
   // (đổi mẫu, FLF-466). Chưa có file nền (tạo mới, kể cả đã chuyển mode 1 sau baseline) vẫn đổi được
   const [current, profile] = await Promise.all([
     Project.findOne({ _id: projectId, organizationId: orgId }).select("mode converted_from template_ref").lean(),
-    TemplateProfile.findOne({ projectId }).select("source_file_ref migrated_base_at").lean()
+    TemplateProfile.findOne({ projectId }).select("source_file_ref migrated_base_at flow2_entry_at").lean()
   ])
   if (!current) throw notFound()
   if (hasBaseFile(current, profile)) throw new Mode1Error(DOCUMENT_LANGUAGE_LOCKED, "Dự án có file nền dùng ngôn ngữ của file, chỉ đổi khi chuyển sang mẫu khác ngôn ngữ.")

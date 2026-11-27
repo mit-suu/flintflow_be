@@ -134,6 +134,18 @@ describe("PATCH /projects/:id/document-language", () => {
     expect(one.body.data.documentLanguage).toBe("en")
   })
 
+  it("FLF-456: dự án chế độ 3/4 đã ký baseline (mode import, converted_from = fpt, có source_file_ref) ⇒ 409", async () => {
+    const created = await request(app).post("/api/v1/projects").set(bearer(seeded.token)).send({ name: "Đã baseline", documentLanguage: "vi" })
+    const id = String(created.body.data._id)
+    await Project.updateOne({ _id: id }, { mode: "import", converted_from: "fpt" })
+    await TemplateProfile.collection.insertOne({ projectId: new mongoose.Types.ObjectId(id), source_file_ref: "uploads/srs-goc.docx" })
+    const res = await patchLanguage(id, seeded.token, { documentLanguage: "en" })
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe("DOCUMENT_LANGUAGE_LOCKED")
+    expect((await Project.findById(id).lean())?.documentLanguage).toBe("vi")
+    expect((await request(app).get(`/api/v1/projects/${id}`).set(bearer(seeded.token))).body.data.document_language_locked).toBe(true)
+  })
+
   it("dự án tạo mới không file ⇒ đổi được, document_language_locked = false", async () => {
     const created = await request(app).post("/api/v1/projects").set(bearer(seeded.token)).send({ name: "Không file", documentLanguage: "en" })
     const id = String(created.body.data._id)
