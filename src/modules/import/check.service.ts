@@ -24,7 +24,7 @@ import type { Flag, Spine, SpineRecord } from "../spine/spine.types.js"
 import { Usage } from "../spine/usage.model.js"
 import { IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { DocBlock } from "./doc-block.model.js"
-import { chunkBlocks, isTemplateOnlyProject } from "./extract.service.js"
+import { chunkBlocks, isTemplateOnlyProject, userStopRequested } from "./extract.service.js"
 import { idKey } from "./extracted-entities.js"
 import { FieldAnchor } from "./field-anchor.model.js"
 import type { MentionEntity } from "./import.constants.js"
@@ -383,13 +383,22 @@ export const loadCheckInput = async (projectId: string, source: StructureSource 
   }
 }
 
-type CheckFailure = Extract<MeteredResult<FindingsOutput>, { ok: false }>
+type CheckFailure = Extract<MeteredResult<FindingsOutput>, { ok: false }> | { ok: false; reason: "user" }
+type StopCheck = () => Promise<boolean>
+const neverStopped: StopCheck = async () => false
 
 /**
  * 1.11 map + reduce. Trả lượt lỗi (để đặt `paused`) hoặc `null` khi đã xong hết. Lượt đã trừ credit ở lần chạy trước
  * (`done`) không gọi lại; lô xong trước lô lỗi vẫn được ghi cờ.
  */
-const runSemanticCheck = async (projectId: string, importId: string, userId: string, done: ReadonlySet<string>, guard: CheckGuard): Promise<CheckFailure | null> => {
+const runSemanticCheck = async (
+  projectId: string,
+  importId: string,
+  userId: string,
+  done: ReadonlySet<string>,
+  guard: CheckGuard,
+  stopped: StopCheck = neverStopped
+): Promise<CheckFailure | null> => {
   const spine = await loadSpine(projectId)
   const [{ blocks, scope: checkScope }, anchors, sectioned] = await Promise.all([
     loadCheckInput(projectId),
@@ -405,6 +414,8 @@ const runSemanticCheck = async (projectId: string, importId: string, userId: str
   const mapStarted = Date.now()
   const results = await runLimited(pending, parallelBatches(), async (batch) => {
     await guard()
+    // BF §2 "Dừng giữa chừng": Code ngắt lượt gọi kế tiếp, lô chưa mở chưa gọi AI và chưa trừ credit (lô đã trừ giữ nguyên)
+    if (await stopped()) return { ok: false as const, reason: "user" as const }
     return withMeteredAi<FindingsOutput>({ projectId, userId, stepId: batch.step_id }, ActionType.IMPORT_SEMANTIC_CHECK, {
       section_ids: batch.section_ids.join(", "),
       // Không có anchor (dữ liệu trước FLF-171) ⇒ không biết phần tử thuộc lô nào: gửi đủ như trước, vẫn có trần ký tự
@@ -433,6 +444,7 @@ const runSemanticCheck = async (projectId: string, importId: string, userId: str
   const hasContent = spine.use_cases.length + spine.functions.length + spine.nfrs.length + spine.business_rules.length > 0
   if (done.has(CROSS_CHECK_STEP) || !hasContent) return null
   await guard()
+  if (await stopped()) return { ok: false, reason: "user" }
   const crossStarted = Date.now()
   const now = await loadSpine(projectId)
   const cross = await withMeteredAi<FindingsOutput>({ projectId, userId, stepId: CROSS_CHECK_STEP }, ActionType.IMPORT_CROSS_CHECK, {
@@ -467,11 +479,12 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string, gua
     // BF §2 "Báo trước khi chạy hàng loạt": credit 1.9 lúc chạy (cấu trúc đích cuối) lớn hơn số màn đọc khung đã báo (bản sơ bộ,
     // vd sơ bộ chế độ 3/4 ⇒ 0, sau finalize chế độ 1) ⇒ dừng, báo lại số mới; bấm tiếp tục = xác nhận đúng số đó
     if (await needsCreditReconfirm(projectId)) {
-      doc.paused = { reason: "user", at: new Date() }
+      // Lý do riêng (không phải "user"): FE phân biệt "cần xác nhận credit 1.9" với "người dùng tự bấm Dừng"
+      doc.paused = { reason: "credit_notice", at: new Date() }
       await doc.save()
       return false
     }
-    const failure = await runSemanticCheck(projectId, String(doc._id), userId, done, guard)
+    const failure = await runSemanticCheck(projectId, String(doc._id), userId, done, guard, () => userStopRequested(doc))
     if (failure) {
       doc.paused = { reason: failure.reason, at: new Date() }
       await doc.save()
