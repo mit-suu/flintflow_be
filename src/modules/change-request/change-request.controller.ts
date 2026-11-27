@@ -40,6 +40,7 @@ import { handleCrMessage } from "./cr-message.service.js"
 import { runImpact } from "./cr-impact.service.js"
 import { decideGroup } from "./decision.service.js"
 import { patchLocation } from "./location.service.js"
+import { crDocumentDiff } from "./cr-document-diff.service.js"
 import { diagramPreview } from "./diagram-preview.service.js"
 import type { OriginalDiagramKind } from "../spine/spine.types.js"
 import { addMaterial, removeMaterial } from "./material.service.js"
@@ -316,6 +317,12 @@ export const locationDiagramPreview = mode1Handler(async (req, res) => {
   res.setHeader("X-Diagram-Parts", String(preview.parts))
   res.setHeader("Access-Control-Expose-Headers", "X-Diagram-Parts")
   return res.status(200).send(preview.image)
+})
+
+/** FLF-495 (#23b): đề xuất của CR tô lên tài liệu — dựng khô hai bản (hiện tại / sau CR), không ghi, không gọi AI. Ai xem được CR thì xem được. */
+export const documentDiff = mode1Handler(async (req, res) => {
+  const { cr } = await loadCr(req)
+  return sendSuccess(res, 200, await crDocumentDiff(cr))
 })
 
 /** BPMN 3.9 (mode 1 v3): sửa đề xuất một vị trí bằng skill của step sở hữu, theo hướng của BA — chỉ ghi đề xuất. */

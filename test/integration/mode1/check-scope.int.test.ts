@@ -13,11 +13,13 @@ import { fakeMode1 } from "../../helpers/mode1.js"
 import { importAtBaselining } from "../../helpers/mode1-import-p4.js"
 import { p, styled } from "../../../src/modules/docx-ooxml/testing/make-docx.js"
 import { startFinalize, waitForFinalize } from "../../../src/modules/import/finalize-jobs.js"
-import { estimateCheckCalls, runImportCheck } from "../../../src/modules/import/check.service.js"
+import { estimateCheckCalls, loadCheckInput, runImportCheck, semanticBatches } from "../../../src/modules/import/check.service.js"
 import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { Usage } from "../../../src/modules/spine/usage.model.js"
+import { env } from "../../../src/config/env.js"
+import { requestStop } from "../../../src/modules/import/extract-jobs.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 
 let semanticCalls = 0
@@ -152,7 +154,8 @@ describe("FLF-454: credit 1.9 lúc chạy lớn hơn số đã báo ở màn đ�
     await ImportedDocument.updateOne({ _id: importId }, { $set: { status: "checking" } })
     const doc = (await ImportedDocument.findById(importId))!
     expect(await runImportCheck(doc, userId)).toBe(false)
-    expect(doc.paused?.reason).toBe("user")
+    // Lý do riêng: FE phân biệt "báo lại credit" với "người dùng tự bấm Dừng"
+    expect(doc.paused?.reason).toBe("credit_notice")
     expect((await TemplateProfile.findOne({ projectId }).lean())!.check_credit_notice?.credits).toBeGreaterThan(0)
     expect(semanticCalls).toBe(0)
 
@@ -160,5 +163,78 @@ describe("FLF-454: credit 1.9 lúc chạy lớn hơn số đã báo ở màn đ�
     expect(await runImportCheck(doc, userId)).toBe(true)
     expect(semanticCalls).toBeGreaterThan(0)
     expect(doc.status).toBe("gap_review")
+  })
+})
+
+describe("FLF-454: Dừng ở bước kiểm tra AI (BF §2 'Dừng giữa chừng')", () => {
+  it("Dừng giữa lúc nhiều lô ⇒ lô chưa mở không gọi AI, không trừ credit; Tiếp tục chạy phần còn lại, mỗi step trừ một lần", async () => {
+    const { projectId, userId, importId } = await importAtBaselining()
+    await setIntent(projectId, "free")
+    await TemplateProfile.updateOne(
+      { projectId },
+      {
+        $set: {
+          "structure_preview.resolved_mode": 1,
+          target_structure: { target: "fpt", intent: "free", resolved_mode: 1, sections: [], missing: [], compared_at: new Date().toISOString() }
+        }
+      }
+    )
+    // Thêm khối chữ lớn ⇒ nhiều lô
+    const last = (await DocBlock.findOne({ projectId }).sort({ "anchor.ordinal": -1 }).lean())!
+    const big = "Hệ thống phải xử lý yêu cầu của người dùng. ".repeat(500)
+    await DocBlock.insertMany(
+      Array.from({ length: 10 }, (_, i) => i).map((i) => ({
+        projectId: last.projectId,
+        doc_version: last.doc_version,
+        block_id: `B${9000 + i}`,
+        kind: "paragraph",
+        anchor: { xml_path: `/big/${i}`, ordinal: last.anchor.ordinal + 1 + i },
+        text: big,
+        text_hash: `big-${i}`,
+        section_id: last.section_id ?? null
+      }))
+    )
+    const input = await loadCheckInput(projectId)
+    const total = semanticBatches(input.blocks, 48_000, input.scope).length
+    expect(total).toBeGreaterThanOrEqual(2)
+
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { status: "checking" } })
+    const doc = (await ImportedDocument.findById(importId))!
+    const savedConcurrency = env.IMPORT_CHECK_CONCURRENCY
+    env.IMPORT_CHECK_CONCURRENCY = 1
+    try {
+      // Người dùng bấm Dừng khi lô đầu đang chạy (qua đúng đường requestStop)
+      let stopped = false
+      mockOverrides.before = async (prompt) => {
+        if (stopped || !prompt.includes("# Import Semantic Check")) return
+        stopped = true
+        await requestStop(projectId, importId)
+      }
+      expect(await runImportCheck(doc, userId)).toBe(false)
+      expect(doc.paused?.reason).toBe("user")
+      // Lô đang gọi dở chạy xong (đã trừ), các lô chưa mở không gọi AI; không có lượt kiểm chéo
+      expect(semanticCalls).toBe(1)
+      const deducted = async (): Promise<string[]> => (await Usage.find({ projectId, step_id: /^I-1\.11/, state: "deducted" }).distinct("step_id")).sort()
+      expect(await deducted()).toHaveLength(1)
+
+      // Tiếp tục: chạy phần còn lại, lô đã trừ không chạy lại
+      mockOverrides.before = undefined
+      expect(await runImportCheck(doc, userId)).toBe(true)
+      // Mỗi lô trừ đúng một lần (lô 1 không chạy lại); lượt kiểm chéo chỉ chạy khi Spine có phần tử
+      expect(semanticCalls).toBeGreaterThanOrEqual(total)
+      const batchSteps = (await deducted()).filter((id) => /^I-1\.11:\d+$/.test(id))
+      expect(batchSteps).toHaveLength(total)
+      expect(await Usage.countDocuments({ projectId, step_id: /^I-1\.11:\d+$/, state: "deducted" })).toBe(total)
+    } finally {
+      env.IMPORT_CHECK_CONCURRENCY = savedConcurrency
+    }
+  })
+
+  it("requestStop nhận checking, từ chối bước khác", async () => {
+    const { projectId, importId } = await importAtBaselining()
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { status: "checking", paused: null } })
+    expect((await requestStop(projectId, importId)).paused?.reason).toBe("user")
+    await ImportedDocument.updateOne({ _id: importId }, { $set: { status: "gap_review", paused: null } })
+    await expect(requestStop(projectId, importId)).rejects.toMatchObject({ code: "IMPORT_INVALID_STATE" })
   })
 })

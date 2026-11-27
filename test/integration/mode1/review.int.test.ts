@@ -114,6 +114,75 @@ describe("FLF-453 - nhánh 2: có mục cờ đỏ (Code bắt ở I-5)", () => 
   })
 })
 
+describe("FLF-453 - cờ đỏ của mục được rà có đề xuất của AI (BF §3.1.2, §5.4)", () => {
+  const vagueFunction = (prompt: string) => {
+    const b = /\[(B\d{4,})\]/.exec(prompt)?.[1] ?? "B0001"
+    return JSON.stringify({
+      section_id: /Section \(registry id\): (\S+)/.exec(prompt)![1],
+      items: [{ entity: "functions", key: null, value: { trigger: "The system should respond fast", normal: ["Enter email", "Submit"], abnormal: ["Wrong password"] }, confidence: 0.9, field_confidence: {}, source_block_ids: [b] }],
+      unmapped_block_ids: []
+    })
+  }
+  const redFlagsOf = (prompt: string): { ref: string; rule: string; section_id: string; message: string }[] => {
+    const line = prompt.split(/\r?\n/).find((l) => l.includes("Open red flags of these sections"))!
+    return JSON.parse(line.slice(line.indexOf(": [") + 2).trim())
+  }
+
+  it("prompt gửi AI chứa đúng cờ đỏ chưa gỡ của các mục đang rà; finding mang target_id của cờ ⇒ cờ vàng import_review có Đề xuất", async () => {
+    const reviewPrompts: string[] = []
+    let redTarget: string | null = null
+    mockOverrides.next = (prompt) => {
+      if (prompt.includes("# Import Extract") && /Section \(registry id\): function:/.test(prompt)) return vagueFunction(prompt)
+      if (prompt.includes("# Import Review Existing")) {
+        reviewPrompts.push(prompt)
+        const flags = redFlagsOf(prompt)
+        redTarget ??= flags[0]?.ref ?? null
+        return JSON.stringify({ findings: flags.map((f) => ({ rule: "red_flag_fix", section_id: f.section_id, target_id: f.ref, message: "Câu mơ hồ. Đề xuất: viết rõ thời gian phản hồi.", block_ids: [] })) })
+      }
+      return fakeMode1(prompt)
+    }
+    const { projectId, importId, userId } = await toReviewGate("fixed", {
+      srs: { extraBody: styled("u2", "5.10 Document Conventions") + p("[Describe the conventions.]") }
+    })
+    const before = (await spineRepository.get(projectId))!
+    const reviewed = new Set((await TemplateProfile.findOne({ projectId }).lean())!.review_sections)
+    const red = before.flags.filter((f) => f.level === "red" && f.resolved_at === null && reviewed.has(f.section_id))
+    expect(red.some((f) => f.rule_id === "vague_wording")).toBe(true)
+    const headers = await asHttp(projectId, userId)
+    const run = await request(app).post(`/api/v1/projects/${projectId}/import/review/run`).set(headers).send({ import_id: importId })
+    expect(run.status, JSON.stringify(run.body.error)).toBe(200)
+    expect(reviewPrompts.length).toBeGreaterThan(0)
+    const sent = reviewPrompts.flatMap(redFlagsOf)
+    // Đủ và chỉ các cờ đỏ chưa gỡ thuộc mục đang rà
+    expect(sent.every((f) => reviewed.has(f.section_id))).toBe(true)
+    expect(sent.map((f) => f.message).sort()).toEqual(red.map((f) => f.message).sort())
+    // Finding đề xuất ⇒ cờ vàng import_review gắn target_id của cờ đỏ
+    expect(redTarget).toBeTruthy()
+    const after = (await spineRepository.get(projectId))!
+    const fix = after.flags.find((f) => f.rule_id === "import_review" && f.target_id === redTarget)
+    expect(fix).toMatchObject({ level: "yellow" })
+    expect(fix!.message).toContain("Đề xuất:")
+  })
+
+  it("mục không có cờ đỏ ⇒ red_flags rỗng", async () => {
+    const { projectId, importId, userId } = await toReviewGate("fixed", {
+      srs: { extraBody: styled("u2", "5.10 Document Conventions") + p("[Describe the conventions.]") }
+    })
+    await TemplateProfile.updateOne({ projectId }, { $set: { review_sections: [] } })
+    const headers = await asHttp(projectId, userId)
+    const prompts: string[] = []
+    mockOverrides.next = (prompt) => {
+      if (!prompt.includes("# Import Review Existing")) return fakeMode1(prompt)
+      prompts.push(prompt)
+      return JSON.stringify({ findings: [] })
+    }
+    const run = await request(app).post(`/api/v1/projects/${projectId}/import/review/section`).set(headers).send({ import_id: importId, section_id: "fixed:1", confirm: true })
+    expect(run.status, JSON.stringify(run.body.error)).toBe(200)
+    expect(prompts.length).toBeGreaterThan(0)
+    for (const pr of prompts) expect(redFlagsOf(pr)).toEqual([])
+  })
+})
+
 describe("FLF-453 - nhánh 3: không mục nào cần rà ⇒ bỏ qua vòng rà soát", () => {
   const REPORT3_TEMPLATE = new URL("../../../fixtures/fpt-report3-blank-template.docx", import.meta.url)
 

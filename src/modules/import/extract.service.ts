@@ -1819,8 +1819,8 @@ export const creditEstimateFor = async (
   doc: IImportedDocument,
   opts: { withBalance: boolean }
 ): Promise<(ExtractionEstimate & { check_calls: number; translate_batches: number; reference_documents: number; reference_credits: number; available_credits: number | null }) | null> => {
-  // FLF-454: finalize dừng ở `checking` (paused: user) để báo lại credit 1.9 lớn hơn số đã báo ⇒ trả số mới (chỉ phần kiểm)
-  const recheck = doc.status === "checking" && doc.paused?.reason === "user"
+  // FLF-454: finalize dừng ở `checking` (paused: credit_notice) để báo lại credit 1.9 lớn hơn số đã báo ⇒ trả số mới (chỉ phần kiểm)
+  const recheck = doc.status === "checking" && doc.paused?.reason === "credit_notice"
   if (doc.status !== "mapping_review" && doc.status !== "extracting" && !recheck) return null
   const extraction = await estimateExtraction(projectId, doc)
   if (!extraction) return null

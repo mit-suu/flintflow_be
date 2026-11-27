@@ -372,6 +372,12 @@ describe("setDocumentLanguage (FLF-265)", () => {
     expect(mocks.TemplateProfile.updateOne).toHaveBeenCalledWith({ projectId: PROJECT }, { $set: { language: "vi" } })
   })
 
+  it("FLF-456: dự án tạo bằng chat đã chuyển, profile không có source_file_ref ⇒ vẫn đổi được", async () => {
+    existing({ mode: "import", converted_from: "fpt" }, { source_file_ref: null as any })
+    mocks.Project.findOneAndUpdate.mockResolvedValueOnce({ _id: PROJECT, mode: "import", converted_from: "fpt", documentLanguage: "en" })
+    await expect(projectService.setDocumentLanguage(PROJECT, ORG, "en")).resolves.toMatchObject({ documentLanguage: "en" })
+  })
+
   it("dự án của org khác ⇒ 404 PROJECT_NOT_FOUND", async () => {
     existing(null)
 
@@ -399,6 +405,7 @@ describe("setDocumentLanguage (FLF-265)", () => {
   it.each([
     ["dự án tạo từ mẫu của org (template_ref)", { mode: "fpt", template_ref: { template_id: "T1", version: 1 } }, null],
     ["dự án Luồng 2 từ file tải lên (chế độ 3 / 4, chưa baseline)", { mode: "fpt" }, { source_file_ref: "file-1" }],
+    ["dự án chế độ 3/4 đã ký baseline 1.0 (converted_from = fpt, có source_file_ref)", { mode: "import", converted_from: "fpt" }, { source_file_ref: "file-1" }],
     ["dự án đã áp mẫu mới (đổi mẫu)", { mode: "import", converted_from: "fpt" }, { migrated_base_at: new Date() }]
   ])("%s ⇒ 409 DOCUMENT_LANGUAGE_LOCKED, không ghi", async (_name, project, profile) => {
     existing(project, profile)

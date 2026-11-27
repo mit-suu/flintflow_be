@@ -1022,6 +1022,37 @@ describe("chế độ 3 - mẫu bắt buộc (FLF-278 trên FLF-335/336)", () =>
     expect(filled.filter((f) => f.rule_id === "template_section_empty").map((f) => f.section_id)).toEqual(["custom:CS01"])
   })
 
+  it("FLF-455: mục riêng Ngoài phạm vi không bị template_section_empty / original_text_mentions_changed; mục trống trong phạm vi vẫn bị; nhãn tay in_scope (không còn trong tập) lại bị kiểm", async () => {
+    const { readFileSync } = await import("node:fs")
+    const base = JSON.parse(readFileSync(new URL("../../../fixtures/spine-fixture-19-screens.json", import.meta.url), "utf8"))
+    const block = (text: string) => ({ kind: "paragraph" as const, text, rows: null, image_ref: null })
+    const uc = base.use_cases[0]
+    const spine = {
+      ...base,
+      use_cases: base.use_cases.map((u: { id: string }) => (u.id === uc.id ? { ...u, name: "Tên mới" } : u)),
+      custom_sections: [
+        { id: "CS01", heading: "Dự toán chi phí", level: 2, blocks: [], source: "import" },
+        { id: "CS02", heading: "Rủi ro", level: 2, blocks: [], source: "import" },
+        { id: "CS03", heading: "Ghi chú", level: 2, blocks: [block(`Xem ${uc.name}`)], source: "import" }
+      ]
+    }
+    const segments = [
+      { section_id: "custom:CS03", parts: [{ kind: "original", custom_id: "CS03", diagrams: [], mentions: [{ path: `use_cases[id=${uc.id}]`, array: "use_cases", id: uc.id, name: uc.name }] }], known: [] }
+    ] as never
+    const profile = (outOfScope?: string[]) => ({
+      ruleProfile: { exclude: new Set<string>(), downgrade: new Set<string>(), templateLayout: new Set(["custom:CS01", "custom:CS02", "custom:CS03"]), sectionSegments: segments, ...(outOfScope ? { outOfScope: new Set(outOfScope) } : {}) }
+    })
+    const sections = (rule: string, o?: string[]) => byRule(runDeterministicCheck(spine, [], profile(o)), rule).map((f) => f.section_id)
+    // Không có Ngoài phạm vi ⇒ như cũ (đủ hai cờ đỏ)
+    expect(sections("template_section_empty")).toEqual(["custom:CS01", "custom:CS02"])
+    expect(sections("original_text_mentions_changed")).toEqual(["custom:CS03"])
+    // CS01 và CS03 Ngoài phạm vi ⇒ không bắn; CS02 trống trong phạm vi vẫn bắn
+    expect(sections("template_section_empty", ["custom:CS01", "custom:CS03"])).toEqual(["custom:CS02"])
+    expect(sections("original_text_mentions_changed", ["custom:CS01", "custom:CS03"])).toEqual([])
+    // Nhãn tay in_scope: mục rời tập Ngoài phạm vi ⇒ bị kiểm lại
+    expect(sections("template_section_empty", ["custom:CS03"])).toEqual(["custom:CS01", "custom:CS02"])
+  })
+
   it("mẫu cố định không có chỗ in sơ đồ (Use Case Diagram) ⇒ sơ đồ vẽ lỗi / cũ không thành cờ chặn release", () => {
     const d = FIXTURE.diagrams.find((x) => x.kind === "usecase")!
     const errored = variant((s) => Object.assign(s.diagrams.find((x) => x.id === d.id)!, { render_status: "error", error: "syntax" }))

@@ -44,4 +44,4 @@ stub: false
 ## Rules
 
 - Colours: fill `#7ACFF5`, black border and text, Arial, no shadow - the theme is written into the source (no `!include`). Labels are English; the localized document redraws from the translated Spine (`:Hệ thống`, `ngược lại`).
-- Caption: `System Sequence Diagram - <function name>` (component level: `Sequence Diagram - <function name>`) and one description paragraph under the figure. Samples: `docs/diagram_guideline/sequence/`, `docs/diagram_image_test/sequence/`.
+- Caption: `System Sequence Diagram - <function name>` (component level: `Sequence Diagram - <function name>`) and one description paragraph under the figure.

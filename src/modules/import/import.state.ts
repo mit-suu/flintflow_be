@@ -70,8 +70,11 @@ export const IMPORT_STATUS_LABELS: Readonly<Record<ImportStatus, string>> = {
   change_requested: "Đang sửa qua change request"
 }
 
-/** `user`: người dùng bấm Dừng lúc đang đọc nội dung (I-4) — vòng đọc dừng sau lượt AI đang chạy, không gọi thêm. */
-export const IMPORT_PAUSE_REASONS = ["credits", "resume_later", "user"] as const
+/**
+ * `user`: người dùng bấm Dừng lúc đang đọc nội dung (I-4) hoặc kiểm tra AI (1.9) — vòng dừng sau lượt AI đang chạy, không gọi thêm.
+ * `credit_notice` (FLF-454): `checking` dừng để báo lại credit 1.9 thực tế lớn hơn số đã báo; Tiếp tục = xác nhận số đó.
+ */
+export const IMPORT_PAUSE_REASONS = ["credits", "resume_later", "user", "credit_notice"] as const
 export type ImportPauseReason = (typeof IMPORT_PAUSE_REASONS)[number]
 
 export const IMPORT_TRANSITIONS: Readonly<Record<ImportStatus, readonly ImportStatus[]>> = {

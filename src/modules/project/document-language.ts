@@ -44,9 +44,12 @@ export const sourceLanguageOf = (
  */
 export const hasBaseFile = (
   project: Pick<DocumentLanguageProject, "mode" | "converted_from"> & { template_ref?: unknown },
-  profile?: { source_file_ref?: string | null; migrated_base_at?: Date | string | null } | null
+  profile?: { source_file_ref?: string | null; migrated_base_at?: Date | string | null; flow2_entry_at?: Date | string | null } | null
 ): boolean =>
   (project.mode === "import" && project.converted_from !== "fpt") ||
   Boolean(project.template_ref) ||
   Boolean(profile?.migrated_base_at) ||
-  (Boolean(profile?.source_file_ref) && project.converted_from !== "fpt")
+  // FLF-456: file nền thật vẫn khoá sau khi ký 1.0 (converted_from = fpt): dự án chế độ 3/4 giữ `source_file_ref` của file đã tải;
+  // dự án chế độ 2 chuyển sang import chỉ có profile tối thiểu (không file nền) nên không bị khoá.
+  Boolean(profile?.source_file_ref) ||
+  Boolean(profile?.flow2_entry_at)

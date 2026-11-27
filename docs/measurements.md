@@ -826,3 +826,15 @@ input có ảnh gốc. Cùng 10 màn, thêm kiểu `new` = màn không có ảnh
 - Đầu ra Salt dao động giữa hai lượt (1 071 / 1 193, ~10%): so sánh dưới 10% coi là nhiễu.
 - Màn lỗi rơi về bảng Function: `new` SCR-05, `original` SCR-07 và SCR-13 (SCR-13 lỗi ở cả hai lượt). `screen_images` của
   `system` 6/8: lượt sai trả rỗng ⇒ code dùng regex chú thích, vẫn đúng ảnh (mỗi mục 1 ảnh).
+
+## FLF-495: `GET …/:crId/document-diff` (xem đề xuất của CR trên tài liệu)
+
+Đo 26/11/2026 trên CR-004 của TechMart (đang `proposing`, 40 vị trí, 128 điểm đổi / 8 mục), máy dev, Mongo Atlas dev.
+
+| Lần | Thời gian |
+|---|---|
+| Đầu (dựng khô hai bản tài liệu + so + 3 lượt đọc DB) | 0,5 s |
+| Sau (trúng cache, vẫn đọc Spine / layout / vị trí để dựng khoá) | 0,2 s |
+
+- Đạt ngưỡng plan (< 2 s lần đầu, < 300 ms lần sau) ⇒ không cần thêm `onlySections` vào `buildLayoutSections`: dựng đủ mọi mục hai lần vẫn chưa tới 0,5 s.
+- Lần đo đầu của CR đã ghi (`written`) tốn 2,0 s do kết nối Mongo / nạp module nguội; đề xuất đã nằm trong Spine nên không còn thay đổi để tô.

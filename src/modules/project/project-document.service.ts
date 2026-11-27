@@ -68,19 +68,12 @@ export const uploadProjectDocument = async (
 
   const project = await getProjectById(projectId, orgId)
 
-  const allowedMimeTypes = new Set([
-    "application/pdf",
-    "text/plain",
-    "text/markdown",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/msword"
-  ])
-
   const allowedExtensions = new Set([".pdf", ".txt", ".md", ".docx", ".doc"])
   const originalName = file.originalname || ""
   const extension = originalName.slice(originalName.lastIndexOf("."))?.toLowerCase() || ""
 
-  if (!allowedMimeTypes.has(file.mimetype) && !allowedExtensions.has(extension)) {
+  // FLF-458 (BF: tài liệu tham khảo không nhận ảnh): đuôi file quyết định — chỉ nhận đuôi trong danh sách, mime gửi kèm không cứu được đuôi sai
+  if (!allowedExtensions.has(extension)) {
     throw new ApiError(400, "Chỉ hỗ trợ file PDF, DOCX, MD hoặc TXT.", "UNSUPPORTED_FILE_TYPE")
   }
 

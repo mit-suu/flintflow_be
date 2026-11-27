@@ -44,6 +44,13 @@ const DETAIL_FIELDS = ["metric", "threshold"] as const
  */
 const STEP_LIST_FIELDS = ["normal", "abnormal"] as const
 
+/**
+ * Mã tài liệu của phần tử: `id` khi là mã khách, không thì `code`. Thông báo của dự án tải SRS lên giữ `id` nội bộ, mã
+ * trong tài liệu (MSG70) nằm ở `code` — thiếu nhánh này thì thẻ CR xoá thông báo có chữ rỗng khi bảng không có cột nội dung.
+ */
+const docIdOf = (value: Row): string =>
+  [value.id, value.code].find((v): v is string => typeof v === "string" && DOC_ID.test(v)) ?? ""
+
 const blockText = (b: CustomBlock): string => {
   if (b.kind === "table") return (b.rows ?? []).map((r) => r.join(" | ")).join("\n")
   if (b.kind === "image") return b.text ? `[${b.text}]` : "[hình]"
@@ -62,7 +69,7 @@ const blocksText = (blocks: readonly CustomBlock[]): string => blocks.map(blockT
 export const elementText = (value: unknown): string => {
   if (isRow(value) && Array.isArray(value.blocks)) return blocksText(value.blocks as CustomBlock[])
   if (!isRow(value)) return typeof value === "string" ? value : ""
-  const id = typeof value.id === "string" && DOC_ID.test(value.id) ? value.id : ""
+  const id = docIdOf(value)
   const parts = BODY_FIELDS.map((f) => value[f]).filter((v): v is string => typeof v === "string" && v.trim().length > 0)
   const unique = parts.filter((p, i) => parts.indexOf(p) === i)
   const detail = DETAIL_FIELDS.map((f) => value[f]).filter((v): v is string => typeof v === "string" && v.trim().length > 0).join(": ")
@@ -73,7 +80,9 @@ export const elementText = (value: unknown): string => {
   const validations = Array.isArray(value.validations)
     ? (value.validations as unknown[]).filter(isRow).map((v) => v.statement).filter((s): s is string => typeof s === "string" && s.trim().length > 0)
     : []
-  return [
+  // Luồng sang màn khác (`flow_lines`, do `readable` dựng) mỗi luồng một dòng riêng, không nối bằng " - "
+  const flows = Array.isArray(value.flow_lines) ? value.flow_lines.filter((s): s is string => typeof s === "string" && s.trim().length > 0) : []
+  const main = [
     id && !unique.some((p) => p.includes(id)) ? id : "",
     ...unique,
     detail ? `(${detail})` : "",
@@ -82,6 +91,7 @@ export const elementText = (value: unknown): string => {
   ]
     .filter(Boolean)
     .join(" - ")
+  return [main, ...flows].filter(Boolean).join("\n")
 }
 
 const elementLabel = (value: unknown): string => {
@@ -92,7 +102,7 @@ const elementLabel = (value: unknown): string => {
     const first = blocks.find((b) => blockText(b).trim())
     return clip(caption?.text ?? (first ? blockText(first) : ""))
   }
-  const id = typeof value.id === "string" && DOC_ID.test(value.id) ? value.id : ""
+  const id = docIdOf(value)
   const text = LABEL_FIELDS.map((f) => value[f]).find((v): v is string => typeof v === "string" && v.trim().length > 0) ?? ""
   return clip(id && !text.includes(id) ? `${id} ${text}` : text)
 }
@@ -168,6 +178,24 @@ export const changedProjectFields = (
   return [...new Set([...Object.keys(before), ...Object.keys(after)])].filter((k) => JSON.stringify(before[k] ?? null) !== JSON.stringify(after[k] ?? null))
 }
 
+/**
+ * Phần tử mà chữ chính nằm ở tham chiếu, không ở field chữ: dòng phân quyền chỉ có `role_id` / `screen_id` / `action`
+ * (thiếu nhánh này ⇒ thẻ CR xoá quyền chỉ ghi "Xoá:" trống); màn có luồng sang màn khác (`flow_to`) — CR bỏ một luồng mà
+ * không hiện luồng thì "Trước / Sau" giống nhau. Đổi id sang tên đọc được (`flow_lines`, `name`) trước khi dựng chữ.
+ */
+const readable = (spine: Spine | null, collection: string, value: unknown): unknown => {
+  if (!spine || !isRow(value)) return value
+  const nameOf = (list: readonly { id: string; name: string }[], id: unknown): string => list.find((x) => x.id === id)?.name ?? (typeof id === "string" ? id : "")
+  if (collection === "permissions" && typeof value.action === "string") {
+    return { ...value, name: [nameOf(spine.roles, value.role_id), nameOf(spine.screens, value.screen_id), value.action].filter(Boolean).join(" - ") }
+  }
+  if (collection === "screens" && Array.isArray(value.flow_to)) {
+    const flow_lines = (value.flow_to as unknown[]).filter(isRow).map((f) => `→ ${nameOf(spine.screens, f.to)}${typeof f.trigger === "string" && f.trigger.trim() ? ` (${f.trigger})` : ""}`)
+    return { ...value, flow_lines }
+  }
+  return value
+}
+
 export const locationDisplay = (
   spine: Spine | null,
   path: string,
@@ -176,8 +204,8 @@ export const locationDisplay = (
 ): LocationDisplay => {
   const collection = collectionOf(path)
   const current = spine ? elementValue(spine, path) : undefined
-  const before = parse(proposal?.old_text) ?? current
-  const after = parse(proposal?.new_text)
+  const before = readable(spine, collection, parse(proposal?.old_text) ?? current)
+  const after = readable(spine, collection, parse(proposal?.new_text))
   const removes = (proposal?.spine_ops ?? []).some((o) => isRemoveOp(o) && (o as Row).path === path)
 
   if (isArrayPath(path)) {
