@@ -279,6 +279,16 @@ describe("UC-21 - đính kèm tài liệu tham khảo", () => {
     expect(await ProjectDocument.countDocuments({ projectId: seeded.projectId })).toBe(0)
   })
 
+  it("FLF-458: .png gửi kèm mime text/plain vẫn bị từ chối; .md với mime lạ vẫn nhận", async () => {
+    const png = await upload(analyst, Buffer.from([0x89, 0x50, 0x4e, 0x47]), "diagram.png", "text/plain")
+    expect(png.status).toBe(400)
+    expect(png.body.error.code).toBe("UNSUPPORTED_FILE_TYPE")
+    expect(await ProjectDocument.countDocuments({ projectId: seeded.projectId })).toBe(0)
+
+    const md = await upload(analyst, Buffer.from("# Ghi chú"), "notes2.md", "application/octet-stream")
+    expect(md.status).toBe(201)
+  })
+
   // BUG(UC-21): chỉ nhận .docx, .md, .txt (spec cũng loại PDF ở mục "dropped") vs code: allow-list gồm cả
   // application/pdf, .pdf, .doc (src/modules/project/project-document.service.ts:22-30).
   it.skip("file .pdf ⇒ 400 UNSUPPORTED_FILE_TYPE", async () => {
