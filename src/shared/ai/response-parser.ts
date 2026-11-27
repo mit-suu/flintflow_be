@@ -500,7 +500,9 @@ export const findingsSchema = z.object({
         rule: z.string().min(1),
         section_id: z.string().min(1),
         message: z.string().min(1),
-        block_ids: z.array(blockIdRef).default([])
+        block_ids: z.array(blockIdRef).default([]),
+        /** FLF-453: finding đề xuất cách sửa cho một cờ đỏ (`red_flags` của prompt rà soát) mang `ref` của cờ đó. */
+        target_id: z.string().min(1).nullish()
       })
     )
     .max(30)

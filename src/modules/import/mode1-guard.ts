@@ -58,8 +58,9 @@ export const ruleProfileOf = async (projectId: string): Promise<RuleProfile | un
   const mode1 = project?.mode === "import"
   const fixed = project?.template_intent === "fixed"
   if (!mode1 && !fixed) return undefined
-  const profile = (await TemplateProfile.findOne({ projectId }, { layout: 1, section_segments: 1, section_slices: 1, migration_missing_sections: 1, migrated_base_at: 1, migrated_base_migration_id: 1, "migrated_base_spine.custom_sections": 1 }).lean()) as {
+  const profile = (await TemplateProfile.findOne({ projectId }, { layout: 1, target_structure: 1, section_segments: 1, section_slices: 1, migration_missing_sections: 1, migrated_base_at: 1, migrated_base_migration_id: 1, "migrated_base_spine.custom_sections": 1 }).lean()) as {
     layout?: LayoutEntry[]
+    target_structure?: { sections?: { section_id: string; status: string }[] } | null
     migration_missing_sections?: string[]
     migrated_base_at?: Date | null
     migrated_base_migration_id?: unknown
@@ -69,8 +70,11 @@ export const ruleProfileOf = async (projectId: string): Promise<RuleProfile | un
   } | null
   // FLF-366: đoạn nguyên văn của file import ⇒ cờ vàng khi văn xuôi gốc nhắc tới phần tử đã đổi tên / bị xoá
   const segments = mode1 ? (profile?.section_segments ?? []) : []
+  // FLF-455: mục riêng Ngoài phạm vi không bị luật theo mục riêng kiểm (BF nguyên tắc 4)
+  const outOfScope = new Set((profile?.target_structure?.sections ?? []).filter((x) => x.status === "out_of_scope" && x.section_id.startsWith("custom:")).map((x) => x.section_id))
+  const scopeExtra: Partial<RuleProfile> = outOfScope.size ? { outOfScope } : {}
   const mode1Profile = (extra: Partial<RuleProfile> = {}): RuleProfile =>
-    segments.length || Object.keys(extra).length ? { ...MODE1_RULE_PROFILE, ...extra, ...(segments.length ? { sectionSegments: segments } : {}) } : MODE1_RULE_PROFILE
+    segments.length || Object.keys(extra).length || outOfScope.size ? { ...MODE1_RULE_PROFILE, ...scopeExtra, ...extra, ...(segments.length ? { sectionSegments: segments } : {}) } : MODE1_RULE_PROFILE
   if (!fixed) return mode1Profile()
   const layout = profile?.layout ?? []
   if (!layout.length) return mode1 ? mode1Profile() : undefined
@@ -100,7 +104,7 @@ export const ruleProfileOf = async (projectId: string): Promise<RuleProfile | un
   // Luồng 2 của chế độ 3 (`mode = fpt`, flow2.service): đủ luật tạo mới, chỉ trên các mục của mẫu
   return mode1
     ? mode1Profile({ templateLayout, templateWrappers, templateFilled, ...migrationExtras, templateHeadings })
-    : { exclude: new Set(), downgrade: new Set(), templateLayout, templateWrappers, templateFilled, ...migrationExtras, templateHeadings }
+    : { exclude: new Set(), downgrade: new Set(), ...scopeExtra, templateLayout, templateWrappers, templateFilled, ...migrationExtras, templateHeadings }
 }
 
 type AnchorPart = Partial<Pick<Spine, "custom_sections" | "nfrs" | "glossary">>

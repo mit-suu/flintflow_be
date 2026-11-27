@@ -115,7 +115,21 @@ const similarity = (a: string, b: string): number => {
   return inter / (A.size + B.size - inter)
 }
 
-export const diffBlockLists = (before: DiffBlock[], after: DiffBlock[]): { blocks: BlockDiffEntry[]; summary: BlockDiffSummary; sections: SectionStat[] } => {
+/**
+ * Một cặp theo thứ tự tài liệu mới (khối bị xoá chen vào đúng chỗ): `before` / `after` là chỉ số trong hai danh sách đầu vào.
+ * `unchanged` gồm cả bảng chỉ đổi thứ tự hàng. FLF-495: bên dùng muốn vẽ cả khối không đổi (không chỉ entry đổi).
+ */
+export interface AlignedPair {
+  before: number | null
+  after: number | null
+  change: "unchanged" | "added" | "removed" | "modified" | "moved"
+}
+
+/** `diffBlockLists` kèm `pairs` (cả khối không đổi, đúng thứ tự tài liệu) — FLF-495. */
+export const alignBlockLists = (
+  before: DiffBlock[],
+  after: DiffBlock[]
+): { blocks: BlockDiffEntry[]; summary: BlockDiffSummary; sections: SectionStat[]; pairs: AlignedPair[] } => {
   const matchOfAfter = new Map<number, number>()
   const usedBefore = new Set<number>()
   const beforeById = new Map<string, number>()
@@ -198,6 +212,7 @@ export const diffBlockLists = (before: DiffBlock[], after: DiffBlock[]): { block
   for (const x of after) note(x)
 
   const entries: BlockDiffEntry[] = []
+  const pairs: AlignedPair[] = []
   /** Khối bị xoá chen vào đúng chỗ trong tài liệu: trước khối mới đầu tiên ghép với khối cũ đứng sau nó. */
   const emittedRemoved = new Set<number>()
   const flushRemoved = (upTo: number): void => {
@@ -205,6 +220,7 @@ export const diffBlockLists = (before: DiffBlock[], after: DiffBlock[]): { block
       if (usedBefore.has(k) || emittedRemoved.has(k)) continue
       emittedRemoved.add(k)
       entries.push({ block_id: before[k].block_id, change: "removed", before: before[k].text, ...meta(before[k]) })
+      pairs.push({ before: k, after: null, change: "removed" })
     }
   }
   after.forEach((a, j) => {
@@ -212,18 +228,31 @@ export const diffBlockLists = (before: DiffBlock[], after: DiffBlock[]): { block
     if (i !== undefined && !moved.has(j)) flushRemoved(i)
     if (i === undefined) {
       entries.push({ block_id: a.block_id, change: "added", after: a.text, ...meta(a) })
+      pairs.push({ before: null, after: j, change: "added" })
       return
     }
     const b = before[i]
-    if (moved.has(j)) entries.push({ block_id: b.block_id, change: "moved", before: b.text, after: a.text, ...meta(a) })
-    else if (b.text_hash !== a.text_hash) {
+    if (moved.has(j)) {
+      entries.push({ block_id: b.block_id, change: "moved", before: b.text, after: a.text, ...meta(a) })
+      pairs.push({ before: i, after: j, change: "moved" })
+    } else if (b.text_hash !== a.text_hash) {
       if (a.kind === "table" && b.kind === "table" && a.rows?.length && b.rows?.length && rowDiffable(a.rows, b.rows)) {
         const table = diffTableRows(b.rows, a.rows)
         // Chỉ đổi thứ tự hàng theo cột mã ⇒ không phải thay đổi
-        if (!table) return unchanged(a)
+        if (!table) {
+          pairs.push({ before: i, after: j, change: "unchanged" })
+          return unchanged(a)
+        }
+        pairs.push({ before: i, after: j, change: "modified" })
         entries.push({ block_id: b.block_id, change: "modified", before: b.text, after: a.text, ...meta(a), table })
-      } else entries.push({ block_id: b.block_id, change: "modified", before: b.text, after: a.text, ...meta(a) })
-    } else unchanged(a)
+      } else {
+        pairs.push({ before: i, after: j, change: "modified" })
+        entries.push({ block_id: b.block_id, change: "modified", before: b.text, after: a.text, ...meta(a) })
+      }
+    } else {
+      pairs.push({ before: i, after: j, change: "unchanged" })
+      unchanged(a)
+    }
   })
   flushRemoved(before.length)
   for (const e of entries) note(e)
@@ -231,6 +260,12 @@ export const diffBlockLists = (before: DiffBlock[], after: DiffBlock[]): { block
   return {
     blocks: entries,
     summary: { added: count("added"), removed: count("removed"), modified: count("modified"), moved: count("moved") },
-    sections: [...stats].map(([key, s]) => ({ title: s.title, key, unchanged: s.unchanged }))
+    sections: [...stats].map(([key, s]) => ({ title: s.title, key, unchanged: s.unchanged })),
+    pairs
   }
+}
+
+export const diffBlockLists = (before: DiffBlock[], after: DiffBlock[]): { blocks: BlockDiffEntry[]; summary: BlockDiffSummary; sections: SectionStat[] } => {
+  const { pairs: _pairs, ...result } = alignBlockLists(before, after)
+  return result
 }
