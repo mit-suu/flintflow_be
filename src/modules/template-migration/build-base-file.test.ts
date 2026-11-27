@@ -15,7 +15,8 @@ import {
   emptyGroups,
   forwardPlan
 } from "./base-file-fixtures.test-helper.js"
-import { buildBaseFile, planLayout, type BuildBaseFileInput, type BuildBaseFileResult } from "./build-base-file.js"
+import { alignHeadingKeys, buildBaseFile, planLayout, sourceOf, type BuildBaseFileInput, type BuildBaseFileResult } from "./build-base-file.js"
+import { ApiError } from "../../shared/utils/api-error.js"
 import { validateDocxStructure } from "./ooxml-transplant.js"
 
 const text = async (buf: Buffer, name: string) => (await (await JSZip.loadAsync(buf)).file(name)!.async("string")) as string
@@ -227,6 +228,57 @@ describe("buildBaseFile — v1 sang v2", () => {
 
   it("heading mẫu không khớp số heading của file ⇒ ném lỗi rõ ràng", async () => {
     await expect(buildBaseFile(await forwardInput({ targetHeadings: V2_HEADINGS.slice(1) }))).rejects.toMatchObject({ code: "target_headings_mismatch" })
+  })
+})
+
+describe("buildBaseFile — file nền có heading không nằm trong layout (E2E đổi mẫu 27/11, file Word rỗng)", () => {
+  it("heading con của file không có trong layout ⇒ ghép theo chữ, vẫn chép khối; heading con đi theo mục trước", async () => {
+    const result = await buildBaseFile(
+      await forwardInput({ source: sourceOf(await buildV1Source({ dangerous: true, subHeading: true }), V1_HEADINGS), spineOnly: new Set(["fixed:4.1"]), renderFromSpine: async () => renderedDoc([section("fixed:4.1", "3. Edited", "Edited from spine")]) })
+    )
+    const doc = await docText(result.buffer)
+    expect(result.warnings.join("\n")).not.toMatch(/không khớp layout/)
+    expect(modeOf(result, "n0")?.mode).toBe("transplant")
+    expect(modeOf(result, "n1")?.mode).toBe("transplant")
+    expect(doc).toContain("Purpose paragraph v1")
+    expect(doc).toContain("Overview detail text v1")
+    expect(doc.indexOf("Overview detail text v1")).toBeGreaterThan(doc.indexOf("Overview text v1"))
+    expect(result.unwritten).toEqual([])
+  })
+
+  it("alignHeadingKeys: heading thừa của file ⇒ null; quá nửa heading layout không tìm thấy ⇒ null", () => {
+    const source = { headingKeys: ["a", "b"], headingTexts: ["1 Intro", "2 Scope"] }
+    expect(alignHeadingKeys(["1 Intro", "1.1 Detail", "2 Scope"], source)).toEqual(["a", null, "b"])
+    // số tay khác nhau vẫn ghép theo tên
+    expect(alignHeadingKeys(["1. Intro", "2. Scope"], source)).toEqual(["a", "b"])
+    expect(alignHeadingKeys(["Other", "Thing"], source)).toBeNull()
+    expect(alignHeadingKeys(["1 Intro"], { headingKeys: ["a"] })).toBeNull()
+  })
+
+  it("một mục không điền được từ Spine ⇒ chỉ mục đó cờ vàng + `unwritten`, mục khác vẫn có nội dung", async () => {
+    const broken: RenderedSection = { id: "fixed:4.1", number: "", heading: "3. Edited", level: 1, blocks: [{ type: "image", png: Buffer.from("not a png") }] }
+    const result = await buildBaseFile(
+      await forwardInput({ spineOnly: new Set(["fixed:4.1", "fixed:2.1"]), renderFromSpine: async () => renderedDoc([section("fixed:2.1", "2. Overview", "Overview from spine"), broken]) })
+    )
+    const doc = await docText(result.buffer)
+    expect(doc).toContain("Overview from spine")
+    expect(doc).toContain("Purpose paragraph v1")
+    expect(modeOf(result, "n2")).toMatchObject({ mode: "spine", flag: "yellow" })
+    expect(modeOf(result, "n1")?.flag).toBeUndefined()
+    expect(result.unwritten).toEqual([expect.objectContaining({ section_id: "fixed:4.1", heading: "3. Edited" })])
+  })
+
+  it("bộ dựng từ Spine lỗi ⇒ mọi mục cần dựng nằm trong `unwritten`, lý do kỹ thuật được giữ", async () => {
+    const result = await buildBaseFile(
+      await forwardInput({
+        spineOnly: new Set(["fixed:4.1"]),
+        renderFromSpine: async () => {
+          throw new ApiError(422, "Không thể điền nội dung vào bố cục mẫu gốc.", "TEMPLATE_LAYOUT_UNAVAILABLE", { reason: "No template parent for x" })
+        }
+      })
+    )
+    expect(result.unwritten).toEqual([expect.objectContaining({ section_id: "fixed:4.1", reason: "No template parent for x" })])
+    expect(modeOf(result, "n2")?.reason).toMatch(/No template parent for x/)
   })
 })
 

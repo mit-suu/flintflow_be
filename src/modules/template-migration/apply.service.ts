@@ -42,7 +42,7 @@ import type { TranslateDocumentExecutor } from "../translation/translation-run.s
 import { toUserLocale } from "../../shared/i18n/locale.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { addCustomOps, affectedSectionIds, customIdAllocator, migrationTxn, ownerKeysOf, selectReverseChanges, withSnapshotContinuations } from "./apply-plan.js"
-import { BuildBaseFileError, buildBaseFile, planLayout, type PlannedLayout } from "./build-base-file.js"
+import { BuildBaseFileError, buildBaseFile, planLayout, sourceOf, type PlannedLayout } from "./build-base-file.js"
 import { DROP_FROM_PRINT, missingAfterMoves, readChoice } from "./classify.js"
 import { composeProfile } from "./compose-profile.js"
 import { editedSections, sectionKeyResolver } from "./edited-since.js"
@@ -178,6 +178,8 @@ export interface SpineWork {
   /** Spine sau khi đảo + ghi op (kết quả chạy khô) — nguồn dựng các mục từ Spine. */
   planned: Spine
   translation: TranslateStepResult | null
+  /** Cảnh báo của bước AI (vd AI không chuyển được chữ thành dữ liệu có cấu trúc ⇒ đã chuyển nguyên văn) — báo cho BA sau áp dụng. */
+  resolveWarnings?: string[]
 }
 
 type ResolveRunner = (spine: Spine) => Promise<ResolveResult>
@@ -249,7 +251,7 @@ export const planSpineWork = async (wc: WorkContext, translate: TranslateRunner,
   }
   const ops = [...baseOps, ...(translation?.ops ?? [])]
   const planned = options.dryRun === false ? afterRevert : dry(afterRevert, ops)
-  return { decisions: resolved.decisions, revert, ops, keepKeys, layout, planned, translation }
+  return { decisions: resolved.decisions, revert, ops, keepKeys, layout, planned, translation, resolveWarnings: resolved.warnings }
 }
 
 // ─── dịch ────────────────────────────────────────────────────────
@@ -358,6 +360,7 @@ const renderLayoutOf = (doc: ITemplateMigration, work: SpineWork, profile: Profi
     ...(!translated && profile?.function_originals?.length ? { functionOriginals: profile.function_originals as TemplateLayout["functionOriginals"] } : {}),
     ...(profile?.section_slices?.length || work.layout.slices.length ? { sectionSlices: [...(profile?.section_slices ?? []), ...work.layout.slices] } : {}),
     printSuppressed: printSuppressedOf(doc, work.decisions),
+    ...(work.layout.renumbered.size ? { headingRenames: [...work.layout.renumbered].map(([from, to]) => ({ from, to })) } : {}),
     ...(!translated && profile?.section_segments?.length ? { sectionSegments: profile.section_segments } : {})
   }
 }
@@ -390,7 +393,7 @@ const buildFile = async (ctx: MigrationContext, doc: ITemplateMigration, work: S
     groups: doc.groups,
     decisions: work.decisions,
     direction: doc.direction,
-    source: sourceBuffer ? { buffer: sourceBuffer, headingKeys: doc.from.headings.filter((h) => h.heading_text.trim()).map((h) => h.key) } : null,
+    source: sourceBuffer ? sourceOf(sourceBuffer, doc.from.headings) : null,
     spineOnly,
     needsTranslation: translated,
     renderFromSpine,
@@ -405,6 +408,13 @@ const buildFile = async (ctx: MigrationContext, doc: ITemplateMigration, work: S
   })
   if (result.problems.length) {
     throw new ApiError(422, "File nền mới dựng ra không qua kiểm cấu trúc, chưa áp dụng gì.", "TEMPLATE_MIGRATION_BUILD_FAILED", { problems: result.problems.slice(0, 10) })
+  }
+  // Mục có dữ liệu mà file nền không có chỗ ghi: lưu file đó thì bản xuất in mục rỗng (workspace vẫn đủ) ⇒ dừng, chưa ghi gì
+  if (result.unwritten.length) {
+    const names = result.unwritten.slice(0, 5).map((u) => `"${u.heading}"`).join(", ")
+    throw new ApiError(422, `Không ghi được nội dung của ${result.unwritten.length} mục vào file theo mẫu mới (${names}${result.unwritten.length > 5 ? ", …" : ""}), chưa áp dụng gì.`, "TEMPLATE_MIGRATION_BUILD_FAILED", {
+      unwritten: result.unwritten.slice(0, 20)
+    })
   }
 
   const ref = await docFileStore().save(result.buffer, { projectId: ctx.projectId, kind: "upload", name: `template-migration-${String(doc._id)}.docx` })
@@ -425,15 +435,17 @@ const buildFile = async (ctx: MigrationContext, doc: ITemplateMigration, work: S
     // Mục của lần đổi trước còn chờ viết và vẫn là mục của mẫu đích: giữ cờ chặn phát hành dù lần này nó được ghép "khớp" với heading rỗng
     const carried = await carriedMissingSections(profile as CarryProfile | null, work.planned, new Set(work.layout.entries.filter((e) => e.new_key !== null).map((e) => e.section_id)), composed.missing_sections)
     composed.missing_sections.push(...carried)
-    const warnings = [...result.warnings, ...composed.warnings, ...result.sections.filter((s) => s.flag === "yellow").map((s) => `Mục ${s.section_id}: ${s.reason ?? "cần kiểm tra"}`)]
+    const warnings = [...(work.resolveWarnings ?? []), ...result.warnings, ...composed.warnings, ...result.sections.filter((s) => s.flag === "yellow").map((s) => `Mục ${s.section_id}: ${s.reason ?? "cần kiểm tra"}`)]
     const plan = await savePlan(doc, work, spine.spine_version)
     await markStep(doc, "file", {
       new_base_file_ref: ref,
       spine_plan: plan,
       anchor_spine: work.planned,
-      new_profile: { ...composed, source_sha256: sha256Of(result.buffer), build_warnings: warnings },
+      new_profile: { ...composed, heading_renames: [...work.layout.renumbered].map(([from, to]) => ({ from, to })), source_sha256: sha256Of(result.buffer), build_warnings: warnings },
       missing_sections: composed.missing_sections
     })
+    // Lựa chọn của BA mà AI không làm được (đã chuyển nguyên văn): hiện trong cảnh báo của lần đổi mẫu, không chỉ nằm trong profile
+    if (work.resolveWarnings?.length) await TemplateMigration.updateOne({ _id: doc._id }, { $addToSet: { warnings: { $each: work.resolveWarnings } } })
   } catch (err) {
     await docFileStore().remove(ref).catch(() => undefined)
     throw err

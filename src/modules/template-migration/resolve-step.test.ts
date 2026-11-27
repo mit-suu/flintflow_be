@@ -49,7 +49,7 @@ describe("resolveAiChoices", () => {
     expect(r.ops.map((o) => `${o.op}:${o.path}`)).toEqual(["add:other_requirements[]", "remove:custom_sections[id=CS01]"])
   })
 
-  it("AI không chuyển được / trả op sai mảng / sai hình / không qua chạy khô ⇒ lùi về giữ thành mục riêng, có cảnh báo, không mất chữ", async () => {
+  it("AI không chuyển được / trả op sai mảng / sai hình / không qua chạy khô ⇒ vẫn chuyển vào chỗ BA chọn (nguyên văn), có cảnh báo, không đổi ngầm lựa chọn", async () => {
     const bad: object[] = [
       { ops: [], choice: null, notes: "Prose only" },
       { ops: [{ op: "add", path: "actors[]", value: { name: "X" } }], choice: null, notes: null },
@@ -58,9 +58,9 @@ describe("resolveAiChoices", () => {
     ]
     for (const output of bad) {
       const r = await resolveAiChoices({ ...base, doc: doc([moveDecision]), executor: async () => ok(output) })
-      expect(r.decisions).toContainEqual({ id: "e:custom:CS01", choice: "keep_custom" })
+      expect(r.decisions).toContainEqual({ id: "e:custom:CS01", choice: "move_to:n7" })
       expect(r.ops).toEqual([])
-      expect(r.warnings.join("\n")).toContain("giữ thành mục riêng")
+      expect(r.warnings.join("\n")).toContain("chuyển nguyên văn")
     }
   })
 
