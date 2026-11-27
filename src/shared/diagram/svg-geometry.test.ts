@@ -166,12 +166,12 @@ describe("luật 5 - đường không xuyên hình", () => {
   })
 })
 
-// ─── fixture thật: mẫu context của docs/diagram_guideline/context ──────────────
+// ─── fixture thật: dữ liệu context FlintFlow (cùng dữ liệu hình mẫu trong tài liệu) ─
 
 type Flow = { label: string; dir: "in" | "out" }
 type Entity = { name: string; flows: Flow[] }
 
-/** Dữ liệu `docs/diagram_guideline/context/example-flintflow.data.mjs`. */
+/** Dữ liệu context diagram của chính FlintFlow, dùng làm fixture thật. */
 const EXAMPLE: { title: string; process: string; left: Entity[]; right: Entity[] } = {
   title: "Context Diagram - FlintFlow",
   process: "FlintFlow System",
