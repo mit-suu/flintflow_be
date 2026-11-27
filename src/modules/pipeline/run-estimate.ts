@@ -27,11 +27,13 @@ import { briefCoreEntries } from "../spine/brief-core.js"
 import { TemplateProfile } from "../import/template-profile.model.js"
 import { loopTemplatesOf, screenLoopProfile, type ScreenLoopProfile, type TemplateLoopHint } from "../spine/section-status.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { LOOP_PHASE, PHASES, getStep, isPhaseUnit, isRegisteredStep, loadStepRegistry, loopKeys, nextStep, orderedSteps, type ExpandedStep } from "./step-registry.js"
+import { LOOP_PHASE, PHASES, getStep, isPhaseUnit, isRegisteredStep, loadStepRegistry, loopKeys, nextStep, NONSCREEN_LOOP, orderedSteps, type ExpandedStep } from "./step-registry.js"
 import { uncoveredScreens } from "./credit-ack.js"
 import { PHASES_WITHOUT_INTERVIEW, phaseUnitOf } from "./phase-runner.service.js"
 import { LOOP_BOOKKEEPING_TEMPLATES, functionBatches } from "./step-runner.service.js"
 import { estimateReviewBatches } from "./s9/ai-review.js"
+import { isScaleNote } from "./context-projection.js"
+import { VI_PHASE_LABELS } from "../render/labels.js"
 
 export type RunEstimateScope = "unit" | "all"
 
@@ -53,6 +55,8 @@ export const DEFAULT_SCREEN_FACTOR = Object.freeze({ min: 1.5, max: 2.5 })
 
 export interface RunEstimateUnit {
   unit: string
+  /** FLF-485 (#18): nhãn cho người dùng — tên màn với `S-5@Sxx`, "Chức năng không có màn" với `S-5@nonscreen`, nhãn giai đoạn với đơn vị khác. FE hiện nhãn này, không hiện mã đơn vị. */
+  label: string
   /** Số bước còn chờ trong đơn vị (kể cả bước không gọi model). */
   steps: number
   /** Số bước có gọi model. */
@@ -86,6 +90,8 @@ export interface ScreenRange {
   credits_max: number
   /** Đầu vào của S-1 dùng để suy dải. */
   inputs: { goals: number; other_requirements: number; feature_notes: number; total: number }
+  /** FLF-485: căn cứ của dải — `scale_note` (Brief có ghi chú quy mô "khoảng 35 use case") hoặc `inputs` (đầu vào S-1). */
+  basis: "scale_note" | "inputs"
   /** Luôn true: số này là ước tính. */
   estimated: true
 }
@@ -168,6 +174,14 @@ const unitInterviewed = (spine: Spine, unit: string): boolean => spine.decisions
 
 const FIRST_SRS_PHASE_INDEX = (PHASES as readonly string[]).indexOf("S-2")
 
+/** Nhãn người dùng đọc được của một đơn vị giai đoạn (FLF-485 #18). */
+const unitLabel = (spine: Pick<Spine, "screens">, unit: string): string => {
+  const [phase, loop] = unit.split("@")
+  if (loop === undefined) return VI_PHASE_LABELS[phase] ?? unit
+  if (loop === NONSCREEN_LOOP) return "Chức năng không có màn"
+  return spine.screens.find((sc) => sc.id === loop)?.name ?? unit
+}
+
 /** Đếm đơn vị giai đoạn của danh sách step (dùng chung cho mọi phạm vi). */
 const tallyUnits = (spine: Spine, counted: readonly ExpandedStep[], costs: RunEstimateCosts): RunEstimateUnit[] => {
   const units: RunEstimateUnit[] = []
@@ -176,7 +190,7 @@ const tallyUnits = (spine: Spine, counted: readonly ExpandedStep[], costs: RunEs
     let entry = units.find((u) => u.unit === unit)
     if (!entry) {
       const interview = PHASES_WITHOUT_INTERVIEW.has(unit) || unitInterviewed(spine, unit) ? 0 : costs.elicit
-      entry = { unit, steps: 0, ai_steps: 0, interview_credits: interview, credits: interview, credits_min: interview, credits_max: interview }
+      entry = { unit, label: unitLabel(spine, unit), steps: 0, ai_steps: 0, interview_credits: interview, credits: interview, credits_min: interview, credits_max: interview }
       units.push(entry)
     }
     entry.steps += 1
@@ -187,11 +201,22 @@ const tallyUnits = (spine: Spine, counted: readonly ExpandedStep[], costs: RunEs
     }
   }
   for (const u of units) {
+    // Đơn vị vòng màn (`S-5@Sxx`): cộng phụ trội thử lại đo được (xem `SCREEN_LOOP_OVERHEAD`).
+    if (u.unit.startsWith(`${LOOP_PHASE}@`)) u.credits = withLoopOverhead(u.credits)
     u.credits_min = u.credits
     u.credits_max = u.credits
   }
   return units
 }
+
+/**
+ * FLF-485 (#23): hệ số phụ trội của vòng màn hình so với giá niêm yết (Elicit + Draft x step). Giá niêm yết không tính lượt thử lại
+ * (AI trả kết quả không hợp lệ sau 3 lần thử => mất ~12 credit/lần), lượt hỏi lại và phần lô S-5.2 / S-5.4.
+ * Số đo E2E nha khoa 26/11 (một dự án, 34 use case, 32 đơn vị vòng màn): 12 màn đầu 211 credit ~ 17,6/màn; 22 màn sau + chức năng
+ * không màn + lệnh thu hẹp ~ 20/màn; niêm yết 13/màn => thực tế gấp ~1,35-1,55. Chọn 1,5 (13 -> 20). Chỉnh lại sau lượt E2E 10-15 use case.
+ */
+export const SCREEN_LOOP_OVERHEAD = 1.5
+const withLoopOverhead = (credits: number): number => Math.ceil(credits * SCREEN_LOOP_OVERHEAD)
 
 /** Step vòng màn không áp dụng cho cấu trúc đích (mẫu không có Screen Layout ⇒ không S-5.3) thì không tính credit. */
 const applicableToProfile = (step: ExpandedStep, profile: ScreenLoopProfile): boolean => step.loop === null || !profile.skippedTemplates.has(step.template_id)
@@ -202,14 +227,31 @@ const applicableToProfile = (step: ExpandedStep, profile: ScreenLoopProfile): bo
  */
 export const creditsPerScreen = (costs: RunEstimateCosts, profile: ScreenLoopProfile): number => {
   const aiSteps = loopTemplatesOf(profile).filter((id) => !LOOP_BOOKKEEPING_TEMPLATES.has(id)).length
-  return costs.elicit + aiSteps * costs.draft
+  return withLoopOverhead(costs.elicit + aiSteps * costs.draft)
 }
 
 const FEATURE_NOTE_TOPIC = /feature|tính năng|chức năng|capabilit|mvp|phạm vi|scope|module/iu
 
+const UC_NOTE = /(\d+)\s*(?:(?:-|–|~|đến|tới|to)\s*(\d+)\s*)?(?:use[\s-]?cases?\b|uc\b)/iu
+
+/** Số use case ghi trong ghi chú quy mô của Brief ("khoảng 35 use case", "5-8 use case"); không có => null. Lấy ghi chú nêu số lớn nhất. */
+const scaleNoteUseCases = (spine: Spine): { lo: number; hi: number } | null => {
+  let best: { lo: number; hi: number } | null = null
+  for (const a of spine.addendum) {
+    if (!isScaleNote(a)) continue
+    const m = UC_NOTE.exec(a.content) ?? UC_NOTE.exec(a.content_en ?? "")
+    if (!m) continue
+    const lo = Number(m[1])
+    const hi = m[2] ? Math.max(lo, Number(m[2])) : lo
+    if (hi > 0 && (!best || hi > best.hi)) best = { lo, hi }
+  }
+  return best
+}
+
 /**
- * Dải số màn sau Approve Brief = hệ số cấu hình × số đầu vào có ở S-1: mục tiêu (addendum lõi hoặc `project.goals`),
- * `other_requirements`, mục addendum dạng tính năng. Là ước tính; S-4.1 mới chốt số màn.
+ * Dải số màn sau Approve Brief. FLF-485 (#9): Brief có ghi chú quy mô theo use case => `số UC x (0,8...1,5)` như `estimateScreenCount`
+ * (35 UC => 28-53 màn). Không có => hệ số cấu hình x số đầu vào có ở S-1: mục tiêu (addendum lõi hoặc `project.goals`) và mục addendum
+ * dạng tính năng. `other_requirements` (câu hỏi mở) KHÔNG tính: câu hỏi mở không sinh màn. Là ước tính; S-4.1 mới chốt số màn.
  */
 export const estimateScreenRange = (spine: Spine, costs: RunEstimateCosts, profile: ScreenLoopProfile): ScreenRange => {
   const core = briefCoreEntries(spine)
@@ -218,12 +260,18 @@ export const estimateScreenRange = (spine: Spine, costs: RunEstimateCosts, profi
     (a) => a !== core.vision && !core.goals.includes(a) && (FEATURE_NOTE_TOPIC.test(a.topic) || a.target_section.startsWith("feature:"))
   ).length
   const inputs = { goals, other_requirements: spine.other_requirements.length, feature_notes: featureNotes, total: 0 }
-  inputs.total = inputs.goals + inputs.other_requirements + inputs.feature_notes
+  inputs.total = inputs.goals + inputs.feature_notes
+  const perScreen = creditsPerScreen(costs, profile)
+  const scale = scaleNoteUseCases(spine)
+  if (scale) {
+    const min = Math.max(1, Math.ceil(scale.lo * 0.8))
+    const max = Math.max(min, Math.ceil(scale.hi * 1.5))
+    return { min, max, credits_per_screen: perScreen, credits_min: min * perScreen, credits_max: max * perScreen, inputs, basis: "scale_note", estimated: true }
+  }
   const factor = costs.screenFactor ?? DEFAULT_SCREEN_FACTOR
   const min = inputs.total === 0 ? 0 : Math.max(1, Math.floor(inputs.total * factor.min))
   const max = inputs.total === 0 ? 0 : Math.max(min, Math.ceil(inputs.total * factor.max))
-  const perScreen = creditsPerScreen(costs, profile)
-  return { min, max, credits_per_screen: perScreen, credits_min: min * perScreen, credits_max: max * perScreen, inputs, estimated: true }
+  return { min, max, credits_per_screen: perScreen, credits_min: min * perScreen, credits_max: max * perScreen, inputs, basis: "inputs", estimated: true }
 }
 
 export interface RunEstimateQuery {
@@ -256,6 +304,25 @@ export const planRunEstimate = (
   const ack = spine.progress.credit_ack_required ?? null
   const kind = query.scope_kind ?? ack?.scope ?? null
 
+  // FLF-458: lần báo đọc tài liệu tham khảo ở B-0 — số credit đã tính sẵn trong lần báo, không đếm step
+  if (kind === "reference_documents") {
+    const credits = ack?.scope === "reference_documents" ? ack.credits : 0
+    return {
+      scope: query.scope,
+      scope_kind: kind,
+      screen_range: null,
+      ack_required: ack,
+      from_step: null,
+      units: [],
+      steps_total: 0,
+      ai_steps_total: 0,
+      credits_total: credits,
+      credits_min: credits,
+      credits_max: credits,
+      screen_estimate: null
+    }
+  }
+
   if (kind) {
     const pending = all.filter((s) => PENDING_STATUSES.has(statusOf(s.id)) && applicableToProfile(s, profile))
     let counted: ExpandedStep[]
@@ -267,19 +334,23 @@ export const planRunEstimate = (
       counted = pending.filter((s) => s.loop !== null && !placeholders.has(s.loop) && (only === null || only.has(s.loop)))
     }
     const units = tallyUnits(spine, counted, costs)
-    const creditsTotal = units.reduce((n, u) => n + u.credits, 0)
+    const screenRange = kind === "after_brief" ? estimateScreenRange(spine, costs, profile) : null
+    // FLF-485 (#9): sau Approve Brief tổng là KHOẢNG gồm cả vòng màn hình ước tính, không chỉ phần ngoài vòng.
+    const fixedTotal = units.reduce((n, u) => n + u.credits, 0)
+    const creditsMin = fixedTotal + (screenRange?.credits_min ?? 0)
+    const creditsMax = fixedTotal + (screenRange?.credits_max ?? 0)
     return {
       scope: query.scope,
       scope_kind: kind,
-      screen_range: kind === "after_brief" ? estimateScreenRange(spine, costs, profile) : null,
+      screen_range: screenRange,
       ack_required: ack,
       from_step: counted[0]?.id ?? null,
       units,
       steps_total: counted.length,
       ai_steps_total: units.reduce((n, u) => n + u.ai_steps, 0),
-      credits_total: creditsTotal,
-      credits_min: creditsTotal,
-      credits_max: creditsTotal,
+      credits_total: creditsMax,
+      credits_min: creditsMin,
+      credits_max: creditsMax,
       screen_estimate: null
     }
   }
@@ -310,13 +381,14 @@ export const planRunEstimate = (
   if (passesScreenList) {
     const loopTemplates = loadStepRegistry().filter((t) => t.kind === "loop")
     const aiPerLoop = loopTemplates.filter((t) => !t.deterministic && !LOOP_BOOKKEEPING_TEMPLATES.has(t.id)).length
-    const perScreen = costs.elicit + aiPerLoop * costs.draft
+    const perScreen = withLoopOverhead(costs.elicit + aiPerLoop * costs.draft)
     const range = estimateScreenCount(spine)
     screenEstimate = range
     const loops = range.max + 1
     const at = units.findIndex((u) => PHASES.indexOf(u.unit.split("@")[0] as (typeof PHASES)[number]) > s5Index)
     const entry: RunEstimateUnit = {
       unit: LOOP_PHASE,
+      label: "Vòng màn hình (ước tính)",
       steps: loopTemplates.length * loops,
       ai_steps: aiPerLoop * loops,
       interview_credits: costs.elicit * loops,

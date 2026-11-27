@@ -17,15 +17,18 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { ActionType, AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import { executeAiAction, type ExecuteAiActionOptions } from "../../shared/ai/ai-action.service.js"
 import { getSkill, skillPromptText } from "../../shared/ai/prompt-registry.service.js"
-import type { LocalizedEntry, OpTransaction, SourceEntry } from "../../shared/ai/response-parser.js"
+import type { AnsweredQuestion, LocalizedEntry, OpTransaction, SourceEntry } from "../../shared/ai/response-parser.js"
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { documentLanguageInput, type TurnDocumentLanguage } from "../translation/turn-language.js"
 import type { StepContext } from "./context-projection.js"
 import { withFrameRenumber } from "../spine/template-frames.js"
-import { actorGeneralizationErrors, briefExtractionErrors, dropRedundantScalarAdds, requiredArrayErrors, sanitizeModelOps, useCaseNamingErrors, useCaseWiringErrors, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
+import { actorGeneralizationErrors, addendumDuplicateErrors, briefExtractionErrors, dropRedundantScalarAdds, requiredArrayErrors, sanitizeModelOps, useCaseNamingErrors, useCaseWiringErrors, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
 import { ESCALATION_MODEL, isErdOnly, normalizeEntityNames } from "./erd-retry.js"
 import { briefQuoteSources, dropUngroundedGaps } from "./gap-quote.js"
+import { sanitizeDraftForm } from "./draft-sanitize.js"
 import { localizedMissingErrors } from "./localized-missing.js"
+import { addsExplicitQuestionId, answeredQuestionErrors, answeredQuestionOps, renewReusedQuestionIds } from "./answered-questions.js"
+import type { RetiredIds } from "../spine/id-allocator.js"
 
 export const NEEDS_USER_INPUT = "NEEDS_USER_INPUT"
 /** Phases §4.1: gửi lại model kèm lỗi tối đa 2 lần, rồi hỏi user. */
@@ -77,6 +80,8 @@ export interface DraftResult {
   localized?: LocalizedEntry[]
   /** FLF-292: nguồn tài liệu model khai cho phần tử nó viết. Người gọi lưu SAU khi áp `txn` (`captureSources`). */
   sources?: SourceEntry[]
+  /** FLF-482 (C2): lượt `revision` báo một phần lời sửa nằm ngoài các trường bước này được ghi — cổng chuyển sang Sửa tài liệu. */
+  outOfScope?: string
 }
 
 export interface DraftOptions {
@@ -110,6 +115,11 @@ export interface DraftOptions {
    * "Document language" và model trả `localized` cạnh `ops`. Thiếu / `null` (dự án `en`, mode 1) ⇒ prompt như cũ.
    */
   documentLanguage?: TurnDocumentLanguage | null
+  /**
+   * FLF-472 (#8): tải tập mã đã từng bị xoá của dự án — chỉ gọi khi lô thêm câu hỏi mở mang mã tường minh. Thiếu ⇒ chỉ
+   * tính mã bị xoá trong chính lô.
+   */
+  retiredLoader?: () => Promise<RetiredIds>
   /** Spine để validate; mặc định đọc repository (phải cùng `spine_version` với ctx). */
   spine?: Spine
   executor?: DraftExecutor
@@ -190,6 +200,17 @@ const loadSpine = async (projectId: string, expectedVersion: number): Promise<Sp
   return spine
 }
 
+/** Mã câu hỏi mở đã từng bị xoá của dự án; không tải được thì chỉ còn kiểm trong chính lô (không làm hỏng lượt soạn). */
+const loadRetiredQuestionIds = async (loader: DraftOptions["retiredLoader"]): Promise<readonly string[]> => {
+  if (!loader) return []
+  try {
+    return (await loader()).get("other_requirements") ?? []
+  } catch (err) {
+    console.warn("[draft-to-ops] không tải được mã đã xoá", err)
+    return []
+  }
+}
+
 export const draftOps = async (projectId: string, stepId: string, ctx: StepContext, options: DraftOptions): Promise<DraftResult> => {
   const callKind = options.callKind ?? "draft"
   const maxRetries = options.maxSchemaRetries ?? MAX_SCHEMA_RETRIES
@@ -237,6 +258,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
     let notes: string | null = null
     let localized: LocalizedEntry[] | undefined
     let sources: SourceEntry[] | undefined
+    let answered: AnsweredQuestion[] | undefined
+    let outOfScope: string | undefined
     try {
       const minMaxTokens = contentMaxTokens(ctx)
       // FLF-433: lượt thử cuối mà lô vẫn chỉ vướng luật ERD ⇒ model mạnh hơn, chỉ đúng lượt này
@@ -252,16 +275,22 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
         logId: result.logId || null
       })
       notes = result.data.notes ?? null
-      localized = result.data.localized?.length ? result.data.localized : undefined
+      // FLF-477: lỗi hình thức (dấu phẩy / ngoặc vuông trong nhãn sơ đồ…) server tự sửa trước khi kiểm, không từ chối cả lượt
+      const form = sanitizeDraftForm(result.data.ops, result.data.localized?.length ? result.data.localized : undefined)
+      localized = form.localized
       sources = result.data.sources?.length ? result.data.sources : undefined
+      answered = result.data.answered_questions?.length ? result.data.answered_questions : undefined
+      outOfScope = callKind === "revision" ? result.data.out_of_scope : undefined
       // BUG-03/BUG-29: field chỉ user/code quyết được chuẩn hoá trước khi kiểm; lô ghi là lô ĐÃ chuẩn hoá
-      const sanitized = sanitizeModelOps(spine, result.data.ops, stepId, new Date(), { revision: callKind === "revision", userDecided: options.userDecided === true, ...(statusIds ? { statusAssumptionIds: statusIds } : {}) })
+      const sanitized = sanitizeModelOps(spine, form.ops, stepId, new Date(), { revision: callKind === "revision", userDecided: options.userDecided === true, ...(statusIds ? { statusAssumptionIds: statusIds } : {}) })
       // Gắn lại liên kết đã có (S-4.1 không thấy function_ids) là vô hại — bỏ trước khi kiểm, không để chết cả lô.
       // Chỉ lọc khi sanitize không báo lỗi: lỗi của nó trỏ op_index theo lô gốc.
       // FLF-413: model không thấy khung của mẫu ⇒ `order` tính năng mới trùng khung — nối renumber (op cuối, không lệch op_index)
       ops = sanitized.errors.length > 0 ? sanitized.ops : withFrameRenumber(spine, dropRedundantScalarAdds(spine, sanitized.ops as Op[]))
       // FLF-433: bản vá ghép sau lô đã giữ; đuôi tên entity kiểu "Exam List" code tự bỏ (không tốn lượt thử)
       if (sanitized.errors.length === 0) ops = normalizeEntityNames(patchBase ? [...patchBase, ...ops] : ops)
+      // FLF-472 (#8): câu hỏi mở mới không dùng lại mã đã xoá — đổi sang mã tạm để server cấp mã kế tiếp
+      if (sanitized.errors.length === 0 && addsExplicitQuestionId(ops as Op[])) ops = renewReusedQuestionIds(ops as Op[], await loadRetiredQuestionIds(options.retiredLoader))
       // FLF-449 việc 16: chỗ thiếu của Brief không có câu trích thật (Brief / tài liệu / yêu cầu sửa) ⇒ bỏ, không đưa ra
       if (sanitized.errors.length === 0) {
         const grounded = dropUngroundedGaps(ops as Op[], stepId, briefQuoteSources(spine, [ctx.documents, options.revisionRequest]))
@@ -269,10 +298,14 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
         ops = grounded.ops
       }
       errors = sanitized.errors.length > 0 ? sanitized.errors : validateOps(spine, ops, { writable: ctx.writable, stepId, visibleIds, ...(extraPaths ? { extraPaths } : {}) })
+      // FLF-472: đóng câu hỏi mở phải kèm câu trả lời (lưu vào sổ quyết định); không thì gửi lại model
+      if (errors.length === 0) errors = answeredQuestionErrors(spine, ops as Op[], answered, callKind)
       // S-1.1 phải dựng vision/goals tiếng Anh từ addendum lõi — kể cả lô rỗng, nên kiểm sau validateOps
       if (errors.length === 0) errors = briefExtractionErrors(spine, ops as Op[], stepId, callKind)
       // FLF-243: tên use case sai luật cờ vàng ⇒ gửi lại model kèm lỗi; lượt cuối thì nhận lô (cờ vàng là lưới cuối)
       if (errors.length === 0 && attempt <= maxRetries) errors = useCaseNamingErrors(spine, ops as Op[])
+      // FLF-449 D1: ghi chú Brief trùng ý ghi chú đã có ⇒ gửi lại model; lượt cuối nhận lô
+      if (errors.length === 0 && attempt <= maxRetries) errors = addendumDuplicateErrors(spine, ops as Op[], stepId)
       // FLF-370: use case tài khoản gắn thẳng ≥ 2 actor người ⇒ gửi lại model thêm actor tổng quát; lượt cuối nhận lô (cờ vàng là lưới cuối)
       if (errors.length === 0 && attempt <= maxRetries && callKind === "draft") errors = actorGeneralizationErrors(spine, ops as Op[], stepId)
       // FLF-248: danh sách bắt buộc của step vẫn trống sau lô ⇒ gửi lại model; lượt cuối nhận lô (cờ array_empty là lưới cuối)
@@ -284,16 +317,18 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
 
       if (errors.length === 0) {
         attempts.push({ attempt, ops, errors })
-        if (ops.length === 0) return { txn: null, attempts, usage, notes, contextTokens: ctx.contextTokens }
+        // FLF-472: câu trả lời câu hỏi mở vào sổ quyết định cùng lô (op do server sinh, không qua `writable`)
+        const answerOps = answeredQuestionOps(spine, stepId, answered)
+        if (ops.length === 0 && answerOps.length === 0) return { txn: null, attempts, usage, notes, contextTokens: ctx.contextTokens, ...(outOfScope ? { outOfScope } : {}) }
         const txn: Transaction = {
           // Id lô luôn do server sinh — không tin `txn` model trả (có thể trùng lô khác)
           txn: randomUUID(),
           base_version: spine.spine_version,
-          ops: ops as Op[],
+          ops: [...(ops as Op[]), ...answerOps],
           by: options.userId,
           step_id: stepId
         }
-        return { txn, attempts, usage, notes, contextTokens: ctx.contextTokens, ...(localized ? { localized } : {}), ...(sources ? { sources } : {}) }
+        return { txn, attempts, usage, notes, contextTokens: ctx.contextTokens, ...(localized ? { localized } : {}), ...(sources ? { sources } : {}), ...(outOfScope ? { outOfScope } : {}) }
       }
     } catch (err) {
       if (!(err instanceof AiActionError) || !SCHEMA_ERROR_CODES.has(err.code)) throw err

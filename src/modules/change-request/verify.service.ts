@@ -51,7 +51,7 @@ import { loadOutOfScopeSections, outOfScopeKind, type OutOfScopeKind } from "./o
  * Lỗi "luật" BA được phép giữ theo ý mình (C-5): đề xuất vẫn ghi được, chỉ làm Spine có cờ đỏ mới. Lỗi chữ cũ không còn
  * khớp, op sai định dạng, bất biến gãy... không giữ được vì không ghi được.
  */
-export const KEEPABLE_RULES: ReadonlySet<string> = new Set(["new_red_flag"])
+export const KEEPABLE_RULES: ReadonlySet<string> = new Set(["new_red_flag", "old_value_left"])
 
 /** Mọi lỗi của vị trí đều là lỗi luật giữ được (và có ít nhất một lỗi). */
 export const isKeepable = (violations: readonly Pick<VerifyViolation, "rule">[]): boolean => violations.length > 0 && violations.every((v) => KEEPABLE_RULES.has(v.rule))
@@ -63,6 +63,7 @@ export const withoutKept = (violations: readonly VerifyViolation[], kept: readon
 export const hasPendingWarning = (l: Pick<IChangeLocation, "warning" | "kept_intent" | "conclusion">): boolean => !!l.warning && !l.kept_intent && l.conclusion !== "not_related"
 import { COUNT_COLLECTIONS, findCountMentionsInText, type CountCollection } from "./count-mentions.js"
 import { removedItems } from "./content-removal.js"
+import { OLD_VALUE_LEFT_RULE, checkOldValueLeft } from "./old-value-left.js"
 
 export const valueChanged = (loc: Pick<IChangeLocation, "location_id" | "path">): Mode1Error =>
   new Mode1Error("CR_VALUE_CHANGED", `${pathLabel(loc.path)} đã bị sửa ở chỗ khác kể từ lúc đề xuất - tải lại rồi đề xuất lại`, { location_id: loc.location_id, path: loc.path })
@@ -527,6 +528,9 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
   // FLF-473 (B14): câu đếm phải khớp số đúng SAU khi ghi cả CR — op đã lỗi thì bỏ qua (checkSpineOps đã báo lỗi thật)
   const countAfter = plannedAfterAll(spine, locations)
   if (countAfter) for (const [locId, vs] of checkCountMentions(countAfter, locations)) violations.set(locId, [...(violations.get(locId) ?? []), ...vs])
+  // FLF-483 (#32): CR đổi giá trị mà phần tử còn ghi giá trị cũ ở chỗ khác — chặn một vòng, sau đó hạ thành nhận xét vàng
+  const oldValues = checkOldValueLeft(spine, checked)
+  for (const [locId, vs] of oldValues.violations) violations.set(locId, [...(violations.get(locId) ?? []), ...vs])
 
   // AI consistency (FLF-307): chỉ khi cả CR đã qua kiểm code — vòng nào còn trượt thì AI làm lại, nhận xét lúc đó vô
   // ích. Không vị trí nào đổi đề xuất kể từ lần kiểm trước (`verify` còn nguyên) ⇒ giữ nhận xét cũ, không gọi lại: mỗi
@@ -592,6 +596,10 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
   // FLF-469: cờ vàng gắn / xoá use case theo chức năng - tính lại mỗi lần (Spine sau lô có thể đã đổi), chạy cả khi lượt AI không chạy
   for (const [locId, flags] of aiFlags) aiFlags.set(locId, flags.filter((f) => !FUNCTION_LINK_FLAG_RULES.includes(f.rule)))
   for (const [locId, flags] of structuralLinkFlags(cr, spine, countAfter, locations)) aiFlags.set(locId, [...(aiFlags.get(locId) ?? []), ...flags])
+
+  // FLF-483: nhận xét "giá trị cũ còn sót" tính lại mỗi lần (đề xuất đổi thì nhận xét đổi theo)
+  for (const [locId, flags] of aiFlags) aiFlags.set(locId, flags.filter((f) => f.rule !== OLD_VALUE_LEFT_RULE))
+  for (const [locId, flags] of oldValues.flags) aiFlags.set(locId, [...(aiFlags.get(locId) ?? []), ...flags])
 
   const at = new Date()
   const failing: IChangeLocation[] = []

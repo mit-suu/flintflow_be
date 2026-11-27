@@ -15,6 +15,8 @@ import { TemplateProfile } from "../../../src/modules/import/template-profile.mo
 import { FIELD_CONFIDENCE_THRESHOLD } from "../../../src/modules/import/import.constants.js"
 import { OFF_FORMAT_TEXT as O, makeOffFormatSrsDocx, type OffFormatVariant } from "../../../src/modules/import/testing/off-format-fixture.js"
 import { SRS_FIXTURE_TEXT } from "../../../src/modules/import/testing/srs-fixture.js"
+import { Project } from "../../../src/modules/project/project.model.js"
+import { getDocument } from "../../../src/modules/render/assemble.service.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 
 useExtractConcurrency(1)
@@ -47,6 +49,7 @@ const fakeByContent = (prompt: string): string | undefined => {
   item(O.enrollRequirement, "functions", { name: "Enroll in a course", description: O.enrollRequirement }, 0.5)
   item(O.reminderFunction, "functions", { name: "Send nightly reminder email", description: O.reminderFunction })
   item(O.reminderNfr, "nfrs", { statement: O.reminderNfr, kind: "quantitative", metric: "delivery delay", threshold: "5 minutes", category: "performance" })
+  item(O.customNfr, "nfrs", { statement: O.customNfr, kind: "quantitative", metric: "load time", threshold: "2 seconds", category: "performance" })
   item(O.proseActors[0], "actors", { name: "Learner", kind: "human", description: O.proseActors[0] })
   item(O.proseActors[1], "actors", { name: "Administrator", kind: "human", description: O.proseActors[1] })
   item(SRS_FIXTURE_TEXT.perf, "nfrs", { statement: SRS_FIXTURE_TEXT.perf, kind: "quantitative" })
@@ -169,5 +172,27 @@ describe("FLF-444 - File lệch format: I-4 đọc theo nội dung", () => {
     expect(drafts.filter((d) => d.section_id.startsWith("content:"))).toEqual([])
     expect(profile.heading_map.find((h) => h.heading_text.startsWith("3.1 "))?.section_id).toBe("group:3.1")
     expect(calls).toBeGreaterThan(0)
+  })
+})
+
+describe("FLF-453 - phần tử đọc từ heading tự đặt không in hai lần", () => {
+  it("mục riêng chứa NFR + mục 4.2.3 không chia đoạn (mẫu để điền) ⇒ NFR chỉ in một lần, ở mục riêng", async () => {
+    const ctx = await importAtExtracting({ buffer: await makeOffFormatSrsDocx("twice") })
+    await Project.updateOne({ _id: ctx.projectId }, { $set: { template_intent: "fixed", start_kind: "existing", has_required_template: true } })
+    const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
+    expect(run.doc.status).toBe("baselining")
+    const before = (await spineRepository.get(ctx.projectId))!
+    await finalizeImport(ctx.projectId, ctx.userId, { import_id: ctx.importId, base_version: before.spine_version })
+    const spine = (await spineRepository.get(ctx.projectId))!
+    expect(spine.nfrs.some((n) => n.statement === O.customNfr)).toBe(true)
+    const profile = (await TemplateProfile.findOne({ projectId: ctx.projectId }).lean())!
+    // Mục 4.2.3 không chia đoạn (file là mẫu để điền)
+    expect((profile.section_segments ?? []).some((s) => s.section_id === "fixed:4.2.3")).toBe(false)
+    const doc = await getDocument(ctx.projectId, "Lumen", { source: "draft" })
+    const printedIn = doc.sections.filter((s) => JSON.stringify(s.blocks).includes(O.customNfr)).map((s) => s.id)
+    expect(printedIn).toHaveLength(1)
+    expect(printedIn[0]).toMatch(/^custom:/)
+    // NFR của mục 4.2.3 vẫn in ở mục đó
+    expect(doc.sections.find((s) => s.id === "fixed:4.2.3" && JSON.stringify(s.blocks).includes(SRS_FIXTURE_TEXT.perf))).toBeTruthy()
   })
 })

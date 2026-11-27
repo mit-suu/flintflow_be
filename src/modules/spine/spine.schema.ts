@@ -64,10 +64,11 @@ export const progressSchema = z.strictObject({
   elicit_turns_this_phase: nonNegativeInt,
   credit_ack_required: z
     .strictObject({
-      scope: z.enum(["after_brief", "screens_locked", "screens_added"]),
+      scope: z.enum(["after_brief", "screens_locked", "screens_added", "reference_documents"]),
       credits: z.number().min(0),
       created_at: z.string(),
-      screens: z.array(id).optional()
+      screens: z.array(id).optional(),
+      documents: nonNegativeInt.optional()
     })
     .nullable()
     .optional(),
@@ -99,7 +100,9 @@ export const actorSchema = z.strictObject({
   flows_in: z.array(z.string()).optional(),
   flows_out: z.array(z.string()).optional(),
   /** Actor cha (generalization); vắng/null ⇒ actor không chuyên biệt hoá actor nào. */
-  parent_id: id.nullable().optional()
+  parent_id: id.nullable().optional(),
+  /** FLF-493: nền tảng actor người dùng (`web` / `mobile`); vắng ⇒ chưa biết. */
+  platforms: z.array(z.enum(["web", "mobile"])).optional()
 })
 
 export const roleSchema = z.strictObject({

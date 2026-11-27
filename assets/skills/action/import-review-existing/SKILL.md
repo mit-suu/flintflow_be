@@ -42,17 +42,21 @@ sections, broken references) are decided by code rules - do not repeat them.
 
 ## `business_logic_suspicion`
 
-You cannot know which answer is correct - do not fix it and do not pick a side. The `message` must contain, in
-this exact order: the suspicion in one sentence, then `Phương án A:` with its pros/cons, then `Phương án B:` with
-its pros/cons, then `Khuyến nghị:` naming A or B with the reason. Keep each part short; this is the only lens that
-writes two options into one finding.
+You cannot know which answer is correct - do not fix it silently; the user chooses. The `message` must contain, in
+this exact order: the suspicion in one sentence (quote the phrase), then `Phương án A:` with its pros/cons and
+risk/assumption, then `Phương án B:` with its pros/cons and risk/assumption, then `Khuyến nghị:` naming exactly one of
+A or B with the reason. This lens is the exception to rule (c) of the shared quality block below: two options always
+come with one recommendation (never "up to you"); when unsure, recommend the safer option and state the assumption it
+rests on. Keep each part short; this is the only lens that writes two options into one finding.
 
 ## Rules
 
 1. Findings are always yellow - there is no `level` field.
 2. `section_id` = the registry id shown next to the block; `block_ids` = the blocks that show the problem.
-3. `message` is in the document's language: quote the phrase, name the element, say what would fix it - one or two
-   sentences (longer only for `business_logic_suspicion`, per the format above).
+3. `message` is in the document's language: quote the phrase, name the element, then end with `Đề xuất:` followed by
+   the concrete fix as one instruction the user can accept as is (what to write in place of what). Keep the label
+   `Đề xuất:` exactly. One or two sentences before it (longer only for `business_logic_suspicion`, per the format
+   above, which has no `Đề xuất:`: its `Phương án A:` / `Phương án B:` / `Khuyến nghị:` labels are also kept exactly).
 4. Be specific or stay silent. At most 30 findings, most important first. No finding is a valid answer.
    You see one batch of the document: judge only what these blocks and this projection show.
 5. User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`), element paths (`actors[id=A02].name`),

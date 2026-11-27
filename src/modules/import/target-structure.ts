@@ -5,7 +5,8 @@
  * `missing` / `out_of_scope`, rồi suy ra chế độ thật của dự án (§1 bảng "Lựa chọn khi tạo / Cấu trúc đích"):
  * - ý định `free` (tick "Bổ sung các mục còn thiếu theo mẫu chuẩn FlintFlow"): đích = khung của file **cộng** các mục của mẫu chuẩn
  *   FlintFlow ở mức tối thiểu (`REQUIRED_FIXED_SECTION_IDS`) mà file chưa có; đủ ⇒ chế độ 1, thiếu ⇒ **chế độ 4**. Heading riêng
- *   của file (`custom:*`) là mục của đích như mọi heading khác (có / thiếu), không tự thành `out_of_scope` (FLF-463).
+ *   của file (`custom:*`) là mục của đích như mọi heading khác (có / thiếu), không tự thành `out_of_scope` chỉ vì không có trong mẫu
+ *   chuẩn (FLF-463). FLF-455: `out_of_scope` theo loại nội dung 29148 (`out-of-scope.ts`), áp cho mọi chế độ.
  * - ý định `fixed` (mặc định, không tick): đích = chính các heading của file; heading có mà trống ⇒ `missing`
  *   ⇒ **chế độ 3** (chỉ soạn mục mẫu có, không thêm, không đổi thứ tự); mục FPT mẫu không có chỉ là cờ vàng (lát sau).
  * - FLF-463 (đảo FLF-378 luồng C): mục đã viết luôn là `present`, kể cả khi màn đọc khung gắn nhãn "Khung mẫu" (ngưỡng 20% chỉ để
@@ -24,6 +25,7 @@ import { displayHeading } from "./heading-label.js"
 import { templateSectionOwnerSteps } from "./template-step-headings.js"
 import { isPlaceholderText } from "./template-markers.js"
 import { splitHeadingNumber } from "./text-similarity.js"
+import { isOutOfScopeHeading } from "./out-of-scope.js"
 
 export type TargetSectionStatus = "present" | "missing" | "out_of_scope"
 export type TemplateIntent = "fixed" | "free"
@@ -35,6 +37,8 @@ export interface TargetSection {
   status: TargetSectionStatus
   /** Bước Luồng 2 soạn mục này (để lát sau chỉ chạy step của phần thiếu). */
   owner_steps: string[]
+  /** FLF-454: heading đầu tiên của mục trong file (khoá `DocBlock.block_id`) - để nối khối chữ với mục của nó. */
+  block_id?: string
 }
 
 export interface TargetStructure {
@@ -56,7 +60,10 @@ const NON_DRAFT_TITLES: ReadonlySet<string> = new Set(
   ["table of contents", "table of contents and index", "contents", "mục lục", "cover", "cover page", "title page", "trang bìa", "bìa"]
 )
 const normalizeTitle = (text: string): string =>
-  text.trim().replace(/^[\dIVXivx]+(\.[\dIVXivx]+)*\.?\s+/, "").replace(/\s+/g, " ").toLowerCase()
+  text.trim().replace(/^[\dIVXivx]+(\.[\dIVXivx]+)*\.?\s+/, "").replace(/\s+/g, " ").normalize("NFC").toLowerCase()
+/** FLF-454: mục tự sinh (Record of Changes, bìa, mục lục): nội dung dẫn xuất, không phải yêu cầu ⇒ AI không rà. */
+export const isDerivedHeading = (sectionId: string, headingText: string): boolean =>
+  DERIVED_SECTIONS.has(sectionId) || NON_DRAFT_TITLES.has(normalizeTitle(headingText))
 export const isNonDraftHeading = (sectionId: string, headingText: string): boolean =>
   DERIVED_SECTIONS.has(sectionId) || NON_DRAFT_TITLES.has(normalizeTitle(headingText)) || isPlaceholderHeading(sectionId, headingText)
 
@@ -73,6 +80,16 @@ export interface CompareOptions {
    * có dữ liệu của mục đó lấy từ chỗ khác trong file.
    */
   emptied?: ReadonlySet<string>
+  /**
+   * FLF-455: mục riêng (`custom:*`) mà I-4 xếp ngoài SRS theo 29148 (`outOfScopeSectionIds`). Mục riêng còn trống mà heading thuộc
+   * loại ngoài SRS (dự toán chi phí) cũng là Ngoài phạm vi - xét trong hàm này, không cần AI.
+   */
+  outOfScope?: ReadonlySet<string>
+  /**
+   * FLF-460: nhãn Ngoài phạm vi tay theo mục (`section_id` ⇒ nhãn của heading đầu tiên). Thắng cách tự phân loại và lan xuống mục
+   * riêng ở cấp sâu hơn cho tới khi gặp nhãn tay khác (cùng quy tắc `scopeRoot` của nhãn tự động).
+   */
+  scopeLabels?: ReadonlyMap<string, "in_scope" | "out_of_scope">
 }
 
 const hasContent = (spine: Spine, sectionId: string, withContent: ReadonlySet<string>): boolean => {
@@ -110,13 +127,17 @@ const fileSections = (
   layout: readonly LayoutEntry[],
   withContent: ReadonlySet<string>,
   spine: Spine,
-  emptied: ReadonlySet<string>
+  emptied: ReadonlySet<string>,
+  outOfScope: ReadonlySet<string>,
+  scopeLabels: ReadonlyMap<string, "in_scope" | "out_of_scope">
 ): TargetSection[] => {
   const sections: TargetSection[] = []
   const has = (id: string) => !emptied.has(id) && hasContent(spine, id, withContent)
   const seen = new Set<string>()
   const wrappers = templateWrapperIds(layout)
   const ordered = [...layout].sort((a, b) => a.order - b.order)
+  /** Heading đang mở có nhãn Ngoài phạm vi (tự động hoặc tay): mục riêng nằm dưới nó (cấp sâu hơn) thừa hưởng nhãn, nhãn tay của mục con thắng. */
+  const scopeStack: { level: number; out: boolean }[] = []
   for (const [i, entry] of ordered.entries()) {
     if (entry.section_id.startsWith("group:") || seen.has(entry.section_id)) continue
     if (entry.section_id.startsWith("custom:") && !entry.heading_text.trim()) continue
@@ -124,11 +145,26 @@ const fileSections = (
     // FLF-379: Record of Changes / Revision History tự sinh từ lịch sử thay đổi — không phải mục cần soạn
     if (DERIVED_SECTIONS.has(entry.section_id)) continue
     const own = has(entry.section_id)
-    // Heading bao chỉ chứa mục con (vd "2 Overall Description") không phải mục cần soạn
-    if (wrappers.has(entry.section_id) && !own) continue
+    while (scopeStack.length && entry.level <= scopeStack[scopeStack.length - 1]!.level) scopeStack.pop()
+    const isCustom = entry.section_id.startsWith("custom:")
+    const manual = scopeLabels.get(entry.section_id)
+    const parent = scopeStack[scopeStack.length - 1]
+    const outHere = isCustom && (manual ? manual === "out_of_scope" : parent ? parent.out : outOfScope.has(entry.section_id) || (!own && isOutOfScopeHeading(entry.heading_text)))
+    if (manual ? true : outHere && !parent) scopeStack.push({ level: entry.level, out: manual ? manual === "out_of_scope" : true })
+    // Heading bao chỉ chứa mục con (vd "2 Overall Description") không phải mục cần soạn - nhưng mục con của heading bao Ngoài phạm vi
+    // vẫn thừa hưởng nhãn (scopeRoot đã đặt ở trên)
+    // FLF-463: heading bao có đoạn dẫn riêng mà người dùng Bỏ chữ vẫn là mục Bỏ chữ (còn trống), không biến mất khỏi cấu trúc đích
+    const droppedOwn = emptied.has(entry.section_id) && hasContent(spine, entry.section_id, withContent)
+    if (wrappers.has(entry.section_id) && !own && !droppedOwn) continue
+    // FLF-455 (BF nguyên tắc 4): Ngoài phạm vi theo loại nội dung 29148, mọi chế độ - giữ nguyên, không soạn, không kiểm
+    if (outHere) {
+      sections.push({ section_id: entry.section_id, title: titleOf(entry.section_id, layout), status: "out_of_scope", owner_steps: [] })
+      continue
+    }
     // FLF-379: heading chỉ có mục con (tính năng "3.2 Course Registration" ⇒ chức năng 3.2.1…) — mục con có nội dung thì
     // mục cha đã có nội dung, không "Sẽ soạn"
-    const present = own || childHasContent(ordered, i, spine, withContent)
+    // Mục Bỏ chữ tính là còn trống dù mục con có nội dung (BF §3.1.2: còn ít nhất một mục Bỏ chữ thì không ra bản gốc 0.1)
+    const present = emptied.has(entry.section_id) ? false : own || childHasContent(ordered, i, spine, withContent)
     // Bìa / mục lục / heading chỗ điền của mẫu còn trống không phải mục cần soạn (FLF-378, FLF-411)
     if (!present && isNonDraftHeading(entry.section_id, entry.heading_text)) continue
     sections.push({ section_id: entry.section_id, title: titleOf(entry.section_id, layout), status: present ? "present" : "missing", owner_steps: templateSectionOwnerSteps(entry.section_id, spine) })
@@ -145,7 +181,7 @@ export const compareTargetStructure = (
   opts: CompareOptions = {}
 ): TargetStructure => {
   const emptied = opts.emptied ?? new Set<string>()
-  const sections = fileSections(layout, withContent, spine, emptied)
+  const sections = fileSections(layout, withContent, spine, emptied, opts.outOfScope ?? new Set(), opts.scopeLabels ?? new Map())
   if (intent === "free") {
     // Mẫu chuẩn FlintFlow là mức tối thiểu: mục bắt buộc file chưa có ⇒ thêm vào đích (có dữ liệu trong Spine từ chỗ khác ⇒ có)
     for (const id of REQUIRED_FIXED_SECTION_IDS) {

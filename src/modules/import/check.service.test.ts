@@ -18,7 +18,9 @@ import {
   countOpenFlags,
   crossProjection,
   elementSections,
+  excludedCheckSections,
   findingOps,
+  hasGoalSection,
   runLimited,
   semanticBatchStep,
   semanticBatches,
@@ -303,5 +305,70 @@ describe("1.11 map-reduce - chia lô, phạm vi, kiểm chéo", () => {
     })
     expect(started).toEqual([1, 2])
     expect(out.map((r) => r?.ok)).toEqual([true, false, undefined, undefined, undefined])
+  })
+})
+
+describe("FLF-454 - phạm vi AI rà ở bước 1.9", () => {
+  const blk = (n: number, section: string | null, text: string, extra: Partial<CheckBlock> = {}): CheckBlock => ({
+    block_id: `B${String(n).padStart(4, "0")}`,
+    section_id: section,
+    text,
+    ...extra
+  })
+  const ids = (blocks: CheckBlock[], scope = {}) => semanticBatches(blocks, 48_000, scope).flatMap((b) => b.lines.split("\n").map((l) => /^\[(B\d+)\]/.exec(l)![1]))
+
+  it("section Ngoài phạm vi (và mục còn trống theo cấu trúc đích) không có trong lô gửi AI", () => {
+    const blocks = [blk(1, "fixed:3.1", "Real"), blk(2, "custom:CS01", "Out of scope text"), blk(3, "fixed:4.2.3", "Real too")]
+    const excluded = excludedCheckSections({
+      sections: [
+        { section_id: "fixed:3.1", status: "present" },
+        { section_id: "custom:CS01", status: "out_of_scope" },
+        { section_id: "fixed:4.2.3", status: "present" }
+      ]
+    })
+    expect(ids(blocks, { excluded_sections: excluded })).toEqual(["B0001", "B0003"])
+    expect(semanticBatches(blocks, 48_000, { excluded_sections: excluded })[0].section_ids).toEqual(["fixed:3.1", "fixed:4.2.3"])
+    // Không truyền phạm vi ⇒ giữ hết
+    expect(ids(blocks)).toEqual(["B0001", "B0002", "B0003"])
+  })
+
+  it("mục còn trống: chỉ heading (không block), chữ trắng, hoặc chỉ chữ hướng dẫn lớp 1-3 ⇒ không vào lô; lớp 4 chưa chắc vẫn rà", () => {
+    const blocks = [
+      blk(1, "fixed:3.1", "Real"),
+      blk(2, "fixed:3.2", "   "),
+      blk(3, "fixed:3.3", "[Describe the scope here]", { guidance_layer: 2 }),
+      blk(4, "fixed:3.4", "Maybe guidance", { guidance_layer: 4 })
+    ]
+    expect(ids(blocks)).toEqual(["B0001", "B0004"])
+    // mục thiếu theo cấu trúc đích cũng bị loại
+    const excluded = excludedCheckSections({ sections: [{ section_id: "fixed:3.4", status: "missing" }] })
+    expect(ids(blocks, { excluded_sections: excluded })).toEqual(["B0001"])
+  })
+
+  it("mục tự sinh: Record of Changes, mục lục, bìa không vào lô", () => {
+    const blocks = [blk(1, "fixed:I", "v0.1 initial"), blk(2, "custom:CS01", "1. Intro ..... 3"), blk(3, "custom:CS02", "Project X"), blk(4, "fixed:3.1", "Real")]
+    const excluded = excludedCheckSections(null, [
+      { section_id: "custom:CS01", heading_text: "Mục lục" },
+      { section_id: "custom:CS02", heading_text: "Cover Page" },
+      { section_id: "fixed:3.1", heading_text: "3.1 Functional Requirements" }
+    ])
+    expect([...excluded].sort()).toEqual(["custom:CS01", "custom:CS02"])
+    // fixed:I tự sinh luôn bị loại, kể cả khi không có bảng heading
+    expect(ids(blocks, { excluded_sections: excluded })).toEqual(["B0004"])
+    expect(ids(blocks)).toEqual(["B0002", "B0003", "B0004"])
+  })
+
+  it("số lô giảm khi loại section (credit báo theo đúng phần còn lại)", () => {
+    const blocks = Array.from({ length: 20 }, (_, i) => blk(i + 1, i < 10 ? "custom:CS01" : "fixed:3.1", "x".repeat(1_000)))
+    const excluded = excludedCheckSections({ sections: [{ section_id: "custom:CS01", status: "out_of_scope" }] })
+    expect(semanticBatches(blocks, 20_000)).toHaveLength(2)
+    expect(semanticBatches(blocks, 20_000, { excluded_sections: excluded })).toHaveLength(1)
+  })
+
+  it("hai phân tích mục tiêu / KPI chỉ chạy khi tài liệu có mục tiêu", () => {
+    const spine = createEmptySpine()
+    expect(hasGoalSection(spine)).toBe(false)
+    expect(hasGoalSection({ project: { ...spine.project, goals: ["  "] } })).toBe(false)
+    expect(hasGoalSection({ project: { ...spine.project, goals: ["Cut checkout time"] } })).toBe(true)
   })
 })

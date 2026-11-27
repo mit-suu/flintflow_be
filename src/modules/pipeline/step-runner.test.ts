@@ -137,6 +137,10 @@ vi.mock("../../shared/ai/document-context.service.js", async (importOriginal) =>
   const actual = await importOriginal<typeof import("../../shared/ai/document-context.service.js")>()
   return { ...actual, buildDocumentContext: vi.fn(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false, mode: "none" as const, chunksUsed: 0, fullTokens: 0 })) }
 })
+vi.mock("../project/project-document.service.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../project/project-document.service.js")>()),
+  pendingSummaryCredits: async () => ({ documents: 0, credits: 0 })
+}))
 vi.mock("../notification/notification.service.js", () => ({ notify: vi.fn(async () => null), notifyAdmins: vi.fn(async () => 0) }))
 vi.mock("../../shared/ai/credit-reservation.service.js", () => ({ refundDeductedCredit: vi.fn(async () => undefined) }))
 // FLF-265: kho bản dịch trong bộ nhớ (project `unit` không nối Mongo)

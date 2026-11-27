@@ -17,6 +17,8 @@
  * compile-time bắt hai bên lệch nhau.
  */
 
+import type { ScreenPlatform } from "../../shared/diagram/screen-theme.js"
+
 /** Chuỗi ISO 8601, ví dụ "2026-09-14T08:00:00.000Z". */
 export type IsoDateTime = string
 
@@ -63,7 +65,7 @@ export interface SpineProject {
 }
 
 /** Phạm vi báo credit cần user xác nhận trước khi chạy tiếp (FLF-466 P08, business-flow §2 "Báo trước khi chạy hàng loạt"). */
-export type CreditAckScope = "after_brief" | "screens_locked" | "screens_added"
+export type CreditAckScope = "after_brief" | "screens_locked" | "screens_added" | "reference_documents"
 
 /** Thông báo credit đang chờ xác nhận — server chặn step thuộc phạm vi tới khi `POST /run-estimate/ack`. */
 export interface CreditAckRequired {
@@ -73,6 +75,8 @@ export interface CreditAckRequired {
   created_at: string
   /** Màn thuộc lần báo (`screens_locked`, `screens_added`). */
   screens?: string[]
+  /** FLF-458: `reference_documents` — số tài liệu tham khảo chờ đọc đã báo. */
+  documents?: number
 }
 
 export interface Progress {
@@ -123,6 +127,11 @@ export interface Actor {
    * Chỉ actor người ↔ actor người. Use case dùng chung đặt ở actor cha; actor con thừa kế.
    */
   parent_id?: string | null
+  /**
+   * FLF-493: nền tảng actor người dùng hệ thống (`web` = máy tính / máy tính bảng, `mobile` = app điện thoại), tập con của
+   * nền tảng dự án. Chỉ có nghĩa với `kind = human`; vắng ⇒ chưa biết (mockup vẽ theo theme dự án).
+   */
+  platforms?: ScreenPlatform[]
 }
 
 export interface Role {

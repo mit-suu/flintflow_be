@@ -6,6 +6,7 @@
  */
 
 import { z } from "zod"
+import { USER_LOCALES } from "../../shared/i18n/locale.js"
 import { baselineSchema, flagSchema } from "../spine/spine.schema.js"
 import { IMPORT_PAUSE_REASONS, IMPORT_STATUSES } from "./import.state.js"
 import { DOC_VERSION_PATTERN } from "../doc-version/versioning.js"
@@ -74,6 +75,8 @@ export const importedDocumentDtoSchema = z.object({
   status: importStatusSchema,
   preflight: z.object({ status: z.enum(["accepted", "rejected"]), issues: z.array(preflightIssueSchema), document_kind: documentKindSchema.nullable().optional() }),
   stamp: docStampSchema.nullable(),
+  /** FLF-458: file nhận lúc tạo dự án mang dấu của một project FlintFlow khác (dấu đã bị bỏ, xem `stamp`). */
+  foreign_project: z.object({ project_id: id, name: z.string().nullable() }).nullable().optional(),
   confirmed_latest_at: isoDateTime.nullable(),
   paused: importPausedSchema.nullable(),
   extract_cursor: z.string().nullable(),
@@ -285,7 +288,14 @@ export const confirmLatestRequestSchema = z.strictObject({ import_id: id })
 export const mappingPatchRequestSchema = z
   .strictObject({
     import_id: id,
-    headings: z.array(z.strictObject({ block_id: blockId, section_id: z.string().min(1) })).default([]),
+    // FLF-460: `section_id` đổi mục khớp; `scope` đưa heading vào / ra Ngoài phạm vi ("auto" = bỏ nhãn tay, để hệ thống tự phân loại)
+    headings: z
+      .array(
+        z
+          .strictObject({ block_id: blockId, section_id: z.string().min(1).optional(), scope: z.enum(["out_of_scope", "in_scope", "auto"]).optional() })
+          .refine((h) => h.section_id !== undefined || h.scope !== undefined, { message: "Cần chọn mục hoặc nhãn Ngoài phạm vi." })
+      )
+      .default([]),
     tables: z
       .array(z.strictObject({ block_id: blockId, column_index: z.number().int().min(0), field_path: z.string().min(1).nullable() }))
       .default([]),
@@ -304,6 +314,9 @@ export const extractRequestSchema = z.strictObject({ import_id: id, confirm_late
 
 /** FLF-412 `PATCH /projects/:id/import/drop-text`: cả tập vùng (khoá `block_id` của heading) người dùng chọn Bỏ chữ. */
 export const dropTextRequestSchema = z.strictObject({ import_id: id, keys: z.array(z.string().min(1).max(32)).max(500) })
+
+/** FLF-456 `PATCH /projects/:id/import/document-language`: ngôn ngữ tài liệu khi file chỉ còn khung (trước Bắt đầu). */
+export const documentLanguageRequestSchema = z.strictObject({ import_id: id, language: z.enum(USER_LOCALES) })
 
 /** `PATCH /projects/:id/import/fields` (UC-22, nút 1.6/1.9). */
 export const fieldsPatchRequestSchema = z
@@ -350,6 +363,21 @@ export const continueFlow2RequestSchema = z.strictObject({
   base_version: baseVersion
 })
 
+/** FLF-461 bước 2.9a — `GET /import/layout-preview` và `POST /import/layout-preview/confirm` (chế độ 4). */
+export const layoutPreviewResponseSchema = z.object({
+  applicable: z.boolean(),
+  confirmed_at: isoDateTime.nullable(),
+  sections: z.array(
+    z.object({
+      section_id: z.string().min(1),
+      title: z.string(),
+      level: z.number().int().min(1),
+      origin: z.enum(["file", "added", "out_of_scope"])
+    })
+  )
+})
+export type LayoutPreviewDto = z.infer<typeof layoutPreviewResponseSchema>
+
 /** FLF-336 I-5 — kết quả so cấu trúc đích (`TemplateProfile.target_structure`). */
 export const targetSectionSchema = z.object({
   section_id: z.string().min(1),
@@ -381,7 +409,20 @@ export const structurePreviewSchema = z.object({
     kind: z.enum(["written", "template"])
   }),
   // P09 (#15): `excerpt` — trích đoạn chữ khách viết dưới mục (≤ 200 ký tự); mục không có chữ / bản sơ bộ cũ ⇒ không có
-  sections: z.array(z.object({ section_id: z.string().min(1), title: z.string(), status: z.enum(["present", "missing", "out_of_scope"]), order: z.number().int().min(0), excerpt: z.string().max(200).optional() })),
+  // FLF-460: `block_id` (đổi nhãn), `uncertain` + `matched_title` (I-3 độ tin thấp), `scope_label` (nhãn Ngoài phạm vi người dùng đổi)
+  sections: z.array(
+    z.object({
+      section_id: z.string().min(1),
+      title: z.string(),
+      status: z.enum(["present", "missing", "out_of_scope"]),
+      order: z.number().int().min(0),
+      excerpt: z.string().max(200).optional(),
+      block_id: z.string().optional(),
+      uncertain: z.boolean().optional(),
+      matched_title: z.string().optional(),
+      scope_label: z.enum(["out_of_scope", "in_scope"]).optional()
+    })
+  ),
   resolved_mode: z.union([z.literal(1), z.literal(3), z.literal(4)]),
   intent: z.enum(["fixed", "free"]),
   computed_at: isoDateTime
@@ -390,6 +431,9 @@ export type StructurePreviewDto = z.infer<typeof structurePreviewSchema>
 
 /** `POST /projects/:id/import/resume` (UC-61, UC-75). */
 export const importResumeRequestSchema = z.strictObject({ import_id: id })
+
+/** `POST /projects/:id/import/review/section` (FLF-453): rà riêng một mục chỉ được Code kiểm; `confirm` chưa true ⇒ chỉ báo credit. */
+export const reviewSectionRequestSchema = z.strictObject({ import_id: id, section_id: z.string().min(1).max(200), confirm: z.boolean().optional() })
 
 /** `GET /projects/:id/gap-report?format=json|docx` (UC-23). */
 export const gapReportQuerySchema = z.object({ format: z.enum(["json", "docx"]).default("json") })
@@ -419,6 +463,8 @@ export const getImportResponseSchema = z.object({
   structure_preview: structurePreviewSchema.nullable().optional(),
   /** FLF-412: vùng heading có chữ + lựa chọn Bỏ chữ — chỉ có trước Bắt đầu (`extracting` chưa đọc lượt nào); khác ⇒ null. */
   text_sections: z.array(z.object({ key: z.string(), title: z.string(), level: z.number().int(), dropped: z.boolean() })).nullable().optional(),
+  /** FLF-456: ô ngôn ngữ tài liệu của màn đọc khung — chỉ trước Bắt đầu; `visible` chỉ khi mọi mục có chữ đã Bỏ chữ. */
+  skeleton_language: z.object({ visible: z.boolean(), file: z.enum(USER_LOCALES), selected: z.enum(USER_LOCALES) }).nullable().optional(),
   /**
    * FLF-343: ước tính cả lượt một mạch (I-4 còn phải chạy + kiểm tra AI 1.11) — chỉ có khi import ở `mapping_review` hoặc `extracting` mà job chưa chạy / đang dừng; trạng
    * thái khác hoặc đang chạy ⇒ `null` / không có. Tính bằng chính kế hoạch lượt của lượt chạy (lô chữ sau phần đọc tất định +
@@ -431,6 +477,8 @@ export const getImportResponseSchema = z.object({
       diagram_images: z.number().int().min(0),
       /** FLF-343: lượt AI của bước kiểm tra (1.11) chạy nối tiếp — đã gộp vào `ai_calls` / `credits`. */
       check_calls: z.number().int().min(0).optional(),
+      /** FLF-456: số lô dịch khung (chọn ngôn ngữ khác file khi file chỉ còn khung) — đã gộp vào `ai_calls` / `credits`. */
+      translate_batches: z.number().int().min(0).optional(),
       ai_calls: z.number().int().min(0),
       credits: z.number().min(0),
       available_credits: z.number().nullable()
@@ -445,7 +493,9 @@ export const getImportResponseSchema = z.object({
     .object({
       section_ids: z.array(z.string()),
       calls: z.number().int().min(0),
-      credits: z.number().min(0)
+      credits: z.number().min(0),
+      /** Mục chỉ được Code kiểm có chữ để AI rà, kèm credit riêng (nút "Rà soát bằng AI" từng mục). */
+      optional_sections: z.array(z.object({ section_id: z.string(), title: z.string(), calls: z.number().int().min(1), credits: z.number().min(0) })).optional()
     })
     .nullable()
     .optional()

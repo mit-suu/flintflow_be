@@ -9,10 +9,10 @@ import type { Request, RequestHandler, Response } from "express"
 vi.mock("../import/convert-from-fpt.service.js", () => ({ retryPendingConversion: vi.fn().mockResolvedValue(false) }))
 vi.mock("../import/template-update.js", () => ({ templateUpdateOf: vi.fn().mockResolvedValue(null), templateCurrentOf: vi.fn().mockResolvedValue(null) }))
 vi.mock("../translation/translation.service.js", () => ({ projectLanguages: vi.fn() }))
-vi.mock("./project.service.js", () => ({ openProject: vi.fn(), getProjectById: vi.fn() }))
+vi.mock("./project.service.js", () => ({ openProject: vi.fn(), getProjectById: vi.fn(), isDocumentLanguageLocked: vi.fn().mockResolvedValue(false) }))
 
 import { getProject } from "./project.controller.js"
-import { openProject } from "./project.service.js"
+import { isDocumentLanguageLocked, openProject } from "./project.service.js"
 import { projectLanguages } from "../translation/translation.service.js"
 
 const PROJECT_ID = "650000000000000000000001"
@@ -76,5 +76,13 @@ describe("getProject - FLF-480 (ChoViet #14)", () => {
 
     const res = await invoke(getProject, "u1", PROJECT_ID)
     expect((res.body as { data: { document_language: string } }).data.document_language).toBe("en")
+  })
+
+  it("FLF-456: trả document_language_locked theo BE để FE không mời đổi ngôn ngữ ở dự án có file nền", async () => {
+    vi.mocked(openProject).mockResolvedValue(project({ mode: "fpt", documentLanguage: "en" }) as never)
+    vi.mocked(projectLanguages).mockResolvedValue({ locale: "en", source: "en" })
+    vi.mocked(isDocumentLanguageLocked).mockResolvedValueOnce(true)
+    const res = await invoke(getProject, "u1", PROJECT_ID)
+    expect((res.body as { data: { document_language_locked: boolean } }).data.document_language_locked).toBe(true)
   })
 })

@@ -134,6 +134,8 @@ export interface TemplateLayout {
    * (`nfrs:NFR-03`). Phần tử in dưới heading đó, lần đầu của section chỉ in phần còn lại (kể cả phần tử thêm sau).
    */
   sectionSlices?: readonly SectionSliceView[]
+  /** Đổi mẫu: mục BA chọn "Không in ra" — coi như đã có chỗ, phần dữ liệu của nó không in ngầm vào mục chứa (Phạm vi in mục tiêu). */
+  printSuppressed?: readonly string[]
   /**
    * Mẫu bắt buộc (`Project.template_intent = fixed`, chế độ 3 — business-flow 2.10): chỉ in đúng các mục của mẫu, **không
    * chèn** heading FlintFlow mẫu không có. Dữ liệu chức năng in trong bảng của mục chức năng gốc;
@@ -275,6 +277,11 @@ interface Placed {
   label?: string
   /** FLF-364 (câu 10): chữ hướng dẫn của mẫu dưới heading (mục FPT / phần nhỏ). */
   guidance?: readonly string[]
+  /**
+   * Mục layout đứng ngay trước mục này mà phần tử đã bị xoá (tính năng / chức năng / mục riêng): không in, nhưng vẫn tính khi
+   * xét file đánh số đều — xoá "3.2" thì "3.3" phía sau dồn thành "3.2" thay vì tài liệu hổng số.
+   */
+  droppedBefore?: readonly Placed[]
 }
 
 // ─── mục riêng ⇒ block ─────────────────────────────────────────────
@@ -445,17 +452,35 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
   const placed: Placed[] = []
   const used = new Set<string>()
   const insertMissing = (candidates: readonly SectionDef[]) => insertMissingSections(placed, used, defs, candidates, spine, template)
+  /** Mục layout mà phần tử đã bị xoá, chờ gắn vào mục layout kế tiếp được đặt (`droppedBefore`). */
+  let dropped: Placed[] = []
+  let mark = 0
+  const attachDropped = () => {
+    if (dropped.length && placed.length > mark) {
+      placed[mark] = { ...placed[mark], droppedBefore: dropped }
+      dropped = []
+    }
+    if (!dropped.length) mark = placed.length
+  }
+  const featureIds = new Set(spine.features.map((f) => `feature:${f.id}`))
+  const functionIds = new Set(spine.functions.map((f) => `function:${f.id}`))
 
   for (const entry of [...template.layout].sort((a, b) => a.order - b.order)) {
+    attachDropped()
     const id = entry.section_id
     if (used.has(id) && !template.fixedTemplate) continue
     const { typed, title, label } = fileNumber(entry.heading_text, entry.number_label)
     const level = clampLevel(entry.level)
+    // Writer cũng bỏ hẳn heading của các mục này trong file nền (`removeDeletedSlot`) ⇒ số anh em phía sau dồn được ở cả hai nơi
+    const drop = () => dropped.push({ section_id: id, kind: "custom", title, level, fromLayout: true, typed, label })
     if (id.startsWith(GROUP_PREFIX)) {
       placed.push({ section_id: id, kind: "group", title: title || id.slice(GROUP_PREFIX.length), level, fromLayout: true, typed, label })
     } else if (id.startsWith(CUSTOM_PREFIX)) {
       const custom = customById.get(id.slice(CUSTOM_PREFIX.length))
-      if (!custom && !template.fixedTemplate) continue
+      if (!custom && !template.fixedTemplate) {
+        drop()
+        continue
+      }
       // Phần nối (heading rỗng) mà mục riêng đã không còn: không có gì để in — không dựng mục trống tên "—"
       if (!custom && !entry.heading_text.trim()) continue
       if (!custom) {
@@ -489,10 +514,12 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
         guidance: entry.template_guidance
       })
     } else {
+      if ((id.startsWith("feature:") && !featureIds.has(id)) || (id.startsWith("function:") && !functionIds.has(id))) drop()
       continue
     }
     used.add(id)
   }
+  attachDropped()
 
   if (template.fixedTemplate) {
     insertMissing(defs.filter((d) => isRepeatingSection(d.id)))
@@ -715,7 +742,9 @@ export const numberSections = (placed: readonly Placed[]): Numbered[] => {
   const flat = (p: Placed, number: string): Numbered => ({ ...p, number, renderLevel: Math.min(MAX_LEVEL, p.level) })
   if (!placed.some((p) => p.fromLayout && p.kind !== "continuation" && p.typed)) return placed.map((p) => flat(p, ""))
   const sameAsFile = (n: Numbered): boolean => !!n.label && bareLabel(n.label) === bareLabel(n.number)
-  const regular = countNumbers(placed.filter((p) => p.fromLayout)).every((n) => !n.typed || sameAsFile(n))
+  // Xét "đều" trên layout của file kể cả mục đã xoá: xoá "3.2" không làm file thành "không đều" ⇒ "3.3" phía sau dồn thành "3.2"
+  const fileRows = placed.filter((p) => p.fromLayout).flatMap((p) => [...(p.droppedBefore ?? []), p])
+  const regular = countNumbers(fileRows).every((n) => !n.typed || sameAsFile(n))
   if (regular) return countNumbers(placed)
   const out: Numbered[] = []
   for (const p of placed) {
@@ -976,11 +1005,23 @@ export const buildLayoutSections = (
   const fromOriginal = new Set<RenderedSection>()
   // Mẫu IEEE: phần tử của heading lặp in dưới heading đó; lần đầu của section bỏ chúng
   const sliceOf = new Map((template.sectionSlices ?? []).map((sl) => [`${CUSTOM_PREFIX}${sl.custom_id}`, sl]))
-  const claimed = new Map<string, Set<string>>()
+  const claimedBy = new Map<string, Set<string>>()
+  /** FLF-453: phần tử đã in nguyên văn ở mục riêng của heading tự đặt (`section_id` = "verbatim") — mục FlintFlow nào cũng không in lại. */
+  const verbatimClaimed = new Set<string>()
   for (const sl of template.sectionSlices ?? []) {
-    const set = claimed.get(sl.section_id) ?? new Set<string>()
+    if (sl.section_id === "verbatim") {
+      sl.items.forEach((k) => verbatimClaimed.add(k))
+      continue
+    }
+    const set = claimedBy.get(sl.section_id) ?? new Set<string>()
     sl.items.forEach((k) => set.add(k))
-    claimed.set(sl.section_id, set)
+    claimedBy.set(sl.section_id, set)
+  }
+  const claimed = {
+    get: (id: string): Set<string> | undefined => {
+      const own = claimedBy.get(id)
+      return verbatimClaimed.size ? new Set([...(own ?? []), ...verbatimClaimed]) : own
+    }
   }
   const useCaseIds = template.relabelUseCases ? useCaseDisplayIds(spine) : undefined
   const contextFor = (sectionId: string, number: string): SectionRenderContext => {
@@ -992,7 +1033,7 @@ export const buildLayoutSections = (
       language: template.language,
       ...(useCaseIds ? { useCaseIds } : {}),
       ...(distributionSlot ? { distributionSlot: true } : {}),
-      ...(template.fixedTemplate ? { fixedTemplate: true, representedSlots: new Set(template.layout.filter((e) => isContentSlot(e.section_id)).map((e) => e.section_id)) } : {}),
+      ...(template.fixedTemplate ? { fixedTemplate: true, representedSlots: new Set([...template.layout.filter((e) => isContentSlot(e.section_id)).map((e) => e.section_id), ...(template.printSuppressed ?? []).filter((id) => isContentSlot(id))]) } : {}),
       ...(nonScreen ? { nonScreenFunctionIds: nonScreen } : {}),
       // FLF-361: tài liệu nhập tự do — mục chức năng dựng từ Spine theo khung FPT (Function trigger / Function description /
       // Screen layout / Function details) thay vì khung cũ không có tiêu đề con; mục tính năng không thêm dòng "Screens: …"
@@ -1133,7 +1174,7 @@ export const buildLayoutSections = (
   /** Khối Spine của heading lặp — phần tử đã xoá hết ⇒ không có gì. */
   const sliceBlocks = (n: Numbered): Block[] => {
     const sl = sliceOf.get(n.section_id)
-    if (!sl) return []
+    if (!sl || sl.section_id === "verbatim") return []
     const section = renderSection(filterSliceItems(contentSpine, new Set(sl.items), true), sl.section_id, contextFor(sl.section_id, n.number))
     return shiftHeadings(section.blocks, n.renderLevel - section.level)
   }

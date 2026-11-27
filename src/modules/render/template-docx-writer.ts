@@ -140,6 +140,30 @@ export async function writeTemplateDocx(
   const styles = await pkg.xml("word/styles.xml")
   const defaultBodyStyle = (styles ? wAll(styles, "style") : []).find((s) => wAttr(s, "type") === "paragraph" && (wAttr(s, "default") === "1" || /^(normal|body text)$/i.test(wAttr(wKid(s, "name"), "val") ?? "")))
   const bodyStyleId = wAttr(defaultBodyStyle, "styleId") ?? undefined
+  /** Đoạn mẫu cho heading cấp `level` khi file chưa có heading cấp đó: style "heading N" / outlineLvl N-1 của mẫu, hoặc heading sâu nhất + outlineLvl. */
+  const headingSampleOfLevel = (level: number): { element: Element; text: string } | undefined => {
+    const style = (styles ? wAll(styles, "style") : []).find(
+      (s) => wAttr(s, "type") === "paragraph" && (new RegExp(`^heading\\s*${level}$`, "i").test(wAttr(wKid(s, "name"), "val") ?? "") || wAttr(wKid(wKid(s, "pPr") ?? s, "outlineLvl"), "val") === String(level - 1))
+    )
+    const p = wEl(xml, "p")
+    const pPr = wEl(xml, "pPr")
+    p.appendChild(pPr)
+    const styleId = wAttr(style, "styleId")
+    if (styleId) {
+      pPr.appendChild(wEl(xml, "pStyle", { val: styleId }))
+      return { element: p, text: "" }
+    }
+    const deepest = [...headings].filter((h) => (h.level ?? 1) < level).sort((a, b) => (b.level ?? 1) - (a.level ?? 1))[0]
+    if (!deepest) return undefined
+    const own = wKid(deepest.element, "pPr")
+    const clone = own ? (own.cloneNode(true) as Element) : pPr
+    for (const old of wKids(clone, "outlineLvl")) clone.removeChild(old)
+    // Thứ tự con của pPr theo schema: outlineLvl đứng trước rPr / sectPr / pPrChange
+    const tail = wKids(clone).find((k) => ["rPr", "sectPr", "pPrChange"].includes(k.localName))
+    clone.insertBefore(wEl(xml, "outlineLvl", { val: String(level - 1) }), tail ?? null)
+    if (clone !== pPr) p.replaceChild(clone, pPr)
+    return { element: p, text: "" }
+  }
   const numbering = await pkg.xml("word/numbering.xml")
   const listFormat = (p: Element): string | null => {
     if (!numbering) return null
@@ -368,9 +392,12 @@ export async function writeTemplateDocx(
     // FLF-468: ưu tiên heading cùng loại (tính năng / chức năng) cùng cấp của file hơn heading cùng cấp bất kỳ ("5.5 Glossary")
     const kindSample = kind ? slots.filter((s) => s.section_id.startsWith(`${kind}:`) && (s.heading.level ?? 1) === section.level).pop()?.heading : undefined
     const sameLevel = headings.filter((h) => (h.level ?? 1) === section.level)
-    const sample = frameSample ?? kindSample ?? sameLevel[sameLevel.length - 1]
+    const found = frameSample ?? kindSample ?? sameLevel[sameLevel.length - 1]
+    // File chưa có heading nào ở cấp này (mẫu chỉ dùng Heading 1–3): heading theo style "heading N" của mẫu; mẫu không có style đó ⇒
+    // theo heading sâu nhất của file + outlineLvl — vẫn là heading (vào mục lục), không rơi về đoạn thường in đậm
+    const sample = found ?? headingSampleOfLevel(section.level)
     if (!sample) return paragraph(xml, [{ text: section.heading, bold: true }], bodyPatternFor(bodyPattern, bodyStyleId))
-    const typed = /^\s*(\d+(\.\d+)*\.?|[IVXLC]+\.)\s+/.test(sample.text)
+    const typed = /^\s*(\d+(\.\d+)*\.?|[IVXLC]+\.)\s+/.test(found ? sample.text : (headings.find((h) => h.text.trim())?.text ?? ""))
     const text = typed && section.number ? `${section.number} ${section.heading}` : section.heading
     const heading = paragraph(xml, [{ text }], sample.element)
     for (const pr of wAll(heading, "sectPr")) pr.parentNode?.removeChild(pr)
@@ -388,7 +415,8 @@ export async function writeTemplateDocx(
   }
   // FLF-468 (lát A): heading bị xoá mang theo bookmark `_Toc` của nó — mục lục field phải tính lại khi mở để không còn
   // dòng trỏ vào mục đã mất.
-  if (sectionsRemoved && !(rearrange || frameMode)) await requestFieldUpdate(pkg)
+  const renumbered = renumberKeptHeadings(xml, slots)
+  if ((sectionsRemoved || renumbered) && !(rearrange || frameMode)) await requestFieldUpdate(pkg)
   // Mẫu để điền: thay chữ giữ chỗ của bìa. Dự án có sẵn: bìa là của file đã viết ⇒ giữ nguyên
   if (!sourceMode) replacePlaceholders(xml, { "[Project name]": doc.projectName, "[Version]": doc.version, "[Date]": doc.generatedAt.slice(0, 10) })
   // Import-only anchors are useful while resolving slots, but untouched source
@@ -423,6 +451,43 @@ const replaceInParagraph = (p: Element, needle: string, value: string): void => 
     t.textContent = text.slice(0, Math.max(0, start - from)) + (from <= start ? value : "") + text.slice(Math.min(text.length, end - from))
     t.setAttribute("xml:space", "preserve")
   }
+}
+
+const TYPED_DECIMAL = /^(\d{1,2}(?:\.\d{1,2})*)\.?\s/
+const DECIMAL_NUMBER = /^\d+(\.\d+)*$/
+
+/**
+ * Heading giữ từ file nền mang số gõ tay cũ: số của bản in khác (xoá / chèn mục ở file đánh số đều ⇒ anh em phía sau dồn số,
+ * "3.3" ⇒ "3.2") thì ghi số mới lên heading; đoạn / ô có chữ đúng bằng nguyên chữ heading cũ (cột "Chức năng" của bảng mô tả
+ * màn hình) đổi theo — chữ cũ trùng giữa nhiều heading thì không đổi ô. Chỉ số thập phân; heading Word tự đánh số không có số
+ * trong chữ nên không đụng. Trả `true` khi có heading đổi số (mục lục cần tính lại).
+ */
+const renumberKeptHeadings = (xml: Document, slots: readonly { section_id: string; heading: { element: Element }; sections: readonly RenderedSection[] }[]): boolean => {
+  const changed = new Map<string, string>()
+  const dup = new Set<string>()
+  const headingEls = new Set(slots.map((s) => s.heading.element))
+  for (const slot of slots) {
+    const el = slot.heading.element
+    if (!el.parentNode) continue
+    const number = slot.sections.find((s) => s.id === slot.section_id)?.number ?? ""
+    if (!DECIMAL_NUMBER.test(number)) continue
+    const before = paragraphText(el)
+    const typed = TYPED_DECIMAL.exec(before)?.[1]
+    if (!typed || typed === number) continue
+    replaceInParagraph(el, typed, number)
+    const after = paragraphText(el)
+    if (changed.has(before) && changed.get(before) !== after) dup.add(before)
+    changed.set(before, after)
+  }
+  for (const d of dup) changed.delete(d)
+  if (!changed.size) return false
+  for (const p of wAll(xml, "p")) {
+    if (headingEls.has(p)) continue
+    const text = paragraphText(p)
+    const next = changed.get(text)
+    if (next) replaceInParagraph(p, text, next)
+  }
+  return true
 }
 
 /** FLF-378: bảng mẫu giữ hàng tiêu đề (+ style), bỏ dòng mẫu / ví dụ bên dưới. */

@@ -19,6 +19,7 @@
 import { env } from "../../../config/env.js"
 import { applyTransaction } from "../../spine/op-engine.js"
 import * as repository from "../../spine/spine.repository.js"
+import { internalElementNames, nameElementIds, stripInternalCodes } from "../../spine/human-labels.js"
 import type { Op } from "../../spine/op.types.js"
 import type { Flag, Spine, SpineRecord } from "../../spine/spine.types.js"
 import { ActionType, type AiActionInput, type AiActionResult } from "../../../shared/ai/ai-action.types.js"
@@ -167,12 +168,28 @@ const buildBlocks = (spine: Spine): Block[] => {
   })
 
   const common = block("common", fixedSectionIds(spine), {
-    project: { name: spine.project.name, vision: spine.project.vision, goals: spine.project.goals, form_factor: spine.project.form_factor },
+    // FLF-449 (M1): tên hệ thống in trên tài liệu được phép khác tên dự án - thiếu nó model báo "tên hệ thống khác tên dự án"
+    project: {
+      name: spine.project.name,
+      system_name: spine.project.system_name ?? null,
+      system_name_note: "system_name is the product name printed on the document; it may differ from the project name - not a conflict.",
+      vision: spine.project.vision,
+      goals: spine.project.goals,
+      form_factor: spine.project.form_factor
+    },
     actors: spine.actors.map((a) => ({ id: a.id, name: a.name, kind: a.kind, description: a.description })),
     roles: spine.roles.map((r) => ({ id: r.id, name: r.name, actor_id: r.actor_id })),
     nfrs: spine.nfrs.map((n) => ({ id: n.id, category: n.category, statement: n.statement, metric: n.metric, threshold: n.threshold })),
     entities: spine.entities.map((e) => ({ id: e.id, name: e.name, description: e.description })),
-    external_interfaces: spine.deployment_nodes.map((n) => ({ id: n.id, name: n.name, kind: n.kind, components: n.components, artifacts: n.artifacts })),
+    // FLF-449 (M1): giao tiếp ngoài = NFR giao tiếp (`category = interface`) + actor không phải người (hệ thống / thời gian).
+    // Nút triển khai là khoá riêng, chỉ khi có - dự án để trống không được hiện thành "danh sách giao tiếp ngoài trống".
+    external_interfaces: {
+      interface_requirements: spine.nfrs.filter((n) => n.category === "interface").map((n) => ({ id: n.id, statement: n.statement })),
+      external_actors: spine.actors.filter((a) => a.kind !== "human").map((a) => ({ id: a.id, name: a.name, kind: a.kind, description: a.description }))
+    },
+    ...(spine.deployment_nodes.length > 0
+      ? { deployment_nodes: spine.deployment_nodes.map((n) => ({ id: n.id, name: n.name, kind: n.kind, components: n.components, artifacts: n.artifacts })) }
+      : {}),
     permissions: spine.permissions.map((p) => ({ screen_id: p.screen_id, role_id: p.role_id, action: p.action })),
     common_requirements: spine.common_requirements.map((c) => ({ id: c.id, category: c.category, statement: c.statement })),
     business_rules: spine.business_rules.filter((r) => !usedRules.has(r.id)).map((r) => ({ id: r.id, statement: r.statement })),
@@ -368,6 +385,7 @@ export const runAiReview = async (projectId: string, userId: string, profile: Re
     .map(({ rule_id, lens, section_id, message }) => ({ rule_id, lens: lens ?? null, section_id, message }))
   const settledSources = [...decisions.map((d) => d.answer), ...assumptions.map((a) => a.statement), documents]
   const knownSections = new Set(spine.sections.map((s) => s.id))
+  const internalNames = internalElementNames(spine)
 
   const lensText = def.lenses.map((l) => `${l.name} - ${l.hint}`).join("\n")
   const accepted = new Map<string, { lens: string; section_id: string; target_id: string | null; message: string }>()
@@ -399,7 +417,8 @@ export const runAiReview = async (projectId: string, userId: string, profile: Re
     // Không tin output: chỉ nhận cờ vàng, lens thuộc profile, câu trích khớp nguồn
     for (const f of result.data.flags ?? []) {
       const lens = f.rule_id ?? ""
-      const message = humanizeReviewMessage(f.message.trim(), options.replyLanguage ?? "vi")
+      // FLF-480: cờ do model viết còn chép mã nội bộ (N23, BR04, A06, AS43…) ⇒ đổi sang tên; mã không còn phần tử thì bỏ
+      const message = stripInternalCodes(nameElementIds(humanizeReviewMessage(f.message.trim(), options.replyLanguage ?? "vi"), spine, internalNames))
       if (f.level !== "yellow" || !lensNames.has(lens) || message === "") continue
 
       const targetId = f.target_id && indexIds.has(f.target_id) ? f.target_id : null

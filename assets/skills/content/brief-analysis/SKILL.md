@@ -1,7 +1,7 @@
 ---
 skill_id: brief-analysis
 kind: content
-version: 0.2.0
+version: 0.3.0
 description: "S-1.1 Brief Extraction, S-1.3 Conflict & Assumption Review, S-1.4 Gap List"
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -54,6 +54,7 @@ The Brief keeps vision and goals in the user's language as addendum entries (`to
 - `notes` (the message the user reads at the gate) is in the user's language, plain and warm: say what you turned
   into the SRS vision and goals, no field names.
 - Other `addendum[]` entries are not yours: extraction reads them unfiltered; triage happens later, at B-2.2.
+- A success metric that is the main business target of the idea ("cut no-shows from 20% to 8%") but has no matching `goals` entry ⇒ add an `other_requirements[kind=open_question]` asking whether it belongs in the goals; never turn it into a goal yourself.
 
 Nothing to extract is a valid outcome: return `ops: []` and say so in `notes`.
 
@@ -97,6 +98,10 @@ Brief raises:
 A gap list is not a complaint list: each entry should be answerable in one sentence by the user. Fewer grounded gaps
 beat a full sweep of generic ones.
 
+### Answered questions (a `revision` at the S-1.3 / S-1.4 gate)
+
+The user's message answers some open questions. **Only process the answers**: do not sweep the themes again or add new gaps, unless an answer itself raises one. For every question answered, `remove` it **and** list it in `answered_questions` (beside `ops`): `{ "id": "OR11", "answer": "<the user's words for that question, verbatim>" }`. The server saves each answer to the decisions ledger that every later step reads, and **rejects a batch that removes an open question without its answer** (the user saying "skip it" is the answer). A question the user answered in free chat that was never an `OR` (the closing "who else uses it?") ⇒ `{ "id": null, "question": "<the question>", "topic_key": "roles", "answer": "…" }` (canonical keys: `roles`, `uptime`, `data_retention`, `cancel_window`…). When the answer **states a rule or capability the document must print** ("past 24h only an extra note is added"), also `add addendum[]` (`content` = the user's words, `content_en`, `target_section`) - this is the one revision exception to the addendum limit below. New questions continue the id sequence and **never reuse a removed id**.
+
 <!-- ba-quality:shared:start -->
 **Analysis quality** - applies to every finding, gap, proposed change, recommendation and reason you write (not to the plain answer options of a question):
 - **(a) Quote it or drop it.** Each one rests on words you can copy verbatim from the uploaded documents, the Brief, the current SRS content or the user's messages. Where the output has a quote or source field, put that exact text there. Nothing to quote ⇒ do not raise it.
@@ -110,7 +115,7 @@ beat a full sweep of generic ones.
 
 1. Ids continue the existing sequence (`draft-to-ops` rule 5) - check the projection first.
 2. Write only `project`, `other_requirements[]`, `assumptions[]`. No `actors[]`, `use_cases[]`,
-   `screens[]`, `functions[]`, `sections[]`; `addendum[]` only for the S-1.1 revision on `vision`/`goals` entries.
+   `screens[]`, `functions[]`, `sections[]`; `addendum[]` only for the S-1.1 revision on `vision`/`goals` entries and for a rule stated in an answered question.
 3. `project.goals[]` is sent as the **full array** (`set` replaces it) - include the goals already there.
 4. English values, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).
 5. Still unclear: record the most reasonable reading plus an `assumptions[]` entry (`draft-to-ops`

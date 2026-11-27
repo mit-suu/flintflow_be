@@ -25,6 +25,10 @@ export const MODE1_ERROR_STATUS = {
   PROJECT_MODE_MISMATCH: 409,
   IMPORT_NEEDS_LATEST_CONFIRM: 409,
   IMPORT_INVALID_STATE: 409,
+  /** FLF-461 (BF 2.9a): xác nhận bố cục khi còn mục cần soạn (chưa tới 2.9a) — `meta.remaining`. */
+  LAYOUT_NOT_READY: 409,
+  /** FLF-461 (BF 2.10): chế độ 4 ký baseline khi chưa xác nhận bố cục mới (hoặc bố cục đã đổi sau xác nhận). */
+  LAYOUT_NOT_CONFIRMED: 409,
   CR_REQUIRES_BASELINE: 409,
   CR_INVALID_TRANSITION: 409,
   /** FLF-186: phần tử Spine đang được CR khác giữ khoá (thay `BLOCK_LOCKED` theo block docx). */

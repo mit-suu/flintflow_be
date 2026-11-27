@@ -50,6 +50,24 @@ describe("reviewInputSections", () => {
   })
 })
 
+describe("reviewInputSections - cột derived và khuôn", () => {
+  it("thiếu 2.2.1 Use Case Diagram ⇒ 2.2.2 (use_cases, derived diagram:usecase) là đầu vào", () => {
+    const sections = [section("fixed:2.2.2", "present"), section("fixed:2.2.1", "missing")]
+    expect(reviewInputSections({ sections, missing: ["fixed:2.2.1"] })).toContain("fixed:2.2.2")
+  })
+
+  it("thiếu 5.3 Messages ⇒ mục chức năng (functions_abnormal, derived fixed:5.3) là đầu vào", () => {
+    const sections = [section("function:FN01", "present"), section("fixed:5.3", "missing")]
+    expect(reviewInputSections({ sections, missing: ["fixed:5.3"] })).toContain("function:FN01")
+  })
+
+  it("thiếu một mục chức năng ⇒ khuôn function:<screen> / function:<rule> khớp: mục 3.1.2 và 5.1 là đầu vào", () => {
+    const sections = [section("fixed:3.1.2", "present"), section("fixed:5.1", "present"), section("function:FN02", "missing")]
+    const got = reviewInputSections({ sections, missing: ["function:FN02"] })
+    expect(got).toEqual(expect.arrayContaining(["fixed:3.1.2", "fixed:5.1"]))
+  })
+})
+
 describe("redFlaggedPresentSections", () => {
   const sections = [section("fixed:1", "present"), section("fixed:3.1.2", "missing")]
 

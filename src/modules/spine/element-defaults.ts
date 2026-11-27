@@ -63,6 +63,9 @@ const ELEMENT_SCHEMAS: Readonly<Record<string, ElementSchema>> = Object.freeze({
 /** Field nullable mà thiếu thì `null` — không đổi nghĩa của phần tử. */
 const NULL_WHEN_MISSING: ReadonlySet<string> = new Set(["priority", "primary_function_id", "confirmed_at"])
 
+/** Mảng mà vắng nghĩa là "chưa biết" (FLF-493: `actors[].platforms`) — không điền `[]` để khỏi thành giá trị giả. */
+const NO_ARRAY_DEFAULT: ReadonlySet<string> = new Set(["platforms"])
+
 const isArraySchema = (schema: z.ZodType): boolean => {
   let current: z.ZodType = schema
   // bóc lớp default/optional/nullable để thấy kiểu thật
@@ -94,6 +97,7 @@ export const withElementDefaults = (collection: string, value: unknown): unknown
   const out: Record<string, unknown> = { ...(value as Record<string, unknown>) }
   for (const [key, field] of Object.entries(schema.shape)) {
     if (out[key] !== undefined) continue
+    if (NO_ARRAY_DEFAULT.has(key)) continue
     if (isArraySchema(field as z.ZodType)) out[key] = []
     else if (NULL_WHEN_MISSING.has(key)) out[key] = null
   }

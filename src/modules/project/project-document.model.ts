@@ -22,7 +22,9 @@ export interface IProjectDocument extends Document {
   tokenCount?: number | null
   // AI summary fields (Task 2b)
   summary?: string | null
-  summaryStatus: "pending" | "success" | "failed"
+  /** `running`: một lượt đọc đang giữ tài liệu (FLF-458, chống đọc / trừ credit hai lần); quá hạn `summaryClaimedAt` coi như `pending`. */
+  summaryStatus: "pending" | "running" | "success" | "failed"
+  summaryClaimedAt?: Date | null
   /** Số tài liệu trong project (FLF-292) — phần `D<n>` của mã đoạn `D1-P03`; gán một lần, không đổi khi xoá tài liệu khác. */
   docCode?: number | null
   /**
@@ -121,9 +123,10 @@ const projectDocumentSchema = new Schema<IProjectDocument>(
     },
     summaryStatus: {
       type: String,
-      enum: ["pending", "success", "failed"],
+      enum: ["pending", "running", "success", "failed"],
       default: "pending"
     },
+    summaryClaimedAt: { type: Date, default: null },
     docCode: {
       type: Number,
       default: null,

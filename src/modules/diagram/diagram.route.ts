@@ -98,4 +98,41 @@ router.get("/:projectId/diagrams/:file", authMiddleware, diagramController.getDi
  */
 router.post("/:projectId/diagrams/:kind/render", authMiddleware, diagramController.renderDiagramRoute)
 
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/diagrams/render:
+ *   post:
+ *     summary: Vẽ lại đúng các hình theo danh sách id rồi tính lại cờ (không gỡ / không vẽ hình khác)
+ *     tags: [Diagram]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [diagram_ids]
+ *             properties:
+ *               diagram_ids:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *               force:
+ *                 type: boolean
+ *                 description: Mặc định true
+ *     responses:
+ *       200:
+ *         description: "{ spine_version, rendered[], skipped[], flags[] }"
+ *       404:
+ *         description: DIAGRAM_NOT_FOUND
+ */
+router.post("/:projectId/diagrams/render", authMiddleware, diagramController.renderDiagramsByIdsRoute)
+
 export default router

@@ -101,9 +101,13 @@ const noBase = (status?: string): Mode1Error =>
  */
 const comparisonBase = async (projectId: string, project: IProject): Promise<{ blocks: OoxmlBlock[]; version: string; beforeBaseline: boolean }> => {
   const version = await latestDocVersion(projectId)
-  if (version && project.mode === "import") {
-    const current = await latestImport(projectId)
-    if (!current || !hasBaseline(current.status)) throw noBase(current?.status)
+  // FLF-457: trước / sau baseline theo việc dự án có version tài liệu thật (đã ký baseline), không theo `mode` — dự án chế độ 2,
+  // hoặc chế độ 3/4 đã chuyển sang `fpt` sau khi ký baseline, cũng phải so với file version và tạo CR.
+  if (version) {
+    if (project.mode === "import") {
+      const current = await latestImport(projectId)
+      if (!current || !hasBaseline(current.status)) throw noBase(current?.status)
+    }
     return { blocks: await fileBlocksOfVersion(version), version: version.version, beforeBaseline: false }
   }
   if (project.mode === "import") throw noBase((await latestImport(projectId))?.status)

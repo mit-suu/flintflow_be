@@ -259,6 +259,12 @@ describe("matchHeadings - khớp gần, unmapped, ngưỡng 0.8", () => {
     expect(map["5.5 Thuật ngữ"]).toMatchObject({ section_id: "fixed:5.5", confidence: 1 })
   })
 
+  it("FLF-455: phụ lục mà tên chỉ loại nội dung ngoài SRS (Phụ lục A Dự toán) không khớp nhóm Phụ lục; phụ lục thường vẫn khớp", () => {
+    const map = mapOf([heading(1, 1, "Phụ lục A Dự toán"), heading(2, 1, "Phụ lục")])
+    expect(map["Phụ lục A Dự toán"].section_id).not.toBe("group:5")
+    expect(map["Phụ lục"].section_id).toBe("group:5")
+  })
+
   it("sai chính tả ⇒ vẫn khớp đúng section nhưng độ tin < 0.8 (cần xác nhận)", () => {
     const blocks = [heading(1, 1, "2 User Requirements"), heading(2, 2, "2.2 Use Cases"), heading(3, 3, "2.2.2 Use Case Descripton")]
     const h = mapOf(blocks)["2.2.2 Use Case Descripton"]

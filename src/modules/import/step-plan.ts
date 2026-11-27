@@ -106,6 +106,8 @@ export interface LayoutResult {
   layout: LayoutEntry[]
   customSections: CustomSection[]
   slices: LayoutSlice[]
+  /** FLF-453: mục riêng của heading tự đặt (không khớp mục nào) + khối dưới nó — phần tử trích từ đó đã in nguyên văn ở mục riêng. */
+  verbatimSlices: LayoutSlice[]
   /** FLF-366: đoạn của từng mục FPT `fixed:*` có trong file (kể cả mục chỉ có heading). */
   segments: LayoutSegment[]
   /** FLF-378 (`templateOnly`): mọi khối dưới heading của mẫu, theo mục (`section_id` của layout) — nguồn của `template_context`. */
@@ -173,6 +175,8 @@ export const buildLayout = (
   const layout: LayoutEntry[] = []
   const customSections: CustomSection[] = []
   const slices: LayoutSlice[] = []
+  const verbatimSlices: LayoutSlice[] = []
+  let vslice: LayoutSlice | null = null
   /** Heading lặp đang mở — gom khối để biết phần tử nào trích từ heading này. */
   let slice: LayoutSlice | null = null
   const seen = new Set<string>()
@@ -227,6 +231,7 @@ export const buildLayout = (
         stack.push({ level: b.level, section: mapped, entry: enclosing.entry })
         current = null
         slice = null
+        vslice = null
         owner = enclosing.entry
         // FLF-378: mục con của mẫu (1.1 Purpose dưới 1 Product Overview) ⇒ ngữ cảnh mẫu ghi tên mục con để bước soạn thấy cấu trúc
         if (templateOnly && heading) {
@@ -248,12 +253,15 @@ export const buildLayout = (
         seen.add(mapped)
         current = null
         slice = null
+        vslice = null
       } else {
         current = newCustom(heading, clampLevel(b.level))
         currentRepeats = mapped !== UNMAPPED_SECTION && !mapped.startsWith("group:")
         section = customSectionKey(current.id)
         slice = currentRepeats ? { custom_id: current.id, section_id: mapped, block_ids: [b.block_id] } : null
         if (slice) slices.push(slice)
+        vslice = mapped === UNMAPPED_SECTION ? { custom_id: current.id, section_id: "verbatim", block_ids: [b.block_id] } : null
+        if (vslice) verbatimSlices.push(vslice)
       }
       const entry: LayoutEntry = {
         order: layout.length,
@@ -274,6 +282,7 @@ export const buildLayout = (
       continue
     }
     slice?.block_ids.push(b.block_id)
+    vslice?.block_ids.push(b.block_id)
     const block = toCustomBlock(b)
     if (!block) continue
     if (templateOnly) {
@@ -303,7 +312,7 @@ export const buildLayout = (
       else segment.parts.push({ kind: "spine", block_ids: [b.block_id], blocks: [block] })
     } else if (owner && (owner.section_id.startsWith("group:") || unmappedBlockIds.has(b.block_id))) continuationOf(owner).blocks.push(block)
   }
-  return { layout, customSections, slices, segments, contextBlocks, sectionBlocks, entryOfHeading }
+  return { layout, customSections, slices, verbatimSlices, segments, contextBlocks, sectionBlocks, entryOfHeading }
 }
 
 /** Phần tử Spine đã trích (finalize): khoá `entity` + `id` + khối nguồn. */
@@ -327,7 +336,7 @@ export const sliceItemKey = (entity: string, id: string): string => `${entity}:$
  * heading chứa **quá nửa** khối nguồn của nó. Còn lại (kể cả phần tử thêm sau qua change request) in ở lần đầu của section
  * như trước. Section không có mảng phần tử có id (Product Overview) ⇒ không chia.
  */
-export const sectionSlices = (slices: readonly LayoutSlice[], entities: readonly SlicedEntity[]): SectionSlice[] => {
+export const sectionSlices = (slices: readonly LayoutSlice[], entities: readonly SlicedEntity[], verbatim: readonly LayoutSlice[] = []): SectionSlice[] => {
   const out = slices.map((s) => ({ custom_id: s.custom_id, section_id: s.section_id, items: [] as string[] }))
   const owners = new Map<string, number>()
   slices.forEach((s, i) => s.block_ids.forEach((b) => owners.set(b, i)))
@@ -343,7 +352,28 @@ export const sectionSlices = (slices: readonly LayoutSlice[], entities: readonly
       if (n * 2 > sources.length && targetsOf(slices[at].section_id).includes(e.entity)) out[at].items.push(sliceItemKey(e.entity, e.id))
     }
   }
-  return out.filter((s) => s.items.length)
+  return [...out, ...verbatimSliceItems(verbatim, entities)].filter((s) => s.items.length)
+}
+
+/**
+ * FLF-453: phần tử trích từ mục riêng của heading tự đặt (quá nửa khối nguồn nằm dưới heading đó) — mục riêng giữ nguyên văn
+ * nên mục FlintFlow cùng loại không in lại. `section_id` = "verbatim" ⇒ chỉ là dấu "đã in ở mục riêng", không in thêm dưới heading.
+ */
+const verbatimSliceItems = (slices: readonly LayoutSlice[], entities: readonly SlicedEntity[]): SectionSlice[] => {
+  const out = slices.map((s) => ({ custom_id: s.custom_id, section_id: "verbatim", items: [] as string[] }))
+  const owners = new Map<string, number>()
+  slices.forEach((s, i) => s.block_ids.forEach((b) => owners.set(b, i)))
+  for (const e of entities) {
+    if (!e.id) continue
+    const sources = [...new Set(e.source_block_ids)]
+    const counts = new Map<number, number>()
+    for (const b of sources) {
+      const at = owners.get(b)
+      if (at !== undefined) counts.set(at, (counts.get(at) ?? 0) + 1)
+    }
+    for (const [at, n] of counts) if (n * 2 > sources.length) out[at].items.push(sliceItemKey(e.entity, e.id))
+  }
+  return out
 }
 
 /** Mảng Spine của phần tử nhắc tới trong văn xuôi (`mentions.ts`). */
@@ -516,6 +546,46 @@ const DERIVED_SECTIONS: ReadonlySet<string> = new Set(["fixed:I"])
 
 const isHiddenPhase = (phase: PhaseId): boolean => phase.startsWith("B-") || phase === "S-1"
 
+/**
+ * FLF-461 (business-flow §5.3 "Lọc step"): bước **dựng danh sách dữ liệu** mà các bước sau đọc. Mẫu bắt buộc / SRS dang dở
+ * không có mục của bước đó (vd mẫu không có Screen Layout hay Screen Inventory) vẫn phải chạy nó, vì vòng soạn theo màn cần
+ * danh sách màn (chỉ xét bước đọc ở S-3 … S-5). Khoá = gốc dữ liệu trong `reads` của registry; giá trị = bước tạo ra danh sách đó.
+ */
+const INPUT_PROVIDER: Readonly<Record<string, string>> = Object.freeze({
+  actors: "S-3.1",
+  use_cases: "S-3.1",
+  features: "S-4.1",
+  screens: "S-4.1",
+  functions: "S-4.1"
+})
+
+/**
+ * Hàm thuần: bước cung cấp đầu vào (kể cả gián tiếp) cho các bước soạn `owners`, không tính chính `owners`. Id vòng S-5 có thể
+ * mang `@màn`. Thứ tự theo registry.
+ */
+export const inputStepsOf = (owners: Iterable<string>): string[] => {
+  const registry = loadStepRegistry()
+  const byId = new Map(registry.map((s) => [s.id, s]))
+  const position = new Map(registry.map((s, i) => [s.id, i]))
+  const owned = new Set([...owners].map((id) => id.split("@")[0]))
+  const found = new Set<string>()
+  const queue = [...owned]
+  for (let id = queue.pop(); id !== undefined; id = queue.pop()) {
+    const reader = byId.get(id)
+    // Chỉ chuỗi use case / màn hình / vòng theo màn (S-3 … S-5) cần danh sách do bước khác dựng; bước soạn mục lẻ (S-2, S-6 … S-9)
+    // chỉ đọc dữ liệu có sẵn, không bắt dự án phải dựng danh sách màn
+    if (!reader || !/^S-[345]$/.test(reader.phase)) continue
+    for (const raw of reader.reads) {
+      const provider = INPUT_PROVIDER[raw.split(/[:[.]/)[0]]
+      // Chỉ bước đứng TRƯỚC mới cung cấp đầu vào (S-2.1 đọc `actors` nhưng S-3.1 dựng danh sách đó sau nó)
+      if (!provider || owned.has(provider) || found.has(provider) || (position.get(provider) ?? 0) >= (position.get(id) ?? 0)) continue
+      found.add(provider)
+      queue.push(provider)
+    }
+  }
+  return registry.filter((s) => found.has(s.id)).map((s) => s.id)
+}
+
 const matches = (section: string, pool: Iterable<string>): boolean => {
   if (section !== FEATURE_SECTIONS) return [...pool].includes(section)
   return [...pool].some((s) => s.startsWith("feature:"))
@@ -538,8 +608,9 @@ export interface StepPlanOptions {
   draftOwners?: ReadonlySet<string>
 }
 
-export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string>, spine?: Spine, opts: StepPlanOptions = {}): StepPlanItem[] =>
-  loadStepRegistry()
+export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string>, spine?: Spine, opts: StepPlanOptions = {}): StepPlanItem[] => {
+  const inputSteps = opts.draftOwners ? new Set(inputStepsOf(opts.draftOwners)) : null
+  return loadStepRegistry()
     .filter((s) => s.kind !== "loop")
     .map((s): StepPlanItem => {
       if (isHiddenPhase(s.phase)) {
@@ -551,9 +622,10 @@ export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string
         return { step_id: s.id, state: "applied", section_ids: owned, reason: "Mục tự sinh từ lịch sử thay đổi" }
       }
       if (opts.draftOwners) {
-        return opts.draftOwners.has(s.id)
-          ? { step_id: s.id, state: "enabled", section_ids: owned, reason: "Mục của mẫu bắt buộc - FlintFlow soạn" }
-          : { step_id: s.id, state: "hidden", section_ids: owned, reason: "Mẫu không có mục này" }
+        if (opts.draftOwners.has(s.id)) return { step_id: s.id, state: "enabled", section_ids: owned, reason: "Mục của mẫu bắt buộc - FlintFlow soạn" }
+        // FLF-461: bước dựng danh sách mà bước soạn cần (vd Screen Inventory dù mẫu không có Screen Layout) vẫn chạy
+        if (inputSteps?.has(s.id)) return { step_id: s.id, state: "enabled", section_ids: owned, reason: "Cung cấp đầu vào cho các bước soạn" }
+        return { step_id: s.id, state: "hidden", section_ids: owned, reason: "Mẫu không có mục này" }
       }
       const hasContent = owned.some((sec) => {
         const inSpine = spine ? sectionHasData(spine, sec) : null
@@ -569,6 +641,7 @@ export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string
       }
       return { step_id: s.id, state: "hidden", section_ids: owned, reason: "File không có đầu mục này - bật nếu muốn AI soạn thêm" }
     })
+}
 
 /** Trạng thái step khởi đầu theo kế hoạch: ẩn ⇒ skipped; `applied` có section (đã có nội dung) ⇒ accepted; còn lại ⇒ pending. */
 const initialStatus = (item: StepPlanItem): StepState["status"] => {
@@ -598,12 +671,13 @@ export const seedStepOps = (spine: Spine, plan: StepPlanItem[], opts: SeedOption
   })
   const withFunctions = new Set(spine.functions.filter((f) => !isTemplateFrame(f)).map((f) => f.screen_id ?? "nonscreen"))
   const loopTemplates = loadStepRegistry().filter((s) => s.kind === "loop")
+  const inputSteps = opts.draftOwners ? new Set(inputStepsOf(opts.draftOwners)) : new Set<string>()
   for (const key of loopKeys(spine)) {
     if (!withFunctions.has(key)) continue
     for (const t of loopTemplates) {
       const id = `${t.id}@${key}`
       if (!opts.draftOwners) steps.push(accepted(id))
-      else steps.push({ id, status: opts.draftOwners.has(t.id) ? "pending" : "skipped", first_seq: null, last_seq: null, accepted_at: null })
+      else steps.push({ id, status: opts.draftOwners.has(t.id) || inputSteps.has(t.id) ? "pending" : "skipped", first_seq: null, last_seq: null, accepted_at: null })
     }
   }
 

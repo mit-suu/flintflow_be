@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { describe, it, expect } from "vitest"
 import { spineSchema } from "../spine/spine.schema.js"
 import type { Spine } from "../spine/spine.types.js"
-import { actorGeneralizationErrors, briefExtractionErrors, dropRedundantScalarAdds, interactionErrors, lifecycleErrors, isWritablePath, normalizeSelectorPath, regulatedFromStakesAnswer, sanitizeModelOps, useCaseWiringErrors, validateOps } from "./op-validator.js"
+import { actorGeneralizationErrors, addendumDuplicateErrors, briefExtractionErrors, dropRedundantScalarAdds, interactionErrors, lifecycleErrors, isWritablePath, normalizeSelectorPath, regulatedFromStakesAnswer, sanitizeModelOps, useCaseWiringErrors, validateOps } from "./op-validator.js"
 import { getStep } from "./step-registry.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -515,6 +515,37 @@ describe("sanitizeModelOps - addendum", () => {
     const raw = [{ op: "add", path: "addendum[]", value: { topic: "scale", content: "50 người", content_en: "50 users", target_section: "fixed:4.2.3", captured_at: "2024-01-01T00:00:00.000Z" } }]
     const sanitized = sanitizeModelOps(FIXTURE, raw, "B-1.4", now)
     expect((sanitized.ops[0] as { value: { captured_at: string } }).value.captured_at).toBe("2026-09-30T01:40:00.000Z")
+  })
+})
+
+describe("sanitizeModelOps - topic mục tiêu ở Brief (FLF-449 D1)", () => {
+  const add = (topic: string) => [{ op: "add", path: "addendum[]", value: { topic, content: "Giảm khách không đến từ 20% xuống 8%", content_en: "Cut no-shows from 20% to 8%", target_section: "fixed:1" } }]
+  it("add addendum topic target ở B-0.1 ⇒ goals", () => {
+    const sanitized = sanitizeModelOps(FIXTURE, add("target"), "B-0.1")
+    expect((sanitized.ops[0] as { value: { topic: string } }).value.topic).toBe("goals")
+  })
+  it("topic metric giữ nguyên; ngoài pha Brief không đổi", () => {
+    expect((sanitizeModelOps(FIXTURE, add("metric: no-show rate"), "B-1.5").ops[0] as { value: { topic: string } }).value.topic).toBe("metric: no-show rate")
+    expect((sanitizeModelOps(FIXTURE, add("target"), "S-3.1").ops[0] as { value: { topic: string } }).value.topic).toBe("target")
+  })
+})
+
+describe("addendumDuplicateErrors (FLF-449 D1, lỗi #2)", () => {
+  const spine: Spine = { ...FIXTURE, addendum: [{ id: "AD3", topic: "deposit", content: "Giữ chỗ 15 phút", content_en: "Hold the slot for 15 minutes before payment", target_section: "fixed:5.4", captured_at: "2026-11-26T00:00:00.000Z" }] }
+  const add = (content_en: string) => ({ op: "add" as const, path: "addendum[]", value: { topic: "deposit", content: "x", content_en, target_section: "fixed:5.4" } })
+  it("ghi chú trùng ≥ 0,8 ⇒ addendum_duplicate kèm mã cũ", () => {
+    const errors = addendumDuplicateErrors(spine, [add("Hold the slot for 15 minutes before payment.")], "B-1.4")
+    expect(errors).toMatchObject([{ rule: "addendum_duplicate", op_index: 0 }])
+    expect(errors[0].message).toContain("AD3")
+  })
+  it("ý khác thì qua; trùng ghi chú cũ đã bị xoá cùng lô thì qua; ngoài pha Brief không kiểm", () => {
+    expect(addendumDuplicateErrors(spine, [add("Refund the deposit when the clinic cancels")], "B-1.4")).toEqual([])
+    expect(addendumDuplicateErrors(spine, [{ op: "remove", path: "addendum[id=AD3]" }, add("Hold the slot for 15 minutes before payment")], "B-1.4")).toEqual([])
+    expect(addendumDuplicateErrors(spine, [add("Hold the slot for 15 minutes before payment")], "S-3.1")).toEqual([])
+  })
+  it("hai ghi chú trùng nhau trong cùng lô ⇒ báo cái thứ hai", () => {
+    const errors = addendumDuplicateErrors(FIXTURE, [add("Patients get a reminder 24 hours and 2 hours before"), add("Patients get a reminder 24 hours and 2 hours before")], "B-1.4")
+    expect(errors).toMatchObject([{ rule: "addendum_duplicate", op_index: 1 }])
   })
 })
 

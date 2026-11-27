@@ -447,6 +447,55 @@ describe("writeTemplateDocx", () => {
     })
   })
 
+  describe("xoá mục ở file đánh số gõ tay: số heading anh em phía sau dồn theo bản in", () => {
+    const screenTable = `<w:tbl><w:tblPr/><w:tblGrid><w:gridCol w:w="3000"/><w:gridCol w:w="3000"/></w:tblGrid><w:tr>${cell("Screen")}${cell("Function")}</w:tr><w:tr>${cell("Home")}${cell("3.3 Discovery")}</w:tr><w:tr>${cell("Cart page")}${cell("3.4 Cart")}</w:tr></w:tbl>`
+    const numberedFile = async () => {
+      const zip = new JSZip()
+      zip.file("[Content_Types].xml", `<Types xmlns="${NS.ct}"><Default Extension="xml" ContentType="application/xml"/></Types>`)
+      zip.file("word/document.xml", `<w:document xmlns:w="${NS.w}" xmlns:r="${NS.r}"><w:body>${heading("3 Functional Requirements")}${heading("3.1 Overview", 2)}${screenTable}${heading("3.2 Account", 2)}${body}${heading("3.3 Discovery", 2)}${body}${heading("3.4 Cart", 2)}${body}<w:sectPr/></w:body></w:document>`)
+      zip.file("word/styles.xml", styles)
+      zip.file("word/_rels/document.xml.rels", `<Relationships xmlns="${NS.rels}"></Relationships>`)
+      return zip.generateAsync({ type: "nodebuffer" })
+    }
+
+    it("xoá 3.2 ⇒ heading 3.3 / 3.4 giữ từ file nền ghi thành 3.2 / 3.3, ô bảng ghi đúng chữ heading cũ đổi theo", async () => {
+      const input = await numberedFile(), parsed = await parseDocument(input), doc = document()
+      const id = (text: string) => parsed.blocks.find((b) => b.kind === "heading" && b.text === text)!.block_id
+      const map = [
+        { block_id: id("3 Functional Requirements"), section_id: "fixed:3" },
+        { block_id: id("3.1 Overview"), section_id: "fixed:3.1" },
+        { block_id: id("3.2 Account"), section_id: "feature:F2" },
+        { block_id: id("3.3 Discovery"), section_id: "feature:F3" },
+        { block_id: id("3.4 Cart"), section_id: "feature:F4" }
+      ]
+      doc.sections = [
+        { id: "fixed:3", heading: "Functional Requirements", number: "3", level: 1, blocks: [] },
+        { id: "fixed:3.1", heading: "Overview", number: "3.1", level: 2, blocks: [] },
+        { id: "feature:F3", heading: "Discovery", number: "3.2", level: 2, blocks: [] },
+        { id: "feature:F4", heading: "Cart", number: "3.3", level: 2, blocks: [] }
+      ]
+      const keepSource = new Set(doc.sections.map((s) => s.id))
+      const output = await writeTemplateDocx(doc, input, map, [], { keepSource, importedSectionIds: new Set([...keepSource, "feature:F2"]) })
+      const result = await parseDocument(output)
+      expect(result.blocks.filter((b) => b.kind === "heading").map((b) => b.text)).toEqual(["3 Functional Requirements", "3.1 Overview", "3.2 Discovery", "3.3 Cart"])
+      expect(result.blocks.find((b) => b.kind === "table")!.rows).toEqual([["Screen", "Function"], ["Home", "3.2 Discovery"], ["Cart page", "3.3 Cart"]])
+      // Heading giữ định dạng run gốc (chỉ đổi số trong chữ)
+      const kept = result.blocks.find((b) => b.kind === "heading" && b.text === "3.2 Discovery")!.element
+      expect(wAll(kept, "b")).toHaveLength(1)
+    })
+
+    it("số của bản in trùng số gõ tay của file ⇒ không đổi gì", async () => {
+      const input = await numberedFile(), parsed = await parseDocument(input), doc = document()
+      const id = (text: string) => parsed.blocks.find((b) => b.kind === "heading" && b.text === text)!.block_id
+      const map = [{ block_id: id("3.3 Discovery"), section_id: "feature:F3" }]
+      doc.sections = [{ id: "feature:F3", heading: "Discovery", number: "3.3", level: 2, blocks: [] }]
+      const output = await writeTemplateDocx(doc, input, map, [], { keepSource: new Set(["feature:F3"]) })
+      const result = await parseDocument(output)
+      expect(result.blocks.filter((b) => b.kind === "heading").map((b) => b.text)).toContain("3.3 Discovery")
+      expect(result.blocks.find((b) => b.kind === "table")!.rows![1]).toEqual(["Home", "3.3 Discovery"])
+    })
+  })
+
   describe("FLF-468 lát D: mục mẫu cố định không có bảng nguồn (\"Cần chốt\" #1)", () => {
     it("bảng 2 cột (mã + nội dung) ⇒ danh sách \"mã – nội dung\", không phải đoạn 'Nhãn: giá trị'", async () => {
       const input = await template(), parsed = await parseDocument(input), doc = document()
@@ -564,6 +613,27 @@ describe("FLF-468 (E2E-1): mục lặp mới ở chế độ giữ file gốc th
     expect(blocks.find((b) => b.text === "Body 3.5")).toBeTruthy()
     // Mục lục tính lại khi mở file
     expect(await (await JSZip.loadAsync(out)).file("word/document.xml")!.async("string")).toContain('w:dirty="true"')
+  })
+
+  it("file chưa có heading cấp 4: heading mới theo style 'heading 4' của mẫu, có style thì dùng, không thì heading sâu nhất + outlineLvl", async () => {
+    const { input, map } = await srsFile()
+    const doc = document()
+    doc.sections = [
+      sec("group:3", "Functional", "3", 1, "Intro 3"), sec("feature:F-3.5", "Billing", "3.5", 2, "Body 3.5"), sec("function:FR-3.5.1", "Pay", "3.5.1", 3, "Body 3.5.1"),
+      sec("function:FR-07", "Pay detail", "3.5.1.1", 4, "Detail body"), sec("group:4", "Non-Functional", "4", 1, "Body 4"), sec("fixed:V.5", "Glossary", "5.5", 2)
+    ]
+    const keepAll = { keepSource: new Set(["group:3", "feature:F-3.5", "function:FR-3.5.1", "group:4", "fixed:V.5"]) }
+    // Mẫu không có style cấp 4 ⇒ heading cấp 3 + outlineLvl 3 (vẫn vào mục lục), không phải đoạn thường in đậm
+    const plain = (await parseDocument(await writeTemplateDocx(doc, input, map, [], keepAll))).blocks.find((b) => b.text === "3.5.1.1 Pay detail")!
+    expect(plain.kind).toBe("heading")
+    expect(wAttr(wKid(wKid(plain.element, "pPr")!, "outlineLvl"), "val")).toBe("3")
+    // Mẫu có style "heading 4" (chưa dùng trong thân) ⇒ dùng đúng style đó
+    const zip = await JSZip.loadAsync(input)
+    const st = (await zip.file("word/styles.xml")!.async("string")).replace("</w:styles>", '<w:style w:type="paragraph" w:styleId="Heading4"><w:name w:val="heading 4"/></w:style></w:styles>')
+    zip.file("word/styles.xml", st)
+    const withStyle = await zip.generateAsync({ type: "nodebuffer" })
+    const styled = (await parseDocument(await writeTemplateDocx(doc, withStyle, map, [], keepAll))).blocks.find((b) => b.text === "3.5.1.1 Pay detail")!
+    expect(wAttr(wKid(wKid(styled.element, "pPr")!, "pStyle"), "val")).toBe("Heading4")
   })
 
   it("chức năng mới của tính năng đã có ⇒ heading 3.5.2 sau 3.5.1, thân 3.5 không đổi", async () => {

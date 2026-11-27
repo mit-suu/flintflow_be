@@ -30,6 +30,7 @@ import { replyLanguageForSessionId } from "../project/reply-language.service.js"
 import { assemble } from "../render/assemble.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { applyTransaction, CHANGE_RANGE_INVALID } from "../spine/op-engine.js"
+import { retiredIds } from "../spine/change-log.js"
 import type { Op } from "../spine/op.types.js"
 import type { Change, Diagram, Spine, SpineRecord, StepState } from "../spine/spine.types.js"
 import * as flagsService from "../spine/flags.service.js"
@@ -38,6 +39,7 @@ import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import { layoutRenderDeps, renderDiagrams, sameDiagramSubject, staleRenderedDiagrams, type DiagramServiceDeps } from "../diagram/diagram.service.js"
 import { loadRenderContext } from "../diagram/render-context.js"
 import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "../spine/source-hash.js"
+import { stripInternalCodes } from "../spine/human-labels.js"
 import { targetOfDiagram, type RenderTarget } from "../diagram/renderers/index.js"
 import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf, screenLoopOrder } from "./step-registry.js"
 import { addendumForUnit, assumptionsForPrompt, buildStepContext, elicitProjection, getStepSpec, loadConversationVariables, loadLastAiReply, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
@@ -52,7 +54,8 @@ import { recordDraftRejected } from "./draft-rejected-log.js"
 import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
 import { runAiReview, type ReviewProfile } from "./s9/ai-review.js"
 import * as meter from "./meter.service.js"
-import { documentLanguageForTurn, type TurnDocumentLanguage } from "../translation/turn-language.js"
+import { documentLanguageForTurn, languagePairOf, type TurnDocumentLanguage } from "../translation/turn-language.js"
+import { translatedViewOf } from "../translation/localized-view.js"
 import { captureForTurn } from "../translation/capture.service.js"
 import { captureSources, paragraphTexts } from "../project/requirement-source.service.js"
 import { paragraphId, parseParagraphId } from "../../shared/ai/document-paragraphs.js"
@@ -1187,6 +1190,8 @@ export interface DraftPhaseResult {
   summary?: ChangeSummary[]
   /** `notes` model viết cho cổng (FLF-232: tin nhắn cổng 2–4 câu). Lô rỗng vẫn có — lý do step không đổi gì nằm ở đây. */
   notes?: string
+  /** FLF-482 (C2): phần lời sửa nằm ngoài các trường bước này được ghi (chỉ lượt `revision`). */
+  outOfScope?: string
 }
 
 /**
@@ -1240,6 +1245,7 @@ export const runDraftPhase = async (
       spine,
       callKind,
       documentLanguage,
+      retiredLoader: () => retiredIds(projectId),
       ...(deps.midPhaseRun ? { midPhaseRun: true } : {}),
       // Lượt thử lại phải nói ngay, bằng lời thường — user đang nhìn màn hình chờ (03 Lớp 3)
       onAttempt: ({ attempt, max, previousErrors }) => {
@@ -1276,7 +1282,10 @@ export const runDraftPhase = async (
 
   for (const attempt of draftResult.attempts) emit({ type: "draft", step_id: stepId, attempt: attempt.attempt })
 
-  const notes = draftResult.notes?.trim() ? { notes: draftResult.notes.trim() } : {}
+  const notes = {
+    ...(draftResult.notes?.trim() ? { notes: draftResult.notes.trim() } : {}),
+    ...(draftResult.outOfScope ? { outOfScope: draftResult.outOfScope } : {})
+  }
   if (!draftResult.txn) return { spineVersion: spine.spine_version, applied: false, ...notes }
 
   try {
@@ -2242,7 +2251,8 @@ export const runStep = async (
       spineVersion = batched.spineVersion
       if (batched.wroteOps) wroteOps = true
       stepSummary.push(...batched.summary)
-      if (batched.notes) gateNotes = batched.notes
+      // FLF-480: tin cổng do model viết có thể còn mã nội bộ của câu hỏi mở đã đóng (OR01…) ⇒ bỏ trước khi người dùng thấy
+      if (batched.notes) gateNotes = stripInternalCodes(batched.notes)
     }
 
     const sectionsAtReview = ownedSections()
@@ -2297,6 +2307,11 @@ export const runStep = async (
     // hết điều tạm hiểu nên không lọc.
     const spokenIds = (gateNotes ?? "").trim() === "" ? null : spokenAssumptionIds(gateMessage, review.new_assumptions)
     const gateAssumptions = spokenIds ? review.new_assumptions.filter((a) => spokenIds.has(a.id)) : review.new_assumptions
+    // FLF-479 #6: bảng tại cổng nói bằng ngôn ngữ tài liệu khi bản dịch đã có (chưa có ⇒ giữ chữ gốc, không gọi AI dịch thêm)
+    const gateTable = gateTableOf(
+      stepDef.template_id === "S-1.1" ? await translatedViewOf(projectId, finalSpine, languagePairOf(deps.documentLanguage ?? (await documentLanguageForTurn(projectId)))) : finalSpine,
+      stepDef.template_id
+    )
     const gateEvent: Extract<StepEvent, { type: "gate_ready" }> = {
       type: "gate_ready",
       step_id: stepId,
@@ -2311,7 +2326,7 @@ export const runStep = async (
       flags: { red: review.red_open, yellow: review.yellow_open, red_delta: review.red_delta, yellow_delta: review.yellow_delta },
       duration_ms: Date.now() - tracker.startedAt,
       credits_used: creditsUsed,
-      ...(gateTableOf(finalSpine, stepDef.template_id) ? { table: gateTableOf(finalSpine, stepDef.template_id) as NonNullable<ReturnType<typeof gateTableOf>> } : {}),
+      ...(gateTable ? { table: gateTable } : {}),
       doc_progress: { before: progressBefore, after: progressAfter },
       ...(gateMessage ? { message_vi: gateMessage } : {}),
       ...(stepSummary.length === 0
@@ -2375,7 +2390,7 @@ export const elicitGuidance = (ctx: StepContext): string => {
 export const noChangeReason = (templateId: string, needsDraft: boolean, language: ReplyLanguage = "vi"): string => {
   if (LOOP_BOOKKEEPING_TEMPLATES.has(templateId)) {
     return byLanguage(language, {
-      vi: "Bước sổ sách của vòng màn hình - không có nội dung để ghi.",
+      vi: "Màn này không còn gì cần ghi thêm.",
       en: "A bookkeeping step of the screen loop - there's no content to write."
     })
   }

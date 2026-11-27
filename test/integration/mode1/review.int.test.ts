@@ -19,6 +19,9 @@ import { ImportedDocument } from "../../../src/modules/import/imported-document.
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
 import { Project } from "../../../src/modules/project/project.model.js"
 import { User } from "../../../src/modules/user/user.model.js"
+import { Usage } from "../../../src/modules/spine/usage.model.js"
+import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
+import { IMPORTED_DOC_VERSION } from "../../../src/modules/doc-version/versioning.js"
 import { CreditWallet } from "../../../src/modules/credits/credit-wallet.model.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 import { sectionsNeedingAiReview } from "../../../src/modules/import/review.service.js"
@@ -115,6 +118,11 @@ describe("FLF-453 - nhánh 3: không mục nào cần rà ⇒ bỏ qua vòng rà
   const REPORT3_TEMPLATE = new URL("../../../fixtures/fpt-report3-blank-template.docx", import.meta.url)
 
   it("mẫu trống, Bỏ tất cả ở màn đọc khung ⇒ không mục nào có chữ ⇒ không dừng ở reviewing, sang thẳng Luồng 2 như trước FLF-453", async () => {
+    const reviewPrompts: string[] = []
+    mockOverrides.next = (prompt) => {
+      if (prompt.includes("# Import Review Existing")) reviewPrompts.push(prompt)
+      return fakeMode1(prompt)
+    }
     const seeded = await (await import("../../setup.js")).seedFixture("minimal", { balance: 1000 })
     const created = await request(app).post("/api/v1/projects").set({ Authorization: `Bearer ${seeded.token}` }).send({ name: "Khung mẫu", has_srs_file: true })
     expect(created.status, JSON.stringify(created.body.error)).toBe(201)
@@ -144,6 +152,12 @@ describe("FLF-453 - nhánh 3: không mục nào cần rà ⇒ bỏ qua vòng rà
     const after = (await ImportedDocument.findById(importId))!
     // Không có mục có sẵn nào (toàn Bỏ chữ) ⇒ không có đầu vào, không có cờ đỏ ⇒ không dừng ở reviewing
     expect(after.status).not.toBe("reviewing")
+    // Đã sang Luồng 2 (drafting), không có lượt AI rà soát nào và không có Usage của vòng rà soát
+    expect(after.status).toBe("drafting")
+    expect(reviewPrompts).toHaveLength(0)
+    expect(await Usage.countDocuments({ projectId, step_id: /^I-1\.11r/ })).toBe(0)
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    expect(profile.review_sections ?? []).toEqual([])
   })
 })
 
@@ -154,9 +168,10 @@ describe("FLF-453 - nhánh 4: nghi sai nghiệp vụ ra 2 phương án + khuyế
       srs: { extraBody: styled("u2", "5.10 Document Conventions") + p("[Describe the conventions.]") }
     })
     expect((await ImportedDocument.findById(importId))!.status).toBe("reviewing")
+    const reviewPrompts: string[] = []
     mockOverrides.next = (prompt) =>
       prompt.includes("# Import Review Existing")
-        ? JSON.stringify({ findings: [{ rule: "business_logic_suspicion", section_id: "fixed:1", message: SUSPICION, block_ids: [] }] })
+        ? (reviewPrompts.push(prompt), JSON.stringify({ findings: [{ rule: "business_logic_suspicion", section_id: "fixed:1", message: SUSPICION, block_ids: [] }] }))
         : fakeMode1(prompt)
     const headers = await asHttp(projectId, userId)
     const run = await request(app).post(`/api/v1/projects/${projectId}/import/review/run`).set(headers).send({ import_id: importId })
@@ -168,6 +183,17 @@ describe("FLF-453 - nhánh 4: nghi sai nghiệp vụ ra 2 phương án + khuyế
     expect(flag!.message).toContain("Phương án A")
     expect(flag!.message).toContain("Phương án B")
     expect(flag!.message).toContain("Khuyến nghị")
+
+    // Prompt thật gửi AI buộc đúng định dạng: nghi ngờ, 2 phương án kèm ưu/nhược + rủi ro/giả định, đúng một khuyến nghị kèm lý do
+    expect(reviewPrompts.length).toBeGreaterThan(0)
+    const prompt = reviewPrompts[0]
+    const order = ["Phương án A:", "Phương án B:", "Khuyến nghị:"].map((k) => prompt.indexOf(k))
+    expect(order.every((i) => i >= 0), JSON.stringify(order)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+    expect(prompt).toMatch(/pros\/cons and\s+risk\/assumption/)
+    expect(prompt).toMatch(/exactly one of\s+A or B with the reason/)
+    // Không còn câu cấm chọn bên mâu thuẫn với khuyến nghị (BF nguyên tắc 10)
+    expect(prompt).not.toMatch(/do not pick a side/i)
   })
 })
 
@@ -193,5 +219,117 @@ describe("FLF-453 - từ chối credit / Dừng giữa chừng", () => {
     expect(run.status, JSON.stringify(run.body.error)).toBe(200)
     expect(run.body.data.import.status).toBe("reviewing")
     expect(run.body.data.import.paused).toMatchObject({ reason: "credits" })
+  })
+})
+
+describe("FLF-453 - nút Rà soát bằng AI cho từng mục chỉ được Code kiểm", () => {
+  const SRS = { srs: { extraBody: styled("u2", "5.10 Document Conventions") + p("[Describe the conventions.]") } }
+  const url = (projectId: string, tail: string) => `/api/v1/projects/${projectId}/import/${tail}`
+
+  /** Đưa fixed:1 ra khỏi nhóm AI tự rà ⇒ thành mục chỉ Code kiểm. */
+  const toOptional = async () => {
+    const ctx = await toReviewGate("fixed", SRS)
+    await TemplateProfile.updateOne({ projectId: ctx.projectId }, { $set: { review_sections: [] } })
+    return { ...ctx, headers: await asHttp(ctx.projectId, ctx.userId) }
+  }
+
+  it("báo credit riêng của mục, chưa xác nhận thì không gọi AI và không trừ; mục Ngoài phạm vi không được đề nghị", async () => {
+    const { projectId, importId, headers } = await toOptional()
+    let aiCalls = 0
+    mockOverrides.next = (prompt) => {
+      if (prompt.includes("# Import Review Existing")) aiCalls++
+      return fakeMode1(prompt)
+    }
+    const view = await request(app).get(url(projectId, "")).set(headers)
+    const opt = view.body.data.review.optional_sections as { section_id: string; calls: number; credits: number }[]
+    expect(opt.map((o) => o.section_id)).toContain("fixed:1")
+    const mine = opt.find((o) => o.section_id === "fixed:1")!
+    expect(mine.credits).toBeGreaterThan(0)
+
+    const project = (await Project.findById(projectId).lean())!
+    const before = (await CreditWallet.findOne({ organizationId: project.organizationId }).lean())!.balance
+    const quote = await request(app).post(url(projectId, "review/section")).set(headers).send({ import_id: importId, section_id: "fixed:1" })
+    expect(quote.status, JSON.stringify(quote.body.error)).toBe(200)
+    expect(quote.body.data).toMatchObject({ section_id: "fixed:1", credits: mine.credits, reviewed: false })
+    expect(aiCalls).toBe(0)
+    expect((await CreditWallet.findOne({ organizationId: project.organizationId }).lean())!.balance).toBe(before)
+
+    // Ngoài phạm vi ⇒ không còn đề nghị, xác nhận trực tiếp bị từ chối
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    await TemplateProfile.updateOne(
+      { projectId },
+      { $set: { "target_structure.sections": profile.target_structure!.sections.map((s) => (s.section_id === "fixed:1" ? { ...s, status: "out_of_scope" } : s)) } }
+    )
+    const denied = await request(app).post(url(projectId, "review/section")).set(headers).send({ import_id: importId, section_id: "fixed:1", confirm: true })
+    expect(denied.status).toBe(409)
+    expect(aiCalls).toBe(0)
+  })
+
+  it("xác nhận ⇒ chạy, ghi cờ import_review, vẫn reviewing, prompt không có chữ hướng dẫn; chạy lại không còn đề nghị", async () => {
+    const { projectId, importId, headers } = await toOptional()
+    const prompts: string[] = []
+    mockOverrides.next = (prompt) => {
+      if (!prompt.includes("# Import Review Existing")) return fakeMode1(prompt)
+      prompts.push(prompt)
+      return JSON.stringify({ findings: [{ rule: "business_logic_suspicion", section_id: "fixed:1", message: "Nghi sai nghiệp vụ. Phương án A, Phương án B. Khuyến nghị: B.", block_ids: [] }] })
+    }
+    const run = await request(app).post(url(projectId, "review/section")).set(headers).send({ import_id: importId, section_id: "fixed:1", confirm: true })
+    expect(run.status, JSON.stringify(run.body.error)).toBe(200)
+    expect(run.body.data).toMatchObject({ reviewed: true, import: { status: "reviewing" } })
+    expect(prompts.length).toBeGreaterThan(0)
+    for (const pr of prompts) expect(pr).not.toContain("[Describe the conventions.]")
+    const spine = (await spineRepository.get(projectId))!
+    const flag = spine.flags.find((f) => f.rule_id === "import_review")
+    expect(flag).toBeTruthy()
+    expect(flag!.level).toBe("yellow")
+    const view = await request(app).get(url(projectId, "")).set(headers)
+    expect((view.body.data.review.optional_sections as { section_id: string }[]).map((o) => o.section_id)).not.toContain("fixed:1")
+  })
+
+  it("hết credit ⇒ paused credits, vẫn reviewing, không cờ nào", async () => {
+    const { projectId, importId, headers } = await toOptional()
+    const project = (await Project.findById(projectId).lean())!
+    await CreditWallet.updateOne({ organizationId: project.organizationId }, { $set: { balance: 0 } })
+    const run = await request(app).post(url(projectId, "review/section")).set(headers).send({ import_id: importId, section_id: "fixed:1", confirm: true })
+    expect(run.status, JSON.stringify(run.body.error)).toBe(200)
+    expect(run.body.data).toMatchObject({ reviewed: false, import: { status: "reviewing", paused: { reason: "credits" } } })
+    expect((await spineRepository.get(projectId))!.flags.filter((f) => f.rule_id === "import_review")).toHaveLength(0)
+  })
+
+  it("mục nhiều lô, lô 1 đã trừ, lô 2 chưa ⇒ mục vẫn hiện (phần còn lại) và rà tiếp chỉ chạy lô còn lại", async () => {
+    const { projectId, importId, userId, headers } = await toOptional()
+    const last = (await DocBlock.findOne({ projectId, doc_version: IMPORTED_DOC_VERSION }).sort({ "anchor.ordinal": -1 }).lean())!
+    await DocBlock.insertMany(
+      Array.from({ length: 200 }, (_, i) => ({
+        projectId: last.projectId,
+        doc_version: IMPORTED_DOC_VERSION,
+        block_id: `B${9000 + i}`,
+        kind: "paragraph",
+        anchor: { xml_path: `/extra/${i}`, ordinal: last.anchor.ordinal + 1 + i },
+        text: "The system shall keep records as needed. ".repeat(48),
+        text_hash: `extra-${i}`,
+        section_id: "fixed:1"
+      }))
+    )
+    const listed = async () => {
+      const view = await request(app).get(url(projectId, "")).set(headers)
+      return (view.body.data.review.optional_sections as { section_id: string; calls: number }[]).find((o) => o.section_id === "fixed:1")
+    }
+    const full = (await listed())!
+    expect(full.calls).toBeGreaterThan(1)
+    await Usage.create({
+      projectId, userId, step_id: "I-1.11r:s:fixed:1:1", call_kind: "import_review_existing", attempt: 1, cost: 1, state: "deducted",
+      expires_at: new Date(Date.now() + 60_000)
+    })
+    expect((await listed())!.calls).toBe(full.calls - 1)
+    let calls = 0
+    mockOverrides.next = (prompt) => {
+      if (prompt.includes("# Import Review Existing")) calls++
+      return fakeMode1(prompt)
+    }
+    const run = await request(app).post(url(projectId, "review/section")).set(headers).send({ import_id: importId, section_id: "fixed:1", confirm: true })
+    expect(run.status, JSON.stringify(run.body.error)).toBe(200)
+    expect(calls).toBe(full.calls - 1)
+    expect(await listed()).toBeUndefined()
   })
 })

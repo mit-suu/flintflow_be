@@ -293,6 +293,48 @@ router.post(
 
 /**
  * @swagger
+ * /api/v1/projects/{projectId}/documents/summarize:
+ *   post:
+ *     summary: "Xác nhận AI đọc tài liệu tham khảo đang chờ (business-flow §3.6: báo credit trước, FLF-458)"
+ *     description: >
+ *       Upload (`POST .../documents`) chỉ trích chữ, không gọi AI; credit cần để AI đọc các tài liệu đang chờ
+ *       (`summaryStatus: "pending"`) báo ở `GET .../documents` `meta.summary_credit_estimate`. Gọi endpoint này sau khi người
+ *       dùng xác nhận mới trừ credit và đọc thật. `document_ids` rỗng / bỏ trống ⇒ đọc hết tài liệu đang chờ của dự án.
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               document_ids:
+ *                 type: array
+ *                 items: { type: string }
+ *     responses:
+ *       200:
+ *         description: Danh sách tài liệu vừa đọc (`summaryStatus` `success` hoặc `failed` — lỗi một tài liệu không chặn tài liệu khác)
+ *       401:
+ *         description: Chưa xác thực
+ *       403:
+ *         description: Viewer không đọc được
+ */
+router.post(
+  "/:projectId/documents/summarize",
+  authMiddleware,
+  requireRole("lead", "analyst"),
+  projectDocumentController.summarizeDocuments
+)
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/documents/{docId}/text:
  *   get:
  *     summary: Chữ đã trích của tài liệu tham khảo, chia đoạn theo mã `D<n>-P<mm>` (FLF-443)

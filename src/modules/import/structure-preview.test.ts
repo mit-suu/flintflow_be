@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { LayoutBlock } from "./step-plan.js"
 import type { LayoutEntry } from "./template-profile.model.js"
-import { EXCERPT_MAX, excerptOf, fileKindOf, isTemplateFile, previewStructure, structureChanges, toPreview, type StructurePreview } from "./structure-preview.js"
+import { applyScopeLabels, EXCERPT_MAX, excerptOf, fileKindOf, isTemplateFile, previewStructure, structureChanges, toPreview, type StructurePreview } from "./structure-preview.js"
 import type { TargetStructure } from "./target-structure.js"
 
 const entry = (order: number, section_id: string, heading_text: string, level = 1): LayoutEntry => ({ order, section_id, heading_text, level })
@@ -116,14 +116,14 @@ describe("previewStructure - màn đọc khung lúc upload", () => {
     expect(preview.resolved_mode).toBe(3)
   })
 
-  it("bổ sung theo mẫu chuẩn (free) ⇒ đích = khung file cộng mẫu FlintFlow; FLF-463: mục riêng của file là có / thiếu (không ngoài phạm vi), giữ vị trí trong file", () => {
-    const blocks = [heading("h1", "1 Overview", "fixed:1"), para("p1", "Lumen is a course management SaaS for small training centres.", "fixed:1"), heading("c1", "Budget", "custom")]
+  it("bổ sung theo mẫu chuẩn (free) ⇒ đích = khung file cộng mẫu FlintFlow; FLF-463: mục riêng của file là có / thiếu, giữ vị trí trong file; FLF-455: heading Dự toán chi phí ngoài 29148 ⇒ ngoài phạm vi", () => {
+    const blocks = [heading("h1", "1 Overview", "fixed:1"), para("p1", "Lumen is a course management SaaS for small training centres.", "fixed:1"), heading("c1", "Dự toán chi phí", "custom")]
     const preview = previewStructure(blocks, new Map([["h1", "fixed:1"]]), spine, "free", AT)
     expect(preview.resolved_mode).toBe(4)
-    expect(preview.summary.out_of_scope).toBe(0)
+    expect(preview.summary.out_of_scope).toBe(1)
     expect(preview.sections[0]).toMatchObject({ section_id: "fixed:1", status: "present", order: 0 })
-    // Heading riêng của file còn trống ⇒ thiếu, đứng ngay sau mục của file; mục mẫu chuẩn file không có xếp sau
-    expect(preview.sections[1]).toMatchObject({ title: "Budget", status: "missing", order: 1 })
+    // Heading dự toán còn trống ⇒ Ngoài phạm vi (xét theo heading), đứng ngay sau mục của file; mục mẫu chuẩn file không có xếp sau
+    expect(preview.sections[1]).toMatchObject({ title: "Dự toán chi phí", status: "out_of_scope", order: 1 })
     expect(preview.sections.slice(2).every((s) => s.status === "missing" && s.order > 1)).toBe(true)
   })
 })
@@ -161,7 +161,7 @@ describe("structureChanges - kết quả cuối lệch bản sơ bộ", () => {
       { section_id: "fixed:1", title: "Overview", status: "present", order: 0 },
       { section_id: "fixed:3.4", title: "3.4 Security", status: "present", order: 1 },
       { section_id: "feature:P01", title: "3.2 Courses", status: "present", order: 2 },
-      { section_id: "custom:CS01", title: "Budget", status: "present", order: 3 }
+      { section_id: "custom:CS01", title: "Dự toán chi phí", status: "present", order: 3 }
     ]
   }
   const final = (status34: "present" | "missing"): TargetStructure => ({
@@ -175,7 +175,7 @@ describe("structureChanges - kết quả cuối lệch bản sơ bộ", () => {
       { section_id: "fixed:3.4", title: "3.4 Security", status: status34, owner_steps: [] },
       { section_id: "feature:F01", title: "3.2 Courses", status: "present", owner_steps: [] },
       // Finalize sinh thêm phần nối ⇒ mục riêng cùng tiêu đề mang số khác
-      { section_id: "custom:CS03", title: "Budget", status: "present", owner_steps: [] }
+      { section_id: "custom:CS03", title: "Dự toán chi phí", status: "present", owner_steps: [] }
     ]
   })
   const realId = (id: string) => (id === "feature:P01" ? "feature:F01" : id)
@@ -263,4 +263,48 @@ describe("FLF-411 - màn đọc khung trên file thật (parse + khớp mẫu, k
     // Giữ khung (không tick): như cũ, đủ khung
     expect((await previewOfFixture("techmart-srs-fpt", "fixed")).summary).toMatchObject({ kind: "written", missing: 0 })
   }, 30000)
+})
+
+describe("FLF-460 - dấu chưa chắc và nhãn Ngoài phạm vi trên bản đồ mục", () => {
+  const spine = createEmptySpine({ name: "Lumen" })
+  const blocks = [
+    heading("h1", "1 Overview", "fixed:1"),
+    para("p1", "Lumen is a course management SaaS for small training centres.", "fixed:1"),
+    heading("h2", "Những gì hệ thống làm", "fixed:3.2", 2),
+    para("p2", "Learners enrol in courses; instructors publish lessons and grade quizzes.", "fixed:3.2")
+  ]
+  const sections = new Map([["h1", "fixed:1"], ["h2", "fixed:3.2"]])
+
+  it("heading độ tin thấp ⇒ section gắn uncertain + matched_title + block_id", () => {
+    const preview = previewStructure(blocks, sections, spine, "free", AT, new Map([["h2", { uncertain: true, matched_title: "Functional Requirements" }]]))
+    expect(preview.sections.find((s) => s.block_id === "h2")).toMatchObject({ uncertain: true, matched_title: "Functional Requirements" })
+    expect(preview.sections.find((s) => s.block_id === "h1")?.uncertain).toBeUndefined()
+  })
+
+  it("FLF-460: đưa vào phạm vi mục tự xếp Ngoài phạm vi ⇒ mục có owner steps (Luồng 2 mở bước, tiến độ đếm còn lại)", () => {
+    const structure: TargetStructure = {
+      target: "fpt",
+      intent: "free",
+      resolved_mode: 1,
+      sections: [{ section_id: "custom:CS01", title: "Chi phí dự kiến", status: "out_of_scope", owner_steps: [] }],
+      missing: [],
+      compared_at: AT
+    }
+    const back = applyScopeLabels(structure, new Map([["c1", { scope_label: "in_scope" as const }]]), new Map([["c1", "custom:CS01"]]), new Set())
+    expect(back.sections[0]).toMatchObject({ status: "missing", owner_steps: ["S-8.1"], block_id: "c1" })
+    expect(back.missing).toEqual(["custom:CS01"])
+    expect(back.resolved_mode).toBe(4)
+  })
+
+  it("nhãn out_of_scope đưa mục ra khỏi phạm vi; in_scope đưa mục tự xếp ngoài phạm vi trở lại", () => {
+    const out = previewStructure(blocks, sections, spine, "free", AT, new Map([["h2", { scope_label: "out_of_scope" as const }]]))
+    expect(out.sections.find((s) => s.block_id === "h2")).toMatchObject({ status: "out_of_scope", scope_label: "out_of_scope" })
+    expect(out.summary.out_of_scope).toBe(1)
+
+    const cost = [heading("c1", "Chi phí dự kiến", "unmapped"), ...blocks]
+    const auto = previewStructure(cost, new Map([...sections, ["c1", "unmapped"]]), spine, "free", AT)
+    expect(auto.sections.find((s) => s.block_id === "c1")?.status).toBe("out_of_scope")
+    const back = previewStructure(cost, new Map([...sections, ["c1", "unmapped"]]), spine, "free", AT, new Map([["c1", { scope_label: "in_scope" as const }]]))
+    expect(back.sections.find((s) => s.block_id === "c1")).toMatchObject({ status: "missing", scope_label: "in_scope" })
+  })
 })

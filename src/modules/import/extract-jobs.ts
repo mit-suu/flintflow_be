@@ -14,7 +14,7 @@
 
 import { defineJob, isJobActive, startJob, waitForJob } from "../../shared/queue/job-runner.js"
 import { ImportedDocument, type IImportedDocument } from "./imported-document.model.js"
-import { acceptLatest, applyDropText, assertImportStatus, autoConfirmPendingMapping, requireImport } from "./import.service.js"
+import { acceptLatest, applyDropText, assertImportStatus, assertStartAffordable, autoConfirmPendingMapping, requireImport } from "./import.service.js"
 import { runExtraction } from "./extract.service.js"
 import { startAutoFinalize } from "./finalize-jobs.js"
 import { Mode1Error } from "./mode1.errors.js"
@@ -76,7 +76,18 @@ export const startExtraction = async (projectId: string, userId: string, importI
   await autoConfirmPendingMapping(doc)
   assertImportStatus(doc, ["extracting"], "extracting")
   // FLF-412: vùng Bỏ chữ ⇒ viết lại file + tách lại trước lượt đọc đầu tiên
-  if (!(await isExtractionRunning(importId))) await applyDropText(doc)
+  if (!(await isExtractionRunning(importId))) {
+    // FLF-458: đủ credit cho tài liệu tham khảo + dịch khung rồi mới viết lại file (thiếu ⇒ 402, chưa ghi / trừ gì)
+    await assertStartAffordable(doc, userId)
+    // Đọc tài liệu tham khảo (AI chậm) TRƯỚC khi viết lại file: sau applyDropText không còn lệnh chậm nào trước job I-4, nên lựa chọn Bỏ chữ / nhãn không chen vào được
+    // FLF-458: tài liệu tham khảo đang chờ đọc cùng lượt Bắt đầu (credit đã cộng vào màn báo); lỗi khác credit không chặn
+    const { summarizePendingAtStart } = await import("../project/project-document.service.js")
+    await summarizePendingAtStart(projectId, userId).catch((err) => {
+      if ((err as { code?: string })?.code === "INSUFFICIENT_CREDIT") throw err
+      console.warn(`[I-4] Không đọc được tài liệu tham khảo của dự án ${projectId}:`, err)
+    })
+    await applyDropText(doc, userId)
+  }
   // Bỏ `paused` trước khi trả lời để lần poll đầu không thấy trạng thái dừng cũ.
   const started = await startJob(
     extractJob,

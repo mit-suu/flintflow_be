@@ -17,9 +17,10 @@ import { targetsOf } from "../import/extract-targets.js"
 import { overlapsOf } from "../import/content-slots.js"
 import { recordColumnOfHeader } from "../import/legacy-record.js"
 import { UNMAPPED_SECTION } from "../import/import.constants.js"
-import { foldText, splitHeadingNumber, titleSimilarity } from "../import/text-similarity.js"
+import { foldText } from "../import/text-similarity.js"
 import type { EditedSection } from "./edited-since.js"
-import { isFrameworkId, type NewHeading, type OldHeading, type PairBy, type PairingResult } from "./pair-sections.js"
+import { isFrameworkId, wrapperKeys, type NewHeading, type OldHeading, type PairBy, type PairingResult } from "./pair-sections.js"
+import { confidenceOf, GUESS_SCORE, HIGH_MARGIN, itemTarget, rankTargets, type PlaceScore, type PlaceSource, type PlaceTarget, type PlaceWhy } from "./place-score.js"
 
 export const RECORD_OF_CHANGES = "fixed:I"
 
@@ -44,17 +45,18 @@ export type TableShapes = ReadonlyMap<string, readonly TableShape[]>
 /** `high`: chọn sẵn, áp dụng luôn nếu BA không đổi. `guess`: đoán, BA phải xác nhận (gửi đúng `suggested`) hoặc chọn khác. */
 export type SuggestConfidence = "high" | "guess"
 
-/** Lý do của lựa chọn chọn sẵn — FE dịch thành câu ngắn. */
-export type SuggestReason = "no_place" | "close_name" | "map_columns" | "no_table_in_new" | "keep_history" | "first_heading"
+/**
+ * Lý do của lựa chọn chọn sẵn — FE dịch thành câu ngắn. `best_fit`: đúng nghĩa theo tên / hướng dẫn / loại dữ liệu của mục mẫu;
+ * `same_data`: mục mẫu đã in đúng phần dữ liệu này từ Spine (gộp vào, không in lần hai); `kept_for_data`: không mục nào hợp nhưng
+ * mục có dữ liệu ⇒ giữ thành mục riêng. `no_place` chỉ còn cho mục không có dữ liệu. `close_name` / `first_heading`: bản ghi cũ.
+ */
+export type SuggestReason = "no_place" | "close_name" | "map_columns" | "no_table_in_new" | "keep_history" | "first_heading" | "best_fit" | "same_data" | "kept_for_data"
 
 export interface Suggestion {
   suggested: string
   suggested_reason: SuggestReason
   confidence: SuggestConfidence
 }
-
-/** Ngưỡng tên gần giống để đoán "chuyển vào" (thang `titleSimilarity`); còn cần cùng nhóm cha + mục đích đang trống. */
-export const MOVE_GUESS_SIMILARITY = 0.6
 
 export interface MatchedItem {
   id: string
@@ -74,6 +76,15 @@ export interface MissingItem {
   guidance: string | null
   /** Mục thừa đã chọn "chuyển vào" mục này (`id` của mục thừa) — mục nhận nội dung, không còn là mục phải viết. Chỉ có khi ≥ 1. */
   moved_in?: string[]
+  /** Mục chưa có cặp nhưng Spine đã có dữ liệu của nó (tầm nhìn, giả định…) ⇒ in từ Spine, không phải "Cần viết". */
+  filled_from_spine?: true
+}
+
+/** Mục mẫu đích hợp để đặt một mục cũ, xếp theo điểm (`place-score`). */
+export interface PlaceTargetHint {
+  new_key: string
+  score: number
+  why: PlaceWhy[]
 }
 
 export interface ExtraItem {
@@ -91,9 +102,17 @@ export interface ExtraItem {
   suggested?: string
   suggested_reason?: SuggestReason
   confidence?: SuggestConfidence
+  /** Tối đa `TARGET_HINTS` mục mẫu hợp nhất (bản ghi cũ không có). */
+  targets?: PlaceTargetHint[]
+  /** Số phần tử Spine / đoạn chữ của mục (bản ghi cũ không có). */
+  data_size?: number
 }
 
-export type ConflictKind = "table_columns" | "split_section" | "record_of_changes"
+/**
+ * `placement`: mục có cặp theo id nhưng sai nghĩa rõ (mẫu tự nhận "3.4 Tuân thủ" là mục Yêu cầu khác) ⇒ BA chọn giữ cặp
+ * (`keep_pair`), gộp vào mục hợp hơn (`move_to:<k>`) hoặc giữ thành mục riêng.
+ */
+export type ConflictKind = "table_columns" | "split_section" | "record_of_changes" | "placement"
 
 export interface ConflictItem {
   id: string
@@ -111,6 +130,13 @@ export interface ConflictItem {
   suggested?: string
   suggested_reason?: SuggestReason
   confidence?: SuggestConfidence
+  targets?: PlaceTargetHint[]
+  data_size?: number
+  /**
+   * `split_section` có lựa chọn `distribute`: phần tử Spine của mục cũ ⇒ heading đích theo nội dung (vd NFR có "uptime" ⇒ Tính sẵn
+   * sàng). Phần tử không phân loại được nằm ở heading đầu (`new_key`).
+   */
+  item_targets?: { id: string; new_key: string }[]
 }
 
 export interface EditedItem {
@@ -145,7 +171,27 @@ export interface ClassifyInput {
   newTables?: TableShapes
   /** Đổi ngược: mục đã sửa sau `applied_at`, theo `old_key`. `null` / bỏ trống = đổi xuôi. */
   edited?: readonly EditedSection[] | null
+  /** Tóm tắt dữ liệu Spine của từng mục cũ, theo `old_key` (thiếu ⇒ coi như không biết dữ liệu, gợi ý như mục trống). */
+  oldData?: ReadonlyMap<string, OldSectionData>
+  /** `new_key` của mục mẫu đích mà Spine đã có dữ liệu để in (dù không có cặp). */
+  newFilled?: ReadonlySet<string>
+  /**
+   * Mẫu đích có bảng lịch sử sửa đổi đứng trước heading đầu tiên (không thuộc mục nào) — bảng Record of Changes cũ ghép vào đó theo
+   * tên cột thay vì "không có chỗ".
+   */
+  preHeadingRecord?: boolean
 }
+
+export interface OldSectionData {
+  size: number
+  /** Vài phần tử đầu nối lại, đã cắt ngắn — để chấm nghĩa. */
+  sample: string
+  /** Phần tử có mã (để chia theo phần tử khi mục bị tách). */
+  items?: readonly { id: string | null; text: string }[]
+}
+
+/** Số mục mẫu gợi ý kèm theo mỗi mục cũ. */
+export const TARGET_HINTS = 3
 
 const SAME_TABLE_CHOICES = ["map_by_header", "keep_old_table", "ai_resolve"]
 const NO_TABLE_CHOICES = ["keep_old_table", "delete", "ai_resolve"]
@@ -240,19 +286,6 @@ const isStructuredTarget = (sectionId: string): boolean => targetsOf(sectionId).
 
 const high = (suggested: string, suggested_reason: SuggestReason): Suggestion => ({ suggested, suggested_reason, confidence: "high" })
 
-/** Heading cha gần nhất (theo cấp) của từng heading có chữ; thiếu cấp ⇒ không có cha. */
-const parentKeys = (headings: readonly { key: string; heading_text: string; level?: number }[]): Map<string, string | null> => {
-  const out = new Map<string, string | null>()
-  const stack: { level: number; key: string }[] = []
-  for (const h of headings) {
-    if (h.level === undefined || !h.heading_text.trim()) continue
-    while (stack.length && stack[stack.length - 1].level >= h.level) stack.pop()
-    out.set(h.key, stack[stack.length - 1]?.key ?? null)
-    stack.push({ level: h.level, key: h.key })
-  }
-  return out
-}
-
 export const classify = (input: ClassifyInput): MigrationGroups => {
   const oldByKey = new Map(input.old.map((o) => [o.key, o]))
   const newByKey = new Map(input.neu.map((n) => [n.key, n]))
@@ -279,46 +312,78 @@ export const classify = (input: ClassifyInput): MigrationGroups => {
     return own !== undefined && next !== undefined && next > own
   }
 
+  const newFilled = input.newFilled ?? new Set<string>()
   const missing: MissingItem[] = input.neu
     .map((n, i) => ({ n, wrapper: isWrapper(i) }))
     .filter(({ n }) => !claimed.has(n.key) && !ignored.has(n.key))
-    .map(({ n, wrapper }) => ({
-      id: `x:${n.key}`,
-      new_key: n.key,
+    .map(({ n, wrapper }) => {
+      const content = !wrapper && (n.section_id === UNMAPPED_SECTION || isContentSection(n.section_id))
+      const filled = content && newFilled.has(n.key)
+      return { id: `x:${n.key}`, new_key: n.key, heading_text: n.heading_text, section_id: n.section_id, needs_content: content && !filled, guidance: n.guidance ?? null, ...(filled ? { filled_from_spine: true as const } : {}) }
+    })
+
+  // Nơi đặt được một mục cũ: mọi mục của mẫu đích (kể cả mục đã có cặp — phần gộp nối sau nội dung đang có — và heading nhóm — thành
+  // mục con cuối của nhóm), trừ heading phần tử ví dụ và heading con gộp vào mục cha
+  const merged = new Set(pairing.children ?? [])
+  const wrappers = wrapperKeys(input.neu)
+  const placeable = input.neu.filter((n) => !ignored.has(n.key) && !merged.has(n.key) && n.heading_text.trim())
+  const moveChoices = placeable.map((n) => `move_to:${n.key}`)
+  const aiMoves = placeable.filter((n) => isStructuredTarget(n.section_id)).map((n) => `move_to:${n.key}`)
+  const oldPairedTo = new Map<string, string[]>()
+  for (const p of pairing.pairs) if (p.new_key) oldPairedTo.set(p.new_key, [...(oldPairedTo.get(p.new_key) ?? []), p.old_key])
+  /** Mục mẫu để chấm cho mục cũ `oldKey` (dữ liệu của mục cũ khác đã ghép vào mục mẫu là một tín hiệu; không tính chính nó). */
+  const placeTargets = (oldKey: string, among: readonly NewHeading[] = placeable): PlaceTarget[] =>
+    among.map((n) => ({
+      key: n.key,
       heading_text: n.heading_text,
       section_id: n.section_id,
-      needs_content: !wrapper && (n.section_id === UNMAPPED_SECTION || isContentSection(n.section_id)),
-      guidance: n.guidance ?? null
+      guidance: n.guidance ?? null,
+      has_children: wrappers.has(n.key),
+      paired_section_ids: (oldPairedTo.get(n.key) ?? []).filter((k) => k !== oldKey).map((k) => oldByKey.get(k)?.section_id ?? "")
     }))
+  const sourceOf = (o: OldHeading): PlaceSource => ({ heading_text: o.heading_text, section_id: o.section_id, sample: input.oldData?.get(o.key)?.sample })
+  const hints = (ranked: readonly PlaceScore[]): PlaceTargetHint[] => ranked.slice(0, TARGET_HINTS).map((r) => ({ new_key: r.new_key, score: r.score, why: r.why }))
+  const dataSize = (o: OldHeading): number => input.oldData?.get(o.key)?.size ?? 0
+  /** Lý do khi gợi ý đặt mục cũ vào `target`: mục mẫu đang in đúng phần dữ liệu này từ Spine ⇒ `same_data`. */
+  const reasonFor = (o: OldHeading, target: NewHeading): SuggestReason =>
+    newFilled.has(target.key) && (o.section_id === target.section_id || overlapsOf(o.section_id).includes(target.section_id) || overlapsOf(target.section_id).includes(o.section_id)) ? "same_data" : "best_fit"
 
-  // Mục thiếu có nội dung là nơi `move_to` đến được (mục đã có cặp không nhận thêm nội dung lạ)
-  const moveTargets = missing.filter((m) => m.needs_content)
-  const moveChoices = moveTargets.map((m) => `move_to:${m.new_key}`)
-  const aiMoves = moveTargets.filter((m) => isStructuredTarget(m.section_id)).map((m) => `move_to:${m.new_key}`)
-
-  const oldParent = parentKeys(input.old)
-  const newParent = parentKeys(input.neu)
-  const pairedTo = new Map(pairing.pairs.filter((p) => p.new_key).map((p) => [p.old_key, p.new_key!]))
-  /** Mục đích đã được đoán cho một mục thừa khác — mỗi mục đích chỉ nhận một lần đoán. */
-  const guessed = new Set<string>()
   /**
-   * Đoán "chuyển vào" chỉ khi đủ cả 3: tên gần giống, cùng nhóm cha (heading cha cũ ghép với heading cha mới, hoặc hai mục cùng id /
-   * chồng lấn), mục đích đang trống cần nội dung (`moveTargets`). Nhiều mục đích đạt ⇒ tên giống nhất, rồi mục đứng trước.
+   * Mục bị tách: gợi ý heading hợp nghĩa nhất trong các heading cùng id (không còn lấy heading đầu). Phần tử Spine của mục phân loại
+   * được vào ≥ 2 heading ⇒ thêm lựa chọn `distribute` (chia theo từng phần tử) và gợi ý nó.
    */
-  const moveGuess = (o: OldHeading): string | null => {
-    let best: { choice: string; score: number } | null = null
-    for (const m of moveTargets) {
-      const choice = `move_to:${m.new_key}`
-      if (guessed.has(choice)) continue
-      const score = titleSimilarity(splitHeadingNumber(o.heading_text).title, splitHeadingNumber(m.heading_text).title)
-      if (score < MOVE_GUESS_SIMILARITY) continue
-      const op = oldParent.get(o.key) ?? null
-      const np = newParent.get(m.new_key) ?? null
-      const sameGroup = (op !== null && np !== null && pairedTo.get(op) === np) || o.section_id === m.section_id || overlapsOf(o.section_id).includes(m.section_id)
-      if (!sameGroup) continue
-      if (!best || score > best.score) best = { choice, score }
+  const splitConflict = (o: OldHeading, nw: NewHeading, split: readonly string[]): ConflictItem => {
+    const candidates = split.map((k) => newByKey.get(k)).filter((n): n is NewHeading => !!n)
+    const targets = placeTargets(o.key, candidates)
+    const ranked = rankTargets(sourceOf(o), targets)
+    const items = (input.oldData?.get(o.key)?.items ?? []).filter((i): i is { id: string; text: string } => !!i.id)
+    const assigned = items.map((i) => ({ id: i.id, new_key: itemTarget(i.text, targets) }))
+    const distinct = new Set(assigned.map((a) => a.new_key ?? nw.key))
+    const distribute = distinct.size > 1
+    const base = { id: `c:split_section:${o.key}`, kind: "split_section" as const, old_key: o.key, new_key: nw.key, candidate_keys: [...split], old_columns: [], new_columns: [], ai_choices: ["ai_resolve"], decision_required: true as const, targets: hints(ranked), data_size: dataSize(o) }
+    const choices = [...split.map((k) => `to:${k}`), ...(distribute ? ["distribute"] : []), "ai_resolve"]
+    if (distribute) {
+      const suggestion: Suggestion = { suggested: "distribute", suggested_reason: "best_fit", confidence: assigned.every((a) => a.new_key) ? "high" : "guess" }
+      return { ...base, choices, ...suggestion, item_targets: assigned.map((a) => ({ id: a.id, new_key: a.new_key ?? nw.key })) }
     }
-    return best?.choice ?? null
+    const best = ranked[0]?.new_key ?? split[0]
+    return { ...base, choices, ...(ranked[0] && ranked[0].score >= GUESS_SCORE ? high(`to:${best}`, "best_fit") : high(`to:${split[0]}`, "first_heading")) }
+  }
+
+  /**
+   * Cặp theo id / chồng lấn mà sai nghĩa rõ: cùng id không được thưởng (khái niệm quá xa) và một mục khác của mẫu hơn hẳn ⇒ conflict
+   * `placement` gợi ý mục đó. Cặp do BA ghép tay / ghép theo tên không bị hỏi lại.
+   */
+  const placementOf = (o: OldHeading, nw: NewHeading, by: PairBy | null): ConflictItem | null => {
+    if (by !== "section_id" && by !== "overlap") return null
+    const ranked = rankTargets(sourceOf(o), placeTargets(o.key))
+    const pairedScore = ranked.find((r) => r.new_key === nw.key)
+    const best = ranked[0]
+    const target = best ? newByKey.get(best.new_key) : undefined
+    if (!best || !pairedScore || !target || best.new_key === nw.key || pairedScore.why.includes("same_section") || !confidenceOf(ranked)) return null
+    if (best.score - pairedScore.score < HIGH_MARGIN) return null
+    const choices = ["keep_pair", ...moveChoices.filter((c) => c !== `move_to:${nw.key}`), "keep_custom"]
+    return { id: `c:placement:${o.key}`, kind: "placement", old_key: o.key, new_key: nw.key, candidate_keys: [], old_columns: [], new_columns: [], choices, ai_choices: [], decision_required: true, suggested: `move_to:${target.key}`, suggested_reason: reasonFor(o, target), confidence: confidenceOf(ranked)!, targets: hints(ranked), data_size: dataSize(o) }
   }
 
   const matched: MatchedItem[] = []
@@ -335,7 +400,11 @@ export const classify = (input: ClassifyInput): MigrationGroups => {
 
     if (!nw) {
       if (o.section_id === RECORD_OF_CHANGES) {
-        conflict.push({ id: `c:record_of_changes:${o.key}`, kind: "record_of_changes", old_key: o.key, new_key: null, candidate_keys: [], old_columns: (oldTables.get(o.section_id) ?? []).map(humanColumns), new_columns: [], choices: ["keep_custom", DROP_FROM_PRINT, "ai_resolve"], ai_choices: ["ai_resolve"], decision_required: true, ...high(DROP_FROM_PRINT, "no_place") })
+        const old_columns = (oldTables.get(o.section_id) ?? []).map(humanColumns)
+        // Bảng lịch sử của mẫu đứng trước heading đầu ⇒ ghép dòng cũ vào đó theo tên cột
+        const record = input.preHeadingRecord ? (newTables.get(RECORD_OF_CHANGES) ?? []) : []
+        if (record.length) conflict.push({ id: `c:record_of_changes:${o.key}`, kind: "record_of_changes", old_key: o.key, new_key: null, candidate_keys: [], old_columns, new_columns: record.map(humanColumns), choices: ["map_by_header", "keep_custom", DROP_FROM_PRINT, "ai_resolve"], ai_choices: ["ai_resolve"], decision_required: true, ...high("map_by_header", "keep_history") })
+        else conflict.push({ id: `c:record_of_changes:${o.key}`, kind: "record_of_changes", old_key: o.key, new_key: null, candidate_keys: [], old_columns, new_columns: [], choices: ["keep_custom", DROP_FROM_PRINT, "ai_resolve"], ai_choices: ["ai_resolve"], decision_required: true, ...high(DROP_FROM_PRINT, "no_place") })
         continue
       }
       const followers = followersOf(o.key)
@@ -350,11 +419,18 @@ export const classify = (input: ClassifyInput): MigrationGroups => {
       const ai_choices = free ? aiMoves : []
       // "Không in ra" an toàn cho cả mục chữ tự do (dữ liệu giữ trong Spine). Đổi mẫu không xoá dữ liệu (BF §3.7, FLF-466): không có lựa chọn "xoá" ở nhóm Thừa
       const choices = ["keep_custom", DROP_FROM_PRINT, ...moveChoices]
-      const guess = moveGuess(o)
-      // Không bao giờ đoán sẵn một lựa chọn cần AI
-      const suggestion: Suggestion = guess && !ai_choices.includes(guess) ? { suggested: guess, suggested_reason: "close_name", confidence: "guess" } : high(DROP_FROM_PRINT, "no_place")
-      if (suggestion.confidence === "guess") guessed.add(suggestion.suggested)
-      extra.push({ id: `e:${o.key}`, old_key: o.key, heading_text: o.heading_text, section_id: o.section_id, follower_keys: followers, choices, ai_choices, decision_required: true, ...suggestion })
+      const ranked = rankTargets(sourceOf(o), placeTargets(o.key))
+      const confidence = confidenceOf(ranked)
+      const top = ranked[0] ? newByKey.get(ranked[0].new_key) : undefined
+      const size = dataSize(o)
+      // Không bao giờ đoán sẵn một lựa chọn cần AI; mục có dữ liệu không bao giờ bị chọn sẵn "Không in ra" với độ tin cao
+      const suggestion: Suggestion =
+        confidence && top && !ai_choices.includes(`move_to:${top.key}`)
+          ? { suggested: `move_to:${top.key}`, suggested_reason: reasonFor(o, top), confidence }
+          : size > 0
+            ? { suggested: "keep_custom", suggested_reason: "kept_for_data", confidence: "guess" }
+            : high(DROP_FROM_PRINT, "no_place")
+      extra.push({ id: `e:${o.key}`, old_key: o.key, heading_text: o.heading_text, section_id: o.section_id, follower_keys: followers, choices, ai_choices, decision_required: true, ...suggestion, targets: hints(ranked), data_size: size })
       continue
     }
 
@@ -369,10 +445,10 @@ export const classify = (input: ClassifyInput): MigrationGroups => {
         conflicts.push({ id: `c:${kind}:${o.key}`, kind, old_key: o.key, new_key: nw.key, candidate_keys: [], old_columns: oldT.map(humanColumns), new_columns: newT.map(humanColumns), choices, ai_choices: ["ai_resolve"], decision_required: true, ...suggestion })
       }
     }
+    const placement = placementOf(o, nw, p.by)
     const split = splitByOld.get(o.key)
-    if (split && split.length > 1) {
-      conflicts.push({ id: `c:split_section:${o.key}`, kind: "split_section", old_key: o.key, new_key: nw.key, candidate_keys: split, old_columns: [], new_columns: [], choices: [...split.map((k) => `to:${k}`), "ai_resolve"], ai_choices: ["ai_resolve"], decision_required: true, ...high(`to:${split[0]}`, "first_heading") })
-    }
+    if (placement) conflicts.push(placement)
+    else if (split && split.length > 1) conflicts.push(splitConflict(o, nw, split))
     conflict.push(...conflicts)
 
     const edit = editedByKey.get(o.key)

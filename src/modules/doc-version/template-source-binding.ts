@@ -23,7 +23,7 @@ export const FIXED_TEMPLATE_RENDERER_REVISION = "fixed-template-v4"
 export type TemplateSourceBinding = Pick<ITemplateProfile,
   "heading_map" | "table_map" | "layout" | "template_family" | "language" |
   "legacy_record_of_changes" | "non_screen_table" | "function_originals" | "section_slices"
-> & Partial<Pick<ITemplateProfile, "section_segments">> & {
+> & Partial<Pick<ITemplateProfile, "section_segments" | "print_suppressed">> & {
   source_file_ref: string
   source_sha256: string
   /**
@@ -80,7 +80,8 @@ const captureBinding = async (projectId: string): Promise<TemplateSourceBinding 
     legacy_record_of_changes: profile.legacy_record_of_changes ?? [], non_screen_table: profile.non_screen_table ?? [],
     function_originals: profile.function_originals ?? [], section_slices: profile.section_slices ?? [],
     // Bug #1: đoạn nguyên văn (FLF-366) chốt cùng version — thiếu thì bản in version dựng lại cả mục từ Spine (mất cột "Mã"…)
-    section_segments: profile.section_segments ?? []
+    section_segments: profile.section_segments ?? [],
+    print_suppressed: profile.print_suppressed ?? []
   })) as TemplateSourceBinding
 }
 
@@ -90,6 +91,7 @@ export const templateLayoutFromBinding = (binding: TemplateSourceBinding): Templ
   functionOriginals: binding.function_originals, sectionSlices: binding.section_slices,
   // Bug #1: như `loadTemplateLayout` (giao diện web) — binding cũ không có ⇒ in như trước
   ...(binding.section_segments?.length ? { sectionSegments: binding.section_segments } : {}),
+  ...(binding.print_suppressed?.length ? { printSuppressed: binding.print_suppressed } : {}),
   // FLF-420: version ghi trên khung mẫu ⇒ mã use case do FlintFlow cấp, in liên tục (chốt theo snapshot của version)
   ...(binding.strip_template_text ? { relabelUseCases: true } : {})
 })

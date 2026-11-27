@@ -12,12 +12,14 @@ import {
   IMPORT_FILE_FIELD,
   confirmLatestRequestSchema,
   extractRequestSchema,
+  documentLanguageRequestSchema,
   dropTextRequestSchema,
   fieldsPatchRequestSchema,
   finalizeRequestSchema,
   continueFlow2RequestSchema,
   gapReportQuerySchema,
   importResumeRequestSchema,
+  reviewSectionRequestSchema,
   mappingPatchRequestSchema,
   stepPlanPatchRequestSchema,
   uploadImportBodySchema
@@ -26,6 +28,7 @@ import * as extractService from "./extract.service.js"
 import * as extractJobs from "./extract-jobs.js"
 import * as finalizeJobs from "./finalize-jobs.js"
 import { continueInFlow2 } from "./flow2.service.js"
+import * as layoutPreviewService from "./layout-preview.service.js"
 import * as gapReportService from "./gap-report.service.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { assertNotMode1 } from "./mode1-guard.js"
@@ -162,6 +165,14 @@ export const dropText = mode1Handler(async (req, res) => {
   return sendSuccess(res, 200, { import: importService.toImportDto(doc) })
 })
 
+/** FLF-456: lưu ngôn ngữ tài liệu khi file chỉ còn khung (trước Bắt đầu); FE đọc lại `GET /import` để có credit mới. */
+export const documentLanguage = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(documentLanguageRequestSchema, req.body)
+  const doc = await importService.setSkeletonLanguage(auth.projectId, body)
+  return sendSuccess(res, 200, { import: importService.toImportDto(doc) })
+})
+
 export const patchFields = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const body = parseInput(fieldsPatchRequestSchema, req.body)
@@ -188,6 +199,18 @@ export const continueFlow2 = mode1Handler(async (req, res) => {
   return sendSuccess(res, 200, await continueInFlow2(auth.projectId, auth.userId, body))
 })
 
+/** FLF-461 (bước 2.9a): xem trước bố cục mới của chế độ 4 trước khi áp vào bản in. */
+export const layoutPreview = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req, { allowDrafting: true })
+  return sendSuccess(res, 200, await layoutPreviewService.getLayoutPreview(auth.projectId))
+})
+
+/** FLF-461 (bước 2.9a): người dùng xác nhận bố cục mới ⇒ bản in từ giờ áp bố cục đó. */
+export const layoutConfirm = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req, { allowDrafting: true })
+  return sendSuccess(res, 200, await layoutPreviewService.confirmLayout(auth.projectId))
+})
+
 /**
  * FLF-453 (business-flow §3.1.2 "Rà soát phần có sẵn"): người dùng xác nhận credit ở `reviewing` ⇒ chạy AI rà các mục
  * Code đã chọn (`TemplateProfile.review_sections`), rồi sang Luồng 2 như `continueFlow2`. Lượt AI lỗi / hết credit ⇒
@@ -202,6 +225,26 @@ export const reviewRun = mode1Handler(async (req, res) => {
   const result = await reviewService.runReview(doc, auth.userId, profile?.review_sections ?? [])
   if ("paused" in result) return sendSuccess(res, 200, { import: importService.toImportDto(doc) })
   return sendSuccess(res, 200, result)
+})
+
+/**
+ * FLF-453 nút "Rà soát bằng AI" của một mục chỉ được Code kiểm (business-flow §3.1.2), ở `reviewing`. Không có `confirm: true`
+ * ⇒ chỉ báo credit riêng của mục (không gọi AI, không trừ). Có `confirm` ⇒ chạy qua `runReview` cùng đường lô; vẫn `reviewing`
+ * (không sang Luồng 2). Hết credit / lỗi ⇒ `{ import }` đang `paused`.
+ */
+export const reviewSection = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(reviewSectionRequestSchema, req.body)
+  const doc = await importService.requireImport(auth.projectId, body.import_id)
+  assertImportStatus(doc, ["reviewing"], "reviewing")
+  const profile = await TemplateProfile.findOne({ projectId: auth.projectId })
+  const options = await reviewService.optionalReviewSections(auth.projectId, profile?.target_structure, profile?.review_sections ?? [])
+  const option = options.find((o) => o.section_id === body.section_id)
+  if (!option) throw new Mode1Error("IMPORT_INVALID_STATE", "Mục này không có chữ để AI rà riêng hoặc đã được rà.", { section_id: body.section_id })
+  if (!body.confirm) return sendSuccess(res, 200, { section_id: option.section_id, calls: option.calls, credits: option.credits, reviewed: false })
+  const result = await reviewService.runSectionReview(doc, auth.userId, option.section_id)
+  if ("paused" in result) return sendSuccess(res, 200, { import: importService.toImportDto(doc), section_id: option.section_id, reviewed: false })
+  return sendSuccess(res, 200, { import: importService.toImportDto(doc), section_id: option.section_id, reviewed: true })
 })
 
 /** Bấm Dừng khi vòng rà soát đang chạy (business-flow §2 "Dừng giữa chừng") — giữ tiến độ, lượt chưa trừ credit không chạy. */
