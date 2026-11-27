@@ -3,7 +3,7 @@
  * ─────────────────────────────────────────────────────────────────
  * Nền chung cho sơ đồ tự dựng (FLF-339, cột engine `svg` của `plantuml-conventions/SKILL.md`): palette Visual Paradigm,
  * đo chữ theo font đóng gói, hình học đầu mũi tên. Hàm thuần — không sinh markup (markup chỉ do `Scene.toSvg`).
- * Bản BE là nguồn sự thật cho renderer; `docs/diagram_guideline/svg-kit.mjs` chỉ dựng hình mẫu cho tài liệu.
+ * Bản BE là nguồn sự thật cho renderer; bản svg-kit của tài liệu dự án chỉ dựng hình mẫu.
  */
 
 import { ASCENT, BOLD_RUNS, DESCENT, REGULAR_RUNS, UNITS_PER_EM } from "./svg-kit-metrics.js"
@@ -68,7 +68,7 @@ export const arrowHeadShape = (style: ArrowHead, tip: Point, from: Point): { poi
   const at = frame(tip, from)
   switch (style) {
     case "open":
-      // dài 12, mở ±0.42 rad — như `arrowhead` của docs/diagram_guideline/svg-kit.mjs
+      // dài 12, mở ±0.42 rad — cùng hình đầu mũi tên với hình mẫu trong tài liệu
       return { points: [at(12 * Math.cos(0.42), 12 * Math.sin(0.42)), tip, at(12 * Math.cos(0.42), -12 * Math.sin(0.42))], closed: false, filled: false }
     case "classic":
       return { points: [tip, at(12, 5), at(12, -5)], closed: true, filled: true }

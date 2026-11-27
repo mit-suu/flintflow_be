@@ -1,5 +1,5 @@
 /**
- * Hình học sơ đồ ngữ cảnh (DFD mức 0, ký pháp Yourdon/DeMarco) — port từ `docs/diagram_guideline/context/build-context-diagram.mjs`.
+ * Hình học sơ đồ ngữ cảnh (DFD mức 0, ký pháp Yourdon/DeMarco) — port từ bộ sinh sơ đồ ngữ cảnh viết tay của tài liệu dự án.
  * Đơn vị px, trục y hướng xuống (khớp `Scene`). Hệ thống là MỘT vòng tròn ở gốc toạ độ; actor nằm trên một ellipse
  * quanh nó: người dùng nửa trái, hệ thống ngoài + bộ hẹn giờ nửa phải (một nửa trống ⇒ chia đôi danh sách).
  *

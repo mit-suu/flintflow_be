@@ -1,6 +1,6 @@
 /**
- * Hình học sơ đồ use case (UML 2.5.1) và sơ đồ phân cấp actor — port từ `docs/technical/usecase-diagram-layout.md`
- * §2–§7 (bản chạy được ở `docs/diagrams/usecase/build-diagrams.mjs`). Đơn vị px, trục y hướng xuống (khớp `Scene`).
+ * Hình học sơ đồ use case (UML 2.5.1) và sơ đồ phân cấp actor — port từ đặc tả layout use case của tài liệu dự án
+ * §2–§7. Đơn vị px, trục y hướng xuống (khớp `Scene`).
  *
  * Ba cột: actor người bên trái, khung hệ thống ở giữa chứa một cột ellipse, actor `system`/`time` bên phải; cả hai cột
  * actor nằm NGOÀI khung. Quy ước này là phương án đầu tiên; không sạch thì `layoutOptions` thử đổi thứ tự hàng và chia actor

@@ -41,7 +41,7 @@ Data → diagram: entity = box with its singular-noun name; relation = parent �
 | Crow's foot | one line, verb on the line | `\|\|` one · `\|o` zero or one | crow's foot + ring `o{` · bar + ring `\|o` for one |
 | IDEF1X | dashed line (non-identifying), verb on the line; entity rounded only when dependent | hollow diamond when optional | solid dot; `Z` for one-to-one |
 
-Lines: straight when clear, otherwise right-angle bends (L / Z / U); never over text or shapes, never overlapping; right-angle crossings only. More than 25 entities ⇒ split (connected components packed, a larger one cut breadth-first, relations across a cut not drawn), title `Entity Relationship Diagram (i/n)`, first part keeps the diagram id. Samples: `docs/diagram_guideline/erd/`.
+Lines: straight when clear, otherwise right-angle bends (L / Z / U); never over text or shapes, never overlapping; right-angle crossings only. More than 25 entities ⇒ split (connected components packed, a larger one cut breadth-first, relations across a cut not drawn), title `Entity Relationship Diagram (i/n)`, first part keeps the diagram id.
 
 ## `class` - §3.x (head of each feature section)
 
@@ -51,7 +51,7 @@ Engine `svg` (no PlantUML source): UML 2.5.1 class built in code, fill `#7ACFF5`
 - One diagram per feature (`owner_kind = feature`, `owner_id` = feature id, `section = feature:<id>`); an entity of several features appears in each. Only relations between classes of the same diagram are drawn. Entity without `feature_ids` ⇒ no class diagram. Over 25 classes ⇒ split (`Class Diagram - <feature> (i/n)`).
 - Class box = 2 compartments: bold name, attributes. No operations, no data types, no stereotype. Attribute `name`, plus `{id}` (key), `{ref}` (reference), `[0..1]` (not required).
 - Relation = association (solid line, no arrowhead): multiplicity at both ends (parent `1` or `0..1` from `relation_optional`; child `*` for `N`, `0..1` for `1`) and the verb as association name. Aggregation (hollow diamond at the whole), composition (filled diamond), generalization (hollow triangle at the parent) are drawn when the source says so; the Spine has no such data yet, so none is generated.
-- Layout as ERD: straight when clear, right-angle bends otherwise, no line over text or shapes. Full rules: `renderer/class/SKILL.md`; samples `docs/diagram_guideline/class/`.
+- Layout as ERD: straight when clear, right-angle bends otherwise, no line over text or shapes. Full rules: `renderer/class/SKILL.md`.
 
 ## `state_machine` - §3.1.5 (next to the entity description)
 
@@ -61,7 +61,7 @@ Engine `svg` (no PlantUML source): UML 2.5 State Machine built in code, fill `#7
 - One diagram per entity that has `states[]` (`owner_kind = entity`, `owner_id` = entity id, `section = fixed:3.1.5`); title `State Machine Diagram - <entity>`. Not split.
 - Initial = solid dot with an open arrow to the `initial` state; final = bullseye (ring + solid core) with an open arrow from each `final` state; state = rounded rectangle, bold name inside. State names are adjectives or participles (Pending, Approved), never actions.
 - Transition = one straight solid line with an open arrowhead, label `event [guard] / action` (guard / action omitted when empty). Several transitions between the same two states (either direction) are parallel segments. A self-transition (`from = to`) is an internal transition: its label is a line in a lower compartment of the state.
-- Layout: states by BFS layer from the initial state, several candidate arrangements (and a circle) tried; the first with no line over a shape or text and the fewest crossings wins. Full rules: `renderer/state-machine/SKILL.md`; samples `docs/diagram_guideline/state-machine/`.
+- Layout: states by BFS layer from the initial state, several candidate arrangements (and a circle) tried; the first with no line over a shape or text and the fewest crossings wins. Full rules: `renderer/state-machine/SKILL.md`.
 
 ## `sequence` - §3.x.y (function detail)
 
@@ -72,7 +72,7 @@ Engine `puml` (PlantUML server): UML 2.5 Sequence from `sequence.renderer.ts`, V
 - Lifelines: human actors (stick figure), `:System`, external `system` / `time` actors; exact actor names, generalization kept, nothing else (no Frontend / Backend / Repository).
 - Message: request with a response back to the sender ⇒ synchronous solid arrow with a filled triangle head (`->` + `skinparam style strictuml`) + activation bar; request without ⇒ asynchronous open arrow (`->>`); response ⇒ dashed open arrow (`-->>`). Labels numbered `1:`, `1.1:`, `1.2:`, `2:` (stimulus = request from an actor).
 - `abnormal` ⇒ `alt <guard>` / `else <guard>`, the normal flow after it is the last `else`; `normal` with `guard` ⇒ `opt <guard>`; no `loop` (no data yet).
-- Messages carry data in plain words (`Submit email and password`), not method calls; the Spine writes them (S-5.4 `function-detail`). Samples: `docs/diagram_guideline/sequence/`; full rules: `renderer/sequence/SKILL.md`.
+- Messages carry data in plain words (`Submit email and password`), not method calls; the Spine writes them (S-5.4 `function-detail`). Full rules: `renderer/sequence/SKILL.md`.
 - Component level (FLF-418, `Project.sequenceLevel = component`): `functions[].component_interactions` drawn as actor → `boundary` (screen) → `control` (`<Feature>Controller`) → `entity` (entities of the feature); function without that data stays system level.
 
 ## `activity` - §3.x (Functions: feature of the use case)
