@@ -23,6 +23,8 @@ import { TemplateProfile } from "../../../src/modules/import/template-profile.mo
 import { makeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
 import { makeDocx, p, styled } from "../../../src/modules/docx-ooxml/testing/make-docx.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
+import * as flagsService from "../../../src/modules/spine/flags.service.js"
+import { ruleProfileOf } from "../../../src/modules/import/mode1-guard.js"
 import { Spine } from "../../../src/modules/spine/spine.model.js"
 import { crToWritten, importedProject, resetCrMock } from "../../helpers/mode1-cr-p4.js"
 
@@ -155,6 +157,22 @@ describe("FLF-455 - Ngoài phạm vi theo loại nội dung 29148, mọi chế �
     expect((profile.template_context ?? []).map((e) => e.section_id).filter((id) => outIds.includes(id))).toEqual([])
     await expectCostUntouched(ctx.projectId, spine)
     expect(await exportedText(ctx.projectId, ctx.userId)).toContain("500 triệu")
+  }, 120000)
+
+  it("FLF-455: mục dự toán còn trống Ngoài phạm vi không bị cờ đỏ template_section_empty chặn baseline; mục riêng trống trong phạm vi thì vẫn bị", async () => {
+    const { ctx, structure } = await run(await templateWithCost(), "fixed")
+    const budget = structure.sections.find((s) => s.title.includes("Dự toán kinh phí"))!
+    expect(budget.status).toBe("out_of_scope")
+    await flagsService.recompute(ctx.projectId, { by: "test", ruleProfile: await ruleProfileOf(ctx.projectId) })
+    const spine = (await spineRepository.get(ctx.projectId))!
+    // Mục còn trống thật trong Spine (nếu không thì test không chứng minh gì)
+    expect(spine.custom_sections.some((c) => `custom:${c.id}` === budget.section_id)).toBe(true)
+    expect(spine.flags.filter((f) => !f.resolved_at && f.rule_id === "template_section_empty").map((f) => f.section_id)).not.toContain(budget.section_id)
+    // Nhãn tay in_scope: mục bị kiểm lại như mục trong phạm vi
+    await TemplateProfile.updateOne({ projectId: ctx.projectId, "target_structure.sections.section_id": budget.section_id }, { $set: { "target_structure.sections.$.status": "missing" } })
+    await flagsService.recompute(ctx.projectId, { by: "test", ruleProfile: await ruleProfileOf(ctx.projectId) })
+    const after = (await spineRepository.get(ctx.projectId))!
+    expect(after.flags.filter((f) => !f.resolved_at && f.rule_id === "template_section_empty").map((f) => f.section_id)).toContain(budget.section_id)
   }, 120000)
 
   it("chế độ 4: bổ sung theo mẫu chuẩn FlintFlow ⇒ mục dự toán vẫn Ngoài phạm vi, mục thiếu là mục của mẫu chuẩn", async () => {
