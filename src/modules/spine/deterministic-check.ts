@@ -204,6 +204,11 @@ export interface RuleProfile {
    * (đoạn in nguyên văn nhắc tới tên / mã phần tử đã đổi tên hay bị xoá so với lúc import). Không đặt ⇒ luật không chạy.
    */
   sectionSegments?: readonly SectionSegments[]
+  /**
+   * FLF-455 (BF nguyên tắc 4): mục riêng `custom:*` Ngoài phạm vi (`target_structure`, status `out_of_scope`) không bị kiểm — hai luật theo mục riêng
+   * (`template_section_empty`, `original_text_mentions_changed`) không bắn trên các mục này. Nhãn tay `in_scope` đã được so cấu trúc đích gỡ khỏi tập.
+   */
+  outOfScope?: ReadonlySet<string>
 }
 
 export interface CheckOptions {
@@ -961,6 +966,11 @@ const outsideTemplate = (c: FlagCandidate, layout: ReadonlySet<string> | undefin
   !!layout && !layout.has(c.section_id) &&
   ((SECTION_SCOPED_RULES.has(c.rule_id) && c.section_id.startsWith("fixed:")) ||
     (DIAGRAM_RULES.has(c.rule_id) && /^(fixed|function|feature):/.test(c.section_id)))
+
+/** FLF-455: cờ của luật theo mục riêng nằm trên mục Ngoài phạm vi ⇒ bỏ (không kiểm mục đó). */
+const OUT_OF_SCOPE_FILTERED_RULES: ReadonlySet<string> = new Set(["template_section_empty", "original_text_mentions_changed"])
+const inOutOfScopeSection = (c: FlagCandidate, outOfScope: ReadonlySet<string> | undefined): boolean =>
+  !!outOfScope?.size && OUT_OF_SCOPE_FILTERED_RULES.has(c.rule_id) && outOfScope.has(c.section_id)
 
 /** Mục riêng có chữ thật (không chỉ hướng dẫn / ô trống) hoặc có phần tử Spine qua slice. */
 const customSectionHasContent = (c: Spine["custom_sections"][number], filled: ReadonlySet<string>): boolean =>
@@ -1995,7 +2005,7 @@ export const runDeterministicCheck = (
       : []),
     ...(options.ruleProfile?.templateMissing?.size ? migrationMissing(spine, options.ruleProfile.templateMissing, options.ruleProfile.templateFilled, options.ruleProfile.templateHeadings) : []),
     ...(options.ruleProfile?.checkSectionReferences ? sectionReferencesAfterMigration(spine, options.ruleProfile.referenceBaseline) : [])
-  ].filter((c) => !outsideTemplate(c, options.ruleProfile?.templateLayout)), options.ruleProfile)
+  ].filter((c) => !outsideTemplate(c, options.ruleProfile?.templateLayout) && !inOutOfScopeSection(c, options.ruleProfile?.outOfScope)), options.ruleProfile)
 
   const index = buildIdIndex(spine)
   const seen = new Set<string>()
