@@ -441,6 +441,24 @@ router.get("/:projectId/change-requests/:crId/locations/:locId/diagram-preview.p
 
 /**
  * @swagger
+ * /api/v1/projects/{projectId}/change-requests/{crId}/document-diff:
+ *   get:
+ *     summary: "FLF-495 (#23b) — đề xuất của CR tô lên tài liệu: các mục có thay đổi, block đầy đủ của bản sau CR kèm `change` (chạy khô, chỉ đọc, không gọi AI, không vẽ hình)"
+ *     tags: [Change requests (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/Mode1ProjectId'
+ *       - $ref: '#/components/parameters/CrId'
+ *     responses:
+ *       200:
+ *         description: "{ cr_id, spine_version, change_count, sections[] } - mỗi mục { id, number, heading, level, change, blocks[] }; block { block, change, before?, location_id?, rows?, items? }"
+ *       404: { description: "Không thấy CR / dự án (SPINE_NOT_FOUND khi chưa có dữ liệu tài liệu)" }
+ */
+router.get("/:projectId/change-requests/:crId/document-diff", authMiddleware, crController.documentDiff)
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/change-requests/{crId}/locations/{locId}/owner-step-draft:
  *   post:
  *     summary: "Soạn lại đề xuất một vị trí theo hướng của BA (BPMN 3.9; phase 8: nút \"Sửa lại\" trong chat) — skill step sở hữu (nếu có), chỉ ghi đề xuất (manual = true); ready_to_submit ⇒ verifying"
