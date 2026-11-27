@@ -9,8 +9,8 @@ import { buildLayout } from "../import/step-plan.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { SectionSegments } from "../spine/segment-hash.js"
 import type { Spine } from "../spine/spine.types.js"
-import type { Block } from "./rendered-document.types.js"
-import { buildLayoutSections, customBlocks, mergeAdjacentTables, functionSourceHash, moveSectionsToEnd, numberSections, placeSections, repairFixedTemplateLayout, romanValue, type TemplateLayout, type TemplateLayoutEntry } from "./layout-sections.js"
+import type { Block, RenderedSection } from "./rendered-document.types.js"
+import { buildLayoutSections, customBlocks, mergeAdjacentTables, functionSourceHash, moveSectionsToEnd, numberSections, placeSections, renameHeadingRefs, repairFixedTemplateLayout, romanValue, type TemplateLayout, type TemplateLayoutEntry } from "./layout-sections.js"
 
 const entry = (order: number, heading_text: string, level: number, section_id: string): TemplateLayoutEntry => ({ order, heading_text, level, section_id })
 
@@ -572,6 +572,29 @@ describe("mẫu IEEE - nhiều heading cùng một section FPT (Reliability + Av
     // Spine trước, nguyên văn không trích được sau
     expect(text(availability.blocks)).toContain("Available 24/7")
     expect(text(availability.blocks).indexOf("Available 24/7")).toBeLessThan(text(availability.blocks).indexOf("See the vendor SLA."))
+  })
+
+  it("đổi mẫu chia theo từng phần tử: đoạn nguyên văn của mục chính còn chứa phần tử đã chia ⇒ mục dựng từ Spine, không in lặp", () => {
+    const sp: Spine = {
+      ...ieee(),
+      custom_sections: [
+        ...ieee().custom_sections,
+        { id: "CS-REL", heading: "", level: 3, source: "import", blocks: [{ kind: "table", text: "", rows: [["Yêu cầu"], ["Uptime 99.5% per month"], ["Available 24/7"]], image_ref: null }] }
+      ]
+    }
+    const original: SectionSegments = { section_id: "fixed:4.2.2", parts: [{ kind: "original", custom_id: "CS-REL", diagrams: [], mentions: [] }], known: [] }
+    const asSpinePart: SectionSegments = {
+      section_id: "fixed:4.2.2",
+      parts: [{ kind: "spine", items: ["nfrs:NFR-01", "nfrs:NFR-02"], source_hash: "h", blocks: [{ kind: "table", text: "", rows: [["Yêu cầu"], ["Uptime 99.5% per month"], ["Available 24/7"]], image_ref: null }], mentions: [] }],
+      known: []
+    }
+    for (const record of [original, asSpinePart]) {
+      const template = { ...layout([{ custom_id: "CS01", section_id: "fixed:4.2.2", items: ["nfrs:NFR-02"] }]), sectionSegments: [record] }
+      const { sections } = buildLayoutSections(sp, template, [], { diagramPng: () => undefined })
+      expect(text(sections.find((x) => x.id === "fixed:4.2.2")!.blocks)).toContain("Uptime 99.5% per month")
+      expect(text(sections.find((x) => x.id === "fixed:4.2.2")!.blocks)).not.toContain("Available 24/7")
+      expect(text(sections.find((x) => x.id === "custom:CS01")!.blocks)).toContain("Available 24/7")
+    }
   })
 
   it("phần tử đã xoá ⇒ heading lặp chỉ còn nguyên văn; import cũ chưa có slice ⇒ như trước (dồn lên lần đầu)", () => {
@@ -1168,5 +1191,27 @@ describe("FLF-468 (lát B) — vá bảng nguyên văn của file theo hàng, th
     ])
     // Không nhân đôi use case: đúng 2 hàng dữ liệu + 1 hàng tiêu đề
     expect(rows).toHaveLength(3)
+  })
+})
+
+describe("renameHeadingRefs — đổi mẫu đánh số lại heading", () => {
+  it("ô bảng / đoạn đúng bằng chữ heading cũ ⇒ chữ mới; chuỗi con không đổi", () => {
+    const sections: RenderedSection[] = [
+      {
+        id: "fixed:3.1.2",
+        number: "3.1.1",
+        heading: "Giao diện người dùng",
+        level: 3,
+        blocks: [
+          { type: "table", header: [[{ text: "Màn hình" }], [{ text: "Chức năng" }]], rows: [[[{ text: "SCR-01" }], [{ text: "3.2 Tài khoản và truy cập" }]], [[{ text: "SCR-02" }], [{ text: "Xem 3.2 Tài khoản và truy cập" }]]] },
+          { type: "paragraph", runs: [{ text: "3.3 Khám phá sản phẩm" }] }
+        ]
+      }
+    ]
+    renameHeadingRefs(sections, [{ from: "3.2 Tài khoản và truy cập", to: "3.2.1 Tài khoản và truy cập" }, { from: "3.3 Khám phá sản phẩm", to: "3.2.2 Khám phá sản phẩm" }])
+    const [table, para] = sections[0].blocks as [Extract<Block, { type: "table" }>, Extract<Block, { type: "paragraph" }>]
+    expect(table.rows[0][1]).toEqual([{ text: "3.2.1 Tài khoản và truy cập" }])
+    expect(table.rows[1][1]).toEqual([{ text: "Xem 3.2 Tài khoản và truy cập" }])
+    expect(para.runs).toEqual([{ text: "3.2.2 Khám phá sản phẩm" }])
   })
 })

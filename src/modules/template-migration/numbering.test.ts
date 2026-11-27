@@ -44,8 +44,17 @@ describe("renumberEntries — mẫu đánh số bằng chữ", () => {
       "3.3.1 Hiệu năng",
       "3.3.5 Khả năng quan sát",
       "3.3.6 Tính khả dụng",
-      "Mục tiêu"
+      // Heading cũ không số đứng sau anh em có số (con cuối của 3.3) ⇒ nhận số kế tiếp, không thành heading duy nhất không số
+      "3.3.7 Mục tiêu"
     ])
+  })
+
+  it("heading cũ không số: dưới heading cha chưa có con có số ⇒ giữ nguyên; phần tử (follower) không bao giờ thêm số", () => {
+    const { texts, changed, numbered } = renumberEntries([t("1.2 Phạm vi sản phẩm", 2), o("Mục tiêu", 3, "moved"), t("3.1 Giao diện bên ngoài", 2), t("3.1.3 Giao diện phần mềm", 3), o("Hệ thống bên ngoài", 3, "custom"), o("Kích hoạt chức năng", 3)], "text")
+    expect(texts).toEqual(["1.2 Phạm vi sản phẩm", "Mục tiêu", "3.1 Giao diện bên ngoài", "3.1.3 Giao diện phần mềm", "3.1.4 Hệ thống bên ngoài", "Kích hoạt chức năng"])
+    // Chỉ sửa chữ heading, không sửa ô / đoạn trùng tên trần
+    expect(changed.has("Hệ thống bên ngoài")).toBe(false)
+    expect(numbered.get("Hệ thống bên ngoài")).toBe("3.1.4 Hệ thống bên ngoài")
   })
 
   it("trả bảng chữ cũ ⇒ chữ mới chỉ cho heading đổi số", () => {

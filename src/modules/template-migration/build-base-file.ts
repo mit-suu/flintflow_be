@@ -15,7 +15,7 @@ import { DocxPackage, OoxmlError, readBlocks } from "../docx-ooxml/index.js"
 import { NS, insertAfter, isW, removeNode, wAll, wEl, wKid, wKids, wText } from "../docx-ooxml/xml.js"
 import { parseDocument } from "../import/parse.service.js"
 import type { RenderedDocument } from "../render/rendered-document.types.js"
-import { writeTemplateDocx } from "../render/template-docx-writer.js"
+import { layoutFailureReason, writeTemplateDocx, type SlotFailure } from "../render/template-docx-writer.js"
 import { columnIdentity, DROP_FROM_PRINT, RECORD_OF_CHANGES, isFreeTextSection, readChoice, type MigrationGroups } from "./classify.js"
 import { UNMAPPED_SECTION } from "../import/import.constants.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -23,7 +23,7 @@ import { isInstructionText, splitInstruction } from "../../shared/utils/instruct
 import { createTransplanter, enforceRelsAllowList, pruneUnreferencedParts, requestFieldUpdate, validateDocxStructure, widenTocLevels, type DroppedItem } from "./ooxml-transplant.js"
 import { wrapperKeys, type NewHeading, type OldHeading, type PairingResult } from "./pair-sections.js"
 import { numberingOfHeadings, renumberEntries, type HeadingNumbering } from "./numbering.js"
-import { overlapsOf } from "../import/content-slots.js"
+import { isPartialSlotOf, overlapsOf } from "../import/content-slots.js"
 import { targetsOf } from "../import/extract-targets.js"
 import { foldText, splitHeadingNumber } from "../import/text-similarity.js"
 
@@ -37,6 +37,17 @@ export interface BaseFileSource {
    * layout của profile. `null` = heading không thuộc mục nào (đi theo mục trước).
    */
   headingKeys: readonly (string | null)[]
+  /**
+   * Chữ heading cùng thứ tự với `headingKeys`. File có heading không nằm trong layout (heading con cùng mục với heading cha,
+   * import không ghi vào layout) ⇒ số heading lệch: ghép theo chữ, heading thừa của file đi theo mục trước.
+   */
+  headingTexts?: readonly string[]
+}
+
+/** File nền + heading của layout có chữ (heading rỗng là phần nối, không có trong file). */
+export const sourceOf = (buffer: Buffer, oldHeadings: readonly OldHeading[]): BaseFileSource => {
+  const named = oldHeadings.filter((h) => h.heading_text.trim())
+  return { buffer, headingKeys: named.map((h) => h.key), headingTexts: named.map((h) => h.heading_text) }
 }
 
 /** Dựng bản in từ Spine cho các mục của mẫu đích (id mục = `section_id` của heading mẫu đích / mục riêng). */
@@ -103,6 +114,17 @@ export interface BuildBaseFileResult {
   warnings: string[]
   /** Đã dựng lại toàn file từ Spine vì kết quả chép khối không qua kiểm cấu trúc. */
   fellBackToSpine: boolean
+  /**
+   * Mục có dữ liệu Spine mà không ghi được vào file (bộ dựng từ Spine lỗi / writer không điền được slot): file nền chỉ còn chữ
+   * hướng dẫn ở đó. Bước áp dụng chặn khi mảng này khác rỗng — lưu file như vậy thì bản xuất in mục rỗng mà không ai biết.
+   */
+  unwritten: UnwrittenSection[]
+}
+
+export interface UnwrittenSection {
+  section_id: string
+  heading: string
+  reason: string
 }
 
 export class BuildBaseFileError extends Error {
@@ -265,6 +287,27 @@ const relatedIds = (a: string, b: string): boolean => a === b || overlapsOf(a).i
 /** `new_key` của mục thiếu theo cặp mà Spine có dữ liệu để in. */
 const filledKeys = (groups: MigrationGroups): Set<string> => new Set(groups.missing.filter((m) => m.filled_from_spine).map((m) => m.new_key))
 
+/**
+ * `section_id` mà layout đã đặt dữ liệu của tài liệu cũ vào (mục có cặp, phần gộp — kể cả phần gộp bỏ qua vì mục đích đã in dữ liệu
+ * đó từ Spine —, mục riêng giữ lại). Heading khác của mẫu cùng id không mang id đó nữa (không in lại dữ liệu ấy).
+ */
+const placedSectionIds = (input: PlanInput, byNew: ReadonlyMap<string, readonly Placement[]>, customs: readonly CustomPlan[]): Set<string> => {
+  const oldSection = new Map(input.oldHeadings.map((h) => [h.key, h.section_id]))
+  const ids = new Set<string>()
+  for (const heading of input.targetHeadings) {
+    for (const p of byNew.get(heading.key) ?? []) {
+      // Phần gộp bỏ qua vì mục đích đã in đúng dữ liệu đó từ Spine: dữ liệu vẫn có chỗ (ở mục đích)
+      const id = !p.moved && heading.section_id !== UNMAPPED_SECTION ? heading.section_id : oldSection.get(p.oldKey)
+      if (id && id !== UNMAPPED_SECTION) ids.add(id)
+    }
+  }
+  for (const c of customs) {
+    const id = oldSection.get(c.oldKey)
+    if (id && id !== UNMAPPED_SECTION) ids.add(id)
+  }
+  return ids
+}
+
 const planOf = (input: PlanInput): { byNew: Map<string, Placement[]>; customs: CustomPlan[]; removed: { oldKey: string; reason: string }[]; records: string[] } => {
   const decision = new Map(input.decisions.map((d) => [d.id, readChoice(input.groups, d.id, d.choice)]))
   const conflictsOf = new Map<string, MigrationGroups["conflict"]>()
@@ -410,6 +453,8 @@ export interface PlannedLayout {
   newCustoms: { section_id: string; heading_text: string; level: number }[]
   /** Chữ heading cũ ⇒ chữ mới của heading đã đánh số lại (sửa tham chiếu chéo nguyên ô / nguyên đoạn trong file). */
   renumbered: Map<string, string>
+  /** Heading cũ không số vừa nhận số vì đứng giữa anh em có số (chỉ sửa chữ heading của file, không sửa ô / đoạn trùng chữ). */
+  numbered?: Map<string, string>
   /**
    * Chia theo phần tử: heading lặp lại một mục (vd "3.3.4 Tính sẵn sàng" của 4.2.2) là mục riêng trống + lát phần tử in dưới nó
    * (`profile.section_slices`, `nfrs:NFR-06`); heading đầu của mục in phần còn lại.
@@ -445,6 +490,11 @@ export const planLayout = (input: PlanInput, nextCustomId: () => string): Planne
   /** Độ lệch cấp của từng mục cũ đã đặt (cấp nơi đặt − cấp cũ) — phần tử / mục riêng đi theo nó dịch cùng độ lệch, như `buildOnce`. */
   const shiftOf = new Map<string, number>()
 
+  // Nhiều heading của mẫu cùng một `section_id` (3.1.2 / 3.1.3 cùng `fixed:4.1`, 3.4 / 3.5.x cùng `fixed:5.4`): id thuộc heading có cặp
+  // (heading BA chọn cho mục bị tách), không có cặp thì thuộc heading đầu. Heading còn lại mang id đó thì bản in đặt dữ liệu vào heading
+  // đứng trước (renderer / writer lấy lần đầu của id) — sai chỗ BA đã chọn.
+  const ownedIds = snapshot ? new Set<string>() : placedSectionIds(input, byNew, customs)
+
   targetHeadings.forEach((heading, i) => {
     const all = byNew.get(heading.key) ?? []
     const pairPl = all.filter((p) => !p.moved)
@@ -455,16 +505,19 @@ export const planLayout = (input: PlanInput, nextCustomId: () => string): Planne
       if (merged.has(heading.key) && !movedPl.length) return
       if (!(pairing.ignored_new.includes(heading.key) && suppressExamples)) {
         // Bản chụp: heading là của chính file cũ (đã có id mục thật), không phải mục thiếu của mẫu
-        const unmapped = heading.section_id === UNMAPPED_SECTION && !snapshot
+        const shared = !snapshot && heading.section_id !== UNMAPPED_SECTION && ownedIds.has(heading.section_id)
+        const unmapped = (heading.section_id === UNMAPPED_SECTION && !snapshot) || shared
+        if (!unmapped && !snapshot && heading.section_id !== UNMAPPED_SECTION) ownedIds.add(heading.section_id)
         const id = unmapped ? `custom:${nextCustomId()}` : heading.section_id
         if (unmapped) newCustoms.push({ section_id: id, heading_text: heading.heading_text, level })
-        const fromSpine = filled.has(heading.key)
+        const fromSpine = !shared && filled.has(heading.key)
         slots[i].head.push({ heading_text: heading.heading_text, level, section_id: id, kind: "target", new_key: heading.key, old_key: null, missing: !movedPl.length && !snapshot && !fromSpine, guidance: heading.guidance ?? null, ...(fromSpine ? { from_spine: true as const } : {}) })
       }
     } else {
       const first = oldByKey.get(pairPl[0].oldKey)
-      // Heading mẫu đích có `section_id` thì giữ; mục riêng của mẫu ghép với mục cũ thì mang id của mục cũ (dữ liệu nằm ở đó)
-      const id = heading.section_id === UNMAPPED_SECTION ? (first?.section_id ?? heading.section_id) : heading.section_id
+      // Heading mẫu đích có `section_id` thì giữ; mục riêng của mẫu ghép với mục cũ thì mang id của mục cũ (dữ liệu nằm ở đó). Heading
+      // của mẫu chỉ là một phần của mục cũ (3.3.2 Bảo mật ↔ 5.2 Yêu cầu chung) ⇒ mang id mục cũ: in đủ dữ liệu, không chỉ phần bảo mật
+      const id = heading.section_id === UNMAPPED_SECTION || (first && isPartialSlotOf(heading.section_id, first.section_id)) ? (first?.section_id ?? heading.section_id) : heading.section_id
       const split = pairPl.find((p) => p.items)
       let sectionId = id
       if (split && !split.primary && !snapshot && first) {
@@ -540,8 +593,8 @@ export const planLayout = (input: PlanInput, nextCustomId: () => string): Planne
     }
   }
   const entries = [...slots.flatMap((s) => [...s.head, ...s.custom, ...s.after, ...mergedOf(s.merged)]), ...tail]
-  const { texts, changed } = renumberEntries(entries, numberingFor(input))
-  return { entries: entries.map((e, i) => (texts[i] === e.heading_text ? e : { ...e, heading_text: texts[i] })), newCustoms, renumbered: changed, slices }
+  const { texts, changed, numbered } = renumberEntries(entries, numberingFor(input))
+  return { entries: entries.map((e, i) => (texts[i] === e.heading_text ? e : { ...e, heading_text: texts[i] })), newCustoms, renumbered: changed, numbered, slices }
 }
 
 /** Phần gộp của heading sâu hơn đứng trước phần gộp của heading nhóm chứa nó (cùng chỗ cuối cây con); cùng cấp giữ thứ tự tài liệu cũ. */
@@ -587,15 +640,43 @@ interface SourceView {
   runRegion: (keys: ReadonlySet<string>, first: string) => Element[] | null
 }
 
+/**
+ * Heading của file ⇒ `old_key` khi số heading lệch layout: đi theo thứ tự, mỗi heading của layout nhận heading đầu tiên còn lại
+ * của file có cùng chữ (bỏ dấu, bỏ số). Heading của file không ghép được ⇒ `null` (thân của nó thuộc mục đứng trước — đúng như
+ * import đã gộp heading con vào mục cha). Heading của layout không có trong file ⇒ mục đó không có vùng chép (dựng từ Spine, cờ
+ * vàng). Không có `headingTexts`, hoặc không quá nửa heading của layout tìm thấy ⇒ `null` (file không cùng layout).
+ */
+export const alignHeadingKeys = (fileTexts: readonly string[], source: Pick<BaseFileSource, "headingKeys" | "headingTexts">): (string | null)[] | null => {
+  const texts = source.headingTexts
+  if (!texts || texts.length !== source.headingKeys.length) return null
+  const fold = (t: string): string => foldText(t)
+  const title = (t: string): string => foldText(splitHeadingNumber(t).title)
+  const keys: (string | null)[] = fileTexts.map(() => null)
+  let at = 0
+  let matched = 0
+  for (let j = 0; j < texts.length; j++) {
+    const want = fold(texts[j])
+    const wantTitle = title(texts[j])
+    let i = fileTexts.findIndex((t, k) => k >= at && fold(t) === want)
+    if (i < 0) i = fileTexts.findIndex((t, k) => k >= at && title(t) === wantTitle)
+    if (i < 0) continue
+    keys[i] = source.headingKeys[j]
+    at = i + 1
+    matched++
+  }
+  return matched * 2 > texts.length ? keys : null
+}
+
 /** `anchorKeys`: heading làm ranh giới vùng chép (mục khung / mục riêng + phần tử đã dời theo mục cha). */
 const loadSource = async (source: BaseFileSource, anchorKeys: ReadonlySet<string>): Promise<{ view: SourceView | null; warning?: string }> => {
   const pkg = await DocxPackage.load(source.buffer)
   const headings = (await readBlocks(pkg)).filter((b) => b.kind === "heading" && b.level !== null && !b.tail)
-  if (headings.length !== source.headingKeys.length) return { view: null, warning: "Số heading của file nền không khớp layout: dựng toàn bộ từ Spine" }
+  const keys = headings.length === source.headingKeys.length ? source.headingKeys : alignHeadingKeys(headings.map((h) => h.text), source)
+  if (!keys) return { view: null, warning: "Số heading của file nền không khớp layout: dựng toàn bộ từ Spine" }
   const headingEl = new Map<string, Element>()
   const keyOfEl = new Map<Element, string | null>()
   headings.forEach((h, i) => {
-    const key = source.headingKeys[i]
+    const key = keys[i]
     keyOfEl.set(h.element, key)
     if (key && !headingEl.has(key)) headingEl.set(key, h.element)
   })
@@ -617,7 +698,9 @@ const loadSource = async (source: BaseFileSource, anchorKeys: ReadonlySet<string
     }).filter((n) => !isLayoutOnly(n))
     return [el, ...rest]
   }
-  return { view: { pkg, headingEl, region, runRegion } }
+  const missing = source.headingKeys.filter((k) => k && !headingEl.has(k)).length
+  const view = { pkg, headingEl, region, runRegion }
+  return missing ? { view, warning: `${missing} heading của layout không tìm thấy trong file nền: các mục đó dựng từ Spine` } : { view }
 }
 
 const mergeDropped = (all: DroppedItem[], more: readonly DroppedItem[]): void => {
@@ -761,8 +844,18 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
   // Một môi trường chép cho cả lượt dựng: numId / ảnh / rels dùng chung giữa các mục, bộ đếm id liên tục
   const transplanter = view ? await createTransplanter(view.pkg, tgt) : null
   const oldByKey = new Map(input.oldHeadings.map((h) => [h.key, h]))
-  /** Id mục của heading mẫu đích như `planLayout`: heading riêng của mẫu (`unmapped`) đã có cặp mang id của mục cũ ghép vào nó. */
+  let planned = 0
+  const plan = input.plannedLayout ?? planLayout(input, () => `build${++planned}`)
+  const layoutIdOfKey = new Map<string, string>()
+  for (const e of plan.entries) if (e.kind === "target" && e.new_key && !layoutIdOfKey.has(e.new_key)) layoutIdOfKey.set(e.new_key, e.section_id)
+  /**
+   * Id mục của heading mẫu đích theo layout: heading riêng của mẫu (`unmapped`) đã có cặp mang id của mục cũ ghép vào nó; heading
+   * dùng chung `section_id` với heading BA chọn cho mục bị tách mang id mục riêng trống (`planLayout`) — writer không đặt dữ liệu
+   * vào heading đứng trước.
+   */
   const pairedSectionId = (h: NewHeading): string => {
+    const fromLayout = layoutIdOfKey.get(h.key)
+    if (fromLayout) return fromLayout
     if (h.section_id !== UNMAPPED_SECTION) return h.section_id
     const pl = (byNew.get(h.key) ?? []).find((p) => !p.moved)
     return pl ? (oldByKey.get(pl.oldKey)?.section_id ?? h.section_id) : h.section_id
@@ -875,8 +968,9 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
           for (const n of guidanceBefore) removeNode(n)
           removeNode(el)
           report({ ...base, key: heading.key, old_key: null, mode: "removed", reason: "Heading con cùng mục với heading cha: gộp vào mục cha" })
-        } else if (filled.has(heading.key)) {
-          // Mục thiếu theo cặp nhưng Spine có dữ liệu (tầm nhìn, giả định…): in từ Spine như workspace, không chỉ chữ hướng dẫn
+        } else if (filled.has(heading.key) && pairedSectionId(heading) === heading.section_id) {
+          // Mục thiếu theo cặp nhưng Spine có dữ liệu (tầm nhìn, giả định…): in từ Spine như workspace, không chỉ chữ hướng dẫn.
+          // Heading dùng chung id với heading khác đã nhận dữ liệu (layout cấp mục riêng trống) thì không in lại
           const r = report({ ...base, key: heading.key, old_key: null, mode: "spine", reason: "Mục in từ dữ liệu Spine" })
           spineSlots.push({ el, sectionId: heading.section_id, report: r })
         } else if (!movedPl.length) {
@@ -1109,8 +1203,7 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
   // Đánh số lại heading đến từ tài liệu cũ theo layout (mẫu đánh số bằng chữ): heading đã chép giữ chữ cũ ⇒ ghi số mới; ô / đoạn có chữ
   // đúng bằng chữ heading cũ (bảng "Chức năng" của mô tả màn hình) đổi theo. Chỉ thay nguyên ô / nguyên đoạn, không thay chuỗi con.
   if (!input.targetIsSnapshot) {
-    const plan = input.plannedLayout ?? planLayout(input, () => "renumber")
-    if (plan.renumbered.size) {
+    if (plan.renumbered.size || plan.numbered?.size) {
       const live = (await readBlocks(tgt)).filter((b) => b.kind === "heading" && b.level !== null && !b.tail)
       const titleKey = (text: string): string => foldText(splitHeadingNumber(text).title)
       let at = 0
@@ -1120,7 +1213,7 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
         if (idx < 0) continue
         at = idx + 1
         const current = paragraphText(live[idx].element).trim()
-        if (current !== e.heading_text && plan.renumbered.get(current) === e.heading_text) setParagraphText(live[idx].element, e.heading_text)
+        if (current !== e.heading_text && (plan.renumbered.get(current) === e.heading_text || plan.numbered?.get(current) === e.heading_text)) setParagraphText(live[idx].element, e.heading_text)
       }
       const headingSet = new Set(live.map((b) => b.element))
       for (const p of wAll(bodyEl, "p")) {
@@ -1138,6 +1231,14 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
       s.report.reason = `${s.report.reason ?? ""} (${reason})`.trim()
     }
   }
+  const unwritten: UnwrittenSection[] = []
+  const headingOfSlot = (s: (typeof spineSlots)[number]): string => paragraphText(s.el).trim()
+  /** Mục dựng từ Spine không ghi được: cờ vàng kèm lý do; mục có dữ liệu (hoặc chưa biết vì bộ dựng lỗi) ⇒ `unwritten`. */
+  const failSlot = (s: (typeof spineSlots)[number], reason: string, hasData: boolean): void => {
+    s.report.flag = "yellow"
+    s.report.reason = `${s.report.reason ?? ""} (dựng từ Spine lỗi: ${reason})`.trim()
+    if (hasData && !unwritten.some((u) => u.section_id === s.sectionId)) unwritten.push({ section_id: s.sectionId, heading: headingOfSlot(s), reason })
+  }
   let doc: RenderedDocument | null = null
   if (spineSlots.length) {
     if (!input.renderFromSpine) flagSpine("chưa có bộ dựng từ Spine")
@@ -1145,9 +1246,9 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
       try {
         doc = await input.renderFromSpine(spineSlots.map((s) => s.sectionId))
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        console.error("[BuildBaseFile] dựng bản in từ Spine lỗi:", message)
-        flagSpine(`dựng từ Spine lỗi: ${message}`)
+        const reason = layoutFailureReason(err)
+        console.error("[BuildBaseFile] dựng bản in từ Spine lỗi:", reason)
+        for (const s of spineSlots) failSlot(s, reason, true)
       }
     }
   }
@@ -1176,15 +1277,26 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
       ]
       const spineIds = new Set(spineSlots.map((s) => s.sectionId))
       const rocFromFile = reports.some((r) => r.section_id === RECORD_OF_CHANGES && (r.mode === "transplant" || r.mode === "table_mapped"))
+      // Chịu lỗi theo mục: một mục không điền được không làm cả file chỉ còn khung mẫu
+      const failures: SlotFailure[] = []
       buffer = await writeTemplateDocx(doc, buffer, headingMap, [], {
         keepSource: new Set(doc.sections.map((s) => s.id).filter((id) => !spineIds.has(id))),
         // Dòng lịch sử đã có trong bảng (chép từ file nền hoặc vừa ghi ở trên) ⇒ writer không nối thêm
-        legacyRecordCount: rocFromFile ? (input.legacyRecordCount ?? doc.recordOfChanges.length) : doc.recordOfChanges.length
+        legacyRecordCount: rocFromFile ? (input.legacyRecordCount ?? doc.recordOfChanges.length) : doc.recordOfChanges.length,
+        failures
       })
+      const printed = new Map(doc.sections.map((s) => [s.id, s]))
+      for (const f of failures) {
+        console.error(`[BuildBaseFile] điền mục ${f.section_id} từ Spine lỗi:`, f.reason)
+        const slot = spineSlots.find((s) => s.sectionId === f.section_id)
+        const hasData = !!printed.get(f.section_id)?.blocks.length
+        if (slot) failSlot(slot, f.reason, hasData)
+        else if (hasData && !unwritten.some((u) => u.section_id === f.section_id)) unwritten.push({ section_id: f.section_id, heading: printed.get(f.section_id)?.heading ?? f.section_id, reason: f.reason })
+      }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      console.error("[BuildBaseFile] điền mục từ Spine lỗi:", message)
-      flagSpine(`dựng từ Spine lỗi: ${message}`)
+      const reason = layoutFailureReason(err)
+      console.error("[BuildBaseFile] điền mục từ Spine lỗi:", reason)
+      for (const s of spineSlots) failSlot(s, reason, !!doc.sections.find((x) => x.id === s.sectionId)?.blocks.length)
     }
   }
 
@@ -1193,10 +1305,10 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
   mergeDropped(dropped, await enforceRelsAllowList(finalPkg))
   await pruneUnreferencedParts(finalPkg)
   // Mục lục của mẫu giới hạn cấp ⇒ nới tới cấp heading sâu nhất của layout mới (tên chức năng ở cấp 4 vào mục lục)
-  if (!input.targetIsSnapshot) await widenTocLevels(finalPkg, Math.max(0, ...(input.plannedLayout ?? planLayout(input, () => "toc")).entries.filter((e) => e.heading_text.trim()).map((e) => e.level)))
+  if (!input.targetIsSnapshot) await widenTocLevels(finalPkg, Math.max(0, ...plan.entries.filter((e) => e.heading_text.trim()).map((e) => e.level)))
   // Mục lục chép theo file mẫu là mục lục của mẫu ⇒ yêu cầu Word dựng lại khi mở
   await requestFieldUpdate(finalPkg)
   const out = await finalPkg.toBuffer()
   const problems = (await validateDocxStructure(await DocxPackage.load(out))).filter((p) => !baseline.has(p))
-  return { buffer: out, sections: reports, dropped, problems, warnings, fellBackToSpine: false, refs }
+  return { buffer: out, sections: reports, dropped, problems, warnings, fellBackToSpine: false, unwritten, refs }
 }

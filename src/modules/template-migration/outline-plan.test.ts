@@ -68,6 +68,46 @@ describe("planLayout — golden ChoViet ⇒ jam01", () => {
   it("bảng chữ cũ ⇒ chữ mới để sửa tham chiếu chéo", () => {
     expect(layout.renumbered.get("3.2 Tài khoản và truy cập")).toBe("3.2.1 Tài khoản và truy cập")
   })
+
+  it("mục bị tách đặt vào heading thứ hai: heading anh em cùng id không giữ id đó (dữ liệu không in vào heading đứng trước)", () => {
+    expect(row("3.1.3 Giao diện phần mềm")).toMatchObject({ section_id: "fixed:4.1", old_key: "o39" })
+    expect(row("3.1.2 Giao diện phần cứng")?.section_id).toMatch(/^custom:/)
+    expect(layout.entries.filter((e) => e.section_id === "fixed:4.1")).toHaveLength(1)
+  })
+
+  it("5.2 Yêu cầu chung ghép chồng lấn với 3.3.2 Bảo mật (chỉ một phần của 5.2): có thẻ hỏi BA, giữ cặp thì in đủ mục 5.2", () => {
+    const { groups } = setup()
+    expect(groups.conflict.find((c) => c.id === "c:placement:o47")).toMatchObject({ kind: "placement", suggested: "keep_pair", confidence: "guess" })
+    expect(row("3.3.2 Bảo mật")).toMatchObject({ section_id: "fixed:5.2", old_key: "o47" })
+  })
+
+  it("heading nhóm cũ chỉ là khung không ghép theo chữ gần giống: '2 Yêu cầu người dùng' không thành cặp với '3. Yêu cầu'", () => {
+    const { pairing, groups } = setup()
+    expect(pairing.pairs.find((p) => p.old_key === "o8")?.new_key).toBeNull()
+    expect(groups.structure_only_dropped).toContain("o8")
+    expect(groups.matched.some((m) => m.old_key === "o8")).toBe(false)
+  })
+
+  it("Yêu cầu khác đã in ở 2.5 từ Spine: 3.4 / 3.5.x cùng id fixed:5.4 không nhận lại dữ liệu đó", () => {
+    expect(layout.entries.filter((e) => e.section_id === "fixed:5.4")).toHaveLength(0)
+  })
+})
+
+describe("planLayout — ChoViet ⇒ jam01 theo lựa chọn của lần đổi mẫu tay 27/11", () => {
+  const base = setup()
+  const choose = (id: string, choice: string) => [...base.decisions.filter((d) => d.id !== id), { id, choice }]
+  const layoutOf = (decisions: { id: string; choice: string }[]) => {
+    let n = 0
+    return planLayout({ ...base.input, decisions }, () => `M${n++}`)
+  }
+  const rowOf = (layout: ReturnType<typeof layoutOf>, text: string) => layout.entries.find((e) => e.heading_text === text)
+
+  it("5.4 Yêu cầu khác ⇒ 3.5.8 Thời hạn: chỉ 3.5.8 mang fixed:5.4, 3.4 (heading đầu cùng id) không nhận dữ liệu", () => {
+    const layout = layoutOf(choose("c:placement:o49", "move_to:n34"))
+    expect(rowOf(layout, "3.5.8 Thời hạn")).toMatchObject({ section_id: "fixed:5.4", old_key: "o49" })
+    expect(layout.entries.filter((e) => e.section_id === "fixed:5.4")).toHaveLength(1)
+    expect(rowOf(layout, "3.4 Tuân thủ")?.section_id).toMatch(/^custom:/)
+  })
 })
 
 describe("buildOutline đọc từ kế hoạch", () => {

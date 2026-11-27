@@ -722,7 +722,7 @@ export const isExistingSrs = (project: { mode?: string | null; start_kind?: stri
 export const loadTemplateLayout: TemplateLoader = async (projectId) => {
   const profile = (await TemplateProfile.findOne(
     { projectId },
-    { layout: 1, language: 1, template_family: 1, legacy_record_of_changes: 1, non_screen_table: 1, function_originals: 1, section_slices: 1, section_segments: 1, print_suppressed: 1, target_structure: 1, flow2_entry_at: 1, layout_confirmed_at: 1, layout_confirmed_signature: 1, "structure_preview.summary.kind": 1 },
+    { layout: 1, language: 1, template_family: 1, legacy_record_of_changes: 1, non_screen_table: 1, function_originals: 1, section_slices: 1, section_segments: 1, print_suppressed: 1, heading_renames: 1, target_structure: 1, flow2_entry_at: 1, layout_confirmed_at: 1, layout_confirmed_signature: 1, "structure_preview.summary.kind": 1 },
     { lean: true }
   )) as
     | {
@@ -735,6 +735,7 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
         section_slices?: TemplateLayout["sectionSlices"]
         section_segments?: TemplateLayout["sectionSegments"]
         print_suppressed?: string[]
+        heading_renames?: { from: string; to: string }[]
         target_structure?: { sections?: { section_id: string; status: string }[]; resolved_mode?: number | null } | null
         flow2_entry_at?: Date | null
         layout_confirmed_at?: Date | null
@@ -771,6 +772,7 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
     ...(mockups.length ? { screenMockups: mockups } : {}),
     ...(profile.section_slices?.length ? { sectionSlices: profile.section_slices } : {}),
     ...(profile.print_suppressed?.length ? { printSuppressed: profile.print_suppressed } : {}),
+    ...(profile.heading_renames?.length ? { headingRenames: profile.heading_renames } : {}),
     // FLF-366: import trước khi có đoạn nguyên văn ⇒ không truyền, bản in như cũ
     ...(profile.section_segments?.length ? { sectionSegments: profile.section_segments } : {})
   }

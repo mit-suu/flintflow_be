@@ -183,6 +183,16 @@ describe("gợi ý Chuyển vào theo nghĩa (place-score)", () => {
     expect(settleDecisions(groups, []).undecided).toEqual(["e:slot:security"])
   })
 
+  it("mục hợp nhất cần AI (mục chữ tự do ⇒ mục có cấu trúc) ⇒ không chọn sẵn, lý do nói đúng là cần AI (không phải 'không mục nào hợp')", () => {
+    const old2 = [old("group:4.2", "4.2 Quality Attributes", 2), old("custom:CS02", "Security notes", 3)]
+    const pairing = pairSections(old2, baseNew)
+    const groups = classify({ old: old2, neu: baseNew, pairing, oldData: new Map([["custom:CS02", { size: 5, sample: "Security requirements: authentication, encryption at rest" }]]) })
+    const item = groups.extra.find((e) => e.id === "e:custom:CS02")!
+    expect(item.ai_choices).toContain("move_to:n1")
+    expect(item).toMatchObject({ suggested: "keep_custom", suggested_reason: "needs_ai", confidence: "guess" })
+    expect(item.targets?.[0]).toMatchObject({ new_key: "n1" })
+  })
+
   it("khác nhóm cha vẫn gợi ý được (nghĩa quyết định, không phải vị trí)", () => {
     const { groups } = run(baseOld, [neu(0, "4.2 Quality Attributes", "group:4.2", 2), neu(2, "5 Appendix", "group:5", 2), neu(1, "5.9 Security requirements", "fixed:4.2.4", 3)])
     expect(groups.extra[0]).toMatchObject({ suggested: "move_to:n1" })

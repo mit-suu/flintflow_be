@@ -136,6 +136,8 @@ export interface TemplateLayout {
   sectionSlices?: readonly SectionSliceView[]
   /** Đổi mẫu: mục BA chọn "Không in ra" — coi như đã có chỗ, phần dữ liệu của nó không in ngầm vào mục chứa (Phạm vi in mục tiêu). */
   printSuppressed?: readonly string[]
+  /** Đổi mẫu: chữ heading cũ ⇒ chữ mới (đánh số lại) — ô bảng / đoạn đúng bằng chữ cũ in chữ mới (`TemplateProfile.heading_renames`). */
+  headingRenames?: readonly { from: string; to: string }[]
   /**
    * Mẫu bắt buộc (`Project.template_intent = fixed`, chế độ 3 — business-flow 2.10): chỉ in đúng các mục của mẫu, **không
    * chèn** heading FlintFlow mẫu không có. Dữ liệu chức năng in trong bảng của mục chức năng gốc;
@@ -876,6 +878,25 @@ const patchTableInBlocks = (
   return blockFromRows(result.rows)
 }
 
+/**
+ * Đổi mẫu đánh số lại heading: ô bảng / đoạn có chữ đúng bằng chữ heading cũ (bảng màn hình nguyên văn ghi "3.2 Tài khoản và truy cập")
+ * đổi sang chữ mới. Chỉ thay nguyên ô / nguyên đoạn, không thay chuỗi con (như bước dựng file nền).
+ */
+export const renameHeadingRefs = (sections: RenderedSection[], renames: readonly { from: string; to: string }[]): void => {
+  const to = new Map(renames.map((r) => [r.from.trim(), r.to]))
+  const swap = (runs: InlineRun[]): InlineRun[] => {
+    const next = to.get(runs.map((r) => r.text).join("").trim())
+    return next ? [{ ...runs[0], text: next }] : runs
+  }
+  for (const section of sections) {
+    section.blocks = section.blocks.map((b) => {
+      if (b.type === "table") return { ...b, rows: b.rows.map((row) => row.map((cell) => (cell.length ? swap(cell) : cell))) }
+      if (b.type === "paragraph" && b.runs.length) return { ...b, runs: swap(b.runs) }
+      return b
+    })
+  }
+}
+
 export const buildLayoutSections = (
   spine: Spine,
   template: TemplateLayout,
@@ -1001,6 +1022,25 @@ export const buildLayoutSections = (
     }
     flush()
     return out
+  }
+  /** Chữ chính của phần tử `<mảng>:<id>` (statement / text / description / name) — để nhận phần tử trong đoạn nguyên văn. */
+  const itemTextOf = (key: string): string | null => {
+    const [array, id] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)]
+    const list = (spine as unknown as Record<string, unknown>)[array]
+    const item = Array.isArray(list) ? (list as Record<string, unknown>[]).find((x) => x && x.id === id) : undefined
+    const text = item ? [item.statement, item.text, item.description, item.name].find((v): v is string => typeof v === "string" && !!v.trim()) : undefined
+    return text ?? null
+  }
+  const squash = (s: string): string => s.normalize("NFC").toLowerCase().replace(/\s+/g, " ").trim()
+  /** Đoạn của mục có in phần tử `keys` không: đoạn Spine ghi mã phần tử; đoạn nguyên văn so theo chữ của phần tử. */
+  const segmentRepeats = (record: SectionSegments, keys: ReadonlySet<string>): boolean => {
+    const texts = [...keys].map(itemTextOf).filter((t): t is string => !!t && t.trim().length >= 8).map(squash)
+    return record.parts.some((p) => {
+      if (p.kind === "spine") return p.items.some((k) => keys.has(k))
+      if (p.kind !== "original" || !texts.length) return false
+      const body = squash((customById.get(`${CUSTOM_PREFIX}${p.custom_id}`)?.blocks ?? []).map((b) => [b.text, ...(b.rows ?? []).flat()].join(" ")).join(" "))
+      return texts.some((t) => body.includes(t))
+    })
   }
   const fromOriginal = new Set<RenderedSection>()
   // Mẫu IEEE: phần tử của heading lặp in dưới heading đó; lần đầu của section bỏ chúng
@@ -1263,7 +1303,11 @@ export const buildLayoutSections = (
     }
     const taken = claimed.get(n.section_id)
     const section = renderSection(taken ? filterSliceItems(contentSpine, taken, false) : contentSpine, n.section_id, contextFor(n.section_id, n.number))
-    const record = segmentsOf.get(n.section_id)
+    // Đổi mẫu "chia theo từng phần tử": phần tử đã chia sang heading khác (lát của mục) mà đoạn nguyên văn của mục vẫn chứa ⇒ in
+    // nguyên văn là lặp phần tử đó (3.3.3 Độ tin cậy vẫn in dòng 99,9 % đã chia sang 3.3.4) — mục dựng từ Spine, bỏ phần tử đã chia
+    const sliced = claimedBy.get(n.section_id)
+    const segment = segmentsOf.get(n.section_id)
+    const record = segment && sliced && segmentRepeats(segment, sliced) ? undefined : segment
     if (record) {
       const blocks = segmentBlocks(record, n)
       // Mục chưa có dữ liệu ⇒ chữ hướng dẫn của mẫu (FLF-364 câu 10), như mục không chia đoạn
@@ -1305,5 +1349,6 @@ export const buildLayoutSections = (
       return renderSection(contentSpine, id, contextFor(id, "")).blocks.length > 0
     })
     : undefined
+  if (template.headingRenames?.length) renameHeadingRefs(out, template.headingRenames)
   return { sections: opts.partial ? out.filter((x) => !(emptyUntilMerged.has(x) && x.blocks.length === 0)) : out, numbers, titles, ...(omittedSectionIds ? { omittedSectionIds } : {}) }
 }

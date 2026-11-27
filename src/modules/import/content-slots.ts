@@ -69,6 +69,13 @@ export const overlapsOf = (id: string): string[] => {
   return CONTENT_SLOTS.filter((s) => s.parents.includes(id)).map((s) => s.id)
 }
 
+/**
+ * `slotId` chỉ là **một phần** dữ liệu của `parentId` (5.2 Yêu cầu chung có Bảo mật và Bản địa hoá; 5.4 có Giả định, Rủi ro, Câu hỏi
+ * mở): mục cũ `parentId` đặt vào heading `slotId` mà in theo id slot thì mất phần còn lại. Slot duy nhất của mục cha (5.1 ↔ Quy tắc
+ * nghiệp vụ) là cả mục, không tính.
+ */
+export const isPartialSlotOf = (slotId: string, parentId: string): boolean => slotId !== parentId && slotParents(slotId).includes(parentId) && overlapsOf(parentId).length > 1
+
 /** Cặp (mục FPT, slot) cùng có heading trong mapping ⇒ nội dung in hai lần. */
 export const slotOverlaps = (sectionIds: Iterable<string>): [string, string][] => {
   const used = new Set(sectionIds)

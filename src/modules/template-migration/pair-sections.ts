@@ -257,6 +257,9 @@ export const pairSections = (old: readonly OldHeading[], neu: readonly NewHeadin
   oldLeft.forEach((o, oi) =>
     newLeft.forEach((n, ni) => {
       if (isFrameworkId(o.section_id) && isFrameworkId(n.section_id)) return
+      // Heading nhóm cũ chỉ là khung (mục con đi chỗ khác): ghép theo chữ gần giống ("2 Yêu cầu người dùng" ↔ "3. Yêu cầu") chỉ tạo
+      // cặp heading rỗng kèm nhãn "Cần xem". Trùng y hệt tên đã ghép ở lượt đầu; còn lại để phân nhóm (khung trống bỏ, có phần nối thì hỏi BA)
+      if (o.section_id.startsWith("group:")) return
       const score = titleSimilarity(titleOf(o.heading_text), titleOf(n.heading_text))
       if (score >= threshold) scored.push({ o, n, score, oi, ni })
     })

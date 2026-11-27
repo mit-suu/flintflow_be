@@ -14,7 +14,7 @@
  */
 import { isContentSection } from "../import/section-catalog.js"
 import { targetsOf } from "../import/extract-targets.js"
-import { overlapsOf } from "../import/content-slots.js"
+import { isPartialSlotOf, overlapsOf } from "../import/content-slots.js"
 import { recordColumnOfHeader } from "../import/legacy-record.js"
 import { UNMAPPED_SECTION } from "../import/import.constants.js"
 import { foldText } from "../import/text-similarity.js"
@@ -50,7 +50,8 @@ export type SuggestConfidence = "high" | "guess"
  * `same_data`: mục mẫu đã in đúng phần dữ liệu này từ Spine (gộp vào, không in lần hai); `kept_for_data`: không mục nào hợp nhưng
  * mục có dữ liệu ⇒ giữ thành mục riêng. `no_place` chỉ còn cho mục không có dữ liệu. `close_name` / `first_heading`: bản ghi cũ.
  */
-export type SuggestReason = "no_place" | "close_name" | "map_columns" | "no_table_in_new" | "keep_history" | "first_heading" | "best_fit" | "same_data" | "kept_for_data"
+/** `needs_ai`: mục hợp nhất cần AI chuyển chữ (tốn credit) nên không chọn sẵn. `partial_slot`: mục của mẫu chỉ nhận một phần dữ liệu của mục cũ. */
+export type SuggestReason = "no_place" | "close_name" | "map_columns" | "no_table_in_new" | "keep_history" | "first_heading" | "best_fit" | "same_data" | "kept_for_data" | "needs_ai" | "partial_slot"
 
 export interface Suggestion {
   suggested: string
@@ -380,10 +381,17 @@ export const classify = (input: ClassifyInput): MigrationGroups => {
     const pairedScore = ranked.find((r) => r.new_key === nw.key)
     const best = ranked[0]
     const target = best ? newByKey.get(best.new_key) : undefined
+    const choices = ["keep_pair", ...moveChoices.filter((c) => c !== `move_to:${nw.key}`), "keep_custom"]
+    const base = { id: `c:placement:${o.key}`, kind: "placement" as const, old_key: o.key, new_key: nw.key, candidate_keys: [], old_columns: [], new_columns: [], choices, ai_choices: [], decision_required: true as const, targets: hints(ranked), data_size: dataSize(o) }
+    // Heading của mẫu chỉ nhận một phần dữ liệu của mục cũ (5.2 Yêu cầu chung ↔ 3.3.2 Bảo mật): luôn hỏi BA. Giữ cặp vẫn in đủ mục cũ
+    // dưới heading đó (`planLayout`); mục khác hơn hẳn thì gợi ý mục đó
+    if (by === "overlap" && isPartialSlotOf(nw.section_id, o.section_id)) {
+      const better = best && target && best.new_key !== nw.key && confidenceOf(ranked) && (!pairedScore || best.score - pairedScore.score >= HIGH_MARGIN)
+      return better ? { ...base, suggested: `move_to:${target!.key}`, suggested_reason: reasonFor(o, target!), confidence: "guess" } : { ...base, suggested: "keep_pair", suggested_reason: "partial_slot", confidence: "guess" }
+    }
     if (!best || !pairedScore || !target || best.new_key === nw.key || pairedScore.why.includes("same_section") || !confidenceOf(ranked)) return null
     if (best.score - pairedScore.score < HIGH_MARGIN) return null
-    const choices = ["keep_pair", ...moveChoices.filter((c) => c !== `move_to:${nw.key}`), "keep_custom"]
-    return { id: `c:placement:${o.key}`, kind: "placement", old_key: o.key, new_key: nw.key, candidate_keys: [], old_columns: [], new_columns: [], choices, ai_choices: [], decision_required: true, suggested: `move_to:${target.key}`, suggested_reason: reasonFor(o, target), confidence: confidenceOf(ranked)!, targets: hints(ranked), data_size: dataSize(o) }
+    return { ...base, suggested: `move_to:${target.key}`, suggested_reason: reasonFor(o, target), confidence: confidenceOf(ranked)! }
   }
 
   const matched: MatchedItem[] = []
@@ -428,7 +436,8 @@ export const classify = (input: ClassifyInput): MigrationGroups => {
         confidence && top && !ai_choices.includes(`move_to:${top.key}`)
           ? { suggested: `move_to:${top.key}`, suggested_reason: reasonFor(o, top), confidence }
           : size > 0
-            ? { suggested: "keep_custom", suggested_reason: "kept_for_data", confidence: "guess" }
+            ? // Mục hợp nhất cần AI ⇒ không chọn sẵn, nhưng câu giải thích nói đúng lý do (không phải "không mục nào hợp")
+              { suggested: "keep_custom", suggested_reason: confidence && top ? "needs_ai" : "kept_for_data", confidence: "guess" }
             : high(DROP_FROM_PRINT, "no_place")
       extra.push({ id: `e:${o.key}`, old_key: o.key, heading_text: o.heading_text, section_id: o.section_id, follower_keys: followers, choices, ai_choices, decision_required: true, ...suggestion, targets: hints(ranked), data_size: size })
       continue

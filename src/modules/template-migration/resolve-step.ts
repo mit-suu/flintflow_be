@@ -1,7 +1,8 @@
 /**
  * Bước AI của đổi mẫu (D8) — chỉ chạy cho lựa chọn BA đã chọn và đã được báo credit:
  *  - `move_to:<mục có cấu trúc>` của một **mục riêng chữ tự do**: AI đọc chữ của mục, đề xuất op `add` vào mảng Spine của mục đích; op hợp lệ
- *    (chạy khô qua op engine) ⇒ ghi qua đường CR `template_migration` kèm xoá mục riêng cũ; không hợp lệ / rỗng ⇒ giữ thành mục riêng (không mất chữ).
+ *    (chạy khô qua op engine) ⇒ ghi qua đường CR `template_migration` kèm xoá mục riêng cũ; không hợp lệ / rỗng ⇒ vẫn đặt mục vào chỗ BA chọn,
+ *    nguyên văn (không mất chữ, không đổi ngầm lựa chọn của BA), kèm cảnh báo.
  *  - `ai_resolve` của conflict (bảng đổi cột / mục bị tách / Record of Changes): AI chọn một cách ghép cụ thể; không chọn được ⇒ cách an toàn nhất.
  * Mục khung chuyển vào mục khác chỉ là chuyển chỗ in (dữ liệu đã có cấu trúc trong Spine) ⇒ không gọi AI.
  * Mỗi mục một lượt `executeAiAction(TEMPLATE_MIGRATION_RESOLVE)` (giữ / trừ credit như mọi lượt AI); kết quả lưu trên migration nên áp dụng lại sau lỗi
@@ -31,7 +32,7 @@ export interface ResolvedItem {
   /** Lựa chọn gốc của BA lúc gọi AI + dấu của dữ liệu đầu vào (chữ mục / mô tả conflict): chỉ dùng lại kết quả khi cả hai còn khớp. */
   original_choice: string
   source_hash: string
-  /** Lựa chọn hiệu lực thay cho lựa chọn AI của BA (`move_to:…` giữ nguyên khi chuyển được; `keep_custom` khi lùi). */
+  /** Lựa chọn hiệu lực thay cho lựa chọn AI của BA (`move_to:…` giữ nguyên, kể cả khi AI không chuyển được — khi đó chuyển nguyên văn). */
   choice: string
   ops: Op[]
   /** Mục riêng cũ bị xoá khỏi Spine vì chữ của nó đã thành phần tử có cấu trúc. */
@@ -146,9 +147,11 @@ const resolveMove = async (input: ResolveInput, executor: ResolveExecutor, extra
   const hash = fingerprint(choice, target?.section_id ?? null, customTexts)
   if (known && known.original_choice === choice && known.source_hash === hash) return known
   const base = { id: extra.id, original_choice: choice, source_hash: hash }
+  // AI không chuyển được thành dữ liệu có cấu trúc: vẫn đặt mục vào chỗ BA đã chọn, giữ nguyên chữ (chép khối của file nền / khối của
+  // mục riêng) — không lặng lẽ đổi lựa chọn của BA thành "Giữ thành mục riêng"
   const keep = (why: string): ResolvedItem => {
-    warnings.push(`Mục "${extra.heading_text}": ${why} - giữ thành mục riêng.`)
-    return { ...base, choice: "keep_custom", ops: [], removed_custom_ids: [], notes: why }
+    warnings.push(`Mục "${extra.heading_text}": ${why} - đã chuyển nguyên văn vào "${target?.heading_text ?? targetKey}", chưa thành dữ liệu có cấu trúc.`)
+    return { ...base, choice, ops: [], removed_custom_ids: [], notes: why }
   }
   // Mục khung đã có dữ liệu có cấu trúc: chuyển chỗ in, không cần AI
   if (!old || !isFreeTextSection(old.section_id) || !target) return { ...base, choice, ops: [], removed_custom_ids: [], notes: null }
