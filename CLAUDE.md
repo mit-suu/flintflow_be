@@ -132,6 +132,10 @@ registry chỉ đọc đĩa.
 - Skill chưa viết mang `stub: true`; viết thật rồi thì bỏ `stub` **và** thêm thư mục vào
   `WRITTEN_NON_ACTION` trong `prompt-assets.test.ts`.
 - `writes` trong frontmatter phải nằm trong `writes` của step tương ứng ở `assets/step-registry.json`.
+- Prompt mang block luật chất lượng (`<!-- ba-quality:shared:start -->`, `ba-quality-block.test.ts`) là **prompt phân tích**:
+  `buildPrompt` nối thêm khối `## Explanation style` theo `User.explanationStyle` của người gọi (UC-90: `concise` |
+  `explained`, mặc định `explained`, `shared/ai/explanation-style.ts`), trước các khối ngôn ngữ. Skill phân tích mới chỉ cần
+  chép block đó là tự có; prompt không có mốc thì không đọc tài khoản.
 
 ## Test
 

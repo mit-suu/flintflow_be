@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document } from "mongoose"
 import bcrypt from "bcrypt"
 import { USER_LOCALES, type UserLocale } from "../../shared/i18n/locale.js"
+import { DEFAULT_EXPLANATION_STYLE, EXPLANATION_STYLES, type ExplanationStyle } from "../../shared/ai/explanation-style.js"
 
 export type AuthProvider = "local" | "google"
 export type UserRole = "user" | "admin"
@@ -30,6 +31,8 @@ export interface IUser extends Document {
   preferredOrganizationId?: mongoose.Types.ObjectId | null
   /** UC-89: nhận email việc duyệt (áp cho mọi tổ chức); tài khoản cũ chưa có field coi như bật. */
   approvalEmails?: boolean
+  /** UC-90: cách AI trình bày phân tích (Ngắn gọn / Giải thích), áp cho mọi tổ chức; tài khoản cũ chưa có field coi như Giải thích. */
+  explanationStyle?: ExplanationStyle
   createdAt: Date
   updatedAt: Date
   comparePassword(password: string): Promise<boolean>
@@ -114,6 +117,11 @@ const userSchema = new Schema<IUser>(
     approvalEmails: {
       type: Boolean,
       default: true
+    },
+    explanationStyle: {
+      type: String,
+      enum: [...EXPLANATION_STYLES],
+      default: DEFAULT_EXPLANATION_STYLE
     }
   },
   { timestamps: true }
