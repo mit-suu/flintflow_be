@@ -29,6 +29,8 @@ import { executeWithInRequestRetry } from "./retry.service.js"
 import { TRANSACTION_UNAVAILABLE, runInTransaction } from "../db/transaction.js"
 import { AiActionLog } from "../../modules/admin/ai-action-log.model.js"
 import { capturePayload } from "./ai-action-payload.service.js"
+import { User } from "../../modules/user/user.model.js"
+import { DEFAULT_EXPLANATION_STYLE, isAnalysisPrompt, toExplanationStyle, withExplanationStyle, type ExplanationStyle } from "./explanation-style.js"
 
 export interface ExecuteAiActionOptions {
   provider?: string
@@ -176,17 +178,31 @@ const recordLocalizedFailure = async (attempt: {
   }
 }
 
+/**
+ * UC-90: cách trình bày phân tích của người gọi (`User.explanationStyle`). Test đơn vị không nối Mongo ⇒ mặc định, không chờ
+ * buffer của mongoose (như `loadRenderContext`).
+ */
+const explanationStyleOf = async (userId: string): Promise<ExplanationStyle> => {
+  if (mongoose.connection.readyState !== 1 || !mongoose.isValidObjectId(userId)) return DEFAULT_EXPLANATION_STYLE
+  const user = (await User.findById(userId).select("explanationStyle").lean()) as { explanationStyle?: unknown } | null
+  return toExplanationStyle(user?.explanationStyle)
+}
+
 const buildPrompt = async (
   actionType: string,
   input: AiActionInput,
   options: ExecuteAiActionOptions,
-  fallbackVariables: Record<string, any>
+  fallbackVariables: Record<string, any>,
+  userId: string
 ): Promise<BuiltPrompt> => {
   const loadedTemplate = await getPromptTemplate(actionType)
-  const basePrompt =
+  const interpolated =
     options.rawPromptOverride || input.rawPrompt
       ? options.rawPromptOverride || input.rawPrompt || ""
       : interpolatePrompt(loadedTemplate.template, input.promptVariables || fallbackVariables)
+  // UC-90: prompt phân tích (mang block luật chất lượng) ⇒ nối khối "Explanation style" theo tài khoản người gọi, TRƯỚC các
+  // khối ngôn ngữ. Prompt khác không đọc DB và giữ nguyên từng byte.
+  const basePrompt = isAnalysisPrompt(interpolated) ? withExplanationStyle(interpolated, await explanationStyleOf(userId)) : interpolated
   // FLF-260: ngôn ngữ trả lời nối cuối prompt. Chỉ nhận vi | en — `POST /ai-actions` chuyển nguyên `input` của client,
   // nên giá trị lạ bị bỏ qua thay vì thành chữ trong prompt.
   const withReply = isUserLocale(input.replyLanguage)
@@ -227,7 +243,7 @@ export const executeAiAction = async <T = any>(
   let providerConfig: AiProviderConfig
   let withoutLocalized: PromptVariant | undefined
   try {
-    ;({ finalPrompt, providerConfig, withoutLocalized } = await buildPrompt(actionType, input, options, input))
+    ;({ finalPrompt, providerConfig, withoutLocalized } = await buildPrompt(actionType, input, options, input, userId))
   } catch (buildError) {
     await releaseQuietly(reservation)
     throw buildError
@@ -413,7 +429,7 @@ export const executeAiActionStream = async <T = any>(
   let finalPrompt: string
   let providerConfig: AiProviderConfig
   try {
-    ;({ finalPrompt, providerConfig } = await buildPrompt(actionType, input, options, {}))
+    ;({ finalPrompt, providerConfig } = await buildPrompt(actionType, input, options, {}, userId))
   } catch (buildError) {
     await releaseQuietly(reservation)
     throw buildError

@@ -6,6 +6,7 @@ import { CreditWallet } from "../credits/credit-wallet.model.js"
 import { Membership } from "../organization/membership.model.js"
 import { Organization } from "../organization/organization.model.js"
 import { toUserLocale, type UserLocale } from "../../shared/i18n/locale.js"
+import { toExplanationStyle, type ExplanationStyle } from "../../shared/ai/explanation-style.js"
 
 export interface UserDTO {
   id: string
@@ -32,6 +33,8 @@ export interface MeDTO extends UserDTO {
   preferredOrganizationId: string | null
   /** UC-89: nhận email việc duyệt; mặc định bật. */
   approvalEmails: boolean
+  /** UC-90: cách AI trình bày phân tích; mặc định `explained`. */
+  explanationStyle: ExplanationStyle
 }
 
 export interface UpdateMeInput {
@@ -40,6 +43,7 @@ export interface UpdateMeInput {
   locale?: UserLocale
   preferredOrganizationId?: string | null
   approvalEmails?: boolean
+  explanationStyle?: ExplanationStyle
 }
 
 export const getUserById = async (id: string): Promise<UserDTO> => {
@@ -94,6 +98,7 @@ export const getMe = async (id: string, activeOrgId?: string | null): Promise<Me
     locale: toUserLocale(user.locale),
     preferredOrganizationId: user.preferredOrganizationId ? String(user.preferredOrganizationId) : null,
     approvalEmails: user.approvalEmails !== false,
+    explanationStyle: toExplanationStyle(user.explanationStyle),
     ...credit
   }
 }
