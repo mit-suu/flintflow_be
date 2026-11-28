@@ -1271,8 +1271,8 @@ const buildOnce = async (input: BuildBaseFileInput, forced: ReadonlySet<string>,
         return block.block_id
       }
       const headingMap = [
-        // Heading con gộp vào mục cha đã bỏ khỏi file ⇒ không định vị (nội dung mục nằm dưới heading cha)
-        ...headingEls.flatMap((el, i) => (!el.parentNode && merged.has(targetHeadings[i].key) ? [] : [{ block_id: idOf(el), section_id: pairedSectionId(targetHeadings[i]) }])),
+        // Heading đã bỏ khỏi file (heading con gộp vào mục cha, heading ví dụ của mẫu) ⇒ không định vị: không còn chỗ trong file
+        ...headingEls.flatMap((el, i) => (!el.parentNode ? [] : [{ block_id: idOf(el), section_id: pairedSectionId(targetHeadings[i]) }])),
         ...customSlots.map((c) => ({ block_id: idOf(c.el), section_id: c.sectionId }))
       ]
       const spineIds = new Set(spineSlots.map((s) => s.sectionId))
