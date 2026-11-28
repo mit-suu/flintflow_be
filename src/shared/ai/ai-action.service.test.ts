@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import mongoose from "mongoose"
 
 vi.mock("./credit-reservation.service.js", () => ({
@@ -42,6 +42,12 @@ vi.mock("../../modules/admin/ai-action-log.model.js", () => ({
 // FLF-244: đổi `AI_PROVIDER_OVERRIDE` theo từng ca
 const envMock = vi.hoisted(() => ({ AI_PROVIDER_OVERRIDE: "" }))
 vi.mock("../../config/env.js", () => ({ env: envMock }))
+// UC-90: kiểu trình bày đọc từ tài khoản người gọi
+const userMock = vi.hoisted(() => ({ explanationStyle: undefined as string | undefined, findById: null as unknown }))
+vi.mock("../../modules/user/user.model.js", () => {
+  userMock.findById = vi.fn(() => ({ select: () => ({ lean: async () => ({ explanationStyle: userMock.explanationStyle }) }) }))
+  return { User: { findById: userMock.findById } }
+})
 
 import { LOCALIZED_MAX_TOKENS_FACTOR, executeAiAction, executeAiActionStream, widenedOutputConfig } from "./ai-action.service.js"
 import { documentLanguageDirective } from "../i18n/document-language.js"
@@ -52,6 +58,7 @@ import { streamText } from "ai"
 import { AiActionLog } from "../../modules/admin/ai-action-log.model.js"
 import { AiActionError, ActionType } from "./ai-action.types.js"
 import { replyLanguageDirective } from "../i18n/reply-language.js"
+import { BA_QUALITY_MARKER, explanationStyleDirective } from "./explanation-style.js"
 
 const USER = "64b000000000000000000020"
 const reservation = {
@@ -254,6 +261,47 @@ describe("executeAiAction - ngôn ngữ trả lời (FLF-260)", () => {
 
     expect(vi.mocked(callLLM).mock.calls[0][0]).toBe("prompt")
     expect(vi.mocked(callLLM).mock.calls[1][0]).toBe("prompt")
+  })
+})
+
+describe("executeAiAction - cách AI trình bày phân tích (UC-90)", () => {
+  const ANALYSIS = `Find gaps.\n${BA_QUALITY_MARKER}\nrules`
+  // Đọc tài khoản chỉ khi đã nối Mongo — giả lập đã nối, trả lại sau mỗi ca để describe khác vẫn "chưa nối"
+  let connected: { mockRestore: () => void } | undefined
+
+  afterEach(() => connected?.mockRestore())
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    vi.spyOn(mongoose, "startSession").mockRejectedValue(new Error("Transaction numbers are only allowed on a replica set member or mongos"))
+    connected = vi.spyOn(mongoose.connection, "readyState", "get").mockReturnValue(1 as never)
+    vi.mocked(reserveCredit).mockResolvedValue(reservation)
+    vi.mocked(deductCredit).mockResolvedValue(2)
+    vi.mocked(callLLM).mockResolvedValue({ text: "{}", promptTokens: 1, completionTokens: 1 } as any)
+    vi.mocked(AiActionLog.create).mockResolvedValue({ _id: "log-1" } as any)
+    vi.mocked(parseResponse).mockReturnValue({ ok: true })
+  })
+
+  it("prompt phân tích ⇒ khối Explanation style theo tài khoản, đứng TRƯỚC khối Reply language", async () => {
+    userMock.explanationStyle = "concise"
+    await executeAiAction(ActionType.ELICIT, { rawPrompt: ANALYSIS, replyLanguage: "vi" }, undefined, USER)
+    expect(vi.mocked(callLLM).mock.calls[0][0]).toBe(`${ANALYSIS}\n\n${explanationStyleDirective("concise")}\n\n${replyLanguageDirective("vi")}`)
+    expect(userMock.findById).toHaveBeenCalledWith(USER)
+  })
+
+  it("tài khoản cũ chưa có field ⇒ Giải thích (mặc định); đường stream (chat) cũng nối khối", async () => {
+    userMock.explanationStyle = undefined
+    vi.mocked(streamText).mockReturnValue(fakeStream(['{"reply":"ok"}']))
+    await executeAiActionStream(ActionType.CHAT, { rawPrompt: ANALYSIS }, undefined, USER)
+    expect(vi.mocked(streamText).mock.calls[0][0]).toMatchObject({ prompt: `${ANALYSIS}\n\n${explanationStyleDirective("explained")}` })
+  })
+
+  it("prompt không phân tích (dịch, tóm tắt) ⇒ không đọc tài khoản, prompt giữ nguyên", async () => {
+    userMock.explanationStyle = "concise"
+    await executeAiAction(ActionType.TRANSLATE_DOCUMENT, { rawPrompt: "Translate." }, undefined, USER)
+    expect(vi.mocked(callLLM).mock.calls[0][0]).toBe("Translate.")
+    expect(userMock.findById).not.toHaveBeenCalled()
   })
 })
 

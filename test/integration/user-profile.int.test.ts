@@ -93,6 +93,36 @@ describe("PATCH /users/me - email việc duyệt (UC-89)", () => {
   })
 })
 
+describe("PATCH /users/me - cách AI trình bày phân tích (UC-90)", () => {
+  it("mặc định Giải thích; chọn Ngắn gọn ⇒ lưu và /users/me trả concise; đổi lại được; giá trị lạ ⇒ 400", async () => {
+    await seedLocalUser()
+    const { agent, auth } = await loginAgent()
+
+    expect((await agent.get("/api/v1/users/me").set(auth)).body.data.explanationStyle).toBe("explained")
+
+    const concise = await agent.patch("/api/v1/users/me").set(auth).send({ explanationStyle: "concise" })
+    expect(concise.status).toBe(200)
+    expect(concise.body.data.explanationStyle).toBe("concise")
+    expect((await User.findOne({ email: EMAIL }).lean())?.explanationStyle).toBe("concise")
+    expect((await agent.get("/api/v1/users/me").set(auth)).body.data.explanationStyle).toBe("concise")
+
+    const explained = await agent.patch("/api/v1/users/me").set(auth).send({ explanationStyle: "explained" })
+    expect(explained.body.data.explanationStyle).toBe("explained")
+
+    const bad = await agent.patch("/api/v1/users/me").set(auth).send({ explanationStyle: "verbose" })
+    expect(bad.status).toBe(400)
+    expect(bad.body.error.code).toBe("VALIDATION_ERROR")
+  })
+
+  it("tài khoản cũ chưa có field ⇒ /users/me trả explained", async () => {
+    await seedLocalUser()
+    await User.updateOne({ email: EMAIL }, { $unset: { explanationStyle: 1 } })
+    const { agent, auth } = await loginAgent()
+
+    expect((await agent.get("/api/v1/users/me").set(auth)).body.data.explanationStyle).toBe("explained")
+  })
+})
+
 describe("POST /users/me/password", () => {
   it("đúng mật khẩu hiện tại ⇒ đổi được, phiên hiện tại giữ nguyên, phiên khác bị thu hồi", async () => {
     await seedLocalUser()
