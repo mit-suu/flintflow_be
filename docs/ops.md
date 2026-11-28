@@ -116,12 +116,12 @@ tiếp. `.env.example` là danh sách đầy đủ kèm giải thích; dưới �
 | `NODE_ENV` | production | phải là `production`. Để `development` trên môi trường thật thì `app.ts:76` **cho qua mọi origin** dù `credentials: true`, và toàn bộ refine `isProd` của `env.ts` (secret ≥ 32, `MONGO_URI`/`APP_PUBLIC_URL` không localhost) đều tắt — hỏng im lặng, không có log nào báo |
 | `MONGO_URI` | có | production **không được** chứa `localhost` |
 | `JWT_ACCESS_SECRET` `JWT_REFRESH_SECRET` | có | production: ≥ 32 ký tự, không phải placeholder. `openssl rand -base64 48` |
-| `COOKIE_SAME_SITE` `COOKIE_DOMAIN` | production | FE và BE **khác site** (FE `flintflow.io.vn`, BE `*.azurewebsites.net`) ⇒ `COOKIE_SAME_SITE=none`, nếu để `lax` trình duyệt không gửi cookie `refreshToken` ⇒ `/auth/refresh` trả `MISSING_REFRESH_TOKEN`, user bị đăng xuất sau khi access token hết hạn (FLF-137). BE ở subdomain cùng site (`api.flintflow.io.vn`) ⇒ giữ `lax`, `COOKIE_DOMAIN=.flintflow.io.vn`. Local không lộ lỗi vì `localhost:3000`/`:5000` cùng site. App setting production đã đặt `none` + `COOKIE_DOMAIN` trống, nhưng **chưa có tác dụng**: image đang chạy dựng từ `origin/main`, ở đó `auth.controller.ts` hardcode `sameSite: "lax"` và chưa có `auth-cookie.ts` — biến này chỉ được đọc từ bản `develop` trở đi, nên FLF-137 còn sống cho tới khi merge develop → main |
+| `COOKIE_SAME_SITE` `COOKIE_DOMAIN` | production | FE và BE **khác site** (FE `flintflow.io.vn`, BE `*.azurewebsites.net`) ⇒ `COOKIE_SAME_SITE=none`, nếu để `lax` trình duyệt không gửi cookie `refreshToken` ⇒ `/auth/refresh` trả `MISSING_REFRESH_TOKEN`, user bị đăng xuất sau khi access token hết hạn (FLF-137). BE ở subdomain cùng site (`api.flintflow.io.vn`) ⇒ giữ `lax`, `COOKIE_DOMAIN=.flintflow.io.vn`. Local không lộ lỗi vì `localhost:3000`/`:5000` cùng site. App setting production đặt `none` + `COOKIE_DOMAIN` trống; có tác dụng từ lần merge develop → main ngày 2026-11-28 (trước đó `main` hardcode `sameSite: "lax"`) |
 | `MODAL_BASE_URL` | khi dùng skill `provider: glm` | **không còn default trong code**; để trống ⇒ `AI_PROVIDER_NOT_CONFIGURED` |
 | `APP_PUBLIC_URL` | khi bật billing | domain public của **BE này** để payment service POST callback (`payment-service.client.ts:48`); production không được là localhost |
 | `PLANTUML_BASE_URL` | production | thiếu ⇒ default `localhost:8080` ⇒ **mọi** diagram `render_status: "error"` trong khi `/health` vẫn trả HTTP 200. Production: `https://flintflow-plantuml.azurewebsites.net` (§5) |
 | `PLANTUML_TIMEOUT_MS` | không | default 15000. Production đặt **30000**: use-case ~70 UC mất 13 s ở lượt đầu sau khi PlantUML restart (JVM chưa JIT-warm), warm còn ~4 s |
-| `GOTENBERG_URL` | production | thiếu ⇒ default `localhost:3001` ⇒ xuất PDF luôn `503 PDF_EXPORT_UNAVAILABLE` trong khi `/health` vẫn HTTP 200 (`gotenberg: "error"`). Production: `https://flintflow-gotenberg.azurewebsites.net` (§5) |
+| `GOTENBERG_URL` | production | thiếu ⇒ default `localhost:3001` ⇒ xuất PDF luôn `503 PDF_EXPORT_UNAVAILABLE` trong khi `/health` vẫn HTTP 200 (`gotenberg: "error"`). Production: Container App `flintflow-gotenberg` (§5) |
 | `GOTENBERG_TIMEOUT_MS` | không | default 60000. Production đặt **90000**, khớp `--api-timeout=90s` của Gotenberg: tài liệu lớn ở lượt đầu sau khi container khởi động lâu hơn nhiều so với lúc warm |
 | `AI_PROVIDER_OVERRIDE` | không | ghi đè provider của mọi skill; chỉ dùng cho CI / smoke (`mock`) |
 | `QUALITY_LENS_ENABLED` `CONSISTENCY_LLM_ENABLED` | không | FLF-449: S-9.2 Soát chất lượng và S-8.4 Rà nhất quán bằng AI, mặc định **bật** (tốn credit theo lô). `false` để tắt khẩn: bước trả `skipped`, ước tính credit tính 0 |
@@ -377,13 +377,14 @@ Subscription `Azure for Students`, region Southeast Asia.
 | Thành phần | Tài nguyên | App Service Plan |
 | --- | --- | --- |
 | Backend | Web App `flintflow-be` (RG `flintflow-be_group`), image từ ACR `flintflowacr` | `ASP-mitsu-b404` (B1) — dùng chung với `payment-service` và 2 app khác |
-| PlantUML | Web App `flintflow-plantuml` (RG `flintflow-be_group`), image `plantuml/plantuml-server:jetty-v1.2025.4` kéo thẳng từ Docker Hub, **không qua ACR** | `asp-flintflow-plantuml` (B1) — tách khỏi plan của BE |
-| Gotenberg | Web App `flintflow-gotenberg` (RG `flintflow-be_group`), image `gotenberg/gotenberg:8.38.1` kéo thẳng từ Docker Hub, **không qua ACR** | `asp-flintflow-plantuml` (B1) — **chung** với PlantUML |
+| PlantUML | Web App `flintflow-plantuml` (RG `flintflow-be_group`), image `plantuml/plantuml-server:jetty-v1.2025.4` kéo thẳng từ Docker Hub, **không qua ACR** | `ASP-mitsu-b404` (B1) — **chung** với BE (xem dưới) |
+| Gotenberg | Container App `flintflow-gotenberg` trong environment `flintflow-aca-env` (RG `flintflow-be_group`, Consumption), image `flintflowacr.azurecr.io/gotenberg:8.38.1` | không dùng App Service Plan — scale về 0 |
 | Frontend | không nằm trên Azure | — |
 
-**Vì sao PlantUML có plan riêng.** Nó là JVM và phải bật Always On, tức giữ RAM thường trú. Nhét chung
-vào plan B1 đang gánh 4 app (trong đó có `payment-service`) thì khi thiếu RAM App Service không giết
-riêng app gây áp lực mà restart cả plan — một sự cố render sẽ kéo theo cả thanh toán.
+**PlantUML đang chung plan với BE.** Thiết kế ban đầu tách PlantUML ra plan riêng: nó là JVM, bật Always On
+nên giữ RAM thường trú, mà plan B1 thiếu RAM thì App Service restart cả plan, kéo theo `payment-service`.
+Thực tế plan riêng chưa được tạo; `ASP-mitsu-b404` đang gánh 5 app, RAM trung bình ~74%, đỉnh 97% (đo
+2026-11-28). Vì vậy Gotenberg không đặt lên plan này.
 
 **Vì sao Always On.** ~10-20 lượt generate/ngày nên container idle gần như cả ngày. Không bật thì App
 Service unload sau ~20 phút, và lượt render kế tiếp lãnh cold start JVM 10-30 s — vượt
@@ -407,61 +408,53 @@ az webapp config access-restriction add -g flintflow-be_group -n flintflow-plant
 
 ### Gotenberg (xuất PDF, FLF-316)
 
-**Mô hình.** 2 container trên 1 máy: `flintflow-gotenberg` chạy **chung plan** `asp-flintflow-plantuml` với
-`flintflow-plantuml`. App Service tính tiền theo plan ⇒ **không phát sinh chi phí**. Không ghép vào
-`ASP-mitsu-b404` của BE cùng lý do PlantUML không ở đó: thiếu RAM là restart cả plan, kéo theo
-`payment-service`.
+**Mô hình.** Azure Container Apps (Consumption), `minReplicas 0`, `maxReplicas 1`, 1 vCPU / 2 GiB. Không
+chiếm RAM của `ASP-mitsu-b404`; lưu lượng demo nằm trong hạn mức miễn phí hằng tháng của Consumption.
+Đánh đổi: lượt xuất PDF đầu tiên sau một lúc không dùng chịu cold start ~10-20 s (nằm trong
+`GOTENBERG_TIMEOUT_MS=90000`).
+
+Environment `flintflow-aca-env` là loại **express**: không nhận `revisionSuffix`, và từ ~20 rule IP trở lên
+revision báo `InvalidRequest: The upstream request was rejected` ⇒ rule IP gộp theo CIDR (3 rule, xem bước 3).
+Máy dùng Azure CLI 32-bit không cài được extension `containerapp` (pip lỗi) ⇒ mọi thao tác dùng `az rest` /
+`az deployment`, không cần extension.
 
 ```bash
 RG=flintflow-be_group
-PLAN=asp-flintflow-plantuml
 APP=flintflow-gotenberg
-IMAGE=gotenberg/gotenberg:8.38.1   # GHIM, cùng tag với docker-compose.yml
+TAG=8.38.1   # GHIM, cùng tag với docker-compose.yml
+URL="/subscriptions/<sub>/resourceGroups/$RG/providers/Microsoft.App/containerApps/$APP?api-version=2024-03-01"
 
-# 1. Web App trên plan có sẵn của PlantUML
-az webapp create -g $RG -p $PLAN -n $APP --container-image-name $IMAGE
+# 1. Image qua ACR: kéo ẩn danh từ Docker Hub bị chặn rate limit trên IP dùng chung của Azure
+az acr import -n flintflowacr --source docker.io/gotenberg/gotenberg:$TAG --image gotenberg:$TAG
 
-# 2. Cổng + thời gian khởi động (image ~1,5 GB, lần kéo đầu lâu)
-az webapp config appsettings set -g $RG -n $APP --settings WEBSITES_PORT=3000 WEBSITES_CONTAINER_START_TIME_LIMIT=600
+# 2. Container: image ACR (registry dùng admin user của ACR, secret `acr-password`), cổng 3000, ingress external,
+#    command ["gotenberg"] + args tắt route không dùng (chromium, webhook, downloadFrom — tránh bị dùng để tải URL
+#    tuỳ ý) và --api-timeout=90s, liveness probe GET /health
+#    Sửa: GET $URL ⇒ đổi properties.template ⇒ PUT lại (PATCH template không tạo revision mới)
 
-# 3. Always On + HTTPS only; timeout API của Gotenberg mặc định 30 s, nới lên 90 s
-az webapp config set -g $RG -n $APP --always-on true --startup-file "gotenberg --api-timeout=90s"
-az webapp update -g $RG -n $APP --https-only true
+# 3. Mạng: .docx chứa dữ liệu khách ⇒ chỉ nhận request từ outbound IP của flintflow-be, gộp CIDR:
+#    20.44.216.0/21 · 20.43.151.0/24 · 20.212.64.12/32 (phủ đủ 25 IP của possibleOutboundIpAddresses)
+az webapp show -g $RG -n flintflow-be --query possibleOutboundIpAddresses -o tsv
 
-# 4. Mạng: .docx chứa dữ liệu khách ⇒ chỉ nhận request từ outbound IP của flintflow-be (như PlantUML)
-i=100
-for ip in $(az webapp show -g $RG -n flintflow-be --query possibleOutboundIpAddresses -o tsv | tr ',' ' '); do
-  az webapp config access-restriction add -g $RG -n $APP --rule-name allow-be-$i --action Allow --ip-address $ip/32 --priority $i
-  i=$((i+1))
-done
-
-# 5. Trỏ BE sang Gotenberg
-az webapp config appsettings set -g $RG -n flintflow-be --settings GOTENBERG_URL=https://$APP.azurewebsites.net GOTENBERG_TIMEOUT_MS=90000
+# 4. Trỏ BE sang Gotenberg
+az webapp config appsettings set -g $RG -n flintflow-be --settings GOTENBERG_URL=https://<fqdn> GOTENBERG_TIMEOUT_MS=90000
 ```
 
-App setting của `flintflow-gotenberg`: `WEBSITES_PORT=3000` · `WEBSITES_CONTAINER_START_TIME_LIMIT=600` ·
-Always On · HTTPS only · startup `gotenberg --api-timeout=90s`.
+FQDN hiện tại: `flintflow-gotenberg.ambitioussky-a0b192c0.southeastasia.azurecontainerapps.io`.
 
 Kiểm sau deploy:
 
 ```bash
-az webapp log tail -g $RG -n $APP                                                  # Gotenberg lắng nghe cổng 3000
-curl -s -o /dev/null -w "%{http_code}\n" https://$APP.azurewebsites.net/health    # từ máy cá nhân: 403 (đúng)
-curl -s https://<api>/health | jq                                                  # "gotenberg": "ok"
+az rest --method get --url "$URL" --query "properties.{prov:provisioningState, image:template.containers[0].image}"
+curl -s -o /dev/null -w "%{http_code}\n" https://<fqdn>/health    # từ máy cá nhân: 403 (đúng)
+curl -s https://<api>/health | jq                                  # "gotenberg": "ok"
 ```
 
 Rồi xuất PDF một tài liệu lớn (fixture 19 màn) trên production.
 
-**RAM của plan** (PlantUML + Gotenberg chung ~1,75 GB) — theo dõi vài ngày đầu; thường xuyên > 80% ⇒ tách
-Gotenberg sang Azure Container Apps (scale về 0) hoặc plan riêng:
-
-```bash
-PLAN_ID=$(az appservice plan show -g $RG -n $PLAN --query id -o tsv)
-az monitor metrics list --resource $PLAN_ID --metric MemoryPercentage --interval PT1H -o table
-```
-
-Đổi plan của BE làm đổi outbound IP ⇒ chạy lại bước 4 cho **cả** `flintflow-plantuml` và `flintflow-gotenberg`.
-Gỡ: `az webapp delete -g $RG -n $APP` + xoá `GOTENBERG_URL` trên `flintflow-be`.
+Đổi plan của BE làm đổi outbound IP ⇒ cập nhật rule IP cho **cả** `flintflow-plantuml` và `flintflow-gotenberg`.
+Gỡ: `az rest --method delete --url "$URL"` (+ environment `flintflow-aca-env` nếu không còn app) + xoá
+`GOTENBERG_URL` trên `flintflow-be`.
 
 ### Smoke test sau khi deploy
 
